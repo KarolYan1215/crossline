@@ -12,8 +12,6 @@ import { stepLeavesMachine, workflowDue, scheduleLabel, WEEKDAYS, type Weekday, 
  */
 export const AUTOMATIONS_SETTING = "automations";
 export const AUTOMATION_RUNS_SETTING = "automations.runs";
-/** Runs one automation may start in a day, whatever fires it: a page that changes every minute must not run up the model bill. */
-export const AUTOMATION_RUNS_PER_DAY = 6;
 export const AUTOMATIONS_MAX = 20;
 
 export type AutomationTrigger =

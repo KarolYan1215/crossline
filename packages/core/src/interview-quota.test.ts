@@ -18,7 +18,7 @@ test("a round's cost is the median rise in one window; a reset window is not cou
 test("a Free account is warned before it is measured, told how many rounds are left once it is, and told what to do when it is spent", () => {
   const unmeasured = interviewQuotaOutlook({ plan: "free", signal: signal(5), trace: [], roundsDone: 0, complete: false });
   expect(unmeasured.verdict).toBe("tight");
-  expect(unmeasured.message).toContain("邀请码");
+  expect(unmeasured.message).toContain("开发者提供的模型");
   const trace = [1, 2, 3].map((round) => quotaReading(signal(10 * round + 20), round, at)!);
   const short = interviewQuotaOutlook({ plan: "free", signal: signal(50), trace, roundsDone: 3, complete: false });
   expect(short).toMatchObject({ verdict: "insufficient", perRound: 10, roundsLeft: 5, remainingRounds: 9 });

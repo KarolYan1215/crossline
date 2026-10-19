@@ -31,7 +31,7 @@ export function ConnectFlow({ next }: { next: string }) {
     <ModelProviderCard onReady={setApi} />
     <h2 className="connect-or">没有 ChatGPT Plus，也没有 API key</h2>
     <InvitePanel onRedeemed={sponsored} onSponsored={sponsored}
-      lead="ChatGPT 免费账号的额度通常做不完访谈。可以申请内测邀请码，用开发者提供的模型完成访谈和日常使用。" />
+      lead="ChatGPT 免费账号的额度通常做不完访谈。可以申请用开发者提供的模型，通过后用邀请码完成访谈和日常使用。" />
     <p className="muted" role="status">{connected ? "已连接，正在进入访谈…" : "连接后自动进入访谈。"}</p>
   </div>;
 }

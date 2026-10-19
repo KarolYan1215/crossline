@@ -136,7 +136,7 @@ jobs:
                   Math.round(r.duration_ms / 1000) + \\\"s\\\", \\\"out=\\\" + r.output_tokens, \\\"reason=\\\" + r.reasoning_tokens].join(\\\"  \\\"));
             \""
             echo "== worker repairs and rejections"; sudo docker logs --since 48h crossline-worker 2>&1 | grep -iE "repair|reject|invalid|blocked|stall|SKILL_" | cut -c1-400 | tail -40
-            echo "== interview and the model gate (3h)"; sudo docker logs --since 3h crossline-worker 2>&1 | grep -iE "onboarding|extract|model.gate|sponsor" | cut -c1-400 | tail -40'
+            echo "== interview and the model gate (3h)"; sudo docker logs --since 3h crossline-worker 2>&1 | grep -iE "onboarding|extract|model.gate|sponsor|item_forbidden|skill.stalled" | cut -c1-400 | tail -60'
           echo "== interview extraction (deploy/server/ledger-report.cjs)"
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker run --rm -i -v /srv/crossline/data:/live:ro -w /repo/packages/db \
             $(sudo docker inspect -f "{{.Config.Image}}" crossline-web) sh -c "mkdir -p /tmp/copy && cp /live/crossline.db* /tmp/copy/ && node -"' \

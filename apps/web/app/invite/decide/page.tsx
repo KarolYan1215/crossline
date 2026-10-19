@@ -3,7 +3,7 @@ import { inviteForLink } from "../../../lib/invites";
 import { DecisionButtons } from "./decision-buttons";
 import "../../privacy/privacy.css";
 
-export const metadata: Metadata = { title: "内测申请 · Crossline" };
+export const metadata: Metadata = { title: "模型额度申请 · Crossline" };
 export const dynamic = "force-dynamic";
 
 const STATUS: Record<string, string> = { pending: "待处理", approved: "已通过，邀请码已发出", rejected: "已拒绝", redeemed: "已通过，邀请码已被使用" };
@@ -16,7 +16,7 @@ export default async function InviteDecisionPage({ searchParams }: { searchParam
   const { t = "" } = await searchParams;
   const invite = t ? inviteForLink(t) : undefined;
   return <main className="privacy">
-    <h1>内测申请</h1>
+    <h1>开发者模型额度申请</h1>
     {!invite ? <p className="privacy-lede">链接无效或已过期（链接 14 天内有效）。</p> : <>
       <ul>
         <li>申请人：{invite.email}</li>

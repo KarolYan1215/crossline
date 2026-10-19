@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { createChatStreamTranslator, responsesToChat, upstreamFailure } from "./chat-bridge";
+import { createChatStreamTranslator, freeformDescription, responsesToChat, upstreamFailure } from "./chat-bridge";
 
 /** Parses the SSE lines a translator produced back into events. */
 const events = (lines: string[]) => lines.map((line) => JSON.parse(line.split("\ndata: ")[1]!) as Record<string, unknown> & { type: string });
@@ -113,4 +113,17 @@ test("upstream errors land on the codes Codex already treats: full context, spen
   expect(upstreamFailure(402, JSON.stringify({ error: { message: "Insufficient Balance" } }))).toEqual({ code: "insufficient_quota", message: "Insufficient Balance" });
   expect(upstreamFailure(429, "slow down").code).toBe("rate_limit_exceeded");
   expect(upstreamFailure(500, "").code).toBe("server_error");
+});
+
+test("a freeform tool travels as a function whose description no longer says 'not JSON' and says how to send the text", () => {
+  const description = "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON. The patch starts with *** Begin Patch.";
+  const out = freeformDescription(description);
+  expect(out).not.toMatch(/do not wrap the patch in JSON/i);
+  expect(out).toContain("Use the `apply_patch` tool to edit files.");
+  expect(out).toContain("The patch starts with *** Begin Patch.");
+  expect(out).toContain("one argument, `input`");
+  const { body } = responsesToChat({ model: "m", input: [], tools: [{ type: "custom", name: "apply_patch", description }] });
+  const tool = (body.tools as Array<{ function: { name: string; description: string } }>)[0]!;
+  expect(tool.function.name).toBe("apply_patch");
+  expect(tool.function.description).toBe(out);
 });

@@ -56,7 +56,7 @@ export function perRoundCost(trace: QuotaReading[]): { window: "long" | "short";
   return undefined;
 }
 
-const PLUS_OR_INVITE = "可以升级到 ChatGPT Plus，或申请内测邀请码，用开发者提供的模型继续访谈。";
+const PLUS_OR_INVITE = "可以升级到 ChatGPT Plus，或申请用开发者提供的模型继续访谈（邮件审批）。";
 
 export function interviewQuotaOutlook(input: { plan?: string | undefined; signal: CostSignal; trace: QuotaReading[]; roundsDone: number;
   complete: boolean; usageLimitHit?: boolean }): InterviewQuotaOutlook {

@@ -73,12 +73,12 @@ export async function applyInvite(ctx: AccessContext, email: string, reason: str
   const { invite, created } = applyForInvite(store, { workspaceId: ctx.workspaceId, email, reason });
   if (created) {
     const link = `${baseUrl()}/invite/decide?t=${signDecisionToken(invite.id)}`;
-    const text = [`${invite.email} 申请 Crossline 内测邀请码。`, "",
+    const text = [`${invite.email} 申请用开发者的模型额度（硅基流动）使用 Crossline。`, "",
       `理由：${invite.reason || "（未填写）"}`, `ChatGPT 账号类型：${context.plan ?? "未知"}`, `申请时间：${invite.createdAt}`, "",
       `通过或拒绝：${link}`, "", `打开链接后按「通过」会生成邀请码并发到申请人的邮箱；链接 ${LINK_DAYS} 天内有效。`].join("\n");
     try {
       const send = appMailSender()!;
-      for (const to of approvers()) await send({ to, subject: `Crossline 内测申请：${invite.email}`, text });
+      for (const to of approvers()) await send({ to, subject: `Crossline 模型额度申请：${invite.email}`, text });
     } catch {
       // Not kept as an open application nobody was told about: the person can apply again once mail works.
       store.saveInvite({ ...invite, status: "rejected", decidedAt: new Date().toISOString() });
@@ -96,11 +96,11 @@ export async function decideFromLink(token: string, decision: "approve" | "rejec
   const result = decideInvite(getStore(), id, decision);
   if (!result.ok) return result;
   if (!result.code) return { ok: true, status: result.invite.status, email: result.invite.email, mailed: false };
-  const text = ["你的 Crossline 内测申请已通过。", "", `邀请码：${result.code}`, "",
+  const text = ["你申请的 Crossline 开发者模型额度已通过。", "", `邀请码：${result.code}`, "",
     `打开 ${baseUrl()}/connect ，在「输入邀请码」里填入，就可以用开发者提供的模型做访谈和日常使用（每月有用量上限）。`,
     "邀请码只能给一个账号使用。"].join("\n");
   try {
-    await appMailSender()!({ to: result.invite.email, subject: "Crossline 内测邀请码", text });
+    await appMailSender()!({ to: result.invite.email, subject: "Crossline 模型额度邀请码", text });
     return { ok: true, status: result.invite.status, email: result.invite.email, mailed: true };
   } catch {
     return { ok: true, status: result.invite.status, email: result.invite.email, mailed: false, code: result.code };

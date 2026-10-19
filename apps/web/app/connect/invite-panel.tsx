@@ -59,11 +59,11 @@ export function InvitePanel({ plan, onRedeemed, onSponsored, lead }: { plan?: st
   const application = state.application;
   return <div className="invite-panel">
     {lead && <p>{lead}</p>}
-    {application?.status === "pending" ? <p role="status">内测申请已提交，开发者通过后邀请码会发到账号邮箱。</p>
+    {application?.status === "pending" ? <p role="status">申请已提交，开发者通过后邀请码会发到账号邮箱。</p>
       : application?.status === "approved" ? <p role="status">申请已通过，邀请码已发到账号邮箱，填在下面即可。</p>
       : <details className="invite-apply">
-        <summary>申请内测邀请码</summary>
-        <p className="muted">开发者通过后，邀请码会发到账号邮箱。用邀请码的账号由开发者提供的模型（硅基流动）完成访谈和日常使用，每月有用量上限。</p>
+        <summary>申请用开发者的模型（邮件审批）</summary>
+        <p className="muted">用自己的 ChatGPT 或 API 不需要申请。这里是申请用开发者提供的模型（硅基流动）：开发者通过后，邀请码会发到账号邮箱，之后访谈和日常使用都走这个模型，每月有用量上限。</p>
         <label>想用 Crossline 做什么（可不填）
           <textarea rows={2} maxLength={300} value={reason} onChange={(event) => setReason(event.target.value)} />
         </label>

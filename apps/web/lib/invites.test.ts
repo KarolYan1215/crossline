@@ -38,7 +38,7 @@ test("apply mails the owner a link; approving from it mails the applicant a code
   await applyInvite(TEST_CTX, "tester@example.com", "again");
   const [request] = mails();
   expect(mails()).toHaveLength(1);
-  expect(request).toMatchObject({ to: "owner@example.com", subject: "Crossline 内测申请：tester@example.com" });
+  expect(request).toMatchObject({ to: "owner@example.com", subject: "Crossline 模型额度申请：tester@example.com" });
   expect(request!.text).toContain("ChatGPT 账号类型：free");
   const token = new URL(request!.url).searchParams.get("t")!;
   expect(inviteForLink(token)).toMatchObject({ email: "tester@example.com", status: "pending" });

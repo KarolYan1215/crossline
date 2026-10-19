@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  AUTOMATION_PLAN_SCHEMA, AUTOMATION_RUNS_PER_DAY, AUTOMATION_RUNS_SETTING, AUTOMATIONS_MAX, AUTOMATIONS_SETTING, AGENT_CATEGORIES, addedLines, fileMatches,
+  AUTOMATION_PLAN_SCHEMA, AUTOMATION_RUNS_SETTING, AUTOMATIONS_MAX, AUTOMATIONS_SETTING, AGENT_CATEGORIES, addedLines, fileMatches,
   mailMatches, readAutomationRuns, readAutomations, timeTriggerDue, triggerLabel, validateAutomationPlan,
   type AgentCategory, type Automation, type AutomationRun
 } from "@crossline/core";
@@ -135,19 +135,10 @@ export function deleteAutomation(store: CrosslineStore, workspaceId: string, id:
   return true;
 }
 
-/** Runs that actually happened in the last day: a firing that waited for the assistant does not use the day's allowance. */
-const firedToday = (store: CrosslineStore, workspaceId: string, id: string, now: Date) =>
-  runs(store, workspaceId).filter((run) => run.automationId === id && (run.state === "started" || run.state === "reminded") && now.getTime() - Date.parse(run.firedAt) < 86_400_000).length;
-
 /** Starts one firing: the reminder said, or the assistant started with the instructions and what fired it. */
-export function fire(deps: AutomationDeps, workspaceId: string, automation: Automation, why: Fire, force = false, retry = false): AutomationRun {
+export function fire(deps: AutomationDeps, workspaceId: string, automation: Automation, why: Fire, retry = false): AutomationRun {
   const now = deps.now?.() ?? new Date();
   const base = { automationId: automation.id, firedAt: now.toISOString(), reason: why.reason };
-  if (!force && firedToday(deps.store, workspaceId, automation.id, now) >= AUTOMATION_RUNS_PER_DAY) {
-    const run = { ...base, taskId: "", state: "skipped" as const, detail: `今天已运行 ${AUTOMATION_RUNS_PER_DAY} 次` };
-    noteRun(deps.store, workspaceId, run);
-    return run;
-  }
   if (automation.action.kind === "remind") {
     sayToPerson(deps.store, workspaceId, automation.action.text, "automation_remind", `remind:${automation.id}:${now.toISOString().slice(0, 13)}`, [], now);
     update(deps.store, workspaceId, automation.id, (item) => ({ ...item, lastFiredAt: now.toISOString(), runs: item.runs + 1 }));
@@ -206,7 +197,8 @@ export function onNewMail(store: CrosslineStore, workspaceId: string, messages: 
 
 /**
  * One tick for one workspace: queued firings first, then each active automation's own trigger — a time, a page's text, new files,
- * task events — at most `AUTOMATION_RUNS_PER_DAY` runs each a day. The assistant runs one thing at a time; what cannot start waits.
+ * task events. No daily count (the owner's decision of 2026-10-19): what bounds a run is the account's own quota or the sponsor's
+ * monthly cap. The assistant runs one thing at a time; what cannot start waits.
  */
 export async function automationPass(deps: AutomationDeps, workspaceId: string): Promise<AutomationRun[]> {
   const now = deps.now?.() ?? new Date();
@@ -218,7 +210,7 @@ export async function automationPass(deps: AutomationDeps, workspaceId: string):
   for (const item of waiting) {
     const automation = active().find((entry) => entry.id === item.automationId);
     if (!automation) continue;
-    const run = fire(deps, workspaceId, automation, item, false, true);
+    const run = fire(deps, workspaceId, automation, item, true);
     fired.push(run);
     if (run.state === "queued") left.push(item);
   }
@@ -303,7 +295,7 @@ export function createAutomationService(deps: AutomationDeps & { afterRequest?: 
       if (method === "POST" && one[3] === "run") {
         const automation = read(deps.store, workspaceId).find((item) => item.id === id);
         if (!automation) return { status: 404, body: { ok: false, blocker: { code: "AUTOMATION_NOT_FOUND", message: "找不到这个自动化。" } } };
-        const run = fire(deps, workspaceId, automation, { reason: "本人点了立即运行", context: automation.trigger.type === "watch" ? `要看的页面：${automation.trigger.url}` : "" }, true);
+        const run = fire(deps, workspaceId, automation, { reason: "本人点了立即运行", context: automation.trigger.type === "watch" ? `要看的页面：${automation.trigger.url}` : "" });
         return { status: 200, body: { ok: run.state !== "skipped", run } };
       }
       return undefined;

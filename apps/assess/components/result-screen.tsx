@@ -21,7 +21,7 @@ const dateText = (iso: string) => { const date = new Date(iso); return Number.is
 export const BETA_EMAIL = "karolyan1215@gmail.com";
 /** A mail to the owner, subject filled in and the type code in the body, so the request says who it is from. */
 export const betaMailto = (code: string, name: string): string =>
-  `mailto:${BETA_EMAIL}?subject=${encodeURIComponent("Crossline 内测申请")}&body=${encodeURIComponent(`我的速测类型：${name} ${code}\n想申请 Crossline 内测。`)}`;
+  `mailto:${BETA_EMAIL}?subject=${encodeURIComponent("Crossline 模型额度申请")}&body=${encodeURIComponent(`我的速测类型：${name} ${code}\n想申请用开发者提供的模型使用 Crossline。`)}`;
 
 type State = { kind: "loading" } | { kind: "error"; code: ClientErrorCode } | { kind: "ready"; view: ResultView } | { kind: "deleted" };
 
@@ -162,7 +162,7 @@ export function ResultScreen({ token }: { token: string }) {
           : <button type="button" className="as-primary" disabled={beta.busy} onClick={() => void askBeta()}>{beta.busy ? "正在提交…" : "申请内测"}</button>}
         {beta.error && <p className="as-error" role="alert">{beta.error}</p>}
       </>}
-      <p className="as-note">也可以直接发邮件到 <a href={betaMailto(type.code, type.name)}>{BETA_EMAIL}</a> 申请；在各大平台私信我也可以。</p>
+      <p className="as-note">{view.appUrl ? "没有 ChatGPT Plus 也没有 API key，想用开发者提供的模型？" : "也可以"}发邮件到 <a href={betaMailto(type.code, type.name)}>{BETA_EMAIL}</a> 申请；在各大平台私信我也可以。</p>
     </section>
 
     <section className="as-block">

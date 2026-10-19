@@ -113,17 +113,16 @@ test("a watched page: the first read is the baseline, a change fires with the ne
   expect(started[0]!.what).toContain("HW2 due Nov 11");
 });
 
-test("a day's runs are capped whatever fires them, and a reminder is said without starting the assistant", () => {
+test("an automation runs as often as it fires (no daily count), and a reminder is said without starting the assistant", () => {
   const { store, workspaceId, deps, started } = setup();
   install(store, workspaceId, { id: "auto-cap" });
   const automation = readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING))[0]!;
-  for (let i = 0; i < 6; i += 1) fire(deps(), workspaceId, automation, { reason: "test", context: "" });
-  expect(fire(deps(), workspaceId, automation, { reason: "test", context: "" }).state).toBe("skipped");
-  expect(started).toHaveLength(6);
+  for (let i = 0; i < 8; i += 1) expect(fire(deps(), workspaceId, automation, { reason: "test", context: "" }).state).toBe("started");
+  expect(started).toHaveLength(8);
   install(store, workspaceId, { id: "auto-remind", action: { kind: "remind", text: "交周报" } });
   const remind = readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING)).find((item) => item.id === "auto-remind")!;
   expect(fire(deps(), workspaceId, remind, { reason: "到点", context: "" }).state).toBe("reminded");
-  expect(started).toHaveLength(6);
+  expect(started).toHaveLength(8);
   expect(JSON.parse(store.getSetting(workspaceId, AUTOMATION_RUNS_SETTING)!).at(-1)).toMatchObject({ automationId: "auto-remind", state: "reminded" });
 });
 

@@ -47,6 +47,15 @@ export type ChatRequest = { body: Json; dropped: string[]; tools: Record<string,
 const flatName = (name: string, namespace?: string) =>
   (namespace && namespace !== "functions" ? `${namespace}__${name}` : name).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 
+/** A sentence telling the model not to use JSON, which a freeform tool says and a bridged one must not. */
+const NO_JSON_SENTENCE = /[^.。\n]*\b(do not|don't|never)\b[^.。\n]*\bjson\b[^.。\n]*[.。]?/gi;
+/** A freeform tool's description as a JSON function: its "not JSON" sentence dropped, and how to send the text said instead. */
+export function freeformDescription(description: string): string {
+  const kept = description.replace(NO_JSON_SENTENCE, "").replace(/\n{3,}/g, "\n\n").trim();
+  return `${kept}\n\nCall this function with one argument, \`input\`: the whole text of the call exactly as described above `
+    + `(for a patch, from "*** Begin Patch" to "*** End Patch"), as a JSON string.`;
+}
+
 /** One Responses request as one Chat Completions request. `dropped` names what had no Chat Completions form. */
 export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "responseFormat" | "reasoningEffort"> = {}): ChatRequest {
   const dropped = new Set<string>();
@@ -64,7 +73,11 @@ export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "r
     const flat = flatName(tool.name, namespace);
     if (names[flat]) return;
     names[flat] = { name: tool.name, ...(namespace && namespace !== "functions" ? { namespace } : {}), custom };
-    tools.push({ type: "function", function: { name: flat, description: text(tool.description), parameters: custom
+    // A freeform tool (apply_patch) arrives here as a JSON function: its own description says not to wrap the text in JSON, which
+    // contradicts the `{input}` argument it must now be sent in, so that sentence is replaced by how to call it (the grammar cannot be
+    // carried over to Chat Completions).
+    const description = custom ? freeformDescription(text(tool.description)) : text(tool.description);
+    tools.push({ type: "function", function: { name: flat, description, parameters: custom
       ? { type: "object", properties: { input: { type: "string" } }, required: ["input"], additionalProperties: false }
       : record(tool.parameters) ?? { type: "object", properties: {} } } });
   };

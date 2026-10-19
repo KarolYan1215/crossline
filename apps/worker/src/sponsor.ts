@@ -55,6 +55,8 @@ export const SPONSOR_DIALOGUE_SCRIPT = [
 /** One turn of the sample interview as logged: what the person said, what came back, and what it cost. */
 export type SponsorDialogueLog = {
   at: string; model: string; turn: number; said: string; ok: boolean; code?: string; message?: string;
+  /** What the runner said beyond the code (the item a model was refused, the provider's own error). */
+  detail?: string;
   reply: string; questions: Array<{ text: string; kind: string; options: string[] }>; stage: string; nextAction: string;
   serviceMs: number | null; wallMs: number; repairs: number;
   /** Machine-made writing in the reply (`plainVoiceMarkers`) and all hits per thousand characters. */
@@ -323,7 +325,7 @@ export function createSponsorService(options: {
         const answer = outcome.state !== "blocked" && last?.role === "assistant" ? last.content as {
           reply?: string; questions?: Array<{ text?: string; kind?: string; options?: Array<{ label?: string }> }>; stage?: string; nextAction?: string } : undefined;
         const line: SponsorDialogueLog = { at: new Date(started).toISOString(), model: model.model, turn: index + 1, said, ok: Boolean(answer),
-          ...(outcome.state === "blocked" ? { code: outcome.code, message: outcome.message.slice(0, 300) } : {}),
+          ...(outcome.state === "blocked" ? { code: outcome.code, message: outcome.message.slice(0, 300), ...(outcome.detail ? { detail: outcome.detail.slice(0, 300) } : {}) } : {}),
           reply: answer?.reply ?? "", questions: (answer?.questions ?? []).map((question) => ({ text: question.text ?? "", kind: question.kind ?? "",
             options: (question.options ?? []).map((option) => option.label ?? "") })), stage: answer?.stage ?? "", nextAction: answer?.nextAction ?? "",
           serviceMs: usage ? usage.durationMs : null, wallMs: Date.now() - started, repairs: usage?.repairs ?? 0,
