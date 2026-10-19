@@ -142,7 +142,10 @@ export type OnboardingTurn = {
   profile?: ProfileModel;
 };
 
-/** What the Skill is shown at the start of the interview (later turns only carry the new reply). */
+/**
+ * What the dialogue is shown at the start of the interview (later turns only carry the new reply). The dialogue cites nothing, so it reads
+ * the person's words and the files as they are; numbered sentences go only to the extraction (`OnboardingExtractContext`).
+ */
 export type OnboardingTurnContext = {
   version: "crossline.onboarding.turn.v1";
   /** `YYYY-MM-DD` in the person's zone, so a date written without a year lands in the right one. */
@@ -150,8 +153,8 @@ export type OnboardingTurnContext = {
   identities: Array<{ id: string; label: string }>;
   projects: Array<{ id: string; identityId: string; name: string; summary: string }>;
   facts: Array<{ identityId: string; projectId: string; slot: string; value: string; status: string }>;
-  /** Each file as numbered sentences (「[12] …」, one per line), the numbers the answer cites in `refs`. */
-  sources: Array<{ id: string; fileName: string; kind: string; projectId: string; sentences: string }>;
+  /** Each file's text, cut to the turn's reading budget. */
+  sources: Array<{ id: string; fileName: string; kind: string; projectId: string; text: string }>;
   /** A line's own interview: only this line is asked about. Absent for the full interview. */
   focusLine?: { id: string; label: string; goal: string } | null;
   /** The person's lines as set on the opening screen: identity noun, order (null = parallel), hard constraint, chosen goals. */
@@ -181,15 +184,48 @@ export type OnboardingTurnContext = {
    */
   stageRounds?: number;
   moveOn?: string;
-  /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first; the person's lines as numbered sentences. */
+  /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
   /**
    * The question ledger (`ledgerLines`): what was already asked, numbered, with its status and answer — the interview's own, the app's
    * waiting ones (待问) and answered ones. A question that asks one of these again names its number in `repeats`.
    */
   questionLedger?: string[];
-  /** The person's reply as numbered sentences (「[41] …」), cited by number like a file. */
-  reply: { id: string; sentences: string };
+  /** The person's reply, as they wrote it. */
+  reply: { id: string; text: string };
+  /**
+   * Facts the background extraction recorded since the dialogue last heard (「research/ece555 · deadline = 12 月中（确认）」): what the
+   * ledger now holds, so the dialogue neither asks it again nor contradicts it. Later turns only; the first turn has `facts`.
+   */
+  recorded?: string[];
+};
+
+/**
+ * What one extraction run is shown (2026-10-19): a fresh thread each time, so everything it needs is here — the replies and files not
+ * yet extracted as numbered sentences, a short index of what the ledger already holds, and tools to read any earlier sentence
+ * (`search_evidence`, `read_sentences`) instead of the whole conversation.
+ */
+export type OnboardingExtractContext = {
+  version: "crossline.onboarding.extract.v1";
+  today: string; timeZone: string;
+  lines: Array<{ id: string; label: string; hard: boolean; goals: string[] }>;
+  projects: Array<{ id: string; identityId: string; name: string; summary: string }>;
+  /** The ledger's facts, one line each (`identity/project · slot = value（确认|推断）`): what is already known, to update rather than repeat. */
+  facts: string[];
+  /** Each line's description and attribute candidates on record. */
+  lineProfiles: Array<{ lineId: string; description: string; attributes: string[] }>;
+  /** The portrait so far; null for a line's own interview, which does not rewrite it. */
+  profile: ProfileModel | null;
+  stage: OnboardingStage;
+  focusLine: { id: string; label: string } | null;
+  /** The person's replies not yet extracted, oldest first, each with the questions it answers and its numbered sentences. */
+  replies: Array<{ id: string; asked: string[]; sentences: string }>;
+  /** Files not yet extracted, as numbered sentences within the run's reading budget. */
+  sources: Array<{ id: string; fileName: string; kind: string; projectId: string; sentences: string }>;
+  /** Files that did not fit this run; the next run takes them. */
+  sourcesWaiting?: number;
+  /** Every file is being read again: dates it states replace the batch nobody answered. */
+  reread: boolean;
 };
 
 /** What the validator may check a citation against. Never sent to the model. */
@@ -213,76 +249,110 @@ const object = (properties: Record<string, unknown>) =>
 /** Sentence numbers (2026-10-19): the model points at what it was shown instead of copying it, and the system fills the words in. */
 export const REFS = { type: "array", maxItems: 8, items: { type: "integer", minimum: 1 } } as const;
 
-export const ONBOARDING_TURN_SCHEMA = object({
-  reply: text(1500),
-  questions: {
-    // A batch of questions that do not depend on each other (decided 2026-10-08): answered one by one on screen and sent together. A question
-    // whose answer depends on another's waits for the next turn.
-    type: "array", maxItems: 5,
-    items: object({
-      id: slug, text: text(400), kind: { type: "string", enum: ["single", "multi", "free"] },
-      options: {
-        type: "array", maxItems: 14,
-        items: object({ id: slug, label: text(120), detail: { type: "string", maxLength: 300 } })
-      },
-      allowOther: { type: "boolean" },
-      // "" = about the person generally / about the connections between lines.
-      identityId: { type: "string", maxLength: 80 }, projectId: { type: "string", maxLength: 80 },
-      // The ledger number of the question this one repeats (`questionLedger`), 0 when it is new.
-      repeats: { type: "integer", minimum: 0 }
+/**
+ * The ids a turn may name, as enums made for that turn (2026-10-19): a line or project the model names is then one the schema itself
+ * offers, instead of a string the validator refuses after the fact. Without them (`undefined`) a field is a plain slug, which is what
+ * the exported schemas below carry for the conformance check and the strict-mode rules.
+ */
+export type TurnIds = { lines: string[]; projects?: string[] };
+const enumOf = (values: string[], fallback: object) => values.length ? { type: "string", enum: [...new Set(values)] } : fallback;
+
+/** Every field either layer of a turn may write, made once so the two schemas below never drift apart. */
+function turnFields(ids?: TurnIds) {
+  // A line the answer names (never "person"); a line or the person; what a question is about ("" for the person in general or across lines).
+  const line = ids ? enumOf(ids.lines.filter((id) => id !== PERSON_LINE), slug) : slug;
+  const lineOrPerson = ids ? enumOf([...ids.lines, PERSON_LINE], slug) : slug;
+  const about = ids ? enumOf(["", PERSON_LINE, ...ids.lines], { type: "string", maxLength: 80 }) : { type: "string", maxLength: 80 };
+  // A question may only be about a project on record; a fact may also name one the same answer detects.
+  const askedProject = ids?.projects ? enumOf(["", ...ids.projects], { type: "string", maxLength: 80 }) : { type: "string", maxLength: 80 };
+  return {
+    reply: text(1500),
+    questions: {
+      // A batch of questions that do not depend on each other (decided 2026-10-08): answered one by one on screen and sent together. A question
+      // whose answer depends on another's waits for the next turn.
+      type: "array", maxItems: 5,
+      items: object({
+        id: slug, text: text(400), kind: { type: "string", enum: ["single", "multi", "free"] },
+        options: {
+          type: "array", maxItems: 14,
+          items: object({ id: slug, label: text(120), detail: { type: "string", maxLength: 300 } })
+        },
+        allowOther: { type: "boolean" },
+        identityId: about, projectId: askedProject,
+        // The ledger number of the question this one repeats (`questionLedger`), 0 when it is new.
+        repeats: { type: "integer", minimum: 0 }
+      })
+    },
+    slotUpdates: {
+      type: "array", maxItems: 40,
+      items: object({
+        identityId: lineOrPerson, projectId: { type: "string", maxLength: 80 }, slot: slug, value: text(600),
+        status: { type: "string", enum: ["confirmed", "inferred"] },
+        // The numbered sentences the fact rests on; empty for an inference.
+        refs: REFS
+      })
+    },
+    projectsDetected: {
+      type: "array", maxItems: 8,
+      items: object({ id: slug, identityId: lineOrPerson, name: text(120), summary: { type: "string", maxLength: 500 } })
+    },
+    flywheelCandidates: {
+      type: "array", maxItems: 12,
+      items: object({
+        fromIdentityId: lineOrPerson, toIdentityId: lineOrPerson, kind: { type: "string", enum: [...RELATION_KINDS] },
+        explanation: text(500), refs: REFS,
+        status: { type: "string", enum: ["inferred"] }
+      })
+    },
+    coverage: {
+      type: "array", maxItems: 8,
+      items: object({
+        identityId: lineOrPerson,
+        filled: { type: "array", maxItems: 30, items: slug }, missing: { type: "array", maxItems: 30, items: slug }
+      })
+    },
+    fileDates: DATE_EXTRACTION_SCHEMA,
+    nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
+    stage: { type: "string", enum: [...ONBOARDING_STAGES] },
+    lineProfiles: { type: "array", maxItems: 8, items: object({ lineId: line, description: { type: "string", maxLength: 800 },
+      attributeCandidates: { type: "array", maxItems: ATTRIBUTE_CANDIDATES_MAX,
+        items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD, refs: REFS }) } }) },
+    goalEdits: { type: "array", maxItems: 8, items: object({ lineId: line,
+      parts: { type: "array", maxItems: 12, items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD }) }, refs: REFS }) },
+    availability: object({ windows: { type: "array", maxItems: 14, items: object({ days: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
+      startMinute: { type: "integer", minimum: 0, maximum: 1440 }, endMinute: { type: "integer", minimum: 0, maximum: 1440 },
+      energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
+    profile: object({
+      portrait: { type: "string", maxLength: 300 }, coreConflict: { type: "string", maxLength: 400 }, problem: { type: "string", maxLength: 600 },
+      gravity: { type: "array", maxItems: 8, items: text(200) }, designable: { type: "array", maxItems: 8, items: text(200) },
+      reframes: { type: "array", maxItems: 4, items: object({ fallacy: text(200), reframe: text(300) }) },
+      workView: { type: "string", maxLength: 600 }, lifeView: { type: "string", maxLength: 600 }, consistency: { type: "string", maxLength: 600 }, trueNorth: { type: "string", maxLength: 300 },
+      energyMap: { type: "array", maxItems: 12, items: object({ activity: text(80), skill: { type: "string", enum: ["high", "low"] }, love: { type: "string", enum: ["high", "low"] },
+        charge: { type: "string", enum: ["charge", "drain"] } }) },
+      flow: { type: "array", maxItems: 8, items: text(200) }, says: { type: "string", maxLength: 400 }, does: { type: "string", maxLength: 400 },
+      anchor: { type: "string", maxLength: 400 }, realWant: { type: "string", maxLength: 400 }, allocation: { type: "string", maxLength: 600 },
+      values: { type: "array", maxItems: 10, items: object({ value: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: { type: "integer", minimum: 0, maximum: 100 } }) }
     })
-  },
-  slotUpdates: {
-    type: "array", maxItems: 40,
-    items: object({
-      identityId: slug, projectId: { type: "string", maxLength: 80 }, slot: slug, value: text(600),
-      status: { type: "string", enum: ["confirmed", "inferred"] },
-      // The numbered sentences the fact rests on; empty for an inference.
-      refs: REFS
-    })
-  },
-  projectsDetected: {
-    type: "array", maxItems: 8,
-    items: object({ id: slug, identityId: slug, name: text(120), summary: { type: "string", maxLength: 500 } })
-  },
-  flywheelCandidates: {
-    type: "array", maxItems: 12,
-    items: object({
-      fromIdentityId: slug, toIdentityId: slug, kind: { type: "string", enum: [...RELATION_KINDS] },
-      explanation: text(500), refs: REFS,
-      status: { type: "string", enum: ["inferred"] }
-    })
-  },
-  coverage: {
-    type: "array", maxItems: 8,
-    items: object({
-      identityId: slug,
-      filled: { type: "array", maxItems: 30, items: slug }, missing: { type: "array", maxItems: 30, items: slug }
-    })
-  },
-  fileDates: DATE_EXTRACTION_SCHEMA,
-  nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
-  stage: { type: "string", enum: [...ONBOARDING_STAGES] },
-  lineProfiles: { type: "array", maxItems: 8, items: object({ lineId: slug, description: { type: "string", maxLength: 800 },
-    attributeCandidates: { type: "array", maxItems: ATTRIBUTE_CANDIDATES_MAX,
-      items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD, refs: REFS }) } }) },
-  goalEdits: { type: "array", maxItems: 8, items: object({ lineId: slug,
-    parts: { type: "array", maxItems: 12, items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD }) }, refs: REFS }) },
-  availability: object({ windows: { type: "array", maxItems: 14, items: object({ days: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
-    startMinute: { type: "integer", minimum: 0, maximum: 1440 }, endMinute: { type: "integer", minimum: 0, maximum: 1440 },
-    energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
-  profile: object({
-    portrait: { type: "string", maxLength: 300 }, coreConflict: { type: "string", maxLength: 400 }, problem: { type: "string", maxLength: 600 },
-    gravity: { type: "array", maxItems: 8, items: text(200) }, designable: { type: "array", maxItems: 8, items: text(200) },
-    reframes: { type: "array", maxItems: 4, items: object({ fallacy: text(200), reframe: text(300) }) },
-    workView: { type: "string", maxLength: 600 }, lifeView: { type: "string", maxLength: 600 }, consistency: { type: "string", maxLength: 600 }, trueNorth: { type: "string", maxLength: 300 },
-    energyMap: { type: "array", maxItems: 12, items: object({ activity: text(80), skill: { type: "string", enum: ["high", "low"] }, love: { type: "string", enum: ["high", "low"] },
-      charge: { type: "string", enum: ["charge", "drain"] } }) },
-    flow: { type: "array", maxItems: 8, items: text(200) }, says: { type: "string", maxLength: 400 }, does: { type: "string", maxLength: 400 },
-    anchor: { type: "string", maxLength: 400 }, realWant: { type: "string", maxLength: 400 }, allocation: { type: "string", maxLength: 600 },
-    values: { type: "array", maxItems: 10, items: object({ value: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: { type: "integer", minimum: 0, maximum: 100 } }) }
-  })
-});
+  };
+}
+
+/**
+ * The two layers of an interview turn (2026-10-19, P2 of the redesign). The person waits only for the **dialogue**: what was taken in,
+ * and the next questions. The **extraction** — facts with their sentence numbers, projects, dates, line attributes, hours, the
+ * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
+ */
+export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage"] as const;
+export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "profile"] as const;
+const pick = <K extends string>(fields: Record<string, unknown>, keys: readonly K[]) => Object.fromEntries(keys.map((key) => [key, fields[key]]));
+export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
+export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
+export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
+export const ONBOARDING_EXTRACT_SCHEMA = onboardingExtractSchema();
+/** What the person waits for, and what is stored as the round. */
+export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage">;
+/** What the background run writes to the ledger. */
+export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
+  | "availability" | "profile"> & { fileDates?: DateExtraction };
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -445,14 +515,13 @@ function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => bo
  * availability windows. The interview keeps a pruned turn at once when this is small (`ONBOARDING_KEEP_EARLY_MAX`) rather than asking
  * the model to rewrite the whole answer, which costs a full regeneration (2026-10-16: two repairs were two thirds of a 174 s turn).
  */
-export function droppedOnboardingItems(original: unknown, kept: OnboardingTurn): number {
+export function droppedOnboardingItems(original: unknown, kept: Partial<OnboardingTurn>): number {
   const turn = original as Partial<OnboardingTurn> | undefined;
   const count = (list: unknown) => Array.isArray(list) ? list.length : 0;
   const candidates = (lines: unknown) => Array.isArray(lines)
     ? lines.reduce((sum: number, line: { attributeCandidates?: unknown }) => sum + count(line?.attributeCandidates), 0) : 0;
-  return Math.max(0, count(turn?.slotUpdates) - kept.slotUpdates.length) + Math.max(0, count(turn?.questions) - kept.questions.length)
-    + Math.max(0, count(turn?.projectsDetected) - kept.projectsDetected.length)
-    + Math.max(0, count(turn?.flywheelCandidates) - count(kept.flywheelCandidates)) + Math.max(0, count(turn?.goalEdits) - count(kept.goalEdits))
+  const lost = (key: "slotUpdates" | "questions" | "projectsDetected" | "flywheelCandidates" | "goalEdits") => Math.max(0, count(turn?.[key]) - count(kept[key]));
+  return lost("slotUpdates") + lost("questions") + lost("projectsDetected") + lost("flywheelCandidates") + lost("goalEdits")
     + Math.max(0, candidates(turn?.lineProfiles) - candidates(kept.lineProfiles))
     + Math.max(0, count(turn?.availability?.windows) - count(kept.availability?.windows));
 }

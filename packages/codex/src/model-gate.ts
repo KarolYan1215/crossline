@@ -26,7 +26,7 @@ export const INTERACTIVE_SKILLS: readonly string[] = ["crossline-onboarding", "c
  * slot kept for a person.
  */
 export const PLANNING_SKILLS: readonly string[] = ["crossline-automation-stripper", "crossline-goal-backplanner", "crossline-step-planner",
-  "crossline-milestone-architect", "crossline-artifact-planner"];
+  "crossline-milestone-architect", "crossline-artifact-planner", "crossline-onboarding-extract"];
 const named = (list: readonly string[], skillName: string) => list.some((name) => skillName === name || skillName.endsWith(`:${name}`));
 export const priorityForSkill = (skillName: string): ModelPriority =>
   named(INTERACTIVE_SKILLS, skillName) ? "interactive" : named(PLANNING_SKILLS, skillName) ? "planning" : "background";

@@ -37,6 +37,11 @@ export type OnboardingState = {
   readyToStart: boolean;
   /** The worker's own first milestone drafts: being designed, or that run ended with none. */
   firstDrafts?: "none" | "running" | "stalled";
+  /**
+   * What the background extraction still owes the conversation: replies and files not yet recorded, and its last failure while it keeps
+   * failing (`extractBacklog`). Absent on a state read before it existed.
+   */
+  organizing?: { replies: number; files: number; failing?: { code: string; message: string; retryAt?: string } };
   /** How many start items there are (they are per line, so not a fixed five). */
   startTotal: number;
   /** The start items still open, in checklist order. */

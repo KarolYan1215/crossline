@@ -1,10 +1,24 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { ONBOARDING_PROGRESS_SETTING, type OnboardingProgress } from "@crossline/core";
-import { createOnboardingSessionRunner, ONBOARDING_SKILL, paceDeepRound } from "./onboarding-session";
-import { fakeRuntime as sharedRuntime } from "./testing/fake-runtime";
+import { createOnboardingSessionRunner as createRunner, ONBOARDING_SKILL, paceDeepRound } from "./onboarding-session";
+import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
+import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
 
+/**
+ * Both layers of a turn are answered from the same list: the dialogue reads its fields of each answer, the extraction (a thread of its
+ * own, told apart by its context's version) reads the rest. Unless a test says otherwise the round waits for the extraction, so the
+ * ledger can be read right after a turn.
+ */
+const EXTRACT = "crossline.onboarding.extract.v1";
+const sharedRuntime = (answers: Array<string | ((prompts: string[]) => string)>, _skill: string, options: Parameters<typeof runtimeWithRoutes>[2] = {}) =>
+  runtimeWithRoutes(answers, [ONBOARDING_SKILL, ONBOARDING_EXTRACT_SKILL], { routes: [{ match: EXTRACT, answers }], ...options });
 const fakeRuntime = (answers: string[], options: { lostThreads?: string[] } = {}) => sharedRuntime(answers, ONBOARDING_SKILL, options);
+/** The prompts of one layer: the dialogue's thread, or the extraction's fresh threads (each first prompt carries its version). */
+const dialogue = (prompts: () => string[]) => prompts().filter((prompt) => !prompt.includes(EXTRACT) && !prompt.includes("search_evidence"));
+const extraction = (prompts: () => string[]) => prompts().filter((prompt) => prompt.includes(EXTRACT));
+const createOnboardingSessionRunner = (...args: Parameters<typeof createRunner>) =>
+  createRunner(args[0], args[1], args[2], args[3], { extract: "await", ...(args[4] ?? {}) });
 let store: CrosslineStore;
 let workspaceId: string;
 
@@ -74,23 +88,28 @@ test("a connected calendar's coming week goes to the interview on the first turn
   await run({ sessionId: "s1", text: "好的" });
   plan("ECE 548 Lecture (room 1610)");
   await run({ sessionId: "s1", text: "继续" });
-  const sent = prompts().map((prompt) => prompt.includes("\"calendar\""));
+  const sent = dialogue(prompts).map((prompt) => prompt.includes("\"calendar\""));
   expect(sent).toEqual([true, false, true]);
-  expect(prompts()[0]).toContain("ECE 548 Lecture");
+  expect(dialogue(prompts)[0]).toContain("ECE 548 Lecture");
 });
 
-test("the second turn continues the same thread and only carries what is new", async () => {
-  const { rpc, prompts, turns } = fakeRuntime([firstAnswer, turn()]);
+test("the second turn continues the same thread and only carries what is new, with what the extraction recorded since", async () => {
+  const { rpc, prompts, threadStarts } = fakeRuntime([firstAnswer, turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
   await run({ sessionId: "s1", text: "图表清单在师兄给的文档里" });
-  expect(turns()).toBe(2);
-  expect(prompts()[1]).not.toContain("identities");
-  expect(prompts()[1]).toContain("reply-3");
+  // One dialogue thread; each extraction on a thread of its own.
+  expect(dialogue(prompts)).toHaveLength(2);
+  expect(extraction(prompts)).toHaveLength(2);
+  expect(threadStarts()).toHaveLength(3);
+  expect(dialogue(prompts)[1]).not.toContain("identities");
+  expect(dialogue(prompts)[1]).toContain("reply-3");
+  // The first turn's extraction wrote the deadline; the dialogue hears of it on the next turn.
+  expect(dialogue(prompts)[1]).toContain("research/westlake · deadline = 10/31 前投出（确认）");
   expect(store.listOnboardingMessages(workspaceId, "s1").map((message) => message.seq)).toEqual([1, 2, 3, 4]);
 });
 
-test("an extracted file reaches the model once, as numbered sentences, and a fact citing two of them gets their words", async () => {
+test("a file reaches the dialogue once as text and the extraction once as numbered sentences, and a fact citing two of them gets their words", async () => {
   store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId, kind: "docx", fileName: "Lecture Plan.docx",
     mediaType: "application/octet-stream", sha256: "x", uri: "file:///x", extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1",
     extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
@@ -99,24 +118,29 @@ test("an extracted file reaches the model once, as numbered sentences, and a fac
   const { rpc, prompts } = fakeRuntime([answer, turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s", text: "我上传了课程文件" });
-  expect(prompts()[0]).toContain("Lecture Plan.docx");
-  expect(prompts()[0]).toContain("[2] Week-8: 27th Oct.\\n[3] L15: Mid-term-1");
+  expect(dialogue(prompts)[0]).toContain("Lecture Plan.docx");
+  expect(dialogue(prompts)[0]).toContain("Week-8: 27th Oct.\\nL15: Mid-term-1");
+  expect(dialogue(prompts)[0]).not.toContain("[2]");
+  expect(extraction(prompts)[0]).toContain("[2] Week-8: 27th Oct.\\n[3] L15: Mid-term-1");
   expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "midterm")).toMatchObject({ sourceRef: "src-1", status: "confirmed",
     sourceQuote: "Week-8: 27th Oct.\nL15: Mid-term-1", sourceSentences: [2, 3] });
   await run({ sessionId: "s", text: "继续" });
-  // Already announced: not sent again.
-  expect(prompts()[1]).not.toContain("Lecture Plan.docx");
+  // Already announced and extracted: not sent again to either.
+  expect(dialogue(prompts)[1]).not.toContain("Lecture Plan.docx");
+  expect(extraction(prompts)[1]).not.toContain("Lecture Plan.docx");
 });
 
-test("a sentence number the model was not shown is refused and nothing from that turn is saved", async () => {
+test("a fact citing a sentence number the extraction was not shown is dropped without a repair; the round still reaches the person", async () => {
   const bad = turn({ slotUpdates: [{ identityId: "research", projectId: "", slot: "deadline", value: "10/15", status: "confirmed", refs: [99] }] });
-  const { rpc } = fakeRuntime([bad]);
+  const { rpc, prompts } = fakeRuntime([bad]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
-  const outcome = await run({ sessionId: "s", text: "10/31 前要投出" });
-  expect(outcome).toMatchObject({ state: "blocked", code: "ONBOARDING_REF_UNKNOWN" });
+  expect(await run({ sessionId: "s", text: "10/31 前要投出" })).toMatchObject({ state: "asked" });
+  // One bad item is dropped at once (`keepEarly`) instead of a full rewrite; nothing invented is kept.
+  expect(extraction(prompts)).toHaveLength(1);
+  expect(prompts()).toHaveLength(2);
   expect(store.listProfileFacts(workspaceId)).toEqual([]);
-  // The person's message is kept, ready for a retry, and there is no assistant message.
-  expect(store.listOnboardingMessages(workspaceId, "s").map((message) => message.role)).toEqual(["user"]);
+  expect(store.listEvents(workspaceId, { type: "onboarding.extracted" })[0]?.payload).toMatchObject({ replies: 1, facts: 0 });
+  expect(store.listOnboardingMessages(workspaceId, "s").map((message) => message.role)).toEqual(["user", "assistant"]);
 });
 
 test("retrying after a failure does not save the person's message a second time", async () => {
@@ -156,9 +180,9 @@ test("a thread the runtime has forgotten is replaced, and the new one is told wh
   expect(await run({ sessionId: "s1", text: "图表清单在师兄给的文档里" })).toEqual({ state: "asked", sessionId: "s1" });
 
   const saved = store.getOnboardingSession(workspaceId, "s1");
-  expect(saved?.codexThreadId).toBe("thread-1");
-  // The new thread's first prompt carries the earlier lines, with the user's own reply id so it can be cited.
-  const prompt = prompts()[0] ?? "";
+  expect(saved?.codexThreadId).toMatch(/^thread-\d$/);
+  // The new thread's first prompt carries the earlier lines, with the user's own reply id.
+  const prompt = dialogue(prompts).find((item) => item.includes("history")) ?? "";
   expect(prompt).toContain("history");
   expect(prompt).toContain("西湖那篇 10/31 前要投出");
   expect(prompt).toContain("reply-1");
@@ -188,15 +212,14 @@ test("dates the model read out of a file become one verified batch, and what can
 });
 
 test("a turn with no dates writes no batch, and a newer batch retires one nobody answered", async () => {
-  store.saveSourceDocument({ id: "doc-1", ownerId: "o", workspaceId, kind: "docx", fileName: "Lecture Plan.docx", mediaType: "x", sha256: "1", uri: "file:///1",
-    extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
+  // Each extraction runs on a fresh thread and may cite only what it is shown: here, the reply of its own turn ([1], [2], [3]).
   const empty = { dates: [], recurring: [], questions: [] };
-  const { rpc } = fakeRuntime([withDates(empty), withDates({ ...empty, dates: [dateItem()] }), withDates({ ...empty, dates: [dateItem({ id: "d9" })] })]);
+  const { rpc } = fakeRuntime([withDates(empty), withDates({ ...empty, dates: [dateItem({ refs: [2] })] }), withDates({ ...empty, dates: [dateItem({ id: "d9", refs: [3] })] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
-  await run({ sessionId: "s1", text: "一" });
+  await run({ sessionId: "s1", text: "没有日期" });
   expect(store.listEvents(workspaceId, { type: "dates.extracted" })).toHaveLength(0);
-  await run({ sessionId: "s1", text: "二" });
-  await run({ sessionId: "s1", text: "三" });
+  await run({ sessionId: "s1", text: "ECE 548 期中 10/27" });
+  await run({ sessionId: "s1", text: "另一场也在 10/27" });
   expect(store.listEvents(workspaceId, { type: "dates.extracted" })).toHaveLength(2);
   const retired = store.listEvents(workspaceId, { type: "dates.decided" });
   expect(retired).toHaveLength(1);
@@ -317,7 +340,7 @@ test("先读材料：首轮把已读出的文件全部带上，清单标出可�
   const { rpc, prompts } = fakeRuntime([turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s", text: "材料已添加，请先从材料里读出能读的，再问还缺的。" });
-  const prompt = prompts()[0]!;
+  const prompt = dialogue(prompts)[0]!;
   const context = JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1)) as {
     sources: unknown[]; checklist: Array<{ start?: boolean }>; stage: string };
   expect(context.sources).toHaveLength(2);
@@ -346,8 +369,8 @@ test("the tone the person chose goes with the first turn and every later one", a
   await run({ sessionId: "s1", text: "开始" });
   store.setSetting(workspaceId, "onboarding.tone", "warm");
   await run({ sessionId: "s1", text: "继续" });
-  expect(prompts()[0]).toContain('"tone":"neutral"');
-  expect(prompts().slice(1).some((prompt) => prompt.includes('"tone":"warm"'))).toBe(true);
+  expect(dialogue(prompts)[0]).toContain('"tone":"neutral"');
+  expect(dialogue(prompts).slice(1).some((prompt) => prompt.includes('"tone":"warm"'))).toBe(true);
 });
 
 test("a round keeps from the person what is not theirs to answer, writes the calendar's recurrence as an assumption, and reads a goal question as multiple choice", async () => {
@@ -415,7 +438,7 @@ test("an app question the model asks in its own words, naming its number, is not
   expect(round.questions.map((question) => question.id)).toEqual(["q-startup"]);
 });
 
-test("a file read again since it was shown is shown again with its new numbers, and its old ones are not taken", async () => {
+test("a file read again since it was shown is shown to the dialogue again and extracted again with its new numbers", async () => {
   store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId, kind: "text", fileName: "Plan.txt", mediaType: "text/plain", sha256: "x", uri: "file:///x",
     extractedText: "Week-8: 27th Oct.", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
   const done = turn({ questions: [], nextAction: "ready_for_milestones" });
@@ -423,12 +446,13 @@ test("a file read again since it was shown is shown again with its new numbers, 
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
   await run({ sessionId: "s", text: "我上传了文件" });
   await run({ sessionId: "s", text: "继续" });
-  expect(prompts()[1]).not.toContain("Plan.txt");
-  // Extraction ran again (a layout re-read): the next turn hands the file over again, numbered anew.
+  expect(dialogue(prompts)[1]).not.toContain("Plan.txt");
+  // Extraction ran again (a layout re-read): the next turn hands the file over again, numbered anew for the extraction.
   store.setSourceDocumentExtraction(workspaceId, "d1", { status: "done", text: "Week-8: 28th Oct." });
   await run({ sessionId: "s", text: "再继续" });
   const latest = store.sentencesOf(workspaceId, "document", "d1")[0]!;
-  expect(prompts()[2]).toContain(`[${latest.id}] Week-8: 28th Oct.`);
+  expect(dialogue(prompts)[2]).toContain("Week-8: 28th Oct.");
+  expect(extraction(prompts).at(-1)).toContain(`[${latest.id}] Week-8: 28th Oct.`);
 });
 
 test("a re-read still accepts the numbers of files an earlier turn of the thread showed", async () => {

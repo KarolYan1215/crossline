@@ -78,7 +78,7 @@ const getClient = () => supervisor.client;
 
 try {
   // 2. The interview, in the person's own words, with the files already in.
-  const interview = createOnboardingSessionRunner(store, workspaceId, repoRoot, getClient);
+  const interview = createOnboardingSessionRunner(store, workspaceId, repoRoot, getClient, { extract: "await" });
   const first = await interview({ sessionId: "journey", text: `${story}\n\n以上是我目前的真实情况，请据此整理，并把文件里的日期读出来。` });
   say("interview", first);
   check("interview_answered", first.state === "asked" || first.state === "ready", first);

@@ -29,7 +29,13 @@ export type AgentScript = (tools: {
   ask: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }) => Promise<void>;
 
-export function fakeRuntime(answers: Array<string | ((prompts: string[]) => string)>, skillName: string, options: { lostThreads?: string[]; unloadedThreads?: string[]; delayMs?: number; stallTurns?: number[];
+type Answer = string | ((prompts: string[]) => string);
+export function fakeRuntime(answers: Answer[], skillName: string | string[], options: { lostThreads?: string[]; unloadedThreads?: string[]; delayMs?: number; stallTurns?: number[];
+  /**
+   * Answers for threads whose first prompt contains `match` (a Skill run beside another, e.g. the interview's extraction), each route
+   * with its own queue; a thread keeps the route its first turn chose. Threads no route matches take `answers`.
+   */
+  routes?: Array<{ match: string; answers: Answer[] }>;
   /** As the real runtime does: an interrupted turn then reports `turn/completed` with status `interrupted`, right away. */
   completeOnInterrupt?: boolean; usage?: { input: number; cached?: number; output: number; reasoning?: number };
   /** What the runtime does during a turn before it answers: tool items, and requests the client has to answer. */
@@ -64,6 +70,9 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
   const pendingAsks = new Map<string, (value: Record<string, unknown>) => void>();
   let askId = 0;
   const configCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const skillNames = Array.isArray(skillName) ? skillName : [skillName];
+  const routeOf = new Map<string, number>();
+  const routeTurns = new Map<number, number>();
   const libraryPath = (name: string) => `C:\\library\\${name.replace(":", "\\")}\\SKILL.md`;
   const libraryEnabled = new Map((options.library ?? []).map((name) => [libraryPath(name), false]));
   const rpc = new JsonLineRpcClient((line) => {
@@ -96,7 +105,7 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
     if (request.method === "skills/config/write" || request.method === "plugin/install") configCalls.push({ method: request.method, params: request.params ?? {} });
     if (request.method === "skills/config/write" && libraryEnabled.has(String(request.params?.path))) libraryEnabled.set(String(request.params?.path), request.params?.enabled === true);
     const result = request.method === "skills/list"
-      ? { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: skillName, path: "C:\\skill\\SKILL.md", enabled: true },
+      ? { data: [{ cwd: "C:\\repo", errors: [], skills: [...skillNames.map((name, index) => ({ name, path: index ? `C:\\skill${index}\\SKILL.md` : "C:\\skill\\SKILL.md", enabled: true })),
         ...(options.library ?? []).map((name) => ({ name, path: libraryPath(name), enabled: libraryEnabled.get(libraryPath(name)) ?? false }))] }] }
       : request.method === "skills/config/write" ? { effectiveEnabled: request.params?.enabled === true }
       : request.method === "account/read" ? { account: { type: "chatgpt" } }
@@ -117,30 +126,37 @@ export function fakeRuntime(answers: Array<string | ((prompts: string[]) => stri
       if (options.stallTurns?.includes(turns)) return;
       // A turn on a thread this connection unsubscribed from runs, but none of its events reach the connection.
       if (!subscribed.has(String(request.params?.threadId))) return;
-      const entry = answers[turns - 1] ?? answers[answers.length - 1]!;
+      const thread = String(request.params?.threadId);
+      if (!routeOf.has(thread)) routeOf.set(thread, (options.routes ?? []).findIndex((route) => prompts.at(-1)!.includes(route.match)));
+      const route = routeOf.get(thread)!;
+      const queue = route >= 0 ? options.routes![route]!.answers : answers;
+      const nth = (routeTurns.get(route) ?? 0) + 1;
+      routeTurns.set(route, nth);
+      const entry = queue[nth - 1] ?? queue[queue.length - 1]!;
       // A function sees every prompt so far, for an answer that has to quote something only the run itself produced (a generated id).
       const text = typeof entry === "function" ? entry([...prompts]) : entry;
+      // Each turn reports on its own thread: two runs can be in flight on one connection (the interview's dialogue and extraction).
       setTimeout(async () => {
         if (options.script) {
           await options.script({
-            threadId, turnId,
+            threadId: thread, turnId,
             emit: (message) => rpc.receiveLine(JSON.stringify(message)),
             ask: (method, params) => new Promise((resolve) => {
               const id = `ask-${(askId += 1)}`;
               pendingAsks.set(id, resolve);
-              rpc.receiveLine(JSON.stringify({ id, method, params: { threadId, turnId, ...params } }));
+              rpc.receiveLine(JSON.stringify({ id, method, params: { threadId: thread, turnId, ...params } }));
             })
           });
         }
         if (options.usage) {
           const u = options.usage;
           const breakdown = { totalTokens: u.input + u.output, inputTokens: u.input, cachedInputTokens: u.cached ?? 0, cacheWriteInputTokens: 0, outputTokens: u.output, reasoningOutputTokens: u.reasoning ?? 0 };
-          rpc.receiveLine(JSON.stringify({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { total: breakdown, last: breakdown, modelContextWindow: null } } }));
+          rpc.receiveLine(JSON.stringify({ method: "thread/tokenUsage/updated", params: { threadId: thread, turnId, tokenUsage: { total: breakdown, last: breakdown, modelContextWindow: null } } }));
         }
         rpc.receiveLine(JSON.stringify({ method: "item/completed",
-          params: { threadId, turnId, item: { type: "agentMessage", phase: "final_answer", text } } }));
+          params: { threadId: thread, turnId, item: { type: "agentMessage", phase: "final_answer", text } } }));
         rpc.receiveLine(JSON.stringify({ method: "turn/completed",
-          params: { threadId, turn: { id: turnId, status: "completed" } } }));
+          params: { threadId: thread, turn: { id: turnId, status: "completed" } } }));
       }, options.delayMs ?? 1);
     }
   });

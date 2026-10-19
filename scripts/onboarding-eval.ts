@@ -141,7 +141,7 @@ const harness = args.includes("--provider") && providerArg ? await (async () => 
 })() : undefined;
 // Entered here, not inside the helper above: entering a workspace only reaches the async chain it is called in.
 if (harness) enterUsageWorkspace(workspaceId);
-const interview = createOnboardingSessionRunner(store, workspaceId, repoRoot, () => client);
+const interview = createOnboardingSessionRunner(store, workspaceId, repoRoot, () => client, { extract: "await" });
 const PERSONA_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload"], properties: {
   answers: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false, required: ["questionId", "picked", "other"], properties: {
     questionId: { type: "string", minLength: 1, maxLength: 120 }, picked: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 200 } },

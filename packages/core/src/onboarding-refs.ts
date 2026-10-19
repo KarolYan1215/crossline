@@ -1,5 +1,6 @@
 import { clockOf, quoteSupportsDate, type DateExtraction } from "./date-schema";
-import { keepOnboardingTurn, validateOnboardingTurn, type EvidenceSentence, type KnownSources, type OnboardingTurn } from "./onboarding-turn-schema";
+import { DIALOGUE_KEYS, EXTRACT_KEYS, keepOnboardingTurn, validateOnboardingTurn, type EvidenceSentence, type KnownSources, type OnboardingDialogue, type OnboardingExtraction,
+  type OnboardingTurn } from "./onboarding-turn-schema";
 import { numbersSupported } from "./sentences";
 
 /**
@@ -132,4 +133,41 @@ export function validateOnboardingAnswer(value: unknown, known: KnownSources): O
 /** What is valid in an answer once the repairs are spent: an item citing a number it was not shown goes, the rest stays. */
 export function keepOnboardingAnswer(value: unknown, known: KnownSources): OnboardingTurn | undefined {
   return keepOnboardingTurn(resolveOnboardingRefs(value, known, { strict: false }), known);
+}
+
+/**
+ * The two layers are checked by the same rules as a whole turn always was (2026-10-19): each layer is filled out with the other's empty
+ * fields, checked, and cut back to its own. A dialogue answer cites nothing; an extraction answer asks nothing.
+ */
+const EMPTY_EXTRACTION = { slotUpdates: [], projectsDetected: [], flywheelCandidates: [], lineProfiles: [], goalEdits: [] };
+const EMPTY_DIALOGUE = { reply: "", questions: [], coverage: [], nextAction: "ready_for_milestones" };
+const only = <K extends string>(turn: Record<string, unknown>, keys: readonly K[]) =>
+  Object.fromEntries(keys.filter((key) => turn[key] !== undefined).map((key) => [key, turn[key]]));
+// The other layer's fields are overwritten, never checked: a strict schema keeps a live answer from carrying them, and a stray one is not this layer's to judge.
+const asDialogue = (value: unknown) => value && typeof value === "object" ? { ...(value as Wire), ...EMPTY_EXTRACTION, fileDates: undefined, availability: undefined, profile: undefined } : value;
+const asExtraction = (value: unknown) => value && typeof value === "object" ? { ...(value as Wire), ...EMPTY_DIALOGUE, stage: undefined } : value;
+
+/**
+ * A question's project is only what it is about: one the extraction is creating from the same reply is not on record yet, so an unknown
+ * project leaves the question about its line instead of refusing the round.
+ */
+const knownProjects = (value: unknown, known: KnownSources) => {
+  if (!value || typeof value !== "object") return value;
+  const ids = new Set(known.projectIds);
+  return { ...(value as Wire), questions: list((value as Wire).questions).map((question) =>
+    typeof question.projectId === "string" && question.projectId && !ids.has(question.projectId) ? { ...question, projectId: "" } : question) };
+};
+export function validateOnboardingDialogue(value: unknown, known: KnownSources): OnboardingDialogue {
+  return only(validateOnboardingTurn(asDialogue(knownProjects(value, known)), known) as unknown as Wire, DIALOGUE_KEYS) as unknown as OnboardingDialogue;
+}
+export function keepOnboardingDialogue(value: unknown, known: KnownSources): OnboardingDialogue | undefined {
+  const kept = keepOnboardingTurn(asDialogue(knownProjects(value, known)), known);
+  return kept ? only(kept as unknown as Wire, DIALOGUE_KEYS) as unknown as OnboardingDialogue : undefined;
+}
+export function validateOnboardingExtraction(value: unknown, known: KnownSources): OnboardingExtraction {
+  return only(validateOnboardingAnswer(asExtraction(value), known) as unknown as Wire, EXTRACT_KEYS) as unknown as OnboardingExtraction;
+}
+export function keepOnboardingExtraction(value: unknown, known: KnownSources): OnboardingExtraction | undefined {
+  const kept = keepOnboardingAnswer(asExtraction(value), known);
+  return kept ? only(kept as unknown as Wire, EXTRACT_KEYS) as unknown as OnboardingExtraction : undefined;
 }

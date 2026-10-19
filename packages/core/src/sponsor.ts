@@ -20,7 +20,7 @@ export const SPONSOR_MONTHLY_CAP_CNY = 30;
 export const SPONSOR_PASS_MARGIN = 0.05;
 /** The interview needs the long context of a full history plus every file. */
 export const SPONSOR_MIN_CONTEXT_K = 128;
-const REQUIRED_SKILLS = ["crossline-onboarding", "crossline-automation-stripper", "crossline-milestone-gate"];
+const REQUIRED_SKILLS = ["crossline-onboarding", "crossline-onboarding-extract", "crossline-automation-stripper", "crossline-milestone-gate"];
 
 /**
  * `model=in:out[:ctxK[:cached]],…` (`CROSSLINE_SPONSOR_MODELS`), yuan per million tokens as SiliconFlow lists them. A model priced by time

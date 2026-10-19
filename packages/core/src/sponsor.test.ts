@@ -21,7 +21,7 @@ test("spend counts only the sponsor's models, cached input at its own price and 
 
 test("the cheapest model that serves the interview and both critical Skills is chosen; a failing or short-context one never is", () => {
   const models = parseSponsorModels("deepseek-ai/DeepSeek-V4.1=4:16:1024,zai-org/GLM-5.2=4:16:1024,small=0.5:1:32");
-  const onboardingCase = "ONBOARDING_TURN_SCHEMA";
+  const onboardingCase = "ONBOARDING_EXTRACT_SCHEMA";
   expect(chooseSponsorModel(models, [
     { model: "deepseek-ai/DeepSeek-V4.1", record: record("deepseek-ai/DeepSeek-V4.1"), yuanPerRun: 0.05 },
     { model: "zai-org/GLM-5.2", record: record("zai-org/GLM-5.2"), yuanPerRun: 0.03 },

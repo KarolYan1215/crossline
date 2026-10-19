@@ -24,9 +24,10 @@ const CONFORMANCE_SKILL = "crossline:crossline-conformance";
 /**
  * Records made before this version lack the per-run log (`sponsor-eval/<model>.jsonl`) the comparison is read from, and are tested
  * again so every candidate is measured the same way. 4 (2026-10-19): the interview cites sentence numbers and writes times as minutes,
- * so every candidate is measured again on the schemas it will actually be asked for.
+ * so every candidate is measured again on the schemas it will actually be asked for. 5 (2026-10-19): the interview is two Skills, the
+ * dialogue and the extraction, each with its own schema, and both must pass.
  */
-export const SPONSOR_EVAL_VERSION = 4;
+export const SPONSOR_EVAL_VERSION = 5;
 /**
  * The sample interview's own version: a change to the interview prompt or the script re-runs only the three sample turns of every
  * candidate (minutes and a few jiao each), not its thirty-odd conformance runs.
@@ -277,7 +278,8 @@ export function createSponsorService(options: {
         { id: "research", label: "研究者", color: "research", goal: "", createdAt: at, hard: true, rank: 1 },
         { id: "startup", label: "创业者", color: "startup", goal: "", createdAt: at },
         { id: "media", label: "创作者", color: "media", goal: "", createdAt: at }] satisfies LineSpec[]));
-      const run = createOnboardingSessionRunner(scratch, workspaceId, options.cwd, () => client);
+      // The dialogue alone: its usage is what each line logs, and the extraction's schema is measured by the conformance cases.
+      const run = createOnboardingSessionRunner(scratch, workspaceId, options.cwd, () => client, { extract: "off" });
       const key = `${SPONSOR_DIALOGUE_PREFIX}${model.model}`;
       for (const [index, said] of SPONSOR_DIALOGUE_SCRIPT.entries()) {
         const started = Date.now();

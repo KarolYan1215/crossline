@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ONBOARDING_TURN_SCHEMA, droppedOnboardingItems, keepOnboardingTurn, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
+import { ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, onboardingDialogueSchema, onboardingExtractSchema, droppedOnboardingItems, keepOnboardingTurn, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
 
 const known = {
   identities: ["research", "startup", "media", "investment"],
@@ -44,7 +44,22 @@ test("the schema is strict: every object lists all its properties and forbids ex
     walk(object.items);
     object.anyOf?.forEach(walk);
   };
-  walk(ONBOARDING_TURN_SCHEMA);
+  for (const schema of [ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, onboardingDialogueSchema({ lines: ["research"], projects: ["p1"] }),
+    onboardingExtractSchema({ lines: ["research"] })]) walk(schema);
+});
+
+test("each layer has its own fields, and a turn's lines and projects are enums the model picks from", () => {
+  expect(Object.keys(ONBOARDING_DIALOGUE_SCHEMA.properties)).toEqual(["reply", "questions", "coverage", "nextAction", "stage"]);
+  expect(Object.keys(ONBOARDING_EXTRACT_SCHEMA.properties)).toEqual(["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles",
+    "goalEdits", "availability", "profile"]);
+  const question = (onboardingDialogueSchema({ lines: ["research", "media"], projects: ["ece555"] }).properties.questions as { items: { properties: Record<string, { enum?: string[] }> } }).items.properties;
+  expect(question.identityId!.enum).toEqual(["", "person", "research", "media"]);
+  expect(question.projectId!.enum).toEqual(["", "ece555"]);
+  const extract = onboardingExtractSchema({ lines: ["research"] }).properties as Record<string, { items: { properties: Record<string, { enum?: string[] }> } }>;
+  expect(extract.slotUpdates!.items.properties.identityId!.enum).toEqual(["research", "person"]);
+  // A fact may name a project the same answer detects, so its project stays open text.
+  expect(extract.slotUpdates!.items.properties.projectId!.enum).toBeUndefined();
+  expect(extract.lineProfiles!.items.properties.lineId!.enum).toEqual(["research"]);
 });
 
 test("a quote must really be in the cited reply, and a made-up quote is refused", () => {

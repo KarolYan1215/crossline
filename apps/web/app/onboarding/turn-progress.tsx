@@ -64,11 +64,15 @@ export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning, o
   if (resumed && !progress) return null;
   const started = progress ? Date.parse(progress.startedAt) : shownFrom;
   const elapsed = Math.max(0, Math.round((now - (Number.isFinite(started) ? started : shownFrom)) / 1000));
+  // The round itself writes questions only; facts and dates are the extraction's, counted on a round stored before it existed.
   const counted = progress && progress.facts + progress.dates + progress.questions > 0;
+  const recordedToo = progress && progress.facts + progress.dates > 0;
   return <div className="ob-turn ob-assistant ob-progress" role="status" aria-label="这一轮的进度">
     <p className="ob-progress-head"><span className="ob-progress-dot" aria-hidden="true" />{progressHeadline(progress)}</p>
     {progress?.reply && <p className="gen ob-progress-reply">{progress.reply}</p>}
-    {counted && <p className="ob-progress-counts">已整理 <b>{progress.facts}</b> 条事实 · <b>{progress.dates}</b> 个日期 · <b>{progress.questions}</b> 个问题</p>}
+    {counted && (recordedToo
+      ? <p className="ob-progress-counts">已整理 <b>{progress.facts}</b> 条事实 · <b>{progress.dates}</b> 个日期 · <b>{progress.questions}</b> 个问题</p>
+      : <p className="ob-progress-counts">已写好 <b>{progress.questions}</b> 个问题</p>)}
     <small className="ob-muted">已用 {clock(elapsed)}，通常 1–4 分钟。可以先在左边确认日期、采用长期目标，或者离开本页，好了会提醒。</small>
     {notify === "default" && <button type="button" className="ob-btn ob-quiet" onClick={() => void Notification.requestPermission().then(setNotify)}>好了用桌面通知提醒我</button>}
   </div>;

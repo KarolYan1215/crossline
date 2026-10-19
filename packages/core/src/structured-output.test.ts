@@ -11,7 +11,7 @@ const named = Object.entries(core).filter(([name, value]) =>
 
 test("the discovery finds the Skills' schemas (a rename that hides one from it fails here)", () => {
   expect(named.map(([name]) => name)).toEqual(expect.arrayContaining([
-    "ANALYSIS_OUTPUT_SCHEMA", "ONBOARDING_TURN_SCHEMA", "MILESTONE_GATE_OUTPUT_SCHEMA", "MANUAL_DESIGN_SCHEMA", "DILIGENCE_OUTPUT_SCHEMA",
+    "ANALYSIS_OUTPUT_SCHEMA", "ONBOARDING_DIALOGUE_SCHEMA", "ONBOARDING_EXTRACT_SCHEMA", "MILESTONE_GATE_OUTPUT_SCHEMA", "MANUAL_DESIGN_SCHEMA", "DILIGENCE_OUTPUT_SCHEMA",
     "MATERIAL_SEARCH_SCHEMA", "NODE_WRITEUP_SCHEMA", "FLYWHEEL_OUTPUT_SCHEMA", "MILESTONE_PROPOSAL_SCHEMA", "BACKPLAN_SCHEMA"
   ]));
 });

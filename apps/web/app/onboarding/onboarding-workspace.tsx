@@ -82,6 +82,14 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     return next;
   }, [line]);
   useEffect(() => { void load(); }, [load]);
+  // While the extraction records the last replies (it runs after the round is shown), the facts, the start ring and the left column
+  // follow it without a refresh. A failing one is not polled: the worker retries it on its own clock.
+  const organizing = Boolean(state?.organizing && (state.organizing.replies || state.organizing.files) && !state.organizing.failing);
+  useEffect(() => {
+    if (!organizing) return;
+    const timer = setInterval(() => { if (document.visibilityState === "visible") void load(); }, 5000);
+    return () => clearInterval(timer);
+  }, [organizing, load]);
   // Attention time (decided 2026-10-12): every 15 seconds while the page is visible, the server is told how long ago the person last typed
   // or clicked; it counts only beats within a minute of input, so the model's thinking time while the person is away is not counted.
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { FIRST_DRAFTS_SETTING, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
-import { questionScreenFor } from "@crossline/db";
+import { extractBacklog, questionScreenFor } from "@crossline/db";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore, planToday } from "../../../../lib/crossline";
 import { folderDocumentIds, projectTimeline, weekSkeleton } from "../../../../lib/onboarding-board";
@@ -40,15 +40,19 @@ export async function GET(request: Request) {
   // whose interview already ended can answer 「没有截止」 here without waiting for a new round.
   const status = focus ? null : interviewStatus(access.ctx);
   const inRound = new Set(lastQuestions.map((question) => question.id));
+  // What the background extraction still owes this conversation (2026-10-19): while it reads the last replies the facts behind the start
+  // standard may not be on record yet, so 「开始使用」 waits for it — unless it is failing, which must not hold the person forever.
+  const organizing = session ? extractBacklog(store, workspaceId, session.id) : { replies: 0, files: 0 };
+  const settling = (organizing.replies > 0 || organizing.files > 0) && !organizing.failing;
   const start = status ? {
-    readyToStart: status.readyToStart,
+    readyToStart: status.readyToStart && !settling,
     startTotal: status.checklist.filter((item) => item.start).length,
     startMissing: status.startMissing.map(({ id, label, detail, owner }) => ({ id, label, detail, owner })),
     extraQuestions: status.questions.filter((question) => !inRound.has(question.id))
   } : { readyToStart: true, startTotal: 0, startMissing: [], extraQuestions: [] };
   return NextResponse.json({
     ...start,
-    ok: true,
+    ok: true, organizing,
     identities, answeredElsewhere: session ? pendingAnswerIds(access.ctx, session.id) : [],
     setupLines: !focus && needsLineSetup(access.ctx),
     focusLine: focus ? { id: focus.id, label: focus.label } : null,

@@ -47,6 +47,7 @@ import { createGoalBackplanner, milestonesAwaitingBackplan } from "./goal-backpl
 import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
 import { createOnboardingSessionRunner } from "./onboarding-session";
+import { createOnboardingExtractor, extractionRunning, requestExtraction } from "./onboarding-extract";
 import { extractText, reextractForLayout } from "./extract";
 import { createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
@@ -332,6 +333,15 @@ async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISO
   void milestoneRiskPass(workspaceId).catch(() => undefined);
 }
 
+/** Starts the interview's extraction when one of the workspace's conversations has replies or files waiting and is due (not backing off). */
+function onboardingExtractPass(workspaceId: string): void {
+  if (!codexSupervisor || extractionRunning(workspaceId)) return;
+  const extractor = createOnboardingExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
+  if (!extractor.nextSession()) return;
+  void requestExtraction(workspaceId, () => { enterUsageWorkspace(workspaceId); return extractor.runOnce(); })
+    .then(() => { void firstDraftsPass(workspaceId).catch(() => undefined); });
+}
+
 /**
  * A guest just connected its model (W-11). The quota is read again, which clears the 「后台自动工作已暂停」 written by a tick that ran before
  * the login, and the passes that were waiting on a model run now: a capture typed meanwhile, approved milestones, the first drafts.
@@ -584,6 +594,8 @@ async function tick(): Promise<void> {
   for (const workspace of workspaces) await goalSplitPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await milestoneRiskPass(workspace.id, checkedAt);
   for (const workspace of workspaces) void firstDraftsPass(workspace.id, checkedAt).catch(() => undefined);
+  // The interview's extraction, for replies a failed run left (after its backoff) or a worker restart cut off; a turn starts it itself.
+  for (const workspace of workspaces) onboardingExtractPass(workspace.id);
   for (const workspace of workspaces) await minePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await publicSkillPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await portraitPass(workspace.id, checkedAt);

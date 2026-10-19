@@ -8,6 +8,6 @@ export const REQUIRED_SKILLS = [
   "crossline:crossline-automation-stripper", "crossline:crossline-milestone-gate",
   "crossline:crossline-flywheel-scout", "crossline:crossline-manualbook-designer", "crossline:crossline-material-researcher", "crossline:crossline-material-writer", "crossline:crossline-milestone-architect", "crossline:crossline-milestone-risk-reviewer", "crossline:crossline-artifact-planner",
   "crossline:crossline-goal-backplanner", "crossline:crossline-background-facts",
-  "crossline:crossline-onboarding", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
+  "crossline:crossline-onboarding", "crossline:crossline-onboarding-extract", "crossline:crossline-due-diligence", "crossline:crossline-plan-explainer", "crossline:crossline-weekly-insight",
   "crossline:crossline-agent", "crossline:crossline-step-planner", "crossline:crossline-validation-reviewer", "crossline:crossline-progress-judge", "crossline:crossline-concierge", "crossline:crossline-archetype-curator", "crossline:crossline-task-titler", "crossline:crossline-portrait-writer", "crossline:crossline-portrait-illustrator", "crossline:crossline-calendar-classifier", "crossline:crossline-folder-classifier", "crossline:crossline-goal-splitter", "crossline:crossline-insight-compiler", "crossline:crossline-skill-scout"
 ];

@@ -33,6 +33,13 @@ export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "start
   return { label: "画像访谈还剩约", minutes: left * 5 };
 }
 
+/** What the background extraction is doing, in a line, or nothing when it is caught up. */
+export function organizingNote(organizing: OnboardingState["organizing"]): string {
+  if (!organizing || (!organizing.replies && !organizing.files)) return "";
+  if (organizing.failing) return "刚才的回答还没整理进记录，系统会自动重试；访谈可以继续。";
+  return organizing.files && !organizing.replies ? `正在整理 ${organizing.files} 份材料…` : "正在整理刚才的回答…";
+}
+
 export function StageView({ state, stage, complete, onChanged }: {
   state: OnboardingState; stage: string; complete: boolean; onChanged: () => void;
 }) {
@@ -52,6 +59,7 @@ export function StageView({ state, stage, complete, onChanged }: {
       <div>
         <b>{state.readyToStart ? "可以开始使用" : total ? `开始使用前还差 ${state.startMissing.length} 项` : "先回答中间的第一组问题"}</b>
         {complete ? <small>访谈已完成</small> : total > 0 && <small>{left.label} {left.minutes} 分钟</small>}
+        {organizingNote(state.organizing) && <small className="ob-organizing" role="status">{organizingNote(state.organizing)}</small>}
         {!state.readyToStart && missing.length > 0 && <ul className="ob-ring-missing">{missing.slice(0, 3).map(({ label, href }) => <li key={label}>{href ? <a href={href}>{label}（在左栏采用）</a> : label}</li>)}
           {missing.length > 3 && <li>等 {missing.length - 3} 项</li>}</ul>}
         {state.readyToStart && <a className="ob-btn ob-primary" href="/">开始使用</a>}

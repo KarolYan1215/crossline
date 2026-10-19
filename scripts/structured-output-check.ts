@@ -59,7 +59,7 @@ const getClient = () => supervisor.client;
 
 try {
   // 1. The interview: the largest and most grounded output, in three situations.
-  const interview = createOnboardingSessionRunner(store, workspaceId, repoRoot, getClient);
+  const interview = createOnboardingSessionRunner(store, workspaceId, repoRoot, getClient, { extract: "await" });
   const outcomeOf = (result: { state: string } & { code?: string }) => result.state === "blocked" ? `blocked:${result.code}` : result.state;
   for (let i = 0; i < runsPerCase; i += 1) {
     await trial("onboarding", `rich-first-message#${i}`, async () => outcomeOf(await interview({ sessionId: `rich-${i}`, text:
