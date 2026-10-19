@@ -11,7 +11,7 @@ import { LeftColumn } from "./left-column";
 import { StageView } from "./stage-view";
 import { FirstHint } from "../ui/first-hint";
 import { OpeningCard, openingReply, type OpeningAnswer } from "./opening-card";
-import { announceRound, TurnProgress } from "./turn-progress";
+import { announceRound, FailureDetail, TurnProgress } from "./turn-progress";
 import { SegmentedControl } from "../ui/controls";
 import { AssessCard } from "./assess-card";
 import { QuotaNotice } from "./quota-notice";
@@ -332,7 +332,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
           && <div className="ob-turn ob-user" data-user-text><p>{pendingText}</p></div>}
         {busy === "turn" && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : sessionId} /></div>}
-        {busy === "" && waiting && !error && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : state.session?.id ?? ""} resumed onRunning={setBackground} onEnded={() => { setBackground(false); void load(); }} onRetry={() => void runTurn("")} /></div>}
+        {busy === "" && waiting && !error && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : state.session?.id ?? ""} resumed failure={state.lastFailure ?? null} onRunning={setBackground} onEnded={() => { setBackground(false); void load(); }} onRetry={() => void runTurn("")} /></div>}
         {answeredElsewhere.size > 0 && !waiting && <p className="ob-moved">本轮有 {answeredElsewhere.size} 题已在待决事项答过，会随这一轮一起发送。</p>}
         {deep && centre[0] && <div ref={asked} className="ob-turn ob-assistant ob-deep" aria-label="本轮问题">
           <p className="ob-deep-question gen">{centre[0].text}</p>
@@ -374,7 +374,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         <div ref={bottom} />
       </div>
       {!line && <QuotaNotice rounds={state.messages.filter((message) => message.role === "assistant").length} usageLimitHit={usageLimitHit} />}
-      {error && <p className="ob-error" role="alert">{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>重试</button>}</p>}
+      {error && <div className="ob-error" role="alert"><p>{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>重试</button>}</p>
+          {waiting && state.lastFailure && <FailureDetail failure={state.lastFailure} />}</div>}
       {!opening && <form className="ob-composer ob-voice" onSubmit={(event) => { event.preventDefault(); if (canSend) void runTurn(composed || ""); }}>
         <textarea value={text} rows={deep ? 4 : open ? 2 : 3} onChange={(event) => setText(event.target.value)} disabled={busy !== ""}
           placeholder={deep ? "写下你的回答…" : open ? "补充说明（可选）" : "想说的都可以写在这里…"} aria-label="回答" />

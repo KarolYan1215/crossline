@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { FIRST_DRAFTS_SETTING, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
+import { FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
 import { extractBacklog, questionScreenFor } from "@crossline/db";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore, planToday } from "../../../../lib/crossline";
@@ -58,6 +58,8 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ...start,
     ok: true, organizing,
+    // Why the last round did not finish, kept after a reload (the worker writes it; the next attempt removes it).
+    lastFailure: session ? readOnboardingFailure(store.getSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}${session.id}`)) : null,
     identities, answeredElsewhere: session ? pendingAnswerIds(access.ctx, session.id) : [],
     setupLines: !focus && needsLineSetup(access.ctx),
     focusLine: focus ? { id: focus.id, label: focus.label } : null,

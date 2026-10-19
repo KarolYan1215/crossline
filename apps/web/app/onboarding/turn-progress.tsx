@@ -26,11 +26,22 @@ const clock = (seconds: number) => seconds < 60 ? `${seconds} 秒` : `${Math.flo
  * keep working on the left meanwhile, or leave: the round calls them back (a desktop notification once allowed here, the tab's title, and
  * the tray on the installed copy).
  */
-export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning, onRetry }: { sessionId: string;
+/** The folded technical line under a failed round: the code, when, and the provider's own words when there are any. */
+export function FailureDetail({ failure }: { failure: { code: string; detail?: string; at: string } }) {
+  const at = new Date(failure.at);
+  const when = Number.isNaN(at.getTime()) ? "" : `${at.getHours()}:${String(at.getMinutes()).padStart(2, "0")}`;
+  return <details className="ob-failure-detail"><summary>技术信息</summary>
+    <p className="ob-muted">{failure.code}{when ? ` · ${when}` : ""}{failure.detail ? ` · ${failure.detail}` : ""}</p>
+  </details>;
+}
+
+export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning, onRetry, failure = null }: { sessionId: string;
   /** Opened on a page that was reloaded mid-turn: shown only while the worker says a turn runs, and `onEnded` when it stops. */
   resumed?: boolean; onEnded?: () => void; onRunning?: (running: boolean) => void;
   /** A reply is waiting but no turn runs for it (the background was restarted): send it again. */
-  onRetry?: () => void }) {
+  onRetry?: () => void;
+  /** Why the last round stopped, kept by the worker: said instead of the bare 「没有得到回答」. */
+  failure?: { code: string; message: string; detail?: string; at: string } | null }) {
   const [progress, setProgress] = useState<OnboardingProgress | null>(null);
   const [seen, setSeen] = useState(false);
   // Reads that found no running turn: after a few, a resumed page says the round was lost instead of showing nothing at all.
@@ -59,7 +70,8 @@ export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning, o
   // where the page showed the answer and nothing else, with no way on).
   if (resumed && !progress && !seen && empty >= 3 && onRetry) return <div className="ob-turn ob-assistant ob-progress" role="alert">
     {/* Not only a restart: a round refused before it ran (the developer's model still being checked, no model connected) ends the same way. */}
-    <p className="ob-progress-head">这一轮还没有得到回答，刚才的回答已保存。</p>
+    <p className="ob-progress-head">{failure ? `这一轮没有完成：${failure.message}` : "这一轮还没有得到回答，刚才的回答已保存。"}</p>
+    {failure && <FailureDetail failure={failure} />}
     <button type="button" className="ob-btn ob-primary" onClick={onRetry}>重新发送这一轮</button>
   </div>;
   if (resumed && !progress) return null;

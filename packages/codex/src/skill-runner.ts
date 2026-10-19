@@ -30,7 +30,31 @@ export type AnalysisAudit = { threadId?: string; turnId?: string;
  */
 export type SkillProgress = { phase: "thinking" | "writing" | "checking"; text: string; repairs: number; stalls: number };
 export type SkillRunResult<T> = { ok: true; output: T; audit: AnalysisAudit }
-  | { ok: false; blocker: { code: string; message: string }; audit: AnalysisAudit };
+  | { ok: false; blocker: { code: string; message: string; detail?: string }; audit: AnalysisAudit };
+
+/**
+ * Items the runtime writes on its own that do nothing outside the thread: a long conversation is compacted (`contextCompaction`) and a
+ * model may lay out a plan (`plan`). Refusing them ended whole interview rounds as 「使用了禁止的工具」 (2026-10-19: a tester's long
+ * interview failed six times in a row at the start of a turn, the moment the runtime compacts).
+ */
+const HARMLESS_ITEM_TYPES = new Set(["contextCompaction", "plan"]);
+
+/**
+ * What a turn the provider refused means for the person, from the provider's own words. Known shapes are said plainly; anything else
+ * is said as a provider error, and the original text travels as the blocker's `detail` (shown folded, never auth material).
+ */
+export function turnFailureAdvice(raw: string | undefined): string {
+  const text = (raw ?? "").toLowerCase();
+  if (/capacity|overload|temporarily unavailable|server is busy|503|529/.test(text)) return "模型服务这会儿满载，没有接这一轮；过几分钟重试即可，连续出现可在设置里换一个模型。";
+  if (/rate limit|too many requests|429/.test(text)) return "请求太频繁，模型服务暂时限流；稍等一分钟再试。";
+  if (/context|too long|maximum.*tokens|token limit/.test(text)) return "这段对话超出了模型一次能读的长度；重试会自动压缩后再发。";
+  if (/invalid|bad request|400/.test(text)) return "模型服务拒绝了这一轮的请求格式；已记录，可重试，仍不行请反馈。";
+  return "模型服务这一轮报错，没有给出回答；可以重试，原文在下面的技术信息里。";
+}
+
+/** The provider's words, kept for the person to read: credentials and long tokens are cut out. */
+const shownDetail = (raw: string | undefined) => (raw ?? "").replace(/(bearer|api[-_ ]?key|token|authorization)[^\s,;]*[\s:=]+\S+/gi, "$1 ***")
+  .replace(/[A-Za-z0-9_-]{32,}/g, "***").slice(0, 300);
 
 /**
  * Everything a Skill run needs that differs between Skills. Transport, isolation, the tool guard and
@@ -633,7 +657,10 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       } else if (run.agent) {
         // The assistant is meant to use tools; what it did is recorded, not refused here (the guard answers each request).
         if (item) { try { run.agent.onItem(item, message.method === "item/started" ? "started" : "completed"); } catch { /* the audit must never fail the work */ } }
-      } else if (item && !run.allowedItemTypes.includes(String(item.type))) settle?.reject(new Error("SKILL_TOOL_FORBIDDEN"));
+      } else if (item && !run.allowedItemTypes.includes(String(item.type)) && !HARMLESS_ITEM_TYPES.has(String(item.type))) {
+        console.info(JSON.stringify({ type: "skill.item_forbidden", skill: run.skillName, item: String(item.type), at: new Date().toISOString() }));
+        settle?.reject(withDetail(new Error("SKILL_TOOL_FORBIDDEN"), `item:${String(item.type)}`));
+      }
       else if (item?.type === "imageGeneration" && message.method === "item/completed" && typeof item.result === "string" && item.result && run.onImage) {
         try { run.onImage({ base64: item.result, revisedPrompt: typeof item.revisedPrompt === "string" ? item.revisedPrompt : "" }); } catch { /* the caller's write failing is the caller's to notice */ }
       }
@@ -782,7 +809,9 @@ function failureResult<T>(client: CodexRpcBoundary, error: unknown, audit: Analy
   // A caller's validator may attach `detail` when the Skill itself explained the refusal; that text is the only thing the
   // person can act on, so it beats the generic fallback.
   const detail = (error as Detailed | undefined)?.detail;
-  return { ok: false, blocker: { code, message: advice[code] ?? detail ?? "运行未完成；请检查阻塞原因。" }, audit };
+  if (code === "SKILL_TURN_FAILED") return { ok: false, blocker: { code, message: turnFailureAdvice(detail), ...(detail ? { detail: shownDetail(detail) } : {}) }, audit };
+  if (code === "SKILL_TOOL_FORBIDDEN") return { ok: false, blocker: { code, message: "模型这一轮用了此处不允许的功能，已拦下；可以重试。", ...(detail ? { detail } : {}) }, audit };
+  return { ok: false, blocker: { code, message: advice[code] ?? detail ?? "这一轮没有完成；可以重试。", ...(detail && advice[code] ? { detail: shownDetail(detail) } : {}) }, audit };
 }
 
 /**

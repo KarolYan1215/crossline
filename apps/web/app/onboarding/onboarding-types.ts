@@ -37,6 +37,8 @@ export type OnboardingState = {
   readyToStart: boolean;
   /** The worker's own first milestone drafts: being designed, or that run ended with none. */
   firstDrafts?: "none" | "running" | "stalled";
+  /** Why the last round did not finish (`onboarding.lastFailure:<session>`), or null. */
+  lastFailure?: { code: string; message: string; detail?: string; at: string } | null;
   /**
    * What the background extraction still owes the conversation: replies and files not yet recorded, and its last failure while it keeps
    * failing (`extractBacklog`). Absent on a state read before it existed.

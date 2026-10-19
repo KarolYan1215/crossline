@@ -201,3 +201,8 @@
 .ob-start-confirm p{margin:2px 0}
 .ob-start-line{border-left:3px solid var(--lc, var(--rule));padding:4px 0 6px 10px;margin-bottom:8px}
 .ob-start-error{margin:0 auto 0 0;color:#5E1212;font-size:13px}
+
+/* The folded technical line under a round that did not finish. */
+.ob-failure-detail { margin-top: 6px; font-size: 13px; }
+.ob-failure-detail summary { cursor: pointer; color: var(--ob-muted, inherit); }
+.ob-failure-detail p { margin: 4px 0 0; overflow-wrap: anywhere; }

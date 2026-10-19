@@ -330,7 +330,8 @@ async function reviewCard(ctx: AccessContext, messageId: string, body: Record<st
 
 function fallback(text: string, why: string, code: string): { text: string; card: Card } {
   const action: ProposedAction = { action: "task.create", summary: text.slice(0, 200), args: { title: text.slice(0, 240), context: "", lineId: "", dueDate: "", milestoneId: "" } };
-  return { text: `未能理解这句话（${why}）。原话已保存在对话里，可稍后重新发送；也可以先作为新任务收集。`,
+  // Not 「未能理解」: the model was not reached, or refused the round; saying it misunderstood hid the real reason (2026-10-19).
+  return { text: `这句话还没有得到回答：${why.replace(/[。.]$/, "")}。原话已保存在对话里，可稍后重新发送；也可以先作为新任务收集。`,
     card: { actions: [action], items: [{ state: "pending" }], clarify: { question: "", options: [] }, confidence: "low", error: code } };
 }
 

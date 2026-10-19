@@ -4,7 +4,7 @@ import {
   validateOnboardingDialogue, locateQuote,
   gapCoveredBy, screenQuestions, screenAssumption,
   type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, TYPE_TABLE, readTone,
-  type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress, calendarWeek
+  type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
 import {
@@ -56,7 +56,7 @@ const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a l
 
 export type OnboardingTurnOutcome =
   | { state: "asked" | "ready"; sessionId: string }
-  | { state: "blocked"; sessionId: string; code: string; message: string };
+  | { state: "blocked"; sessionId: string; code: string; message: string; detail?: string };
 
 /** What the dialogue's thread has been shown: the files, the calendar week, and when it last heard what the extraction recorded. */
 type Announced = { announcedSources?: string[]; calendarSent?: string; heardAt?: string };
@@ -138,7 +138,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   return async function turn(input: { sessionId: string; text: string; reread?: boolean }): Promise<OnboardingTurnOutcome> {
     const client = getClient();
     const sessionId = input.sessionId;
-    const blocked = (code: string, message: string): OnboardingTurnOutcome => ({ state: "blocked", sessionId, code, message });
+    // A round that did not finish says why, and keeps saying it after a reload (2026-10-19: testers saw a bare 「这一轮还没有得到回答」
+    // and could not tell a busy provider from a broken round). Cleared when the next attempt starts.
+    const blocked = (code: string, message: string, detail?: string): OnboardingTurnOutcome => {
+      if (code !== "ONBOARDING_MESSAGE_EMPTY") store.setSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}${sessionId}`,
+        JSON.stringify({ code, message, ...(detail ? { detail } : {}), at: new Date().toISOString() }));
+      return { state: "blocked", sessionId, code, message, ...(detail ? { detail } : {}) };
+    };
     if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", "Codex 运行时不可用。");
     const text = input.text.trim().slice(0, 4000);
     const ownerId = store.getWorkspaceOwnerId(workspaceId);
@@ -159,6 +165,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       store.appendOnboardingMessage({ sessionId, workspaceId, role: "user", content: { text }, createdAt: now });
       messages = store.listOnboardingMessages(workspaceId, sessionId);
     }
+    store.deleteSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}${sessionId}`);
     const userMessage = messages.at(-1)!;
     const replyId = `reply-${userMessage.seq}`;
     const replyText = String((userMessage.content as { text?: string }).text ?? "");
@@ -335,7 +342,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         }
       }
     } finally { clearInterval(heartbeat); store.deleteSetting(workspaceId, progressKey); }
-    if (!result.ok) return blocked(result.blocker.code, result.blocker.message);
+    if (!result.ok) return blocked(result.blocker.code, result.blocker.message, result.blocker.detail);
 
     // The checklist and the app's questions are read after the extraction when the round would end the interview (so a fact this reply
     // gave is on record), or always when asked to wait; otherwise from what the ledger held, and what this reply settled joins next round.

@@ -61,3 +61,18 @@ export function readPartialTurn(text: string): Pick<OnboardingProgress, "facts" 
     dates: count(dates, "date") + count(dates, "weekdays")
   };
 }
+
+/**
+ * The last interview round that did not finish, per conversation (`onboarding.lastFailure:<session>`): what it was, in words the
+ * person can act on, and the provider's own text folded beside it. Written by the worker when a round stops, removed when the next
+ * attempt starts.
+ */
+export const ONBOARDING_LAST_FAILURE = "onboarding.lastFailure:";
+export type OnboardingFailure = { code: string; message: string; detail?: string; at: string };
+export function readOnboardingFailure(raw: string | undefined | null): OnboardingFailure | null {
+  try {
+    const value = JSON.parse(raw ?? "null") as Partial<OnboardingFailure> | null;
+    return value && typeof value.code === "string" && typeof value.message === "string" && typeof value.at === "string"
+      ? { code: value.code, message: value.message, at: value.at, ...(typeof value.detail === "string" && value.detail ? { detail: value.detail } : {}) } : null;
+  } catch { return null; }
+}

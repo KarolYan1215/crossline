@@ -479,3 +479,23 @@ test("a re-read still accepts the numbers of files an earlier turn of the thread
   expect((await run({ sessionId: "s", text: "请重新读一遍", reread: true })).state).toBe("ready");
   expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "midterm")).toMatchObject({ sourceRef: "src-1", sourceSentences: [2] });
 });
+
+test("a compacted conversation is not a forbidden tool; a round that stops says why and keeps saying it until the next attempt", async () => {
+  const { ONBOARDING_LAST_FAILURE, readOnboardingFailure } = await import("@crossline/core");
+  const compacting = sharedRuntime([turn(), turn()], ONBOARDING_SKILL, { script: async ({ emit, threadId, turnId }) => {
+    emit({ method: "item/completed", params: { threadId, turnId, item: { type: "contextCompaction", id: "c1" } } });
+  } });
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => compacting.rpc, { checklist: false, extract: "off" });
+  expect(await run({ sessionId: "s", text: "我在读研。" })).toMatchObject({ state: "asked" });
+
+  const acting = sharedRuntime([turn(), turn(), turn()], ONBOARDING_SKILL, { script: async ({ emit, threadId, turnId }) => {
+    emit({ method: "item/completed", params: { threadId, turnId, item: { type: "commandExecution", id: "x1" } } });
+  } });
+  const refused = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => acting.rpc, { checklist: false, extract: "off" });
+  const outcome = await refused({ sessionId: "s2", text: "第二段对话。" });
+  expect(outcome).toMatchObject({ state: "blocked", code: "SKILL_TOOL_FORBIDDEN", detail: "item:commandExecution" });
+  expect(readOnboardingFailure(store.getSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}s2`))).toMatchObject({ code: "SKILL_TOOL_FORBIDDEN" });
+  // The retry starts: the old reason goes, whatever the retry then does.
+  await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => sharedRuntime([turn(), turn()], ONBOARDING_SKILL).rpc, { checklist: false, extract: "off" })({ sessionId: "s2", text: "" });
+  expect(store.getSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}s2`)).toBeUndefined();
+});
