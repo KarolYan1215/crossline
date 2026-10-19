@@ -2,7 +2,7 @@
  * A line's long-term goal built from atomic attributes (decided 2026-10-10, docs/flywheel-and-views.md §4.1).
  *
  * The interview used to propose whole sentences 「成为 ___ 的 <身份>」, at most six of up to 120 characters, and the model filled them
- * by permuting the same few attributes: the candidates repeated each other and their combinations were often odd. It now proposes 6–12
+ * by permuting the same few attributes: the candidates repeated each other and their combinations were often odd. It now proposes 3–12
  * mutually independent attributes per line, each cited to the reply or file it came from and labelled with its kind; the person picks
  * any number of them, the system orders them as Chinese attributives are ordered (领域 → 能力 → 状态), the person may drag them into
  * another order or reword one, and 「采用」 writes the chosen parts (`goalParts`) plus the sentence composed from them (`goals[0]`), so
@@ -26,7 +26,10 @@ export const GOAL_EDITS_SETTING = "lines.goalEdits";
 /** The longest an attribute may be: a phrase, not a sentence. */
 export const ATTRIBUTE_MAX_LENGTH = 40;
 /** How many attributes one line's candidates hold when the interview writes them (0 = keep the ones already there). */
-export const ATTRIBUTE_CANDIDATES_MIN = 6;
+// Three, not six (2026-10-19, live walkthrough on the developer's model): asked for six and told to leave the list empty when it could not,
+// the extraction gave three, was sent back, and then left every line empty — the start standard needs candidates, so the interview never
+// reached 「开始使用」. Three is enough to compose a goal from, and the person can add their own.
+export const ATTRIBUTE_CANDIDATES_MIN = 3;
 export const ATTRIBUTE_CANDIDATES_MAX = 12;
 
 const KIND_RANK: Record<AttributeKind, number> = { domain: 0, ability: 1, state: 2 };

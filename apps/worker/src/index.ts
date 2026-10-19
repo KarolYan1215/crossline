@@ -341,7 +341,8 @@ async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISO
 /** Starts the interview's extraction when one of the workspace's conversations has replies or files waiting and is due (not backing off). */
 async function onboardingExtractPass(workspaceId: string): Promise<void> {
   if (!codexSupervisor || extractionRunning(workspaceId) || paused(workspaceId, "planning")) return;
-  const extractor = createOnboardingExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
+  // The start-on-use handle: a guest's runtime that went idle after the reply is started again, or the retry fails for want of a client.
+  const extractor = createOnboardingExtractor(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
   if (!extractor.nextSession()) return;
   // A turn starts its own extraction whatever the quota says (the person is there); a retry from the tick is core work like any other.
   if (!spendAllows(await spendFor(workspaceId), "core")) return;

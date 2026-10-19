@@ -44,11 +44,11 @@ Every date the new files state, and every fixed weekly arrangement a reply state
 
 ## Lines (`lineProfiles`, `goalEdits`, `flywheelCandidates`)
 
-- For each line the new material says something about: a personal `description` (what this line is for this person, in their own terms) and **6–12 `attributeCandidates`** — the building blocks the person composes 「成为 A 的、B 的<身份>」 from:
+- For each line the new material says something about: a personal `description` (what this line is for this person, in their own terms) and **3–12 `attributeCandidates`** (more when the line is rich) — the building blocks the person composes 「成为 A 的、B 的<身份>」 from:
   - one independent quality each, a short phrase (≤ 40 characters) without 「成为」 or a trailing 「的」: a field (`kind: "domain"`), an ability (`"ability"`) or a lasting state (`"state"`);
   - no two overlapping: after removing 「的」 and punctuation neither may contain the other; no enumerations inside one;
   - each cites in `refs` the sentences it was drawn from — only what the person said or a file states.
-  An empty list keeps the candidates on record: leave it empty while the line is thin, and give a full new list only when the new material changes it.
+  An empty list keeps the candidates on record. A line that has a `description` but no candidates yet must get them now — at least three, drawn from what the person already said about it (what they value, what they do, what they want to become, the options they picked); leave the list empty only when the person has said almost nothing about the line. Give a full new list later only when new material changes it.
 - `goalEdits[]` only when the person asks in so many words to change a line's goal (「把目标改成…」): that line's new `parts` in the person's order, citing the sentence of their reply. It is shown to them to adopt.
 - `flywheelCandidates[]`: how one line feeds another (`kind` enables / reuses / informs / constrains / recurring_feedback), with a one-line `explanation`; always `inferred`; `refs` when a sentence suggests it. Over-generate plausible links; the person confirms.
 

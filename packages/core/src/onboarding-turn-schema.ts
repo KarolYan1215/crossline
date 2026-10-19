@@ -53,7 +53,7 @@ export type TurnCoverage = { identityId: string; filled: string[]; missing: stri
 /**
  * Where the interview is (decided 2026-10-08, reordered 2026-10-12): the person sets their lines first on a structured screen (identity
  * nouns, order, hard constraints); the interview then goes, a batch of independent questions at a time, in two parts. The front part —
- * `orientation` (read every file first, then the hard lines' rules and the weekly hours) and `lines` (a personal description and 6–12
+ * `orientation` (read every file first, then the hard lines' rules and the weekly hours) and `lines` (a personal description and 3–12
  * attribute candidates for the long-term goal of each, and each line's current project with its deadline) — gathers the start standard
  * (`readyToStart`); the back part — where they stand, their compass, their energy, and each line's specifics — writes the portrait, in the
  * same interview. A line's own interview (`focusLine`) runs only `details` for that line. The portrait report is written afterwards by its own Skill.
@@ -106,7 +106,7 @@ export type ProfileModel = {
 export const EMPTY_PROFILE_MODEL: ProfileModel = { portrait: "", coreConflict: "", problem: "", gravity: [], designable: [], reframes: [], workView: "",
   lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "", values: [] };
 /**
- * For each line: a personal description from what was said, and 6–12 mutually independent attributes (`attributeCandidates`) the person
+ * For each line: a personal description from what was said, and 3–12 mutually independent attributes (`attributeCandidates`) the person
  * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from and labelled with its kind
  * (decided 2026-10-10; it replaced whole-sentence `goalCandidates`, which the model filled by permuting the same few attributes). An empty
  * list keeps the candidates already on record. `goalCandidates` is only ever on turns stored before.
@@ -519,7 +519,7 @@ const cleanCandidates = (list: AttributeCandidate[]) => list.map((item) => ({ te
 
 /**
  * What is wrong with one line's attribute candidates, if anything: an empty list is allowed (it keeps the ones on record); otherwise
- * 6–12, each cited to a reply or file, each one thing, and no two saying the same (after removing 「的」 and punctuation, one contains
+ * 3–12, each cited to a reply or file, each one thing, and no two saying the same (after removing 「的」 and punctuation, one contains
  * the other). The detail names the offending attributes so the repair has something to act on.
  */
 function attributeProblem(list: AttributeCandidate[], citable: (ref: string) => boolean): { code: string; detail: string } | undefined {
@@ -532,12 +532,14 @@ function attributeProblem(list: AttributeCandidate[], citable: (ref: string) => 
   const duplicate = duplicateAttributes(list.map((item) => cleanAttribute(item.text)))[0];
   if (duplicate) return { code: "ONBOARDING_ATTRIBUTE_DUPLICATE", detail: `「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个或改成互不重叠的两个。` };
   if (list.length < ATTRIBUTE_CANDIDATES_MIN || list.length > ATTRIBUTE_CANDIDATES_MAX) {
-    return { code: "ONBOARDING_ATTRIBUTES_COUNT", detail: `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个；信息还不够时留空数组并继续追问。` };
+    return { code: "ONBOARDING_ATTRIBUTES_COUNT", detail: list.length < ATTRIBUTE_CANDIDATES_MIN
+      ? `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个：从本人已说的话和文件里补到至少 ${ATTRIBUTE_CANDIDATES_MIN} 个（每个引用句子编号）；本人对这条线几乎什么都没说时才留空数组。`
+      : `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个，留下最有区别的 ${ATTRIBUTE_CANDIDATES_MAX} 个。` };
   }
   return undefined;
 }
 
-/** The candidates that pass on their own (cited, one thing, not repeating an earlier one); fewer than six left means none (keep those on record). */
+/** The candidates that pass on their own (cited, one thing, not repeating an earlier one); fewer than three left means none (keep those on record). */
 function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => boolean): AttributeCandidate[] {
   const kept: AttributeCandidate[] = [];
   for (const item of list) {

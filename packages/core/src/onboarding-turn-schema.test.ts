@@ -130,12 +130,14 @@ const attribute = (text: string, kind: "domain" | "ability" | "state" = "domain"
 const SIX = [attribute("神经形态计算"), attribute("器件物理"), attribute("能独立立项", "ability"), attribute("能写基金申请", "ability"),
   attribute("持续产出", "state"), attribute("被同行认可", "state")];
 
-test("a line's attribute candidates are 6–12 independent, cited attributes, or none at all", () => {
+test("a line's attribute candidates are 3–12 independent, cited attributes, or none at all", () => {
   const ok = validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "研究描述", attributeCandidates: SIX }] }), known);
   expect(ok.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(SIX.map((item) => item.text));
   // An empty list keeps the candidates on record (a line still thin, or a turn that only refines the description).
   expect(validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [] }] }), known).lineProfiles).toHaveLength(1);
-  expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 3) }] }), "ONBOARDING_ATTRIBUTES_COUNT");
+  // Three is enough to compose a goal from (2026-10-19: asked for six, a real run left every line empty); two is not.
+  expect(validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 3) }] }), known).lineProfiles?.[0]?.attributeCandidates).toHaveLength(3);
+  expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 2) }] }), "ONBOARDING_ATTRIBUTES_COUNT");
   expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX, attribute("x", "domain", "reply-9")] }] }), "ONBOARDING_UNKNOWN_SOURCE_REF");
   expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX, attribute("严谨、高产", "state")] }] }), "ONBOARDING_ATTRIBUTE_NOT_ATOMIC");
 });
@@ -165,13 +167,13 @@ test("a goal edit must cite the reply that asked for it, and is never a free-sta
   expectRejected(turn({ goalEdits: [{ ...edit, parts: [{ text: "器件", kind: "domain" }, { text: "器件物理", kind: "domain" }] }] }), "ONBOARDING_ATTRIBUTE_DUPLICATE");
 });
 
-test("when repairs run out, bad attributes are dropped one by one, and fewer than six left keeps the ones on record", () => {
+test("when repairs run out, bad attributes are dropped one by one, and fewer than three left keeps the ones on record", () => {
   const kept = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d",
     attributeCandidates: [...SIX, attribute("神经形态计算的"), attribute("编造", "domain", "reply-7")] }],
     goalEdits: [{ lineId: "research", parts: [{ text: "器件物理", kind: "domain" }], sourceRef: "inference" }] }), known);
   expect(kept?.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(SIX.map((item) => item.text));
   expect(kept?.goalEdits).toEqual([]);
-  const thin = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d", attributeCandidates: [...SIX.slice(0, 5), attribute("x", "domain", "reply-9")] }] }), known);
+  const thin = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d", attributeCandidates: [...SIX.slice(0, 2), attribute("x", "domain", "reply-9")] }] }), known);
   expect(thin?.lineProfiles?.[0]?.attributeCandidates).toEqual([]);
 });
 

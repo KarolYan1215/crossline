@@ -58,7 +58,8 @@ export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning, o
   // The answer was sent but nothing is answering it: a worker restart drops a turn that was waiting or running (2026-10-15 walkthrough,
   // where the page showed the answer and nothing else, with no way on).
   if (resumed && !progress && !seen && empty >= 3 && onRetry) return <div className="ob-turn ob-assistant ob-progress" role="alert">
-    <p className="ob-progress-head">这一轮没有在后台运行（后台服务重启过），回答已保存。</p>
+    {/* Not only a restart: a round refused before it ran (the developer's model still being checked, no model connected) ends the same way. */}
+    <p className="ob-progress-head">这一轮还没有得到回答，刚才的回答已保存。</p>
     <button type="button" className="ob-btn ob-primary" onClick={onRetry}>重新发送这一轮</button>
   </div>;
   if (resumed && !progress) return null;
