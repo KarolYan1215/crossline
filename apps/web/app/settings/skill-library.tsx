@@ -5,7 +5,7 @@ import { AI_TOOL_KIND_LABEL, type AiTool, type AiToolKind } from "@crossline/cor
 import { Markdown } from "../ui/markdown";
 import { Clamp } from "../ui/clamp";
 import { LineTag, Tag } from "../ui/tag";
-import type { GrownSkillView, MineSkillView, PublicSkillView, SkillLibraryView } from "../../lib/skill-library";
+import type { GrownSkillView, MineSkillView, PublicSkillView, ScriptsView, SkillLibraryView } from "../../lib/skill-library";
 
 const day = (iso: string) => iso ? `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}` : "—";
 const KIND = { play: "打法", preference: "偏好", redline: "红线" } as const;
@@ -32,13 +32,14 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
       <header><h3>生长的工作流 · {grown.length}</h3><small>同类的事采纳过两次，或在输入框里说「以后都这样做」「每周五提醒」，助手会把它写成工作流，建好后通知；发出、发布一类的步骤始终由本人完成</small></header>
       {library.growing > 0 && <p className="st-note">{library.growing} 个工作流正在生成，建好后会通知。</p>}
       {grown.length === 0 ? <p className="muted">尚无。</p>
-        : <ul className="sk-publics">{grown.map((flow) => <GrownFlow key={flow.id} flow={flow}
+        : <ul className="sk-publics">{grown.map((flow) => <GrownFlow key={flow.id} flow={flow} shell={library.shell}
           onChanged={(next) => setGrown((all) => next ? all.map((item) => item.id === next.id ? next : item) : all.filter((item) => item.id !== flow.id))} />)}</ul>}
     </section>
     <section className="st-card st-card-wide" aria-label="公开 skills">
       <header><h3>公开 skills · {publics.length}</h3><small>按主线检索的公开 skill，取回后经代码扫描与模型审查；30 天未调用自动删除</small></header>
       {publics.length === 0 ? <p className="muted">尚无。首次检索在主线建立后进行，之后每月一次；任务需要而库中没有时会提前检索。</p>
-        : <ul className="sk-publics">{publics.map((skill) => <PublicSkill key={skill.id} skill={skill} onRemoved={() => setPublics((all) => all.filter((item) => item.id !== skill.id))} />)}</ul>}
+        : <ul className="sk-publics">{publics.map((skill) => <PublicSkill key={skill.id} skill={skill} shell={library.shell}
+          onChanged={(next) => setPublics((all) => next ? all.map((item) => item.id === next.id ? next : item) : all.filter((item) => item.id !== skill.id))} />)}</ul>}
       {library.removed.length > 0 && <p className="st-note">最近删除：{library.removed.map((item) => `${item.name}（${item.by === "person" ? "本人删除" : item.reason}，${day(item.at)}）`).join("；")}</p>}
     </section>
   </div>;
@@ -93,7 +94,7 @@ function MineLine({ line, onSaved }: { line: MineSkillView; onSaved: (line: Mine
   </li>;
 }
 
-function PublicSkill({ skill, onRemoved }: { skill: PublicSkillView; onRemoved: () => void }) {
+function PublicSkill({ skill, shell, onChanged }: { skill: PublicSkillView; shell: boolean; onChanged: (skill: PublicSkillView | undefined) => void }) {
   const [note, setNote] = useState("");
   const verdict = VERDICT[skill.verdict];
   const flagged = [...new Set(skill.findings.map((finding) => RULE[finding.rule] ?? finding.rule))];
@@ -102,22 +103,61 @@ function PublicSkill({ skill, onRemoved }: { skill: PublicSkillView; onRemoved: 
       <strong>{skill.name}</strong><Tag>{skill.category}</Tag><Tag tone={verdict.tone}>{verdict.label}</Tag>
       <span className="sk-actions"><ConfirmDelete name={`公开 skill「${skill.name}」`} onConfirm={async () => {
         const ok = await fetch(`/api/skills/public/${encodeURIComponent(skill.id)}`, { method: "DELETE" }).then((response) => response.ok).catch(() => false);
-        if (ok) onRemoved(); else setNote("删除未完成");
+        if (ok) onChanged(undefined); else setNote("删除未完成");
       }} /></span>
     </div>
     <p className="sk-desc" data-user-text><Clamp text={skill.description} /></p>
     <dl className="sk-facts">
       <dt>来源</dt><dd><a href={skill.url} target="_blank" rel="noreferrer">{skill.repo.replace("https://github.com/", "")}{skill.path ? `/${skill.path}` : ""}</a> · 提交 <span className="mono">{skill.commit.slice(0, 7)}</span></dd>
       <dt>许可证</dt><dd>{skill.license}</dd>
-      <dt>扫描</dt><dd>{skill.risk === "high" || skill.injection ? `发现${flagged.join("、")}，脚本未安装` : "未发现风险"} · {skill.files} 个文件已记录校验值{skill.skipped ? `，${skill.skipped} 个非文本文件未取回` : ""}</dd>
+      <dt>扫描</dt><dd>{skill.risk === "high" || skill.injection ? `发现${flagged.join("、")}，${skill.scriptsAllowedAt ? `本人于 ${day(skill.scriptsAllowedAt)} 允许运行脚本` : "脚本未安装"}` : "未发现风险"} · {skill.files} 个文件已记录校验值{skill.skipped ? `，${skill.skipped} 个非文本文件未取回` : ""}</dd>
       <dt>审查</dt><dd className="gen"><Clamp lines={1} text={skill.reasons.join("；")} /></dd>
       <dt>上次调用</dt><dd>{skill.lastUsedAt === skill.installedAt ? `尚未调用（${day(skill.installedAt)} 安装）` : day(skill.lastUsedAt)}</dd>
     </dl>
+    <ScriptsConsent view={skill} shell={shell} endpoint={`/api/skills/public/${encodeURIComponent(skill.id)}`}
+      onChanged={(allowedAt) => { const { scriptsAllowedAt: _was, ...rest } = skill; onChanged(allowedAt ? { ...rest, scriptsAllowedAt: allowedAt } : rest); }} />
     {note && <p role="status" className="st-note">{note}</p>}
   </li>;
 }
 
-function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow: GrownSkillView | undefined) => void }) {
+/**
+ * 「允许运行脚本」 (2026-10-19, the owner's decision): a skill the scan capped to text keeps its scripts once the person has read what the
+ * scan found and allows them. The leave covers these files only — an update asks again — and is taken back with one click. The hosted
+ * assistant has no command line, so there an allowed script is read for its method, not run; the page says which.
+ */
+function ScriptsConsent({ view, shell, endpoint, onChanged }: { view: ScriptsView; shell: boolean; endpoint: string; onChanged: (allowedAt: string | undefined) => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  if (!view.scriptsAllowable) return null;
+  const send = async (allow: boolean) => {
+    const ok = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: allow ? "allow_scripts" : "disallow_scripts" }) })
+      .then((response) => response.ok).catch(() => false);
+    if (!ok) { setNote("未保存"); return; }
+    onChanged(allow ? new Date().toISOString() : undefined);
+    setOpen(false);
+    setNote(allow ? "已允许，下次运行时脚本随 skill 一起安装" : "已收回，下次运行时只用文字");
+  };
+  const where = shell ? "助手运行时可以按这份 skill 执行其中的脚本，命令仍逐条经过助手的检查。"
+    : "托管版助手没有命令行：允许后脚本随 skill 安装，供助手阅读其中的方法，不会执行；本人电脑上的副本可以执行。";
+  return <div className="sk-scripts">
+    {view.scriptsAllowedAt
+      ? <p className="st-note">{view.scripts} 个脚本已允许运行（{day(view.scriptsAllowedAt)}）。{where}
+        <button type="button" className="secondary-button" onClick={() => { void send(false); }}>收回</button></p>
+      : <button type="button" className="secondary-button" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "收起" : `查看扫描结果并允许 ${view.scripts} 个脚本`}</button>}
+    {open && !view.scriptsAllowedAt && <div className="sk-scripts-review">
+      <p>扫描按模式逐行查找联网、删除、越出目录、读取凭据、改系统设置和下载执行，可能漏判，也可能误判。以下是它找到的：</p>
+      <ul className="st-list">{view.findings.map((finding, index) => <li key={index}>
+        <Tag tone="warn">{RULE[finding.rule] ?? finding.rule}</Tag><span className="mono">{finding.file}:{finding.line}</span>
+        <code className="sk-excerpt">{finding.excerpt}</code>
+      </li>)}</ul>
+      <p>{where}文件更新后需要重新允许。</p>
+      <button type="button" className="secondary-button" onClick={() => { void send(true); }}>允许运行脚本</button>
+    </div>}
+    {note && <p role="status" className="st-note">{note}</p>}
+  </div>;
+}
+
+function GrownFlow({ flow, shell, onChanged }: { flow: GrownSkillView; shell: boolean; onChanged: (flow: GrownSkillView | undefined) => void }) {
   const [note, setNote] = useState("");
   const send = async (method: "POST" | "DELETE", body?: object) => fetch(`/api/skills/grown/${encodeURIComponent(flow.id)}`,
     { method, headers: { "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) }).then((response) => response.ok).catch(() => false);
@@ -179,11 +219,14 @@ function GrownFlow({ flow, onChanged }: { flow: GrownSkillView; onChanged: (flow
           : <>{flow.risks.map((risk) => <span key={risk}>{risk}<br /></span>)}本人接受前不会运行</>}</dd></>}
       <dt>步骤</dt><dd><Clamp text={flow.steps.map((step) => step.person ? `${step.title}（本人）` : step.title).join(" → ")} /></dd>
       {person.length > 0 && <><dt>本人完成</dt><dd>{person.map((step) => step.title).join("；")}</dd></>}
-      <dt>检查</dt><dd>{flow.risk === "high" ? "脚本扫描发现风险，只用文字" : "脚本扫描未发现风险"} · {flow.files} 个文件已记录校验值</dd>
+      <dt>检查</dt><dd>{flow.risk === "high" ? flow.scriptsAllowedAt ? `脚本扫描发现风险，本人于 ${day(flow.scriptsAllowedAt)} 允许运行` : "脚本扫描发现风险，只用文字"
+        : "脚本扫描未发现风险"} · {flow.files} 个文件已记录校验值</dd>
       <dt>审查</dt><dd className="gen"><Clamp lines={1} text={flow.reasons.join("；")} /></dd>
       <dt>上次使用</dt><dd>{flow.lastRunAt ? `${day(flow.lastRunAt)} 执行` : day(flow.lastUsedAt)}{flow.pinned ? "" : "；30 天未用会被移除，保留后不再移除"}</dd>
     </dl>
     {flow.skillText && <details className="advanced sk-full"><summary>工作流全文</summary><Markdown className="long-form" text={flow.skillText} /></details>}
+    <ScriptsConsent view={flow} shell={shell} endpoint={`/api/skills/grown/${encodeURIComponent(flow.id)}`}
+      onChanged={(allowedAt) => { const { scriptsAllowedAt: _was, ...rest } = flow; onChanged(allowedAt ? { ...rest, scriptsAllowedAt: allowedAt } : rest); }} />
     {note && <p role="status" className="st-note">{note}</p>}
   </li>;
 }

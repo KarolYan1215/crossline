@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { CrosslineStore, installedPublicFiles as installedFiles, readPublicSkills as readLibrary, removePublicSkill } from "@crossline/db";
+import { CrosslineStore, allowSkillScripts, installedPublicFiles as installedFiles, readPublicSkills as readLibrary, removePublicSkill } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { SKILL_LIBRARY_SETTING } from "@crossline/core";
 import { cleanPublicSkills, createSkillScout, fetchSkillDirectory, scoutDue, wantPublicSkill, SKILL_SCOUT, type HttpGet } from "./public-skills";
@@ -140,5 +141,51 @@ test("a run on the line switches on the public skills that fit its task, install
     // Another line's task, or a task nothing fits, switches nothing on and writes nothing.
     expect(await librarySkillsFor(run.rpc, store, ws, "media", { cwd: "C:\\repo", dir, task: "整理投资周报", wantIfMissing: true })).toEqual([]);
     expect(store.listEvents(ws, { type: "skill.public.wanted" })).toHaveLength(1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the person allows a text-only skill's scripts: they are installed and run; taking it back or a new commit removes them", async () => {
+  // An offline counter the scan flags for the address in its comment — the kind of finding the person reads before allowing it.
+  const counter = "import { readFileSync } from \"node:fs\";\n// method from https://example.com/xhs-length\nconsole.log(readFileSync(process.argv[2], \"utf8\").trim().length);\n";
+  const withCounter = { ...repos, "acme/skills": { ...repos["acme/skills"]!, files: { ...repos["acme/skills"]!.files,
+    "skills/xhs-count/SKILL.md": skill("xhs-count", "小红书笔记字数检查：运行 scripts/count.mjs <笔记文件>，超过 1000 字就删。"), "skills/xhs-count/scripts/count.mjs": counter } } };
+  const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
+    ? JSON.stringify({ candidates: [candidate("xhs-count")], blockers: [] }) : JSON.stringify({ verdict: "usable", reasons: ["只读本目录的笔记"] }));
+  await createSkillScout(store, ws, "C:\\repo", () => runtime.rpc, { http: github(withCounter), now: () => new Date("2026-10-01T00:00:00Z") })();
+  const record = readLibrary(store, ws)[0]!;
+  expect(record).toMatchObject({ id: "pub-xhs-count", scan: { risk: "high" }, review: { final: "text_only" } });
+  expect(record.scan.findings.map((finding) => finding.rule)).toContain("net");
+  expect(installedFiles(store, ws, record).map((file) => file.path)).toEqual(["SKILL.md"]);
+  // A skill the checks refused, or one with nothing to run, cannot be given leave.
+  expect(allowSkillScripts(store, ws, "public", "pub-missing", true)).toBe(false);
+
+  expect(allowSkillScripts(store, ws, "public", "pub-xhs-count", true, new Date("2026-10-02T00:00:00Z"))).toBe(true);
+  expect(installedFiles(store, ws, readLibrary(store, ws)[0]!).map((file) => file.path)).toEqual(["SKILL.md", "scripts/count.mjs"]);
+  expect(store.listEvents(ws, { type: "skill.scripts_allowed" })[0]!.payload).toMatchObject({ kind: "public", files: ["scripts/count.mjs"] });
+  const dir = mkdtempSync(path.join(tmpdir(), "crossline-scripts-"));
+  try {
+    const run = fakeRuntime(["{}"], "crossline:crossline-agent", { library: ["crossline-public:pub-xhs-count"] });
+    expect(await librarySkillsFor(run.rpc, store, ws, "media", { cwd: "C:\\repo", dir, task: "小红书笔记字数检查" })).toEqual(["crossline-public:pub-xhs-count"]);
+    const script = path.join(dir, "plugins", "crossline-public", "skills", "pub-xhs-count", "scripts", "count.mjs");
+    const note = path.join(dir, "note.md");
+    writeFileSync(note, "冲突开头，解释，给出 solution。");
+    // The installed script runs as the assistant's shell would run it.
+    expect(execFileSync(process.execPath, [script, note], { encoding: "utf8" }).trim()).toBe(String("冲突开头，解释，给出 solution。".length));
+
+    // Taken back: the next install leaves the script out, and nothing of it stays on disk for the runtime to copy.
+    expect(allowSkillScripts(store, ws, "public", "pub-xhs-count", false)).toBe(true);
+    await librarySkillsFor(run.rpc, store, ws, "media", { cwd: "C:\\repo", dir, task: "小红书笔记字数检查" });
+    expect(existsSync(script)).toBe(false);
+    expect(store.listEvents(ws, { type: "skill.scripts_revoked" })).toHaveLength(1);
+
+    // Allowed again, then the skill is updated to a new commit with a changed script: the leave does not cover the new files.
+    allowSkillScripts(store, ws, "public", "pub-xhs-count", true);
+    const changed = { ...withCounter, "acme/skills": { ...withCounter["acme/skills"]!, commit: SHA2, files: { ...withCounter["acme/skills"]!.files,
+      "skills/xhs-count/scripts/count.mjs": counter.replace(".length", ".length + 0") } } };
+    const later = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
+      ? JSON.stringify({ candidates: [], blockers: [{ code: "SKILL_SCOUT_NOTHING_FOUND", message: "没有新的" }] }) : JSON.stringify({ verdict: "usable", reasons: ["可用"] }));
+    await createSkillScout(store, ws, "C:\\repo", () => later.rpc, { http: github(changed), now: () => new Date("2026-11-02T00:00:00Z") })();
+    expect(readLibrary(store, ws)[0]!.commit).toBe(SHA2);
+    expect(installedFiles(store, ws, readLibrary(store, ws)[0]!).map((file) => file.path)).toEqual(["SKILL.md"]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

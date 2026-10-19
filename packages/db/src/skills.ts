@@ -1,5 +1,5 @@
 import {
-  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey,
+  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey, scriptsAllowable, scriptsDigest, scriptsRunnable,
   readGrownLibrary, readMineSkill, readSkillLibrary,
   type AiTool, type GrownSkillRecord, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
@@ -30,11 +30,12 @@ export const readPublicSkills = (store: CrosslineStore, workspaceId: string) => 
 export const writePublicSkills = (store: CrosslineStore, workspaceId: string, records: PublicSkillRecord[]) =>
   store.setSetting(workspaceId, SKILL_LIBRARY_SETTING, JSON.stringify(records));
 
-/** The files installed for a public skill: everything fetched, or — for one allowed only as text — everything but its scripts. */
+/** The files installed for a public skill: everything fetched, or — for one allowed only as text, until the person allows its scripts — everything but them. */
 export function installedPublicFiles(store: CrosslineStore, workspaceId: string, record: PublicSkillRecord): Array<{ path: string; text: string }> {
   let stored: { files?: Array<{ path: string; text: string }> } | undefined;
   try { stored = JSON.parse(store.getSetting(workspaceId, publicSkillFilesKey(record.id)) ?? "{}") as typeof stored; } catch { stored = undefined; }
-  return (stored?.files ?? []).filter((file) => record.review.final === "usable" || !isScriptFile(file.path));
+  const scripts = scriptsRunnable(record);
+  return (stored?.files ?? []).filter((file) => scripts || !isScriptFile(file.path));
 }
 
 export const readGrownSkills = (store: CrosslineStore, workspaceId: string) => readGrownLibrary(store.getSetting(workspaceId, GROWN_LIBRARY_SETTING));
@@ -58,11 +59,38 @@ export function grownHomeLine(store: CrosslineStore, workspaceId: string, record
     ?? (record.lines.length === 1 ? record.lines[0] : undefined);
 }
 
-/** A grown workflow's files: all of them, or — when the scan or the review allowed it only as text — all but its scripts. */
+/** A grown workflow's files: all of them, or — when the scan or the review allowed it only as text and the person has not allowed its scripts — all but them. */
 export function installedGrownFiles(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord): Array<{ path: string; text: string }> {
   let stored: { files?: Array<{ path: string; text: string }> } | undefined;
   try { stored = JSON.parse(store.getSetting(workspaceId, grownSkillFilesKey(record.id)) ?? "{}") as typeof stored; } catch { stored = undefined; }
-  return (stored?.files ?? []).filter((file) => record.review.final === "usable" || !isScriptFile(file.path));
+  const scripts = scriptsRunnable(record);
+  return (stored?.files ?? []).filter((file) => scripts || !isScriptFile(file.path));
+}
+
+/**
+ * The person allows a skill's scripts after reading the scan, or takes the leave back (`skill.scripts_allowed`, with what the scan found
+ * and the files it covers). Only for a skill the checks capped to text; one they refused stays refused. The worker reinstalls the plugin
+ * on its next run, since the files it installs changed.
+ */
+export function allowSkillScripts(store: CrosslineStore, workspaceId: string, kind: "public" | "grown", id: string, allow: boolean, now = new Date()): boolean {
+  const at = now.toISOString();
+  const change = <T extends PublicSkillRecord | GrownSkillRecord>(records: T[], write: (next: T[]) => void): T | undefined => {
+    const record = records.find((item) => item.id === id);
+    if (!record || !scriptsAllowable(record) || (!allow && !record.scriptsAllowed)) return undefined;
+    write(records.map((item) => {
+      if (item.id !== id) return item;
+      const { scriptsAllowed: _old, ...rest } = item;
+      return (allow ? { ...rest, scriptsAllowed: { at, digest: scriptsDigest(item.files) }, updatedAt: at } : { ...rest, updatedAt: at }) as T;
+    }));
+    return record;
+  };
+  const record = kind === "public" ? change(readPublicSkills(store, workspaceId), (next) => writePublicSkills(store, workspaceId, next))
+    : change(readGrownSkills(store, workspaceId), (next) => writeGrownSkills(store, workspaceId, next));
+  if (!record) return false;
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.scripts:${kind}:${id}:${at}`, type: allow ? "skill.scripts_allowed" : "skill.scripts_revoked",
+    entityId: id, payload: { id, kind, files: record.files.filter((file) => isScriptFile(file.path)).map((file) => file.path),
+      findings: record.scan.findings.map((finding) => `${finding.file}:${finding.line} ${finding.rule}`).slice(0, 20) } });
+  return true;
 }
 
 /** The person turns a grown workflow off or on, or keeps it (`pinned`: never removed for being idle). */

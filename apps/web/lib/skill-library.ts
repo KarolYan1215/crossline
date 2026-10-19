@@ -1,8 +1,8 @@
 import {
-  AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill, readableMineSourceLabel, readableMineText,
+  AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scriptCount, scriptsAllowable, scriptsRunnable, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill, readableMineSourceLabel, readableMineText,
   type AccessContext, type AiTool, type PublicSkillRecord, type StoredMineRule
 } from "@crossline/core";
-import { aiToolsFor, consentToGrownSkill, grownHomeLine, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
+import { aiToolsFor, allowSkillScripts, assistantMode, consentToGrownSkill, grownHomeLine, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { getStore } from "./crossline";
 import { identityLines } from "./lines";
@@ -18,9 +18,15 @@ export type MineSkillView = {
   /** Newest first, each in full, so 回到此版 shows what comes back. */
   versions: Array<{ version: number; by: "compiler" | "person"; at: string; markdown: string; rules: StoredMineRule[]; restoredFrom?: number }>;
 };
-export type PublicSkillView = Pick<PublicSkillRecord, "id" | "name" | "description" | "lines" | "commit" | "license" | "installedAt" | "updatedAt" | "lastUsedAt" | "why"> & {
+/**
+ * A skill's scripts as the person sees them: how many, whether the checks capped them to text and the person may allow them anyway, when
+ * they did, and what the scan found (file, line, rule, the line itself), which is what they read before allowing.
+ */
+export type ScriptsView = { scripts: number; scriptsAllowable: boolean; scriptsAllowedAt?: string;
+  findings: Array<{ file: string; line: number; rule: string; excerpt: string }> };
+export type PublicSkillView = Pick<PublicSkillRecord, "id" | "name" | "description" | "lines" | "commit" | "license" | "installedAt" | "updatedAt" | "lastUsedAt" | "why"> & ScriptsView & {
   category: string; repo: string; path: string; url: string; files: number; skipped: number;
-  risk: "low" | "high"; injection: boolean; findings: Array<{ file: string; line: number; rule: string }>;
+  risk: "low" | "high"; injection: boolean;
   verdict: "usable" | "text_only" | "reject"; reasons: string[];
 };
 /** A workflow the assistant grew: what it does and when, where it came from, which steps stay the person's, and what the checks found. */
@@ -28,9 +34,16 @@ export type GrownSkillView = { id: string; summary: string; name: string; catego
   origin: string; steps: Array<{ title: string; person: boolean }>; status: "active" | "off" | "needs_consent"; pinned: boolean; verdict: "usable" | "text_only" | "reject";
   /** The sites it reads and the risks it was installed with; when the person accepted them and last logged in to each. */
   access: Array<{ service: string; site: string; login: boolean; how: string; loggedInAt?: string }>; risks: string[]; consentedAt?: string;
-  risk: "low" | "high"; reasons: string[]; files: number; createdAt: string; lastUsedAt: string; lastRunAt?: string; skillText: string };
+  risk: "low" | "high"; reasons: string[]; files: number; createdAt: string; lastUsedAt: string; lastRunAt?: string; skillText: string } & ScriptsView;
+/** `shell`: this account's assistant has a command line (the copy on the person's own computer) and can run an allowed script. */
 export type SkillLibraryView = { mine: MineSkillView[]; grown: GrownSkillView[]; publics: PublicSkillView[]; aiTools: AiTool[];
-  removed: Array<{ name: string; reason: string; at: string; by: string }>; growing: number };
+  removed: Array<{ name: string; reason: string; at: string; by: string }>; growing: number; shell: boolean };
+
+const scriptsView = (record: Parameters<typeof scriptsRunnable>[0]): ScriptsView => ({
+  scripts: scriptCount(record), scriptsAllowable: scriptsAllowable(record),
+  ...(scriptsAllowable(record) && scriptsRunnable(record) && record.scriptsAllowed ? { scriptsAllowedAt: record.scriptsAllowed.at } : {}),
+  findings: record.scan.findings.slice(0, 12).map(({ file, line, rule, excerpt }) => ({ file, line, rule, excerpt }))
+});
 
 export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
   const store = getStore();
@@ -52,7 +65,7 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
       installedAt: record.installedAt, updatedAt: record.updatedAt, lastUsedAt: record.lastUsedAt, why: record.why,
       category: PUBLIC_SKILL_CATEGORY_LABEL[record.category] ?? record.category, repo: record.source.repo, path: record.source.path, url: record.source.url,
       files: record.files.length, skipped, risk: record.scan.risk, injection: record.scan.injection,
-      findings: record.scan.findings.slice(0, 8).map(({ file, line, rule }) => ({ file, line, rule })), verdict: record.review.final, reasons: record.review.reasons };
+      ...scriptsView(record), verdict: record.review.final, reasons: record.review.reasons };
   });
   const removed = store.listEvents(ctx.workspaceId, { type: "skill.public.removed" }).slice(-5).reverse().map((event) => {
     const payload = event.payload as { name?: string; reason?: string; by?: string };
@@ -72,12 +85,13 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
       access: (record.manifest.access ?? []).map((item) => ({ ...item, ...(record.logins?.[item.service] ? { loggedInAt: record.logins[item.service] } : {}) })),
       risks: record.manifest.risks ?? [], ...(record.consentedAt ? { consentedAt: record.consentedAt } : {}),
       verdict: record.review.final, risk: record.scan.risk, reasons: record.review.reasons, files: record.files.length, createdAt: record.createdAt,
-      lastUsedAt: record.lastUsedAt, ...(record.lastRunAt ? { lastRunAt: record.lastRunAt } : {}), skillText: skillText.replace(/^---[\s\S]*?\n---\n/, "") };
+      lastUsedAt: record.lastUsedAt, ...(record.lastRunAt ? { lastRunAt: record.lastRunAt } : {}), skillText: skillText.replace(/^---[\s\S]*?\n---\n/, ""),
+      ...scriptsView(record) };
   });
   // Requests made in words that no growing run has picked up yet: the page says they are on their way.
   const tried = new Set(store.listEvents(ctx.workspaceId, { type: "skill.grown.attempted" }).map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
   const growing = store.listEvents(ctx.workspaceId, { type: "workflow.requested" }).filter((event) => !tried.has(event.entityId)).length;
-  return { mine, grown, publics, removed, growing, aiTools: aiToolsFor(store, ctx.workspaceId) };
+  return { mine, grown, publics, removed, growing, aiTools: aiToolsFor(store, ctx.workspaceId), shell: assistantMode(store, ctx.workspaceId) === "shell" };
 }
 
 const MAX_SKILL_CHARS = 20_000;
@@ -106,6 +120,11 @@ export function restoreMineSkill(ctx: AccessContext, lineId: string, version: nu
   const number = saveMineVersion(store, ctx.workspaceId, lineId, { at: new Date().toISOString(), by: "person", markdown: old.markdown,
     ...(old.rules ? { rules: old.rules } : {}), restoredFrom: version });
   return { ok: true, version: number };
+}
+
+/** The person allows a skill's scripts after reading the scan, or takes the leave back. */
+export function allowScripts(ctx: AccessContext, kind: "public" | "grown", id: string, allow: boolean): { ok: boolean; code?: string } {
+  return allowSkillScripts(getStore(), ctx.workspaceId, kind, id, allow) ? { ok: true } : { ok: false, code: "SCRIPTS_NOT_ALLOWABLE" };
 }
 
 export function deletePublicSkill(ctx: AccessContext, id: string): { ok: boolean; code?: string } {

@@ -206,6 +206,22 @@ export function finalVerdict(scan: SkillScan, review: PublicSkillReview): Public
   return review.verdict;
 }
 
+/**
+ * The person's leave to run a skill's scripts after reading what the scan found (2026-10-19, the owner's decision): a skill the checks
+ * capped to text keeps its scripts once the person allows them. The leave is tied to the files they saw — an update or a re-grown
+ * workflow brings new files and asks again — and never covers a skill refused outright (an injection, or the review's `reject`).
+ */
+export type ScriptsAllowance = { at: string; digest: string };
+export const scriptsDigest = (files: Array<{ path: string; sha256: string }>) =>
+  files.map((file) => `${file.path}:${file.sha256}`).sort().join("|");
+type ScriptsRecord = { review: { final: PublicSkillVerdict }; scan: SkillScan; files: Array<{ path: string; sha256: string }>; scriptsAllowed?: ScriptsAllowance };
+export const scriptCount = (record: Pick<ScriptsRecord, "files">) => record.files.filter((file) => isScriptFile(file.path)).length;
+/** Whether the leave can be given: a skill with scripts that the checks capped to text, not one they refused. */
+export const scriptsAllowable = (record: ScriptsRecord) => record.review.final === "text_only" && !record.scan.injection && scriptCount(record) > 0;
+/** Whether a skill's scripts are installed with it: reviewed usable, or allowed by the person for exactly these files. */
+export const scriptsRunnable = (record: ScriptsRecord) => record.review.final === "usable"
+  || scriptsAllowable(record) && record.scriptsAllowed?.digest === scriptsDigest(record.files);
+
 // ── The library record ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 export type PublicSkillRecord = {
@@ -218,6 +234,7 @@ export type PublicSkillRecord = {
   review: PublicSkillReview & { final: PublicSkillVerdict };
   installedAt: string; updatedAt: string; lastUsedAt: string;
   why: string;
+  scriptsAllowed?: ScriptsAllowance;
 };
 
 export function readSkillLibrary(raw: string | undefined): PublicSkillRecord[] {

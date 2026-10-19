@@ -1,6 +1,6 @@
 import { isAgentCategory, type AgentCategory } from "./agent-dispatch";
 import { mentionsExternalAction } from "./external-action";
-import type { PublicSkillReview, PublicSkillVerdict, SkillScan } from "./public-skills";
+import type { PublicSkillReview, PublicSkillVerdict, ScriptsAllowance, SkillScan } from "./public-skills";
 
 /**
  * A site the workflow reads on the person's behalf (「整理小红书收藏夹」), found by the run that grew it. Only reading: anything that
@@ -170,6 +170,7 @@ export type GrownSkillRecord = {
   loginBrowsers?: Record<string, string>;
   /** Kept by the person: never removed for being idle. */
   pinned: boolean;
+  scriptsAllowed?: ScriptsAllowance;
   createdAt: string; updatedAt: string; lastUsedAt: string;
   lastRunAt?: string;
 };

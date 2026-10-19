@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { changeGrownSkill, grownSkillAction } from "../../../../../lib/skill-library";
+import { allowScripts, changeGrownSkill, grownSkillAction } from "../../../../../lib/skill-library";
 import { writeGuard, validId } from "../../../agent/guard";
 
 /**
  * A grown workflow, changed by the person: `{status: "active" | "off"}` turns it on or off, `{pinned}` keeps it from idle removal,
  * `{action: "consent"}` accepts the risks of one that reads an account, `{action: "login", service}` opens a window to log in with and
- * `{action: "run"}` starts it now.
+ * `{action: "run"}` starts it now; `{action: "allow_scripts" | "disallow_scripts"}` allows the scripts the checks capped to text, or takes it back.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const guard = await writeGuard(request);
@@ -13,6 +13,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
   if (!validId(id)) return NextResponse.json({ ok: false, code: "INVALID_SKILL" }, { status: 400 });
   const { status, pinned, action, service } = guard.body;
+  if (action === "allow_scripts" || action === "disallow_scripts") {
+    const result = allowScripts(guard.ctx, "grown", id, action === "allow_scripts");
+    return NextResponse.json(result, { status: result.ok ? 200 : 409 });
+  }
   if (action === "consent") {
     const result = changeGrownSkill(guard.ctx, id, "consent");
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });

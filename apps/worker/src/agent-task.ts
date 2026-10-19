@@ -7,7 +7,7 @@ import {
   AGENT_CATEGORIES, AGENT_SUMMARY_SCHEMA, decideCommand, decideFileChange, decideMcpTool, resultNeedsPerson, validateAgentSummary,
   type AgentCategory, type AgentProgressRecord, type AgentSummary, type GuardContext, type GuardDecision
 } from "@crossline/core";
-import { runCodexSkill, type AgentItem, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
+import { runCodexSkill, webResearchBlocker, type AgentItem, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import { agentChainsFor, approveCategory, CLEAN_RUNS_TO_TRUST, readCategories, recordReview, type CategoryState, type CrosslineStore } from "@crossline/db";
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
 import { applyToolboxActions, createAgentToolbox, type MailLookup } from "./agent-tools";
@@ -506,8 +506,9 @@ async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: str
     },
     allowWebSearch: true, timeoutMs: 2 * 60 * 60_000, signal, tools,
     // The runtime's own features (2026-10-19): JavaScript in its V8 isolate to compute and to call these functions, the person's ChatGPT
-    // connectors read-only, and its plan tool, whose steps are shown while the run works.
-    codeMode: true, connectors: true, onPlan: (plan) => { audit.plan = plan; live(); writeProgress(directory, audit); }
+    // connectors read-only, and its plan tool, whose steps are shown while the run works. Code mode runs in codex-code-mode-host beside
+    // the runtime; without it every call through code mode fails, so it is switched on only when the host is there.
+    codeMode: !webResearchBlocker(), connectors: true, onPlan: (plan) => { audit.plan = plan; live(); writeProgress(directory, audit); }
   });
   live();
   const inputsModified = changedFiles(before, fingerprint(inputs));
