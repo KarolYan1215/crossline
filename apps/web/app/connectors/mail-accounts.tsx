@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { MAIL_TRIAGE_KIND_LABEL, type MailAccount, type MailLogEntry } from "@crossline/core";
+import { appPasswordPage, MAIL_TRIAGE_KIND_LABEL, type AppPasswordPage, type MailAccount, type MailLogEntry } from "@crossline/core";
 
 type View = { accounts: MailAccount[]; log: MailLogEntry[] };
 const post = (url: string, body: unknown, method = "POST") => fetch(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
@@ -10,6 +10,14 @@ const ago = (at: string | undefined) => {
   const minutes = Math.max(0, Math.round((Date.now() - Date.parse(at)) / 60_000));
   return minutes < 1 ? "刚刚读过" : minutes < 60 ? `${minutes} 分钟前读过` : minutes < 1440 ? `${Math.round(minutes / 60)} 小时前读过` : `${Math.round(minutes / 1440)} 天前读过`;
 };
+
+/** The way to the provider's app-password page, opened in a new tab so the half-filled form stays where it is. */
+export function AppPasswordLink({ page, label }: { page: AppPasswordPage; label: string }) {
+  return <span className="mail-app-password">
+    <a className="secondary-button" href={page.url} target="_blank" rel="noopener noreferrer">{label}</a>
+    <a href={page.setupUrl} target="_blank" rel="noopener noreferrer">{page.setupLabel}</a>
+  </span>;
+}
 
 /**
  * 邮箱 (docs/personal-agent.md, 2026-10-19): a mailbox read over IMAP with an app password or authorisation code, read-only — nothing is
@@ -24,6 +32,9 @@ export function MailAccounts() {
   const [showHost, setShowHost] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  // Set when the last attempt was refused for its password, so the way to make one stays beside the message.
+  const [refused, setRefused] = useState(false);
+  const typedPage = appPasswordPage(address);
   const load = async () => {
     const response = await fetch("/api/mail", { cache: "no-store" }).catch(() => undefined);
     const body = await response?.json().catch(() => undefined) as View | undefined;
@@ -31,11 +42,15 @@ export function MailAccounts() {
   };
   useEffect(() => { void load(); }, []);
   const add = async () => {
-    setBusy(true); setMessage("");
+    setBusy(true); setMessage(""); setRefused(false);
     const result = await post("/api/mail/accounts", { address, password, host });
     const blocker = result.body.blocker as { code?: string; message?: string } | undefined;
     if (result.ok && result.body.ok) { setAddress(""); setPassword(""); setHost(""); setMessage("已接入，正在读最近三天的邮件；以后每 15 分钟看一次新邮件。"); }
-    else { setMessage(blocker?.message ?? "没能接入，稍后再试。"); if (blocker?.code === "MAIL_HOST_REQUIRED") setShowHost(true); }
+    else {
+      setMessage(blocker?.message ?? "没能接入，稍后再试。");
+      if (blocker?.code === "MAIL_HOST_REQUIRED") setShowHost(true);
+      if (blocker?.code === "MAIL_AUTH_FAILED") setRefused(true);
+    }
     await load(); setBusy(false);
   };
   const remove = async (account: MailAccount) => {
@@ -62,17 +77,24 @@ export function MailAccounts() {
     <header><h3>邮箱（只读）</h3><small>用应用专用密码或授权码接入；只读不写：不标已读、不移动、不删除、不发信</small></header>
     {view?.accounts.map((account) => <div className="st-row" key={account.id}>
       <span className="st-row-label">{account.address}
-        <small>{account.label} · {account.lastError ? `读取失败：${account.lastError.message}` : ago(account.lastCheckedAt)}</small></span>
+        <small>{account.label} · {account.lastError ? `读取失败：${account.lastError.message}` : ago(account.lastCheckedAt)}</small>
+        {account.lastError?.code === "MAIL_AUTH_FAILED" && appPasswordPage(account.address)
+          && <small>应用专用密码失效时：生成一个新的，移除这个邮箱后用新密码重新接入。<AppPasswordLink page={appPasswordPage(account.address)!} label="生成新的应用专用密码" /></small>}</span>
       <label className="st-inline"><input type="checkbox" checked={account.triage} disabled={busy} onChange={(event) => void triage(account, event.target.checked)} /> 自动整理新邮件</label>
       <button type="button" className="secondary-button" disabled={busy} onClick={() => void remove(account)}>移除</button>
     </div>)}
     {Boolean(view?.accounts.length) && <button type="button" className="secondary-button" disabled={busy} onClick={() => void check()}>现在读新邮件</button>}
     <form className="mail-accounts-form" onSubmit={(event) => { event.preventDefault(); if (address && password) void add(); }}>
       <input type="email" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="邮箱地址，如 name@gmail.com" aria-label="邮箱地址" disabled={busy} autoComplete="off" />
-      <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="应用专用密码 / 授权码（不是登录密码）" aria-label="应用专用密码或授权码" disabled={busy} autoComplete="new-password" />
+      <input type="password" value={password} onChange={(event) => setPassword(event.target.value)}
+        placeholder={typedPage ? "16 位应用专用密码（不是 Google 登录密码）" : "应用专用密码 / 授权码（不是登录密码）"} aria-label="应用专用密码或授权码" disabled={busy} autoComplete="new-password" />
       {showHost && <input type="text" value={host} onChange={(event) => setHost(event.target.value)} placeholder="IMAP 服务器，如 imap.example.com" aria-label="IMAP 服务器" disabled={busy} />}
       <button type="submit" className="primary-button" disabled={busy || !address || !password}>{busy ? "连接中…" : "接入"}</button>
     </form>
+    {typedPage && <div className="mail-app-password-help">
+      <AppPasswordLink page={typedPage} label={`去 Google 生成${refused ? "新的" : ""}应用专用密码`} />
+      <small>{typedPage.hint}</small>
+    </div>}
     <details className="advanced"><summary>怎么拿到应用专用密码或授权码</summary>
       <ul className="st-list">
         <li>Gmail：先开两步验证，再打开 <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">myaccount.google.com/apppasswords</a> 生成 16 位应用专用密码</li>

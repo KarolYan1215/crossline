@@ -29,7 +29,7 @@
 ## 3. 邮箱（只读，IMAP）
 
 - 开源库：`imapflow` 2.1.2（连接，`mailboxOpen("INBOX", { readOnly: true })` = EXAMINE，不改任何标志）+ `mailparser` 3.9.32（解析正文）。没有 SMTP、没有 APPEND，模块里根本没有写的路径。
-- 接入：地址 + 应用专用密码/授权码。预设：Gmail、QQ/Foxmail、163/126/yeah、iCloud、Yahoo、新浪、阿里；其他域名填 IMAP 服务器（只接受域名，不接受 IP 或内网名）。Outlook/Hotmail/Live 微软已关掉密码登录 IMAP，只能 OAuth，明确说不支持。先登录一次成功才保存；密码只进 worker 的密钥库（`mail-<id>`，Linux 上 AES-GCM，Windows 上 DPAPI），从不进账本、导出或备份。
+- 接入：地址 + 应用专用密码/授权码。预设：Gmail、QQ/Foxmail、163/126/yeah、iCloud、Yahoo、新浪、阿里；其他域名填 IMAP 服务器（只接受域名，不接受 IP 或内网名）。Outlook/Hotmail/Live 微软已关掉密码登录 IMAP，只能 OAuth，明确说不支持。填入 Gmail 地址时，卡片给出「去 Google 生成应用专用密码」（新标签页打开 `myaccount.google.com/apppasswords?authuser=<地址>`，浏览器登了多个 Google 账号时直接选中这一个）和「还没开两步验证？先开启」（应用专用密码页只在开了两步验证后才有），Gmail 因密码拒绝登录、或已接入的邮箱日后读取时密码失效，同一入口再出现（`appPasswordPage`，2026-10-19 应用户要求）。先登录一次成功才保存；密码只进 worker 的密钥库（`mail-<id>`，Linux 上 AES-GCM，Windows 上 DPAPI），从不进账本、导出或备份。
 - 读取：每 15 分钟读新邮件（UID 水位 + UIDVALIDITY；首次接入读最近 3 天，最多 30 封）。只保存发件人、主题、日期、开头 300 字和处理结果（`mail.log`，最多 120 条）；全文需要时从服务器现读。
 - 整理（`crossline-mail-triage`，低档模型，intake 类）：每封归为 待办 / 日期 / 回复了等待项 / 知悉 / 略过。待办和日期写成 capture（带来源邮件），走收集分析变成任务，一次最多 5 条；「回复了等待项」写 `waiting.mail_seen`，待决事项里对应的「……到了吗？」立即提前并写明是哪封邮件；其余不动。可按邮箱关掉自动整理。
 - 实测（2026-10-19）：`scripts/mail-imap-e2e.ts` 用真实 Dovecot（本机）走 worker 的同一套代码，993（TLS）与 143（STARTTLS）各 13/13：错误授权码被拒且说清原因、正确的接入、授权码不进账本、首次读到全部邮件、编码的中文主题与正文解码、HTML 只留文字、服务器上的标志与邮件不变（只读，零删除）、再读不重复、新到一封只读这一封、助手按主题搜到并读全文、分类后待办进收件箱。线上用不存在的 Gmail/QQ 地址试接入，两家服务器都回「拒绝登录」，说明托管服务器到外部 IMAP 的网络、TLS 和协议是通的。还没验证的只剩用真实邮箱的授权码登录成功这一步（需要一个真实邮箱）。

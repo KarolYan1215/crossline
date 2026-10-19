@@ -31,6 +31,22 @@ export function readMailLog(raw: string | null | undefined): MailLogEntry[] {
   try { const parsed = JSON.parse(raw ?? "[]") as MailLogEntry[]; return Array.isArray(parsed) ? parsed : []; } catch { return []; }
 }
 
+/**
+ * Where the person makes the password a mailbox needs, for providers that have one page for it (2026-10-19, the owner's request: send a
+ * Gmail user straight there). `authuser` picks the typed account when the browser is signed in to several; Google shows its own account
+ * chooser otherwise. The app-password page exists only once two-step verification is on, hence the second address.
+ */
+export type AppPasswordPage = { provider: string; url: string; setupUrl: string; setupLabel: string; hint: string };
+export function appPasswordPage(address: string): AppPasswordPage | undefined {
+  const trimmed = address.trim().toLowerCase();
+  const domain = trimmed.split("@")[1] ?? "";
+  if (domain !== "gmail.com" && domain !== "googlemail.com") return undefined;
+  const account = /^[^\s@]+@[^\s@]+$/.test(trimmed) ? `?authuser=${encodeURIComponent(trimmed)}` : "";
+  return { provider: "Gmail", url: `https://myaccount.google.com/apppasswords${account}`,
+    setupUrl: `https://myaccount.google.com/signinoptions/twosv${account}`, setupLabel: "还没开两步验证？先开启",
+    hint: "Gmail 不收 Google 登录密码。在打开的页面里起个名字（如 Crossline）并创建，把显示的 16 位密码粘贴到上面，空格可以带着。" };
+}
+
 export type MailTriageKind = "todo" | "date" | "reply" | "info" | "ignore";
 export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind, string> = { todo: "待办", date: "日期", reply: "回复了等待项", info: "知悉", ignore: "略过" };
 export type MailTriage = { items: Array<{ uid: number; kind: MailTriageKind; title: string; waitingId: string; why: string }> };
