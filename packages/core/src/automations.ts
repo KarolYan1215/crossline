@@ -74,7 +74,8 @@ export const AUTOMATION_PLAN_SCHEMA = {
 } as const;
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-const list = (text: string) => text.split(/[,，、;；\s]+/).map((item) => item.trim()).filter(Boolean).slice(0, 12);
+// Items are split on commas, semicolons and line breaks only: an output like 「一份 Markdown 清单」 has spaces inside it.
+const list = (text: string) => text.split(/[,，、;；\n]+/).map((item) => item.trim()).filter(Boolean).slice(0, 12);
 const problem = (detail: string): never => { throw Object.assign(new Error("AUTOMATION_PLAN_INVALID"), { detail }); };
 
 /** The page a watch may read: public https, no IP literal, no local name. */

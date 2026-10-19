@@ -23,11 +23,11 @@ Unused fields: empty string, 0, or "" for `event`.
 ## Action
 
 - `remind` — the request is only to be reminded: `reminder` is the sentence to send.
-- `run` — `instructions` say what the assistant does on each firing, in concrete steps, as if to a capable colleague: what to read (the new mail, the changed page, the new files, the task), what to make (a summary file, a table, a checklist, an `.ics`), and what to put in the inbox or tell the person. `outputs` lists what each run hands over. `category` is the closest of `categories` by id.
+- `run` — `instructions` say what the assistant does on each firing, in concrete steps, as if to a capable colleague: what to read (the new mail, the changed page, the new files, the task), what to make (a summary file, a table, a checklist, an `.ics`), and what to tell the person. The inbox is only for new things the person has to do that are not on the board yet (each item there becomes a task); a digest, a notice or 「已生成」 is told to the person, never put in the inbox, and every run's result already reaches the person as a message with its files. `outputs` lists what each run hands over, separated by commas. `category` is the closest of `categories` by id.
 
 ## Steps
 
-List the steps in order with who does each. A step that sends, replies, posts, uploads, submits or pays is `person` — the assistant prepares everything up to it. Everything else the assistant can do is `assistant`.
+List the steps in order with who does each. A step that sends, replies, posts, uploads, submits or pays is `person` — the assistant prepares everything up to it. Everything else the assistant can do is `assistant`. Do not add a step for the person to read or check the result: they get it as a message; a `person` step is only an action the assistant may not take.
 
 ## Changing one that exists
 
