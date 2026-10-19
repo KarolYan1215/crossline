@@ -14,7 +14,9 @@ const TIER: Record<BackgroundOverview["engagement"]["tier"], { text: string; ton
 export const when = (iso: string | null, timeZone: string): string => iso ? localStamp(iso, timeZone) : "—";
 const tokens = (n: number) => n >= 10_000 ? `${Math.round(n / 1_000) / 10} 万` : String(n);
 
-type Progress = { commands: Array<{ command: string; status: string; exitCode: number | null }>; files: string[]; searches: string[] } | null;
+type Progress = { commands: Array<{ command: string; status: string; exitCode: number | null }>; files: string[]; searches: string[];
+  plan?: { explanation: string; steps: Array<{ step: string; status: string }> } } | null;
+const STEP_MARK: Record<string, string> = { completed: "已完成", inProgress: "进行中", pending: "待做" };
 
 /** One running assistant task: what it has done so far, polled every few seconds, and 「中止」. */
 function RunningTask({ task, timeZone }: { task: BackgroundOverview["running"][number]; timeZone: string }) {
@@ -43,6 +45,9 @@ function RunningTask({ task, timeZone }: { task: BackgroundOverview["running"][n
     <div className="st-row"><span className="st-row-label">{task.title}<small>开始于 {when(task.startedAt, timeZone)}</small></span>
       {state === "ended" ? <Tag tone="neutral">已结束</Tag>
         : <button type="button" className="secondary-button" disabled={state === "stopping"} onClick={() => void stop()}>{state === "stopping" ? "中止中…" : "中止"}</button>}</div>
+    {progress?.plan?.steps.length ? <ol className="bg-plan" aria-label="助手的步骤">
+      {progress.plan.steps.map((item, index) => <li key={`p-${index}`} data-status={item.status}>{STEP_MARK[item.status] ?? item.status} · {item.step}</li>)}
+    </ol> : null}
     {progress && (progress.commands.length + progress.files.length + progress.searches.length) > 0 && <ol className="bg-steps">
       {progress.searches.map((query) => <li key={`s-${query}`}>搜索：{query}</li>)}
       {progress.commands.slice(-8).map((command, index) => <li key={`c-${index}`} className="mono">{command.command}{command.exitCode !== null && command.exitCode !== 0 ? `（退出码 ${command.exitCode}）` : ""}</li>)}

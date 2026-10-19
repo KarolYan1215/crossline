@@ -113,11 +113,11 @@ export function createAgentToolbox(deps: {
       inputSchema: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string" } } } },
     { name: "list_facts", description: "What the person confirmed about themselves and their projects (from the interview and their files).",
       inputSchema: { type: "object", additionalProperties: false, properties: { query: str("Words to filter by; empty lists them all (up to 120)") } } },
-    { name: "calendar", description: "The person's fixed calendar commitments (synced calendars, classes read from files) between two days.",
+    { name: "calendar", description: "The person's fixed calendar commitments (synced calendars, classes read from files) between two days; not the work blocks Crossline planned.",
       inputSchema: { type: "object", additionalProperties: false, required: ["from", "to"], properties: { from: str("YYYY-MM-DD"), to: str("YYYY-MM-DD") } } },
-    { name: "add_to_inbox", description: "Put one thing the person should do into their inbox, written as the task in one line (Crossline then plans it like anything they type). At most 5 a run; only things the person will clearly want.",
+    { name: "add_to_inbox", description: "Put one new thing the person will clearly want to do into their inbox, written as the task in one line (Crossline then plans it like anything they type). Never a digest, a summary or a notice that a file was made: the run's result reaches the person by itself. At most 5 a run.",
       inputSchema: { type: "object", additionalProperties: false, required: ["text"], properties: { text: str("The task in one line, with its date if it has one") } } },
-    { name: "tell_person", description: "Something the person must know now (one short paragraph), sent to them when the run finishes.",
+    { name: "tell_person", description: "Something the person must know now (one short paragraph), sent to them when the run finishes. At most 3 a run; not for what the result already says.",
       inputSchema: { type: "object", additionalProperties: false, required: ["text"], properties: { text: { type: "string" } } } }
   ];
   if (deps.mail) specs.push(

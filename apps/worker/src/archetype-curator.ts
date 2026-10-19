@@ -12,12 +12,11 @@ export const CURATION_PREFERENCE_TRIGGER = 20;
 /** Without this many planned tasks there is no history to draw an archetype from. */
 const MIN_PLANNED_TASKS = 8;
 
-const INSTRUCTIONS = "Read the person's planned tasks (each with the archetype it was given and its step roles), their recorded "
-  + "preferences, and the built-in and already learned archetypes. Propose at most three new archetypes only for work this person "
-  + "repeats that no existing archetype fits well; return none when the existing ones suffice. Build each from the given primitives and "
-  + "roles, with the few ordering rules that make it that kind of work, a size formula, a recognised acceptance standard and a tick "
-  + "phrasing. Each must rest on at least two of the listed task ids and on at least one public standard, guideline or method page you "
-  + "found with web search (https URL and its title). Return raw JSON only.";
+const INSTRUCTIONS = "Propose at most three new task archetypes, the grammars the step planner splits tasks by, only for work this person "
+  + "repeats (two or more of the listed task ids) that its archetype fitted badly; return none, saying why in notes, when the existing ones "
+  + "suffice. Build each from the given primitives and roles with a few ordering rules, shares, a size formula from the tasks' real sizes, a "
+  + "recognised acceptance standard and a tick phrasing, and ground it in at least one public standard or method page you opened (https URL "
+  + "and its title). Return raw JSON only.";
 
 /** Learned archetypes in the shape the step planner and its checks use. */
 export const learnedArchetypes = (store: CrosslineStore, workspaceId: string): Archetype[] =>

@@ -25,7 +25,8 @@ export function createTaskTitler(store: CrosslineStore, workspaceId: string, cwd
     if (!tasks.length) return { named: 0 };
     const context = { version: "crossline.task-titles.v1", tasks };
     const result = await runCodexSkill<TaskTitles>(client, context, { skillName: TASK_TITLER, cwd,
-      developerInstructions: "Name each task as the Skill describes. Return raw JSON only.", outputSchema: TASK_TITLES_SCHEMA, prepareInput: () => context,
+      developerInstructions: "Give each task the short name shown on its card and calendar block, as the crossline-task-titler Skill describes, and "
+        + "return only the requested JSON: a verb-first action of at most 24 characters that keeps the course code and what tells the task apart.", outputSchema: TASK_TITLES_SCHEMA, prepareInput: () => context,
       validateOutput: (output) => validateTaskTitles(output, tasks.map((task) => task.id)), onAudit: () => {}, timeoutMs: 20 * 60_000 });
     if (!result.ok) return { blocked: result.blocker.code };
     const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));

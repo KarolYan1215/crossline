@@ -85,6 +85,20 @@ export function watchUrlAllowed(url: string): boolean {
   } catch { return false; }
 }
 
+/**
+ * Reading or sorting mail is not sending it. The shared external-action pattern counts the noun 邮件 itself as an act, so a mail
+ * automation's own work (「读新邮件并整理成清单」) was handed to the person and the assistant was told the person does it. Here the noun
+ * alone does not count; the acts done to mail still do (sending, replying, forwarding, deleting, submitting).
+ */
+const MAIL_NOUN = /邮件|来信/g;
+const MAIL_ACT = /回复|答复|转发|抄送|群发|发(一?封)?(邮件|信)(?!人)|发给|发出|寄给|寄出|\b(reply|forward)\b/i;
+/** Drafting a reply is the assistant's (「起草回复存成草稿」); sending it is not. */
+const DRAFTS_REPLY = /(起草|草拟|拟定?|准备)[^，。；,.;]{0,8}?(回复|答复)|(回复|答复)(稿|草稿)/g;
+export const automationStepLeaves = (title: string) => {
+  const drafted = title.replace(DRAFTS_REPLY, "");
+  return MAIL_ACT.test(drafted) || stepLeavesMachine(drafted.replace(MAIL_NOUN, ""));
+};
+
 /** Turns the designer's answer into a stored automation's parts, or says what is wrong so the designer can fix it. */
 export function validateAutomationPlan(value: unknown, lineIds: string[], existingIds: string[] = []):
   Pick<Automation, "name" | "summary" | "lineId" | "trigger" | "action" | "steps"> & { assumptions: string; replaces: string; enabled: boolean } {
@@ -129,7 +143,7 @@ export function validateAutomationPlan(value: unknown, lineIds: string[], existi
   }
   if (!Array.isArray(plan.steps) || !plan.steps.length) problem("steps 至少一步");
   // Anything that sends, uploads, publishes or pays is the person's, whatever the plan says.
-  const steps = plan.steps.map((step) => ({ title: step.title.trim(), by: stepLeavesMachine(step.title) ? "person" as const : step.by }));
+  const steps = plan.steps.map((step) => ({ title: step.title.trim(), by: automationStepLeaves(step.title) ? "person" as const : step.by }));
   return { name: plan.name.trim(), summary: plan.summary.trim(), lineId: plan.lineId, trigger, action, steps, assumptions: plan.assumptions.trim(), replaces,
     enabled: plan.enabled !== false };
 }

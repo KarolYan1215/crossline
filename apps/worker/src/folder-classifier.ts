@@ -32,7 +32,8 @@ export function createFolderClassifier(store: CrosslineStore, workspaceId: strin
     const projects = store.listProjects(workspaceId).map((project) => ({ name: project.name, lineId: project.identityId }));
     const context = { version: "crossline.folder-lines.v1", lines, projects, folders: asked };
     const result = await runCodexSkill<FolderLinesAnswer>(client, context, { skillName: FOLDER_CLASSIFIER, cwd,
-      developerInstructions: "Decide which lines each folder serves as the Skill describes. Return raw JSON only.", outputSchema: FOLDER_LINES_SCHEMA,
+      developerInstructions: "Decide which lines each authorized folder serves, from its name, file names and openings: every line a clear group of "
+        + "its files serves, most central first; none when nothing ties it to a line. A stray file does not make a line. Return raw JSON only.", outputSchema: FOLDER_LINES_SCHEMA,
       prepareInput: () => context, validateOutput: (output) => validateFolderLines(output, asked.map((folder) => folder.id), lines.map((line) => line.id)),
       onAudit: () => {}, timeoutMs: 20 * 60_000 });
     if (!result.ok) return { blocked: result.blocker.code };

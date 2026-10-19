@@ -99,6 +99,8 @@ jobs:
             unset key
             echo "== codex"
             sudo docker exec crossline-worker /opt/codex/codex --version 2>&1 | tail -1 || true
+            # Code mode and web search need codex-code-mode-host beside the runtime.
+            sudo ls -la /srv/crossline/codex 2>&1 | head -10 || true
             curl -s -m 10 http://127.0.0.1:3211/v1/codex/status | head -c 600; echo
             # OpenAI answers an unsupported region with 403 unsupported_country; 401 means reachable.
             for u in https://auth.openai.com/ https://api.openai.com/v1/models https://chatgpt.com/; do printf "%s " $u; curl -s -m 10 -o /tmp/oa -w "%{http_code} " $u; grep -o "unsupported_country[a-z_]*" /tmp/oa | head -1; echo; done'

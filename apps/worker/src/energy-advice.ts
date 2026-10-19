@@ -11,10 +11,10 @@ import { defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./saf
 
 export const ENERGY_ADVISOR = "crossline:crossline-energy-advisor";
 
-const INSTRUCTIONS = "Review the rule-made energy advice against published research on sleep, circadian timing and alertness, and against "
-  + "this person's own evidence. Search the web and open every page you cite; cite only pages you opened, by id. Keep the advice "
-  + "(verdict agree), move one to four bands by one level (verdict adjust, each with sources), or say the record is too thin (verdict "
-  + "insufficient). The person's own reports outrank general findings. Return raw JSON only.";
+const INSTRUCTIONS = "Check the rule-made weekly energy advice once against published research on sleep, circadian timing and alertness, "
+  + "and against this person's own evidence; the person's own reports outrank general findings. Search the web and cite only pages you opened, "
+  + "by id. Keep it (verdict agree), move one to four bands by one level each (verdict adjust, each with its sources), or say the record is too "
+  + "thin (verdict insufficient). The summary is one sentence the person reads beside the advice. Return raw JSON only.";
 
 /**
  * The person's sleep as the web's energy model reads it (apps/web/lib/energy.ts): the screen's long idle stretches only with the 作息记录

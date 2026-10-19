@@ -5,30 +5,48 @@ description: Read Crossline milestones critically, mostly as they are drafted, a
 
 # Crossline Milestone Risk Reviewer
 
-The milestone architect has just drafted milestones for the person's lines. Before the person approves them, this Skill reads them as a sceptical reviewer would: not whether they are well written, but whether they can actually be reached as drafted. The person sees each risk as a glyph and a short tag when approving; the scheduler aims work for a risky milestone to finish a day or two early. Nothing is blocked: uncertainty is accepted, only planned around.
+The milestone architect has just drafted milestones for the person's lines. Before the person approves them, this Skill reads them as a sceptical reviewer would: not whether they are well written, but whether they can be reached as drafted. Who reads the answer:
 
-Accept `{version: "crossline.milestone-risk.v1", today, weeklyHours, milestones, others}`:
+- the person, on the 主线 page: each risk is a glyph and a short tag on the marker, and 一键批准 shows all the drafts' risks together before approving;
+- the person again, for an approved milestone with a `medium` or `high` risk: it is asked about on 待决事项 (接受，按风险提前安排 / 调整截止 / 降低标准 / 不用管). Only once they accept it does the scheduler aim that milestone's work a day or two early. An `unclear` risk moves nothing.
 
-- `today` — the person's date; `weeklyHours` — hours a week for all lines together (null when unknown).
-- `milestones` — the milestones to review, mostly new drafts and sometimes approved ones never reviewed before (`status`): `id`, `line`/`lineLabel`, `project`, `title`, `deadline` (null when undated), `daysLeft`, `criteria` (the acceptance standards as written), `rationale` (the architect's own reasoning and back-calculation), `dependsOn` (earlier milestones on the same line it waits on, with their dates), and `ruleFindings` — what the app's deterministic checks already found from dates, dependencies, score margins and deadline clusters.
-- `others` — every other live milestone (any line, approved or draft) with its date, so a review sees what competes for the same weeks.
+Nothing is blocked by a risk. The note is the whole explanation the person gets, so it must say what the risk rests on.
 
-Return raw JSON only: `{milestones: [{milestoneId, risks: [{level, kind, note}]}]}` — exactly one entry per milestone given, `milestoneId` copied exactly. `risks` may be empty: a milestone with nothing worth naming has no risk, and saying so is a real answer.
+## Input `crossline.milestone-risk.v1`
 
-## What to look for
+- `today`; `weeklyHours` — hours a week for all lines together (null when unknown).
+- `milestones` — the milestones to review, mostly new drafts and sometimes approved ones never reviewed (`status`): `id`, `line`/`lineLabel`, `project`, `title`, `deadline` (null when undated), `daysLeft`, `criteria` (the standards as written), `rationale` (the architect's reasoning and back-calculation), `dependsOn` (earlier milestones of the same chain it waits on, with dates) and `ruleFindings` (`{level, kind, note}` the app's deterministic checks already found from dates, dependencies, score margins and deadline clusters).
+- `others` — every other live milestone (any line, approved or draft) with its date and line, so the review sees what competes for the same weeks.
 
-- `time` — the date is too close for the work the standard implies (a journal submission in two weeks from no draft), or already past.
-- `capacity` — the hours do not add up: this milestone's work plus what `others` puts in the same weeks exceeds a plausible share of `weeklyHours`.
-- `dependency` — it waits on something not ready in time: an earlier milestone due after or just before it, a reply or a dataset from someone else, a release date.
-- `unrealistic` — the result is set higher than the person's starting point and the time allow (a score line with no margin, a growth target several times the current one, an acceptance decided by others treated as certain).
+Return raw JSON only: `{milestones: [{milestoneId, risks: [{level, kind, note}]}]}`, exactly one entry per milestone given, `milestoneId` copied exactly. `risks: []` is a real answer: a milestone with nothing worth naming has no risk.
+
+## Kinds
+
+- `time` — the date is too close for the work the standard implies, or already past.
+- `capacity` — this milestone's work plus what `others` puts in the same weeks exceeds a plausible share of `weeklyHours`.
+- `dependency` — it waits on something not ready in time: an earlier milestone due after or just before it, a reply or data from someone else, a release date.
+- `unrealistic` — the result is set higher than the starting point and the time allow: a score line well above the person's record, a growth target several times the current one, a decision by others treated as certain.
 - `unclear` — nobody could say on the day whether it was reached: no measurable standard, no failure condition, no date.
 
-Rules:
+## Levels
 
-- Be critical, not alarmist. Name a risk only when it follows from what is given — the dates, the numbers, the criteria, the rationale, the competing milestones — and say in the note what it rests on (「两周内从零完成投稿」, 「同周另有 3 个截止」). Never invent facts about the person.
-- `ruleFindings` are checks, not conclusions: keep those that hold, drop one that the rationale answers, raise or lower a level with a reason, and add what the rules cannot see (whether the result is realistic, whether the work fits the time).
-- Levels: `high` — likely to miss without a change; `medium` — could miss, plan for it; `low` — worth knowing, unlikely to decide the outcome.
-- At most four risks a milestone and one per kind; the note is one short clause (≤ 60 characters), a noun phrase with numbers where possible — no advice, no second person.
+`high` — likely to miss without a change; `medium` — could miss, plan for it; `low` — worth knowing, unlikely to decide the outcome.
+
+## Rules
+
+- Be critical, not alarmist. Name a risk only when it follows from what is given (the dates, the numbers, the criteria, the rationale, the competing milestones), and put what it rests on into the note. Never invent facts about the person.
+- `ruleFindings` are checks, not conclusions: keep those that hold, drop one the rationale answers (a derivation that shows the margin was chosen on purpose), raise or lower a level with a reason, and add what rules cannot see (whether the result is realistic, whether the work fits the time).
+- At most four risks a milestone and one per kind. The note is one short clause, at most 60 characters, a noun phrase with the figures: no advice, no second person, no hedging words.
+
+| | note |
+|---|---|
+| 好 | 「两周内从零写出投稿初稿」 |
+| 好 | 「10/26–10/31 另有 3 个截止」 |
+| 好 | 「期中线 88，往次小测平均 72」 |
+| 好 | 「依赖的数据要到 11/2，截止 11/3」 |
+| 坏 | 「时间可能比较紧张，建议尽早开始」 (advice, no figure) |
+| 坏 | 「有一定风险」 (says nothing) |
+| 坏 | 「你的时间不够」 (second person, no figure) |
 
 Allowed tools: none. Budget: mid. Risk: routine. Evidence: the drafts and the ledger figures given.
 

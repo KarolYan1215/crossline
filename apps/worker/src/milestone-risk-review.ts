@@ -99,7 +99,10 @@ export function createMilestoneRiskReviewer(store: CrosslineStore, workspaceId: 
     const fingerprints = new Map(liveMilestones(store, workspaceId).map((item) => [item.milestone.id, item.fingerprint]));
     const result = await runCodexSkill<MilestoneRiskAnswer>(client, context, {
       skillName: MILESTONE_RISK_REVIEWER, cwd, outputSchema: MILESTONE_RISK_SCHEMA,
-      developerInstructions: "Review each milestone critically for what could keep it from being reached, as the Skill describes. One entry per milestone; an empty risks array when there is none. Return raw JSON only.",
+      developerInstructions: "Review each milestone for what could keep it from being reached on its date, as the crossline-milestone-risk-reviewer Skill "
+        + "describes, and return only the requested JSON. The person sees each risk as a tag on the 主线 page before approving, and a medium or high risk "
+        + "on an approved milestone is put to them as a question. One entry per milestone; `risks: []` when nothing follows from the dates, numbers, "
+        + "criteria and competing milestones given. Each note is one clause of at most 60 characters that names the figure it rests on, never advice.",
       prepareInput: () => context,
       validateOutput: (output) => ({ milestones: [...validateMilestoneRisks(output, context)].map(([milestoneId, risks]) => ({ milestoneId, risks })) }),
       softAccept: (_rejection, output) => keepMilestoneRisks(output, context),

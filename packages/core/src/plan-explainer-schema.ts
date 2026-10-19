@@ -12,7 +12,8 @@ export type PlanExplainerContext = {
   nextActionId: string | null;
   alternativeIds: string[];
   activeWorkOrders: Array<{
-    id: string; intent: string; identityId: string;
+    /** The short name the person sees on cards and the plan page (`taskTitleOf`); the explanation names tasks by it, never by `intent`. */
+    id: string; title?: string; intent: string; identityId: string;
     estimateP50Minutes: number; energy: "low" | "medium" | "high" | null;
     important: boolean; confirmedDeadline: string | null;
     /** From the scheduler's own result when the web app supplied it: urgency tier (1 most urgent), importance 0–100, first block. */

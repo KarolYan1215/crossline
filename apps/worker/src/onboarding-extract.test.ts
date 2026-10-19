@@ -49,6 +49,22 @@ test("a failed extraction backs off, says so, and is taken up again once its wai
   expect(store.listProfileFacts(workspaceId).map((fact) => fact.slot)).toEqual(["deadline"]);
 });
 
+test("goal attributes that are actions or achievements are dropped: a line with none on record keeps the real ones, a fuller one keeps its own", async () => {
+  const onRecord = ["科普", "有趣", "稳定更新", "值得信赖"].map((text) => ({ text, kind: "state", sourceRef: "reply-0" }));
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普", attributes: onRecord } }));
+  const attribute = (text: string) => ({ text, kind: "ability", refs: [1] });
+  const answer = facts({ lineProfiles: [
+    { lineId: "research", description: "做忆阻器研究", attributeCandidates: [attribute("严谨"), attribute("能独立立项"), attribute("发表三篇顶会论文"), attribute("独立")] },
+    { lineId: "media", description: "", attributeCandidates: [attribute("有影响力"), attribute("写公众号长文")] }] });
+  const { rpc, prompts } = runtime([round], [answer]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "await" })({ sessionId: "s", text: "希望自己严谨、独立，三年内发三篇顶会。" });
+  // The model was told what was wrong and how to write an attribute before its answer was kept.
+  expect(prompts().filter((prompt) => prompt.includes("ONBOARDING_ATTRIBUTE_NOT_DESCRIPTIVE")).length).toBeGreaterThan(0);
+  const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { attributes: Array<{ text: string }> }>;
+  expect(profiles.research!.attributes.map((item) => item.text)).toEqual(["严谨", "独立"]);
+  expect(profiles.media!.attributes.map((item) => item.text)).toEqual(["科普", "有趣", "稳定更新", "值得信赖"]);
+});
+
 test("files over one run's budget wait for the next run, which follows at once", async () => {
   for (let index = 1; index <= 14; index += 1) store.saveSourceDocument({ id: `d${index}`, ownerId: "o", workspaceId, kind: "text", fileName: `f${index}.txt`,
     mediaType: "text/plain", sha256: `s${index}`, uri: `file:///${index}`, extractedText: `第 ${index} 份材料的内容。`, extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });

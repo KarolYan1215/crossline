@@ -31,6 +31,8 @@ export type ProviderConfig = {
   /** The last four characters of the key the worker holds, or null for a provider that takes none. Never the key. */
   keyLast4: string | null;
   updatedAt: string;
+  /** The model's context window in thousands of tokens, when known (the sponsor's list carries it). */
+  contextK?: number;
 };
 export const MODEL_PROVIDER_SETTING = "model.provider";
 
@@ -83,12 +85,13 @@ export function currentProviderRouting(): ProviderRouting | undefined {
 export const currentRoute = (skillName: string): RouteDecision => decideRoute(skillName, currentProviderRouting());
 
 /** What Codex is given for one thread: the provider's id and its definition (no key — the gateway adds it). */
-export type ThreadProvider = { id: string; model: string; definition: Record<string, unknown> };
+/** `contextWindow`: the model's context in tokens when known (the sponsor's list says it), for compaction before it overflows. */
+export type ThreadProvider = { id: string; model: string; definition: Record<string, unknown>; contextWindow?: number };
 export type RouteDecision = { via: "codex" } | { via: "provider"; provider: ThreadProvider }
   | { via: "blocked"; code: "MODEL_CAPABILITY_MISSING" | "MODEL_NOT_ADMITTED" | "MODEL_SPONSOR_PENDING" | "MODEL_SPONSOR_BUDGET"; message: string };
 
 export function threadProvider(routing: Pick<ProviderRouting, "provider" | "gatewayUrl">, model: string): ThreadProvider {
-  return { id: `crossline-${routing.provider.id}`, model, definition: {
+  return { id: `crossline-${routing.provider.id}`, model, ...(routing.provider.contextK ? { contextWindow: routing.provider.contextK * 1000 } : {}), definition: {
     name: routing.provider.label, base_url: routing.gatewayUrl, wire_api: "responses", requires_openai_auth: false, supports_websockets: false,
     // A local model can think for minutes before its first word; the gateway streams its reasoning, but leave room.
     stream_idle_timeout_ms: 600_000, request_max_retries: 2, stream_max_retries: 2 } };

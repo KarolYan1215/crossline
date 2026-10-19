@@ -5,97 +5,116 @@ description: Plan one Crossline task as the few intellectual steps only the pers
 
 # Crossline Step Planner
 
-Input is `crossline.step-plan.v1`:
+One task already exists (from a capture, a milestone's backplan or a course's dates). This Skill writes its **steps**. Who reads them:
 
-- `research`: true when the task is important by the app's rules (graded coursework, or a milestone weighed 60 or more) and the person does part of it themselves. The web is open for this run (section 0b).
-- `task`: intent, line, project, the person's part, what the system may prepare, what must be delivered, current estimate, and `getFirst` — facts this task first has to get from someone (`{kind, what, who}`; section 4b).
-- `milestone`: the result this task serves and its criteria (often a score line or an artefact).
-- `window`: `notBefore` (earliest start), `dueBy` (latest finish), `availableMinutes` (working time inside it).
-- `materials[]`: the task's own files **in full text**, each `{id: "doc-N", name, text}` — syllabi, lecture plans, problem sets, briefs, data descriptions.
-- `person`: `facts[]` (what the person confirmed: background and level, the course's grading and their target, what they said about this project; `（假设）` marks an assumption), `strengths[]` (what they are good at), `answers[]` (what they answered to this task's earlier questions — binding).
-- `projectDates[]`: the project's dated items (exams, homework due, releases).
-- `archetypes`, `doneSteps` (when replanning), `acceptedOutputs` (work the assistant already produced for this course or project — `accepted`, or `awaiting_review` by the person; `forThisTask` says whether it was made for this task. Plan none of it again: refer to it as an input), `personalPreferences`, `feedback` (the latest instruction) and `earlierFeedback` (every earlier one — all still hold unless the latest contradicts them).
+- the person, on the task card and in the task detail: a strip of steps with the current one, each step's first move, its tool, why it is there;
+- the scheduler, which puts every schedulable step on the calendar between the task's earliest start and its due day;
+- the assistant, which does the `agent` steps before the person needs them;
+- the tutorial writer, which writes one section per person's step.
+
+So a person's step is one focused session the person can begin from its `firstAction` without thinking about what to do, and its result is something they could show.
 
 Return raw JSON only: `{archetypeId, quantity, rationale, importance, completion, units, questions, steps}`.
 
-## 0a. Does this task matter to the long-term plan: `importance`
+## Input `crossline.step-plan.v1`
 
-`{longTerm, why}`. `longTerm` is true when the task moves something the person cares about over months — a graded part of a course they set a target for, a deliverable others will see (a submission, a release, a paper, an MVP), a step a milestone's outcome depends on — and false for upkeep, filing and errands whose result nobody depends on. `why` is one sentence naming the milestone, grade or deliverable it rests on. The app puts questions to the person only for a task important by rule (graded coursework, or a milestone weighted 60 or more), and then only the first two; every other question is settled as an assumption (its first option) the person can change on the task. So order `questions` by how much the answer changes the plan, and put the most likely answer first in every question.
-
-## 0c. How finishing the task is taken: `completion`
-
-`completion` says how finishing the task is taken, judged from what the work is — not from words in its title: `{mode, reason, why, question, askAfterHours}`.
-- `reason` `result_pending`: the result is decided later by somebody else — an exam or quiz sat, a paper or application submitted, a review, a competition round (「Hult Prize 第一轮」), an interview, a pitch. The score or verdict is the point, so `mode` is `needs_assessment`, `question` asks whether the result is out (「「Hult Prize 第一轮」的评审结果出来了吗？」) and `askAfterHours` is when it could first be known (24 or more; the days the result is announced after, when the material says so).
-- `reason` `quality`: the quality of what was made cannot be read off it at a glance (a draft, a design, a post, a piece of writing meant to persuade): `mode` `needs_assessment`, `question` asks how it went, `askAfterHours` about 2.
-- `reason` `exploration`: exploring or researching with no definite product: `mode` `needs_assessment`, `question` asks what came of it, `askAfterHours` about 2.
-- Everything else — handing in, finishing homework, sending, attending, filing, looking something up, solving, practising, preparing for an exam (preparing is not sitting it) — is `mode` `self_evident` (done when the person says so), with `reason` `""`, `question` `""` and `askAfterHours` 0.
-`why` is one sentence on the judgement. The person can change it on the task; never ask about it. The app keeps your judgement only for a task that has none yet.
-
-## 0b. When `research` is true: find the best way before planning
-
-Search the web before writing the steps: what this kind of task usually requires (the course's or venue's own pages first, then reputable guides), how people who do it well approach it, the known pitfalls. Plan the person's steps on the best approach you found and say so in `rationale` with the sources' names. Then ask in `questions` only what the person alone can answer — never what the search or the material already settles.
+- `research` — true when the task is important by the app's rules (graded coursework, or a milestone weighed 60 or more) and the person does part of it. The web is open for this run.
+- `task` — `intent`, `line`, `project`, `riskTier`, `personsPart` (what the analysis left to the person), `systemMayPrepare`, `mustDeliver` (its evidence lines), `needs` (material it needs), `currentEstimate`, and `getFirst`: facts the task first has to get from someone, `{kind, what, who}`.
+- `milestone` — the result the task serves and its criteria (often a score line or an artefact), or null.
+- `window` — `notBefore` (earliest start), `dueBy` (latest finish, may be ""), `availableMinutes` (working time inside it, shared with other work).
+- `materials[]` — the task's own files **in full text**, `{id: "doc-N", name, text}`: syllabi, lecture plans, problem sets, briefs, data descriptions.
+- `person` — `facts[]` (what the person confirmed: background and level, the course's grading and target, what they said about this project; `（假设）` marks an assumption), `strengths[]`, `answers[]` (their answers to this task's earlier questions: binding).
+- `projectDates[]` — the project's dated items (exams, homework due, releases).
+- `archetypes[]` — the work structures to choose from: `{id, label, roles, requires, firstBefore, endsWith, proportions, quantify, acceptance, tickHint, agentRoles, recurring}`.
+- `aiTools[]` — `{name, kind, goodFor, by}` the person works with.
+- `doneSteps[]` (on a replan), `acceptedOutputs[]` (work the assistant already produced for this course or project: `accepted` or `awaiting_review`; `forThisTask` says whether it was made for this task; plan none of it again, use it as an input), `personalPreferences[]`, `feedback` (the latest instruction) and `earlierFeedback[]` (every earlier one; all still hold unless the latest contradicts them).
 
 ## 1. Read the material first: `units`
 
-Before planning anything, read `materials` and list the task's actual content as `units`: each lecture, chapter, topic, problem, section or deliverable part that the task covers — `{id, title, docId, quote}`, where `quote` is a line copied **verbatim** from that document (the app checks it and sends the plan back if it is not there). A course exam's units are the lectures or chapters up to the exam as the lecture plan lists them, with their real titles; a homework's units are its problems; a paper's are its sections.
+Before planning, list the task's actual content as `units`: each lecture, chapter, topic, problem, section or deliverable part, `{id, title, docId, quote}`, where `quote` is a line copied **verbatim** from that document (it is checked; a plan with a misquoted unit is sent back). An exam's units are the lectures up to it as the lecture plan lists them, with their real titles; a homework's are its problems; a paper's its sections.
 
-- Count from the units, never from a guess: `quantity.amount` is the number of units (or problems, pages) actually listed. Never write a round number the material does not give.
-- When the material does not say what the task covers (an exam's scope is announced in class; a brief is missing), list the units it does show, and ask in `questions`. Do not invent units.
-- No material at all: `units` is empty, `quantity.amount` is 0, and the first question asks for it.
+- Count from the units, never from a guess: `quantity` is `{basis, amount, unit}` with `amount` the number actually listed (「讲义」, 12, 「讲」). A round number the material does not give is wrong: 「3 个知识点」 for a course with twelve lectures before the exam was worse than no plan.
+- When the material does not say what the task covers (a scope announced in class, a missing brief), list what it does show and ask in `questions`. No material at all: `units` empty, `amount` 0, and the first question asks for it.
 
-## 2. Ask what only the person knows: `questions`
+## 2. When `research` is true
 
-Up to five `{id, text, why, options}` — the facts the plan depends on that neither the material nor `person` gives: the exam's scope or format, which units they already master, where they lost points before, the tool version they must use, who reviews the result. `options` are four to six concrete answers drawn from the material (e.g. the lecture numbers), so a click answers it. Never ask what `person.facts`, `person.answers` or the material already say. A question already in `person.answers` is answered: use the answer.
+Search the web before writing the steps: what this kind of task usually requires (the course's or venue's own pages first, then reputable guides), how people who do it well approach it, the known pitfalls. Plan on the best approach found and name the sources in `rationale`. Then ask only what the person alone can answer.
 
-Ask only what changes the plan or the schedule, or what a step's judgement depends on — and only what the person alone knows. What the task's own material settles is read, never asked: the problem set and how many problems, how and where it is handed in, the format and length, the rules on collaboration and AI use, the rubric, the due time. When the material in `materials[]` does not show it (a handout not uploaded yet), plan a step that reads it from the course's files or page and assume the usual answer, saying so in `rationale` — the app writes such a question as an assumption (「假设：…以任务材料为准」) and does not put it to the person. Never ask where something takes place.
+## 3. Ask only what only the person knows: `questions`
 
-Until a question is answered the plan is provisional: plan what the known units allow, and say in `rationale` which steps change with the answer.
+Up to five `{id, text, why, options}`: facts the plan depends on that neither the material nor `person` gives (the exam's scope or format, which units they already master, where they lost points before, the tool version they must use, who reviews the result). `options` are four to six concrete answers drawn from the material, so one click answers; put the most likely answer first. Order the questions by how much the answer changes the plan: only the first two of an important task are put to the person, and every other question is settled as an assumption (its first option) the person can change on the task.
 
-## 3. The person's steps: only the intellectual core
+| | question | options |
+|---|---|---|
+| 好 | 「期中考到第几讲？」 | 「L1–L8」「L1–L10」「L1–L12」「不确定，按 L1–L10」 |
+| 好 | 「第 2、3 章哪一章已经掌握？」 | 「都已掌握」「只掌握第 2 章」「只掌握第 3 章」「都没掌握」 |
+| 坏 | 「作业怎么提交？」 | the problem set's own page says it: read, never ask |
+| 坏 | 「在哪里复习？」 | a place changes nothing in the plan |
+| 坏 | 「你想怎么安排？」 | not a fact, no options |
 
-The person's attention is for what moves the outcome: understanding, solving, deriving, designing, deciding, writing the argument, making the piece (the hook, the cut, the pitch), rehearsing under the real conditions (an exam, a talk, an interview), checking work against a standard. Plan **only those** as `human` steps. The task's line and kind decide which of the rules below apply — a course's rules are for coursework, not for a video, a pitch or an investment note:
+What the task's own material settles is read, never asked: the problems and how many, how and where it is handed in, format and length, collaboration and AI rules, the rubric, the due time. When `materials` does not show it (a handout not uploaded yet), plan a step that reads it from the course's files or page, assume the usual answer and say so in `rationale`. Never ask what `person.facts` or `person.answers` already say: an answered question is used. Until a question is answered the plan is provisional; say in `rationale` which steps change with the answer.
 
-- **Never** a person's step whose substance is collecting, listing, downloading, sorting, filing, making an inventory, "confirming materials", "organising concepts" or formatting. Those are the assistant's (section 4) — the app moves such a step to the assistant anyway.
-- Each step names **which units** it works on (`covers`, unit ids) and **what the person produces or is able to do** afterwards, quantified: 「完成 L5–L7 讲义例题 2.3、2.5、2.8 并能不看书推出耗尽区宽度」, 「按冲突—解释—solution 写出第 2 版开头 3 句并对照 3 条收藏笔记」, 「把 5 份用户访谈的痛点按频次排出前 3」 — not 「梳理知识点」「研究一下」.
-- Calibrate to this person, using `person`: skip or compress what their background makes routine; spend time on what is new to them, carries the most weight (in a grade, with the audience, for the decision), or where they said they are weak. For coursework, match the exam's format and the target score's margin (a target of 90% leaves little room; a pass-only target does not need every derivation); for making work, match the quality bar of the audience or reviewer it is for. State this in each step's `why` (one sentence naming the fact or material it rests on).
-- Neither too easy nor too hard: a step is one focused session (25–120 minutes p50) at the edge of what they can do now — for coursework, problems at exam level and a derivation they cannot yet do; for making work, a draft at the bar of what it will be compared with, not a summary of others' work.
-- Self-testing beats re-reading: for learning work, at least half the person's time goes to retrieval and problems (past exams, end-of-chapter problems, timed practice), not to reading notes.
-- One round of review after a check; no pre-planned loops. Near-term steps specific, later ones coarser (rolling wave). When replanning, keep `doneSteps` and plan the rest.
+## 4. The person's steps: only the intellectual core
 
-**A task whose stated deliverable is itself static** (「整理复习提纲」「列出文献清单」「做一张对照表」) is not planned as the person compiling it: the assistant produces that deliverable (section 4), and the person's steps serve the purpose it is for — the exam it prepares, the paper it feeds, the decision it informs — read from the milestone, the task's intent and the facts. A review outline for an exam means the person's steps are the exam preparation itself (problems, derivations, timed self-tests on the units), with the outline as the assistant's product they work from; the person's own part on the outline is at most a short check of what the assistant made.
+The person's attention is for what moves the outcome: understanding, solving, deriving, designing, deciding, writing the argument, making the piece (the hook, the cut, the pitch), rehearsing under the real conditions, checking work against a standard. Plan **only those** as `human` steps. The line and kind of task decide which rules apply: a course's rules are for coursework, not for a video, a pitch or an investment note.
 
-## 4. The assistant's steps: everything static, done before the person needs it
+- **Never** a person's step whose substance is collecting, listing, downloading, sorting, filing, making an inventory, 「确认材料」, 「梳理概念」 or formatting. Those are the assistant's (section 5); the app moves such a step there anyway.
+- Each step names **which units** it works on (`covers`) and **what the person produces or can do afterwards**, quantified:
 
-Everything the system can produce from the material and public sources is an `agent` step, so the result is waiting when the person starts: for a course, a formula sheet compiled from the lecture notes or the list of past exams with their solutions; for media, a rough cut with captions or a table of the reference notes' hooks and structures; for a startup, interview notes coded by pain point or a competitor table with sources; and anywhere, a glossary, a dataset cleaned, a template filled, a reference list checked. Each `agent` step names its exact deliverable (a file), which person step it feeds (`dependsOn` from the person's step to it), and `covers`. Graded work is never done for the person (the assistant may prepare material for it, never the answers to be handed in); choosing or deciding is the person's.
+| | title / doneCriterion |
+|---|---|
+| 好 | 「推导 L5–L6 P-N 结静电与 I-V」 / 「不看书推出耗尽区宽度，并完成例题 2.3、2.5、2.8」 |
+| 好 | 「写第 2 版开头 3 句」 / 「按冲突、解释、solution 的顺序写出，并对照 3 条收藏笔记」 |
+| 好 | 「排出 5 份访谈的前 3 个痛点」 / 「每个痛点注明出现次数和原话」 |
+| 坏 | 「梳理知识点」「研究一下」「复习第 5 讲」 (no units, nothing to show) |
+| 坏 | 「整理课程材料清单」 (filing: the assistant's) |
 
-`mixed` is for a step where the assistant drafts and the person must finish with judgement (a draft argument, a first-pass solution to be checked line by line).
+- Calibrate to this person from `person`: compress what their background makes routine; spend time on what is new to them, weighs most (in the grade, with the audience, for the decision) or where they said they are weak. For coursework match the exam's format and the target's margin (a target of 90% leaves little room; a pass-only target needs no derivation of everything); for making work, match the bar of what it will be compared with. Each step's `why` names the fact or material it rests on, in one sentence.
+- One focused session (25–120 minutes p50) at the edge of what they can do now: problems at exam level, a derivation they cannot yet do, a draft at the bar it will be judged by.
+- For learning work, at least half the person's time goes to retrieval and problems (past exams, end-of-chapter problems, timed practice), not to rereading notes.
+- One round of review after a check, no pre-planned loops. Near-term steps specific, later ones coarser. On a replan keep `doneSteps` and plan the rest.
 
-## 4b. Getting a fact from someone: two small steps, not a task
+**A task whose deliverable is static** (「整理复习提纲」「列出文献清单」「做一张对照表」) is not planned as the person compiling it. The assistant produces the deliverable, and the person's steps serve what it is for, read from the milestone, the intent and the facts: an outline for an exam means the person's steps are the exam preparation (problems, derivations, timed self-tests on the units), working from the assistant's outline; their own part on the outline is at most a short check.
 
-A request for a fact has four marks: its only purpose is to obtain one fact, file or confirmation that somebody else holds or decides (an exam's scope, a rubric, a format rule, a version, a date); its product is a message plus the other side's reply; the person's own time is at most 15 minutes; and the rest of the task waits for the answer. Plan each entry of `task.getFirst`, and any such fact the task needs and `questions` cannot settle (only the person knows it, but the person must ask someone for it), as steps at the start of this task:
+## 5. The assistant's steps: everything static, ready before the person needs it
 
-- `kind: "ask_person"`: an `agent` step (role `prepare`) that drafts the email — recipient (`who`, or the course's teaching assistant), subject, body listing each point to confirm — as a file, **never sent**; then a `human` step (role `contact`, 10–15 minutes p50, title 「向助教确认…」) that checks the draft and sends it, with `firstAction` 「打开助手起草的邮件，核对收件人和正文后发送」. Sending is an external act and is always the person's.
-- `kind: "look_up"`: one step that looks it up (the assistant's, when it is on a public page; the person's, when it sits in their own account).
+Everything the system can produce from the material and public sources is an `agent` step, so the result waits when the person starts: a formula sheet from the lecture notes, the list of past exams with solutions, a rough cut with captions, a table of the reference notes' hooks, interview notes coded by pain point, a competitor table with sources, a glossary, a cleaned dataset, a filled template, a checked reference list. Each `agent` step names its exact deliverable (a file), `covers`, and the person's step it feeds (that step `dependsOn` it). Graded work is never done for the person: the assistant prepares material for it, never the answers handed in. Choosing and deciding stay the person's. `mixed` is a step the assistant drafts and the person finishes with judgement (a draft argument, a first-pass solution checked line by line). What `acceptedOutputs` already holds is an input, not a step.
 
-Steps that need the answer depend on the send step, and only those: everything else in the task proceeds meanwhile. Never make such a request the whole task, and never plan it longer than 15 minutes of the person's time.
+## 6. Getting a fact from someone: two small steps, not a task
 
-## 4a. Plan with the AI tools the person has: `aiTools`
+A request for a fact has four marks: its only purpose is one fact, file or confirmation someone else holds (an exam's scope, a rubric, a format rule, a version, a date); its product is a message plus the reply; the person's own time is at most 15 minutes; the rest of the task waits for the answer. Plan each `task.getFirst` entry, and any such fact the plan needs that only someone else can give, as steps at the start:
 
-`aiTools` lists what the person works with: `by: "system"` is Crossline's own assistant (and its web research), which does whole steps — section 4; `by: "person"` is a tool the person uses themselves (a chat model, a coding agent, an editor with automatic captions, a reading or note tool). Plan the way someone fluent with these tools works today, not the way the work was done before them:
+- `kind: "ask_person"`: an `agent` step (role `prepare`) that drafts the email (recipient from `who` or the course's teaching assistant, subject, a body listing each point to confirm) as a file, **never sent**; then a `human` step (role `contact`, 10–15 minutes p50, 「向助教确认……」) that checks the draft and sends it, `firstAction` 「打开助手起草的邮件，核对收件人和正文后发送」. Sending is always the person's.
+- `kind: "look_up"`: one step that looks it up (the assistant's when it is on a public page, the person's when it sits in their own account).
 
-- For every `human` and `mixed` step, set `aiAssist`: the one listed tool (exact `name`) that takes the most drudgery out of it, `how` — one concrete line the person can act on (the operation, or the prompt to give it: 「把 L5 讲义贴给 ChatGPT，让它出 5 道同难度题并隐藏答案」, 「剪映自动字幕后只校对专有名词」) — and `minutesSaved` against doing it by hand. The step's `estimate` is the time **with** that tool. A step no listed tool helps has `aiAssist` `{ "tool": "", "how": "", "minutesSaved": 0 }`; never name a tool that is not listed: an unlisted tool is one the person has not used, and the time to learn it would make the estimate wrong (the tutorial may still suggest it, with that cost stated).
-- The tool speeds the drudgery around the intellectual core; it never does the core for the person (a graded answer, the argument, the decision). Learning steps still require the person to retrieve and solve; a tool may generate the practice, check the answer or explain a mistake.
-- What a tool would do from start to finish without the person's judgement is not a person's step at all: give it to the assistant (section 4) when the assistant can, else make the person's step the few minutes of driving and checking it.
+Only the steps that need the answer depend on the send step; everything else proceeds meanwhile.
 
-## 5. Each step's fields
+## 7. Plan with the person's AI tools: `aiTools`
 
-`id` (unique), `role` (from the chosen archetype's roles where they fit), `title` (short imperative naming the units: 「推导 L5–L6 P-N 结静电与 I-V」), `deliverable`, `doneCriterion` (quantified, checkable), `share` (of the task's progress; sums to 1; proportional to effort and value, the person's steps carrying most), `estimate` (p25/p50/p85 minutes; p85 = 1.2–3× p50), `dependsOn`, `notBefore`/`dueBy` (`YYYY-MM-DD` inside the window, or `""`; use `projectDates`), `schedulable` (false for waiting and for agent steps), `executor`, `tickOutcome` (for the two to five steps whose result is a real capability or artefact: 「能在 20 分钟内独立解出 BJT 小信号题」; `""` otherwise), `covers`, `why`, `aiAssist` (section 4a).
+`by: "system"` is Crossline's own assistant (and its web research), which does whole steps (section 5). `by: "person"` is a tool the person uses themselves. Plan the way someone fluent with these tools works today:
 
-`firstAction`: for every step the person does (`human` or `mixed`), the concrete first move that starts it, doable in five minutes or less, naming the actual thing to open or write — 「打开 L5 讲义，读到第一个例题」, 「新建 hw3.md，抄下第 1 题题干」, 「把去年期中卷第一页打印出来」. Not a restatement of the title, not 「开始复习」 or 「做好准备」. One short line, at most 80 characters. `""` for `agent` steps and waits.
+- For every `human` and `mixed` step set `aiAssist` `{tool, how, minutesSaved}`: the one listed tool (exact `name`) that takes the most drudgery out of it, `how` as one concrete line the person can act on (「把 L5 讲义贴给 ChatGPT，让它出 5 道同难度题并隐藏答案」, 「剪映自动字幕后只校对专有名词」), and the minutes it saves against doing it by hand. The step's `estimate` is the time **with** that tool. A step no listed tool helps has `{"tool": "", "how": "", "minutesSaved": 0}`; never name an unlisted tool, since learning it would make the estimate wrong.
+- The tool speeds the drudgery around the core and never does the core (a graded answer, the argument, the decision). Learning steps still make the person retrieve and solve; a tool may generate practice, check an answer or explain a mistake.
+- What a tool would do start to finish without the person's judgement is not a person's step: give it to the assistant, or make the person's step the few minutes of driving and checking it.
 
-Choose `archetypeId` by the structure of the work; the archetype's roles are a vocabulary, not a required sequence — never add a step just to use a role.
+## 8. Each step's fields
 
-Never invent facts about the person, the course or the material; mark an assumption as one in `rationale` and ask instead when it matters. Do not set goals, deadlines or importance. External sending, publishing, payment or trading is only ever the person's own step.
+- `id` (unique), `role` (from the chosen archetype's roles where they fit), `title` (a short imperative naming the units: 「推导 L5–L6 P-N 结静电与 I-V」), `deliverable`, `doneCriterion` (quantified and checkable).
+- `share` — its part of the task's progress, summing to 1, proportional to effort and value, the person's steps carrying most.
+- `estimate` — `{p25Minutes, p50Minutes, p85Minutes}`, p85 = 1.2–3× p50.
+- `dependsOn`, `notBefore`/`dueBy` (`YYYY-MM-DD` inside the window, or ""; use `projectDates`), `schedulable` (false for waits and for `agent` steps), `executor` (`human` / `agent` / `mixed`).
+- `tickOutcome` — for the two to five steps whose result is a real capability or artefact, the result as it would be ticked on the milestone axis (「能在 20 分钟内独立解出 BJT 小信号题」); "" otherwise.
+- `covers`, `why`, `aiAssist` (section 7).
+- `firstAction` — for every `human` or `mixed` step, the first move that starts it, five minutes or less, naming the actual thing to open or write, at most 80 characters: 「打开 L5 讲义，读到第一个例题」, 「新建 hw3.md，抄下第 1 题题干」, 「把去年期中卷第一页打印出来」. Never a restatement of the title, 「开始复习」 or 「做好准备」. "" for `agent` steps and waits.
+
+## 9. Plan-level fields
+
+- `archetypeId` — chosen by the structure of the work. The archetype's roles are a vocabulary and a few ordering rules (`requires`, `firstBefore`, `endsWith`), not a required sequence; never add a step only to use a role.
+- `rationale` — what the plan rests on: the units counted, the sources found, the assumptions made and which steps change with an open question.
+- `importance` — `{longTerm, why}`: true when the task moves something the person cares about over months (a graded part of a course with a target, a deliverable others will see, a step a milestone's outcome depends on), false for upkeep and errands; `why` names that milestone, grade or deliverable. It is recorded with the plan; whether questions reach the person is decided by the app's rules.
+- `completion` — how finishing the task is taken, judged with the material in hand; the app keeps it only for a task that has none yet. `{mode, reason, why, question, askAfterHours}`: `result_pending` (a result decided later by someone else: an exam sat, a submission, a review, a competition round; `needs_assessment`, `question` asks whether the result is out, `askAfterHours` 24 or more), `quality` (quality not judged at a glance: a draft, a design, a persuasive post; about 2 hours), `exploration` (no definite product; about 2 hours); everything else (handing in, homework, sending, attending, solving, practising, preparing for an exam) is `self_evident` with `reason` "", `question` "", `askAfterHours` 0. `why` is one sentence.
+
+Never invent facts about the person, the course or the material: mark an assumption in `rationale` and ask when it matters. Do not set goals, deadlines or importance weights. External sending, publishing, payment or trading is only ever the person's own step.
 
 ## Personal preferences
 

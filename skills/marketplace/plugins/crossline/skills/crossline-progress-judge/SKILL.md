@@ -1,18 +1,38 @@
 ---
 name: crossline-progress-judge
-description: Read a person's progress report on one task against its steps and standards, and give each a reading in quarters.
+description: Read a person's progress report on one task against its steps and its milestone's standards, and give each one the report speaks to a reading in quarters.
 ---
 
 # Crossline Progress Judge
 
-Input is `crossline.progress-judge.v1`: one task (`task`), its open and done steps (`steps`: id, title, done criterion, current quarters), the standards it is judged against (`criteria`: id, statement, current quarters), and `report`: what the person wrote about their progress, with the names and text of any files they attached. Return raw JSON only: `{steps, criteria, summary}`.
+On a task's page the person wrote, in their own words, how far they are (「第 1–4 题做完了，第 5 题还没开始」). This Skill turns that into readings. A step's reading moves its progress on the task card (4 marks it done; a reading is only ever applied forward, never back); a standard's reading fills its ring on the card. The person did not ask for a grade, so read generously what they say they did and strictly what counts as done.
 
-- For each step or standard the report actually speaks to, give `quarters` from 0 to 4: 1 = started, 2 = about half, 3 = nearly done, 4 = done by its own done criterion. Leave out what the report does not mention; do not lower a reading the report does not contradict.
-- 4 needs the report (or an attached file) to show the done criterion is met, not only that work happened. A claim without anything to check against is at most 3.
-- `criteria[].note`: one short line on what in the report supports the reading (「已完成第 1–3 题并附答案文件」).
-- `summary`: one or two sentences on where the task stands overall.
+## Input `crossline.progress-judge.v1`
 
-Never invent progress, files or numbers. Chinese, objective, third person, no second person.
+- `task` — the task's description.
+- `report.text` — what the person wrote (up to 2000 characters). There are no attachments.
+- `steps[]` — `{id, title, doneCriterion, quarters, status}`: the task's steps with their current reading (0–4) and `status` (`planned`, `done`, `skipped`).
+- `criteria[]` — `{id, statement}`: the standards of the milestone the task serves; may be empty.
+
+Return raw JSON only: `{steps: [{stepId, quarters}], criteria: [{criterionId, quarters, note}], summary}`.
+
+## Readings
+
+- Give an entry only for a step or standard the report speaks to; leave out the rest. Copy `stepId` and `criterionId` exactly.
+- `quarters` 0–4: 1 started, 2 about half, 3 nearly done, 4 done by its own `doneCriterion` (or, for a standard, its statement met).
+- 4 needs the report to show the done criterion is met, not only that work happened. A claim with nothing checkable against the criterion is at most 3.
+- Never lower a reading the report does not contradict; a step already `done` needs no entry.
+- `criteria[].note`: one short line on what in the report supports the reading.
+- `summary`: one or two sentences on where the task stands.
+
+Example: step `s2` 「解第 1–5 题」 (doneCriterion 「5 题全部有完整解答」) and the report 「第 1–4 题做完了，第 5 题还没开始」 → `{stepId: "s2", quarters: 3}`; summary 「解题步骤完成第 1–4 题，第 5 题未开始；其余步骤未提及」.
+
+| | note |
+|---|---|
+| 好 | 「已完成第 1–4 题，第 5 题未开始」 |
+| 坏 | 「进展不错，继续加油」 (no content, encouragement) |
+
+Never invent progress, files or numbers.
 
 ## Language
 

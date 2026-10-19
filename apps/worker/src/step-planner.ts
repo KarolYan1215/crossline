@@ -2,7 +2,7 @@ import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, readableFromMaterial, relevantDocuments, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
-  FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, type FinerSplit, type StepTrouble
+  FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, type FinerSplit, type StepTrouble, type SuccessCriterion
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { aiToolsFor, assistantAvailable, listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
@@ -261,9 +261,13 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // The line's own skill and the public skills that fit the task, read beside the planner's: how this work is done shapes the steps.
     const extraSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, task: order.intent, ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
     const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd, ...(extraSkills.length ? { extraSkills } : {}),
-      developerInstructions: "Choose the archetype and write the task's step graph as the Skill describes. Return raw JSON only."
+      developerInstructions: "Write this task's steps as the crossline-step-planner Skill describes and return only the requested JSON. The steps are "
+        + "what the person sees on the task and what the scheduler puts on the calendar. Read `materials` first and count the units from them, each quoting "
+        + "its file verbatim. The person's steps are only the intellectual core (solving, deriving, deciding, writing, rehearsing), each one focused "
+        + "session with a quantified done criterion and a firstAction of five minutes or less; collecting, listing and filing are the assistant's steps. "
+        + "Ask only what neither the material nor person.facts settles, with the likeliest option first."
         + libraryInstruction(extraSkills)
-        + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change." : "")
+        + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change; earlierFeedback still holds unless it contradicts it." : "")
         + (research ? " research is true: search the web for this task's background and the best known way to do it before planning, as the Skill's research section says." : ""),
       ...(research ? { allowWebSearch: true } : {}),
       outputSchema: stepPlanSchema(learned.map((archetype) => archetype.id)), prepareInput: () => input,
@@ -399,7 +403,9 @@ export function createProgressJudge(store: CrosslineStore, workspaceId: string, 
       steps: steps.map((step) => ({ id: step.id, title: step.title, doneCriterion: step.doneCriterion, quarters: step.progressQuarter, status: step.status })),
       criteria: criteria.map((criterion) => ({ id: criterion.id, statement: criterion.statement })) };
     const result = await runCodexSkill<ProgressAssessment>(client, input, { skillName: JUDGE, cwd,
-      developerInstructions: "Read the progress report against the steps and standards as the Skill describes. Return raw JSON only.",
+      developerInstructions: "Read the person's progress report against this task's steps and standards, as the crossline-progress-judge Skill describes, "
+        + "and return only the requested JSON. A reading moves a step forward on the task card, so give one only for what the report speaks to, and 4 "
+        + "only when the report shows the done criterion met.",
       outputSchema: PROGRESS_ASSESSMENT_SCHEMA, prepareInput: () => input,
       validateOutput: (output) => validateProgressAssessment(output, steps.map((step) => step.id), criteria.map((criterion) => criterion.id)),
       onAudit: () => {}, timeoutMs: 30 * 60_000 });
@@ -447,7 +453,7 @@ export function createWarningReviewer(store: CrosslineStore, workspaceId: string
       : item.subject === "analysis" ? analysisSubject(store, workspaceId, item) : stepSubject(store, workspaceId, item);
     if (!input) { record({ verdict: "dismiss", notes: "已被新版本取代" }); return undefined; }
     const result = await runCodexSkill<ValidationReview>(client, input, { skillName: REVIEWER, cwd,
-      developerInstructions: "Decide whether the warnings matter, as the Skill describes. Return raw JSON only.",
+      developerInstructions: REVIEW_INSTRUCTIONS[item.subject] ?? REVIEW_INSTRUCTIONS.task_steps!,
       outputSchema: VALIDATION_REVIEW_SCHEMA, prepareInput: () => input, validateOutput: validateValidationReview,
       onAudit: () => {}, timeoutMs: 30 * 60_000 });
     if (!result.ok) return undefined;
@@ -467,6 +473,25 @@ export function createWarningReviewer(store: CrosslineStore, workspaceId: string
 
 type PendingWarning = ReturnType<typeof warningsAwaitingReview>[number];
 
+/**
+ * What each kind of review decides and where its notes go: one line saying "decide whether the warnings matter" for all four left the
+ * reviewer to guess who would read a redo's notes.
+ */
+const REVIEW_COMMON = " Return only the requested JSON. Judge the substance, never the wording; when unsure, dismiss.";
+const REVIEW_INSTRUCTIONS: Record<string, string> = {
+  task_steps: "Decide whether the warnings on this task's step plan point at a real problem the person would notice (no hand-in, an order that "
+    + "cannot work, a total that cannot fit the window, a step nobody could tell is done), as the crossline-validation-reviewer Skill describes. "
+    + "A redo's notes go to the step planner as its brief, one concrete change per line." + REVIEW_COMMON,
+  milestone_line: "Decide whether the drafts an architect run kept despite quality warnings can stand, as the crossline-validation-reviewer Skill "
+    + "describes. Redo when a draft is an ongoing condition rather than a dated result, a score line has no margin or derivation, or a graded part "
+    + "is missing; the notes become the architect's brief for this line." + REVIEW_COMMON,
+  analysis: "Decide whether this task's corrected estimate and evidence contract can be right for the task, as the crossline-validation-reviewer "
+    + "Skill describes. A redo's notes go to the step planner, which estimates again step by step." + REVIEW_COMMON,
+  milestone_relation: "Decide whether this cross-line link claims a real transfer someone could check on its check day, as the "
+    + "crossline-validation-reviewer Skill describes. A redo's notes become the brief for designing the receiving line again: say what the link "
+    + "should claim instead, or that it should be dropped." + REVIEW_COMMON
+};
+
 function stepSubject(store: CrosslineStore, workspaceId: string, item: PendingWarning) {
   const plan = store.getStepPlan(workspaceId, item.entityId);
   const order = store.listWorkOrders(workspaceId).find((row) => row.id === item.entityId);
@@ -474,7 +499,9 @@ function stepSubject(store: CrosslineStore, workspaceId: string, item: PendingWa
   return { version: "crossline.validation-review.v1", warnings: item.warnings,
     subject: { kind: "task_steps", task: order.intent, archetype: archetypeBrief(archetypeById(plan.archetypeId, learnedArchetypes(store, workspaceId)) ?? ARCHETYPES[0]!),
       quantity: plan.quantity, rationale: plan.rationale, steps: plan.steps.map((step) => ({ id: step.id, role: step.role, title: step.title,
-        doneCriterion: step.doneCriterion, share: step.share, p50Minutes: step.estimate.p50Minutes, dependsOn: step.dependsOn, status: step.status })) } };
+        doneCriterion: step.doneCriterion, share: step.share, p50Minutes: step.estimate.p50Minutes, dependsOn: step.dependsOn, status: step.status,
+        // Whose step it is: the assistant's take no calendar time, so a total that "cannot fit the window" may count only the person's.
+        executor: step.executor, schedulable: step.schedulable })) } };
 }
 
 /** The drafts one architect run produced for a line, while they are still untouched drafts. */
@@ -483,10 +510,16 @@ function lineSubject(store: CrosslineStore, workspaceId: string, item: PendingWa
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
   const drafts = store.listMilestones(workspaceId).filter((milestone) => ids.has(milestone.id) && milestone.status === "draft");
   if (!drafts.length) return undefined;
+  // The rationale carries the derivation (`persistProposals` appends it), which is what a 「no margin or derivation」 warning is about.
+  const rationale = new Map(store.listEvents(workspaceId, { type: "milestone.proposed" })
+    .map((event) => [event.entityId, String((event.payload as { rationale?: string }).rationale ?? "")]));
+  const line = (measure: SuccessCriterion["measure"]) => measure.kind === "threshold"
+    ? `${measure.comparator === "lte" ? "≤" : "≥"} ${measure.value}${measure.unit}${typeof measure.bareLine === "number" ? `（刚好够：${measure.bareLine}）` : ""}` : "";
   return { version: "crossline.validation-review.v1", warnings: item.warnings,
     subject: { kind: "milestone_line", line: item.entityId.replace(/^line:/, ""), milestones: drafts.map((milestone) => ({ title: milestone.title,
       deadline: anchors.get(milestone.id)?.deadline ?? "", target: anchors.get(milestone.id)?.target ?? "",
-      criteria: milestone.successCriteria.map((criterion) => criterion.statement) })) } };
+      criteria: milestone.successCriteria.map((criterion) => [criterion.statement, line(criterion.measure)].filter(Boolean).join(" ")),
+      rationale: (rationale.get(milestone.id) ?? "").slice(0, 800) })) } };
 }
 
 /** An analysis kept after a quality correction, while its task has not started. */

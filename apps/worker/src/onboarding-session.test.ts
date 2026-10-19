@@ -308,7 +308,7 @@ test("with the completion list on, a 「ready」 before the portrait is written 
   expect(last.questions.length).toBeGreaterThan(0);
 });
 
-const attributes = ["神经形态计算", "器件物理", "能独立立项", "能写基金申请", "持续产出", "被同行认可"]
+const attributes = ["神经形态计算", "器件物理", "严谨", "独立", "持续产出", "被同行认可"]
   .map((text, index) => ({ text, kind: index < 2 ? "domain" : index < 4 ? "ability" : "state", refs: [1] }));
 
 test("a line card's turn is that line's own interview: attributes refresh by line, and a goal change waits for the person", async () => {
@@ -530,4 +530,15 @@ test("the round that ends the interview marks it finishing, and the synthesis le
   expect(await run({ sessionId: "s", text: "能量部分都答完了" })).toEqual({ state: "ready", sessionId: "s" });
   // `off` leaves the extraction alone: nothing is marked for a run that will never come.
   expect(readFinishing(store, workspaceId, "s")).toBeUndefined();
+});
+
+test("the dialogue is told which lines still have no goal candidates, so it asks what the person wants to become only there", async () => {
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普",
+    attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }] } }));
+  const { rpc, prompts } = fakeRuntime([turn()]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" })({ sessionId: "s", text: "开始吧" });
+  const first = dialogue(prompts)[0]!;
+  expect(first).toContain("goalPicker");
+  expect(first).toMatch(/：左栏已有 2 个候选定语/);
+  expect(first).toMatch(/：还没有候选定语/);
 });

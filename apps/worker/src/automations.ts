@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   AUTOMATION_PLAN_SCHEMA, AUTOMATION_RUNS_SETTING, AUTOMATIONS_MAX, AUTOMATIONS_SETTING, AGENT_CATEGORIES, addedLines, fileMatches,
   mailMatches, readAutomationRuns, readAutomations, timeTriggerDue, triggerLabel, validateAutomationPlan,
-  type AgentCategory, type Automation, type AutomationRun
+  type AgentCategory, type Automation, type AutomationPlan, type AutomationRun
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { approveCategory, readCategories, requestAutomation, type CrosslineStore } from "@crossline/db";
@@ -82,11 +82,13 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
   const input = { request: text, lineHint, lines, today: now.toISOString().slice(0, 10), timeZone: deps.zone(workspaceId),
     categories: Object.entries(AGENT_CATEGORIES).map(([id, label]) => ({ id, label })),
     connected: { mail: Boolean(deps.store.getSetting(workspaceId, "mail.accounts")?.includes("\"id\"")) },
-    // What exists already: a request that changes one of these replaces it (the automation grows by being told what to change).
-    existing: existing.map((item) => ({ id: item.id, name: item.name, trigger: triggerLabel(item.trigger), summary: item.summary, status: item.status })) };
+    // What exists already: a request that changes one of these replaces it (the automation grows by being told what to change). Each is
+    // given whole, in the answer's own shape, because a change answers with the whole automation and keeps every part it does not change.
+    existing: existing.map((item) => ({ id: item.id, name: item.name, summary: item.summary, lineId: item.lineId, status: item.status,
+      when: triggerLabel(item.trigger), trigger: flatTrigger(item.trigger), action: flatAction(item.action), steps: item.steps })) };
   const result = await runCodexSkill<ReturnType<typeof validateAutomationPlan>>(client, input, {
     skillName: AUTOMATION_DESIGNER_SKILL, cwd: deps.cwd, outputSchema: AUTOMATION_PLAN_SCHEMA as unknown as Record<string, unknown>,
-    developerInstructions: "Turn the request into one automation: a trigger Crossline can watch and an action the assistant can do with its functions. Answer in the schema only.",
+    developerInstructions: DESIGN_INSTRUCTIONS,
     prepareInput: () => input, validateOutput: (output) => validateAutomationPlan(output, lines.map((line) => line.id), existing.map((item) => item.id)), onAudit: () => {}, timeoutMs: 30 * 60_000
   });
   if (!result.ok) {
@@ -120,6 +122,30 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
   [{ label: "查看与修改", href: "/settings#automation" }], now);
   return { state: "created", id };
 }
+
+const DESIGN_INSTRUCTIONS = "Turn the person's one request into one automation Crossline runs by itself: a trigger it can watch for free, and what "
+  + "the assistant does each time it fires. The instructions are read by the assistant on every firing: concrete steps naming what to read and "
+  + "which files to write, never a plan. The person gets every run's result as a message, so the inbox is only for new things they must do and "
+  + "a person step is only an act the assistant may not take (sending, replying, posting, paying). A request that changes one in `existing` "
+  + "answers with that whole automation, `replaces` set to its id and every part the request does not change copied from it. Answer in the "
+  + "schema only.";
+
+/** A stored trigger in the designer's own flat shape, so a request that changes one part of an automation can give the rest back unchanged. */
+export function flatTrigger(trigger: Automation["trigger"]): AutomationPlan["trigger"] {
+  const base = { type: trigger.type, time: "", days: "", hours: 0, from: "", keywords: "", url: "", event: "" };
+  switch (trigger.type) {
+    case "schedule": return { ...base, time: trigger.schedule.time,
+      days: trigger.schedule.type === "daily" ? "DAILY" : trigger.schedule.type === "weekdays" ? "WEEKDAYS" : trigger.schedule.days.join(",") };
+    case "interval": return { ...base, hours: trigger.hours };
+    case "mail": return { ...base, from: trigger.from, keywords: trigger.keywords.join(",") };
+    case "watch": return { ...base, url: trigger.url, hours: trigger.hours };
+    case "file": return { ...base, keywords: trigger.keywords.join(",") };
+    case "task": return { ...base, event: trigger.event, from: trigger.lineId };
+  }
+}
+const flatAction = (action: Automation["action"]): AutomationPlan["action"] => action.kind === "remind"
+  ? { kind: "remind", instructions: "", reminder: action.text, category: "", outputs: "" }
+  : { kind: "run", instructions: action.instructions, reminder: "", category: action.category, outputs: action.outputs.join("，") };
 
 /** Changes from the settings card: pause, resume, delete, run now. */
 export function setAutomationStatus(store: CrosslineStore, workspaceId: string, id: string, status: "active" | "off"): boolean {

@@ -40,6 +40,22 @@ export type SkillRunResult<T> = { ok: true; output: T; audit: AnalysisAudit }
 const HARMLESS_ITEM_TYPES = new Set(["contextCompaction", "plan"]);
 
 /**
+ * ChatGPT connectors with reading only: every connector tool not marked read-only needs approval (`writes`), destructive ones are not
+ * offered at all, and the runner answers each approval request with a refusal (vendor/codex core/src/mcp_tool_call.rs: an unanswered or
+ * refused elicitation denies the call).
+ */
+const CONNECTORS_READ_ONLY: Record<string, unknown> = { "apps._default.default_tools_approval_mode": "writes", "apps._default.destructive_enabled": false };
+
+/**
+ * Another provider's context window, so the runtime compacts before the model overflows: an unknown model is assumed to have 272k
+ * (vendor/codex models-manager fallback) and would compact only at ~245k, past the window of most 128k models. Unknown here → 128k.
+ */
+export function contextWindowConfig(provider: ThreadProvider): Record<string, number> {
+  const window = provider.contextWindow && provider.contextWindow >= 16_000 ? provider.contextWindow : 128_000;
+  return { model_context_window: window, model_auto_compact_token_limit: Math.floor(window * 0.8) };
+}
+
+/**
  * What a turn the provider refused means for the person, from the provider's own words. Known shapes are said plainly; anything else
  * is said as a provider error, and the original text travels as the blocker's `detail` (shown folded, never auth material).
  */
@@ -111,6 +127,20 @@ export type SkillRunOptions<T> = {
   agent?: AgentMode;
   /** Read-only tools the model may call during the turn (the one input box's lookups); see `SkillTools`. */
   tools?: SkillTools;
+  /**
+   * Codex's code mode for a run with `tools` (2026-10-19, the owner: turn the runtime's own features over to use): the model may write
+   * JavaScript that runs in the runtime's V8 isolate — no file system, network or process of its own — to compute and to call the run's
+   * tools (`tools.read_file(…)`). Needs `codex-code-mode-host` beside the runtime; the caller checks that.
+   */
+  codeMode?: boolean;
+  /**
+   * The person's ChatGPT connectors (Gmail, Calendar, Drive, Notion …) for this run, read-only: the runtime asks before any tool not
+   * marked read-only and this runner declines every such request, so only reading goes through. A ChatGPT sign-in is needed; on any
+   * other login the runtime offers none.
+   */
+  connectors?: boolean;
+  /** The runtime's own plan tool: each update of the model's step list is handed here as it is made (`turn/plan/updated`). */
+  onPlan?: (plan: { explanation: string; steps: Array<{ step: string; status: string }> }) => void;
   /** Run on this tier instead of the Skill's own (the input box's second, stronger look). Ignored when the budget is tight. */
   tier?: RouteTier;
   /** Run on exactly this provider, bypassing routing: only the conformance check, which measures a provider before it may be routed to. */
@@ -481,7 +511,10 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
     "memories.use_memories": false, "memories.generate_memories": false,
     "features.shell_tool": true, "features.web_search": hosted, "features.standalone_web_search": hosted, "features.plugins": true,
     "features.view_image": true,
-    ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition, "features.memories": false } : {}),
+    // The runtime's plan tool (each update reaches `onPlan`, shown while the run works) and the person's ChatGPT connectors, read-only.
+    ...(options.onPlan ? { "tools.update_plan.enabled": true } : {}),
+    ...(options.connectors ? { "features.apps": true, ...CONNECTORS_READ_ONLY } : {}),
+    ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition, "features.memories": false, ...contextWindowConfig(context.provider) } : {}),
     // In the sandbox: a named permission profile (writes in the task directory, reads only what it is given, no network) and a
     // command environment that carries none of the worker's own variables.
     ...(agent.sandbox ? { default_permissions: SANDBOX_PROFILE, permissions: sandboxProfile(agent.sandbox),
@@ -543,13 +576,19 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     "memories.use_memories": true, "memories.generate_memories": true,
     "tools.update_plan.enabled": false, "tools.experimental_request_user_input.enabled": false,
     "features.plugins": true, "features.memories": true,
-    ...Object.fromEntries(["shell_tool", "multi_agent", "multi_agent_v2", "apps", "hooks", "codex_hooks", "plugin_hooks", "web_search", "standalone_web_search", "image_generation", "view_image", "request_permissions_tool", "tool_suggest", "token_budget", "current_time_reminder", "sleep_tool", "send_message_to_user_async", "js_repl", "code_mode", "deferred_executor"]
+    // Goals are off too: a goal the model set would start turns of its own after this run had its answer (they are on by default).
+    ...Object.fromEntries(["shell_tool", "multi_agent", "multi_agent_v2", "apps", "hooks", "codex_hooks", "plugin_hooks", "web_search", "standalone_web_search", "image_generation", "view_image", "request_permissions_tool", "tool_suggest", "token_budget", "current_time_reminder", "sleep_tool", "send_message_to_user_async", "js_repl", "code_mode", "deferred_executor", "goals"]
       .map((key) => [`features.${key}`, (Boolean(options.allowWebSearch) && (key === "web_search" || key === "standalone_web_search"))
-        || (Boolean(options.allowImageGeneration) && key === "image_generation")])),
+        || (Boolean(options.allowImageGeneration) && key === "image_generation")
+        // Not through another provider yet: the conformance cases have not measured `exec` there.
+        || (Boolean(options.codeMode && options.tools && !context.provider) && key === "code_mode")
+        || (Boolean(options.connectors) && key === "apps")])),
+    ...(options.connectors ? CONNECTORS_READ_ONLY : {}),
+    ...(options.onPlan ? { "tools.update_plan.enabled": true } : {}),
     ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false])),
     // Another provider: defined for this thread only, and no memories — Codex's memory runs would call an OpenAI model on it.
     ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition,
-      "memories.use_memories": false, "memories.generate_memories": false, "features.memories": false } : {})
+      "memories.use_memories": false, "memories.generate_memories": false, "features.memories": false, ...contextWindowConfig(context.provider) } : {})
   };
   const threadParams = {
     environments: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
@@ -605,6 +644,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
  */
 async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, context: RunContext, audit: AnalysisAudit, run: {
   skillName: string; threadId: string; outputSchema: unknown; allowedItemTypes: string[]; firstPrompt: string;
+  onPlan?: SkillRunOptions<unknown>["onPlan"];
   validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number; agent?: AgentMode;
   soften?: (rejection: Error, output: unknown) => T | undefined;
   keepEarly?: (rejection: Error, output: unknown) => T | undefined;
@@ -645,6 +685,12 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     // Events can precede the turn/start response; capture only this isolated thread.
     if (audit.turnId && turnId !== audit.turnId) return;
     if (message.method === "thread/tokenUsage/updated") { context.usage.note(params); return; }
+    if (message.method === "turn/plan/updated") {
+      const steps = Array.isArray(params.plan) ? params.plan.map(record).filter((item): item is Record<string, unknown> => Boolean(item))
+        .map((item) => ({ step: String(item.step ?? "").slice(0, 200), status: String(item.status ?? "") })) : [];
+      try { run.onPlan?.({ explanation: typeof params.explanation === "string" ? params.explanation.slice(0, 300) : "", steps: steps.slice(0, 30) }); } catch { /* the caller's display */ }
+      return;
+    }
     if (message.method === "item/agentMessage/delta") {
       if (typeof params.delta === "string" && streamed.length < 200_000) { streamed += params.delta; progress("writing"); }
       return;
@@ -930,7 +976,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, request
   // Web search is the only tool any Skill may use, and only when that Skill was granted it.
   const allowedItemTypes = ["agentMessage", "reasoning", "userMessage",
     ...(options.allowWebSearch ? ["webSearch", "webSearchCall"] : []), ...(options.allowImageGeneration ? ["imageGeneration"] : []),
-    ...(options.tools ? ["dynamicToolCall"] : [])];
+    ...(options.tools ? ["dynamicToolCall"] : []), ...(options.connectors ? ["mcpToolCall"] : [])];
   let scope: Scope | undefined;
   let unregister: (() => void) | undefined;
   try {
@@ -947,8 +993,11 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, request
       unregister = registerAgentThread(client, threadId, (method, params) => method === "item/tool/call" && tools ? tools(method, params) : agentAnswer(method, params));
     }
     else if (options.tools) unregister = registerAgentThread(client, threadId, toolAnswerer(options.tools));
+    // A connector tool that is not read-only comes as an approval request: refused (an error answer denies the call).
+    else if (options.connectors) unregister = registerAgentThread(client, threadId, async () => { throw new Error("connectors are read-only here"); });
     const output = await runTurnsUntilValid(client, scope, context, audit, {
       skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes, ...(options.onImage ? { onImage: options.onImage } : {}),
+      ...(options.onPlan ? { onPlan: options.onPlan } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
       firstPrompt: `${[options.skillName, ...context.extraSkills].map((name) => `$${name}`).join(" ")}\n\n${JSON.stringify(prepared)}`,
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),

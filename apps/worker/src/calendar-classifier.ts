@@ -64,7 +64,8 @@ export function createCalendarClassifier(store: CrosslineStore, workspaceId: str
       .map((fact) => ({ lineId: fact.identityId, project: fact.projectId ? projectName.get(fact.projectId) ?? fact.projectId : "", statement: fact.value.slice(0, 160) }));
     const context = { version: "crossline.calendar-lines.v2", lines, projects, files, facts, events };
     const result = await runCodexSkill<CalendarClassification>(client, context, { skillName: CALENDAR_CLASSIFIER, cwd,
-      developerInstructions: "File each calendar event under a line as the Skill describes. Return raw JSON only.", outputSchema: CALENDAR_CLASSIFICATION_SCHEMA,
+      developerInstructions: "File each distinct calendar event under the line it serves, or under none when it plainly serves none; when nothing "
+        + "given places it, mark it unclear so the person is asked, never guess a line. Return raw JSON only.", outputSchema: CALENDAR_CLASSIFICATION_SCHEMA,
       prepareInput: () => context, validateOutput: (output) => validateCalendarClassification(output, events.map((event) => event.key), lines.map((line) => line.id)),
       onAudit: () => {}, timeoutMs: 20 * 60_000 });
     if (!result.ok) return { blocked: result.blocker.code };

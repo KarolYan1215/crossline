@@ -40,6 +40,10 @@ test("a plan is checked: a step that sends is the person's, a watch needs a publ
   expect(checked.steps[1]).toEqual({ title: "回复老师的邮件", by: "person" });
   expect(validateAutomationPlan(plan({ steps: [{ title: "把清单发送给导师", by: "assistant" }] }), ["research"]).steps[0]!.by).toBe("person");
   expect(validateAutomationPlan(plan({}, { days: "MO,FR" }), ["research"]).trigger).toEqual({ type: "schedule", schedule: { type: "weekly", days: ["MO", "FR"], time: "08:00" } });
+  // Reading and sorting mail is the assistant's own work; the acts done to mail are the person's (the noun 邮件 alone used to count as one).
+  const by = (title: string) => validateAutomationPlan(plan({ steps: [{ title, by: "assistant" }] }), ["research"]).steps[0]!.by;
+  for (const title of ["读新邮件，摘出截止日期", "邮件里的截止日期写进收件箱", "起草回复存进草稿文件", "按发信人归类", "到点提醒本人"]) expect([title, by(title)]).toEqual([title, "assistant"]);
+  for (const title of ["读邮件并回复", "给王老师发邮件确认时间", "删除垃圾邮件", "起草回复并发出", "发布到小红书"]) expect([title, by(title)]).toEqual([title, "person"]);
   expect(() => validateAutomationPlan(plan({}, { type: "watch", url: "http://127.0.0.1/admin" }), ["research"])).toThrow(/AUTOMATION_PLAN_INVALID/);
   expect(() => validateAutomationPlan(plan({ lineId: "nope" }), ["research"])).toThrow(/AUTOMATION_PLAN_INVALID/);
 });
@@ -57,8 +61,12 @@ test("a request in words becomes an active automation, its kind of work is allow
   expect(await designPending(deps(() => rpc), workspaceId)).toEqual([]);
   // Told what to change, it grows in place: same id, its runs kept, a new trigger.
   requestAutomation(store, workspaceId, "把课程邮件整理改成每天早晚各一次", "research", "user-1");
-  const { rpc: second } = fakeRuntime([JSON.stringify(plan({ replaces: automation!.id }, { time: "20:00" }))], AUTOMATION_DESIGNER_SKILL);
+  const { rpc: second, prompts } = fakeRuntime([JSON.stringify(plan({ replaces: automation!.id }, { time: "20:00" }))], AUTOMATION_DESIGNER_SKILL);
   await designPending(deps(() => second), workspaceId);
+  // The designer is shown the one it changes whole, in its own answer's shape, so the parts the request leaves alone can be copied back.
+  const shown = JSON.parse(prompts()[0]!.slice(prompts()[0]!.indexOf("{"))) as { existing: Array<Record<string, unknown>> };
+  expect(shown.existing[0]).toMatchObject({ id: automation!.id, lineId: "research", trigger: { type: "schedule", time: "08:00", days: "DAILY" },
+    action: { kind: "run", category: "read_research_organize", outputs: "digest.md" } });
   const after = readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING));
   expect(after).toHaveLength(1);
   expect(after[0]).toMatchObject({ id: automation!.id, trigger: { type: "schedule", schedule: { time: "20:00" } } });

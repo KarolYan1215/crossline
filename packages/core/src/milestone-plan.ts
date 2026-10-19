@@ -160,7 +160,7 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
       refuse("MILESTONE_NOT_MEASURABLE", `${label} 的达成标准全是「判断」型。至少要有一条能用数字或「某个产出物存在」直接核对的标准（count / threshold / artifact）。`);
     }
     if (GRADED.test(`${item.title} ${plan.target}`) && !kinds.includes("threshold")) {
-      refuse("MILESTONE_NOT_MEASURABLE", `${label} 是有分数的事（考试、小测、作业或项目），需要一条 threshold 型标准给出分数线，比如「成绩 ≥ 85 分」「平均正确率 ≥ 80%」。人没说过目标分数时，按大纲里的评分占比给一个合理的，并在 assumptions 里写明「这是我替你定的，请确认」。`);
+      refuse("MILESTONE_NOT_MEASURABLE", `${label} 是有分数的事（考试、小测、作业或项目），需要一条 threshold 型标准给出分数线，比如「成绩 ≥ 85 分」「平均正确率 ≥ 80%」。课程没有目标成绩时，先在 targetProposals 里提出一个，再按大纲里的评分占比从它倒推这一项的分数线（bareLine 和留了余量的 value）；其他部分的预计成绩写进 derivation 和 assumptions。`);
     }
     // Every number is worked back from the result the person wants, and says how much room was left. 「≥ 85」 with nothing behind it is a
     // guess that looks like a standard; the derivation is what the person can check, and the margin is what absorbs a bad day.
@@ -194,7 +194,7 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
     }
     // A guess the person never confirmed cannot be what a goal is built on.
     if (!plan.sourceFactIds.some((id) => confirmed.has(id))) {
-      refuse("MILESTONE_SOURCE_UNCONFIRMED", `${label} 引用的事实全是推断，至少要有一条是你已经确认过的。`);
+      refuse("MILESTONE_SOURCE_UNCONFIRMED", `${label} 引用的事实全是推断，至少要有一条 status 为 confirmed 的事实（本人说过的或文件里写着的）。`);
     }
     // The gate reads submitted evidence, and an output is trivially easy to evidence: a milestone whose
     // criteria are all outputs passes on a productive afternoon while the goal stands still.

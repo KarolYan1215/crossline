@@ -89,7 +89,7 @@ export function planAssistantTask(order: DispatchableOrder, context: { projectIs
       contract.length ? `需要的材料或证据：${contract.join("；")}` : ""].filter(Boolean).join("\n"),
     humanPart: human.length ? human.map((part) => part.intent).join("；") : "审阅并决定如何使用产出",
     graded,
-    notes: graded ? "这是带评分的课程工作：只做学习辅助（讲解、你自己设计的练习、检查你写的、整理资料），不要生成可提交的答案、代码、报告或图表。" : "",
+    notes: graded ? "这是带评分的课程工作：只做学习辅助（讲解、你自己设计的练习、检查本人写的、整理资料），不要生成可提交的答案、代码、报告或图表。" : "",
     delegated: false
   };
 }

@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { caseTools } from "./conformance-tools";
 import path from "node:path";
 import {
-  admittedSkills, chooseSponsorModel, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, conformanceProblems, parseSponsorModels, sponsorMonth, sponsorSpend,
+  admittedSkills, chooseSponsorModel, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, conformanceProblems, parseSponsorModels, thinkingVariant, sponsorMonth, sponsorSpend,
   SPONSOR_MONTHLY_CAP_CNY, summarizeConformance, type ConformanceRecord, type ConformanceRun, type CostSignal, type ProviderCapabilities,
   type SponsorEvaluation, type SponsorModel
 } from "@crossline/core";
@@ -28,9 +28,10 @@ const CONFORMANCE_SKILL = "crossline:crossline-conformance";
  * Records made before this version lack the per-run log (`sponsor-eval/<model>.jsonl`) the comparison is read from, and are tested
  * again so every candidate is measured the same way. 4 (2026-10-19): the interview cites sentence numbers and writes times as minutes,
  * so every candidate is measured again on the schemas it will actually be asked for. 5 (2026-10-19): the interview is two Skills, the
- * dialogue and the extraction, each with its own schema, and both must pass.
+ * dialogue and the extraction, each with its own schema, and both must pass. 6 (2026-10-19): every Skill's prompt was rewritten and the
+ * extraction forgives an enum slip (`dropEnumSlips`); the owner asked for the candidates to be measured again once that was done.
  */
-export const SPONSOR_EVAL_VERSION = 5;
+export const SPONSOR_EVAL_VERSION = 6;
 /**
  * The sample interview's own version: a change to the interview prompt or the script re-runs only the three sample turns of every
  * candidate (minutes and a few jiao each), not its thirty-odd conformance runs. 3 (2026-10-19): the extraction is run once on the sample's
@@ -158,8 +159,11 @@ export function createSponsorService(options: {
     const config = settings();
     return config ? chooseSponsorModel(config.models, currentEvaluations(), options.capabilities) : undefined;
   };
-  const providerFor = (model: string): ProviderConfig => ({ id: SPONSOR_PROVIDER_ID, kind: "chat", label: "开发者提供的模型", baseUrl: settings()?.baseUrl ?? "",
-    model, responseFormat: "json_object", keyLast4: null, updatedAt: "1970-01-01T00:00:00.000Z" });
+  const providerFor = (model: string): ProviderConfig => {
+    const contextK = settings()?.models.find((item) => item.model === thinkingVariant(model).base)?.contextK;
+    return { id: SPONSOR_PROVIDER_ID, kind: "chat", label: "开发者提供的模型", baseUrl: settings()?.baseUrl ?? "",
+      model, responseFormat: "json_object", keyLast4: null, updatedAt: "1970-01-01T00:00:00.000Z", ...(contextK ? { contextK } : {}) };
+  };
 
   /** Yuan the account has spent on the sponsor's models this calendar month, and the cap. */
   const budget = (workspaceId: string): { spent: number; cap: number; resetsAt: Date } | undefined => {

@@ -1,5 +1,5 @@
 import {
-  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, interviewAbstract, progressLines, readInsightRatings, readTurnProgress,
+  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, interviewAbstract, lineAttributes, progressLines, readInsightRatings, readTurnProgress,
   resolveAvailability, type StoredLineProfile, type TurnProgress
 } from "@crossline/core";
 import { datedItems, type CrosslineStore } from "@crossline/db";
@@ -14,7 +14,7 @@ const SOURCE_LABEL: Record<string, string> = { saved: "本人设定", interview:
  */
 export function paceContext(store: CrosslineStore, workspaceId: string, sessionId: string, input: {
   today: string; lines: Array<{ id: string; label: string; goals: string[] }>; recent: string[]; progress: TurnProgress | undefined;
-}): { progress?: string[]; abstract: string[]; observations?: string[] } {
+}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[] } {
   const profiles = (() => { try { return JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   const facts = store.listProfileFacts(workspaceId);
   const deadlineOf = (projectId: string) => {
@@ -46,7 +46,14 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
     .filter(([key]) => key.startsWith(`${sessionId}#`)).sort((a, b) => a[1].at.localeCompare(b[1].at)).slice(-4)
     .map(([, rating]) => `观察「${(rating.text ?? "").slice(0, 60)}」：本人说${rating.verdict === "fits" ? "准" : "不准"}`);
   const progress = progressLines(input.progress);
-  return { abstract, ...(progress.length ? { progress } : {}), ...(ratings.length ? { observations: ratings } : {}) };
+  // Lines with no long-term goal yet, and whether the picker beside the conversation already offers candidates for one: the dialogue asks
+  // what the person wants to become on a line only while it offers none (W-8: asking beside the picker asked the same thing twice).
+  const goalPicker = input.lines.filter((line) => !line.goals.length).map((line) => {
+    const count = lineAttributes(profiles[line.id], line.label).length;
+    return count ? `${line.label}：左栏已有 ${count} 个候选定语，由本人选定` : `${line.label}：还没有候选定语`;
+  });
+  return { abstract, ...(progress.length ? { progress } : {}), ...(ratings.length ? { observations: ratings } : {}),
+    ...(goalPicker.length ? { goalPicker } : {}) };
 }
 
 /** The progress record the last round left in the session. */

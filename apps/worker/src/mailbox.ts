@@ -166,7 +166,10 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   };
   const result = await runCodexSkill<MailTriage>(deps.client, input, {
     skillName: MAIL_TRIAGE_SKILL, cwd: deps.cwd, outputSchema: MAIL_TRIAGE_SCHEMA as unknown as Record<string, unknown>,
-    developerInstructions: "Sort each new message once. Use todo only for something the person must do themselves, date only for a dated event or deadline they should keep, reply only when the sender is the one an open wait is on. Everything else is info or ignore.",
+    developerInstructions: "Sort each new message once, from its sender, subject and opening. todo when it asks the person to do something or "
+      + "doing nothing costs them (a deadline, a question only they can answer, an account or money alert to check); its title is the inbox line, "
+      + "verb first, with the day. date for a dated event the mail asks nothing about; reply only when the sender is who an open wait is on; info "
+      + "for news about the person's own things that needs nothing; ignore for promotions, digests, cold pitches, spam and phishing.",
     prepareInput: () => input, validateOutput: (output) => validateMailTriage(output, keyed.map((message) => message.key), waiting.map((item) => item.id)),
     onAudit: () => {}, timeoutMs: 20 * 60_000
   });

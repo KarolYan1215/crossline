@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { BACKPLAN_SCHEMA, foldInfoRequests, mentionsExternalAction, producedArtifacts, usedArtifacts, validateBackplan, withCourse, type BackplanAnswer as Answer,
+import { BACKPLAN_SCHEMA, foldInfoRequests, goalSettingKey, mentionsExternalAction, producedArtifacts, usedArtifacts, validateBackplan, withCourse, type BackplanAnswer as Answer,
   type MissingInput } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { handOffArtifacts, linkArtifactWork, readStoredArtifactPlan, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 
 import { ownerOf } from "./owner";
+import { localToday } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { identityLines } from "./lines";
 import { decideFold, existingTasksFor, openTasks, recentlyDoneTasks, recordFold, type Fold } from "./duplicate-guard";
@@ -86,9 +87,14 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     const { supplied, waiting } = personInputs(store, workspaceId, milestone.id);
     const sources = [...dateSources, ...approvedInsights.map((item) => item.summary), ...supplied.map((item) => `${item.what}：${item.text}`)];
     const artifacts = milestoneArtifacts(store, workspaceId, milestone.id);
-    const context = { version: "crossline.goal-backplan.v2", artifacts, milestone: {
+    // The date the tasks are worked back to (the one the person confirmed, else the approved plan's): without it a milestone due in five
+    // days and one due in five months were split the same way.
+    let confirmedDeadline: string | undefined;
+    try { confirmedDeadline = (JSON.parse(store.getSetting(workspaceId, goalSettingKey(milestone.id)) ?? "{}") as { confirmedDeadline?: string }).confirmedDeadline; } catch { /* none */ }
+    const milestoneDeadline = confirmedDeadline ?? store.listMilestoneAnchors(workspaceId).find((anchor) => anchor.milestoneId === milestone.id)?.deadline ?? "";
+    const context = { version: "crossline.goal-backplan.v2", today: localToday(store, workspaceId), artifacts, milestone: {
       id: milestone.id, version: milestone.version, identityId: milestone.identityId,
-      projectId: milestone.projectId, title: milestone.title, successCriteria: milestone.successCriteria
+      projectId: milestone.projectId, title: milestone.title, deadline: milestoneDeadline, successCriteria: milestone.successCriteria
     }, sourceText: request?.request ?? "", approvedInsights,
       suppliedInputs: supplied, waitingInputs: waiting, missingInputs: [] as MissingInput[],
       existingWork: store.listWorkOrders(workspaceId)
@@ -98,18 +104,23 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       // Work of this line and project finished in the last 30 days: done once, not proposed again (walkthrough W-30).
       recentlyDone: recentlyDoneTasks(store, workspaceId).filter((task) => task.identityId === milestone.identityId && task.projectId === milestone.projectId)
         .slice(0, 20).map((task) => ({ id: task.id, title: task.title.slice(0, 120), intent: task.intent.slice(0, 160) })) };
-    const rolling = options.rolling ? ` Return only the next ${ROLLING_STEPS} steps that can start now (existingWork shows what is already done or open); the rest is proposed after these are done.` : "";
+    const rolling = options.rolling ? ` Return only the next ${ROLLING_STEPS} items that can start now (existingWork shows what is already done or open); the rest is proposed after these are done.` : "";
     const run = (missingInputs: MissingInput[]) => {
       const input = { ...context, missingInputs };
       const runSources = [...sources, ...missingInputs.flatMap((item) => [item.message, item.what])];
       return runCodexSkill<Answer>(client, input, { skillName: SKILL, cwd,
-        developerInstructions: (missingInputs.length
-          ? "Work backwards from the approved milestone. Some inputs it needs are missing (missingInputs). Do not block on them: obtaining or confirming each one is the first part of the task that needs it, which sets `acquires` to that input's id and quotes its `message` in `sourceQuote`; only when obtaining it is real work of its own (not a message to someone) is it a separate step that the steps needing it depend on. Every other step has `acquires` \"\". Return blockers only for what the milestone itself leaves unclear; never set a goal or deadline."
-          : "Work backwards from the approved milestone. Return only sourced step drafts; never set a goal or deadline; every step's `acquires` is \"\". If a step needs an input that is in none of sourceText, suppliedInputs or approvedInsights (data, a specification, someone's decision), do not invent it: return it as a blocker with `what` (the input in a few words) and `whoHas` (who can provide it, \"\" if unknown). waitingInputs are on their way: steps that need them come after the steps that do not.")
-          + " Each item in `steps` becomes one task in the person's list: group the work into coherent tasks that each produce one deliverable (an outline, a set of solved problems, a draft), not single actions — the step planner splits every task into its own steps afterwards."
-          + " Getting a fact from someone (an exam's scope, a rubric, a format rule — one email and its reply, 15 minutes of the person's time) is never an item: it is the first part of the task that needs the answer."
-          + " existingTasks are open already: never write an item one of them covers; an item that only adds to one sets `extendsTaskId` to its id (otherwise \"\"). Each item's `completion` says how finishing it is taken, as the Skill describes."
-          + (artifacts.produce.length || artifacts.use.length ? " Cross-line artifacts (artifacts): exactly one step produces each artifacts.produce id (`produces`), every artifacts.use id is listed in `uses` by the steps that work with it; all other steps have produces \"\" and uses []." : "")
+        developerInstructions: "Work backwards from this approved milestone to the tasks that deliver it, as the crossline-goal-backplanner Skill describes, "
+          + "and return only the requested JSON. Each item becomes one task card on the person's 任务 page (one deliverable, 30 to 480 minutes, named "
+          + "with its course or project) that the step planner splits into steps afterwards; a request for a fact is never an item. Read existingTasks and "
+          + "recentlyDone first: never write work they cover, and an item that only adds to an open task sets extendsTaskId. Never set a goal, a deadline "
+          + "or criteria."
+          + (missingInputs.length
+            ? " Second mode: missingInputs are known to be missing and are being asked about. Obtaining each is the first part of the task that needs it "
+              + "(acquires = its id, sourceQuote from its message); a separate item only when obtaining it is real work. Blockers only for what the milestone "
+              + "itself leaves unclear."
+            : " First mode: an input the work needs that is in none of sourceText, suppliedInputs or approvedInsights is a blocker with what and whoHas, "
+              + "never invented; every acquires is \"\". Items that need waitingInputs come after those that do not.")
+          + (artifacts.produce.length || artifacts.use.length ? " Exactly one item produces each artifacts.produce id (produces); every artifacts.use id is in the uses of the items that work with it." : "")
           + rolling,
         outputSchema: BACKPLAN_SCHEMA, prepareInput: () => input,
         validateOutput: (output) => validateBackplan(output, runSources, dateSources, missingInputs.map((item) => item.id),

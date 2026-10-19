@@ -80,6 +80,9 @@
 /* 后台任务: the assistant's runs going on now, each with what it has done so far. */
 .bg-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .bg-steps{margin:4px 0 0;padding-left:18px;display:grid;gap:2px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.bg-plan{margin:4px 0 0;padding-left:18px;display:grid;gap:2px;font-size:13px;overflow-wrap:anywhere}
+.bg-plan li[data-status="completed"]{color:var(--muted)}
+.bg-plan li[data-status="inProgress"]{font-weight:600}
 /* Skill 库: each line's own skill (rules with their sources, the full text and its versions folded) and the public skills with what was found. */
 .sk-lines,.sk-publics,.sk-rules{list-style:none;margin:0;padding:0;display:grid;gap:10px}
 .sk-line,.sk-public{display:grid;gap:6px;padding:8px 0;border-top:1px solid var(--chalk);min-width:0}

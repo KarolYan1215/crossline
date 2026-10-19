@@ -2,8 +2,8 @@ import { RELATION_KINDS } from "./flywheel-schema";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
 import { SCHWARTZ_VALUES } from "./portrait";
 import {
-  ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, cleanAttribute, duplicateAttributes, guessKind,
-  notAtomic, type AttributeCandidate, type AttributeKind
+  ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, attributeProblem, cleanAttribute, duplicateAttributes,
+  guessKind, notAtomic, type AttributeCandidate, type AttributeKind
 } from "./line-attributes";
 
 /**
@@ -107,8 +107,9 @@ export const EMPTY_PROFILE_MODEL: ProfileModel = { portrait: "", coreConflict: "
   lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "", values: [] };
 /**
  * For each line: a personal description from what was said, and 3–12 mutually independent attributes (`attributeCandidates`) the person
- * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from and labelled with its kind
- * (decided 2026-10-10; it replaced whole-sentence `goalCandidates`, which the model filled by permuting the same few attributes). An empty
+ * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from, labelled with its kind, and an
+ * adjective or a short field qualifier rather than an action or an achievement (decided 2026-10-10; it replaced whole-sentence
+ * `goalCandidates`, which the model filled by permuting the same few attributes; the wording rule is the owner's of 2026-10-19). An empty
  * list keeps the candidates already on record. `goalCandidates` is only ever on turns stored before.
  */
 export type LineProfile = { lineId: string; description: string; attributeCandidates: AttributeCandidate[]; goalCandidates?: string[] };
@@ -221,6 +222,11 @@ export type OnboardingTurnContext = {
   progress?: string[];
   abstract?: string[];
   observations?: string[];
+  /**
+   * Each line with no long-term goal yet, and whether the picker beside the conversation offers attribute candidates for it (「创作者：还没有
+   * 候选定语」): the dialogue asks what the person wants to become on a line only while it offers none.
+   */
+  goalPicker?: string[];
 };
 
 /**
@@ -273,6 +279,12 @@ export type KnownSources = {
   sources: Record<string, string>;
   /** The numbered sentences the model was shown, by id: which reply or file each is in and where (`resolveOnboardingRefs`). */
   sentences?: Map<number, EvidenceSentence>;
+  /**
+   * How many attribute candidates each line already has on record (the extraction knows; absent counts as none). A list pruned below
+   * `ATTRIBUTE_CANDIDATES_MIN` replaces the ones on record only when it is at least as long, so dropping bad items never empties a line
+   * that had nothing and never shrinks one that had more (`keepCandidates`).
+   */
+  attributesOnRecord?: Record<string, number>;
 };
 /** One citable sentence: the reply (`reply-N`) or file (`src-N`) it is in, and its offsets in that text. */
 export type EvidenceSentence = { ref: string; start: number; end: number; text: string };
@@ -456,6 +468,14 @@ function reject(code: string, detail: string): never {
 }
 
 export function validateOnboardingTurn(value: unknown, known: KnownSources): OnboardingTurn {
+  return checkTurn(value, known, ATTRIBUTE_CANDIDATES_MIN);
+}
+
+/**
+ * The turn's rules. `minimumCandidates` is how many attribute candidates a non-empty list must hold: three for a model's answer, one for
+ * a turn `keepOnboardingTurn` already pruned, whose short lists `keepCandidates` let through on purpose.
+ */
+function checkTurn(value: unknown, known: KnownSources, minimumCandidates: number): OnboardingTurn {
   const turn = value as OnboardingTurn | undefined;
   if (!turn || typeof turn.reply !== "string" || !Array.isArray(turn.questions) || !Array.isArray(turn.slotUpdates)
     || !Array.isArray(turn.projectsDetected) || !Array.isArray(turn.flywheelCandidates) || !Array.isArray(turn.coverage)
@@ -517,7 +537,7 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
   if (turn.nextAction === "ask" && !turn.questions.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题。");
   for (const line of turn.lineProfiles ?? []) {
     if (!identities.has(line.lineId) || line.lineId === PERSON_LINE) reject("ONBOARDING_IDENTITY_UNKNOWN", `主线描述里的主线「${line.lineId}」不存在。`);
-    const problem = attributeProblem(line.attributeCandidates ?? [], citable);
+    const problem = candidatesProblem(line.attributeCandidates ?? [], citable, minimumCandidates);
     if (problem) reject(problem.code, `主线「${line.lineId}」的定语候选：${problem.detail}`);
   }
   for (const edit of turn.goalEdits ?? []) {
@@ -564,37 +584,50 @@ const kindOf = (part: { text: string; kind?: string }): AttributeKind =>
 const cleanCandidates = (list: AttributeCandidate[]) => list.map((item) => ({ text: cleanAttribute(item.text), kind: kindOf(item), sourceRef: item.sourceRef }))
   .filter((item) => item.text);
 
+/** What every repair about a candidate's wording ends with: what an attribute is, and that fewer real ones beat made-up ones. */
+const ATTRIBUTE_HOW = "定语说的是本人想在这条线上成为什么样的人，取自本人原话：形容词或形容性短语（严谨、高产、独立、有影响力、值得信赖、受学生欢迎）或短的领域限定（器件物理方向）；"
+  + "本人只说了要做什么、要拿到什么时，不要硬改成定语，去掉这一个，少给几个也可以。";
+
 /**
  * What is wrong with one line's attribute candidates, if anything: an empty list is allowed (it keeps the ones on record); otherwise
- * 3–12, each cited to a reply or file, each one thing, and no two saying the same (after removing 「的」 and punctuation, one contains
- * the other). The detail names the offending attributes so the repair has something to act on.
+ * 3–12, each cited to a reply or file, each one thing, each describing the person rather than an action or an achievement
+ * (`attributeProblem`), and no two saying the same (after removing 「的」 and punctuation, one contains the other). The detail names
+ * the offending attributes, all of them at once for wording, so one repair can fix them together.
  */
-function attributeProblem(list: AttributeCandidate[], citable: (ref: string) => boolean): { code: string; detail: string } | undefined {
+function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) => boolean, minimum = ATTRIBUTE_CANDIDATES_MIN): { code: string; detail: string } | undefined {
   if (!list.length) return undefined;
   for (const item of list) {
     if (!citable(item.sourceRef)) return { code: "ONBOARDING_UNKNOWN_SOURCE_REF", detail: `「${item.text}」没有引用本轮给出的句子；每个定语在 refs 里写出它来自的句子编号。` };
     if (!cleanAttribute(item.text)) return { code: "ONBOARDING_ATTRIBUTE_EMPTY", detail: "有一个定语是空的。" };
     if (notAtomic(item.text)) return { code: "ONBOARDING_ATTRIBUTE_NOT_ATOMIC", detail: `「${item.text}」含有并列，一个定语只写一件事，拆成两个。` };
   }
+  const wording = list.map((item) => attributeProblem(item.text)).filter((problem): problem is string => Boolean(problem));
+  if (wording.length) return { code: "ONBOARDING_ATTRIBUTE_NOT_DESCRIPTIVE", detail: `${wording.slice(0, 3).join("；")}。${ATTRIBUTE_HOW}` };
   const duplicate = duplicateAttributes(list.map((item) => cleanAttribute(item.text)))[0];
   if (duplicate) return { code: "ONBOARDING_ATTRIBUTE_DUPLICATE", detail: `「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个或改成互不重叠的两个。` };
-  if (list.length < ATTRIBUTE_CANDIDATES_MIN || list.length > ATTRIBUTE_CANDIDATES_MAX) {
+  if (list.length < minimum || list.length > ATTRIBUTE_CANDIDATES_MAX) {
     return { code: "ONBOARDING_ATTRIBUTES_COUNT", detail: list.length < ATTRIBUTE_CANDIDATES_MIN
-      ? `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个：从本人已说的话和文件里补到至少 ${ATTRIBUTE_CANDIDATES_MIN} 个（每个引用句子编号）；本人对这条线几乎什么都没说时才留空数组。`
+      ? `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个：从本人已说的话和文件里补到至少 ${ATTRIBUTE_CANDIDATES_MIN} 个（每个引用句子编号）；`
+        + "只补本人用过的形容说法，本人确实只说了这些时就保持这几个；本人对这条线几乎什么都没说时才留空数组。"
       : `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个，留下最有区别的 ${ATTRIBUTE_CANDIDATES_MAX} 个。` };
   }
   return undefined;
 }
 
-/** The candidates that pass on their own (cited, one thing, not repeating an earlier one); fewer than three left means none (keep those on record). */
-function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => boolean): AttributeCandidate[] {
+/**
+ * The candidates that pass on their own (cited, one thing, describing the person, not repeating an earlier one). Fewer than three left
+ * replace the ones on record only when the line has no more than that on record (`onRecord`): a line with nothing gets the one or two
+ * real attributes rather than none — an empty list there is what kept the start standard from standing (2026-10-19, W-71) — while a
+ * line that already has a fuller list keeps it.
+ */
+function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => boolean, onRecord = 0): AttributeCandidate[] {
   const kept: AttributeCandidate[] = [];
   for (const item of list) {
     const text = cleanAttribute(item.text);
-    if (!text || !citable(item.sourceRef) || notAtomic(text) || duplicateAttributes([...kept.map((other) => other.text), text]).length) continue;
+    if (!text || !citable(item.sourceRef) || notAtomic(text) || attributeProblem(text) || duplicateAttributes([...kept.map((other) => other.text), text]).length) continue;
     kept.push({ text, kind: kindOf(item), sourceRef: item.sourceRef });
   }
-  return kept.length >= ATTRIBUTE_CANDIDATES_MIN ? kept.slice(0, ATTRIBUTE_CANDIDATES_MAX) : [];
+  return kept.length >= ATTRIBUTE_CANDIDATES_MIN || (kept.length > 0 && kept.length >= onRecord) ? kept.slice(0, ATTRIBUTE_CANDIDATES_MAX) : [];
 }
 
 /**
@@ -639,10 +672,11 @@ export function keepOnboardingTurn(value: unknown, known: KnownSources): Onboard
     flywheelCandidates: (turn.flywheelCandidates ?? []).filter((candidate) => identities.has(candidate.fromIdentityId) && identities.has(candidate.toIdentityId)
       && candidate.fromIdentityId !== candidate.toIdentityId && candidate.evidenceRefs.every((ref) => ref === "inference" || sourceText(ref) !== undefined)),
     lineProfiles: (turn.lineProfiles ?? []).filter((line) => identities.has(line.lineId) && line.lineId !== PERSON_LINE)
-      .map((line) => ({ ...line, attributeCandidates: keepCandidates(line.attributeCandidates ?? [], (ref) => sourceText(ref) !== undefined) })),
+      .map((line) => ({ ...line, attributeCandidates: keepCandidates(line.attributeCandidates ?? [], (ref) => sourceText(ref) !== undefined,
+        known.attributesOnRecord?.[line.lineId] ?? 0) })),
     goalEdits: (turn.goalEdits ?? []).filter((edit) => identities.has(edit.lineId) && edit.lineId !== PERSON_LINE && edit.sourceRef in known.replies
       && edit.parts.some((part) => cleanAttribute(part.text)) && !duplicateAttributes(edit.parts.map((part) => cleanAttribute(part.text)).filter(Boolean)).length),
     ...(turn.availability ? { availability: { ...turn.availability, windows: turn.availability.windows.filter((window) => /^\d{2}:\d{2}$/.test(window.start)
       && /^\d{2}:\d{2}$/.test(window.end) && window.end > window.start) } } : {}) };
-  try { return validateOnboardingTurn(pruned, known); } catch { return undefined; }
+  try { return checkTurn(pruned, known, 1); } catch { return undefined; }
 }

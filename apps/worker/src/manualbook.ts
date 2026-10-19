@@ -23,29 +23,22 @@ import { ownerOf } from "./owner";
 import { startingWithin } from "./schedule-window";
 import { planningContext } from "./step-planner";
 
-const DESIGN_INSTRUCTIONS = "Design how this one task gets done, as a short flow of steps a person can follow from left to "
-  + "right. Return only the requested JSON. Every step is concrete (what to do, in what order, how you know it is done), "
-  + "serves at least one item of the task's contract by id, and a step that needs material the person does not have "
-  + "says what to look for. Every REQUIRED contract item must be served by some step. Steps form a chain with no loops: "
-  + "edges point from what must come first to what follows. Use the person's own facts and local files where they bear "
-  + "on the how. Concise and complete: one node per planned step when the task has them, each covering its step fully and no two "
-  + "overlapping. Do not do the work itself and do not claim it is done. Write every human-readable field in Chinese.";
-const SEARCH_INSTRUCTIONS = "Find the best material for ONE step of a task on the public web. Return only the requested "
-  + "JSON. A source is a public https page you opened, with its real title. Prefer primary and open-access sources "
-  + "(official documentation, the paper itself, a maintained tutorial) over summaries of them. Say honestly whether you "
-  + "believe the full text is open access; that is only your reading and the app decides what is kept. Put what you "
-  + "could not find in `gaps` instead of guessing. Never invent a source. Write human-readable fields in Chinese.";
-const WRITE_INSTRUCTIONS = "Write up ONE step of a task from the supplied sources: an analysis (what the material says that "
-  + "matters for this step, what to trust and what to doubt) and a tutorial (the concrete way to do this step, in order, "
-  + "with the commands, settings or reasoning someone needs). Cite sources only by their id from the input and never "
-  + "write a web address yourself. Where the sources do not support something, say so rather than filling it in. "
-  + "Missing material (the problem sheet itself, a dataset, a page that was not supplied) is not a reason to stop: write the best guide "
-  + "the supplied material allows — start the tutorial with where and how to get what is missing (named from the sources, e.g. the "
-  + "course platform the syllabus names), then the method, the topics and checks that apply whatever the exact content turns out to be — "
-  + "and open the analysis with a 「需要补充」 line naming each missing item. Return a blocker only when nothing useful can be written at all. "
-  + "Concise and complete: cover everything this one step needs and nothing that belongs to another step; say each point once (the analysis "
-  + "does not repeat the tutorial); a source's note says only what matters for this step, not what it already said for others. "
-  + "Return only the requested JSON. Write in Chinese.";
+// Short summaries of each scenario; each Skill carries the detail.
+const DESIGN_INSTRUCTIONS = "Design the tutorial for one task as a short flow of steps the person follows left to right; a researcher then searches "
+  + "the web with each step's research questions and a writer writes each step from what was found. Every step is concrete, serves contract items "
+  + "by id (every required one is served), and has two to four research questions the open web can answer, fitted to the person's setting and to "
+  + "the step's scale. When the task has planned steps, make one node per planned step in their order, with the planned step's title copied "
+  + "exactly. No loops, no two steps overlapping. Do not do the work. Return only the requested JSON, every human-readable field in Chinese.";
+const SEARCH_INSTRUCTIONS = "Find the best public material for ONE step of a task's tutorial: a writer will write the step from your sources alone. "
+  + "Answer every research question; a source is a public https page you opened, with its real title, and its summary says faithfully what it "
+  + "gives for this step. Prefer primary, open-access sources in the person's setting and language, at the step's scale. Say honestly whether you "
+  + "believe the full text is open access; the app decides what is kept. Put what you could not find in gaps; never invent a source. Return only "
+  + "the requested JSON, every human-readable field in Chinese.";
+const WRITE_INSTRUCTIONS = "Write ONE step of the tutorial the person works from: an analysis of what the supplied material says for this step and "
+  + "a numbered tutorial of the real work (the derivation, the method, the worked example, the commands, the check), fitted to this person's level "
+  + "and their own files, ending with how they know the step is done. Cite sources only by their id and never write a web address yourself; where "
+  + "the sources do not support a detail, say so. Missing material is not a reason to stop: start with where to get it and open the analysis with "
+  + "「需要补充」. Cover this step fully and nothing of another, saying each point once. Return only the requested JSON, in Chinese.";
 
 export type ManualProgress = { stage: "designing" | "researching" | "writing" | "assembling"; done: number; total: number };
 export type ManualOutcome =

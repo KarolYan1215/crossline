@@ -15,14 +15,12 @@ import { identityLines } from "./lines";
 /** A weekly refresh, not a loop: a line is researched again only once its last report is this old. */
 export const DILIGENCE_REFRESH_DAYS = 7;
 
-const INSTRUCTIONS = "Research the question on the public web, then report only what you actually read. Every "
-  + "finding cites sources by id; every source is a public https page you opened, with its real title and the "
-  + "date you read it (today or within three days). Never cite a page you did not read and never invent a "
-  + "deadline, price, requirement or number. Propose only things that follow from a finding AND from the "
-  + "person's own facts (cite their ids in basedOnFacts), and respect every constraint listed. Put what you "
-  + "could not establish in `gaps` instead of guessing. Do not repeat anything in `alreadyDecided`. For the "
-  + "investment line give findings, tracking frameworks and memo templates only: no buy or sell call, no price "
-  + "target. Write every human-readable field in Chinese.";
+const INSTRUCTIONS = "Research the line's question on the public web for this person, then report only what you actually read: findings, "
+  + "each citing pages you opened (public https, real title, read today or within three days), and proposals the person will accept or reject, "
+  + "each resting on a finding AND on the person's own facts (their ids in basedOnFacts). Take the person's status, place and stage from the "
+  + "facts and assume none. Never invent a deadline, price, requirement or number; what you could not establish goes in gaps. Respect every "
+  + "constraint, repeat nothing in alreadyDecided, and for the investment line give findings and tracking frameworks only, never a buy or sell "
+  + "call or a price target. Every human-readable field in Chinese.";
 
 const QUESTIONS: Record<DiligenceTopic, string> = {
   // The person's own status and place come from `facts` (the line's and the person's): asking 「是否对在读学生开放」 of everyone made a

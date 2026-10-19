@@ -47,7 +47,7 @@ export function createAgentService(deps: {
   // Per task: how to stop it, and what it has done so far (docs/review-2026-10-13.md §6.4: the run is watched and can be stopped).
   const controls = new Map<string, AbortController>();
   const live = new Map<string, { startedAt: string; audit: { commands: Array<{ command: string; status: string; exitCode: number | null }>;
-    filesChanged: Array<{ path: string; kind: string }>; searches: string[] } }>();
+    filesChanged: Array<{ path: string; kind: string }>; searches: string[]; plan?: { explanation: string; steps: Array<{ step: string; status: string }> } } }>();
   const log = deps.log ?? (() => {});
   const mark = (workspaceId: string) => running.get(workspaceId) ?? running.set(workspaceId, new Set()).get(workspaceId)!;
   /** Turned away only where no mode is offered: with `modeFor`, every account has the assistant in one mode or the other. */
@@ -248,7 +248,8 @@ export function createAgentService(deps: {
       if (!mark(workspaceId).has(taskId)) return undefined;
       const record = live.get(taskId);
       return { taskId, startedAt: record?.startedAt ?? "", commands: (record?.audit.commands ?? []).slice(-20).map(({ command, status, exitCode }) => ({ command, status, exitCode })),
-        files: [...new Set((record?.audit.filesChanged ?? []).map((change) => change.path))].slice(-30), searches: (record?.audit.searches ?? []).slice(-10) };
+        files: [...new Set((record?.audit.filesChanged ?? []).map((change) => change.path))].slice(-30), searches: (record?.audit.searches ?? []).slice(-10),
+        ...(record?.audit.plan ? { plan: record.audit.plan } : {}) };
     },
 
     /** 「中止」: stops a running task; its result is recorded as stopped by the person and it is not started again by itself. */

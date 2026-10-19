@@ -67,7 +67,7 @@ export function createPortraitIllustrator(store: CrosslineStore, workspaceId: st
     let wrote = false;
     const context = { version: "crossline.portrait-image.v1", slot: "character", prompt };
     const result = await runCodexSkill<{ generated: boolean; note: string }>(client, context, {
-      skillName: PORTRAIT_ILLUSTRATOR, cwd, developerInstructions: "Generate exactly one image from the given prompt, then return raw JSON only.",
+      skillName: PORTRAIT_ILLUSTRATOR, cwd, developerInstructions: "Draw the person's portrait figure: call the image tool exactly once with the given prompt, unchanged, then return raw JSON only.",
       outputSchema: SCHEMA, prepareInput: () => context, allowImageGeneration: true,
       onImage: (image) => { if (wrote) return; writeFileSync(join(dir, file), Buffer.from(image.base64, "base64")); wrote = true; },
       validateOutput: (output) => output as { generated: boolean; note: string }, onAudit: () => {}, timeoutMs: 15 * 60_000 });

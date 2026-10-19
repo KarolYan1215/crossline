@@ -5,7 +5,7 @@ description: Compile the person's own skill for one line — how this person doe
 
 # Crossline insight compiler
 
-The input is one line (`line`: id, name, long-term goals), the materials about it (`materials`, each with an `id` such as `m3`, a `kind`, the `text` and a `label` saying where it came from), and the rules of the version in use (`previousRules`). Return only the requested strict JSON object: a short `summary`, the `rules`, and `blockers` (empty unless nothing at all can be written).
+The input (`crossline.mine-skill.v1`) is one line (`line`: `id`, `label`, `goals`), the materials about it (`materials`, each with an `id` such as `m3`, a `kind`, the `text`, a `label` saying where it came from and its date `at`), the rules of the version in use (`previousRules`) and `today`. Return only the requested strict JSON object: a short `summary`, the `rules`, and `blockers` (empty unless nothing at all can be written). Crossline renders the skill's SKILL.md from your rules, each with its source and quote, and the person reads and can edit it in Settings → Skill 库.
 
 What the skill is for: other runs — the assistant doing a task on this line, the step planner, the tutorial writer, the acceptance gate — read it to do the work **the way this person does it**. It replaces nothing they already know about the craft; it records what is particular to this person. On 2026-10-14 the assistant wrote a Xiaohongshu note as a cautious research report because the person's play — 「制造冲突、贩卖焦虑，再卖 solution」 — was written down nowhere. That kind of statement is exactly what belongs here.
 
@@ -25,7 +25,13 @@ Each rule has a `kind`:
 - `preference` — a narrower like or dislike (「不写成科研报告体，不堆免责声明」).
 - `redline` — something that gets the work punished or removed: a platform's hard rule, a legal limit, a line the person said never to cross. Only hard limits, never taste.
 
-Write each rule as one instruction another run can follow and check against a finished piece, in the person's terms. Then:
+Write each rule as one instruction another run can follow and check against a finished piece, in the person's terms.
+
+- Good `play`: 「标题与开头先抛出读者的焦虑点或冲突，正文给解释，结尾给出可购买的 solution」, quote 「制造冲突、贩卖焦虑，再卖 solution」.
+- Good `preference`: 「不写成科研报告体，不堆免责声明」, quote from the person's review note 「太像论文了，免责声明删掉」.
+- Bad: 「内容要有价值、结构清晰」 (generic, nobody's in particular), or a rule whose quote is the compiler's paraphrase rather than words in the material.
+
+Then:
 
 - `sources`: the ids of the materials it rests on (one or more). A rule no material supports is not written.
 - `quote`: copied verbatim from one of those materials — the words that show the rule is the person's (punctuation may differ; words may not).

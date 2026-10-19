@@ -140,7 +140,9 @@ export async function reviewPairs(store: CrosslineStore, workspaceId: string, cl
       due: (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "" }; };
     const input = { version: "crossline.task-merge-review.v1", pairs: open.map((pair, index) => ({ id: `p${index + 1}`, a: brief(pair.a), b: brief(pair.b), rule: pair.why })) };
     const result = await runCodexSkill<TaskMergeReview>(client, input, { skillName: REVIEWER, cwd,
-      developerInstructions: "Decide for each pair whether the two tasks are the same piece of work, as the Skill's duplicate-task section describes. Return raw JSON only.",
+      developerInstructions: "Decide for each pair whether the two open tasks are the same piece of work, as the duplicate-task section of the "
+        + "crossline-validation-reviewer Skill describes, and return only the requested JSON. `same: true` merges them into one task that serves both "
+        + "milestones; doing one must also deliver the other. Different deliverables are never the same however close the words; when unsure, false.",
       outputSchema: TASK_MERGE_REVIEW_SCHEMA as unknown as Record<string, unknown>, prepareInput: () => input,
       validateOutput: (output) => validateTaskMergeReview(output, input.pairs.map((pair) => pair.id)), onAudit: () => {}, timeoutMs: 30 * 60_000 });
     if (result.ok) {

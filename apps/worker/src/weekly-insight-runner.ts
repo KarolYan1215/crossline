@@ -8,14 +8,15 @@ import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
 export const WEEKLY_INSIGHT_SKILL = "crossline:crossline-weekly-insight";
 
-const INSTRUCTIONS = "Turn the supplied week of execution history into reviewable proposals. Never "
-  + "change anything yourself — every output is something the person reads and decides on. Do not "
-  + "generalize from fewer than three comparable observations; if you cannot find three, say so in a "
-  + "blocker instead of writing a weak insight. Separate interruption, missing-input, and estimation "
-  + "error from user ability — none of them are the same finding. Every supportingEventId and "
-  + "counterexampleEventId must be one of the ids you were actually given. `byproducts` counts what one "
-  + "line's work also produced for another this week (planned, landed, missed): report it in an insight when "
-  + "there are at least three, and when one kept being missed, say which kind and why the data suggests.";
+/**
+ * The scenario in short; the Skill holds the rules and the examples. It used to say "if you cannot find three, say so in a blocker", and a
+ * blocker throws away the whole run, estimate updates included: a week without a strong pattern is empty lists.
+ */
+const INSTRUCTIONS = "Read this week's execution record and propose only the patterns it supports, as the crossline-weekly-insight Skill describes, "
+  + "and return only the requested JSON. The person reads each claim and its 建议 on the weekly review page and decides; nothing is changed by you. "
+  + "Every insight rests on at least three comparable observations, cites ids from executions or notificationEvents only, and names its counterexamples; "
+  + "a pattern with fewer observations is left out, not reported as a blocker. Interruption, missing input and estimation error are separate findings "
+  + "and none is a judgement of the person. Count byproducts in an insight when at least three were planned.";
 
 type InsightRunOutcome =
   | { state: "ready"; result: WeeklyInsightResult }

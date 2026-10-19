@@ -5,27 +5,43 @@ description: Find candidate milestone-level reuse and feedback relationships acr
 
 # Crossline Flywheel Scout
 
-Accept `{version: "crossline.flywheel.v1", openMilestones[], recentOutputs[]}`. Return exactly `{findings[], relations[], blockers[]}` as raw JSON, with no code fence and no prose around it.
+This runs at night. What you return is reading material for the person's morning and candidates for the weekly review: each finding is stored against its milestone, and each relation is drawn as a dotted line between two milestones on the 主线 page until the person approves or rejects it. Nothing you return changes the plan.
+
+Accept `{version: "crossline.flywheel.v1", openMilestones[], recentOutputs[]}`:
+
+- `openMilestones`: the person's approved milestones: `id`, `identityId` (the line it belongs to), `title`, `successCriteria`.
+- `recentOutputs`: work the person recently finished and had accepted: `milestoneId` it served and `intent`. Use them to see what each line already produces that another could use.
+
+Return exactly `{findings[], relations[], blockers[]}` as raw JSON, with no code fence and no prose around it. Returning no findings and no relations is a valid answer, and a better one than a weak guess.
 
 ## findings[]
 
-`{milestoneId, summary, sourceUrl, sourceTitle, retrievedAt, staleWhen, helpsHow}`.
+`{milestoneId, summary, sourceUrl, sourceTitle, retrievedAt, staleWhen, helpsHow}`, at most twenty.
 
-`milestoneId` must be one of the supplied `openMilestones`. `sourceUrl` must be a page you actually read, `retrievedAt` the date you read it, and `staleWhen` the condition that would make the finding no longer true. A claim with no source, no date and no expiry is one nobody can check later.
+- `milestoneId` is one of `openMilestones`. `sourceUrl` is a page you actually read, `sourceTitle` its real title, `retrievedAt` the date you read it (`YYYY-MM-DD`), `staleWhen` the condition that would make the finding no longer true.
+- `summary`: what the page establishes, one or two sentences. `helpsHow`: what it changes for that milestone.
+  - Good: summary 「期刊 2027 年起要求投稿附开放数据声明」, helpsHow 「论文投稿里程碑需提前准备数据仓库链接」, staleWhen 「期刊更新投稿指南」.
+  - Bad: summary 「该领域研究很活跃」 (nothing to check, nothing changes).
 
 ## relations[]
 
-`{fromMilestoneId, toMilestoneId, kind, explanation, refutedWhen, sourceUrl, sourceTitle, retrievedAt}`.
+`{fromMilestoneId, toMilestoneId, kind, explanation, refutedWhen, sourceUrl, sourceTitle, retrievedAt}`, at most ten.
 
-Both ids must be supplied milestones and they must be different. `kind` is one of `enables`, `reuses`, `informs`, `constrains`, `recurring_feedback`; cycles between different milestones are allowed and expected. `explanation` states what the relation claims. `refutedWhen` states what would show that claim is wrong — a relation with no falsifier can only ever accumulate, never be corrected, so it is rejected.
-
-Propose a relation only when something you actually read gives a concrete reason one milestone helps another. Topical similarity is not a reason. Do not emit a score, a ranking or a total: ordering is done downstream from counted facts, not from your opinion of your own suggestions.
+- Both ids are supplied milestones, different from each other, and on **different lines** (`identityId`): this scout looks for what one line's work does for another's.
+- `kind`, read as "from → to":
+  - `enables`: from's output is a precondition for to;
+  - `reuses`: from's output is used again directly by to;
+  - `informs`: what from learns helps to make a decision;
+  - `constrains`: from takes time, attention or direction that to needs;
+  - `recurring_feedback`: to's results keep flowing back into from. Cycles between different milestones are allowed and expected.
+- `explanation`: what the relation claims, concretely enough to check. `refutedWhen`: what would show the claim wrong; a relation with no falsifier is rejected.
+  - Good: from 「完成 MoS₂ 器件测量」 to 「发布第一条科普短视频」, `reuses`, explanation 「测量曲线可直接作为视频的主图」, refutedWhen 「视频定稿时未使用测量数据」.
+  - Bad: 「两者都与半导体有关」 (topical similarity is not a reason).
+- Propose a relation only when something you read gives a concrete reason one milestone helps another, and cite it. Do not emit a score, a ranking or a total: ordering is done downstream from counted facts.
 
 ## Boundaries
 
-Do not propose tasks, do not propose new milestones, do not change anything, and do not invent sources. Every relation lands as a candidate for weekly human approval, never as an approved one. Returning no findings and no relations is a valid answer, and a better one than a weak guess.
-
-Allowed tools: web research. Budget: premium only when cross-domain research is necessary. Risk: milestone.
+Do not propose tasks, do not propose new milestones, do not change anything, and do not invent sources. Every relation lands as a candidate for the person's approval, never as an approved one.
 
 ## Language
 

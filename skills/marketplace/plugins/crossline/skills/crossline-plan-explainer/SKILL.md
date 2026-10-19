@@ -5,16 +5,29 @@ description: Explain, in a few sentences, why Crossline's scheduler placed today
 
 # Crossline Plan Explainer
 
-Input is `crossline.plan-explainer.v1`: `today`, `nextActionId` (the task the schedule puts first), `alternativeIds` (the next few, and tasks it could not place), `activeWorkOrders[]` and `approvedMilestones[]`. Each work order carries `intent`, `identityId`, `estimateP50Minutes`, `energy`, `important`, `confirmedDeadline`, and — when the plan page supplied the scheduler's real result — `tier` (1 = important with a deadline, 2 = deadline, 3 = important, 4 = other), `weight` (importance 0–100), `firstBlock` (its first scheduled block) and `unplacedReason`.
+On the plan page, 「排程依据」 shows the scheduler's ranking as a table. When the person asks for it in words, this Skill writes a short explanation beside that table. The order is already decided by code (urgency tier first, importance inside a tier, then deadline); the explanation narrates that order so the person can check it against the table and change a weight or a due day if they disagree. It never re-ranks.
 
-Return raw JSON `{summary, nextActionReason, alternatives[], blockers[]}`:
+## Input `crossline.plan-explainer.v1`
 
-- `summary`: two sentences at most on how this schedule is shaped (what dominates it: a near deadline, one heavy milestone, little free time).
-- `nextActionReason`: why `nextActionId` comes first, citing its tier, weight, deadline or first block.
-- `alternatives`: for each id in `alternativeIds`, why it is not first — later in order, a lower tier, a later deadline, or, for an unplaced one, its `unplacedReason`.
-- `blockers`: only when there is nothing to explain.
+- `today`; `nextActionId` — the task the schedule puts first; `alternativeIds` — the next few, and tasks it could not place.
+- `activeWorkOrders[]` — `{id, title, intent, identityId, estimateP50Minutes, energy, important, confirmedDeadline}`, plus, when the plan page supplied the scheduler's real result, `tier` (1 important with a deadline, 2 deadline, 3 important, 4 other), `weight` (importance 0–100), `firstBlock` (its first scheduled block) and `unplacedReason`.
+- `currentEnergy` — the person's latest self-report (low / medium / high), or `uncalibrated`.
+- `approvedMilestones[]` — `{id, identityId, title}`.
 
-The order is already decided by the scheduler (urgency tier first, importance inside a tier, then deadline). Narrate it; never re-rank, never compute a score of your own, never mention a factor that is not in the input. Chinese, concise, objective, third person.
+Return raw JSON only: `{summary, nextActionReason, alternatives[], blockers[]}`.
+
+- `summary` — at most two sentences on what shapes this schedule (a near deadline, one heavy milestone, little free time).
+- `nextActionReason` — why `nextActionId` comes first, citing its tier, weight, deadline or first block.
+- `alternatives` — `{id, reason}` for each id in `alternativeIds`: why it is not first (later in order, a lower tier, a later deadline), or, for an unplaced one, its `unplacedReason` in plain words.
+- `blockers` — only when there is nothing to explain.
+
+Name tasks by `title` in 「」; never print an id or the whole `intent` in the text, and never use 「p50」 (say 「通常 90 分钟」). Cite only factors in the input: never a score of your own, never a reason the data does not show.
+
+| | nextActionReason |
+|---|---|
+| 好 | 「「完成 ECE 555 作业 3」属于有期限的重要任务（第 1 级，重要性 80），10/24 截止，首个时段在今天 14:00。」 |
+| 坏 | 「这项任务最重要，建议优先完成。」 (no factor from the input) |
+| 坏 | 「w-3f2a 的 p50 是 120。」 (an id and statistics jargon) |
 
 Allowed tools: supplied state only. Budget: economy. Risk: routine.
 

@@ -8,18 +8,11 @@ import { identityLines } from "./lines";
 
 export const BACKGROUND_FACTS_SKILL = "crossline:crossline-background-facts";
 
-const INSTRUCTIONS = "You are silently compacting one capture into structured background facts about "
-  + "the user's own identities/主线 — current experiment or paper title, key file or repo paths, the "
-  + "client or project name, anything durable that later tasks in the same identity would benefit from "
-  + "already knowing. This is not classification (you are not choosing which identity the capture itself "
-  + "belongs to, only which identity a fact you extract is ABOUT) and it is not a conversation — return "
-  + "only new or changed facts, or an empty list when the capture has nothing durable in it, which is the "
-  + "normal case for most captures. Every fact needs a short stable `key` (snake_case, reusable across "
-  + "captures so a later update overwrites the same fact instead of duplicating it), a `value`, a `why` "
-  + "explaining its relevance, and `sourceQuote` — the exact substring of the capture's title or context "
-  + "that supports it; never paraphrase into the quote. If nothing in the capture is durable background "
-  + "(most short task notes), return an empty facts array — that is success, not a blocker. Only use a "
-  + "blocker for something that actually prevents processing, not for \"nothing to extract\".";
+// The scenario in brief; the Skill has the rules and the examples (this used to be a second copy of it).
+const INSTRUCTIONS = "You run silently after the person captured one line, as the Skill describes: keep only durable background a later task "
+  + "on the same line would want already (a paper's title, a key path, a client's name), shown under 「相关背景」 on those tasks. Most "
+  + "captures have none: an empty facts array is success, not a blocker. Reuse an existing key to update it; `sourceQuote` is an exact "
+  + "substring of the capture. Return raw JSON only.";
 
 export type BackgroundFactsOutcome =
   | { state: "extracted"; factCount: number }

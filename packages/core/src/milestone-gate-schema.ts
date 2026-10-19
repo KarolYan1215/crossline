@@ -146,10 +146,9 @@ export const MILESTONE_PROPOSAL_SCHEMA = object({
   }), 20),
   targetProposals: list(object({ projectId: str, value: str, why: str }), 8),
   assumptions: strList,
-  blockers: list(object({ code: str, message: str }), 10),
-  // Whether the delivery follows the person's own line skill. `violated` names each broken rule; a delivery that covers its contract
-  // but breaks one is `partial`, not `pass`.
-  fit: object({ fits: { type: "boolean" }, violated: strList, why: emptyableStr })
+  // `fit` (the gate's judgement of the person's line skill) was copied in here by mistake with the gate's own field: in strict mode the
+  // architect had to answer a question about a delivery that does not exist. It belongs to `MILESTONE_GATE_OUTPUT_SCHEMA` only.
+  blockers: list(object({ code: str, message: str }), 10)
 });
 
 export type MilestoneProposalContext = {
