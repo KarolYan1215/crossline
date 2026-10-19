@@ -73,6 +73,8 @@ export type ProviderRouting = {
    * or this month's cap reached). The workspace's own Codex sign-in still serves; without one the run stops with this.
    */
   blocked?: { code: "MODEL_SPONSOR_PENDING" | "MODEL_SPONSOR_BUDGET"; message: string };
+  /** A model of the same provider for one Skill (the developer's cheaper model for simple background work); otherwise the provider's. */
+  modelFor?: (skillKey: string) => string | undefined;
 };
 
 let resolver: ((workspaceId: string | undefined) => ProviderRouting | undefined) | undefined;
@@ -90,11 +92,13 @@ export type ThreadProvider = { id: string; model: string; definition: Record<str
 export type RouteDecision = { via: "codex" } | { via: "provider"; provider: ThreadProvider }
   | { via: "blocked"; code: "MODEL_CAPABILITY_MISSING" | "MODEL_NOT_ADMITTED" | "MODEL_SPONSOR_PENDING" | "MODEL_SPONSOR_BUDGET"; message: string };
 
-export function threadProvider(routing: Pick<ProviderRouting, "provider" | "gatewayUrl">, model: string): ThreadProvider {
+export function threadProvider(routing: Pick<ProviderRouting, "provider" | "gatewayUrl">, model: string, skill?: string): ThreadProvider {
   return { id: `crossline-${routing.provider.id}`, model, ...(routing.provider.contextK ? { contextWindow: routing.provider.contextK * 1000 } : {}), definition: {
     name: routing.provider.label, base_url: routing.gatewayUrl, wire_api: "responses", requires_openai_auth: false, supports_websockets: false,
     // A local model can think for minutes before its first word; the gateway streams its reasoning, but leave room.
-    stream_idle_timeout_ms: 600_000, request_max_retries: 2, stream_max_retries: 2 } };
+    stream_idle_timeout_ms: 600_000, request_max_retries: 2, stream_max_retries: 2,
+    // Which Skill the thread runs, for the gateway: a person's turn refused for load goes to another model, background work waits.
+    ...(skill ? { http_headers: { "x-crossline-skill": skill } } : {}) } };
 }
 
 /**
@@ -107,7 +111,7 @@ export function decideRoute(skillName: string, routing: ProviderRouting | undefi
   if (routing.blocked) return routing.codexSignedIn ? { via: "codex" } : { via: "blocked", ...routing.blocked };
   const key = skillKey(skillName);
   const gap = capabilityGap(key, { ...THIRD_PARTY_CAPABILITIES, ...routing.capabilities });
-  if (!gap && routing.admitted.has(key)) return { via: "provider", provider: threadProvider(routing, routing.provider.model) };
+  if (!gap && routing.admitted.has(key)) return { via: "provider", provider: threadProvider(routing, routing.modelFor?.(key) ?? routing.provider.model, key) };
   if (routing.codexSignedIn) return { via: "codex" };
   const label = SKILL_NEEDS[key]?.label ?? "这项功能";
   return gap ? { via: "blocked", code: "MODEL_CAPABILITY_MISSING", message: gap }

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { cleanAnswerStrings } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
-import { createUsageCollector, currentSpendMode, reportUsage, type UsageCollector } from "./usage";
+import { createUsageCollector, currentSpendMode, currentUsageWorkspace, reportUsage, type UsageCollector } from "./usage";
 import { currentProviderRouting, decideRoute, type ThreadProvider } from "./providers";
 import { markClientBusy, withModelSlot, type ModelPriority } from "./model-gate";
 import { accountModels, fitRoute } from "./model-catalog";
@@ -122,6 +122,8 @@ export type SkillRunOptions<T> = {
   onQueued?: (ahead: number) => void;
   /** Overrides the gate's priority, which otherwise follows the Skill (`priorityForSkill`). */
   priority?: ModelPriority;
+  /** The account the gate counts this run against; otherwise the workspace the run is attributed to (`enterUsageWorkspace`). */
+  tenant?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   /** Silence, in ms, after which a turn is treated as hung and sent again. Defaults to 20 minutes (`CROSSLINE_SKILL_IDLE_MINUTES`). */
@@ -235,24 +237,29 @@ function fail(code: string): never { throw new Error(code); }
 
 type NativeSkill = { path: string; enabled: boolean };
 /**
- * Runs wait in a lane per model tier, not in one line for everything. A ten-minute interview turn used to hold
- * a one-second plan explanation behind it; now the cheap lane moves while the heavy one works. Two runs of the
- * same Skill still never overlap, because a Skill belongs to exactly one tier.
+ * The assistant waits in a line of its own per runtime: a task that runs for up to an hour must not hold anything else, and two of one
+ * account's assistant runs never overlap. Every other run is paced by the model gate (model-gate.ts): an account holds at most two
+ * background slots, accounts take turns, and a person's turn starts at once. Until 2026-10-19 every run waited in a line per tier and
+ * runtime, so one account's twelve backplans and thirty step plans ran strictly one after another (decided with the owner that day).
  */
-const skillLanes = new Map<string, Promise<void>>();
+const agentLanes = new Map<string, Promise<void>>();
 // Lanes and the config lock belong to one runtime: each account's own Codex (runtime-registry.ts) queues only its own runs.
 const runtimeIds = new WeakMap<object, number>();
 let nextRuntimeId = 0;
 const runtimeKey = (client: object) => { if (!runtimeIds.has(client)) runtimeIds.set(client, ++nextRuntimeId); return runtimeIds.get(client)!; };
-function serializeSkillRun<T>(client: object, skillName: string, run: () => Promise<T>): Promise<T> {
-  // The assistant gets a lane of its own: a task that runs for an hour must not hold the capture analysis or the gate behind it.
-  // The assistant without a shell too: it still waits for a model slot like any background run, but in a lane of its own.
-  const lane = `${runtimeKey(client)}:${/crossline-agent(-tools)?$/.test(skillName) ? "agent" : tierForSkill(skillName) ?? "default"}`;
-  const previous = skillLanes.get(lane) ?? Promise.resolve();
+function inLane<T>(lanes: Map<string, Promise<void>>, lane: string, run: () => Promise<T>): Promise<T> {
+  const previous = lanes.get(lane) ?? Promise.resolve();
   let release = () => {};
-  skillLanes.set(lane, new Promise<void>((resolve) => { release = resolve; }));
-  return previous.then(run).finally(release);
+  const mine = new Promise<void>((resolve) => { release = resolve; });
+  lanes.set(lane, mine);
+  return previous.then(run).finally(() => { release(); if (lanes.get(lane) === mine) lanes.delete(lane); });
 }
+const isAssistant = (skillName: string) => /crossline-agent(-tools)?$/.test(skillName);
+/** Two turns on one thread never overlap (the interview and the input box send one after another on the same thread). */
+const threadLanes = new Map<string, Promise<void>>();
+
+/** The account a run is for, as the gate counts it: a model evaluation's many keys are one account. */
+const tenantOf = (workspaceId: string | undefined) => workspaceId?.startsWith("sponsor-eval:") ? "sponsor-eval" : workspaceId;
 
 /**
  * Switching a Skill on or off rewrites the runtime's one config file, so two lanes doing it at once could write
@@ -303,29 +310,68 @@ const MAX_STALL_RETRIES = 2;
  * it back off, and reporting what the run used.
  */
 async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools;
-  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode },
+  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode; tenant?: string },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
-  // The assistant (owner's machine only, never on the hosted beta) runs for up to an hour in a lane of its own; holding the one gate
-  // slot that long would stop every interview behind it.
-  // A sandboxed assistant (any account, on a shared server) waits for a model slot like every other background run.
-  if (/crossline-agent$/.test(options.skillName) && !options.agent?.sandbox) return serializeSkillRun(client, options.skillName, () => runGated(client, options, body));
-  return serializeSkillRun(client, options.skillName, async () => {
-    const gated = await withModelSlot({ skill: options.skillName, ...(options.priority ? { priority: options.priority } : {}),
+  const queuedAt = Date.now();
+  const timing: RunTiming = { laneMs: 0, gateMs: 0, tenant: options.tenant ?? tenantOf(currentUsageWorkspace()) ?? "-" };
+  const gated = async () => {
+    timing.laneMs = Date.now() - queuedAt;
+    // The assistant (owner's machine only, never on the hosted beta) runs for up to an hour; holding a gate slot that long would stop
+    // every interview behind it. A sandboxed assistant (any account, on a shared server) waits for a model slot like any background run.
+    if (/crossline-agent$/.test(options.skillName) && !options.agent?.sandbox) return runGated(client, options, body, timing);
+    // The assistant's own runs count apart from the account's two background slots (the owner's decision of 2026-10-19).
+    const tenant = isAssistant(options.skillName) ? `${timing.tenant}#assistant` : timing.tenant;
+    const result = await withModelSlot({ skill: options.skillName, tenant, onGranted: (waited) => { timing.gateMs = waited; },
+      ...(options.priority ? { priority: options.priority } : {}),
       ...(options.onQueued ? { onQueued: options.onQueued } : {}), ...(options.signal ? { signal: options.signal } : {}) },
-    () => runGated(client, options, body));
-    return gated ?? { ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；排队时取消，没有开始运行。" }, audit: {} };
-  });
+    () => runGated(client, options, body, timing));
+    return result ?? { ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；排队时取消，没有开始运行。" }, audit: {} };
+  };
+  return isAssistant(options.skillName) ? inLane(agentLanes, `${runtimeKey(client)}:agent`, gated) : gated();
 }
+
+/** How long a run waited before it began, and for which account (logged with the run as `skill.run`). */
+type RunTiming = { laneMs: number; gateMs: number; tenant: string };
 
 /** The run itself, once it holds a slot: counted as in flight on its runtime so the runtime is never reclaimed under it. */
 async function runGated<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
-  body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
+  body: (context: RunContext) => Promise<SkillRunResult<T>>, timing: RunTiming): Promise<SkillRunResult<T>> {
   markClientBusy(client, 1);
-  try { return await runRouted(client, options, body); } finally { markClientBusy(client, -1); }
+  try { return await runRouted(client, options, body, timing); } finally { markClientBusy(client, -1); }
+}
+
+/**
+ * A Skill switched on for a run stays on while any run that needs it is going: two runs of one Skill may now overlap on one runtime, and
+ * the first to finish must not switch it off under the other (whose first prompt names it). Counted per runtime and skill path; switched
+ * back off only by the last holder, and only if it was off before the first.
+ */
+const heldSkills = new WeakMap<object, Map<string, { count: number; restore: boolean }>>();
+function heldOn(client: object): Map<string, { count: number; restore: boolean }> {
+  let held = heldSkills.get(client);
+  if (!held) { held = new Map(); heldSkills.set(client, held); }
+  return held;
+}
+/** Under the config lock: switches the skill on unless a run already holds it, and counts this run as holding it. */
+async function holdSkill(client: CodexRpcBoundary, skill: NativeSkill): Promise<void> {
+  const held = heldOn(client);
+  const entry = held.get(skill.path);
+  if (entry) { entry.count += 1; return; }
+  if (!skill.enabled) await setNativeSkill(client, skill.path, true);
+  held.set(skill.path, { count: 1, restore: !skill.enabled });
+}
+/** Under the config lock: the last holder switches the skill back off when it was off before. */
+async function releaseSkill(client: CodexRpcBoundary, path: string): Promise<void> {
+  const held = heldOn(client);
+  const entry = held.get(path);
+  if (!entry) return;
+  entry.count -= 1;
+  if (entry.count > 0) return;
+  held.delete(path);
+  if (entry.restore) await setNativeSkill(client, path, false);
 }
 
 async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
-  body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
+  body: (context: RunContext) => Promise<SkillRunResult<T>>, timing: RunTiming): Promise<SkillRunResult<T>> {
   const startedAt = Date.now();
   const spendMode = await currentSpendMode();
   // The workspace's own provider when it can serve this Skill, else its own Codex sign-in, else a blocker (never the owner's runtime).
@@ -341,36 +387,32 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   const route = provider ? wanted : fitRoute(wanted, options.tier ?? tierForSkill(options.skillName), await accountModels(client));
   const webTools = provider ? options.webTools ?? routing?.webTools : undefined;
   const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [] };
-  let skill: NativeSkill | undefined;
-  // Library skills switched on for this run, with whether they were on before (only those that were off are switched back).
-  const extras: Array<NativeSkill & { name: string }> = [];
+  // The skills this run holds on (its own and the library skills named for it); each is released after the run.
+  const holding: string[] = [];
+  const extras: string[] = [];
   let result: SkillRunResult<T>;
   try {
-    skill = await underConfigLock(client, async () => {
+    await underConfigLock(client, async () => {
       const found = await findNativeSkill(client, options.skillName, options.cwd);
-      if (!found.enabled) await setNativeSkill(client, found.path, true);
+      await holdSkill(client, found);
+      holding.push(found.path);
       for (const name of options.extraSkills ?? []) {
         const extra = await findNativeSkill(client, name, options.cwd).catch(() => undefined);
         if (!extra) continue;
-        if (!extra.enabled) await setNativeSkill(client, extra.path, true);
-        extras.push({ ...extra, name });
+        await holdSkill(client, extra);
+        holding.push(extra.path);
+        extras.push(name);
       }
-      return found;
     });
-    context.extraSkills = extras.map((extra) => extra.name);
+    context.extraSkills = extras;
     result = await body(context);
     if (extras.length) result.audit.skills = context.extraSkills;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "";
     result = skillBlocker<T>(/^SKILL_(LIST_FAILED|MISSING|CONFIG_FAILED)$/.test(errorMessage) ? errorMessage : "SKILL_CONFIG_FAILED");
   }
-  for (const extra of extras.filter((item) => !item.enabled)) {
-    try { await underConfigLock(client, () => setNativeSkill(client, extra.path, false)); }
-    catch { result = skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
-  }
-  if (skill && !skill.enabled) {
-    const path = skill.path;
-    try { await underConfigLock(client, () => setNativeSkill(client, path, false)); }
+  for (const path of holding.reverse()) {
+    try { await underConfigLock(client, () => releaseSkill(client, path)); }
     catch { result = skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
   }
   reportUsage({
@@ -380,6 +422,12 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
     ...(result.ok ? {} : { errorCode: result.blocker.code }), repairs: result.audit.repairs ?? 0, turns: context.usage.turns(),
     durationMs: Date.now() - startedAt, at: new Date(startedAt).toISOString(), turnSeconds: context.usage.turnSeconds(), ...context.usage.total()
   });
+  // Where the time went (docs/model-scheduling.md): waiting before the gate (the assistant's line, a thread's earlier turn), at the gate,
+  // and the run itself, with how much of the input the provider served from its cache. Summed per Skill by the diagnose job.
+  const tokens = context.usage.total();
+  console.info(JSON.stringify({ type: "skill.run", skill: options.skillName, ok: result.ok, provider: provider ? "provider" : "codex",
+    ...(context.route?.model ? { model: context.route.model } : {}), laneMs: timing.laneMs, gateMs: timing.gateMs, serviceMs: Date.now() - startedAt,
+    input: tokens.inputTokens, cached: tokens.cachedInputTokens, output: tokens.outputTokens }));
   return result;
 }
 
@@ -400,7 +448,10 @@ export async function installLibraryPlugin(client: CodexRpcBoundary, plugin: { m
       const listed = record(entry)?.skills;
       return Array.isArray(listed) ? listed.map(record).filter((skill): skill is Record<string, unknown> => Boolean(skill)) : [];
     }).filter((skill) => typeof skill.name === "string" && skill.name.startsWith(`${plugin.name}:`) && typeof skill.path === "string");
-    for (const skill of skills.filter((item) => item.enabled === true)) await setNativeSkill(client, String(skill.path), false);
+    // A skill a run is holding on stays on until that run lets go (`releaseSkill` switches it off then).
+    const held = heldOn(client);
+    for (const skill of skills.filter((item) => item.enabled === true && !held.has(String(item.path)))) await setNativeSkill(client, String(skill.path), false);
+    for (const skill of skills) { const entry = held.get(String(skill.path)); if (entry) entry.restore = true; }
     return [...new Set(skills.map((skill) => String(skill.name)))].sort();
   });
 }
@@ -450,6 +501,7 @@ export type ContinueTurnOptions<T> = {
   onProgress?: (progress: SkillProgress) => void;
   onQueued?: (ahead: number) => void;
   priority?: ModelPriority;
+  tenant?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   idleMs?: number;
@@ -621,7 +673,10 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false])),
     // Another provider: defined for this thread only, and no memories — Codex's memory runs would call an OpenAI model on it.
     ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition,
-      "memories.use_memories": false, "memories.generate_memories": false, "features.memories": false, ...contextWindowConfig(context.provider) } : {})
+      "memories.use_memories": false, "memories.generate_memories": false, "features.memories": false, ...contextWindowConfig(context.provider),
+      // The catalog of every skill on this runtime is not needed (the run names its own) and changes with what other runs hold on, which
+      // would make each request's opening differ and miss the provider's cache.
+      "skills.include_instructions": false } : {})
   };
   const threadParams = {
     environments: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
@@ -908,7 +963,7 @@ function failureResult<T>(client: CodexRpcBoundary, error: unknown, audit: Analy
 export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string, message: string,
   options: ContinueTurnOptions<T>): Promise<SkillRunResult<T>> {
   if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} });
-  return executeSkill(client, options, async (context): Promise<SkillRunResult<T>> => {
+  return inLane(threadLanes, `${runtimeKey(client)}:${threadId}`, () => executeSkill(client, options, async (context): Promise<SkillRunResult<T>> => {
     const audit: AnalysisAudit = { threadId };
     holdThread(client, threadId);
     const scope = openScope(client, options);
@@ -927,7 +982,7 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
       return { ok: true, output, audit };
     } catch (error) { return failureResult<T>(client, error, audit); }
     finally { unregister?.(); scope.dispose(); releaseThread(client, threadId, THREAD_KEEP_MS); }
-  });
+  }));
 }
 
 export function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>): Promise<SkillRunResult<T>> {

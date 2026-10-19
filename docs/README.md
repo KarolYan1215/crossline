@@ -28,6 +28,7 @@
 | [setup-google-oauth.md](setup-google-oauth.md) | 开启「用 Google 账号登录」的一次性配置 |
 | [setup-siwc.md](setup-siwc.md) | Sign in with ChatGPT：能做什么、怎样打开、订阅额度共享还差什么 |
 | [competitors.md](competitors.md) | 竞品与证据（2026-10-06）：各产品的机制、借鉴点与可信度，以及设计所依据的研究 |
+| [model-scheduling.md](model-scheduling.md) | 模型调度（已实现，2026-10-19）：每账号两个并行、账号轮流、短活先跑与等久升级、有人在等内存够即开始、开发者模型的限流与被拒换模型、简单活用快模型、低价时段、缓存命中与测量 |
 | [model-providers.md](model-providers.md) | 接入本人自己的 Codex 与其他 API 模型：现有耦合清单、接口设计、分阶段与风险（设计稿，待审） |
 | [assistant-agent.md](assistant-agent.md) | 带 shell 的助手：设计、守卫、信任与审阅流程 |
 | [structured-output.md](structured-output.md) | 模型的结构化输出怎么约束、怎么校验、怎么修正，出问题怎么查，现有的实测数据 |

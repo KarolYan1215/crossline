@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { caseTools } from "./conformance-tools";
 import path from "node:path";
 import {
-  admittedSkills, chooseSponsorModel, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, conformanceProblems, parseSponsorModels, thinkingVariant, sponsorMonth, sponsorSpend,
+  admittedSkills, chooseSponsorModel, skillKey, sponsorFallbacks, sponsorModelForSkill, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, conformanceProblems, parseSponsorModels, thinkingVariant, sponsorMonth, sponsorSpend,
   SPONSOR_MONTHLY_CAP_CNY, summarizeConformance, type ConformanceRecord, type ConformanceRun, type CostSignal, type ProviderCapabilities,
   type SponsorEvaluation, type SponsorModel
 } from "@crossline/core";
@@ -113,7 +113,8 @@ const FAST_CANDIDATE = "deepseek-ai/DeepSeek-V4-Flash";
 export type SponsorEffortLog = { at: string; model: string; variant: string; caseId: string; ok: boolean; code?: string; repairs: number;
   serviceMs: number | null; wallMs: number; tokens: { input: number; cached: number; output: number; reasoning: number } };
 
-type Saved = { evaluations: SponsorEvaluation[] };
+/** `lastChosen`: the model last chosen, served while a new evaluation runs (the owner's decision of 2026-10-19: no pause). */
+type Saved = { evaluations: SponsorEvaluation[]; lastChosen?: SponsorEvaluation };
 
 export function sponsorFromEnv(env: NodeJS.ProcessEnv = process.env): { key: string; baseUrl: string; models: SponsorModel[]; capYuan: number } | undefined {
   const key = env.CROSSLINE_SPONSOR_API_KEY?.trim();
@@ -155,9 +156,30 @@ export function createSponsorService(options: {
     return read().evaluations.filter((item) => item.tokens && item.version === SPONSOR_EVAL_VERSION && config.models.some((model) => model.model === item.model)
       && conformanceCurrent(item.record, item.model, RUNTIME_VERSION, now()));
   };
+  /** Writes the evaluations, keeping the last choice. */
+  const save = (evaluations: SponsorEvaluation[], lastChosen = read().lastChosen) =>
+    writeFileSync(file, JSON.stringify({ evaluations, ...(lastChosen ? { lastChosen } : {}) } satisfies Saved, null, 2), "utf8");
+  /** The current choice; while a new evaluation has chosen nothing yet, the last one (if that model is still listed). */
   const chosen = (): SponsorEvaluation | undefined => {
     const config = settings();
-    return config ? chooseSponsorModel(config.models, currentEvaluations(), options.capabilities) : undefined;
+    if (!config) return undefined;
+    const current = chooseSponsorModel(config.models, currentEvaluations(), options.capabilities);
+    if (current) return current;
+    const last = read().lastChosen;
+    return last && config.models.some((model) => model.model === last.model) ? last : undefined;
+  };
+  /** What per-Skill choices are made from: the current records, or only the last choice while none is current. */
+  const pool = (): SponsorEvaluation[] => {
+    const current = currentEvaluations();
+    if (current.length && settings() && chooseSponsorModel(settings()!.models, current, options.capabilities)) return current;
+    const last = chosen();
+    return last ? [last] : [];
+  };
+  /** The model a Skill runs on (a simple background Skill may run on a cheaper candidate that passed it). */
+  const modelFor = (skill: string): string | undefined => {
+    const config = settings();
+    const pick = chosen();
+    return config && pick ? sponsorModelForSkill(skill, pick.model, config.models, pool(), options.capabilities) : undefined;
   };
   const providerFor = (model: string): ProviderConfig => {
     const contextK = settings()?.models.find((item) => item.model === thinkingVariant(model).base)?.contextK;
@@ -187,10 +209,16 @@ export function createSponsorService(options: {
       long: { usedPercent, windowDurationMins: null, resetsAt: Math.floor(spend.resetsAt.getTime() / 1000) } };
   };
 
-  /** What the gateway forwards to: the sponsor's base URL with the server key; the model is the one the thread names. */
-  const upstream = (): GatewayUpstream | undefined => {
+  /**
+   * What the gateway forwards to: the sponsor's base URL with the server key; the model is the one the thread names. A person's turn
+   * refused for load may go to another candidate that passed the Skill; an evaluation's run never does, or it would measure the wrong model.
+   */
+  const upstream = (workspaceId = ""): GatewayUpstream | undefined => {
     const config = settings();
-    return config ? { kind: "chat", baseUrl: config.baseUrl, responseFormat: "json_object", key: config.key, thinkingControl: true } : undefined;
+    if (!config) return undefined;
+    const measuring = workspaceId.startsWith(SPONSOR_EVAL_PREFIX);
+    return { kind: "chat", baseUrl: config.baseUrl, responseFormat: "json_object", key: config.key, thinkingControl: true,
+      ...(measuring ? {} : { fallback: (skill: string, model: string) => sponsorFallbacks(skillKey(skill), model, config.models, pool(), options.capabilities) }) };
   };
 
   /** Models the key can use, or undefined when the list cannot be read (then every candidate is tried). */
@@ -239,18 +267,22 @@ export function createSponsorService(options: {
         await sampleDialogue(client, model).catch((error: unknown) => console.info(JSON.stringify({ type: "sponsor.dialogue_failed", model: model.model,
           message: error instanceof Error ? error.message.slice(0, 160) : "unknown" })));
         const saved = read().evaluations.map((item) => item.model === model.model ? { ...item, dialogueVersion: SPONSOR_DIALOGUE_VERSION } : item);
-        writeFileSync(file, JSON.stringify({ evaluations: saved } satisfies Saved, null, 2), "utf8");
+        save(saved);
       }));
       await Promise.all(pending.map(async (model) => {
         const evaluation = await evaluateOne(client, model);
         const saved = read().evaluations.filter((item) => item.model !== model.model);
-        writeFileSync(file, JSON.stringify({ evaluations: [...saved, evaluation] } satisfies Saved, null, 2), "utf8");
+        save([...saved, evaluation]);
         tested.push(model.model);
         console.info(JSON.stringify({ type: "sponsor.evaluated", model: model.model, passRate: evaluation.record.passRate,
           repairRate: evaluation.record.repairRate, p95Ms: evaluation.record.p95Ms, yuanPerRun: evaluation.yuanPerRun, tokens: evaluation.tokens,
           admitted: admittedSkills(evaluation.record, options.capabilities).length, failures: evaluation.record.failures.slice(0, 6) }));
       }));
     } finally { evaluating = false; }
+    // A choice from current records is kept as the last choice, served while a later evaluation runs.
+    const listedModels = settings()?.models;
+    const current = listedModels ? chooseSponsorModel(listedModels, currentEvaluations(), options.capabilities) : undefined;
+    if (current) save(read().evaluations, current);
     const pick = chosen();
     // The thinking trial on the chosen model and the fastest candidate, once per trial version.
     const trial = [...new Set([pick?.model, FAST_CANDIDATE].filter((model): model is string => Boolean(model)))]
@@ -262,7 +294,7 @@ export function createSponsorService(options: {
           await effortTrial(client, model).catch((error: unknown) => console.info(JSON.stringify({ type: "sponsor.effort_failed", model,
             message: error instanceof Error ? error.message.slice(0, 160) : "unknown" })));
           const saved = read().evaluations.map((item) => item.model === model ? { ...item, effortVersion: SPONSOR_EFFORT_VERSION } : item);
-          writeFileSync(file, JSON.stringify({ evaluations: saved } satisfies Saved, null, 2), "utf8");
+          save(saved);
         }));
       } finally { evaluating = false; }
     }
@@ -468,6 +500,6 @@ export function createSponsorService(options: {
       budget: active(workspaceId) ? budget(workspaceId) : undefined, admitted: pick ? admittedSkills(pick.record, options.capabilities) : [] };
   }
 
-  return { settings, chosen, providerFor, budget, active, cost, upstream, evaluate, noteEvalUsage, view, dialogueRouting, isEvaluating: () => evaluating };
+  return { settings, chosen, modelFor, providerFor, budget, active, cost, upstream, evaluate, noteEvalUsage, view, dialogueRouting, isEvaluating: () => evaluating };
 }
 export type SponsorService = ReturnType<typeof createSponsorService>;

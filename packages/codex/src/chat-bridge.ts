@@ -63,6 +63,25 @@ export function freeformDescription(description: string): string {
     + `(for a patch, from "*** Begin Patch" to "*** End Patch"), as a JSON string.`;
 }
 
+/**
+ * Codex puts a Skill's text (`<skill>…</skill>`, the same few thousand tokens every run) after the input it was named in, which differs
+ * every run, so no run's Skill text could come from the provider's cache. Within each run of user messages, the Skill blocks are moved
+ * ahead of the rest: the order of the Skill blocks among themselves, and of everything else, is kept.
+ */
+export function stableFirst(messages: Json[]): void {
+  const isSkill = (message: Json) => message.role === "user" && /^\s*<skill>/.test(typeof message.content === "string" ? message.content
+    : Array.isArray(message.content) ? text(record(message.content[0])?.text) : "");
+  let start = 0;
+  for (let index = 0; index <= messages.length; index += 1) {
+    if (index < messages.length && messages[index]!.role === "user") continue;
+    // messages[start..index) is one run of user messages.
+    const run = messages.slice(start, index);
+    const skills = run.filter(isSkill);
+    if (skills.length && skills.length < run.length) messages.splice(start, run.length, ...skills, ...run.filter((message) => !isSkill(message)));
+    start = index + 1;
+  }
+}
+
 /** One Responses request as one Chat Completions request. `dropped` names what had no Chat Completions form. */
 export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "responseFormat" | "reasoningEffort" | "thinkingControl"> = {}): ChatRequest {
   const dropped = new Set<string>();
@@ -95,8 +114,14 @@ export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "r
     const type = item.type ?? (item.role ? "message" : undefined);
     if (type === "message") {
       const role = text(item.role);
-      // Many compatible endpoints accept one leading system message only; developer text is instructions wherever Codex put it.
-      if (role === "system" || role === "developer") { const body = contentText(item.content); if (body) system.push(body); }
+      // Many compatible endpoints accept one leading system message only: developer text before the conversation is that message. Text
+      // Codex adds later stays where it came, as a marked user message, so the system message and everything before it are the same
+      // in every request of a thread and the provider can serve that prefix from its cache (2026-10-19).
+      if (role === "system" || role === "developer") {
+        const body = contentText(item.content);
+        if (body && !messages.length) system.push(body);
+        else if (body) messages.push({ role: "user", content: `<instructions>\n${body}\n</instructions>` });
+      }
       else if (role === "assistant") messages.push({ role: "assistant", content: contentText(item.content) });
       else messages.push({ role: "user", content: userContent(item.content) });
     } else if (type === "additional_tools") {
@@ -140,6 +165,7 @@ export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "r
   }
 
   const effort = text(record(request.reasoning)?.effort);
+  stableFirst(messages);
   const variant = upstream.thinkingControl ? thinkingVariant(text(request.model)) : undefined;
   const body: Json = {
     model: variant ? variant.base : request.model,

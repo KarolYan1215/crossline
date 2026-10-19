@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { conformanceCases, summarizeConformance } from "./provider-conformance";
-import { chooseSponsorModel, evaluationYuanPerRun, parseSponsorModels, sponsorMonth, sponsorSpend } from "./sponsor";
+import { conformanceCases, SKILL_NEEDS, summarizeConformance } from "./provider-conformance";
+import { chooseSponsorModel, evaluationYuanPerRun, parseSponsorModels, hoursToOffPeakEnd, sponsorFallbacks, sponsorModelForSkill, sponsorMonth, sponsorOffPeak, sponsorSpend, SPONSOR_SIMPLE_SKILLS } from "./sponsor";
 
 const record = (model: string, failCase?: string) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: "r", ranAt: "2026-10-18T00:00:00Z" },
   conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: item.id !== failCase, repairs: 0, ms: 1000 }))));
@@ -50,4 +50,36 @@ test("a thinking variant is priced as its base model, and only off or a token co
   expect(thinkingVariant("m@think:99999")).toEqual({ base: "m", thinking: { enable: true, budget: 32768 } });
   expect(thinkingVariant("qwen3:8b")).toEqual({ base: "qwen3:8b" });
   expect(sponsorSpend([{ model: "m@think:2048", inputTokens: 1_000_000, outputTokens: 0 }], [{ model: "m", priceIn: 2, priceOut: 8 }])).toBe(2);
+});
+
+test("a simple background Skill runs on the cheapest candidate that passed it; the rest stay on the chosen model; fallbacks exclude the model", () => {
+  const models = parseSponsorModels("main=2:8:1024,flash=0.5:2:1024,mid=1:4:1024,short=0.1:0.1:32");
+  const classifierCase = SKILL_NEEDS["crossline-calendar-classifier"]!.schemas[0]!;
+  const evaluations = [
+    { model: "main", record: record("main"), yuanPerRun: 0.05 },
+    { model: "flash", record: record("flash"), yuanPerRun: 0.01 },
+    { model: "mid", record: record("mid"), yuanPerRun: 0.02 },
+    { model: "short", record: record("short"), yuanPerRun: 0.001 }
+  ];
+  expect(SPONSOR_SIMPLE_SKILLS).toContain("crossline-mail-triage");
+  expect(sponsorModelForSkill("crossline-calendar-classifier", "main", models, evaluations)).toBe("flash");
+  expect(sponsorModelForSkill("crossline-step-planner", "main", models, evaluations)).toBe("main");
+  // A candidate that failed the Skill's own case is not used for it.
+  const failing = evaluations.map((item) => item.model === "flash" ? { ...item, record: record("flash", classifierCase) } : item);
+  expect(sponsorModelForSkill("crossline-calendar-classifier", "main", models, failing)).toBe("mid");
+  // Next models for a person's turn refused for load: cheapest first, never the one refused (a thinking variant counts as its base).
+  expect(sponsorFallbacks("crossline-onboarding", "main@think:off", models, evaluations)).toEqual(["flash", "mid"]);
+});
+
+test("the off-peak hours are 02:00–08:00 Beijing time, and the time to their end counts to this window or the next", () => {
+  // 18:00 UTC is 02:00 in Beijing; 23:59 UTC is 07:59; 00:00 UTC is 08:00.
+  expect(sponsorOffPeak(new Date("2026-10-19T18:00:00Z"))).toBe(true);
+  expect(sponsorOffPeak(new Date("2026-10-19T23:59:00Z"))).toBe(true);
+  expect(sponsorOffPeak(new Date("2026-10-20T00:00:00Z"))).toBe(false);
+  expect(sponsorOffPeak(new Date("2026-10-19T17:59:00Z"))).toBe(false);
+  expect(hoursToOffPeakEnd(new Date("2026-10-19T20:00:00Z"))).toBe(4);
+  // 09:00 Beijing (01:00 UTC): the next window ends tomorrow at 08:00 Beijing, 23 hours on.
+  expect(hoursToOffPeakEnd(new Date("2026-10-20T01:00:00Z"))).toBe(23);
+  // 01:00 Beijing (17:00 UTC): this night's window, 7 hours on.
+  expect(hoursToOffPeakEnd(new Date("2026-10-19T17:00:00Z"))).toBe(7);
 });

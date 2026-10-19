@@ -53,12 +53,17 @@ test("real RPC boundary isolates one analysis thread and collects a strict final
   ]);
 });
 
-test("task-scoped skill toggles are serialized and restored", async () => {
+test("two runs of one Skill may overlap: it is switched on once, held by both, and switched back off by the last", async () => {
   const fake = runtime();
   await Promise.all([
     codex.runCodexAnalysis(fake.client, context, { skillName: "crossline-automation-stripper", cwd: "C:\\repo", onAudit: () => {} }),
     codex.runCodexAnalysis(fake.client, context, { skillName: "crossline-automation-stripper", cwd: "C:\\repo", onAudit: () => {} })
   ]);
+  expect(fake.requests.filter((request) => request.method === "thread/start")).toHaveLength(2);
+  expect(fake.requests.filter((request) => request.method === "skills/config/write").map((request) => request.params.enabled))
+    .toEqual([true, false]);
+  // Alone, a run switches its Skill on and back off as before.
+  await codex.runCodexAnalysis(fake.client, context, { skillName: "crossline-automation-stripper", cwd: "C:\\repo", onAudit: () => {} });
   expect(fake.requests.filter((request) => request.method === "skills/config/write").map((request) => request.params.enabled))
     .toEqual([true, false, true, false]);
 });

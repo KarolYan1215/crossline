@@ -104,6 +104,11 @@ jobs:
             curl -s -m 10 http://127.0.0.1:3211/v1/codex/status | head -c 600; echo
             # OpenAI answers an unsupported region with 403 unsupported_country; 401 means reachable.
             for u in https://auth.openai.com/ https://api.openai.com/v1/models https://chatgpt.com/; do printf "%s " $u; curl -s -m 10 -o /tmp/oa -w "%{http_code} " $u; grep -o "unsupported_country[a-z_]*" /tmp/oa | head -1; echo; done'
+      - name: Model time per Skill
+        run: |
+          # Per Skill over the last day: waits before and at the model gate, run time and cache hits (deploy/server/skill-runs.py).
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker logs --since 24h crossline-worker 2>&1 | grep "\"type\":\"skill.run\"" > /tmp/skill-runs.jsonl || true'
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'python3 -' < deploy/server/skill-runs.py || true
       - name: Codex device-code probe
         if: contains(github.event.head_commit.message, '[codex-probe]')
         run: |

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { createChatStreamTranslator, freeformDescription, responsesToChat, upstreamFailure } from "./chat-bridge";
+import { createChatStreamTranslator, freeformDescription, responsesToChat, stableFirst, upstreamFailure } from "./chat-bridge";
 
 /** Parses the SSE lines a translator produced back into events. */
 const events = (lines: string[]) => lines.map((line) => JSON.parse(line.split("\ndata: ")[1]!) as Record<string, unknown> & { type: string });
@@ -136,4 +136,26 @@ test("a thinking variant is sent to an endpoint that takes it as the base model 
   expect(capped).toMatchObject({ model: "deepseek-ai/DeepSeek-V4.1-Flash", enable_thinking: true, thinking_budget: 2048 });
   expect(responsesToChat(request("deepseek-ai/DeepSeek-V4.1-Flash"), { thinkingControl: true }).body).not.toHaveProperty("enable_thinking");
   expect(responsesToChat(request("qwen3:8b@think:off")).body).toMatchObject({ model: "qwen3:8b@think:off" });
+});
+
+test("a Skill's text goes ahead of the input it was named in, and instructions Codex adds mid-thread stay where they came", () => {
+  const skill = "<skill>\n<name>crossline:crossline-step-planner</name>\n<path>/s/SKILL.md</path>\nrules\n</skill>";
+  const chat = responsesToChat({ model: "m", instructions: "base", input: [
+    { type: "message", role: "developer", content: [{ type: "input_text", text: "<permissions>x</permissions>" }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "$crossline:crossline-step-planner\n\n{\"task\":1}" }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: skill }] },
+    { type: "message", role: "assistant", content: [{ type: "output_text", text: "{}" }] },
+    { type: "message", role: "developer", content: [{ type: "input_text", text: "model changed" }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "repair: field missing" }] }
+  ] });
+  const messages = chat.body.messages as Array<{ role: string; content: unknown }>;
+  expect(messages.map((message) => message.role)).toEqual(["system", "user", "user", "assistant", "user", "user"]);
+  expect(messages[0]!.content).toBe("base\n\n<permissions>x</permissions>");
+  expect(String(messages[1]!.content)).toMatch(/^<skill>/);
+  expect(String(messages[2]!.content)).toContain("{\"task\":1}");
+  expect(messages[4]!.content).toBe("<instructions>\nmodel changed\n</instructions>");
+  // Moving is idempotent: the same history always gives the same opening, so every request of a thread shares its prefix.
+  const again = [...messages.slice(1)];
+  stableFirst(again);
+  expect(again).toEqual(messages.slice(1));
 });

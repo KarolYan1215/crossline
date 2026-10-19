@@ -103,6 +103,57 @@ export function evaluationYuanPerRun(evaluation: SponsorEvaluation, models: Spon
  * The model to use, or undefined while none passes. Among the candidates that serve the interview and both critical Skills and have the
  * context: those within `SPONSOR_PASS_MARGIN` of the best pass rate, the cheapest per run; ties go to the earlier one in the list.
  */
+/**
+ * The developer's model's cheaper hours (SiliconFlow lists DeepSeek-V4.1-Flash at its peak price 00–02 and 08–24 Beijing time). Work no
+ * one waits on — research, tutorials with time to spare, the nightly flywheel, portrait rewrites, finding and compiling skills, energy
+ * advice, the periodic re-checks of the candidates — waits for them on accounts that run on that model (decided 2026-10-19); planning,
+ * captures and anything a person waits on never does.
+ */
+export const SPONSOR_OFF_PEAK = { utcOffsetHours: 8, fromHour: 2, toHour: 8 } as const;
+const beijingHour = (now: Date) => (now.getUTCHours() + SPONSOR_OFF_PEAK.utcOffsetHours) % 24;
+export const sponsorOffPeak = (now: Date): boolean => {
+  const hour = beijingHour(now);
+  return hour >= SPONSOR_OFF_PEAK.fromHour && hour < SPONSOR_OFF_PEAK.toHour;
+};
+/** Hours from now to the end of the current off-peak window, or of the next one. */
+export function hoursToOffPeakEnd(now: Date): number {
+  const local = new Date(now.getTime() + SPONSOR_OFF_PEAK.utcOffsetHours * 3_600_000);
+  const end = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), SPONSOR_OFF_PEAK.toHour) - SPONSOR_OFF_PEAK.utcOffsetHours * 3_600_000;
+  const next = beijingHour(now) >= SPONSOR_OFF_PEAK.toHour ? end + 86_400_000 : end;
+  return (next - now.getTime()) / 3_600_000;
+}
+
+/**
+ * Background Skills simple enough for whichever measured candidate is cheapest (the owner's choice of 2026-10-19): filing, titles, splits,
+ * mail sorting. The conformance cases measure form, not judgement, so the interview, the input box, analysis, the gate, planning and
+ * the reviewer stay on the chosen model.
+ */
+export const SPONSOR_SIMPLE_SKILLS: readonly string[] = ["crossline-task-titler", "crossline-calendar-classifier", "crossline-folder-classifier",
+  "crossline-goal-splitter", "crossline-background-facts", "crossline-mail-triage"];
+
+/** Candidates that passed this Skill's checks with enough context, cheapest first (list order breaks ties). */
+function admittedFor(skill: string, models: SponsorModel[], evaluations: SponsorEvaluation[], capabilities: ProviderCapabilities): SponsorEvaluation[] {
+  const order = new Map(models.map((model, index) => [model.model, index]));
+  return evaluations.filter((evaluation) => {
+    const model = models.find((item) => item.model === evaluation.model);
+    return model && !(model.contextK !== undefined && model.contextK < SPONSOR_MIN_CONTEXT_K) && admittedSkills(evaluation.record, capabilities).includes(skill);
+  }).sort((a, b) => evaluationYuanPerRun(a, models) - evaluationYuanPerRun(b, models) || (order.get(a.model) ?? 99) - (order.get(b.model) ?? 99));
+}
+
+/** The model one Skill runs on: the cheapest candidate that passed it for a simple background Skill, the chosen model for the rest. */
+export function sponsorModelForSkill(skill: string, chosen: string, models: SponsorModel[], evaluations: SponsorEvaluation[],
+  capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES): string {
+  if (!SPONSOR_SIMPLE_SKILLS.includes(skill)) return chosen;
+  return admittedFor(skill, models, evaluations, capabilities)[0]?.model ?? chosen;
+}
+
+/** Where a person's turn refused for load goes next: other candidates that passed this Skill, cheapest first. */
+export function sponsorFallbacks(skill: string, model: string, models: SponsorModel[], evaluations: SponsorEvaluation[],
+  capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES): string[] {
+  const base = thinkingVariant(model).base;
+  return admittedFor(skill, models, evaluations, capabilities).map((evaluation) => evaluation.model).filter((candidate) => candidate !== base);
+}
+
 export function chooseSponsorModel(models: SponsorModel[], evaluations: SponsorEvaluation[],
   capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES): SponsorEvaluation | undefined {
   const order = new Map(models.map((model, index) => [model.model, index]));

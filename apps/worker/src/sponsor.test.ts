@@ -61,6 +61,23 @@ test("the month's cap stops the account with the reason, and its quota reads as 
   expect(providers.cost("ws")).toMatchObject({ available: true, limitReached: true, money: { spent: 32, cap: 30 } });
 });
 
+test("while a new evaluation has chosen nothing, the last choice keeps serving; the Skill names its thread, and refusals may go elsewhere", async () => {
+  const { store, providers, sponsor } = setup(false);
+  store.setSetting("ws", SPONSOR_SETTING, JSON.stringify({ inviteId: "inv", since: NOW.toISOString() }));
+  const dataDir = dirs.at(-1)!;
+  const record = summarizeConformance({ providerId: "sponsor", model: MODEL, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
+    conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 900 }))));
+  // Records of an older measuring version (as after a prompt change), with the choice they made kept as the last one.
+  writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02, version: SPONSOR_EVAL_VERSION - 1 }],
+    lastChosen: { model: MODEL, record, yuanPerRun: 0.02 } }));
+  expect(sponsor!.chosen()?.model).toBe(MODEL);
+  const decision = decideRoute("crossline:crossline-onboarding", providers.routing("ws"));
+  expect(decision).toMatchObject({ via: "provider", provider: { model: MODEL, definition: { http_headers: { "x-crossline-skill": "crossline-onboarding" } } } });
+  // A person's refused turn can go to another candidate; an evaluation's run never leaves the model it measures.
+  expect(typeof (await providers.upstream("ws", "sponsor"))?.fallback).toBe("function");
+  expect((await providers.upstream("sponsor-eval:x", "sponsor"))?.fallback).toBeUndefined();
+});
+
 test("until a model has passed, the account is told it is being tested", () => {
   const { store, providers } = setup(false);
   store.setSetting("ws", SPONSOR_SETTING, JSON.stringify({ inviteId: "inv", since: NOW.toISOString() }));

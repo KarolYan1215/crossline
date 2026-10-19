@@ -11,6 +11,14 @@
  *   going finishes first, idle runtimes are reclaimed, and only after a minute of that with nothing running does the next run go anyway
  *   (a reading that never drops must not stop the service for good).
  * - Each waiter is told how many runs are ahead of it, so a page can say 「排队中，前面还有 N 个」.
+ *
+ * Who goes next (decided with the owner on 2026-10-19, docs/model-scheduling.md):
+ * - A person's turn starts at once while memory is below the mark, whatever else runs: the slots count background work only; above the
+ *   mark it waits first in line.
+ * - Background work of one account holds at most `CROSSLINE_ACCOUNT_CONCURRENCY` (2) slots, and accounts take turns within a priority, so
+ *   one person approving twelve milestones does not fill every slot ahead of another person's capture.
+ * - Within a priority and an account the shorter job goes first, by the Skill's recent service times here; anything that has waited
+ *   `AGING_MS` (15 minutes) moves up one priority, and again after another 15, so nothing waits for ever.
  */
 
 export type ModelPriority = "interactive" | "planning" | "background";
@@ -54,6 +62,19 @@ export function interactiveReserve(env: NodeJS.ProcessEnv = process.env): number
   return env.CROSSLINE_PUBLIC_BETA === "1" ? 1 : 0;
 }
 
+/** Background runs one account may hold at once (`CROSSLINE_ACCOUNT_CONCURRENCY`, default 2; the owner's decision of 2026-10-19). */
+export function accountConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.CROSSLINE_ACCOUNT_CONCURRENCY);
+  return Number.isInteger(raw) && raw > 0 ? raw : 2;
+}
+
+/** A waiter moves up one priority after waiting this long, and again after as long again. */
+export const AGING_MS = 15 * 60_000;
+/** What a Skill not yet seen here is assumed to take, for ordering only. */
+const DEFAULT_SERVICE_MS = 60_000;
+/** Recent service times kept per Skill: enough for a median, short enough to follow a model change. */
+const SERVICE_SAMPLES = 20;
+
 export function memoryHighWater(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.CROSSLINE_MEMORY_HIGH_WATER);
   return Number.isFinite(raw) && raw > 0 && raw < 1 ? raw : 0.75;
@@ -61,6 +82,9 @@ export function memoryHighWater(env: NodeJS.ProcessEnv = process.env): number {
 
 type GateConfig = {
   limit: number;
+  /** Background runs one account may hold at once. */
+  perTenant: number;
+  agingMs: number;
   /** Slots background runs may not take (kept for interactive ones); never below one slot for background. */
   reserve: number;
   highWater: number;
@@ -74,20 +98,27 @@ type GateConfig = {
   log: (event: Record<string, unknown>) => void;
 };
 
-type Waiter = { skill: string; priority: ModelPriority; seq: number; queuedAt: number; grant: () => void; onQueued?: (ahead: number) => void; told?: number };
+type Waiter = { skill: string; priority: ModelPriority; tenant: string; seq: number; queuedAt: number; grant: () => void;
+  onQueued?: (ahead: number) => void; told?: number };
 
 let config: GateConfig = defaults();
 let active = 0;
 let activeBackground = 0;
 let seq = 0;
 let waiters: Waiter[] = [];
+/** Background runs in flight per account, and when each account was last given a slot (a counter, for taking turns). */
+const activeByTenant = new Map<string, number>();
+const lastServed = new Map<string, number>();
+let served = 0;
+/** Recent service times per Skill (milliseconds), newest last. */
+const serviceTimes = new Map<string, number[]>();
 let blockedSince: number | undefined;
 let reclaimedAt: number | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 function defaults(): GateConfig {
-  return { limit: modelGateLimit(), reserve: interactiveReserve(), highWater: memoryHighWater(), maxMemoryWaitMs: 60_000, pollMs: 5_000, now: Date.now,
-    log: (event) => console.info(JSON.stringify(event)) };
+  return { limit: modelGateLimit(), perTenant: accountConcurrency(), agingMs: AGING_MS, reserve: interactiveReserve(), highWater: memoryHighWater(),
+    maxMemoryWaitMs: 60_000, pollMs: 5_000, now: Date.now, log: (event) => console.info(JSON.stringify(event)) };
 }
 
 /** The worker sets the memory probe and the reclaimer; tests set everything and reset with `resetModelGate`. */
@@ -99,10 +130,16 @@ export function configureModelGate(options: Partial<GateConfig>): void {
 export function resetModelGate(): void {
   if (timer) clearTimeout(timer);
   timer = undefined;
+  if (agingTimer) clearTimeout(agingTimer);
+  agingTimer = undefined;
   config = defaults();
   active = 0;
   activeBackground = 0;
   waiters = [];
+  activeByTenant.clear();
+  lastServed.clear();
+  served = 0;
+  serviceTimes.clear();
   blockedSince = undefined;
   reclaimedAt = undefined;
 }
@@ -128,9 +165,47 @@ function schedule(): void {
   (timer as { unref?: () => void }).unref?.();
 }
 
+/** The Skill's median recent service time here, or a minute when it has not run yet. */
+export function expectedServiceMs(skill: string): number {
+  const times = serviceTimes.get(skill);
+  if (!times?.length) return DEFAULT_SERVICE_MS;
+  const sorted = [...times].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)]!;
+}
+function recordService(skill: string, ms: number): void {
+  const times = serviceTimes.get(skill) ?? [];
+  times.push(ms);
+  if (times.length > SERVICE_SAMPLES) times.shift();
+  serviceTimes.set(skill, times);
+}
+
+/** A waiter's priority after aging: one step up for every `agingMs` it has waited. */
+const effectiveRank = (waiter: Waiter, now: number) =>
+  Math.max(0, RANK[waiter.priority] - Math.floor((now - waiter.queuedAt) / Math.max(1, config.agingMs)));
+
+/**
+ * The order waiters are considered in: a person's turn first (first come, first served among them), then by aged priority, then the
+ * account served longest ago, then the shorter expected job, then arrival.
+ */
+function ordered(now: number): Waiter[] {
+  return [...waiters].sort((a, b) => {
+    const ai = a.priority === "interactive" ? 0 : 1, bi = b.priority === "interactive" ? 0 : 1;
+    if (ai !== bi) return ai - bi;
+    if (ai === 0) return a.seq - b.seq;
+    return effectiveRank(a, now) - effectiveRank(b, now)
+      || (lastServed.get(a.tenant) ?? 0) - (lastServed.get(b.tenant) ?? 0)
+      || expectedServiceMs(a.skill) - expectedServiceMs(b.skill)
+      || a.seq - b.seq;
+  });
+}
+
 function tellPositions(): void {
-  waiters.forEach((waiter, index) => {
-    const ahead = active + index;
+  if (!waiters.some((waiter) => waiter.onQueued)) return;
+  const high = memoryHigh();
+  ordered(config.now()).forEach((waiter, index) => {
+    // A person's turn waits only for memory, behind other people's turns; background work waits behind background runs going and
+    // everything ahead of it in line (a person's turn takes no background slot).
+    const ahead = waiter.priority === "interactive" ? index + (high ? active : 0) : activeBackground + index;
     if (waiter.told === ahead) return;
     waiter.told = ahead;
     try { waiter.onQueued?.(ahead); } catch { /* a page's bookkeeping must never stop the queue */ }
@@ -142,12 +217,21 @@ function backgroundLimit(): number {
   return Number.isFinite(config.limit) ? Math.max(1, config.limit - config.reserve) : config.limit;
 }
 
+/**
+ * Whether a waiter may start now, slots and its account's share considered (memory is checked apart). A person's turn takes no slot, so
+ * background work counts only background runs: the memory mark is what bounds the two together.
+ */
+function eligible(waiter: Waiter): boolean {
+  if (waiter.priority === "interactive") return true;
+  return activeBackground < backgroundLimit() && (activeByTenant.get(waiter.tenant) ?? 0) < config.perTenant;
+}
+
 function pump(): void {
-  while (waiters.length && active < config.limit) {
-    // Waiters are ordered interactive first, so a non-interactive head means only background work waits.
-    if (waiters[0]!.priority !== "interactive" && activeBackground >= backgroundLimit()) break;
+  for (;;) {
+    const now = config.now();
+    const next = ordered(now).find(eligible);
+    if (!next) break;
     if (memoryHigh()) {
-      const now = config.now();
       blockedSince ??= now;
       if (config.reclaim && (reclaimedAt === undefined || now - reclaimedAt >= config.pollMs * 6)) {
         reclaimedAt = now;
@@ -162,16 +246,29 @@ function pump(): void {
       config.log({ type: "model.gate.memory_forced", waitedMs: now - blockedSince, memory: readMemory() });
     }
     blockedSince = undefined;
-    const next = waiters.shift()!;
+    waiters.splice(waiters.indexOf(next), 1);
     active += 1;
-    if (next.priority !== "interactive") activeBackground += 1;
-    const waitedMs = config.now() - next.queuedAt;
+    if (next.priority !== "interactive") {
+      activeBackground += 1;
+      activeByTenant.set(next.tenant, (activeByTenant.get(next.tenant) ?? 0) + 1);
+      lastServed.set(next.tenant, ++served);
+    }
+    const waitedMs = now - next.queuedAt;
     if (waitedMs > 0) config.log({ type: "model.gate", skill: next.skill, priority: next.priority, waitedMs, queued: waiters.length });
     // A waiter that was told it had runs ahead hears 0 when its own run starts, so a page stops saying it is queued.
     if (next.told) { try { next.onQueued?.(0); } catch { /* bookkeeping only */ } }
     next.grant();
   }
+  // Aging moves a waiter up while nothing finishes: look again after a while even when nothing else would wake the queue.
+  if (waiters.some((waiter) => waiter.priority !== "interactive")) scheduleAging();
   tellPositions();
+}
+
+let agingTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleAging(): void {
+  if (agingTimer) return;
+  agingTimer = setTimeout(() => { agingTimer = undefined; pump(); }, Math.min(config.agingMs, 60_000));
+  (agingTimer as { unref?: () => void }).unref?.();
 }
 
 /**
@@ -179,11 +276,17 @@ function pump(): void {
  * had to wait starts. A run aborted
  * by `signal` before it got a slot leaves the queue and resolves to `undefined` without running.
  */
-export async function withModelSlot<T>(input: { skill: string; priority?: ModelPriority; onQueued?: (ahead: number) => void; signal?: AbortSignal },
+export async function withModelSlot<T>(input: { skill: string; priority?: ModelPriority; onQueued?: (ahead: number) => void; signal?: AbortSignal;
+  /** The account the run is for (accounts take turns and each holds at most `perTenant` background slots). */
+  tenant?: string;
+  /** Hears how long the run waited for its slot, once it has one. */
+  onGranted?: (waitedMs: number) => void },
   run: () => Promise<T>): Promise<T | undefined> {
   const priority = input.priority ?? priorityForSkill(input.skill);
+  const tenant = input.tenant || "-";
+  const queuedAt = config.now();
   const granted = await new Promise<boolean>((resolve) => {
-    const waiter: Waiter = { skill: input.skill, priority, seq: ++seq, queuedAt: config.now(),
+    const waiter: Waiter = { skill: input.skill, priority, tenant, seq: ++seq, queuedAt,
       grant: () => { input.signal?.removeEventListener("abort", onAbort); resolve(true); }, ...(input.onQueued ? { onQueued: input.onQueued } : {}) };
     function onAbort() {
       const index = waiters.indexOf(waiter);
@@ -194,14 +297,24 @@ export async function withModelSlot<T>(input: { skill: string; priority?: ModelP
     }
     if (input.signal?.aborted) { resolve(false); return; }
     input.signal?.addEventListener("abort", onAbort, { once: true });
-    // Interactive, then planning, then the rest; first come, first served within each.
-    const at = waiters.findIndex((other) => RANK[other.priority] > RANK[waiter.priority]);
-    if (at < 0) waiters.push(waiter); else waiters.splice(at, 0, waiter);
+    // The order is worked out each time a slot frees (`ordered`), so a waiter only has to join the queue.
+    waiters.push(waiter);
     pump();
   });
   if (!granted) return undefined;
+  const startedAt = config.now();
+  try { input.onGranted?.(startedAt - queuedAt); } catch { /* bookkeeping only */ }
   try { return await run(); }
-  finally { active -= 1; if (priority !== "interactive") activeBackground -= 1; pump(); }
+  finally {
+    recordService(input.skill, config.now() - startedAt);
+    active -= 1;
+    if (priority !== "interactive") {
+      activeBackground -= 1;
+      const held = (activeByTenant.get(tenant) ?? 1) - 1;
+      if (held > 0) activeByTenant.set(tenant, held); else activeByTenant.delete(tenant);
+    }
+    pump();
+  }
 }
 
 /** Waits (polling) while memory is above the high-water mark, at most `maxMs`; used before starting another runtime process. */

@@ -98,7 +98,8 @@ export function createModelProviderService(options: {
       blocked: { code: "MODEL_SPONSOR_PENDING", message: "开发者提供的模型还在检验，通常一小时内可用；也可以先连接自己的 ChatGPT。" } };
     if (budget && budget.spent >= budget.cap) return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(),
       blocked: { code: "MODEL_SPONSOR_BUDGET", message: `本月邀请额度（¥${budget.cap}）已用完，下月 1 日恢复；也可以在 设置 → 模型连接 连接自己的 ChatGPT 或 API。` } };
-    return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(admittedSkills(pick.record, capabilities)) };
+    return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(admittedSkills(pick.record, capabilities)),
+      modelFor: (skill: string) => sponsor.modelFor(skill) };
   };
 
   const routing = (workspaceId: string | undefined): ProviderRouting | undefined => {
@@ -115,7 +116,7 @@ export function createModelProviderService(options: {
   const upstream = async (workspaceId: string, providerId: string): Promise<GatewayUpstream | undefined> => {
     if (providerId === "sponsor") {
       const sponsor = options.sponsor?.();
-      return sponsor && (workspaceId.startsWith("sponsor-eval:") || (!config(workspaceId) && sponsor.active(workspaceId))) ? sponsor.upstream() : undefined;
+      return sponsor && (workspaceId.startsWith("sponsor-eval:") || (!config(workspaceId) && sponsor.active(workspaceId))) ? sponsor.upstream(workspaceId) : undefined;
     }
     const provider = config(workspaceId);
     if (!provider || provider.id !== providerId) return undefined;
