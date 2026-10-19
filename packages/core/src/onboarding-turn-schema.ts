@@ -293,7 +293,13 @@ export type SectionUpdate = Partial<ProfileModel> & { sentences?: number[] };
 export type ProfileSections = Partial<Record<ProfileSection, SectionUpdate | null>>;
 /** What the ledger keeps about each section (`PROFILE_SECTIONS_SETTING`): the sentences it rests on, whether its stage is over, when written. */
 export const PROFILE_SECTIONS_SETTING = "profile.sections";
-export type SectionRecord = { sentences: number[]; final: boolean; at: string };
+/** `emptyRuns`: runs asked to finalize this section that wrote nothing for it; it is final with nothing only after `SECTION_EMPTY_RUNS_MAX`. */
+export type SectionRecord = { sentences: number[]; final: boolean; at: string; emptyRuns?: number };
+/** Runs a section may come back empty when asked to finalize before it is closed as it stands (2026-10-19: one empty answer closed it for good). */
+export const SECTION_EMPTY_RUNS_MAX = 2;
+/** Whether a section is done: final with something it rests on, or closed after its empty runs. A record the old rule closed empty is open again. */
+export const sectionClosed = (record: Pick<SectionRecord, "final" | "sentences" | "emptyRuns"> | undefined): boolean =>
+  Boolean(record?.final && (record.sentences?.length || (record.emptyRuns ?? 0) >= SECTION_EMPTY_RUNS_MAX));
 
 /** The portrait with the sections a run was allowed to write put in; every other field stays as it was. */
 export function mergeProfileSections(profile: ProfileModel, sections: ProfileSections | undefined, allowed: ReadonlySet<ProfileSection>): ProfileModel {

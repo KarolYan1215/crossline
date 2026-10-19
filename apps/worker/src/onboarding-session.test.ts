@@ -190,6 +190,9 @@ test("a thread the runtime has forgotten is replaced, and the new one is told wh
 });
 
 const withDates = (fileDates: object) => turn({ fileDates, questions: [], nextAction: "ready_for_milestones" });
+/** The portrait's sections closed, so a test about dates is not also asked for the sections a finished interview owes (P3). */
+const sectionsClosed = () => store.setSetting(workspaceId, "profile.sections", JSON.stringify(Object.fromEntries(["situation", "compass", "energy", "synthesis"]
+  .map((section) => [section, { sentences: [1], final: true, at: "2026-10-19T00:00:00.000Z" }]))));
 const dateItem = (over: object = {}) => ({ id: "d1", date: "2026-10-27", startMinute: null, endMinute: null, kind: "exam", title: "ECE 548 期中 1", project: "",
   refs: [2, 3], confidence: "high", note: "", ...over });
 
@@ -214,6 +217,7 @@ test("dates the model read out of a file become one verified batch, and what can
 });
 
 test("a turn with no dates writes no batch, and a newer batch retires one nobody answered", async () => {
+  sectionsClosed();
   // Each extraction runs on a fresh thread and may cite only what it is shown: here, the reply of its own turn ([1], [2], [3]).
   const empty = { dates: [], recurring: [], questions: [] };
   const { rpc } = fakeRuntime([withDates(empty), withDates({ ...empty, dates: [dateItem({ refs: [2] })] }), withDates({ ...empty, dates: [dateItem({ refs: [3], title: "ECE 548 期中 2" })] })]);
@@ -232,6 +236,7 @@ test("a turn with no dates writes no batch, and a newer batch retires one nobody
 });
 
 test("a re-read of the files replaces the unanswered batch; meals outside the stated hours never become a batch", async () => {
+  sectionsClosed();
   store.saveSourceDocument({ id: "doc-1", ownerId: "o", workspaceId, kind: "docx", fileName: "Lecture Plan.docx", mediaType: "x", sha256: "1", uri: "file:///1",
     extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
   const empty = { dates: [], recurring: [], questions: [] };
@@ -397,8 +402,8 @@ test("a 「符合」 for the portrait holds for the portrait the same turn rewri
   store.setSetting(workspaceId, "profile.model", JSON.stringify(written));
   // The three deep stages are over, so this run writes the synthesis (P3), the part a confirmation is about.
   const at = "2026-10-19T00:00:00.000Z";
-  store.setSetting(workspaceId, "profile.sections", JSON.stringify({ situation: { sentences: [], final: true, at }, compass: { sentences: [], final: true, at },
-    energy: { sentences: [], final: true, at } }));
+  store.setSetting(workspaceId, "profile.sections", JSON.stringify({ situation: { sentences: [1], final: true, at }, compass: { sentences: [1], final: true, at },
+    energy: { sentences: [1], final: true, at } }));
   const rewritten = { ...written, portrait: "一位在毕业前同时押注研究与产品的工程师，靠打球和讨论充电，最怕的是五件事都停在七成。",
     coreConflict: "想把两条未来都留着，代价落在睡眠和周日下午上。" };
   const { rpc } = fakeRuntime([turn({ profileSections: { situation: null, compass: null, energy: null,

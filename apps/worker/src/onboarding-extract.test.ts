@@ -102,8 +102,14 @@ test("the portrait is kept by section: a deep section while its stage runs, fina
   const { portraitTask } = await import("./onboarding-extract");
   expect(portraitTask("situation", false, {})).toEqual({ finalize: [], synthesize: false });
   expect(portraitTask("compass", false, {})).toEqual({ finalize: ["situation"], synthesize: false });
-  expect(portraitTask("details", false, { situation: { final: true } })).toEqual({ finalize: ["compass", "energy"], synthesize: true });
-  expect(portraitTask("details", false, { situation: { final: true }, compass: { final: true }, energy: { final: true }, synthesis: { final: true } }))
+  const done = { final: true, sentences: [1], at: "x" };
+  expect(portraitTask("details", false, { situation: done })).toEqual({ finalize: ["compass", "energy"], synthesize: true });
+  expect(portraitTask("details", false, { situation: done, compass: done, energy: done, synthesis: done }))
+    .toEqual({ finalize: [], synthesize: false });
+  // A section closed with nothing in it (the old rule) is asked again; one that came back empty twice stays closed.
+  expect(portraitTask("details", false, { situation: { final: true, sentences: [], at: "x" }, compass: done, energy: done, synthesis: done }))
+    .toEqual({ finalize: ["situation"], synthesize: true });
+  expect(portraitTask("details", false, { situation: { final: true, sentences: [], at: "x", emptyRuns: 2 }, compass: done, energy: done, synthesis: done }))
     .toEqual({ finalize: [], synthesize: false });
   // A finished interview finalizes whatever is left, even a stage it skipped.
   expect(portraitTask("energy", true, {})).toEqual({ finalize: ["situation", "compass", "energy"], synthesize: true });
@@ -168,4 +174,16 @@ test("a reply sent while another extraction runs is read in the next round even 
   await first;
   expect(readExtractState(store, workspaceId, "a").upTo).toBe(1);
   expect(readExtractState(store, workspaceId, "b")).toMatchObject({ upTo: 1, failures: 0 });
+});
+
+test("a section owed but answered empty stays open, and is closed as it stands only after two empty runs", async () => {
+  const { persistExtraction } = await import("./onboarding-persist");
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  const empty = { slotUpdates: [], projectsDetected: [], flywheelCandidates: [], profileSections: { situation: null, compass: null, energy: null, synthesis: null } };
+  const task = { finalize: ["situation" as const], synthesize: false };
+  const sections = () => JSON.parse(store.getSetting(workspaceId, "profile.sections") ?? "{}") as Record<string, { final: boolean; emptyRuns?: number }>;
+  persistExtraction(store, workspaceId, empty as never, { sessionId: "s", ownerId, documentIds: [], sources: {}, today: "2026-10-19", reread: false, profileTask: task });
+  expect(sections().situation).toMatchObject({ final: false, emptyRuns: 1 });
+  persistExtraction(store, workspaceId, empty as never, { sessionId: "s", ownerId, documentIds: [], sources: {}, today: "2026-10-19", reread: false, profileTask: task });
+  expect(sections().situation).toMatchObject({ final: true, emptyRuns: 2 });
 });

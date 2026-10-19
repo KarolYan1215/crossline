@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, DEEP_SECTIONS, EMPTY_PROFILE_MODEL, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, mergeProfileSections,
-  type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, citationWarnings, duplicateAttributes, mergeDateExtractions,
+  type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, mergeDateExtractions,
   resolveAvailability, sanitizeDateExtraction, withContentIds, withoutDecidedDates, withoutOffHours,
   type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile
 } from "@crossline/core";
@@ -57,14 +57,19 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
     const sections = extraction.profileSections ?? {};
     if (PROFILE_SECTIONS.some((section) => sections[section] && allowed.has(section)))
       store.setSetting(workspaceId, "profile.model", JSON.stringify(mergeProfileSections(readProfileModel(store, workspaceId), sections, allowed)));
-    // What each section rests on, and whether its stage is over: a section asked to be finalized is final even when there was nothing to add.
+    // What each section rests on, and whether its stage is over. A section asked to be finalized is final once written, or when it already
+    // has what it rests on; one that comes back empty stays open to be asked again, and is closed as it stands only after
+    // `SECTION_EMPTY_RUNS_MAX` empty runs (one empty answer used to close a section with nothing in it, and the portrait stayed blank).
     const records = readSectionRecords(store, workspaceId);
     for (const section of PROFILE_SECTIONS) {
-      const written = sections[section] && allowed.has(section);
-      const final = task.finalize.includes(section) || (section === "synthesis" && Boolean(written));
-      if (!written && !final) continue;
+      const written = Boolean(sections[section] && allowed.has(section));
       const previous = records[section];
-      records[section] = { sentences: written ? sections[section]!.sentences ?? [] : previous?.sentences ?? [], final: final || Boolean(previous?.final), at: now };
+      const asked = task.finalize.includes(section);
+      if (!written && !asked) continue;
+      const emptyRuns = !written && asked && !previous?.sentences?.length ? (previous?.emptyRuns ?? 0) + 1 : 0;
+      const final = (asked && (written || Boolean(previous?.sentences?.length) || emptyRuns >= SECTION_EMPTY_RUNS_MAX))
+        || (section === "synthesis" && written) || sectionClosed(previous);
+      records[section] = { sentences: written ? sections[section]!.sentences ?? [] : previous?.sentences ?? [], final, at: now, ...(emptyRuns ? { emptyRuns } : {}) };
     }
     store.setSetting(workspaceId, PROFILE_SECTIONS_SETTING, JSON.stringify(records));
   }

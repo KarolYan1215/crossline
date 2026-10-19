@@ -1,6 +1,6 @@
 import {
   DEEP_SECTIONS, ONBOARDING_KEEP_EARLY_MAX, ONBOARDING_STAGES, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, lineAttributes, numberedText, onboardingExtractSchema,
-  portraitFingerprint, validateOnboardingExtraction,
+  portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
@@ -183,9 +183,19 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const result = await runCodexSkill<OnboardingExtraction>(client, context, {
       skillName: ONBOARDING_EXTRACT_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: onboardingExtractSchema(ids),
       prepareInput: () => context, tools,
-      validateOutput: (output) => validateOnboardingExtraction(output, known),
+      validateOutput: (output) => {
+        const valid = validateOnboardingExtraction(output, known);
+        // A section this run owes comes back written: an empty answer here used to close it with nothing in it. After the repairs the
+        // answer is kept as it is (softAccept) and the section is asked for again by a later run.
+        const missing = (profileTask?.finalize ?? []).filter((section) => !valid.profileSections?.[section]);
+        if (missing.length) throw Object.assign(new Error("ONBOARDING_SECTION_MISSING"), { detail: `profileTask.finalize 要求重写 ${missing.join("、")}：`
+          + "用 search_evidence 找本人在这些阶段说过的话，按引用写完整一节；本人确实没谈过的字段留空字符串或空数组，但这一节不能是 null。" });
+        return valid;
+      },
       softAccept: (_rejection, output) => keepOnboardingExtraction(output, known),
-      keepEarly: (_rejection, output) => {
+      keepEarly: (rejection, output) => {
+        // An owed section is worth the repair: keeping the answer early would skip the one chance to have it written.
+        if (rejection.message === "ONBOARDING_SECTION_MISSING") return undefined;
         const kept = keepOnboardingExtraction(output, known);
         return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX ? kept : undefined;
       },
@@ -225,12 +235,12 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
  * whose section is not final is rewritten whole; the synthesis is written once all three are final — again whenever one is finalized —
  * and never before, since it sums up what they found.
  */
-export function portraitTask(stage: OnboardingStage, complete: boolean, records: Partial<Record<ProfileSection, { final: boolean }>>):
+export function portraitTask(stage: OnboardingStage, complete: boolean, records: Partial<Record<ProfileSection, SectionRecord>>):
   { finalize: ProfileSection[]; synthesize: boolean } {
   const at = ONBOARDING_STAGES.indexOf(stage);
-  const finalize = DEEP_SECTIONS.filter((section) => !records[section]?.final && (complete || ONBOARDING_STAGES.indexOf(section) < at));
-  const allFinal = DEEP_SECTIONS.every((section) => records[section]?.final || finalize.includes(section));
-  return { finalize, synthesize: allFinal && (finalize.length > 0 || !records.synthesis?.final) };
+  const finalize = DEEP_SECTIONS.filter((section) => !sectionClosed(records[section]) && (complete || ONBOARDING_STAGES.indexOf(section) < at));
+  const allFinal = DEEP_SECTIONS.every((section) => sectionClosed(records[section]) || finalize.includes(section));
+  return { finalize, synthesize: allFinal && (finalize.length > 0 || !sectionClosed(records.synthesis)) };
 }
 
 /** The ledger's facts as short lines, newest last, at most `FACTS_SHOWN`. */
