@@ -72,6 +72,18 @@
 - 不写本人电脑上的原始文件；整理文件是复制进任务目录。托管服务器上「本人的文件」就是上传的文件和产出。
 - 邮箱只读；Outlook 不支持。
 
+## 8. 沙箱 shell：在 Codex 自带的 Linux 沙箱里给所有人真正的 shell（已实现，默认关）
+
+Codex 是 vendor 进来的（`vendor/codex`，rust-v0.155.0），它自带 Linux 沙箱（bubblewrap）和权限配置文件（`[permissions.<id>]`，可只放行指定目录的读取）。在它的基础上不改 Codex 本身就能做到模型无关的 shell 助手：
+
+- `agent.sandbox`（`packages/codex/src/agent-mode.ts` `sandboxProfile`）：线程不再用 `danger-full-access`，而是命名配置 `crossline-task` —— `:minimal`（系统目录）只读、输入只读、任务目录可写、`/data` 与 `/state` 拒读（拒读项同时让 Codex 永远不会「无沙箱重跑」）、网络关闭；命令的环境只继承核心变量（`shell_environment_policy.inherit = core`，HOME/TMPDIR 指向任务目录）。启动后核对 `activePermissionProfile`，不对就拒绝运行（`SKILL_SANDBOX_UNSUPPORTED`），启动重试时也绝不丢掉这些配置。
+- 审批仍是 `untrusted`：每条命令照样先问 Crossline 的守卫。
+- 命令没有网络，联网走 `web_search`/`web_fetch` 函数；本人的任务、文件、邮箱和收件箱走工具型助手的同一组函数（不含文件函数，文件用 shell 自己读写）。
+- 走模型闸门（共享服务器上与其他后台运行一起排队），跑在账号自己的运行时上；第三方模型也能驱动（`capabilities.shell` 随探测结果打开）。
+- 何时启用：服务器环境 `CROSSLINE_SANDBOX_SHELL=on`，且启动时探测（`apps/worker/src/sandbox-probe.ts`）能找到 bubblewrap 并真正起一个沙箱；否则自动回到工具模式，日志 `worker.sandbox_shell` 写明原因。电脑主人自己的电脑仍是原来的完全权限 shell。
+
+**要在托管服务器上打开，需要本人决定并改部署**（没有改）：镜像里装 `bubblewrap`；worker 容器允许创建用户命名空间（自定义 seccomp 配置或 `seccomp=unconfined`，以及 `apparmor=unconfined`；Ubuntu 23.10+ 还要关 `kernel.apparmor_restrict_unprivileged_userns`）。代价：在共享服务器上运行其他账号的命令，用户命名空间扩大了内核攻击面；CPU 与内存仍受容器上限约束，命令没有网络。
+
 ## 7. 没做的
 
 - Outlook/Microsoft 365 的 OAuth 读取（需要 Entra 注册与审核）。

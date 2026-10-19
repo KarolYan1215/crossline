@@ -51,6 +51,8 @@ export function createModelProviderService(options: {
   /** What Crossline adds on top of a provider (docs/beta-launch.md §10.4); from the environment unless given. Null turns one off. */
   search?: WebSearchBackend | null;
   image?: ImageBackend | null;
+  /** The server runs the shell assistant inside Codex's Linux sandbox (sandbox-probe.ts): another model may then drive it too. */
+  sandboxShell?: boolean;
   /** A conformance run just finished: what was decided while the provider was not admitted is decided again (W-11). */
   onConformance?: (workspaceId: string) => void;
   /** The developer's model for accounts that redeemed an invite code (`sponsor.ts`); a workspace's own provider comes first. */
@@ -59,7 +61,8 @@ export function createModelProviderService(options: {
   const now = options.now ?? (() => new Date());
   const search = options.search === undefined ? webSearchFromEnv() : options.search ?? undefined;
   const image = options.image === undefined ? imageBackendFromEnv() : options.image ?? undefined;
-  const capabilities = { ...THIRD_PARTY_CAPABILITIES, webSearch: Boolean(search), image: Boolean(image) };
+  // The shell assistant on another model only inside Codex's Linux sandbox, where the server allows it (sandbox-probe.ts).
+  const capabilities = { ...THIRD_PARTY_CAPABILITIES, webSearch: Boolean(search), image: Boolean(image), shell: Boolean(options.sandboxShell) };
   const keys = new Map<string, string | null>();
   const testing = new Map<string, Progress>();
 

@@ -265,7 +265,12 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
    * `tools`: no shell — Crossline's own functions (agent-tools.ts), on whatever model serves the workspace. The machine owner's own
    * Codex keeps the shell (`shell`, the default); every other account, and everyone on the hosted server, gets this.
    */
-  mode?: "shell" | "tools";
+  mode?: "shell" | "sandbox" | "tools";
+  /**
+   * `sandbox`: the shell inside Codex's Linux sandbox — what it may read beside its inputs (the Codex binary's folder) and what it may
+   * never read (the server's data and state folders, holding every other account).
+   */
+  sandbox?: { readable: string[]; deny: string[] };
   /** The person's mailbox, read-only, for a tools-mode run. */
   mail?: MailLookup;
 }) {
@@ -292,6 +297,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const startedAt = Date.now();
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:requested:${taskId}`, type: "agent.task.requested", entityId: taskId,
       payload: { taskId, title: input.title, category: input.category, workOrderId: input.workOrderId ?? "", inputs, humanPart: input.humanPart, ...(worktree ? { worktree } : {}),
+        ...(options.mode === "sandbox" ? { mode: "sandbox" } : {}),
         ...(input.delegated ? { delegated: true } : {}), ...(input.stepId ? { stepId: input.stepId } : {}), ...(input.by === "person" ? { by: "person" } : {}),
         // Taken up because the order took effect by itself (nobody clicked approve): the review card says so.
         ...(input.workOrderId && store.listEvents(workspaceId, { type: "work_order.auto_approved", entityId: input.workOrderId }).length ? { autoApproved: true } : {}) } });
@@ -320,14 +326,22 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     };
     const signal = options.signal ? AbortSignal.any([options.signal, stopper.signal]) : stopper.signal;
     let progressAt = 0;
+    // Sandboxed (no network in its commands): the board, the mailbox and the inbox through Crossline's own functions beside the shell.
+    const sandboxed = options.mode === "sandbox";
+    const board = sandboxed ? createAgentToolbox({ store, workspaceId, directory, inputs, ...(options.mail ? { mail: options.mail } : {}) }) : undefined;
+    const boardSpecs = board?.specs.filter((spec) => !/_file$|^list_files$/.test(spec.name)) ?? [];
+    const readerSpecs = input.reader?.tools.specs ?? [];
+    const tools = boardSpecs.length || readerSpecs.length ? { specs: [...readerSpecs, ...boardSpecs],
+      call: (name: string, args: unknown) => readerSpecs.some((spec) => spec.name === name) ? input.reader!.tools.call(name, args) : board!.call(name, args) } : undefined;
     const result = await runCodexSkill<AgentSummary>(client, task, {
-      skillName: AGENT_SKILL, cwd, developerInstructions: AGENT_INSTRUCTIONS + libraryInstruction(extraSkills), outputSchema: AGENT_SUMMARY_SCHEMA,
+      skillName: AGENT_SKILL, cwd, developerInstructions: AGENT_INSTRUCTIONS + (sandboxed ? SANDBOX_NOTE : "") + libraryInstruction(extraSkills), outputSchema: AGENT_SUMMARY_SCHEMA,
       ...(extraSkills.length ? { extraSkills } : {}),
       prepareInput: () => task, validateOutput: (output) => validateAgentSummary(output, probe), onAudit: () => {},
       allowWebSearch: true, timeoutMs: 6 * 60 * 60_000, idleMs: 60 * 60_000, signal,
-      ...(input.reader?.tools.specs.length ? { tools: input.reader.tools } : {}),
+      ...(tools ? { tools } : {}),
       agent: {
         cwd: directory,
+        ...(sandboxed ? { sandbox: { writable: directory, readable: [...inputs, ...(options.sandbox?.readable ?? [])], deny: options.sandbox?.deny ?? [] } } : {}),
         onItem: (item, phase) => {
           noteItem(audit, pendingChanges, item, phase);
           if (phase !== "completed") return;
@@ -367,7 +381,9 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     // exceptions are confirmed) — it replaced counting accepted results per kind before a kind was trusted.
     const reviewReasons = resultNeedsPerson({ needsHuman: result.output.needsHuman, checksPassed, inputsModified, decisions: audit.decisions, ...(input.growing ? { growing: true } : {}) });
     const reviewRequired = reviewReasons.length > 0;
+    const applied = board ? applyToolboxActions(store, workspaceId, ownerId, taskId, board.actions) : { captures: [], told: [] };
     const record = { taskId, title: input.title, category: input.category, directory, durationMs: Date.now() - startedAt, summary: result.output.summary,
+      ...(sandboxed ? { mode: "sandbox" } : {}),
       artifacts, verification: result.output.verification, needsHuman: result.output.needsHuman, notDone: result.output.notDone, assumptions: result.output.assumptions,
       audit, inputsModified, checksPassed, reviewRequired, reviewReasons };
     writeFileSync(path.join(directory, "audit.json"), JSON.stringify(record, null, 2), "utf8");
@@ -378,9 +394,15 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
         denied: audit.decisions.filter((d) => d.outcome === "declined").length, artifacts: artifacts.map(({ path: p, sha256, bytes }) => ({ path: p, sha256, bytes })),
         verification: result.output.verification.map((v) => ({ check: v.check, result: v.result })), needsHuman: result.output.needsHuman.length,
         inputsModified, checksPassed, reviewRequired, ...(reviewReasons.length ? { reviewReasons } : {}), auditFile: path.join(directory, "audit.json"), ...(result.audit.skills?.length ? { skills: result.audit.skills } : {}) } });
-    return { state: "done", taskId, directory, summary: result.output, artifacts, audit, inputsModified, checksPassed, reviewRequired, reviewReasons };
+    return { state: "done", taskId, directory, summary: result.output, artifacts, audit, inputsModified, checksPassed, reviewRequired, reviewReasons,
+      ...(board ? { captured: applied.captures, told: applied.told } : {}) };
   };
 }
+
+const SANDBOX_NOTE = " Your commands run in a sandbox: they can read only your inputs and the system's own folders, write only in your working "
+  + "directory, and have no network — use the web_search and web_fetch functions for the web, and the board functions (list_tasks, read_document, "
+  + "mail_search, add_to_inbox, tell_person) for the person's own material. Install nothing system-wide; a virtual environment in your working "
+  + "directory needs the network, so use what is already installed (python3, node) and the standard library.";
 
 const AGENT_INSTRUCTIONS = "You are the person's assistant on their own computer, working on one task in your working directory. Use your tools to do the work; "
   + "do not describe it. Everything you make goes in the working directory; do not change the person's original files. Read only the inputs "

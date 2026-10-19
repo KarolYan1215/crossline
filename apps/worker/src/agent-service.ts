@@ -35,7 +35,9 @@ export function createAgentService(deps: {
    * Crossline's own functions on whatever model serves the account — for everyone else. With this set, `isOwner` no longer turns
    * other accounts away; it only decides the mode.
    */
-  modeFor?: (workspaceId: string) => "shell" | "tools";
+  modeFor?: (workspaceId: string) => "shell" | "sandbox" | "tools";
+  /** For `sandbox`: beside its inputs what it may read, and what it may never read (the server's data and state). */
+  sandbox?: { readable: string[]; deny: string[] };
   /** The workspace's own runtime, for a tools-mode run (the shell runs on the owner's `getClient`). */
   clientFor?: (workspaceId: string) => CodexRpcBoundary | undefined;
   /** The person's mailbox, read-only, when connected. */
@@ -52,11 +54,11 @@ export function createAgentService(deps: {
   const refused = (workspaceId: string) => !deps.modeFor && deps.isOwner !== undefined && !deps.isOwner(workspaceId);
   const runnerFor = (workspaceId: string, control: AbortController, onLive: Parameters<typeof createAgentRunner>[4]["onLive"]) => {
     const mode = deps.modeFor?.(workspaceId) ?? "shell";
-    const mail = mode === "tools" ? deps.mailFor?.(workspaceId) : undefined;
-    // Tools mode runs on the account's own runtime only: never the owner's (a guest's task must not spend the owner's account).
-    return createAgentRunner(deps.store, workspaceId, deps.repoRoot, mode === "tools" ? () => deps.clientFor?.(workspaceId) : deps.getClient, {
+    const mail = mode !== "shell" ? deps.mailFor?.(workspaceId) : undefined;
+    // Tools and sandbox modes run on the account's own runtime only: never the owner's (a guest's task must not spend the owner's account).
+    return createAgentRunner(deps.store, workspaceId, deps.repoRoot, mode === "shell" ? deps.getClient : () => deps.clientFor?.(workspaceId), {
       outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
-      signal: control.signal, ...(onLive ? { onLive } : {}), mode, ...(mail ? { mail } : {})
+      signal: control.signal, ...(onLive ? { onLive } : {}), mode, ...(mail ? { mail } : {}), ...(mode === "sandbox" && deps.sandbox ? { sandbox: deps.sandbox } : {})
     });
   };
 

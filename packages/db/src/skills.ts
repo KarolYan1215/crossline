@@ -175,9 +175,13 @@ export function aiToolsFor(store: CrosslineStore, workspaceId: string): AiTool[]
   const tools = allAiTools(store.getSetting(workspaceId, AI_TOOLS_SETTING), detectedAiTools(summary));
   // Every account has the assistant now (docs/personal-agent.md, 2026-10-19): the owner's with a shell, everyone else's through
   // Crossline's own functions — which cannot run scripts or edit media, so its line says what it does there.
-  return assistantMode(store, workspaceId) === "shell" ? tools
-    : tools.map((tool) => tool.id === "crossline-assistant" ? { ...tool, goodFor: TOOLS_ASSISTANT_GOOD_FOR } : tool);
+  const mode = assistantMode(store, workspaceId);
+  return mode === "shell" ? tools
+    : tools.map((tool) => tool.id === "crossline-assistant" ? { ...tool, goodFor: mode === "sandbox" ? SANDBOX_ASSISTANT_GOOD_FOR : TOOLS_ASSISTANT_GOOD_FOR } : tool);
 }
+
+/** Where the server runs the shell in Codex's Linux sandbox: scripts and data work, without network in its commands. */
+export const SANDBOX_ASSISTANT_GOOD_FOR = "整份做琐事：汇集整理材料、起草、数据处理与脚本（在沙箱里运行）、联网查证、读邮箱、定期跑自动化；不发送不发布";
 
 /** What the assistant does where it has no shell: reading, writing and organising, the web, the mailbox; not scripts or media. */
 export const TOOLS_ASSISTANT_GOOD_FOR = "整份做琐事：汇集与整理材料、起草文档与表格、联网查证、读邮箱找信息、定期跑自动化；不运行脚本、不剪辑，不发送不发布";
@@ -186,8 +190,9 @@ export const TOOLS_ASSISTANT_GOOD_FOR = "整份做琐事：汇集与整理材料
  * How the assistant works for this workspace: `shell` on the machine owner's own Codex (everything the computer can do, behind the
  * guard), `tools` for everyone else — Crossline's own functions (agent-tools.ts), on whatever model serves the account.
  */
-export function assistantMode(store: CrosslineStore, workspaceId: string, env: NodeJS.ProcessEnv = process.env): "shell" | "tools" {
-  return assistantAvailable(store, workspaceId, env) ? "shell" : "tools";
+export function assistantMode(store: CrosslineStore, workspaceId: string, env: NodeJS.ProcessEnv = process.env): "shell" | "sandbox" | "tools" {
+  // `sandbox` as the server configured it; the worker falls back to tools by itself when a sandbox does not start (sandbox-probe.ts).
+  return assistantAvailable(store, workspaceId, env) ? "shell" : env.CROSSLINE_SANDBOX_SHELL?.trim() === "on" && process.platform === "linux" ? "sandbox" : "tools";
 }
 
 /**

@@ -9,7 +9,7 @@ import { currentProviderRouting, decideRoute, type ThreadProvider } from "./prov
 import { markClientBusy, withModelSlot, type ModelPriority } from "./model-gate";
 import { accountModels, fitRoute } from "./model-catalog";
 
-import { registerAgentThread, type AgentMode } from "./agent-mode";
+import { registerAgentThread, SANDBOX_PROFILE, sandboxProfile, type AgentMode } from "./agent-mode";
 
 export type AnalysisAudit = { threadId?: string; turnId?: string;
   /** How many times a turn went silent for so long it was interrupted and sent again. Absent means none did. */
@@ -218,11 +218,12 @@ const MAX_STALL_RETRIES = 2;
  * it back off, and reporting what the run used.
  */
 async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools;
-  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal },
+  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
   // The assistant (owner's machine only, never on the hosted beta) runs for up to an hour in a lane of its own; holding the one gate
   // slot that long would stop every interview behind it.
-  if (/crossline-agent$/.test(options.skillName)) return serializeSkillRun(client, options.skillName, () => runGated(client, options, body));
+  // A sandboxed assistant (any account, on a shared server) waits for a model slot like every other background run.
+  if (/crossline-agent$/.test(options.skillName) && !options.agent?.sandbox) return serializeSkillRun(client, options.skillName, () => runGated(client, options, body));
   return serializeSkillRun(client, options.skillName, async () => {
     const gated = await withModelSlot({ skill: options.skillName, ...(options.priority ? { priority: options.priority } : {}),
       ...(options.onQueued ? { onQueued: options.onQueued } : {}), ...(options.signal ? { signal: options.signal } : {}) },
@@ -455,11 +456,15 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
     web_search: hosted ? "live" : "disabled", include_environment_context: true,
     "memories.use_memories": false, "memories.generate_memories": false,
     "features.shell_tool": true, "features.web_search": hosted, "features.standalone_web_search": hosted, "features.plugins": true,
-    "features.view_image": true, "features.apply_patch_freeform": true,
-    ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition, "features.memories": false } : {})
+    "features.view_image": true,
+    ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition, "features.memories": false } : {}),
+    // In the sandbox: a named permission profile (writes in the task directory, reads only what it is given, no network) and a
+    // command environment that carries none of the worker's own variables.
+    ...(agent.sandbox ? { default_permissions: SANDBOX_PROFILE, permissions: sandboxProfile(agent.sandbox),
+      shell_environment_policy: { inherit: "core", set: { HOME: agent.sandbox.writable, TMPDIR: `${agent.sandbox.writable}/.tmp`, ...(agent.sandbox.env ?? {}) } } } : {})
   };
   const threadParams = {
-    cwd: agent.cwd, sandbox: "danger-full-access", approvalPolicy: "untrusted", approvalsReviewer: "user",
+    cwd: agent.cwd, ...(agent.sandbox ? {} : { sandbox: "danger-full-access" }), approvalPolicy: "untrusted", approvalsReviewer: "user",
     // Tools Crossline answers itself (reading a site behind the person's login, so the assistant never holds the browser profile).
     dynamicTools: (options.tools?.specs ?? []).map((spec) => ({ type: "function", name: spec.name, description: spec.description, inputSchema: spec.inputSchema })),
     ephemeral: false, experimentalRawEvents: false, developerInstructions: options.developerInstructions,
@@ -473,6 +478,8 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
       const message = error instanceof Error ? error.message : "";
       const field = /unknown configuration field `([^`]+)`/.exec(message)?.[1];
       const dropped = field ? Object.keys(config).filter((key) => key === field || key.startsWith(`${field}.`)) : [];
+      // The sandbox is never dropped to get a thread started: a runtime that cannot take the profile does not run the shell at all.
+      if (dropped.some((key) => ["default_permissions", "permissions", "shell_environment_policy"].includes(key))) throw withDetail(new Error("SKILL_SANDBOX_UNSUPPORTED"), message.slice(0, 400));
       if (!dropped.length) {
         if (/configuration|unknown variant/i.test(message)) throw withDetail(new Error("SKILL_CONFIG_REJECTED"), message.slice(0, 400));
         throw error;
@@ -484,6 +491,8 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
   if (!identifier(threadId)) fail("SKILL_PROTOCOL_INVALID");
   // The thread must really be running with the approval policy the guard hangs on; with `never` nothing would ever ask.
   if (started?.approvalPolicy !== "untrusted") fail("SKILL_PERMISSION_DENIED");
+  // And, sandboxed, under the profile it was given: anything else (full access, the runtime's default) is refused before a turn.
+  if (agent.sandbox && (record(started?.activePermissionProfile)?.id !== SANDBOX_PROFILE || record(started?.sandbox)?.type === "dangerFullAccess")) fail("SKILL_SANDBOX_UNSUPPORTED");
   return threadId;
 }
 
@@ -539,6 +548,8 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
       const message = error instanceof Error ? error.message : "";
       const field = /unknown configuration field `([^`]+)`/.exec(message)?.[1];
       const dropped = field ? Object.keys(config).filter((key) => key === field || key.startsWith(`${field}.`)) : [];
+      // The sandbox is never dropped to get a thread started: a runtime that cannot take the profile does not run the shell at all.
+      if (dropped.some((key) => ["default_permissions", "permissions", "shell_environment_policy"].includes(key))) throw withDetail(new Error("SKILL_SANDBOX_UNSUPPORTED"), message.slice(0, 400));
       if (!dropped.length) {
         // A field this runtime does not know can be dropped; a value it rejects cannot, because
         // dropping it would silently turn off the thing that was asked for. This used to surface as

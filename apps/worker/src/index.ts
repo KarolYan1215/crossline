@@ -59,6 +59,7 @@ import { homedir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
 import { createMailService } from "./mailbox";
+import { probeSandboxShell } from "./sandbox-probe";
 import { automationPass, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { identityLines } from "./lines";
@@ -697,8 +698,11 @@ const secrets = createDpapiSecretStore(dataDir);
 const modelGateway = await startModelGateway({ resolve: (workspaceId, providerId) => modelProviders.upstream(workspaceId, providerId) });
 // The developer's model for accounts that redeemed an invite code (sponsor.ts): only when the server has a key and candidates.
 let sponsorService: SponsorService | undefined;
+// The shell assistant for every account inside Codex's Linux sandbox, when the server turned it on and a sandbox really starts here.
+const sandboxShell = probeSandboxShell();
+console.info(JSON.stringify({ type: "worker.sandbox_shell", ...sandboxShell }));
 const modelProviders = createModelProviderService({
-  store: analysisStore, secrets, cwd: repoRoot, sponsor: () => sponsorService,
+  store: analysisStore, secrets, cwd: repoRoot, sponsor: () => sponsorService, sandboxShell: sandboxShell.ok,
   gateway: modelGateway,
   signedIn: (workspaceId) => codexSupervisor?.runtimes?.signedIn(workspaceId) ?? true,
   onConformance: (workspaceId) => { void afterConnected(workspaceId); },
@@ -843,7 +847,10 @@ const agentService = createAgentService({
   // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).
   store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(), isOwner: machineOwner,
   // Everyone else's assistant works through Crossline's own functions on the account's own model (docs/personal-agent.md, 2026-10-19).
-  modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : "tools",
+  modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : sandboxShell.ok ? "sandbox" : "tools",
+  // What a sandboxed run may never read: the server's data and state (every account's ledger, files and runtime homes) — its own task
+  // folder and inputs, which live under them, stay reachable because the more specific entry wins.
+  sandbox: { readable: [path.dirname(process.env.CROSSLINE_CODEX_PATH ?? "/opt/codex/codex")], deny: [dataDir, process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state")] },
   clientFor: accountClient,
   mailFor: (workspaceId) => mailService.lookup(workspaceId),
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))

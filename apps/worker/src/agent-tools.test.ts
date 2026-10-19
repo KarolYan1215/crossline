@@ -120,3 +120,28 @@ test("reading one long file page by page is not a loop, and copying large files 
   await tools.call("copy_file", { from: "input/0/big.txt", to: "归档/big-2.txt" });
   expect(JSON.parse(await tools.call("write_file", { path: "README.md", content: "# 索引" }))).toMatchObject({ written: "README.md" });
 });
+
+test("a sandboxed shell run is started under the task profile — writes in its folder, the server's data unreadable, no network — and refused without it", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  const summary = JSON.stringify({ summary: "整理完成。", artifacts: [], verification: [], needsHuman: [], notDone: [], assumptions: [] });
+  const sandbox = { readable: ["/opt/codex"], deny: ["/data", "/state"] };
+  const { rpc, threadStarts } = fakeRuntime([summary], "crossline:crossline-agent",
+    { threadResponse: { approvalPolicy: "untrusted", activePermissionProfile: { id: "crossline-task" }, sandbox: { type: "workspaceWrite" } } });
+  const run = createAgentRunner(store, workspaceId, "/repo", () => rpc, { outputRoot: path.join(root, "ai"), mode: "sandbox", sandbox });
+  const outcome = await run({ taskId: "t-sb", title: "整理", what: "整理", category: "read_research_organize", humanPart: "看结果" });
+  expect(outcome.state).toBe("done");
+  const started = threadStarts()[0]!;
+  expect(started).not.toHaveProperty("sandbox");
+  const config = started.config as Record<string, unknown>;
+  expect(config.default_permissions).toBe("crossline-task");
+  const filesystem = ((config.permissions as Record<string, { filesystem: Record<string, string>; network: { enabled: boolean } }>)["crossline-task"]!);
+  expect(filesystem.network.enabled).toBe(false);
+  expect(filesystem.filesystem).toMatchObject({ ":minimal": "read", "/data": "deny", "/state": "deny", "/opt/codex": "read", [path.join(root, "ai", "t-sb")]: "write" });
+  expect((config.shell_environment_policy as { inherit: string }).inherit).toBe("core");
+  expect((started.dynamicTools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(expect.arrayContaining(["add_to_inbox", "read_document"]));
+  expect((started.dynamicTools as Array<{ name: string }>).map((tool) => tool.name)).not.toContain("write_file");
+  const { rpc: unsafe } = fakeRuntime([summary], "crossline:crossline-agent", { threadResponse: { approvalPolicy: "untrusted", sandbox: { type: "dangerFullAccess" } } });
+  const refused = await createAgentRunner(store, workspaceId, "/repo", () => unsafe, { outputRoot: path.join(root, "ai"), mode: "sandbox", sandbox })(
+    { taskId: "t-sb2", title: "整理", what: "整理", category: "read_research_organize", humanPart: "看结果" });
+  expect(refused).toMatchObject({ state: "blocked", code: "SKILL_SANDBOX_UNSUPPORTED" });
+});
