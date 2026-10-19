@@ -25,7 +25,12 @@ export type GatewayUpstream = BridgeUpstream & { kind: "chat" | "responses"; key
    * Models to try, best first, when the request's model is refused as overloaded (429, 503, 「满载」) and a person is waiting on the
    * run; the developer's model offers the other candidates that passed this Skill's checks. Background work waits and retries instead.
    */
-  fallback?: (skill: string, model: string) => string[] };
+  fallback?: (skill: string, model: string) => string[];
+  /**
+   * A route nobody waits on whatever its Skill (the developer's model while it is measured): a refusal for load is waited out like
+   * background work, since a measurement that fails on the provider's rate limit says nothing about the model.
+   */
+  patient?: boolean };
 
 /**
  * Requests in flight per upstream model, adapted to what the upstream accepts (2026-10-19, docs/model-scheduling.md): every account on the
@@ -178,7 +183,7 @@ export async function startModelGateway(options: {
     response.on("close", () => { if (!response.writableEnded) abort.abort(); });
     // Which Skill sent it (the thread's provider definition carries the header), so a person's turn is told apart from background work.
     const skill = String(request.headers["x-crossline-skill"] ?? "");
-    const interactive = Boolean(skill) && priorityForSkill(skill) === "interactive";
+    const interactive = !upstream.patient && Boolean(skill) && priorityForSkill(skill) === "interactive";
     let model = typeof parsed.model === "string" ? parsed.model : "";
     const tried = new Set([model]);
     let forward: ReturnType<typeof responsesToChat> | undefined;

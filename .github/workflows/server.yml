@@ -82,6 +82,8 @@ jobs:
             sudo grep -E "^(CROSSLINE_INVITE_APPROVER|CROSSLINE_SPONSOR_BASE_URL|CROSSLINE_SPONSOR_MODELS|CROSSLINE_SPONSOR_MONTHLY_CNY)=" /srv/crossline/app.env || true
             printf "sponsor key filled: "; sudo grep -cE "^CROSSLINE_SPONSOR_API_KEY=.+" /srv/crossline/app.env || true
             sudo docker logs --since 7d crossline-worker 2>&1 | grep -E "\"sponsor\." | tail -20 || true
+            # Which tool or item a structured run used that it was never offered (a candidate failing SKILL_TOOL_FORBIDDEN).
+            sudo docker logs --since 1d crossline-worker 2>&1 | grep -E "item_forbidden|tool_call_refused" | cut -c1-300 | tail -20 || true
             # Which text models the sponsor key can use (ids only), so a candidate is named as SiliconFlow names it. The key stays on the host.
             echo "-- sponsor catalog"
             key=$(sudo grep -E "^CROSSLINE_SPONSOR_API_KEY=" /srv/crossline/app.env | cut -d= -f2-)

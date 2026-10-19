@@ -71,7 +71,10 @@ export type SponsorDialogueLog = {
  * then (the cases are synthetic, so the answer carries no person's data), and the model's own time apart from the wait for a slot.
  */
 export type SponsorRunLog = {
-  at: string; model: string; caseId: string; attempt: number; ok: boolean; code?: string; repairs: number; stalls: number;
+  at: string; model: string; caseId: string; attempt: number; ok: boolean; code?: string;
+  /** What the runner said beyond the code (the provider's own error, the item a structured run was refused). */
+  detail?: string;
+  repairs: number; stalls: number;
   rejections: Array<{ problems: string; answer: string }>;
   /** Repairs the validator did not ask for: the answer was not JSON (or the turn failed before it was read). */
   unparsed: number;
@@ -121,8 +124,21 @@ export const SPONSOR_KEY_EXHAUSTED = "SPONSOR_KEY_EXHAUSTED";
 const spent = (code: string | undefined) => code === "SKILL_USAGE_LIMIT";
 const exhaustedError = (error: unknown) => error instanceof Error && error.message === SPONSOR_KEY_EXHAUSTED;
 
-/** `lastChosen`: the model last chosen, served while a new evaluation runs (the owner's decision of 2026-10-19: no pause). */
-type Saved = { evaluations: SponsorEvaluation[]; lastChosen?: SponsorEvaluation };
+/**
+ * `lastChosen`: the model last chosen, served while a new evaluation runs (the owner's decision of 2026-10-19: no pause). `pruned`: the
+ * candidates found off the frontier, with the one that beat them; kept for good, so a later measuring version does not test them again.
+ */
+type Saved = { evaluations: SponsorEvaluation[]; lastChosen?: SponsorEvaluation; pruned?: Record<string, { by: string; at: string; version: number }> };
+
+/**
+ * A candidate whose first runs all fail for reasons of its own (not the provider's rate limit or load) is not measured to the end
+ * (2026-10-19: Ling-flash-2.0 failed every run after five to seven minutes each and would have held a measuring slot for hours); what
+ * was measured is kept, so the rule above puts it off the frontier.
+ */
+export const SPONSOR_EARLY_STOP_RUNS = 5;
+const detailOf = (blocker: { code: string; detail?: string }) => blocker.detail ?? "";
+const transientFailure = (code: string, detail = "") => /RATE_LIMIT|USAGE_LIMIT|STALLED|TIMEOUT|CANCELED/.test(code)
+  || /rate limit|TPM|RPM|429|overload|busy|满载|限流|timed? ?out/i.test(detail);
 
 export function sponsorFromEnv(env: NodeJS.ProcessEnv = process.env): { key: string; baseUrl: string; models: SponsorModel[]; capYuan: number } | undefined {
   const key = env.CROSSLINE_SPONSOR_API_KEY?.trim();
@@ -160,7 +176,10 @@ export function createSponsorService(options: {
   /** Candidates another beats on pass rate, cost and slowest run, with the one that beats them: never measured again, never used. */
   const offFrontier = (): Map<string, string> => {
     const config = settings();
-    return config ? dominatedCandidates(read().evaluations, config.models) : new Map();
+    if (!config) return new Map();
+    const saved = read();
+    return new Map([...Object.entries(saved.pruned ?? {}).map(([model, entry]) => [model, entry.by] as const),
+      ...dominatedCandidates(saved.evaluations, config.models)]);
   };
   const currentEvaluations = (): SponsorEvaluation[] => {
     const config = settings();
@@ -170,9 +189,9 @@ export function createSponsorService(options: {
     return read().evaluations.filter((item) => item.tokens && item.version === SPONSOR_EVAL_VERSION && config.models.some((model) => model.model === item.model)
       && !dominated.has(item.model) && conformanceCurrent(item.record, item.model, RUNTIME_VERSION, now()));
   };
-  /** Writes the evaluations, keeping the last choice. */
-  const save = (evaluations: SponsorEvaluation[], lastChosen = read().lastChosen) =>
-    writeFileSync(file, JSON.stringify({ evaluations, ...(lastChosen ? { lastChosen } : {}) } satisfies Saved, null, 2), "utf8");
+  /** Writes the evaluations, keeping the last choice and the candidates off the frontier. */
+  const save = (evaluations: SponsorEvaluation[], lastChosen = read().lastChosen, pruned = read().pruned) =>
+    writeFileSync(file, JSON.stringify({ evaluations, ...(lastChosen ? { lastChosen } : {}), ...(pruned ? { pruned } : {}) } satisfies Saved, null, 2), "utf8");
   /** The current choice; while a new evaluation has chosen nothing yet, the last one (if that model is still listed). */
   const chosen = (): SponsorEvaluation | undefined => {
     const config = settings();
@@ -236,7 +255,7 @@ export function createSponsorService(options: {
     if (!config) return undefined;
     const measuring = workspaceId.startsWith(SPONSOR_EVAL_PREFIX);
     return { kind: "chat", baseUrl: config.baseUrl, responseFormat: "json_object", key: config.key, thinkingControl: true,
-      ...(measuring ? {} : { fallback: (skill: string, model: string) => sponsorFallbacks(skillKey(skill), model, config.models, pool(), options.capabilities) }) };
+      ...(measuring ? { patient: true } : { fallback: (skill: string, model: string) => sponsorFallbacks(skillKey(skill), model, config.models, pool(), options.capabilities) }) };
   };
 
   /** Models the key can use, or undefined when the list cannot be read (then every candidate is tried). */
@@ -331,8 +350,15 @@ export function createSponsorService(options: {
     // Every measured candidate at the current prices, so a price change shows its effect on the next start.
     const candidates = currentEvaluations().map((item) => ({ model: item.model, passRate: item.record.passRate, p95Ms: item.record.p95Ms,
       yuanPerRun: evaluationYuanPerRun(item, config.models), tokens: item.tokens ?? null }));
-    const pruned = [...offFrontier()].map(([model, by]) => ({ model, by }));
-    if (pruned.length) console.info(JSON.stringify({ type: "sponsor.pruned", pruned }));
+    // Off the frontier for good: written down, so a later measuring version leaves them out too.
+    const saved = read();
+    const found = [...dominatedCandidates(saved.evaluations, config.models)].filter(([model]) => !saved.pruned?.[model]);
+    if (found.length) {
+      const at = now().toISOString();
+      save(saved.evaluations, saved.lastChosen, { ...saved.pruned,
+        ...Object.fromEntries(found.map(([model, by]) => [model, { by, at, version: SPONSOR_EVAL_VERSION }])) });
+      console.info(JSON.stringify({ type: "sponsor.pruned", pruned: found.map(([model, by]) => ({ model, by })) }));
+    }
     if (exhausted) console.info(JSON.stringify({ type: "sponsor.key_exhausted", balance: await balance() ?? null }));
     console.info(JSON.stringify({ type: "sponsor.chosen", model: pick?.model ?? null, skipped, candidates }));
     return { ...(pick ? { chosen: pick.model } : {}), tested, skipped, exhausted };
@@ -375,7 +401,8 @@ export function createSponsorService(options: {
 
   async function conformanceRuns(client: CodexRpcBoundary, model: SponsorModel, thread: ReturnType<typeof threadProvider>, key: string,
     runs: ConformanceRun[]): Promise<SponsorEvaluation> {
-    for (const item of conformanceCases()) for (let attempt = 0; attempt < item.runs; attempt += 1) {
+    let ownFailures = 0;
+    measuring: for (const item of conformanceCases()) for (let attempt = 0; attempt < item.runs; attempt += 1) {
       const started = Date.now();
       const input = { version: "crossline.conformance.v1", caseId: item.id, prompt: item.prompt };
       const rejections: SponsorRunLog["rejections"] = [];
@@ -405,11 +432,16 @@ export function createSponsorService(options: {
       const serviceMs = usage ? usage.durationMs : null;
       runs.push({ caseId: item.id, ok: result.ok, repairs, ms: serviceMs ?? wallMs, ...(result.ok ? {} : { code: result.blocker.code }) });
       const line: SponsorRunLog = { at: new Date(started).toISOString(), model: model.model, caseId: item.id, attempt, ok: result.ok,
-        ...(result.ok ? {} : { code: result.blocker.code }), repairs, stalls: result.audit.stalls ?? audit.stalls ?? 0, rejections,
+        ...(result.ok ? {} : { code: result.blocker.code, ...(detailOf(result.blocker) ? { detail: detailOf(result.blocker).slice(0, 300) } : {}) }), repairs, stalls: result.audit.stalls ?? audit.stalls ?? 0, rejections,
         unparsed: Math.max(0, repairs - rejections.length + (result.ok ? 0 : 1)), serviceMs, wallMs, turnSeconds: usage?.turnSeconds ?? [],
         tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 } };
       try { appendFileSync(logFile(model.model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading, never a reason to fail the measurement */ }
       if (!result.ok && spent(result.blocker.code)) throw new Error(SPONSOR_KEY_EXHAUSTED);
+      if (!result.ok && !transientFailure(result.blocker.code, detailOf(result.blocker))) ownFailures += 1;
+      if (runs.length === SPONSOR_EARLY_STOP_RUNS && ownFailures === runs.length) {
+        console.info(JSON.stringify({ type: "sponsor.stopped_early", model: model.model, runs: runs.length, codes: runs.map((run) => run.code) }));
+        break measuring;
+      }
     }
     const record: ConformanceRecord = summarizeConformance({ providerId: SPONSOR_PROVIDER_ID, model: model.model, runtimeVersion: RUNTIME_VERSION, ranAt: now().toISOString() }, runs);
     const tokens = evalUsage.get(key)!;

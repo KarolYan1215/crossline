@@ -133,6 +133,19 @@ test("a person's request refused for load is tried once more, then on the next m
   expect(await (await post(none.urlFor("ws", "sponsor"), "crossline:crossline-concierge")).text()).toMatch(/response.failed/);
 });
 
+test("a route being measured waits out a refusal like background work, even for a person's Skill, and never changes model", async () => {
+  let refusals = 2;
+  const provider = await upstream((_seen, response) => { if (refusals-- > 0) busy(response); else ok(response); });
+  const events: Array<Record<string, unknown>> = [];
+  const started = await startModelGateway({ resolve: () => ({ kind: "chat", baseUrl: provider.base, key: "k", patient: true }),
+    backoffMs: [10, 10, 10], quickRetryMs: 10, log: (event) => events.push(event) });
+  closers.push(started.close);
+  const answer = await post(started.urlFor("sponsor-eval:m-main", "sponsor"), "crossline:crossline-onboarding");
+  expect(await answer.text()).toContain("response.completed");
+  expect(provider.seen.map((seen) => seen.body.model)).toEqual(["m-main", "m-main", "m-main"]);
+  expect(events.map((event) => [event.interactive, event.action])).toEqual([[false, "retry"], [false, "retry"]]);
+});
+
 test("the limit on requests in flight to one model halves on a refusal and grows back with successes", async () => {
   let inFlight = 0, most = 0, refuse = true;
   const provider = await upstream((_seen, response) => {

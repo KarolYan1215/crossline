@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
@@ -6,7 +6,7 @@ import { conformanceCases, summarizeConformance } from "@crossline/core";
 import { decideRoute, setUsageSink } from "@crossline/codex";
 import { CrosslineStore, SPONSOR_SETTING } from "@crossline/db";
 import { createModelProviderService, RUNTIME_VERSION } from "./model-provider";
-import { createSponsorService, extractRecall, SPONSOR_DIALOGUE_SCRIPT, SPONSOR_EFFORT_VERSION, SPONSOR_EVAL_VERSION, SPONSOR_EXTRACT_EXPECTED, type SponsorDialogueLog, type SponsorExtractLog, type SponsorRunLog } from "./sponsor";
+import { createSponsorService, extractRecall, SPONSOR_DIALOGUE_SCRIPT, SPONSOR_EARLY_STOP_RUNS, SPONSOR_EFFORT_VERSION, SPONSOR_EVAL_VERSION, SPONSOR_EXTRACT_EXPECTED, type SponsorDialogueLog, type SponsorExtractLog, type SponsorRunLog } from "./sponsor";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
 const dirs: string[] = [];
@@ -102,7 +102,8 @@ test("an evaluation logs every run with what the validator sent back, and a mode
     expect(result.tested).toEqual(["org/Broken"]);
     expect(result.chosen).toBeUndefined();
     const lines = readFileSync(path.join(dataDir, "sponsor-eval", "org_Broken.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as SponsorRunLog);
-    expect(lines).toHaveLength(conformanceCases().reduce((sum, item) => sum + item.runs, 0));
+    // Every run failed for a reason of its own: the measurement stops after the first few, and what was measured is kept.
+    expect(lines).toHaveLength(SPONSOR_EARLY_STOP_RUNS);
     expect(lines[0]).toMatchObject({ model: "org/Broken", ok: false, repairs: 2, unparsed: 0 });
     expect(lines[0]!.rejections).toHaveLength(3);
     expect(lines[0]!.rejections[0]!.answer).toBe("{}");
@@ -181,5 +182,12 @@ test("a candidate off the frontier is neither measured again nor used, for the c
     expect(result).toMatchObject({ tested: [], skipped: ["org/New"], chosen: MODEL });
     expect(measured).toEqual([]);
     expect(sponsor.modelFor("crossline-task-titler")).toBe(MODEL);
+    // Written down for good: with the record that beat it gone (a later measuring version), it is still not measured.
+    const saved = JSON.parse(readFileSync(path.join(dataDir, "sponsor.json"), "utf8")) as { evaluations: Array<{ model: string }>; pruned: Record<string, { by: string }> };
+    expect(saved.pruned["org/Dear"]?.by).toBe(MODEL);
+    writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ ...saved, evaluations: saved.evaluations.filter((item) => item.model === "org/Dear") }));
+    const again = await sponsor.evaluate();
+    expect(again.tested).toEqual([MODEL]);
+    expect(existsSync(path.join(dataDir, "sponsor-eval", "org_Dear.jsonl"))).toBe(false);
   } finally { setUsageSink(undefined); }
 }, 60_000);
