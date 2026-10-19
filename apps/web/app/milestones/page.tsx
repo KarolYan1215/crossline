@@ -47,7 +47,12 @@ export default async function MilestonesPage() {
       drafts: board.milestones.filter((milestone) => milestone.identityId === pack.id && milestone.status === "draft").length }))}
       palette={Object.fromEntries(Object.entries(LINE_PALETTE).map(([key, value]) => [key, value.light]))} />
     <FirstHint id="milestones" title="主线页怎么看">
-      上面每张卡是一条主线和它的长期目标；下面是共用的一条时间轴，菱形是里程碑，落在它的截止日。空心虚线的是系统设计的草稿，点开能改标题、日期、标准和重要性，批准后才会倒推成任务；不想要的点「撤销草稿」。同一条线前后里程碑之间的弧线是先后顺序，跨线的曲线表示一条线的产出供另一条线使用。
+      <ul className="ui-first-hint-list">
+        <li>上方每张卡是一条主线和它的长期目标</li>
+        <li>下方共用一条时间轴：菱形是里程碑，落在它的截止日</li>
+        <li>空心虚线是系统设计的草稿：点开可改标题、日期、标准和重要性，批准后才倒推成任务；不要的点「撤销草稿」</li>
+        <li>同一条线上的弧线是先后顺序；跨线的曲线表示一条线的产出供另一条线使用</li>
+      </ul>
     </FirstHint>
     <MilestoneTimeline board={board} actions={<MilestoneActions lines={identities.map((pack) => ({ id: pack.id, label: pack.label }))} archived={archived} />} />
     <p className="muted ms-foot"><a href="/review">本周复盘 →</a></p>

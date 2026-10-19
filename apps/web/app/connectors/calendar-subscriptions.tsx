@@ -63,7 +63,7 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
   };
 
   return <section className="st-card calendar-subscriptions" aria-label="订阅日历">
-    <header><h3>订阅日历</h3><small>点你用的日历，在打开的页面拷贝订阅链接，回来点「粘贴并接入」。只读，不用登录。</small></header>
+    <header><h3>订阅日历</h3><small>点所用的日历，在打开的页面复制订阅链接，回来点「粘贴并接入」。只读，不用登录。</small></header>
     {items?.map((item) => <div className="st-row" key={item.id}>
       <span className="st-row-label">{item.label}
         <small>{item.host}{item.lastError ? ` · ${item.lastError}` : item.lastReadAt ? ` · ${ago(item.lastReadAt, now)}，${item.lastEvents ?? 0} 个日程` : ""}</small>

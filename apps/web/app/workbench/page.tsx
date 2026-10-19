@@ -94,8 +94,13 @@ export default async function WorkbenchPage({ searchParams }: {
   const shownLines = lines.filter((line) => lineCounts.has(line.id));
   return <SubpageShell active="任务" title="任务">
     {!nothing && <FirstHint id="workbench" title="这一页怎么看">
-      任务按四个问题分组：<b>现在</b>是正在计时、今天有时段或今天到期的；<b>接下来</b>是之后有时段的；<b>在等</b>是等本人批准、等他人或材料、等验收的；<b>任务库</b>里的任务所属里程碑还远，进入三周窗口后才排进日历。
-      点开任务卡看步骤和材料；<b>开始计时</b>后右下角出现倒计时，整件做完在任务里按<b>完成</b>，本人提交即视为验收。
+      <ul className="ui-first-hint-list">
+        <li><b>现在</b>：正在计时、今天有时段或今天到期</li>
+        <li><b>接下来</b>：之后有时段</li>
+        <li><b>在等</b>：等本人批准、等他人或材料、等验收</li>
+        <li><b>任务库</b>：所属里程碑还远，进入三周窗口后才排进日历</li>
+        <li>点开任务卡看步骤和材料；<b>开始计时</b>后右下角倒计时，做完按<b>完成</b>，本人提交即视为验收</li>
+      </ul>
     </FirstHint>}
     {nothing ? <p className="panel today-empty">{backplanning
       ? `系统正在从已批准的 ${backplanning} 个里程碑倒推任务（每个几分钟），出来的任务会出现在这里。`

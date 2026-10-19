@@ -73,7 +73,14 @@ export function MailAccounts() {
       {showHost && <input type="text" value={host} onChange={(event) => setHost(event.target.value)} placeholder="IMAP 服务器，如 imap.example.com" aria-label="IMAP 服务器" disabled={busy} />}
       <button type="submit" className="primary-button" disabled={busy || !address || !password}>{busy ? "连接中…" : "接入"}</button>
     </form>
-    <p className="st-note">Gmail：Google 账号 → 安全 → 两步验证 → 应用专用密码。QQ / 163 / 126：邮箱设置里开启 IMAP 并生成授权码。iCloud：appleid.apple.com → App 专用密码。Outlook / Hotmail 已不允许用密码读取，暂不支持。</p>
+    <details className="advanced"><summary>怎么拿到应用专用密码或授权码</summary>
+      <ul className="st-list">
+        <li>Gmail：Google 账号 → 安全 → 两步验证 → 应用专用密码</li>
+        <li>QQ / 163 / 126：邮箱设置里开启 IMAP，生成授权码</li>
+        <li>iCloud：appleid.apple.com → App 专用密码</li>
+        <li>Outlook / Hotmail 已不允许用密码读取，暂不支持</li>
+      </ul>
+    </details>
     {message && <p role="status" className="muted">{message}</p>}
     {Boolean(view?.log.length) && <details className="st-fold"><summary>最近整理的邮件</summary>
       <ul className="st-list">{view!.log.map((entry) => <li key={`${entry.accountId}:${entry.uid}`}>
