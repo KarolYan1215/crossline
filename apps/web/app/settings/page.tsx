@@ -39,7 +39,9 @@ import {
   ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, readAvailability, toZonedInstant
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
-import { lineLabels } from "../../lib/lines";
+import { identityLines, lineLabels } from "../../lib/lines";
+import { AutomationsCard } from "./automations-card";
+import { MailAccounts } from "../connectors/mail-accounts";
 import { interviewStatus } from "../../lib/interview-status";
 import { timed, timedSync } from "../../lib/sections";
 import { memoForAsync } from "../../lib/ledger-memo";
@@ -150,16 +152,17 @@ export default async function SettingsPage() {
         </section>
 
         <section id="automation" className="st-section" aria-labelledby="st-automation"><h2 id="st-automation">自动化与助手</h2>
-          {/* The shell assistant runs as this machine's user, so it works only for the machine owner's account (decided 2026-10-10). */}
+          {/* The shell assistant runs as this machine's user (decided 2026-10-10); every other account's works through Crossline's functions. */}
           {!machine && <p className="muted">{hosted
-            ? "网页版不提供能在电脑上执行命令的助手，步骤都由本人完成；分析、拆分、规划和教程照常在自己的模型连接上运行。"
-            : "这台电脑上的助手只为电脑主人工作，这个账号的步骤都由本人完成；分析、拆分与规划照常在自己的模型连接上运行。"}</p>}
+            ? "网页版的助手通过 Crossline 自己的功能工作：读写和整理文件、查网页、读已接入的邮箱、把待办放进收件箱、按时或按条件跑自动化；不在电脑上执行命令。"
+            : "这个账号的助手通过 Crossline 自己的功能工作（读写整理文件、查网页、读邮箱、跑自动化）；能在电脑上执行命令的助手只为电脑主人工作。"}</p>}
           <AutomationModule toolsMode={!machine} paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} autoHandoff={isAutoHandoff(store, ctx.workspaceId)}
             categories={assistant.categories.map((item) => ({ category: item.category, label: item.label, explained: item.explained,
               mode: categoryMode(states[item.category]), cleanRuns: item.cleanRuns, runsToTrust: item.runsToTrust }))}
             recent={assistant.tasks.slice(0, 8).map((task) => ({ taskId: task.taskId, title: task.title, kind: assistant.categories.find((item) => item.category === task.category)?.label ?? "",
               status: agentTaskStatusLabel[task.status] ?? task.status, tone: TONE[task.status] ?? "neutral", day: task.requestedAt.slice(5, 10).replace("-", "/"),
               workOrderId: task.workOrderId }))} />
+          <div className="st-modules"><AutomationsCard lines={identityLines(ctx).map((line) => ({ id: line.id, label: line.label }))} /></div>
         </section>
 
         <section id="background" className="st-section" aria-labelledby="st-background"><h2 id="st-background">后台任务</h2>
@@ -176,6 +179,7 @@ export default async function SettingsPage() {
 
         <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar">日历与连接</h2>
           <CalendarModule ctx={ctx} />
+          <div className="st-modules"><MailAccounts /></div>
           <ConnectionsSection />
         </section>
 

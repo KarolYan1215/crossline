@@ -660,3 +660,4 @@ export * from "./secret-file";
 export * from "./ical";
 export * from "./web-search";
 export * from "./image-generation";
+export * from "./imap-mail";

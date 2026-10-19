@@ -58,6 +58,8 @@ import { createFolderClassifier } from "./folder-classifier";
 import { homedir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
+import { createMailService } from "./mailbox";
+import { automationPass, createAutomationService, designPending, onNewMail, type AutomationDeps } from "./automations";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { identityLines } from "./lines";
 import { createBackgroundSpend } from "./spend";
@@ -638,6 +640,12 @@ async function tick(): Promise<void> {
       }
     }
   }
+  // The mailbox and the automations (docs/personal-agent.md): new mail read and sorted, then each automation's trigger looked at.
+  for (const workspace of workspaces) {
+    enterUsageWorkspace(workspace.id);
+    await mailService.pass(workspace.id).catch(() => undefined);
+    await automationTick(workspace.id).catch(() => undefined);
+  }
   // The nightly expansion decides for itself whether this tick is its moment; most ticks are not.
   for (const workspace of workspaces) {
     enterUsageWorkspace(workspace.id);
@@ -814,6 +822,13 @@ const getCalendarWriteSession = () => calendarWriteSession ??= (async () => {
 })().catch(() => undefined);
 // The writer account's sign-in from the calendar card: the same MSAL cache the publisher reads, so a new token is used at once.
 const calendarWriteLogin = createWriteLogin(analysisStore, { session: getCalendarWriteSession, ownerOf: (workspaceId) => ownerOf(analysisStore, workspaceId) });
+// The person's mailbox, read-only (docs/personal-agent.md): new mail read every quarter hour and sorted into the inbox; the assistant
+// searches and reads it; matching mail fires the person's automations. Sorting is intake work (it runs while the person is around or
+// cooling off); reading never needs the model.
+const mailService = createMailService({ store: analysisStore, secrets, cwd: repoRoot, client: (workspaceId) => codexSupervisor?.clientFor(workspaceId),
+  sortAllowed: async (workspaceId) => !paused(workspaceId, "intake") && spendAllows(await spendFor(workspaceId), "intake"),
+  onNewMail: (workspaceId, messages) => { onNewMail(analysisStore, workspaceId, messages); },
+  log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
 const agentService = createAgentService({
   // The shell assistant runs on the machine owner's runtime only: it works with the operating system user's files, and a guard is a
   // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).
@@ -821,8 +836,33 @@ const agentService = createAgentService({
   // Everyone else's assistant works through Crossline's own functions on the account's own model (docs/personal-agent.md, 2026-10-19).
   modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : "tools",
   clientFor: (workspaceId) => codexSupervisor?.clientFor(workspaceId),
+  mailFor: (workspaceId) => mailService.lookup(workspaceId),
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
 });
+// Automations (docs/personal-agent.md): requests in words designed into a trigger and steps, then watched every tick and run by the
+// assistant when they fire. Designing is the person's own request (core work); firing runs while the person is around or cooling off,
+// and stops — with everything else — once they have been away a week.
+const automationDeps: AutomationDeps = { store: analysisStore, cwd: repoRoot, client: (workspaceId) => codexSupervisor?.clientFor(workspaceId),
+  runFree: (workspaceId, input, after) => agentService.runFree(workspaceId, input, after),
+  zone: (workspaceId) => calendarZone(workspaceId) ?? process.env.CROSSLINE_TIME_ZONE?.trim() ?? "America/Chicago",
+  log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) };
+const designingAutomations = new Set<string>();
+async function automationDesignPass(workspaceId: string): Promise<void> {
+  if (designingAutomations.has(workspaceId) || !codexSupervisor || !spendAllows(await spendFor(workspaceId), "core")) return;
+  designingAutomations.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const designed = await designPending(automationDeps, workspaceId);
+    if (designed.length) console.info(JSON.stringify({ type: "automation.designed", workspaceId, designed, checkedAt: new Date().toISOString() }));
+  } finally { designingAutomations.delete(workspaceId); }
+}
+async function automationTick(workspaceId: string): Promise<void> {
+  await automationDesignPass(workspaceId);
+  if (!codexSupervisor || paused(workspaceId, "assistant") || !spendAllows(await spendFor(workspaceId), "intake")) return;
+  enterUsageWorkspace(workspaceId);
+  await automationPass(automationDeps, workspaceId);
+}
+const automationService = createAutomationService({ ...automationDeps, afterRequest: (workspaceId) => { void automationDesignPass(workspaceId).catch(() => undefined); } });
 for (const workspace of analysisStore.listWorkspaces()) {
   const lost = agentService.recoverLost(workspace.id);
   if (lost.length) console.info(JSON.stringify({ type: "agent.recovered_lost", workspaceId: workspace.id, lost, checkedAt: new Date().toISOString() }));
@@ -1123,6 +1163,7 @@ if (!capabilitySecret) {
       ...(hostedBeta ? { maxRunning: guestRuntimeLimit() ?? 2, idleMs: 10 * 60_000 } : {}) },
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId) },
+    services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/automations", handle: automationService.handle }],
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),

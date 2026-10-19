@@ -149,7 +149,11 @@ function waitingIndex(store: Source["store"], workspaceId: string) {
 /** 「…到了吗？」 on the day something the person waits for was due — the waiting card, now one ask among the others. */
 function waitingAsks({ store, ctx, today }: Source): Ask[] {
   const index = waitingIndex(store, ctx.workspaceId);
-  const due = index.open.filter((item) => item.followUpAt <= today);
+  // A reply from the one a wait is on, seen in the person's mailbox (mail triage), brings the question forward to today.
+  const replies = new Map(store.listEvents(ctx.workspaceId, { type: "waiting.mail_seen" })
+    .map((event) => [event.entityId, { ...(event.payload as { from?: string; subject?: string }), at: event.createdAt }]));
+  const replied = (item: WaitingItem) => { const reply = replies.get(item.id); return reply && reply.at > item.updatedAt ? reply : undefined; };
+  const due = index.open.filter((item) => item.followUpAt <= today || replied(item));
   // One card for one wait: an item whose twin is already asked about is answered with it.
   return due.filter((item, position) => !due.slice(0, position).some((earlier) => index.withTwins(earlier).includes(item))).map((item) => {
     const twins = index.withTwins(item);
@@ -159,9 +163,10 @@ function waitingAsks({ store, ctx, today }: Source): Ask[] {
     const blocked = twins.flatMap((twin) => twin.blocks);
     return { id: `wait:${item.id}`, kind: "waiting_due" as const, entityId: item.id, urgency: "now" as const, dueDay: item.followUpAt,
       important: forMilestone || blocked.length > 0, ...(blocked[0] ? { preview: taskPreview(blocked[0], "看等它的任务") } : {}),
-      raisedAt: item.updatedAt, fingerprint: item.followUpAt,
+      raisedAt: item.updatedAt, fingerprint: `${item.followUpAt}${replied(item) ? `:mail:${replied(item)!.at}` : ""}`,
       title: `${item.who ? `${item.who}的` : ""}「${short(item.title, 50)}」到了吗？`,
-      why: `原定${item.approximate ? "大约" : ""} ${item.expectedAt.slice(5)} 到。${forMilestone ? "到了以后系统会带着它重新拆这个里程碑的步骤。"
+      why: `${replied(item) ? `邮箱里收到 ${short(replied(item)!.from ?? "", 40)} 的邮件「${short(replied(item)!.subject ?? "", 50)}」，可能就是它。` : ""}`
+        + `原定${item.approximate ? "大约" : ""} ${item.expectedAt.slice(5)} 到。${forMilestone ? "到了以后系统会带着它重新拆这个里程碑的步骤。"
         : `在它到之前，依赖它的 ${blocks} 项工作不会排进日历。`}`,
       options: [
         { id: "arrived", label: "到了", recommended: true, ...(forMilestone ? { detail: "写一句放在哪、有什么，重拆更准",

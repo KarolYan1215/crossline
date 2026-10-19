@@ -3865,3 +3865,4 @@ export * from "./skills";
 export * from "./invites";
 export * from "./evidence-backfill";
 export * from "./onboarding-extract";
+export * from "./automations";

@@ -51,7 +51,7 @@ export const ACTIONS = {
   "milestone.draft": { label: "新建里程碑草稿", risk: "internal", args: { lineId: str(64), title: str(200), date: day, target: str(500) } },
   "line.add": { label: "新增主线", risk: "internal", args: { label: str(12) } },
   "profile.tell": { label: "交给访谈", risk: "internal", args: { text: str(2000), lineId: str(64) } },
-  "workflow.request": { label: "建成工作流", risk: "internal", args: { text: str(1000), lineId: str(64), reminder: str(200), time: str(5),
+  "workflow.request": { label: "建成自动化", risk: "internal", args: { text: str(1000), lineId: str(64), reminder: str(200), time: str(5),
     weekdays: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } } } },
   "proposal.decide": { label: "处理任务提案", risk: "commitment", args: { workOrderId: str(128), decision: enumOf(["approve", "reject"]), reason: str(300) } },
   "milestones.decide": { label: "处理里程碑草稿", risk: "commitment", args: { milestoneIds: { type: "array", maxItems: 20, items: str(128) },
@@ -172,7 +172,7 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     case "workflow.request": return !String(a.text ?? "").trim() ? "内容为空"
       : String(a.reminder ?? "").trim() && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(a.time ?? "")) ? "提醒须有 HH:MM 的时间" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在`
       // A workflow is written in one line's way and used on that line only; with none named it used to land on the first line.
-      : !String(a.reminder ?? "").trim() && !item.args.lineId ? "工作流须写明服务哪条主线（lineId）；看不出是哪条时用 clarify 列出主线让本人选" : "";
+      : !String(a.reminder ?? "").trim() && !item.args.lineId ? "自动化须写明服务哪条主线（lineId）；看不出是哪条时用 clarify 列出主线让本人选" : "";
     case "profile.tell": return !String(a.text ?? "").trim() ? "内容为空" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在` : "";
     case "task.op": {
       const args = item.args;

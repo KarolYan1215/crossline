@@ -495,6 +495,11 @@ export async function startCodexSupervisor(options: {
   };
   /** This month's spend and cap for a workspace on a pay-per-use (API key) login, which reports no quota windows of its own. */
   monthSpend?: (workspaceId: string) => { spent: number; cap: number };
+  /**
+   * Routes a worker service answers itself under its own prefix (the mailbox, automations — docs/personal-agent.md), for the caller's
+   * workspace. A write must come from the web app's server (no browser `Origin`), like every other write here.
+   */
+  services?: Array<{ prefix: string; handle: (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => Promise<{ status: number; body: unknown } | undefined> }>;
 } = {}): Promise<CodexSupervisor> {
   const host = options.host ?? "127.0.0.1";
   // Regenerated every boot: a token signed before a crash or restart must not still be honoured after
@@ -1205,6 +1210,14 @@ export async function startCodexSupervisor(options: {
         try { await sendJsonWhenReady(response, () => options.backplanGoal!(rt, String(body?.milestoneId ?? ""), controller.signal, callerWorkspaceId)); }
         finally { if (proposing.get(callerWorkspaceId) === controller) proposing.delete(callerWorkspaceId); }
         return;
+      }
+      for (const service of options.services ?? []) {
+        if (!pathname.startsWith(service.prefix)) continue;
+        const method = request.method ?? "GET";
+        if (method !== "GET" && request.headers.origin) { sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } }); return; }
+        const answer = await service.handle(method, pathname, callerWorkspaceId, method === "GET" ? undefined : await readJsonBody(request).catch(() => undefined))
+          .catch(() => ({ status: 502, body: { blocker: { code: "SERVICE_FAILED", message: "后台没有完成这次操作" } } }));
+        if (answer) { sendJson(response, answer.status, answer.body); return; }
       }
       if (options.modelProviders && pathname.startsWith("/v1/model/provider")) {
         const answer = await options.modelProviders.handle(request.method ?? "GET", pathname, callerWorkspaceId,

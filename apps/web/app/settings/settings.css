@@ -150,3 +150,13 @@
 .bg-degraded{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:6px 16px;padding:8px 10px;background:var(--chalk);font-size:13px}
 .bg-degraded p{grid-column:1/-1;margin:0}
 .bg-degraded ul{margin:2px 0 0;padding-left:18px}
+/* The mailbox (connectors/mail-accounts.tsx) and automations (settings/automations-card.tsx), docs/personal-agent.md. */
+.mail-accounts-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:6px;align-items:center}
+.mail-accounts-form input{min-width:0;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink)}
+.mail-accounts .st-inline{display:inline-flex;gap:4px;align-items:center;font-size:13px}
+.st-automation-new{display:grid;gap:6px}
+.st-automation-new textarea{font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);resize:vertical;min-width:0}
+.st-automation-new select{font:inherit;font-size:13px;margin-left:6px}
+.st-automation .st-row-label{display:grid;gap:2px}
+.st-automation-actions{display:flex;flex-wrap:wrap;gap:6px}
+@media (max-width:640px){.mail-accounts-form{grid-template-columns:minmax(0,1fr)}.st-automation{display:grid;gap:6px}}

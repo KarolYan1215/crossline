@@ -1,0 +1,115 @@
+import { expect, test } from "vitest";
+import { AUTOMATION_RUNS_SETTING, AUTOMATIONS_SETTING, readAutomations, validateAutomationPlan, type Automation, type AutomationPlan } from "@crossline/core";
+import { CrosslineStore, readCategories, requestAutomation } from "@crossline/db";
+import type { AgentTaskInput } from "./agent-task";
+import { AUTOMATION_DESIGNER_SKILL, automationPass, designPending, fire, onNewMail, type AutomationDeps } from "./automations";
+import { fakeRuntime } from "./testing/fake-runtime";
+
+const plan = (over: Partial<AutomationPlan> = {}, trigger: Partial<AutomationPlan["trigger"]> = {}): AutomationPlan => ({
+  name: "课程邮件整理", summary: "每天早上把课程邮件整理成清单", lineId: "research",
+  trigger: { type: "schedule", time: "08:00", days: "DAILY", hours: 0, from: "", keywords: "", url: "", event: "", ...trigger },
+  action: { kind: "run", instructions: "读最近一天和课程有关的邮件，整理成待办清单写进 digest.md，把要做的事放进收件箱", reminder: "", category: "read_research_organize", outputs: "digest.md" },
+  steps: [{ title: "读邮件并整理", by: "assistant" }, { title: "回复老师的邮件", by: "assistant" }], assumptions: "", ...over
+});
+
+function setup(now = new Date("2026-10-19T14:00:00Z")) {
+  const store = new CrosslineStore(":memory:");
+  const workspaceId = store.createPrincipalWithWorkspace("user-1", "w").workspace.id;
+  store.setSetting(workspaceId, "lines.custom", JSON.stringify([{ id: "research", label: "研究者" }]));
+  const started: Array<AgentTaskInput & { taskId: string }> = [];
+  let busy = false;
+  const deps = (client: AutomationDeps["client"] = () => undefined, fetched: string[] = []): AutomationDeps => ({
+    store, cwd: "/repo", client, zone: () => "America/Chicago", now: () => now,
+    runFree: (_w, input) => { if (busy) return { state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" }; started.push(input); return { state: "started", taskId: input.taskId }; },
+    fetch: { isPublicHost: async () => true,
+      fetchImpl: (async () => new Response(fetched.shift() ?? "<html><title>x</title><body>same</body></html>", { status: 200, headers: { "content-type": "text/html" } })) as typeof fetch }
+  });
+  return { store, workspaceId, started, deps, setBusy: (value: boolean) => { busy = value; }, setNow: (value: Date) => { now = value; } };
+}
+const install = (store: CrosslineStore, workspaceId: string, automation: Partial<Automation>) => {
+  const base: Automation = { id: "auto-test1", name: "测试", summary: "", lineId: "research", status: "active", runs: 0,
+    trigger: { type: "interval", hours: 4 }, action: { kind: "run", instructions: "整理新文件并写一份索引", category: "read_research_organize", outputs: [] },
+    steps: [{ title: "整理", by: "assistant" }], origin: { kind: "asked", text: "x", requestId: "r" }, createdAt: "2026-10-19T00:00:00.000Z", updatedAt: "2026-10-19T00:00:00.000Z" };
+  store.setSetting(workspaceId, AUTOMATIONS_SETTING, JSON.stringify([...readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING)), { ...base, ...automation }]));
+};
+
+test("a plan is checked: a step that sends is the person's, a watch needs a public https page, the schedule is read from words", () => {
+  const checked = validateAutomationPlan(plan(), ["research"]);
+  expect(checked.trigger).toEqual({ type: "schedule", schedule: { type: "daily", time: "08:00" } });
+  // Replying leaves Crossline: it is the person's, whatever the plan said.
+  expect(checked.steps[1]).toEqual({ title: "回复老师的邮件", by: "person" });
+  expect(validateAutomationPlan(plan({ steps: [{ title: "把清单发送给导师", by: "assistant" }] }), ["research"]).steps[0]!.by).toBe("person");
+  expect(validateAutomationPlan(plan({}, { days: "MO,FR" }), ["research"]).trigger).toEqual({ type: "schedule", schedule: { type: "weekly", days: ["MO", "FR"], time: "08:00" } });
+  expect(() => validateAutomationPlan(plan({}, { type: "watch", url: "http://127.0.0.1/admin" }), ["research"])).toThrow(/AUTOMATION_PLAN_INVALID/);
+  expect(() => validateAutomationPlan(plan({ lineId: "nope" }), ["research"])).toThrow(/AUTOMATION_PLAN_INVALID/);
+});
+
+test("a request in words becomes an active automation, its kind of work is allowed by the request, and the person is told how it was read", async () => {
+  const { store, workspaceId, deps } = setup();
+  requestAutomation(store, workspaceId, "每天早上八点把邮箱里和课程有关的整理成清单", "research", "user-1");
+  const { rpc } = fakeRuntime([JSON.stringify(plan({ assumptions: "按每天 08:00 理解" }))], AUTOMATION_DESIGNER_SKILL);
+  const designed = await designPending(deps(() => rpc), workspaceId);
+  expect(designed[0]).toMatchObject({ state: "created" });
+  const [automation] = readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING));
+  expect(automation).toMatchObject({ status: "active", name: "课程邮件整理", origin: { kind: "asked" } });
+  expect(readCategories(store, workspaceId).read_research_organize).toBeTruthy();
+  // Designed once: a second pass finds nothing waiting.
+  expect(await designPending(deps(() => rpc), workspaceId)).toEqual([]);
+});
+
+test("a schedule fires once at its time; an interval after its hours; a busy assistant queues the firing for the next tick", async () => {
+  const { store, workspaceId, deps, started, setBusy, setNow } = setup(new Date("2026-10-19T13:05:00Z"));
+  install(store, workspaceId, { id: "auto-sched", trigger: { type: "schedule", schedule: { type: "daily", time: "08:00" } } });
+  expect((await automationPass(deps(), workspaceId)).map((run) => run.state)).toEqual(["started"]);
+  expect(started[0]!.title).toBe("自动化「测试」");
+  expect(started[0]!.what).toContain("到了设定时间");
+  expect(await automationPass(deps(), workspaceId)).toEqual([]);
+  install(store, workspaceId, { id: "auto-every", trigger: { type: "interval", hours: 4 }, createdAt: "2026-10-19T08:00:00.000Z" });
+  setBusy(true);
+  setNow(new Date("2026-10-19T13:30:00Z"));
+  expect((await automationPass(deps(), workspaceId)).map((run) => run.state)).toEqual(["queued"]);
+  setBusy(false);
+  // Only the queued firing goes; the interval does not fire twice for one due time.
+  const next = await automationPass(deps(), workspaceId);
+  expect(next.map((run) => `${run.automationId}:${run.state}`)).toEqual(["auto-every:started"]);
+});
+
+test("new mail matching a filter fires the automation with the messages as input; other mail does not", async () => {
+  const { store, workspaceId, deps, started } = setup();
+  install(store, workspaceId, { id: "auto-mail", trigger: { type: "mail", from: "uni.edu", keywords: ["HW"] } });
+  const mail = (uid: number, subject: string, from = "Prof Lin <lin@uni.edu>") => ({ uid, subject, from, fromAddress: "", to: "", date: "2026-10-19T08:00:00.000Z", snippet: "", accountId: "a1" });
+  expect(onNewMail(store, workspaceId, [mail(1, "Lunch?", "friend@x.com"), mail(2, "Seminar")])).toBe(0);
+  expect(onNewMail(store, workspaceId, [mail(3, "HW2 posted"), mail(4, "Lunch?", "friend@x.com")])).toBe(1);
+  await automationPass(deps(), workspaceId);
+  expect(started[0]!.what).toContain("id a1:3");
+  expect(started[0]!.what).not.toContain("Lunch");
+});
+
+test("a watched page: the first read is the baseline, a change fires with the new lines, and nothing fires while it stays the same", async () => {
+  const { store, workspaceId, deps, started, setNow } = setup(new Date("2026-10-19T08:00:00Z"));
+  install(store, workspaceId, { id: "auto-watch", trigger: { type: "watch", url: "https://course.example.edu/ece555", hours: 6 } });
+  const same = "<html><body>HW1 due Oct 28</body></html>";
+  await automationPass(deps(undefined, [same]), workspaceId);
+  expect(started).toHaveLength(0);
+  setNow(new Date("2026-10-19T15:00:00Z"));
+  await automationPass(deps(undefined, [same]), workspaceId);
+  expect(started).toHaveLength(0);
+  setNow(new Date("2026-10-19T22:00:00Z"));
+  await automationPass(deps(undefined, ["<html><body>HW1 due Oct 28\nHW2 due Nov 11</body></html>"]), workspaceId);
+  expect(started).toHaveLength(1);
+  expect(started[0]!.what).toContain("HW2 due Nov 11");
+});
+
+test("a day's runs are capped whatever fires them, and a reminder is said without starting the assistant", () => {
+  const { store, workspaceId, deps, started } = setup();
+  install(store, workspaceId, { id: "auto-cap" });
+  const automation = readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING))[0]!;
+  for (let i = 0; i < 6; i += 1) fire(deps(), workspaceId, automation, { reason: "test", context: "" });
+  expect(fire(deps(), workspaceId, automation, { reason: "test", context: "" }).state).toBe("skipped");
+  expect(started).toHaveLength(6);
+  install(store, workspaceId, { id: "auto-remind", action: { kind: "remind", text: "交周报" } });
+  const remind = readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING)).find((item) => item.id === "auto-remind")!;
+  expect(fire(deps(), workspaceId, remind, { reason: "到点", context: "" }).state).toBe("reminded");
+  expect(started).toHaveLength(6);
+  expect(JSON.parse(store.getSetting(workspaceId, AUTOMATION_RUNS_SETTING)!).at(-1)).toMatchObject({ automationId: "auto-remind", state: "reminded" });
+});

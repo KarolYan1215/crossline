@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createReminderWorkflow, requestWorkflow, reviewAgentTask } from "@crossline/db";
+import { createReminderWorkflow, requestAutomation, reviewAgentTask } from "@crossline/db";
 import { ACTIONS, describeEvent, scheduleLabel, templateCriterion, windowDays, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
 import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, getStore, saveMilestoneTemplate,
@@ -117,10 +117,11 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     // No line, no guess: the first line is not a default (a media request filed under research was grown in research's way).
     const target = line;
     if (!target) return { ok: false, code: "LINE_REQUIRED", message: "请说明这件事服务哪条主线" };
-    requestWorkflow(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
-    // Grown now, not at the worker's next tick; a worker that is down picks it up when it is back.
-    void requestCodexSupervisor(ctx, "/v1/workflows/grow", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
-    return { ok: true, message: "已交给助手建成工作流，建好后会通知；发出、发布一类的步骤仍由本人完成", href: "/settings#skills" };
+    // An automation for every account (docs/personal-agent.md, 2026-10-19): the worker designs it from the words now — a trigger it
+    // watches and what the assistant does each time — and says when it is ready. A worker that is down takes it up when it is back.
+    requestAutomation(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
+    void requestCodexSupervisor(ctx, "/v1/automations/design", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
+    return { ok: true, message: "已交给助手建成自动化，建好后会通知，并说明它按什么条件运行；发出、发布一类的步骤仍由本人完成", href: "/settings#automation" };
   },
   "proposal.decide": (ctx, args) => {
     if (args.decision !== "approve") return archiveWorkOrder(ctx, args.workOrderId, args.reason.trim() || "在输入框中拒绝");

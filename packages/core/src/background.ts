@@ -6,14 +6,14 @@
 export type BackgroundKind = "intake" | "planning" | "tutorials" | "assistant" | "research" | "nightly";
 
 export const BACKGROUND_KINDS: ReadonlyArray<{ kind: BackgroundKind; label: string; explained: string; skills: readonly string[] }> = [
-  { kind: "intake", label: "收集分析与日历归类", explained: "把写下的事整理成任务，把日历事件和授权的文件夹归到主线",
-    skills: ["crossline-automation-stripper", "crossline-calendar-classifier", "crossline-folder-classifier"] },
+  { kind: "intake", label: "收集分析、日历与邮件归类", explained: "把写下的事整理成任务，把日历事件和授权的文件夹归到主线，把新邮件里的待办和日期放进收件箱",
+    skills: ["crossline-automation-stripper", "crossline-calendar-classifier", "crossline-folder-classifier", "crossline-mail-triage"] },
   { kind: "planning", label: "拆分与步骤规划", explained: "从里程碑倒推任务、给任务排步骤、复核与改写",
     skills: ["crossline-goal-backplanner", "crossline-step-planner", "crossline-validation-reviewer", "crossline-progress-judge", "crossline-goal-splitter",
       "crossline-task-titler", "crossline-archetype-curator", "crossline-milestone-architect", "crossline-milestone-risk-reviewer", "crossline-artifact-planner", "crossline-background-facts"] },
   { kind: "tutorials", label: "任务教程", explained: "为 48 小时内要做的任务查资料、写教程",
     skills: ["crossline-manualbook-designer", "crossline-material-researcher", "crossline-material-writer"] },
-  { kind: "assistant", label: "助手代办", explained: "助手代为完成准备类杂事", skills: ["crossline-agent"] },
+  { kind: "assistant", label: "助手代办与自动化", explained: "助手代为完成准备类杂事，按时或按触发条件跑本人设的自动化", skills: ["crossline-agent", "crossline-agent-tools", "crossline-automation-designer"] },
   { kind: "research", label: "主线调研", explained: "每周为每条主线上网调研一次，并对照研究复核精力时段建议", skills: ["crossline-due-diligence", "crossline-energy-advisor"] },
   { kind: "nightly", label: "夜间飞轮", explained: "夜里找跨主线可以互相促进的地方", skills: ["crossline-flywheel-scout"] }
 ];

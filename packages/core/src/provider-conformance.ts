@@ -7,6 +7,8 @@ import { BACKPLAN_SCHEMA } from "./backplan-schema";
 import { CALENDAR_CLASSIFICATION_SCHEMA } from "./calendar-lines";
 import { FOLDER_LINES_SCHEMA } from "./source-folders";
 import { CONCIERGE_SCHEMA } from "./concierge";
+import { MAIL_TRIAGE_SCHEMA } from "./mail";
+import { AUTOMATION_PLAN_SCHEMA } from "./automations";
 import { DATE_EXTRACTION_SCHEMA } from "./date-schema";
 import { DILIGENCE_OUTPUT_SCHEMA } from "./diligence-schema";
 import { ENERGY_ADVICE_REVIEW_SCHEMA } from "./energy-advice";
@@ -86,7 +88,9 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-plan-explainer": { label: "排程说明", schemas: ["PLAN_EXPLAINER_OUTPUT_SCHEMA"] },
   "crossline-agent": { label: "电脑上的助手", schemas: ["AGENT_SUMMARY_SCHEMA"], shell: true },
   // The assistant without a shell (docs/personal-agent.md): Crossline's own functions, on any model that can call them.
-  "crossline-agent-tools": { label: "助手", schemas: ["AGENT_SUMMARY_SCHEMA"], tools: true }
+  "crossline-agent-tools": { label: "助手", schemas: ["AGENT_SUMMARY_SCHEMA"], tools: true },
+  "crossline-mail-triage": { label: "邮件整理", schemas: ["MAIL_TRIAGE_SCHEMA"] },
+  "crossline-automation-designer": { label: "自动化设计", schemas: ["AUTOMATION_PLAN_SCHEMA"] }
 };
 
 export const skillKey = (skill: string) => skill.replace(/^crossline:/, "");
@@ -140,8 +144,8 @@ const DEEP_SCHEMA = level(level(level({ type: "object", additionalProperties: fa
   properties: { leaf: { type: "string", minLength: 1, maxLength: 80 }, done: { type: "boolean" } } }, "steps"), "tasks"), "milestones");
 
 const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
-  AGENT_SUMMARY_SCHEMA, ANALYSIS_OUTPUT_SCHEMA, ARCHETYPE_CURATION_SCHEMA, ARTIFACT_PLAN_SCHEMA, BACKGROUND_FACTS_OUTPUT_SCHEMA, BACKPLAN_SCHEMA,
-  CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, ENERGY_ADVICE_REVIEW_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, GOAL_SPLIT_SCHEMA,
+  AGENT_SUMMARY_SCHEMA, ANALYSIS_OUTPUT_SCHEMA, AUTOMATION_PLAN_SCHEMA, ARCHETYPE_CURATION_SCHEMA, ARTIFACT_PLAN_SCHEMA, BACKGROUND_FACTS_OUTPUT_SCHEMA, BACKPLAN_SCHEMA,
+  CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, MAIL_TRIAGE_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, ENERGY_ADVICE_REVIEW_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, GOAL_SPLIT_SCHEMA,
   MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MILESTONE_RISK_SCHEMA, MINE_SKILL_SCHEMA,
   ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA
@@ -256,8 +260,18 @@ export function conformanceCurrent(record: ConformanceRecord | undefined, model:
  * the extraction now write apart (2026-10-19), so a provider that passed it is not shut out of the interview until it is tested again.
  */
 const LEGACY_CASES: Record<string, string> = { ONBOARDING_TURN_SCHEMA: "ONBOARDING_DIALOGUE_SCHEMA|ONBOARDING_EXTRACT_SCHEMA" };
-const caseRuns = (record: ConformanceRecord) => record.runs.flatMap((run) => LEGACY_CASES[run.caseId]
-  ? LEGACY_CASES[run.caseId]!.split("|").map((caseId) => ({ ...run, caseId })) : [run]);
+/**
+ * A schema added after a model was measured, and the measured schema of the same shape that stands for it until the next measurement
+ * runs it for real (mail sorting: a flat list of small objects with an enum and short strings, like calendar filing; an automation plan: nested objects and a list of them, like the input box's answer): a new Skill is not withheld from every provider for
+ * weeks because its record is older than the Skill. A record that ran the new schema itself is judged on those runs only.
+ */
+export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA", AUTOMATION_PLAN_SCHEMA: "CONCIERGE_SCHEMA" };
+const caseRuns = (record: ConformanceRecord) => {
+  const runs = record.runs.flatMap((run) => LEGACY_CASES[run.caseId] ? LEGACY_CASES[run.caseId]!.split("|").map((caseId) => ({ ...run, caseId })) : [run]);
+  const proxied = Object.entries(SCHEMA_PROXIES).filter(([schema]) => !runs.some((run) => run.caseId === schema))
+    .flatMap(([schema, proxy]) => runs.filter((run) => run.caseId === proxy).map((run) => ({ ...run, caseId: schema })));
+  return [...runs, ...proxied];
+};
 
 export function admittedSkills(record: ConformanceRecord, capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES): string[] {
   const all = caseRuns(record);
