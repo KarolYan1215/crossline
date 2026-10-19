@@ -74,7 +74,13 @@ fi
 if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.2=8:28:1024:2,zai-org/GLM-5.3=8:28:1024:2,deepseek-ai/DeepSeek-V4-Pro=12:24:1024:1,zai-org/GLM-5.3-Flash=0.8:2.8:1024:0.23,deepseek-ai/DeepSeek-V4-Flash=3:9:1024:0.3$" /srv/crossline/app.env 2>/dev/null; then
   drop /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS
 fi
-ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.3-Flash=0.8:2.8:1024:0.23,Qwen/Qwen3.5-122B-A10B=0.8:6.4:262,Qwen/Qwen3.5-27B=0.6:4.8:262,Qwen/Qwen3.5-35B-A3B=0.4:3.2:262,stepfun-ai/Step-3.5-Flash=0.7:2.1:262,inclusionAI/Ling-flash-2.0=1:4:131"
+# The owner stopped the measurement of the last two on 2026-10-19 (Qwen3.5-27B at 31 of 45 runs, Step-3.5-Flash at 9 of 45 with three
+# minutes a run; both behind GLM-5.3-Flash on pass rate, cost and p95 so far), and Ling-flash-2.0 had been stopped early: the list is the
+# four measured whole.
+if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.3-Flash=0.8:2.8:1024:0.23,Qwen/Qwen3.5-122B-A10B=0.8:6.4:262,Qwen/Qwen3.5-27B=0.6:4.8:262,Qwen/Qwen3.5-35B-A3B=0.4:3.2:262,stepfun-ai/Step-3.5-Flash=0.7:2.1:262,inclusionAI/Ling-flash-2.0=1:4:131$" /srv/crossline/app.env 2>/dev/null; then
+  drop /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS
+fi
+ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.3-Flash=0.8:2.8:1024:0.23,Qwen/Qwen3.5-122B-A10B=0.8:6.4:262,Qwen/Qwen3.5-35B-A3B=0.4:3.2:262"
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MONTHLY_CNY 30
 if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_SPONSOR_API_KEY=." /srv/crossline/app.env; then
   key=$(grep "^ASSESS_TEXT_API_KEY=" /srv/assess/assess.env 2>/dev/null | cut -d= -f2-)
