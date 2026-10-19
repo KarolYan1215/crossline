@@ -34,9 +34,14 @@ export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "start
   return { label: "画像访谈还剩约", minutes: left * 5 };
 }
 
+/** Codes that mean no model can run for this account yet: the conversation already says so in the same words, under the reply. */
+const NO_MODEL = new Set(["MODEL_SPONSOR_PENDING", "MODEL_SPONSOR_BUDGET", "RUNTIME_UNCONNECTED", "MODEL_NOT_ADMITTED", "MODEL_CAPABILITY_MISSING"]);
+
 /** What the background extraction is doing, in a line, or nothing when it is caught up. */
 export function organizingNote(organizing: OnboardingState["organizing"]): string {
   if (!organizing || (!organizing.replies && !organizing.files)) return "";
+  // 「系统会自动重试；访谈可以继续」 beside a round that could not run either was wrong on both counts (live beta, 2026-10-19).
+  if (organizing.failing && NO_MODEL.has(organizing.failing.code)) return "";
   if (organizing.failing) return "刚才的回答还没整理进记录，系统会自动重试；访谈可以继续。";
   return organizing.files && !organizing.replies ? `正在整理 ${organizing.files} 份材料…` : "正在整理刚才的回答…";
 }

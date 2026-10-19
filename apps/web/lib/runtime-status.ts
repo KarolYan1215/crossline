@@ -2,7 +2,7 @@ import type { AccessContext } from "@crossline/core";
 import { requestCodexSupervisor } from "./codex-runtime";
 
 /** Why the AI cannot work at all right now, or null when it can. An error to show, not a decision: it is never one of the asks. */
-export type RuntimeStatus = { code: "worker_down" | "signed_out"; title: string; message: string };
+export type RuntimeStatus = { code: "worker_down" | "signed_out" | "sponsor_waiting"; title: string; message: string };
 
 let cached: { workspaceId: string; at: number; status: RuntimeStatus | null } | undefined;
 
@@ -18,16 +18,22 @@ export async function runtimeStatus(ctx: AccessContext, now = Date.now()): Promi
     .then((value) => ({ ok: true as const, value })).catch(() => ({ ok: false as const })), timeout]);
   // With no ChatGPT sign-in, another model's API that serves anything is a connection too (decided 2026-10-17): what it does not serve
   // is said on its own card, not as a red bar on every page.
-  const viaApi = account !== "timeout" && account.ok && !account.value.account
-    ? await requestCodexSupervisor<{ features?: Array<{ served: boolean }> }>(ctx, "/v1/model/provider")
-      .then((view) => Boolean(view.features?.some((feature) => feature.served))).catch(() => false)
-    : false;
+  type ProviderView = { features?: Array<{ served: boolean }>; sponsorBlocked?: { code: string; message: string } | null };
+  const view = account !== "timeout" && account.ok && !account.value.account
+    ? await requestCodexSupervisor<ProviderView>(ctx, "/v1/model/provider").catch(() => undefined)
+    : undefined;
+  const viaApi = Boolean(view?.features?.some((feature) => feature.served));
+  // An invited account is connected to the developer's model; while that model is still being checked, or its month is spent, the
+  // bar says so in the sponsor's own words instead of sending the person to connect something (found on the live beta, 2026-10-19).
+  const sponsorWait = viaApi ? undefined : view?.sponsorBlocked ?? undefined;
   const status: RuntimeStatus | null = account === "timeout" || !account.ok
     ? { code: "worker_down", title: "后台服务没有运行",
       message: "自动分析、倒推、材料准备、验收与提醒都已停止；已收集的内容不受影响。在运行 Crossline 的那台电脑上重新启动后恢复。" }
-    : !account.value.account && !viaApi
-      ? { code: "signed_out", title: "还没有连接模型", message: "访谈、自动分析、倒推、材料准备与验收都要用它；用本人的 ChatGPT 账号或自己的模型 API 连接一次即可。" }
-      : null;
+    : !account.value.account && sponsorWait
+      ? { code: "sponsor_waiting", title: sponsorWait.code === "MODEL_SPONSOR_BUDGET" ? "本月邀请额度已用完" : "邀请码已生效，模型还在检验", message: sponsorWait.message }
+      : !account.value.account && !viaApi
+        ? { code: "signed_out", title: "还没有连接模型", message: "访谈、自动分析、倒推、材料准备与验收都要用它；用本人的 ChatGPT 账号或自己的模型 API 连接一次即可。" }
+        : null;
   cached = { workspaceId: ctx.workspaceId, at: now, status };
   return status;
 }

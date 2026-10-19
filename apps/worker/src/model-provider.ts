@@ -183,7 +183,8 @@ export function createModelProviderService(options: {
     return { provider: provider ?? null, presets: PROVIDER_PRESETS, unavailable: unavailableOnThirdParty(capabilities), signedIn: options.signedIn(workspaceId),
       conformance: record ? { ranAt: record.ranAt, model: record.model, passRate: record.passRate, repairRate: record.repairRate, p95Ms: record.p95Ms,
         runs: record.runs.length, failures: record.failures, current: Boolean(valid) } : null,
-      features, testing: testing.get(workspaceId) ?? null, sponsor: options.sponsor?.()?.view(workspaceId) ?? null };
+      features, testing: testing.get(workspaceId) ?? null, sponsor: options.sponsor?.()?.view(workspaceId) ?? null,
+      sponsorBlocked: sponsored?.blocked ?? null };
   };
 
   async function save(workspaceId: string, body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
