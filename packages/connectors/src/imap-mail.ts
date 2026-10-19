@@ -87,8 +87,23 @@ async function textOf(source: Buffer | undefined): Promise<string> {
   } catch { return ""; }
 }
 
-export function createImapMail(server: MailServer, user: string, password: string, factory: ImapFactory = realFactory,
+/**
+ * Why a sign-in was refused, in words the person can act on. Gmail says which of three things went wrong in its response text: its normal
+ * password used where an app password is needed, a sign-in from a new place held until the person confirms it in a browser, or an app
+ * password that does not match; the generic line stays for every other server.
+ */
+export function signInRefusal(text: string, host: string): string {
+  const gmail = /(^|\.)gmail\.com$|googlemail\.com$/i.test(host);
+  if (/application-specific password required/i.test(text)) return "Gmail 要求应用专用密码，填的是 Google 登录密码。先开两步验证，再到 myaccount.google.com/apppasswords 生成一个 16 位密码填进来。";
+  if (/WEBALERT|log ?in via your web browser|web login required/i.test(text)) return "Gmail 拦下了这次登录（来自新的地点）。在浏览器里登录一次 Gmail，按提示确认是你本人，然后再接入。";
+  if (gmail) return "Gmail 不认这个密码：要用 16 位的应用专用密码（myaccount.google.com/apppasswords 生成），不是 Google 登录密码；复制时空格可以带着。";
+  return "邮箱拒绝了登录：多半是没开 IMAP，或填的是登录密码而不是应用专用密码 / 授权码。";
+}
+
+export function createImapMail(server: MailServer, user: string, rawPassword: string, factory: ImapFactory = realFactory,
   resolve: (host: string) => Promise<string | undefined> = publicAddressOf) {
+  // Google shows an app password as four groups of four letters; the spaces are not part of it.
+  const password = /(^|\.)gmail\.com$|googlemail\.com$/i.test(server.host) ? rawPassword.replace(/\s+/g, "") : rawPassword;
   /**
    * One connection per call, INBOX opened read-only, always logged out. The host is resolved first and the connection made to that
    * checked public address (the certificate still checked against the name), so a name pointing inside cannot be used to probe it.
@@ -124,9 +139,12 @@ export function createImapMail(server: MailServer, user: string, password: strin
       catch (error) {
         const code = (error as { code?: string }).code;
         if (code === "MAIL_HOST_INVALID" || code === "MAIL_PORT_INVALID") return { ok: false, code: "MAIL_UNREACHABLE", message: (error as Error).message };
-        const text = error instanceof Error ? `${error.message} ${(error as { responseText?: string }).responseText ?? ""}` : String(error);
-        if (/auth|login|credential|password|invalid|denied|LOGIN|AUTHENTICATIONFAILED/i.test(text) && !/ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(text)) {
-          return { ok: false, code: "MAIL_AUTH_FAILED", message: "邮箱拒绝了登录：多半是没开 IMAP，或填的是登录密码而不是应用专用密码 / 授权码。" };
+        // imapflow puts the server's own words in `response` (a string after a refused LOGIN), its code in `serverResponseCode`.
+        const detail = error as { responseText?: string; response?: unknown; serverResponseCode?: string; authenticationFailed?: boolean };
+        const text = error instanceof Error ? [error.message, detail.responseText, typeof detail.response === "string" ? detail.response : "", detail.serverResponseCode]
+          .filter(Boolean).join(" ") : String(error);
+        if (detail.authenticationFailed || (/auth|login|credential|password|invalid|denied|LOGIN|AUTHENTICATIONFAILED/i.test(text) && !/ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(text))) {
+          return { ok: false, code: "MAIL_AUTH_FAILED", message: signInRefusal(text, server.host) };
         }
         return { ok: false, code: "MAIL_UNREACHABLE", message: "连不上邮箱服务器，请检查服务器地址。" };
       }

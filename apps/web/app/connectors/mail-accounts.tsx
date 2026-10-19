@@ -75,7 +75,7 @@ export function MailAccounts() {
     </form>
     <details className="advanced"><summary>怎么拿到应用专用密码或授权码</summary>
       <ul className="st-list">
-        <li>Gmail：Google 账号 → 安全 → 两步验证 → 应用专用密码</li>
+        <li>Gmail：先开两步验证，再打开 <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">myaccount.google.com/apppasswords</a> 生成 16 位应用专用密码</li>
         <li>QQ / 163 / 126：邮箱设置里开启 IMAP，生成授权码</li>
         <li>iCloud：appleid.apple.com → App 专用密码</li>
         <li>Outlook / Hotmail 已不允许用密码读取，暂不支持</li>

@@ -78,3 +78,23 @@ test("a host that resolves inside, or another port, is never connected to", asyn
   expect(["127.0.0.1", "10.1.2.3", "169.254.169.254", "172.20.0.1", "192.168.1.1", "::1", "fd00::1", "::ffff:127.0.0.1"].every(privateAddress)).toBe(true);
   expect(privateAddress("142.250.1.109")).toBe(false);
 });
+
+test("Gmail's three refusals are told apart from its own words, and an app password's spaces are not part of it", async () => {
+  // imapflow sets `authenticationFailed` and puts the server's text in `response` after a refused LOGIN.
+  const refusing = (response: string): ImapFactory => () => ({ ...server().factory({} as never),
+    connect: async () => { throw Object.assign(new Error("Command failed"), { authenticationFailed: true, response }); } });
+  const gmail = { host: "imap.gmail.com", port: 993, secure: true };
+  const said = async (response: string) => ((await createImapMail(gmail, "me@gmail.com", "pw", refusing(response)).check()) as { message: string }).message;
+  expect(await said("[ALERT] Application-specific password required: https://support.google.com/accounts/answer/185833 (Failure)")).toContain("要求应用专用密码");
+  expect(await said("[WEBALERT https://accounts.google.com/signin/continue?...] Web login required.")).toContain("拦下了这次登录");
+  expect(await said("[AUTHENTICATIONFAILED] Invalid credentials (Failure)")).toContain("Gmail 不认这个密码");
+  // Another server keeps the general line.
+  expect(((await createImapMail({ host: "imap.qq.com", port: 993, secure: true }, "me@qq.com", "pw", refusing("Invalid credentials")).check()) as { message: string }).message)
+    .toContain("授权码");
+  // Google shows the app password as four groups of four; it is signed in with without the spaces.
+  const used: string[] = [];
+  const recording: ImapFactory = (options) => { used.push(String((options.auth as { pass?: string }).pass)); return server().factory(options); };
+  await createImapMail(gmail, "me@gmail.com", "abcd efgh ijkl mnop", recording).check();
+  await createImapMail({ host: "imap.qq.com", port: 993, secure: true }, "me@qq.com", "ab cd", recording).check();
+  expect(used).toEqual(["abcdefghijklmnop", "ab cd"]);
+});
