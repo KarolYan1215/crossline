@@ -9,7 +9,7 @@ import {
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
 import {
-  EXTRACT_REREAD_SETTING, firstSentenceOf, interviewChecklistFor, interviewGapsFor, queueExtractDocs, questionScreenFor, readExtractDocs, unfiledFilesIn,
+  EXTRACT_REREAD_SETTING, extractBacklog, firstSentenceOf, markFinishing, interviewChecklistFor, interviewGapsFor, queueExtractDocs, questionScreenFor, readExtractDocs, unfiledFilesIn,
   type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument
 } from "@crossline/db";
 import { sourceIds } from "./source-ids";
@@ -26,6 +26,8 @@ const SOURCE_TEXT_PER_DOCUMENT = 14_000;
 const SOURCE_TEXT_TOTAL = 60_000;
 /** New files one turn reads at most; more wait for the next turn. */
 const SOURCES_PER_TURN = 12;
+/** How long the round that ends the interview waits for the extraction before the portrait's items stop holding it. */
+const FINISH_WAIT_MS = 90_000;
 /** How long a round with a blocking app question waits for the extraction of the reply it may answer. */
 const BLOCKING_WAIT_MS = 30_000;
 /** Facts the extraction recorded since the last turn, at most this many lines in `recorded`. */
@@ -95,7 +97,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   const checklistNow = () => interviewChecklistFor(store, workspaceId, identityLines(store, workspaceId)
     .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: unfiled().length, today: todayIso() });
   // Start items first, then what the interview itself still owes; a project's details are deferred (asked when its task is planned).
-  const openChecklist = (limit = 8) => checklistNow().filter((item) => !item.done && !item.deferred).sort((a, b) => Number(Boolean(b.start)) - Number(Boolean(a.start)))
+  const openChecklist = (limit = 8, skip: (item: { group: string }) => boolean = () => false) => checklistNow()
+    .filter((item) => !item.done && !item.deferred && !skip(item)).sort((a, b) => Number(Boolean(b.start)) - Number(Boolean(a.start)))
     .slice(0, limit).map(({ label, detail, owner, start }) => ({ label, detail, owner, ...(start ? { start } : {}) }));
   /** Whether a start item is still open: then the front stages do not move on. */
   const startOpen = () => checklistNow().some((item) => item.start && !item.done);
@@ -355,7 +358,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // The checklist and the app's questions are read after the extraction when the round would end the interview (so a fact this reply
     // gave is on record), or always when asked to wait; otherwise from what the ledger held, and what this reply settled joins next round.
     if (extractMode === "await") await extraction.catch(() => undefined);
-    if (extractMode === "await" || result.output.nextAction === "ready_for_milestones") await caughtUp();
+    // The dialogue says the interview can end: the extraction finalizes every deep section and writes the synthesis on its next run.
+    if (result.output.nextAction === "ready_for_milestones" && !focusLine && extractMode !== "off") markFinishing(store, workspaceId, sessionId);
+    // A round that would end the interview waits for the extraction, but not without end: on a slow model a run takes minutes and the
+    // deep stages' replies queue behind each other (2026-10-19: the last round took ten minutes). What is still being written is the
+    // portrait, which no question can settle, so after `FINISH_WAIT_MS` the portrait's items no longer hold the end.
+    const ending = result.output.nextAction === "ready_for_milestones";
+    if (extractMode === "await") await caughtUp();
+    else if (ending) await caughtUp(FINISH_WAIT_MS);
     // An app question that blocks is asked every round until answered: when this reply may have answered it in prose, the round waits a
     // little for the extraction, so it is not asked again right under the answer.
     else if (currentGaps().some((gap) => gap.blocking)) await caughtUp(BLOCKING_WAIT_MS);
@@ -373,9 +383,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const gapsNow = currentGaps().filter((gap) => !repeated.coveredGaps.has(gap.question.id));
     const paced = paceDeepRound({ ...result.output, questions: repeated.questions }, Boolean(focusLine));
     const touched = { lines: recorded.identities, projects: recorded.projects, portrait: Boolean(readProfile().portrait) };
+    const stillWriting = ending && extractMode === "background" && extractBacklog(store, workspaceId, sessionId).replies > 0;
+    const owed = focusLine || options.checklist === false ? [] : openChecklist(Infinity, (item) => stillWriting && item.group === "画像");
     const output = withSomethingToAnswer(withChecklist(paced.deep ? paced.output
-      : withGapQuestions(paced.output, gapsNow, messages, { freshDocuments: sent.map(([, doc]) => doc.id), touched }),
-      focusLine || options.checklist === false ? [] : openChecklist(Infinity)), gapsNow, messages);
+      : withGapQuestions(paced.output, gapsNow, messages, { freshDocuments: sent.map(([, doc]) => doc.id), touched }), owed), gapsNow, messages);
     // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
     const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
       .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
@@ -394,6 +405,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         announcedSources: [...announcedNow, ...sent.map(([id]) => id)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}) },
       updatedAt: new Date().toISOString()
     });
+    // The synthesis is written by a run made after this one; the person does not wait for it.
+    if (output.nextAction === "ready_for_milestones" && !focusLine && extractMode !== "off") void ask().catch(() => undefined);
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };
   };
 }

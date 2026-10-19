@@ -39,7 +39,7 @@ Every round, write where the interview stands, judged from this round's answers 
 - **A long pasted profile or CV is material, not a finished interview.** The other run records every fact it states; you still walk each part and ask what it leaves out that the plan needs.
 - The app adds its own questions about what the round touches (a project's deadline, which project a new file belongs to, whether the portrait fits, how the person wants their cartoon figure to look); do not repeat them in other words. When the person describes their own appearance anyway, say once in `reply` that it is used only to draw their figure in the portrait report.
 - `identityId`/`projectId` on a question say what it is about; `""` for the person in general or across lines.
-- `reply` never mentions schemas, validation, ids or how this app works internally.
+- `reply` and `progress` never mention schemas, validation, ids, the other run (「记录侧」「整理层」) or how this app works internally.
 
 ## What `reply` says
 

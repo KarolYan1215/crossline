@@ -521,3 +521,13 @@ test("the progress record goes back to the model next round, and an observation 
   await run({ sessionId: "s", text: "还有别的吗" });
   expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: unknown }).insight).toBeUndefined();
 });
+
+test("the round that ends the interview marks it finishing, and the synthesis left to write does not turn the end into a question", async () => {
+  const { readFinishing } = await import("@crossline/db");
+  const { rpc } = fakeRuntime([turn({ stage: "energy", questions: [], nextAction: "ready_for_milestones" })]);
+  // The checklist is off for this runner's own items, so what is checked is that a missing synthesis alone never asks the person.
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off", checklist: false });
+  expect(await run({ sessionId: "s", text: "能量部分都答完了" })).toEqual({ state: "ready", sessionId: "s" });
+  // `off` leaves the extraction alone: nothing is marked for a run that will never come.
+  expect(readFinishing(store, workspaceId, "s")).toBeUndefined();
+});

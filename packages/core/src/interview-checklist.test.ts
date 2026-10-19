@@ -22,7 +22,7 @@ const full: ChecklistInput = {
 test("a complete record ticks every item, the portrait included", () => {
   const items = interviewChecklist(full);
   expect(items.filter((item) => !item.done)).toEqual([]);
-  expect(items.map((item) => item.id)).toEqual(["portrait_fields", "portrait_grounded", "portrait_confirmed", "line_desc:research", "line_goal:research",
+  expect(items.map((item) => item.id)).toEqual(["portrait_fields", "portrait_synthesis", "portrait_grounded", "portrait_confirmed", "line_desc:research", "line_goal:research",
     "hard_schedule:research", "availability", "line_project:research", "project:ece555", "files_filed"]);
 });
 

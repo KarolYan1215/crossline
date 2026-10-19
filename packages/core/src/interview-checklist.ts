@@ -64,8 +64,14 @@ const PORTRAIT_PARTS: Array<{ label: string; slots: RegExp }> = [
   { label: "能量与心流", slots: /flow|energy|drain|charge|anchor|behavio|habit/i }
 ];
 /** The portrait's written parts, each a field of the working profile. */
-const PORTRAIT_FIELDS: Array<[keyof ProfileModel, string]> = [["portrait", "一句话画像"], ["coreConflict", "核心矛盾"], ["problem", "真问题"],
+const PORTRAIT_FIELDS: Array<[keyof ProfileModel, string]> = [["problem", "真问题"],
   ["workView", "工作观"], ["lifeView", "人生观"], ["trueNorth", "正北"], ["says", "所说想要的"], ["does", "行为在维护的"]];
+/**
+ * The synthesis (one line and the core conflict) is written by the extraction once the three deep sections are final, after the dialogue
+ * ends the interview: no question can settle it, so it never holds the interview (2026-10-19: it was owed by the interview and the
+ * person was asked 「完成访谈前还缺：一句话画像、核心矛盾，请补充」).
+ */
+const SYNTHESIS_FIELDS: Array<[keyof ProfileModel, string]> = [["portrait", "一句话画像"], ["coreConflict", "核心矛盾"]];
 const isDefaultProject = (id: string) => /-default$/.test(id);
 /** A deadline the person said there is none of: an answer, and as good as a date for starting. */
 export const NO_DEADLINE = /没有截止|无截止|不设截止|no deadline/i;
@@ -85,6 +91,9 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   const energy = profile.energyMap ?? [];
   if (energy.length < 3 || !energy.some((item) => item.charge === "charge") || !energy.some((item) => item.charge === "drain")) missingFields.push("能量地图（至少 3 项，含充电与耗电）");
   items.push({ id: "portrait_fields", group: "画像", label: "画像各部分已写出", done: !missingFields.length, detail: missingFields.length ? `缺：${missingFields.join("、")}` : "", owner: "interview" });
+  const missingSynthesis = SYNTHESIS_FIELDS.filter(([key]) => !String(profile[key] ?? "").trim()).map(([, label]) => label);
+  items.push({ id: "portrait_synthesis", group: "画像", label: "画像综合段已写出", done: !missingSynthesis.length,
+    detail: missingSynthesis.length ? `整理中：${missingSynthesis.join("、")}` : "", owner: "interview", deferred: true });
   const personFacts = input.facts.filter((fact) => fact.identityId === "person" && settledFact(fact));
   const unbacked = PORTRAIT_PARTS.filter((part) => !personFacts.some((fact) => part.slots.test(fact.slot))).map((part) => part.label);
   const assumedParts = PORTRAIT_PARTS.filter((part) => !personFacts.some((fact) => confirmedFact(fact) && part.slots.test(fact.slot))).map((part) => part.label)

@@ -199,3 +199,22 @@ test("only replies to the opening and the front stages hold the start; a deep-st
   writeExtractState(store, workspaceId, "s", { upTo: 3, failures: 0 });
   expect(extractBacklog(store, workspaceId, "s")).toMatchObject({ replies: 1, frontReplies: 0 });
 });
+
+test("an interview the dialogue ended owes a run until the synthesis is written, at most twice, and that run finalizes every deep section", async () => {
+  const { markFinishing, FINISH_RUNS_MAX } = await import("@crossline/db");
+  const { prompts, rpc } = runtime([round], [facts(), facts()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  await run({ sessionId: "s", text: "能量部分答完了。" });
+  await extractionSettled(workspaceId);
+  const extractor = createOnboardingExtractor(store, workspaceId, "C:\\repo", () => rpc);
+  expect(extractor.nextSession()).toBeUndefined();
+  markFinishing(store, workspaceId, "s");
+  expect(extractor.nextSession()).toBe("s");
+  expect(await extractor.runOnce()).toMatchObject({ state: "done", replies: 0 });
+  // The run made for it asked for every deep section and the synthesis, though the stage never moved past energy.
+  const last = prompts().filter((prompt) => prompt.includes(EXTRACT)).at(-1)!;
+  expect(last).toMatch(/"finalize":\[[^\]]*"energy"/);
+  expect(last).toContain('"synthesize":true');
+  markFinishing(store, workspaceId, "s", FINISH_RUNS_MAX);
+  expect(extractor.nextSession()).toBeUndefined();
+});

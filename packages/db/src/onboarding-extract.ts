@@ -13,6 +13,22 @@ export const EXTRACT_STATE_SETTING = "onboarding.extract";
 export const EXTRACT_DOCS_SETTING = "onboarding.extract.docs";
 /** Set by a turn that re-reads every file; the next run takes it, and its dates replace the batch nobody answered. */
 export const EXTRACT_REREAD_SETTING = "onboarding.extract.reread";
+/**
+ * Set when the dialogue says the interview can end (2026-10-19): the extraction then finalizes every deep section and writes the
+ * synthesis, as it does for a completed interview. Without it the energy section, the last stage now that details is gone, was never
+ * past and never final, so the synthesis was never written and the checklist asked the person for 「一句话画像、核心矛盾」. The value
+ * counts the runs made for it; a run is made for it at most `FINISH_RUNS_MAX` times when nothing else waits.
+ */
+export const EXTRACT_FINISHING_SETTING = "onboarding.extract.finishing";
+export const FINISH_RUNS_MAX = 2;
+export function readFinishing(store: CrosslineStore, workspaceId: string, sessionId: string): { runs: number } | undefined {
+  const raw = store.getSetting(workspaceId, `${EXTRACT_FINISHING_SETTING}:${sessionId}`);
+  if (!raw) return undefined;
+  try { return { runs: Number((JSON.parse(raw) as { runs?: number }).runs ?? 0) }; } catch { return { runs: 0 }; }
+}
+export function markFinishing(store: CrosslineStore, workspaceId: string, sessionId: string, runs = 0): void {
+  store.setSetting(workspaceId, `${EXTRACT_FINISHING_SETTING}:${sessionId}`, JSON.stringify({ runs }));
+}
 /** Minutes to wait after the first, second and third failure in a row (and every later one). */
 export const EXTRACT_BACKOFF_MINUTES = [1, 5, 30] as const;
 

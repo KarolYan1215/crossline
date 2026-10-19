@@ -6,7 +6,7 @@ import {
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
-  EXTRACT_BACKOFF_MINUTES, EXTRACT_REREAD_SETTING, firstSentenceOf, pendingExtractDocs, readExtractDocs, readExtractState, writeExtractDocs, writeExtractState,
+  EXTRACT_BACKOFF_MINUTES, EXTRACT_REREAD_SETTING, FINISH_RUNS_MAX, markFinishing, readFinishing, firstSentenceOf, pendingExtractDocs, readExtractDocs, readExtractState, writeExtractDocs, writeExtractState,
   type CrosslineStore, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument
 } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -60,15 +60,21 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
    * The conversation to extract next: one the person just replied in (`preferred`, whatever its backoff), else the one whose replies
    * wait and are due, else the files' conversation when only files wait and it is due.
    */
+  // Written, or closed after its empty runs: the same test `portraitTask` uses for the synthesis.
+  const synthesized = () => sectionClosed(readSectionRecords(store, workspaceId).synthesis);
   const nextSession = (preferred: string[] = []): string | undefined => {
     const sessions = store.listOnboardingSessions(workspaceId);
     const waiting = (id: string) => store.listOnboardingMessages(workspaceId, id)
       .some((message) => message.role === "user" && message.seq > readExtractState(store, workspaceId, id).upTo);
     const due = (id: string) => { const retryAt = readExtractState(store, workspaceId, id).retryAt; return !retryAt || Date.parse(retryAt) <= Date.now(); };
-    const asked = preferred.find((id) => waiting(id) || (pendingExtractDocs(store, workspaceId).length > 0 && docsSession(id) === id));
+    // An interview the dialogue ended whose synthesis is not written yet still owes a run, even with nothing new to read.
+    const finishing = (id: string) => { const mark = readFinishing(store, workspaceId, id); return Boolean(mark && mark.runs < FINISH_RUNS_MAX && !synthesized()); };
+    const asked = preferred.find((id) => waiting(id) || (pendingExtractDocs(store, workspaceId).length > 0 && docsSession(id) === id) || finishing(id));
     if (asked) return asked;
     const replies = sessions.find((session) => waiting(session.id) && due(session.id));
     if (replies) return replies.id;
+    const owed = sessions.find((session) => finishing(session.id) && due(session.id));
+    if (owed) return owed.id;
     if (!pendingExtractDocs(store, workspaceId).length) return undefined;
     const files = docsSession();
     return files && due(files) ? files : undefined;
@@ -150,7 +156,9 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       const sentences = cite(ref, store.ensureEvidence(workspaceId, "document", doc.id, doc.extractedText).filter((sentence) => sentence.start < limit));
       return { id: ref, fileName: doc.fileName, kind: doc.kind, projectId: doc.projectId ?? "", sentences: numberedText(sentences) };
     });
-    if (!replies.length && !sources.length) return { state: "idle" };
+    // A run owed to an ended interview (`markFinishing`) reads nothing new: it finalizes the portrait from what is on record.
+    const finishing = readFinishing(store, workspaceId, sessionId);
+    if (!replies.length && !sources.length && !(finishing && finishing.runs < FINISH_RUNS_MAX)) return { state: "idle" };
 
     // Everything the run may look up: this conversation's replies and every file read, as numbered sentences in order.
     const corpus = (): Array<StoredSentence & { ref: string; label: string }> => [
@@ -166,7 +174,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* none yet */ }
     const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString().slice(0, 10);
     const stage = ((session?.coverage as { stage?: OnboardingStage } | undefined)?.stage ?? (focus ? "details" : "orientation"));
-    const profileTask = focus ? undefined : portraitTask(stage, session?.state === "complete", readSectionRecords(store, workspaceId));
+    const profileTask = focus ? undefined : portraitTask(stage, session?.state === "complete" || Boolean(finishing), readSectionRecords(store, workspaceId));
     const context: OnboardingExtractContext = {
       version: "crossline.onboarding.extract.v1", today, timeZone: personTimeZone(store, workspaceId),
       lines: lines.map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })),
@@ -225,6 +233,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       for (const [, doc] of taken) if (docs[doc.id] === takenAt[doc.id]) docs[doc.id] = firstSentenceOf(store, workspaceId, doc.id) ?? -1;
       writeExtractDocs(store, workspaceId, docs);
       writeExtractState(store, workspaceId, sessionId, { upTo, failures: 0, ranAt: new Date().toISOString() });
+      if (finishing) markFinishing(store, workspaceId, sessionId, finishing.runs + 1);
     });
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extracted:${sessionId}:${upTo}:${new Date().toISOString()}`, type: "onboarding.extracted",
       entityId: sessionId, payload: { replies: pendingReplies.length, files: taken.length, facts: result.output.slotUpdates.length,
