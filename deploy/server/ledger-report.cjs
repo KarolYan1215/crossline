@@ -37,3 +37,12 @@ for (const row of db.prepare("SELECT workspace_id, type, created_at, payload_jso
 try {
   for (const row of db.prepare("SELECT workspace_id, COUNT(*) AS n FROM task_step_plans GROUP BY workspace_id").all()) console.log(["step plans", row.workspace_id.slice(0, 8), row.n].join("  "));
 } catch (error) { console.log("step plans unreadable", String(error.message).slice(0, 120)); }
+
+// Mail: each sorting pass, the captures it wrote (title and state only; the context holds the sender and subject) and what became of them.
+for (const row of db.prepare("SELECT workspace_id, type, created_at, payload_json FROM events WHERE type IN ('mail.triaged', 'waiting.mail_seen') AND created_at >= ? ORDER BY created_at").all(since))
+  console.log([row.created_at.slice(5, 19), row.workspace_id.slice(0, 8), row.type, String(row.payload_json).slice(0, 200)].join("  "));
+for (const row of db.prepare("SELECT id, workspace_id, title, state, audit_json FROM captures WHERE id LIKE 'cap-mail-%'").all()) {
+  const audit = (() => { try { return JSON.parse(row.audit_json); } catch { return {}; } })();
+  const order = db.prepare("SELECT id, state FROM work_orders WHERE workspace_id = ? AND (id = ? OR payload_json LIKE ?)").get(row.workspace_id, row.id, `%${row.id}%`);
+  console.log(["mail capture", row.workspace_id.slice(0, 8), row.id, row.state, row.title.slice(0, 80), audit.blocker?.code ?? "", order ? `order ${order.id} ${order.state}` : "no order"].join("  "));
+}
