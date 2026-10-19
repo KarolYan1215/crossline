@@ -84,7 +84,9 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-energy-advisor": { label: "精力时段复核", schemas: ["ENERGY_ADVICE_REVIEW_SCHEMA"], webSearch: true },
   "crossline-background-facts": { label: "背景整理", schemas: ["BACKGROUND_FACTS_OUTPUT_SCHEMA"] },
   "crossline-plan-explainer": { label: "排程说明", schemas: ["PLAN_EXPLAINER_OUTPUT_SCHEMA"] },
-  "crossline-agent": { label: "电脑上的助手", schemas: ["AGENT_SUMMARY_SCHEMA"], shell: true }
+  "crossline-agent": { label: "电脑上的助手", schemas: ["AGENT_SUMMARY_SCHEMA"], shell: true },
+  // The assistant without a shell (docs/personal-agent.md): Crossline's own functions, on any model that can call them.
+  "crossline-agent-tools": { label: "助手", schemas: ["AGENT_SUMMARY_SCHEMA"], tools: true }
 };
 
 export const skillKey = (skill: string) => skill.replace(/^crossline:/, "");
@@ -115,7 +117,7 @@ export function unavailableOnThirdParty(capabilities: Pick<ProviderCapabilities,
   const missing = [capabilities.webSearch ? "" : "联网查证", capabilities.image ? "" : "画像插图"].filter(Boolean);
   return [missing.length ? `${missing.join("和")}在这台服务器上只在 ChatGPT 登录（或 OpenAI API key）下可用` : "联网查证和画像插图由 Crossline 自己完成，用哪个模型都可以",
     "日历用订阅链接接入，主线、事实和偏好记在 Crossline 自己的账本里，都和模型无关",
-    "电脑上的助手只在电脑主人自己的 Codex 上运行",
+    "助手在这里通过 Crossline 自己的功能读写文件、查网页和邮箱、跑自动化（不运行脚本；能运行脚本的助手只在电脑主人自己的 Codex 上）",
     "其余功能按检验结果开放。"].join("；");
 }
 

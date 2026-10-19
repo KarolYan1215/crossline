@@ -65,7 +65,9 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-background-facts": "low",
   "crossline-plan-explainer": "low",
   // The assistant that works on the person's machine: coding and multi-step work, so the strongest tier, and never stepped down.
-  "crossline-agent": "top"
+  "crossline-agent": "top",
+  // The assistant without a shell: reading, writing and organising through Crossline's functions, on any model.
+  "crossline-agent-tools": "mid"
 };
 
 /**

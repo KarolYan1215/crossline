@@ -161,7 +161,8 @@ let nextRuntimeId = 0;
 const runtimeKey = (client: object) => { if (!runtimeIds.has(client)) runtimeIds.set(client, ++nextRuntimeId); return runtimeIds.get(client)!; };
 function serializeSkillRun<T>(client: object, skillName: string, run: () => Promise<T>): Promise<T> {
   // The assistant gets a lane of its own: a task that runs for an hour must not hold the capture analysis or the gate behind it.
-  const lane = `${runtimeKey(client)}:${/crossline-agent$/.test(skillName) ? "agent" : tierForSkill(skillName) ?? "default"}`;
+  // The assistant without a shell too: it still waits for a model slot like any background run, but in a lane of its own.
+  const lane = `${runtimeKey(client)}:${/crossline-agent(-tools)?$/.test(skillName) ? "agent" : tierForSkill(skillName) ?? "default"}`;
   const previous = skillLanes.get(lane) ?? Promise.resolve();
   let release = () => {};
   skillLanes.set(lane, new Promise<void>((resolve) => { release = resolve; }));

@@ -154,7 +154,7 @@ export default async function SettingsPage() {
           {!machine && <p className="muted">{hosted
             ? "网页版不提供能在电脑上执行命令的助手，步骤都由本人完成；分析、拆分、规划和教程照常在自己的模型连接上运行。"
             : "这台电脑上的助手只为电脑主人工作，这个账号的步骤都由本人完成；分析、拆分与规划照常在自己的模型连接上运行。"}</p>}
-          <AutomationModule assistant={machine} paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} autoHandoff={isAutoHandoff(store, ctx.workspaceId)}
+          <AutomationModule toolsMode={!machine} paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} autoHandoff={isAutoHandoff(store, ctx.workspaceId)}
             categories={assistant.categories.map((item) => ({ category: item.category, label: item.label, explained: item.explained,
               mode: categoryMode(states[item.category]), cleanRuns: item.cleanRuns, runsToTrust: item.runsToTrust }))}
             recent={assistant.tasks.slice(0, 8).map((task) => ({ taskId: task.taskId, title: task.title, kind: assistant.categories.find((item) => item.category === task.category)?.label ?? "",

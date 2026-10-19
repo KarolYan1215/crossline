@@ -1,7 +1,7 @@
 import "server-only";
 import { archetypeById, completionRule, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type SuccessCriterion,
   type EvidenceQuestionTemplate } from "@crossline/core";
-import { assistantAvailable, listAgentTasks, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
+import { listAgentTasks, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
 import { effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
@@ -24,8 +24,6 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const executions = store.listExecutions(workspaceId);
   const documents = store.listSourceDocuments(workspaceId);
   const agentTasks = listAgentTasks(store, workspaceId).filter((task) => ids.has(task.workOrderId));
-  // 「交给 Agent」 only where the machine's assistant works: for a guest it answered every click with AGENT_OWNER_ONLY.
-  const assistant = assistantAvailable(store, workspaceId);
   const confirmed = store.listEvents(workspaceId, { type: "criterion.confirmed" });
   const assessed = store.listEvents(workspaceId, { type: "criteria.assessed" });
   const notes = store.listEvents(workspaceId, { type: "task.note" }).filter((event) => ids.has(event.entityId));
@@ -108,7 +106,8 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       sources: relevantDocuments(documents, { projectId: order.projectId, projectName: projects.get(order.projectId) }).map((doc) => ({ id: doc.id, fileName: doc.fileName })),
       agentOutputs: agentTasks.filter((task) => task.workOrderId === order.id).map((task) => ({ taskId: task.taskId, title: task.title, status: task.status, stepId: task.stepId,
         files: task.artifacts.map((artifact) => ({ path: artifact.path, name: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path })) })),
-      agentSteps: (assistant ? plan?.steps ?? [] : []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title })),
+      // 「交给 Agent」 for every account: the owner's assistant has a shell, everyone else's works through Crossline's own functions.
+      agentSteps: (plan?.steps ?? []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title })),
       notes: notes.filter((event) => event.entityId === order.id).map((event) => { const payload = event.payload as { text?: string; kind?: string };
         return { at: event.createdAt, text: payload.text ?? "", kind: payload.kind ?? "note" }; }).reverse().slice(0, 30),
       completion: (({ mode, why, by }) => ({ mode, why, by }))(completionRule(order))

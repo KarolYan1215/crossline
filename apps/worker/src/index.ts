@@ -415,7 +415,8 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
       ? { state: "blocked", code: "AGENT_PAUSED", message: "助手已暂停。" } : agentService.runFree(workspaceId, input, after), new Date(), browserProfilesRoot(workspaceId));
     if (fired.length) console.info(JSON.stringify({ type: "skill.grown.scheduled", checkedAt, workspaceId, fired }));
   } catch { /* next tick */ }
-  if (assistantOff || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
+  // Growing a workflow writes and tests scripts with the runtime's `skill-creator`: only the shell assistant can (the owner's own Codex).
+  if (assistantOff || !machineOwner(workspaceId) || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
   const candidate = growCandidates(analysisStore, workspaceId)[0];
   // What the person asked for in words is their own work, like a capture: it runs while the quota lasts. An errand the system noticed
   // repeating is its own idea, and waits for a normal quota.
@@ -817,6 +818,9 @@ const agentService = createAgentService({
   // The shell assistant runs on the machine owner's runtime only: it works with the operating system user's files, and a guard is a
   // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).
   store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(), isOwner: machineOwner,
+  // Everyone else's assistant works through Crossline's own functions on the account's own model (docs/personal-agent.md, 2026-10-19).
+  modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : "tools",
+  clientFor: (workspaceId) => codexSupervisor?.clientFor(workspaceId),
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
 });
 for (const workspace of analysisStore.listWorkspaces()) {

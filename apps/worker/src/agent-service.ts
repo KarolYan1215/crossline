@@ -4,6 +4,7 @@ import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
 import { agentChainsFor, deliverAgentResult, isPaused, listAgentTasks, readCategories, readGrownSkills, requestAgentRetry, requestCategory, type CrosslineStore } from "@crossline/db";
 import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, retryDue, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, salvageStoppedRun, type AgentOutcome, type AgentTaskInput } from "./agent-task";
+import type { MailLookup } from "./agent-tools";
 import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, retryCandidates, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 import { browserProfilesRoot, sayToPerson, startWorkflowRun } from "./workflow-smith";
 import { ASSISTANT_PREP_HOURS, startingWithin } from "./schedule-window";
@@ -29,6 +30,16 @@ export function createAgentService(deps: {
   outputRoot?: string; log?: (event: Record<string, unknown>) => void;
   /** The machine owner's workspace; the assistant (a shell on this machine) works for no one else. Absent: everyone (tests). */
   isOwner?: (workspaceId: string) => boolean;
+  /**
+   * How the assistant works for a workspace (docs/personal-agent.md, 2026-10-19): `shell` on the machine owner's own Codex, `tools` —
+   * Crossline's own functions on whatever model serves the account — for everyone else. With this set, `isOwner` no longer turns
+   * other accounts away; it only decides the mode.
+   */
+  modeFor?: (workspaceId: string) => "shell" | "tools";
+  /** The workspace's own runtime, for a tools-mode run (the shell runs on the owner's `getClient`). */
+  clientFor?: (workspaceId: string) => CodexRpcBoundary | undefined;
+  /** The person's mailbox, read-only, when connected. */
+  mailFor?: (workspaceId: string) => MailLookup | undefined;
 }) {
   const running = new Map<string, Set<string>>();
   // Per task: how to stop it, and what it has done so far (docs/review-2026-10-13.md §6.4: the run is watched and can be stopped).
@@ -37,9 +48,19 @@ export function createAgentService(deps: {
     filesChanged: Array<{ path: string; kind: string }>; searches: string[] } }>();
   const log = deps.log ?? (() => {});
   const mark = (workspaceId: string) => running.get(workspaceId) ?? running.set(workspaceId, new Set()).get(workspaceId)!;
+  /** Turned away only where no mode is offered: with `modeFor`, every account has the assistant in one mode or the other. */
+  const refused = (workspaceId: string) => !deps.modeFor && deps.isOwner !== undefined && !deps.isOwner(workspaceId);
+  const runnerFor = (workspaceId: string, control: AbortController, onLive: Parameters<typeof createAgentRunner>[4]["onLive"]) => {
+    const mode = deps.modeFor?.(workspaceId) ?? "shell";
+    const mail = mode === "tools" ? deps.mailFor?.(workspaceId) : undefined;
+    return createAgentRunner(deps.store, workspaceId, deps.repoRoot, mode === "tools" ? () => deps.clientFor?.(workspaceId) ?? deps.getClient() : deps.getClient, {
+      outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
+      signal: control.signal, ...(onLive ? { onLive } : {}), mode, ...(mail ? { mail } : {})
+    });
+  };
 
   function start(workspaceId: string, orderId: string, category: AgentCategory | undefined, stepId?: string, by: "person" | "system" = "system"): DispatchResult {
-    if (deps.isOwner && !deps.isOwner(workspaceId))
+    if (refused(workspaceId))
       return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作；其他账号的任务请本人完成。" };
     const planned = taskFromWorkOrder(deps.store, workspaceId, orderId, category, stepId);
     if (!planned.ok) return { state: "blocked", code: planned.code, message: planned.message };
@@ -54,10 +75,7 @@ export function createAgentService(deps: {
     mark(workspaceId).add(taskId);
     const control = new AbortController();
     controls.set(taskId, control);
-    const run = createAgentRunner(deps.store, workspaceId, deps.repoRoot, deps.getClient, {
-      outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
-      signal: control.signal, onLive: (record) => live.set(taskId, record)
-    });
+    const run = runnerFor(workspaceId, control, (record) => live.set(taskId, record));
     void (async () => {
       enterUsageWorkspace(workspaceId);
       const outcome: AgentOutcome | { state: "failed"; message: string } = await run({ ...planned.input, category: chosen, by })
@@ -76,6 +94,7 @@ export function createAgentService(deps: {
       if (outcome.state === "done" && !outcome.reviewRequired) {
         try { tellAccepted(workspaceId, taskId, planned.input.title, orderId, outcome); } catch { /* the message is a courtesy */ }
       }
+      if (outcome.state === "done") tellWhatItFound(workspaceId, taskId, planned.input.title, outcome);
       log({ type: `agent.${outcome.state}`, workspaceId, taskId, ...(outcome.state === "blocked" ? { code: outcome.code } : {}), ...(delivered ? { delivered } : {}) });
     })().finally(() => { mark(workspaceId).delete(taskId); controls.delete(taskId); live.delete(taskId); });
     return { state: "started", taskId };
@@ -103,21 +122,28 @@ export function createAgentService(deps: {
       [{ label: "查看", href: orders.length === 1 ? `/workbench/${encodeURIComponent(orders[0]!)}` : "/approvals#assistant" }], now);
   }
 
+  /** A tools-mode run's own words to the person (`tell_person`) and what it put in the inbox, said once when it finishes. */
+  function tellWhatItFound(workspaceId: string, taskId: string, title: string, outcome: Extract<AgentOutcome, { state: "done" }>): void {
+    const told = outcome.told ?? [], captured = outcome.captured ?? [];
+    if (!told.length && !captured.length) return;
+    const head = `助手在「${title.length > 40 ? `${title.slice(0, 40)}…` : title}」里`;
+    const text = [...told.map((line) => `${head}提醒：${line}`), ...(captured.length ? [`${head}记下 ${captured.length} 件待办，已放进收件箱：${captured.join("；")}`] : [])].join("\n");
+    try { sayToPerson(deps.store, workspaceId, text, "agent_told", `told:${taskId}`, [{ label: "查看", href: "/" }], new Date()); } catch { /* a courtesy */ }
+  }
+
   function runFree(workspaceId: string, input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void): DispatchResult {
-    if (deps.isOwner && !deps.isOwner(workspaceId))
+    if (refused(workspaceId))
       return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
     if (!readCategories(deps.store, workspaceId)[input.category]) return { state: "needs_category_approval", category: input.category, label: AGENT_CATEGORIES[input.category] };
     if (mark(workspaceId).size) return { state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" };
     mark(workspaceId).add(input.taskId);
     const control = new AbortController();
     controls.set(input.taskId, control);
-    const run = createAgentRunner(deps.store, workspaceId, deps.repoRoot, deps.getClient, {
-      outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
-      signal: control.signal, onLive: (record) => live.set(input.taskId, record)
-    });
+    const run = runnerFor(workspaceId, control, (record) => live.set(input.taskId, record));
     void (async () => {
       enterUsageWorkspace(workspaceId);
       const outcome = await run(input).catch((error): { state: "failed"; message: string } => ({ state: "failed", message: error instanceof Error ? error.message : "" }));
+      if (outcome.state === "done") tellWhatItFound(workspaceId, input.taskId, input.title, outcome);
       try { after?.(outcome); } catch (error) { log({ type: "agent.after_failed", workspaceId, taskId: input.taskId, message: error instanceof Error ? error.message : "" }); }
       log({ type: `agent.${outcome.state}`, workspaceId, taskId: input.taskId });
     })().finally(() => { mark(workspaceId).delete(input.taskId); controls.delete(input.taskId); live.delete(input.taskId); });
@@ -159,7 +185,7 @@ export function createAgentService(deps: {
      */
     async retry(workspaceId: string, taskId: string, input: { note?: string; only?: string[] }, now = new Date()):
       Promise<{ ok: true; state: "started" | "queued"; message: string } | { ok: false; code: string; message: string }> {
-      if (deps.isOwner && !deps.isOwner(workspaceId)) return { ok: false, code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
+      if (refused(workspaceId)) return { ok: false, code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
       if (mark(workspaceId).has(taskId)) return { ok: false, code: "TASK_RUNNING", message: "这个任务正在运行。" };
       const recorded = requestAgentRetry(deps.store, workspaceId, taskId, input, now);
       if (!recorded.ok) return { ok: false, code: recorded.code, message: recorded.code === "TASK_NOT_FOUND" ? "找不到这个助手任务。" : "这个任务正在运行。" };
@@ -174,7 +200,7 @@ export function createAgentService(deps: {
     /** On the tick: at most one new task per workspace, only of an approved kind, only with quota to spare, only when none is going. */
     async pass(workspaceId: string, now = new Date(), options: { quotaChecked?: boolean } = {}): Promise<void> {
       try { sayAccepted(workspaceId, now); } catch { /* the message is a courtesy */ }
-      if (mark(workspaceId).size || (deps.isOwner && !deps.isOwner(workspaceId))) return;
+      if (mark(workspaceId).size || refused(workspaceId)) return;
       // In order: a step 「自动交给 Agent」 handed over whose block has come up (it is wanted now); preparation steps (what the person's
       // next session is waiting for); whole orders; and, with nothing else waiting, a handed-over step whose block is later this week.
       // Preparation and whole errands only for work starting within two days (docs/review-2026-10-13.md §6.1): results for later work
