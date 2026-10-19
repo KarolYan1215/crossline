@@ -492,6 +492,8 @@ export * from "./relevance";
 export * from "./task-title";
 export * from "./calendar-lines";
 export * from "./belonging";
+export * from "./sentences";
+export * from "./onboarding-refs";
 export * from "./interview-checklist";
 export * from "./fixed-events";
 export * from "./portrait";

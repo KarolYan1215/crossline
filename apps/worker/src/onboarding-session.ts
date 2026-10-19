@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
-  EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
+  EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingAnswer, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, mergeFacts, sanitizeDateExtraction, validateOnboardingAnswer,
+  citationWarnings, locateQuote, numberedText, type EvidenceSentence,
   gapCoveredBy, screenQuestions, screenAssumption, mergeDateExtractions, withoutDecidedDates, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
   type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, TYPE_TABLE, readTone,
   type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress, calendarWeek
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
-import { interviewChecklistFor, interviewGapsFor, questionScreenFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
+import { interviewChecklistFor, interviewGapsFor, questionScreenFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { identityLines } from "./lines";
 
@@ -39,15 +40,16 @@ const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a l
   + "space is large) and allows the person's own answer. Rewrite `profile` in full every turn (your synthesis). In the lines stage write "
   + "each line's personal description and 6-12 attribute candidates for its long-term goal in `lineProfiles[].attributeCandidates` — never "
   + "whole sentences: each one independent quality (a field, an ability or a lasting state, labelled `kind` domain/ability/state), a short "
-  + "phrase without 「成为」 or a trailing 「的」, cited by `sourceRef` to the reply-N or src-N it comes from, and no two overlapping (after removing "
+  + "phrase without 「成为」 or a trailing 「的」, citing in `refs` the sentences it comes from, and no two overlapping (after removing "
   + "「的」 and punctuation neither may contain the other); the person combines them into 「成为 A 的、B 的<身份>」 themselves. Leave the list empty "
   + "while a line is still thin and ask more. When the person asks in so many words to change a line's goal (「把目标改成…」), put the new "
-  + "attributes in `goalEdits` citing that reply — it is shown to them to adopt, never applied by you; otherwise `goalEdits` is empty. "
+  + "attributes in `goalEdits` citing that reply's sentence — it is shown to them to adopt, never applied by you; otherwise `goalEdits` is empty. "
   + "Facts about the person in general use identityId \"person\". When `focusLine` is "
   + "set, interview only that line (stage `details`) and refresh its `lineProfiles` entry whenever what was said changes its description "
-  + "or attributes. Every confirmed slotUpdate cites a reply-N or src-N with a verbatim sourceQuote; your "
-  + "own conclusions are sourceRef 'inference', status 'inferred', empty quote. Never invent dates, numbers or names. Files that arrive "
-  + "are for you to read: every date they state goes into `fileDates`, each with a verbatim quote containing the day and a title that names its course or project (「ECE 555 期末考试」, never a bare 「期末考试」); never ask which course or project a file belongs to (the app asks that itself; a settled file carries its projectId); never turn TBD into "
+  + "or attributes. The person's replies and the files come as numbered sentences (「[12] …」): cite evidence only by those numbers in "
+  + "`refs` (one or a few adjacent ones), never by copying words. Every confirmed slotUpdate cites the sentence it rests on; your own "
+  + "conclusions are status 'inferred' with empty refs. Times are minutes after midnight (09:30 is 570). Never invent dates, numbers or names. Files that arrive "
+  + "are for you to read: every date they state goes into `fileDates`, each citing the sentence that contains the day and with a title that names its course or project (「ECE 555 期末考试」, never a bare 「期末考试」); never ask which course or project a file belongs to (the app asks that itself; a settled file carries its projectId); never turn TBD into "
   + "a date (list it in `undated`). When `history` is present the conversation is being resumed: continue it, do not greet again or re-ask "
   + "what is answered. All human-readable fields in Chinese.";
 
@@ -65,7 +67,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   const identities = () => identityLines(store, workspaceId)
     .map((pack) => ({ id: pack.id, label: pack.label }));
 
-  /** Everything a quote can be checked against, rebuilt from the ledger on every turn. */
+  /**
+   * Everything a citation can be checked against, rebuilt from the ledger on every turn: the texts, and the numbered sentences the model
+   * is shown (`sentences`, filled by `replySentences` and `documentSentences` as each reply and file is handed over).
+   */
   function knownSources(messages: StoredOnboardingMessage[], docs: Map<string, StoredSourceDocument>): KnownSources {
     return {
       identities: identities().map((item) => item.id),
@@ -73,8 +78,23 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       replies: Object.fromEntries(messages.filter((message) => message.role === "user")
         .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")])),
       sources: Object.fromEntries([...docs].filter(([, doc]) => doc.extractionStatus === "done")
-        .map(([id, doc]) => [id, doc.extractedText]))
+        .map(([id, doc]) => [id, doc.extractedText])),
+      sentences: new Map<number, EvidenceSentence>()
     };
+  }
+
+  /** A reply's numbered sentences, made on first use and added to what the answer may cite. */
+  function replySentences(known: KnownSources, sessionId: string, message: StoredOnboardingMessage): StoredSentence[] {
+    const sentences = store.ensureEvidence(workspaceId, "reply", `${sessionId}#${message.seq}`, String((message.content as { text?: string }).text ?? ""));
+    for (const sentence of sentences) known.sentences?.set(sentence.id, { ref: `reply-${message.seq}`, start: sentence.start, end: sentence.end, text: sentence.text });
+    return sentences;
+  }
+
+  /** A file's numbered sentences within what one turn shows of it (`limit` characters), added to what the answer may cite. */
+  function documentSentences(known: KnownSources, ref: string, doc: StoredSourceDocument, limit = SOURCE_TEXT_PER_DOCUMENT): StoredSentence[] {
+    const sentences = store.ensureEvidence(workspaceId, "document", doc.id, doc.extractedText).filter((sentence) => sentence.start < limit);
+    for (const sentence of sentences) known.sentences?.set(sentence.id, { ref, start: sentence.start, end: sentence.end, text: sentence.text });
+    return sentences;
   }
 
   const todayIso = () => (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString().slice(0, 10);
@@ -107,12 +127,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     return taken;
   };
 
-  const clipDocuments = (entries: Array<[string, StoredSourceDocument]>) => {
+  /** The files a turn hands over, as numbered sentences within the turn's reading budget. */
+  const clipDocuments = (known: KnownSources, entries: Array<[string, StoredSourceDocument]>) => {
     let budget = SOURCE_TEXT_TOTAL;
     return entries.map(([id, doc]) => {
-      const text = doc.extractedText.slice(0, Math.min(SOURCE_TEXT_PER_DOCUMENT, budget));
-      budget -= text.length;
-      return { id, fileName: doc.fileName, kind: doc.kind, projectId: doc.projectId ?? "", text };
+      const limit = Math.min(SOURCE_TEXT_PER_DOCUMENT, budget);
+      budget -= Math.min(limit, doc.extractedText.length);
+      return { id, fileName: doc.fileName, kind: doc.kind, projectId: doc.projectId ?? "", sentences: numberedText(documentSentences(known, id, doc, limit)) };
     });
   };
 
@@ -162,14 +183,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     }
     for (const update of turn.slotUpdates) {
       store.upsertProfileFact({ workspaceId, identityId: update.identityId, projectId: update.projectId, slot: update.slot,
-        value: update.value, status: update.status, sourceRef: update.sourceRef, sourceQuote: update.sourceQuote, updatedAt: now });
+        value: update.value, status: update.status, sourceRef: update.sourceRef, sourceQuote: update.sourceQuote, sourceSentences: update.sentences ?? [], updatedAt: now });
     }
     // A connection between lines is a guess until the person confirms it, so it is kept as an inferred fact
     // keyed by its two ends and kind, not as a milestone relation (there may not be milestones yet).
     for (const candidate of turn.flywheelCandidates) {
       store.upsertProfileFact({ workspaceId, identityId: candidate.fromIdentityId, projectId: "",
         slot: `flywheel_${candidate.toIdentityId}_${candidate.kind}`, value: candidate.explanation, status: "inferred",
-        sourceRef: candidate.evidenceRefs[0] ?? "inference", sourceQuote: "", updatedAt: now });
+        sourceRef: candidate.evidenceRefs[0] ?? "inference", sourceQuote: "", sourceSentences: candidate.sentences ?? [], updatedAt: now });
     }
     void sessionId;
   }
@@ -258,6 +279,16 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const userMessage = messages.at(-1)!;
     const replyId = `reply-${userMessage.seq}`;
     const replyText = String((userMessage.content as { text?: string }).text ?? "");
+    const docs = sourceIds(store.listSourceDocuments(workspaceId));
+    const known = knownSources(messages, docs);
+    // Every reply of this conversation is citable by number (the thread holds them all); this one is shown numbered below.
+    const sentencesOfReply = new Map(messages.filter((message) => message.role === "user").map((message) => [message.seq, replySentences(known, sessionId, message)]));
+    const replyNumbered = numberedText(sentencesOfReply.get(userMessage.seq) ?? []);
+    /** The sentences of this reply a quote the system took from it covers. */
+    const sentencesFor = (quote: string) => {
+      const span = locateQuote(replyText, quote);
+      return span ? (sentencesOfReply.get(userMessage.seq) ?? []).filter((sentence) => sentence.start < span.end && sentence.end > span.start).map((sentence) => sentence.id) : [];
+    };
 
     // The person's answers to the questions the app itself asked (target grade, an unconfirmed line, a TBD date) are facts the moment they
     // are given, written here and not left for the model to remember: the label they picked is a verbatim span of their reply.
@@ -277,16 +308,16 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         store.appendEvent({ ownerId, workspaceId, idempotencyKey: `profile:confirmed:${replyId}`, type: "profile.confirmed", entityId: workspaceId, payload: { via: "interview" } });
       } else if (answer.slot) {
         store.upsertProfileFact({ workspaceId, identityId: answer.identityId, projectId: answer.projectId, slot: answer.slot, value: answer.value,
-          status: "confirmed", sourceRef: replyId, sourceQuote: answer.quote, updatedAt: now });
+          status: "confirmed", sourceRef: replyId, sourceQuote: answer.quote, sourceSentences: sentencesFor(answer.quote), updatedAt: now });
       }
     }
 
-    const docs = sourceIds(store.listSourceDocuments(workspaceId));
     const timeZone = personTimeZone();
     const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString().slice(0, 10);
-    const known = knownSources(messages, docs);
     // A re-read hands every file over again, as if none had been seen.
     const announced = input.reread ? new Set<string>() : new Set((session.coverage as Announced).announcedSources ?? []);
+    // Files an earlier turn of this thread showed stay citable by the numbers it showed.
+    for (const [id, doc] of docs) if (announced.has(id) && doc.extractionStatus === "done") documentSentences(known, id, doc);
     // A turn takes the new files that fit its reading budget; the rest wait for the next turn instead of being marked read with their text
     // cut away (an authorized folder can bring hundreds at once). The model is told how many still wait.
     const unread = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id));
@@ -303,11 +334,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     let threadId = session.codexThreadId;
     let announcedNow = announced;
     let sent = fresh;
-    const validateOutput = (output: unknown) => validateOnboardingTurn(output, known);
-    const softAccept = (_rejection: Error, output: unknown) => keepOnboardingTurn(output, known);
+    const validateOutput = (output: unknown) => validateOnboardingAnswer(output, known);
+    const softAccept = (_rejection: Error, output: unknown) => keepOnboardingAnswer(output, known);
     // A turn that only needs one or two items dropped is kept now instead of rewritten in full by a repair.
     const keepEarly = (_rejection: Error, output: unknown) => {
-      const kept = keepOnboardingTurn(output, known);
+      const kept = keepOnboardingAnswer(output, known);
       return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX ? kept : undefined;
     };
 
@@ -331,7 +362,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         identities: identities(),
         projects: store.listProjects(workspaceId).map(({ id, identityId, name, summary }) => ({ id, identityId, name, summary })),
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
-        today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
+        today, timeZone, sources: clipDocuments(known, documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, sentences: replyNumbered },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
         checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
@@ -378,10 +409,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         result = await startThread(fresh);
       } else {
         // Later turns carry only what is new: the reply, and any file that arrived since the last turn.
-        const newSources = clipDocuments(fresh);
+        const newSources = clipDocuments(known, fresh);
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
         const pace = stagePace(messages, { startOpen: startOpen() });
-        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
+        const message = JSON.stringify({ reply: { id: replyId, sentences: replyNumbered }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
           tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}),
         ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
         result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
@@ -394,13 +425,17 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           threadId = undefined;
           announcedNow = new Set();
           sent = [...docs].filter(([, doc]) => doc.extractionStatus === "done");
-          result = await startThread(sent, conversationSoFar(messages.slice(0, -1)));
+          result = await startThread(sent, conversationSoFar(messages.slice(0, -1), sentencesOfReply));
         }
       }
     } finally { clearInterval(heartbeat); store.deleteSetting(workspaceId, progressKey); }
     if (!result.ok) return blocked(result.blocker.code, result.blocker.message);
 
     persistTurn(result.output, sessionId, ownerId);
+    // Numbers in a confirmed fact that its sentences do not state: recorded to measure, never refused (people write 「九点半」).
+    const warnings = citationWarnings(result.output);
+    if (warnings.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:citation-warned:${sessionId}:${replyId}:${randomUUID()}`,
+      type: "onboarding.citation_warned", entityId: sessionId, payload: { replyId, facts: warnings } });
     // The 「符合」 was said in this reply, and this turn rewrote the portrait with that reply in hand: the confirmation holds for the
     // portrait it wrote. Re-recording it here stops the confirmation being asked for again every round (the hosted walkthrough of
     // 2026-10-16 answered 「符合」 four rounds running, and the interview never reached 「已完成」).
@@ -542,10 +577,14 @@ export function stagePace(messages: Array<{ role: string; content: unknown }>, o
   return { stageRounds: rounds, moveOn: `「${current}」阶段已问 ${rounds} 轮：本轮进入下一阶段。` };
 }
 
-/** The conversation as plain lines, for a thread that has to be rebuilt. Questions are kept; option lists are not. */
-function conversationSoFar(messages: StoredOnboardingMessage[]): NonNullable<OnboardingTurnContext["history"]> {
+/**
+ * The conversation as plain lines, for a thread that has to be rebuilt. The person's lines come as their numbered sentences, so the
+ * rebuilt thread cites them by the same numbers. Questions are kept; option lists are not.
+ */
+function conversationSoFar(messages: StoredOnboardingMessage[], sentences: Map<number, StoredSentence[]>): NonNullable<OnboardingTurnContext["history"]> {
   return messages.slice(-24).map((message) => {
-    if (message.role === "user") return { id: `reply-${message.seq}`, role: "user" as const, text: String((message.content as { text?: string }).text ?? "").slice(0, 4000) };
+    if (message.role === "user") return { id: `reply-${message.seq}`, role: "user" as const,
+      text: (numberedText(sentences.get(message.seq) ?? []) || String((message.content as { text?: string }).text ?? "")).slice(0, 4000) };
     const turn = message.content as { reply?: string; questions?: Array<{ text?: string }> };
     return { id: `assistant-${message.seq}`, role: "assistant" as const,
       text: [turn.reply ?? "", ...(turn.questions ?? []).map((question) => question.text ?? "")].filter(Boolean).join("\n").slice(0, 4000) };

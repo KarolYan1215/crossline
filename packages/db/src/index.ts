@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
+import { SEGMENTER_VERSION, segmentText, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
@@ -178,6 +178,8 @@ export type StoredProject = {
 /** A file the person gave us, with the text pulled out of it: the only form in which a model ever sees it. */
 export type StoredSourceDocument = {
   id: string; ownerId: string; workspaceId: string; projectId?: string;
+  /** The `src-N` number, fixed at upload (migration 16); set by the store, never by a caller. */
+  refNo?: number;
   kind: "pdf" | "docx" | "image" | "audio" | "text";
   fileName: string; mediaType: string; sha256: string; uri: string;
   extractedText: string; extractionStatus: "pending" | "done" | "failed" | "unsupported";
@@ -197,6 +199,15 @@ export type StoredOnboardingMessage = {
 export type StoredProfileFact = {
   workspaceId: string; identityId: string; projectId: string; slot: string; value: string;
   status: "confirmed" | "inferred"; sourceRef: string; sourceQuote: string; updatedAt: string;
+  /**
+   * The numbered sentences (`evidence_sentences`) the fact rests on; `sourceQuote` is their text, filled by the system. Empty for a
+   * fact no sentence stands behind (an inference, a fact another Skill wrote from text it was given).
+   */
+  sourceSentences?: number[];
+};
+/** One numbered sentence of a reply or a file (`segmentText`). Ids are per workspace and never reused or renumbered. */
+export type StoredSentence = {
+  id: number; sourceKind: "reply" | "document"; sourceId: string; ord: number; start: number; end: number; text: string; retired: boolean;
 };
 
 /**
@@ -439,6 +450,16 @@ const PERSON_ACTIVITY_SQL = `
   UNION ALL SELECT created_at FROM events WHERE workspace_id = @ws AND created_at >= @since
     AND (type IN (${PERSON_EVENTS.map((type) => `'${type}'`).join(",")})
       OR (type = 'task.step_progress' AND json_extract(payload_json, '$.source') IN ('user', 'person', 'confirm')))`;
+
+/** A stored id list (`source_sentences`), tolerant of a hand-edited or empty value. */
+function sentenceIds(raw: unknown): number[] {
+  try {
+    const parsed = JSON.parse(typeof raw === "string" && raw ? raw : "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((id): id is number => Number.isInteger(id) && id > 0) : [];
+  } catch { return []; }
+}
+const sentenceRow = (row: Record<string, string | number>): StoredSentence => ({ id: Number(row.id), sourceKind: row.source_kind as StoredSentence["sourceKind"],
+  sourceId: String(row.source_id), ord: Number(row.ord), start: Number(row.start_at), end: Number(row.end_at), text: String(row.text), retired: Number(row.retired) === 1 });
 
 export class CrosslineStore {
   readonly #db: Database.Database;
@@ -1065,6 +1086,24 @@ export class CrosslineStore {
             status TEXT NOT NULL, code_hash TEXT, created_at TEXT NOT NULL, decided_at TEXT, redeemed_at TEXT, redeemed_workspace_id TEXT);
           CREATE INDEX IF NOT EXISTS beta_invites_by_workspace ON beta_invites(workspace_id, created_at);
           CREATE UNIQUE INDEX IF NOT EXISTS beta_invites_by_code ON beta_invites(code_hash) WHERE code_hash IS NOT NULL;`);
+      } },
+      // Numbered evidence (2026-10-19): the person's replies and files cut into sentences with ids the model cites instead of copying
+      // words (`evidence_sentences`), the sentences each fact rests on (`profile_facts.source_sentences`), and a document number fixed at
+      // upload (`source_documents.ref_no`): `src-N` used to be a position, so removing one file renumbered every later one and the facts
+      // and dates citing them pointed at the wrong file. Existing documents keep the number their position gives them today.
+      { version: 16, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS evidence_sentences (
+            workspace_id TEXT NOT NULL, id INTEGER NOT NULL, source_kind TEXT NOT NULL CHECK(source_kind IN ('reply','document')),
+            source_id TEXT NOT NULL, source_hash TEXT NOT NULL, ord INTEGER NOT NULL, start_at INTEGER NOT NULL, end_at INTEGER NOT NULL,
+            text TEXT NOT NULL, segmenter TEXT NOT NULL, retired INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id));
+          CREATE INDEX IF NOT EXISTS evidence_by_source ON evidence_sentences(workspace_id, source_kind, source_id, retired, ord);`);
+        if (!has("profile_facts", "source_sentences")) this.#db.exec("ALTER TABLE profile_facts ADD COLUMN source_sentences TEXT NOT NULL DEFAULT '[]'");
+        if (!has("source_documents", "ref_no")) {
+          this.#db.exec("ALTER TABLE source_documents ADD COLUMN ref_no INTEGER");
+          this.#numberDocuments();
+        }
       } }
     ];
 
@@ -1846,24 +1885,26 @@ export class CrosslineStore {
   saveSourceDocument(doc: StoredSourceDocument): StoredSourceDocument {
     this.#db.prepare(`
       INSERT INTO source_documents (id, owner_id, workspace_id, project_id, kind, file_name, media_type, sha256, uri,
-        extracted_text, extraction_status, extraction_note, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        extracted_text, extraction_status, extraction_note, created_at, ref_no)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        (SELECT COALESCE(MAX(ref_no), 0) + 1 FROM source_documents WHERE workspace_id = ?))
       ON CONFLICT(workspace_id, sha256) DO NOTHING
     `).run(doc.id, doc.ownerId, doc.workspaceId, doc.projectId ?? null, doc.kind, doc.fileName, doc.mediaType,
-      doc.sha256, doc.uri, doc.extractedText, doc.extractionStatus, doc.extractionNote ?? null, doc.createdAt);
+      doc.sha256, doc.uri, doc.extractedText, doc.extractionStatus, doc.extractionNote ?? null, doc.createdAt, doc.workspaceId);
     return this.listSourceDocuments(doc.workspaceId).find((item) => item.sha256 === doc.sha256)!;
   }
 
   listSourceDocuments(workspaceId: string, options: { projectId?: string } = {}): StoredSourceDocument[] {
     const rows = this.#db.prepare("SELECT * FROM source_documents WHERE workspace_id = ? ORDER BY created_at, rowid")
-      .all(workspaceId) as Array<Record<string, string | null>>;
+      .all(workspaceId) as Array<Record<string, string | number | null>>;
     return rows.filter((row) => !options.projectId || row.project_id === options.projectId).map((row) => ({
-      id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
-      ...(row.project_id ? { projectId: row.project_id } : {}),
-      kind: row.kind as StoredSourceDocument["kind"], fileName: row.file_name!, mediaType: row.media_type!,
-      sha256: row.sha256!, uri: row.uri!, extractedText: row.extracted_text ?? "",
+      id: String(row.id), ownerId: String(row.owner_id), workspaceId: String(row.workspace_id),
+      ...(row.project_id ? { projectId: String(row.project_id) } : {}),
+      ...(typeof row.ref_no === "number" ? { refNo: row.ref_no } : {}),
+      kind: row.kind as StoredSourceDocument["kind"], fileName: String(row.file_name), mediaType: String(row.media_type),
+      sha256: String(row.sha256), uri: String(row.uri), extractedText: String(row.extracted_text ?? ""),
       extractionStatus: row.extraction_status as StoredSourceDocument["extractionStatus"],
-      ...(row.extraction_note ? { extractionNote: row.extraction_note } : {}), createdAt: row.created_at!
+      ...(row.extraction_note ? { extractionNote: String(row.extraction_note) } : {}), createdAt: String(row.created_at)
     }));
   }
 
@@ -1884,6 +1925,19 @@ export class CrosslineStore {
       const row = this.#db.prepare("SELECT uri FROM source_documents WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as { uri: string } | undefined;
       if (!row) return undefined;
       this.#db.prepare("DELETE FROM source_documents WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
+      // The file's words go with it; facts that cited them keep their quote but no longer point at sentences that are gone.
+      const gone = new Set((this.#db.prepare("SELECT id FROM evidence_sentences WHERE workspace_id = ? AND source_kind = 'document' AND source_id = ?")
+        .all(workspaceId, id) as Array<{ id: number }>).map((sentence) => sentence.id));
+      if (gone.size) {
+        this.#db.prepare("DELETE FROM evidence_sentences WHERE workspace_id = ? AND source_kind = 'document' AND source_id = ?").run(workspaceId, id);
+        const facts = this.#db.prepare("SELECT identity_id, project_id, slot, source_sentences FROM profile_facts WHERE workspace_id = ? AND source_sentences <> '[]'")
+          .all(workspaceId) as Array<{ identity_id: string; project_id: string; slot: string; source_sentences: string }>;
+        for (const fact of facts) {
+          const ids = sentenceIds(fact.source_sentences);
+          if (ids.some((sentence) => gone.has(sentence))) this.setProfileFactSentences(workspaceId,
+            { identityId: fact.identity_id, projectId: fact.project_id, slot: fact.slot }, ids.filter((sentence) => !gone.has(sentence)));
+        }
+      }
       return { uri: row.uri, uriInUse: Boolean(this.#db.prepare("SELECT 1 FROM source_documents WHERE uri = ? LIMIT 1").get(row.uri)) };
     })();
   }
@@ -1916,6 +1970,12 @@ export class CrosslineStore {
       "SELECT * FROM onboarding_sessions WHERE workspace_id = ? AND id NOT LIKE 'line-%' ORDER BY updated_at DESC, rowid DESC LIMIT 1"
     ).get(workspaceId) as Record<string, string> | undefined;
     return row ? this.#onboardingSessionFrom(row) : undefined;
+  }
+
+  /** Every interview conversation of the workspace, the line interviews included. */
+  listOnboardingSessions(workspaceId: string): StoredOnboardingSession[] {
+    return (this.#db.prepare("SELECT * FROM onboarding_sessions WHERE workspace_id = ? ORDER BY created_at, rowid").all(workspaceId) as Array<Record<string, string>>)
+      .map((row) => this.#onboardingSessionFrom(row));
   }
 
   getOnboardingSession(workspaceId: string, id: string): StoredOnboardingSession | undefined {
@@ -1952,8 +2012,8 @@ export class CrosslineStore {
    */
   upsertProfileFact(fact: StoredProfileFact): void {
     this.#db.prepare(`
-      INSERT INTO profile_facts (workspace_id, identity_id, project_id, slot, value, status, source_ref, source_quote, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO profile_facts (workspace_id, identity_id, project_id, slot, value, status, source_ref, source_quote, source_sentences, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, identity_id, project_id, slot) DO UPDATE SET
         value = CASE WHEN profile_facts.status = 'confirmed' AND excluded.status = 'inferred'
           THEN profile_facts.value ELSE excluded.value END,
@@ -1962,9 +2022,53 @@ export class CrosslineStore {
           THEN profile_facts.source_ref ELSE excluded.source_ref END,
         source_quote = CASE WHEN profile_facts.status = 'confirmed' AND excluded.status = 'inferred'
           THEN profile_facts.source_quote ELSE excluded.source_quote END,
+        source_sentences = CASE WHEN profile_facts.status = 'confirmed' AND excluded.status = 'inferred'
+          THEN profile_facts.source_sentences ELSE excluded.source_sentences END,
         updated_at = excluded.updated_at
     `).run(fact.workspaceId, fact.identityId, fact.projectId, fact.slot, fact.value, fact.status,
-      fact.sourceRef, fact.sourceQuote, fact.updatedAt);
+      fact.sourceRef, fact.sourceQuote, JSON.stringify(fact.sourceSentences ?? []), fact.updatedAt);
+  }
+
+  /** Gives a fact its sentences without touching anything else (facts written before numbered evidence). */
+  setProfileFactSentences(workspaceId: string, key: { identityId: string; projectId: string; slot: string }, ids: number[]): void {
+    this.#db.prepare("UPDATE profile_facts SET source_sentences = ? WHERE workspace_id = ? AND identity_id = ? AND project_id = ? AND slot = ?")
+      .run(JSON.stringify(ids), workspaceId, key.identityId, key.projectId, key.slot);
+  }
+
+  /**
+   * The numbered sentences of one reply or file, cut on first use and kept: ids are per workspace, given once, and never move, so a
+   * citation stored today means the same words next year. When the source's text changed (a file read again), its old sentences are
+   * retired, never renumbered or deleted, and the new text gets new ids.
+   */
+  ensureEvidence(workspaceId: string, sourceKind: StoredSentence["sourceKind"], sourceId: string, text: string): StoredSentence[] {
+    const hash = createHash("sha256").update(text).digest("hex").slice(0, 32);
+    return this.#db.transaction(() => {
+      const current = this.#db.prepare("SELECT source_hash FROM evidence_sentences WHERE workspace_id = ? AND source_kind = ? AND source_id = ? AND retired = 0 LIMIT 1")
+        .get(workspaceId, sourceKind, sourceId) as { source_hash: string } | undefined;
+      if (current?.source_hash === hash) return this.sentencesOf(workspaceId, sourceKind, sourceId);
+      if (current) this.#db.prepare("UPDATE evidence_sentences SET retired = 1 WHERE workspace_id = ? AND source_kind = ? AND source_id = ?")
+        .run(workspaceId, sourceKind, sourceId);
+      const next = Number((this.#db.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM evidence_sentences WHERE workspace_id = ?").get(workspaceId) as { id: number }).id) + 1;
+      const insert = this.#db.prepare(`INSERT INTO evidence_sentences (workspace_id, id, source_kind, source_id, source_hash, ord, start_at, end_at, text, segmenter, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const at = new Date().toISOString();
+      segmentText(text).forEach((segment, ord) => insert.run(workspaceId, next + ord, sourceKind, sourceId, hash, ord, segment.start, segment.end,
+        segment.text, SEGMENTER_VERSION, at));
+      return this.sentencesOf(workspaceId, sourceKind, sourceId);
+    }).immediate();
+  }
+
+  /** The current (not retired) sentences of one source, in order. */
+  sentencesOf(workspaceId: string, sourceKind: StoredSentence["sourceKind"], sourceId: string): StoredSentence[] {
+    return (this.#db.prepare("SELECT * FROM evidence_sentences WHERE workspace_id = ? AND source_kind = ? AND source_id = ? AND retired = 0 ORDER BY ord")
+      .all(workspaceId, sourceKind, sourceId) as Array<Record<string, string | number>>).map(sentenceRow);
+  }
+
+  /** Sentences by id, retired ones included (a stored citation still reads the words it was made on). */
+  sentencesById(workspaceId: string, ids: number[]): StoredSentence[] {
+    if (!ids.length) return [];
+    return (this.#db.prepare(`SELECT * FROM evidence_sentences WHERE workspace_id = ? AND id IN (${ids.map(() => "?").join(",")}) ORDER BY id`)
+      .all(workspaceId, ...ids) as Array<Record<string, string | number>>).map(sentenceRow);
   }
 
   listProfileFacts(workspaceId: string, options: { identityId?: string; projectId?: string } = {}): StoredProfileFact[] {
@@ -1975,7 +2079,8 @@ export class CrosslineStore {
       && (options.projectId === undefined || row.project_id === options.projectId))
       .map((row) => ({ workspaceId: row.workspace_id!, identityId: row.identity_id!, projectId: row.project_id ?? "",
         slot: row.slot!, value: row.value!, status: row.status as StoredProfileFact["status"],
-        sourceRef: row.source_ref!, sourceQuote: row.source_quote ?? "", updatedAt: row.updated_at! }));
+        sourceRef: row.source_ref!, sourceQuote: row.source_quote ?? "", updatedAt: row.updated_at!,
+        ...(sentenceIds(row.source_sentences).length ? { sourceSentences: sentenceIds(row.source_sentences) } : {}) }));
   }
 
   /** The person rejecting a fact the interview inferred (or correcting one it got wrong). */
@@ -3085,7 +3190,7 @@ export class CrosslineStore {
       "assistant_threads", "assistant_attachments", "milestone_templates",
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
-      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites",
+      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by
@@ -3239,8 +3344,20 @@ export class CrosslineStore {
         this.#db.exec("DROP TABLE temp.restored_plan_changes");
       }
       this.#collapsePlanVersions(snapshot.workspaceId);
+      // A backup taken before migration 16 has no document numbers: they get the ones their position gave them when it was taken.
+      this.#numberDocuments(snapshot.workspaceId);
     })();
     return counts;
+  }
+
+  /** Gives every document without a fixed `src-N` number the next ones, in upload order (migration 16 and older backups). */
+  #numberDocuments(workspaceId?: string): void {
+    const scope = workspaceId ? "AND workspace_id = ?" : "";
+    this.#db.prepare(`UPDATE source_documents SET ref_no = (
+        SELECT numbered.n FROM (SELECT rowid AS r, ROW_NUMBER() OVER (PARTITION BY workspace_id ORDER BY created_at, rowid)
+          + (SELECT COALESCE(MAX(ref_no), 0) FROM source_documents kept WHERE kept.workspace_id = d.workspace_id) AS n
+          FROM source_documents d WHERE ref_no IS NULL) numbered WHERE numbered.r = source_documents.rowid)
+      WHERE ref_no IS NULL ${scope}`).run(...(workspaceId ? [workspaceId] : []));
   }
 
   getPrincipalByBetterAuthId(betterAuthUserId: string): StoredPrincipal | undefined {
@@ -3648,3 +3765,4 @@ export * from "./artifacts";
 export * from "./portrait";
 export * from "./skills";
 export * from "./invites";
+export * from "./evidence-backfill";

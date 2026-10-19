@@ -6,7 +6,7 @@ import { conformanceCases, summarizeConformance } from "@crossline/core";
 import { decideRoute, setUsageSink } from "@crossline/codex";
 import { CrosslineStore, SPONSOR_SETTING } from "@crossline/db";
 import { createModelProviderService, RUNTIME_VERSION } from "./model-provider";
-import { createSponsorService, type SponsorDialogueLog, type SponsorRunLog } from "./sponsor";
+import { createSponsorService, SPONSOR_EVAL_VERSION, type SponsorDialogueLog, type SponsorRunLog } from "./sponsor";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
 const dirs: string[] = [];
@@ -21,7 +21,7 @@ function setup(withEvaluation = true) {
   if (withEvaluation) {
     const record = summarizeConformance({ providerId: "sponsor", model: MODEL, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
       conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 900 }))));
-    writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02, tokens: { input: 100_000, cached: 0, output: 10_000, runs: 10 }, version: 3 }] }));
+    writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02, tokens: { input: 100_000, cached: 0, output: 10_000, runs: 10 }, version: SPONSOR_EVAL_VERSION }] }));
   }
   const store = new CrosslineStore(":memory:");
   const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };

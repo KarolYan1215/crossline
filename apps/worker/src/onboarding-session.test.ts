@@ -24,9 +24,9 @@ const turn = (over: object = {}) => JSON.stringify({
 const firstAnswer = turn({
   projectsDetected: [{ id: "westlake", identityId: "research", name: "西湖合作：MoS2 忆阻器片上训练", summary: "负责仿真和算法" }],
   slotUpdates: [{ identityId: "research", projectId: "westlake", slot: "deadline", value: "10/31 前投出", status: "confirmed",
-    sourceRef: "reply-1", sourceQuote: "10/31 前要投出" }],
+    refs: [1] }],
   flywheelCandidates: [{ fromIdentityId: "research", toIdentityId: "media", kind: "informs", explanation: "研究过程是自媒体的选题来源",
-    evidenceRefs: ["inference"], status: "inferred" }],
+    refs: [], status: "inferred" }],
   coverage: [{ identityId: "research", filled: ["deadline"], missing: ["stage"] }]
 });
 
@@ -38,7 +38,9 @@ test("a first turn opens a thread, saves the reply, and writes the projects and 
 
   expect(store.listProjects(workspaceId).map((project) => project.name)).toEqual(["西湖合作：MoS2 忆阻器片上训练"]);
   const facts = store.listProfileFacts(workspaceId);
-  expect(facts.find((fact) => fact.slot === "deadline")).toMatchObject({ value: "10/31 前投出", status: "confirmed", sourceRef: "reply-1" });
+  // The model cited sentence [1]; the quote is the person's own words, filled in from the ledger.
+  expect(facts.find((fact) => fact.slot === "deadline")).toMatchObject({ value: "10/31 前投出", status: "confirmed", sourceRef: "reply-1",
+    sourceQuote: "西湖那篇 10/31 前要投出，数据下周到。", sourceSentences: [1] });
   // A connection between lines is only ever a guess at this point.
   expect(facts.find((fact) => fact.slot === "flywheel_media_informs")).toMatchObject({ status: "inferred" });
 
@@ -88,29 +90,30 @@ test("the second turn continues the same thread and only carries what is new", a
   expect(store.listOnboardingMessages(workspaceId, "s1").map((message) => message.seq)).toEqual([1, 2, 3, 4]);
 });
 
-test("an extracted file reaches the model once, as a citable source, and its text can be quoted", async () => {
+test("an extracted file reaches the model once, as numbered sentences, and a fact citing two of them gets their words", async () => {
   store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId, kind: "docx", fileName: "Lecture Plan.docx",
     mediaType: "application/octet-stream", sha256: "x", uri: "file:///x", extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1",
     extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
   const answer = turn({ questions: [], nextAction: "ready_for_milestones", slotUpdates: [{ identityId: "research", projectId: "", slot: "midterm", value: "10/27 期中 1", status: "confirmed",
-    sourceRef: "src-1", sourceQuote: "27th Oct. L15: Mid-term-1" }] });
+    refs: [2, 3] }] });
   const { rpc, prompts } = fakeRuntime([answer, turn()]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   await run({ sessionId: "s", text: "我上传了课程文件" });
   expect(prompts()[0]).toContain("Lecture Plan.docx");
-  expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "midterm")).toMatchObject({ sourceRef: "src-1", status: "confirmed" });
+  expect(prompts()[0]).toContain("[2] Week-8: 27th Oct.\\n[3] L15: Mid-term-1");
+  expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "midterm")).toMatchObject({ sourceRef: "src-1", status: "confirmed",
+    sourceQuote: "Week-8: 27th Oct.\nL15: Mid-term-1", sourceSentences: [2, 3] });
   await run({ sessionId: "s", text: "继续" });
   // Already announced: not sent again.
   expect(prompts()[1]).not.toContain("Lecture Plan.docx");
 });
 
-test("a fabricated quote is refused and nothing from that turn is saved", async () => {
-  const bad = turn({ slotUpdates: [{ identityId: "research", projectId: "", slot: "deadline", value: "10/15", status: "confirmed",
-    sourceRef: "reply-1", sourceQuote: "10/15 前投出" }] });
+test("a sentence number the model was not shown is refused and nothing from that turn is saved", async () => {
+  const bad = turn({ slotUpdates: [{ identityId: "research", projectId: "", slot: "deadline", value: "10/15", status: "confirmed", refs: [99] }] });
   const { rpc } = fakeRuntime([bad]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   const outcome = await run({ sessionId: "s", text: "10/31 前要投出" });
-  expect(outcome).toMatchObject({ state: "blocked", code: "ONBOARDING_QUOTE_NOT_VERBATIM" });
+  expect(outcome).toMatchObject({ state: "blocked", code: "ONBOARDING_REF_UNKNOWN" });
   expect(store.listProfileFacts(workspaceId)).toEqual([]);
   // The person's message is kept, ready for a retry, and there is no assistant message.
   expect(store.listOnboardingMessages(workspaceId, "s").map((message) => message.role)).toEqual(["user"]);
@@ -163,14 +166,15 @@ test("a thread the runtime has forgotten is replaced, and the new one is told wh
 });
 
 const withDates = (fileDates: object) => turn({ fileDates, questions: [], nextAction: "ready_for_milestones" });
-const dateItem = (over: object = {}) => ({ id: "d1", date: "2026-10-27", startTime: "", endTime: "", kind: "exam", title: "ECE 548 期中 1", project: "", sourceRef: "src-1",
-  quote: "Week-8: 27th Oct. L15: Mid-term-1", confidence: "high", note: "", ...over });
+const dateItem = (over: object = {}) => ({ id: "d1", date: "2026-10-27", startMinute: null, endMinute: null, kind: "exam", title: "ECE 548 期中 1", project: "",
+  refs: [2, 3], confidence: "high", note: "", ...over });
 
 test("dates the model read out of a file become one verified batch, and what cannot be verified is dropped and counted", async () => {
   store.saveSourceDocument({ id: "doc-1", ownerId: "o", workspaceId, kind: "docx", fileName: "Lecture Plan.docx", mediaType: "x", sha256: "1", uri: "file:///1",
     extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1\nExam: 17th December Wednesday", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
   const { rpc } = fakeRuntime([withDates({
-    dates: [dateItem(), dateItem({ id: "d2", title: "编造的考试", date: "2026-11-03", quote: "27th Oct. L15" })],
+    // [2] says 27 October: a date of 3 November citing it is dropped.
+    dates: [dateItem(), dateItem({ id: "d2", title: "编造的考试", date: "2026-11-03", refs: [2] })],
     recurring: [], questions: ["这些材料是哪门课的？"]
   })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
@@ -206,9 +210,9 @@ test("a re-read of the files replaces the unanswered batch; meals outside the st
   store.saveSourceDocument({ id: "doc-1", ownerId: "o", workspaceId, kind: "docx", fileName: "Lecture Plan.docx", mediaType: "x", sha256: "1", uri: "file:///1",
     extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
   const empty = { dates: [], recurring: [], questions: [] };
-  const meal = { id: "lunch", title: "午饭", project: "个人安排", weekdays: [0, 1, 2, 3, 4, 5, 6], startTime: "12:00", endTime: "14:00", from: "2026-10-12",
-    to: "2026-12-31", exceptions: [], location: "", sourceRef: "reply-3", quote: "12–14 点午饭", confidence: "medium" };
-  const hours = { windows: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "09:00", end: "12:00", energy: "high" }, { days: [0, 1, 2, 3, 4, 5, 6], start: "14:00", end: "18:00", energy: "medium" }], why: "本人所述" };
+  const meal = { id: "lunch", title: "午饭", project: "个人安排", weekdays: [0, 1, 2, 3, 4, 5, 6], startMinute: 720, endMinute: 840, from: "2026-10-12",
+    to: "2026-12-31", exceptions: [], location: "", refs: [4], confidence: "medium" };
+  const hours = { windows: [{ days: [0, 1, 2, 3, 4, 5, 6], startMinute: 540, endMinute: 720, energy: "high" }, { days: [0, 1, 2, 3, 4, 5, 6], startMinute: 840, endMinute: 1080, energy: "medium" }], why: "本人所述" };
   const { rpc } = fakeRuntime([withDates({ ...empty, dates: [dateItem()] }),
     turn({ fileDates: { ...empty, recurring: [meal] }, availability: hours, questions: [], nextAction: "ready_for_milestones" }),
     withDates({ ...empty, dates: [dateItem({ id: "d9" })] })]);
@@ -226,9 +230,9 @@ test("a re-read of the files replaces the unanswered batch; meals outside the st
 const course = turn({
   projectsDetected: [{ id: "ece555", identityId: "research", name: "ECE 555", summary: "课程" }],
   slotUpdates: [
-    { identityId: "research", projectId: "ece555", slot: "grading", value: "作业 20%、小测 30%、项目 25%、期末 25%", status: "confirmed", sourceRef: "reply-1", sourceQuote: "作业 20%、小测 30%、项目 25%、期末 25%" },
-    { identityId: "research", projectId: "ece555", slot: "goal", value: "拿高分", status: "confirmed", sourceRef: "reply-1", sourceQuote: "拿高分" },
-    { identityId: "research", projectId: "ece555", slot: "deadline", value: "2026-12-15", status: "confirmed", sourceRef: "reply-1", sourceQuote: "期末 2026-12-15" }
+    { identityId: "research", projectId: "ece555", slot: "grading", value: "作业 20%、小测 30%、项目 25%、期末 25%", status: "confirmed", refs: [1] },
+    { identityId: "research", projectId: "ece555", slot: "goal", value: "拿高分", status: "confirmed", refs: [1] },
+    { identityId: "research", projectId: "ece555", slot: "deadline", value: "2026-12-15", status: "confirmed", refs: [1] }
   ],
   questions: [], nextAction: "ready_for_milestones"
 });
@@ -241,7 +245,7 @@ test("a course's target grade is not asked: the architect proposes one later, so
 });
 
 const guessOnly = turn({
-  slotUpdates: [{ identityId: "startup", projectId: "", slot: "what", value: "可能在做某个产品", status: "inferred", sourceRef: "inference", sourceQuote: "" }],
+  slotUpdates: [{ identityId: "startup", projectId: "", slot: "what", value: "可能在做某个产品", status: "inferred", refs: [] }],
   questions: [], nextAction: "ready_for_milestones"
 });
 
@@ -274,7 +278,7 @@ test("with the completion list on, a 「ready」 before the portrait is written 
 });
 
 const attributes = ["神经形态计算", "器件物理", "能独立立项", "能写基金申请", "持续产出", "被同行认可"]
-  .map((text, index) => ({ text, kind: index < 2 ? "domain" : index < 4 ? "ability" : "state", sourceRef: "reply-1" }));
+  .map((text, index) => ({ text, kind: index < 2 ? "domain" : index < 4 ? "ability" : "state", refs: [1] }));
 
 test("a line card's turn is that line's own interview: attributes refresh by line, and a goal change waits for the person", async () => {
   store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ research: { description: "旧描述",
@@ -282,7 +286,7 @@ test("a line card's turn is that line's own interview: attributes refresh by lin
     media: { description: "自媒体描述", goalCandidates: ["成为有影响力的科普创作者"] } }));
   const answer = turn({ questions: [], nextAction: "ready_for_milestones",
     lineProfiles: [{ lineId: "research", description: "以器件物理为底的神经形态计算研究", attributeCandidates: attributes }],
-    goalEdits: [{ lineId: "research", parts: [{ text: "器件物理", kind: "domain" }, { text: "能独立立项", kind: "ability" }], sourceRef: "reply-1" }] });
+    goalEdits: [{ lineId: "research", parts: [{ text: "器件物理", kind: "domain" }, { text: "能独立立项", kind: "ability" }], refs: [1] }] });
   const { rpc, prompts } = fakeRuntime([answer]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   expect(await run({ sessionId: "line-research", text: "把目标改成器件物理方向能独立立项的研究者" })).toEqual({ state: "ready", sessionId: "line-research" });
@@ -298,11 +302,12 @@ test("a line card's turn is that line's own interview: attributes refresh by lin
 });
 
 test("a turn that leaves a line's candidates empty keeps those on record and only refines its description", async () => {
-  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ research: { description: "旧描述", attributes } }));
+  const stored = attributes.map(({ refs: _refs, ...item }) => ({ ...item, sourceRef: "reply-1" }));
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ research: { description: "旧描述", attributes: stored } }));
   const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones", lineProfiles: [{ lineId: "research", description: "新描述", attributeCandidates: [] }] })]);
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc)({ sessionId: "line-research", text: "补充一点" });
   const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { description: string; attributes: unknown[] }>;
-  expect(profiles.research).toMatchObject({ description: "新描述", attributes });
+  expect(profiles.research).toMatchObject({ description: "新描述", attributes: stored });
 });
 
 test("先读材料：首轮把已读出的文件全部带上，清单标出可开始项，阶段从 orientation 开始", async () => {

@@ -7,7 +7,7 @@ import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, grownHomeLine, interviewChecklistFor, isPaused, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -815,6 +815,11 @@ for (const workspace of analysisStore.listWorkspaces()) {
   // Once: imported class blocks a date batch put on the plan twice (a weekly class and that day's dated session in one slot).
   const deduped = repairDuplicateImports(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
   if (deduped) console.info(JSON.stringify({ type: "repair.import_duplicates", workspaceId: workspace.id, removed: deduped.removed, checkedAt: new Date().toISOString() }));
+  // Once: facts written before numbered evidence get the sentences their quotes stand in.
+  try {
+    const evidence = backfillFactEvidence(analysisStore, workspace.id);
+    if (evidence) console.info(JSON.stringify({ type: "repair.fact_evidence", workspaceId: workspace.id, ...evidence, checkedAt: new Date().toISOString() }));
+  } catch (error) { console.warn(JSON.stringify({ type: "repair.fact_evidence_failed", workspaceId: workspace.id, error: String(error), checkedAt: new Date().toISOString() })); }
   // First drafts begun by a worker that stopped before any milestone existed were lost with it: forget the start, so the pass runs
   // again and the screens do not say 「正在设计」 for a run nobody is doing.
   if (analysisStore.getSetting(workspace.id, FIRST_DRAFTS_SETTING) && !analysisStore.listMilestones(workspace.id).length)

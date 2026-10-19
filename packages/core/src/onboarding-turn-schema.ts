@@ -17,9 +17,10 @@ import {
  *
  * So a turn does not return milestones. It returns:
  *   - `questions`: several at once, each with generously many candidate answers;
- *   - `slotUpdates`: facts it learned, each tied to the reply or file it came from and, unless it is an
- *     explicit inference, to a verbatim quote from that source — the same grounding rule the rest of
- *     this app already uses, because a profile built on invented facts is worse than an empty one;
+ *   - `slotUpdates`: facts it learned, each tied, unless it is an explicit inference, to the numbered
+ *     sentences of the reply or file it came from (`refs`; the system fills the quote in) — the same
+ *     grounding rule the rest of this app already uses, because a profile built on invented facts is
+ *     worse than an empty one;
  *   - `projectsDetected`: the separate things the person works on inside a line;
  *   - `flywheelCandidates`: connections between lines, always `inferred` here — only the person can
  *     confirm one.
@@ -29,14 +30,18 @@ export type TurnQuestion = {
   options: Array<{ id: string; label: string; detail: string }>;
   allowOther: boolean; identityId: string; projectId: string;
 };
+/**
+ * A fact as the rest of the app reads it. The model does not write `sourceRef` or `sourceQuote` any more (2026-10-19): it cites numbered
+ * sentences (`refs` in `ONBOARDING_TURN_SCHEMA`) and `resolveOnboardingRefs` fills both in from the ledger, with the ids in `sentences`.
+ */
 export type SlotUpdate = {
   identityId: string; projectId: string; slot: string; value: string;
-  status: "confirmed" | "inferred"; sourceRef: string; sourceQuote: string;
+  status: "confirmed" | "inferred"; sourceRef: string; sourceQuote: string; sentences?: number[];
 };
 export type DetectedProject = { id: string; identityId: string; name: string; summary: string };
 export type FlywheelCandidate = {
   fromIdentityId: string; toIdentityId: string; kind: (typeof RELATION_KINDS)[number];
-  explanation: string; evidenceRefs: string[]; status: "inferred";
+  explanation: string; evidenceRefs: string[]; status: "inferred"; sentences?: number[];
 };
 export type TurnCoverage = { identityId: string; filled: string[]; missing: string[] };
 
@@ -140,7 +145,8 @@ export type OnboardingTurnContext = {
   identities: Array<{ id: string; label: string }>;
   projects: Array<{ id: string; identityId: string; name: string; summary: string }>;
   facts: Array<{ identityId: string; projectId: string; slot: string; value: string; status: string }>;
-  sources: Array<{ id: string; fileName: string; kind: string; projectId: string; text: string }>;
+  /** Each file as numbered sentences (「[12] …」, one per line), the numbers the answer cites in `refs`. */
+  sources: Array<{ id: string; fileName: string; kind: string; projectId: string; sentences: string }>;
   /** A line's own interview: only this line is asked about. Absent for the full interview. */
   focusLine?: { id: string; label: string; goal: string } | null;
   /** The person's lines as set on the opening screen: identity noun, order (null = parallel), hard constraint, chosen goals. */
@@ -170,9 +176,10 @@ export type OnboardingTurnContext = {
    */
   stageRounds?: number;
   moveOn?: string;
-  /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. User lines carry their `reply-N` id. */
+  /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first; the person's lines as numbered sentences. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
-  reply: { id: string; text: string };
+  /** The person's reply as numbered sentences (「[41] …」), cited by number like a file. */
+  reply: { id: string; sentences: string };
 };
 
 /** What the validator may check a citation against. Never sent to the model. */
@@ -183,12 +190,18 @@ export type KnownSources = {
   replies: Record<string, string>;
   /** Every extracted document, by id (`src-N`). */
   sources: Record<string, string>;
+  /** The numbered sentences the model was shown, by id: which reply or file each is in and where (`resolveOnboardingRefs`). */
+  sentences?: Map<number, EvidenceSentence>;
 };
+/** One citable sentence: the reply (`reply-N`) or file (`src-N`) it is in, and its offsets in that text. */
+export type EvidenceSentence = { ref: string; start: number; end: number; text: string };
 
 const text = (max: number, min = 1) => ({ type: "string", minLength: min, maxLength: max }) as const;
 const slug = { type: "string", minLength: 1, maxLength: 80 } as const;
 const object = (properties: Record<string, unknown>) =>
   ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+/** Sentence numbers (2026-10-19): the model points at what it was shown instead of copying it, and the system fills the words in. */
+export const REFS = { type: "array", maxItems: 8, items: { type: "integer", minimum: 1 } } as const;
 
 export const ONBOARDING_TURN_SCHEMA = object({
   reply: text(1500),
@@ -212,8 +225,8 @@ export const ONBOARDING_TURN_SCHEMA = object({
     items: object({
       identityId: slug, projectId: { type: "string", maxLength: 80 }, slot: slug, value: text(600),
       status: { type: "string", enum: ["confirmed", "inferred"] },
-      // `reply-N`, `src-N`, or `inference`.
-      sourceRef: slug, sourceQuote: { type: "string", maxLength: 600 }
+      // The numbered sentences the fact rests on; empty for an inference.
+      refs: REFS
     })
   },
   projectsDetected: {
@@ -224,7 +237,7 @@ export const ONBOARDING_TURN_SCHEMA = object({
     type: "array", maxItems: 12,
     items: object({
       fromIdentityId: slug, toIdentityId: slug, kind: { type: "string", enum: [...RELATION_KINDS] },
-      explanation: text(500), evidenceRefs: { type: "array", maxItems: 6, items: slug },
+      explanation: text(500), refs: REFS,
       status: { type: "string", enum: ["inferred"] }
     })
   },
@@ -240,11 +253,12 @@ export const ONBOARDING_TURN_SCHEMA = object({
   stage: { type: "string", enum: [...ONBOARDING_STAGES] },
   lineProfiles: { type: "array", maxItems: 8, items: object({ lineId: slug, description: { type: "string", maxLength: 800 },
     attributeCandidates: { type: "array", maxItems: ATTRIBUTE_CANDIDATES_MAX,
-      items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD, sourceRef: slug }) } }) },
+      items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD, refs: REFS }) } }) },
   goalEdits: { type: "array", maxItems: 8, items: object({ lineId: slug,
-    parts: { type: "array", maxItems: 12, items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD }) }, sourceRef: slug }) },
+    parts: { type: "array", maxItems: 12, items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD }) }, refs: REFS }) },
   availability: object({ windows: { type: "array", maxItems: 14, items: object({ days: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
-    start: text(5), end: text(5), energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
+    startMinute: { type: "integer", minimum: 0, maximum: 1440 }, endMinute: { type: "integer", minimum: 0, maximum: 1440 },
+    energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
   profile: object({
     portrait: { type: "string", maxLength: 300 }, coreConflict: { type: "string", maxLength: 400 }, problem: { type: "string", maxLength: 600 },
     gravity: { type: "array", maxItems: 8, items: text(200) }, designable: { type: "array", maxItems: 8, items: text(200) },
@@ -385,7 +399,7 @@ const cleanCandidates = (list: AttributeCandidate[]) => list.map((item) => ({ te
 function attributeProblem(list: AttributeCandidate[], citable: (ref: string) => boolean): { code: string; detail: string } | undefined {
   if (!list.length) return undefined;
   for (const item of list) {
-    if (!citable(item.sourceRef)) return { code: "ONBOARDING_UNKNOWN_SOURCE_REF", detail: `「${item.text}」引用了不存在的来源「${item.sourceRef}」；每个定语注明来自哪条回复（reply-N）或哪个文件（src-N）。` };
+    if (!citable(item.sourceRef)) return { code: "ONBOARDING_UNKNOWN_SOURCE_REF", detail: `「${item.text}」没有引用本轮给出的句子；每个定语在 refs 里写出它来自的句子编号。` };
     if (!cleanAttribute(item.text)) return { code: "ONBOARDING_ATTRIBUTE_EMPTY", detail: "有一个定语是空的。" };
     if (notAtomic(item.text)) return { code: "ONBOARDING_ATTRIBUTE_NOT_ATOMIC", detail: `「${item.text}」含有并列，一个定语只写一件事，拆成两个。` };
   }

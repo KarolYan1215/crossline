@@ -61,16 +61,20 @@ export function leaningProject(project: string | undefined, projects: KnownProje
   return named.length === 1 ? named[0] : undefined;
 }
 
-/** The upload a `src-N` reference means: the N-th of the workspace's documents in upload order (the interview numbers them the same way). */
-export function documentsByRef<T>(docs: T[]): Map<string, T> {
-  return new Map(docs.map((doc, index) => [`src-${index + 1}`, doc]));
+/**
+ * The upload a `src-N` reference means. Since migration 16 each document keeps the number it was given on upload (`refNo`): numbering by
+ * position meant that removing one file (an excluded folder file, a deleted upload) renumbered every later one, and stored facts and
+ * dates then pointed at the wrong file. A row without one (a test, a hand-built list) falls back to its position.
+ */
+export function documentsByRef<T extends { refNo?: number }>(docs: T[]): Map<string, T> {
+  return new Map(docs.map((doc, index) => [`src-${doc.refNo ?? index + 1}`, doc]));
 }
 
 /**
  * The project name a dated item belongs to: its own project when that plainly names a known one, else the project its source file is
  * filed under (by its own evidence or by the person's answer), else none — and then the person is asked.
  */
-export function itemProjectResolver(projects: KnownProject[], docs: Array<{ projectId?: string }>): (item: { project?: string; sourceRef?: string }) => string | undefined {
+export function itemProjectResolver(projects: KnownProject[], docs: Array<{ projectId?: string; refNo?: number }>): (item: { project?: string; sourceRef?: string }) => string | undefined {
   const byRef = documentsByRef(docs);
   const names = new Map(projects.map((project) => [project.id, project.name]));
   return (item) => plainProject(item.project, projects)?.name ?? (() => { const id = item.sourceRef ? byRef.get(item.sourceRef)?.projectId : undefined; return id ? names.get(id) : undefined; })();

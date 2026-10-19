@@ -4,10 +4,10 @@ import { withCourse } from "./task-title";
  * Dates a person's own documents state — class meetings, quiz and homework dates, exams, deadlines.
  *
  * Reading these out of a syllabus is a job for a model, but a wrong date on a calendar is worse than no
- * date, so nothing here is trusted on the model's say-so. Every date must come with a verbatim quote from
- * the file, and the quote has to actually contain that day (`10/27`, `27th Oct.`, `Oct 27`, `10月27日`):
- * a model that mis-reads a table row, or adds a year the file never mentions, produces a quote that does
- * not support its own date, and the whole extraction is sent back for repair.
+ * date, so nothing here is trusted on the model's say-so. Every date cites the numbered sentence of the file
+ * it was read from (since 2026-10-19; a verbatim quote before), and that sentence has to actually contain the
+ * day (`10/27`, `27th Oct.`, `Oct 27`, `10月27日`): a model that mis-reads a table row, or adds a year the file
+ * never mentions, cites a sentence that does not support its own date, and that date is dropped.
  *
  * Nothing is written to the calendar from here. The result is a batch the person confirms as a whole.
  */
@@ -48,13 +48,21 @@ const object = (properties: Record<string, unknown>) =>
   ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 const confidence = { type: "string", enum: ["high", "medium", "low"] } as const;
 
+/**
+ * What the model writes (2026-10-19): times as minutes after midnight and the evidence as sentence numbers (`refs`), never copied words or
+ * typed clock strings; `resolveDateRefs` turns an answer into a `DateExtraction`, filling `sourceRef`, `quote` and `HH:MM` from the
+ * ledger, and `sanitizeDateExtraction` then checks each item against the sentences it cites.
+ */
+const REFS = { type: "array", minItems: 1, maxItems: 6, items: { type: "integer", minimum: 1 } } as const;
+const minute = { type: "integer", minimum: 0, maximum: 1439 } as const;
+const minuteOrNone = { anyOf: [minute, { type: "null" }] } as const;
 export const DATE_EXTRACTION_SCHEMA = object({
   dates: {
     type: "array", maxItems: 60,
     items: object({
-      id: text(60, 1), date: text(10, 10), startTime: text(5), endTime: text(5),
+      id: text(60, 1), date: text(10, 10), startMinute: minuteOrNone, endMinute: minuteOrNone,
       kind: { type: "string", enum: [...DATE_KINDS] }, title: text(160, 1), project: text(80),
-      sourceRef: text(60, 1), quote: text(400, 1), confidence, note: text(300)
+      refs: REFS, confidence, note: text(300)
     })
   },
   recurring: {
@@ -62,9 +70,9 @@ export const DATE_EXTRACTION_SCHEMA = object({
     items: object({
       id: text(60, 1), title: text(160, 1), project: text(80),
       weekdays: { type: "array", minItems: 1, maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
-      startTime: text(5, 5), endTime: text(5, 5), from: text(10, 10), to: text(10, 10),
+      startMinute: minute, endMinute: minute, from: text(10, 10), to: text(10, 10),
       exceptions: { type: "array", maxItems: 30, items: text(10, 10) }, location: text(120),
-      sourceRef: text(60, 1), quote: text(400, 1), confidence
+      refs: REFS, confidence
     })
   },
   questions: { type: "array", maxItems: 10, items: text(300, 1) },
@@ -72,10 +80,16 @@ export const DATE_EXTRACTION_SCHEMA = object({
     type: "array", maxItems: 12,
     items: object({
       id: text(60, 1), kind: { type: "string", enum: [...DATE_KINDS] }, title: text(160, 1), project: text(80),
-      sourceRef: text(60, 1), quote: text(400, 1), note: text(300)
+      refs: REFS, note: text(300)
     })
   }
 });
+
+/** `HH:MM` for minutes after midnight; "" for none. */
+export function clockOf(minutes: unknown): string {
+  if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes < 0 || minutes > 1440) return "";
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;

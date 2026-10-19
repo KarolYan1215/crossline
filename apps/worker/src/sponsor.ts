@@ -23,9 +23,10 @@ export const SPONSOR_EVAL_PREFIX = "sponsor-eval:";
 const CONFORMANCE_SKILL = "crossline:crossline-conformance";
 /**
  * Records made before this version lack the per-run log (`sponsor-eval/<model>.jsonl`) the comparison is read from, and are tested
- * again so every candidate is measured the same way.
+ * again so every candidate is measured the same way. 4 (2026-10-19): the interview cites sentence numbers and writes times as minutes,
+ * so every candidate is measured again on the schemas it will actually be asked for.
  */
-export const SPONSOR_EVAL_VERSION = 3;
+export const SPONSOR_EVAL_VERSION = 4;
 /**
  * The sample interview's own version: a change to the interview prompt or the script re-runs only the three sample turns of every
  * candidate (minutes and a few jiao each), not its thirty-odd conformance runs.

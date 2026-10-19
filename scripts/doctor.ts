@@ -43,7 +43,7 @@ orphans("evidence 指向不存在的作业",
   `SELECT c.id AS id, c.work_order_id AS target FROM evidence_claims c
    WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = c.work_order_id AND w.workspace_id = c.workspace_id)`);
 orphans("等待项指向不存在的作业",
-  `SELECT COUNT(*) AS n FROM waiting_items i, json_each(i.blocks_json) b
+  `SELECT i.id AS id, b.value AS target FROM waiting_items i, json_each(i.blocks_json) b
    WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = b.value AND w.workspace_id = i.workspace_id)`);
 orphans("material 指向不存在的作业",
   `SELECT m.id AS id, m.work_order_id AS target FROM materials m
@@ -79,6 +79,31 @@ const present = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'
   .map((row) => row.name);
 for (const table of retired.filter((name) => present.includes(name))) {
   findings.push(`schema 陈旧：${table} 本应在迁移 4 删除`);
+}
+
+// Numbered evidence (migration 16): a fact pointing at a sentence that is not there, or a sentence whose reply or file is gone. Removing
+// a file deletes its sentences and unhooks the facts, so either is a half-applied change, not normal use.
+if (Number(db.pragma("user_version", { simple: true })) >= 16) {
+  for (const [table, column] of [["profile_facts", "source_sentences"], ["source_documents", "ref_no"]] as const)
+    if (!columns(table).includes(column)) findings.push(`schema 不完整：${table} 缺少 ${column}（半迁移）`);
+  if (!present.includes("evidence_sentences")) findings.push("schema 不完整：缺少 evidence_sentences（半迁移）");
+  else {
+    const dangling = (db.prepare(`SELECT f.slot AS slot, s.value AS id FROM profile_facts f, json_each(f.source_sentences) s
+      WHERE NOT EXISTS (SELECT 1 FROM evidence_sentences e WHERE e.workspace_id = f.workspace_id AND e.id = s.value)`).all() as Array<{ slot: string; id: number }>);
+    for (const row of dangling) findings.push(`事实指向不存在的句子：${row.slot} → [${row.id}]`);
+    orphans("句子的文件已不存在",
+      `SELECT DISTINCT e.source_id AS id, e.source_id AS target FROM evidence_sentences e WHERE e.source_kind = 'document'
+       AND NOT EXISTS (SELECT 1 FROM source_documents d WHERE d.workspace_id = e.workspace_id AND d.id = e.source_id)`);
+    orphans("句子的回复已不存在",
+      `SELECT DISTINCT e.source_id AS id, e.source_id AS target FROM evidence_sentences e WHERE e.source_kind = 'reply'
+       AND NOT EXISTS (SELECT 1 FROM onboarding_messages m WHERE m.workspace_id = e.workspace_id
+         AND m.session_id || '#' || m.seq = e.source_id AND m.role = 'user')`);
+    const numbers = db.prepare(`SELECT workspace_id AS ws, ref_no AS n, COUNT(*) AS c FROM source_documents WHERE ref_no IS NOT NULL
+      GROUP BY workspace_id, ref_no HAVING COUNT(*) > 1`).all() as Array<{ ws: string; n: number }>;
+    for (const row of numbers) findings.push(`文件编号重复：src-${row.n}（${row.ws}）`);
+    const unnumbered = (db.prepare("SELECT COUNT(*) AS c FROM source_documents WHERE ref_no IS NULL").get() as { c: number }).c;
+    if (unnumbered) findings.push(`${unnumbered} 个文件没有固定编号（迁移 16 未回填）`);
+  }
 }
 
 const version = Number(db.pragma("user_version", { simple: true }));
