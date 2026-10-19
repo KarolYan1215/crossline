@@ -6,7 +6,7 @@ import { conformanceCases, summarizeConformance } from "@crossline/core";
 import { decideRoute, setUsageSink } from "@crossline/codex";
 import { CrosslineStore, SPONSOR_SETTING } from "@crossline/db";
 import { createModelProviderService, RUNTIME_VERSION } from "./model-provider";
-import { createSponsorService, SPONSOR_EVAL_VERSION, type SponsorDialogueLog, type SponsorRunLog } from "./sponsor";
+import { createSponsorService, extractRecall, SPONSOR_DIALOGUE_SCRIPT, SPONSOR_EVAL_VERSION, SPONSOR_EXTRACT_EXPECTED, type SponsorDialogueLog, type SponsorExtractLog, type SponsorRunLog } from "./sponsor";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
 const dirs: string[] = [];
@@ -94,5 +94,13 @@ test("an evaluation logs every run with what the validator sent back, and a mode
     const dialogue = readFileSync(path.join(dataDir, "sponsor-eval", "org_Broken.dialogue.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as SponsorDialogueLog);
     expect(dialogue).toHaveLength(1);
     expect(dialogue[0]).toMatchObject({ model: "org/Broken", turn: 1, ok: false });
+    // The extraction is tried on the reply that was stored; its failure is logged, not thrown.
+    const extract = readFileSync(path.join(dataDir, "sponsor-eval", "org_Broken.extract.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as SponsorExtractLog);
+    expect(extract.every((line) => line.kind === "extract" && line.ok === false)).toBe(true);
   } finally { setUsageSink(undefined); }
 }, 60_000);
+
+test("the sample's own replies hold every statement the extraction is scored on", () => {
+  expect(extractRecall(SPONSOR_DIALOGUE_SCRIPT.join("\n"))).toHaveLength(SPONSOR_EXTRACT_EXPECTED.length);
+  expect(extractRecall("研究者/ms/stage=研二 (confirmed)\n研究者/ms/deadline=12 月中投会议论文 (confirmed)")).toEqual(["研二", "12 月中投稿"]);
+});

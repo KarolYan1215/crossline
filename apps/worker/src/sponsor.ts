@@ -9,6 +9,8 @@ import {
 import { runCodexSkill, withUsageWorkspace, threadProvider, type CodexRpcBoundary, type GatewayUpstream, type ModelGateway, type ProviderConfig, type ProviderRouting, type SkillUsage } from "@crossline/codex";
 import { CrosslineStore, sponsorshipOf, type StoredOnboardingMessage } from "@crossline/db";
 import { LINE_SETTING, type LineSpec } from "@crossline/identity-packs";
+import { createOnboardingExtractor } from "./onboarding-extract";
+import { readSectionRecords } from "./onboarding-persist";
 import { createOnboardingSessionRunner } from "./onboarding-session";
 import { RUNTIME_VERSION } from "./model-provider";
 
@@ -31,9 +33,10 @@ const CONFORMANCE_SKILL = "crossline:crossline-conformance";
 export const SPONSOR_EVAL_VERSION = 5;
 /**
  * The sample interview's own version: a change to the interview prompt or the script re-runs only the three sample turns of every
- * candidate (minutes and a few jiao each), not its thirty-odd conformance runs.
+ * candidate (minutes and a few jiao each), not its thirty-odd conformance runs. 3 (2026-10-19): the extraction is run once on the sample's
+ * replies too, so each candidate's speed and recall on the background layer can be compared (the owner asked whether a faster model would do).
  */
-export const SPONSOR_DIALOGUE_VERSION = 2;
+export const SPONSOR_DIALOGUE_VERSION = 3;
 /** Usage and routing key of a candidate's sample interview (`sponsor-eval:dialogue:<model>`): counted with the evaluation, never a ledger. */
 export const SPONSOR_DIALOGUE_PREFIX = `${SPONSOR_EVAL_PREFIX}dialogue:`;
 
@@ -72,6 +75,28 @@ export type SponsorRunLog = {
   tokens: { input: number; cached: number; output: number; reasoning: number };
 };
 
+/**
+ * What the sample's replies state, each as a pattern the recorded facts should contain: how much of it one extraction run wrote down.
+ * Read off `SPONSOR_DIALOGUE_SCRIPT`; a change there changes these.
+ */
+export const SPONSOR_EXTRACT_EXPECTED: ReadonlyArray<{ label: string; pattern: RegExp }> = [
+  { label: "研二", pattern: /研二|二年级/ }, { label: "忆阻器仿真", pattern: /忆阻器/ }, { label: "12 月中投稿", pattern: /12\s*月/ },
+  { label: "数据差一半", pattern: /一半/ }, { label: "排期工具", pattern: /排期/ }, { label: "还没有用户", pattern: /没有用户|无用户|0\s*个?用户|零用户/ },
+  { label: "800 粉丝", pattern: /800/ }, { label: "目标 1 万", pattern: /1\s*万|10000|10,000/ }, { label: "周一三五上午", pattern: /周一|星期一|一、三、五|一三五/ },
+  { label: "每周 50 小时", pattern: /50/ }, { label: "晚上效率高", pattern: /晚上|夜间|夜里/ }
+];
+
+/** Which of the expected statements a text holds. */
+export const extractRecall = (text: string) => SPONSOR_EXTRACT_EXPECTED.filter((item) => item.pattern.test(text)).map((item) => item.label);
+
+/** The extraction run on the sample interview's replies, as logged: time, tokens and what it wrote (all of it synthetic). */
+export type SponsorExtractLog = {
+  at: string; model: string; kind: "extract"; ok: boolean; code?: string; message?: string; replies: number;
+  serviceMs: number | null; wallMs: number; repairs: number;
+  tokens: { input: number; cached: number; output: number; reasoning: number };
+  facts: string[]; projects: string[]; sections: string[]; recalled: string[]; recall: number;
+};
+
 type Saved = { evaluations: SponsorEvaluation[] };
 
 export function sponsorFromEnv(env: NodeJS.ProcessEnv = process.env): { key: string; baseUrl: string; models: SponsorModel[]; capYuan: number } | undefined {
@@ -99,6 +124,7 @@ export function createSponsorService(options: {
   const slug = (model: string) => model.replace(/[^A-Za-z0-9._-]+/g, "_");
   const logFile = (model: string) => path.join(logDir, `${slug(model)}.jsonl`);
   const dialogueFile = (model: string) => path.join(logDir, `${slug(model)}.dialogue.jsonl`);
+  const extractFile = (model: string) => path.join(logDir, `${slug(model)}.extract.jsonl`);
   let evaluating = false;
 
   const settings = () => sponsorFromEnv(env);
@@ -307,7 +333,37 @@ export function createSponsorService(options: {
         // A turn that failed leaves nothing to answer: the rest of the script would only measure the same failure again.
         if (!line.ok) break;
       }
+      await sampleExtraction(client, model, scratch, workspaceId, key).catch((error: unknown) => console.info(JSON.stringify({ type: "sponsor.extract_failed",
+        model: model.model, message: error instanceof Error ? error.message.slice(0, 160) : "unknown" })));
     } finally { scratch.close(); }
+  }
+
+  /**
+   * One extraction run over the sample's replies, routed to the same candidate: how long the background layer takes on it and how much
+   * of what the person said it wrote down (`extractRecall`). Logged whole; it does not enter the automatic choice.
+   */
+  async function sampleExtraction(client: CodexRpcBoundary, model: SponsorModel, scratch: CrosslineStore, workspaceId: string, key: string): Promise<void> {
+    writeFileSync(extractFile(model.model), "", "utf8");
+    const replies = scratch.listOnboardingMessages(workspaceId, "sample").filter((message) => message.role === "user").length;
+    if (!replies) return;
+    const started = Date.now();
+    runUsage.delete(key);
+    const extractor = createOnboardingExtractor(scratch, workspaceId, options.cwd, () => client);
+    const outcome = await withUsageWorkspace(key, () => extractor.runOnce(["sample"]));
+    const usage = runUsage.get(key);
+    const facts = scratch.listProfileFacts(workspaceId).map((fact) => `${fact.identityId ?? ""}/${fact.projectId ?? ""}/${fact.slot}=${fact.value} (${fact.status})`);
+    const projects = scratch.listProjects(workspaceId).filter((project) => !/-default$/.test(project.id)).map((project) => `${project.identityId}/${project.name}`);
+    const sections = Object.entries(readSectionRecords(scratch, workspaceId)).filter(([, record]) => record).map(([section]) => section);
+    const corpus = [...facts, ...projects, scratch.getSetting(workspaceId, "lines.profiles") ?? "", JSON.stringify(readSectionRecords(scratch, workspaceId))].join("\n");
+    const recalled = extractRecall(corpus);
+    const line: SponsorExtractLog = { at: new Date(started).toISOString(), model: model.model, kind: "extract", ok: outcome.state === "done",
+      ...(outcome.state === "blocked" ? { code: outcome.code, message: outcome.message.slice(0, 300) } : {}), replies,
+      serviceMs: usage ? usage.durationMs : null, wallMs: Date.now() - started, repairs: usage?.repairs ?? 0,
+      tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 },
+      facts, projects, sections, recalled, recall: Math.round(recalled.length / SPONSOR_EXTRACT_EXPECTED.length * 100) / 100 };
+    try { appendFileSync(extractFile(model.model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading only */ }
+    console.info(JSON.stringify({ type: "sponsor.extract_sampled", model: model.model, ok: line.ok, code: line.code, serviceMs: line.serviceMs,
+      wallMs: line.wallMs, recall: line.recall, facts: facts.length, output: line.tokens.output, reasoning: line.tokens.reasoning }));
   }
 
   /**
@@ -318,7 +374,7 @@ export function createSponsorService(options: {
     if (!workspaceId?.startsWith(SPONSOR_DIALOGUE_PREFIX) || !settings()) return undefined;
     const model = workspaceId.slice(SPONSOR_DIALOGUE_PREFIX.length);
     return { provider: providerFor(model), gatewayUrl: options.gateway.urlFor(workspaceId, SPONSOR_PROVIDER_ID),
-      admitted: new Set(["crossline-onboarding"]), codexSignedIn: false, capabilities: options.capabilities };
+      admitted: new Set(["crossline-onboarding", "crossline-onboarding-extract"]), codexSignedIn: false, capabilities: options.capabilities };
   }
 
   /** The usage sink's share: evaluation runs are counted here, never written to a workspace's ledger. */
