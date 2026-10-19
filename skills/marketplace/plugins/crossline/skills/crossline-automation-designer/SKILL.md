@@ -31,7 +31,7 @@ List the steps in order with who does each. A step that sends, replies, posts, u
 
 ## Changing one that exists
 
-`existing` lists the person's automations. When the request changes one of them (「把邮件整理改成每天两次」「那个网页监控别再提醒了，改成只记下来」), answer with the whole changed automation and `replaces` set to its id; it keeps its history. A new automation has `replaces` `""`.
+`existing` lists the person's automations. When the request changes one of them (「把邮件整理改成每天两次」「那个网页监控别再提醒了，改成只记下来」), answer with the whole changed automation and `replaces` set to its id; it keeps its history. A new automation has `replaces` `""`. `enabled` is false only when the request is to stop or pause one (「先停掉那个网页监控」), with `replaces` set to it and everything else as it was; otherwise true.
 
 ## Line
 

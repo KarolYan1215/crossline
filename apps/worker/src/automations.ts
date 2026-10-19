@@ -101,7 +101,7 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
   const previous = plan.replaces ? existing.find((item) => item.id === plan.replaces) : undefined;
   if (!previous && existing.length >= AUTOMATIONS_MAX) return fail(`已经有 ${AUTOMATIONS_MAX} 个自动化，先删掉不用的。`);
   const id = previous?.id ?? `auto-${createHash("sha256").update(requestId).digest("hex").slice(0, 8)}`;
-  const automation: Automation = { id, name: plan.name, summary: plan.summary, lineId: plan.lineId, status: "active", trigger: plan.trigger, action: plan.action, steps: plan.steps,
+  const automation: Automation = { id, name: plan.name, summary: plan.summary, lineId: plan.lineId, status: plan.enabled ? "active" : "off", trigger: plan.trigger, action: plan.action, steps: plan.steps,
     origin: previous?.origin ?? { kind: "asked", text, requestId }, createdAt: previous?.createdAt ?? now.toISOString(), updatedAt: now.toISOString(),
     runs: previous?.runs ?? 0, ...(previous?.lastFiredAt ? { lastFiredAt: previous.lastFiredAt } : {}),
     ...(previous?.watch && previous.trigger.type === "watch" && plan.trigger.type === "watch" && previous.trigger.url === plan.trigger.url ? { watch: previous.watch } : {}) };
@@ -113,7 +113,8 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
   deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.created:${requestId}`, type: "automation.created", entityId: id,
     payload: { requestId, name: plan.name, trigger: plan.trigger.type, action: plan.action.kind, ...(previous ? { replaced: previous.id } : {}) } });
   const person = plan.steps.filter((step) => step.by === "person").map((step) => step.title);
-  sayToPerson(deps.store, workspaceId, [`${previous ? "已按要求改好" : "已建好"}自动化「${plan.name}」：${triggerLabel(plan.trigger)}，${plan.summary}`,
+  sayToPerson(deps.store, workspaceId, [!plan.enabled ? `已暂停自动化「${plan.name}」，要恢复在设置里点「恢复」或再说一句。`
+    : `${previous ? "已按要求改好" : "已建好"}自动化「${plan.name}」：${triggerLabel(plan.trigger)}，${plan.summary}`,
     person.length ? `其中「${person.join("」「")}」由本人完成。` : "", allowed && automation.action.kind === "run" ? `已按这个请求为助手开启「${AGENT_CATEGORIES[automation.action.category]}」。` : "",
     plan.assumptions ? `按以下理解建立：${plan.assumptions}` : ""].filter(Boolean).join("\n"), "automation_created", `automation:${requestId}`,
   [{ label: "查看与修改", href: "/settings#automation" }], now);
