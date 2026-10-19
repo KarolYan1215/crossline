@@ -6,6 +6,8 @@
  *
  * This file is the translation only (pure functions); `model-gateway.ts` is the local listener that uses it.
  */
+import { thinkingVariant } from "@crossline/core";
+
 export type BridgeUpstream = {
   /** Everything before `/chat/completions`, e.g. `https://api.deepseek.com/v1`. */
   baseUrl: string;
@@ -16,6 +18,11 @@ export type BridgeUpstream = {
   responseFormat?: "json_schema" | "json_object";
   /** Passes `reasoning.effort` on as `reasoning_effort`; off by default because most compatible endpoints reject the field. */
   reasoningEffort?: boolean;
+  /**
+   * The endpoint takes SiliconFlow's `enable_thinking` / `thinking_budget`: a model named `<model>@think:off|<tokens>` is sent as
+   * `<model>` with those set (`thinkingVariant`). Without it the name goes through as written.
+   */
+  thinkingControl?: boolean;
 };
 
 type Json = Record<string, unknown>;
@@ -57,7 +64,7 @@ export function freeformDescription(description: string): string {
 }
 
 /** One Responses request as one Chat Completions request. `dropped` names what had no Chat Completions form. */
-export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "responseFormat" | "reasoningEffort"> = {}): ChatRequest {
+export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "responseFormat" | "reasoningEffort" | "thinkingControl"> = {}): ChatRequest {
   const dropped = new Set<string>();
   const system: string[] = [];
   if (text(request.instructions)) system.push(text(request.instructions));
@@ -133,15 +140,17 @@ export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "r
   }
 
   const effort = text(record(request.reasoning)?.effort);
+  const variant = upstream.thinkingControl ? thinkingVariant(text(request.model)) : undefined;
   const body: Json = {
-    model: request.model,
+    model: variant ? variant.base : request.model,
     messages: [...(system.length ? [{ role: "system", content: system.join("\n\n") }] : []), ...messages],
     stream: true,
     stream_options: { include_usage: true },
     ...(tools.length ? { tools, tool_choice: request.tool_choice === "none" ? "none" : "auto",
       ...(typeof request.parallel_tool_calls === "boolean" ? { parallel_tool_calls: request.parallel_tool_calls } : {}) } : {}),
     ...(responseFormat ? { response_format: responseFormat } : {}),
-    ...(upstream.reasoningEffort && effort ? { reasoning_effort: effort } : {})
+    ...(upstream.reasoningEffort && effort ? { reasoning_effort: effort } : {}),
+    ...(variant?.thinking ? { enable_thinking: variant.thinking.enable, ...(variant.thinking.budget ? { thinking_budget: variant.thinking.budget } : {}) } : {})
   };
   return { body, dropped: [...dropped], tools: names };
 }

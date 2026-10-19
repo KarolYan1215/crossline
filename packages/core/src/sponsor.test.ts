@@ -43,3 +43,11 @@ test("a measurement with token totals is priced at the current prices, so new pr
   expect(evaluationYuanPerRun(evaluations[0]!, cheapOutput)).toBe(1.232);
   expect(chooseSponsorModel(cheapOutput, evaluations)).toMatchObject({ model: "x", yuanPerRun: 1.232 });
 });
+
+test("a thinking variant is priced as its base model, and only off or a token count is a variant", async () => {
+  const { sponsorSpend, thinkingVariant } = await import("./sponsor");
+  expect(thinkingVariant("deepseek-ai/DeepSeek-V4.1-Flash@think:off")).toEqual({ base: "deepseek-ai/DeepSeek-V4.1-Flash", thinking: { enable: false } });
+  expect(thinkingVariant("m@think:99999")).toEqual({ base: "m", thinking: { enable: true, budget: 32768 } });
+  expect(thinkingVariant("qwen3:8b")).toEqual({ base: "qwen3:8b" });
+  expect(sponsorSpend([{ model: "m@think:2048", inputTokens: 1_000_000, outputTokens: 0 }], [{ model: "m", priceIn: 2, priceOut: 8 }])).toBe(2);
+});

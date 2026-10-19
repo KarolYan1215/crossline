@@ -514,6 +514,7 @@ export * from "./public-skills";
 export * from "./workflows";
 export * from "./ai-tools";
 export * from "./provider-conformance";
+export { dropEnumSlips } from "./json-schema-check";
 export * from "./local-stamp";
 export * from "./onboarding-progress";
 export * from "./onboarding-pace";

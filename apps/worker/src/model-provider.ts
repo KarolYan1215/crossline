@@ -1,6 +1,6 @@
 import { caseTools } from "./conformance-tools";
 import {
-  admittedSkills, conformanceCases, conformanceCurrent, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
+  admittedSkills, conformanceCases, conformanceCurrent, conformanceProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
   capabilityGap, THIRD_PARTY_CAPABILITIES, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
 } from "@crossline/core";
 import {
@@ -157,7 +157,7 @@ export function createModelProviderService(options: {
           developerInstructions: "Answer the conformance case as the Skill describes. Return raw JSON only.", outputSchema: item.schema,
           prepareInput: () => input, onAudit: () => {}, timeoutMs: 20 * 60_000,
           validateOutput: (output) => {
-            const problems = jsonSchemaProblems(output, item.schema);
+            const problems = conformanceProblems(item.id, output, item.schema);
             if (problems.length) throw Object.assign(new Error("CONFORMANCE_SCHEMA_VIOLATED"), { detail: problems.slice(0, 6).join("; ") });
             offered.check(output);
             return output;

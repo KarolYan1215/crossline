@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { caseTools } from "./conformance-tools";
 import path from "node:path";
 import {
-  admittedSkills, chooseSponsorModel, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, jsonSchemaProblems, parseSponsorModels, sponsorMonth, sponsorSpend,
+  admittedSkills, chooseSponsorModel, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, conformanceProblems, parseSponsorModels, sponsorMonth, sponsorSpend,
   SPONSOR_MONTHLY_CAP_CNY, summarizeConformance, type ConformanceRecord, type ConformanceRun, type CostSignal, type ProviderCapabilities,
   type SponsorEvaluation, type SponsorModel
 } from "@crossline/core";
@@ -99,6 +99,19 @@ export type SponsorExtractLog = {
   facts: string[]; projects: string[]; sections: string[]; recalled: string[]; recall: number;
 };
 
+/**
+ * The thinking trial (2026-10-19, the owner: 「赞助模型规划太慢：先做测试」): on the planning Skills the developer's model spent most of its
+ * time reasoning (the step planner's median run 510 s with 14k reasoning tokens). The chosen model and the fastest candidate run each
+ * planning case with thinking as it is, capped at 2048 tokens and off, logged in `<model>.effort.jsonl` so a lower setting is chosen
+ * from measurements, not guessed. It does not enter the automatic choice.
+ */
+export const SPONSOR_EFFORT_VERSION = 1;
+export const SPONSOR_EFFORT_CASES = ["STEP_PLAN_SCHEMA", "BACKPLAN_SCHEMA", "MILESTONE_PROPOSAL_SCHEMA", "ANALYSIS_OUTPUT_SCHEMA", "ONBOARDING_EXTRACT_SCHEMA", "ARTIFACT_PLAN_SCHEMA"];
+export const SPONSOR_EFFORT_VARIANTS = ["", "@think:2048", "@think:off"] as const;
+const FAST_CANDIDATE = "deepseek-ai/DeepSeek-V4-Flash";
+export type SponsorEffortLog = { at: string; model: string; variant: string; caseId: string; ok: boolean; code?: string; repairs: number;
+  serviceMs: number | null; wallMs: number; tokens: { input: number; cached: number; output: number; reasoning: number } };
+
 type Saved = { evaluations: SponsorEvaluation[] };
 
 export function sponsorFromEnv(env: NodeJS.ProcessEnv = process.env): { key: string; baseUrl: string; models: SponsorModel[]; capYuan: number } | undefined {
@@ -127,6 +140,7 @@ export function createSponsorService(options: {
   const logFile = (model: string) => path.join(logDir, `${slug(model)}.jsonl`);
   const dialogueFile = (model: string) => path.join(logDir, `${slug(model)}.dialogue.jsonl`);
   const extractFile = (model: string) => path.join(logDir, `${slug(model)}.extract.jsonl`);
+  const effortFile = (model: string) => path.join(logDir, `${slug(model)}.effort.jsonl`);
   let evaluating = false;
 
   const settings = () => sponsorFromEnv(env);
@@ -172,7 +186,7 @@ export function createSponsorService(options: {
   /** What the gateway forwards to: the sponsor's base URL with the server key; the model is the one the thread names. */
   const upstream = (): GatewayUpstream | undefined => {
     const config = settings();
-    return config ? { kind: "chat", baseUrl: config.baseUrl, responseFormat: "json_object", key: config.key } : undefined;
+    return config ? { kind: "chat", baseUrl: config.baseUrl, responseFormat: "json_object", key: config.key, thinkingControl: true } : undefined;
   };
 
   /** Models the key can use, or undefined when the list cannot be read (then every candidate is tried). */
@@ -234,6 +248,20 @@ export function createSponsorService(options: {
       }));
     } finally { evaluating = false; }
     const pick = chosen();
+    // The thinking trial on the chosen model and the fastest candidate, once per trial version.
+    const trial = [...new Set([pick?.model, FAST_CANDIDATE].filter((model): model is string => Boolean(model)))]
+      .filter((model) => currentEvaluations().some((item) => item.model === model && item.effortVersion !== SPONSOR_EFFORT_VERSION));
+    if (trial.length) {
+      evaluating = true;
+      try {
+        await Promise.all(trial.map(async (model) => {
+          await effortTrial(client, model).catch((error: unknown) => console.info(JSON.stringify({ type: "sponsor.effort_failed", model,
+            message: error instanceof Error ? error.message.slice(0, 160) : "unknown" })));
+          const saved = read().evaluations.map((item) => item.model === model ? { ...item, effortVersion: SPONSOR_EFFORT_VERSION } : item);
+          writeFileSync(file, JSON.stringify({ evaluations: saved } satisfies Saved, null, 2), "utf8");
+        }));
+      } finally { evaluating = false; }
+    }
     // Every measured candidate at the current prices, so a price change shows its effect on the next start.
     const candidates = currentEvaluations().map((item) => ({ model: item.model, passRate: item.record.passRate,
       yuanPerRun: evaluationYuanPerRun(item, config.models), tokens: item.tokens ?? null }));
@@ -265,7 +293,7 @@ export function createSponsorService(options: {
         developerInstructions: "Answer the conformance case as the Skill describes. Return raw JSON only.", outputSchema: item.schema,
         prepareInput: () => input, onAudit: (next) => { audit = next; }, timeoutMs: 20 * 60_000,
         validateOutput: (output) => {
-          const problems = jsonSchemaProblems(output, item.schema);
+          const problems = conformanceProblems(item.id, output, item.schema);
           if (problems.length) {
             rejections.push({ problems: problems.slice(0, 6).join("; ").slice(0, 500), answer: JSON.stringify(output).slice(0, 600) });
             throw Object.assign(new Error("CONFORMANCE_SCHEMA_VIOLATED"), { detail: problems.slice(0, 6).join("; ") });
@@ -295,6 +323,42 @@ export function createSponsorService(options: {
     const evaluation: SponsorEvaluation = { model: model.model, record, yuanPerRun: 0, version: SPONSOR_EVAL_VERSION, dialogueVersion: SPONSOR_DIALOGUE_VERSION,
       tokens: { input: tokens.inputTokens, cached: tokens.cachedInputTokens, output: tokens.outputTokens, runs: runs.length } };
     return { ...evaluation, yuanPerRun: evaluationYuanPerRun(evaluation, [model]) };
+  }
+
+  /** Each planning case once per thinking setting, on one candidate; the log line per run is the measurement. */
+  async function effortTrial(client: CodexRpcBoundary, model: string): Promise<void> {
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(effortFile(model), "", "utf8");
+    const cases = conformanceCases().filter((item) => SPONSOR_EFFORT_CASES.includes(item.id));
+    const summary: Record<string, { ok: number; runs: number; serviceMs: number; reasoning: number }> = {};
+    for (const variant of SPONSOR_EFFORT_VARIANTS) {
+      const named = `${model}${variant}`;
+      const thread = threadProvider({ provider: providerFor(named), gatewayUrl: options.gateway.urlFor(`${SPONSOR_EVAL_PREFIX}${model}`, SPONSOR_PROVIDER_ID) }, named);
+      const key = `${SPONSOR_EVAL_PREFIX}effort:${named}`;
+      for (const item of cases) {
+        const started = Date.now();
+        const input = { version: "crossline.conformance.v1", caseId: item.id, prompt: item.prompt };
+        runUsage.delete(key);
+        const offered = caseTools(item);
+        const result = await withUsageWorkspace(key, () => runCodexSkill<unknown>(client, input, { skillName: CONFORMANCE_SKILL, cwd: options.cwd, provider: thread,
+          ...(offered.tools ? { tools: offered.tools } : {}),
+          developerInstructions: "Answer the conformance case as the Skill describes. Return raw JSON only.", outputSchema: item.schema,
+          prepareInput: () => input, onAudit: () => {}, timeoutMs: 20 * 60_000,
+          validateOutput: (output) => {
+            const problems = conformanceProblems(item.id, output, item.schema);
+            if (problems.length) throw Object.assign(new Error("CONFORMANCE_SCHEMA_VIOLATED"), { detail: problems.slice(0, 6).join("; ") });
+            return output;
+          } })).catch((error: unknown) => ({ ok: false as const, blocker: { code: error instanceof Error ? error.message : "SKILL_RUNTIME_FAILED", message: "" }, audit: {} as { repairs?: number } }));
+        const usage = runUsage.get(key);
+        const line: SponsorEffortLog = { at: new Date(started).toISOString(), model, variant: variant || "default", caseId: item.id, ok: result.ok,
+          ...(result.ok ? {} : { code: result.blocker.code }), repairs: result.audit.repairs ?? 0, serviceMs: usage ? usage.durationMs : null, wallMs: Date.now() - started,
+          tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 } };
+        try { appendFileSync(effortFile(model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading only */ }
+        const tally = summary[line.variant] ??= { ok: 0, runs: 0, serviceMs: 0, reasoning: 0 };
+        tally.runs += 1; tally.ok += line.ok ? 1 : 0; tally.serviceMs += line.serviceMs ?? line.wallMs; tally.reasoning += line.tokens.reasoning;
+      }
+    }
+    console.info(JSON.stringify({ type: "sponsor.effort_sampled", model, variants: summary }));
   }
 
   /**

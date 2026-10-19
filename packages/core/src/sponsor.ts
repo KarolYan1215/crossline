@@ -49,11 +49,23 @@ export function tokenYuan(usage: Omit<UsageForPrice, "model">, price: SponsorMod
   return ((usage.inputTokens - cached) * price.priceIn + cached * (price.priceCached ?? price.priceIn) + usage.outputTokens * price.priceOut) / 1_000_000;
 }
 
+/**
+ * How much a model may think, written after its name (2026-10-19, measuring whether planning gets faster with less reasoning):
+ * `<model>@think:off` turns thinking off, `<model>@think:<tokens>` caps it. Only a gateway route that says it understands this
+ * (`thinkingControl`, SiliconFlow's `enable_thinking`/`thinking_budget`) acts on it; the base name is what is priced.
+ */
+export function thinkingVariant(model: string): { base: string; thinking?: { enable: boolean; budget?: number } } {
+  const match = /^(.+)@think:(off|\d{3,5})$/.exec(model);
+  if (!match) return { base: model };
+  return match[2] === "off" ? { base: match[1]!, thinking: { enable: false } }
+    : { base: match[1]!, thinking: { enable: true, budget: Math.min(32768, Math.max(128, Number(match[2]))) } };
+}
+
 /** Yuan spent on the sponsor's models; rows on any other model (the account's own ChatGPT) are not counted. */
 export function sponsorSpend(usage: UsageForPrice[], models: SponsorModel[]): number {
   const byName = new Map(models.map((model) => [model.model, model]));
   return usage.reduce((sum, row) => {
-    const price = byName.get(row.model);
+    const price = byName.get(thinkingVariant(row.model).base);
     return price ? sum + tokenYuan(row, price) : sum;
   }, 0);
 }
@@ -75,6 +87,8 @@ export type SponsorEvaluation = {
   version?: number;
   /** The sample interview's version (`SPONSOR_DIALOGUE_VERSION`); an older one has only its sample interview run again. */
   dialogueVersion?: number;
+  /** The version of the thinking trial last run on this candidate (`SPONSOR_EFFORT_VERSION` in the worker). */
+  effortVersion?: number;
 };
 
 /** Yuan per conformance run at the current prices. */

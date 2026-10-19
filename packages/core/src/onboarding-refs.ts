@@ -1,6 +1,7 @@
 import { clockOf, quoteSupportsDate, type DateExtraction } from "./date-schema";
-import { DIALOGUE_KEYS, EXTRACT_KEYS, PROFILE_SECTIONS, SECTION_FIELDS, keepOnboardingTurn, validateOnboardingTurn, type EvidenceSentence, type KnownSources, type OnboardingDialogue, type OnboardingExtraction,
+import { DIALOGUE_KEYS, EXTRACT_KEYS, ONBOARDING_EXTRACT_SCHEMA, PROFILE_SECTIONS, SECTION_FIELDS, keepOnboardingTurn, validateOnboardingTurn, type EvidenceSentence, type KnownSources, type OnboardingDialogue, type OnboardingExtraction,
   type OnboardingTurn } from "./onboarding-turn-schema";
+import { dropEnumSlips } from "./json-schema-check";
 import { numbersSupported } from "./sentences";
 
 /**
@@ -163,8 +164,10 @@ const EXTRACT_LISTS = ["slotUpdates", "projectsDetected", "flywheelCandidates", 
 // A slot built from a line id that has a hyphen in it (「flywheel_line-x-3_informs」) was refused and the whole answer with it: slots are
 // normalised to their own alphabet instead.
 const slotName = (slot: unknown) => typeof slot === "string" ? slot.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) : slot;
-const asExtraction = (value: unknown) => {
-  if (!value || typeof value !== "object") return value;
+const asExtraction = (raw: unknown) => {
+  if (!raw || typeof raw !== "object") return raw;
+  // An enum slip in one list item (a cheaper model's 「love: "medium"」) costs that item, not the run (2026-10-19).
+  const value = dropEnumSlips(raw, ONBOARDING_EXTRACT_SCHEMA);
   const lists = Object.fromEntries(EXTRACT_LISTS.map((key) => [key, Array.isArray((value as Wire)[key]) ? (value as Wire)[key] as Wire[] : []]));
   lists.slotUpdates = (lists.slotUpdates as Wire[]).map((update) => update && typeof update === "object" ? { ...update, slot: slotName(update.slot) } : update);
   return { ...(value as Wire), ...lists, ...EMPTY_DIALOGUE, stage: undefined };

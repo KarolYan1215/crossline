@@ -101,14 +101,14 @@ const MIME: Record<string, string> = {
 const FILE_LIMIT = 8 * 1024 * 1024;
 
 /** One file from a task's directory, for the review page to open. Never a path that leaves the directory, a secret, or something huge. */
-export function readTaskFile(ctx: AccessContext, taskId: string, relative: string): { body: Buffer; type: string } | undefined {
+export function readTaskFile(ctx: AccessContext, taskId: string, relative: string, limit = FILE_LIMIT): { body: Buffer; type: string } | undefined {
   const directory = taskDirectory(ctx, taskId);
   if (!directory || !relative || path.isAbsolute(relative)) return undefined;
   const full = path.resolve(directory, relative);
   if (!full.toLowerCase().startsWith(`${path.resolve(directory).toLowerCase()}${path.sep}`) || isSecretPath(full)) return undefined;
   try {
     const stat = statSync(full);
-    if (!stat.isFile() || stat.size > FILE_LIMIT) return undefined;
+    if (!stat.isFile() || stat.size > limit) return undefined;
     // An SVG is shown as text, not run: it can carry script, and this is an origin the person is signed in on.
     const type = MIME[path.extname(full).toLowerCase()];
     return { body: readFileSync(full), type: type === "image/svg+xml" ? "text/plain; charset=utf-8" : type ?? "application/octet-stream" };

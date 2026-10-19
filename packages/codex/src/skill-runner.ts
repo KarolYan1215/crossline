@@ -657,8 +657,16 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       } else if (run.agent) {
         // The assistant is meant to use tools; what it did is recorded, not refused here (the guard answers each request).
         if (item) { try { run.agent.onItem(item, message.method === "item/started" ? "started" : "completed"); } catch { /* the audit must never fail the work */ } }
+      } else if (item?.type === "mcpToolCall" && !run.allowedItemTypes.includes("mcpToolCall")
+        && (message.method === "item/started" || item.status === "failed" || item.error)) {
+        // A model on another provider sometimes calls a tool this run never offered (2026-10-19: two sponsor candidates' interview turn
+        // 1). The runtime finds no such server and hands the model an error, so nothing ran: the turn goes on. Only a call that completed
+        // is refused below.
+        if (message.method === "item/completed") console.info(JSON.stringify({ type: "skill.tool_call_refused", skill: run.skillName,
+          server: String(item.server ?? ""), tool: String(item.tool ?? ""), at: new Date().toISOString() }));
       } else if (item && !run.allowedItemTypes.includes(String(item.type)) && !HARMLESS_ITEM_TYPES.has(String(item.type))) {
-        console.info(JSON.stringify({ type: "skill.item_forbidden", skill: run.skillName, item: String(item.type), at: new Date().toISOString() }));
+        console.info(JSON.stringify({ type: "skill.item_forbidden", skill: run.skillName, item: String(item.type),
+          ...(item.type === "mcpToolCall" ? { server: String(item.server ?? ""), tool: String(item.tool ?? "") } : {}), at: new Date().toISOString() }));
         settle?.reject(withDetail(new Error("SKILL_TOOL_FORBIDDEN"), `item:${String(item.type)}`));
       }
       else if (item?.type === "imageGeneration" && message.method === "item/completed" && typeof item.result === "string" && item.result && run.onImage) {

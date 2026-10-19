@@ -127,3 +127,13 @@ test("a freeform tool travels as a function whose description no longer says 'no
   expect(tool.function.name).toBe("apply_patch");
   expect(tool.function.description).toBe(out);
 });
+
+test("a thinking variant is sent to an endpoint that takes it as the base model with thinking off or capped; elsewhere the name goes through", () => {
+  const request = (model: string) => ({ model, input: [{ type: "message", role: "user", content: "hi" }] });
+  expect(responsesToChat(request("deepseek-ai/DeepSeek-V4.1-Flash@think:off"), { thinkingControl: true }).body)
+    .toMatchObject({ model: "deepseek-ai/DeepSeek-V4.1-Flash", enable_thinking: false });
+  const capped = responsesToChat(request("deepseek-ai/DeepSeek-V4.1-Flash@think:2048"), { thinkingControl: true }).body;
+  expect(capped).toMatchObject({ model: "deepseek-ai/DeepSeek-V4.1-Flash", enable_thinking: true, thinking_budget: 2048 });
+  expect(responsesToChat(request("deepseek-ai/DeepSeek-V4.1-Flash"), { thinkingControl: true }).body).not.toHaveProperty("enable_thinking");
+  expect(responsesToChat(request("qwen3:8b@think:off")).body).toMatchObject({ model: "qwen3:8b@think:off" });
+});

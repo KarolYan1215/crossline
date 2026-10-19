@@ -41,6 +41,7 @@ import {
 import { requireSessionContext } from "../../lib/access-guard";
 import { identityLines, lineLabels } from "../../lib/lines";
 import { AutomationsCard } from "./automations-card";
+import { OutputsCard } from "./outputs-card";
 import { MailAccounts } from "../connectors/mail-accounts";
 import { interviewStatus } from "../../lib/interview-status";
 import { timed, timedSync } from "../../lib/sections";
@@ -162,7 +163,7 @@ export default async function SettingsPage() {
             recent={assistant.tasks.slice(0, 8).map((task) => ({ taskId: task.taskId, title: task.title, kind: assistant.categories.find((item) => item.category === task.category)?.label ?? "",
               status: agentTaskStatusLabel[task.status] ?? task.status, tone: TONE[task.status] ?? "neutral", day: task.requestedAt.slice(5, 10).replace("-", "/"),
               workOrderId: task.workOrderId }))} />
-          <div className="st-modules"><AutomationsCard lines={identityLines(ctx).map((line) => ({ id: line.id, label: line.label }))} /></div>
+          <div className="st-modules"><AutomationsCard lines={identityLines(ctx).map((line) => ({ id: line.id, label: line.label }))} /><OutputsCard /></div>
         </section>
 
         <section id="background" className="st-section" aria-labelledby="st-background"><h2 id="st-background">后台任务</h2>
