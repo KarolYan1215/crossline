@@ -30,3 +30,10 @@ for (const row of db.prepare("SELECT workspace_id, key, value FROM settings WHER
   console.log(["setting", row.workspace_id.slice(0, 8), row.key, String(row.value).slice(0, 600)].join("  "));
 for (const row of db.prepare("SELECT workspace_id, type, created_at, payload_json FROM events WHERE (type LIKE 'milestone%' OR type LIKE 'artifact%' OR type LIKE 'first_drafts%') AND created_at >= ? ORDER BY created_at").all(since))
   console.log([row.created_at.slice(5, 19), row.workspace_id.slice(0, 8), row.type, String(row.payload_json).slice(0, 300)].join("  "));
+
+// Tasks and their step plans: what the backplanner wrote and whether the step planner has reached them.
+for (const row of db.prepare("SELECT workspace_id, type, created_at, payload_json FROM events WHERE (type LIKE 'goal.backplan%' OR type LIKE 'task.steps%' OR type LIKE 'step_plan%' OR type LIKE 'backplan%') AND created_at >= ? ORDER BY created_at").all(since))
+  console.log([row.created_at.slice(5, 19), row.workspace_id.slice(0, 8), row.type, String(row.payload_json).slice(0, 240)].join("  "));
+try {
+  for (const row of db.prepare("SELECT workspace_id, COUNT(*) AS n FROM task_step_plans GROUP BY workspace_id").all()) console.log(["step plans", row.workspace_id.slice(0, 8), row.n].join("  "));
+} catch (error) { console.log("step plans unreadable", String(error.message).slice(0, 120)); }
