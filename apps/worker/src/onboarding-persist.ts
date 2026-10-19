@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
-  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, citationWarnings, duplicateAttributes, mergeDateExtractions,
-  resolveAvailability, sanitizeDateExtraction, withoutDecidedDates, withoutOffHours,
+  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, DEEP_SECTIONS, EMPTY_PROFILE_MODEL, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, mergeProfileSections,
+  type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, citationWarnings, duplicateAttributes, mergeDateExtractions,
+  resolveAvailability, sanitizeDateExtraction, withContentIds, withoutDecidedDates, withoutOffHours,
   type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
@@ -36,14 +37,37 @@ export type PersistContext = {
   today: string;
   /** Every file was read again: its dates replace the batch nobody answered. */
   reread: boolean;
+  /** The portrait's sections this run was to rewrite whole because their stage is over, and whether it was to write the synthesis. */
+  profileTask?: { finalize: ProfileSection[]; synthesize: boolean };
 };
+
+export function readSectionRecords(store: CrosslineStore, workspaceId: string): Partial<Record<ProfileSection, SectionRecord>> {
+  try { return JSON.parse(store.getSetting(workspaceId, PROFILE_SECTIONS_SETTING) ?? "{}") as Partial<Record<ProfileSection, SectionRecord>>; } catch { return {}; }
+}
 
 /** Writes what a validated extraction learned. Facts the person already confirmed are protected by the store. */
 export function persistExtraction(store: CrosslineStore, workspaceId: string, extraction: OnboardingExtraction, context: PersistContext): void {
   const now = new Date().toISOString();
   const { sessionId, ownerId } = context;
-  // A line's own interview adds to the facts but does not rewrite the person's whole portrait.
-  if (!sessionId.startsWith("line-") && extraction.profile) store.setSetting(workspaceId, "profile.model", JSON.stringify(extraction.profile));
+  // The portrait by section (P3): the deep sections whenever new material bears on them, the synthesis only when the run was asked for it.
+  // A line's own interview adds to the facts but does not touch the person's portrait.
+  if (!sessionId.startsWith("line-") && context.profileTask) {
+    const task = context.profileTask;
+    const allowed = new Set<ProfileSection>([...DEEP_SECTIONS, ...(task.synthesize ? ["synthesis" as const] : [])]);
+    const sections = extraction.profileSections ?? {};
+    if (PROFILE_SECTIONS.some((section) => sections[section] && allowed.has(section)))
+      store.setSetting(workspaceId, "profile.model", JSON.stringify(mergeProfileSections(readProfileModel(store, workspaceId), sections, allowed)));
+    // What each section rests on, and whether its stage is over: a section asked to be finalized is final even when there was nothing to add.
+    const records = readSectionRecords(store, workspaceId);
+    for (const section of PROFILE_SECTIONS) {
+      const written = sections[section] && allowed.has(section);
+      const final = task.finalize.includes(section) || (section === "synthesis" && Boolean(written));
+      if (!written && !final) continue;
+      const previous = records[section];
+      records[section] = { sentences: written ? sections[section]!.sentences ?? [] : previous?.sentences ?? [], final: final || Boolean(previous?.final), at: now };
+    }
+    store.setSetting(workspaceId, PROFILE_SECTIONS_SETTING, JSON.stringify(records));
+  }
   // Each line's personal description and attribute candidates, kept by line so a later run or a line's own interview refines one line
   // only. An empty candidate list keeps those on record; new ones replace them, except the attributes split from the adopted goal.
   if (extraction.lineProfiles?.length) {
@@ -125,7 +149,8 @@ export function persistFileDates(store: CrosslineStore, workspaceId: string, ext
     const ids = new Set([...(event.payload.included ?? []), ...(event.payload.excluded ?? [])]);
     return batch ? [...batch.dates, ...batch.recurring].filter((item) => ids.has(item.id)) : [];
   });
-  const unseen = withoutDecidedDates(checked.extraction, decided);
+  // Ids from what each item is: a fresh run numbers from d1 again, and its d1 must not replace an earlier run's.
+  const unseen = withoutDecidedDates(withContentIds(checked.extraction), decided);
   const fresh = { ...unseen, recurring: stated ? withoutOffHours(unseen.recurring, stated,
     store.listProjects(workspaceId, { includeArchived: true })) : unseen.recurring };
   if (!fresh.dates.length && !fresh.recurring.length && !fresh.questions.length && !(fresh.undated ?? []).length) return;

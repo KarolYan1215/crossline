@@ -82,14 +82,90 @@ test("the lookups find an earlier sentence by its words or its number, and whate
   expect([...new Set(cited)].sort()).toEqual([1, 2, 3]);
 });
 
-test("a line's own interview extracts its replies only, never the files, and does not rewrite the portrait", async () => {
+test("a line's own interview extracts its replies only (its files go with the main interview), and does not rewrite the portrait", async () => {
+  const now = "2026-10-19T00:00:00.000Z";
+  store.saveOnboardingSession({ id: "main", ownerId: store.getWorkspaceOwnerId(workspaceId)!, workspaceId, state: "complete", coverage: {}, createdAt: now, updatedAt: now });
   store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId, kind: "text", fileName: "plan.txt", mediaType: "text/plain", sha256: "x", uri: "file:///x",
     extractedText: "Week-8: 27th Oct.", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
   store.setSetting(workspaceId, "profile.model", JSON.stringify({ portrait: "原画像" }));
   const { rpc, prompts } = runtime([round], [facts({ profile: { portrait: "不应写入" } })]);
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "await" })({ sessionId: "line-research", text: "补充一点" });
-  const extraction = prompts().find((prompt) => prompt.includes(EXTRACT))!;
-  expect(extraction).not.toContain("plan.txt");
-  expect(extraction).toContain('"profile":null');
+  const extractions = prompts().filter((prompt) => prompt.includes(EXTRACT));
+  expect(extractions[0]).not.toContain("plan.txt");
+  expect(extractions[0]).toContain('"profile":null');
+  // The file the line's turn showed is extracted all the same, with the main interview.
+  expect(extractions.some((prompt) => prompt.includes("plan.txt"))).toBe(true);
   expect(JSON.parse(store.getSetting(workspaceId, "profile.model")!)).toMatchObject({ portrait: "原画像" });
+});
+
+test("the portrait is kept by section: a deep section while its stage runs, finalized once the stage is over, the synthesis only after all three", async () => {
+  const { portraitTask } = await import("./onboarding-extract");
+  expect(portraitTask("situation", false, {})).toEqual({ finalize: [], synthesize: false });
+  expect(portraitTask("compass", false, {})).toEqual({ finalize: ["situation"], synthesize: false });
+  expect(portraitTask("details", false, { situation: { final: true } })).toEqual({ finalize: ["compass", "energy"], synthesize: true });
+  expect(portraitTask("details", false, { situation: { final: true }, compass: { final: true }, energy: { final: true }, synthesis: { final: true } }))
+    .toEqual({ finalize: [], synthesize: false });
+  // A finished interview finalizes whatever is left, even a stage it skipped.
+  expect(portraitTask("energy", true, {})).toEqual({ finalize: ["situation", "compass", "energy"], synthesize: true });
+
+  const now = "2026-10-19T00:00:00.000Z";
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation" }, createdAt: now, updatedAt: now });
+  store.setSetting(workspaceId, "profile.model", JSON.stringify({ portrait: "旧的一句话", workView: "旧工作观" }));
+  const sections = (over: object) => facts({ profileSections: { situation: null, compass: null, energy: null, synthesis: null, ...over } });
+  const { rpc, prompts } = runtime([round], [
+    sections({ situation: { problem: "论文和产品抢同一段时间", gravity: [], designable: [], reframes: [], refs: [1] },
+      synthesis: { portrait: "不该现在写", coreConflict: "", allocation: "", refs: [] } }),
+    sections({ situation: { problem: "论文投稿前，产品只做维护", gravity: ["导师的时间表"], designable: [], reframes: [], refs: [2] } })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "await" });
+  await run({ sessionId: "s", text: "论文和产品在抢同一段时间。" });
+  const first = JSON.parse(store.getSetting(workspaceId, "profile.model")!) as Record<string, unknown>;
+  // The situation section is written with its sentences; the synthesis waits; the compass is untouched.
+  expect(first).toMatchObject({ problem: "论文和产品抢同一段时间", portrait: "旧的一句话", workView: "旧工作观" });
+  expect(JSON.parse(store.getSetting(workspaceId, "profile.sections")!)).toMatchObject({ situation: { sentences: [1], final: false } });
+  // The conversation moved on to the compass: the next run rewrites the situation whole and marks it final.
+  const session = store.getOnboardingSession(workspaceId, "s")!;
+  store.saveOnboardingSession({ ...session, coverage: { ...session.coverage, stage: "compass" } });
+  await run({ sessionId: "s", text: "投稿前产品只做维护。" });
+  const second = prompts().filter((prompt) => prompt.includes(EXTRACT))[1]!;
+  const task = JSON.parse(second.slice(second.indexOf("{"), second.lastIndexOf("}") + 1)) as { profileTask: unknown };
+  expect(task.profileTask).toEqual({ finalize: ["situation"], synthesize: false });
+  expect(JSON.parse(store.getSetting(workspaceId, "profile.sections")!)).toMatchObject({ situation: { final: true } });
+});
+
+test("conversations from before the extraction start at their last reply; one the extraction has worked in is never backfilled", async () => {
+  const { backfillExtractWatermarks } = await import("@crossline/db");
+  const now = "2026-10-18T00:00:00.000Z";
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  store.saveOnboardingSession({ id: "old", ownerId, workspaceId, state: "complete", coverage: {}, createdAt: now, updatedAt: now });
+  for (const text of ["一", "二"]) store.appendOnboardingMessage({ sessionId: "old", workspaceId, role: "user", content: { text }, createdAt: now });
+  expect(extractBacklog(store, workspaceId, "old").replies).toBe(2);
+  expect(backfillExtractWatermarks(store, workspaceId)).toBe(1);
+  expect(readExtractState(store, workspaceId, "old")).toMatchObject({ upTo: 2 });
+  expect(createOnboardingExtractor(store, workspaceId, "C:\\repo", () => undefined).nextSession()).toBeUndefined();
+  // Once only: a reply that waits after this is the extraction's to read.
+  store.appendOnboardingMessage({ sessionId: "old", workspaceId, role: "user", content: { text: "三" }, createdAt: now });
+  expect(backfillExtractWatermarks(store, workspaceId)).toBe(0);
+  expect(extractBacklog(store, workspaceId, "old").replies).toBe(1);
+});
+
+test("a reply sent while another extraction runs is read in the next round even when its conversation is backing off", async () => {
+  const now = "2026-10-19T00:00:00.000Z";
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  for (const id of ["a", "b"]) {
+    store.saveOnboardingSession({ id, ownerId, workspaceId, state: "active", coverage: {}, createdAt: now, updatedAt: now });
+    store.appendOnboardingMessage({ sessionId: id, workspaceId, role: "user", content: { text: `会话 ${id} 的回答。` }, createdAt: now });
+  }
+  // b failed a minute ago and waits half an hour.
+  writeExtractState(store, workspaceId, "b", { upTo: 0, failures: 3, retryAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+    lastError: { code: "X", message: "x", at: new Date(Date.now() - 60_000).toISOString() } });
+  const { rpc } = runtime([round], [facts()], { delayMs: 20 });
+  const extractor = createOnboardingExtractor(store, workspaceId, "C:\\repo", () => rpc);
+  const first = requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred));
+  // The person replies in b while a's run is in flight.
+  const second = requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), "b");
+  expect(second).toBe(first);
+  await first;
+  expect(readExtractState(store, workspaceId, "a").upTo).toBe(1);
+  expect(readExtractState(store, workspaceId, "b")).toMatchObject({ upTo: 1, failures: 0 });
 });

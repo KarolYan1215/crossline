@@ -27,6 +27,8 @@ export function readExtractState(store: CrosslineStore, workspaceId: string, ses
 }
 export function writeExtractState(store: CrosslineStore, workspaceId: string, sessionId: string, state: ExtractState): void {
   store.setSetting(workspaceId, stateKey(sessionId), JSON.stringify(state));
+  // A workspace the extraction has worked in needs no backfill: a later restart must not skip a reply still waiting to be extracted.
+  if (!store.getSetting(workspaceId, EXTRACT_BACKFILL_SETTING)) store.setSetting(workspaceId, EXTRACT_BACKFILL_SETTING, new Date().toISOString());
 }
 
 export function readExtractDocs(store: CrosslineStore, workspaceId: string): Record<string, number> {
@@ -68,4 +70,24 @@ export function extractBacklog(store: CrosslineStore, workspaceId: string, sessi
   const files = sessionId.startsWith("line-") ? 0 : pendingExtractDocs(store, workspaceId).length;
   return { replies, files, ...(state.failures && state.lastError ? { failing: { code: state.lastError.code, message: state.lastError.message,
     ...(state.retryAt ? { retryAt: state.retryAt } : {}) } } : {}) };
+}
+
+/** Marks the workspace once the watermarks below are set (`backfillExtractWatermarks`). */
+export const EXTRACT_BACKFILL_SETTING = "onboarding.extract.backfill.v1";
+/**
+ * Conversations that existed before the extraction did were recorded by the old single turn: their watermark starts at their last reply,
+ * or the first tick after the change would extract every interview again from the start (and rewrite every confirmed portrait). Once per
+ * workspace; returns how many conversations it set.
+ */
+export function backfillExtractWatermarks(store: CrosslineStore, workspaceId: string): number {
+  if (store.getSetting(workspaceId, EXTRACT_BACKFILL_SETTING)) return 0;
+  let set = 0;
+  for (const session of store.listOnboardingSessions(workspaceId)) {
+    if (store.getSetting(workspaceId, stateKey(session.id))) continue;
+    const last = store.listOnboardingMessages(workspaceId, session.id).filter((message) => message.role === "user").at(-1)?.seq ?? 0;
+    store.setSetting(workspaceId, stateKey(session.id), JSON.stringify({ upTo: last, failures: 0 } satisfies ExtractState));
+    set += 1;
+  }
+  store.setSetting(workspaceId, EXTRACT_BACKFILL_SETTING, new Date().toISOString());
+  return set;
 }

@@ -204,9 +204,11 @@ test("dates the model read out of a file become one verified batch, and what can
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
   expect((await run({ sessionId: "s1", text: "我添加了文件" })).state).toBe("ready");
   const [batch] = store.listEvents(workspaceId, { type: "dates.extracted" });
-  const payload = batch!.payload as { documentIds: string[]; dates: Array<{ id: string }>; questions: string[]; dropped: Array<{ id: string }> };
+  const payload = batch!.payload as { documentIds: string[]; dates: Array<{ id: string; title: string }>; questions: string[]; dropped: Array<{ id: string }> };
   expect(payload.documentIds).toEqual(["doc-1"]);
-  expect(payload.dates.map((item) => item.id)).toEqual(["d1"]);
+  // Stored under an id made from what the date is, so a later run's own d1 can never replace it.
+  expect(payload.dates.map((item) => item.title)).toEqual(["ECE 548 期中 1"]);
+  expect(payload.dates[0]!.id).toMatch(/^d-[0-9a-z]+$/);
   expect(payload.dropped.map((item) => item.id)).toEqual(["d2"]);
   expect(payload.questions).toEqual(["这些材料是哪门课的？"]);
 });
@@ -214,7 +216,7 @@ test("dates the model read out of a file become one verified batch, and what can
 test("a turn with no dates writes no batch, and a newer batch retires one nobody answered", async () => {
   // Each extraction runs on a fresh thread and may cite only what it is shown: here, the reply of its own turn ([1], [2], [3]).
   const empty = { dates: [], recurring: [], questions: [] };
-  const { rpc } = fakeRuntime([withDates(empty), withDates({ ...empty, dates: [dateItem({ refs: [2] })] }), withDates({ ...empty, dates: [dateItem({ id: "d9", refs: [3] })] })]);
+  const { rpc } = fakeRuntime([withDates(empty), withDates({ ...empty, dates: [dateItem({ refs: [2] })] }), withDates({ ...empty, dates: [dateItem({ refs: [3], title: "ECE 548 期中 2" })] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
   await run({ sessionId: "s1", text: "没有日期" });
   expect(store.listEvents(workspaceId, { type: "dates.extracted" })).toHaveLength(0);
@@ -224,9 +226,9 @@ test("a turn with no dates writes no batch, and a newer batch retires one nobody
   const retired = store.listEvents(workspaceId, { type: "dates.decided" });
   expect(retired).toHaveLength(1);
   expect(retired[0]!.payload).toMatchObject({ superseded: true });
-  // A later turn adds to the batch nobody answered; it does not throw the earlier dates away.
-  const latest = store.listEvents(workspaceId, { type: "dates.extracted" }).at(-1)!.payload as { dates: Array<{ id: string }> };
-  expect(latest.dates.map((item) => item.id).sort()).toEqual(["d1", "d9"]);
+  // A later turn adds to the batch nobody answered; it does not throw the earlier dates away, though both runs called theirs d1.
+  const latest = store.listEvents(workspaceId, { type: "dates.extracted" }).at(-1)!.payload as { dates: Array<{ title: string }> };
+  expect(latest.dates.map((item) => item.title).sort()).toEqual(["ECE 548 期中 1", "ECE 548 期中 2"]);
 });
 
 test("a re-read of the files replaces the unanswered batch; meals outside the stated hours never become a batch", async () => {
@@ -238,7 +240,7 @@ test("a re-read of the files replaces the unanswered batch; meals outside the st
   const hours = { windows: [{ days: [0, 1, 2, 3, 4, 5, 6], startMinute: 540, endMinute: 720, energy: "high" }, { days: [0, 1, 2, 3, 4, 5, 6], startMinute: 840, endMinute: 1080, energy: "medium" }], why: "本人所述" };
   const { rpc } = fakeRuntime([withDates({ ...empty, dates: [dateItem()] }),
     turn({ fileDates: { ...empty, recurring: [meal] }, availability: hours, questions: [], nextAction: "ready_for_milestones" }),
-    withDates({ ...empty, dates: [dateItem({ id: "d9" })] })]);
+    withDates({ ...empty, dates: [dateItem({ title: "ECE 548 期中 1（重读）" })] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
   await run({ sessionId: "s1", text: "我添加了文件" });
   // The meals are what the hours already leave out: no batch, and the course's date still waits for an answer.
@@ -246,8 +248,8 @@ test("a re-read of the files replaces the unanswered batch; meals outside the st
   expect(store.listEvents(workspaceId, { type: "dates.extracted" })).toHaveLength(1);
   expect(store.getSetting(workspaceId, "schedule.availability.proposed")).toContain("09:00");
   await run({ sessionId: "s1", text: "请重新读一遍日期", reread: true });
-  const latest = store.listEvents(workspaceId, { type: "dates.extracted" }).at(-1)!.payload as { dates: Array<{ id: string }> };
-  expect(latest.dates.map((item) => item.id)).toEqual(["d9"]);
+  const latest = store.listEvents(workspaceId, { type: "dates.extracted" }).at(-1)!.payload as { dates: Array<{ title: string }> };
+  expect(latest.dates.map((item) => item.title)).toEqual(["ECE 548 期中 1（重读）"]);
 });
 
 const course = turn({
@@ -393,9 +395,14 @@ test("a 「符合」 for the portrait holds for the portrait the same turn rewri
   const { readFileSync } = await import("node:fs");
   const written = JSON.parse(readFileSync(new URL("./testing/fixtures/onboarding-profile.json", import.meta.url), "utf8")) as Record<string, unknown>;
   store.setSetting(workspaceId, "profile.model", JSON.stringify(written));
+  // The three deep stages are over, so this run writes the synthesis (P3), the part a confirmation is about.
+  const at = "2026-10-19T00:00:00.000Z";
+  store.setSetting(workspaceId, "profile.sections", JSON.stringify({ situation: { sentences: [], final: true, at }, compass: { sentences: [], final: true, at },
+    energy: { sentences: [], final: true, at } }));
   const rewritten = { ...written, portrait: "一位在毕业前同时押注研究与产品的工程师，靠打球和讨论充电，最怕的是五件事都停在七成。",
-    coreConflict: "想把两条未来都留着，代价落在睡眠和周日下午上。", problem: "缺的不是时间，而是一条让某件事这周先慢下来的规则。" };
-  const { rpc } = fakeRuntime([turn({ profile: rewritten,
+    coreConflict: "想把两条未来都留着，代价落在睡眠和周日下午上。" };
+  const { rpc } = fakeRuntime([turn({ profileSections: { situation: null, compass: null, energy: null,
+    synthesis: { portrait: rewritten.portrait, coreConflict: rewritten.coreConflict, allocation: written.allocation ?? "", refs: [] } },
     questions: [{ id: "q", text: "这周最想先收口哪件事？", kind: "free", options: [], allowOther: true, identityId: "", projectId: "" }] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
   expect(await run({ sessionId: "s", text: "【「当前画像」写的是否符合本人？】选择：符合" })).toEqual({ state: "asked", sessionId: "s" });

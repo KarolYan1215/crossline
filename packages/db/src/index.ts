@@ -2057,6 +2057,14 @@ export class CrosslineStore {
     return row ? questionRow(row) : undefined;
   }
 
+  /**
+   * Runs several writes as one transaction: all of them land or none does. The interview's extraction writes facts, projects, dates and the
+   * portrait from one answer, and a throw half-way used to leave half of it written and the run to be repeated over it.
+   */
+  atomically<T>(work: () => T): T {
+    return this.#db.transaction(work).immediate();
+  }
+
   /** Every interview conversation of the workspace, the line interviews included. */
   listOnboardingSessions(workspaceId: string): StoredOnboardingSession[] {
     return (this.#db.prepare("SELECT * FROM onboarding_sessions WHERE workspace_id = ? ORDER BY created_at, rowid").all(workspaceId) as Array<Record<string, string>>)

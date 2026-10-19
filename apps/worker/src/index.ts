@@ -7,7 +7,7 @@ import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -336,11 +336,13 @@ async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISO
 }
 
 /** Starts the interview's extraction when one of the workspace's conversations has replies or files waiting and is due (not backing off). */
-function onboardingExtractPass(workspaceId: string): void {
-  if (!codexSupervisor || extractionRunning(workspaceId)) return;
+async function onboardingExtractPass(workspaceId: string): Promise<void> {
+  if (!codexSupervisor || extractionRunning(workspaceId) || paused(workspaceId, "planning")) return;
   const extractor = createOnboardingExtractor(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId));
   if (!extractor.nextSession()) return;
-  void requestExtraction(workspaceId, () => { enterUsageWorkspace(workspaceId); return extractor.runOnce(); })
+  // A turn starts its own extraction whatever the quota says (the person is there); a retry from the tick is core work like any other.
+  if (!spendAllows(await spendFor(workspaceId), "core")) return;
+  void requestExtraction(workspaceId, (preferred) => { enterUsageWorkspace(workspaceId); return extractor.runOnce(preferred); })
     .then(() => { void firstDraftsPass(workspaceId).catch(() => undefined); });
 }
 
@@ -597,7 +599,7 @@ async function tick(): Promise<void> {
   for (const workspace of workspaces) await milestoneRiskPass(workspace.id, checkedAt);
   for (const workspace of workspaces) void firstDraftsPass(workspace.id, checkedAt).catch(() => undefined);
   // The interview's extraction, for replies a failed run left (after its backoff) or a worker restart cut off; a turn starts it itself.
-  for (const workspace of workspaces) onboardingExtractPass(workspace.id);
+  for (const workspace of workspaces) await onboardingExtractPass(workspace.id).catch(() => undefined);
   for (const workspace of workspaces) await minePass(workspace.id, checkedAt);
   for (const workspace of workspaces) await publicSkillPass(workspace.id, checkedAt);
   for (const workspace of workspaces) await portraitPass(workspace.id, checkedAt);
@@ -829,8 +831,11 @@ for (const workspace of analysisStore.listWorkspaces()) {
   // Once: imported class blocks a date batch put on the plan twice (a weekly class and that day's dated session in one slot).
   const deduped = repairDuplicateImports(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
   if (deduped) console.info(JSON.stringify({ type: "repair.import_duplicates", workspaceId: workspace.id, removed: deduped.removed, checkedAt: new Date().toISOString() }));
-  // Once: facts written before numbered evidence get the sentences their quotes stand in.
+  // Once: conversations from before the interview's extraction start at their last reply; facts written before numbered evidence get the
+  // sentences their quotes stand in.
   try {
+    const watermarks = backfillExtractWatermarks(analysisStore, workspace.id);
+    if (watermarks) console.info(JSON.stringify({ type: "repair.extract_watermarks", workspaceId: workspace.id, sessions: watermarks }));
     const evidence = backfillFactEvidence(analysisStore, workspace.id);
     if (evidence) console.info(JSON.stringify({ type: "repair.fact_evidence", workspaceId: workspace.id, ...evidence, checkedAt: new Date().toISOString() }));
   } catch (error) { console.warn(JSON.stringify({ type: "repair.fact_evidence_failed", workspaceId: workspace.id, error: String(error), checkedAt: new Date().toISOString() })); }

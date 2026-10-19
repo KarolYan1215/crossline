@@ -264,6 +264,30 @@ export function mergeDateExtractions(earlier: DateExtraction[], next: DateExtrac
 }
 
 /**
+ * Ids made from what an item is, not from where the model counted it (2026-10-19): each extraction run is a fresh thread that numbers its
+ * dates from d1 again, and merging by the model's ids let a later run's d1 replace an earlier run's unanswered d1. The same date read
+ * twice gets the same id (the newer reading wins); two different dates never share one.
+ */
+export function withContentIds(extraction: DateExtraction): DateExtraction {
+  const norm = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  const hash = (text: string) => { let h = 5381; for (const char of text) h = ((h * 33) ^ char.codePointAt(0)!) >>> 0; return h.toString(36); };
+  const unique = <T extends { id: string }>(items: T[], key: (item: T) => string, prefix: string) => {
+    const seen = new Map<string, number>();
+    return items.map((item) => {
+      const base = `${prefix}${hash(key(item))}`;
+      const n = (seen.get(base) ?? 0) + 1;
+      seen.set(base, n);
+      return { ...item, id: n > 1 ? `${base}-${n}` : base };
+    });
+  };
+  return { ...extraction,
+    dates: unique(extraction.dates, (item) => `${item.date}|${item.startTime}|${item.kind}|${norm(item.title)}`, "d-"),
+    recurring: unique(extraction.recurring, (item) => `${[...item.weekdays].sort().join(",")}|${item.startTime}|${item.endTime}|${norm(item.title)}`, "w-"),
+    ...(extraction.undated ? { undated: unique(extraction.undated, (item) => `${item.kind}|${norm(item.title)}`, "u-") } : {}),
+    ...(extraction.past ? { past: unique(extraction.past, (item) => JSON.stringify({ ...item, id: "" }), "p-") } : {}) };
+}
+
+/**
  * What the person already answered is not offered again. Every interview turn may return the files' dates, and a turn after the person
  * confirmed a batch returned the same 24 dates as a new one to confirm (2026-10-15 walkthrough) — confirming it twice would put every class
  * on the calendar twice. A date matches on day, start time and kind within its project, or on day and title; a weekly arrangement on its

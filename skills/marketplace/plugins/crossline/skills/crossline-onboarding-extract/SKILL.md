@@ -7,16 +7,16 @@ description: Read what a Crossline interview just heard — the person's new rep
 
 The interview (`crossline-onboarding`) talks with the person; this Skill records what they said. It runs after every reply on a fresh thread, so everything it needs is in its input or behind its two lookups. Nothing here is shown to the person as conversation; what you write becomes the ledger every later plan rests on, so be careful before being complete.
 
-Accept `crossline.onboarding.extract.v1`: `{today, timeZone, lines[], projects[], facts[], lineProfiles[], profile, stage, focusLine, replies[], sources[], sourcesWaiting?, reread}`.
+Accept `crossline.onboarding.extract.v1`: `{today, timeZone, lines[], projects[], facts[], lineProfiles[], profile, profileTask, stage, focusLine, replies[], sources[], sourcesWaiting?, reread}`.
 
 - `replies[]` are the person's new replies, oldest first: `{id: "reply-N", asked: [the questions this reply answers], sentences}`. A reply is often in the answer cards' own form, one line per question: 「【question】选择：A；B。补充：text」 — the bracket names the question, so 「选择：周三」 under 「【组会是哪天？】」 means the meeting is on Wednesday.
 - `sources[]` are files not yet read: `{id: "src-N", fileName, kind, projectId, sentences}`. `projectId` is set when the file is already filed under a project; use it. `sourcesWaiting` files come in the next run: do not conclude something is missing while files still wait.
 - `sentences` are numbered, one per line: 「[41] 论文 12 月中投稿」. **Cite only by these numbers**, in `refs`; never copy words. The app fills the quote in from its own record.
 - `facts[]` is what the ledger already holds, one line each: `identity/project · slot = value（确认|推断）`. To change a fact, write its slot again; do not repeat a fact unchanged. A confirmed fact is never replaced by a guess (the store keeps the person's word).
-- `lineProfiles[]` are each line's description and attribute candidates on record; `profile` is the working portrait so far (null for a line's own interview); `stage` is where the conversation is.
+- `lineProfiles[]` are each line's description and attribute candidates on record; `profile` is the working portrait so far and `profileTask` what this run owes it (both null for a line's own interview); `stage` is where the conversation is.
 - `lines[]` are the person's lines (identity nouns, hard constraints, adopted goals); `projects[]` the projects on record.
 
-Return JSON matching `OnboardingExtraction` (`packages/core/src/onboarding-turn-schema.ts`): `{slotUpdates[], projectsDetected[], flywheelCandidates[], fileDates, lineProfiles[], goalEdits[], availability, profile}`. Leave a list empty when the new material says nothing for it.
+Return JSON matching `OnboardingExtraction` (`packages/core/src/onboarding-turn-schema.ts`): `{slotUpdates[], projectsDetected[], flywheelCandidates[], fileDates, lineProfiles[], goalEdits[], availability, profileSections}`. Leave a list empty when the new material says nothing for it.
 
 ## Lookups
 
@@ -56,9 +56,21 @@ Every date the new files state, and every fixed weekly arrangement a reply state
 
 As soon as the person has said when they can work, propose their weekly available hours: `windows` of `{days: 0=Sunday…6, startMinute, endMinute, energy}` (the end of the day is 1440) and `why` in one line. Fixed classes and meetings are subtracted automatically: do not wait for them. Give each window the energy they described — their best hours `high`, the rest `medium`, tired hours `low`; marking everything `high` erases the difference the schedule relies on. If they said nothing about weekends, say in `why` that weekends were assumed to be like weekdays. Leave `windows` empty when nothing new about their hours was said.
 
-## Portrait (`profile`)
+## Portrait (`profileSections`)
 
-The working synthesis, rewritten in full from `profile` and what the new material adds (for a line's own interview `profile` is null: return it with every field empty). `portrait` (one sentence that sums them up now), `coreConflict`, `problem`, `gravity[]` (circumstances to accept), `designable[]`, `reframes[]` (`{fallacy, reframe}`), `workView`, `lifeView`, `consistency`, `trueNorth`, `energyMap[]` (`{activity, skill, love, charge}`), `flow[]`, `says` / `does`, `anchor` / `realWant`, `allocation`, `values[]` (Schwartz's ten — 自主, 刺激, 享乐, 成就, 权力, 安全, 遵从, 传统, 仁慈, 普世 — each `{value, score 0–100}`, only those what was said bears on). Keep what the new material does not change; leave a field empty until there is something to say; never pad.
+The working portrait is kept in four sections, each written whole or left as it is (`null`), each with `refs` naming the sentences it rests on (empty when it is your own reading):
+
+- `situation` — `problem` (the problem as it really is), `gravity[]` (circumstances to accept), `designable[]` (problems worth designing), `reframes[]` (`{fallacy, reframe}`: a false premise and the problem reframed);
+- `compass` — `workView`, `lifeView`, `consistency` (how the two fit), `trueNorth`, `values[]` (Schwartz's ten — 自主, 刺激, 享乐, 成就, 权力, 安全, 遵从, 传统, 仁慈, 普世 — each `{value, score 0–100}`, only those what was said bears on);
+- `energy` — `energyMap[]` (`{activity, skill: high|low, love: high|low, charge: charge|drain}`), `flow[]`, `says` / `does` (what they say they want vs what their behaviour protects), `anchor` / `realWant`;
+- `synthesis` — `portrait` (one sentence that sums them up now), `coreConflict` (the contradiction that matters most), `allocation` (the attention rule across their lines).
+
+Rules:
+
+- Write a deep section (situation, compass, energy) only when the new replies or files bear on it, starting from what `profile` already holds and keeping what the new material does not change. Otherwise `null`.
+- `profileTask.finalize` lists the deep sections whose stage is over: rewrite each of them whole from everything the person said about it, looking the earlier replies up (`search_evidence` with the stage's words; `read_sentences` around what you find), so the section reads as one finished account rather than a pile of updates.
+- Write `synthesis` only when `profileTask.synthesize` is true (all three deep stages are over); it sums up the three sections, so it is never written before them. Otherwise `null`; the app ignores a synthesis written early.
+- Leave a field empty until there is something to say; never pad. A line's own interview leaves every section `null`.
 
 Allowed tools: `search_evidence`, `read_sentences`. Budget: standard. Risk: routine. Evidence: sentence numbers in `refs` for every confirmed fact, date and attribute.
 

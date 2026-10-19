@@ -214,8 +214,13 @@ export type OnboardingExtractContext = {
   facts: string[];
   /** Each line's description and attribute candidates on record. */
   lineProfiles: Array<{ lineId: string; description: string; attributes: string[] }>;
-  /** The portrait so far; null for a line's own interview, which does not rewrite it. */
+  /** The portrait so far; null for a line's own interview, which does not touch it. */
   profile: ProfileModel | null;
+  /**
+   * What this run owes the portrait besides keeping a section current when the new material bears on it: the deep sections whose stage
+   * is over, to rewrite whole from everything said (looked up), and the synthesis, once all three are over. Null for a line's interview.
+   */
+  profileTask: { finalize: ProfileSection[]; synthesize: boolean } | null;
   stage: OnboardingStage;
   focusLine: { id: string; label: string } | null;
   /** The person's replies not yet extracted, oldest first, each with the questions it answers and its numbered sentences. */
@@ -248,6 +253,53 @@ const object = (properties: Record<string, unknown>) =>
   ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 /** Sentence numbers (2026-10-19): the model points at what it was shown instead of copying it, and the system fills the words in. */
 export const REFS = { type: "array", maxItems: 8, items: { type: "integer", minimum: 1 } } as const;
+const pick = <K extends string>(fields: Record<string, unknown>, keys: readonly K[]) => Object.fromEntries(keys.map((key) => [key, fields[key]]));
+
+/** Each field of the working portrait, as the schema of the whole portrait and of its sections both write it. */
+const PROFILE_FIELD_SCHEMAS: Record<string, unknown> = {
+  portrait: { type: "string", maxLength: 300 }, coreConflict: { type: "string", maxLength: 400 }, problem: { type: "string", maxLength: 600 },
+  gravity: { type: "array", maxItems: 8, items: text(200) }, designable: { type: "array", maxItems: 8, items: text(200) },
+  reframes: { type: "array", maxItems: 4, items: object({ fallacy: text(200), reframe: text(300) }) },
+  workView: { type: "string", maxLength: 600 }, lifeView: { type: "string", maxLength: 600 }, consistency: { type: "string", maxLength: 600 }, trueNorth: { type: "string", maxLength: 300 },
+  energyMap: { type: "array", maxItems: 12, items: object({ activity: text(80), skill: { type: "string", enum: ["high", "low"] }, love: { type: "string", enum: ["high", "low"] },
+    charge: { type: "string", enum: ["charge", "drain"] } }) },
+  flow: { type: "array", maxItems: 8, items: text(200) }, says: { type: "string", maxLength: 400 }, does: { type: "string", maxLength: 400 },
+  anchor: { type: "string", maxLength: 400 }, realWant: { type: "string", maxLength: 400 }, allocation: { type: "string", maxLength: 600 },
+  values: { type: "array", maxItems: 10, items: object({ value: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: { type: "integer", minimum: 0, maximum: 100 } }) }
+};
+
+/**
+ * The portrait in four sections (2026-10-19, P3 of the interview redesign). It used to be rewritten whole every round, so each round
+ * re-worded what the person had already confirmed and spent output on fields nothing new bore on. Now the extraction writes a section only
+ * when new material bears on it, rewrites a deep stage's section whole once that stage is over (`finalize`), and writes the synthesis only
+ * once all three deep stages are over — it sums up what they found, so it waits for them.
+ */
+export const PROFILE_SECTIONS = ["situation", "compass", "energy", "synthesis"] as const;
+export type ProfileSection = (typeof PROFILE_SECTIONS)[number];
+export const DEEP_SECTIONS = ["situation", "compass", "energy"] as const;
+export const SECTION_FIELDS: Record<ProfileSection, Array<keyof ProfileModel>> = {
+  situation: ["problem", "gravity", "designable", "reframes"],
+  compass: ["workView", "lifeView", "consistency", "trueNorth", "values"],
+  energy: ["energyMap", "flow", "says", "does", "anchor", "realWant"],
+  synthesis: ["portrait", "coreConflict", "allocation"]
+};
+/** One section as the extraction writes it: its fields whole, and the sentences it rests on (`refs` on the wire). */
+export type SectionUpdate = Partial<ProfileModel> & { sentences?: number[] };
+export type ProfileSections = Partial<Record<ProfileSection, SectionUpdate | null>>;
+/** What the ledger keeps about each section (`PROFILE_SECTIONS_SETTING`): the sentences it rests on, whether its stage is over, when written. */
+export const PROFILE_SECTIONS_SETTING = "profile.sections";
+export type SectionRecord = { sentences: number[]; final: boolean; at: string };
+
+/** The portrait with the sections a run was allowed to write put in; every other field stays as it was. */
+export function mergeProfileSections(profile: ProfileModel, sections: ProfileSections | undefined, allowed: ReadonlySet<ProfileSection>): ProfileModel {
+  const next = { ...profile } as Record<string, unknown>;
+  for (const section of PROFILE_SECTIONS) {
+    const update = sections?.[section];
+    if (!update || !allowed.has(section)) continue;
+    for (const field of SECTION_FIELDS[section]) if (update[field] !== undefined) next[field] = update[field];
+  }
+  return withValues({ ...EMPTY_PROFILE_MODEL, ...(next as Partial<ProfileModel>) });
+}
 
 /**
  * The ids a turn may name, as enums made for that turn (2026-10-19): a line or project the model names is then one the schema itself
@@ -322,17 +374,10 @@ function turnFields(ids?: TurnIds) {
     availability: object({ windows: { type: "array", maxItems: 14, items: object({ days: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
       startMinute: { type: "integer", minimum: 0, maximum: 1440 }, endMinute: { type: "integer", minimum: 0, maximum: 1440 },
       energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
-    profile: object({
-      portrait: { type: "string", maxLength: 300 }, coreConflict: { type: "string", maxLength: 400 }, problem: { type: "string", maxLength: 600 },
-      gravity: { type: "array", maxItems: 8, items: text(200) }, designable: { type: "array", maxItems: 8, items: text(200) },
-      reframes: { type: "array", maxItems: 4, items: object({ fallacy: text(200), reframe: text(300) }) },
-      workView: { type: "string", maxLength: 600 }, lifeView: { type: "string", maxLength: 600 }, consistency: { type: "string", maxLength: 600 }, trueNorth: { type: "string", maxLength: 300 },
-      energyMap: { type: "array", maxItems: 12, items: object({ activity: text(80), skill: { type: "string", enum: ["high", "low"] }, love: { type: "string", enum: ["high", "low"] },
-        charge: { type: "string", enum: ["charge", "drain"] } }) },
-      flow: { type: "array", maxItems: 8, items: text(200) }, says: { type: "string", maxLength: 400 }, does: { type: "string", maxLength: 400 },
-      anchor: { type: "string", maxLength: 400 }, realWant: { type: "string", maxLength: 400 }, allocation: { type: "string", maxLength: 600 },
-      values: { type: "array", maxItems: 10, items: object({ value: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: { type: "integer", minimum: 0, maximum: 100 } }) }
-    })
+    profile: object(PROFILE_FIELD_SCHEMAS),
+    // The portrait by section (2026-10-19, P3): null leaves a section as it is; a section written is written whole, with the sentences it rests on.
+    profileSections: object(Object.fromEntries(PROFILE_SECTIONS.map((section) => [section,
+      { anyOf: [object({ ...pick(PROFILE_FIELD_SCHEMAS, SECTION_FIELDS[section]), refs: REFS }), { type: "null" }] }])))
   };
 }
 
@@ -342,8 +387,7 @@ function turnFields(ids?: TurnIds) {
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
 export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage"] as const;
-export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "profile"] as const;
-const pick = <K extends string>(fields: Record<string, unknown>, keys: readonly K[]) => Object.fromEntries(keys.map((key) => [key, fields[key]]));
+export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "profileSections"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
 export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
 export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
@@ -352,7 +396,7 @@ export const ONBOARDING_EXTRACT_SCHEMA = onboardingExtractSchema();
 export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
-  | "availability" | "profile"> & { fileDates?: DateExtraction };
+  | "availability"> & { fileDates?: DateExtraction; profileSections?: ProfileSections };
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;

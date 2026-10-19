@@ -85,3 +85,11 @@ test("the third-party note says what this install actually adds: search and the 
   expect(unavailableOnThirdParty({ webSearch: true, image: true })).toContain("由 Crossline 自己完成");
   expect(unavailableOnThirdParty({ webSearch: true, image: true })).toContain("日历用订阅链接接入");
 });
+
+test("a record made before the interview was split into two schemas still admits both layers", async () => {
+  const { admittedSkills, summarizeConformance, conformanceCases } = await import("./provider-conformance");
+  const runs = conformanceCases().filter((item) => !item.id.startsWith("ONBOARDING_")).flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 1 })));
+  const record = summarizeConformance({ providerId: "p", model: "m", runtimeVersion: "r", ranAt: "2026-10-18T00:00:00Z" },
+    [...runs, { caseId: "ONBOARDING_TURN_SCHEMA", ok: true, repairs: 0, ms: 1 }]);
+  expect(admittedSkills(record)).toEqual(expect.arrayContaining(["crossline-onboarding", "crossline-onboarding-extract"]));
+});

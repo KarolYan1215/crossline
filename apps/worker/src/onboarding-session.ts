@@ -8,13 +8,13 @@ import {
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
 import {
-  EXTRACT_REREAD_SETTING, interviewChecklistFor, interviewGapsFor, queueExtractDocs, questionScreenFor, readExtractDocs, unfiledFilesIn,
+  EXTRACT_REREAD_SETTING, firstSentenceOf, interviewChecklistFor, interviewGapsFor, queueExtractDocs, questionScreenFor, readExtractDocs, unfiledFilesIn,
   type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument
 } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { identityLines } from "./lines";
 import { ledgerForModel, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
-import { createOnboardingExtractor, requestExtraction } from "./onboarding-extract";
+import { createOnboardingExtractor, extractionReached, requestExtraction } from "./onboarding-extract";
 import { personTimeZone, readProfileModel } from "./onboarding-persist";
 
 export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
@@ -24,6 +24,8 @@ const SOURCE_TEXT_PER_DOCUMENT = 14_000;
 const SOURCE_TEXT_TOTAL = 60_000;
 /** New files one turn reads at most; more wait for the next turn. */
 const SOURCES_PER_TURN = 12;
+/** How long a round with a blocking app question waits for the extraction of the reply it may answer. */
+const BLOCKING_WAIT_MS = 30_000;
 /** Facts the extraction recorded since the last turn, at most this many lines in `recorded`. */
 const RECORDED_SHOWN = 40;
 
@@ -215,12 +217,16 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const weekSent = JSON.stringify(week);
     const calendarChanged = week.length > 0 && (input.reread || weekSent !== coverage.calendarSent);
 
-    // The extraction starts now, beside the dialogue: this reply, and the files this turn shows (every file, on a re-read).
-    if (input.reread && !sessionId.startsWith("line-")) {
-      store.setSetting(workspaceId, EXTRACT_REREAD_SETTING, "1");
-      queueExtractDocs(store, workspaceId, [...docs.values()].filter((doc) => doc.extractionStatus === "done").map((doc) => doc.id));
-    } else if (!sessionId.startsWith("line-")) queueExtractDocs(store, workspaceId, fresh.map(([, doc]) => doc.id));
-    const extraction = extractMode === "off" ? Promise.resolve() : requestExtraction(workspaceId, () => extractor.runOnce(sessionId));
+    // The extraction starts now, beside the dialogue: this reply, and the files this turn shows — as many as the dialogue reads, a re-read
+    // included, so files go to the extraction at the dialogue's pace. A file already extracted at its current text is not queued again (a
+    // turn that failed shows its files once more), except on a re-read.
+    if (input.reread) store.setSetting(workspaceId, EXTRACT_REREAD_SETTING, "1");
+    queueExtractDocs(store, workspaceId, fresh.map(([, doc]) => doc.id)
+      .filter((id) => input.reread || !(extracted[id]! > 0 && firstSentenceOf(store, workspaceId, id) === extracted[id])));
+    const ask = () => requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), sessionId);
+    const extraction = extractMode === "off" ? Promise.resolve() : ask();
+    const caughtUp = (timeoutMs?: number) => extractMode === "off" ? Promise.resolve(false)
+      : extractionReached(store, workspaceId, sessionId, userMessage.seq, ask, timeoutMs).catch(() => false);
 
     // `line-<id>`: the interview of one line, added after the first one.
     const focus = sessionId.startsWith("line-") ? identityLines(store, workspaceId).find((line) => line.id === sessionId.slice(5)) : undefined;
@@ -333,7 +339,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
 
     // The checklist and the app's questions are read after the extraction when the round would end the interview (so a fact this reply
     // gave is on record), or always when asked to wait; otherwise from what the ledger held, and what this reply settled joins next round.
-    if (extractMode === "await" || result.output.nextAction === "ready_for_milestones") await extraction.catch(() => undefined);
+    if (extractMode === "await") await extraction.catch(() => undefined);
+    if (extractMode === "await" || result.output.nextAction === "ready_for_milestones") await caughtUp();
+    // An app question that blocks is asked every round until answered: when this reply may have answered it in prose, the round waits a
+    // little for the extraction, so it is not asked again right under the answer.
+    else if (currentGaps().some((gap) => gap.blocking)) await caughtUp(BLOCKING_WAIT_MS);
     // Questions that are not the person's to answer (a room, class times already on record, whether a calendar event repeats) are taken
     // out before the round is stored; what something rests on is written as an assumption the person can correct.
     const screen = screenQuestions(result.output.questions, questionScreenFor(store, workspaceId));

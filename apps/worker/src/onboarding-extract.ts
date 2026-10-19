@@ -1,5 +1,5 @@
 import {
-  ONBOARDING_KEEP_EARLY_MAX, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, lineAttributes, numberedText, onboardingExtractSchema,
+  DEEP_SECTIONS, ONBOARDING_KEEP_EARLY_MAX, ONBOARDING_STAGES, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, validateOnboardingExtraction,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile
 } from "@crossline/core";
@@ -9,7 +9,7 @@ import {
   type CrosslineStore, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument
 } from "@crossline/db";
 import { identityLines } from "./lines";
-import { persistExtraction, personTimeZone, readProfileModel } from "./onboarding-persist";
+import { persistExtraction, personTimeZone, readProfileModel, readSectionRecords } from "./onboarding-persist";
 import { sourceIds } from "./source-ids";
 
 /**
@@ -27,6 +27,8 @@ export const ONBOARDING_EXTRACT_SKILL = "crossline:crossline-onboarding-extract"
 const TEXT_PER_DOCUMENT = 14_000;
 const TEXT_TOTAL = 60_000;
 const DOCUMENTS_PER_RUN = 12;
+/** Replies one run reads at most; more wait for the next run, which follows at once. */
+const REPLIES_PER_RUN = 6;
 /** The fact index shown to a run: enough to update rather than repeat, short enough not to crowd out the new sentences. */
 const FACTS_SHOWN = 200;
 const SEARCH_RESULTS = 12;
@@ -34,7 +36,8 @@ const READ_MAX = 40;
 
 const INSTRUCTIONS = "You extract what a Crossline interview learned, as the Skill describes: from the person's new replies and new files, "
   + "given as numbered sentences (「[12] …」), write facts, projects, dates, line descriptions and attribute candidates, available hours and the "
-  + "working portrait. Cite evidence only by sentence numbers in `refs`, never by copying words; a confirmed fact cites the sentences that "
+  + "portrait by section (`profileSections`: a section only when new material bears on it, the ones in `profileTask.finalize` rewritten whole, "
+  + "the synthesis only when `profileTask.synthesize`; null leaves a section as it is). Cite evidence only by sentence numbers in `refs`, never by copying words; a confirmed fact cites the sentences that "
   + "state it, your own conclusion is 'inferred' with empty refs. `facts` is what the ledger already holds: update a fact by writing its "
   + "slot again, do not repeat one unchanged. To check something said earlier, use `search_evidence` (words to look for) or `read_sentences` "
   + "(numbers, with their neighbours); every number they return may be cited. Times are minutes after midnight (09:30 is 570). Never invent "
@@ -48,49 +51,66 @@ export type ExtractOutcome =
 const textOf = (message: StoredOnboardingMessage) => String((message.content as { text?: string }).text ?? "");
 
 export function createOnboardingExtractor(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
-  /** The conversation whose replies wait longest, else the main one when only files wait. */
-  const nextSession = (preferred?: string): string | undefined => {
+  /** The conversation files are extracted with: the main interview, or the one asking when there is no main one yet. */
+  const docsSession = (asking?: string) => [...store.listOnboardingSessions(workspaceId)].reverse().find((session) => !session.id.startsWith("line-"))?.id ?? asking;
+  /**
+   * The conversation to extract next: one the person just replied in (`preferred`, whatever its backoff), else the one whose replies
+   * wait and are due, else the files' conversation when only files wait and it is due.
+   */
+  const nextSession = (preferred: string[] = []): string | undefined => {
     const sessions = store.listOnboardingSessions(workspaceId);
     const waiting = (id: string) => store.listOnboardingMessages(workspaceId, id)
       .some((message) => message.role === "user" && message.seq > readExtractState(store, workspaceId, id).upTo);
     const due = (id: string) => { const retryAt = readExtractState(store, workspaceId, id).retryAt; return !retryAt || Date.parse(retryAt) <= Date.now(); };
-    if (preferred && waiting(preferred)) return preferred;
+    const asked = preferred.find((id) => waiting(id) || (pendingExtractDocs(store, workspaceId).length > 0 && docsSession(id) === id));
+    if (asked) return asked;
     const replies = sessions.find((session) => waiting(session.id) && due(session.id));
     if (replies) return replies.id;
     if (!pendingExtractDocs(store, workspaceId).length) return undefined;
-    const main = [...sessions].reverse().find((session) => !session.id.startsWith("line-"));
-    return main && due(main.id) ? main.id : undefined;
+    const files = docsSession();
+    return files && due(files) ? files : undefined;
   };
 
-  /** One run: the oldest waiting replies of one conversation, and the files waiting, within the reading budget. */
-  async function runOnce(preferred?: string, options: { force?: boolean } = {}): Promise<ExtractOutcome> {
+  /** Writes the failure and when to try again; also what an unexpected throw goes through, so it never reruns at once. */
+  function failed(sessionId: string, code: string, message: string): ExtractOutcome {
+    const state = readExtractState(store, workspaceId, sessionId);
+    const failures = state.failures + 1;
+    const wait = EXTRACT_BACKOFF_MINUTES[Math.min(failures, EXTRACT_BACKOFF_MINUTES.length) - 1]!;
+    const at = new Date().toISOString();
+    writeExtractState(store, workspaceId, sessionId, { ...state, failures, lastError: { code, message, at }, retryAt: new Date(Date.now() + wait * 60_000).toISOString() });
+    const ownerId = store.getWorkspaceOwnerId(workspaceId);
+    if (ownerId) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extract-failed:${sessionId}:${at}`, type: "onboarding.extract_failed",
+      entityId: sessionId, payload: { code, message: message.slice(0, 300), failures } });
+    return { state: "blocked", sessionId, code, message };
+  }
+
+  /** One run (see `runInner`); anything it throws is a failure with its backoff, never a silent rerun. */
+  async function runOnce(preferred: string[] = []): Promise<ExtractOutcome> {
     const sessionId = nextSession(preferred);
     if (!sessionId) return { state: "idle" };
+    try { return await runInner(sessionId); }
+    catch (error) { return failed(sessionId, "EXTRACT_FAILED", error instanceof Error ? error.message : String(error)); }
+  }
+
+  /** The oldest waiting replies of one conversation (at most `REPLIES_PER_RUN`), and the files waiting, within the reading budget. */
+  async function runInner(sessionId: string): Promise<ExtractOutcome> {
     const state = readExtractState(store, workspaceId, sessionId);
-    if (!options.force && state.retryAt && Date.parse(state.retryAt) > Date.now() && sessionId !== preferred) return { state: "idle" };
     const client = getClient();
-    const blocked = (code: string, message: string): ExtractOutcome => {
-      const failures = state.failures + 1;
-      const wait = EXTRACT_BACKOFF_MINUTES[Math.min(failures, EXTRACT_BACKOFF_MINUTES.length) - 1]!;
-      const at = new Date().toISOString();
-      writeExtractState(store, workspaceId, sessionId, { ...state, failures, lastError: { code, message, at }, retryAt: new Date(Date.now() + wait * 60_000).toISOString() });
-      const ownerId = store.getWorkspaceOwnerId(workspaceId);
-      if (ownerId) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extract-failed:${sessionId}:${at}`, type: "onboarding.extract_failed",
-        entityId: sessionId, payload: { code, message: message.slice(0, 300), failures } });
-      return { state: "blocked", sessionId, code, message };
-    };
+    const blocked = (code: string, message: string): ExtractOutcome => failed(sessionId, code, message);
     if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", "Codex 运行时不可用。");
     const ownerId = store.getWorkspaceOwnerId(workspaceId);
     if (!ownerId) return blocked("WORKSPACE_OWNER_MISSING", "找不到这个工作区的所有者。");
     const session = store.getOnboardingSession(workspaceId, sessionId);
     const messages = store.listOnboardingMessages(workspaceId, sessionId);
-    const pendingReplies = messages.filter((message) => message.role === "user" && message.seq > state.upTo);
-    const reread = !sessionId.startsWith("line-") && store.getSetting(workspaceId, EXTRACT_REREAD_SETTING) === "1";
+    // Oldest first, a few at a time: a long backlog (a restart, a failing provider) is read over several runs, not in one context.
+    const pendingReplies = messages.filter((message) => message.role === "user" && message.seq > state.upTo).slice(0, REPLIES_PER_RUN);
+    const withFiles = docsSession(sessionId) === sessionId;
+    const reread = withFiles && store.getSetting(workspaceId, EXTRACT_REREAD_SETTING) === "1";
 
     // The files waiting, as numbered sentences within the run's budget; a line's own interview reads replies only.
     const docsByRef = sourceIds(store.listSourceDocuments(workspaceId));
     const refOf = new Map([...docsByRef].map(([ref, doc]) => [doc.id, ref]));
-    const waitingDocs = sessionId.startsWith("line-") ? [] : pendingExtractDocs(store, workspaceId)
+    const waitingDocs = !withFiles ? [] : pendingExtractDocs(store, workspaceId)
       .map((id) => [refOf.get(id), [...docsByRef.values()].find((doc) => doc.id === id)] as const)
       .filter((entry): entry is readonly [string, StoredSourceDocument] => Boolean(entry[0] && entry[1]));
     let budget = TEXT_TOTAL;
@@ -100,6 +120,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       taken.push(entry);
       budget -= Math.min(TEXT_PER_DOCUMENT, entry[1].extractedText.length);
     }
+    // What each file's entry said when this run took it: a file queued again meanwhile (a re-read) is not marked done by this run.
+    const takenAt = readExtractDocs(store, workspaceId);
 
     const known: KnownSources = {
       identities: identityLines(store, workspaceId).map((line) => line.id),
@@ -140,6 +162,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     let profiles: Record<string, StoredLineProfile> = {};
     try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* none yet */ }
     const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString().slice(0, 10);
+    const stage = ((session?.coverage as { stage?: OnboardingStage } | undefined)?.stage ?? (focus ? "details" : "orientation"));
+    const profileTask = focus ? undefined : portraitTask(stage, session?.state === "complete", readSectionRecords(store, workspaceId));
     const context: OnboardingExtractContext = {
       version: "crossline.onboarding.extract.v1", today, timeZone: personTimeZone(store, workspaceId),
       lines: lines.map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })),
@@ -147,8 +171,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       facts: factIndex(store, workspaceId),
       lineProfiles: lines.map((line) => ({ lineId: line.id, description: profiles[line.id]?.description ?? "",
         attributes: lineAttributes(profiles[line.id], line.label).map((item) => item.text) })),
-      profile: focus ? null : readProfileModel(store, workspaceId),
-      stage: ((session?.coverage as { stage?: OnboardingStage } | undefined)?.stage ?? (focus ? "details" : "orientation")),
+      profile: focus ? null : readProfileModel(store, workspaceId), profileTask: profileTask ?? null, stage,
       focusLine: focus ? { id: focus.id, label: focus.label } : null,
       replies, sources, ...(waitingDocs.length > taken.length ? { sourcesWaiting: waitingDocs.length - taken.length } : {}), reread
     };
@@ -166,21 +189,24 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     });
     if (!result.ok) return blocked(result.blocker.code, result.blocker.message);
 
-    persistExtraction(store, workspaceId, result.output, { sessionId, ownerId, documentIds: taken.map(([, doc]) => doc.id),
-      sources: { ...known.sources, ...known.replies }, today, reread });
-    if (reread) store.deleteSetting(workspaceId, EXTRACT_REREAD_SETTING);
-    // The 「符合」 was said in one of these replies, and this run rewrote the portrait with that reply in hand: the confirmation holds for the
-    // portrait it wrote (before, the person was asked to confirm again every round, 2026-10-16).
-    const seqs = new Set(pendingReplies.map((message) => message.seq));
-    const confirmedHere = !focus && store.listEvents(workspaceId, { type: "profile.confirmed" })
-      .some((event) => (event.payload as { sessionId?: string; replySeq?: number }).sessionId === sessionId && seqs.has(Number((event.payload as { replySeq?: number }).replySeq)));
-    if (confirmedHere) store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(readProfileModel(store, workspaceId)), at: new Date().toISOString() }));
-    // Synchronous from here to the end: the dialogue may queue files meanwhile, and nothing it writes is lost.
-    const docs = readExtractDocs(store, workspaceId);
-    for (const [, doc] of taken) docs[doc.id] = firstSentenceOf(store, workspaceId, doc.id) ?? -1;
-    writeExtractDocs(store, workspaceId, docs);
+    // One answer lands whole: the ledger writes, the files marked done and the watermark, in one transaction.
     const upTo = Math.max(state.upTo, ...pendingReplies.map((message) => message.seq));
-    writeExtractState(store, workspaceId, sessionId, { upTo, failures: 0, ranAt: new Date().toISOString() });
+    store.atomically(() => {
+      persistExtraction(store, workspaceId, result.output, { sessionId, ownerId, documentIds: taken.map(([, doc]) => doc.id),
+        sources: { ...known.sources, ...known.replies }, today, reread, ...(profileTask ? { profileTask } : {}) });
+      if (reread) store.deleteSetting(workspaceId, EXTRACT_REREAD_SETTING);
+      // The 「符合」 was said in the last reply this run read, and the portrait was rewritten with it in hand: the confirmation holds for the
+      // portrait it wrote (before, the person was asked to confirm again every round, 2026-10-16). Not when a correction followed it.
+      const lastSeq = pendingReplies.at(-1)?.seq;
+      const confirmedHere = !focus && lastSeq !== undefined && store.listEvents(workspaceId, { type: "profile.confirmed" })
+        .some((event) => (event.payload as { sessionId?: string; replySeq?: number }).sessionId === sessionId && Number((event.payload as { replySeq?: number }).replySeq) === lastSeq);
+      if (confirmedHere) store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(readProfileModel(store, workspaceId)), at: new Date().toISOString() }));
+      // Read again here, inside the transaction: the dialogue may have queued files while the model ran.
+      const docs = readExtractDocs(store, workspaceId);
+      for (const [, doc] of taken) if (docs[doc.id] === takenAt[doc.id]) docs[doc.id] = firstSentenceOf(store, workspaceId, doc.id) ?? -1;
+      writeExtractDocs(store, workspaceId, docs);
+      writeExtractState(store, workspaceId, sessionId, { upTo, failures: 0, ranAt: new Date().toISOString() });
+    });
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extracted:${sessionId}:${upTo}:${new Date().toISOString()}`, type: "onboarding.extracted",
       entityId: sessionId, payload: { replies: pendingReplies.length, files: taken.length, facts: result.output.slotUpdates.length,
         repairs: result.audit.repairs ?? 0, warnings: result.audit.warnings ?? [] } });
@@ -188,6 +214,19 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     return { state: "done", sessionId, replies: pendingReplies.length, files: taken.length, facts: result.output.slotUpdates.length, more };
   }
   return { runOnce, nextSession };
+}
+
+/**
+ * What a run owes the portrait (P3): every deep stage the conversation has moved past (or all of them, once the interview is complete)
+ * whose section is not final is rewritten whole; the synthesis is written once all three are final — again whenever one is finalized —
+ * and never before, since it sums up what they found.
+ */
+export function portraitTask(stage: OnboardingStage, complete: boolean, records: Partial<Record<ProfileSection, { final: boolean }>>):
+  { finalize: ProfileSection[]; synthesize: boolean } {
+  const at = ONBOARDING_STAGES.indexOf(stage);
+  const finalize = DEEP_SECTIONS.filter((section) => !records[section]?.final && (complete || ONBOARDING_STAGES.indexOf(section) < at));
+  const allFinal = DEEP_SECTIONS.every((section) => records[section]?.final || finalize.includes(section));
+  return { finalize, synthesize: allFinal && (finalize.length > 0 || !records.synthesis?.final) };
 }
 
 /** The ledger's facts as short lines, newest last, at most `FACTS_SHOWN`. */
@@ -258,28 +297,51 @@ export function evidenceTools(corpus: () => Array<StoredSentence & { ref: string
 }
 
 /**
- * One extraction at a time per workspace. A request while one runs makes it go round again when it ends; a run that leaves more waiting
- * (files over the budget, replies that came meanwhile) goes round again at once, unless it failed.
+ * One extraction at a time per workspace. A request while one runs adds its conversation to the next round's (so a reply the person just
+ * sent skips any backoff) and makes it go round again when this one ends, even after a failure; a run that leaves more waiting (files
+ * over the budget, replies that came meanwhile) goes round again at once, unless it failed with nothing new asked for.
  */
-const inFlight = new Map<string, { promise: Promise<void>; again: boolean }>();
-export function requestExtraction(workspaceId: string, run: () => Promise<ExtractOutcome>): Promise<void> {
+const inFlight = new Map<string, { promise: Promise<void>; again: boolean; preferred: Set<string> }>();
+export function requestExtraction(workspaceId: string, run: (preferred: string[]) => Promise<ExtractOutcome>, preferred?: string): Promise<void> {
   const current = inFlight.get(workspaceId);
-  if (current) { current.again = true; return current.promise; }
-  const entry = { again: false, promise: Promise.resolve() };
+  if (current) { current.again = true; if (preferred) current.preferred.add(preferred); return current.promise; }
+  const entry = { again: false, preferred: new Set<string>(preferred ? [preferred] : []), promise: Promise.resolve() };
   entry.promise = (async () => {
     try {
       for (let rounds = 0; rounds < 20; rounds += 1) {
         entry.again = false;
-        const outcome = await run().catch((error: unknown): ExtractOutcome => ({ state: "blocked", sessionId: "", code: "EXTRACT_FAILED",
+        const asked = [...entry.preferred];
+        entry.preferred.clear();
+        const outcome = await run(asked).catch((error: unknown): ExtractOutcome => ({ state: "blocked", sessionId: "", code: "EXTRACT_FAILED",
           message: error instanceof Error ? error.message : String(error) }));
-        if (outcome.state === "blocked") break;
-        if (!(outcome.state === "done" && outcome.more) && !entry.again) break;
+        if (entry.again) continue;
+        if (!(outcome.state === "done" && outcome.more)) break;
       }
     } finally { inFlight.delete(workspaceId); }
   })();
   inFlight.set(workspaceId, entry);
   return entry.promise;
 }
+/**
+ * Waits until a conversation's replies up to `seq` are extracted (true), or its extraction is failing and backing off (false), asking for
+ * a run when none is going; at most `timeoutMs`, after which the caller reads the ledger as it is.
+ */
+export async function extractionReached(store: CrosslineStore, workspaceId: string, sessionId: string, seq: number, request: () => Promise<void>,
+  timeoutMs = Number.POSITIVE_INFINITY): Promise<boolean> {
+  const until = Date.now() + timeoutMs;
+  // A failure recorded after this reply was sent is this reply's: it is not retried at once (the backoff holds). One from before is not.
+  const sentAt = store.listOnboardingMessages(workspaceId, sessionId).find((message) => message.seq === seq)?.createdAt ?? "";
+  const wait = (promise: Promise<void>) => Number.isFinite(timeoutMs)
+    ? Promise.race([promise, new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, until - Date.now())))]) : promise;
+  for (let attempt = 0; attempt < 4 && Date.now() < until; attempt += 1) {
+    const state = readExtractState(store, workspaceId, sessionId);
+    if (state.upTo >= seq) return true;
+    if (state.failures && state.retryAt && Date.parse(state.retryAt) > Date.now() && (attempt > 0 || (state.lastError?.at ?? "") >= sentAt)) return false;
+    await wait(extractionRunning(workspaceId) ? extractionSettled(workspaceId) : request());
+  }
+  return readExtractState(store, workspaceId, sessionId).upTo >= seq;
+}
+
 export const extractionRunning = (workspaceId: string) => inFlight.has(workspaceId);
 /** Resolves when the workspace's extraction (if any) has finished. */
 export const extractionSettled = (workspaceId: string): Promise<void> => inFlight.get(workspaceId)?.promise ?? Promise.resolve();

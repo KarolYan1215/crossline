@@ -249,10 +249,19 @@ export function conformanceCurrent(record: ConformanceRecord | undefined, model:
  * repaired; any other Skill needs its own schemas to pass and the whole run to pass at least 90%. A Skill the provider cannot serve
  * at all (`capabilityGap`) is never admitted, however the schemas went.
  */
+/**
+ * Cases a record made before a schema was split still answers for: the interview's whole-turn schema held every field the dialogue and
+ * the extraction now write apart (2026-10-19), so a provider that passed it is not shut out of the interview until it is tested again.
+ */
+const LEGACY_CASES: Record<string, string> = { ONBOARDING_TURN_SCHEMA: "ONBOARDING_DIALOGUE_SCHEMA|ONBOARDING_EXTRACT_SCHEMA" };
+const caseRuns = (record: ConformanceRecord) => record.runs.flatMap((run) => LEGACY_CASES[run.caseId]
+  ? LEGACY_CASES[run.caseId]!.split("|").map((caseId) => ({ ...run, caseId })) : [run]);
+
 export function admittedSkills(record: ConformanceRecord, capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES): string[] {
+  const all = caseRuns(record);
   return Object.entries(SKILL_NEEDS).filter(([skill, needs]) => {
     if (capabilityGap(skill, capabilities) || !needs.schemas.length) return false;
-    const runs = record.runs.filter((run) => needs.schemas.includes(run.caseId));
+    const runs = all.filter((run) => needs.schemas.includes(run.caseId));
     if (!needs.schemas.every((schema) => runs.some((run) => run.caseId === schema)) || runs.some((run) => !run.ok)) return false;
     if (needs.critical) return runs.filter((run) => run.repairs > 0).length / runs.length <= 0.05;
     return record.passRate >= 0.9;

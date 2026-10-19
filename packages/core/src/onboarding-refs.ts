@@ -1,5 +1,5 @@
 import { clockOf, quoteSupportsDate, type DateExtraction } from "./date-schema";
-import { DIALOGUE_KEYS, EXTRACT_KEYS, keepOnboardingTurn, validateOnboardingTurn, type EvidenceSentence, type KnownSources, type OnboardingDialogue, type OnboardingExtraction,
+import { DIALOGUE_KEYS, EXTRACT_KEYS, PROFILE_SECTIONS, SECTION_FIELDS, keepOnboardingTurn, validateOnboardingTurn, type EvidenceSentence, type KnownSources, type OnboardingDialogue, type OnboardingExtraction,
   type OnboardingTurn } from "./onboarding-turn-schema";
 import { numbersSupported } from "./sentences";
 
@@ -89,7 +89,16 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     return { ...proposal, windows: list(proposal.windows).map(({ startMinute, endMinute, ...window }) =>
       ({ ...window, start: clockOf(startMinute), end: clockOf(endMinute) })) };
   })() : turn.availability;
-  return { ...turn, slotUpdates, flywheelCandidates, lineProfiles, goalEdits, availability,
+  // A portrait section keeps only its own fields, and the sentences it rests on; null leaves the section as it is.
+  const sections = turn.profileSections && typeof turn.profileSections === "object" ? Object.fromEntries(PROFILE_SECTIONS.map((section) => {
+    const raw = (turn.profileSections as Wire)[section];
+    if (!raw || typeof raw !== "object") return [section, null];
+    const cited = span((raw as Wire).refs, `画像的「${section}」段`, false);
+    const fields = raw as Wire;
+    return [section, { ...Object.fromEntries(SECTION_FIELDS[section].filter((field) => fields[field] !== undefined).map((field) => [field, fields[field]])),
+      sentences: cited.ids }];
+  })) : undefined;
+  return { ...turn, slotUpdates, flywheelCandidates, lineProfiles, goalEdits, availability, ...(sections ? { profileSections: sections } : {}),
     ...(turn.fileDates && typeof turn.fileDates === "object" ? { fileDates: resolveDateRefs(turn.fileDates, index, texts) } : {}) };
 }
 

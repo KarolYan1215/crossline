@@ -156,8 +156,15 @@ export const interviewOwnedOpen = (items: ChecklistItem[]) => items.filter((item
 
 /** Where the person's 「画像符合我」 is kept, with the portrait it was said about. */
 export const PROFILE_CONFIRMED = "profile.confirmed";
-/** What a confirmation is about: the portrait's one line, its core conflict and its problem. A portrait rewritten after is asked again. */
+/**
+ * What a confirmation is about: the portrait's synthesis — its one line and its core conflict (2026-10-19, P3). The sections under it
+ * (the problem, the compass, the energy) are rewritten as each stage ends, and confirming the synthesis covers them; including the
+ * problem made every later situation edit ask again. A portrait whose synthesis is rewritten in substance is asked again.
+ */
 export const portraitFingerprint = (profile: Partial<ProfileModel>) =>
+  [profile.portrait, profile.coreConflict].map((text) => String(text ?? "").replace(/\s+/g, "")).join("|");
+/** How a confirmation was recorded before 2026-10-19 (the problem included), so a confirmation from then still holds. */
+const legacyPortraitFingerprint = (profile: Partial<ProfileModel>) =>
   [profile.portrait, profile.coreConflict, profile.problem].map((text) => String(text ?? "").replace(/\s+/g, "")).join("|");
 
 /** How alike two portraits must read (character-pair Dice) for a confirmation of one to hold for the other. */
@@ -173,7 +180,8 @@ const pairs = (text: string) => { const out = new Map<string, number>(); const c
  */
 export function portraitStillConfirmed(confirmedFingerprint: string | undefined, profile: Partial<ProfileModel>): boolean {
   if (!confirmedFingerprint) return false;
-  const current = portraitFingerprint(profile);
+  // Three parts: recorded before the synthesis-only fingerprint, compared as it was then.
+  const current = confirmedFingerprint.split("|").length === 3 ? legacyPortraitFingerprint(profile) : portraitFingerprint(profile);
   if (current === confirmedFingerprint) return true;
   if (current.replace(/\|/g, "").length < 10) return false;
   const a = pairs(confirmedFingerprint), b = pairs(current);
