@@ -74,34 +74,40 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
     return { state: "failed" };
   };
   const existing = read(deps.store, workspaceId);
-  if (existing.length >= AUTOMATIONS_MAX) return fail(`已经有 ${AUTOMATIONS_MAX} 个自动化，先删掉不用的。`);
   const client = deps.client(workspaceId);
   if (!client) return { state: "waiting" };
   const lines = identityLines(deps.store, workspaceId).map((line) => ({ id: line.id, label: line.label }));
   const input = { request: text, lineHint, lines, today: now.toISOString().slice(0, 10), timeZone: deps.zone(workspaceId),
     categories: Object.entries(AGENT_CATEGORIES).map(([id, label]) => ({ id, label })),
-    connected: { mail: Boolean(deps.store.getSetting(workspaceId, "mail.accounts")?.includes("\"id\"")) } };
+    connected: { mail: Boolean(deps.store.getSetting(workspaceId, "mail.accounts")?.includes("\"id\"")) },
+    // What exists already: a request that changes one of these replaces it (the automation grows by being told what to change).
+    existing: existing.map((item) => ({ id: item.id, name: item.name, trigger: triggerLabel(item.trigger), summary: item.summary, status: item.status })) };
   const result = await runCodexSkill<ReturnType<typeof validateAutomationPlan>>(client, input, {
     skillName: AUTOMATION_DESIGNER_SKILL, cwd: deps.cwd, outputSchema: AUTOMATION_PLAN_SCHEMA as unknown as Record<string, unknown>,
     developerInstructions: "Turn the request into one automation: a trigger Crossline can watch and an action the assistant can do with its functions. Answer in the schema only.",
-    prepareInput: () => input, validateOutput: (output) => validateAutomationPlan(output, lines.map((line) => line.id)), onAudit: () => {}, timeoutMs: 30 * 60_000
+    prepareInput: () => input, validateOutput: (output) => validateAutomationPlan(output, lines.map((line) => line.id), existing.map((item) => item.id)), onAudit: () => {}, timeoutMs: 30 * 60_000
   });
   if (!result.ok) return result.blocker.code.startsWith("SKILL_") || result.blocker.code.startsWith("MODEL_") || result.blocker.code.startsWith("RUNTIME_")
     ? { state: "waiting" } : fail(result.blocker.message);
   const plan = result.output;
-  const id = `auto-${createHash("sha256").update(requestId).digest("hex").slice(0, 8)}`;
+  const previous = plan.replaces ? existing.find((item) => item.id === plan.replaces) : undefined;
+  if (!previous && existing.length >= AUTOMATIONS_MAX) return fail(`已经有 ${AUTOMATIONS_MAX} 个自动化，先删掉不用的。`);
+  const id = previous?.id ?? `auto-${createHash("sha256").update(requestId).digest("hex").slice(0, 8)}`;
   const automation: Automation = { id, name: plan.name, summary: plan.summary, lineId: plan.lineId, status: "active", trigger: plan.trigger, action: plan.action, steps: plan.steps,
-    origin: { kind: "asked", text, requestId }, createdAt: now.toISOString(), updatedAt: now.toISOString(), runs: 0 };
-  write(deps.store, workspaceId, [...read(deps.store, workspaceId).filter((item) => item.id !== id), automation]);
+    origin: previous?.origin ?? { kind: "asked", text, requestId }, createdAt: previous?.createdAt ?? now.toISOString(), updatedAt: now.toISOString(),
+    runs: previous?.runs ?? 0, ...(previous?.lastFiredAt ? { lastFiredAt: previous.lastFiredAt } : {}),
+    ...(previous?.watch && previous.trigger.type === "watch" && plan.trigger.type === "watch" && previous.trigger.url === plan.trigger.url ? { watch: previous.watch } : {}) };
+  write(deps.store, workspaceId, previous ? read(deps.store, workspaceId).map((item) => item.id === id ? automation : item)
+    : [...read(deps.store, workspaceId).filter((item) => item.id !== id), automation]);
   // The person asked for this in words: the kind of work it does is allowed by that request (said in the message, switchable in 设置).
   const allowed = automation.action.kind === "run" && !readCategories(deps.store, workspaceId)[automation.action.category];
   if (automation.action.kind === "run" && allowed) approveCategory(deps.store, workspaceId, automation.action.category);
-  deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.created:${id}`, type: "automation.created", entityId: id,
-    payload: { requestId, name: plan.name, trigger: plan.trigger.type, action: plan.action.kind } });
+  deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.created:${requestId}`, type: "automation.created", entityId: id,
+    payload: { requestId, name: plan.name, trigger: plan.trigger.type, action: plan.action.kind, ...(previous ? { replaced: previous.id } : {}) } });
   const person = plan.steps.filter((step) => step.by === "person").map((step) => step.title);
-  sayToPerson(deps.store, workspaceId, [`已建好自动化「${plan.name}」：${triggerLabel(plan.trigger)}，${plan.summary}`,
+  sayToPerson(deps.store, workspaceId, [`${previous ? "已按要求改好" : "已建好"}自动化「${plan.name}」：${triggerLabel(plan.trigger)}，${plan.summary}`,
     person.length ? `其中「${person.join("」「")}」由本人完成。` : "", allowed && automation.action.kind === "run" ? `已按这个请求为助手开启「${AGENT_CATEGORIES[automation.action.category]}」。` : "",
-    plan.assumptions ? `按以下理解建立：${plan.assumptions}` : ""].filter(Boolean).join("\n"), "automation_created", `automation:${id}`,
+    plan.assumptions ? `按以下理解建立：${plan.assumptions}` : ""].filter(Boolean).join("\n"), "automation_created", `automation:${requestId}`,
   [{ label: "查看与修改", href: "/settings#automation" }], now);
   return { state: "created", id };
 }
@@ -285,4 +291,28 @@ export function createAutomationService(deps: AutomationDeps & { afterRequest?: 
       return undefined;
     }
   };
+}
+
+/**
+ * The automations grow from use too: when the assistant has had the same kind of errand on one line done twice and both were taken
+ * (`growCandidates`' own rule), the person is asked once whether to make it automatic; 「建成自动化」 sends the request through the input
+ * box's own action, so the designer takes it up like anything they said. Where the shell assistant works, the errand is grown into a
+ * workflow instead (workflow-smith.ts), so this is for everyone else.
+ */
+export function suggestFromRepeats(store: CrosslineStore, workspaceId: string, candidates: Array<{ lineId: string; text: string; origin: { kind: string; taskIds?: string[] } }>, now = new Date()): number {
+  const suggested = new Set(store.listEvents(workspaceId, { type: "automation.suggested" }).map((event) => event.entityId));
+  let made = 0;
+  for (const candidate of candidates) {
+    if (candidate.origin.kind !== "repeated" || !candidate.origin.taskIds?.length) continue;
+    const key = `sugg-${createHash("sha256").update([...candidate.origin.taskIds].sort().join(",")).digest("hex").slice(0, 12)}`;
+    if (suggested.has(key)) continue;
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `automation.suggested:${key}`, type: "automation.suggested", entityId: key,
+      payload: { lineId: candidate.lineId, text: candidate.text.slice(0, 300), taskIds: candidate.origin.taskIds } });
+    const text = `以后自动做这类事：${candidate.text.slice(0, 200)}`;
+    sayToPerson(store, workspaceId, `助手已经做过 ${candidate.origin.taskIds.length} 次类似的事（${candidate.text.slice(0, 80)}），都已采纳。要不要以后自动做？可以按时做，也可以在有新邮件、新文件或任务完成时做。`,
+      "automation_suggest", key, [{ label: "建成自动化", action: { action: "workflow.request", summary: text.slice(0, 200),
+        args: { text, lineId: candidate.lineId, reminder: "", time: "", weekdays: [] } } }, { label: "去设置里写清楚", href: "/settings#automation" }], now);
+    made += 1;
+  }
+  return made;
 }

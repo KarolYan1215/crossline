@@ -59,7 +59,7 @@ import { homedir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
 import { createMailService } from "./mailbox";
-import { automationPass, createAutomationService, designPending, onNewMail, type AutomationDeps } from "./automations";
+import { automationPass, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { identityLines } from "./lines";
 import { createBackgroundSpend } from "./spend";
@@ -858,6 +858,8 @@ async function automationDesignPass(workspaceId: string): Promise<void> {
 }
 async function automationTick(workspaceId: string): Promise<void> {
   await automationDesignPass(workspaceId);
+  // The machine owner's repeated errands are grown into workflows (workflowPass); everyone else is offered an automation for them.
+  if (!machineOwner(workspaceId)) { try { suggestFromRepeats(analysisStore, workspaceId, growCandidates(analysisStore, workspaceId)); } catch { /* a courtesy */ } }
   if (!codexSupervisor || paused(workspaceId, "assistant") || !spendAllows(await spendFor(workspaceId), "intake")) return;
   enterUsageWorkspace(workspaceId);
   await automationPass(automationDeps, workspaceId);

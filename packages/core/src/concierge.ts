@@ -362,6 +362,9 @@ export type ConciergePack = {
   preferences: string[];
   energy: { level: string; at: string } | null;
   forecast: Array<{ milestoneId: string; title: string; deadline: string; usualFinish: string; cautiousFinish: string; atRisk: boolean }>;
+  /** The person's automations (what runs by itself) and how many mailboxes are connected (docs/personal-agent.md). */
+  automations?: Array<{ name: string; trigger: string; status: string }>;
+  mailboxes?: number;
 };
 
 export function conciergeRefs(pack: ConciergePack): ConciergeRefs {

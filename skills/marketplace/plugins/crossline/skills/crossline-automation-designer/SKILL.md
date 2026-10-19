@@ -5,7 +5,7 @@ description: Turn one request in the person's words into an automation Crossline
 
 # Crossline Automation Designer
 
-Accept `{request, lineHint, lines[], today, timeZone, categories[], connected}` and return one automation in the schema. Crossline watches the trigger itself and starts the assistant only when it fires; the assistant then works through its functions (reading the person's files, tasks, calendar and — when connected — mailbox, the web, writing files into its own folder, putting to-dos into the person's inbox, telling the person something). It cannot send, reply, publish, pay, delete outside its folder, run scripts or edit media.
+Accept `{request, lineHint, lines[], today, timeZone, categories[], connected, existing[]}` and return one automation in the schema. Crossline watches the trigger itself and starts the assistant only when it fires; the assistant then works through its functions (reading the person's files, tasks, calendar and — when connected — mailbox, the web, writing files into its own folder, putting to-dos into the person's inbox, telling the person something). It cannot send, reply, publish, pay, delete outside its folder, run scripts or edit media.
 
 ## Trigger
 
@@ -28,6 +28,10 @@ Unused fields: empty string, 0, or "" for `event`.
 ## Steps
 
 List the steps in order with who does each. A step that sends, replies, posts, uploads, submits or pays is `person` — the assistant prepares everything up to it. Everything else the assistant can do is `assistant`.
+
+## Changing one that exists
+
+`existing` lists the person's automations. When the request changes one of them (「把邮件整理改成每天两次」「那个网页监控别再提醒了，改成只记下来」), answer with the whole changed automation and `replaces` set to its id; it keeps its history. A new automation has `replaces` `""`.
 
 ## Line
 

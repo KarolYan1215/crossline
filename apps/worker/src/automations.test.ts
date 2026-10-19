@@ -9,7 +9,7 @@ const plan = (over: Partial<AutomationPlan> = {}, trigger: Partial<AutomationPla
   name: "课程邮件整理", summary: "每天早上把课程邮件整理成清单", lineId: "research",
   trigger: { type: "schedule", time: "08:00", days: "DAILY", hours: 0, from: "", keywords: "", url: "", event: "", ...trigger },
   action: { kind: "run", instructions: "读最近一天和课程有关的邮件，整理成待办清单写进 digest.md，把要做的事放进收件箱", reminder: "", category: "read_research_organize", outputs: "digest.md" },
-  steps: [{ title: "读邮件并整理", by: "assistant" }, { title: "回复老师的邮件", by: "assistant" }], assumptions: "", ...over
+  steps: [{ title: "读邮件并整理", by: "assistant" }, { title: "回复老师的邮件", by: "assistant" }], assumptions: "", replaces: "", ...over
 });
 
 function setup(now = new Date("2026-10-19T14:00:00Z")) {
@@ -55,6 +55,14 @@ test("a request in words becomes an active automation, its kind of work is allow
   expect(readCategories(store, workspaceId).read_research_organize).toBeTruthy();
   // Designed once: a second pass finds nothing waiting.
   expect(await designPending(deps(() => rpc), workspaceId)).toEqual([]);
+  // Told what to change, it grows in place: same id, its runs kept, a new trigger.
+  requestAutomation(store, workspaceId, "把课程邮件整理改成每天早晚各一次", "research", "user-1");
+  const { rpc: second } = fakeRuntime([JSON.stringify(plan({ replaces: automation!.id }, { time: "20:00" }))], AUTOMATION_DESIGNER_SKILL);
+  await designPending(deps(() => second), workspaceId);
+  const after = readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING));
+  expect(after).toHaveLength(1);
+  expect(after[0]).toMatchObject({ id: automation!.id, trigger: { type: "schedule", schedule: { time: "20:00" } } });
+  expect(() => validateAutomationPlan(plan({ replaces: "auto-nope" }), ["research"], [automation!.id])).toThrow(/AUTOMATION_PLAN_INVALID/);
 });
 
 test("a schedule fires once at its time; an interval after its hours; a busy assistant queues the firing for the next tick", async () => {

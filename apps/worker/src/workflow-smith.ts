@@ -165,15 +165,20 @@ function readSkillDir(root: string): { files: Array<{ path: string; text: string
  * pass sends it to the desktop and phone when no page is open (a page shows it itself).
  */
 export function sayToPerson(store: CrosslineStore, workspaceId: string, text: string, kind: string, fingerprint: string,
-  links: Array<{ label: string; href: string }>, now = new Date()): void {
+  links: Array<{ label: string; href: string } | { label: string; action: { action: string; summary: string; args: Record<string, unknown> } }>, now = new Date()): void {
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
   try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
   const conversation = store.conversationFor(workspaceId, day);
+  // A button may carry one of the input box's actions (carried out on click, like any card's), or open a page.
+  const actions = links.flatMap((link) => "action" in link ? [link.action] : []);
+  let next = 0;
+  const options = links.map((link) => "action" in link ? { label: link.label, actions: [next++], kind: "action" }
+    : { label: link.label, actions: [], kind: "href", href: link.href });
   store.appendConversationMessage({ id: randomUUID(), workspaceId, conversationId: conversation.id, role: "nudge", text: "", createdAt: now.toISOString(),
     payload: { nudge: { kind, fingerprint, urgent: false, counted: true, delivery: "pending" },
-      card: { actions: [], items: [], clarify: { question: text, options: [...links.map((link) => ({ label: link.label, actions: [], kind: "href", href: link.href })),
-        { label: "知道了", actions: [], kind: "ack" }] }, confidence: "high", nudgeKind: kind } } });
+      card: { actions, items: actions.map(() => ({ state: "pending" })), clarify: { question: text, options: [...options, { label: "知道了", actions: [], kind: "ack" }] },
+        confidence: "high", nudgeKind: kind } } });
 }
 
 /**

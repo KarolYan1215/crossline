@@ -54,10 +54,12 @@ export type AutomationPlan = {
   action: { kind: "run" | "remind"; instructions: string; reminder: string; category: string; outputs: string };
   steps: Array<{ title: string; by: "assistant" | "person" }>;
   assumptions: string;
+  /** The id of an existing automation this request changes (「把邮件整理改成每天两次」), or "" for a new one. */
+  replaces: string;
 };
 const str = (max: number) => ({ type: "string", maxLength: max }) as const;
 export const AUTOMATION_PLAN_SCHEMA = {
-  type: "object", additionalProperties: false, required: ["name", "summary", "lineId", "trigger", "action", "steps", "assumptions"], properties: {
+  type: "object", additionalProperties: false, required: ["name", "summary", "lineId", "trigger", "action", "steps", "assumptions", "replaces"], properties: {
     name: str(40), summary: str(200), lineId: str(64),
     trigger: { type: "object", additionalProperties: false, required: ["type", "time", "days", "hours", "from", "keywords", "url", "event"], properties: {
       type: { type: "string", enum: ["schedule", "interval", "mail", "watch", "file", "task"] }, time: str(5), days: str(40),
@@ -66,7 +68,7 @@ export const AUTOMATION_PLAN_SCHEMA = {
       kind: { type: "string", enum: ["run", "remind"] }, instructions: str(2000), reminder: str(200), category: str(40), outputs: str(300) } },
     steps: { type: "array", minItems: 1, maxItems: 12, items: { type: "object", additionalProperties: false, required: ["title", "by"], properties: {
       title: str(120), by: { type: "string", enum: ["assistant", "person"] } } } },
-    assumptions: str(400) }
+    assumptions: str(400), replaces: str(40) }
 } as const;
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -83,9 +85,12 @@ export function watchUrlAllowed(url: string): boolean {
 }
 
 /** Turns the designer's answer into a stored automation's parts, or says what is wrong so the designer can fix it. */
-export function validateAutomationPlan(value: unknown, lineIds: string[]): Pick<Automation, "name" | "summary" | "lineId" | "trigger" | "action" | "steps"> & { assumptions: string } {
+export function validateAutomationPlan(value: unknown, lineIds: string[], existingIds: string[] = []):
+  Pick<Automation, "name" | "summary" | "lineId" | "trigger" | "action" | "steps"> & { assumptions: string; replaces: string } {
   const plan = value as AutomationPlan | undefined;
   if (!plan || typeof plan !== "object" || !plan.trigger || !plan.action) return problem("回答缺少 trigger 或 action");
+  const replaces = typeof plan.replaces === "string" ? plan.replaces.trim() : "";
+  if (replaces && !existingIds.includes(replaces)) problem(`replaces「${replaces}」不是已有自动化的 id；新建时写 ""`);
   if (!plan.name?.trim()) problem("name 不能为空");
   if (!lineIds.includes(plan.lineId)) problem(`lineId 只能是 ${lineIds.join("、")}`);
   const t = plan.trigger;
@@ -124,7 +129,7 @@ export function validateAutomationPlan(value: unknown, lineIds: string[]): Pick<
   if (!Array.isArray(plan.steps) || !plan.steps.length) problem("steps 至少一步");
   // Anything that sends, uploads, publishes or pays is the person's, whatever the plan says.
   const steps = plan.steps.map((step) => ({ title: step.title.trim(), by: stepLeavesMachine(step.title) ? "person" as const : step.by }));
-  return { name: plan.name.trim(), summary: plan.summary.trim(), lineId: plan.lineId, trigger, action, steps, assumptions: plan.assumptions.trim() };
+  return { name: plan.name.trim(), summary: plan.summary.trim(), lineId: plan.lineId, trigger, action, steps, assumptions: plan.assumptions.trim(), replaces };
 }
 
 /** In words, for the settings card and the message that says it was made. */
