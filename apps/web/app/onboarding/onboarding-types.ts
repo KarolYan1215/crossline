@@ -19,6 +19,8 @@ export type Question = {
 export type AssistantTurn = {
   reply: string; questions: Question[]; nextAction: "ask" | "ready_for_milestones"; stage?: string;
   coverage: Array<{ identityId: string; filled: string[]; missing: string[] }>;
+  /** The deep stages' observation, kept only when its quotes are in the replies it names (`checkInsight`). */
+  insight?: { text: string; refs: Array<{ replyId: string; quote: string }> };
 };
 export type Message = { seq: number; role: "assistant" | "user"; content: unknown; createdAt: string };
 export type DateBatchItem = {
@@ -58,6 +60,15 @@ export type OnboardingState = {
   answeredElsewhere?: string[];
   diligence: DiligenceReport[];
   dateBatch: DateBatch | null;
+  /** What was read from the files and adopted without a click (or left out as unsure), each removable (`loadAdoptedDates`). */
+  adoptedDates?: { items: Array<DateBatchItem & { batchId: string; adopted: boolean }>; dropped: string[] };
+  /** Where the interview is, by its own progress record: part n of five, how much of it is clear, and what it asks next. */
+  progress?: { index: number; total: number; label: string; clear: number; of: number; next: string };
+  /** The capacity conflict and, once the start standard stands, the week's draft (`weekCapacity`). */
+  capacity?: import("@crossline/core").WeekCapacity;
+  skeleton?: import("@crossline/core").SkeletonBlock[];
+  /** The person's 准 / 不准 per round (round seq → verdict). */
+  insightRatings?: Record<string, "fits" | "off">;
   identities: Identity[];
   session: { id: string; state: "active" | "complete"; coverage: { coverage?: AssistantTurn["coverage"]; stage?: string } } | null;
   /** A new account sets its lines before the conversation starts. */

@@ -46,7 +46,7 @@ export function ledgerForModel(store: CrosslineStore, workspaceId: string, sessi
   const all = interviewQuestions(store, workspaceId, sessionId).filter((question) => question.status !== "dropped");
   const waiting = all.filter((question) => question.status === "pending" || question.status === "open");
   const settled = all.filter((question) => question.status === "answered" || question.status === "assumed").slice(-Math.max(0, limit - waiting.length));
-  return ledgerLines([...settled, ...waiting].sort((a, b) => a.id - b.id));
+  return ledgerLines([...settled, ...waiting].sort((a, b) => a.id - b.id).slice(-limit));
 }
 
 export type RepeatOutcome = { questions: TurnQuestion[]; coveredGaps: Set<string>; dropped: Array<{ text: string; repeats: number; why: "answered" | "similar" }> };

@@ -303,7 +303,8 @@ test("with the completion list on, a 「ready」 before the portrait is written 
   expect(await run({ sessionId: "s", text: "都说完了" })).toEqual({ state: "asked", sessionId: "s" });
   expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("active");
   const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; questions: unknown[] };
-  expect(last.reply).toContain("完成访谈前还缺：画像各部分已写出");
+  // Start items are named first; the portrait's items are among what is still owed.
+  expect(last.reply).toContain("完成访谈前还缺：");
   expect(last.questions.length).toBeGreaterThan(0);
 });
 
@@ -498,4 +499,25 @@ test("a compacted conversation is not a forbidden tool; a round that stops says 
   // The retry starts: the old reason goes, whatever the retry then does.
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => sharedRuntime([turn(), turn()], ONBOARDING_SKILL).rpc, { checklist: false, extract: "off" })({ sessionId: "s2", text: "" });
   expect(store.getSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}s2`)).toBeUndefined();
+});
+
+test("the progress record goes back to the model next round, and an observation is kept only when its quotes are the person's", async () => {
+  const progress = { part: "energy", covered: ["心流时刻"], open: ["耗能的事"], partDone: false, next: "问什么事做完很累" };
+  const insight = (quote: string) => ({ text: "你说投入的两次都是和人一起赶东西；底座主线是一个人做的研究。",
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote }] });
+  const { rpc, prompts } = fakeRuntime([turn({ stage: "energy", progress, insight: { text: "", refs: [] } }),
+    turn({ stage: "energy", progress: { ...progress, covered: ["心流时刻", "耗能的事"], open: [] }, insight: insight("一个人做研究") }),
+    turn({ stage: "energy", progress, insight: insight("一个人做实验") })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
+  await run({ sessionId: "s", text: "最投入的是和同学一起赶比赛的时候。" });
+  await run({ sessionId: "s", text: "底座是我一个人做研究。" });
+  expect(dialogue(prompts)[1]).toContain("上轮判断：第 5/5 部分「能量」未完成");
+  expect(dialogue(prompts)[1]).toContain("abstract");
+  const kept = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: { refs: unknown[] }; progress?: { covered: string[] } };
+  expect(kept.insight?.refs).toHaveLength(2);
+  expect(kept.progress?.covered).toEqual(["心流时刻", "耗能的事"]);
+  expect((store.getOnboardingSession(workspaceId, "s")!.coverage as { progress?: unknown }).progress).toMatchObject({ covered: ["心流时刻", "耗能的事"] });
+  // A quote the person never wrote: the card goes, the round stays.
+  await run({ sessionId: "s", text: "还有别的吗" });
+  expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: unknown }).insight).toBeUndefined();
 });

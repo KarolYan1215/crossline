@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
+import { ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
 import { extractBacklog, questionScreenFor } from "@crossline/db";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore, planToday } from "../../../../lib/crossline";
-import { folderDocumentIds, projectTimeline, weekSkeleton } from "../../../../lib/onboarding-board";
-import { loadPendingDateBatch } from "../../../../lib/imported-dates";
+import { folderDocumentIds, projectTimeline, weekCapacity, weekSkeleton } from "../../../../lib/onboarding-board";
+import { adoptPendingDates, loadAdoptedDates, loadPendingDateBatch } from "../../../../lib/imported-dates";
 import { loadDiligence } from "../../../../lib/diligence";
 import { identityLines, needsLineSetup } from "../../../../lib/lines";
 import { interviewStatus, pendingAnswerIds, questionsOwnedElsewhere } from "../../../../lib/interview-status";
@@ -20,6 +20,8 @@ export async function GET(request: Request) {
   if ("response" in access) return access.response;
   const { workspaceId } = access.ctx;
   const store = getStore();
+  // What the files say is taken, not asked (2026-10-19): a batch of dates still waiting is adopted before anything is read.
+  adoptPendingDates(access.ctx);
   // `?line=<id>`: that line's own interview, kept in its own session (`line-<id>`).
   const lineId = new URL(request.url).searchParams.get("line");
   const focus = lineId ? identityLines(access.ctx).find((line) => line.id === lineId) : undefined;
@@ -55,8 +57,19 @@ export async function GET(request: Request) {
     startMissing: status.startMissing.map(({ id, label, detail, owner }) => ({ id, label, detail, owner })),
     extraQuestions: status.questions.filter((question) => !inRound.has(question.id))
   } : { readyToStart: true, startConfirmed: true, startTotal: 0, startMissing: [], extraQuestions: [] };
+  const today = planToday(access.ctx);
+  const week = weekSkeleton(access.ctx, today), timeline = projectTimeline(access.ctx, today);
+  const { capacity, draft } = weekCapacity(access.ctx, today, week, timeline);
+  const stageNow = String((session?.coverage as { stage?: string } | undefined)?.stage ?? "orientation");
+  const ratings = Object.fromEntries(Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
+    .filter(([key]) => session && key.startsWith(`${session.id}#`)).map(([key, rating]) => [key.slice(key.indexOf("#") + 1), rating.verdict]));
   return NextResponse.json({
     ...start,
+    // Where the interview is, by its own record (`progress` of the last round), for the right column.
+    progress: progressView(readTurnProgress((session?.coverage as { progress?: unknown } | undefined)?.progress), stageNow),
+    capacity, skeleton: start.readyToStart ? draft : [],
+    insightRatings: ratings,
+    adoptedDates: loadAdoptedDates(access.ctx),
     ok: true, organizing,
     // Why the last round did not finish, kept after a reload (the worker writes it; the next attempt removes it).
     lastFailure: session ? readOnboardingFailure(store.getSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}${session.id}`)) : null,
@@ -73,8 +86,7 @@ export async function GET(request: Request) {
     // The right column's week and project axis (docs/onboarding-v3.md), and how the person asked to be spoken to.
     tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
     toneChosen: Boolean(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
-    week: weekSkeleton(access.ctx, planToday(access.ctx)),
-    timeline: projectTimeline(access.ctx, planToday(access.ctx)),
+    week, timeline,
     session: session ? { id: session.id, state: session.state, coverage: session.coverage } : null,
     messages,
     dateBatch: loadPendingDateBatch(access.ctx),

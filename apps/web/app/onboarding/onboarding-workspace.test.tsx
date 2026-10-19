@@ -42,7 +42,7 @@ test("each stage brings its own picture, and the time left is said before and af
   expect(viewForStage("details", true)).toBe("structure");
   expect(minutesLeft({ readyToStart: false, startMissing: [{ id: "a", label: "", detail: "", owner: "interview" }, { id: "b", label: "", detail: "", owner: "person" }] }, "lines"))
     .toEqual({ label: "开始使用前约", minutes: 5 });
-  expect(minutesLeft({ readyToStart: true, startMissing: [] }, "compass")).toEqual({ label: "画像访谈还剩约", minutes: 15 });
+  expect(minutesLeft({ readyToStart: true, startMissing: [] }, "compass")).toEqual({ label: "画像访谈还剩约", minutes: 10 });
 });
 
 test("the week draws working hours and fixed arrangements, waiting ones dashed, and says where the hours came from", () => {

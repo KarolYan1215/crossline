@@ -1,7 +1,8 @@
 import {
   DEEP_SECTIONS, ONBOARDING_KEEP_EARLY_MAX, ONBOARDING_STAGES, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
-  type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile
+  type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
+  ONBOARDING_INSIGHTS, readInsightRatings
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
@@ -177,7 +178,11 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
         && !lineAttributes(profiles[line.id], line.label).length).map((line) => line.id),
       profile: focus ? null : readProfileModel(store, workspaceId), profileTask: profileTask ?? null, stage,
       focusLine: focus ? { id: focus.id, label: focus.label } : null,
-      replies, sources, ...(waitingDocs.length > taken.length ? { sourcesWaiting: waitingDocs.length - taken.length } : {}), reread
+      replies, sources, ...(waitingDocs.length > taken.length ? { sourcesWaiting: waitingDocs.length - taken.length } : {}), reread,
+      // The person's ratings of the interview's observations: one they called 不准 is wrong about them and does not go into the portrait.
+      ...(() => { const rated = Object.values(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))).filter((rating) => rating.text)
+        .slice(-8).map((rating) => `${rating.verdict === "fits" ? "准" : "不准"}：${rating.text!.slice(0, 120)}`);
+        return rated.length && !focus ? { observations: rated } : {}; })()
     };
     const ids = { lines: lines.map((line) => line.id) };
     const result = await runCodexSkill<OnboardingExtraction>(client, context, {

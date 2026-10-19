@@ -90,7 +90,7 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const today = planToday(ctx);
   const lines = identityLines(ctx).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] }));
   const checklist = interviewChecklistFor(store, ctx.workspaceId, lines, { unfiledFiles: unfiledFiles(ctx, today).length, today });
-  const open = checklist.filter((item) => !item.done);
+  const open = checklist.filter((item) => !item.done && !item.deferred);
   const readyToStart = startReady(checklist), startMissing = startOpen(checklist);
   if (!session) return { started: false, complete: false, awaitingPerson: false, parked: false, readyToStart, startMissing, stage: "", stageIndex: 0, stageCount,
     questions: [], screened: [], openQuestions: 0, checklist, sessionId: "" };

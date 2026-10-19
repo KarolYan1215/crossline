@@ -49,7 +49,7 @@ test("the schema is strict: every object lists all its properties and forbids ex
 });
 
 test("each layer has its own fields, and a turn's lines and projects are enums the model picks from", () => {
-  expect(Object.keys(ONBOARDING_DIALOGUE_SCHEMA.properties)).toEqual(["reply", "questions", "coverage", "nextAction", "stage"]);
+  expect(Object.keys(ONBOARDING_DIALOGUE_SCHEMA.properties)).toEqual(["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress"]);
   expect(Object.keys(ONBOARDING_EXTRACT_SCHEMA.properties)).toEqual(["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles",
     "goalEdits", "availability", "profileSections"]);
   const question = (onboardingDialogueSchema({ lines: ["research", "media"], projects: ["ece555"] }).properties.questions as { items: { properties: Record<string, { enum?: string[] }> } }).items.properties;

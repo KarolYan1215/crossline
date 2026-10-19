@@ -1,4 +1,4 @@
-import { ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile } from "@crossline/core";
+import { ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile } from "@crossline/core";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
 import type { CrosslineStore } from "./index";
@@ -9,7 +9,7 @@ type DateRow = { id: string; project?: string; kind?: string; sourceRef?: string
  * Every dated item read from files or replies, pending or confirmed (an excluded one does not count; a pending one already over is
  * history, never offered, so it waits for nobody), with its project, kind and whether it repeats weekly.
  */
-function datedItems(store: CrosslineStore, workspaceId: string, today: string) {
+export function datedItems(store: CrosslineStore, workspaceId: string, today: string) {
   const decided = new Map(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => [event.entityId,
     event.payload as { superseded?: boolean; included?: string[] }]));
   return store.listEvents(workspaceId, { type: "dates.extracted" }).flatMap((event) => {
@@ -49,7 +49,8 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     dates,
     availability: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed") || store.getSetting(workspaceId, "schedule.availability")),
     unfiledFiles: extras.unfiledFiles,
-    portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile)
+    // 「准」 on an observation in each deep stage confirms the portrait piece by piece (2026-10-19), as the one 「符合」 at the end does.
+    portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile) || portraitConfirmedByInsights(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
   });
 }
 

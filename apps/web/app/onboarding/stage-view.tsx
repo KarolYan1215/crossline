@@ -7,6 +7,7 @@ import { FlywheelPreview, type Link } from "./flywheel-preview";
 import { StartConfirm } from "./start-confirm";
 import type { OnboardingState } from "./onboarding-types";
 import type { ProjectTimeline, WeekSkeleton } from "../../lib/onboarding-board";
+import type { SkeletonBlock } from "@crossline/core";
 
 /**
  * The interview's right column (docs/onboarding-v3.md, decided 2026-10-14): what the answers are building, one picture per stage — the
@@ -14,14 +15,18 @@ import type { ProjectTimeline, WeekSkeleton } from "../../lib/onboarding-board";
  * content. The current stage's picture is shown; earlier ones stay one click away. Above it, the start standard as a ring and the time
  * left, so the person always knows how far they are.
  */
+/** The five parts of the main interview, as the progress strip shows them. */
+const PART_LABELS = ["定向", "主线", "处境", "指南针", "能量"];
 export type StageKey = "lines" | "week" | "compass" | "energy" | "projects" | "structure";
 const VIEWS: Array<{ key: StageKey; label: string }> = [
   { key: "lines", label: "主线" }, { key: "week", label: "一周" }, { key: "compass", label: "指南针" },
   { key: "energy", label: "能量" }, { key: "projects", label: "项目" }, { key: "structure", label: "全貌" }
 ];
 /** Which picture each interview stage builds. */
-export function viewForStage(stage: string, complete: boolean): StageKey {
+export function viewForStage(stage: string, complete: boolean, ready = false): StageKey {
   if (complete) return "structure";
+  // Once the start standard stands the week's draft is the payoff: it comes forward until the deep parts begin.
+  if (ready && (stage === "orientation" || stage === "lines")) return "week";
   return ({ orientation: "lines", lines: "lines", situation: "week", compass: "compass", energy: "energy", details: "projects" } as Record<string, StageKey>)[stage] ?? "lines";
 }
 
@@ -29,7 +34,7 @@ export function viewForStage(stage: string, complete: boolean): StageKey {
 export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "startMissing">, stage: string): { label: string; minutes: number } {
   // A start item is per line and most are settled by one answer, several to a round: about 2.5 minutes each, never more than half an hour.
   if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, Math.min(30, Math.ceil(state.startMissing.length * 2.5))) };
-  const order = ["orientation", "lines", "situation", "compass", "energy", "details"];
+  const order = ["orientation", "lines", "situation", "compass", "energy"];
   const left = Math.max(1, order.length - Math.max(0, order.indexOf(stage)));
   return { label: "画像访谈还剩约", minutes: left * 5 };
 }
@@ -49,7 +54,7 @@ export function organizingNote(organizing: OnboardingState["organizing"]): strin
 export function StageView({ state, stage, complete, onChanged }: {
   state: OnboardingState; stage: string; complete: boolean; onChanged: () => void;
 }) {
-  const current = viewForStage(stage, complete);
+  const current = viewForStage(stage, complete, state.readyToStart);
   const [shown, setShown] = useState<StageKey>(current);
   // A new stage brings its picture forward; a picture the person opened stays until the stage moves on.
   useEffect(() => setShown(current), [current]);
@@ -59,7 +64,13 @@ export function StageView({ state, stage, complete, onChanged }: {
   const left = minutesLeft(state, stage);
   // A long-term goal is adopted in the left column, not answered in the conversation: its missing item links there (W-8).
   const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
+  const progress = state.progress;
   return <aside className="ob-stage" aria-label="正在成形">
+    {progress && !state.focusLine && <section className="ob-progress" aria-label="访谈进度">
+      <ol className="ob-progress-parts">{PART_LABELS.map((label, index) => <li key={label} data-state={index + 1 < progress.index || complete ? "done" : index + 1 === progress.index ? "now" : undefined}>{label}</li>)}</ol>
+      <b>{complete ? "访谈已完成" : `第 ${progress.index}/${progress.total} 部分 · ${progress.label}${progress.of ? ` · 已谈清 ${progress.clear}/${progress.of}` : ""}`}</b>
+      {!complete && progress.next && <small className="gen">接下来：{progress.next}</small>}
+    </section>}
     <section className="ob-ring-row" aria-label="开始使用的进度">
       <Ring done={state.readyToStart ? Math.max(1, total) : done} total={Math.max(1, total)} />
       <div>
@@ -82,8 +93,10 @@ export function StageView({ state, stage, complete, onChanged }: {
         onClick={() => setShown(view.key)}>{view.label}</button>)}
     </nav>
     <div className="ob-stage-body">
+      {/* The capacity conflict, once the lines are known: hours, what the fixed schedule takes, deadlines that crowd together. */}
+      {(shown === "lines" || shown === "week") && stage !== "orientation" && state.capacity && <CapacityNote capacity={state.capacity} />}
       {shown === "lines" && <LinesView state={state} onChanged={onChanged} />}
-      {shown === "week" && <WeekView week={state.week} />}
+      {shown === "week" && <WeekView week={state.week} draft={state.skeleton ?? []} lines={state.lines} />}
       {shown === "compass" && <CompassView profile={state.profile} />}
       {shown === "energy" && <EnergyView profile={state.profile} />}
       {shown === "projects" && <ProjectsView timeline={state.timeline} lines={state.lines} />}
@@ -122,11 +135,21 @@ function LinesView({ state, onChanged }: { state: OnboardingState; onChanged: ()
 }
 
 const DAYS = ["一", "二", "三", "四", "五", "六", "日"];
+/** Colours for lines without a colour of their own (a line the person named), so the draft still tells them apart. */
+const DRAFT_PALETTE = ["#2f6f8f", "#8a5a2b", "#5b6b2e", "#7a3f6e", "#3f5f7a"];
+
+/** The capacity conflict in plain sentences (`capacityConflict`), computed from the ledger. */
+function CapacityNote({ capacity }: { capacity: import("@crossline/core").WeekCapacity }) {
+  return <section className="ob-capacity" aria-label="容量">
+    <b>你的一周</b>
+    <ul>{capacity.notes.map((note) => <li key={note}>{note}</li>)}</ul>
+  </section>;
+}
 const dayIndex = (weekday: number) => (weekday + 6) % 7; // 0 = Sunday in the data, Monday first on screen.
 const minutes = (time: string) => { const [h, m] = time.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 
 /** The week as it stands: working hours by energy, and the fixed arrangements over them (dashed while still waiting for confirmation). */
-export function WeekView({ week }: { week: WeekSkeleton }) {
+export function WeekView({ week, draft = [], lines = [] }: { week: WeekSkeleton; draft?: SkeletonBlock[]; lines?: OnboardingState["lines"] }) {
   const from = 6 * 60, to = 24 * 60, height = 300, top = 18, left = 26, column = 36;
   const y = (time: string) => top + ((Math.min(to, Math.max(from, minutes(time))) - from) / (to - from)) * height;
   const hours = week.windows.reduce((sum, window) => sum + window.days.length * Math.max(0, minutes(window.end) - minutes(window.start)), 0) / 60;
@@ -141,6 +164,10 @@ export function WeekView({ week }: { week: WeekSkeleton }) {
       {week.windows.flatMap((window, w) => window.days.map((day) => <rect key={`${w}-${day}`} x={left + dayIndex(day) * column + 2} width={column - 4}
         y={y(window.start)} height={Math.max(2, y(window.end) - y(window.start))} className="ob-window" data-energy={window.energy}>
         <title>{`周${DAYS[dayIndex(day)]} ${window.start}–${window.end} 可用（精力${window.energy === "high" ? "高" : window.energy === "low" ? "低" : "中"}）`}</title></rect>))}
+      {draft.map((block, index) => <rect key={`draft-${index}`} x={left + dayIndex(block.weekday) * column + 3} width={column - 6}
+        y={y(block.start)} height={Math.max(2, y(block.end) - y(block.start))} className="ob-draft" data-line={block.lineId}
+        style={{ fill: `var(--lc, ${DRAFT_PALETTE[Math.max(0, lines.findIndex((line) => line.id === block.lineId)) % DRAFT_PALETTE.length]})` }}>
+        <title>{`${lines.find((line) => line.id === block.lineId)?.label ?? ""} · 周${DAYS[dayIndex(block.weekday)]} ${block.start}–${block.end}（草稿）`}</title></rect>)}
       {week.calendar.map((event, index) => <rect key={`cal-${index}`} x={left + dayIndex(event.weekday) * column + 4} width={column - 8}
         y={y(event.start)} height={Math.max(3, y(event.end) - y(event.start))} className="ob-calendar">
         <title>{`${event.title} · 周${DAYS[dayIndex(event.weekday)]} ${event.start}–${event.end}（${event.source}）`}</title></rect>)}
@@ -151,6 +178,11 @@ export function WeekView({ week }: { week: WeekSkeleton }) {
     <p className="ob-legend"><span className="ob-key" data-k="high" />精力高 <span className="ob-key" data-k="medium" />中 <span className="ob-key" data-k="low" />低
       <span className="ob-key" data-k="fixed" />固定安排 <span className="ob-key" data-k="pending" />待确认
       {week.calendar.length > 0 && <><span className="ob-key" data-k="calendar" />日历</>}</p>
+    {draft.length > 0 && <div className="ob-draft-note"><b>本周骨架草稿</b>
+      <ul>{lines.map((line, index) => { const hours = draft.filter((block) => block.lineId === line.id)
+        .reduce((sum, block) => sum + minutes(block.end) - minutes(block.start), 0) / 60;
+        return hours > 0 ? <li key={line.id} data-line={line.id}><span className="ob-key" style={{ background: `var(--lc, ${DRAFT_PALETTE[index % DRAFT_PALETTE.length]})` }} />{line.label} 约 {Math.round(hours)} 小时</li> : null; })}</ul>
+      <small className="ob-muted">按主线主次分配空闲时间的草稿；开始使用后，排程按真实任务和截止安排。</small></div>}
     <p className="ob-muted">{week.source === "default" ? "还不知道可用时间，先按默认的每周 39 小时画；说出工作时间后会更新。"
       : `每周可用约 ${Math.round(hours)} 小时${week.source === "interview" ? "（访谈提议，可在计划页修改）" : week.source === "stated_hours" ? "（按说过的每周小时数推算）" : ""}。`}</p>
   </div>;

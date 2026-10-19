@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { DateBatchCard } from "./date-batch-card";
+import { FileReadList } from "./file-read-list";
+import { InsightCard } from "./insight-card";
 import { DiligencePanel } from "./diligence-panel";
 import { TranscriptionCard, type TranscriptionStatus } from "./transcription-card";
 import { DEEP_STAGES, ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingStage, type OnboardingTone } from "@crossline/core";
@@ -326,6 +328,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
           const latest = message.seq === messages.at(-1)?.seq;
           return <div className="ob-turn ob-assistant" key={message.seq}>
             <p className="gen">{turn.reply}</p>
+            {turn.insight?.text && state.session && <InsightCard sessionId={state.session.id} seq={message.seq} insight={turn.insight}
+              rating={state.insightRatings?.[String(message.seq)]} onRated={() => void load()} />}
             {latest && turn.nextAction === "ready_for_milestones" && state.readyToStart && <p className="ob-done">信息已基本完整，可以在下方设计里程碑；画像报告随后生成。</p>}
           </div>;
         })}
@@ -352,6 +356,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             <small className="ob-muted">{centre.length} 题一起作答，答完一并发送；不确定的可以跳过。</small>
           </div>
         </div>}
+        {state.adoptedDates && !state.focusLine && <FileReadList data={state.adoptedDates} open={stage === "orientation" || stage === "lines"} onChanged={() => void load()} />}
         {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== "" && busy !== "turn"} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn("请把我已添加的文件里的日期重新读一遍，只整理日期。", true)} />}
         {!state.focusLine && complete && <section className="ob-design" aria-label="画像报告">
           <b>画像报告</b>

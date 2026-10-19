@@ -69,6 +69,8 @@ export function isCourse(projectId: string, facts: Array<{ projectId: string; sl
 
 const GRADED_KINDS = new Set(["quiz", "exam", "homework_due", "homework_out", "project_due"]);
 const confirmed = (fact: { status: string }) => fact.status === "confirmed";
+/** The option that adopts the deadline the interview inferred: the person's tap on it is their word for that date. */
+export const DEADLINE_GUESS_PREFIX = "就按 ";
 const flywheel = (slot: string) => slot.startsWith("flywheel_");
 
 export function profileGaps(input: ProfileGapInput): ProfileGap[] {
@@ -100,18 +102,26 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
   // Every current project needs its deadline, or the person's word that it has none: one of the start items (decided 2026-10-12), and
   // an answer the code can read back — otherwise 「没有截止」 rested on the model remembering to write it as a fact.
   const dated = new Set(input.dated ?? []);
+  const knowsDeadline = (project: { id: string; name: string }) => dated.has(project.id) || dated.has(project.name)
+    || input.facts.some((fact) => fact.projectId === project.id && confirmed(fact) && /^deadline$|^date_|^no_deadline$/.test(fact.slot));
+  // Only a line with no project whose deadline is known holds the interview (that is the start item); the other projects' deadlines are
+  // asked without blocking and wait on 待决事项 once the person uses the app (2026-10-19, the owner's decision: ask only what matters).
+  const lineKnows = new Set(input.projects.filter((project) => !/-default$/.test(project.id) && knowsDeadline(project)).map((project) => project.identityId));
   for (const project of input.projects) {
-    if (/-default$/.test(project.id) || dated.has(project.id) || dated.has(project.name)) continue;
-    if (input.facts.some((fact) => fact.projectId === project.id && confirmed(fact) && /^deadline$|^date_|^no_deadline$/.test(fact.slot))) continue;
+    if (/-default$/.test(project.id) || knowsDeadline(project)) continue;
+    // A deadline the interview worked out from the person's rough words or the files: one tap makes it theirs.
+    const inferred = input.facts.find((fact) => fact.projectId === project.id && fact.status === "inferred" && fact.slot === "deadline" && fact.value.trim());
+    const guess = inferred?.value.replace(/^(推断|假设)[：:]\s*/, "").trim().slice(0, 40);
     gaps.push({
-      code: "PROJECT_DEADLINE", identityId: project.identityId, projectId: project.id, blocking: true,
+      code: "PROJECT_DEADLINE", identityId: project.identityId, projectId: project.id, blocking: !lineKnows.has(project.identityId),
       detail: `「${project.name}」还不知道截止日期，也没有说明没有截止。`,
       question: {
         id: `gap-deadline-${project.id}`, kind: "single", allowOther: true, identityId: project.identityId, projectId: project.id,
         text: `「${project.name}」有截止日期吗？`,
         options: [
-          { id: "date", label: "我来写日期", detail: "在“其他”里写日期，例如「2026-12-15」" },
-          { id: "none", label: "没有截止", detail: "不设截止，排程按主线份额安排" }
+          ...(guess ? [{ id: "inferred", label: `${DEADLINE_GUESS_PREFIX}${guess}`, detail: "按访谈推断的时间" }] : []),
+          { id: "date", label: "我来写日期", detail: "大概时间也可以，例如「12 月中」" },
+          { id: "none", label: "没有截止", detail: "排程按主线份额安排" }
         ]
       }
     });
@@ -337,7 +347,9 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
       if (other) out.push({ ...base, slot: "what", value: other, quote: other });
       else if (declined) out.push({ ...base, slot: "skipped", value: declined, quote: declined });
     } else if (gap.code === "PROJECT_DEADLINE") {
+      const guess = picked.find((label) => label.startsWith(DEADLINE_GUESS_PREFIX));
       if (other) out.push({ ...base, slot: "deadline", value: other, quote: other });
+      else if (guess) out.push({ ...base, slot: "deadline", value: guess.slice(DEADLINE_GUESS_PREFIX.length), quote: guess });
       else if (picked.includes("没有截止")) out.push({ ...base, slot: "no_deadline", value: "没有截止", quote: "没有截止" });
     } else if (gap.code === "DATE_UNDATED") {
       // 「知道具体日期」 without the date is not an answer.

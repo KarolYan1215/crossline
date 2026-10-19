@@ -4,6 +4,7 @@ import {
   validateOnboardingDialogue, locateQuote,
   gapCoveredBy, screenQuestions, screenAssumption,
   type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, TYPE_TABLE, readTone,
+  checkInsight, readTurnProgress,
   type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
@@ -16,6 +17,7 @@ import { identityLines } from "./lines";
 import { ledgerForModel, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
 import { createOnboardingExtractor, extractionReached, requestExtraction } from "./onboarding-extract";
 import { personTimeZone, readProfileModel } from "./onboarding-persist";
+import { paceContext, storedProgress } from "./onboarding-pace";
 
 export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
 
@@ -28,31 +30,32 @@ const SOURCES_PER_TURN = 12;
 const BLOCKING_WAIT_MS = 30_000;
 /** Facts the extraction recorded since the last turn, at most this many lines in `recorded`. */
 const RECORDED_SHOWN = 40;
+/** Questions of the ledger shown to the model each round; repeats of older ones are still caught in code (`resolveRepeats`). */
+const LEDGER_SHOWN = 15;
 
-const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a life designer's interview in stages (orientation, "
-  + "lines, situation, compass, energy, details), never proposing milestones. You write only the conversation: `reply`, `questions`, "
-  + "`coverage`, `nextAction` and `stage`; another run records facts, dates, attributes, hours and the portrait from the same replies and "
-  + "files (`recorded` says what it has written since your last turn). The first two stages gather the start standard: checklist "
-  + "items marked `start` must be answered by the person or read from a file, never assumed; while one is open stay in the "
-  + "current stage and keep asking, and once all are in say in `reply` that the person can start using the app while the interview goes "
-  + "on here. The person already set their lines (`lines`: identity "
-  + "nouns, their order, which are hard constraints); do not propose new ones. Each turn: one to three plain sentences on what was just said "
-  + "in the person's chosen `tone`, addressing them as 「你」: what you took from it in their own concrete terms and, if two things they said "
-  + "pull against each other, those two facts side by side (no reinterpretation, no 'the real problem is'; never judge a choice or decide "
-  + "for the person). Plain voice in reply, questions and options: no dashes as connectors, no 不是……而是/与其……不如/真正的……是 frames, "
-  + "no metaphors, no 先别/算清/理清 formulas, no summing-up line. In orientation, lines and details follow it with a batch of up to five fact questions that "
-  + "do not depend on each other; in situation, compass and energy with two to four questions that do not need each other's answers "
-  + "(usually more than one: the stage has several sides to ask about), most important first, keeping only a follow-up that builds on "
-  + "another answer for the next round; follow a "
-  + "thread that carries a clue before returning to the stage. Ask about the hard-constraint lines' rules first (fixed schedule, terms, "
-  + "deadlines). Every single/multi question has concrete candidate options (8-14 when the "
-  + "space is large) and allows the person's own answer. When the person answers 不确定 or skips, do not ask it again (the other run writes "
-  + "an assumption); start items are the exception, asked once more with concrete options. Once a line has attribute candidates (`lines`), do "
-  + "not ask its long-term goal: the person picks it beside the conversation. When `focusLine` is set, interview only that line (stage "
-  + "`details`). Never ask which course or project a file belongs to (the app asks that itself). When `history` is present the conversation "
-  + "is being resumed: continue it, do not greet again or re-ask what is answered. `questionLedger` lists what was already asked, numbered "
-  + "(「#12 [已答] …」; 待问 = the app will ask it unless you do): never ask an answered question again; when a question of yours asks one "
-  + "of these, put its number in `repeats`, otherwise 0. `identityId`/`projectId` are picked from the ids offered. All human-readable fields in Chinese.";
+const INSTRUCTIONS = "You interview a Crossline user as the Skill describes, in five parts (orientation, lines, situation, compass, energy), "
+  + "never proposing milestones. You write only the conversation: `reply`, `questions`, `coverage`, `nextAction`, `stage`, `insight` and "
+  + "`progress`; another run records facts, dates, attributes, hours and the portrait from the same replies and files (`abstract` says what "
+  + "the ledger holds; never ask what it already says). Start from `progress`, your own record from the last round, and write it again every "
+  + "round from this round's answers: the part, what of it is clear, what is not, whether this round finished it, and what you ask next. Stay "
+  + "on the current part; when the person drifts, say in one sentence that it is noted and go back to the part. Ask only what changes the "
+  + "plan or the portrait and only the person knows: what a file, the calendar or an earlier reply says is adopted, not asked. A rough time "
+  + "is enough (say so the first time you ask about timing); per line ask at most two or three questions about its core deadlines. The first "
+  + "two parts gather the start standard: checklist items marked `start` must be answered by the person or read from a file, never assumed; "
+  + "once all are in say in `reply` that the person can start using the app while the interview goes on here. The person already set their "
+  + "lines (`lines`); do not propose new ones. `reply`: one to three plain sentences in the person's `tone`, addressing them as 「你」, on what "
+  + "was just said in their own concrete terms. Plain voice in reply, questions, options and the observation: no dashes as connectors, no "
+  + "不是……而是/与其……不如/真正的……是 frames, no metaphors, no 先别/算清/理清 formulas, no summing-up line. In orientation and lines ask a batch "
+  + "of independent fact questions; in situation, compass and energy ask that part's questions that do not need each other's answers, and "
+  + "keep a follow-up for the next round. Options cover the common answers, usually three to six, short; a deep question may be free with up "
+  + "to three example answers. In situation, compass and energy also write one `insight`: two things the person said in different replies, "
+  + "connected and the pattern named, no advice, with `refs` naming each reply id and a short exact span of it; empty when nothing supports "
+  + "one. When the person answers 不确定 or skips, do not ask it again (the other run writes an assumption); start items are the exception, "
+  + "asked once more with concrete options. Once a line has attribute candidates, do not ask its long-term goal. When `focusLine` is set, "
+  + "interview only that line (stage `details`). Never ask which course or project a file belongs to. When `history` is present the "
+  + "conversation is being resumed: continue it. `questionLedger` lists the latest questions, numbered: never ask an answered one again; put "
+  + "the number of a question you repeat in `repeats`, otherwise 0. `identityId`/`projectId` are picked from the ids offered. All "
+  + "human-readable fields in Chinese.";
 
 export type OnboardingTurnOutcome =
   | { state: "asked" | "ready"; sessionId: string }
@@ -91,7 +94,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   /** The completion list as of now: the system's own record of what the interview still owes, never shown to the person. */
   const checklistNow = () => interviewChecklistFor(store, workspaceId, identityLines(store, workspaceId)
     .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: unfiled().length, today: todayIso() });
-  const openChecklist = () => checklistNow().filter((item) => !item.done).map(({ label, detail, owner, start }) => ({ label, detail, owner, ...(start ? { start } : {}) }));
+  // Start items first, then what the interview itself still owes; a project's details are deferred (asked when its task is planned).
+  const openChecklist = (limit = 8) => checklistNow().filter((item) => !item.done && !item.deferred).sort((a, b) => Number(Boolean(b.start)) - Number(Boolean(a.start)))
+    .slice(0, limit).map(({ label, detail, owner, start }) => ({ label, detail, owner, ...(start ? { start } : {}) }));
   /** Whether a start item is still open: then the front stages do not move on. */
   const startOpen = () => checklistNow().some((item) => item.start && !item.done);
 
@@ -243,6 +248,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     let sent = fresh;
     const heardAt = new Date().toISOString();
     const recorded = recordedSince(coverage.heardAt);
+    // The short ledger the round starts from: the last round's progress record, an abstract of the ledger, and the latest ratings.
+    const pace = () => paceContext(store, workspaceId, sessionId, { today, recent: recorded.lines, progress: storedProgress(session!.coverage),
+      lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [] })) });
     const ids = { lines: identities().map((item) => item.id), projects: store.listProjects(workspaceId).map((project) => project.id) };
     const outputSchema = onboardingDialogueSchema(ids);
     const validateOutput = (output: unknown) => validateOnboardingDialogue(output, known);
@@ -276,7 +284,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
         checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
-        questionLedger: ledgerForModel(store, workspaceId, sessionId),
+        questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
         ...(publicAssessment ? { publicAssessment } : {}),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [],
@@ -323,9 +331,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // Later turns carry only what is new: the reply, any file that arrived since the last turn, and what the extraction recorded.
         const newSources = clipDocuments(fresh);
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-        const pace = stagePace(messages, { startOpen: startOpen() });
-        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
-          questionLedger: ledgerForModel(store, workspaceId, sessionId), ...(recorded.lines.length ? { recorded: recorded.lines } : {}),
+        const rounds = stagePace(messages, { startOpen: startOpen() });
+        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...rounds,
+          questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(),
           tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}),
           ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
         result = await continueSkillTurn<OnboardingDialogue>(client, session.codexThreadId, message, {
@@ -367,15 +375,22 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const touched = { lines: recorded.identities, projects: recorded.projects, portrait: Boolean(readProfile().portrait) };
     const output = withSomethingToAnswer(withChecklist(paced.deep ? paced.output
       : withGapQuestions(paced.output, gapsNow, messages, { freshDocuments: sent.map(([, doc]) => doc.id), touched }),
-      focusLine || options.checklist === false ? [] : openChecklist()), gapsNow, messages);
-    const roundSeq = store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });
+      focusLine || options.checklist === false ? [] : openChecklist(Infinity)), gapsNow, messages);
+    // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
+    const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
+      .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
+    const insight = checkInsight(result.output.insight, replies, output.stage);
+    const progress = readTurnProgress(result.output.progress);
+    const { insight: _raw, progress: _rawProgress, ...rest } = output;
+    const stored = { ...rest, ...(insight ? { insight } : {}), ...(progress ? { progress } : {}) };
+    const roundSeq = store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: stored, createdAt: new Date().toISOString() });
     recordRound(store, workspaceId, sessionId, roundSeq, output.questions, new Date().toISOString());
     // Saved over the session as it is now, so a stage the extraction never writes is not lost to the copy read at the start.
     const current = store.getOnboardingSession(workspaceId, sessionId) ?? session;
     store.saveOnboardingSession({
       ...current, ...(threadId ? { codexThreadId: threadId } : {}),
       state: output.nextAction === "ready_for_milestones" ? "complete" : "active",
-      coverage: { ...current.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}),
+      coverage: { ...current.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}), ...(progress ? { progress } : {}),
         announcedSources: [...announcedNow, ...sent.map(([id]) => id)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}) },
       updatedAt: new Date().toISOString()
     });

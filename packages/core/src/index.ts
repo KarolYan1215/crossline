@@ -419,9 +419,10 @@ const APPROVAL_TIERS = {
   // choice (2026-10-06). What may be written did not move: only that calendar, only events this app made and
   // the person has not changed, deletes only in the future, previews never. See CLAUDE.md, Safety boundaries.
   write_focus_block: "automatic",
-  // Dates read out of the person's own files, confirmed as one batch. Never automatic: a wrong date on a
-  // calendar is worse than a missing one, so the person sees every item with its quote first.
-  import_dated_items: "batch",
+  // Dates read out of the person's own files, each checked against the sentence that states the day. Adopted
+  // without a click since 2026-10-19 (the owner's decision: what the files say is taken, not asked); the
+  // reader's low-confidence items are left out, and every adopted one can be removed from the list.
+  import_dated_items: "automatic",
   // Saving the full text of a page the model found: only from an open-access host on the short list in
   // `openAccessVerdict`; any other page keeps its link and summary, and keeping its text is never permitted.
   download_open_access: "automatic",
@@ -515,6 +516,7 @@ export * from "./ai-tools";
 export * from "./provider-conformance";
 export * from "./local-stamp";
 export * from "./onboarding-progress";
+export * from "./onboarding-pace";
 export * from "./calendar-subscriptions";
 export * from "./source-folders";
 export * from "./info-request";

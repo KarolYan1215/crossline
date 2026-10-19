@@ -25,6 +25,12 @@ export type ChecklistItem = {
    * and a long-term goal the person adopted. These accept only the person's word or a file, never an assumption.
    */
   start?: true;
+  /**
+   * Not the interview's to hold up (2026-10-19, the owner's decision): a project's goal, evidence, grading and class times are worked out
+   * from the files and the conversation, and what is still missing is asked later — when its task is planned, or on 待决事项 — instead of
+   * in a details stage at the end of the interview. Shown, never counted against finishing.
+   */
+  deferred?: true;
 };
 
 export type ChecklistInput = {
@@ -138,7 +144,7 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
       || own.some((fact) => MEETING_SLOTS.test(fact.slot));
     if (course && !meets) missing.push("上课时间");
     items.push({ id: `project:${project.id}`, group: "项目", label: `「${project.name}」${course ? "目标、截止、进展证据、评分占比与上课时间" : "目标、截止与进展证据"}`,
-      done: !missing.length, detail: missing.length ? `缺：${missing.join("、")}` : "", owner: "interview" });
+      done: !missing.length, detail: missing.length ? `缺：${missing.join("、")}` : "", owner: "interview", deferred: true });
   }
 
   if (input.unfiledFiles !== null) items.push({ id: "files_filed", group: "文件", label: "上传的文件都已归属项目", done: input.unfiledFiles === 0,
@@ -152,7 +158,9 @@ export const readyToStart = (items: ChecklistItem[]) => items.filter((item) => i
 export const startMissing = (items: ChecklistItem[]) => items.filter((item) => item.start && !item.done);
 
 /** The interview's own open items, as the lines it is told and the reason a premature 「ready」 is turned back. */
-export const interviewOwnedOpen = (items: ChecklistItem[]) => items.filter((item) => item.owner === "interview" && !item.done);
+export const interviewOwnedOpen = (items: ChecklistItem[]) => items.filter((item) => item.owner === "interview" && !item.done && !item.deferred);
+/** Whether the interview is finished: every item that is not deferred is done. */
+export const interviewComplete = (items: ChecklistItem[]) => items.every((item) => item.done || item.deferred);
 
 /** Where the person's 「画像符合我」 is kept, with the portrait it was said about. */
 export const PROFILE_CONFIRMED = "profile.confirmed";

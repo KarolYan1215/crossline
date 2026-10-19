@@ -206,3 +206,29 @@
 .ob-failure-detail { margin-top: 6px; font-size: 13px; }
 .ob-failure-detail summary { cursor: pointer; color: var(--ob-muted, inherit); }
 .ob-failure-detail p { margin: 4px 0 0; overflow-wrap: anywhere; }
+
+/* What each part gives back (2026-10-19): the progress strip, the observation card, the capacity note, the week's draft, the file list. */
+.ob-progress{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--ink);background:var(--paper)}
+.ob-progress b{font-size:14px}
+.ob-progress small{font-size:13px;color:var(--ink)}
+.ob-progress-parts{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin:0;padding:0;list-style:none}
+.ob-progress-parts li{font-size:12px;text-align:center;padding:4px 0 2px;border-top:4px solid var(--mist);color:var(--graphite)}
+.ob-progress-parts li[data-state="done"]{border-top-color:var(--graphite);color:var(--ink)}
+.ob-progress-parts li[data-state="now"]{border-top-color:var(--ink);color:var(--ink);font-weight:700}
+.ob-insight{display:grid;gap:6px;margin-top:8px;padding:10px 12px;border-left:4px solid var(--ink);background:var(--chalk)}
+.ob-insight-label{font-size:13px}
+.ob-insight-quotes{margin:0;padding:0;list-style:none;display:grid;gap:2px;font-size:13px;color:var(--graphite)}
+.ob-insight-rate{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ob-insight-rate button[aria-pressed="true"]{background:var(--ink) !important;color:var(--paper) !important}
+.ob-capacity{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--ink);margin-bottom:10px}
+.ob-capacity b{font-size:14px}
+.ob-capacity ul{margin:0;padding-left:18px;display:grid;gap:2px;font-size:13px}
+.ob-draft{opacity:.85}
+.ob-draft-note{display:grid;gap:4px;margin:8px 0}
+.ob-draft-note ul{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13px}
+.ob-draft-note li{display:flex;gap:4px;align-items:center}
+.ob-file-list{padding:10px 12px;display:grid;gap:6px}
+.ob-file-list summary{cursor:pointer;font-size:14px}
+.ob-file-list ul{margin:0;padding:0;list-style:none;display:grid;gap:4px}
+.ob-file-list li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:13px;border-top:1px solid var(--mist);padding-top:4px}
+.ob-file-list li blockquote{flex-basis:100%;margin:2px 0 0;padding-left:8px;border-left:2px solid var(--mist);color:var(--graphite)}

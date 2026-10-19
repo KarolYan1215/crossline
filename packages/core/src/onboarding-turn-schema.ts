@@ -140,7 +140,23 @@ export type OnboardingTurn = {
   /** Filled once a hard-constraint line's rules are known (empty `windows` otherwise). */
   availability?: AvailabilityProposal;
   profile?: ProfileModel;
+  /** The dialogue's observation of the round (deep stages only; dropped in code when its quotes do not check out). */
+  insight?: TurnInsight;
+  /** The dialogue's own record of where the interview stands, handed back next round. */
+  progress?: TurnProgress;
 };
+
+/**
+ * An observation (观察卡): two things the person said in different replies, connected, with the pattern named and no advice. `refs` name
+ * the replies (`reply-N`) and a short verbatim span of each; `checkInsight` keeps the card only when every span is in its reply.
+ */
+export type TurnInsight = { text: string; refs: Array<{ replyId: string; quote: string }> };
+/**
+ * The interview's progress record (2026-10-19, the owner's decision): which part it is in, what of that part is clear and what is not,
+ * whether this round's answers finished the part, and what to ask next. Written by the dialogue every round, kept by the app and handed
+ * back at the start of the next round, so the stage is steered by the interview's own judgement and not re-derived from a long ledger.
+ */
+export type TurnProgress = { part: OnboardingStage; covered: string[]; open: string[]; partDone: boolean; next: string };
 
 /**
  * What the dialogue is shown at the start of the interview (later turns only carry the new reply). The dialogue cites nothing, so it reads
@@ -198,6 +214,13 @@ export type OnboardingTurnContext = {
    * ledger now holds, so the dialogue neither asks it again nor contradicts it. Later turns only; the first turn has `facts`.
    */
   recorded?: string[];
+  /**
+   * The short ledger (2026-10-19): the interview's own progress record from the last round (`progressLines`), what the ledger holds in at
+   * most fifteen lines (`interviewAbstract`), and how the person rated the latest observations.
+   */
+  progress?: string[];
+  abstract?: string[];
+  observations?: string[];
 };
 
 /**
@@ -236,6 +259,8 @@ export type OnboardingExtractContext = {
   sourcesWaiting?: number;
   /** Every file is being read again: dates it states replace the batch nobody answered. */
   reread: boolean;
+  /** The person's ratings of the interview's observations (「准：…」/「不准：…」): what they said fits them, and what they said does not. */
+  observations?: string[];
 };
 
 /** What the validator may check a citation against. Never sent to the model. */
@@ -338,7 +363,8 @@ function turnFields(ids?: TurnIds) {
         id: slug, text: text(400), kind: { type: "string", enum: ["single", "multi", "free"] },
         options: {
           type: "array", maxItems: 14,
-          items: object({ id: slug, label: text(120), detail: { type: "string", maxLength: 300 } })
+          // A short label; `detail` only when the label does not explain itself (2026-10-19: long option notes were half of what made a round tiring).
+          items: object({ id: slug, label: text(120), detail: { type: "string", maxLength: 80 } })
         },
         allowOther: { type: "boolean" },
         identityId: about, projectId: askedProject,
@@ -377,6 +403,13 @@ function turnFields(ids?: TurnIds) {
     fileDates: DATE_EXTRACTION_SCHEMA,
     nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
     stage: { type: "string", enum: [...ONBOARDING_STAGES] },
+    // One observation in the deep stages (2026-10-19, the owner's decision): two things the person said, in different replies, connected and
+    // the pattern named, no advice. `text` empty for none. Checked in code (`checkInsight`): each quote must be in the reply it names.
+    insight: object({ text: { type: "string", maxLength: 300 },
+      refs: { type: "array", maxItems: 3, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 80 } }) } }),
+    // The interview's own progress record, rewritten every round and handed back at the start of the next (`TurnProgress`).
+    progress: object({ part: { type: "string", enum: [...ONBOARDING_STAGES] }, covered: { type: "array", maxItems: 8, items: text(60) },
+      open: { type: "array", maxItems: 8, items: text(60) }, partDone: { type: "boolean" }, next: text(160) }),
     lineProfiles: { type: "array", maxItems: 8, items: object({ lineId: line, description: { type: "string", maxLength: 800 },
       attributeCandidates: { type: "array", maxItems: ATTRIBUTE_CANDIDATES_MAX,
         items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD, refs: REFS }) } }) },
@@ -397,14 +430,14 @@ function turnFields(ids?: TurnIds) {
  * and the next questions. The **extraction** — facts with their sentence numbers, projects, dates, line attributes, hours, the
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
-export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage"] as const;
+export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress"] as const;
 export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "profileSections"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
 export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
 export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
 export const ONBOARDING_EXTRACT_SCHEMA = onboardingExtractSchema();
 /** What the person waits for, and what is stored as the round. */
-export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage">;
+export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
   | "availability"> & { fileDates?: DateExtraction; profileSections?: ProfileSections };
