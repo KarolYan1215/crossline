@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { caseTools } from "./conformance-tools";
 import path from "node:path";
 import {
-  admittedSkills, chooseSponsorModel, skillKey, sponsorFallbacks, sponsorModelForSkill, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, conformanceProblems, parseSponsorModels, thinkingVariant, sponsorMonth, sponsorSpend,
+  admittedSkills, chooseSponsorModel, dominatedCandidates, skillKey, sponsorFallbacks, sponsorModelForSkill, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, conformanceProblems, parseSponsorModels, thinkingVariant, sponsorMonth, sponsorSpend,
   SPONSOR_MONTHLY_CAP_CNY, summarizeConformance, type ConformanceRecord, type ConformanceRun, type CostSignal, type ProviderCapabilities,
   type SponsorEvaluation, type SponsorModel
 } from "@crossline/core";
@@ -110,7 +110,6 @@ export type SponsorExtractLog = {
 export const SPONSOR_EFFORT_VERSION = 2;
 export const SPONSOR_EFFORT_CASES = ["STEP_PLAN_SCHEMA", "BACKPLAN_SCHEMA", "MILESTONE_PROPOSAL_SCHEMA", "ANALYSIS_OUTPUT_SCHEMA", "ONBOARDING_EXTRACT_SCHEMA", "ARTIFACT_PLAN_SCHEMA"];
 export const SPONSOR_EFFORT_VARIANTS = ["", "@think:2048", "@think:off"] as const;
-const FAST_CANDIDATE = "deepseek-ai/DeepSeek-V4-Flash";
 export type SponsorEffortLog = { at: string; model: string; variant: string; caseId: string; ok: boolean; code?: string; repairs: number;
   serviceMs: number | null; wallMs: number; tokens: { input: number; cached: number; output: number; reasoning: number } };
 
@@ -158,12 +157,18 @@ export function createSponsorService(options: {
   const read = (): Saved => {
     try { return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) as Saved : { evaluations: [] }; } catch { return { evaluations: [] }; }
   };
+  /** Candidates another beats on pass rate, cost and slowest run, with the one that beats them: never measured again, never used. */
+  const offFrontier = (): Map<string, string> => {
+    const config = settings();
+    return config ? dominatedCandidates(read().evaluations, config.models) : new Map();
+  };
   const currentEvaluations = (): SponsorEvaluation[] => {
     const config = settings();
     if (!config) return [];
+    const dominated = offFrontier();
     // A record without token totals predates pricing by tokens and could only be compared at the prices it ran under: tested again.
     return read().evaluations.filter((item) => item.tokens && item.version === SPONSOR_EVAL_VERSION && config.models.some((model) => model.model === item.model)
-      && conformanceCurrent(item.record, item.model, RUNTIME_VERSION, now()));
+      && !dominated.has(item.model) && conformanceCurrent(item.record, item.model, RUNTIME_VERSION, now()));
   };
   /** Writes the evaluations, keeping the last choice. */
   const save = (evaluations: SponsorEvaluation[], lastChosen = read().lastChosen) =>
@@ -178,7 +183,8 @@ export function createSponsorService(options: {
     const last = saved.lastChosen;
     if (last && config.models.some((model) => model.model === last.model)) return last;
     // No choice kept yet: the best of the older records that reached a model, so invited accounts are not paused for a re-measurement.
-    return chooseSponsorModel(config.models, saved.evaluations.filter((item) => (item.tokens?.input ?? 0) > 0), options.capabilities);
+    const dominated = offFrontier();
+    return chooseSponsorModel(config.models, saved.evaluations.filter((item) => (item.tokens?.input ?? 0) > 0 && !dominated.has(item.model)), options.capabilities);
   };
   /** What per-Skill choices are made from: the current records, or only the last choice while none is current. */
   const pool = (): SponsorEvaluation[] => {
@@ -245,8 +251,8 @@ export function createSponsorService(options: {
       }
       const body = await answer.json() as { data?: Array<{ id?: string }> };
       const ids = (body.data ?? []).map((item) => item.id ?? "").filter(Boolean);
-      // Which comparable models the key can use, so a candidate named wrongly in the list can be corrected from the log.
-      console.info(JSON.stringify({ type: "sponsor.catalog", models: ids.filter((id) => /deepseek|glm|qwen|kimi/i.test(id)).slice(0, 40) }));
+      // Every model the key can use, so a candidate named wrongly in the list can be corrected from the log.
+      console.info(JSON.stringify({ type: "sponsor.catalog", models: ids.slice(0, 120) }));
       return new Set(ids);
     } catch (error) {
       console.info(JSON.stringify({ type: "sponsor.catalog_unread", error: error instanceof Error ? error.message.slice(0, 120) : "unknown" }));
@@ -275,8 +281,9 @@ export function createSponsorService(options: {
     try {
       const available = await listed();
       const have = new Set(currentEvaluations().map((item) => item.model));
+      const dominated = offFrontier();
       const pending = config.models.filter((model) => {
-        if (have.has(model.model)) return false;
+        if (have.has(model.model) || dominated.has(model.model)) return false;
         if (available && !available.has(model.model)) { skipped.push(model.model); return false; }
         return true;
       });
@@ -307,8 +314,9 @@ export function createSponsorService(options: {
     const current = listedModels ? chooseSponsorModel(listedModels, currentEvaluations(), options.capabilities) : undefined;
     if (current) save(read().evaluations, current);
     const pick = chosen();
-    // The thinking trial on the chosen model and the fastest candidate, once per trial version.
-    const trial = [...new Set([pick?.model, FAST_CANDIDATE].filter((model): model is string => Boolean(model)))]
+    // The thinking trial on the chosen model and the fastest other candidate on the frontier, once per trial version.
+    const fastest = currentEvaluations().filter((item) => item.model !== pick?.model).sort((a, b) => a.record.p95Ms - b.record.p95Ms)[0]?.model;
+    const trial = [...new Set([pick?.model, fastest].filter((model): model is string => Boolean(model)))]
       .filter((model) => currentEvaluations().some((item) => item.model === model && item.effortVersion !== SPONSOR_EFFORT_VERSION));
     if (trial.length && !exhausted) {
       evaluating = true;
@@ -321,8 +329,10 @@ export function createSponsorService(options: {
       } finally { evaluating = false; }
     }
     // Every measured candidate at the current prices, so a price change shows its effect on the next start.
-    const candidates = currentEvaluations().map((item) => ({ model: item.model, passRate: item.record.passRate,
+    const candidates = currentEvaluations().map((item) => ({ model: item.model, passRate: item.record.passRate, p95Ms: item.record.p95Ms,
       yuanPerRun: evaluationYuanPerRun(item, config.models), tokens: item.tokens ?? null }));
+    const pruned = [...offFrontier()].map(([model, by]) => ({ model, by }));
+    if (pruned.length) console.info(JSON.stringify({ type: "sponsor.pruned", pruned }));
     if (exhausted) console.info(JSON.stringify({ type: "sponsor.key_exhausted", balance: await balance() ?? null }));
     console.info(JSON.stringify({ type: "sponsor.chosen", model: pick?.model ?? null, skipped, candidates }));
     return { ...(pick ? { chosen: pick.model } : {}), tested, skipped, exhausted };

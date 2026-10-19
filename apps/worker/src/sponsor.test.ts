@@ -154,3 +154,32 @@ test("a spent key stops the measurement without a record, so the candidate is me
     expect(await sponsor.balance()).toEqual({ balance: "0", chargeBalance: "", totalBalance: "0", status: "normal" });
   } finally { setUsageSink(undefined); }
 }, 60_000);
+
+test("a candidate off the frontier is neither measured again nor used, for the chosen model or a simple Skill", async () => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-frontier-"));
+  dirs.push(dataDir);
+  const store = new CrosslineStore(":memory:");
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  // "org/Dear" costs more per run and is slower at the same pass rate; "org/New" has no record yet.
+  const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: `org/Dear=8:28:1024,${MODEL}=2:8:1024,org/New=0.4:3.2:262` } as NodeJS.ProcessEnv;
+  const record = (model: string, ms: number) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
+    conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms }))));
+  const tokens = { input: 100_000, cached: 0, output: 10_000, runs: 10 };
+  writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [
+    { model: "org/Dear", record: record("org/Dear", 2000), yuanPerRun: 0, tokens, version: SPONSOR_EVAL_VERSION, effortVersion: SPONSOR_EFFORT_VERSION },
+    { model: MODEL, record: record(MODEL, 900), yuanPerRun: 0, tokens, version: SPONSOR_EVAL_VERSION, effortVersion: SPONSOR_EFFORT_VERSION }] }));
+  const measured: string[] = [];
+  const { rpc } = scriptedRuntime(["crossline:crossline-conformance", "crossline:crossline-onboarding"], (prompt) => { measured.push(prompt); return "{}"; }, { usage: { input: 1000, output: 100 } });
+  const providers = createModelProviderService({ store, cwd: dataDir, gateway, signedIn: () => false, client: async () => undefined,
+    secrets: { read: async () => undefined, write: async () => {}, remove: () => {} } as never, search: null, image: null, sponsor: () => undefined, now: () => NOW });
+  const sponsor = createSponsorService({ store, dataDir, cwd: dataDir, gateway, capabilities: providers.capabilities, client: () => rpc, env, now: () => NOW,
+    fetch: (async () => new Response(JSON.stringify({ data: [{ id: "org/Dear" }, { id: MODEL }] }), { status: 200 })) as typeof fetch });
+  setUsageSink((usage) => { sponsor.noteEvalUsage(usage); });
+  try {
+    const result = await sponsor.evaluate();
+    // The new candidate the key does not list is skipped; the dominated one is not measured again.
+    expect(result).toMatchObject({ tested: [], skipped: ["org/New"], chosen: MODEL });
+    expect(measured).toEqual([]);
+    expect(sponsor.modelFor("crossline-task-titler")).toBe(MODEL);
+  } finally { setUsageSink(undefined); }
+}, 60_000);

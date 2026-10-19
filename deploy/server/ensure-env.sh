@@ -67,7 +67,14 @@ fi
 if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.2=8:28:1024:2,zai-org/GLM-5.3=8:28:1024:2,deepseek-ai/DeepSeek-V4-Pro=12:24:1024:1$" /srv/crossline/app.env 2>/dev/null; then
   drop /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS
 fi
-ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.2=8:28:1024:2,zai-org/GLM-5.3=8:28:1024:2,deepseek-ai/DeepSeek-V4-Pro=12:24:1024:1,zai-org/GLM-5.3-Flash=0.8:2.8:1024:0.23,deepseek-ai/DeepSeek-V4-Flash=3:9:1024:0.3"
+# The frontier and five new candidates (the owner's decision of 2026-10-19). Measured on 2026-10-19, DeepSeek-V4-Flash, GLM-5.3, GLM-5.2
+# and DeepSeek-V4-Pro passed everything as DeepSeek-V4.1-Flash did, but each cost more per run and was slower at p95: they are not measured
+# again. The new ones are the catalogue's models whose listed prices could undercut V4.1-Flash; Qwen3.5 and the others are priced by their
+# first input tier (a run's input stays under 128K), and they list no cache-hit price.
+if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.2=8:28:1024:2,zai-org/GLM-5.3=8:28:1024:2,deepseek-ai/DeepSeek-V4-Pro=12:24:1024:1,zai-org/GLM-5.3-Flash=0.8:2.8:1024:0.23,deepseek-ai/DeepSeek-V4-Flash=3:9:1024:0.3$" /srv/crossline/app.env 2>/dev/null; then
+  drop /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS
+fi
+ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.3-Flash=0.8:2.8:1024:0.23,Qwen/Qwen3.5-122B-A10B=0.8:6.4:262,Qwen/Qwen3.5-27B=0.6:4.8:262,Qwen/Qwen3.5-35B-A3B=0.4:3.2:262,stepfun-ai/Step-3.5-Flash=0.7:2.1:262,inclusionAI/Ling-flash-2.0=1:4:131"
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MONTHLY_CNY 30
 if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_SPONSOR_API_KEY=." /srv/crossline/app.env; then
   key=$(grep "^ASSESS_TEXT_API_KEY=" /srv/assess/assess.env 2>/dev/null | cut -d= -f2-)

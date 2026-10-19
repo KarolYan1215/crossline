@@ -86,11 +86,11 @@ jobs:
             echo "-- sponsor catalog"
             key=$(sudo grep -E "^CROSSLINE_SPONSOR_API_KEY=" /srv/crossline/app.env | cut -d= -f2-)
             curl -s -m 20 -H "Authorization: Bearer $key" "https://api.siliconflow.cn/v1/models?type=text" \
-              | python3 -c "import sys,json; d=json.load(sys.stdin); [print(x.get(\"id\")) for x in d.get(\"data\",[]) if any(k in str(x.get(\"id\",\"\")).lower() for k in (\"deepseek\",\"glm\",\"qwen\",\"kimi\"))]" || true
+              | python3 -c "import sys,json; d=json.load(sys.stdin); [print(x.get(\"id\")) for x in d.get(\"data\",[]) if any(k in str(x.get(\"id\",\"\")).lower() for k in (\"deepseek\",\"glm\",\"qwen\",\"kimi\",\"step\",\"ling\"))]" || true
             # What is left on the sponsor key (amounts and status only).
             echo "-- sponsor balance"
             curl -s -m 20 -H "Authorization: Bearer $key" "https://api.siliconflow.cn/v1/user/info" \
-              | python3 -c "import sys,json; d=json.load(sys.stdin).get(\"data\") or {}; print({k: d.get(k) for k in (\"balance\",\"chargeBalance\",\"totalBalance\",\"status\")})" || true
+              | python3 -c "import sys,json; r=json.load(sys.stdin); d=r.get(\"data\") if isinstance(r.get(\"data\"),dict) else {}; print({\"code\": r.get(\"code\"), \"message\": str(r.get(\"message\"))[:80], **{k: d.get(k) for k in (\"balance\",\"chargeBalance\",\"totalBalance\",\"status\")}})" || true
             unset key
             # Every conformance run and every sample-interview turn of every candidate, whole (synthetic cases and a fictional person only).
             echo "-- sponsor evaluation runs"

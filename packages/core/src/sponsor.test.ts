@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { conformanceCases, SKILL_NEEDS, summarizeConformance } from "./provider-conformance";
-import { chooseSponsorModel, evaluationYuanPerRun, parseSponsorModels, hoursToOffPeakEnd, sponsorFallbacks, sponsorModelForSkill, sponsorMonth, sponsorOffPeak, sponsorSpend, SPONSOR_SIMPLE_SKILLS } from "./sponsor";
+import { chooseSponsorModel, dominatedCandidates, evaluationYuanPerRun, parseSponsorModels, hoursToOffPeakEnd, sponsorFallbacks, sponsorModelForSkill, sponsorMonth, sponsorOffPeak, sponsorSpend, SPONSOR_SIMPLE_SKILLS } from "./sponsor";
 
 const record = (model: string, failCase?: string) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: "r", ranAt: "2026-10-18T00:00:00Z" },
   conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: item.id !== failCase, repairs: 0, ms: 1000 }))));
@@ -82,4 +82,22 @@ test("the off-peak hours are 02:00–08:00 Beijing time, and the time to their e
   expect(hoursToOffPeakEnd(new Date("2026-10-20T01:00:00Z"))).toBe(23);
   // 01:00 Beijing (17:00 UTC): this night's window, 7 hours on.
   expect(hoursToOffPeakEnd(new Date("2026-10-19T17:00:00Z"))).toBe(7);
+});
+
+test("a candidate another beats on pass rate, cost and slowest run is off the frontier; a trade-off keeps both", () => {
+  const models = parseSponsorModels("a=2:8:1024,b=8:28:1024,c=0.8:2.8:1024,d=1:4:1024");
+  const tokens = { input: 1_000_000, cached: 0, output: 100_000, runs: 10 };
+  const record = (passRate: number, p95Ms: number) => ({ providerId: "sponsor", model: "", runtimeVersion: "r", ranAt: "", passRate, repairRate: 0, p95Ms, runs: [], failures: [] });
+  const evaluations = [
+    { model: "a", record: record(1, 38_000), yuanPerRun: 0, tokens, version: 7 },
+    // Dearer and slower at the same pass rate.
+    { model: "b", record: record(1, 56_000), yuanPerRun: 0, tokens, version: 7 },
+    // Cheaper but fails more and is slower: a trade-off, on the frontier.
+    { model: "c", record: record(0.976, 145_000), yuanPerRun: 0, tokens, version: 7 },
+    // Would be beaten by "a", but was measured another way.
+    { model: "d", record: record(0.9, 90_000), yuanPerRun: 0, tokens, version: 6 },
+    // Never reached a model (a spent key): compares with nothing.
+    { model: "x", record: record(0, 0), yuanPerRun: 0, tokens: { ...tokens, input: 0 }, version: 7 }
+  ];
+  expect([...dominatedCandidates(evaluations, models)]).toEqual([["b", "a"]]);
 });
