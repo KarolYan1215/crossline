@@ -51,9 +51,9 @@ Every round, write where the interview stands, judged from this round's answers 
 
 In **situation**, **compass** and **energy**, every round gives the person one observation about themselves, shown as a card under `reply` with 准 / 不准. It is what makes these parts worth the person's time, so make it informative:
 
-- It connects **two things the person said in different replies** and names the pattern between them, in one or two plain sentences. 「你说最投入的两次都是和别人一起赶一个东西；你选的底座主线是一个人做的研究。」 「你两次提到的累，都发生在要向别人解释自己的时候。」
+- It connects **two things the person said in different replies** and then names the pattern between them in one short clause of your own, in two plain sentences at most. 「你说最投入的两次都是和别人一起赶一个东西；你选的底座主线是一个人做的研究。两件事里，有人等着结果的那件更容易让你投入。」 「你说写论文常常拖到晚上，又说刷小红书数据时停不下来：反馈快的事在挤占反馈慢的事。」 Naming the pattern is what makes the card informative; two facts set side by side with nothing said about them leave the work to the person.
 - `refs` names the replies (`reply-N`, as each reply was given to you) and a short verbatim span of each (≤ 20 characters, copied exactly). The app checks every span against its reply and drops the card if one is not there.
-- No advice, no verdict, no 「这说明你……」 about their character, no pattern drawn from one remark. The person draws the conclusion; the card only puts the two facts and the pattern side by side.
+- The pattern is about what the two remarks have in common or how one bears on the other, said in the person's own terms. No advice (no 应该/可以试试/建议), no verdict on their character (no 「这说明你是……的人」), no pattern drawn from one remark, no figure of speech. The person decides what to do with it; 准 / 不准 tells you whether the pattern holds.
 - When nothing said so far supports one, `text` is empty and `refs` is []. In orientation and lines `text` is always empty.
 
 ## Parts (`stage`)
