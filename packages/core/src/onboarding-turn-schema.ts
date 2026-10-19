@@ -214,6 +214,11 @@ export type OnboardingExtractContext = {
   facts: string[];
   /** Each line's description and attribute candidates on record. */
   lineProfiles: Array<{ lineId: string; description: string; attributes: string[] }>;
+  /**
+   * Lines that have a description and no goal adopted but no attribute candidates yet: this run owes them candidates, drawn from everything
+   * said about the line (looked up), or the person has nothing to compose a goal from and cannot start (2026-10-19 walkthrough).
+   */
+  candidatesWanted?: string[];
   /** The portrait so far; null for a line's own interview, which does not touch it. */
   profile: ProfileModel | null;
   /**

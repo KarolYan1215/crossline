@@ -100,10 +100,11 @@ type GoalLine = OnboardingState["lines"][number];
 function GoalCard({ line, candidates, onAdopt }: { line: GoalLine; candidates: AttributeOption[]; onAdopt: (parts: string[]) => Promise<string> }) {
   const [editing, setEditing] = useState(false);
   const adopted = Boolean(line.goals[0]);
-  const picking = (!adopted || editing) && (candidates.length > 0 || line.goalParts.length > 0);
+  // Open with no candidates too: the person can always write their own goal and start (the interview may be slow to offer any).
+  const picking = !adopted || editing;
   return <article className="ob-goal" data-line={line.id}>
     <b>{line.label}</b>
-    {adopted ? <p className="ob-goal-now">{line.goals[0]}</p> : <small className="ob-muted">{candidates.length ? "选几项拼成长期目标，再点采用" : "访谈谈到这条主线后给出候选"}</small>}
+    {adopted ? <p className="ob-goal-now">{line.goals[0]}</p> : <small className="ob-muted">{candidates.length ? "选几项拼成长期目标，再点采用" : "访谈谈到这条主线后给出候选；也可以直接写一项再点采用"}</small>}
     {adopted && !editing && candidates.length > 0 && <button type="button" className="ob-btn ob-quiet" onClick={() => setEditing(true)}>修改</button>}
     {picking && <AttributePicker key={`${line.goalParts.join("|")}:${candidates.length}`} noun={line.label} candidates={candidates}
       initial={line.goalParts} onAdopt={async (parts) => { const error = await onAdopt(parts); if (!error) setEditing(false); return error; }} />}
