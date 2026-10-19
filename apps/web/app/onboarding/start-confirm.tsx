@@ -1,0 +1,61 @@
+"use client";
+
+import { useState } from "react";
+import { Sheet } from "../ui/overlay";
+import type { StartSummary } from "../../lib/start-confirm";
+
+const SOURCE: Record<StartSummary["hours"]["source"], string> = {
+  saved: "本人在计划页设置", interview: "按访谈中所说推定", stated_hours: "按所说的每周总时长平均分配", default: "默认时段"
+};
+
+/**
+ * The one look before the app opens (2026-10-19): the lines with their goals and current projects, the weekly hours and the fixed
+ * schedule the first plan rests on. Something wrong is told to the interview in its own box; 「确认无误」 opens every page.
+ */
+export function StartConfirm({ summary }: { summary: StartSummary }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const confirm = async () => {
+    setBusy(true); setError("");
+    const response = await fetch("/api/onboarding/start-confirm", { method: "POST" }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { ok?: boolean; code?: string } | undefined;
+    setBusy(false);
+    if (body?.ok) { location.assign("/"); return; }
+    setError(body?.code === "START_STILL_ORGANIZING" ? "刚才的回答还在整理，稍等片刻再确认。" : "没有保存成功，请再试一次。");
+  };
+  return <>
+    <button type="button" className="ob-btn ob-primary" onClick={() => setOpen(true)}>核对后开始使用</button>
+    <Sheet title="开始使用前核对一遍" open={open} onOpenChange={setOpen}
+      footer={<>
+        {error && <p className="ob-start-error" role="alert">{error}</p>}
+        <button type="button" className="ob-btn" onClick={() => setOpen(false)}>有要改的，回到访谈</button>
+        <button type="button" className="ob-btn ob-primary" disabled={busy} onClick={() => void confirm()}>{busy ? "保存中…" : "确认无误，开始使用"}</button>
+      </>}>
+      <div className="ob-start-confirm">
+        <p className="ob-muted">第一份日程按下面这些内容排。哪里不对，回到访谈在对话框里直接说，访谈会改。</p>
+        <section aria-label="主线">
+          <h3>主线</h3>
+          {summary.lines.map((line) => <div key={line.id} className="ob-start-line" data-line={line.id}>
+            <b>{line.label}{line.hard ? "（固定日程优先）" : ""}</b>
+            {line.description && <p className="gen">{line.description}</p>}
+            <p>长期目标：{line.goal || "未采用"}</p>
+            <ul>{line.projects.length ? line.projects.map((project) => <li key={project.name}>{project.name}：{project.deadline || "截止未记录"}</li>)
+              : <li>暂无当前项目</li>}</ul>
+          </div>)}
+        </section>
+        <section aria-label="每周可用时段">
+          <h3>每周可用时段：约 {summary.hours.weekly} 小时</h3>
+          <p className="ob-muted">{SOURCE[summary.hours.source]}</p>
+          <ul>{summary.hours.windows.map((window) => <li key={window}>{window}</li>)}</ul>
+        </section>
+        <section aria-label="固定日程">
+          <h3>固定日程：{summary.fixed.count} 项</h3>
+          {summary.fixed.count > 0 ? <ul>{summary.fixed.items.map((item) => <li key={item}>{item}</li>)}
+            {summary.fixed.count > summary.fixed.items.length && <li>等 {summary.fixed.count - summary.fixed.items.length} 项</li>}</ul>
+            : <p className="ob-muted">没有读到每周固定的课或会。</p>}
+        </section>
+      </div>
+    </Sheet>
+  </>;
+}

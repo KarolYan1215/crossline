@@ -7,7 +7,7 @@ import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -317,6 +317,8 @@ async function firstDraftsPass(workspaceId: string, checkedAt = new Date().toISO
   if (analysisStore.getSetting(workspaceId, FIRST_DRAFTS_SETTING) || analysisStore.listMilestones(workspaceId).length) return;
   const lines = identityLines(analysisStore, workspaceId).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] }));
   if (!lines.length || !readyToStart(interviewChecklistFor(analysisStore, workspaceId, lines, { unfiledFiles: null }))) return;
+  // Drafts rest on what the person confirmed before using the app (2026-10-19): not on facts they have not looked over yet.
+  if (!startConfirmedFor(analysisStore, workspaceId)) return;
   // Not while the person is still in the interview: the architect runs in the interview's lane, and a round waited behind it for a
   // quarter of an hour (2026-10-15 walkthrough). Once the interview is complete, or nobody has answered in twenty minutes.
   const session = analysisStore.getLatestOnboardingSession(workspaceId);

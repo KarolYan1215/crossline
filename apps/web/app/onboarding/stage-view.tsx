@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { SCHWARTZ_VALUES } from "@crossline/core";
 import { ValuesRadar } from "../portrait/portrait-charts";
 import { FlywheelPreview, type Link } from "./flywheel-preview";
+import { StartConfirm } from "./start-confirm";
 import type { OnboardingState } from "./onboarding-types";
 import type { ProjectTimeline, WeekSkeleton } from "../../lib/onboarding-board";
 
@@ -62,7 +63,9 @@ export function StageView({ state, stage, complete, onChanged }: {
         {organizingNote(state.organizing) && <small className="ob-organizing" role="status">{organizingNote(state.organizing)}</small>}
         {!state.readyToStart && missing.length > 0 && <ul className="ob-ring-missing">{missing.slice(0, 3).map(({ label, href }) => <li key={label}>{href ? <a href={href}>{label}（在左栏采用）</a> : label}</li>)}
           {missing.length > 3 && <li>等 {missing.length - 3} 项</li>}</ul>}
-        {state.readyToStart && <a className="ob-btn ob-primary" href="/">开始使用</a>}
+        {/* The first time, the person looks over what the plan will rest on before every page opens; after that it is a plain link. */}
+        {state.readyToStart && (state.startConfirmed === false && state.startSummary ? <StartConfirm summary={state.startSummary} />
+          : <a className="ob-btn ob-primary" href="/">开始使用</a>)}
         {/* Two ways on from here, said once: the button looked like the end of the interview (2026-10-18 walkthrough). */}
         {state.readyToStart && !complete && <small className="ob-ring-next">现在就能排日程；接着答完剩下几轮会拿到画像报告。先去用的话，剩下的问题会出现在待确认里，随时回来接着答。</small>}
       </div>

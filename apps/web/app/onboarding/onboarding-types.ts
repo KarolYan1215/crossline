@@ -42,6 +42,10 @@ export type OnboardingState = {
    * failing (`extractBacklog`). Absent on a state read before it existed.
    */
   organizing?: { replies: number; files: number; failing?: { code: string; message: string; retryAt?: string } };
+  /** Whether the person confirmed what was recorded before using the app (or their account was in use before that existed). */
+  startConfirmed?: boolean;
+  /** What they confirm, once the start standard stands and the extraction has caught up (`startSummary`). */
+  startSummary?: import("../../lib/start-confirm").StartSummary;
   /** How many start items there are (they are per line, so not a fixed five). */
   startTotal: number;
   /** The start items still open, in checklist order. */

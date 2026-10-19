@@ -1,4 +1,4 @@
-import { interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile } from "@crossline/core";
+import { ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile } from "@crossline/core";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
 import type { CrosslineStore } from "./index";
@@ -118,4 +118,18 @@ export function questionScreenFor(store: CrosslineStore, workspaceId: string): Q
     calendarRecurring: calendarRecurringTitles(store, workspaceId),
     goalPickerLines: Object.entries(profiles).filter(([, profile]) => lineAttributes(profile, "").length > 0).map(([id]) => id)
   };
+}
+
+/**
+ * Whether the person confirmed what the interview recorded before using the app (`START_CONFIRMED_SETTING`). An account already in use
+ * when the confirmation came in is not asked for it: one that reached the start standard before `START_CONFIRM_SINCE`, or that already
+ * has milestones or tasks on its board.
+ */
+export function startConfirmedFor(store: CrosslineStore, workspaceId: string): boolean {
+  if (store.getSetting(workspaceId, START_CONFIRMED_SETTING)) return true;
+  try {
+    const reached = (JSON.parse(store.getSetting(workspaceId, ATTENTION_SETTING) ?? "null") as { ready?: { at?: string } } | null)?.ready?.at;
+    if (reached && reached < START_CONFIRM_SINCE) return true;
+  } catch { /* an unreadable record says nothing */ }
+  return store.listMilestones(workspaceId).length > 0 || store.listWorkOrders(workspaceId).length > 0;
 }

@@ -8,6 +8,7 @@ import { loadPendingDateBatch } from "../../../../lib/imported-dates";
 import { loadDiligence } from "../../../../lib/diligence";
 import { identityLines, needsLineSetup } from "../../../../lib/lines";
 import { interviewStatus, pendingAnswerIds, questionsOwnedElsewhere } from "../../../../lib/interview-status";
+import { startConfirmed, startSummary } from "../../../../lib/start-confirm";
 
 /**
  * Everything the onboarding screen shows, in one read: the conversation so far, the projects and facts the
@@ -44,12 +45,16 @@ export async function GET(request: Request) {
   // standard may not be on record yet, so 「开始使用」 waits for it — unless it is failing, which must not hold the person forever.
   const organizing = session ? extractBacklog(store, workspaceId, session.id) : { replies: 0, files: 0 };
   const settling = (organizing.replies > 0 || organizing.files > 0) && !organizing.failing;
+  const ready = Boolean(status?.readyToStart && !settling);
   const start = status ? {
-    readyToStart: status.readyToStart && !settling,
+    readyToStart: ready,
+    // The one look before the app opens: what the person confirms, shown once the standard stands and the extraction has caught up.
+    startConfirmed: startConfirmed(access.ctx),
+    ...(ready ? { startSummary: startSummary(access.ctx) } : {}),
     startTotal: status.checklist.filter((item) => item.start).length,
     startMissing: status.startMissing.map(({ id, label, detail, owner }) => ({ id, label, detail, owner })),
     extraQuestions: status.questions.filter((question) => !inRound.has(question.id))
-  } : { readyToStart: true, startTotal: 0, startMissing: [], extraQuestions: [] };
+  } : { readyToStart: true, startConfirmed: true, startTotal: 0, startMissing: [], extraQuestions: [] };
   return NextResponse.json({
     ...start,
     ok: true, organizing,
