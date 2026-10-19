@@ -29,7 +29,8 @@
 | 开发者模型限流 | 本地网关按「上游地址 + 模型」限制同时在途的请求：从 6 起步（`CROSSLINE_UPSTREAM_CONCURRENCY`），被拒（429、503、「满载」）就减半，成功次数达到上限值就加一，最多 16；有人在等的请求排在前面 | `model-gateway.ts` |
 | 被拒怎么办 | 有人在等：马上再试一次，仍被拒就换下一个通过该 Skill 检验的候选（最便宜的先）。后台：按 Retry-After 或 5/15/45/90 秒退避后再试同一个模型，都不行再交给 Codex 自己的重试。检验中的运行从不换模型 | `GatewayUpstream.fallback`、`sponsorFallbacks` |
 | 简单活用快模型 | 任务标题、日历归类、文件夹归类、目标拆分、背景事实、邮件分拣这 6 个 Skill，用通过检验里最便宜的候选；访谈、输入框、分析、验收、拆步骤、里程碑、审查不换 | `SPONSOR_SIMPLE_SKILLS`、`sponsorModelForSkill` |
-| 检验期间 | 重新检验没跑完时，继续用上次选中的模型，不暂停 | `sponsor.json` `lastChosen` |
+| 检验期间 | 重新检验没跑完时，继续用上次选中的模型，不暂停；从没留下选择时，用旧检验里真正调到模型的记录选一个 | `sponsor.json` `lastChosen` |
+| key 余额用完 | 第一次「用量额度已用完」就停下这个候选，不写记录（10-19 第 6 版检验因此把所有候选记成全部不过）；之后每半小时试一次，充值后自动接着测；诊断打印余额 | `SPONSOR_KEY_EXHAUSTED`、`balance` |
 | 低价时段 | 用开发者模型的账号，调研、跨线飞轮、画像重写（第一份不等）、技能检索与整理、精力建议、定期复检，等北京时间 2–8 点；教程只在下一个低价时段结束后离工作开始还有一天以上时才等。规划类、记下的事、有人在等的都不等。部署后的那次检验不等 | `sponsorOffPeak`、`hoursToOffPeakEnd`、`waitsForOffPeak` |
 | 缓存 | 聊天桥接把 Skill 正文挪到同一段用户消息的最前面；线程中途 Codex 加的说明留在原处（作为带标记的用户消息），系统消息在整条线程里不变；开发者模型的线程不注入全部 Skill 的目录 | `chat-bridge.ts` `stableFirst`、`skills.include_instructions` |
 | 测量 | 每次运行记一条 `skill.run`：排队（助手的队、同一线程的上一回合）、总闸等待、模型用时、输入、缓存命中、输出；诊断按 Skill 汇总（`deploy/server/skill-runs.py`） | `runRouted` |

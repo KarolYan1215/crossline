@@ -318,7 +318,7 @@ export function upstreamFailure(status: number, body: string): { code: string; m
     if (typeof error?.message === "string") message = error.message;
   } catch { /* not JSON: the raw text is the message */ }
   const code = /context|too long|maximum.*tokens|token limit/i.test(message) && status === 400 ? "context_length_exceeded"
-    : status === 402 || /insufficient.*(balance|quota)|余额不足|arrearage/i.test(message) ? "insufficient_quota"
+    : status === 402 || /insufficient.*(balance|quota)|(balance|quota).{0,20}insufficient|余额不足|arrearage/i.test(message) ? "insufficient_quota"
     : status === 429 ? "rate_limit_exceeded"
     : status === 503 || status === 529 ? "server_is_overloaded"
     : status >= 500 ? "server_error" : "invalid_request";

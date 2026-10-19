@@ -183,28 +183,45 @@ export function recordedAnswer(name: string): string {
  * is chosen by looking at the prompt that turn was sent, so a test can say "when asked to design, answer this; when asked
  * to search, answer that" instead of counting turns.
  */
-export function scriptedRuntime(skillNames: string[], respond: (prompt: string, turn: number) => string): { rpc: JsonLineRpcClient; prompts: () => string[] } {
-  let turns = 0, threads = 0, threadId = "";
+export function scriptedRuntime(skillNames: string[], respond: (prompt: string, turn: number) => string, options: {
+  /** Tokens each turn reports, as the runtime's usage event does. */
+  usage?: { input: number; output: number };
+  /** A runtime error the turn fails with instead of answering (`usageLimitExceeded` for a spent key), or undefined to answer. */
+  failWith?: (prompt: string, turn: number) => string | undefined;
+} = {}): { rpc: JsonLineRpcClient; prompts: () => string[] } {
+  let turns = 0, threads = 0, latestThread = "";
   const prompts: string[] = [];
   const rpc = new JsonLineRpcClient((line) => {
     const request = JSON.parse(line) as { id?: number; method: string; params?: Record<string, unknown> };
-    if (request.method === "thread/start") threadId = `thread-${(threads += 1)}`;
+    if (request.method === "thread/start") latestThread = `thread-${(threads += 1)}`;
     const result = request.method === "skills/list"
       ? { data: [{ cwd: "C:\repo", errors: [], skills: skillNames.map((name) => ({ name, path: `C:\skill\${name}\SKILL.md`, enabled: true })) }] }
       : request.method === "account/read" ? { account: { type: "chatgpt" } }
       : request.method === "config/read" ? { config: {} }
       : request.method === "thread/start"
-        ? { thread: { id: threadId }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [] }
+        ? { thread: { id: latestThread }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [] }
         : { turn: { id: `turn-${turns + 1}`, status: "inProgress" } };
     queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, result })));
     if (request.method === "turn/start") {
       turns += 1;
       const turnId = `turn-${turns}`;
+      // The turn's own thread: runs side by side each start a thread, so the latest one is not necessarily this turn's.
+      const threadId = typeof request.params?.threadId === "string" ? request.params.threadId : latestThread;
       const input = request.params?.input;
       const prompt = Array.isArray(input) ? String((input[0] as { text?: unknown })?.text ?? "") : "";
       prompts.push(prompt);
-      const text = respond(prompt, turns);
+      const failure = options.failWith?.(prompt, turns);
+      const text = failure ? "" : respond(prompt, turns);
       setTimeout(() => {
+        if (failure) {
+          rpc.receiveLine(JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "failed", error: { message: failure, codexErrorInfo: failure } } } }));
+          return;
+        }
+        if (options.usage) {
+          const breakdown = { totalTokens: options.usage.input + options.usage.output, inputTokens: options.usage.input, cachedInputTokens: 0, cacheWriteInputTokens: 0,
+            outputTokens: options.usage.output, reasoningOutputTokens: 0 };
+          rpc.receiveLine(JSON.stringify({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { total: breakdown, last: breakdown, modelContextWindow: null } } }));
+        }
         rpc.receiveLine(JSON.stringify({ method: "item/completed", params: { threadId, turnId, item: { type: "agentMessage", phase: "final_answer", text } } }));
         rpc.receiveLine(JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed" } } }));
       }, 1);

@@ -29,9 +29,10 @@ const CONFORMANCE_SKILL = "crossline:crossline-conformance";
  * again so every candidate is measured the same way. 4 (2026-10-19): the interview cites sentence numbers and writes times as minutes,
  * so every candidate is measured again on the schemas it will actually be asked for. 5 (2026-10-19): the interview is two Skills, the
  * dialogue and the extraction, each with its own schema, and both must pass. 6 (2026-10-19): every Skill's prompt was rewritten and the
- * extraction forgives an enum slip (`dropEnumSlips`); the owner asked for the candidates to be measured again once that was done.
+ * extraction forgives an enum slip (`dropEnumSlips`); the owner asked for the candidates to be measured again once that was done. 7
+ * (2026-10-19): the key's balance ran out during the version 6 measurement and every candidate was recorded as failing everything.
  */
-export const SPONSOR_EVAL_VERSION = 6;
+export const SPONSOR_EVAL_VERSION = 7;
 /**
  * The sample interview's own version: a change to the interview prompt or the script re-runs only the three sample turns of every
  * candidate (minutes and a few jiao each), not its thirty-odd conformance runs. 3 (2026-10-19): the extraction is run once on the sample's
@@ -104,14 +105,22 @@ export type SponsorExtractLog = {
  * The thinking trial (2026-10-19, the owner: 「赞助模型规划太慢：先做测试」): on the planning Skills the developer's model spent most of its
  * time reasoning (the step planner's median run 510 s with 14k reasoning tokens). The chosen model and the fastest candidate run each
  * planning case with thinking as it is, capped at 2048 tokens and off, logged in `<model>.effort.jsonl` so a lower setting is chosen
- * from measurements, not guessed. It does not enter the automatic choice.
+ * from measurements, not guessed. It does not enter the automatic choice. 2 (2026-10-19): version 1 ran on a spent key and measured nothing.
  */
-export const SPONSOR_EFFORT_VERSION = 1;
+export const SPONSOR_EFFORT_VERSION = 2;
 export const SPONSOR_EFFORT_CASES = ["STEP_PLAN_SCHEMA", "BACKPLAN_SCHEMA", "MILESTONE_PROPOSAL_SCHEMA", "ANALYSIS_OUTPUT_SCHEMA", "ONBOARDING_EXTRACT_SCHEMA", "ARTIFACT_PLAN_SCHEMA"];
 export const SPONSOR_EFFORT_VARIANTS = ["", "@think:2048", "@think:off"] as const;
 const FAST_CANDIDATE = "deepseek-ai/DeepSeek-V4-Flash";
 export type SponsorEffortLog = { at: string; model: string; variant: string; caseId: string; ok: boolean; code?: string; repairs: number;
   serviceMs: number | null; wallMs: number; tokens: { input: number; cached: number; output: number; reasoning: number } };
+
+/**
+ * The key's balance is spent (SiliconFlow answers every call at once with a quota error, nothing reaches a model): nothing measured
+ * from then on says anything about a candidate, so the measurement stops and no record is written.
+ */
+export const SPONSOR_KEY_EXHAUSTED = "SPONSOR_KEY_EXHAUSTED";
+const spent = (code: string | undefined) => code === "SKILL_USAGE_LIMIT";
+const exhaustedError = (error: unknown) => error instanceof Error && error.message === SPONSOR_KEY_EXHAUSTED;
 
 /** `lastChosen`: the model last chosen, served while a new evaluation runs (the owner's decision of 2026-10-19: no pause). */
 type Saved = { evaluations: SponsorEvaluation[]; lastChosen?: SponsorEvaluation };
@@ -165,8 +174,11 @@ export function createSponsorService(options: {
     if (!config) return undefined;
     const current = chooseSponsorModel(config.models, currentEvaluations(), options.capabilities);
     if (current) return current;
-    const last = read().lastChosen;
-    return last && config.models.some((model) => model.model === last.model) ? last : undefined;
+    const saved = read();
+    const last = saved.lastChosen;
+    if (last && config.models.some((model) => model.model === last.model)) return last;
+    // No choice kept yet: the best of the older records that reached a model, so invited accounts are not paused for a re-measurement.
+    return chooseSponsorModel(config.models, saved.evaluations.filter((item) => (item.tokens?.input ?? 0) > 0), options.capabilities);
   };
   /** What per-Skill choices are made from: the current records, or only the last choice while none is current. */
   const pool = (): SponsorEvaluation[] => {
@@ -242,14 +254,24 @@ export function createSponsorService(options: {
     }
   }
 
-  /** Tests every candidate without a current record, one after another; the choice follows from the records. Safe to call often. */
-  async function evaluate(): Promise<{ chosen?: string; tested: string[]; skipped: string[] }> {
+  /**
+   * Tests every candidate without a current record, side by side; the choice follows from the records. Safe to call often.
+   * `exhausted`: the key's balance ran out, so what was not measured is measured again on a later call, once there is money.
+   */
+  async function evaluate(): Promise<{ chosen?: string; tested: string[]; skipped: string[]; exhausted: boolean }> {
     const config = settings();
     const client = options.client();
-    if (!config || !client || evaluating) return { tested: [], skipped: [] };
+    if (!config || !client || evaluating) return { tested: [], skipped: [], exhausted: false };
     evaluating = true;
     const tested: string[] = [];
     const skipped: string[] = [];
+    let exhausted = false;
+    // A spent key stops the measurement where it is; whatever was not measured stays unrecorded.
+    const unlessSpent = (model: string, error: unknown): false => {
+      if (exhaustedError(error)) exhausted = true;
+      else console.info(JSON.stringify({ type: "sponsor.measure_failed", model, message: error instanceof Error ? error.message.slice(0, 160) : "unknown" }));
+      return false;
+    };
     try {
       const available = await listed();
       const have = new Set(currentEvaluations().map((item) => item.model));
@@ -264,13 +286,14 @@ export function createSponsorService(options: {
       const redialogue = currentEvaluations().filter((item) => item.dialogueVersion !== SPONSOR_DIALOGUE_VERSION)
         .map((item) => config.models.find((model) => model.model === item.model)).filter((model): model is SponsorModel => Boolean(model));
       await Promise.all(redialogue.map(async (model) => {
-        await sampleDialogue(client, model).catch((error: unknown) => console.info(JSON.stringify({ type: "sponsor.dialogue_failed", model: model.model,
-          message: error instanceof Error ? error.message.slice(0, 160) : "unknown" })));
+        if (!await sampleDialogue(client, model).then(() => true, (error: unknown) => unlessSpent(model.model, error))) return;
         const saved = read().evaluations.map((item) => item.model === model.model ? { ...item, dialogueVersion: SPONSOR_DIALOGUE_VERSION } : item);
         save(saved);
       }));
       await Promise.all(pending.map(async (model) => {
-        const evaluation = await evaluateOne(client, model);
+        const evaluation = await evaluateOne(client, model).catch((error: unknown) => unlessSpent(model.model, error));
+        // A candidate whose runs never reached the model was not measured: a record of zeros would keep it out for thirty days.
+        if (!evaluation || !evaluation.tokens?.input) return;
         const saved = read().evaluations.filter((item) => item.model !== model.model);
         save([...saved, evaluation]);
         tested.push(model.model);
@@ -287,12 +310,11 @@ export function createSponsorService(options: {
     // The thinking trial on the chosen model and the fastest candidate, once per trial version.
     const trial = [...new Set([pick?.model, FAST_CANDIDATE].filter((model): model is string => Boolean(model)))]
       .filter((model) => currentEvaluations().some((item) => item.model === model && item.effortVersion !== SPONSOR_EFFORT_VERSION));
-    if (trial.length) {
+    if (trial.length && !exhausted) {
       evaluating = true;
       try {
         await Promise.all(trial.map(async (model) => {
-          await effortTrial(client, model).catch((error: unknown) => console.info(JSON.stringify({ type: "sponsor.effort_failed", model,
-            message: error instanceof Error ? error.message.slice(0, 160) : "unknown" })));
+          if (!await effortTrial(client, model).then(() => true, (error: unknown) => unlessSpent(model, error))) return;
           const saved = read().evaluations.map((item) => item.model === model ? { ...item, effortVersion: SPONSOR_EFFORT_VERSION } : item);
           save(saved);
         }));
@@ -301,8 +323,22 @@ export function createSponsorService(options: {
     // Every measured candidate at the current prices, so a price change shows its effect on the next start.
     const candidates = currentEvaluations().map((item) => ({ model: item.model, passRate: item.record.passRate,
       yuanPerRun: evaluationYuanPerRun(item, config.models), tokens: item.tokens ?? null }));
+    if (exhausted) console.info(JSON.stringify({ type: "sponsor.key_exhausted", balance: await balance() ?? null }));
     console.info(JSON.stringify({ type: "sponsor.chosen", model: pick?.model ?? null, skipped, candidates }));
-    return { ...(pick ? { chosen: pick.model } : {}), tested, skipped };
+    return { ...(pick ? { chosen: pick.model } : {}), tested, skipped, exhausted };
+  }
+
+  /** What is left on the key (SiliconFlow's `/user/info`; only the amounts and status are kept), or undefined when it cannot be read. */
+  async function balance(): Promise<{ balance: string; chargeBalance: string; totalBalance: string; status: string } | undefined> {
+    const config = settings();
+    if (!config) return undefined;
+    try {
+      const answer = await (options.fetch ?? fetch)(`${config.baseUrl}/user/info`, { headers: { authorization: `Bearer ${config.key}` }, signal: AbortSignal.timeout(20_000) });
+      if (!answer.ok) return undefined;
+      const data = (await answer.json() as { data?: Record<string, unknown> }).data ?? {};
+      const text = (value: unknown) => typeof value === "string" || typeof value === "number" ? String(value) : "";
+      return { balance: text(data.balance), chargeBalance: text(data.chargeBalance), totalBalance: text(data.totalBalance), status: text(data.status) };
+    } catch { return undefined; }
   }
 
   async function evaluateOne(client: CodexRpcBoundary, model: SponsorModel): Promise<SponsorEvaluation> {
@@ -315,8 +351,20 @@ export function createSponsorService(options: {
     mkdirSync(logDir, { recursive: true });
     writeFileSync(logFile(model.model), "", "utf8");
     // How it talks first: the sample interview takes minutes, and its replies are what the owner reads.
-    await sampleDialogue(client, model).catch((error: unknown) => console.info(JSON.stringify({ type: "sponsor.dialogue_failed", model: model.model,
-      message: error instanceof Error ? error.message.slice(0, 160) : "unknown" })));
+    try {
+      await sampleDialogue(client, model).catch((error: unknown) => {
+        if (exhaustedError(error)) throw error;
+        console.info(JSON.stringify({ type: "sponsor.dialogue_failed", model: model.model, message: error instanceof Error ? error.message.slice(0, 160) : "unknown" }));
+      });
+      return await conformanceRuns(client, model, thread, key, runs);
+    } finally {
+      evalUsage.delete(key);
+      runUsage.delete(key);
+    }
+  }
+
+  async function conformanceRuns(client: CodexRpcBoundary, model: SponsorModel, thread: ReturnType<typeof threadProvider>, key: string,
+    runs: ConformanceRun[]): Promise<SponsorEvaluation> {
     for (const item of conformanceCases()) for (let attempt = 0; attempt < item.runs; attempt += 1) {
       const started = Date.now();
       const input = { version: "crossline.conformance.v1", caseId: item.id, prompt: item.prompt };
@@ -351,11 +399,10 @@ export function createSponsorService(options: {
         unparsed: Math.max(0, repairs - rejections.length + (result.ok ? 0 : 1)), serviceMs, wallMs, turnSeconds: usage?.turnSeconds ?? [],
         tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 } };
       try { appendFileSync(logFile(model.model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading, never a reason to fail the measurement */ }
+      if (!result.ok && spent(result.blocker.code)) throw new Error(SPONSOR_KEY_EXHAUSTED);
     }
     const record: ConformanceRecord = summarizeConformance({ providerId: SPONSOR_PROVIDER_ID, model: model.model, runtimeVersion: RUNTIME_VERSION, ranAt: now().toISOString() }, runs);
     const tokens = evalUsage.get(key)!;
-    evalUsage.delete(key);
-    runUsage.delete(key);
     const evaluation: SponsorEvaluation = { model: model.model, record, yuanPerRun: 0, version: SPONSOR_EVAL_VERSION, dialogueVersion: SPONSOR_DIALOGUE_VERSION,
       tokens: { input: tokens.inputTokens, cached: tokens.cachedInputTokens, output: tokens.outputTokens, runs: runs.length } };
     return { ...evaluation, yuanPerRun: evaluationYuanPerRun(evaluation, [model]) };
@@ -390,6 +437,7 @@ export function createSponsorService(options: {
           ...(result.ok ? {} : { code: result.blocker.code }), repairs: result.audit.repairs ?? 0, serviceMs: usage ? usage.durationMs : null, wallMs: Date.now() - started,
           tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 } };
         try { appendFileSync(effortFile(model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading only */ }
+        if (!result.ok && spent(result.blocker.code)) throw new Error(SPONSOR_KEY_EXHAUSTED);
         const tally = summary[line.variant] ??= { ok: 0, runs: 0, serviceMs: 0, reasoning: 0 };
         tally.runs += 1; tally.ok += line.ok ? 1 : 0; tally.serviceMs += line.serviceMs ?? line.wallMs; tally.reasoning += line.tokens.reasoning;
       }
@@ -432,6 +480,7 @@ export function createSponsorService(options: {
           voice: plainVoiceMarkers(answer?.reply ?? ""), voiceRate: plainVoiceRate(answer?.reply ?? ""),
           tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 } };
         try { appendFileSync(dialogueFile(model.model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading only */ }
+        if (outcome.state === "blocked" && spent(outcome.code)) throw new Error(SPONSOR_KEY_EXHAUSTED);
         // A turn that failed leaves nothing to answer: the rest of the script would only measure the same failure again.
         if (!line.ok) break;
       }
@@ -500,6 +549,6 @@ export function createSponsorService(options: {
       budget: active(workspaceId) ? budget(workspaceId) : undefined, admitted: pick ? admittedSkills(pick.record, options.capabilities) : [] };
   }
 
-  return { settings, chosen, modelFor, providerFor, budget, active, cost, upstream, evaluate, noteEvalUsage, view, dialogueRouting, isEvaluating: () => evaluating };
+  return { settings, chosen, modelFor, providerFor, budget, active, cost, upstream, evaluate, balance, noteEvalUsage, view, dialogueRouting, isEvaluating: () => evaluating };
 }
 export type SponsorService = ReturnType<typeof createSponsorService>;

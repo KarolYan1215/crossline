@@ -87,6 +87,10 @@ jobs:
             key=$(sudo grep -E "^CROSSLINE_SPONSOR_API_KEY=" /srv/crossline/app.env | cut -d= -f2-)
             curl -s -m 20 -H "Authorization: Bearer $key" "https://api.siliconflow.cn/v1/models?type=text" \
               | python3 -c "import sys,json; d=json.load(sys.stdin); [print(x.get(\"id\")) for x in d.get(\"data\",[]) if any(k in str(x.get(\"id\",\"\")).lower() for k in (\"deepseek\",\"glm\",\"qwen\",\"kimi\"))]" || true
+            # What is left on the sponsor key (amounts and status only).
+            echo "-- sponsor balance"
+            curl -s -m 20 -H "Authorization: Bearer $key" "https://api.siliconflow.cn/v1/user/info" \
+              | python3 -c "import sys,json; d=json.load(sys.stdin).get(\"data\") or {}; print({k: d.get(k) for k in (\"balance\",\"chargeBalance\",\"totalBalance\",\"status\")})" || true
             unset key
             # Every conformance run and every sample-interview turn of every candidate, whole (synthetic cases and a fictional person only).
             echo "-- sponsor evaluation runs"
@@ -107,7 +111,7 @@ jobs:
       - name: Model time per Skill
         run: |
           # Per Skill over the last day: waits before and at the model gate, run time and cache hits (deploy/server/skill-runs.py).
-          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker logs --since 24h crossline-worker 2>&1 | grep "\"type\":\"skill.run\"" > /tmp/skill-runs.jsonl || true'
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker logs --since 24h crossline-worker 2>&1 | grep -F skill.run > /tmp/skill-runs.jsonl || true'
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'python3 -' < deploy/server/skill-runs.py || true
       - name: Codex device-code probe
         if: contains(github.event.head_commit.message, '[codex-probe]')

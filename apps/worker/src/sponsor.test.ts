@@ -6,7 +6,7 @@ import { conformanceCases, summarizeConformance } from "@crossline/core";
 import { decideRoute, setUsageSink } from "@crossline/codex";
 import { CrosslineStore, SPONSOR_SETTING } from "@crossline/db";
 import { createModelProviderService, RUNTIME_VERSION } from "./model-provider";
-import { createSponsorService, extractRecall, SPONSOR_DIALOGUE_SCRIPT, SPONSOR_EVAL_VERSION, SPONSOR_EXTRACT_EXPECTED, type SponsorDialogueLog, type SponsorExtractLog, type SponsorRunLog } from "./sponsor";
+import { createSponsorService, extractRecall, SPONSOR_DIALOGUE_SCRIPT, SPONSOR_EFFORT_VERSION, SPONSOR_EVAL_VERSION, SPONSOR_EXTRACT_EXPECTED, type SponsorDialogueLog, type SponsorExtractLog, type SponsorRunLog } from "./sponsor";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
 const dirs: string[] = [];
@@ -91,7 +91,7 @@ test("an evaluation logs every run with what the validator sent back, and a mode
   const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
   const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: "org/Broken=1:2:1024" } as NodeJS.ProcessEnv;
   // Every answer is an empty object: valid JSON that no case's schema accepts, so each run is sent back for repair and still fails.
-  const { rpc } = scriptedRuntime(["crossline:crossline-conformance", "crossline:crossline-onboarding"], () => "{}");
+  const { rpc } = scriptedRuntime(["crossline:crossline-conformance", "crossline:crossline-onboarding"], () => "{}", { usage: { input: 1000, output: 100 } });
   const providers = createModelProviderService({ store, cwd: dataDir, gateway, signedIn: () => false, client: async () => undefined,
     secrets: { read: async () => undefined, write: async () => {}, remove: () => {} } as never, search: null, image: null, sponsor: () => undefined, now: () => NOW });
   const sponsor = createSponsorService({ store, dataDir, cwd: dataDir, gateway, capabilities: providers.capabilities, client: () => rpc, env, now: () => NOW,
@@ -121,3 +121,36 @@ test("the sample's own replies hold every statement the extraction is scored on"
   expect(extractRecall(SPONSOR_DIALOGUE_SCRIPT.join("\n"))).toHaveLength(SPONSOR_EXTRACT_EXPECTED.length);
   expect(extractRecall("研究者/ms/stage=研二 (confirmed)\n研究者/ms/deadline=12 月中投会议论文 (confirmed)")).toEqual(["研二", "12 月中投稿"]);
 });
+
+test("a spent key stops the measurement without a record, so the candidate is measured again once there is money", async () => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-spent-"));
+  dirs.push(dataDir);
+  const store = new CrosslineStore(":memory:");
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: `${MODEL}=4:16:1024,org/Other=1:2:1024` } as NodeJS.ProcessEnv;
+  const record = summarizeConformance({ providerId: "sponsor", model: MODEL, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
+    conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 900 }))));
+  // Only an older measurement exists (no choice was kept from it), and the trial already ran on it.
+  writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02,
+    tokens: { input: 100_000, cached: 0, output: 10_000, runs: 10 }, version: SPONSOR_EVAL_VERSION - 1, effortVersion: SPONSOR_EFFORT_VERSION }] }));
+  // Every turn is refused at once the way a spent balance is.
+  const { rpc, prompts } = scriptedRuntime(["crossline:crossline-conformance", "crossline:crossline-onboarding"], () => "{}", { failWith: () => "usageLimitExceeded" });
+  const providers = createModelProviderService({ store, cwd: dataDir, gateway, signedIn: () => false, client: async () => undefined,
+    secrets: { read: async () => undefined, write: async () => {}, remove: () => {} } as never, search: null, image: null, sponsor: () => undefined, now: () => NOW });
+  const sponsor = createSponsorService({ store, dataDir, cwd: dataDir, gateway, capabilities: providers.capabilities, client: () => rpc, env, now: () => NOW,
+    fetch: (async (url: string) => new Response(JSON.stringify(String(url).endsWith("/user/info") ? { data: { balance: "0", totalBalance: "0", status: "normal" } }
+      : { data: [{ id: MODEL }, { id: "org/Other" }] }), { status: 200 })) as typeof fetch });
+  setUsageSink((usage) => { sponsor.noteEvalUsage(usage); });
+  try {
+    const result = await sponsor.evaluate();
+    expect(result.exhausted).toBe(true);
+    expect(result.tested).toEqual([]);
+    // Nothing was written over the older record, and each candidate stopped at its first refused call (one sample turn, one case).
+    const saved = JSON.parse(readFileSync(path.join(dataDir, "sponsor.json"), "utf8")) as { evaluations: Array<{ model: string; version: number }> };
+    expect(saved.evaluations).toEqual([expect.objectContaining({ model: MODEL, version: SPONSOR_EVAL_VERSION - 1 })]);
+    expect(prompts().length).toBeLessThanOrEqual(4);
+    // The older record serves meanwhile, so invited accounts are not paused for the re-measurement.
+    expect(sponsor.chosen()?.model).toBe(MODEL);
+    expect(await sponsor.balance()).toEqual({ balance: "0", chargeBalance: "", totalBalance: "0", status: "normal" });
+  } finally { setUsageSink(undefined); }
+}, 60_000);
