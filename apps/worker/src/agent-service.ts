@@ -5,7 +5,7 @@ import { agentChainsFor, deliverAgentResult, isPaused, listAgentTasks, readCateg
 import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, retryDue, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, salvageStoppedRun, type AgentOutcome, type AgentTaskInput } from "./agent-task";
 import type { MailLookup } from "./agent-tools";
-import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, retryCandidates, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
+import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, ledgerQuestion, retryCandidates, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 import { browserProfilesRoot, sayToPerson, startWorkflowRun } from "./workflow-smith";
 import { ASSISTANT_PREP_HOURS, startingWithin } from "./schedule-window";
 import { ownerOf } from "./owner";
@@ -58,6 +58,10 @@ export function createAgentService(deps: {
     // Tools and sandbox modes run on the account's own runtime only: never the owner's (a guest's task must not spend the owner's account).
     return createAgentRunner(deps.store, workspaceId, deps.repoRoot, mode === "shell" ? deps.getClient : () => deps.clientFor?.(workspaceId), {
       outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
+      // A question asked mid-run waits on 待确认 and reaches the phone as well: nobody is watching a background run.
+      questionFor: (id, title) => ledgerQuestion(deps.store, workspaceId, id, title, { onAsked: (questionId, questions) =>
+        sayToPerson(deps.store, workspaceId, `助手在做「${title.slice(0, 40)}」时需要本人回答：${questions[0]!.question.slice(0, 160)}（10 分钟内未回答就按最稳妥的做法继续）`,
+          "agent_question", questionId, [{ label: "去回答", href: "/approvals#assistant" }]) }),
       signal: control.signal, ...(onLive ? { onLive } : {}), mode, ...(mail ? { mail } : {}), ...(mode === "sandbox" && deps.sandbox ? { sandbox: deps.sandbox } : {})
     });
   };

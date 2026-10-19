@@ -50,6 +50,9 @@ const CONNECTORS_READ_ONLY: Record<string, unknown> = { "apps._default.default_t
  * Another provider's context window, so the runtime compacts before the model overflows: an unknown model is assumed to have 272k
  * (vendor/codex models-manager fallback) and would compact only at ~245k, past the window of most 128k models. Unknown here → 128k.
  */
+/** `request_user_input` outside Plan mode is behind a feature flag of its own; the tool itself is on unless configured off. */
+const ASK_PERSON_CONFIG = { "tools.experimental_request_user_input.enabled": true, "features.default_mode_request_user_input": true };
+
 export function contextWindowConfig(provider: ThreadProvider): Record<string, number> {
   const window = provider.contextWindow && provider.contextWindow >= 16_000 ? provider.contextWindow : 128_000;
   return { model_context_window: window, model_auto_compact_token_limit: Math.floor(window * 0.8) };
@@ -134,6 +137,12 @@ export type SkillRunOptions<T> = {
    */
   codeMode?: boolean;
   /**
+   * Codex's `request_user_input` (2026-10-19, the owner: turn the runtime's own features over to use): the run may stop and ask the
+   * person what only they know and the work cannot go on without. Each request reaches this function, whose answers (one list per
+   * question id) go back on the same turn; the caller decides how long to wait and what an unanswered question becomes.
+   */
+  askPerson?: (questions: PersonQuestion[]) => Promise<Record<string, string[]>>;
+  /**
    * The person's ChatGPT connectors (Gmail, Calendar, Drive, Notion …) for this run, read-only: the runtime asks before any tool not
    * marked read-only and this runner declines every such request, so only reading goes through. A ChatGPT sign-in is needed; on any
    * other login the runtime offers none.
@@ -166,6 +175,28 @@ export type SkillTools = {
 };
 
 /** The runtime's request for one tool call, answered from `tools`; any other request about the thread is refused. */
+export type PersonQuestion = { id: string; header: string; question: string; options: Array<{ label: string; description: string }> };
+
+/** The runtime's `item/tool/requestUserInput` answered through `askPerson`; every other request goes to `fallback`. */
+function withPersonQuestions(ask: SkillRunOptions<unknown>["askPerson"], fallback: (method: string, params: Record<string, unknown>) => unknown | Promise<unknown>) {
+  if (!ask) return fallback;
+  return async (method: string, params: Record<string, unknown>) => {
+    if (method !== "item/tool/requestUserInput") return fallback(method, params);
+    const questions = (Array.isArray(params.questions) ? params.questions : []).flatMap((raw): PersonQuestion[] => {
+      const item = record(raw);
+      if (!item || typeof item.id !== "string" || typeof item.question !== "string") return [];
+      const options = (Array.isArray(item.options) ? item.options : []).flatMap((option) => {
+        const value = record(option);
+        return value && typeof value.label === "string" ? [{ label: value.label, description: typeof value.description === "string" ? value.description : "" }] : [];
+      });
+      return [{ id: item.id, header: typeof item.header === "string" ? item.header : "", question: item.question, options }];
+    });
+    const answers = questions.length ? await ask(questions) : {};
+    return { answers: Object.fromEntries(questions.map((question) => [question.id, { answers: answers[question.id] ?? [] }])) };
+  };
+}
+const refuseAll = async (): Promise<never> => { throw new Error("nothing on this thread is answered here"); };
+
 function toolAnswerer(tools: SkillTools) {
   return async (method: string, params: Record<string, unknown>) => {
     if (method !== "item/tool/call") throw new Error("only tool calls are answered for this thread");
@@ -514,6 +545,7 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
     // The runtime's plan tool (each update reaches `onPlan`, shown while the run works) and the person's ChatGPT connectors, read-only.
     ...(options.onPlan ? { "tools.update_plan.enabled": true } : {}),
     ...(options.connectors ? { "features.apps": true, ...CONNECTORS_READ_ONLY } : {}),
+    ...(options.askPerson ? ASK_PERSON_CONFIG : {}),
     ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition, "features.memories": false, ...contextWindowConfig(context.provider) } : {}),
     // In the sandbox: a named permission profile (writes in the task directory, reads only what it is given, no network) and a
     // command environment that carries none of the worker's own variables.
@@ -585,6 +617,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
         || (Boolean(options.connectors) && key === "apps")])),
     ...(options.connectors ? CONNECTORS_READ_ONLY : {}),
     ...(options.onPlan ? { "tools.update_plan.enabled": true } : {}),
+    ...(options.askPerson ? ASK_PERSON_CONFIG : {}),
     ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false])),
     // Another provider: defined for this thread only, and no memories — Codex's memory runs would call an OpenAI model on it.
     ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition,
@@ -990,11 +1023,12 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, request
       // One handler per thread: a tool call goes to the tools, everything else (approvals) to the guard.
       const agentAnswer = options.agent.answer;
       const tools = options.tools ? toolAnswerer(options.tools) : undefined;
-      unregister = registerAgentThread(client, threadId, (method, params) => method === "item/tool/call" && tools ? tools(method, params) : agentAnswer(method, params));
+      unregister = registerAgentThread(client, threadId, withPersonQuestions(options.askPerson,
+        (method, params) => method === "item/tool/call" && tools ? tools(method, params) : agentAnswer(method, params)));
     }
-    else if (options.tools) unregister = registerAgentThread(client, threadId, toolAnswerer(options.tools));
+    else if (options.tools) unregister = registerAgentThread(client, threadId, withPersonQuestions(options.askPerson, toolAnswerer(options.tools)));
     // A connector tool that is not read-only comes as an approval request: refused (an error answer denies the call).
-    else if (options.connectors) unregister = registerAgentThread(client, threadId, async () => { throw new Error("connectors are read-only here"); });
+    else if (options.connectors || options.askPerson) unregister = registerAgentThread(client, threadId, withPersonQuestions(options.askPerson, refuseAll));
     const output = await runTurnsUntilValid(client, scope, context, audit, {
       skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes, ...(options.onImage ? { onImage: options.onImage } : {}),
       ...(options.onPlan ? { onPlan: options.onPlan } : {}),

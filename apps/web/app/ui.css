@@ -192,6 +192,10 @@
 .assistant-actions{display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center}
 .assistant-actions input,.assistant-actions select{font:inherit;font-size:14px;max-width:100%;min-width:0}
 .assistant-ask{display:grid;gap:4px;padding:6px 0;border-bottom:1px solid var(--mist)}
+.assistant-question{display:grid;gap:8px}
+.assistant-question fieldset{display:grid;gap:6px;margin:0;padding:0;border:0;min-width:0}
+.assistant-question legend{padding:0;font-size:14px;overflow-wrap:anywhere}
+.assistant-question input{width:100%;max-width:480px}
 .assistant-task{display:grid;gap:6px;padding:10px 12px;border:1px solid var(--mist);border-left:4px solid var(--ink);margin:8px 0}
 .assistant-task h3{margin:0;font-size:16px}
 .assistant-detail{display:grid;gap:6px;font-size:14px}

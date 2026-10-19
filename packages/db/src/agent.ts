@@ -236,6 +236,51 @@ export function pendingAgentApprovals(store: CrosslineStore, workspaceId: string
 }
 
 /**
+ * A question the assistant put to the person in the middle of a run (Codex's `request_user_input`, 2026-10-19): what only the person
+ * knows and the work cannot go on without. Each question has an id, a short header, the question and its options; the person answers on
+ * 待确认 with options or their own words. Unanswered it expires (`agent.question.expired`), and the run goes on the safest way.
+ */
+export type AgentQuestion = { id: string; header: string; question: string; options: Array<{ label: string; description: string }> };
+export type AgentQuestionRow = { id: string; taskId: string; title: string; questions: AgentQuestion[]; requestedAt: string };
+export function requestAgentQuestion(store: CrosslineStore, workspaceId: string, taskId: string, title: string, questions: AgentQuestion[]): string | undefined {
+  const ownerId = store.getWorkspaceOwnerId(workspaceId);
+  if (!ownerId || !questions.length) return undefined;
+  const id = `aq-${Math.random().toString(36).slice(2, 10)}`;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:requested:${id}`, type: "agent.question.requested", entityId: id,
+    payload: { id, taskId, title: title.slice(0, 200), questions: questions.slice(0, 3).map((question) => ({ id: question.id.slice(0, 80), header: question.header.slice(0, 60),
+      question: question.question.slice(0, 600), options: question.options.slice(0, 6).map((option) => ({ label: option.label.slice(0, 120), description: option.description.slice(0, 300) })) })) } });
+  return id;
+}
+/** The person's answers, one list per question id (an option's label, or their own words). Refused once answered or expired. */
+export function answerAgentQuestion(store: CrosslineStore, workspaceId: string, id: string, answers: Record<string, string[]>): boolean {
+  const ownerId = store.getWorkspaceOwnerId(workspaceId);
+  const asked = store.listEvents(workspaceId, { type: "agent.question.requested", entityId: id })[0];
+  if (!ownerId || !asked || agentQuestionClosed(store, workspaceId, id)) return false;
+  const ids = new Set(((asked.payload as { questions?: AgentQuestion[] }).questions ?? []).map((question) => question.id));
+  const kept = Object.fromEntries(Object.entries(answers).filter(([key, value]) => ids.has(key) && Array.isArray(value))
+    .map(([key, value]) => [key, value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim().slice(0, 1000)).slice(0, 6)]));
+  if (!Object.values(kept).some((value) => value.length)) return false;
+  return store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:answered:${id}`, type: "agent.question.answered", entityId: id, payload: { id, answers: kept } }).inserted;
+}
+export function agentQuestionAnswers(store: CrosslineStore, workspaceId: string, id: string): Record<string, string[]> | undefined {
+  const answered = store.listEvents(workspaceId, { type: "agent.question.answered", entityId: id })[0];
+  return answered ? (answered.payload as { answers: Record<string, string[]> }).answers : undefined;
+}
+export function expireAgentQuestion(store: CrosslineStore, workspaceId: string, id: string): void {
+  const ownerId = store.getWorkspaceOwnerId(workspaceId);
+  if (!ownerId || agentQuestionClosed(store, workspaceId, id)) return;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:expired:${id}`, type: "agent.question.expired", entityId: id, payload: { id } });
+}
+const agentQuestionClosed = (store: CrosslineStore, workspaceId: string, id: string) =>
+  store.listEvents(workspaceId, { type: "agent.question.answered", entityId: id }).length > 0 || store.listEvents(workspaceId, { type: "agent.question.expired", entityId: id }).length > 0;
+export function pendingAgentQuestions(store: CrosslineStore, workspaceId: string, now = new Date(), maxAgeMs = 15 * 60_000): AgentQuestionRow[] {
+  const closed = new Set([...store.listEvents(workspaceId, { type: "agent.question.answered" }), ...store.listEvents(workspaceId, { type: "agent.question.expired" })].map((event) => event.entityId));
+  return store.listEvents(workspaceId, { type: "agent.question.requested" })
+    .filter((event) => !closed.has(event.entityId) && now.getTime() - Date.parse(event.createdAt) <= maxAgeMs)
+    .map((event) => ({ ...(event.payload as Omit<AgentQuestionRow, "requestedAt">), requestedAt: event.createdAt }));
+}
+
+/**
  * Whether a work order can go to the assistant, and in what words: the same reading the worker dispatches from and the Workbench shows,
  * so the button never promises what the worker would refuse.
  */

@@ -3,8 +3,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { AGENT_CATEGORIES, AGENT_CATEGORY_EXPLAINED, isSecretPath, type AccessContext, type AgentCategory } from "@crossline/core";
 import {
-  CLEAN_RUNS_TO_TRUST, declinedCategories, isPaused, listAgentTasks, pendingAgentApprovals, pendingCategoryRequests, readCategories,
-  type AgentApprovalRow, type AgentTaskRow
+  CLEAN_RUNS_TO_TRUST, declinedCategories, isPaused, listAgentTasks, pendingAgentApprovals, pendingAgentQuestions, pendingCategoryRequests, readCategories,
+  type AgentApprovalRow, type AgentQuestionRow, type AgentTaskRow
 } from "@crossline/db";
 import { getStore } from "./crossline";
 import { namesFrom, type Names } from "../app/materials/humanize";
@@ -22,6 +22,8 @@ export type AssistantView = {
   categories: CategoryView[];
   categoryRequests: Array<{ category: AgentCategory; label: string; explained: string; why: string; workOrderId: string; workOrderTitle: string }>;
   approvals: AgentApprovalRow[];
+  /** Questions a run asked mid-way (Codex's `request_user_input`), waiting for the person's answer. */
+  questions: AgentQuestionRow[];
   tasks: Array<AgentTaskRow & { workOrderTitle: string }>;
 };
 
@@ -41,6 +43,7 @@ export function loadAssistant(ctx: AccessContext): AssistantView {
       ...request, label: AGENT_CATEGORIES[request.category], explained: AGENT_CATEGORY_EXPLAINED[request.category], workOrderTitle: titles.get(request.workOrderId) ?? ""
     })),
     approvals: pendingAgentApprovals(store, ctx.workspaceId),
+    questions: pendingAgentQuestions(store, ctx.workspaceId),
     tasks: listAgentTasks(store, ctx.workspaceId).map((task) => ({ ...task, workOrderTitle: titles.get(task.workOrderId) ?? "" }))
   };
 }
@@ -50,7 +53,7 @@ export function countAssistantPending(ctx: AccessContext): { categories: number;
   const store = getStore();
   return {
     categories: pendingCategoryRequests(store, ctx.workspaceId).length,
-    approvals: pendingAgentApprovals(store, ctx.workspaceId).length,
+    approvals: pendingAgentApprovals(store, ctx.workspaceId).length + pendingAgentQuestions(store, ctx.workspaceId).length,
     reviews: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review").length
   };
 }

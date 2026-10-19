@@ -7,7 +7,7 @@ import {
 } from "@crossline/core";
 import {
   agentApprovalDecision, agentChainsFor, assistantPlanFor, decideAgentApproval, declinedCategories, deliverableKey, isAutoHandoff, isPaused, listAgentTasks, readCategories,
-  requestAgentApproval, requestCategory, type CrosslineStore
+  agentQuestionAnswers, expireAgentQuestion, requestAgentApproval, requestAgentQuestion, requestCategory, type AgentQuestion, type CrosslineStore
 } from "@crossline/db";
 import type { AgentTaskInput } from "./agent-task";
 
@@ -288,6 +288,33 @@ export function ledgerAsk(store: CrosslineStore, workspaceId: string, taskId: st
     }
     decideAgentApproval(store, workspaceId, id, "declined");
     return false;
+  };
+}
+
+/** What the run is told about a question nobody answered in time (the Skill says what to do with it). */
+export const QUESTION_UNANSWERED = "本人暂未回答。按最稳妥的做法继续，并把这个问题写进 needsHuman。";
+
+/**
+ * A question the assistant asks mid-run (Codex's `request_user_input`), put to the person the way guard questions are: written to the
+ * ledger, shown on 待确认, answered there. Unanswered within ten minutes it expires and the run is told to go on the safest way.
+ */
+export function ledgerQuestion(store: CrosslineStore, workspaceId: string, taskId: string, title: string,
+  options: { timeoutMs?: number; pollMs?: number; sleep?: (ms: number) => Promise<void>; onAsked?: (id: string, questions: AgentQuestion[]) => void } = {}) {
+  const timeoutMs = options.timeoutMs ?? 10 * 60_000;
+  const pollMs = options.pollMs ?? 3_000;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  return async (questions: AgentQuestion[]): Promise<Record<string, string[]>> => {
+    const unanswered = Object.fromEntries(questions.map((question) => [question.id, [QUESTION_UNANSWERED]]));
+    const id = requestAgentQuestion(store, workspaceId, taskId, title, questions);
+    if (!id) return unanswered;
+    options.onAsked?.(id, questions);
+    for (let waited = 0; waited <= timeoutMs; waited += pollMs) {
+      const answers = agentQuestionAnswers(store, workspaceId, id);
+      if (answers) return { ...unanswered, ...Object.fromEntries(Object.entries(answers).filter(([, value]) => value.length)) };
+      await sleep(pollMs);
+    }
+    expireAgentQuestion(store, workspaceId, id);
+    return unanswered;
   };
 }
 

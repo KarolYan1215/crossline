@@ -1,7 +1,7 @@
 import { AGENT_CATEGORIES } from "@crossline/core";
 import type { AccessContext } from "@crossline/core";
 import { loadAssistant, loadTaskAudit, outputNames, readTaskFile, type AssistantView, type TaskAudit } from "../../lib/agent";
-import { ApprovalButtons, CategoryDecision, RetryCheckButton, ReviewButtons, SendBackItem } from "./assistant-controls";
+import { ApprovalButtons, CategoryDecision, QuestionAnswer, RetryCheckButton, ReviewButtons, SendBackItem } from "./assistant-controls";
 import { csvHead, groupOutputs, markdownHead, workflowSteps, type OutputItem } from "./assistant-outputs";
 import { Markdown } from "../ui/markdown";
 import { Namer, cleanText, humanTable, humanizeMarkdown } from "../materials/humanize";
@@ -140,7 +140,7 @@ export function AssistantReview({ ctx, deferred = () => undefined }: { ctx: Acce
   // Results for work that need not start within a week are folded (decided 2026-10-10), the soonest to come up first.
   const review = results.filter((task) => !deferred(task.workOrderId));
   const later = results.filter((task) => deferred(task.workOrderId)).sort((a, b) => deferred(a.workOrderId)!.localeCompare(deferred(b.workOrderId)!));
-  if (!view.categoryRequests.length && !view.approvals.length && !results.length) return null;
+  if (!view.categoryRequests.length && !view.approvals.length && !view.questions.length && !results.length) return null;
   const card = (task: AssistantView["tasks"][number]) => <article key={task.taskId} className="assistant-task" data-status={task.status}>
     <h3>{task.title}</h3>
     <p className="assistant-meta"><Tag>{AGENT_CATEGORIES[task.category]}</Tag><small>用时 {minutes(task.durationMs)}</small>
@@ -151,7 +151,11 @@ export function AssistantReview({ ctx, deferred = () => undefined }: { ctx: Acce
     <ReviewButtons taskId={task.taskId} />
   </article>;
   return <section className="pending-block" id="assistant" aria-label="助手">
-    <h2>助手 · {view.categoryRequests.length + view.approvals.length + review.length}</h2>
+    <h2>助手 · {view.categoryRequests.length + view.approvals.length + view.questions.length + review.length}</h2>
+    {view.questions.map((question) => <div key={question.id} className="assistant-ask">
+      <p><strong>运行中的提问</strong>{question.title && <> · {question.title}</>} <small className="muted">10 分钟内未回答，助手按最稳妥的做法继续</small></p>
+      <QuestionAnswer id={question.id} questions={question.questions} />
+    </div>)}
     {view.categoryRequests.map((request) => <div key={request.category} className="assistant-ask">
       <p><strong>请求开始「{request.label}」类工作</strong>{request.workOrderTitle && <> · 起因：{request.workOrderTitle}</>}</p>
       <CategoryDecision category={request.category} label={request.label} />

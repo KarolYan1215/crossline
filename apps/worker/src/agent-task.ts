@@ -7,7 +7,7 @@ import {
   AGENT_CATEGORIES, AGENT_SUMMARY_SCHEMA, decideCommand, decideFileChange, decideMcpTool, resultNeedsPerson, validateAgentSummary,
   type AgentCategory, type AgentProgressRecord, type AgentSummary, type GuardContext, type GuardDecision
 } from "@crossline/core";
-import { runCodexSkill, webResearchBlocker, type AgentItem, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
+import { runCodexSkill, webResearchBlocker, type AgentItem, type CodexRpcBoundary, type PersonQuestion, type SkillTools } from "@crossline/codex";
 import { agentChainsFor, approveCategory, CLEAN_RUNS_TO_TRUST, readCategories, recordReview, type CategoryState, type CrosslineStore } from "@crossline/db";
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
 import { applyToolboxActions, createAgentToolbox, type MailLookup } from "./agent-tools";
@@ -59,6 +59,8 @@ export type AuditRecord = {
   requests: { total: number; allowed: number };
   /** The run's own step list, as it last updated it with the runtime's plan tool (shown while it works). */
   plan?: { explanation: string; steps: Array<{ step: string; status: string }> };
+  /** What it asked the person mid-run, and what came back (an option, their own words, or that nobody answered). */
+  questions?: Array<{ question: string; answers: string[] }>;
 };
 export type ArtifactRecord = { path: string; purpose: string; sha256: string; bytes: number };
 
@@ -258,6 +260,8 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
   outputRoot: string; homeDir?: string; ask?: (request: { kind: string; subject: string; rule: string; reason: string }) => Promise<boolean>;
   /** A question-asker made for one task, when the way to reach the person depends on which task is asking. */
   askFor?: (taskId: string) => (request: { kind: string; subject: string; rule: string; reason: string }) => Promise<boolean>;
+  /** Where a question the run asks mid-run (Codex's `request_user_input`) goes for one task; absent, the run cannot ask. */
+  questionFor?: (taskId: string, title: string) => (questions: PersonQuestion[]) => Promise<Record<string, string[]>>;
   signal?: AbortSignal;
   /** Handed the run's live record when it starts (commands, file changes, searches as they happen), for the page that watches it. */
   onLive?: (live: { startedAt: string; audit: AuditRecord }) => void;
@@ -343,6 +347,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       ...(tools ? { tools } : {}),
       // The runtime's own plan tool and the person's ChatGPT connectors, read-only (2026-10-19).
       connectors: true, onPlan: (plan) => { audit.plan = plan; writeProgress(directory, audit); },
+      ...askOption(personAsker(options.questionFor?.(taskId, input.title), audit, () => writeProgress(directory, audit))),
       agent: {
         cwd: directory,
         ...(sandboxed ? { sandbox: { writable: directory, readable: [...inputs, ...(options.sandbox?.readable ?? [])], deny: options.sandbox?.deny ?? [] } } : {}),
@@ -417,7 +422,27 @@ const AGENT_INSTRUCTIONS = "You are the person's assistant on their own computer
   + "coursework is learning aid only. Run and check what you make, record the checks honestly, and finish with the requested JSON, every "
   + "human-readable field in Chinese. needsHuman holds only what the person must do or decide before the result can be used (any entry sends the "
   + "result to review); notDone, assumptions and needsHuman are read word for word, so write them in plain everyday words with no file names, "
-  + "paths, commands or code.";
+  + "paths, commands or code."
+  + " You can stop and ask the person mid-run with request_user_input, at most twice: only when one fact only they know decides which way the "
+  + "work goes and a guess would waste the run (which of two drafts their advisor expects, which account a shared folder is under). Give two "
+  + "to four options, the one you recommend first. If you are told nobody answered, take the safest option and list the question in "
+  + "needsHuman. What your inputs or public sources answer is not a question for the person.";
+
+/** At most this many questions reach the person in one run; more are answered with 「go on the safest way」 without asking. */
+export const QUESTIONS_PER_RUN = 2;
+const QUESTION_LIMIT_REACHED = "这次运行已经问过本人两次，不再提问。按最稳妥的做法继续，并把这个问题写进 needsHuman。";
+
+/** The run's `askPerson`: each question recorded on the audit, at most `QUESTIONS_PER_RUN` put to the person. */
+export function personAsker(ask: ((questions: PersonQuestion[]) => Promise<Record<string, string[]>>) | undefined, audit: AuditRecord, onChange: () => void) {
+  if (!ask) return undefined;
+  let asked = 0;
+  return async (questions: PersonQuestion[]): Promise<Record<string, string[]>> => {
+    const answers = asked++ < QUESTIONS_PER_RUN ? await ask(questions) : Object.fromEntries(questions.map((question) => [question.id, [QUESTION_LIMIT_REACHED]]));
+    audit.questions = [...(audit.questions ?? []), ...questions.map((question) => ({ question: question.question.slice(0, 300), answers: answers[question.id] ?? [] }))];
+    onChange();
+    return answers;
+  };
+}
 
 /** The same call in a row this many times, or the same failing call this many times, is a tools-mode run going round in circles. */
 const TOOL_LOOP_REPEATS = 6;
@@ -441,8 +466,11 @@ export function toolLoopReason(calls: Array<{ tool: string; subject: string; ok:
  * ledger events and `audit.json`, so the board, 待确认, the retry chains and delivery treat both modes alike; what it did is recorded
  * from Crossline's own answers to its calls (every call, every file written), not from what the model says.
  */
+const askOption = (ask: ReturnType<typeof personAsker>) => ask ? { askPerson: ask } : {};
+
 async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined,
-  options: { outputRoot: string; signal?: AbortSignal; onLive?: (live: { startedAt: string; audit: AuditRecord }) => void; libraryDir?: string; mail?: MailLookup },
+  options: { outputRoot: string; signal?: AbortSignal; onLive?: (live: { startedAt: string; audit: AuditRecord }) => void; libraryDir?: string; mail?: MailLookup;
+    questionFor?: (taskId: string, title: string) => (questions: PersonQuestion[]) => Promise<Record<string, string[]>> },
   input: AgentTaskInput): Promise<AgentOutcome> {
   const taskId = input.taskId ?? `agent-${randomUUID().slice(0, 8)}`;
   const directory = path.join(options.outputRoot, taskId);
@@ -508,7 +536,8 @@ async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: str
     // The runtime's own features (2026-10-19): JavaScript in its V8 isolate to compute and to call these functions, the person's ChatGPT
     // connectors read-only, and its plan tool, whose steps are shown while the run works. Code mode runs in codex-code-mode-host beside
     // the runtime; without it every call through code mode fails, so it is switched on only when the host is there.
-    codeMode: !webResearchBlocker(), connectors: true, onPlan: (plan) => { audit.plan = plan; live(); writeProgress(directory, audit); }
+    codeMode: !webResearchBlocker(), connectors: true, onPlan: (plan) => { audit.plan = plan; live(); writeProgress(directory, audit); },
+    ...askOption(personAsker(options.questionFor?.(taskId, input.title), audit, () => { live(); writeProgress(directory, audit); }))
   });
   live();
   const inputsModified = changedFiles(before, fingerprint(inputs));
@@ -556,4 +585,8 @@ const TOOLS_AGENT_INSTRUCTIONS = "You are the person's assistant, doing one erra
   + "something was made; tell_person only for what they must know now. Graded coursework is learning aid only. Every artifact path must be a file "
   + "you wrote. Every human-readable field in Chinese; needsHuman holds only what the person must do or decide before the result can be used (any "
   + "entry sends the result to review); notDone, assumptions and needsHuman are read word for word, in plain everyday words with no file names, "
-  + "paths, function names or code.";
+  + "paths, function names or code."
+  + " You can stop and ask the person mid-run with request_user_input, at most twice: only when one fact only they know decides which way the "
+  + "work goes and a guess would waste the run (which of two drafts their advisor expects, which account a shared folder is under). Give two "
+  + "to four options, the one you recommend first. If you are told nobody answered, take the safest option and list the question in "
+  + "needsHuman. What your inputs or public sources answer is not a question for the person.";
