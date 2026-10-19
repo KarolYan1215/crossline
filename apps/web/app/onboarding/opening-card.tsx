@@ -58,9 +58,9 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
         <p className="ob-opening-sign">——Y.K.</p>
       </section>
       <ol className="ob-opening-plan">
-        <li><b>认识你</b><span>你有哪些想成为的身份，手上有哪些材料支持你。</span></li>
-        <li><b>聊深一点</b><span>你现在的处境、为什么做这些，动机和愿景是什么、你日常的精力情况。</span></li>
-        <li><b>补齐细节</b><span>每个具体项目哪天截止、要交出什么，你用什么来验收具体项目的成果。</span></li>
+        <li><b>认识你</b><span>你有哪些想成为的身份，各自正在做什么、大概什么时候截止；时间说个大概就行，材料里有的不再问。</span></li>
+        <li><b>聊深一点</b><span>你现在的处境、为什么做这些、日常的精力情况。每一轮都会给你一条关于你自己的观察。</span></li>
+        <li><b>拿到结果</b><span>一周的骨架草稿和画像报告。具体项目的细节，到拆任务时再补。</span></li>
       </ol>
       <p className="ob-opening-time">大约 30 分钟后拿到一份你的画像报告（几条主线各是什么、精力怎么分），以及把各条主线的事排进同一张日历的计划。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。</p>
     </div>

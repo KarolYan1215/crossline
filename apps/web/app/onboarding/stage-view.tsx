@@ -15,8 +15,6 @@ import type { SkeletonBlock } from "@crossline/core";
  * content. The current stage's picture is shown; earlier ones stay one click away. Above it, the start standard as a ring and the time
  * left, so the person always knows how far they are.
  */
-/** The five parts of the main interview, as the progress strip shows them. */
-const PART_LABELS = ["定向", "主线", "处境", "指南针", "能量"];
 export type StageKey = "lines" | "week" | "compass" | "energy" | "projects" | "structure";
 const VIEWS: Array<{ key: StageKey; label: string }> = [
   { key: "lines", label: "主线" }, { key: "week", label: "一周" }, { key: "compass", label: "指南针" },
@@ -67,7 +65,6 @@ export function StageView({ state, stage, complete, onChanged }: {
   const progress = state.progress;
   return <aside className="ob-stage" aria-label="正在成形">
     {progress && !state.focusLine && <section className="ob-progress" aria-label="访谈进度">
-      <ol className="ob-progress-parts">{PART_LABELS.map((label, index) => <li key={label} data-state={index + 1 < progress.index || complete ? "done" : index + 1 === progress.index ? "now" : undefined}>{label}</li>)}</ol>
       <b>{complete ? "访谈已完成" : `第 ${progress.index}/${progress.total} 部分 · ${progress.label}${progress.of ? ` · 已谈清 ${progress.clear}/${progress.of}` : ""}`}</b>
       {!complete && progress.next && <small className="gen">接下来：{progress.next}</small>}
     </section>}

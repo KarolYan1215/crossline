@@ -11,7 +11,7 @@ import { DEEP_STAGES, ONBOARDING_STAGES, type OnboardingStage, type TurnInsight,
 /** The parts of the main interview, in order. `details` is gone from it (line interviews still use it). */
 export const INTERVIEW_PARTS: OnboardingStage[] = ["orientation", "lines", "situation", "compass", "energy"];
 export const PART_LABEL: Record<OnboardingStage, string> = {
-  orientation: "定向", lines: "主线", situation: "处境", compass: "指南针", energy: "能量", details: "细节"
+  orientation: "开场", lines: "主线", situation: "处境", compass: "指南针", energy: "能量", details: "细节"
 };
 
 /** Where the person's ratings of observations are kept: `{ "<session>#<round seq>": { verdict, stage, at, text } }`. */

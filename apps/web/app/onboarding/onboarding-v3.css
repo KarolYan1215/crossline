@@ -211,10 +211,7 @@
 .ob-progress{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--ink);background:var(--paper)}
 .ob-progress b{font-size:14px}
 .ob-progress small{font-size:13px;color:var(--ink)}
-.ob-progress-parts{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin:0;padding:0;list-style:none}
-.ob-progress-parts li{font-size:12px;text-align:center;padding:4px 0 2px;border-top:4px solid var(--mist);color:var(--graphite)}
-.ob-progress-parts li[data-state="done"]{border-top-color:var(--graphite);color:var(--ink)}
-.ob-progress-parts li[data-state="now"]{border-top-color:var(--ink);color:var(--ink);font-weight:700}
+
 .ob-insight{display:grid;gap:6px;margin-top:8px;padding:10px 12px;border-left:4px solid var(--ink);background:var(--chalk)}
 .ob-insight-label{font-size:13px}
 .ob-insight-quotes{margin:0;padding:0;list-style:none;display:grid;gap:2px;font-size:13px;color:var(--graphite)}

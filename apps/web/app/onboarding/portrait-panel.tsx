@@ -1,5 +1,5 @@
 "use client";
-
+import { INTERVIEW_PARTS, PART_LABEL } from "@crossline/core";
 
 export type ProfileModelView = {
   portrait: string; coreConflict: string; problem: string; gravity: string[]; designable: string[]; reframes: Array<{ fallacy: string; reframe: string }>;
@@ -11,12 +11,13 @@ export type ProfileModelView = {
 };
 export type LineView = { id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts: string[] };
 
-export const STAGES: Array<[string, string]> = [["orientation", "开场与规则"], ["lines", "主线"], ["situation", "现状"], ["compass", "指南针"], ["energy", "能量"], ["details", "细节"]];
+/** The five parts of the main interview (2026-10-19: the details stage is gone; a session stored at `details` reads as past the last part). */
+export const STAGES: Array<[string, string]> = INTERVIEW_PARTS.map((id) => [id, PART_LABEL[id]]);
 
 /** Where the interview is, as a row of stages. */
 export function StageBar({ stage, line }: { stage: string; line?: string | undefined }) {
   if (line) return <ol className="ob-stages"><li data-state="current">{line} · 细节</li></ol>;
-  const at = Math.max(0, STAGES.findIndex(([id]) => id === stage));
+  const at = stage === "details" ? STAGES.length : Math.max(0, STAGES.findIndex(([id]) => id === stage));
   return <ol className="ob-stages" aria-label="访谈阶段">{STAGES.map(([id, label], index) =>
     <li key={id} data-state={index < at ? "done" : index === at ? "current" : "next"}>{label}</li>)}</ol>;
 }
