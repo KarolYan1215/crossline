@@ -24,7 +24,7 @@
 - 账本事件与 shell 助手完全一致（`agent.task.requested/completed/blocked`，多一个 `mode: "tools"`），`audit.json` 里记下每一次函数调用（`toolCalls`）。所以待确认、重试链、交付、「交给 Agent」、准备步骤、自动交给 Agent 全部照常工作。
 - 防打转：同一调用重复 6 次、同一调用连续失败 3 次即停（`toolLoopReason`）。
 - 跑在账号自己的模型上（`clientFor`），排队走模型闸门的 background 份额，但有自己的 lane，不挡收集分析和验收。
-- 一致性测量：`AGENT_SUMMARY_SCHEMA` 一直在一致性用例里，赞助模型评测 v5 已覆盖；Skill 需要 `tools: true`。
+- 一致性测量：`AGENT_SUMMARY_SCHEMA` 一直在一致性用例里，赞助模型评测 v5 已覆盖；Skill 需要 `tools: true`。格式通过不等于会调用函数（10-19 线上：赞助模型在 JSON 模式下一次都没调用），所以另有用例 `ADVERSARIAL_TOOLS`：给一个函数，必须调用并用它的返回值作答；没通过时需要函数的 Skill 不开放。只支持 JSON 模式的服务商在带函数时不发 `response_format`，JSON 只在最后一条回复里要。一次函数都没调用的助手运行会被退回（`AGENT_NOTHING_DONE`）。
 
 ## 3. 邮箱（只读，IMAP）
 

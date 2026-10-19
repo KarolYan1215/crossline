@@ -105,10 +105,17 @@ export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "r
     if ((upstream.responseFormat ?? "json_schema") === "json_schema")
       responseFormat = { type: "json_schema", json_schema: { name: text(format.name) || "output", schema: format.schema, strict: format.strict !== false } };
     else {
-      responseFormat = { type: "json_object" };
+      // JSON mode makes every reply a JSON object, so a model offered functions could never call one first: on SiliconFlow's DeepSeek
+      // the tools assistant finished in seven seconds with no call and nothing made, and the interview's lookups were never used
+      // (2026-10-19). With functions on offer the JSON is asked for in words, for the final reply only; the runner reads it and its
+      // repair loop sends back anything that is not JSON.
+      if (!tools.length) responseFormat = { type: "json_object" };
       // Without a schema the endpoint enforces, models echoed the input's own keys (`version`, `caseId`, `prompt`) into the answer
       // (GLM on SiliconFlow, 2026-10-18): the answer's keys are the schema's, and only those.
-      system.push(`Reply with one JSON object only, no prose and no code fence, that validates against this JSON Schema. Use exactly the schema's own properties: never copy keys or fields from the user's message into the answer.\n${JSON.stringify(format.schema)}`);
+      const lead = tools.length
+        ? "Call the functions you need first, as many times as the task needs. When you are finished, your final reply is one JSON object only"
+        : "Reply with one JSON object only";
+      system.push(`${lead}, no prose and no code fence, that validates against this JSON Schema. Use exactly the schema's own properties: never copy keys or fields from the user's message into the answer.\n${JSON.stringify(format.schema)}`);
     }
   }
 

@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { caseTools } from "./conformance-tools";
 import path from "node:path";
 import {
   admittedSkills, chooseSponsorModel, ONBOARDING_TONE_SETTING, plainVoiceMarkers, plainVoiceRate, conformanceCases, evaluationYuanPerRun, conformanceCurrent, jsonSchemaProblems, parseSponsorModels, sponsorMonth, sponsorSpend,
@@ -230,7 +231,9 @@ export function createSponsorService(options: {
       const rejections: SponsorRunLog["rejections"] = [];
       let audit: { repairs?: number; stalls?: number } = {};
       runUsage.delete(key);
+      const offered = caseTools(item);
       const result = await withUsageWorkspace(key, () => runCodexSkill<unknown>(client, input, { skillName: CONFORMANCE_SKILL, cwd: options.cwd, provider: thread,
+        ...(offered.tools ? { tools: offered.tools } : {}),
         developerInstructions: "Answer the conformance case as the Skill describes. Return raw JSON only.", outputSchema: item.schema,
         prepareInput: () => input, onAudit: (next) => { audit = next; }, timeoutMs: 20 * 60_000,
         validateOutput: (output) => {
@@ -238,6 +241,10 @@ export function createSponsorService(options: {
           if (problems.length) {
             rejections.push({ problems: problems.slice(0, 6).join("; ").slice(0, 500), answer: JSON.stringify(output).slice(0, 600) });
             throw Object.assign(new Error("CONFORMANCE_SCHEMA_VIOLATED"), { detail: problems.slice(0, 6).join("; ") });
+          }
+          try { offered.check(output); } catch (error) {
+            rejections.push({ problems: (error as Error).message, answer: JSON.stringify(output).slice(0, 600) });
+            throw error;
           }
           return output;
         } })).catch((error: unknown) => ({ ok: false as const, blocker: { code: error instanceof Error ? error.message : "SKILL_RUNTIME_FAILED", message: "" }, audit: {} as { repairs?: number; stalls?: number } }));

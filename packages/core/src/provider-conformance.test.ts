@@ -51,6 +51,15 @@ test("admission: everything structured passes → served; what needs web, images
   expect(capabilityGap("crossline-portrait-illustrator")).toContain("图片");
 });
 
+test("admission: a model that never calls the offered function keeps the Skills that need functions out; a record from before the case is read as before", () => {
+  const runs = allPassing().map((item) => item.caseId === "ADVERSARIAL_TOOLS" ? run("ADVERSARIAL_TOOLS", false) : item);
+  const admitted = admittedSkills(summarizeConformance(base, runs));
+  for (const skill of ["crossline-agent-tools", "crossline-concierge", "crossline-onboarding-extract"]) expect(admitted).not.toContain(skill);
+  expect(admitted).toContain("crossline-task-titler");
+  const older = admittedSkills(summarizeConformance(base, allPassing().filter((item) => item.caseId !== "ADVERSARIAL_TOOLS")));
+  expect(older).toContain("crossline-agent-tools");
+});
+
 test("admission: one repair on a critical schema keeps that Skill out; a failure elsewhere keeps only its own Skill out", () => {
   const runs = allPassing();
   runs[runs.findIndex((item) => item.caseId === "MILESTONE_GATE_OUTPUT_SCHEMA")] = run("MILESTONE_GATE_OUTPUT_SCHEMA", true, 1);

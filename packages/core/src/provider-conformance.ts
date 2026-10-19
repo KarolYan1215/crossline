@@ -127,7 +127,16 @@ export function unavailableOnThirdParty(capabilities: Pick<ProviderCapabilities,
 
 // ── Conformance ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export type ConformanceCase = { id: string; schema: Record<string, unknown>; prompt: string; runs: number; skills: string[] };
+/** `tool`: the case offers one function and passes only when the model called it and answered with what it returned. */
+export type ConformanceCase = { id: string; schema: Record<string, unknown>; prompt: string; runs: number; skills: string[];
+  tool?: { name: string; description: string; inputSchema: Record<string, unknown>; reply: string } };
+/**
+ * Whether a model calls a function before answering (2026-10-19): every schema case passed on SiliconFlow's DeepSeek while, in use, the
+ * tools assistant and the interview's lookups never made a call. A Skill that needs functions is admitted only when this case passed;
+ * a record from before the case existed is read as it was.
+ */
+export const TOOLS_CASE_ID = "ADVERSARIAL_TOOLS";
+const TOOLS_CASE_SCHEMA = { type: "object", additionalProperties: false, required: ["code"], properties: { code: { type: "string", minLength: 1, maxLength: 40 } } } as const;
 
 const LONG_TEXT_SCHEMA = { type: "object", additionalProperties: false, required: ["title", "report"], properties: {
   title: { type: "string", minLength: 1, maxLength: 60 }, report: { type: "string", minLength: 1500, maxLength: 6000 } } } as const;
@@ -172,7 +181,12 @@ export function conformanceCases(): ConformanceCase[] {
     { id: "ADVERSARIAL_UNION", schema: UNION_SCHEMA as unknown as Record<string, unknown>, runs: 1, skills: [],
       prompt: "List four items for tomorrow: two tasks (with minutes) and two notes, mixed in order. Set `note` to null." },
     { id: "ADVERSARIAL_DEEP", schema: DEEP_SCHEMA, runs: 1, skills: [],
-      prompt: "Describe one research line with one milestone, two tasks under it and two steps under each task." });
+      prompt: "Describe one research line with one milestone, two tasks under it and two steps under each task." },
+    { id: TOOLS_CASE_ID, schema: TOOLS_CASE_SCHEMA as unknown as Record<string, unknown>, runs: 1,
+      skills: Object.entries(SKILL_NEEDS).filter(([, needs]) => needs.tools).map(([skill]) => skill),
+      prompt: "The project's access code is not in this message: call the function `lookup_code` with key \"stat610\" to get it, then answer with that code in `code`.",
+      tool: { name: "lookup_code", description: "Returns the access code stored for a key.", reply: "QX-4417-PL",
+        inputSchema: { type: "object", additionalProperties: false, required: ["key"], properties: { key: { type: "string" } } } } });
   return cases;
 }
 export const exportedSchemaNames = () => Object.keys(CONFORMANCE_SCHEMAS);
@@ -279,6 +293,7 @@ export function admittedSkills(record: ConformanceRecord, capabilities: Provider
     if (capabilityGap(skill, capabilities) || !needs.schemas.length) return false;
     const runs = all.filter((run) => needs.schemas.includes(run.caseId));
     if (!needs.schemas.every((schema) => runs.some((run) => run.caseId === schema)) || runs.some((run) => !run.ok)) return false;
+    if (needs.tools && all.some((run) => run.caseId === TOOLS_CASE_ID && !run.ok)) return false;
     if (needs.critical) return runs.filter((run) => run.repairs > 0).length / runs.length <= 0.05;
     return record.passRate >= 0.9;
   }).map(([skill]) => skill);

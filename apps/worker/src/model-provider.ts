@@ -1,3 +1,4 @@
+import { caseTools } from "./conformance-tools";
 import {
   admittedSkills, conformanceCases, conformanceCurrent, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
   capabilityGap, THIRD_PARTY_CAPABILITIES, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
@@ -150,12 +151,15 @@ export function createModelProviderService(options: {
       for (const item of cases) for (let attempt = 0; attempt < item.runs; attempt += 1) {
         const started = Date.now();
         const input = { version: "crossline.conformance.v1", caseId: item.id, prompt: item.prompt };
+        const offered = caseTools(item);
         const result = await runCodexSkill<unknown>(client, input, { skillName: CONFORMANCE_SKILL, cwd: options.cwd, provider: thread,
+          ...(offered.tools ? { tools: offered.tools } : {}),
           developerInstructions: "Answer the conformance case as the Skill describes. Return raw JSON only.", outputSchema: item.schema,
           prepareInput: () => input, onAudit: () => {}, timeoutMs: 20 * 60_000,
           validateOutput: (output) => {
             const problems = jsonSchemaProblems(output, item.schema);
             if (problems.length) throw Object.assign(new Error("CONFORMANCE_SCHEMA_VIOLATED"), { detail: problems.slice(0, 6).join("; ") });
+            offered.check(output);
             return output;
           } });
         runs.push({ caseId: item.id, ok: result.ok, repairs: result.audit.repairs ?? 0, ms: Date.now() - started, ...(result.ok ? {} : { code: result.blocker.code }) });

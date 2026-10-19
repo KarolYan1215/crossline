@@ -38,6 +38,17 @@ test("a provider with JSON mode only gets json_object and the schema in its inst
   expect((body.messages as Array<{ content: string }>)[0]!.content).toContain(JSON.stringify(schema));
 });
 
+test("with functions on offer, JSON mode is not forced: the model may call them first and gives the JSON as its final reply", () => {
+  const schema = { type: "object", properties: { a: { type: "string" } } };
+  const { body } = responsesToChat({ model: "m", input: [], tools: [{ type: "function", name: "read_file", description: "", parameters: { type: "object", properties: {} } }],
+    text: { format: { type: "json_schema", strict: true, schema, name: "s" } } }, { responseFormat: "json_object" });
+  expect(body.response_format).toBeUndefined();
+  expect(body.tool_choice).toBe("auto");
+  const system = (body.messages as Array<{ content: string }>)[0]!.content;
+  expect(system).toContain("Call the functions you need first");
+  expect(system).toContain(JSON.stringify(schema));
+});
+
 test("tools: namespaces flatten to ns__name and come back with their namespace; earlier calls and outputs replay as tool messages", () => {
   const chat = responsesToChat({ model: "m", tools: [
     { type: "function", name: "lookup", description: "d", parameters: { type: "object", properties: {} } },

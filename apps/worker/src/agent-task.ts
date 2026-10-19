@@ -494,7 +494,14 @@ async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: str
   const result = await runCodexSkill<AgentSummary>(client, task, {
     skillName: TOOLS_AGENT_SKILL, cwd, developerInstructions: TOOLS_AGENT_INSTRUCTIONS + libraryInstruction(extraSkills), outputSchema: AGENT_SUMMARY_SCHEMA,
     ...(extraSkills.length ? { extraSkills } : {}),
-    prepareInput: () => task, validateOutput: (output) => validateAgentSummary(output, probe), onAudit: () => {},
+    prepareInput: () => task, onAudit: () => {},
+    validateOutput: (output) => {
+      // An errand done without one call did nothing: everything the tools assistant can read or make goes through its functions
+      // (on 2026-10-19 a model finished an automation in seven seconds with no call, its summary a plan for work it never did).
+      if (!toolbox.calls.length) throw Object.assign(new Error("AGENT_NOTHING_DONE"), { detail: "这次运行一个函数都没有调用，什么也没读、没写。"
+        + "先用函数读需要的材料（list_tasks、calendar、list_documents、read_file 等），按任务做出文件（write_file），再交总结；总结写已经做了什么，不写打算做什么。" });
+      return validateAgentSummary(output, probe);
+    },
     allowWebSearch: true, timeoutMs: 2 * 60 * 60_000, signal, tools
   });
   live();

@@ -91,6 +91,17 @@ test("a tools-mode run declares Crossline's functions (no shell), records every 
   expect(audit.toolCalls.map((call: { tool: string }) => call.tool)).toEqual(["write_file", "add_to_inbox"]);
 });
 
+test("a run that calls no function is sent back: a summary of work never done is not a result", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  const plan = JSON.stringify({ summary: "开始读取任务板与日历，随后生成清单文件。", artifacts: [], verification: [], needsHuman: [], notDone: [], assumptions: [] });
+  const { rpc, prompts } = fakeRuntime([plan, plan, plan], TOOLS_AGENT_SKILL);
+  const run = createAgentRunner(store, workspaceId, "/repo", () => rpc, { outputRoot: path.join(root, "ai"), mode: "tools" });
+  const outcome = await run({ taskId: "t-idle", title: "每日到期清单", what: "整理到期任务", category: "read_research_organize", humanPart: "" });
+  expect(outcome.state).toBe("blocked");
+  expect(prompts().some((prompt) => prompt.includes("一个函数都没有调用"))).toBe(true);
+  expect(store.listEvents(workspaceId, { type: "agent.task.completed", entityId: "t-idle" })).toHaveLength(0);
+});
+
 test("a run that fails leaves its inbox lines unapplied", async () => {
   approveCategory(store, workspaceId, "read_research_organize");
   const { rpc } = fakeRuntime(["not json", "still not json", "nope"], TOOLS_AGENT_SKILL, { script: async ({ ask }) => {
