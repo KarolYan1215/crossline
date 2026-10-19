@@ -1062,6 +1062,13 @@ export async function answerAsk(ctx: AccessContext, askId: string, choice: strin
   const ids = checked.options.map((option) => option.id);
   const label = checked.options.map((option) => option.label).join("、") || "自己回答";
   const result = await withUndo(ctx, `${label}：${ask.title}`, () => answerOne(ctx, ask, { optionIds: ids, note: checked.note }, checked.values));
+  // The question ledger keeps the answer beside the question, numbered, for the models that read it.
+  if (result.ok && ask.kind !== "interview_question") {
+    const store = getStore();
+    const id = store.questionByKey(ctx.workspaceId, `ask:${ask.id}`)?.id ?? recordAsk(ctx, ask, now.toISOString());
+    store.answerQuestion(ctx.workspaceId, id, { text: [checked.options.map((option) => option.label).join("、"), checked.note].filter(Boolean).join("。补充："),
+      at: now.toISOString() });
+  }
   if (result.ok) record(ctx, "ask.answered", ask.entityId, `ask:answered:${ask.id}:${ids.join("+") || "note"}:${now.getTime()}`,
     { askId: ask.id, kind: ask.kind, optionId: ids[0] ?? "", ...(ids.length > 1 ? { optionIds: ids } : {}), ...(checked.note ? { note: checked.note } : {}),
       // Seconds the card was on screen before the answer, when the page measured it: the decision's cost on 系统体检.
@@ -1088,10 +1095,34 @@ export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" 
  * an urgent message all count the same things. Called on the web's own timer.
  */
 export function writeAttentionSnapshot(ctx: AccessContext, pending: number, now = new Date()): void {
-  const asks = listed(openAsks(ctx, now)).map((ask) => ({ id: ask.id, title: ask.title, urgency: ask.urgency, dueDay: ask.dueDay ?? null,
+  const open = openAsks(ctx, now);
+  syncAskLedger(ctx, open, now.toISOString());
+  const asks = listed(open).map((ask) => ({ id: ask.id, title: ask.title, urgency: ask.urgency, dueDay: ask.dueDay ?? null,
     path: ask.urgency === "now" ? "/" : "/approvals#asks" }));
   getStore().setSetting(ctx.workspaceId, ATTENTION_SNAPSHOT, JSON.stringify({ at: now.toISOString(), pending, asks }));
   // A round whose remaining questions were dead (answered, no longer asked, screened out) still holds the answers given on 待决事项:
   // they go to the interview here, on the same timer, so a restarted resident app settles it by itself.
   void flushPendingAnswers(ctx, sendInterviewReply(ctx)).catch(() => undefined);
+}
+
+/** One ask in the question ledger (`ask:<id>`), open; returns its number. The interview's own questions are kept by the interview. */
+function recordAsk(ctx: AccessContext, ask: Ask, at: string): number {
+  return getStore().recordQuestion(ctx.workspaceId, { kind: "ask", key: `ask:${ask.id}`, text: ask.title, options: ask.options.map((option) => option.label),
+    identityId: ask.line ?? "", status: "open", at });
+}
+
+/**
+ * 待决事项 in the question ledger (2026-10-19), on the web's ten-minute timer: every open ask once, numbered, and an ask whose cause went
+ * away no longer asked. Step questions are asks, so they are here too.
+ */
+export function syncAskLedger(ctx: AccessContext, asks: Ask[], at: string): void {
+  const live = new Set<string>();
+  for (const ask of asks) {
+    if (ask.kind === "interview_question") continue;
+    live.add(`ask:${ask.id}`);
+    recordAsk(ctx, ask, at);
+  }
+  const store = getStore();
+  for (const question of store.listQuestions(ctx.workspaceId, { kind: "ask", statuses: ["pending", "open"] }))
+    if (!live.has(question.key)) store.dropQuestion(ctx.workspaceId, question.id, at);
 }

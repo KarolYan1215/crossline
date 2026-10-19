@@ -4,7 +4,7 @@ import { askQuadrant } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
 import { requestCodexSupervisor } from "./codex-runtime";
-import { answerAsk, collectAsks, explainRisk, openAsks, snoozeAsk } from "./asks";
+import { answerAsk, collectAsks, explainRisk, openAsks, snoozeAsk, writeAttentionSnapshot } from "./asks";
 import { countPending } from "./pending";
 import { TEST_CTX } from "./test-support";
 
@@ -460,4 +460,22 @@ test("a project's questions are settled on one card: 都按建议 in one tap, or
   const replans = store.listEvents(ws, { type: "task.steps_replan_requested" });
   expect(replans.map((event) => event.entityId).sort()).toEqual(["a", "b"]);
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "step_question")).toBe(false);
+});
+
+test("待决事项 are in the question ledger: listed on the timer, answered with the chosen option, dropped when their cause goes", async () => {
+  const store = setup();
+  refusedWithMissing(store);
+  const eventId = refusedOutright(store);
+  writeAttentionSnapshot(TEST_CTX, 0, NOW);
+  const key = `ask:bp:${eventId}:all`;
+  expect(store.questionByKey(ws, key)).toMatchObject({ kind: "ask", status: "open" });
+  const id = store.questionByKey(ws, key)!.id;
+  // Asked again on the next tick: the same number.
+  writeAttentionSnapshot(TEST_CTX, 0, NOW);
+  expect(store.questionByKey(ws, key)!.id).toBe(id);
+  const ask = collectAsks(TEST_CTX, NOW).find((item) => item.id === `bp:${eventId}:all`)!;
+  await answerAsk(TEST_CTX, ask.id, "skip", {}, NOW);
+  expect(store.questionByKey(ws, key)).toMatchObject({ status: "answered", answer: ask.options.find((option) => option.id === "skip")!.label });
+  writeAttentionSnapshot(TEST_CTX, 0, NOW);
+  expect(store.questionByKey(ws, key)!.status).toBe("answered");
 });

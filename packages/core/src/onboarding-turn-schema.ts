@@ -29,6 +29,11 @@ export type TurnQuestion = {
   id: string; text: string; kind: "single" | "multi" | "free";
   options: Array<{ id: string; label: string; detail: string }>;
   allowOther: boolean; identityId: string; projectId: string;
+  /**
+   * The question ledger's number of the question this one asks again (`questionLedger`, 「#12」), 0 for a new one (2026-10-19). An answered
+   * question asked again is dropped from the round; one of the app's own waiting questions asked in the model's words is not added again.
+   */
+  repeats?: number;
 };
 /**
  * A fact as the rest of the app reads it. The model does not write `sourceRef` or `sourceQuote` any more (2026-10-19): it cites numbered
@@ -178,6 +183,11 @@ export type OnboardingTurnContext = {
   moveOn?: string;
   /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first; the person's lines as numbered sentences. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
+  /**
+   * The question ledger (`ledgerLines`): what was already asked, numbered, with its status and answer — the interview's own, the app's
+   * waiting ones (待问) and answered ones. A question that asks one of these again names its number in `repeats`.
+   */
+  questionLedger?: string[];
   /** The person's reply as numbered sentences (「[41] …」), cited by number like a file. */
   reply: { id: string; sentences: string };
 };
@@ -217,7 +227,9 @@ export const ONBOARDING_TURN_SCHEMA = object({
       },
       allowOther: { type: "boolean" },
       // "" = about the person generally / about the connections between lines.
-      identityId: { type: "string", maxLength: 80 }, projectId: { type: "string", maxLength: 80 }
+      identityId: { type: "string", maxLength: 80 }, projectId: { type: "string", maxLength: 80 },
+      // The ledger number of the question this one repeats (`questionLedger`), 0 when it is new.
+      repeats: { type: "integer", minimum: 0 }
     })
   },
   slotUpdates: {

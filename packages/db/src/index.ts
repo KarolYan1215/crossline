@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { SEGMENTER_VERSION, segmentText, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
+import { SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
@@ -458,6 +458,11 @@ function sentenceIds(raw: unknown): number[] {
     return Array.isArray(parsed) ? parsed.filter((id): id is number => Number.isInteger(id) && id > 0) : [];
   } catch { return []; }
 }
+const questionRow = (row: Record<string, string | number | null>): LedgerQuestion => ({ id: Number(row.id), kind: row.kind as LedgerQuestion["kind"],
+  key: String(row.key), text: String(row.text), options: (() => { try { return JSON.parse(String(row.options_json ?? "[]")) as string[]; } catch { return []; } })(),
+  identityId: String(row.identity_id ?? ""), projectId: String(row.project_id ?? ""), status: row.status as LedgerQuestion["status"], answer: String(row.answer ?? ""),
+  answerSentences: sentenceIds(row.answer_sentences), ...(typeof row.repeats === "number" ? { repeats: row.repeats } : {}), askedAt: String(row.asked_at),
+  ...(row.answered_at ? { answeredAt: String(row.answered_at) } : {}) });
 const sentenceRow = (row: Record<string, string | number>): StoredSentence => ({ id: Number(row.id), sourceKind: row.source_kind as StoredSentence["sourceKind"],
   sourceId: String(row.source_id), ord: Number(row.ord), start: Number(row.start_at), end: Number(row.end_at), text: String(row.text), retired: Number(row.retired) === 1 });
 
@@ -1106,6 +1111,18 @@ export class CrosslineStore {
           this.#db.exec("ALTER TABLE source_documents ADD COLUMN ref_no INTEGER");
           this.#numberDocuments();
         }
+      } },
+      // The question ledger (2026-10-19): every question put to the person — the interview's, the app's own, 待决, a step plan's — once,
+      // numbered per workspace, with its answer and the sentences it was given in, so a model is shown what was already asked.
+      { version: 17, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS question_ledger (
+            workspace_id TEXT NOT NULL, id INTEGER NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('interview','ask')), key TEXT NOT NULL,
+            text TEXT NOT NULL, options_json TEXT NOT NULL DEFAULT '[]', identity_id TEXT NOT NULL DEFAULT '', project_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL CHECK(status IN ('pending','open','answered','assumed','dropped')), answer TEXT NOT NULL DEFAULT '',
+            answer_sentences TEXT NOT NULL DEFAULT '[]', repeats INTEGER, asked_at TEXT NOT NULL, answered_at TEXT, updated_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, key));
+          CREATE INDEX IF NOT EXISTS question_ledger_by_status ON question_ledger(workspace_id, status, updated_at);`);
       } }
     ];
 
@@ -1989,6 +2006,55 @@ export class CrosslineStore {
       "SELECT * FROM onboarding_sessions WHERE workspace_id = ? AND id NOT LIKE 'line-%' ORDER BY updated_at DESC, rowid DESC LIMIT 1"
     ).get(workspaceId) as Record<string, string> | undefined;
     return row ? this.#onboardingSessionFrom(row) : undefined;
+  }
+
+  /**
+   * Records a question in the ledger (`question_ledger`) once per `key` and returns its number. A question asked again keeps its number;
+   * an answered or assumed one never goes back to open or pending (re-asking what was answered is the duplicate the ledger exists to
+   * catch), and a dropped one opens again when it is asked again.
+   */
+  recordQuestion(workspaceId: string, question: { kind: LedgerQuestion["kind"]; key: string; text: string; options?: string[]; identityId?: string;
+    projectId?: string; status: "pending" | "open" | "dropped"; repeats?: number; at: string }): number {
+    return this.#db.transaction(() => {
+      const row = this.#db.prepare("SELECT id, status FROM question_ledger WHERE workspace_id = ? AND key = ?").get(workspaceId, question.key) as
+        { id: number; status: LedgerQuestion["status"] } | undefined;
+      if (row) {
+        const settled = row.status === "answered" || row.status === "assumed";
+        const status = settled ? row.status : row.status === "open" && question.status === "pending" ? "open" : question.status;
+        this.#db.prepare(`UPDATE question_ledger SET text = ?, options_json = ?, identity_id = ?, project_id = ?, status = ?, repeats = COALESCE(?, repeats),
+          updated_at = ? WHERE workspace_id = ? AND id = ?`).run(question.text, JSON.stringify(question.options ?? []), question.identityId ?? "",
+          question.projectId ?? "", status, question.repeats ?? null, question.at, workspaceId, row.id);
+        return row.id;
+      }
+      const id = Number((this.#db.prepare("SELECT COALESCE(MAX(id), 0) + 1 AS id FROM question_ledger WHERE workspace_id = ?").get(workspaceId) as { id: number }).id);
+      this.#db.prepare(`INSERT INTO question_ledger (workspace_id, id, kind, key, text, options_json, identity_id, project_id, status, repeats, asked_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(workspaceId, id, question.kind, question.key, question.text, JSON.stringify(question.options ?? []),
+        question.identityId ?? "", question.projectId ?? "", question.status, question.repeats ?? null, question.at, question.at);
+      return id;
+    }).immediate();
+  }
+
+  /** The person's answer to a numbered question (or the assumption that stands in for one), with the sentences it was given in. */
+  answerQuestion(workspaceId: string, id: number, answer: { text: string; sentences?: number[]; status?: "answered" | "assumed"; at: string }): void {
+    this.#db.prepare(`UPDATE question_ledger SET status = ?, answer = ?, answer_sentences = ?, answered_at = ?, updated_at = ? WHERE workspace_id = ? AND id = ?`)
+      .run(answer.status ?? "answered", answer.text, JSON.stringify(answer.sentences ?? []), answer.at, answer.at, workspaceId, id);
+  }
+
+  /** Takes an unanswered question out of what is asked (its cause went away, or it repeated an answered one). Answers are never undone. */
+  dropQuestion(workspaceId: string, id: number, at: string): void {
+    this.#db.prepare("UPDATE question_ledger SET status = 'dropped', updated_at = ? WHERE workspace_id = ? AND id = ? AND status IN ('pending','open')")
+      .run(at, workspaceId, id);
+  }
+
+  listQuestions(workspaceId: string, options: { kind?: LedgerQuestion["kind"]; statuses?: LedgerQuestion["status"][]; keyPrefix?: string } = {}): LedgerQuestion[] {
+    const rows = this.#db.prepare("SELECT * FROM question_ledger WHERE workspace_id = ? ORDER BY id").all(workspaceId) as Array<Record<string, string | number | null>>;
+    return rows.map(questionRow).filter((question) => (!options.kind || question.kind === options.kind)
+      && (!options.statuses || options.statuses.includes(question.status)) && (!options.keyPrefix || question.key.startsWith(options.keyPrefix)));
+  }
+
+  questionByKey(workspaceId: string, key: string): LedgerQuestion | undefined {
+    const row = this.#db.prepare("SELECT * FROM question_ledger WHERE workspace_id = ? AND key = ?").get(workspaceId, key) as Record<string, string | number | null> | undefined;
+    return row ? questionRow(row) : undefined;
   }
 
   /** Every interview conversation of the workspace, the line interviews included. */
@@ -3214,7 +3280,7 @@ export class CrosslineStore {
       "assistant_threads", "assistant_attachments", "milestone_templates",
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
-      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences", "workspace_counters",
+      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences", "question_ledger", "workspace_counters",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by

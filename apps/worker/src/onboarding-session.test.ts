@@ -382,6 +382,39 @@ test("a 「符合」 for the portrait holds for the portrait the same turn rewri
   expect(portraitStillConfirmed(confirmed.fingerprint, rewritten)).toBe(true);
 });
 
+test("the question ledger: a round's questions are numbered, an answer is recorded with its sentences, and asking it again is dropped", async () => {
+  const ask = (repeats = 0) => ({ id: "q1", text: "西湖合作的图表清单由谁提供？", kind: "single", allowOther: true, identityId: "research", projectId: "",
+    options: [{ id: "a", label: "师兄", detail: "" }, { id: "b", label: "导师", detail: "" }], repeats });
+  const { rpc, prompts } = fakeRuntime([turn({ questions: [ask()] }), turn({ questions: [], nextAction: "ready_for_milestones" }), turn({ questions: [{ ...ask(), id: "q9" }] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  await run({ sessionId: "s1", text: "西湖那篇 10/31 前要投出，数据下周到。" });
+  const asked = store.questionByKey(workspaceId, "iq:s1:2:q1")!;
+  expect(asked).toMatchObject({ status: "open", text: "西湖合作的图表清单由谁提供？" });
+  await run({ sessionId: "s1", text: "【西湖合作的图表清单由谁提供？】选择：师兄" });
+  expect(store.questionByKey(workspaceId, "iq:s1:2:q1")).toMatchObject({ status: "answered", answer: "选择：师兄" });
+  expect(store.questionByKey(workspaceId, "iq:s1:2:q1")!.answerSentences.length).toBeGreaterThan(0);
+  // The next prompt shows the ledger with that answer; a round asking it again in the same words loses that question.
+  await run({ sessionId: "s1", text: "继续" });
+  expect(prompts()[2]).toContain(`#${asked.id} [已答] 西湖合作的图表清单由谁提供？`);
+  const last = store.listOnboardingMessages(workspaceId, "s1").at(-1)!.content as { questions: Array<{ id: string }> };
+  expect(last.questions.map((question) => question.id)).not.toContain("q9");
+  expect(store.listEvents(workspaceId, { type: "onboarding.questions_repeated" })[0]?.payload).toMatchObject({ dropped: [{ repeats: asked.id, why: "similar" }] });
+});
+
+test("an app question the model asks in its own words, naming its number, is not added beside it", async () => {
+  const { rpc } = fakeRuntime([guessOnly, turn({ questions: [] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  await run({ sessionId: "s", text: "随便聊聊" });
+  const gap = store.questionByKey(workspaceId, "gap:gap-line-startup")!;
+  expect(gap.status).toBe("open");
+  const own = { id: "q-startup", text: "创业这条线你现在具体在做什么？", kind: "free", allowOther: true, identityId: "startup", projectId: "", options: [], repeats: gap.id };
+  const { rpc: rpc2 } = fakeRuntime([turn({ questions: [own], nextAction: "ask" })]);
+  // A second runner on the same ledger, so the second answer is the model's own question.
+  await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc2, { checklist: false })({ sessionId: "s2", text: "继续" });
+  const round = store.listOnboardingMessages(workspaceId, "s2").at(-1)!.content as { questions: Array<{ id: string }> };
+  expect(round.questions.map((question) => question.id)).toEqual(["q-startup"]);
+});
+
 test("a file read again since it was shown is shown again with its new numbers, and its old ones are not taken", async () => {
   store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId, kind: "text", fileName: "Plan.txt", mediaType: "text/plain", sha256: "x", uri: "file:///x",
     extractedText: "Week-8: 27th Oct.", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });

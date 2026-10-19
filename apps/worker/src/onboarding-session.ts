@@ -11,6 +11,7 @@ import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProg
 import { interviewChecklistFor, interviewGapsFor, questionScreenFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument } from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { identityLines } from "./lines";
+import { ledgerForModel, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
 
 export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
 
@@ -51,7 +52,9 @@ const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a l
   + "conclusions are status 'inferred' with empty refs. Times are minutes after midnight (09:30 is 570). Never invent dates, numbers or names. Files that arrive "
   + "are for you to read: every date they state goes into `fileDates`, each citing the sentence that contains the day and with a title that names its course or project (「ECE 555 期末考试」, never a bare 「期末考试」); never ask which course or project a file belongs to (the app asks that itself; a settled file carries its projectId); never turn TBD into "
   + "a date (list it in `undated`). When `history` is present the conversation is being resumed: continue it, do not greet again or re-ask "
-  + "what is answered. All human-readable fields in Chinese.";
+  + "what is answered. `questionLedger` lists what was already asked, numbered (「#12 [已答] …」; 待问 = the app will ask it unless you do): "
+  + "never ask an answered question again; when a question of yours asks one of these, put its number in `repeats`, otherwise 0. "
+  + "All human-readable fields in Chinese.";
 
 export type OnboardingTurnOutcome =
   | { state: "asked" | "ready"; sessionId: string }
@@ -318,6 +321,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           status: "confirmed", sourceRef: replyId, sourceQuote: answer.quote, sourceSentences: sentencesFor(answer.quote), updatedAt: now });
       }
     }
+    // The question ledger: the answers this reply gives, then the app's own questions as of now (answered ones stay answered).
+    recordReplyAnswers(store, workspaceId, sessionId, replyText, sentencesOfReply.get(userMessage.seq) ?? [], now);
+    syncGapQuestions(store, workspaceId, currentGaps(), now);
 
     const timeZone = personTimeZone();
     const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString().slice(0, 10);
@@ -382,6 +388,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         today, timeZone, sources: clipDocuments(known, documents, shownNow), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, sentences: replyNumbered },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
         checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
+        questionLedger: ledgerForModel(store, workspaceId, sessionId),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
         ...(publicAssessment ? { publicAssessment } : {}),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [],
@@ -430,6 +437,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
         const pace = stagePace(messages, { startOpen: startOpen() });
         const message = JSON.stringify({ reply: { id: replyId, sentences: replyNumbered }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
+          questionLedger: ledgerForModel(store, workspaceId, sessionId),
           tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}),
         ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
         result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
@@ -467,10 +475,16 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const assumption = screenAssumption(item);
       if (assumption) store.upsertProfileFact({ workspaceId, ...assumption, status: "inferred", sourceRef: "inference", sourceQuote: "", updatedAt: new Date().toISOString() });
     }
-    const paced = paceDeepRound({ ...result.output, questions: screen.keep }, Boolean(focusLine));
-    const output = withSomethingToAnswer(withChecklist(paced.deep ? paced.output : withGapQuestions(paced.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id) }),
-      focusLine || options.checklist === false ? [] : openChecklist()), currentGaps(), messages);
-    store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });
+    // What the ledger says this round repeats: an answered question asked again goes; an app question the model asked itself is not added.
+    const repeated = resolveRepeats(store, workspaceId, sessionId, screen.keep);
+    if (repeated.dropped.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:questions-repeated:${sessionId}:${replyId}:${randomUUID()}`,
+      type: "onboarding.questions_repeated", entityId: sessionId, payload: { replyId, dropped: repeated.dropped } });
+    const gapsNow = currentGaps().filter((gap) => !repeated.coveredGaps.has(gap.question.id));
+    const paced = paceDeepRound({ ...result.output, questions: repeated.questions }, Boolean(focusLine));
+    const output = withSomethingToAnswer(withChecklist(paced.deep ? paced.output : withGapQuestions(paced.output, gapsNow, messages, { freshDocuments: sent.map(([, doc]) => doc.id) }),
+      focusLine || options.checklist === false ? [] : openChecklist()), gapsNow, messages);
+    const roundSeq = store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });
+    recordRound(store, workspaceId, sessionId, roundSeq, output.questions, new Date().toISOString());
     store.saveOnboardingSession({
       ...session, ...(threadId ? { codexThreadId: threadId } : {}),
       state: output.nextAction === "ready_for_milestones" ? "complete" : "active",
