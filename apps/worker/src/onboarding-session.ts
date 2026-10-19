@@ -57,7 +57,8 @@ export type OnboardingTurnOutcome =
   | { state: "asked" | "ready"; sessionId: string }
   | { state: "blocked"; sessionId: string; code: string; message: string };
 
-type Announced = { announcedSources?: string[]; calendarSent?: string };
+/** `shownUpTo`: per file (`src-N`), the last sentence number a turn of this thread showed of it, so only those count as seen. */
+type Announced = { announcedSources?: string[]; calendarSent?: string; shownUpTo?: Record<string, number> };
 
 export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId: string, cwd: string,
   getClient: () => CodexRpcBoundary | undefined, options: {
@@ -90,9 +91,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     return sentences;
   }
 
-  /** A file's numbered sentences within what one turn shows of it (`limit` characters), added to what the answer may cite. */
-  function documentSentences(known: KnownSources, ref: string, doc: StoredSourceDocument, limit = SOURCE_TEXT_PER_DOCUMENT): StoredSentence[] {
-    const sentences = store.ensureEvidence(workspaceId, "document", doc.id, doc.extractedText).filter((sentence) => sentence.start < limit);
+  /**
+   * A file's numbered sentences within what one turn shows of it (`limit` characters, or up to the number an earlier turn showed),
+   * added to what the answer may cite.
+   */
+  function documentSentences(known: KnownSources, ref: string, doc: StoredSourceDocument, limit = SOURCE_TEXT_PER_DOCUMENT, upTo?: number): StoredSentence[] {
+    const sentences = store.ensureEvidence(workspaceId, "document", doc.id, doc.extractedText)
+      .filter((sentence) => sentence.start < limit && (upTo === undefined || sentence.id <= upTo));
     for (const sentence of sentences) known.sentences?.set(sentence.id, { ref, start: sentence.start, end: sentence.end, text: sentence.text });
     return sentences;
   }
@@ -127,13 +132,15 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     return taken;
   };
 
-  /** The files a turn hands over, as numbered sentences within the turn's reading budget. */
-  const clipDocuments = (known: KnownSources, entries: Array<[string, StoredSourceDocument]>) => {
+  /** The files a turn hands over, as numbered sentences within the turn's reading budget; `shown` records the last number of each. */
+  const clipDocuments = (known: KnownSources, entries: Array<[string, StoredSourceDocument]>, shown: Record<string, number>) => {
     let budget = SOURCE_TEXT_TOTAL;
     return entries.map(([id, doc]) => {
       const limit = Math.min(SOURCE_TEXT_PER_DOCUMENT, budget);
       budget -= Math.min(limit, doc.extractedText.length);
-      return { id, fileName: doc.fileName, kind: doc.kind, projectId: doc.projectId ?? "", sentences: numberedText(documentSentences(known, id, doc, limit)) };
+      const sentences = documentSentences(known, id, doc, limit);
+      if (sentences.length) shown[id] = Math.max(...sentences.map((sentence) => sentence.id));
+      return { id, fileName: doc.fileName, kind: doc.kind, projectId: doc.projectId ?? "", sentences: numberedText(sentences) };
     });
   };
 
@@ -315,9 +322,19 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const timeZone = personTimeZone();
     const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString().slice(0, 10);
     // A re-read hands every file over again, as if none had been seen.
-    const announced = input.reread ? new Set<string>() : new Set((session.coverage as Announced).announcedSources ?? []);
-    // Files an earlier turn of this thread showed stay citable by the numbers it showed.
-    for (const [id, doc] of docs) if (announced.has(id) && doc.extractionStatus === "done") documentSentences(known, id, doc);
+    const shownBefore = new Set((session.coverage as Announced).announcedSources ?? []);
+    const shownUpTo = { ...((session.coverage as Announced).shownUpTo ?? {}) };
+    const shownNow: Record<string, number> = {};
+    const announced = input.reread ? new Set<string>() : new Set(shownBefore);
+    // Files an earlier turn of this thread showed stay citable by the numbers it showed, a re-read included. One whose numbers the thread
+    // never saw (read again since, or shown before numbered evidence existed) is shown again.
+    for (const [id, doc] of docs) {
+      if (!shownBefore.has(id) || doc.extractionStatus !== "done") continue;
+      const before = store.sentencesOf(workspaceId, "document", doc.id).map((sentence) => sentence.id);
+      const indexed = documentSentences(known, id, doc, SOURCE_TEXT_PER_DOCUMENT, shownUpTo[id]);
+      const unseen = !before.length || before[0] !== indexed[0]?.id || shownUpTo[id] === undefined;
+      if (unseen) { announced.delete(id); delete shownUpTo[id]; }
+    }
     // A turn takes the new files that fit its reading budget; the rest wait for the next turn instead of being marked read with their text
     // cut away (an authorized folder can bring hundreds at once). The model is told how many still wait.
     const unread = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id));
@@ -362,7 +379,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         identities: identities(),
         projects: store.listProjects(workspaceId).map(({ id, identityId, name, summary }) => ({ id, identityId, name, summary })),
         facts: store.listProfileFacts(workspaceId).map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status })),
-        today, timeZone, sources: clipDocuments(known, documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, sentences: replyNumbered },
+        today, timeZone, sources: clipDocuments(known, documents, shownNow), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, sentences: replyNumbered },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
         checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
@@ -409,7 +426,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         result = await startThread(fresh);
       } else {
         // Later turns carry only what is new: the reply, and any file that arrived since the last turn.
-        const newSources = clipDocuments(known, fresh);
+        const newSources = clipDocuments(known, fresh, shownNow);
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
         const pace = stagePace(messages, { startOpen: startOpen() });
         const message = JSON.stringify({ reply: { id: replyId, sentences: replyNumbered }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
@@ -458,7 +475,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       ...session, ...(threadId ? { codexThreadId: threadId } : {}),
       state: output.nextAction === "ready_for_milestones" ? "complete" : "active",
       coverage: { ...session.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}),
-        announcedSources: [...announcedNow, ...sent.map(([id]) => id)], ...(week.length ? { calendarSent: weekSent } : {}) },
+        announcedSources: [...announcedNow, ...sent.map(([id]) => id)], shownUpTo: { ...shownUpTo, ...shownNow }, ...(week.length ? { calendarSent: weekSent } : {}) },
       updatedAt: new Date().toISOString()
     });
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };

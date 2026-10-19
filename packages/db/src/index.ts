@@ -1098,7 +1098,9 @@ export class CrosslineStore {
             source_id TEXT NOT NULL, source_hash TEXT NOT NULL, ord INTEGER NOT NULL, start_at INTEGER NOT NULL, end_at INTEGER NOT NULL,
             text TEXT NOT NULL, segmenter TEXT NOT NULL, retired INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
             PRIMARY KEY(workspace_id, id));
-          CREATE INDEX IF NOT EXISTS evidence_by_source ON evidence_sentences(workspace_id, source_kind, source_id, retired, ord);`);
+          CREATE INDEX IF NOT EXISTS evidence_by_source ON evidence_sentences(workspace_id, source_kind, source_id, retired, ord);
+          CREATE TABLE IF NOT EXISTS workspace_counters (workspace_id TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL,
+            PRIMARY KEY(workspace_id, name));`);
         if (!has("profile_facts", "source_sentences")) this.#db.exec("ALTER TABLE profile_facts ADD COLUMN source_sentences TEXT NOT NULL DEFAULT '[]'");
         if (!has("source_documents", "ref_no")) {
           this.#db.exec("ALTER TABLE source_documents ADD COLUMN ref_no INTEGER");
@@ -1883,15 +1885,31 @@ export class CrosslineStore {
    * the row that now exists, which is the existing one on a repeat.
    */
   saveSourceDocument(doc: StoredSourceDocument): StoredSourceDocument {
-    this.#db.prepare(`
-      INSERT INTO source_documents (id, owner_id, workspace_id, project_id, kind, file_name, media_type, sha256, uri,
-        extracted_text, extraction_status, extraction_note, created_at, ref_no)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        (SELECT COALESCE(MAX(ref_no), 0) + 1 FROM source_documents WHERE workspace_id = ?))
-      ON CONFLICT(workspace_id, sha256) DO NOTHING
-    `).run(doc.id, doc.ownerId, doc.workspaceId, doc.projectId ?? null, doc.kind, doc.fileName, doc.mediaType,
-      doc.sha256, doc.uri, doc.extractedText, doc.extractionStatus, doc.extractionNote ?? null, doc.createdAt, doc.workspaceId);
+    this.#db.transaction(() => {
+      if (this.#db.prepare("SELECT 1 FROM source_documents WHERE workspace_id = ? AND sha256 = ?").get(doc.workspaceId, doc.sha256)) return;
+      this.#db.prepare(`
+        INSERT INTO source_documents (id, owner_id, workspace_id, project_id, kind, file_name, media_type, sha256, uri,
+          extracted_text, extraction_status, extraction_note, created_at, ref_no)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(doc.id, doc.ownerId, doc.workspaceId, doc.projectId ?? null, doc.kind, doc.fileName, doc.mediaType,
+        doc.sha256, doc.uri, doc.extractedText, doc.extractionStatus, doc.extractionNote ?? null, doc.createdAt,
+        this.#nextNumber(doc.workspaceId, "source_documents.ref_no", "SELECT MAX(ref_no) AS n FROM source_documents WHERE workspace_id = ?"));
+    }).immediate();
     return this.listSourceDocuments(doc.workspaceId).find((item) => item.sha256 === doc.sha256)!;
+  }
+
+  /**
+   * The next number of a per-workspace sequence that never gives a number twice, even after the row that held it is deleted: a
+   * high-water mark kept in `workspace_counters`, never below what the table itself holds (a restore or an older file has no mark).
+   * Call inside a transaction.
+   */
+  #nextNumber(workspaceId: string, name: string, maxQuery: string): number {
+    const kept = (this.#db.prepare("SELECT value FROM workspace_counters WHERE workspace_id = ? AND name = ?").get(workspaceId, name) as { value: number } | undefined)?.value ?? 0;
+    const held = Number((this.#db.prepare(maxQuery).get(workspaceId) as { n: number | null } | undefined)?.n ?? 0);
+    const next = Math.max(kept, held) + 1;
+    this.#db.prepare(`INSERT INTO workspace_counters (workspace_id, name, value) VALUES (?, ?, ?)
+      ON CONFLICT(workspace_id, name) DO UPDATE SET value = excluded.value`).run(workspaceId, name, next);
+    return next;
   }
 
   listSourceDocuments(workspaceId: string, options: { projectId?: string } = {}): StoredSourceDocument[] {
@@ -1925,11 +1943,12 @@ export class CrosslineStore {
       const row = this.#db.prepare("SELECT uri FROM source_documents WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as { uri: string } | undefined;
       if (!row) return undefined;
       this.#db.prepare("DELETE FROM source_documents WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
-      // The file's words go with it; facts that cited them keep their quote but no longer point at sentences that are gone.
+      // The file's words go with it; facts that cited them keep their quote but no longer point at its sentences.
       const gone = new Set((this.#db.prepare("SELECT id FROM evidence_sentences WHERE workspace_id = ? AND source_kind = 'document' AND source_id = ?")
         .all(workspaceId, id) as Array<{ id: number }>).map((sentence) => sentence.id));
       if (gone.size) {
-        this.#db.prepare("DELETE FROM evidence_sentences WHERE workspace_id = ? AND source_kind = 'document' AND source_id = ?").run(workspaceId, id);
+        // Kept as blank, retired rows: the ids stay spent, so no later sentence takes a number an earlier turn showed for this file.
+        this.#db.prepare("UPDATE evidence_sentences SET retired = 1, text = '' WHERE workspace_id = ? AND source_kind = 'document' AND source_id = ?").run(workspaceId, id);
         const facts = this.#db.prepare("SELECT identity_id, project_id, slot, source_sentences FROM profile_facts WHERE workspace_id = ? AND source_sentences <> '[]'")
           .all(workspaceId) as Array<{ identity_id: string; project_id: string; slot: string; source_sentences: string }>;
         for (const fact of facts) {
@@ -2048,11 +2067,16 @@ export class CrosslineStore {
       if (current?.source_hash === hash) return this.sentencesOf(workspaceId, sourceKind, sourceId);
       if (current) this.#db.prepare("UPDATE evidence_sentences SET retired = 1 WHERE workspace_id = ? AND source_kind = ? AND source_id = ?")
         .run(workspaceId, sourceKind, sourceId);
-      const next = Number((this.#db.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM evidence_sentences WHERE workspace_id = ?").get(workspaceId) as { id: number }).id) + 1;
+      const segments = segmentText(text);
+      // Reserve the whole run of ids at once: never one a removed file's sentence held.
+      const first = this.#nextNumber(workspaceId, "evidence_sentences.id", "SELECT MAX(id) AS n FROM evidence_sentences WHERE workspace_id = ?");
+      if (segments.length > 1) this.#db.prepare("UPDATE workspace_counters SET value = ? WHERE workspace_id = ? AND name = ?")
+        .run(first + segments.length - 1, workspaceId, "evidence_sentences.id");
+      const next = first;
       const insert = this.#db.prepare(`INSERT INTO evidence_sentences (workspace_id, id, source_kind, source_id, source_hash, ord, start_at, end_at, text, segmenter, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       const at = new Date().toISOString();
-      segmentText(text).forEach((segment, ord) => insert.run(workspaceId, next + ord, sourceKind, sourceId, hash, ord, segment.start, segment.end,
+      segments.forEach((segment, ord) => insert.run(workspaceId, next + ord, sourceKind, sourceId, hash, ord, segment.start, segment.end,
         segment.text, SEGMENTER_VERSION, at));
       return this.sentencesOf(workspaceId, sourceKind, sourceId);
     }).immediate();
@@ -3190,7 +3214,7 @@ export class CrosslineStore {
       "assistant_threads", "assistant_attachments", "milestone_templates",
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
-      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences",
+      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences", "workspace_counters",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by

@@ -357,7 +357,7 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
     if (duplicate) reject("ONBOARDING_ATTRIBUTE_DUPLICATE", `长期目标修改里「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个。`);
   }
   for (const window of turn.availability?.windows ?? []) if (!/^\d{2}:\d{2}$/.test(window.start) || !/^\d{2}:\d{2}$/.test(window.end) || window.end <= window.start)
-    reject("ONBOARDING_AVAILABILITY_INVALID", `可用时段 ${window.start}–${window.end} 不合法：用 HH:MM，且结束晚于开始。`);
+    reject("ONBOARDING_AVAILABILITY_INVALID", `可用时段 ${window.start}–${window.end} 不合法：startMinute 和 endMinute 是从零点起的分钟数（0–1440），结束晚于开始。`);
   // A turn recorded before the portrait existed has none of it; every live answer carries all of it (strict schema).
   return { ...turn, stage: turn.stage ?? "details", questions: turn.questions.map((question) => ({ ...question, kind: questionKind(question) })),
     lineProfiles: (turn.lineProfiles ?? []).map((line) => ({ ...line, attributeCandidates: cleanCandidates(line.attributeCandidates ?? []) })),

@@ -92,7 +92,7 @@ if (Number(db.pragma("user_version", { simple: true })) >= 16) {
       WHERE NOT EXISTS (SELECT 1 FROM evidence_sentences e WHERE e.workspace_id = f.workspace_id AND e.id = s.value)`).all() as Array<{ slot: string; id: number }>);
     for (const row of dangling) findings.push(`事实指向不存在的句子：${row.slot} → [${row.id}]`);
     orphans("句子的文件已不存在",
-      `SELECT DISTINCT e.source_id AS id, e.source_id AS target FROM evidence_sentences e WHERE e.source_kind = 'document'
+      `SELECT DISTINCT e.source_id AS id, e.source_id AS target FROM evidence_sentences e WHERE e.source_kind = 'document' AND e.retired = 0
        AND NOT EXISTS (SELECT 1 FROM source_documents d WHERE d.workspace_id = e.workspace_id AND d.id = e.source_id)`);
     orphans("句子的回复已不存在",
       `SELECT DISTINCT e.source_id AS id, e.source_id AS target FROM evidence_sentences e WHERE e.source_kind = 'reply'

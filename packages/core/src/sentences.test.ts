@@ -34,6 +34,11 @@ test("a quote is found by its letters and digits, whatever the punctuation and M
   const span = locateQuote(text, "阶段：只有用户自己在用。")!;
   expect(text.slice(span.start, span.end)).toBe("阶段：**只有用户自己在用");
   expect(locateQuote(text, "没有说过")).toBeUndefined();
+  // A character outside the basic plane is one letter, and a letter that folds to two keeps the offsets true.
+  const named = "名字𠮷田在这里";
+  expect(named.slice(locateQuote(named, "𠮷田")!.start, locateQuote(named, "𠮷田")!.end)).toBe("𠮷田");
+  const city = "İstanbul is big";
+  expect(city.slice(locateQuote(city, "is big")!.start, locateQuote(city, "is big")!.end)).toBe("is big");
 });
 
 test("numbers are compared however they are typed; a miss is the model's own number", () => {

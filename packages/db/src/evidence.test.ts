@@ -50,7 +50,7 @@ test("a document's number is fixed at upload: removing one file no longer renumb
   expect(documentsByRef(store.listSourceDocuments(A)).get("src-4")?.id).toBe("d4");
   // Removing a file takes its sentences with it and unhooks the facts that cited them; their quotes stay.
   store.deleteSourceDocument(A, "d2");
-  expect(store.sentencesById(A, [sentence.id])).toEqual([]);
+  expect(store.sentencesById(A, [sentence.id])).toMatchObject([{ id: sentence.id, text: "", retired: true }]);
   expect(store.listProfileFacts(A)[0]).toMatchObject({ sourceQuote: "d2 的内容在这里" });
   expect(store.listProfileFacts(A)[0]!.sourceSentences).toBeUndefined();
 });
@@ -89,4 +89,19 @@ test("a backup taken before document numbers gets them on restore, and an upload
     target.saveSourceDocument(doc("d3", "h3"));
     expect([...documentsByRef(target.listSourceDocuments(A)).entries()].map(([ref, item]) => `${ref}=${item.id}`)).toEqual(["src-1=d1", "src-2=d2", "src-3=d3"]);
   } finally { target.close(); }
+});
+
+test("numbers are never given twice: not a removed file's src-N, not a removed file's sentence ids", () => {
+  store.saveSourceDocument(doc("a", "ha", "甲文件第一行\n甲文件第二行"));
+  store.saveSourceDocument(doc("b", "hb", "乙文件的内容"));
+  const shown = store.ensureEvidence(A, "document", "b", "乙文件的内容").map((sentence) => sentence.id);
+  store.deleteSourceDocument(A, "b");
+  store.saveSourceDocument(doc("c", "hc"));
+  expect([...documentsByRef(store.listSourceDocuments(A)).entries()].map(([ref, item]) => `${ref}=${item.id}`)).toEqual(["src-1=a", "src-3=c"]);
+  const next = store.ensureEvidence(A, "reply", "s#1", "新的回复。").map((sentence) => sentence.id);
+  expect(next.every((id) => !shown.includes(id) && id > Math.max(...shown))).toBe(true);
+  // The same content dropped again is still one document and takes no number.
+  store.saveSourceDocument(doc("c2", "hc"));
+  store.saveSourceDocument(doc("d", "hd"));
+  expect(documentsByRef(store.listSourceDocuments(A)).get("src-4")?.id).toBe("d");
 });

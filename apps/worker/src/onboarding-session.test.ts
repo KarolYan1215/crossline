@@ -381,3 +381,32 @@ test("a 「符合」 for the portrait holds for the portrait the same turn rewri
   expect(JSON.parse(store.getSetting(workspaceId, "profile.model")!)).toMatchObject({ portrait: rewritten.portrait });
   expect(portraitStillConfirmed(confirmed.fingerprint, rewritten)).toBe(true);
 });
+
+test("a file read again since it was shown is shown again with its new numbers, and its old ones are not taken", async () => {
+  store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId, kind: "text", fileName: "Plan.txt", mediaType: "text/plain", sha256: "x", uri: "file:///x",
+    extractedText: "Week-8: 27th Oct.", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
+  const done = turn({ questions: [], nextAction: "ready_for_milestones" });
+  const { rpc, prompts } = fakeRuntime([done, done, done]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  await run({ sessionId: "s", text: "我上传了文件" });
+  await run({ sessionId: "s", text: "继续" });
+  expect(prompts()[1]).not.toContain("Plan.txt");
+  // Extraction ran again (a layout re-read): the next turn hands the file over again, numbered anew.
+  store.setSourceDocumentExtraction(workspaceId, "d1", { status: "done", text: "Week-8: 28th Oct." });
+  await run({ sessionId: "s", text: "再继续" });
+  const latest = store.sentencesOf(workspaceId, "document", "d1")[0]!;
+  expect(prompts()[2]).toContain(`[${latest.id}] Week-8: 28th Oct.`);
+});
+
+test("a re-read still accepts the numbers of files an earlier turn of the thread showed", async () => {
+  store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId, kind: "text", fileName: "Plan.txt", mediaType: "text/plain", sha256: "x", uri: "file:///x",
+    extractedText: "Week-8: 27th Oct.", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
+  const done = turn({ questions: [], nextAction: "ready_for_milestones" });
+  const cite = (id: number) => turn({ questions: [], nextAction: "ready_for_milestones", slotUpdates: [{ identityId: "research", projectId: "", slot: "midterm", value: "10/27", status: "confirmed", refs: [id] }] });
+  const { rpc } = fakeRuntime([done, cite(2)]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
+  await run({ sessionId: "s", text: "我上传了文件" });
+  expect(store.sentencesOf(workspaceId, "document", "d1")[0]!.id).toBe(2);
+  expect((await run({ sessionId: "s", text: "请重新读一遍", reread: true })).state).toBe("ready");
+  expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "midterm")).toMatchObject({ sourceRef: "src-1", sourceSentences: [2] });
+});

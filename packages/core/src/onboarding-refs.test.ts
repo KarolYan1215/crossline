@@ -70,3 +70,13 @@ test("a confirmed fact whose numbers its sentences do not state is a warning, ho
     fact({ slot: "deadline", value: "2026-12-20", refs: [2] })] }), known());
   expect(citationWarnings(resolved)).toEqual([{ slot: "deadline", value: "2026-12-20", sentences: [2] }]);
 });
+
+test("a date citing sentences far apart keeps the one that holds its day", () => {
+  const long = `Week-8: 27th Oct.\n${"Reading list and lecture notes for the week. ".repeat(20)}\nL15: Mid-term-1 on 29th Oct.`;
+  const sentences = new Map<number, EvidenceSentence>();
+  segmentText(long).forEach((segment, index) => sentences.set(index + 1, { ref: "src-1", ...segment }));
+  const last = sentences.size;
+  const out = resolveDateRefs({ dates: [{ id: "d", date: "2026-10-29", startMinute: null, endMinute: null, kind: "exam", title: "期中", project: "", refs: [1, last],
+    confidence: "high", note: "" }], recurring: [], questions: [], undated: [] }, sentences, { "src-1": long });
+  expect(out.dates[0]!.quote).toBe("L15: Mid-term-1 on 29th Oct.");
+});

@@ -1,4 +1,4 @@
-import { clockOf, type DateExtraction } from "./date-schema";
+import { clockOf, quoteSupportsDate, type DateExtraction } from "./date-schema";
 import { keepOnboardingTurn, validateOnboardingTurn, type EvidenceSentence, type KnownSources, type OnboardingTurn } from "./onboarding-turn-schema";
 import { numbersSupported } from "./sentences";
 
@@ -17,7 +17,11 @@ type Span = { sourceRef: string; quote: string; ids: number[]; refs: string[]; u
 /** The longest quote a citation fills in; a span past it keeps only its first sentence. */
 const QUOTE_MAX = 600;
 
-export function citedSpan(raw: unknown, index: Index, texts: Record<string, string>): Span {
+/**
+ * The words a citation names. A span past `QUOTE_MAX` (sentences cited far apart) keeps one sentence: the first that `prefer` accepts
+ * (for a date, the one that holds the day), else the first cited.
+ */
+export function citedSpan(raw: unknown, index: Index, texts: Record<string, string>, prefer?: (text: string) => boolean): Span {
   const ids = [...new Set(Array.isArray(raw) ? raw.filter((id): id is number => Number.isInteger(id)) : [])];
   const unknown = ids.filter((id) => !index.has(id));
   const known = ids.filter((id) => index.has(id)).map((id) => ({ id, ...index.get(id)! }));
@@ -27,7 +31,8 @@ export function citedSpan(raw: unknown, index: Index, texts: Record<string, stri
   const same = known.filter((entry) => entry.ref === first.ref);
   const start = Math.min(...same.map((entry) => entry.start)), end = Math.max(...same.map((entry) => entry.end));
   const whole = (texts[first.ref] ?? "").slice(start, end);
-  return { sourceRef: first.ref, quote: whole && whole.length <= QUOTE_MAX ? whole : first.text, ids: known.map((entry) => entry.id), refs, unknown };
+  const fallback = (prefer && same.find((entry) => prefer(entry.text))) || first;
+  return { sourceRef: first.ref, quote: whole && whole.length <= QUOTE_MAX ? whole : fallback.text, ids: known.map((entry) => entry.id), refs, unknown };
 }
 
 function reject(code: string, detail: string): never {
@@ -90,10 +95,14 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
 /** A date answer with sentence numbers and minutes, as the `DateExtraction` the checks and the ledger read. */
 export function resolveDateRefs(value: unknown, index: Index, texts: Record<string, string>): DateExtraction {
   const out = value as Wire;
-  const cite = (item: Wire) => { const cited = citedSpan(item.refs, index, texts); return { sourceRef: cited.sourceRef, quote: cited.quote }; };
+  const cite = (item: Wire, prefer?: (text: string) => boolean) => {
+    const cited = citedSpan(item.refs, index, texts, prefer);
+    return { sourceRef: cited.sourceRef, quote: cited.quote };
+  };
   return {
     dates: list(out.dates).map(({ refs: _refs, startMinute, endMinute, ...item }) =>
-      ({ ...item, startTime: clockOf(startMinute), endTime: clockOf(endMinute), ...cite({ refs: _refs }) })) as unknown as DateExtraction["dates"],
+      ({ ...item, startTime: clockOf(startMinute), endTime: clockOf(endMinute),
+        ...cite({ refs: _refs }, (text) => typeof item.date === "string" && quoteSupportsDate(item.date, text)) })) as unknown as DateExtraction["dates"],
     recurring: list(out.recurring).map(({ refs: _refs, startMinute, endMinute, ...item }) =>
       ({ ...item, startTime: clockOf(startMinute), endTime: clockOf(endMinute), ...cite({ refs: _refs }) })) as unknown as DateExtraction["recurring"],
     questions: Array.isArray(out.questions) ? out.questions.filter((question): question is string => typeof question === "string") : [],

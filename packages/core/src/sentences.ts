@@ -79,19 +79,18 @@ function trim(text: string, start: number, end: number): TextSegment | undefined
  */
 export function locateQuote(text: string, quote: string): { start: number; end: number } | undefined {
   const keep = /[\p{L}\p{N}]/u;
-  const index: number[] = [];
-  let folded = "";
-  for (let at = 0; at < text.length; at += 1) {
-    const char = text[at]!;
-    if (!keep.test(char)) continue;
-    folded += char.toLowerCase();
-    index.push(at);
+  // By code point (an astral character is one), and one entry per folded code unit (「İ」 folds to two), so the offsets stay true.
+  const starts: number[] = [], ends: number[] = [];
+  let folded = "", at = 0;
+  for (const char of text) {
+    if (keep.test(char)) for (const unit of char.toLowerCase().split("")) { folded += unit; starts.push(at); ends.push(at + char.length); }
+    at += char.length;
   }
   const needle = [...quote].filter((char) => keep.test(char)).join("").toLowerCase();
   if (!needle) return undefined;
   const found = folded.indexOf(needle);
   if (found < 0) return undefined;
-  return { start: index[found]!, end: index[found + needle.length - 1]! + 1 };
+  return { start: starts[found]!, end: ends[found + needle.length - 1]! };
 }
 
 const CHINESE_DIGITS: Record<string, number> = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
