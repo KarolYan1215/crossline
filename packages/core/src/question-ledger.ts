@@ -59,6 +59,39 @@ export function answersInReply(reply: string, questions: Array<{ id: number; tex
   return out;
 }
 
+/** Length of the longest run of characters two normalized texts share. */
+const longestShared = (a: string, b: string) => {
+  const left = [...a], right = [...b];
+  let best = 0;
+  let previous = new Array<number>(right.length + 1).fill(0);
+  for (let i = 1; i <= left.length; i += 1) {
+    const row = new Array<number>(right.length + 1).fill(0);
+    for (let j = 1; j <= right.length; j += 1) if (left[i - 1] === right[j - 1]) { row[j] = previous[j - 1]! + 1; best = Math.max(best, row[j]!); }
+    previous = row;
+  }
+  return best;
+};
+/** A shared run this long (letters and digits) is taken as the reply speaking to that question or one of its options. */
+export const FREE_TEXT_OVERLAP = 4;
+
+/**
+ * Questions a reply typed in the person's own words answers (2026-10-19: a compass round answered in a paragraph left all four open, and
+ * the next rounds asked 「生活应该用来做什么」 again). Only replies with no card answers are read this way; a question counts when one
+ * sentence of the reply shares a run of `FREE_TEXT_OVERLAP` characters with the question or one of its options, and that sentence is the answer.
+ */
+export function freeTextAnswers(reply: string, questions: Array<{ id: number; text: string; options: string[] }>): Array<{ id: number; answer: string; start: number; end: number }> {
+  const sentences: Array<{ text: string; start: number; end: number }> = [];
+  const pattern = /[^。！？!?\n；;]+[。！？!?；;]?/gu;
+  for (const match of reply.matchAll(pattern)) if (match[0].trim()) sentences.push({ text: match[0], start: match.index!, end: match.index! + match[0].length });
+  const out: Array<{ id: number; answer: string; start: number; end: number }> = [];
+  for (const question of questions) {
+    const targets = [question.text, ...question.options].map(normalize).filter((text) => text.length >= FREE_TEXT_OVERLAP);
+    const hit = sentences.find((sentence) => targets.some((target) => longestShared(normalize(sentence.text), target) >= FREE_TEXT_OVERLAP));
+    if (hit) out.push({ id: question.id, answer: hit.text.trim().slice(0, 200), start: hit.start, end: hit.end });
+  }
+  return out;
+}
+
 /** One line per question for a model's short index: number, status, the question, and the answer when there is one. */
 export function ledgerLines(questions: LedgerQuestion[]): string[] {
   const label: Record<QuestionStatus, string> = { pending: "待问", open: "未答", answered: "已答", assumed: "按假设", dropped: "不再问" };

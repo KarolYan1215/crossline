@@ -136,6 +136,10 @@ jobs:
                   Math.round(r.duration_ms / 1000) + \\\"s\\\", \\\"out=\\\" + r.output_tokens, \\\"reason=\\\" + r.reasoning_tokens].join(\\\"  \\\"));
             \""
             echo "== worker repairs and rejections"; sudo docker logs --since 48h crossline-worker 2>&1 | grep -iE "repair|reject|invalid|blocked|stall|SKILL_" | cut -c1-400 | tail -40'
+          echo "== interview extraction (deploy/server/ledger-report.cjs)"
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker run --rm -i -v /srv/crossline/data:/live:ro -w /repo/packages/db \
+            $(sudo docker inspect -f "{{.Config.Image}}" crossline-web) sh -c "mkdir -p /tmp/copy && cp /live/crossline.db* /tmp/copy/ && node -"' \
+            < deploy/server/ledger-report.cjs
       - name: Migrate the owner's ledger
         if: contains(github.event.head_commit.message, '[migrate]') || contains(github.event.head_commit.message, '[migrate-apply]')
         env:

@@ -1,4 +1,4 @@
-import { answersInReply, ledgerLines, questionSimilarity, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
+import { answersInReply, freeTextAnswers, ledgerLines, questionSimilarity, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
 import type { CrosslineStore, StoredSentence } from "@crossline/db";
 
 /**
@@ -17,7 +17,10 @@ const interviewQuestions = (store: CrosslineStore, workspaceId: string, sessionI
 export function recordReplyAnswers(store: CrosslineStore, workspaceId: string, sessionId: string, reply: string, sentences: StoredSentence[], at: string): number {
   const open = interviewQuestions(store, workspaceId, sessionId).filter((question) => question.status === "open" || question.status === "pending");
   // Newest first, so a question asked again in a later round is the one answered.
-  const answers = answersInReply(reply, [...open].reverse().map((question) => ({ id: question.id, text: question.text })));
+  const newestFirst = [...open].reverse();
+  const carded = answersInReply(reply, newestFirst.map((question) => ({ id: question.id, text: question.text })));
+  // A reply in the person's own words answers what it speaks to; the cards' form, when present, is exact and wins.
+  const answers = carded.length ? carded : freeTextAnswers(reply, newestFirst.map((question) => ({ id: question.id, text: question.text, options: question.options })));
   const seen = new Set<string>();
   for (const answer of answers) {
     const question = open.find((item) => item.id === answer.id)!;

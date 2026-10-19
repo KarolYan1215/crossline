@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { answersInReply, ledgerLines, questionSimilarity } from "./question-ledger";
+import { answersInReply, freeTextAnswers, ledgerLines, questionSimilarity } from "./question-ledger";
 
 test("similarity reads what a question says, not its punctuation", () => {
   expect(questionSimilarity("ECE 555 期末考试是哪一天？", "ECE555期末考试是哪一天")).toBe(1);
@@ -18,4 +18,16 @@ test("the answers a reply gives are read from the cards' own form, one line per 
 test("the short index a model is shown", () => {
   expect(ledgerLines([{ id: 7, kind: "interview", key: "k", text: "每周可投入时长？", options: [], identityId: "", projectId: "", status: "answered",
     answer: "选择：20 小时", answerSentences: [], askedAt: "x" }])).toEqual(["#7 [已答] 每周可投入时长？ → 选择：20 小时"]);
+});
+
+test("a reply in the person's own words answers the questions its sentences speak to", () => {
+  const reply = "工作对我来说主要是把一个问题做成别人能用的东西。生活里我想保住每天的睡眠，和朋友吃顿饭。";
+  const answers = freeTextAnswers(reply, [
+    { id: 1, text: "工作对你意味着什么？", options: ["把方法做成别人能用的代码与文档", "维持稳定收入"] },
+    { id: 2, text: "生活应该用来做什么？", options: ["每天的睡眠不被打乱", "读闲书"] },
+    { id: 3, text: "你的读者是谁？", options: ["同专业研究生", "本科生"] }
+  ]);
+  expect(answers.map((answer) => answer.id)).toEqual([1, 2]);
+  expect(answers[1]!.answer).toBe("生活里我想保住每天的睡眠，和朋友吃顿饭。");
+  expect(reply.slice(answers[0]!.start, answers[0]!.end)).toBe("工作对我来说主要是把一个问题做成别人能用的东西。");
 });
