@@ -45,8 +45,9 @@ export async function GET(request: Request) {
   const inRound = new Set(lastQuestions.map((question) => question.id));
   // What the background extraction still owes this conversation (2026-10-19): while it reads the last replies the facts behind the start
   // standard may not be on record yet, so 「开始使用」 waits for it — unless it is failing, which must not hold the person forever.
-  const organizing = session ? extractBacklog(store, workspaceId, session.id) : { replies: 0, files: 0 };
-  const settling = (organizing.replies > 0 || organizing.files > 0) && !organizing.failing;
+  const organizing = session ? extractBacklog(store, workspaceId, session.id) : { replies: 0, frontReplies: 0, files: 0 };
+  // Only replies that can carry a start-standard fact (the opening and the front stages' answers) and files hold the button.
+  const settling = (organizing.frontReplies > 0 || organizing.files > 0) && !organizing.failing;
   const ready = Boolean(status?.readyToStart && !settling);
   const start = status ? {
     readyToStart: ready,

@@ -17,7 +17,13 @@ export const EXTRACT_REREAD_SETTING = "onboarding.extract.reread";
 export const EXTRACT_BACKOFF_MINUTES = [1, 5, 30] as const;
 
 export type ExtractState = { upTo: number; failures: number; retryAt?: string; lastError?: { code: string; message: string; at: string }; ranAt?: string };
-export type ExtractBacklog = { replies: number; files: number; failing?: { code: string; message: string; retryAt?: string } };
+/**
+ * What the extraction still owes a conversation. `frontReplies` counts the waiting replies that answer a round of the front stages (or
+ * the opening): only those can carry a start-standard fact, so only they hold 「开始使用」 (2026-10-19 walkthrough: on the sponsor model a
+ * run took 5–7 minutes and the deep stages' replies kept the button away for the whole interview after the standard stood).
+ */
+export type ExtractBacklog = { replies: number; frontReplies: number; files: number; failing?: { code: string; message: string; retryAt?: string } };
+const DEEP = new Set(["situation", "compass", "energy"]);
 
 const stateKey = (sessionId: string) => `${EXTRACT_STATE_SETTING}:${sessionId}`;
 const parse = <T>(raw: string | null | undefined, fallback: T): T => { try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } };
@@ -66,9 +72,13 @@ export function pendingExtractDocs(store: CrosslineStore, workspaceId: string): 
 /** What the extraction still owes a conversation: replies after its watermark, files waiting, and its last failure while it is failing. */
 export function extractBacklog(store: CrosslineStore, workspaceId: string, sessionId: string): ExtractBacklog {
   const state = readExtractState(store, workspaceId, sessionId);
-  const replies = store.listOnboardingMessages(workspaceId, sessionId).filter((message) => message.role === "user" && message.seq > state.upTo).length;
+  const messages = store.listOnboardingMessages(workspaceId, sessionId);
+  const waiting = messages.filter((message) => message.role === "user" && message.seq > state.upTo);
+  // The stage of the round a reply answers: the latest assistant round before it (none: the opening).
+  const answers = (seq: number) => String(((messages.filter((message) => message.role === "assistant" && message.seq < seq).at(-1)?.content ?? {}) as { stage?: string }).stage ?? "");
+  const frontReplies = waiting.filter((message) => !DEEP.has(answers(message.seq))).length;
   const files = sessionId.startsWith("line-") ? 0 : pendingExtractDocs(store, workspaceId).length;
-  return { replies, files, ...(state.failures && state.lastError ? { failing: { code: state.lastError.code, message: state.lastError.message,
+  return { replies: waiting.length, frontReplies, files, ...(state.failures && state.lastError ? { failing: { code: state.lastError.code, message: state.lastError.message,
     ...(state.retryAt ? { retryAt: state.retryAt } : {}) } } : {}) };
 }
 

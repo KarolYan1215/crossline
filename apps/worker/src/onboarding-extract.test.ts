@@ -28,7 +28,7 @@ test("in the app the round reaches the person without waiting for the extraction
   await extractionSettled(workspaceId);
   expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "deadline")).toMatchObject({ sourceQuote: "论文 12 月中投稿。", sourceSentences: [1] });
   expect(readExtractState(store, workspaceId, "s")).toMatchObject({ upTo: 1, failures: 0 });
-  expect(extractBacklog(store, workspaceId, "s")).toEqual({ replies: 0, files: 0 });
+  expect(extractBacklog(store, workspaceId, "s")).toEqual({ replies: 0, frontReplies: 0, files: 0 });
 });
 
 test("a failed extraction backs off, says so, and is taken up again once its wait is over; the conversation is not held", async () => {
@@ -186,4 +186,16 @@ test("a section owed but answered empty stays open, and is closed as it stands o
   expect(sections().situation).toMatchObject({ final: false, emptyRuns: 1 });
   persistExtraction(store, workspaceId, empty as never, { sessionId: "s", ownerId, documentIds: [], sources: {}, today: "2026-10-19", reread: false, profileTask: task });
   expect(sections().situation).toMatchObject({ final: true, emptyRuns: 2 });
+});
+
+test("only replies to the opening and the front stages hold the start; a deep-stage answer waiting does not", () => {
+  const now = "2026-10-19T00:00:00.000Z";
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "开场" }, createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "assistant", content: { reply: "", questions: [], stage: "lines" }, createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "主线的回答" }, createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "assistant", content: { reply: "", questions: [], stage: "situation" }, createdAt: now });
+  store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: "处境的回答" }, createdAt: now });
+  expect(extractBacklog(store, workspaceId, "s")).toMatchObject({ replies: 3, frontReplies: 2 });
+  writeExtractState(store, workspaceId, "s", { upTo: 3, failures: 0 });
+  expect(extractBacklog(store, workspaceId, "s")).toMatchObject({ replies: 1, frontReplies: 0 });
 });

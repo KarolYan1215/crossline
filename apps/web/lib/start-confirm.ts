@@ -66,12 +66,12 @@ export function startSummary(ctx: AccessContext): StartSummary {
 
 export const startConfirmed = (ctx: AccessContext): boolean => startConfirmedFor(getStore(), ctx.workspaceId);
 
-/** Records the confirmation. Refused while the extraction still owes the main conversation something: the summary would be stale. */
+/** Records the confirmation. Refused while the extraction still owes a reply that can change the summary (the opening or a front-stage answer) or a file. */
 export function confirmStart(ctx: AccessContext): { ok: true } | { ok: false; code: string } {
   const store = getStore();
   const session = store.getLatestOnboardingSession(ctx.workspaceId);
-  const backlog = session ? extractBacklog(store, ctx.workspaceId, session.id) : { replies: 0, files: 0 };
-  if ((backlog.replies || backlog.files) && !("failing" in backlog && backlog.failing)) return { ok: false, code: "START_STILL_ORGANIZING" };
+  const backlog = session ? extractBacklog(store, ctx.workspaceId, session.id) : { replies: 0, frontReplies: 0, files: 0 };
+  if ((backlog.frontReplies || backlog.files) && !("failing" in backlog && backlog.failing)) return { ok: false, code: "START_STILL_ORGANIZING" };
   const at = new Date().toISOString();
   store.setSetting(ctx.workspaceId, START_CONFIRMED_SETTING, JSON.stringify({ at, via: "person" }));
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `onboarding:start-confirmed:${at}`, type: "onboarding.start_confirmed",
