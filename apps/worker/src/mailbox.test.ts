@@ -27,29 +27,29 @@ function mailbox(password = "app-pass") {
 const setup = () => {
   const store = new CrosslineStore(":memory:");
   const workspaceId = store.createPrincipalWithWorkspace("user-1", "w").workspace.id;
-  return { store, workspaceId, secrets: memorySecrets() };
+  return { store, workspaceId, secrets: memorySecrets(), resolve: async () => "203.0.113.10" };
 };
 
 test("an account is kept only after it signs in; the password goes to the secret store, never the ledger", async () => {
-  const { store, workspaceId, secrets } = setup();
+  const { store, workspaceId, secrets, resolve } = setup();
   const box = mailbox();
-  expect(await addMailAccount({ store, secrets, factory: box.factory }, workspaceId, { address: "me@gmail.com", password: "wrong" })).toMatchObject({ ok: false, code: "MAIL_AUTH_FAILED" });
-  expect(await addMailAccount({ store, secrets, factory: box.factory }, workspaceId, { address: "me@outlook.com", password: "x" })).toMatchObject({ ok: false, code: "MAIL_PROVIDER_UNSUPPORTED" });
-  expect(await addMailAccount({ store, secrets, factory: box.factory }, workspaceId, { address: "me@unknown-provider.org", password: "x" })).toMatchObject({ ok: false, code: "MAIL_HOST_REQUIRED" });
-  const added = await addMailAccount({ store, secrets, factory: box.factory }, workspaceId, { address: "Me@Gmail.com", password: "app-pass" });
+  expect(await addMailAccount({ store, secrets, resolve, factory: box.factory }, workspaceId, { address: "me@gmail.com", password: "wrong" })).toMatchObject({ ok: false, code: "MAIL_AUTH_FAILED" });
+  expect(await addMailAccount({ store, secrets, resolve, factory: box.factory }, workspaceId, { address: "me@outlook.com", password: "x" })).toMatchObject({ ok: false, code: "MAIL_PROVIDER_UNSUPPORTED" });
+  expect(await addMailAccount({ store, secrets, resolve, factory: box.factory }, workspaceId, { address: "me@unknown-provider.org", password: "x" })).toMatchObject({ ok: false, code: "MAIL_HOST_REQUIRED" });
+  const added = await addMailAccount({ store, secrets, resolve, factory: box.factory }, workspaceId, { address: "Me@Gmail.com", password: "app-pass" });
   expect(added).toMatchObject({ ok: true, account: { address: "me@gmail.com", host: "imap.gmail.com", triage: true } });
   expect(JSON.stringify(store.exportSnapshot(workspaceId))).not.toContain("app-pass");
   expect([...secrets.values.values()]).toEqual(["app-pass"]);
-  if (added.ok) expect(removeMailAccount({ store, secrets }, workspaceId, added.account.id)).toBe(true);
+  if (added.ok) expect(removeMailAccount({ store, secrets, resolve }, workspaceId, added.account.id)).toBe(true);
   expect(secrets.values.size).toBe(0);
   expect(store.getSetting(workspaceId, MAIL_ACCOUNTS_SETTING)).toBe("[]");
 });
 
 test("new mail is read once per check; sorting turns a to-do into an inbox line and a reply into the wait coming forward", async () => {
-  const { store, workspaceId, secrets } = setup();
+  const { store, workspaceId, secrets, resolve } = setup();
   const box = mailbox();
   let now = new Date("2026-10-19T09:00:00Z");
-  const deps = { store, secrets, factory: box.factory, now: () => now };
+  const deps = { store, secrets, resolve, factory: box.factory, now: () => now };
   await addMailAccount(deps, workspaceId, { address: "me@qq.com", password: "app-pass" });
   expect(await readNewMail(deps, workspaceId)).toEqual([]);
   box.messages.push({ uid: 1, subject: "HW1 extended to Oct 30", body: "Please submit by Oct 30." }, { uid: 2, subject: "Re: 测量数据", body: "数据在附件里。" },
@@ -76,12 +76,12 @@ test("new mail is read once per check; sorting turns a to-do into an inbox line 
 });
 
 test("the assistant searches every connected account through one lookup", async () => {
-  const { store, workspaceId, secrets } = setup();
+  const { store, workspaceId, secrets, resolve } = setup();
   const box = mailbox();
-  expect(mailLookupFor({ store, secrets, factory: box.factory }, workspaceId)).toBeUndefined();
-  await addMailAccount({ store, secrets, factory: box.factory }, workspaceId, { address: "me@163.com", password: "app-pass" });
+  expect(mailLookupFor({ store, secrets, resolve, factory: box.factory }, workspaceId)).toBeUndefined();
+  await addMailAccount({ store, secrets, resolve, factory: box.factory }, workspaceId, { address: "me@163.com", password: "app-pass" });
   box.messages.push({ uid: 5, subject: "Lab meeting moved", body: "Now 15:00." });
-  const hits = await mailLookupFor({ store, secrets, factory: box.factory }, workspaceId)!.search({ text: "Lab" });
+  const hits = await mailLookupFor({ store, secrets, resolve, factory: box.factory }, workspaceId)!.search({ text: "Lab" });
   expect(hits[0]).toMatchObject({ subject: "Lab meeting moved", snippet: "Now 15:00." });
   expect(hits[0]!.id).toMatch(/^[a-z0-9-]+:5$/);
 });

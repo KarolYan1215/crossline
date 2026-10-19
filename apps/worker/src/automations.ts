@@ -25,6 +25,8 @@ import { sayToPerson } from "./workflow-smith";
 export const AUTOMATION_DESIGNER_SKILL = "crossline:crossline-automation-designer";
 
 type Fire = { reason: string; context: string; inputs?: string[] };
+/** Troubles that pass by themselves: a design that met one is tried again on a later tick. */
+const PASSING = /^(SKILL_USAGE_LIMIT|SKILL_TIMEOUT|SKILL_STALLED|SKILL_THREAD_LOST|SKILL_RUNTIME_FAILED|SKILL_CANCELED|RUNTIME_|MODEL_SPONSOR_|CODEX_SUPERVISOR|RATE_LIMIT)/;
 export type AutomationDeps = {
   store: CrosslineStore; cwd: string;
   client: (workspaceId: string) => CodexRpcBoundary | undefined;
@@ -87,8 +89,14 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
     developerInstructions: "Turn the request into one automation: a trigger Crossline can watch and an action the assistant can do with its functions. Answer in the schema only.",
     prepareInput: () => input, validateOutput: (output) => validateAutomationPlan(output, lines.map((line) => line.id), existing.map((item) => item.id)), onAudit: () => {}, timeoutMs: 30 * 60_000
   });
-  if (!result.ok) return result.blocker.code.startsWith("SKILL_") || result.blocker.code.startsWith("MODEL_") || result.blocker.code.startsWith("RUNTIME_")
-    ? { state: "waiting" } : fail(result.blocker.message);
+  if (!result.ok) {
+    // A passing trouble (quota, a timeout, a runtime that restarted, the developer's model still being checked) waits for the next tick,
+    // three times at most; anything else — an answer that never kept to the schema, a missing Skill — is said to the person at once.
+    const attempts = deps.store.listEvents(workspaceId, { type: "automation.design_attempted", entityId: requestId }).length + 1;
+    deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.design_attempted:${requestId}:${attempts}`, type: "automation.design_attempted", entityId: requestId,
+      payload: { code: result.blocker.code } });
+    return PASSING.test(result.blocker.code) && attempts < 3 ? { state: "waiting" } : fail(result.blocker.message || "设计没有成功");
+  }
   const plan = result.output;
   const previous = plan.replaces ? existing.find((item) => item.id === plan.replaces) : undefined;
   if (!previous && existing.length >= AUTOMATIONS_MAX) return fail(`已经有 ${AUTOMATIONS_MAX} 个自动化，先删掉不用的。`);
@@ -126,11 +134,12 @@ export function deleteAutomation(store: CrosslineStore, workspaceId: string, id:
   return true;
 }
 
+/** Runs that actually happened in the last day: a firing that waited for the assistant does not use the day's allowance. */
 const firedToday = (store: CrosslineStore, workspaceId: string, id: string, now: Date) =>
-  runs(store, workspaceId).filter((run) => run.automationId === id && run.state !== "skipped" && now.getTime() - Date.parse(run.firedAt) < 86_400_000).length;
+  runs(store, workspaceId).filter((run) => run.automationId === id && (run.state === "started" || run.state === "reminded") && now.getTime() - Date.parse(run.firedAt) < 86_400_000).length;
 
 /** Starts one firing: the reminder said, or the assistant started with the instructions and what fired it. */
-export function fire(deps: AutomationDeps, workspaceId: string, automation: Automation, why: Fire, force = false): AutomationRun {
+export function fire(deps: AutomationDeps, workspaceId: string, automation: Automation, why: Fire, force = false, retry = false): AutomationRun {
   const now = deps.now?.() ?? new Date();
   const base = { automationId: automation.id, firedAt: now.toISOString(), reason: why.reason };
   if (!force && firedToday(deps.store, workspaceId, automation.id, now) >= AUTOMATION_RUNS_PER_DAY) {
@@ -169,7 +178,8 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
   const state = started.state === "started" ? "started" as const : "queued" as const;
   if (state === "started") update(deps.store, workspaceId, automation.id, (item) => ({ ...item, lastFiredAt: now.toISOString(), runs: item.runs + 1 }));
   const run = { ...base, taskId: state === "started" ? taskId : "", state, ...(state === "queued" ? { detail: started.state === "blocked" ? started.message : "等待批准这类工作" } : {}) };
-  noteRun(deps.store, workspaceId, run);
+  // A queued firing is noted once, when it first waits; its retries are noted only when one starts.
+  if (!(retry && state === "queued")) noteRun(deps.store, workspaceId, run);
   return run;
 }
 
@@ -207,17 +217,24 @@ export async function automationPass(deps: AutomationDeps, workspaceId: string):
   for (const item of waiting) {
     const automation = active().find((entry) => entry.id === item.automationId);
     if (!automation) continue;
-    const run = fire(deps, workspaceId, automation, item);
+    const run = fire(deps, workspaceId, automation, item, false, true);
     fired.push(run);
     if (run.state === "queued") left.push(item);
   }
   saveQueue(deps.store, workspaceId, left);
   const busy = () => fired.some((run) => run.state === "queued");
+  // A firing that has to wait (the assistant busy) is queued like a mail firing: a watched page's change, a new file or a task event
+  // is seen once, and would otherwise be lost.
+  const fireOrQueue = (automation: Automation, why: Fire): AutomationRun => {
+    const run = fire(deps, workspaceId, automation, why);
+    if (run.state === "queued") saveQueue(deps.store, workspaceId, [...queue(deps.store, workspaceId), { ...why, automationId: automation.id, at: now.toISOString() }]);
+    return run;
+  };
   for (const automation of active()) {
     if (busy()) break;
     const { trigger } = automation;
     if (trigger.type === "schedule" || trigger.type === "interval") {
-      if (timeTriggerDue(automation, now, deps.zone(workspaceId))) fired.push(fire(deps, workspaceId, automation, { reason: trigger.type === "schedule" ? `到了设定时间（${triggerLabel(trigger)}）` : triggerLabel(trigger), context: "" }));
+      if (timeTriggerDue(automation, now, deps.zone(workspaceId))) fired.push(fireOrQueue(automation, { reason: trigger.type === "schedule" ? `到了设定时间（${triggerLabel(trigger)}）` : triggerLabel(trigger), context: "" }));
     } else if (trigger.type === "watch") {
       if (!timeTriggerDue(automation, now, deps.zone(workspaceId))) continue;
       const page = await safeGet(trigger.url, deps.fetch ?? defaultSafeGetDeps(), { maxBytes: 3_000_000, timeoutMs: 20_000 }).catch(() => undefined);
@@ -229,14 +246,14 @@ export async function automationPass(deps: AutomationDeps, workspaceId: string):
       // The first read is the baseline; a change after it fires, with the lines that are new.
       if (before?.hash && before.hash !== hash) {
         const added = addedLines(before.excerpt, text.slice(0, 6000));
-        fired.push(fire(deps, workspaceId, automation, { reason: `${trigger.url} 的内容变了`,
+        fired.push(fireOrQueue(automation, { reason: `${trigger.url} 的内容变了`,
           context: `页面 ${trigger.url} 新出现的内容：\n${added.length ? added.map((line) => `- ${line}`).join("\n") : "（文字有改动，但没有整行新增；用 web_fetch 打开页面看）"}` }));
       }
     } else if (trigger.type === "file") {
       const since = automation.lastFiredAt ?? automation.createdAt;
       const docs = deps.store.listSourceDocuments(workspaceId).filter((doc) => doc.createdAt > since && doc.extractionStatus !== "pending"
         && fileMatches(trigger, { fileName: doc.fileName, text: doc.extractedText }));
-      if (docs.length) fired.push(fire(deps, workspaceId, automation, { reason: `新添加了 ${docs.length} 个文件`,
+      if (docs.length) fired.push(fireOrQueue(automation, { reason: `新添加了 ${docs.length} 个文件`,
         context: `新文件（用 read_document 按 id 读）：\n${docs.slice(0, 20).map((doc) => `- id ${doc.id} · ${doc.fileName}`).join("\n")}`,
         inputs: docs.slice(0, 20).map((doc) => doc.uri.replace(/^file:\/\//, "")) }));
     } else if (trigger.type === "task") {
@@ -247,14 +264,14 @@ export async function automationPass(deps: AutomationDeps, workspaceId: string):
       if (trigger.event === "accepted") {
         const done = deps.store.listEvents(workspaceId, { type: "work_order.transitioned" })
           .filter((event) => event.createdAt > since && (event.payload as { to?: string }).to === "accepted" && ofLine(event.entityId)).map((event) => event.entityId);
-        if (done.length) fired.push(fire(deps, workspaceId, automation, { reason: `${done.length} 个任务完成验收`,
+        if (done.length) fired.push(fireOrQueue(automation, { reason: `${done.length} 个任务完成验收`,
           context: `完成的任务（用 read_task 按 id 读）：\n${[...new Set(done)].slice(0, 10).map((id) => `- id ${id} · ${title(id)}`).join("\n")}` }));
       } else {
         const tomorrow = new Intl.DateTimeFormat("en-CA", { timeZone: deps.zone(workspaceId), year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now.getTime() + 86_400_000));
         const lastDay = automation.lastFiredAt ? new Intl.DateTimeFormat("en-CA", { timeZone: deps.zone(workspaceId), year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(automation.lastFiredAt)) : "";
         const today = new Intl.DateTimeFormat("en-CA", { timeZone: deps.zone(workspaceId), year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
         const due = [...orders.values()].filter((order) => !["accepted", "archived"].includes(order.state) && (order.payload as { dueDate?: string }).dueDate === tomorrow && ofLine(order.id));
-        if (due.length && lastDay !== today) fired.push(fire(deps, workspaceId, automation, { reason: `${due.length} 个任务明天到期`,
+        if (due.length && lastDay !== today) fired.push(fireOrQueue(automation, { reason: `${due.length} 个任务明天到期`,
           context: `明天到期的任务（用 read_task 按 id 读）：\n${due.slice(0, 10).map((order) => `- id ${order.id} · ${title(order.id)}`).join("\n")}` }));
       }
     }

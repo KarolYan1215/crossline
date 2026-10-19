@@ -22,7 +22,9 @@ import { ownerOf } from "./owner";
 export const MAIL_TRIAGE_SKILL = "crossline:crossline-mail-triage";
 const secretName = (id: string) => `mail-${id}`;
 
-export type MailDeps = { store: CrosslineStore; secrets: SecretStore; factory?: ImapFactory; now?: () => Date };
+export type MailDeps = { store: CrosslineStore; secrets: SecretStore; factory?: ImapFactory; now?: () => Date;
+  /** The host's checked public address (tests stand in for DNS). */
+  resolve?: (host: string) => Promise<string | undefined> };
 
 const accounts = (store: CrosslineStore, workspaceId: string) => readMailAccounts(store.getSetting(workspaceId, MAIL_ACCOUNTS_SETTING));
 const saveAccounts = (store: CrosslineStore, workspaceId: string, list: MailAccount[]) => store.setSetting(workspaceId, MAIL_ACCOUNTS_SETTING, JSON.stringify(list));
@@ -43,10 +45,10 @@ export async function addMailAccount(deps: MailDeps, workspaceId: string, input:
   const host = (input.host?.trim() || preset?.host || "").toLowerCase();
   if (!host) return { ok: false, code: "MAIL_HOST_REQUIRED", message: "认不出这个邮箱的服务器，请填写 IMAP 服务器地址（如 imap.example.com）。" };
   if (!hostAllowed(host)) return { ok: false, code: "MAIL_HOST_INVALID", message: "服务器地址须是邮件服务器的域名。" };
-  const port = input.port && input.port > 0 && input.port < 65536 ? Math.floor(input.port) : preset?.port ?? 993;
+  const port = input.port === 143 ? 143 : 993;
   if (!input.password.trim() || input.password.length > 200) return { ok: false, code: "MAIL_PASSWORD_REQUIRED", message: "请填写应用专用密码或授权码。" };
   if (accounts(deps.store, workspaceId).some((account) => account.address === address)) return { ok: false, code: "MAIL_ALREADY_ADDED", message: "这个邮箱已经接入。" };
-  const mail = createImapMail({ host, port, secure: port === 993 }, address, input.password, deps.factory);
+  const mail = createImapMail({ host, port, secure: port === 993 }, address, input.password, deps.factory, deps.resolve);
   const checked = await mail.check();
   if (!checked.ok) return checked;
   const id = randomUUID().slice(0, 8);
@@ -78,7 +80,7 @@ export function setMailTriage(store: CrosslineStore, workspaceId: string, id: st
 
 async function clientOf(deps: MailDeps, workspaceId: string, account: MailAccount): Promise<ImapMail | undefined> {
   const password = await deps.secrets.read(workspaceId, secretName(account.id)).catch(() => undefined);
-  return password ? createImapMail({ host: account.host, port: account.port, secure: account.port === 993 }, account.address, password, deps.factory) : undefined;
+  return password ? createImapMail({ host: account.host, port: account.port, secure: account.port === 993 }, account.address, password, deps.factory, deps.resolve) : undefined;
 }
 
 /** The mailbox for the assistant's `mail_search` / `mail_read`: every account, ids as `<account>:<uid>`. Undefined with none. */
@@ -105,7 +107,12 @@ export function mailLookupFor(deps: MailDeps, workspaceId: string): MailLookup |
   };
 }
 
-export type NewMail = MailHeader & { accountId: string };
+export type NewMail = MailHeader & { accountId: string; uidValidity?: string };
+/** New mail not sorted yet (quota, pause, a failed run): sorted with the next pass's, for three days. */
+const UNSORTED_SETTING = "mail.unsorted";
+const unsortedOf = (store: CrosslineStore, workspaceId: string): NewMail[] => { try { return JSON.parse(store.getSetting(workspaceId, UNSORTED_SETTING) ?? "[]") as NewMail[]; } catch { return []; } };
+/** A message's key across UIDVALIDITY resets: a reused number is not taken for a message already handled. */
+const mailKey = (message: NewMail) => `${message.accountId}:${message.uidValidity ?? ""}:${message.uid}`;
 
 /**
  * Reads what arrived on every account whose check is due, records the new numbering, and hands the new headers back (for sorting and
@@ -121,7 +128,7 @@ export async function readNewMail(deps: MailDeps, workspaceId: string, force = f
     try {
       if (!mail) throw Object.assign(new Error("没有找到这个邮箱的密码，请移除后重新接入。"), { code: "MAIL_SECRET_MISSING" });
       const result = await mail.newSince({ ...(account.uidValidity ? { uidValidity: account.uidValidity } : {}), ...(account.lastUid ? { lastUid: account.lastUid } : {}) });
-      fresh.push(...result.messages.map((message) => ({ ...message, accountId: account.id })));
+      fresh.push(...result.messages.map((message) => ({ ...message, accountId: account.id, uidValidity: result.uidValidity })));
       update = { uidValidity: result.uidValidity, lastUid: result.lastUid, lastCheckedAt: now.toISOString() };
     } catch (error) {
       update = { lastCheckedAt: now.toISOString(), lastError: { code: (error as { code?: string }).code ?? "MAIL_READ_FAILED",
@@ -175,11 +182,11 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
     if ((kind === "todo" || kind === "date") && captured < MAIL_INBOX_PER_PASS) {
       deps.store.capture({ id: `cap-mail-${randomUUID().slice(0, 12)}`, ownerId, workspaceId, title: item.title.trim().slice(0, 240),
         context: `来自邮件：${message.from}「${message.subject}」（${message.date.slice(0, 10)}）${message.snippet ? `\n开头：${message.snippet.slice(0, 200)}` : ""}` },
-      `mail:capture:${message.accountId}:${message.uid}`);
+      `mail:capture:${mailKey(message)}`);
       captured += 1;
     } else if (kind === "todo" || kind === "date") kind = "info";
     if (kind === "reply") {
-      deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${message.accountId}:${message.uid}`, type: "waiting.mail_seen",
+      deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${mailKey(message)}`, type: "waiting.mail_seen",
         entityId: item.waitingId, payload: { from: message.from, subject: message.subject, date: message.date, at } });
       replies += 1;
     }
@@ -205,9 +212,15 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
     running.add(workspaceId);
     try {
       const fresh = await readNewMail(deps, workspaceId, force);
-      if (!fresh.length) return { read: 0 };
-      try { deps.onNewMail?.(workspaceId, fresh); } catch { /* the automations decide for themselves */ }
-      const sorted = await deps.sortAllowed(workspaceId) ? await triageMail({ ...deps, client: deps.client(workspaceId) }, workspaceId, fresh) : { state: "skipped" as const, reason: "quota" };
+      if (fresh.length) { try { deps.onNewMail?.(workspaceId, fresh); } catch { /* the automations decide for themselves */ } }
+      const now = (deps.now?.() ?? new Date()).getTime();
+      const seen = new Set(fresh.map(mailKey));
+      const waiting = unsortedOf(deps.store, workspaceId).filter((message) => !seen.has(mailKey(message)) && now - Date.parse(message.date || "1970-01-01") < 3 * 86_400_000);
+      const batch = [...waiting, ...fresh].slice(-40);
+      if (!batch.length) return { read: 0 };
+      const sorted = await deps.sortAllowed(workspaceId) ? await triageMail({ ...deps, client: deps.client(workspaceId) }, workspaceId, batch) : { state: "skipped" as const, reason: "quota" };
+      // Kept for the next pass unless sorted (or there was nothing to sort on these accounts).
+      deps.store.setSetting(workspaceId, UNSORTED_SETTING, JSON.stringify(sorted.state === "done" || sorted.reason === "nothing" ? [] : batch));
       deps.log?.({ type: "mail.pass", workspaceId, read: fresh.length, ...sorted });
       return { read: fresh.length, sorted };
     } finally { running.delete(workspaceId); }

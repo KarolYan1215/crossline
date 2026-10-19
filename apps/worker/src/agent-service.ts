@@ -53,7 +53,8 @@ export function createAgentService(deps: {
   const runnerFor = (workspaceId: string, control: AbortController, onLive: Parameters<typeof createAgentRunner>[4]["onLive"]) => {
     const mode = deps.modeFor?.(workspaceId) ?? "shell";
     const mail = mode === "tools" ? deps.mailFor?.(workspaceId) : undefined;
-    return createAgentRunner(deps.store, workspaceId, deps.repoRoot, mode === "tools" ? () => deps.clientFor?.(workspaceId) ?? deps.getClient() : deps.getClient, {
+    // Tools mode runs on the account's own runtime only: never the owner's (a guest's task must not spend the owner's account).
+    return createAgentRunner(deps.store, workspaceId, deps.repoRoot, mode === "tools" ? () => deps.clientFor?.(workspaceId) : deps.getClient, {
       outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
       signal: control.signal, ...(onLive ? { onLive } : {}), mode, ...(mail ? { mail } : {})
     });

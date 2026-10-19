@@ -1,3 +1,5 @@
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { ImapFlow, type FetchMessageObject, type ImapFlowOptions } from "imapflow";
 import { simpleParser } from "mailparser";
 
@@ -50,8 +52,30 @@ const SNIPPET = 300;
 const PARTIAL_BYTES = 48_000;
 const FULL_BYTES = 2_000_000;
 
+/** IMAP over TLS or STARTTLS only: a typed port cannot point the worker at another service on some host. */
+export const MAIL_PORTS = [993, 143] as const;
+
+/** A loopback, private, link-local or otherwise non-public address (IPv4 and IPv6, including IPv4-mapped). */
+export function privateAddress(address: string): boolean {
+  const v4 = /^(?:::ffff:)?(\d+)\.(\d+)\.(\d+)\.(\d+)$/i.exec(address);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
+  }
+  const v6 = address.toLowerCase();
+  return v6 === "::" || v6 === "::1" || v6.startsWith("fc") || v6.startsWith("fd") || v6.startsWith("fe80") || v6.startsWith("ff");
+}
+/** The host's first address when every address it resolves to is public; undefined otherwise (no reaching the server's own network). */
+export async function publicAddressOf(host: string): Promise<string | undefined> {
+  if (isIP(host)) return undefined;
+  const found = await lookup(host, { all: true }).catch(() => []);
+  return found.length && found.every((entry) => !privateAddress(entry.address)) ? found[0]!.address : undefined;
+}
+
 /** The parts of `ImapFlow` used here, so tests can stand in for a server. */
-export type ImapLike = Pick<ImapFlow, "connect" | "logout" | "mailboxOpen" | "search" | "fetchAll" | "fetchOne"> & { close?: () => void };
+export type ImapLike = Pick<ImapFlow, "connect" | "logout" | "mailboxOpen" | "search" | "fetchAll" | "fetchOne"> & { close?: () => void;
+  on?: (event: "error", listener: (error: unknown) => void) => unknown };
 export type ImapFactory = (options: ImapFlowOptions) => ImapLike;
 const realFactory: ImapFactory = (options) => new ImapFlow(options);
 
@@ -63,12 +87,20 @@ async function textOf(source: Buffer | undefined): Promise<string> {
   } catch { return ""; }
 }
 
-export function createImapMail(server: MailServer, user: string, password: string, factory: ImapFactory = realFactory) {
-  const options = (): ImapFlowOptions => ({ host: server.host, port: server.port, secure: server.secure, auth: { user, pass: password }, logger: false,
-    disableAutoIdle: true, tls: { servername: server.host }, clientInfo: { name: "Crossline", version: "1" } });
-  /** One connection per call, INBOX opened read-only, always logged out. */
+export function createImapMail(server: MailServer, user: string, password: string, factory: ImapFactory = realFactory,
+  resolve: (host: string) => Promise<string | undefined> = publicAddressOf) {
+  /**
+   * One connection per call, INBOX opened read-only, always logged out. The host is resolved first and the connection made to that
+   * checked public address (the certificate still checked against the name), so a name pointing inside cannot be used to probe it.
+   */
   async function withInbox<T>(work: (client: ImapLike, box: { uidValidity: string; uidNext: number }) => Promise<T>): Promise<T> {
-    const client = factory(options());
+    if (!(MAIL_PORTS as readonly number[]).includes(server.port)) throw Object.assign(new Error("只接受 993 或 143 端口"), { code: "MAIL_PORT_INVALID" });
+    const address = await resolve(server.host);
+    if (!address) throw Object.assign(new Error("服务器地址解析不到公开地址"), { code: "MAIL_HOST_INVALID" });
+    const client = factory({ host: address, port: server.port, secure: server.secure, auth: { user, pass: password }, logger: false,
+      disableAutoIdle: true, tls: { servername: server.host }, clientInfo: { name: "Crossline", version: "1" } });
+    // ImapFlow emits 'error' after connecting (a socket error, a command timing out); with no listener that would end the worker.
+    client.on?.("error", () => undefined);
     await client.connect();
     try {
       const box = await client.mailboxOpen("INBOX", { readOnly: true });
@@ -90,6 +122,8 @@ export function createImapMail(server: MailServer, user: string, password: strin
     async check(): Promise<MailCheck> {
       try { await withInbox(async () => undefined); return { ok: true }; }
       catch (error) {
+        const code = (error as { code?: string }).code;
+        if (code === "MAIL_HOST_INVALID" || code === "MAIL_PORT_INVALID") return { ok: false, code: "MAIL_UNREACHABLE", message: (error as Error).message };
         const text = error instanceof Error ? `${error.message} ${(error as { responseText?: string }).responseText ?? ""}` : String(error);
         if (/auth|login|credential|password|invalid|denied|LOGIN|AUTHENTICATIONFAILED/i.test(text) && !/ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i.test(text)) {
           return { ok: false, code: "MAIL_AUTH_FAILED", message: "邮箱拒绝了登录：多半是没开 IMAP，或填的是登录密码而不是应用专用密码 / 授权码。" };

@@ -822,10 +822,19 @@ const getCalendarWriteSession = () => calendarWriteSession ??= (async () => {
 })().catch(() => undefined);
 // The writer account's sign-in from the calendar card: the same MSAL cache the publisher reads, so a new token is used at once.
 const calendarWriteLogin = createWriteLogin(analysisStore, { session: getCalendarWriteSession, ownerOf: (workspaceId) => ownerOf(analysisStore, workspaceId) });
+/**
+ * The account's own model runtime for work it asked for (tools-mode assistant, mail sorting, automations): the start-on-use handle,
+ * so an idle guest runtime starts again instead of the run being skipped — and never the owner's runtime for anyone else.
+ */
+const accountClient = (workspaceId: string) => {
+  const handle = codexSupervisor?.runtimes?.handle(workspaceId);
+  if (handle) return handle.ok ? handle.client : undefined;
+  return machineOwner(workspaceId) || !hostedBeta ? codexSupervisor?.clientFor(workspaceId) : undefined;
+};
 // The person's mailbox, read-only (docs/personal-agent.md): new mail read every quarter hour and sorted into the inbox; the assistant
 // searches and reads it; matching mail fires the person's automations. Sorting is intake work (it runs while the person is around or
 // cooling off); reading never needs the model.
-const mailService = createMailService({ store: analysisStore, secrets, cwd: repoRoot, client: (workspaceId) => codexSupervisor?.clientFor(workspaceId),
+const mailService = createMailService({ store: analysisStore, secrets, cwd: repoRoot, client: accountClient,
   sortAllowed: async (workspaceId) => !paused(workspaceId, "intake") && spendAllows(await spendFor(workspaceId), "intake"),
   onNewMail: (workspaceId, messages) => { onNewMail(analysisStore, workspaceId, messages); },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
@@ -835,14 +844,14 @@ const agentService = createAgentService({
   store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(), isOwner: machineOwner,
   // Everyone else's assistant works through Crossline's own functions on the account's own model (docs/personal-agent.md, 2026-10-19).
   modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : "tools",
-  clientFor: (workspaceId) => codexSupervisor?.clientFor(workspaceId),
+  clientFor: accountClient,
   mailFor: (workspaceId) => mailService.lookup(workspaceId),
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
 });
 // Automations (docs/personal-agent.md): requests in words designed into a trigger and steps, then watched every tick and run by the
 // assistant when they fire. Designing is the person's own request (core work); firing runs while the person is around or cooling off,
 // and stops — with everything else — once they have been away a week.
-const automationDeps: AutomationDeps = { store: analysisStore, cwd: repoRoot, client: (workspaceId) => codexSupervisor?.clientFor(workspaceId),
+const automationDeps: AutomationDeps = { store: analysisStore, cwd: repoRoot, client: accountClient,
   runFree: (workspaceId, input, after) => agentService.runFree(workspaceId, input, after),
   zone: (workspaceId) => calendarZone(workspaceId) ?? process.env.CROSSLINE_TIME_ZONE?.trim() ?? "America/Chicago",
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) };

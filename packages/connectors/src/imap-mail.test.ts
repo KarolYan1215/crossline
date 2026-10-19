@@ -1,5 +1,8 @@
 import { expect, test } from "vitest";
-import { createImapMail, hostAllowed, presetFor, unsupportedProvider, type ImapFactory } from "./imap-mail";
+import { createImapMail as realCreate, hostAllowed, presetFor, privateAddress, unsupportedProvider, type ImapFactory } from "./imap-mail";
+
+const createImapMail = (server: Parameters<typeof realCreate>[0], user: string, password: string, factory: ImapFactory) =>
+  realCreate(server, user, password, factory, async () => "203.0.113.10");
 
 const raw = (subject: string, body: string, from = "Prof Lin <lin@uni.edu>") => Buffer.from(
   `From: ${from}\r\nTo: me@gmail.com\r\nSubject: ${subject}\r\nDate: Sun, 18 Oct 2026 10:00:00 +0000\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}\r\n`);
@@ -62,4 +65,16 @@ test("a refused login is said in words; presets and unsupported providers are kn
   expect(hostAllowed("127.0.0.1")).toBe(false);
   expect(hostAllowed("mail.local")).toBe(false);
   expect(hostAllowed("localhost")).toBe(false);
+});
+
+test("a host that resolves inside, or another port, is never connected to", async () => {
+  const connected: string[] = [];
+  const factory: ImapFactory = (options) => { connected.push(String(options.host)); return server().factory(options); };
+  expect(await realCreate({ host: "imap.evil.example", port: 993, secure: true }, "x", "y", factory, async () => undefined).check()).toMatchObject({ ok: false, code: "MAIL_UNREACHABLE" });
+  expect(await realCreate({ host: "imap.gmail.com", port: 3211, secure: false }, "x", "y", factory, async () => "203.0.113.10").check()).toMatchObject({ ok: false, code: "MAIL_UNREACHABLE" });
+  expect(connected).toEqual([]);
+  await realCreate({ host: "imap.gmail.com", port: 993, secure: true }, "me", "app-password", factory, async () => "203.0.113.10").check();
+  expect(connected).toEqual(["203.0.113.10"]);
+  expect(["127.0.0.1", "10.1.2.3", "169.254.169.254", "172.20.0.1", "192.168.1.1", "::1", "fd00::1", "::ffff:127.0.0.1"].every(privateAddress)).toBe(true);
+  expect(privateAddress("142.250.1.109")).toBe(false);
 });

@@ -121,3 +121,27 @@ test("a day's runs are capped whatever fires them, and a reminder is said withou
   expect(started).toHaveLength(6);
   expect(JSON.parse(store.getSetting(workspaceId, AUTOMATION_RUNS_SETTING)!).at(-1)).toMatchObject({ automationId: "auto-remind", state: "reminded" });
 });
+
+test("waiting for a busy assistant uses none of the day's runs, and a watched page's change waits in the queue instead of being lost", async () => {
+  const { store, workspaceId, deps, started, setBusy, setNow } = setup(new Date("2026-10-19T08:00:00Z"));
+  install(store, workspaceId, { id: "auto-watch", trigger: { type: "watch", url: "https://course.example.edu/x", hours: 1 } });
+  await automationPass(deps(undefined, ["<html><body>a</body></html>"]), workspaceId);
+  setBusy(true);
+  setNow(new Date("2026-10-19T09:30:00Z"));
+  expect((await automationPass(deps(undefined, ["<html><body>a\nb</body></html>"]), workspaceId)).map((run) => run.state)).toEqual(["queued"]);
+  for (let hour = 10; hour < 18; hour += 1) { setNow(new Date(`2026-10-19T${hour}:30:00Z`)); await automationPass(deps(undefined, ["<html><body>a\nb</body></html>"]), workspaceId); }
+  setBusy(false);
+  await automationPass(deps(undefined, ["<html><body>a\nb</body></html>"]), workspaceId);
+  expect(started).toHaveLength(1);
+  expect(started[0]!.what).toContain("- b");
+  // The waiting was noted once, not once a tick.
+  expect(JSON.parse(store.getSetting(workspaceId, AUTOMATION_RUNS_SETTING)!).filter((run: { state: string }) => run.state === "queued")).toHaveLength(1);
+});
+
+test("a design that never keeps to the schema is said to the person at once; a passing trouble waits, three times at most", async () => {
+  const { store, workspaceId, deps } = setup();
+  requestAutomation(store, workspaceId, "每天提醒我喝水", "research", "user-1");
+  const { rpc } = fakeRuntime(["not json", "still not", "nope"], AUTOMATION_DESIGNER_SKILL);
+  expect((await designPending(deps(() => rpc), workspaceId))[0]).toMatchObject({ state: "failed" });
+  expect(await designPending(deps(() => rpc), workspaceId)).toEqual([]);
+});

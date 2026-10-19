@@ -56,6 +56,8 @@ export function createAgentToolbox(deps: {
   const calls: ToolCall[] = [];
   const actions: ToolboxAction[] = [];
   const written = new Set<string>();
+  /** Copies of the person's files: counted against their own allowance, so organising large files leaves room to write the index. */
+  const copied = new Set<string>();
   const read = deps.readFile ?? ((uri: string) => readFileSync(uri.replace(/^file:\/\//, "")));
   mkdirSync(deps.directory, { recursive: true });
 
@@ -72,7 +74,8 @@ export function createAgentToolbox(deps: {
     const full = inside(deps.directory, relative);
     return full ? { full, writable: true } : undefined;
   };
-  const totalWritten = () => [...written].reduce((sum, file) => sum + (statSync(file, { throwIfNoEntry: false })?.size ?? 0), 0);
+  const bytesOf = (files: Set<string>) => [...files].reduce((sum, file) => sum + (statSync(file, { throwIfNoEntry: false })?.size ?? 0), 0);
+  const totalWritten = () => bytesOf(written);
   const fail = (message: string): never => { throw new Error(message); };
   const textOf = async (full: string): Promise<string> => {
     const kind = kindOf(full) ?? fail(`「${path.basename(full)}」不是能读的文字文件（支持 PDF、Word 与文本）。`);
@@ -183,10 +186,10 @@ export function createAgentToolbox(deps: {
         if (!existsSync(from.full) || statSync(from.full).isDirectory()) fail(`没有文件「${s("from")}」。`);
         const bytes = statSync(from.full).size;
         if (bytes > 50 * 1024 * 1024) fail("文件超过 50 MB，不复制。");
-        if (totalWritten() + bytes > MAX_TOTAL_BYTES * 5) fail("这次运行复制的文件总量已到上限。");
+        if (bytesOf(copied) + bytes > MAX_TOTAL_BYTES * 5) fail("这次运行复制的文件总量已到上限（100 MB）。");
         mkdirSync(path.dirname(to!.full), { recursive: true });
         copyFileSync(from.full, to!.full);
-        written.add(to!.full);
+        copied.add(to!.full);
         return JSON.stringify({ copied: s("from"), to: s("to"), bytes });
       }
       case "move_file": {
@@ -197,13 +200,15 @@ export function createAgentToolbox(deps: {
         mkdirSync(path.dirname(to!.full), { recursive: true });
         renameSync(from!.full, to!.full);
         if (written.delete(from!.full)) written.add(to!.full);
+        if (copied.delete(from!.full)) copied.add(to!.full);
         return JSON.stringify({ moved: s("from"), to: s("to") });
       }
       case "delete_file": {
         const target = resolve(s("path"));
-        if (!target?.writable || !written.has(target.full)) fail("只能删除这次运行自己写出的文件。");
+        if (!target?.writable || !(written.has(target.full) || copied.has(target.full))) fail("只能删除这次运行自己写出的文件。");
         rmSync(target!.full, { force: true });
         written.delete(target!.full);
+        copied.delete(target!.full);
         return JSON.stringify({ deleted: s("path") });
       }
       case "list_documents": {
@@ -290,9 +295,11 @@ export function createAgentToolbox(deps: {
   }
 
   return {
-    specs, calls, actions, written: () => [...written],
+    specs, calls, actions, written: () => [...written, ...copied],
     async call(name, args) {
-      const subject = (() => { const a = (args ?? {}) as Record<string, unknown>; return String(a.path ?? a.from ?? a.id ?? a.query ?? a.text ?? a.folder ?? "").slice(0, 160); })();
+      // What a call is about, offset included: reading one long file page by page is not going round in circles.
+      const subject = (() => { const a = (args ?? {}) as Record<string, unknown>;
+        return `${String(a.path ?? a.from ?? a.id ?? a.query ?? a.text ?? a.folder ?? "").slice(0, 160)}${typeof a.offset === "number" ? `@${a.offset}` : ""}`; })();
       try {
         const answer = await call(name, args);
         calls.push({ tool: name, subject, ok: true });

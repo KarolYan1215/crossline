@@ -108,3 +108,15 @@ test("going round in circles is caught from the calls themselves", () => {
   expect(toolLoopReason([call(false), call(false), call(false)])).toMatch(/连续失败 3 次/);
   expect(toolLoopReason(Array.from({ length: 6 }, () => call(true)))).toMatch(/重复了 6 次/);
 });
+
+test("reading one long file page by page is not a loop, and copying large files leaves room to write the index", async () => {
+  const tools = box();
+  const long = path.join(root, "in", "long.txt");
+  writeFileSync(long, "x".repeat(130_000));
+  for (let offset = 0; offset < 130_000; offset += 20_000) await tools.call("read_file", { path: "input/0/long.txt", offset });
+  expect(toolLoopReason(tools.calls)).toBeUndefined();
+  writeFileSync(path.join(root, "in", "big.txt"), "y".repeat(19_000_000));
+  await tools.call("copy_file", { from: "input/0/big.txt", to: "归档/big.txt" });
+  await tools.call("copy_file", { from: "input/0/big.txt", to: "归档/big-2.txt" });
+  expect(JSON.parse(await tools.call("write_file", { path: "README.md", content: "# 索引" }))).toMatchObject({ written: "README.md" });
+});
