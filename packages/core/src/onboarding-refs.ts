@@ -154,7 +154,21 @@ const only = <K extends string>(turn: Record<string, unknown>, keys: readonly K[
   Object.fromEntries(keys.filter((key) => turn[key] !== undefined).map((key) => [key, turn[key]]));
 // The other layer's fields are overwritten, never checked: a strict schema keeps a live answer from carrying them, and a stray one is not this layer's to judge.
 const asDialogue = (value: unknown) => value && typeof value === "object" ? { ...(value as Wire), ...EMPTY_EXTRACTION, fileDates: undefined, availability: undefined, profile: undefined } : value;
-const asExtraction = (value: unknown) => value && typeof value === "object" ? { ...(value as Wire), ...EMPTY_DIALOGUE, stage: undefined } : value;
+/**
+ * A list the extraction left out (or sent as null) is an empty list: a model whose schema is only described to it, not enforced (a
+ * Chat Completions provider in JSON mode), drops keys it had nothing for, and the whole answer used to be refused for it as
+ * 「输出结构不符合要求」 — repeatedly, so nothing from the interview's deep stages was recorded (2026-10-19 walkthrough, the developer's model).
+ */
+const EXTRACT_LISTS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "lineProfiles", "goalEdits"] as const;
+// A slot built from a line id that has a hyphen in it (「flywheel_line-x-3_informs」) was refused and the whole answer with it: slots are
+// normalised to their own alphabet instead.
+const slotName = (slot: unknown) => typeof slot === "string" ? slot.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) : slot;
+const asExtraction = (value: unknown) => {
+  if (!value || typeof value !== "object") return value;
+  const lists = Object.fromEntries(EXTRACT_LISTS.map((key) => [key, Array.isArray((value as Wire)[key]) ? (value as Wire)[key] as Wire[] : []]));
+  lists.slotUpdates = (lists.slotUpdates as Wire[]).map((update) => update && typeof update === "object" ? { ...update, slot: slotName(update.slot) } : update);
+  return { ...(value as Wire), ...lists, ...EMPTY_DIALOGUE, stage: undefined };
+};
 
 /**
  * A question's project is only what it is about: one the extraction is creating from the same reply is not on record yet, so an unknown

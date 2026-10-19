@@ -421,7 +421,10 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
   if (!turn || typeof turn.reply !== "string" || !Array.isArray(turn.questions) || !Array.isArray(turn.slotUpdates)
     || !Array.isArray(turn.projectsDetected) || !Array.isArray(turn.flywheelCandidates) || !Array.isArray(turn.coverage)
     || (turn.nextAction !== "ask" && turn.nextAction !== "ready_for_milestones")) {
-    reject("ONBOARDING_TURN_SCHEMA_INVALID", "输出结构不符合要求。");
+    // Which part is wrong, so a repair has something to act on (a bare 「输出结构不符合要求」 was sent back three times in a row).
+    const missing = !turn ? ["整个回答"] : [typeof turn.reply !== "string" ? "reply" : "", ...(["questions", "slotUpdates", "projectsDetected", "flywheelCandidates", "coverage"] as const)
+      .filter((key) => !Array.isArray((turn as Record<string, unknown>)[key])), turn.nextAction !== "ask" && turn.nextAction !== "ready_for_milestones" ? "nextAction" : ""].filter(Boolean);
+    reject("ONBOARDING_TURN_SCHEMA_INVALID", `输出结构不符合要求：${missing.join("、")} 缺失或类型不对（列表字段没有内容时写 []）。`);
   }
   const identities = new Set([...known.identities, PERSON_LINE]);
   const projectIds = new Set(known.projectIds);

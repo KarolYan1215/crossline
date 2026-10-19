@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { citationWarnings, citedSpan, keepOnboardingAnswer, numberedText, resolveDateRefs, validateOnboardingAnswer } from "./onboarding-refs";
+import { citationWarnings, citedSpan, keepOnboardingAnswer, numberedText, resolveDateRefs, validateOnboardingAnswer, validateOnboardingExtraction } from "./onboarding-refs";
 import { segmentText } from "./sentences";
 import type { EvidenceSentence, KnownSources } from "./onboarding-turn-schema";
 
@@ -79,4 +79,11 @@ test("a date citing sentences far apart keeps the one that holds its day", () =>
   const out = resolveDateRefs({ dates: [{ id: "d", date: "2026-10-29", startMinute: null, endMinute: null, kind: "exam", title: "期中", project: "", refs: [1, last],
     confidence: "high", note: "" }], recurring: [], questions: [], undated: [] }, sentences, { "src-1": long });
   expect(out.dates[0]!.quote).toBe("L15: Mid-term-1 on 29th Oct.");
+});
+
+test("an extraction that leaves out lists it had nothing for, or names a slot after a hyphenated line id, is read, not refused", () => {
+  const extracted = validateOnboardingExtraction({ slotUpdates: [{ identityId: "research", projectId: "", slot: "flywheel_line-x-3_informs", value: "笔记反哺研究",
+    status: "inferred", refs: [] }], availability: null, profileSections: null, fileDates: null }, known());
+  expect(extracted.slotUpdates?.[0]?.slot).toBe("flywheel_line_x_3_informs");
+  expect(extracted.projectsDetected).toEqual([]);
 });

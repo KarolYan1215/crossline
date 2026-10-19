@@ -15,7 +15,9 @@ export const AVAILABILITY_PROPOSED_SETTING = "schedule.availability.proposed";
  */
 export const START_CONFIRMED_SETTING = "onboarding.startConfirmed";
 /** Accounts that met the start standard before the confirmation existed are not asked for it (`startConfirmedFor`). */
-export const START_CONFIRM_SINCE = "2026-10-20T00:00:00.000Z";
+// When the confirmation went live (deployed 2026-10-19 04:11 UTC). It said 2026-10-20 at first, which exempted every account that reached
+// the standard on the launch day itself, so nobody saw the sheet (found walking the live beta).
+export const START_CONFIRM_SINCE = "2026-10-19T04:00:00.000Z";
 /** `"1"` on the one workspace whose account owns this machine's Codex runtime and the shell assistant (decided once by the worker). */
 export const RUNTIME_OWNER_SETTING = "deployment.runtimeOwner";
 
