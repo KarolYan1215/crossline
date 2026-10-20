@@ -23,7 +23,13 @@ const PERSON_ACTIVITY_SQL = `
   UNION ALL SELECT observed_at FROM energy_observations WHERE workspace_id = @ws AND source = 'self_report' AND observed_at >= @since
   UNION ALL SELECT created_at FROM events WHERE workspace_id = @ws AND created_at >= @since
     AND (type IN (${PERSON_EVENTS.map((type) => `'${type}'`).join(",")})
-      OR (type = 'task.step_progress' AND json_extract(payload_json, '$.source') IN ('user', 'person', 'confirm')))`;
+      OR (type = 'task.step_progress' AND json_extract(payload_json, '$.source') IN ('user', 'person', 'confirm'))
+      -- An undoable change made on a page (availability, shares, weights, a lock, a due day…) and an undo (2026-10-20: these were not
+      -- counted, so a plan edit on one side read as no activity and the ledger sync could copy the other side over it). Ops the worker
+      -- writes for itself carry bySystem; the daily merge's older ones are known by their inverse.
+      OR (type = 'op.applied' AND json_extract(payload_json, '$.bySystem') IS NULL
+        AND COALESCE(json_extract(payload_json, '$.inverse.kind'), '') <> 'task.unmerge')
+      OR type = 'op.undone')`;
 
 const arg = (name: string) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : undefined; };
 const db = arg("db") ?? (() => { throw new Error("missing --db"); })();

@@ -121,7 +121,7 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
   // One undoable operation, in the shape the web's undo log reads (apps/web/lib/undo.ts).
   const opId = `op-${now.getTime().toString(36)}-${randomUUID().slice(0, 6)}`;
   store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `op.applied:${opId}`, type: "op.applied", entityId: opId,
-    payload: { label: label.slice(0, 160), inverse: { kind: "task.unmerge", keepId: keep.id, payload: beforePayload, plan: beforePlan, restore: absorbed.map((order) => order.id) } } });
+    payload: { bySystem: true, label: label.slice(0, 160), inverse: { kind: "task.unmerge", keepId: keep.id, payload: beforePayload, plan: beforePlan, restore: absorbed.map((order) => order.id) } } });
   store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.merged:${keep.id}:${opId}`, type: "task.merged", entityId: keep.id,
     payload: { kind: group.kind, absorbed: absorbed.map((order) => order.id), reason: group.reason, opId } });
   return { keep: keep.id, absorbed: absorbed.map((order) => order.id), label };

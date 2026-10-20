@@ -44,16 +44,38 @@ const runLocal = (args: string[], options: { stdio?: "inherit" | "pipe" } = {}) 
 };
 const remoteDir = "/tmp/crossline-sync";
 let scriptSent = false;
+/**
+ * A connection that fails (ssh's own exit code 255, or scp failing to connect) is tried again after 10 and 30 seconds: the hourly run of
+ * 2026-10-20 20:01 lost a whole hour to one 「connect to host … port 22: Unknown error」. A command that ran and failed is not retried.
+ */
+class Unreachable extends Error {}
+const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function retrying<T>(what: string, work: () => T): T {
+  const waits = [10_000, 30_000];
+  for (let attempt = 0; ; attempt += 1) {
+    try { return work(); } catch (error) {
+      if (!(error instanceof Unreachable) || attempt >= waits.length) throw error;
+      log(`${what}: server unreachable, trying again in ${waits[attempt]! / 1000} s`);
+      pause(waits[attempt]!);
+    }
+  }
+}
+const copyTo = (files: string[], target: string) => retrying("copy", () => {
+  try { execFileSync("scp", [...ssh, ...files, target], { stdio: "pipe" }); } catch (error) { throw new Unreachable(String((error as { stderr?: unknown }).stderr ?? error)); }
+});
 const remote = (args: string[], stdio: "inherit" | "pipe" = "pipe") => {
   if (!scriptSent) {
-    spawnSync("ssh", [...ssh, host, `mkdir -p ${remoteDir}`], { stdio: "pipe" });
-    execFileSync("scp", [...ssh, path.join(repo, "deploy", "server", "ledger-sync.sh"),
-      ...["ledger-stamp.ts", "migrate-workspace.ts", "pack-for-server.ts"].map((name) => path.join(repo, "scripts", name)), `${host}:${remoteDir}/`], { stdio: "pipe" });
+    retrying("prepare", () => { if (spawnSync("ssh", [...ssh, host, `mkdir -p ${remoteDir}`], { stdio: "pipe" }).status === 255) throw new Unreachable("ssh"); });
+    copyTo([path.join(repo, "deploy", "server", "ledger-sync.sh"),
+      ...["ledger-stamp.ts", "migrate-workspace.ts", "pack-for-server.ts"].map((name) => path.join(repo, "scripts", name))], `${host}:${remoteDir}/`);
     scriptSent = true;
   }
-  const result = spawnSync("ssh", [...ssh, host, `sudo sh ${remoteDir}/ledger-sync.sh ${args.map((item) => `'${item.replace(/'/g, "'\\''")}'`).join(" ")}`], { encoding: "utf8", stdio });
-  if (result.status !== 0) throw new Error(`server ${args[0]} failed (${result.status}): ${result.stderr ?? ""}`);
-  return result.stdout ?? "";
+  return retrying(args[0]!, () => {
+    const result = spawnSync("ssh", [...ssh, host, `sudo sh ${remoteDir}/ledger-sync.sh ${args.map((item) => `'${item.replace(/'/g, "'\\''")}'`).join(" ")}`], { encoding: "utf8", stdio });
+    if (result.status === 255) throw new Unreachable(`server ${args[0]} unreachable: ${result.stderr ?? ""}`);
+    if (result.status !== 0) throw new Error(`server ${args[0]} failed (${result.status}): ${result.stderr ?? ""}`);
+    return result.stdout ?? "";
+  });
 };
 const lastLine = (text: string) => text.trim().split(/\r?\n/).filter(Boolean).pop() ?? "";
 
@@ -85,7 +107,7 @@ if (chosen === "to-server") {
   const out = path.join(tmpdir(), `crossline-transfer-${process.pid}.tgz`);
   runLocal(["scripts/pack-for-server.ts", "--to-email", email, "--workspace", localWorkspace, "--out", out], { stdio: "inherit" });
   log(`uploading ${out}`);
-  execFileSync("scp", [...ssh, out, `${host}:/tmp/crossline-transfer.tgz`], { stdio: "inherit" });
+  copyTo([out], `${host}:/tmp/crossline-transfer.tgz`);
   rmSync(out, { force: true });
   remote(["apply"], "inherit");
 } else {
@@ -94,7 +116,7 @@ if (chosen === "to-server") {
   remote(["pack", email, remoteOut], "inherit");
   const staging = mkdtempSync(path.join(tmpdir(), "crossline-sync-"));
   const tgz = path.join(staging, "export.tgz");
-  execFileSync("scp", [...ssh, `${host}:${remoteOut}`, tgz], { stdio: "inherit" });
+  copyTo([`${host}:${remoteOut}`], tgz);
   spawnSync("ssh", [...ssh, host, `rm -f ${remoteOut}`]);
   // The system's bsdtar by full path: from Git Bash the first `tar` on PATH is GNU tar, which reads "C:\…" as a remote host.
   const systemTar = process.platform === "win32" ? path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
