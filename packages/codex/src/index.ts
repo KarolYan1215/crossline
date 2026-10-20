@@ -111,7 +111,7 @@ export const CODEX_GENERATED_PROTOCOL_SHA256 = "0a029db4277456684f035f790bda8ea8
  * (docs/codex-upgrade-0.163.md), and the new hash goes here then. It also names the runtime in provider conformance records
  * (`RUNTIME_VERSION`), which go stale when it changes.
  */
-export const CODEX_FORK_BINARY_SHA256 = "4bcc1d8452c75cd132e010f41ccfaf6afb8699317f9a90d88df0b20be2335497";
+export const CODEX_FORK_BINARY_SHA256 = "e6300d7fd03c53a11a746e49f12706c313a04eaedb4541f1857799d9551617ac";
 /**
  * The release build of the pinned source that the installed copy ships (docs/local-installer.md, Codex 的 Release 构建): still
  * rust-v0.155.0's until the release build (three hours of thin-LTO linking) is redone from 0.163.0.
