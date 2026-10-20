@@ -156,6 +156,8 @@ test("editing availability re-runs the scheduler instead of only storing a prefe
   const grid = page.locator(".pl-grid");
   await page.getByRole("radio", { name: "擦除" }).click();
   for (const row of await grid.locator("tbody tr").all()) {
+    // Rows below the fold would take the drag on whatever covers that point instead.
+    await row.scrollIntoViewIfNeeded();
     const first = (await row.locator("td").first().boundingBox())!, last = (await row.locator("td").last().boundingBox())!;
     await page.mouse.move(first.x + 3, first.y + first.height / 2);
     await page.mouse.down();
@@ -218,7 +220,7 @@ test("goal confirmation and permission-mode rejection persist through the real p
     page.waitForNavigation({ waitUntil: "load" }),
     drawer.locator('input[type="date"]').fill("2026-09-30", { force: true })
   ]);
-  await page.locator('.mt-marker[aria-label^="稳定推进当前实验与论文"]').click();
+  // The save reloads the page and opens the same drawer again (2026-10-18), so the new deadline is read where it was written.
   await expect(page.locator(".ui-sheet").locator('input[type="date"]')).toHaveValue("2026-09-30");
   await page.goto("/plan");
   // The confirmed deadline places that milestone's mark on the plan page's timeline.
@@ -296,7 +298,7 @@ test("the app opens with the network down, and the offline capture queues", asyn
 
   await page.reload();
   // The headline claim: the shell came from the cache, not the server.
-  await expect(page.getByRole("link", { name: "任务" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "任务", exact: true })).toBeVisible();
   await expect(page.locator(".analog-clock")).toBeVisible();
 
   // And a capture taken while down is kept rather than lost.
