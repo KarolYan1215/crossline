@@ -1,4 +1,5 @@
 use super::*;
+use codex_protocol::sandbox::SandboxOverride;
 use core_test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
@@ -34,6 +35,7 @@ async fn snapshot_failure_omits_credentials_and_stops_descendants(
     let permissions = PermissionProfile::Disabled;
     let manager = SandboxManager::new();
     let attempt = SandboxAttempt {
+        sandbox_override: SandboxOverride::NoOverride,
         sandbox: SandboxType::None,
         sandbox_requested: false,
         permissions: &permissions,
@@ -42,10 +44,10 @@ async fn snapshot_failure_omits_credentials_and_stops_descendants(
         manager: &manager,
         sandbox_cwd: &cwd_uri,
         workspace_roots: std::slice::from_ref(&cwd_uri),
-        codex_linux_sandbox_exe: None,
+        sandbox_exe: None,
         use_legacy_landlock: false,
+        windows_sandbox_type: SandboxType::None,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
-        windows_sandbox_private_desktop: false,
         network_denial_cancellation_token: cancellation.clone(),
         network_proxy: None,
     };

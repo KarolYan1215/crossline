@@ -43,7 +43,32 @@ fn controls_preserve_order_and_independent_settings_and_overflow_closes() {
     }
     assert!(handle.set_microphone_muted(/*muted*/ false).is_err());
     assert!(handle.0.stop.is_aborted());
-    assert!(handle.take_error().is_some());
+    assert_eq!(
+        handle.take_error(),
+        Some((
+            ConnectionError::Failed,
+            "Voice control channel unavailable.".into()
+        ))
+    );
+}
+
+#[test]
+fn failed_control_send_preserves_existing_error() {
+    let (handle, commands, _) = handles();
+    *handle.0.state.error.lock().unwrap() = Some((
+        ConnectionError::AudioSession,
+        "voice audio session stopped unexpectedly".into(),
+    ));
+    drop(commands);
+
+    assert!(handle.set_microphone_muted(/*muted*/ true).is_err());
+    assert_eq!(
+        handle.take_error(),
+        Some((
+            ConnectionError::AudioSession,
+            "voice audio session stopped unexpectedly".into()
+        ))
+    );
 }
 
 #[tokio::test]
@@ -197,4 +222,27 @@ async fn startup_completion_preserves_classified_failure() {
         assert_eq!(thread.join().unwrap(), Err(failure));
         assert_eq!(handle.take_error(), None);
     }
+}
+
+#[test]
+fn classified_errors_discard_sensitive_sources_but_preserve_retry_classification() {
+    let error = report_failure::<()>(
+        ConnectionError::AudioDevices,
+        Err(anyhow::anyhow!("synthetic-secret-sdp-device-path")),
+    )
+    .unwrap_err();
+    assert_eq!(
+        format!("{error:#}"),
+        ConnectionError::AudioDevices.to_string()
+    );
+    assert!(!format!("{error:?}").contains("synthetic-secret"));
+    let error = report_failure::<()>(
+        ConnectionError::Transport,
+        Err(ConnectionError::NegotiationTimedOut.into()),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<ConnectionError>(),
+        Some(&ConnectionError::NegotiationTimedOut)
+    );
 }

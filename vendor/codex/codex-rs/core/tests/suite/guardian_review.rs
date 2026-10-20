@@ -6,6 +6,7 @@ use chrono::DateTime;
 use chrono::Local;
 use chrono::Utc;
 use codex_config::types::McpServerConfig;
+use codex_config::types::OtelExporterKind;
 use codex_core::SleepFuture;
 use codex_core::TimeFuture;
 use codex_core::TimeProvider;
@@ -16,6 +17,7 @@ use codex_core::config::CurrentTimeReminderConfig;
 use codex_core::sandboxing::SandboxPermissions;
 use codex_core::windows_sandbox::WindowsSandboxLevelExt;
 use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::ToolFinishInput;
 use codex_extension_api::ToolLifecycleContributor;
 use codex_extension_api::ToolLifecycleFuture;
 use codex_extension_api::ToolStartInput;
@@ -57,6 +59,7 @@ use core_test_support::responses::assert_root_turn;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_completed_with_tokens;
+use core_test_support::responses::ev_custom_tool_call;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
@@ -70,6 +73,7 @@ use core_test_support::skip_if_sandbox;
 use core_test_support::skip_if_wine_exec;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
+use core_test_support::test_codex::local_requests;
 use core_test_support::test_codex::local_selections;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
@@ -79,7 +83,6 @@ use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -136,11 +139,11 @@ impl TimeProvider for RecordingTimeProvider {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[test_case(CodexAuth::from_api_key("test-api-key"), "OpenAI", "/v1", true, "/v1/responses", true; "api_key_uses_responses")]
-#[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/backend-api/codex", false, "/backend-api/codex/responses", true; "chatgpt_uses_responses_by_default")]
-#[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/backend-api/codex", true, "/backend-api/codex/guardian", true; "chatgpt_uses_guardian_when_enabled")]
+#[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/backend-api/codex", false, "/backend-api/codex/responses", true; "chatgpt_marks_guardian_by_default")]
+#[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/backend-api/codex", true, "/backend-api/codex/responses", true; "legacy_opt_in_still_accepted")]
 #[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/v1", true, "/v1/responses", true; "custom_openai_url_uses_responses")]
 #[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "Custom", "/backend-api/codex", true, "/backend-api/codex/responses", true; "custom_provider_uses_responses")]
-#[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/backend-api/codex", true, "/backend-api/codex/guardian", false; "server_without_response_id")]
+#[test_case(CodexAuth::create_dummy_chatgpt_auth_for_testing(), "OpenAI", "/backend-api/codex", true, "/backend-api/codex/responses", false; "retry_without_response_id_keeps_last_parent")]
 async fn guardian_session_inherits_parent_http_fallback(
     auth: CodexAuth,
     provider_name: &str,
@@ -149,8 +152,12 @@ async fn guardian_session_inherits_parent_http_fallback(
     expected_guardian_path: &str,
     response_id_present: bool,
 ) -> Result<()> {
+    let credits_enabled =
+        auth.uses_codex_backend() && provider_name == "OpenAI" && base_path == "/backend-api/codex";
     skip_if_no_network!(Ok(()));
 
+    let configured_policy = "Use the task-configured Guardian policy.";
+    let configured_template = "You are judging one planned coding-agent action.\nConfigured template: {{ tenant_policy_config }}";
     let server = start_mock_server().await;
     let websocket_fallback = Mock::given(method("GET"))
         .and(path_regex(".*/responses$"))
@@ -163,7 +170,7 @@ async fn guardian_session_inherits_parent_http_fallback(
     let responses = mount_sse_sequence(
         &server,
         vec![
-            // A failed sampling attempt must not supply the retried action's parent ID.
+            // A started response remains a billing parent until a later response supplies an ID.
             sse(vec![json!({"type": "response.created", "response": {
                 "id": "failed-parent"
             }})]),
@@ -203,6 +210,8 @@ async fn guardian_session_inherits_parent_http_fallback(
             config.model_provider.stream_max_retries = Some(1);
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
             config.approvals_reviewer = ApprovalsReviewer::User;
+            config.guardian_policy_config = Some(configured_policy.to_string());
+            config.guardian_policy_template = Some(configured_template.to_string());
         });
     let test = builder.build_with_auto_env(&server).await?;
 
@@ -245,8 +254,18 @@ async fn guardian_session_inherits_parent_http_fallback(
             request.body_json()["client_metadata"]["x-openai-subagent"].as_str() == Some("guardian")
         })
         .expect("Guardian reviewer inference request");
+    assert!(
+        guardian_request
+            .body_contains_text("Configured template: Use the task-configured Guardian policy.")
+    );
     assert_eq!(guardian_request.path(), expected_guardian_path);
-    let credits_enabled = expected_guardian_path.ends_with("/guardian");
+    assert_eq!(
+        guardian_request.header("x-codex-guardian").as_deref(),
+        credits_enabled.then_some("reviewer")
+    );
+    if credits_enabled {
+        assert_eq!(guardian_request.header("x-codex-routing-hint"), None);
+    }
     let body = guardian_request.body_json();
     assert_eq!(
         (
@@ -254,7 +273,13 @@ async fn guardian_session_inherits_parent_http_fallback(
             body["client_metadata"].get("guardian_credits_requested"),
         ),
         (
-            (credits_enabled && response_id_present).then(|| json!(parent_response_id)),
+            credits_enabled.then(|| {
+                json!(if response_id_present {
+                    parent_response_id
+                } else {
+                    "failed-parent"
+                })
+            }),
             None
         )
     );
@@ -262,6 +287,7 @@ async fn guardian_session_inherits_parent_http_fallback(
     for request in responses.requests() {
         let body = request.body_json();
         if body["client_metadata"]["x-openai-subagent"] != "guardian" {
+            assert_eq!(request.header("x-codex-guardian"), None);
             assert_eq!(
                 (
                     body["client_metadata"]
@@ -292,28 +318,213 @@ async fn guardian_session_inherits_parent_http_fallback(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[test_case(false; "legacy_transcript")]
-#[test_case(true; "thread_owned_transcript")]
-async fn guardian_review_compacts_with_summary_despite_parent_token_budget(
-    thread_owned: bool,
-) -> Result<()> {
+async fn guardian_parent_id_survives_code_mode_response_handoff() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    #[derive(Default)]
+    struct PauseCommands {
+        started: tokio::sync::Notify,
+        resume: tokio::sync::Notify,
+        finished: tokio::sync::Notify,
+    }
+    impl ToolLifecycleContributor for PauseCommands {
+        fn on_tool_start<'a>(&'a self, input: ToolStartInput<'a>) -> ToolLifecycleFuture<'a> {
+            Box::pin(async move {
+                if input.tool_name.name == "exec_command" {
+                    self.started.notify_one();
+                    self.resume.notified().await;
+                }
+            })
+        }
+
+        fn on_tool_finish<'a>(&'a self, input: ToolFinishInput<'a>) -> ToolLifecycleFuture<'a> {
+            Box::pin(async move {
+                if input.tool_name.name == "exec_command" {
+                    self.finished.notify_one();
+                }
+            })
+        }
+    }
+
+    let code = r#"
+yield_control();
+for (const phase of ["before", "after"]) {
+    try {
+        await tools.exec_command({
+            cmd: `echo ${phase}`,
+            sandbox_permissions: "require_escalated",
+            justification: "Check Guardian parent metadata across a response handoff."
+        });
+    } catch (_) {}
+}
+"#;
+    let deny = sse(vec![
+        ev_assistant_message("assessment", r#"{"outcome":"deny"}"#),
+        ev_completed("review"),
+    ]);
+    let (release_created, created_gate) = tokio::sync::oneshot::channel();
+    let (release_completed, completed_gate) = tokio::sync::oneshot::channel();
+    let (streaming, _) = start_streaming_sse_server(vec![
+        vec![StreamingSseChunk {
+            gate: None,
+            body: sse(vec![
+                ev_response_created("parent-a"),
+                ev_custom_tool_call("cell", "exec", code),
+                ev_completed("parent-a"),
+            ]),
+        }],
+        vec![
+            StreamingSseChunk {
+                gate: Some(created_gate),
+                body: sse(vec![
+                    ev_response_created("parent-b"),
+                    ev_assistant_message("b-ready", "B is ready"),
+                ]),
+            },
+            StreamingSseChunk {
+                gate: Some(completed_gate),
+                body: sse(vec![ev_completed("parent-b")]),
+            },
+        ],
+        vec![StreamingSseChunk { gate: None, body: deny.clone() }],
+        vec![StreamingSseChunk { gate: None, body: deny.clone() }],
+        // A fresh turn without response.created must not inherit the preceding turn's ID.
+        vec![StreamingSseChunk {
+            gate: None,
+            body: sse(vec![
+                ev_function_call(
+                    "fresh-command", "exec_command",
+                    r#"{"cmd":"echo fresh","sandbox_permissions":"require_escalated","justification":"Check a fresh turn."}"#,
+                ),
+                ev_completed("fresh-parent"),
+            ]),
+        }],
+        vec![StreamingSseChunk { gate: None, body: deny }],
+        vec![StreamingSseChunk {
+            gate: None,
+            body: sse(vec![ev_completed("fresh-complete")]),
+        }],
+    ]).await;
+    let pause = Arc::new(PauseCommands::default());
+    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+    extensions.tool_lifecycle_contributor(pause.clone());
+    let server = start_mock_server().await;
+    let base_url = format!("{}/backend-api/codex", streaming.uri());
+    let test = test_codex()
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_extensions(Arc::new(extensions.build()))
+        .with_pre_build_hook(|home| {
+            fs::write(
+                home.join("config.toml"),
+                "[features.guardianv2]\nfree_guardian = true\n",
+            )
+            .expect("write Guardian config");
+        })
+        .with_config(move |config| {
+            config.features.enable(Feature::CodeMode).unwrap();
+            // The streaming server records raw request bodies for the JSON assertions below.
+            config
+                .features
+                .disable(Feature::EnableRequestCompression)
+                .unwrap();
+            config.model_provider.base_url = Some(base_url);
+            config.model_provider.supports_websockets = false;
+            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
+            config.approvals_reviewer = ApprovalsReviewer::User;
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    test.codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Start the cell and review both commands.".into(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                ..Default::default()
+            }),
+        )
+        .await?;
+
+    tokio::time::timeout(Duration::from_secs(30), async {
+        // B is in flight, but has not emitted its ID. The cell can still request review.
+        streaming.wait_for_request_count(/*count*/ 2).await;
+        pause.started.notified().await;
+        pause.resume.notify_one();
+        pause.finished.notified().await;
+
+        release_created.send(()).unwrap();
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::AgentMessage(message) if message.message == "B is ready")
+        }).await;
+        pause.started.notified().await;
+        pause.resume.notify_one();
+        pause.finished.notified().await;
+        release_completed.send(()).unwrap();
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Start a fresh turn.".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        pause.started.notified().await;
+        pause.resume.notify_one();
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        anyhow::Ok(())
+    })
+    .await??;
+
+    let requests = streaming.requests().await;
+    let reviews = requests
+        .iter()
+        .map(|body| serde_json::from_slice::<Value>(body).unwrap())
+        .filter(|body| body["client_metadata"]["x-openai-subagent"] == "guardian")
+        .map(|body| body["client_metadata"].get("parent_response_id").cloned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reviews,
+        vec![Some(json!("parent-a")), Some(json!("parent-b")), None]
+    );
+    test.codex.shutdown_and_wait().await?;
+    streaming.shutdown().await;
+    Ok(())
+}
+
+#[test_case(false; "without parent checkpoint")]
+#[test_case(true; "reuse parent checkpoint and newer authorization")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn guardian_review_recovers_after_compaction(with_parent_checkpoint: bool) -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_wine_exec!(
         Ok(()),
-        "Guardian approval actions require host-native paths"
+        "approved commands can collide on process IDs in the shared Wine exec server"
     );
 
     let server = start_mock_server().await;
     let summary = "Guardian retained the user's standing authorization.";
+    let store = Arc::new(codex_thread_store::InMemoryThreadStore::default());
     let mut builder = test_codex()
-        .with_model_info_override("gpt-5.5", |model| {
+        .with_thread_store(store.clone())
+        .with_history_mode(codex_protocol::protocol::ThreadHistoryMode::Legacy)
+        .with_model_info_override("gpt-5.5", move |model| {
             model.auto_review_model_override = Some(model.slug.clone());
+            model.supports_experimental_context = true;
             model
                 .model_messages
                 .as_mut()
                 .expect("model messages")
                 .token_budget = Some(ModelTokenBudgetConfig {
-                enabled: true,
+                enabled: !with_parent_checkpoint,
                 use_history_notes_extension: true,
                 reminder_threshold_tokens: 6_144,
                 reminder_message_template: "{n_remaining} tokens remain.".to_string(),
@@ -323,20 +534,39 @@ async fn guardian_review_compacts_with_summary_despite_parent_token_budget(
             });
         })
         .with_config(move |config| {
-            config
-                .features
-                .set_enabled(Feature::GuardianThreadContext, thread_owned)
-                .expect("configure Guardian context mode");
             config.model_context_window = Some(100_000);
             config.model_auto_compact_token_limit = Some(50_000);
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
             config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("test config should allow token budget");
+            if with_parent_checkpoint {
+                config
+                    .features
+                    .disable(Feature::TokenBudget)
+                    .expect("disable token-budget resets");
+            } else {
+                config
+                    .features
+                    .enable(Feature::TokenBudget)
+                    .expect("enable token-budget resets");
+            }
         });
     let test = builder.build_with_auto_env(&server).await?;
+    if with_parent_checkpoint {
+        mount_sse_sequence(&server, vec![
+            sse(vec![ev_assistant_message("old-evidence", "PRE_CHECKPOINT_DIAGNOSTIC"), ev_completed("initial")]),
+            sse(vec![json!({
+                "type": "response.output_item.done",
+                "item": {"type": "compaction", "id": "cmp-parent", "encrypted_content": "parent checkpoint"},
+            }), ev_completed("parent-compact")]),
+        ]).await;
+        test.submit_text_turn("Only monitor; do not change settings yet.")
+            .await?;
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+    }
     let command = json!({
         "cmd": "true",
         "sandbox_permissions": "require_escalated",
@@ -344,47 +574,64 @@ async fn guardian_review_compacts_with_summary_despite_parent_token_budget(
     })
     .to_string();
     let approval = r#"{"risk_level":"low","user_authorization":"high","outcome":"allow"}"#;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-parent-first"),
-                ev_function_call("exec-first", "exec_command", &command),
-                ev_completed("resp-parent-first"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-guardian-first"),
-                ev_assistant_message("guardian-first", approval),
-                ev_completed_with_tokens("resp-guardian-first", /*total_tokens*/ 60_000),
-            ]),
-            sse(vec![
-                ev_response_created("resp-parent-second"),
-                ev_function_call("exec-second", "exec_command", &command),
-                ev_completed("resp-parent-second"),
-            ]),
-            sse(vec![
-                json!({
-                    "type": "response.output_item.done",
-                    "item": {"type": "compaction", "encrypted_content": summary},
-                }),
-                ev_completed("resp-guardian-compact"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-guardian-second"),
-                ev_assistant_message("guardian-second", approval),
-                ev_completed("resp-guardian-second"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-parent-done"),
-                ev_assistant_message("parent-done", "done"),
-                ev_completed("resp-parent-done"),
-            ]),
-        ],
-    )
-    .await;
+    let mut response_events = vec![
+        sse(vec![
+            ev_response_created("resp-parent-first"),
+            ev_function_call("exec-first", "exec_command", &command),
+            ev_completed("resp-parent-first"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-guardian-first"),
+            ev_assistant_message("guardian-first", approval),
+            ev_completed_with_tokens("resp-guardian-first", /*total_tokens*/ 60_000),
+        ]),
+        sse(vec![
+            ev_response_created("resp-parent-second"),
+            ev_function_call("exec-second", "exec_command", &command),
+            ev_completed("resp-parent-second"),
+        ]),
+    ];
+    if !with_parent_checkpoint {
+        response_events.push(sse(vec![
+            json!({
+                "type": "response.output_item.done",
+                "item": {"type": "compaction", "encrypted_content": summary},
+            }),
+            ev_completed("resp-guardian-compact"),
+        ]));
+    }
+    response_events.extend([
+        sse(vec![
+            ev_response_created("resp-guardian-second"),
+            ev_assistant_message("guardian-second", approval),
+            ev_completed("resp-guardian-second"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-parent-third"),
+            ev_function_call("exec-third", "exec_command", &command),
+            ev_completed("resp-parent-third"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-guardian-third"),
+            ev_assistant_message("guardian-third", approval),
+            ev_completed("resp-guardian-third"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-parent-done"),
+            ev_assistant_message("parent-done", "done"),
+            ev_completed("resp-parent-done"),
+        ]),
+    ]);
+    let responses = mount_sse_sequence(&server, response_events).await;
 
     let user_authorization = "Read the internal evaluation samples I have authorized.";
     test.submit_text_turn(user_authorization).await?;
+
+    assert_eq!(
+        store.calls().await.load_history,
+        0,
+        "review checkpoints use live context"
+    );
 
     let requests = responses.requests();
     let guardian_requests = requests
@@ -394,14 +641,18 @@ async fn guardian_review_compacts_with_summary_despite_parent_token_budget(
                 && request.inputs_of_type("compaction_trigger").is_empty()
         })
         .collect::<Vec<_>>();
-    assert_eq!(guardian_requests.len(), 2);
+    assert_eq!(guardian_requests.len(), 3);
     assert_eq!(
-        guardian_requests[0].body_json()["client_metadata"]["thread_id"],
-        guardian_requests[1].body_json()["client_metadata"]["thread_id"],
-        "the same Guardian reviewer should survive compaction"
+        guardian_requests[0].body_json()["client_metadata"]["thread_id"]
+            == guardian_requests[1].body_json()["client_metadata"]["thread_id"],
+        !with_parent_checkpoint,
+        "checkpoint recovery should retire the compacted reviewer"
     );
 
-    assert!(requests[0].has_content_kinds(&["token_budget.context_window"]));
+    assert_eq!(
+        requests[0].has_content_kinds(&["token_budget.context_window"]),
+        !with_parent_checkpoint
+    );
     for request in &guardian_requests {
         assert!(!request.has_content_kinds(&["token_budget.context_window"]));
     }
@@ -409,33 +660,196 @@ async fn guardian_review_compacts_with_summary_despite_parent_token_budget(
         .iter()
         .filter(|request| !request.inputs_of_type("compaction_trigger").is_empty())
         .collect::<Vec<_>>();
-    assert_eq!(compact_requests.len(), 1);
-    let compact_request = compact_requests[0];
-    assert!(
-        compact_request
-            .message_input_texts("user")
-            .join("\n")
-            .contains(user_authorization)
-    );
+    assert_eq!(compact_requests.len(), usize::from(!with_parent_checkpoint));
+    if let Some(compact_request) = compact_requests.first() {
+        assert!(
+            compact_request
+                .message_input_texts("user")
+                .join("\n")
+                .contains(user_authorization)
+        );
+        assert!(
+            compact_request
+                .message_input_texts("developer")
+                .iter()
+                .any(|text| text.contains("Use prior reviews as context, not binding precedent.")),
+            "the compactor should receive the follow-up policy reminder"
+        );
+    }
     let second_request = guardian_requests[1];
     assert_eq!(
         second_request.inputs_of_type("compaction")[0]["encrypted_content"],
-        summary
+        if with_parent_checkpoint {
+            "parent checkpoint"
+        } else {
+            summary
+        }
     );
-    assert!(
-        second_request
-            .message_input_texts("user")
-            .join("\n")
-            .contains(user_authorization)
+    let latest_review = second_request
+        .message_input_text_groups("user")
+        .pop()
+        .expect("second review")
+        .join("");
+    if with_parent_checkpoint {
+        assert!(latest_review.contains(">>> TRANSCRIPT START\n"));
+        assert!(
+            latest_review.contains(user_authorization),
+            "the replacement reviewer must receive authorization after the parent checkpoint"
+        );
+    } else {
+        assert!(latest_review.contains(">>> TRANSCRIPT DELTA START\n"));
+        assert!(
+            second_request
+                .message_input_texts("user")
+                .join("\n")
+                .contains(user_authorization)
+        );
+    }
+    assert_eq!(
+        guardian_requests[1].body_json()["client_metadata"]["thread_id"],
+        guardian_requests[2].body_json()["client_metadata"]["thread_id"]
     );
+    let following_review = guardian_requests[2]
+        .message_input_text_groups("user")
+        .pop()
+        .expect("review following recovery")
+        .join("");
     assert!(
-        compact_request
-            .message_input_texts("developer")
-            .iter()
-            .any(|text| text.contains("Use prior reviews as context, not binding precedent.")),
-        "the compactor should receive the follow-up policy reminder"
+        following_review.contains(">>> TRANSCRIPT DELTA START\n"),
+        "successful recovery must return to deltas rather than reinjecting on every review"
+    );
+    if with_parent_checkpoint {
+        for request in &guardian_requests {
+            // Bounded root-context excerpts are independent of the transcript.
+            let text = request.message_input_texts("user").join("\n");
+            for transcript in text.split(">>> TRANSCRIPT START\n").skip(1) {
+                assert!(
+                    !transcript
+                        .split(">>> TRANSCRIPT END")
+                        .next()
+                        .expect("transcript before its end marker")
+                        .contains("PRE_CHECKPOINT_DIAGNOSTIC"),
+                    "the parent checkpoint replaces the pre-compaction legacy transcript"
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn guardian_requests_record_only_their_own_tool_calls() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_wine_exec!(
+        Ok(()),
+        "basic PowerShell execution through Wine exec is not passing yet"
     );
 
+    let server = start_mock_server().await;
+    let mut builder = test_codex().with_config(move |config| {
+        config
+            .features
+            .enable(Feature::ExecutedToolCallMetadata)
+            .expect("enable tool-call metadata");
+        config.update_plan_enabled = true;
+        config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
+        config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+    });
+    let test = builder.build_with_auto_env(&server).await?;
+    let plan_args = json!({"plan": [{"step": "inspect", "status": "completed"}]});
+    let guardian_tool_args = json!({
+        "cmd": "printf guardian-metadata-own-call",
+        "login": false,
+        "yield_time_ms": 1000,
+    });
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_function_call("plan", "update_plan", &plan_args.to_string()),
+                ev_completed("parent-plan"),
+            ]),
+            sse(vec![
+                ev_function_call(
+                    "reviewed-command",
+                    "exec_command",
+                    r#"{"cmd":"true","sandbox_permissions":"require_escalated","justification":"Exercise Guardian metadata filtering."}"#,
+                ),
+                ev_completed("parent-review"),
+            ]),
+            sse(vec![
+                ev_function_call(
+                    "guardian-command",
+                    "exec_command",
+                    &guardian_tool_args.to_string(),
+                ),
+                ev_completed("guardian-command-response"),
+            ]),
+            sse(vec![
+                ev_assistant_message(
+                    "guardian-denial",
+                    r#"{"risk_level":"high","user_authorization":"low","outcome":"deny","rationale":"The test denies escalation."}"#,
+                ),
+                ev_completed("guardian-review"),
+            ]),
+            sse(vec![ev_completed("parent-done")]),
+        ],
+    )
+    .await;
+
+    test.submit_text_turn("Update the plan, then request a reviewed command")
+        .await?;
+
+    let expected_calls = json!([{"name": "update_plan", "arguments": plan_args}]);
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 5);
+    let parent_output = requests[1].function_call_output("plan");
+    assert_eq!(parent_output["output"], "Plan updated");
+    assert_eq!(
+        parent_output["internal_chat_message_metadata_passthrough"]["executed_tool_calls"],
+        expected_calls,
+    );
+    assert_eq!(
+        parent_output["internal_chat_message_metadata_passthrough"]["tool_calls_complete"],
+        true,
+    );
+    let guardian_output = requests[3].function_call_output("guardian-command");
+    let guardian_text = guardian_output["output"].as_str().expect("command output");
+    assert!(
+        guardian_text.contains("Process exited with code 0"),
+        "Guardian command did not complete successfully: {guardian_text}"
+    );
+    assert!(
+        guardian_text.ends_with("guardian-metadata-own-call"),
+        "Guardian command returned unexpected output: {guardian_text}"
+    );
+    assert_eq!(
+        super::direct_tool_metadata::tool_call_metadata(guardian_output),
+        json!({
+            "executed_tool_calls": [{"name": "exec_command", "arguments": guardian_tool_args}],
+            "tool_calls_complete": true,
+        }),
+    );
+    for guardian_request in &requests[2..4] {
+        assert_eq!(
+            guardian_request.body_json()["client_metadata"]["x-openai-subagent"],
+            "guardian",
+        );
+        assert!(guardian_request.body_contains_text("Plan updated"));
+        for item in guardian_request.input() {
+            if item["type"] == "function_call_output" && item["call_id"] == "guardian-command" {
+                continue;
+            }
+            let metadata = &item["internal_chat_message_metadata_passthrough"];
+            for field in ["executed_tool_calls", "tool_calls_complete", "cell_id"] {
+                assert!(
+                    metadata.get(field).is_none(),
+                    "Guardian reattributed parent {field} to an unrelated input item"
+                );
+            }
+        }
+    }
     Ok(())
 }
 
@@ -451,7 +865,7 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
     skip_if_no_network!(Ok(()));
 
     let uses_codex_backend = auth.uses_codex_backend();
-    let credits_enabled = free_guardian && uses_codex_backend;
+    let credits_enabled = uses_codex_backend;
     let bundled_models = codex_models_manager::bundled_models_response()?.models;
     let catalog_auto_review = bundled_models
         .iter()
@@ -609,7 +1023,7 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
             .as_str()
             .expect("Responses Lite Guardian developer instructions")
     } else {
-        guardian_prewarm["instructions"]
+        guardian_prewarm["input"][0]["content"][0]["text"]
             .as_str()
             .expect("Guardian instructions")
     };
@@ -731,6 +1145,19 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
         .await
         .expect("guardian trunk rollout path");
     test.codex.shutdown_and_wait().await?;
+    // Parent stop joins ThreadManager cleanup through the real extension registration.
+    assert!(
+        test.codex
+            .thread_extension_data()
+            .get::<codex_guardian_reviewer::ReviewerTasks>()
+            .expect("Guardian tasks")
+            .tasks
+            .is_empty()
+    );
+    assert!(matches!(
+        test.thread_store.flush_thread(guardian_thread_id).await,
+        Err(codex_thread_store::ThreadStoreError::ThreadNotFound { .. })
+    ));
     let guardian_rollout = fs::read_to_string(guardian_rollout_path)?
         .lines()
         .map(codex_rollout::parse_rollout_line)
@@ -752,18 +1179,20 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
     assert_eq!(guardian_context_windows, vec![Some(258_400)]);
     for handshake in server.handshakes() {
         let is_guardian = handshake.header("x-openai-subagent").as_deref() == Some("guardian");
-        let uses_guardian_endpoint = credits_enabled && is_guardian;
+        let is_guardian_request = credits_enabled && is_guardian;
         assert_eq!(
             handshake.uri(),
-            if uses_guardian_endpoint {
-                "/backend-api/codex/guardian"
-            } else if uses_codex_backend {
+            if uses_codex_backend {
                 "/backend-api/codex/responses"
             } else {
                 "/v1/responses"
             }
         );
-        if uses_guardian_endpoint {
+        assert_eq!(
+            handshake.header("x-codex-guardian").as_deref(),
+            is_guardian_request.then_some("reviewer")
+        );
+        if is_guardian_request {
             assert_eq!(handshake.header("x-codex-routing-hint"), None);
         }
     }
@@ -900,7 +1329,9 @@ async fn guardian_node_repl_policy_follows_production_approval_path(
         .collect::<Vec<_>>();
     assert_eq!(guardian_requests.len(), actions.len());
 
-    let bundled_policy = include_str!("../../assets/guardian/node_repl_policy.md");
+    let bundled_policy = codex_prompts::ResolvedModelMessages::bundled()
+        .auto_review()
+        .node_repl_policy;
     let policy = node_repl_policy.unwrap_or(bundled_policy);
     let first_guardian_thread = guardian_requests[0].body_json()["client_metadata"]["thread_id"]
         .as_str()
@@ -1142,7 +1573,7 @@ async fn guardian_session_is_reused_for_consecutive_tool_reviews_without_prewarm
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
     extensions.tool_lifecycle_contributor(lifecycle_recorder.clone());
     let mut builder = test_codex()
-        .with_model("gpt-5.4")
+        .with_model_info_override("gpt-5.4", |_| {})
         .with_extensions(Arc::new(extensions.build()))
         .with_config(move |config| {
             let secret_file = config.cwd.join("guardian-secret.txt");
@@ -1289,7 +1720,7 @@ async fn guardian_session_is_reused_for_consecutive_tool_reviews_without_prewarm
         ),
         shell_environment_policy: Default::default(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&test.config),
-        windows_sandbox_private_desktop: test.config.permissions.windows_sandbox_private_desktop,
+        windows_sandbox_type: test.config.permissions.windows_sandbox_type,
         use_legacy_landlock: test.config.features.use_legacy_landlock(),
         exec_policy: None,
         mcp_policy: None,
@@ -1309,7 +1740,7 @@ async fn guardian_session_is_reused_for_consecutive_tool_reviews_without_prewarm
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(parent_environments),
+                environments: Some(parent_environments.into_requests()),
                 approval_policy: Some(approval_policy),
                 approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
                 ..Default::default()
@@ -1355,7 +1786,7 @@ async fn guardian_session_is_reused_for_consecutive_tool_reviews_without_prewarm
     let permission_section = [
         "\n>>> PARENT TURN PERMISSION CONTEXT START\n".to_string(),
         format!(
-            "The parent turn's active permission profile denies reading these paths/globs. These are policy restrictions; do not approve escalation whose purpose is to read them.\n- path `{}`\n- glob `{}`\n",
+            "The active permission profile for environment \"local\" denies reading these paths/globs. These are policy restrictions; do not approve escalation whose purpose is to read them.\n- path `{}`\n- glob `{}`\n",
             fs::canonicalize(&secret_file)?.display(),
             test.config.cwd.join("guardian-*.key").display(),
         ),
@@ -1376,6 +1807,18 @@ async fn guardian_session_is_reused_for_consecutive_tool_reviews_without_prewarm
     }
     let first_guardian_request = guardian_requests[0].body_json();
     let second_guardian_request = guardian_requests[2].body_json();
+    let second_input = guardian_requests[2]
+        .message_input_text_groups("user")
+        .last()
+        .expect("second review input")
+        .concat();
+    assert_eq!(
+        second_input
+            .matches("run the second command that requires Guardian review")
+            .count(),
+        1
+    );
+    assert!(!second_input.contains("run the first command that requires Guardian review"));
     let first_parent_request = requests[0].body_json();
     let second_parent_request = requests[4].body_json();
     let first_parent_turn_id = first_parent_request["client_metadata"]["turn_id"]
@@ -1617,11 +2060,14 @@ async fn interrupted_guardian_review_across_model_change_does_not_execute_the_co
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[test_case(None; "legacy_fallback")]
-#[test_case(Some("Acting model rejection instructions."); "catalog_override")]
-#[test_case(Some(""); "empty_override")]
+#[tracing_test::traced_test]
+#[test_case(None, false; "legacy_fallback")]
+#[test_case(None, true; "otel_enabled")]
+#[test_case(Some("Acting model rejection instructions."), false; "catalog_override")]
+#[test_case(Some(""), false; "empty_override")]
 async fn guardian_denial_rejects_tool_call_with_rationale(
     rejection_instructions: Option<&'static str>,
+    log_assessments: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
@@ -1669,6 +2115,12 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
             });
         })
         .with_config(move |config| {
+            config.otel.log_guardian_assessments = log_assessments;
+            config.otel.exporter = OtelExporterKind::OtlpGrpc {
+                endpoint: "http://127.0.0.1:1".to_string(),
+                headers: Default::default(),
+                tls: None,
+            };
             config.permissions.approval_policy = Constrained::allow_any(approval_policy);
             config
                 .set_legacy_sandbox_policy(sandbox_policy_for_config)
@@ -1755,10 +2207,31 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
     assert!(guardian_request.body_contains_text(&command));
     assert_eq!(guardian_request.body_json()["model"], "gpt-5.6-luna");
 
-    let feedback = codex_feedback::guardian_review_failures(&[test.session_configured.thread_id])
-        .attachment
-        .expect("failed Guardian review");
+    test.codex.shutdown_and_wait().await?;
+    let state_db = codex_state::StateRuntime::init(
+        test.config.sqlite.clone(),
+        test.config.model_provider_id.clone(),
+    )
+    .await?;
+    let durable = state_db.list_guardian_review_records().await?;
+    assert_eq!(
+        durable.len(),
+        1,
+        "the Guardian capture must persist, not just fall back to memory"
+    );
+    let feedback = codex_feedback::guardian_review_failures(
+        Some(&state_db),
+        &[test.session_configured.thread_id],
+    )
+    .await
+    .attachment
+    .expect("failed Guardian review");
     let record: serde_json::Value = serde_json::from_slice(&feedback.buffer)?;
+    assert_eq!(
+        record,
+        serde_json::from_slice::<serde_json::Value>(&durable[0].record)?
+    );
+    assert_eq!(record["instructions"], guardian_request.instructions_text());
     assert!(
         guardian_request.body_contains_text(record["action"].as_str().expect("reviewed action"))
     );
@@ -1788,7 +2261,7 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
     assert!(recorded_history.iter().any(|item| {
         matches!(item, ResponseItem::Message { role, content, .. }
         if role == "assistant" && content.iter().any(|part| {
-            matches!(part, ContentItem::OutputText { text }
+            matches!(part, ContentItem::OutputText { text , .. }
                 if Some(text.as_str()) == record["decision"].as_str())
         }))
     }));
@@ -1838,6 +2311,32 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
         "Guardian-denied command unexpectedly executed"
     );
 
+    // Approval workers do not inherit the test span, so select the conversation explicitly.
+    let thread_id = test.session_configured.thread_id;
+    let logs = String::from_utf8(
+        tracing_test::internal::global_buf()
+            .lock()
+            .expect("captured logs")
+            .clone(),
+    )?;
+    let assessments: Vec<_> = logs
+        .lines()
+        .filter(|line| {
+            line.contains("codex.guardian_assessment")
+                && line.contains(&format!("conversation.id={thread_id}"))
+        })
+        .collect();
+    assert_eq!(assessments.len(), usize::from(log_assessments));
+    if let Some(log) = assessments.first() {
+        for field in [
+            "status=\"denied\"",
+            "outcome=\"deny\"",
+            "item.id=\"exec-call-denied\"",
+            "rationale=\"The requested write has unacceptable test risk.\"",
+        ] {
+            assert!(log.contains(field), "missing {field}: {log}");
+        }
+    }
     Ok(())
 }
 
@@ -1955,8 +2454,32 @@ async fn guardian_timeout_rejects_tool_call_with_acting_model_instructions(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+enum ApprovalPath {
+    SynchronousFallback,
+    CachedContributor,
+}
+
+struct AttemptCachedApproval(Arc<std::sync::atomic::AtomicUsize>);
+
+impl codex_extension_api::ApprovalReviewContributor for AttemptCachedApproval {
+    fn decide<'a>(
+        &'a self,
+        _input: &'a codex_extension_api::ApprovalDecisionInput<'_>,
+    ) -> codex_extension_api::ExtensionFuture<'a, Option<codex_extension_api::ApprovalDecision>>
+    {
+        self.0
+            .fetch_add(/*val*/ 1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async { Some(codex_extension_api::ApprovalDecision::Allow) })
+    }
+}
+
+#[test_case(ApprovalPath::SynchronousFallback; "synchronous_fallback")]
+#[test_case(ApprovalPath::CachedContributor; "cached_result_requires_fresh_review")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cyber_model_guardian_denial_interrupts_turn_immediately() -> Result<()> {
+async fn cyber_model_guardian_denial_interrupts_turn_immediately(
+    approval_path: ApprovalPath,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
     skip_if_wine_exec!(
@@ -1984,6 +2507,14 @@ async fn cyber_model_guardian_denial_interrupts_turn_immediately() -> Result<()>
                 .set_legacy_sandbox_policy(sandbox_policy_for_config)
                 .expect("set sandbox policy");
         });
+    let cached_calls = Arc::new(std::sync::atomic::AtomicUsize::new(/*v*/ 0));
+    if matches!(approval_path, ApprovalPath::CachedContributor) {
+        let mut extensions = ExtensionRegistryBuilder::default();
+        extensions.approval_review_contributor(Arc::new(AttemptCachedApproval(Arc::clone(
+            &cached_calls,
+        ))));
+        builder = builder.with_extensions(Arc::new(extensions.build()));
+    }
     let test = builder.build_with_auto_env(&server).await?;
 
     let output_file = test.cwd.path().join("cyber-guardian-denied.txt");
@@ -2039,14 +2570,41 @@ async fn cyber_model_guardian_denial_interrupts_turn_immediately() -> Result<()>
         )
         .await?;
 
+    let mut assessments = Vec::new();
     let warning = wait_for_event(&test.codex, |event| {
-        matches!(
-            event,
+        match event {
+            EventMsg::GuardianAssessment(event) => assessments.push(event.clone()),
             EventMsg::GuardianWarning(warning)
-                if warning.message.contains("too many approval requests")
-        )
+                if warning.message.contains("too many approval requests") =>
+            {
+                return true;
+            }
+            EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_) => {
+                panic!("turn ended without Guardian's denial warning")
+            }
+            _ => {}
+        }
+        false
     })
     .await;
+    assert_eq!(
+        assessments
+            .iter()
+            .map(|event| event.status)
+            .collect::<Vec<_>>(),
+        vec![
+            codex_protocol::protocol::GuardianAssessmentStatus::InProgress,
+            codex_protocol::protocol::GuardianAssessmentStatus::Denied
+        ]
+    );
+    assert_eq!(assessments[0].id, assessments[1].id);
+    assert_eq!(
+        cached_calls.load(std::sync::atomic::Ordering::SeqCst),
+        match approval_path {
+            ApprovalPath::SynchronousFallback => 0,
+            ApprovalPath::CachedContributor => 1,
+        }
+    );
     let EventMsg::GuardianWarning(warning) = warning else {
         unreachable!("wait_for_event returned a non-warning event")
     };
@@ -2089,14 +2647,13 @@ async fn guardian_review_session_does_not_inherit_legacy_notify() -> Result<()> 
 
     let notify_dir = TempDir::new()?;
     let notify_script = notify_dir.path().join("notify.sh");
-    fs::write(
+    codex_utils_cargo_bin::write_executable(
         &notify_script,
         r#"#!/bin/bash
 set -e
 payload_path="$(dirname "${0}")/notify.jsonl"
 printf '%s\n' "${@: -1}" >> "${payload_path}""#,
     )?;
-    fs::set_permissions(&notify_script, fs::Permissions::from_mode(0o755))?;
     let notify_file = notify_dir.path().join("notify.jsonl");
     let notify_script_str = notify_script.to_str().unwrap().to_string();
     let sandbox_policy_for_config = sandbox_policy.clone();
@@ -2160,7 +2717,7 @@ printf '%s\n' "${@: -1}" >> "${payload_path}""#,
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_selections(test.config.cwd.clone())),
+                environments: Some(local_requests(test.config.cwd.clone())),
                 approval_policy: Some(approval_policy),
                 approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
                 sandbox_policy: Some(sandbox_policy),
@@ -2206,5 +2763,168 @@ printf '%s\n' "${@: -1}" >> "${payload_path}""#,
     );
     assert_eq!(fs::read_to_string(&output_file)?, "guardian-approved");
 
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn yielded_code_mode_denials_interrupt_the_servicing_turn() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let mut builder = test_codex()
+        .with_model_info_override("gpt-5.4", |model| {
+            model.tool_mode = Some(codex_protocol::openai_models::ToolMode::CodeMode);
+            model.experimental_supported_tools = vec!["test_sync_tool".to_string()];
+        })
+        .with_config(|config| {
+            config.features.enable(Feature::CodeMode).unwrap();
+            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
+            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+        });
+    let test = builder.build_with_auto_env(&server).await?;
+    let barrier = r#"await tools.test_sync_tool({barrier: {
+        id: "guardian-origin", participants: 2, timeout_ms: 60000
+    }});"#;
+    let code = format!(
+        r#"// @exec: {{"yield_time_ms": 1}}
+{barrier}
+for (let index = 0; index < 6; index++) {{
+    try {{
+        text(await tools.exec_command({{
+            cmd: `echo review-${{index}}`,
+            sandbox_permissions: "require_escalated",
+            justification: "Exercise originating-cell Guardian reviews."
+        }}));
+    }} catch (error) {{
+        text(String(error));
+    }}
+}}
+"#
+    );
+    core_test_support::responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("origin-a"),
+            core_test_support::responses::ev_custom_tool_call("cell-a", "exec", &code),
+            ev_completed("origin-a"),
+        ]),
+    )
+    .await;
+    let yielded = core_test_support::responses::mount_sse_once(
+        &server,
+        sse(vec![ev_completed("a-finished")]),
+    )
+    .await;
+    test.submit_text_turn("Start A and leave its cell running.")
+        .await?;
+    let output = yielded.single_request().custom_tool_call_output("cell-a");
+    let text = output["output"]
+        .as_str()
+        .or_else(|| output["output"][0]["text"].as_str())
+        .context("A should return text")?;
+    let cell_id = text
+        .strip_prefix("Script running with cell ID ")
+        .and_then(|text| text.lines().next())
+        .context("A should yield a running cell")?
+        .to_string();
+
+    core_test_support::responses::mount_sse_once(
+        &server,
+        sse(vec![
+            core_test_support::responses::ev_custom_tool_call("cell-b", "exec", barrier),
+            ev_completed("b-started"),
+        ]),
+    )
+    .await;
+    let mut reviews = Vec::new();
+    // An approval resets B's consecutive count; only the final three denials interrupt it.
+    for outcome in ["deny", "deny", "allow", "deny", "deny", "deny"] {
+        reviews.push(
+            core_test_support::responses::mount_sse_once_match(
+                &server,
+                wiremock::matchers::body_partial_json(json!({
+                    "client_metadata": {"x-openai-subagent": "guardian"}
+                })),
+                sse(vec![
+                    ev_assistant_message(
+                        "review",
+                        &json!({
+                            "risk_level": if outcome == "allow" { "low" } else { "high" },
+                            "user_authorization": "high", "outcome": outcome,
+                            "rationale": "Test decision for the delayed cell.",
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("review-done"),
+                ]),
+            )
+            .await,
+        );
+    }
+    core_test_support::responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_function_call(
+                "wait-a",
+                "wait",
+                &json!({
+                    "cell_id": cell_id, "yield_time_ms": 60000,
+                })
+                .to_string(),
+            ),
+            ev_completed("b-wait"),
+        ]),
+    )
+    .await;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "Run B and wait for A.".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    let mut active_id = None;
+    let mut warning_id = None;
+    loop {
+        let event =
+            tokio::time::timeout(Duration::from_secs(60), test.codex.next_event()).await??;
+        match event.msg {
+            EventMsg::TurnStarted(_) => active_id = Some(event.id),
+            EventMsg::GuardianWarning(warning)
+                if warning.message.contains("too many approval requests") =>
+            {
+                assert!(
+                    warning
+                        .message
+                        .contains("3 consecutive, 5 in the last 50 reviews"),
+                    "{}",
+                    warning.message
+                );
+                warning_id = Some(event.id);
+            }
+            EventMsg::TurnAborted(aborted) => {
+                assert_eq!(aborted.reason, TurnAbortReason::Interrupted);
+                assert_eq!(Some(event.id), active_id);
+                break;
+            }
+            EventMsg::TurnComplete(_) => panic!("B must be interrupted by A's denials"),
+            _ => {}
+        }
+    }
+    assert!(active_id.is_some());
+    assert_eq!(warning_id, active_id);
+    for review in reviews {
+        assert_eq!(
+            review
+                .requests()
+                .iter()
+                .filter(
+                    |request| request.body_json()["client_metadata"]["x-openai-subagent"]
+                        == "guardian"
+                )
+                .count(),
+            1
+        );
+    }
     Ok(())
 }
