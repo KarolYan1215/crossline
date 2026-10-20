@@ -31,8 +31,20 @@ const REVIEW_INSTRUCTIONS = "Review this public skill as the Skill's public-skil
 /** The two hosts a skill is fetched from; nothing else is ever requested, whatever a candidate names. */
 const ALLOWED_HOSTS = new Set(["api.github.com", "raw.githubusercontent.com"]);
 export type HttpGet = (url: string) => Promise<{ status: number; url: string; text: () => Promise<string> }>;
-export const defaultHttpGet: HttpGet = (url) => fetch(url, { redirect: "follow", signal: AbortSignal.timeout(30_000),
-  headers: { "user-agent": "crossline-skill-library", accept: url.startsWith("https://api.github.com/") ? "application/vnd.github+json" : "text/plain" } });
+/**
+ * `CROSSLINE_GITHUB_TOKEN` (optional, read-only public access is enough) lifts GitHub's limit for unauthenticated requests, 60 an hour
+ * per address: on 2026-10-20 five of seventeen installs stopped on it. Sent only to the two GitHub hosts above.
+ */
+export const defaultHttpGet: HttpGet = (url) => {
+  const token = process.env.CROSSLINE_GITHUB_TOKEN?.trim();
+  let host = "";
+  try { host = new URL(url).host; } catch { /* refused by get() */ }
+  return fetch(url, { redirect: "follow", signal: AbortSignal.timeout(30_000),
+    headers: { "user-agent": "crossline-skill-library", accept: url.startsWith("https://api.github.com/") ? "application/vnd.github+json" : "text/plain",
+      ...(token && ALLOWED_HOSTS.has(host) ? { authorization: `Bearer ${token}` } : {}) } });
+};
+/** A refusal that says nothing about the skill (GitHub's rate limit, no connection): not recorded as rejected, tried again later. */
+export const TRANSIENT_FETCH = /频率限制|无法连接/;
 
 async function get(http: HttpGet, url: string): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
   const response = await http(url).catch(() => undefined);
@@ -157,62 +169,107 @@ export function scoutDue(store: CrosslineStore, workspaceId: string, now = new D
   return now.getTime() - Date.parse(last) >= SCOUT_PERIOD_DAYS * 86_400_000;
 }
 
-type Deps = { http?: HttpGet; now?: () => Date };
+/** At most this many answers in one coverage search; it stops sooner once an answer names nothing new. */
+export const COVERAGE_ROUNDS_MAX = 6;
+
+/**
+ * The search after the interview (2026-10-20, the owner's decision: 「完成访谈时，自动检索网络，安装用户主线相关的高热度高星 skills，
+ * 不限制数量，覆盖所有需求为止」): due once the main interview is complete, for every line no coverage search has done yet — a line
+ * added later gets its own. A search stopped by the quota or the runtime is tried again the next day.
+ */
+export function coverageDue(store: CrosslineStore, workspaceId: string, now = new Date()): boolean {
+  const lines = identityLines(store, workspaceId).map((line) => line.id);
+  if (!lines.length) return false;
+  const interview = store.listOnboardingSessions(workspaceId).find((session) => !session.id.startsWith("line-") && session.state === "complete");
+  if (!interview) return false;
+  const runs = store.listEvents(workspaceId, { type: "skill.public.scouted" })
+    .map((event) => event.payload as { mode?: string; lines?: string[]; code?: string; at?: string })
+    .filter((payload) => payload.mode === "coverage");
+  const covered = new Set(runs.filter((run) => !run.code).flatMap((run) => run.lines ?? []));
+  if (lines.every((id) => covered.has(id))) return false;
+  const last = runs.at(-1)?.at;
+  return !last || now.getTime() - Date.parse(last) >= 86_400_000 || !runs.at(-1)?.code;
+}
+
+type Deps = { http?: HttpGet; now?: () => Date; mode?: "routine" | "coverage" };
 
 /**
  * One scouting pass: the model finds candidates; each is fetched (only its directory, only from GitHub, only with a reusable licence),
  * scanned by code, reviewed by a model, and installed when both allow it — as written, or without its scripts. On the monthly pass every
  * installed skill is also checked for a newer commit, which goes through the same checks and replaces the old one without asking (the
- * person's decision; each file's sha256 is kept so a bad version can be traced).
+ * person's decision; each file's sha256 is kept so a bad version can be traced). In `coverage` mode the model is asked again, with what is
+ * now installed and what could not be, until an answer names nothing new (`COVERAGE_ROUNDS_MAX`); no count caps what is installed.
  */
 export function createSkillScout(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined, deps: Deps = {}) {
   const http = deps.http ?? defaultHttpGet;
-  return async function scout(): Promise<{ installed: string[]; updated: string[]; rejected: Array<{ name: string; reason: string }>; removed: string[] } | { blocked: string }> {
+  const mode = deps.mode ?? "routine";
+  return async function scout(): Promise<{ installed: string[]; updated: string[]; rejected: Array<{ name: string; reason: string }>; removed: string[]; rounds: number } | { blocked: string }> {
     const client = getClient();
     if (!client) return { blocked: "CODEX_SUPERVISOR_UNAVAILABLE" };
     const web = webResearchBlocker();
     if (web) return { blocked: web.code };
     const now = deps.now?.() ?? new Date();
     const previous = lastScout(store, workspaceId);
-    const monthly = !previous || now.getTime() - Date.parse(previous) >= SCOUT_PERIOD_DAYS * 86_400_000;
+    const monthly = mode === "routine" && (!previous || now.getTime() - Date.parse(previous) >= SCOUT_PERIOD_DAYS * 86_400_000);
     const orders = store.listWorkOrders(workspaceId);
-    const records = readPublicSkills(store, workspaceId);
-    const context: SkillScoutContext = {
-      version: "crossline.skill-scout.v1", today: now.toISOString().slice(0, 10),
-      lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [],
-        recentTasks: orders.filter((order) => order.identityId === line.id && order.state !== "archived").slice(-8).map((order) => order.intent.slice(0, 120)) })),
-      wanted: pendingWants(store, workspaceId),
-      installed: records.map((record) => ({ id: record.id, name: record.name, repo: record.source.repo, path: record.source.path })),
-      categories: PUBLIC_SKILL_CATEGORIES.map((id) => ({ id, label: PUBLIC_SKILL_CATEGORY_LABEL[id] }))
-    };
-    const result = await runCodexSkill<SkillScoutAnswer>(client, context, {
-      skillName: SKILL_SCOUT, cwd, developerInstructions: SCOUT_INSTRUCTIONS, outputSchema: SKILL_SCOUT_SCHEMA, prepareInput: () => context,
-      allowWebSearch: true, validateOutput: (output) => validateSkillScout(output, context), softAccept: (_rejection, output) => keepSkillScout(output, context),
-      onAudit: () => {}, timeoutMs: 60 * 60_000
-    });
-    const outcome = { installed: [] as string[], updated: [] as string[], rejected: [] as Array<{ name: string; reason: string }>, removed: [] as string[] };
+    const lines = identityLines(store, workspaceId);
+    const outcome = { installed: [] as string[], updated: [] as string[], rejected: [] as Array<{ name: string; reason: string }>, removed: [] as string[], rounds: 0 };
     const recentlyRejected = new Set(store.listEvents(workspaceId, { type: "skill.public.rejected" })
-      .filter((item) => now.getTime() - Date.parse(item.createdAt) < REJECTED_FOR_DAYS * 86_400_000)
+      .filter((item) => now.getTime() - Date.parse(item.createdAt) < REJECTED_FOR_DAYS * 86_400_000
+        && !TRANSIENT_FETCH.test(String((item.payload as { reason?: string }).reason ?? "")))
       .map((item) => { const payload = item.payload as { repo?: string; path?: string }; return `${payload.repo}#${payload.path}`; }));
     const key = (candidate: { repo: string; path: string }) => `${candidate.repo.replace(/\.git$|\/$/g, "")}#${safeRepoPath(candidate.path) ?? candidate.path}`;
-    const candidates = result.ok ? result.output.candidates.filter((candidate) => !recentlyRejected.has(key(candidate))
-      && !records.some((record) => key(record.source) === key(candidate))) : [];
     const consider = (candidate: SkillCandidate, existing: PublicSkillRecord | undefined) =>
       considerPublicSkill({ store, workspaceId, cwd, client, http, now }, candidate, existing);
-    for (const candidate of candidates.slice(0, 8)) {
-      const done = await consider(candidate, undefined);
-      if (done.state === "installed") outcome.installed.push(done.id); else outcome.rejected.push({ name: candidate.name, reason: done.reason });
+    const tried: NonNullable<SkillScoutContext["tried"]> = [];
+    const triedKeys = new Set<string>();
+    const wanted = pendingWants(store, workspaceId);
+    let blocker: { code: string; message: string } | undefined;
+    let limited = false;
+    for (let round = 1; round <= (mode === "coverage" ? COVERAGE_ROUNDS_MAX : 1) && !limited; round += 1) {
+      const records = readPublicSkills(store, workspaceId);
+      const context: SkillScoutContext = {
+        version: "crossline.skill-scout.v1", today: now.toISOString().slice(0, 10),
+        lines: lines.map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [],
+          recentTasks: orders.filter((order) => order.identityId === line.id && order.state !== "archived").slice(-8).map((order) => order.intent.slice(0, 120)) })),
+        wanted,
+        installed: records.map((record) => ({ id: record.id, name: record.name, repo: record.source.repo, path: record.source.path })),
+        categories: PUBLIC_SKILL_CATEGORIES.map((id) => ({ id, label: PUBLIC_SKILL_CATEGORY_LABEL[id] })),
+        ...(mode === "coverage" ? { mode, round, tried: tried.slice(-40) } : {})
+      };
+      const result = await runCodexSkill<SkillScoutAnswer>(client, context, {
+        skillName: SKILL_SCOUT, cwd, developerInstructions: SCOUT_INSTRUCTIONS, outputSchema: SKILL_SCOUT_SCHEMA, prepareInput: () => context,
+        allowWebSearch: true, validateOutput: (output) => validateSkillScout(output, context), softAccept: (_rejection, output) => keepSkillScout(output, context),
+        onAudit: () => {}, timeoutMs: 60 * 60_000
+      });
+      outcome.rounds = round;
+      if (!result.ok) { blocker = { code: result.blocker.code, message: result.blocker.message }; break; }
+      const candidates = result.output.candidates.filter((candidate) => !recentlyRejected.has(key(candidate)) && !triedKeys.has(key(candidate))
+        && !records.some((record) => key(record.source) === key(candidate)));
+      // An answer that names nothing new: every need has a skill, or none worth installing exists.
+      if (!candidates.length) break;
+      for (const candidate of mode === "coverage" ? candidates : candidates.slice(0, 8)) {
+        triedKeys.add(key(candidate));
+        const done = await consider(candidate, undefined);
+        if (done.state === "installed") { outcome.installed.push(done.id); continue; }
+        outcome.rejected.push({ name: candidate.name, reason: done.reason });
+        tried.push({ repo: candidate.repo, path: candidate.path, reason: done.reason.slice(0, 160) });
+        // GitHub's limit: the rest waits for the next search, which is due again the next day.
+        if (done.transient) { limited = true; break; }
+      }
     }
     if (monthly && previous) {
-      for (const record of records) {
+      for (const record of readPublicSkills(store, workspaceId)) {
         const head = await currentCommit(record);
         if (!head || head === record.commit) continue;
         const done = await consider({ name: record.name, repo: record.source.repo, path: record.source.path, category: record.category, lines: record.lines, why: record.why }, record);
-        if (done.state === "installed") outcome.updated.push(done.id); else outcome.removed.push(record.id);
+        if (done.state === "installed") outcome.updated.push(done.id); else if (!("transient" in done)) outcome.removed.push(record.id);
       }
     }
+    const stopped = blocker ?? (limited ? { code: "GITHUB_RATE_LIMITED", message: "GitHub 暂时拒绝了请求（频率限制）" } : undefined);
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.public.scouted:${now.getTime()}`, type: "skill.public.scouted",
-      entityId: workspaceId, payload: { ...outcome, at: now.toISOString(), wanted: context.wanted.length, ...(result.ok ? {} : { code: result.blocker.code, message: result.blocker.message.slice(0, 300) }) } });
+      entityId: workspaceId, payload: { ...outcome, mode, lines: lines.map((line) => line.id), at: now.toISOString(), wanted: wanted.length,
+        ...(stopped ? { code: stopped.code, message: stopped.message.slice(0, 300) } : {}) } });
     return outcome;
 
     async function currentCommit(record: PublicSkillRecord): Promise<string | undefined> {
@@ -237,7 +294,7 @@ type ConsiderContext = { store: CrosslineStore; workspaceId: string; cwd: string
  * With `existing`, a newer commit of an installed skill: it replaces the old record, or removes it when it no longer passes.
  */
 export async function considerPublicSkill(ctx: ConsiderContext, candidate: SkillCandidate, existing: PublicSkillRecord | undefined):
-  Promise<{ state: "installed"; id: string; final: "usable" | "text_only" } | { state: "rejected"; reason: string }> {
+  Promise<{ state: "installed"; id: string; final: "usable" | "text_only" } | { state: "rejected"; reason: string; transient?: true }> {
   const { store, workspaceId, cwd, client, http, now } = ctx;
   const via = ctx.via ? { via: ctx.via } : {};
   const reject = (reason: string, extra: Record<string, unknown> = {}) => {
@@ -246,6 +303,8 @@ export async function considerPublicSkill(ctx: ConsiderContext, candidate: Skill
     return { state: "rejected" as const, reason };
   };
   const fetched = await fetchSkillDirectory(candidate, http);
+  // A rate limit or a lost connection is no verdict on the skill: nothing is recorded, an installed one is kept, and it is tried again.
+  if (!fetched.ok && TRANSIENT_FETCH.test(fetched.reason)) return { state: "rejected" as const, reason: fetched.reason, transient: true as const };
   if (!fetched.ok) return reject(fetched.reason);
   const skillText = fetched.files.find((file) => file.path === "SKILL.md")?.text ?? "";
   const front = skillFrontmatter(skillText);

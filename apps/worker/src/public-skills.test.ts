@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, allowSkillScripts, installedPublicFiles as installedFiles, readPublicSkills as readLibrary, removePublicSkill } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { SKILL_LIBRARY_SETTING } from "@crossline/core";
-import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, fetchSkillDirectory, installPublicSkillFromLink, readLinkRequest, scoutDue,
+import { cleanPublicSkills, coverageDue, createPublicSkillInstaller, createSkillScout, fetchSkillDirectory, installPublicSkillFromLink, readLinkRequest, scoutDue,
   wantPublicSkill, SKILL_SCOUT, type HttpGet } from "./public-skills";
 import { librarySkillsFor } from "./skill-library";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
@@ -243,4 +243,43 @@ test("a link is checked before anything is fetched, and without a model nothing 
     .toEqual({ ok: true, request: { repo: "https://github.com/acme/skills.git", path: "skills/xhs-writer", lineId: "media", why: "" } });
   expect(await installer.handle("GET", "/v1/skills/public/install/inst-missing", ws, undefined)).toMatchObject({ status: 404 });
   expect(await installer.handle("GET", "/v1/skills/public/elsewhere", ws, undefined)).toBeUndefined();
+});
+
+test("after the interview the search covers every line round after round until an answer names nothing new; no count caps it", async () => {
+  const now = new Date("2026-10-20T12:00:00Z");
+  expect(coverageDue(store, ws, now)).toBe(false);
+  store.saveOnboardingSession({ id: "main", ownerId: "user-1", workspaceId: ws, state: "complete", coverage: {}, createdAt: now.toISOString(), updatedAt: now.toISOString() });
+  expect(coverageDue(store, ws, now)).toBe(true);
+  const rounds: string[] = [];
+  const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => {
+    if (!prompt.startsWith(`$${SKILL_SCOUT}`)) return JSON.stringify({ verdict: "usable", reasons: ["方法具体"] });
+    const round = /"round":(\d+)/.exec(prompt)?.[1] ?? "?";
+    rounds.push(round);
+    // Round 1 names a good one and an injected one; round 2 sees the refusal in `tried` and names another; round 3 names nothing new.
+    if (round === "1") return JSON.stringify({ candidates: [candidate("xhs-writer"), candidate("sneaky")], blockers: [] });
+    if (round === "2") { expect(prompt).toContain("skills/sneaky"); return JSON.stringify({ candidates: [candidate("xhs-tools"), candidate("xhs-writer")], blockers: [] }); }
+    return JSON.stringify({ candidates: [], blockers: [] });
+  });
+  const outcome = await createSkillScout(store, ws, "C:\repo", () => runtime.rpc, { http: github(repos), now: () => now, mode: "coverage" })();
+  expect(outcome).toMatchObject({ installed: ["pub-xhs-writer", "pub-xhs-tools"], rounds: 3 });
+  expect(rounds).toEqual(["1", "2", "3"]);
+  expect(coverageDue(store, ws, now)).toBe(false);
+  // A line added later gets a search of its own.
+  store.setSetting(ws, LINE_SETTING, JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "", goals: [], createdAt: "" },
+    { id: "research", label: "研究者", color: "research", goal: "", goals: [], createdAt: "" }]));
+  expect(coverageDue(store, ws, now)).toBe(true);
+});
+
+test("GitHub's rate limit is no verdict: nothing is recorded as rejected, an installed skill is kept, and the search is due again", async () => {
+  const now = new Date("2026-10-20T12:00:00Z");
+  store.saveOnboardingSession({ id: "main", ownerId: "user-1", workspaceId: ws, state: "complete", coverage: {}, createdAt: now.toISOString(), updatedAt: now.toISOString() });
+  const limited: HttpGet = async (url) => ({ status: 403, url, text: async () => "rate limit" });
+  const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
+    ? JSON.stringify({ candidates: [candidate("xhs-writer"), candidate("xhs-tools")], blockers: [] }) : JSON.stringify({ verdict: "usable", reasons: ["ok"] }));
+  const outcome = await createSkillScout(store, ws, "C:\repo", () => runtime.rpc, { http: limited, now: () => now, mode: "coverage" })();
+  expect(outcome).toMatchObject({ installed: [], rounds: 1 });
+  expect(store.listEvents(ws, { type: "skill.public.rejected" })).toHaveLength(0);
+  // Stopped by the limit: the search is due again the next day, not counted as covering the line.
+  expect(coverageDue(store, ws, now)).toBe(false);
+  expect(coverageDue(store, ws, new Date("2026-10-21T13:00:00Z"))).toBe(true);
 });

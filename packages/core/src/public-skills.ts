@@ -124,14 +124,23 @@ export type SkillScoutContext = {
   wanted: Array<{ lineId: string; task: string }>;
   installed: Array<{ id: string; name: string; repo: string; path: string }>;
   categories: Array<{ id: PublicSkillCategory; label: string }>;
+  /**
+   * `coverage`: the search after the interview (2026-10-20, the owner's 「覆盖所有需求为止」): every need of every line, round after round
+   * until an answer names nothing new. `round` counts from 1; `tried` lists what earlier rounds named and could not install.
+   */
+  mode?: "routine" | "coverage";
+  round?: number;
+  tried?: Array<{ repo: string; path: string; reason: string }>;
 };
 export type SkillCandidate = { name: string; repo: string; path: string; category: PublicSkillCategory; lines: string[]; why: string };
 export type SkillScoutAnswer = { candidates: SkillCandidate[]; blockers: Array<{ code: string; message: string }> };
 
 const str = (max: number) => ({ type: "string", minLength: 1, maxLength: max }) as const;
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+/** One answer's candidates (was 8). The coverage search asks again until an answer names nothing new, so the total is not capped. */
+export const SKILL_SCOUT_CANDIDATES_MAX = 20;
 export const SKILL_SCOUT_SCHEMA = object({
-  candidates: { type: "array", maxItems: 8, items: object({
+  candidates: { type: "array", maxItems: SKILL_SCOUT_CANDIDATES_MAX, items: object({
     name: str(80), repo: str(200), path: { type: "string", maxLength: 200 },
     category: { type: "string", enum: [...PUBLIC_SKILL_CATEGORIES] },
     lines: { type: "array", maxItems: 8, items: str(80) }, why: str(400)

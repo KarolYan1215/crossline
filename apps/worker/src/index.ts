@@ -32,7 +32,7 @@ import { dedupePass } from "./dedupe";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
-import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, scoutDue } from "./public-skills";
+import { cleanPublicSkills, coverageDue, createPublicSkillInstaller, createSkillScout, scoutDue } from "./public-skills";
 import { browserProfilesRoot, cleanGrownSkills, finishWorkflowLogin, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
   workflowSchedulePass } from "./workflow-smith";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
@@ -416,19 +416,23 @@ async function minePass(workspaceId: string, checkedAt: string): Promise<void> {
  * once a month (checking installed ones for a newer commit too), and the day after a task found nothing that fits. Discretionary spend.
  */
 const scoutingSkills = new Set<string>();
-async function publicSkillPass(workspaceId: string, checkedAt: string): Promise<void> {
+async function publicSkillPass(workspaceId: string, checkedAt: string, offPeakWait = false): Promise<void> {
   try {
     const removed = cleanPublicSkills(analysisStore, workspaceId);
     if (removed.length) console.info(JSON.stringify({ type: "skill.public.cleaned", checkedAt, workspaceId, removed }));
   } catch { /* housekeeping */ }
   if (paused(workspaceId, "planning")) return;
-  if (scoutingSkills.has(workspaceId) || !codexSupervisor || !scoutDue(analysisStore, workspaceId)) return;
-  if (!spendAllows(await spendFor(workspaceId), "discretionary")) return;
+  if (scoutingSkills.has(workspaceId) || !codexSupervisor) return;
+  // The search after the interview (coverageDue) is part of setting the account up: it runs as core work and does not wait for the
+  // developer's model's cheaper hours. The monthly and on-demand search stays discretionary and waits.
+  const coverage = coverageDue(analysisStore, workspaceId);
+  if (!coverage && (offPeakWait || !scoutDue(analysisStore, workspaceId))) return;
+  if (!spendAllows(await spendFor(workspaceId), coverage ? "core" : "discretionary")) return;
   scoutingSkills.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createSkillScout(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
-    if (outcome) console.info(JSON.stringify({ type: "skill.public.scouted", checkedAt, workspaceId, ...outcome }));
+    const outcome = await createSkillScout(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { mode: coverage ? "coverage" : "routine" })().catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: "skill.public.scouted", checkedAt, workspaceId, mode: coverage ? "coverage" : "routine", ...outcome }));
   } finally { scoutingSkills.delete(workspaceId); }
 }
 
@@ -628,7 +632,7 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   // The interview's extraction, for replies a failed run left (after its backoff) or a worker restart cut off; a turn starts it itself.
   await onboardingExtractPass(workspace.id).catch(() => undefined);
   if (!offPeakWait) await minePass(workspace.id, checkedAt);
-  if (!offPeakWait) await publicSkillPass(workspace.id, checkedAt);
+  await publicSkillPass(workspace.id, checkedAt, offPeakWait);
   await portraitPass(workspace.id, checkedAt, offPeakWait);
   // Authorized folders: what changed since the last tick is read (at most forty files a folder a tick), before filing runs over it.
   await folderPass(workspace.id, checkedAt);
@@ -1260,7 +1264,10 @@ if (!capabilitySecret) {
       createOnboardingSessionRunner(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))({ sessionId, text, ...(reread ? { reread: true } : {}) })
         // The interview just finished: the first drafts start now, not at the next tick up to fifteen minutes later, while 主线 said
         // 「完成初始访谈后生成」 to someone who had (2026-10-17 walkthrough, W-12).
-        .then((outcome) => { if (outcome.state === "ready") void firstDraftsPass(workspaceId).catch(() => undefined); return outcome; }),
+        .then((outcome) => {
+          // The interview just finished: the first drafts, and the search for the lines' skills (coverageDue), start now, not at the next tick.
+          if (outcome.state === "ready") { void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined); }
+          return outcome; }),
     transcriptionStatus: () => transcriber.status(),
     startTranscriptionDownload: async () => {
       const current = await transcriber.status();
