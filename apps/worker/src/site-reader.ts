@@ -184,17 +184,16 @@ function playwrightDriver(page: import("playwright-core").Page): PageDriver {
         .map((anchor) => ({ text: (anchor.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 120), href: anchor.href })) }), [TEXT_MAX, LINKS_MAX] as const)) }),
     tabs: (label) => page.evaluate((wanted) => {
       document.querySelectorAll("[data-crossline-tab]").forEach((element) => element.removeAttribute("data-crossline-tab"));
-      const norm = (value: string) => value.replace(/\s+/g, " ").trim();
       const escaped = wanted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const pattern = new RegExp(`^${escaped}\\s*[·•]?\\s*\\d*$`);
-      const all = [...document.querySelectorAll<HTMLElement>("body *")].filter((element) => element.getClientRects().length && pattern.test(norm(element.innerText ?? "")));
+      const all = [...document.querySelectorAll<HTMLElement>("body *")].filter((element) => element.getClientRects().length && pattern.test((element.innerText ?? "").replace(/\s+/g, " ").trim()));
       const deepest = all.filter((element) => !all.some((other) => other !== element && element.contains(other)));
       return deepest.slice(0, 20).map((element, index) => {
         element.setAttribute("data-crossline-tab", String(index));
         let tabLike = false;
         for (let node: HTMLElement | null = element, depth = 0; node && depth < 5 && !tabLike; node = node.parentElement, depth += 1)
           tabLike = /^(tab|tablist)$/.test(node.getAttribute("role") ?? "") || node.hasAttribute("aria-selected") || /tab(?!le)/i.test(String(node.className ?? ""));
-        return { text: norm(element.innerText ?? ""), tabLike, href: element.closest<HTMLAnchorElement>("a[href]")?.href ?? "",
+        return { text: (element.innerText ?? "").replace(/\s+/g, " ").trim(), tabLike, href: element.closest<HTMLAnchorElement>("a[href]")?.href ?? "",
           control: Boolean(element.closest("form, input, textarea, select, button[type=submit]")) };
       });
     }, label),
@@ -210,6 +209,10 @@ const openBrowser: OpenSite = async (profileDir, executablePath, onSite) => {
   const { chromium } = await import("playwright-core");
   const context = await chromium.launchPersistentContext(profileDir, { executablePath, headless: false, viewport: null,
     args: ["--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-mode"] });
+  // The worker runs under tsx, whose esbuild wraps every named function in `__name(…)`: a function handed to `page.evaluate` then
+  // throws 「__name is not defined」 in the page. The first real run that clicked a tab stopped on exactly that (2026-10-20), so the
+  // page functions above name nothing, and every page also gets a harmless `__name` for anything that still does.
+  await context.addInitScript({ content: "globalThis.__name = globalThis.__name || ((target) => target);" });
   const driver = playwrightDriver(context.pages()[0] ?? await context.newPage());
   return {
     read: (url, scrolls, click) => readPage(driver, url, { scrolls, onSite, ...(click ? { click } : {}) }),
