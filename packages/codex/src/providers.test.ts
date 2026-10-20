@@ -29,6 +29,14 @@ test("what the provider cannot do or has not passed goes to the workspace's own 
   expect(decideRoute("crossline-milestone-gate", undefined)).toEqual({ via: "codex" });
 });
 
+test("a Skill with a model of its own runs on it, and on the provider's own model when the main model is asked for", () => {
+  const withPlanning = { ...routing(["crossline-step-planner", "crossline-milestone-gate"], false),
+    modelFor: (skill: string) => skill === "crossline-step-planner" ? "glm" : undefined };
+  expect(decideRoute("crossline-step-planner", withPlanning)).toMatchObject({ via: "provider", provider: { model: "glm" } });
+  expect(decideRoute("crossline-step-planner", withPlanning, { mainModel: true })).toMatchObject({ via: "provider", provider: { model: "deepseek-chat" } });
+  expect(decideRoute("crossline-milestone-gate", withPlanning)).toMatchObject({ via: "provider", provider: { model: "deepseek-chat" } });
+});
+
 test("with Crossline's own search configured, a web Skill may go to the provider; the assistant still may not", () => {
   const withSearch = { ...routing(["crossline-due-diligence", "crossline-agent"], false), capabilities: { webSearch: true } };
   expect(decideRoute("crossline-due-diligence", withSearch)).toMatchObject({ via: "provider" });

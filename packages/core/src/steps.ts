@@ -187,7 +187,7 @@ const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((
   : typeof value === "string" ? value.split(/[\s,，、;；]+/).filter(Boolean) : [];
 
 export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options: {
-  /** False for an account the machine's assistant does not work for: every step is then the person's (or mixed), none is handed over. */
+  /** False only where no assistant can take a step: every step is then the person's (or mixed). Every account has one now (tools mode). */
   assistant?: boolean } = {}): { plan: StepPlan; warnings: StepWarning[] } {
   const assistant = options.assistant !== false;
   const warnings: StepWarning[] = [];
@@ -217,7 +217,7 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
     if (!assistant && step.executor === "agent") {
       step.executor = "human";
       step.schedulable = step.role !== "wait";
-      warnings.push({ code: "STEP_NO_ASSISTANT", detail: `「${step.title}」改由本人完成：这个账号没有电脑上的助手` });
+      warnings.push({ code: "STEP_NO_ASSISTANT", detail: `「${step.title}」改由本人完成：这个账号没有助手` });
     }
     // Asking someone for a fact: the assistant drafts the message, the person sends it — sending is an external act (info-request.ts).
     const request = step.role === "prepare" || /草稿|起草/.test(step.title) ? null : infoRequestTraits({ title: step.title, p50Minutes: step.estimate.p50Minutes }).request;

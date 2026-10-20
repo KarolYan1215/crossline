@@ -22,7 +22,9 @@ export type AnalysisAudit = { threadId?: string; turnId?: string;
    */
   warnings?: Array<{ code: string; detail: string }>;
   /** The library skills (`extraSkills`) that were installed and switched on for this run. */
-  skills?: string[] };
+  skills?: string[];
+  /** Set when the answer is a second run on the provider's own model (`redoOnRepair`): the repairs the first one needed. */
+  redone?: { repairs: number } };
 /**
  * What a running turn has done so far, for a screen that shows the wait (docs/onboarding-v3.md 「等待」): `thinking` until the first
  * word, `writing` with the answer streamed so far (unvalidated — never stored, only counted and previewed), `checking` once it is in.
@@ -160,6 +162,14 @@ export type SkillRunOptions<T> = {
   onPlan?: (plan: { explanation: string; steps: Array<{ step: string; status: string }> }) => void;
   /** Run on this tier instead of the Skill's own (the input box's second, stronger look). Ignored when the budget is tight. */
   tier?: RouteTier;
+  /**
+   * On a provider that gives this Skill a model of its own (the developer's planning model, `SPONSOR_PLANNING_SKILLS`): a run there that
+   * needed a repair is run once more on the provider's own model and that answer kept, unless it fails (decided 2026-10-20 after the
+   * real-work comparison, where the one plan that missed its task was a repaired one). `audit.redone` says it happened.
+   */
+  redoOnRepair?: boolean;
+  /** The provider's own model even where the Skill has one of its own (set by `redoOnRepair` for the second run). */
+  mainModel?: boolean;
   /** Run on exactly this provider, bypassing routing: only the conformance check, which measures a provider before it may be routed to. */
   provider?: ThreadProvider;
   /** With `provider`: the search functions to stand in for hosted web search (routing supplies them otherwise). */
@@ -315,7 +325,7 @@ const MAX_STALL_RETRIES = 2;
  * Everything the two entry points share: waiting in the right lane, switching the Skill on, running, switching
  * it back off, and reporting what the run used.
  */
-async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools;
+async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools;
   onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode; tenant?: string },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
   const queuedAt = Date.now();
@@ -340,7 +350,7 @@ async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: s
 type RunTiming = { laneMs: number; gateMs: number; tenant: string };
 
 /** The run itself, once it holds a slot: counted as in flight on its runtime so the runtime is never reclaimed under it. */
-async function runGated<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
+async function runGated<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
   body: (context: RunContext) => Promise<SkillRunResult<T>>, timing: RunTiming): Promise<SkillRunResult<T>> {
   markClientBusy(client, 1);
   try { return await runRouted(client, options, body, timing); } finally { markClientBusy(client, -1); }
@@ -376,13 +386,14 @@ async function releaseSkill(client: CodexRpcBoundary, path: string): Promise<voi
   if (entry.restore) await setNativeSkill(client, path, false);
 }
 
-async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
+async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
   body: (context: RunContext) => Promise<SkillRunResult<T>>, timing: RunTiming): Promise<SkillRunResult<T>> {
   const startedAt = Date.now();
   const spendMode = await currentSpendMode();
   // The workspace's own provider when it can serve this Skill, else its own Codex sign-in, else a blocker (never the owner's runtime).
   const routing = options.provider ? undefined : currentProviderRouting();
-  const decision = options.provider ? { via: "provider" as const, provider: options.provider } : decideRoute(options.skillName, routing);
+  const decision = options.provider ? { via: "provider" as const, provider: options.provider }
+    : decideRoute(options.skillName, routing, options.mainModel ? { mainModel: true } : {});
   if (decision.via === "blocked") return { ok: false, blocker: { code: decision.code, message: decision.message }, audit: {} };
   const provider = decision.via === "provider" ? decision.provider : undefined;
   // A stronger look is a cost the person did not ask for: in economy mode the Skill keeps its own route.
@@ -994,9 +1005,22 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
   }));
 }
 
-export function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>): Promise<SkillRunResult<T>> {
-  if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} });
-  return executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
+export async function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>): Promise<SkillRunResult<T>> {
+  if (options.signal?.aborted) return { ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} };
+  const first = await executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
+  if (!options.redoOnRepair || options.mainModel || !first.ok || !first.audit.repairs || !onSkillModel(options)) return first;
+  console.log(JSON.stringify({ type: "skill.redo_on_main_model", skill: options.skillName, repairs: first.audit.repairs }));
+  const main = { ...options, mainModel: true };
+  const second = await executeSkill(client, main, (context) => runSkillTurn(client, input, main, context));
+  return second.ok ? { ...second, audit: { ...second.audit, redone: { repairs: first.audit.repairs } } } : first;
+}
+
+/** Whether this run goes to a model the provider keeps for this Skill rather than its own (what `redoOnRepair` redoes). */
+function onSkillModel<T>(options: SkillRunOptions<T>): boolean {
+  if (options.provider) return false;
+  const routing = currentProviderRouting();
+  const decision = decideRoute(options.skillName, routing);
+  return decision.via === "provider" && Boolean(routing) && decision.provider.model !== routing!.provider.model;
 }
 
 /**

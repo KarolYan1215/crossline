@@ -108,7 +108,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     const run = (missingInputs: MissingInput[]) => {
       const input = { ...context, missingInputs };
       const runSources = [...sources, ...missingInputs.flatMap((item) => [item.message, item.what])];
-      return runCodexSkill<Answer>(client, input, { skillName: SKILL, cwd,
+      return runCodexSkill<Answer>(client, input, { skillName: SKILL, cwd, redoOnRepair: true,
         developerInstructions: "Work backwards from this approved milestone to the tasks that deliver it, as the crossline-goal-backplanner Skill describes, "
           + "and return only the requested JSON. Each item becomes one task card on the person's 任务 page (one deliverable, 30 to 480 minutes, named "
           + "with its course or project) that the step planner splits into steps afterwards; a request for a fact is never an item. Read existingTasks and "

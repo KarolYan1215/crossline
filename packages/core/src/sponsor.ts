@@ -140,9 +140,22 @@ function admittedFor(skill: string, models: SponsorModel[], evaluations: Sponsor
   }).sort((a, b) => evaluationYuanPerRun(a, models) - evaluationYuanPerRun(b, models) || (order.get(a.model) ?? 99) - (order.get(b.model) ?? 99));
 }
 
-/** The model one Skill runs on: the cheapest candidate that passed it for a simple background Skill, the chosen model for the rest. */
+/**
+ * Planning Skills that may run on a model the owner picked after reading two models' plans side by side on real work (2026-10-20,
+ * scripts/sponsor-compare.ts): conformance measures form, so a planning Skill moves only by that decision (`CROSSLINE_SPONSOR_PLANNING_MODEL`),
+ * never because a cheaper candidate passed its checks. A run of one that needed a repair is redone on the chosen model (`redoOnRepair`).
+ */
+export const SPONSOR_PLANNING_SKILLS: readonly string[] = ["crossline-step-planner", "crossline-goal-backplanner"];
+
+/**
+ * The model one Skill runs on: the cheapest candidate that passed it for a simple background Skill, the planning model for a planning
+ * Skill when that model passed it, the chosen model for the rest.
+ */
 export function sponsorModelForSkill(skill: string, chosen: string, models: SponsorModel[], evaluations: SponsorEvaluation[],
-  capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES): string {
+  capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES, planningModel?: string): string {
+  if (SPONSOR_PLANNING_SKILLS.includes(skill)) {
+    return planningModel && admittedFor(skill, models, evaluations, capabilities).some((item) => item.model === planningModel) ? planningModel : chosen;
+  }
   if (!SPONSOR_SIMPLE_SKILLS.includes(skill)) return chosen;
   return admittedFor(skill, models, evaluations, capabilities)[0]?.model ?? chosen;
 }

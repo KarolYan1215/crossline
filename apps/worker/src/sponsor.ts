@@ -140,13 +140,16 @@ const detailOf = (blocker: { code: string; detail?: string }) => blocker.detail 
 const transientFailure = (code: string, detail = "") => /RATE_LIMIT|USAGE_LIMIT|STALLED|TIMEOUT|CANCELED/.test(code)
   || /rate limit|TPM|RPM|429|overload|busy|满载|限流|timed? ?out/i.test(detail);
 
-export function sponsorFromEnv(env: NodeJS.ProcessEnv = process.env): { key: string; baseUrl: string; models: SponsorModel[]; capYuan: number } | undefined {
+export function sponsorFromEnv(env: NodeJS.ProcessEnv = process.env): { key: string; baseUrl: string; models: SponsorModel[]; capYuan: number;
+  planningModel?: string } | undefined {
   const key = env.CROSSLINE_SPONSOR_API_KEY?.trim();
   const models = parseSponsorModels(env.CROSSLINE_SPONSOR_MODELS);
   if (!key || !models.length) return undefined;
   const cap = Number(env.CROSSLINE_SPONSOR_MONTHLY_CNY);
+  // The model the planning Skills run on (SPONSOR_PLANNING_SKILLS), as the owner chose it after the real-work comparison; one not listed is ignored.
+  const planning = env.CROSSLINE_SPONSOR_PLANNING_MODEL?.trim();
   return { key, baseUrl: (env.CROSSLINE_SPONSOR_BASE_URL?.trim() || "https://api.siliconflow.cn/v1").replace(/\/+$/, ""), models,
-    capYuan: cap > 0 ? cap : SPONSOR_MONTHLY_CAP_CNY };
+    capYuan: cap > 0 ? cap : SPONSOR_MONTHLY_CAP_CNY, ...(planning && models.some((model) => model.model === planning) ? { planningModel: planning } : {}) };
 }
 
 export function createSponsorService(options: {
@@ -212,11 +215,11 @@ export function createSponsorService(options: {
     const last = chosen();
     return last ? [last] : [];
   };
-  /** The model a Skill runs on (a simple background Skill may run on a cheaper candidate that passed it). */
+  /** The model a Skill runs on (a simple background Skill may run on a cheaper candidate that passed it, a planning Skill on the planning model). */
   const modelFor = (skill: string): string | undefined => {
     const config = settings();
     const pick = chosen();
-    return config && pick ? sponsorModelForSkill(skill, pick.model, config.models, pool(), options.capabilities) : undefined;
+    return config && pick ? sponsorModelForSkill(skill, pick.model, config.models, pool(), options.capabilities, config.planningModel) : undefined;
   };
   const providerFor = (model: string): ProviderConfig => {
     const contextK = settings()?.models.find((item) => item.model === thinkingVariant(model).base)?.contextK;

@@ -11,4 +11,7 @@ test("the patterns found in the candidates' replies are counted; a plain reply c
   expect(plainVoiceRate(plain)).toBe(0);
   // A range written with an en dash between figures is not a dash used as a connector.
   expect(plainVoiceMarkers("每周 12–24 个月的底座，09:00–12:00 上课。").dash).toBe(0);
+  // Words that only contain a pattern's characters (found in the 2026-10-20 real-work comparison): a checklist, a statistics term.
+  expect(plainVoiceMarkers("整理 Paperless 登记办理清单，推导杠杆、学生化残差与 Cook 距离，画残差-杠杆图。")).toMatchObject({ formula: 0, metaphor: 0 });
+  expect(plainVoiceMarkers("先把时间理清，用这篇笔记撬动更多读者。")).toMatchObject({ formula: 1, metaphor: 1 });
 });

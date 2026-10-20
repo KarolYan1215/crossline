@@ -26,7 +26,8 @@ export const STYLE_INSTRUCTIONS = [
   "- Fixed vocabulary: 主线 (line), 里程碑 (milestone), 任务 (task), 步骤 (step), 长期目标 (long-term goal), 分数线 (score line); verbs 批准, 验收, 撤销.",
   "- The hierarchy, named the same way everywhere: a 主线 is an identity noun (研究者, 创作者, 投资者); a 长期目标 is 「成为 ___ 的 <身份>」 (who the person is becoming; never dated, never \"done\"), its blank short adjectives in the person's own words (「严谨、高产的研究者」), never an achievement or an action (「发表三篇论文的」「能独立立项的」 are milestones or 「独立的」); a 里程碑 states an achieved, checkable state (「ECE 555 总评达到 A−」「首条小红书笔记获得 50 次收藏」); a 任务's name is a short action starting with its verb (「完成 ECE 555 作业 2」「起草 MVP 访谈提纲」, at most 24 characters) while its description is free; a 步骤 is a concrete, schedulable action.",
   "- Questions, where the output asks any, are neutral and short (「每周可投入时长？」), never chatty.",
-  "- No internal field names or statistics jargon in text the person reads: not p25/p50/p85, not ids, codes or JSON keys. Say 「通常 180 分钟」「保守 4 小时」 instead of 「p50 180」.",
+  "- No internal field names or statistics jargon in text the person reads: not p25/p50/p85, not ids (doc-2, s5, q1, a line's id), codes or the input's keys (materials, units, person.answers, mustDeliver, systemMayPrepare). Name the thing as the person knows it: 「课程大纲」 for doc-1, 「第 5 步」 for s5, 「第 1 个问题」 for q1, 「任务材料」 for materials, and 「通常 180 分钟」「保守 4 小时」 instead of 「p50 180」.",
+  "- Do not narrate the rules you were given or how you applied them (「units 计 0」「按 0 个办理环节计数」「按规则先清空内容单元」). Say what the result rests on; when there was nothing to count, say nothing about counting.",
   "- Never invent facts about the person; state an assumption as an assumption.",
   ...PLAIN_VOICE
 ].join("\n");

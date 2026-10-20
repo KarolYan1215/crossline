@@ -5,7 +5,7 @@ import {
   FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, type FinerSplit, type StepTrouble, type SuccessCriterion
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { aiToolsFor, assistantAvailable, listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
+import { aiToolsFor, listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
@@ -260,11 +260,12 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     };
     // The line's own skill and the public skills that fit the task, read beside the planner's: how this work is done shapes the steps.
     const extraSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, task: order.intent, ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
-    const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd, ...(extraSkills.length ? { extraSkills } : {}),
+    const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd, ...(extraSkills.length ? { extraSkills } : {}), redoOnRepair: true,
       developerInstructions: "Write this task's steps as the crossline-step-planner Skill describes and return only the requested JSON. The steps are "
         + "what the person sees on the task and what the scheduler puts on the calendar. Read `materials` first and count the units from them, each quoting "
         + "its file verbatim. The person's steps are only the intellectual core (solving, deriving, deciding, writing, rehearsing), each one focused "
         + "session with a quantified done criterion and a firstAction of five minutes or less; collecting, listing and filing are the assistant's steps. "
+        + "The rationale is a few short sentences for the person: what the plan rests on, never the input's keys, ids or how units were counted. "
         + "Ask only what neither the material nor person.facts settles, with the likeliest option first."
         + libraryInstruction(extraSkills)
         + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change; earlierFeedback still holds unless it contradicts it." : "")
@@ -292,7 +293,9 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         payload: { code: result.blocker.code, message: result.blocker.message.slice(0, 300) } });
       return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     }
-    const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output, tools.map((tool) => tool.name), { assistant: assistantAvailable(store, workspaceId) });
+    // Every account has the assistant in one mode or another (assistantMode: the owner's shell, else Crossline's tools on any model), so
+    // collecting and filing stay the assistant's on the hosted beta too; tying this to the shell turned every such step into the person's.
+    const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output, tools.map((tool) => tool.name), { assistant: true });
     const normalized = result.output.importance ? { ...shapedPlan, importance: result.output.importance } : shapedPlan;
     // Steps must not start before the window or end after it: clamp, the reviewer sees the warning.
     // What normalization already fixed (rescaled shares, a missing estimate filled in, an unknown dependency dropped) needs no judgement;

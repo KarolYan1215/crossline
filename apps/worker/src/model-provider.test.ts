@@ -109,6 +109,29 @@ test("an admitted Skill runs on the provider's thread: the provider defined on t
   expect(JSON.stringify(start)).not.toContain("sk-live-secret");
 });
 
+test("a run on a Skill's own model that needed a repair is run again on the provider's model, and that answer is kept", async () => {
+  const provider = { id: "sponsor", kind: "chat" as const, label: "开发者提供的模型", baseUrl: "https://api.example.com/v1", model: "main",
+    keyLast4: null, updatedAt: "1970-01-01T00:00:00.000Z" };
+  setProviderResolver(() => ({ provider, gatewayUrl: gateway.urlFor(workspaceId, "sponsor"), admitted: new Set(["crossline-task-titler"]),
+    codexSignedIn: false, modelFor: () => "cheap" }));
+  const valid = (title: string) => JSON.stringify({ titles: [{ id: "t1", title }] });
+  const options = { skillName: "crossline:crossline-task-titler", cwd: "C:\\repo", developerInstructions: "x", outputSchema: TASK_TITLES_SCHEMA,
+    prepareInput: () => ({}), validateOutput: (output: unknown) => validateTaskTitles(output, ["t1"]), onAudit: () => {} };
+  enterUsageWorkspace(workspaceId);
+  // First answer is not JSON (a rejection), the repair passes on the cheap model; the redo on the main model is the answer kept.
+  const runtime = fakeRuntime(["不是 JSON", valid("便宜模型的标题"), valid("整理 ECE 555 笔记")], "crossline:crossline-task-titler", { threadResponse: {} });
+  const result = await runCodexSkill(runtime.rpc, {}, { ...options, redoOnRepair: true });
+  expect(result).toMatchObject({ ok: true, output: { titles: [{ title: "整理 ECE 555 笔记" }] }, audit: { redone: { repairs: 1 } } });
+  expect(runtime.threadStarts().map((start) => start.model)).toEqual(["cheap", "main"]);
+  // Passed first time, or without the option: one run on the cheap model.
+  const once = fakeRuntime([valid("整理 ECE 555 笔记")], "crossline:crossline-task-titler", { threadResponse: {} });
+  expect(await runCodexSkill(once.rpc, {}, { ...options, redoOnRepair: true })).toMatchObject({ ok: true });
+  expect(once.threadStarts().map((start) => start.model)).toEqual(["cheap"]);
+  const without = fakeRuntime(["不是 JSON", valid("整理 ECE 555 笔记")], "crossline:crossline-task-titler", { threadResponse: {} });
+  expect(await runCodexSkill(without.rpc, {}, options)).toMatchObject({ ok: true, audit: { repairs: 1 } });
+  expect(without.threadStarts()).toHaveLength(1);
+});
+
 test("a Skill the provider has not passed, in a workspace with no Codex sign-in, stops with a blocker and never starts a thread", async () => {
   const providers = service();
   await providers.handle("POST", "/v1/model/provider", workspaceId, deepseek);

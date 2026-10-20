@@ -7,8 +7,10 @@
 export const PLAIN_VOICE_PATTERNS = {
   dash: /——|—|(?<=\p{Script=Han}) ?– ?(?=\p{Script=Han})/gu,
   contrast: /不是[^。！？\n]{0,30}?(?:而是|，是|——是)|而不是|并非|不在于|与其[^。！？\n]{0,20}?不如|不只是?[^。！？\n]{0,20}?(?:更|还)|真正(?:的|卡住|吃掉|待定|的问题)/gu,
-  formula: /先别|别急着|先不急|算清|理清|看清|量出来|落地|才是关键|关键在于/gu,
-  metaphor: /地基|双刃剑|滋养|土壤|燃料|杠杆|飞轮|天花板|护城河|底色|找缝|三笔账|锚点|碎片化|站得最稳|全速/gu,
+  // 「理清」 not inside a word that only contains the two characters (办理清单, 整理清单, 处理清楚).
+  formula: /先别|别急着|先不急|算清|(?<![办整处管清])理清|看清|量出来|落地|才是关键|关键在于/gu,
+  // 「杠杆」 as a figure (撬动、杠杆效应、当杠杆), not the statistics term (杠杆值、残差-杠杆图) or a broker's margin.
+  metaphor: /地基|双刃剑|滋养|土壤|燃料|撬动|杠杆效应|当杠杆|飞轮|天花板|护城河|底色|找缝|三笔账|锚点|碎片化|站得最稳|全速/gu,
   aphorism: /说明你|这说明|意味着|本质上|藏着/gu
 } as const;
 export type PlainVoiceMarker = keyof typeof PLAIN_VOICE_PATTERNS;

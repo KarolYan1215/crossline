@@ -82,6 +82,8 @@ if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0
 fi
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.3-Flash=0.8:2.8:1024:0.23,Qwen/Qwen3.5-122B-A10B=0.8:6.4:262,Qwen/Qwen3.5-35B-A3B=0.4:3.2:262"
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MONTHLY_CNY 30
+# The planning Skills (step planner, backplanner) on GLM-5.3-Flash: the owner's choice of 2026-10-20 after the real-work comparison.
+ensure /srv/crossline/app.env CROSSLINE_SPONSOR_PLANNING_MODEL zai-org/GLM-5.3-Flash
 if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_SPONSOR_API_KEY=." /srv/crossline/app.env; then
   key=$(grep "^ASSESS_TEXT_API_KEY=" /srv/assess/assess.env 2>/dev/null | cut -d= -f2-)
   if [ -n "$key" ]; then

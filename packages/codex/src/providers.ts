@@ -106,12 +106,14 @@ export function threadProvider(routing: Pick<ProviderRouting, "provider" | "gate
  * its conformance admits the Skill; else the workspace's own Codex sign-in; else a blocker that says why, which the caller turns into
  * an ask. There is never a third option — a workspace that has neither does not borrow the machine owner's runtime.
  */
-export function decideRoute(skillName: string, routing: ProviderRouting | undefined): RouteDecision {
+export function decideRoute(skillName: string, routing: ProviderRouting | undefined, options: { mainModel?: boolean } = {}): RouteDecision {
   if (!routing) return { via: "codex" };
   if (routing.blocked) return routing.codexSignedIn ? { via: "codex" } : { via: "blocked", ...routing.blocked };
   const key = skillKey(skillName);
   const gap = capabilityGap(key, { ...THIRD_PARTY_CAPABILITIES, ...routing.capabilities });
-  if (!gap && routing.admitted.has(key)) return { via: "provider", provider: threadProvider(routing, routing.modelFor?.(key) ?? routing.provider.model, key) };
+  // `mainModel`: the provider's own model even where this Skill has one of its own (a planning run redone after a repair).
+  const model = (options.mainModel ? undefined : routing.modelFor?.(key)) ?? routing.provider.model;
+  if (!gap && routing.admitted.has(key)) return { via: "provider", provider: threadProvider(routing, model, key) };
   if (routing.codexSignedIn) return { via: "codex" };
   const label = SKILL_NEEDS[key]?.label ?? "这项功能";
   return gap ? { via: "blocked", code: "MODEL_CAPABILITY_MISSING", message: gap }
