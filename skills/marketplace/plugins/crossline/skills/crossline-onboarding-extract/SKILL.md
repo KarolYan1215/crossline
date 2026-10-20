@@ -77,6 +77,7 @@ For each line the new material says something about, write a `description` (what
 `domainGuides[]` (when present) lists the lines with a `domain` (健康 / 财富) with the fact `slots` their answers belong in (`health_exercise_freq：每周运动次数`, `wealth_emergency_months：应急金可覆盖的月数` …). For these lines:
 
 - Record what the person said about one of those subjects under exactly that slot and that line's id, never under a slot of your own naming, so later plans and milestones read the same names. Numbers keep their unit and range as said (「每月支出约 6000–8000 元」, 「每周 2 次，晚上」).
+- A domain line's `description` is what the person said about this part of their life (「每周跑两次，想 5 公里跑进 30 分钟」), never the domain's name restated (not 「健康领域的健康管理者主线」); leave it unwritten until they have said something.
 - A domain line's current project is what it works towards now (「3 个月内建满应急金」, 「年底前 5 公里跑进 28 分钟」): `projectsDetected` with its `goal`, and a `deadline` or `no_deadline` like any project.
 - Never record account numbers, card numbers, exact balances, passwords or holdings, even when the person typed them: write the range or the kind instead (「有一笔约 3 万元的消费贷」). An injury, condition or doctor's instruction goes in `health_limits` as said, never interpreted.
 - `attributeHints` are adjectives this domain's goals often use; offer one as a candidate only when the person's own words support it, citing those words like any attribute.
