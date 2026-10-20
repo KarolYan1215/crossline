@@ -1,11 +1,11 @@
 import Database from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
+import { chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria,
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
-  type ChecklistAnswer, type WorkRhythm, type DomainRecordInput, type StoredDomainRecord } from "@crossline/core";
+  type ChecklistAnswer, type DomainRecordInput, type StoredDomainRecord } from "@crossline/core";
 import { handOffArtifacts } from "./artifacts";
 
 type LedgerEventInput = {
@@ -3839,22 +3839,6 @@ export class CrosslineStore {
       contextVersion: String(row.context_version ?? ""), censored: Number(row.censored ?? 0) === 1,
       observedAt: String(row.observed_at), createdAt: String(row.created_at)
     }));
-  }
-
-  /**
-   * How this workspace's person actually works: stretches of work-like activity from the screen record (when they agreed to it)
-   * and how finished tasks compared with what was estimated for them. Measurements only; see `summarizeRhythm`.
-   */
-  workRhythm(workspaceId: string, sinceIso: string): WorkRhythm {
-    const orders = new Map(this.listWorkOrders(workspaceId).map((order) => [order.id, order]));
-    const finished = this.listExecutions(workspaceId).flatMap((execution) => {
-      const order = orders.get(execution.workOrderId);
-      if (!order || !execution.endedAt || !execution.durationObserved || execution.outcome === "blocked") return [];
-      const actualMinutes = (Date.parse(execution.endedAt) - Date.parse(execution.startedAt)) / 60_000 - execution.pauseMinutes;
-      // What was estimated *for this order when it was written*: its own stored estimate, never a later recalibration.
-      return [{ actualMinutes, estimatedMinutes: order.estimate.p50Minutes }];
-    });
-    return summarizeRhythm({ segments: this.listActivitySegments(workspaceId, sinceIso).map((segment) => ({ start: segment.start, end: segment.end, category: segment.category, idle: segment.idle })), finished });
   }
 
   /** One beta invite: an application, then the owner's decision, then the redemption (see `packages/db/src/invites.ts`). */

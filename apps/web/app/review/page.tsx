@@ -25,6 +25,8 @@ export const dynamic = "force-dynamic";
 const criterionKind: Record<string, string> = {
   count: "计数", artifact: "产物", threshold: "阈值", judgement: "判断"
 };
+const LOAD = { low: "低", medium: "中", high: "高" } as const;
+const LOAD_RANK = { low: 0, medium: 1, high: 2 } as const;
 const metLabel: Record<string, string> = { met: "已达成", partial: "部分达成", unmet: "未达成", unverifiable: "无法核实" };
 
 export default async function ReviewPage() {
@@ -59,6 +61,17 @@ export default async function ReviewPage() {
           </div>;
         })}</div>}
     </section>
+
+    {review.taskLoad.length > 0 && <section className="review-block">
+      <h2>本周做完后的累不累</h2>
+      <p className="review-note">做完任务时本人选的「这件事累不累」，与排程时按任务估计的精力需求并列；只在这里列出，不改排程。</p>
+      <ul className="review-list">{review.taskLoad.map((item) => <li key={item.workOrderId}>
+        <b><a href={`/workbench/${encodeURIComponent(item.workOrderId)}`}>{item.title}</a></b>
+        <small>{lineLabel.get(item.identityId) ?? item.identityId} · 本人说：{LOAD[item.actual]}{item.expected ? ` · 原估精力需求：${LOAD[item.expected]}` : ""}</small>
+        {item.expected && item.expected !== item.actual && <Tag tone={LOAD_RANK[item.actual] > LOAD_RANK[item.expected] ? "warn" : "neutral"}>
+          {LOAD_RANK[item.actual] > LOAD_RANK[item.expected] ? "比预想累" : "比预想轻松"}</Tag>}
+      </li>)}</ul>
+    </section>}
 
     {diligence.length > 0 && <section className="review-block">
       <h2>本周调研结论</h2>

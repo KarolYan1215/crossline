@@ -1,5 +1,5 @@
 import "server-only";
-import { rankCandidates, stalledIdentities, type AccessContext, type CandidateRelation } from "@crossline/core";
+import { rankCandidates, stalledIdentities, taskTitleOf, type AccessContext, type CandidateRelation } from "@crossline/core";
 import { getStore } from "./crossline";
 
 export type WeeklyReview = {
@@ -28,7 +28,15 @@ export type WeeklyReview = {
   /** Report-only proposals from `crossline-weekly-insight` — read here, never applied automatically;
    * there is no generic "apply an overlay patch" mechanism in this app to wire an apply button to. */
   insightProposals: Array<{ id: string; claim: string; observationCount: number; period: string; proposedOverlayPatch: string }>;
+  /**
+   * 「这件事累不累」 as the person answered it after finishing (`actualLoad` on `energy.observed`, 2026-10-20: it was stored and never
+   * read), beside the energy the task was planned to need, this week's latest answer per task, the ones that differ first. Read here,
+   * not learned from: it is a word about a task, not a measurement of a slot, and too sparse to backtest.
+   */
+  taskLoad: Array<{ workOrderId: string; title: string; identityId: string; expected?: Level; actual: Level }>;
 };
+type Level = "low" | "medium" | "high";
+const RANK: Record<Level, number> = { low: 0, medium: 1, high: 2 };
 
 const daysBetween = (fromIso: string, to: Date) =>
   Math.floor((to.getTime() - Date.parse(fromIso)) / 86_400_000);
@@ -140,8 +148,23 @@ export function loadWeeklyReview(ctx: AccessContext, now = new Date()): WeeklyRe
     return { identityId, daysSinceLastPass: latest ? daysBetween(latest, now) : null };
   }), 7);
 
+  const loads = new Map<string, Level>();
+  for (const event of events) {
+    const payload = event.payload as { context?: string; workOrderId?: string; actualLoad?: string };
+    if (event.type === "energy.observed" && event.createdAt >= since && payload.context === "after_task" && payload.workOrderId
+      && (payload.actualLoad === "low" || payload.actualLoad === "medium" || payload.actualLoad === "high")) loads.set(payload.workOrderId, payload.actualLoad);
+  }
+  const taskLoad: WeeklyReview["taskLoad"] = [...loads].flatMap(([workOrderId, actual]): WeeklyReview["taskLoad"] => {
+    const order = orders.find((item) => item.id === workOrderId);
+    if (!order) return [];
+    const need = ((order.payload as { humanCore?: Array<{ energy?: string }> }).humanCore ?? [])[0]?.energy;
+    const expected = need === "low" || need === "medium" || need === "high" ? need as Level : undefined;
+    return [{ workOrderId, title: taskTitleOf(order), identityId: order.identityId, ...(expected ? { expected } : {}), actual }];
+  }).sort((a, b) => Math.abs(RANK[b.actual] - RANK[b.expected ?? b.actual]) - Math.abs(RANK[a.actual] - RANK[a.expected ?? a.actual]));
+
   return {
     autoAccepted,
+    taskLoad,
     milestoneProgress: milestones.filter((milestone) => milestone.status === "approved").map((milestone) => ({
       id: milestone.id, title: milestone.title, identityId: milestone.identityId,
       verifiability: milestone.verifiability,

@@ -79,6 +79,23 @@ test("capacity only lowers the day: debt, low heart-rate variability and a warm 
   expect(tired.basis.join(" ")).toContain("手腕温度");
 });
 
+test("steps and daylight lower capacity only once admitted, only off the person's baseline, and only on the side that went with lower energy", () => {
+  const at = "2026-10-08T15:00:00Z", day = "2026-10-08";
+  const baseline = ["01", "02", "03", "04", "05", "06"].map((d, index) => ({ day: `2026-10-${d}`, steps: 8000 + index * 400, daylightMin: 60 + index * 5 }));
+  const lazy = [...baseline, { day, steps: 1500, daylightMin: 5 }];
+  // Not admitted by the backtest: recorded, nothing else.
+  expect(dayCapacity(at, day, nights(8, 8), lazy).multiplier).toBe(1);
+  // Admitted with fewer steps going with lower energy: a day far under the baseline costs a little, never more than a tenth each.
+  const low = dayCapacity(at, day, nights(8, 8), lazy, { steps: 1.2, daylightMin: 0.8 });
+  expect(low.multiplier).toBeLessThan(1);
+  expect(low.multiplier).toBeGreaterThanOrEqual(0.8);
+  expect(low.basis).toEqual(["步数低于本人近期水平", "日照少于本人近期水平"]);
+  // A busy day on the side that went with more energy never lowers it.
+  expect(dayCapacity(at, day, nights(8, 8), [...baseline, { day, steps: 20000 }], { steps: 1.2 }).multiplier).toBe(1);
+  // Under four days of baseline the reading is ignored.
+  expect(dayCapacity(at, day, nights(8, 8), [...baseline.slice(0, 3), { day, steps: 100 }], { steps: 1.2 }).multiplier).toBe(1);
+});
+
 test("a phone's sleep record wins over the sleep-focus switch, which wins over the screen", () => {
   const screen = [{ sleepAt: "2026-10-10T04:00:00Z", wakeAt: "2026-10-10T13:00:00Z", source: "screen" }];
   const focus = [{ sleepAt: "2026-10-10T04:30:00Z", wakeAt: "2026-10-10T12:30:00Z", source: "phone-focus" }];

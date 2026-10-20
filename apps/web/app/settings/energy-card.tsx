@@ -14,8 +14,15 @@ export type EnergyStatus = {
   /** 键鼠节律 and 摄像头精力采样, each its own consent (docs/energy-and-ecosystem.md §8). */
   inputRhythm: boolean;
   camera: boolean;
-  /** Each turned-on signal's backtest against the person's own reports: it moves a reading only once `enabled`. */
-  signals: Array<{ id: string; label: string; evaluated: number; hitsWith: number; hitsWithout: number; enabled: boolean }>;
+  /** 手机健康数据, its own consent: on once the health token is made; off deletes the phone's record and the token. */
+  phoneHealth: boolean;
+  /** The latest day the phone sent steps or daylight for. */
+  phoneDaily?: { day: string; steps?: number; daylightMin?: number };
+  /**
+   * Each turned-on signal's backtest against the person's own reports: it moves anything only once `enabled` — a reading of now, or for
+   * the phone's steps and daylight (`use: "capacity"`) only the day's capacity, downwards.
+   */
+  signals: Array<{ id: string; label: string; use: "now" | "capacity"; evaluated: number; hitsWith: number; hitsWithout: number; enabled: boolean }>;
 };
 
 const LEVEL = { low: "低", medium: "中", high: "高" } as const;
@@ -40,13 +47,15 @@ export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: E
   const [note, setNote] = useState("");
   const [rhythm, setRhythm] = useState(status.inputRhythm);
   const [camera, setCamera] = useState(status.camera);
+  const [phoneHealth, setPhoneHealth] = useState(status.phoneHealth);
   const [signalNote, setSignalNote] = useState("");
-  const changeSignal = async (signal: "input_rhythm" | "camera", on: boolean) => {
-    const set = signal === "camera" ? setCamera : setRhythm;
+  const changeSignal = async (signal: "input_rhythm" | "camera" | "phone_health", on: boolean) => {
+    const set = signal === "camera" ? setCamera : signal === "phone_health" ? setPhoneHealth : setRhythm;
     set(on);
     const response = await fetch("/api/settings/energy-signals", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signal, on }) }).catch(() => undefined);
     if (!response?.ok) { set(!on); setSignalNote("未保存，请重试"); return; }
-    setSignalNote(on ? signal === "camera" ? "已开启：本机桌面页面打开时，每 20 分钟采样 20 秒" : "已开启：从下一分钟开始记录" : "已关闭，已删除记录");
+    setSignalNote(on ? signal === "camera" ? "已开启：本机桌面页面打开时，每 20 分钟采样 20 秒" : signal === "phone_health" ? "已开启：生成健康令牌后，手机发来的数据开始保存"
+      : "已开启：从下一分钟开始记录" : signal === "phone_health" ? "已关闭，已删除手机记录，健康令牌已失效" : "已关闭，已删除记录");
   };
   const [captureToken, setCaptureToken] = useState("");
   const [recordsToken, setRecordsToken] = useState("");
@@ -71,9 +80,14 @@ export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: E
     <div className="st-row"><span className="st-row-label">摄像头精力采样<small>仅电脑、页面在前台时：每 20 分钟开 20 秒，在本机算眨眼、闭眼比例与心率，只存这几个数；画面不存不传；关闭即删除</small></span>
       <SegmentedControl label="摄像头精力采样" value={camera ? "on" : "off"} onChange={(next) => void changeSignal("camera", next === "on")}
         options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
+    <div className="st-row"><span className="st-row-label">手机健康数据<small>手机快捷指令发来的睡眠、起床与入睡时刻，以及当天的心率、手腕温度、步数和日照；生成健康令牌即开启；关闭即删除，令牌失效</small></span>
+      <SegmentedControl label="手机健康数据" value={phoneHealth ? "on" : "off"} onChange={(next) => void changeSignal("phone_health", next === "on")}
+        options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
+    {phoneHealth && status.phoneDaily && <div className="st-row"><span className="st-row-label">步数与日照<small>{Number(status.phoneDaily.day.slice(5, 7))}/{Number(status.phoneDaily.day.slice(8, 10))} 手机发来；与本人近 28 天比，明显偏向精力低的一侧时才下调当天可排的量</small></span>
+      <span>{status.phoneDaily.steps !== undefined ? `${status.phoneDaily.steps.toLocaleString("zh-CN")} 步` : "步数未发"} · {status.phoneDaily.daylightMin !== undefined ? `日照 ${status.phoneDaily.daylightMin} 分钟` : "日照未发"}</span></div>}
     {signalNote && <p role="status" className="st-note">{signalNote}</p>}
     {status.signals.length > 0 && <ul className="st-list">{status.signals.map((signal) => <li key={signal.id}>{signal.label}：{signal.enabled
-      ? `已用于修正当前精力（回测 ${signal.evaluated} 次自评，命中 ${signal.hitsWithout} → ${signal.hitsWith}）`
+      ? `${signal.use === "capacity" ? "已用于下调当天容量" : "已用于修正当前精力"}（回测 ${signal.evaluated} 次自评，命中 ${signal.hitsWithout} → ${signal.hitsWith}）`
       : signal.evaluated ? `验证中：回测 ${signal.evaluated} 次自评，未比不用时更准，暂不使用` : "验证中：还需要更多自评"}</li>)}</ul>}
     <div className="st-row"><span className="st-row-label">现在<small>{SURE[status.now.confidence]}</small></span><b>{LEVEL[status.now.level]}</b></div>
     <ul className="st-list">{status.now.basis.map((line) => <li key={line}>{line}</li>)}</ul>

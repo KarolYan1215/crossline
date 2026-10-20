@@ -147,3 +147,29 @@ test("the morning brief says how many of last night's blocks wait to be confirme
   expect(shown[0]).toContain("昨晚 1 块待确认");
   store.close();
 });
+
+test("away from the computer by the screen record, a nudge goes to the phone only, and to the desktop only when no phone takes it", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "notify.level", "off");
+  const nudge = (id: string) => store.appendConversationMessage({ id, workspaceId: "w", conversationId: store.conversationFor("w", "2026-10-12").id, role: "nudge", text: "",
+    createdAt: "2026-10-12T13:50:00.000Z", payload: { nudge: { kind: "block_start", fingerprint: `start:${id}:2026-10-12`, counted: false, urgent: true, delivery: "pending" },
+      card: { actions: [], clarify: { question: "09:00 做「作业 2」。", options: [] } } } });
+  const now = new Date("2026-10-12T13:52:00.000Z");
+  // Fifteen idle minutes on the screen record, kept under the detail consent.
+  for (let minute = 16; minute >= 1; minute -= 1)
+    store.recordActivityReading({ workspaceId: "w", at: new Date(now.getTime() - minute * 60_000).toISOString(), intervalSeconds: 60, app: "", title: "", category: "other", idle: true });
+  const desktop: string[] = [], phone: string[] = [];
+  const toDesktop = async (_title: string, body: string) => { desktop.push(body); return true; };
+  nudge("a");
+  // Without the consent the record is not read: both, as before.
+  await notifyPass(store, "w", now, toDesktop, undefined, async (_ws, message) => { phone.push(message.body); return true; });
+  expect([desktop.length, phone.length]).toEqual([1, 1]);
+  store.setSetting("w", "localActivity.consentV2", "granted");
+  nudge("b");
+  await notifyPass(store, "w", now, toDesktop, undefined, async (_ws, message) => { phone.push(message.body); return true; });
+  expect([desktop.length, phone.length]).toEqual([1, 2]);
+  nudge("c");
+  expect(await notifyPass(store, "w", now, toDesktop, undefined, async () => false)).toEqual(["nudge:start:c:2026-10-12"]);
+  expect(desktop.length).toBe(2);
+  store.close();
+});

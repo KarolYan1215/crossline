@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ASSUMED_EFFICIENCY, backtestEfficiency, fitEfficiency, learnedEfficiency, type EfficiencySample } from "./efficiency";
+import { ASSUMED_EFFICIENCY, backtestEfficiency, backtestMisses, fitEfficiency, fitEfficiencyWithMisses, learnedEfficiency, type EfficiencySample } from "./efficiency";
 
 // A person who works at the planned pace in matching slots and at half pace one level short (slower than the assumed 0.8).
 const history = (count: number): EfficiencySample[] => Array.from({ length: count }, (_, index) => {
@@ -26,4 +26,29 @@ test("the assumed factors stay until the backtest shows the learned ones better"
   // A person whose short blocks go exactly as assumed never gets factors of their own.
   const asAssumed = history(30).map((sample) => sample.slot === "medium" ? { ...sample, minutes: 60 } : sample);
   expect(learnedEfficiency(asAssumed)).toBeUndefined();
+});
+
+// A person who, when done, works short slots exactly at the assumed pace — but leaves every other short block undone.
+const skipping = (count: number): EfficiencySample[] => Array.from({ length: count }, (_, index) => {
+  const at = new Date(Date.parse("2026-09-01T15:00:00Z") + index * 86_400_000).toISOString();
+  if (index % 2 === 0) return { at, slot: "high", need: "high", planned: 1, blockMinutes: 60, minutes: 60 };
+  return index % 4 === 1 ? { at, slot: "medium", need: "high", planned: 0.8, blockMinutes: 60, minutes: 60 }
+    : { at, slot: "medium", need: "high", planned: 0.8, blockMinutes: 60, minutes: 0, done: false };
+});
+
+test("blocks that produced nothing count as zero yield, and replace the done-only factors only when the backtest favours them", () => {
+  const samples = skipping(40);
+  // Done blocks alone look exactly as assumed: no factors of their own.
+  expect(learnedEfficiency(samples.filter((sample) => sample.done !== false))).toBeUndefined();
+  // With the misses, a short slot yields about half the assumed work, and the backtest says so.
+  expect(fitEfficiencyWithMisses(samples)[0]).toBeLessThan(0.6);
+  const backtest = backtestMisses(samples);
+  expect(backtest.evaluated).toBeGreaterThanOrEqual(5);
+  expect(backtest.mseWithMisses!).toBeLessThan(backtest.mseAssumed!);
+  expect(learnedEfficiency(samples)![0]).toBeLessThan(0.6);
+  // A person who misses short and matching blocks alike: the misses say nothing about the slot, and nothing changes.
+  const evenly = skipping(40).map((sample, index) => sample.slot === "high" && index % 4 === 0 ? { ...sample, done: false } : sample);
+  expect(learnedEfficiency(evenly)).toBeUndefined();
+  // A missed block never enters the done-only fit.
+  expect(fitEfficiency(samples)).toEqual(fitEfficiency(samples.filter((sample) => sample.done !== false)));
 });

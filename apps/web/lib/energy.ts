@@ -2,8 +2,8 @@ import "server-only";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import {
-  ACTIVITY_LONG_GAPS, CAMERA_ENERGY_CONSENT, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, SLEEP_TRACKING_CONSENT, calibrate, covariateShift, inputRhythmAt, judgeCovariate, dayCapacity, mergeSleep, phaseShiftFromPeak, predictEnergy, sleepFromGaps, sleepFromPhoneEvents, alertnessAt,
-  type AccessContext, type AvailabilityWindow, type CovariateVerdict, type DailyPhysiology, type InputRhythmBucket, type DayCapacity, type EnergyCalibration, type EnergyLevel, type EnergyPrediction, type EnergySource, type PhoneSleepEvent, type SleepEpisode
+  ACTIVITY_LONG_GAPS, CAMERA_ENERGY_CONSENT, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, PHONE_HEALTH_CONSENT, SLEEP_TRACKING_CONSENT, phoneHealthGranted, calibrate, covariateShift, inputRhythmAt, judgeCovariate, dayCapacity, mergeSleep, phaseShiftFromPeak, predictEnergy, sleepFromGaps, sleepFromPhoneEvents, alertnessAt,
+  type AccessContext, type AdmittedActivity, type AvailabilityWindow, type DailyActivityId, type CovariateVerdict, type DailyPhysiology, type InputRhythmBucket, type DayCapacity, type EnergyCalibration, type EnergyLevel, type EnergyPrediction, type EnergySource, type PhoneSleepEvent, type SleepEpisode
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore } from "./crossline";
 
@@ -17,6 +17,28 @@ const LONG_GAPS_SETTING = ACTIVITY_LONG_GAPS;
 
 const read = <T>(raw: string | undefined | null, fallback: T): T => { try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } };
 
+/** 手机健康数据 is on (`phoneHealthGranted`: the person's switch, or a token made before the switch existed). */
+export function phoneHealthOn(workspaceId: string): boolean {
+  const store = getStore();
+  return phoneHealthGranted(store.getSetting(workspaceId, PHONE_HEALTH_CONSENT), Boolean(store.getSetting(workspaceId, HEALTH_TOKEN_SETTING)));
+}
+
+/** The latest day the phone sent steps or daylight for, shown on the settings card; undefined while 手机健康数据 is off or none came. */
+export function phoneDailyLatest(workspaceId: string): { day: string; steps?: number; daylightMin?: number } | undefined {
+  if (!phoneHealthOn(workspaceId)) return undefined;
+  const latest = read(getStore().getSetting(workspaceId, HEALTH_DAILY_SETTING), [] as DailyPhysiology[])
+    .filter((item) => item.steps !== undefined || item.daylightMin !== undefined).sort((a, b) => a.day.localeCompare(b.day)).at(-1);
+  return latest ? { day: latest.day, ...(latest.steps !== undefined ? { steps: latest.steps } : {}), ...(latest.daylightMin !== undefined ? { daylightMin: latest.daylightMin } : {}) } : undefined;
+}
+
+/** Turns 手机健康数据 on or off; off deletes every phone summary and the health token, so the shortcut stops at once. */
+export function setPhoneHealth(workspaceId: string, on: boolean): void {
+  const store = getStore();
+  store.setSetting(workspaceId, PHONE_HEALTH_CONSENT, on ? "granted" : "denied");
+  if (on) return;
+  for (const key of [HEALTH_SLEEP_SETTING, HEALTH_DAILY_SETTING, HEALTH_EVENTS_SETTING, HEALTH_TOKEN_SETTING]) store.deleteSetting(workspaceId, key);
+}
+
 /** The screen's long idle stretches, read as sleep (docs/one-input.md §5.1 ①). */
 function screenSource(ctx: AccessContext, hourOf: (iso: string) => number): EnergySource {
   const on = getStore().getSetting(ctx.workspaceId, SLEEP_TRACKING_CONSENT) === "granted";
@@ -25,6 +47,7 @@ function screenSource(ctx: AccessContext, hourOf: (iso: string) => number): Ener
 /** What the person's phone sent (③): sleep episodes, nights from its bed and wake moments, and per-day heart-rate readings. */
 function phoneSource(ctx: AccessContext): EnergySource {
   const store = getStore();
+  if (!phoneHealthOn(ctx.workspaceId)) return { id: "ios-health", sleep: () => [], physiology: () => [] };
   return { id: "ios-health", sleep: () => [...read(store.getSetting(ctx.workspaceId, HEALTH_SLEEP_SETTING), [] as SleepEpisode[]),
       ...sleepFromPhoneEvents(read(store.getSetting(ctx.workspaceId, HEALTH_EVENTS_SETTING), [] as PhoneSleepEvent[]))],
     physiology: () => read(store.getSetting(ctx.workspaceId, HEALTH_DAILY_SETTING), [] as DailyPhysiology[]) };
@@ -38,31 +61,41 @@ export type EnergyModel = {
   capacity: (at: string, day: string) => DayCapacity;
   /** When the person last said how they are, ISO, or "". */
   lastReportAt: string;
-  /** Each optional signal the person turned on, with its backtest: only an `enabled` one moves a reading. */
-  covariates: Array<CovariateVerdict & { label: string }>;
+  /**
+   * Each optional signal the person turned on, with its backtest: only an `enabled` one moves anything — a reading of now (`use: "now"`),
+   * or, for the phone's daily steps and daylight, only the day's capacity, and only downwards (`use: "capacity"`).
+   */
+  covariates: Array<CovariateVerdict & { label: string; use: "now" | "capacity" }>;
 };
 
-type Signal = { id: string; label: string; valueAt: (at: string) => number | undefined };
+type Signal = { id: string; label: string; valueAt: (at: string) => number | undefined; use: "now" | "capacity"; daily?: DailyActivityId };
 
 /**
  * The optional signals (docs/energy-and-ecosystem.md §8), each read only with its own consent: the input rhythm over the hour before a
  * moment, and the camera's last window within half an hour before it. Both exist only for the past, so they can move a reading of now and
  * never one of a later slot.
  */
-function optionalSignals(ctx: AccessContext): Signal[] {
+function optionalSignals(ctx: AccessContext, physiology: DailyPhysiology[], dayOf: (iso: string) => string): Signal[] {
   const store = getStore(), ws = ctx.workspaceId;
   const signals: Signal[] = [];
   if (store.getSetting(ws, INPUT_RHYTHM_CONSENT) === "granted") {
     const buckets = read(store.getSetting(ws, INPUT_RHYTHM_BUCKETS), [] as InputRhythmBucket[]);
-    signals.push({ id: "input.fragmentation", label: "键鼠停顿", valueAt: (at) => inputRhythmAt(buckets, at)?.fragmentation },
-      { id: "input.pointer", label: "鼠标移动", valueAt: (at) => inputRhythmAt(buckets, at)?.pointerPace });
+    signals.push({ id: "input.fragmentation", label: "键鼠停顿", use: "now", valueAt: (at) => inputRhythmAt(buckets, at)?.fragmentation },
+      { id: "input.pointer", label: "鼠标移动", use: "now", valueAt: (at) => inputRhythmAt(buckets, at)?.pointerPace });
   }
   if (store.getSetting(ws, CAMERA_ENERGY_CONSENT) === "granted") {
     const windows = store.listEnergyObservations(ws).filter((item) => item.source === "camera_aggregate");
     const near = (at: string) => windows.find((item) => item.observedAt <= at && Date.parse(at) - Date.parse(item.observedAt) <= 30 * 60_000);
-    signals.push({ id: "camera.perclos", label: "闭眼比例", valueAt: (at) => near(at)?.aggregate.perclos },
-      { id: "camera.blinks", label: "眨眼频率", valueAt: (at) => near(at)?.aggregate.blinkRate },
-      { id: "camera.pulse", label: "心率", valueAt: (at) => { const item = near(at); return item && (item.aggregate.quality ?? 0) >= 0.4 ? item.aggregate.heartRate : undefined; } });
+    signals.push({ id: "camera.perclos", label: "闭眼比例", use: "now", valueAt: (at) => near(at)?.aggregate.perclos },
+      { id: "camera.blinks", label: "眨眼频率", use: "now", valueAt: (at) => near(at)?.aggregate.blinkRate },
+      { id: "camera.pulse", label: "心率", use: "now", valueAt: (at) => { const item = near(at); return item && (item.aggregate.quality ?? 0) >= 0.4 ? item.aggregate.heartRate : undefined; } });
+  }
+  // The phone's steps and minutes in daylight (2026-10-20), under 手机健康数据: the figures filed under a report's local day, judged on
+  // the same reports; one admitted lowers only that day's capacity (`dayCapacity`), never a reading.
+  if (phoneHealthOn(ws)) {
+    const byDay = new Map(physiology.map((item) => [item.day, item]));
+    signals.push({ id: "phone.steps", label: "步数", use: "capacity", daily: "steps", valueAt: (at) => byDay.get(dayOf(at))?.steps },
+      { id: "phone.daylight", label: "日照", use: "capacity", daily: "daylightMin", valueAt: (at) => byDay.get(dayOf(at))?.daylightMin });
   }
   return signals;
 }
@@ -88,8 +121,9 @@ export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): 
   }));
   const lastReportAt = reports.map((report) => report.observedAt).sort().at(-1) ?? "";
   // Each optional signal judged on the person's own reports; only one the backtest admits moves a reading.
-  const signals = optionalSignals(ctx);
-  const covariates = signals.map((signal) => ({ label: signal.label, ...judgeCovariate(signal.id, reports.flatMap((report) => {
+  const physiology = phone.physiology?.() ?? [];
+  const signals = optionalSignals(ctx, physiology, (iso) => formatInTimeZone(new Date(iso), zone, "yyyy-MM-dd"));
+  const covariates = signals.map((signal) => ({ label: signal.label, use: signal.use, ...judgeCovariate(signal.id, reports.flatMap((report) => {
     const value = alertnessAt(report.observedAt, episodes, hourOf, phaseShift);
     return value === undefined ? [] : [{ at: report.observedAt, alertness: value, level: report.level as EnergyLevel, value: signal.valueAt(report.observedAt) }];
   }), calibration) }));
@@ -100,7 +134,7 @@ export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): 
     const used: string[] = [];
     for (const verdict of covariates) {
       const signal = signals.find((item) => item.id === verdict.id);
-      if (!verdict.enabled || !verdict.fit || !signal) continue;
+      if (!verdict.enabled || !verdict.fit || !signal || signal.use !== "now") continue;
       const moved = covariateShift(verdict.fit, signal.valueAt(at));
       if (moved !== 0) { shift += moved; used.push(verdict.label); }
     }
@@ -109,8 +143,13 @@ export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): 
     const level: EnergyLevel = value < calibration.low ? "low" : value < calibration.high ? "medium" : "high";
     return { ...base, level, alertness: Math.round(value * 10) / 10, basis: [...base.basis, `按${used.join("、")}修正`] };
   };
+  const admitted: AdmittedActivity = {};
+  for (const verdict of covariates) {
+    const daily = signals.find((item) => item.id === verdict.id)?.daily;
+    if (daily && verdict.enabled && verdict.fit) admitted[daily] = verdict.fit.beta;
+  }
   return { episodes, calibration, phaseShift, hourOf, lastReportAt, covariates, predict,
-    capacity: (at, day) => dayCapacity(at, day, episodes, phone.physiology?.() ?? []) };
+    capacity: (at, day) => dayCapacity(at, day, episodes, physiology, admitted) };
 }
 
 /** A slot's energy for the scheduler: the model's when it is at least moderately sure, the pattern's otherwise. */
@@ -131,6 +170,8 @@ const TOKEN_SETTING: Record<DeviceTokenScope, string> = { health: HEALTH_TOKEN_S
 export function issueDeviceToken(ctx: AccessContext, scope: DeviceTokenScope): string {
   const token = randomBytes(24).toString("base64url");
   getStore().setSetting(ctx.workspaceId, TOKEN_SETTING[scope], createHash("sha256").update(token).digest("hex"));
+  // Making the health token is setting the phone up: it turns 手机健康数据 on, with no switch of its own to press first.
+  if (scope === "health") getStore().setSetting(ctx.workspaceId, PHONE_HEALTH_CONSENT, "granted");
   return token;
 }
 export const issueHealthToken = (ctx: AccessContext) => issueDeviceToken(ctx, "health");

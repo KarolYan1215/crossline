@@ -8,7 +8,7 @@ import {
 } from "@crossline/core";
 import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
 import { listed, openAsks, thisWeek } from "./asks";
-import { calendarFiling } from "./timeline";
+import { calendarFiling, currentWorkState } from "./timeline";
 import { dayLabel, type OpenerView } from "./opener";
 import { interviewStatus } from "./interview-status";
 import { preparingProposalIds } from "./proposal-ready";
@@ -134,7 +134,9 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     ? { nextBlock: `${nextWork.start}「${nextWork.task ?? nextWork.title}」`, why: "回答后，今天剩下和之后的时段会按精力重新安排。" } : undefined;
   const planned = planNudges({
     now: now.toISOString(), today, clock, tomorrow: addDays(today, 1), level, muted,
-    quiet: { timerRunning: Boolean(running), inMeeting: meeting, answeredRecently: Boolean(answeredAt) && now.getTime() - Date.parse(answeredAt!) < ANSWERED_QUIET_MS },
+    quiet: { timerRunning: Boolean(running), inMeeting: meeting, answeredRecently: Boolean(answeredAt) && now.getTime() - Date.parse(answeredAt!) < ANSWERED_QUIET_MS,
+      // Focused by the screen record (its detail consent only): only the urgent interrupts. Away is the worker's to act on (phone only).
+      focused: currentWorkState(ctx, plan)?.state === "focused" },
     night: clock < "08:00" || clock >= "23:00",
     sent: new Set(recent.flatMap((message) => [payloadOf(message)?.fingerprint ?? "", ...(payloadOf(message)?.covers ?? [])])),
     countedToday: recent.filter((message) => payloadOf(message)?.counted && message.createdAt.slice(0, 10) >= addDays(today, -1)
