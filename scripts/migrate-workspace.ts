@@ -28,6 +28,14 @@ const arg = (name: string) => { const index = process.argv.indexOf(`--${name}`);
 const need = (name: string) => arg(name) ?? (() => { throw new Error(`missing --${name}`); })();
 const fromDb = need("from-db"), fromData = need("from-data"), workspaceId = need("workspace"), toDb = need("to-db"), toData = need("to-data");
 const apply = process.argv.includes("--apply"), replace = process.argv.includes("--replace");
+// Settings that belong to the machine, not the person: with --replace these keep the target's own values (docs/ledger-sync.md). A key
+// ending in "." or ":" is a prefix. `--keep-settings none` turns it off, `--keep-settings a,b.` replaces the list.
+const MACHINE_SETTINGS = ["deployment.runtimeOwner", "calendar.graph.owner", "calendar.write.account", "calendar.sources", "calendar.sources.seeded",
+  "calendar.subscriptions", "calendar.sync_zone:", "calendar.published", "calendar.autopublish.hash", "calendar.fixed.hash", "calendar.publish.failure",
+  "calendar.sync.failure", "push.subscriptions", "sources.folders", "sources.folder.index:", "localActivity.", "activity.", "energy.camera",
+  "health.token.sha256", "model.provider", "model.provider.conformance", "model.sponsor", "model.budget.monthly", "mail.", "agent.sandbox", "background.blocker"];
+const keepSettings = arg("keep-settings") === "none" ? [] : arg("keep-settings")?.split(",").map((key) => key.trim()).filter(Boolean) ?? MACHINE_SETTINGS;
+const keptKey = (key: string) => keepSettings.some((rule) => (rule.endsWith(".") || rule.endsWith(":")) ? key.startsWith(rule) : key === rule);
 const filesRoot = arg("files") ?? fromData;
 // A Windows path is resolved with Windows rules even on the Linux server, and the other way round.
 const pathFor = (dir: string) => (/^[A-Za-z]:[\\/]/.test(dir) ? path.win32 : path.posix);
@@ -58,7 +66,7 @@ if (named ? !targets.some((workspace) => workspace.id === named) : targets.lengt
 }
 const toWorkspace = named ?? targets[0]!.id;
 const toOwner = target.getWorkspaceOwnerId(toWorkspace)!;
-const raw = new Database(toDb) as unknown as { prepare: (sql: string) => { get: (...args: unknown[]) => unknown; run: (...args: unknown[]) => unknown; all: () => unknown[] }; close: () => void };
+const raw = new Database(toDb) as unknown as { prepare: (sql: string) => { get: (...args: unknown[]) => unknown; run: (...args: unknown[]) => unknown; all: (...args: unknown[]) => unknown[] }; close: () => void };
 const existing = Object.fromEntries(PERSON_DATA.map((table) =>
   [table, (raw.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE workspace_id = ?`).get(toWorkspace) as { n: number }).n] as const).filter(([, n]) => n));
 if (Object.keys(existing).length && !replace) throw new Error(`TARGET_NOT_EMPTY: ${JSON.stringify(existing)}; pass --replace to clear it`);
@@ -115,6 +123,9 @@ for (const [table, rows] of Object.entries(snapshot.tables as Record<string, Arr
   if (IDENTITY.has(table)) continue;
   tables[table] = rows.map((row) => Object.fromEntries(Object.entries(row).map(([column, value]) => [column, typeof value === "string" ? rewrite(value) : value])));
 }
+type Setting = { workspace_id: string; key: string; value: string; updated_at: string };
+const keptSettings = replace ? (raw.prepare("SELECT workspace_id, key, value, updated_at FROM settings WHERE workspace_id = ?").all(toWorkspace) as Setting[]).filter((row) => keptKey(row.key)) : [];
+if (replace && tables.settings) tables.settings = tables.settings.filter((row) => !keptKey(String(row.key)));
 const counts = Object.fromEntries(Object.entries(tables).filter(([, rows]) => rows.length).map(([table, rows]) => [table, rows.length]));
 const seeded = (replace ? workspaceTables() : Object.keys(tables)).map((table) => [table, (raw.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE workspace_id = ?`).get(toWorkspace) as { n: number }).n] as const)
   .filter(([, n]) => n);
@@ -124,7 +135,7 @@ const portraitTo = path.join(toData, "portrait", toWorkspace.replace(/[^a-zA-Z0-
 const folders = [["materials", "materials"], ["sources", "sources"]].map(([from, to]) => [path.join(filesRoot, from!), path.join(toData, to!)] as const)
   .filter(([from]) => existsSync(from));
 console.log(JSON.stringify({ apply, from: { workspaceId, owner: fromOwner }, to: { workspace: toWorkspace, owner: toOwner },
-  rows: counts, pathsRewritten: paths, replace, targetRowsCleared: Object.fromEntries(seeded),
+  rows: counts, pathsRewritten: paths, replace, targetRowsCleared: Object.fromEntries(seeded), settingsKept: keptSettings.map((row) => row.key),
   copies: [...folders, ...(existsSync(portraitFrom) ? [[portraitFrom, portraitTo] as const] : [])].map(([from, to]) => `${from} -> ${to}`) }, null, 1));
 
 if (apply) {
@@ -132,6 +143,12 @@ if (apply) {
   raw.close();
   const result = target.importSnapshot({ ...snapshot, workspaceId: toWorkspace, tables });
   target.close();
+  if (keptSettings.length) {
+    const again = new Database(toDb) as unknown as { prepare: (sql: string) => { run: (...args: unknown[]) => unknown }; close: () => void };
+    const put = again.prepare("INSERT OR REPLACE INTO settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?)");
+    for (const row of keptSettings) put.run(row.workspace_id, row.key, row.value, row.updated_at);
+    again.close();
+  }
   for (const [from, to] of folders) cpSync(from, to, { recursive: true, force: false, errorOnExist: false });
   if (existsSync(portraitFrom)) { rmSync(portraitTo, { recursive: true, force: true }); cpSync(portraitFrom, portraitTo, { recursive: true }); }
   console.log(JSON.stringify({ imported: Object.fromEntries(Object.entries(result).filter(([, n]) => n)) }));
