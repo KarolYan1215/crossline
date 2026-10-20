@@ -14,8 +14,11 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: diagnose, deploy or backup
+        description: diagnose, deploy, backup, compare-list, compare or compare-report
         default: diagnose
+      args:
+        description: "compare only: e.g. --email someone@example.com --steps 6 --backplans 3"
+        default: ""
 
 permissions:
   contents: read
@@ -185,6 +188,53 @@ jobs:
           docker start crossline-web crossline-worker
           rm -f /tmp/crossline-transfer.tgz
           exit $status
+          REMOTE
+      - name: Compare the developer's models on real work
+        if: github.event_name == 'workflow_dispatch' && startsWith(inputs.action, 'compare')
+        env:
+          ACTION: ${{ inputs.action }}
+          ARGS: ${{ inputs.args }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          # scripts/sponsor-compare.ts in a one-off container of the newest app image (pulled with the job's token and logged out again; the
+          # running app is not restarted): `compare-list` counts what each account could be compared on, `compare` starts the comparison
+          # detached (it takes about an hour and spends the developer's key), `compare-report` prints its progress and the newest report.
+          # The ledger is copied by SQLite's online backup into /srv/crossline/compare (root and the app user only); nothing writes the live one.
+          printf '%s' "$ARGS" | grep -qE '^[A-Za-z0-9@._,/ +-]*$' || { echo "args may hold only letters, digits and @._,/+- and spaces"; exit 1; }
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "ACTION='$ACTION' ARGS='$ARGS' TOKEN='$TOKEN' ACTOR='$ACTOR' sudo -E sh -s" <<'REMOTE'
+          set -e
+          dir=/srv/crossline/compare
+          if [ "$ACTION" = compare-report ]; then
+            docker ps -a --filter name=crossline-compare --format "{{.Names}} {{.Status}}"
+            docker logs --tail 60 crossline-compare 2>&1 | grep -v '^#' | tail -60 || true
+            latest=$(ls -1d $dir/out/*/ 2>/dev/null | sort | tail -1)
+            [ -n "$latest" ] && { echo "== $latest"; cat "$latest/report.md" 2>/dev/null || wc -l "$latest/runs.jsonl"; }
+            exit 0
+          fi
+          registry=ghcr.io/karolyan1215/crossline-app:beta
+          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null && docker pull -q "$registry" || true
+          docker logout ghcr.io >/dev/null
+          image=$registry
+          docker image inspect "$image" >/dev/null 2>&1 || image=$(docker inspect -f '{{.Config.Image}}' crossline-worker)
+          install -d -m 750 -o 1000 -g 1000 $dir $dir/in $dir/out
+          owner=$(stat -c %u:%g /srv/crossline/data/crossline.db)
+          for name in crossline.db auth.db; do
+            docker run --rm --user "$owner" -v /srv/crossline/data:/src -v $dir/in:/out -w /repo/packages/db "$image" node -e '
+              const Database = require("better-sqlite3");
+              (async () => { const source = new Database("/src/" + process.argv[1], { fileMustExist: true }); await source.backup("/out/" + process.argv[1]); source.close(); })()
+                .catch((error) => { console.error(error.message); process.exit(1); });' "$name"
+          done
+          chown -R 1000:1000 $dir
+          # compare <docker options> <script arguments…>
+          compare() { opts="$1"; shift; docker run $opts --network host --env-file /srv/crossline/app.env -e CROSSLINE_DATA_DIR=/tmp/data \
+            -v $dir:/compare -v /srv/crossline/codex:/opt/codex:ro -w /repo "$image" /repo/node_modules/.bin/tsx scripts/sponsor-compare.ts "$@"; }
+          if [ "$ACTION" = compare-list ]; then compare --rm list --ledger /compare/in/crossline.db; exit 0; fi
+          docker rm -f crossline-compare >/dev/null 2>&1 || true
+          # Its own ceiling, beside the app's: one Codex runtime and two model runs at a time.
+          compare "-d --name crossline-compare --memory 800m --memory-swap 800m -e NODE_OPTIONS=--max-old-space-size=384" \
+            run --ledger /compare/in/crossline.db --out /compare/out $ARGS
+          sleep 30; docker logs crossline-compare 2>&1 | tail -10
           REMOTE
       - name: Deploy
         if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
