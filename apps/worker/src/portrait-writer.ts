@@ -114,7 +114,8 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
     const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd,
       developerInstructions: "Write the person's portrait report as the Skill describes, from the supplied material only: the report they get "
         + "right after the interview, a shareable first half and a private second half. Every sentence specific to this person, in their own concrete "
-        + "terms; long-term goals are the ones they chose, never an achievement dressed as one. Return raw JSON only.",
+        + "terms; long-term goals are the ones they chose, never an achievement dressed as one. Use a document only where it is about the person; "
+        + "plain statements, no 「并非……而是」 contrasts, an abstract phrase at most once, advice as a step they may take, never a rule. Return raw JSON only.",
       outputSchema: PORTRAIT_SCHEMA, prepareInput: () => context, validateOutput: (output) => checked(output, lineIds),
       softAccept: (rejection, output) => keepIncomplete(rejection, () => checked(output, lineIds, { lenient: true })),
       onAudit: () => {}, timeoutMs: 60 * 60_000 });

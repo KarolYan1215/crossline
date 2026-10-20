@@ -55,3 +55,6 @@
 | [archive/codex-test-plan.md](archive/codex-test-plan.md) | 交给 Codex 自动跑的测试方案，含证伪设计赌注的红队层 |
 | [archive/codex-browser-drill.md](archive/codex-browser-drill.md) | 两项浏览器实测脚本 |
 | [archive/ux-review-2026-10-01.md](archive/ux-review-2026-10-01.md) | 2026-10-01 的用户视角测评 |
+- [onboarding-prompts.md](onboarding-prompts.md)：访谈对话层、整理层与画像报告的 prompt 结构、目的、实际上下文，对照本人真实访谈找出的问题与 2026-10-20 的修改。
+- [ledger-sync.md](ledger-sync.md)：本机与服务器账本的长期同步。
+- [review-2026-10-20.md](review-2026-10-20.md)：2026-10-20 全系统走查与调研（Muse、Codex/Claude Code、可穿戴、公域用户）。

@@ -41,12 +41,19 @@ export function syncGapQuestions(store: CrosslineStore, workspaceId: string, gap
     if (!live.has(question.key)) store.dropQuestion(workspaceId, question.id, at);
 }
 
-/** What the model is shown of the ledger: every waiting and unanswered question, and the latest answered ones. */
+/**
+ * What the model is shown of the ledger: the questions still waiting and the latest answered ones. The app's own waiting questions
+ * (`gap:`) take at most a third of the room: on the owner's real interview the fifteen places were all the app's file-belonging
+ * questions, and the dialogue could not see what it had itself asked and been told (docs/onboarding-prompts.md).
+ */
 export function ledgerForModel(store: CrosslineStore, workspaceId: string, sessionId: string, limit = 60): string[] {
   const all = interviewQuestions(store, workspaceId, sessionId).filter((question) => question.status !== "dropped");
-  const waiting = all.filter((question) => question.status === "pending" || question.status === "open");
-  const settled = all.filter((question) => question.status === "answered" || question.status === "assumed").slice(-Math.max(0, limit - waiting.length));
-  return ledgerLines([...settled, ...waiting].sort((a, b) => a.id - b.id).slice(-limit));
+  const isWaiting = (question: (typeof all)[number]) => question.status === "pending" || question.status === "open";
+  const appWaiting = all.filter((question) => isWaiting(question) && question.key.startsWith("gap:")).slice(-Math.ceil(limit / 3));
+  const ownWaiting = all.filter((question) => isWaiting(question) && !question.key.startsWith("gap:")).slice(-Math.max(0, limit - appWaiting.length));
+  const room = Math.max(0, limit - appWaiting.length - ownWaiting.length);
+  const settled = room ? all.filter((question) => question.status === "answered" || question.status === "assumed").slice(-room) : [];
+  return ledgerLines([...settled, ...ownWaiting, ...appWaiting].sort((a, b) => a.id - b.id));
 }
 
 export type RepeatOutcome = { questions: TurnQuestion[]; coveredGaps: Set<string>; dropped: Array<{ text: string; repeats: number; why: "answered" | "similar" }> };
