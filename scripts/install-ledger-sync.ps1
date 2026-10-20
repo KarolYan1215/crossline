@@ -17,9 +17,11 @@ $pnpm = (Get-Command pnpm.cmd -ErrorAction Stop).Source
 $logDir = Join-Path $repo 'data\logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir 'ledger-sync.log'
-# A cmd line so stdout and stderr land in one log the person can read after a silent run.
-$action = New-ScheduledTaskAction -Execute 'cmd.exe' -WorkingDirectory $repo `
-  -Argument "/c `"`"$pnpm`" exec tsx scripts\ledger-sync.ts >> `"$log`" 2>&1`""
+# A cmd line so stdout and stderr land in one log the person can read after a silent run, hosted by `conhost --headless` as
+# install-startup.ps1 does: run directly, cmd.exe opened a console window on top of whatever the person was doing every interval
+# (2026-10-20, every 15 minutes).
+$action = New-ScheduledTaskAction -Execute 'conhost.exe' -WorkingDirectory $repo `
+  -Argument "--headless cmd.exe /c `"`"$pnpm`" exec tsx scripts\ledger-sync.ts >> `"$log`" 2>&1`""
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 
