@@ -301,7 +301,10 @@ export function readLineShares(ctx: AccessContext): Record<string, number> | nul
   } catch { /* unreadable: fall back to what was said */ }
   let portrait: PortraitReport | undefined;
   try { portrait = (JSON.parse(store.getSetting(ctx.workspaceId, "portrait.report") ?? "{}") as { report?: PortraitReport }).report; } catch { /* none yet */ }
-  return statedShares(portrait?.lines?.items ?? null, store.listProfileFacts(ctx.workspaceId), hoursFromText);
+  // The portrait's suggested share (`targetShare`) over the one the person described (`share`): the owner chose on 2026-10-20 to plan
+  // on the suggestion, which keeps the hard line as the calendar's base and gives each other line what it feeds back to it.
+  const items = portrait?.lines?.items?.map((item) => ({ lineId: item.lineId, share: item.targetShare ?? item.share })) ?? null;
+  return statedShares(items, store.listProfileFacts(ctx.workspaceId), hoursFromText);
 }
 
 /** Each line's share as the person set it: whole percents for known lines, together at most 100; `{}` goes back to what they said. */
