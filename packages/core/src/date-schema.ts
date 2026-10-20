@@ -306,11 +306,15 @@ export function withoutDecidedDates(next: DateExtraction, decided: Array<DateCan
 /**
  * Weekly arrangements that fall wholly outside the hours the person works and belong to no project — meals, sleep — say nothing the
  * available hours do not already say. Kept out of the batch, they are not offered for confirmation or for the calendar. A course's
- * class is kept even outside those hours: it is still an arrangement the person may want on the calendar.
+ * class is kept even outside those hours: it is still an arrangement the person may want on the calendar. So is a hard line's own
+ * schedule (上班 9:30–18:30, named by its project or its title): it lies outside the free hours by definition, and it is the fixed
+ * schedule the start standard asks for.
  */
 export function withoutOffHours(recurring: RecurringMeeting[], windows: Array<{ days: number[]; start: string; end: string }>,
-  projects: Array<{ id: string; name: string }>): RecurringMeeting[] {
-  const belongs = (item: RecurringMeeting) => Boolean(item.project) && projects.some((project) =>
+  projects: Array<{ id: string; name: string }>, hardLines: Array<{ id: string; label: string }> = []): RecurringMeeting[] {
+  const ofHardLine = (item: RecurringMeeting) => hardLines.some((line) =>
+    item.project === line.id || item.project === line.label || (line.label.length >= 2 && item.title.includes(line.label)));
+  const belongs = (item: RecurringMeeting) => ofHardLine(item) || Boolean(item.project) && projects.some((project) =>
     item.project === project.id || item.project === project.name || item.project.includes(project.name));
   const overlaps = (item: RecurringMeeting) => item.weekdays.some((day) => windows.some((window) =>
     window.days.includes(day) && window.start < item.endTime && window.end > item.startTime));
