@@ -32,7 +32,7 @@ import { dedupePass } from "./dedupe";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
-import { cleanPublicSkills, createSkillScout, scoutDue } from "./public-skills";
+import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, scoutDue } from "./public-skills";
 import { browserProfilesRoot, cleanGrownSkills, finishWorkflowLogin, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
   workflowSchedulePass } from "./workflow-smith";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
@@ -931,6 +931,10 @@ async function automationTick(workspaceId: string): Promise<void> {
   enterUsageWorkspace(workspaceId);
   await automationPass(automationDeps, workspaceId);
 }
+// 「按链接添加」 a public skill (docs/skills-library.md §2): the person's link goes through the scout's own fetch, scan and review.
+const publicSkillInstaller = createPublicSkillInstaller({ store: analysisStore, cwd: repoRoot, client: accountClient,
+  beforeRun: (workspaceId) => enterUsageWorkspace(workspaceId),
+  log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
 const automationService = createAutomationService({ ...automationDeps, afterRequest: (workspaceId) => { void automationDesignPass(workspaceId).catch(() => undefined); } });
 for (const workspace of analysisStore.listWorkspaces()) {
   const lost = agentService.recoverLost(workspace.id);
@@ -1232,7 +1236,8 @@ if (!capabilitySecret) {
       ...(hostedBeta ? { maxRunning: guestRuntimeLimit() ?? 2, idleMs: 10 * 60_000 } : {}) },
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId) },
-    services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/automations", handle: automationService.handle }],
+    services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
+      { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle }],
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),

@@ -6,7 +6,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, allowSkillScripts, installedPublicFiles as installedFiles, readPublicSkills as readLibrary, removePublicSkill } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { SKILL_LIBRARY_SETTING } from "@crossline/core";
-import { cleanPublicSkills, createSkillScout, fetchSkillDirectory, scoutDue, wantPublicSkill, SKILL_SCOUT, type HttpGet } from "./public-skills";
+import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, fetchSkillDirectory, installPublicSkillFromLink, readLinkRequest, scoutDue,
+  wantPublicSkill, SKILL_SCOUT, type HttpGet } from "./public-skills";
 import { librarySkillsFor } from "./skill-library";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 
@@ -188,4 +189,58 @@ test("the person allows a text-only skill's scripts: they are installed and run;
     expect(readLibrary(store, ws)[0]!.commit).toBe(SHA2);
     expect(installedFiles(store, ws, readLibrary(store, ws)[0]!).map((file) => file.path)).toEqual(["SKILL.md"]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a link the person gives goes through the same fetch, scan and review: installed, capped to text, or refused", async () => {
+  store.setSetting(ws, LINE_SETTING, JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "", goals: [], createdAt: "" },
+    { id: "research", label: "研究者", color: "research", goal: "", goals: [], createdAt: "" }]));
+  const runtime = scriptedRuntime([REVIEWER], () => JSON.stringify({ verdict: "usable", reasons: ["方法具体"] }));
+  const http = github(repos);
+  const installer = createPublicSkillInstaller({ store, cwd: "C:\\repo", client: () => runtime.rpc, http, now: () => new Date("2026-10-20T00:00:00Z") });
+  // A pasted directory link names both the repository and the directory; the branch in it is not used.
+  const started = await installer.handle("POST", "/v1/skills/public/install", ws,
+    { repo: "https://github.com/acme/skills/tree/main/skills/xhs-writer", path: "", lineId: "media", why: "小红书写作" });
+  expect(started).toMatchObject({ status: 202, body: { ok: true, state: "running", repo: "https://github.com/acme/skills", path: "skills/xhs-writer" } });
+  const jobId = (started!.body as { jobId: string }).jobId;
+  expect(await installer.settle(jobId)).toEqual({ state: "installed", id: "pub-xhs-writer", final: "usable" });
+  expect(await installer.handle("GET", `/v1/skills/public/install/${jobId}`, ws, undefined)).toMatchObject({ status: 200, body: { state: "installed", id: "pub-xhs-writer" } });
+  // Another workspace cannot read the job.
+  const other = store.createPrincipalWithWorkspace("user-2", "另一个").workspace.id;
+  expect(await installer.handle("GET", `/v1/skills/public/install/${jobId}`, other, undefined)).toMatchObject({ status: 404 });
+  expect(readLibrary(store, ws)[0]).toMatchObject({ id: "pub-xhs-writer", lines: ["media"], category: "other", why: "小红书写作",
+    source: { repo: "https://github.com/acme/skills", path: "skills/xhs-writer" } });
+  expect(store.listEvents(ws, { type: "skill.public.installed" })[0]!.payload).toMatchObject({ via: "link" });
+  expect(runtime.prompts().filter((prompt) => prompt.startsWith(`$${REVIEWER}`))).toHaveLength(1);
+
+  // The same directory for another line: nothing is fetched again, the line is added.
+  const fetchedBefore = http.urls.length;
+  const again = await installer.handle("POST", "/v1/skills/public/install", ws, { repo: "https://github.com/acme/skills", path: "skills/xhs-writer/", lineId: "research" });
+  expect(await installer.settle((again!.body as { jobId: string }).jobId)).toEqual({ state: "already", id: "pub-xhs-writer", lines: ["media", "research"] });
+  expect(http.urls.length).toBe(fetchedBefore);
+
+  // A risky script is installed without it; an injection is refused outright, whoever asked.
+  const risky = await installer.handle("POST", "/v1/skills/public/install", ws, { repo: "https://github.com/acme/skills", path: "skills/xhs-tools", lineId: "media" });
+  const sneaky = await installer.handle("POST", "/v1/skills/public/install", ws, { repo: "https://github.com/acme/skills", path: "skills/sneaky", lineId: "media", category: "writing" });
+  expect(await installer.settle((risky!.body as { jobId: string }).jobId)).toEqual({ state: "installed", id: "pub-xhs-tools", final: "text_only" });
+  expect(await installer.settle((sneaky!.body as { jobId: string }).jobId)).toEqual({ state: "rejected", reason: "SKILL.md 含有要求模型越权或外传的语句" });
+  expect(installedFiles(store, ws, readLibrary(store, ws).find((record) => record.id === "pub-xhs-tools")!).map((file) => file.path)).toEqual(["SKILL.md"]);
+  expect(store.listEvents(ws, { type: "skill.public.rejected" })[0]!.payload).toMatchObject({ name: "sneaky", via: "link" });
+});
+
+test("a link is checked before anything is fetched, and without a model nothing is installed", async () => {
+  const http = github(repos);
+  const installer = createPublicSkillInstaller({ store, cwd: "C:\\repo", client: () => undefined, http });
+  expect(await installer.handle("POST", "/v1/skills/public/install", ws, { repo: "https://gitlab.com/acme/skills", path: "x", lineId: "media" }))
+    .toMatchObject({ status: 400, body: { blocker: { code: "SKILL_LINK_NOT_GITHUB" } } });
+  expect(await installer.handle("POST", "/v1/skills/public/install", ws, { repo: "https://github.com/acme/skills", path: "../etc", lineId: "media" }))
+    .toMatchObject({ status: 400, body: { blocker: { code: "SKILL_LINK_PATH_INVALID" } } });
+  expect(await installer.handle("POST", "/v1/skills/public/install", ws, { repo: "https://github.com/acme/skills", path: "skills/xhs-writer", lineId: "nowhere" }))
+    .toMatchObject({ status: 400, body: { blocker: { code: "SKILL_LINK_LINE_UNKNOWN" } } });
+  expect(await installPublicSkillFromLink(store, ws, "C:\\repo", undefined, { repo: "https://github.com/acme/skills", path: "skills/xhs-writer", lineId: "media" }, { http }))
+    .toMatchObject({ state: "blocked", code: "CODEX_SUPERVISOR_UNAVAILABLE" });
+  expect(http.urls).toEqual([]);
+  expect(readLinkRequest(store, ws, { repo: "https://github.com/acme/skills.git", path: "/skills/xhs-writer/", lineId: "media" }))
+    .toEqual({ ok: true, request: { repo: "https://github.com/acme/skills.git", path: "skills/xhs-writer", lineId: "media", why: "" } });
+  expect(await installer.handle("GET", "/v1/skills/public/install/inst-missing", ws, undefined)).toMatchObject({ status: 404 });
+  expect(await installer.handle("GET", "/v1/skills/public/elsewhere", ws, undefined)).toBeUndefined();
 });

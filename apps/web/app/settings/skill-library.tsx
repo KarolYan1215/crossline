@@ -40,6 +40,7 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
       {publics.length === 0 ? <p className="muted">尚无。首次检索在主线建立后进行，之后每月一次；任务需要而库中没有时会提前检索。</p>
         : <ul className="sk-publics">{publics.map((skill) => <PublicSkill key={skill.id} skill={skill} shell={library.shell}
           onChanged={(next) => setPublics((all) => next ? all.map((item) => item.id === next.id ? next : item) : all.filter((item) => item.id !== skill.id))} />)}</ul>}
+      <LinkInstall lines={library.mine.map((line) => ({ id: line.lineId, label: line.lineLabel }))} />
       {library.removed.length > 0 && <p className="st-note">最近删除：{library.removed.map((item) => `${item.name}（${item.by === "person" ? "本人删除" : item.reason}，${day(item.at)}）`).join("；")}</p>}
     </section>
   </div>;
@@ -232,6 +233,58 @@ function GrownFlow({ flow, shell, onChanged }: { flow: GrownSkillView; shell: bo
 }
 
 /** Removing is not undone, so it takes a second click: 「删除」 becomes 「确认删除」 for a few seconds. */
+type InstallStatus = { state: "running" | "installed" | "already" | "rejected" | "blocked"; jobId?: string; id?: string; final?: string; reason?: string; message?: string };
+const INSTALL_POLL_MS = 4000;
+const INSTALL_WAIT_MS = 40 * 60_000;
+
+/**
+ * 「按链接添加」 (docs/skills-library.md §2): a GitHub repository and the directory holding SKILL.md, for one line. The worker takes it
+ * through the same fetch, scan and review as the scout's own finds; this waits on the job and reloads once the skill is in the library.
+ */
+function LinkInstall({ lines }: { lines: Array<{ id: string; label: string }> }) {
+  const [repo, setRepo] = useState("");
+  const [dir, setDir] = useState("");
+  const [lineId, setLineId] = useState(lines[0]?.id ?? "");
+  const [why, setWhy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const describe = (status: InstallStatus) => status.state === "installed" ? `已加入 Skill 库（${status.final === "text_only" ? "脚本有风险，只用文字" : "可用"}）`
+    : status.state === "already" ? "库里已有这个 skill，已把这条主线加给它"
+    : status.state === "rejected" ? `未加入：${status.reason ?? ""}` : status.state === "blocked" ? `未完成：${status.message ?? ""}` : "正在取回、扫描与审查……";
+  const poll = async (jobId: string) => {
+    const until = Date.now() + INSTALL_WAIT_MS;
+    while (Date.now() < until) {
+      await new Promise((resolve) => setTimeout(resolve, INSTALL_POLL_MS));
+      const status = await fetch(`/api/skills/public/install?job=${encodeURIComponent(jobId)}`).then((response) => response.json() as Promise<InstallStatus>).catch(() => undefined);
+      if (!status || status.state === "running") continue;
+      setNote(describe(status));
+      if (status.state === "installed" || status.state === "already") window.location.reload();
+      return;
+    }
+    setNote("审查还没结束；稍后刷新页面查看。");
+  };
+  return <form className="sk-tool-form" aria-label="按链接添加公开 skill" onSubmit={async (event) => {
+    event.preventDefault();
+    setBusy(true); setNote("正在取回、扫描与审查……");
+    try {
+      const response = await fetch("/api/skills/public/install", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repo, path: dir, lineId, why }) });
+      const answer = await response.json().catch(() => ({})) as InstallStatus & { blocker?: { message?: string } };
+      if (!response.ok || !answer.jobId) { setNote(`未开始：${answer.blocker?.message ?? "请检查链接与目录"}`); return; }
+      await poll(answer.jobId);
+    } finally { setBusy(false); }
+  }}>
+    <label className="sk-tool-good"><span>仓库链接</span><input value={repo} maxLength={300} placeholder="https://github.com/owner/repo，或目录的链接" onChange={(event) => setRepo(event.target.value)} /></label>
+    <label><span>目录</span><input value={dir} maxLength={300} placeholder="例如 skills/teach" onChange={(event) => setDir(event.target.value)} /></label>
+    <label><span>主线</span><select value={lineId} onChange={(event) => setLineId(event.target.value)}>
+      {lines.map((line) => <option key={line.id} value={line.id}>{line.label}</option>)}
+    </select></label>
+    <label className="sk-tool-good"><span>用来做什么</span><input value={why} maxLength={300} placeholder="可不填" onChange={(event) => setWhy(event.target.value)} /></label>
+    <button type="submit" className="secondary-button" disabled={busy || !repo.trim() || !lineId}>按链接添加</button>
+    {note && <p role="status" className="st-note">{note}</p>}
+  </form>;
+}
+
 function ConfirmDelete({ name, onConfirm }: { name: string; onConfirm: () => Promise<void> }) {
   const [armed, setArmed] = useState(false);
   return <button type="button" className="secondary-button" aria-label={armed ? `确认删除${name}` : `删除${name}`} onClick={async () => {
