@@ -23,4 +23,5 @@ test("beats add attention time on the server's clock, and only a bounded input a
   expect((await beat({ inputAgoMs: -1 })).status).toBe(400);
   expect((await beat({ inputAgoMs: "1" })).status).toBe(400);
   expect((await beat({ inputAgoMs: 700_000 })).status).toBe(400);
-});
+// The route's first import is cold (the whole web lib graph); under a loaded full run it alone passed the 5 s default.
+}, 30_000);

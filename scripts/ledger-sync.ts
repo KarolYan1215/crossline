@@ -96,7 +96,9 @@ if (chosen === "to-server") {
   const tgz = path.join(staging, "export.tgz");
   execFileSync("scp", [...ssh, `${host}:${remoteOut}`, tgz], { stdio: "inherit" });
   spawnSync("ssh", [...ssh, host, `rm -f ${remoteOut}`]);
-  execFileSync("tar", ["-xzf", tgz, "-C", staging], { stdio: "inherit" });
+  // The system's bsdtar by full path: from Git Bash the first `tar` on PATH is GNU tar, which reads "C:\…" as a remote host.
+  const systemTar = process.platform === "win32" ? path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
+  execFileSync(existsSync(systemTar) ? systemTar : "tar", ["-xzf", tgz, "-C", staging], { stdio: "inherit" });
   const manifest = JSON.parse(readFileSync(path.join(staging, "manifest.json"), "utf8")) as { workspaceId: string; fromData: string };
   stopLocalApp();
   try {

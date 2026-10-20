@@ -47,8 +47,10 @@ for (const folder of ["materials", "sources", portrait]) {
 writeFileSync(path.join(staging, "manifest.json"),
   JSON.stringify({ workspaceId, fromData: dataDir, toEmail, folders: copied, packedAt: new Date().toISOString() }, null, 1));
 
-// Windows 10 and later ship bsdtar as tar.exe; it writes the same gzip archive GNU tar reads on the server.
-execFileSync("tar", ["-czf", out, "-C", staging, "."], { stdio: "inherit" });
+// Windows 10 and later ship bsdtar as tar.exe; it writes the same gzip archive GNU tar reads on the server. It is named by its full
+// path: from Git Bash the first `tar` on PATH is GNU tar, which reads "C:…" as a remote host and fails.
+const systemTar = process.platform === "win32" ? path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
+execFileSync(existsSync(systemTar) ? systemTar : "tar", ["-czf", out, "-C", staging, "."], { stdio: "inherit" });
 rmSync(staging, { recursive: true, force: true });
 console.log(JSON.stringify({ out, megabytes: +(statSync(out).size / 1048576).toFixed(1), workspaceId, toEmail, folders: copied }, null, 1));
 console.log(`next: scp -i <key> "${out}" admin@47.245.88.172:/tmp/crossline-transfer.tgz`);
