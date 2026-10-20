@@ -36,6 +36,9 @@ ensure /srv/assess/assess.env ASSESS_TEXT_BASE_URL https://api.siliconflow.cn/v1
 ensure /srv/assess/assess.env ASSESS_TEXT_MODEL deepseek-ai/DeepSeek-V4-Pro
 # The app's portrait figure for accounts on another model is drawn with the same Ark key and Seedream model (decided 2026-10-16). The key
 # is copied between the two files on this host only, never printed; an app key already set is left alone.
+# 录音在服务器转写 (the owner's decision of 2026-10-20, docs/phone-recording.md): run.sh starts the transcriber container on a host of
+# 3.2 GB or more; each person still turns it on in Settings, and uploads are refused until they do. Set it to 0 to take the container down.
+ensure /srv/crossline/app.env CROSSLINE_SERVER_TRANSCRIBE 1
 ensure /srv/crossline/app.env CROSSLINE_IMAGE_API_STYLE ark
 ensure /srv/crossline/app.env CROSSLINE_IMAGE_MODEL doubao-seedream-5-0-pro-260628
 if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_IMAGE_API_KEY=." /srv/crossline/app.env; then

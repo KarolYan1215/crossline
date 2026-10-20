@@ -1,7 +1,7 @@
 #!/bin/sh
 # (Re)starts the hosted beta's three containers from the images on this host (docs/beta-launch.md §10.6).
 #   sudo sh /srv/crossline/run.sh            all three
-#   sudo sh /srv/crossline/run.sh assess     one of: assess, web, worker
+#   sudo sh /srv/crossline/run.sh assess     one of: assess, web, worker, transcriber
 # Images: built by .github/workflows/images.yml and pulled from ghcr.io (a 2 GB host cannot run `next build`). A private repository's
 # packages need one `sudo docker login ghcr.io -u <github user>` with a token that has read:packages. CROSSLINE_LOCAL_IMAGES=1 uses the
 # images build.sh made on this host instead.
@@ -29,14 +29,23 @@ fi
 #             may not use. The fifth runtime was the owner's call on 2026-10-17; web gave back 50 MB (its renders peak near 330 MB)
 #   below:    worker 550m (2, 2), web 400m (2), assess 300m (2) — 1.25 GB on the 1.6 GB host
 host_mb=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
-if [ "${host_mb:-0}" -ge 3200 ]; then
+# 录音在服务器转写 (docs/phone-recording.md 「服务器转写」): with CROSSLINE_SERVER_TRANSCRIBE=1 in app.env, on a host of 3.2 GB or more, a
+# fourth container runs SenseVoice at night on one CPU. Measured on 2026-10-20: a 29-minute recording with 9 minutes of speech peaked at
+# 557 MB (under tsx; the prebuilt process holds less), so it gets 650m — taken from the worker, which drops to 1350m with one model run and
+# one guest runtime fewer, keeping the four ceilings 3.1 GB, under the 3149 MB the 350 MB rule allows.
+transcribe=0
+if grep -q "^CROSSLINE_SERVER_TRANSCRIBE=1" /srv/crossline/app.env 2>/dev/null && [ "${host_mb:-0}" -ge 3200 ]; then transcribe=1; fi
+if [ "${host_mb:-0}" -ge 3200 ] && [ "$transcribe" = 1 ]; then
+  assess_mem=450m; assess_heap=320; web_mem=650m; web_heap=480; worker_mem=1350m; worker_heap=384; transcriber_mem=650m
+  model_runs=4; guest_runtimes=4; web_renders=3; posters=3
+elif [ "${host_mb:-0}" -ge 3200 ]; then
   assess_mem=450m; assess_heap=320; web_mem=650m; web_heap=480; worker_mem=1750m; worker_heap=384
   model_runs=5; guest_runtimes=5; web_renders=3; posters=3
 else
   assess_mem=300m; assess_heap=224; web_mem=400m; web_heap=300; worker_mem=550m; worker_heap=280
   model_runs=2; guest_runtimes=2; web_renders=2; posters=2
 fi
-echo "host ${host_mb} MB: worker ${worker_mem}, web ${web_mem}, assess ${assess_mem}; ${model_runs} model runs, ${guest_runtimes} guest runtimes, ${web_renders} renders"
+echo "host ${host_mb} MB: worker ${worker_mem}, web ${web_mem}, assess ${assess_mem}${transcriber_mem:+, transcriber $transcriber_mem}; ${model_runs} model runs, ${guest_runtimes} guest runtimes, ${web_renders} renders"
 # A value set by hand in the env file wins over the profile: `-e` would override `--env-file`, so it is passed only when the file lacks it.
 default_env() { # file key value
   grep -q "^$2=." "$1" 2>/dev/null || printf -- '-e %s=%s ' "$2" "$3"
@@ -86,4 +95,34 @@ if [ "$want" = all ] || [ "$want" = worker ]; then
     $(default_env /srv/crossline/app.env CROSSLINE_MODEL_CONCURRENCY $model_runs) $(default_env /srv/crossline/app.env CROSSLINE_GUEST_RUNTIMES $guest_runtimes) \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/worker "$app_image" $worker_cmd
+fi
+# The server transcriber (apps/worker/src/transcriber.ts): one CPU, no network, its own ceiling, the shared data volume (it writes transcripts into the
+# ledger and deletes the uploads it has read) and the SenseVoice files read-only. The model is fetched once from Hugging Face
+# (CROSSLINE_HF_BASE, e.g. https://hf-mirror.com, for a host that cannot reach it) and every file is checked against its pinned sha256;
+# a file that does not match is deleted and the container is not started. Without CROSSLINE_SERVER_TRANSCRIBE=1 it is removed.
+if [ "$want" = all ] || [ "$want" = transcriber ]; then
+  if [ "$transcribe" = 1 ]; then
+    models=/srv/crossline/models/sensevoice
+    base="$(grep "^CROSSLINE_HF_BASE=" /srv/crossline/app.env 2>/dev/null | cut -d= -f2-)"
+    base="${base:-https://huggingface.co}/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main"
+    mkdir -p "$models"
+    ok=1
+    for pair in "model.int8.onnx c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51" "tokens.txt f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc"; do
+      file=${pair% *}; sum=${pair#* }
+      if ! echo "$sum  $models/$file" | sha256sum -c --status 2>/dev/null; then
+        curl -fsSL --retry 3 -o "$models/$file.tmp" "$base/$file" && mv "$models/$file.tmp" "$models/$file" || true
+        if ! echo "$sum  $models/$file" | sha256sum -c --status 2>/dev/null; then echo "SenseVoice $file did not download or does not match its hash"; rm -f "$models/$file" "$models/$file.tmp"; ok=0; fi
+      fi
+    done
+    chmod 644 "$models"/* 2>/dev/null || true
+    if [ "$ok" = 1 ]; then
+      transcriber_cmd="/repo/node_modules/.bin/tsx src/transcriber.ts"
+      if docker run --rm --entrypoint test "$app_image" -f /repo/apps/worker/dist/transcriber.mjs; then transcriber_cmd="node dist/transcriber.mjs"; fi
+      start crossline-transcriber --network none --env-file /srv/crossline/app.env --memory $transcriber_mem --memory-swap $transcriber_mem --cpus 1 \
+        -e NODE_OPTIONS=--max-old-space-size=160 -e CROSSLINE_SENSEVOICE_DIR=/models -e CROSSLINE_TRANSCRIBE_THREADS=1 \
+        -v /srv/crossline/data:/data -v "$models":/models:ro -w /repo/apps/worker "$app_image" $transcriber_cmd
+    fi
+  else
+    docker rm -f crossline-transcriber >/dev/null 2>&1 && echo "removed crossline-transcriber" || true
+  fi
 fi

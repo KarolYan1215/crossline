@@ -26,7 +26,8 @@ const outside = {
   name: "crossline-outside",
   setup(build) {
     build.onResolve({ filter: /^[^./]/ }, async (args) => {
-      if (args.pluginData === "inner") return undefined;
+      // A Windows absolute path (an entry point, `C:\…`) also starts with a letter; it is a file, not a package.
+      if (args.pluginData === "inner" || path.isAbsolute(args.path)) return undefined;
       const name = args.path.startsWith("@") ? args.path.split("/").slice(0, 2).join("/") : args.path.split("/")[0];
       if (args.path.startsWith("node:") || builtins.has(name)) return { path: args.path, external: true };
       if (args.path.startsWith("@crossline/")) return undefined;
@@ -45,9 +46,11 @@ const outside = {
   }
 };
 
+// The worker, and the server transcriber's own process (apps/worker/src/transcriber.ts, docs/phone-recording.md), which shares its code.
+for (const [entry, out] of [["index.ts", "index.mjs"], ["transcriber.ts", "transcriber.mjs"]]) {
 const result = await esbuild.build({
-  entryPoints: [path.join(worker, "src", "index.ts")],
-  outfile: path.join(worker, "dist", "index.mjs"),
+  entryPoints: [path.join(worker, "src", entry)],
+  outfile: path.join(worker, "dist", out),
   bundle: true,
   platform: "node",
   format: "esm",
@@ -59,4 +62,5 @@ const result = await esbuild.build({
   metafile: true
 });
 const bytes = Object.values(result.metafile.outputs).reduce((sum, output) => sum + output.bytes, 0);
-console.log(JSON.stringify({ built: path.relative(repo, path.join(worker, "dist", "index.mjs")), megabytes: +(bytes / 1048576).toFixed(1) }));
+console.log(JSON.stringify({ built: path.relative(repo, path.join(worker, "dist", out)), megabytes: +(bytes / 1048576).toFixed(1) }));
+}

@@ -4,6 +4,7 @@ import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { AgentHistoryCard } from "./agent-history-card";
 import { RecordingCard } from "./recording-card";
+import { ServerRecordingCard } from "./server-recording-card";
 import { recordingOverview } from "../../lib/recordings";
 import { TelemetryCard } from "./telemetry-card";
 import { AutostartCard } from "./autostart-card";
@@ -37,7 +38,7 @@ import { loadAssistant } from "../../lib/agent";
 import { agentTaskStatusLabel } from "../../lib/labels";
 import { permissionModeEnabled } from "../../lib/permission-mode";
 import {
-  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, readAvailability, toZonedInstant
+  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, dataDirectory, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, readAvailability, toZonedInstant
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 import { lineLabels } from "../../lib/lines";
@@ -108,6 +109,7 @@ export default async function SettingsPage() {
   // This computer's own readings (folders, screen, idle stretches, coding agents' logs) are the machine owner's only.
   const machine = assistantAvailable(store, ctx.workspaceId);
   // When the person is at the computer, hour by hour (activity.hourly, under the activity consent).
+  const recordings = recordingOverview(store, ctx.workspaceId, dataDirectory());
   const usualDay = (() => { try { return atComputerByHour(JSON.parse(setting(ACTIVITY_HOURLY) ?? "[]") as ActivityHour[], zone); } catch { return undefined; } })();
   const autostart = autostartAvailable() ? await readAutostart() : undefined;
 
@@ -193,7 +195,8 @@ export default async function SettingsPage() {
               <span key={hour} title={`${hour}:00–${hour + 1}:00 · 平均 ${minutes} 分钟，${Math.round(usualDay.present[hour]! * 100)}% 的日子在电脑前`}><i style={{ height: `${(minutes / 60) * 100}%` }} /></span>)}</div>
             <div className="st-hours-axis" aria-hidden="true"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
           </section>}
-          {machine && <RecordingCard overview={recordingOverview(store, ctx.workspaceId)} />}
+          {machine && <RecordingCard overview={recordings} />}
+          {recordings.server && <ServerRecordingCard server={recordings.server} done={recordings.done} />}
           {isLocalInstall() && <TelemetryCard on={setting(TELEMETRY_ENABLED_SETTING) !== "0"} />}
         </section>
 

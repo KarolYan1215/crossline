@@ -8,11 +8,12 @@
 # (pinned by CODEX_LINUX_RELEASE_BINARY_SHA256) and mounts it read-only at /opt/codex.
 FROM node:22-bookworm-slim
 ENV CI=1 NEXT_TELEMETRY_DISABLED=1
-# node-gyp for better-sqlite3 and keytar; libsecret is loaded by keytar at import, or every connector fails to load.
+# node-gyp for better-sqlite3 and keytar; libsecret is loaded by keytar at import, or every connector fails to load. ffmpeg decodes the
+# recordings the server transcriber reads (apps/worker/src/sensevoice.ts), in blocks, so a long one never sits in memory whole.
 # A server far from deb.debian.org (the hosted beta's Hong Kong host) builds with `--build-arg APT_MIRROR=mirrors.aliyun.com`.
 ARG APT_MIRROR=
 RUN if [ -n "$APT_MIRROR" ]; then sed -i "s#deb.debian.org#$APT_MIRROR#g" /etc/apt/sources.list.d/debian.sources; fi
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ libsecret-1-0 libsecret-1-dev ca-certificates git \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ libsecret-1-0 libsecret-1-dev ca-certificates git ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@12.6.0
 WORKDIR /repo

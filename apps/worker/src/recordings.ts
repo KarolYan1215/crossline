@@ -116,11 +116,9 @@ async function transcribeOne(store: CrosslineStore, workspaceId: string, deps: R
     return { state: "failed", file };
   }
   const audioSha = createHash("sha256").update(bytes).digest("hex");
-  const prior = store.listEvents(workspaceId, { type: [RECORDING_TRANSCRIBED_EVENT, RECORDING_SILENT_EVENT], entityId: audioSha }).at(-1);
+  const prior = priorRecording(store, workspaceId, audioSha);
   if (prior) {
-    const documentId = prior.type === RECORDING_TRANSCRIBED_EVENT ? String((prior.payload as { documentId?: unknown }).documentId ?? "") : "";
-    const exists = documentId && store.listSourceDocuments(workspaceId).some((doc) => doc.id === documentId);
-    settle(store, workspaceId, folder.id, relative, entry, { audio: prior.type === RECORDING_SILENT_EVENT ? "silent" : "done", documentId: exists ? documentId : "" });
+    settle(store, workspaceId, folder.id, relative, entry, { audio: prior.state, documentId: prior.documentId });
     return { state: "duplicate", file };
   }
 
@@ -155,24 +153,49 @@ async function transcribeOne(store: CrosslineStore, workspaceId: string, deps: R
   }
 
   // The recorder writes the file when the recording ends, so its start is about its modification time less its length.
-  const started = localTime(new Date(entry.mtimeMs - result.seconds * 1000), deps.timeZone);
-  const text = `[录音：${file}，约 ${started} 开始，时长 ${clock(result.seconds)}]\n${result.text}`;
+  const saved = saveTranscript(store, workspaceId, { dataDir: deps.dataDir, timeZone: deps.timeZone, label: folder.label, file, endedAtMs: entry.mtimeMs,
+    audioSha, where: "本机转写", result: { ...result, wallMs }, extra: { folderId: folder.id }, now: now() });
+  settle(store, workspaceId, folder.id, relative, entry, { audio: "done", documentId: saved.documentId, ...(saved.created ? { created: true } : {}) });
+  return { state: "transcribed", file };
+}
+
+/**
+ * A transcript as a document in the materials plus its `recording.transcribed` event, keyed by the audio's sha256 — the one place both the
+ * folder path and the server inbox (`recording-inbox.ts`) write it, so dedup, digests and deletion treat them alike.
+ */
+export function saveTranscript(store: CrosslineStore, workspaceId: string, input: {
+  dataDir: string; timeZone: string; label: string; file: string; endedAtMs: number; audioSha: string; where: string;
+  result: { text: string; seconds: number; speechSeconds: number; workMs: number; wallMs: number }; extra?: Record<string, unknown>; now: Date;
+}): { documentId: string; created: boolean } {
+  const { result } = input;
+  const started = localTime(new Date(input.endedAtMs - result.seconds * 1000), input.timeZone);
+  const text = `[录音：${input.file}，约 ${started} 开始，时长 ${clock(result.seconds)}]\n${result.text}`;
   const textBytes = Buffer.from(text, "utf8");
   const sha256 = createHash("sha256").update(textBytes).digest("hex");
-  const root = path.resolve(deps.dataDir, "sources");
+  const root = path.resolve(input.dataDir, "sources");
   const target = path.join(root, `${sha256}.txt`);
   mkdirSync(root, { recursive: true });
   writeFileSync(target, textBytes);
   const id = randomUUID();
-  const doc = store.saveSourceDocument({ id, ownerId: owner, workspaceId, kind: "text", fileName: `${folder.label}/${file} 转写.txt`.slice(-200),
+  const owner = ownerOf(store, workspaceId);
+  const doc = store.saveSourceDocument({ id, ownerId: owner, workspaceId, kind: "text", fileName: `${input.label}/${input.file} 转写.txt`.slice(-200),
     mediaType: "text/plain", sha256, uri: pathToFileURL(target).href, extractedText: text, extractionStatus: "done",
-    extractionNote: `本机转写：录音 ${Math.max(1, Math.round(result.seconds / 60))} 分钟，有人声约 ${Math.round(result.speechSeconds / 60)} 分钟；录音没有保存副本（sha256 ${audioSha.slice(0, 12)}）。`,
-    createdAt: now().toISOString() });
-  const payload: RecordingTranscribed & { folderId: string } = { fileName: file, seconds: result.seconds, speechSeconds: result.speechSeconds,
-    workMs: result.workMs, wallMs, documentId: doc.id, folderId: folder.id };
-  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `${RECORDING_TRANSCRIBED_EVENT}:${audioSha}`, type: RECORDING_TRANSCRIBED_EVENT, entityId: audioSha, payload });
-  settle(store, workspaceId, folder.id, relative, entry, { audio: "done", documentId: doc.id, ...(doc.id === id ? { created: true } : {}) });
-  return { state: "transcribed", file };
+    extractionNote: `${input.where}：录音 ${Math.max(1, Math.round(result.seconds / 60))} 分钟，有人声约 ${Math.round(result.speechSeconds / 60)} 分钟；录音没有保存副本（sha256 ${input.audioSha.slice(0, 12)}）。`,
+    createdAt: input.now.toISOString() });
+  const payload: RecordingTranscribed & Record<string, unknown> = { fileName: input.file, seconds: result.seconds, speechSeconds: result.speechSeconds,
+    workMs: result.workMs, wallMs: result.wallMs, documentId: doc.id, ...input.extra };
+  store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `${RECORDING_TRANSCRIBED_EVENT}:${input.audioSha}`, type: RECORDING_TRANSCRIBED_EVENT,
+    entityId: input.audioSha, payload });
+  return { documentId: doc.id, created: doc.id === id };
+}
+
+/** Whether this audio was already transcribed or found silent, and the transcript it became if it still exists. */
+export function priorRecording(store: CrosslineStore, workspaceId: string, audioSha: string): { state: "done" | "silent"; documentId: string } | undefined {
+  const prior = store.listEvents(workspaceId, { type: [RECORDING_TRANSCRIBED_EVENT, RECORDING_SILENT_EVENT], entityId: audioSha }).at(-1);
+  if (!prior) return undefined;
+  const documentId = prior.type === RECORDING_TRANSCRIBED_EVENT ? String((prior.payload as { documentId?: unknown }).documentId ?? "") : "";
+  const exists = documentId && store.listSourceDocuments(workspaceId).some((doc) => doc.id === documentId);
+  return { state: prior.type === RECORDING_SILENT_EVENT ? "silent" : "done", documentId: exists ? documentId : "" };
 }
 
 /**

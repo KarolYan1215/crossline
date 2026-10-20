@@ -42,3 +42,30 @@ export function transcriptionCost(recent: Array<Pick<RecordingTranscribed, "seco
   const work = usable.reduce((sum, item) => sum + item.workMs, 0);
   return { recordings: usable.length, audioHours: Math.round((seconds / 3600) * 10) / 10, minutesPerHour: Math.round((work / 60_000) / (seconds / 3600) * 10) / 10 };
 }
+
+/**
+ * 录音在服务器转写 (docs/phone-recording.md 「服务器转写」, decided 2026-10-20): the phone's shortcut uploads each recording to
+ * `POST /api/recordings/upload`, where it waits in the data directory's `recordings/inbox/<workspace>/` until the transcriber container
+ * (SenseVoiceSmall through sherpa-onnx, one CPU) takes it in the person's night. Its own consent, off by default, because the audio leaves
+ * the person's own devices; the audio is deleted once transcribed and never backed up.
+ */
+export const RECORDING_SERVER_CONSENT = "recordings.serverTranscribe";
+/** Where uploads wait, under the data directory: `<dataDir>/recordings/inbox/<workspaceId>/`. */
+export const RECORDING_INBOX_SEGMENTS = ["recordings", "inbox"] as const;
+/** One upload at most, and one workspace's uploads per day (about 25 hours of 64 kbps audio). */
+export const RECORDING_UPLOAD_LIMIT = 300 * 1024 * 1024;
+export const RECORDING_UPLOAD_DAILY_LIMIT = 3 * 1024 * 1024 * 1024;
+/** The hours the transcriber works for a workspace, in its own zone; `CROSSLINE_TRANSCRIBE_WINDOW` overrides it as `HH:MM-HH:MM`. */
+export const TRANSCRIBE_WINDOW = "01:00-06:00";
+
+/** Whether `at` falls inside `window` (`HH:MM-HH:MM`, which may cross midnight) in `timeZone`. A malformed window falls back to the default. */
+export function inTranscribeWindow(at: Date, timeZone: string, window = TRANSCRIBE_WINDOW): boolean {
+  const parsed = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(window) ?? /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(TRANSCRIBE_WINDOW)!;
+  const from = Number(parsed[1]) * 60 + Number(parsed[2]), to = Number(parsed[3]) * 60 + Number(parsed[4]);
+  let minute = at.getUTCHours() * 60 + at.getUTCMinutes();
+  try {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at).map((part) => [part.type, part.value]));
+    minute = (Number(parts.hour) % 24) * 60 + Number(parts.minute);
+  } catch { /* UTC */ }
+  return from <= to ? minute >= from && minute < to : minute >= from || minute < to;
+}

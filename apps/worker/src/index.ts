@@ -572,6 +572,8 @@ async function tick(): Promise<void> {
   for (const workspace of workspaces) await portraitPass(workspace.id, checkedAt);
   // Authorized folders: what changed since the last tick is read (at most forty files a folder a tick), before filing runs over it.
   for (const workspace of workspaces) await folderPass(workspace.id, checkedAt);
+  // Transcripts from any source — this computer's folders or the server transcriber's inbox — are digested for every workspace.
+  for (const workspace of workspaces) void digestPass(workspace.id).catch(() => undefined);
   // Uploaded files are filed under the project their own name or opening names; what stays unclear is asked about on 待确认.
   for (const workspace of workspaces) {
     try {
