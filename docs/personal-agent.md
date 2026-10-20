@@ -97,7 +97,7 @@
 
 ## 8. 沙箱 shell：在 Codex 自带的 Linux 沙箱里给所有人真正的 shell（已实现，默认关）
 
-Codex 是 vendor 进来的（`vendor/codex`，rust-v0.155.0），它自带 Linux 沙箱（bubblewrap）和权限配置文件（`[permissions.<id>]`，可只放行指定目录的读取）。在它的基础上不改 Codex 本身就能做到模型无关的 shell 助手：
+Codex 是 vendor 进来的（`vendor/codex`，写这段时是 rust-v0.155.0，2026-10-20 起 rust-v0.163.0），它自带 Linux 沙箱（bubblewrap）和权限配置文件（`[permissions.<id>]`，可只放行指定目录的读取）。在它的基础上不改 Codex 本身就能做到模型无关的 shell 助手：
 
 - `agent.sandbox`（`packages/codex/src/agent-mode.ts` `sandboxProfile`）：线程不再用 `danger-full-access`，而是命名配置 `crossline-task` —— `:minimal`（系统目录）只读、输入只读、任务目录可写、`/data` 与 `/state` 拒读（拒读项同时让 Codex 永远不会「无沙箱重跑」）、网络关闭；命令的环境只继承核心变量（`shell_environment_policy.inherit = core`，HOME/TMPDIR 指向任务目录）。启动后核对 `activePermissionProfile`，不对就拒绝运行（`SKILL_SANDBOX_UNSUPPORTED`），启动重试时也绝不丢掉这些配置。
 - 审批仍是 `untrusted`：每条命令照样先问 Crossline 的守卫。

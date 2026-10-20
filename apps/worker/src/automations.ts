@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 import {
   AUTOMATION_PLAN_SCHEMA, AUTOMATION_RUNS_SETTING, AUTOMATIONS_MAX, AUTOMATIONS_SETTING, AGENT_CATEGORIES, addedLines, fileMatches,
-  mailMatches, readAutomationRuns, readAutomations, timeTriggerDue, triggerLabel, validateAutomationPlan,
+  mailMatches, previousRunNote, readAutomationRuns, readAutomations, timeTriggerDue, triggerLabel, validateAutomationPlan,
   type AgentCategory, type Automation, type AutomationPlan, type AutomationRun
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -174,16 +175,26 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
   }
   const action = automation.action;
   const taskId = `${automation.id}-${now.getTime().toString(36)}`;
+  // Each firing goes on in the automation's own conversation (a new turn on its thread, resumed at the time), told what the last run did
+  // and given that run's files to read: a run that wakes up a week later carries on instead of starting over.
+  const previous = automation.lastRun;
+  const previousFiles = previous ? previous.files.slice(0, 8).map((file) => path.join(previous.directory, file)) : [];
+  const inputs = [...(why.inputs ?? []), ...previousFiles];
+  const note = previousRunNote(previous);
   const input: AgentTaskInput & { taskId: string } = {
     taskId, title: `自动化「${automation.name}」`, category: action.category as AgentCategory, lineId: automation.lineId,
-    what: `${action.instructions}\n\n这次运行的原因：${why.reason}${why.context ? `\n\n${why.context}` : ""}${action.outputs.length ? `\n\n要交出：${action.outputs.join("、")}` : ""}`,
+    what: `${action.instructions}\n\n这次运行的原因：${why.reason}${why.context ? `\n\n${why.context}` : ""}${note ? `\n\n${note}` : ""}${action.outputs.length ? `\n\n要交出：${action.outputs.join("、")}` : ""}`,
     humanPart: automation.steps.filter((step) => step.by === "person").map((step) => step.title).join("；") || "查看结果",
     notes: `这是本人设的自动化，第 ${automation.runs + 1} 次运行。每次只做这一轮的事，结果写进任务目录。`,
-    ...(why.inputs?.length ? { inputs: why.inputs } : {})
+    ...(inputs.length ? { inputs } : {}), ...(automation.threadId ? { resumeThreadId: automation.threadId } : {})
   };
   const started = deps.runFree(workspaceId, input, (outcome) => {
     const at = deps.now?.() ?? new Date();
     if (outcome.state === "done") {
+      // The conversation and what this run made, for the next firing to go on from.
+      update(deps.store, workspaceId, automation.id, (item) => ({ ...item, ...(outcome.threadId ? { threadId: outcome.threadId } : {}),
+        lastRun: { taskId, at: at.toISOString(), summary: outcome.summary.summary.slice(0, 600), directory: outcome.directory,
+          files: outcome.artifacts.map((artifact) => artifact.path).slice(0, 20) } }));
       const files = outcome.artifacts.slice(0, 4).map((artifact) => ({ label: artifact.path.split("/").pop() ?? artifact.path,
         href: `/api/agent/tasks/${encodeURIComponent(taskId)}/file?path=${encodeURIComponent(artifact.path)}` }));
       sayToPerson(deps.store, workspaceId, `自动化「${automation.name}」跑完了：${outcome.summary.summary.slice(0, 300)}${outcome.reviewRequired ? "\n有需要本人看的地方，在待确认里。" : ""}`,

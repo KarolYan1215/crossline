@@ -52,10 +52,10 @@ run("git", ["apply", patchPath]);
 const cargoRoot = path.join(fork, "codex-rs");
 run("cargo", ["build", "-p", "codex-cli", "--bin", "codex"], cargoRoot);
 const lockDiff = run("git", ["diff", "--unified=0", "--", "codex-rs/Cargo.lock"]);
-const changedVersions = lockDiff.split(/\r?\n/).filter((line) => /^[-+]version = "(?:0\.0\.0|0\.155\.0)"$/.test(line));
+const changedVersions = lockDiff.split(/\r?\n/).filter((line) => /^[-+]version = "(?:0\.0\.0|0\.163\.0)"$/.test(line));
 const allVersionOnly = lockDiff.split(/\r?\n/).every((line) =>
-  !/^[+-]/.test(line) || /^[-+]version = "(?:0\.0\.0|0\.155\.0)"$/.test(line) || /^---|^\+\+\+/.test(line));
-if (!allVersionOnly || changedVersions.length !== 304) fail("Cargo bootstrap changed more than the documented 152 workspace versions");
+  !/^[+-]/.test(line) || /^[-+]version = "(?:0\.0\.0|0\.163\.0)"$/.test(line) || /^---|^\+\+\+/.test(line));
+if (!allVersionOnly || changedVersions.length !== 320) fail("Cargo bootstrap changed more than the documented 160 workspace versions");
 const lockPath = path.join(cargoRoot, "Cargo.lock");
 if (sha256(lockPath) !== baseline.build.lockfileSha256) fail("post-bootstrap Cargo.lock hash differs from baseline");
 

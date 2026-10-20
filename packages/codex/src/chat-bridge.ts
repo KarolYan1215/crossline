@@ -1,6 +1,6 @@
 /**
  * A thin local translator so a model that only speaks Chat Completions can still be driven by Codex (decided 2026-10-13: every
- * provider goes through the same Codex path). Codex 0.155 accepts only `wire_api = "responses"`; its requests are stateless
+ * provider goes through the same Codex path). Codex (0.155, still in 0.163) accepts only `wire_api = "responses"`; its requests are stateless
  * (`store: false`, `stream: true`, no `previous_response_id` — the whole conversation is in `input` every time), so one request maps
  * to one Chat Completions call and nothing is kept between them.
  *

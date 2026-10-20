@@ -6,7 +6,7 @@ import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
 import { createUsageCollector, currentSpendMode, currentUsageWorkspace, reportUsage, type UsageCollector } from "./usage";
 import { currentProviderRouting, decideRoute, type ThreadProvider } from "./providers";
-import { markClientBusy, withModelSlot, type ModelPriority } from "./model-gate";
+import { markClientBusy, priorityForSkill, withModelSlot, type ModelPriority } from "./model-gate";
 import { accountModels, fitRoute } from "./model-catalog";
 
 import { registerAgentThread, SANDBOX_PROFILE, sandboxProfile, type AgentMode } from "./agent-mode";
@@ -24,7 +24,9 @@ export type AnalysisAudit = { threadId?: string; turnId?: string;
   /** The library skills (`extraSkills`) that were installed and switched on for this run. */
   skills?: string[];
   /** Set when the answer is a second run on the provider's own model (`redoOnRepair`): the repairs the first one needed. */
-  redone?: { repairs: number } };
+  redone?: { repairs: number };
+  /** With `resumeThreadId`: whether the run went on in that thread (true) or the runtime no longer had it and a new one was opened. */
+  resumed?: boolean };
 /**
  * What a running turn has done so far, for a screen that shows the wait (docs/onboarding-v3.md 「等待」): `thinking` until the first
  * word, `writing` with the answer streamed so far (unvalidated — never stored, only counted and previewed), `checking` once it is in.
@@ -180,6 +182,13 @@ export type SkillRunOptions<T> = {
    * runs as before. Which ones were actually on is reported in `audit.skills`.
    */
   extraSkills?: string[];
+  /**
+   * Go on in this thread instead of starting one (an automation that wakes up where its last run left off, 2026-10-20). The thread is
+   * resumed with the same settings a new one would be started with (`thread/resume` applies them to a thread it loads from disk, and
+   * since 0.163 restores its saved permissions too); a runtime that no longer has it (`thread not found`, `no rollout found`) gets a
+   * new thread, and `audit.resumed` says which happened. The caller's prompt carries what the last run did either way.
+   */
+  resumeThreadId?: string;
 };
 
 /**
@@ -539,7 +548,8 @@ export type ContinueTurnOptions<T> = {
  */
 function isThreadLost(error: unknown): boolean {
   const text = error && typeof error === "object" && "message" in error ? String((error as { message?: unknown }).message) : "";
-  return /thread not found/i.test(text);
+  // `thread/resume` of a thread whose rollout is gone (a guest home deleted at sign-out) says it differently.
+  return /thread not found|no rollout found/i.test(text);
 }
 
 type Detailed = Error & { detail?: string };
@@ -595,13 +605,48 @@ async function requireLogin(scope: Scope, context: RunContext): Promise<void> {
   if (!record(account?.account) && account?.requiresOpenaiAuth !== false) fail("SKILL_UNAUTHENTICATED");
 }
 
+/** What `thread/resume` takes of a thread's start parameters: the settings, never `dynamicTools` (kept with the thread on disk). */
+const RESUMED_PARAMS = ["cwd", "sandbox", "approvalPolicy", "approvalsReviewer", "developerInstructions", "model", "modelProvider"] as const;
+
+/**
+ * Starts a thread, or resumes `resumeId` with the same settings (a resumed thread is given them again: a thread loaded from disk takes
+ * them, one still loaded and idle is reloaded with them).
+ *
+ * The flag list is written against the newest runtime, but `--strict-config` rejects the whole call over one field an older runtime
+ * never defined. A field this runtime does not know names a feature this runtime does not have, so dropping it removes no protection;
+ * the real guarantees are the sandbox, the untrusted approval policy and the tool-call guard. A value it rejects cannot be dropped,
+ * because that would silently turn off what was asked for: it fails as SKILL_CONFIG_REJECTED with the runtime's own diagnostics (config
+ * text, never model output), which used to hide behind a bare SKILL_RUNTIME_FAILED.
+ */
+async function openThread(scope: Scope, threadParams: Record<string, unknown>, config: Record<string, unknown>, resumeId: string | undefined): Promise<Record<string, unknown> | undefined> {
+  for (;;) {
+    try {
+      return record(resumeId
+        ? await scope.rpc("thread/resume", { threadId: resumeId, excludeTurns: true, config,
+          ...Object.fromEntries(RESUMED_PARAMS.filter((key) => threadParams[key] !== undefined).map((key) => [key, threadParams[key]])) })
+        : await scope.rpc("thread/start", { ...threadParams, config }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const field = /unknown configuration field `([^`]+)`/.exec(message)?.[1];
+      const dropped = field ? Object.keys(config).filter((key) => key === field || key.startsWith(`${field}.`)) : [];
+      // The sandbox is never dropped to get a thread started: a runtime that cannot take the profile does not run the shell at all.
+      if (dropped.some((key) => ["default_permissions", "permissions", "shell_environment_policy"].includes(key))) throw withDetail(new Error("SKILL_SANDBOX_UNSUPPORTED"), message.slice(0, 400));
+      if (!dropped.length) {
+        if (!isThreadLost(error) && /configuration|unknown variant/i.test(message)) throw withDetail(new Error("SKILL_CONFIG_REJECTED"), message.slice(0, 400));
+        throw error;
+      }
+      for (const key of dropped) delete config[key];
+    }
+  }
+}
+
 /**
  * The assistant's thread: full access to the person's account, in the task's own directory, with every tool the runtime has. The
  * approval policy is still `untrusted`, so each command that is not on the runtime's own short list of harmless ones comes to
  * `agent.answer` first — that is the hook the guard rails hang on — and `web_search` is live. Nothing here is a sandbox; see
  * `agent-guard.ts` for what the guard is and is not.
  */
-async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, context: RunContext): Promise<string> {
+async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, context: RunContext, resumeId?: string): Promise<string> {
   const agent = options.agent!;
   // On a provider (only ever measured by the evaluation matrix; routing never sends the assistant there) the hosted search does not
   // exist: it is off, and `withWebTools` has given the thread Crossline's own search functions instead.
@@ -629,24 +674,9 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
     ...(context.route ? { model: context.route.model } : {}),
     ...(context.provider ? { modelProvider: context.provider.id } : {})
   };
-  let started: Record<string, unknown> | undefined;
-  for (;;) {
-    try { started = record(await scope.rpc("thread/start", { ...threadParams, config })); break; }
-    catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      const field = /unknown configuration field `([^`]+)`/.exec(message)?.[1];
-      const dropped = field ? Object.keys(config).filter((key) => key === field || key.startsWith(`${field}.`)) : [];
-      // The sandbox is never dropped to get a thread started: a runtime that cannot take the profile does not run the shell at all.
-      if (dropped.some((key) => ["default_permissions", "permissions", "shell_environment_policy"].includes(key))) throw withDetail(new Error("SKILL_SANDBOX_UNSUPPORTED"), message.slice(0, 400));
-      if (!dropped.length) {
-        if (/configuration|unknown variant/i.test(message)) throw withDetail(new Error("SKILL_CONFIG_REJECTED"), message.slice(0, 400));
-        throw error;
-      }
-      for (const key of dropped) delete config[key];
-    }
-  }
+  const started = await openThread(scope, threadParams, config, resumeId);
   const threadId = record(started?.thread)?.id;
-  if (!identifier(threadId)) fail("SKILL_PROTOCOL_INVALID");
+  if (!identifier(threadId) || (resumeId && threadId !== resumeId)) fail("SKILL_PROTOCOL_INVALID");
   // The thread must really be running with the approval policy the guard hangs on; with `never` nothing would ever ask.
   if (started?.approvalPolicy !== "untrusted") fail("SKILL_PERMISSION_DENIED");
   // And, sandboxed, under the profile it was given: anything else (full access, the runtime's default) is refused before a turn.
@@ -658,11 +688,11 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
  * Starts the one thread a fresh run uses, with everything that makes it safe to run unattended: read-only sandbox, the
  * `untrusted` approval policy, no tools but the one granted, no instruction files, no MCP servers. Returns its id.
  */
-async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>, context: RunContext): Promise<string> {
+async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>, context: RunContext, resumeId?: string): Promise<string> {
   const runtimeConfig = record(record(await scope.rpc("config/read", { includeLayers: false }))?.config);
   if (!runtimeConfig) fail("SKILL_PROTOCOL_INVALID");
   const mcp = record(runtimeConfig.mcp_servers) ?? {};
-  if (options.agent) return startAgentThread(scope, options, context);
+  if (options.agent) return startAgentThread(scope, options, context, resumeId);
   const config: Record<string, unknown> = {
     // "live", not "enabled": this runtime's `web_search` takes `disabled | cached | live`, and the
     // wrong variant made the whole thread/start fail — so the one Skill granted the web could never
@@ -704,34 +734,9 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ...(context.route ? { model: context.route.model } : {}),
     ...(context.provider ? { modelProvider: context.provider.id } : {})
   };
-  // The flag list is written against the newest runtime, but `--strict-config` rejects the whole call
-  // over one field an older runtime never defined. A field this runtime does not know names a feature
-  // this runtime does not have, so dropping it removes no protection; the real guarantees are the
-  // read-only sandbox, the untrusted approval policy and the tool-call guard. Any other error
-  // still fails the analysis.
-  let started: Record<string, unknown> | undefined;
-  for (;;) {
-    try { started = record(await scope.rpc("thread/start", { ...threadParams, config })); break; }
-    catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      const field = /unknown configuration field `([^`]+)`/.exec(message)?.[1];
-      const dropped = field ? Object.keys(config).filter((key) => key === field || key.startsWith(`${field}.`)) : [];
-      // The sandbox is never dropped to get a thread started: a runtime that cannot take the profile does not run the shell at all.
-      if (dropped.some((key) => ["default_permissions", "permissions", "shell_environment_policy"].includes(key))) throw withDetail(new Error("SKILL_SANDBOX_UNSUPPORTED"), message.slice(0, 400));
-      if (!dropped.length) {
-        // A field this runtime does not know can be dropped; a value it rejects cannot, because
-        // dropping it would silently turn off the thing that was asked for. This used to surface as
-        // a bare SKILL_RUNTIME_FAILED, which hid a one-word config mismatch behind a generic failure
-        // for as long as nobody instrumented the call. The runtime's own text is config diagnostics,
-        // not model output, so it is safe to carry.
-        if (/configuration|unknown variant/i.test(message)) throw withDetail(new Error("SKILL_CONFIG_REJECTED"), message.slice(0, 400));
-        throw error;
-      }
-      for (const key of dropped) delete config[key];
-    }
-  }
+  const started = await openThread(scope, threadParams, config, resumeId);
   const threadId = record(started?.thread)?.id;
-  if (!identifier(threadId)) fail("SKILL_PROTOCOL_INVALID");
+  if (!identifier(threadId) || (resumeId && threadId !== resumeId)) fail("SKILL_PROTOCOL_INVALID");
   if (started?.approvalPolicy !== "untrusted" || record(started.sandbox)?.type !== "readOnly" || !Array.isArray(started.instructionSources) || started.instructionSources.length) fail("SKILL_PERMISSION_DENIED");
   return threadId;
 }
@@ -789,7 +794,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     if (typeof turnId === "string" && abandoned.has(turnId)) return;
     // Events can precede the turn/start response; capture only this isolated thread.
     if (audit.turnId && turnId !== audit.turnId) return;
-    if (message.method === "thread/tokenUsage/updated") { context.usage.note(params); return; }
+    if (message.method === "thread/tokenUsage/updated") { context.usage.note(params); noteContext(client, run.threadId, params); return; }
     if (message.method === "turn/plan/updated") {
       const steps = Array.isArray(params.plan) ? params.plan.map(record).filter((item): item is Record<string, unknown> => Boolean(item))
         .map((item) => ({ step: String(item.step ?? "").slice(0, 200), status: String(item.status ?? "") })) : [];
@@ -1001,7 +1006,7 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
       });
       return { ok: true, output, audit };
     } catch (error) { return failureResult<T>(client, error, audit); }
-    finally { unregister?.(); scope.dispose(); releaseThread(client, threadId, THREAD_KEEP_MS); }
+    finally { unregister?.(); scope.dispose(); releaseThread(client, threadId, THREAD_KEEP_MS); queueCompaction(client, threadId, options.skillName); }
   }));
 }
 
@@ -1104,7 +1109,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, request
     const prepared = options.prepareInput(input);
     scope = openScope(client, options);
     await requireLogin(scope, context);
-    const threadId = await startIsolatedThread(scope, options, context);
+    const threadId = await openRunThread(client, scope, options, context, audit);
     audit.threadId = threadId;
     options.onAudit({ ...audit });
     if (options.agent) {
@@ -1132,5 +1137,122 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, request
   finally {
     unregister?.(); scope?.dispose();
     if (audit.threadId) releaseThread(client, audit.threadId, options.keepThread ? THREAD_KEEP_MS : 0);
+    if (audit.threadId && options.keepThread) queueCompaction(client, audit.threadId, options.skillName);
+  }
+}
+
+/** The run's thread: a new one, or `resumeThreadId` gone on with — and a new one when the runtime no longer has it. */
+async function openRunThread<T>(client: CodexRpcBoundary, scope: Scope, options: SkillRunOptions<T>, context: RunContext, audit: AnalysisAudit): Promise<string> {
+  const resumeId = options.resumeThreadId;
+  if (!resumeId) return startIsolatedThread(scope, options, context);
+  try {
+    const threadId = await startIsolatedThread(scope, options, context, resumeId);
+    // Subscribed again: a later release of it is a fresh one.
+    releasedOf(client).delete(threadId);
+    audit.resumed = true;
+    return threadId;
+  } catch (error) {
+    if (!isThreadLost(error)) throw error;
+    console.info(JSON.stringify({ type: "skill.resume_lost", skill: options.skillName, threadId: resumeId }));
+    audit.resumed = false;
+    return startIsolatedThread(scope, options, context);
+  }
+}
+
+/**
+ * Explicit compaction of a long conversation (Codex `thread/compact/start`, 2026-10-20). The runtime already compacts by itself when a
+ * turn would overflow the window, but it does so at the start of the person's next turn, which then waits for it — the moment a tester's
+ * long interview turned slow. A conversation that keeps its thread (the interview's dialogue, the input box, the milestone architect) is
+ * compacted between turns instead, as soon as the context reported by the last turn (`thread/tokenUsage/updated`: `last.totalTokens`
+ * against `modelContextWindow`, which for a provider is what `contextWindowConfig` told the runtime) passes `COMPACT_AT` of the window.
+ * It waits in the thread's own line, so no turn is sent while it runs, and in the model gate at the Skill's own priority.
+ */
+export const COMPACT_AT = (() => { const value = Number(process.env.CROSSLINE_COMPACT_AT); return value > 0 && value < 1 ? value : 0.6; })();
+const COMPACT_TIMEOUT_MS = 10 * 60_000;
+const threadContexts = new WeakMap<object, Map<string, { used: number; window: number }>>();
+function contextsOf(client: CodexRpcBoundary): Map<string, { used: number; window: number }> {
+  let contexts = threadContexts.get(client);
+  if (!contexts) { contexts = new Map(); threadContexts.set(client, contexts); }
+  return contexts;
+}
+/** How full a thread's context was after its last model call, from a `thread/tokenUsage/updated` notification. */
+function noteContext(client: CodexRpcBoundary, threadId: string, params: Record<string, unknown>): void {
+  const usage = record(params.tokenUsage);
+  const used = Number(record(usage?.last)?.totalTokens);
+  const window = Number(usage?.modelContextWindow);
+  if (used > 0 && window > 0) contextsOf(client).set(threadId, { used, window });
+}
+/** Whether the thread's context has filled past `COMPACT_AT` of its window, and how far. */
+export function compactionDue(client: CodexRpcBoundary, threadId: string): { used: number; window: number } | undefined {
+  const context = contextsOf(client).get(threadId);
+  return context && context.used >= context.window * COMPACT_AT ? context : undefined;
+}
+/** Queues a compaction behind the thread's current turn when one is due; the next turn on the thread waits for it. */
+function queueCompaction(client: CodexRpcBoundary, threadId: string, skillName: string): void {
+  if (!compactionDue(client, threadId)) return;
+  void inLane(threadLanes, `${runtimeKey(client)}:${threadId}`, () => compactThread(client, threadId, skillName)).catch(() => undefined);
+}
+
+/** Compacts one thread now, if still due. Resolves true when the runtime reported the compaction done; logged as `skill.compacted`. */
+export async function compactThread(client: CodexRpcBoundary, threadId: string, skillName: string): Promise<boolean> {
+  const before = compactionDue(client, threadId);
+  if (!before) return false;
+  holdThread(client, threadId);
+  const startedAt = Date.now();
+  let outcome: { ok: boolean; code?: string; tokens?: number } = { ok: false, code: "SKILL_CANCELED" };
+  try {
+    outcome = await withModelSlot({ skill: `${skillName}#compact`, priority: priorityForSkill(skillName), tenant: tenantOf(currentUsageWorkspace()) ?? "-" }, async () => {
+      markClientBusy(client, 1);
+      try { return await runCompaction(client, threadId, skillName); } finally { markClientBusy(client, -1); }
+    }) ?? outcome;
+  } catch (error) {
+    outcome = { ok: false, code: error instanceof Error && /^[A-Z][A-Z_]{2,}$/.test(error.message) ? error.message : isThreadLost(error) ? "SKILL_THREAD_LOST" : "SKILL_RUNTIME_FAILED" };
+  } finally {
+    // Kept for the conversation as after any turn.
+    releaseThread(client, threadId, THREAD_KEEP_MS);
+  }
+  if (outcome.ok) contextsOf(client).delete(threadId);
+  console.info(JSON.stringify({ type: "skill.compacted", skill: skillName, threadId, ok: outcome.ok, ...(outcome.code ? { code: outcome.code } : {}),
+    beforeTokens: before.used, window: before.window, ...(outcome.tokens ? { tokens: outcome.tokens } : {}), ms: Date.now() - startedAt }));
+  return outcome.ok;
+}
+
+/** `thread/compact/start`, then the compaction turn's own events: a `contextCompaction` item and the turn's completion. */
+async function runCompaction(client: CodexRpcBoundary, threadId: string, skillName: string): Promise<{ ok: boolean; code?: string; tokens?: number }> {
+  const scope = openScope(client, { timeoutMs: COMPACT_TIMEOUT_MS });
+  const usage = createUsageCollector();
+  let turnId: string | undefined;
+  let settle: (value: { ok: boolean; code?: string }) => void = () => {};
+  const done = new Promise<{ ok: boolean; code?: string }>((resolve) => { settle = resolve; });
+  const unsubscribe = client.onNotification((message) => {
+    if (message.method === "crossline/runtimeDisconnected") return settle({ ok: false, code: "SKILL_RUNTIME_EXITED" });
+    const params = record(message.params);
+    if (!params || params.threadId !== threadId) return;
+    const turn = record(params.turn);
+    const id = typeof params.turnId === "string" ? params.turnId : typeof turn?.id === "string" ? turn.id : undefined;
+    // The compaction is a turn of its own: the first one this thread starts after the request (the line holds every other turn back).
+    if (!turnId && (message.method === "turn/started" || (message.method === "item/started" && record(params.item)?.type === "contextCompaction"))) turnId = id;
+    if (!turnId || id !== turnId) return;
+    if (message.method === "thread/tokenUsage/updated") usage.note(params);
+    if (message.method === "turn/completed") settle(turn?.status === "completed" ? { ok: true } : { ok: false, code: turn?.status === "interrupted" ? "SKILL_CANCELED" : "SKILL_TURN_FAILED" });
+  });
+  const startedAt = Date.now();
+  try {
+    await resubscribe(client, scope, threadId);
+    await scope.rpc("thread/compact/start", { threadId });
+    const limit = scope.window();
+    try {
+      const result = await Promise.race([done, limit.promise]);
+      return { ...result, tokens: usage.total().totalTokens };
+    } catch (error) {
+      // A compaction still going when the line moves on would take the next turn as input to steer it: it is stopped first.
+      if (turnId) void client.request("turn/interrupt", { threadId, turnId }).catch(() => undefined);
+      throw error;
+    } finally { limit.clear(); }
+  } finally {
+    unsubscribe(); scope.dispose();
+    // What compacting cost is the conversation's own cost (Settings → 模型用量 counts it under the Skill).
+    if (usage.turns()) reportUsage({ skillName, spendMode: "normal", threadId, ok: true, repairs: 0, turns: usage.turns(),
+      durationMs: Date.now() - startedAt, at: new Date(startedAt).toISOString(), ...usage.total() });
   }
 }

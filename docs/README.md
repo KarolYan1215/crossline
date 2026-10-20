@@ -33,6 +33,7 @@
 | [assistant-agent.md](assistant-agent.md) | 带 shell 的助手：设计、守卫、信任与审阅流程 |
 | [structured-output.md](structured-output.md) | 模型的结构化输出怎么约束、怎么校验、怎么修正，出问题怎么查，现有的实测数据 |
 | [codex-fork-runtime.md](codex-fork-runtime.md) | 固定在 `vendor/codex` 的 Codex 运行时：来源、补丁、构建、哈希校验、升级方式、supervisor 令牌 |
+| [codex-upgrade-0.163.md](codex-upgrade-0.163.md) | 0.155.0 → 0.163.0：协议差异、显式压缩、自动化续跑、没采用的上游新能力、待换的二进制 |
 | [private-network-deployment.md](private-network-deployment.md) | 通过 Tailscale Serve 跨设备访问（`CROSSLINE_DEPLOYMENT_MODE=private`） |
 | [external-deployment.md](external-deployment.md) | 真正的公网暴露为什么还被禁止，以及解禁前要满足的清单 |
 

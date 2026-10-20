@@ -41,6 +41,11 @@ export type AgentTaskInput = {
    * a grown workflow for its scheduled run.
    */
   extraSkills?: string[];
+  /**
+   * Go on in this conversation (an automation's own thread, 2026-10-20): the run is a new turn on it, resumed with the same settings,
+   * and a new thread when the runtime no longer has it. The outcome carries the thread the run used.
+   */
+  resumeThreadId?: string;
   /** The line a task tied to no work order serves (growing a workflow, its scheduled run): its own skill is switched on like an order's. */
   lineId?: string;
   /** A run that grows a workflow: no other grown workflow is switched on for it. */
@@ -69,7 +74,9 @@ export type AgentOutcome =
   | { state: "done"; taskId: string; directory: string; summary: AgentSummary; artifacts: ArtifactRecord[]; audit: AuditRecord;
       inputsModified: string[]; checksPassed: boolean; reviewRequired: boolean; reviewReasons: string[];
       /** Tools mode: what it put in the inbox, and what it had to tell the person (said by the caller). */
-      captured?: string[]; told?: string[] }
+      captured?: string[]; told?: string[];
+      /** The conversation the run was a turn of, for a caller that goes on in it next time. */
+      threadId?: string }
   | { state: "blocked"; taskId: string; directory: string; code: string; message: string };
 
 const sha = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -353,7 +360,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       ...(extraSkills.length ? { extraSkills } : {}),
       prepareInput: () => task, validateOutput: (output) => validateAgentSummary(output, probe), onAudit: () => {},
       allowWebSearch: true, timeoutMs: 6 * 60 * 60_000, idleMs: 60 * 60_000, signal,
-      ...(tools ? { tools } : {}),
+      ...(tools ? { tools } : {}), ...(input.resumeThreadId ? { resumeThreadId: input.resumeThreadId } : {}),
       // The runtime's own plan tool and the person's ChatGPT connectors, read-only (2026-10-19).
       connectors: true, onPlan: (plan) => { audit.plan = plan; writeProgress(directory, audit); },
       ...askOption(personAsker(options.questionFor?.(taskId, input.title), audit, () => writeProgress(directory, audit))),
@@ -413,7 +420,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
         verification: result.output.verification.map((v) => ({ check: v.check, result: v.result })), needsHuman: result.output.needsHuman.length,
         inputsModified, checksPassed, reviewRequired, ...(reviewReasons.length ? { reviewReasons } : {}), auditFile: path.join(directory, "audit.json"), ...(result.audit.skills?.length ? { skills: result.audit.skills } : {}) } });
     return { state: "done", taskId, directory, summary: result.output, artifacts, audit, inputsModified, checksPassed, reviewRequired, reviewReasons,
-      ...(board ? { captured: applied.captures, told: applied.told } : {}) };
+      ...(board ? { captured: applied.captures, told: applied.told } : {}), ...(result.audit.threadId ? { threadId: result.audit.threadId } : {}) };
   };
 }
 
@@ -541,7 +548,7 @@ async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: str
         + "先用函数读需要的材料（list_tasks、calendar、list_documents、read_file 等），按任务做出文件（write_file），再交总结；总结写已经做了什么，不写打算做什么。" });
       return validateAgentSummary(output, probe);
     },
-    allowWebSearch: true, timeoutMs: 2 * 60 * 60_000, signal, tools,
+    allowWebSearch: true, timeoutMs: 2 * 60 * 60_000, signal, tools, ...(input.resumeThreadId ? { resumeThreadId: input.resumeThreadId } : {}),
     // The runtime's own features (2026-10-19): JavaScript in its V8 isolate to compute and to call these functions, the person's ChatGPT
     // connectors read-only, and its plan tool, whose steps are shown while the run works. Code mode runs in codex-code-mode-host beside
     // the runtime; without it every call through code mode fails, so it is switched on only when the host is there.
@@ -580,7 +587,7 @@ async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: str
       inputsModified, checksPassed, reviewRequired, ...(reviewReasons.length ? { reviewReasons } : {}), ...(applied.captures.length ? { captured: applied.captures.length } : {}),
       auditFile: path.join(directory, "audit.json"), ...(result.audit.skills?.length ? { skills: result.audit.skills } : {}) } });
   return { state: "done", taskId, directory, summary: result.output, artifacts, audit, inputsModified, checksPassed, reviewRequired, reviewReasons,
-    captured: applied.captures, told: applied.told };
+    captured: applied.captures, told: applied.told, ...(result.audit.threadId ? { threadId: result.audit.threadId } : {}) };
 }
 
 // A short summary of the scenario; the Skill (crossline-agent-tools) carries the functions and the answer's wording rules.

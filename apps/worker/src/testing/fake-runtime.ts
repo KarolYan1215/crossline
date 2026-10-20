@@ -38,6 +38,8 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   routes?: Array<{ match: string; answers: Answer[] }>;
   /** As the real runtime does: an interrupted turn then reports `turn/completed` with status `interrupted`, right away. */
   completeOnInterrupt?: boolean; usage?: { input: number; cached?: number; output: number; reasoning?: number };
+  /** Reported as `modelContextWindow` with `usage`, as the real runtime does once it knows the model. */
+  contextWindow?: number;
   /** What the runtime does during a turn before it answers: tool items, and requests the client has to answer. */
   script?: AgentScript; threadResponse?: Record<string, unknown>;
   /** Skills of the person's library the runtime has installed (off until a run switches them on), e.g. `crossline-mine:media`. */
@@ -54,9 +56,16 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   unsubscribed: () => string[];
   /** Threads the runner subscribed to again (`thread/resume`), in order. */
   resumes: () => string[];
+  /** The `thread/resume` parameters the runner sent, in order. */
+  resumeParams: () => Array<Record<string, unknown>>;
+  /** Every runtime call in order, by method (to check that a compaction came between two turns). */
+  calls: () => string[];
 } {
   const unsubscribed: string[] = [];
   const resumes: string[] = [];
+  const resumeParams: Array<Record<string, unknown>> = [];
+  const calls: string[] = [];
+  let compactions = 0;
   // As the real runtime does: a connection gets a thread's events only while subscribed (thread/start, thread/resume); a turn
   // started on a thread it unsubscribed from still runs, silently.
   const subscribed = new Set<string>();
@@ -82,6 +91,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
       pendingAsks.get(String(request.id))?.((request.result ?? { error: request.error }) as Record<string, unknown>);
       return;
     }
+    calls.push(request.method);
     // Counted per thread, not per turn — that conflation is the bug this helper exists to fix.
     if (request.method === "thread/start") { threadId = `thread-${(threads += 1)}`; starts.push(request.params ?? {}); subscribed.add(threadId); startedThreads.push(threadId); }
     if (request.method === "thread/resume") {
@@ -90,7 +100,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
         queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, error: { code: -32600, message: `thread not found: ${id}` } })));
         return;
       }
-      resumes.push(id); subscribed.add(id);
+      resumes.push(id); resumeParams.push(request.params ?? {}); subscribed.add(id);
     }
     if (request.method === "turn/start" && options.lostThreads?.includes(String(request.params?.threadId))) {
       queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, error: { code: -32600, message: `thread not found: ${String(request.params?.threadId)}` } })));
@@ -111,11 +121,23 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
       : request.method === "account/read" ? { account: { type: "chatgpt" } }
       : request.method === "config/read" ? { config: {} }
       : request.method === "thread/loaded/list" ? { data: startedThreads.filter((id) => !options.lostThreads?.includes(id) && !options.unloadedThreads?.includes(id)), nextCursor: null }
-      : request.method === "thread/resume" ? { thread: { id: String(request.params?.threadId) } }
+      : request.method === "thread/resume" ? { thread: { id: String(request.params?.threadId) }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [], ...(options.threadResponse ?? {}) }
+      : request.method === "thread/compact/start" ? {}
       : request.method === "thread/start"
         ? { thread: { id: threadId }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [], ...(options.threadResponse ?? {}) }
         : { turn: { id: `turn-${turns + 1}`, status: "inProgress" } };
     queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, result })));
+    // As the real runtime does: a compaction is a turn of its own, with a `contextCompaction` item.
+    if (request.method === "thread/compact/start") {
+      const thread = String(request.params?.threadId);
+      const turnId = `compact-${(compactions += 1)}`;
+      setTimeout(() => {
+        rpc.receiveLine(JSON.stringify({ method: "turn/started", params: { threadId: thread, turn: { id: turnId, status: "inProgress" } } }));
+        rpc.receiveLine(JSON.stringify({ method: "item/started", params: { threadId: thread, turnId, item: { type: "contextCompaction", id: `item-${turnId}` } } }));
+        rpc.receiveLine(JSON.stringify({ method: "item/completed", params: { threadId: thread, turnId, item: { type: "contextCompaction", id: `item-${turnId}` } } }));
+        rpc.receiveLine(JSON.stringify({ method: "turn/completed", params: { threadId: thread, turn: { id: turnId, status: "completed" } } }));
+      }, options.delayMs ?? 1);
+    }
     if (request.method === "turn/start") {
       turns += 1;
       const turnId = `turn-${turns}`;
@@ -151,7 +173,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
         if (options.usage) {
           const u = options.usage;
           const breakdown = { totalTokens: u.input + u.output, inputTokens: u.input, cachedInputTokens: u.cached ?? 0, cacheWriteInputTokens: 0, outputTokens: u.output, reasoningOutputTokens: u.reasoning ?? 0 };
-          rpc.receiveLine(JSON.stringify({ method: "thread/tokenUsage/updated", params: { threadId: thread, turnId, tokenUsage: { total: breakdown, last: breakdown, modelContextWindow: null } } }));
+          rpc.receiveLine(JSON.stringify({ method: "thread/tokenUsage/updated", params: { threadId: thread, turnId, tokenUsage: { total: breakdown, last: breakdown, modelContextWindow: options.contextWindow ?? null } } }));
         }
         rpc.receiveLine(JSON.stringify({ method: "item/completed",
           params: { threadId: thread, turnId, item: { type: "agentMessage", phase: "final_answer", text } } }));
@@ -161,7 +183,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
     }
   });
   return { rpc, turns: () => turns, prompts: () => prompts, interrupts: () => interrupts, threadStarts: () => starts, configCalls: () => configCalls,
-    unsubscribed: () => unsubscribed, resumes: () => resumes };
+    unsubscribed: () => unsubscribed, resumes: () => resumes, resumeParams: () => resumeParams, calls: () => calls };
 }
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures");
