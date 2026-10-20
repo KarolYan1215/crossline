@@ -132,12 +132,15 @@ const runsOn = (schedule: WorkflowSchedule, weekday: Weekday) =>
 
 /**
  * Whether a scheduled workflow is due now: today (in the person's zone) is one of its days, its time has passed, it has not run today,
- * and the time is under three hours ago — a worker that was off at the time does not fire the morning's reminder in the evening.
+ * and the time is under three hours ago — a worker that was off at the time does not fire the morning's reminder in the evening. A run
+ * held at its time because the assistant was busy (`heldSince`, today) stays due for the rest of the day.
  */
-export function workflowDue(schedule: WorkflowSchedule, lastRunAt: string | undefined, now: Date, zone: string): boolean {
+export function workflowDue(schedule: WorkflowSchedule, lastRunAt: string | undefined, now: Date, zone: string, heldSince?: string): boolean {
   const clock = wallClock(now, zone);
   if (!runsOn(schedule, clock.weekday) || clock.time < schedule.time) return false;
   if (lastRunAt && wallClock(new Date(lastRunAt), zone).day === clock.day) return false;
+  // Held at its time because the assistant was busy: still due today, however late.
+  if (heldSince && wallClock(new Date(heldSince), zone).day === clock.day) return true;
   const [hour, minute] = schedule.time.split(":").map(Number);
   const [nowHour, nowMinute] = clock.time.split(":").map(Number);
   return (nowHour! * 60 + nowMinute!) - (hour! * 60 + minute!) < 180;
@@ -173,6 +176,13 @@ export type GrownSkillRecord = {
   scriptsAllowed?: ScriptsAllowance;
   createdAt: string; updatedAt: string; lastUsedAt: string;
   lastRunAt?: string;
+  /**
+   * The last run that read items off the sites it reads (docs/skills-library.md §8): its output folder, given to the next run read-only
+   * so it organises only what is new, the pages that showed the items (with the tab clicked), and how many there were.
+   */
+  lastRead?: { at: string; taskId: string; directory: string; items: number; pages: Array<{ url: string; click?: string }> };
+  /** Its time came while the assistant was busy: tried again at the next ticks of that day, past the usual three hours. */
+  heldSince?: string;
 };
 
 export function readGrownLibrary(raw: string | undefined): GrownSkillRecord[] {

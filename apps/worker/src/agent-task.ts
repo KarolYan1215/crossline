@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  AGENT_CATEGORIES, AGENT_SUMMARY_SCHEMA, decideCommand, decideFileChange, decideMcpTool, resultNeedsPerson, validateAgentSummary,
+  AGENT_CATEGORIES, AGENT_SUMMARY_SCHEMA, GROWN_PLUGIN, decideCommand, decideFileChange, decideMcpTool, resultNeedsPerson, validateAgentSummary,
   type AgentCategory, type AgentProgressRecord, type AgentSummary, type GuardContext, type GuardDecision
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type AgentItem, type CodexRpcBoundary, type PersonQuestion, type SkillTools } from "@crossline/codex";
@@ -95,6 +95,16 @@ export function fingerprint(inputs: string[], limit = 2000): Map<string, string>
 const STOPPED = new Set(["AGENT_CANCELLED", "AGENT_RUN_LOST", "AGENT_LOOP_STOPPED", "SKILL_STALLED", "SKILL_TIMEOUT"]);
 
 /** The same command run this many times, or a site's reader refusing this many reads, is a run going round in circles. */
+/**
+ * How a run asks the library for skills. A run growing a workflow, or a grown workflow's own run, switches no other grown workflow on:
+ * on 2026-10-16 the 小红书 favourites run had a research-notes workflow switched on by word overlap with its title and left
+ * 科研笔记候选包.md among its results. The line's own skill and public skills are still offered.
+ */
+export function librarySelection(input: Pick<AgentTaskInput, "growing" | "extraSkills">): { wantIfMissing: boolean; grown?: false } {
+  const ownWorkflow = (input.extraSkills ?? []).some((name) => name.startsWith(`${GROWN_PLUGIN}:`));
+  return { wantIfMissing: !input.growing, ...(input.growing || ownWorkflow ? { grown: false as const } : {}) };
+}
+
 export const LOOP_REPEATS = 4;
 export const LOOP_REFUSALS = 3;
 /**
@@ -318,8 +328,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     // The person's own skill for this task's line and the public skills that fit it (docs/skills-library.md §3), on for this run only.
     const lineId = input.lineId ?? (input.workOrderId ? store.listWorkOrders(workspaceId).find((order) => order.id === input.workOrderId)?.identityId : undefined);
     // Matched on the title only: the task text carries this app's own instructions, whose words matched skills of any kind.
-    const chosen = await librarySkillsFor(client, store, workspaceId, lineId, { cwd, task: input.title, wantIfMissing: !input.growing,
-      ...(input.growing ? { grown: false } : {}),
+    const chosen = await librarySkillsFor(client, store, workspaceId, lineId, { cwd, task: input.title, ...librarySelection(input),
       ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
     const extraSkills = [...new Set([...(input.extraSkills ?? []), ...chosen])];
     // The watchdog: a run going round in circles is stopped by the app, not left for the person to notice.
@@ -506,8 +515,8 @@ async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: str
     try { const stat = statSync(full); return { exists: stat.isFile(), bytes: stat.size, insideDirectory }; } catch { return { exists: false, bytes: 0, insideDirectory }; }
   };
   const lineId = input.lineId ?? (input.workOrderId ? store.getWorkOrder(workspaceId, input.workOrderId)?.identityId : undefined);
-  const chosen = await librarySkillsFor(client, store, workspaceId, lineId, { cwd, task: input.title, wantIfMissing: !input.growing,
-    ...(input.growing ? { grown: false } : {}), ...(options.libraryDir ? { dir: options.libraryDir } : {}) }).catch(() => [] as string[]);
+  const chosen = await librarySkillsFor(client, store, workspaceId, lineId, { cwd, task: input.title, ...librarySelection(input),
+    ...(options.libraryDir ? { dir: options.libraryDir } : {}) }).catch(() => [] as string[]);
   const extraSkills = [...new Set([...(input.extraSkills ?? []).filter((name) => !name.startsWith("skill-creator")), ...chosen])];
   const stopper = new AbortController();
   let loopStop: string | undefined;

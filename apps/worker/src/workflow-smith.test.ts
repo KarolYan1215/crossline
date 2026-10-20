@@ -5,7 +5,8 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore, consentToGrownSkill, createReminderWorkflow, grownHomeLine, readGrownSkills, requestWorkflow, updateGrownSkill } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { validateWorkflowManifest } from "@crossline/core";
-import type { AgentOutcome } from "./agent-task";
+import { librarySelection, type AgentOutcome, type AgentTaskInput } from "./agent-task";
+import type { OpenSite, SiteReader } from "./site-reader";
 import { cleanGrownSkills, finishWorkflowLogin, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR, startWorkflowRun, workflowSchedulePass } from "./workflow-smith";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
@@ -262,6 +263,12 @@ test("a grown workflow serves only the line it grew on, and a run growing anothe
     expect(await librarySkillsFor(run.rpc, store, ws, "research", { cwd: "C:\repo", dir, task: "汇集课程讲义并整理公开来源" })).toEqual([]);
     expect(await librarySkillsFor(run.rpc, store, ws, "media", { cwd: "C:\repo", dir, task: "为小红书整理公开来源" })).toEqual(["crossline-grown:flow-xhs-note"]);
     expect(await librarySkillsFor(run.rpc, store, ws, "media", { cwd: "C:\repo", dir, task: "为小红书整理公开来源", grown: false })).toEqual([]);
+    // A grown workflow's own run switches no other one on either (2026-10-16: 科研笔记候选包.md among the favourites run's results).
+    const ownRun = librarySelection({ extraSkills: ["crossline-grown:flow-xhs-favorites-digest"] });
+    expect(ownRun).toEqual({ wantIfMissing: true, grown: false });
+    expect(await librarySkillsFor(run.rpc, store, ws, "media", { cwd: "C:\repo", dir, task: "为小红书整理公开来源", ...ownRun })).toEqual([]);
+    expect(librarySelection({ growing: true, extraSkills: [SKILL_CREATOR] })).toEqual({ wantIfMissing: false, grown: false });
+    expect(librarySelection({ extraSkills: [] })).toEqual({ wantIfMissing: true });
   } finally { rmSync(dir, { recursive: true, force: true }); }
   // A new workflow keeps only the line it was grown for, whatever its manifest lists.
   const grown = path.join(root, "grow-two-lines");
@@ -329,6 +336,69 @@ test("a run reading an account opens each page once and stops at a security chec
   expect(what).toContain("不换方式、不尝试绕过");
   after!({ ...done("t", root), summary: { needsHuman: [{ what: "需要本人完成小红书安全验证", why: "详情页出现滑块" }] } } as unknown as AgentOutcome);
   expect(said().at(-1)).toContain("遇到了网站的安全验证，已停下，不会重试");
+});
+
+const favouritesRecord = (extra: Record<string, unknown> = {}) => store.setSetting(ws, "skills.grown", JSON.stringify([{ id: "flow-xhs", kind: "grown", name: "xhs",
+  description: "d", lines: ["media"], category: "files_calendar_prep", manifest: favourites, origin: { kind: "asked", text: "t", requestId: "r" }, taskId: "", files: [],
+  scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: [], final: "usable" }, status: "active", pinned: false,
+  createdAt: "", updatedAt: "", lastUsedAt: "", ...extra }]));
+
+test("a run whose pages listed nothing is partial and points at the login; one that read items hands its folder and pages to the next, which adds only what is new", async () => {
+  favouritesRecord();
+  const note = (index: number) => ({ text: `笔记 ${index}`, href: `https://www.xiaohongshu.com/user/profile/me/6512abcd00000000000000${String(index).padStart(2, "0")}` });
+  let listed = [note(1), note(2)];
+  // A stand-in browser: the favourites tab lists `listed`, or says it is empty (10-16).
+  const openSite: OpenSite = async () => ({ close: async () => {},
+    read: async (url, _scrolls, click) => ({ url, title: "我的", status: 200, links: listed, ...(click ? { click: { label: click, done: true } } : {}),
+      text: listed.length ? listed.map((item) => item.text).join("\n") : "你还没有收藏任何内容哦" }) });
+  const runs: Array<AgentTaskInput & { taskId: string }> = [];
+  let after: ((outcome: AgentOutcome) => void) | undefined;
+  const run = (input: AgentTaskInput & { taskId: string }, then?: (outcome: AgentOutcome) => void) => { runs.push(input); after = then; return { state: "started" as const, taskId: input.taskId }; };
+  const readFavourites = async (index: number) => JSON.parse(await (runs[index] as unknown as { reader: SiteReader }).reader.tools.call("site_read",
+    { service: "小红书", url: "https://www.xiaohongshu.com/user/profile/me", click: "收藏", scrolls: 15 })) as { ok: boolean; items: number };
+
+  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe", openSite);
+  expect(runs[0]!.what).toContain("用 site_read 的 click 传标签文字切换过去");
+  expect(await readFavourites(0)).toMatchObject({ ok: true, items: 2 });
+  const first = path.join(root, "flow-1");
+  mkdirSync(first);
+  after!({ ...done("flow-1", first), summary: { needsHuman: [] } } as unknown as AgentOutcome);
+  expect(said().at(-1)).toContain("本期「每周日整理小红书收藏夹，按主题归类并列出可删的重复项」已做好");
+  expect(readGrownSkills(store, ws)[0]!.lastRead).toMatchObject({ taskId: "flow-1", directory: first, items: 2,
+    pages: [{ url: "https://www.xiaohongshu.com/user/profile/me", click: "收藏" }] });
+
+  // The next run gets the last output read-only and the page that worked; this time the page shows nothing.
+  listed = [];
+  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe", openSite);
+  expect(runs[1]!.inputs).toEqual([first]);
+  expect(runs[1]!.what).toContain("上期读到内容的页面：https://www.xiaohongshu.com/user/profile/me（点「收藏」）");
+  expect(runs[1]!.what).toContain("本期只整理上期之后新增的，按条目链接去重");
+  expect(await readFavourites(1)).toMatchObject({ ok: true, items: 0 });
+  after!({ ...done("flow-2", root), summary: { needsHuman: [] } } as unknown as AgentOutcome);
+  expect(said().at(-1)).toBe("本期「每周日整理小红书收藏夹，按主题归类并列出可删的重复项」只做了一部分：这次没读到收藏（上期读到 2 条），可能需要重新登录或页面改版。请在设置里点「登录」重新登录，关掉窗口后再点「立即运行」。");
+  const card = store.listRecentNudges(ws, "2000-01-01T00:00:00Z").at(-1)!.payload.card as { clarify: { options: Array<{ label: string; href?: string }> } };
+  expect(card.clarify.options).toContainEqual(expect.objectContaining({ label: "去登录", href: "/settings#skills" }));
+  // The baseline stays the last run that read something.
+  expect(readGrownSkills(store, ws)[0]!.lastRead).toMatchObject({ taskId: "flow-1", items: 2 });
+  expect(store.listEvents(ws, { type: "skill.grown.result" }).map((event) => (event.payload as { outcome: string }).outcome)).toEqual(["done", "partial"]);
+});
+
+test("a scheduled run that finds the assistant busy is not marked as run: later ticks that day try again, past the usual three hours", () => {
+  favouritesRecord();
+  const sunday = new Date("2026-10-19T01:10:00Z"); // 20:10 on Sunday in Chicago
+  expect(workflowSchedulePass(store, ws, () => ({ state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" }), sunday)).toEqual([]);
+  expect(readGrownSkills(store, ws)[0]).toMatchObject({ heldSince: sunday.toISOString() });
+  expect(readGrownSkills(store, ws)[0]!.lastRunAt).toBeUndefined();
+  expect(said()).toEqual([]);
+  const runs: unknown[] = [];
+  const late = new Date("2026-10-19T04:40:00Z"); // 23:40, three and a half hours after its time
+  expect(workflowSchedulePass(store, ws, (input) => { runs.push(input); return { state: "started", taskId: input.taskId }; }, late)).toEqual(["flow-xhs"]);
+  expect(runs).toHaveLength(1);
+  expect(readGrownSkills(store, ws)[0]).toMatchObject({ lastRunAt: late.toISOString() });
+  expect(readGrownSkills(store, ws)[0]!.heldSince).toBeUndefined();
+  // Without a hold, that late is too late.
+  favouritesRecord();
+  expect(workflowSchedulePass(store, ws, () => ({ state: "started", taskId: "t" }), late)).toEqual([]);
 });
 
 test("a run stopped part way offers what it had made for review, unchecked; its helper scripts and a run that made nothing are left out", async () => {

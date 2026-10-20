@@ -15,7 +15,7 @@ import type { AgentOutcome, AgentTaskInput } from "./agent-task";
 import type { DispatchResult } from "./agent-service";
 import { identityLines } from "./lines";
 import { ownerOf, runtimesDir } from "./owner";
-import { createSiteReader, SITE_PAGES_PER_RUN } from "./site-reader";
+import { createSiteReader, SITE_PAGES_PER_RUN, SITE_SCROLLS_MAX, type OpenSite } from "./site-reader";
 
 /**
  * Grown workflows (docs/skills-library.md §6): the assistant fixes an errand the person keeps having done — or one they asked for in words —
@@ -341,33 +341,42 @@ export function finishWorkflowLogin(store: CrosslineStore, workspaceId: string, 
  * login, or why it did not start.
  */
 export function startWorkflowRun(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, runFree: RunFree, profilesRoot: string,
-  now = new Date(), fallbackBrowser = loginBrowser()): DispatchResult {
+  now = new Date(), fallbackBrowser = loginBrowser(), openSite?: OpenSite): DispatchResult {
   if (openLogins.has(`${workspaceId}:${record.id}`)) return { state: "blocked", code: "LOGIN_WINDOW_OPEN", message: "登录窗口还开着；登录后关掉它再运行。" };
   const { access } = workflowAccess(record);
   const home = grownHomeLine(store, workspaceId, record);
   const personSteps = record.manifest.steps.filter((step) => step.by === "person").map((step) => step.title);
   const folders = record.manifest.inputs.filter((item) => path.isAbsolute(item) && existsSync(item));
+  // What the last run that read something found: its folder goes in read-only so this run organises only what is new, and the
+  // pages that showed the items are named so this run reads them first instead of looking for the way in again.
+  const last = record.lastRead;
+  const lastFolder = last && existsSync(last.directory) ? last.directory : undefined;
   // Sites behind the person's login are read by Crossline's own reader (`site-reader.ts`), never by the assistant with the profile:
   // the first real run, given the profile and told to be gentle, opened every note and re-checked every link until the site's
   // security check came up again and again (2026-10-14). The reader holds the rules in code; the words below only explain them.
   const reader = access.some((item) => item.login) ? createSiteReader(store, workspaceId, record,
     (item) => ({ dir: accessProfileDir(profilesRoot, item), browser: record.loginBrowsers?.[item.service] || fallbackBrowser || "" }),
-    { notify: (text) => sayToPerson(store, workspaceId, text, "workflow_done", `breaker:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: "去看结果", href: "/approvals#assistant" }]) }) : undefined;
+    { notify: (text) => sayToPerson(store, workspaceId, text, "workflow_done", `breaker:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: "去看结果", href: "/approvals#assistant" }]),
+      ...(openSite ? { open: openSite } : {}) }) : undefined;
   const accountRules = access.length ? [
     `要读取的网站：${access.map((item) => item.login ? `${item.service}（${item.site}，本人已登录）` : `${item.service}（${item.site}，公开页面）`).join("；")}。`,
-    ...(reader ? [`需要登录的网站只能用工具 site_read 读取：传网站名和页面地址，它打开本人登录过的浏览器并返回页面上的文字和链接。你拿不到浏览器配置目录，也不要自己启动浏览器去读这些网站。site_read 每个页面只读一次、本期最多 ${SITE_PAGES_PER_RUN} 页；只读工作流说明里的页面（例如收藏页、指定账号主页），不逐条打开详情页，不为核验再次访问。`] : []),
+    ...(reader ? [`需要登录的网站只能用工具 site_read 读取：传网站名和页面地址，它打开本人登录过的浏览器并返回页面上的文字和链接。你拿不到浏览器配置目录，也不要自己启动浏览器去读这些网站。site_read 每个页面只读一次、本期最多 ${SITE_PAGES_PER_RUN} 页；只读工作流说明里的页面（例如收藏页、指定账号主页），不逐条打开详情页，不为核验再次访问。`,
+      `列表在页面内的标签下时（例如个人页的「收藏」，其下的「笔记」「专辑」），用 site_read 的 click 传标签文字切换过去，scrolls 传 ${SITE_SCROLLS_MAX} 一次读到底（连续两屏没有新内容会自己停）；同一页面点不同标签各算一页。返回里的 items 是页面列出的条目数，为 0 时这一页没读到东西：换上面说的标签再读，仍为 0 就在 summary 里如实写「读到 0 条」，不要编造。`] : []),
     "把读到的内容存进任务目录，再用工作流的脚本整理；不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。",
-    "site_read 说已停止（安全验证或要求登录）时，不再读取、不换方式、不尝试绕过；用已读到的内容完成本期，needsHuman 第一项照它说的写。"] : [];
+    "site_read 说已停止（安全验证或要求登录）时，不再读取、不换方式、不尝试绕过；用已读到的内容完成本期，needsHuman 第一项照它说的写。",
+    ...(last?.pages.length ? [`上期读到内容的页面：${last.pages.map((page) => page.click ? `${page.url}（点「${page.click}」）` : page.url).join("；")}。先读这些页面，不必再找入口。`] : [])] : [];
+  const incremental = last && lastFolder ? [`上期（${last.at.slice(0, 10)}，读到 ${last.items} 条）的产出已作为只读输入给你（${path.basename(lastFolder)}）：先读它，本期只整理上期之后新增的，按条目链接去重后并入完整的结果；上期已整理的不再重复整理。`] : [];
   const day = now.toISOString().slice(0, 10);
   const title = record.manifest.summary.slice(0, 80);
   // Run again after an interruption, or because the person asked: where the last run stopped, its files, and the person's words.
   const before = retryContext(store, workspaceId, agentChainKey({ workOrderId: "", stepId: "", title }));
   return runFree({ taskId: `flow-${record.id.replace(/^flow-/, "")}-${now.getTime().toString(36)}`, category: record.category,
-    ...(home ? { lineId: home } : {}), ...(folders.length || before.inputs.length ? { inputs: [...folders, ...before.inputs] } : {}),
+    ...(home ? { lineId: home } : {}),
+    ...(folders.length || lastFolder || before.inputs.length ? { inputs: [...folders, ...(lastFolder ? [lastFolder] : []), ...before.inputs] } : {}),
     extraSkills: [grownSkillName(record.id)], title, humanPart: personSteps.join("；") || "查看结果",
     ...(reader ? { reader } : {}),
     what: [`按工作流 $${grownSkillName(record.id)} 做本期的这件事：${record.manifest.summary.replace(/[。.\s]+$/, "")}。在由本人完成的步骤之前停下，把要发出或要本人在账号里操作的东西备好。`,
-      ...(folders.length ? [`本期的输入在：${folders.join("；")}（只读）。`] : []), ...accountRules, ...(before.text ? [before.text] : [])].join("\n") },
+      ...(folders.length ? [`本期的输入在：${folders.join("；")}（只读）。`] : []), ...accountRules, ...incremental, ...(before.text ? [before.text] : [])].join("\n") },
   (outcome) => {
     const login = outcome.state === "done" ? outcome.summary.needsHuman.find((item) => item.what.startsWith("需要登录"))?.what : undefined;
     if (login) {
@@ -382,6 +391,21 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
         "workflow_done", `check:${record.id}:${day}`, [{ label: "去看结果", href: "/approvals#assistant" }]);
       return;
     }
+    // A run that read its sites and found nothing on them is not done (2026-10-16: 「done」 with 0 favourites, the page saying 「你还没有
+    // 收藏任何内容哦」). Judged by what the reader counted on the pages, never by the assistant's words or its files: an incremental run
+    // may rightly write nothing new, while the pages still list every item.
+    if (outcome.state === "done" && reader) {
+      const found = reader.found();
+      const previous = record.lastRead?.items ?? 0;
+      recordWorkflowResult(store, workspaceId, record.id, outcome.taskId, found.items ? "done" : "partial", found.items, previous);
+      if (!found.items) {
+        const noun = /收藏/.test(record.manifest.summary) ? "收藏" : "内容";
+        sayToPerson(store, workspaceId, `本期「${record.manifest.summary}」只做了一部分：这次没读到${noun}${previous ? `（上期读到 ${previous} 条）` : ""}，可能需要重新登录或页面改版。请在设置里点「登录」重新登录，关掉窗口后再点「立即运行」。`,
+          "workflow_login", `empty:${record.id}:${outcome.taskId}`, [{ label: "去登录", href: "/settings#skills" }, { label: "去看结果", href: "/approvals#assistant" }]);
+        return;
+      }
+      rememberRead(store, workspaceId, record.id, { at: new Date().toISOString(), taskId: outcome.taskId, directory: outcome.directory, items: found.items, pages: found.pages });
+    }
     sayToPerson(store, workspaceId, outcome.state === "done"
       ? `本期「${record.manifest.summary}」已做好${personSteps.length ? `，留给本人：${personSteps.join("；")}` : ""}。`
       : `本期「${record.manifest.summary}」没有做成：${outcome.state === "blocked" || outcome.state === "failed" ? outcome.message : "助手未获准做这类工作"}。`,
@@ -391,13 +415,14 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
 
 /**
  * At each tick, the grown workflows whose time has come: a reminder is said to the person; a run starts the assistant with the workflow
- * on (when it is free and the kind is allowed — otherwise the person is told it is due and why it did not start). Recorded as run either way.
+ * on (when it is free and the kind is allowed — otherwise the person is told it is due and why it did not start). Recorded as run either way,
+ * except when the assistant is busy: then it is held and tried again at the later ticks of the day.
  */
 export function workflowSchedulePass(store: CrosslineStore, workspaceId: string, runFree: RunFree, now = new Date(), profilesRoot = ""): string[] {
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
   try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
   const due = readGrownSkills(store, workspaceId).filter((record) => record.status === "active" && record.manifest.trigger === "schedule" && record.manifest.schedule
-    && workflowDue(record.manifest.schedule, record.lastRunAt, now, zone) && !loggedInElsewhere(record, profilesRoot));
+    && workflowDue(record.manifest.schedule, record.lastRunAt, now, zone, record.heldSince) && !loggedInElsewhere(record, profilesRoot));
   const fired: string[] = [];
   for (const record of due) {
     let note: string;
@@ -408,6 +433,12 @@ export function workflowSchedulePass(store: CrosslineStore, workspaceId: string,
       // Reviewed like any result of the assistant's (on 待确认, unless the kind has earned trust), and the person is told it is ready —
       // what it made is for them to send, so it must not finish unseen.
       const started = startWorkflowRun(store, workspaceId, record, runFree, profilesRoot, now);
+      // The assistant busy with something else, or a login window open: not a run, and not the person's to handle; the next ticks of
+      // the day try again, instead of the week being marked as run.
+      if (started.state === "blocked" && HOLD_CODES.has(started.code)) {
+        holdWorkflowRun(store, workspaceId, record.id, now);
+        continue;
+      }
       note = started.state;
       if (started.state !== "started") {
         sayToPerson(store, workspaceId, `到点了：${record.manifest.summary}。${started.state === "needs_category_approval" ? `助手还没获准做「${started.label}」这类工作，可在设置里开启。` : `${started.message}这次请本人处理。`}`,
@@ -430,9 +461,30 @@ export function loggedInElsewhere(record: GrownSkillRecord, profilesRoot: string
   return workflowAccess(record).access.some((item) => item.login && record.logins?.[item.service] && !existsSync(accessProfileDir(profilesRoot, item)));
 }
 
+/** Why a run due now could not start that only time fixes: tried again at the next ticks of the day. */
+const HOLD_CODES = new Set(["AGENT_BUSY", "LOGIN_WINDOW_OPEN"]);
+
+const unheld = (record: GrownSkillRecord): GrownSkillRecord => { const copy = { ...record }; delete copy.heldSince; return copy; };
+
+/** Its time came while the assistant was busy: kept due for the rest of the day (`workflowDue`), not marked as run. */
+export function holdWorkflowRun(store: CrosslineStore, workspaceId: string, id: string, now = new Date()): void {
+  writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === id ? { ...item, heldSince: now.toISOString() } : item));
+}
+
+/** A run that read items: its folder and the pages that showed them are kept for the next run (`startWorkflowRun`). */
+export function rememberRead(store: CrosslineStore, workspaceId: string, id: string, read: NonNullable<GrownSkillRecord["lastRead"]>): void {
+  writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === id ? { ...item, lastRead: { ...read, pages: read.pages.slice(0, 6) } } : item));
+}
+
+/** How a run that reads sites ended: `partial` when its pages listed nothing. */
+function recordWorkflowResult(store: CrosslineStore, workspaceId: string, id: string, taskId: string, outcome: "done" | "partial", items: number, previous: number): void {
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.result:${id}:${taskId}`, type: "skill.grown.result",
+    entityId: id, payload: { id, taskId, outcome, items, previous } });
+}
+
 /** A run or reminder happened (at its time or by hand): recorded, and the idle clock starts again. */
 export function markWorkflowRun(store: CrosslineStore, workspaceId: string, id: string, outcome: string, now = new Date()): void {
-  writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === id ? { ...item, lastRunAt: now.toISOString(), lastUsedAt: now.toISOString() } : item));
+  writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === id ? { ...unheld(item), lastRunAt: now.toISOString(), lastUsedAt: now.toISOString() } : item));
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.ran:${id}:${now.getTime()}`, type: "skill.grown.ran",
     entityId: id, payload: { id, outcome } });
 }
