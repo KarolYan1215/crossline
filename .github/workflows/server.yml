@@ -201,7 +201,7 @@ jobs:
           # running app is not restarted): `compare-list` counts what each account could be compared on, `compare` starts the comparison
           # detached (it takes about an hour and spends the developer's key), `compare-report` prints its progress and the newest report.
           # The ledger is copied by SQLite's online backup into /srv/crossline/compare (root and the app user only); nothing writes the live one.
-          printf '%s' "$ARGS" | grep -qE '^[A-Za-z0-9@._,/ +-]*$' || { echo "args may hold only letters, digits and @._,/+- and spaces"; exit 1; }
+          case "$ARGS" in *[!A-Za-z0-9@._,/\ +-]*) echo "args may hold only letters, digits and @._,/+- and spaces"; exit 1;; esac
           ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "ACTION='$ACTION' ARGS='$ARGS' TOKEN='$TOKEN' ACTOR='$ACTOR' sudo -E sh -s" <<'REMOTE'
           set -e
           dir=/srv/crossline/compare
