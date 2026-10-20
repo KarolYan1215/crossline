@@ -32,6 +32,17 @@ describe("step plans", () => {
     expect(validateStepPlanShape(plan([step("a", "draft")])).steps).toHaveLength(1);
   });
 
+  it("reads a list given as one string and a text given as a number, as another provider's model may send them", () => {
+    // GLM-5.3-Flash through the chat bridge, where the schema is described and not enforced: `dependsOn: "s1"` threw on `.map`.
+    const loose = plan([step("a", "draft"), { ...step("b", "check"), dependsOn: "a" as never, covers: "u1, u2" as never, deliverable: 3 as never,
+      why: null as never, firstAction: undefined as never }]);
+    loose.units = [{ id: "u1", title: "第一讲", docId: "doc-1", quote: "第一讲" }];
+    loose.questions = [{ id: "q1", text: "交到哪里？", why: "", options: "Canvas、邮件" as never }];
+    const { plan: normalized } = normalizeStepPlan(loose);
+    expect(normalized.steps[1]).toMatchObject({ dependsOn: ["s1"], covers: ["u1"], deliverable: "3", why: "", firstAction: "" });
+    expect(normalized.questions[0]!.options).toEqual(["Canvas", "邮件"]);
+  });
+
   it("allows research-execute-execute-research: order is the model's call when the archetype's rules hold", () => {
     const { plan: normalized } = normalizeStepPlan(plan([step("r1", "gather"), step("d1", "draft", { dependsOn: ["r1"] }),
       step("d2", "draft", { dependsOn: ["d1"] }), step("r2", "gather", { dependsOn: ["d2"] }), step("c", "check", { dependsOn: ["r2"] })]));

@@ -177,6 +177,15 @@ export function unverifiedUnits(units: StepUnit[], documents: Array<{ id: string
  * Makes any shape-valid plan usable: unique safe ids, ordered estimates, dependencies only on known earlier-or-later steps with cycles
  * broken, shares normalized, dates kept only when they are dates. Returns what it had to change as warnings.
  */
+/**
+ * A field as the plan's type says it is. Through another provider's chat bridge the schema is only described to the model, never
+ * enforced, so a list can arrive as one string and a text as a number: GLM-5.3-Flash gave `dependsOn: "s1"` on a real task on
+ * 2026-10-20, normalization threw on `.map`, and the planner failed after a paid run instead of keeping the plan.
+ */
+const text = (value: unknown): string => typeof value === "string" ? value : typeof value === "number" ? String(value) : "";
+const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string")
+  : typeof value === "string" ? value.split(/[\s,，、;；]+/).filter(Boolean) : [];
+
 export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options: {
   /** False for an account the machine's assistant does not work for: every step is then the person's (or mixed), none is handed over. */
   assistant?: boolean } = {}): { plan: StepPlan; warnings: StepWarning[] } {
@@ -191,16 +200,16 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
     const p50 = raw[1] || raw[0] || raw[2] || 30;
     const p25 = Math.min(raw[0] || Math.round(p50 * 0.7), p50), p85 = Math.max(raw[2] || Math.round(p50 * 1.5), p50);
     if (!raw[1]) warnings.push({ code: "STEP_ESTIMATE_MISSING", detail: `「${step.title}」没有通常耗时，按 ${p50} 分钟计` });
-    return { ...step, id, title: step.title.trim().slice(0, 120), deliverable: (step.deliverable ?? "").trim().slice(0, 300),
-      doneCriterion: (step.doneCriterion ?? "").trim().slice(0, 300), share: Number.isFinite(step.share) && step.share > 0 ? step.share : 0,
+    return { ...step, id, title: step.title.trim().slice(0, 120), deliverable: text(step.deliverable).trim().slice(0, 300),
+      doneCriterion: text(step.doneCriterion).trim().slice(0, 300), share: Number.isFinite(step.share) && step.share > 0 ? step.share : 0,
       estimate: { p25Minutes: p25, p50Minutes: p50, p85Minutes: p85 },
-      notBefore: DAY.test(step.notBefore ?? "") ? step.notBefore : "", dueBy: DAY.test(step.dueBy ?? "") ? step.dueBy : "",
+      notBefore: DAY.test(text(step.notBefore)) ? step.notBefore : "", dueBy: DAY.test(text(step.dueBy)) ? step.dueBy : "",
       schedulable: step.role === "wait" ? false : step.schedulable !== false,
       executor: (["human", "agent", "mixed"] as const).includes(step.executor) ? step.executor : "human",
-      tickOutcome: (step.tickOutcome ?? "").trim().slice(0, 120), dependsOn: step.dependsOn ?? [],
-      covers: Array.isArray(step.covers) ? step.covers.filter((id) => typeof id === "string") : [], why: (step.why ?? "").trim().slice(0, 300),
+      tickOutcome: text(step.tickOutcome).trim().slice(0, 120), dependsOn: list(step.dependsOn),
+      covers: list(step.covers), why: text(step.why).trim().slice(0, 300),
       aiAssist: normalizeAiAssist(step.aiAssist, toolNames, p50),
-      firstAction: (step.firstAction ?? "").trim().slice(0, FIRST_ACTION_MAX) };
+      firstAction: text(step.firstAction).trim().slice(0, FIRST_ACTION_MAX) };
   });
   // Preparation is the assistant's: a person's step that only gathers or files material moves to it, and the assistant's steps never
   // take time on the person's calendar.
@@ -263,9 +272,10 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
   for (const step of steps) step.covers = step.covers.filter((id) => unitIds.has(id));
   const questions = (Array.isArray(plan.questions) ? plan.questions : []).filter((question) => question && question.text)
     .map((question, index) => ({ id: String(question.id || `q${index + 1}`).slice(0, 40), text: String(question.text).trim().slice(0, 200),
-      why: String(question.why ?? "").trim().slice(0, 300), options: (question.options ?? []).map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 8) })).slice(0, 5);
-  return { plan: { archetypeId: plan.archetypeId, rationale: (plan.rationale ?? "").trim().slice(0, 600),
-    quantity: { basis: (plan.quantity?.basis ?? "").slice(0, 60), amount, unit: (plan.quantity?.unit ?? "").slice(0, 12) }, units, questions, steps }, warnings };
+      why: String(question.why ?? "").trim().slice(0, 300), options: (Array.isArray(question.options) ? question.options : list(question.options))
+        .map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 8) })).slice(0, 5);
+  return { plan: { archetypeId: plan.archetypeId, rationale: text(plan.rationale).trim().slice(0, 600),
+    quantity: { basis: text(plan.quantity?.basis).slice(0, 60), amount, unit: text(plan.quantity?.unit).slice(0, 12) }, units, questions, steps }, warnings };
 }
 
 /**
