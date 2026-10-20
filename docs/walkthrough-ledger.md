@@ -65,6 +65,7 @@
 | 机主本机账本整份搬到服务器账号（`scripts/pack-for-server.ts` 打包 286 MB，含 materials/sources/画像 → scp → `[migrate]` 预览 → `[migrate-apply]` 写入） | 2026-10-20 | ba9d12cc+ | 通：首次写入因提交正文含标签被误触发、清空后导入失败（已修，见 docs/ledger-sync.md）；修复后本机账本经 deploy/server/ledger-sync.sh 写入（202 事实、89 任务、136 里程碑、110 文件），每小时双向同步的计划任务已注册 |
 
 | 托管服务器 Codex 运行时换成 0.163.0（`/srv/crossline/codex`，旧的 0.155 留在 `/srv/crossline/codex-0.155`），连同按任务挑选上下文（迁移 19）、按链接安装公开 skill 一起部署 | 2026-10-20 | 102eb760 | 部署中 |
+| 访谈完成后按主线自动补齐公开 skill（每轮最多 20 个，直到不再提出新的；GitHub 限流记为暂时失败、第二天再补）部署到托管服务器 | 2026-10-20 | 5c4d976d | 部署中 |
 
 ## 还没走过
 
