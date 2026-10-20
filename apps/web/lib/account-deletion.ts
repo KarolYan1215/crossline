@@ -90,6 +90,8 @@ export async function deleteAccount(ctx: AccessContext, session: { userId: strin
   removeInside(root, path.join(root, "portrait", safe(ctx.workspaceId)));
   removeInside(root, path.join(root, "mail-drafts", safe(ctx.workspaceId)));
   removeInside(root, path.join(root, "secrets", safe(ctx.workspaceId).slice(0, 80)));
+  // Recordings uploaded for the server transcriber and not yet transcribed.
+  removeInside(root, path.join(root, "recordings", "inbox", safe(ctx.workspaceId)));
 
   const auth = getAuth();
   for (const userId of new Set([session.userId, ...purged.betterAuthUserIds])) await deleteAuthUser(auth, userId, session.email.toLowerCase());

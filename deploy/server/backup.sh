@@ -51,10 +51,11 @@ echo "backup $stamp"
 copy /srv/crossline/data crossline.db
 copy /srv/crossline/data auth.db
 copy /srv/assess/data assess.db
-# Files the ledger points at. The assistant's scratch folders (ai-output) and the databases themselves are left out.
+# Files the ledger points at. The assistant's scratch folders (ai-output), the databases themselves and uploaded recordings waiting to be
+# transcribed (recordings/; their audio is deleted once transcribed and must never outlive it in a backup) are left out.
 if [ -d /srv/crossline/data ]; then
   tar -czf "$out/files.tgz" -C /srv/crossline/data --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' --exclude='*.bak' \
-    --exclude='ai-output' --exclude='worker.lock' --exclude='import' . 2>/dev/null || true
+    --exclude='ai-output' --exclude='worker.lock' --exclude='import' --exclude='recordings' . 2>/dev/null || true
   echo "  files.tgz $(du -h "$out/files.tgz" | cut -f1)"
 fi
 chown -R root:root "$out"

@@ -1,5 +1,5 @@
 import { folderDocuments } from "./source-folders";
-import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary } from "@crossline/core";
+import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { sayDoFor, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -112,7 +112,8 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
       .map((doc) => { const text = doc.extractedText.slice(0, Math.max(0, Math.min(12_000, room))); room -= text.length; return { fileName: doc.fileName, text }; })
       .filter((doc) => doc.text);
     // How the person actually spends their working hours with coding agents (time only, when they allowed it): evidence of habit, not a plan.
-    const workHistory = agentHistoryLines(json<AgentHistorySummary | null>(AGENT_HISTORY_SUMMARY, null));
+    const workHistory = [...agentHistoryLines(json<AgentHistorySummary | null>(AGENT_HISTORY_SUMMARY, null)),
+      ...atComputerLines(json<ActivityHour[]>(ACTIVITY_HOURLY, []), process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago")];
     const context = { version: "crossline.portrait.v1", lines, profile: json<Record<string, unknown>>("profile.model", {}), facts, replies, documents, doing,
       ...(workHistory.length ? { workHistory } : {}) };
     const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd,

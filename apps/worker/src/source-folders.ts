@@ -4,7 +4,7 @@ import { open, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  FOLDER_MAX_ENTRIES, FOLDER_MAX_FILES, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, credentialName, credentialText, excludedByRules, folderFileAction, folderGroup, folderLabel,
+  FOLDER_MAX_ENTRIES, FOLDER_MAX_FILES, RECORDING_SETTLE_MS, SOURCE_FOLDERS_SETTING, cleanFolderNames, cleanFolderRules, credentialName, credentialText, excludedByRules, folderFileAction, folderGroup, folderLabel,
   folderPathProblem, readSourceFolders, sensitiveName, sensitiveText, skipFolderDirectory, sourceFolderIndexSetting, sourceKindFor,
   type FolderIndexEntry, type SourceFolder, type SourceKind
 } from "@crossline/core";
@@ -56,7 +56,8 @@ const kept = (file: ScannedFile) => !file.sensitive && !file.duplicateOf && !fil
  * person excluded, then marks suspected private papers, second copies and what lies past the cap. Only files of the same size are hashed.
  */
 // ponytail: same-size files are hashed on every scan; keep their hash in the index if a folder of many equal-size files gets slow.
-export async function scanFolder(root: string, rules: Rules = {}, options: { peekText?: boolean } = {}): Promise<FolderScan> {
+export async function scanFolder(root: string, rules: Rules = {}, options: { peekText?: boolean; audio?: boolean } = {}): Promise<FolderScan> {
+  const audio = { audio: Boolean(options.audio) };
   const files: ScannedFile[] = [];
   const credentials: FolderScan["credentials"] = [];
   let entries = 0, skippedDirectories = 0, truncated = false;
@@ -79,11 +80,11 @@ export async function scanFolder(root: string, rules: Rules = {}, options: { pee
       const credential = credentialName(relative);
       if (credential) { credentials.push({ relative: slash(relative), reason: credential }); continue; }
       // The name decides first, so files the app never reads (pictures, archives …) cost no disk read.
-      if (folderFileAction(relative, 0).action === "skip") continue;
+      if (folderFileAction(relative, 0, audio).action === "skip") continue;
       let info;
       try { info = await stat(path.join(root, relative)); } catch { continue; }
       const sensitive = included(relative, rules) ? undefined : sensitiveName(relative, rules.names);
-      files.push({ relative, size: info.size, mtimeMs: Math.round(info.mtimeMs), action: folderFileAction(relative, info.size), ...(sensitive ? { sensitive } : {}) });
+      files.push({ relative, size: info.size, mtimeMs: Math.round(info.mtimeMs), action: folderFileAction(relative, info.size, audio), ...(sensitive ? { sensitive } : {}) });
     }
   }
   // The preview also checks text files' openings for keys and IDs (PDF and Word are checked when they are read, from their extracted text).
@@ -138,6 +139,9 @@ export type FolderDeps = {
   home: string;
   /** Reads a file's text (the worker's own `extractText`), before anything is kept, so a file whose text holds an ID is never stored. */
   readText: (bytes: Uint8Array, kind: StoredSourceDocument["kind"]) => Promise<{ status: StoredSourceDocument["extractionStatus"]; text: string; note?: string }>;
+  /** 录音自动转写 is on: recordings are queued for transcription (`recordings.ts`) instead of being left alone. */
+  audio?: boolean;
+  now?: () => number;
 };
 
 /** Checks a path the person typed: absolute, an existing folder, and not one of the places `folderPathProblem` refuses. */
@@ -283,7 +287,7 @@ export async function syncFolder(store: CrosslineStore, workspaceId: string, fol
   if (!exists) { update(store, workspaceId, folder.id, { lastScanAt: new Date().toISOString(), lastError: "找不到这个文件夹了（移动、改名或拔掉了磁盘？）" }); return { read: 0, waiting: 0, removed: 0 }; }
   const saved = list(store, workspaceId).find((item) => item.id === folder.id) ?? folder;
   const rules = { ...saved, names: personNames(store, workspaceId, saved.names) };
-  const scan = await scanFolder(folder.path, rules);
+  const scan = await scanFolder(folder.path, rules, { audio: Boolean(deps.audio) });
   const index = readIndex(store, workspaceId, folder.id);
   const present = new Map(scan.files.map((file) => [file.relative, file]));
   // Left out now (excluded, a credential, or a private paper not ticked back): what was read from it goes. Gone from disk: the entry goes,
@@ -294,12 +298,23 @@ export async function syncFolder(store: CrosslineStore, workspaceId: string, fol
     const leftOut = excludedByRules(relative, rules.exclude) || Boolean(file?.sensitive) || Boolean(credentialName(relative))
       || Boolean(!included(relative, rules) && (sensitiveName(relative, rules.names) || entry.flagged));
     if (leftOut) { if (entry.documentId) dropped.push(entry); delete index[relative]; }
-    else if (!file) delete index[relative];
+    // A recording's entry outlives 录音自动转写 being off (the scan then does not list recordings), so what was done is not redone.
+    else if (!file && !(entry.audio && !deps.audio)) delete index[relative];
   }
   const removed = dropDocuments(store, workspaceId, folder, dropped, Object.values(index), deps.dataDir, "excluded");
 
+  // New or changed recordings join the queue once they have settled (a file still being written or synced is left for the next pass).
+  const now = deps.now?.() ?? Date.now();
+  for (const file of scan.files) {
+    if (file.action.action !== "audio" || file.sensitive) continue;
+    const known = index[file.relative];
+    if (known?.audio && known.size === file.size && known.mtimeMs === file.mtimeMs) continue;
+    if (now - file.mtimeMs < RECORDING_SETTLE_MS) continue;
+    index[file.relative] = { size: file.size, mtimeMs: file.mtimeMs, documentId: "", audio: "queued" };
+  }
+
   const changed = scan.files.filter((file) => {
-    if (!kept(file)) return false;
+    if (!kept(file) || file.action.action === "audio") return false;
     const known = index[file.relative];
     return !known || known.size !== file.size || known.mtimeMs !== file.mtimeMs || Boolean(known.sensitive && !known.hard && included(file.relative, rules));
   });

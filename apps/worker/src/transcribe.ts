@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { originalTime, speechPieces, speechSegments } from "./vad";
 
 /**
  * Turning a recording into text, on this machine.
@@ -79,6 +80,23 @@ export function formatTranscript(chunks: TranscriptChunk[], fallbackText: string
   return (lines.length ? lines.join("\n") : fallbackText.trim()).slice(0, 200_000);
 }
 
+/**
+ * Lines Whisper writes over silence, music or noise rather than hearing them (Koenecke et al., FAccT 2024; arXiv 2501.11378): the closing
+ * phrases of the subtitled videos it was trained on. A line that is only such a phrase, or the same line repeated a third time in a row
+ * (the decoder looping), is dropped from a recording's transcript.
+ */
+const STOCK_LINE = /^[\s\p{P}]*(谢谢(大家)?(收看|观看)|感谢(您的)?(收看|观看)|请不吝点赞.*|.*订阅.*转发.*打赏.*|字幕(由|提供|制作).*|.*amara\.org.*|明镜.*点点栏目.*|thank(s| you) (so much )?for watching.*|please subscribe.*|subtitles by.*)[\s\p{P}]*$/iu;
+export function withoutHallucinations(chunks: TranscriptChunk[]): TranscriptChunk[] {
+  const out: TranscriptChunk[] = [];
+  for (const chunk of chunks) {
+    const text = chunk.text.trim();
+    if (!text || STOCK_LINE.test(text)) continue;
+    if (out.length >= 2 && out.at(-1)!.text.trim() === text && out.at(-2)!.text.trim() === text) continue;
+    out.push(chunk);
+  }
+  return out;
+}
+
 export type TranscriberOptions = {
   engine: TranscriptionEngine; decode: AudioDecoder; modelsDir: string;
   /** Traditional → simplified Chinese, applied to a transcript only when the language heard was Chinese. Defaults to OpenCC. */
@@ -156,8 +174,66 @@ ${body}` : body;
     }
   }
 
-  return { status, download, transcribe };
+  /**
+   * A recording found in an authorized folder (docs/phone-recording.md): only the speech goes to the model (`vad.ts`), in pieces of at
+   * most ten minutes, each line put back at its time in the recording. Between pieces `rest` is awaited with how long the piece took —
+   * that is where the worker slows down while the person uses the computer — and `stop` is asked, so turning the consent off ends the
+   * run at the next piece. `workMs` is the time spent decoding and recognising, rests left out.
+   */
+  async function transcribeSpeech(bytes: Uint8Array, fileName: string, run: {
+    language?: string; rest?: (pieceMs: number) => Promise<void>; stop?: () => boolean; now?: () => number;
+  } = {}): Promise<SpeechOutcome> {
+    const now = run.now ?? Date.now;
+    const current = await status();
+    if (current.state === "needs_download" || current.state === "downloading") return { state: "needs_download" };
+    if (current.state === "unavailable") return { state: "failed", code: current.code, message: current.message };
+    let work = 0, started = now();
+    let samples: Float32Array;
+    try { samples = toMono16k(await options.decode(bytes, fileName)); }
+    catch { return { state: "failed", code: "AUDIO_DECODE_FAILED", message: "这段录音的格式读不了；可以在录音 App 里改存成 m4a 或 wav。" }; }
+    const seconds = samples.length / TARGET_RATE;
+    if (seconds > MAX_SECONDS) return { state: "failed", code: "AUDIO_TOO_LONG", message: "这段录音超过 3 小时；请在录音 App 里设成按时长自动分段。" };
+    const pieces = speechPieces(samples, speechSegments(samples, TARGET_RATE), TARGET_RATE);
+    const speechSeconds = Math.round(pieces.reduce((sum, piece) => sum + piece.map.reduce((total, run) => total + run.length, 0), 0));
+    if (!pieces.length) return { state: "silent", seconds: Math.round(seconds), speechSeconds: 0, workMs: now() - started };
+    let language = run.language;
+    const chunks: TranscriptChunk[] = [];
+    let text = "";
+    try {
+      for (const [index, piece] of pieces.entries()) {
+        if (run.stop?.()) return { state: "stopped" };
+        const result = await options.engine.recognise(piece.samples, language);
+        // The first piece decides the language for the rest, so detection (three extra passes) runs once a recording.
+        language ??= result.language;
+        for (const chunk of result.chunks) chunks.push({ start: originalTime(piece.map, chunk.start), end: originalTime(piece.map, chunk.end), text: chunk.text });
+        text += ` ${result.text}`;
+        const took = now() - started;
+        work += took;
+        if (index < pieces.length - 1) await run.rest?.(took);
+        started = now();
+      }
+    } catch (error) {
+      return { state: "failed", code: "TRANSCRIPTION_FAILED", message: `识别没有完成：${error instanceof Error ? error.message.slice(0, 200) : "未知错误"}` };
+    }
+    const kept = withoutHallucinations(chunks);
+    const body = formatTranscript(kept, kept.length || !chunks.length ? text : "");
+    // Speech by energy that the model hears no words in (music, traffic) counts as silence, not as a failure to report.
+    if (!body.trim()) return { state: "silent", seconds: Math.round(seconds), speechSeconds, workMs: work };
+    const spoken = language === "zh" ? await (options.simplify ?? simplifyChinese)(body) : body;
+    const named = language ? TRANSCRIPTION_LANGUAGES[language] ?? language : "";
+    return { state: "transcribed", seconds: Math.round(seconds), speechSeconds, workMs: work, ...(language ? { language } : {}),
+      text: named ? `[语言：${named}${run.language ? "" : "，自动识别"}]\n${spoken}` : spoken };
+  }
+
+  return { status, download, transcribe, transcribeSpeech };
 }
+
+export type SpeechOutcome =
+  | { state: "transcribed"; text: string; seconds: number; speechSeconds: number; workMs: number; language?: string }
+  | { state: "silent"; seconds: number; speechSeconds: number; workMs: number }
+  | { state: "needs_download" }
+  | { state: "stopped" }
+  | { state: "failed"; code: string; message: string };
 
 /**
  * The real engine: Whisper (small) through transformers.js on the CPU, and `audio-decode` for mp3/wav/m4a/ogg/flac.
@@ -180,6 +256,10 @@ export function createWhisperEngine(modelsDir: string): { engine: TranscriptionE
     try { return await import(/* @vite-ignore */ moduleName) as Transformers; }
     catch { throw new Error("还没有安装语音识别组件（@huggingface/transformers）。"); }
   };
+  // The offline pipeline is loaded once and shared: building it reads ~250 MB and sets up the ONNX sessions, which each piece of a
+  // recording and each parallel lane would otherwise repeat.
+  let offline: Promise<WhisperPipeline> | undefined;
+  const loaded = () => (offline ??= open(false).catch((error: unknown) => { offline = undefined; throw error; }));
   const open = async (remote: boolean, onProgress?: (fraction: number) => void) => {
     const { env, pipeline } = await load();
     env.cacheDir = modelsDir; env.allowLocalModels = true; env.allowRemoteModels = remote;
@@ -219,14 +299,14 @@ export function createWhisperEngine(modelsDir: string): { engine: TranscriptionE
   };
   const engine: TranscriptionEngine = {
     async modelReady() {
-      try { await open(false); return true; } catch (error) {
+      try { await loaded(); return true; } catch (error) {
         if (error instanceof Error && error.message.includes("@huggingface/transformers")) throw error;
         return false;
       }
     },
     async download(onProgress) { await open(true, onProgress); },
     async recognise(samples, language) {
-      const run = await open(false);
+      const run = await loaded();
       const chosen = language ?? await detectLanguage(run, samples);
       // 30-second windows overlapped by 5 seconds, which is how Whisper is meant to be fed a long recording.
       const result = await run(samples, { chunk_length_s: 30, stride_length_s: 5, return_timestamps: true, task: "transcribe", language: chosen });

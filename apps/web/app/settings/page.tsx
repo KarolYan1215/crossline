@@ -1,8 +1,11 @@
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
+import { ACTIVITY_HOURLY, atComputerByHour, type ActivityHour, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CATEGORY_LABEL, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
 import { assistantAvailable, categoryMode, isAutoHandoff, readCategories } from "@crossline/db";
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { AgentHistoryCard } from "./agent-history-card";
+import { RecordingCard } from "./recording-card";
+import { ServerRecordingCard } from "./server-recording-card";
+import { recordingOverview } from "../../lib/recordings";
 import { TelemetryCard } from "./telemetry-card";
 import { AutostartCard } from "./autostart-card";
 import { autostartAvailable, readAutostart } from "../../lib/autostart";
@@ -36,7 +39,7 @@ import { loadAssistant } from "../../lib/agent";
 import { agentTaskStatusLabel } from "../../lib/labels";
 import { permissionModeEnabled } from "../../lib/permission-mode";
 import {
-  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, readAvailability, toZonedInstant
+  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, dataDirectory, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, readAvailability, toZonedInstant
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 import { identityLines, lineLabels } from "../../lib/lines";
@@ -112,6 +115,9 @@ export default async function SettingsPage() {
 
   // This computer's own readings (folders, screen, idle stretches, coding agents' logs) are the machine owner's only.
   const machine = assistantAvailable(store, ctx.workspaceId);
+  // When the person is at the computer, hour by hour (activity.hourly, under the activity consent).
+  const recordings = recordingOverview(store, ctx.workspaceId, dataDirectory());
+  const usualDay = (() => { try { return atComputerByHour(JSON.parse(setting(ACTIVITY_HOURLY) ?? "[]") as ActivityHour[], zone); } catch { return undefined; } })();
   const autostart = autostartAvailable() ? await readAutostart() : undefined;
 
   return <SubpageShell active="设置" title="设置">
@@ -188,13 +194,21 @@ export default async function SettingsPage() {
 
         <section id="privacy" className="st-section" aria-labelledby="st-privacy"><h2 id="st-privacy">隐私与屏幕活动</h2>
           {!machine && <p className="muted">{hosted
-            ? "屏幕活动、作息记录、键鼠节律和 Codex 使用记录要读本人电脑，网页版不提供；精力按本人自评和手机记录推算。"
-            : "屏幕活动、作息记录、键鼠节律和 Codex 使用记录读的是运行 Crossline 的那台电脑，只对它的主人开放。"}</p>}
+            ? "屏幕活动、作息记录、键鼠节律、Codex 使用记录和录音自动转写要读本人电脑，网页版不提供；精力按本人自评和手机记录推算。"
+            : "屏幕活动、作息记录、键鼠节律、Codex 使用记录和录音自动转写读的是运行 Crossline 的那台电脑，只对它的主人开放。"}</p>}
           {machine && <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
             hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
               .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />}
           <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} />
           {machine && <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />}
+          {machine && usualDay && <section className="st-card" aria-label="电脑前的一天">
+            <header><h3>电脑前的一天</h3><small>近 {usualDay.days} 天按小时的平均活跃分钟；只记分钟，供访谈与画像了解作息，不用于排程</small></header>
+            <div className="st-hours" role="img" aria-label="每小时平均活跃分钟">{usualDay.active.map((minutes, hour) =>
+              <span key={hour} title={`${hour}:00–${hour + 1}:00 · 平均 ${minutes} 分钟，${Math.round(usualDay.present[hour]! * 100)}% 的日子在电脑前`}><i style={{ height: `${(minutes / 60) * 100}%` }} /></span>)}</div>
+            <div className="st-hours-axis" aria-hidden="true"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
+          </section>}
+          {machine && <RecordingCard overview={recordings} />}
+          {recordings.server && <ServerRecordingCard server={recordings.server} done={recordings.done} />}
           {isLocalInstall() && <TelemetryCard on={setting(TELEMETRY_ENABLED_SETTING) !== "0"} />}
         </section>
 

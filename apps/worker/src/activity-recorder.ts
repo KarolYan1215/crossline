@@ -1,6 +1,6 @@
 import { classifyWindow, isPrivateWindow, type ActivityReading, type ActivityRule } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
-import { ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, SLEEP_TRACKING_CONSENT, type InputRhythmBucket } from "@crossline/core";
+import { ACTIVITY_HOURLY, ACTIVITY_HOURLY_DAYS, ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, SLEEP_TRACKING_CONSENT, type ActivityHour, type InputRhythmBucket } from "@crossline/core";
 
 /** Consent v1: idle time and window changes, as daily aggregates only. Never a window title, never an app name. */
 export const LOCAL_ACTIVITY_CONSENT = "localActivity.consent";
@@ -84,6 +84,18 @@ export function createActivityTracker(store: CrosslineStore, listWorkspaceIds: (
     store.setSetting(workspaceId, INPUT_RHYTHM_BUCKETS, JSON.stringify(buckets.filter((item) => item.start >= since)));
   }
 
+  /** The reading's minutes added to its clock hour (`ACTIVITY_HOURLY`), the last 28 days kept. */
+  function noteHour(workspaceId: string, at: string, minutes: number, idle: boolean): void {
+    const time = Date.parse(at);
+    const start = new Date(time - time % 3_600_000).toISOString();
+    let hours: ActivityHour[] = [];
+    try { hours = JSON.parse(store.getSetting(workspaceId, ACTIVITY_HOURLY) ?? "[]") as ActivityHour[]; } catch { /* starts afresh */ }
+    const hour = hours.find((item) => item.start === start) ?? (hours.push({ start, active: 0, idle: 0 }), hours.at(-1)!);
+    if (idle) hour.idle += minutes; else hour.active += minutes;
+    const since = new Date(time - ACTIVITY_HOURLY_DAYS * 86_400_000).toISOString();
+    store.setSetting(workspaceId, ACTIVITY_HOURLY, JSON.stringify(hours.filter((item) => item.start >= since)));
+  }
+
   function handleFor(workspaceId: string, reading: ActivityReading): "skipped" | "recorded" {
     const pausedUntil = store.getSetting(workspaceId, ACTIVITY_PAUSED_UNTIL);
     const paused = Boolean(pausedUntil && Date.parse(pausedUntil) > Date.parse(reading.at));
@@ -93,7 +105,11 @@ export function createActivityTracker(store: CrosslineStore, listWorkspaceIds: (
     else forgetGaps(workspaceId);
     const detail = store.getSetting(workspaceId, ACTIVITY_DETAIL_CONSENT) === "granted";
     const aggregate = store.getSetting(workspaceId, LOCAL_ACTIVITY_CONSENT) === "granted";
-    if (!detail && !aggregate) { counters.delete(workspaceId); return "skipped"; }
+    if (!detail && !aggregate) {
+      counters.delete(workspaceId);
+      if (store.getSetting(workspaceId, ACTIVITY_HOURLY) !== undefined) store.deleteSetting(workspaceId, ACTIVITY_HOURLY);
+      return "skipped";
+    }
     if (paused) return "skipped";
 
     const idle = reading.idleMs >= IDLE_AFTER_MS;
@@ -104,8 +120,13 @@ export function createActivityTracker(store: CrosslineStore, listWorkspaceIds: (
 
     const day = reading.at.slice(0, 10);
     let current = counters.get(workspaceId);
-    if (!current || current.day !== day) current = { day, active: 0, idle: 0, switches: 0, samples: 0 };
+    if (!current || current.day !== day) {
+      // The day's row survives a restart: counting starts from what is stored, not from zero (a restart at noon used to halve the day).
+      const stored = current ? undefined : store.listEnergyObservations(workspaceId).find((item) => item.id === `local-activity:${day}`)?.aggregate as Record<string, number> | undefined;
+      current = { day, active: stored?.activeMinutes ?? 0, idle: stored?.idleMinutes ?? 0, switches: stored?.windowSwitches ?? 0, samples: stored?.sampleCount ?? 0 };
+    }
     const minutes = intervalSeconds / 60;
+    noteHour(workspaceId, reading.at, minutes, idle);
     if (idle) current.idle += minutes; else current.active += minutes;
     if (current.last !== undefined && current.last !== signature && !idle) current.switches += 1;
     if (!idle) current.last = signature;

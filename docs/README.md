@@ -26,6 +26,7 @@
 | [local-installer.md](local-installer.md) | 本机安装版（给内测者，不 clone 代码、用自己的 ChatGPT 额度）：目录结构、启动器与托盘、Codex 登录、使用记录回传与诊断快照、更新、已知限制与工作包 |
 | [walkthrough-ledger.md](walkthrough-ledger.md) | 内测走查账本：以内测用户身份走查线上站点时已走过哪些路径、还有哪些没走、每次的发现与修复状态（走查前先读，只走没走过或改过的） |
 | [onboarding-v3.md](onboarding-v3.md) | 登录页与访谈页 v3：安装版走查的审查发现，三栏访谈、引导开场、语气选择、混合节奏、iCal 订阅与授权文件夹，各阶段进展（2026-10-14） |
+| [phone-recording.md](phone-recording.md) | 手机全天录音自动进 Crossline：iPhone（Just Press Record → iCloud Drive）与安卓（录音 App → Syncthing-Fork）的一次性设置、本机转写与语音活动检测、去重与降速、电量与隐私提醒 |
 | [calendar-write-setup.md](calendar-write-setup.md) | Crossline 日历的写入授权（只写名为 Crossline 的日历），以及分享到 Google 日历 |
 | [setup-google-oauth.md](setup-google-oauth.md) | 开启「用 Google 账号登录」的一次性配置 |
 | [setup-siwc.md](setup-siwc.md) | Sign in with ChatGPT：能做什么、怎样打开、订阅额度共享还差什么 |

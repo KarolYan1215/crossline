@@ -1,5 +1,6 @@
+import { transcriptDocumentIds } from "./recording-digest";
 import {
-  AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
+  AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour,
   PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
   validateOnboardingDialogue, locateQuote,
   gapCoveredBy, screenQuestions, screenAssumption,
@@ -100,7 +101,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
 
   /** The person's coding-agent hours, time only, when they allowed it (Settings → 隐私). */
   const workHistory = () => {
-    try { return agentHistoryLines(JSON.parse(store.getSetting(workspaceId, AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null); } catch { return []; }
+    let lines: string[] = [];
+    try { lines = agentHistoryLines(JSON.parse(store.getSetting(workspaceId, AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null); } catch { /* none */ }
+    // When the person is at the computer, from the screen-activity record (minutes only), when they allowed it.
+    try { lines = [...lines, ...atComputerLines(JSON.parse(store.getSetting(workspaceId, ACTIVITY_HOURLY) ?? "[]") as ActivityHour[], personTimeZone(store, workspaceId))]; } catch { /* none */ }
+    return lines;
   };
 
   /** What the ledger still lacks, as of now. */
@@ -219,7 +224,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     }
     // A turn takes the new files that fit its reading budget; the rest wait for the next turn instead of being marked read with their text
     // cut away (an authorized folder can bring hundreds at once). The model is told how many still wait.
-    const unread = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id));
+    // A phone recording's raw transcript is read through its digest (「… 摘要.md」, recording-digest.ts): all-day transcripts are mostly
+    // talk the interview has no use for, and would take the whole reading budget.
+    const transcripts = transcriptDocumentIds(store, workspaceId);
+    const unread = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id) && !transcripts.has(id));
     const fresh = withinBudget(unread);
     const waiting = unread.length - fresh.length;
     // What the connected calendars hold in the coming week: sent on the first turn and again whenever it changed.
