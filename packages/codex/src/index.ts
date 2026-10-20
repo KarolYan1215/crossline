@@ -103,16 +103,32 @@ export class JsonLineRpcClient {
   }
 }
 
-export const CODEX_BASELINE_COMMIT = "f0a1b8f0849d90960bc406b848f32e5a129b0457";
-export const CODEX_GENERATED_PROTOCOL_SHA256 = "cff5bf0f8f52d3d4fd2d00145462c5a3e21df86ec3b3b652668884831eb5c6a3";
+export const CODEX_BASELINE_COMMIT = "83086188ae0614bd882818ff1aa23f3194962012";
+export const CODEX_GENERATED_PROTOCOL_SHA256 = "0a029db4277456684f035f790bda8ea8651d4120fe3ab6c17436fadf1dfa7a05";
+/**
+ * The debug build at the repository root, which the resident app runs. A debug build embeds the absolute source path, so only a build
+ * in that checkout gives this hash: it is still rust-v0.155.0's until the root is rebuilt from the vendored 0.163.0 source
+ * (docs/codex-upgrade-0.163.md), and the new hash goes here then. It also names the runtime in provider conformance records
+ * (`RUNTIME_VERSION`), which go stale when it changes.
+ */
 export const CODEX_FORK_BINARY_SHA256 = "4bcc1d8452c75cd132e010f41ccfaf6afb8699317f9a90d88df0b20be2335497";
-/** The release build of the same pinned source that the installed copy ships (docs/local-installer.md, Codex 的 Release 构建). */
+/**
+ * The release build of the pinned source that the installed copy ships (docs/local-installer.md, Codex 的 Release 构建): still
+ * rust-v0.155.0's until the release build (three hours of thin-LTO linking) is redone from 0.163.0.
+ */
 export const CODEX_RELEASE_BINARY_SHA256 = "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9";
 /**
- * The Linux server of the hosted beta (docs/beta-launch.md §10): upstream's own release of the same tag, rust-v0.155.0
- * (`codex-x86_64-unknown-linux-musl`, asset digest e415cc3a… checked on download). The fork's only change is a Windows migration fix.
+ * The Linux server of the hosted beta (docs/beta-launch.md §10): upstream's own release of the same tag, rust-v0.163.0
+ * (`codex-x86_64-unknown-linux-musl.tar.gz`, asset digest beb339e8… checked on download 2026-10-20). The fork's only change is a
+ * Windows migration fix.
  */
-export const CODEX_LINUX_RELEASE_BINARY_SHA256 = "660e159a49e823ac8e5986cb238f73158ce4b957d40d9292f8de90862644b501";
+export const CODEX_LINUX_RELEASE_BINARY_SHA256 = "399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215";
+/**
+ * The previous pin's binaries (rust-v0.155.0), still accepted while each place that runs one is moved to 0.163.0
+ * (docs/codex-upgrade-0.163.md 「留给人做的事」): the Linux release on the hosted server until /srv/crossline/codex is replaced. The protocol
+ * the worker speaks works with both. Remove an entry once nothing runs it.
+ */
+export const CODEX_PREVIOUS_BINARY_SHA256: readonly string[] = ["660e159a49e823ac8e5986cb238f73158ce4b957d40d9292f8de90862644b501"];
 
 export function codexProcessEnvironment(
   base: NodeJS.ProcessEnv = process.env,
@@ -163,7 +179,8 @@ export function resolveCodexCommand(
   const rules = platform === "win32" ? path.win32 : path.posix;
   if (!rules.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");
   const hash = sha256(executable);
-  if (hash !== CODEX_FORK_BINARY_SHA256 && hash !== CODEX_RELEASE_BINARY_SHA256 && hash !== CODEX_LINUX_RELEASE_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
+  if (hash !== CODEX_FORK_BINARY_SHA256 && hash !== CODEX_RELEASE_BINARY_SHA256 && hash !== CODEX_LINUX_RELEASE_BINARY_SHA256
+    && !CODEX_PREVIOUS_BINARY_SHA256.includes(hash)) throw new Error("CODEX_FORK_BINARY_MISMATCH");
   return { command: executable, args: [] };
 }
 

@@ -91,6 +91,26 @@ test("a tools-mode run declares Crossline's functions (no shell), records every 
   expect(audit.toolCalls.map((call: { tool: string }) => call.tool)).toEqual(["write_file", "add_to_inbox"]);
 });
 
+test("a run told to go on in an earlier run's conversation resumes that thread, and its functions answer for the new task directory", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  const summary = (file: string) => JSON.stringify({ summary: `写了 ${file}`, artifacts: [{ path: file, purpose: "清单" }],
+    verification: [{ check: "读回", result: "pass", evidence: `读回 ${file}` }], needsHuman: [], notDone: [], assumptions: [] });
+  let turn = 0;
+  const { rpc, threadStarts, resumes } = fakeRuntime([summary("week-1.md"), summary("week-2.md")], TOOLS_AGENT_SKILL, { script: async ({ ask }) => {
+    turn += 1;
+    await ask("item/tool/call", { callId: `c${turn}`, tool: "write_file", arguments: { path: `week-${turn}.md`, content: `第 ${turn} 周` } });
+  } });
+  const run = createAgentRunner(store, workspaceId, "/repo", () => rpc, { outputRoot: path.join(root, "ai"), mode: "tools" });
+  const first = await run({ taskId: "t-week-1", title: "每周整理", what: "整理本周", category: "read_research_organize", humanPart: "" });
+  expect(first).toMatchObject({ state: "done", threadId: "thread-1" });
+  const second = await run({ taskId: "t-week-2", title: "每周整理", what: "整理本周", category: "read_research_organize", humanPart: "",
+    resumeThreadId: (first as { threadId: string }).threadId });
+  expect(second).toMatchObject({ state: "done", threadId: "thread-1" });
+  expect(threadStarts()).toHaveLength(1);
+  expect(resumes()).toEqual(["thread-1"]);
+  expect(readFileSync(path.join(root, "ai", "t-week-2", "week-2.md"), "utf8")).toBe("第 2 周");
+});
+
 test("a run that calls no function is sent back: a summary of work never done is not a result", async () => {
   approveCategory(store, workspaceId, "read_research_organize");
   const plan = JSON.stringify({ summary: "开始读取任务板与日历，随后生成清单文件。", artifacts: [], verification: [], needsHuman: [], notDone: [], assumptions: [] });

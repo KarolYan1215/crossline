@@ -5,7 +5,9 @@
 #   docker build -f deploy/app/Dockerfile -t crossline-app .
 #
 # BuildKit reads deploy/app/Dockerfile.dockerignore. The Codex binaries are not in the image: the host keeps upstream's Linux release
-# (pinned by CODEX_LINUX_RELEASE_BINARY_SHA256) and mounts it read-only at /opt/codex.
+# (pinned by CODEX_LINUX_RELEASE_BINARY_SHA256) and mounts it read-only at /opt/codex. Since 2026-10-20 that is rust-v0.163.0:
+# https://github.com/openai/codex/releases/download/rust-v0.163.0/codex-x86_64-unknown-linux-musl.tar.gz (asset sha256 beb339e8…,
+# binary sha256 399ff69c…); the 0.155.0 binary stays accepted until /srv/crossline/codex is replaced (docs/codex-upgrade-0.163.md).
 FROM node:22-bookworm-slim
 ENV CI=1 NEXT_TELEMETRY_DISABLED=1
 # node-gyp for better-sqlite3 and keytar; libsecret is loaded by keytar at import, or every connector fails to load.

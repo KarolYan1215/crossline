@@ -34,7 +34,22 @@ export type Automation = {
   lastFiredAt?: string; runs: number;
   /** A watched page's text fingerprint and when it was last read. */
   watch?: { hash: string; checkedAt: string; excerpt: string };
+  /**
+   * The assistant's conversation this automation goes on in (2026-10-20): each firing is a new turn on it, so a run knows what the last
+   * ones did. Replaced when the runtime no longer has it.
+   */
+  threadId?: string;
+  /** What its last finished run did and where that run's files are, handed to the next run (and to a new thread, as history). */
+  lastRun?: { taskId: string; at: string; summary: string; directory: string; files: string[] };
 };
+/** The part of the next run's instructions that says what the last run did; empty before the first. */
+export function previousRunNote(lastRun: Automation["lastRun"]): string {
+  if (!lastRun) return "";
+  const files = lastRun.files.slice(0, 8);
+  return `上次运行（${lastRun.at.slice(0, 16).replace("T", " ")}）做了：${lastRun.summary.slice(0, 600)}`
+    + `${files.length ? `\n上次的产出已作为只读输入给这次运行：${files.map((file) => file.split(/[\\/]/).pop()).join("、")}${lastRun.files.length > files.length ? ` 等 ${lastRun.files.length} 个文件` : ""}` : ""}`
+    + "\n这次接着上次做：已经做过、没有变化的不要重做，只处理新的部分；需要上次的内容时读上次的产出。";
+}
 export type AutomationRun = { automationId: string; taskId: string; firedAt: string; reason: string; state: "started" | "reminded" | "queued" | "skipped"; detail?: string };
 
 export function readAutomations(raw: string | null | undefined): Automation[] {

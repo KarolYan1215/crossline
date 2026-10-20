@@ -1,5 +1,7 @@
 use super::PreviousSectionState;
+use super::SectionTransition;
 use super::WorldStateSection;
+use super::WorldStateUpdate;
 use crate::context::ContextualUserFragment;
 use crate::context::environment_context::FileSystemContext;
 use crate::context::environment_context::NetworkContext;
@@ -59,7 +61,10 @@ impl EnvironmentsState {
             environments: environment_states(environments),
             shell_version,
             current_date,
-            timezone: turn_context.timezone.clone(),
+            timezone: turn_context
+                .timezone
+                .clone()
+                .filter(|_| turn_context.config.include_environment_context_time),
             network: network_from_turn_context(turn_context),
             filesystem: environments.primary().map(|environment| {
                 FileSystemContext::from_permission_profile(
@@ -92,6 +97,7 @@ impl EnvironmentsState {
             shell_version: self.shell_version.clone(),
             shell_version_removed: false,
             current_date: self.current_date.clone(),
+            current_date_removed: false,
             timezone: self.timezone.clone(),
             network: self.network.clone(),
             filesystem: self.filesystem.clone(),
@@ -104,8 +110,11 @@ impl WorldStateSection for EnvironmentsState {
     const ID: &'static str = "environments";
     type Snapshot = EnvironmentsSnapshot;
 
-    fn snapshot(&self) -> Self::Snapshot {
-        EnvironmentsSnapshot {
+    fn render_diff(
+        &self,
+        previous: PreviousSectionState<'_, Self::Snapshot>,
+    ) -> SectionTransition<Self::Snapshot> {
+        let current = EnvironmentsSnapshot {
             environments: self
                 .environments
                 .iter()
@@ -128,14 +137,7 @@ impl WorldStateSection for EnvironmentsState {
             network: self.network.as_ref().map(NetworkContext::render),
             filesystem: self.filesystem.as_ref().map(FileSystemContext::render),
             subagents: self.subagents.clone(),
-        }
-    }
-
-    fn render_diff(
-        &self,
-        previous: PreviousSectionState<'_, Self::Snapshot>,
-    ) -> Option<Box<dyn ContextualUserFragment>> {
-        let current = self.snapshot();
+        };
         let empty = EnvironmentsSnapshot::default();
         let previous = match previous {
             PreviousSectionState::Known(previous) => previous,
@@ -174,7 +176,7 @@ impl WorldStateSection for EnvironmentsState {
             && updates
                 .values()
                 .all(|update| matches!(update, EnvironmentUpdate::Current(_)));
-        (!updates.is_empty() || turn_context_values_changed).then(|| {
+        let fragment = (!updates.is_empty() || turn_context_values_changed).then(|| {
             Box::new(RenderedEnvironments {
                 updates,
                 legacy_single,
@@ -183,12 +185,18 @@ impl WorldStateSection for EnvironmentsState {
                 shell_version_removed: self.shell_version.is_none()
                     && previous.shell_version.is_some(),
                 current_date: self.current_date.clone(),
+                current_date_removed: self.current_date.is_none()
+                    && previous.current_date.is_some(),
                 timezone: self.timezone.clone(),
                 network: self.network.clone(),
                 filesystem: self.filesystem.clone(),
                 subagents: self.subagents.clone(),
             }) as Box<dyn ContextualUserFragment>
-        })
+        });
+        (
+            Some(current),
+            WorldStateUpdate::optional_boxed_fragment(fragment),
+        )
     }
 }
 
@@ -221,6 +229,7 @@ struct RenderedEnvironments {
     shell_version: Option<String>,
     shell_version_removed: bool,
     current_date: Option<String>,
+    current_date_removed: bool,
     timezone: Option<String>,
     network: Option<NetworkContext>,
     filesystem: Option<FileSystemContext>,
@@ -289,7 +298,11 @@ impl ContextualUserFragment for RenderedEnvironments {
             let shell_version = self.shell_version.as_deref();
             push_optional_element(&mut rendered, "shell_version", shell_version);
         }
-        push_optional_element(&mut rendered, "current_date", self.current_date.as_deref());
+        if self.current_date_removed {
+            rendered.push_str("  <current_date status=\"unavailable\" />\n");
+        } else {
+            push_optional_element(&mut rendered, "current_date", self.current_date.as_deref());
+        }
         push_optional_element(&mut rendered, "timezone", self.timezone.as_deref());
         if let Some(network) = &self.network {
             rendered.push_str("  ");
@@ -484,7 +497,10 @@ fn environment_states(snapshot: &TurnEnvironmentSnapshot) -> BTreeMap<String, En
     const MAX_TOTAL_ERROR_BYTES: usize = 512;
     let mut remaining_error_bytes = MAX_TOTAL_ERROR_BYTES;
     for environment in &snapshot.environments {
-        if let TurnEnvironmentState::Failed { selection, error } = environment {
+        if let TurnEnvironmentState::Failed {
+            selection, error, ..
+        } = environment
+        {
             let detail = error
                 [..error.floor_char_boundary(remaining_error_bytes.min(MAX_ERROR_BYTES))]
                 .to_string();

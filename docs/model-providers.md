@@ -48,7 +48,7 @@
 
 另外，助手以 `danger-full-access` 和 worker 的操作系统用户运行（`startAgentThread`）：多账号时它在技术上能读到别的 workspace 的 `data/`。守卫是绊线不是沙箱（`docs/assistant-agent.md`），所以**助手只能给机器主人的 workspace 用**。
 
-### 1.3 已核实的运行时能力（`vendor/codex`，rust-v0.155.0）
+### 1.3 已核实的运行时能力（`vendor/codex`，rust-v0.155.0 时核实；2026-10-20 升到 rust-v0.163.0 后这里列的仍成立，见 `docs/codex-upgrade-0.163.md`）
 
 - 登录：`account/login/start` 支持 `apiKey`、`chatgpt`（浏览器回调）、`chatgptDeviceCode`；`chatgptAuthTokens` 标注为 OpenAI 内部、不得使用（`app-server-protocol/src/protocol/v2/account.rs` `LoginAccountParams`）。**没有「按请求换账号」的接口**——一个进程一个 auth manager。
 - 提供方：`thread/start` 有 `model_provider`（`v2/thread.rs`）；内置 `openai`、`amazon-bedrock`、`ollama`（11434）、`lmstudio`（1234）；自定义提供方写在 `model_providers.<id>`，字段有 `base_url`、`env_key`、`auth`（命令取 token）、`http_headers`、`query_params`（`model-provider-info/src/lib.rs`）。

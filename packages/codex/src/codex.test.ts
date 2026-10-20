@@ -450,6 +450,13 @@ describe("codex executable resolution", () => {
       () => codexModule.CODEX_RELEASE_BINARY_SHA256)).toEqual({ command: shipped, args: [] });
   });
 
+  test("the server's Linux release is accepted at the new pin, and at the previous one until the host's binary is replaced", () => {
+    const server = "/opt/codex/codex";
+    for (const hash of [codexModule.CODEX_LINUX_RELEASE_BINARY_SHA256, ...codexModule.CODEX_PREVIOUS_BINARY_SHA256])
+      expect(codexModule.resolveCodexCommand({ CROSSLINE_CODEX_PATH: server }, (file) => file === server, "linux", () => hash)).toEqual({ command: server, args: [] });
+    expect(codexModule.CODEX_PREVIOUS_BINARY_SHA256).not.toContain(codexModule.CODEX_LINUX_RELEASE_BINARY_SHA256);
+  });
+
   test("a changed executable is refused before app-server starts", () => {
     expect(() => codexModule.resolveCodexCommand({ CROSSLINE_CODEX_PATH: fork },
       (file) => file === fork, "win32", () => "different"))

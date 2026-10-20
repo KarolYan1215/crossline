@@ -132,7 +132,7 @@ writeFileSync(path.join(notices, "README.txt"), [
   "Crossline 随附的第三方程序：",
   `- Node.js ${process.version}（node.exe），MIT 等许可，见 node-LICENSE.txt`,
   "- OpenAI Codex（codex\\codex.exe、codex\\codex-code-mode-host.exe），Apache-2.0，见 codex-LICENSE.txt 与 codex-NOTICE.txt；",
-  "  源码固定在 https://github.com/openai/codex 的 rust-v0.155.0（f0a1b8f0849d90960bc406b848f32e5a129b0457），附一处 Windows 迁移校验和补丁",
+  "  源码固定在 https://github.com/openai/codex 的 rust-v0.163.0（83086188ae0614bd882818ff1aa23f3194962012），附一处 Windows 迁移校验和补丁",
   "- Microsoft Visual C++ 运行库（msvcp140*.dll、vcruntime140*.dll，放在用到它们的模块旁边），按 Visual Studio 许可条款中的可分发代码条款随附",
   "- node_modules 下各软件包的许可证在各自目录中",
   ""

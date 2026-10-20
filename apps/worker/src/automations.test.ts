@@ -157,3 +157,25 @@ test("a design that never keeps to the schema is said to the person at once; a p
   expect((await designPending(deps(() => rpc), workspaceId))[0]).toMatchObject({ state: "failed" });
   expect(await designPending(deps(() => rpc), workspaceId)).toEqual([]);
 });
+
+test("each firing goes on in the automation's own conversation: the next run resumes its thread, told what the last one did and given its files", () => {
+  const { store, workspaceId, deps } = setup();
+  install(store, workspaceId, { id: "auto-resume" });
+  const started: Array<AgentTaskInput & { taskId: string }> = [];
+  const finish: Array<(outcome: never) => void> = [];
+  const resuming: AutomationDeps = { ...deps(), runFree: (_w, input, after) => { started.push(input); if (after) finish.push(after as (outcome: never) => void); return { state: "started", taskId: input.taskId }; } };
+  const current = () => readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING)).find((item) => item.id === "auto-resume")!;
+  fire(resuming, workspaceId, current(), { reason: "到点", context: "" });
+  expect(started[0]!.resumeThreadId).toBeUndefined();
+  expect(started[0]!.what).not.toContain("上次运行");
+  finish[0]!({ state: "done", taskId: started[0]!.taskId, directory: "/out/auto-resume-1", threadId: "thread-9",
+    summary: { summary: "整理了 3 个新文件，写了 index.md", artifacts: [], verification: [], needsHuman: [], notDone: [], assumptions: [] },
+    artifacts: [{ path: "index.md", purpose: "索引", sha256: "x", bytes: 10 }], audit: { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } },
+    inputsModified: [], checksPassed: true, reviewRequired: false, reviewReasons: [] } as never);
+  expect(current()).toMatchObject({ threadId: "thread-9", lastRun: { directory: "/out/auto-resume-1", files: ["index.md"], summary: "整理了 3 个新文件，写了 index.md" } });
+  fire(resuming, workspaceId, current(), { reason: "到点", context: "" });
+  expect(started[1]).toMatchObject({ resumeThreadId: "thread-9" });
+  expect(started[1]!.what).toContain("上次运行");
+  expect(started[1]!.what).toContain("整理了 3 个新文件");
+  expect(started[1]!.inputs?.some((file) => file.replace(/\\/g, "/").endsWith("/out/auto-resume-1/index.md"))).toBe(true);
+});
