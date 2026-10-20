@@ -54,7 +54,7 @@ case "$1" in
     find /srv/crossline/backups -name 'crossline.db*' -mtime +14 -delete 2>/dev/null || true
     status=0; migrate --apply || status=$?
     docker start crossline-web crossline-worker
-    rm -f /tmp/crossline-transfer.tgz
+    [ $status = 0 ] && rm -f /tmp/crossline-transfer.tgz
     exit $status
     ;;
   *)
