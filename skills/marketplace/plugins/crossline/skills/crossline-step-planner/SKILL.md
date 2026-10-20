@@ -23,7 +23,8 @@ Return raw JSON only: `{archetypeId, quantity, rationale, importance, completion
 - `milestone` — the result the task serves and its criteria (often a score line or an artefact), or null.
 - `window` — `notBefore` (earliest start), `dueBy` (latest finish, may be ""), `availableMinutes` (working time inside it, shared with other work).
 - `materials[]` — the task's own files **in full text**, `{id: "doc-N", name, text}`: syllabi, lecture plans, problem sets, briefs, data descriptions.
-- `person` — `facts[]` (what the person confirmed: background and level, the course's grading and target, what they said about this project; `（假设）` marks an assumption), `strengths[]`, `answers[]` (their answers to this task's earlier questions: binding).
+- `person` — `facts[]` (what the person confirmed: background and level, the course's grading and target, what they said about this project; `（假设）` marks an assumption), `strengths[]`, `answers[]` (their answers to this task's earlier questions: binding), `profile[]` (below).
+- `person.profile[]` is the interview's conclusions for planning, one short line each: how the person works (peak hours, how long they can go, what drains them, how they react to criticism or friction), what they are good at and enjoy, how their lines are weighed, what they value most and where they are headed. Use it to size, order and phrase the work for this person (put demanding work where they are strong, keep draining work short and early, plan a check-in where their pattern says they tend to stall); never quote it back as a new fact and never let it override a hard date or a file.
 - `projectDates[]` — the project's dated items (exams, homework due, releases).
 - `archetypes[]` — the work structures to choose from: `{id, label, roles, requires, firstBefore, endsWith, proportions, quantify, acceptance, tickHint, agentRoles, recurring}`.
 - `aiTools[]` — `{name, kind, goodFor, by}` the person works with.

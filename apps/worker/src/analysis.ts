@@ -1,3 +1,4 @@
+import { personProfileFor } from "./planning-profile";
 import { autoApproveEligible } from "./auto-approval";
 import { ownerOf } from "./owner";
 import type { AnalysisDate, AnalysisWaitingOn } from "@crossline/core";
@@ -120,6 +121,8 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
             explanation: relation.explanation ?? "" })),
         // What the person has corrected or shown about how they work, across every line (the capture's line is not known yet).
         personalPreferences: store.preferenceLines(workspaceId, packs.map((pack) => pack.id), 20),
+        // The interview's conclusions for planning (how the person works, drains, direction): the estimate and the split are this person's.
+        personProfile: personProfileFor(store, workspaceId),
         // The open tasks already on the board, so the same work is not written twice and an addition says what it adds to.
         existingTasks: existingTasksFor(store, workspaceId),
         policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }

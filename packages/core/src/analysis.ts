@@ -14,6 +14,8 @@ export type AnalysisContext = {
   identityPacks: Array<{ id: string; version: number; summary: string }>;
   /** What the person has said or shown about how they work (v2; `preference_entries`). Absent on contexts stored before it. */
   personalPreferences?: string[];
+  /** The interview's conclusions for planning (`planningProfile`): how the person works, what drains and carries them, the direction. */
+  personProfile?: string[];
   // How this workspace's own past captures actually turned out, per (identityId, family) — not a
   // suggestion to copy, evidence the model can weigh against its own read of the current capture.
   // `medianActualMinutes: 0` means no real completions exist yet for that pair, same convention
@@ -172,6 +174,7 @@ const V2_CONTEXT = object({ version: choice("crossline.analysis.v2"), ...sharedC
   referenceClass: array(object({ identityId: str, family, title: str, llmP50Minutes: number, actualMinutes: number }), 0, 5),
   relations: array(object({ fromMilestoneId: str, toMilestoneId: str, kind: str, explanation: { type: "string", minLength: 0, maxLength: 4000 } }), 0, 40),
   personalPreferences: array(str, 0, 30),
+  personProfile: array(str, 0, 20),
   existingTasks: array(object({ id: str, title: str, intent: str, lineId: str, projectId: { type: "string", minLength: 0, maxLength: 4000 },
     dueDate: { type: "string", minLength: 0, maxLength: 20 }, state: str }), 0, EXISTING_TASKS_LIMIT) });
 export const ANALYSIS_CONTEXT_VERSION = "crossline.analysis.v2";
@@ -182,8 +185,10 @@ export function validateAnalysisContext(value: unknown): AnalysisContext {
   const full = version === "crossline.analysis.v1" && value && typeof value === "object" && !("rhythm" in value)
     ? { ...(value as object), rhythm: { focusRunMinutes: 0, productiveMinutesPerDay: 0, planActualRatio: 0, observedDays: 0, completed: 0 } }
     // A v2 context stored before personal preferences (or the existing tasks) existed reads as "nothing learned yet" ("no tasks shown").
-    : version === "crossline.analysis.v2" && value && typeof value === "object" && (!("personalPreferences" in value) || !("existingTasks" in value))
-      ? { personalPreferences: [], existingTasks: [], ...(value as object) } : value;
+    // … and one stored before the interview's planning profile was handed over (2026-10-20) reads as "no profile".
+    : version === "crossline.analysis.v2" && value && typeof value === "object"
+      && (!("personalPreferences" in value) || !("existingTasks" in value) || !("personProfile" in value))
+      ? { personalPreferences: [], existingTasks: [], personProfile: [], ...(value as object) } : value;
   if (!matches(full, version === "crossline.analysis.v2" ? V2_CONTEXT : V1_CONTEXT)) throw new Error("ANALYSIS_CONTEXT_INVALID");
   const context = full as AnalysisContext;
   // Every milestone offered must be backed by a pack; the Skill picks the identity, the app never guesses it.

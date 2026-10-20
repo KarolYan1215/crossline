@@ -15,6 +15,7 @@ The input is always `crossline.milestone-proposal.v1`. Return raw JSON only, no 
 - `existingMilestones[]` — live milestones: approved ones, and drafts that are not about to be replaced by this run. Never propose one again; a title equal to one of them is refused.
 - `request` — what the person asked for; empty means the whole picture. A request starting 「复核意见」 is a reviewer's notes on this line's earlier drafts: fix exactly what it names and keep what it does not mention.
 - `recentWork[]`, `templates[]`, `personalPreferences[]`, `diligence[]` (web research the person accepted).
+- `personProfile[]` — the interview's conclusions for planning, one short line each: how the person works (peak hours, how long they can go, what drains them, how they react to criticism or friction), what they are good at and enjoy, how their lines are weighed, what they value most and where they are headed. Use it to size, order and phrase the work for this person (put demanding work where they are strong, keep draining work short and early, plan a check-in where their pattern says they tend to stall); never quote it back as a new fact and never let it override a hard date or a file. For milestones: pace a line's chain to the hours and allocation it states, and keep the line's place in that allocation.
 - `profile` — present once the person has been interviewed (see **Profile runs**).
 - `artifacts` — this line's part of the artifact plan (see **Artifacts**).
 

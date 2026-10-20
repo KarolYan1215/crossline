@@ -19,6 +19,7 @@ Return raw JSON only: `{steps, dateCandidates, blockers}`.
 - `existingTasks[]` — every open task of this line and project, the task library included: `{id, title, intent, lineId, projectId, dueDate, state}`.
 - `recentlyDone[]` — `{id, title, intent}`: tasks of this line and project finished in the last 30 days.
 - `artifacts` — `{produce[], use[]}` cross-line artifacts (see below); empty lists when none.
+- `personProfile[]` — the interview's conclusions for planning, one short line each: how the person works (peak hours, how long they can go, what drains them, how they react to criticism or friction), what they are good at and enjoy, how their lines are weighed, what they value most and where they are headed. Use it to size, order and phrase the work for this person (put demanding work where they are strong, keep draining work short and early, plan a check-in where their pattern says they tend to stall); never quote it back as a new fact and never let it override a hard date or a file.
 
 ## Work backwards from the criteria
 

@@ -19,6 +19,7 @@ Return raw JSON only: `{identityId, projectId, milestoneId, title, intent, famil
 - `referenceClass[]` — recently finished tasks with what was estimated (`llmP50Minutes`) and what they really took (`actualMinutes`).
 - `relations[]` — approved links between milestones of different lines.
 - `existingTasks[]` — open tasks, the task library included: `{id, title, intent, lineId, projectId, dueDate, state}`.
+- `personProfile[]` — the interview's conclusions for planning, one short line each: how the person works (peak hours, how long they can go, what drains them, how they react to criticism or friction), what they are good at and enjoy, how their lines are weighed, what they value most and where they are headed. Use it to size, order and phrase the work for this person (put demanding work where they are strong, keep draining work short and early, plan a check-in where their pattern says they tend to stall); never quote it back as a new fact and never let it override a hard date or a file.
 - `personalPreferences[]`; `policy` — a fixed boundary (no tools, no external side effects). Never write about policy or approval in any field.
 
 ## Name, line, project, milestone

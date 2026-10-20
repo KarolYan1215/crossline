@@ -153,6 +153,8 @@ export const MILESTONE_PROPOSAL_SCHEMA = object({
 
 export type MilestoneProposalContext = {
   version: "crossline.milestone-proposal.v1";
+  /** The interview's conclusions for planning (`planningProfile`): how the person works, what drains them, direction, line allocation. */
+  personProfile?: string[];
   identities: Array<{ id: string; label: string; summary: string }>;
   existingMilestones: Array<{ id: string; identityId: string; title: string; status: string }>;
   recentWork: Array<{ milestoneId: string; intent: string; state: string }>;

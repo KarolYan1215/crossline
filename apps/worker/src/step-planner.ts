@@ -1,3 +1,4 @@
+import { personProfileFor } from "./planning-profile";
 import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, readableFromMaterial, relevantDocuments, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
@@ -45,7 +46,9 @@ export function planningContext(store: CrosslineStore, workspaceId: string, orde
     }).filter((doc) => doc.text.trim());
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.value.startsWith("假设"));
   const own = (fact: (typeof facts)[number]) => fact.projectId === order.projectId ? 0 : fact.identityId === order.identityId ? 1 : fact.identityId === "person" ? 2 : 3;
-  const person = facts.filter((fact) => own(fact) < 3 && !fact.slot.startsWith(STEP_ANSWER_SLOT)).sort((a, b) => own(a) - own(b)).slice(0, 50)
+  // The project's and the line's facts; how the person works comes whole in `profile` below (planningProfile), so a line with a hundred
+  // facts no longer pushes it out (on the owner's research line none of the person's facts ever reached a plan).
+  const person = facts.filter((fact) => own(fact) < 2 && !fact.slot.startsWith(STEP_ANSWER_SLOT)).sort((a, b) => own(a) - own(b)).slice(0, 50)
     .map((fact) => `${fact.projectId ? `[${fact.projectId}] ` : ""}${fact.slot}：${fact.value.slice(0, 240)}${fact.status === "inferred" ? "（假设）" : ""}`);
   const answers = facts.filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT) && (fact.projectId === order.projectId || fact.projectId === ""))
     .map((fact) => fact.value.slice(0, 400));
@@ -59,7 +62,7 @@ export function planningContext(store: CrosslineStore, workspaceId: string, orde
       .map((item) => `${item.date}${item.startTime ? ` ${item.startTime}` : ""} ${item.title}`);
   });
   const profile = (() => { try { return JSON.parse(store.getSetting(workspaceId, "profile.model") ?? "{}") as { energyMap?: Array<{ activity: string; skill: string; love: string }> }; } catch { return {}; } })();
-  return { documents, person, answers, dated: [...new Set(dated)].sort().slice(0, 40),
+  return { documents, person, answers, dated: [...new Set(dated)].sort().slice(0, 40), profile: personProfileFor(store, workspaceId),
     strengths: (profile.energyMap ?? []).filter((item) => item.skill === "high").map((item) => item.activity).slice(0, 8) };
 }
 
@@ -241,7 +244,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       materials: grounding.documents,
       // Who this is for: confirmed facts (their background and level, the course's grading and target, what they said about this
       // project), the activities they are good at, the project's dated items, and what they answered to this plan's earlier questions.
-      person: { facts: grounding.person, strengths: grounding.strengths, answers: grounding.answers },
+      person: { facts: grounding.person, strengths: grounding.strengths, answers: grounding.answers, profile: grounding.profile },
       projectDates: grounding.dated,
       archetypes: [...ARCHETYPES, ...learned].map(archetypeBrief),
       // The AI tools the person works with (docs/skills-library.md §7): the assistant takes whole steps, the rest name the tool that

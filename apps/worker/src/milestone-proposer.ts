@@ -1,3 +1,4 @@
+import { personProfileFor } from "./planning-profile";
 import { randomUUID } from "node:crypto";
 import {
   ARTIFACT_PLAN_SCHEMA, ARTIFACT_PLAN_VERSION, MILESTONE_PROPOSAL_SCHEMA, deriveArtifactRelations, goalSettingKey, keptArtifactPlan, lineArtifacts, mergeArtifactPlan,
@@ -130,6 +131,8 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
   const identities = identityLines(store, workspaceId);
   const now = options.now?.() ?? (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date());
   return {
+    // How the person works and what the plan serves (planningProfile): every line's chain is paced for this person.
+    personProfile: personProfileFor(store, workspaceId),
     version: "crossline.milestone-proposal.v1",
     // A line's long-term goal, when the person gave one, is what its milestones are worked toward.
     // The attributes the person chose are named too, so the milestones serve what they adopted and nothing the model adds to it.

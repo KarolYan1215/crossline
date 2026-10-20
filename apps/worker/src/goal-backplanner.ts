@@ -1,3 +1,4 @@
+import { personProfileFor } from "./planning-profile";
 import { randomUUID } from "node:crypto";
 import { BACKPLAN_SCHEMA, foldInfoRequests, goalSettingKey, mentionsExternalAction, producedArtifacts, usedArtifacts, validateBackplan, withCourse, type BackplanAnswer as Answer,
   type MissingInput } from "@crossline/core";
@@ -96,6 +97,8 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       id: milestone.id, version: milestone.version, identityId: milestone.identityId,
       projectId: milestone.projectId, title: milestone.title, deadline: milestoneDeadline, successCriteria: milestone.successCriteria
     }, sourceText: request?.request ?? "", approvedInsights,
+      // How the person works and what the plan serves, from the interview (planningProfile): tasks are sized and ordered for this person.
+      personProfile: personProfileFor(store, workspaceId),
       suppliedInputs: supplied, waitingInputs: waiting, missingInputs: [] as MissingInput[],
       existingWork: store.listWorkOrders(workspaceId)
       .filter((order) => order.milestoneId === milestone.id).map((order) => ({ id: order.id, intent: order.intent, state: order.state })),
