@@ -5,8 +5,8 @@
  * tokens and price is kept with what it produced, and a report puts the two next to each other for reading.
  *
  *   tsx scripts/sponsor-compare.ts list --ledger <crossline.db> [--auth <auth.db>]
- *   tsx scripts/sponsor-compare.ts run  --ledger <crossline.db> [--auth <auth.db>] --email <address> --out <dir>
- *                                       [--models A,B] [--steps 6] [--backplans 3]
+ *   tsx scripts/sponsor-compare.ts run  --ledger <crossline.db> [--auth <auth.db>] --workspace <id,…> | --email <address,…> --out <dir>
+ *                                       [--models A,B] [--steps 6] [--backplans 3]     (the counts are per account)
  *
  * The ledger given is never written: it is copied by SQLite's online backup first, and the backplanned milestones are reset on the
  * copies only (their earlier tasks and the record of the backplan removed, so both models split them from the same start). Runs go
@@ -107,9 +107,10 @@ if (mode === "list") {
 }
 
 // ---- run ----
-const email = arg("email");
 const outRoot = arg("out");
-if (!email || !outRoot) { console.error("run needs --email <address> and --out <dir>"); process.exit(2); }
+// Accounts by workspace id or sign-in address, several at once (comma-separated).
+const wanted = [...(arg("workspace") ?? "").split(","), ...(arg("email") ?? "").split(",")].map((item) => item.trim()).filter(Boolean);
+if (!wanted.length || !outRoot) { console.error("run needs --workspace <id,…> or --email <address,…>, and --out <dir>"); process.exit(2); }
 const sponsor = sponsorFromEnv();
 if (!sponsor) { console.error("CROSSLINE_SPONSOR_API_KEY / CROSSLINE_SPONSOR_MODELS are not set"); process.exit(2); }
 const models = (arg("models") ?? DEFAULT_MODELS.join(",")).split(",").map((item) => item.trim()).filter(Boolean);
@@ -126,29 +127,35 @@ const scratch = mkdtempSync(path.join(tmpdir(), "crossline-compare-"));
 process.env.CROSSLINE_STATE_DIR = path.join(scratch, "state");
 const base = path.join(scratch, "base.db");
 await copyLedger(base);
-const workspaceId = [...emailsByWorkspace(base)].find(([, address]) => address.toLowerCase() === email.toLowerCase())?.[0];
-if (!workspaceId) { console.error(`no workspace for ${masked(email)}`); process.exit(1); }
+const emails = emailsByWorkspace(base);
+const workspaceIds = [...new Set(wanted.map((item) => item.includes("@")
+  ? [...emails].find(([, address]) => address.toLowerCase() === item.toLowerCase())?.[0] ?? `missing:${masked(item)}` : item))];
 
 // The same tasks and milestones for every model, chosen on the untouched copy: tasks with files of their own first, one project at a
-// time; milestones due soonest first. A task whose milestone is reset for the backplan is not also re-planned.
+// time; milestones due soonest first, one per project while there are enough. A task whose milestone is reset is not also re-planned.
 const probe = new CrosslineStore(base);
-const pool = candidates(probe, workspaceId);
-const pickedMilestones = [...pool.milestones].sort((a, b) => (a.deadline || "9999").localeCompare(b.deadline || "9999"))
-  .filter((item, index, list) => list.findIndex((other) => other.milestone.projectId === item.milestone.projectId) === index || list.length <= backplanCount)
-  .slice(0, backplanCount).map((item) => item.milestone);
-const resetMilestones = new Set(pickedMilestones.map((item) => item.id));
-const byProject = new Map<string, typeof pool.tasks>();
-for (const task of [...pool.tasks].filter((task) => !resetMilestones.has(task.order.milestoneId)).sort((a, b) => b.documents - a.documents))
-  byProject.set(task.order.projectId, [...(byProject.get(task.order.projectId) ?? []), task]);
-const pickedTasks: typeof pool.tasks = [];
-while (pickedTasks.length < stepCount && [...byProject.values()].some((list) => list.length))
-  for (const list of byProject.values()) { const next = list.shift(); if (next && pickedTasks.length < stepCount) pickedTasks.push(next); }
-const existingPlans = new Map(pickedTasks.map((task) => [task.order.id, probe.getStepPlan(workspaceId, task.order.id)]));
-const existingBackplans = new Map(pickedMilestones.map((milestone) => [milestone.id, probe.listWorkOrders(workspaceId)
-  .filter((order) => order.milestoneId === milestone.id && (order.payload as { backplan?: unknown } | undefined)?.backplan)
-  .map((order) => ({ title: taskTitleOf(order), state: order.state, p50: order.estimate.p50Minutes }))]));
+const known = new Set(probe.listWorkspaces().map((workspace) => workspace.id));
+const picks = workspaceIds.map((workspaceId) => {
+  if (!known.has(workspaceId)) { console.error(`no workspace ${workspaceId}`); process.exit(1); }
+  const pool = candidates(probe, workspaceId);
+  const milestones = [...pool.milestones].sort((a, b) => (a.deadline || "9999").localeCompare(b.deadline || "9999"))
+    .filter((item, index, list) => list.findIndex((other) => other.milestone.projectId === item.milestone.projectId) === index || list.length <= backplanCount)
+    .slice(0, backplanCount).map((item) => item.milestone);
+  const reset = new Set(milestones.map((item) => item.id));
+  const byProject = new Map<string, typeof pool.tasks>();
+  for (const task of [...pool.tasks].filter((task) => !reset.has(task.order.milestoneId)).sort((a, b) => b.documents - a.documents))
+    byProject.set(task.order.projectId, [...(byProject.get(task.order.projectId) ?? []), task]);
+  const tasks: Array<(typeof pool.tasks)[number]["order"]> = [];
+  while (tasks.length < stepCount && [...byProject.values()].some((list) => list.length))
+    for (const list of byProject.values()) { const next = list.shift(); if (next && tasks.length < stepCount) tasks.push(next.order); }
+  return { workspaceId, label: emails.has(workspaceId) ? masked(emails.get(workspaceId)!) : workspaceId, tasks, milestones,
+    existingPlans: new Map(tasks.map((order) => [order.id, probe.getStepPlan(workspaceId, order.id)])),
+    existingBackplans: new Map(milestones.map((milestone) => [milestone.id, probe.listWorkOrders(workspaceId)
+      .filter((order) => order.milestoneId === milestone.id && (order.payload as { backplan?: unknown } | undefined)?.backplan)
+      .map((order) => ({ title: taskTitleOf(order), p50: order.estimate.p50Minutes }))])) };
+});
 probe.close();
-console.info(JSON.stringify({ step: "picked", workspace: workspaceId, tasks: pickedTasks.length, milestones: pickedMilestones.length, models }));
+console.info(JSON.stringify({ step: "picked", accounts: picks.map((pick) => ({ workspace: pick.workspaceId, tasks: pick.tasks.length, milestones: pick.milestones.length })), models }));
 
 /** One copy per model; the picked milestones reset on it (their unstarted tasks and the record of the backplan removed). */
 async function copyFor(model: string): Promise<CrosslineStore> {
@@ -157,7 +164,7 @@ async function copyFor(model: string): Promise<CrosslineStore> {
   await source.backup(file);
   source.close();
   const db = new Database(file);
-  for (const milestone of pickedMilestones) {
+  for (const { workspaceId, milestones } of picks) for (const milestone of milestones) {
     const orders = (db.prepare("SELECT id, state, payload_json FROM work_orders WHERE workspace_id = ? AND milestone_id = ?").all(workspaceId, milestone.id) as
       Array<{ id: string; state: string; payload_json: string }>).filter((row) => UNSTARTED.has(row.state) && JSON.parse(row.payload_json || "{}").backplan
       && !db.prepare("SELECT 1 FROM executions WHERE workspace_id = ? AND work_order_id = ?").get(workspaceId, row.id));
@@ -192,7 +199,7 @@ const supervisor = await startCodexSupervisor({ port: 3393, sidecarFactory: () =
     requiredSkills: [`crossline:${STEP_SKILL}`, `crossline:${BACKPLAN_SKILL}`] } });
 
 type RunRecord = {
-  model: string; kind: "steps" | "backplan"; subject: string; title: string; ok: boolean; code?: string; message?: string;
+  model: string; workspace: string; kind: "steps" | "backplan"; subject: string; title: string; ok: boolean; code?: string; message?: string;
   seconds: number; modelSeconds: number; repairs: number; tokens: { input: number; cached: number; output: number; reasoning: number }; yuan: number;
   result: unknown;
 };
@@ -212,7 +219,7 @@ async function measured(model: string, work: () => Promise<{ ok: boolean; code?:
     repairs: usage.reduce((sum, row) => sum + row.repairs, 0), tokens, yuan: Math.round(yuan * 10_000) / 10_000 };
 }
 
-/** Everything one model does, in order: the tasks' steps, then the milestones' tasks. */
+/** Everything one model does, account by account: the tasks' steps, then the milestones' tasks. */
 async function compareOne(model: string): Promise<RunRecord[]> {
   const store = await copyFor(model);
   const records: RunRecord[] = [];
@@ -222,31 +229,34 @@ async function compareOne(model: string): Promise<RunRecord[]> {
     console.info(JSON.stringify({ step: "ran", model, kind: record.kind, subject: record.subject, ok: record.ok, code: record.code, seconds: record.seconds,
       modelSeconds: record.modelSeconds, repairs: record.repairs, yuan: record.yuan }));
   };
-  const planner = createStepPlanner(store, workspaceId!, repoRoot, () => supervisor.client);
-  for (const { order } of pickedTasks) {
-    let planned: Awaited<ReturnType<typeof planner>> | undefined;
-    const run = await measured(model, async () => { planned = await planner(order.id); return planned.state === "planned" ? { ok: true }
-      : { ok: false, code: planned.code, message: planned.message }; });
-    const plan = store.getStepPlan(workspaceId!, order.id);
-    keep({ model, kind: "steps", subject: order.id, title: taskTitleOf(order), ok: run.outcome.ok, ...(run.outcome.code ? { code: run.outcome.code } : {}),
-      ...("message" in run.outcome && run.outcome.message ? { message: run.outcome.message.slice(0, 300) } : {}),
-      seconds: run.seconds, modelSeconds: run.modelSeconds, repairs: run.repairs, tokens: run.tokens, yuan: run.yuan,
-      result: run.outcome.ok && plan ? { warnings: planned?.state === "planned" ? planned.warnings.map((warning) => warning.code) : [], ...planSummary(plan) } : null });
-  }
-  const backplanner = createGoalBackplanner(store, workspaceId!, repoRoot, () => supervisor.client, { rolling: true });
-  for (const milestone of pickedMilestones) {
-    const before = new Set(store.listWorkOrders(workspaceId!).map((order) => order.id));
-    let answer: { state: string; code?: string; message?: string } | undefined;
-    const run = await measured(model, async () => { answer = await backplanner(milestone.id) as typeof answer;
-      return answer?.state === "proposed" ? { ok: true } : { ok: false, code: answer?.code ?? "BACKPLAN_FAILED", message: answer?.message ?? "" }; });
-    const created = store.listWorkOrders(workspaceId!).filter((order) => !before.has(order.id));
-    const folded = store.listEvents(workspaceId!, { type: "task.duplicate_prevented" }).filter((event) => !before.has(event.entityId)).length;
-    keep({ model, kind: "backplan", subject: milestone.id, title: milestone.title, ok: run.outcome.ok, ...(run.outcome.code ? { code: run.outcome.code } : {}),
-      ...("message" in run.outcome && run.outcome.message ? { message: run.outcome.message.slice(0, 300) } : {}),
-      seconds: run.seconds, modelSeconds: run.modelSeconds, repairs: run.repairs, tokens: run.tokens, yuan: run.yuan,
-      result: { folded, tasks: created.map((order) => ({ title: taskTitleOf(order), p50: order.estimate.p50Minutes, p85: order.estimate.p85Minutes,
-        due: (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "", deliver: ((order.payload as { evidenceContract?: Array<{ description: string }> } | undefined)
-          ?.evidenceContract ?? []).map((item) => item.description).slice(0, 3) })) } });
+  for (const { workspaceId, tasks, milestones } of picks) {
+    const planner = createStepPlanner(store, workspaceId, repoRoot, () => supervisor.client);
+    for (const order of tasks) {
+      let planned: Awaited<ReturnType<typeof planner>> | undefined;
+      const run = await measured(model, async () => { planned = await planner(order.id); return planned.state === "planned" ? { ok: true }
+        : { ok: false, code: planned.code, message: planned.message }; });
+      const plan = store.getStepPlan(workspaceId, order.id);
+      keep({ model, workspace: workspaceId, kind: "steps", subject: order.id, title: taskTitleOf(order), ok: run.outcome.ok, ...(run.outcome.code ? { code: run.outcome.code } : {}),
+        ...("message" in run.outcome && run.outcome.message ? { message: run.outcome.message.slice(0, 300) } : {}),
+        seconds: run.seconds, modelSeconds: run.modelSeconds, repairs: run.repairs, tokens: run.tokens, yuan: run.yuan,
+        result: run.outcome.ok && plan ? { warnings: planned?.state === "planned" ? planned.warnings.map((warning) => warning.code) : [], ...planSummary(plan) } : null });
+    }
+    const backplanner = createGoalBackplanner(store, workspaceId, repoRoot, () => supervisor.client, { rolling: true });
+    for (const milestone of milestones) {
+      const before = new Set(store.listWorkOrders(workspaceId).map((order) => order.id));
+      const foldedBefore = store.listEvents(workspaceId, { type: "task.duplicate_prevented" }).length;
+      let answer: { state: string; code?: string; message?: string } | undefined;
+      const run = await measured(model, async () => { answer = await backplanner(milestone.id) as typeof answer;
+        return answer?.state === "proposed" ? { ok: true } : { ok: false, code: answer?.code ?? "BACKPLAN_FAILED", message: answer?.message ?? "" }; });
+      const created = store.listWorkOrders(workspaceId).filter((order) => !before.has(order.id));
+      const folded = store.listEvents(workspaceId, { type: "task.duplicate_prevented" }).length - foldedBefore;
+      keep({ model, workspace: workspaceId, kind: "backplan", subject: milestone.id, title: milestone.title, ok: run.outcome.ok, ...(run.outcome.code ? { code: run.outcome.code } : {}),
+        ...("message" in run.outcome && run.outcome.message ? { message: run.outcome.message.slice(0, 300) } : {}),
+        seconds: run.seconds, modelSeconds: run.modelSeconds, repairs: run.repairs, tokens: run.tokens, yuan: run.yuan,
+        result: { folded, tasks: created.map((order) => ({ title: taskTitleOf(order), p50: order.estimate.p50Minutes, p85: order.estimate.p85Minutes,
+          due: (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "", deliver: ((order.payload as { evidenceContract?: Array<{ description: string }> } | undefined)
+            ?.evidenceContract ?? []).map((item) => item.description).slice(0, 3) })) } });
+    }
   }
   store.close();
   return records;
@@ -269,14 +279,18 @@ await gateway.close();
 
 // ---- the report ----
 const lines: string[] = [`# 开发者模型对比：${models.join(" 对 ")}`, "",
-  `账号 ${masked(email)} 的账本副本，${pickedTasks.length} 个任务重新拆步骤，${pickedMilestones.length} 个里程碑重新倒推任务；用时 ${Math.round((Date.now() - started) / 60_000)} 分钟。`, "",
-  "| 模型 | 运行 | 成功 | 修复 | 模型用时中位/最长 | 每次费用 | 合计 |", "|---|---|---|---|---|---|---|"];
+  `账本副本上的 ${picks.map((pick) => `${pick.label}（${pick.tasks.length} 个任务重新拆步骤，${pick.milestones.length} 个里程碑重新倒推）`).join("、")}；`
+    + `用时 ${Math.round((Date.now() - started) / 60_000)} 分钟。`, "",
+  "| 模型 | 工作 | 运行 | 成功 | 修复 | 模型用时中位/最长 | 每次费用 | 每次成功费用 |", "|---|---|---|---|---|---|---|---|"];
 const median = (values: number[]) => { const sorted = [...values].sort((a, b) => a - b); return sorted.length ? sorted[Math.floor((sorted.length - 1) / 2)]! : 0; };
-for (const model of models) {
-  const own = results.filter((record) => record.model === model);
+for (const model of models) for (const kind of ["steps", "backplan"] as const) {
+  const own = results.filter((record) => record.model === model && record.kind === kind);
+  if (!own.length) continue;
   const total = own.reduce((sum, record) => sum + record.yuan, 0);
-  lines.push(`| ${model} | ${own.length} | ${own.filter((record) => record.ok).length} | ${own.reduce((sum, record) => sum + record.repairs, 0)} | `
-    + `${median(own.map((record) => record.modelSeconds))} s / ${Math.max(0, ...own.map((record) => record.modelSeconds))} s | ¥${own.length ? (total / own.length).toFixed(4) : "-"} | ¥${total.toFixed(3)} |`);
+  const ok = own.filter((record) => record.ok).length;
+  lines.push(`| ${model} | ${kind === "steps" ? "拆步骤" : "倒推任务"} | ${own.length} | ${ok} | ${own.reduce((sum, record) => sum + record.repairs, 0)} | `
+    + `${median(own.map((record) => record.modelSeconds))} s / ${Math.max(0, ...own.map((record) => record.modelSeconds))} s | ¥${(total / own.length).toFixed(4)} | `
+    + `${ok ? `¥${(total / ok).toFixed(4)}` : "-"} |`);
 }
 const describe = (record: RunRecord | undefined): string[] => {
   if (!record) return ["（没有运行）"];
@@ -293,17 +307,22 @@ const describe = (record: RunRecord | undefined): string[] => {
   return [head, `新任务 ${answer.tasks.length} 个，并入已有 ${answer.folded} 个`,
     ...answer.tasks.map((task, index) => `${index + 1}. ${task.title}（${task.p50}–${task.p85} 分${task.due ? `，截止 ${task.due}` : ""}）${task.deliver.length ? `；交付：${task.deliver.join("；")}` : ""}`)];
 };
-lines.push("", "## 拆步骤");
-for (const { order } of pickedTasks) {
-  const existing = existingPlans.get(order.id);
-  lines.push("", `### ${taskTitleOf(order)}`, "", `现有计划：${existing ? existing.steps.map((step) => step.title).join(" → ") : "无"}`);
-  for (const model of models) lines.push("", `**${model}**`, "", ...describe(results.find((record) => record.model === model && record.kind === "steps" && record.subject === order.id)).map((line) => `- ${line}`));
-}
-lines.push("", "## 倒推任务");
-for (const milestone of pickedMilestones) {
-  const existing = existingBackplans.get(milestone.id) ?? [];
-  lines.push("", `### ${milestone.title}`, "", `现有任务：${existing.map((task) => `${task.title}（${task.p50} 分）`).join("、") || "无"}`);
-  for (const model of models) lines.push("", `**${model}**`, "", ...describe(results.find((record) => record.model === model && record.kind === "backplan" && record.subject === milestone.id)).map((line) => `- ${line}`));
+const find = (model: string, workspace: string, kind: RunRecord["kind"], subject: string) =>
+  results.find((record) => record.model === model && record.workspace === workspace && record.kind === kind && record.subject === subject);
+for (const pick of picks) {
+  lines.push("", `## ${pick.label}`);
+  if (pick.tasks.length) lines.push("", "### 拆步骤");
+  for (const order of pick.tasks) {
+    const existing = pick.existingPlans.get(order.id);
+    lines.push("", `#### ${taskTitleOf(order)}`, "", `现有计划：${existing ? existing.steps.map((step) => step.title).join(" → ") : "无"}`);
+    for (const model of models) lines.push("", `**${model}**`, "", ...describe(find(model, pick.workspaceId, "steps", order.id)).map((line) => `- ${line}`));
+  }
+  if (pick.milestones.length) lines.push("", "### 倒推任务");
+  for (const milestone of pick.milestones) {
+    const existing = pick.existingBackplans.get(milestone.id) ?? [];
+    lines.push("", `#### ${milestone.title}`, "", `现有任务：${existing.map((task) => `${task.title}（${task.p50} 分）`).join("、") || "无"}`);
+    for (const model of models) lines.push("", `**${model}**`, "", ...describe(find(model, pick.workspaceId, "backplan", milestone.id)).map((line) => `- ${line}`));
+  }
 }
 writeFileSync(path.join(out, "report.md"), `${lines.join("\n")}\n`, "utf8");
 console.info(lines.join("\n"));
