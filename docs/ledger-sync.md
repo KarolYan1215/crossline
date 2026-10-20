@@ -19,6 +19,8 @@
 - 服务器 → 本机：服务器打包 → scp 下来 → 本机停两个 keeper 及其子进程和 3210/3211 上的进程（`taskkill /T`）、复制账本到 `backups/ledger-sync/`、导入、`start-crossline.ps1` 重启。
 - 定时：`scripts/install-ledger-sync.ps1` 注册计划任务「Crossline Ledger Sync」，每小时一次（`-IntervalMinutes` 可改），日志 `data\logs\ledger-sync.log`。
 - 第一次（2026-10-20）按本人要求强制 `--direction to-server`：服务器上本人账号里当时是 10-18 走查用的虚构访谈，本人动作时间反而比本机的真实账本新，`auto` 会选错方向。
+- **2026-10-20 的事故与修正。** 引入本功能的提交正文里写了带方括号的迁移标签原文，`server.yml` 按 `contains(message, …)` 匹配，于是那次推送直接执行了写入：旧版 `migrate-workspace.ts` 先在事务外清空目标再导入，导入在 `model_usage.id`（AUTOINCREMENT，全库唯一）上撞主键失败，服务器上本人账号被留空（被清掉的是虚构访谈，备份在 `/srv/crossline/backups/crossline.db*.20261020-102800`）。修正：清空与导入在同一事务里（`atomically` + `resetWorkspace` + `importSnapshot`，失败整体回滚，已在服务器上实际验证过一次回滚）；AUTOINCREMENT 表的 id 交给目标重编；目标自己的 `model_usage`（赞助额度按它计）保留、源的不导入；要保留的设置在导入前取出、导入后写回（`importSnapshot` 拒绝仍有行的表）；写入失败时保留上传包以便重试；Windows 上打包与解包固定用系统自带的 `tar.exe`（Git Bash 的 GNU tar 把 `C:` 当远程主机）。随后本机账本完整写入服务器（202 条事实、89 个任务、136 个里程碑、110 份文件，两边本人最后动作时间一致），计划任务「Crossline Ledger Sync」已注册。
+- **提交信息里不要写方括号形式的服务器动作标签原文**（迁移、部署、体检……），除非就是要触发它：工作流在整条提交信息里找，正文也算。
 
 ## 时间戳脚本
 

@@ -146,9 +146,16 @@ if (apply) {
   raw.close();
   // Clearing and importing are one transaction: the first real write cleared the target, failed in the import and left the account
   // empty. `resetWorkspace` is the app's own 「清空数据重新开始」 — it keeps the membership, the model spend and the kept settings.
+  // importSnapshot refuses a table that still holds rows of the workspace, so the kept settings are taken out and put back after it,
+  // and the model spend is the target's own (it is what a sponsored account's monthly budget is counted from): the source's is not
+  // imported and the target's stays.
+  const keptRows = keptSettings.map((key) => ({ key, value: target.getSetting(toWorkspace, key) })).filter((row): row is { key: string; value: string } => row.value !== undefined);
+  const { model_usage: _sourceSpend, ...imported } = tables;
   const result = target.atomically(() => {
-    target.resetWorkspace(toWorkspace, { settingPrefixes: keepSettings, eventTypePrefixes: [] });
-    return target.importSnapshot({ ...snapshot, workspaceId: toWorkspace, tables });
+    target.resetWorkspace(toWorkspace, { settingPrefixes: [], eventTypePrefixes: [] });
+    const counts = target.importSnapshot({ ...snapshot, workspaceId: toWorkspace, tables: imported });
+    for (const row of keptRows) target.setSetting(toWorkspace, row.key, row.value);
+    return counts;
   });
   target.close();
   for (const [from, to] of folders) cpSync(from, to, { recursive: true, force: false, errorOnExist: false });
