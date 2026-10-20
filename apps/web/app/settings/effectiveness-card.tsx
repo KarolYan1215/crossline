@@ -1,4 +1,4 @@
-import type { Effectiveness } from "@crossline/core";
+import { ATTENTION_TARGET_MINUTES, type AttentionSummary, type Effectiveness } from "@crossline/core";
 import { Bullet, Ring, Sparkline, StackedBar } from "../ui/charts";
 import { Tag } from "../ui/tag";
 
@@ -10,7 +10,7 @@ const h = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
  * deadline work, the cost of running the system, and how much committed work gets the treatments the evidence supports. All from the
  * ledger; nothing here is a model's judgement.
  */
-export function EffectivenessCard({ data, labels }: { data: Effectiveness & { decisionMinutesMeasured: false }; labels: Record<string, string> }) {
+export function EffectivenessCard({ data, labels }: { data: Effectiveness & { decisionMinutesMeasured: false; setup?: AttentionSummary }; labels: Record<string, string> }) {
   const lines = Object.entries(data.priorities.minutesByLine).sort((a, b) => b[1] - a[1]);
   const coverage = data.estimates.coverageCalibrated ?? data.estimates.coverageRaw;
   return <div className="st-health">
@@ -44,6 +44,13 @@ export function EffectivenessCard({ data, labels }: { data: Effectiveness & { de
       <div className="ui-stat"><b>{data.overhead.pendingNow}</b><span>当前待决</span></div>
       <div className="ui-stat"><b>{data.overhead.medianCaptureToScheduled === null ? "—" : `${data.overhead.medianCaptureToScheduled} 分`}</b><span>收集到排入（中位）</span></div>
     </div>
+    {data.setup && <div className="st-health-cell">
+      <div className="ui-stat"><b>{data.setup.ready ? `${data.setup.ready.minutes} 分` : "—"}</b><span>访谈到可开始</span></div>
+      <div className="ui-stat"><b>{data.setup.complete ? `${data.setup.complete.minutes} 分` : "—"}</b><span>访谈到完整</span></div>
+      <div><b>访谈用时 {data.setup.minutes} 分</b><small>只计页面在前台且一分钟内有操作的时间；目标：可开始 ≤{ATTENTION_TARGET_MINUTES.ready} 分、完整 ≤{ATTENTION_TARGET_MINUTES.complete} 分
+        {data.setup.ready ? `；第 ${data.setup.ready.rounds} 轮可开始` : ""}{data.setup.complete ? `，第 ${data.setup.complete.rounds} 轮完整` : ""}</small>
+        {[data.setup.ready, data.setup.complete].some((mark) => mark && !mark.withinTarget) && <Tag tone="risk">超出目标</Tag>}</div>
+    </div>}
     <div className="st-health-cell">
       {data.relations.rate === null ? <div className="ui-stat"><b>—</b></div> : <Ring label="跨线关系兑现率" value={data.relations.rate} />}
       <div><b>跨线关系兑现率</b><small>{data.relations.checked ? `${data.relations.checked} 条飞轮关系已到核对日，部分兑现按一半计` : "尚无到核对日的飞轮关系"}</small>

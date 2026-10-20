@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { addAttentionBeat } from "./onboarding-attention";
+import { addAttentionBeat, attentionSummary } from "./onboarding-attention";
 
 const at = (s: number) => new Date(Date.UTC(2026, 9, 12, 10, 0, s)).toISOString();
 test("只计可见且 60 秒内有操作的时间；两次心跳间隔超过 20 秒只记 20 秒；达标时刻只记一次", () => {
@@ -21,4 +21,12 @@ test("完整设置的时刻同样只记一次；时钟倒退的心跳不加秒�
   record = addAttentionBeat(record, { at: at(5), inputAgoMs: 0, rounds: 6, ready: true, complete: true });
   expect(record.seconds).toBe(0);
   expect(record.complete?.rounds).toBe(5);
+});
+
+test("系统体检读的是分钟和是否在目标内：开始标准 30 分钟、完整 90 分钟；还没记录时为空", () => {
+  expect(attentionSummary(undefined)).toBeUndefined();
+  expect(attentionSummary({ seconds: 2_520, lastBeatAt: at(0), ready: { seconds: 1_500, rounds: 4, at: at(0) } }))
+    .toEqual({ minutes: 42, ready: { minutes: 25, rounds: 4, withinTarget: true } });
+  expect(attentionSummary({ seconds: 6_000, lastBeatAt: at(0), ready: { seconds: 2_400, rounds: 7, at: at(0) }, complete: { seconds: 6_000, rounds: 12, at: at(0) } }))
+    .toMatchObject({ ready: { withinTarget: false }, complete: { minutes: 100, withinTarget: false } });
 });

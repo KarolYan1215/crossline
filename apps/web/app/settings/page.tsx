@@ -14,7 +14,7 @@ import { PasswordCard } from "./password-card";
 import { DeleteAccountCard } from "./delete-account-card";
 import { deletionRefused } from "../../lib/account-deletion";
 import { EnergyCard, type EnergyStatus } from "./energy-card";
-import { HEALTH_TOKEN_SETTING, energyModel } from "../../lib/energy";
+import { HEALTH_TOKEN_SETTING, energyModel, phoneDailyLatest, phoneHealthOn } from "../../lib/energy";
 import { UsageCard } from "./usage-card";
 import { QuotaCard } from "./quota-card";
 import { readQuota } from "../../lib/quota";
@@ -95,13 +95,15 @@ export default async function SettingsPage() {
   const energy = timedSync("settings.energy", () => energyModel(ctx, readAvailability(ctx)));
   const fortnight = new Date(Date.now() - 14 * 86_400_000).toISOString();
   const recentNights = energy.episodes.filter((episode) => episode.wakeAt >= fortnight);
+  const phoneDaily = phoneDailyLatest(ctx.workspaceId);
   const energyStatus: EnergyStatus = { now: energy.predict(new Date().toISOString()),
     nights: { screen: recentNights.filter((episode) => episode.source === "screen").length, phone: recentNights.filter((episode) => episode.source !== "screen").length },
     reports: energy.calibration.reports, agreement: energy.calibration.agreement, phoneConnected: Boolean(store.getSetting(ctx.workspaceId, HEALTH_TOKEN_SETTING)),
     sleepTracking: store.getSetting(ctx.workspaceId, SLEEP_TRACKING_CONSENT) === "granted",
     inputRhythm: store.getSetting(ctx.workspaceId, "activity.inputRhythm") === "granted",
     camera: store.getSetting(ctx.workspaceId, "energy.camera") === "granted",
-    signals: energy.covariates.map(({ id, label, evaluated, hitsWith, hitsWithout, enabled }) => ({ id, label, evaluated, hitsWith, hitsWithout, enabled })) };
+    phoneHealth: phoneHealthOn(ctx.workspaceId), ...(phoneDaily ? { phoneDaily } : {}),
+    signals: energy.covariates.map(({ id, label, use, evaluated, hitsWith, hitsWithout, enabled }) => ({ id, label, use, evaluated, hitsWith, hitsWithout, enabled })) };
 
   // This computer's own readings (folders, screen, idle stretches, coding agents' logs) are the machine owner's only.
   const machine = assistantAvailable(store, ctx.workspaceId);

@@ -51,6 +51,21 @@ describe("review page", () => {
     expect(html).toContain("撤销验收");
   });
 
+  test("lists how tiring each finished task was by the person's own word, beside the energy it was planned to need", async () => {
+    const store = seed();
+    store.saveWorkOrder({ ...store.listWorkOrders(WORKSPACE).find((order) => order.id === "w2")!, payload: { humanCore: [{ energy: "low" }] } });
+    const observed = (key: string, workOrderId: string, actualLoad: string) => store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: WORKSPACE,
+      idempotencyKey: key, type: "energy.observed", entityId: key, payload: { source: "self_report", level: "low", confidence: "high", context: "after_task", workOrderId, actualLoad } });
+    observed("e1", "w2", "medium");
+    observed("e2", "w2", "high");
+    const { default: ReviewPage } = await import("./page");
+    const html = renderToStaticMarkup(await ReviewPage());
+    expect(html).toContain("本周做完后的累不累");
+    expect(html).toContain("本人说：高 · 原估精力需求：低");
+    expect(html).toContain("比预想累");
+    expect(html).not.toContain("本人说：中");
+  });
+
   test("says plainly when a section has nothing, instead of inventing content", async () => {
     seed();
     const { default: ReviewPage } = await import("./page");
@@ -58,5 +73,6 @@ describe("review page", () => {
     expect(html).toContain("本周没有自动验收记录");
     expect(html).toContain("本周无扩展记录");
     expect(html).toContain("暂无待判断的问题");
+    expect(html).not.toContain("本周做完后的累不累");
   });
 });

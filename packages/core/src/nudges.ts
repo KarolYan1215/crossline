@@ -66,7 +66,8 @@ export type NudgeSlack = { orderId: string; title: string; dueDay: string; remai
 
 export type NudgeInput = {
   now: string; today: string; clock: string; tomorrow: string; level: NotifyLevelName;
-  quiet: { timerRunning: boolean; inMeeting: boolean; answeredRecently: boolean };
+  /** `focused`: the screen record reads the person as focused on work now (`inferWorkState`, with its consent only). */
+  quiet: { timerRunning: boolean; inMeeting: boolean; answeredRecently: boolean; focused?: boolean };
   /** Before 08:00 or after 23:00 (the person's clock): only what follows their own activity — a block they are about to start, a timer they left running. */
   night?: boolean;
   muted: Set<NudgeKind>; sent: Set<string>; countedToday: number;
@@ -188,12 +189,12 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
 
 /**
  * What is said now: nothing at the 「关闭」 level; nothing already said; no muted kind; at night only what follows their own activity; while the person is busy (the timer runs, a
- * meeting is on, they answered something under twenty minutes ago) only the urgent; and no more counted ones than the day's cap has
- * left, urgent first.
+ * meeting is on, they answered something under twenty minutes ago, the screen record reads them as focused) only the urgent; and no more
+ * counted ones than the day's cap has left, urgent first.
  */
 export function planNudges(input: NudgeInput): PlannedNudge[] {
   if (input.level === "off") return [];
-  const busy = input.quiet.timerRunning || input.quiet.inMeeting || input.quiet.answeredRecently;
+  const busy = input.quiet.timerRunning || input.quiet.inMeeting || input.quiet.answeredRecently || Boolean(input.quiet.focused);
   const candidates = nudgeCandidates(input).filter((item) => !input.sent.has(item.fingerprint) && !input.muted.has(item.kind) && (item.urgent || !busy)
     && (!input.night || item.kind === "block_start" || item.kind === "timer_overrun"))
     .sort((a, b) => Number(b.urgent) - Number(a.urgent));

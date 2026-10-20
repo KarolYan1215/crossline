@@ -1,5 +1,5 @@
 import "server-only";
-import { answeredOnTime, computeEffectiveness, type AccessContext, type Effectiveness } from "@crossline/core";
+import { ATTENTION_SETTING, answeredOnTime, attentionSummary, computeEffectiveness, type AccessContext, type AttentionRecord, type AttentionSummary, type Effectiveness } from "@crossline/core";
 import { relationChecks } from "@crossline/db";
 import { getStore, loadCurrentPlan, loadGoalForecast, planToday, resolvedEstimate, workspaceCalibration } from "./crossline";
 import { countPending } from "./pending";
@@ -13,7 +13,7 @@ const ACTIONABLE = new Set(["approved", "preparing", "ready_for_human", "active"
  * calibration's own rolling backtest (each finished task predicted only from the ones before it), not an
  * in-sample fit, so the calibrated figure is not flattered by having seen the answer.
  */
-export async function loadEffectiveness(ctx: AccessContext, now = new Date()): Promise<Effectiveness & { decisionMinutesMeasured: false }> {
+export async function loadEffectiveness(ctx: AccessContext, now = new Date()): Promise<Effectiveness & { decisionMinutesMeasured: false; setup?: AttentionSummary }> {
   const store = getStore();
   const today = planToday(ctx, now);
   const weekAgo = new Date(now.getTime() - 7 * DAY).toISOString();
@@ -93,7 +93,11 @@ export async function loadEffectiveness(ctx: AccessContext, now = new Date()): P
     result.estimates = { ...result.estimates, maeRaw: round(backtest.maeRaw), maeCalibrated: round(backtest.maeCalibrated),
       coverageRaw: round(backtest.coverageRaw), coverageCalibrated: round(backtest.coverageCalibrated) };
   }
-  return { ...result, decisionMinutesMeasured: false };
+  // The interview's attention time against its targets (`onboarding.attention`, written by the interview page's beats).
+  let attention: AttentionRecord | undefined;
+  try { attention = JSON.parse(store.getSetting(ctx.workspaceId, ATTENTION_SETTING) ?? "null") ?? undefined; } catch { attention = undefined; }
+  const setup = attentionSummary(attention);
+  return { ...result, decisionMinutesMeasured: false, ...(setup ? { setup } : {}) };
 }
 
 const round = (value: number | null) => value === null ? null : Math.round(value * 100) / 100;

@@ -1,6 +1,6 @@
 import {
-  ACTIVITY_LONG_GAPS, ENERGY_ADVICE_PERIOD_DAYS, ENERGY_ADVICE_REVIEW_SCHEMA, ENERGY_ADVICE_SETTING, SLEEP_TRACKING_CONSENT, adviceId, adviceProfiles, energyAdviceRule,
-  mergeSleep, readEnergyAdvice, resolveAvailability, sleepFromGaps, sleepFromPhoneEvents, spendAllows, validateEnergyAdviceReview, withAdjustments, workedRhythm, zoneClock,
+  ACTIVITY_LONG_GAPS, ENERGY_ADVICE_PERIOD_DAYS, ENERGY_ADVICE_REVIEW_SCHEMA, ENERGY_ADVICE_SETTING, PHONE_HEALTH_CONSENT, SLEEP_TRACKING_CONSENT, adviceId, adviceProfiles, energyAdviceRule,
+  mergeSleep, phoneHealthGranted, readEnergyAdvice, resolveAvailability, sleepFromGaps, sleepFromPhoneEvents, spendAllows, validateEnergyAdviceReview, withAdjustments, workedRhythm, zoneClock,
   type BackgroundKind, type BackgroundSpend, type EnergyAdvice, type EnergyAdviceReview, type EnergyAdviceReviewRecord, type EnergyLevel, type PhoneSleepEvent, type SleepEpisode
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
@@ -24,7 +24,9 @@ const INSTRUCTIONS = "Review the rule-made energy advice against published resea
 export function sleepFor(store: CrosslineStore, workspaceId: string, hourOf: (iso: string) => number): SleepEpisode[] {
   const read = <T>(key: string, fallback: T): T => { try { const raw = store.getSetting(workspaceId, key); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } };
   const screen = store.getSetting(workspaceId, SLEEP_TRACKING_CONSENT) === "granted" ? sleepFromGaps(read(ACTIVITY_LONG_GAPS, [] as Array<{ from: string; to: string }>), hourOf) : [];
-  return mergeSleep(screen, [...read("health.sleep", [] as SleepEpisode[]), ...sleepFromPhoneEvents(read("health.events", [] as PhoneSleepEvent[]))]);
+  // 手机健康数据 is its own consent (the web's `phoneHealthOn`): off, the phone's record is not read even if some is left.
+  const phone = phoneHealthGranted(store.getSetting(workspaceId, PHONE_HEALTH_CONSENT), Boolean(store.getSetting(workspaceId, "health.token.sha256")));
+  return mergeSleep(screen, phone ? [...read("health.sleep", [] as SleepEpisode[]), ...sleepFromPhoneEvents(read("health.events", [] as PhoneSleepEvent[]))] : []);
 }
 
 const zoneOf = (store: CrosslineStore, workspaceId: string): string => {

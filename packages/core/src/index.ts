@@ -34,7 +34,6 @@ export * from "./replay";
 export * from "./weekly-insight-schema";
 export * from "./structured-output";
 export * from "./text-hygiene";
-export * from "./rhythm";
 export * from "./backplan-schema";
 export * from "./external-action";
 export * from "./settings-keys";

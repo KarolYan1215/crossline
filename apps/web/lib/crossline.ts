@@ -57,7 +57,7 @@ export function planToday(ctx?: AccessContext,
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
-import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEfficiency, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
+import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEfficiency, type EfficiencySample, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
 import { statedShares } from "./plan-stats";
 import { completionRule, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
@@ -816,18 +816,42 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
 
 /**
  * The person's own yield in slots short of the work's energy, from the blocks they confirmed (`block.confirmed` carries the block's
- * energy since 2026-10-14), or undefined while the assumed 0.8 and 0.65 predict as well.
+ * energy since 2026-10-14), or undefined while the assumed 0.8 and 0.65 predict as well. Blocks that produced nothing go in as
+ * `done: false` — answered 「未执行」, or seen under way on a past day (`nudge.blocks:<day>`) with no timer that day and no answer — and
+ * `learnedEfficiency` counts them only when its backtest favours that (2026-10-20).
  */
-function personalEfficiency(ctx: AccessContext): [number, number] | undefined {
-  type Confirmed = { outcome?: string; minutes?: number; blockMinutes?: number;
-    energy?: { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number } };
-  return learnedEfficiency(getStore().listEvents(ctx.workspaceId, { type: "block.confirmed" }).flatMap((event) => {
+export function personalEfficiency(ctx: AccessContext, now = new Date()): [number, number] | undefined {
+  type Energy = { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number };
+  type Confirmed = { blockId?: string; day?: string; outcome?: string; minutes?: number; blockMinutes?: number; energy?: Energy };
+  const store = getStore();
+  const confirmed = store.listEvents(ctx.workspaceId, { type: "block.confirmed" });
+  const samples: EfficiencySample[] = confirmed.flatMap((event) => {
     const payload = event.payload as Confirmed;
-    return payload.energy && payload.minutes && payload.blockMinutes && payload.outcome !== "not_done"
-      ? [{ at: event.createdAt, slot: payload.energy.slot, need: payload.energy.need, planned: payload.energy.efficiency,
-        blockMinutes: payload.blockMinutes, minutes: payload.minutes }] : [];
-  }));
+    if (!payload.energy || !payload.blockMinutes) return [];
+    const base = { at: event.createdAt, slot: payload.energy.slot, need: payload.energy.need, planned: payload.energy.efficiency, blockMinutes: payload.blockMinutes };
+    if (payload.outcome === "not_done") return [{ ...base, minutes: 0, done: false }];
+    return payload.minutes ? [{ ...base, minutes: payload.minutes }] : [];
+  });
+  const answered = new Set(confirmed.map((event) => { const payload = event.payload as Confirmed; return `${payload.blockId}|${payload.day}`; }));
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const startedOn = new Set(store.listExecutions(ctx.workspaceId).map((execution) => `${execution.workOrderId}|${formatInTimeZone(new Date(execution.startedAt), zone, "yyyy-MM-dd")}`));
+  const today = planToday(ctx, now);
+  for (let back = 1; back <= MISSED_LOOKBACK_DAYS; back += 1) {
+    const day = new Date(Date.parse(`${today}T12:00:00Z`) - back * 86_400_000).toISOString().slice(0, 10);
+    let seen: Record<string, { id: string; orderId: string; start: string; end: string; began?: boolean; energy?: Energy }> = {};
+    try { seen = JSON.parse(store.getSetting(ctx.workspaceId, `nudge.blocks:${day}`) ?? "{}"); } catch { continue; }
+    for (const block of Object.values(seen)) {
+      if (!block.began || !block.energy || answered.has(`${block.id}|${day}`) || startedOn.has(`${block.orderId}|${day}`)) continue;
+      const [sh, sm] = block.start.split(":").map(Number), [eh, em] = block.end.split(":").map(Number);
+      const blockMinutes = ((eh ?? 0) * 60 + (em ?? 0)) - ((sh ?? 0) * 60 + (sm ?? 0));
+      if (blockMinutes > 0) samples.push({ at: toZonedInstant(day, block.end, zone), slot: block.energy.slot, need: block.energy.need,
+        planned: block.energy.efficiency, blockMinutes, minutes: 0, done: false });
+    }
+  }
+  return learnedEfficiency(samples);
 }
+/** How far back the blocks seen under way are read for ones that went by unused. */
+const MISSED_LOOKBACK_DAYS = 28;
 
 /**
  * Everything the scheduler is given for the person's week, built once: the planner input itself plus the pieces `scheduledBlocks`
@@ -899,7 +923,7 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
   const frozen = settleFrozen(readFrozen(ctx, now).filter((item) => expanded.some((entry) => entry.task.id === plannerIdOfBlock(item.blockId))),
     busyInstants, (blockId) => releaseAt.get(plannerIdOfBlock(blockId))).kept;
   const pinned = frozen.map((item) => ({ taskId: plannerIdOfBlock(item.blockId), start: item.start, end: item.end }));
-  const efficiency = personalEfficiency(ctx);
+  const efficiency = personalEfficiency(ctx, now);
   const input: PlanningInput = {
     now,
     horizonDays: days.length,

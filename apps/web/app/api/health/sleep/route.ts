@@ -1,5 +1,5 @@
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
-import { storeHealthSummary, workspaceForHealthToken } from "../../../../lib/energy";
+import { phoneHealthOn, storeHealthSummary, workspaceForHealthToken } from "../../../../lib/energy";
 
 const MAX_BYTES = 64_000;
 
@@ -13,6 +13,8 @@ export async function POST(request: Request) {
   const token = /^Bearer\s+([A-Za-z0-9_-]{20,100})$/.exec(request.headers.get("authorization") ?? "")?.[1];
   const workspaceId = token ? workspaceForHealthToken(token) : undefined;
   if (!workspaceId) return Response.json({ ok: false, code: "HEALTH_TOKEN_INVALID" }, { status: 401 });
+  // 手机健康数据 switched off: nothing is kept, whatever the shortcut sends.
+  if (!phoneHealthOn(workspaceId)) return Response.json({ ok: false, code: "HEALTH_NOT_ENABLED" }, { status: 403 });
   const text = await request.text();
   if (text.length > MAX_BYTES) return Response.json({ ok: false, code: "HEALTH_BODY_TOO_LARGE" }, { status: 413 });
   let body: Record<string, unknown>;

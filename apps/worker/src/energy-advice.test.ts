@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { ENERGY_ADVICE_SETTING, readEnergyAdvice } from "@crossline/core";
-import { ENERGY_ADVISOR, computeEnergyAdvice, energyAdviceDue, energyAdvicePass } from "./energy-advice";
+import { ENERGY_ADVISOR, computeEnergyAdvice, energyAdviceDue, energyAdvicePass, sleepFor } from "./energy-advice";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 let store: CrosslineStore;
@@ -69,4 +69,14 @@ test("the pass does nothing while paused or the person is away, and skips only t
   await energyAdvicePass({ ...base, paused: () => false, spend: async () => ({ mode: "economy", engagement: "active" }) as never });
   const advice = readEnergyAdvice(store.getSetting(workspaceId, ENERGY_ADVICE_SETTING));
   expect(advice && !("insufficient" in advice) && advice.review).toMatchObject({ state: "skipped", summary: "额度偏紧，本周未做联网复核" });
+});
+
+test("the phone's record is read only while 手机健康数据 is on (or a token from before the switch is there)", () => {
+  store.setSetting(workspaceId, "health.sleep", JSON.stringify([{ sleepAt: "2026-10-14T04:00:00.000Z", wakeAt: "2026-10-14T12:00:00.000Z", source: "ios-health" }]));
+  const hour = (iso: string) => new Date(iso).getUTCHours();
+  expect(sleepFor(store, workspaceId, hour)).toEqual([]);
+  store.setSetting(workspaceId, "health.token.sha256", "0".repeat(64));
+  expect(sleepFor(store, workspaceId, hour)).toHaveLength(1);
+  store.setSetting(workspaceId, "health.phone", "denied");
+  expect(sleepFor(store, workspaceId, hour)).toEqual([]);
 });

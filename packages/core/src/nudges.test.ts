@@ -59,6 +59,9 @@ test("busy, muted, capped: only the urgent get through while busy, a muted kind 
   const finished = [{ key: "agent:a", text: "助手做完了「索引」", label: "去审阅", href: "/approvals#assistant" }];
   expect(planNudges(base({ blocks: [], finished, quiet: { timerRunning: false, inMeeting: true, answeredRecently: false } }))).toEqual([]);
   expect(planNudges(base({ blocks: [], finished }))).toHaveLength(1);
+  // Focused on work by the screen record: the finished-work note waits; a block about to start (urgent) still comes through.
+  expect(planNudges(base({ blocks: [], finished, quiet: { timerRunning: false, inMeeting: false, answeredRecently: false, focused: true } }))).toEqual([]);
+  expect(planNudges(base({ quiet: { timerRunning: false, inMeeting: false, answeredRecently: false, focused: true } }))).toHaveLength(1);
   expect(planNudges(base({ muted: new Set(["block_start"]) }))).toEqual([]);
   expect(planNudges(base({ blocks: [], finished, countedToday: 6 }))).toEqual([]);
   // The block's start is not counted: it is said even with the cap reached.
