@@ -126,3 +126,17 @@ test("with no report yet, a complete interview makes the first one due; an unfin
   store.saveOnboardingSession({ id: "s1", ownerId: "o", workspaceId, state: "complete", coverage: {}, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString() });
   expect(portraitRewriteDue(store, workspaceId, NOW)).toBe("first");
 });
+
+test("the portrait reads the files the person uploaded about themselves, not the files read from an authorized folder", async () => {
+  const owner = store.getWorkspaceOwnerId(workspaceId)!;
+  const doc = (id: string, fileName: string, text: string) => store.saveSourceDocument({ id, ownerId: owner, workspaceId, kind: "text", fileName,
+    mediaType: "text/markdown", sha256: id, uri: `file:///x/${id}`, extractedText: text, extractionStatus: "done", createdAt: "2026-10-19T00:00:00Z" });
+  doc("lecture", "Entrepreneurship.pdf", "下载的讲义正文");
+  doc("profile", "personal-profile.md", "本人自述");
+  store.setSetting(workspaceId, "sources.folders", JSON.stringify([{ id: "f1", path: "C:\Users\me\Downloads" }]));
+  store.setSetting(workspaceId, "sources.folder.index:f1", JSON.stringify({ "Entrepreneurship.pdf": { documentId: "lecture" } }));
+  const runtime = fakeRuntime([JSON.stringify(report())], PORTRAIT_WRITER);
+  await createPortraitWriter(store, workspaceId, "C:\repo", () => runtime.rpc)();
+  expect(runtime.prompts()[0]).toContain("本人自述");
+  expect(runtime.prompts()[0]).not.toContain("下载的讲义正文");
+});

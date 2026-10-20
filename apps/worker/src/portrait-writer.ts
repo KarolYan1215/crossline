@@ -1,3 +1,4 @@
+import { folderDocuments } from "./source-folders";
 import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { sayDoFor, type CrosslineStore } from "@crossline/db";
@@ -102,9 +103,12 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
       .filter((text) => { budget -= text.length; return budget > 0; }).reverse();
     const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.slot.startsWith("flywheel_")).slice(0, 120)
       .map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status }));
-    // What the person handed over about themselves (a profile, a CV, notes) — files not filed under any one project — read as well.
+    // What the person handed over about themselves (a profile, a CV, notes) — files they uploaded themselves and filed under no project —
+    // read as well. Files read from an authorized folder are left out: on the owner's ledger the unfiled set was sixty files, downloaded
+    // lecture notes among them, and the first two filled the whole budget (docs/onboarding-prompts.md).
     let room = 24_000;
-    const documents = store.listSourceDocuments(workspaceId).filter((doc) => !doc.projectId && doc.extractionStatus === "done" && doc.extractedText.trim())
+    const fromFolders = folderDocuments(store, workspaceId);
+    const documents = store.listSourceDocuments(workspaceId).filter((doc) => !doc.projectId && !fromFolders.has(doc.id) && doc.extractionStatus === "done" && doc.extractedText.trim())
       .map((doc) => { const text = doc.extractedText.slice(0, Math.max(0, Math.min(12_000, room))); room -= text.length; return { fileName: doc.fileName, text }; })
       .filter((doc) => doc.text);
     // How the person actually spends their working hours with coding agents (time only, when they allowed it): evidence of habit, not a plan.

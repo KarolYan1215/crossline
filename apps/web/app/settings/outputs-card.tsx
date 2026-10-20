@@ -20,7 +20,7 @@ export function OutputsCard() {
       .catch(() => setFolder({ lines: [], files: 0, bytes: 0 }));
   }, []);
   return <section className="st-card outputs-card" aria-label="助手产出">
-    <header><h3>助手产出</h3><small>助手每次做完交出的文件都放在这里，按主线和任务分开；不改动你上传的原文件</small></header>
+    <header><h3>助手产出</h3><small>助手每次做完交出的文件都放在这里，按主线和任务分开；不改动本人上传的原文件</small></header>
     {!folder ? <p className="muted">读取中…</p>
       : !folder.files ? <p className="muted">还没有产出。交给助手的任务、准备步骤和自动化做完后，文件会出现在这里。</p>
       : <>
