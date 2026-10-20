@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
@@ -31,7 +32,7 @@ test("a mistaken upload is taken back: its row, its stored copy and the question
   const doc = saved.documents[0]!;
   store.setSourceDocumentExtraction(ws, doc.id, { status: "done", text: "随手一行" });
   expect(unfiledFiles(TEST_CTX, "2026-10-17").map((file) => file.id)).toContain(doc.id);
-  const file = new URL(doc.uri).pathname;
+  const file = fileURLToPath(doc.uri);
   expect(existsSync(file)).toBe(true);
 
   expect(removeUploadedSource(TEST_CTX, doc.id)).toEqual({ ok: true, fileName: "t.md" });
@@ -48,7 +49,7 @@ test("the same content another workspace uploaded keeps its copy; a folder's fil
   const theirs = saveSourceFiles(other, [{ fileName: "b.txt", mediaType: "text/plain", buffer: Buffer.from("同一份") }]);
   if (!mine.ok || !theirs.ok) throw new Error("not saved");
   expect(removeUploadedSource(TEST_CTX, mine.documents[0]!.id)).toMatchObject({ ok: true });
-  expect(existsSync(new URL(theirs.documents[0]!.uri).pathname)).toBe(true);
+  expect(existsSync(fileURLToPath(theirs.documents[0]!.uri))).toBe(true);
   expect(removeUploadedSource(TEST_CTX, theirs.documents[0]!.id)).toEqual({ ok: false, code: "SOURCE_NOT_FOUND" });
 
   const kept = saveSourceFiles(TEST_CTX, [{ fileName: "c.txt", mediaType: "text/plain", buffer: Buffer.from("文件夹里的") }]);
