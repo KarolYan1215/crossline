@@ -58,6 +58,7 @@ export function resetAccountData(ctx: AccessContext, session: { email: string },
   }
   for (const id of reset.workOrderIds) if (removeInside(root, path.join(root, "materials", id))) files += 1;
   removeInside(root, path.join(root, "portrait", safe(ctx.workspaceId)));
+  removeInside(root, path.join(root, "mail-drafts", safe(ctx.workspaceId)));
   console.info(JSON.stringify({ type: "account.reset", workspaceId: ctx.workspaceId, rows: reset.rows, files }));
   return { ok: true, rows: reset.rows, files };
 }
@@ -87,6 +88,7 @@ export async function deleteAccount(ctx: AccessContext, session: { userId: strin
   }
   for (const id of purged.workOrderIds) if (removeInside(root, path.join(root, "materials", id))) files += 1;
   removeInside(root, path.join(root, "portrait", safe(ctx.workspaceId)));
+  removeInside(root, path.join(root, "mail-drafts", safe(ctx.workspaceId)));
   removeInside(root, path.join(root, "secrets", safe(ctx.workspaceId).slice(0, 80)));
 
   const auth = getAuth();

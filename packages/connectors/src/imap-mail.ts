@@ -11,7 +11,11 @@ import { simpleParser } from "mailparser";
  * as such rather than failing at login.
  */
 export type MailServer = { host: string; port: number; secure: boolean };
-export type MailHeader = { uid: number; from: string; fromAddress: string; to: string; subject: string; date: string; snippet: string };
+export type MailHeader = { uid: number; from: string; fromAddress: string; to: string; subject: string; date: string; snippet: string;
+  /** The message's own Message-ID and the one it answers (In-Reply-To), "" when absent: how a sent answer is matched to its message. */
+  messageId?: string; inReplyTo?: string };
+/** A message the person was asked to answer, as the sent-mail check looks for it. */
+export type ReplyThread = { messageId: string; fromAddress: string; subject: string; date: string };
 export type MailMessage = MailHeader & { text: string };
 export type MailCheck = { ok: true } | { ok: false; code: "MAIL_AUTH_FAILED" | "MAIL_UNREACHABLE" | "MAIL_PROVIDER_UNSUPPORTED"; message: string };
 
@@ -75,7 +79,9 @@ export async function publicAddressOf(host: string): Promise<string | undefined>
 
 /** The parts of `ImapFlow` used here, so tests can stand in for a server. */
 export type ImapLike = Pick<ImapFlow, "connect" | "logout" | "mailboxOpen" | "search" | "fetchAll" | "fetchOne"> & { close?: () => void;
-  on?: (event: "error", listener: (error: unknown) => void) => unknown };
+  on?: (event: "error", listener: (error: unknown) => void) => unknown;
+  /** The folder list, for finding the sent folder (optional: a stand-in without it has no sent folder). */
+  list?: () => Promise<Array<{ path: string; specialUse?: string | undefined; flags?: Set<string> | undefined }>> };
 export type ImapFactory = (options: ImapFlowOptions) => ImapLike;
 const realFactory: ImapFactory = (options) => new ImapFlow(options);
 
@@ -100,6 +106,24 @@ export function signInRefusal(text: string, host: string): string {
   return "邮箱拒绝了登录：多半是没开 IMAP，或填的是登录密码而不是应用专用密码 / 授权码。";
 }
 
+/** The sent folder: its special-use flag (RFC 6154), else one of the usual names. */
+async function sentFolder(client: ImapLike): Promise<string | undefined> {
+  const folders = await client.list?.().catch(() => []) ?? [];
+  return folders.find((folder) => folder.specialUse === "\\Sent" || folder.flags?.has("\\Sent"))?.path
+    ?? folders.find((folder) => /^(sent|sent items|sent messages|sent mail|\[gmail\]\/sent mail|已发送|已发送邮件)$/i.test(folder.path))?.path;
+}
+
+/** A subject without its reply and forward prefixes, for matching a sent answer to the message it answers. */
+export function bareSubject(subject: string): string {
+  let text = subject.trim();
+  for (let i = 0; i < 5; i += 1) {
+    const next = text.replace(/^(re|fw|fwd|aw|回复|答复|转发)\s*[:：]\s*/i, "");
+    if (next === text) break;
+    text = next;
+  }
+  return text.replace(/\s+/g, " ").toLowerCase();
+}
+
 export function createImapMail(server: MailServer, user: string, rawPassword: string, factory: ImapFactory = realFactory,
   resolve: (host: string) => Promise<string | undefined> = publicAddressOf) {
   // Google shows an app password as four groups of four letters; the spaces are not part of it.
@@ -109,6 +133,14 @@ export function createImapMail(server: MailServer, user: string, rawPassword: st
    * checked public address (the certificate still checked against the name), so a name pointing inside cannot be used to probe it.
    */
   async function withInbox<T>(work: (client: ImapLike, box: { uidValidity: string; uidNext: number }) => Promise<T>): Promise<T> {
+    return withBox(async () => "INBOX", work);
+  }
+  /**
+   * One connection per call to the folder `choose` names (opened read-only, EXAMINE, like the inbox; nothing is ever written to it). A
+   * `choose` answering undefined opens nothing and hands `work` no box.
+   */
+  async function withBox<T>(choose: (client: ImapLike) => Promise<string | undefined>,
+    work: (client: ImapLike, box: { uidValidity: string; uidNext: number }) => Promise<T>, none?: () => T): Promise<T> {
     if (!(MAIL_PORTS as readonly number[]).includes(server.port)) throw Object.assign(new Error("只接受 993 或 143 端口"), { code: "MAIL_PORT_INVALID" });
     const address = await resolve(server.host);
     if (!address) throw Object.assign(new Error("服务器地址解析不到公开地址"), { code: "MAIL_HOST_INVALID" });
@@ -118,7 +150,9 @@ export function createImapMail(server: MailServer, user: string, rawPassword: st
     client.on?.("error", () => undefined);
     await client.connect();
     try {
-      const box = await client.mailboxOpen("INBOX", { readOnly: true });
+      const folder = await choose(client);
+      if (!folder) return none ? none() : Promise.reject(Object.assign(new Error("没有这个文件夹"), { code: "MAIL_FOLDER_MISSING" }));
+      const box = await client.mailboxOpen(folder, { readOnly: true });
       return await work(client, { uidValidity: String(box.uidValidity ?? ""), uidNext: Number(box.uidNext ?? 1) });
     } finally {
       await client.logout().catch(() => client.close?.());
@@ -128,7 +162,7 @@ export function createImapMail(server: MailServer, user: string, rawPassword: st
     const text = await textOf(message.source);
     return { uid: message.uid, from: addressText(message.envelope?.from), fromAddress: (message.envelope?.from?.[0]?.address ?? "").toLowerCase(),
       to: addressText(message.envelope?.to), subject: (message.envelope?.subject ?? "").slice(0, 300), date: iso(message.envelope?.date ?? message.internalDate),
-      snippet: text.slice(0, SNIPPET) };
+      snippet: text.slice(0, SNIPPET), messageId: message.envelope?.messageId ?? "", inReplyTo: message.envelope?.inReplyTo ?? "" };
   };
   const QUERY = { uid: true, envelope: true, internalDate: true, source: { start: 0, maxLength: PARTIAL_BYTES } } as const;
 
@@ -179,6 +213,31 @@ export function createImapMail(server: MailServer, user: string, rawPassword: st
         const fetched = await client.fetchAll(uids, QUERY, { uid: true });
         return (await Promise.all(fetched.map(header))).sort((a, b) => b.uid - a.uid);
       });
+    },
+
+    /**
+     * Which of `threads` the person has answered: the sent folder (its special-use flag, else a usual name) is opened read-only and its
+     * messages since the oldest thread are matched by In-Reply-To, or by recipient and subject without its 「Re:」. Returns the matched
+     * threads' Message-IDs (or `fromAddress|subject` when a thread has none). No sent folder: nothing matched.
+     */
+    async sentReplies(threads: ReplyThread[]): Promise<string[]> {
+      if (!threads.length) return [];
+      const since = new Date(Math.min(...threads.map((thread) => Date.parse(thread.date) || Date.now())) - 86_400_000);
+      return withBox(sentFolder, async (client) => {
+        const uids = ((await client.search({ since }, { uid: true })) || []).sort((a, b) => b - a).slice(0, 200);
+        if (!uids.length) return [];
+        const sent = await client.fetchAll(uids, { uid: true, envelope: true }, { uid: true });
+        const matched: string[] = [];
+        for (const thread of threads) {
+          const key = thread.messageId || `${thread.fromAddress}|${thread.subject}`;
+          const subject = bareSubject(thread.subject);
+          if (sent.some((message) => (thread.messageId && message.envelope?.inReplyTo === thread.messageId)
+            || ((message.envelope?.to ?? []).some((to) => (to.address ?? "").toLowerCase() === thread.fromAddress) && subject && bareSubject(message.envelope?.subject ?? "") === subject))) {
+            matched.push(key);
+          }
+        }
+        return matched;
+      }, () => []);
     },
 
     /** One message's text (up to 2 MB of source read), without marking it read. */

@@ -5,14 +5,21 @@ import { gateUntilReady } from "../../../lib/start-gate";
 import { getStore } from "../../../lib/crossline";
 import { MaterialViewer } from "../material-viewer";
 import { fileDigest } from "../material-digest";
+import { MailDraftActions } from "./mail-draft-actions";
+import { draftOf } from "../../../lib/mail-drafts";
+import { mailReplyClosures } from "@crossline/db";
 
 export const dynamic = "force-dynamic";
+
+const MAIL_DRAFT_SRC = /^\/api\/mail\/drafts\/(rd-[a-f0-9-]{1,40})\/file$/;
 
 /** Only the app's own file routes are drawn here; the route itself checks the file belongs to the viewer's workspace. */
 const ROUTES = [
   /^\/api\/source-documents\/([A-Za-z0-9_-]{1,128})\/file$/,
   /^\/api\/agent\/tasks\/[A-Za-z0-9_.:-]{1,160}\/file\?path=[^#]{1,600}$/,
-  /^\/api\/work-orders\/[A-Za-z0-9_-]{1,128}\/materials\?uri=[^#]{1,1200}$/
+  /^\/api\/work-orders\/[A-Za-z0-9_-]{1,128}\/materials\?uri=[^#]{1,1200}$/,
+  // A mail reply draft (docs/personal-agent.md §3.1), with 复制草稿 / 已回复 / 不用回 beside it.
+  MAIL_DRAFT_SRC
 ];
 
 /**
@@ -32,6 +39,17 @@ export default async function MaterialViewPage({ searchParams }: { searchParams:
   const digest = document ? fileDigest({ fileName: document.fileName, extractedText: document.extractedText, notes: [], steps: [], units: [] }) : undefined;
   const project = document?.projectId ? getStore().listProjects(ctx.workspaceId, { includeArchived: true }).find((item) => item.id === document.projectId)?.name : undefined;
   const back = from && /^\/workbench\/[A-Za-z0-9_-]{1,128}$/.test(from) ? from : undefined;
+  const draftId = MAIL_DRAFT_SRC.exec(src)?.[1];
+  const mailDraft = draftId ? draftOf(ctx, draftId) : undefined;
+  if (draftId && !mailDraft) notFound();
+  if (mailDraft) {
+    const closure = mailReplyClosures(getStore(), ctx.workspaceId).get(mailDraft.draft.id);
+    return <SubpageShell active="今日" title={`回复草稿：${mailDraft.draft.subject || "无主题"}`}>
+      <MaterialViewer src={src} name="回复草稿.md" generated size="page"
+        aside={<MailDraftActions id={mailDraft.draft.id} from={mailDraft.draft.from} why={mailDraft.draft.why} replyBy={mailDraft.draft.replyBy}
+          state={closure?.how ?? "open"} />} />
+    </SubpageShell>;
+  }
   const aside = digest && <div className="mt-digest">
     <h2>这份材料</h2>
     <p className="mt-digest-kind"><span className="tag">本人上传</span>

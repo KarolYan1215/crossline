@@ -889,7 +889,7 @@ const accountClient = (workspaceId: string) => {
 // The person's mailbox, read-only (docs/personal-agent.md): new mail read every quarter hour and sorted into the inbox; the assistant
 // searches and reads it; matching mail fires the person's automations. Sorting is intake work (it runs while the person is around or
 // cooling off); reading never needs the model.
-const mailService = createMailService({ store: analysisStore, secrets, cwd: repoRoot, client: accountClient,
+const mailService = createMailService({ store: analysisStore, secrets, cwd: repoRoot, client: accountClient, dataDir,
   sortAllowed: async (workspaceId) => !paused(workspaceId, "intake") && spendAllows(await spendFor(workspaceId), "intake"),
   onNewMail: (workspaceId, messages) => { onNewMail(analysisStore, workspaceId, messages); },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });

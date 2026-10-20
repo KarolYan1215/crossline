@@ -70,6 +70,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-agent-tools": "mid",
   // New mail sorted from headers and opening lines: many small runs, so the cheap tier.
   "crossline-mail-triage": "low",
+  // One short answer to one message the person must reply to, structured and without tools: the cheap tier (docs/personal-agent.md §3.1).
+  "crossline-mail-reply-drafter": "low",
   // One request in words into a trigger and steps, once per automation.
   "crossline-automation-designer": "mid"
 };

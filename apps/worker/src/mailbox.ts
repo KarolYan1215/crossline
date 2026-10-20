@@ -7,8 +7,9 @@ import {
   createImapMail, hostAllowed, presetFor, unsupportedProvider, type ImapFactory, type ImapMail, type MailHeader, type SecretStore
 } from "@crossline/connectors";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import type { CrosslineStore } from "@crossline/db";
+import { mailRepliesView, type CrosslineStore } from "@crossline/db";
 import type { MailLookup } from "./agent-tools";
+import { draftReplies, followUpReplies, type ReplyCandidate } from "./mail-replies";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 
@@ -29,9 +30,10 @@ export type MailDeps = { store: CrosslineStore; secrets: SecretStore; factory?: 
 const accounts = (store: CrosslineStore, workspaceId: string) => readMailAccounts(store.getSetting(workspaceId, MAIL_ACCOUNTS_SETTING));
 const saveAccounts = (store: CrosslineStore, workspaceId: string, list: MailAccount[]) => store.setSetting(workspaceId, MAIL_ACCOUNTS_SETTING, JSON.stringify(list));
 
-/** What the settings card shows: the accounts (no password), and what sorting did lately. */
+/** What the settings card shows: the accounts (no password), what sorting did lately, and the reply drafts (switch and latest). */
 export function mailView(store: CrosslineStore, workspaceId: string) {
-  return { accounts: accounts(store, workspaceId), log: readMailLog(store.getSetting(workspaceId, MAIL_LOG_SETTING)).slice(-30).reverse() };
+  return { accounts: accounts(store, workspaceId), log: readMailLog(store.getSetting(workspaceId, MAIL_LOG_SETTING)).slice(-30).reverse(),
+    replies: mailRepliesView(store, workspaceId) };
 }
 
 /** Signs in once with what the person typed; kept only when it works. */
@@ -149,7 +151,7 @@ export async function readNewMail(deps: MailDeps, workspaceId: string, force = f
  * lines carry the sender and subject so the analysis knows where a task came from.
  */
 export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | undefined; cwd: string }, workspaceId: string, messages: NewMail[]):
-  Promise<{ state: "done"; captured: number; replies: number; sorted: number } | { state: "skipped"; reason: string }> {
+  Promise<{ state: "done"; captured: number; replies: number; sorted: number; needsReply: ReplyCandidate[] } | { state: "skipped"; reason: string }> {
   const sorting = new Set(accounts(deps.store, workspaceId).filter((account) => account.triage).map((account) => account.id));
   const batch = messages.filter((message) => sorting.has(message.accountId)).slice(-40);
   if (!batch.length) return { state: "skipped", reason: "nothing" };
@@ -168,7 +170,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
     skillName: MAIL_TRIAGE_SKILL, cwd: deps.cwd, outputSchema: MAIL_TRIAGE_SCHEMA as unknown as Record<string, unknown>,
     developerInstructions: "Sort each new message once, from its sender, subject and opening. todo when it asks the person to do something or "
       + "doing nothing costs them (a deadline, a question only they can answer, an account or money alert to check); its title is the inbox line, "
-      + "verb first, with the day. date for a dated event the mail asks nothing about; reply only when the sender is who an open wait is on; info "
+      + "verb first, with the day. date for a dated event the mail asks nothing about; reply with the wait's id when the sender is who an open wait "
+      + "is on, or with an empty waitingId when a real person or office waits for the person's answer by mail (a draft is written, never sent); info "
       + "for news about the person's own things that needs nothing; ignore for promotions, digests, cold pitches, spam and phishing.",
     prepareInput: () => input, validateOutput: (output) => validateMailTriage(output, keyed.map((message) => message.key), waiting.map((item) => item.id)),
     onAudit: () => {}, timeoutMs: 20 * 60_000
@@ -178,10 +181,17 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   const ownerId = ownerOf(deps.store, workspaceId);
   const log: MailLogEntry[] = [];
   let captured = 0, replies = 0;
+  const needsReply: ReplyCandidate[] = [];
   for (const item of result.output.items) {
     const message = keyed.find((entry) => entry.key === item.uid);
     if (!message) continue;
-    let kind = item.kind;
+    let kind: MailLogEntry["kind"] = item.kind;
+    if (kind === "reply" && !item.waitingId) {
+      const { key: _key, ...mail } = message;
+      needsReply.push({ ...mail, why: item.why });
+      log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind: "needs_reply", title: item.why.slice(0, 140), at });
+      continue;
+    }
     if ((kind === "todo" || kind === "date") && captured < MAIL_INBOX_PER_PASS) {
       deps.store.capture({ id: `cap-mail-${randomUUID().slice(0, 12)}`, ownerId, workspaceId, title: item.title.trim().slice(0, 240),
         context: `来自邮件：${message.from}「${message.subject}」（${message.date.slice(0, 10)}）${message.snippet ? `\n开头：${message.snippet.slice(0, 200)}` : ""}` },
@@ -199,8 +209,14 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   deps.store.setSetting(workspaceId, MAIL_LOG_SETTING, JSON.stringify(kept));
   deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `mail.triaged:${at}:${randomUUID().slice(0, 6)}`, type: "mail.triaged", entityId: workspaceId,
     payload: { messages: keyed.length, captured, replies } });
-  return { state: "done", captured, replies, sorted: log.length };
+  return { state: "done", captured, replies, sorted: log.length, needsReply };
 }
+
+/** Messages that need a reply whose draft failed for a passing reason (the model, the quota): drafted with a later pass, for three days. */
+const REPLY_QUEUE_SETTING = "mail.replyQueue";
+const replyQueueOf = (store: CrosslineStore, workspaceId: string): ReplyCandidate[] => { try { return JSON.parse(store.getSetting(workspaceId, REPLY_QUEUE_SETTING) ?? "[]") as ReplyCandidate[]; } catch { return []; } };
+/** Reasons a draft is not written that will not pass by themselves: such messages are not queued again. */
+const FINAL_SKIPS = new Set(["already", "daily_limit", "off", "muted"]);
 
 /**
  * The tick's pass and the supervisor's `/v1/mail*` routes. `sortAllowed` is the quota and pause check for sorting (it is intake work);
@@ -208,9 +224,20 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
  */
 export function createMailService(deps: MailDeps & { cwd: string; client: (workspaceId: string) => CodexRpcBoundary | undefined;
   sortAllowed: (workspaceId: string) => Promise<boolean>; onNewMail?: (workspaceId: string, messages: NewMail[]) => void;
+  /** Where reply drafts are written (`<dataDir>/mail-drafts/<workspace>`); without it no draft is written. */
+  dataDir?: string;
   log?: (event: Record<string, unknown>) => void }) {
   const running = new Set<string>();
-  async function pass(workspaceId: string, force = false): Promise<{ read: number; sorted?: Awaited<ReturnType<typeof triageMail>> }> {
+  /** When each workspace's sent folders were last looked at: no more often than new mail is read. */
+  const sentCheckedAt = new Map<string, number>();
+  const replyDeps = (workspaceId: string) => ({ store: deps.store, dataDir: deps.dataDir ?? "", cwd: deps.cwd, client: deps.client(workspaceId), ...(deps.now ? { now: deps.now } : {}),
+    open: async (accountId: string) => {
+      const account = accounts(deps.store, workspaceId).find((item) => item.id === accountId);
+      const mail = account ? await clientOf(deps, workspaceId, account) : undefined;
+      return account && mail ? { mail, address: account.address } : undefined;
+    } });
+  async function pass(workspaceId: string, force = false): Promise<{ read: number; sorted?: Awaited<ReturnType<typeof triageMail>>;
+    drafts?: Awaited<ReturnType<typeof draftReplies>>; followUp?: Awaited<ReturnType<typeof followUpReplies>> }> {
     if (running.has(workspaceId) || !accounts(deps.store, workspaceId).length) return { read: 0 };
     running.add(workspaceId);
     try {
@@ -220,12 +247,35 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
       const seen = new Set(fresh.map(mailKey));
       const waiting = unsortedOf(deps.store, workspaceId).filter((message) => !seen.has(mailKey(message)) && now - Date.parse(message.date || "1970-01-01") < 3 * 86_400_000);
       const batch = [...waiting, ...fresh].slice(-40);
-      if (!batch.length) return { read: 0 };
-      const sorted = await deps.sortAllowed(workspaceId) ? await triageMail({ ...deps, client: deps.client(workspaceId) }, workspaceId, batch) : { state: "skipped" as const, reason: "quota" };
-      // Kept for the next pass unless sorted (or there was nothing to sort on these accounts).
-      deps.store.setSetting(workspaceId, UNSORTED_SETTING, JSON.stringify(sorted.state === "done" || sorted.reason === "nothing" ? [] : batch));
-      deps.log?.({ type: "mail.pass", workspaceId, read: fresh.length, ...sorted });
-      return { read: fresh.length, sorted };
+      const allowed = batch.length || replyQueueOf(deps.store, workspaceId).length ? await deps.sortAllowed(workspaceId) : false;
+      let sorted: Awaited<ReturnType<typeof triageMail>> | undefined;
+      if (batch.length) {
+        sorted = allowed ? await triageMail({ ...deps, client: deps.client(workspaceId) }, workspaceId, batch) : { state: "skipped" as const, reason: "quota" };
+        // Kept for the next pass unless sorted (or there was nothing to sort on these accounts).
+        deps.store.setSetting(workspaceId, UNSORTED_SETTING, JSON.stringify(sorted.state === "done" || sorted.reason === "nothing" ? [] : batch));
+      }
+      // Drafts for what needs the person's answer: this pass's, and those a passing failure held back (three days at most).
+      let drafts: Awaited<ReturnType<typeof draftReplies>> | undefined;
+      const queued = replyQueueOf(deps.store, workspaceId).filter((message) => now - Date.parse(message.date || "1970-01-01") < 3 * 86_400_000);
+      const candidates = [...queued, ...(sorted?.state === "done" ? sorted.needsReply : [])];
+      if (deps.dataDir && candidates.length) {
+        drafts = allowed ? await draftReplies(replyDeps(workspaceId), workspaceId, candidates)
+          : { drafted: 0, notNeeded: 0, skipped: candidates.map((item) => ({ uid: item.uid, reason: "quota" })) };
+        const retry = new Set(drafts.skipped.filter((item) => !FINAL_SKIPS.has(item.reason)).map((item) => item.uid));
+        deps.store.setSetting(workspaceId, REPLY_QUEUE_SETTING, JSON.stringify(candidates.filter((item) => retry.has(item.uid)).slice(-20)));
+      }
+      // The follow-up needs no model: answers found in the sent folders close drafts, quiet moments let held messages out.
+      let followUp: Awaited<ReturnType<typeof followUpReplies>> | undefined;
+      if (deps.dataDir) {
+        const checkSent = force || now - (sentCheckedAt.get(workspaceId) ?? 0) >= MAIL_CHECK_MINUTES * 60_000 - 30_000;
+        if (checkSent) sentCheckedAt.set(workspaceId, now);
+        followUp = await followUpReplies(replyDeps(workspaceId), workspaceId, { checkSent });
+      }
+      if (batch.length || drafts || followUp?.closed || followUp?.told || followUp?.reminded) {
+        deps.log?.({ type: "mail.pass", workspaceId, read: fresh.length, ...(sorted ?? {}), ...(sorted?.state === "done" ? { needsReply: sorted.needsReply.length } : {}),
+          ...(drafts ? { drafts: { drafted: drafts.drafted, notNeeded: drafts.notNeeded, skipped: drafts.skipped.length } } : {}), ...(followUp ? { followUp } : {}) });
+      }
+      return { read: fresh.length, ...(sorted ? { sorted } : {}), ...(drafts ? { drafts } : {}), ...(followUp ? { followUp } : {}) };
     } finally { running.delete(workspaceId); }
   }
   async function handle(method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined): Promise<{ status: number; body: unknown } | undefined> {

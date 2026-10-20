@@ -6,8 +6,8 @@
 export type BackgroundKind = "intake" | "planning" | "tutorials" | "assistant" | "research" | "nightly";
 
 export const BACKGROUND_KINDS: ReadonlyArray<{ kind: BackgroundKind; label: string; explained: string; skills: readonly string[] }> = [
-  { kind: "intake", label: "收集分析、日历与邮件归类", explained: "把写下的事整理成任务，把日历事件和授权的文件夹归到主线，把新邮件里的待办和日期放进收件箱",
-    skills: ["crossline-automation-stripper", "crossline-calendar-classifier", "crossline-folder-classifier", "crossline-mail-triage"] },
+  { kind: "intake", label: "收集分析、日历与邮件归类", explained: "把写下的事整理成任务，把日历事件和授权的文件夹归到主线，把新邮件里的待办和日期放进收件箱、为需要回复的邮件起草",
+    skills: ["crossline-automation-stripper", "crossline-calendar-classifier", "crossline-folder-classifier", "crossline-mail-triage", "crossline-mail-reply-drafter"] },
   { kind: "planning", label: "拆分与步骤规划", explained: "从里程碑倒推任务、给任务排步骤、复核与改写",
     skills: ["crossline-goal-backplanner", "crossline-step-planner", "crossline-validation-reviewer", "crossline-progress-judge", "crossline-goal-splitter",
       "crossline-task-titler", "crossline-archetype-curator", "crossline-milestone-architect", "crossline-milestone-risk-reviewer", "crossline-artifact-planner", "crossline-background-facts"] },

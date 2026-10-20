@@ -1,8 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
 import { appPasswordPage, MAIL_TRIAGE_KIND_LABEL, type AppPasswordPage, type MailAccount, type MailLogEntry } from "@crossline/core";
+import { closeDraft, copyDraft } from "../materials/view/mail-draft-actions";
 
-type View = { accounts: MailAccount[]; log: MailLogEntry[] };
+type ReplyView = { id: string; from: string; subject: string; why: string; points: string[]; replyBy: string; createdAt: string;
+  state: "open" | "replied" | "dismissed"; closedBy?: "person" | "sent_found" };
+type View = { accounts: MailAccount[]; log: MailLogEntry[]; replies?: { on: boolean; recent: ReplyView[] } };
+const REPLY_STATE: Record<ReplyView["state"], string> = { open: "待回复", replied: "已回复", dismissed: "不用回" };
+const draftHref = (id: string) => `/materials/view?src=${encodeURIComponent(`/api/mail/drafts/${id}/file`)}&name=${encodeURIComponent("回复草稿.md")}`;
 const post = (url: string, body: unknown, method = "POST") => fetch(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .then(async (response) => ({ ok: response.ok, body: await response.json().catch(() => ({})) as Record<string, unknown> })).catch(() => ({ ok: false, body: {} as Record<string, unknown> }));
 const ago = (at: string | undefined) => {
@@ -65,6 +70,19 @@ export function MailAccounts() {
     await post(`/api/mail/accounts/${account.id}`, { triage: on });
     await load(); setBusy(false);
   };
+  const drafting = async (on: boolean) => {
+    setBusy(true);
+    const result = await post("/api/mail/replies", { on });
+    if (!result.ok) setMessage("没能保存，稍后再试。");
+    await load(); setBusy(false);
+  };
+  const closeReply = async (reply: ReplyView, how: "replied" | "dismissed") => {
+    setBusy(true);
+    const ok = await closeDraft(reply.id, how);
+    if (!ok) setMessage("没能记下，稍后再试。");
+    await load(); setBusy(false);
+  };
+  const copyReply = async (reply: ReplyView) => setMessage(await copyDraft(reply.id) ? `已复制回复「${reply.subject || "无主题"}」的草稿正文。` : "没能复制，请打开草稿后手动复制。");
   const check = async () => {
     setBusy(true); setMessage("正在读新邮件…");
     const result = await post("/api/mail/check", {});
@@ -84,6 +102,26 @@ export function MailAccounts() {
       <button type="button" className="secondary-button" disabled={busy} onClick={() => void remove(account)}>移除</button>
     </div>)}
     {Boolean(view?.accounts.length) && <button type="button" className="secondary-button" disabled={busy} onClick={() => void check()}>现在读新邮件</button>}
+    {Boolean(view?.accounts.length) && <div className="st-row">
+      <span className="st-row-label">需要回复的邮件，先起草再提醒我
+        <small>助手起草一封回复存为文件，再告诉本人谁来信、为什么要回、草稿要点；不会发送，由本人确认后自己发。每个邮箱每天最多 5 封，夜里和忙时不提醒。</small></span>
+      <label className="st-inline"><input type="checkbox" checked={view?.replies?.on ?? true} disabled={busy} onChange={(event) => void drafting(event.target.checked)} /> 开启</label>
+    </div>}
+    {Boolean(view?.replies?.recent.length) && <details className="st-fold" open={view!.replies!.recent.some((reply) => reply.state === "open")}>
+      <summary>最近起草的回复</summary>
+      <ul className="st-list">{view!.replies!.recent.map((reply) => <li key={reply.id}>
+        <span>{REPLY_STATE[reply.state]}{reply.closedBy === "sent_found" ? "（在已发送里找到）" : ""} · {reply.subject || "（无主题）"}</span>
+        <small>{reply.from} · {reply.why}{reply.replyBy ? ` · 希望 ${reply.replyBy} 前答复` : ""}</small>
+        <span className="mail-reply-actions">
+          <a className="secondary-button" href={draftHref(reply.id)}>看草稿</a>
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => void copyReply(reply)}>复制草稿</button>
+          {reply.state === "open" && <>
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => void closeReply(reply, "replied")}>已回复</button>
+            <button type="button" className="text-button" disabled={busy} onClick={() => void closeReply(reply, "dismissed")}>不用回</button>
+          </>}
+        </span>
+      </li>)}</ul>
+    </details>}
     <form className="mail-accounts-form" onSubmit={(event) => { event.preventDefault(); if (address && password) void add(); }}>
       <input type="email" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="邮箱地址，如 name@gmail.com" aria-label="邮箱地址" disabled={busy} autoComplete="off" />
       <input type="password" value={password} onChange={(event) => setPassword(event.target.value)}

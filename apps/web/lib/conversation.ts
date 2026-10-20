@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
-import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
+import { closeMailReply, listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
   ACTIONS, AUTOMATIONS_SETTING, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
   type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
@@ -26,14 +26,18 @@ export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; mes
 /** An assistant message's card: what the turn proposed, the question back, and the state of each. */
 /**
  * An option of a card's question. A turn's options carry candidate actions; a nudge's buttons may instead open a page (`href`),
- * acknowledge (`ack`), ask about this kind less (`mute`) or invite typing (`say`). Choosing any of them is the answer.
+ * acknowledge (`ack`), ask about this kind less (`mute`) or invite typing (`say`). Choosing any of them is the answer — except `copy`, which
+ * puts the text at `href` on the clipboard and leaves the card open. `close` (on an `ack`) closes the card's mail reply draft
+ * (`Card.mailReplyId`) as answered or as needing no answer.
  */
-export type CardOption = ClarifyOption & { kind?: "action" | "ack" | "mute" | "href" | "say"; href?: string };
+export type CardOption = ClarifyOption & { kind?: "action" | "ack" | "mute" | "href" | "say" | "copy"; href?: string; close?: "replied" | "dismissed" };
 export type Card = {
   actions: ProposedAction[]; items: CardItem[];
   clarify: { question: string; options: CardOption[]; chosen?: number };
   /** Set on a nudge's card: which rule raised it (for 「少问这类」). */
   nudgeKind?: string;
+  /** Set on a message about a mail reply draft: the draft its 「已回复」 and 「不用回」 close. */
+  mailReplyId?: string;
   confidence: ConciergeTurn["confidence"]; error?: string;
   /** The words this card is a reading of (for remembering a correction of it). */
   heard?: string;
@@ -352,11 +356,13 @@ export async function decideCard(ctx: AccessContext, messageId: string,
   applyEdits(ctx, message.id, card, decision.edits ?? {});
   const candidates = new Set(card.clarify.options.flatMap((option) => option.actions));
   let chosen: number[];
+  let closeDraft: CardOption["close"];
   if (decision.option !== undefined) {
     const option = card.clarify.options[decision.option];
-    if (!option || card.clarify.chosen !== undefined) return { ok: false, code: "OPTION_NOT_AVAILABLE" };
+    if (!option || option.kind === "copy" || card.clarify.chosen !== undefined) return { ok: false, code: "OPTION_NOT_AVAILABLE" };
     card.clarify.chosen = decision.option;
     if (option.kind === "mute" && card.nudgeKind) muteNudgeKind(ctx, card.nudgeKind, now);
+    if (option.close && card.mailReplyId) closeDraft = option.close;
     chosen = option.actions;
     // The candidates not chosen will never run.
     for (const index of candidates) if (!option.actions.includes(index) && card.items[index]?.state === "pending") card.items[index] = { state: "dismissed" };
@@ -375,6 +381,8 @@ export async function decideCard(ctx: AccessContext, messageId: string,
     }
   }
   store.updateConversationPayload(ctx.workspaceId, messageId, { ...message.payload, card });
+  // After the card is written: closing the draft marks every message about it (this one keeps the choice just made).
+  if (closeDraft && card.mailReplyId) closeMailReply(store, ctx.workspaceId, card.mailReplyId, closeDraft, "person", now);
   return { ok: true, message: view({ ...message, payload: { ...message.payload, card } }) };
 }
 

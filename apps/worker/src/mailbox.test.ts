@@ -68,7 +68,7 @@ test("new mail is read once per check; sorting turns a to-do into an inbox line 
     { uid: 3, kind: "ignore", title: "", waitingId: "", why: "简报" }] });
   const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
   const done = await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh);
-  expect(done).toEqual({ state: "done", captured: 1, replies: 1, sorted: 3 });
+  expect(done).toEqual({ state: "done", captured: 1, replies: 1, sorted: 3, needsReply: [] });
   expect(store.listCaptures(workspaceId)[0]).toMatchObject({ title: "10/30 前交 HW1（截止延后）" });
   expect(store.listCaptures(workspaceId)[0]!.context).toContain("HW1 extended to Oct 30");
   expect(store.listEvents(workspaceId, { type: "waiting.mail_seen", entityId: "wait-data" })).toHaveLength(1);

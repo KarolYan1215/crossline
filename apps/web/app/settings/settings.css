@@ -172,6 +172,7 @@
 .mail-app-password-help{display:grid;gap:4px;margin-top:6px}
 .mail-app-password{display:inline-flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:13px}
 .st-row-label .mail-app-password{margin-left:6px}
+.mail-reply-actions{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;margin-top:2px}
 .st-automation-new{display:grid;gap:6px}
 .st-automation-new textarea{font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);resize:vertical;min-width:0}
 .st-automation-new select{font:inherit;font-size:13px;margin-left:6px}

@@ -98,3 +98,35 @@ test("Gmail's three refusals are told apart from its own words, and an app passw
   await createImapMail({ host: "imap.qq.com", port: 993, secure: true }, "me@qq.com", "ab cd", recording).check();
   expect(used).toEqual(["abcdefghijklmnop", "ab cd"]);
 });
+
+test("the person's answers are found in the sent folder, opened read-only, by In-Reply-To or by recipient and subject", async () => {
+  const opened: Array<{ path: string; readOnly: boolean | undefined }> = [];
+  const sent = [
+    { uid: 3, envelope: { subject: "Re: 测量数据", inReplyTo: "<m1@uni.edu>", to: [{ address: "lin@uni.edu" }] } },
+    { uid: 4, envelope: { subject: "回复：Seminar time", to: [{ address: "office@uni.edu" }] } },
+    { uid: 5, envelope: { subject: "Re: Unrelated", to: [{ address: "chen@uni.edu" }] } }
+  ];
+  const factory = (folders: Array<{ path: string; specialUse?: string }>): ImapFactory => () => ({
+    connect: async () => undefined, logout: async () => undefined,
+    list: async () => folders,
+    mailboxOpen: async (path: string | string[], open?: { readOnly?: boolean }) => { opened.push({ path: String(path), readOnly: open?.readOnly }); return { uidValidity: 1n, uidNext: 6 } as never; },
+    search: (async () => sent.map((m) => m.uid)) as never,
+    fetchAll: (async (uids: number[]) => sent.filter((m) => uids.includes(m.uid))) as never,
+    fetchOne: (async () => false) as never
+  });
+  const threads = [
+    { messageId: "<m1@uni.edu>", fromAddress: "lin@uni.edu", subject: "测量数据", date: "2026-10-19T08:00:00Z" },
+    { messageId: "", fromAddress: "office@uni.edu", subject: "Seminar time", date: "2026-10-19T08:00:00Z" },
+    { messageId: "<m3@uni.edu>", fromAddress: "wang@uni.edu", subject: "Budget", date: "2026-10-19T08:00:00Z" }
+  ];
+  const mail = createImapMail({ host: "imap.gmail.com", port: 993, secure: true }, "me@gmail.com", "pw",
+    factory([{ path: "INBOX" }, { path: "[Gmail]/Sent Mail", specialUse: "\\Sent" }]));
+  expect(await mail.sentReplies(threads)).toEqual(["<m1@uni.edu>", "office@uni.edu|Seminar time"]);
+  expect(opened).toEqual([{ path: "[Gmail]/Sent Mail", readOnly: true }]);
+  // By name when the server sets no special-use flag; with no sent folder at all nothing matches and nothing is opened.
+  expect(await createImapMail({ host: "imap.qq.com", port: 993, secure: true }, "me@qq.com", "pw", factory([{ path: "INBOX" }, { path: "Sent Messages" }]))
+    .sentReplies(threads)).toHaveLength(2);
+  opened.length = 0;
+  expect(await createImapMail({ host: "imap.qq.com", port: 993, secure: true }, "me@qq.com", "pw", factory([{ path: "INBOX" }])).sentReplies(threads)).toEqual([]);
+  expect(opened).toEqual([]);
+});
