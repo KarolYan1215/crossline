@@ -53,3 +53,13 @@ test("an undoable change made on a page and an undo are the person acting; the w
   expect(store.lastPersonActivity("w")! >= after!).toBe(true);
   store.close();
 });
+
+test("a public skill added by its link is the person acting; one the scout found is not", async () => {
+  const { CrosslineStore } = await import("./index");
+  const store = new CrosslineStore(":memory:");
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "scout", type: "skill.public.installed", entityId: "pub-a", payload: { id: "pub-a" } });
+  expect(store.lastPersonActivity("w")).toBeUndefined();
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "link", type: "skill.public.installed", entityId: "pub-b", payload: { id: "pub-b", via: "link" } });
+  expect(store.lastPersonActivity("w")).toBeDefined();
+  store.close();
+});

@@ -14,7 +14,9 @@ import path from "node:path";
 // also mounted into the server's app image, which may predate an export (deploy/server/ledger-sync.sh).
 const PERSON_EVENTS = ["ask.answered", "block.confirmed", "execution.confirmed", "execution.paused", "execution.resumed", "capture.created",
   "capture.discarded", "milestone.revised", "milestone.retrospective", "approval.revoked", "risk.accepted", "ask.snoozed", "return.answered",
-  "line.created", "line.updated", "line.ranked", "lines.set_up", "dates.decided", "source.project_assigned"];
+  "line.created", "line.updated", "line.ranked", "lines.set_up", "dates.decided", "source.project_assigned",
+  // Decisions about skills the person makes on Skill 库 (2026-10-20): a script's leave, a workflow's risks accepted, a site logged in.
+  "skill.scripts_allowed", "skill.scripts_revoked", "skill.grown.consented", "skill.grown.logged_in"];
 const PERSON_ACTIVITY_SQL = `
   SELECT created_at AS at FROM conversation_messages WHERE workspace_id = @ws AND role = 'person' AND created_at >= @since
   UNION ALL SELECT created_at FROM onboarding_messages WHERE workspace_id = @ws AND role = 'user' AND created_at >= @since
@@ -29,7 +31,9 @@ const PERSON_ACTIVITY_SQL = `
       -- writes for itself carry bySystem; the daily merge's older ones are known by their inverse.
       OR (type = 'op.applied' AND json_extract(payload_json, '$.bySystem') IS NULL
         AND COALESCE(json_extract(payload_json, '$.inverse.kind'), '') <> 'task.unmerge')
-      OR type = 'op.undone')`;
+      OR type = 'op.undone'
+      -- A public skill the person added by its link (the scout's own finds carry no via).
+      OR (type LIKE 'skill.public.%' AND json_extract(payload_json, '$.via') = 'link'))`;
 
 const arg = (name: string) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : undefined; };
 const db = arg("db") ?? (() => { throw new Error("missing --db"); })();
