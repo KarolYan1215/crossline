@@ -10,6 +10,7 @@ import { localToday } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { identityLines } from "./lines";
 import { decideFold, existingTasksFor, openTasks, recentlyDoneTasks, recordFold, type Fold } from "./duplicate-guard";
+import { materialExcerpts, relevantFacts } from "./material-context";
 const SKILL = "crossline:crossline-goal-backplanner";
 /** How many next steps an automatic (rolling) backplan keeps. */
 export const ROLLING_STEPS = 2;
@@ -88,6 +89,14 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     const { supplied, waiting } = personInputs(store, workspaceId, milestone.id);
     const sources = [...dateSources, ...approvedInsights.map((item) => item.summary), ...supplied.map((item) => `${item.what}：${item.text}`)];
     const artifacts = milestoneArtifacts(store, workspaceId, milestone.id);
+    // What this milestone's work rests on beyond the planning profile (docs/context-selection.md): the project's and the line's facts
+    // ranked by the milestone's terms, and the passages of the project's files (else the line's) that match it, as excerpts.
+    const project = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === milestone.projectId);
+    const query = [milestone.title, project?.name ?? "", ...milestone.successCriteria.map((item) => item.statement), request?.request ?? ""].join(" ");
+    const facts = relevantFacts(store.listProfileFacts(workspaceId), { query, projectId: milestone.projectId ?? "", identityId: milestone.identityId },
+      { budget: 3_000 });
+    const projectMaterial = materialExcerpts(store, workspaceId, query, { projectId: milestone.projectId ?? "", identityId: milestone.identityId, within: "project" });
+    const materials = projectMaterial.length ? projectMaterial : materialExcerpts(store, workspaceId, query, { identityId: milestone.identityId, within: "line" });
     // The date the tasks are worked back to (the one the person confirmed, else the approved plan's): without it a milestone due in five
     // days and one due in five months were split the same way.
     let confirmedDeadline: string | undefined;
@@ -99,6 +108,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     }, sourceText: request?.request ?? "", approvedInsights,
       // How the person works and what the plan serves, from the interview (planningProfile): tasks are sized and ordered for this person.
       personProfile: personProfileFor(store, workspaceId),
+      facts, materials,
       suppliedInputs: supplied, waitingInputs: waiting, missingInputs: [] as MissingInput[],
       existingWork: store.listWorkOrders(workspaceId)
       .filter((order) => order.milestoneId === milestone.id).map((order) => ({ id: order.id, intent: order.intent, state: order.state })),
@@ -110,7 +120,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     const rolling = options.rolling ? ` Return only the next ${ROLLING_STEPS} items that can start now (existingWork shows what is already done or open); the rest is proposed after these are done.` : "";
     const run = (missingInputs: MissingInput[]) => {
       const input = { ...context, missingInputs };
-      const runSources = [...sources, ...missingInputs.flatMap((item) => [item.message, item.what])];
+      const runSources = [...sources, ...materials.map((item) => item.text), ...missingInputs.flatMap((item) => [item.message, item.what])];
       return runCodexSkill<Answer>(client, input, { skillName: SKILL, cwd, redoOnRepair: true,
         developerInstructions: "Work backwards from this approved milestone to the tasks that deliver it, as the crossline-goal-backplanner Skill describes, "
           + "and return only the requested JSON. Each item becomes one task card on the person's 任务 page (one deliverable, 30 to 480 minutes, named "
@@ -121,7 +131,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
             ? " Second mode: missingInputs are known to be missing and are being asked about. Obtaining each is the first part of the task that needs it "
               + "(acquires = its id, sourceQuote from its message); a separate item only when obtaining it is real work. Blockers only for what the milestone "
               + "itself leaves unclear."
-            : " First mode: an input the work needs that is in none of sourceText, suppliedInputs or approvedInsights is a blocker with what and whoHas, "
+            : " First mode: an input the work needs that is in none of sourceText, suppliedInputs, approvedInsights, facts or materials is a blocker with what and whoHas, "
               + "never invented; every acquires is \"\". Items that need waitingInputs come after those that do not.")
           + (artifacts.produce.length || artifacts.use.length ? " Exactly one item produces each artifacts.produce id (produces); every artifacts.use id is in the uses of the items that work with it." : "")
           + rolling,

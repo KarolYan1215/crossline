@@ -256,6 +256,16 @@ const caseRuns = (record: ConformanceRecord) => {
   return [...runs, ...proxied];
 };
 
+/**
+ * Whether this record shows the model calling a function when asked to (the tools case ran and passed). A Skill that is better with
+ * lookups but can do without them (the step planner's `search_material`/`read_chunk`, docs/context-selection.md) gets them only then,
+ * and otherwise the passages code picked in full. A record from before the case existed has not shown it.
+ */
+export function callsFunctions(record: ConformanceRecord): boolean {
+  const runs = record.runs.filter((run) => run.caseId === TOOLS_CASE_ID);
+  return runs.length > 0 && runs.every((run) => run.ok);
+}
+
 export function admittedSkills(record: ConformanceRecord, capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES): string[] {
   const all = caseRuns(record);
   return Object.entries(SKILL_NEEDS).filter(([skill, needs]) => {

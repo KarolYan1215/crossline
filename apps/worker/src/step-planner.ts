@@ -1,7 +1,7 @@
 import { personProfileFor } from "./planning-profile";
 import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
-  normalizeStepPlan, readableFromMaterial, relevantDocuments, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
+  normalizeStepPlan, readableFromMaterial, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
   FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, type FinerSplit, type StepTrouble, type SuccessCriterion
 } from "@crossline/core";
@@ -10,7 +10,7 @@ import { aiToolsFor, listAgentTasks, projectAgentOutputs, type CrosslineStore, t
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
-import { folderDocuments } from "./source-folders";
+import { relevantFacts, selectMaterial } from "./material-context";
 
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
 const PLANNER = "crossline:crossline-step-planner";
@@ -20,36 +20,36 @@ const JUDGE = "crossline:crossline-progress-judge";
 const PLANNABLE = ["approved", "preparing", "ready_for_human", "active"];
 const day = (iso: string) => iso.slice(0, 10);
 const AUTO_FIXED = new Set(["STEP_SHARE_NORMALIZED", "STEP_SHARE_MISSING", "STEP_ESTIMATE_MISSING", "STEP_DEPENDENCY_UNKNOWN", "STEP_TRIVIAL_TO_AGENT", "STEP_NO_ASSISTANT"]);
-const MATERIAL_TEXT_PER_DOC = 16_000, MATERIAL_TEXT_TOTAL = 48_000;
+/** What a task is searched by: its wording, its project, the milestone it serves, what it must deliver and what it needs. */
+export function taskQuery(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder, options: { core?: boolean } = {}): string {
+  const project = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === order.projectId);
+  const milestone = store.listMilestones(workspaceId).filter((item) => item.id === order.milestoneId).at(-1);
+  const payload = (order.payload ?? {}) as { title?: string; humanCore?: Array<{ intent: string }>; evidenceContract?: Array<{ description: string }>;
+    materialContract?: Array<{ description: string }> };
+  // The core: what names the task (its title, project and milestone), without the contract's general wording.
+  if (options.core) return [payload.title ?? order.intent.slice(0, 80), project?.name ?? "", milestone?.title ?? ""].filter(Boolean).join(" ");
+  return [payload.title ?? "", order.intent, project?.name ?? "", milestone?.title ?? "", ...(payload.humanCore ?? []).map((part) => part.intent),
+    ...(payload.evidenceContract ?? []).map((item) => item.description), ...(payload.materialContract ?? []).map((item) => item.description)]
+    .filter(Boolean).join(" ").slice(0, 1200);
+}
 
 /**
  * Everything the plan is to rest on, for one task (decided 2026-10-09: plans were written from a file's first 300 characters and the
- * task's title, so a course with a dozen lectures before the exam was planned as 「3 个知识点」 and half the steps were filing). The
- * task's own material in full (clipped per file and overall), each with an id a content unit cites; what the person confirmed about
- * this line and project, and about themselves; the project's dated items; and what they already answered to earlier plans.
+ * task's title, so a course with a dozen lectures before the exam was planned as 「3 个知识点」 and half the steps were filing). Since
+ * 2026-10-20 (docs/context-selection.md) the material is chosen for the task, not cut blind: the task's files and the passages of any
+ * file that match it (`selectMaterial`), which the model reads further through `search_material`/`read_chunk`; the project's and the
+ * line's facts ranked by the task's terms within a budget (`relevantFacts`); the project's dated items; earlier answers.
  */
 export function planningContext(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder) {
   const project = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === order.projectId);
-  let budget = MATERIAL_TEXT_TOTAL;
-  const readable = store.listSourceDocuments(workspaceId).filter((doc) => doc.extractionStatus === "done");
-  const relevant = relevantDocuments(readable, { projectId: order.projectId, projectName: project?.name });
-  // Few files of its own: the unfiled material of the folders the person (or the model) put on this task's line comes next, in the
-  // reading budget left (docs/onboarding-v3.md 「文件夹授权」).
-  const fromFolders = folderDocuments(store, workspaceId);
-  const lineFolderDocs = relevant.length >= 3 ? [] : readable.filter((doc) => !doc.projectId && !relevant.includes(doc)
-    && (fromFolders.get(doc.id)?.lines ?? []).includes(order.identityId));
-  const documents = [...relevant, ...lineFolderDocs]
-    .map((doc, index) => {
-      const text = doc.extractedText.slice(0, Math.max(0, Math.min(MATERIAL_TEXT_PER_DOC, budget)));
-      budget -= text.length;
-      return { id: `doc-${index + 1}`, name: doc.fileName, text };
-    }).filter((doc) => doc.text.trim());
+  const query = taskQuery(store, workspaceId, order);
+  const material = selectMaterial(store, { query, core: taskQuery(store, workspaceId, order, { core: true }), workspaceId, projectId: order.projectId,
+    identityId: order.identityId, ...(project?.name ? { projectName: project.name } : {}) });
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.value.startsWith("假设"));
-  const own = (fact: (typeof facts)[number]) => fact.projectId === order.projectId ? 0 : fact.identityId === order.identityId ? 1 : fact.identityId === "person" ? 2 : 3;
-  // The project's and the line's facts; how the person works comes whole in `profile` below (planningProfile), so a line with a hundred
-  // facts no longer pushes it out (on the owner's research line none of the person's facts ever reached a plan).
-  const person = facts.filter((fact) => own(fact) < 2 && !fact.slot.startsWith(STEP_ANSWER_SLOT)).sort((a, b) => own(a) - own(b)).slice(0, 50)
-    .map((fact) => `${fact.projectId ? `[${fact.projectId}] ` : ""}${fact.slot}：${fact.value.slice(0, 240)}${fact.status === "inferred" ? "（假设）" : ""}`);
+  // The project's and the line's facts, the task's own project first and then by the task's terms; how the person works comes whole in
+  // `profile` below (planningProfile), so a line with a hundred facts no longer pushes it out.
+  const person = relevantFacts(facts, { query, projectId: order.projectId, identityId: order.identityId },
+    { exclude: (fact) => fact.slot.startsWith(STEP_ANSWER_SLOT) });
   const answers = facts.filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT) && (fact.projectId === order.projectId || fact.projectId === ""))
     .map((fact) => fact.value.slice(0, 400));
   const decided = new Map(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => [event.entityId, event.payload as { superseded?: boolean; included?: string[] }]));
@@ -62,7 +62,7 @@ export function planningContext(store: CrosslineStore, workspaceId: string, orde
       .map((item) => `${item.date}${item.startTime ? ` ${item.startTime}` : ""} ${item.title}`);
   });
   const profile = (() => { try { return JSON.parse(store.getSetting(workspaceId, "profile.model") ?? "{}") as { energyMap?: Array<{ activity: string; skill: string; love: string }> }; } catch { return {}; } })();
-  return { documents, person, answers, dated: [...new Set(dated)].sort().slice(0, 40), profile: personProfileFor(store, workspaceId),
+  return { material, documents: material.documents(), person, answers, dated: [...new Set(dated)].sort().slice(0, 40), profile: personProfileFor(store, workspaceId),
     strengths: (profile.energyMap ?? []).filter((item) => item.skill === "high").map((item) => item.activity).slice(0, 8) };
 }
 
@@ -240,8 +240,9 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         getFirst: payload.infoRequests ?? [] },
       milestone: milestone ? { title: milestone.title, criteria: milestone.successCriteria.map((item) => item.statement) } : null,
       window,
-      // The task's own material in full: units are read from it and cite it; a quantity is never assumed when it can be counted here.
-      materials: grounding.documents,
+      // The task's files and the passages chosen for it (docs/context-selection.md): the strongest in full, the rest by their opening line,
+      // read further through search_material/read_chunk. On a route that cannot call them, the passages code picked, in full.
+      materials: grounding.material.view(),
       // Who this is for: confirmed facts (their background and level, the course's grading and target, what they said about this
       // project), the activities they are good at, the project's dated items, and what they answered to this plan's earlier questions.
       person: { facts: grounding.person, strengths: grounding.strengths, answers: grounding.answers, profile: grounding.profile },
@@ -263,7 +264,13 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     };
     // The line's own skill and the public skills that fit the task, read beside the planner's: how this work is done shapes the steps.
     const extraSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, task: order.intent, ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
+    let materialMode: "tools" | "fallback" = "fallback";
     const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd, ...(extraSkills.length ? { extraSkills } : {}), redoOnRepair: true,
+      optionalTools: { tools: grounding.material.tools, onMode: (mode) => { materialMode = mode; },
+        instructions: "`materials.passages` are the passages that matched this task, in full; `materials.candidates` are more, by their opening line; "
+          + "`materials.files` are the files they come from. Read the candidates you need with read_chunk(id), and find what is missing (a lecture "
+          + "list, the problem set, the rubric) with search_material before you count units. A unit quotes a passage you read, under that passage's doc id.",
+        withoutTools: (value) => ({ ...(value as object), materials: grounding.material.fallback() }) },
       developerInstructions: "Write this task's steps as the crossline-step-planner Skill describes and return only the requested JSON. The steps are "
         + "what the person sees on the task and what the scheduler puts on the calendar. Read `materials` first and count the units from them, each quoting "
         + "its file verbatim. The person's steps are only the intellectual core (solving, deriving, deciding, writing, rehearsing), each one focused "
@@ -274,11 +281,11 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change; earlierFeedback still holds unless it contradicts it." : "")
         + (research ? " research is true: search the web for this task's background and the best known way to do it before planning, as the Skill's research section says." : ""),
       ...(research ? { allowWebSearch: true } : {}),
-      outputSchema: stepPlanSchema(learned.map((archetype) => archetype.id)), prepareInput: () => input,
+      outputSchema: stepPlanSchema(learned.map((archetype) => archetype.id)), prepareInput: (value) => value,
       validateOutput: (output) => {
         const shaped = validateStepPlanShape(output, learned);
         // Units are the plan's footing: each must quote its own file verbatim, or the plan is sent back to read the file again.
-        const bad = unverifiedUnits(shaped.units ?? [], grounding.documents);
+        const bad = unverifiedUnits(shaped.units ?? [], grounding.material.documents());
         if (bad.length) throw Object.assign(new Error("STEP_UNIT_UNVERIFIED"), { detail: `这些内容单元的 quote 在所注明的文件里找不到逐字原文：${bad.slice(0, 5)
           .map((unit) => `「${unit.title}」(${unit.docId})`).join("、")}。只引用 materials 中逐字出现的行；文件里没有的内容，写进 questions 问本人。` });
         return shaped;
@@ -286,10 +293,11 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       // After the repairs, a plan whose only fault is a few unverifiable units is kept without them.
       softAccept: (rejection, output) => {
         if (rejection.message !== "STEP_UNIT_UNVERIFIED") return undefined;
-        try { const shaped = validateStepPlanShape(output, learned); const bad = new Set(unverifiedUnits(shaped.units ?? [], grounding.documents).map((unit) => unit.id));
+        try { const shaped = validateStepPlanShape(output, learned); const bad = new Set(unverifiedUnits(shaped.units ?? [], grounding.material.documents()).map((unit) => unit.id));
           return { ...shaped, units: (shaped.units ?? []).filter((unit) => !bad.has(unit.id)) }; } catch { return undefined; }
       },
       onAudit: () => {}, ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000 });
+    console.info(JSON.stringify({ type: "context.selected", skill: PLANNER, workOrderId, mode: materialMode, ...grounding.material.stats(materialMode) }));
     if (!result.ok) {
       if (!/^(SKILL_|CODEX_)/.test(result.blocker.code)) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
         idempotencyKey: `task.steps_blocked:${workOrderId}:${Date.now()}`, type: "task.steps_blocked", entityId: workOrderId,

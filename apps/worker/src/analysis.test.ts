@@ -194,12 +194,16 @@ test("files the person already uploaded reach the analysis as supplied material,
     extractedText: "Midterm 1  Oct 27\nChapters 1-4", extractionStatus: "done", createdAt: "2026-10-05T00:00:00.000Z" });
   store.saveSourceDocument({ id: "d2", ownerId: "o", workspaceId: ws, kind: "pdf", fileName: "scan.pdf", mediaType: "application/pdf", sha256: "2", uri: "file:///2",
     extractedText: "", extractionStatus: "failed", createdAt: "2026-10-05T00:00:00.000Z" });
-  const inputs = analysis.uploadedMaterialInputs(store, ws);
-  expect(inputs).toHaveLength(1);
-  expect(inputs[0]!.id).toBe("uploaded-d1");
+  store.saveSourceDocument({ id: "d3", ownerId: "o", workspaceId: ws, kind: "text", fileName: "recipes.txt", mediaType: "text/plain", sha256: "3", uri: "file:///3",
+    extractedText: "番茄炒蛋：先炒蛋再炒番茄。", extractionStatus: "done", createdAt: "2026-10-05T00:00:00.000Z" });
+  const inputs = analysis.uploadedMaterialInputs(store, ws, "复习 ECE 548 midterm 前几章");
+  // The passage that matches the capture, then one line naming the other readable file; the unreadable scan is not offered.
+  expect(inputs.map((input) => input.id)).toEqual(["uploaded-d1-1", "uploaded-other-files"]);
   expect(inputs[0]!.text).toContain("ECE 548 syllabus.pdf");
   expect(inputs[0]!.text).toContain("Midterm 1 Oct 27 Chapters 1-4");
   expect(inputs[0]!.text).toContain("不必再向用户要");
+  expect(inputs[1]!.text).toContain("recipes.txt");
+  expect(inputs[1]!.text).not.toContain("番茄");
 });
 
 // 「10月8号左右师兄会给我数据…10月21号前交」: the waiting item, the release date and the due date land where the

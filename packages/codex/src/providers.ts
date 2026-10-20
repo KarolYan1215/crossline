@@ -69,6 +69,11 @@ export type ProviderRouting = {
   /** The search functions that stand in for hosted web search on this provider (set exactly when `capabilities.webSearch` is). */
   webTools?: SkillTools;
   /**
+   * Whether the provider's conformance record shows it calling a function when asked (`callsFunctions`): a run whose lookups are
+   * optional (`SkillRunOptions.optionalTools`) gets them only then. Unset counts as no.
+   */
+  functionCalls?: boolean;
+  /**
    * Why this provider serves nothing right now, in the person's words (the developer's model for invited accounts: still being tested,
    * or this month's cap reached). The workspace's own Codex sign-in still serves; without one the run stops with this.
    */

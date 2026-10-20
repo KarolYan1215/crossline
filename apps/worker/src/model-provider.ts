@@ -1,6 +1,6 @@
 import { caseTools } from "./conformance-tools";
 import {
-  admittedSkills, conformanceCases, conformanceCurrent, conformanceProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
+  admittedSkills, callsFunctions, conformanceCases, conformanceCurrent, conformanceProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
   capabilityGap, THIRD_PARTY_CAPABILITIES, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
 } from "@crossline/core";
 import {
@@ -98,7 +98,7 @@ export function createModelProviderService(options: {
       blocked: { code: "MODEL_SPONSOR_PENDING", message: "开发者提供的模型还在检验，通常一小时内可用；也可以先连接自己的 ChatGPT。" } };
     if (budget && budget.spent >= budget.cap) return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(),
       blocked: { code: "MODEL_SPONSOR_BUDGET", message: `本月邀请额度（¥${budget.cap}）已用完，下月 1 日恢复；也可以在 设置 → 模型连接 连接自己的 ChatGPT 或 API。` } };
-    return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(admittedSkills(pick.record, capabilities)),
+    return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(admittedSkills(pick.record, capabilities)), functionCalls: callsFunctions(pick.record),
       modelFor: (skill: string) => sponsor.modelFor(skill) };
   };
 
@@ -108,7 +108,7 @@ export function createModelProviderService(options: {
     if (!provider) return sponsorRouting(workspaceId);
     const record = current(workspaceId, provider);
     return { provider, gatewayUrl: options.gateway.urlFor(workspaceId, provider.id),
-      admitted: new Set(record ? admittedSkills(record, capabilities) : []), codexSignedIn: options.signedIn(workspaceId),
+      admitted: new Set(record ? admittedSkills(record, capabilities) : []), functionCalls: Boolean(record && callsFunctions(record)), codexSignedIn: options.signedIn(workspaceId),
       capabilities, ...(search ? { webTools: createWebTools(search) } : {}) };
   };
 

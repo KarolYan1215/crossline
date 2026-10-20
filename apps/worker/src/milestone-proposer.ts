@@ -15,6 +15,7 @@ import {
 /** Only for a ledger that has no workspace owner on record, which a real account never is. */
 import { ownerOf } from "./owner";
 import { identityLines } from "./lines";
+import { materialExcerpts } from "./material-context";
 export const MILESTONE_ARCHITECT_SKILL = "crossline:crossline-milestone-architect";
 export const ARTIFACT_PLANNER_SKILL = "crossline:crossline-artifact-planner";
 
@@ -335,7 +336,11 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     for (const identityId of lines) {
       if (signal?.aborted) break;
       // Recomputed per line: a line designed earlier in this run is already a producer or consumer for the next one.
-      const own = lineContext(context, identityId, crossLine ? lineArtifacts(plan, identityId, artifactMilestones(store, workspaceId, replaced), labelsOf(context)) : undefined);
+      const lined = lineContext(context, identityId, crossLine ? lineArtifacts(plan, identityId, artifactMilestones(store, workspaceId, replaced), labelsOf(context)) : undefined);
+      // Beyond the planning profile and the line's facts: the passages of this line's files that match its goal and projects.
+      const materials = materialExcerpts(store, workspaceId, [...lined.identities.map((identity) => `${identity.label} ${identity.summary.replace(/^长期目标：|本人选定的定语：/g, "")}`),
+        ...(lined.profile?.projects ?? []).map((project) => project.name), context.request].join(" "), { identityId, within: "line" });
+      const own = materials.length ? { ...lined, materials } : lined;
       const { result, threadId } = await runLine(client, own, signal);
       if (threadId) lastThread = threadId;
       if (!result.ok) {

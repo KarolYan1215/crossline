@@ -7,6 +7,7 @@ import { ANALYSIS_CONTEXT_VERSION, validateAnalysisContext, type AnalysisContext
 import { CrosslineStore, type StoredCapture } from "@crossline/db";
 import { identityLines } from "./lines";
 import { existingTasksFor, foldNewTask } from "./duplicate-guard";
+import { analysisMaterialInputs } from "./material-context";
 
 export type AnalysisOutcome = { id: string; state: string; attempt: number; audit: StoredCapture["audit"] };
 
@@ -44,17 +45,13 @@ export function localToday(store: CrosslineStore, workspaceId: string, now = new
 // and wrong for any account that is not that one literal owner.
 /**
  * The files the person already gave the system (syllabi, schedules, notes from the first interview), as inputs the analysis may rely
- * on. Without them a capture about 「ECE 548 前几章」 asked the person for course materials the system was already holding.
- * Names and a short opening only — the contract says model input is supplied text, and a whole syllabus on every capture is waste.
+ * on. Without them a capture about 「ECE 548 前几章」 asked the person for course materials the system was already holding. Since
+ * 2026-10-20 (docs/context-selection.md) these are the passages that match the capture (`analysisMaterialInputs`, within
+ * `CONTEXT_BUDGETS.analysis`) plus one line naming the other files; it used to be the opening 300 characters of the first eight files
+ * uploaded, whatever the capture was about.
  */
-export function uploadedMaterialInputs(store: CrosslineStore, workspaceId: string, limit = 8): Array<{ id: string; text: string }> {
-  return store.listSourceDocuments(workspaceId)
-    .filter((doc) => doc.extractionStatus === "done" && doc.extractedText.trim())
-    .slice(0, limit)
-    .map((doc) => ({
-      id: `uploaded-${doc.id}`,
-      text: `用户此前已交给系统的资料《${doc.fileName}》（已读取，共 ${doc.extractedText.length} 字，不必再向用户要）。开头：${doc.extractedText.trim().replace(/\s+/g, " ").slice(0, 300)}`
-    }));
+export function uploadedMaterialInputs(store: CrosslineStore, workspaceId: string, query: string): Array<{ id: string; text: string }> {
+  return analysisMaterialInputs(store, workspaceId, query);
 }
 
 export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string, cwd: string) {
@@ -107,7 +104,7 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         // supplied text, and attachment content is not decoded or sent to the model at all. This just
         // lets it know material was actually supplied somewhere, instead of always reading as none.
         availableInputs: [
-          ...uploadedMaterialInputs(store, workspaceId),
+          ...uploadedMaterialInputs(store, workspaceId, `${capture.title} ${capture.context}`),
           ...(capture.context.trim() ? [{ id: "capture-context", text: capture.context.trim() }] : []),
           ...(store.listCaptureAttachments(workspaceId, id).length
             ? [{ id: "capture-attachments", text: `用户上传了 ${store.listCaptureAttachments(workspaceId, id).length} 份附件，文件名：${

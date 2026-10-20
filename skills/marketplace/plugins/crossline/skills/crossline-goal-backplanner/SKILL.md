@@ -14,6 +14,8 @@ Return raw JSON only: `{steps, dateCandidates, blockers}`.
 - `today` — the person's date. `milestone` — `{id, version, identityId, projectId, title, deadline, successCriteria}`; `deadline` may be "" when undated.
 - `sourceText` — the request the milestone was proposed from (often empty).
 - `approvedInsights[]` — `{summary, sourceUrl, staleWhen}`: research findings about this milestone the person accepted.
+- `facts[]` — what the person confirmed (or an assumption, marked 「（假设）」) about this project and line, the most relevant first: the course's grading, the project's state, what they said about it. Read it before naming an input as missing.
+- `materials[]` — `{id, file, text}`: excerpts of the person's files that match this milestone (the project's, else the line's). An input one of them already holds is not missing; a `sourceQuote` may quote an excerpt verbatim.
 - `suppliedInputs[]` — `{what, text}` the person handed over; `waitingInputs[]` — `{what, who, expectedAt}` on their way; `missingInputs[]` — `{id, what, whoHas, message}`, only in the second mode.
 - `existingWork[]` — `{id, intent, state}`: tasks already serving this milestone (open or done).
 - `existingTasks[]` — every open task of this line and project, the task library included: `{id, title, intent, lineId, projectId, dueDate, state}`.

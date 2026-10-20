@@ -18,6 +18,7 @@ The input is always `crossline.milestone-proposal.v1`. Return raw JSON only, no 
 - `personProfile[]` — the interview's conclusions for planning, one short line each: how the person works (peak hours, how long they can go, what drains them, how they react to criticism or friction), what they are good at and enjoy, how their lines are weighed, what they value most and where they are headed. Use it to size, order and phrase the work for this person (put demanding work where they are strong, keep draining work short and early, plan a check-in where their pattern says they tend to stall); never quote it back as a new fact and never let it override a hard date or a file. For milestones: pace a line's chain to the hours and allocation it states, and keep the line's place in that allocation.
 - `profile` — present once the person has been interviewed (see **Profile runs**).
 - `artifacts` — this line's part of the artifact plan (see **Artifacts**).
+- `materials[]` — `{id, file, text}`: excerpts of the person's files that match this line, its projects' files first. Read a deadline, a graded part or a stated scope from them; a milestone still cites facts in `sourceFactIds`, never an excerpt alone.
 
 ## What a milestone is
 

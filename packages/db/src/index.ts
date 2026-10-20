@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
+import { chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
@@ -185,6 +185,14 @@ export type StoredSourceDocument = {
   extractedText: string; extractionStatus: "pending" | "done" | "failed" | "unsupported";
   extractionNote?: string; createdAt: string;
 };
+
+/**
+ * One passage of a document's text in the full-text index (migration 19, docs/context-selection.md): what the model's `read_chunk` returns
+ * and a search hit points at. `heading` is 「文件名 · 项目 · 线」, indexed with the text, so a query naming the course finds its files.
+ */
+export type DocChunk = { id: number; documentId: string; ord: number; start: number; heading: string; body: string;
+  fileName: string; projectId?: string; identityId?: string };
+export type DocChunkHit = DocChunk & { score: number };
 
 export type StoredOnboardingSession = {
   id: string; ownerId: string; workspaceId: string; codexThreadId?: string;
@@ -421,6 +429,9 @@ export type StoredBackgroundFact = { key: string; value: string; why: string; so
  * restore has to step over an empty one rather than refuse the whole backup — while still refusing
  * if one somehow has rows, because skipping those would be losing data quietly.
  */
+/** Tables derived from others and rebuilt from them (migration 19's passages): not exported, skipped on restore, rebuilt after it. */
+const DERIVED_TABLES: readonly string[] = ["doc_chunks"];
+
 const RETIRED_TABLES = ["outbox", "identities", "projects", "milestone_versions", "insight_proposals", "skill_versions"] as const;
 
 /** Columns a migration dropped, by table. Same reason as `RETIRED_TABLES`: old snapshots still list them. */
@@ -1142,6 +1153,25 @@ export class CrosslineStore {
             created_at TEXT NOT NULL, deleted_at TEXT,
             PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, dedupe_key));
           CREATE INDEX IF NOT EXISTS domain_records_by_day ON domain_records(workspace_id, domain, at);`);
+      } },
+      // The files' text as passages in a full-text index (2026-10-20, docs/context-selection.md): each about 800 characters with a heading
+      // 「文件名 · 项目 · 线」, in an FTS5 trigram table kept by triggers, so a task's context holds the passages that match it instead of
+      // every file cut blind. Derived from `source_documents` and rebuilt from it here, on restore, and whenever a file is read, re-read,
+      // filed or removed; never exported. `id` is an INTEGER PRIMARY KEY so the external-content index survives a VACUUM.
+      { version: 19, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS doc_chunks (
+            id INTEGER PRIMARY KEY, workspace_id TEXT NOT NULL, document_id TEXT NOT NULL, ord INTEGER NOT NULL, start_at INTEGER NOT NULL,
+            heading TEXT NOT NULL, body TEXT NOT NULL, UNIQUE(workspace_id, document_id, ord));
+          CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks_fts USING fts5(heading, body, content='doc_chunks', content_rowid='id', tokenize='trigram');
+          CREATE TRIGGER IF NOT EXISTS doc_chunks_ai AFTER INSERT ON doc_chunks BEGIN
+            INSERT INTO doc_chunks_fts(rowid, heading, body) VALUES (new.id, new.heading, new.body); END;
+          CREATE TRIGGER IF NOT EXISTS doc_chunks_ad AFTER DELETE ON doc_chunks BEGIN
+            INSERT INTO doc_chunks_fts(doc_chunks_fts, rowid, heading, body) VALUES ('delete', old.id, old.heading, old.body); END;
+          CREATE TRIGGER IF NOT EXISTS doc_chunks_au AFTER UPDATE ON doc_chunks BEGIN
+            INSERT INTO doc_chunks_fts(doc_chunks_fts, rowid, heading, body) VALUES ('delete', old.id, old.heading, old.body);
+            INSERT INTO doc_chunks_fts(rowid, heading, body) VALUES (new.id, new.heading, new.body); END;`);
+        this.#indexDocuments();
       } }
     ];
 
@@ -1895,6 +1925,8 @@ export class CrosslineStore {
   // One block because they are one feature: what we know about the person and where it came from.
 
   saveProject(project: StoredProject): void {
+    const before = this.#db.prepare("SELECT name, identity_id FROM workspace_projects WHERE workspace_id = ? AND id = ?")
+      .get(project.workspaceId, project.id) as { name: string; identity_id: string } | undefined;
     this.#db.prepare(`
       INSERT INTO workspace_projects (id, owner_id, workspace_id, identity_id, name, status, summary, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1902,6 +1934,9 @@ export class CrosslineStore {
         status = excluded.status, summary = excluded.summary, updated_at = excluded.updated_at
     `).run(project.id, project.ownerId, project.workspaceId, project.identityId, project.name, project.status,
       project.summary, project.createdAt, project.updatedAt);
+    // Renamed or moved to another line: its files' passages are indexed under the new heading.
+    if (before && (before.name !== project.name || before.identity_id !== project.identityId))
+      this.#refreshHeadings(project.workspaceId, "document_id IN (SELECT id FROM source_documents WHERE workspace_id = ? AND project_id = ?)", [project.workspaceId, project.id]);
   }
 
   listProjects(workspaceId: string, options: { identityId?: string; includeArchived?: boolean } = {}): StoredProject[] {
@@ -1930,6 +1965,7 @@ export class CrosslineStore {
       `).run(doc.id, doc.ownerId, doc.workspaceId, doc.projectId ?? null, doc.kind, doc.fileName, doc.mediaType,
         doc.sha256, doc.uri, doc.extractedText, doc.extractionStatus, doc.extractionNote ?? null, doc.createdAt,
         this.#nextNumber(doc.workspaceId, "source_documents.ref_no", "SELECT MAX(ref_no) AS n FROM source_documents WHERE workspace_id = ?"));
+      this.#indexDocument(doc.workspaceId, doc.id);
     }).immediate();
     return this.listSourceDocuments(doc.workspaceId).find((item) => item.sha256 === doc.sha256)!;
   }
@@ -1965,9 +2001,12 @@ export class CrosslineStore {
   /** Text extraction runs after upload, in the worker, so it is recorded separately from the file itself. */
   setSourceDocumentExtraction(workspaceId: string, id: string,
     result: { status: StoredSourceDocument["extractionStatus"]; text?: string; note?: string }): void {
-    this.#db.prepare(
-      "UPDATE source_documents SET extraction_status = ?, extracted_text = ?, extraction_note = ? WHERE workspace_id = ? AND id = ?"
-    ).run(result.status, result.text ?? "", result.note ?? null, workspaceId, id);
+    this.#db.transaction(() => {
+      this.#db.prepare(
+        "UPDATE source_documents SET extraction_status = ?, extracted_text = ?, extraction_note = ? WHERE workspace_id = ? AND id = ?"
+      ).run(result.status, result.text ?? "", result.note ?? null, workspaceId, id);
+      this.#indexDocument(workspaceId, id);
+    })();
   }
 
   /**
@@ -1979,6 +2018,7 @@ export class CrosslineStore {
       const row = this.#db.prepare("SELECT uri FROM source_documents WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as { uri: string } | undefined;
       if (!row) return undefined;
       this.#db.prepare("DELETE FROM source_documents WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
+      this.#db.prepare("DELETE FROM doc_chunks WHERE workspace_id = ? AND document_id = ?").run(workspaceId, id);
       // The file's words go with it; facts that cited them keep their quote but no longer point at its sentences.
       const gone = new Set((this.#db.prepare("SELECT id FROM evidence_sentences WHERE workspace_id = ? AND source_kind = 'document' AND source_id = ?")
         .all(workspaceId, id) as Array<{ id: number }>).map((sentence) => sentence.id));
@@ -1998,8 +2038,138 @@ export class CrosslineStore {
   }
 
   assignSourceDocumentProject(workspaceId: string, id: string, projectId: string | null): void {
-    this.#db.prepare("UPDATE source_documents SET project_id = ? WHERE workspace_id = ? AND id = ?")
-      .run(projectId, workspaceId, id);
+    this.#db.transaction(() => {
+      this.#db.prepare("UPDATE source_documents SET project_id = ? WHERE workspace_id = ? AND id = ?")
+        .run(projectId, workspaceId, id);
+      // The passages' heading names the project: filed elsewhere, they are found under the new one.
+      this.#refreshHeadings(workspaceId, "document_id = ?", [id]);
+    })();
+  }
+
+  /** The heading every passage of a document is indexed under: 「文件名 · 项目 · 线」 (「未归项目」 for a file filed under none). */
+  #headingOf(workspaceId: string, documentId: string): string | undefined {
+    const row = this.#db.prepare(`SELECT d.file_name AS file, p.name AS project, p.identity_id AS line FROM source_documents d
+      LEFT JOIN workspace_projects p ON p.workspace_id = d.workspace_id AND p.id = d.project_id WHERE d.workspace_id = ? AND d.id = ?`)
+      .get(workspaceId, documentId) as { file: string; project: string | null; line: string | null } | undefined;
+    return row ? [row.file, row.project ?? "未归项目", row.line ?? ""].filter(Boolean).join(" · ") : undefined;
+  }
+
+  /** Cuts one document's text into passages and indexes them, replacing what it had (none when it has no readable text). */
+  #indexDocument(workspaceId: string, documentId: string): void {
+    this.#db.prepare("DELETE FROM doc_chunks WHERE workspace_id = ? AND document_id = ?").run(workspaceId, documentId);
+    const row = this.#db.prepare("SELECT extracted_text AS text, extraction_status AS status FROM source_documents WHERE workspace_id = ? AND id = ?")
+      .get(workspaceId, documentId) as { text: string; status: string } | undefined;
+    if (!row || row.status !== "done" || !row.text.trim()) return;
+    const heading = this.#headingOf(workspaceId, documentId) ?? "";
+    const insert = this.#db.prepare("INSERT INTO doc_chunks (workspace_id, document_id, ord, start_at, heading, body) VALUES (?, ?, ?, ?, ?, ?)");
+    chunkText(row.text).forEach((chunk, ord) => insert.run(workspaceId, documentId, ord, chunk.start, heading, chunk.text));
+  }
+
+  /** Every document's passages again, for one workspace or all (migration 19 and a restore). */
+  #indexDocuments(workspaceId?: string): void {
+    const ids = this.#db.prepare(`SELECT workspace_id AS ws, id FROM source_documents ${workspaceId ? "WHERE workspace_id = ?" : ""}`)
+      .all(...(workspaceId ? [workspaceId] : [])) as Array<{ ws: string; id: string }>;
+    for (const { ws, id } of ids) this.#indexDocument(ws, id);
+  }
+
+  /** Rebuilds the passage index of one workspace from its documents. Returns how many passages it now holds. */
+  reindexDocuments(workspaceId: string): number {
+    this.#db.transaction(() => {
+      this.#db.prepare("DELETE FROM doc_chunks WHERE workspace_id = ?").run(workspaceId);
+      this.#indexDocuments(workspaceId);
+    })();
+    return Number((this.#db.prepare("SELECT COUNT(*) AS n FROM doc_chunks WHERE workspace_id = ?").get(workspaceId) as { n: number }).n);
+  }
+
+  #refreshHeadings(workspaceId: string, where: string, params: unknown[]): void {
+    const documents = this.#db.prepare(`SELECT DISTINCT document_id AS id FROM doc_chunks WHERE workspace_id = ? AND ${where}`)
+      .all(workspaceId, ...params) as Array<{ id: string }>;
+    const update = this.#db.prepare("UPDATE doc_chunks SET heading = ? WHERE workspace_id = ? AND document_id = ? AND heading <> ?");
+    for (const { id } of documents) { const heading = this.#headingOf(workspaceId, id) ?? ""; update.run(heading, workspaceId, id, heading); }
+  }
+
+  #docChunk(row: Record<string, string | number | null>): DocChunk {
+    return { id: Number(row.id), documentId: String(row.document_id), ord: Number(row.ord), start: Number(row.start_at), heading: String(row.heading),
+      body: String(row.body), fileName: String(row.file_name ?? ""), ...(row.project_id ? { projectId: String(row.project_id) } : {}),
+      ...(row.identity_id ? { identityId: String(row.identity_id) } : {}) };
+  }
+
+  /**
+   * The passages of this workspace's files that match a query, best first (docs/context-selection.md). Terms of three characters or more
+   * go through the trigram index (bm25, the heading weighted double); two-character ones (「组会」, 「HW」) are matched by LIKE and add to
+   * the score. A passage of `projectId` counts double and one of `identityId`'s line 1.4×; `within` keeps only those. Read-only.
+   */
+  searchDocChunks(workspaceId: string, query: string, options: { projectId?: string; identityId?: string; within?: "project" | "line" | "all";
+    documentIds?: string[]; limit?: number } = {}): DocChunkHit[] {
+    const terms = searchTerms(query);
+    const scores = new Map<number, number>();
+    if (terms.long.length) {
+      try {
+        const rows = this.#db.prepare(`SELECT c.id AS id, bm25(doc_chunks_fts, 2.0, 1.0) AS rank FROM doc_chunks_fts JOIN doc_chunks c ON c.id = doc_chunks_fts.rowid
+          WHERE doc_chunks_fts MATCH ? AND c.workspace_id = ? ORDER BY rank LIMIT 400`).all(ftsMatchExpression(terms.long), workspaceId) as Array<{ id: number; rank: number }>;
+        for (const row of rows) scores.set(row.id, -row.rank);
+      } catch { /* an expression the index cannot read finds nothing, never fails the caller */ }
+    }
+    const top = Math.max(1, ...scores.values());
+    // A two-character word alone is a weak signal (「输入」 is in every file about voice input): with longer terms in the query it only
+    // lifts passages they already found; with none, it is all there is to search by.
+    const longFound = new Set(scores.keys());
+    const like = this.#db.prepare("SELECT id FROM doc_chunks WHERE workspace_id = ? AND (body LIKE ? ESCAPE '!' OR heading LIKE ? ESCAPE '!') LIMIT 800");
+    for (const term of terms.short) {
+      const pattern = `%${term.replace(/[!%_]/g, (char) => `!${char}`)}%`;
+      for (const row of like.all(workspaceId, pattern, pattern) as Array<{ id: number }>)
+        if (!terms.long.length || longFound.has(row.id)) scores.set(row.id, (scores.get(row.id) ?? 0) + top * 0.3);
+    }
+    if (!scores.size) return [];
+    const ids = [...scores.keys()];
+    const rows: Array<Record<string, string | number | null>> = [];
+    for (let at = 0; at < ids.length; at += 500) {
+      const slice = ids.slice(at, at + 500);
+      rows.push(...this.#db.prepare(`SELECT c.*, d.file_name, d.project_id, p.identity_id FROM doc_chunks c
+        JOIN source_documents d ON d.workspace_id = c.workspace_id AND d.id = c.document_id
+        LEFT JOIN workspace_projects p ON p.workspace_id = d.workspace_id AND p.id = d.project_id
+        WHERE c.workspace_id = ? AND c.id IN (${slice.map(() => "?").join(", ")})`).all(workspaceId, ...slice) as Array<Record<string, string | number | null>>);
+    }
+    const allowed = options.documentIds ? new Set(options.documentIds) : undefined;
+    const ownProject = (chunk: DocChunk) => Boolean(options.projectId) && chunk.projectId === options.projectId;
+    const ownLine = (chunk: DocChunk) => Boolean(options.identityId) && chunk.identityId === options.identityId;
+    return rows.map((row) => this.#docChunk(row))
+      .filter((chunk) => !allowed || allowed.has(chunk.documentId))
+      .filter((chunk) => options.within === "project" ? ownProject(chunk) : options.within === "line" ? ownProject(chunk) || ownLine(chunk) : true)
+      .map((chunk) => ({ ...chunk, score: scores.get(chunk.id)! * (ownProject(chunk) ? 2 : ownLine(chunk) ? 1.4 : 1) }))
+      .sort((a, b) => b.score - a.score || a.id - b.id)
+      .slice(0, options.limit ?? 40);
+  }
+
+  /** One passage by id, only within this workspace, with the ids of the passages before and after it in its file. */
+  readDocChunk(workspaceId: string, id: number): (DocChunk & { previousId?: number; nextId?: number; total: number }) | undefined {
+    const row = this.#db.prepare(`SELECT c.*, d.file_name, d.project_id, p.identity_id FROM doc_chunks c
+      JOIN source_documents d ON d.workspace_id = c.workspace_id AND d.id = c.document_id
+      LEFT JOIN workspace_projects p ON p.workspace_id = d.workspace_id AND p.id = d.project_id
+      WHERE c.workspace_id = ? AND c.id = ?`).get(workspaceId, id) as Record<string, string | number | null> | undefined;
+    if (!row) return undefined;
+    const chunk = this.#docChunk(row);
+    const near = (ord: number) => (this.#db.prepare("SELECT id FROM doc_chunks WHERE workspace_id = ? AND document_id = ? AND ord = ?")
+      .get(workspaceId, chunk.documentId, ord) as { id: number } | undefined)?.id;
+    const previousId = near(chunk.ord - 1), nextId = near(chunk.ord + 1);
+    const total = Number((this.#db.prepare("SELECT COUNT(*) AS n FROM doc_chunks WHERE workspace_id = ? AND document_id = ?")
+      .get(workspaceId, chunk.documentId) as { n: number }).n);
+    return { ...chunk, total, ...(previousId !== undefined ? { previousId } : {}), ...(nextId !== undefined ? { nextId } : {}) };
+  }
+
+  /** How many passages each of the workspace's documents is cut into (a document with no readable text is absent). */
+  docChunkCounts(workspaceId: string): Map<string, number> {
+    return new Map((this.#db.prepare("SELECT document_id AS id, COUNT(*) AS n FROM doc_chunks WHERE workspace_id = ? GROUP BY document_id")
+      .all(workspaceId) as Array<{ id: string; n: number }>).map((row) => [row.id, Number(row.n)]));
+  }
+
+  /** A document's first passages in order (the opening of a file of the task that no search term reached). */
+  documentChunks(workspaceId: string, documentId: string, limit = 3): DocChunk[] {
+    return (this.#db.prepare(`SELECT c.*, d.file_name, d.project_id, p.identity_id FROM doc_chunks c
+      JOIN source_documents d ON d.workspace_id = c.workspace_id AND d.id = c.document_id
+      LEFT JOIN workspace_projects p ON p.workspace_id = d.workspace_id AND p.id = d.project_id
+      WHERE c.workspace_id = ? AND c.document_id = ? ORDER BY c.ord LIMIT ?`).all(workspaceId, documentId, limit) as Array<Record<string, string | number | null>>)
+      .map((row) => this.#docChunk(row));
   }
 
   saveOnboardingSession(session: StoredOnboardingSession): void {
@@ -3406,9 +3576,13 @@ export class CrosslineStore {
 
   /** Every real table in this database, so the restore path can validate against reality. */
   tableNames(): string[] {
-    return (this.#db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-      .all() as Array<{ name: string }>).map((row) => row.name);
+    const rows = this.#db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+      .all() as Array<{ name: string; sql: string | null }>;
+    // A full-text index (and the tables SQLite keeps for it) and the passages it indexes are derived from `source_documents`: rebuilt on
+    // restore, never carried in a backup (they would double its size and could disagree with the files they were cut from).
+    const virtual = rows.filter((row) => /^CREATE VIRTUAL TABLE/i.test(row.sql ?? "")).map((row) => row.name);
+    return rows.map((row) => row.name).filter((name) => !DERIVED_TABLES.includes(name)
+      && !virtual.some((table) => name === table || name.startsWith(`${table}_`)));
   }
 
   #columnsOf(tableName: string): string[] {
@@ -3436,6 +3610,8 @@ export class CrosslineStore {
       // would have been wrong and skipping it would lose data without saying so.
       // A backup taken before migration 14 still carries the plan differences: they are archived as events below, not refused.
       if (!known.has(tableName) && tableName === "plan_changes") continue;
+      // Derived passages are rebuilt from the documents below, whatever a snapshot carries.
+      if (DERIVED_TABLES.includes(tableName)) continue;
       if (!known.has(tableName) && retired.has(tableName)) {
         if (rows.length) throw new Error("RESTORE_RETIRED_TABLE_NOT_EMPTY");
         continue;
@@ -3454,7 +3630,7 @@ export class CrosslineStore {
       // at commit instead of demanding the importer know the dependency order between tables.
       this.#db.pragma("defer_foreign_keys = ON");
       for (const [tableName, rows] of Object.entries(snapshot.tables)) {
-        if (!known.has(tableName)) continue;
+        if (!known.has(tableName) || DERIVED_TABLES.includes(tableName)) continue;
         counts[tableName] = rows.length;
         const first = rows[0];
         if (!first) continue;
@@ -3489,6 +3665,9 @@ export class CrosslineStore {
       this.#collapsePlanVersions(snapshot.workspaceId);
       // A backup taken before migration 16 has no document numbers: they get the ones their position gave them when it was taken.
       this.#numberDocuments(snapshot.workspaceId);
+      // The passage index is not in a backup: it is cut again from the restored documents.
+      this.#db.prepare("DELETE FROM doc_chunks WHERE workspace_id = ?").run(snapshot.workspaceId);
+      this.#indexDocuments(snapshot.workspaceId);
     })();
     return counts;
   }

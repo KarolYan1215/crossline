@@ -175,6 +175,11 @@ export type MilestoneProposalContext = {
    * The milestones declare them in `plan.outputs` / `plan.inputs`; the cross-line relations are derived from those references.
    */
   artifacts?: LineArtifacts;
+  /**
+   * Excerpts of the person's files that match this line (one line per run; docs/context-selection.md): its projects' files first. A
+   * deadline or a graded part a file states is read here; a milestone still rests on facts (`sourceFactIds`), never on an excerpt alone.
+   */
+  materials?: Array<{ id: string; file: string; text: string }>;
 };
 
 export function validateMilestoneProposal(value: unknown, context: MilestoneProposalContext): MilestoneProposal {

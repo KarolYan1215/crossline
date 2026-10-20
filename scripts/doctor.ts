@@ -106,8 +106,25 @@ if (Number(db.pragma("user_version", { simple: true })) >= 16) {
   }
 }
 
+// The passage index (migration 19, docs/context-selection.md): derived from the documents and kept by the store and by triggers, so a
+// passage of a file that is gone, a readable file with no passages, or an index that does not hold every passage is a half-applied change.
+if (Number(db.pragma("user_version", { simple: true })) >= 19) {
+  if (!present.includes("doc_chunks") || !present.includes("doc_chunks_fts")) findings.push("schema 不完整：缺少 doc_chunks 或其全文索引（半迁移）");
+  else {
+    orphans("段落的文件已不存在",
+      `SELECT DISTINCT c.document_id AS id, c.document_id AS target FROM doc_chunks c
+       WHERE NOT EXISTS (SELECT 1 FROM source_documents d WHERE d.workspace_id = c.workspace_id AND d.id = c.document_id)`);
+    const unindexed = (db.prepare(`SELECT COUNT(*) AS c FROM source_documents d WHERE d.extraction_status = 'done' AND trim(d.extracted_text) <> ''
+      AND NOT EXISTS (SELECT 1 FROM doc_chunks c WHERE c.workspace_id = d.workspace_id AND c.document_id = d.id)`).get() as { c: number }).c;
+    if (unindexed) findings.push(`${unindexed} 个已读文件没有段落（全文索引未建）`);
+    const chunks = (db.prepare("SELECT COUNT(*) AS c FROM doc_chunks").get() as { c: number }).c;
+    const indexed = (db.prepare("SELECT COUNT(*) AS c FROM doc_chunks_fts_docsize").get() as { c: number }).c;
+    if (chunks !== indexed) findings.push(`全文索引与段落不一致：段落 ${chunks}，索引 ${indexed}`);
+  }
+}
+
 const version = Number(db.pragma("user_version", { simple: true }));
-const wal = (() => { try { return statSync(`${file}-wal`).size; } catch { return 0; } })();
+const wal =(() => { try { return statSync(`${file}-wal`).size; } catch { return 0; } })();
 const counts = Object.fromEntries(["events", "work_orders", "captures", "milestones", "materials"]
   .map((table) => [table, (db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c]));
 db.close();

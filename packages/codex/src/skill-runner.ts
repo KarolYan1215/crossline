@@ -143,6 +143,13 @@ export type SkillRunOptions<T> = {
   /** Read-only tools the model may call during the turn (the one input box's lookups); see `SkillTools`. */
   tools?: SkillTools;
   /**
+   * Lookups the run is better with but can do without (the step planner's `search_material`/`read_chunk`, docs/context-selection.md):
+   * offered beside `tools`, with `instructions` appended, when the route calls functions — the account's own Codex always, another
+   * provider only when its conformance record shows it calling one (`ProviderRouting.functionCalls`). Otherwise they are not offered
+   * and the run's input is `withoutTools(input)`: the passages code picked, in full. `onMode` is told which it was.
+   */
+  optionalTools?: { tools: SkillTools; instructions: string; withoutTools: (input: unknown) => unknown; onMode?: (mode: "tools" | "fallback") => void };
+  /**
    * Codex's code mode for a run with `tools` (2026-10-19, the owner: turn the runtime's own features over to use): the model may write
    * JavaScript that runs in the runtime's V8 isolate — no file system, network or process of its own — to compute and to call the run's
    * tools (`tools.read_file(…)`). Needs `codex-code-mode-host` beside the runtime; the caller checks that.
@@ -298,7 +305,25 @@ type RunContext = { route: ModelRoute | undefined; spendMode: SpendMode; usage: 
   /** On a provider: Crossline's own `web_search`/`web_fetch`, standing in for the OpenAI-hosted search the provider does not have. */
   webTools?: SkillTools;
   /** The library skills switched on for this run, named in its first prompt beside the target. */
-  extraSkills: string[] };
+  extraSkills: string[];
+  /** Whether the model on this route calls functions: the account's own Codex does; a provider has to have shown it (`functionCalls`). */
+  functionCalls: boolean };
+
+/**
+ * A run's optional lookups resolved for its route: merged into its tools with their instructions where the model calls functions,
+ * else left out and the input replaced by what stands in for them.
+ */
+function withOptionalTools<T>(options: SkillRunOptions<T>, input: unknown, context: RunContext): { options: SkillRunOptions<T>; input: unknown } {
+  const optional = options.optionalTools;
+  if (!optional) return { options, input };
+  const { optionalTools: _resolved, ...rest } = options;
+  if (!context.functionCalls) { optional.onMode?.("fallback"); return { options: rest, input: optional.withoutTools(input) }; }
+  optional.onMode?.("tools");
+  const own = options.tools;
+  return { input, options: { ...rest, developerInstructions: `${options.developerInstructions}\n\n${optional.instructions}`,
+    tools: { specs: [...(own?.specs ?? []), ...optional.tools.specs.filter((spec) => !own?.specs.some((mine) => mine.name === spec.name))],
+      call: (name, args) => own?.specs.some((spec) => spec.name === name) ? own.call(name, args) : optional.tools.call(name, args) } } };
+}
 
 const WEB_TOOLS_INSTRUCTION = "Web access in this run is through the functions `web_search` (results: title, url, snippet) and `web_fetch` "
   + "(the page's text). Search, then fetch every page you rely on before citing it; cite only pages you fetched, by their exact url.";
@@ -405,7 +430,9 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   // Fitted to the models this account is offered (a ChatGPT Free account has no `gpt-5.6-sol`); a provider's model is its own.
   const route = provider ? wanted : fitRoute(wanted, options.tier ?? tierForSkill(options.skillName), await accountModels(client));
   const webTools = provider ? options.webTools ?? routing?.webTools : undefined;
-  const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [] };
+  // The conformance check (`options.provider`) measures a provider and offers whatever its case needs.
+  const functionCalls = !provider || Boolean(options.provider) || routing?.functionCalls === true;
+  const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [], functionCalls };
   // The skills this run holds on (its own and the library skills named for it); each is released after the run.
   const holding: string[] = [];
   const extras: string[] = [];
@@ -1098,7 +1125,8 @@ async function resubscribe(client: CodexRpcBoundary, scope: Scope, threadId: str
   released.delete(threadId);
 }
 
-async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, requested: SkillRunOptions<T>, context: RunContext): Promise<SkillRunResult<T>> {
+async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted: SkillRunOptions<T>, context: RunContext): Promise<SkillRunResult<T>> {
+  const { options: requested, input } = withOptionalTools(wanted, given, context);
   const options = withWebTools(requested, context);
   const audit: AnalysisAudit = {};
   // Web search is the only tool any Skill may use, and only when that Skill was granted it.
