@@ -205,19 +205,36 @@ jobs:
           ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "ACTION='$ACTION' ARGS='$ARGS' TOKEN='$TOKEN' ACTOR='$ACTOR' sudo -E sh -s" <<'REMOTE'
           set -e
           dir=/srv/crossline/compare
-          if [ "$ACTION" = compare-report ]; then
-            docker ps -a --filter name=crossline-compare --format "{{.Names}} {{.Status}}"
-            docker logs --tail 60 crossline-compare 2>&1 | grep -v '^#' | tail -60 || true
-            latest=$(ls -1d $dir/out/*/ 2>/dev/null | sort | tail -1)
-            [ -n "$latest" ] && { echo "== $latest"; cat "$latest/report.md" 2>/dev/null || wc -l "$latest/runs.jsonl"; }
-            exit 0
-          fi
           registry=ghcr.io/karolyan1215/crossline-app:beta
           echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null && docker pull -q "$registry" || true
           docker logout ghcr.io >/dev/null
           image=$registry
           docker image inspect "$image" >/dev/null 2>&1 || image=$(docker inspect -f '{{.Config.Image}}' crossline-worker)
           install -d -m 750 -o 1000 -g 1000 $dir $dir/in $dir/out
+          # compare <docker options> <script arguments…>; the evaluation's logs are read for each model's sample-interview replies.
+          compare() { opts="$1"; shift; docker run $opts --network host --env-file /srv/crossline/app.env -e CROSSLINE_DATA_DIR=/tmp/data \
+            -v $dir:/compare -v /srv/crossline/codex:/opt/codex:ro -v /srv/crossline/data/sponsor-eval:/evals:ro -w /repo "$image" \
+            /repo/node_modules/.bin/tsx scripts/sponsor-compare.ts "$@"; }
+          if [ "$ACTION" = compare-report ]; then
+            docker ps -a --filter name=crossline-compare --format "{{.Names}} {{.Status}}"
+            docker logs --tail 40 crossline-compare 2>&1 | tail -40 || true
+            latest=$(ls -1d $dir/out/*/ 2>/dev/null | sort | tail -1)
+            [ -n "$latest" ] || exit 0
+            status=$(docker inspect -f '{{.State.Status}}' crossline-compare 2>/dev/null || echo gone)
+            # A run from before the copies were kept in its folder left them in its container's /tmp: copied out once it has finished.
+            if [ "$status" = exited ] && [ ! -f "$latest/copies/base.db" ]; then
+              mkdir -p "$latest/copies"
+              for f in $(docker diff crossline-compare | awk '$1 == "A" && $2 ~ /^\/tmp\/crossline-compare-[^\/]+\/[^\/]+\.db(-wal|-shm)?$/ { print $2 }'); do
+                docker cp "crossline-compare:$f" "$latest/copies/"
+              done
+              chown -R 1000:1000 "$latest"
+            fi
+            if [ "$status" != running ] && [ -f "$latest/copies/base.db" ]; then
+              compare --rm report --run "/compare/out/$(basename "$latest")" --auth /compare/in/auth.db --dialogues /evals > /dev/null || true
+            fi
+            echo "== $latest"; cat "$latest/report.md" 2>/dev/null || wc -l "$latest/runs.jsonl"
+            exit 0
+          fi
           owner=$(stat -c %u:%g /srv/crossline/data/crossline.db)
           for name in crossline.db auth.db; do
             docker run --rm --user "$owner" -v /srv/crossline/data:/src -v $dir/in:/out -w /repo/packages/db "$image" node -e '
@@ -226,14 +243,11 @@ jobs:
                 .catch((error) => { console.error(error.message); process.exit(1); });' "$name"
           done
           chown -R 1000:1000 $dir
-          # compare <docker options> <script arguments…>
-          compare() { opts="$1"; shift; docker run $opts --network host --env-file /srv/crossline/app.env -e CROSSLINE_DATA_DIR=/tmp/data \
-            -v $dir:/compare -v /srv/crossline/codex:/opt/codex:ro -w /repo "$image" /repo/node_modules/.bin/tsx scripts/sponsor-compare.ts "$@"; }
           if [ "$ACTION" = compare-list ]; then compare --rm list --ledger /compare/in/crossline.db; exit 0; fi
           docker rm -f crossline-compare >/dev/null 2>&1 || true
           # Its own ceiling, beside the app's: one Codex runtime and two model runs at a time.
           compare "-d --name crossline-compare --memory 800m --memory-swap 800m -e NODE_OPTIONS=--max-old-space-size=384" \
-            run --ledger /compare/in/crossline.db --out /compare/out $ARGS
+            run --ledger /compare/in/crossline.db --out /compare/out --dialogues /evals $ARGS
           sleep 30; docker logs crossline-compare 2>&1 | tail -10
           REMOTE
       - name: Deploy
