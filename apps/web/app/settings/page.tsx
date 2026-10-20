@@ -3,6 +3,8 @@ import { assistantAvailable, categoryMode, isAutoHandoff, readCategories } from 
 import { SubpageShell } from "../subpage-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { AgentHistoryCard } from "./agent-history-card";
+import { RecordingCard } from "./recording-card";
+import { recordingOverview } from "../../lib/recordings";
 import { TelemetryCard } from "./telemetry-card";
 import { AutostartCard } from "./autostart-card";
 import { autostartAvailable, readAutostart } from "../../lib/autostart";
@@ -176,13 +178,14 @@ export default async function SettingsPage() {
 
         <section id="privacy" className="st-section" aria-labelledby="st-privacy"><h2 id="st-privacy">隐私与屏幕活动</h2>
           {!machine && <p className="muted">{hosted
-            ? "屏幕活动、作息记录、键鼠节律和 Codex 使用记录要读本人电脑，网页版不提供；精力按本人自评和手机记录推算。"
-            : "屏幕活动、作息记录、键鼠节律和 Codex 使用记录读的是运行 Crossline 的那台电脑，只对它的主人开放。"}</p>}
+            ? "屏幕活动、作息记录、键鼠节律、Codex 使用记录和录音自动转写要读本人电脑，网页版不提供；精力按本人自评和手机记录推算。"
+            : "屏幕活动、作息记录、键鼠节律、Codex 使用记录和录音自动转写读的是运行 Crossline 的那台电脑，只对它的主人开放。"}</p>}
           {machine && <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
             hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
               .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />}
           <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} />
           {machine && <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />}
+          {machine && <RecordingCard overview={recordingOverview(store, ctx.workspaceId)} />}
           {isLocalInstall() && <TelemetryCard on={setting(TELEMETRY_ENABLED_SETTING) !== "0"} />}
         </section>
 

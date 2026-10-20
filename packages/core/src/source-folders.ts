@@ -62,7 +62,12 @@ export type SourceFolder = {
  * content may delete it. `sensitive`: the file's text looked sensitive when read, so nothing was kept. `flagged`: it did, but the person
  * included it, so it was kept — and goes again if they take that back.
  */
-export type FolderIndexEntry = { size: number; mtimeMs: number; documentId: string; created?: boolean; sensitive?: string; flagged?: string; hard?: true };
+export type FolderIndexEntry = { size: number; mtimeMs: number; documentId: string; created?: boolean; sensitive?: string; flagged?: string; hard?: true;
+  /**
+   * A recording (docs/phone-recording.md), seen while 录音自动转写 was on: `queued` waits for the one transcription at a time, `done`
+   * became the transcript `documentId` names, `silent` held no speech, `failed` says why in `note`. The audio itself is never copied.
+   */
+  audio?: "queued" | "done" | "silent" | "failed"; note?: string };
 
 export function readSourceFolders(raw: string | undefined): SourceFolder[] {
   if (!raw) return [];
@@ -81,13 +86,25 @@ export const skipFolderDirectory = (name: string) => SKIP_DIRECTORY.test(name);
 const NAME_ONLY = /\.(pptx?|xlsx?|doc|key|numbers|pages)$/i;
 
 /**
- * What to do with one file found in a folder: read it (a kind the app reads, within the limit), keep only its name (too large, or a
- * kind it cannot read yet), or leave it alone entirely (a secret, a hidden file, anything else — pictures and audio included, which
- * are personal and better uploaded on purpose).
+ * 录音自动转写 (docs/phone-recording.md, 2026-10-20): whether recordings that land in an authorized folder — a phone recorder's files
+ * synced by iCloud Drive or Syncthing — are transcribed on this machine. Off by default; `granted` turns it on.
  */
-export function folderFileAction(relativePath: string, size: number): { action: "read"; kind: SourceKind } | { action: "name_only"; reason: string } | { action: "skip" } {
+export const RECORDING_CONSENT = "recordings.autoTranscribe";
+/** The formats phone recorders write. */
+export const RECORDING_FILE = /\.(m4a|mp3|wav|aac|opus|ogg|webm|flac)$/i;
+/** A recording larger than this is recorded by name only (an hour of uncompressed stereo is about 600 MB). */
+export const RECORDING_FILE_LIMIT = 500 * 1024 * 1024;
+
+/**
+ * What to do with one file found in a folder: read it (a kind the app reads, within the limit), keep only its name (too large, or a
+ * kind it cannot read yet), transcribe it (a recording, only with `audio`, which is 录音自动转写), or leave it alone entirely (a secret,
+ * a hidden file, anything else — pictures included, and audio without that consent, which are personal and better uploaded on purpose).
+ */
+export function folderFileAction(relativePath: string, size: number, options: { audio?: boolean } = {}):
+  { action: "read"; kind: SourceKind } | { action: "name_only"; reason: string } | { action: "audio" } | { action: "skip" } {
   const name = relativePath.split(/[\\/]/).pop() ?? relativePath;
   if (!name || name.startsWith(".") || name.startsWith("~$") || isSecretPath(relativePath.replace(/\\/g, "/"))) return { action: "skip" };
+  if (options.audio && RECORDING_FILE.test(name)) return size > RECORDING_FILE_LIMIT ? { action: "name_only", reason: "录音超过 500 MB，没有转写" } : { action: "audio" };
   const kind = sourceKindFor(name, "");
   if (kind === "pdf" || kind === "docx" || kind === "text") {
     return size > FOLDER_FILE_LIMIT ? { action: "name_only", reason: "超过 50 MB，只记文件名" } : { action: "read", kind };

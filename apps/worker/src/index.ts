@@ -47,7 +47,8 @@ import { createPlanExplainer } from "./plan-explainer-runner";
 import { createWeeklyInsight } from "./weekly-insight-runner";
 import { createOnboardingSessionRunner } from "./onboarding-session";
 import { extractText, reextractForLayout } from "./extract";
-import { createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
+import { WHISPER_MODEL, createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
+import { recordingPass, recordingsOn } from "./recordings";
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import { addSubscription, hasSubscriptions, removeSubscription, subscriptionSources } from "./calendar-subscriptions";
@@ -225,6 +226,8 @@ const machineOwner = (workspaceId: string) => !hostedBeta && runtimeOwner(analys
 const OWNER_ONLY_FOLDER = { state: "blocked" as const, code: "FOLDER_OWNER_ONLY",
   message: "文件夹在运行 Crossline 的那台电脑上，只有那台电脑的主人能授权。请改用「添加文件」上传。" };
 const folderDeps = { dataDir, home: homedir(), readText: extractText };
+/** With 录音自动转写 on, the folder pass also queues the recordings it finds (recordings.ts). */
+const folderDepsFor = (workspaceId: string) => ({ ...folderDeps, audio: recordingsOn(analysisStore, workspaceId) });
 const readingFolders = new Set<string>();
 // A folder added while a pass runs would wait for the next tick (up to fifteen minutes) while its card says 「正在读取」 — four folders
 // authorized at once read only the first (2026-10-15) — so a call during a pass runs one more pass after it.
@@ -234,9 +237,11 @@ async function folderPass(workspaceId: string, checkedAt: string): Promise<void>
   if (paused(workspaceId, "intake") || !machineOwner(workspaceId)) return;
   readingFolders.add(workspaceId);
   try {
-    const outcomes = await syncFolders(analysisStore, workspaceId, folderDeps).catch(() => []);
+    const outcomes = await syncFolders(analysisStore, workspaceId, folderDepsFor(workspaceId)).catch(() => []);
     const read = outcomes.reduce((sum, item) => sum + item.read, 0);
     if (read) console.info(JSON.stringify({ type: "sources.folders_read", checkedAt, workspaceId, outcomes }));
+    // Recordings the pass just queued start now, in the background: a long one takes far longer than a tick.
+    startRecordings(workspaceId);
     if (!codexSupervisor || !spendAllows(await spendFor(workspaceId), "intake")) return;
     enterUsageWorkspace(workspaceId);
     const filed = await createFolderClassifier(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
@@ -660,7 +665,8 @@ setProviderResolver((workspaceId) => modelProviders.routing(workspaceId));
 const activityIntervalSeconds = Math.max(5, Number(process.env.CROSSLINE_ACTIVITY_INTERVAL_SECONDS) || 60);
 const activityTracker = createActivityTracker(analysisStore, () => analysisStore.listWorkspaces().map((workspace) => workspace.id).filter(machineOwner), activityIntervalSeconds);
 const activitySource = createWindowsActivitySource({ intervalSeconds: activityIntervalSeconds });
-if (process.env.CROSSLINE_RUN_ONCE !== "1") activitySource.start((reading) => activityTracker.handle(reading));
+let lastIdle: { idleMs: number; at: number } | undefined;
+if (process.env.CROSSLINE_RUN_ONCE !== "1") activitySource.start((reading) => { lastIdle = { idleMs: reading.idleMs, at: Date.now() }; activityTracker.handle(reading); });
 process.on("exit", () => activitySource.stop());
 /** A workspace's own quota: the owner's runtime for the owner, the account's own for anyone else (which starts it when connected). */
 const readCost = async (workspaceId?: string) => codexSupervisor
@@ -731,6 +737,34 @@ async function transcribeDocument(workspaceId: string, documentId: string): Prom
   }).catch(() => undefined);
   return { state: "transcribing", documentId };
 }
+/**
+ * 录音自动转写 (recordings.ts, docs/phone-recording.md): recordings queued from the authorized folders, one at a time on the same line as
+ * uploaded recordings, slowed down while the person uses the computer in the day. The idle time is the screen-activity reader's latest,
+ * kept in memory only — it is read whether or not screen activity is recorded, and nothing of it is stored here.
+ */
+const recordingWorkspaces = new Set<string>();
+let recordingRunning = false;
+function startRecordings(workspaceId: string): void {
+  if (!machineOwner(workspaceId) || !recordingsOn(analysisStore, workspaceId) || paused(workspaceId, "intake")) return;
+  recordingWorkspaces.add(workspaceId);
+  if (recordingRunning) return;
+  recordingRunning = true;
+  transcribeQueue = transcribeQueue.then(async () => {
+    while (recordingWorkspaces.size) {
+      const next = [...recordingWorkspaces][0]!;
+      recordingWorkspaces.delete(next);
+      const outcomes = await recordingPass(analysisStore, next, {
+        transcriber, dataDir, timeZone: calendarZone(next) ?? "America/Chicago",
+        ...(process.env.CROSSLINE_TRANSCRIBE_LANGUAGE?.trim() ? { language: process.env.CROSSLINE_TRANSCRIBE_LANGUAGE.trim() } : {}),
+        idleMs: () => lastIdle && Date.now() - lastIdle.at < 5 * 60_000 ? lastIdle.idleMs + (Date.now() - lastIdle.at) : undefined,
+        modelNeeded: (waiting) => sayToPerson(analysisStore, next, `有 ${waiting} 个手机录音等着转写，需要先在设置里同意下载语音识别模型（约 ${WHISPER_MODEL.approxMegabytes} MB，一次性）。`,
+          "recording_model", "recording_model", [{ label: "去设置", href: "/settings#privacy" }])
+      }).catch(() => []);
+      if (outcomes.length) console.info(JSON.stringify({ type: "recordings.transcribed", workspaceId: next, outcomes }));
+    }
+  }).catch(() => undefined).finally(() => { recordingRunning = false; });
+}
+
 /** After the model arrives, every recording that was waiting for it starts. */
 // Files read before columns were kept (a schedule table came out as a list nobody could tell the columns of) are read once more.
 void (async () => {
@@ -742,6 +776,7 @@ void (async () => {
 
 async function resumeWaitingRecordings(): Promise<void> {
   for (const workspace of analysisStore.listWorkspaces()) {
+    startRecordings(workspace.id);
     for (const doc of analysisStore.listSourceDocuments(workspace.id)) {
       if (doc.kind === "audio" && doc.extractionStatus === "pending") await transcribeDocument(workspace.id, doc.id);
     }
@@ -1106,7 +1141,7 @@ if (!capabilitySecret) {
       },
       remove: async (workspaceId: string, id: string, purge?: boolean) => removeFolder(analysisStore, workspaceId, id, { purge: Boolean(purge), dataDir }),
       setRules: async (workspaceId: string, id: string, rules: { exclude?: unknown; include?: unknown; names?: unknown }) =>
-        machineOwner(workspaceId) ? setFolderRules(analysisStore, workspaceId, id, rules, folderDeps) : OWNER_ONLY_FOLDER,
+        machineOwner(workspaceId) ? setFolderRules(analysisStore, workspaceId, id, rules, folderDepsFor(workspaceId)) : OWNER_ONLY_FOLDER,
       setLines: async (workspaceId: string, id: string, lines: string[]) => ({ saved: setFolderLines(analysisStore, workspaceId, id, lines) })
     },
     extractBackgroundFacts: (_client, captureTitle, captureContext, signal, workspaceId) =>

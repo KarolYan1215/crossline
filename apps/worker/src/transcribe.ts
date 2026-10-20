@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { originalTime, speechPieces, speechSegments } from "./vad";
 
 /**
  * Turning a recording into text, on this machine.
@@ -156,8 +157,65 @@ ${body}` : body;
     }
   }
 
-  return { status, download, transcribe };
+  /**
+   * A recording found in an authorized folder (docs/phone-recording.md): only the speech goes to the model (`vad.ts`), in pieces of at
+   * most ten minutes, each line put back at its time in the recording. Between pieces `rest` is awaited with how long the piece took —
+   * that is where the worker slows down while the person uses the computer — and `stop` is asked, so turning the consent off ends the
+   * run at the next piece. `workMs` is the time spent decoding and recognising, rests left out.
+   */
+  async function transcribeSpeech(bytes: Uint8Array, fileName: string, run: {
+    language?: string; rest?: (pieceMs: number) => Promise<void>; stop?: () => boolean; now?: () => number;
+  } = {}): Promise<SpeechOutcome> {
+    const now = run.now ?? Date.now;
+    const current = await status();
+    if (current.state === "needs_download" || current.state === "downloading") return { state: "needs_download" };
+    if (current.state === "unavailable") return { state: "failed", code: current.code, message: current.message };
+    let work = 0, started = now();
+    let samples: Float32Array;
+    try { samples = toMono16k(await options.decode(bytes, fileName)); }
+    catch { return { state: "failed", code: "AUDIO_DECODE_FAILED", message: "这段录音的格式读不了；可以在录音 App 里改存成 m4a 或 wav。" }; }
+    const seconds = samples.length / TARGET_RATE;
+    if (seconds > MAX_SECONDS) return { state: "failed", code: "AUDIO_TOO_LONG", message: "这段录音超过 3 小时；请在录音 App 里设成按时长自动分段。" };
+    const pieces = speechPieces(samples, speechSegments(samples, TARGET_RATE), TARGET_RATE);
+    const speechSeconds = Math.round(pieces.reduce((sum, piece) => sum + piece.map.reduce((total, run) => total + run.length, 0), 0));
+    if (!pieces.length) return { state: "silent", seconds: Math.round(seconds), speechSeconds: 0, workMs: now() - started };
+    let language = run.language;
+    const chunks: TranscriptChunk[] = [];
+    let text = "";
+    try {
+      for (const [index, piece] of pieces.entries()) {
+        if (run.stop?.()) return { state: "stopped" };
+        const result = await options.engine.recognise(piece.samples, language);
+        // The first piece decides the language for the rest, so detection (three extra passes) runs once a recording.
+        language ??= result.language;
+        for (const chunk of result.chunks) chunks.push({ start: originalTime(piece.map, chunk.start), end: originalTime(piece.map, chunk.end), text: chunk.text });
+        text += ` ${result.text}`;
+        const took = now() - started;
+        work += took;
+        if (index < pieces.length - 1) await run.rest?.(took);
+        started = now();
+      }
+    } catch (error) {
+      return { state: "failed", code: "TRANSCRIPTION_FAILED", message: `识别没有完成：${error instanceof Error ? error.message.slice(0, 200) : "未知错误"}` };
+    }
+    const body = formatTranscript(chunks, text);
+    // Speech by energy that the model hears no words in (music, traffic) counts as silence, not as a failure to report.
+    if (!body.trim()) return { state: "silent", seconds: Math.round(seconds), speechSeconds, workMs: work };
+    const spoken = language === "zh" ? await (options.simplify ?? simplifyChinese)(body) : body;
+    const named = language ? TRANSCRIPTION_LANGUAGES[language] ?? language : "";
+    return { state: "transcribed", seconds: Math.round(seconds), speechSeconds, workMs: work, ...(language ? { language } : {}),
+      text: named ? `[语言：${named}${run.language ? "" : "，自动识别"}]\n${spoken}` : spoken };
+  }
+
+  return { status, download, transcribe, transcribeSpeech };
 }
+
+export type SpeechOutcome =
+  | { state: "transcribed"; text: string; seconds: number; speechSeconds: number; workMs: number; language?: string }
+  | { state: "silent"; seconds: number; speechSeconds: number; workMs: number }
+  | { state: "needs_download" }
+  | { state: "stopped" }
+  | { state: "failed"; code: string; message: string };
 
 /**
  * The real engine: Whisper (small) through transformers.js on the CPU, and `audio-decode` for mp3/wav/m4a/ogg/flac.
