@@ -7,7 +7,7 @@
  * drops the ones that do not resolve or do not match what was claimed about them. Last, the person decides:
  * nothing here becomes a milestone or a task until they accept it.
  */
-export const DILIGENCE_TOPICS = ["opportunities", "positioning", "literature", "tracking_framework"] as const;
+export const DILIGENCE_TOPICS = ["opportunities", "positioning", "literature", "tracking_framework", "evidence_summary"] as const;
 export type DiligenceTopic = (typeof DILIGENCE_TOPICS)[number];
 
 export type DiligenceSource = { id: string; url: string; title: string; publisher: string; accessedOn: string };
@@ -25,7 +25,8 @@ export type DiligenceOutput = {
 export type DiligenceContext = {
   version: "crossline.diligence.v1";
   today: string; timeZone: string;
-  identity: { id: string; label: string };
+  /** `noTradeCalls`: the investment line and any wealth line; findings and proposals may then carry no buy or sell call or price target. */
+  identity: { id: string; label: string; noTradeCalls?: boolean };
   topic: { kind: DiligenceTopic; question: string };
   projects: Array<{ id: string; name: string; summary: string }>;
   /** The profile, each fact addressed by id so a proposal can say which of the person's own facts it follows from. */
@@ -35,6 +36,9 @@ export type DiligenceContext = {
   /** Titles already proposed and answered, so the same idea is not offered twice. */
   alreadyDecided: Array<{ title: string; decision: "accepted" | "rejected" }>;
 };
+
+/** The red line follows the line's pack, not its id: a wealth line made in the lite edition is `line-wealth`, never `investment`. */
+const noTradeCalls = (context: DiligenceContext) => context.identity.id === "investment" || context.identity.noTradeCalls === true;
 
 const text = (max: number, min = 0) => ({ type: "string", minLength: min, maxLength: max }) as const;
 const object = (properties: Record<string, unknown>) =>
@@ -107,7 +111,7 @@ export function validateDiligence(value: unknown, context: DiligenceContext): Di
     if (!finding.sourceIds.length || finding.sourceIds.some((id) => !sources.has(id))) {
       refuse("DILIGENCE_FINDING_UNSOURCED", `结论「${finding.claim.slice(0, 40)}」没有引用 sources 里存在的来源。`);
     }
-    if (context.identity.id === "investment" && TRADING_ADVICE.test(finding.claim)) {
+    if (noTradeCalls(context) && TRADING_ADVICE.test(finding.claim)) {
       refuse("DILIGENCE_ADVICE_FORBIDDEN", `投资线只做收益率/风险追踪、配置分析和研究备忘，结论「${finding.claim.slice(0, 40)}」含买卖建议或目标价。`);
     }
   }
@@ -122,7 +126,7 @@ export function validateDiligence(value: unknown, context: DiligenceContext): Di
     if (proposal.dueDate && (!ISO.test(proposal.dueDate) || day(proposal.dueDate) < today)) {
       refuse("DILIGENCE_DUE_DATE_INVALID", `建议「${proposal.title}」的日期「${proposal.dueDate}」必须是今天或之后的 YYYY-MM-DD，或留空。`);
     }
-    if (context.identity.id === "investment" && TRADING_ADVICE.test(`${proposal.title} ${proposal.why}`)) {
+    if (noTradeCalls(context) && TRADING_ADVICE.test(`${proposal.title} ${proposal.why}`)) {
       refuse("DILIGENCE_ADVICE_FORBIDDEN", `投资线的建议「${proposal.title}」含买卖建议或目标价。`);
     }
     if (context.alreadyDecided.some((item) => item.title.trim() === proposal.title.trim())) {

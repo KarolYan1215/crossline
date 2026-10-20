@@ -24,7 +24,7 @@ test("the box's actions write a goal, a milestone draft, a new line and a task n
   const draft = store.listMilestones(ws).find((item) => item.title === "投出第一篇期刊论文");
   expect(draft?.status).toBe("draft");
   expect(store.listMilestoneAnchors(ws).find((anchor) => anchor.milestoneId === draft?.id)).toMatchObject({ deadline: "2026-12-01", target: "期刊审稿中" });
-  expect(await executeAction(TEST_CTX, { action: "line.add", summary: "跑者", args: { label: "跑者" } })).toMatchObject({ ok: true });
+  expect(await executeAction(TEST_CTX, { action: "line.add", summary: "跑者", args: { label: "跑者", domain: "" } })).toMatchObject({ ok: true });
   expect(identityLines(TEST_CTX).some((line) => line.label === "跑者")).toBe(true);
   expect(await executeAction(TEST_CTX, { action: "task.op", summary: "第三题卡住了", args: { ...op, type: "note", text: "第三题卡住了" } })).toMatchObject({ ok: true });
   expect(store.listEvents(ws, { type: "task.note", entityId: "w1" })).toHaveLength(1);

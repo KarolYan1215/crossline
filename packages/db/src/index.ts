@@ -5,7 +5,7 @@ import { SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactI
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
-  type ChecklistAnswer, type WorkRhythm } from "@crossline/core";
+  type ChecklistAnswer, type WorkRhythm, type DomainRecordInput, type StoredDomainRecord } from "@crossline/core";
 import { handOffArtifacts } from "./artifacts";
 
 type LedgerEventInput = {
@@ -1123,6 +1123,19 @@ export class CrosslineStore {
             answer_sentences TEXT NOT NULL DEFAULT '[]', repeats INTEGER, asked_at TEXT NOT NULL, answered_at TEXT, updated_at TEXT NOT NULL,
             PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, key));
           CREATE INDEX IF NOT EXISTS question_ledger_by_status ON question_ledger(workspace_id, status, updated_at);`);
+      } },
+      // Records (2026-10-19, docs/domain-lines.md): a wealth line's bookkeeping and a wellness line's measurements, one row per real event
+      // (`dedupe_key`: the same mail, shortcut or confirmation never writes twice). `deleted_at` keeps a removed record out of every sum
+      // while the deletion stays undoable.
+      { version: 18, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS domain_records (
+            workspace_id TEXT NOT NULL, id TEXT NOT NULL, domain TEXT NOT NULL CHECK(domain IN ('wellness','wealth')), kind TEXT NOT NULL,
+            at TEXT NOT NULL, value REAL NOT NULL, unit TEXT NOT NULL DEFAULT '', currency TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '', source TEXT NOT NULL, source_ref TEXT NOT NULL DEFAULT '', dedupe_key TEXT NOT NULL,
+            created_at TEXT NOT NULL, deleted_at TEXT,
+            PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, dedupe_key));
+          CREATE INDEX IF NOT EXISTS domain_records_by_day ON domain_records(workspace_id, domain, at);`);
       } }
     ];
 
@@ -2617,6 +2630,32 @@ export class CrosslineStore {
     })();
   }
 
+  /** Keeps one record; a second one with the same `dedupeKey` is not written (`inserted: false`) and the first stays as it was. */
+  addRecord(workspaceId: string, input: DomainRecordInput, now = new Date().toISOString()): { inserted: boolean; record: StoredDomainRecord } {
+    const record: StoredDomainRecord = { ...input, id: randomUUID(), workspaceId, createdAt: now };
+    const result = this.#db.prepare(`INSERT OR IGNORE INTO domain_records (workspace_id, id, domain, kind, at, value, unit, currency, category, note, source,
+      source_ref, dedupe_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(workspaceId, record.id, input.domain, input.kind, input.at,
+      input.value, input.unit, input.currency, input.category, input.note, input.source, input.sourceRef, input.dedupeKey, now);
+    if (result.changes) return { inserted: true, record };
+    const existing = this.listRecords(workspaceId, { includeDeleted: true }).find((item) => item.dedupeKey === input.dedupeKey)!;
+    return { inserted: false, record: existing };
+  }
+
+  /** Records of a workspace, oldest first; `since` is a day (`YYYY-MM-DD`) compared with each record's own day. */
+  listRecords(workspaceId: string, filter: { domain?: "wellness" | "wealth"; since?: string; includeDeleted?: boolean } = {}): StoredDomainRecord[] {
+    const rows = this.#db.prepare(`SELECT * FROM domain_records WHERE workspace_id = ? ${filter.domain ? "AND domain = ?" : ""}
+      ${filter.since ? "AND substr(at, 1, 10) >= ?" : ""} ${filter.includeDeleted ? "" : "AND deleted_at IS NULL"} ORDER BY at, created_at`)
+      .all(workspaceId, ...(filter.domain ? [filter.domain] : []), ...(filter.since ? [filter.since] : [])) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({ id: String(row.id), workspaceId, domain: row.domain as "wellness" | "wealth", kind: row.kind as DomainRecordInput["kind"],
+      at: String(row.at), value: Number(row.value), unit: String(row.unit), currency: String(row.currency), category: String(row.category), note: String(row.note),
+      source: row.source as DomainRecordInput["source"], sourceRef: String(row.source_ref), dedupeKey: String(row.dedupe_key), createdAt: String(row.created_at) }));
+  }
+
+  /** Marks a record removed (kept for undo) or brings it back. */
+  setRecordDeleted(workspaceId: string, id: string, deleted: boolean, at = new Date().toISOString()): boolean {
+    return this.#db.prepare("UPDATE domain_records SET deleted_at = ? WHERE workspace_id = ? AND id = ?").run(deleted ? at : null, workspaceId, id).changes > 0;
+  }
+
   appendEvent(event: LedgerEventInput): { inserted: boolean; eventId: string } {
     const existing = this.#db.prepare(
       "SELECT event_id FROM events WHERE workspace_id = ? AND idempotency_key = ?"
@@ -3288,7 +3327,7 @@ export class CrosslineStore {
       "assistant_threads", "assistant_attachments", "milestone_templates",
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
-      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences", "question_ledger", "workspace_counters",
+      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences", "question_ledger", "workspace_counters", "domain_records",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by
@@ -3865,5 +3904,6 @@ export * from "./skills";
 export * from "./invites";
 export * from "./evidence-backfill";
 export * from "./onboarding-extract";
+export * from "./records";
 export * from "./automations";
 export * from "./mail-replies";

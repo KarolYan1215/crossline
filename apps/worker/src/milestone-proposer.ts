@@ -4,7 +4,8 @@ import {
   ARTIFACT_PLAN_SCHEMA, ARTIFACT_PLAN_VERSION, MILESTONE_PROPOSAL_SCHEMA, deriveArtifactRelations, goalSettingKey, keptArtifactPlan, lineArtifacts, mergeArtifactPlan,
   profileFactId, relationFulfilment, supplyWarnings, MILESTONE_DRAFTING_SETTING, readMilestoneDrafting, validateArtifactPlan, validateMilestoneProposal, keepMilestoneProposal, computeMilestoneConfidence,
   type ArtifactMilestone, type ArtifactPlanContext, type CheckedArtifactPlan, type LineArtifacts, type MilestoneProposal, type MilestoneProposalContext,
-  type StoredArtifactPlan, type MilestoneDrafting
+  type StoredArtifactPlan, type MilestoneDrafting,
+  domainMilestoneTemplates
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import {
@@ -129,6 +130,8 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
     && !(options.replaceUntouchedDrafts && isUntouchedDraft(milestone)));
   const facts = store.listProfileFacts(workspaceId);
   const identities = identityLines(store, workspaceId);
+  // A domain line's templates are added the first time its milestones are designed (INSERT OR IGNORE: a person's own edits stay).
+  for (const pack of identities) if (pack.domain) store.seedMilestoneTemplates(workspaceId, domainMilestoneTemplates(pack.id, pack.domain));
   const now = options.now?.() ?? (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date());
   return {
     // How the person works and what the plan serves (planningProfile): every line's chain is paced for this person.
@@ -137,7 +140,10 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
     // A line's long-term goal, when the person gave one, is what its milestones are worked toward.
     // The attributes the person chose are named too, so the milestones serve what they adopted and nothing the model adds to it.
     identities: identities.map((pack) => ({ id: pack.id, label: pack.label, summary: pack.goal
-      ? `长期目标：${pack.goal}${pack.goalParts?.length ? `（本人选定的定语：${pack.goalParts.join("；")}）` : ""}` : pack.workflowTemplates.join(", ") })),
+      ? `长期目标：${pack.goal}${pack.goalParts?.length ? `（本人选定的定语：${pack.goalParts.join("；")}）` : ""}` : pack.workflowTemplates.join(", ")
+      // A domain line's milestones are numbers against the person's own baseline (its facts' health_* / wealth_* slots), never advice.
+      + (pack.domain === "wealth" ? "。财富领域：里程碑是可核对的数字（应急金月数、储蓄率、还清的负债），不含买卖建议" : "")
+      + (pack.domain === "wellness" ? "。健康领域：里程碑是可测的数字（体重、每周运动次数、配速、体检指标），尊重 health_limits，不含医疗建议" : "") })),
     // Drafts are included so the Skill does not re-propose something already waiting for a decision.
     existingMilestones: milestones.map((milestone) => ({
       id: milestone.id, identityId: milestone.identityId, title: milestone.title, status: milestone.status

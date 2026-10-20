@@ -157,6 +157,9 @@ export type TurnInsight = { text: string; refs: Array<{ replyId: string; quote: 
  * whether this round's answers finished the part, and what to ask next. Written by the dialogue every round, kept by the app and handed
  * back at the start of the next round, so the stage is steered by the interview's own judgement and not re-derived from a long ledger.
  */
+/** A domain line's checklist as the interview is given it (built by `domainGuides` in @crossline/identity-packs). */
+export type DomainGuideContext = { lineId: string; label: string; domain: string; ask: string[]; slots: string[]; attributeHints: string[] };
+
 export type TurnProgress = { part: OnboardingStage; covered: string[]; open: string[]; partDone: boolean; next: string };
 
 /**
@@ -175,7 +178,9 @@ export type OnboardingTurnContext = {
   /** A line's own interview: only this line is asked about. Absent for the full interview. */
   focusLine?: { id: string; label: string; goal: string } | null;
   /** The person's lines as set on the opening screen: identity noun, order (null = parallel), hard constraint, chosen goals. */
-  lines?: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts?: string[] }>;
+  lines?: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts?: string[]; domain?: string }>;
+  /** The domain lines' fixed checklists (健康 / 财富, docs/domain-lines.md): asked instead of improvised, recorded under fixed slots. */
+  domainGuides?: DomainGuideContext[];
   /** The portrait so far and the stage reached, so a rebuilt thread carries on rather than starting over. */
   profile?: ProfileModel; stage?: OnboardingStage;
   /** How the person asked to be spoken to (`ONBOARDING_TONE_SETTING`); also sent with every later turn, since it can change. */
@@ -237,7 +242,9 @@ export type OnboardingTurnContext = {
 export type OnboardingExtractContext = {
   version: "crossline.onboarding.extract.v1";
   today: string; timeZone: string;
-  lines: Array<{ id: string; label: string; hard: boolean; goals: string[] }>;
+  lines: Array<{ id: string; label: string; hard: boolean; goals: string[]; domain?: string }>;
+  /** The domain lines' fixed slots and goal adjectives, so their facts are recorded under the same names every time. */
+  domainGuides?: DomainGuideContext[];
   projects: Array<{ id: string; identityId: string; name: string; summary: string }>;
   /** The ledger's facts, one line each (`identity/project · slot = value（确认|推断）`): what is already known, to update rather than repeat. */
   facts: string[];

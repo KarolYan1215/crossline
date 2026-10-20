@@ -28,6 +28,8 @@ export type Inverse =
   | { kind: "source.project"; entries: Array<{ id: string; projectId: string | null }> }
   /** The daily merge (apps/worker/src/dedupe.ts): the absorbed tasks come back and the kept one gets its payload and step plan back. */
   | { kind: "task.unmerge"; keepId: string; payload: unknown; plan: StepPlanInput | null; restore: string[] }
+  /** Records (docs/domain-lines.md) the operation added are removed again; ones it removed come back. */
+  | { kind: "records.deleted"; ids: string[]; deleted: boolean }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
@@ -129,6 +131,9 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
         if (keep && inverse.plan) store.saveStepPlan(ctx.workspaceId, inverse.keepId, inverse.plan, ctx.principalId, "unmerged");
         return { ok: true };
       }
+      case "records.deleted":
+        for (const id of inverse.ids) store.setRecordDeleted(ctx.workspaceId, id, inverse.deleted);
+        return { ok: true };
       case "source.project":
         for (const entry of inverse.entries) store.assignSourceDocumentProject(ctx.workspaceId, entry.id, entry.projectId);
         return { ok: true };
@@ -208,6 +213,7 @@ function snapshot(ctx: AccessContext) {
     milestones: new Map(store.listMilestones(ctx.workspaceId).map((item) => [item.id, item.status])),
     settings: store.listSettings(ctx.workspaceId, UNDOABLE_SETTINGS),
     sources: new Map(store.listSourceDocuments(ctx.workspaceId).map((doc) => [doc.id, doc.projectId ?? null])),
+    records: new Set(store.listRecords(ctx.workspaceId).map((record) => record.id)),
     eventIds: new Set(store.listEvents(ctx.workspaceId, { type: RETRACTABLE_EVENTS }).map((event) => event.eventId))
   };
 }
@@ -221,6 +227,9 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
     if (was.state === "open" && now && (now.state !== "open" || now.followUpAt !== was.followUpAt)) reopen.push({ id, followUpAt: was.followUpAt });
   }
   if (reopen.length) items.push({ kind: "waiting.reopen", items: reopen });
+  const addedRecords = [...after.records].filter((id) => !before.records.has(id)), removedRecords = [...before.records].filter((id) => !after.records.has(id));
+  if (addedRecords.length) items.push({ kind: "records.deleted", ids: addedRecords, deleted: true });
+  if (removedRecords.length) items.push({ kind: "records.deleted", ids: removedRecords, deleted: false });
   const opened = [...after.waiting].filter(([id, now]) => !before.waiting.has(id) && now.state === "open").map(([id]) => id);
   if (opened.length) items.push({ kind: "waiting.cancel", ids: opened });
   const restored: string[] = [], archived: string[] = [], revoked: string[] = [];

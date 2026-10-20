@@ -4,13 +4,19 @@ import { useState } from "react";
 import { Sheet } from "../ui/overlay";
 import { AttributePicker, type AttributeOption } from "../ui/attribute-picker";
 import { composeGoal } from "@crossline/core";
+import { DOMAIN_PACKS, LINE_DOMAINS, type LineDomain } from "@crossline/identity-packs";
 import { LineCardInterview, type LineInterviewView } from "./line-card-interview";
+import { DomainRecords, type DomainRecordsCard } from "./domain-records";
 
 /**
  * One line as its card shows it. `attributes`: the interview's candidates for the long-term goal (§4.1); `goalParts`: the ones the goal
  * was composed from, in order; the rest is the line's own interview inside the card (§4.2).
  */
 export type LineCard = { id: string; label: string; color: string; goals: string[]; hard: boolean; rank: number | null; milestones: number;
+  /** The life domain the line covers (健康 / 财富), which brings its interview checklist, templates and records; null for none. */
+  domain?: LineDomain | null;
+  /** A domain line's numbers from its records (this month's money, this week's exercise). */
+  records?: DomainRecordsCard | null;
   attributes: AttributeOption[]; goalParts: string[]; description: string; pendingEdit: { parts: string[] } | null; redraftDue: boolean;
   interview: LineInterviewView;
   /** Of `milestones`, how many are drafts waiting for approval. */
@@ -18,7 +24,7 @@ export type LineCard = { id: string; label: string; color: string; goals: string
 
 const post = async (body: unknown) => {
   const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
-  return { ok: Boolean(response?.ok), body: await response?.json().catch(() => null) as { id?: string; code?: string; message?: string } | null };
+  return { ok: Boolean(response?.ok), body: await response?.json().catch(() => null) as { id?: string; code?: string; message?: string; lineId?: string } | null };
 };
 const FAILURE: Record<string, string> = { LINE_LABEL_REQUIRED: "需要主线名称（身份名词，如「研究者」）", LINE_LABEL_TAKEN: "已有同名主线",
   LINE_HARD_LIMIT: "硬约束最多两条" };
@@ -27,7 +33,9 @@ const FAILURE: Record<string, string> = { LINE_LABEL_REQUIRED: "需要主线名�
  * One line, or a new one: its name (an identity noun — 研究者, 创作者), its long-term goal built from attributes (an existing line), any
  * further long-term goals, whether it is a hard constraint, and its colour.
  */
-function LineEditor({ line, palette, onDone, onOrder }: { line?: LineCard; palette: Record<string, string>; onDone: () => void;
+function LineEditor({ line, palette, onDone, onOrder, names = {} }: { line?: LineCard; palette: Record<string, string>; onDone: () => void;
+  /** Line id → name, so a domain another line already covers can be named. */
+  names?: Record<string, string>;
   /** Moves this line into the ranked order or out of it (to parallel); absent for a new line. */
   onOrder?: (() => void) | undefined }) {
   const [label, setLabel] = useState(line?.label ?? "");
@@ -35,11 +43,17 @@ function LineEditor({ line, palette, onDone, onOrder }: { line?: LineCard; palet
   const [goals, setGoals] = useState<string[]>(line ? line.goals.slice(1) : [""]);
   const [hard, setHard] = useState(line?.hard ?? false);
   const [color, setColor] = useState(line?.color ?? "");
+  const [domain, setDomain] = useState<LineDomain | "">(line?.domain ?? "");
   const [status, setStatus] = useState("");
   const save = async (extra: Record<string, unknown> = {}) => {
     setStatus("保存中…");
     const kept = goals.filter((goal) => goal.trim());
-    const result = await post({ ...(line ? { id: line.id } : {}), label, goals: line ? [...line.goals.slice(0, 1), ...kept] : kept, hard, ...(color ? { color } : {}), ...extra });
+    const domainChange = line ? (domain !== (line.domain ?? "") ? { domain: domain || null } : {}) : domain ? { domain } : {};
+    const result = await post({ ...(line ? { id: line.id } : {}), label, goals: line ? [...line.goals.slice(0, 1), ...kept] : kept, hard, ...(color ? { color } : {}), ...domainChange, ...extra });
+    if (!result.ok && result.body?.code === "LINE_DOMAIN_TAKEN" && domain) {
+      // One line per domain: name the line that has it, which can be changed instead of adding a second.
+      setStatus(`「${names[result.body.lineId ?? ""] ?? "另一条主线"}」已经是${DOMAIN_PACKS[domain].label}主线，可在那条主线里修改`); return;
+    }
     if (!result.ok) { setStatus(FAILURE[result.body?.code ?? ""] ?? result.body?.message ?? "未保存，请重试"); return; }
     // A new line is set up by its own interview: what the person does on it, where they stand, what they want from it.
     if (!line && result.body?.id) { location.href = `/onboarding?line=${encodeURIComponent(result.body.id)}`; return; }
@@ -65,6 +79,10 @@ function LineEditor({ line, palette, onDone, onOrder }: { line?: LineCard; palet
         {(line || goals.length > 1) && <button type="button" aria-label="删除该目标" onClick={() => setGoals((list) => list.filter((_, i) => i !== index))}>×</button>}
       </div>)}
       <button type="button" className="text-button" onClick={() => setGoals((list) => [...list, ""])}>＋ 添加长期目标</button>
+    </fieldset>
+    <fieldset className="line-domain"><legend>领域（带固定的访谈清单、里程碑模板与记录）</legend>
+      {(["", ...LINE_DOMAINS] as const).map((id) => <label key={id || "none"}><input type="radio" name={`domain-${line?.id ?? "new"}`} checked={domain === id}
+        onChange={() => { setDomain(id); if (!line && id && !label.trim()) setLabel(DOMAIN_PACKS[id].noun); }} />{id ? DOMAIN_PACKS[id].label : "无"}</label>)}
     </fieldset>
     <label className="line-hard"><input type="checkbox" checked={hard} onChange={(event) => setHard(event.target.checked)} />
       硬约束：其固定日程是不可移动的骨架、截止日优先，可用时段由它推出（最多两条）</label>
@@ -131,10 +149,12 @@ export function LinesBar({ lines, palette }: { lines: LineCard[]; palette: Recor
       <header draggable={Boolean(line.rank)} onDragStart={() => setDragging(line.id)}>
         <button type="button" className="lines-bar-name" onClick={() => setEditing(line)}>{line.label}</button>
         {line.hard && <span className="tag">硬约束</span>}
+        {line.domain && <span className="tag">{DOMAIN_PACKS[line.domain].label}</span>}
         <small className="mono">{index !== undefined ? (index === 0 ? "底座" : `第 ${index + 1}`) : "平行"}</small>
       </header>
       <GoalChips line={line} />
       {line.goals.length > 1 && <small className="muted lb-more" title={line.goals.slice(1).join("；")}>另有 {line.goals.length - 1} 个长期目标</small>}
+      {line.records && <DomainRecords card={line.records} />}
       <footer>
         <small className="mono">{line.milestones} 个里程碑{line.drafts ? ` · ${line.drafts} 待批准` : ""}</small>
         <button type="button" className="text-button lines-bar-goal-button" onClick={() => setEditing(line)}>{goalLink(line)}</button>
@@ -154,7 +174,7 @@ export function LinesBar({ lines, palette }: { lines: LineCard[]; palette: Recor
       <button type="button" className="lines-bar-add" aria-label="新增主线" title="新增主线" onClick={() => setEditing("new")}>＋</button>
     </div>
     <Sheet title={editing === "new" ? "新增主线" : editing ? `主线：${editing.label}` : ""} open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}>
-      {editing && <LineEditor {...(editing === "new" ? {} : { line: editing, onOrder: reorder(editing) })} palette={palette} onDone={() => setEditing(null)} />}
+      {editing && <LineEditor {...(editing === "new" ? {} : { line: editing, onOrder: reorder(editing) })} palette={palette} names={Object.fromEntries(lines.map((item) => [item.id, item.label]))} onDone={() => setEditing(null)} />}
     </Sheet>
   </section>;
 }

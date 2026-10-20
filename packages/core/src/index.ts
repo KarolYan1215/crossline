@@ -18,6 +18,7 @@ export * from "./milestone-risk";
 export * from "./artifact-plan";
 export * from "./onboarding-turn-schema";
 export * from "./line-attributes";
+export * from "./records";
 export * from "./profile-gaps";
 export * from "./agent-guard";
 export * from "./agent-summary";

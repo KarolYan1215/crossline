@@ -27,3 +27,11 @@ _Avoid_: Delete, archive
 **Archive**:
 Withdrawing a WorkOrder, with a reason. Archived work leaves the board and stays in the ledger.
 _Avoid_: Discard, delete
+
+**Domain line**:
+A line that covers a part of life every person has (health, money) rather than a calling of their own. Carries a fixed interview checklist, milestone templates and records; at most one per domain.
+_Avoid_: Mode, edition, capacity
+
+**Record**:
+One real event a domain line keeps — a payment, a salary, a workout, a weight — stated by the person or one of their devices and checked by code, never a model's estimate.
+_Avoid_: Log, entry, transaction

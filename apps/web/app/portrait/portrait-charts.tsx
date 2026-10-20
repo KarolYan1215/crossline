@@ -27,7 +27,9 @@ export function Fit({ initial, max, children }: { initial: number; max: number; 
  */
 
 const INK = "#1C1A17", MUTED = "#4F4A42", TRACK = "#DDD5C7";
-const LINE_COLOUR: Record<string, string> = { research: "#0A5198", startup: "#8C3709", media: "#792E9C", investment: "#085E3A", health: "#664E00" };
+// The domain lines (docs/domain-lines.md) keep their default palette colours (olive, teal).
+const LINE_COLOUR: Record<string, string> = { research: "#0A5198", startup: "#8C3709", media: "#792E9C", investment: "#085E3A", health: "#664E00",
+  "line-wellness": "#4A5200", "line-wealth": "#005B66" };
 const colourOf = (lineId: string) => LINE_COLOUR[lineId] ?? INK;
 
 /**

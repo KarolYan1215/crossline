@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
   MAIL_ACCOUNTS_SETTING, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
-  validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage
+  amountsInText, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage
 } from "@crossline/core";
 import {
   createImapMail, hostAllowed, presetFor, unsupportedProvider, type ImapFactory, type ImapMail, type MailHeader, type SecretStore
 } from "@crossline/connectors";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { mailRepliesView, type CrosslineStore } from "@crossline/db";
+import { mailRepliesView, recordAndJudge, type CrosslineStore } from "@crossline/db";
 import type { MailLookup } from "./agent-tools";
 import { draftReplies, followUpReplies, type ReplyCandidate } from "./mail-replies";
 import { identityLines } from "./lines";
@@ -151,7 +151,7 @@ export async function readNewMail(deps: MailDeps, workspaceId: string, force = f
  * lines carry the sender and subject so the analysis knows where a task came from.
  */
 export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | undefined; cwd: string }, workspaceId: string, messages: NewMail[]):
-  Promise<{ state: "done"; captured: number; replies: number; sorted: number; needsReply: ReplyCandidate[] } | { state: "skipped"; reason: string }> {
+  Promise<{ state: "done"; captured: number; replies: number; sorted: number; needsReply: ReplyCandidate[]; recorded: number } | { state: "skipped"; reason: string }> {
   const sorting = new Set(accounts(deps.store, workspaceId).filter((account) => account.triage).map((account) => account.id));
   const batch = messages.filter((message) => sorting.has(message.accountId)).slice(-40);
   if (!batch.length) return { state: "skipped", reason: "nothing" };
@@ -172,7 +172,10 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       + "doing nothing costs them (a deadline, a question only they can answer, an account or money alert to check); its title is the inbox line, "
       + "verb first, with the day. date for a dated event the mail asks nothing about; reply with the wait's id when the sender is who an open wait "
       + "is on, or with an empty waitingId when a real person or office waits for the person's answer by mail (a draft is written, never sent); info "
-      + "for news about the person's own things that needs nothing; ignore for promotions, digests, cold pitches, spam and phishing.",
+      + "for news about the person's own things that needs nothing; ignore for promotions, digests, cold pitches, spam and phishing. "
+      + "transaction for a payment, purchase, refund, transfer or salary the mail itself states with an amount: direction, amount, currency "
+      + "(ISO, e.g. CNY) and merchant exactly as the mail shows them; an unusual or unrecognised charge is todo, not transaction. Other kinds "
+      + "leave direction and currency empty and amount 0.",
     prepareInput: () => input, validateOutput: (output) => validateMailTriage(output, keyed.map((message) => message.key), waiting.map((item) => item.id)),
     onAudit: () => {}, timeoutMs: 20 * 60_000
   });
@@ -180,8 +183,10 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   const at = (deps.now?.() ?? new Date()).toISOString();
   const ownerId = ownerOf(deps.store, workspaceId);
   const log: MailLogEntry[] = [];
-  let captured = 0, replies = 0;
+  let captured = 0, replies = 0, recorded = 0;
   const needsReply: ReplyCandidate[] = [];
+  const bookkeeping = new Set(accounts(deps.store, workspaceId).filter((account) => account.triage && account.bookkeeping !== false).map((account) => account.id));
+  const wealthLine = identityLines(deps.store, workspaceId).find((line) => line.domain === "wealth")?.id;
   for (const item of result.output.items) {
     const message = keyed.find((entry) => entry.key === item.uid);
     if (!message) continue;
@@ -198,6 +203,19 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       `mail:capture:${mailKey(message)}`);
       captured += 1;
     } else if (kind === "todo" || kind === "date") kind = "info";
+    // A payment mail is a record only when its own subject or opening states the same amount: the model sorts, it never supplies a number.
+    if (kind === "transaction") {
+      const stated = amountsInText(`${message.subject} ${message.snippet}`);
+      const currency = item.currency.trim().toUpperCase() === "RMB" ? "CNY" : item.currency.trim().toUpperCase();
+      const confirmed = bookkeeping.has(message.accountId) && stated.some((entry) => entry.value === item.amount && (!currency || entry.currency === currency));
+      if (confirmed && item.direction) {
+        const written = recordAndJudge(deps.store, workspaceId, ownerId, { domain: "wealth", kind: item.direction, at: (message.date || at).slice(0, 10), value: item.amount,
+          unit: "元", currency: currency || stated.find((entry) => entry.value === item.amount)!.currency, category: item.merchant.trim().slice(0, 40),
+          note: `邮件：${message.subject}`.slice(0, 200), source: "mail", sourceRef: mailKey(message), dedupeKey: `mail:${mailKey(message)}` },
+        { lineId: wealthLine, now: deps.now?.() ?? new Date() });
+        if (written.ok && written.inserted) recorded += 1;
+      } else kind = "info";
+    }
     if (kind === "reply") {
       deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${mailKey(message)}`, type: "waiting.mail_seen",
         entityId: item.waitingId, payload: { from: message.from, subject: message.subject, date: message.date, at } });
@@ -208,8 +226,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   const kept = [...readMailLog(deps.store.getSetting(workspaceId, MAIL_LOG_SETTING)), ...log].slice(-MAIL_LOG_KEEP);
   deps.store.setSetting(workspaceId, MAIL_LOG_SETTING, JSON.stringify(kept));
   deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `mail.triaged:${at}:${randomUUID().slice(0, 6)}`, type: "mail.triaged", entityId: workspaceId,
-    payload: { messages: keyed.length, captured, replies } });
-  return { state: "done", captured, replies, sorted: log.length, needsReply };
+    payload: { messages: keyed.length, captured, replies, recorded } });
+  return { state: "done", captured, replies, sorted: log.length, needsReply, recorded };
 }
 
 /** Messages that need a reply whose draft failed for a passing reason (the model, the quota): drafted with a later pass, for three days. */

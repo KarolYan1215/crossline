@@ -210,6 +210,58 @@ export function defaultMilestoneTemplates(): MilestoneTemplate[] {
   ];
 }
 
+/**
+ * Templates for a domain line (健康 / 财富, docs/domain-lines.md), keyed to that line's id so a renamed or re-id'd line keeps its own.
+ * Events with a number, as every milestone must be: a threshold reached and held, a cadence kept for weeks, a debt cleared. The numbers
+ * here are placeholders the architect replaces with the person's own baseline and target; an emergency fund comes first because people
+ * who are prompted to set one up at the start do so far more often than those left to choose (docs/domain-lines.md, research notes).
+ */
+export function domainMilestoneTemplates(lineId: string, domain: "wellness" | "wealth"): MilestoneTemplate[] {
+  const id = (name: string) => `${lineId}-${name}`;
+  if (domain === "wellness") return [
+    template(id("weight-target"), "threshold", lineId, "体重达到目标并保持四周", [
+      criterion("c1", "连续四周每周的体重记录都在目标范围内", true, "outcome", { kind: "threshold", unit: "kg", comparator: "lte", value: 70 })
+    ]),
+    template(id("weekly-cadence"), "recurring_cadence", lineId, "每周运动达标连续八周", [
+      criterion("c1", "连续八周每周运动次数不少于目标", true, "outcome", { kind: "count", unit: "次/周", atLeast: 3 })
+    ]),
+    template(id("run-time"), "threshold", lineId, "5 公里用时达到目标", [
+      criterion("c1", "一次完整的 5 公里记录用时不超过目标", true, "outcome", { kind: "threshold", unit: "分钟", comparator: "lte", value: 30 })
+    ]),
+    template(id("checkup-metric"), "threshold", lineId, "体检指标回到正常范围", [
+      criterion("c1", "复查报告中目标指标在参考范围内", true, "outcome",
+        { kind: "judgement", rubric: "复查报告写明该指标在参考范围内", failsWhen: "指标仍在参考范围外，或没有复查" })
+    ]),
+    template(id("sleep-regular"), "recurring_cadence", lineId, "作息规律连续四周", [
+      criterion("c1", "连续四周每周至少五晚在目标时间前入睡", true, "outcome", { kind: "count", unit: "晚/周", atLeast: 5 })
+    ]),
+    template(id("event"), "validation", lineId, "完成一次赛事或体测", [
+      criterion("c1", "赛事或体测的成绩记录存在", true, "output", { kind: "artifact", mustExist: "成绩记录" })
+    ])
+  ];
+  return [
+    template(id("emergency-fund"), "threshold", lineId, "应急金达到 N 个月支出", [
+      criterion("c1", "应急账户余额可覆盖的月支出数达到目标", true, "outcome", { kind: "threshold", unit: "个月", comparator: "gte", value: 3 })
+    ]),
+    template(id("savings-rate"), "threshold", lineId, "月储蓄率连续三个月达标", [
+      criterion("c1", "连续三个月的储蓄率（1 − 支出 / 收入）不低于目标", true, "outcome", { kind: "threshold", unit: "%", comparator: "gte", value: 20 })
+    ]),
+    template(id("debt-cleared"), "deliverable", lineId, "还清一笔负债", [
+      criterion("c1", "结清证明或账单显示该笔负债余额为零", true, "output", { kind: "artifact", mustExist: "结清证明" })
+    ]),
+    template(id("spend-cap"), "threshold", lineId, "月支出控制在上限内", [
+      criterion("c1", "连续两个月的总支出不超过上限", true, "outcome", { kind: "threshold", unit: "元", comparator: "lte", value: 6000 })
+    ]),
+    template(id("learning-note"), "deliverable", lineId, "写成一份自己的投资复盘或框架", [
+      criterion("c1", "本人写的复盘或框架文档存在，说明规则与理由，不含买卖建议", true, "output", { kind: "artifact", mustExist: "复盘或框架文档" })
+    ]),
+    template(id("annual-review"), "decision", lineId, "完成一次保险与税务盘点", [
+      criterion("c1", "列出现有保险与税务事项并对每项做出保留、调整或新增的决定", true, "outcome",
+        { kind: "judgement", rubric: "每一项都有明确决定", failsWhen: "仍有事项没有决定" })
+    ])
+  ];
+}
+
 export type MilestoneConfidence = "low" | "medium" | "high";
 
 /**

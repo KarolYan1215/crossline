@@ -9,6 +9,7 @@
  */
 import type { TaskOpType } from "./assistant-schema";
 import { SHIFT_MINUTES } from "./schedule-frozen";
+import { recordProblem } from "./records";
 
 export type ActionRisk = "internal" | "commitment";
 
@@ -35,6 +36,11 @@ export const ACTIONS = {
   "ask.snooze": { label: "稍后再问", risk: "internal", args: { askId: str(200), until: enumOf(["tomorrow", "week"]) } },
   "undo": { label: "撤销", risk: "internal", args: { opId: str(64) } },
   "energy.report": { label: "记录精力", risk: "internal", args: { level: enumOf(["low", "medium", "high"]), note: str(300) } },
+  // A record of money or health (docs/domain-lines.md): read from the person's line, a pasted text or an attached screenshot; the card
+  // shows the numbers and nothing is written until the person confirms them.
+  "record.add": { label: "记一笔", risk: "internal", args: { domain: enumOf(["wellness", "wealth"]),
+    kind: enumOf(["income", "expense", "workout", "weight", "meal", "metric"]), value: { type: "number" }, unit: str(16), currency: str(8),
+    category: str(40), note: str(200), at: day } },
   /** 「后面都推 10 分钟」: today's plan from now on starts later; what the person started or locked stays. */
   "schedule.shift": { label: "整体顺延", risk: "internal", args: { minutes: { type: "number" } } },
   "event.create": { label: "加入日程", risk: "internal", args: {
@@ -49,7 +55,8 @@ export const ACTIONS = {
     windows: { type: "array", maxItems: 21, items: object({ days: str(20), start: str(5), end: str(5), energy: enumOf(["low", "medium", "high"]) }) } } },
   "goal.add": { label: "新增长期目标", risk: "internal", args: { lineId: str(64), title: str(60) } },
   "milestone.draft": { label: "新建里程碑草稿", risk: "internal", args: { lineId: str(64), title: str(200), date: day, target: str(500) } },
-  "line.add": { label: "新增主线", risk: "internal", args: { label: str(12) } },
+  // `domain` (docs/domain-lines.md): "" for an ordinary line, else 健康 / 财富 — at most one live line each.
+  "line.add": { label: "新增主线", risk: "internal", args: { label: str(12), domain: enumOf(["", "wellness", "wealth"]) } },
   "profile.tell": { label: "交给访谈", risk: "internal", args: { text: str(2000), lineId: str(64) } },
   "workflow.request": { label: "建成自动化", risk: "internal", args: { text: str(1000), lineId: str(64), reminder: str(200), time: str(5),
     weekdays: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } } } },
@@ -83,12 +90,14 @@ type ArgsOf = {
   "ask.snooze": { askId: string; until: "tomorrow" | "week" };
   "undo": { opId: string };
   "energy.report": { level: "low" | "medium" | "high"; note: string };
+  "record.add": { domain: "wellness" | "wealth"; kind: "income" | "expense" | "workout" | "weight" | "meal" | "metric"; value: number; unit: string;
+    currency: string; category: string; note: string; at: string };
   "event.create": { title: string; date: string; weekdays: number[]; startTime: string; endTime: string; until: string; minutes: number; lineId: string; location: string };
   "schedule.shift": { minutes: number };
   "availability.set": { windows: Array<{ days: string; start: string; end: string; energy: "low" | "medium" | "high" }> };
   "goal.add": { lineId: string; title: string };
   "milestone.draft": { lineId: string; title: string; date: string; target: string };
-  "line.add": { label: string };
+  "line.add": { label: string; domain: "" | "wellness" | "wealth" };
   /** `lineId`: that line's own interview (the person is on its card or page); "" = the whole interview. */
   "profile.tell": { text: string; lineId: string };
   "workflow.request": { text: string; lineId: string; reminder: string; time: string; weekdays: number[] };
@@ -197,6 +206,8 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     case "ask.snooze": return refs.asks.has(item.args.askId) ? "" : `待决事项 id「${item.args.askId}」不存在`;
     case "undo": return refs.ops.has(item.args.opId) ? "" : `操作 id「${item.args.opId}」不在最近 24 小时的可撤销操作里`;
     case "energy.report": return "";
+    // The same checks the store applies; an empty day is today.
+    case "record.add": return recordProblem({ ...item.args, at: item.args.at || new Date().toISOString().slice(0, 10) });
     case "schedule.shift": return Number.isInteger(item.args.minutes) && item.args.minutes >= SHIFT_MINUTES.min && item.args.minutes <= SHIFT_MINUTES.max
       ? "" : `顺延分钟数须为 ${SHIFT_MINUTES.min}–${SHIFT_MINUTES.max} 的整数`;
     case "event.create": {
@@ -218,7 +229,7 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       if (!refs.lines.has(item.args.lineId)) return `主线 id「${item.args.lineId}」不存在`;
       if (!item.args.title.trim()) return "标题为空";
       return item.action === "milestone.draft" && item.args.date && !DAY.test(item.args.date) ? "date 须为 YYYY-MM-DD 或空" : "";
-    case "line.add": return item.args.label.trim() ? "" : "主线名为空";
+    case "line.add": return item.args.label.trim() || item.args.domain ? "" : "主线名为空";
     case "proposal.decide": return refs.proposals.has(item.args.workOrderId) ? "" : `「${item.args.workOrderId}」不是待批准的任务提案`;
     case "milestones.decide": {
       const unknown = item.args.milestoneIds.filter((id) => !refs.draftMilestones.has(id));
@@ -340,7 +351,7 @@ export type ConciergePack = {
   now: string; today: string; timeZone: string;
   page: { kind: string; entityId: string; title: string };
   /** `description` is the interview's reading of the line (`lines.profiles`), "" before one exists. */
-  lines: Array<{ id: string; label: string; goals: string[]; hard: boolean; description: string }>;
+  lines: Array<{ id: string; label: string; goals: string[]; hard: boolean; description: string; domain?: string }>;
   tasks: Array<{ id: string; title: string; line: string; project: string; state: string; dueDate: string; notBefore: string; usualMinutes: number;
     nextBlock: string; steps: Array<{ id: string; title: string; status: string; minutes: number; executor: string }> }>;
   proposals: Array<{ id: string; title: string; line: string }>;

@@ -63,16 +63,37 @@ test("new mail is read once per check; sorting turns a to-do into an inbox line 
   store.saveWaitingItem({ id: "wait-data", ownerId: "user-1", workspaceId, title: "测量数据", who: "Prof Lin", expectedAt: "2026-10-25", approximate: false,
     followUpAt: "2026-10-25", state: "open", blocks: [], source: "manual" });
   const answer = JSON.stringify({ items: [
-    { uid: 1, kind: "todo", title: "10/30 前交 HW1（截止延后）", waitingId: "", why: "老师通知延期" },
-    { uid: 2, kind: "reply", title: "", waitingId: "wait-data", why: "等的数据到了" },
-    { uid: 3, kind: "ignore", title: "", waitingId: "", why: "简报" }] });
+    { uid: 1, kind: "todo", title: "10/30 前交 HW1（截止延后）", waitingId: "", why: "老师通知延期", direction: "", amount: 0, currency: "", merchant: "" },
+    { uid: 2, kind: "reply", title: "", waitingId: "wait-data", why: "等的数据到了", direction: "", amount: 0, currency: "", merchant: "" },
+    { uid: 3, kind: "ignore", title: "", waitingId: "", why: "简报", direction: "", amount: 0, currency: "", merchant: "" }] });
   const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
   const done = await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh);
-  expect(done).toEqual({ state: "done", captured: 1, replies: 1, sorted: 3, needsReply: [] });
+  expect(done).toEqual({ state: "done", captured: 1, replies: 1, sorted: 3, needsReply: [], recorded: 0 });
   expect(store.listCaptures(workspaceId)[0]).toMatchObject({ title: "10/30 前交 HW1（截止延后）" });
   expect(store.listCaptures(workspaceId)[0]!.context).toContain("HW1 extended to Oct 30");
   expect(store.listEvents(workspaceId, { type: "waiting.mail_seen", entityId: "wait-data" })).toHaveLength(1);
   expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["todo", "reply", "ignore"]);
+});
+
+test("a payment mail becomes one wealth record only when its own text states the amount the model read", async () => {
+  const { store, workspaceId, secrets, resolve } = setup();
+  const box = mailbox();
+  let now = new Date("2026-10-19T09:00:00Z");
+  const deps = { store, secrets, resolve, factory: box.factory, now: () => now };
+  await addMailAccount(deps, workspaceId, { address: "me@qq.com", password: "app-pass" });
+  await readNewMail(deps, workspaceId);
+  box.messages.push({ uid: 1, subject: "信用卡消费提醒", body: "您尾号 1234 的信用卡在 星巴克 消费人民币 35.00 元。" },
+    { uid: 2, subject: "Order receipt", body: "Thanks for your order." });
+  now = new Date("2026-10-19T09:20:00Z");
+  const fresh = await readNewMail(deps, workspaceId);
+  const answer = JSON.stringify({ items: [
+    { uid: 1, kind: "transaction", title: "", waitingId: "", why: "银行消费提醒", direction: "expense", amount: 35, currency: "CNY", merchant: "星巴克" },
+    // The amount appears nowhere in this mail's text: it is not written, and the mail is only noted.
+    { uid: 2, kind: "transaction", title: "", waitingId: "", why: "订单收据", direction: "expense", amount: 88, currency: "USD", merchant: "Shop" }] });
+  const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
+  expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh)).toMatchObject({ state: "done", recorded: 1 });
+  expect(store.listRecords(workspaceId).map((item) => [item.kind, item.value, item.currency, item.category, item.source])).toEqual([["expense", 35, "CNY", "星巴克", "mail"]]);
+  expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["transaction", "info"]);
 });
 
 test("the assistant searches every connected account through one lookup", async () => {

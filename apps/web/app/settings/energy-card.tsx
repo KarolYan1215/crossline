@@ -49,11 +49,12 @@ export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: E
     setSignalNote(on ? signal === "camera" ? "已开启：本机桌面页面打开时，每 20 分钟采样 20 秒" : "已开启：从下一分钟开始记录" : "已关闭，已删除记录");
   };
   const [captureToken, setCaptureToken] = useState("");
-  const issue = async (scope: "health" | "capture") => {
+  const [recordsToken, setRecordsToken] = useState("");
+  const issue = async (scope: "health" | "capture" | "records") => {
     const response = await fetch("/api/health/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope }) }).catch(() => undefined);
     const body = await response?.json().catch(() => null) as { token?: string } | null;
     if (!body?.token) { setNote("未能生成，请重试"); return; }
-    if (scope === "capture") setCaptureToken(body.token); else setToken(body.token);
+    if (scope === "capture") setCaptureToken(body.token); else if (scope === "records") setRecordsToken(body.token); else setToken(body.token);
     setNote("令牌只显示这一次；重新生成后旧的立即失效。");
   };
   const base = phoneUrl ?? "https://<本机的私有网络地址>";
@@ -85,7 +86,7 @@ export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: E
         <li>点「生成健康令牌」，复制令牌。下面每个「获取 URL 内容」都填 URL <b>{endpoint}</b>、方法 POST、头部 <b>Authorization</b> = <b>Bearer 令牌</b>。</li>
         <li><b>起床时刻</b>：新建自动化「闹钟」→ 选「已停止」（或「睡眠」→「醒来」），动作「获取 URL 内容」，请求体 JSON：<b>events</b> = 一项词典 <b>type</b> = wake、<b>at</b> = 当前日期（ISO 8601）。</li>
         <li><b>入睡时刻</b>：新建自动化「睡眠」→「就寝时间开始」（或打开「睡眠」专注模式时），同上，<b>type</b> = bed。</li>
-        <li><b>晨间健康汇总</b>：新建自动化每天 9:00。「查找健康样本」取过去 1 天的「睡眠分析」，用「重复」把每项写成词典 <b>start</b> / <b>end</b>（ISO 8601）加入变量 <b>睡眠</b>；再取「心率变异性」「静息心率」的平均值、「步数」「日照时间」的总和；有 Apple Watch 时取「手腕温度」与平时的差值。请求体 JSON：<b>sleep</b>、<b>hrvMs</b>、<b>restingHr</b>、<b>steps</b>、<b>daylightMin</b>、<b>wristTempDeltaC</b>（缺的不填）、<b>day</b> = 当前日期（yyyy-MM-dd）。</li>
+        <li><b>晨间健康汇总</b>：新建自动化每天 9:00。「查找健康样本」取过去 1 天的「睡眠分析」，用「重复」把每项写成词典 <b>start</b> / <b>end</b>（ISO 8601）加入变量 <b>睡眠</b>；再取「心率变异性」「静息心率」的平均值、「步数」「日照时间」的总和；有 Apple Watch 时取「手腕温度」与平时的差值。请求体 JSON：<b>sleep</b>、<b>hrvMs</b>、<b>restingHr</b>、<b>steps</b>、<b>daylightMin</b>、<b>wristTempDeltaC</b>（缺的不填）、<b>day</b> = 当前日期（yyyy-MM-dd）。有健康主线时可再加 <b>weightKg</b>（最近一次体重）、<b>kcal</b>（当天摄入能量），以及 <b>workouts</b> = 每次体能训练一项词典 <b>id</b>、<b>start</b>、<b>minutes</b>、<b>type</b>：它们记成健康主线的记录，用来判断体重、运动次数一类的里程碑。用 Health Auto Export 的「REST API」自动导出到同一地址也可以。</li>
         <li>Android：用健康数据转发应用（读取 Health Connect）按同样的 JSON 发送，并加 <b>source</b> = android-health。</li>
       </ol>
       <div className="st-row"><button type="button" className="secondary-button" onClick={() => void issue("health")}>{status.phoneConnected ? "重新生成健康令牌" : "生成健康令牌"}</button>
@@ -95,6 +96,13 @@ export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: E
       </ol>
       <div className="st-row"><button type="button" className="secondary-button" onClick={() => void issue("capture")}>生成收集令牌</button>
         {captureToken && <b className="st-token">{captureToken}</b>}</div>
+      <p className="st-note">自动记账（有财富主线时）：付款提醒和到账通知自动成为记账记录。最稳的是银行与商家的提醒邮件（在「日历与连接」接入邮箱即可）；下面两种是补充。记账令牌只能写记账记录。</p>
+      <ol className="st-steps">
+        <li><b>iPhone 钱包</b>：新建自动化「交易」，选卡片，动作「获取 URL 内容」：URL <b>{`${base}/api/records`}</b>、方法 POST、头部 <b>Authorization</b> = <b>Bearer 记账令牌</b>、请求体 JSON <b>records</b> = 一项词典 <b>clientId</b> = 当前日期、<b>domain</b> = wealth、<b>kind</b> = expense、<b>value</b> = 金额、<b>currency</b> = CNY、<b>merchant</b> = 商户、<b>at</b> = 当前日期。苹果的这个自动化偶尔不触发或超时，漏掉的由邮件补上。</li>
+        <li><b>Android</b>：用通知转发应用（如 MacroDroid、Tasker）在微信、支付宝或银行 App 发出通知时，POST 到同一地址，请求体 JSON <b>notifications</b> = 一项词典 <b>id</b>（通知的唯一编号）、<b>app</b>、<b>title</b>、<b>text</b>、<b>at</b>。只有写明一个金额的付款或到账通知会记下，其余忽略。</li>
+      </ol>
+      <div className="st-row"><button type="button" className="secondary-button" onClick={() => void issue("records")}>生成记账令牌</button>
+        {recordsToken && <b className="st-token">{recordsToken}</b>}</div>
       {note && <p role="status" className="st-note">{note}</p>}
     </details>
   </section>;

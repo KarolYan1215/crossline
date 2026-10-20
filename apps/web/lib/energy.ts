@@ -124,8 +124,9 @@ export function slotEnergy(model: EnergyModel, startIso: string, fallback: Energ
  * box (Siri 「记一下」) — a leaked health token cannot create work. Made on request and shown once; only its hash is kept, so it can be
  * replaced but never read back. Replacing it cuts off the old shortcut at once.
  */
-export type DeviceTokenScope = "health" | "capture";
-const TOKEN_SETTING: Record<DeviceTokenScope, string> = { health: HEALTH_TOKEN_SETTING, capture: "capture.token.sha256" };
+// `records` (docs/domain-lines.md) may only add money and health records through /api/records: payment notifications, a Wallet transaction.
+export type DeviceTokenScope = "health" | "capture" | "records";
+const TOKEN_SETTING: Record<DeviceTokenScope, string> = { health: HEALTH_TOKEN_SETTING, capture: "capture.token.sha256", records: "records.token.sha256" };
 
 export function issueDeviceToken(ctx: AccessContext, scope: DeviceTokenScope): string {
   const token = randomBytes(24).toString("base64url");

@@ -6,7 +6,11 @@ export type IdentityPack = {
   workflowTemplates: string[];
   evidencePolicy: "tiered" | "telemetry";
   /** What the weekly web research on this line is about. Absent means "external opportunities". */
-  diligenceTopic?: "opportunities" | "positioning" | "literature" | "tracking_framework";
+  diligenceTopic?: "opportunities" | "positioning" | "literature" | "tracking_framework" | "evidence_summary";
+  /** The life domain this line covers (`DOMAIN_PACKS`), which brings its interview checklist, templates, research topic and records. */
+  domain?: LineDomain;
+  /** Research on this line may never contain a buy or sell call or a price target (the investment line, and any wealth line). */
+  noTradeCalls?: boolean;
   durationPriors: Record<string, { p25Minutes: number; p50Minutes: number; p85Minutes: number }>;
   /** The line's colour, a key of `LINE_PALETTE`. The built-in lines use their own key (their colours live in the stylesheet). */
   color?: string;
@@ -75,6 +79,7 @@ export function defaultIdentityPacks(): IdentityPack[] {
       workflowTemplates: ["pre-market-brief", "midday-check", "close-review"],
       evidencePolicy: "tiered",
       diligenceTopic: "tracking_framework",
+      noTradeCalls: true,
       durationPriors: commonPriors
     },
     {
@@ -99,9 +104,84 @@ export function defaultIdentityPacks(): IdentityPack[] {
  */
 export const LINE_SETTING = "lines.v1";
 export type LineSpec = { id: string; label: string; color: string; goal: string; createdAt: string; archived?: boolean;
-  goals?: string[]; goalParts?: string[]; hard?: boolean; rank?: number };
+  goals?: string[]; goalParts?: string[]; hard?: boolean; rank?: number; domain?: LineDomain };
 /** At most this many lines may be hard constraints. */
 export const MAX_HARD_LINES = 2;
+
+/**
+ * Life domains a line may cover (the lite edition, decided 2026-10-19; docs/domain-lines.md). Not a mode: any line may carry one, at
+ * most one live line per domain. A domain line is an ordinary identity line (goals, milestones, tasks on the calendar); what the domain
+ * adds is a fixed interview checklist, its own fact slots, milestone templates, a research topic with its red lines, and record kinds.
+ * Health as a domain line is separate from the `health` capacity pack, which keeps feeding only the energy model.
+ */
+export const LINE_DOMAINS = ["wellness", "wealth"] as const;
+export type LineDomain = (typeof LINE_DOMAINS)[number];
+export const isLineDomain = (value: unknown): value is LineDomain => (LINE_DOMAINS as readonly unknown[]).includes(value);
+
+export type DomainPack = {
+  id: LineDomain;
+  /** The domain's name (健康 / 财富) and the identity noun a new line of it takes (renameable). */
+  label: string; noun: string;
+  /** The fixed id a new line of this domain takes when free, and its default colour (a `LINE_PALETTE` key). */
+  lineId: string; color: string;
+  workflowTemplates: string[];
+  diligenceTopic: NonNullable<IdentityPack["diligenceTopic"]>;
+  noTradeCalls: boolean;
+  /** What the interview gathers for this line, in the order asked; the dialogue asks these instead of improvising. */
+  interviewGuide: string[];
+  /** The fact slots the extraction writes for this line (snake_case), so later plans read the same names. */
+  slots: Array<{ slot: string; meaning: string }>;
+  /** Adjectives the long-term goal picker may offer when the person's own words support them. */
+  attributeHints: string[];
+  /** Kinds of record (`domain_records.kind`) this domain keeps. */
+  recordKinds: string[];
+};
+
+export const DOMAIN_PACKS: Record<LineDomain, DomainPack> = {
+  wellness: {
+    id: "wellness", label: "健康", noun: "健康管理者", lineId: "line-wellness", color: "olive",
+    workflowTemplates: ["workout-session", "meal-prep", "weekly-check-in"],
+    diligenceTopic: "evidence_summary", noTradeCalls: false,
+    interviewGuide: [
+      "现在每周运动几次、做什么、通常在哪个时段",
+      "睡眠：通常几点睡几点起，规律不规律",
+      "饮食：三餐是否规律、外食频率、最想改的一点",
+      "12–24 个月想达到的一个可量化目标（体重、5 公里用时、每周运动次数、体检指标），以及现在的数值",
+      "伤病、禁忌或医生的限制",
+      "在用的手表、手环、体重秤或健康 App（决定能否自动记录）"
+    ],
+    slots: [
+      { slot: "health_exercise_freq", meaning: "每周运动次数" }, { slot: "health_exercise_kinds", meaning: "运动项目与时段" },
+      { slot: "health_sleep", meaning: "作息与睡眠时长" }, { slot: "health_diet", meaning: "饮食模式与想改的一点" },
+      { slot: "health_goal_metric", meaning: "可量化目标及其指标" }, { slot: "health_baseline", meaning: "目标指标的现值" },
+      { slot: "health_limits", meaning: "伤病、禁忌与医嘱限制" }, { slot: "health_devices", meaning: "在用的设备与健康 App" }
+    ],
+    attributeHints: ["规律", "有耐力", "睡眠充足", "饮食清淡", "体能好", "精力充沛"],
+    recordKinds: ["workout", "weight", "meal", "metric"]
+  },
+  wealth: {
+    id: "wealth", label: "财富", noun: "理财者", lineId: "line-wealth", color: "teal",
+    workflowTemplates: ["monthly-review", "budget-check", "learning-note"],
+    diligenceTopic: "tracking_framework", noTradeCalls: true,
+    interviewGuide: [
+      "眼下最重要的一个财务目标：建应急金、还债、提高储蓄率、一笔大额支出、学投资常识",
+      "收入稳不稳定，大致每月收入与支出的范围",
+      "现有的应急金大约够几个月的支出",
+      "有没有要还的债（类型与大致金额）",
+      "现在怎样记账（App、表格、不记），平时主要用哪些支付方式和银行（决定能否自动记账）",
+      "投资只问想学什么、不碰什么；不问持仓细节，不给买卖建议"
+    ],
+    slots: [
+      { slot: "wealth_primary_goal", meaning: "首要财务目标" }, { slot: "wealth_income_stable", meaning: "收入是否稳定" },
+      { slot: "wealth_income_monthly", meaning: "月收入范围" }, { slot: "wealth_spend_monthly", meaning: "月支出范围" },
+      { slot: "wealth_emergency_months", meaning: "应急金可覆盖的月数" }, { slot: "wealth_debts", meaning: "负债类型与金额" },
+      { slot: "wealth_tracking_now", meaning: "现在的记账方式" }, { slot: "wealth_payment_channels", meaning: "常用支付方式与银行" },
+      { slot: "wealth_invest_learning", meaning: "想学的投资知识与不碰的东西" }
+    ],
+    attributeHints: ["稳健", "有储蓄纪律", "财务清醒", "零负债", "有安全垫"],
+    recordKinds: ["income", "expense"]
+  }
+};
 
 /**
  * Line colours, each readable as text at 7:1 on white (light) and on the dark background (dark). The built-in four keep the colours
@@ -133,8 +213,13 @@ export function identityPacksFor(read: (key: string) => string | undefined, opti
   if (!specs) return defaults.map((pack) => pack.kind === "identity" ? { ...pack, color: pack.id } : pack);
   const lines = specs.filter((line) => options.includeArchived || !line.archived).map((line): IdentityPack => {
     const builtIn = defaults.find((pack) => pack.id === line.id && pack.kind === "identity");
-    return { ...(builtIn ?? { id: line.id, kind: "identity" as const, masterClock: false, workflowTemplates: [], evidencePolicy: "tiered" as const,
-      diligenceTopic: "opportunities" as const, durationPriors: commonPriors }), label: line.label, color: line.color,
+    const domain = isLineDomain(line.domain) ? DOMAIN_PACKS[line.domain] : undefined;
+    // A domain brings its own templates, research topic and red line; a built-in line given a domain (投资者 tagged 财富) keeps its own
+    // templates and topic and gains the domain's red line.
+    const base: IdentityPack = builtIn ?? { id: line.id, label: line.label, kind: "identity", masterClock: false, workflowTemplates: domain?.workflowTemplates ?? [],
+      evidencePolicy: "tiered", diligenceTopic: domain?.diligenceTopic ?? "opportunities", durationPriors: commonPriors };
+    return { ...base, ...(domain ? { domain: domain.id, ...(domain.noTradeCalls || base.noTradeCalls ? { noTradeCalls: true } : {}) } : {}),
+      label: line.label, color: line.color,
       goals: line.goals?.length ? line.goals : line.goal ? [line.goal] : [], goal: line.goals?.[0] ?? line.goal,
       ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}),
       ...(line.hard ? { hard: true } : {}), ...(line.rank ? { rank: line.rank } : {}) };
@@ -155,6 +240,28 @@ export function newLineId(label: string, taken: Iterable<string>): string {
   let id = base, n = 2;
   while (used.has(id) || BUILT_IN_LINES.has(id)) id = `${base}-${n++}`;
   return id;
+}
+
+/** What the interview is told about a domain line: what to ask, the fact slots to record it under, and adjectives the goal may use. */
+export type DomainGuide = { lineId: string; label: string; domain: string; ask: string[]; slots: string[]; attributeHints: string[] };
+export function domainGuides(lines: Array<{ id: string; label: string; domain?: LineDomain | undefined }>): DomainGuide[] {
+  return lines.flatMap((line) => {
+    if (!isLineDomain(line.domain)) return [];
+    const pack = DOMAIN_PACKS[line.domain];
+    return [{ lineId: line.id, label: line.label, domain: pack.label, ask: pack.interviewGuide,
+      slots: pack.slots.map((item) => `${item.slot}：${item.meaning}`), attributeHints: pack.attributeHints }];
+  });
+}
+
+/** The live line already covering a domain, if any: a workspace keeps at most one per domain. */
+export function lineForDomain(lines: Array<Pick<LineSpec, "id" | "domain" | "archived">>, domain: LineDomain) {
+  return lines.find((line) => !line.archived && line.domain === domain);
+}
+
+/** A new domain line's id: the domain's own fixed id while it is free, else one made from the name like any other line. */
+export function domainLineId(domain: LineDomain, label: string, taken: Iterable<string>): string {
+  const used = new Set(taken);
+  return used.has(DOMAIN_PACKS[domain].lineId) ? newLineId(label, used) : DOMAIN_PACKS[domain].lineId;
 }
 
 /** The first palette colour no live line uses. */

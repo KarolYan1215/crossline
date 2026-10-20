@@ -91,6 +91,8 @@ const shownDetail = (raw: string | undefined) => (raw ?? "").replace(/(bearer|ap
 export type SkillRunOptions<T> = {
   skillName: string;
   cwd: string;
+  /** Local image files shown with the first prompt (a screenshot the person attached); the model reads them, code checks what it read. */
+  images?: string[];
   /**
    * The caller will send more turns on this thread (`continueSkillTurn`): it stays loaded for `THREAD_KEEP_MS` after its last turn
    * instead of being released when the run ends. A later turn on a released thread answers SKILL_THREAD_LOST, which those callers
@@ -512,6 +514,8 @@ const skillBlocker = <T,>(code: string, audit: AnalysisAudit = {}): SkillRunResu
 export type ContinueTurnOptions<T> = {
   skillName: string;
   cwd: string;
+  /** Local image files the person attached to this message (a screenshot), shown with it. */
+  images?: string[];
   outputSchema: unknown;
   validateOutput: (output: unknown) => T;
   onAudit: (audit: AnalysisAudit) => void;
@@ -749,6 +753,8 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
  */
 async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, context: RunContext, audit: AnalysisAudit, run: {
   skillName: string; threadId: string; outputSchema: unknown; allowedItemTypes: string[]; firstPrompt: string;
+  /** Local image files shown with the first prompt (a payment or meal screenshot the person attached); never resent with a repair. */
+  images?: string[];
   onPlan?: SkillRunOptions<unknown>["onPlan"];
   validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number; agent?: AgentMode;
   soften?: (rejection: Error, output: unknown) => T | undefined;
@@ -844,7 +850,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   });
 
   /** One turn on the thread, from prompt to the model's final text. */
-  const runTurn = async (text: string): Promise<string> => {
+  const runTurn = async (text: string, images: string[] = []): Promise<string> => {
     finalText = undefined;
     streamed = "";
     reportedAt = 0;
@@ -857,7 +863,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     void completed.catch(() => {});
     const route = context.route;
     const turn = record(record(await scope.rpc("turn/start", {
-      threadId: run.threadId, ...(run.agent ? {} : { environments: [] }), input: [{ type: "text", text, text_elements: [] }], outputSchema: run.outputSchema,
+      threadId: run.threadId, ...(run.agent ? {} : { environments: [] }), input: [{ type: "text", text, text_elements: [] }, ...images.map((path) => ({ type: "localImage", path }))], outputSchema: run.outputSchema,
       // Re-stated every turn: a continued turn inherits the thread's model unless told otherwise.
       ...(route ? { model: route.model, ...(route.effort ? { effort: route.effort } : {}) } : {})
     }))?.turn);
@@ -891,9 +897,9 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   };
 
   /** A silent turn is interrupted and the same prompt sent again, a couple of times; every other failure ends the run as before. */
-  const runTurnOrRetryStall = async (prompt: string): Promise<string> => {
+  const runTurnOrRetryStall = async (prompt: string, images: string[] = []): Promise<string> => {
     for (let stalls = 0; ; stalls += 1) {
-      try { return await runTurn(prompt); }
+      try { return await runTurn(prompt, images); }
       catch (error) {
         if (!(error instanceof Error) || error.message !== "SKILL_STALLED" || stalls >= MAX_STALL_RETRIES) throw error;
         if (audit.turnId) abandoned.add(audit.turnId);
@@ -914,7 +920,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
         : `Your previous answer was rejected by the receiving layer: ${rejection?.message}`
           + `${(rejection as Detailed | undefined)?.detail ? ` — ${(rejection as Detailed).detail}` : ""}\n\n`
           + "Return the corrected JSON object in full. Change only what the rejection names; do not "
-          + "explain, apologise, or add commentary outside the JSON.");
+          + "explain, apologise, or add commentary outside the JSON.", attempt === 0 ? run.images ?? [] : []);
       let parsed: unknown;
       try {
         parsed = parse(answer);
@@ -994,7 +1000,8 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
       const output = await runTurnsUntilValid(client, scope, context, audit, {
         skillName: options.skillName, threadId, outputSchema: options.outputSchema,
         allowedItemTypes: ["agentMessage", "reasoning", "userMessage", ...(options.tools ? ["dynamicToolCall"] : [])],
-        firstPrompt: message, validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
+        firstPrompt: message, ...(options.images?.length ? { images: options.images } : {}),
+        validate: options.validateOutput, onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
         ...(options.onProgress ? { onProgress: options.onProgress } : {}),
         ...(options.softAccept ? { soften: options.softAccept } : {}),
         ...(options.keepEarly ? { keepEarly: options.keepEarly } : {})
@@ -1122,6 +1129,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, input: unknown, request
       ...(options.onPlan ? { onPlan: options.onPlan } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
       firstPrompt: `${[options.skillName, ...context.extraSkills].map((name) => `$${name}`).join(" ")}\n\n${JSON.stringify(prepared)}`,
+      ...(options.images?.length ? { images: options.images } : {}),
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
       ...(options.softAccept ? { soften: (rejection: Error, answer: unknown) => options.softAccept!(rejection, answer, prepared) } : {}),

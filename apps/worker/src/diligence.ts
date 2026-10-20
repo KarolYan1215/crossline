@@ -19,7 +19,7 @@ const INSTRUCTIONS = "Research the line's question on the public web for this pe
   + "each citing pages you opened (public https, real title, read today or within three days), and proposals the person will accept or reject, "
   + "each resting on a finding AND on the person's own facts (their ids in basedOnFacts). Take the person's status, place and stage from the "
   + "facts and assume none. Never invent a deadline, price, requirement or number; what you could not establish goes in gaps. Respect every "
-  + "constraint, repeat nothing in alreadyDecided, and for the investment line give findings and tracking frameworks only, never a buy or sell "
+  + "constraint, repeat nothing in alreadyDecided, and when identity.noTradeCalls is set (the investment line, any wealth line) give findings and tracking frameworks only, never a buy or sell "
   + "call or a price target. Every human-readable field in Chinese.";
 
 const QUESTIONS: Record<DiligenceTopic, string> = {
@@ -28,7 +28,9 @@ const QUESTIONS: Record<DiligenceTopic, string> = {
   opportunities: "找出适合这个人当前阶段和身份约束的外部机会（比赛、孵化器、资助、合作渠道）。只列这个人按 facts 里的身份、所在地和阶段大致能申请的，优先所在地区或线上可参加的；每一项都要有申请条件（身份、地区、阶段等限制）和截止日期，facts 里查不到的条件写进 gaps，不要假设这个人是学生或身在某地。",
   positioning: "基于公开的事实（同类账号的数据、平台规则、受众需求）判断这条线最可行的定位和选题方向，并说明依据。",
   literature: "为这个人正在做的项目梳理最相关的文献和代表性工作，给出可以直接开始读的清单，并指出尚未被充分回答的空白。",
-  tracking_framework: "给出个人账户收益率与风险的追踪框架和研究备忘录模板（指标口径、记录频率、数据来源），不包含任何买卖建议。"
+  tracking_framework: "给出个人账户收益率与风险的追踪框架和研究备忘录模板（指标口径、记录频率、数据来源），不包含任何买卖建议。",
+  // A wellness line (docs/domain-lines.md): guideline-level sources on the person's own goal and limits, never a diagnosis or a dose.
+  evidence_summary: "针对这个人在 facts 里写的健康目标与限制（伤病、医嘱、作息），找出权威指南与系统综述给出的做法（运动频率与强度、睡眠、饮食），说明证据强度；不做诊断，不给药物、剂量或替代医嘱的建议，facts 里提到的伤病与禁忌一律按限制处理。"
 };
 
 export type SourceCheck =
@@ -126,9 +128,9 @@ export type DiligenceOutcome =
   | { state: "skipped"; reason: "recent_report" | "no_profile" }
   | { state: "blocked"; code: string; message: string };
 
-export function topicFor(identityId: string): DiligenceTopic {
-  const pack = defaultIdentityPacks().find((item) => item.id === identityId);
-  return pack?.diligenceTopic ?? "opportunities";
+/** What to research for a line: its own pack's topic (a domain line's, or a built-in line's), else external opportunities. */
+export function topicFor(pack: { id: string; diligenceTopic?: DiligenceTopic | undefined } | undefined): DiligenceTopic {
+  return pack?.diligenceTopic ?? defaultIdentityPacks().find((item) => item.id === pack?.id)?.diligenceTopic ?? "opportunities";
 }
 
 /** What this person has already answered for this line, so a refresh never offers the same idea twice. */
@@ -173,7 +175,7 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
         message: cost.available ? "额度已经比较紧张；尽调等额度恢复后再做。" : "读不到用量信号；尽调暂缓。" };
     }
 
-    const topic = topicFor(identityId);
+    const topic = topicFor(pack);
     const ownerId = ownerOf(store, workspaceId);
     const preferences = store.getSetting(workspaceId, "schedule.preferences");
     let timeZone = "America/Chicago";
@@ -183,7 +185,7 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
     const runAt = now.toISOString();
     const context: DiligenceContext = {
       version: "crossline.diligence.v1", today: runAt.slice(0, 10), timeZone,
-      identity: { id: pack.id, label: pack.label }, topic: { kind: topic, question: QUESTIONS[topic] },
+      identity: { id: pack.id, label: pack.label, ...(pack.noTradeCalls ? { noTradeCalls: true } : {}) }, topic: { kind: topic, question: QUESTIONS[topic] },
       projects: store.listProjects(workspaceId).filter((project) => project.identityId === identityId)
         .map(({ id, name, summary }) => ({ id, name, summary })),
       facts: [...facts, ...personFacts].map((fact) => ({ id: profileFactId(fact), projectId: fact.projectId, slot: fact.slot, value: fact.value, status: fact.status })),

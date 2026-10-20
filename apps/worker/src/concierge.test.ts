@@ -80,3 +80,20 @@ test("a second look runs on the same thread and the stronger model; a correction
     pack: pack(), history: [], review: true });
   expect(none).toMatchObject({ state: "blocked", code: "CONCIERGE_REVIEW_NO_THREAD" });
 });
+
+test("an attached screenshot stored as .img reaches the runtime as a copy named by its real format; a non-image is left out", async () => {
+  const { asTypedImage } = await import("./concierge");
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const dir = mkdtempSync(path.join(tmpdir(), "crossline-img-test-"));
+  try {
+    const png = path.join(dir, "a.img");
+    writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]));
+    expect(asTypedImage(png)).toMatch(/\.png$/);
+    const text = path.join(dir, "b.img");
+    writeFileSync(text, "not an image at all");
+    expect(asTypedImage(text)).toBeUndefined();
+    expect(asTypedImage(path.join(dir, "missing.img"))).toBeUndefined();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

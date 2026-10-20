@@ -6,6 +6,7 @@ import { loadMilestoneBoard } from "../../lib/milestone-board";
 import { requireSessionContext } from "../../lib/access-guard";
 import { gateUntilReady } from "../../lib/start-gate";
 import { identityLines } from "../../lib/lines";
+import { domainRecordViews } from "../../lib/records";
 import { LINE_PALETTE } from "@crossline/identity-packs";
 import { LinesBar } from "./lines-bar";
 import { FirstHint } from "../ui/first-hint";
@@ -34,11 +35,13 @@ export default async function MilestonesPage() {
   const drafts = board.milestones.filter((milestone) => milestone.status === "draft").length;
   const identities = identityLines(ctx);
   const details = lineCardDetails(ctx);
+  const records = Object.fromEntries(domainRecordViews(ctx).filter((view) => view.lineId).map((view) => [view.lineId!, { domain: view.domain, ...view.metrics,
+    recent: view.recent.map(({ id, kind, at, value, unit, currency, category, source }) => ({ id, kind, at, value, unit, currency, category, source })) }]));
 
   return <SubpageShell active="主线" title="主线"
     description={drafts ? `${drafts} 个里程碑待批准 · 点开查看风险与标准，或在时间轴右上方一键批准` : "各主线的里程碑排在同一条时间轴上，点开可修改。"}>
     <LinesBar lines={identities.map((pack) => ({ id: pack.id, label: pack.label, color: pack.color ?? pack.id, goals: pack.goals ?? [],
-      hard: Boolean(pack.hard), rank: pack.rank ?? null,
+      hard: Boolean(pack.hard), rank: pack.rank ?? null, domain: pack.domain ?? null, records: records[pack.id] ?? null,
       attributes: (details[pack.id]?.attributes ?? []).map(({ text, kind }) => ({ text, kind })), goalParts: details[pack.id]?.goalParts ?? [],
       description: details[pack.id]?.description ?? "", pendingEdit: details[pack.id]?.pendingEdit ? { parts: details[pack.id]!.pendingEdit!.parts } : null,
       redraftDue: details[pack.id]?.redraftDue ?? false,

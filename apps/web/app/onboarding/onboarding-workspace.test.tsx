@@ -24,16 +24,29 @@ test("the opening states the premise, the three parts and the time, then asks to
 });
 
 test("the opening answers become the first reply in the screen's own words, ending with the materials sentence the eval also sends", () => {
-  const reply = openingReply({ tone: "warm", lines: ["研究者", "创业者"], base: "研究者", fixed: ["研究者"] }, true);
+  const reply = openingReply({ tone: "warm", edition: "full", lines: ["研究者", "创业者"], domains: {}, base: "研究者", fixed: ["研究者"] }, true);
   expect(reply).toContain("【语气】温柔体贴");
   expect(reply).toContain("【我的主线】研究者、创业者");
   expect(reply).toContain("【未来 12–24 个月的底座】研究者");
   expect(reply).toContain("【有固定日程的主线】研究者");
   expect(reply.endsWith(MATERIALS_FIRST_REPLY)).toBe(true);
-  const none = openingReply({ tone: "neutral", lines: ["学生"], base: "", fixed: [] }, false);
+  const none = openingReply({ tone: "neutral", edition: "full", lines: ["学生"], domains: {}, base: "", fixed: [] }, false);
   expect(none).toContain("【未来 12–24 个月的底座】几条并重");
   expect(none).toContain("【有固定日程的主线】都没有");
   expect(none.endsWith(NO_MATERIALS_REPLY)).toBe(true);
+});
+
+test("the lite edition is asked first, and its domain lines are named with their domain in the reply the interview quotes", () => {
+  const card = renderToStaticMarkup(<OpeningCard linesKnown={false} knownLines={[]} initialTone="neutral" busy={false} hasMaterials={false} onStart={() => {}} />);
+  expect(card).toContain("从哪一版开始");
+  // The full list offers the two domain lines beside the usual identities.
+  expect(card).toContain("健康管理者（健康领域）");
+  expect(card).toContain("理财者（财富领域）");
+  const lite = openingReply({ tone: "neutral", edition: "lite", lines: ["上班", "健康管理者", "理财者"],
+    domains: { 健康管理者: "wellness", 理财者: "wealth" }, base: "上班", fixed: ["上班"] }, false);
+  expect(lite).toContain("【版本】极简");
+  expect(lite).toContain("【我的主线】上班、健康管理者（健康领域）、理财者（财富领域）");
+  expect(lite).toContain("【有固定日程的主线】上班");
 });
 
 test("each stage brings its own picture, and the time left is said before and after the start standard", () => {

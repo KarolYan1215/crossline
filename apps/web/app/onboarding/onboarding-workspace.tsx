@@ -290,7 +290,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     if (state.setupLines) {
       const ordered = answer.base ? [answer.base, ...answer.lines.filter((label) => label !== answer.base)] : answer.lines;
       const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ setup: ordered.map((label) => ({ label, ranked: label === answer.base, hard: answer.fixed.includes(label) })) }) }).catch(() => undefined);
+        body: JSON.stringify({ setup: ordered.map((label) => ({ label, ranked: label === answer.base, hard: answer.fixed.includes(label),
+          ...(answer.domains[label] ? { domain: answer.domains[label] } : {}) })) }) }).catch(() => undefined);
       if (!response?.ok) { setError("主线没有保存成功，请重试。"); setBusy(""); return; }
     }
     setBusy("");

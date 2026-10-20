@@ -2,6 +2,13 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { expandRecurring, requiredApproval, type AccessContext, type DateCandidate, type RecurringMeeting } from "@crossline/core";
 import { ensureSeeded, getStore, type PersistedScheduleBlock } from "./crossline";
+import { identityLines } from "./lines";
+
+/**
+ * The line a date with no known project is filed under: the workspace's first line. It was always `research`, which a workspace that
+ * has no research line (the lite edition) never shows, so such dates went nowhere.
+ */
+const fallbackLine = (ctx: AccessContext) => identityLines(ctx)[0]?.id ?? "research";
 
 /**
  * Dates read out of the person's own files, waiting for their confirmation.
@@ -87,7 +94,7 @@ function writeItems(ctx: AccessContext, batchId: string, payload: ExtractedPaylo
     }
     // Untimed dates are deadlines and exam days, not blocks of time. They are kept as profile facts so the
     // milestone design can start from them instead of from nothing.
-    store.upsertProfileFact({ workspaceId: ctx.workspaceId, identityId: projectIdentity.get(item.project) ?? "research", projectId: item.project,
+    store.upsertProfileFact({ workspaceId: ctx.workspaceId, identityId: projectIdentity.get(item.project) ?? fallbackLine(ctx), projectId: item.project,
       slot: dateSlot(item), value: `${item.date} ${item.title}`, status: "confirmed",
       sourceRef: item.sourceRef, sourceQuote: item.quote, updatedAt: now });
     facts += 1;
@@ -206,8 +213,11 @@ export function changeAdoptedDate(ctx: AccessContext, batchId: string, itemId: s
     }
     const date = (payload.dates ?? []).find((item) => item.id === itemId);
     if (date) {
-      const identityId = store.listProjects(ctx.workspaceId, { includeArchived: true }).find((project) => project.id === date.project)?.identityId ?? "research";
-      store.deleteProfileFact(ctx.workspaceId, identityId, date.project, dateSlot(date));
+      const known = store.listProjects(ctx.workspaceId, { includeArchived: true }).find((project) => project.id === date.project)?.identityId;
+      // A date filed before the fallback followed the workspace's lines sits under `research`.
+      for (const identityId of new Set([known ?? fallbackLine(ctx), ...(known ? [] : ["research"])])) {
+        store.deleteProfileFact(ctx.workspaceId, identityId, date.project, dateSlot(date));
+      }
     }
     included.delete(itemId);
   }

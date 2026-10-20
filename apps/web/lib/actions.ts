@@ -17,6 +17,7 @@ import { scheduleEvent } from "./event-scheduling";
 import { applyChange } from "./impact";
 import { createMilestoneDraft } from "./input";
 import { addLine, identityLines, lineLabels, updateLine } from "./lines";
+import { addDomainRecord, personToday } from "./records";
 import { applyTaskOp, recordEnergy } from "./task-ops";
 import { undoOp, withUndo } from "./undo";
 
@@ -59,6 +60,11 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     return result.ok ? { ok: true, message: `已撤销：${result.label}` } : result;
   },
   "energy.report": (ctx, args) => recordEnergy(ctx, args.level, args.note),
+  "record.add": (ctx, args) => {
+    const result = addDomainRecord(ctx, { domain: args.domain, kind: args.kind, value: args.value, unit: args.unit, currency: args.domain === "wealth" ? args.currency || "CNY" : "",
+      category: args.category, note: args.note, at: args.at || personToday(ctx), source: "input", sourceRef: "" });
+    return result.ok ? { ok: true, message: "已记下" } : { ok: false, code: result.code, message: result.message };
+  },
   // 「后面都推 10 分钟」: today's plan starts later; started and locked blocks stay. Undone like any `schedule.` setting.
   "schedule.shift": (ctx, args) => {
     const result = shiftToday(ctx, args.minutes);
@@ -89,7 +95,11 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     return result.ok ? { ok: true, message: "草稿已建立，在主线页批准", href: `/milestones?open=${encodeURIComponent(result.id)}` } : result;
   },
   "line.add": (ctx, args) => {
-    const result = addLine(ctx, { label: args.label, goal: "" });
+    const result = addLine(ctx, { label: args.label, goal: "", ...(args.domain ? { domain: args.domain } : {}) });
+    if (!result.ok && result.code === "LINE_DOMAIN_TAKEN") {
+      // One live line per domain: say which line has it, so the person can change that one instead of adding a second.
+      return { ok: false, code: result.code, message: `「${lineLabels(ctx)[result.lineId ?? ""] ?? "另一条主线"}」已经负责这个领域，可在主线页修改那条主线` };
+    }
     return result.ok ? { ok: true, message: "这条主线的访谈可以开始了", href: `/onboarding?line=${encodeURIComponent(result.id)}` } : result;
   },
   "profile.tell": (ctx, args) => {

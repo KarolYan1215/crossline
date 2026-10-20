@@ -9,7 +9,7 @@ The person's own aims are often vague (「找合适的比赛」「想清楚定�
 
 Accept `{version: "crossline.diligence.v1", today, timeZone, identity, topic, projects[], facts[], constraints[], alreadyDecided[]}`:
 
-- `identity`: the line (`id`, `label`). `topic`: `kind` and `question`, what to research for this line.
+- `identity`: the line (`id`, `label`, and `noTradeCalls: true` for the investment line and any wealth line). `topic`: `kind` and `question`, what to research for this line.
 - `projects`: the line's projects (`id`, `name`, `summary`).
 - `facts`: what is on record about this line and about the person (`id`, `projectId`, `slot`, `value`, `status`). The person's own status, place and stage are here: read them before deciding what applies. A fact with `status: "inferred"` is the interviewer's guess, not the person's word.
 - `constraints`: limits the person stated. `alreadyDecided`: proposals the person already accepted or rejected.
@@ -47,7 +47,8 @@ Respect every line in `constraints[]`: an opportunity that ignores one is not us
 - `opportunities`: external routes (competitions, incubators, grants, partners) this person can actually use. Take their status, place and stage from `facts`; assume none. A Hangzhou founder who is not a student is not offered a US university's student fund. List eligibility and deadline for each; a condition `facts` cannot settle goes in `gaps`.
 - `positioning`: what the public evidence says about audience, platform rules and comparable accounts or cases; propose a positioning and a first run of topics, each tied to a finding.
 - `literature`: the most relevant papers and groups for the person's projects, a reading list they can start on, and the gaps nobody has filled.
-- `tracking_framework`: metrics, definitions, cadence and data sources for tracking return and risk, and a memo template. **No buy or sell call, no price target, no personalised allocation advice**, in findings or proposals.
+- `tracking_framework`: metrics, definitions, cadence and data sources for tracking return and risk, and a memo template; for a wealth line also the household basics the person asked about (an emergency fund, a savings rate, paying down a debt, a bookkeeping routine). **No buy or sell call, no price target, no personalised allocation advice**, in findings or proposals, whenever `identity.noTradeCalls` is true.
+- `evidence_summary` (a wellness line): what clinical guidelines and systematic reviews say about the person's own goal (exercise frequency and intensity, sleep, diet), with how strong the evidence is. Every injury, condition or doctor's instruction in `facts` is a limit to respect. **No diagnosis, no medication or dose, nothing that replaces a doctor's advice**; a question only a doctor can answer goes in `gaps`.
 
 ## Boundaries
 

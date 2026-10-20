@@ -220,6 +220,17 @@
 .line-goal-row{display:flex;gap:6px}
 .line-goal-row input{flex:1}
 .line-hard{display:flex !important;grid-template-columns:none;gap:6px;align-items:flex-start}
+.line-domain{display:flex;flex-wrap:wrap;gap:12px;border:0;margin:0;padding:0}
+.lb-records{display:grid;gap:4px;font-size:13px}
+.lb-records-line{display:flex;flex-wrap:wrap;gap:4px 12px;margin:0}
+.lb-records-bars{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.lb-records-bars li{display:grid;grid-template-columns:5em minmax(0,1fr) auto;gap:6px;align-items:center}
+.lb-records-bar{display:block;height:8px;background:var(--lc,var(--graphite));min-width:2px}
+.lb-records-list{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:2px;max-height:240px;overflow:auto}
+.lb-records-list li{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.lb-records summary{cursor:pointer}
+.line-domain legend{font-size:13px;margin-bottom:4px}
+.line-domain label{display:flex !important;gap:4px;align-items:center}
 .line-swatches{display:flex;flex-wrap:wrap;gap:6px;border:0;margin:0;padding:0}
 .line-swatches legend{font-size:13px;margin-bottom:4px}
 .line-swatches button{width:24px;height:24px;border:2px solid var(--paper);outline:1px solid var(--mist);cursor:pointer}

@@ -171,7 +171,8 @@ export const CHARACTER_STANDARD = [
   "Absolutely no text, letters, numbers, logos or brand marks anywhere. Square 1:1 frame."
 ].join(" ");
 
-const LINE_COLOUR_NAME: Record<string, string> = { research: "deep blue (#0A5198)", startup: "burnt orange (#8C3709)", media: "plum (#792E9C)", investment: "forest green (#085E3A)", health: "ochre (#664E00)" };
+const LINE_COLOUR_NAME: Record<string, string> = { research: "deep blue (#0A5198)", startup: "burnt orange (#8C3709)", media: "plum (#792E9C)", investment: "forest green (#085E3A)", health: "ochre (#664E00)",
+  "line-wellness": "olive (#4A5200)", "line-wealth": "deep teal (#005B66)" };
 
 /** The one image prompt for the person's figure: the standard, their group's backdrop, and the writer's redacted choices. */
 export function characterPrompt(report: PortraitReport): string | null {

@@ -1,5 +1,6 @@
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { storeHealthSummary, workspaceForHealthToken } from "../../../../lib/energy";
+import { storePhoneHealthRecords } from "../../../../lib/records";
 
 const MAX_BYTES = 64_000;
 
@@ -17,5 +18,6 @@ export async function POST(request: Request) {
   if (text.length > MAX_BYTES) return Response.json({ ok: false, code: "HEALTH_BODY_TOO_LARGE" }, { status: 413 });
   let body: Record<string, unknown>;
   try { body = JSON.parse(text) as Record<string, unknown>; } catch { return Response.json({ ok: false, code: "INVALID_JSON" }, { status: 400 }); }
-  return Response.json({ ok: true, ...storeHealthSummary(workspaceId, body) });
+  // Weight, workouts and energy intake sent beside the night are wellness records (docs/domain-lines.md), judged against the health line.
+  return Response.json({ ok: true, ...storeHealthSummary(workspaceId, body), records: storePhoneHealthRecords(workspaceId, body) });
 }

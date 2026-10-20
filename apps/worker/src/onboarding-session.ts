@@ -18,6 +18,7 @@ import { ledgerForModel, recordReplyAnswers, recordRound, resolveRepeats, syncGa
 import { createOnboardingExtractor, extractionReached, requestExtraction } from "./onboarding-extract";
 import { personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
+import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
 export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
 
@@ -49,7 +50,9 @@ const INSTRUCTIONS = "You are the interviewer of Crossline's first-run interview
   + "it never corrects how the person describes their own hours or problem, says a tension once, and answers a request about the app "
   + "(re-reading files) with what was done. "
   + "In situation, compass and energy write one `insight` connecting two of their replies, with exact short spans in `refs`. When `history` "
-  + "is present the conversation is being resumed: continue it. Human-readable fields in Chinese.";
+  + "is present the conversation is being resumed: continue it. A line in `domainGuides` (健康 / 财富) is asked from its `ask` list, in order, "
+  + "with numbers as ranges; never ask account numbers, balances, holdings or passwords, never advise trades, diagnoses or doses. "
+  + "Human-readable fields in Chinese.";
 
 export type OnboardingTurnOutcome =
   | { state: "asked" | "ready"; sessionId: string }
@@ -283,7 +286,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
         ...(publicAssessment ? { publicAssessment } : {}),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [],
-          ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}) }))
+          ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}), ...(line.domain ? { domain: DOMAIN_PACKS[line.domain].label } : {}) })),
+        // A line's own interview gets its own checklist only; the main interview gets every domain line's.
+        ...(() => { const guides = domainGuides(identityLines(store, workspaceId)).filter((guide) => !focusLine || guide.lineId === focusLine.id);
+          return guides.length ? { domainGuides: guides } : {}; })()
       };
       return runCodexSkill<OnboardingDialogue>(client, context, {
         skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema, keepThread: true,

@@ -1,11 +1,13 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { formatInTimeZone } from "date-fns-tz";
 import { closeMailReply, listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
   ACTIONS, AUTOMATIONS_SETTING, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
   type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
+import { DOMAIN_PACKS } from "@crossline/identity-packs";
 import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability } from "./crossline";
 import { openAsks } from "./asks";
 import { executeAction } from "./actions";
@@ -98,7 +100,8 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
   const profiles = (() => { try { return JSON.parse(store.getSetting(ctx.workspaceId, LINE_PROFILES_SETTING) ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   return {
     now: now.toISOString(), today, timeZone, page: { ...page, title: pageTitle },
-    lines: identityLines(ctx).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [], hard: Boolean(line.hard), description: profiles[line.id]?.description ?? "" })),
+    lines: identityLines(ctx).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [], hard: Boolean(line.hard), description: profiles[line.id]?.description ?? "",
+      ...(line.domain ? { domain: DOMAIN_PACKS[line.domain].label } : {}) })),
     tasks: orders.filter((order) => OPEN.includes(order.state)).map((order) => {
       const payload = (order.payload ?? {}) as { dueDate?: string; notBefore?: string };
       return { id: order.id, title: taskTitleOf(order), line: label(order.identityId), project: projects.get(order.projectId) ?? "", state: order.state,
@@ -156,7 +159,7 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
     `最近一次精力记录：${pack.energy ? `${pack.energy.level}（${formatInTimeZone(new Date(pack.energy.at), pack.timeZone, "MM-dd HH:mm")}）` : "无"}`,
     `自动化（改哪个就用 workflow.request 写明改法）：${pack.automations?.length ? pack.automations.map((item) => `${item.name}（${item.trigger}${item.status === "off" ? "，已暂停" : ""}${item.lineId ? `，主线 ${item.lineId}` : ""}）`).join("；") : "无"}；已接入邮箱 ${pack.mailboxes ?? 0} 个`,
     `当前页面：${pack.page.kind}${pack.page.title ? `「${pack.page.title}」(${pack.page.entityId})` : ""}`,
-    `主线（id | 名称）：${pack.lines.map((line) => `${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""}`).join("；") || "无"}`,
+    `主线（id | 名称）：${pack.lines.map((line) => `${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""}${line.domain ? `（${line.domain}）` : ""}`).join("；") || "无"}`,
     `项目（id | 名称 | 主线）：${pack.projects.map((project) => `${project.id} | ${project.name} | ${project.line}`).join("；") || "无"}`,
     ...pageTask(pack),
     ...pageLine(pack),
@@ -262,8 +265,12 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
   const attached = attachedFiles(docs, pack);
   // From the return page: what the absence left to settle, and which task and step a line typed beside one is about.
   const returning = input.page.kind === "return" ? ["", ...returnPageLines(ctx, input.page, now)].join("\n") : "";
+  // A screenshot dropped with the line (a payment, a meal) is shown to the model itself, so it can read the numbers into a record card the
+  // person confirms (docs/domain-lines.md); at most three, stored files only.
+  const images = docs.filter((doc) => /\.(png|jpe?g|webp|gif)$/i.test(doc.fileName) && doc.uri.startsWith("file:")).slice(0, 3)
+    .map((doc) => fileURLToPath(doc.uri));
   const request = { conversationId: conversation.id, text: input.text || "（只附了文件）", mentions: input.mentions,
-    snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${returning}${attached}`, pack, history,
+    snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${returning}${attached}`, pack, history, ...(images.length ? { images } : {}),
     ...(corrected ? { corrected: true } : {}) };
   let reply: { text: string; card: Card };
   let warnings: string[] = [];

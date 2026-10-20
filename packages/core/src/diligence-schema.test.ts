@@ -63,3 +63,11 @@ test("an idea the person already answered is not offered again, and a blocker is
   refused(output({ proposals: [{ ...output().proposals[0]!, title: "已经拒绝过的建议" }] }), "DILIGENCE_PROPOSAL_REPEATED");
   refused(output({ blockers: [{ code: "NO_ACCESS", message: "无法联网" }] }), "DILIGENCE_BLOCKED");
 });
+
+test("a wealth line made in the lite edition carries the same red line as the investment line", () => {
+  const advice = output({ findings: [{ ...output().findings[0]!, claim: "建议加仓宽基指数基金。" }] });
+  const wealth = { ...context("line-wealth"), identity: { id: "line-wealth", label: "理财者", noTradeCalls: true } };
+  refused(advice, "DILIGENCE_ADVICE_FORBIDDEN", wealth);
+  // Any other line may name a trade in a finding (a startup's market notes are not advice to the person).
+  expect(() => validateDiligence(advice, context("startup"))).not.toThrow();
+});

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingTone } from "@crossline/core";
+import { DOMAIN_PACKS, LINE_DOMAINS, type LineDomain } from "@crossline/identity-packs";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
 
 /**
@@ -9,16 +10,32 @@ import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
  * then one card of fact questions answered together — how to be spoken to, the lines, the one that cannot move, and the ones with a fixed
  * schedule. It replaces the old line-setup screen and the six-level lecture; the structure is shown at the end, drawn from what was said.
  * Its answers are written in code (tone, lines) and sent as the first reply, so the interview quotes them like anything else said.
+ *
+ * The lite edition (decided 2026-10-19, docs/domain-lines.md) is asked first: 健康 and 财富 as domain lines plus, when there is one, the one
+ * thing with a fixed schedule. It is not a mode: the answer only pre-fills the lines, and more can be added on the 主线 page at any time.
  */
 const COMMON_LINES = ["研究者", "学生", "工程师", "创业者", "创作者", "投资者", "设计师", "教师", "职员", "自由职业者"];
+const DOMAIN_NOUNS = LINE_DOMAINS.map((domain) => DOMAIN_PACKS[domain].noun);
 const ALL_EQUAL = "几条并重";
 const NO_FIXED = "都没有";
 
-export type OpeningAnswer = { tone: OnboardingTone; lines: string[]; base: string; fixed: string[] };
+export type Edition = "lite" | "full";
+export type OpeningAnswer = { tone: OnboardingTone; edition: Edition; lines: string[]; domains: Record<string, LineDomain>; base: string; fixed: string[] };
+
+const EDITION_LABEL: Record<Edition, { label: string; detail: string }> = {
+  lite: { label: "极简", detail: "健康、财富，加一件有固定日程的事" },
+  full: { label: "完整", detail: "自己选几条正在投入的身份" }
+};
+
+/** The domain a label on the card stands for: the domain lines' own nouns (健康管理者, 理财者). */
+const domainOf = (label: string): LineDomain | undefined => LINE_DOMAINS.find((domain) => DOMAIN_PACKS[domain].noun === label);
+const domainsOf = (labels: string[]) => Object.fromEntries(labels.flatMap((label) => { const domain = domainOf(label); return domain ? [[label, domain]] : []; }));
+const shown = (label: string) => { const domain = domainOf(label); return domain ? `${label}（${DOMAIN_PACKS[domain].label}领域）` : label; };
 
 /** The first reply as the person "says" it, in the screen's own words, so every answer is a verbatim span to quote. */
 export function openingReply(answer: OpeningAnswer, withMaterials: boolean): string {
-  return [`【语气】${ONBOARDING_TONE_LABEL[answer.tone].label}`, `【我的主线】${answer.lines.join("、")}`,
+  return [`【语气】${ONBOARDING_TONE_LABEL[answer.tone].label}`, `【版本】${EDITION_LABEL[answer.edition].label}`,
+    `【我的主线】${answer.lines.map(shown).join("、")}`,
     `【未来 12–24 个月的底座】${answer.base || ALL_EQUAL}`, `【有固定日程的主线】${answer.fixed.length ? answer.fixed.join("、") : NO_FIXED}`,
     withMaterials ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY].join("\n");
 }
@@ -31,7 +48,10 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
   onStart: (answer: OpeningAnswer) => void;
 }) {
   const [tone, setTone] = useState<OnboardingTone>(initialTone);
+  const [edition, setEdition] = useState<Edition>("full");
   const [lines, setLines] = useState<string[]>(linesKnown ? knownLines : []);
+  const [liteDomains, setLiteDomains] = useState<string[]>(DOMAIN_NOUNS);
+  const [hardName, setHardName] = useState("");
   const [custom, setCustom] = useState("");
   const [base, setBase] = useState("");
   const [fixed, setFixed] = useState<string[]>([]);
@@ -41,9 +61,12 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
     if (label && !lines.includes(label) && lines.length < 5) setLines((list) => [...list, label]);
     setCustom("");
   };
-  const chosenBase = lines.includes(base) ? base : "";
-  const chosenFixed = fixed.filter((label) => lines.includes(label));
-  const offered = [...COMMON_LINES, ...lines.filter((label) => !COMMON_LINES.includes(label))];
+  // Lite: the named fixed-schedule line first (it is the hard constraint), then the domain lines kept ticked.
+  const hard = hardName.trim().slice(0, 20);
+  const chosen = linesKnown || edition === "full" ? lines : [...(hard && !DOMAIN_NOUNS.includes(hard) ? [hard] : []), ...liteDomains];
+  const chosenBase = chosen.includes(base) ? base : edition === "lite" && hard && chosen.includes(hard) ? hard : "";
+  const chosenFixed = edition === "lite" ? (hard && chosen.includes(hard) ? [hard] : []) : fixed.filter((label) => chosen.includes(label));
+  const offered = [...COMMON_LINES, ...DOMAIN_NOUNS, ...lines.filter((label) => !COMMON_LINES.includes(label) && !DOMAIN_NOUNS.includes(label))];
 
   return <section className="ob-opening ob-voice" aria-label="开始访谈">
     <div className="ob-opening-intro">
@@ -75,24 +98,45 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
 
     {!linesKnown && <>
       <fieldset className="ob-question">
+        <legend>从哪一版开始？<small>之后随时可以在主线页加主线</small></legend>
+        <div className="ob-chips" role="radiogroup">
+          {(["lite", "full"] as const).map((id) => <button key={id} type="button" role="radio" aria-checked={edition === id} data-picked={edition === id}
+            onClick={() => setEdition(id)}>{EDITION_LABEL[id].label}<small>{EDITION_LABEL[id].detail}</small></button>)}
+        </div>
+      </fieldset>
+      {edition === "lite" ? <>
+        <fieldset className="ob-question">
+          <legend>要规划的方面<small>至少留一个</small></legend>
+          <div className="ob-chips" role="group">
+            {DOMAIN_NOUNS.map((label) => <button key={label} type="button" role="checkbox" aria-checked={liteDomains.includes(label)} data-picked={liteDomains.includes(label)}
+              onClick={() => setLiteDomains((list) => list.includes(label) ? (list.length > 1 ? list.filter((item) => item !== label) : list) : [...list, label])}>{shown(label)}</button>)}
+          </div>
+        </fieldset>
+        <fieldset className="ob-question">
+          <legend>有没有固定日程、不能挪的事？<small>例如上班、上学、带娃；写成一个词，没有就留空</small></legend>
+          <div className="ob-add">
+            <input value={hardName} maxLength={20} onChange={(event) => setHardName(event.target.value)} placeholder="例如：上班" aria-label="有固定日程的事" />
+          </div>
+        </fieldset>
+      </> : <fieldset className="ob-question">
         <legend>你正在投入的身份有哪些？<small>写成身份名词，2–5 个</small></legend>
         <div className="ob-chips" role="group">
           {offered.map((label) => <button key={label} type="button" role="checkbox" aria-checked={lines.includes(label)} data-picked={lines.includes(label)}
-            onClick={() => toggle(label)}>{label}</button>)}
+            onClick={() => toggle(label)}>{shown(label)}</button>)}
         </div>
         <form className="ob-add" onSubmit={(event) => { event.preventDefault(); addCustom(); }}>
           <input value={custom} maxLength={20} onChange={(event) => setCustom(event.target.value)} placeholder="其他身份，例如：播客主" aria-label="其他身份" />
           <button type="submit" className="ob-btn ob-quiet" disabled={!custom.trim()}>添加</button>
         </form>
-      </fieldset>
-      {lines.length > 1 && <fieldset className="ob-question">
+      </fieldset>}
+      {chosen.length > 1 && <fieldset className="ob-question">
         <legend>未来 12–24 个月，哪一条是不能动摇的底座？</legend>
         <div className="ob-chips" role="radiogroup">
-          {[...lines, ALL_EQUAL].map((label) => <button key={label} type="button" role="radio" aria-checked={(chosenBase || ALL_EQUAL) === label}
+          {[...chosen, ALL_EQUAL].map((label) => <button key={label} type="button" role="radio" aria-checked={(chosenBase || ALL_EQUAL) === label}
             data-picked={(chosenBase || ALL_EQUAL) === label} onClick={() => setBase(label === ALL_EQUAL ? "" : label)}>{label}</button>)}
         </div>
       </fieldset>}
-      {lines.length > 0 && <fieldset className="ob-question">
+      {edition === "full" && lines.length > 0 && <fieldset className="ob-question">
         <legend>哪些有固定日程，比如课表或坐班？<small>最多两条；固定日程是一周的骨架，其余时间围绕它安排</small></legend>
         <div className="ob-chips" role="group">
           {lines.map((label) => <button key={label} type="button" role="checkbox" aria-checked={chosenFixed.includes(label)} data-picked={chosenFixed.includes(label)}
@@ -103,9 +147,10 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
     </>}
 
     <div className="ob-opening-go">
-      <button type="button" className="ob-btn ob-primary" disabled={busy || !lines.length || needsConnection} onClick={() => onStart({ tone, lines, base: chosenBase, fixed: chosenFixed })}>
+      <button type="button" className="ob-btn ob-primary" disabled={busy || !chosen.length || needsConnection}
+        onClick={() => onStart({ tone, edition: linesKnown ? "full" : edition, lines: chosen, domains: domainsOf(chosen), base: chosenBase, fixed: chosenFixed })}>
         {hasMaterials ? "读完材料，开始访谈" : "开始访谈"}</button>
-      {!lines.length ? <small className="ob-muted">先选至少一个身份</small>
+      {!chosen.length ? <small className="ob-muted">先选至少一个身份</small>
         : needsConnection && <small className="ob-muted">先<a href="/connect?next=/onboarding">连接模型（ChatGPT 或 API）</a></small>}
     </div>
   </section>;

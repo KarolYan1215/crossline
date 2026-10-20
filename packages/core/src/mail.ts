@@ -18,6 +18,8 @@ export type MailAccount = {
   id: string; address: string; label: string; host: string; port: number;
   /** New mail is sorted (inbox lines, waits brought forward). Off: only read when the assistant or an automation asks. */
   triage: boolean;
+  /** A bank or shop mail's amount becomes a wealth record (docs/domain-lines.md). On unless set to false; needs `triage`. */
+  bookkeeping?: boolean;
   addedAt: string; uidValidity?: string; lastUid?: number; lastCheckedAt?: string;
   lastError?: { code: string; message: string; at: string };
 };
@@ -48,19 +50,26 @@ export function appPasswordPage(address: string): AppPasswordPage | undefined {
     hint: "Gmail 不收 Google 登录密码。在打开的页面里起个名字（如 Crossline）并创建，把显示的 16 位密码粘贴到上面，空格可以带着。" };
 }
 
-export type MailTriageKind = "todo" | "date" | "reply" | "info" | "ignore";
-export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply", string> = { todo: "待办", date: "日期", reply: "回复了等待项", info: "知悉", ignore: "略过",
-  needs_reply: "需要回复" };
-export type MailTriage = { items: Array<{ uid: number; kind: MailTriageKind; title: string; waitingId: string; why: string }> };
+export type MailTriageKind = "todo" | "date" | "reply" | "transaction" | "info" | "ignore";
+export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply", string> = { todo: "待办", date: "日期", reply: "回复了等待项", transaction: "记账",
+  info: "知悉", ignore: "略过", needs_reply: "需要回复" };
+/** `transaction` (a payment, a refund, a salary, a receipt): `direction`, `amount`, `currency` and `merchant` as the mail states them; empty otherwise. */
+export type MailTriage = { items: Array<{ uid: number; kind: MailTriageKind; title: string; waitingId: string; why: string;
+  direction: "" | "income" | "expense"; amount: number; currency: string; merchant: string }> };
 
 export const MAIL_TRIAGE_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items"], properties: {
-    items: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false, required: ["uid", "kind", "title", "waitingId", "why"], properties: {
+    items: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false,
+      required: ["uid", "kind", "title", "waitingId", "why", "direction", "amount", "currency", "merchant"], properties: {
       uid: { type: "integer", minimum: 1 },
-      kind: { type: "string", enum: ["todo", "date", "reply", "info", "ignore"] },
+      kind: { type: "string", enum: ["todo", "date", "reply", "transaction", "info", "ignore"] },
       title: { type: "string", maxLength: 140 },
       waitingId: { type: "string", maxLength: 128 },
-      why: { type: "string", maxLength: 200 } } } } }
+      why: { type: "string", maxLength: 200 },
+      direction: { type: "string", enum: ["", "income", "expense"] },
+      amount: { type: "number", minimum: 0 },
+      currency: { type: "string", maxLength: 8 },
+      merchant: { type: "string", maxLength: 60 } } } } }
 } as const;
 
 /**
@@ -80,6 +89,7 @@ export function validateMailTriage(value: unknown, uids: number[], waitingIds: s
     if (item.kind === "reply" && item.waitingId && !waitingIds.includes(item.waitingId)) {
       problems.push(`uid ${item.uid} 的 waitingId「${item.waitingId}」不是正在等的事项（需要本人回复、不是在等的回信时 waitingId 留空）`);
     }
+    if (item.kind === "transaction" && !(item.amount > 0 && item.direction)) problems.push(`uid ${item.uid} 是记账却没有 amount 或 direction`);
   }
   if (problems.length) throw Object.assign(new Error("MAIL_TRIAGE_INVALID"), { detail: problems.slice(0, 6).join("；") });
   return answer;

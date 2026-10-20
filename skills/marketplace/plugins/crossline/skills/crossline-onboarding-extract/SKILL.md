@@ -15,7 +15,7 @@ Accept `crossline.onboarding.extract.v1`: `{today, timeZone, lines[], projects[]
 - `facts[]` is what the ledger already holds, one line each: `identity/project · slot = value（确认|推断）`. To change a fact, write its slot again; do not repeat a fact unchanged. A confirmed fact is never replaced by a guess (the store keeps the person's word).
 - `lineProfiles[]` are each line's description and attribute candidates on record; `candidatesWanted` lists the lines that have a description, no adopted goal and no candidates yet: this run owes them candidates (below). `profile` is the working portrait so far and `profileTask` what this run owes it (both null for a line's own interview); `stage` is where the conversation is.
 - `observations` (when present) are the interview's observations the person rated: 「准」 ones are the person's own agreement and may inform the portrait; a 「不准」 one is wrong about them, and nothing in the portrait may rest on it.
-- `lines[]` are the person's lines (identity nouns, hard constraints, adopted goals); `projects[]` the projects on record.
+- `lines[]` are the person's lines (identity nouns, hard constraints, adopted goals, and `domain` for a 健康 / 财富 line); `projects[]` the projects on record.
 
 Return JSON matching `OnboardingExtraction` (`packages/core/src/onboarding-turn-schema.ts`): `{slotUpdates[], projectsDetected[], flywheelCandidates[], fileDates, lineProfiles[], goalEdits[], availability, profileSections}`. Leave a list empty when the new material says nothing for it.
 
@@ -71,6 +71,15 @@ For each line the new material says something about, write a `description` (what
 
 - `goalEdits[]` only when the person asks in so many words to change a line's goal (「把目标改成…」): that line's new `parts` in the person's order and in their own words (split at their 「的」 and 「、」, nothing reworded), citing the sentence of their reply. It is shown to them to adopt.
 - `flywheelCandidates[]`: how one line feeds another (`kind` enables / reuses / informs / constrains / recurring_feedback), with a one-line `explanation` (「研究里的器件实验整理成科普选题」); always `inferred`; `refs` when a sentence suggests it. Over-generate plausible links; the person confirms.
+
+## Domain lines (`domainGuides`)
+
+`domainGuides[]` (when present) lists the lines with a `domain` (健康 / 财富) with the fact `slots` their answers belong in (`health_exercise_freq：每周运动次数`, `wealth_emergency_months：应急金可覆盖的月数` …). For these lines:
+
+- Record what the person said about one of those subjects under exactly that slot and that line's id, never under a slot of your own naming, so later plans and milestones read the same names. Numbers keep their unit and range as said (「每月支出约 6000–8000 元」, 「每周 2 次，晚上」).
+- A domain line's current project is what it works towards now (「3 个月内建满应急金」, 「年底前 5 公里跑进 28 分钟」): `projectsDetected` with its `goal`, and a `deadline` or `no_deadline` like any project.
+- Never record account numbers, card numbers, exact balances, passwords or holdings, even when the person typed them: write the range or the kind instead (「有一笔约 3 万元的消费贷」). An injury, condition or doctor's instruction goes in `health_limits` as said, never interpreted.
+- `attributeHints` are adjectives this domain's goals often use; offer one as a candidate only when the person's own words support it, citing those words like any attribute.
 
 ## Hours (`availability`)
 

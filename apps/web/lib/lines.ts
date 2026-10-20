@@ -1,6 +1,7 @@
 import "server-only";
 import { checkGoalParts, composeGoal, plainComposeGoal, type AccessContext } from "@crossline/core";
-import { LINE_PALETTE, LINE_SETTING, MAX_HARD_LINES, defaultIdentityPacks, freeLineColor, identityPacksFor, newLineId, readLineSpecs, type IdentityPack, type LineSpec } from "@crossline/identity-packs";
+import { DOMAIN_PACKS, LINE_PALETTE, LINE_SETTING, MAX_HARD_LINES, defaultIdentityPacks, domainLineId, freeLineColor, identityPacksFor, isLineDomain, lineForDomain, newLineId,
+  readLineSpecs, type IdentityPack, type LineDomain, type LineSpec } from "@crossline/identity-packs";
 import { getStore } from "./crossline";
 
 /** Every pack this workspace works with: its lines (built-in or its own) and the capacity pack. */
@@ -28,18 +29,22 @@ function saveSpecs(ctx: AccessContext, specs: LineSpec[], event: { type: string;
 }
 
 /** A new line: its name, its long-term goal and a free colour. Its interview (`/onboarding?line=<id>`) comes next. */
-export function addLine(ctx: AccessContext, input: { label: string; goal: string; color?: string; goals?: string[]; hard?: boolean; rank?: number }): { ok: true; id: string } | { ok: false; code: string } {
-  const label = input.label.trim().slice(0, 20);
+export function addLine(ctx: AccessContext, input: { label: string; goal: string; color?: string; goals?: string[]; hard?: boolean; rank?: number; domain?: LineDomain }): { ok: true; id: string } | { ok: false; code: string; lineId?: string } {
+  const domain = isLineDomain(input.domain) ? input.domain : undefined;
+  const label = (input.label.trim() || (domain ? DOMAIN_PACKS[domain].noun : "")).slice(0, 20);
   if (!label) return { ok: false, code: "LINE_LABEL_REQUIRED" };
   const specs = currentSpecs(ctx);
   if (specs.some((line) => !line.archived && line.label === label)) return { ok: false, code: "LINE_LABEL_TAKEN" };
-  const id = newLineId(label, specs.map((line) => line.id));
-  const color = input.color && LINE_PALETTE[input.color] ? input.color : freeLineColor(specs);
+  // One live line per domain: a second one is refused with the line that has it, so the page can offer to tag that one instead.
+  const holder = domain ? lineForDomain(specs, domain) : undefined;
+  if (holder) return { ok: false, code: "LINE_DOMAIN_TAKEN", lineId: holder.id };
+  const id = domain ? domainLineId(domain, label, specs.map((line) => line.id)) : newLineId(label, specs.map((line) => line.id));
+  const color = input.color && LINE_PALETTE[input.color] ? input.color : domainColor(domain, specs);
   if (input.hard && specs.filter((line) => line.hard && !line.archived).length >= MAX_HARD_LINES) return { ok: false, code: "LINE_HARD_LIMIT" };
   const goals = cleanGoals(input.goals ?? (input.goal ? [input.goal] : []));
   saveSpecs(ctx, [...specs, { id, label, color, goal: goals[0] ?? "", goals, createdAt: new Date().toISOString(),
-    ...(input.hard ? { hard: true } : {}), ...(input.rank ? { rank: input.rank } : {}) }],
-    { type: "line.created", entityId: id, payload: { label, color } });
+    ...(input.hard ? { hard: true } : {}), ...(input.rank ? { rank: input.rank } : {}), ...(domain ? { domain } : {}) }],
+    { type: "line.created", entityId: id, payload: { label, color, ...(domain ? { domain } : {}) } });
   return { ok: true, id };
 }
 
@@ -48,10 +53,15 @@ export function addLine(ctx: AccessContext, input: { label: string; goal: string
  * attributes (§4.1): the parts are kept in the order given and `goals[0]` becomes the sentence composed from them; a goal changed as a
  * whole sentence drops parts that no longer compose it (the split pass splits it again).
  */
-export function updateLine(ctx: AccessContext, id: string, change: { label?: string; goal?: string; goals?: string[]; goalParts?: string[]; color?: string; archived?: boolean; hard?: boolean; rank?: number | null }): { ok: true } | { ok: false; code: string; message?: string } {
+export function updateLine(ctx: AccessContext, id: string, change: { label?: string; goal?: string; goals?: string[]; goalParts?: string[]; color?: string; archived?: boolean; hard?: boolean; rank?: number | null; domain?: LineDomain | null }): { ok: true } | { ok: false; code: string; message?: string; lineId?: string } {
   const specs = currentSpecs(ctx);
   const line = specs.find((item) => item.id === id);
   if (!line) return { ok: false, code: "LINE_NOT_FOUND" };
+  // Tagging a line with a domain (投资者 → 财富) is refused while another live line has it; restoring an archived one is checked too.
+  const domainAfter = change.domain === null ? undefined : change.domain ?? line.domain;
+  const archivedAfter = change.archived ?? line.archived;
+  const holder = domainAfter && !archivedAfter ? lineForDomain(specs.filter((item) => item.id !== id), domainAfter) : undefined;
+  if (holder) return { ok: false, code: "LINE_DOMAIN_TAKEN", lineId: holder.id };
   if (change.hard && !line.hard && specs.filter((item) => item.hard && !item.archived).length >= MAX_HARD_LINES) return { ok: false, code: "LINE_HARD_LIMIT" };
   const label = change.label !== undefined && change.label.trim() ? change.label.trim().slice(0, 20) : line.label;
   const oldGoals = line.goals?.length ? line.goals : line.goal ? [line.goal] : [];
@@ -79,6 +89,8 @@ export function updateLine(ctx: AccessContext, id: string, change: { label?: str
   if (change.hard === false) delete next.hard;
   if (change.rank === null) delete next.rank;
   if (typeof change.rank === "number" && change.rank >= 1) next.rank = Math.round(change.rank);
+  if (change.domain === null) delete next.domain;
+  if (isLineDomain(change.domain)) next.domain = change.domain;
   saveSpecs(ctx, specs.map((item) => item.id === id ? next : item), { type: "line.updated", entityId: id, payload: change });
   return { ok: true };
 }
@@ -108,18 +120,28 @@ export function needsLineSetup(ctx: AccessContext): boolean {
  * The opening screen's answer: the person's lines in their order — each an identity noun, ranked or in parallel, at most two hard
  * constraints — written as the workspace's lines (replacing the built-in four a new account would otherwise see).
  */
-export function setupLines(ctx: AccessContext, lines: Array<{ label: string; ranked: boolean; hard: boolean }>): { ok: true; ids: string[] } | { ok: false; code: string } {
-  const clean = lines.map((line) => ({ ...line, label: line.label.trim().slice(0, 20) })).filter((line) => line.label);
+export function setupLines(ctx: AccessContext, lines: Array<{ label: string; ranked: boolean; hard: boolean; domain?: LineDomain }>): { ok: true; ids: string[] } | { ok: false; code: string } {
+  const clean = lines.map((line) => ({ ...line, domain: isLineDomain(line.domain) ? line.domain : undefined }))
+    .map((line) => ({ ...line, label: (line.label.trim() || (line.domain ? DOMAIN_PACKS[line.domain].noun : "")).slice(0, 20) })).filter((line) => line.label);
   if (!clean.length) return { ok: false, code: "LINE_LABEL_REQUIRED" };
   if (new Set(clean.map((line) => line.label)).size !== clean.length) return { ok: false, code: "LINE_LABEL_TAKEN" };
   if (clean.filter((line) => line.hard).length > MAX_HARD_LINES) return { ok: false, code: "LINE_HARD_LIMIT" };
+  const domains = clean.flatMap((line) => line.domain ? [line.domain] : []);
+  if (new Set(domains).size !== domains.length) return { ok: false, code: "LINE_DOMAIN_TAKEN" };
   const specs: LineSpec[] = [];
   let rank = 0;
   for (const line of clean) {
-    const color = freeLineColor(specs);
-    specs.push({ id: newLineId(line.label, specs.map((item) => item.id)), label: line.label, color, goal: "", goals: [], createdAt: new Date().toISOString(),
-      ...(line.hard ? { hard: true } : {}), ...(line.ranked ? { rank: ++rank } : {}) });
+    const taken = specs.map((item) => item.id);
+    specs.push({ id: line.domain ? domainLineId(line.domain, line.label, taken) : newLineId(line.label, taken), label: line.label,
+      color: domainColor(line.domain, specs), goal: "", goals: [], createdAt: new Date().toISOString(),
+      ...(line.hard ? { hard: true } : {}), ...(line.ranked ? { rank: ++rank } : {}), ...(line.domain ? { domain: line.domain } : {}) });
   }
   saveSpecs(ctx, specs, { type: "lines.set_up", entityId: ctx.workspaceId, payload: { lines: specs.map((line) => line.label) } });
   return { ok: true, ids: specs.map((line) => line.id) };
+}
+
+/** A domain line's own colour while no live line uses it, else the first free one. */
+function domainColor(domain: LineDomain | undefined, specs: LineSpec[]): string {
+  const own = domain ? DOMAIN_PACKS[domain].color : undefined;
+  return own && !specs.some((line) => !line.archived && line.color === own) ? own : freeLineColor(specs);
 }
