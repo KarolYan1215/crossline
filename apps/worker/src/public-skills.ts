@@ -6,7 +6,7 @@ import {
   type PublicSkillRecord, type PublicSkillReview, type SkillCandidate, type SkillScoutAnswer, type SkillScoutContext
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
-import { readPublicSkills, removePublicSkill, writePublicSkills, type CrosslineStore } from "@crossline/db";
+import { readPublicSkills, removePublicSkill, startConfirmedFor, writePublicSkills, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 
@@ -180,8 +180,10 @@ export const COVERAGE_ROUNDS_MAX = 6;
 export function coverageDue(store: CrosslineStore, workspaceId: string, now = new Date()): boolean {
   const lines = identityLines(store, workspaceId).map((line) => line.id);
   if (!lines.length) return false;
+  // The interview counts as done when it said so, or when the person pressed 开始使用 (or the account is already in use): an
+  // interview parked with the start standard met stays "active", and the owner's own account would otherwise never be searched.
   const interview = store.listOnboardingSessions(workspaceId).find((session) => !session.id.startsWith("line-") && session.state === "complete");
-  if (!interview) return false;
+  if (!interview && !startConfirmedFor(store, workspaceId)) return false;
   const runs = store.listEvents(workspaceId, { type: "skill.public.scouted" })
     .map((event) => event.payload as { mode?: string; lines?: string[]; code?: string; at?: string })
     .filter((payload) => payload.mode === "coverage");

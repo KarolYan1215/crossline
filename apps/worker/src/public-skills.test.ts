@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, allowSkillScripts, installedPublicFiles as installedFiles, readPublicSkills as readLibrary, removePublicSkill } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
-import { SKILL_LIBRARY_SETTING } from "@crossline/core";
+import { SKILL_LIBRARY_SETTING, START_CONFIRMED_SETTING } from "@crossline/core";
 import { cleanPublicSkills, coverageDue, createPublicSkillInstaller, createSkillScout, fetchSkillDirectory, installPublicSkillFromLink, readLinkRequest, scoutDue,
   wantPublicSkill, SKILL_SCOUT, type HttpGet } from "./public-skills";
 import { librarySkillsFor } from "./skill-library";
@@ -249,6 +249,11 @@ test("after the interview the search covers every line round after round until a
   const now = new Date("2026-10-20T12:00:00Z");
   expect(coverageDue(store, ws, now)).toBe(false);
   store.saveOnboardingSession({ id: "main", ownerId: "user-1", workspaceId: ws, state: "complete", coverage: {}, createdAt: now.toISOString(), updatedAt: now.toISOString() });
+  expect(coverageDue(store, ws, now)).toBe(true);
+  store.saveOnboardingSession({ id: "main", ownerId: "user-1", workspaceId: ws, state: "active", coverage: {}, createdAt: now.toISOString(), updatedAt: now.toISOString() });
+  expect(coverageDue(store, ws, now)).toBe(false);
+  // Pressing 开始使用 finishes the interview for this purpose even while it stays open for the portrait.
+  store.setSetting(ws, START_CONFIRMED_SETTING, now.toISOString());
   expect(coverageDue(store, ws, now)).toBe(true);
   const rounds: string[] = [];
   const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => {
