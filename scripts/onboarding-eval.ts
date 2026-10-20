@@ -8,7 +8,8 @@
  * the person's own profile under `data/profile/`, never committed): it answers only what it is asked, never volunteers, uploads a file only
  * when asked for one. The interview runs as it does for a real new user, from an empty first message, until it says it is done or the turn
  * limit. Dates it reads are confirmed as a person would; nothing else is answered for them. The report scores the interview against its
- * own completion list (`interviewChecklistFor`, the interview's items only — the person's own clicks are not the interview's to earn),
+ * own completion list (`interviewChecklistFor`, the interview's items only — the person's own clicks are not the interview's to earn; 「完整」 is
+ * `interviewComplete`, which leaves out what the design defers to later: a project's details and the synthesis),
  * per course and project, and prints turns, questions and minutes. It spends real quota and takes hours; it is never run as a side effect.
  *
  * Time (decided 2026-10-12): the targets count only the person's attention — start standard (`readyToStart`) in at most 6 rounds and 30
@@ -30,13 +31,14 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { enterUsageWorkspace, runCodexSkill, setUsageSink, startCodexSupervisor } from "../packages/codex/src/index";
-import { PROFILE_CONFIRMED, composeGoal, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
+import { PROFILE_CONFIRMED, composeGoal, interviewComplete, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor } from "../packages/db/src/index";
 import { domainGuides } from "../packages/identity-packs/src/index";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
 import { openingReply } from "../apps/web/app/onboarding/opening-card";
 import { extractText, sha256 } from "../apps/worker/src/extract";
 import { identityLines } from "../apps/worker/src/lines";
+import { createOnboardingExtractor, extractionSettled, requestExtraction } from "../apps/worker/src/onboarding-extract";
 import { createOnboardingSessionRunner } from "../apps/worker/src/onboarding-session";
 import { readMatrixConfig, startProviderHarness } from "./provider-harness";
 
@@ -249,7 +251,7 @@ try {
     const items = checklistNow();
     const minutesNow = Math.round(attentionSeconds / 6) / 10;
     if (!readyAt && readyToStart(items)) readyAt = { rounds: turns, minutes: minutesNow };
-    if (!completeAt && items.every((item) => item.done)) completeAt = { rounds: turns, minutes: minutesNow };
+    if (!completeAt && interviewComplete(items)) completeAt = { rounds: turns, minutes: minutesNow };
     transcript.push(`### 第 ${turns} 轮（${turn.stage ?? ""}）\n\n${turn.reply}\n\n${turn.questions.map((question, index) => `${index + 1}. ${question.text}`).join("\n")}`);
     console.info(JSON.stringify({ turn: turns, stage: turn.stage, questions: turn.questions.length, clicks, next: turn.nextAction,
       attentionMinutes: minutesNow, modelSeconds: Math.round(modelSeconds.at(-1)!), ready: Boolean(readyAt), complete: Boolean(completeAt) }));
@@ -274,6 +276,20 @@ try {
     }));
     text = composeAnswers(turn.questions, answers, played.output.freeText) || "不确定。";
     transcript.push(`**回答**${played.output.upload.length ? `（上传：${played.output.upload.join("、")}）` : ""}\n\n${text}`);
+  }
+  // The interview said it is done: the synthesis that 「画像符合我」 confirms is written by the extraction's finishing runs, which the
+  // worker's tick asks for in the app. Asked for here, then the person's one click, then the app's own completeness rule (2026-10-20: the
+  // eval used to score straight away and closed the runtime under the finishing run, so the full checklist could never be reached).
+  if (state === "ready" && !completeAt) {
+    const extractor = createOnboardingExtractor(store, workspaceId, repoRoot, () => client);
+    await extractionSettled(workspaceId);
+    for (let run = 0; run < 3 && !json<Partial<ProfileModel>>("profile.model", {}).portrait; run += 1) {
+      await requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), "eval");
+    }
+    const clicks = confirmPortrait();
+    attentionSeconds += clicks * SECONDS_PER_ANSWER;
+    if (interviewComplete(checklistNow())) completeAt = { rounds: turns, minutes: Math.round(attentionSeconds / 6) / 10 };
+    console.info(JSON.stringify({ finished: true, portrait: clicks > 0, complete: Boolean(completeAt) }));
   }
 } finally {
   const lines = identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] }));
