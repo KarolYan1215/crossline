@@ -77,3 +77,21 @@ test("only domain lines get an interview checklist, with their fixed slots", asy
   expect(guides[0]!.slots).toContain("wealth_emergency_months：应急金可覆盖的月数");
   expect(guides[0]!.ask.join("")).toContain("不给买卖建议");
 });
+
+// The owner's decision of 2026-10-20: the lite edition's fixed-schedule line is named for a person, from what was typed.
+test("the fixed-schedule line takes a noun for a person", async () => {
+  const { lineNounFor } = await import("./index");
+  expect(lineNounFor("上班")).toEqual({ noun: "职场人", certain: true });
+  expect(lineNounFor(" 每天上班 ")).toEqual({ noun: "职场人", certain: true });
+  expect(lineNounFor("上学")).toEqual({ noun: "学生", certain: true });
+  expect(lineNounFor("自由职业")).toEqual({ noun: "自由职业者", certain: true });
+  expect(lineNounFor("带娃")).toEqual({ noun: "家长", certain: true });
+  expect(lineNounFor("实习")).toEqual({ noun: "实习生", certain: true });
+  // Already a person: kept as typed.
+  expect(lineNounFor("护士")).toEqual({ noun: "护士", certain: true });
+  expect(lineNounFor("上班族")).toEqual({ noun: "上班族", certain: true });
+  expect(lineNounFor("研究生")).toEqual({ noun: "研究生", certain: true });
+  // Unknown: kept, and the card asks the person to name it.
+  expect(lineNounFor("健身房值班表")).toEqual({ noun: "健身房值班表", certain: false });
+  expect(lineNounFor("  ")).toEqual({ noun: "", certain: false });
+});

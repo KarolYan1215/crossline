@@ -42,11 +42,16 @@ test("the lite edition is asked first, and its domain lines are named with their
   // The full list offers the two domain lines beside the usual identities.
   expect(card).toContain("健康管理者（健康领域）");
   expect(card).toContain("理财者（财富领域）");
-  const lite = openingReply({ tone: "neutral", edition: "lite", lines: ["上班", "健康管理者", "理财者"],
-    domains: { 健康管理者: "wellness", 理财者: "wealth" }, base: "上班", fixed: ["上班"] }, false);
+  // The fixed-schedule line is named for a person (2026-10-20), and the person's own words stay in the reply for the interview to quote.
+  const lite = openingReply({ tone: "neutral", edition: "lite", lines: ["职场人", "健康管理者", "理财者"],
+    domains: { 健康管理者: "wellness", 理财者: "wealth" }, base: "职场人", fixed: ["职场人"], said: { 职场人: "上班" } }, false);
   expect(lite).toContain("【版本】极简");
-  expect(lite).toContain("【我的主线】上班、健康管理者（健康领域）、理财者（财富领域）");
-  expect(lite).toContain("【有固定日程的主线】上班");
+  expect(lite).toContain("【我的主线】职场人、健康管理者（健康领域）、理财者（财富领域）");
+  expect(lite).toContain("【有固定日程的主线】职场人");
+  expect(lite).toContain("【有固定日程的事】上班（主线：职场人）");
+  // A name the person typed as a noun already needs no second line.
+  const nurse = openingReply({ tone: "neutral", edition: "lite", lines: ["护士"], domains: {}, base: "护士", fixed: ["护士"], said: { 护士: "护士" } }, false);
+  expect(nurse).not.toContain("【有固定日程的事】");
 });
 
 test("each stage brings its own picture, and the time left is said before and after the start standard", () => {

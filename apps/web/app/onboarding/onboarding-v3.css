@@ -229,3 +229,6 @@
 .ob-file-list ul{margin:0;padding:0;list-style:none;display:grid;gap:4px}
 .ob-file-list li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:13px;border-top:1px solid var(--mist);padding-top:4px}
 .ob-file-list li blockquote{flex-basis:100%;margin:2px 0 0;padding-left:8px;border-left:2px solid var(--mist);color:var(--graphite)}
+.ob-line-name{flex-direction:column;align-items:stretch;margin-top:8px}
+.ob-line-name label{display:flex;gap:8px;align-items:center;white-space:nowrap}
+.ob-line-name label input{flex:1;min-width:0}

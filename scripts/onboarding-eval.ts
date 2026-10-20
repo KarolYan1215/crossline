@@ -18,7 +18,7 @@
  * attribute candidates (two, or the one there is) as a line's goal, and 「画像符合我」 once the interview says it is done. Simulated attention time is
  * (questions shown + clicks) × 20 seconds per round; the model's time is reported apart and not counted. Any target missed sets exit code 1.
  *
- * `--lite` (docs/domain-lines.md, 2026-10-19): the lite edition's opening — an office worker whose fixed-schedule line is 上班 plus the two
+ * `--lite` (docs/domain-lines.md, 2026-10-19): the lite edition's opening — an office worker whose fixed-schedule line is 职场人 (they say 上班) plus the two
  * domain lines 健康管理者 (wellness) and 理财者 (wealth), set through `setupLines` as the opening card does, the first reply being the card's
  * own words with 【版本】极简 (`openingReply`), no files. The persona is `scripts/personas/office-worker-lite.md`. The report then adds a
  * 「领域主线」 section: the questions asked under each domain line against its `domainGuides` ask list, the facts that landed under the
@@ -58,9 +58,11 @@ const dataDir = mkdtempSync(path.join(tmpdir(), "crossline-onboarding-eval-"));
 const store = new CrosslineStore(path.join(dataDir, "crossline.db"));
 const { workspace, principal } = store.createPrincipalWithWorkspace("onboarding-eval", "eval");
 const workspaceId = workspace.id;
-/** The opening card's lite answer: 上班 as the base and the one fixed schedule, 健康 and 财富 as domain lines. */
-const LITE_OPENING = { tone: "neutral" as const, edition: "lite" as const, lines: ["上班", "健康管理者", "理财者"],
-  domains: { 健康管理者: "wellness" as const, 理财者: "wealth" as const }, base: "上班", fixed: ["上班"] };
+/** The opening card's lite answer: 职场人 (the person's 上班) as the base and the one fixed schedule, 健康 and 财富 as domain lines. */
+const LITE_OPENING = { tone: "neutral" as const, edition: "lite" as const, lines: ["职场人", "健康管理者", "理财者"],
+  domains: { 健康管理者: "wellness" as const, 理财者: "wealth" as const }, base: "职场人", fixed: ["职场人"],
+  // The person says 上班; the line is named for a person (2026-10-20), as the card names it.
+  said: { 职场人: "上班" } };
 if (lite) {
   // The web library's store is this one (`getStore` reads the global first), so `setupLines` writes the same ledger the interview reads.
   process.env.CROSSLINE_DATA_DIR = dataDir;
