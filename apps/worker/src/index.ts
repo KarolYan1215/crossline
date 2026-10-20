@@ -48,7 +48,8 @@ import { createWeeklyInsight } from "./weekly-insight-runner";
 import { createOnboardingSessionRunner } from "./onboarding-session";
 import { extractText, reextractForLayout } from "./extract";
 import { WHISPER_MODEL, createTranscriber, createWhisperEngine, modelsDirectory } from "./transcribe";
-import { recordingPass, recordingsOn } from "./recordings";
+import { recordingPass, recordingsOn, transcribeConcurrency } from "./recordings";
+import { createRecordingDigester, transcriptsAwaitingDigest } from "./recording-digest";
 import { createBackgroundFactsExtractor } from "./background-facts-runner";
 import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import { addSubscription, hasSubscriptions, removeSubscription, subscriptionSources } from "./calendar-subscriptions";
@@ -242,6 +243,7 @@ async function folderPass(workspaceId: string, checkedAt: string): Promise<void>
     if (read) console.info(JSON.stringify({ type: "sources.folders_read", checkedAt, workspaceId, outcomes }));
     // Recordings the pass just queued start now, in the background: a long one takes far longer than a tick.
     startRecordings(workspaceId);
+    void digestPass(workspaceId).catch(() => undefined);
     if (!codexSupervisor || !spendAllows(await spendFor(workspaceId), "intake")) return;
     enterUsageWorkspace(workspaceId);
     const filed = await createFolderClassifier(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId))().catch(() => undefined);
@@ -738,8 +740,8 @@ async function transcribeDocument(workspaceId: string, documentId: string): Prom
   return { state: "transcribing", documentId };
 }
 /**
- * 录音自动转写 (recordings.ts, docs/phone-recording.md): recordings queued from the authorized folders, one at a time on the same line as
- * uploaded recordings, slowed down while the person uses the computer in the day. The idle time is the screen-activity reader's latest,
+ * 录音自动转写 (recordings.ts, docs/phone-recording.md): recordings queued from the authorized folders, a few at once
+ * (`transcribeConcurrency`), beside uploaded recordings, slowed down while the person uses the computer in the day. The idle time is the screen-activity reader's latest,
  * kept in memory only — it is read whether or not screen activity is recorded, and nothing of it is stored here.
  */
 const recordingWorkspaces = new Set<string>();
@@ -749,7 +751,7 @@ function startRecordings(workspaceId: string): void {
   recordingWorkspaces.add(workspaceId);
   if (recordingRunning) return;
   recordingRunning = true;
-  transcribeQueue = transcribeQueue.then(async () => {
+  void (async () => {
     while (recordingWorkspaces.size) {
       const next = [...recordingWorkspaces][0]!;
       recordingWorkspaces.delete(next);
@@ -759,10 +761,29 @@ function startRecordings(workspaceId: string): void {
         idleMs: () => lastIdle && Date.now() - lastIdle.at < 5 * 60_000 ? lastIdle.idleMs + (Date.now() - lastIdle.at) : undefined,
         modelNeeded: (waiting) => sayToPerson(analysisStore, next, `有 ${waiting} 个手机录音等着转写，需要先在设置里同意下载语音识别模型（约 ${WHISPER_MODEL.approxMegabytes} MB，一次性）。`,
           "recording_model", "recording_model", [{ label: "去设置", href: "/settings#privacy" }])
-      }).catch(() => []);
+      }, transcribeConcurrency()).catch(() => []);
       if (outcomes.length) console.info(JSON.stringify({ type: "recordings.transcribed", workspaceId: next, outcomes }));
+      // What was just transcribed is sorted and summarised at once, not at the next tick.
+      if (outcomes.some((item) => item.state === "transcribed")) void digestPass(next).catch(() => undefined);
     }
-  }).catch(() => undefined).finally(() => { recordingRunning = false; });
+  })().catch(() => undefined).finally(() => { recordingRunning = false; });
+}
+
+/**
+ * Recording digests (recording-digest.ts): transcripts sorted into kept and not, summarised, and their commitments, facts and days taken
+ * into the ledger. Intake work: it runs while the quota allows intake, one pass per workspace at a time.
+ */
+const digesting = new Set<string>();
+async function digestPass(workspaceId: string): Promise<void> {
+  if (digesting.has(workspaceId) || paused(workspaceId, "intake") || !transcriptsAwaitingDigest(analysisStore, workspaceId).length) return;
+  if (!codexSupervisor || !spendAllows(await spendFor(workspaceId), "intake")) return;
+  digesting.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const outcome = await createRecordingDigester(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId),
+      { dataDir, timeZone: calendarZone(workspaceId) ?? "America/Chicago" })();
+    console.info(JSON.stringify({ type: "recordings.digested", workspaceId, ...outcome }));
+  } finally { digesting.delete(workspaceId); }
 }
 
 /** After the model arrives, every recording that was waiting for it starts. */

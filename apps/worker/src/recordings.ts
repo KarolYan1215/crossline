@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -12,7 +13,7 @@ import type { SpeechOutcome } from "./transcribe";
 
 /**
  * 录音自动转写 (docs/phone-recording.md, 2026-10-20). The folder pass queues recordings that land in an authorized folder (`syncFolder`
- * marks their index entry `audio: "queued"`); this takes them one at a time, oldest first, and turns each into a text document in the
+ * marks their index entry `audio: "queued"`); this takes them oldest first, a few at once (`transcribeConcurrency`), and turns each into a text document in the
  * person's materials, where the interview, filing and capture analysis read it like any other file. The audio is read where it lies and
  * never copied: the transcript keeps the recording's name, length and sha256, nothing else of it.
  *
@@ -30,7 +31,21 @@ export type RecordingDeps = {
   now?: () => Date;
   /** Told once, with how many recordings wait, that the speech model has not been downloaded. */
   modelNeeded?: (waiting: number) => void;
+  /** Recordings another lane of this pass has taken (`folderId:relative`), so two lanes never transcribe the same file. */
+  claimed?: Set<string>;
 };
+
+/**
+ * How many recordings are transcribed at once. The owner asked for more than one (2026-10-20). Whisper's ONNX session already spreads one
+ * recording over every core, so a second lane mostly overlaps decoding and the decoder loop with the other's matrix work: worth it on four
+ * cores or more, not a multiple. `CROSSLINE_TRANSCRIBE_CONCURRENCY` overrides it.
+ */
+export function transcribeConcurrency(cores = os.cpus().length, freeBytes = os.freemem(), env = process.env.CROSSLINE_TRANSCRIBE_CONCURRENCY): number {
+  const set = Number(env);
+  if (Number.isInteger(set) && set >= 1) return Math.min(set, 8);
+  // About 0.8 GB per lane once the shared model is loaded (decoded audio of a three-hour file is the large part).
+  return Math.max(1, Math.min(4, Math.max(2, Math.floor(cores / 4)), Math.floor(freeBytes / 800_000_000)));
+}
 
 export type RecordingOutcome =
   | { state: "off" | "idle" | "waiting_for_model" | "stopped" }
@@ -42,11 +57,13 @@ const readIndex = (store: CrosslineStore, workspaceId: string, id: string): Reco
   try { return JSON.parse(store.getSetting(workspaceId, sourceFolderIndexSetting(id)) ?? "{}") as Record<string, FolderIndexEntry>; } catch { return {}; }
 };
 
-/** Recordings waiting, oldest first. */
-export function queuedRecordings(store: CrosslineStore, workspaceId: string): Array<{ folder: SourceFolder; relative: string; entry: FolderIndexEntry }> {
+const claimKey = (folderId: string, relative: string) => `${folderId}:${relative}`;
+
+/** Recordings waiting, oldest first, leaving out those another lane has taken. */
+export function queuedRecordings(store: CrosslineStore, workspaceId: string, claimed?: Set<string>): Array<{ folder: SourceFolder; relative: string; entry: FolderIndexEntry }> {
   return readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING))
     .flatMap((folder) => Object.entries(readIndex(store, workspaceId, folder.id)).filter(([, entry]) => entry.audio === "queued")
-      .map(([relative, entry]) => ({ folder, relative, entry })))
+      .filter(([relative]) => !claimed?.has(claimKey(folder.id, relative))).map(([relative, entry]) => ({ folder, relative, entry })))
     .sort((a, b) => a.entry.mtimeMs - b.entry.mtimeMs || a.relative.localeCompare(b.relative));
 }
 
@@ -74,13 +91,20 @@ const localTime = (at: Date, zone: string) => {
   } catch { return at.toISOString().slice(0, 16).replace("T", " "); }
 };
 
-/** Transcribes the oldest waiting recording, or says why nothing was done. */
+/** Transcribes the oldest waiting recording no other lane holds, or says why nothing was done. */
 export async function transcribeNextRecording(store: CrosslineStore, workspaceId: string, deps: RecordingDeps): Promise<RecordingOutcome> {
   if (!recordingsOn(store, workspaceId)) return { state: "off" };
-  const queue = queuedRecordings(store, workspaceId);
+  const queue = queuedRecordings(store, workspaceId, deps.claimed);
   const next = queue[0];
   if (!next) return { state: "idle" };
-  const { folder, relative, entry } = next;
+  const key = claimKey(next.folder.id, next.relative);
+  deps.claimed?.add(key);
+  try { return await transcribeOne(store, workspaceId, deps, next, queue.length); }
+  finally { deps.claimed?.delete(key); }
+}
+
+async function transcribeOne(store: CrosslineStore, workspaceId: string, deps: RecordingDeps,
+  { folder, relative, entry }: { folder: SourceFolder; relative: string; entry: FolderIndexEntry }, waiting: number): Promise<RecordingOutcome> {
   const file = relative.replace(/\\/g, "/");
   const now = deps.now ?? (() => new Date());
   let bytes: Buffer;
@@ -113,7 +137,7 @@ export async function transcribeNextRecording(store: CrosslineStore, workspaceId
   if (result.state === "needs_download") {
     if (!store.getSetting(workspaceId, RECORDING_MODEL_NOTICE)) {
       store.setSetting(workspaceId, RECORDING_MODEL_NOTICE, now().toISOString());
-      deps.modelNeeded?.(queue.length);
+      deps.modelNeeded?.(waiting);
     }
     return { state: "waiting_for_model" };
   }
@@ -151,12 +175,20 @@ export async function transcribeNextRecording(store: CrosslineStore, workspaceId
   return { state: "transcribed", file };
 }
 
-/** Works through the queue, one recording at a time, until it is empty, the model is missing, or the consent is turned off. */
-export async function recordingPass(store: CrosslineStore, workspaceId: string, deps: RecordingDeps): Promise<RecordingOutcome[]> {
+/**
+ * Works through the queue in `lanes` parallel lanes until it is empty, the model is missing, or the consent is turned off. A lane that
+ * finds nothing left stops; the others finish what they hold.
+ */
+export async function recordingPass(store: CrosslineStore, workspaceId: string, deps: RecordingDeps, lanes = 1): Promise<RecordingOutcome[]> {
   const outcomes: RecordingOutcome[] = [];
-  for (;;) {
-    const outcome = await transcribeNextRecording(store, workspaceId, deps);
-    if (!("file" in outcome)) return outcomes;
-    outcomes.push(outcome);
-  }
+  const shared = { ...deps, claimed: deps.claimed ?? new Set<string>() };
+  const lane = async () => {
+    for (;;) {
+      const outcome = await transcribeNextRecording(store, workspaceId, shared);
+      if (!("file" in outcome)) return;
+      outcomes.push(outcome);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, lanes) }, lane));
+  return outcomes;
 }

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { RECORDING_CONSENT, RECORDING_TRANSCRIBED_EVENT, recordingPace, sourceFolderIndexSetting, type FolderIndexEntry, type SourceFolder } from "@crossline/core";
 import { CrosslineStore } from "@crossline/db";
-import { recordingPass, transcribeNextRecording, type RecordingDeps } from "./recordings";
+import { recordingPass, transcribeConcurrency, transcribeNextRecording, type RecordingDeps } from "./recordings";
 import { addFolder, syncFolder } from "./source-folders";
 import { RATE, signal } from "./testing/audio";
 import { createTranscriber, type TranscriptionEngine } from "./transcribe";
@@ -152,4 +152,27 @@ test("in the day, with the person at the computer, the worker rests between piec
   expect(recordingPace({ idleMs: 30_000, at: new Date("2026-10-21T05:00:00Z"), timeZone: "America/Chicago" })).toBe("full");
   expect(recordingPace({ idleMs: 10 * 60_000, at: new Date("2026-10-20T15:00:00Z"), timeZone: "America/Chicago" })).toBe("full");
   expect(recordingPace({ at: new Date("2026-10-20T15:00:00Z"), timeZone: "America/Chicago" })).toBe("slow");
+});
+
+test("several recordings are transcribed at once, each by one lane only", async () => {
+  store.setSetting(workspaceId, RECORDING_CONSENT, "granted");
+  put("second.m4a", "speech two");
+  put("third.m4a", "speech three");
+  await syncFolder(store, workspaceId, folder, folderDeps(true));
+  let inFlight = 0, most = 0;
+  const transcriber = createTranscriber({ engine: { ...engine(), recognise: async (samples) => {
+    inFlight += 1; most = Math.max(most, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    inFlight -= 1; heard.push(samples.length / RATE);
+    return { text: "x", chunks: [{ start: 0, end: 1, text: "x" }] };
+  } }, decode, modelsDir: path.join(data, "models") });
+  await transcriber.download();
+  const outcomes = await recordingPass(store, workspaceId, { ...(await deps()), transcriber }, 2);
+  expect(outcomes.map((item) => item.state)).toEqual(["transcribed", "transcribed", "transcribed"]);
+  expect(most).toBe(2);
+  expect(heard).toHaveLength(3);
+  expect(transcribeConcurrency(16, 8e9, undefined)).toBe(4);
+  expect(transcribeConcurrency(4, 8e9, undefined)).toBe(2);
+  expect(transcribeConcurrency(16, 1e9, undefined)).toBe(1);
+  expect(transcribeConcurrency(16, 8e9, "3")).toBe(3);
 });

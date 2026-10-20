@@ -80,6 +80,23 @@ export function formatTranscript(chunks: TranscriptChunk[], fallbackText: string
   return (lines.length ? lines.join("\n") : fallbackText.trim()).slice(0, 200_000);
 }
 
+/**
+ * Lines Whisper writes over silence, music or noise rather than hearing them (Koenecke et al., FAccT 2024; arXiv 2501.11378): the closing
+ * phrases of the subtitled videos it was trained on. A line that is only such a phrase, or the same line repeated a third time in a row
+ * (the decoder looping), is dropped from a recording's transcript.
+ */
+const STOCK_LINE = /^[\s\p{P}]*(谢谢(大家)?(收看|观看)|感谢(您的)?(收看|观看)|请不吝点赞.*|.*订阅.*转发.*打赏.*|字幕(由|提供|制作).*|.*amara\.org.*|明镜.*点点栏目.*|thank(s| you) (so much )?for watching.*|please subscribe.*|subtitles by.*)[\s\p{P}]*$/iu;
+export function withoutHallucinations(chunks: TranscriptChunk[]): TranscriptChunk[] {
+  const out: TranscriptChunk[] = [];
+  for (const chunk of chunks) {
+    const text = chunk.text.trim();
+    if (!text || STOCK_LINE.test(text)) continue;
+    if (out.length >= 2 && out.at(-1)!.text.trim() === text && out.at(-2)!.text.trim() === text) continue;
+    out.push(chunk);
+  }
+  return out;
+}
+
 export type TranscriberOptions = {
   engine: TranscriptionEngine; decode: AudioDecoder; modelsDir: string;
   /** Traditional → simplified Chinese, applied to a transcript only when the language heard was Chinese. Defaults to OpenCC. */
@@ -198,7 +215,8 @@ ${body}` : body;
     } catch (error) {
       return { state: "failed", code: "TRANSCRIPTION_FAILED", message: `识别没有完成：${error instanceof Error ? error.message.slice(0, 200) : "未知错误"}` };
     }
-    const body = formatTranscript(chunks, text);
+    const kept = withoutHallucinations(chunks);
+    const body = formatTranscript(kept, kept.length || !chunks.length ? text : "");
     // Speech by energy that the model hears no words in (music, traffic) counts as silence, not as a failure to report.
     if (!body.trim()) return { state: "silent", seconds: Math.round(seconds), speechSeconds, workMs: work };
     const spoken = language === "zh" ? await (options.simplify ?? simplifyChinese)(body) : body;
@@ -238,6 +256,10 @@ export function createWhisperEngine(modelsDir: string): { engine: TranscriptionE
     try { return await import(/* @vite-ignore */ moduleName) as Transformers; }
     catch { throw new Error("还没有安装语音识别组件（@huggingface/transformers）。"); }
   };
+  // The offline pipeline is loaded once and shared: building it reads ~250 MB and sets up the ONNX sessions, which each piece of a
+  // recording and each parallel lane would otherwise repeat.
+  let offline: Promise<WhisperPipeline> | undefined;
+  const loaded = () => (offline ??= open(false).catch((error: unknown) => { offline = undefined; throw error; }));
   const open = async (remote: boolean, onProgress?: (fraction: number) => void) => {
     const { env, pipeline } = await load();
     env.cacheDir = modelsDir; env.allowLocalModels = true; env.allowRemoteModels = remote;
@@ -277,14 +299,14 @@ export function createWhisperEngine(modelsDir: string): { engine: TranscriptionE
   };
   const engine: TranscriptionEngine = {
     async modelReady() {
-      try { await open(false); return true; } catch (error) {
+      try { await loaded(); return true; } catch (error) {
         if (error instanceof Error && error.message.includes("@huggingface/transformers")) throw error;
         return false;
       }
     },
     async download(onProgress) { await open(true, onProgress); },
     async recognise(samples, language) {
-      const run = await open(false);
+      const run = await loaded();
       const chosen = language ?? await detectLanguage(run, samples);
       // 30-second windows overlapped by 5 seconds, which is how Whisper is meant to be fed a long recording.
       const result = await run(samples, { chunk_length_s: 30, stride_length_s: 5, return_timestamps: true, task: "transcribe", language: chosen });

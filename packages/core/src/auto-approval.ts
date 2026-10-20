@@ -1,5 +1,8 @@
 import { stepLeavesMachine } from "./workflows";
 
+/** Captures made from what a recording's digest heard the person promise (`apps/worker/src/recording-digest.ts`) carry this id prefix. */
+export const RECORDING_CAPTURE_PREFIX = "recording-";
+
 /** Who a default-effective approval is recorded as. Never the person's own principal: they did not click. */
 export const AUTO_APPROVER_ID = "system:auto-approval";
 /** How long an automatic approval can still be taken back with one click. */
@@ -50,7 +53,9 @@ const leavesMachine = (text: string) => {
  * - it reaches outside the machine — sends, publishes, submits, pays, contacts or hands something to another person — because that
  *   step cannot be taken back, and the person should know it is coming before it is on their week;
  * - it needs access only the person can grant (a login, a permission, a broker or bank account);
- * - the person took back an automatic approval of it before (their undo is a decision; `revoked`).
+ * - the person took back an automatic approval of it before (their undo is a decision; `revoked`);
+ * - it was heard in a recording (`RECORDING_CAPTURE_PREFIX`): with no speaker separation, a television or another person's promise can
+ *   read as the person's own, so what was only heard waits for them (2026-10-20, after Bee was found taking TV dialogue for conversation).
  *
  * Risk tier alone is no longer a reason: 「影响里程碑」 is most work, and 「高风险」 came from the same external-action words (the
  * backplanner marks a step that matches them), which are judged here directly — on the intent and the person's own parts, with the
@@ -58,9 +63,10 @@ const leavesMachine = (text: string) => {
  * same test: the only irreversible acts a proposal can name are the external ones and deleting, which the shared words cover; every
  * automated part is local by schema. Seeded example work never takes effect by itself (a demo order once reached a real calendar).
  */
-export function autoApprovalEligible(order: Candidate, options: { revoked?: boolean } = {}): { eligible: boolean; reason: string } {
+export function autoApprovalEligible(order: Candidate & { id?: string }, options: { revoked?: boolean } = {}): { eligible: boolean; reason: string } {
   if (order.state !== "awaiting_plan_approval") return { eligible: false, reason: "不在待批准状态" };
   if (options.revoked) return { eligible: false, reason: "本人撤销过自动生效，需本人批准" };
+  if (order.id?.startsWith(RECORDING_CAPTURE_PREFIX)) return { eligible: false, reason: "从录音里听到的，说话人未经确认，需本人确认" };
   const payload = (order.payload ?? {}) as { title?: string; seeded?: boolean; humanCore?: Array<{ intent?: string }>;
     materialContract?: Array<{ description?: string; required?: boolean }> };
   if (payload.seeded) return { eligible: false, reason: "示例任务，不自动生效" };

@@ -66,7 +66,7 @@ export function RecordingCard({ overview }: { overview: RecordingOverview }) {
     {on && model?.state === "downloading" && <p className="st-note">正在下载语音识别模型：{Math.round(model.progress * 100)}%，完成后自动开始转写。</p>}
     {on && model?.state === "unavailable" && <p className="st-fail">暂时不能转写：{model.message}</p>}
     {on && overview.folders === 0 && <p className="st-note">还没有授权文件夹：先在「日历与连接」里授权手机录音同步到的那个文件夹。</p>}
-    {(on || overview.done > 0) && <p className="st-note">已转写 {overview.done} 个，无人声 {overview.silent} 个，排队 {overview.queued} 个。一次只转一个；白天本人在用电脑时放慢，夜间与离开时全速。</p>}
+    {(on || overview.done > 0) && <p className="st-note">已转写 {overview.done} 个，无人声 {overview.silent} 个，排队 {overview.queued} 个。同时转几个（按电脑核数和内存）；白天本人在用电脑时放慢，夜间与离开时全速。转完的录音会整理成摘要：闲聊和视频声不保留，本人答应做的事记为收集，需本人确认后才排进日程。</p>}
     {overview.cost && <p className="st-note">最近 {overview.cost.recordings} 个录音（共 {overview.cost.audioHours} 小时）：每小时录音约用 {overview.cost.minutesPerHour} 分钟转写。</p>}
     {overview.failed.length > 0 && <ul className="st-list" aria-label="没有转写成的录音">{overview.failed.map((item) =>
       <li key={item.file}><span>{item.file}</span><small>{item.note}</small></li>)}</ul>}
