@@ -56,8 +56,10 @@ export function normalizeParams(value: unknown): ScheduleParams {
     const number = typeof given === "number" && Number.isFinite(given) ? given : PARAMS_BUFFERED[key];
     return Math.min(limit.max, Math.max(limit.min, number));
   };
-  return { gapMinutes: Math.round(pick("gapMinutes")), maxDailyShare: Math.round(pick("maxDailyShare") * 100) / 100,
-    focusCapMinutes: Math.round(pick("focusCapMinutes")), deadlineBufferDays: Math.round(pick("deadlineBufferDays")) };
+  // Minutes are kept on the five-minute grid every block is placed on (GRID_MINUTES in optimizer.ts).
+  const toGrid = (minutes: number) => Math.round(minutes / 5) * 5;
+  return { gapMinutes: toGrid(pick("gapMinutes")), maxDailyShare: Math.round(pick("maxDailyShare") * 100) / 100,
+    focusCapMinutes: toGrid(pick("focusCapMinutes")), deadlineBufferDays: Math.round(pick("deadlineBufferDays")) };
 }
 
 export type PlanningInput = {

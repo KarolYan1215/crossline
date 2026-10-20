@@ -216,6 +216,23 @@ test("the person logs in in a window of its own; a run is told that profile, and
   expect(said().at(-1)).toContain("这次没读到：需要登录：小红书");
 });
 
+test("a scheduled workflow logged in on another machine is left to that machine: the synced ledger has the login, this one has no profile", () => {
+  store.setSetting(ws, "skills.grown", JSON.stringify([{ id: "flow-xhs", kind: "grown", name: "xhs", description: "d", lines: ["media"], category: "files_calendar_prep",
+    manifest: favourites, origin: { kind: "asked", text: "t", requestId: "r" }, taskId: "", files: [],
+    scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: [], final: "usable" }, status: "active", pinned: false,
+    logins: { 小红书: "2026-10-14T22:55:00Z" }, createdAt: "", updatedAt: "", lastUsedAt: "" }]));
+  const sunday = new Date("2026-10-19T01:10:00Z"), runs: unknown[] = [];
+  const run = (input: unknown) => { runs.push(input); return { state: "started" as const, taskId: "t" }; };
+  // The hosted copy: no profile for the site, so it neither runs, reminds nor marks the week as run.
+  expect(workflowSchedulePass(store, ws, run, sunday, path.join(root, "elsewhere"))).toEqual([]);
+  expect(runs).toEqual([]);
+  expect(readGrownSkills(store, ws)[0]!.lastRunAt).toBeUndefined();
+  // The machine the person logged in on runs it.
+  mkdirSync(path.join(root, "here", "xiaohongshu.com"), { recursive: true });
+  expect(workflowSchedulePass(store, ws, run, sunday, path.join(root, "here"))).toEqual(["flow-xhs"]);
+  expect(runs.length).toBe(1);
+});
+
 test("the first grown vlog workflow (2026-10-14) installs with its script: reading a system font is not leaving its directory", async () => {
   const fixture = JSON.parse(readFileSync(path.join(import.meta.dirname, "testing", "fixtures", "grown-vlog-workflow-real-2026-10-14.json"), "utf8")) as { files: Array<{ path: string; text: string }> };
   const dir = path.join(root, "grow-vlog");

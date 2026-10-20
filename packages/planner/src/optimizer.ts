@@ -43,8 +43,10 @@ const sessionCap = (task: PlannerTask, short: number) => task.interruptible === 
 /** `minutes` of work cut into the fewest sessions of at most `cap`, evenly (185 at 45 is five of 37, not four of 45 and a 5-minute tail). */
 const sessions = (minutes: number, cap: number): number[] => {
   const count = cap === Infinity ? 1 : Math.max(1, Math.ceil(minutes / cap));
-  const base = Math.floor(minutes / count);
-  return Array.from({ length: count }, (_, index) => base + (index < minutes - base * count ? 1 : 0));
+  // Split in whole five minutes when the total is on the grid (185 at 45 is 40+40+35+35+35), else by the minute as before.
+  const unit = minutes % GRID_MINUTES === 0 ? GRID_MINUTES : 1;
+  const units = minutes / unit, base = Math.floor(units / count);
+  return Array.from({ length: count }, (_, index) => (base + (index < units - base * count ? 1 : 0)) * unit);
 };
 /** The most work minutes that fit in `room` minutes as sessions of at most `cap` with `rest` between. */
 const fitting = (room: number, cap: number, rest: number): number => {
@@ -53,6 +55,17 @@ const fitting = (room: number, cap: number, rest: number): number => {
   return work;
 };
 const highsReady = loadHighs();
+/**
+ * Every block starts and ends on a five-minute mark (the person's decision of 2026-10-20: 「做成 5 分钟一个的时间块」). Inputs are put on
+ * the grid first — free time shrinks inward to the nearest marks, estimates round up to whole five minutes, the gap is a multiple of
+ * five — and the finished plan is laid out on the grid once more (`onGrid`), because the solver's continuous minutes, the efficiency
+ * factors and the remaining day capacity still give lengths such as 37.
+ */
+export const GRID_MINUTES = 5;
+const GRID = GRID_MINUTES * 60_000;
+const ceilGrid = (ms: number) => Math.ceil(ms / GRID) * GRID;
+const floorGrid = (ms: number) => Math.floor(ms / GRID) * GRID;
+const ceilMinutes = (minutes: number) => Math.ceil(minutes / GRID_MINUTES - 1e-9) * GRID_MINUTES;
 const MIN_SEGMENT = 15;
 
 const durationOf = (task: PlannerTask) => task.estimate.confidence === "low"
@@ -65,14 +78,14 @@ function freeSlots(input: PlanningInput): Slot[] {
   const frozen = input.frozenBlocks.map((block) => ({ start: Date.parse(block.start), end: Date.parse(block.end) }));
   const slots: Slot[] = [];
   for (const available of input.availability) {
-    const start = Math.max(Date.parse(available.start), input.now.getTime());
-    const end = Date.parse(available.end);
+    const start = ceilGrid(Math.max(Date.parse(available.start), input.now.getTime()));
+    const end = floorGrid(Date.parse(available.end));
     if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < MIN_SEGMENT * 60_000) continue;
     let pieces = [{ start, end }];
     for (const block of frozen) {
       pieces = pieces.flatMap((piece) => block.end <= piece.start || block.start >= piece.end ? [piece] : [
-        { start: piece.start, end: Math.min(piece.end, block.start) },
-        { start: Math.max(piece.start, block.end), end: piece.end }
+        { start: piece.start, end: floorGrid(Math.min(piece.end, block.start)) },
+        { start: ceilGrid(Math.max(piece.start, block.end)), end: piece.end }
       ].filter((item) => item.end - item.start >= MIN_SEGMENT * 60_000));
     }
     slots.push(...pieces.map((piece) => ({ ...piece, energy: available.energy,
@@ -554,9 +567,49 @@ export function fallbackSchedule(input: PlanningInput): PlanResult {
 }
 
 export async function planSchedule(original: PlanningInput, options: SolveOptions = {}): Promise<PlanResult> {
-  const { input, notes } = clampContinuousBuffers(original);
-  const result = await schedule(input, options);
+  const { input, notes } = clampContinuousBuffers(estimatesOnGrid(original));
+  const result = onGrid(await schedule(input, options), input);
   return notes.length ? { ...result, notes } : result;
+}
+
+/** Estimates rounded up to whole five minutes, so work is placed in lengths the grid can hold. */
+function estimatesOnGrid(input: PlanningInput): PlanningInput {
+  return { ...input, tasks: input.tasks.map((task) => ({ ...task, estimate: { ...task.estimate,
+    p25Minutes: ceilMinutes(task.estimate.p25Minutes), p50Minutes: ceilMinutes(task.estimate.p50Minutes),
+    p85Minutes: ceilMinutes(task.estimate.p85Minutes) } })) };
+}
+
+/**
+ * Lays the placed blocks out again on the five-minute grid, slot by slot in their own order: the first in a slot starts at the next
+ * mark, each later one at the end of the one before plus the gap or rest that was between them (rounded to the grid). A length is
+ * rounded to five minutes with what the task gained or lost carried to its next block, so a task's total stays within a few minutes of
+ * what was placed; a block is shortened to fit its slot, and dropped only when not even five minutes are left. Frozen blocks and blocks
+ * outside every free slot keep their times.
+ */
+export function onGrid(result: PlanResult, input: PlanningInput): PlanResult {
+  const slots = freeSlots(input);
+  const slotOf = (start: number) => slots.find((slot) => start >= slot.start - GRID && start < slot.end);
+  const carried = new Map<string, number>();
+  const cursor = new Map<Slot, number>(), lastEnd = new Map<Slot, number>();
+  const placed: ScheduleBlock[] = [];
+  for (const block of [...result.plan.blocks].sort((a, b) => Date.parse(a.start) - Date.parse(b.start))) {
+    const start = Date.parse(block.start), end = Date.parse(block.end);
+    const slot = block.frozen ? undefined : slotOf(start);
+    if (!slot) { placed.push(block); continue; }
+    const before = lastEnd.get(slot);
+    const from = Math.max(slot.start, before === undefined ? ceilGrid(start)
+      : cursor.get(slot)! + Math.max(0, Math.round((start - before) / GRID) * GRID));
+    lastEnd.set(slot, end);
+    const wanted = (end - start) / 60_000 + (carried.get(block.taskId) ?? 0);
+    const length = Math.min(Math.max(GRID_MINUTES, Math.round(wanted / GRID_MINUTES) * GRID_MINUTES),
+      Math.floor((slot.end - from) / GRID) * GRID_MINUTES);
+    if (length < GRID_MINUTES) { carried.set(block.taskId, wanted); continue; }
+    carried.set(block.taskId, wanted - length);
+    placed.push({ ...block, start: new Date(from).toISOString(), end: new Date(from + length * 60_000).toISOString() });
+    cursor.set(slot, from + length * 60_000);
+  }
+  placed.sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+  return { ...result, plan: { ...result.plan, blocks: placed } };
 }
 
 async function schedule(input: PlanningInput, options: SolveOptions): Promise<PlanResult> {

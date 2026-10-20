@@ -397,7 +397,7 @@ export function workflowSchedulePass(store: CrosslineStore, workspaceId: string,
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
   try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
   const due = readGrownSkills(store, workspaceId).filter((record) => record.status === "active" && record.manifest.trigger === "schedule" && record.manifest.schedule
-    && workflowDue(record.manifest.schedule, record.lastRunAt, now, zone));
+    && workflowDue(record.manifest.schedule, record.lastRunAt, now, zone) && !loggedInElsewhere(record, profilesRoot));
   const fired: string[] = [];
   for (const record of due) {
     let note: string;
@@ -418,6 +418,16 @@ export function workflowSchedulePass(store: CrosslineStore, workspaceId: string,
     fired.push(record.id);
   }
   return fired;
+}
+
+/**
+ * A workflow that reads a site behind a login the person made on another machine: the ledger is the same here and on the hosted
+ * server (docs/ledger-sync.md), the browser profile is not. It is left to the machine that holds the profile — neither run nor
+ * reminded, nor marked as run — instead of every copy firing at its time and the one without a profile asking for a login again.
+ */
+export function loggedInElsewhere(record: GrownSkillRecord, profilesRoot: string): boolean {
+  if (!profilesRoot) return false;
+  return workflowAccess(record).access.some((item) => item.login && record.logins?.[item.service] && !existsSync(accessProfileDir(profilesRoot, item)));
 }
 
 /** A run or reminder happened (at its time or by hand): recorded, and the idle clock starts again. */
