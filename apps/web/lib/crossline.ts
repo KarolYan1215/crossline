@@ -194,6 +194,27 @@ export function effectiveParams(ctx: AccessContext): ScheduleParams {
   return previewScope.getStore()?.params ?? paramsFor(effectiveSchedulePreferences(ctx).preferences);
 }
 
+/**
+ * The zone the person's own device reports (2026-10-21): the hosted beta runs in Hong Kong with `CROSSLINE_TIME_ZONE=Asia/Shanghai`, so
+ * without it every account that had not picked a zone was planned, reminded and shown on the server's clock — and saving any schedule
+ * number copied that default into the saved preferences, where it stayed. The page reports `Intl`'s zone; when it differs from the one on
+ * record it becomes `schedule.preferences.timeZone`, which every reader (the web's and the worker's) takes before the server's. The
+ * device's zone, not one guessed from the IP address: a VPN, a proxy or the phone's mobile network moves an IP's apparent place, and the
+ * device's own setting is what its clock shows.
+ */
+export function syncDeviceTimeZone(ctx: AccessContext, timeZone: unknown): { ok: true; changed: boolean } | { ok: false; code: string } {
+  const zone = typeof timeZone === "string" ? timeZone.trim() : "";
+  if (!zone || zone.length > 64) return { ok: false, code: "SCHEDULE_TIME_ZONE_INVALID" };
+  try { new Intl.DateTimeFormat("en", { timeZone: zone }); } catch { return { ok: false, code: "SCHEDULE_TIME_ZONE_INVALID" }; }
+  const current = effectiveSchedulePreferences(ctx).preferences;
+  if (current.timeZone === zone && readSchedulePreferences(ctx)) return { ok: true, changed: false };
+  const store = getStore();
+  store.setSetting(ctx.workspaceId, PREFERENCES_SETTING, JSON.stringify({ ...current, timeZone: zone } satisfies SchedulePreferences));
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `schedule:time_zone:${randomUUID()}`,
+    type: "schedule.time_zone_detected", entityId: ctx.workspaceId, payload: { previous: current.timeZone, next: zone } });
+  return { ok: true, changed: current.timeZone !== zone };
+}
+
 export function saveScheduleParams(ctx: AccessContext, value: unknown): { ok: true } {
   const params = normalizeParams(value);
   const current = effectiveSchedulePreferences(ctx).preferences;

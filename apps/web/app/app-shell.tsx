@@ -11,6 +11,7 @@ import { UndoCenter } from "./undo-center";
 import { LineColors } from "./line-colors";
 import { CameraSampler } from "./camera-sampler";
 import { ReturnPoint } from "./ui/back-link";
+import { TimeZoneSync } from "./time-zone-sync";
 
 /**
  * The frame every signed-in page shares: the name, the four working views, the decisions waiting for you, the
@@ -27,6 +28,8 @@ export function AppShell({ active, children, className = "page", focus = false, 
     <LineColors />
     {/* Every page in the frame is left and returned to as it was: scroll, open folds, and what components register. */}
     <ReturnPoint />
+    {/* A pinned clock (tests, visual baselines) keeps the zone it was set up with. */}
+    {!process.env.CROSSLINE_FIXED_NOW && <TimeZoneSync />}
     <header className="running-head">
       <a className="wordmark" href="/">Crossline</a>
       <nav aria-label="主导航">{(focus ? [] : NAV_ITEMS).map((item) =>

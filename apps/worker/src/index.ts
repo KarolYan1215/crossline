@@ -1283,6 +1283,16 @@ if (!capabilitySecret) {
   codexSupervisor = await startCodexSupervisor({
     port: supervisorPort,
     capabilitySecret,
+    // The owner's runtime cannot be replaced in place, so a killed one restarts the whole worker (docker's `unless-stopped` on the
+    // hosted beta, the keeper loop here). The lock goes first: a new container's process can get the same PID and would otherwise read
+    // the old lock as alive and stand down (`worker.already_running`). Exit code 1, so the restart is visible in restarts.log.
+    onRuntimeExit: () => {
+      console.error(JSON.stringify({ type: "codex.runtime_exited", action: "worker_restart", at: new Date().toISOString() }));
+      setTimeout(() => {
+        try { rmSync(lockPath, { force: true }); } catch { /* goes stale on its own */ }
+        process.exit(1);
+      }, 2_000).unref();
+    },
     plugin: {
       name: "crossline",
       marketplacePath: path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json"),

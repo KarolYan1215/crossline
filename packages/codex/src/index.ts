@@ -503,6 +503,12 @@ export async function startCodexSupervisor(options: {
   runtimes?: { baseDir: string; ownerWorkspaceId: () => string | undefined; start?: (codexHome: string) => Promise<RuntimeSidecar>;
     maxRunning?: number; idleMs?: number; hasProvider?: (workspaceId: string) => boolean; onConnected?: (workspaceId: string) => void };
   /**
+   * The machine owner's runtime ended without `stop()` (killed by the kernel when the container ran out of memory, 2026-10-21). Nothing
+   * here restarts it — every caller holds its client — so the worker exits and its supervisor (docker's restart policy, the keeper loop)
+   * starts it again; without this the supervisor answered `CODEX_RUNTIME_EXITED` until someone restarted it by hand.
+   */
+  onRuntimeExit?: () => void;
+  /**
    * A workspace's own model provider (R7, providers.ts): its routes under `/v1/model/provider*`, answered for the caller's workspace,
    * and the quota reading that replaces the Codex one while a provider serves that workspace.
    */
@@ -651,8 +657,10 @@ export async function startCodexSupervisor(options: {
     }
     if (message.method === "account/updated") accountRevision += 1;
   });
+  // `stop()` unsubscribes before it stops the sidecar, so this runs only for an exit nobody asked for.
   const unsubscribeExit = sidecar.onExit(() => {
     runtimeBlocker = { code: "CODEX_RUNTIME_EXITED", message: "Codex app-server exited" };
+    options.onRuntimeExit?.();
   });
   const status = (): CodexSupervisorStatus => runtimeBlocker
     ? { state: "blocked", login, accountRevision, blocker: runtimeBlocker, plugin: pluginState, contract, supervisorBootId }

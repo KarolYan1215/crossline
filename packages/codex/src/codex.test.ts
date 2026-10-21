@@ -12,6 +12,7 @@ type TestSupervisor = {
 type StartSupervisor = (options: {
   port: number;
   sidecarFactory: () => Promise<unknown>;
+  onRuntimeExit?: () => void;
 }) => Promise<TestSupervisor>;
 
 function supervisorStarter(): StartSupervisor | undefined {
@@ -397,6 +398,24 @@ describe("Codex app-server boundary", () => {
     } finally {
       await supervisor.stop();
     }
+  });
+
+  test("an exit nobody asked for is reported once so the worker can restart; stopping the supervisor is not", async () => {
+    const startSupervisor = supervisorStarter();
+    if (!startSupervisor) return;
+    let exits = 0;
+    const killed = fakeSidecar();
+    const first = await startSupervisor(
+      { port: 0, sidecarFactory: async () => killed.handle, onRuntimeExit: () => { exits += 1; } });
+    killed.exit();
+    expect(exits).toBe(1);
+    await first.stop();
+    const stopped = fakeSidecar();
+    const second = await startSupervisor(
+      { port: 0, sidecarFactory: async () => stopped.handle, onRuntimeExit: () => { exits += 1; } });
+    await second.stop();
+    stopped.exit();
+    expect(exits).toBe(1);
   });
 
   test("the durable boundary cancels the active login without stopping the sidecar", async () => {
