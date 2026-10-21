@@ -23,7 +23,7 @@ import { repairDuplicateImports, repairFrozenRace } from "./calendar-repair";
 import { repairLineAttributes } from "./attribute-repair";
 import { returnTidy } from "./return-tidy";
 import { createWriteLogin } from "./calendar-write-login";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { startingWithin } from "./schedule-window";
@@ -260,6 +260,20 @@ async function extractDocument(documentId: string, workspaceId: string) {
 // On the hosted beta the machine is a shared server: nobody's account reads its folders, screen or logs, and nobody gets its shell.
 const hostedBeta = process.env.CROSSLINE_PUBLIC_BETA === "1";
 const machineOwner = (workspaceId: string) => !hostedBeta && runtimeOwner(analysisStore) === workspaceId;
+const pidAlive = (pid: number): boolean => {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+};
+let evalHeldBefore = false;
+/** A local evaluation on the owner's Codex sign-in is running (`EVAL_HOLD_FILE`); said once in the log each time it starts or ends. */
+const evalHeld = (): boolean => {
+  let text: string | undefined;
+  try { text = readFileSync(path.join(dataDir, EVAL_HOLD_FILE), "utf8"); } catch { text = undefined; }
+  const held = evalHoldActive(text, new Date(), pidAlive);
+  if (held !== evalHeldBefore) { evalHeldBefore = held; console.info(JSON.stringify({ type: "worker.eval_hold", held })); }
+  return held;
+};
+/** Only the owner's runtime is the one the evaluation spends; a guest's own sign-in is not touched. */
+const heldForEval = (workspaceId: string) => machineOwner(workspaceId) && evalHeld();
 const OWNER_ONLY_FOLDER = { state: "blocked" as const, code: "FOLDER_OWNER_ONLY",
   message: "文件夹在运行 Crossline 的那台电脑上，只有那台电脑的主人能授权。请改用「添加文件」上传。" };
 const folderDeps = { dataDir, home: homedir(), readText: extractText };
@@ -608,6 +622,8 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       if (paused(workspaceId, "planning") || !spendAllows(await spendFor(workspaceId), "core")) break;
       batch = tasksAwaitingStepPlan(analysisStore, workspaceId, accountConcurrency() * 2).filter((id) => !tried.has(id));
     }
+    // Reviewing kept warnings waits while an evaluation spends the same quota; the warnings stay and are reviewed afterwards.
+    if (heldForEval(workspaceId)) return;
     const reviewer = createWarningReviewer(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), (id, feedback) => planner(id, feedback),
       createRelationReviser(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId)),
       (line, notes) => createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(`复核意见：${notes}`, undefined, [line], { revised: true }));
@@ -858,7 +874,11 @@ setUsageSink((usage) => {
 // Unreadable reads as manual_core_only here, which routes like normal: only economy steps a Skill down.
 setSpendModeProvider(async (workspaceId) => backgroundSpend(await readCost(workspaceId)).mode);
 // The one quota gate for every background pass (core: keeps the person's own work moving; discretionary: nobody is waiting on it).
-const spendFor = createBackgroundSpend(analysisStore, (workspaceId) => readCost(workspaceId));
+const readSpend = createBackgroundSpend(analysisStore, (workspaceId) => readCost(workspaceId));
+const spendFor = async (workspaceId: string) => {
+  const spend = await readSpend(workspaceId);
+  return heldForEval(workspaceId) ? { ...spend, held: true } : spend;
+};
 /** A kind of background work the person paused on the background tasks page (the assistant has its own `agent.paused`). */
 const paused = (workspaceId: string, kind: BackgroundKind): boolean => pausedKinds(analysisStore.getSetting(workspaceId, BACKGROUND_PAUSED)).has(kind);
 const nightlies = new Map<string, ReturnType<typeof createNightlyFlywheel>>();

@@ -99,7 +99,9 @@ export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; messa
   /** Absent reads as `active` (callers that do not track the person). */
   engagement?: Engagement;
   /** The fullest window's share used, when the reading has one: core work stops at `CORE_STOP_PERCENT`, intake runs on to 100%. */
-  usedPercent?: number };
+  usedPercent?: number;
+  /** A local evaluation is spending this account's quota (`EVAL_HOLD_FILE`): discretionary work waits until it ends. */
+  held?: boolean };
 /**
  * Core background work stops here and leaves the last of the quota to intake (capture analysis, calendar filing) and the person's own
  * turns: what the person just put in is turned into something usable last of all (2026-10-21).
@@ -182,7 +184,7 @@ export function degradedService(code: string): { works: string[]; paused: string
 export function spendAllows(spend: BackgroundSpend, kind: SpendKind): boolean {
   const engagement = spend.engagement ?? "active";
   if (engagement === "dormant" || (engagement === "cooling" && kind !== "intake")) return false;
-  if (kind === "discretionary") return spend.mode === "normal";
+  if (kind === "discretionary") return spend.mode === "normal" && !spend.held;
   if (kind === "core" && (spend.usedPercent ?? 0) >= CORE_STOP_PERCENT) return false;
   return spend.mode !== "manual_core_only";
 }

@@ -21,6 +21,27 @@ export const BACKGROUND_KINDS: ReadonlyArray<{ kind: BackgroundKind; label: stri
 
 export const BACKGROUND_PAUSED = "background.paused";
 
+/**
+ * A local evaluation (scripts/onboarding-eval.ts) runs on the machine owner's own Codex sign-in, so it spends the quota the resident app
+ * spends. While it runs it leaves this file in the resident data directory, `{pid, startedAt}`, and the worker holds the owner's
+ * discretionary background work and the validation review (2026-10-20: in the half hour before an evaluation the resident app spent
+ * 1.6 million input tokens on a tutorial, skill scouting and reviews, and the evaluation stopped on SKILL_USAGE_LIMIT at round 12).
+ */
+export const EVAL_HOLD_FILE = "eval-hold.json";
+/** A hold older than this is ignored: a script killed hard cannot remove its file, and its pid may be reused. */
+export const EVAL_HOLD_MAX_HOURS = 6;
+
+/** Whether a hold file's contents still hold: well formed, younger than the cap, and its process alive. */
+export function evalHoldActive(text: string | undefined, now: Date, alive: (pid: number) => boolean): boolean {
+  if (!text) return false;
+  try {
+    const hold = JSON.parse(text) as { pid?: unknown; startedAt?: unknown };
+    if (typeof hold.pid !== "number" || typeof hold.startedAt !== "string") return false;
+    const age = now.getTime() - Date.parse(hold.startedAt);
+    return Number.isFinite(age) && age >= 0 && age < EVAL_HOLD_MAX_HOURS * 3_600_000 && alive(hold.pid);
+  } catch { return false; }
+}
+
 /** The kinds the person paused (the assistant excluded: it has its own setting). Anything unreadable reads as nothing paused. */
 export function pausedKinds(raw: string | undefined | null): Set<BackgroundKind> {
   try {

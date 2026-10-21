@@ -26,12 +26,13 @@
  * dose (each one a defect).
  */
 import { register } from "node:module";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { enterUsageWorkspace, runCodexSkill, setUsageSink, startCodexSupervisor } from "../packages/codex/src/index";
-import { PROFILE_CONFIRMED, composeGoal, interviewComplete, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
+import { EVAL_HOLD_FILE, PROFILE_CONFIRMED, composeGoal, interviewComplete, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor } from "../packages/db/src/index";
 import { domainGuides } from "../packages/identity-packs/src/index";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
@@ -47,6 +48,29 @@ register("data:text/javascript,export async function resolve(s,c,n){if(s==='serv
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
+
+/**
+ * The run spends the machine owner's own Codex quota, which the resident app spends too: while it runs, the resident worker holds the
+ * owner's discretionary background work (tutorials, skill scouting, the validation review; `EVAL_HOLD_FILE`). The resident data
+ * directory is the main checkout's, also when this runs from a worktree; `CROSSLINE_RESIDENT_DATA_DIR` names another.
+ */
+function residentDataDir(): string {
+  if (process.env.CROSSLINE_RESIDENT_DATA_DIR) return path.resolve(process.env.CROSSLINE_RESIDENT_DATA_DIR);
+  try {
+    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: repoRoot, encoding: "utf8", windowsHide: true }).trim();
+    return path.join(path.dirname(common), "data");
+  } catch { return path.join(repoRoot, "data"); }
+}
+const holdFile = path.join(residentDataDir(), EVAL_HOLD_FILE);
+const holding = existsSync(path.join(path.dirname(holdFile), "crossline.db"));
+const releaseHold = () => { if (holding) rmSync(holdFile, { force: true }); };
+if (holding) {
+  writeFileSync(holdFile, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), by: "scripts/onboarding-eval.ts" }));
+  // A normal end, a thrown error and Ctrl+C each take the hold back; a hard kill leaves it to the worker's pid and age checks.
+  process.on("exit", releaseHold);
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { releaseHold(); process.exit(130); });
+}
+console.info(JSON.stringify({ residentHold: holding ? holdFile : "none (no resident ledger found)" }));
 const lite = args.includes("--lite");
 const turnLimit = Number(args[args.indexOf("--turns") + 1]) || 20;
 const personaFile = args.find((arg) => arg.endsWith(".md"))

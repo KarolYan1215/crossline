@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { allowDiscretionarySpend, backgroundSpend, chatgptExhausted, chatgptQuotaSpent, CORE_STOP_PERCENT, engagementTier, spendAllows, type CostSignal } from "./cost";
+import { evalHoldActive } from "./background";
 
 const policy = { windowSharePercent: 80, longWindowCeilingPercent: 90 };
 const signal = (over: Partial<Extract<CostSignal, { available: true }>> = {}): CostSignal => ({
@@ -120,4 +121,17 @@ test("a spent ChatGPT reading is marked until the spent window resets; a refused
   expect(chatgptExhausted(JSON.stringify({ at: "2026-10-21T06:20:00.000Z", source: "usage_limit" }), now)).toBeUndefined();
   expect(chatgptExhausted("", now)).toBeUndefined();
   expect(chatgptExhausted("not json", now)).toBeUndefined();
+});
+
+test("a local evaluation on the same sign-in holds discretionary work only, and only while its process lives and the hold is fresh", () => {
+  const spend = { ...backgroundSpend(signal()), held: true };
+  expect([spendAllows(spend, "intake"), spendAllows(spend, "core"), spendAllows(spend, "discretionary")]).toEqual([true, true, false]);
+  const now = new Date("2026-10-21T04:00:00Z");
+  const hold = (startedAt: string, pid = 42) => JSON.stringify({ pid, startedAt });
+  const alive = (pid: number) => pid === 42;
+  expect(evalHoldActive(hold("2026-10-21T03:30:00Z"), now, alive)).toBe(true);
+  expect(evalHoldActive(hold("2026-10-21T03:30:00Z", 7), now, alive)).toBe(false);   // the script is gone
+  expect(evalHoldActive(hold("2026-10-20T21:30:00Z"), now, alive)).toBe(false);      // older than the cap: its pid may be reused
+  expect(evalHoldActive(undefined, now, alive)).toBe(false);
+  expect(evalHoldActive("{not json", now, alive)).toBe(false);
 });
