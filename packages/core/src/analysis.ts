@@ -49,6 +49,11 @@ export type AnalysisContext = {
 export type ExistingTask = { id: string; title: string; intent: string; lineId: string; projectId: string; dueDate: string; state: string };
 /** At most this many existing tasks go into a context: the nearest due first. */
 export const EXISTING_TASKS_LIMIT = 60;
+/**
+ * At most this many approved milestones go into a context: the nearest deadline first. The context used to take the list helper's
+ * default of 32, and an account with 41 approved milestones had every capture analysis refused as `ANALYSIS_CONTEXT_INVALID` (2026-10-21).
+ */
+export const APPROVED_MILESTONES_LIMIT = 60;
 
 /** A dated fact read from the capture itself: when work can start (`release`) or must be done (`due`). */
 export type AnalysisDate = { kind: "release" | "due"; date: string; quote: string; approximate: boolean };
@@ -170,7 +175,7 @@ const V1_CONTEXT = object({ version: choice("crossline.analysis.v1"), ...sharedC
 const V2_CONTEXT = object({ version: choice("crossline.analysis.v2"), ...sharedContext,
   today: str,
   approvedMilestones: array(object({ id: str, projectId: str, identityId: str, title: str, version: { type: "integer", minimum: 1 }, hasSuccessCriteria: bool,
-    deadline: { type: "string", minLength: 0, maxLength: 20 } }), 0),
+    deadline: { type: "string", minLength: 0, maxLength: 20 } }), 0, APPROVED_MILESTONES_LIMIT),
   referenceClass: array(object({ identityId: str, family, title: str, llmP50Minutes: number, actualMinutes: number }), 0, 5),
   relations: array(object({ fromMilestoneId: str, toMilestoneId: str, kind: str, explanation: { type: "string", minLength: 0, maxLength: 4000 } }), 0, 40),
   personalPreferences: array(str, 0, 30),

@@ -3,7 +3,7 @@ import { autoApproveEligible } from "./auto-approval";
 import { ownerOf } from "./owner";
 import type { AnalysisDate, AnalysisWaitingOn } from "@crossline/core";
 import { runCodexAnalysis, type CodexRpcBoundary } from "@crossline/codex";
-import { ANALYSIS_CONTEXT_VERSION, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
+import { ANALYSIS_CONTEXT_VERSION, APPROVED_MILESTONES_LIMIT, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
 import { CrosslineStore, type StoredCapture } from "@crossline/db";
 import { identityLines } from "./lines";
 import { existingTasksFor, foldNewTask } from "./duplicate-guard";
@@ -90,8 +90,12 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
       const packs = identityLines(store, workspaceId);
       if (!packs.length) throw new Error("ANALYSIS_IDENTITY_CONTEXT_REQUIRED");
       const lines = new Set(packs.map((p) => p.id));
-      const milestones = store.listMilestones(workspaceId).filter((m) => m.status === "approved" && m.projectId && lines.has(m.identityId));
       const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+      // Nearest deadline first, past ones and undated ones after, at most what the context takes.
+      const today = localToday(store, workspaceId);
+      const order = (id: string) => { const day = deadlines.get(id) ?? ""; return day >= today ? `0${day}` : day ? `1${day}` : "2"; };
+      const milestones = store.listMilestones(workspaceId).filter((m) => m.status === "approved" && m.projectId && lines.has(m.identityId))
+        .sort((a, b) => order(a.id).localeCompare(order(b.id))).slice(0, APPROVED_MILESTONES_LIMIT);
       const context = validateAnalysisContext({
         version: ANALYSIS_CONTEXT_VERSION, today: localToday(store, workspaceId), capture: { title: capture.title, context: capture.context },
         approvedMilestones: milestones.map((m) => ({ id: m.id, identityId: m.identityId, projectId: m.projectId!, title: m.title, version: m.version,
@@ -169,12 +173,14 @@ const BLOCKER_ADVICE: Record<string, string> = {
  * A capture that was analysed and blocked is deliberately NOT here: that one waits for the person (add context, press
  * re-analyse). Retrying it on a timer would spend quota to fail the same way every fifteen minutes.
  */
+const REPICKED_BLOCKERS = new Set(["ANALYSIS_APPROVED_MILESTONE_REQUIRED", "ANALYSIS_CONTEXT_INVALID"]);
 export function capturesAwaitingAutoAnalysis(store: CrosslineStore, workspaceId: string, limit = 3): string[] {
   if (!identityLines(store, workspaceId).length) return [];
   return store.listCaptures(workspaceId)
-    // Also a capture an older version blocked for want of an approved milestone: that requirement is gone, so it is re-picked.
+    // Also a capture blocked by a fault of ours rather than of its words: an older version wanted an approved milestone, and until
+    // 2026-10-21 a context with more than 32 approved milestones was refused outright. Both are gone, so those are re-picked.
     .filter((capture) => (capture.state === "captured" && capture.attempt === 0)
-      || (capture.state === "blocked" && capture.audit.blocker?.code === "ANALYSIS_APPROVED_MILESTONE_REQUIRED"))
+      || (capture.state === "blocked" && REPICKED_BLOCKERS.has(capture.audit.blocker?.code ?? "")))
     .slice(0, limit).map((capture) => capture.id);
 }
 

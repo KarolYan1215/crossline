@@ -188,6 +188,18 @@ test("a capture an older version blocked for want of an approved milestone is pi
   expect((await analysis.createCaptureAnalyzer(store, ws, "C:\\repo")(rpc, "c")).state).toBe("awaiting_plan_approval");
 });
 
+test("an account with more approved milestones than the old cap of 32 is analysed, and a capture that cap blocked is picked up again", async () => {
+  const ws = "personal-crossline";
+  for (let index = 0; index < 41; index += 1)
+    store.saveMilestone({ id: `m${index}`, ownerId: "local-owner", workspaceId: ws, identityId: "research", projectId: "p", title: `Milestone ${index}`, version: 1, status: "approved" });
+  store.transitionWorkOrder(ws, "c", { type: "analysis.proposed", proposalId: "c" }, "analysis:c:0:start", { attempt: 0 });
+  store.transitionWorkOrder(ws, "c", { type: "blocked", reason: "ANALYSIS_CONTEXT_INVALID" }, "analysis:c:0:finish",
+    { audit: { blocker: { code: "ANALYSIS_CONTEXT_INVALID", message: "分析被阻塞" } } });
+  expect(analysis.capturesAwaitingAutoAnalysis(store, ws)).toEqual(["c"]);
+  const { rpc } = fakeRuntime([JSON.stringify({ ...proposal, milestoneId: "" })]);
+  expect((await analysis.createCaptureAnalyzer(store, ws, "C:\repo")(rpc, "c")).state).toBe("awaiting_plan_approval");
+});
+
 test("files the person already uploaded reach the analysis as supplied material, so it does not ask for them again", () => {
   const ws = "personal-crossline";
   store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId: ws, kind: "pdf", fileName: "ECE 548 syllabus.pdf", mediaType: "application/pdf", sha256: "1", uri: "file:///1",
