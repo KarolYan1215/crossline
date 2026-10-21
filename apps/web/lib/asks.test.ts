@@ -156,6 +156,15 @@ test("a milestone whose known work cannot finish by its deadline is asked about;
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "milestone_risk")).toBe(false);
 });
 
+test("work that runs past eight weeks but finishes before a deadline months away is not called at risk (the forecast reaches the deadline)", () => {
+  const store = setup();
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mos2", stage: 1, deadline: "2027-01-29", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  store.saveWorkOrder({ id: "long", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "mos2", intent: "长期仿真",
+    state: "approved", riskTier: "milestone", estimate: { ...estimate, p50Minutes: 15000, p85Minutes: 22000 }, payload: {} });
+  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "milestone_risk")).toBe(false);
+});
+
 test("while the reviewer's risk question on a milestone waits, the forecast's question on it does not stand beside it", async () => {
   const store = setup();
   const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");

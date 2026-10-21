@@ -11,7 +11,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
   acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast,
   markMaterialsReady, planToday, plannerIdOfBlock, readFrozen, readGoalSettings, retryMaterialPreparation, saveGoalSettings, TASK_LIBRARY_WINDOW_DAYS,
-  heldConflicts, unlockBlock, writeFrozen, readRiskDecisions, RISK_DECISIONS_SETTING, type RiskDecision
+  heldConflicts, unlockBlock, writeFrozen, readRiskDecisions, RISK_DECISIONS_SETTING, riskHorizonDays, type RiskDecision
 } from "./crossline";
 import { requestAutoBackplan } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
@@ -290,11 +290,11 @@ const format = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8
  * and only of the steps already split out — said so, because with rolling backplans there are usually more.
  */
 export function explainRisk(input: { deadline: string; today: string; p50Day: string | null; p85Day: string | null; slackDays: number | null;
-  steps: number; p50Minutes: number; p85Minutes: number; moreToSplit: boolean }): string {
+  steps: number; p50Minutes: number; p85Minutes: number; moreToSplit: boolean; horizonDays?: number }): string {
   const left = daysBetween(input.today, input.deadline);
   const hours = (minutes: number) => Math.max(0.5, Math.round(minutes / 30) / 2);
   const parts = [`截止 ${format(input.deadline)}（剩 ${left} 天）。已拆分的 ${input.steps} 个步骤剩余约 ${hours(input.p50Minutes)}–${hours(input.p85Minutes)} 小时。`];
-  if (!input.p85Day) parts.push("按当前可用时段与优先于它的工作，八周内无法排完（或前置步骤尚未完成）。");
+  if (!input.p85Day) parts.push(`按当前可用时段与优先于它的工作，截止前（预测到 ${Math.round((input.horizonDays ?? 56) / 7)} 周后）无法排完（或前置步骤尚未完成）。`);
   else {
     const late = input.slackDays !== null && input.slackDays < 0;
     parts.push(`按当前可用时段与优先于它的工作，通常 ${input.p50Day ? format(input.p50Day) : "—"} 完成，保守估计 ${format(input.p85Day)} 完成`
@@ -315,7 +315,10 @@ const ACCEPT_RISK_DAYS = 7;
 function riskAsks(source: Source): Ask[] {
   const { store, ctx, today } = source;
   const reviewed = new Set(riskReviewMembers(source).map((ask) => ask.entityId));
-  const forecast = loadGoalForecast(ctx);
+  // The run reaches past every deadline it judges: a deadline beyond the run would otherwise read as never finishing.
+  const horizonDays = riskHorizonDays(ctx);
+  const forecast = loadGoalForecast(ctx, horizonDays);
+  const lastDay = new Date(Date.parse(`${today}T00:00:00Z`) + (horizonDays - 1) * DAY).toISOString().slice(0, 10);
   const orders = store.listWorkOrders(ctx.workspaceId);
   const accepted = live(ctx, store.listEvents(ctx.workspaceId, { type: "risk.accepted" }));
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
@@ -327,7 +330,7 @@ function riskAsks(source: Source): Ask[] {
     if (!milestone || !deadline || deadline < today || reviewed.has(goal.milestoneId)) return [];
     const own = orders.filter((order) => order.milestoneId === goal.milestoneId && ["approved", "preparing", "ready_for_human", "active"].includes(order.state));
     if (!own.length) return [];
-    const atRisk = goal.p85Day === null || (goal.slackDays !== null && goal.slackDays < 2);
+    const atRisk = (goal.p85Day === null && deadline <= lastDay) || (goal.slackDays !== null && goal.slackDays < 2);
     if (!atRisk) return [];
     // 「接受这个风险」 holds for a week, and only while it does not get worse.
     const slack = goal.slackDays ?? -999;
@@ -341,7 +344,7 @@ function riskAsks(source: Source): Ask[] {
       title: `「${short(milestone.title)}」可能赶不上 ${format(deadline)}`,
       why: explainRisk({ deadline, today, p50Day: goal.p50Day, p85Day: goal.p85Day, slackDays: goal.slackDays, steps: own.length,
         p50Minutes: own.reduce((sum, order) => sum + order.estimate.p50Minutes, 0), p85Minutes: own.reduce((sum, order) => sum + order.estimate.p85Minutes, 0),
-        moreToSplit: rolling.has(goal.milestoneId) }),
+        moreToSplit: rolling.has(goal.milestoneId), horizonDays }),
       options: [
         { id: "time", label: "加可用时间", href: "/plan#availability" },
         { id: "extend", label: "推迟截止", fields: [{ id: "date", label: "推迟到", kind: "date" as const, required: true }] },
@@ -929,7 +932,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
         // Only the date: passing an importance here demoted every milestone moved this way to 「ordinary」 (2026-10-18 walkthrough).
         return saveGoalSettings(ctx, ask.entityId, { confirmedDeadline: values.date!, sourceQuote: "在「可能赶不上」的询问里推迟" });
       }
-      const goal = loadGoalForecast(ctx).goals.find((item) => item.milestoneId === ask.entityId);
+      const goal = loadGoalForecast(ctx, riskHorizonDays(ctx)).goals.find((item) => item.milestoneId === ask.entityId);
       record(ctx, "risk.accepted", ask.entityId, `risk:accepted:${ask.entityId}:${Date.now()}`, { slackDays: goal?.slackDays ?? -999, p85Day: goal?.p85Day ?? null });
       return { ok: true };
     }
