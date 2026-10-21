@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import {
-  EVENT_DECISIONS, FIXED_EVENTS, fixedEventBlocks, graphWeekdays, importedTitle, inCalendar, itemProjectResolver, occurrences, validFixedEvent,
+  EVENT_DECISIONS, FIXED_EVENTS, fixedEventBlocks, graphWeekdays, heardEventFromFact, importedTitle, inCalendar, itemProjectResolver, occurrences, validFixedEvent,
   type AccessContext, type FixedEvent
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore, planToday, toZonedInstant, type PersistedScheduleBlock } from "./crossline";
@@ -53,6 +53,17 @@ export function confirmedEvents(ctx: AccessContext): FixedEvent[] {
   return out.filter(validFixedEvent);
 }
 
+/**
+ * Timed days heard in the person's recordings (the digest's `date_heard_*` facts, docs/phone-recording.md), offered like a file's dated
+ * item: the person creates or declines each, and the fact behind it stays either way.
+ */
+export function heardEvents(ctx: AccessContext): FixedEvent[] {
+  return getStore().listProfileFacts(ctx.workspaceId).flatMap((fact) => { const event = heardEventFromFact(fact); return event && validFixedEvent(event) ? [event] : []; });
+}
+
+/** Every arrangement that may be offered or, once chosen, written: confirmed file and interview dates, and timed days heard in recordings. */
+const offerableEvents = (ctx: AccessContext): FixedEvent[] => [...confirmedEvents(ctx), ...heardEvents(ctx)];
+
 /** The person's synced calendars as they stand on the plan: what a proposal is checked against before it is made. */
 function calendarBlocks(ctx: AccessContext): Array<{ title: string; day: string; start: string; end: string }> {
   const plan = getStore().listPlanVersions(ctx.workspaceId)[0];
@@ -71,7 +82,7 @@ export function eventProposals(ctx: AccessContext): FixedEvent[] {
   const ahead = span(today, 60), check = span(today, 28);
   const decided = eventDecisions(ctx);
   const calendar = calendarBlocks(ctx);
-  return confirmedEvents(ctx).filter((event) => !decided[event.id] && occurrences(event, ahead).length > 0 && !inCalendar(event, calendar, check));
+  return offerableEvents(ctx).filter((event) => !decided[event.id] && occurrences(event, ahead).length > 0 && !inCalendar(event, calendar, check));
 }
 
 export function decideEvent(ctx: AccessContext, id: string, decision: Decision): { ok: true } {
@@ -98,7 +109,7 @@ export function fixedEventsToPublish(ctx: AccessContext, now = new Date()): Arra
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const today = planToday(ctx, now);
   const decided = eventDecisions(ctx);
-  const chosen = [...inputEvents(ctx), ...confirmedEvents(ctx).filter((event) => decided[event.id] === "create")];
+  const chosen = [...inputEvents(ctx), ...offerableEvents(ctx).filter((event) => decided[event.id] === "create")];
   return chosen.flatMap((event) => {
     try {
       if (!event.repeat) {

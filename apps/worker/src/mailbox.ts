@@ -80,6 +80,14 @@ export function setMailTriage(store: CrosslineStore, workspaceId: string, id: st
   return true;
 }
 
+/** Whether a bank or shop mail on this account becomes a wealth record (docs/domain-lines.md); on by default, and only while sorting is on. */
+export function setMailBookkeeping(store: CrosslineStore, workspaceId: string, id: string, on: boolean): boolean {
+  const list = accounts(store, workspaceId);
+  if (!list.some((account) => account.id === id)) return false;
+  saveAccounts(store, workspaceId, list.map((account) => account.id === id ? { ...account, bookkeeping: on } : account));
+  return true;
+}
+
 async function clientOf(deps: MailDeps, workspaceId: string, account: MailAccount): Promise<ImapMail | undefined> {
   const password = await deps.secrets.read(workspaceId, secretName(account.id)).catch(() => undefined);
   return password ? createImapMail({ host: account.host, port: account.port, secure: account.port === 993 }, account.address, password, deps.factory, deps.resolve) : undefined;
@@ -306,9 +314,10 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
       return { status: added.ok ? 200 : 400, body: added.ok ? { ok: true, account: added.account } : { ok: false, blocker: { code: added.code, message: added.message } } };
     }
     if (method === "POST" && pathname === "/v1/mail/check") return { status: 200, body: { ok: true, ...(await pass(workspaceId, true)) } };
-    const one = /^\/v1\/mail\/accounts\/([a-z0-9-]{1,40})(\/triage)?$/.exec(pathname);
+    const one = /^\/v1\/mail\/accounts\/([a-z0-9-]{1,40})(\/triage|\/bookkeeping)?$/.exec(pathname);
     if (one && method === "DELETE" && !one[2]) return { status: 200, body: { ok: removeMailAccount(deps, workspaceId, one[1]!) } };
-    if (one && method === "POST" && one[2]) return { status: 200, body: { ok: setMailTriage(deps.store, workspaceId, one[1]!, body?.on === true) } };
+    if (one && method === "POST" && one[2] === "/triage") return { status: 200, body: { ok: setMailTriage(deps.store, workspaceId, one[1]!, body?.on === true) } };
+    if (one && method === "POST" && one[2] === "/bookkeeping") return { status: 200, body: { ok: setMailBookkeeping(deps.store, workspaceId, one[1]!, body?.on === true) } };
     return undefined;
   }
   return { pass, handle, lookup: (workspaceId: string) => mailLookupFor(deps, workspaceId) };

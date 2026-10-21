@@ -35,9 +35,9 @@ afterEach(() => { store.close(); rmSync(data, { recursive: true, force: true });
 
 const answer = JSON.stringify({ recordings: [
   { id: "a", kind: "meeting", title: "组会：开题报告", summary: "讨论开题报告结构；本人周五前交第二章初稿；下周三开会。", lineIds: ["research", "nonexistent"], projectId: "",
-    commitments: [{ text: "把第二章初稿发给王老师", by: "person", due: "2026-10-23", quote: "我周五之前把第二章的初稿发给王老师" },
-      { text: "安排开会", by: "other", due: "", quote: "王老师说下周三下午三点在 2310 开会" },
-      { text: "编出来的承诺", by: "person", due: "", quote: "这句话录音里没有" }],
+    commitments: [{ text: "把第二章初稿发给王老师", by: "person", who: "", due: "2026-10-23", quote: "我周五之前把第二章的初稿发给王老师" },
+      { text: "安排开会", by: "other", who: "王老师", due: "", quote: "王老师说下周三下午三点在 2310 开会" },
+      { text: "编出来的承诺", by: "person", who: "", due: "", quote: "这句话录音里没有" }],
     facts: [{ identityId: "research", projectId: "", slot: "simulation_tool", value: "电路仿真用 Cadence", quote: "本人做电路仿真，用的是 Cadence" }],
     dates: [{ title: "组会", date: "2026-10-28", time: "15:00", quote: "下周三下午三点在 2310 开会" }] },
   { id: "b", kind: "small_talk", title: "午饭闲聊", summary: "不该留下", lineIds: [], projectId: "", commitments: [], facts: [], dates: [] }] });
@@ -46,14 +46,18 @@ test("kept recordings become a summary, inferred facts and captures that wait fo
   transcript("a", meeting); transcript("b", chat); transcript("c", tiny);
   const { rpc, turns } = fakeRuntime([answer], "crossline:crossline-recording-digest");
   const outcome = await createRecordingDigester(store, workspaceId, "C:\\repo", () => rpc, { dataDir: data, timeZone: "America/Chicago" })();
-  expect(outcome).toEqual({ digested: 3, kept: 1, captures: 1, facts: 2 });
+  expect(outcome).toEqual({ digested: 3, kept: 1, captures: 1, facts: 2, waits: 1 });
   expect(turns()).toBe(1);
   // The near-empty one was noise by rule, without the model.
   expect(store.listEvents(workspaceId, { type: RECORDING_DIGESTED_EVENT, entityId: "c" })[0]!.payload).toMatchObject({ kind: "noise", by: "rule" });
   const digest = store.listSourceDocuments(workspaceId).find((doc) => doc.fileName === "phone/a.m4a 摘要.md")!;
   expect(digest.extractedText).toContain("## 本人答应做的");
   expect(digest.extractedText).toContain("别人答应的或说不清是谁");
+  expect(digest.extractedText).toContain("- 王老师：安排开会");
   expect(digest.extractedText).not.toContain("编出来的承诺");
+  // What the other party promised is a wait on its day — no day named, so a week after the recording — that only the person closes.
+  expect(store.listWaitingItems(workspaceId, { state: "open" })).toMatchObject([{ id: "wait-recording-a-0", title: "安排开会", who: "王老师", expectedAt: "2026-10-27",
+    followUpAt: "2026-10-27", approximate: true, source: "recording", blocks: [] }]);
   expect(store.listSourceDocuments(workspaceId).some((doc) => doc.fileName.includes("b.m4a 摘要"))).toBe(false);
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.sourceRef === "recording:a");
   expect(facts.map((fact) => [fact.slot.startsWith("date_heard_") ? "date" : fact.slot, fact.status])).toEqual(expect.arrayContaining([["simulation_tool", "inferred"], ["date", "inferred"]]));

@@ -19,14 +19,35 @@ export type FixedEvent = {
   date: string;
   start: string; end: string;
   location: string;
-  /** Where it came from: typed into the input box, said in the interview, or read from a file. */
-  source: "input" | "interview" | "file";
+  /** Where it came from: typed into the input box, said in the interview, read from a file, or heard in a recording. */
+  source: "input" | "interview" | "file" | "recording";
 };
 
 const WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** How long an appointment heard in a recording is taken to last when nothing says. */
+export const HEARD_EVENT_MINUTES = 60;
+const HEARD_SLOT = "date_heard_";
+
+/**
+ * A day heard in a recording (the digest's `date_heard_*` fact, value 「2026-10-28 15:00 组会」) as a one-off event to offer the person
+ * (docs/phone-recording.md). Only one that names a time: a day alone is a fact to confirm, not an appointment. The fact is never
+ * changed by the answer.
+ */
+export function heardEventFromFact(fact: { slot: string; value: string; identityId: string; sourceRef: string }): FixedEvent | undefined {
+  if (!fact.slot.startsWith(HEARD_SLOT)) return undefined;
+  const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}) (.+)$/.exec(fact.value.trim());
+  if (!match || !DAY.test(match[1]!) || !TIME.test(match[2]!)) return undefined;
+  const [hours, minutes] = match[2]!.split(":").map(Number) as [number, number];
+  const endMinutes = Math.min(hours * 60 + minutes + HEARD_EVENT_MINUTES, 23 * 60 + 59);
+  const end = `${String(Math.floor(endMinutes / 60)).padStart(2, "0")}:${String(endMinutes % 60).padStart(2, "0")}`;
+  const recording = fact.sourceRef.replace(/^recording:/, "");
+  return { id: `heard:${recording}:${fact.slot.slice(HEARD_SLOT.length)}`, title: match[3]!.trim(), lineId: fact.identityId === "person" ? "" : fact.identityId,
+    repeat: null, date: match[1]!, start: match[2]!, end, location: "", source: "recording" };
+}
 
 /** The days among `days` on which the event happens. */
 export function occurrences(event: FixedEvent, days: string[]): string[] {

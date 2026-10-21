@@ -621,7 +621,7 @@ function eventAsks({ ctx, today }: Source): Ask[] {
     return { id: `event:${event.id}`, kind: "event_propose" as const, entityId: event.id, urgency: first ? urgencyFor(first, today) : "later" as const,
       ...(first ? { dueDay: first } : {}), ...(event.lineId ? { line: event.lineId } : {}), raisedAt: "", fingerprint: event.id,
       title: `日历中没有「${short(event.title, 24)}」，要创建吗？`,
-      why: `${kind}日程：${describeEvent(event)}${event.location ? `，${event.location}` : ""}；来自${event.source === "interview" ? "访谈中的口述" : "上传的文件"}，`
+      why: `${kind}日程：${describeEvent(event)}${event.location ? `，${event.location}` : ""}；来自${event.source === "interview" ? "访谈中的口述" : event.source === "recording" ? "录音里听到的话（按 1 小时计）" : "上传的文件"}，`
         + "在已同步的日历里没有找到。创建后写入 Crossline 日历——" + (event.repeat ? "作为一个每周重复的系列，" : "作为单个事件，")
         + "提前 10 分钟提醒；排程本来就会绕开这段时间。",
       options: [{ id: "create", label: "创建", recommended: true }, { id: "exists", label: "已在别的日历里", detail: "不再提醒" },

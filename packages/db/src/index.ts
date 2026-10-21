@@ -240,7 +240,8 @@ export type StoredWaitingItem = {
   state: "open" | "arrived" | "cancelled";
   /** Work orders that cannot start until it arrives. */
   blocks: string[];
-  source: "analysis" | "manual" | "assistant" | "backplan" | "datepair";
+  /** `recording`: what someone else promised the person in a recording (the digest, docs/phone-recording.md). */
+  source: "analysis" | "manual" | "assistant" | "backplan" | "datepair" | "recording";
   createdAt: string; updatedAt: string;
 };
 

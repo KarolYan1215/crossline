@@ -46,6 +46,22 @@ test("after the report, confirmed fixed arrangements the calendar lacks are offe
   expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "event_propose")).toHaveLength(1);
 });
 
+test("a timed day heard in a recording is offered as a one-off event the person decides on; a day with no time stays a fact only", async () => {
+  const store = setup();
+  const fact = { workspaceId: ws, identityId: "research", projectId: "", status: "inferred" as const, sourceRef: "recording:rec-a", sourceQuote: "下周三下午三点在 2310 开会", updatedAt: "2026-10-12T00:00:00Z" };
+  store.upsertProfileFact({ ...fact, slot: "date_heard_ab12cd34", value: "2026-10-28 15:00 组会" });
+  store.upsertProfileFact({ ...fact, slot: "date_heard_ffff0000", value: "2026-10-30 提交报告" });
+  const asks = collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "event_propose");
+  const heard = asks.find((ask) => ask.title === "日历中没有「组会」，要创建吗？");
+  expect(heard?.why).toContain("一次性日程：10/28 周三 15:00–16:00");
+  expect(heard?.why).toContain("录音里听到的话");
+  expect(asks.some((ask) => ask.title.includes("提交报告"))).toBe(false);
+  expect(await answerAsk(TEST_CTX, heard!.id, "create", {}, NOW)).toMatchObject({ ok: true });
+  expect(fixedEventsToPublish(TEST_CTX, NOW)).toMatchObject([{ id: "fixed:heard:rec-a:ab12cd34", title: "组会", start: expect.stringContaining("2026-10-28") }]);
+  // The fact is untouched by the answer.
+  expect(store.listProfileFacts(ws).find((item) => item.slot === "date_heard_ab12cd34")).toMatchObject({ status: "inferred", value: "2026-10-28 15:00 组会" });
+});
+
 test("an arrangement the person's own calendar already holds is not offered again", () => {
   setup([{ title: "ECE555 Lecture", day: "2026-10-12", start: "14:30", end: "15:45" }]);
   expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "event_propose").map((ask) => ask.title)).toEqual(["日历中没有「ECE 555 期中考试」，要创建吗？"]);

@@ -3,8 +3,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  DIGEST_CAPTURES_PER_RECORDING, DIGEST_MIN_CHARS, DISCARDED_KINDS, RECORDING_CAPTURE_PREFIX, RECORDING_DIGESTED_EVENT, RECORDING_DIGEST_SCHEMA,
-  RECORDING_TRANSCRIBED_EVENT, digestDocument, digestText, spokenText, validateRecordingDigest, type RecordingDigestAnswer, type RecordingTranscribed
+  DIGEST_CAPTURES_PER_RECORDING, DIGEST_MIN_CHARS, DIGEST_WAIT_DEFAULT_DAYS, DIGEST_WAITS_PER_RECORDING, DISCARDED_KINDS, RECORDING_CAPTURE_PREFIX,
+  RECORDING_DIGESTED_EVENT, RECORDING_DIGEST_SCHEMA, RECORDING_TRANSCRIBED_EVENT, digestDocument, digestText, spokenText, validateRecordingDigest,
+  type RecordingDigestAnswer, type RecordingTranscribed
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore, StoredSourceDocument } from "@crossline/db";
@@ -23,10 +24,13 @@ const RUNS_PER_PASS = 3;
  * which sorts out small talk, videos and noise and, for what is kept, writes a summary document and pulls out commitments, facts and days.
  * The ledger gets: a `recording.digested` event per recording (what it was, what came of it); a 「… 摘要.md」 document that the interview
  * and planning read instead of the transcript; an inferred profile fact per fact or day, citing the recording, which the interview can
- * confirm; and a capture per commitment of the person's, analysed like anything typed in, whose proposal waits for the person
- * (`RECORDING_CAPTURE_PREFIX`). A transcript with almost no words is noise by rule and costs no model run.
+ * confirm (a day with a time is also offered as a calendar event the person decides on, `heardEvents`); a capture per commitment of the
+ * person's, analysed like anything typed in, whose proposal waits for the person (`RECORDING_CAPTURE_PREFIX`); and a waiting item per
+ * promise someone else made to the person (`wait-recording-…`, asked about on its day, closed only by the person's answer). A transcript
+ * with almost no words is noise by rule and costs no model run.
  */
-export type DigestOutcome = { digested: number; kept: number; captures: number; facts: number } | { blocked: string };
+export type DigestOutcome = { digested: number; kept: number; captures: number; facts: number; waits: number } | { blocked: string };
+const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
 /** Transcripts with no digest yet, oldest first. */
 export function transcriptsAwaitingDigest(store: CrosslineStore, workspaceId: string): Array<{ doc: StoredSourceDocument; recording: RecordingTranscribed }> {
@@ -52,7 +56,7 @@ export function createRecordingDigester(store: CrosslineStore, workspaceId: stri
     type: RECORDING_DIGESTED_EVENT, entityId: docId, payload });
 
   return async function digest(): Promise<DigestOutcome> {
-    const outcome = { digested: 0, kept: 0, captures: 0, facts: 0 };
+    const outcome = { digested: 0, kept: 0, captures: 0, facts: 0, waits: 0 };
     let pending = transcriptsAwaitingDigest(store, workspaceId);
     // Almost no words: noise, decided here without a model.
     for (const item of pending) if (spokenText(item.doc.extractedText).replace(/\s/g, "").length < DIGEST_MIN_CHARS) {
@@ -70,6 +74,7 @@ export function createRecordingDigester(store: CrosslineStore, workspaceId: stri
     const facts = store.listProfileFacts(workspaceId).filter((fact) => !fact.value.startsWith("假设")).slice(-80)
       .map((fact) => `${fact.identityId}/${fact.projectId || "-"}：${fact.slot} = ${fact.value.slice(0, 120)}`);
     const madeCaptures: string[] = [];
+    const madeWaits: string[] = [];
 
     for (let run = 0; run < RUNS_PER_PASS && pending.length; run += 1) {
       const batch: typeof pending = [];
@@ -117,7 +122,8 @@ export function createRecordingDigester(store: CrosslineStore, workspaceId: stri
             status: "inferred", sourceRef: `recording:${item.id}`, sourceQuote: fact.quote, updatedAt: at });
           outcome.facts += 1;
         }
-        // A day heard is a fact to confirm, not a calendar entry: a wrong one on the calendar misleads, an unconfirmed fact only waits.
+        // A day heard is a fact to confirm, never written to the calendar by itself: a wrong one there misleads, an unconfirmed fact only
+        // waits. One with a time is read back by `heardEvents` and offered as an event the person creates or declines.
         for (const day of item.dates) {
           const slot = `date_heard_${createHash("sha256").update(`${day.date}${day.title}`).digest("hex").slice(0, 8)}`;
           store.upsertProfileFact({ workspaceId, identityId: item.lineIds[0] ?? "person", projectId: item.projectId, slot, value: `${day.date}${day.time ? ` ${day.time}` : ""} ${day.title}`,
@@ -133,13 +139,29 @@ export function createRecordingDigester(store: CrosslineStore, workspaceId: stri
           captures.push(id);
         }
         madeCaptures.push(...captures);
+        // What someone else promised the person: a wait on its day (a week out when no day was named), closed only by the person's answer.
+        const waits: string[] = [];
+        const heardDay = startedAtOf(source.doc).slice(0, 10);
+        for (const [index, promise] of item.commitments.filter((c) => c.by === "other").slice(0, DIGEST_WAITS_PER_RECORDING).entries()) {
+          const id = `wait-recording-${item.id}-${index}`;
+          const expectedAt = promise.due || addDays(heardDay, DIGEST_WAIT_DEFAULT_DAYS);
+          if (store.saveWaitingItem({ id, ownerId: owner(), workspaceId, title: promise.text, who: promise.who, expectedAt, approximate: !promise.due,
+            followUpAt: expectedAt, state: "open", blocks: [], source: "recording", createdAt: at }).inserted) waits.push(id);
+        }
+        madeWaits.push(...waits);
         record(item.id, { kind: item.kind, title: item.title, fileName: source.recording.fileName, lineIds: item.lineIds, projectId: item.projectId,
-          digestDocumentId: digestDoc.id, captures, facts: item.facts.length + item.dates.length });
-        outcome.digested += 1; outcome.kept += 1; outcome.captures += captures.length;
+          digestDocumentId: digestDoc.id, captures, waits, facts: item.facts.length + item.dates.length });
+        outcome.digested += 1; outcome.kept += 1; outcome.captures += captures.length; outcome.waits += waits.length;
       }
     }
-    if (madeCaptures.length) sayToPerson(store, workspaceId, `从录音里听到本人答应要做的 ${madeCaptures.length} 件事，已记为收集；分析成提议后，需本人在待确认里确认。`,
-      "recording_captures", `recording-captures:${madeCaptures.join(",")}`, [{ label: "去看看", href: "/approvals" }], now());
+    if (madeCaptures.length || madeWaits.length) {
+      const parts = [
+        madeCaptures.length ? `本人答应要做的 ${madeCaptures.length} 件事，已记为收集；分析成提议后，需本人在待确认里确认` : "",
+        madeWaits.length ? `别人答应给本人的 ${madeWaits.length} 件，已记为「在等」，到日子再问` : ""
+      ].filter(Boolean);
+      sayToPerson(store, workspaceId, `从录音里听到${parts.join("；")}。`, "recording_captures", `recording-captures:${[...madeCaptures, ...madeWaits].join(",")}`,
+        [{ label: "去看看", href: "/approvals" }], now());
+    }
     return outcome;
   };
 }

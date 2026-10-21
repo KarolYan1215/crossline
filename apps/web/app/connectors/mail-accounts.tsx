@@ -70,6 +70,11 @@ export function MailAccounts() {
     await post(`/api/mail/accounts/${account.id}`, { triage: on });
     await load(); setBusy(false);
   };
+  const bookkeeping = async (account: MailAccount, on: boolean) => {
+    setBusy(true);
+    await post(`/api/mail/accounts/${account.id}`, { bookkeeping: on });
+    await load(); setBusy(false);
+  };
   const drafting = async (on: boolean) => {
     setBusy(true);
     const result = await post("/api/mail/replies", { on });
@@ -99,6 +104,8 @@ export function MailAccounts() {
         {account.lastError?.code === "MAIL_AUTH_FAILED" && appPasswordPage(account.address)
           && <small>应用专用密码失效时：生成一个新的，移除这个邮箱后用新密码重新接入。<AppPasswordLink page={appPasswordPage(account.address)!} label="生成新的应用专用密码" /></small>}</span>
       <label className="st-inline"><input type="checkbox" checked={account.triage} disabled={busy} onChange={(event) => void triage(account, event.target.checked)} /> 自动整理新邮件</label>
+      <label className="st-inline" title="银行与商家的提醒邮件记为财富主线的收支记录；只记邮件原文写明金额的">
+        <input type="checkbox" checked={account.triage && account.bookkeeping !== false} disabled={busy || !account.triage} onChange={(event) => void bookkeeping(account, event.target.checked)} /> 自动记账</label>
       <button type="button" className="secondary-button" disabled={busy} onClick={() => void remove(account)}>移除</button>
     </div>)}
     {Boolean(view?.accounts.length) && <button type="button" className="secondary-button" disabled={busy} onClick={() => void check()}>现在读新邮件</button>}

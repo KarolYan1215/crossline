@@ -226,6 +226,15 @@
 .lb-records-bars{list-style:none;margin:0;padding:0;display:grid;gap:2px}
 .lb-records-bars li{display:grid;grid-template-columns:5em minmax(0,1fr) auto;gap:6px;align-items:center}
 .lb-records-bar{display:block;height:8px;background:var(--lc,var(--graphite));min-width:2px}
+.lb-trend{margin:4px 0 0;display:grid;gap:2px}
+.lb-trend-columns{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:4px;align-items:end}
+.lb-trend-col{display:grid;gap:2px;justify-items:center;min-width:0}
+.lb-trend-bars{display:flex;align-items:flex-end;justify-content:center;gap:2px;height:40px;width:100%}
+.lb-trend-bar{display:block;width:40%;max-width:14px;background:var(--lc,var(--graphite))}
+.lb-trend-light{opacity:.45}
+.lb-trend-label{font-size:12px;white-space:nowrap}
+.lb-trend figcaption{font-size:13px}
+.lb-trend-weight{align-items:center}
 .lb-records-list{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:2px;max-height:240px;overflow:auto}
 .lb-records-list li{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
 .lb-records summary{cursor:pointer}

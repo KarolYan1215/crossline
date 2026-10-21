@@ -64,13 +64,20 @@ export type RecordMetrics = {
   weight: { value: number; at: string } | null;
 };
 
-/** What the line card shows and the milestone readings use, computed from the records alone. */
-export function recordMetrics(records: Array<Pick<DomainRecordInput, "kind" | "at" | "value" | "currency" | "category">>, today: string): RecordMetrics {
-  const month = today.slice(0, 7);
-  const money = records.filter((record) => (record.kind === "income" || record.kind === "expense") && record.at.slice(0, 7) === month);
+type MetricRecord = Pick<DomainRecordInput, "kind" | "at" | "value" | "currency" | "category">;
+const isMoney = (record: Pick<DomainRecordInput, "kind">) => record.kind === "income" || record.kind === "expense";
+/** The currency most of these money records use (CNY with none). */
+function currencyOf(money: MetricRecord[]): string {
   const counts = new Map<string, number>();
   for (const record of money) counts.set(record.currency || "CNY", (counts.get(record.currency || "CNY") ?? 0) + 1);
-  const currency = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "CNY";
+  return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "CNY";
+}
+
+/** What the line card shows and the milestone readings use, computed from the records alone. */
+export function recordMetrics(records: MetricRecord[], today: string): RecordMetrics {
+  const month = today.slice(0, 7);
+  const money = records.filter((record) => isMoney(record) && record.at.slice(0, 7) === month);
+  const currency = currencyOf(money);
   const inCurrency = money.filter((record) => (record.currency || "CNY") === currency);
   const sum = (kind: string) => round(inCurrency.filter((record) => record.kind === kind).reduce((total, record) => total + record.value, 0));
   const income = sum("income"), expense = sum("expense");
@@ -87,6 +94,41 @@ export function recordMetrics(records: Array<Pick<DomainRecordInput, "kind" | "a
 }
 
 const round = (value: number) => Math.round(value * 100) / 100;
+const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+
+/** Months and weeks the line card's trend covers (docs/domain-lines.md 「主线卡」). */
+export const TREND_MONTHS = 6;
+export const TREND_WEEKS = 8;
+export type RecordTrends = {
+  /** The currency the months are summed in: the card's own (this month's most used), else the span's. */
+  currency: string;
+  /** The last `TREND_MONTHS` months, oldest first, the current one last: income and spending per month, zero where nothing was recorded. */
+  months: Array<{ month: string; income: number; expense: number }>;
+  /** The last `TREND_WEEKS` weeks, Monday first, oldest first, the current one last: workouts and their minutes, and the week's last weight. */
+  weeks: Array<{ start: string; workouts: number; workoutMinutes: number; weight: number | null }>;
+};
+
+/** The line card's trend, by month for money and by week for exercise and weight, computed from the records alone. */
+export function recordTrends(records: MetricRecord[], today: string, currency = ""): RecordTrends {
+  const first = new Date(`${today.slice(0, 7)}-01T12:00:00Z`);
+  const months = Array.from({ length: TREND_MONTHS }, (_, index) => {
+    const at = new Date(first); at.setUTCMonth(first.getUTCMonth() - (TREND_MONTHS - 1 - index));
+    return at.toISOString().slice(0, 7);
+  });
+  const money = records.filter((record) => isMoney(record) && months.includes(record.at.slice(0, 7)));
+  const chosen = currency || currencyOf(money);
+  const sum = (month: string, kind: string) => round(money.filter((record) => record.kind === kind && record.at.slice(0, 7) === month && (record.currency || "CNY") === chosen)
+    .reduce((total, record) => total + record.value, 0));
+  const monday = addDays(today, -((new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7));
+  const weeks = Array.from({ length: TREND_WEEKS }, (_, index) => addDays(monday, -7 * (TREND_WEEKS - 1 - index))).map((start) => {
+    const end = addDays(start, 6);
+    const within = (record: MetricRecord) => record.at.slice(0, 10) >= start && record.at.slice(0, 10) <= end;
+    const workouts = records.filter((record) => record.kind === "workout" && within(record));
+    const weight = records.filter((record) => record.kind === "weight" && within(record)).sort((a, b) => a.at.localeCompare(b.at)).at(-1);
+    return { start, workouts: workouts.length, workoutMinutes: round(workouts.reduce((total, record) => total + record.value, 0)), weight: weight ? weight.value : null };
+  });
+  return { currency: chosen, months: months.map((month) => ({ month, income: sum(month, "income"), expense: sum(month, "expense") })), weeks };
+}
 
 /**
  * Which of a milestone's criteria the records can judge, and how they stand. Only a threshold whose unit names a measured quantity is

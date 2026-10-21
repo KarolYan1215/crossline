@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { MAIL_ACCOUNTS_SETTING, MAIL_LOG_SETTING } from "@crossline/core";
 import type { ImapFactory, SecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
-import { addMailAccount, MAIL_TRIAGE_SKILL, mailLookupFor, readNewMail, removeMailAccount, triageMail } from "./mailbox";
+import { addMailAccount, MAIL_TRIAGE_SKILL, mailLookupFor, readNewMail, removeMailAccount, setMailBookkeeping, triageMail } from "./mailbox";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const memorySecrets = (): SecretStore & { values: Map<string, string> } => {
@@ -94,6 +94,29 @@ test("a payment mail becomes one wealth record only when its own text states the
   expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh)).toMatchObject({ state: "done", recorded: 1 });
   expect(store.listRecords(workspaceId).map((item) => [item.kind, item.value, item.currency, item.category, item.source])).toEqual([["expense", 35, "CNY", "星巴克", "mail"]]);
   expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["transaction", "info"]);
+});
+
+test("with bookkeeping switched off on an account, a payment mail is only noted, and nothing is written", async () => {
+  const { store, workspaceId, secrets, resolve } = setup();
+  const box = mailbox();
+  let now = new Date("2026-10-19T09:00:00Z");
+  const deps = { store, secrets, resolve, factory: box.factory, now: () => now };
+  const added = await addMailAccount(deps, workspaceId, { address: "me@qq.com", password: "app-pass" });
+  if (!added.ok) throw new Error(added.code);
+  expect(setMailBookkeeping(store, workspaceId, "no-such-account", false)).toBe(false);
+  expect(setMailBookkeeping(store, workspaceId, added.account.id, false)).toBe(true);
+  await readNewMail(deps, workspaceId);
+  box.messages.push({ uid: 1, subject: "信用卡消费提醒", body: "您尾号 1234 的信用卡在 星巴克 消费人民币 35.00 元。" });
+  now = new Date("2026-10-19T09:20:00Z");
+  const fresh = await readNewMail(deps, workspaceId);
+  const answer = JSON.stringify({ items: [{ uid: 1, kind: "transaction", title: "", waitingId: "", why: "银行消费提醒", direction: "expense", amount: 35, currency: "CNY", merchant: "星巴克" }] });
+  const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
+  expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh)).toMatchObject({ state: "done", recorded: 0 });
+  expect(store.listRecords(workspaceId)).toEqual([]);
+  expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["info"]);
+  // Back on, the next such mail is written again.
+  expect(setMailBookkeeping(store, workspaceId, added.account.id, true)).toBe(true);
+  expect(JSON.parse(store.getSetting(workspaceId, MAIL_ACCOUNTS_SETTING)!)[0]).toMatchObject({ triage: true, bookkeeping: true });
 });
 
 test("the assistant searches every connected account through one lookup", async () => {

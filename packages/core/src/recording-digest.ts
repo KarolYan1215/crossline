@@ -17,6 +17,9 @@ export const DIGEST_MIN_CHARS = 60;
 export const DIGEST_TEXT_LIMIT = 40_000;
 /** Commitments turned into captures from one recording at most: a meeting with twenty action items is summarised, not turned into twenty tasks. */
 export const DIGEST_CAPTURES_PER_RECORDING = 5;
+/** What others promised the person, turned into waiting items from one recording at most; one with no day named is expected in `DIGEST_WAIT_DEFAULT_DAYS`. */
+export const DIGEST_WAITS_PER_RECORDING = 3;
+export const DIGEST_WAIT_DEFAULT_DAYS = 7;
 
 export const RECORDING_KINDS = ["meeting", "lecture", "call", "conversation", "self_note", "small_talk", "media", "noise"] as const;
 export type RecordingKind = typeof RECORDING_KINDS[number];
@@ -26,7 +29,8 @@ export const RECORDING_KIND_LABEL: Record<RecordingKind, string> = {
   meeting: "会议", lecture: "课堂或讲座", call: "通话", conversation: "交谈", self_note: "本人口述笔记", small_talk: "闲聊", media: "视频或音乐", noise: "噪声"
 };
 
-export type DigestCommitment = { text: string; by: "person" | "other" | "unclear"; due: string; quote: string };
+/** `who`: the other party as the recording names them (「王老师」), empty when it does not; only read for `by: "other"`. */
+export type DigestCommitment = { text: string; by: "person" | "other" | "unclear"; who: string; due: string; quote: string };
 export type DigestFact = { identityId: string; projectId: string; slot: string; value: string; quote: string };
 export type DigestDate = { title: string; date: string; time: string; quote: string };
 export type RecordingDigestItem = {
@@ -43,8 +47,9 @@ export const RECORDING_DIGEST_SCHEMA = { type: "object", additionalProperties: f
       kind: { type: "string", enum: [...RECORDING_KINDS] },
       title: text(40), summary: text(1200),
       lineIds: { type: "array", maxItems: 4, items: text(80) }, projectId: text(80),
-      commitments: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false, required: ["text", "by", "due", "quote"], properties: {
-        text: { type: "string", minLength: 1, maxLength: 120 }, by: { type: "string", enum: ["person", "other", "unclear"] }, due: text(10), quote: { type: "string", minLength: 1, maxLength: 300 } } } },
+      commitments: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false, required: ["text", "by", "who", "due", "quote"], properties: {
+        text: { type: "string", minLength: 1, maxLength: 120 }, by: { type: "string", enum: ["person", "other", "unclear"] }, who: text(40), due: text(10),
+        quote: { type: "string", minLength: 1, maxLength: 300 } } } },
       facts: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false, required: ["identityId", "projectId", "slot", "value", "quote"], properties: {
         identityId: { type: "string", minLength: 1, maxLength: 80 }, projectId: text(80), slot: { type: "string", minLength: 1, maxLength: 60 },
         value: { type: "string", minLength: 1, maxLength: 200 }, quote: { type: "string", minLength: 1, maxLength: 300 } } } },
@@ -91,7 +96,7 @@ export function validateRecordingDigest(value: unknown, input: { transcripts: Ma
       title: String(item.title ?? "").trim().slice(0, 40), summary: discarded ? "" : String(item.summary ?? "").trim().slice(0, 1200),
       lineIds: [...new Set((item.lineIds ?? []).filter((id) => lines.has(id)))], projectId: projects.has(item.projectId) ? item.projectId : "",
       commitments: discarded ? [] : (item.commitments ?? []).filter((c) => c && quoted(c.quote) && ["person", "other", "unclear"].includes(c.by))
-        .map((c) => ({ text: c.text.trim().slice(0, 120), by: c.by, due: DAY.test(c.due) ? c.due : "", quote: c.quote })),
+        .map((c) => ({ text: c.text.trim().slice(0, 120), by: c.by, who: String(c.who ?? "").trim().slice(0, 40), due: DAY.test(c.due) ? c.due : "", quote: c.quote })),
       facts: discarded ? [] : (item.facts ?? []).filter((f) => f && quoted(f.quote) && SLOT.test(f.slot) && (f.identityId === "person" || lines.has(f.identityId)))
         .map((f) => ({ identityId: f.identityId, projectId: projects.has(f.projectId) ? f.projectId : "", slot: f.slot, value: f.value.trim().slice(0, 200), quote: f.quote })),
       dates: discarded ? [] : (item.dates ?? []).filter((d) => d && quoted(d.quote) && DAY.test(d.date))
@@ -107,7 +112,7 @@ export function digestDocument(item: RecordingDigestItem, source: { fileName: st
   const lines = [`# ${item.title || source.fileName}`, "", `录音：${source.fileName}，约 ${source.startedAt} 开始，${source.minutes} 分钟；类型：${RECORDING_KIND_LABEL[item.kind]}`, "", item.summary];
   const mine = item.commitments.filter((c) => c.by === "person"), others = item.commitments.filter((c) => c.by !== "person");
   if (mine.length) lines.push("", "## 本人答应做的", ...mine.map((c) => `- ${c.text}${c.due ? `（${c.due} 前）` : ""}：「${c.quote}」`));
-  if (others.length) lines.push("", "## 别人答应的或说不清是谁", ...others.map((c) => `- ${c.text}${c.due ? `（${c.due}）` : ""}${c.by === "unclear" ? "（说话人不确定）" : ""}：「${c.quote}」`));
+  if (others.length) lines.push("", "## 别人答应的或说不清是谁", ...others.map((c) => `- ${c.who ? `${c.who}：` : ""}${c.text}${c.due ? `（${c.due}）` : ""}${c.by === "unclear" ? "（说话人不确定）" : ""}：「${c.quote}」`));
   if (item.dates.length) lines.push("", "## 提到的日期", ...item.dates.map((d) => `- ${d.date}${d.time ? ` ${d.time}` : ""} ${d.title}：「${d.quote}」`));
   if (item.facts.length) lines.push("", "## 关于本人与工作的信息", ...item.facts.map((f) => `- ${f.value}：「${f.quote}」`));
   return lines.join("\n");

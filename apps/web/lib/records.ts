@@ -1,7 +1,9 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { recordAndJudge, type RecordOutcome } from "@crossline/db";
-import { healthRecordsFromPhone, recordMetrics, type AccessContext, type DomainRecordInput, type RecordDomain, type RecordMetrics, type StoredDomainRecord } from "@crossline/core";
+import {
+  healthRecordsFromPhone, recordMetrics, recordTrends, type AccessContext, type DomainRecordInput, type RecordDomain, type RecordMetrics, type RecordTrends, type StoredDomainRecord
+} from "@crossline/core";
 import { DOMAIN_PACKS, LINE_DOMAINS } from "@crossline/identity-packs";
 import { formatInTimeZone } from "date-fns-tz";
 import { appNow, effectiveSchedulePreferences, getStore } from "./crossline";
@@ -26,9 +28,9 @@ export function removeDomainRecord(ctx: AccessContext, id: string): { ok: true }
   return getStore().setRecordDeleted(ctx.workspaceId, id, true) ? { ok: true } : { ok: false, code: "RECORD_NOT_FOUND" };
 }
 
-export type DomainRecordsView = { domain: RecordDomain; label: string; lineId: string | null; metrics: RecordMetrics; recent: StoredDomainRecord[] };
+export type DomainRecordsView = { domain: RecordDomain; label: string; lineId: string | null; metrics: RecordMetrics; trends: RecordTrends; recent: StoredDomainRecord[] };
 
-/** Each domain's numbers for the line card and the records drawer: this month's money, this week's workouts, the latest weight. */
+/** Each domain's numbers for the line card and the records drawer: this month's money, this week's workouts, the latest weight, and the trend behind them. */
 export function domainRecordViews(ctx: AccessContext): DomainRecordsView[] {
   const store = getStore();
   const today = personToday(ctx);
@@ -37,7 +39,8 @@ export function domainRecordViews(ctx: AccessContext): DomainRecordsView[] {
     const records = store.listRecords(ctx.workspaceId, { domain, since });
     const line = lineOfDomain(ctx, domain);
     if (!line && !records.length) return [];
-    return [{ domain, label: DOMAIN_PACKS[domain].label, lineId: line?.id ?? null, metrics: recordMetrics(records, today), recent: records.slice(-30).reverse() }];
+    const metrics = recordMetrics(records, today);
+    return [{ domain, label: DOMAIN_PACKS[domain].label, lineId: line?.id ?? null, metrics, trends: recordTrends(records, today, metrics.currency), recent: records.slice(-30).reverse() }];
   });
 }
 

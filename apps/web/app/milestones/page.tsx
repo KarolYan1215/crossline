@@ -35,7 +35,7 @@ export default async function MilestonesPage() {
   const drafts = board.milestones.filter((milestone) => milestone.status === "draft").length;
   const identities = identityLines(ctx);
   const details = lineCardDetails(ctx);
-  const records = Object.fromEntries(domainRecordViews(ctx).filter((view) => view.lineId).map((view) => [view.lineId!, { domain: view.domain, ...view.metrics,
+  const records = Object.fromEntries(domainRecordViews(ctx).filter((view) => view.lineId).map((view) => [view.lineId!, { domain: view.domain, ...view.metrics, trends: view.trends,
     recent: view.recent.map(({ id, kind, at, value, unit, currency, category, source }) => ({ id, kind, at, value, unit, currency, category, source })) }]));
 
   return <SubpageShell active="主线" title="主线"

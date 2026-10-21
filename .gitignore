@@ -2,6 +2,7 @@ node_modules/
 .next/
 .next-e2e/
 .next-prod/
+.next-review/
 .next-install-preview/
 .next-beta/
 # The public quick test's static export (docs/assess-deploy.md).

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { amountsInText, recordMetrics, recordProblem, recordReadings, type DomainRecordInput } from "./records";
+import { amountsInText, recordMetrics, recordProblem, recordReadings, recordTrends, type DomainRecordInput } from "./records";
 
 const now = new Date("2026-10-20T12:00:00Z");
 const base = { at: "2026-10-19", currency: "CNY", unit: "元", category: "", note: "", source: "input", sourceRef: "", dedupeKey: "" } as const;
@@ -25,6 +25,30 @@ test("this month's income, spending, savings rate and categories; this week's wo
   expect(metrics).toMatchObject({ month: "2026-10", currency: "CNY", income: 12000, expense: 3600, savingsRate: 70, workouts: 1, workoutMinutes: 40,
     weight: { value: 71.8, at: "2026-10-19" } });
   expect(metrics.categories).toEqual([{ category: "房租", amount: 3000 }, { category: "餐饮", amount: 600 }]);
+});
+
+test("the trend is six months of money, oldest first, and eight Monday-first weeks of exercise with each week's last weight", () => {
+  const trends = recordTrends([
+    record({ kind: "income", value: 12000, at: "2026-10-05" }), record({ value: 3000, at: "2026-10-01" }), record({ value: 600, at: "2026-10-19" }),
+    record({ kind: "income", value: 11000, at: "2026-09-05" }), record({ value: 9999, at: "2026-09-30" }), record({ value: 50, currency: "USD", at: "2026-09-12" }),
+    record({ value: 1, at: "2026-04-30" }),
+    record({ domain: "wellness", kind: "workout", value: 40, at: "2026-10-18" }), record({ domain: "wellness", kind: "workout", value: 30, at: "2026-10-19" }),
+    record({ domain: "wellness", kind: "workout", value: 25, at: "2026-10-06" }),
+    record({ domain: "wellness", kind: "weight", value: 72.4, at: "2026-10-12" }), record({ domain: "wellness", kind: "weight", value: 72.0, at: "2026-10-14" }),
+    record({ domain: "wellness", kind: "weight", value: 71.8, at: "2026-10-19" })
+  ], "2026-10-20");
+  expect(trends.currency).toBe("CNY");
+  expect(trends.months.map((month) => month.month)).toEqual(["2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"]);
+  // April is outside the six months; the USD record is not summed with the CNY ones.
+  expect(trends.months.at(-2)).toEqual({ month: "2026-09", income: 11000, expense: 9999 });
+  expect(trends.months.at(-1)).toEqual({ month: "2026-10", income: 12000, expense: 3600 });
+  expect(trends.months[0]).toEqual({ month: "2026-05", income: 0, expense: 0 });
+  // 2026-10-20 is a Tuesday: the current week starts Monday 10-19, and the one before holds the 10-12/10-14 weights and the 10-18 workout.
+  expect(trends.weeks.map((week) => week.start)).toEqual(["2026-08-31", "2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19"]);
+  expect(trends.weeks.at(-1)).toEqual({ start: "2026-10-19", workouts: 1, workoutMinutes: 30, weight: 71.8 });
+  expect(trends.weeks.at(-2)).toEqual({ start: "2026-10-12", workouts: 1, workoutMinutes: 40, weight: 72 });
+  expect(trends.weeks.at(-3)).toEqual({ start: "2026-10-05", workouts: 1, workoutMinutes: 25, weight: null });
+  expect(recordTrends([record({ value: 50, currency: "USD", at: "2026-09-12" })], "2026-10-20", "CNY").months.at(-2)).toEqual({ month: "2026-09", income: 0, expense: 0 });
 });
 
 test("records judge only a threshold on a measured quantity; a cadence over weeks is never read from one week", () => {
