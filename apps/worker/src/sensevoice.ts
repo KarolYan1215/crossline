@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { TranscriptChunk } from "./transcribe";
 import { withoutHallucinations } from "./transcribe";
+import { labelledTurns, type Diarizer, type SpeakerBook } from "./diarize";
 import { speechSegments } from "./vad";
 
 /**
@@ -97,24 +98,45 @@ export type BlockTranscript = { state: "transcribed" | "silent"; text: string; s
 /**
  * Transcribes a recording block by block: each block's speech is found (`vad.ts`), cut into windows of at most twenty seconds, and each
  * window becomes one timestamped line. `stop` is asked before every window, so the night ending or the consent being withdrawn leaves the
- * file for later instead of half-written text.
+ * file for later instead of half-written text. With `speakers`, a block that has speech is diarized instead and each speaker turn is
+ * recognised in its own windows, so every line says who spoke (`[00:20] 说话人 1：…`); a block the diarizer finds no turn in falls back
+ * to the speech windows without a label.
  */
 export async function transcribeBlocks(blocks: AsyncIterable<Float32Array>, recognise: WindowRecogniser,
-  options: { stop?: () => boolean; now?: () => number } = {}): Promise<BlockTranscript> {
+  options: { stop?: () => boolean; now?: () => number; speakers?: { diarizer: Diarizer; book: SpeakerBook } } = {}): Promise<BlockTranscript> {
   const now = options.now ?? Date.now;
   const started = now();
   const chunks: TranscriptChunk[] = [];
   const languages = new Map<string, number>();
   let offset = 0, speech = 0;
   for await (const block of blocks) {
-    for (const segment of speechSegments(block, RATE)) {
-      for (let start = segment.start; start < segment.end; start += WINDOW_SECONDS * RATE) {
+    const voiced = speechSegments(block, RATE);
+    let regions: Array<{ start: number; end: number; speaker: string }> = voiced.map((segment) => ({ ...segment, speaker: "" }));
+    if (voiced.length && options.speakers) {
+      if (options.stop?.()) return { state: "stopped" };
+      // Only the speech is diarized: a day's recording is mostly quiet, and pyannote reads every window it is given.
+      const compact = new Float32Array(voiced.reduce((sum, segment) => sum + segment.end - segment.start, 0));
+      const pieces: Array<{ at: number; start: number; length: number }> = [];
+      for (const segment of voiced) {
+        const at = pieces.length ? pieces.at(-1)!.at + pieces.at(-1)!.length : 0;
+        compact.set(block.subarray(segment.start, segment.end), at);
+        pieces.push({ at, start: segment.start, length: segment.end - segment.start });
+      }
+      const turns = await labelledTurns(compact, options.speakers.diarizer, options.speakers.book);
+      const mapped = turns.flatMap((turn) => pieces.flatMap((piece) => {
+        const from = Math.max(Math.round(turn.start * RATE), piece.at), to = Math.min(Math.round(turn.end * RATE), piece.at + piece.length);
+        return to - from >= 0.3 * RATE ? [{ start: piece.start + from - piece.at, end: piece.start + to - piece.at, speaker: turn.speaker }] : [];
+      }));
+      if (mapped.length) regions = mapped;
+    }
+    for (const region of regions) {
+      for (let start = region.start; start < region.end; start += WINDOW_SECONDS * RATE) {
         if (options.stop?.()) return { state: "stopped" };
-        const end = Math.min(segment.end, start + WINDOW_SECONDS * RATE);
+        const end = Math.min(region.end, start + WINDOW_SECONDS * RATE);
         const heard = await recognise(block.subarray(start, end));
         speech += (end - start) / RATE;
         if (heard.lang) languages.set(heard.lang, (languages.get(heard.lang) ?? 0) + (end - start));
-        chunks.push({ start: offset + start / RATE, end: offset + end / RATE, text: heard.text });
+        chunks.push({ start: offset + start / RATE, end: offset + end / RATE, text: heard.text, ...(region.speaker ? { speaker: region.speaker } : {}) });
       }
     }
     offset += block.length / RATE;
@@ -123,7 +145,7 @@ export async function transcribeBlocks(blocks: AsyncIterable<Float32Array>, reco
   const language = [...languages].sort((a, b) => b[1] - a[1])[0]?.[0];
   const clock = (seconds: number) => { const total = Math.floor(seconds); const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
     return `${h ? `${h}:` : ""}${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`; };
-  const body = kept.map((chunk) => `[${clock(chunk.start)}] ${chunk.text.trim()}`).join("\n");
+  const body = kept.map((chunk) => `[${clock(chunk.start)}] ${chunk.speaker ? `${chunk.speaker}：` : ""}${chunk.text.trim()}`).join("\n");
   const base = { seconds: Math.round(offset), speechSeconds: Math.round(speech), workMs: now() - started };
   if (!body.trim()) return { state: "silent", text: "", ...base };
   const named = language === "zh" ? "中文" : language === "en" ? "English" : language === "yue" ? "粤语" : language === "ja" ? "日本語" : language === "ko" ? "한국어" : language;

@@ -52,6 +52,21 @@ export function transcriptionCost(recent: Array<Pick<RecordingTranscribed, "seco
 export const RECORDING_SERVER_CONSENT = "recordings.serverTranscribe";
 /** Where uploads wait, under the data directory: `<dataDir>/recordings/inbox/<workspaceId>/`. */
 export const RECORDING_INBOX_SEGMENTS = ["recordings", "inbox"] as const;
+
+/**
+ * 识别本人声音 (decided 2026-10-21): the transcriber separates speakers in every recording, and with this consent it also compares them
+ * with the person's own voiceprint, so lines the person spoke read 「本人：」. Its own consent, off by default: a voiceprint is biometric.
+ * The voiceprint is one embedding vector (no audio) in `<dataDir>/recordings/voiceprint/<workspace>.json`, made from a recording of the
+ * person alone that they upload; it is outside the backups like everything under `recordings/`, and turning the consent off deletes it.
+ * Other people's voices are only told apart within one recording and never kept.
+ */
+export const RECORDING_VOICEPRINT_CONSENT = "recordings.voiceprint";
+export const RECORDING_VOICEPRINT_SEGMENTS = ["recordings", "voiceprint"] as const;
+/** The speaker label for the person's own lines; others are 「说话人 1」, 「说话人 2」 … in order of first speaking. */
+export const SPEAKER_SELF = "本人";
+/** An enrolment recording must hold at least this much speech, and at most this much is used. */
+export const VOICEPRINT_MIN_SPEECH_SECONDS = 15;
+export const VOICEPRINT_MAX_SPEECH_SECONDS = 120;
 /** One upload at most, and one workspace's uploads per day (about 25 hours of 64 kbps audio). */
 export const RECORDING_UPLOAD_LIMIT = 300 * 1024 * 1024;
 export const RECORDING_UPLOAD_DAILY_LIMIT = 3 * 1024 * 1024 * 1024;
@@ -68,4 +83,19 @@ export function inTranscribeWindow(at: Date, timeZone: string, window = TRANSCRI
     minute = (Number(parts.hour) % 24) * 60 + Number(parts.minute);
   } catch { /* UTC */ }
   return from <= to ? minute >= from && minute < to : minute >= from || minute < to;
+}
+
+/** The container a recording's opening bytes name, as the extension it is stored under; undefined when they name no audio format. */
+export function audioKind(head: Uint8Array): string | undefined {
+  const ascii = (from: number, to: number) => String.fromCharCode(...head.subarray(from, to));
+  if (ascii(4, 8) === "ftyp") return "m4a";
+  if (ascii(0, 4) === "caff") return "m4a";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WAVE") return "wav";
+  if (ascii(0, 4) === "OggS") return "ogg";
+  if (ascii(0, 4) === "fLaC") return "flac";
+  if (head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) return "webm";
+  if (ascii(0, 3) === "ID3") return "mp3";
+  if (head[0] === 0xff && head[1] !== undefined && (head[1] & 0xf6) === 0xf0) return "aac";
+  if (head[0] === 0xff && head[1] !== undefined && (head[1] & 0xe0) === 0xe0) return "mp3";
+  return undefined;
 }

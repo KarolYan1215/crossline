@@ -1,8 +1,8 @@
-import { readdirSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  RECORDING_CONSENT, RECORDING_FILE, RECORDING_INBOX_SEGMENTS, RECORDING_MODEL_NOTICE, RECORDING_SERVER_CONSENT, RECORDING_PURGED_EVENT, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING,
+  RECORDING_CONSENT, RECORDING_FILE, RECORDING_INBOX_SEGMENTS, RECORDING_VOICEPRINT_CONSENT, RECORDING_VOICEPRINT_SEGMENTS, RECORDING_MODEL_NOTICE, RECORDING_SERVER_CONSENT, RECORDING_PURGED_EVENT, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING,
   readSourceFolders, sourceFolderIndexSetting, transcriptionCost, type FolderIndexEntry, type RecordingTranscribed
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
@@ -16,8 +16,10 @@ export type RecordingOverview = {
   failed: Array<{ file: string; note: string }>;
   cost?: { recordings: number; audioHours: number; minutesPerHour: number };
   /** 录音在服务器转写, when this deployment runs the transcriber: whether it is on, what waits, and the last few that failed. */
-  server?: { on: boolean; waiting: number; failed: Array<{ file: string; note: string }> };
+  server?: { on: boolean; waiting: number; failed: Array<{ file: string; note: string }>; voiceprint: VoiceprintState };
 };
+/** 识别本人声音: the consent, and whether a voiceprint exists, waits to be made from an uploaded recording, or could not be made. */
+export type VoiceprintState = { on: boolean; state: "none" | "pending" | "ready" | "failed"; seconds?: number; at?: string; message?: string };
 
 const entries = (store: CrosslineStore, workspaceId: string) => readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING)).flatMap((folder) => {
   let index: Record<string, FolderIndexEntry> = {};
@@ -38,7 +40,8 @@ export function recordingOverview(store: CrosslineStore, workspaceId: string, da
     ...(cost ? { cost } : {}),
     ...(serverTranscribeAvailable() && dataDir ? { server: { on: store.getSetting(workspaceId, RECORDING_SERVER_CONSENT) === "granted", waiting: serverInboxCount(dataDir, workspaceId),
       failed: store.listEvents(workspaceId, { type: "recording.failed" }).slice(-5).reverse()
-        .map((event) => ({ file: String((event.payload as { fileName?: unknown }).fileName ?? ""), note: String((event.payload as { message?: unknown }).message ?? "") })) } } : {}) };
+        .map((event) => ({ file: String((event.payload as { fileName?: unknown }).fileName ?? ""), note: String((event.payload as { message?: unknown }).message ?? "") })),
+      voiceprint: voiceprintState(store, workspaceId, dataDir) } } : {}) };
 }
 
 /**
@@ -97,4 +100,31 @@ function purgeRecordingTranscripts(store: CrosslineStore, workspaceId: string, d
   }
   store.appendEvent({ ownerId, workspaceId, idempotencyKey: `${RECORDING_PURGED_EVENT}:${Date.now()}`, type: RECORDING_PURGED_EVENT, entityId: workspaceId, payload: { deleted } });
   return deleted;
+}
+
+/** Where the voiceprint, a failed attempt and a pending enrolment recording live (`apps/worker/src/diarize.ts` reads the same names). */
+export const voiceprintDir = (dataDir: string) => path.join(dataDir, ...RECORDING_VOICEPRINT_SEGMENTS);
+const voiceprintFiles = (dataDir: string, workspaceId: string) => {
+  try { return readdirSync(voiceprintDir(dataDir)).filter((name) => name.startsWith(`${workspaceId}.`)); } catch { return []; }
+};
+
+export function voiceprintState(store: CrosslineStore, workspaceId: string, dataDir: string): VoiceprintState {
+  const on = store.getSetting(workspaceId, RECORDING_VOICEPRINT_CONSENT) === "granted";
+  const files = voiceprintFiles(dataDir, workspaceId);
+  const read = (name: string) => { try { return JSON.parse(readFileSync(path.join(voiceprintDir(dataDir), name), "utf8")) as Record<string, unknown>; } catch { return undefined; } };
+  if (files.some((name) => name.includes(".enrol."))) return { on, state: "pending" };
+  const ready = files.includes(`${workspaceId}.json`) ? read(`${workspaceId}.json`) : undefined;
+  if (ready) return { on, state: "ready", ...(typeof ready.seconds === "number" ? { seconds: ready.seconds } : {}), ...(typeof ready.at === "string" ? { at: ready.at } : {}) };
+  const failed = files.includes(`${workspaceId}.failed.json`) ? read(`${workspaceId}.failed.json`) : undefined;
+  if (failed) return { on, state: "failed", message: String(failed.message ?? "") };
+  return { on, state: "none" };
+}
+
+/** Turns 识别本人声音 on or off. Off deletes the voiceprint and anything waiting to become one; nothing else holds the person's voice. */
+export function setVoiceprintConsent(store: CrosslineStore, workspaceId: string, on: boolean, dataDir: string): { deleted: number } {
+  store.setSetting(workspaceId, RECORDING_VOICEPRINT_CONSENT, on ? "granted" : "denied");
+  if (on) return { deleted: 0 };
+  const files = voiceprintFiles(dataDir, workspaceId);
+  for (const name of files) rmSync(path.join(voiceprintDir(dataDir), name), { force: true });
+  return { deleted: files.length };
 }

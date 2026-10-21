@@ -36,7 +36,8 @@ host_mb=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
 transcribe=0
 if grep -q "^CROSSLINE_SERVER_TRANSCRIBE=1" /srv/crossline/app.env 2>/dev/null && [ "${host_mb:-0}" -ge 3200 ]; then transcribe=1; fi
 if [ "${host_mb:-0}" -ge 3200 ] && [ "$transcribe" = 1 ]; then
-  assess_mem=450m; assess_heap=320; web_mem=650m; web_heap=480; worker_mem=1350m; worker_heap=384; transcriber_mem=650m
+  # The transcriber holds SenseVoice and the speaker models together (~660 MB measured, 2026-10-21); the web gives it 100 MB (it peaks near 310).
+  assess_mem=450m; assess_heap=320; web_mem=550m; web_heap=400; worker_mem=1350m; worker_heap=384; transcriber_mem=750m
   model_runs=4; guest_runtimes=4; web_renders=3; posters=3
 elif [ "${host_mb:-0}" -ge 3200 ]; then
   assess_mem=450m; assess_heap=320; web_mem=650m; web_heap=480; worker_mem=1750m; worker_heap=384
@@ -114,6 +115,17 @@ if [ "$want" = all ] || [ "$want" = transcriber ]; then
         if ! echo "$sum  $models/$file" | sha256sum -c --status 2>/dev/null; then echo "SenseVoice $file did not download or does not match its hash"; rm -f "$models/$file" "$models/$file.tmp"; ok=0; fi
       fi
     done
+    # Speaker separation (apps/worker/src/diarize.ts): pyannote segmentation 3.0 and the 3D-Speaker CAM++ embedding. Optional — without
+    # them the transcriber still runs, its lines just name no speaker.
+    hf="$(grep "^CROSSLINE_HF_BASE=" /srv/crossline/app.env 2>/dev/null | cut -d= -f2-)"; hf="${hf:-https://huggingface.co}"
+    speaker_model() {
+      if ! echo "$2  $models/$1" | sha256sum -c --status 2>/dev/null; then
+        curl -fsSL --retry 3 -o "$models/$1.tmp" "$hf/$3" && mv "$models/$1.tmp" "$models/$1" || true
+        if ! echo "$2  $models/$1" | sha256sum -c --status 2>/dev/null; then echo "speaker model $1 did not download or does not match its hash"; rm -f "$models/$1" "$models/$1.tmp"; fi
+      fi
+    }
+    speaker_model segmentation.int8.onnx d582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.int8.onnx
+    speaker_model speaker.onnx f682b514c05d947ee3fa91cd6ec6c5c7543479a128373fa29b1faedccd21fd11 csukuangfj/speaker-embedding-models/resolve/main/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx
     chmod 644 "$models"/* 2>/dev/null || true
     if [ "$ok" = 1 ]; then
       transcriber_cmd="/repo/node_modules/.bin/tsx src/transcriber.ts"
