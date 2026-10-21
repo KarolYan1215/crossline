@@ -58,13 +58,13 @@ export function ServerRecordingCard({ server, done }: { server: NonNullable<Reco
       </ul>}
       <details className="st-details"><summary>快捷指令怎么设</summary>
         <ol className="st-steps">
-          <li>「快捷指令」App → 新建快捷指令，命名「上传到 Crossline」；在「ⓘ」里打开「在共享表单中显示」，接收类型只留「媒体」。</li>
+          <li>「快捷指令」App → 新建快捷指令，命名「上传到 Crossline」；在「ⓘ」里打开「在共享表单中显示」，接收类型只留「媒体」和「文件」。</li>
           <li>加「获取名称」（输入：快捷指令输入），再加「URL 编码」编码这个名称。</li>
           <li>加「获取 URL 内容」：网址填上面的网址并在末尾接上编码后的名称，方法 POST，请求头 Authorization 填上面的值，请求体选「文件」，文件选「快捷指令输入」。</li>
-          <li>用 iPhone 自带的「语音备忘录」录音（锁屏后继续录）；录完点开这条录音 →「…」→「共享」→「上传到 Crossline」。</li>
-          <li>iOS 26 可试全自动：「自动化」→「App」→「语音备忘录」→「已关闭」→「立即运行」，动作为「查找录音」（过去 1 天内）→「重复每一项」→ 同样的上传。若「查找录音」给不出文件，就用上一步手动分享。</li>
+          <li>加「显示通知」，内容选「URL 的内容」。</li>
+          <li>用 iPhone 自带的「语音备忘录」录音（锁屏后继续录）；录完点开这条录音 →「…」→「共享」→「上传到 Crossline」。通知里出现 ok 和 size 就是收到了。</li>
         </ol>
-        <p className="st-note">不用另装 App。同一个录音传两次只转一次。录音时别的 App 放声音，语音备忘录会停录。单个录音不超过 300 MB，每天合计不超过 3 GB。</p>
+        <p className="st-note">不用另装 App。同一个录音传两次只转一次。快捷指令的「查找录音」只交出录音标题，拿不到音频，所以不能做成退出语音备忘录就自动上传，每条要分享一次。录音时别的 App 放声音，语音备忘录会停录。单个录音不超过 300 MB，每天合计不超过 3 GB。</p>
       </details>
     </>}
     {server.failed.length > 0 && <ul className="st-list" aria-label="没有转写成的上传">{server.failed.map((item, index) =>
