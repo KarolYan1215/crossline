@@ -210,11 +210,17 @@ export function scriptedRuntime(skillNames: string[], respond: (prompt: string, 
   usage?: { input: number; output: number };
   /** A runtime error the turn fails with instead of answering (`usageLimitExceeded` for a spent key), or undefined to answer. */
   failWith?: (prompt: string, turn: number) => string | undefined;
+  /** Whether the runtime answers `skills/list` with an error, as one that is going away does (a runtime replaced mid-measurement). */
+  listFails?: () => boolean;
 } = {}): { rpc: JsonLineRpcClient; prompts: () => string[] } {
   let turns = 0, threads = 0, latestThread = "";
   const prompts: string[] = [];
   const rpc = new JsonLineRpcClient((line) => {
     const request = JSON.parse(line) as { id?: number; method: string; params?: Record<string, unknown> };
+    if (request.method === "skills/list" && options.listFails?.()) {
+      queueMicrotask(() => rpc.receiveLine(JSON.stringify({ id: request.id, error: { code: -32000, message: "runtime is shutting down" } })));
+      return;
+    }
     if (request.method === "thread/start") latestThread = `thread-${(threads += 1)}`;
     const result = request.method === "skills/list"
       ? { data: [{ cwd: "C:\repo", errors: [], skills: skillNames.map((name) => ({ name, path: `C:\skill\${name}\SKILL.md`, enabled: true })) }] }

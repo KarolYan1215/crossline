@@ -156,6 +156,47 @@ test("a spent key stops the measurement without a record, so the candidate is me
   } finally { setUsageSink(undefined); }
 }, 60_000);
 
+test("a measurement the runtime cut short is not a record: it stops there, and a record taken while the runtime was down is measured again", async () => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-down-"));
+  dirs.push(dataDir);
+  const store = new CrosslineStore(":memory:");
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: `${MODEL}=2:8:1024,org/Glm=0.8:2.8:1024`,
+    CROSSLINE_SPONSOR_PLANNING_MODEL: "org/Glm" } as NodeJS.ProcessEnv;
+  const cases = conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => item.id));
+  const record = (model: string, downAfter?: number) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
+    cases.map((caseId, index) => downAfter !== undefined && index >= downAfter
+      ? { caseId, ok: false, repairs: 0, ms: 1, code: "SKILL_LIST_FAILED" } : { caseId, ok: true, repairs: 0, ms: 900 }));
+  const tokens = { input: 100_000, cached: 0, output: 10_000, runs: 10 };
+  // The 2026-10-20 shape: both candidates' records end in the same second with the runtime gone; the last choice is kept from before.
+  const good = { model: MODEL, record: record(MODEL), yuanPerRun: 0.03, tokens, version: SPONSOR_EVAL_VERSION, effortVersion: SPONSOR_EFFORT_VERSION };
+  writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ lastChosen: good, evaluations: [
+    { ...good, record: record(MODEL, 8) }, { model: "org/Glm", record: record("org/Glm", 8), yuanPerRun: 0.01, tokens, version: SPONSOR_EVAL_VERSION, effortVersion: SPONSOR_EFFORT_VERSION }] }));
+  let down = true;
+  const { rpc } = scriptedRuntime(["crossline:crossline-conformance", "crossline:crossline-onboarding"], () => "{}", { usage: { input: 1000, output: 100 }, listFails: () => down });
+  const providers = createModelProviderService({ store, cwd: dataDir, gateway, signedIn: () => false, client: async () => undefined,
+    secrets: { read: async () => undefined, write: async () => {}, remove: () => {} } as never, search: null, image: null, sponsor: () => undefined, now: () => NOW });
+  const sponsor = createSponsorService({ store, dataDir, cwd: dataDir, gateway, capabilities: providers.capabilities, client: () => rpc, env, now: () => NOW,
+    fetch: (async () => new Response(JSON.stringify({ data: [{ id: MODEL }, { id: "org/Glm" }] }), { status: 200 })) as typeof fetch });
+  setUsageSink((usage) => { sponsor.noteEvalUsage(usage); });
+  try {
+    // Neither broken record counts: the last choice serves and the planning model is not used on a record that says nothing.
+    expect(sponsor.chosen()?.model).toBe(MODEL);
+    expect(sponsor.modelFor("crossline-step-planner")).toBe(MODEL);
+    // Measured again while the runtime is still down: stopped without writing anything over the records, and to be tried again.
+    const stopped = await sponsor.evaluate();
+    expect(stopped).toMatchObject({ interrupted: true, tested: [] });
+    const saved = JSON.parse(readFileSync(path.join(dataDir, "sponsor.json"), "utf8")) as { evaluations: Array<{ record: { failures: Array<{ code: string }> } }>; pruned?: unknown };
+    expect(saved.evaluations.every((item) => item.record.failures.some((failure) => failure.code === "SKILL_LIST_FAILED"))).toBe(true);
+    expect(saved.pruned).toBeUndefined();
+    // With the runtime back, both are measured whole.
+    down = false;
+    const again = await sponsor.evaluate();
+    expect(again.interrupted).toBe(false);
+    expect([...again.tested].sort()).toEqual(["org/Glm", MODEL].sort());
+  } finally { setUsageSink(undefined); }
+}, 120_000);
+
 test("a candidate off the frontier is neither measured again nor used, for the chosen model or a simple Skill", async () => {
   const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-frontier-"));
   dirs.push(dataDir);

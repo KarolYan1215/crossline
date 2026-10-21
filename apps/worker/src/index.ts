@@ -1438,14 +1438,14 @@ if (!capabilitySecret) {
   // whenever a record goes stale (a new runtime, a changed list, thirty days); a model already measured is not tested again.
   if (sponsorService && process.env.CROSSLINE_RUN_ONCE !== "1") {
     let spentKey = false;
-    const evaluateSponsor = () => void sponsorService?.evaluate().then((outcome) => { spentKey = outcome.exhausted; }, (error: unknown) =>
+    const evaluateSponsor = () => void sponsorService?.evaluate().then((outcome) => { spentKey = outcome.exhausted || outcome.interrupted; }, (error: unknown) =>
       console.warn(JSON.stringify({ type: "sponsor.evaluate_failed", message: error instanceof Error ? error.message : String(error) })));
     setTimeout(evaluateSponsor, 2 * 60_000).unref();
     // The periodic re-check of stale candidates runs in the cheaper hours (one of the four daily calls falls in them); the one after a
     // start runs at once, since a deploy is when the prompts or the code it measures changed.
     setInterval(() => { if (sponsorOffPeak(new Date())) evaluateSponsor(); }, 6 * 60 * 60_000).unref();
-    // A spent key, or nothing chosen at all, keeps invited accounts waiting: tried again every half hour (a spent key answers at once, so
-    // a try costs nothing), and the measurement resumes as soon as the balance is topped up.
+    // A spent key, a measurement the runtime cut short, or nothing chosen at all: tried again every half hour (a spent key answers at once,
+    // so a try costs nothing), and the measurement resumes as soon as the balance is topped up or the runtime is back.
     setInterval(() => { if (spentKey || !sponsorService?.chosen()) evaluateSponsor(); }, 30 * 60_000).unref();
   }
   // Other accounts' runtimes stop after a quiet spell (above), so an idle account holds no process.
