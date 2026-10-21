@@ -106,7 +106,7 @@ jobs:
             echo "-- sponsor records"
             sudo python3 -c "import json,collections; d=json.load(open(\"/srv/crossline/data/sponsor.json\")); [print(e.get(\"model\"), \"v\"+str(e.get(\"version\")), e[\"record\"].get(\"ranAt\"), e[\"record\"].get(\"runtimeVersion\"), round(e[\"record\"].get(\"passRate\",0),3), dict(collections.Counter(f.get(\"code\") for f in e[\"record\"].get(\"failures\",[])))) for e in d.get(\"evaluations\",[])]; print(\"lastChosen:\", (d.get(\"lastChosen\") or {}).get(\"model\")); print(\"pruned:\", {k: v.get(\"by\") for k, v in (d.get(\"pruned\") or {}).items()})" || true
             # Which plugins a structured run keeps (skill-runner.ts ownPlugins): what the runtime listed, and the plugin sections of the owner
-            # runtime's config (section headers and enabled lines only), then how many plugin MCP servers are running.
+            # runtime config (section headers and enabled lines only), then how many plugin MCP servers are running.
             echo "-- plugins"
             sudo docker logs --since 6h crossline-worker 2>&1 | grep -E "\"skill.plugins\"" | cut -c1-600 | tail -5 || true
             sudo docker exec crossline-worker sh -c "grep -n -E \"^\\[(plugins|marketplaces)|^enabled\" /state/codex-home/config.toml" 2>/dev/null | head -30 || true
