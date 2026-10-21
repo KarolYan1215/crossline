@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { STYLE_INSTRUCTIONS } from "./style";
-import { join, posix, win32 } from "node:path";
+import { join } from "node:path";
 import { cleanAnswerStrings } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
@@ -518,7 +518,6 @@ export async function installLibraryPlugin(client: CodexRpcBoundary, plugin: { m
   return underConfigLock(client, async () => {
     try { await client.request("plugin/install", { marketplacePath: plugin.marketplacePath, pluginName: plugin.name }); }
     catch { fail("SKILL_LIBRARY_INSTALL_FAILED"); }
-    forgetOwnPlugins(client);
     let response: unknown;
     try { response = await client.request("skills/list", { cwds: [plugin.cwd], forceReload: true }); }
     catch { fail("SKILL_LIST_FAILED"); }
@@ -658,44 +657,18 @@ type Scope = ReturnType<typeof openScope>;
  * for each thread, and a ChatGPT account carries OpenAI's curated `codex-security` plugin: an ~80 MB node process per thread. During a
  * model measurement sixteen of them held the worker at its memory ceiling, the kernel killed the owner's runtime and the worker restarted,
  * three times in an hour, so the measurement started over each time. A structured run needs only Crossline's own plugins: its thread turns
- * every other plugin off (`plugins._default.enabled = false`) and each of ours on, by the id the runtime itself lists. When the runtime
- * cannot list them, or lists none of ours, nothing is changed.
+ * every other plugin off (`plugins._default.enabled = false`) and each of ours on. The ids are read from the runtime's own settings
+ * (`config/read`), where installing a plugin writes `[plugins."<name>@<marketplace>"] enabled = true`; `plugin/installed`, tried first,
+ * lists only OpenAI's remote plugins and none from a local marketplace. When the settings hold none of ours, nothing is changed.
  */
 const OWN_MARKETPLACES = ["crossline-local", "crossline-library"];
-const OWN_PLUGINS_TTL_MS = 10 * 60_000;
-const OWN_PLUGINS_RETRY_MS = 60_000;
-const ownPluginCache = new WeakMap<object, Map<string, { at: number; ttl: number; ids: string[] | undefined }>>();
-/** After an install: the next run lists the plugins again, so a new library plugin is not left off. */
-export function forgetOwnPlugins(client: CodexRpcBoundary): void { ownPluginCache.delete(client); }
-async function ownPlugins(client: CodexRpcBoundary, cwd: string): Promise<string[] | undefined> {
-  let byCwd = ownPluginCache.get(client);
-  if (!byCwd) { byCwd = new Map(); ownPluginCache.set(client, byCwd); }
-  const cached = byCwd.get(cwd);
-  if (cached && Date.now() - cached.at < cached.ttl) return cached.ids;
-  let ids: string[] | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("PLUGIN_LIST_TIMEOUT")), 10_000); });
-    // The run's folder too, where a marketplace may be found by its location rather than the home's settings.
-    const params = posix.isAbsolute(cwd) || win32.isAbsolute(cwd) ? { cwds: [cwd] } : {};
-    const listed = record(await Promise.race([client.request("plugin/installed", params), timeout]));
-    const plugins = (Array.isArray(listed?.marketplaces) ? listed.marketplaces : []).flatMap((entry) => {
-      const items = record(entry)?.plugins;
-      return Array.isArray(items) ? items.map(record) : [];
-    });
-    const own = plugins.flatMap((plugin) => plugin?.installed === true && typeof plugin.id === "string"
-      && OWN_MARKETPLACES.some((marketplace) => String(plugin.id).endsWith(`@${marketplace}`)) ? [String(plugin.id)] : []);
-    ids = own.some((id) => id.endsWith(`@${OWN_MARKETPLACES[0]}`)) ? [...new Set(own)].sort() : undefined;
-    // Plugin ids and flags only: what the runtime listed, for reading why a run kept every plugin.
-    console.info(JSON.stringify({ type: "skill.plugins", listed: plugins.map((plugin) => `${String(plugin?.id)}${plugin?.installed === true ? "" : ":not-installed"}${plugin?.enabled === false ? ":off" : ""}`),
-      own: ids ?? null }));
-  } catch (error) {
-    ids = undefined;
-    console.info(JSON.stringify({ type: "skill.plugins", error: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
-  }
-  finally { if (timer) clearTimeout(timer); }
-  byCwd.set(cwd, { at: Date.now(), ttl: ids ? OWN_PLUGINS_TTL_MS : OWN_PLUGINS_RETRY_MS, ids });
-  return ids;
+const pluginsLogged = new WeakSet<object>();
+/** Crossline's own plugins switched on in the runtime's settings, or undefined when the main one is not among them. */
+export function ownPluginsIn(config: Record<string, unknown>): string[] | undefined {
+  const plugins = record(config.plugins) ?? {};
+  const own = Object.keys(plugins).filter((id) => record(plugins[id])?.enabled === true
+    && OWN_MARKETPLACES.some((marketplace) => id.endsWith(`@${marketplace}`))).sort();
+  return own.some((id) => id.endsWith(`@${OWN_MARKETPLACES[0]}`)) ? own : undefined;
 }
 /**
  * The thread settings that leave only these plugins on: none when the list is unknown, or when a skill the run names (`plugin:skill`)
@@ -805,7 +778,12 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
   const mcp = record(runtimeConfig.mcp_servers) ?? {};
   if (options.agent) return startAgentThread(scope, options, context, resumeId);
   // A run with connectors or the image tool may use what another plugin brings, so it keeps them all.
-  const own = options.connectors || options.allowImageGeneration ? undefined : await ownPlugins(scope.client, options.cwd);
+  const own = options.connectors || options.allowImageGeneration ? undefined : ownPluginsIn(runtimeConfig);
+  if (!pluginsLogged.has(scope.client)) {
+    pluginsLogged.add(scope.client);
+    // Plugin ids only, once per runtime: what a structured run keeps, for reading why one kept every plugin.
+    console.info(JSON.stringify({ type: "skill.plugins", own: ownPluginsIn(runtimeConfig) ?? null, configured: Object.keys(record(runtimeConfig.plugins) ?? {}).length }));
+  }
   const ownOnly = onlyOwnPlugins(own, [options.skillName, ...context.extraSkills]);
   context.plugins = Object.keys(ownOnly).length ? "own" : "all";
   const config: Record<string, unknown> = {

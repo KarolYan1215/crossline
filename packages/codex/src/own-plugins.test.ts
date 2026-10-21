@@ -3,25 +3,20 @@ import * as codex from "./index";
 
 /**
  * Plugins on a structured run's thread (found on the hosted beta, 2026-10-21): every plugin's MCP servers start per thread, so a run
- * keeps only Crossline's own plugins, by the ids the runtime lists, and changes nothing when the runtime cannot list them.
+ * keeps only Crossline's own plugins, by the ids in the runtime's own settings, and changes nothing when the settings hold none of ours.
  */
-function runtime(installed: unknown | Error) {
+function runtime(plugins: Record<string, unknown> | undefined) {
   const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
   let enabled = false;
   const client = new codex.JsonLineRpcClient((line) => {
     const req = JSON.parse(line);
     requests.push(req);
     let result: unknown = {};
-    if (req.method === "plugin/installed" && installed instanceof Error) {
-      queueMicrotask(() => client.receiveLine(JSON.stringify({ id: req.id, error: { code: -32601, message: installed.message } })));
-      return;
-    }
-    if (req.method === "plugin/installed") result = installed;
     if (req.method === "skills/list") result = { data: [{ cwd: "C:\\repo", errors: [], skills: [{ name: "crossline:crossline-step-planner", path: "C:\\skill\\SKILL.md", enabled }] }] };
     if (req.method === "skills/config/write") { enabled = req.params.enabled; result = { effectiveEnabled: enabled }; }
     if (req.method === "account/read") result = { account: { type: "chatgpt" }, requiresOpenaiAuth: false };
     if (req.method === "model/list") result = { data: [] };
-    if (req.method === "config/read") result = { config: {} };
+    if (req.method === "config/read") result = { config: plugins ? { plugins } : {} };
     if (req.method === "thread/start") result = { thread: { id: "thread-1" }, approvalPolicy: "untrusted", sandbox: { type: "readOnly" }, instructionSources: [] };
     if (req.method === "turn/start") {
       result = { turn: { id: "turn-1", status: "inProgress" } };
@@ -38,48 +33,36 @@ function runtime(installed: unknown | Error) {
 const run = (client: codex.CodexRpcBoundary, extra: Partial<codex.SkillRunOptions<unknown>> = {}) => codex.runCodexSkill(client, { task: "x" }, {
   skillName: "crossline:crossline-step-planner", cwd: "C:\\repo", developerInstructions: "Plan.", outputSchema: { type: "object" },
   prepareInput: (value) => value, validateOutput: (output) => output, onAudit: () => {}, ...extra });
-const threadConfig = (requests: Array<{ method: string; params: Record<string, unknown> }>) =>
-  requests.find((request) => request.method === "thread/start")!.params.config as Record<string, unknown>;
+const pluginKeys = (requests: Array<{ method: string; params: Record<string, unknown> }>) =>
+  Object.keys(requests.find((request) => request.method === "thread/start")!.params.config as Record<string, unknown>).filter((key) => key.startsWith("plugins."));
 
-const listed = { marketplaces: [
-  { name: "crossline-local", plugins: [{ id: "crossline@crossline-local", installed: true, enabled: true }] },
-  { name: "crossline-library", plugins: [{ id: "crossline-mine@crossline-library", installed: true, enabled: true }, { id: "crossline-public@crossline-library", installed: false, enabled: false }] },
-  { name: "openai-curated-remote", plugins: [{ id: "codex-security@openai-curated-remote", installed: true, enabled: true }] }
-] };
+// As the hosted owner's runtime has them (2026-10-21): installing a plugin writes it enabled; OpenAI's remote plugins are not listed here.
+const configured = { "crossline@crossline-local": { enabled: true }, "crossline-mine@crossline-library": { enabled: true },
+  "crossline-public@crossline-library": { enabled: false }, "someone-else@elsewhere": { enabled: true } };
 
-test("a structured run turns every plugin off but Crossline's own, by the ids the runtime lists", async () => {
-  const fake = runtime(listed);
+test("a structured run turns every plugin off but Crossline's own that the runtime's settings switch on", async () => {
+  const fake = runtime(configured);
   expect((await run(fake.client)).ok).toBe(true);
-  const config = threadConfig(fake.requests);
+  const config = fake.requests.find((request) => request.method === "thread/start")!.params.config as Record<string, unknown>;
   expect(config["plugins._default.enabled"]).toBe(false);
   expect(config["plugins.crossline@crossline-local.enabled"]).toBe(true);
   expect(config["plugins.crossline-mine@crossline-library.enabled"]).toBe(true);
-  // Not installed, or not ours: no line of its own, so the default keeps it off.
-  expect(Object.keys(config).filter((key) => key.startsWith("plugins."))).toEqual(["plugins._default.enabled",
-    "plugins.crossline-mine@crossline-library.enabled", "plugins.crossline@crossline-local.enabled"]);
-  // Asked with the run's folder, where a marketplace may be found by its location.
-  expect(fake.requests.find((request) => request.method === "plugin/installed")!.params).toEqual({ cwds: ["C:\\repo"] });
-  // The list is kept: a second run does not ask again.
-  expect((await run(fake.client)).ok).toBe(true);
-  expect(fake.requests.filter((request) => request.method === "plugin/installed")).toHaveLength(1);
-  // An install makes the next run list them again.
-  codex.forgetOwnPlugins(fake.client);
-  await run(fake.client);
-  expect(fake.requests.filter((request) => request.method === "plugin/installed")).toHaveLength(2);
+  // Switched off, or not ours: no line of its own, so the default keeps it off.
+  expect(pluginKeys(fake.requests)).toEqual(["plugins._default.enabled", "plugins.crossline-mine@crossline-library.enabled", "plugins.crossline@crossline-local.enabled"]);
+  expect(codex.ownPluginsIn({ plugins: configured })).toEqual(["crossline-mine@crossline-library", "crossline@crossline-local"]);
 });
 
-test("nothing is changed when the runtime cannot list its plugins, lists none of ours, or the run uses connectors or images", async () => {
-  for (const installed of [new Error("Method not found"), { marketplaces: [listed.marketplaces[2]] }, {}]) {
-    const fake = runtime(installed);
+test("nothing is changed when the settings hold none of ours, a named library plugin is missing, or the run uses connectors or images", async () => {
+  for (const plugins of [undefined, { "someone-else@elsewhere": { enabled: true } }, { "crossline@crossline-local": { enabled: false } }]) {
+    const fake = runtime(plugins);
     expect((await run(fake.client)).ok).toBe(true);
-    expect(Object.keys(threadConfig(fake.requests)).some((key) => key.startsWith("plugins."))).toBe(false);
+    expect(pluginKeys(fake.requests)).toEqual([]);
   }
-  // A library skill whose plugin the list does not hold would be turned off with the rest: the run keeps every plugin.
+  // A library skill whose plugin is not switched on would be turned off with the rest: the run keeps every plugin.
   expect(codex.onlyOwnPlugins(["crossline@crossline-local"], ["crossline:crossline-step-planner", "crossline-public:deck"])).toEqual({});
   expect(codex.onlyOwnPlugins(["crossline@crossline-local", "crossline-public@crossline-library"], ["crossline:crossline-step-planner", "crossline-public:deck"]))
     .toEqual({ "plugins._default.enabled": false, "plugins.crossline@crossline-local.enabled": true, "plugins.crossline-public@crossline-library.enabled": true });
-  const images = runtime(listed);
+  const images = runtime(configured);
   await run(images.client, { allowImageGeneration: true, onImage: () => {} });
-  expect(images.requests.some((request) => request.method === "plugin/installed")).toBe(false);
-  expect(Object.keys(threadConfig(images.requests)).some((key) => key.startsWith("plugins."))).toBe(false);
+  expect(pluginKeys(images.requests)).toEqual([]);
 });
