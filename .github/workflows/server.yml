@@ -31,7 +31,8 @@ jobs:
   server:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.ref == 'refs/heads/main' && (contains(github.event.head_commit.message, '[backup]') || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate') || contains(github.event.head_commit.message, '[readiness]') || contains(github.event.head_commit.message, '[usage]')))
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A deploy may retry a stalled pull (deploy/server/run.sh): three tries of eight minutes per image fit.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: SSH key
@@ -47,6 +48,11 @@ jobs:
             uptime; printf "cpus: "; nproc; free -m; df -h / | tail -1
             sudo docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
             sudo docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | head
+            # Where the disk goes: a new app image needs its whole size free while the old one still runs (2026-10-21).
+            sudo docker system df 2>/dev/null || true
+            sudo docker info --format "storage: {{.Driver}} {{.DriverStatus}}" 2>/dev/null || true
+            sudo timeout 120 du -xsh /srv/crossline/data /srv/crossline/compare /srv/backups /var/lib/docker /var/lib/containerd /tmp 2>/dev/null || true
+            ps -eo pid,etime,args | grep -E "docker (pull|run)" | grep -v grep || true
             sudo systemctl is-active caddy
             tail -5 /tmp/build-app.log 2>/dev/null || true
             for p in 3340 3210; do printf "%s " $p; curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$p/ || echo down; done
@@ -209,7 +215,7 @@ jobs:
           set -e
           dir=/srv/crossline/compare
           registry=ghcr.io/karolyan1215/crossline-app:beta
-          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null && docker pull -q "$registry" || true
+          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null && timeout 600 docker pull -q "$registry" || true
           docker logout ghcr.io >/dev/null
           image=$registry
           docker image inspect "$image" >/dev/null 2>&1 || image=$(docker inspect -f '{{.Config.Image}}' crossline-worker)
