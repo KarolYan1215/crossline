@@ -311,7 +311,7 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
   const buttons: NudgeButton[] = [
     ...(first ? answerable.map((option): NudgeButton => ({ kind: "action", label: option.label,
       action: { action: "ask.answer", summary: `${first.title.slice(0, 40)}：${option.label}`, args: { askId: first.id, optionId: option.id, fields: [] } } })) : []),
-    ...(asks.length ? [{ kind: "href" as const, label: `全部待决（${asks.length}）`, href: "/approvals" }] : []),
+    ...(asks.length ? [{ kind: "href" as const, label: `待决事项（${asks.length}）`, href: "/approvals" }] : []),
     { kind: "href", label: "打开计划", href: "/plan" }
   ];
   // The same day as data, for the card Today's conversation and the return page draw (the text above stays for push and older pages).

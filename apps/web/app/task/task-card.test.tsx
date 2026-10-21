@@ -61,4 +61,10 @@ describe("task card", () => {
     expect(html).toContain("等本人批准");
     expect(renderToStaticMarkup(<TaskCard detail={base({ state: "awaiting_plan_approval" })} />)).toContain("准备中：步骤规划生成后再请本人确认。");
   });
+
+  test("the task's sections say which they are, so a wide sheet can set steps and materials side by side", async () => {
+    const { TaskPanels } = await import("./task-dialog");
+    const html = renderToStaticMarkup(<TaskPanels detail={base()} />);
+    expect([...html.matchAll(/data-section="(\w+)"/g)].map((match) => match[1])).toEqual(["steps", "materials", "finish"]);
+  });
 });

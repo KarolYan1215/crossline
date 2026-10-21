@@ -15,16 +15,31 @@ export function announceThinking(thinking: boolean): void {
   window.dispatchEvent(new CustomEvent(HELPER_THINKING, { detail: thinking }));
 }
 
-type Shared = { avatar: string | null; working: boolean; down: boolean };
-let shared: Shared = { avatar: null, working: false, down: false };
+/**
+ * `known` is false until the page has any reading of whether there is a figure (the last one remembered in this browser, or the
+ * server's answer). Until then the button is a placeholder of the figure's size, so it no longer shows 「小帮手」 as text and then jumps
+ * to the round figure a moment later (2026-10-21 walkthrough).
+ */
+type Shared = { avatar: string | null; working: boolean; down: boolean; known: boolean };
+let shared: Shared = { avatar: null, working: false, down: false, known: false };
 const listeners = new Set<(next: Shared) => void>();
 let polling: (() => void) | undefined;
 
+/** The figure last seen, per browser: `""` for none. A convenience only; the server's answer replaces it within the same second. */
+const AVATAR_CACHE = "crossline.helper.avatar";
+function cachedAvatar(): string | null | undefined {
+  try { const value = window.localStorage.getItem(AVATAR_CACHE); return value === null ? undefined : value || null; } catch { return undefined; }
+}
+function rememberAvatar(avatar: string | null): void {
+  try { window.localStorage.setItem(AVATAR_CACHE, avatar ?? ""); } catch { /* private window or storage blocked: the placeholder covers it */ }
+}
+
 async function refresh(): Promise<void> {
   const body = await fetch("/api/helper", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).catch(() => null) as
-    ({ ok?: boolean } & Shared) | null;
+    ({ ok?: boolean } & Omit<Shared, "known">) | null;
   if (!body?.ok) return;
-  shared = { avatar: body.avatar ?? null, working: Boolean(body.working), down: Boolean(body.down) };
+  shared = { avatar: body.avatar ?? null, working: Boolean(body.working), down: Boolean(body.down), known: true };
+  rememberAvatar(shared.avatar);
   for (const listener of listeners) listener(shared);
 }
 
@@ -40,6 +55,10 @@ export function useHelper(): Shared & { thinking: boolean } {
   const [thinking, setThinking] = useState(false);
   useEffect(() => {
     listeners.add(setState);
+    if (!shared.known) {
+      const cached = cachedAvatar();
+      if (cached !== undefined) { shared = { ...shared, avatar: cached, known: true }; setState(shared); }
+    }
     if (!polling) polling = pollWhileVisible(refresh, 30_000);
     else setState(shared);
     const onThinking = (event: Event) => setThinking(Boolean((event as CustomEvent<boolean>).detail));

@@ -26,7 +26,10 @@ describe("the flywheel graph", () => {
   test("a dot per milestone and an anchor per line labelled with its long-term goal, sized by the drawing's own width", () => {
     expect(html.match(/class="fw-node" data-kind="milestone"/g)).toHaveLength(3);
     expect(html.match(/class="fw-node" data-kind="anchor"/g)).toHaveLength(2);
-    expect(html).toContain("成为神经形态计算方向能独立立项…");
+    // The goal takes two lines, broken after 「的」, instead of one cut at sixteen characters (2026-10-21); an anchor can be focused to
+    // read it whole.
+    expect(html).toContain('<tspan x="0" dy="0">成为神经形态计算方向能独立立项的</tspan><tspan x="0" dy="16">研究者</tspan>');
+    expect(html).toContain('aria-label="研究者的长期目标：成为神经形态计算方向能独立立项的研究者"');
     expect(html).toContain('viewBox="0 0 720 446"');
     expect(html).toContain('aria-label="飞轮图谱：3 个里程碑，3 条飞轮关系"');
   });

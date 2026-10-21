@@ -8,15 +8,17 @@ import * as Tooltip from "@radix-ui/react-tooltip";
  * The one dialog chrome: `side="center"` for the task dialog, `side="right"` for the milestone drawer that keeps the timeline in view.
  * Controlled (`open`/`onOpenChange`) or triggered (`trigger`).
  */
-export function Sheet({ title, side = "center", trigger, open, onOpenChange, footer, children }: {
-  title: string; side?: "center" | "right"; trigger?: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void;
+export function Sheet({ title, side = "center", size, trigger, open, onOpenChange, footer, children }: {
+  title: string; side?: "center" | "right";
+  /** `wide`: most of a large screen and the whole of a phone's, for content that reads in columns (a task opened from a card). */
+  size?: "wide"; trigger?: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void;
   footer?: ReactNode; children: ReactNode;
 }) {
   return <Dialog.Root {...(open !== undefined ? { open } : {})} {...(onOpenChange ? { onOpenChange } : {})}>
     {trigger && <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>}
     <Dialog.Portal>
       <Dialog.Overlay className="dialog-overlay" />
-      <Dialog.Content className="ui-sheet" data-side={side} aria-describedby={undefined}>
+      <Dialog.Content className="ui-sheet" data-side={side} data-size={size} aria-describedby={undefined}>
         <header className="ui-sheet-head">
           <Dialog.Title>{title}</Dialog.Title>
           <Dialog.Close asChild><button type="button" className="ui-icon-button" aria-label="关闭">×</button></Dialog.Close>

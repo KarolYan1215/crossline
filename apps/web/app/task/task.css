@@ -232,6 +232,14 @@
 .task-section-title{margin:0;font-size:15px;display:flex;align-items:center;gap:8px}
 .task-section-title .mono{display:inline-grid;place-items:center;width:22px;height:22px;border:1.5px solid var(--lc,var(--ink));font-size:12px}
 .task-subhead{margin:0 0 4px;font-size:13px;color:var(--graphite);font-weight:700}
+/* In a wide sheet (`.ui-sheet[data-size="wide"]`, whose body is the size container) the steps and the materials sit side by side; the
+   head, the actions, the input box, hand-in and the record run across the whole width. */
+@container (min-width:880px){
+  .task-dialog{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);column-gap:20px;align-items:start}
+  .task-dialog>*{grid-column:1 / -1}
+  .task-dialog>.task-section[data-section="steps"]{grid-column:1}
+  .task-dialog>.task-section[data-section="materials"]{grid-column:2}
+}
 .steps-meta{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0}
 .steps-meta small{font-size:12px;color:var(--graphite)}
 .steps-meta .text-button{min-height:32px;padding:4px 10px;font-size:13px}

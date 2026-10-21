@@ -74,28 +74,114 @@ export function dayTicks(start: string, spanDays: number): string[] {
 /** A level 0–4 for a heatmap cell, from its minutes against the busiest cell (0 = none). */
 export const heatLevel = (minutes: number, max: number) => minutes <= 0 || max <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((minutes / max) * 4)));
 
-/** The width of a label in Arial at `px`: CJK and full-width characters one em, digits and Latin about 0.58 em. */
+/**
+ * The width of a label in Arial at `px`: CJK and full-width characters one em, digits and Latin about 0.58 em. Curly quotes, dashes and
+ * the ellipsis count as one em too: Arial draws them narrower, but a CJK fallback font draws them full width, and a label measured short
+ * runs into its neighbour.
+ */
 export function textWidth(text: string, px = 12): number {
   let width = 0;
-  for (const char of text) width += /[⺀-￯]/.test(char) ? px : /[A-Z]/.test(char) ? px * 0.68 : /\s/.test(char) ? px * 0.3 : px * 0.58;
+  for (const char of text) width += /[⺀-￯‐-‧]/.test(char) ? px : /[A-Z]/.test(char) ? px * 0.68 : /\s/.test(char) ? px * 0.3 : px * 0.58;
   return Math.ceil(width);
 }
 
+/** `text` cut short with 「…」 so it measures at most `max` (whole when it fits; empty when not even one character and the ellipsis fit). */
+export function fitText(text: string, max: number, px = 12): string {
+  if (textWidth(text, px) <= max) return text;
+  const chars = [...text];
+  for (let keep = chars.length - 1; keep > 0; keep -= 1) {
+    const cut = `${chars.slice(0, keep).join("").trimEnd()}…`;
+    if (textWidth(cut, px) <= max) return cut;
+  }
+  return "";
+}
+
 /**
- * Labels beside points on one axis, packed into as few rows as keep them apart: each label starts at its point (or, where it would run
- * off the right edge, ends there) and takes the lowest row whose last label ends `gap` before it. Points are taken left to right.
- * Returns, per input index, the row and the label's left edge.
+ * The milestone axis's name lanes (decided 2026-10-21, after names on the real account were drawn on top of one another and leader lines
+ * ran through them): lanes stack above the axis, lane 0 nearest; a name in lane k hangs from a leader at its marker that rises through
+ * lanes 0…k-1. `AXIS_LABEL` is the vertical arithmetic shared by the chart and the tests.
  */
-export function packLabels(items: Array<{ x: number; width: number }>, plotWidth: number, gap = 10): Array<{ row: number; left: number }> {
-  const order = items.map((item, index) => ({ ...item, index })).sort((a, b) => a.x - b.x || a.index - b.index);
-  const rowEnds: number[] = [];
-  const out: Array<{ row: number; left: number }> = items.map(() => ({ row: 0, left: 0 }));
+export const AXIS_LABEL = {
+  /** Distance between lanes; a 12px line with room to spare. */ laneH: 16,
+  /** Baseline of lane 0 above the axis. */ firstBaseline: 13,
+  /** A label's box around its baseline: CJK ascent, and the descent. */ ascent: 11, descent: 3,
+  /** The marker's half-size on the axis (radius 5.5): nothing may come lower than this above the axis. */ marker: 6,
+  /** Horizontal gap kept between two names, and between a name and a leader passing beside it. */ gap: 8, leaderGap: 2,
+  /** The shortest a cut name may be: three characters and the ellipsis; two read as nothing. */ minWidth: 52
+} as const;
+export const axisLabelBaseline = (axisY: number, lane: number) => axisY - AXIS_LABEL.firstBaseline - lane * AXIS_LABEL.laneH;
+/** A placed name's box (x, y, width, height) on an axis at `axisY`. */
+export const axisLabelBox = (label: AxisLabel, axisY: number) => {
+  const baseline = axisLabelBaseline(axisY, label.lane);
+  return { x: label.left, y: baseline - AXIS_LABEL.ascent, w: label.width, h: AXIS_LABEL.ascent + AXIS_LABEL.descent };
+};
+/** A placed name's leader: from just above its marker up to the bottom of its box. */
+export const axisLabelLeader = (x: number, label: AxisLabel, axisY: number) =>
+  ({ x, y1: axisY - AXIS_LABEL.marker, y2: axisLabelBaseline(axisY, label.lane) + AXIS_LABEL.descent });
+
+export type AxisLabel = { lane: number; left: number; width: number; text: string; anchor: "start" | "end" };
+
+/**
+ * Names beside markers on one axis, such that no two names touch and no leader crosses a name (pure; tested on crowded data). Markers are
+ * taken right to left, so that in a cluster the later marker's name sits lowest and the earlier ones climb over its leader, a staircase;
+ * taken left to right, the first long name blocked every leader after it. Each name starts at its marker (or, where the plot ends too
+ * soon, ends at it), is cut short with 「…」 where it would run into what is already placed (a name in its lane, or a leader rising
+ * through it), and takes the lowest lane where it keeps a set length of itself (or all), else the lane where it keeps the most, never
+ * less than `minWidth`. Whether a name should climb for its length or stay low and leave the lanes above to its neighbours depends on
+ * them, so the pass runs once per length in `LANE_LENGTHS` and the layout naming the most markers (then showing the most text) is kept. A
+ * name with no lane is left out (`null`): its marker stays, and its full name is shown on hover and focus. Returns, per input index, the
+ * lane, the box's left edge and width, and the text to draw.
+ */
+export function layoutAxisLabels(items: Array<{ x: number; text: string }>, bounds: { left: number; right: number },
+  options: { lanes?: number; px?: number } = {}): Array<AxisLabel | null> {
+  const score = (layout: Array<AxisLabel | null>) => layout.reduce((sum, label) => sum + (label ? 10_000 + label.width : 0), 0);
+  return LANE_LENGTHS.map((enough) => axisLabelPass(items, bounds, options.lanes ?? 3, options.px ?? 12, enough))
+    .reduce((best, layout) => score(layout) > score(best) ? layout : best);
+}
+/** The lengths a name may stop climbing at (∞ = only when whole), tried in turn by `layoutAxisLabels`. */
+const LANE_LENGTHS = [Infinity, 120, 80, 64, AXIS_LABEL.minWidth];
+
+function axisLabelPass(items: Array<{ x: number; text: string }>, bounds: { left: number; right: number }, lanes: number, px: number, enough: number): Array<AxisLabel | null> {
+  const { gap, leaderGap, minWidth } = AXIS_LABEL;
+  type Spot = { lane: number; left: number; right: number; anchor: "start" | "end" };
+  type Placed = Spot & { index: number; x: number };
+  const placed: Placed[] = [];
+  const order = items.map((item, index) => ({ ...item, index, full: textWidth(item.text, px) })).sort((a, b) => b.x - a.x || b.index - a.index);
   for (const item of order) {
-    const left = Math.max(0, item.x - 4 + item.width > plotWidth ? item.x + 4 - item.width : item.x - 4);
-    let row = rowEnds.findIndex((end) => end + gap <= left);
-    if (row < 0) { row = rowEnds.length; rowEnds.push(0); }
-    rowEnds[row] = left + item.width;
-    out[item.index] = { row, left };
+    const need = Math.min(item.full, minWidth);
+    const found: Spot[] = [];
+    for (let lane = 0; lane < lanes; lane += 1) {
+      // The own leader rises through the lanes below: no name there may cover the marker.
+      if (placed.some((other) => other.lane < lane && other.left - leaderGap < item.x && other.right + leaderGap > item.x)) continue;
+      // What a name in this lane must keep clear of, and by how much: names in the lane, and leaders from higher lanes passing through it.
+      const obstacles = placed.flatMap((other): Array<[number, number, number]> => other.lane === lane ? [[other.left, other.right, gap]]
+        : other.lane > lane ? [[other.x, other.x, leaderGap]] : []);
+      const start = Math.max(bounds.left, item.x - 2);
+      if (!obstacles.some(([from, to, keep]) => from < start + 1 && to > start - keep)) {
+        const width = Math.min(item.full, bounds.right - start, ...obstacles.filter(([from]) => from >= start + 1).map(([from, , keep]) => from - keep - start));
+        if (width >= need) found.push({ lane, left: start, right: start + width, anchor: "start" });
+      }
+      if (bounds.right - start < item.full) {
+        // Ending at the marker, for a name the plot's right edge would cut short.
+        const end = Math.min(bounds.right, item.x + 2);
+        if (!obstacles.some(([from, to, keep]) => from < end + keep && to > end - 1)) {
+          const width = Math.min(item.full, end - bounds.left, ...obstacles.filter(([, to]) => to <= end - 1).map(([, to, keep]) => end - keep - to));
+          if (width >= need) found.push({ lane, left: end - width, right: end, anchor: "end" });
+        }
+      }
+    }
+    const width = (spot: Spot) => spot.right - spot.left;
+    // The lowest lane that keeps the name whole or long enough to read; else wherever it keeps the most.
+    const best = found.find((spot) => width(spot) >= Math.min(item.full, enough))
+      ?? found.reduce<Spot | undefined>((most, spot) => !most || width(spot) > width(most) ? spot : most, undefined);
+    if (best) placed.push({ index: item.index, x: item.x, ...best });
+  }
+  const out: Array<AxisLabel | null> = items.map(() => null);
+  for (const entry of placed) {
+    const text = fitText(items[entry.index]!.text, entry.right - entry.left, px);
+    if (!text) continue;
+    const width = textWidth(text, px);
+    out[entry.index] = { lane: entry.lane, text, width, anchor: entry.anchor, left: entry.anchor === "end" ? entry.right - width : entry.left };
   }
   return out;
 }

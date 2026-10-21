@@ -211,3 +211,16 @@
 .md-text ul,.md-text ol{padding-left:20px}
 .md-text li{margin:2px 0}
 .md-text code{font-family:var(--f-mono);font-size:13px;background:var(--chalk);padding:0 3px}
+
+/* Today's change summary (schedule-summary.tsx): a task's or an event's name is cut at its own width with an ellipsis, the whole name
+   on hover, instead of being sliced to a character count in the middle of a word (2026-10-21 walkthrough). */
+.schedule-summary .ss-text{min-width:0;line-height:1.5}
+.schedule-summary .ss-name{display:inline-block;max-width:min(16em,60vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+/* 「待确认共 N →」 beside a stack of asks: the larger number the header badge shows, said in words beside the asks' own count. */
+.pending-total-link{white-space:nowrap;font-size:13px}
+@media (max-width:680px){
+  /* Thumb-sized: 「钉回原位」 and the link out of the stack were 28px tall on a phone. */
+  .schedule-summary button,.ask-stack-nav .pending-total-link{min-height:44px;display:inline-flex;align-items:center}
+  .schedule-summary li{padding:4px 0;border-top:1px solid var(--mist)}
+  .schedule-summary li:first-child{border-top:0}
+}

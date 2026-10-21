@@ -82,10 +82,11 @@
 .ak-board-head{display:grid;gap:6px}
 .ak-board-head h2{margin:0;font-size:15px;font-weight:700}
 .ak-empty{margin:0}
-.ak-qbar{display:flex;gap:2px;height:28px;min-width:0}
-.ak-qbar a{flex-basis:0;display:flex;align-items:center;gap:6px;min-width:34px;padding:0 8px;overflow:hidden;white-space:nowrap;text-decoration:none;font-size:12px;border:1px solid transparent}
+/* Each part is at least as wide as 「N 紧急重要」 and grows by its count; on a narrow screen the parts wrap onto a second row rather than
+   cutting the label to 「2 紧…」 (2026-10-21 walkthrough). The exact share is in the hover title. */
+.ak-qbar{display:flex;flex-wrap:wrap;gap:2px;min-height:28px;min-width:0}
+.ak-qbar a{flex-shrink:0;flex-basis:auto;display:flex;align-items:center;gap:6px;min-height:28px;padding:0 8px;white-space:nowrap;text-decoration:none;font-size:12px;border:1px solid transparent;box-sizing:border-box}
 .ak-qbar a .mono{font-size:13px;font-weight:700}
-.ak-qbar-label{overflow:hidden;text-overflow:ellipsis}
 .ak-qbar a[data-quadrant="urgent_important"]{background:var(--ink);color:var(--paper)}
 .ak-qbar a[data-quadrant="important"]{background:var(--graphite);color:var(--paper)}
 .ak-qbar a[data-quadrant="urgent"]{background:var(--chalk);color:var(--ink);border-color:var(--ink)}
@@ -115,14 +116,28 @@
   .ak-more{min-height:44px;padding:0 6px}
   .ak-brief{grid-template-columns:minmax(0,1fr)}
   .ak-brief dt{padding-top:2px}
-  .ak-qbar-label{display:none}
+  .ak-qbar a{min-height:36px}
 }
 /* A milestone's reviewed risks (milestone_risk_review): the level as three bars, the kind as a tag. Same marks as the 主线 page. */
 .ak-risks{padding:8px 10px;border:1px solid var(--mist);background:var(--chalk)}
 .ak-risks .risk-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}
 .ak-risks .risk-list li{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:13px}
-.ak-risks .risk-glyph{display:inline-block;width:18px;height:18px;flex:none}
-.ak-risks .risk-glyph rect{fill:var(--paper);stroke:var(--ink);stroke-width:1}
-.ak-risks .risk-glyph rect[data-on]{fill:var(--ink)}
-.ak-risks .risk-kind{display:inline-block;padding:0 5px;border:1px solid var(--ink);font-size:12px;line-height:18px;white-space:nowrap;color:var(--ink);background:var(--paper)}
-.ak-risks li[data-level="high"] .risk-kind{font-weight:700;border-width:2px}
+.ak-risks .risk-glyph,.ak-items .risk-glyph{display:inline-block;width:18px;height:18px;flex:none}
+.ak-risks .risk-glyph rect,.ak-items .risk-glyph rect{fill:var(--paper);stroke:var(--ink);stroke-width:1}
+.ak-risks .risk-glyph rect[data-on],.ak-items .risk-glyph rect[data-on]{fill:var(--ink)}
+.ak-risks .risk-kind,.ak-items .risk-kind{display:inline-block;padding:0 5px;border:1px solid var(--ink);font-size:12px;line-height:18px;white-space:nowrap;color:var(--ink);background:var(--paper)}
+.ak-risks li[data-level="high"] .risk-kind,.ak-items li[data-level="high"] .risk-kind{font-weight:700;border-width:2px}
+/* A folded card's rows (a batch of risk reviews): name | deadline | level and kinds, one row each; on a phone the risk wraps under. */
+.ak-items{display:grid;gap:4px;padding:6px 10px;border:1px solid var(--mist);background:var(--chalk)}
+.ak-item-list{margin:0;padding:0;list-style:none;display:grid}
+.ak-item-list li{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,auto);align-items:center;gap:4px 10px;padding:4px 0;border-top:1px solid var(--mist);font-size:13px}
+.ak-item-list li:first-child{border-top:0}
+.ak-item-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.ak-item-due{white-space:nowrap;font-size:12px;color:var(--graphite)}
+.ak-item-risk{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px}
+.ak-items-more{justify-self:start;min-height:32px}
+@media (max-width:680px){
+  .ak-item-list li{grid-template-columns:minmax(0,1fr) auto}
+  .ak-item-risk{grid-column:1 / -1}
+  .ak-items-more{min-height:44px}
+}

@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { TaskDetail } from "../../lib/task-detail";
 import type { TimelineItem } from "./model";
 import type { LineLabels } from "./views";
 import { BlockOverview } from "./block-overview";
 import { dayLoad, hoursLabel, nextBlock } from "./panel-model";
+import { usePendingView } from "../pending-badge";
 import "./day-panel.css";
 
 export type QuickProposal = { id: string; title: string };
@@ -29,12 +30,10 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
   /** Task details read with the page, by work order id; a task missing here is read on demand. */
   details?: Record<string, TaskDetail> | undefined;
 }) {
-  const [asks, setAsks] = useState<number | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    void fetch("/api/pending").then((response) => response.json()).then((body: { asks?: number }) => setAsks(body.asks ?? 0)).catch(() => setAsks(null));
-  }, []);
+  // The same reading as the stack beside it and the header badge (`usePendingView`), so the three never disagree.
+  const asks = usePendingView()?.asks ?? null;
   const load = dayLoad(items, day);
   const total = Math.max(1, load.planned + load.pencilled + load.fixed);
   const next = nextBlock(items, day, today, nowMinute);
@@ -65,7 +64,7 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
           setBusy(false); setStatus("未能批准，请到待确认页处理");
         }}>全部批准</button>
       </span>}
-      {asks !== null && asks > 0 && <a className="dq-link" href="/approvals#asks">待决事项 · <b className="mono">{asks}</b></a>}
+      {asks !== null && asks > 0 && <a className="dq-link" href="/approvals#asks" title="本周的待决事项；待确认页还列有任务提案与助手成果">待决事项 · <b className="mono">{asks}</b></a>}
       <a className="dq-link" href="/plan#time">调整可用时段</a>
     </nav>
     {status && <small role="status">{status}</small>}

@@ -4,7 +4,7 @@ import { useCallback, useRef, useState, type ReactNode } from "react";
 import { MILESTONE_STATE_ORDER, milestoneMarks, timelineMarks, timelineSpan, type CapacityWeek, type EstimatePoint, type GoalRow, type Investment, type MilestoneMark, type MilestoneState } from "../../lib/plan-stats";
 import { Ring } from "../ui/charts";
 import { LineTag, Tag } from "../ui/tag";
-import { bands, dayAt, heatLevel, hours, labelEvery, linear, linearTicks, logDomain, logScale, md, minuteLabel, monthTicks, packLabels, scatterMargins, textWidth } from "./chart-geometry";
+import { AXIS_LABEL, axisLabelBaseline, axisLabelLeader, bands, dayAt, fitText, heatLevel, hours, labelEvery, layoutAxisLabels, linear, linearTicks, logDomain, logScale, md, minuteLabel, monthTicks, scatterMargins, textWidth } from "./chart-geometry";
 import { usePlanPreview } from "./preview-context";
 
 /**
@@ -55,6 +55,11 @@ function tipLeft(centre: number, band: number, width: number): number {
   if (right + TIP_WIDTH <= width) return right;
   if (leftSide >= 0) return leftSide;
   return Math.max(0, width - TIP_WIDTH);
+}
+
+/** The overload over a week's bar, as long as its band holds it (bold text runs about a tenth wider): in words, as a number, or not at all. */
+function overloadLabel(minutes: number, band: number): string | null {
+  return [`超载 ${hours(minutes)} 小时`, `+${hours(minutes)}`].find((text) => textWidth(text) * 1.1 <= band - 4) ?? null;
 }
 
 export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, usingDefault, source = "saved" }: { weeks: CapacityWeek[]; labels: Record<string, string>;
@@ -125,8 +130,8 @@ export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, u
             {marks}
             {before && before.totalP50 !== week.totalP50 && <rect x={x - 1.5} width={layout.bar + 3} y={y(before.totalP50 / 60)} height={Math.max(0, y(0) - y(before.totalP50 / 60))} className="pl-ghost">
               <title>{`改动前需求 ${h1(before.totalP50)}`}</title></rect>}
-            {week.overloadMinutes > 0 && layout.band >= 30 && <text x={left + layout.centre(index)} y={Math.max(12, y(week.totalP85 / 60) - 5)} textAnchor="middle" className="pl-over-text">
-              {layout.band >= 76 ? `超载 ${hours(week.overloadMinutes)} 小时` : `+${hours(week.overloadMinutes)}`}</text>}
+            {week.overloadMinutes > 0 && overloadLabel(week.overloadMinutes, layout.band) && <text x={left + layout.centre(index)} y={Math.max(12, y(week.totalP85 / 60) - 5)} textAnchor="middle" className="pl-over-text">
+              {overloadLabel(week.overloadMinutes, layout.band)}</text>}
             {index % every === 0 && <text x={left + layout.centre(index)} y={H - 8} textAnchor="middle" className="pl-axis-text">{md(week.start)}</text>}
           </g>;
         })}
@@ -205,6 +210,8 @@ export function MilestoneTimeline({ rows, today, weeks, spanDays, done = [], lab
   // impact list beside it, which named milestones finishing days earlier (2026-10-18 walkthrough).
   const finishBefore = new Map((preview?.before.goals ?? []).map((goal) => [goal.id, goal.p85Day]));
   const finishMoved = shown.some((goal) => finishBefore.has(goal.id) && finishBefore.get(goal.id) !== goal.p85Day);
+  const [focus, setFocus] = useState<string | null>(null);
+  const axis = marks.length > 0 && width >= 560;
   return <section className="pl-card pl-stat pl-timeline" aria-label="里程碑时间轴">
     <header><h2>里程碑时间轴</h2>
       <small>范围内未完成 {marks.length} 个{outside ? ` · 范围外或已完成 ${outside} 个` : ""}{count("risk") ? ` · 有完不成风险 ${count("risk")}` : ""}{count("unprepared") ? ` · 待准备 ${count("unprepared")}` : ""}</small>
@@ -212,10 +219,12 @@ export function MilestoneTimeline({ rows, today, weeks, spanDays, done = [], lab
     {preview && (moved ? <PreviewNote /> : <p className="pl-preview-note" role="status">{finishMoved
       ? "里程碑按截止日画，位置不变；预计完成日的变化见「改动影响」"
       : "预览中的改动不移动任何里程碑"}</p>)}
+    {axis && <AxisFocus mark={marks.find((mark) => mark.id === focus) ?? null} labels={labels} weeks={weeks} />}
     <div ref={box} className="pl-chart-box">
       {!marks.length ? <p className="pl-empty">{outside ? "统计范围内没有未完成的里程碑。" : "尚无已批准的里程碑。"}</p>
-        : width < 560 ? <TimelineList marks={marks} lines={lines} labels={labels} weeks={weeks} />
-        : <TimelineAxis marks={marks} before={before} lines={lines} labels={labels} today={today} width={width} weeks={weeks} spanDays={spanDays} />}
+        : !axis ? <TimelineList marks={marks} lines={lines} labels={labels} weeks={weeks} />
+        : <TimelineAxis marks={marks} before={before} lines={lines} labels={labels} today={today} width={width} weeks={weeks} spanDays={spanDays}
+          focus={focus} onFocus={setFocus} />}
     </div>
     <div className="pl-legend">
       <span><span className="pl-key" data-k="ms-on" />按计划（主线色）</span>
@@ -226,12 +235,26 @@ export function MilestoneTimeline({ rows, today, weeks, spanDays, done = [], lab
   </section>;
 }
 
-const GUTTER = 96, RIGHT = 8, AXIS_TOP = 20, LABEL_ROW = 15;
-/** At most this many rows of names per line; a milestone whose name does not fit is drawn as a mark alone, its name on hover. */
+const GUTTER = 96, RIGHT = 8, AXIS_TOP = 20;
+/** At most this many lanes of names per line; a milestone whose name does not fit is drawn as a mark alone, its name on hover and focus. */
 export const MAX_LABEL_ROWS = 3;
 
-function TimelineAxis({ marks, before, lines, labels, today, width, weeks, spanDays }: { marks: MilestoneMark[]; before: Map<string, MilestoneMark>; lines: string[];
-  labels: Record<string, string>; today: string; width: number; weeks: number; spanDays: number }) {
+/**
+ * The strip above the axis, of fixed height so the axis never moves under the pointer: the milestone under the pointer or in focus, in
+ * full — a name cut short or left out on the axis reads whole here — with its line, deadline, finish forecast and state.
+ */
+function AxisFocus({ mark, labels, weeks }: { mark: MilestoneMark | null; labels: Record<string, string>; weeks: number }) {
+  if (!mark) return <div className="pl-ms-focus" aria-live="polite"><p className="pl-ms-focus-hint">指向或聚焦圆点，这里显示里程碑全名、截止日与状态；点击圆点打开里程碑。</p></div>;
+  const detail = markDetail(mark, weeks).split("\n").slice(1).filter((line) => !line.startsWith("状态："));
+  return <div className="pl-ms-focus" data-line={mark.line} aria-live="polite">
+    <p className="pl-ms-focus-title"><b>{mark.title}</b>{" "}
+      {mark.states.length ? mark.states.map((state) => <Tag key={state} tone={state === "risk" ? "risk" : "neutral"}>{STATE_LABEL[state]}</Tag>) : <Tag tone="ok">按计划</Tag>}</p>
+    <p className="pl-ms-focus-meta">{[labels[mark.line] ?? mark.line, ...detail].join(" · ")}</p>
+  </div>;
+}
+
+function TimelineAxis({ marks, before, lines, labels, today, width, weeks, spanDays, focus, onFocus }: { marks: MilestoneMark[]; before: Map<string, MilestoneMark>; lines: string[];
+  labels: Record<string, string>; today: string; width: number; weeks: number; spanDays: number; focus: string | null; onFocus: (id: string | null) => void }) {
   const span = timelineSpan(marks, today, spanDays);
   const plotW = Math.max(120, width - GUTTER - RIGHT);
   const xOf = (day: string) => GUTTER + dayAt(day, span.start, span.days).at * plotW;
@@ -241,28 +264,30 @@ function TimelineAxis({ marks, before, lines, labels, today, width, weeks, spanD
   for (const line of lines) {
     const own = marks.filter((mark) => mark.line === line);
     const xs = own.map((mark) => xOf(mark.day!));
-    const packed = packLabels(own.map((mark, index) => ({ x: xs[index]! - GUTTER, width: textWidth(mark.title) })), width - GUTTER - RIGHT);
-    const rows = Math.min(MAX_LABEL_ROWS, Math.max(1, ...packed.map((item) => item.row + 1)));
-    const unnamed = packed.filter((item) => item.row >= MAX_LABEL_ROWS).length;
-    const axisY = y + rows * LABEL_ROW + 12;
+    const placed = layoutAxisLabels(own.map((mark, index) => ({ x: xs[index]!, text: mark.title })), { left: GUTTER, right: width - RIGHT }, { lanes: MAX_LABEL_ROWS });
+    const rows = Math.max(1, ...placed.map((label) => label ? label.lane + 1 : 0));
+    const unnamed = placed.filter((label) => !label).length;
+    const axisY = y + AXIS_LABEL.firstBaseline + (rows - 1) * AXIS_LABEL.laneH + AXIS_LABEL.ascent + 4;
     const name = labels[line] ?? line;
     bands.push(<g key={line} data-line={line} className="pl-ms-band">
       <rect x={0} y={y + 4} width={3} height={axisY - y} className="pl-ms-bar" />
       <text x={10} y={axisY} dy="0.32em" className="pl-ms-line">{textWidth(name, 13) > GUTTER - 16 ? `${[...name].slice(0, 5).join("")}…` : name}<title>{name}</title></text>
-      {unnamed > 0 && <text x={10} y={axisY - 17} className="pl-axis-text pl-ms-more">+{unnamed}<title>{`另有 ${unnamed} 个里程碑未标名称，悬停圆点可看全名`}</title></text>}
+      {unnamed > 0 && <text x={10} y={axisY - 17} className="pl-axis-text pl-ms-more">+{unnamed}<title>{`另有 ${unnamed} 个里程碑未标名称，指向圆点可看全名`}</title></text>}
       <line x1={GUTTER} x2={GUTTER + plotW} y1={axisY} y2={axisY} className="pl-ms-track" />
       {own.map((mark, index) => {
-        const x = xs[index]!, label = packed[index]!;
-        const named = label.row < MAX_LABEL_ROWS;
-        const labelY = axisY - 12 - label.row * LABEL_ROW;
+        const x = xs[index]!, label = placed[index];
         const ghost = before.get(mark.id);
+        const leader = label ? axisLabelLeader(x, label, axisY) : null;
         return <g key={mark.id}>
           {ghost && ghost.day !== mark.day && ghost.day && <circle cx={xOf(ghost.day)} cy={axisY} r={5.5} className="pl-ms-ghost"><title>{`改动前：${ghost.day}`}</title></circle>}
           <a href={`/milestones?open=${encodeURIComponent(mark.id)}`} className="pl-ms-point" data-deadline={mark.row.deadline ?? undefined}
-            data-states={mark.states.join(" ") || "on_track"} aria-label={markDetail(mark, weeks).replace(/\n/g, "，")}>
+            data-states={mark.states.join(" ") || "on_track"} data-focus={focus === mark.id || undefined} aria-label={markDetail(mark, weeks).replace(/\n/g, "，")}
+            onMouseEnter={() => onFocus(mark.id)} onMouseLeave={() => onFocus(null)} onFocus={() => onFocus(mark.id)} onBlur={() => onFocus(null)}>
             <title>{markDetail(mark, weeks)}</title>
-            {named && <line x1={x} x2={x} y1={axisY - 6} y2={labelY + 3} className="pl-ms-leader" />}
-            {named && <text x={GUTTER + label.left} y={labelY} className="pl-ms-label">{mark.title}</text>}
+            {/* A hit area as wide as the marker, so the pointer need not land on the 11px dot itself. */}
+            <rect x={x - 9} y={axisY - 9} width={18} height={18} className="pl-hit" />
+            {leader && <line x1={leader.x} x2={leader.x} y1={leader.y1} y2={leader.y2} className="pl-ms-leader" />}
+            {label && <text x={label.left} y={axisLabelBaseline(axisY, label.lane)} className="pl-ms-label">{label.text}</text>}
             <Marker states={mark.states} cx={x} cy={axisY} />
           </a>
         </g>;
@@ -318,7 +343,8 @@ export function InvestmentChart({ data, labels }: { data: Investment; labels: Re
   const values = lines.map((line) => weekly(line.line));
   const peak = Math.max(60, ...values.flatMap((value) => [value.planned ?? 0, value.actual ?? 0, value.next, value.before ?? 0])) / 60;
   const ticks = linearTicks(peak, 3);
-  const H = 196, top = 14, bottom = 40, left = 30;
+  // `top` leaves the unit 「h/周」 its own line: at 14 the top tick's label, centred on the plot's top edge, ran into it.
+  const H = 196, top = 24, bottom = 40, left = 30;
   const plotW = Math.max(160, width - left - 4), plotH = H - top - bottom;
   const y = linear(ticks.at(-1)!, top + plotH, top);
   const groups = bands(Math.max(1, lines.length), plotW, 0.82);
@@ -347,8 +373,8 @@ export function InvestmentChart({ data, labels }: { data: Investment; labels: Re
             {rect(2, value.next, "next", `${name} · 未来 7 天计划 ${h1(value.next)}`)}
             {value.before !== null && value.before !== value.next && <rect x={x0 + 2 * (bar + 2) - 1.5} width={bar + 3} y={y(value.before / 60)}
               height={Math.max(0, y(0) - y(value.before / 60))} className="pl-ghost"><title>{`改动前未来 7 天计划 ${h1(value.before)}`}</title></rect>}
-            <text x={left + groups.centre(index)} y={H - 24} textAnchor="middle" className="pl-axis-text pl-axis-strong">{textWidth(name) > groups.band - 4 ? `${[...name].slice(0, 4).join("")}…` : name}<title>{name}</title></text>
-            {line.stated !== null && groups.band >= 56 && <text x={left + groups.centre(index)} y={H - 8} textAnchor="middle" className="pl-axis-text">所述 {line.stated}%</text>}
+            <text x={left + groups.centre(index)} y={H - 24} textAnchor="middle" className="pl-axis-text pl-axis-strong">{fitText(name, (groups.band - 4) / 1.1)}<title>{name}</title></text>
+            {line.stated !== null && textWidth(`所述 ${line.stated}%`) <= groups.band - 4 && <text x={left + groups.centre(index)} y={H - 8} textAnchor="middle" className="pl-axis-text">所述 {line.stated}%</text>}
           </g>;
         })}
         <text x={2} y={10} className="pl-axis-text">h/周</text>

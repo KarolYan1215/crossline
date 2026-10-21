@@ -71,6 +71,19 @@ test("a stopped assistant run shows what it finished, where it stopped, and what
   expect(html).toContain('placeholder="补充助手缺的信息"');
 });
 
+test("a folded risk card lists its milestones as rows (name, deadline, level bars, kinds), five shown and the rest behind 「另有 N 个」", () => {
+  const items = Array.from({ length: 7 }, (_, index) => ({ id: `m${index}`, title: `里程碑 ${index}`, href: `/milestones?open=m${index}`,
+    ...(index === 6 ? {} : { dueDay: `2026-11-0${index + 1}` }), risks: [{ level: index === 0 ? "high" as const : "medium" as const, kind: "time" as const, note: "紧" }] }));
+  const html = card({ ...base, kind: "milestone_risk_review", entityId: "batch", title: "7 个里程碑有风险待过目", why: "审查在 7 个里程碑上找出风险。", items });
+  expect(html.match(/<li data-level=/g)).toHaveLength(5);
+  expect(html).toContain('<a class="ak-item-name" href="/milestones?open=m0" title="里程碑 0">里程碑 0</a>');
+  expect(html).toContain("截止 11/1");
+  expect(html).toContain('aria-label="高风险"');
+  expect(html).toContain('<span class="risk-kind">时间紧</span>');
+  expect(html).toContain("另有 2 个");
+  expect(html).not.toContain("里程碑 6");
+});
+
 test("待确认 lays the week's asks out in four quadrants, each a drawer with its top ask open", () => {
   const asks: Ask[] = [
     { ...base, id: "1", title: "紧急重要一", urgency: "now", important: true }, { ...base, id: "2", title: "紧急重要二", urgency: "now", important: true },

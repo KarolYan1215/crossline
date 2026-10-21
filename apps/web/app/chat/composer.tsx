@@ -34,8 +34,31 @@ export function fitTextarea(el: HTMLTextAreaElement | null) {
   if (empty) el.value = "";
 }
 
-export function Composer({ mode, placeholder, onSubmit, busy = false, children, name = "title", takeShare = false }: {
+/** Width under which the box shows its short hint: a phone held upright. */
+const NARROW_HINT = "(max-width: 480px)";
+
+/** The hint to show: the short one on a narrow screen, where the long one took three lines (2026-10-21 walkthrough). */
+export function hintFor(placeholder: string, short: string | undefined, narrow: boolean): string {
+  return narrow && short ? short : placeholder;
+}
+
+function useNarrow(query: string): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(query);
+    const update = () => setNarrow(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, [query]);
+  return narrow;
+}
+
+export function Composer({ mode, placeholder, shortPlaceholder, onSubmit, busy = false, children, name = "title", takeShare = false }: {
   mode: "capture" | "chat"; placeholder: string; busy?: boolean; name?: string;
+  /** A shorter hint for a phone; the long one stays the box's accessible name. */
+  shortPlaceholder?: string;
   /** Fill the box from a share-sheet arrival (`share_title`/`share_text`/`share_url` on the address, see the manifest). */
   takeShare?: boolean;
   /** Returns true when the input was taken (the box then clears). */
@@ -51,6 +74,7 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
   // 「无匹配」 only once the answer for what is typed now is in; before that the list says it is searching.
   const [searching, setSearching] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const hint = hintFor(placeholder, shortPlaceholder, useNarrow(NARROW_HINT));
   // Neither what is typed nor the hint may be cut off on a narrow phone: fit on every change, on mount and when the width changes.
   useEffect(() => {
     const el = textRef.current;
@@ -58,7 +82,7 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
     const refit = () => fitTextarea(el);
     window.addEventListener("resize", refit);
     return () => window.removeEventListener("resize", refit);
-  }, [text, placeholder]);
+  }, [text, hint]);
   const { fileInputRef, fileNames, dragOver, setDragOver, onDrop, onPaste, onInputChange, reset } = useAttachmentDrop(ACCEPTED.split(","));
 
   useEffect(() => {
@@ -128,7 +152,7 @@ export function Composer({ mode, placeholder, onSubmit, busy = false, children, 
           {fileNames.map((file) => <span key={file} className="composer-chip" data-kind="file">{file}</span>)}
           {fileNames.length > 0 && <button type="button" className="composer-clear" onClick={reset}>清除文件</button>}
         </div>}
-        <textarea ref={textRef} name={name} rows={batch ? 4 : 1} value={text} maxLength={4000} placeholder={placeholder} aria-label={placeholder}
+        <textarea ref={textRef} name={name} rows={batch ? 4 : 1} value={text} maxLength={4000} placeholder={hint} aria-label={placeholder}
           onChange={(event) => onChange(event.target.value)} onKeyDown={onKeyDown}
           onInput={(event) => fitTextarea(event.currentTarget)} />
       </div>

@@ -73,6 +73,11 @@ button.ui-ring:hover .ui-ring-seg:not([data-on]){stroke:#9BD3AE}
 .ui-sheet{position:fixed;z-index:61;display:grid;grid-template-rows:auto minmax(0,1fr) auto;background:var(--paper);color:var(--ink);border:1px solid var(--ink)}
 .ui-sheet[data-side="center"]{top:50%;left:50%;transform:translate(-50%,-50%);width:min(860px,calc(100vw - 32px));max-height:min(88vh,920px)}
 .ui-sheet[data-side="right"]{top:0;right:0;bottom:0;width:min(520px,100vw);border-width:0 0 0 1px}
+/* A wide sheet (a task opened from a card): most of a large screen, the whole of a phone's. Its body is a size container, so what it
+   holds can lay itself out in columns when the sheet is wide enough. */
+.ui-sheet[data-side="center"][data-size="wide"]{width:min(1040px,94vw);max-height:min(92vh,1000px)}
+.ui-sheet[data-size="wide"] .ui-sheet-body{container-type:inline-size}
+@media (max-width:640px){.ui-sheet[data-side="center"][data-size="wide"]{top:0;left:0;transform:none;width:100vw;height:100dvh;max-height:none;border-width:0}}
 .ui-sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--mist)}
 .ui-sheet-head h2{margin:0;font-size:17px}
 .ui-sheet-body{overflow:auto;padding:12px 14px;min-height:0}

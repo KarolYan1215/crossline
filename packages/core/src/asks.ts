@@ -66,7 +66,13 @@ export type Ask = {
   progress?: AskProgress;
   /** A milestone's reviewed risks, drawn with their level (`milestone_risk_review`). */
   risks?: MilestoneRisk[];
+  /**
+   * The rows a folded card stands for (a batch of milestone risk reviews), drawn as a short list the person can scan — name, deadline,
+   * level, kinds — instead of one sentence naming all of them (2026-10-21 walkthrough: 25 milestones in one `why`).
+   */
+  items?: AskItem[];
 };
+export type AskItem = { id: string; title: string; dueDay?: string; line?: string; href?: string; risks?: MilestoneRisk[] };
 export type AskPreview = { kind: "portrait" | "milestones" | "plan" | "task" | "file" | "agent"; href: string; label: string };
 export type AskProgress = {
   /** One sentence: what the run was doing. */

@@ -236,7 +236,7 @@ function RecordPanel({ detail }: { detail: TaskDetail }) {
  * keeps the address).
  */
 export function TaskDialog({ detail, open, onOpenChange }: { detail: TaskDetail; open: boolean; onOpenChange: (open: boolean) => void }) {
-  return <Sheet title={detail.title} open={open} onOpenChange={onOpenChange}
+  return <Sheet title={detail.title} size="wide" open={open} onOpenChange={onOpenChange}
     footer={<a className="secondary" href={`/workbench/${encodeURIComponent(detail.id)}`}>完整页面</a>}>
     <TaskPanels detail={detail} />
   </Sheet>;
@@ -294,7 +294,7 @@ export function TaskPanels({ detail, anchors = false }: { detail: TaskDetail; an
     </div>
     <nav className="task-sections" aria-label="任务内容">{SECTIONS.map(([id, label], index) =>
       <button key={id} type="button" onClick={() => refs.current[id]?.scrollIntoView({ behavior: "smooth", block: "start" })}><span className="mono">{index + 1}</span> {label}</button>)}</nav>
-    {SECTIONS.map(([id, label], index) => <section key={id} className="task-section" aria-labelledby={`${detail.id}-${id}`} ref={(element) => { refs.current[id] = element; }}
+    {SECTIONS.map(([id, label], index) => <section key={id} className="task-section" data-section={id} aria-labelledby={`${detail.id}-${id}`} ref={(element) => { refs.current[id] = element; }}
       {...(anchors ? { id } : {})}>
       <h3 id={`${detail.id}-${id}`} className="task-section-title"><span className="mono">{index + 1}</span> {label}</h3>
       {id === "steps" && <StepsPanel detail={detail} />}

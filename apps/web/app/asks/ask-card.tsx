@@ -5,6 +5,7 @@ import { DECISION_SECONDS_MAX, type Ask, type AskField, type AskOption, type Ask
 import { Tag } from "../ui/tag";
 import { Clamp } from "../ui/clamp";
 import { RiskList } from "../milestones/risk-glyph";
+import { AskItems } from "./ask-items";
 import { answerBody, answerProblem, askOutcome, askSources, shortDay } from "./model";
 import type { AskPreviewData } from "./types";
 import "./asks.css";
@@ -102,6 +103,7 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
       <a key={source.href} href={source.href} {...(source.href.startsWith("/api/") ? { target: "_blank", rel: "noreferrer" } : {})}>{source.label}</a>)}</p>}
     {ask.progress && <AgentProgressView progress={ask.progress} />}
     {ask.risks && <div className="ak-risks"><RiskList risks={ask.risks} gen /></div>}
+    {ask.items && <AskItems items={ask.items} />}
     {ask.preview && <PreviewToggle href={ask.preview.href} label={ask.preview.label} data={preview} />}
 
     {many

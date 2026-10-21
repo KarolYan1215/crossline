@@ -220,7 +220,14 @@ test("several reviewed risks are one card, as pressing as its nearest deadline a
   expect(rest).toEqual([]);
   expect(batch).toMatchObject({ id: "riskreview:batch", title: "2 个里程碑有风险待过目", urgency: "soon", dueDay: "2026-10-13", important: true });
   expect(askQuadrant(batch!)).toBe("important");
-  expect(batch!.why).toContain("「首批 5 家门店签试用」有中风险");
+  // The members are rows the card draws (2026-10-21: 25 milestones in one sentence), nearest deadline first at equal level; the
+  // sentence keeps only the count.
+  expect(batch!.items).toEqual([
+    { id: "pitch", title: "首批 5 家门店签试用", dueDay: "2026-10-13", line: "startup", href: "/milestones?open=pitch", risks: [{ level: "medium", kind: "time", note: "只剩一周" }] },
+    expect.objectContaining({ id: "mos2", title: "实测 MoS₂ 参数已可直接驱动 NeuroSim", dueDay: "2026-11-30" })
+  ]);
+  expect(batch!.why).toContain("2 个里程碑上找出风险");
+  expect(batch!.why).not.toContain("首批");
   expect(batch!.options.map((option) => option.id)).toEqual(["accept", "split", "ignore"]);
   // 逐个决定: one card each, the 65-weighted one no longer filed as unimportant by an explicit `important: false`.
   expect(await answerAsk(TEST_CTX, batch!.id, "split", {}, NOW)).toMatchObject({ ok: true });

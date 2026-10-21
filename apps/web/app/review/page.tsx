@@ -1,6 +1,8 @@
 import { effectiveSchedulePreferences, getStore, lastNight } from "../../lib/crossline";
 import { localStamp } from "@crossline/core";
-import { loadWeeklyReview } from "../../lib/review";
+import { loadWeekInvestment, loadWeeklyReview } from "../../lib/review";
+import { BarChart } from "../ui/charts";
+import "./review.css";
 import { SubpageShell } from "../subpage-shell";
 import { RevokeAcceptance } from "./revoke-acceptance";
 import { DecideRelations } from "./decide-relations";
@@ -43,8 +45,26 @@ export default async function ReviewPage() {
   const diligence: DiligenceReport[] = loadDiligence(ctx);
   const identities = linePacks(ctx).filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label }));
 
+  const week = loadWeekInvestment(ctx);
+  const hoursOf = (minutes: number) => Math.round(minutes / 6) / 10;
+  const weekMax = Math.max(...week.lines.flatMap((line) => [hoursOf(line.planned), hoursOf(line.actual)]), 1);
+
   return <SubpageShell active="主线" eyebrow="证据驱动" title="周复盘" description="本周的验收、里程碑进展与待定的跨主线关系；没有记录的指标标为「未标定」。">
-    <section className="review-block">
+    {/* Sections fill the width: the wide ones run across it, the rest pair up in two columns on a large screen (2026-10-21). */}
+    <div className="review-grid">
+    {week.hasData && <section className="review-block review-wide" aria-label="本周各线投入">
+      <h2>本周各线投入</h2>
+      <p className="review-note">{week.start.slice(5).replace("-", "/")}–{week.end.slice(5).replace("-", "/")}，单位小时。计划按日程记下的 {week.recordedDays} 天累计，实际为计时。</p>
+      <div className="review-week">
+        <div><h3 className="review-week-head">计划</h3>
+          <BarChart label="本周各线计划小时" unit=" h" max={weekMax} data={week.lines.map((line) => ({ label: line.label, line: line.line, value: hoursOf(line.planned),
+            title: `${line.label} · 计划 ${hoursOf(line.planned)} 小时` }))} /></div>
+        <div><h3 className="review-week-head">实际计时</h3>
+          <BarChart label="本周各线实际计时小时" unit=" h" max={weekMax} data={week.lines.map((line) => ({ label: line.label, line: line.line, value: hoursOf(line.actual),
+            title: `${line.label} · 实际计时 ${hoursOf(line.actual)} 小时` }))} /></div>
+      </div>
+    </section>}
+    <section className="review-block review-wide">
       <h2>本周自动验收</h2>
       <p className="review-note">
         关联里程碑的任务由系统按证据自动验收，每一条都列在这里。任一条都可撤销：撤销后回到证据复核，已交的证据保留。
@@ -73,14 +93,15 @@ export default async function ReviewPage() {
       </li>)}</ul>
     </section>}
 
-    {diligence.length > 0 && <section className="review-block">
+    {diligence.length > 0 && <section className="review-block review-wide review-diligence">
       <h2>本周调研结论</h2>
       <p className="review-note">网上调研得出的提议在这里一周批一次；采纳「任务」类提议会收进待分析、变成任务；其余类型采纳后作为下次设计里程碑的参考。</p>
       <DiligenceReview reports={diligence} identities={identities} />
     </section>}
 
-    <section className="review-block">
+    <section className="review-block review-wide">
       <h2>里程碑达成标准</h2>
+      <div className="review-milestones">
       {review.milestoneProgress.map((milestone) => <article key={milestone.id} className="review-milestone">
         <a className="card-cover-link" href={`/milestones/${encodeURIComponent(milestone.id)}`} aria-label={milestone.title} />
         <MilestonePreview detail={milestoneDetails.get(milestone.id)} />
@@ -98,6 +119,7 @@ export default async function ReviewPage() {
         {milestone.verifiability === "judgement_only"
           && <em className="review-flag">全部为判断型标准 —— 无法客观判负，值得额外复核。</em>}
       </article>)}
+      </div>
     </section>
 
     <section className="review-block">
@@ -115,7 +137,7 @@ export default async function ReviewPage() {
         </li>)}</ul>}
     </section>
 
-    <section className="review-block">
+    <section className="review-block review-wide">
       <h2>候选关系</h2>
       <p className="review-note">
         排序依据全部是可数事实：目标是否停滞、是否复用已有产物、有无反例、历史成本。没有综合评分。
@@ -170,6 +192,7 @@ export default async function ReviewPage() {
         ? <p className="review-empty">暂无待判断的问题；周复盘运行后在此列出。</p>
         : <ul className="review-list">{review.questions.map((item) => <li key={item.id}><b>{item.question}</b></li>)}</ul>}
     </section>
+    </div>
 
     <p className="muted">已验收作业 {accepted} / {workOrders.length}（只来自账本里的真实状态）。</p>
   </SubpageShell>;

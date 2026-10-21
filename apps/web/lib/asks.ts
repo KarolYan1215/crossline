@@ -3,7 +3,7 @@ import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
   ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
-  validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskPreview, type AskSnooze,
+  validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf
 } from "@crossline/core";
 import { acceptOwnCompletion, listAgentTasks, ownCompletion, type StoredWorkOrder } from "@crossline/db";
@@ -280,6 +280,8 @@ function gateAsks({ store, ctx, today }: Source): Ask[] {
   return asks;
 }
 
+/** The name inside 「…」 of an ask's title, without the brackets; the whole title when there is none. */
+const quotedTitle = (title: string) => /「([^」]+)」/.exec(title)?.[1] ?? title;
 const format = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 
 /**
@@ -409,12 +411,20 @@ export function riskReviewBatch(ctx: AccessContext, members: Ask[], today: strin
   const due = members.map((ask) => ask.dueDay).filter((day): day is string => Boolean(day)).sort()[0];
   const weight = Math.max(0, ...members.map((ask) => effectiveWeight(ctx, ask.entityId)));
   const high = members.some((ask) => ask.important);
-  const lines = members.map((ask) => `${ask.title}${ask.dueDay ? `（截止 ${format(ask.dueDay)}）` : ""}`);
+  // The members as rows the card draws (name, deadline, level, kinds), highest level first, then nearest deadline: a folded card of
+  // 25 milestones used to say them all in one sentence (2026-10-21 walkthrough). The sentence keeps only the counts.
+  const titles = new Map(getStore().listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]));
+  const rank = (ask: Ask) => { const level = riskLevelOf(ask.risks ?? []); return level === "high" ? 0 : level === "medium" ? 1 : 2; };
+  const items: AskItem[] = [...members].sort((a, b) => rank(a) - rank(b) || (a.dueDay ?? "9999").localeCompare(b.dueDay ?? "9999"))
+    .map((ask) => ({ id: ask.entityId, title: titles.get(ask.entityId) ?? quotedTitle(ask.title), ...(ask.dueDay ? { dueDay: ask.dueDay } : {}),
+      ...(ask.line ? { line: ask.line } : {}), href: `/milestones?open=${encodeURIComponent(ask.entityId)}`, risks: ask.risks ?? [] }));
+  const levels = { high: items.filter((item) => riskLevelOf(item.risks ?? []) === "high").length };
   return { id: "riskreview:batch", kind: "milestone_risk_review", entityId: "batch", urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}),
     raisedAt: members.map((ask) => ask.raisedAt).sort().at(-1) ?? "", fingerprint, important: high || weight >= IMPORTANT_WEIGHT, importance: weight,
     preview: { kind: "milestones", href: "/milestones", label: "看里程碑" },
-    title: `${members.length} 个里程碑有风险待过目`,
-    why: `审查找出这些风险：${lines.join("；")}。接受后，排程让各自的任务提前 1–2 天排完；不接受则排程不变。`,
+    title: `${members.length} 个里程碑有风险待过目`, items,
+    why: `审查在 ${members.length} 个里程碑上找出风险${levels.high ? `，其中 ${levels.high} 个为高风险` : ""}，逐个列在下方。`
+      + `接受后，排程让各自的任务提前 1–2 天排完；不接受则排程不变。`,
     options: [
       { id: "accept", label: "全部接受，按风险提前安排", recommended: true, detail: "各自的任务提前 1–2 天排完" },
       { id: "split", label: "逐个决定", detail: "拆成每个里程碑一张卡，可分别调整截止或降低标准" },

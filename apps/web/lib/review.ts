@@ -1,6 +1,38 @@
 import "server-only";
 import { rankCandidates, stalledIdentities, taskTitleOf, type AccessContext, type CandidateRelation } from "@crossline/core";
-import { getStore } from "./crossline";
+import { effectiveSchedulePreferences, getStore, planToday } from "./crossline";
+import { identityLines, lineLabels } from "./lines";
+import { investment } from "./plan-stats";
+import { readScheduledMinutes } from "./schedule-memory";
+
+/**
+ * This week's hours per line, planned against timed (2026-10-21, for the review page's one figure): the last seven days, the planned
+ * figure from the day lengths the schedule recorded (`schedule.minutes:<day>`, only days with a record), the timed one from the sessions
+ * that started in them. The same arithmetic as the plan page's 「主线投入」 (`investment`), cut to the latest week. Lines with neither
+ * are left out; `hasData` is false when nothing was recorded at all, and the page then draws nothing.
+ */
+export function loadWeekInvestment(ctx: AccessContext): { start: string; end: string; recordedDays: number; hasData: boolean;
+  lines: Array<{ line: string; label: string; planned: number; actual: number }> } {
+  const store = getStore();
+  const today = planToday(ctx);
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const running = new Set(orders.filter((order) => order.state === "active").map((order) => order.id));
+  const plannedByDay: Record<string, Record<string, number> | null> = {};
+  for (let back = 6; back >= 0; back -= 1) {
+    const day = new Date(Date.parse(`${today}T12:00:00Z`) - back * 86_400_000).toISOString().slice(0, 10);
+    plannedByDay[day] = readScheduledMinutes(ctx, day);
+  }
+  const now = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString();
+  const result = investment({ today, zone, now, lineOrder: identityLines(ctx).map((line) => line.id), plannedByDay,
+    orderLine: Object.fromEntries(orders.map((order) => [order.id, order.identityId])),
+    executions: store.listExecutions(ctx.workspaceId).filter((item) => item.endedAt || running.has(item.workOrderId)), next7: {}, stated: null });
+  const week = result.weeks.at(-1)!;
+  const labels = lineLabels(ctx);
+  const lines = result.lines.map(({ line }) => ({ line, label: labels[line] ?? line, planned: week.planned[line] ?? 0, actual: week.actual[line] ?? 0 }))
+    .filter((line) => line.planned > 0 || line.actual > 0);
+  return { start: week.start, end: week.end, recordedDays: week.recordedDays, hasData: lines.length > 0, lines };
+}
 
 export type WeeklyReview = {
   /** Compensating control for automatic acceptance: every one is listed, never folded into a count. */

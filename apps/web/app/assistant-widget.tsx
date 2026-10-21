@@ -84,7 +84,11 @@ export function AssistantWidget() {
       <button type="button" className="assistant-nudge-close" aria-label="收起这条提示" title="收起"
         onClick={() => { setPopped(false); setHover(false); }}>×</button>
     </div>}
-    {helper.avatar
+    {!helper.known
+      // Not yet known whether there is a figure: a quiet circle the figure's size, so nothing jumps when the answer comes.
+      ? <button type="button" className="assistant-bubble helper-bubble" data-pending="" onClick={openPanel} aria-label={label} title={label}>
+        <span className="helper-face" data-size="button" aria-hidden="true" /></button>
+      : helper.avatar
       ? <button type="button" className="assistant-bubble helper-bubble" data-mood={mood} data-unread={latest && !shown ? "" : undefined} onClick={openPanel} aria-label={label} title={label}>
         <HelperFace src={helper.avatar} size="button" mood={mood} /></button>
       : <button type="button" className="assistant-bubble" data-unread={latest ? "" : undefined} data-mood={mood} onClick={openPanel} aria-label={label}>小帮手</button>}

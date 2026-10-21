@@ -66,6 +66,20 @@ describe("review page", () => {
     expect(html).not.toContain("本人说：中");
   });
 
+  test("draws this week's hours per line, planned beside timed, once the schedule recorded a day; nothing before", async () => {
+    const store = seed();
+    const { default: ReviewPage } = await import("./page");
+    expect(renderToStaticMarkup(await ReviewPage())).not.toContain("本周各线投入");
+    // Yesterday in UTC is inside the local week whatever the zone.
+    const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    store.setSetting(WORKSPACE, `schedule.minutes:${day}`, JSON.stringify({ w2: 90 }));
+    const html = renderToStaticMarkup(await ReviewPage());
+    expect(html).toContain("本周各线投入");
+    expect(html).toContain("· 计划 1.5 小时");
+    expect(html).toContain("· 实际计时 0 小时");
+    expect(html).toContain('class="review-grid"');
+  });
+
   test("says plainly when a section has nothing, instead of inventing content", async () => {
     seed();
     const { default: ReviewPage } = await import("./page");

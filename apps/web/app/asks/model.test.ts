@@ -1,6 +1,13 @@
 import { expect, test } from "vitest";
 import type { Ask } from "@crossline/core";
-import { answerBody, answerProblem, askOutcome, askSources, byQuadrant, entryHistogram, quotedName, uniqueAsks } from "./model";
+import { answerBody, answerProblem, askOutcome, askSources, byQuadrant, entryHistogram, itemsShown, quotedName, uniqueAsks } from "./model";
+
+test("a folded card shows five rows and counts the rest until expanded", () => {
+  const rows = Array.from({ length: 25 }, (_, index) => index);
+  expect(itemsShown(rows, false)).toEqual({ shown: [0, 1, 2, 3, 4], more: 20 });
+  expect(itemsShown(rows, true)).toEqual({ shown: rows, more: 0 });
+  expect(itemsShown([1, 2, 3], false)).toEqual({ shown: [1, 2, 3], more: 0 });
+});
 
 const ask = (over: Partial<Ask>): Ask => ({ id: "a", kind: "gate_insufficient", entityId: "wo-1", title: "「完成 ECE 555 作业 2」未通过验收", why: "缺证据。",
   urgency: "later", raisedAt: "", fingerprint: "f", options: [{ id: "redo", label: "重新排上，补做缺的", recommended: true }], ...over });

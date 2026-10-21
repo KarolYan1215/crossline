@@ -124,3 +124,12 @@ export function entryHistogram(entries: string[], today: string, days = 28): Arr
 }
 
 export const shortDay = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+
+/** How many rows of a folded card are shown before 「另有 N 个」. */
+export const ASK_ITEMS_SHOWN = 5;
+
+/** A folded card's rows: the first few, and how many more there are (none once expanded). */
+export function itemsShown<T>(items: T[], expanded: boolean, limit = ASK_ITEMS_SHOWN): { shown: T[]; more: number } {
+  if (expanded || items.length <= limit) return { shown: items, more: 0 };
+  return { shown: items.slice(0, limit), more: items.length - limit };
+}
