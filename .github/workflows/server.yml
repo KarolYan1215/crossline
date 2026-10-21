@@ -31,6 +31,10 @@ jobs:
   server:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.ref == 'refs/heads/main' && (contains(github.event.head_commit.message, '[backup]') || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate') || contains(github.event.head_commit.message, '[readiness]') || contains(github.event.head_commit.message, '[usage]')))
     runs-on: ubuntu-latest
+    # Runs queue instead of overlapping: two deploys at once stopped each other's pulls and wrote the same backup folder (2026-10-21).
+    concurrency:
+      group: hosted-server
+      cancel-in-progress: false
     # A deploy may retry a stalled pull (deploy/server/run.sh): three tries of eight minutes per image fit.
     timeout-minutes: 60
     steps:

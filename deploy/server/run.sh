@@ -6,6 +6,10 @@
 # packages need one `sudo docker login ghcr.io -u <github user>` with a token that has read:packages. CROSSLINE_LOCAL_IMAGES=1 uses the
 # images build.sh made on this host instead.
 set -e
+# One run at a time: two deploys overlapped on 2026-10-21, the second's pkill ended the first's app pull, the two pulls broke each
+# other's containerd ingest, and both restarted everything on the old image.
+exec 9>/run/crossline-run.lock
+flock -w 3600 9 || { echo "another run.sh has held /run/crossline-run.lock for an hour"; exit 1; }
 want="${1:-all}"
 registry="${CROSSLINE_REGISTRY:-ghcr.io/karolyan1215}"
 tag="${CROSSLINE_TAG:-beta}"
