@@ -315,6 +315,8 @@ type RunContext = { route: ModelRoute | undefined; spendMode: SpendMode; usage: 
   webTools?: SkillTools;
   /** The library skills switched on for this run, named in its first prompt beside the target. */
   extraSkills: string[];
+  /** Whether the thread kept only Crossline's own plugins (`onlyOwnPlugins`) or every plugin; logged on `skill.run`. */
+  plugins?: "own" | "all";
   /** Whether the model on this route calls functions: the account's own Codex does; a provider has to have shown it (`functionCalls`). */
   functionCalls: boolean };
 
@@ -501,7 +503,8 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   // and the run itself, with how much of the input the provider served from its cache. Summed per Skill by the diagnose job.
   const tokens = context.usage.total();
   console.info(JSON.stringify({ type: "skill.run", skill: options.skillName, ok: result.ok, provider: provider ? "provider" : "codex",
-    ...(context.route?.model ? { model: context.route.model } : {}), laneMs: timing.laneMs, gateMs: timing.gateMs, serviceMs: Date.now() - startedAt,
+    ...(context.route?.model ? { model: context.route.model } : {}), ...(context.plugins ? { plugins: context.plugins } : {}),
+    laneMs: timing.laneMs, gateMs: timing.gateMs, serviceMs: Date.now() - startedAt,
     input: tokens.inputTokens, cached: tokens.cachedInputTokens, output: tokens.outputTokens }));
   return result;
 }
@@ -683,7 +686,13 @@ async function ownPlugins(client: CodexRpcBoundary, cwd: string): Promise<string
     const own = plugins.flatMap((plugin) => plugin?.installed === true && typeof plugin.id === "string"
       && OWN_MARKETPLACES.some((marketplace) => String(plugin.id).endsWith(`@${marketplace}`)) ? [String(plugin.id)] : []);
     ids = own.some((id) => id.endsWith(`@${OWN_MARKETPLACES[0]}`)) ? [...new Set(own)].sort() : undefined;
-  } catch { ids = undefined; }
+    // Plugin ids and flags only: what the runtime listed, for reading why a run kept every plugin.
+    console.info(JSON.stringify({ type: "skill.plugins", listed: plugins.map((plugin) => `${String(plugin?.id)}${plugin?.installed === true ? "" : ":not-installed"}${plugin?.enabled === false ? ":off" : ""}`),
+      own: ids ?? null }));
+  } catch (error) {
+    ids = undefined;
+    console.info(JSON.stringify({ type: "skill.plugins", error: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
+  }
   finally { if (timer) clearTimeout(timer); }
   byCwd.set(cwd, { at: Date.now(), ttl: ids ? OWN_PLUGINS_TTL_MS : OWN_PLUGINS_RETRY_MS, ids });
   return ids;
@@ -797,6 +806,8 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
   if (options.agent) return startAgentThread(scope, options, context, resumeId);
   // A run with connectors or the image tool may use what another plugin brings, so it keeps them all.
   const own = options.connectors || options.allowImageGeneration ? undefined : await ownPlugins(scope.client, options.cwd);
+  const ownOnly = onlyOwnPlugins(own, [options.skillName, ...context.extraSkills]);
+  context.plugins = Object.keys(ownOnly).length ? "own" : "all";
   const config: Record<string, unknown> = {
     // "live", not "enabled": this runtime's `web_search` takes `disabled | cached | live`, and the
     // wrong variant made the whole thread/start fail — so the one Skill granted the web could never
@@ -822,7 +833,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ...(options.onPlan ? { "tools.update_plan.enabled": true } : {}),
     ...(options.askPerson ? ASK_PERSON_CONFIG : {}),
     ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false])),
-    ...onlyOwnPlugins(own, [options.skillName, ...context.extraSkills]),
+    ...ownOnly,
     // Another provider: defined for this thread only, and no memories — Codex's memory runs would call an OpenAI model on it.
     ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition,
       "memories.use_memories": false, "memories.generate_memories": false, "features.memories": false, ...contextWindowConfig(context.provider),

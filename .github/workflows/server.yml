@@ -105,6 +105,13 @@ jobs:
             # and the candidates pruned (no content). A measurement the runtime cut short shows here as a run of SKILL_LIST_FAILED.
             echo "-- sponsor records"
             sudo python3 -c "import json,collections; d=json.load(open(\"/srv/crossline/data/sponsor.json\")); [print(e.get(\"model\"), \"v\"+str(e.get(\"version\")), e[\"record\"].get(\"ranAt\"), e[\"record\"].get(\"runtimeVersion\"), round(e[\"record\"].get(\"passRate\",0),3), dict(collections.Counter(f.get(\"code\") for f in e[\"record\"].get(\"failures\",[])))) for e in d.get(\"evaluations\",[])]; print(\"lastChosen:\", (d.get(\"lastChosen\") or {}).get(\"model\")); print(\"pruned:\", {k: v.get(\"by\") for k, v in (d.get(\"pruned\") or {}).items()})" || true
+            # Which plugins a structured run keeps (skill-runner.ts ownPlugins): what the runtime listed, and the plugin sections of the owner
+            # runtime's config (section headers and enabled lines only), then how many plugin MCP servers are running.
+            echo "-- plugins"
+            sudo docker logs --since 6h crossline-worker 2>&1 | grep -E "\"skill.plugins\"" | cut -c1-600 | tail -5 || true
+            sudo docker exec crossline-worker sh -c "grep -n -E \"^\\[(plugins|marketplaces)|^enabled\" /state/codex-home/config.toml" 2>/dev/null | head -30 || true
+            printf "plugin mcp servers: "; sudo docker exec crossline-worker sh -c "grep -l plugins/cache /proc/[0-9]*/cmdline 2>/dev/null | wc -l" || true
+            sudo docker logs --since 6h crossline-worker 2>&1 | grep -E "\"skill.run\"" | grep -o "\"plugins\":\"[a-z]*\"" | sort | uniq -c || true
             # Every conformance run and every sample-interview turn of every candidate, whole (synthetic cases and a fictional person only).
             echo "-- sponsor evaluation runs"
             sudo sh -c "tail -n +1 /srv/crossline/data/sponsor-eval/*.jsonl 2>/dev/null" || true
