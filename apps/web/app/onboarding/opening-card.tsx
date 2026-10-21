@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingTone } from "@crossline/core";
-import { DOMAIN_PACKS, LINE_DOMAINS, type LineDomain } from "@crossline/identity-packs";
+import { DOMAIN_PACKS, LINE_DOMAINS, lineNounFor, type LineDomain } from "@crossline/identity-packs";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
 
 /**
@@ -18,9 +18,13 @@ const COMMON_LINES = ["研究者", "学生", "工程师", "创业者", "创作�
 const DOMAIN_NOUNS = LINE_DOMAINS.map((domain) => DOMAIN_PACKS[domain].noun);
 const ALL_EQUAL = "几条并重";
 const NO_FIXED = "都没有";
+/** The lite edition's usual fixed-schedule things, as people say them; the line itself is named for a person (`lineNounFor`). */
+const FIXED_ACTIVITIES = ["上班", "上学", "自由职业"];
 
 export type Edition = "lite" | "full";
-export type OpeningAnswer = { tone: OnboardingTone; edition: Edition; lines: string[]; domains: Record<string, LineDomain>; base: string; fixed: string[] };
+export type OpeningAnswer = { tone: OnboardingTone; edition: Edition; lines: string[]; domains: Record<string, LineDomain>; base: string; fixed: string[];
+  /** The lite edition: what the person typed for the fixed-schedule line, by the line it named (上班 for 职场人), so the interview can quote it. */
+  said?: Record<string, string> };
 
 const EDITION_LABEL: Record<Edition, { label: string; detail: string }> = {
   lite: { label: "极简", detail: "健康、财富，加一件有固定日程的事" },
@@ -37,6 +41,7 @@ export function openingReply(answer: OpeningAnswer, withMaterials: boolean): str
   return [`【语气】${ONBOARDING_TONE_LABEL[answer.tone].label}`, `【版本】${EDITION_LABEL[answer.edition].label}`,
     `【我的主线】${answer.lines.map(shown).join("、")}`,
     `【未来 12–24 个月的底座】${answer.base || ALL_EQUAL}`, `【有固定日程的主线】${answer.fixed.length ? answer.fixed.join("、") : NO_FIXED}`,
+    ...Object.entries(answer.said ?? {}).filter(([label, said]) => said && said !== label).map(([label, said]) => `【有固定日程的事】${said}（主线：${label}）`),
     withMaterials ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY].join("\n");
 }
 
@@ -52,6 +57,8 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
   const [lines, setLines] = useState<string[]>(linesKnown ? knownLines : []);
   const [liteDomains, setLiteDomains] = useState<string[]>(DOMAIN_NOUNS);
   const [hardName, setHardName] = useState("");
+  // The line's name, once the person changed it; until then it follows what they typed (上班 → 职场人).
+  const [lineName, setLineName] = useState<string | undefined>(undefined);
   const [custom, setCustom] = useState("");
   const [base, setBase] = useState("");
   const [fixed, setFixed] = useState<string[]>([]);
@@ -61,8 +68,12 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
     if (label && !lines.includes(label) && lines.length < 5) setLines((list) => [...list, label]);
     setCustom("");
   };
-  // Lite: the named fixed-schedule line first (it is the hard constraint), then the domain lines kept ticked.
-  const hard = hardName.trim().slice(0, 20);
+  // Lite: the named fixed-schedule line first (it is the hard constraint), then the domain lines kept ticked. It is named for a person
+  // (职场人, not 上班), since its goal is composed as 「成为 A 的<line>」 (the owner's decision of 2026-10-20).
+  const said = hardName.trim().slice(0, 20);
+  const derived = lineNounFor(said);
+  const hard = said ? (lineName ?? derived.noun).trim().slice(0, 20) : "";
+  const pickActivity = (text: string) => { setHardName(text); setLineName(undefined); };
   const chosen = linesKnown || edition === "full" ? lines : [...(hard && !DOMAIN_NOUNS.includes(hard) ? [hard] : []), ...liteDomains];
   const chosenBase = chosen.includes(base) ? base : edition === "lite" && hard && chosen.includes(hard) ? hard : "";
   const chosenFixed = edition === "lite" ? (hard && chosen.includes(hard) ? [hard] : []) : fixed.filter((label) => chosen.includes(label));
@@ -113,10 +124,22 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
           </div>
         </fieldset>
         <fieldset className="ob-question">
-          <legend>有没有固定日程、不能挪的事？<small>例如上班、上学、带娃；写成一个词，没有就留空</small></legend>
-          <div className="ob-add">
-            <input value={hardName} maxLength={20} onChange={(event) => setHardName(event.target.value)} placeholder="例如：上班" aria-label="有固定日程的事" />
+          <legend>有没有固定日程、不能挪的事？<small>选一个或自己写；没有就不选</small></legend>
+          <div className="ob-chips" role="radiogroup">
+            {FIXED_ACTIVITIES.map((label) => <button key={label} type="button" role="radio" aria-checked={said === label} data-picked={said === label}
+              onClick={() => pickActivity(said === label ? "" : label)}>{label}</button>)}
           </div>
+          <div className="ob-add">
+            <input value={hardName} maxLength={20} onChange={(event) => pickActivity(event.target.value)} placeholder="其他，例如：带娃、轮班" aria-label="有固定日程的事" />
+          </div>
+          {said && <div className="ob-add ob-line-name">
+            <label>这条线叫
+              <input value={hard} maxLength={20} onChange={(event) => setLineName(event.target.value)} aria-label="这条线的名称" />
+            </label>
+            <small className="ob-muted">{lineName === undefined && !derived.certain
+              ? "请改成指人的称呼，例如职场人、学生、自由职业者"
+              : `长期目标会写成「成为……的${hard || "……"}」，可以改`}</small>
+          </div>}
         </fieldset>
       </> : <fieldset className="ob-question">
         <legend>你正在投入的身份有哪些？<small>写成身份名词，2–5 个</small></legend>
@@ -148,7 +171,8 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
 
     <div className="ob-opening-go">
       <button type="button" className="ob-btn ob-primary" disabled={busy || !chosen.length || needsConnection}
-        onClick={() => onStart({ tone, edition: linesKnown ? "full" : edition, lines: chosen, domains: domainsOf(chosen), base: chosenBase, fixed: chosenFixed })}>
+        onClick={() => onStart({ tone, edition: linesKnown ? "full" : edition, lines: chosen, domains: domainsOf(chosen), base: chosenBase, fixed: chosenFixed,
+          ...(edition === "lite" && hard && said ? { said: { [hard]: said } } : {}) })}>
         {hasMaterials ? "读完材料，开始访谈" : "开始访谈"}</button>
       {!chosen.length ? <small className="ob-muted">先选至少一个身份</small>
         : needsConnection && <small className="ob-muted">先<a href="/connect?next=/onboarding">连接模型（ChatGPT 或 API）</a></small>}

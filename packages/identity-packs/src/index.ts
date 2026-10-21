@@ -232,6 +232,29 @@ export function identityPacksFor(read: (key: string) => string | undefined, opti
   return [...lines, ...capacity];
 }
 
+/**
+ * What the lite edition calls the line for the one thing with a fixed schedule (the owner's decision of 2026-10-20). A line is named for
+ * a person, because its long-term goal is composed as 「成为 A 的<line>」: the typed 「上班」 made 「成为互联网运营的上班」. So 上班 → 职场人,
+ * 上学 → 学生, 自由职业 → 自由职业者; a text that already names a person is kept; anything else is kept as typed with `certain: false`, and
+ * the opening card asks the person to name it.
+ */
+const ACTIVITY_NOUNS: Array<[RegExp, string]> = [
+  [/自由职业|接单|freelanc/i, "自由职业者"],
+  [/实习/, "实习生"],
+  [/上班|坐班|打工|工作|职场|通勤|上下班/, "职场人"],
+  [/上学|读书|念书|上课|求学|读研|读博|在读|学业/, "学生"],
+  [/带娃|带孩子|育儿|接送孩子|照顾孩子|陪娃/, "家长"],
+  [/照顾老人|照护|陪护|照顾家人/, "照护者"]
+];
+const PERSON_NOUN = /(人|者|生|员|师|家|手|工|长|客|主|官|匠|士|族|妈|爸)$/;
+export function lineNounFor(text: string): { noun: string; certain: boolean } {
+  const said = text.trim().slice(0, 20);
+  if (!said) return { noun: "", certain: false };
+  if (PERSON_NOUN.test(said)) return { noun: said, certain: true };
+  const known = ACTIVITY_NOUNS.find(([pattern]) => pattern.test(said));
+  return known ? { noun: known[1], certain: true } : { noun: said, certain: false };
+}
+
 /** A new line's id from its name: `line-` and a short stable slug, never one of the built-in ids. */
 export function newLineId(label: string, taken: Iterable<string>): string {
   const used = new Set(taken);
