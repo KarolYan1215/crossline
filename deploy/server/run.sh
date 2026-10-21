@@ -15,7 +15,23 @@ else
   assess_image="$registry/crossline-assess:$tag"; app_image="$registry/crossline-app:$tag"
   # The packages are private and the host keeps no registry login (a deploy logs in for its own pull and out again), so a restart by
   # hand cannot pull: it then runs the copy of the image already on this host instead of stopping (2026-10-16).
-  pull() { docker pull "$1" || { docker image inspect "$1" >/dev/null 2>&1 && echo "pull refused; using the copy of $1 already on this host"; }; }
+  # A pull that stops moving is cut after eight minutes and started again, keeping the layers it finished; one that stalls three times
+  # fails the deploy instead of restarting on the old image unseen. Before it, a pull left over from a cancelled deploy is stopped, and
+  # stopped one-off containers and every image no running container uses are removed: a new app image (5.3 GB) is pulled whole beside
+  # the running one when its base image changes, and on 2026-10-21 old images held 10 GB of the 40 GB disk, 5 GB was free and two
+  # deploys hung on the same layer until the job's 20 minutes ran out.
+  pkill -f "docker pull $registry/" 2>/dev/null || true
+  docker container prune -f >/dev/null 2>&1 || true
+  docker image prune -af 2>/dev/null | tail -1 || true
+  pull() {
+    for try in 1 2 3; do
+      timeout 480 docker pull "$1" && return 0 || code=$?
+      [ "$code" = 124 ] || break
+      echo "pull of $1 stalled for eight minutes (try $try of 3)"
+    done
+    if [ "$code" = 124 ]; then echo "pull of $1 kept stalling; nothing restarted"; return 1; fi
+    docker image inspect "$1" >/dev/null 2>&1 && echo "pull refused; using the copy of $1 already on this host"
+  }
   if [ "$want" = all ] || [ "$want" = assess ]; then pull "$assess_image"; fi
   if [ "$want" != assess ]; then pull "$app_image"; fi
 fi

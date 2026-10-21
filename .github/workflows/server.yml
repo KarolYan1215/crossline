@@ -31,7 +31,8 @@ jobs:
   server:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.ref == 'refs/heads/main' && (contains(github.event.head_commit.message, '[backup]') || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate') || contains(github.event.head_commit.message, '[readiness]') || contains(github.event.head_commit.message, '[usage]')))
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A deploy may retry a stalled pull (deploy/server/run.sh): three tries of eight minutes per image fit.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: SSH key
@@ -214,7 +215,7 @@ jobs:
           set -e
           dir=/srv/crossline/compare
           registry=ghcr.io/karolyan1215/crossline-app:beta
-          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null && docker pull -q "$registry" || true
+          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null && timeout 600 docker pull -q "$registry" || true
           docker logout ghcr.io >/dev/null
           image=$registry
           docker image inspect "$image" >/dev/null 2>&1 || image=$(docker inspect -f '{{.Config.Image}}' crossline-worker)
