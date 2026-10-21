@@ -1264,8 +1264,11 @@ export async function startCodexSupervisor(options: {
       if (!isOwner(callerWorkspaceId) && pathname.startsWith("/v1/codex/")) {
         const workspace = callerWorkspaceId;
         if (request.method === "GET" && pathname === "/v1/codex/account") {
-          const running = runtimes!.connected(workspace) ? await runtimes!.client(workspace) : undefined;
-          const account = running?.ok ? await running.client.request("account/read", { refreshToken: false }) : { account: null, requiresOpenaiAuth: true };
+          // A runtime already up answers itself; one that is not is never started just to say who is signed in — that cold start
+          // outlasted the red bar's 2.5 s and showed 「后台服务没有运行」 on every page while the worker was fine (2026-10-21).
+          const live = runtimes!.current(workspace);
+          const saved = live ? undefined : runtimes!.savedAccount(workspace);
+          const account = live ? await live.request("account/read", { refreshToken: false }) : { account: saved, requiresOpenaiAuth: !saved };
           // `guest`: this account runs on its own Codex, which it can sign out of here (the owner's is the machine's own).
           sendJson(response, 200, { ...(record(account) ?? {}), login: runtimes!.loginStatus(workspace), guest: true });
           return;
