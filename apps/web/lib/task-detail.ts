@@ -111,7 +111,8 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
         files: task.artifacts.map((artifact) => ({ path: artifact.path, name: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path })) })),
       // 「交给 Agent」 for every account: the owner's assistant has a shell, everyone else's works through Crossline's own functions.
       agentSteps: (plan?.steps ?? []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title })),
-      notes: notes.filter((event) => event.entityId === order.id).map((event) => { const payload = event.payload as { text?: string; kind?: string };
+      // 「助手留下的待补」 (written when the daily pass accepted a result in the person's place) shows only while that acceptance stands.
+      notes: notes.filter((event) => event.entityId === order.id && !retractedAgentNote(event.payload, agentTasks)).map((event) => { const payload = event.payload as { text?: string; kind?: string };
         return { at: event.createdAt, text: payload.text ?? "", kind: payload.kind ?? "note" }; }).reverse().slice(0, 30),
       completion: (({ mode, why, by }) => ({ mode, why, by }))(completionRule(order))
     });
@@ -120,6 +121,12 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
 }
 
 type StoredEvent = ReturnType<CrosslineStore["listEvents"]>[number];
+
+/** An `agent_left` note whose result is no longer accepted (the daily pass's acceptance was undone). */
+function retractedAgentNote(payload: unknown, agentTasks: Array<{ taskId: string; status: string }>): boolean {
+  const note = payload as { kind?: string; agentTaskId?: string };
+  return note.kind === "agent_left" && agentTasks.find((task) => task.taskId === note.agentTaskId)?.status !== "accepted";
+}
 
 /**
  * One canonical shape for "everything about this task", read once here instead of being assembled

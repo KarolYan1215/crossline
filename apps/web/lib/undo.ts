@@ -1,5 +1,5 @@
 import "server-only";
-import { retractedEventIdsIn, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
+import { reopenAgentResult, retractedEventIdsIn, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
 import { PORTRAIT_FIGURE_SETTING, taskTitleOf, type AccessContext, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 
@@ -30,6 +30,8 @@ export type Inverse =
   | { kind: "task.unmerge"; keepId: string; payload: unknown; plan: StepPlanInput | null; restore: string[] }
   /** Records (docs/domain-lines.md) the operation added are removed again; ones it removed come back. */
   | { kind: "records.deleted"; ids: string[]; deleted: boolean }
+  /** Assistant results the daily pass put away or accepted (apps/worker/src/date-advance.ts) wait for the person again. */
+  | { kind: "agent.reopen"; taskIds: string[] }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
@@ -134,6 +136,9 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
       case "records.deleted":
         for (const id of inverse.ids) store.setRecordDeleted(ctx.workspaceId, id, inverse.deleted);
         return { ok: true };
+      case "agent.reopen":
+        for (const id of inverse.taskIds) reopenAgentResult(store, ctx.workspaceId, id, ctx.principalId);
+        return { ok: true };
       case "source.project":
         for (const entry of inverse.entries) store.assignSourceDocumentProject(ctx.workspaceId, entry.id, entry.projectId);
         return { ok: true };
@@ -199,7 +204,7 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
 /** Settings an operation may change and an undo puts back. Device, account and calendar-write state are not operations. */
 const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines", PORTRAIT_FIGURE_SETTING] as const;
 /** Ledger markers that hide or close something when written; undoing the operation that wrote them brings it back. */
-const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged", "source.project_cleared"];
+const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged", "source.project_cleared", "milestone.overdue_resolved"];
 
 type Snapshot = ReturnType<typeof snapshot>;
 function snapshot(ctx: AccessContext) {

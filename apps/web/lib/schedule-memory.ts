@@ -1,6 +1,6 @@
 import "server-only";
 import { addChurn, PLAN_SNAPSHOT_SETTING, planChanges, planChurnKey, STEP_STARTS_SETTING, scheduledMinutesKey, type AccessContext, type PlanChurnDay, type PlanSnapshot } from "@crossline/core";
-import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, plannerIdOfBlock, planToday, toZonedInstant } from "./crossline";
+import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, plannerIdOfBlock, planToday, toZonedInstant } from "./crossline";
 
 /** The setting that remembers which work was given a time on a day: `schedule.day:<YYYY-MM-DD>` → `{ [orderId]: "HH:MM" }`. */
 export const scheduledDayKey = (day: string) => `schedule.day:${day}`;
@@ -81,7 +81,28 @@ export async function recordScheduledToday(ctx: AccessContext, now = new Date())
   const weights = Object.fromEntries(getStore().listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved")
     .map((milestone) => [milestone.id, effectiveWeight(ctx, milestone.id)]));
   getStore().setSetting(ctx.workspaceId, MILESTONE_WEIGHTS_SETTING, JSON.stringify(weights));
+  recordMilestoneForecast(ctx, now);
   return seen;
+}
+
+/** `{ at, goals: { [milestoneId]: { p50Day, p85Day } } }`: read by the worker's daily pass to move an overdue milestone to its cautious finish. */
+export const MILESTONE_FORECAST_SETTING = "milestone.forecast";
+const FORECAST_EVERY_MS = 6 * 3_600_000;
+
+/**
+ * Each approved milestone's forecast finish, kept for the worker, which cannot run the forecast (the schedule lives in this process).
+ * Recomputed at most every six hours: the worker reads it once a day.
+ */
+function recordMilestoneForecast(ctx: AccessContext, now: Date): void {
+  const store = getStore();
+  try {
+    const previous = JSON.parse(store.getSetting(ctx.workspaceId, MILESTONE_FORECAST_SETTING) || "null") as { at?: string } | null;
+    if (previous?.at && now.getTime() - Date.parse(previous.at) < FORECAST_EVERY_MS) return;
+  } catch { /* rewrite */ }
+  try {
+    const goals = Object.fromEntries(loadGoalForecast(ctx).goals.map((goal) => [goal.milestoneId, { p50Day: goal.p50Day, p85Day: goal.p85Day }]));
+    store.setSetting(ctx.workspaceId, MILESTONE_FORECAST_SETTING, JSON.stringify({ at: now.toISOString(), goals }));
+  } catch { /* the worker falls back to the open work at the person's daily hours */ }
 }
 
 /**
