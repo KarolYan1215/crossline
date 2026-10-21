@@ -139,7 +139,13 @@ const stoppedError = (error: unknown) => error instanceof Error && (error.messag
  * `lastChosen`: the model last chosen, served while a new evaluation runs (the owner's decision of 2026-10-19: no pause). `pruned`: the
  * candidates found off the frontier, with the one that beat them; kept for good, so a later measuring version does not test them again.
  */
-type Saved = { evaluations: SponsorEvaluation[]; lastChosen?: SponsorEvaluation; pruned?: Record<string, { by: string; at: string; version: number }> };
+type Saved = { evaluations: SponsorEvaluation[]; lastChosen?: SponsorEvaluation; pruned?: Record<string, { by: string; at: string; version: number; rule?: number }> };
+
+/**
+ * The rule a pruning was made under. 2 since 2026-10-21, when the share of repaired runs became the fourth thing compared
+ * (`dominatedCandidates`, the owner's decision); a pruning made under an earlier rule does not stand, and the current rule decides again.
+ */
+const PRUNE_RULE = 2;
 
 /**
  * A candidate whose first runs all fail for reasons of its own (not the provider's rate limit or load) is not measured to the end
@@ -152,15 +158,20 @@ const transientFailure = (code: string, detail = "") => /RATE_LIMIT|USAGE_LIMIT|
   || /rate limit|TPM|RPM|429|overload|busy|满载|限流|timed? ?out/i.test(detail);
 
 export function sponsorFromEnv(env: NodeJS.ProcessEnv = process.env): { key: string; baseUrl: string; models: SponsorModel[]; capYuan: number;
-  planningModel?: string } | undefined {
+  planningModel?: string; mainModel?: string } | undefined {
   const key = env.CROSSLINE_SPONSOR_API_KEY?.trim();
   const models = parseSponsorModels(env.CROSSLINE_SPONSOR_MODELS);
   if (!key || !models.length) return undefined;
   const cap = Number(env.CROSSLINE_SPONSOR_MONTHLY_CNY);
   // The model the planning Skills run on (SPONSOR_PLANNING_SKILLS), as the owner chose it after the real-work comparison; one not listed is ignored.
   const planning = env.CROSSLINE_SPONSOR_PLANNING_MODEL?.trim();
+  // The main model the owner holds while a cheaper one is compared on real work (2026-10-21): served whenever its current record admits
+  // the required Skills, whatever the automatic choice says; one not listed is ignored.
+  const main = env.CROSSLINE_SPONSOR_MAIN_MODEL?.trim();
+  const listedModel = (model: string | undefined) => Boolean(model) && models.some((item) => item.model === model);
   return { key, baseUrl: (env.CROSSLINE_SPONSOR_BASE_URL?.trim() || "https://api.siliconflow.cn/v1").replace(/\/+$/, ""), models,
-    capYuan: cap > 0 ? cap : SPONSOR_MONTHLY_CAP_CNY, ...(planning && models.some((model) => model.model === planning) ? { planningModel: planning } : {}) };
+    capYuan: cap > 0 ? cap : SPONSOR_MONTHLY_CAP_CNY, ...(listedModel(planning) ? { planningModel: planning! } : {}),
+    ...(listedModel(main) ? { mainModel: main! } : {}) };
 }
 
 export function createSponsorService(options: {
@@ -187,7 +198,15 @@ export function createSponsorService(options: {
   const read = (): Saved => {
     try { return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) as Saved : { evaluations: [] }; } catch { return { evaluations: [] }; }
   };
-  /** Candidates another beats on pass rate, cost and slowest run, with the one that beats them: never measured again, never used. */
+  /** The models the owner named for a use (`mainModel`, `planningModel`): never pruned, so the use they were named for stands. */
+  const pinnedOf = (config: NonNullable<ReturnType<typeof settings>>) =>
+    new Set([config.mainModel, config.planningModel].filter((model): model is string => Boolean(model)));
+  /** The prunings that stand: made under the current rule. */
+  const standingPrunings = (saved: Saved) => Object.fromEntries(Object.entries(saved.pruned ?? {}).filter(([, entry]) => entry.rule === PRUNE_RULE));
+  /**
+   * Candidates another beats on pass rate, cost, slowest run and repaired runs, with the one that beats them: never measured again, never
+   * used. A model the owner named for a use is never among them.
+   */
   const offFrontier = (): Map<string, string> => {
     const config = settings();
     if (!config) return new Map();
@@ -195,8 +214,9 @@ export function createSponsorService(options: {
     const sound = saved.evaluations.filter((item) => !measuredWhileDown(item));
     // A pruning that rested on a record taken while the runtime was down (either side of it) does not stand.
     const unsound = new Set(saved.evaluations.filter(measuredWhileDown).map((item) => item.model));
-    return new Map([...Object.entries(saved.pruned ?? {}).filter(([model, entry]) => !unsound.has(model) && !unsound.has(entry.by))
-      .map(([model, entry]) => [model, entry.by] as const), ...dominatedCandidates(sound, config.models)]);
+    const pinned = pinnedOf(config);
+    return new Map([...Object.entries(standingPrunings(saved)).filter(([model, entry]) => !unsound.has(model) && !unsound.has(entry.by))
+      .map(([model, entry]) => [model, entry.by] as const), ...dominatedCandidates(sound, config.models)].filter(([model]) => !pinned.has(model)));
   };
   const currentEvaluations = (): SponsorEvaluation[] => {
     const config = settings();
@@ -209,24 +229,30 @@ export function createSponsorService(options: {
   /** Writes the evaluations, keeping the last choice and the candidates off the frontier. */
   const save = (evaluations: SponsorEvaluation[], lastChosen = read().lastChosen, pruned = read().pruned) =>
     writeFileSync(file, JSON.stringify({ evaluations, ...(lastChosen ? { lastChosen } : {}), ...(pruned ? { pruned } : {}) } satisfies Saved, null, 2), "utf8");
+  /** The owner's main model when its record among these admits the required Skills, else the automatic choice. */
+  const choose = (models: SponsorModel[], evaluations: SponsorEvaluation[]): SponsorEvaluation | undefined => {
+    const main = settings()?.mainModel;
+    const held = main ? evaluations.find((item) => item.model === main) : undefined;
+    return (held && chooseSponsorModel(models, [held], options.capabilities)) || chooseSponsorModel(models, evaluations, options.capabilities);
+  };
   /** The current choice; while a new evaluation has chosen nothing yet, the last one (if that model is still listed). */
   const chosen = (): SponsorEvaluation | undefined => {
     const config = settings();
     if (!config) return undefined;
-    const current = chooseSponsorModel(config.models, currentEvaluations(), options.capabilities);
+    const current = choose(config.models, currentEvaluations());
     if (current) return current;
     const saved = read();
     const last = saved.lastChosen;
     if (last && config.models.some((model) => model.model === last.model)) return last;
     // No choice kept yet: the best of the older records that reached a model, so invited accounts are not paused for a re-measurement.
     const dominated = offFrontier();
-    return chooseSponsorModel(config.models, saved.evaluations.filter((item) => (item.tokens?.input ?? 0) > 0 && !dominated.has(item.model)
-      && !measuredWhileDown(item)), options.capabilities);
+    return choose(config.models, saved.evaluations.filter((item) => (item.tokens?.input ?? 0) > 0 && !dominated.has(item.model)
+      && !measuredWhileDown(item)));
   };
   /** What per-Skill choices are made from: the current records, or only the last choice while none is current. */
   const pool = (): SponsorEvaluation[] => {
     const current = currentEvaluations();
-    if (current.length && settings() && chooseSponsorModel(settings()!.models, current, options.capabilities)) return current;
+    if (current.length && settings() && choose(settings()!.models, current)) return current;
     const last = chosen();
     return last ? [last] : [];
   };
@@ -350,7 +376,7 @@ export function createSponsorService(options: {
     } finally { evaluating = false; }
     // A choice from current records is kept as the last choice, served while a later evaluation runs.
     const listedModels = settings()?.models;
-    const current = listedModels ? chooseSponsorModel(listedModels, currentEvaluations(), options.capabilities) : undefined;
+    const current = listedModels ? choose(listedModels, currentEvaluations()) : undefined;
     if (current) save(read().evaluations, current);
     const pick = chosen();
     // The thinking trial on the chosen model and the fastest other candidate on the frontier, once per trial version.
@@ -370,14 +396,20 @@ export function createSponsorService(options: {
     // Every measured candidate at the current prices, so a price change shows its effect on the next start.
     const candidates = currentEvaluations().map((item) => ({ model: item.model, passRate: item.record.passRate, p95Ms: item.record.p95Ms,
       yuanPerRun: evaluationYuanPerRun(item, config.models), tokens: item.tokens ?? null }));
-    // Off the frontier for good: written down, so a later measuring version leaves them out too.
+    // Off the frontier for good: written down, so a later measuring version leaves them out too. Prunings made under an earlier rule
+    // are dropped here, and a model the owner named for a use is never written down.
     const saved = read();
-    const found = [...dominatedCandidates(saved.evaluations.filter((item) => !measuredWhileDown(item)), config.models)].filter(([model]) => !saved.pruned?.[model]);
-    if (found.length) {
+    const standing = standingPrunings(saved);
+    const pinned = pinnedOf(config);
+    const found = [...dominatedCandidates(saved.evaluations.filter((item) => !measuredWhileDown(item)), config.models)]
+      .filter(([model]) => !standing[model] && !pinned.has(model));
+    const dropped = Object.keys(saved.pruned ?? {}).filter((model) => !standing[model]);
+    if (found.length || dropped.length) {
       const at = now().toISOString();
-      save(saved.evaluations, saved.lastChosen, { ...saved.pruned,
-        ...Object.fromEntries(found.map(([model, by]) => [model, { by, at, version: SPONSOR_EVAL_VERSION }])) });
-      console.info(JSON.stringify({ type: "sponsor.pruned", pruned: found.map(([model, by]) => ({ model, by })) }));
+      save(saved.evaluations, saved.lastChosen, { ...standing,
+        ...Object.fromEntries(found.map(([model, by]) => [model, { by, at, version: SPONSOR_EVAL_VERSION, rule: PRUNE_RULE }])) });
+      if (found.length) console.info(JSON.stringify({ type: "sponsor.pruned", pruned: found.map(([model, by]) => ({ model, by })) }));
+      if (dropped.length) console.info(JSON.stringify({ type: "sponsor.unpruned", models: dropped, rule: PRUNE_RULE }));
     }
     if (exhausted) console.info(JSON.stringify({ type: "sponsor.key_exhausted", balance: await balance() ?? null }));
     if (interrupted) console.info(JSON.stringify({ type: "sponsor.runtime_down" }));

@@ -87,6 +87,9 @@ ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MONTHLY_CNY 30
 # The planning Skills (step planner, backplanner) on GLM-5.3-Flash: the owner's choice of 2026-10-20 after the real-work comparison.
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_PLANNING_MODEL zai-org/GLM-5.3-Flash
+# The main model held on V4.1-Flash while Qwen3.5-122B, which the automatic choice took on 2026-10-21, is compared on real work (the
+# owner's decision the same day): served whenever its current record admits the required Skills, and never pruned.
+ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MAIN_MODEL deepseek-ai/DeepSeek-V4.1-Flash
 if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_SPONSOR_API_KEY=." /srv/crossline/app.env; then
   key=$(grep "^ASSESS_TEXT_API_KEY=" /srv/assess/assess.env 2>/dev/null | cut -d= -f2-)
   if [ -n "$key" ]; then
