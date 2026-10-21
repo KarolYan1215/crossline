@@ -121,3 +121,19 @@ test("a candidate another beats on pass rate, cost and slowest run is off the fr
   ];
   expect([...dominatedCandidates(evaluations, models)]).toEqual([["b", "a"]]);
 });
+
+test("a share of repaired runs is the fourth thing compared: cheaper and faster with more repairs beats nobody", () => {
+  const models = parseSponsorModels("main=2:8:1024,glm=0.8:2.8:1024,cheap=0.8:6.4:262");
+  const tokens = { input: 1_000_000, cached: 0, output: 100_000, runs: 10 };
+  const record = (p95Ms: number, repairRate: number) => ({ providerId: "sponsor", model: "", runtimeVersion: "r", ranAt: "", passRate: 1, repairRate, p95Ms, runs: [], failures: [] });
+  // As measured on 2026-10-21: no repairs at V4.1's cost and speed, a few at GLM's, more at Qwen3.5-122B's lower cost and speed.
+  const evaluations = [
+    { model: "main", record: record(85_000, 0), yuanPerRun: 0, tokens, version: 7 },
+    { model: "glm", record: record(300_000, 0.106), yuanPerRun: 0, tokens: { ...tokens, output: 300_000 }, version: 7 },
+    { model: "cheap", record: record(24_000, 0.149), yuanPerRun: 0, tokens, version: 7 }
+  ];
+  expect([...dominatedCandidates(evaluations, models)]).toEqual([]);
+  // With its repairs no higher, the cheaper and faster one does beat them.
+  const fewer = evaluations.map((item) => item.model === "cheap" ? { ...item, record: record(24_000, 0) } : item);
+  expect(new Map(dominatedCandidates(fewer, models))).toEqual(new Map([["main", "cheap"], ["glm", "cheap"]]));
+});

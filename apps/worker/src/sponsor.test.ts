@@ -6,7 +6,7 @@ import { conformanceCases, summarizeConformance } from "@crossline/core";
 import { decideRoute, setUsageSink } from "@crossline/codex";
 import { CrosslineStore, SPONSOR_SETTING } from "@crossline/db";
 import { createModelProviderService, RUNTIME_VERSION } from "./model-provider";
-import { createSponsorService, extractRecall, SPONSOR_DIALOGUE_SCRIPT, SPONSOR_EARLY_STOP_RUNS, SPONSOR_EFFORT_VERSION, SPONSOR_EVAL_VERSION, SPONSOR_EXTRACT_EXPECTED, type SponsorDialogueLog, type SponsorExtractLog, type SponsorRunLog } from "./sponsor";
+import { createSponsorService, extractRecall, SPONSOR_DIALOGUE_SCRIPT, SPONSOR_DIALOGUE_VERSION, SPONSOR_EARLY_STOP_RUNS, SPONSOR_EFFORT_VERSION, SPONSOR_EVAL_VERSION, SPONSOR_EXTRACT_EXPECTED, type SponsorDialogueLog, type SponsorExtractLog, type SponsorRunLog } from "./sponsor";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
 const dirs: string[] = [];
@@ -231,4 +231,69 @@ test("a candidate off the frontier is neither measured again nor used, for the c
     expect(again.tested).toEqual([MODEL]);
     expect(existsSync(path.join(dataDir, "sponsor-eval", "org_Dear.jsonl"))).toBe(false);
   } finally { setUsageSink(undefined); }
+}, 60_000);
+
+test("the owner's main and planning models are held whatever the automatic choice, and a pruning made under the old rule is dropped", async () => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-pinned-"));
+  dirs.push(dataDir);
+  const store = new CrosslineStore(":memory:");
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  // As on 2026-10-21: "org/Cheap" is cheaper and faster than both, but needed repairs where they did not.
+  const models = `${MODEL}=2:8:1024,org/Glm=0.8:2.8:1024,org/Cheap=0.4:3.2:1024`;
+  const record = (model: string, ms: number, repaired: boolean) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
+    conformanceCases().flatMap((item, index) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: repaired && index % 5 === 0 ? 1 : 0, ms }))));
+  const tokens = { input: 100_000, cached: 0, output: 10_000, runs: 10 };
+  const evaluation = (model: string, ms: number, repaired: boolean) => ({ model, record: record(model, ms, repaired), yuanPerRun: 0, tokens,
+    version: SPONSOR_EVAL_VERSION, effortVersion: SPONSOR_EFFORT_VERSION, dialogueVersion: SPONSOR_DIALOGUE_VERSION });
+  // Pruned on cost and speed alone, before the repair share was compared.
+  const pruned = { [MODEL]: { by: "org/Cheap", at: NOW.toISOString(), version: SPONSOR_EVAL_VERSION }, "org/Glm": { by: "org/Cheap", at: NOW.toISOString(), version: SPONSOR_EVAL_VERSION } };
+  writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [evaluation(MODEL, 2000, false), evaluation("org/Glm", 4000, false),
+    evaluation("org/Cheap", 500, true)], lastChosen: evaluation("org/Cheap", 500, true), pruned }));
+  const { rpc } = scriptedRuntime(["crossline:crossline-conformance", "crossline:crossline-onboarding"], () => "{}", { usage: { input: 1000, output: 100 } });
+  const providers = createModelProviderService({ store, cwd: dataDir, gateway, signedIn: () => false, client: async () => undefined,
+    secrets: { read: async () => undefined, write: async () => {}, remove: () => {} } as never, search: null, image: null, sponsor: () => undefined, now: () => NOW });
+  const service = (extra: Record<string, string>) => createSponsorService({ store, dataDir, cwd: dataDir, gateway, capabilities: providers.capabilities,
+    client: () => rpc, now: () => NOW, env: { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: models, ...extra } as NodeJS.ProcessEnv,
+    fetch: (async () => new Response(JSON.stringify({ data: [{ id: MODEL }, { id: "org/Glm" }, { id: "org/Cheap" }] }), { status: 200 })) as typeof fetch });
+  // Left to the automatic choice, the cheapest that passed serves; the old prunings no longer stand, so nothing is pruned.
+  const automatic = service({});
+  expect(automatic.chosen()?.model).toBe("org/Cheap");
+  expect(automatic.modelFor("crossline-step-planner")).toBe("org/Cheap");
+  // The owner's main model serves the main Skills, the planning model the planning Skills.
+  const pinned = service({ CROSSLINE_SPONSOR_MAIN_MODEL: MODEL, CROSSLINE_SPONSOR_PLANNING_MODEL: "org/Glm" });
+  expect(pinned.chosen()?.model).toBe(MODEL);
+  expect(pinned.modelFor("crossline-automation-stripper")).toBe(MODEL);
+  expect(pinned.modelFor("crossline-step-planner")).toBe("org/Glm");
+  expect(pinned.modelFor("crossline-goal-backplanner")).toBe("org/Glm");
+  // A run of the evaluation measures nothing (every record is current), keeps the main model as the last choice and drops the old prunings.
+  const result = await pinned.evaluate();
+  expect(result).toMatchObject({ tested: [], chosen: MODEL });
+  const saved = JSON.parse(readFileSync(path.join(dataDir, "sponsor.json"), "utf8")) as { lastChosen: { model: string }; pruned: Record<string, unknown> };
+  expect(saved.lastChosen.model).toBe(MODEL);
+  expect(saved.pruned).toEqual({});
+}, 60_000);
+
+test("a model the owner named for a use is never pruned, even by a candidate that beats it on every count", async () => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-pinned-prune-"));
+  dirs.push(dataDir);
+  const store = new CrosslineStore(":memory:");
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const record = (model: string, ms: number) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
+    conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms }))));
+  const tokens = { input: 100_000, cached: 0, output: 10_000, runs: 10 };
+  const evaluation = (model: string, ms: number) => ({ model, record: record(model, ms), yuanPerRun: 0, tokens, version: SPONSOR_EVAL_VERSION,
+    effortVersion: SPONSOR_EFFORT_VERSION, dialogueVersion: SPONSOR_DIALOGUE_VERSION });
+  writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [evaluation("org/Glm", 4000), evaluation(MODEL, 900)] }));
+  const { rpc } = scriptedRuntime(["crossline:crossline-conformance", "crossline:crossline-onboarding"], () => "{}", { usage: { input: 1000, output: 100 } });
+  const providers = createModelProviderService({ store, cwd: dataDir, gateway, signedIn: () => false, client: async () => undefined,
+    secrets: { read: async () => undefined, write: async () => {}, remove: () => {} } as never, search: null, image: null, sponsor: () => undefined, now: () => NOW });
+  // "org/Glm" costs more per run and is slower than MODEL at the same pass rate and repair share: dominated, but named for planning.
+  const sponsor = createSponsorService({ store, dataDir, cwd: dataDir, gateway, capabilities: providers.capabilities, client: () => rpc, now: () => NOW,
+    env: { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: `org/Glm=8:28:1024,${MODEL}=2:8:1024`, CROSSLINE_SPONSOR_PLANNING_MODEL: "org/Glm" } as NodeJS.ProcessEnv,
+    fetch: (async () => new Response(JSON.stringify({ data: [{ id: "org/Glm" }, { id: MODEL }] }), { status: 200 })) as typeof fetch });
+  await sponsor.evaluate();
+  const saved = JSON.parse(readFileSync(path.join(dataDir, "sponsor.json"), "utf8")) as { pruned?: Record<string, unknown> };
+  expect(saved.pruned?.["org/Glm"]).toBeUndefined();
+  expect(sponsor.modelFor("crossline-step-planner")).toBe("org/Glm");
+  expect(sponsor.chosen()?.model).toBe(MODEL);
 }, 60_000);

@@ -186,20 +186,22 @@ export function chooseSponsorModel(models: SponsorModel[], evaluations: SponsorE
 
 /**
  * Candidates off the frontier (the owner's rule of 2026-10-19: a model shown not to be on it is not measured again): another candidate
- * measured the same way has a pass rate at least as high, a cost per run at the current prices no higher and a slowest run (p95) no
- * slower, and is better on at least one of the three. Only records that reached a model and share a measuring version are compared.
- * Returns each dominated model with the one that beats it.
+ * measured the same way has a pass rate at least as high, a cost per run at the current prices no higher, a slowest run (p95) no slower
+ * and a share of runs that needed a repair no higher, and is better on at least one of the four. Only records that reached a model and
+ * share a measuring version are compared. The repair share joined on 2026-10-21 (the owner's decision): Qwen3.5-122B had pruned
+ * V4.1-Flash (no repair in 47 runs) and GLM-5.3-Flash on cost and speed with 7 repaired runs of its own, and in the real-work comparison
+ * of 2026-10-20 the one plan that missed its task was a repaired one. Returns each dominated model with the one that beats it.
  */
 export function dominatedCandidates(evaluations: SponsorEvaluation[], models: SponsorModel[]): Map<string, string> {
   const listed = new Set(models.map((model) => model.model));
   const measured = evaluations.filter((evaluation) => listed.has(evaluation.model) && (evaluation.tokens?.input ?? 0) > 0)
     .map((evaluation) => ({ model: evaluation.model, version: evaluation.version, pass: evaluation.record.passRate, p95: evaluation.record.p95Ms,
-      cost: evaluationYuanPerRun(evaluation, models) }));
+      repair: evaluation.record.repairRate ?? 0, cost: evaluationYuanPerRun(evaluation, models) }));
   const dominated = new Map<string, string>();
   for (const item of measured) {
     const by = measured.find((other) => other.model !== item.model && other.version === item.version
-      && other.pass >= item.pass && other.cost <= item.cost && other.p95 <= item.p95
-      && (other.pass > item.pass || other.cost < item.cost || other.p95 < item.p95));
+      && other.pass >= item.pass && other.cost <= item.cost && other.p95 <= item.p95 && other.repair <= item.repair
+      && (other.pass > item.pass || other.cost < item.cost || other.p95 < item.p95 || other.repair < item.repair));
     if (by) dominated.set(item.model, by.model);
   }
   return dominated;
