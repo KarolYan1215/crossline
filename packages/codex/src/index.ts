@@ -460,7 +460,7 @@ export async function startCodexSupervisor(options: {
   /** Builds (or rebuilds) a committed task's tutorial without moving its state: the step-by-step guide and the analysis of its materials. */
   buildTutorial?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
   /** Writes (or rewrites) the portrait report from the interview; answered at once, the page follows the ledger. */
-  writePortrait?: (workspaceId: string) => Promise<unknown>;
+  writePortrait?: (workspaceId: string, options: { redrawFigure?: boolean }) => Promise<unknown>;
   judgeMilestone?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
   explainPlan?: (today: string, workspaceId: string, ranking?: unknown) => Promise<unknown>;
   runWeeklyInsight?: (workspaceId: string) => Promise<unknown>;
@@ -515,6 +515,8 @@ export async function startCodexSupervisor(options: {
   modelProviders?: {
     handle: (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => Promise<{ status: number; body: unknown } | undefined>;
     cost: (workspaceId: string) => CostSignal | undefined;
+    /** The account's own ChatGPT reading, which the developer's model may stand in for while it is spent (model-provider.ts). */
+    afterChatgptCost?: (workspaceId: string, signal: CostSignal) => CostSignal;
   };
   /** This month's spend and cap for a workspace on a pay-per-use (API key) login, which reports no quota windows of its own. */
   monthSpend?: (workspaceId: string) => { spent: number; cap: number };
@@ -579,7 +581,8 @@ export async function startCodexSupervisor(options: {
   const costFor = async (client: CodexRpcBoundary, workspaceId: string): Promise<CostSignal> => {
     const provided = options.modelProviders?.cost(workspaceId);
     if (provided) return provided;
-    const signal = await readCostSignal(client);
+    const read = await readCostSignal(client);
+    const signal = options.modelProviders?.afterChatgptCost?.(workspaceId, read) ?? read;
     if (signal.available || !options.monthSpend) return signal;
     const account = record(record(await client.request("account/read", { refreshToken: false }).catch(() => undefined))?.account);
     if (account?.type !== "apiKey") return signal;
@@ -811,11 +814,14 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "PORTRAIT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
+        // `{redrawFigure: true}` is the person asking for a new figure only; anything else writes the words (and keeps the figure).
+        const body = await readJsonBody(request).catch(() => undefined);
+        const redrawFigure = body?.redrawFigure === true;
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const key = `portrait:${callerWorkspaceId}`;
         if (preparing.has(key)) { sendJson(response, 409, { blocker: { code: "PORTRAIT_ALREADY_WRITING", message: "画像报告正在生成" } }); return; }
         preparing.add(key);
-        runDetached(() => options.writePortrait!(callerWorkspaceId), () => preparing.delete(key));
+        runDetached(() => options.writePortrait!(callerWorkspaceId, { redrawFigure }), () => preparing.delete(key));
         sendJson(response, 202, { started: true });
         return;
       }

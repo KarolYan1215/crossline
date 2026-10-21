@@ -18,6 +18,13 @@ test("the hosted beta runs two model turns at a time; elsewhere there is no limi
   expect(guestRuntimeLimit({})).toBeUndefined();
   expect(priorityForSkill("crossline:crossline-milestone-architect")).toBe("planning");
   expect(priorityForSkill("crossline:crossline-due-diligence")).toBe("background");
+  // Information first (2026-10-21): what arrived is read and recorded before anything is planned from it.
+  for (const skill of ["crossline-mail-triage", "crossline-automation-stripper", "crossline-calendar-classifier", "crossline-recording-digest", "crossline-onboarding-extract"]) {
+    expect(priorityForSkill(`crossline:${skill}`)).toBe("intake");
+  }
+  for (const skill of ["crossline-material-researcher", "crossline-material-writer", "crossline-agent-tools", "crossline-mail-reply-drafter"]) {
+    expect(priorityForSkill(`crossline:${skill}`)).toBe("background");
+  }
 });
 
 test("with one slot, background runs wait in line and hear what is ahead; a person's turn starts at once while memory allows", async () => {
@@ -92,14 +99,14 @@ test("a tenant given its own limit (the candidates' measurement) may take every 
 test("within one account the shorter job goes first, and a long wait moves a run up a priority", async () => {
   let now = 0;
   configureModelGate({ limit: 1, agingMs: 1000, now: () => now, log: () => {} });
-  // Teach the gate how long each Skill takes: the classifier is quick, the planner slow.
-  await withModelSlot({ skill: "crossline-calendar-classifier" }, async () => { now += 5; });
+  // Teach the gate how long each Skill takes (two of one priority): the title writer is quick, the tutorial writer slow.
+  await withModelSlot({ skill: "crossline-task-titler" }, async () => { now += 5; });
   await withModelSlot({ skill: "crossline-material-writer" }, async () => { now += 500; });
   const order: string[] = [];
   const first = deferred();
   const running = withModelSlot({ skill: "hold" }, async () => { await first.promise; });
   const slow = withModelSlot({ skill: "crossline-material-writer" }, async () => { order.push("slow"); });
-  const quick = withModelSlot({ skill: "crossline-calendar-classifier" }, async () => { order.push("quick"); });
+  const quick = withModelSlot({ skill: "crossline-task-titler" }, async () => { order.push("quick"); });
   first.resolve();
   await Promise.all([running, slow, quick]);
   expect(order).toEqual(["quick", "slow"]);
@@ -131,6 +138,32 @@ test("planning work goes before discretionary background work, behind a person's
   first.resolve();
   await Promise.all([running, tutorial, backplan]);
   expect(order).toEqual(["research", "backplan", "tutorial"]);
+});
+
+test("information goes first: intake before planning before preparation, and a long-waiting tutorial still moves up", async () => {
+  let now = 0;
+  configureModelGate({ limit: 1, agingMs: 1000, now: () => now, log: () => {} });
+  const order: string[] = [];
+  const first = deferred();
+  const running = withModelSlot({ skill: "hold" }, async () => { await first.promise; });
+  const tutorial = withModelSlot({ skill: "crossline:crossline-material-researcher" }, async () => { order.push("tutorial"); });
+  const steps = withModelSlot({ skill: "crossline:crossline-step-planner" }, async () => { order.push("steps"); });
+  const mail = withModelSlot({ skill: "crossline:crossline-mail-triage" }, async () => { order.push("mail"); });
+  const capture = withModelSlot({ skill: "crossline:crossline-automation-stripper" }, async () => { order.push("capture"); });
+  first.resolve();
+  await Promise.all([running, tutorial, steps, mail, capture]);
+  expect(order).toEqual(["mail", "capture", "steps", "tutorial"]);
+
+  // Aging still holds: a tutorial that waited three aging periods goes before mail that just arrived.
+  const order2: string[] = [];
+  const second = deferred();
+  const hold = withModelSlot({ skill: "hold" }, async () => { await second.promise; });
+  const waited = withModelSlot({ skill: "crossline:crossline-material-writer" }, async () => { order2.push("tutorial"); });
+  now += 3500;
+  const fresh = withModelSlot({ skill: "crossline:crossline-mail-triage" }, async () => { order2.push("mail"); });
+  second.resolve();
+  await Promise.all([hold, waited, fresh]);
+  expect(order2).toEqual(["tutorial", "mail"]);
 });
 
 test("on the hosted beta one slot is kept for a person: background work never takes every slot", async () => {

@@ -8,9 +8,9 @@ import {
   type CostSignal, type FoundSource, type ManualDesign, type ManualDesignContext, type ManualNode, type MaterialSearch,
   type MaterialSearchContext, type NodeWriteup, type WriteContext
 } from "@crossline/core";
-import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
-import { aiToolsFor, listAgentTasks, type CrosslineStore } from "@crossline/db";
-import { aiToolBrief, requiredApproval, taskTitleOf, tutorialWorthIt } from "@crossline/core";
+import { continueSkillTurn, releaseThread, runCodexSkill, webResearchBlocker, type CodexRpcBoundary, type SkillRunResult } from "@crossline/codex";
+import { aiToolsFor, doneKinds, listAgentTasks, preparationOf, type CrosslineStore } from "@crossline/db";
+import { aiToolBrief, requiredApproval, taskTitleOf } from "@crossline/core";
 import { claimedTitleMatches } from "./diligence";
 import { arxivPdfAddress, defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { extractText } from "./extract";
@@ -25,9 +25,10 @@ import { planningContext } from "./step-planner";
 
 // Short summaries of each scenario; each Skill carries the detail.
 const DESIGN_INSTRUCTIONS = "Design the tutorial for one task as a short flow of steps the person follows left to right; a researcher then searches "
-  + "the web with each step's research questions and a writer writes each step from what was found. Every step is concrete, serves contract items "
-  + "by id (every required one is served), and has two to four research questions the open web can answer, fitted to the person's setting and to "
-  + "the step's scale. When the task has planned steps, make one node per planned step in their order, with the planned step's title copied "
+  + "the web for the steps that need it and a writer writes each step from what was found. Every step is concrete and serves contract items "
+  + "by id (every required one is served). Mark needsResearch only for the one to three steps that need knowledge or a method the person's own "
+  + "files do not hold, each with two to four research questions the open web can answer, fitted to the person's setting and to the step's "
+  + "scale; every other step has needsResearch false and no questions. When the task has planned steps, make one node per planned step in their order, with the planned step's title copied "
   + "exactly. No loops, no two steps overlapping. Do not do the work. Return only the requested JSON, every human-readable field in Chinese.";
 const SEARCH_INSTRUCTIONS = "Find the best public material for ONE step of a task's tutorial: a writer will write the step from your sources alone. "
   + "Answer every research question; a source is a public https page you opened, with its real title, and its summary says faithfully what it "
@@ -155,9 +156,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     const context = buildManualContext(store, workspaceId, workOrderId, today)!;
     if (!context.contract.length) return blocked("MATERIALS_NOT_REQUIRED", "该任务没有步骤、材料或证据要求，无法生成教程。");
     // The person's own files for this task (a homework sheet, the syllabus), read from the app's copy and given to every step's writer.
-    const projectName = store.listProjects(workspaceId, { includeArchived: true }).find((project) => project.id === order.projectId)?.name;
-    const uploads: KeptSource[] = relevantDocuments(store.listSourceDocuments(workspaceId), { projectId: order.projectId, projectName })
-      .filter((doc) => doc.extractedText.trim()).slice(0, 4).map((doc, index) => ({ id: `upload-${index + 1}`, url: `local:${doc.id}`, title: doc.fileName,
+    const uploads: KeptSource[] = tutorialUploads(store, workspaceId, order).map((doc, index) => ({ id: `upload-${index + 1}`, url: `local:${doc.id}`, title: doc.fileName,
         publisher: "本人上传", kind: "upload", summary: doc.extractedText.trim().slice(0, 300), kept: "full_text" as const, verdict: "本人上传的文件",
         fetchedAt: all.now().toISOString(), docId: doc.id, text: doc.extractedText.slice(0, TEXT_PER_SOURCE) }));
     // What the assistant prepared for this task (a formula sheet, a problem list) is material the tutorial builds on and links to.
@@ -212,15 +211,23 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     // 2. material, per step -------------------------------------------------------------------------------------
     const web = all.webBlocker();
     const results: NodeResult[] = [];
-    // Every step is researched; a design from before that rule, or a step whose questions are missing, searches by its own title and goal.
+    // Only the steps the designer marked as needing outside material are researched, at most `MAX_RESEARCHED_STEPS` of them; a step another
+    // tutorial of the same project already researched under the same title takes those sources instead of searching again.
+    const researched = new Set(nodes.filter((node) => node.needsResearch).slice(0, MAX_RESEARCHED_STEPS).map((node) => node.id));
+    const earlier = researchedBefore(store, workspaceId, materialsDir, order, all.now());
     let searched = 0;
-    for (const node of nodes) {
+    for (const [index, node] of nodes.entries()) {
       if (finished()) return stopped();
       const result: NodeResult = { node, sources: [], gaps: [], writeup: undefined };
-      progress("researching", searched, nodes.length);
-      searched += 1;
-      if (web) { result.gaps.push(`没有联网查资料：${web.message}`); }
+      results.push(result);
+      // A step not researched is written from the person's own files and what the assistant prepared.
+      if (!researched.has(node.id)) continue;
+      const reused = earlier.get(titleKey(node.title));
+      if (reused) { result.sources = reused.sources.map((source, at) => ({ ...source, id: `n${index + 1}-s${at + 1}` })); result.gaps.push(`${reused.note}，没有重新检索。`); }
+      else if (web) { result.gaps.push(`没有联网查资料：${web.message}`); }
       else {
+        progress("researching", searched, researched.size);
+        searched += 1;
         const searchContext: MaterialSearchContext = { version: "crossline.manualbook.search.v1", today, task: { intent: context.workOrder.intent },
           node: { id: node.id, title: node.title, kind: node.kind, goal: node.goal, steps: node.steps,
             researchQuestions: node.researchQuestions.length ? node.researchQuestions : [`${node.title}：${node.goal}`] },
@@ -232,33 +239,54 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
         if (!found.ok) result.gaps.push(`这一步没有找到可核实的资料：${found.blocker.message}`);
         else {
           result.gaps.push(...found.output.gaps);
-          result.sources = await keepSources(found.output.sources, all, today, result.gaps);
+          // Ids made unique across the book (`n2-s1`): the writer answers every step in one conversation and must not mix two steps' `s1`.
+          result.sources = (await keepSources(found.output.sources, all, today, result.gaps)).map((source) => ({ ...source, id: `n${index + 1}-${source.id}` }));
+          noteResearch(materialsDir, workOrderId, node.title, result.sources);
         }
       }
-      results.push(result);
     }
 
     // 3. the write-up, per step ---------------------------------------------------------------------------------
     // The line's own skill and the public skills that fit the task, read beside the writer's: a tutorial for the person's way of doing it.
     const writerSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, task: order.intent, ...(all.libraryDir ? { dir: all.libraryDir } : {}) });
+    // Every step is written in ONE conversation (2026-10-21): the first turn carries what all steps share — the task, the person, their
+    // files (`upload-N`, `prep-N`: most of a writer's input) — and each later turn only the next step and its own sources. A fresh thread
+    // per step re-sent the shared part every time under a new cache key; on the owner's account 17 writer runs read 417k tokens, 30%
+    // from cache. The stable part comes first in the first turn too, so a fresh thread after a lost one still shares its prefix.
+    const aiTools = aiToolsFor(store, workspaceId).map(aiToolBrief);
+    let thread: string | undefined;
     for (const [index, result] of results.entries()) {
       if (finished()) return stopped();
       progress("writing", index, results.length);
+      const planned = context.plannedSteps?.find((step) => step.title === result.node.title);
+      const node = { id: result.node.id, title: result.node.title, kind: result.node.kind, goal: result.node.goal, steps: result.node.steps, acceptance: result.node.acceptance };
+      const own = result.sources.map((source) => ({ id: source.id, title: source.title, url: source.url, kept: source.kept, text: source.text }));
       const writeContext: WriteContext = { version: "crossline.manualbook.write.v1", today, task: { intent: context.workOrder.intent },
-        node: { id: result.node.id, title: result.node.title, kind: result.node.kind, goal: result.node.goal, steps: result.node.steps, acceptance: result.node.acceptance },
-        sources: [...uploads, ...result.sources].map((source) => ({ id: source.id, title: source.title, url: source.url, kept: source.kept, text: source.text })),
-        inputs: context.inputs, profile: context.profile, person: context.person ?? [],
-        covers: context.plannedSteps?.find((step) => step.title === result.node.title)?.covers ?? [],
-        aiTools: aiToolsFor(store, workspaceId).map(aiToolBrief),
-        ...(() => { const assist = context.plannedSteps?.find((step) => step.title === result.node.title)?.aiAssist; return assist ? { aiAssist: assist } : {}; })() };
-      const written = await runCodexSkill<NodeWriteup>(client, writeContext, {
+        inputs: context.inputs, profile: context.profile, person: context.person ?? [], aiTools,
+        sources: [...uploads.map((source) => ({ id: source.id, title: source.title, url: source.url, kept: source.kept, text: source.text })), ...own],
+        node, covers: planned?.covers ?? [], ...(planned?.aiAssist ? { aiAssist: planned.aiAssist } : {}) };
+      const validate = (output: unknown) => validateNodeWriteup(output, writeContext);
+      const fresh = () => runCodexSkill<NodeWriteup>(client, writeContext, {
         skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS + libraryInstruction(writerSkills),
-        ...(writerSkills.length ? { extraSkills: writerSkills } : {}), outputSchema: NODE_WRITEUP_SCHEMA,
-        prepareInput: () => writeContext, validateOutput: (output) => validateNodeWriteup(output, writeContext), onAudit: () => {}, timeoutMs: 60 * 60_000
+        ...(writerSkills.length ? { extraSkills: writerSkills } : {}), outputSchema: NODE_WRITEUP_SCHEMA, keepThread: true,
+        prepareInput: () => writeContext, validateOutput: validate, onAudit: () => {}, timeoutMs: 60 * 60_000
       });
+      let written: SkillRunResult<NodeWriteup>;
+      if (!thread) written = await fresh();
+      else {
+        const next = { version: writeContext.version, next: true, node, covers: writeContext.covers, ...(planned?.aiAssist ? { aiAssist: planned.aiAssist } : {}), sources: own };
+        // No `$skill` mention again: the runtime would inject the whole SKILL.md into the conversation a second time.
+        written = await continueSkillTurn<NodeWriteup>(client, thread, JSON.stringify(next), {
+          skillName: MATERIAL_WRITER_SKILL, cwd, outputSchema: NODE_WRITEUP_SCHEMA, validateOutput: validate, onAudit: () => {}, timeoutMs: 60 * 60_000 });
+        // The runtime lost the conversation (a restart): this step starts a new one with everything shared in it again.
+        if (!written.ok && written.blocker.code === "SKILL_THREAD_LOST") { thread = undefined; written = await fresh(); }
+      }
+      if (written.audit.threadId && (written.ok || !thread)) thread = written.audit.threadId;
       if (written.ok) result.writeup = written.output;
       else result.note = `这一步的分析和教程没有写成：${written.blocker.message}`;
     }
+    // Kept open between steps only (`keepThread`); let the runtime unload it now rather than ten minutes later.
+    if (thread) releaseThread(client, thread);
     // The writer's own reason is what the person can act on (the material it was given was for another course, say): it is kept, not
     // replaced by a sentence that only says nothing was written.
     if (!results.some((result) => result.writeup)) {
@@ -297,7 +325,8 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     const builds = store.listEvents(workspaceId, { type: "manualbook.built", entityId: workOrderId }).length;
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: builds ? `manualbook:built:${workOrderId}:${builds}` : `manualbook:built:${workOrderId}`, type: "manualbook.built", entityId: workOrderId,
       payload: { nodes: nodes.length, sources: sources.length, downloaded: sources.filter((source) => source.kept === "full_text").length,
-        inputs: tutorialInputs(store, workspaceId, workOrderId) } });
+        inputs: tutorialInputs(store, workspaceId, workOrderId), inputsVersion: TUTORIAL_INPUTS_VERSION,
+        researched: researched.size } });
     return { state: "ready", workOrderId, artifacts: files.filter((item) => item.record).length, nodes: nodes.length, sources: sources.length,
       downloaded: sources.filter((source) => source.kept === "full_text").length };
   };
@@ -447,18 +476,97 @@ export function listManualbookFiles(materialsDir: string, workOrderId: string): 
   return existsSync(root) ? (readdirSync(root, { recursive: true }) as string[]).map((entry) => entry.replaceAll("\\", "/")).sort() : [];
 }
 
-/**
- * Committed work coming up in the next seven days (the web writes `schedule.upcoming` on its timer) that has no tutorial yet: built on the
- * tick, one at a time. A failed build waits for the person (「生成教程」) instead of being retried on a timer.
- */
-/** A built tutorial older than this is made again before its work comes up (the person's decision, 2026-10-13). */
-export const TUTORIAL_MAX_AGE_DAYS = 7;
+/** At most this many steps of one tutorial are researched on the web (the first ones the designer marked; docs/task-preparation.md). */
+export const MAX_RESEARCHED_STEPS = 3;
+/** Another tutorial of the same project built within this many days lends its sources to a step of the same title. */
+export const REUSE_SOURCES_DAYS = 30;
+/** A tutorial whose inputs changed is made again at most once in this many hours: a day of replans and new files is one rebuild. */
+export const TUTORIAL_REBUILD_HOURS = 24;
+/** Before this, a tutorial is not made while assistant steps before the person's first step are still open (their files feed it). */
+export const TUTORIAL_PREP_WAIT_HOURS = 24;
+
+/** The person's files a tutorial reads (the writer's `upload-N`): the task's project's readable files, at most four. */
+function tutorialUploads(store: CrosslineStore, workspaceId: string, order: { projectId: string }) {
+  const projectName = store.listProjects(workspaceId, { includeArchived: true }).find((project) => project.id === order.projectId)?.name;
+  return relevantDocuments(store.listSourceDocuments(workspaceId), { projectId: order.projectId, projectName }).filter((doc) => doc.extractedText.trim()).slice(0, 4);
+}
+
+const titleKey = (title: string) => title.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
 
 /**
- * What a tutorial is made from: the task's wording and due day, its step plan (the person's steps, by title — progress does not count),
- * its required materials and the files of its project. A tutorial built from other inputs than these is out of date.
+ * Where a build keeps each step's research as it goes, so a build cut short (a worker restart) does not search the same step again. Inside
+ * the task's own folder: a finished build replaces the folder (and the draft with it), and deleting the account removes it.
  */
+const researchDraft = (materialsDir: string, workOrderId: string) => path.join(materialsDir, workOrderId, ".research-draft.json");
+type ResearchNote = { title: string; sources: Array<Omit<KeptSource, "text" | "raw">> };
+
+function noteResearch(materialsDir: string, workOrderId: string, title: string, sources: KeptSource[]): void {
+  if (!sources.length) return;
+  const file = researchDraft(materialsDir, workOrderId);
+  let notes: ResearchNote[] = [];
+  try { notes = JSON.parse(readFileSync(file, "utf8")) as ResearchNote[]; } catch { /* the first step of this build */ }
+  notes.push({ title, sources: sources.map(({ text: _text, raw: _raw, ...source }) => source) });
+  try { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, JSON.stringify(notes)); } catch { /* a cache: losing it costs a search */ }
+}
+
+/** Checked pages from an earlier search, as link and summary (a downloaded copy stays in its own book). */
+const reusable = (sources: ReadonlyArray<Omit<KeptSource, "text">>, verdict: string): KeptSource[] =>
+  sources.filter((source) => source.kept !== "unverified" && !source.docId && source.url?.startsWith("https://"))
+    .map(({ file: _file, sha256: _sha, bytes: _bytes, raw: _raw, ...source }) => ({ ...source, kept: "summary_only" as const, verdict, text: source.summary }));
+
+/**
+ * What was already researched for a step of this title (docs/task-preparation.md §3): first what this task's own build found before it
+ * was cut short (`researchDraft`: a worker restart on 2026-10-20 threw away two half-built tutorials, eleven researcher and writer runs),
+ * then this task's previous tutorial, then other tutorials of the same project built within `REUSE_SOURCES_DAYS` — a step called the
+ * same in the next homework or the next revision session takes those sources instead of a new web search.
+ */
+function researchedBefore(store: CrosslineStore, workspaceId: string, materialsDir: string, order: { id: string; projectId: string }, now: Date):
+  Map<string, { note: string; sources: KeptSource[] }> {
+  const found = new Map<string, { note: string; sources: KeptSource[] }>();
+  let draft: ResearchNote[] = [];
+  try { draft = JSON.parse(readFileSync(researchDraft(materialsDir, order.id), "utf8")) as ResearchNote[]; } catch { /* none */ }
+  for (const note of draft) {
+    const sources = reusable(note.sources, "上次生成中途停止前已查到的资料");
+    if (sources.length && !found.has(titleKey(note.title))) found.set(titleKey(note.title), { note: "沿用上次生成中途停止前这一步已查到的资料", sources });
+  }
+  const since = now.getTime() - REUSE_SOURCES_DAYS * 86_400_000;
+  const built = new Set(store.listEvents(workspaceId, { type: "manualbook.built" }).filter((event) => Date.parse(event.createdAt) >= since).map((event) => event.entityId));
+  const books = store.listWorkOrders(workspaceId).filter((item) => built.has(item.id) && (item.id === order.id || (order.projectId && item.projectId === order.projectId)))
+    .sort((a, b) => Number(b.id === order.id) - Number(a.id === order.id));
+  for (const other of books) {
+    const root = path.join(materialsDir, other.id);
+    const from = other.id === order.id ? "上一版教程" : `「${taskTitleOf(other)}」的教程`;
+    let flow: { nodes?: Array<{ id: string; title: string }> } = {};
+    try { flow = JSON.parse(readFileSync(path.join(root, "flow.json"), "utf8")) as typeof flow; } catch { continue; }
+    for (const node of flow.nodes ?? []) {
+      if (!/^[a-z][a-z0-9-]{0,39}$/.test(node.id) || found.has(titleKey(node.title))) continue;
+      let stored: Array<Omit<KeptSource, "text">> = [];
+      try { stored = JSON.parse(readFileSync(path.join(root, "nodes", node.id, "sources.json"), "utf8")) as typeof stored; } catch { continue; }
+      const sources = reusable(stored, `沿用${from}的资料`);
+      if (sources.length) found.set(titleKey(node.title), { note: `沿用${from}里这一步找到的资料`, sources });
+    }
+  }
+  return found;
+}
+
+/**
+ * What a tutorial is made from (version 2, 2026-10-21): the task's wording, its step plan (the person's steps, by title — progress does
+ * not count), its required materials and the files the writer reads (`tutorialUploads`). A tutorial built from other inputs than these is
+ * out of date. Version 1 also counted the due day and every file of the project, so moving a deadline or filing an unrelated upload under
+ * the course rebuilt every tutorial of it (「ECE 548 整理两门课程当前成绩」 was built four times).
+ */
+export const TUTORIAL_INPUTS_VERSION = 2;
 export function tutorialInputs(store: CrosslineStore, workspaceId: string, workOrderId: string): string {
+  const order = store.getWorkOrder(workspaceId, workOrderId);
+  const payload = (order?.payload ?? {}) as { materialContract?: unknown[]; evidenceContract?: unknown[] };
+  const steps = (store.getStepPlan(workspaceId, workOrderId)?.steps ?? []).filter((step) => step.executor !== "agent").map((step) => step.title);
+  const files = order ? tutorialUploads(store, workspaceId, order).map((doc) => doc.id).sort() : [];
+  return createHash("sha256").update(JSON.stringify({ intent: order?.intent ?? "", steps,
+    materials: payload.materialContract ?? [], evidence: payload.evidenceContract ?? [], files })).digest("hex").slice(0, 16);
+}
+
+/** The hash a build recorded before version 2, compared only against builds that carry no version. */
+function tutorialInputsV1(store: CrosslineStore, workspaceId: string, workOrderId: string): string {
   const order = store.getWorkOrder(workspaceId, workOrderId);
   const payload = (order?.payload ?? {}) as { dueDate?: string; materialContract?: unknown[]; evidenceContract?: unknown[] };
   const steps = (store.getStepPlan(workspaceId, workOrderId)?.steps ?? []).filter((step) => step.executor !== "agent").map((step) => step.title);
@@ -468,12 +576,21 @@ export function tutorialInputs(store: CrosslineStore, workspaceId: string, workO
 }
 
 /**
- * Tutorials to make now: for committed work with a step plan whose next block starts within `TUTORIAL_LEAD_DAYS` (a week — the person's
- * decision, 2026-10-15; two days before), never built, or built from inputs that have since changed, or built over a week ago. A tutorial that failed after
- * its last build waits for the person (the failure is asked about).
+ * Tutorials to make now (docs/task-preparation.md, 2026-10-21): committed work with a step plan
+ * - whose preparation level is `tutorial` (`preparationOf`: learning work, or method-heavy craft work of a kind not done before);
+ * - whose next block starts within `TUTORIAL_LEAD_DAYS` (three days; it was a week, and a week's replans rebuilt or wasted them), and,
+ *   while the assistant's steps before the person's first step are still open, only within `TUTORIAL_PREP_WAIT_HOURS` (their files are
+ *   what the tutorial builds on);
+ * - never built, or built from inputs that have since changed — at most once a `TUTORIAL_REBUILD_HOURS`. A tutorial is no longer made
+ *   again only for being a week old: unchanged inputs give the same tutorial.
+ * A tutorial that failed after its last build waits for the person (the failure is asked about).
  */
 export function pendingTutorials(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
   const soon = startingWithin(store, workspaceId, now);
+  const imminent = startingWithin(store, workspaceId, now, TUTORIAL_PREP_WAIT_HOURS);
+  const plans = store.listStepPlans(workspaceId);
+  const planOf = new Map(plans.map((plan) => [plan.workOrderId, plan]));
+  const done = doneKinds(store, workspaceId, plans);
   const latest = (type: string) => {
     const out = new Map<string, { createdAt: string; payload: Record<string, unknown> }>();
     for (const event of store.listEvents(workspaceId, { type })) {
@@ -486,14 +603,20 @@ export function pendingTutorials(store: CrosslineStore, workspaceId: string, now
   const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
   return [...soon].filter((id) => {
     const order = orders.get(id);
-    const plan = store.getStepPlan(workspaceId, id);
+    const plan = planOf.get(id);
     if (!order || !["approved", "ready_for_human", "active"].includes(order.state) || !plan) return false;
-    // A short task or a request for a fact gets none on its own (W-17); the person can still ask for one on the task page.
-    if (!tutorialWorthIt({ title: taskTitleOf(order), intent: order.intent, p50Minutes: order.estimate.p50Minutes }, plan.steps)) return false;
+    // Only work that needs one gets a tutorial by itself; the person can still ask for one on the task page.
+    if (preparationOf(order, plan, done).level !== "tutorial") return false;
     const build = built.get(id), failure = failed.get(id);
     if (failure && (!build || failure.createdAt > build.createdAt)) return false;
-    if (!build) return true;
-    if (now.getTime() - Date.parse(build.createdAt) > TUTORIAL_MAX_AGE_DAYS * 86_400_000) return true;
-    return typeof build.payload.inputs === "string" && build.payload.inputs !== tutorialInputs(store, workspaceId, id);
+    if (!build) {
+      const firstOwn = plan.steps.find((step) => step.executor !== "agent")?.seq ?? Infinity;
+      const prepOpen = plan.steps.some((step) => step.executor === "agent" && step.status === "planned" && step.seq < firstOwn);
+      return !prepOpen || imminent.has(id);
+    }
+    if (now.getTime() - Date.parse(build.createdAt) < TUTORIAL_REBUILD_HOURS * 3_600_000) return false;
+    if (typeof build.payload.inputs !== "string") return false;
+    const current = build.payload.inputsVersion === TUTORIAL_INPUTS_VERSION ? tutorialInputs(store, workspaceId, id) : tutorialInputsV1(store, workspaceId, id);
+    return build.payload.inputs !== current;
   });
 }

@@ -5,11 +5,12 @@ import { sayDoFor } from "@crossline/db";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { effectiveSchedulePreferences, getStore, readAvailability } from "./crossline";
 import { energyModel } from "./energy";
+import { currentFigure, figureUrl } from "./figures";
 import { identityLines } from "./lines";
 
 export type PortraitState = {
   report: PortraitReport | null; version: number; at: string | null;
-  /** Sections with an illustration drawn for this version (`/api/portrait/image/<slot>`), with when, for cache-busting. */
+  /** The figure's address (`character`, the person's current figure, `figureUrl`), when there is one. */
   images: Record<string, string>;
   /** What the execution record says was done, for the say–do comparison (drawn only once `sufficient`). */
   sayDo: ReturnType<typeof sayDoFor>;
@@ -30,11 +31,11 @@ export function loadPortrait(ctx: AccessContext): PortraitState {
   const last = store.listEvents(ctx.workspaceId, { type: ["portrait.requested", "portrait.written", "portrait.blocked"] }).at(-1);
   const lines = identityLines(ctx);
   const milestones = store.listMilestones(ctx.workspaceId);
-  let drawn: { version?: number; images?: Record<string, { at?: string }> } = {};
-  try { drawn = JSON.parse(store.getSetting(ctx.workspaceId, "portrait.images") ?? "{}"); } catch { /* none */ }
+  // The person's figure, whichever report version drew it: a rewritten report keeps the figure (2026-10-21).
+  const figure = currentFigure(ctx);
   return {
     report: saved.report ?? null, version: saved.version ?? 0, at: saved.at ?? null,
-    images: drawn.version === saved.version ? Object.fromEntries(Object.entries(drawn.images ?? {}).map(([slot, image]) => [slot, image.at ?? ""])) : {},
+    images: figure ? { character: figureUrl(figure) } : {},
     sayDo: sayDoFor(store, ctx.workspaceId, now),
     rhythm: portraitRhythm(ctx, now),
     writing: last?.type === "portrait.requested" && Date.now() - Date.parse(last.createdAt) < 3_600_000,
@@ -61,9 +62,10 @@ function portraitRhythm(ctx: AccessContext, now: Date): EnergyRhythm {
 }
 
 /** Asks the worker to write (or rewrite) the portrait; answered at once. */
-export async function requestPortrait(ctx: AccessContext): Promise<{ ok: boolean }> {
+export async function requestPortrait(ctx: AccessContext, options: { redrawFigure?: boolean } = {}): Promise<{ ok: boolean }> {
   try {
-    await requestCodexSupervisor(ctx, "/v1/portrait", { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(10_000) });
+    await requestCodexSupervisor(ctx, "/v1/portrait", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(options.redrawFigure ? { redrawFigure: true } : {}), signal: AbortSignal.timeout(10_000) });
     return { ok: true };
   } catch { return { ok: false }; }
 }

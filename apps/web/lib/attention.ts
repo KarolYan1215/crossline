@@ -4,6 +4,7 @@ import { recordScheduledToday } from "./schedule-memory";
 import { countPending } from "./pending";
 import { writeAttentionSnapshot } from "./asks";
 import { systemContext } from "./auto-publish";
+import { adoptPendingDates } from "./imported-dates";
 
 /** How often the web refreshes what the worker's notifications read. */
 export const ATTENTION_INTERVAL_MS = 10 * 60_000;
@@ -11,6 +12,8 @@ export const ATTENTION_INTERVAL_MS = 10 * 60_000;
 /**
  * Writes each workspace's open asks and pending count where the worker's notifications read them, and records what today's plan
  * placed. The asks are built here, where the forecast and the plan live; the worker only delivers. A workspace that fails is skipped.
+ * A batch of dates still waiting is adopted first: since 2026-10-19 what the files say is taken, not asked, but only the interview page
+ * adopted, so a batch read before that day by an account past its interview waited on 待确认 for good (one from 10-15 on the real account).
  */
 export async function attentionPass(now = new Date()): Promise<number> {
   const store = getStore();
@@ -19,6 +22,7 @@ export async function attentionPass(now = new Date()): Promise<number> {
     const ownerId = store.getWorkspaceOwnerId(workspace.id);
     if (!ownerId) continue;
     const ctx = systemContext(workspace.id, ownerId, now);
+    try { adoptPendingDates(ctx); } catch { /* left for the interview page */ }
     try { await recordScheduledToday(ctx, now); } catch { /* the asks still go out */ }
     try { writeAttentionSnapshot(ctx, countPending(ctx).total, now); written += 1; } catch { /* next interval */ }
   }

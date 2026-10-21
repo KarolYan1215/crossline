@@ -1,8 +1,8 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { MAIL_ACCOUNTS_SETTING, MAIL_LOG_SETTING } from "@crossline/core";
 import type { ImapFactory, SecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
-import { addMailAccount, MAIL_TRIAGE_SKILL, mailLookupFor, readNewMail, removeMailAccount, setMailBookkeeping, triageMail } from "./mailbox";
+import { addMailAccount, createMailService, MAIL_TRIAGE_SKILL, mailLookupFor, readNewMail, removeMailAccount, setMailBookkeeping, triageMail } from "./mailbox";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const memorySecrets = (): SecretStore & { values: Map<string, string> } => {
@@ -128,4 +128,35 @@ test("the assistant searches every connected account through one lookup", async 
   const hits = await mailLookupFor({ store, secrets, resolve, factory: box.factory }, workspaceId)!.search({ text: "Lab" });
   expect(hits[0]).toMatchObject({ subject: "Lab meeting moved", snippet: "Now 15:00." });
   expect(hits[0]!.id).toMatch(/^[a-z0-9-]+:5$/);
+});
+
+test("connecting sorts at once; mail read while sorting was off is kept and sorted the moment sorting is switched on", async () => {
+  const { store, workspaceId, secrets, resolve } = setup();
+  const box = mailbox();
+  box.messages.push({ uid: 1, subject: "HW1 extended to Oct 30", body: "Please submit by Oct 30." });
+  let now = new Date("2026-10-19T09:00:00Z");
+  const answer = JSON.stringify({ items: [{ uid: 1, kind: "todo", title: "10/30 前交 HW1", waitingId: "", why: "老师通知延期", direction: "", amount: 0, currency: "", merchant: "" }] });
+  const { rpc, turns } = fakeRuntime([answer, answer], MAIL_TRIAGE_SKILL);
+  const captured: string[] = [];
+  const service = createMailService({ store, secrets, resolve, factory: box.factory, now: () => now, cwd: "/repo", client: () => rpc,
+    sortAllowed: async () => true, onCaptured: (id) => { captured.push(id); } });
+  // Connecting runs a pass at once (not at the next quarter hour), and its to-do reaches the inbox and wakes the analysis.
+  const added = await service.handle("POST", "/v1/mail/accounts", workspaceId, { address: "me@qq.com", password: "app-pass" });
+  expect(added?.status).toBe(200);
+  await vi.waitFor(() => expect(store.listCaptures(workspaceId)).toHaveLength(1));
+  expect(captured).toEqual([workspaceId]);
+  const id = JSON.parse(store.getSetting(workspaceId, MAIL_ACCOUNTS_SETTING)!)[0].id as string;
+
+  // Sorting off: new mail is still read (the automations listen), no model runs, and the mail waits.
+  await service.handle("POST", `/v1/mail/accounts/${id}/triage`, workspaceId, { on: false });
+  box.messages.push({ uid: 2, subject: "Lab meeting moved", body: "Now 15:00." });
+  now = new Date("2026-10-19T09:20:00Z");
+  expect(await service.pass(workspaceId)).toMatchObject({ read: 1 });
+  expect(turns()).toBe(1);
+  expect(JSON.parse(store.getSetting(workspaceId, "mail.unsorted")!).map((m: { subject: string }) => m.subject)).toEqual(["Lab meeting moved"]);
+
+  // Switched back on: what waited is sorted right away.
+  await service.handle("POST", `/v1/mail/accounts/${id}/triage`, workspaceId, { on: true });
+  await vi.waitFor(() => expect(turns()).toBe(2));
+  await vi.waitFor(() => expect(store.getSetting(workspaceId, "mail.unsorted")).toBe("[]"));
 });

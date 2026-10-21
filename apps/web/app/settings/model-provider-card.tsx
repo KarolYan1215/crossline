@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Tag } from "../ui/tag";
 import "./model-provider-card.css";
+import { SetupGuide } from "../ui/setup-guide";
+import { modelProviderGuide } from "../../lib/setup-guides";
 
 type Provider = { id: string; kind: "chat" | "responses" | "siwc-plan"; label: string; baseUrl: string; model: string; responseFormat?: "json_object"; keyLast4: string | null };
 type Preset = { id: string; label: string; kind: "chat" | "responses"; baseUrl: string; model: string; responseFormat?: "json_object" };
@@ -31,7 +33,9 @@ const shown = (blocker: { code: string; message: string }) => /SUPERVISOR|CAPABI
  * OpenAI API, OpenRouter or a model on this computer — and every one runs through the same Codex path. It serves only what it has passed
  * the check for, and the card says plainly what it can never do here. The key is sent once and never shown again (only its last four).
  */
-export function ModelProviderCard({ initial, onReady }: { initial?: ProviderView; onReady?: (ready: boolean) => void }) {
+export function ModelProviderCard({ initial, onReady, local = false }: { initial?: ProviderView; onReady?: (ready: boolean) => void;
+  /** Crossline runs on the person's own computer, so a model there (Ollama) can be reached. */
+  local?: boolean }) {
   const [view, setView] = useState<ProviderView | undefined>(initial);
   // The interview is the first thing an account does: once the added model has passed the check for it, the connect page moves on.
   const interviewServed = Boolean(view?.features.some((feature) => feature.skill.endsWith("crossline-onboarding") && feature.served));
@@ -118,6 +122,7 @@ export function ModelProviderCard({ initial, onReady }: { initial?: ProviderView
       <div><b>{view?.signedIn ? "仍由 ChatGPT 登录承担" : "暂不可用"}</b><ul>{withheld.map((feature) =>
         <li key={feature.skill}>{feature.label}<small>{feature.reason}</small></li>)}</ul></div>
     </div>}
+    {(!provider || draft) && <SetupGuide guide={modelProviderGuide(local)} selected={draft?.id} />}
     <small className="muted">{view?.unavailable}</small>
   </section>;
 }

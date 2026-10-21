@@ -31,11 +31,12 @@ Return exactly `{overview, nodes[], edges[], assumptions[], blockers[]}` as raw 
 - `steps`: what to actually do, in order, concrete enough to follow without asking (at most twelve). Good: 「对照第 3 讲推导耗尽区宽度公式，写出每一步用到的假设」. Bad: 「学习相关知识」「整理笔记」.
 - `acceptance`: how the person knows the step is done: something observable (「不看讲义写出推导，并说明两条适用条件」).
 - `serves`: ids from `contract[]` this step helps produce or evidence. **Every `required` contract item must be served by at least one step.**
-- `needsResearch`: always true (every step is researched). `researchQuestions`: two to four per step, each a concrete search a researcher can answer by opening public pages. At least one must be answerable on the open web whatever course or company this is (a textbook chapter, open courseware, official documentation, a standard); a question only the course platform or the person's inbox can answer may be added, but never as the only one.
+- `needsResearch`: true only when the step needs knowledge or a method the person's own files (`localFiles`, `inputs`, `prepared`) do not hold: a concept to learn, a tool to use, a format to follow, a standard to check against. **Most tasks have one to three such steps; the rest are false**, with `researchQuestions` empty: reading the person's own homework sheet, solving problems from lectures they have, checking against their own list, handing in, sending, filing, choosing between options they already listed. The app researches at most three steps of a task (the first three marked true), so mark the ones that matter; a step whose answer would not change how the person does it is not researched.
+- `researchQuestions` (only when `needsResearch` is true): two to four, each a concrete search a researcher can answer by opening public pages. At least one must be answerable on the open web whatever course or company this is (a textbook chapter, open courseware, official documentation, a standard); a question only the course platform or the person's inbox can answer may be added, but never as the only one.
   - Good: 「P-N 结耗尽区宽度的推导与适用条件（大学讲义或教材）」「Cadence Virtuoso 中 DC 扫描的设置步骤（官方文档）」.
   - Bad: 「如何高效学习」 (answers nothing about this step). 「这门课的考试范围」 only the course platform answers, so it can only sit beside an open-web question.
 
-### What to research, by kind
+### What to research, by kind (for a step marked `needsResearch`)
 
 - `read`: an authoritative explanation of the concept (a university's lecture notes or open courseware, a textbook chapter), a worked example, the common misconceptions; for a course topic, its standard name and usual prerequisites.
 - `do`: the tool's official documentation, a maintained step-by-step tutorial, a worked example or reference implementation, the known pitfalls (error messages, version differences).

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SetupGuide } from "../ui/setup-guide";
+import { CALENDAR_WRITER_GUIDE } from "../../lib/setup-guides";
 
 type LoginState = { ok?: boolean; state?: "idle" | "waiting" | "done" | "failed"; userCode?: string; verificationUri?: string; message?: string };
 
@@ -32,7 +34,7 @@ export function CalendarWriteLogin({ relogin }: { relogin: boolean }) {
     setBusy(false);
     setLogin(next ?? { state: "failed", message: "未能开始登录，请重试。" });
   };
-  return <div className="st-row"><span className="st-row-label">{relogin ? "重新登录或更换写入账号" : "登录写入账号"}
+  return <><div className="st-row"><span className="st-row-label">{relogin ? "重新登录或更换写入账号" : "登录写入账号"}
     <small>用存放 Crossline 日历的微软账号登录，只授权读取本人信息和读写日历；Crossline 只写名为 Crossline 的日历。</small>
     {login.state === "waiting" && <small>在 <a href={login.verificationUri} target="_blank" rel="noreferrer">{login.verificationUri}</a> 输入代码
       <b className="mono"> {login.userCode} </b>，按页面提示登录。登录完成后这里会自动更新。</small>}
@@ -40,5 +42,6 @@ export function CalendarWriteLogin({ relogin }: { relogin: boolean }) {
     {login.ok === false && !login.state && <small role="status">{login.message ?? "后台服务未运行，稍后再试。"}</small>}
   </span>
     <button type="button" disabled={busy || login.state === "waiting"} onClick={() => void start()}>{login.state === "waiting" ? "等待登录…" : "获取登录代码"}</button>
-  </div>;
+  </div>
+  <SetupGuide guide={CALENDAR_WRITER_GUIDE} {...(login.state === "waiting" ? { open: true } : {})} /></>;
 }

@@ -17,28 +17,38 @@
  *   mark it waits first in line.
  * - Background work of one account holds at most `CROSSLINE_ACCOUNT_CONCURRENCY` (2) slots, and accounts take turns within a priority, so
  *   one person approving twelve milestones does not fill every slot ahead of another person's capture.
+ * - Background work goes in three priorities: intake (what arrived is read and recorded), then planning, then everything else
+ *   (preparation: tutorials, research, the assistant) — `INTAKE_SKILLS`, `PLANNING_SKILLS` (2026-10-21).
  * - Within a priority and an account the shorter job goes first, by the Skill's recent service times here; anything that has waited
- *   `AGING_MS` (15 minutes) moves up one priority, and again after another 15, so nothing waits for ever.
+ *   `AGING_MS` (15 minutes) moves up one priority, and again after every further 15, so nothing waits for ever.
  */
 
-export type ModelPriority = "interactive" | "planning" | "background";
+export type ModelPriority = "interactive" | "intake" | "planning" | "background";
 /** Bytes in use (without reclaimable page cache) and the ceiling they are measured against. */
 export type MemoryReading = { used: number; limit: number };
 
 /** Skills a person is looking at a spinner for. Everything else is background and waits behind them. */
 export const INTERACTIVE_SKILLS: readonly string[] = ["crossline-onboarding", "crossline-concierge"];
 /**
- * Background Skills that turn what the person just did (a capture, approved milestones, a finished interview) into work on their board.
- * They wait behind a person's turn but go before discretionary runs: after 12 milestones were approved the first task took 22 minutes,
- * queued behind web research and tutorials nobody was waiting for (2026-10-17 walkthrough, W-28). They still count as background for the
- * slot kept for a person.
+ * Background Skills that take in what arrived — new mail, a capture, calendar events, an authorized folder, a recording's transcript, the
+ * interview's replies — and record it. Information first, then planning, then preparation (the owner, 2026-10-21: 「整个系统的逻辑是先获取
+ * 信息再进行规划和准备」; mail sorting had not run once while 20 step plans and 43 tutorial runs went ahead): a plan made before the mail
+ * that changes it is read is made twice. They wait behind a person's turn and still count as background for the slot kept for a person.
  */
-export const PLANNING_SKILLS: readonly string[] = ["crossline-automation-stripper", "crossline-goal-backplanner", "crossline-step-planner",
-  "crossline-milestone-architect", "crossline-artifact-planner", "crossline-onboarding-extract"];
+export const INTAKE_SKILLS: readonly string[] = ["crossline-mail-triage", "crossline-automation-stripper", "crossline-calendar-classifier",
+  "crossline-folder-classifier", "crossline-recording-digest", "crossline-onboarding-extract", "crossline-background-facts"];
+/**
+ * Background Skills that turn what the person just did (approved milestones, a finished interview, an analysed capture) into work on their
+ * board. They go after intake and before discretionary runs (tutorials, research, the assistant): after 12 milestones were approved the
+ * first task took 22 minutes, queued behind web research and tutorials nobody was waiting for (2026-10-17 walkthrough, W-28).
+ */
+export const PLANNING_SKILLS: readonly string[] = ["crossline-goal-backplanner", "crossline-step-planner", "crossline-milestone-architect",
+  "crossline-artifact-planner"];
 const named = (list: readonly string[], skillName: string) => list.some((name) => skillName === name || skillName.endsWith(`:${name}`));
 export const priorityForSkill = (skillName: string): ModelPriority =>
-  named(INTERACTIVE_SKILLS, skillName) ? "interactive" : named(PLANNING_SKILLS, skillName) ? "planning" : "background";
-const RANK: Record<ModelPriority, number> = { interactive: 0, planning: 1, background: 2 };
+  named(INTERACTIVE_SKILLS, skillName) ? "interactive" : named(INTAKE_SKILLS, skillName) ? "intake"
+    : named(PLANNING_SKILLS, skillName) ? "planning" : "background";
+const RANK: Record<ModelPriority, number> = { interactive: 0, intake: 1, planning: 2, background: 3 };
 
 export function modelGateLimit(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.CROSSLINE_MODEL_CONCURRENCY);

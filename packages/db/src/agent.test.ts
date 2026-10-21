@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   agentApprovalDecision, approveCategory, CLEAN_RUNS_TO_TRUST, CrosslineStore, declineCategory, decideAgentApproval, isPaused, listAgentTasks, pendingAgentApprovals,
-  pendingCategoryRequests, readCategories, requestAgentApproval, requestCategory, reviewAgentTask, setPaused
+  pendingCategoryRequests, readCategories, requestAgentApproval, requestCategory, resultsAwaitingReview, reviewAgentTask, setPaused
 } from "./index";
 
 let store: CrosslineStore;
@@ -89,4 +89,29 @@ test("a question from the guard waits for the person, is answered once, and expi
   expect(pendingAgentApprovals(store, ws, new Date(Date.now() + 60 * 60_000))).toEqual([]);
   expect(old).toBeTruthy();
   expect(decideAgentApproval(store, ws, "unknown", "accepted")).toBe(false);
+});
+
+test("a result is no longer a decision once its task is finished or archived, or a later run of the same work replaced it", () => {
+  vi.useFakeTimers();
+  try {
+    const order = (id: string, state: "approved" | "archived") => store.saveWorkOrder({ id, ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, identityId: "research",
+      projectId: "p", milestoneId: "m", intent: id, state, riskTier: "routine", payload: {},
+      estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" } });
+    order("live", "approved");
+    order("gone", "archived");
+    const run = (taskId: string, workOrderId: string, title: string, at: string) => {
+      vi.setSystemTime(new Date(at));
+      event("agent.task.requested", taskId, { title, category: "read_research_organize", workOrderId });
+      event("agent.task.completed", taskId, { directory: "C:\\ai\\t", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true });
+    };
+    run("old", "live", "清单 · 汇集讲义", "2026-10-09T00:00:00Z");
+    run("new", "live", "清单 · 汇集讲义", "2026-10-15T00:00:00Z");
+    run("other-step", "live", "清单 · 起草邮件", "2026-10-10T00:00:00Z");
+    run("dead", "gone", "别的", "2026-10-11T00:00:00Z");
+    run("flow-a", "", "每周整理收藏夹", "2026-10-16T00:00:00Z");
+    run("flow-b", "", "每周整理收藏夹", "2026-10-20T00:00:00Z");
+    expect(resultsAwaitingReview(store, ws).map((task) => task.taskId).sort()).toEqual(["flow-b", "new", "other-step"]);
+    // The replaced and the dead keep their own status: their files are still shown with the task.
+    expect(listAgentTasks(store, ws).filter((task) => task.status === "needs_review")).toHaveLength(6);
+  } finally { vi.useRealTimers(); }
 });

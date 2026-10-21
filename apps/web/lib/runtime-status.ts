@@ -1,8 +1,13 @@
-import type { AccessContext } from "@crossline/core";
+import { localStamp, type AccessContext } from "@crossline/core";
+import { quotaFallbackOf } from "./background";
 import { requestCodexSupervisor } from "./codex-runtime";
+import { getStore, readSchedulePreferences } from "./crossline";
 
-/** Why the AI cannot work at all right now, or null when it can. An error to show, not a decision: it is never one of the asks. */
-export type RuntimeStatus = { code: "worker_down" | "signed_out" | "sponsor_waiting"; title: string; message: string };
+/**
+ * Why the AI cannot work at all right now, or null when it can. An error to show, not a decision: it is never one of the asks.
+ * `sponsor_standin` is the one notice that is not an error: ChatGPT's quota is spent and the developer's model carries on.
+ */
+export type RuntimeStatus = { code: "worker_down" | "signed_out" | "sponsor_waiting" | "sponsor_standin"; title: string; message: string };
 
 let cached: { workspaceId: string; at: number; status: RuntimeStatus | null } | undefined;
 
@@ -33,7 +38,16 @@ export async function runtimeStatus(ctx: AccessContext, now = Date.now()): Promi
       ? { code: "sponsor_waiting", title: sponsorWait.code === "MODEL_SPONSOR_BUDGET" ? "本月邀请额度已用完" : "邀请码已生效，模型还在检验", message: sponsorWait.message }
       : !account.value.account && !viaApi
         ? { code: "signed_out", title: "还没有连接模型", message: "访谈、自动分析、倒推、材料准备与验收都要用它；用本人的 ChatGPT 账号或自己的模型 API 连接一次即可。" }
-        : null;
+        : standIn(ctx, now);
   cached = { workspaceId: ctx.workspaceId, at: now, status };
   return status;
+}
+
+/** ChatGPT's quota spent and the developer's model standing in (the worker's mark), said with when ChatGPT comes back. */
+function standIn(ctx: AccessContext, now: number): RuntimeStatus | null {
+  const { quotaFallback } = quotaFallbackOf(getStore(), ctx.workspaceId, new Date(now));
+  if (!quotaFallback) return null;
+  const zone = readSchedulePreferences(ctx)?.timeZone ?? process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago";
+  return { code: "sponsor_standin", title: "已改用开发者提供的模型",
+    message: `ChatGPT 额度已用尽，后台工作改由开发者提供的模型继续${quotaFallback.resetsAt ? `，到 ${localStamp(quotaFallback.resetsAt, zone)} ChatGPT 额度恢复后切回` : "，ChatGPT 额度恢复后切回"}。` };
 }

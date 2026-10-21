@@ -2,7 +2,7 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageSink, startCodexSupervisor, startModelGateway, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -20,13 +20,14 @@ import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
 import { repairDuplicateImports, repairFrozenRace } from "./calendar-repair";
+import { repairLineAttributes } from "./attribute-repair";
 import { returnTidy } from "./return-tidy";
 import { createWriteLogin } from "./calendar-write-login";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { startingWithin } from "./schedule-window";
-import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, requestFinerSplits, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
+import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, requestFinerSplits, requestOutdatedReplans, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { energyAdvicePass } from "./energy-advice";
 import { dedupePass } from "./dedupe";
@@ -397,6 +398,8 @@ async function afterConnected(workspaceId: string): Promise<void> {
   // Another account may be on another plan, with other models.
   forgetAccountModels(workspaceId);
   await spendFor(workspaceId).catch(() => undefined);
+  // Information first: mail held back while no model could sort it is sorted now (its to-dos become captures for the analysis below).
+  await mailService.pass(workspaceId).catch(() => undefined);
   await autoAnalyzePass(workspaceId).catch(() => undefined);
   void autoBackplanPass(workspaceId).catch(() => undefined);
   void firstDraftsPass(workspaceId).catch(() => undefined);
@@ -496,7 +499,8 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
 
 /**
  * Writes the portrait (the interview's end, 重新生成, or the one rewrite after the fixed dimensions shipped): `portrait.requested` first,
- * so the page shows it running, then `portrait.blocked` with the reason, or the figure drawn in the background after the words.
+ * so the page shows it running, then `portrait.blocked` with the reason, or the figure drawn in the background after the words (kept
+ * when one exists, `figureRedrawDue`).
  */
 async function writePortraitFor(workspaceId: string) {
   enterUsageWorkspace(workspaceId);
@@ -510,6 +514,14 @@ async function writePortraitFor(workspaceId: string) {
     .then((drawn) => console.info(JSON.stringify({ type: "portrait.illustrated", workspaceId, ...drawn })))
     .catch(() => undefined);
   return outcome;
+}
+
+/** The person's 「重画一版」 on the portrait page: a new figure only, the words stay as they are and the earlier figures are kept. */
+async function redrawFigureFor(workspaceId: string) {
+  enterUsageWorkspace(workspaceId);
+  const drawn = await createPortraitIllustrator(analysisStore, workspaceId, repoRoot, dataDir, () => accountClient(workspaceId))({ redraw: true });
+  console.info(JSON.stringify({ type: "portrait.illustrated", workspaceId, redraw: true, ...drawn }));
+  return drawn;
 }
 
 /**
@@ -561,6 +573,11 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       const splits = requestFinerSplits(analysisStore, workspaceId);
       if (splits.length) console.info(JSON.stringify({ type: "steps.finer_split_requested", checkedAt, workspaceId, splits }));
     } catch { /* next tick */ }
+    // A plan written before first actions and AI assists were required is planned again once its work is a week away.
+    try {
+      const outdated = requestOutdatedReplans(analysisStore, workspaceId);
+      if (outdated.length) console.info(JSON.stringify({ type: "steps.outdated_replan_requested", checkedAt, workspaceId, orders: outdated }));
+    } catch { /* next tick */ }
     if (!codexSupervisor || paused(workspaceId, "planning")) return;
     const ids = tasksAwaitingStepPlan(analysisStore, workspaceId);
     const reviews = warningsAwaitingReview(analysisStore, workspaceId);
@@ -605,49 +622,14 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
 }
 
 /** One account's share of the tick, in the order the tick always ran it; the tick runs every account's at once (see `tick`). */
-async function workspaceTick(workspace: { id: string }, checkedAt: string): Promise<void> {
-  // Material preparation is the one background job that writes into the project directory, so it only
-  // ever runs for work orders the human already approved into `preparing`.
-  for (const workOrderId of pendingMaterialWorkOrders(analysisStore, workspace.id)) {
-    const outcome = await getMaterialPreparer(workspace.id)(workOrderId).catch(() => undefined);
-    if (outcome) console.info(JSON.stringify({ type: `materials.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
-  }
-  // Work nobody waits on waits for the developer's model's cheaper hours on accounts that run on it (docs/model-scheduling.md).
-  const offPeakWait = waitsForOffPeak(workspace.id);
-  // Tutorials for work coming up in the next seven days (decided 2026-10-08): one per workspace per tick, and only while the quota is normal.
-  // Waiting for the cheaper hours, only a tutorial whose work starts within a day of their end is written now.
-  const urgent = offPeakWait ? startingWithin(analysisStore, workspace.id, new Date(), hoursToOffPeakEnd(new Date()) + 24) : undefined;
-  const tutorial = pendingTutorials(analysisStore, workspace.id).find((id) => !urgent || urgent.has(id));
-  if (tutorial && codexSupervisor && !paused(workspace.id, "tutorials") && spendAllows(await spendFor(workspace.id), "discretionary")) {
-    const outcome = await getMaterialPreparer(workspace.id)(tutorial, { mode: "tutorial" }).catch(() => undefined);
-    if (outcome) console.info(JSON.stringify({ type: `tutorial.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
-  }
-  // A new capture is classified, estimated and split without anyone pressing 分析: the person's job is to write it down, the
-  // system's is to turn it into a proposal waiting in 待确认. Quota-gated (nothing runs unless the budget is normal) and capped
-  // per tick; a capture that came back blocked is left for the person rather than retried on a timer.
-  if (codexSupervisor) {
-    await autoAnalyzePass(workspace.id, checkedAt);
-    await autoBackplanPass(workspace.id, checkedAt);
-  }
-  await stepPlanPass(workspace.id, checkedAt);
-  if (!offPeakWait) await curatorPass(workspace.id, checkedAt);
-  if (!offPeakWait) await energyAdvicePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
-  // Back after two days or more: overdue milestones of their own moved, old work archived, duplicates merged now (return-tidy.ts).
-  const tidied = await returnTidy(analysisStore, workspace.id, { mergeNow: async () => (await dedupePass({ store: analysisStore, workspaceId: workspace.id,
-    cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind),
-    enterUsage: enterUsageWorkspace, force: true })).reduce((sum, item) => sum + item.absorbed.length, 0) }).catch(() => undefined);
-  if (tidied) console.info(JSON.stringify({ type: "return.tidied", workspaceId: workspace.id, shifted: tidied.shifted.length, archived: tidied.archived.length,
-    merged: tidied.merged, checkedAt }));
-  await dedupePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
-  await titlePass(workspace.id, checkedAt);
-  await goalSplitPass(workspace.id, checkedAt);
-  await milestoneRiskPass(workspace.id, checkedAt);
-  void firstDraftsPass(workspace.id, checkedAt).catch(() => undefined);
-  // The interview's extraction, for replies a failed run left (after its backoff) or a worker restart cut off; a turn starts it itself.
-  await onboardingExtractPass(workspace.id).catch(() => undefined);
-  if (!offPeakWait) await minePass(workspace.id, checkedAt);
-  await publicSkillPass(workspace.id, checkedAt, offPeakWait);
-  await portraitPass(workspace.id, checkedAt, offPeakWait);
+/**
+ * Information first (the owner, 2026-10-21: 「整个系统的逻辑是先获取信息再进行规划和准备」). What arrived since the last tick — authorized
+ * folders and recordings, the calendar, new mail, captures (mail's included), the interview's replies — is read and recorded before anything
+ * is planned from it. It runs on its own each tick, not behind the account's planning and preparation: mail sorting sat last in one long
+ * pass and was reached only once tutorials, step plans and the gate had all finished, so a backlog there could hold it for hours. The model
+ * gate gives these Skills the same precedence (`INTAKE_SKILLS` in model-gate.ts).
+ */
+async function intakeTick(workspace: { id: string }, checkedAt: string): Promise<void> {
   // Authorized folders: what changed since the last tick is read (at most forty files a folder a tick), before filing runs over it.
   await folderPass(workspace.id, checkedAt);
   // Transcripts from any source — this computer's folders or the server transcriber's inbox — are digested for every workspace.
@@ -657,14 +639,6 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
     const filed = fileSourceDocuments(analysisStore, workspace.id);
     if (filed.length) console.info(JSON.stringify({ type: "source.project_inferred", checkedAt, workspaceId: workspace.id, filed }));
   } catch { /* housekeeping */ }
-  // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
-  // real ledger a milestone-bound work order reached `evidence_review`, the approvals page said
-  // 「等待里程碑闸门」 — and nothing was ever going to judge it. A verdict other than `pass` holds the
-  // order for a person, so a held order is skipped rather than re-judged every fifteen minutes.
-  for (const workOrderId of pendingMilestoneGates(analysisStore, workspace.id)) {
-    const outcome = await getMilestoneGate(workspace.id)(workOrderId).catch(() => undefined);
-    if (outcome) console.info(JSON.stringify({ type: `milestone_gate.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
-  }
   // Calendar reality is pulled every tick. It never rewrites an approved plan — a change there becomes
   // a new draft whose diffs are conflicts for the person to look at.
   {
@@ -678,8 +652,63 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
       }
     }
   }
-  // The mailbox and the automations (docs/personal-agent.md): new mail read and sorted, then each automation's trigger looked at.
+  // The mailbox (docs/personal-agent.md): new mail read and sorted; to-dos and dates it finds become captures, analysed just below.
   await mailService.pass(workspace.id).catch(() => undefined);
+  // A new capture is classified, estimated and split without anyone pressing 分析: the person's job is to write it down, the
+  // system's is to turn it into a proposal waiting in 待确认. Capped per tick; a capture that came back blocked is left for the person
+  // rather than retried on a timer.
+  if (codexSupervisor) await autoAnalyzePass(workspace.id, checkedAt);
+  // The interview's extraction, for replies a failed run left (after its backoff) or a worker restart cut off; a turn starts it itself.
+  await onboardingExtractPass(workspace.id).catch(() => undefined);
+}
+
+/** Planning, then preparation, for one account; started each tick once that tick's intake for the account has finished (`tick`). */
+async function workspaceTick(workspace: { id: string }, checkedAt: string): Promise<void> {
+  // Planning: what was taken in becomes work on the board.
+  if (codexSupervisor) await autoBackplanPass(workspace.id, checkedAt);
+  await stepPlanPass(workspace.id, checkedAt);
+  // Back after two days or more: overdue milestones of their own moved, old work archived, duplicates merged now (return-tidy.ts).
+  const tidied = await returnTidy(analysisStore, workspace.id, { mergeNow: async () => (await dedupePass({ store: analysisStore, workspaceId: workspace.id,
+    cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind),
+    enterUsage: enterUsageWorkspace, force: true })).reduce((sum, item) => sum + item.absorbed.length, 0) }).catch(() => undefined);
+  if (tidied) console.info(JSON.stringify({ type: "return.tidied", workspaceId: workspace.id, shifted: tidied.shifted.length, archived: tidied.archived.length,
+    merged: tidied.merged, checkedAt }));
+  await dedupePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
+  await titlePass(workspace.id, checkedAt);
+  await goalSplitPass(workspace.id, checkedAt);
+  await milestoneRiskPass(workspace.id, checkedAt);
+  void firstDraftsPass(workspace.id, checkedAt).catch(() => undefined);
+  // The milestone gate. Without this it existed only inside `scripts/gate-loop-check.ts`, so on the
+  // real ledger a milestone-bound work order reached `evidence_review`, the approvals page said
+  // 「等待里程碑闸门」 — and nothing was ever going to judge it. A verdict other than `pass` holds the
+  // order for a person, so a held order is skipped rather than re-judged every fifteen minutes.
+  for (const workOrderId of pendingMilestoneGates(analysisStore, workspace.id)) {
+    const outcome = await getMilestoneGate(workspace.id)(workOrderId).catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: `milestone_gate.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
+  }
+  // Preparation: materials, tutorials, the person's own skills, research, the assistant.
+  // Material preparation is the one background job that writes into the project directory, so it only
+  // ever runs for work orders the human already approved into `preparing`.
+  for (const workOrderId of pendingMaterialWorkOrders(analysisStore, workspace.id)) {
+    const outcome = await getMaterialPreparer(workspace.id)(workOrderId).catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: `materials.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
+  }
+  // Work nobody waits on waits for the developer's model's cheaper hours on accounts that run on it (docs/model-scheduling.md).
+  const offPeakWait = waitsForOffPeak(workspace.id);
+  // Tutorials only for work at the `tutorial` preparation level, three days before it starts (docs/task-preparation.md): one per workspace per tick, and only while the quota is normal.
+  // Waiting for the cheaper hours, only a tutorial whose work starts within a day of their end is written now.
+  const urgent = offPeakWait ? startingWithin(analysisStore, workspace.id, new Date(), hoursToOffPeakEnd(new Date()) + 24) : undefined;
+  const tutorial = pendingTutorials(analysisStore, workspace.id).find((id) => !urgent || urgent.has(id));
+  if (tutorial && codexSupervisor && !paused(workspace.id, "tutorials") && spendAllows(await spendFor(workspace.id), "discretionary")) {
+    const outcome = await getMaterialPreparer(workspace.id)(tutorial, { mode: "tutorial" }).catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: `tutorial.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
+  }
+  if (!offPeakWait) await curatorPass(workspace.id, checkedAt);
+  if (!offPeakWait) await energyAdvicePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
+  if (!offPeakWait) await minePass(workspace.id, checkedAt);
+  await publicSkillPass(workspace.id, checkedAt, offPeakWait);
+  await portraitPass(workspace.id, checkedAt, offPeakWait);
+  // The automations (docs/personal-agent.md): each one's trigger looked at, new mail's included (the intake pass recorded it).
   await automationTick(workspace.id).catch(() => undefined);
   // The nightly expansion decides for itself whether this tick is its moment; most ticks are not.
   // The nightly flywheel, research and the assistant run only while the person is around (docs/review-2026-10-13.md §6.1): their
@@ -698,6 +727,8 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
 
 /** Each account's model work from the tick still running, so the next tick starts it again only once it has ended. */
 const workspaceTicks = new Map<string, Promise<void>>();
+/** Each account's intake from the tick still running (`intakeTick`): it never waits behind the account's planning and preparation. */
+const intakeTicks = new Map<string, Promise<void>>();
 
 async function tick(options: { waitForWorkspaces?: boolean } = {}): Promise<void> {
   const checkedAt = new Date().toISOString();
@@ -723,8 +754,20 @@ async function tick(options: { waitForWorkspaces?: boolean } = {}): Promise<void
   // Each account's model work runs on its own (2026-10-19, docs/model-scheduling.md): the tick starts it for every account not already
   // busy and does not wait, so one account's long backlog (85 minutes of step plans on the developer's model) no longer holds every other
   // account's captures and calendar until it ends; the model gate takes turns between the accounts' runs.
-  const launched = workspaces.filter((workspace) => !workspaceTicks.has(workspace.id)).map((workspace) => {
-    const work = withUsageWorkspace(workspace.id, () => workspaceTick(workspace, checkedAt))
+  // Intake goes first and on its own (2026-10-21): an account whose planning or preparation from an earlier tick still runs has its mail,
+  // calendar and captures read anyway; planning and preparation start after this tick's intake, on what it took in.
+  const launched = workspaces.map((workspace) => {
+    let intake = intakeTicks.get(workspace.id);
+    if (!intake) {
+      const started: Promise<void> = withUsageWorkspace(workspace.id, () => intakeTick(workspace, checkedAt))
+        .catch((error: unknown) => console.warn(JSON.stringify({ type: "worker.intake_tick_failed", workspaceId: workspace.id,
+          message: error instanceof Error ? error.message : "" })))
+        .finally(() => { if (intakeTicks.get(workspace.id) === started) intakeTicks.delete(workspace.id); });
+      intakeTicks.set(workspace.id, started);
+      intake = started;
+    }
+    if (workspaceTicks.has(workspace.id)) return intake;
+    const work = intake.then(() => withUsageWorkspace(workspace.id, () => workspaceTick(workspace, checkedAt)))
       .catch((error: unknown) => console.warn(JSON.stringify({ type: "worker.workspace_tick_failed", workspaceId: workspace.id,
         message: error instanceof Error ? error.message : "" })))
       .finally(() => workspaceTicks.delete(workspace.id));
@@ -782,6 +825,8 @@ const modelProviders = createModelProviderService({
 });
 // A candidate's sample interview (sponsor.ts) is routed to that candidate; every other run to the workspace's own provider.
 setProviderResolver((workspaceId) => sponsorService?.dialogueRouting(workspaceId) ?? modelProviders.routing(workspaceId));
+// A run refused by the account's own ChatGPT quota: the developer's model stands in until it resets, where the account holds it.
+setUsageLimitHandler((workspaceId) => modelProviders.noteUsageLimit(workspaceId));
 if (sponsorFromEnv()) sponsorService = createSponsorService({ store: analysisStore, dataDir, cwd: repoRoot, gateway: modelGateway,
   capabilities: modelProviders.capabilities, client: () => { const owner = runtimeOwner(analysisStore); return owner ? codexSupervisor?.clientFor(owner) : undefined; } });
 // Screen activity: a foreground-window reader feeding a tracker that asks every workspace for its own consent on every
@@ -902,7 +947,8 @@ async function digestPass(workspaceId: string): Promise<void> {
   digesting.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createRecordingDigester(analysisStore, workspaceId, repoRoot, () => codexSupervisor?.clientFor(workspaceId),
+    // The start-on-use handle, like every other pass: the running runtime only left a guest whose runtime had gone idle undigested.
+    const outcome = await createRecordingDigester(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId),
       { dataDir, timeZone: calendarZone(workspaceId) ?? "America/Chicago" })();
     console.info(JSON.stringify({ type: "recordings.digested", workspaceId, ...outcome }));
   } finally { digesting.delete(workspaceId); }
@@ -961,6 +1007,8 @@ const accountClient = (workspaceId: string) => {
 const mailService = createMailService({ store: analysisStore, secrets, cwd: repoRoot, client: accountClient, dataDir,
   sortAllowed: async (workspaceId) => !paused(workspaceId, "intake") && spendAllows(await spendFor(workspaceId), "intake"),
   onNewMail: (workspaceId, messages) => { onNewMail(analysisStore, workspaceId, messages); },
+  // Sorting's to-dos are captures: analysed at once, not at the next tick's intake.
+  onCaptured: (workspaceId) => { void autoAnalyzePass(workspaceId).catch(() => undefined); },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
 const agentService = createAgentService({
   // The shell assistant runs on the machine owner's runtime only: it works with the operating system user's files, and a guard is a
@@ -1020,6 +1068,9 @@ for (const workspace of analysisStore.listWorkspaces()) {
   // Once: imported class blocks a date batch put on the plan twice (a weekly class and that day's dated session in one slot).
   const deduped = repairDuplicateImports(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
   if (deduped) console.info(JSON.stringify({ type: "repair.import_duplicates", workspaceId: workspace.id, removed: deduped.removed, checkedAt: new Date().toISOString() }));
+  // Once: long-term goal chips a model proposed before the adjective rule (2026-10-19) that are actions or achievements.
+  const chips = repairLineAttributes(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
+  if (chips && Object.keys(chips).length) console.info(JSON.stringify({ type: "repair.line_attributes", workspaceId: workspace.id, removed: chips, checkedAt: new Date().toISOString() }));
   // Once: conversations from before the interview's extraction start at their last reply; facts written before numbered evidence get the
   // sentences their quotes stand in.
   try {
@@ -1317,7 +1368,7 @@ if (!capabilitySecret) {
       onConnected: (workspaceId) => { void afterConnected(workspaceId); },
       ...(hostedBeta ? { maxRunning: guestRuntimeLimit() ?? 2, idleMs: 10 * 60_000 } : {}) },
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
-      cost: (workspaceId) => modelProviders.cost(workspaceId) },
+      cost: (workspaceId) => modelProviders.cost(workspaceId), afterChatgptCost: (workspaceId, signal) => modelProviders.afterChatgptCost(workspaceId, signal) },
     services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
       { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle }],
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
@@ -1380,7 +1431,7 @@ if (!capabilitySecret) {
     // than at the next tick. `pendingMaterialWorkOrders`/`pendingMilestoneGates` still govern which
     // orders the loop itself picks up.
     prepareMaterials: (workOrderId, workspaceId) => getMaterialPreparer(workspaceId)(workOrderId),
-    writePortrait: (workspaceId) => writePortraitFor(workspaceId),
+    writePortrait: (workspaceId, options) => options.redrawFigure ? redrawFigureFor(workspaceId) : writePortraitFor(workspaceId),
     buildTutorial: (workOrderId, workspaceId) => { enterUsageWorkspace(workspaceId); return getMaterialPreparer(workspaceId)(workOrderId, { mode: "tutorial" }); },
     judgeMilestone: (workOrderId, workspaceId) => getMilestoneGate(workspaceId)(workOrderId),
     dispatchAgentTask: (workspaceId, workOrderId, category, stepId) => agentService.dispatch(workspaceId, workOrderId, category, stepId),

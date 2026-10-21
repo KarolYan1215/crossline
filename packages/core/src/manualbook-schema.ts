@@ -101,9 +101,10 @@ export function validateManualDesign(value: unknown, context: ManualDesignContex
     if (!SLUG.test(node.id)) refuse("MANUAL_NODE_ID_INVALID", `步骤 id「${node.id}」只能是小写字母、数字和连字符，字母开头。`);
     if (ids.has(node.id)) refuse("MANUAL_NODE_ID_DUPLICATE", `步骤 id「${node.id}」重复。`);
     ids.add(node.id);
-    // Every step is researched (decided 2026-10-09): one written only from what the person already has told them nothing new.
-    if (!node.needsResearch || node.researchQuestions.length < 2) refuse("MANUAL_RESEARCH_QUESTION_MISSING",
-      `每一步都要联网查资料：步骤「${node.title}」需要 needsResearch=true 和至少两个具体的检索问题，其中至少一个能在公开网页上找到答案（教材、公开课讲义、官方文档或标准）。`);
+    // Only a step that needs knowledge or a method from outside the person's own files is researched (2026-10-21, replacing 「every step
+    // is researched」 of 2026-10-09): a researcher run is 35–90k tokens, and 「提交」「核对」 steps were researched like the rest.
+    if (node.needsResearch && node.researchQuestions.length < 2) refuse("MANUAL_RESEARCH_QUESTION_MISSING",
+      `步骤「${node.title}」标了需要查资料（needsResearch=true），就要有至少两个具体的检索问题，其中至少一个能在公开网页上找到答案（教材、公开课讲义、官方文档或标准）；不需要查的步骤写 needsResearch=false、researchQuestions 为空。`);
   }
   for (const edge of out.edges) {
     if (!ids.has(edge.from) || !ids.has(edge.to)) refuse("MANUAL_EDGE_UNKNOWN_NODE", `连线 ${edge.from} → ${edge.to} 指向不存在的步骤。`);

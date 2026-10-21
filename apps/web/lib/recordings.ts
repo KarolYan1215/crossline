@@ -2,8 +2,9 @@ import { readFileSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  RECORDING_CONSENT, RECORDING_FILE, RECORDING_INBOX_SEGMENTS, RECORDING_VOICEPRINT_CONSENT, RECORDING_VOICEPRINT_SEGMENTS, RECORDING_MODEL_NOTICE, RECORDING_SERVER_CONSENT, RECORDING_PURGED_EVENT, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING,
-  readSourceFolders, sourceFolderIndexSetting, transcriptionCost, type FolderIndexEntry, type RecordingTranscribed
+  RECORDING_CONSENT, RECORDING_DIGESTED_EVENT, RECORDING_FAILED_EVENT, RECORDING_FILE, RECORDING_INBOX_SEGMENTS, RECORDING_VOICEPRINT_CONSENT, RECORDING_VOICEPRINT_SEGMENTS, RECORDING_MODEL_NOTICE, RECORDING_SERVER_CONSENT, RECORDING_PURGED_EVENT,
+  RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING, TRANSCRIBE_WINDOW,
+  readSourceFolders, sourceFolderIndexSetting, transcribeWindowOpens, transcriptionCost, type FolderIndexEntry, type RecordingTranscribed
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 
@@ -16,7 +17,22 @@ export type RecordingOverview = {
   failed: Array<{ file: string; note: string }>;
   cost?: { recordings: number; audioHours: number; minutesPerHour: number };
   /** 录音在服务器转写, when this deployment runs the transcriber: whether it is on, what waits, and the last few that failed. */
-  server?: { on: boolean; waiting: number; failed: Array<{ file: string; note: string }>; voiceprint: VoiceprintState };
+  server?: ServerRecordings;
+};
+
+/**
+ * The server path's own counts. Before 2026-10-21 the card showed only what still waited, so a recording transcribed in the night read
+ * as 「等待转写 0 个」 the next morning, as if nothing had arrived.
+ */
+export type ServerRecordings = {
+  on: boolean;
+  transcribed: number; silent: number; waiting: number; failedCount: number;
+  /** When the transcriber next takes the inbox, in the person's zone: 0 while its night window is open. */
+  opens: { inMinutes: number; at: string; timeZone: string };
+  failed: Array<{ file: string; note: string }>;
+  /** The last few transcripts, with whether their digest exists yet (it waits for the model quota). */
+  recent: Array<{ file: string; at: string; documentId: string; minutes: number; digested: boolean }>;
+  voiceprint: VoiceprintState;
 };
 /** 识别本人声音: the consent, and whether a voiceprint exists, waits to be made from an uploaded recording, or could not be made. */
 export type VoiceprintState = { on: boolean; state: "none" | "pending" | "ready" | "failed"; seconds?: number; at?: string; message?: string };
@@ -27,21 +43,41 @@ const entries = (store: CrosslineStore, workspaceId: string) => readSourceFolder
   return Object.entries(index).filter(([, entry]) => entry.audio).map(([relative, entry]) => ({ folder, relative, entry }));
 });
 
-export function recordingOverview(store: CrosslineStore, workspaceId: string, dataDir?: string): RecordingOverview {
+export function recordingOverview(store: CrosslineStore, workspaceId: string, dataDir?: string, timeZone = "America/Chicago", now = new Date()): RecordingOverview {
   const all = entries(store, workspaceId);
-  const recent = store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT }).slice(-20).map((event) => event.payload as RecordingTranscribed);
+  const transcribed = store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT });
+  const recent = transcribed.slice(-20).map((event) => event.payload as RecordingTranscribed);
   const cost = transcriptionCost(recent);
   return { on: store.getSetting(workspaceId, RECORDING_CONSENT) === "granted",
     folders: readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING)).length,
     queued: all.filter((item) => item.entry.audio === "queued").length,
-    done: store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT }).length,
+    done: transcribed.length,
     silent: store.listEvents(workspaceId, { type: RECORDING_SILENT_EVENT }).length,
     failed: all.filter((item) => item.entry.audio === "failed").slice(0, 5).map((item) => ({ file: `${item.folder.label}/${item.relative.replace(/\\/g, "/")}`, note: item.entry.note ?? "" })),
     ...(cost ? { cost } : {}),
-    ...(serverTranscribeAvailable() && dataDir ? { server: { on: store.getSetting(workspaceId, RECORDING_SERVER_CONSENT) === "granted", waiting: serverInboxCount(dataDir, workspaceId),
-      failed: store.listEvents(workspaceId, { type: "recording.failed" }).slice(-5).reverse()
-        .map((event) => ({ file: String((event.payload as { fileName?: unknown }).fileName ?? ""), note: String((event.payload as { message?: unknown }).message ?? "") })),
-      voiceprint: voiceprintState(store, workspaceId, dataDir) } } : {}) };
+    ...(serverTranscribeAvailable() && dataDir ? { server: serverRecordings(store, workspaceId, dataDir, timeZone, now) } : {}) };
+}
+
+const fromServer = (event: { payload: unknown }) => (event.payload as { where?: unknown }).where === "server";
+
+/** What the server path did for this workspace: transcribed, silent, waiting in the inbox (and when the night window opens), failed. */
+export function serverRecordings(store: CrosslineStore, workspaceId: string, dataDir: string, timeZone: string, now = new Date()): ServerRecordings {
+  const transcribed = store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT }).filter(fromServer);
+  const failed = store.listEvents(workspaceId, { type: RECORDING_FAILED_EVENT });
+  const digested = new Set(store.listEvents(workspaceId, { type: RECORDING_DIGESTED_EVENT }).map((event) => event.entityId));
+  return { on: store.getSetting(workspaceId, RECORDING_SERVER_CONSENT) === "granted",
+    transcribed: transcribed.length,
+    silent: store.listEvents(workspaceId, { type: RECORDING_SILENT_EVENT }).filter(fromServer).length,
+    waiting: serverInboxCount(dataDir, workspaceId),
+    failedCount: failed.length,
+    opens: { ...transcribeWindowOpens(now, timeZone, process.env.CROSSLINE_TRANSCRIBE_WINDOW?.trim() || TRANSCRIBE_WINDOW), timeZone },
+    failed: failed.slice(-5).reverse()
+      .map((event) => ({ file: String((event.payload as { fileName?: unknown }).fileName ?? ""), note: String((event.payload as { message?: unknown }).message ?? "") })),
+    recent: transcribed.slice(-5).reverse().map((event) => {
+      const payload = event.payload as RecordingTranscribed;
+      return { file: payload.fileName, at: event.createdAt, documentId: payload.documentId, minutes: Math.round(payload.seconds / 60), digested: digested.has(payload.documentId) };
+    }),
+    voiceprint: voiceprintState(store, workspaceId, dataDir) };
 }
 
 /**

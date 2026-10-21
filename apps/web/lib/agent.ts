@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { AGENT_CATEGORIES, AGENT_CATEGORY_EXPLAINED, isSecretPath, type AccessContext, type AgentCategory } from "@crossline/core";
 import {
-  CLEAN_RUNS_TO_TRUST, declinedCategories, isPaused, listAgentTasks, pendingAgentApprovals, pendingAgentQuestions, pendingCategoryRequests, readCategories,
+  CLEAN_RUNS_TO_TRUST, declinedCategories, isPaused, listAgentTasks, pendingAgentApprovals, pendingAgentQuestions, pendingCategoryRequests, readCategories, resultsAwaitingReview,
   type AgentApprovalRow, type AgentQuestionRow, type AgentTaskRow
 } from "@crossline/db";
 import { getStore } from "./crossline";
@@ -25,6 +25,8 @@ export type AssistantView = {
   /** Questions a run asked mid-way (Codex's `request_user_input`), waiting for the person's answer. */
   questions: AgentQuestionRow[];
   tasks: Array<AgentTaskRow & { workOrderTitle: string }>;
+  /** The results still the person's to look at (`resultsAwaitingReview`): not one for finished or archived work, not one a later run replaced. */
+  reviews: Array<AgentTaskRow & { workOrderTitle: string }>;
 };
 
 export function loadAssistant(ctx: AccessContext): AssistantView {
@@ -32,6 +34,8 @@ export function loadAssistant(ctx: AccessContext): AssistantView {
   const approved = readCategories(store, ctx.workspaceId);
   const declined = new Set(declinedCategories(store, ctx.workspaceId));
   const titles = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.intent]));
+  const tasks = listAgentTasks(store, ctx.workspaceId).map((task) => ({ ...task, workOrderTitle: titles.get(task.workOrderId) ?? "" }));
+  const reviewable = new Set(resultsAwaitingReview(store, ctx.workspaceId, tasks).map((task) => task.taskId));
   return {
     paused: isPaused(store, ctx.workspaceId),
     categories: (Object.keys(AGENT_CATEGORIES) as AgentCategory[]).map((category) => ({
@@ -44,7 +48,8 @@ export function loadAssistant(ctx: AccessContext): AssistantView {
     })),
     approvals: pendingAgentApprovals(store, ctx.workspaceId),
     questions: pendingAgentQuestions(store, ctx.workspaceId),
-    tasks: listAgentTasks(store, ctx.workspaceId).map((task) => ({ ...task, workOrderTitle: titles.get(task.workOrderId) ?? "" }))
+    tasks,
+    reviews: tasks.filter((task) => reviewable.has(task.taskId))
   };
 }
 
@@ -54,7 +59,7 @@ export function countAssistantPending(ctx: AccessContext): { categories: number;
   return {
     categories: pendingCategoryRequests(store, ctx.workspaceId).length,
     approvals: pendingAgentApprovals(store, ctx.workspaceId).length + pendingAgentQuestions(store, ctx.workspaceId).length,
-    reviews: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review").length
+    reviews: resultsAwaitingReview(store, ctx.workspaceId).length
   };
 }
 

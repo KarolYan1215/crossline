@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import {
-  RECORDING_INBOX_SEGMENTS, RECORDING_SERVER_CONSENT, RECORDING_SILENT_EVENT, inTranscribeWindow, TRANSCRIBE_WINDOW
+  RECORDING_FAILED_EVENT, RECORDING_INBOX_SEGMENTS, RECORDING_SERVER_CONSENT, RECORDING_SILENT_EVENT, inTranscribeWindow, TRANSCRIBE_WINDOW
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
@@ -16,7 +16,7 @@ import type { BlockTranscript, WindowRecogniser } from "./sensevoice";
  * is transcribed, found silent, a copy of one already done, or unreadable — the audio is never kept and never backed up. A run cut off by
  * the night ending or the consent being withdrawn leaves the file for the next night.
  */
-export const RECORDING_FAILED_EVENT = "recording.failed";
+export { RECORDING_FAILED_EVENT };
 export const inboxDir = (dataDir: string, workspaceId: string) => path.join(dataDir, ...RECORDING_INBOX_SEGMENTS, workspaceId);
 export const serverRecordingsOn = (store: CrosslineStore, workspaceId: string) => store.getSetting(workspaceId, RECORDING_SERVER_CONSENT) === "granted";
 

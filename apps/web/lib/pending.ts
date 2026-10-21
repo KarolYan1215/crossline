@@ -1,6 +1,6 @@
 import "server-only";
 import type { AccessContext } from "@crossline/core";
-import { listAgentTasks } from "@crossline/db";
+import { resultsAwaitingReview } from "@crossline/db";
 import { appNow, getStore } from "./crossline";
 import { countProposedTargets } from "./targets";
 import { countAssistantPending } from "./agent";
@@ -68,7 +68,7 @@ function computePending(ctx: AccessContext): PendingCounts {
   const proposals = split(orders.filter((order) => order.state === "awaiting_plan_approval" && !preparing.has(order.id)), (order) => Boolean(horizon.orderEntry(order)));
   const drafts = split(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "draft"), (milestone) => Boolean(horizon.milestoneEntry(milestone.id)));
   const asks = split(listed(openAsks(ctx)), (ask) => Boolean(ask.entersOn));
-  const reviews = split(listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review"), (task) => {
+  const reviews = split(resultsAwaitingReview(store, ctx.workspaceId), (task) => {
     const order = orders.find((item) => item.id === task.workOrderId);
     return Boolean(order && horizon.orderEntry(order));
   });

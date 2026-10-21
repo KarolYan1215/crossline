@@ -13,9 +13,11 @@ Accept `{version: "crossline.manualbook.write.v1", today, task, node, sources[],
 - `sources`: `{id, title, url, kept, text}`. `kept` says what `text` is: `full_text` (the page or file itself, clipped), `summary_only` (only the researcher's summary of a page the app opened; the link is kept) or `unverified` (a page that refused automated readers: the researcher's summary, not checked by the app; lean on it least and never for a figure).
   - Ids `upload-N` (url `local:…`) are the person's own files for this task: a homework sheet, a syllabus, a brief, reference posts, interview notes. Read them first, take the actual requirements, numbers and dates from them, and say which part (page, problem number, section) each point comes from.
   - Ids `prep-N` (url `agent:…`) are what the assistant already prepared for this task: a formula sheet, a table of reference posts, coded interview notes. Build on them and point the person to them by id instead of redoing their content.
-  - Ids `s1`, `s2`, … are the public pages found for this step.
+  - Ids `n<k>-…` (`n2-s1`) are the public pages found for this step (step k of the tutorial). A step with none was judged to need nothing beyond the person's own files: write it from those.
 - `inputs`: what the person wrote when capturing the task; `profile`: confirmed facts about this line (`{id, value}`).
 - `person`, `covers`, `aiTools`, `aiAssist`: below.
+
+**One conversation per tutorial.** The first message carries everything shared (the task, the person, the `upload-N` and `prep-N` files) and the first step. Each later message is `{version, next: true, node, covers, aiAssist?, sources[]}`: the next step and only its own new sources; the `upload-N` and `prep-N` files of the first message stay citable. Answer each message with that one step's JSON. Do not repeat what an earlier step already explained; refer to it by the step's title instead.
 
 Return exactly `{analysis, tutorial, citations[], sourceNotes[], blockers[]}` as raw JSON, with no code fence and no prose around it.
 

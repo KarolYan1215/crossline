@@ -5,6 +5,14 @@
 .pt-empty{display:grid;gap:10px;justify-items:start;padding:14px;border:1px solid var(--mist)}
 .pt-wrap{display:grid;gap:12px}
 .pt-toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 10px;background:var(--paper);border:1px solid var(--mist)}
+/* Which figure the 小帮手 shows: one card per figure ever drawn or added, the current one outlined. */
+.pt-figures{display:grid;gap:8px;padding:8px 10px;border:1px solid var(--mist)}
+.pt-figures summary{cursor:pointer;font-weight:600}
+.pt-figure-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
+.pt-figure-list li{display:grid;gap:6px;justify-items:center;padding:8px;border:1px solid var(--mist);text-align:center;font-size:13px}
+.pt-figure-list li[data-current]{border:2px solid var(--ink)}
+.pt-figure-list img{width:112px;height:112px;object-fit:cover;object-position:top;border-radius:8px;background:var(--chalk)}
+.pt-figure-actions{display:flex;flex-wrap:wrap;gap:8px}
 /* The document is paper whatever the app's theme: these colours are the poster's, not the page's. #6B655C (the draft's grey) is
    5.2:1 on the paper, so the grey here is #4F4A42 (7.9:1); the group colour as text on paper is about 7.1:1, so text beside a bar is ink. */
 .pt-doc{--pt-paper:#F6F2EA;--pt-ink:#1C1A17;--pt-muted:#4F4A42;--pt-track:#DDD5C7;--pt-soft:#ECE5D8;--pt-accent:var(--group,#0A5198);--pt-accent-text:#08427A;

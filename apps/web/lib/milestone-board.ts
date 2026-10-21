@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import {
   currentRiskReview, draftingProgress, FIRST_DRAFTS_SETTING, firstDraftsState, MILESTONE_DRAFTING_SETTING, readMilestoneDrafting, type DraftingProgress, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskCriteriaKeys,
-  ruleMilestoneRisks, supplyWarnings, taskProgress, timeOrderProblem, type AccessContext, type MilestoneRisk, type SuccessCriterion
+  ruleMilestoneRisks, supplyWarnings, taskProgress, taskTitleOf, timeOrderProblem, type AccessContext, type MilestoneRisk, type SuccessCriterion
 } from "@crossline/core";
 import { readStoredArtifactPlan } from "@crossline/db";
 import { appNow, effectiveWeight, getStore, importancePresets, loadCurrentPlan, loadGoalForecast, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel, saveGoalSettings } from "./crossline";
@@ -16,7 +16,9 @@ import { identityLines } from "./lines";
  */
 export type BoardTick = { id: string; workOrderId: string; taskTitle: string; outcome: string; day: string | null;
   /** done: reached (filled); planned: ahead (hollow); postponed: its planned day passed without it (hollow, dashed, moved to `day`). */
-  state: "done" | "planned" | "postponed"; plannedDay: string | null };
+  state: "done" | "planned" | "postponed"; plannedDay: string | null;
+  /** The step the tick belongs to, and the day of its first block in the current schedule (null when the scheduler has not placed it). */
+  stepTitle: string; scheduledDay: string | null };
 export type BoardCriterion = { id: string; statement: string; quarters: number; observed?: string;
   threshold?: { comparator: "gte" | "lte"; value: number; bare?: number; unit: string } };
 export type BoardRelation = { id: string; direction: "out" | "in"; otherId: string; otherTitle: string; otherLine: string; kindLabel: string;
@@ -118,9 +120,9 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
       const doneDay = step.status === "done" ? step.updatedAt.slice(0, 10) : null;
       const plannedDay = step.dueBy || scheduled;
       const postponed = !doneDay && Boolean(plannedDay && plannedDay < today);
-      return { id: `${order.id}#${step.id}`, workOrderId: order.id, taskTitle: order.intent, outcome: step.tickOutcome,
+      return { id: `${order.id}#${step.id}`, workOrderId: order.id, taskTitle: taskTitleOf(order), outcome: step.tickOutcome,
         day: doneDay ?? (postponed ? scheduled ?? today : plannedDay ?? null), state: doneDay ? "done" as const : postponed ? "postponed" as const : "planned" as const,
-        plannedDay: plannedDay ?? null };
+        plannedDay: plannedDay ?? null, stepTitle: step.title, scheduledDay: scheduled };
     }));
     const reading = readings.get(milestone.id) ?? new Map();
     const criteria: BoardCriterion[] = milestone.successCriteria.map((criterion) => {

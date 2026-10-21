@@ -78,7 +78,7 @@ export default async function ApprovalsPage() {
     ...laterAsks.map((ask) => ask.entersOn!),
     ...laterProposals.map((item) => entersOn.get(item.id)!),
     ...getStore().listMilestones(ctx.workspaceId).filter((item) => item.status === "draft").flatMap((item) => horizon.milestoneEntry(item.id) ?? []),
-    ...loadAssistant(ctx).tasks.filter((task) => task.status === "needs_review").flatMap((task) => deferredOrder(task.workOrderId) ?? [])
+    ...loadAssistant(ctx).reviews.flatMap((task) => deferredOrder(task.workOrderId) ?? [])
   ];
   // The earliest suggested block per proposal (a split task has several; the first is when it would start).
   const slotOf = new Map<string, { day: string; start: string; end: string }>();

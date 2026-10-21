@@ -1,6 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import { SUBSCRIPTION_GUIDES, type CalendarSubscription } from "@crossline/core";
+import { SetupGuide } from "../ui/setup-guide";
+import { subscriptionGuide } from "../../lib/setup-guides";
+
+const GUIDE = subscriptionGuide(SUBSCRIPTION_GUIDES);
 
 const ago = (at: string | undefined, now: number) => {
   if (!at) return "";
@@ -53,7 +57,6 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
     onChanged?.();
     setBusy(false);
   };
-  const steps = SUBSCRIPTION_GUIDES.find((item) => item.app === guide)?.steps ?? [];
   // One click after copying the link on the calendar's page: read the clipboard and connect. A browser that will not give the clipboard
   // (permission refused, or not a secure page) leaves the box below to paste into by hand.
   const pasteAndAdd = async () => {
@@ -74,7 +77,6 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
       {SUBSCRIPTION_GUIDES.map((item) => <a key={item.app} href={item.url} target="_blank" rel="noreferrer" className="ob-btn secondary-button"
         aria-current={guide === item.app || undefined} onClick={() => setGuide(item.app)}>{item.app} ↗</a>)}
     </div>
-    {guide && <ol className="calendar-subscriptions-guide">{steps.map((step) => <li key={step}>{step}</li>)}</ol>}
     <button type="button" className="ob-btn primary-button" disabled={busy} onClick={() => void pasteAndAdd()}>{busy ? "读取中…" : "粘贴并接入"}</button>
     <form className="calendar-subscriptions-form" onSubmit={(event) => { event.preventDefault(); if (link.trim()) void add(); }}>
       <input type="url" inputMode="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="或手动粘贴：webcal://… 或 https://…ics" aria-label="日历订阅链接" disabled={busy} />
@@ -82,6 +84,8 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
       <button type="submit" className="ob-btn secondary-button" disabled={busy || !link.trim()}>接入</button>
     </form>
     {message && <p role="status" className="muted">{message}</p>}
+    {/* Keyed on the chosen app so picking one opens the guide on its steps, as the list under the buttons used to. */}
+    <SetupGuide key={guide ?? "none"} guide={GUIDE} selected={guide} {...(guide ? { open: true } : {})} />
     <small className="muted">链接相当于这本日历的钥匙：加密保存，只用来读取，不进备份。</small>
   </section>;
 }

@@ -680,6 +680,9 @@ test("确认时间块：通知打开的小页上点「超出预估 · 30 分钟�
 test("设置里的 Skill 库：主线 skill 逐条带来源；编辑存为新版本，回到旧版另存为新版本；公开 skill 可删除", async ({ page }, testInfo) => {
   await ensureSkillLibrary(page);
   await page.goto("/settings#skills");
+  // The library opens folded to its summary (2026-10-21); 「全部展开」 lists every kind with each item open.
+  const expandAll = () => page.getByRole("button", { name: "全部展开" }).click();
+  await expandAll();
   const mine = page.getByRole("region", { name: "本人的主线 skill" });
   await expect(mine.getByText("以冲突和焦虑作为内容核心切口，并以 solution 完成变现。")).toBeVisible();
   await expect(mine.getByText(/来源：2026-10-14 本人采纳助手结果/)).toBeVisible();
@@ -703,6 +706,7 @@ test("设置里的 Skill 库：主线 skill 逐条带来源；编辑存为新版
   expect(current.markdown).toMatch(/^---\nname: /);
 
   await page.reload();
+  await expandAll();
   await mine.getByText(/历次版本/).click();
   await mine.getByRole("button", { name: "回到此版" }).last().click();
   await expect(mine.getByRole("status")).toContainText("已回到第 1 版");

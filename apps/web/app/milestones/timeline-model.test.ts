@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { TL, boxesOverlap, edgeLabelSize, labelObstacles, layoutTimeline, placeEdgeLabels, riskGlyphsShown, type TimelineNodeInput } from "./timeline-model";
+import { TICK_HIT, TL, boxesOverlap, connectionsOf, edgeLabelSize, focusLabels, labelObstacles, labelWidth, layoutTimeline, markerBox, nodeLabelBox, placeEdgeLabels,
+  riskGlyphsShown, tickStory, tickTargets, type TimelineNodeInput, type TimelineTickInput } from "./timeline-model";
 
 const node = (id: string, line: string, day?: string, dependsOn: string[] = []): TimelineNodeInput =>
   ({ id, line, title: id, status: "approved", kind: "milestone", day, dependsOn });
@@ -150,5 +151,76 @@ describe("milestone timeline", () => {
     expect(chains("research").length).toBeGreaterThan(TL.chainMax);
     expect(chains("research").every((edge) => edge.faint)).toBe(true);
     expect(chains("media").some((edge) => edge.faint)).toBe(false);
+  });
+});
+
+describe("what is in focus on the timeline", () => {
+  const tick = (id: string, milestoneId: string, day: string, state: TimelineTickInput["state"] = "planned", plannedDay: string | null = day): TimelineTickInput =>
+    ({ id, milestoneId, line: "research", day, state, plannedDay });
+  // The real account's research row: a deadline with a dozen ticks packed before it, one postponed with its ghost among the others.
+  const dense = () => layoutTimeline({ nodes: [node("ece", "research", "2026-11-20"), node("next", "research", "2027-01-15", ["ece"])],
+    ticks: [...Array.from({ length: 12 }, (_, index) => tick(`t${index}`, "ece", `2026-11-${String(5 + index).padStart(2, "0")}`)),
+      tick("late", "ece", "2026-11-16", "postponed", "2026-11-08")], relations: [], lineOrder: ["research"], today: "2026-10-21", width: 700 });
+
+  it("gives every dot and the postponed tick's ghost its own target, none overlapping, clear of markers and the labels below the axis", () => {
+    const layout = dense();
+    const targets = tickTargets(layout);
+    // Every tick is reachable, and the postponed one twice: at its dot and at its original day.
+    expect(new Set(targets.flatMap((target) => target.ticks))).toEqual(new Set(layout.ticks.map((item) => item.id)));
+    expect(targets.filter((target) => target.ticks.includes("late")).length).toBe(2);
+    expect(targets.find((target) => target.ticks.includes("late") && target.ghostOnly)).toBeDefined();
+    for (const [index, target] of targets.entries()) {
+      expect(target.w).toBeGreaterThan(0);
+      for (const other of targets.slice(index + 1)) if (!target.over && !other.over) expect(boxesOverlap(target, other)).toBe(false);
+      for (const milestone of layout.nodes) if (!target.over) expect(boxesOverlap(target, markerBox(milestone))).toBe(false);
+      for (const milestone of layout.nodes) { const label = nodeLabelBox(milestone); if (label) expect(boxesOverlap(target, label)).toBe(false); }
+    }
+    expect(targets[0]!.h).toBe(TICK_HIT.up + TICK_HIT.down);
+  });
+
+  it("lets a lone tick reach past its 12px dot", () => {
+    const layout = layoutTimeline({ nodes: [node("m", "research", "2026-12-20")], ticks: [tick("one", "m", "2026-11-10")], relations: [], lineOrder: ["research"], today: "2026-10-21" });
+    const [target] = tickTargets(layout);
+    expect(target!.w).toBe(2 * TICK_HIT.reach);
+    expect(target!.points).toEqual([{ id: "one", x: layout.ticks[0]!.x, ghost: false }]);
+  });
+
+  it("writes the full name of the milestone in focus over a label that was cut short, and of the ones joined to it, without overlaps", () => {
+    const long = (id: string, day: string, dependsOn: string[] = []) => ({ ...node(id, "research", day, dependsOn), title: `ECE 548 期中考试 2 复习与模拟题 ${id}` });
+    const layout = layoutTimeline({ nodes: [long("a", "2026-11-01"), long("b", "2026-11-04", ["a"]), long("c", "2026-11-07", ["b"]), node("m", "media", "2026-11-05")],
+      ticks: [], relations: [{ id: "r", from: "b", to: "m", pending: false, label: "促成" }], lineOrder: ["research", "media"], today: "2026-10-21", width: 700 });
+    const b = layout.nodes.find((item) => item.id === "b")!;
+    expect(b.labelW).toBeLessThan(labelWidth(b.title));
+    const full = focusLabels(layout, ["b", "a", "c", "m"]);
+    // The one in focus keeps its own spot, at its full width.
+    expect(full.get("b")).toMatchObject({ x: b.labelX, y: b.labelY, w: labelWidth(b.title) });
+    const boxes = [...full.values()];
+    boxes.forEach((box, index) => boxes.slice(index + 1).forEach((other) => expect(boxesOverlap(box, other)).toBe(false)));
+    // No full name covers another milestone in focus.
+    for (const [id, box] of full) for (const other of layout.nodes) if (other.id !== id && ["a", "b", "c", "m"].includes(other.id)) expect(boxesOverlap(box, markerBox(other))).toBe(false);
+    for (const box of boxes) { expect(box.x).toBeGreaterThanOrEqual(TL.labelW); expect(box.x + box.w).toBeLessThanOrEqual(layout.width); }
+  });
+
+  it("never draws a full name over what is under the pointer", () => {
+    const layout = dense();
+    const under = tickTargets(layout).filter((target) => target.ticks.includes("t3"));
+    const full = focusLabels(layout, ["ece"], under);
+    for (const box of full.values()) for (const target of under) expect(boxesOverlap(box, target, 1)).toBe(false);
+  });
+
+  it("lists what a milestone is joined to: the chain before and after, and its relations with their kind", () => {
+    const layout = layoutTimeline({ nodes: [node("a", "research", "2026-11-01"), node("b", "research", "2026-11-10", ["a"]), node("c", "research", "2026-11-20", ["b"]),
+      node("m", "media", "2026-11-12")], ticks: [], relations: [{ id: "r", from: "b", to: "m", pending: true, label: "复用" }],
+      lineOrder: ["research", "media"], today: "2026-10-21" });
+    expect(connectionsOf(layout, "b")).toEqual({ before: ["a"], after: ["c"], relations: [{ other: "m", direction: "out", label: "复用", pending: true }] });
+    expect(connectionsOf(layout, "m").relations).toEqual([{ other: "b", direction: "in", label: "复用", pending: true }]);
+  });
+
+  it("says why a postponed tick moved: the day it was due, the day it is on now, or that it has no new time yet", () => {
+    expect(tickStory({ state: "postponed", day: "2026-10-24", plannedDay: "2026-10-12", scheduledDay: "2026-10-24" }))
+      .toEqual({ status: "已顺延", when: "原定 10/12 → 现排 10/24", why: "原定 10/12 已过，这一步还没完成，排程把它挪到了 10/24 的时间块。" });
+    expect(tickStory({ state: "postponed", day: "2026-10-21", plannedDay: "2026-10-12", scheduledDay: null }).when).toBe("原定 10/12 → 尚未重排");
+    expect(tickStory({ state: "done", day: "2026-10-03", plannedDay: "2026-10-05", scheduledDay: null })).toEqual({ status: "已达成", when: "完成于 10/3" });
+    expect(tickStory({ state: "planned", day: null, plannedDay: null, scheduledDay: null }).when).toBe("还没有排上日程");
   });
 });

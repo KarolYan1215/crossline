@@ -64,6 +64,21 @@ test("a profile or CV is about the person, even when it names only one project i
   expect(asked).toContain("n");
 });
 
+test("files read from a folder are not asked about one by one (a dated one still is, through the dates' own question)", () => {
+  const store = setup();
+  const doc = (id: string, fileName: string) => store.saveSourceDocument({ id, ownerId: "o", workspaceId: ws, kind: "text", fileName, mediaType: "text/plain",
+    sha256: id, uri: `file://${id}`, extractedText: "Lecture notes on device physics.", extractionStatus: "done", createdAt: "2026-10-05T00:00:00Z" });
+  doc("f1", "Downloads/Physics of Semiconductor Devices.pdf");
+  doc("f2", "手机上传/Engineering Hall 8.m4a 转写.txt");
+  doc("f3", "DEJA-VU/Reference Papers/Sensory.pdf");
+  doc("up", "notes.md");
+  const asked = collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "source_project").map((ask) => ask.entityId);
+  expect(asked).not.toContain("f1");
+  expect(asked).not.toContain("f2");
+  expect(asked).not.toContain("f3");
+  expect(asked).toContain("up");
+});
+
 test("a calendar event nothing places is asked about, and the person's answer colours it and survives a renamed line", async () => {
   const store = setup();
   const day = "2026-10-08";

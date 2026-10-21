@@ -30,9 +30,11 @@ export type MailDeps = { store: CrosslineStore; secrets: SecretStore; factory?: 
 const accounts = (store: CrosslineStore, workspaceId: string) => readMailAccounts(store.getSetting(workspaceId, MAIL_ACCOUNTS_SETTING));
 const saveAccounts = (store: CrosslineStore, workspaceId: string, list: MailAccount[]) => store.setSetting(workspaceId, MAIL_ACCOUNTS_SETTING, JSON.stringify(list));
 
-/** What the settings card shows: the accounts (no password), what sorting did lately, and the reply drafts (switch and latest). */
+/** What the settings card shows: the accounts (no password) with how much new mail waits to be sorted, what sorting did lately, and the reply drafts (switch and latest). */
 export function mailView(store: CrosslineStore, workspaceId: string) {
-  return { accounts: accounts(store, workspaceId), log: readMailLog(store.getSetting(workspaceId, MAIL_LOG_SETTING)).slice(-30).reverse(),
+  const waiting = new Map<string, number>();
+  for (const message of unsortedOf(store, workspaceId)) waiting.set(message.accountId, (waiting.get(message.accountId) ?? 0) + 1);
+  return { accounts: accounts(store, workspaceId).map((account) => ({ ...account, unsorted: waiting.get(account.id) ?? 0 })), log:readMailLog(store.getSetting(workspaceId, MAIL_LOG_SETTING)).slice(-30).reverse(),
     replies: mailRepliesView(store, workspaceId) };
 }
 
@@ -250,10 +252,13 @@ const FINAL_SKIPS = new Set(["already", "daily_limit", "off", "muted"]);
  */
 export function createMailService(deps: MailDeps & { cwd: string; client: (workspaceId: string) => CodexRpcBoundary | undefined;
   sortAllowed: (workspaceId: string) => Promise<boolean>; onNewMail?: (workspaceId: string, messages: NewMail[]) => void;
+  /** Sorting put to-dos or dates in the inbox: the capture analysis may start now rather than at the next tick. */
+  onCaptured?: (workspaceId: string) => void;
   /** Where reply drafts are written (`<dataDir>/mail-drafts/<workspace>`); without it no draft is written. */
   dataDir?: string;
   log?: (event: Record<string, unknown>) => void }) {
   const running = new Set<string>();
+  const rerun = new Set<string>();
   /** When each workspace's sent folders were last looked at: no more often than new mail is read. */
   const sentCheckedAt = new Map<string, number>();
   const replyDeps = (workspaceId: string) => ({ store: deps.store, dataDir: deps.dataDir ?? "", cwd: deps.cwd, client: deps.client(workspaceId), ...(deps.now ? { now: deps.now } : {}),
@@ -264,21 +269,34 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
     } });
   async function pass(workspaceId: string, force = false): Promise<{ read: number; sorted?: Awaited<ReturnType<typeof triageMail>>;
     drafts?: Awaited<ReturnType<typeof draftReplies>>; followUp?: Awaited<ReturnType<typeof followUpReplies>> }> {
-    if (running.has(workspaceId) || !accounts(deps.store, workspaceId).length) return { read: 0 };
+    if (!accounts(deps.store, workspaceId).length) return { read: 0 };
+    // A forced pass (an account connected, sorting switched on) during a running one goes right after it instead of being dropped.
+    if (running.has(workspaceId)) { if (force) rerun.add(workspaceId); return { read: 0 }; }
     running.add(workspaceId);
     try {
       const fresh = await readNewMail(deps, workspaceId, force);
       if (fresh.length) { try { deps.onNewMail?.(workspaceId, fresh); } catch { /* the automations decide for themselves */ } }
       const now = (deps.now?.() ?? new Date()).getTime();
       const seen = new Set(fresh.map(mailKey));
-      const waiting = unsortedOf(deps.store, workspaceId).filter((message) => !seen.has(mailKey(message)) && now - Date.parse(message.date || "1970-01-01") < 3 * 86_400_000);
+      const list = accounts(deps.store, workspaceId);
+      const known = new Set(list.map((account) => account.id));
+      const sortingOn = new Set(list.filter((account) => account.triage).map((account) => account.id));
+      const stored = unsortedOf(deps.store, workspaceId);
+      const waiting = stored.filter((message) => known.has(message.accountId) && !seen.has(mailKey(message))
+        && now - Date.parse(message.date || "1970-01-01") < 3 * 86_400_000);
       const batch = [...waiting, ...fresh].slice(-40);
-      const allowed = batch.length || replyQueueOf(deps.store, workspaceId).length ? await deps.sortAllowed(workspaceId) : false;
+      // Mail on an account with sorting off is kept unsorted too (three days, like the rest): switching sorting on sorts it at once.
+      const toSort = batch.filter((message) => sortingOn.has(message.accountId));
+      const sortingOff = batch.filter((message) => !sortingOn.has(message.accountId));
+      const allowed = toSort.length || replyQueueOf(deps.store, workspaceId).length ? await deps.sortAllowed(workspaceId) : false;
       let sorted: Awaited<ReturnType<typeof triageMail>> | undefined;
-      if (batch.length) {
-        sorted = allowed ? await triageMail({ ...deps, client: deps.client(workspaceId) }, workspaceId, batch) : { state: "skipped" as const, reason: "quota" };
-        // Kept for the next pass unless sorted (or there was nothing to sort on these accounts).
-        deps.store.setSetting(workspaceId, UNSORTED_SETTING, JSON.stringify(sorted.state === "done" || sorted.reason === "nothing" ? [] : batch));
+      if (toSort.length) {
+        sorted = allowed ? await triageMail({ ...deps, client: deps.client(workspaceId) }, workspaceId, toSort) : { state: "skipped" as const, reason: "quota" };
+        if (sorted.state === "done" && sorted.captured) { try { deps.onCaptured?.(workspaceId); } catch { /* the analysis runs at the next intake anyway */ } }
+      }
+      // Kept for the next pass unless sorted.
+      if (batch.length || stored.length) {
+        deps.store.setSetting(workspaceId, UNSORTED_SETTING, JSON.stringify(sorted?.state === "skipped" ? batch : sortingOff));
       }
       // Drafts for what needs the person's answer: this pass's, and those a passing failure held back (three days at most).
       let drafts: Awaited<ReturnType<typeof draftReplies>> | undefined;
@@ -297,12 +315,15 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
         if (checkSent) sentCheckedAt.set(workspaceId, now);
         followUp = await followUpReplies(replyDeps(workspaceId), workspaceId, { checkSent });
       }
-      if (batch.length || drafts || followUp?.closed || followUp?.told || followUp?.reminded) {
+      if (fresh.length || sorted || drafts || followUp?.closed || followUp?.told || followUp?.reminded) {
         deps.log?.({ type: "mail.pass", workspaceId, read: fresh.length, ...(sorted ?? {}), ...(sorted?.state === "done" ? { needsReply: sorted.needsReply.length } : {}),
           ...(drafts ? { drafts: { drafted: drafts.drafted, notNeeded: drafts.notNeeded, skipped: drafts.skipped.length } } : {}), ...(followUp ? { followUp } : {}) });
       }
       return { read: fresh.length, ...(sorted ? { sorted } : {}), ...(drafts ? { drafts } : {}), ...(followUp ? { followUp } : {}) };
-    } finally { running.delete(workspaceId); }
+    } finally {
+      running.delete(workspaceId);
+      if (rerun.delete(workspaceId)) void pass(workspaceId, true).catch(() => undefined);
+    }
   }
   async function handle(method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined): Promise<{ status: number; body: unknown } | undefined> {
     if (method === "GET" && pathname === "/v1/mail") return { status: 200, body: mailView(deps.store, workspaceId) };
@@ -316,7 +337,12 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
     if (method === "POST" && pathname === "/v1/mail/check") return { status: 200, body: { ok: true, ...(await pass(workspaceId, true)) } };
     const one = /^\/v1\/mail\/accounts\/([a-z0-9-]{1,40})(\/triage|\/bookkeeping)?$/.exec(pathname);
     if (one && method === "DELETE" && !one[2]) return { status: 200, body: { ok: removeMailAccount(deps, workspaceId, one[1]!) } };
-    if (one && method === "POST" && one[2] === "/triage") return { status: 200, body: { ok: setMailTriage(deps.store, workspaceId, one[1]!, body?.on === true) } };
+    if (one && method === "POST" && one[2] === "/triage") {
+      const ok = setMailTriage(deps.store, workspaceId, one[1]!, body?.on === true);
+      // Switched on: the last three days' mail is sorted now, not in up to fifteen minutes (as on connecting).
+      if (ok && body?.on === true) void pass(workspaceId, true).catch(() => undefined);
+      return { status: 200, body: { ok } };
+    }
     if (one && method === "POST" && one[2] === "/bookkeeping") return { status: 200, body: { ok: setMailBookkeeping(deps.store, workspaceId, one[1]!, body?.on === true) } };
     return undefined;
   }

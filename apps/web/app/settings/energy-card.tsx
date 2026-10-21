@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { SegmentedControl } from "../ui/controls";
+import { SetupGuide } from "../ui/setup-guide";
+import { captureShortcutGuide, phoneHealthGuide, recordsGuide } from "../../lib/setup-guides";
 
 export type EnergyStatus = {
   /** The model's reading of now: its level, how sure, and why. */
@@ -33,9 +35,11 @@ const SURE = { low: "把握低，需要时询问", medium: "把握中等", high:
  * connection — iPhone automations that post the bed and wake moments and a morning health summary with a token made here (shown once),
  * and Siri 「记一下」 with its own capture token. Set once, then nothing to do each day; never prompted.
  */
-export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: EnergyStatus; phoneUrl: string | null;
+export function EnergyCard({ status, phoneUrl, hostSignals = true, privateNetwork = true }: { status: EnergyStatus; phoneUrl: string | null;
   /** False for a guest: 作息记录 and 键鼠节律 read the computer Crossline runs on, which is not theirs. */
-  hostSignals?: boolean }) {
+  hostSignals?: boolean;
+  /** The phone reaches this computer over the private network (not the hosted address), which the guides say. */
+  privateNetwork?: boolean }) {
   const [token, setToken] = useState("");
   const [tracking, setTracking] = useState(status.sleepTracking);
   const [trackingNote, setTrackingNote] = useState("");
@@ -63,11 +67,10 @@ export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: E
     const response = await fetch("/api/health/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope }) }).catch(() => undefined);
     const body = await response?.json().catch(() => null) as { token?: string } | null;
     if (!body?.token) { setNote("未能生成，请重试"); return; }
-    if (scope === "capture") setCaptureToken(body.token); else if (scope === "records") setRecordsToken(body.token); else setToken(body.token);
+    if (scope === "capture") setCaptureToken(body.token); else if (scope === "records") setRecordsToken(body.token); else { setToken(body.token); setPhoneHealth(true); }
     setNote("令牌只显示这一次；重新生成后旧的立即失效。");
   };
-  const base = phoneUrl ?? "https://<本机的私有网络地址>";
-  const endpoint = `${base}/api/health/sleep`;
+  const at = { base: phoneUrl ?? "https://<本机的私有网络地址>", privateNetwork };
   return <section className="st-card" aria-label="精力">
     <header><h3>精力</h3><small>由作息推算，按本人自评校准；把握低时才询问</small></header>
     {hostSignals && <><div className="st-row"><span className="st-row-label">作息记录<small>只记电脑 4 小时以上无活动（如夜间）的开始与结束时刻，用于推算睡眠；关闭即删除</small></span>
@@ -83,7 +86,12 @@ export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: E
     <div className="st-row"><span className="st-row-label">手机健康数据<small>手机快捷指令发来的睡眠、起床与入睡时刻，以及当天的心率、手腕温度、步数和日照；生成健康令牌即开启；关闭即删除，令牌失效</small></span>
       <SegmentedControl label="手机健康数据" value={phoneHealth ? "on" : "off"} onChange={(next) => void changeSignal("phone_health", next === "on")}
         options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
-    {phoneHealth && status.phoneDaily && <div className="st-row"><span className="st-row-label">步数与日照<small>{Number(status.phoneDaily.day.slice(5, 7))}/{Number(status.phoneDaily.day.slice(8, 10))} 手机发来；与本人近 28 天比，明显偏向精力低的一侧时才下调当天可排的量</small></span>
+    {/* The token button and its tutorial sit right under the switch they turn on (2026-10-21: the steps used to be folded at the card's foot). */}
+    <div className="st-row"><span className="st-row-label">手机接入<small>{status.phoneConnected ? "已设置过健康令牌；重新生成后旧的立即失效" : "生成健康令牌，再按下方教程在手机上设置一次"}</small></span>
+      <button type="button" className="secondary-button" onClick={() => void issue("health")}>{status.phoneConnected || token ? "重新生成健康令牌" : "生成健康令牌"}</button></div>
+    {token && <p className="st-note">健康令牌：<b className="st-token">{token}</b></p>}
+    <SetupGuide guide={phoneHealthGuide(at)} />
+    {phoneHealth && status.phoneDaily &&<div className="st-row"><span className="st-row-label">步数与日照<small>{Number(status.phoneDaily.day.slice(5, 7))}/{Number(status.phoneDaily.day.slice(8, 10))} 手机发来；与本人近 28 天比，明显偏向精力低的一侧时才下调当天可排的量</small></span>
       <span>{status.phoneDaily.steps !== undefined ? `${status.phoneDaily.steps.toLocaleString("zh-CN")} 步` : "步数未发"} · {status.phoneDaily.daylightMin !== undefined ? `日照 ${status.phoneDaily.daylightMin} 分钟` : "日照未发"}</span></div>}
     {signalNote && <p role="status" className="st-note">{signalNote}</p>}
     {status.signals.length > 0 && <ul className="st-list">{status.signals.map((signal) => <li key={signal.id}>{signal.label}：{signal.enabled
@@ -93,31 +101,14 @@ export function EnergyCard({ status, phoneUrl, hostSignals = true }: { status: E
     <ul className="st-list">{status.now.basis.map((line) => <li key={line}>{line}</li>)}</ul>
     <div className="st-row"><span className="st-row-label">依据<small>近 14 天</small></span>
       <span>电脑空闲推断 {status.nights.screen} 晚 · 手机记录 {status.nights.phone} 晚 · 自评 {status.reports} 次{status.reports ? `（与模型一致 ${Math.round(status.agreement * 100)}%）` : ""}</span></div>
-    <details className="st-details advanced">
-      <summary>手机接入（可选）{status.phoneConnected ? "：已设置" : ""}</summary>
-      <p className="st-note">每项在 iPhone「快捷指令」→「自动化」里设置一次，选「立即运行」，之后每天无需操作。手机需连接同一私有网络（Tailscale）。只保存时刻和当天的汇总数字。</p>
-      <ol className="st-steps">
-        <li>点「生成健康令牌」，复制令牌。下面每个「获取 URL 内容」都填 URL <b>{endpoint}</b>、方法 POST、头部 <b>Authorization</b> = <b>Bearer 令牌</b>。</li>
-        <li><b>起床时刻</b>：新建自动化「闹钟」→ 选「已停止」（或「睡眠」→「醒来」），动作「获取 URL 内容」，请求体 JSON：<b>events</b> = 一项词典 <b>type</b> = wake、<b>at</b> = 当前日期（ISO 8601）。</li>
-        <li><b>入睡时刻</b>：新建自动化「睡眠」→「就寝时间开始」（或打开「睡眠」专注模式时），同上，<b>type</b> = bed。</li>
-        <li><b>晨间健康汇总</b>：新建自动化每天 9:00。「查找健康样本」取过去 1 天的「睡眠分析」，用「重复」把每项写成词典 <b>start</b> / <b>end</b>（ISO 8601）加入变量 <b>睡眠</b>；再取「心率变异性」「静息心率」的平均值、「步数」「日照时间」的总和；有 Apple Watch 时取「手腕温度」与平时的差值。请求体 JSON：<b>sleep</b>、<b>hrvMs</b>、<b>restingHr</b>、<b>steps</b>、<b>daylightMin</b>、<b>wristTempDeltaC</b>（缺的不填）、<b>day</b> = 当前日期（yyyy-MM-dd）。有健康主线时可再加 <b>weightKg</b>（最近一次体重）、<b>kcal</b>（当天摄入能量），以及 <b>workouts</b> = 每次体能训练一项词典 <b>id</b>、<b>start</b>、<b>minutes</b>、<b>type</b>：它们记成健康主线的记录，用来判断体重、运动次数一类的里程碑。用 Health Auto Export 的「REST API」自动导出到同一地址也可以。</li>
-        <li>Android：用健康数据转发应用（读取 Health Connect）按同样的 JSON 发送，并加 <b>source</b> = android-health。</li>
-      </ol>
-      <div className="st-row"><button type="button" className="secondary-button" onClick={() => void issue("health")}>{status.phoneConnected ? "重新生成健康令牌" : "生成健康令牌"}</button>
-        {token && <b className="st-token">{token}</b>}</div>
-      <ol className="st-steps">
-        <li><b>Siri「记一下」</b>：新建快捷指令，命名「记一下」。动作「听写文本」，再「获取 URL 内容」：URL <b>{`${base}/api/capture/shortcut`}</b>、方法 POST、头部 <b>Authorization</b> = <b>Bearer 收集令牌</b>、请求体 JSON <b>text</b> = 听写的文本。之后说「嘿 Siri，记一下」即可收集，系统随后自动分析。</li>
-      </ol>
-      <div className="st-row"><button type="button" className="secondary-button" onClick={() => void issue("capture")}>生成收集令牌</button>
-        {captureToken && <b className="st-token">{captureToken}</b>}</div>
-      <p className="st-note">自动记账（有财富主线时）：付款提醒和到账通知自动成为记账记录。最稳的是银行与商家的提醒邮件（在「日历与连接」接入邮箱即可）；下面两种是补充。记账令牌只能写记账记录。</p>
-      <ol className="st-steps">
-        <li><b>iPhone 钱包</b>：新建自动化「交易」，选卡片，动作「获取 URL 内容」：URL <b>{`${base}/api/records`}</b>、方法 POST、头部 <b>Authorization</b> = <b>Bearer 记账令牌</b>、请求体 JSON <b>records</b> = 一项词典 <b>clientId</b> = 当前日期、<b>domain</b> = wealth、<b>kind</b> = expense、<b>value</b> = 金额、<b>currency</b> = CNY、<b>merchant</b> = 商户、<b>at</b> = 当前日期。苹果的这个自动化偶尔不触发或超时，漏掉的由邮件补上。</li>
-        <li><b>Android</b>：用通知转发应用（如 MacroDroid、Tasker）在微信、支付宝或银行 App 发出通知时，POST 到同一地址，请求体 JSON <b>notifications</b> = 一项词典 <b>id</b>（通知的唯一编号）、<b>app</b>、<b>title</b>、<b>text</b>、<b>at</b>。只有写明一个金额的付款或到账通知会记下，其余忽略。</li>
-      </ol>
-      <div className="st-row"><button type="button" className="secondary-button" onClick={() => void issue("records")}>生成记账令牌</button>
-        {recordsToken && <b className="st-token">{recordsToken}</b>}</div>
-      {note && <p role="status" className="st-note">{note}</p>}
-    </details>
+    <div className="st-row"><span className="st-row-label">Siri「记一下」<small>对 Siri 说一句话直接进收集；收集令牌只能写收集</small></span>
+      <button type="button" className="secondary-button" onClick={() => void issue("capture")}>{captureToken ? "重新生成收集令牌" : "生成收集令牌"}</button></div>
+    {captureToken && <p className="st-note">收集令牌：<b className="st-token">{captureToken}</b></p>}
+    <SetupGuide guide={captureShortcutGuide(at)} />
+    <div className="st-row"><span className="st-row-label">手机自动记账<small>有财富主线时，付款与到账通知记成收支；记账令牌只能写收支记录</small></span>
+      <button type="button" className="secondary-button" onClick={() => void issue("records")}>{recordsToken ? "重新生成记账令牌" : "生成记账令牌"}</button></div>
+    {recordsToken && <p className="st-note">记账令牌：<b className="st-token">{recordsToken}</b></p>}
+    <SetupGuide guide={recordsGuide(at)} />
+    {note && <p role="status" className="st-note">{note}</p>}
   </section>;
 }

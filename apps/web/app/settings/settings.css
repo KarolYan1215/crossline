@@ -1,12 +1,20 @@
 /* ── settings: index + modules ─────────────── */
-.st-layout{display:grid;grid-template-columns:168px minmax(0,1fr);gap:20px;align-items:start}
-.st-nav{position:sticky;top:12px;display:grid;gap:2px;border-left:1px solid var(--mist)}
-.st-nav a{padding:6px 10px;font-size:13px;color:var(--graphite);text-decoration:none;border-left:3px solid transparent;margin-left:-2px}
-.st-nav a:hover{color:var(--ink)}
-.st-nav a[aria-current="true"]{color:var(--ink);font-weight:700;border-left-color:var(--ink)}
-.st-sections{display:grid;gap:28px;min-width:0}
-.st-section{display:grid;gap:10px;scroll-margin-top:16px}
-.st-section>h2{margin:0;font-size:16px}
+/* Each module is its own block with a dark title band, and the index beside it is a column of separate entries that stays in view
+   (2026-10-21: the modules ran into one another and the lower ones took long scrolling to find). A long module lists its parts under
+   its entry, so any card is one click away. */
+.st-layout{display:grid;grid-template-columns:188px minmax(0,1fr);gap:20px;align-items:start}
+.st-nav{position:sticky;top:12px;display:grid;gap:6px;max-height:calc(100vh - 24px);overflow-y:auto}
+.st-nav-item{display:grid;gap:2px}
+.st-nav a{display:block;padding:7px 10px;font-size:13px;color:var(--ink);text-decoration:none;border:1px solid var(--mist);background:var(--paper)}
+.st-nav a:hover{border-color:var(--ink)}
+.st-nav a[aria-current="true"]{font-weight:700;border-color:var(--ink);box-shadow:inset 4px 0 0 var(--ink)}
+.st-nav-sub{display:grid;gap:0;padding-left:12px}
+.st-nav .st-nav-sub a{padding:3px 8px;font-size:12px;color:var(--graphite);border:0;border-left:1px solid var(--mist);background:transparent;box-shadow:none}
+.st-nav .st-nav-sub a:hover{color:var(--ink);border-left-color:var(--ink)}
+.st-sections{display:grid;gap:20px;min-width:0}
+.st-section{display:grid;gap:12px;padding:0 14px 14px;border:1px solid var(--ink);background:var(--paper);scroll-margin-top:16px;min-width:0}
+.st-section>h2{margin:0 -14px;padding:8px 14px;font-size:16px;background:var(--ink);color:var(--paper)}
+.st-section [id]{scroll-margin-top:16px}
 .st-modules{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(380px,100%),1fr));gap:12px;align-items:start}
 .st-card{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--mist);background:var(--paper);min-width:0}
 .st-card>header{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
@@ -59,9 +67,13 @@
 .plan-sync-icon{margin-left:0;padding:4px 9px;font-size:14px}
 @media (max-width:760px){
   .st-layout{grid-template-columns:minmax(0,1fr)}
-  .st-nav{top:0;z-index:5;display:flex;overflow-x:auto;border-left:0;border-bottom:1px solid var(--mist);background:var(--paper)}
-  .st-nav a{white-space:nowrap;border-left:0;border-bottom:3px solid transparent;margin:0}
-  .st-nav a[aria-current="true"]{border-bottom-color:var(--ink)}
+  .st-nav{top:0;z-index:5;display:flex;gap:6px;max-height:none;overflow-x:auto;padding:6px 0;border-bottom:1px solid var(--mist);background:var(--paper)}
+  .st-nav-sub{display:none}
+  .st-nav a{white-space:nowrap}
+  .st-nav a[aria-current="true"]{box-shadow:inset 0 -3px 0 var(--ink)}
+  .st-section{padding:0 10px 10px}
+  .st-section>h2{margin:0 -10px;padding:8px 10px}
+  .st-section,.st-section [id]{scroll-margin-top:60px}
 }
 .st-details{display:grid;gap:8px;font-size:13px}
 .st-details summary{cursor:pointer;font-weight:700}
@@ -116,7 +128,6 @@
 /* Subscription calendars (connectors/calendar-subscriptions.tsx): the link, an optional name, and where each app keeps the link. */
 .calendar-subscriptions-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,160px) auto;gap:6px;align-items:center}
 .calendar-subscriptions-form input{min-width:0;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink)}
-.calendar-subscriptions-guide{margin:0;padding-left:18px;display:grid;gap:2px;font-size:13px}
 .calendar-subscriptions-providers{display:flex;flex-wrap:wrap;gap:6px}
 .calendar-subscriptions-providers a{text-decoration:none}
 .calendar-subscriptions-providers a[aria-current]{outline:2px solid var(--ink);outline-offset:1px}
@@ -160,8 +171,13 @@
 .bg-degraded p{grid-column:1/-1;margin:0}
 .bg-degraded ul{margin:2px 0 0;padding-left:18px}
 /* The mailbox (connectors/mail-accounts.tsx) and automations (settings/automations-card.tsx), docs/personal-agent.md. */
-.mail-accounts-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:6px;align-items:center}
+.mail-accounts-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:8px 10px;align-items:end}
+.mail-field{display:grid;gap:3px;font-size:13px;min-width:0}
+.mail-field>span{font-weight:700}
+.mail-field small{font-size:12px;color:var(--graphite);overflow-wrap:anywhere}
 .mail-accounts-form input{min-width:0;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink)}
+.mail-accounts-form>button{justify-self:start;align-self:center}
+.mail-owner{margin:0;padding:4px 8px;font-size:13px;background:var(--chalk);overflow-wrap:anywhere}
 .mail-accounts .st-inline{display:inline-flex;gap:4px;align-items:center;font-size:13px}
 /* The assistant's output folder (settings/outputs-card.tsx). */
 .outputs-total{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
@@ -178,4 +194,46 @@
 .st-automation-new select{font:inherit;font-size:13px;margin-left:6px}
 .st-automation .st-row-label{display:grid;gap:2px}
 .st-automation-actions{display:flex;flex-wrap:wrap;gap:6px}
-@media (max-width:640px){.mail-accounts-form{grid-template-columns:minmax(0,1fr)}.st-automation{display:grid;gap:6px}}
+@media (max-width:640px){.st-automation{display:grid;gap:6px}}
+
+/* The tutorial beside each connect button (app/ui/setup-guide.tsx): steps by provider, the values to copy in full, official pages, mistakes. */
+.setup-guide{display:grid;gap:8px;font-size:13px;padding:2px 0 2px 10px;border-left:3px solid var(--ink);min-width:0}
+.setup-guide>summary{cursor:pointer;font-weight:700}
+.setup-guide-intro,.setup-guide-note{margin:0;color:var(--graphite);max-width:46em}
+.setup-guide-tabs{display:flex;flex-wrap:wrap;gap:4px}
+.setup-guide-tabs button{font:inherit;font-size:13px;padding:3px 10px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);cursor:pointer}
+.setup-guide-tabs button[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+.setup-guide-body{display:grid;gap:6px;min-width:0}
+.setup-guide-steps{margin:0;padding-left:20px;display:grid;gap:4px;line-height:1.6;max-width:46em}
+.setup-guide-facts{margin:0;display:grid;gap:2px}
+.setup-guide-facts>div{display:grid;grid-template-columns:minmax(4.5em,max-content) minmax(0,1fr);gap:2px 10px;padding:3px 8px;background:var(--chalk)}
+.setup-guide-facts dt{color:var(--graphite)}
+.setup-guide-facts dd{margin:0;overflow-wrap:anywhere}
+.setup-guide-links{margin:0;display:flex;flex-wrap:wrap;gap:4px 14px}
+.setup-guide-problems{display:grid;gap:4px}
+.setup-guide-problems dl{margin:0;display:grid;gap:4px}
+.setup-guide-problems dt{font-weight:700;overflow-wrap:anywhere}
+.setup-guide-problems dd{margin:0 0 0 12px;color:var(--graphite);max-width:46em}
+@media (max-width:640px){.setup-guide-facts>div{grid-template-columns:minmax(0,1fr)}}
+.st-section-cards{display:grid;gap:12px;min-width:0}
+/* Skill 库 folded to a summary (settings/skill-library.tsx): counts per kind that open its list, what needs the person, recent use, search. */
+.sk-overview{gap:10px}
+.sk-counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:6px}
+.sk-counts button{display:grid;justify-items:start;gap:1px;padding:8px 10px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.sk-counts button:hover{border-color:var(--ink)}
+.sk-counts button[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 -3px 0 var(--ink)}
+.sk-counts b{font-size:20px;font-variant-numeric:tabular-nums}
+.sk-counts span{font-size:13px}
+.sk-counts small{font-size:12px;color:var(--graphite)}
+.sk-attention,.sk-recent{margin:0;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:13px}
+.sk-recent>span{color:var(--graphite)}
+.sk-recent small{margin-left:6px;font-size:12px;color:var(--graphite)}
+.sk-search{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:end}
+.sk-search-field{flex:1 1 240px;display:grid;gap:2px;font-size:12px;color:var(--graphite)}
+.sk-search-field input{font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);min-width:0}
+.sk-item{display:grid;gap:6px;min-width:0}
+.sk-item>summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:13px;min-width:0}
+.sk-item>summary small{font-size:12px;color:var(--graphite)}
+.sk-item>summary strong{overflow-wrap:anywhere}
+.sk-item>summary::before{content:"▸";color:var(--graphite)}
+.sk-item[open]>summary::before{content:"▾"}

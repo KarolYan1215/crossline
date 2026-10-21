@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SetupGuide } from "../ui/setup-guide";
+import { phonePushGuide } from "../../lib/setup-guides";
 
 type Device = { device: string; origin: string; createdAt: string; endpointHost: string };
 
@@ -15,16 +17,19 @@ const deviceName = () => /iPhone/.test(navigator.userAgent) ? "iPhone" : /iPad/.
  * Turns on notifications for this device. An iPhone only allows it for the app added to the home screen and opened from there, and
  * only on the https (tailnet) address — each condition is said plainly instead of the button silently doing nothing.
  */
-export function PhonePush() {
+export function PhonePush({ privateNetwork = true }: { privateNetwork?: boolean } = {}) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [status, setStatus] = useState("");
   const [blocker, setBlocker] = useState("");
+  // The guide opens on the tab for the device the page is open on.
+  const [device, setDevice] = useState<string | undefined>();
   const load = async () => {
     const body = await fetch("/api/push", { cache: "no-store" }).then((r) => r.json()).catch(() => null) as { devices?: Device[] } | null;
     setDevices(body?.devices ?? []);
   };
   useEffect(() => {
     void load();
+    setDevice(/iPhone|iPad/.test(navigator.userAgent) ? "iphone" : /Android/.test(navigator.userAgent) ? "android" : "desktop");
     const standalone = window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
     if (location.protocol !== "https:") setBlocker("要在手机上用 https 的 Tailscale 地址打开这一页，才能开启推送。");
     else if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window))
@@ -65,5 +70,6 @@ export function PhonePush() {
         {devices.length > 0 && <button type="button" onClick={() => void test()}>发一条测试推送</button>}
       </div>}
     {status && <small role="status">{status}</small>}
+    <SetupGuide guide={phonePushGuide(privateNetwork)} selected={device} />
   </div>;
 }

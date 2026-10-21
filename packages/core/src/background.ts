@@ -12,7 +12,7 @@ export const BACKGROUND_KINDS: ReadonlyArray<{ kind: BackgroundKind; label: stri
   { kind: "planning", label: "拆分与步骤规划", explained: "从里程碑倒推任务、给任务排步骤、复核与改写",
     skills: ["crossline-goal-backplanner", "crossline-step-planner", "crossline-validation-reviewer", "crossline-progress-judge", "crossline-goal-splitter",
       "crossline-task-titler", "crossline-archetype-curator", "crossline-milestone-architect", "crossline-milestone-risk-reviewer", "crossline-artifact-planner", "crossline-background-facts"] },
-  { kind: "tutorials", label: "任务教程", explained: "为 48 小时内要做的任务查资料、写教程",
+  { kind: "tutorials", label: "任务教程", explained: "只为 3 天内开工、要学新内容或新方法的任务写教程，只查确实需要外部资料的步骤；整理、确认、沟通类任务按步骤做，不写教程",
     skills: ["crossline-manualbook-designer", "crossline-material-researcher", "crossline-material-writer"] },
   { kind: "assistant", label: "助手代办与自动化", explained: "助手代为完成准备类杂事，按时或按触发条件跑本人设的自动化", skills: ["crossline-agent", "crossline-agent-tools", "crossline-automation-designer"] },
   { kind: "research", label: "主线调研", explained: "每周为每条主线上网调研一次，并对照研究复核精力时段建议", skills: ["crossline-due-diligence", "crossline-energy-advisor"] },

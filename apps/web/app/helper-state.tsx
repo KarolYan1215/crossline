@@ -28,6 +28,9 @@ async function refresh(): Promise<void> {
   for (const listener of listeners) listener(shared);
 }
 
+/** Reads the figure again now (the person just picked another one), instead of at the next poll. */
+export function refreshHelper(): void { void refresh(); }
+
 /**
  * The 小帮手's figure and background state, shared by the floating button and the conversation's avatars: one request every thirty
  * seconds for the whole page, however many places show the figure.

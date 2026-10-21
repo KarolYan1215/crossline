@@ -167,6 +167,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .runtime-banner{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin:10px 0 0;padding:8px 12px;border:1.5px solid #8A1F24;background:#FBEDEE;color:#5C1418;font-size:13px;line-height:1.5}
 .runtime-banner b{font-size:14px}
 .runtime-banner a{color:#5C1418;text-decoration:underline}
+.runtime-banner[data-code="sponsor_standin"]{border-color:#2E4A5C;background:#EEF3F6;color:#1B2E3A}
 .today-day{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);gap:14px;align-items:stretch}
 .today-day:has(>.today-asks:empty){grid-template-columns:minmax(0,1fr)}
 .today-day>.today-asks{position:relative;min-height:0}

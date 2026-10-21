@@ -1,8 +1,32 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { RecordingOverview, VoiceprintState } from "../../lib/recordings";
+import type { RecordingOverview, ServerRecordings, VoiceprintState } from "../../lib/recordings";
 import { SegmentedControl } from "../ui/controls";
+import { SetupGuide } from "../ui/setup-guide";
+import { recordingUploadGuide } from "../../lib/setup-guides";
+
+const later = (minutes: number) => minutes < 60 ? `约 ${minutes} 分钟后` : `约 ${Math.floor(minutes / 60)} 小时${minutes % 60 ? ` ${minutes % 60} 分钟` : ""}后`;
+const day = (iso: string, timeZone: string) => {
+  try { return new Intl.DateTimeFormat("zh-CN", { timeZone, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso)); }
+  catch { return iso.slice(0, 16).replace("T", " "); }
+};
+
+/** 已转写 / 等待转写（何时开始）/ 无人声 / 失败（原因）, and the last few transcripts with whether their summary exists yet. */
+export function ServerRecordingStatus({ server }: { server: ServerRecordings }) {
+  const { opens } = server;
+  return <>
+    <p className="st-note" aria-label="服务器转写进度">已转写 {server.transcribed} 个 · 等待转写 {server.waiting} 个 · 无人声 {server.silent} 个 · 失败 {server.failedCount} 个</p>
+    {server.waiting > 0 && <p className="st-note">{opens.inMinutes === 0
+      ? "现在是夜间转写时段，等待的录音按收到的先后逐个转写。"
+      : `等待的录音在本人时区（${opens.timeZone}）${opens.at} 开始转写，${later(opens.inMinutes)}。`}</p>}
+    {server.recent.length > 0 && <ul className="st-list" aria-label="最近转写的录音">{server.recent.map((item) =>
+      <li key={item.documentId}><a href={`/api/source-documents/${encodeURIComponent(item.documentId)}/file`}>{item.file}</a>
+        <small>{day(item.at, opens.timeZone)} 转写，{item.minutes} 分钟；{item.digested ? "摘要已整理进材料" : "摘要待整理（需要模型额度）"}</small></li>)}</ul>}
+    {server.failed.length > 0 && <ul className="st-list" aria-label="没有转写成的上传">{server.failed.map((item, index) =>
+      <li key={`${item.file}-${index}`}><span>{item.file}</span><small>没有转写成：{item.note}</small></li>)}</ul>}
+  </>;
+}
 
 /**
  * 录音在服务器转写 (docs/phone-recording.md 「服务器转写」): the phone's shortcut uploads recordings with a token of their own, the server
@@ -48,28 +72,18 @@ export function ServerRecordingCard({ server, done }: { server: NonNullable<Reco
         <button type="button" onClick={() => setAsking(false)}>取消</button>
       </span></div>}
     {note && <p role="status" className="st-note">{note}</p>}
+    {(on || server.transcribed + server.silent + server.failedCount + server.waiting > 0) && <ServerRecordingStatus server={server} />}
     {on && <>
-      <p className="st-note">等待转写 {server.waiting} 个。转完的录音会整理成摘要：闲聊和视频声不保留，本人答应做的事记为收集，需本人确认后才排进日程。</p>
+      <p className="st-note">转完的录音会整理成摘要：闲聊和视频声不保留，本人答应做的事记为收集，需本人确认后才排进日程。</p>
       <div className="st-row st-row-wrap"><span className="st-row-label">上传令牌<small>只能上传录音，不能读任何内容</small></span>
         <button type="button" onClick={() => void issue()}>{token ? "重新生成" : "生成上传令牌"}</button></div>
       {token && <ul className="st-list" aria-label="快捷指令要填的内容">
         <li><span>网址</span><small className="mono">{endpoint}</small></li>
         <li><span>请求头 Authorization</span><small className="mono">Bearer {token}</small></li>
       </ul>}
-      <details className="st-details"><summary>快捷指令怎么设</summary>
-        <ol className="st-steps">
-          <li>「快捷指令」App → 新建快捷指令，命名「上传到 Crossline」；在「ⓘ」里打开「在共享表单中显示」，接收类型只留「媒体」和「文件」。</li>
-          <li>加「获取名称」（输入：快捷指令输入），再加「URL 编码」编码这个名称。</li>
-          <li>加「获取 URL 内容」：网址填上面的网址并在末尾接上编码后的名称，方法 POST，请求头 Authorization 填上面的值，请求体选「文件」，文件选「快捷指令输入」。</li>
-          <li>加「显示通知」，内容选「URL 的内容」。</li>
-          <li>用 iPhone 自带的「语音备忘录」录音（锁屏后继续录）；录完点开这条录音 →「…」→「共享」→「上传到 Crossline」。通知里出现 ok 和 size 就是收到了。</li>
-        </ol>
-        <p className="st-note">不用另装 App。同一个录音传两次只转一次。快捷指令的「查找录音」只交出录音标题，拿不到音频，所以不能做成退出语音备忘录就自动上传，每条要分享一次。录音时别的 App 放声音，语音备忘录会停录。单个录音不超过 300 MB，每天合计不超过 3 GB。</p>
-      </details>
+      <SetupGuide guide={recordingUploadGuide(endpoint)} {...(token ? { open: true } : {})} />
     </>}
     {on && <VoiceprintSection initial={server.voiceprint} />}
-    {server.failed.length > 0 && <ul className="st-list" aria-label="没有转写成的上传">{server.failed.map((item, index) =>
-      <li key={`${item.file}-${index}`}><span>{item.file}</span><small>{item.note}</small></li>)}</ul>}
     <p className="st-note">录到别人说话前，需让对方知情，并遵守当地关于录音的法律。</p>
   </section>;
 }

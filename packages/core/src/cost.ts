@@ -97,7 +97,14 @@ export const BACKGROUND_BLOCKER = "background.blocker";
 /** `message` is for the person; `reason` is the runtime's own words, kept for logs and for telling a down worker apart. */
 export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; message: string; resetsAt?: string; reason?: string };
   /** Absent reads as `active` (callers that do not track the person). */
-  engagement?: Engagement };
+  engagement?: Engagement;
+  /** The fullest window's share used, when the reading has one: core work stops at `CORE_STOP_PERCENT`, intake runs on to 100%. */
+  usedPercent?: number };
+/**
+ * Core background work stops here and leaves the last of the quota to intake (capture analysis, calendar filing) and the person's own
+ * turns: what the person just put in is turned into something usable last of all (2026-10-21).
+ */
+export const CORE_STOP_PERCENT = 95;
 
 /**
  * The one reading of the quota for background work. It replaced eight copies of the same check that disagreed about an
@@ -124,7 +131,36 @@ export function backgroundSpend(signal: CostSignal): BackgroundSpend {
   const resetsAt = fullest?.resetsAt ? new Date(fullest.resetsAt * 1000).toISOString() : undefined;
   return mode === "manual_core_only"
     ? { mode, blocker: { code: "BUDGET_EXHAUSTED", message: `模型额度已用 ${Math.round(used)}%，后台自动工作暂停到额度恢复。`, ...(resetsAt ? { resetsAt } : {}) } }
-    : { mode };
+    : { mode, usedPercent: used };
+}
+
+/**
+ * The account's own ChatGPT quota is spent while it also holds the developer's model (2026-10-21, the owner's 「chatgpt额度达到时，如果
+ * 账号有赞助模型授权，应该切换成赞助模型继续」). The worker writes `{at, source, until?}` when a reading shows the quota spent (`quota`,
+ * `until` the spent window's reset) or a run came back `SKILL_USAGE_LIMIT` (`usage_limit`, which carries no reset); every Skill the
+ * developer's model may serve goes there until then, and the next reading that shows the quota back clears it.
+ */
+export const CHATGPT_EXHAUSTED_SETTING = "model.chatgptExhausted";
+export type ChatgptExhausted = { at: string; source: "quota" | "usage_limit"; until?: string };
+/** How long a refused run alone (no reading with a reset time) keeps the account on the developer's model before ChatGPT is tried again. */
+export const USAGE_LIMIT_HOLD_MS = 30 * 60_000;
+
+/** Whether a reading of the ChatGPT quota says it is spent, and until when: the same line `backgroundSpend` pauses at. */
+export function chatgptQuotaSpent(signal: CostSignal): { until?: string } | undefined {
+  if (!signal.available || signal.money) return undefined;
+  const spend = backgroundSpend(signal);
+  if (spend.mode !== "manual_core_only" || !spend.blocker) return undefined;
+  return spend.blocker.resetsAt ? { until: spend.blocker.resetsAt } : {};
+}
+
+/** The stored mark while it still holds: until its reset time, or `USAGE_LIMIT_HOLD_MS` after a refused run that gave none. */
+export function chatgptExhausted(raw: string | undefined, now: Date): ChatgptExhausted | undefined {
+  if (!raw) return undefined;
+  let mark: ChatgptExhausted;
+  try { mark = JSON.parse(raw) as ChatgptExhausted; } catch { return undefined; }
+  if (!mark?.at) return undefined;
+  const end = mark.until ? Date.parse(mark.until) : Date.parse(mark.at) + USAGE_LIMIT_HOLD_MS;
+  return Number.isFinite(end) && end > now.getTime() ? mark : undefined;
 }
 
 /**
@@ -146,5 +182,7 @@ export function degradedService(code: string): { works: string[]; paused: string
 export function spendAllows(spend: BackgroundSpend, kind: SpendKind): boolean {
   const engagement = spend.engagement ?? "active";
   if (engagement === "dormant" || (engagement === "cooling" && kind !== "intake")) return false;
-  return kind === "discretionary" ? spend.mode === "normal" : spend.mode !== "manual_core_only";
+  if (kind === "discretionary") return spend.mode === "normal";
+  if (kind === "core" && (spend.usedPercent ?? 0) >= CORE_STOP_PERCENT) return false;
+  return spend.mode !== "manual_core_only";
 }

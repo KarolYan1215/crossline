@@ -21,7 +21,7 @@ export function RuntimeBanner() {
 
 /** The bar itself; exported for its test. */
 export function RuntimeAlert({ status }: { status: RuntimeStatus }) {
-  return <p className="runtime-banner" role="alert" data-code={status.code}>
+  return <p className="runtime-banner" role={status.code === "sponsor_standin" ? "status" : "alert"} data-code={status.code}>
     <b>{status.title}</b>{status.message}
     {status.code === "signed_out" && <a href="/settings#model">去连接</a>}
     {status.code === "sponsor_waiting" && <a href="/settings#model">连接自己的模型</a>}

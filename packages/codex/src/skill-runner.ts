@@ -5,7 +5,7 @@ import { cleanAnswerStrings } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
 import { createUsageCollector, currentSpendMode, currentUsageWorkspace, reportUsage, type UsageCollector } from "./usage";
-import { currentProviderRouting, decideRoute, type ThreadProvider } from "./providers";
+import { currentProviderRouting, decideRoute, noteChatgptUsageLimit, type ThreadProvider } from "./providers";
 import { markClientBusy, priorityForSkill, withModelSlot, type ModelPriority } from "./model-gate";
 import { accountModels, fitRoute } from "./model-catalog";
 
@@ -380,6 +380,26 @@ async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: s
     return result ?? { ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；排队时取消，没有开始运行。" }, audit: {} };
   };
   return isAssistant(options.skillName) ? inLane(agentLanes, `${runtimeKey(client)}:agent`, gated) : gated();
+}
+
+/**
+ * Which model provider each kept thread was started on (`codex` for the account's own sign-in). A thread keeps the provider it was
+ * started with, so a later turn whose route has moved (ChatGPT's quota spent and the developer's model standing in, or back) is answered
+ * `SKILL_THREAD_LOST`, which the conversations already rebuild from (concierge, interview). Unknown threads (after a restart) go on.
+ */
+const threadRoutes = new Map<string, string>();
+const THREAD_ROUTES_MAX = 2_000;
+const routeOf = (context: RunContext) => context.provider?.id ?? "codex";
+function rememberThreadRoute(client: object, threadId: string, context: RunContext): void {
+  const key = `${runtimeKey(client)}:${threadId}`;
+  threadRoutes.delete(key);
+  threadRoutes.set(key, routeOf(context));
+  if (threadRoutes.size > THREAD_ROUTES_MAX) threadRoutes.delete(threadRoutes.keys().next().value!);
+}
+/** Whether this thread was started on another provider than the turn's route. */
+function threadRouteMoved(client: object, threadId: string, context: RunContext): boolean {
+  const started = threadRoutes.get(`${runtimeKey(client)}:${threadId}`);
+  return started !== undefined && started !== routeOf(context);
 }
 
 /** How long a run waited before it began, and for which account (logged with the run as `skill.run`). */
@@ -1018,7 +1038,19 @@ function failureResult<T>(client: CodexRpcBoundary, error: unknown, audit: Analy
  * One more turn on a thread a previous `runCodexSkill` call already started — the conversational follow-up path. There is no
  * thread to start, so no instructions, web grant or input preparation: those only ever apply at `thread/start`.
  */
-export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string, message: string,
+export async function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string, message: string,
+  options: ContinueTurnOptions<T>): Promise<SkillRunResult<T>> {
+  const onChatgpt = decideRoute(options.skillName, currentProviderRouting()).via === "codex";
+  const result = await continueOnThread(client, threadId, message, options);
+  // ChatGPT's quota refused the turn: once the developer's model serves this Skill the conversation is rebuilt there, the way a
+  // thread the runtime lost is (the thread itself stays on the provider it was started on).
+  if (!onChatgpt || result.ok || result.blocker.code !== "SKILL_USAGE_LIMIT") return result;
+  noteChatgptUsageLimit();
+  if (decideRoute(options.skillName, currentProviderRouting()).via !== "provider") return result;
+  return { ok: false, blocker: { code: "SKILL_THREAD_LOST", message: "ChatGPT 额度已用尽，这段对话改由开发者提供的模型接着进行。" }, audit: result.audit };
+}
+
+function continueOnThread<T>(client: CodexRpcBoundary, threadId: string, message: string,
   options: ContinueTurnOptions<T>): Promise<SkillRunResult<T>> {
   if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} });
   return inLane(threadLanes, `${runtimeKey(client)}:${threadId}`, () => executeSkill(client, options, async (context): Promise<SkillRunResult<T>> => {
@@ -1027,6 +1059,7 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
     const scope = openScope(client, options);
     const unregister = options.tools ? registerAgentThread(client, threadId, toolAnswerer(options.tools)) : undefined;
     try {
+      if (threadRouteMoved(client, threadId, context)) fail("SKILL_THREAD_LOST");
       await requireLogin(scope, context);
       await resubscribe(client, scope, threadId);
       const output = await runTurnsUntilValid(client, scope, context, audit, {
@@ -1046,7 +1079,17 @@ export function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: string,
 
 export async function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>): Promise<SkillRunResult<T>> {
   if (options.signal?.aborted) return { ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} };
-  const first = await executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
+  const onChatgpt = !options.provider && decideRoute(options.skillName, currentProviderRouting()).via === "codex";
+  let first = await executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
+  // The account's ChatGPT quota refused the run: the worker marks it spent, and where the developer's model now serves this Skill the
+  // run goes there once (2026-10-21). Nothing else changes about the run.
+  if (onChatgpt && !first.ok && first.blocker.code === "SKILL_USAGE_LIMIT" && !options.signal?.aborted) {
+    noteChatgptUsageLimit();
+    if (decideRoute(options.skillName, currentProviderRouting()).via === "provider") {
+      console.log(JSON.stringify({ type: "skill.rerun_on_sponsor", skill: options.skillName }));
+      first = await executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
+    }
+  }
   if (!options.redoOnRepair || options.mainModel || !first.ok || !first.audit.repairs || !onSkillModel(options)) return first;
   console.log(JSON.stringify({ type: "skill.redo_on_main_model", skill: options.skillName, repairs: first.audit.repairs }));
   const main = { ...options, mainModel: true };
@@ -1146,6 +1189,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted:
     await requireLogin(scope, context);
     const threadId = await openRunThread(client, scope, options, context, audit);
     audit.threadId = threadId;
+    rememberThreadRoute(client, threadId, context);
     options.onAudit({ ...audit });
     if (options.agent) {
       // One handler per thread: a tool call goes to the tools, everything else (approvals) to the guard.

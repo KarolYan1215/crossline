@@ -501,6 +501,7 @@ export * from "./question-ledger";
 export * from "./interview-checklist";
 export * from "./fixed-events";
 export * from "./portrait";
+export * from "./portrait-figure";
 export * from "./planning-profile";
 export * from "./context-selection";
 export * from "./portrait-type";

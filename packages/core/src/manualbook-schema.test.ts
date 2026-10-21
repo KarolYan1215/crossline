@@ -44,7 +44,8 @@ test("every required item needs a step that serves it, and a step cannot serve a
 
 test("a step that needs research must say what to look for", () => {
   refused(design({ nodes: [node("learn", { serves: ["c1"], researchQuestions: ["只有一个"] }), node("draw", { serves: ["c2"] })] }), "MANUAL_RESEARCH_QUESTION_MISSING");
-  refused(design({ nodes: [node("learn", { serves: ["c1"], needsResearch: false }), node("draw", { serves: ["c2"] })] }), "MANUAL_RESEARCH_QUESTION_MISSING");
+  // A step that needs nothing from outside the person's own files is not researched (2026-10-21).
+  expect(() => validateManualDesign(design({ nodes: [node("learn", { serves: ["c1"], needsResearch: false, researchQuestions: [] }), node("draw", { serves: ["c2"] })] }), context)).not.toThrow();
 });
 
 test("topological order puts every step after what it depends on, and is absent for a loop", () => {

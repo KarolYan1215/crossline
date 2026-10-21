@@ -148,6 +148,21 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
   return [...rows.values()].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
 }
 
+/**
+ * The finished results that are still the person's to look at: `needs_review`, less the ones nobody can act on any more (2026-10-21,
+ * walking the real account: 35 results waited, the oldest from 10-08) — a result for a task since accepted or archived, and an older run
+ * of the same piece of work (same task and deliverable, or the same grown workflow) that a later finished run replaced. Those keep their
+ * status and their files; they are only no longer a decision. 待确认, its count and the input box read this.
+ */
+export function resultsAwaitingReview(store: CrosslineStore, workspaceId: string, rows: AgentTaskRow[] = listAgentTasks(store, workspaceId)): AgentTaskRow[] {
+  const gone = new Set(store.listWorkOrders(workspaceId).filter((order) => order.state === "accepted" || order.state === "archived").map((order) => order.id));
+  const key = (row: AgentTaskRow) => `${row.workOrderId}|${deliverableKey(row.title)}`;
+  const latest = new Map<string, string>();
+  for (const row of rows) if (row.status === "needs_review" || row.status === "accepted")
+    if (row.requestedAt > (latest.get(key(row)) ?? "")) latest.set(key(row), row.requestedAt);
+  return rows.filter((row) => row.status === "needs_review" && !(row.workOrderId && gone.has(row.workOrderId)) && latest.get(key(row)) === row.requestedAt);
+}
+
 /** The person's verdict on a finished task: records it, and moves the kind's trust accordingly. */
 export function reviewAgentTask(store: CrosslineStore, workspaceId: string, taskId: string, decision: "accepted" | "rejected", note = ""):
   { ok: true; trust: CategoryState | undefined } | { ok: false; code: "TASK_NOT_FOUND" | "TASK_NOT_REVIEWABLE" } {

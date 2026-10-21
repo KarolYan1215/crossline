@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { formatInTimeZone } from "date-fns-tz";
-import { closeMailReply, listAgentTasks, type StoredConversationMessage } from "@crossline/db";
+import { closeMailReply, resultsAwaitingReview, type StoredConversationMessage } from "@crossline/db";
 import {
   ACTIONS, AUTOMATIONS_SETTING, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
   type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
@@ -122,7 +122,7 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     automations: readAutomations(store.getSetting(ctx.workspaceId, AUTOMATIONS_SETTING)).map((item) => ({ name: item.name, trigger: triggerLabel(item.trigger), status: item.status, lineId: item.lineId })),
     mailboxes: readMailAccounts(store.getSetting(ctx.workspaceId, MAIL_ACCOUNTS_SETTING)).length,
     ops: recentOps(ctx, now).map((op) => ({ id: op.id, label: op.label, at: op.at })),
-    agentResults: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review")
+    agentResults: resultsAwaitingReview(store, ctx.workspaceId)
       .map((task) => ({ taskId: task.taskId, title: task.title, summary: `产出：${task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)).slice(0, 6).join("、") || "无"}${task.needsHuman ? `；${task.needsHuman} 项需本人完成` : ""}` })),
     materials: docs.map((doc) => ({ id: doc.id, fileName: doc.fileName, project: doc.projectId ? projects.get(doc.projectId) ?? "" : "" })),
     projects: store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, line: label(project.identityId) })),

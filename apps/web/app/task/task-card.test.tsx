@@ -52,10 +52,12 @@ describe("task card", () => {
 
   test("a proposal shows its first step and when the tutorial comes; one without steps says it is being prepared", () => {
     const planned = base({ state: "awaiting_plan_approval", stepPlan: { archetypeLabel: "习题", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", progress: 0, units: [], questions: [],
-      steps: [step("a", { title: "列出题目", firstAction: "打开作业 PDF" })] } });
+      steps: [step("a", { title: "列出题目", firstAction: "打开作业 PDF" })] }, preparation: { level: "tutorial", reason: "要学新内容" } });
     const html = renderToStaticMarkup(<TaskCard detail={planned} />);
     expect(html).toContain("第一步");
-    expect(html).toContain("开工前一周会备好教程。");
+    expect(html).toContain("开工前三天会备好教程。");
+    // Work its steps prepare enough gets no promise of a tutorial (docs/task-preparation.md).
+    expect(renderToStaticMarkup(<TaskCard detail={{ ...planned, preparation: { level: "steps", reason: "" } }} />)).not.toContain("教程");
     expect(html).toContain("等本人批准");
     expect(renderToStaticMarkup(<TaskCard detail={base({ state: "awaiting_plan_approval" })} />)).toContain("准备中：步骤规划生成后再请本人确认。");
   });

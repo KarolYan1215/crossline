@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
-import { tutorialWorthIt } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { dayLabel, formatMinutes } from "../ui/controls";
 import { useReturnState } from "../ui/return-state";
@@ -68,8 +67,8 @@ function CardStep({ detail, step, proposal, finished, waiting }: {
   detail: TaskDetail; step: ReturnType<typeof currentStep>; proposal: boolean; finished: boolean; waiting: boolean;
 }) {
   if (finished) return null;
-  // A proposal is shown with what the person will do first; its tutorial is written once approved work is a week from its first block
-  // (`TUTORIAL_LEAD_DAYS`, 2026-10-15), so the card says when rather than showing nothing. One without steps yet is still being prepared.
+  // A proposal is shown with what the person will do first; its tutorial, when it gets one (`preparation`), is written once approved work is three days
+  // from its first block (`TUTORIAL_LEAD_DAYS`, 2026-10-21), so the card says when rather than showing nothing. One without steps yet is still being prepared.
   if (!detail.stepPlan) return <p className="task-card-step-note">{proposal ? "准备中：步骤规划生成后再请本人确认。"
     : <>步骤规划中 · 全程约 <span className="mono">{formatMinutes(detail.estimate.p50Minutes)}</span></>}</p>;
   if (!step) return <p className="task-card-step-note">步骤已完成</p>;
@@ -79,7 +78,6 @@ function CardStep({ detail, step, proposal, finished, waiting }: {
     <p className="task-card-step-title"><small>{proposal ? "第一步" : "当前"}</small><span>{step.title}</span>
       {step.schedulable && <span className="mono task-card-minutes">约 {formatMinutes(step.estimate.p50Minutes)}</span>}</p>
     {step.firstAction && <p className="task-card-first"><small>先做</small><span className="gen">{step.firstAction}</span></p>}
-    {proposal && tutorialWorthIt({ title: detail.title, intent: detail.intent, p50Minutes: detail.estimate.p50Minutes }, detail.stepPlan?.steps)
-      && <p className="task-card-step-note">开工前一周会备好教程。</p>}
+    {proposal && detail.preparation?.level === "tutorial" && <p className="task-card-step-note">开工前三天会备好教程。</p>}
   </div>;
 }

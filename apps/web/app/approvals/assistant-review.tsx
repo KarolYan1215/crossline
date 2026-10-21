@@ -136,7 +136,7 @@ function RunRecord({ audit }: { audit: TaskAudit["audit"] }) {
 /** The assistant's part of 待确认: kinds of work it asks to start, questions it put mid-run, and results waiting for review. */
 export function AssistantReview({ ctx, deferred = () => undefined }: { ctx: AccessContext; deferred?: (workOrderId: string) => string | undefined }) {
   const view = loadAssistant(ctx);
-  const results = view.tasks.filter((task) => task.status === "needs_review");
+  const results = view.reviews;
   // Results for work that need not start within a week are folded (decided 2026-10-10), the soonest to come up first.
   const review = results.filter((task) => !deferred(task.workOrderId));
   const later = results.filter((task) => deferred(task.workOrderId)).sort((a, b) => deferred(a.workOrderId)!.localeCompare(deferred(b.workOrderId)!));

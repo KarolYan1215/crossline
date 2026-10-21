@@ -19,7 +19,7 @@ test("a preview is a summary of the thing the ask is about, read from the ledger
     uri: "file://doc-1", extractedText: "ECE 555   Schedule\n\nWeek 1 intro", extractionStatus: "done", createdAt: "2026-10-01T00:00:00Z" });
   store.setSetting("ws", "portrait.report", JSON.stringify({ version: 2, report: { cover: { portrait: "边做边改的人。", coreConflict: "", keywords: ["跨界", "实证"], tagline: "边做边改" },
     type: { breadth: 70, evidence: 40, making: 30, planning: 60, evidence_text: {} } } }));
-  store.setSetting("ws", "portrait.images", JSON.stringify({ version: 2, images: { character: { at: "2026-10-14" } } }));
+  store.setSetting("ws", "portrait.images", JSON.stringify({ version: 2, images: { character: { file: "v2-character.png", at: "2026-10-14" } } }));
   const previews = loadAskPreviews(CTX, [
     ask("file", { kind: "file", href: "/api/source-documents/doc-1/file", label: "syllabus" }),
     ask("portrait", { kind: "portrait", href: "/portrait", label: "当前画像" }),
@@ -27,6 +27,6 @@ test("a preview is a summary of the thing the ask is about, read from the ledger
     ask("none", undefined)
   ]);
   expect(previews.file).toEqual({ kind: "file", fileName: "syllabus.txt", excerpt: "ECE 555 Schedule Week 1 intro" });
-  expect(previews.portrait).toMatchObject({ kind: "portrait", image: "/api/portrait/image/character?v=2026-10-14", tagline: "边做边改", keywords: ["跨界", "实证"] });
+  expect(previews.portrait).toMatchObject({ kind: "portrait", image: "/api/portrait/image/character?file=v2-character.png&v=2026-10-14", tagline: "边做边改", keywords: ["跨界", "实证"] });
   expect(Object.keys(previews).sort()).toEqual(["file", "portrait"]);
 });

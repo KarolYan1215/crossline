@@ -31,6 +31,15 @@ describe("settings page", () => {
     // Each assistant capability is on or off (2026-10-15): results take effect by default, only what needs the person is reviewed.
     expect(html).toContain("助手做完的结果默认直接生效");
     expect(html).not.toContain("逐次审阅");
+    // Every card in a long module is one click from the index, and each connection has its tutorial beside its button (2026-10-21).
+    for (const anchor of ["#phone", "#mail", "#calendar-subscriptions", "#model", "#energy"]) {
+      expect(html).toContain(`href="${anchor}"`);
+      expect(html).toContain(`id="${anchor.slice(1)}"`);
+    }
+    expect(html.indexOf('id="st-calendar"')).toBeLessThan(html.indexOf('id="st-notify"'));
+    for (const guide of ["接入教程：各家邮箱的授权码与服务器", "接入教程：手机健康数据", "接入教程：Siri「记一下」", "接入教程：各日历的订阅链接"]) expect(html).toContain(guide);
+    // The Skill library opens folded to its summary.
+    expect(html).toContain("Skill 库概览");
     globalThis.crosslineStore.close();
     globalThis.crosslineStore = undefined;
   }, 20000);

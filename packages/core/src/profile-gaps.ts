@@ -1,4 +1,5 @@
 import type { TurnQuestion } from "./onboarding-turn-schema";
+import { APPEARANCE_FACT_SLOT as APPEARANCE_SLOT } from "./portrait-figure";
 import { courseCodeOf } from "./task-title";
 
 /**
@@ -257,8 +258,6 @@ export function undatedKey(title: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
 }
 
-/** Person facts that already say how they look, so the appearance question is not asked. */
-const APPEARANCE_SLOT = /^(appearance|appearance_skipped|gender|hairstyle|clothing_preference)$/;
 
 const MEETING_SLOT = /^(meeting|class)_?times?$|^no_meetings$/;
 

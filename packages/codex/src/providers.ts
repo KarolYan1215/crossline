@@ -80,9 +80,23 @@ export type ProviderRouting = {
   blocked?: { code: "MODEL_SPONSOR_PENDING" | "MODEL_SPONSOR_BUDGET"; message: string };
   /** A model of the same provider for one Skill (the developer's cheaper model for simple background work); otherwise the provider's. */
   modelFor?: (skillKey: string) => string | undefined;
+  /**
+   * Set while the account's own ChatGPT quota is spent and the developer's model stands in (`CHATGPT_EXHAUSTED_SETTING`): what the
+   * developer's model cannot serve is refused with that said, rather than sent to a ChatGPT login that would refuse it again.
+   */
+  chatgptExhausted?: { until?: string };
 };
 
 let resolver: ((workspaceId: string | undefined) => ProviderRouting | undefined) | undefined;
+let usageLimitHandler: ((workspaceId: string) => void) | undefined;
+/** Installed once by the worker: a run on the account's own ChatGPT came back `SKILL_USAGE_LIMIT` (the quota is spent). */
+export function setUsageLimitHandler(next: ((workspaceId: string) => void) | undefined): void { usageLimitHandler = next; }
+/** Tells the worker the current workspace's ChatGPT quota refused a run, so the routing that follows can move to the developer's model. */
+export function noteChatgptUsageLimit(): void {
+  const workspaceId = currentUsageWorkspace();
+  if (!workspaceId) return;
+  try { usageLimitHandler?.(workspaceId); } catch { /* the next quota reading says the same */ }
+}
 /** Installed once by the worker; with none installed every run keeps the Codex sign-in it always had. */
 export function setProviderResolver(next: ((workspaceId: string | undefined) => ProviderRouting | undefined) | undefined): void { resolver = next; }
 export function currentProviderRouting(): ProviderRouting | undefined {
@@ -121,6 +135,11 @@ export function decideRoute(skillName: string, routing: ProviderRouting | undefi
   if (!gap && routing.admitted.has(key)) return { via: "provider", provider: threadProvider(routing, model, key) };
   if (routing.codexSignedIn) return { via: "codex" };
   const label = SKILL_NEEDS[key]?.label ?? "这项功能";
+  if (routing.chatgptExhausted) {
+    const until = routing.chatgptExhausted.until ? `，${routing.chatgptExhausted.until.slice(0, 16).replace("T", " ")}（UTC）恢复` : "";
+    return { via: "blocked", code: gap ? "MODEL_CAPABILITY_MISSING" : "MODEL_NOT_ADMITTED",
+      message: `ChatGPT 额度已用尽${until}；${label}开发者提供的模型做不了${gap ? `（${gap}）` : ""}，等 ChatGPT 额度恢复后继续。` };
+  }
   return gap ? { via: "blocked", code: "MODEL_CAPABILITY_MISSING", message: gap }
     : { via: "blocked", code: "MODEL_NOT_ADMITTED", message: `${label}还没有交给「${routing.provider.label}」：它还没通过这项功能的检验。到 设置 → 模型连接 运行检验，或登录 ChatGPT。` };
 }

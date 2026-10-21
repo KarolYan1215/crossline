@@ -8,6 +8,8 @@
 export const RECORDING_TRANSCRIBED_EVENT = "recording.transcribed";
 /** A recording with no speech in it: also never transcribed again. */
 export const RECORDING_SILENT_EVENT = "recording.silent";
+/** An uploaded recording the server transcriber could not read (its audio is deleted). */
+export const RECORDING_FAILED_EVENT = "recording.failed";
 /** The person turned 录音自动转写 off and chose to delete the transcripts. */
 export const RECORDING_PURGED_EVENT = "recording.transcripts_deleted";
 /** Set once when recordings wait for the speech model, so the person is told once and not on every pass. */
@@ -73,15 +75,21 @@ export const RECORDING_UPLOAD_DAILY_LIMIT = 3 * 1024 * 1024 * 1024;
 /** The hours the transcriber works for a workspace, in its own zone; `CROSSLINE_TRANSCRIBE_WINDOW` overrides it as `HH:MM-HH:MM`. */
 export const TRANSCRIBE_WINDOW = "01:00-06:00";
 
-/** Whether `at` falls inside `window` (`HH:MM-HH:MM`, which may cross midnight) in `timeZone`. A malformed window falls back to the default. */
-export function inTranscribeWindow(at: Date, timeZone: string, window = TRANSCRIBE_WINDOW): boolean {
+const windowBounds = (window: string) => {
   const parsed = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(window) ?? /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(TRANSCRIBE_WINDOW)!;
-  const from = Number(parsed[1]) * 60 + Number(parsed[2]), to = Number(parsed[3]) * 60 + Number(parsed[4]);
-  let minute = at.getUTCHours() * 60 + at.getUTCMinutes();
+  return { from: Number(parsed[1]) * 60 + Number(parsed[2]), to: Number(parsed[3]) * 60 + Number(parsed[4]), start: `${parsed[1]}:${parsed[2]}` };
+};
+const minuteOfDay = (at: Date, timeZone: string) => {
   try {
     const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at).map((part) => [part.type, part.value]));
-    minute = (Number(parts.hour) % 24) * 60 + Number(parts.minute);
-  } catch { /* UTC */ }
+    return (Number(parts.hour) % 24) * 60 + Number(parts.minute);
+  } catch { return at.getUTCHours() * 60 + at.getUTCMinutes(); }
+};
+
+/** Whether `at` falls inside `window` (`HH:MM-HH:MM`, which may cross midnight) in `timeZone`. A malformed window falls back to the default. */
+export function inTranscribeWindow(at: Date, timeZone: string, window = TRANSCRIBE_WINDOW): boolean {
+  const { from, to } = windowBounds(window);
+  const minute = minuteOfDay(at, timeZone);
   return from <= to ? minute >= from && minute < to : minute >= from || minute < to;
 }
 
@@ -98,4 +106,11 @@ export function audioKind(head: Uint8Array): string | undefined {
   if (head[0] === 0xff && head[1] !== undefined && (head[1] & 0xf6) === 0xf0) return "aac";
   if (head[0] === 0xff && head[1] !== undefined && (head[1] & 0xe0) === 0xe0) return "mp3";
   return undefined;
+}
+
+/** When the transcriber next takes uploads: 0 inside the window, else the minutes until it opens, with the clock time it opens at. */
+export function transcribeWindowOpens(at: Date, timeZone: string, window = TRANSCRIBE_WINDOW): { inMinutes: number; at: string } {
+  const { from, start } = windowBounds(window);
+  if (inTranscribeWindow(at, timeZone, window)) return { inMinutes: 0, at: start };
+  return { inMinutes: (from - minuteOfDay(at, timeZone) + 24 * 60) % (24 * 60), at: start };
 }

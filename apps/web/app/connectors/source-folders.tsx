@@ -1,6 +1,11 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { groupPattern, type SourceFolder } from "@crossline/core";
+import { SetupGuide } from "../ui/setup-guide";
+import { SOURCE_FOLDER_GUIDE } from "../../lib/setup-guides";
+
+/** Windows' 「复制为路径」 wraps the path in quotes; the worker takes the path as typed, so they are taken off here. */
+export const withoutQuotes = (value: string) => value.replace(/^\s*["'“”]|["'“”]\s*$/g, "");
 
 type PreviewFile = { relative: string; size: number; nameOnly?: true; duplicates?: number };
 type PreviewGroup = { name: string; files: number; nameOnly: number; bytes: number; list: PreviewFile[]; more: number };
@@ -143,10 +148,11 @@ export function SourceFolders({ onChanged }: { onChanged?: () => void }) {
       <FolderRules folder={folder} busy={busy} onSave={(exclude, include) => void saveRules(folder, exclude, include)} />
     </div>)}
     <form className="source-folders-form" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) void look(); }}>
-      <input value={draft} onChange={(event) => { setDraft(event.target.value); setPreview(undefined); }} placeholder="文件夹完整路径，如 D:\课程资料"
+      <input value={draft} onChange={(event) => { setDraft(withoutQuotes(event.target.value)); setPreview(undefined); }} placeholder="文件夹完整路径，如 D:\课程资料"
         aria-label="文件夹路径" disabled={busy} spellCheck={false} />
       <button type="submit" className="ob-btn secondary-button" disabled={busy || !draft.trim()}>{busy && !preview ? "查看中…" : "查看"}</button>
     </form>
+    <SetupGuide guide={SOURCE_FOLDER_GUIDE} />
     {preview && chosen && <div className="source-folders-preview" role="status">
       <p>将读取 <b>{Math.min(chosen.files, preview.limit)}</b> 个文件（共 {megabytes(chosen.bytes)}）{preview.nameOnly ? `，另有 ${preview.nameOnly} 个只记文件名` : ""}
         {preview.duplicates ? `；${preview.duplicates} 个相同副本只读一份` : ""}

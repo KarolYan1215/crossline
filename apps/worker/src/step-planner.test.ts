@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { CrosslineStore, addAiTool } from "@crossline/db";
-import { createStepPlanner, createWarningReviewer, requestFinerSplits, taskWindow, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
+import { OUTDATED_PLAN_FEEDBACK, createStepPlanner, createWarningReviewer, requestFinerSplits, requestOutdatedReplans, taskWindow, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { materializeDatePairs } from "./date-pairs";
 import { taskFromWorkOrder } from "./agent-dispatch";
 import { scriptedRuntime } from "./testing/fake-runtime";
@@ -247,6 +247,38 @@ test("the task changed last is planned first, ahead of an older backlog", () => 
     store.saveWorkOrder({ ...order("proposal"), state: "awaiting_plan_approval" });
     expect(tasksAwaitingStepPlan(store, workspaceId)[0]).toBe("proposal");
   } finally { vi.useRealTimers(); }
+});
+
+test("a plan from before first actions and AI assists is planned again once, and only when its work starts within a week", () => {
+  const store = new CrosslineStore(":memory:");
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
+    seed(store);
+    store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
+      steps: [step("a", "solve"), step("b", "submit", { dependsOn: ["a"] })] }, ownerId, "planned");
+    const now = new Date("2026-10-21T12:00:00Z");
+    vi.setSystemTime(now);
+    // Its work has no time this week: left alone.
+    expect(requestOutdatedReplans(store, workspaceId, now)).toEqual([]);
+    store.setSetting(workspaceId, "schedule.orderStarts", JSON.stringify({ wo: "2026-10-23T14:00:00Z" }));
+    expect(requestOutdatedReplans(store, workspaceId, now)).toEqual(["wo"]);
+    expect(tasksAwaitingStepPlan(store, workspaceId)).toEqual(["wo"]);
+    expect((store.listEvents(workspaceId, { type: "task.steps_replan_requested" }).at(-1)!.payload as { feedback: string }).feedback).toBe(OUTDATED_PLAN_FEEDBACK);
+    // Asked once, even while the replan has not run yet.
+    expect(requestOutdatedReplans(store, workspaceId, now)).toEqual([]);
+  } finally { vi.useRealTimers(); store.close(); }
+});
+
+test("a plan that already gives first actions is not replanned for being old", () => {
+  const store = new CrosslineStore(":memory:");
+  seed(store);
+  store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
+    steps: [step("a", "solve", { firstAction: "打开题目 1，写下已知量" }), step("b", "submit", { dependsOn: ["a"] })] }, ownerId, "planned");
+  const now = new Date();
+  store.setSetting(workspaceId, "schedule.orderStarts", JSON.stringify({ wo: new Date(now.getTime() + 86_400_000).toISOString() }));
+  expect(requestOutdatedReplans(store, workspaceId, now)).toEqual([]);
+  store.close();
 });
 
 test("a step not got through on two days is planned again smaller, once: 未执行 one day, a block nobody started the next", () => {

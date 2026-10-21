@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import type { RecordingOverview } from "../../lib/recordings";
 import { SegmentedControl } from "../ui/controls";
+import { SetupGuide } from "../ui/setup-guide";
+import { LOCAL_RECORDING_GUIDE } from "../../lib/setup-guides";
 import type { TranscriptionStatus } from "../onboarding/transcription-card";
 
 /**
@@ -70,6 +72,7 @@ export function RecordingCard({ overview }: { overview: RecordingOverview }) {
     {overview.cost && <p className="st-note">最近 {overview.cost.recordings} 个录音（共 {overview.cost.audioHours} 小时）：每小时录音约用 {overview.cost.minutesPerHour} 分钟转写。</p>}
     {overview.failed.length > 0 && <ul className="st-list" aria-label="没有转写成的录音">{overview.failed.map((item) =>
       <li key={item.file}><span>{item.file}</span><small>{item.note}</small></li>)}</ul>}
+    <SetupGuide guide={LOCAL_RECORDING_GUIDE} />
     <p className="st-note">录到别人说话前，需让对方知情，并遵守当地关于录音的法律。</p>
   </section>;
 }

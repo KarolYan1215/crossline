@@ -3,9 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { RECORDING_CONSENT, RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
+import {
+  RECORDING_CONSENT, RECORDING_DIGESTED_EVENT, RECORDING_FAILED_EVENT, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING,
+  sourceFolderIndexSetting, transcribeWindowOpens
+} from "@crossline/core";
 import { CrosslineStore } from "@crossline/db";
-import { recordingOverview, setRecordingConsent } from "./recordings";
+import { recordingOverview, serverRecordings, setRecordingConsent } from "./recordings";
 
 let store: CrosslineStore;
 let workspaceId: string;
@@ -35,6 +38,35 @@ test("the overview counts what is done, waiting and failed, and the cost per hou
   store.setSetting(workspaceId, RECORDING_CONSENT, "granted");
   expect(recordingOverview(store, workspaceId)).toEqual({ on: true, folders: 1, queued: 1, done: 1, silent: 0,
     failed: [{ file: "phone/c.m4a", note: "格式读不了" }], cost: { recordings: 1, audioHours: 1, minutesPerHour: 6 } });
+});
+
+test("the server path counts what it transcribed, what waits and when the night window opens, and what failed", () => {
+  const ws = workspaceId;
+  // The 2026-10-21 case: one upload transcribed in the night, so nothing waits — the card used to say only 「等待转写 0 个」.
+  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.transcribed:server-sha", type: RECORDING_TRANSCRIBED_EVENT, entityId: "server-sha",
+    payload: { fileName: "Engineering Hall 8.m4a", seconds: 1059, speechSeconds: 1044, workMs: 103_911, wallMs: 103_911, documentId: "doc-2", where: "server", engine: "sensevoice-small" } });
+  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.silent:s", type: RECORDING_SILENT_EVENT, entityId: "s",
+    payload: { fileName: "空白.m4a", seconds: 60, speechSeconds: 0, workMs: 1, wallMs: 1, where: "server" } });
+  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.failed:f", type: RECORDING_FAILED_EVENT, entityId: "f", payload: { fileName: "坏.m4a", message: "ffmpeg 读不了" } });
+  const inbox = path.join(data, "recordings", "inbox", ws);
+  mkdirSync(inbox, { recursive: true });
+  writeFileSync(path.join(inbox, "1761025440000-abc.m4a"), "x");
+  writeFileSync(path.join(inbox, "1761025440000-abc.m4a.json"), "{\"name\":\"新录音 3\"}");
+  // 13:44 Shanghai = 00:44 Chicago: the window opens at 01:00, 16 minutes later.
+  const server = serverRecordings(store, ws, data, "America/Chicago", new Date("2026-10-21T05:44:00Z"));
+  expect(server).toMatchObject({ transcribed: 1, silent: 1, waiting: 1, failedCount: 1, opens: { inMinutes: 16, at: "01:00", timeZone: "America/Chicago" },
+    failed: [{ file: "坏.m4a", note: "ffmpeg 读不了" }],
+    recent: [{ file: "Engineering Hall 8.m4a", documentId: "doc-2", minutes: 18, digested: false }] });
+  expect(serverRecordings(store, ws, data, "America/Chicago", new Date("2026-10-21T06:06:00Z")).opens.inMinutes).toBe(0);
+  store.appendEvent({ ownerId, workspaceId: ws, idempotencyKey: "recording.digested:doc-2", type: RECORDING_DIGESTED_EVENT, entityId: "doc-2", payload: {} });
+  expect(serverRecordings(store, ws, data, "America/Chicago").recent[0]?.digested).toBe(true);
+});
+
+test("the window opening is counted across midnight in the person's zone", () => {
+  expect(transcribeWindowOpens(new Date("2026-10-21T17:30:00Z"), "Asia/Shanghai")).toEqual({ inMinutes: 0, at: "01:00" });
+  expect(transcribeWindowOpens(new Date("2026-10-21T16:00:00Z"), "Asia/Shanghai").inMinutes).toBe(60);
+  expect(transcribeWindowOpens(new Date("2026-10-21T15:00:00Z"), "Asia/Shanghai")).toEqual({ inMinutes: 2 * 60, at: "01:00" });
+  expect(transcribeWindowOpens(new Date("2026-10-21T11:00:00Z"), "Asia/Shanghai").inMinutes).toBe(6 * 60);
 });
 
 test("turned off with the transcripts kept, they stay in the materials", () => {

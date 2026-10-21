@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { portraitLabels, portraitType, redactPortrait, type EnergyRhythm, type PortraitReport, type PortraitType, type SayDoReading } from "@crossline/core";
 import { LineNetwork, type NetworkEdge } from "../ui/line-network";
+import { FigurePicker } from "./figure-picker";
 import { AdviceMatrix, DivergingAxes, EnergyScatter, Fit, GapChart, IdentityBars, RhythmChart, ValuesRadar } from "./portrait-charts";
 import { radarValues, rhythmStats } from "./poster-geometry";
 
@@ -31,10 +32,10 @@ const roleOf = (line: Line) => line.hard ? "硬约束" : line.rank === 1 ? "底�
 const edgesOf = (report: PortraitReport): NetworkEdge[] => report.lines.items.flatMap((item) => item.feeds.map((feed, index) => ({
   id: `${item.lineId}>${feed.toLineId}:${index}`, from: item.lineId, to: feed.toLineId, kind: "", explanation: feed.how, status: "confirmed" as const })));
 
-/** The cartoon figure for this version, when drawn. */
+/** The person's cartoon figure (the one they picked, else the latest drawn), when there is one. */
 function Figure({ state, className }: { state: State; className: string }) {
-  const at = state.images.character;
-  return at ? <img className={className} src={`/api/portrait/image/character?v=${encodeURIComponent(at)}`} alt="代表这一类型的卡通形象" /> : null;
+  const src = state.images.character;
+  return src ? <img className={className} src={src} alt="代表这一类型的卡通形象" /> : null;
 }
 
 /** A hard-coded section title, set in the poster's serif, with its number. */
@@ -142,6 +143,12 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     return () => clearInterval(timer);
   }, [state.writing, drawing]);
 
+  // The picker says which figure is now the person's; the page shows that one at once.
+  const showFigure = useCallback((url: string | null) => setState((current) => {
+    const images = { ...current.images };
+    if (url) images.character = url; else delete images.character;
+    return images.character === current.images.character ? current : { ...current, images };
+  }), []);
   const write = async () => {
     setStatus("");
     const response = await fetch("/api/portrait", { method: "POST" }).catch(() => null);
@@ -193,6 +200,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
       <button type="button" disabled={state.writing} onClick={() => void write()}>{state.writing ? "重新生成中…" : "重新生成"}</button>
       {drawing && <small role="status">卡通形象生成中…</small>}
     </div>
+    <FigurePicker onCurrent={showFigure} />
 
     <div className="pt-doc">
       <SharePart report={raw} state={state} ordered={ordered} />

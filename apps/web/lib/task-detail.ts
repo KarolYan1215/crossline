@@ -1,7 +1,7 @@
 import "server-only";
-import { archetypeById, completionRule, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type SuccessCriterion,
+import { archetypeById, completionRule, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type Preparation, type SuccessCriterion,
   type EvidenceQuestionTemplate } from "@crossline/core";
-import { listAgentTasks, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
+import { doneKinds, listAgentTasks, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
 import { effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
@@ -16,7 +16,9 @@ const quartersOfVerdict: Record<string, number> = { met: 4, partial: 2, unmet: 0
 function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWorkOrder[]): Map<string, TaskExtras> {
   const ids = new Set(orders.map((order) => order.id));
   const projects = new Map(store.listProjects(workspaceId, { includeArchived: true }).map((project) => [project.id, project.name]));
-  const plans = new Map(store.listStepPlans(workspaceId).filter((plan) => ids.has(plan.workOrderId)).map((plan) => [plan.workOrderId, plan]));
+  const allPlans = store.listStepPlans(workspaceId);
+  const plans = new Map(allPlans.filter((plan) => ids.has(plan.workOrderId)).map((plan) => [plan.workOrderId, plan]));
+  const done = doneKinds(store, workspaceId, allPlans);
   const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const relations = store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" || relation.status === "candidate");
@@ -94,6 +96,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       ...(plan ? { stepPlan: { archetypeLabel: archetypeById(plan.archetypeId)?.label ?? plan.archetypeId, quantity: plan.quantity, rationale: plan.rationale,
         progress: taskProgress(finishedSteps(order.state, plan.steps)), steps: finishedSteps(order.state, plan.steps), units: plan.units,
         questions: plan.questions.map((question) => { const answer = answerOf(order.projectId, question.text); return { ...question, ...(answer ? { answer } : {}) }; }) } } : {}),
+      preparation: preparationOf(order, plan, done),
       supports, workedMinutes: worked, ...(artifactLinks.length ? { artifactLinks } : {}),
       criteria: (milestone?.successCriteria ?? []).map((criterion) => {
         if (personConfirmed.has(criterion.id)) return { id: criterion.id, statement: criterion.statement, quarters: 4, by: "person" as const };
@@ -195,6 +198,8 @@ export type TaskExtras = {
   window: { notBefore?: string; dueBy?: string };
   stepPlan?: { archetypeLabel: string; quantity: { basis: string; amount: number; unit: string }; rationale: string; progress: number;
     steps: StoredTaskStep[]; units: StoredStepPlan["units"]; questions: StepQuestionView[] };
+  /** How the card is prepared before its work starts (docs/task-preparation.md): nothing, its steps, or a full tutorial, and why. */
+  preparation?: Preparation;
   /** Other lines this work feeds: the milestone relations from this task's milestone, and its byproducts. */
   supports: Array<{ line: string; lineLabel: string; target: string; artifact?: string; pending: boolean }>;
   /** Cross-line artifacts at task level: what this task produces for another line's work, and whose output it uses (docs/flywheel-and-views.md §5.5). */

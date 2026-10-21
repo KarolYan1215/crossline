@@ -4,11 +4,12 @@ import type { CrosslineStore } from "@crossline/db";
 /** Written by the web (`schedule-memory.ts`): each work order's earliest block start this week, as an instant. */
 export const ORDER_STARTS_SETTING = "schedule.orderStarts";
 /**
- * How far ahead of its first block approved work gets its tutorial (manualbook): seven days (the person's decision, 2026-10-15), replacing
- * the 48 hours of 2026-10-13 (docs/review-2026-10-13.md §6.1). Steps are planned before a proposal is shown; the tutorial follows once
- * the work is a week away.
+ * How far ahead of its first block approved work gets its tutorial (manualbook): three days (2026-10-21, docs/task-preparation.md). It was
+ * seven days (2026-10-15), and a week of replans and new files rebuilt tutorials or left them for work that moved; before that 48 hours,
+ * which left no day for the person to look at it. Steps are planned before a proposal is shown; the tutorial follows once the work is
+ * three days away, and waits for the assistant's preparation steps up to a day before (`pendingTutorials`).
  */
-export const TUTORIAL_LEAD_DAYS = 7;
+export const TUTORIAL_LEAD_DAYS = 3;
 /** How far ahead the assistant prepares (its preparation steps and whole errands): still 48 hours (docs/review-2026-10-13.md §6.1). */
 export const ASSISTANT_PREP_HOURS = 48;
 /** States in which work is committed and may be prepared. */
@@ -16,7 +17,7 @@ const COMMITTED = new Set(["approved", "preparing", "ready_for_human", "active"]
 const DAY_MS = 86_400_000;
 
 /**
- * The work orders whose next block starts within `hours` (or began in the last hour): a week for tutorials by default, `ASSISTANT_PREP_HOURS`
+ * The work orders whose next block starts within `hours` (or began in the last hour): three days for tutorials by default, `ASSISTANT_PREP_HOURS`
  * for the assistant. The schedule is derived in the web process, so
  * the worker reads what the web last recorded. Committed work with no block recorded (the web records this week's only, and some work
  * gets no block at all) is judged by when it would have to start: its due day less its open work at the person's daily hours. Work with

@@ -10,6 +10,7 @@ import { aiToolsFor, listAgentTasks, projectAgentOutputs, type CrosslineStore, t
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
+import { startingWithin } from "./schedule-window";
 import { relevantFacts, selectMaterial } from "./material-context";
 
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
@@ -191,6 +192,34 @@ export function requestFinerSplits(store: CrosslineStore, workspaceId: string, n
       payload: { feedback: `「${title}」${split.days.length} 天没做成：${FINER_SPLIT_FEEDBACK}`, finerSplit: { stepId: split.stepId, version: split.version, title, days: split.days } } });
   }
   return splits;
+}
+
+/** What the replan of a plan written under the old schema is told. */
+export const OUTDATED_PLAN_FEEDBACK = "按现行规则重排步骤：本人每一步写出 5 分钟内能开始的首个动作，标出能借助的 AI 工具及省下的时间，能交给助手的整理和收集交给助手。";
+
+/**
+ * Plans written before a step plan had to give each person step its first move (`firstAction`) and say which AI tool helps (`aiAssist`)
+ * — STEP_PLAN_SCHEMA since 2026-10-14 — show no first action on the block-start nudge, the timer or the day panel, and are estimated as if
+ * no tool helped (13 live tasks on the real account, planned 10-08 to 10-10). Such a plan (an open person step and not one first action or
+ * AI assist anywhere) is planned again, once, and only when its work starts within a week (`startingWithin`, the tutorial's lead), so the
+ * task library's far work is not replanned for nothing. Rules only; the task pass picks the request up like any replan.
+ */
+export function requestOutdatedReplans(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
+  const soon = startingWithin(store, workspaceId, now);
+  const asked = new Set(store.listEvents(workspaceId, { type: "task.steps_replan_requested" })
+    .filter((event) => (event.payload as { outdated?: boolean }).outdated).map((event) => event.entityId));
+  const live = new Set(store.listWorkOrders(workspaceId).filter((order) => PLANNABLE.includes(order.state)).map((order) => order.id));
+  const out: string[] = [];
+  for (const plan of store.listStepPlans(workspaceId)) {
+    if (!live.has(plan.workOrderId) || !soon.has(plan.workOrderId) || asked.has(plan.workOrderId)) continue;
+    const open = plan.steps.filter((step) => step.status === "planned" && step.executor !== "agent");
+    if (!open.length || plan.steps.some((step) => step.firstAction || step.aiAssist)) continue;
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `task.steps_outdated:${plan.workOrderId}:${plan.version}`,
+      type: "task.steps_replan_requested", entityId: plan.workOrderId, payload: { feedback: OUTDATED_PLAN_FEEDBACK, outdated: true, version: plan.version } });
+    out.push(plan.workOrderId);
+    asked.add(plan.workOrderId);
+  }
+  return out;
 }
 
 /** A milestone this important or more makes its tasks important (the scheduler's own line for 「重要」). */

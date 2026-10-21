@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { tutorialWorthIt } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { AssistantMaterials } from "../materials/assistant-materials";
 import { cleanText } from "../materials/humanize";
@@ -24,8 +23,8 @@ export function TaskMaterials({ detail, live, anchors }: { detail: TaskDetail; l
     <div className="task-tutorial" {...(anchors ? { id: "tutorial" } : {})}>
       <p className="task-tutorial-head"><span className="task-subhead">教程</span>
         <a href={`/materials/${encodeURIComponent(detail.id)}`}>打开阅读页</a></p>
-      <TutorialView workOrderId={detail.id} building={detail.state === "preparing"} auto={tutorialWorthIt({ title: detail.title, intent: detail.intent,
-        p50Minutes: detail.estimate.p50Minutes }, detail.stepPlan?.steps)} canBuild={live} layout="toc"
+      <TutorialView workOrderId={detail.id} building={detail.state === "preparing"} auto={detail.preparation?.level === "tutorial"}
+        {...(detail.preparation ? { reason: detail.preparation.reason } : {})} canBuild={live} layout="toc"
         {...(currentStep(detail) ? { currentStepId: currentStep(detail)!.id } : {})} />
     </div>
   </div>;

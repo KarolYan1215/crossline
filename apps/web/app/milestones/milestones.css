@@ -23,7 +23,9 @@
 .mt-arrowhead{fill:var(--lc,var(--ink))}
 .mt-relation-label{font-size:12px;fill:var(--ink);paint-order:stroke;stroke:var(--paper);stroke-width:4px;stroke-linejoin:round}
 .mt-edge{transition:opacity .15s}
-.mt[data-hover] .mt-edge:not([data-hot]),.mt[data-hover] .mt-node:not([data-hot]),.mt[data-hover] .mt-marker:not([data-hot]){opacity:.18}
+/* In focus, the rest dims its graphics only: a label keeps its ink text (7:1) and loses its line-coloured edge. */
+.mt[data-hover] .mt-edge:not([data-hot]),.mt[data-hover] .mt-marker:not([data-hot]){opacity:.18}
+.mt[data-hover] .mt-node:not([data-hot]){border-left-color:var(--mist);outline-color:var(--mist)}
 .mt[data-hover] .mt-edge[data-hot] path:not(.mt-edge-hit){stroke-width:2.6}
 /* A row with many chain steps: its arcs stay in the background until one of their milestones is hovered or focused (graphics only). */
 .mt-edge-chain[data-faint]:not([data-hot]) .mt-chain{opacity:.22}
@@ -49,10 +51,17 @@
 .mt-line b{font-size:13px;color:var(--lc);line-height:1.2;overflow-wrap:anywhere}
 .mt-line-waiting{font-size:12px;color:var(--ink);border:1px dashed var(--lc);padding:0 4px;white-space:nowrap}
 
-.mt-tick{position:absolute;width:12px;height:12px;padding:0;border-radius:50%;border:2px solid var(--lc,var(--graphite));background:var(--paper);cursor:pointer;z-index:1}
+.mt-tick{position:absolute;width:12px;height:12px;padding:0;border-radius:50%;border:2px solid var(--lc,var(--graphite));background:var(--paper);z-index:1;transition:opacity .15s}
 .mt-tick[data-state="done"]{background:var(--lc,var(--graphite))}
 .mt-tick[data-state="postponed"]{border-style:dashed}
-.mt-tick:hover,.mt-tick:focus-visible{transform:scale(1.35)}
+/* A tick's target: the dot (and a postponed tick's dashed ghost) plus the room its neighbours leave, so a dense row is still clickable. */
+.mt-tick-hit{position:absolute;z-index:1;padding:0;border:0;background:transparent;cursor:pointer}
+.mt-tick-hit[data-over]{z-index:3}
+.mt-tick-hit:hover,.mt-tick-hit[data-picked]{background:color-mix(in srgb,var(--lc,var(--graphite)) 14%,transparent)}
+.mt-tick-hit:focus-visible{outline:2px solid var(--ink);outline-offset:0}
+.mt-tick-hit:hover .mt-tick,.mt-tick-hit:focus-visible .mt-tick,.mt-tick-hit[data-picked] .mt-tick{transform:scale(1.35)}
+.mt[data-hover] .mt-tick-hit:not([data-hot]) .mt-tick{opacity:.3}
+.mt-tick-ghost[data-hot]{opacity:1;stroke-width:1.6}
 /* The marker is the button (22px to hit); the diamond inside it is the mark. */
 .mt-marker{position:absolute;z-index:2;width:22px;height:22px;padding:0;border:0;background:transparent;cursor:pointer;display:grid;place-items:center}
 .mt-marker i{display:block;width:13px;height:13px;background:var(--lc,var(--ink));transform:rotate(45deg)}
@@ -66,6 +75,8 @@
   font:inherit;font-size:12px;line-height:17px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mt-node:hover,.mt-node:focus-visible{background:var(--chalk);text-decoration:underline}
 .mt-node[data-status="draft"]{outline:1px dashed var(--lc);outline-offset:-1px;font-weight:700}
+/* A full name drawn for the milestone in focus: above everything on the canvas, the whole title. */
+.mt-node[data-full]{z-index:4;box-shadow:0 0 0 1px var(--lc),0 2px 6px rgb(0 0 0 / .12)}
 
 .risk-glyph{display:inline-block;vertical-align:-1px;flex:none}
 .risk-glyph rect{fill:var(--paper);stroke:var(--ink);stroke-width:1}
@@ -87,11 +98,20 @@
 .mt-key[data-k="relation"]{width:22px;height:0;border-width:2px 0 0;border-radius:0;border-color:var(--ink)}
 .mt-key[data-k="chain"]{width:22px;height:8px;border-width:2px 2px 0;border-radius:12px 12px 0 0;border-color:var(--graphite)}
 
-.mt-result{position:fixed;z-index:40;right:16px;bottom:96px;width:min(320px,calc(100vw - 32px));display:grid;gap:6px;padding:10px 12px;background:var(--paper);border:1px solid var(--ink);box-shadow:0 6px 18px rgb(0 0 0 / .14);animation:mt-pop .25s ease-out}
-.mt-result header{display:flex;justify-content:space-between;align-items:center}
-.mt-result p{margin:0;font-size:14px}
-.mt-result small{font-size:12px;color:var(--graphite)}
-@keyframes mt-pop{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+.mt-key[data-k="ghost"]{width:7px;height:7px;border-width:1px;border-style:dashed}
+
+/* The strip above the canvas: what is in focus, in full. Fixed height, so the canvas never moves under the pointer; more scrolls inside. */
+.mt-focus{position:relative;height:92px;overflow-y:auto;padding:6px 10px;border:1px solid var(--mist);border-left:4px solid var(--lc,var(--mist));background:var(--paper);
+  font-size:13px;line-height:1.5;color:var(--ink)}
+.mt-focus[data-pinned]{border-color:var(--ink);border-left-color:var(--lc,var(--ink))}
+.mt-focus p{margin:0}
+.mt-focus-title b{font-size:14px}
+.mt-focus-title .ui-tag{margin-right:4px;vertical-align:1px}
+.mt-focus-meta{color:var(--ink)}
+.mt-focus-hint{color:var(--graphite)}
+.mt-focus-tick+.mt-focus-tick{margin-top:4px;padding-top:4px;border-top:1px solid var(--mist)}
+.mt-focus-close{position:sticky;top:0;float:right;margin-left:8px}
+.mt-focus .text-button{font-size:13px;padding:0}
 
 /* The week's figures, inline on the timeline's header. */
 .mt-stats{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;min-width:0}
@@ -175,7 +195,7 @@
 .md-target{margin:0;font-size:20px}
 .md-chainline{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto;gap:8px;align-items:center;font-size:13px}
 
-@media (prefers-reduced-motion:reduce){.mt-relation,.mt-result{animation:none}.mt-tick:hover{transform:none}}
+@media (prefers-reduced-motion:reduce){.mt-relation{animation:none}.mt-tick-hit .mt-tick{transform:none !important}}
 @media (max-width:640px){.md-chainline{grid-template-columns:1fr}.md-reading{grid-template-columns:1fr}}
 
 /* ── weekly review: auto-accepted tasks as cards ── */

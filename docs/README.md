@@ -34,6 +34,7 @@
 | [model-scheduling.md](model-scheduling.md) | 模型调度（已实现，2026-10-19）：每账号两个并行、账号轮流、短活先跑与等久升级、有人在等内存够即开始、开发者模型的限流与被拒换模型、简单活用快模型、低价时段、缓存命中与测量 |
 | [model-providers.md](model-providers.md) | 接入本人自己的 Codex 与其他 API 模型：现有耦合清单、接口设计、分阶段与风险（设计稿，待审） |
 | [assistant-agent.md](assistant-agent.md) | 带 shell 的助手：设计、守卫、信任与审阅流程 |
+| [task-preparation.md](task-preparation.md) | 任务卡的准备流程（2026-10-21）：不备 / 按步骤 / 完整教程三级的规则，教程的开工前 3 天、只查需要的步骤、复用已查资料、一本教程一个撰写对话，改前改后的 token 实测与估算 |
 | [context-selection.md](context-selection.md) | 只把当前任务需要的信息放进上下文：文件段落的全文索引、候选与模型自选的两个查阅工具、各处预算、实测 |
 | [structured-output.md](structured-output.md) | 模型的结构化输出怎么约束、怎么校验、怎么修正，出问题怎么查，现有的实测数据 |
 | [codex-fork-runtime.md](codex-fork-runtime.md) | 固定在 `vendor/codex` 的 Codex 运行时：来源、补丁、构建、哈希校验、升级方式、supervisor 令牌 |

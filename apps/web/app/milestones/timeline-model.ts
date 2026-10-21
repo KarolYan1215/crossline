@@ -290,3 +290,107 @@ export function placeEdgeLabels(layout: TimelineLayout, requests: Array<{ id: st
   }
   return placed;
 }
+
+/**
+ * Where a tick can be clicked. A dot is 12px and dense rows put one every 13px, so the dot alone was hard to hit, and a postponed tick's
+ * dashed ghost (its original day) could not be clicked at all. Every dot and every ghost gets an area along its row: up to
+ * `TICK_HIT.reach` either side, split halfway with its neighbours so no two areas overlap, stopped at a milestone marker's edge, and from
+ * `TICK_HIT.up` above the axis to `TICK_HIT.down` below it, clear of the labels hung below the axis. Points on one spot (a ghost under
+ * another tick's dot) share one area naming all their ticks. `over`: the point sits under a marker, so its area is the dot alone, drawn
+ * above the marker. `ghostOnly`: an area holding only ghosts, which the keyboard skips (the tick's own dot has an area of its own).
+ */
+export const TICK_HIT = { reach: 12, up: 10, down: 7 } as const;
+export type TickTarget = { key: string; line: string; ticks: string[]; points: Array<{ id: string; x: number; ghost: boolean }>;
+  x: number; y: number; w: number; h: number; over: boolean; ghostOnly: boolean };
+
+export function tickTargets(layout: TimelineLayout): TickTarget[] {
+  const targets: TickTarget[] = [];
+  for (const row of layout.rows) {
+    const points = layout.ticks.filter((tick) => tick.line === row.line).flatMap((tick) => [{ id: tick.id, x: tick.x, ghost: false },
+      ...(tick.plannedX !== null ? [{ id: tick.id, x: tick.plannedX, ghost: true }] : [])]).sort((a, b) => a.x - b.x || Number(a.ghost) - Number(b.ghost));
+    const groups: Array<typeof points> = [];
+    for (const point of points) {
+      const last = groups.at(-1);
+      if (last && point.x - last[0]!.x < 2) last.push(point); else groups.push([point]);
+    }
+    const markers = layout.nodes.filter((node) => node.line === row.line).map((node) => node.x);
+    groups.forEach((group, index) => {
+      const x = group[0]!.x;
+      const prev = groups[index - 1]?.[0]!.x, next = groups[index + 1]?.[0]!.x;
+      let left = Math.max(x - TICK_HIT.reach, prev === undefined ? -Infinity : (prev + x) / 2, TL.labelW);
+      let right = Math.min(x + TICK_HIT.reach, next === undefined ? Infinity : (x + next) / 2);
+      let over = false;
+      for (const marker of markers) {
+        if (marker + 11 <= left || marker - 11 >= right) continue;
+        if (x <= marker - 11) right = Math.min(right, marker - 11);
+        else if (x >= marker + 11) left = Math.max(left, marker + 11);
+        else { left = x - 6; right = x + 6; over = true; break; }
+      }
+      targets.push({ key: `${row.line}:${index}:${group.map((point) => `${point.id}${point.ghost ? "~" : ""}`).join("|")}`, line: row.line,
+        ticks: [...new Set(group.map((point) => point.id))], points: group, x: left, y: row.axisY - TICK_HIT.up, w: Math.max(1, right - left),
+        h: TICK_HIT.up + TICK_HIT.down, over, ghostOnly: group.every((point) => point.ghost) });
+    });
+  }
+  return targets;
+}
+
+/**
+ * Where the full names of the milestones in focus go while one is hovered, focused or has a tick picked: a label cut short (「ECE …」) or
+ * left out reads in full there, drawn over the timeline. `ids` in order of importance (the one in focus first, which keeps its own label's
+ * spot whenever it has one). Each other tries its own label's
+ * spot, then the label lanes below its marker, then just above the axis, each started at the marker or ended at it: first where it covers
+ * no other label or marker, else where it covers only what is not in focus; never another focused marker, a full name already placed or
+ * anything in `keep` (what is under the pointer). One with nowhere to go is left out; the strip above the timeline names it anyway.
+ */
+export function focusLabels(layout: TimelineLayout, ids: string[], keep: Box[] = []): Map<string, Box> {
+  const placed = new Map<string, Box>();
+  const taken: Box[] = [...keep];
+  const nodes = ids.flatMap((id) => layout.nodes.find((node) => node.id === id) ?? []);
+  const inFocus = new Set(nodes.map((node) => node.id));
+  const rest = layout.nodes.filter((node) => !inFocus.has(node.id)).flatMap((node) => [markerBox(node), ...(nodeLabelBox(node) ? [nodeLabelBox(node)!] : [])]);
+  for (const [index, node] of nodes.entries()) {
+    const w = Math.max(TL.labelMin, Math.min(labelWidth(node.title), layout.width - TL.labelW - 8));
+    const fit = (x: number) => Math.max(TL.labelW, Math.min(x, layout.width - 4 - w));
+    const own = nodeLabelBox(node);
+    const ys = [...Array.from({ length: TL.maxLanes }, (_, lane) => node.axisY + 8 + lane * TL.laneH), node.axisY - 30];
+    const spots: Box[] = [...(own ? [{ x: fit(own.x), y: own.y, w, h: 17 }] : []),
+      ...ys.flatMap((y) => [{ x: fit(node.x - 6), y, w, h: 17 }, { x: fit(node.x + 6 - w), y, w, h: 17 }])];
+    const blocked = (box: Box) => box.y < TL.headH || box.y + box.h > layout.height || taken.some((other) => boxesOverlap(box, other, 1))
+      || nodes.some((other) => other.id !== node.id && boxesOverlap(box, markerBox(other)));
+    // The first one keeps its own spot whatever it covers: the pointer may be on its label, and a name that jumped away from under the
+    // pointer would end the hover that drew it.
+    const found = (index === 0 && own && !blocked(spots[0]!) ? spots[0] : undefined)
+      ?? spots.find((box) => !blocked(box) && !rest.some((other) => boxesOverlap(box, other))) ?? spots.find((box) => !blocked(box));
+    if (!found) continue;
+    placed.set(node.id, found);
+    taken.push(found);
+  }
+  return placed;
+}
+
+/** What a milestone is joined to on the timeline: the steps of its chain before and after it, and its relations to other lines with their kind. */
+export function connectionsOf(layout: TimelineLayout, id: string): { before: string[]; after: string[];
+  relations: Array<{ other: string; direction: "out" | "in"; label?: string; pending: boolean }> } {
+  const edges = layout.edges.filter((edge) => edge.from === id || edge.to === id);
+  return {
+    before: edges.filter((edge) => edge.kind === "chain" && edge.to === id).map((edge) => edge.from),
+    after: edges.filter((edge) => edge.kind === "chain" && edge.from === id).map((edge) => edge.to),
+    relations: edges.filter((edge) => edge.kind === "relation").map((edge) => ({ other: edge.from === id ? edge.to : edge.from,
+      direction: edge.from === id ? "out" as const : "in" as const, ...(edge.label ? { label: edge.label } : {}), pending: edge.pending }))
+  };
+}
+
+const monthDay = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+/**
+ * A tick in words: its state and day and, for one postponed, the day it was due, the day it is on now and why it moved: the planned day
+ * passed without the step done, and the scheduler either placed it again (`scheduledDay`) or has not yet (it is drawn on today).
+ */
+export function tickStory(tick: { state: "done" | "planned" | "postponed"; day: string | null; plannedDay: string | null; scheduledDay: string | null }):
+  { status: string; when: string; why?: string } {
+  if (tick.state === "done") return { status: "已达成", when: tick.day ? `完成于 ${monthDay(tick.day)}` : "已完成" };
+  if (tick.state === "planned") return { status: "计划中", when: tick.day ? `排在 ${monthDay(tick.day)}` : "还没有排上日程" };
+  const was = tick.plannedDay ? monthDay(tick.plannedDay) : "原定日";
+  return tick.scheduledDay
+    ? { status: "已顺延", when: `原定 ${was} → 现排 ${monthDay(tick.scheduledDay)}`, why: `原定 ${was} 已过，这一步还没完成，排程把它挪到了 ${monthDay(tick.scheduledDay)} 的时间块。` }
+    : { status: "已顺延", when: `原定 ${was} → 尚未重排`, why: `原定 ${was} 已过，这一步还没完成，排程还没给它新的时间，暂画在今天。` };
+}

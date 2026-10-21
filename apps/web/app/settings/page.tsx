@@ -28,7 +28,7 @@ import { EffectivenessCard } from "./effectiveness-card";
 import { AutomationModule, type RecentTask } from "./automation";
 import { BackgroundModule } from "./background-module";
 import { backgroundOverview } from "../../lib/background";
-import { SettingsNav } from "./settings-nav";
+import { SettingsNav, type SettingsSection } from "./settings-nav";
 import { PersonalizationModule } from "./personalization";
 import { SkillLibraryModule } from "./skill-library";
 import { loadSkillLibrary } from "../../lib/skill-library";
@@ -52,8 +52,6 @@ import { memoForAsync } from "../../lib/ledger-memo";
 
 export const dynamic = "force-dynamic";
 const USAGE_DAYS = 7;
-const SECTIONS = [["general", "通用"], ["notify", "时间与提醒"], ["automation", "自动化与助手"], ["background", "后台任务"], ["personal", "个性化"], ["skills", "Skill 库"], ["calendar", "日历与连接"],
-  ["privacy", "隐私与屏幕活动"], ["usage", "用量与体检"]] as const;
 const TONE: Record<string, RecentTask["tone"]> = { running: "info", needs_review: "warn", accepted: "ok", rejected: "neutral", blocked: "risk", stale: "neutral" };
 
 /**
@@ -94,7 +92,9 @@ export default async function SettingsPage() {
   const hosted = isHostedBeta();
   // 删除账号 is offered on the hosted beta to every account but the machine owner's; 清空数据重新开始 to every hosted account
   // (lib/account-deletion.ts).
-  const accountEmail = hosted ? (await getAuth().api.getSession({ headers: await headers() }).catch(() => null))?.user.email : undefined;
+  // The signed-in account's email, also said on the mailbox card: mailboxes belong to the account they were connected under.
+  const sessionEmail = await (async () => { try { return (await getAuth().api.getSession({ headers: await headers() }))?.user.email; } catch { return undefined; } })();
+  const accountEmail = hosted ? sessionEmail : undefined;
   const deletable = accountEmail && !deletionRefused(store, ctx.workspaceId) ? accountEmail : undefined;
   // On the hosted beta the app already is a web address; elsewhere the phone reaches this machine over the private network.
   const phoneUrl = hosted ? process.env.CROSSLINE_WEB_BASE_URL?.trim() || undefined
@@ -116,13 +116,27 @@ export default async function SettingsPage() {
   // This computer's own readings (folders, screen, idle stretches, coding agents' logs) are the machine owner's only.
   const machine = assistantAvailable(store, ctx.workspaceId);
   // When the person is at the computer, hour by hour (activity.hourly, under the activity consent).
-  const recordings = recordingOverview(store, ctx.workspaceId, dataDirectory());
+  const recordings = recordingOverview(store, ctx.workspaceId, dataDirectory(), zone);
   const usualDay = (() => { try { return atComputerByHour(JSON.parse(setting(ACTIVITY_HOURLY) ?? "[]") as ActivityHour[], zone); } catch { return undefined; } })();
   const autostart = autostartAvailable() ? await readAutostart() : undefined;
+  // The index, with the parts of the long modules under their entry so every card is one click away (2026-10-21). Connections come
+  // second: they are what the person most often comes here for.
+  const sections: SettingsSection[] = [
+    { id: "general", label: "通用", parts: [{ id: "phone", label: "手机访问与推送" }] },
+    { id: "calendar", label: "日历与连接", parts: [{ id: "calendar-subscriptions", label: "订阅日历" }, { id: "mail", label: "邮箱" }, { id: "model", label: "模型连接" }] },
+    { id: "notify", label: "时间与提醒" },
+    { id: "automation", label: "自动化与助手", parts: [{ id: "automations", label: "自动化" }, { id: "outputs", label: "助手产出" }] },
+    { id: "background", label: "后台任务" },
+    { id: "personal", label: "个性化" },
+    { id: "skills", label: "Skill 库" },
+    { id: "privacy", label: "隐私与屏幕活动", parts: [{ id: "energy", label: "精力与手机健康" },
+      ...(machine || recordings.server ? [{ id: "recordings", label: "录音转写" }] : [])] },
+    { id: "usage", label: "用量与体检" }
+  ];
 
   return <SubpageShell active="设置" title="设置">
     <div className="st-layout">
-      <SettingsNav sections={SECTIONS.map(([id, label]) => ({ id, label }))} />
+      <SettingsNav sections={sections} />
       <div className="st-sections">
         <section id="general" className="st-section" aria-labelledby="st-general"><h2 id="st-general">通用</h2>
           <div className="st-modules">
@@ -138,13 +152,19 @@ export default async function SettingsPage() {
               <header><h3>手机访问</h3><small>{hosted ? "手机与电脑用同一个账号、同一本账" : "与电脑同一账本；本机需保持运行"}</small></header>
               {phoneUrl ? <>
                 <div className="st-row"><span className="st-row-label">地址<small>{hosted ? "在手机浏览器打开并登录，添加到主屏幕" : "手机连接同一私有网络后打开，添加到主屏幕"}</small></span><a href={phoneUrl}><b>{phoneUrl}</b></a></div>
-                <PhonePush />
+                <PhonePush privateNetwork={!hosted} />
               </> : <p className="muted">手机访问未开启。</p>}
             </section>
             {autostart !== undefined && <AutostartCard on={autostart} />}
             {accountEmail && <ResetAccountCard email={accountEmail} />}
             {deletable && <DeleteAccountCard email={deletable} />}
           </div>
+        </section>
+
+        <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar">日历与连接</h2>
+          <CalendarModule ctx={ctx} />
+          <div className="st-modules"><div id="mail"><MailAccounts accountEmail={sessionEmail} /></div></div>
+          <ConnectionsSection />
         </section>
 
         <section id="notify" className="st-section" aria-labelledby="st-notify"><h2 id="st-notify">时间与提醒</h2>
@@ -171,7 +191,8 @@ export default async function SettingsPage() {
             recent={assistant.tasks.slice(0, 8).map((task) => ({ taskId: task.taskId, title: task.title, kind: assistant.categories.find((item) => item.category === task.category)?.label ?? "",
               status: agentTaskStatusLabel[task.status] ?? task.status, tone: TONE[task.status] ?? "neutral", day: task.requestedAt.slice(5, 10).replace("-", "/"),
               workOrderId: task.workOrderId }))} />
-          <div className="st-modules"><AutomationsCard lines={identityLines(ctx).map((line) => ({ id: line.id, label: line.label }))} /><OutputsCard /></div>
+          <div className="st-modules"><div id="automations"><AutomationsCard lines={identityLines(ctx).map((line) => ({ id: line.id, label: line.label }))} /></div>
+            <div id="outputs"><OutputsCard /></div></div>
         </section>
 
         <section id="background" className="st-section" aria-labelledby="st-background"><h2 id="st-background">后台任务</h2>
@@ -186,12 +207,6 @@ export default async function SettingsPage() {
           <SkillLibraryModule library={loadSkillLibrary(ctx)} />
         </section>
 
-        <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar">日历与连接</h2>
-          <CalendarModule ctx={ctx} />
-          <div className="st-modules"><MailAccounts /></div>
-          <ConnectionsSection />
-        </section>
-
         <section id="privacy" className="st-section" aria-labelledby="st-privacy"><h2 id="st-privacy">隐私与屏幕活动</h2>
           {!machine && <p className="muted">{hosted
             ? "屏幕活动、作息记录、键鼠节律、Codex 使用记录和录音自动转写要读本人电脑，网页版不提供；精力按本人自评和手机记录推算。"
@@ -199,7 +214,7 @@ export default async function SettingsPage() {
           {machine && <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
             hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
               .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />}
-          <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} />
+          <div id="energy"><EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} privateNetwork={!hosted} /></div>
           {machine && <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />}
           {machine && usualDay && <section className="st-card" aria-label="电脑前的一天">
             <header><h3>电脑前的一天</h3><small>近 {usualDay.days} 天按小时的平均活跃分钟；只记分钟，供访谈与画像了解作息，不用于排程</small></header>
@@ -207,8 +222,10 @@ export default async function SettingsPage() {
               <span key={hour} title={`${hour}:00–${hour + 1}:00 · 平均 ${minutes} 分钟，${Math.round(usualDay.present[hour]! * 100)}% 的日子在电脑前`}><i style={{ height: `${(minutes / 60) * 100}%` }} /></span>)}</div>
             <div className="st-hours-axis" aria-hidden="true"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
           </section>}
-          {machine && <RecordingCard overview={recordings} />}
-          {recordings.server && <ServerRecordingCard server={recordings.server} done={recordings.done} />}
+          {(machine || recordings.server) && <div id="recordings" className="st-section-cards">
+            {machine && <RecordingCard overview={recordings} />}
+            {recordings.server && <ServerRecordingCard server={recordings.server} done={recordings.done} />}
+          </div>}
           {isLocalInstall() && <TelemetryCard on={setting(TELEMETRY_ENABLED_SETTING) !== "0"} />}
         </section>
 
