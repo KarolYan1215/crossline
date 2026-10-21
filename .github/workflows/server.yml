@@ -117,6 +117,15 @@ jobs:
             curl -s -m 10 http://127.0.0.1:3211/v1/codex/status | head -c 600; echo
             # OpenAI answers an unsupported region with 403 unsupported_country; 401 means reachable.
             for u in https://auth.openai.com/ https://api.openai.com/v1/models https://chatgpt.com/; do printf "%s " $u; curl -s -m 10 -o /tmp/oa -w "%{http_code} " $u; grep -o "unsupported_country[a-z_]*" /tmp/oa | head -1; echo; done'
+      - name: Recordings
+        run: |
+          # 录音在服务器转写 from a copy of the ledger: recording events of the last three days and, per transcript, lines and speaker
+          # labels (counts only, no text or file names), then what waits for a voiceprint (names only). Read-only.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker run --rm -i -v /srv/crossline/data:/live:ro -w /repo/packages/db \
+            $(sudo docker inspect -f "{{.Config.Image}}" crossline-web) sh -c "mkdir -p /tmp/copy && cp /live/crossline.db* /tmp/copy/ && node -"' \
+            < deploy/server/recordings-report.cjs || true
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'echo "-- voiceprint files"; sudo ls /srv/crossline/data/recordings/voiceprint 2>/dev/null | sed "s/^\(........\)[^.]*/\1…/" || true
+            echo "-- speaker models"; sudo ls -la /srv/crossline/models/sensevoice 2>/dev/null | awk "{print \$5, \$9}"; sudo docker logs crossline-transcriber 2>&1 | grep -E "no_diarization|voiceprint|pass" | tail -10 || true'
       - name: Model time per Skill
         run: |
           # Per Skill over the last day: waits before and at the model gate, run time and cache hits (deploy/server/skill-runs.py).
