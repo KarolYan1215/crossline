@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   agentApprovalDecision, approveCategory, CLEAN_RUNS_TO_TRUST, CrosslineStore, declineCategory, decideAgentApproval, isPaused, listAgentTasks, pendingAgentApprovals,
-  pendingCategoryRequests, readCategories, requestAgentApproval, requestCategory, resultsAwaitingReview, reviewAgentTask, setPaused
+  pendingCategoryRequests, readCategories, reopenAgentResult, requestAgentApproval, requestCategory, resultsAwaitingReview, reviewAgentTask, setPaused,
+  settleAgentResult
 } from "./index";
 
 let store: CrosslineStore;
@@ -113,5 +114,32 @@ test("a result is no longer a decision once its task is finished or archived, or
     expect(resultsAwaitingReview(store, ws).map((task) => task.taskId).sort()).toEqual(["flow-b", "new", "other-step"]);
     // The replaced and the dead keep their own status: their files are still shown with the task.
     expect(listAgentTasks(store, ws).filter((task) => task.status === "needs_review")).toHaveLength(6);
+    // Steps of one task whose titles have no step part (「任务 · 」) are different work, each still the person's to look at.
+    run("s4", "live", "两个案例 · ", "2026-10-17T00:00:00Z");
+    event("agent.task.requested", "s5", { title: "两个案例 · ", category: "read_research_organize", workOrderId: "live", stepId: "v1s5" });
+    event("agent.task.completed", "s5", { directory: "C:\\ai\\t", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true });
+    expect(resultsAwaitingReview(store, ws).map((task) => task.taskId)).toEqual(expect.arrayContaining(["s4", "s5"]));
   } finally { vi.useRealTimers(); }
+});
+
+test("the daily pass puts a result away or accepts it in the person's place, earning no trust, and an undo hands it back", () => {
+  approveCategory(store, ws, "read_research_organize");
+  finish("put-away", { reviewReasons: ["涉及对外发送、发布、上传或付款"] });
+  expect(listAgentTasks(store, ws)[0]).toMatchObject({ external: true, completedAt: expect.any(String) });
+  expect(settleAgentResult(store, ws, "put-away", "expired", { day: "2026-10-21" })).toBe(true);
+  expect(settleAgentResult(store, ws, "put-away", "expired", { day: "2026-10-21" })).toBe(false);
+  expect(listAgentTasks(store, ws)[0]).toMatchObject({ status: "needs_review", settled: "expired" });
+  expect(resultsAwaitingReview(store, ws)).toEqual([]);
+  finish("adopted");
+  expect(reviewAgentTask(store, ws, "adopted", "accepted", "代为采纳", { by: "system" })).toMatchObject({ ok: true });
+  expect(listAgentTasks(store, ws).find((task) => task.taskId === "adopted")).toMatchObject({ status: "accepted", reviewedBy: "system" });
+  expect(readCategories(store, ws).read_research_organize).toMatchObject({ cleanRuns: 0 });
+  const principal = store.getWorkspaceOwnerId(ws)!;
+  reopenAgentResult(store, ws, "put-away", principal);
+  reopenAgentResult(store, ws, "adopted", principal);
+  expect(listAgentTasks(store, ws).map((task) => [task.taskId, task.status, task.settled ?? ""]).sort()).toEqual([["adopted", "needs_review", ""], ["put-away", "needs_review", ""]]);
+  // The person's own acceptance is never reopened by an undo of the pass.
+  reviewAgentTask(store, ws, "adopted", "accepted");
+  reopenAgentResult(store, ws, "adopted", principal);
+  expect(listAgentTasks(store, ws).find((task) => task.taskId === "adopted")?.status).toBe("accepted");
 });

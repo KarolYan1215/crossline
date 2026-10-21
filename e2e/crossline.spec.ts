@@ -549,10 +549,13 @@ test("Today's flywheel graph draws each line around its goal and opens a milesto
   await expect.poll(async () => { await page.mouse.wheel(0, -200); return node.getAttribute("transform"); }).not.toBe(before);
   // Once it answers, a wheel turn zooms again and the page stays where it is.
   const zoomed = await node.getAttribute("transform");
-  const scrolled = await page.evaluate(() => window.scrollY);
+  // Where the drawing sits in the window, not `scrollY`: something inserted above it after load (a daytime nudge) moves `scrollY`
+  // through scroll anchoring while the view stays put, and that made this test pass at night and fail by day.
+  const top = async () => (await graph.locator("svg.fw-graph").boundingBox())!.y;
+  const placed = await top();
   await page.mouse.wheel(0, -200);
   await expect.poll(() => node.getAttribute("transform")).not.toBe(zoomed);
-  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+  expect(Math.abs((await top()) - placed)).toBeLessThan(2);
   await graph.getByRole("button", { name: "复位" }).click();
   await Promise.all([page.waitForURL(/\/milestones\?open=/), node.locator("circle").first().click()]);
 });

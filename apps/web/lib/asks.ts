@@ -10,7 +10,7 @@ import { acceptOwnCompletion, listAgentTasks, ownCompletion, type StoredWorkOrde
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
   acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast,
-  markMaterialsReady, planToday, plannerIdOfBlock, readFrozen, readGoalSettings, retryMaterialPreparation, saveGoalSettings, TASK_LIBRARY_WINDOW_DAYS,
+  markMaterialsReady, planToday, plannerIdOfBlock, readFrozen, readGoalSettings, retryMaterialPreparation, saveGoalSettings, saveMilestoneEdit, TASK_LIBRARY_WINDOW_DAYS,
   heldConflicts, unlockBlock, writeFrozen, readRiskDecisions, RISK_DECISIONS_SETTING, riskHorizonDays, type RiskDecision
 } from "./crossline";
 import { requestAutoBackplan } from "./approvals";
@@ -393,6 +393,38 @@ function riskReviewMembers({ store, ctx, today }: Source): Ask[] {
   });
 }
 
+/**
+ * A deadline the system does not move — a course's, or one the person set — passed with the milestone's work still open (the worker's
+ * daily pass writes `milestone.overdue` once per deadline, `apps/worker/src/date-advance.ts`; the person's own other milestones it moves
+ * by itself). Asked once: 补做 keeps the date and the work, a new date is the person's, 放弃 archives the milestone and its unstarted work.
+ * It goes away when answered, when the date is changed elsewhere, or when no work is left.
+ */
+function overdueAsks({ store, ctx, today }: Source): Ask[] {
+  const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
+  const anchors = deadlines(store, ctx.workspaceId);
+  const resolved = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "milestone.overdue_resolved" }))
+    .map((event) => `${event.entityId}|${(event.payload as { deadline?: string }).deadline ?? ""}`));
+  const open = store.listWorkOrders(ctx.workspaceId).filter((order) => ["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active", "blocked"].includes(order.state));
+  const latest = new Map<string, ReturnType<typeof store.listEvents>[number]>();
+  for (const event of store.listEvents(ctx.workspaceId, { type: "milestone.overdue" })) latest.set(event.entityId, event);
+  return [...latest].flatMap(([milestoneId, event]): Ask[] => {
+    const milestone = milestones.get(milestoneId);
+    const { deadline, why } = event.payload as { deadline: string; why?: string };
+    const current = readGoalSettings(ctx, milestoneId)?.confirmedDeadline || anchors.get(milestoneId);
+    const left = open.filter((order) => order.milestoneId === milestoneId);
+    if (!milestone || current !== deadline || deadline >= today || resolved.has(`${milestoneId}|${deadline}`) || !left.length) return [];
+    return [{ id: `overdue:${milestoneId}:${deadline}`, kind: "milestone_overdue", entityId: milestoneId, line: milestone.identityId,
+      preview: milestonePreview(milestoneId), urgency: "soon", dueDay: deadline, raisedAt: event.createdAt, fingerprint: deadline, important: true,
+      title: `「${short(milestone.title)}」的截止 ${format(deadline)} 已过，还有 ${left.length} 个任务没完成`,
+      why: `${why === "course" ? "这是课程给定的日期" : "这个日期是本人定的"}，系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。`,
+      options: [
+        { id: "makeup", label: "补做", detail: "截止不变，剩下的工作照常排", recommended: true },
+        { id: "extend", label: "改为新日期", fields: [{ id: "date", label: "截止改到", kind: "date" as const, required: true }] },
+        { id: "drop", label: "放弃这个里程碑", detail: "里程碑和未开始的任务归档，可从已归档恢复" }
+      ] }];
+  });
+}
+
 /** Set by 「逐个决定」 on the folded card: while the same reviews wait, each is its own card again. */
 const RISK_REVIEW_SPLIT = "asks.riskReview.split";
 const riskBatchFingerprint = (members: Ask[]) => members.map((ask) => `${ask.entityId}:${ask.fingerprint}`).sort().join("|");
@@ -696,7 +728,7 @@ function lockedConflictAsks({ store, ctx, today, now }: Source): Ask[] {
 
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, missedAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, overdueAsks, missedAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
@@ -934,6 +966,26 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       }
       const goal = loadGoalForecast(ctx, riskHorizonDays(ctx)).goals.find((item) => item.milestoneId === ask.entityId);
       record(ctx, "risk.accepted", ask.entityId, `risk:accepted:${ask.entityId}:${Date.now()}`, { slackDays: goal?.slackDays ?? -999, p85Day: goal?.p85Day ?? null });
+      return { ok: true };
+    }
+    case "milestone_overdue": {
+      const deadline = ask.fingerprint;
+      const resolve = (how: string) => record(ctx, "milestone.overdue_resolved", ask.entityId, `milestone-overdue:resolved:${ask.entityId}:${deadline}:${Date.now()}`, { deadline, how });
+      if (optionId === "extend") {
+        const saved = saveGoalSettings(ctx, ask.entityId, { confirmedDeadline: values.date!, sourceQuote: "在「截止已过」的询问里改期" });
+        if (!saved.ok) return saved;
+      } else if (optionId === "drop") {
+        const milestone = store.listMilestones(ctx.workspaceId).find((item) => item.id === ask.entityId);
+        if (!milestone) return { ok: false, code: "MILESTONE_NOT_FOUND" };
+        const saved = saveMilestoneEdit(ctx, { id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId ?? "", title: milestone.title,
+          status: "archived", successCriteria: milestone.successCriteria ?? [], ...(milestone.templateId ? { templateId: milestone.templateId } : {}) });
+        if (!saved.ok) return saved;
+        // Work being timed stays; the rest of the milestone's open work goes with it.
+        for (const order of store.listWorkOrders(ctx.workspaceId).filter((item) => item.milestoneId === milestone.id
+          && ["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "blocked"].includes(item.state)))
+          archiveWorkOrder(ctx, order.id, `里程碑「${short(milestone.title, 20)}」截止已过，本人选择放弃`);
+      } else if (optionId !== "makeup") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+      resolve(optionId);
       return { ok: true };
     }
     case "missed_block": {

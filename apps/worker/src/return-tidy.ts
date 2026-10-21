@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { goalSettingKey, taskTitleOf } from "@crossline/core";
+import { goalSettingKey, shiftWithChain, taskTitleOf } from "@crossline/core";
 import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
 import { localToday } from "./analysis";
 import { ownerOf } from "./owner";
@@ -46,7 +46,7 @@ export function absenceToTidy(store: CrosslineStore, workspaceId: string, now = 
 }
 
 /** Projects that are courses: a grade breakdown on record, homework dated from the course's files, or graded items read from them. */
-function courseProjects(store: CrosslineStore, workspaceId: string): Set<string> {
+export function courseProjects(store: CrosslineStore, workspaceId: string): Set<string> {
   const out = new Set<string>();
   for (const fact of store.listProfileFacts(workspaceId)) if (fact.slot === "grading" && fact.projectId) out.add(fact.projectId);
   for (const order of store.listWorkOrders(workspaceId)) if (order.id.startsWith("datepair-") && order.projectId) out.add(order.projectId);
@@ -59,6 +59,78 @@ function courseProjects(store: CrosslineStore, workspaceId: string): Set<string>
 type Settings = { confirmedDeadline?: string | null; [key: string]: unknown };
 export type TidyOutcome = { shifted: Array<{ id: string; title: string; from: string; to: string }>; archived: Array<{ id: string; title: string; why: string }>;
   merged: number; opId?: string };
+export type UndoEntry = { key: string; value: string | null };
+
+/** A milestone's deadline as the scheduler reads it: the goal setting's, else the approved milestone's own. */
+export function deadlineReader(store: CrosslineStore, workspaceId: string) {
+  const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  const settingsOf = (id: string) => json<Settings | null>(store.getSetting(workspaceId, goalSettingKey(id)), null);
+  return { settingsOf, deadlineOf: (id: string) => settingsOf(id)?.confirmedDeadline || anchors.get(id) || "" };
+}
+
+/**
+ * Writes milestone deadline moves as the system's (`goal.settings_confirmed` with `bySystem`), returning what an undo restores and what
+ * moved. Shared by the return tidy-up and the daily pass (`date-advance.ts`).
+ */
+export function writeDeadlineMoves(store: CrosslineStore, workspaceId: string, moves: Map<string, string>, bySystem: string):
+  { restore: UndoEntry[]; shifted: TidyOutcome["shifted"] } {
+  const owner = ownerOf(store, workspaceId);
+  const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
+  const { settingsOf, deadlineOf } = deadlineReader(store, workspaceId);
+  const restore: UndoEntry[] = [];
+  const shifted: TidyOutcome["shifted"] = [];
+  for (const [id, to] of moves) {
+    const key = goalSettingKey(id);
+    const previous = store.getSetting(workspaceId, key) ?? null;
+    const from = deadlineOf(id);
+    if (from === to) continue;
+    restore.push({ key, value: previous });
+    store.setSetting(workspaceId, key, JSON.stringify({ ...(settingsOf(id) ?? {}), confirmedDeadline: to }));
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `goal:settings:${id}:${randomUUID()}`, type: "goal.settings_confirmed", entityId: id,
+      payload: { milestoneVersion: milestones.get(id)?.version ?? 1, previous: json(previous, null), next: { confirmedDeadline: to }, bySystem } });
+    shifted.push({ id, title: milestones.get(id)?.title ?? id, from, to });
+  }
+  return { restore, shifted };
+}
+
+/**
+ * Open work whose moment is long gone: a proposal untouched for `STALE_DAYS`, work whose milestone is no longer approved, and work never
+ * started whose own due day passed `STALE_DAYS` ago. Started work and work with progress are never in it.
+ */
+export function staleOpenWork(store: CrosslineStore, workspaceId: string, now: Date, today: string): Array<{ order: StoredWorkOrder; why: string }> {
+  const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
+  const cutoff = new Date(now.getTime() - STALE_DAYS * DAY).toISOString();
+  const lastMove = new Map<string, string>();
+  const started = new Set<string>();
+  for (const event of store.listEvents(workspaceId, { type: "work_order.transitioned" })) {
+    if ((lastMove.get(event.entityId) ?? "") < event.createdAt) lastMove.set(event.entityId, event.createdAt);
+    if ((event.payload as { event?: { type?: string } }).event?.type === "human.started") started.add(event.entityId);
+  }
+  const progressOf = (order: StoredWorkOrder) => (store.getStepPlan(workspaceId, order.id)?.steps ?? []).some((step) => step.status === "done" || (step.progressQuarter ?? 0) > 0);
+  return store.listWorkOrders(workspaceId).filter((order) => OPEN.has(order.state) && !order.tombstone).flatMap((order) => {
+    if (order.state === "active" || started.has(order.id) || progressOf(order)) return [];
+    const milestone = order.milestoneId ? milestones.get(order.milestoneId) : undefined;
+    const due = (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "";
+    const why = order.state === "awaiting_plan_approval" && (lastMove.get(order.id) ?? now.toISOString()) <= cutoff ? `提议超过 ${STALE_DAYS} 天无人处理`
+      : order.milestoneId && milestone?.status !== "approved" ? "所服务的里程碑已不在"
+      : due && due <= addDays(today, -STALE_DAYS) ? `截止 ${due} 已过 ${STALE_DAYS} 天以上且未开始`
+      : "";
+    return why ? [{ order, why }] : [];
+  });
+}
+
+/** Archives work by the system with the reason (recoverable from 已归档). */
+export function archiveBySystem(store: CrosslineStore, workspaceId: string, items: Array<{ order: StoredWorkOrder; why: string }>, prefix: string): TidyOutcome["archived"] {
+  const owner = ownerOf(store, workspaceId);
+  return items.map(({ order, why }) => {
+    const attempt = store.listEvents(workspaceId, { type: "work_order.archived", entityId: order.id }).length;
+    const suffix = attempt ? `:${attempt}` : "";
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.archived", entityId: order.id,
+      payload: { reason: `${prefix}${why}`, from: order.state, bySystem: true } });
+    store.transitionWorkOrder(workspaceId, order.id, { type: "archived" }, `archive:${order.id}${suffix}`);
+    return { id: order.id, title: taskTitleOf(order), why };
+  });
+}
 
 export async function returnTidy(store: CrosslineStore, workspaceId: string, options: { now?: Date; mergeNow?: () => Promise<number> } = {}):
   Promise<TidyOutcome | undefined> {
@@ -69,70 +141,21 @@ export async function returnTidy(store: CrosslineStore, workspaceId: string, opt
   store.setSetting(workspaceId, RETURN_TIDY_SETTING, absence.since);
   const today = localToday(store, workspaceId, now);
   const owner = ownerOf(store, workspaceId);
-  const orders = store.listWorkOrders(workspaceId);
-  const open = orders.filter((order) => OPEN.has(order.state) && !order.tombstone);
-  const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
-  const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
-  const settingsOf = (id: string) => json<Settings | null>(store.getSetting(workspaceId, goalSettingKey(id)), null);
-  const deadlineOf = (id: string) => settingsOf(id)?.confirmedDeadline || anchors.get(id) || "";
-  const restore: Array<{ key: string; value: string | null }> = [];
+  const open = store.listWorkOrders(workspaceId).filter((order) => OPEN.has(order.state) && !order.tombstone);
+  const { deadlineOf } = deadlineReader(store, workspaceId);
 
   // 1. The person's own milestones that fell due while they were away, and what would now come before them.
   const courses = courseProjects(store, workspaceId);
-  const approved = [...milestones.values()].filter((milestone) => milestone.status === "approved" && !courses.has(milestone.projectId ?? ""));
+  const approved = store.listMilestones(workspaceId).filter((milestone) => milestone.status === "approved" && !courses.has(milestone.projectId ?? ""))
+    .map((milestone) => ({ id: milestone.id, line: milestone.identityId, project: milestone.projectId ?? "", deadline: deadlineOf(milestone.id) }));
   const withOpenWork = new Set(open.map((order) => order.milestoneId).filter(Boolean));
   const shiftDays = absence.days;
-  const moves = new Map<string, string>();
-  for (const milestone of approved) {
-    const deadline = deadlineOf(milestone.id);
-    if (!deadline || deadline >= today || !withOpenWork.has(milestone.id)) continue;
-    const to = [addDays(deadline, shiftDays), addDays(today, SHIFT_MIN_DAYS)].sort().at(-1)!;
-    moves.set(milestone.id, to);
-    for (const later of approved) {
-      const at = deadlineOf(later.id);
-      if (later.id === milestone.id || later.identityId !== milestone.identityId || (later.projectId ?? "") !== (milestone.projectId ?? "")) continue;
-      if (at && at >= deadline && at <= to) moves.set(later.id, [moves.get(later.id) ?? "", addDays(at, shiftDays)].sort().at(-1)!);
-    }
-  }
-  const shifted: TidyOutcome["shifted"] = [];
-  for (const [id, to] of moves) {
-    const key = goalSettingKey(id);
-    const previous = store.getSetting(workspaceId, key) ?? null;
-    const from = deadlineOf(id);
-    if (from === to) continue;
-    restore.push({ key, value: previous });
-    store.setSetting(workspaceId, key, JSON.stringify({ ...(settingsOf(id) ?? {}), confirmedDeadline: to }));
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `goal:settings:${id}:${randomUUID()}`, type: "goal.settings_confirmed", entityId: id,
-      payload: { milestoneVersion: milestones.get(id)?.version ?? 1, previous: json(previous, null), next: { confirmedDeadline: to }, bySystem: "return_tidy" } });
-    shifted.push({ id, title: milestones.get(id)?.title ?? id, from, to });
-  }
+  const moves = shiftWithChain(approved, approved.filter((milestone) => milestone.deadline && milestone.deadline < today && withOpenWork.has(milestone.id))
+    .map((milestone) => ({ id: milestone.id, days: shiftDays, to: [addDays(milestone.deadline, shiftDays), addDays(today, SHIFT_MIN_DAYS)].sort().at(-1)! })));
+  const { restore, shifted } = writeDeadlineMoves(store, workspaceId, moves, "return_tidy");
 
   // 2. What is old.
-  const cutoff = new Date(now.getTime() - STALE_DAYS * DAY).toISOString();
-  const lastMove = new Map<string, string>();
-  const started = new Set<string>();
-  for (const event of store.listEvents(workspaceId, { type: "work_order.transitioned" })) {
-    if ((lastMove.get(event.entityId) ?? "") < event.createdAt) lastMove.set(event.entityId, event.createdAt);
-    if ((event.payload as { event?: { type?: string } }).event?.type === "human.started") started.add(event.entityId);
-  }
-  const progressOf = (order: StoredWorkOrder) => (store.getStepPlan(workspaceId, order.id)?.steps ?? []).some((step) => step.status === "done" || (step.progressQuarter ?? 0) > 0);
-  const archived: TidyOutcome["archived"] = [];
-  for (const order of open) {
-    if (order.state === "active" || started.has(order.id) || progressOf(order)) continue;
-    const milestone = order.milestoneId ? milestones.get(order.milestoneId) : undefined;
-    const due = (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "";
-    const why = order.state === "awaiting_plan_approval" && (lastMove.get(order.id) ?? now.toISOString()) <= cutoff ? `提议超过 ${STALE_DAYS} 天无人处理`
-      : order.milestoneId && milestone?.status !== "approved" ? "所服务的里程碑已不在"
-      : due && due <= addDays(today, -STALE_DAYS) ? `截止 ${due} 已过 ${STALE_DAYS} 天以上且未开始`
-      : "";
-    if (!why) continue;
-    const attempt = store.listEvents(workspaceId, { type: "work_order.archived", entityId: order.id }).length;
-    const suffix = attempt ? `:${attempt}` : "";
-    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `archive-reason:${order.id}${suffix}`, type: "work_order.archived", entityId: order.id,
-      payload: { reason: `回来整理：${why}`, from: order.state, bySystem: true } });
-    store.transitionWorkOrder(workspaceId, order.id, { type: "archived" }, `archive:${order.id}${suffix}`);
-    archived.push({ id: order.id, title: taskTitleOf(order), why });
-  }
+  const archived = archiveBySystem(store, workspaceId, staleOpenWork(store, workspaceId, now, today), "回来整理：");
 
   // One undo for both: the dates back, the archived work restored. Merges carry their own undo.
   let opId: string | undefined;

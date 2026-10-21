@@ -26,6 +26,7 @@ export * from "./agent-dispatch";
 export * from "./agent-failure";
 export * from "./source-kinds";
 export * from "./date-schema";
+export * from "./date-advance";
 export * from "./diligence-schema";
 export * from "./manualbook-schema";
 export * from "./activity-state";

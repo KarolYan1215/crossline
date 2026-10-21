@@ -33,6 +33,13 @@ export function startingWithin(store: CrosslineStore, workspaceId: string, now: 
   return within;
 }
 
+/** The person's working minutes a day as the worker can know them: the weekly pattern's hours over seven days, at least an hour. */
+export function dailyAvailableMinutes(store: CrosslineStore, workspaceId: string): number {
+  const { windows } = resolveAvailability({ saved: store.getSetting(workspaceId, AVAILABILITY_SETTING),
+    proposed: store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING), facts: store.listProfileFacts(workspaceId) });
+  return Math.max(60, weeklyAvailableHours(windows) * 60 / 7);
+}
+
 /** Committed work with no recorded block whose latest start, worked back from its due day, falls on or before `to`. */
 function estimatedStarts(store: CrosslineStore, workspaceId: string, now: Date, recorded: string[], to: number): string[] {
   const skip = new Set(recorded);
@@ -40,9 +47,7 @@ function estimatedStarts(store: CrosslineStore, workspaceId: string, now: Date, 
   if (!orders.length) return [];
   const today = now.toISOString().slice(0, 10);
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
-  const { windows } = resolveAvailability({ saved: store.getSetting(workspaceId, AVAILABILITY_SETTING),
-    proposed: store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING), facts: store.listProfileFacts(workspaceId) });
-  const dailyMinutes = Math.max(60, weeklyAvailableHours(windows) * 60 / 7);
+  const dailyMinutes = dailyAvailableMinutes(store, workspaceId);
   return orders.filter((order) => {
     // The same due day the step planner uses: the task's own, else the milestone's confirmed deadline, else its anchor.
     let goal: string | undefined;

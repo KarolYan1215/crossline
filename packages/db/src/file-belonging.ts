@@ -6,11 +6,12 @@ export function retractedEventIdsIn(store: CrosslineStore, workspaceId: string):
   const undone = new Set(store.listEvents(workspaceId, { type: "op.undone" }).map((event) => event.entityId));
   return new Set(store.listEvents(workspaceId, { type: "op.applied" })
     .filter((event) => undone.has(event.entityId))
-    .flatMap((event) => {
-      const inverse = (event.payload as { inverse?: { kind?: string; eventIds?: string[] } }).inverse;
-      return inverse?.kind === "event.retract" ? inverse.eventIds ?? [] : [];
-    }));
+    .flatMap((event) => retracted((event.payload as { inverse?: RetractInverse }).inverse)));
 }
+type RetractInverse = { kind?: string; eventIds?: string[]; items?: RetractInverse[] };
+/** Inside a batch too: an operation that also archived or moved something records its markers as one item of several. */
+const retracted = (inverse: RetractInverse | undefined): string[] =>
+  inverse?.kind === "event.retract" ? inverse.eventIds ?? [] : inverse?.kind === "batch" ? (inverse.items ?? []).flatMap(retracted) : [];
 
 const PERSONAL = /^(个人|本人|个人档案|个人信息|person|personal)$/iu;
 /** A file whose own name says it is about the person — a profile, a CV — whatever projects it happens to name in passing. */

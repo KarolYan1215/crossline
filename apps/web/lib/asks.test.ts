@@ -530,3 +530,52 @@ test("work the assistant delivered and the gate refused is not the person's comp
   expect(ask.options.map((option) => option.id)).toEqual(["redo", "look", "drop"]);
   expect(() => store.transitionWorkOrder(ws, "wo", { type: "evidence.accepted" }, "wo:2", {})).toThrow("INVALID_WORK_ORDER_TRANSITION");
 });
+
+test("a course's or the person's own deadline that passed with work open is asked once: 补做 keeps it, 放弃 archives the milestone and its unstarted work, and both undo", async () => {
+  const store = setup();
+  const { undoOp, recentOps } = await import("./undo");
+  for (const id of ["exam", "talk"]) {
+    store.saveMilestone({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: id, title: id === "exam" ? "ECE 555 期中" : "组会报告", status: "approved", version: 1 });
+    store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: id, stage: 1, deadline: "2026-10-05", baseline: "", target: "", stakeholders: [], sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+    store.saveWorkOrder({ id: `t-${id}`, ownerId: owner, workspaceId: ws, identityId: "research", projectId: id, milestoneId: id, intent: `t-${id}`,
+      state: "approved", riskTier: "milestone", estimate, payload: {} });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `milestone-overdue:${id}:2026-10-05`, type: "milestone.overdue", entityId: id,
+      payload: { deadline: "2026-10-05", why: id === "exam" ? "course" : "person" } });
+  }
+  const overdue = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "milestone_overdue");
+  expect(overdue().map((ask) => [ask.id, ask.title])).toEqual([["overdue:exam:2026-10-05", "「ECE 555 期中」的截止 10/5 已过，还有 1 个任务没完成"],
+    ["overdue:talk:2026-10-05", "「组会报告」的截止 10/5 已过，还有 1 个任务没完成"]]);
+  expect(overdue()[0]!.why).toContain("课程给定的日期");
+  expect(await answerAsk(TEST_CTX, "overdue:exam:2026-10-05", "makeup", {}, NOW)).toMatchObject({ ok: true });
+  expect(overdue().map((ask) => ask.entityId)).toEqual(["talk"]);
+  expect(await answerAsk(TEST_CTX, "overdue:talk:2026-10-05", "drop", {}, NOW)).toMatchObject({ ok: true });
+  expect(store.listMilestones(ws).find((item) => item.id === "talk")!.status).toBe("archived");
+  expect(store.listWorkOrders(ws).find((item) => item.id === "t-talk")!.state).toBe("archived");
+  expect(overdue()).toEqual([]);
+  // Undone: the milestone and its work are back, and so is the question.
+  const op = recentOps(TEST_CTX)[0]!;
+  expect(undoOp(TEST_CTX, op.id)).toMatchObject({ ok: true });
+  expect(store.listMilestones(ws).find((item) => item.id === "talk")!.status).toBe("approved");
+  expect(store.listWorkOrders(ws).find((item) => item.id === "t-talk")!.state).toBe("approved");
+  expect(overdue().map((ask) => ask.entityId)).toEqual(["talk"]);
+  // A date moved elsewhere is no longer this question.
+  store.setSetting(ws, "goal.settings:talk", JSON.stringify({ confirmedDeadline: "2026-10-20" }));
+  expect(overdue()).toEqual([]);
+});
+
+test("撤销 on the daily pass hands its assistant results back to the person", async () => {
+  const store = setup();
+  const { undoOp } = await import("./undo");
+  const { listAgentTasks, reviewAgentTask, settleAgentResult } = await import("@crossline/db");
+  for (const taskId of ["kept", "adopted"]) {
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested", entityId: taskId, payload: { title: `任务 · ${taskId}`, category: "read_research_organize", workOrderId: "" } });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.task.completed", entityId: taskId,
+      payload: { directory: "", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true } });
+  }
+  settleAgentResult(store, ws, "kept", "expired", { day: "2026-10-07" });
+  reviewAgentTask(store, ws, "adopted", "accepted", "", { by: "system" });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "op.applied:op-pass", type: "op.applied", entityId: "op-pass",
+    payload: { bySystem: true, label: "到期整理", inverse: { kind: "agent.reopen", taskIds: ["kept", "adopted"] } } });
+  expect(undoOp(TEST_CTX, "op-pass")).toMatchObject({ ok: true });
+  expect(listAgentTasks(store, ws).map((row) => [row.taskId, row.status, row.settled ?? ""]).sort()).toEqual([["adopted", "needs_review", ""], ["kept", "needs_review", ""]]);
+});

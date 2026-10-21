@@ -22,6 +22,7 @@ import { createCalendarPublisher } from "./calendar-publish";
 import { repairDuplicateImports, repairFrozenRace } from "./calendar-repair";
 import { repairLineAttributes } from "./attribute-repair";
 import { returnTidy } from "./return-tidy";
+import { dateAdvancePass } from "./date-advance";
 import { createWriteLogin } from "./calendar-write-login";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
@@ -689,6 +690,13 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
     enterUsage: enterUsageWorkspace, force: true })).reduce((sum, item) => sum + item.absorbed.length, 0) }).catch(() => undefined);
   if (tidied) console.info(JSON.stringify({ type: "return.tidied", workspaceId: workspace.id, shifted: tidied.shifted.length, archived: tidied.archived.length,
     merged: tidied.merged, checkedAt }));
+  // Once a day: what waits for the person moves with the date — old assistant results decided or put away, overdue milestones moved or
+  // asked about, untouched proposals and drafts archived (date-advance.ts). Rules only, no model.
+  try {
+    const advanced = dateAdvancePass(analysisStore, workspace.id);
+    if (advanced) console.info(JSON.stringify({ type: "date.advanced", workspaceId: workspace.id, superseded: advanced.superseded.length, adopted: advanced.adopted.length,
+      expired: advanced.expired.length, shifted: advanced.shifted.length, asked: advanced.asked.length, archived: advanced.archived.length, drafts: advanced.drafts.length, checkedAt }));
+  } catch (error) { console.warn(JSON.stringify({ type: "date.advance_failed", workspaceId: workspace.id, message: error instanceof Error ? error.message : String(error) })); }
   await dedupePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
   await titlePass(workspace.id, checkedAt);
   await goalSplitPass(workspace.id, checkedAt);
