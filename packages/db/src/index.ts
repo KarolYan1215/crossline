@@ -1380,6 +1380,8 @@ export class CrosslineStore {
       const retrying = isCapture && state === "blocked" && event.type === "analysis.proposed";
       const next = advanceWorkOrder({ ...current, state: retrying ? "captured" : state }, event);
       if (!next.ok) throw new Error(next.blocker.code);
+      // A blocked order is accepted only as the person's own completion, never by the gate or a review.
+      if (state === "blocked" && event.type === "evidence.accepted" && !event.onCompletion) throw new Error("INVALID_WORK_ORDER_TRANSITION");
       if (event.type === "analysis.accepted") {
         const context = validateAnalysisContext(update.context);
         const proposal = validateAnalysisProposal(update.proposal, context);
@@ -4081,3 +4083,4 @@ export * from "./onboarding-extract";
 export * from "./records";
 export * from "./automations";
 export * from "./mail-replies";
+export * from "./own-completion";

@@ -6,7 +6,7 @@ import {
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskPreview, type AskSnooze,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf
 } from "@crossline/core";
-import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
+import { acceptOwnCompletion, listAgentTasks, ownCompletion, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
   acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast,
@@ -253,7 +253,9 @@ function gateAsks({ store, ctx, today }: Source): Ask[] {
         why: offPlay ? `契约要求已覆盖，但违背了主线 skill：${clause(review.fit!.violated.join("；"))}。${review.fit!.why ? `${clause(review.fit!.why)}。` : ""}改后重新提交即重新判定。`
           : needs.length ? `验收尚缺：${clause(needs.join("；"))}。补充后重新提交即重新判定。` : "验收证据不足。补充后重新提交即重新判定。",
         options: [
-          { id: "redo", label: "重新排上，补做缺的", recommended: true },
+          // The person had pressed 完成 themselves: that is the acceptance now (2026-10-15), so ending it is the first answer.
+          ...(ownCompletion(store, ctx.workspaceId, order.id) ? [{ id: "done", label: "已经交了，结束", detail: "按本人点的完成算验收通过", recommended: true }] : []),
+          { id: "redo", label: "重新排上，补做缺的", recommended: !ownCompletion(store, ctx.workspaceId, order.id) },
           { id: "look", label: "去看判定细节", href: `/workbench/${encodeURIComponent(order.id)}` },
           { id: "drop", label: "不做了", fields: [{ id: "reason", label: "为什么不做", kind: "text", required: true }] }
         ] });
@@ -901,7 +903,10 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       return { ok: true };
     }
     case "materials_blocked": return optionId === "retry" ? retryMaterialPreparation(ctx, ask.entityId) : markMaterialsReady(ctx, ask.entityId, "human");
-    case "gate_insufficient": return optionId === "drop" ? archiveWorkOrder(ctx, ask.entityId, values.reason!) : approveWorkOrderProposal(ctx, ask.entityId);
+    case "gate_insufficient":
+      if (optionId === "done") return acceptOwnCompletion(store, ctx.workspaceId, ask.entityId, `own-completion:${ask.entityId}:${ask.fingerprint}`)
+        ? { ok: true } : { ok: false, code: "NOT_COMPLETED_BY_PERSON" };
+      return optionId === "drop" ? archiveWorkOrder(ctx, ask.entityId, values.reason!) : approveWorkOrderProposal(ctx, ask.entityId);
     case "gate_failed": {
       record(ctx, "milestone_gate.retry_requested", ask.entityId, `milestone-gate:retry:${ask.entityId}:${Date.now()}`, { requestedBy: ctx.principalId });
       await requestCodexSupervisor(ctx, `/v1/work-orders/${ask.entityId}/milestone-gate`, { method: "POST", headers: { "content-type": "application/json" },

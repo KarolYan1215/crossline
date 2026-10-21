@@ -479,3 +479,38 @@ test("待决事项 are in the question ledger: listed on the timer, answered wit
   writeAttentionSnapshot(TEST_CTX, 0, NOW);
   expect(store.questionByKey(ws, key)!.status).toBe("answered");
 });
+
+/** The real path of 「完成 ECE 555 作业 2」: marked done before 完成 became the acceptance, then refused by the gate. */
+function completedThenRefused(store: CrosslineStore) {
+  store.saveWorkOrder({ id: "hw2", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "mos2", intent: "完成 ECE 555 作业 2",
+    state: "approved", riskTier: "milestone", estimate, payload: {} });
+  for (const [index, event] of ([{ type: "materials.not_required" }, { type: "human.started" }, { type: "human.completed" },
+    { type: "blocked", reason: "MILESTONE_GATE_INSUFFICIENT" }] as const).entries())
+    store.transitionWorkOrder(ws, "hw2", event as never, `hw2:${index}`, {});
+  const order = store.listWorkOrders(ws).find((item) => item.id === "hw2")!;
+  store.saveWorkOrder({ ...order, payload: { gateReview: { verdict: "insufficient", gaps: [{ code: "G1", whatWouldSatisfyIt: "提交作业文件副本" }], criteriaVerdict: [] } } });
+}
+
+test("a refusal of work the person marked done themselves offers to end it, and ending it accepts it with no evidence", async () => {
+  const store = setup();
+  completedThenRefused(store);
+  const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "gate_insufficient")!;
+  expect(ask.options.map((option) => option.id)).toEqual(["done", "redo", "look", "drop"]);
+  expect(ask.options.find((option) => option.recommended)?.id).toBe("done");
+  expect(await answerAsk(TEST_CTX, ask.id, "done", {}, NOW)).toMatchObject({ ok: true });
+  expect(store.listWorkOrders(ws).find((order) => order.id === "hw2")!.state).toBe("accepted");
+  expect(collectAsks(TEST_CTX, NOW).some((item) => item.kind === "gate_insufficient")).toBe(false);
+});
+
+test("work the assistant delivered and the gate refused is not the person's completion: no 「已经交了」, and a blocked order takes no other acceptance", async () => {
+  const store = setup();
+  store.saveWorkOrder({ id: "wo", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "mos2", intent: "跑一轮仿真",
+    state: "approved", riskTier: "milestone", estimate, payload: {} });
+  store.transitionWorkOrder(ws, "wo", { type: "agent.delivered" } as never, "wo:0", {});
+  store.transitionWorkOrder(ws, "wo", { type: "blocked", reason: "MILESTONE_GATE_INSUFFICIENT" } as never, "wo:1", {});
+  const order = store.listWorkOrders(ws).find((item) => item.id === "wo")!;
+  store.saveWorkOrder({ ...order, payload: { gateReview: { verdict: "insufficient", gaps: [], criteriaVerdict: [] } } });
+  const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "gate_insufficient")!;
+  expect(ask.options.map((option) => option.id)).toEqual(["redo", "look", "drop"]);
+  expect(() => store.transitionWorkOrder(ws, "wo", { type: "evidence.accepted" }, "wo:2", {})).toThrow("INVALID_WORK_ORDER_TRANSITION");
+});

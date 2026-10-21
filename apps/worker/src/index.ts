@@ -7,7 +7,7 @@ import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -1007,6 +1007,9 @@ for (const workspace of analysisStore.listWorkspaces()) {
   const repaired = repairFrozenRace(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
   if (repaired && (repaired.released.length || repaired.republished.length))
     console.info(JSON.stringify({ type: "repair.frozen_race", workspaceId: workspace.id, released: repaired.released.length, republished: repaired.republished.length, checkedAt: new Date().toISOString() }));
+  // Once: work the person marked done before 完成 became the acceptance (2026-10-15) and the gate then blocked is accepted as done.
+  const ownDone = repairOwnCompletions(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
+  if (ownDone?.length) console.info(JSON.stringify({ type: "repair.own_completion", workspaceId: workspace.id, accepted: ownDone, checkedAt: new Date().toISOString() }));
   // Once: imported class blocks a date batch put on the plan twice (a weekly class and that day's dated session in one slot).
   const deduped = repairDuplicateImports(analysisStore, workspace.id, ownerOf(analysisStore, workspace.id));
   if (deduped) console.info(JSON.stringify({ type: "repair.import_duplicates", workspaceId: workspace.id, removed: deduped.removed, checkedAt: new Date().toISOString() }));

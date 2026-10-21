@@ -358,7 +358,9 @@ const WORK_ORDER_TRANSITIONS: Partial<Record<WorkOrderState, Partial<Record<Work
   ready_for_human: { "human.started": "active", "approval.revoked": "awaiting_plan_approval", "agent.delivered": "evidence_review", blocked: "blocked", archived: "archived" },
   active: { "human.completed": "evidence_review", blocked: "blocked", archived: "archived" },
   evidence_review: { "evidence.accepted": "accepted", blocked: "blocked", archived: "archived" },
-  blocked: { "plan.approved": "approved", archived: "archived" },
+  // `evidence.accepted` here only with `onCompletion` (the store refuses any other): the person had pressed 完成, and a gate that refused
+  // it afterwards — before 2026-10-15, when 完成 became the acceptance — is not the last word on their own homework.
+  blocked: { "plan.approved": "approved", "evidence.accepted": "accepted", archived: "archived" },
   accepted: { "acceptance.revoked": "evidence_review", archived: "archived" }
 };
 
