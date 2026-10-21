@@ -271,7 +271,7 @@ jobs:
           # The job's own token pulls the private images and is logged out again; nothing long-lived is left on the host.
           ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "
             echo '$TOKEN' | sudo docker login ghcr.io -u '$ACTOR' --password-stdin &&
-            sudo sh /srv/crossline/run.sh; status=\$?; sudo docker logout ghcr.io; sudo docker image prune -f >/dev/null; exit \$status"
+            sudo env CROSSLINE_PULL_REQUIRED=1 sh /srv/crossline/run.sh; status=\$?; sudo docker logout ghcr.io; sudo docker image prune -f >/dev/null; exit \$status"
       - name: Daily backup and the cron entry
         if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
         run: |
