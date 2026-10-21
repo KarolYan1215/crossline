@@ -11,6 +11,21 @@ const DAILY_SETTING = "recordings.upload.bytes";
 const EXTENSION: Record<string, string> = { "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/m4a": "m4a", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav",
   "audio/aac": "aac", "audio/ogg": "ogg", "audio/opus": "opus", "audio/webm": "webm", "audio/flac": "flac" };
 
+/** The container a recording's opening bytes name, as the extension it is stored under; undefined when they name no audio format. */
+export function audioKind(head: Uint8Array): string | undefined {
+  const ascii = (from: number, to: number) => Buffer.from(head.subarray(from, to)).toString("latin1");
+  if (ascii(4, 8) === "ftyp") return "m4a";
+  if (ascii(0, 4) === "caff") return "m4a";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WAVE") return "wav";
+  if (ascii(0, 4) === "OggS") return "ogg";
+  if (ascii(0, 4) === "fLaC") return "flac";
+  if (head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) return "webm";
+  if (ascii(0, 3) === "ID3") return "mp3";
+  if (head[0] === 0xff && head[1] !== undefined && (head[1] & 0xf6) === 0xf0) return "aac";
+  if (head[0] === 0xff && head[1] !== undefined && (head[1] & 0xe0) === 0xe0) return "mp3";
+  return undefined;
+}
+
 /**
  * A recording from the phone's shortcut (docs/phone-recording.md 「服务器转写」): the raw file as the body, the recording-scoped device
  * token as `Authorization: Bearer <token>`, and its name as `?name=`. It is written to the inbox as it arrives — never held in memory —
@@ -28,14 +43,6 @@ export async function POST(request: Request) {
 
   const named = path.basename((new URL(request.url).searchParams.get("name") ?? "").replace(/\\/g, "/")).replace(/[\u0000-\u001f]/g, "").trim().slice(-120);
   const type = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-  // Voice Memos names a recording 「新录音 3」, with no extension, and a shortcut may send it as application/octet-stream. ffmpeg reads
-  // the format from the content, not the name, so a recording that says nothing about its type is taken as Voice Memos' m4a; only a name
-  // or type that says it is something else (a document, a picture) is refused.
-  const otherExtension = /\.[A-Za-z][A-Za-z0-9]{0,4}$/.test(named) && !RECORDING_FILE.test(named);
-  const otherType = Boolean(type) && !type.startsWith("audio/") && type !== "application/octet-stream" && !(type === "video/mp4" || type === "video/webm");
-  const extension = RECORDING_FILE.exec(named)?.[1]?.toLowerCase() ?? EXTENSION[type] ?? (otherExtension || otherType ? undefined : "m4a");
-  if (!extension) return Response.json({ ok: false, code: "RECORDING_TYPE_UNSUPPORTED", message: "只收录音（m4a、mp3、wav、aac、opus、ogg、webm、flac）。" }, { status: 415 });
-  const given = named && !RECORDING_FILE.test(named) ? `${named}.${extension}` : named;
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (declared > RECORDING_UPLOAD_LIMIT) return Response.json({ ok: false, code: "RECORDING_TOO_LARGE", message: "单个录音不能超过 300 MB。" }, { status: 413 });
   const day = new Date().toISOString().slice(0, 10);
@@ -44,6 +51,30 @@ export async function POST(request: Request) {
   if (used.bytes + declared > RECORDING_UPLOAD_DAILY_LIMIT) return Response.json({ ok: false, code: "RECORDING_DAILY_LIMIT", message: "今天上传的录音已到 3 GB。" }, { status: 429 });
   if (!request.body) return Response.json({ ok: false, code: "RECORDING_EMPTY" }, { status: 400 });
 
+  // The opening bytes decide first: a Voice Memos recording handed over by the Find Recordings action comes with a name and a type
+  // that say nothing useful (every upload was refused as 415 on 2026-10-21), while its content is plainly m4a.
+  const reader = request.body.getReader();
+  const head: Uint8Array[] = [];
+  let headSize = 0;
+  while (headSize < 16) {
+    const next = await reader.read();
+    if (next.done) break;
+    head.push(next.value); headSize += next.value.byteLength;
+  }
+  const opening = Buffer.concat(head);
+  // Voice Memos names a recording 「新录音 3」, with no extension, and a shortcut may send it as application/octet-stream. ffmpeg reads
+  // the format from the content, not the name, so a recording that says nothing about its type is taken as Voice Memos' m4a; only a name
+  // or type that says it is something else (a document, a picture) is refused.
+  const otherExtension = /\.[A-Za-z][A-Za-z0-9]{0,4}$/.test(named) && !RECORDING_FILE.test(named);
+  const otherType = Boolean(type) && !type.startsWith("audio/") && type !== "application/octet-stream" && !(type === "video/mp4" || type === "video/webm");
+  const extension = audioKind(opening) ?? RECORDING_FILE.exec(named)?.[1]?.toLowerCase() ?? EXTENSION[type] ?? (otherExtension || otherType ? undefined : "m4a");
+  if (!extension) {
+    await reader.cancel().catch(() => undefined);
+    const looksText = opening.length > 0 && [...opening.subarray(0, 16)].every((byte) => byte >= 0x09 && byte < 0x7f || byte >= 0x80);
+    return Response.json({ ok: false, code: "RECORDING_TYPE_UNSUPPORTED", message: `只收录音（m4a、mp3、wav、aac、opus、ogg、webm、flac）。收到的类型：${type || "无"}${looksText ? `，内容是文字：「${opening.toString("utf8").slice(0, 40)}」` : ""}` }, { status: 415 });
+  }
+  const given = named && !RECORDING_FILE.test(named) ? `${named}.${extension}` : named;
+
   const dir = path.join(dataDirectory(), ...RECORDING_INBOX_SEGMENTS, workspaceId);
   await mkdir(dir, { recursive: true });
   const final = path.join(dir, `${Date.now()}-${randomUUID().slice(0, 8)}.${extension}`);
@@ -51,7 +82,8 @@ export async function POST(request: Request) {
   const out = createWriteStream(part);
   let size = 0;
   try {
-    for await (const chunk of request.body as unknown as AsyncIterable<Uint8Array>) {
+    const chunks = async function* () { yield* head; for (;;) { const next = await reader.read(); if (next.done) return; yield next.value; } };
+    for await (const chunk of chunks()) {
       size += chunk.byteLength;
       if (size > RECORDING_UPLOAD_LIMIT || used.bytes + size > RECORDING_UPLOAD_DAILY_LIMIT) throw new Error("RECORDING_TOO_LARGE");
       if (!out.write(chunk)) await new Promise((resolve) => out.once("drain", resolve));
