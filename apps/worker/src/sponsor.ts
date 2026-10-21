@@ -122,7 +122,18 @@ export type SponsorEffortLog = { at: string; model: string; variant: string; cas
  */
 export const SPONSOR_KEY_EXHAUSTED = "SPONSOR_KEY_EXHAUSTED";
 const spent = (code: string | undefined) => code === "SKILL_USAGE_LIMIT";
+/**
+ * A run that failed before anything reached the model (the runtime gone or replaced, its Skill list unreadable) says nothing about the
+ * candidate either (found on 2026-10-20: the runtime was replaced part way through a measurement, every remaining case of every
+ * candidate was written as a SKILL_LIST_FAILED failure in the same second, and GLM-5.3-Flash then admitted none of the planning Skills
+ * the owner had moved to it). The measurement stops there without a record and is tried again, like a spent key.
+ */
+export const SPONSOR_RUNTIME_DOWN = "SPONSOR_RUNTIME_DOWN";
+export const runtimeDown = (code: string | undefined) => /^(SKILL_(LIST_FAILED|MISSING|CONFIG_FAILED)|CODEX_(RUNTIME|SKILL_LIST)|RUNTIME_UNCONNECTED)/.test(code ?? "");
+/** A record with such a failure in it was taken while the runtime was down: it is measured again and never used to choose or prune. */
+export const measuredWhileDown = (evaluation: SponsorEvaluation) => evaluation.record.runs.some((run) => !run.ok && runtimeDown(run.code));
 const exhaustedError = (error: unknown) => error instanceof Error && error.message === SPONSOR_KEY_EXHAUSTED;
+const stoppedError = (error: unknown) => error instanceof Error && (error.message === SPONSOR_KEY_EXHAUSTED || error.message === SPONSOR_RUNTIME_DOWN);
 
 /**
  * `lastChosen`: the model last chosen, served while a new evaluation runs (the owner's decision of 2026-10-19: no pause). `pruned`: the
@@ -181,8 +192,11 @@ export function createSponsorService(options: {
     const config = settings();
     if (!config) return new Map();
     const saved = read();
-    return new Map([...Object.entries(saved.pruned ?? {}).map(([model, entry]) => [model, entry.by] as const),
-      ...dominatedCandidates(saved.evaluations, config.models)]);
+    const sound = saved.evaluations.filter((item) => !measuredWhileDown(item));
+    // A pruning that rested on a record taken while the runtime was down (either side of it) does not stand.
+    const unsound = new Set(saved.evaluations.filter(measuredWhileDown).map((item) => item.model));
+    return new Map([...Object.entries(saved.pruned ?? {}).filter(([model, entry]) => !unsound.has(model) && !unsound.has(entry.by))
+      .map(([model, entry]) => [model, entry.by] as const), ...dominatedCandidates(sound, config.models)]);
   };
   const currentEvaluations = (): SponsorEvaluation[] => {
     const config = settings();
@@ -190,7 +204,7 @@ export function createSponsorService(options: {
     const dominated = offFrontier();
     // A record without token totals predates pricing by tokens and could only be compared at the prices it ran under: tested again.
     return read().evaluations.filter((item) => item.tokens && item.version === SPONSOR_EVAL_VERSION && config.models.some((model) => model.model === item.model)
-      && !dominated.has(item.model) && conformanceCurrent(item.record, item.model, RUNTIME_VERSION, now()));
+      && !dominated.has(item.model) && !measuredWhileDown(item) && conformanceCurrent(item.record, item.model, RUNTIME_VERSION, now()));
   };
   /** Writes the evaluations, keeping the last choice and the candidates off the frontier. */
   const save = (evaluations: SponsorEvaluation[], lastChosen = read().lastChosen, pruned = read().pruned) =>
@@ -206,7 +220,8 @@ export function createSponsorService(options: {
     if (last && config.models.some((model) => model.model === last.model)) return last;
     // No choice kept yet: the best of the older records that reached a model, so invited accounts are not paused for a re-measurement.
     const dominated = offFrontier();
-    return chooseSponsorModel(config.models, saved.evaluations.filter((item) => (item.tokens?.input ?? 0) > 0 && !dominated.has(item.model)), options.capabilities);
+    return chooseSponsorModel(config.models, saved.evaluations.filter((item) => (item.tokens?.input ?? 0) > 0 && !dominated.has(item.model)
+      && !measuredWhileDown(item)), options.capabilities);
   };
   /** What per-Skill choices are made from: the current records, or only the last choice while none is current. */
   const pool = (): SponsorEvaluation[] => {
@@ -286,17 +301,19 @@ export function createSponsorService(options: {
    * Tests every candidate without a current record, side by side; the choice follows from the records. Safe to call often.
    * `exhausted`: the key's balance ran out, so what was not measured is measured again on a later call, once there is money.
    */
-  async function evaluate(): Promise<{ chosen?: string; tested: string[]; skipped: string[]; exhausted: boolean }> {
+  async function evaluate(): Promise<{ chosen?: string; tested: string[]; skipped: string[]; exhausted: boolean; interrupted: boolean }> {
     const config = settings();
     const client = options.client();
-    if (!config || !client || evaluating) return { tested: [], skipped: [], exhausted: false };
+    if (!config || !client || evaluating) return { tested: [], skipped: [], exhausted: false, interrupted: false };
     evaluating = true;
     const tested: string[] = [];
     const skipped: string[] = [];
     let exhausted = false;
-    // A spent key stops the measurement where it is; whatever was not measured stays unrecorded.
+    let interrupted = false;
+    // A spent key or a runtime that went away stops the measurement where it is; whatever was not measured stays unrecorded.
     const unlessSpent = (model: string, error: unknown): false => {
       if (exhaustedError(error)) exhausted = true;
+      else if (error instanceof Error && error.message === SPONSOR_RUNTIME_DOWN) interrupted = true;
       else console.info(JSON.stringify({ type: "sponsor.measure_failed", model, message: error instanceof Error ? error.message.slice(0, 160) : "unknown" }));
       return false;
     };
@@ -355,7 +372,7 @@ export function createSponsorService(options: {
       yuanPerRun: evaluationYuanPerRun(item, config.models), tokens: item.tokens ?? null }));
     // Off the frontier for good: written down, so a later measuring version leaves them out too.
     const saved = read();
-    const found = [...dominatedCandidates(saved.evaluations, config.models)].filter(([model]) => !saved.pruned?.[model]);
+    const found = [...dominatedCandidates(saved.evaluations.filter((item) => !measuredWhileDown(item)), config.models)].filter(([model]) => !saved.pruned?.[model]);
     if (found.length) {
       const at = now().toISOString();
       save(saved.evaluations, saved.lastChosen, { ...saved.pruned,
@@ -363,8 +380,9 @@ export function createSponsorService(options: {
       console.info(JSON.stringify({ type: "sponsor.pruned", pruned: found.map(([model, by]) => ({ model, by })) }));
     }
     if (exhausted) console.info(JSON.stringify({ type: "sponsor.key_exhausted", balance: await balance() ?? null }));
+    if (interrupted) console.info(JSON.stringify({ type: "sponsor.runtime_down" }));
     console.info(JSON.stringify({ type: "sponsor.chosen", model: pick?.model ?? null, skipped, candidates }));
-    return { ...(pick ? { chosen: pick.model } : {}), tested, skipped, exhausted };
+    return { ...(pick ? { chosen: pick.model } : {}), tested, skipped, exhausted, interrupted };
   }
 
   /** What is left on the key (SiliconFlow's `/user/info`; only the amounts and status are kept), or undefined when it cannot be read. */
@@ -392,7 +410,7 @@ export function createSponsorService(options: {
     // How it talks first: the sample interview takes minutes, and its replies are what the owner reads.
     try {
       await sampleDialogue(client, model).catch((error: unknown) => {
-        if (exhaustedError(error)) throw error;
+        if (stoppedError(error)) throw error;
         console.info(JSON.stringify({ type: "sponsor.dialogue_failed", model: model.model, message: error instanceof Error ? error.message.slice(0, 160) : "unknown" }));
       });
       return await conformanceRuns(client, model, thread, key, runs);
@@ -440,6 +458,7 @@ export function createSponsorService(options: {
         tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 } };
       try { appendFileSync(logFile(model.model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading, never a reason to fail the measurement */ }
       if (!result.ok && spent(result.blocker.code)) throw new Error(SPONSOR_KEY_EXHAUSTED);
+      if (!result.ok && runtimeDown(result.blocker.code)) throw new Error(SPONSOR_RUNTIME_DOWN);
       if (!result.ok && !transientFailure(result.blocker.code, detailOf(result.blocker))) ownFailures += 1;
       if (runs.length === SPONSOR_EARLY_STOP_RUNS && ownFailures === runs.length) {
         console.info(JSON.stringify({ type: "sponsor.stopped_early", model: model.model, runs: runs.length, codes: runs.map((run) => run.code) }));
@@ -483,6 +502,7 @@ export function createSponsorService(options: {
           tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 } };
         try { appendFileSync(effortFile(model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading only */ }
         if (!result.ok && spent(result.blocker.code)) throw new Error(SPONSOR_KEY_EXHAUSTED);
+        if (!result.ok && runtimeDown(result.blocker.code)) throw new Error(SPONSOR_RUNTIME_DOWN);
         const tally = summary[line.variant] ??= { ok: 0, runs: 0, serviceMs: 0, reasoning: 0 };
         tally.runs += 1; tally.ok += line.ok ? 1 : 0; tally.serviceMs += line.serviceMs ?? line.wallMs; tally.reasoning += line.tokens.reasoning;
       }
@@ -526,6 +546,7 @@ export function createSponsorService(options: {
           tokens: { input: usage?.inputTokens ?? 0, cached: usage?.cachedInputTokens ?? 0, output: usage?.outputTokens ?? 0, reasoning: usage?.reasoningOutputTokens ?? 0 } };
         try { appendFileSync(dialogueFile(model.model), `${JSON.stringify(line)}\n`, "utf8"); } catch { /* the log is for reading only */ }
         if (outcome.state === "blocked" && spent(outcome.code)) throw new Error(SPONSOR_KEY_EXHAUSTED);
+        if (outcome.state === "blocked" && runtimeDown(outcome.code)) throw new Error(SPONSOR_RUNTIME_DOWN);
         // A turn that failed leaves nothing to answer: the rest of the script would only measure the same failure again.
         if (!line.ok) break;
       }
