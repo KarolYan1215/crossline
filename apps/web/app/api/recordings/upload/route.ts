@@ -26,10 +26,16 @@ export async function POST(request: Request) {
   if (store.getSetting(workspaceId, RECORDING_SERVER_CONSENT) !== "granted") return Response.json({ ok: false, code: "RECORDING_SERVER_NOT_ENABLED",
     message: "设置里还没有打开「录音在服务器转写」。" }, { status: 403 });
 
-  const given = path.basename((new URL(request.url).searchParams.get("name") ?? "").replace(/\\/g, "/")).replace(/[\u0000-\u001f]/g, "").trim().slice(-120);
+  const named = path.basename((new URL(request.url).searchParams.get("name") ?? "").replace(/\\/g, "/")).replace(/[\u0000-\u001f]/g, "").trim().slice(-120);
   const type = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-  const extension = RECORDING_FILE.exec(given)?.[1]?.toLowerCase() ?? EXTENSION[type];
-  if (!extension) return Response.json({ ok: false, code: "RECORDING_TYPE_UNSUPPORTED", message: "只收 m4a、mp3、wav、aac、opus、ogg、webm、flac 录音。" }, { status: 415 });
+  // Voice Memos names a recording 「新录音 3」, with no extension, and a shortcut may send it as application/octet-stream. ffmpeg reads
+  // the format from the content, not the name, so a recording that says nothing about its type is taken as Voice Memos' m4a; only a name
+  // or type that says it is something else (a document, a picture) is refused.
+  const otherExtension = /\.[A-Za-z][A-Za-z0-9]{0,4}$/.test(named) && !RECORDING_FILE.test(named);
+  const otherType = Boolean(type) && !type.startsWith("audio/") && type !== "application/octet-stream" && !(type === "video/mp4" || type === "video/webm");
+  const extension = RECORDING_FILE.exec(named)?.[1]?.toLowerCase() ?? EXTENSION[type] ?? (otherExtension || otherType ? undefined : "m4a");
+  if (!extension) return Response.json({ ok: false, code: "RECORDING_TYPE_UNSUPPORTED", message: "只收录音（m4a、mp3、wav、aac、opus、ogg、webm、flac）。" }, { status: 415 });
+  const given = named && !RECORDING_FILE.test(named) ? `${named}.${extension}` : named;
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (declared > RECORDING_UPLOAD_LIMIT) return Response.json({ ok: false, code: "RECORDING_TOO_LARGE", message: "单个录音不能超过 300 MB。" }, { status: 413 });
   const day = new Date().toISOString().slice(0, 10);

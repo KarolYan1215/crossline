@@ -45,3 +45,15 @@ test("only the recording token uploads, only with the server consent on, and the
   expect(existsSync(inbox())).toBe(false);
   expect((await send(recording, "audio")).status).toBe(403);
 });
+
+test("a Voice Memos recording with no extension and no audio type is taken as m4a; a document or picture is still refused", async () => {
+  const recording = issueDeviceToken({ ...TEST_CTX, workspaceId }, "recording");
+  store.setSetting(workspaceId, RECORDING_SERVER_CONSENT, "granted");
+  expect((await send(recording, "voice memo", "新录音 3", { "content-type": "application/octet-stream" })).status).toBe(200);
+  expect((await send(recording, "voice memo 2", "2026-10-20 at 9.30 AM", { "content-type": "" })).status).toBe(200);
+  const sides = readdirSync(inbox()).filter((name) => name.endsWith(".json")).map((name) => (JSON.parse(readFileSync(path.join(inbox(), name), "utf8")) as { name: string }).name).sort();
+  expect(sides).toEqual(["2026-10-20 at 9.30 AM.m4a", "新录音 3.m4a"]);
+  expect(readdirSync(inbox()).filter((name) => !name.endsWith(".json")).every((name) => name.endsWith(".m4a"))).toBe(true);
+  expect((await send(recording, "x", "photo", { "content-type": "image/png" })).status).toBe(415);
+  expect((await send(recording, "x", "notes.docx", { "content-type": "application/octet-stream" })).status).toBe(415);
+});
