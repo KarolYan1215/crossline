@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { STYLE_INSTRUCTIONS } from "./style";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { cleanAnswerStrings } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
@@ -515,6 +515,7 @@ export async function installLibraryPlugin(client: CodexRpcBoundary, plugin: { m
   return underConfigLock(client, async () => {
     try { await client.request("plugin/install", { marketplacePath: plugin.marketplacePath, pluginName: plugin.name }); }
     catch { fail("SKILL_LIBRARY_INSTALL_FAILED"); }
+    forgetOwnPlugins(client);
     let response: unknown;
     try { response = await client.request("skills/list", { cwds: [plugin.cwd], forceReload: true }); }
     catch { fail("SKILL_LIST_FAILED"); }
@@ -643,10 +644,60 @@ function openScope(client: CodexRpcBoundary, options: { timeoutMs?: number; sign
       try { return await Promise.race([client.request(method, params), canceled, limit.promise]); }
       finally { limit.clear(); }
     },
-    dispose: () => stopWaiting()
+    dispose: () => stopWaiting(),
+    client
   };
 }
 type Scope = ReturnType<typeof openScope>;
+
+/**
+ * The plugins a structured run keeps (found on the hosted beta, 2026-10-21). The runtime starts every MCP server of every active plugin
+ * for each thread, and a ChatGPT account carries OpenAI's curated `codex-security` plugin: an ~80 MB node process per thread. During a
+ * model measurement sixteen of them held the worker at its memory ceiling, the kernel killed the owner's runtime and the worker restarted,
+ * three times in an hour, so the measurement started over each time. A structured run needs only Crossline's own plugins: its thread turns
+ * every other plugin off (`plugins._default.enabled = false`) and each of ours on, by the id the runtime itself lists. When the runtime
+ * cannot list them, or lists none of ours, nothing is changed.
+ */
+const OWN_MARKETPLACES = ["crossline-local", "crossline-library"];
+const OWN_PLUGINS_TTL_MS = 10 * 60_000;
+const OWN_PLUGINS_RETRY_MS = 60_000;
+const ownPluginCache = new WeakMap<object, Map<string, { at: number; ttl: number; ids: string[] | undefined }>>();
+/** After an install: the next run lists the plugins again, so a new library plugin is not left off. */
+export function forgetOwnPlugins(client: CodexRpcBoundary): void { ownPluginCache.delete(client); }
+async function ownPlugins(client: CodexRpcBoundary, cwd: string): Promise<string[] | undefined> {
+  let byCwd = ownPluginCache.get(client);
+  if (!byCwd) { byCwd = new Map(); ownPluginCache.set(client, byCwd); }
+  const cached = byCwd.get(cwd);
+  if (cached && Date.now() - cached.at < cached.ttl) return cached.ids;
+  let ids: string[] | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("PLUGIN_LIST_TIMEOUT")), 10_000); });
+    // The run's folder too, where a marketplace may be found by its location rather than the home's settings.
+    const params = posix.isAbsolute(cwd) || win32.isAbsolute(cwd) ? { cwds: [cwd] } : {};
+    const listed = record(await Promise.race([client.request("plugin/installed", params), timeout]));
+    const plugins = (Array.isArray(listed?.marketplaces) ? listed.marketplaces : []).flatMap((entry) => {
+      const items = record(entry)?.plugins;
+      return Array.isArray(items) ? items.map(record) : [];
+    });
+    const own = plugins.flatMap((plugin) => plugin?.installed === true && typeof plugin.id === "string"
+      && OWN_MARKETPLACES.some((marketplace) => String(plugin.id).endsWith(`@${marketplace}`)) ? [String(plugin.id)] : []);
+    ids = own.some((id) => id.endsWith(`@${OWN_MARKETPLACES[0]}`)) ? [...new Set(own)].sort() : undefined;
+  } catch { ids = undefined; }
+  finally { if (timer) clearTimeout(timer); }
+  byCwd.set(cwd, { at: Date.now(), ttl: ids ? OWN_PLUGINS_TTL_MS : OWN_PLUGINS_RETRY_MS, ids });
+  return ids;
+}
+/**
+ * The thread settings that leave only these plugins on: none when the list is unknown, or when a skill the run names (`plugin:skill`)
+ * belongs to a plugin the list does not hold, which turning the rest off would take away from it.
+ */
+export function onlyOwnPlugins(ids: string[] | undefined, skills: string[] = []): Record<string, unknown> {
+  if (!ids) return {};
+  const names = new Set(ids.map((id) => id.split("@")[0]));
+  if (!skills.every((skill) => !skill.includes(":") || names.has(skill.split(":")[0]))) return {};
+  return { "plugins._default.enabled": false, ...Object.fromEntries(ids.map((id) => [`plugins.${id}.enabled`, true])) };
+}
 
 async function requireLogin(scope: Scope, context: RunContext): Promise<void> {
   // A provider routed through the gateway has its key there; there is no Codex account to be signed in to.
@@ -744,6 +795,8 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
   if (!runtimeConfig) fail("SKILL_PROTOCOL_INVALID");
   const mcp = record(runtimeConfig.mcp_servers) ?? {};
   if (options.agent) return startAgentThread(scope, options, context, resumeId);
+  // A run with connectors or the image tool may use what another plugin brings, so it keeps them all.
+  const own = options.connectors || options.allowImageGeneration ? undefined : await ownPlugins(scope.client, options.cwd);
   const config: Record<string, unknown> = {
     // "live", not "enabled": this runtime's `web_search` takes `disabled | cached | live`, and the
     // wrong variant made the whole thread/start fail — so the one Skill granted the web could never
@@ -769,6 +822,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ...(options.onPlan ? { "tools.update_plan.enabled": true } : {}),
     ...(options.askPerson ? ASK_PERSON_CONFIG : {}),
     ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false])),
+    ...onlyOwnPlugins(own, [options.skillName, ...context.extraSkills]),
     // Another provider: defined for this thread only, and no memories — Codex's memory runs would call an OpenAI model on it.
     ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition,
       "memories.use_memories": false, "memories.generate_memories": false, "features.memories": false, ...contextWindowConfig(context.provider),

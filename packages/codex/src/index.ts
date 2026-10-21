@@ -10,6 +10,7 @@ import { verifyCapability } from "./capability";
 import { enterUsageWorkspace } from "./usage";
 import { CALENDAR_APPS, calendarAppStatuses, type CostSignal } from "@crossline/core";
 import { createRuntimeRegistry, type RuntimeRegistry, type RuntimeSidecar } from "./runtime-registry";
+import { forgetOwnPlugins } from "./skill-runner";
 export * from "./skill-runner";
 export * from "./model-gate";
 export * from "./style";
@@ -325,6 +326,7 @@ async function installLocalPlugin(client: CodexRpcBoundary, plugin: LocalPluginC
   try {
     await client.request("plugin/install", { marketplacePath: plugin.marketplacePath, pluginName: plugin.name });
   } catch { throw new Error("CODEX_PLUGIN_INSTALL_FAILED"); }
+  forgetOwnPlugins(client);
   let listed: unknown;
   try { listed = await client.request("skills/list", { cwds: [plugin.cwd], forceReload: true }); }
   catch { throw new Error("CODEX_SKILL_LIST_FAILED"); }
