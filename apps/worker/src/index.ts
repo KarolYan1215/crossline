@@ -20,6 +20,7 @@ import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService } from "./agent-service";
 import { createCalendarPublisher } from "./calendar-publish";
 import { repairDuplicateImports, repairFrozenRace } from "./calendar-repair";
+import { returnTidy } from "./return-tidy";
 import { createWriteLogin } from "./calendar-write-login";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
@@ -631,6 +632,12 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   await stepPlanPass(workspace.id, checkedAt);
   if (!offPeakWait) await curatorPass(workspace.id, checkedAt);
   if (!offPeakWait) await energyAdvicePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
+  // Back after two days or more: overdue milestones of their own moved, old work archived, duplicates merged now (return-tidy.ts).
+  const tidied = await returnTidy(analysisStore, workspace.id, { mergeNow: async () => (await dedupePass({ store: analysisStore, workspaceId: workspace.id,
+    cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind),
+    enterUsage: enterUsageWorkspace, force: true })).reduce((sum, item) => sum + item.absorbed.length, 0) }).catch(() => undefined);
+  if (tidied) console.info(JSON.stringify({ type: "return.tidied", workspaceId: workspace.id, shifted: tidied.shifted.length, archived: tidied.archived.length,
+    merged: tidied.merged, checkedAt }));
   await dedupePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
   await titlePass(workspace.id, checkedAt);
   await goalSplitPass(workspace.id, checkedAt);

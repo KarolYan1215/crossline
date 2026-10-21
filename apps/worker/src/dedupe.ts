@@ -164,12 +164,14 @@ const readJudged = (store: CrosslineStore, workspaceId: string): Record<string, 
  * the same day only asks the reviewer about pairs left open because the quota was not normal at the first run (`DEDUPE_REVIEW_DAY_SETTING`).
  */
 export async function dedupePass(deps: { store: CrosslineStore; workspaceId: string; cwd: string; client: () => CodexRpcBoundary | undefined;
-  spend: () => Promise<BackgroundSpend>; paused: (kind: BackgroundKind) => boolean; enterUsage: (workspaceId: string) => void; now?: Date }) {
+  spend: () => Promise<BackgroundSpend>; paused: (kind: BackgroundKind) => boolean; enterUsage: (workspaceId: string) => void; now?: Date;
+  /** The return tidy-up (`return-tidy.ts`): run now whatever ran today, the reviewer as core work, and say nothing of its own. */
+  force?: boolean }) {
   const { store, workspaceId } = deps;
   const now = deps.now ?? new Date();
   const day = localDay(store, workspaceId, now);
   if (deps.paused("planning")) return [];
-  const catchUp = store.getSetting(workspaceId, DEDUPE_DAY_SETTING) === day;
+  const catchUp = !deps.force && store.getSetting(workspaceId, DEDUPE_DAY_SETTING) === day;
   if (catchUp && store.getSetting(workspaceId, DEDUPE_REVIEW_DAY_SETTING) === day) return [];
   const judged = readJudged(store, workspaceId);
   const sameKeys = () => new Set(Object.entries(readJudged(store, workspaceId)).filter(([, same]) => same).map(([key]) => key));
@@ -178,7 +180,7 @@ export async function dedupePass(deps: { store: CrosslineStore; workspaceId: str
   if (catchUp && !open.length) return [];
   if (!catchUp) store.setSetting(workspaceId, DEDUPE_DAY_SETTING, day);
   const client = deps.client();
-  if (open.length && client && spendAllows(await deps.spend(), "discretionary")) {
+  if (open.length && client && spendAllows(await deps.spend(), deps.force ? "core" : "discretionary")) {
     store.setSetting(workspaceId, DEDUPE_REVIEW_DAY_SETTING, day);
     deps.enterUsage(workspaceId);
     const same = await reviewPairs(store, workspaceId, client, deps.cwd, open).catch(() => undefined);
@@ -187,7 +189,7 @@ export async function dedupePass(deps: { store: CrosslineStore; workspaceId: str
   // Requests first, so a task that took one in and is then merged as a duplicate carries it along.
   const ordered = [...groups.filter((group) => group.kind === "info_request"), ...groups.filter((group) => group.kind === "duplicate")];
   const done = ordered.map((group) => applyMerge(store, workspaceId, group, now)).filter((item): item is NonNullable<typeof item> => Boolean(item));
-  if (done.length) sayToPerson(store, workspaceId, `今天的自检合并了 ${done.reduce((sum, item) => sum + item.absorbed.length, 0)} 个重复或只需一封邮件的任务：\n${done.map((item) => `- ${item.label.replace(/^合并任务：/, "")}`).join("\n")}\n可在任务页「已归档」的「已合并」里撤销。`,
+  if (done.length && !deps.force) sayToPerson(store, workspaceId, `今天的自检合并了 ${done.reduce((sum, item) => sum + item.absorbed.length, 0)} 个重复或只需一封邮件的任务：\n${done.map((item) => `- ${item.label.replace(/^合并任务：/, "")}`).join("\n")}\n可在任务页「已归档」的「已合并」里撤销。`,
     "tasks_merged", catchUp ? `merged:${day}:review` : `merged:${day}`, [{ label: "查看", href: "/approvals" }], now);
   return done;
 }
