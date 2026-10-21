@@ -200,6 +200,18 @@ export function validateDateExtraction(value: unknown, known: Known): DateExtrac
   return out;
 }
 
+/** How long an arrangement with no end date (a job, a standing meeting) is taken to run: half a year, within the range a date may lie in. */
+const OPEN_ENDED_DAYS = 182;
+/**
+ * A weekly arrangement whose start is a date and whose end is not one is ongoing: a job has no end date, and the lite run of 2026-10-20
+ * wrote 「持续进行中，结束时间」 (exactly the field's ten characters), which dropped the hard line's whole schedule as 「not a valid range」.
+ */
+function openEnded(meeting: RecurringMeeting): RecurringMeeting {
+  if (!validDate(meeting.from) || validDate(meeting.to)) return meeting;
+  const [y, m, d] = meeting.from.split("-").map(Number) as [number, number, number];
+  return { ...meeting, to: new Date(Date.UTC(y, m - 1, d + OPEN_ENDED_DAYS)).toISOString().slice(0, 10) };
+}
+
 /**
  * Per-item: every date stands on its own quote, so one that cannot be verified is dropped and the rest are
  * kept. Failing the whole answer for one misquoted row (a model joining two lines that are not adjacent in
@@ -223,7 +235,7 @@ export function sanitizeDateExtraction(value: unknown, known: Known):
     }
   });
   const dates = attempt(out.dates, (item) => checkDate(item, known));
-  const recurring = attempt(out.recurring, (meeting) => checkMeeting(meeting, known));
+  const recurring = attempt(out.recurring.map(openEnded), (meeting) => checkMeeting(meeting, known));
   const undated = attempt(out.undated ?? [], (item) => checkSource(known, item.sourceRef, item.quote, item.title));
   if (out.dates.length + out.recurring.length > 0 && dates.length + recurring.length === 0) {
     reject("DATE_NOTHING_VERIFIABLE", `一条都没能在原文里核实：${dropped.slice(0, 3).map((item) => item.reason).join("；")}`);
@@ -306,11 +318,15 @@ export function withoutDecidedDates(next: DateExtraction, decided: Array<DateCan
 /**
  * Weekly arrangements that fall wholly outside the hours the person works and belong to no project — meals, sleep — say nothing the
  * available hours do not already say. Kept out of the batch, they are not offered for confirmation or for the calendar. A course's
- * class is kept even outside those hours: it is still an arrangement the person may want on the calendar.
+ * class is kept even outside those hours: it is still an arrangement the person may want on the calendar. So is a hard line's own
+ * schedule (上班 9:30–18:30, named by its project or its title): it lies outside the free hours by definition, and it is the fixed
+ * schedule the start standard asks for.
  */
 export function withoutOffHours(recurring: RecurringMeeting[], windows: Array<{ days: number[]; start: string; end: string }>,
-  projects: Array<{ id: string; name: string }>): RecurringMeeting[] {
-  const belongs = (item: RecurringMeeting) => Boolean(item.project) && projects.some((project) =>
+  projects: Array<{ id: string; name: string }>, hardLines: Array<{ id: string; label: string }> = []): RecurringMeeting[] {
+  const ofHardLine = (item: RecurringMeeting) => hardLines.some((line) =>
+    item.project === line.id || item.project === line.label || (line.label.length >= 2 && item.title.includes(line.label)));
+  const belongs = (item: RecurringMeeting) => ofHardLine(item) || Boolean(item.project) && projects.some((project) =>
     item.project === project.id || item.project === project.name || item.project.includes(project.name));
   const overlaps = (item: RecurringMeeting) => item.weekdays.some((day) => windows.some((window) =>
     window.days.includes(day) && window.start < item.endTime && window.end > item.startTime));

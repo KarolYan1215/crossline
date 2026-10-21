@@ -136,7 +136,9 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
       input.facts.some((fact) => fact.projectId === project.id && confirmedFact(fact)
         && (/^deadline$|^date_|^no_deadline$/.test(fact.slot) || NO_DEADLINE.test(fact.value ?? "")))
       || input.dates.some((entry) => !entry.recurring && (entry.project === project.id || entry.project === project.name));
-    const done = current.some(knowsDeadline);
+    // 「这条线先不规划」 is the person's answer to this item too: the interview offers it and the app's own line question records it.
+    const skipped = input.facts.some((fact) => fact.identityId === line.id && fact.slot === "skipped" && confirmedFact(fact));
+    const done = skipped || current.some(knowsDeadline);
     items.push({ id: `line_project:${line.id}`, group: "项目", label: `「${line.label}」有当前项目，且知道截止或没有截止`, done,
       detail: done ? "" : current.length ? `缺截止（或说明没有截止）：${current.map((project) => project.name).join("、")}` : "尚无当前项目",
       owner: "interview", start: true });

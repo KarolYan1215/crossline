@@ -6,6 +6,7 @@ import {
   type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
+import { identityLines } from "./lines";
 
 /**
  * What the interview writes to the ledger (2026-10-19): shared by the extraction run, which is now the only writer of facts, projects,
@@ -157,7 +158,8 @@ export function persistFileDates(store: CrosslineStore, workspaceId: string, ext
   // Ids from what each item is: a fresh run numbers from d1 again, and its d1 must not replace an earlier run's.
   const unseen = withoutDecidedDates(withContentIds(checked.extraction), decided);
   const fresh = { ...unseen, recurring: stated ? withoutOffHours(unseen.recurring, stated,
-    store.listProjects(workspaceId, { includeArchived: true })) : unseen.recurring };
+    store.listProjects(workspaceId, { includeArchived: true }),
+    identityLines(store, workspaceId).filter((line) => line.hard).map((line) => ({ id: line.id, label: line.label }))) : unseen.recurring };
   if (!fresh.dates.length && !fresh.recurring.length && !fresh.questions.length && !(fresh.undated ?? []).length) return;
   const answered = new Set(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => event.entityId));
   const open = store.listEvents(workspaceId, { type: "dates.extracted" }).filter((event) => !answered.has(event.entityId));
