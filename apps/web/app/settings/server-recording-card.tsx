@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { RecordingOverview } from "../../lib/recordings";
+import { useEffect, useRef, useState } from "react";
+import type { RecordingOverview, VoiceprintState } from "../../lib/recordings";
 import { SegmentedControl } from "../ui/controls";
 
 /**
@@ -67,8 +67,50 @@ export function ServerRecordingCard({ server, done }: { server: NonNullable<Reco
         <p className="st-note">不用另装 App。同一个录音传两次只转一次。快捷指令的「查找录音」只交出录音标题，拿不到音频，所以不能做成退出语音备忘录就自动上传，每条要分享一次。录音时别的 App 放声音，语音备忘录会停录。单个录音不超过 300 MB，每天合计不超过 3 GB。</p>
       </details>
     </>}
+    {on && <VoiceprintSection initial={server.voiceprint} />}
     {server.failed.length > 0 && <ul className="st-list" aria-label="没有转写成的上传">{server.failed.map((item, index) =>
       <li key={`${item.file}-${index}`}><span>{item.file}</span><small>{item.note}</small></li>)}</ul>}
     <p className="st-note">录到别人说话前，需让对方知情，并遵守当地关于录音的法律。</p>
   </section>;
+}
+
+const VOICEPRINT_STATE: Record<VoiceprintState["state"], string> = {
+  none: "还没有录入", pending: "已收到录音，几分钟内处理", ready: "已录入", failed: "没有录成"
+};
+
+/**
+ * 识别本人声音: every server transcript already separates speakers (「说话人 1」「说话人 2」); with this consent the person's own lines
+ * read 「本人」, from a voiceprint made of a recording of them alone. Its own consent because a voiceprint is biometric; off deletes it.
+ */
+function VoiceprintSection({ initial }: { initial: VoiceprintState }) {
+  const [state, setState] = useState(initial);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  const setOn = async (on: boolean) => {
+    const response = await fetch("/api/settings/recordings/voiceprint", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on }) }).catch(() => undefined);
+    if (!response?.ok) { setNote("未保存，请重试"); return; }
+    setState(on ? { ...state, on } : { on, state: "none" });
+    setNote(on ? "已开启：上传一段只有本人说话的录音" : "已关闭，声纹已删除");
+  };
+  const upload = async (file: File) => {
+    setBusy(true);
+    const response = await fetch("/api/recordings/voiceprint", { method: "POST", body: file }).catch(() => undefined);
+    const body = await response?.json().catch(() => null) as { message?: string } | null;
+    setBusy(false);
+    if (!response?.ok) { setNote(body?.message ?? "上传失败，请重试"); return; }
+    setState({ on: true, state: "pending" });
+    setNote("已收到，处理完会显示「已录入」；录音本身处理后删除。");
+  };
+  return <>
+    <div className="st-row"><span className="st-row-label">识别本人声音<small>{state.on ? "开启" : "关闭"}；转写稿本来就分说话人，开启后本人说的话标为「本人」</small></span>
+      <SegmentedControl label="识别本人声音" value={state.on ? "on" : "off"} onChange={(next) => void setOn(next === "on")}
+        options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]} /></div>
+    {state.on && <div className="st-row st-row-wrap"><span className="st-row-label">本人声纹<small>{VOICEPRINT_STATE[state.state]}{state.state === "ready" && state.seconds ? `（用了约 ${state.seconds} 秒人声）` : ""}{state.state === "failed" && state.message ? `：${state.message}` : ""}</small></span>
+      <input ref={picker} type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.opus,.webm,.flac" hidden
+        onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} />
+      <button type="button" disabled={busy} onClick={() => picker.current?.click()}>{busy ? "上传中…" : state.state === "ready" ? "重新录入" : "上传本人录音"}</button></div>}
+    {state.on && <p className="st-note">用语音备忘录录 30 秒到 2 分钟只有本人说话的内容（念一段文字即可），录完「共享 → 存储到文件」，再在这里选那个文件。只保存从中算出的一串数字（声纹），不保存录音；别人的声音只在单个录音里区分，不保存。关闭即删除。</p>}
+    {note && <p role="status" className="st-note">{note}</p>}
+  </>;
 }

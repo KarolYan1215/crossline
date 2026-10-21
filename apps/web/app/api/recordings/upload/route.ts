@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { RECORDING_FILE, RECORDING_INBOX_SEGMENTS, RECORDING_SERVER_CONSENT, RECORDING_UPLOAD_DAILY_LIMIT, RECORDING_UPLOAD_LIMIT } from "@crossline/core";
+import { RECORDING_FILE, RECORDING_INBOX_SEGMENTS, audioKind, RECORDING_SERVER_CONSENT, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT,
+  RECORDING_UPLOAD_DAILY_LIMIT, RECORDING_UPLOAD_LIMIT } from "@crossline/core";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 import { workspaceForDeviceToken } from "../../../../lib/energy";
 import { dataDirectory, getStore } from "../../../../lib/crossline";
@@ -11,26 +12,13 @@ const DAILY_SETTING = "recordings.upload.bytes";
 const EXTENSION: Record<string, string> = { "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/m4a": "m4a", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav",
   "audio/aac": "aac", "audio/ogg": "ogg", "audio/opus": "opus", "audio/webm": "webm", "audio/flac": "flac" };
 
-/** The container a recording's opening bytes name, as the extension it is stored under; undefined when they name no audio format. */
-export function audioKind(head: Uint8Array): string | undefined {
-  const ascii = (from: number, to: number) => Buffer.from(head.subarray(from, to)).toString("latin1");
-  if (ascii(4, 8) === "ftyp") return "m4a";
-  if (ascii(0, 4) === "caff") return "m4a";
-  if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WAVE") return "wav";
-  if (ascii(0, 4) === "OggS") return "ogg";
-  if (ascii(0, 4) === "fLaC") return "flac";
-  if (head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) return "webm";
-  if (ascii(0, 3) === "ID3") return "mp3";
-  if (head[0] === 0xff && head[1] !== undefined && (head[1] & 0xf6) === 0xf0) return "aac";
-  if (head[0] === 0xff && head[1] !== undefined && (head[1] & 0xe0) === 0xe0) return "mp3";
-  return undefined;
-}
-
 /**
  * A recording from the phone's shortcut (docs/phone-recording.md 「服务器转写」): the raw file as the body, the recording-scoped device
  * token as `Authorization: Bearer <token>`, and its name as `?name=`. It is written to the inbox as it arrives — never held in memory —
  * and waits there for the transcriber container's night. Refused unless the person turned on 录音在服务器转写; one file is at most
- * 300 MB and a workspace's uploads at most 3 GB a day. A health or capture token cannot upload.
+ * 300 MB and a workspace's uploads at most 3 GB a day. A health or capture token cannot upload. The same audio uploaded again — already
+ * transcribed, found silent, or still waiting — is recognised by its sha256 as it arrives, not kept, not counted against the day, and
+ * answered `{ok: true, duplicate: true}`.
  */
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
@@ -81,11 +69,13 @@ export async function POST(request: Request) {
   const part = `${final}.part`;
   const out = createWriteStream(part);
   let size = 0;
+  const hash = createHash("sha256");
   try {
     const chunks = async function* () { yield* head; for (;;) { const next = await reader.read(); if (next.done) return; yield next.value; } };
     for await (const chunk of chunks()) {
       size += chunk.byteLength;
       if (size > RECORDING_UPLOAD_LIMIT || used.bytes + size > RECORDING_UPLOAD_DAILY_LIMIT) throw new Error("RECORDING_TOO_LARGE");
+      hash.update(chunk);
       if (!out.write(chunk)) await new Promise((resolve) => out.once("drain", resolve));
     }
     await new Promise<void>((resolve, reject) => out.end((error?: Error | null) => error ? reject(error) : resolve()));
@@ -96,7 +86,14 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, code: tooLarge ? "RECORDING_TOO_LARGE" : "RECORDING_UPLOAD_FAILED" }, { status: tooLarge ? 413 : 400 });
   }
   if (!size) { await rm(part, { force: true }); return Response.json({ ok: false, code: "RECORDING_EMPTY" }, { status: 400 }); }
-  await writeFile(`${final}.json`, JSON.stringify({ name: given || `录音.${extension}`, size }));
+  const sha256 = hash.digest("hex");
+  const waiting = await Promise.all((await readdir(dir).catch(() => [] as string[])).filter((name) => name.endsWith(".json"))
+    .map((name) => readFile(path.join(dir, name), "utf8").then((text) => (JSON.parse(text) as { sha256?: unknown }).sha256).catch(() => undefined)));
+  if (waiting.includes(sha256) || store.listEvents(workspaceId, { type: [RECORDING_TRANSCRIBED_EVENT, RECORDING_SILENT_EVENT], entityId: sha256 }).length) {
+    await rm(part, { force: true });
+    return Response.json({ ok: true, duplicate: true, size, message: "这段录音已经收到过，不会再转一次。" });
+  }
+  await writeFile(`${final}.json`, JSON.stringify({ name: given || `录音.${extension}`, size, sha256 }));
   await rename(part, final);
   store.setSetting(workspaceId, DAILY_SETTING, JSON.stringify({ day, bytes: used.bytes + size }));
   return Response.json({ ok: true, size });

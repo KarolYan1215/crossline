@@ -17,7 +17,8 @@ export const WHISPER_MODEL = {
   approxMegabytes: 255
 } as const;
 
-export type TranscriptChunk = { start: number; end: number; text: string };
+/** `speaker`, when the recording was diarized: 「本人」 or 「说话人 N」 (`diarize.ts`). */
+export type TranscriptChunk = { start: number; end: number; text: string; speaker?: string };
 export type TranscriptionEngine = {
   /** True once the model files are on disk, so recognising needs no network. */
   modelReady(): Promise<boolean>;

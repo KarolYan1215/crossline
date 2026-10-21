@@ -85,3 +85,15 @@ test("subtitle stock phrases and a looping line are not kept in a transcript", (
   expect(withoutHallucinations([chunk("谢谢观看！"), chunk("请不吝点赞 订阅 转发 打赏支持明镜与点点栏目"), chunk("我们开始吧"),
     chunk("好"), chunk("好"), chunk("好"), chunk("Thank you for watching.")]).map((item) => item.text)).toEqual(["我们开始吧", "好", "好"]);
 });
+
+test("with the person's lines marked, a promise is theirs only when a 本人 line says it", () => {
+  const diarized = "[录音：phone/c.m4a，约 2026-10-20 15:00 开始，时长 10:00]\n[00:05] 本人：我明天把实验数据整理好发给你\n[00:12] 说话人 1：好的我周五之前把评审意见给你\n[00:20] 说话人 2：我来订会议室";
+  const item = (by: "person" | "other" | "unclear", quote: string) => ({ text: quote.slice(0, 10), by, who: "", due: "", quote });
+  const answer = { recordings: [{ id: "c", kind: "meeting", title: "讨论", summary: "讨论了数据与评审", lineIds: [], projectId: "",
+    commitments: [item("unclear", "我明天把实验数据整理好发给你"), item("other", "我周五之前把评审意见给你"), item("person", "我来订会议室")], facts: [], dates: [] }] };
+  const kept = validateRecordingDigest(answer, { transcripts: new Map([["c", diarized]]), lineIds: [], projectIds: [] });
+  expect(kept.recordings[0]!.commitments.map((c) => c.by)).toEqual(["person", "other", "unclear"]);
+  // Without any 本人 line (no voiceprint), the model's reading stands.
+  const plain = diarized.replace("本人：", "说话人 3：");
+  expect(validateRecordingDigest(answer, { transcripts: new Map([["c", plain]]), lineIds: [], projectIds: [] }).recordings[0]!.commitments.map((c) => c.by)).toEqual(["unclear", "other", "person"]);
+});

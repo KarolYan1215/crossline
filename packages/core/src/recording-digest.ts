@@ -70,6 +70,25 @@ export function digestText(transcript: string, limit = DIGEST_TEXT_LIMIT): strin
 
 /** Letters and digits only, so a quote copied with other punctuation or spacing still matches. */
 const squash = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+
+/** A diarized line's speaker: `[00:20] 说话人 1：…` or `[00:20] 本人：…` (`apps/worker/src/diarize.ts`). */
+const SPEAKER_LINE = /^\[\d{1,2}(?::\d{2}){1,2}\]\s*(本人|说话人 \d+)：(.*)$/;
+/**
+ * Who said a quote, when the transcript names speakers: the speaker of the lines that hold it, else undefined (not diarized, not
+ * found, or found in lines of different speakers).
+ */
+export function speakerOfQuote(transcript: string, quote: string): string | undefined {
+  const wanted = squash(quote);
+  if (wanted.length < 2) return undefined;
+  const speakers = new Set<string>();
+  for (const line of transcript.split(/\r?\n/)) {
+    const match = SPEAKER_LINE.exec(line);
+    if (match && squash(match[2]!).includes(wanted)) speakers.add(match[1]!);
+  }
+  return speakers.size === 1 ? [...speakers][0] : undefined;
+}
+/** Whether the transcript marks the person's own lines (识别本人声音 was on when it was transcribed). */
+export const marksSelf = (transcript: string) => transcript.split(/\r?\n/).some((line) => SPEAKER_LINE.exec(line)?.[1] === "本人");
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const SLOT = /^[a-z][a-z0-9_]{1,59}$/;
@@ -92,11 +111,19 @@ export function validateRecordingDigest(value: unknown, input: { transcripts: Ma
     const body = squash(spokenText(transcript));
     const quoted = (quote: string) => { const q = squash(String(quote ?? "")); return q.length >= 2 && body.includes(q); };
     const discarded = DISCARDED_KINDS.includes(item.kind);
+    // With the person's lines marked, a promise is the person's only when a 「本人」 line says it; one said by anyone else is not.
+    const selfMarked = marksSelf(transcript);
+    const byOf = (c: DigestCommitment): DigestCommitment["by"] => {
+      if (!selfMarked) return c.by;
+      const speaker = speakerOfQuote(transcript, c.quote);
+      if (speaker === "本人") return "person";
+      return c.by === "person" ? "unclear" : c.by;
+    };
     out.push({ id: item.id, kind: RECORDING_KINDS.includes(item.kind) ? item.kind : "noise",
       title: String(item.title ?? "").trim().slice(0, 40), summary: discarded ? "" : String(item.summary ?? "").trim().slice(0, 1200),
       lineIds: [...new Set((item.lineIds ?? []).filter((id) => lines.has(id)))], projectId: projects.has(item.projectId) ? item.projectId : "",
       commitments: discarded ? [] : (item.commitments ?? []).filter((c) => c && quoted(c.quote) && ["person", "other", "unclear"].includes(c.by))
-        .map((c) => ({ text: c.text.trim().slice(0, 120), by: c.by, who: String(c.who ?? "").trim().slice(0, 40), due: DAY.test(c.due) ? c.due : "", quote: c.quote })),
+        .map((c) => ({ text: c.text.trim().slice(0, 120), by: byOf(c), who: String(c.who ?? "").trim().slice(0, 40), due: DAY.test(c.due) ? c.due : "", quote: c.quote })),
       facts: discarded ? [] : (item.facts ?? []).filter((f) => f && quoted(f.quote) && SLOT.test(f.slot) && (f.identityId === "person" || lines.has(f.identityId)))
         .map((f) => ({ identityId: f.identityId, projectId: projects.has(f.projectId) ? f.projectId : "", slot: f.slot, value: f.value.trim().slice(0, 200), quote: f.quote })),
       dates: discarded ? [] : (item.dates ?? []).filter((d) => d && quoted(d.quote) && DAY.test(d.date))
