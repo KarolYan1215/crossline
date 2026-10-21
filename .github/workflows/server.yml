@@ -31,6 +31,10 @@ jobs:
   server:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.ref == 'refs/heads/main' && (contains(github.event.head_commit.message, '[backup]') || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate') || contains(github.event.head_commit.message, '[readiness]') || contains(github.event.head_commit.message, '[usage]')))
     runs-on: ubuntu-latest
+    # Runs queue instead of overlapping: two deploys at once stopped each other's pulls and wrote the same backup folder (2026-10-21).
+    concurrency:
+      group: hosted-server
+      cancel-in-progress: false
     # A deploy may retry a stalled pull (deploy/server/run.sh): three tries of eight minutes per image fit.
     timeout-minutes: 60
     steps:
@@ -271,7 +275,7 @@ jobs:
           # The job's own token pulls the private images and is logged out again; nothing long-lived is left on the host.
           ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "
             echo '$TOKEN' | sudo docker login ghcr.io -u '$ACTOR' --password-stdin &&
-            sudo sh /srv/crossline/run.sh; status=\$?; sudo docker logout ghcr.io; sudo docker image prune -f >/dev/null; exit \$status"
+            sudo env CROSSLINE_PULL_REQUIRED=1 sh /srv/crossline/run.sh; status=\$?; sudo docker logout ghcr.io; sudo docker image prune -f >/dev/null; exit \$status"
       - name: Daily backup and the cron entry
         if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
         run: |
