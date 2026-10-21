@@ -163,3 +163,15 @@ test("a guest with only a model provider of its own gets its own runtime, but do
   expect(registry.connected("ws-other")).toBe(false);
   expect(registry.signedIn("ws-owner")).toBe(true);
 });
+
+test("a saved login is read from auth.json without starting anything: an API key, a ChatGPT login, or none", () => {
+  const { registry, started, homeOf } = setup();
+  expect(registry.savedAccount("ws-guest")).toBeNull();
+  mkdirSync(homeOf("ws-guest"), { recursive: true });
+  writeFileSync(path.join(homeOf("ws-guest"), "auth.json"), JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: "sk-test" }));
+  expect(registry.savedAccount("ws-guest")).toEqual({ type: "apiKey" });
+  writeFileSync(path.join(homeOf("ws-guest"), "auth.json"), JSON.stringify({ tokens: { id_token: "not-a-jwt" } }));
+  expect(registry.savedAccount("ws-guest")).toEqual({ type: "chatgpt", email: null, planType: "unknown" });
+  expect(registry.savedAccount("ws-owner")).toBeNull();
+  expect(started).toHaveLength(0);
+});

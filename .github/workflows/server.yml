@@ -51,6 +51,10 @@ jobs:
             tail -5 /tmp/build-app.log 2>/dev/null || true
             for p in 3340 3210; do printf "%s " $p; curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$p/ || echo down; done
             for c in assess crossline-web crossline-worker; do echo "== $c"; sudo docker logs --tail 40 $c 2>&1 || true; done
+            # 录音在服务器转写: what waits in each inbox (sizes and stored names only, never the audio) and the transcriber night pass.
+            echo "== recordings"
+            sudo find /srv/crossline/data/recordings/inbox -type f -printf "%TY-%Tm-%Td %TH:%TM %s %p\n" 2>/dev/null | sort | tail -20 || true
+            sudo docker logs --tail 20 crossline-transcriber 2>&1 || true
             echo "== memory"
             # Each container against its ceiling, whether one was killed for memory and how often it restarted, the worker peak, and the
             # model gate (runs waiting for the one slot, waits caused by memory) from the worker log.

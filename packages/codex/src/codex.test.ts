@@ -619,6 +619,27 @@ describe("each account's own Codex", () => {
       expect(supervisor.clientFor("ws-owner")).toBe(owner.handle.client);
     } finally { await supervisor.stop(); rmSync(dir, { recursive: true, force: true }); }
   });
+
+  test("a signed-in guest whose runtime is not up is told who it is from its saved login, without starting the runtime", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(path.join(tmpdir(), "crossline-guest-"));
+    const home = path.join(dir, "ws-guest", "codex-home");
+    mkdirSync(home, { recursive: true });
+    const claims = Buffer.from(JSON.stringify({ email: "guest@example.com", "https://api.openai.com/auth": { chatgpt_plan_type: "plus" } })).toString("base64url");
+    writeFileSync(path.join(home, "auth.json"), JSON.stringify({ auth_mode: "chatgpt", OPENAI_API_KEY: null, tokens: { id_token: `h.${claims}.s` } }));
+    const owner = fakeSidecar();
+    let started = 0;
+    const supervisor = await codexModule.startCodexSupervisor({ port: 0, sidecarFactory: async () => owner.handle, capabilitySecret: SECRET,
+      runtimes: { baseDir: dir, ownerWorkspaceId: () => "ws-owner", start: async () => { started += 1; return fakeSidecar().handle as never; } },
+      autoAnalyzeCaptures: async () => undefined });
+    try {
+      const { supervisorBootId } = await (await fetch(`${supervisor.url}/v1/codex/status`)).json() as { supervisorBootId: string };
+      const answer = await fetch(`${supervisor.url}/v1/codex/account`, { headers: { "x-crossline-capability": sign("ws-guest", "GET /v1/codex/account", supervisorBootId) } });
+      expect(await answer.json()).toMatchObject({ account: { type: "chatgpt", email: "guest@example.com", planType: "plus" }, requiresOpenaiAuth: false, guest: true });
+      expect(started).toBe(0);
+    } finally { await supervisor.stop(); rmSync(dir, { recursive: true, force: true }); }
+  });
 });
 
 test("an API-key login has no quota windows; its month's spend against the cap is the reading", async () => {

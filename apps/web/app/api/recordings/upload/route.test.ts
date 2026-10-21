@@ -45,3 +45,28 @@ test("only the recording token uploads, only with the server consent on, and the
   expect(existsSync(inbox())).toBe(false);
   expect((await send(recording, "audio")).status).toBe(403);
 });
+
+test("a Voice Memos recording with no extension and no audio type is taken as m4a; a document or picture is still refused", async () => {
+  const recording = issueDeviceToken({ ...TEST_CTX, workspaceId }, "recording");
+  store.setSetting(workspaceId, RECORDING_SERVER_CONSENT, "granted");
+  expect((await send(recording, "voice memo", "新录音 3", { "content-type": "application/octet-stream" })).status).toBe(200);
+  expect((await send(recording, "voice memo 2", "2026-10-20 at 9.30 AM", { "content-type": "" })).status).toBe(200);
+  const sides = readdirSync(inbox()).filter((name) => name.endsWith(".json")).map((name) => (JSON.parse(readFileSync(path.join(inbox(), name), "utf8")) as { name: string }).name).sort();
+  expect(sides).toEqual(["2026-10-20 at 9.30 AM.m4a", "新录音 3.m4a"]);
+  expect(readdirSync(inbox()).filter((name) => !name.endsWith(".json")).every((name) => name.endsWith(".m4a"))).toBe(true);
+  expect((await send(recording, "x", "photo", { "content-type": "image/png" })).status).toBe(415);
+  expect((await send(recording, "x", "notes.docx", { "content-type": "application/octet-stream" })).status).toBe(415);
+});
+
+test("an upload whose opening bytes are audio is kept whatever name and type it came with; text in a recording's place is refused and said", async () => {
+  const recording = issueDeviceToken({ ...TEST_CTX, workspaceId }, "recording");
+  store.setSetting(workspaceId, RECORDING_SERVER_CONSENT, "granted");
+  const m4a = Buffer.concat([Buffer.from([0, 0, 0, 0x1c]), Buffer.from("ftypM4A isomM4A mp42"), Buffer.alloc(64)]);
+  expect((await send(recording, m4a, "", { "content-type": "text/plain" })).status).toBe(200);
+  const wav = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVEfmt "), Buffer.alloc(32)]);
+  expect((await send(recording, wav, "新录音", { "content-type": "application/json" })).status).toBe(200);
+  expect(readdirSync(inbox()).filter((name) => !name.endsWith(".json")).map((name) => name.split(".").pop()).sort()).toEqual(["m4a", "wav"]);
+  const refused = await send(recording, "新录音 3, 0:12", "", { "content-type": "text/plain" });
+  expect(refused.status).toBe(415);
+  expect((await refused.json() as { message: string }).message).toContain("text/plain，内容是文字：「新录音 3, 0:12」");
+});

@@ -1,6 +1,6 @@
 import { clientBusy, waitForMemory } from "./model-gate";
 import { forgetAccountModels } from "./model-catalog";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { CodexRpcBoundary } from "./index";
 
@@ -26,12 +26,35 @@ const BLOCKERS: Record<RuntimeBlocker["code"], string> = {
 };
 const blocker = (code: RuntimeBlocker["code"]): RuntimeBlocker => ({ code, message: BLOCKERS[code] });
 
+/**
+ * `account/read`'s account from a Codex `auth.json` (vendor/codex login/src/auth/storage.rs, token_data.rs): an API key, or a ChatGPT
+ * login whose email and plan are claims of the stored ID token. Null when the file is missing or unreadable.
+ */
+export function accountFromAuthFile(file: string): Record<string, unknown> | null {
+  let auth: { auth_mode?: string; OPENAI_API_KEY?: string | null; tokens?: { id_token?: unknown } };
+  try { auth = JSON.parse(readFileSync(file, "utf8")) as typeof auth; } catch { return null; }
+  if (auth.auth_mode === "apikey" || (!auth.tokens && auth.OPENAI_API_KEY)) return { type: "apiKey" };
+  if (!auth.tokens) return null;
+  let claims: { email?: string; "https://api.openai.com/profile"?: { email?: string }; "https://api.openai.com/auth"?: { chatgpt_plan_type?: string } } = {};
+  try {
+    const jwt = typeof auth.tokens.id_token === "string" ? auth.tokens.id_token : "";
+    claims = JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64url").toString("utf8")) as typeof claims;
+  } catch { /* a login without readable claims is still a login */ }
+  return { type: "chatgpt", email: claims.email ?? claims["https://api.openai.com/profile"]?.email ?? null,
+    planType: claims["https://api.openai.com/auth"]?.chatgpt_plan_type ?? "unknown" };
+}
+
 export type RuntimeRegistry = {
   isOwner(workspaceId: string): boolean;
   /** Owner: always. A guest: once its own home holds a login, or it has a model provider of its own (providers.ts). */
   connected(workspaceId: string): boolean;
   /** Owner: always. A guest: only its own Codex sign-in — what serves the Skills a provider cannot. */
   signedIn(workspaceId: string): boolean;
+  /**
+   * A guest's sign-in as `account/read` would give it, read from its home's `auth.json` without starting its process; null when it has
+   * none. The red bar asks every page (2.5 s), and a cold runtime took ~4 s to start just to answer it (2026-10-21).
+   */
+  savedAccount(workspaceId: string): Record<string, unknown> | null;
   /** The runtime for running Skills; starts a connected guest's process. */
   client(workspaceId: string): Promise<{ ok: true; client: CodexRpcBoundary } | { ok: false; blocker: RuntimeBlocker }>;
   /**
@@ -94,6 +117,7 @@ export function createRuntimeRegistry(options: {
   const homeOf = (workspaceId: string) => path.join(options.baseDir, workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"), "codex-home");
   const signedIn = (workspaceId: string) => isOwner(workspaceId) || existsSync(path.join(homeOf(workspaceId), "auth.json"));
   const connected = (workspaceId: string) => signedIn(workspaceId) || Boolean(options.hasProvider?.(workspaceId));
+  const savedAccount = (workspaceId: string) => isOwner(workspaceId) ? null : accountFromAuthFile(path.join(homeOf(workspaceId), "auth.json"));
 
   const stop = (workspaceId: string) => {
     const entry = running.get(workspaceId);
@@ -200,7 +224,7 @@ export function createRuntimeRegistry(options: {
   };
 
   return {
-    isOwner, connected, signedIn,
+    isOwner, connected, signedIn, savedAccount,
     client: (workspaceId) => clientFor(workspaceId),
     handle: (workspaceId) => isOwner(workspaceId) ? { ok: true, client: options.owner.client }
       : connected(workspaceId) ? { ok: true, client: handleFor(workspaceId) } : { ok: false, blocker: blocker("RUNTIME_UNCONNECTED") },
