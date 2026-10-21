@@ -57,12 +57,33 @@ function personSetDeadlines(store: CrosslineStore, workspaceId: string): Set<str
   return new Set([...latest].filter(([, byPerson]) => byPerson).map(([id]) => id));
 }
 
-/** What a result left for the person, from its own record beside its files; the ledger keeps only the count. */
-function leftForPerson(directory: string): Array<{ what: string; why: string }> {
+/**
+ * What a result left for the person, from its own record beside its files; the ledger keeps only the count. A result made on another
+ * machine (a ledger moved to the server) names a folder that is not here: its run folder under this data directory is tried by name.
+ */
+function leftForPerson(directory: string, dataDir = process.env.CROSSLINE_DATA_DIR): Array<{ what: string; why: string }> {
   if (!directory) return [];
-  const record = json<{ needsHuman?: Array<{ what?: unknown; why?: unknown }> }>((() => { try { return readFileSync(path.join(directory, "audit.json"), "utf8"); } catch { return ""; } })(), {});
+  const read = (folder: string) => { try { return readFileSync(path.join(folder, "audit.json"), "utf8"); } catch { return ""; } };
+  const name = directory.split(/[\\/]/).filter(Boolean).at(-1) ?? "";
+  const text = read(directory) || (dataDir && name ? read(path.join(dataDir, "ai-output", name)) : "");
+  const record = json<{ needsHuman?: Array<{ what?: unknown; why?: unknown }> }>(text, {});
   return (record.needsHuman ?? []).flatMap((item) => typeof item.what === "string" && item.what.trim()
     ? [{ what: item.what.trim().slice(0, 300), why: typeof item.why === "string" ? item.why.trim().slice(0, 300) : "" }] : []);
+}
+
+/**
+ * Writes on the task what a result accepted in the person's place left for them. When its own record cannot be read (made on another
+ * machine), one line still says how many things are left and where they were listed, so the count is never all the person sees.
+ */
+function writeLeftNotes(store: CrosslineStore, workspaceId: string, owner: string, row: { taskId: string; title: string; workOrderId?: string;
+  directory: string; needsHuman: number }): number {
+  if (!row.workOrderId) return 0;
+  const left = leftForPerson(row.directory);
+  const lines = left.length ? left.map((item) => `助手留下的待补：${item.what}${item.why ? `（${item.why}）` : ""}`)
+    : row.needsHuman ? [`助手留下 ${row.needsHuman} 件待补，列在助手结果「${row.title}」里（原记录不在这台机器上）`] : [];
+  lines.forEach((text, index) => store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.note:agent-left:${row.taskId}:${index}`, type: "task.note",
+    entityId: row.workOrderId!, payload: { text, kind: "agent_left", agentTaskId: row.taskId } }));
+  return left.length || row.needsHuman;
 }
 
 export function dateAdvancePass(store: CrosslineStore, workspaceId: string, options: { now?: Date; force?: boolean } = {}): AdvanceOutcome | undefined {
@@ -103,10 +124,13 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
     reopened.push(row.taskId);
     if (step && step.status !== "done") inverse.push({ kind: "step.status", workOrderId: row.workOrderId, stepId: step.id, status: step.status, progressQuarter: step.progressQuarter ?? 0 });
     // What only the person can do goes on the task, where they will be when they do it.
-    left.forEach((item, index) => store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.note:agent-left:${row.taskId}:${index}`, type: "task.note",
-      entityId: row.workOrderId, payload: { text: `助手留下的待补：${item.what}${item.why ? `（${item.why}）` : ""}`, kind: "agent_left", agentTaskId: row.taskId } }));
-    outcome.adopted.push({ taskId: row.taskId, title: row.title, left: left.length || row.needsHuman });
+    outcome.adopted.push({ taskId: row.taskId, title: row.title, left: writeLeftNotes(store, workspaceId, owner, row) });
   }
+  // A result accepted in the person's place before its notes could be read (2026-10-21: results made on the owner's machine, read on the
+  // server) gets them now; the keys are the same, so a note already written is not written again.
+  const noted = new Set(store.listEvents(workspaceId, { type: "task.note" })
+    .map((event) => (event.payload as { kind?: string; agentTaskId?: string })).filter((note) => note.kind === "agent_left").map((note) => note.agentTaskId));
+  for (const row of rows) if (row.status === "accepted" && row.reviewedBy === "system" && row.needsHuman && !noted.has(row.taskId)) writeLeftNotes(store, workspaceId, owner, row);
   if (reopened.length) inverse.push({ kind: "agent.reopen", taskIds: reopened });
 
   // 2. Approved milestones past their deadline with open work.

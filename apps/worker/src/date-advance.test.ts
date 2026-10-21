@@ -170,3 +170,22 @@ test("the message says what moved and why, and nothing when nothing did", () => 
     .toBe("按今天的日期整理了待办：1 个助手成果交付超过 7 天无人审阅、自检都通过，已代为采纳，留给本人的 2 件事写在各自任务的记录里；"
       + "1 个里程碑已过截止、还有没做完的工作，按保守完成日留 2 天余量顺延：「样本包」10/17 → 10/29。助手成果的文件都还在「助手产出」里；24 小时内可撤销。");
 });
+
+test("a result made on another machine still leaves its items on the task: read from this data folder by name, else counted in one line", () => {
+  vi.stubEnv("CROSSLINE_DATA_DIR", dir);
+  order("t", "pack", "approved");
+  // Its record was moved with the ledger into <data>/ai-output/<run>, under a Windows path the ledger still names.
+  mkdirSync(path.join(dir, "ai-output", "moved"), { recursive: true });
+  writeFileSync(path.join(dir, "ai-output", "moved", "audit.json"), JSON.stringify({ needsHuman: [{ what: "确认数据版本", why: "" }] }));
+  at("2026-10-05T10:00:00Z");
+  event("agent.task.requested", "moved", { title: "任务 · 整理", category: "read_research_organize", workOrderId: "t", stepId: "" });
+  event("agent.task.completed", "moved", { directory: "C:\\Users\\karol\\Crossline\\ai-output\\moved", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true });
+  event("agent.task.requested", "gone", { title: "任务 · 汇总", category: "read_research_organize", workOrderId: "t", stepId: "s2" });
+  event("agent.task.completed", "gone", { directory: "C:\\Users\\karol\\Crossline\\ai-output\\gone", artifacts: [], needsHuman: 2, checksPassed: true, inputsModified: [], reviewRequired: true });
+  at(NOW.toISOString());
+  dateAdvancePass(store, ws, { now: NOW });
+  const notes = store.listEvents(ws, { type: "task.note" }).map((item) => (item.payload as { text: string }).text);
+  expect(notes).toContain("助手留下的待补：确认数据版本");
+  expect(notes).toContain("助手留下 2 件待补，列在助手结果「任务 · 汇总」里（原记录不在这台机器上）");
+  vi.unstubAllEnvs();
+});
