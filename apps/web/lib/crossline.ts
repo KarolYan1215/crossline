@@ -1114,6 +1114,20 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     ...(result.notes?.length ? { notes: result.notes } : {}), ...(inPreview() ? {} : { inputHash: hash, optimal: Boolean(cached) }) } };
 }
 
+/**
+ * How far a forecast that judges risk must run: past the furthest deadline of an approved milestone (a week beyond it), never under
+ * the usual eight weeks nor over 26. An eight-week run called work due in 100 days 「八周内无法排完」 and asked about it as at risk —
+ * not finishing inside the run says nothing about a deadline that lies beyond it (2026-10-21, the owner's account).
+ */
+export function riskHorizonDays(ctx: AccessContext): number {
+  const today = planToday(ctx);
+  const furthest = getStore().listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved")
+    .map((milestone) => milestoneDeadline(ctx, milestone.id) ?? "").filter((day) => day > today).sort().at(-1);
+  if (!furthest) return 56;
+  const days = Math.round((Date.parse(`${furthest}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000) + 8;
+  return Math.min(182, Math.max(56, days));
+}
+
 /** `horizonDays`: how far the simulation runs — eight weeks unless the plan page asks for four weeks or up to six months. */
 export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): ForecastResult & { inferredRegularBlocks: number } {
   ensureSeeded(ctx);
