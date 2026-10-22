@@ -4,7 +4,8 @@ import { writeGuard, validId } from "../../../agent/guard";
 
 /**
  * A grown workflow, changed by the person: `{status: "active" | "off"}` turns it on or off, `{pinned}` keeps it from idle removal,
- * `{action: "consent"}` accepts the risks of one that reads an account, `{action: "login", service}` opens a window to log in with and
+ * `{action: "consent"}` accepts the risks of one that reads an account, `{action: "login", service}` opens a window to log in with (on the
+ * hosted beta the server's browser, answered `remote: true` and shown in a dialog; `width`/`height` are the dialog's size) and
  * `{action: "run"}` starts it now; `{action: "allow_scripts" | "disallow_scripts"}` allows the scripts the checks capped to text, or takes it back.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -12,7 +13,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if ("response" in guard) return guard.response;
   const { id } = await context.params;
   if (!validId(id)) return NextResponse.json({ ok: false, code: "INVALID_SKILL" }, { status: 400 });
-  const { status, pinned, action, service } = guard.body;
+  const { status, pinned, action, service, width, height } = guard.body;
   if (action === "allow_scripts" || action === "disallow_scripts") {
     const result = allowScripts(guard.ctx, "grown", id, action === "allow_scripts");
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });
@@ -23,7 +24,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   if (action === "login" || action === "login_done" || action === "run") {
     if (action !== "run" && (typeof service !== "string" || !service.trim() || service.length > 40)) return NextResponse.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
-    const result = await grownSkillAction(guard.ctx, id, action, typeof service === "string" ? service : "");
+    // The dialog's size, for a login shown as the server's browser; numbers only, kept in range by the worker.
+    const viewport = action === "login" ? { ...(typeof width === "number" ? { width } : {}), ...(typeof height === "number" ? { height } : {}) } : {};
+    const result = await grownSkillAction(guard.ctx, id, action, typeof service === "string" ? service : "", viewport);
     return NextResponse.json(result, { status: result.ok ? 200 : 409 });
   }
   if ((status !== undefined && status !== "active" && status !== "off") || (pinned !== undefined && typeof pinned !== "boolean") || (status === undefined && pinned === undefined)) {

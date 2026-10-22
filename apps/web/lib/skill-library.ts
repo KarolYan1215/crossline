@@ -155,11 +155,13 @@ export function changeGrownSkill(ctx: AccessContext, id: string, change: { statu
 }
 
 /** 「登录」 (a browser window of its own opens on this computer) and 「立即运行」, both carried out by the worker. */
-export async function grownSkillAction(ctx: AccessContext, id: string, action: "login" | "login_done" | "run", service = ""):
-  Promise<{ ok: boolean; code?: string; message?: string; taskId?: string }> {
+export async function grownSkillAction(ctx: AccessContext, id: string, action: "login" | "login_done" | "run", service = "", viewport: { width?: number; height?: number } = {}):
+  Promise<{ ok: boolean; code?: string; message?: string; taskId?: string; remote?: boolean }> {
   try {
-    return await requestCodexSupervisor<{ ok: boolean; code?: string; message?: string; taskId?: string }>(ctx, `/v1/workflows/${encodeURIComponent(id)}/${action}`, {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ service }), signal: AbortSignal.timeout(15_000) });
+    // `remote: true` answers a login opened as the server's browser (no screen there): the page shows it in a dialog. Starting that
+    // browser takes some seconds, closing it saves its cookies; both get longer than a run's start.
+    return await requestCodexSupervisor<{ ok: boolean; code?: string; message?: string; taskId?: string; remote?: boolean }>(ctx, `/v1/workflows/${encodeURIComponent(id)}/${action}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ service, ...viewport }), signal: AbortSignal.timeout(action === "run" ? 15_000 : 60_000) });
   } catch (error) {
     if (error instanceof CodexSupervisorRequestError) {
       const blocker = error.blocker as { code?: string; message?: string } | undefined;

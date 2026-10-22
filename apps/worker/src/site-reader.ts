@@ -1,7 +1,9 @@
 import type { SkillTools } from "@crossline/codex";
 import { workflowAccess, type GrownSkillRecord, type WorkflowAccess } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
+import { readerLaunchOptions, restoreSessionCookies } from "./browser-launch";
 import { ownerOf } from "./owner";
+import { HOLDER_WORDS, holdProfile, profileHolder, releaseProfile } from "./profile-locks";
 
 /**
  * Reading a site behind the person's login, done by Crossline and not by the assistant (docs/skills-library.md §8, decided 2026-10-14).
@@ -205,11 +207,14 @@ function playwrightDriver(page: import("playwright-core").Page): PageDriver {
 /** Opens the browser for one site: tests give their own, which never starts a real browser. */
 export type OpenSite = (profileDir: string, executablePath: string, onSite: (href: string) => boolean) => Promise<SiteBrowser>;
 
-/** The real browser: Playwright driving the browser the person logged in with, on its own profile, in a visible window. */
+/**
+ * The real browser: Playwright driving the browser the person logged in with, on its own profile — a visible window on the person's
+ * computer, headless on a server (`readerLaunchOptions`), with the session cookies the login left beside the profile put back.
+ */
 const openBrowser: OpenSite = async (profileDir, executablePath, onSite) => {
   const { chromium } = await import("playwright-core");
-  const context = await chromium.launchPersistentContext(profileDir, { executablePath, headless: false, viewport: null,
-    args: ["--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-mode"] });
+  const context = await chromium.launchPersistentContext(profileDir, readerLaunchOptions(executablePath));
+  await restoreSessionCookies(context, profileDir);
   // The worker runs under tsx, whose esbuild wraps every named function in `__name(…)`: a function handed to `page.evaluate` then
   // throws 「__name is not defined」 in the page. The first real run that clicked a tab stopped on exactly that (2026-10-20), so the
   // page functions above name nothing, and every page also gets a harmless `__name` for anything that still does.
@@ -244,7 +249,11 @@ export function createSiteReader(store: CrosslineStore, workspaceId: string, rec
   const refuse = (text: string) => { refused += 1; return JSON.stringify({ ok: false, stop: true, message: text }); };
   const log = (host: string, url: string, outcome: string) => store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
     idempotencyKey: `site.read:${host}:${now().getTime()}:${Math.random().toString(36).slice(2, 8)}`, type: "site.read", entityId: record.id, payload: { host, url: url.slice(0, 300), outcome } });
-  const closeSite = async (service: string) => { const open = browsers.get(service); browsers.delete(service); if (open) await (await open).close(); };
+  const profiles = new Map<string, string>();
+  const closeSite = async (service: string) => {
+    const open = browsers.get(service); browsers.delete(service);
+    try { if (open) await (await open).close(); } finally { const dir = profiles.get(service); profiles.delete(service); if (dir) releaseProfile(dir, "reader"); }
+  };
 
   const call = async (name: string, args: unknown): Promise<string> => {
     if (name !== "site_read") return refuse(`没有名为 ${name} 的工具`);
@@ -273,7 +282,14 @@ export function createSiteReader(store: CrosslineStore, workspaceId: string, rec
     const onSite = (href: string) => sameSite(href, access);
     let shown: PageRead;
     try {
-      if (!browsers.has(access.service)) { const profile = profileFor(access); browsers.set(access.service, (deps.open ?? openBrowser)(profile.dir, profile.browser, onSite)); }
+      if (!browsers.has(access.service)) {
+        const profile = profileFor(access);
+        // A login to this site is open (the server's popup browser holds the profile): this read waits for it, it does not fight it.
+        if (!holdProfile(profile.dir, "reader")) { log(host, String(url), "profile_busy"); seen.delete(key); pages -= 1; store.setSetting(workspaceId, dayKey(host, day), String(today));
+          return refuse(`${HOLDER_WORDS[profileHolder(profile.dir) ?? "login"]}，现在读不了${access.service}；用已读到的内容完成本期，needsHuman 第一项写「需要登录：${access.service}」。`); }
+        profiles.set(access.service, profile.dir);
+        browsers.set(access.service, (deps.open ?? openBrowser)(profile.dir, profile.browser, onSite));
+      }
       shown = await (await browsers.get(access.service)!).read(String(url), Math.max(0, Math.min(SITE_SCROLLS_MAX, Math.floor(Number(scrolls) || 0))), label || undefined);
     } catch (error) {
       log(host, String(url), "failed");
