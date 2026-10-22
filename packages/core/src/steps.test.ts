@@ -146,6 +146,16 @@ describe("grounded, non-trivial plans", () => {
       step("e", "deliver", { title: "交付图表与数据包", dependsOn: ["d"], firstAction: "打开交付包" })], "writing"));
     expect(normalized.steps.map((item) => item.title)).toEqual(["起草反馈框架", "执行真实数据仿真", "核验图表科学结论", "交付图表与数据包"]);
   });
+  it("a step the plan calls a decision stays the person's; one it calls gathering is the assistant's (the hosted plans of 10-22)", () => {
+    const { plan: normalized } = normalizeStepPlan(plan([
+      step("a", "gather", { title: "整理候选人筛选底稿", executor: "agent", schedulable: false }),
+      step("b", "decide", { title: "批准首轮试用候选人", executor: "agent", dependsOn: ["a"] }),
+      step("c", "gather", { title: "汇编季度复盘决策底稿", dependsOn: ["b"] }),
+      step("d", "gather", { title: "取得小测3正式范围", dependsOn: ["c"] }),
+      step("e", "analyze", { title: "决定下一季度研究取舍", dependsOn: ["d"], firstAction: "打开底稿" })], "writing"));
+    expect(normalized.steps.map((item) => [item.title, item.executor])).toEqual([
+      ["整理候选人筛选底稿", "agent"], ["批准首轮试用候选人", "human"], ["汇编季度复盘决策底稿", "agent"], ["取得小测3正式范围", "agent"], ["决定下一季度研究取舍", "human"]]);
+  });
   it("a step's choice stays the person's, and a startup line's interview synthesis is the person's core", () => {
     const { plan: normalized } = normalizeStepPlan(plan([
       step("a", "gather", { title: "收集 5 份试用访谈记录", executor: "agent", schedulable: false }),

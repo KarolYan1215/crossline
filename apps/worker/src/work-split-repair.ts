@@ -31,7 +31,8 @@ import { sayToPerson, type SayButton } from "./workflow-smith";
  * `planWorkSplit` is the reading alone (no write), for `scripts/work-split-dry-run.ts`.
  */
 // v2 (2026-10-22): run again once approving the assistant's output became a review step whatever its words (`ACCEPTS_OUTPUT` in steps.ts).
-export const WORK_SPLIT_REPAIR_MARKER = "repair.work-split.v2";
+// v3 (2026-10-22 evening): a step the plan calls a decision stays the person's, one it calls gathering goes to the assistant.
+export const WORK_SPLIT_REPAIR_MARKER = "repair.work-split.v3";
 const CANDIDATE_STATES = new Set(["awaiting_plan_approval", "approved", "preparing", "ready_for_human"]);
 const OPEN = new Set(["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active", "blocked", "evidence_review"]);
 

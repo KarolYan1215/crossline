@@ -313,14 +313,22 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
       // Approving what the assistant just made (「验收定义稿」「批准可交付版本」「核验版本基线包」): the step before it, or one it waits on,
       // is the assistant's, and the step only checks that output. The real account kept a dozen of these after the first rule, which
       // asked for 「助手」 in the title; a judgement (结论, 边界, 权限), a decision or graded work is not folded.
+      // A step the plan itself calls a decision is the person's, whatever its verb (「批准首轮试用候选人」 went to the assistant on 10-22).
+      if (step.role === "decide") {
+        if (step.executor === "agent") { step.executor = "human"; step.schedulable = true;
+          warnings.push({ code: "STEP_OWNER_PERSON", detail: `「${step.title}」改由本人完成：有后果的选择由本人做` }); }
+        step.owner = "person";
+        continue;
+      }
       if (step.executor !== "agent" && ACCEPTS_OUTPUT.test(step.title) && !JUDGES.test(step.title) && verdict.code === "model"
         && (step.dependsOn.some((dep) => steps.find((other) => other.id === dep)?.executor === "agent")
           || steps[steps.indexOf(step) - 1]?.executor === "agent" || options.afterAgent?.has(step.id))) {
         reviews.add(step.id);
         continue;
       }
-      // The older, narrower rule still holds where the new one has nothing to say.
-      const owner = verdict.code === "model" && verdict.owner === "person" && TRIVIAL_STEP.test(step.title) ? "assistant" : verdict.owner;
+      // The older, narrower rule still holds where the new one has nothing to say; so does the plan's own role: a step it calls
+      // gathering (「汇集候选人联系底稿」「取得小测3正式范围」) is the assistant's unless something about it is the person's.
+      const owner = verdict.code === "model" && verdict.owner === "person" && (TRIVIAL_STEP.test(step.title) || step.role === "gather") ? "assistant" : verdict.owner;
       if (owner === "person" && step.executor === "agent") {
         step.executor = "human";
         step.schedulable = true;
