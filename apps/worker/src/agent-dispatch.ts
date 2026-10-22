@@ -7,7 +7,7 @@ import {
 } from "@crossline/core";
 import {
   agentApprovalDecision, agentChainsFor, assistantPlanFor, decideAgentApproval, declinedCategories, deliverableKey, isAutoHandoff, isPaused, listAgentTasks, readCategories,
-  agentQuestionAnswers, expireAgentQuestion, lessonsFor, requestAgentApproval, requestAgentQuestion, requestCategory, type AgentQuestion, type CrosslineStore
+  agentQuestionAnswers, expireAgentQuestion, lessonsFor, openNeedsOf, requestAgentApproval, requestAgentQuestion, requestCategory, type AgentQuestion, type CrosslineStore
 } from "@crossline/db";
 
 /** What earlier work of this line and kind taught (docs/token-economy.md §2), for the assistant's input. */
@@ -156,6 +156,8 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
     for (const step of plan.steps) {
       if (step.executor !== "agent" || step.status !== "planned" || tried.has(`${plan.workOrderId}#${step.id}`)) continue;
       if (within && !within.has(`${plan.workOrderId}#${step.id}`)) continue;
+      // Material only the person has, not given yet (an upload or 「没有」 on the provide step): nothing that uses it is made before.
+      if (openNeedsOf(plan, step).length) continue;
       // Already made (or being made, or waiting for review) for another task of the same course or project.
       if (made.get(order.projectId)?.has(deliverableKey(step.title))) continue;
       const category = stepCategory(step) ?? "read_research_organize";

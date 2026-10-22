@@ -170,3 +170,35 @@ describe("grounded, non-trivial plans", () => {
       { id: "u2", title: "MOS 电容", docId: "doc-1", quote: "L7 MOS capacitor" }, { id: "u3", title: "x", docId: "doc-9", quote: "Diode" }], docs).map((unit) => unit.id)).toEqual(["u2", "u3"]);
   });
 });
+
+describe("the step type table (3A, 2026-10-22)", () => {
+  it("what a step produces decides who does it; the wording only forces the person", () => {
+    const { plan: normalized } = normalizeStepPlan(plan([
+      step("a", "read", { title: "摘要 L1–L4 讲义", product: "material" }),
+      step("b", "read", { title: "读懂 L3 的耗尽区推导", product: "ability" }),
+      step("c", "draft", { title: "起草给助教的邮件", product: "material" }),
+      step("d", "summarize", { title: "总结第 3 章", executor: "agent", product: "material" }),
+      step("e", "compare", { title: "比较三家门店并选定一家", product: "material" }),
+      step("f", "learn", { title: "学习 BJT 小信号", product: "material" as never })], "exam_prep"));
+    expect(normalized.steps.map((item) => [item.title, item.owner, item.product])).toEqual([
+      ["摘要 L1–L4 讲义", "assistant", "material"], ["读懂 L3 的耗尽区推导", "person", "ability"], ["起草给助教的邮件", "assistant", "material"],
+      ["总结第 3 章", "assistant", "material"], ["比较三家门店并选定一家", "person", "material"], ["学习 BJT 小信号", "person", "ability"]]);
+  });
+  it("the person's own choice for a kind of step holds, except where only the person may act", () => {
+    const preferences = new Map<string, "person" | "assistant">([["read|material", "person"], ["submit|action", "assistant"]]);
+    const { plan: normalized } = normalizeStepPlan(plan([step("a", "read", { title: "摘要 L1–L4 讲义", product: "material" }),
+      step("b", "submit", { title: "提交作业 3", product: "action" })]), undefined, { ownerPreferences: preferences });
+    expect(normalized.steps.map((item) => item.owner)).toEqual(["person", "person"]);
+  });
+  it("material only the person has is asked for first, and what uses it waits on that", () => {
+    const raw = plan([step("a", "practice", { title: "闭卷完成作业 2 第 1 题", product: "ability", uses: ["n1"] }), step("b", "mock", { title: "限时模拟", product: "ability" })], "exam_prep");
+    raw.needs = [{ id: "n1", what: "L3–L8 讲义", why: "练习要按讲义的推导", basis: "[f2] 讲义在 Canvas 上" },
+      { id: "n2", what: "往年卷", why: "", basis: "" }];
+    const { plan: normalized } = normalizeStepPlan(raw);
+    expect(normalized.steps[0]).toMatchObject({ title: "提供L3–L8 讲义", provides: "n1", owner: "person", schedulable: false, executor: "human" });
+    expect(normalized.steps[1]!.dependsOn).toContain(normalized.steps[0]!.id);
+    // A need nothing on record says the person has is dropped: only one provide step.
+    expect(normalized.needs).toEqual([{ id: "n1", what: "L3–L8 讲义", why: "练习要按讲义的推导", basis: "[f2] 讲义在 Canvas 上" }]);
+    expect(normalized.steps.filter((item) => item.provides)).toHaveLength(1);
+  });
+});

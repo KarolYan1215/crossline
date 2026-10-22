@@ -274,9 +274,14 @@ test("a plan that already gives first actions is not replanned for being old", (
   const store = new CrosslineStore(":memory:");
   seed(store);
   store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
-    steps: [step("a", "solve", { firstAction: "打开题目 1，写下已知量" }), step("b", "submit", { dependsOn: ["a"] })] }, ownerId, "planned");
+    steps: [step("a", "solve", { firstAction: "打开题目 1，写下已知量", product: "ability" }), step("b", "submit", { dependsOn: ["a"], product: "action" })] }, ownerId, "planned");
   const now = new Date();
   store.setSetting(workspaceId, "schedule.orderStarts", JSON.stringify({ wo: new Date(now.getTime() + 86_400_000).toISOString() }));
+  expect(requestOutdatedReplans(store, workspaceId, now)).toEqual([]);
+  // One planned before steps named their product (2026-10-22) is planned again once under the step type table.
+  store.saveStepPlan(workspaceId, "wo", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "",
+    steps: [step("a", "solve", { firstAction: "打开题目 1，写下已知量" })] }, ownerId, "planned");
+  expect(requestOutdatedReplans(store, workspaceId, now)).toEqual(["wo"]);
   expect(requestOutdatedReplans(store, workspaceId, now)).toEqual([]);
   store.close();
 });

@@ -11,7 +11,8 @@ export type TaskSlotLike = { day: string; start: string; end: string };
 
 /** The step the person is on: the first open step that is theirs (the assistant's preparation runs by itself). */
 export function currentStep(detail: Pick<CardDetail, "stepPlan">): Step | undefined {
-  return detail.stepPlan?.steps.find((step) => step.status === "planned" && step.executor !== "agent");
+  // A provide step the system is still looking for (files, then the web) is not the person's yet.
+  return detail.stepPlan?.steps.find((step) => step.status === "planned" && step.executor !== "agent" && (step as { needState?: string }).needState !== "checking");
 }
 
 /** The step whose duration is edited: the next open step that is actual work (a waiting step has no minutes). */

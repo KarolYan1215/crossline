@@ -306,3 +306,8 @@
 /* How finishing the task is taken: the label, the switch and its reason on one wrapping line. */
 .task-completion-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 6px 0; }
 .step-covers{display:flex;flex-wrap:wrap;gap:4px}
+
+/* A provide step: the person's own material, uploaded or declared absent (2026-10-22). */
+.step-provide > span { display: grid; gap: 6px; min-width: 0; }
+.step-provide input[type="file"] { max-width: 100%; font-size: 14px; }
+.step-provide-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

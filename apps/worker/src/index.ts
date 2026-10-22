@@ -9,6 +9,7 @@ import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
 import { CrosslineStore, aiToolsFor, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
+import { NEEDS_PER_PASS, createNeedChecker, needsAwaitingCheck } from "./need-check";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
 import { notifyPass } from "./notify";
@@ -611,7 +612,8 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
     const ids = tasksAwaitingStepPlan(analysisStore, workspaceId);
     const reviews = warningsAwaitingReview(analysisStore, workspaceId);
     const reports = reportsAwaitingJudgement(analysisStore, workspaceId);
-    if (!ids.length && !reviews.length && !reports.length) return;
+    const needs = needsAwaitingCheck(analysisStore, workspaceId);
+    if (!ids.length && !reviews.length && !reports.length && !needs.length) return;
     if (!spendAllows(await spendFor(workspaceId), "core")) return;
     enterUsageWorkspace(workspaceId);
     // A report the person just wrote comes first: they are waiting to see the rings move.
@@ -636,6 +638,12 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       });
       if (paused(workspaceId, "planning") || !spendAllows(await spendFor(workspaceId), "core")) break;
       batch = tasksAwaitingStepPlan(analysisStore, workspaceId, accountConcurrency() * 2).filter((id) => !tried.has(id));
+    }
+    // Material a plan would ask the person for is looked for on the web first (need-check.ts); only what is not found is asked.
+    const checker = createNeedChecker(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { readCost: () => readCost(workspaceId) });
+    for (const item of needsAwaitingCheck(analysisStore, workspaceId).slice(0, NEEDS_PER_PASS)) {
+      const outcome = await checker(item).catch(() => "skipped" as const);
+      console.info(JSON.stringify({ type: "steps.need_checked", checkedAt, workspaceId, workOrderId: item.workOrderId, needId: item.needId, outcome }));
     }
     // Reviewing kept warnings waits while an evaluation spends the same quota; the warnings stay and are reviewed afterwards.
     if (heldForEval(workspaceId)) return;

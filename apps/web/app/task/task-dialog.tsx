@@ -145,10 +145,71 @@ function StepDetail({ detail, step, kind, onStatus }: { detail: TaskDetail; step
     {step.executor === "human" && kind !== "done" && detail.preparedMaterials.some((item) => /manual\.md$/.test(item.uri)) && <p className="step-line"><small>教程</small>
       <a href={`#${tutorialAnchor(step.id)}`}>本步的教程与材料</a></p>}
     {kind !== "done" && kind !== "agent" && step.schedulable && <div className="step-line"><small>时长</small><StepDuration workOrderId={detail.id} stepId={step.id} estimate={step.estimate} /></div>}
+    {kind !== "done" && step.provides && <ProvideBox workOrderId={detail.id} step={step} onStatus={onStatus} />}
+    {kind !== "done" && !step.provides && <OwnerSwitch workOrderId={detail.id} step={step} onStatus={onStatus} />}
     {kind !== "done" && step.executor !== "human" && <p className="step-line"><span />
       <button type="button" className="secondary-button step-agent" onClick={() => void post("/api/agent/dispatch", { workOrderId: detail.id, stepId: step.id })
         .then((ok) => onStatus(ok ? `已交给 Agent：${step.title}` : "未能交给 Agent"))}>由 Agent 完成该步骤</button></p>}
   </div>;
+}
+
+/**
+ * Who does the step, as the person sees fit (4A): a step of the person's whose product is material or an output can go to the assistant, and
+ * any assistant's step can be taken back. The choice holds for that kind of step on the line; acts, practice and decisions stay the person's
+ * (the server says why when it refuses).
+ */
+function OwnerSwitch({ workOrderId, step, onStatus }: { workOrderId: string; step: Step; onStatus: (text: string) => void }) {
+  const toAssistant = step.executor !== "agent";
+  if (toAssistant && (step.product === "ability" || step.product === "action" || step.role === "decide" || step.role === "wait")) return null;
+  const choose = async () => {
+    onStatus("保存中…");
+    const response = await fetch(stepsApi(workOrderId), { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "owner", stepId: step.id, owner: toAssistant ? "assistant" : "person" }) }).catch(() => null);
+    const body = await response?.json().catch(() => ({})) as { ok?: boolean; message?: string } | undefined;
+    if (!body?.ok) { onStatus(body?.message ? `未改：${body.message}` : "未能保存，请重试"); return; }
+    location.reload();
+  };
+  return <p className="step-line"><small>由谁做</small><span>{toAssistant ? "本人" : "助手"}
+    <button type="button" className="text-button" title="以后这条线上同类的步骤也这样分" onClick={() => void choose()}>{toAssistant ? "交给助手" : "改为本人做"}</button></span></p>;
+}
+
+/**
+ * A provide step: material only the person has (their notes, the problem set behind their course login). Uploading it or saying there is
+ * none settles the step; until then the tutorial sections and the assistant's work that use it wait.
+ */
+function ProvideBox({ workOrderId, step, onStatus }: { workOrderId: string; step: Step; onStatus: (text: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const upload = async () => {
+    const files = [...(input.current?.files ?? [])];
+    if (!files.length) { onStatus("还没有选文件"); return; }
+    setBusy(true); onStatus("上传中…");
+    const form = new FormData();
+    form.set("stepId", step.id);
+    for (const file of files) form.append("file", file);
+    const ok = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/steps/provide`, { method: "POST", body: form }).then((response) => response.ok).catch(() => false);
+    setBusy(false);
+    if (!ok) { onStatus("未能上传，请重试"); return; }
+    location.reload();
+  };
+  const none = async () => {
+    setBusy(true);
+    const ok = await post(stepsApi(workOrderId), { action: "provide_none", stepId: step.id });
+    setBusy(false);
+    if (!ok) { onStatus("未能保存，请重试"); return; }
+    location.reload();
+  };
+  const checking = (step as { needState?: string }).needState === "checking";
+  return <div className="step-line step-provide"><small>提交材料</small>
+    <span>
+      <span className="muted">{checking ? "系统正在已有文件和网上查找这份材料，找到就不用提交；手里有也可以直接上传。"
+        : "已有文件和网上都没找到。用到这份材料的教程和助手准备，在提交或说明没有之后才生成。"}</span>
+      <input ref={input} type="file" multiple aria-label={`上传：${step.deliverable || step.title}`} disabled={busy} />
+      <span className="step-provide-actions">
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => void upload()}>上传</button>
+        <button type="button" className="text-button" disabled={busy} onClick={() => void none()}>没有</button>
+      </span>
+    </span></div>;
 }
 
 /** The step list as a form: drag or arrow to reorder, rename in place, add, remove, save; or ask for a replan in one line. */

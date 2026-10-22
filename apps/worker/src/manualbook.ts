@@ -9,8 +9,8 @@ import {
   type MaterialSearchContext, type NodeWriteup, type WriteContext
 } from "@crossline/core";
 import { continueSkillTurn, releaseThread, runCodexSkill, webResearchBlocker, type CodexRpcBoundary, type SkillRunResult } from "@crossline/codex";
-import { aiToolsFor, doneKinds, listAgentTasks, preparationOf, type CrosslineStore } from "@crossline/db";
-import { aiToolBrief, onPersonsBoard, requiredApproval, taskTitleOf } from "@crossline/core";
+import { aiToolsFor, doneKinds, listAgentTasks, openNeedsOf, preparationOf, provisionsOf, type CrosslineStore } from "@crossline/db";
+import { aiToolBrief, onPersonsBoard, requiredApproval, taskTitleOf, tutorialSteps } from "@crossline/core";
 import { claimedTitleMatches } from "./diligence";
 import { arxivPdfAddress, defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { extractText } from "./extract";
@@ -24,7 +24,7 @@ import { startingWithin } from "./schedule-window";
 import { planningContext } from "./step-planner";
 
 // Short summaries of each scenario; each Skill carries the detail.
-const DESIGN_INSTRUCTIONS = "Design the tutorial for one task as a short flow of steps the person follows left to right; a researcher then searches "
+const DESIGN_INSTRUCTIONS = "Design the tutorial for one task as a short flow of the steps the person learns from (planned steps are only those), left to right; a researcher then searches "
   + "the web for the steps that need it and a writer writes each step from what was found. Every step is concrete and serves contract items "
   + "by id (every required one is served). Mark needsResearch only for the one to three steps that need knowledge or a method the person's own "
   + "files do not hold, each with two to four research questions the open web can answer, fitted to the person's setting and to the step's "
@@ -35,11 +35,13 @@ const SEARCH_INSTRUCTIONS = "Find the best public material for ONE step of a tas
   + "gives for this step. Prefer primary, open-access sources in the person's setting and language, at the step's scale. Say honestly whether you "
   + "believe the full text is open access; the app decides what is kept. Put what you could not find in gaps; never invent a source. Return only "
   + "the requested JSON, every human-readable field in Chinese.";
-const WRITE_INSTRUCTIONS = "Write ONE step of the tutorial the person works from: an analysis of what the supplied material says for this step and "
-  + "a numbered tutorial of the real work (the derivation, the method, the worked example, the commands, the check), fitted to this person's level "
-  + "and their own files, ending with how they know the step is done. Cite sources only by their id and never write a web address yourself; where "
-  + "the sources do not support a detail, say so. Missing material is not a reason to stop: start with where to get it and open the analysis with "
-  + "「需要补充」. Cover this step fully and nothing of another, saying each point once. Return only the requested JSON, in Chinese.";
+const WRITE_INSTRUCTIONS = "Write ONE section of the tutorial the person learns from: an analysis of what the supplied material says for this step and "
+  + "a finished teaching document made from it — the key points with formulas and conditions, a worked example solved in full, the common mistakes "
+  + "and a short self-check — fitted to this person's level and their own files, then a list of the materials used with what each gives and where and "
+  + "how to get it (the link is the source id; for material behind a login, the path on that platform). Do not restate the step's own plan (title, "
+  + "first move, hand-in, done criterion: it is on the task card), and process public sources the same way when the person has no file for it. "
+  + "Cite sources only by their id and never write a web address yourself; where the "
+  + "sources do not support a detail, say so. Cover this step fully and nothing of another, saying each point once. Return only the requested JSON, in Chinese.";
 
 export type ManualProgress = { stage: "designing" | "researching" | "writing" | "assembling"; done: number; total: number };
 export type ManualOutcome =
@@ -97,7 +99,10 @@ export function buildManualContext(store: CrosslineStore, workspaceId: string, w
   const anchor = order.milestoneId ? store.listMilestoneAnchors(workspaceId).find((item) => item.milestoneId === order.milestoneId) : undefined;
   // The tutorial is for the person's own steps; the assistant's preparation is done for them and shows up as material.
   const stepPlan = store.getStepPlan(workspaceId, order.id);
-  const steps = stepPlan?.steps.filter((step) => step.status === "planned" && step.executor !== "agent") ?? [];
+  // Only the steps the person learns from (`tutorialSteps`: product `ability`), and of those only the ones whose own material is in: a step
+  // waiting on an upload (`openNeedsOf`) gets its section once the person gives it or says there is none.
+  const steps = tutorialSteps(stepPlan?.steps.filter((step) => step.status === "planned") ?? [])
+    .filter((step) => !openNeedsOf(stepPlan!, step).length);
   const unitTitle = new Map((stepPlan?.units ?? []).map((unit) => [unit.id, unit.title]));
   const prepared = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === order.id && task.artifacts.length)
     .map((task) => ({ step: stepPlan?.steps.find((step) => step.id === task.stepId)?.title ?? task.title, files: task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1) ?? artifact.path) }));
@@ -215,7 +220,9 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     const results: NodeResult[] = [];
     // Only the steps the designer marked as needing outside material are researched, at most `MAX_RESEARCHED_STEPS` of them; a step another
     // tutorial of the same project already researched under the same title takes those sources instead of searching again.
-    const researched = new Set(nodes.filter((node) => node.needsResearch).slice(0, MAX_RESEARCHED_STEPS).map((node) => node.id));
+    // The person's own material first (2026-10-22): a step whose needed material the person uploaded is written from it, not searched for.
+    const ownMaterial = stepsWithOwnMaterial(store, workspaceId, order.id);
+    const researched = new Set(nodes.filter((node) => node.needsResearch && !ownMaterial.has(node.title.trim())).slice(0, MAX_RESEARCHED_STEPS).map((node) => node.id));
     const earlier = researchedBefore(store, workspaceId, materialsDir, order, all.now());
     let searched = 0;
     for (const [index, node] of nodes.entries()) {
@@ -343,7 +350,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
  * title, is dropped. An open-access page on a known host is downloaded in full (capped, typed, checksummed); everything
  * else keeps its link and the model's summary and nothing of the page itself.
  */
-async function keepSources(found: FoundSource[], deps: ManualbookDeps, today: string, gaps: string[]): Promise<KeptSource[]> {
+export async function keepSources(found: FoundSource[], deps: ManualbookDeps, today: string, gaps: string[]): Promise<KeptSource[]> {
   const kept: KeptSource[] = [];
   let downloads = 0;
   for (const source of found.slice(0, 6)) {
@@ -565,10 +572,20 @@ export const TUTORIAL_INPUTS_VERSION = 2;
 export function tutorialInputs(store: CrosslineStore, workspaceId: string, workOrderId: string): string {
   const order = store.getWorkOrder(workspaceId, workOrderId);
   const payload = (order?.payload ?? {}) as { materialContract?: unknown[]; evidenceContract?: unknown[] };
-  const steps = (store.getStepPlan(workspaceId, workOrderId)?.steps ?? []).filter((step) => step.executor !== "agent").map((step) => step.title);
+  const plan = store.getStepPlan(workspaceId, workOrderId);
+  const steps = (plan?.steps ?? []).filter((step) => step.executor !== "agent").map((step) => step.title);
   const files = order ? tutorialUploads(store, workspaceId, order).map((doc) => doc.id).sort() : [];
+  // A plan that asks the person for material: how each was settled, so an upload or 「没有」 writes the sections that waited on it.
+  const needs = plan?.needs?.length ? { needs: Object.fromEntries([...provisionsOf(store, workspaceId, workOrderId)]) } : {};
   return createHash("sha256").update(JSON.stringify({ intent: order?.intent ?? "", steps,
-    materials: payload.materialContract ?? [], evidence: payload.evidenceContract ?? [], files })).digest("hex").slice(0, 16);
+    materials: payload.materialContract ?? [], evidence: payload.evidenceContract ?? [], files, ...needs })).digest("hex").slice(0, 16);
+}
+
+/** Titles of the planned steps whose every needed material the person uploaded: their sections are written from the person's files. */
+function stepsWithOwnMaterial(store: CrosslineStore, workspaceId: string, workOrderId: string): Set<string> {
+  const provided = provisionsOf(store, workspaceId, workOrderId);
+  return new Set((store.getStepPlan(workspaceId, workOrderId)?.steps ?? [])
+    .filter((step) => step.uses?.length && step.uses.every((need) => provided.get(need) === "file")).map((step) => step.title.trim()));
 }
 
 /** The hash a build recorded before version 2, compared only against builds that carry no version. */

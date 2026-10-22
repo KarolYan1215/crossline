@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, isWorkOwner, planMerges, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview, workOwner,
+  TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, isWorkOwner, planMerges, scopeRenames, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview, workOwner,
   type WorkOwner, type BackgroundKind, type BackgroundSpend, type InfoRequest, type MergeGroup, type MergeTask, type TaskMergeReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -188,10 +188,32 @@ export async function dedupePass(deps: { store: CrosslineStore; workspaceId: str
     const same = await reviewPairs(store, workspaceId, client, deps.cwd, open).catch(() => undefined);
     if (same?.size) ({ groups, unsure } = planMerges(mergeTasks(store, workspaceId), same));
   } else if (catchUp) return [];
+  if (!catchUp) renameByScope(store, workspaceId, now);
   // Requests first, so a task that took one in and is then merged as a duplicate carries it along.
   const ordered = [...groups.filter((group) => group.kind === "info_request"), ...groups.filter((group) => group.kind === "duplicate")];
   const done = ordered.map((group) => applyMerge(store, workspaceId, group, now)).filter((item): item is NonNullable<typeof item> => Boolean(item));
   if (done.length && !deps.force) sayToPerson(store, workspaceId, `今天的自检合并了 ${done.reduce((sum, item) => sum + item.absorbed.length, 0)} 个重复或只需一封邮件的任务：\n${done.map((item) => `- ${item.label.replace(/^合并任务：/, "")}`).join("\n")}\n可在任务页「已归档」的「已合并」里撤销。`,
     "tasks_merged", catchUp ? `merged:${day}:review` : `merged:${day}`, [{ label: "查看", href: "/approvals" }], now);
+  return done;
+}
+
+/**
+ * Tasks the merge keeps apart that read alike get their milestone in the name (`scopeRenames`): 「汇集 ECE 548 复习材料（期中考试 1）」 and
+ * 「…（期末考试）」. Each is recorded as a `task.renamed` event.
+ */
+export function renameByScope(store: CrosslineStore, workspaceId: string, now = new Date()): Array<{ id: string; title: string }> {
+  const owner = ownerOf(store, workspaceId);
+  const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone.title]));
+  const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
+  const done: Array<{ id: string; title: string }> = [];
+  for (const rename of scopeRenames(mergeTasks(store, workspaceId), milestones)) {
+    const order = orders.get(rename.id);
+    if (!order) continue;
+    const before = taskTitleOf(order);
+    store.saveWorkOrder({ ...order, payload: { ...((order.payload ?? {}) as Record<string, unknown>), title: rename.title } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.renamed:${order.id}:${rename.title}`, type: "task.renamed", entityId: order.id,
+      payload: { at: now.toISOString(), by: "system", before, title: rename.title, reason: `与同名任务服务不同里程碑，名称注明「${rename.scope}」` } });
+    done.push({ id: order.id, title: rename.title });
+  }
   return done;
 }

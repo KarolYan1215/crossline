@@ -1,12 +1,12 @@
 import { personProfileFor } from "./planning-profile";
 import {
-  ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
+  ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, stepTypesBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, readableFromMaterial, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
   FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { aiToolsFor, createRefBook, lessonsFor, listAgentTasks, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
+import { aiToolsFor, createRefBook, lessonsFor, listAgentTasks, ownerPreferencesFor, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
@@ -21,7 +21,7 @@ const JUDGE = "crossline:crossline-progress-judge";
 /** States in which a task is committed and its steps get time on the calendar. */
 const PLANNABLE = ["approved", "preparing", "ready_for_human", "active"];
 const day = (iso: string) => iso.slice(0, 10);
-const AUTO_FIXED = new Set(["STEP_SHARE_NORMALIZED", "STEP_SHARE_MISSING", "STEP_ESTIMATE_MISSING", "STEP_DEPENDENCY_UNKNOWN", "STEP_TRIVIAL_TO_AGENT", "STEP_NO_ASSISTANT",
+const AUTO_FIXED = new Set(["STEP_OWNER_TABLE", "STEP_SHARE_NORMALIZED", "STEP_SHARE_MISSING", "STEP_ESTIMATE_MISSING", "STEP_DEPENDENCY_UNKNOWN", "STEP_TRIVIAL_TO_AGENT", "STEP_NO_ASSISTANT",
   "STEP_OWNER_ASK", "STEP_OWNER_PERSON", "STEP_REVIEW_FOLDED"]);
 /** What a task is searched by: its wording, its project, the milestone it serves, what it must deliver and what it needs. */
 export function taskQuery(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder, options: { core?: boolean } = {}): string {
@@ -205,28 +205,33 @@ export function requestFinerSplits(store: CrosslineStore, workspaceId: string, n
 
 /** What the replan of a plan written under the old schema is told. */
 export const OUTDATED_PLAN_FEEDBACK = "按现行规则重排步骤：本人每一步写出 5 分钟内能开始的首个动作，标出能借助的 AI 工具及省下的时间，能交给助手的整理和收集交给助手。";
+export const STEP_TYPES_FEEDBACK = "按统一步骤类型表重排：每一步标出产出（材料、核心产出、能力提升、对外动作），由产出决定谁做；只有本人手里才有的材料列入 needs，先请本人提交，没有再用公开材料。";
 
 /**
- * Plans written before a step plan had to give each person step its first move (`firstAction`) and say which AI tool helps (`aiAssist`)
- * — STEP_PLAN_SCHEMA since 2026-10-14 — show no first action on the block-start nudge, the timer or the day panel, and are estimated as if
- * no tool helped (13 live tasks on the real account, planned 10-08 to 10-10). Such a plan (an open person step and not one first action or
- * AI assist anywhere) is planned again, once, and only when its work starts within a week (`startingWithin`, the tutorial's lead), so the
- * task library's far work is not replanned for nothing. Rules only; the task pass picks the request up like any replan.
+ * Plans written under older rules, planned again once each, and only when their work starts within a week (`startingWithin`, the tutorial's
+ * lead), so the task library's far work is not replanned for nothing. Rules only; the task pass picks the request up like any replan.
+ * - `first_action`: before a step plan had to give each person step its first move (`firstAction`) and say which AI tool helps (`aiAssist`)
+ *   — STEP_PLAN_SCHEMA since 2026-10-14 (13 live tasks on the real account, planned 10-08 to 10-10).
+ * - `step_types`: before steps named their product (`STEP_TYPES`, 2026-10-22): who does each step was read from its wording, tutorials were
+ *   written for every person step, and material only the person has was a 「从 Canvas 下载」 line inside the steps.
  */
 export function requestOutdatedReplans(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
   const soon = startingWithin(store, workspaceId, now);
-  const asked = new Set(store.listEvents(workspaceId, { type: "task.steps_replan_requested" })
-    .filter((event) => (event.payload as { outdated?: boolean }).outdated).map((event) => event.entityId));
+  const asked = new Set(store.listEvents(workspaceId, { type: "task.steps_replan_requested" }).filter((event) => (event.payload as { outdated?: boolean }).outdated)
+    .map((event) => `${event.entityId}|${(event.payload as { reason?: string }).reason ?? "first_action"}`));
   const live = new Set(store.listWorkOrders(workspaceId).filter((order) => PLANNABLE.includes(order.state)).map((order) => order.id));
   const out: string[] = [];
   for (const plan of store.listStepPlans(workspaceId)) {
-    if (!live.has(plan.workOrderId) || !soon.has(plan.workOrderId) || asked.has(plan.workOrderId)) continue;
+    if (!live.has(plan.workOrderId) || !soon.has(plan.workOrderId)) continue;
     const open = plan.steps.filter((step) => step.status === "planned" && step.executor !== "agent");
-    if (!open.length || plan.steps.some((step) => step.firstAction || step.aiAssist)) continue;
-    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `task.steps_outdated:${plan.workOrderId}:${plan.version}`,
-      type: "task.steps_replan_requested", entityId: plan.workOrderId, payload: { feedback: OUTDATED_PLAN_FEEDBACK, outdated: true, version: plan.version } });
+    if (!open.length) continue;
+    const reason = !plan.steps.some((step) => step.firstAction || step.aiAssist) ? "first_action" : !plan.steps.some((step) => step.product) ? "step_types" : "";
+    if (!reason || asked.has(`${plan.workOrderId}|${reason}`)) continue;
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `task.steps_outdated:${plan.workOrderId}:${plan.version}:${reason}`,
+      type: "task.steps_replan_requested", entityId: plan.workOrderId,
+      payload: { feedback: reason === "first_action" ? OUTDATED_PLAN_FEEDBACK : STEP_TYPES_FEEDBACK, outdated: true, reason, version: plan.version } });
     out.push(plan.workOrderId);
-    asked.add(plan.workOrderId);
+    asked.add(`${plan.workOrderId}|${reason}`);
   }
   return out;
 }
@@ -291,6 +296,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       person: { profile: grounding.profile, strengths: grounding.strengths, facts: grounding.factIndex.index, answers: grounding.answers },
       projectDates: grounding.dated,
       archetypes: [...ARCHETYPES, ...learned].map(archetypeBrief),
+      // The one table of step types (docs/work-split.md §6): what each role may produce; who does a step follows from its product.
+      stepTypes: stepTypesBrief(),
       // The AI tools the person works with (docs/skills-library.md §7): the assistant takes whole steps, the rest name the tool that
       // speeds them, and every estimate is the time with it.
       aiTools: tools.map(aiToolBrief),
@@ -323,13 +330,16 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         + "its file verbatim. The person's steps are only the intellectual core (solving, deriving, deciding, writing, rehearsing), each one focused "
         + "session with a quantified done criterion, a why naming what it trains or decides, and a firstAction of five minutes or less; collecting, "
         + "compiling, listing and filing are the assistant's steps (owner assistant), and what needs one fact only the person holds is owner ask with "
-        + "that question in questions. No step only reviews the assistant's output, writes an acceptance checklist or defines scope. "
+        + "that question in questions. Every step names its product from stepTypes (material, output, ability, action): who does it follows from "
+        + "that, and only ability steps get a tutorial. needs lists only material the person's files and folders do not cover and that something on "
+        + "record says the person has (basis: the fact, file or task wording); the app looks for it on the web first and asks the person last. "
+        + "No step only reviews the assistant's output, writes an acceptance checklist or defines scope. "
         + "The rationale is a few short sentences for the person: what the plan rests on, never the input's keys, ids or how units were counted. "
         + "Ask only what neither the material nor person.facts settles, with the likeliest option first. "
         + "usedRefs lists the bracketed ids ([f3], [p1], [l2]) of the facts, preferences and lessons the plan really rests on, [] when none.",
       // The prompt cache (docs/token-economy.md §2.5): what every plan of this workspace shares first, then the line's and the project's,
       // then this task; what only this run is told comes after the input instead of in the developer instructions.
-      stableKeys: ["version", "archetypes", "aiTools", "person", "personalPreferences", "lessons", "projectDates", "milestone"],
+      stableKeys: ["version", "archetypes", "stepTypes", "aiTools", "person", "personalPreferences", "lessons", "projectDates", "milestone"],
       runNote: (libraryInstruction(extraSkills)
         + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change; earlierFeedback still holds unless it contradicts it." : "")
         + (research ? " research is true: search the web for this task's background and the best known way to do it before planning, as the Skill's research section says." : "")).trim(),
@@ -360,7 +370,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     }
     // Every account has the assistant in one mode or another (assistantMode: the owner's shell, else Crossline's tools on any model), so
     // collecting and filing stay the assistant's on the hosted beta too; tying this to the shell turned every such step into the person's.
-    const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output, tools.map((tool) => tool.name), { assistant: true });
+    const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output, tools.map((tool) => tool.name),
+      { assistant: true, ownerPreferences: ownerPreferencesFor(store, workspaceId, order.identityId) });
     const normalized = result.output.importance ? { ...shapedPlan, importance: result.output.importance } : shapedPlan;
     // Steps must not start before the window or end after it: clamp, the reviewer sees the warning.
     // What normalization already fixed (rescaled shares, a missing estimate filled in, an unknown dependency dropped) needs no judgement;

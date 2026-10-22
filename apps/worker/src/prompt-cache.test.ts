@@ -114,7 +114,7 @@ test("the step planner: one workspace's archetypes, tools and person first; each
   const plan = createStepPlanner(store, ws, "C:\\repo", () => client);
   await plan("wo1");
   await plan("wo2", "把复习拆成每讲一步");
-  expectShared("crossline:crossline-step-planner", runs, ["version", "archetypes", "aiTools", "person", "personalPreferences", "lessons", "projectDates", "milestone"]);
+  expectShared("crossline:crossline-step-planner", runs, ["version", "archetypes", "stepTypes", "aiTools", "person", "personalPreferences", "lessons", "projectDates", "milestone"]);
   // What only the second run was told is after its input, not in the instructions both share.
   expect(runs[1]!.parts.at(-1)).toMatch(/^Instructions for this run only.*\n Apply the feedback|^Instructions for this run only[^\n]*\nApply the feedback/s);
   expect(runs[1]!.developer).not.toContain("Apply the feedback");

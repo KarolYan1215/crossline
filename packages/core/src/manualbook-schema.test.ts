@@ -64,6 +64,7 @@ test("only public https pages are accepted as found sources", () => {
 test("a full text is kept only from an open-access host AND when the model did not say it is closed", () => {
   expect(openAccessVerdict({ url: "https://arxiv.org/abs/1706.03762", openAccess: "yes" })).toMatchObject({ download: true });
   expect(openAccessVerdict({ url: "https://arxiv.org/abs/1706.03762", openAccess: "unknown" })).toMatchObject({ download: true });
+  expect(openAccessVerdict({ url: "https://ocw.mit.edu/courses/6-012-microelectronic-devices-and-circuits-fall-2005/lec2.pdf", openAccess: "unknown" })).toMatchObject({ download: true });
   expect(openAccessVerdict({ url: "https://arxiv.org/abs/1706.03762", openAccess: "no" })).toMatchObject({ download: false });
   // The model saying "open access" about a publisher's paywalled page changes nothing: the host is not on the list.
   expect(openAccessVerdict({ url: "https://www.sciencedirect.com/science/article/pii/X", openAccess: "yes" })).toMatchObject({ download: false });

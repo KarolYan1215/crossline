@@ -120,7 +120,11 @@ export type StepPlanInput = {
     schedulable: boolean; executor: "human" | "agent" | "mixed"; tickOutcome: string; covers?: string[]; why?: string;
     aiAssist?: { tool: string; how: string; minutesSaved: number };
     /** A concrete first move of at most five minutes for a person's step ("" for the assistant's steps and waits). */
-    firstAction?: string }>;
+    firstAction?: string;
+    /** What the step produces (`STEP_TYPES`), the needs it uses, and on a provide step the need it asks for (packages/core/src/steps.ts). */
+    product?: "material" | "output" | "ability" | "action"; uses?: string[]; provides?: string }>;
+  /** Material only the person has, asked for before anything that uses it (provide steps). */
+  needs?: Array<{ id: string; what: string; why: string; basis?: string }>;
   /** The content units read from the person's material, and what only the person can answer (packages/core/src/steps.ts). */
   units?: Array<{ id: string; title: string; docId: string; quote: string }>;
   questions?: Array<{ id: string; text: string; why: string; options: string[] }>;
@@ -134,6 +138,7 @@ export type StoredStepPlan = {
   workOrderId: string; version: number; archetypeId: string; quantity: StepPlanInput["quantity"]; rationale: string; plannedAt: string;
   units: NonNullable<StepPlanInput["units"]>; questions: NonNullable<StepPlanInput["questions"]>;
   importance?: StepPlanInput["importance"];
+  needs?: StepPlanInput["needs"];
   steps: StoredTaskStep[];
 };
 
@@ -2862,7 +2867,8 @@ export class CrosslineStore {
         archetype_id = excluded.archetype_id, quantity_json = excluded.quantity_json, rationale = excluded.rationale, planned_at = excluded.planned_at,
         detail_json = excluded.detail_json`)
         .run(workspaceId, workOrderId, version, plan.archetypeId, JSON.stringify(plan.quantity), plan.rationale, now,
-          JSON.stringify({ units: plan.units ?? [], questions: plan.questions ?? [], ...(plan.importance ? { importance: plan.importance } : {}) }));
+          JSON.stringify({ units: plan.units ?? [], questions: plan.questions ?? [], ...(plan.importance ? { importance: plan.importance } : {}),
+            ...(plan.needs?.length ? { needs: plan.needs } : {}) }));
       // New ids continue after the kept ones so a dependency on a done step still points at it.
       const offset = kept.length;
       const insert = this.#db.prepare(`INSERT INTO task_steps (workspace_id, work_order_id, id, seq, role, title, deliverable, done_criterion, share,
@@ -2874,7 +2880,8 @@ export class CrosslineStore {
         insert.run(workspaceId, workOrderId, rename.get(step.id)!, offset + index, step.role, step.title, step.deliverable, step.doneCriterion,
           step.share, step.estimate.p25Minutes, step.estimate.p50Minutes, step.estimate.p85Minutes,
           JSON.stringify(step.dependsOn.map((dep) => rename.get(dep) ?? dep)), step.notBefore, step.dueBy, step.schedulable ? 1 : 0,
-          step.executor, step.tickOutcome, now, JSON.stringify({ covers: step.covers ?? [], why: step.why ?? "", ...(step.aiAssist?.tool ? { aiAssist: step.aiAssist } : {}), ...(step.firstAction ? { firstAction: step.firstAction } : {}) }));
+          step.executor, step.tickOutcome, now, JSON.stringify({ covers: step.covers ?? [], why: step.why ?? "", ...(step.aiAssist?.tool ? { aiAssist: step.aiAssist } : {}), ...(step.firstAction ? { firstAction: step.firstAction } : {}),
+            ...(step.product ? { product: step.product } : {}), ...(step.uses?.length ? { uses: step.uses } : {}), ...(step.provides ? { provides: step.provides } : {}) }));
       });
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_planned:${workOrderId}:${version}`, type: "task.steps_planned",
         entityId: workOrderId, payload: { version, archetypeId: plan.archetypeId, steps: plan.steps.length, kept: kept.length, reason } });
@@ -2901,14 +2908,15 @@ export class CrosslineStore {
         dependsOn: JSON.parse(String(row.depends_on_json)) as string[], notBefore: String(row.not_before), dueBy: String(row.due_by),
         schedulable: Number(row.schedulable) === 1, executor: row.executor as StoredTaskStep["executor"], tickOutcome: String(row.tick_outcome),
         status: row.status as StoredTaskStep["status"], progressQuarter: Number(row.progress_quarter), updatedAt: String(row.updated_at),
-        ...(JSON.parse(String(row.detail_json ?? "{}")) as { covers?: string[]; why?: string; aiAssist?: { tool: string; how: string; minutesSaved: number }; firstAction?: string }) });
+        ...(JSON.parse(String(row.detail_json ?? "{}")) as Pick<StoredTaskStep, "covers" | "why" | "aiAssist" | "firstAction" | "product" | "uses" | "provides">) });
       byOrder.set(String(row.work_order_id), list);
     }
     return plans.map((row) => ({ workOrderId: String(row.work_order_id), version: Number(row.version), archetypeId: String(row.archetype_id),
       quantity: JSON.parse(String(row.quantity_json)) as StoredStepPlan["quantity"], rationale: String(row.rationale),
       plannedAt: String(row.planned_at),
-      ...(() => { const detail = JSON.parse(String(row.detail_json ?? "{}")) as Partial<Pick<StoredStepPlan, "units" | "questions" | "importance">>;
-        return { units: detail.units ?? [], questions: detail.questions ?? [], ...(detail.importance ? { importance: detail.importance } : {}) }; })(),
+      ...(() => { const detail = JSON.parse(String(row.detail_json ?? "{}")) as Partial<Pick<StoredStepPlan, "units" | "questions" | "importance" | "needs">>;
+        return { units: detail.units ?? [], questions: detail.questions ?? [], ...(detail.importance ? { importance: detail.importance } : {}),
+          ...(detail.needs?.length ? { needs: detail.needs } : {}) }; })(),
       steps: byOrder.get(String(row.work_order_id)) ?? [] }));
   }
 
@@ -2926,6 +2934,16 @@ export class CrosslineStore {
         entityId: workOrderId, payload: { stepId, before: step.estimate, after: estimate } });
       return { changed: true };
     }).immediate();
+  }
+
+  /** Who does one step, as the person chose it on the task (`step-owner.ts`): the assistant's steps take no calendar time. */
+  setStepExecutor(workspaceId: string, workOrderId: string, stepId: string, executor: "human" | "agent"): { changed: boolean } {
+    const step = this.getStepPlan(workspaceId, workOrderId)?.steps.find((item) => item.id === stepId);
+    if (!step) throw new Error("STEP_NOT_FOUND");
+    if (step.executor === executor) return { changed: false };
+    this.#db.prepare("UPDATE task_steps SET executor = ?, schedulable = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
+      .run(executor, executor === "agent" || step.role === "wait" ? 0 : 1, new Date().toISOString(), workspaceId, workOrderId, stepId);
+    return { changed: true };
   }
 
   /** Progress on one step: quarters (0–4), done, or skipped. Each change is its own event. */
@@ -4278,4 +4296,5 @@ export * from "./automations";
 export * from "./mail-replies";
 export * from "./own-completion";
 export * from "./preparation";
+export * from "./step-owner";
 export * from "./lessons";

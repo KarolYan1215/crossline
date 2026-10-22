@@ -1,4 +1,4 @@
-import { ARCHETYPE_IDS, STEP_ROLES, archetypeById, isStepRole, type Archetype, type StepRole } from "./archetypes";
+import { ARCHETYPE_IDS, PRODUCT_OWNER, STEP_PRODUCTS, STEP_ROLES, archetypeById, isStepRole, productOf, type Archetype, type StepProduct, type StepRole } from "./archetypes";
 import { normalizeAiAssist } from "./ai-tools";
 import { INFO_REQUEST_PERSON_MINUTES, infoRequestTraits } from "./info-request";
 import { COMPLETION_FIELD, type ModelCompletion } from "./completion";
@@ -50,7 +50,23 @@ export type PlannedStep = {
    * normalization corrects it and keeps `executor` in step with it. Optional for plans stored before it; the schema requires it.
    */
   owner?: WorkOwner;
+  /**
+   * What the step produces (`STEP_TYPES` in archetypes.ts): who does it follows from it, and only `ability` steps get a tutorial.
+   * Optional for plans stored before it (2026-10-22); the schema requires it and normalization fills a role's default.
+   */
+  product?: StepProduct;
+  /** Ids of the plan's `needs` this step cannot be done (or prepared for) without. */
+  uses?: string[];
+  /** On the step that asks the person for a need: that need's id (the step shows an upload box and 「没有」). */
+  provides?: string;
 };
+/**
+ * Material the task needs that the files and folders on record do not cover and that the person is known to have (their lecture notes,
+ * the problem set behind their course login, a brief they received). Decided 2026-10-22, the owner: look in the person's files first,
+ * then on the web for a tutorial or plan made for this very task, and only when neither is enough ask the person — and only for material
+ * something on record says they have (`basis`: the fact, file or the task's own words that say so). A need with no basis is dropped.
+ */
+export type StepNeed = { id: string; what: string; why: string; basis: string };
 /**
  * One unit of the task's actual content, read from the person's material — a lecture, a chapter, a problem set, a section of a brief —
  * with the document and the verbatim line it was read from. Quantities are counted from these, never assumed (decided 2026-10-09: a
@@ -79,6 +95,8 @@ export type StepPlan = {
   completion?: ModelCompletion;
   units: StepUnit[];
   questions: StepQuestion[];
+  /** Optional for plans stored before it; the schema requires it. */
+  needs?: StepNeed[];
   steps: PlannedStep[];
   /**
    * The short ids of the facts, preferences and lessons (「[f3]」「[p1]」「[l2]」) the plan really rests on, counted as used when it is saved
@@ -92,6 +110,12 @@ const str = { type: "string" };
 const num = { type: "number" };
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 
+/** At most this many of the person's materials are asked for in one plan; a provide step takes this long (finding and uploading a file). */
+export const MAX_NEEDS = 4;
+export const PROVIDE_MINUTES = 5;
+/** The key under which the person's choice of who does a kind of step is kept (setting `steps.ownerPreferences`): line, role, product. */
+export const ownerPreferenceKey = (lineId: string, role: string, product: StepProduct) => `${lineId}|${role}|${product}`;
+
 /** A first move is one short line: anything longer is a step of its own. */
 export const FIRST_ACTION_MAX = 80;
 
@@ -104,6 +128,7 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
   completion: COMPLETION_FIELD,
   units: { type: "array", items: object({ id: str, title: str, docId: str, quote: str }) },
   questions: { type: "array", items: object({ id: str, text: str, why: str, options: { type: "array", items: str } }) },
+  needs: { type: "array", items: object({ id: str, what: str, why: str, basis: str }) },
   steps: { type: "array", items: object({
     id: str, role: { type: "string", enum: Object.keys(STEP_ROLES) }, title: str, deliverable: str, doneCriterion: str, share: num,
     estimate: object({ p25Minutes: num, p50Minutes: num, p85Minutes: num }),
@@ -111,7 +136,9 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
     executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str, covers: { type: "array", items: str }, why: str,
     aiAssist: object({ tool: str, how: str, minutesSaved: num }),
     firstAction: str,
-    owner: { type: "string", enum: [...WORK_OWNERS] }
+    owner: { type: "string", enum: [...WORK_OWNERS] },
+    product: { type: "string", enum: Object.keys(STEP_PRODUCTS) },
+    uses: { type: "array", items: str }
   }) },
   usedRefs: { type: "array", items: str }
 });
@@ -201,7 +228,9 @@ const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((
 
 export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options: {
   /** False only where no assistant can take a step: every step is then the person's (or mixed). Every account has one now (tools mode). */
-  assistant?: boolean } = {}): { plan: StepPlan; warnings: StepWarning[] } {
+  assistant?: boolean;
+  /** The person's own choices of who does a kind of step (`role|product` → owner), applied where nothing forces the person. */
+  ownerPreferences?: ReadonlyMap<string, "person" | "assistant"> } = {}): { plan: StepPlan; warnings: StepWarning[] } {
   const assistant = options.assistant !== false;
   const warnings: StepWarning[] = [];
   const idMap = new Map<string, string>();
@@ -223,13 +252,34 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
       covers: list(step.covers), why: text(step.why).trim().slice(0, 300),
       aiAssist: normalizeAiAssist(step.aiAssist, toolNames, p50),
       firstAction: text(step.firstAction).trim().slice(0, FIRST_ACTION_MAX),
-      owner: (step.owner === "assistant" || step.owner === "ask" || step.owner === "person" ? step.owner : step.executor === "agent" ? "assistant" : "person") as WorkOwner };
+      owner: (step.owner === "assistant" || step.owner === "ask" || step.owner === "person" ? step.owner : step.executor === "agent" ? "assistant" : "person") as WorkOwner,
+      // No product named: what the model said about the doer picks among the role's products (the assistant's work is material).
+      product: productOf(step.role, step.product ?? (step.executor === "agent" ? "material" : undefined)), uses: list(step.uses) };
   });
+  // The person's own material first: each need becomes a provide step at the front (an upload box and 「没有」, no calendar time).
+  // Only material something on record says the person has: a need without that is guessed, and asking for it wastes their time.
+  const needs = (Array.isArray(plan.needs) ? plan.needs : []).filter((need) => need && text(need.what).trim() && text(need.basis).trim()).slice(0, MAX_NEEDS)
+    .map((need, index) => ({ id: String(need.id || `n${index + 1}`).slice(0, 40), what: text(need.what).trim().slice(0, 80), why: text(need.why).trim().slice(0, 200),
+      basis: text(need.basis).trim().slice(0, 200) }));
+  const needIds = new Set(needs.map((need) => need.id));
+  for (const step of steps) step.uses = step.uses.filter((id) => needIds.has(id));
+  const provides = needs.map((need, index) => ({ id: `provide${index + 1}`, role: "prepare" as StepRole, title: `提供${need.what}`.slice(0, 120),
+    deliverable: need.what, doneCriterion: "已上传，或说明没有", share: 0,
+    estimate: { p25Minutes: PROVIDE_MINUTES, p50Minutes: PROVIDE_MINUTES, p85Minutes: PROVIDE_MINUTES * 2 }, dependsOn: [] as string[],
+    notBefore: "", dueBy: "", schedulable: false, executor: "human" as StepExecutor, tickOutcome: "", covers: [] as string[], why: need.why,
+    aiAssist: { tool: "", how: "", minutesSaved: 0 }, firstAction: "上传文件，或点「没有」", owner: "person" as WorkOwner,
+    product: "material" as StepProduct, uses: [] as string[], provides: need.id }));
+  for (const provide of provides) idMap.set(provide.id, provide.id);
+  for (const step of steps) for (const need of step.uses) {
+    const provide = provides.find((item) => item.provides === need)!;
+    if (!step.dependsOn.includes(provide.id)) step.dependsOn.push(provide.id);
+  }
+  steps.unshift(...provides);
   const questions = (Array.isArray(plan.questions) ? plan.questions : []).filter((question) => question && question.text)
     .map((question, index) => ({ id: String(question.id || `q${index + 1}`).slice(0, 40), text: String(question.text).trim().slice(0, 200),
       why: String(question.why ?? "").trim().slice(0, 300), options: (Array.isArray(question.options) ? question.options : list(question.options))
         .map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 8) }));
-  const reviews = assignStepOwners(steps, questions, warnings, { assistant });
+  const reviews = assignStepOwners(steps, questions, warnings, { assistant, ...(options.ownerPreferences ? { ownerPreferences: options.ownerPreferences } : {}) });
   // Dependencies: known ids only, then any edge that closes a cycle is dropped (the latest-listed edge first).
   for (const step of steps) {
     const known = step.dependsOn.map((dep) => idMap.get(dep)).filter((dep): dep is string => Boolean(dep) && dep !== step.id);
@@ -268,7 +318,7 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
   for (const step of steps) step.covers = step.covers.filter((id) => unitIds.has(id));
   return { plan: { archetypeId: plan.archetypeId, rationale: text(plan.rationale).trim().slice(0, 600),
     quantity: { basis: text(plan.quantity?.basis).slice(0, 60), amount, unit: text(plan.quantity?.unit).slice(0, 12) }, units,
-    questions: questions.slice(0, 5), steps }, warnings };
+    questions: questions.slice(0, 5), needs, steps }, warnings };
 }
 
 /**
@@ -283,7 +333,9 @@ const JUDGES = /结论|科学|正确|边界|权限|规则|选定|决定|取舍/;
 export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[], warnings: StepWarning[],
   options: { assistant?: boolean; /** The task's title: a step of graded homework touching its problems stays the person's. */ taskTitle?: string;
     /** Steps (of a stored plan being judged again) that come right after, or wait on, the assistant's already-finished work. */
-    afterAgent?: ReadonlySet<string> } = {}): Set<string> {
+    afterAgent?: ReadonlySet<string>;
+    /** `role|product` → the owner the person chose for that kind of step (4A); never over what only the person may do. */
+    ownerPreferences?: ReadonlyMap<string, "person" | "assistant"> } = {}): Set<string> {
   const assistant = options.assistant !== false;
   const reviews = new Set<string>();
   for (const step of steps) {
@@ -306,7 +358,38 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
       warnings.push({ code: "STEP_INFO_REQUEST_PERSON", detail: `「${step.title}」要向别人发出询问，改由本人检查草稿后发送` });
       continue;
     }
-    if (step.role !== "wait") {
+    // Handing over material only the person has: theirs, an upload rather than work.
+    if (step.provides) { step.executor = "human"; step.owner = "person"; step.schedulable = false; continue; }
+    if (step.role !== "wait" && step.product) {
+      const product = productOf(step.role, step.product);
+      step.product = product;
+      // The wording rules are a cross-check now: they can only force the person (acts, choices, graded answers, practice), fold a
+      // review, or turn the assistant's step into a question; the table decides the rest.
+      const verdict = workOwner({ title: step.title, owner: PRODUCT_OWNER[product], ...(options.taskTitle ? { taskTitle: options.taskTitle } : {}) });
+      const forced = ["external", "decision", "graded", "person_skill"].includes(verdict.code) && verdict.owner === "person";
+      if (!forced && step.executor !== "agent" && verdict.code === "review_only") { reviews.add(step.id); continue; }
+      if (!forced && step.executor !== "agent" && ACCEPTS_OUTPUT.test(step.title) && !JUDGES.test(step.title) && product !== "ability"
+        && (step.dependsOn.some((dep) => steps.find((other) => other.id === dep)?.executor === "agent")
+          || steps[steps.indexOf(step) - 1]?.executor === "agent" || options.afterAgent?.has(step.id))) { reviews.add(step.id); continue; }
+      const preferred = options.ownerPreferences?.get(`${step.role}|${product}`);
+      const table = PRODUCT_OWNER[product];
+      const owner: WorkOwner = forced || step.role === "decide" ? "person" : preferred ?? (table === "assistant" && verdict.owner === "ask" ? "ask" : table);
+      if (!forced && !preferred && (verdict.code === "design" || verdict.code === "static_artifact") && verdict.owner !== table)
+        warnings.push({ code: "STEP_OWNER_TABLE", detail: `「${step.title}」按产出（${STEP_PRODUCTS[product]}）由${table === "person" ? "本人" : "助手"}做，措辞规则判为${verdict.owner === "person" ? "本人" : "助手"}` });
+      const was = step.executor;
+      step.executor = owner === "person" ? (was === "agent" ? "human" : was) : "agent";
+      if (owner === "person" && was === "agent") {
+        step.schedulable = true;
+        warnings.push({ code: "STEP_OWNER_PERSON", detail: `「${step.title}」改由本人完成：${forced ? verdict.reason : preferred ? "本人选择这类步骤自己做" : `产出是${STEP_PRODUCTS[product]}`}` });
+      } else if (owner !== "person" && was !== "agent") warnings.push({ code: owner === "ask" ? "STEP_OWNER_ASK" : "STEP_TRIVIAL_TO_AGENT",
+        detail: `「${step.title}」${owner === "ask" ? "改为问本人一句后由助手完成" : preferred ? "按本人的选择交给助手" : "产出是材料，改由助手完成"}` });
+      if (owner === "ask") {
+        const question = verdict.question ?? `「${step.title}」需本人提供哪些信息？`;
+        if (questions.length < 5 && !questions.some((item) => item.text === question))
+          questions.push({ id: `q${questions.length + 1}`, text: question, why: `「${step.title}」需要本人持有的信息，答完由助手接着做`, options: [] });
+      }
+      step.owner = owner;
+    } else if (step.role !== "wait") {
       // `executor: "agent"` is the model's word that the assistant does it, whatever `owner` it also wrote; `ask` stays a question.
       const verdict = workOwner({ title: step.title, owner: step.executor === "agent" && step.owner !== "ask" ? "assistant" : step.owner ?? "person",
         ...(options.taskTitle ? { taskTitle: options.taskTitle } : {}) });

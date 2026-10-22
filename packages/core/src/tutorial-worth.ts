@@ -17,6 +17,10 @@ import { infoRequestTraits } from "./info-request";
  *   `TUTORIAL_CRAFT_MINUTES` in steps that take a method (`METHOD_ROLES`), and no accepted task of the same kind on the same line before
  *   (`doneBefore`) — someone who has done one does it again from the steps.
  * Everything else — deciding, gathering, confirming, contacting, admin, money, errands — is `steps`.
+ *
+ * A plan whose steps name their product (`STEP_TYPES`, from 2026-10-22) is judged by that alone: a tutorial teaches, so only the
+ * person's `ability` steps count, and only they get a section (`tutorialSteps`). Checking a delivery package, approving and sending, or
+ * finding the cause of a failure in the person's own system produce an output or an act — the owner saw both get generic tutorials.
  */
 export const TUTORIAL_MIN_MINUTES = 45;
 export const TUTORIAL_LEARNING_MINUTES = 60;
@@ -29,7 +33,7 @@ export const METHOD_ROLES = new Set(["learn", "practice", "mock", "solve", "buil
 export type PreparationLevel = "none" | "steps" | "tutorial";
 export type Preparation = { level: PreparationLevel; reason: string };
 
-type Step = { executor: string; schedulable: boolean; status: string; role?: string; estimate: { p50Minutes: number } };
+type Step = { executor: string; schedulable: boolean; status: string; role?: string; product?: string; estimate: { p50Minutes: number } };
 type Task = { title: string; intent: string; p50Minutes: number; archetypeId?: string };
 
 const minutes = (value: number) => value >= 60 ? `${Math.round(value / 6) / 10} 小时` : `${Math.round(value)} 分钟`;
@@ -42,6 +46,12 @@ export function taskPreparation(task: Task, steps?: readonly Step[], history: { 
   if (!steps?.length) return { level: "steps", reason: "步骤规划好后再决定是否准备教程。" };
   const own = steps.filter((step) => step.executor !== "agent" && step.schedulable);
   const ownMinutes = own.reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
+  if (own.some((step) => step.product)) {
+    const learning = tutorialSteps(own).reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
+    return learning >= TUTORIAL_LEARNING_MINUTES
+      ? { level: "tutorial", reason: `有约 ${minutes(learning)}要学新东西或练新方法，开工前备好这几步的教程。` }
+      : { level: "steps", reason: learning ? `要学的部分约 ${minutes(learning)}，按步骤做即可，不备教程。` : "这件事是产出或办理，不需要学新东西，按步骤做即可，不备教程。" };
+  }
   if (ownMinutes < TUTORIAL_MIN_MINUTES)
     return { level: "steps", reason: `本人的部分约 ${minutes(ownMinutes)}，按步骤和「先做」即可，不备教程。` };
   const archetype = task.archetypeId ?? "";
@@ -58,6 +68,12 @@ export function taskPreparation(task: Task, steps?: readonly Step[], history: { 
     return { level: "tutorial", reason: `需要新方法的部分约 ${minutes(method)}，开工前备好教程。` };
   }
   return { level: "steps", reason: "整理、确认、决定、沟通或办理类的任务，按步骤做即可，不备教程。" };
+}
+
+/** The person's steps a tutorial is written for: those whose product is the person's ability (all of them on a plan from before products). */
+export function tutorialSteps<T extends { executor: string; product?: string }>(steps: readonly T[]): T[] {
+  const own = steps.filter((step) => step.executor !== "agent");
+  return own.some((step) => step.product) ? own.filter((step) => step.product === "ability") : own;
 }
 
 /** Whether the system writes a tutorial by itself (`taskPreparation` says `tutorial`); the task page's button still makes one for any task. */

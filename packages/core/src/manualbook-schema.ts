@@ -190,6 +190,9 @@ const OPEN_ACCESS_HOSTS: Array<{ host: RegExp; why: string }> = [
   { host: /(^|\.)proceedings\.mlr\.press$|(^|\.)jmlr\.org$/, why: "PMLR / JMLR（开放获取）" },
   { host: /(^|\.)plos\.org$|(^|\.)journals\.plos\.org$/, why: "PLOS（CC-BY 开放获取）" },
   { host: /(^|\.)zenodo\.org$/, why: "Zenodo（带许可的公开存档）" },
+  // Open courseware under CC licences (2026-10-22: an ECE 548 tutorial kept MIT's lecture notes as summaries only).
+  { host: /(^|\.)ocw\.mit\.edu$/, why: "MIT OpenCourseWare（CC BY-NC-SA 开放课件）" },
+  { host: /(^|\.)openstax\.org$|(^|\.)libretexts\.org$/, why: "OpenStax / LibreTexts（CC BY 开放教材）" },
   { host: /(^|\.)docs\.python\.org$|(^|\.)developer\.mozilla\.org$|(^|\.)docs\.github\.com$/, why: "公开技术文档" }
 ];
 

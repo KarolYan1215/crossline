@@ -1,7 +1,7 @@
 import "server-only";
 import { archetypeById, completionRule, preparesOf, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type Preparation, type SuccessCriterion,
   type EvidenceQuestionTemplate } from "@crossline/core";
-import { doneKinds, listAgentTasks, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
+import { doneKinds, listAgentTasks, needStatesOf, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
 import { effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
@@ -97,7 +97,10 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       ...(!proposalReady(order, plan, { planBlocked: planBlocked.has(order.id), exempt: capacity.has(order.identityId) }) ? { preparing: true } : {}),
       window: { ...(payload.notBefore ? { notBefore: payload.notBefore } : {}), ...(dueBy ? { dueBy } : {}) },
       ...(plan ? { stepPlan: { archetypeLabel: archetypeById(plan.archetypeId)?.label ?? plan.archetypeId, quantity: plan.quantity, rationale: plan.rationale,
-        progress: taskProgress(finishedSteps(order.state, plan.steps)), steps: finishedSteps(order.state, plan.steps), units: plan.units,
+        progress: taskProgress(finishedSteps(order.state, plan.steps)), units: plan.units,
+        // A provide step says whether the system is still looking (files, then the web) or the person is asked (need-check.ts).
+        steps: (() => { const states = plan.needs?.length ? needStatesOf(store, workspaceId, order.id) : new Map<string, "checking" | "ask">();
+          return finishedSteps(order.state, plan.steps).map((step) => step.provides && states.get(step.provides) ? { ...step, needState: states.get(step.provides)! } : step); })(),
         questions: plan.questions.map((question) => { const answer = answerOf(order.projectId, question.text); return { ...question, ...(answer ? { answer } : {}) }; }) } } : {}),
       preparation: preparationOf(order, plan, done),
       supports, workedMinutes: worked, ...(artifactLinks.length ? { artifactLinks } : {}),
@@ -207,7 +210,7 @@ export type TaskExtras = {
   /** Earliest start and latest finish, as the scheduler uses them. */
   window: { notBefore?: string; dueBy?: string };
   stepPlan?: { archetypeLabel: string; quantity: { basis: string; amount: number; unit: string }; rationale: string; progress: number;
-    steps: StoredTaskStep[]; units: StoredStepPlan["units"]; questions: StepQuestionView[] };
+    steps: Array<StoredTaskStep & { needState?: "checking" | "ask" }>; units: StoredStepPlan["units"]; questions: StepQuestionView[] };
   /** How the card is prepared before its work starts (docs/task-preparation.md): nothing, its steps, or a full tutorial, and why. */
   preparation?: Preparation;
   /** Other lines this work feeds: the milestone relations from this task's milestone, and its byproducts. */

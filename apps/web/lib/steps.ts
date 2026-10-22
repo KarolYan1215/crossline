@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { stepAnswerSlot, taskProgress, type AccessContext } from "@crossline/core";
-import type { StoredStepPlan, StoredWorkOrder } from "@crossline/db";
+import { chooseStepOwner, provideMaterial, type StoredStepPlan, type StoredWorkOrder } from "@crossline/db";
 import { getStore } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
 
@@ -94,6 +94,26 @@ export function editSteps(ctx: AccessContext, workOrderId: string, edited: Array
   store.saveStepPlan(ctx.workspaceId, workOrderId, { archetypeId: plan.archetypeId, quantity: plan.quantity, rationale: plan.rationale,
     units: plan.units, questions: plan.questions, steps },
     ctx.principalId, "edited");
+  return { ok: true };
+}
+
+/**
+ * The person hands one step to the assistant or takes it back (the owner's 4A, 2026-10-22); the choice holds for that kind of step on the
+ * line. A step handed over is started by the worker's next pass.
+ */
+export function chooseOwnerOfStep(ctx: AccessContext, workOrderId: string, stepId: string, owner: "person" | "assistant"): { ok: true } | { ok: false; code: string; message: string } {
+  const result = chooseStepOwner(getStore(), ctx.workspaceId, workOrderId, stepId, owner, ctx.principalId);
+  if (!result.ok) return { ok: false, code: "STEP_OWNER_REFUSED", message: result.reason };
+  if (owner === "assistant") requestTaskPass(ctx);
+  return { ok: true };
+}
+
+/** A provide step settled: the files (already stored under the task's project) or 「没有」; what waited on it goes ahead. */
+export function settleProvideStep(ctx: AccessContext, workOrderId: string, stepId: string, how: "file" | "none", documentIds: string[] = []):
+  { ok: true } | { ok: false; code: string; message: string } {
+  const result = provideMaterial(getStore(), ctx.workspaceId, workOrderId, stepId, how, documentIds, ctx.principalId);
+  if (!result.ok) return { ok: false, code: "STEP_PROVIDE_REFUSED", message: result.reason };
+  requestTaskPass(ctx);
   return { ok: true };
 }
 

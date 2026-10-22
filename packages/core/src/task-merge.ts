@@ -169,6 +169,41 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
 function keeperOrNone(tasks: MergeTask[]): MergeTask | undefined { return tasks.length ? keeperOf(tasks) : undefined; }
 
 /**
+ * Tasks that read the same but serve different milestones (2026-10-22, the owner: two 「汇集 ECE 548 复习材料」, one per exam, are two
+ * pieces of work and stay two — their names must say which exam). For every set of open tasks on one line and project whose titles are
+ * the same once normalized and that serve milestones the merge keeps apart, each title gets its milestone's scope (`milestoneScope`)
+ * unless it already names it. Returns only the titles that change.
+ */
+export function scopeRenames(tasks: readonly MergeTask[], milestoneTitles: ReadonlyMap<string, string>): Array<{ id: string; title: string; scope: string }> {
+  const groups = new Map<string, MergeTask[]>();
+  for (const task of tasks) if (KEEPABLE.has(task.state) && task.milestoneId) {
+    const key = `${task.identityId}|${task.projectId}|${normalizeTaskTitle(task.title)}`;
+    groups.set(key, [...(groups.get(key) ?? []), task]);
+  }
+  const out: Array<{ id: string; title: string; scope: string }> = [];
+  for (const members of groups.values()) {
+    if (new Set(members.map((task) => task.milestoneId)).size < 2) continue;
+    for (const task of members) {
+      const scope = milestoneScope(milestoneTitles.get(task.milestoneId) ?? "", task.milestoneDeadline);
+      if (!scope || squash(task.title).includes(squash(scope))) continue;
+      out.push({ id: task.id, title: `${task.title}（${scope}）`, scope });
+    }
+  }
+  return out;
+}
+const squash = (text: string) => text.replace(/[\s\p{P}\p{S}]+/gu, "").toLowerCase();
+/**
+ * The short name of what a milestone is: its title without the course code and without the target that follows (「ECE 548 期中考试 1 达到
+ * A− 支撑线」 → 「期中考试 1」); its deadline (「10/27 截止」) when nothing short is left.
+ */
+export function milestoneScope(title: string, deadline = ""): string {
+  const head = title.replace(COURSE, "").split(/达到|达成|拿到|取得|完成|提交|通过|支撑|[，,:：;；(（≥]/)[0]!.trim();
+  if (head && head.length <= 12) return head;
+  const day = /^\d{4}-(\d{2})-(\d{2})/.exec(deadline);
+  return day ? `${Number(day[1])}/${Number(day[2])} 截止` : "";
+}
+
+/**
  * Checked before a new task is kept (the owner's direction of 2026-10-15: planning should not write a task the board already has; the
  * daily merge is only the backstop). The open task `candidate` is the same work as, by the same rules the daily merge uses — the closest
  * one when several match. A pair the rules leave unsure is not stopped here: it is created and left to the daily merge and its reviewer.
