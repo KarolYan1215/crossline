@@ -27,11 +27,15 @@ export const CONTEXT_BUDGETS = {
   analysisPassage: 700,
   /** Backplanner and milestone architect: a line's or a milestone's passages as excerpts. */
   excerpts: 3_000,
-  excerpt: 280
+  excerpt: 280,
+  /** How much of a ledger entry an index line carries; a longer one ends in 「…」 and is read whole through `read_ledger`. */
+  ledgerSummary: 60
 } as const;
 
 /** What the lookups may return in one run, summed: past it they say so and the model plans with what it has. */
 export const MATERIAL_TOOL_BUDGET = 30_000;
+/** What `read_ledger` may return in one run, summed (token-economy.md §2). */
+export const LEDGER_READ_BUDGET = 8_000;
 
 export type TextChunk = { start: number; text: string };
 

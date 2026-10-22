@@ -1,8 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { CHATGPT_EXHAUSTED_SETTING } from "@crossline/core";
+import { CHATGPT_EXHAUSTED_SETTING, QUOTA_SAVER_SETTING } from "@crossline/core";
 import { CrosslineStore, SPONSOR_SETTING } from "@crossline/db";
 vi.mock("server-only", () => ({}));
-import { backgroundOverview, setBackgroundPaused } from "./background";
+import { backgroundOverview, setBackgroundPaused, setQuotaSaver } from "./background";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
@@ -28,6 +28,16 @@ test("each kind's last run and week come from the model usage record; pausing on
   expect(backgroundOverview(TEST_CTX, now).kinds.filter((item) => item.paused).map((item) => item.kind)).toEqual(["tutorials", "assistant"]);
   expect(setBackgroundPaused(TEST_CTX, "tutorials", false)).toEqual({ ok: true });
   expect(setBackgroundPaused(TEST_CTX, "nope" as never, true)).toEqual({ ok: false, code: "BACKGROUND_KIND_UNKNOWN" });
+});
+
+test("节省额度 is on by default and is turned off and on again as one setting", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  expect(backgroundOverview(TEST_CTX).saver).toBe(true);
+  expect(setQuotaSaver(TEST_CTX, false)).toEqual({ ok: true });
+  expect(store.getSetting(ws, QUOTA_SAVER_SETTING)).toBe("off");
+  expect(backgroundOverview(TEST_CTX).saver).toBe(false);
+  setQuotaSaver(TEST_CTX, true);
+  expect(backgroundOverview(TEST_CTX).saver).toBe(true);
 });
 
 test("ChatGPT spent and the developer's model standing in is said with when ChatGPT comes back; a pause, or no sponsorship, says nothing of it", () => {

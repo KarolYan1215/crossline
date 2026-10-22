@@ -21,7 +21,7 @@ import { MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA } from "./miles
 import { MILESTONE_PLAN_SCHEMA } from "./milestone-plan";
 import { MILESTONE_RISK_SCHEMA } from "./milestone-risk";
 import { MINE_SKILL_SCHEMA } from "./mine-skill";
-import { PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA } from "./public-skills";
+import { PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA } from "./public-skills";
 import { ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA } from "./onboarding-turn-schema";
 import { PLAN_EXPLAINER_OUTPUT_SCHEMA } from "./plan-explainer-schema";
 import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA } from "./portrait";
@@ -69,7 +69,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-material-writer": { label: "教程写作", schemas: ["NODE_WRITEUP_SCHEMA"] },
   "crossline-step-planner": { label: "步骤拆分", schemas: ["STEP_PLAN_SCHEMA"] },
   "crossline-archetype-curator": { label: "任务类型整理", schemas: ["ARCHETYPE_CURATION_SCHEMA"], webSearch: true },
-  "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA", "PUBLIC_SKILL_REVIEW_SCHEMA", "TASK_MERGE_REVIEW_SCHEMA"] },
+  "crossline-validation-reviewer": { label: "复核", schemas: ["VALIDATION_REVIEW_SCHEMA", "PUBLIC_SKILL_REVIEW_SCHEMA", "PUBLIC_SKILL_BATCH_REVIEW_SCHEMA", "TASK_MERGE_REVIEW_SCHEMA"] },
   "crossline-progress-judge": { label: "进度判断", schemas: ["PROGRESS_ASSESSMENT_SCHEMA"] },
   "crossline-concierge": { label: "输入框", schemas: ["CONCIERGE_SCHEMA"], tools: true },
   "crossline-task-titler": { label: "任务命名", schemas: ["TASK_TITLES_SCHEMA"] },
@@ -161,7 +161,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, MAIL_TRIAGE_SCHEMA, MAIL_REPLY_DRAFT_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, ENERGY_ADVICE_REVIEW_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, RECORDING_DIGEST_SCHEMA, GOAL_SPLIT_SCHEMA,
   MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MILESTONE_RISK_SCHEMA, MINE_SKILL_SCHEMA,
   ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
-  VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA
+  VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */
@@ -250,13 +250,22 @@ const LEGACY_CASES: Record<string, string> = { ONBOARDING_TURN_SCHEMA: "ONBOARDI
  */
 export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA", AUTOMATION_PLAN_SCHEMA: "CONCIERGE_SCHEMA",
   // A reply draft: a few short strings, a long text and a short list of strings, like a tutorial step's write-up.
-  MAIL_REPLY_DRAFT_SCHEMA: "NODE_WRITEUP_SCHEMA" };
+  MAIL_REPLY_DRAFT_SCHEMA: "NODE_WRITEUP_SCHEMA",
+  // Several public-skill reviews in one answer (2026-10-21): the single review's object, in a list keyed by id.
+  PUBLIC_SKILL_BATCH_REVIEW_SCHEMA: "PUBLIC_SKILL_REVIEW_SCHEMA" };
 const caseRuns = (record: ConformanceRecord) => {
   const runs = record.runs.flatMap((run) => LEGACY_CASES[run.caseId] ? LEGACY_CASES[run.caseId]!.split("|").map((caseId) => ({ ...run, caseId })) : [run]);
   const proxied = Object.entries(SCHEMA_PROXIES).filter(([schema]) => !runs.some((run) => run.caseId === schema))
     .flatMap(([schema, proxy]) => runs.filter((run) => run.caseId === proxy).map((run) => ({ ...run, caseId: schema })));
   return [...runs, ...proxied];
 };
+
+/** The share of this Skill's schema runs that needed a repair, on this record; undefined when none of its schemas ran. */
+export function skillRepairRate(record: ConformanceRecord, skill: string): number | undefined {
+  const schemas = SKILL_NEEDS[skill]?.schemas ?? [];
+  const runs = caseRuns(record).filter((run) => schemas.includes(run.caseId));
+  return runs.length ? runs.filter((run) => run.repairs > 0).length / runs.length : undefined;
+}
 
 /**
  * Whether this record shows the model calling a function when asked to (the tools case ran and passed). A Skill that is better with

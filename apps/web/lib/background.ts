@@ -1,5 +1,5 @@
 import "server-only";
-import { BACKGROUND_BLOCKER, BACKGROUND_KINDS, CHATGPT_EXHAUSTED_SETTING, chatgptExhausted, BACKGROUND_PAUSED, backgroundKindOf, degradedService, engagementTier, pausedKinds, type AccessContext, type BackgroundKind, type Engagement } from "@crossline/core";
+import { BACKGROUND_BLOCKER, BACKGROUND_KINDS, CHATGPT_EXHAUSTED_SETTING, chatgptExhausted, BACKGROUND_PAUSED, QUOTA_SAVER_SETTING, backgroundKindOf, degradedService, engagementTier, pausedKinds, quotaSaverOn, type AccessContext, type BackgroundKind, type Engagement } from "@crossline/core";
 import { isPaused, listAgentTasks, setPaused, sponsorshipOf, type CrosslineStore } from "@crossline/db";
 import { getStore, readSchedulePreferences } from "./crossline";
 
@@ -15,6 +15,8 @@ export type BackgroundOverview = {
     /** Of the week's input tokens, the share read from the provider's prompt cache (cheaper than new input); null with no input. */
     weekCacheShare: number | null }>;
   running: Array<{ taskId: string; title: string; startedAt: string }>;
+  /** 节省额度 (docs/token-economy.md §2.3): on unless the person turned it off. No figures go with it. */
+  saver: boolean;
   /** Background work paused for the quota (`BACKGROUND_BLOCKER`): why, until when, and what still works meanwhile. */
   quotaPause?: { message: string; resetsAt?: string; works: string[]; paused: string[] };
   /** The account's own ChatGPT quota is spent and the developer's model carries on until it resets (`CHATGPT_EXHAUSTED_SETTING`). */
@@ -41,6 +43,7 @@ export function backgroundOverview(ctx: AccessContext, now = new Date()): Backgr
     }),
     running: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "running")
       .map((task) => ({ taskId: task.taskId, title: task.title, startedAt: task.requestedAt })),
+    saver: quotaSaverOn(store.getSetting(ctx.workspaceId, QUOTA_SAVER_SETTING)),
     ...quotaPauseOf(store.getSetting(ctx.workspaceId, BACKGROUND_BLOCKER)),
     ...quotaFallbackOf(store, ctx.workspaceId, now)
   };
@@ -65,6 +68,12 @@ export function setBackgroundPaused(ctx: AccessContext, kind: BackgroundKind, pa
   const current = pausedKinds(store.getSetting(ctx.workspaceId, BACKGROUND_PAUSED));
   if (paused) current.add(kind); else current.delete(kind);
   store.setSetting(ctx.workspaceId, BACKGROUND_PAUSED, JSON.stringify([...current]));
+  return { ok: true };
+}
+
+/** 节省额度 on or off; the worker reads it on its next pass. */
+export function setQuotaSaver(ctx: AccessContext, on: boolean): { ok: true } {
+  getStore().setSetting(ctx.workspaceId, QUOTA_SAVER_SETTING, on ? "on" : "off");
   return { ok: true };
 }
 

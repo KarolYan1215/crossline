@@ -3,11 +3,12 @@ import { autoApproveEligible } from "./auto-approval";
 import { ownerOf } from "./owner";
 import type { AnalysisDate, AnalysisWaitingOn } from "@crossline/core";
 import { runCodexAnalysis, type CodexRpcBoundary } from "@crossline/codex";
-import { ANALYSIS_CONTEXT_VERSION, APPROVED_MILESTONES_LIMIT, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
-import { CrosslineStore, type StoredCapture } from "@crossline/db";
+import { ANALYSIS_CONTEXT_VERSION, APPROVED_MILESTONES_LIMIT, TASK_INDEX_SEPARATOR, validateAnalysisContext, type AnalysisContext } from "@crossline/core";
+import { CrosslineStore, createRefBook, withRef, type RefBook, type StoredCapture } from "@crossline/db";
 import { identityLines } from "./lines";
 import { existingTasksFor, foldNewTask } from "./duplicate-guard";
 import { analysisMaterialInputs } from "./material-context";
+import { ledgerLookup, ledgerSummary, READ_LEDGER_INSTRUCTIONS, type LedgerEntry } from "./ledger-index";
 
 export type AnalysisOutcome = { id: string; state: string; attempt: number; audit: StoredCapture["audit"] };
 
@@ -54,6 +55,99 @@ export function uploadedMaterialInputs(store: CrosslineStore, workspaceId: strin
   return analysisMaterialInputs(store, workspaceId, query);
 }
 
+/**
+ * The capture analysis's context, whole. Every line is offered, with or without an approved milestone: choosing between them is the
+ * Skill's job, and work that serves no milestone yet is filed under its line unbound (an empty milestoneId), not held until a milestone
+ * is approved — that hold made a new account's first day a dead end. Approved milestones are offered for binding when they exist.
+ */
+export function buildAnalysisContext(store: CrosslineStore, workspaceId: string, capture: Pick<StoredCapture, "id" | "title" | "context">,
+  book?: RefBook): AnalysisContext {
+  const packs = identityLines(store, workspaceId);
+  if (!packs.length) throw new Error("ANALYSIS_IDENTITY_CONTEXT_REQUIRED");
+  const lines = new Set(packs.map((p) => p.id));
+  const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  // Nearest deadline first, past ones and undated ones after, at most what the context takes.
+  const today = localToday(store, workspaceId);
+  const order = (id: string) => { const day = deadlines.get(id) ?? ""; return day >= today ? `0${day}` : day ? `1${day}` : "2"; };
+  const milestones = store.listMilestones(workspaceId).filter((m) => m.status === "approved" && m.projectId && lines.has(m.identityId))
+    .sort((a, b) => order(a.id).localeCompare(order(b.id))).slice(0, APPROVED_MILESTONES_LIMIT);
+  const attachments = store.listCaptureAttachments(workspaceId, capture.id);
+  return validateAnalysisContext({
+    version: ANALYSIS_CONTEXT_VERSION, today, capture: { title: capture.title, context: capture.context },
+    approvedMilestones: milestones.map((m) => ({ id: m.id, identityId: m.identityId, projectId: m.projectId!, title: m.title, version: m.version,
+      hasSuccessCriteria: m.verifiability !== "unstated", deadline: deadlines.get(m.id) ?? "" })),
+    // The note the person attached to the capture, handed over as what it is. It was hardcoded
+    // empty, so the Skill could never see any material the user supplied and correctly refused
+    // every capture that depended on some. Passing it does not assert it IS the material: a note
+    // that merely says where the notes live is still not the notes, and the Skill judges that.
+    // Names only, never file bytes — the Skill contract requires every quote to be verbatim from
+    // supplied text, and attachment content is not decoded or sent to the model at all. This just
+    // lets it know material was actually supplied somewhere, instead of always reading as none.
+    availableInputs: [
+      ...uploadedMaterialInputs(store, workspaceId, `${capture.title} ${capture.context}`),
+      ...(capture.context.trim() ? [{ id: "capture-context", text: capture.context.trim() }] : []),
+      ...(attachments.length ? [{ id: "capture-attachments", text: `用户上传了 ${attachments.length} 份附件，文件名：${attachments.map((item) => item.fileName).join("、")}` }] : [])
+    ],
+    identityPacks: packs.map((p) => ({ id: p.id, version: 1, summary: `${p.label}; workflows: ${p.workflowTemplates.join(", ")}; evidence: ${p.evidencePolicy}` })),
+    referenceClass: buildReferenceClass(store, workspaceId),
+    relations: store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved").slice(0, 40)
+      .map((relation) => ({ fromMilestoneId: relation.fromMilestoneId, toMilestoneId: relation.toMilestoneId, kind: relation.kind,
+        explanation: relation.explanation ?? "" })),
+    // What the person has corrected or shown about how they work, across every line (the capture's line is not known yet).
+    personalPreferences: book
+      ? store.preferenceEntries(workspaceId, packs.map((pack) => pack.id), 20).map((entry) => withRef(book.pref(entry), entry.text))
+      : store.preferenceLines(workspaceId, packs.map((pack) => pack.id), 20),
+    // The interview's conclusions for planning (how the person works, drains, direction): the estimate and the split are this person's.
+    personProfile: personProfileFor(store, workspaceId),
+    // The open tasks already on the board, so the same work is not written twice and an addition says what it adds to.
+    existingTasks: existingTasksFor(store, workspaceId),
+    policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
+  });
+}
+
+export const LEDGER_INSTRUCTIONS = "The open tasks are `taskIndex` (one line each: id｜title｜line/project｜due｜state｜the description's opening, "
+  + "left out when it only repeats the title) and `existingTasks` is empty; the `relations[].explanation` (each begins with its id, r1 …) and the "
+  + "`personProfile` lines (each begins with its id, p1 …) are cut to their opening. read_ledger reads entries whole — an open task by its id "
+  + "(its full description, due day and steps), a link by its r-id, a profile line by its p-id. Read an open task before naming it in "
+  + "extendsTaskId unless its index line already settles it. " + READ_LEDGER_INSTRUCTIONS;
+
+/**
+ * The analysis context as an index for a route that calls functions (token-economy.md §2): the open tasks as one line each in `taskIndex`
+ * (whose ids `extendsTaskId` may name, `existingTaskIds`) instead of objects, the links' explanations and the profile lines cut to their
+ * first 60 characters, all read whole through `read_ledger`. Quotes are still checked against the capture and `availableInputs`, which stay
+ * whole. The context stored with the proposal is the whole one.
+ */
+export function analysisLedger(context: AnalysisContext, store?: CrosslineStore, workspaceId?: string) {
+  const steps = new Map(store && workspaceId ? store.listStepPlans(workspaceId).map((plan) => [plan.workOrderId, plan.steps.map((step) => step.title)]) : []);
+  const orders = new Map(store && workspaceId ? store.listWorkOrders(workspaceId).map((order) => [order.id, order]) : []);
+  const entries: LedgerEntry[] = [];
+  const flat = (text: string) => text.replace(/[\s。.，,]+/g, "");
+  const taskIndex = (context.existingTasks ?? []).map((task) => {
+    const order = orders.get(task.id);
+    const plan = steps.get(task.id) ?? [];
+    entries.push({ id: task.id, label: `任务「${task.title}」`, text: [order?.intent ?? task.intent, task.dueDate ? `截止 ${task.dueDate}` : "", `状态 ${task.state}`,
+      plan.length ? `步骤：${plan.join("；")}` : ""].filter(Boolean).join("｜") });
+    // A description that says no more than the title is left out (still readable whole): on the real board many do.
+    const repeats = flat(task.title).includes(flat(task.intent));
+    return [task.id, ledgerSummary(task.title), `${task.lineId}/${task.projectId}`, task.dueDate ? `截止 ${task.dueDate}` : "无截止", task.state,
+      ...(repeats ? [] : [ledgerSummary(task.intent)])].join(TASK_INDEX_SEPARATOR);
+  });
+  const relations = (context.relations ?? []).map((relation, index) => {
+    const id = `r${index + 1}`;
+    entries.push({ id, label: `跨线关系 ${relation.fromMilestoneId} → ${relation.toMilestoneId}（${relation.kind}）`, text: relation.explanation || "（无说明）" });
+    return { ...relation, explanation: `${id} ${ledgerSummary(relation.explanation)}`.trim() };
+  });
+  const profile = (context.personProfile ?? []).map((line, index) => {
+    const id = `h${index + 1}`;
+    entries.push({ id, label: "画像", text: line });
+    return `${id} ${ledgerSummary(line)}`;
+  });
+  const indexed: AnalysisContext = validateAnalysisContext({ ...context, existingTasks: [], taskIndex, relations, personProfile: profile });
+  const lookup = ledgerLookup(entries);
+  return { indexed, tools: lookup.tools,
+    stats: (mode: "tools" | "fallback") => ({ contextChars: JSON.stringify(mode === "tools" ? indexed : context).length, ...lookup.stats() }) };
+}
+
 export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string, cwd: string) {
   // A new worker cannot safely replay an interrupted turn. Retain its IDs for audit.
   for (const capture of store.listCaptures(workspaceId).filter((item) => item.state === "analyzing")) {
@@ -84,59 +178,29 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
     const claimed = store.transitionWorkOrder(workspaceId, id, { type: "analysis.proposed", proposalId: id }, `analysis:${id}:${attempt}:start`, { attempt });
     if (!claimed.changed) return outcome(id);
     try {
-      // Every line is offered, with or without an approved milestone: choosing between them is the Skill's job, and work that
-      // serves no milestone yet is filed under its line unbound (an empty milestoneId), not held until a milestone is approved —
-      // that hold made a new account's first day a dead end. Approved milestones are offered for binding when they exist.
-      const packs = identityLines(store, workspaceId);
-      if (!packs.length) throw new Error("ANALYSIS_IDENTITY_CONTEXT_REQUIRED");
-      const lines = new Set(packs.map((p) => p.id));
-      const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
-      // Nearest deadline first, past ones and undated ones after, at most what the context takes.
-      const today = localToday(store, workspaceId);
-      const order = (id: string) => { const day = deadlines.get(id) ?? ""; return day >= today ? `0${day}` : day ? `1${day}` : "2"; };
-      const milestones = store.listMilestones(workspaceId).filter((m) => m.status === "approved" && m.projectId && lines.has(m.identityId))
-        .sort((a, b) => order(a.id).localeCompare(order(b.id))).slice(0, APPROVED_MILESTONES_LIMIT);
-      const context = validateAnalysisContext({
-        version: ANALYSIS_CONTEXT_VERSION, today: localToday(store, workspaceId), capture: { title: capture.title, context: capture.context },
-        approvedMilestones: milestones.map((m) => ({ id: m.id, identityId: m.identityId, projectId: m.projectId!, title: m.title, version: m.version,
-          hasSuccessCriteria: m.verifiability !== "unstated", deadline: deadlines.get(m.id) ?? "" })),
-        // The note the person attached to the capture, handed over as what it is. It was hardcoded
-        // empty, so the Skill could never see any material the user supplied and correctly refused
-        // every capture that depended on some. Passing it does not assert it IS the material: a note
-        // that merely says where the notes live is still not the notes, and the Skill judges that.
-        // Names only, never file bytes — the Skill contract requires every quote to be verbatim from
-        // supplied text, and attachment content is not decoded or sent to the model at all. This just
-        // lets it know material was actually supplied somewhere, instead of always reading as none.
-        availableInputs: [
-          ...uploadedMaterialInputs(store, workspaceId, `${capture.title} ${capture.context}`),
-          ...(capture.context.trim() ? [{ id: "capture-context", text: capture.context.trim() }] : []),
-          ...(store.listCaptureAttachments(workspaceId, id).length
-            ? [{ id: "capture-attachments", text: `用户上传了 ${store.listCaptureAttachments(workspaceId, id).length} 份附件，文件名：${
-                store.listCaptureAttachments(workspaceId, id).map((item) => item.fileName).join("、")}` }]
-            : [])
-        ],
-        identityPacks: packs.map((p) => ({ id: p.id, version: 1, summary: `${p.label}; workflows: ${p.workflowTemplates.join(", ")}; evidence: ${p.evidencePolicy}` })),
-        referenceClass: buildReferenceClass(store, workspaceId),
-        relations: store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved").slice(0, 40)
-          .map((relation) => ({ fromMilestoneId: relation.fromMilestoneId, toMilestoneId: relation.toMilestoneId, kind: relation.kind,
-            explanation: relation.explanation ?? "" })),
-        // What the person has corrected or shown about how they work, across every line (the capture's line is not known yet).
-        personalPreferences: store.preferenceLines(workspaceId, packs.map((pack) => pack.id), 20),
-        // The interview's conclusions for planning (how the person works, drains, direction): the estimate and the split are this person's.
-        personProfile: personProfileFor(store, workspaceId),
-        // The open tasks already on the board, so the same work is not written twice and an addition says what it adds to.
-        existingTasks: existingTasksFor(store, workspaceId),
-        policy: { tools: [], externalSideEffects: false, humanApprovalRequired: true }
-      });
+      // Short ids for the preferences given (「[p3]」), so the proposal says which it rested on (`usedRefs`); counted when it takes effect.
+      const book = createRefBook();
+      const context = buildAnalysisContext(store, workspaceId, capture, book);
       store.updateAnalysisAudit(workspaceId, id, { contextVersion: context.version });
-      const result = await runCodexAnalysis(client, context, { skillName: "crossline:crossline-automation-stripper", cwd, ...(signal ? { signal } : {}),
+      // With lookups (a route that calls functions) the open tasks, the cross-line links and the planning profile go in as one short line
+      // each and the model reads what it needs whole through read_ledger; elsewhere the context as built, whole (token-economy.md §2).
+      const ledger = analysisLedger(context, store, workspaceId);
+      let ledgerMode: "tools" | "fallback" = "fallback";
+      const result = await runCodexAnalysis(client, ledger.indexed, { skillName: "crossline:crossline-automation-stripper", cwd, ...(signal ? { signal } : {}),
+        optionalTools: { tools: ledger.tools, instructions: LEDGER_INSTRUCTIONS, withoutTools: () => context, onMode: (mode) => { ledgerMode = mode; } },
         onAudit: (audit) => store.updateAnalysisAudit(workspaceId, id, audit) });
+      console.info(JSON.stringify({ type: "context.selected", skill: "crossline:crossline-automation-stripper", captureId: id, mode: ledgerMode,
+        ...ledger.stats(ledgerMode) }));
       if (!result.ok) {
         store.transitionWorkOrder(workspaceId, id, { type: "blocked", reason: result.blocker.code }, `analysis:${id}:${attempt}:finish`, { audit: { ...result.audit, blocker: result.blocker } });
       } else {
         store.transitionWorkOrder(workspaceId, id, { type: "analysis.accepted", approvalId: "schema-validation-only" }, `analysis:${id}:${attempt}:finish`, {
           proposal: result.proposal, context, audit: { ...result.audit, contextVersion: context.version }
         });
+        // What the proposal cited, resolved now while the ids still mean something; `plan.approved` counts it (store) once it takes effect.
+        const usedRefKeys = book.resolve(result.proposal.usedRefs);
+        const promoted = usedRefKeys.length ? store.listWorkOrders(workspaceId).find((item) => item.id === id) : undefined;
+        if (promoted) store.saveWorkOrder({ ...promoted, payload: { ...(promoted.payload as object), usedRefKeys } });
         recordWaitingAndDates(store, workspaceId, id);
         // Work the board already has is folded into that task instead of standing beside it (after the dates, so the earlier due day carries).
         if (!foldNewTask(store, workspaceId, id, result.proposal.extendsTaskId ?? "")) autoApproveEligible(store, workspaceId, [id]);

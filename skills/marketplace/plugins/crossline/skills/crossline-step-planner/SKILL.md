@@ -25,6 +25,7 @@ Return raw JSON only: `{archetypeId, quantity, rationale, importance, completion
 - `materials` — the person's material chosen for this task (syllabi, lecture plans, problem sets, briefs, data descriptions), cut into passages of about 800 characters: `files[]` `{doc: "doc-N", name, project, passages, own}` (`own`: the task's own file), `passages[]` `{id: "c123", doc, at: "3/12", text}` in full, and, when the functions below are offered, `candidates[]` `{id, doc, at, line}` with only their opening line.
 - The functions `search_material(query, scope)` (`task` | `line` | `all`) and `read_chunk(id)`, when offered: read the candidates the plan rests on and search for what the passages do not show (the lecture list up to an exam, the problem set, the rubric, the submission rule) before counting units. Read what you need, not everything; a passage you did not read is not evidence. Without the functions, `passages` is all there is.
 - `person` — `facts[]` (what the person confirmed: background and level, the course's grading and target, what they said about this project; `（假设）` marks an assumption), `strengths[]`, `answers[]` (their answers to this task's earlier questions: binding), `profile[]` (below).
+- When the function `read_ledger(ids)` is offered, `person.facts` is an index: one line per fact, `f3a9c1 slot：the value's opening` for the task's own project and for facts naming its terms, and `f3a9c1 [project] slot：…` (the slot alone) for the line's other facts. A line ending in 「…」 is cut. Read it whole with `read_ledger` (several ids in one call) when it could change the plan — the grading, the target, a constraint, what the person said they already master — and plan on the index alone for the rest. A line without 「…」 is already whole; do not read it. The reads share a small budget per run. Without the function, `facts` are whole.
 - `person.profile[]` is the interview's conclusions for planning, one short line each: how the person works (peak hours, how long they can go, what drains them, how they react to criticism or friction), what they are good at and enjoy, how their lines are weighed, what they value most and where they are headed. Use it to size, order and phrase the work for this person (put demanding work where they are strong, keep draining work short and early, plan a check-in where their pattern says they tend to stall); never quote it back as a new fact and never let it override a hard date or a file.
 - `projectDates[]` — the project's dated items (exams, homework due, releases).
 - `archetypes[]` — the work structures to choose from: `{id, label, roles, requires, firstBefore, endsWith, proportions, quantify, acceptance, tickHint, agentRoles, recurring}`.
@@ -121,6 +122,10 @@ Never invent facts about the person, the course or the material: mark an assumpt
 ## Personal preferences
 
 `personalPreferences` lists what this person has corrected or shown about how they work. Follow them unless one contradicts a hard fact; where two conflict, the later one wins.
+
+## Lessons and `usedRefs`
+
+`lessons` (at most five) are what earlier work of this line and kind taught: a result the person sent back and why, a hand-in judged 「部分符合」 and the rule it broke, a step that took far longer than its cautious estimate, an error this planner repeated. Apply each to this plan where it fits (a step of that kind estimated looser, the rule kept); never quote them in the plan. Facts, preferences and lessons each carry a short id in brackets (`[f3]`, `[p1]`, `[l2]`): list in `usedRefs` the ids of those the plan really rests on, `[]` when none. Do not list an id only because it was given.
 
 ## Language
 

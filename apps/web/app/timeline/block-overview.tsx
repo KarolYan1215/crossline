@@ -8,6 +8,7 @@ import { LineTag, Tag } from "../ui/tag";
 import { dayLabel } from "../ui/controls";
 import { TaskActions } from "../task/task-actions";
 import { TaskDialog } from "../task/task-dialog";
+import { Conversation } from "../chat/conversation";
 import { TaskQuickEdit } from "../task/quick-edit";
 import { ImpactCard, useImpact } from "../task/impact";
 import { shiftDay, type TimelineItem } from "./model";
@@ -73,7 +74,8 @@ const slotText = (item: TimelineItem) => `${dayLabel(item.day)} ${item.start}–
  * The block the person picked (or, with nothing picked, the next one): where it sits — 主线 · 里程碑, the step and the task's progress,
  * the due date and this step's duration (both edited in place and previewed), what falls to the person, the task's next block — and
  * what can be done from here: start, pause, resume (a pencilled-in block is made formal first), 完成并提交材料, 交给 Agent when the system
- * can do the step, and 推迟 to tomorrow or a chosen day, previewed. `compact` is the 下一项 form: the line, the task, the time, the start.
+ * can do the step, and 推迟 to tomorrow or a chosen day, previewed; under them, the one input box with this task and step as its page.
+ * `compact` is the 下一项 form: the line, the task, the time, the start.
  */
 export function BlockOverview({ item, items, today, labels, details, compact = false, heading, onClose }: {
   item: TimelineItem; items: TimelineItem[]; today: string; labels: LineLabels; details?: Record<string, TaskDetail> | undefined;
@@ -153,6 +155,11 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
       {impact.error && <small role="status">{impact.error}</small>}
     </div>}
     {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()} onCancel={impact.cancel} />}
+    {/* The one input box with this task (and this block's step) as its page; keyed by the task so a draft never follows another block. */}
+    {detail && !compact && <div className="dq-entry">
+      <Conversation key={detail.id} variant="block" page={{ kind: "task", entityId: detail.id, ...(step ? { stepId: step.id } : {}) }}
+        placeholder="关于这项任务：改期、拆细、提问……" />
+    </div>}
     {detail && !compact && <TaskDialog detail={detail} open={open} onOpenChange={setOpen} />}
     {detail && completing && <CompleteDialog open={completing} onOpenChange={setCompleting} workOrderId={detail.id} title={detail.title} state={detail.state}
       stepId={step?.id} stepTitle={step?.title} otherSteps={otherOpenSteps(step?.id, steps)} />}

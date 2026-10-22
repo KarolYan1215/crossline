@@ -6,12 +6,13 @@ import {
   FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, type FinerSplit, type StepTrouble, type SuccessCriterion
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { aiToolsFor, listAgentTasks, projectAgentOutputs, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
+import { aiToolsFor, createRefBook, lessonsFor, listAgentTasks, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
 import { startingWithin } from "./schedule-window";
-import { relevantFacts, selectMaterial } from "./material-context";
+import { factLedger, relevantFacts, selectMaterial } from "./material-context";
+import { mergeTools, READ_LEDGER_INSTRUCTIONS } from "./ledger-index";
 
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
 const PLANNER = "crossline:crossline-step-planner";
@@ -41,7 +42,7 @@ export function taskQuery(store: CrosslineStore, workspaceId: string, order: Sto
  * file that match it (`selectMaterial`), which the model reads further through `search_material`/`read_chunk`; the project's and the
  * line's facts ranked by the task's terms within a budget (`relevantFacts`); the project's dated items; earlier answers.
  */
-export function planningContext(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder) {
+export function planningContext(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder, book?: RefBook) {
   const project = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === order.projectId);
   const query = taskQuery(store, workspaceId, order);
   const material = selectMaterial(store, { query, core: taskQuery(store, workspaceId, order, { core: true }), workspaceId, projectId: order.projectId,
@@ -50,7 +51,10 @@ export function planningContext(store: CrosslineStore, workspaceId: string, orde
   // The project's and the line's facts, the task's own project first and then by the task's terms; how the person works comes whole in
   // `profile` below (planningProfile), so a line with a hundred facts no longer pushes it out.
   const person = relevantFacts(facts, { query, projectId: order.projectId, identityId: order.identityId },
-    { exclude: (fact) => fact.slot.startsWith(STEP_ANSWER_SLOT) });
+    { exclude: (fact) => fact.slot.startsWith(STEP_ANSWER_SLOT), ...(book ? { ref: book.fact } : {}) });
+  // The same facts as an index read through read_ledger, for a route that calls functions (token-economy.md §2); `person` is the fallback.
+  const factIndex = factLedger(facts, { query, projectId: order.projectId, identityId: order.identityId },
+    { exclude: (fact) => fact.slot.startsWith(STEP_ANSWER_SLOT), ...(book ? { ref: book.fact } : {}) });
   const answers = facts.filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT) && (fact.projectId === order.projectId || fact.projectId === ""))
     .map((fact) => fact.value.slice(0, 400));
   const decided = new Map(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => [event.entityId, event.payload as { superseded?: boolean; included?: string[] }]));
@@ -63,7 +67,7 @@ export function planningContext(store: CrosslineStore, workspaceId: string, orde
       .map((item) => `${item.date}${item.startTime ? ` ${item.startTime}` : ""} ${item.title}`);
   });
   const profile = (() => { try { return JSON.parse(store.getSetting(workspaceId, "profile.model") ?? "{}") as { energyMap?: Array<{ activity: string; skill: string; love: string }> }; } catch { return {}; } })();
-  return { material, documents: material.documents(), person, answers, dated: [...new Set(dated)].sort().slice(0, 40), profile: personProfileFor(store, workspaceId),
+  return { material, documents: material.documents(), person, factIndex, answers, dated: [...new Set(dated)].sort().slice(0, 40), profile: personProfileFor(store, workspaceId),
     strengths: (profile.energyMap ?? []).filter((item) => item.skill === "high").map((item) => item.activity).slice(0, 8) };
 }
 
@@ -253,8 +257,11 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     const done = (previous?.steps ?? []).filter((step) => step.status !== "planned");
     // Archetypes the curator learned for this workspace are offered beside the built-in ones and checked the same way.
     const learned = learnedArchetypes(store, workspaceId);
-    const grounding = planningContext(store, workspaceId, order);
+    // Short ids for the facts, preferences and lessons given (「[f3]」), so the plan says which it rested on (`usedRefs`).
+    const book = createRefBook();
+    const grounding = planningContext(store, workspaceId, order, book);
     const tools = aiToolsFor(store, workspaceId);
+    const lessons = lessonsFor(store, workspaceId, { lineId: order.identityId, archetypeId: previous?.archetypeId, skill: PLANNER });
     // Important work the person does themselves is researched first (the web is open for this run): its background and the best known
     // way to do it, the plan proposed on that basis, and only what the person alone can answer asked.
     const research = importantByRule(store, workspaceId, order) && (payload.humanCore ?? []).length > 0;
@@ -274,14 +281,18 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       materials: grounding.material.view(),
       // Who this is for: confirmed facts (their background and level, the course's grading and target, what they said about this
       // project), the activities they are good at, the project's dated items, and what they answered to this plan's earlier questions.
-      person: { facts: grounding.person, strengths: grounding.strengths, answers: grounding.answers, profile: grounding.profile },
+      // The workspace's profile and strengths before the project's facts and this plan's answers (the prompt cache). The facts are an
+      // index (id, slot, the opening of the value) read whole through read_ledger; on a route without lookups, whole.
+      person: { profile: grounding.profile, strengths: grounding.strengths, facts: grounding.factIndex.index, answers: grounding.answers },
       projectDates: grounding.dated,
       archetypes: [...ARCHETYPES, ...learned].map(archetypeBrief),
       // The AI tools the person works with (docs/skills-library.md §7): the assistant takes whole steps, the rest name the tool that
       // speeds them, and every estimate is the time with it.
       aiTools: tools.map(aiToolBrief),
       // Corrections and patterns the person has given: for this task, its line, or everything.
-      personalPreferences: store.preferenceLines(workspaceId, [order.identityId, `task:${order.id}`], 15),
+      personalPreferences: store.preferenceEntries(workspaceId, [order.identityId, `task:${order.id}`], 15).map((entry) => withRef(book.pref(entry), entry.text)),
+      // What earlier work of this line and kind taught (docs/token-economy.md §2): a returned result, a 「部分符合」, a step far over its estimate.
+      lessons: lessons.map((lesson) => withRef(book.lesson(lesson), lesson.text)),
       doneSteps: done.map((step) => ({ title: step.title, role: step.role, deliverable: step.deliverable })),
       // What the assistant already produced for this course or project: work that exists, not work to plan again.
       acceptedOutputs: existingOutputs(store, workspaceId, order),
@@ -295,20 +306,26 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     const extraSkills = await librarySkillsFor(client, store, workspaceId, order.identityId, { cwd, task: order.intent, ...(options.libraryDir ? { dir: options.libraryDir } : {}) });
     let materialMode: "tools" | "fallback" = "fallback";
     const result = await runCodexSkill<StepPlan>(client, input, { skillName: PLANNER, cwd, ...(extraSkills.length ? { extraSkills } : {}), redoOnRepair: true,
-      optionalTools: { tools: grounding.material.tools, onMode: (mode) => { materialMode = mode; },
+      optionalTools: { tools: mergeTools(grounding.material.tools, grounding.factIndex.tools), onMode: (mode) => { materialMode = mode; },
         instructions: "`materials.passages` are the passages that matched this task, in full; `materials.candidates` are more, by their opening line; "
           + "`materials.files` are the files they come from. Read the candidates you need with read_chunk(id), and find what is missing (a lecture "
-          + "list, the problem set, the rubric) with search_material before you count units. A unit quotes a passage you read, under that passage's doc id.",
-        withoutTools: (value) => ({ ...(value as object), materials: grounding.material.fallback() }) },
+          + "list, the problem set, the rubric) with search_material before you count units. A unit quotes a passage you read, under that passage's doc id. "
+          + "`person.facts` is an index of the person's facts for this task: an id, the slot, the value's opening. " + READ_LEDGER_INSTRUCTIONS,
+        withoutTools: (value) => ({ ...(value as object), materials: grounding.material.fallback(),
+          person: { ...(value as { person: object }).person, facts: grounding.person } }) },
       developerInstructions: "Write this task's steps as the crossline-step-planner Skill describes and return only the requested JSON. The steps are "
         + "what the person sees on the task and what the scheduler puts on the calendar. Read `materials` first and count the units from them, each quoting "
         + "its file verbatim. The person's steps are only the intellectual core (solving, deriving, deciding, writing, rehearsing), each one focused "
         + "session with a quantified done criterion and a firstAction of five minutes or less; collecting, listing and filing are the assistant's steps. "
         + "The rationale is a few short sentences for the person: what the plan rests on, never the input's keys, ids or how units were counted. "
-        + "Ask only what neither the material nor person.facts settles, with the likeliest option first."
-        + libraryInstruction(extraSkills)
+        + "Ask only what neither the material nor person.facts settles, with the likeliest option first. "
+        + "usedRefs lists the bracketed ids ([f3], [p1], [l2]) of the facts, preferences and lessons the plan really rests on, [] when none.",
+      // The prompt cache (docs/token-economy.md §2.5): what every plan of this workspace shares first, then the line's and the project's,
+      // then this task; what only this run is told comes after the input instead of in the developer instructions.
+      stableKeys: ["version", "archetypes", "aiTools", "person", "personalPreferences", "lessons", "projectDates", "milestone"],
+      runNote: (libraryInstruction(extraSkills)
         + (feedback ? " Apply the feedback: it is what the reviewer or the person asked to change; earlierFeedback still holds unless it contradicts it." : "")
-        + (research ? " research is true: search the web for this task's background and the best known way to do it before planning, as the Skill's research section says." : ""),
+        + (research ? " research is true: search the web for this task's background and the best known way to do it before planning, as the Skill's research section says." : "")).trim(),
       ...(research ? { allowWebSearch: true } : {}),
       outputSchema: stepPlanSchema(learned.map((archetype) => archetype.id)), prepareInput: (value) => value,
       validateOutput: (output) => {
@@ -326,7 +343,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
           return { ...shaped, units: (shaped.units ?? []).filter((unit) => !bad.has(unit.id)) }; } catch { return undefined; }
       },
       onAudit: () => {}, ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000 });
-    console.info(JSON.stringify({ type: "context.selected", skill: PLANNER, workOrderId, mode: materialMode, ...grounding.material.stats(materialMode) }));
+    console.info(JSON.stringify({ type: "context.selected", skill: PLANNER, workOrderId, mode: materialMode, ...grounding.material.stats(materialMode),
+      factChars: JSON.stringify((materialMode as "tools" | "fallback") === "tools" ? grounding.factIndex.index : grounding.person).length, ...grounding.factIndex.stats() }));
     if (!result.ok) {
       if (!/^(SKILL_|CODEX_)/.test(result.blocker.code)) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
         idempotencyKey: `task.steps_blocked:${workOrderId}:${Date.now()}`, type: "task.steps_blocked", entityId: workOrderId,
@@ -342,6 +360,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     // only the rest goes to the reviewer.
     const warnings = [...fixed.filter((warning) => !AUTO_FIXED.has(warning.code)), ...stepPlanWarnings(normalized, window, learned)];
     const saved = store.saveStepPlan(workspaceId, workOrderId, normalized, ownerOf(store, workspaceId), feedback ? "revised" : "planned");
+    // A saved plan is an answer that took effect: what it cited counts as used.
+    store.markUsed(workspaceId, book.resolve(result.output.usedRefs));
     // A task nobody judged the completion of yet (one from a course's dates, or written before the field) takes the planner's judgement;
     // one the analysis or backplanner already judged keeps theirs, and the person's own choice is `completionMode`, untouched here.
     const completion = readModelCompletion(result.output.completion);

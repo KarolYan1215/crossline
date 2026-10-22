@@ -47,6 +47,7 @@ export * from "./effectiveness";
 export * from "./plan-churn";
 export * from "./interview-quota";
 export * from "./sponsor";
+export * from "./quota-saver";
 import type { EvidenceQuestionTemplate } from "./milestone-templates";
 export type EnergyLevel = "low" | "medium" | "high";
 

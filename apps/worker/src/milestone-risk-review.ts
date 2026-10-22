@@ -103,6 +103,8 @@ export function createMilestoneRiskReviewer(store: CrosslineStore, workspaceId: 
         + "describes, and return only the requested JSON. The person sees each risk as a tag on the 主线 page before approving, and a medium or high risk "
         + "on an approved milestone is put to them as a question. One entry per milestone; `risks: []` when nothing follows from the dates, numbers, "
         + "criteria and competing milestones given. Each note is one clause of at most 60 characters that names the figure it rests on, never advice.",
+      // The prompt cache (docs/token-economy.md §2.5): the week's hours and the competing milestones before the ones under review and the date.
+      stableKeys: ["version", "weeklyHours", "others"],
       prepareInput: () => context,
       validateOutput: (output) => ({ milestones: [...validateMilestoneRisks(output, context)].map(([milestoneId, risks]) => ({ milestoneId, risks })) }),
       softAccept: (_rejection, output) => keepMilestoneRisks(output, context),

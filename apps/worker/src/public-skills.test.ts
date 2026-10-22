@@ -6,8 +6,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, allowSkillScripts, installedPublicFiles as installedFiles, readPublicSkills as readLibrary, removePublicSkill } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { SKILL_LIBRARY_SETTING, START_CONFIRMED_SETTING } from "@crossline/core";
-import { cleanPublicSkills, coverageDue, createPublicSkillInstaller, createSkillScout, fetchSkillDirectory, installPublicSkillFromLink, readLinkRequest, scoutDue,
-  wantPublicSkill, SKILL_SCOUT, type HttpGet } from "./public-skills";
+import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, fetchSkillDirectory, installPublicSkillFromLink, lineSetupDue, readLinkRequest, reviewBatches, scoutDue,
+  wantPublicSkill, SEARCH_REQUESTED, SKILL_SCOUT, type HttpGet } from "./public-skills";
 import { librarySkillsFor } from "./skill-library";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 
@@ -57,6 +57,10 @@ const repos: Record<string, Repo> = {
   "nolicense/skills": { license: null, commit: SHA, files: { "SKILL.md": skill("free") } },
   "collection/skills": { license: null, commit: SHA, files: { "skills/own/SKILL.md": skill("own"), "skills/own/LICENSE.txt": "Apache License\n Version 2.0, January 2004" } }
 };
+/** The reviewer's answer: one review, or one per candidate of a batch (`s1`…), all with the same verdict. */
+const review = (prompt: string, reasons: string[], verdict = "usable") => prompt.includes("public-skill-review-batch")
+  ? JSON.stringify({ reviews: [...new Set([...prompt.matchAll(/"id":"(s\d+)"/g)].map((match) => match[1]))].map((id) => ({ id, verdict, reasons })) })
+  : JSON.stringify({ verdict, reasons });
 const candidate = (name: string, repo = "https://github.com/acme/skills", path = `skills/${name}`) => ({ name, repo, path, category: "writing", lines: ["media"], why: "小红书写作" });
 
 test("only the skill's own directory is fetched, at one commit, from GitHub's two hosts", async () => {
@@ -76,7 +80,7 @@ test("only the skill's own directory is fetched, at one commit, from GitHub's tw
 test("scouting installs what passes both checks, a risky script's skill as text only, and refuses no licence and injected text", async () => {
   const answers = { candidates: [candidate("xhs-writer"), candidate("xhs-tools"), candidate("sneaky"), candidate("free", "https://github.com/nolicense/skills", "")], blockers: [] };
   const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`) ? JSON.stringify(answers)
-    : JSON.stringify({ verdict: "usable", reasons: ["方法具体，脚本只在本目录内"] }));
+    : review(prompt, ["方法具体，脚本只在本目录内"]));
   const now = new Date("2026-10-14T08:00:00Z");
   const outcome = await createSkillScout(store, ws, "C:\\repo", () => runtime.rpc, { http: github(repos), now: () => now })();
   expect(outcome).toMatchObject({ installed: ["pub-xhs-writer", "pub-xhs-tools"], updated: [], removed: [] });
@@ -91,21 +95,35 @@ test("scouting installs what passes both checks, a risky script's skill as text 
   expect(installedFiles(store, ws, library[1]!).map((file) => file.path)).toEqual(["SKILL.md"]);
   expect(store.listEvents(ws, { type: "skill.public.installed" })).toHaveLength(2);
   expect(store.listEvents(ws, { type: "skill.public.scouted" })).toHaveLength(1);
-  // Each review saw the scan and the files as data.
-  expect(runtime.prompts().filter((prompt) => prompt.startsWith(`$${REVIEWER}`))[1]).toContain("\"risk\":\"high\"");
+  // The line's two candidates went to one review run, each with its scan and files as data; the injected one, refused by the scan,
+  // and the unlicensed one never reached a model.
+  const reviews = runtime.prompts().filter((prompt) => prompt.startsWith(`$${REVIEWER}`));
+  expect(reviews).toHaveLength(1);
+  expect(reviews[0]).toContain("public-skill-review-batch");
+  expect(reviews[0]).toContain("\"risk\":\"high\"");
+  expect(reviews[0]).not.toContain("sneaky");
+  expect(outcome).toMatchObject({ reviews: 1 });
   expect(scoutDue(store, ws, new Date("2026-10-20T00:00:00Z"))).toBe(false);
-  // A task that found nothing in the library brings the next search forward.
+  // A task that found nothing no longer brings the search forward; what it wanted goes to the next monthly one.
   wantPublicSkill(store, ws, "media", "剪辑第一条视频", new Date("2026-10-20T00:00:00Z"));
-  expect(scoutDue(store, ws, new Date("2026-10-20T00:00:00Z"))).toBe(true);
+  expect(scoutDue(store, ws, new Date("2026-10-20T00:00:00Z"))).toBe(false);
+  expect(scoutDue(store, ws, new Date("2026-11-14T00:00:00Z"))).toBe(true);
+});
+
+test("review batches: a line's candidates five to a run, a candidate with large files alone", () => {
+  const item = (line: string, chars = 1_000) => ({ line, chars });
+  const batches = reviewBatches([item("media"), item("media"), item("research"), item("media", 90_000), item("media"), item("media"), item("media"), item("media")]);
+  expect(batches.map((batch) => batch.map((entry) => `${entry.line}:${entry.chars}`))).toEqual([
+    ["media:1000", "media:1000", "media:1000", "media:1000", "media:1000"], ["research:1000"], ["media:90000"], ["media:1000"]]);
 });
 
 test("on the monthly pass a newer commit is fetched, checked again and replaces the old one without asking", async () => {
   const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
-    ? JSON.stringify({ candidates: [candidate("xhs-writer")], blockers: [] }) : JSON.stringify({ verdict: "usable", reasons: ["可用"] }));
+    ? JSON.stringify({ candidates: [candidate("xhs-writer")], blockers: [] }) : review(prompt, ["可用"]));
   await createSkillScout(store, ws, "C:\\repo", () => runtime.rpc, { http: github(repos), now: () => new Date("2026-10-01T00:00:00Z") })();
   const newer = { ...repos, "acme/skills": { ...repos["acme/skills"]!, commit: SHA2 } };
   const later = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
-    ? JSON.stringify({ candidates: [], blockers: [{ code: "SKILL_SCOUT_NOTHING_FOUND", message: "没有新的" }] }) : JSON.stringify({ verdict: "usable", reasons: ["可用"] }));
+    ? JSON.stringify({ candidates: [], blockers: [{ code: "SKILL_SCOUT_NOTHING_FOUND", message: "没有新的" }] }) : review(prompt, ["可用"]));
   const outcome = await createSkillScout(store, ws, "C:\\repo", () => later.rpc, { http: github(newer), now: () => new Date("2026-11-02T00:00:00Z") })();
   expect(outcome).toMatchObject({ installed: [], updated: ["pub-xhs-writer"] });
   expect(readLibrary(store, ws)[0]).toMatchObject({ commit: SHA2, installedAt: "2026-10-01T00:00:00.000Z" });
@@ -126,7 +144,7 @@ test("a public skill not called for thirty days is removed once a day; the perso
 
 test("a run on the line switches on the public skills that fit its task, installed by id and without a risky skill's scripts", async () => {
   const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
-    ? JSON.stringify({ candidates: [candidate("xhs-writer"), candidate("xhs-tools")], blockers: [] }) : JSON.stringify({ verdict: "usable", reasons: ["可用"] }));
+    ? JSON.stringify({ candidates: [candidate("xhs-writer"), candidate("xhs-tools")], blockers: [] }) : review(prompt, ["可用"]));
   await createSkillScout(store, ws, "C:\\repo", () => runtime.rpc, { http: github(repos), now: () => new Date("2026-10-01T00:00:00Z") })();
   const dir = mkdtempSync(path.join(tmpdir(), "crossline-public-"));
   try {
@@ -151,7 +169,7 @@ test("the person allows a text-only skill's scripts: they are installed and run;
   const withCounter = { ...repos, "acme/skills": { ...repos["acme/skills"]!, files: { ...repos["acme/skills"]!.files,
     "skills/xhs-count/SKILL.md": skill("xhs-count", "小红书笔记字数检查：运行 scripts/count.mjs <笔记文件>，超过 1000 字就删。"), "skills/xhs-count/scripts/count.mjs": counter } } };
   const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
-    ? JSON.stringify({ candidates: [candidate("xhs-count")], blockers: [] }) : JSON.stringify({ verdict: "usable", reasons: ["只读本目录的笔记"] }));
+    ? JSON.stringify({ candidates: [candidate("xhs-count")], blockers: [] }) : review(prompt, ["只读本目录的笔记"]));
   await createSkillScout(store, ws, "C:\\repo", () => runtime.rpc, { http: github(withCounter), now: () => new Date("2026-10-01T00:00:00Z") })();
   const record = readLibrary(store, ws)[0]!;
   expect(record).toMatchObject({ id: "pub-xhs-count", scan: { risk: "high" }, review: { final: "text_only" } });
@@ -184,7 +202,7 @@ test("the person allows a text-only skill's scripts: they are installed and run;
     const changed = { ...withCounter, "acme/skills": { ...withCounter["acme/skills"]!, commit: SHA2, files: { ...withCounter["acme/skills"]!.files,
       "skills/xhs-count/scripts/count.mjs": counter.replace(".length", ".length + 0") } } };
     const later = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
-      ? JSON.stringify({ candidates: [], blockers: [{ code: "SKILL_SCOUT_NOTHING_FOUND", message: "没有新的" }] }) : JSON.stringify({ verdict: "usable", reasons: ["可用"] }));
+      ? JSON.stringify({ candidates: [], blockers: [{ code: "SKILL_SCOUT_NOTHING_FOUND", message: "没有新的" }] }) : review(prompt, ["可用"]));
     await createSkillScout(store, ws, "C:\\repo", () => later.rpc, { http: github(changed), now: () => new Date("2026-11-02T00:00:00Z") })();
     expect(readLibrary(store, ws)[0]!.commit).toBe(SHA2);
     expect(installedFiles(store, ws, readLibrary(store, ws)[0]!).map((file) => file.path)).toEqual(["SKILL.md"]);
@@ -194,7 +212,7 @@ test("the person allows a text-only skill's scripts: they are installed and run;
 test("a link the person gives goes through the same fetch, scan and review: installed, capped to text, or refused", async () => {
   store.setSetting(ws, LINE_SETTING, JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "", goals: [], createdAt: "" },
     { id: "research", label: "研究者", color: "research", goal: "", goals: [], createdAt: "" }]));
-  const runtime = scriptedRuntime([REVIEWER], () => JSON.stringify({ verdict: "usable", reasons: ["方法具体"] }));
+  const runtime = scriptedRuntime([REVIEWER], (prompt) => review(prompt, ["方法具体"]));
   const http = github(repos);
   const installer = createPublicSkillInstaller({ store, cwd: "C:\\repo", client: () => runtime.rpc, http, now: () => new Date("2026-10-20T00:00:00Z") });
   // A pasted directory link names both the repository and the directory; the branch in it is not used.
@@ -245,34 +263,64 @@ test("a link is checked before anything is fetched, and without a model nothing 
   expect(await installer.handle("GET", "/v1/skills/public/elsewhere", ws, undefined)).toBeUndefined();
 });
 
-test("after the interview the search covers every line round after round until an answer names nothing new; no count caps it", async () => {
+test("a line is searched once when it is set up: one answer, its candidates reviewed together, a line added later on its own", async () => {
   const now = new Date("2026-10-20T12:00:00Z");
-  expect(coverageDue(store, ws, now)).toBe(false);
+  expect(lineSetupDue(store, ws, now)).toEqual([]);
   store.saveOnboardingSession({ id: "main", ownerId: "user-1", workspaceId: ws, state: "complete", coverage: {}, createdAt: now.toISOString(), updatedAt: now.toISOString() });
-  expect(coverageDue(store, ws, now)).toBe(true);
+  expect(lineSetupDue(store, ws, now)).toEqual(["media"]);
   store.saveOnboardingSession({ id: "main", ownerId: "user-1", workspaceId: ws, state: "active", coverage: {}, createdAt: now.toISOString(), updatedAt: now.toISOString() });
-  expect(coverageDue(store, ws, now)).toBe(false);
+  expect(lineSetupDue(store, ws, now)).toEqual([]);
   // Pressing 开始使用 finishes the interview for this purpose even while it stays open for the portrait.
   store.setSetting(ws, START_CONFIRMED_SETTING, now.toISOString());
-  expect(coverageDue(store, ws, now)).toBe(true);
-  const rounds: string[] = [];
-  const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => {
-    if (!prompt.startsWith(`$${SKILL_SCOUT}`)) return JSON.stringify({ verdict: "usable", reasons: ["方法具体"] });
-    const round = /"round":(\d+)/.exec(prompt)?.[1] ?? "?";
-    rounds.push(round);
-    // Round 1 names a good one and an injected one; round 2 sees the refusal in `tried` and names another; round 3 names nothing new.
-    if (round === "1") return JSON.stringify({ candidates: [candidate("xhs-writer"), candidate("sneaky")], blockers: [] });
-    if (round === "2") { expect(prompt).toContain("skills/sneaky"); return JSON.stringify({ candidates: [candidate("xhs-tools"), candidate("xhs-writer")], blockers: [] }); }
-    return JSON.stringify({ candidates: [], blockers: [] });
-  });
-  const outcome = await createSkillScout(store, ws, "C:\repo", () => runtime.rpc, { http: github(repos), now: () => now, mode: "coverage" })();
-  expect(outcome).toMatchObject({ installed: ["pub-xhs-writer", "pub-xhs-tools"], rounds: 3 });
-  expect(rounds).toEqual(["1", "2", "3"]);
-  expect(coverageDue(store, ws, now)).toBe(false);
-  // A line added later gets a search of its own.
+  expect(lineSetupDue(store, ws, now)).toEqual(["media"]);
+  expect(scoutDue(store, ws, now)).toBe(false);
+  const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
+    ? JSON.stringify({ candidates: [candidate("xhs-writer"), candidate("sneaky"), candidate("xhs-tools")], blockers: [] }) : review(prompt, ["方法具体"]));
+  const outcome = await createSkillScout(store, ws, "C:\\repo", () => runtime.rpc, { http: github(repos), now: () => now, mode: "setup", lines: ["media"] })();
+  expect(outcome).toMatchObject({ installed: ["pub-xhs-writer", "pub-xhs-tools"], rejected: [{ name: "sneaky" }], reviews: 1 });
+  // One answer only, and one review run for the line's two candidates; the injected one never reached the reviewer.
+  expect(runtime.prompts().filter((prompt) => prompt.startsWith(`$${SKILL_SCOUT}`))).toHaveLength(1);
+  const reviews = runtime.prompts().filter((prompt) => prompt.startsWith(`$${REVIEWER}`));
+  expect(reviews).toHaveLength(1);
+  expect(reviews[0]).not.toContain("sneaky");
+  expect(lineSetupDue(store, ws, now)).toEqual([]);
+  // The monthly supplement starts counting from the setup search.
+  expect(scoutDue(store, ws, new Date("2026-11-10T00:00:00Z"))).toBe(false);
+  expect(scoutDue(store, ws, new Date("2026-11-20T00:00:00Z"))).toBe(true);
+  // A line added later gets a search of its own, and only that line is put to the model.
   store.setSetting(ws, LINE_SETTING, JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "", goals: [], createdAt: "" },
     { id: "research", label: "研究者", color: "research", goal: "", goals: [], createdAt: "" }]));
-  expect(coverageDue(store, ws, now)).toBe(true);
+  expect(lineSetupDue(store, ws, now)).toEqual(["research"]);
+  const later = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
+    ? JSON.stringify({ candidates: [], blockers: [] }) : review(prompt, ["方法具体"]));
+  await createSkillScout(store, ws, "C:\\repo", () => later.rpc, { http: github(repos), now: () => new Date("2026-10-20T13:00:00Z"), mode: "setup", lines: ["research"] })();
+  const asked = later.prompts().find((prompt) => prompt.startsWith(`$${SKILL_SCOUT}`))!;
+  expect(asked).toContain("研究者");
+  expect(asked).not.toContain("创作者");
+  expect(lineSetupDue(store, ws, now)).toEqual([]);
+});
+
+test("the person asks for one more search of a line: due until a setup search covering it ran after the request", async () => {
+  const now = new Date("2026-11-02T12:00:00Z");
+  store.setSetting(ws, START_CONFIRMED_SETTING, now.toISOString());
+  store.appendEvent({ ownerId: "user-1", workspaceId: ws, idempotencyKey: "scouted:setup", type: "skill.public.scouted", entityId: ws,
+    payload: { mode: "setup", lines: ["media"], at: "2026-10-20T12:00:00.000Z" } });
+  expect(lineSetupDue(store, ws, now)).toEqual([]);
+  store.appendEvent({ ownerId: "user-1", workspaceId: ws, idempotencyKey: "search:media", type: SEARCH_REQUESTED, entityId: "media",
+    payload: { lineId: "media", at: "2026-11-02T11:00:00.000Z" } });
+  expect(lineSetupDue(store, ws, now)).toEqual(["media"]);
+  const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
+    ? JSON.stringify({ candidates: [], blockers: [] }) : review(prompt, ["方法具体"]));
+  await createSkillScout(store, ws, "C:\repo", () => runtime.rpc, { http: github(repos), now: () => now, mode: "setup", lines: ["media"] })();
+  expect(lineSetupDue(store, ws, now)).toEqual([]);
+});
+
+test("a line covered by the earlier coverage search counts as set up", () => {
+  const now = new Date("2026-10-21T12:00:00Z");
+  store.setSetting(ws, START_CONFIRMED_SETTING, now.toISOString());
+  store.appendEvent({ ownerId: "user-1", workspaceId: ws, idempotencyKey: "scouted:old", type: "skill.public.scouted", entityId: ws,
+    payload: { mode: "coverage", lines: ["media"], at: "2026-10-20T12:00:00.000Z" } });
+  expect(lineSetupDue(store, ws, now)).toEqual([]);
 });
 
 test("GitHub's rate limit is no verdict: nothing is recorded as rejected, an installed skill is kept, and the search is due again", async () => {
@@ -280,11 +328,11 @@ test("GitHub's rate limit is no verdict: nothing is recorded as rejected, an ins
   store.saveOnboardingSession({ id: "main", ownerId: "user-1", workspaceId: ws, state: "complete", coverage: {}, createdAt: now.toISOString(), updatedAt: now.toISOString() });
   const limited: HttpGet = async (url) => ({ status: 403, url, text: async () => "rate limit" });
   const runtime = scriptedRuntime([SKILL_SCOUT, REVIEWER], (prompt) => prompt.startsWith(`$${SKILL_SCOUT}`)
-    ? JSON.stringify({ candidates: [candidate("xhs-writer"), candidate("xhs-tools")], blockers: [] }) : JSON.stringify({ verdict: "usable", reasons: ["ok"] }));
-  const outcome = await createSkillScout(store, ws, "C:\repo", () => runtime.rpc, { http: limited, now: () => now, mode: "coverage" })();
-  expect(outcome).toMatchObject({ installed: [], rounds: 1 });
+    ? JSON.stringify({ candidates: [candidate("xhs-writer"), candidate("xhs-tools")], blockers: [] }) : review(prompt, ["ok"]));
+  const outcome = await createSkillScout(store, ws, "C:\\repo", () => runtime.rpc, { http: limited, now: () => now, mode: "setup", lines: ["media"] })();
+  expect(outcome).toMatchObject({ installed: [], reviews: 0 });
   expect(store.listEvents(ws, { type: "skill.public.rejected" })).toHaveLength(0);
   // Stopped by the limit: the search is due again the next day, not counted as covering the line.
-  expect(coverageDue(store, ws, now)).toBe(false);
-  expect(coverageDue(store, ws, new Date("2026-10-21T13:00:00Z"))).toBe(true);
+  expect(lineSetupDue(store, ws, now)).toEqual([]);
+  expect(lineSetupDue(store, ws, new Date("2026-10-21T13:00:00Z"))).toEqual(["media"]);
 });

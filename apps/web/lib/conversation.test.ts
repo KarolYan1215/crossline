@@ -5,7 +5,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(), CodexSupervisorRequestError: class extends Error {} }));
 import { requestCodexSupervisor } from "./codex-runtime";
 import { ACTION_HANDLERS, executeAction } from "./actions";
-import { conversationTurn, decideCard, loadConversation, searchConversation } from "./conversation";
+import { conversationTurn, decideCard, loadConversation, pageTask, searchConversation } from "./conversation";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.clearAllMocks(); vi.unstubAllEnvs(); });
@@ -24,6 +24,19 @@ function setup() {
     approximate: true, followUpAt: "2026-10-08", state: "open", blocks: ["sim"], source: "manual" });
   return store;
 }
+
+test("from a block picked on Today, 「这一步」 is that block's step while it is open; otherwise the first open step", () => {
+  const steps = [{ id: "v1s1", title: "确定论证主线", status: "planned", minutes: 30, executor: "human" },
+    { id: "v1s2", title: "整理方法对照表", status: "planned", minutes: 45, executor: "human" },
+    { id: "v1s3", title: "写引言", status: "done", minutes: 30, executor: "human" }];
+  const pack = (page: { stepId?: string }) => ({ page: { kind: "task", entityId: "wo-1", title: "撰写综述初稿", ...page },
+    tasks: [{ id: "wo-1", title: "撰写综述初稿", line: "研究者", project: "", state: "approved", dueDate: "", notBefore: "", usualMinutes: 60, nextBlock: "", steps }] }) as never;
+  const marked = (lines: string[]) => lines.find((line) => line.startsWith("- ▶"));
+  expect(marked(pageTask(pack({ stepId: "v1s2" })))).toContain("v1s2");
+  expect(marked(pageTask(pack({})))).toContain("v1s1");
+  // A step already done is not 「这一步」: the first open one is.
+  expect(marked(pageTask(pack({ stepId: "v1s3" })))).toContain("v1s1");
+});
 
 test("every action of the registry has a handler", () => {
   expect(Object.keys(ACTION_HANDLERS).sort()).toEqual([...ACTION_IDS].sort());

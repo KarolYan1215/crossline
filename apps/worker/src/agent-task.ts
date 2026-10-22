@@ -54,6 +54,8 @@ export type AgentTaskInput = {
   reader?: { tools: SkillTools; refusals: () => number; close: () => Promise<void> };
   /** Who asked for this run: the person (「交给 Agent」, a retry they asked for) or the system (the worker's own pass). */
   by?: "person" | "system";
+  /** What earlier work of this line and kind taught (`lessonsFor`, docs/token-economy.md §2): at most five short lines. */
+  lessons?: string[];
 };
 
 export type AuditCommand = { command: string; cwd: string; status: string; exitCode: number | null; reads: string[] };
@@ -326,7 +328,8 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
         ...(input.workOrderId && store.listEvents(workspaceId, { type: "work_order.auto_approved", entityId: input.workOrderId }).length ? { autoApproved: true } : {}) } });
 
     const task = { taskId, title: input.title, what: input.what, category: input.category, directory, inputs, humanPart: input.humanPart,
-      ...(worktree ? { worktree: { path: worktree, branch: `ai/${taskId}` } } : {}), ...(input.deadline ? { deadline: input.deadline } : {}), ...(input.notes ? { notes: input.notes } : {}) };
+      ...(worktree ? { worktree: { path: worktree, branch: `ai/${taskId}` } } : {}), ...(input.deadline ? { deadline: input.deadline } : {}), ...(input.notes ? { notes: input.notes } : {}),
+      ...(input.lessons?.length ? { lessons: input.lessons } : {}) };
     const probe = (relative: string) => {
       const full = path.resolve(directory, relative);
       const insideDirectory = full.toLowerCase().startsWith(`${directory.toLowerCase()}${path.sep}`);
@@ -356,8 +359,9 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const tools = boardSpecs.length || readerSpecs.length ? { specs: [...readerSpecs, ...boardSpecs],
       call: (name: string, args: unknown) => readerSpecs.some((spec) => spec.name === name) ? input.reader!.tools.call(name, args) : board!.call(name, args) } : undefined;
     const result = await runCodexSkill<AgentSummary>(client, task, {
-      skillName: AGENT_SKILL, cwd, developerInstructions: AGENT_INSTRUCTIONS + (sandboxed ? SANDBOX_NOTE : "") + libraryInstruction(extraSkills), outputSchema: AGENT_SUMMARY_SCHEMA,
-      ...(extraSkills.length ? { extraSkills } : {}),
+      skillName: AGENT_SKILL, cwd, developerInstructions: AGENT_INSTRUCTIONS + (sandboxed ? SANDBOX_NOTE : ""), outputSchema: AGENT_SUMMARY_SCHEMA,
+      // The library skills' note follows the line and the task: after the input, not in the instructions every run shares (the prompt cache).
+      ...(extraSkills.length ? { extraSkills, runNote: libraryInstruction(extraSkills) } : {}),
       prepareInput: () => task, validateOutput: (output) => validateAgentSummary(output, probe), onAudit: () => {},
       allowWebSearch: true, timeoutMs: 6 * 60 * 60_000, idleMs: 60 * 60_000, signal,
       ...(tools ? { tools } : {}), ...(input.resumeThreadId ? { resumeThreadId: input.resumeThreadId } : {}),
@@ -515,7 +519,7 @@ async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: str
       ...(input.workOrderId && store.listEvents(workspaceId, { type: "work_order.auto_approved", entityId: input.workOrderId }).length ? { autoApproved: true } : {}) } });
   const task = { taskId, title: input.title, what: input.what, category: input.category, inputs: inputs.map((entry, index) => ({ path: `input/${index}`, name: path.basename(entry) })),
     humanPart: input.humanPart, mailbox: Boolean(options.mail), today: new Date().toISOString().slice(0, 10),
-    ...(input.deadline ? { deadline: input.deadline } : {}), ...(input.notes ? { notes: input.notes } : {}) };
+    ...(input.deadline ? { deadline: input.deadline } : {}), ...(input.notes ? { notes: input.notes } : {}), ...(input.lessons?.length ? { lessons: input.lessons } : {}) };
   const probe = (relative: string) => {
     const full = path.resolve(directory, relative);
     const insideDirectory = full.toLowerCase().startsWith(`${directory.toLowerCase()}${path.sep}`);
@@ -538,8 +542,8 @@ async function runWithTools(store: CrosslineStore, workspaceId: string, cwd: str
   } };
   const signal = options.signal ? AbortSignal.any([options.signal, stopper.signal]) : stopper.signal;
   const result = await runCodexSkill<AgentSummary>(client, task, {
-    skillName: TOOLS_AGENT_SKILL, cwd, developerInstructions: TOOLS_AGENT_INSTRUCTIONS + libraryInstruction(extraSkills), outputSchema: AGENT_SUMMARY_SCHEMA,
-    ...(extraSkills.length ? { extraSkills } : {}),
+    skillName: TOOLS_AGENT_SKILL, cwd, developerInstructions: TOOLS_AGENT_INSTRUCTIONS, outputSchema: AGENT_SUMMARY_SCHEMA,
+    ...(extraSkills.length ? { extraSkills, runNote: libraryInstruction(extraSkills) } : {}),
     prepareInput: () => task, onAudit: () => {},
     validateOutput: (output) => {
       // An errand done without one call did nothing: everything the tools assistant can read or make goes through its functions

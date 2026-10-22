@@ -64,6 +64,12 @@ export function BackgroundModule({ overview }: { overview: BackgroundOverview })
     const response = await fetch("/api/background", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, paused }) }).catch(() => undefined);
     if (!response?.ok) setKinds(before);
   };
+  const [saver, setSaver] = useState(overview.saver);
+  const toggleSaver = async (on: boolean) => {
+    setSaver(on);
+    const response = await fetch("/api/background", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ saver: on }) }).catch(() => undefined);
+    if (!response?.ok) setSaver(!on);
+  };
   const tier = TIER[overview.engagement.tier];
   return <div className="st-modules">
     <section className="st-card" aria-label="后台任务">
@@ -76,6 +82,11 @@ export function BackgroundModule({ overview }: { overview: BackgroundOverview })
         <div><b>照常可用</b><ul>{overview.quotaPause.works.map((item) => <li key={item}>{item}</li>)}</ul></div>
         <div><b>暂停到恢复</b><ul>{overview.quotaPause.paused.map((item) => <li key={item}>{item}</li>)}</ul></div>
       </div>}
+      <div className="st-row">
+        <span className="st-row-label">节省额度<small>开启时，调研、技能搜寻等非必需的后台工作只在额度宽裕或夜间运行；规划与助手不受影响</small></span>
+        <SegmentedControl label="节省额度" value={saver ? "on" : "off"} options={[{ value: "on", label: "开启" }, { value: "off", label: "关闭" }]}
+          onChange={(value) => void toggleSaver(value === "on")} />
+      </div>
       {kinds.map((item) => <div key={item.kind} className="st-row">
         <span className="st-row-label">{item.label}<small>{item.explained} · 上次 {when(item.lastRunAt, overview.timeZone)}{item.lastOk === false ? "（失败）" : ""} · 近 7 天 {item.weekRuns} 次、{tokens(item.weekTokens)} tokens{item.weekCacheShare !== null ? `（输入的 ${Math.round(item.weekCacheShare * 100)}% 来自缓存）` : ""}</small></span>
         <SegmentedControl label={`${item.label}是否运行`} value={item.paused ? "paused" : "on"} options={[{ value: "on", label: "运行" }, { value: "paused", label: "暂停" }]}

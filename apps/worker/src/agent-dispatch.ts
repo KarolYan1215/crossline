@@ -7,8 +7,16 @@ import {
 } from "@crossline/core";
 import {
   agentApprovalDecision, agentChainsFor, assistantPlanFor, decideAgentApproval, declinedCategories, deliverableKey, isAutoHandoff, isPaused, listAgentTasks, readCategories,
-  agentQuestionAnswers, expireAgentQuestion, requestAgentApproval, requestAgentQuestion, requestCategory, type AgentQuestion, type CrosslineStore
+  agentQuestionAnswers, expireAgentQuestion, lessonsFor, requestAgentApproval, requestAgentQuestion, requestCategory, type AgentQuestion, type CrosslineStore
 } from "@crossline/db";
+
+/** What earlier work of this line and kind taught (docs/token-economy.md §2), for the assistant's input. */
+function assistantLessons(store: CrosslineStore, workspaceId: string, orderId: string): string[] {
+  const order = store.listWorkOrders(workspaceId).find((item) => item.id === orderId);
+  if (!order) return [];
+  return lessonsFor(store, workspaceId, { lineId: order.identityId, archetypeId: store.getStepPlan(workspaceId, orderId)?.archetypeId,
+    skill: ["crossline-agent", "crossline-agent-tools"] }).map((lesson) => lesson.text);
+}
 import type { AgentTaskInput } from "./agent-task";
 
 /**
@@ -49,7 +57,7 @@ function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: strin
     input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${stepId}-${attempt}`, workOrderId: orderId, stepId, title,
       what: `完成任务「${order.intent}」中的一个准备步骤：${step.title}\n产出：${step.deliverable || "（未写明）"}\n完成标准：${step.doneCriterion || "（未写明）"}${context ? `\n${context}` : ""}\n产出是直接可用的成品（文件），不是计划或说明；只依据给出的文件与公开来源，找不到的写明。${before.text ? `\n${before.text}` : ""}`,
       category: category ?? "read_research_organize", humanPart: "该任务的其余步骤由本人完成；需要本人判断或选择的内容列入待本人处理。", inputs: [...inputs, ...before.inputs],
-      ...(step.executor === "agent" ? { prep: true } : {}) } };
+      ...(step.executor === "agent" ? { prep: true } : {}), lessons: assistantLessons(store, workspaceId, orderId) } };
 }
 
 /**
@@ -85,7 +93,7 @@ export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, or
     ok: true, category, why: plan.why, graded: plan.graded,
     input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${attempt}`, workOrderId: orderId, title: order.intent, what,
       category: category ?? "read_research_organize", humanPart: plan.humanPart, inputs: [...inputs, ...before.inputs], ...(plan.notes ? { notes: plan.notes } : {}),
-      ...(plan.delegated ? { delegated: true } : {}) }
+      ...(plan.delegated ? { delegated: true } : {}), lessons: assistantLessons(store, workspaceId, orderId) }
   };
 }
 

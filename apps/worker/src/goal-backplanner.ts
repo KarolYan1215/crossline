@@ -126,15 +126,18 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           + "and return only the requested JSON. Each item becomes one task card on the person's 任务 page (one deliverable, 30 to 480 minutes, named "
           + "with its course or project) that the step planner splits into steps afterwards; a request for a fact is never an item. Read existingTasks and "
           + "recentlyDone first: never write work they cover, and an item that only adds to an open task sets extendsTaskId. Never set a goal, a deadline "
-          + "or criteria."
-          + (missingInputs.length
+          + "or criteria.",
+        // The prompt cache (docs/token-economy.md §2.5): how the person works, then the line's and the project's work and material, then
+        // this milestone and the date; the mode and the artifact rules for this run after the input.
+        stableKeys: ["version", "personProfile", "existingTasks", "recentlyDone", "facts", "materials", "milestone", "artifacts"],
+        runNote: ((missingInputs.length
             ? " Second mode: missingInputs are known to be missing and are being asked about. Obtaining each is the first part of the task that needs it "
               + "(acquires = its id, sourceQuote from its message); a separate item only when obtaining it is real work. Blockers only for what the milestone "
               + "itself leaves unclear."
             : " First mode: an input the work needs that is in none of sourceText, suppliedInputs, approvedInsights, facts or materials is a blocker with what and whoHas, "
               + "never invented; every acquires is \"\". Items that need waitingInputs come after those that do not.")
           + (artifacts.produce.length || artifacts.use.length ? " Exactly one item produces each artifacts.produce id (produces); every artifacts.use id is in the uses of the items that work with it." : "")
-          + rolling,
+          + rolling).trim(),
         outputSchema: BACKPLAN_SCHEMA, prepareInput: () => input,
         validateOutput: (output) => validateBackplan(output, runSources, dateSources, missingInputs.map((item) => item.id),
           { produce: artifacts.produce.map((item) => item.id), use: artifacts.use.map((item) => item.id) }, context.existingTasks.map((task) => task.id)), onAudit: () => {},

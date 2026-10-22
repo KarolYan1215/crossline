@@ -349,7 +349,8 @@ export const actionLabel = (item: ProposedAction): string => ACTIONS[item.action
  */
 export type ConciergePack = {
   now: string; today: string; timeZone: string;
-  page: { kind: string; entityId: string; title: string };
+  /** `stepId`: on a task, the step the person is looking at (a picked block on Today's day panel); absent, the first open step. */
+  page: { kind: string; entityId: string; title: string; stepId?: string };
   /** `description` is the interview's reading of the line (`lines.profiles`), "" before one exists. */
   lines: Array<{ id: string; label: string; goals: string[]; hard: boolean; description: string; domain?: string }>;
   tasks: Array<{ id: string; title: string; line: string; project: string; state: string; dueDate: string; notBefore: string; usualMinutes: number;

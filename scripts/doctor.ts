@@ -123,6 +123,19 @@ if (Number(db.pragma("user_version", { simple: true })) >= 19) {
   }
 }
 
+// Lessons and use counts (migration 20, docs/token-economy.md §2): the table and the counting columns, and no lesson longer than a context
+// line may be (the store cuts at 300, so a longer one was written around it).
+if (Number(db.pragma("user_version", { simple: true })) >= 20) {
+  if (!present.includes("run_lessons")) findings.push("schema 不完整：缺少 run_lessons（半迁移）");
+  for (const [table, column] of [["profile_facts", "use_count"], ["profile_facts", "last_used_at"], ["preference_entries", "use_count"],
+    ["preference_entries", "last_used_at"], ["preference_entries", "invalidated_at"], ["preference_entries", "confirmed_at"]] as const)
+    if (!columns(table).includes(column)) findings.push(`schema 不完整：${table} 缺少 ${column}（半迁移）`);
+  if (present.includes("run_lessons")) {
+    const long = (db.prepare("SELECT COUNT(*) AS c FROM run_lessons WHERE length(text) > 300").get() as { c: number }).c;
+    if (long) findings.push(`${long} 条经验教训超过 300 字`);
+  }
+}
+
 const version = Number(db.pragma("user_version", { simple: true }));
 const wal =(() => { try { return statSync(`${file}-wal`).size; } catch { return 0; } })();
 const counts = Object.fromEntries(["events", "work_orders", "captures", "milestones", "materials"]

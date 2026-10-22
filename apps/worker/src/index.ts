@@ -2,12 +2,12 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, codexProcessEnvironment, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -24,7 +24,7 @@ import { repairLineAttributes } from "./attribute-repair";
 import { returnTidy } from "./return-tidy";
 import { dateAdvancePass } from "./date-advance";
 import { createWriteLogin } from "./calendar-write-login";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { startingWithin } from "./schedule-window";
@@ -32,10 +32,11 @@ import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsA
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
 import { energyAdvicePass } from "./energy-advice";
 import { dedupePass } from "./dedupe";
+import { guestCodexHomes, importCodexMemories } from "./codex-memory-import";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
-import { cleanPublicSkills, coverageDue, createPublicSkillInstaller, createSkillScout, scoutDue } from "./public-skills";
+import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, scoutDue } from "./public-skills";
 import { browserProfilesRoot, cleanGrownSkills, finishWorkflowLogin, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
   workflowSchedulePass } from "./workflow-smith";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
@@ -69,7 +70,7 @@ import { probeSandboxShell } from "./sandbox-probe";
 import { automationPass, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { identityLines } from "./lines";
-import { createBackgroundSpend } from "./spend";
+import { createBackgroundSpend, nonCoreAllowed } from "./spend";
 import { telemetryPass } from "./telemetry";
 import {
   buildSources, calendarLabel, listCatalogue, readSelection, saveSelection, seedNewAccounts, sourceKey, mayUseGraphLogin, withdrawForeignCalendar } from "./calendar-sources";
@@ -213,11 +214,11 @@ const curating = new Set<string>();
 async function curatorPass(workspaceId: string, checkedAt: string): Promise<void> {
   if (paused(workspaceId, "planning")) return;
   if (curating.has(workspaceId) || !codexSupervisor || !curationDue(analysisStore, workspaceId)) return;
-  if (!spendAllows(await spendFor(workspaceId), "discretionary")) return;
+  if (!nonCoreAllowed(analysisStore, workspaceId, await spendFor(workspaceId), "discretionary")) return;
   curating.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createArchetypeCurator(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
+    const outcome = await withUsagePurpose(NON_CORE_PURPOSE, () => createArchetypeCurator(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))()).catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "archetypes.curated", checkedAt, workspaceId, added: outcome.added.length, dropped: outcome.dropped.length }));
   } finally { curating.delete(workspaceId); }
 }
@@ -428,18 +429,20 @@ const compilingMine = new Set<string>();
 async function minePass(workspaceId: string, checkedAt: string): Promise<void> {
   if (paused(workspaceId, "planning")) return;
   if (compilingMine.has(workspaceId) || !codexSupervisor || !linesAwaitingMineSkill(analysisStore, workspaceId).length) return;
-  if (!spendAllows(await spendFor(workspaceId), "core")) return;
+  // Core by its quota rule (as before), non-core for the saver (docs/token-economy.md §2.3).
+  if (!nonCoreAllowed(analysisStore, workspaceId, await spendFor(workspaceId), "core")) return;
   compilingMine.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createInsightCompiler(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
+    const outcome = await withUsagePurpose(NON_CORE_PURPOSE, () => createInsightCompiler(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))()).catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "skill.mine.compiled", checkedAt, workspaceId, ...outcome }));
   } finally { compilingMine.delete(workspaceId); }
 }
 
 /**
- * Public skills (docs/skills-library.md §2): once a day the ones not called for thirty days are removed; the scout runs for a new library,
- * once a month (checking installed ones for a newer commit too), and the day after a task found nothing that fits. Discretionary spend.
+ * Public skills (docs/skills-library.md §2): once a day the ones not called for thirty days are removed; the scout searches once for each
+ * line when it is set up (the interview done, or a line added later), then once a month (checking installed ones for a newer commit
+ * too). The setup search is core work; the monthly one is non-core (the quota saver), as are its reviews.
  */
 const scoutingSkills = new Set<string>();
 async function publicSkillPass(workspaceId: string, checkedAt: string, offPeakWait = false): Promise<void> {
@@ -449,16 +452,18 @@ async function publicSkillPass(workspaceId: string, checkedAt: string, offPeakWa
   } catch { /* housekeeping */ }
   if (paused(workspaceId, "planning")) return;
   if (scoutingSkills.has(workspaceId) || !codexSupervisor) return;
-  // The search after the interview (coverageDue) is part of setting the account up: it runs as core work and does not wait for the
-  // developer's model's cheaper hours. The monthly and on-demand search stays discretionary and waits.
-  const coverage = coverageDue(analysisStore, workspaceId);
-  if (!coverage && (offPeakWait || !scoutDue(analysisStore, workspaceId))) return;
-  if (!spendAllows(await spendFor(workspaceId), coverage ? "core" : "discretionary")) return;
+  // A line's search when it is set up is part of setting the account up: it runs as core work and does not wait for the developer's
+  // model's cheaper hours. The monthly search is non-core and waits.
+  const setup = lineSetupDue(analysisStore, workspaceId);
+  if (!setup.length && (offPeakWait || !scoutDue(analysisStore, workspaceId))) return;
+  const spend = await spendFor(workspaceId);
+  if (setup.length ? !spendAllows(spend, "core") : !nonCoreAllowed(analysisStore, workspaceId, spend, "discretionary")) return;
   scoutingSkills.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const outcome = await createSkillScout(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { mode: coverage ? "coverage" : "routine" })().catch(() => undefined);
-    if (outcome) console.info(JSON.stringify({ type: "skill.public.scouted", checkedAt, workspaceId, mode: coverage ? "coverage" : "routine", ...outcome }));
+    const scout = createSkillScout(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), setup.length ? { mode: "setup", lines: setup } : { mode: "routine" });
+    const outcome = await (setup.length ? scout() : withUsagePurpose(NON_CORE_PURPOSE, scout)).catch(() => undefined);
+    if (outcome) console.info(JSON.stringify({ type: "skill.public.scouted", checkedAt, workspaceId, mode: setup.length ? "setup" : "routine", ...outcome }));
   } finally { scoutingSkills.delete(workspaceId); }
 }
 
@@ -549,17 +554,21 @@ async function portraitPass(workspaceId: string, checkedAt: string, offPeakWait 
   if (rewritingPortraits.has(workspaceId) || !codexSupervisor) return;
   const due = portraitRewriteDue(analysisStore, workspaceId, new Date(checkedAt));
   // The first report is waited for; a rewrite of one that exists waits for the cheaper hours.
-  if (!due || (offPeakWait && due !== "first") || !spendAllows(await spendFor(workspaceId), "discretionary")) return;
+  if (!due || (offPeakWait && due !== "first")) return;
+  // The first report ends the interview; a rewrite of one that exists is non-core (the quota saver).
+  const spend = await spendFor(workspaceId);
+  if (due === "first" ? !spendAllows(spend, "discretionary") : !nonCoreAllowed(analysisStore, workspaceId, spend, "discretionary")) return;
+  const purpose = <T,>(run: () => Promise<T>) => due === "first" ? run() : withUsagePurpose(NON_CORE_PURPOSE, run);
   rewritingPortraits.add(workspaceId);
   try {
     if (due === "schema" || due === "first") {
       if (due === "schema") analysisStore.setSetting(workspaceId, PORTRAIT_REWRITE_MARKER, checkedAt);
-      const outcome = await writePortraitFor(workspaceId).catch(() => undefined);
+      const outcome = await purpose(() => writePortraitFor(workspaceId)).catch(() => undefined);
       console.info(JSON.stringify({ type: "portrait.rewritten", checkedAt, workspaceId, state: outcome?.state ?? "failed" }));
     } else {
       analysisStore.setSetting(workspaceId, PORTRAIT_GAP_AT, checkedAt);
       enterUsageWorkspace(workspaceId);
-      const outcome = await createPortraitWriter(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { only: "gap" })().catch(() => undefined);
+      const outcome = await purpose(() => createPortraitWriter(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { only: "gap" })()).catch(() => undefined);
       console.info(JSON.stringify({ type: "portrait.gap_rewrite", checkedAt, workspaceId, state: outcome?.state ?? "failed" }));
     }
   } finally { rewritingPortraits.delete(workspaceId); }
@@ -697,6 +706,11 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
     if (advanced) console.info(JSON.stringify({ type: "date.advanced", workspaceId: workspace.id, superseded: advanced.superseded.length, adopted: advanced.adopted.length,
       expired: advanced.expired.length, shifted: advanced.shifted.length, asked: advanced.asked.length, archived: advanced.archived.length, drafts: advanced.drafts.length, checkedAt }));
   } catch (error) { console.warn(JSON.stringify({ type: "date.advance_failed", workspaceId: workspace.id, message: error instanceof Error ? error.message : String(error) })); }
+  // Once a day: lessons drawn by rule from what happened, and what went unused lapses (lessons.ts, docs/token-economy.md §2). No model.
+  try {
+    const learned = lessonsPass(analysisStore, workspace.id);
+    if (learned) console.info(JSON.stringify({ type: "lessons.pass", workspaceId: workspace.id, ...learned, checkedAt }));
+  } catch (error) { console.warn(JSON.stringify({ type: "lessons.pass_failed", workspaceId: workspace.id, message: error instanceof Error ? error.message : String(error) })); }
   await dedupePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
   await titlePass(workspace.id, checkedAt);
   await goalSplitPass(workspace.id, checkedAt);
@@ -728,7 +742,7 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
     if (outcome) console.info(JSON.stringify({ type: `tutorial.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));
   }
   if (!offPeakWait) await curatorPass(workspace.id, checkedAt);
-  if (!offPeakWait) await energyAdvicePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
+  if (!offPeakWait) await withUsagePurpose(NON_CORE_PURPOSE, () => energyAdvicePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace })).catch(() => undefined);
   if (!offPeakWait) await minePass(workspace.id, checkedAt);
   await publicSkillPass(workspace.id, checkedAt, offPeakWait);
   await portraitPass(workspace.id, checkedAt, offPeakWait);
@@ -738,11 +752,14 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   // The nightly flywheel, research and the assistant run only while the person is around (docs/review-2026-10-13.md §6.1): their
   // results are for someone to look at, and for days nobody did.
   if ((await spendFor(workspace.id)).engagement !== "active") return;
-  const decision = paused(workspace.id, "nightly") || offPeakWait ? undefined : await getNightly(workspace.id)().catch(() => undefined);
+  // The nightly flywheel and research are non-core (the quota saver), on top of their own budget checks.
+  const nonCore = nonCoreAllowed(analysisStore, workspace.id, await spendFor(workspace.id), "discretionary");
+  const decision = paused(workspace.id, "nightly") || offPeakWait || !nonCore ? undefined
+    : await withUsagePurpose(NON_CORE_PURPOSE, () => getNightly(workspace.id)()).catch(() => undefined);
   if (decision && !decision.run && decision.code !== "BEFORE_PLANNED_TIME" && decision.code !== "ALREADY_RAN_TODAY") {
     console.info(JSON.stringify({ type: "flywheel.nightly.skipped", checkedAt, workspaceId: workspace.id, code: decision.code }));
   }
-  if (!offPeakWait) startDiligencePass(workspace.id, checkedAt);
+  if (!offPeakWait && nonCore) startDiligencePass(workspace.id, checkedAt);
   // A workflow the person asked for goes before the assistant's own background work, which would otherwise keep it busy.
   await workflowPass(workspace.id, checkedAt).catch(() => undefined);
   // The assistant starts approved kinds of work by itself; it never holds the tick (its runs are detached).
@@ -876,7 +893,8 @@ setUsageSink((usage) => {
     workspaceId: usage.workspaceId, skill: usage.skillName, tier: usage.tier ?? "", model: usage.model ?? "", effort: usage.effort ?? "",
     spendMode: usage.spendMode, threadId: usage.threadId ?? "", ok: usage.ok, errorCode: usage.errorCode ?? "", repairs: usage.repairs, turns: usage.turns,
     inputTokens: usage.inputTokens, cachedInputTokens: usage.cachedInputTokens, outputTokens: usage.outputTokens,
-    reasoningTokens: usage.reasoningOutputTokens, totalTokens: usage.totalTokens, durationMs: usage.durationMs, at: usage.at
+    reasoningTokens: usage.reasoningOutputTokens, totalTokens: usage.totalTokens, durationMs: usage.durationMs, at: usage.at,
+    ...(usage.purpose ? { purpose: usage.purpose } : {})
   });
 });
 // Unreadable reads as manual_core_only here, which routes like normal: only economy steps a Skill down.
@@ -1112,6 +1130,14 @@ for (const workspace of analysisStore.listWorkspaces()) {
   if (analysisStore.getSetting(workspace.id, FIRST_DRAFTS_SETTING) && !analysisStore.listMilestones(workspace.id).length)
     analysisStore.deleteSetting(workspace.id, FIRST_DRAFTS_SETTING);
 }
+// Once: Codex's own memories (now off for structured Skills) become each account's lessons, and the files are moved into the data
+// folder's backups (codex-memory-import.ts, docs/token-economy.md §2). Before the runtime starts, so nothing holds them open.
+try {
+  const ownerHome = codexProcessEnvironment().CODEX_HOME;
+  const imported = importCodexMemories(analysisStore, { dataDir,
+    homes: [...(ownerHome ? [{ label: "owner", dir: ownerHome }] : []), ...guestCodexHomes(runtimesDir())] });
+  if (imported) console.info(JSON.stringify({ type: "repair.codex_memory_import", ...imported, checkedAt: new Date().toISOString() }));
+} catch (error) { console.warn(JSON.stringify({ type: "repair.codex_memory_import_failed", error: String(error), checkedAt: new Date().toISOString() })); }
 const diligencePasses = new Set<string>();
 /**
  * The automatic research pass: once the interview is complete (or a report already exists, which makes this
@@ -1127,7 +1153,7 @@ function startDiligencePass(workspaceId: string, checkedAt: string): void {
   const due = linesDueForDiligence(analysisStore, workspaceId, new Date());
   if (!due.length) return;
   diligencePasses.add(workspaceId);
-  void (async () => {
+  void withUsagePurpose(NON_CORE_PURPOSE, async () => {
     enterUsageWorkspace(workspaceId);
     for (const identityId of due) {
       const outcome = await getDiligence(workspaceId)(identityId).catch((error): { state: "blocked"; code: string; message: string } =>
@@ -1136,7 +1162,7 @@ function startDiligencePass(workspaceId: string, checkedAt: string): void {
       // A tight budget applies to every line alike: stop rather than ask the next one and be told the same.
       if (outcome.state === "blocked" && /BUDGET|COST_SIGNAL/.test(outcome.code)) break;
     }
-  })().finally(() => diligencePasses.delete(workspaceId));
+  }).finally(() => diligencePasses.delete(workspaceId));
 }
 // Where every task's manualbook (and anything the assistant saves for a task) lives: inside the data directory, so a
 // backup carries it and it is never written into the repository.
@@ -1422,7 +1448,7 @@ if (!capabilitySecret) {
         // The interview just finished: the first drafts start now, not at the next tick up to fifteen minutes later, while 主线 said
         // 「完成初始访谈后生成」 to someone who had (2026-10-17 walkthrough, W-12).
         .then((outcome) => {
-          // The interview just finished: the first drafts, and the search for the lines' skills (coverageDue), start now, not at the next tick.
+          // The interview just finished: the first drafts, and the search for the lines' skills (lineSetupDue), start now, not at the next tick.
           if (outcome.state === "ready") { void firstDraftsPass(workspaceId).catch(() => undefined); void publicSkillPass(workspaceId, new Date().toISOString()).catch(() => undefined); }
           return outcome; }),
     transcriptionStatus: () => transcriber.status(),

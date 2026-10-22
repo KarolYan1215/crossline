@@ -105,6 +105,19 @@ export type SkillRunOptions<T> = {
   outputSchema: unknown;
   /** Validated before the turn starts; whatever it returns is what gets sent. */
   prepareInput: (input: unknown) => unknown;
+  /**
+   * The prompt cache (docs/token-economy.md §2.5): the provider matches a request from its first token, so what is the same for every
+   * run of this Skill goes first. The top-level keys of the prepared input that change little between runs (the person's profile and
+   * preferences, the archetype table, a line's facts), from the least to the most changing; they are sent first and every other key
+   * (today's date, the object of this run) after, each in the order the runner wrote it (`cacheOrderedInput`). Nothing is added or left out.
+   */
+  stableKeys?: readonly string[];
+  /**
+   * What only this run is told beside the Skill's own instructions (feedback to apply, the library skills it names, a mode): sent as the
+   * last part of the first prompt, after the input, so the developer instructions are the same for every run of the Skill and the
+   * shared writing style after them is not pushed behind text that changes (`firstPromptTexts`).
+   */
+  runNote?: string;
   /** The trust boundary: the runtime proving a shape is not the same as the content being right. */
   validateOutput: (output: unknown, prepared: unknown) => T;
   /**
@@ -737,14 +750,15 @@ async function startAgentThread<T>(scope: Scope, options: SkillRunOptions<T>, co
   const hosted = !context.provider;
   const config: Record<string, unknown> = {
     web_search: hosted ? "live" : "disabled", include_environment_context: true,
-    "memories.use_memories": false, "memories.generate_memories": false,
+    // No Codex memory for the assistant either (2026-10-21, docs/token-economy.md §2): what it needs from earlier runs is given to it.
+    "memories.use_memories": false, "memories.generate_memories": false, "features.memories": false,
     "features.shell_tool": true, "features.web_search": hosted, "features.standalone_web_search": hosted, "features.plugins": true,
     "features.view_image": true,
     // The runtime's plan tool (each update reaches `onPlan`, shown while the run works) and the person's ChatGPT connectors, read-only.
     ...(options.onPlan ? { "tools.update_plan.enabled": true } : {}),
     ...(options.connectors ? { "features.apps": true, ...CONNECTORS_READ_ONLY } : {}),
     ...(options.askPerson ? ASK_PERSON_CONFIG : {}),
-    ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition, "features.memories": false, ...contextWindowConfig(context.provider) } : {}),
+    ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition, ...contextWindowConfig(context.provider) } : {}),
     // In the sandbox: a named permission profile (writes in the task directory, reads only what it is given, no network) and a
     // command environment that carries none of the worker's own variables.
     ...(agent.sandbox ? { default_permissions: SANDBOX_PROFILE, permissions: sandboxProfile(agent.sandbox),
@@ -791,15 +805,14 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     // wrong variant made the whole thread/start fail — so the one Skill granted the web could never
     // start at all. A scout that must cite what it read needs `live` rather than `cached`.
     web_search: options.allowWebSearch ? "live" : "disabled", project_doc_max_bytes: 0, include_environment_context: false,
-    // Cross-run memory, on by explicit user decision: every call used to be a clean-slate context for
-    // reproducibility and audit, which is why this pair was `false`. Turning it on means the model's
-    // own accumulated memory can now influence an answer — the same input is no longer guaranteed to
-    // produce the same output — and that memory itself lives in Codex's own CODEX_HOME, not this app's
-    // SQLite ledger, so it is outside `pnpm export`/`backup-crossline.ps1`. See the Connectors page for
-    // the same disclosure surfaced where a person would actually see it.
-    "memories.use_memories": true, "memories.generate_memories": true,
+    // No Codex memory, generated or used (the owner's decision of 2026-10-21, docs/token-economy.md §1–2; it had been on by his
+    // earlier choice). Every idle thread cost a stage-1 summary on the account's own quota and the consolidation another, neither
+    // counted in `model_usage`; 510 summaries from 2026-10-20 were never used once (a structured run has no shell to read MEMORY.md
+    // and its JSON never cites it); the memory block changed each run's opening and so missed the prompt cache; and several accounts'
+    // runs were mixed into the one memory of the owner's runtime. What a run should know from earlier runs comes from the ledger.
+    "memories.use_memories": false, "memories.generate_memories": false,
     "tools.update_plan.enabled": false, "tools.experimental_request_user_input.enabled": false,
-    "features.plugins": true, "features.memories": true,
+    "features.plugins": true, "features.memories": false,
     // Goals are off too: a goal the model set would start turns of its own after this run had its answer (they are on by default).
     ...Object.fromEntries(["shell_tool", "multi_agent", "multi_agent_v2", "apps", "hooks", "codex_hooks", "plugin_hooks", "web_search", "standalone_web_search", "image_generation", "view_image", "request_permissions_tool", "tool_suggest", "token_budget", "current_time_reminder", "sleep_tool", "send_message_to_user_async", "js_repl", "code_mode", "deferred_executor", "goals"]
       .map((key) => [`features.${key}`, (Boolean(options.allowWebSearch) && (key === "web_search" || key === "standalone_web_search"))
@@ -812,9 +825,8 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     ...(options.askPerson ? ASK_PERSON_CONFIG : {}),
     ...Object.fromEntries(Object.keys(mcp).map((key) => [`mcp_servers.${key}.enabled`, false])),
     ...ownOnly,
-    // Another provider: defined for this thread only, and no memories — Codex's memory runs would call an OpenAI model on it.
-    ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition,
-      "memories.use_memories": false, "memories.generate_memories": false, "features.memories": false, ...contextWindowConfig(context.provider),
+    // Another provider: defined for this thread only (memories are off above for every run).
+    ...(context.provider ? { [`model_providers.${context.provider.id}`]: context.provider.definition, ...contextWindowConfig(context.provider),
       // The catalog of every skill on this runtime is not needed (the run names its own) and changes with what other runs hold on, which
       // would make each request's opening differ and miss the provider's cache.
       "skills.include_instructions": false } : {})
@@ -847,7 +859,9 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
  * time is a schema problem, not a cost of doing business.
  */
 async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, context: RunContext, audit: AnalysisAudit, run: {
-  skillName: string; threadId: string; outputSchema: unknown; allowedItemTypes: string[]; firstPrompt: string;
+  skillName: string; threadId: string; outputSchema: unknown; allowedItemTypes: string[];
+  /** One text, or several sent as the parts of one message in this order (`firstPromptTexts`). */
+  firstPrompt: string | string[];
   /** Local image files shown with the first prompt (a payment or meal screenshot the person attached); never resent with a repair. */
   images?: string[];
   onPlan?: SkillRunOptions<unknown>["onPlan"];
@@ -945,7 +959,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   });
 
   /** One turn on the thread, from prompt to the model's final text. */
-  const runTurn = async (text: string, images: string[] = []): Promise<string> => {
+  const runTurn = async (text: string | string[], images: string[] = []): Promise<string> => {
     finalText = undefined;
     streamed = "";
     reportedAt = 0;
@@ -958,7 +972,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
     void completed.catch(() => {});
     const route = context.route;
     const turn = record(record(await scope.rpc("turn/start", {
-      threadId: run.threadId, ...(run.agent ? {} : { environments: [] }), input: [{ type: "text", text, text_elements: [] }, ...images.map((path) => ({ type: "localImage", path }))], outputSchema: run.outputSchema,
+      threadId: run.threadId, ...(run.agent ? {} : { environments: [] }), input: [...(Array.isArray(text) ? text : [text]).map((part) => ({ type: "text", text: part, text_elements: [] })), ...images.map((path) => ({ type: "localImage", path }))], outputSchema: run.outputSchema,
       // Re-stated every turn: a continued turn inherits the thread's model unless told otherwise.
       ...(route ? { model: route.model, ...(route.effort ? { effort: route.effort } : {}) } : {})
     }))?.turn);
@@ -992,7 +1006,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   };
 
   /** A silent turn is interrupted and the same prompt sent again, a couple of times; every other failure ends the run as before. */
-  const runTurnOrRetryStall = async (prompt: string, images: string[] = []): Promise<string> => {
+  const runTurnOrRetryStall = async (prompt: string | string[], images: string[] = []): Promise<string> => {
     for (let stalls = 0; ; stalls += 1) {
       try { return await runTurn(prompt, images); }
       catch (error) {
@@ -1216,6 +1230,36 @@ async function resubscribe(client: CodexRpcBoundary, scope: Scope, threadId: str
   released.delete(threadId);
 }
 
+/**
+ * The prepared input with its stable keys first (`SkillRunOptions.stableKeys`), then every other key in the order the runner wrote it.
+ * Only the order moves: the same keys and values, so the Skill reads the same object.
+ */
+export function cacheOrderedInput(prepared: unknown, stableKeys: readonly string[] = []): unknown {
+  const object = record(prepared);
+  if (!object || !stableKeys.length) return prepared;
+  const first = stableKeys.filter((key, index) => Object.hasOwn(object, key) && stableKeys.indexOf(key) === index);
+  return Object.fromEntries([...first, ...Object.keys(object).filter((key) => !first.includes(key))].map((key) => [key, object[key]]));
+}
+
+/** How the run note is introduced, so the model reads it as part of its instructions for this run. */
+export const RUN_NOTE_LEAD = "Instructions for this run only (they extend the developer instructions):";
+
+/**
+ * A fresh run's first message, in parts, ordered for the prompt cache (docs/token-economy.md §2.5). The runtime records the whole message
+ * first and the `<skill>` blocks of the skills it names only after it (vendor/codex core/src/session/turn.rs: the message is recorded by
+ * `run_hooks_and_record_inputs`, the blocks `build_skills_and_plugins` made are recorded after it), so on this path no Skill text can
+ * come before the input; what can be ordered is the message itself: the target Skill's name and the input with its stable keys first,
+ * then what changes from run to run — the library skills named (they follow the line and the task; a name is read from any part,
+ * skills/src/selection.rs `collect_explicit_skill_mentions`) and the run note.
+ */
+export function firstPromptTexts(skillName: string, extraSkills: readonly string[], prepared: unknown,
+  options: { stableKeys?: readonly string[] | undefined; runNote?: string | undefined } = {}): string[] {
+  const note = options.runNote?.trim();
+  return [`$${skillName}\n\n${JSON.stringify(cacheOrderedInput(prepared, options.stableKeys))}`,
+    ...(extraSkills.length ? [extraSkills.map((name) => `$${name}`).join(" ")] : []),
+    ...(note ? [`${RUN_NOTE_LEAD}\n${note}`] : [])];
+}
+
 async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted: SkillRunOptions<T>, context: RunContext): Promise<SkillRunResult<T>> {
   const { options: requested, input } = withOptionalTools(wanted, given, context);
   const options = withWebTools(requested, context);
@@ -1248,7 +1292,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted:
       skillName: options.skillName, threadId, outputSchema: options.outputSchema, allowedItemTypes, ...(options.onImage ? { onImage: options.onImage } : {}),
       ...(options.onPlan ? { onPlan: options.onPlan } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
-      firstPrompt: `${[options.skillName, ...context.extraSkills].map((name) => `$${name}`).join(" ")}\n\n${JSON.stringify(prepared)}`,
+      firstPrompt: firstPromptTexts(options.skillName, context.extraSkills, prepared, options),
       ...(options.images?.length ? { images: options.images } : {}),
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),

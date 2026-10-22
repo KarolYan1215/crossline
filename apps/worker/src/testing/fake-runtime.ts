@@ -46,7 +46,10 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   library?: string[] } = {}): {
   rpc: JsonLineRpcClient;
   turns: () => number;
+  /** The first text part of each turn (a fresh run's: the Skill named and its input). */
   prompts: () => string[];
+  /** Every text part of each turn, in order: a fresh run sends its input first, then the library skills it names and its run note. */
+  inputs: () => string[][];
   interrupts: () => number;
   /** The thread/start parameters the runner sent. */
   threadStarts: () => Array<Record<string, unknown>>;
@@ -75,6 +78,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
   let threads = 0;
   let threadId = "";
   const prompts: string[] = [];
+  const inputs: string[][] = [];
   const starts: Array<Record<string, unknown>> = [];
   const pendingAsks = new Map<string, (value: Record<string, unknown>) => void>();
   let askId = 0;
@@ -143,7 +147,10 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
       const turnId = `turn-${turns}`;
       // What the runner actually sent, so a test can assert that a repair turn carried the rejection.
       const input = request.params?.input;
-      prompts.push(Array.isArray(input) ? String((input[0] as { text?: unknown })?.text ?? "") : "");
+      const parts = (Array.isArray(input) ? input as Array<{ type?: unknown; text?: unknown }> : [])
+        .filter((item) => item.type === "text").map((item) => String(item.text ?? ""));
+      inputs.push(parts);
+      prompts.push(parts[0] ?? "");
       // A hung backend: the turn starts and then nothing, ever, comes back for it.
       if (options.stallTurns?.includes(turns)) return;
       // A turn on a thread this connection unsubscribed from runs, but none of its events reach the connection.
@@ -182,7 +189,7 @@ export function fakeRuntime(answers: Answer[], skillName: string | string[], opt
       }, options.delayMs ?? 1);
     }
   });
-  return { rpc, turns: () => turns, prompts: () => prompts, interrupts: () => interrupts, threadStarts: () => starts, configCalls: () => configCalls,
+  return { rpc, turns: () => turns, prompts: () => prompts, inputs: () => inputs, interrupts: () => interrupts, threadStarts: () => starts, configCalls: () => configCalls,
     unsubscribed: () => unsubscribed, resumes: () => resumes, resumeParams: () => resumeParams, calls: () => calls };
 }
 

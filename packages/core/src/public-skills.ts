@@ -125,19 +125,17 @@ export type SkillScoutContext = {
   installed: Array<{ id: string; name: string; repo: string; path: string }>;
   categories: Array<{ id: PublicSkillCategory; label: string }>;
   /**
-   * `coverage`: the search after the interview (2026-10-20, the owner's 「覆盖所有需求为止」): every need of every line, round after round
-   * until an answer names nothing new. `round` counts from 1; `tried` lists what earlier rounds named and could not install.
+   * `setup`: the one search for lines just set up (2026-10-21, docs/token-economy.md §2.4, replacing the rounds 「until every need is
+   * covered」): `lines` holds only those lines, and there is no second round.
    */
-  mode?: "routine" | "coverage";
-  round?: number;
-  tried?: Array<{ repo: string; path: string; reason: string }>;
+  mode?: "routine" | "setup";
 };
 export type SkillCandidate = { name: string; repo: string; path: string; category: PublicSkillCategory; lines: string[]; why: string };
 export type SkillScoutAnswer = { candidates: SkillCandidate[]; blockers: Array<{ code: string; message: string }> };
 
 const str = (max: number) => ({ type: "string", minLength: 1, maxLength: max }) as const;
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
-/** One answer's candidates (was 8). The coverage search asks again until an answer names nothing new, so the total is not capped. */
+/** One answer's candidates: a setup search for several lines at once may name up to eight a line; the worker keeps eight a line. */
 export const SKILL_SCOUT_CANDIDATES_MAX = 20;
 export const SKILL_SCOUT_SCHEMA = object({
   candidates: { type: "array", maxItems: SKILL_SCOUT_CANDIDATES_MAX, items: object({
@@ -201,6 +199,40 @@ export function validatePublicSkillReview(value: unknown): PublicSkillReview {
   const answer = value as PublicSkillReview;
   if (!answer || !["usable", "text_only", "reject"].includes(answer.verdict) || !Array.isArray(answer.reasons) || !answer.reasons.length) {
     throw Object.assign(new Error("SKILL_REVIEW_SHAPE_INVALID"), { detail: "verdict 为 usable、text_only 或 reject，reasons 至少一条" });
+  }
+  return answer;
+}
+
+/**
+ * Several candidates of one line in one review run (2026-10-21, docs/token-economy.md §2.4: the public-skill reviews were 12% of the
+ * ChatGPT quota, with a 24% cache share, one run per candidate). At most `PUBLIC_SKILL_BATCH_MAX` a run; a candidate whose files shown
+ * to the reviewer exceed `PUBLIC_SKILL_BATCH_CHARS` is reviewed alone, so a batch never cuts what any one review sees.
+ */
+export const PUBLIC_SKILL_BATCH_MAX = 5;
+export const PUBLIC_SKILL_BATCH_CHARS = 40_000;
+export type PublicSkillBatchReview = { reviews: Array<PublicSkillReview & { id: string }> };
+export const PUBLIC_SKILL_BATCH_REVIEW_SCHEMA = object({
+  reviews: { type: "array", minItems: 1, maxItems: PUBLIC_SKILL_BATCH_MAX, items: object({
+    id: str(20), verdict: { type: "string", enum: ["usable", "text_only", "reject"] },
+    reasons: { type: "array", minItems: 1, maxItems: 8, items: str(300) }
+  }) }
+});
+/** Every id in the batch answered exactly once, each like a single review. */
+export function validatePublicSkillBatchReview(value: unknown, ids: readonly string[]): PublicSkillBatchReview {
+  const answer = value as PublicSkillBatchReview;
+  if (!answer || !Array.isArray(answer.reviews)) throw Object.assign(new Error("SKILL_REVIEW_SHAPE_INVALID"), { detail: "reviews 为每个 id 一条" });
+  const seen = answer.reviews.map((review) => review?.id);
+  const missing = ids.filter((id) => !seen.includes(id));
+  const unknown = seen.filter((id) => !ids.includes(id));
+  const repeated = seen.filter((id, index) => seen.indexOf(id) !== index);
+  if (missing.length || unknown.length || repeated.length) {
+    throw Object.assign(new Error("SKILL_REVIEW_IDS_INVALID"), { detail: [missing.length ? `缺少 ${missing.join("、")}` : "",
+      unknown.length ? `没有这些 id：${unknown.join("、")}` : "", repeated.length ? `重复：${repeated.join("、")}` : ""].filter(Boolean).join("；") });
+  }
+  for (const review of answer.reviews) {
+    try { validatePublicSkillReview(review); } catch (error) {
+      throw Object.assign(new Error("SKILL_REVIEW_SHAPE_INVALID"), { detail: `${review.id}：${(error as { detail?: string }).detail ?? ""}` });
+    }
   }
   return answer;
 }

@@ -20,7 +20,8 @@ import { returnPageLines } from "./return";
 import { captureProgress } from "./capture-progress";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
-export type PageContext = { kind: string; entityId: string };
+/** `stepId`: on a task, the step its block is for (Today's day panel), so 「这一步」 names that step rather than the first open one. */
+export type PageContext = { kind: string; entityId: string; stepId?: string };
 export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 
 /** One action on a card and what became of it. */
@@ -185,11 +186,12 @@ export function pageLine(pack: ConciergePack): string[] {
     `关于这条主线的情况交给访谈时 profile.tell 的 lineId 填 ${line.id}；修改长期目标同样交给该主线的访谈（由本人在卡片上确认）。`];
 }
 
-function pageTask(pack: ConciergePack): string[] {
+export function pageTask(pack: ConciergePack): string[] {
   if (pack.page.kind !== "task") return [];
   const task = pack.tasks.find((item) => item.id === pack.page.entityId);
   if (!task) return [];
-  const current = task.steps.find((step) => step.status === "planned");
+  // From a picked block the step is that block's own, while it is still open; otherwise the first open step.
+  const current = task.steps.find((step) => step.id === pack.page.stepId && step.status === "planned") ?? task.steps.find((step) => step.status === "planned");
   return [`本页任务：${task.id} | ${task.title} | 截止 ${task.dueDate || "—"}；步骤（id | 标题 | 状态，▶ 为当前步骤）：`,
     ...task.steps.map((step) => `- ${step === current ? "▶ " : ""}${step.id} | ${step.title} | ${step.status}${step.executor === "agent" ? "（助手做）" : ""}`)];
 }

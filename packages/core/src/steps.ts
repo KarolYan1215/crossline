@@ -74,6 +74,11 @@ export type StepPlan = {
   units: StepUnit[];
   questions: StepQuestion[];
   steps: PlannedStep[];
+  /**
+   * The short ids of the facts, preferences and lessons (「[f3]」「[p1]」「[l2]」) the plan really rests on, counted as used when it is saved
+   * (migration 20). Not stored with the plan; the schema requires it.
+   */
+  usedRefs?: string[];
 };
 export type StepWarning = { code: string; detail: string };
 
@@ -100,7 +105,8 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
     executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str, covers: { type: "array", items: str }, why: str,
     aiAssist: object({ tool: str, how: str, minutesSaved: num }),
     firstAction: str
-  }) }
+  }) },
+  usedRefs: { type: "array", items: str }
 });
 export const STEP_PLAN_SCHEMA = stepPlanSchema();
 

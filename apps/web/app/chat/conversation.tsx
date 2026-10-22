@@ -35,9 +35,10 @@ export function pageFromLocation(): PageContext {
 export function Conversation({ variant, placeholder, page }: {
   /**
    * `inline`: Today's box with the latest exchange under it; `panel`: the whole day's conversation, with search; `task`: a task's own
-   * entry — the box first, then only what was said from this task's page.
+   * entry — the box first, then only what was said from this task's page; `block`: the same for a block picked on Today's day panel,
+   * showing only this task's latest exchange, held short.
    */
-  variant: "inline" | "panel" | "task"; placeholder?: string;
+  variant: "inline" | "panel" | "task" | "block"; placeholder?: string;
   /** Fixed for an entry that belongs to one object (a task dialog); otherwise read from the address. */
   page?: PageContext;
 }) {
@@ -118,10 +119,12 @@ export function Conversation({ variant, placeholder, page }: {
   };
 
   // Today's box shows the latest exchange only; the panel shows the day; a task's entry shows what was said from its page.
-  const shown = variant === "inline" ? lastExchange(messages) : variant === "task" && page ? fromPage(messages, page) : messages;
+  const shown = variant === "inline" ? lastExchange(messages)
+    : variant === "task" && page ? fromPage(messages, page)
+    : variant === "block" && page ? lastExchange(fromPage(messages, page)) : messages;
   // On a page (Today, the return page) a long reply is held to three lines; the full conversation shows it whole.
-  const item = (message: MessageView) => <MessageItem key={message.id} message={message} onUpdate={update} choices={choices} compact={variant === "inline"} />;
-  if (variant === "task") return <div className="conversation" data-variant={variant}>
+  const item = (message: MessageView) => <MessageItem key={message.id} message={message} onUpdate={update} choices={choices} compact={variant === "inline" || variant === "block"} />;
+  if (variant === "task" || variant === "block") return <div className="conversation" data-variant={variant}>
     <Composer mode="capture" busy={busy} placeholder={placeholder ?? "对该任务的指令或问题：改截止、这一步做完了、记进度、推迟、讲解某一步…"} onSubmit={submit}>
       {busy && <small className="muted composer-status" role="status">正在理解…</small>}
       {status && <small className="muted composer-status" role="status">{status}</small>}

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
-  mineFactLabel, MINE_SKILL_SCHEMA, currentMineVersion, keepMineSkill, mineSkillSettingKey, readMineSkill, renderMineSkill, validateMineSkill,
-  type MineMaterial, type MineSkillCompilation, type MineSkillContext
+  mineFactLabel, MINE_SKILL_SCHEMA, applyMineChanges, currentMineVersion, keepMineSkill, mineMaterialId, mineSkillSettingKey, mineTextHash, readMineSkill,
+  renderMineSkill, resolveMineSources, validateMineSkill, type MineMaterial, type MineRule, type MineSkillCompilation, type MineSkillContext, type PreviousMineRule
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
 import { listAgentTasks, saveMineVersion, type CrosslineStore, type StoredPreference } from "@crossline/db";
@@ -20,8 +20,10 @@ const MAX_FACTS = 60;
 const INSTRUCTIONS = "Compile the person's own skill for this one line from the supplied materials, as the Skill describes: only how "
   + "this person does this line's work — their plays, preferences and hard red lines — never generic methodology. Every rule cites the "
   + "material ids it rests on and copies a quote verbatim from one of them. A platform red line (a rule whose breach gets content "
-  + "punished) may instead rest on one public https page you found with web search. Keep previous rules that the materials still support. "
-  + "Return raw JSON only.";
+  + "punished) may instead rest on one public https page you found with web search. `materials` are only what is new or changed since "
+  + "`previousRules` were compiled; answer with changes: `add` a rule, `revise` or `drop` a previous one by its ruleId when a new material "
+  + "bears on it. A previous rule you do not name stays as it is. A rule may cite the materials given or a previous rule's sources. "
+  + "With previousRules, leave `summary` empty unless the changes alter it. Return raw JSON only.";
 
 /** Preferences that say how the work is done; estimates, importance and postponements are scheduling, not a play. */
 const PLAY_SOURCES = new Set<StoredPreference["source"]>(["correction", "retrospective", "standard_confirmed", "relation_rejected"]);
@@ -76,7 +78,9 @@ export function mineMaterials(store: CrosslineStore, workspaceId: string, lineId
       text: `${fact.value}${fact.sourceQuote && fact.sourceQuote !== fact.value ? `（原话：${fact.sourceQuote}）` : ""}`,
       label: mineFactLabel(fact.slot, fact.value) });
   }
-  return found.map((material, index) => ({ ...material, id: `m${index + 1}` }));
+  // Ids from the stable keys (they used to be positions, m1 m2 …, so one new material renumbered every later one).
+  const taken = new Set<string>();
+  return found.map((material) => ({ ...material, id: mineMaterialId(material.key, taken) }));
 }
 
 export const mineMaterialsFingerprint = (materials: Array<{ key: string; text: string }>) =>
@@ -128,42 +132,81 @@ export function createInsightCompiler(store: CrosslineStore, workspaceId: string
     const line = identityLines(store, workspaceId).find((item) => item.id === target);
     if (!line) return { blocked: "LINE_NOT_FOUND", lineId: target };
     const materials = mineMaterials(store, workspaceId, target);
-    const previous = currentMineVersion(readMineSkill(store.getSetting(workspaceId, mineSkillSettingKey(target))));
-    const context: MineSkillContext = { version: "crossline.mine-skill.v1", today: now.toISOString().slice(0, 10),
-      line: { id: line.id, label: line.label, goals: line.goals ?? [] },
-      materials: materials.map(({ key: _key, ...material }) => material),
-      previousRules: (previous?.rules ?? []).map((rule) => ({ kind: rule.kind, text: rule.text })) };
-    // Web search finds a platform's written red lines; without the runtime's search host the run still compiles the person's own rules.
-    const web = !webResearchBlocker();
-    const result = await runCodexSkill<MineSkillCompilation>(client, context, {
-      skillName: INSIGHT_COMPILER, cwd, developerInstructions: INSTRUCTIONS + (web ? "" : " Web search is unavailable: write no url-only red line."),
-      outputSchema: MINE_SKILL_SCHEMA, prepareInput: () => context, ...(web ? { allowWebSearch: true } : {}),
-      validateOutput: (output) => validateMineSkill(output, context),
-      softAccept: (_rejection, output) => keepMineSkill(output, context),
-      onAudit: () => {}, timeoutMs: 60 * 60_000
-    });
-    if (!result.ok) {
+    const all: MineMaterial[] = materials.map(({ key: _key, ...material }) => material);
+    const fingerprint = mineMaterialsFingerprint(materials);
+    const materialHashes = Object.fromEntries(all.map((material) => [material.id, mineTextHash(material.text)]));
+    const blocked = (code: string, message = "") => {
       store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.mine:blocked:${target}:${now.getTime()}`,
-        type: "skill.mine.blocked", entityId: target, payload: { lineId: target, code: result.blocker.code, message: result.blocker.message.slice(0, 400),
-          fingerprint: mineMaterialsFingerprint(materials), at: now.toISOString() } });
-      return { blocked: result.blocker.code, lineId: target };
+        type: "skill.mine.blocked", entityId: target, payload: { lineId: target, code, message: message.slice(0, 400), fingerprint, at: now.toISOString() } });
+      return { blocked: code, lineId: target };
+    };
+    const previous = currentMineVersion(readMineSkill(store.getSetting(workspaceId, mineSkillSettingKey(target))));
+    // Incremental (token-economy.md §2): on top of a compiled version that recorded its materials, only what is new or changed since is
+    // shown, beside that version's rules with their sources. Anything else — a version the person wrote, one compiled before — is rebuilt
+    // from every material, its rules still offered (their sources found again by their quotes).
+    const base = previous?.by === "compiler" ? previous.materialHashes : undefined;
+    const shown = base ? all.filter((material) => base[material.id] !== materialHashes[material.id]) : all;
+    const previousRules: PreviousMineRule[] = (previous?.rules ?? []).map((rule, index) => ({ id: `r${index + 1}`, kind: rule.kind, text: rule.text,
+      sources: resolveMineSources(rule, all), quote: rule.quote, url: rule.url }));
+    const cited = new Set(previousRules.flatMap((rule) => rule.sources));
+    const citable = [...shown, ...all.filter((material) => cited.has(material.id) && !shown.includes(material))];
+    const context: MineSkillContext = { version: "crossline.mine-skill.v2", today: now.toISOString().slice(0, 10),
+      line: { id: line.id, label: line.label, goals: line.goals ?? [] }, materials: shown, previousRules };
+
+    let answer: MineSkillCompilation = { summary: "", rules: [], blockers: [] };
+    // Nothing new or changed (a material was only removed): no model run; the rules that rested on it go.
+    if (shown.length) {
+      // Web search finds a platform's written red lines; without the runtime's search host the run still compiles the person's own rules.
+      const web = !webResearchBlocker();
+      const result = await runCodexSkill<MineSkillCompilation>(client, context, {
+        skillName: INSIGHT_COMPILER, cwd, developerInstructions: INSTRUCTIONS,
+        // The prompt cache (docs/token-economy.md §2.5): the line and its material before the previous rules and the date.
+        stableKeys: ["version", "line", "materials", "previousRules"],
+        ...(web ? {} : { runNote: "Web search is unavailable: write no url-only red line." }),
+        outputSchema: MINE_SKILL_SCHEMA, prepareInput: () => context, ...(web ? { allowWebSearch: true } : {}),
+        validateOutput: (output) => validateMineSkill(output, context, citable),
+        softAccept: (_rejection, output) => keepMineSkill(output, context, citable),
+        onAudit: () => {}, timeoutMs: 60 * 60_000
+      });
+      if (!result.ok) return blocked(result.blocker.code, result.blocker.message);
+      answer = result.output;
     }
-    const dropped: string[] = [];
-    const rules = [];
-    for (const rule of result.output.rules) {
-      if (!rule.sources.length) {
+    const applied = applyMineChanges(answer, context, citable);
+    const dropped = [...applied.dropped];
+    const rules: MineRule[] = [];
+    const known = new Set((previous?.rules ?? []).filter((rule) => !rule.sources.length).map((rule) => rule.url));
+    for (const rule of applied.rules) {
+      // A url-only red line's page is opened once, when it is first written; one carried over has been.
+      if (!rule.sources.length && !known.has(rule.url)) {
         const page = await safeGet(rule.url, deps.safeGet ?? defaultSafeGetDeps(), { maxBytes: 2_000_000, timeoutMs: 20_000 }).catch(() => undefined);
         if (!page?.ok) { dropped.push(`${rule.text.slice(0, 40)}：来源页面无法打开`); continue; }
       }
       rules.push(rule);
     }
-    if (!rules.length) return { blocked: "MINE_SKILL_EMPTY", lineId: target };
+    // Recorded like a failed run, so the same materials are not tried again every tick (W-114).
+    if (!rules.length) return blocked("MINE_SKILL_EMPTY", dropped.join("；"));
     const at = now.toISOString();
+    const summary = answer.summary.trim() || previous?.summary || "";
+    const same = previous?.by === "compiler" && previous.rules?.length === rules.length && (previous.summary ?? "") === summary
+      && rules.every((rule, index) => { const old = previous.rules![index]!; return old.kind === rule.kind && old.text === rule.text && old.quote === rule.quote; });
+    if (same) {
+      // The rules stand as they are: the version in force now records the materials it is up to date with, and nothing is rewritten.
+      touchMineVersion(store, workspaceId, target, previous!.version, { fingerprint, materialHashes });
+      return { lineId: target, version: previous!.version, rules: rules.length, dropped };
+    }
     const stored = readMineSkill(store.getSetting(workspaceId, mineSkillSettingKey(target)));
     const number = Math.max(0, ...(stored?.versions ?? []).map((item) => item.version)) + 1;
-    const rendered = renderMineSkill({ line: { id: line.id, label: line.label }, version: number, at, summary: result.output.summary, rules, materials });
-    saveMineVersion(store, workspaceId, target, { at, by: "compiler", markdown: rendered.markdown, rules: rendered.rules,
-      fingerprint: mineMaterialsFingerprint(materials) });
+    const rendered = renderMineSkill({ line: { id: line.id, label: line.label }, version: number, at, summary, rules, materials: all });
+    saveMineVersion(store, workspaceId, target, { at, by: "compiler", markdown: rendered.markdown, rules: rendered.rules, fingerprint, materialHashes, summary });
     return { lineId: target, version: number, rules: rules.length, dropped };
   };
+}
+
+/** Records on a version what it is up to date with, without a new version (the rules did not change). */
+function touchMineVersion(store: CrosslineStore, workspaceId: string, lineId: string, version: number,
+  update: { fingerprint: string; materialHashes: Record<string, string> }): void {
+  const stored = readMineSkill(store.getSetting(workspaceId, mineSkillSettingKey(lineId)));
+  if (!stored) return;
+  store.setSetting(workspaceId, mineSkillSettingKey(lineId), JSON.stringify({ ...stored,
+    versions: stored.versions.map((item) => item.version === version ? { ...item, ...update } : item) }));
 }

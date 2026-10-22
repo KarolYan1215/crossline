@@ -186,6 +186,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       + "transaction for a payment, purchase, refund, transfer or salary the mail itself states with an amount: direction, amount, currency "
       + "(ISO, e.g. CNY) and merchant exactly as the mail shows them; an unusual or unrecognised charge is todo, not transaction. Other kinds "
       + "leave direction and currency empty and amount 0.",
+    // The prompt cache (docs/token-economy.md §2.5): the lines, open tasks and waits every pass shares, before this pass's mail and date.
+    stableKeys: ["lines", "openTasks", "waiting"],
     prepareInput: () => input, validateOutput: (output) => validateMailTriage(output, keyed.map((message) => message.key), waiting.map((item) => item.id)),
     onAudit: () => {}, timeoutMs: 20 * 60_000
   });

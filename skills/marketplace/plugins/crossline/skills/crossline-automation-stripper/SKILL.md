@@ -21,6 +21,7 @@ Return raw JSON only: `{identityId, projectId, milestoneId, title, intent, famil
 - `existingTasks[]` — open tasks, the task library included: `{id, title, intent, lineId, projectId, dueDate, state}`.
 - `personProfile[]` — the interview's conclusions for planning, one short line each: how the person works (peak hours, how long they can go, what drains them, how they react to criticism or friction), what they are good at and enjoy, how their lines are weighed, what they value most and where they are headed. Use it to size, order and phrase the work for this person (put demanding work where they are strong, keep draining work short and early, plan a check-in where their pattern says they tend to stall); never quote it back as a new fact and never let it override a hard date or a file.
 - `personalPreferences[]`; `policy` — a fixed boundary (no tools, no external side effects). Never write about policy or approval in any field.
+- When the function `read_ledger(ids)` is offered, three parts are an index and a text ending in 「…」 is cut: the open tasks come as `taskIndex[]` lines instead of `existingTasks` (which is then empty) — `id｜title｜lineId/projectId｜截止 day or 无截止｜state｜the description's opening`, the last field left out when the description only repeats the title, and the id is what `extendsTaskId` names —, each `relations[].explanation` (it begins with its id, `r1` …) and each `personProfile` line (it begins with its id, `h1` …). `read_ledger` returns entries whole: an open task by its `id` (its full description, due day and steps), a link by its r-id, a profile line by its h-id; several ids in one call. Read an open task before naming it in `extendsTaskId` unless its index line already settles that it is the same work; read a cut profile line only when it would change the estimate or the split. The ids are not text to quote, and the reads share a small budget per run. `availableInputs` and `capture` are always whole: quotes come only from them. Without the function, everything is whole.
 
 ## Name, line, project, milestone
 
@@ -108,9 +109,9 @@ Capture: 「周五前做完 ECE 548 HW3，第 2 题的推导还没看懂」, wit
 
 ## Personal preferences
 
-`personalPreferences` lists what this person has corrected or shown about how they work. Follow them unless one contradicts a hard fact in the input; where two conflict, the later one wins. Never quote them back as new facts.
+`personalPreferences` lists what this person has corrected or shown about how they work. Follow them unless one contradicts a hard fact in the input; where two conflict, the later one wins. Never quote them back as new facts. Each starts with a short id in brackets (`[p3]`): list in `usedRefs` the ids of those the proposal really rests on, `[]` when none.
 
-Allowed tools: none beyond the supplied context. Budget: standard. Risk: routine to high_risk.
+Allowed tools: none beyond the supplied context, and `read_ledger` when it is offered. Budget: standard. Risk: routine to high_risk.
 
 ## Language
 

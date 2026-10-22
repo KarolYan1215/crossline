@@ -206,6 +206,9 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const result = await runCodexSkill<OnboardingExtraction>(client, context, {
       skillName: ONBOARDING_EXTRACT_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: onboardingExtractSchema(ids),
       prepareInput: () => context, tools,
+      // The prompt cache (docs/token-economy.md §2.5): the lines, projects and portrait first, the facts on record (which grow) after
+      // them, and this run's replies, files, task and date last.
+      stableKeys: ["version", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"],
       validateOutput: (output) => {
         const valid = validateOnboardingExtraction(output, known);
         // A section this run owes comes back written: an empty answer here used to close it with nothing in it. After the repairs the

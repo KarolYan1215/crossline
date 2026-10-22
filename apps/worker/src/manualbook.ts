@@ -201,6 +201,8 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
     progress("designing", 0, 1);
     const designed = await runCodexSkill<ManualDesign>(client, context, {
       skillName: MANUAL_DESIGNER_SKILL, cwd, developerInstructions: DESIGN_INSTRUCTIONS, outputSchema: MANUAL_DESIGN_SCHEMA,
+      // The prompt cache (docs/token-economy.md §2.5): the person's and the line's, then the project's, then this task and the date.
+      stableKeys: ["version", "setting", "profile", "constraints", "person", "localFiles"],
       prepareInput: () => context, validateOutput: (output) => validateManualDesign(output, context), onAudit: () => {}, timeoutMs: 60 * 60_000
     });
     if (!designed.ok) return fail(designed.blocker.code, designed.blocker.message);
@@ -234,6 +236,7 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
           localFiles: context.localFiles, constraints: context.constraints, ...(context.setting?.length ? { setting: context.setting } : {}) };
         const found = await runCodexSkill<MaterialSearch>(client, searchContext, {
           skillName: MATERIAL_RESEARCHER_SKILL, cwd, developerInstructions: SEARCH_INSTRUCTIONS, outputSchema: MATERIAL_SEARCH_SCHEMA, allowWebSearch: true,
+          stableKeys: ["version", "setting", "constraints", "localFiles", "task"],
           prepareInput: () => searchContext, validateOutput: (output) => validateMaterialSearch(output), onAudit: () => {}, timeoutMs: 60 * 60_000
         });
         if (!found.ok) result.gaps.push(`这一步没有找到可核实的资料：${found.blocker.message}`);
@@ -267,7 +270,10 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
         node, covers: planned?.covers ?? [], ...(planned?.aiAssist ? { aiAssist: planned.aiAssist } : {}) };
       const validate = (output: unknown) => validateNodeWriteup(output, writeContext);
       const fresh = () => runCodexSkill<NodeWriteup>(client, writeContext, {
-        skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS + libraryInstruction(writerSkills),
+        skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS,
+        // The person's, then this task's shared material, then the step and the date; the library skills' note after the input.
+        stableKeys: ["version", "profile", "person", "aiTools", "task", "inputs", "sources"],
+        ...(writerSkills.length ? { runNote: libraryInstruction(writerSkills) } : {}),
         ...(writerSkills.length ? { extraSkills: writerSkills } : {}), outputSchema: NODE_WRITEUP_SCHEMA, keepThread: true,
         prepareInput: () => writeContext, validateOutput: validate, onAudit: () => {}, timeoutMs: 60 * 60_000
       });

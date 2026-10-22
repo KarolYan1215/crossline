@@ -127,6 +127,18 @@ export function allowScripts(ctx: AccessContext, kind: "public" | "grown", id: s
   return allowSkillScripts(getStore(), ctx.workspaceId, kind, id, allow) ? { ok: true } : { ok: false, code: "SCRIPTS_NOT_ALLOWABLE" };
 }
 
+/**
+ * The person asks for one more search of a line's public skills (docs/token-economy.md §2.4: a line is searched when it is set up, then
+ * monthly, and again when the person asks). The worker's next tick runs it as that line's setup search.
+ */
+export function requestSkillSearch(ctx: AccessContext, lineId: string): { ok: boolean; code?: string } {
+  if (!identityLines(ctx).some((line) => line.id === lineId)) return { ok: false, code: "LINE_NOT_FOUND" };
+  const at = new Date().toISOString();
+  getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `skill.public.search_requested:${lineId}:${at}`,
+    type: "skill.public.search_requested", entityId: lineId, payload: { lineId, at } });
+  return { ok: true };
+}
+
 export function deletePublicSkill(ctx: AccessContext, id: string): { ok: boolean; code?: string } {
   return removePublicSkill(getStore(), ctx.workspaceId, id, "本人删除", "person") ? { ok: true } : { ok: false, code: "SKILL_NOT_FOUND" };
 }

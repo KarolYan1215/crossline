@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { conformanceCases, SKILL_NEEDS, summarizeConformance } from "./provider-conformance";
-import { chooseSponsorModel, dominatedCandidates, evaluationYuanPerRun, parseSponsorModels, hoursToOffPeakEnd, sponsorFallbacks, sponsorModelForSkill, sponsorMonth, sponsorOffPeak, sponsorSpend, SPONSOR_PLANNING_SKILLS, SPONSOR_SIMPLE_SKILLS } from "./sponsor";
+import { chooseSponsorModel, skillYuanPerRun, dominatedCandidates, evaluationYuanPerRun, parseSponsorModels, hoursToOffPeakEnd, sponsorFallbacks, sponsorModelForSkill, sponsorMonth, sponsorOffPeak, sponsorSpend, SPONSOR_PLANNING_SKILLS, SPONSOR_SIMPLE_SKILLS } from "./sponsor";
 
 const record = (model: string, failCase?: string) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: "r", ranAt: "2026-10-18T00:00:00Z" },
   conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: item.id !== failCase, repairs: 0, ms: 1000 }))));
@@ -136,4 +136,34 @@ test("a share of repaired runs is the fourth thing compared: cheaper and faster 
   // With its repairs no higher, the cheaper and faster one does beat them.
   const fewer = evaluations.map((item) => item.model === "cheap" ? { ...item, record: record(24_000, 0) } : item);
   expect(new Map(dominatedCandidates(fewer, models))).toEqual(new Map([["main", "cheap"], ["glm", "cheap"]]));
+});
+
+test("a simple Skill goes to the candidate whose run of it costs least: cached input at its price, and that Skill's own repairs counted", () => {
+  // Same tokens on both: `cache` lists a cache-hit price, `nocache` (like Qwen on SiliconFlow) bills cached input as input.
+  const models = parseSponsorModels("main=2:8:1024,cache=1:4:1024:0.1,nocache=0.8:4:1024");
+  const tokens = { input: 100_000, cached: 80_000, output: 10_000, runs: 10 };
+  const triage = SKILL_NEEDS["crossline-mail-triage"]!.schemas[0]!;
+  const plain = (model: string) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: "r", ranAt: "2026-10-18T00:00:00Z" },
+    conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 1000 }))));
+  const evaluations = [
+    { model: "main", record: plain("main"), yuanPerRun: 0.05, tokens },
+    { model: "cache", record: plain("cache"), yuanPerRun: 0.05, tokens },
+    { model: "nocache", record: plain("nocache"), yuanPerRun: 0.05, tokens }
+  ];
+  // cache: (20k×1 + 80k×0.1 + 10k×4)/1M/10 = 0.0068; nocache: (100k×0.8 + 10k×4)/1M/10 = 0.012.
+  expect(evaluationYuanPerRun(evaluations[1]!, models)).toBe(0.0068);
+  expect(evaluationYuanPerRun(evaluations[2]!, models)).toBe(0.012);
+  expect(sponsorModelForSkill("crossline-mail-triage", "main", models, evaluations)).toBe("cache");
+  // A record whose mail sorting needed a repair every run costs about twice per run of it;
+  // a Skill none of whose cases was repaired costs a little under the average.
+  const repaired = summarizeConformance({ providerId: "sponsor", model: "cache", runtimeVersion: "r", ranAt: "2026-10-18T00:00:00Z" },
+    conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true,
+      repairs: item.id === triage ? 1 : 0, ms: 1000 }))));
+  const costly = { ...evaluations[1]!, record: repaired };
+  const overall = repaired.repairRate;
+  expect(overall).toBeGreaterThan(0);
+  expect(skillYuanPerRun(costly, "crossline-mail-triage", models)).toBeCloseTo(0.0068 / (1 + overall) * 2, 4);
+  expect(skillYuanPerRun(costly, "crossline-task-titler", models)).toBeCloseTo(0.0068 / (1 + overall), 4);
+  expect(sponsorModelForSkill("crossline-mail-triage", "main", models, [evaluations[0]!, costly, evaluations[2]!])).toBe("nocache");
+  expect(sponsorModelForSkill("crossline-task-titler", "main", models, [evaluations[0]!, costly, evaluations[2]!])).toBe("cache");
 });

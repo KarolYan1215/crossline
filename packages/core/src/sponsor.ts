@@ -1,4 +1,4 @@
-import { admittedSkills, THIRD_PARTY_CAPABILITIES, type ConformanceRecord, type ProviderCapabilities } from "./provider-conformance";
+import { admittedSkills, skillRepairRate, THIRD_PARTY_CAPABILITIES, type ConformanceRecord, type ProviderCapabilities } from "./provider-conformance";
 
 /**
  * The developer's model for invited accounts (2026-10-18, the owner's decision): accounts that redeemed an invite code run every Skill on
@@ -131,13 +131,28 @@ export function hoursToOffPeakEnd(now: Date): number {
 export const SPONSOR_SIMPLE_SKILLS: readonly string[] = ["crossline-task-titler", "crossline-calendar-classifier", "crossline-folder-classifier",
   "crossline-goal-splitter", "crossline-background-facts", "crossline-mail-triage"];
 
-/** Candidates that passed this Skill's checks with enough context, cheapest first (list order breaks ties). */
+/**
+ * What one run of this Skill is expected to cost on a candidate, in yuan (2026-10-21, docs/token-economy.md §2.6): the measured cost per
+ * run at the current prices (uncached input × input price + cached input × cache-hit price — the input price where the model lists none,
+ * as Qwen on SiliconFlow does — + output × output price), moved from the record's overall repair share to this Skill's. The measured
+ * average already carries the repairs the whole record needed; a repaired run is taken to cost about two (the thread resent, mostly from
+ * the cache, and the whole answer written again), so a Skill whose own cases were repaired more often costs more on that model than
+ * the average says, and one never repaired less. A Skill none of whose schemas ran keeps the average.
+ */
+export function skillYuanPerRun(evaluation: SponsorEvaluation, skill: string, models: SponsorModel[]): number {
+  const average = evaluationYuanPerRun(evaluation, models);
+  const overall = evaluation.record.repairRate ?? 0;
+  const own = skillRepairRate(evaluation.record, skill) ?? overall;
+  return Math.round((average / (1 + overall)) * (1 + own) * 10_000) / 10_000;
+}
+
+/** Candidates that passed this Skill's checks with enough context, cheapest for this Skill first (list order breaks ties). */
 function admittedFor(skill: string, models: SponsorModel[], evaluations: SponsorEvaluation[], capabilities: ProviderCapabilities): SponsorEvaluation[] {
   const order = new Map(models.map((model, index) => [model.model, index]));
   return evaluations.filter((evaluation) => {
     const model = models.find((item) => item.model === evaluation.model);
     return model && !(model.contextK !== undefined && model.contextK < SPONSOR_MIN_CONTEXT_K) && admittedSkills(evaluation.record, capabilities).includes(skill);
-  }).sort((a, b) => evaluationYuanPerRun(a, models) - evaluationYuanPerRun(b, models) || (order.get(a.model) ?? 99) - (order.get(b.model) ?? 99));
+  }).sort((a, b) => skillYuanPerRun(a, skill, models) - skillYuanPerRun(b, skill, models) || (order.get(a.model) ?? 99) - (order.get(b.model) ?? 99));
 }
 
 /**

@@ -143,7 +143,8 @@ export async function energyAdvicePass(input: { store: CrosslineStore; workspace
   running.add(workspaceId);
   try {
     input.enterUsage?.(workspaceId);
-    const review = spendAllows(spend, "discretionary");
+    // The review is non-core: the quota saver may hold it (docs/token-economy.md §2.3); the rule-based advice is written regardless.
+    const review = spendAllows(spend, "discretionary", { nonCore: true });
     const advice = await computeEnergyAdvice(store, workspaceId, input.cwd, { client: input.client(), review,
       ...(review ? {} : { skippedBecause: "额度偏紧，本周未做联网复核" }) });
     console.info(JSON.stringify({ type: "energy.advice", workspaceId, ...("insufficient" in advice ? { insufficient: true } : { id: advice.id, review: advice.review.state }) }));

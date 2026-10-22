@@ -100,10 +100,11 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
     </section>}
     {listed("public") && (!searching || publicShown.length > 0) && <section className="st-card st-card-wide" aria-label="公开 skills">
       <header><h3>公开 skills · {publics.length}</h3><small>按主线检索的公开 skill，取回后经代码扫描与模型审查；30 天未调用自动删除</small></header>
-      {publics.length === 0 ? <p className="muted">尚无。首次检索在主线建立后进行，之后每月一次；任务需要而库中没有时会提前检索。</p>
+      {publics.length === 0 ? <p className="muted">尚无。主线建立时检索一轮，之后每月补充一次；也可以在下面为一条主线再检索一轮。</p>
         : <ul className="sk-publics">{publicShown.map((skill) => <PublicSkill key={`${skill.id}:${kind}`} skill={skill} shell={library.shell} open={all || focus === skill.id}
           onChanged={(next) => setPublics((items) => next ? items.map((item) => item.id === next.id ? next : item) : items.filter((item) => item.id !== skill.id))} />)}</ul>}
       {!searching && <>
+        <SearchAgain lines={library.mine.map((line) => ({ id: line.lineId, label: line.lineLabel }))} />
         <LinkInstall lines={library.mine.map((line) => ({ id: line.lineId, label: line.lineLabel }))} />
         <SetupGuide guide={SKILL_LINK_GUIDE} />
       </>}
@@ -309,6 +310,24 @@ const INSTALL_WAIT_MS = 40 * 60_000;
  * 「按链接添加」 (docs/skills-library.md §2): a GitHub repository and the directory holding SKILL.md, for one line. The worker takes it
  * through the same fetch, scan and review as the scout's own finds; this waits on the job and reloads once the skill is in the library.
  */
+/** One more search of a line's public skills, at the person's word; the worker runs it at its next tick. */
+function SearchAgain({ lines }: { lines: Array<{ id: string; label: string }> }) {
+  const [lineId, setLineId] = useState(lines[0]?.id ?? "");
+  const [note, setNote] = useState("");
+  return <form className="sk-tool-form" aria-label="为一条主线再检索公开 skill" onSubmit={async (event) => {
+    event.preventDefault();
+    const response = await fetch("/api/skills/public/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ lineId }) })
+      .then((result) => result.ok).catch(() => false);
+    setNote(response ? "已安排，下一次后台检查时开始检索；新加入的 skill 会出现在这里" : "未安排，请稍后再试");
+  }}>
+    <label><span>主线</span><select value={lineId} onChange={(event) => setLineId(event.target.value)}>
+      {lines.map((line) => <option key={line.id} value={line.id}>{line.label}</option>)}
+    </select></label>
+    <button type="submit" className="secondary-button" disabled={!lineId}>再检索一轮</button>
+    {note && <p role="status" className="st-note">{note}</p>}
+  </form>;
+}
+
 function LinkInstall({ lines }: { lines: Array<{ id: string; label: string }> }) {
   const [repo, setRepo] = useState("");
   const [dir, setDir] = useState("");

@@ -2,6 +2,7 @@ import { CONTEXT_BUDGETS, MATERIAL_TOOL_BUDGET, oneLine, relevantDocuments, sear
 import type { SkillTools } from "@crossline/codex";
 import type { CrosslineStore, DocChunk, StoredProfileFact } from "@crossline/db";
 import { folderDocuments } from "./source-folders";
+import { ledgerId, ledgerLookup, ledgerSummary, type LedgerEntry } from "./ledger-index";
 
 /**
  * What a task's context is built from, and only that (docs/context-selection.md, decided 2026-10-20): code proposes candidates — the
@@ -204,12 +205,54 @@ export function analysisMaterialInputs(store: CrosslineStore, workspaceId: strin
  * hundred facts which fifty a plan saw was chance.
  */
 export function relevantFacts(facts: StoredProfileFact[], task: { query: string; projectId: string; identityId: string },
-  options: { exclude?: (fact: StoredProfileFact) => boolean; budget?: number } = {}): string[] {
+  options: { exclude?: (fact: StoredProfileFact) => boolean; budget?: number;
+    /** A short id put in front of each fact given (`createRefBook`), so the answer can say which it rested on. */
+    ref?: (fact: StoredProfileFact) => string } = {}): string[] {
+  const line = (fact: StoredProfileFact) => `${fact.projectId ? `[${fact.projectId}] ` : ""}${fact.slot}：${fact.value.slice(0, 240)}${fact.status === "inferred" ? "（假设）" : ""}`;
+  // The id is not counted in the budget, and only facts that fit are given one.
+  return withinBudget(rankedFacts(facts, task, options), (fact) => line(fact).length + 4, options.budget ?? CONTEXT_BUDGETS.facts)
+    .map((fact) => options.ref ? `[${options.ref(fact)}] ${line(fact)}` : line(fact));
+}
+
+/** The facts `relevantFacts` lists, in its order, before they are written out. */
+function rankedFacts(facts: StoredProfileFact[], task: { query: string; projectId: string; identityId: string },
+  options: { exclude?: (fact: StoredProfileFact) => boolean } = {}): StoredProfileFact[] {
   const terms = searchTerms(task.query);
   const usable = facts.filter((fact) => (fact.status === "confirmed" || fact.value.startsWith("假设")) && !options.exclude?.(fact)
     && (fact.projectId === task.projectId || fact.identityId === task.identityId));
-  const ranked = usable.map((fact) => ({ fact, own: fact.projectId === task.projectId && Boolean(task.projectId) ? 1 : 0, hits: termHits(`${fact.slot} ${fact.value}`, terms) }))
-    .sort((a, b) => b.own - a.own || b.hits - a.hits);
-  const lines = ranked.map(({ fact }) => `${fact.projectId ? `[${fact.projectId}] ` : ""}${fact.slot}：${fact.value.slice(0, 240)}${fact.status === "inferred" ? "（假设）" : ""}`);
-  return withinBudget(lines, (line) => line.length + 4, options.budget ?? CONTEXT_BUDGETS.facts);
+  return usable.map((fact) => ({ fact, own: fact.projectId === task.projectId && Boolean(task.projectId) ? 1 : 0, hits: termHits(`${fact.slot} ${fact.value}`, terms) }))
+    // The task's own project first, then what the person confirmed, then by the task's terms, then the facts answers really used (migration 20).
+    .sort((a, b) => b.own - a.own || Number(b.fact.status === "confirmed") - Number(a.fact.status === "confirmed") || b.hits - a.hits
+      || (b.fact.useCount ?? 0) - (a.fact.useCount ?? 0) || (b.fact.lastUsedAt ?? "").localeCompare(a.fact.lastUsedAt ?? ""))
+    .map(({ fact }) => fact);
+}
+
+/**
+ * The same facts as an index for a route that calls functions (token-economy.md §2), one line each with a stable short id and the slot
+ * (with the project when it is not the task's own): the task's own project's facts and those naming its terms carry the value's first
+ * 60 characters; the rest of the line's facts (another project's dates, say) carry only the slot, ending in 「…」. Any of them is read
+ * whole through `read_ledger`. The index lists every fact `relevantFacts` lists and, room permitting, the ones its budget left out;
+ * `full` is that list, what a route without functions keeps getting.
+ */
+export function factLedger(facts: StoredProfileFact[], task: { query: string; projectId: string; identityId: string },
+  options: { exclude?: (fact: StoredProfileFact) => boolean;
+    /** The run's short id for a fact (`createRefBook`), used as its index id so `usedRefs` and `read_ledger` name it the same way. */
+    ref?: (fact: StoredProfileFact) => string } = {}) {
+  const taken = new Set<string>();
+  const terms = searchTerms(task.query);
+  const entries: Array<LedgerEntry & { near: boolean }> = rankedFacts(facts, task, options).map((fact) => ({
+    id: options.ref ? options.ref(fact) : ledgerId("f", `${fact.identityId}|${fact.projectId}|${fact.slot}`, taken),
+    label: `${fact.projectId && fact.projectId !== task.projectId ? `[${fact.projectId}] ` : ""}${fact.slot}${fact.status === "inferred" ? "（假设）" : ""}`,
+    text: fact.value,
+    near: (Boolean(task.projectId) && fact.projectId === task.projectId) || termHits(`${fact.slot} ${fact.value}`, terms) > 0 }));
+  const lines: string[] = [];
+  let left = CONTEXT_BUDGETS.facts;
+  for (const entry of entries) {
+    const line = entry.near ? `${entry.id} ${entry.label}：${ledgerSummary(entry.text)}` : `${entry.id} ${entry.label}：…`;
+    if (line.length + 4 > left) break;
+    left -= line.length + 4;
+    lines.push(line);
+  }
+  const lookup = ledgerLookup(entries);
+  return { index: lines, full: relevantFacts(facts, task, options), tools: lookup.tools, stats: lookup.stats };
 }

@@ -1,4 +1,5 @@
 import { budgetPolicy } from "./index";
+import type { QuotaSaver } from "./quota-saver";
 
 /**
  * What discretionary work is allowed to spend, expressed without naming a currency or a vendor.
@@ -101,7 +102,9 @@ export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; messa
   /** The fullest window's share used, when the reading has one: core work stops at `CORE_STOP_PERCENT`, intake runs on to 100%. */
   usedPercent?: number;
   /** A local evaluation is spending this account's quota (`EVAL_HOLD_FILE`): discretionary work waits until it ends. */
-  held?: boolean };
+  held?: boolean;
+  /** 节省额度 (`quotaSaverReading`): absent reads as off, the rules before it. */
+  saver?: QuotaSaver };
 /**
  * Core background work stops here and leaves the last of the quota to intake (capture analysis, calendar filing) and the person's own
  * turns: what the person just put in is turned into something usable last of all (2026-10-21).
@@ -181,7 +184,23 @@ export function degradedService(code: string): { works: string[]; paused: string
   };
 }
 
-export function spendAllows(spend: BackgroundSpend, kind: SpendKind): boolean {
+/**
+ * The one gate for every background pass. `nonCore` marks the work the quota saver holds (docs/token-economy.md §2.3, `quota-saver.ts`):
+ * with the saver on it must also pass its kind's own rule, find the quota normal or the person's night, and find non-core work under its
+ * share of the week; with the saver off its kind's rule alone decides, as before. Core work is never held by the saver.
+ */
+export function spendAllows(spend: BackgroundSpend, kind: SpendKind, options: { nonCore?: boolean } = {}): boolean {
+  if (!kindAllows(spend, kind)) return false;
+  if (!options.nonCore || !spend.saver?.on) return true;
+  return (spend.mode === "normal" || spend.saver.night) && !spend.saver.overShare;
+}
+
+/** Whether the saver, not the quota or the person's absence, is what stops non-core work now: the person is told once a week. */
+export function saverStopsNonCore(spend: BackgroundSpend, kind: SpendKind): boolean {
+  return Boolean(spend.saver?.on && spend.saver.overShare && kindAllows(spend, kind));
+}
+
+function kindAllows(spend: BackgroundSpend, kind: SpendKind): boolean {
   const engagement = spend.engagement ?? "active";
   if (engagement === "dormant" || (engagement === "cooling" && kind !== "intake")) return false;
   if (kind === "discretionary") return spend.mode === "normal" && !spend.held;

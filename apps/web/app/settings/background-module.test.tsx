@@ -9,7 +9,8 @@ const overview = {
     { kind: "tutorials" as const, label: "任务教程", explained: "为 48 小时内要做的任务查资料、写教程", paused: false, lastRunAt: "2026-10-12T19:07:16.000Z", lastOk: true, weekRuns: 25, weekTokens: 7_140_000, weekCacheShare: 0.47 },
     { kind: "assistant" as const, label: "助手代办", explained: "助手代为完成准备类杂事", paused: true, lastRunAt: null, lastOk: null, weekRuns: 0, weekTokens: 0, weekCacheShare: null }
   ],
-  running: [{ taskId: "t1", title: "ECE 548 · 汇集复习材料", startedAt: "2026-10-13T09:00:00.000Z" }]
+  running: [{ taskId: "t1", title: "ECE 548 · 汇集复习材料", startedAt: "2026-10-13T09:00:00.000Z" }],
+  saver: true
 };
 
 test("each kind shows its last run, its week and a pause; the tier says what runs now; a running task can be stopped", () => {
@@ -18,7 +19,9 @@ test("each kind shows its last run, its week and a pause; the tier says what run
   // Shown on the person's clock (Chicago), not UTC.
   expect(html).toContain("最近一次本人操作 10/10 02:49");
   expect(html).toContain("上次 10/12 14:07 · 近 7 天 25 次、714 万 tokens（输入的 47% 来自缓存）");
-  expect(html.match(/role="radiogroup"/g)).toHaveLength(2);
+  // 节省额度 above the kinds: one switch, its one sentence, no figures of its own.
+  expect(html.match(/role="radiogroup"/g)).toHaveLength(3);
+  expect(html).toContain("节省额度<small>开启时，调研、技能搜寻等非必需的后台工作");
   expect(html).toContain("ECE 548 · 汇集复习材料");
   expect(html).toContain("中止");
 });
