@@ -531,6 +531,7 @@ export * from "./source-folders";
 export * from "./recordings";
 export * from "./recording-digest";
 export * from "./xhs-notes";
+export * from "./favourite-topics";
 export * from "./info-request";
 export * from "./tutorial-worth";
 export * from "./completion";

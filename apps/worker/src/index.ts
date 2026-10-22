@@ -9,6 +9,7 @@ import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
 import { CrosslineStore, aiToolsFor, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
+import { createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
 import { NEEDS_PER_PASS, createNeedChecker, needsAwaitingCheck } from "./need-check";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -491,6 +492,12 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
     const fired = workflowSchedulePass(analysisStore, workspaceId, (input, after) => assistantOff
       ? { state: "blocked", code: "AGENT_PAUSED", message: "助手已暂停。" } : agentService.runFree(workspaceId, input, after), new Date(), browserProfilesRoot(workspaceId));
     if (fired.length) console.info(JSON.stringify({ type: "skill.grown.scheduled", checkedAt, workspaceId, fired }));
+  } catch { /* next tick */ }
+  // Favourites organised by topic: the day's share by day, everything in order by night (favourites-topics.ts).
+  try {
+    const started = favouritesTopicPass(analysisStore, workspaceId, readGrownSkills(analysisStore, workspaceId), (input, after) => assistantOff
+      ? { state: "blocked", code: "AGENT_PAUSED", message: "助手已暂停。" } : agentService.runFree(workspaceId, input, after), browserProfilesRoot(workspaceId));
+    if (started.length) console.info(JSON.stringify({ type: "favourites.topics_started", checkedAt, workspaceId, started }));
   } catch { /* next tick */ }
   // Growing a workflow writes and tests scripts with the runtime's `skill-creator`: only the shell assistant can (the owner's own Codex).
   if (assistantOff || !machineOwner(workspaceId) || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
@@ -1106,8 +1113,15 @@ const mailService = createMailService({ store: analysisStore, secrets, cwd: repo
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
 // The person's Xiaohongshu favourites, read whole by a worker job in their own visible browser (favourites-reader.ts): pictures described
 // on the account's own Codex, videos heard by the recordings' transcriber (ffmpeg on the PATH, or CROSSLINE_FFMPEG).
+const classifyTopics = createTopicClassifier(analysisStore, repoRoot, (workspaceId) => accountClient(workspaceId));
 configureFavouritesCollector({
   outputRoot: defaultOutputRoot(),
+  // Sorting the titles is the person's own request at work: it runs while the quota allows core work.
+  classify: async (workspaceId, workflowId) => {
+    if (!spendAllows(await spendFor(workspaceId), "core")) return 0;
+    enterUsageWorkspace(workspaceId);
+    return classifyTopics(workspaceId, workflowId);
+  },
   media: (workspaceId) => {
     const client = accountClient(workspaceId);
     return { ...(client ? { describe: createMediaDescriber(client, repoRoot) } : {}), ffmpeg: realVideoTools,

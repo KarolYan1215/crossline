@@ -1,8 +1,8 @@
 import {
-  AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scriptCount, scriptsAllowable, scriptsRunnable, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill, readableMineSourceLabel, readableMineText,
+  AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scriptCount, scriptsAllowable, scriptsRunnable, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill, readableMineSourceLabel, readableMineText, parseTopicPlan, topicPlanKey, topicProgress, withTopicSettings,
   type AccessContext, type AiTool, type PublicSkillRecord, type StoredMineRule
 } from "@crossline/core";
-import { aiToolsFor, allowSkillScripts, assistantMode, consentToGrownSkill, grownHomeLine, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
+import { type CrosslineStore, aiToolsFor, allowSkillScripts, assistantMode, consentToGrownSkill, grownHomeLine, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { getStore } from "./crossline";
 import { identityLines } from "./lines";
@@ -34,7 +34,9 @@ export type GrownSkillView = { id: string; summary: string; name: string; catego
   origin: string; steps: Array<{ title: string; person: boolean }>; status: "active" | "off" | "needs_consent"; pinned: boolean; verdict: "usable" | "text_only" | "reject";
   /** The sites it reads and the risks it was installed with; when the person accepted them and last logged in to each. */
   access: Array<{ service: string; site: string; login: boolean; how: string; loggedInAt?: string }>; risks: string[]; consentedAt?: string;
-  risk: "low" | "high"; reasons: string[]; files: number; createdAt: string; lastUsedAt: string; lastRunAt?: string; skillText: string } & ScriptsView;
+  risk: "low" | "high"; reasons: string[]; files: number; createdAt: string; lastUsedAt: string; lastRunAt?: string; skillText: string;
+  /** Favourites organised by topic: the day's share, the night window, and each topic read so far (packages/core/src/favourite-topics.ts). */
+  topics?: { perDay: number; from: number; to: number; listed: number; progress: Array<{ name: string; total: number; read: number }> } } & ScriptsView;
 /** `shell`: this account's assistant has a command line (the copy on the person's own computer) and can run an allowed script. */
 export type SkillLibraryView = { mine: MineSkillView[]; grown: GrownSkillView[]; publics: PublicSkillView[]; aiTools: AiTool[];
   removed: Array<{ name: string; reason: string; at: string; by: string }>; growing: number; shell: boolean };
@@ -86,7 +88,7 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
       risks: record.manifest.risks ?? [], ...(record.consentedAt ? { consentedAt: record.consentedAt } : {}),
       verdict: record.review.final, risk: record.scan.risk, reasons: record.review.reasons, files: record.files.length, createdAt: record.createdAt,
       lastUsedAt: record.lastUsedAt, ...(record.lastRunAt ? { lastRunAt: record.lastRunAt } : {}), skillText: skillText.replace(/^---[\s\S]*?\n---\n/, ""),
-      ...scriptsView(record) };
+      ...topicsView(store, ctx.workspaceId, record.id), ...scriptsView(record) };
   });
   // Requests made in words that no growing run has picked up yet: the page says they are on their way.
   const tried = new Set(store.listEvents(ctx.workspaceId, { type: "skill.grown.attempted" }).map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
@@ -147,6 +149,28 @@ export function deletePublicSkill(ctx: AccessContext, id: string): { ok: boolean
  * The person turns a grown workflow on or off, keeps it for good, removes it, or — for one that reads an account — accepts its risks,
  * which is the only way such a workflow is switched on.
  */
+function topicsView(store: CrosslineStore, workspaceId: string, id: string): Pick<GrownSkillView, "topics"> {
+  const plan = parseTopicPlan(store.getSetting(workspaceId, topicPlanKey(id)));
+  if (!plan) return {};
+  let ledger: { read?: Record<string, unknown>; listed?: Record<string, unknown> } = {};
+  try { ledger = JSON.parse(store.getSetting(workspaceId, `collect.notes.${id}`) ?? "{}") as typeof ledger; } catch { /* nothing read yet */ }
+  const read = new Set(Object.keys(ledger.read ?? {}));
+  return { topics: { perDay: plan.perDay, from: plan.window.from, to: plan.window.to, listed: Object.keys(ledger.listed ?? {}).length,
+    progress: topicProgress(plan, read).map(({ name, total, read: done }) => ({ name, total, read: done })) } };
+}
+
+/** The person's own pace for favourites by topic: notes a day and the night window (equal hours: no night reading). */
+export function changeFavouriteTopics(ctx: AccessContext, id: string, change: { perDay?: number; from?: number; to?: number }): { ok: boolean; code?: string } {
+  const store = getStore();
+  const plan = parseTopicPlan(store.getSetting(ctx.workspaceId, topicPlanKey(id)));
+  if (!plan) return { ok: false, code: "NOT_TOPIC_MODE" };
+  const next = withTopicSettings(plan, change);
+  store.setSetting(ctx.workspaceId, topicPlanKey(id), JSON.stringify(next));
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `favourites.topics_changed:${id}:${Date.now()}`, type: "favourites.topics_changed",
+    entityId: id, payload: { perDay: next.perDay, window: next.window } });
+  return { ok: true };
+}
+
 export function changeGrownSkill(ctx: AccessContext, id: string, change: { status?: "active" | "off"; pinned?: boolean } | "remove" | "consent"): { ok: boolean; code?: string } {
   const store = getStore();
   const done = change === "remove" ? removeGrownSkill(store, ctx.workspaceId, id, "本人删除", "person")

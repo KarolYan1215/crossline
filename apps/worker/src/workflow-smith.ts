@@ -16,8 +16,9 @@ import type { DispatchResult } from "./agent-service";
 import { identityLines } from "./lines";
 import { ownerOf, runtimesDir } from "./owner";
 import { createSiteReader, SITE_PAGES_PER_RUN, SITE_SCROLLS_MAX, type OpenSite } from "./site-reader";
+import { favouritesTopicStep, topicModeOn } from "./favourites-topics";
 import { COLLECT_BREAKER_DAYS, collectFavourites, collectFolder, collectPausedUntil, favouritesAccess, markOrganised, openCollectBrowser, readCollectLedger,
-  type CollectDriver, type CollectResult } from "./favourites-reader";
+  type CollectDriver, type CollectOptions, type CollectResult } from "./favourites-reader";
 import { describeNotes, type NoteMediaDeps } from "./note-media";
 import { loginMode } from "./browser-launch";
 import { HOLDER_WORDS, holdProfile, profileHolder, releaseProfile } from "./profile-locks";
@@ -396,6 +397,9 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
   if (loginOpen(workspaceId, record.id)) return { state: "blocked", code: "LOGIN_WINDOW_OPEN", message: "登录窗口还开着；登录后关掉它再运行。" };
   // The person's Xiaohongshu favourites are read whole by Crossline's own job (favourites-reader.ts), then organised by the assistant.
   const favourites = favouritesCollector ? favouritesAccess(record) : undefined;
+  // Organised one topic a night (favourites-topics.ts): 「立即运行」 reads the list and sorts it now; the notes are read in the night window.
+  if (favourites && favouritesCollector && topicModeOn(store, workspaceId, record.id))
+    return favouritesTopicStep(store, workspaceId, record, runFree, profilesRoot, now, { manual: true, fallbackBrowser });
   if (favourites && favouritesCollector) return startFavouritesRun(store, workspaceId, record, runFree, profilesRoot, now, fallbackBrowser, favourites, favouritesCollector);
   const { access } = workflowAccess(record);
   const home = grownHomeLine(store, workspaceId, record);
@@ -478,16 +482,24 @@ export type FavouritesCollector = {
   media: (workspaceId: string) => NoteMediaDeps;
   sleep?: (ms: number) => Promise<void>;
   log?: (event: Record<string, unknown>) => void;
+  /** Sorts the listed favourites not yet under a topic (a model run, favourites-topics.ts); the number sorted. */
+  classify?: (workspaceId: string, workflowId: string) => Promise<number>;
 };
 let favouritesCollector: FavouritesCollector | undefined;
 export function configureFavouritesCollector(collector: FavouritesCollector | undefined): void { favouritesCollector = collector; }
+export const currentFavouritesCollector = (): FavouritesCollector | undefined => favouritesCollector;
+/**
+ * How one collection reads (favourites-topics.ts): the list only, or given notes spread to a deadline; `after` takes the result instead of
+ * the default hand-over of everything read to the assistant.
+ */
+export type FavouritesJob = Pick<CollectOptions, "listOnly" | "targets" | "gapMs" | "deadline" | "mode" | "now"> & { after?: (result: CollectResult) => void };
 /** Collections under way, by workspace and workflow: a second start waits (`COLLECTING` is a hold code). */
 const collecting = new Map<string, Promise<void>>();
 /** Resolves when the workflow's collection (and the hand-over to the assistant) is over; for tests and the trial script. */
 export const collectionDone = (workspaceId: string, id: string) => collecting.get(`${workspaceId}:${id}`) ?? Promise.resolve();
 
-function startFavouritesRun(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, runFree: RunFree, profilesRoot: string, now: Date,
-  fallbackBrowser: string | undefined, access: WorkflowAccess, collector: FavouritesCollector): DispatchResult {
+export function startFavouritesRun(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, runFree: RunFree, profilesRoot: string, now: Date,
+  fallbackBrowser: string | undefined, access: WorkflowAccess, collector: FavouritesCollector, plan: FavouritesJob = {}): DispatchResult {
   const key = `${workspaceId}:${record.id}`;
   if (collecting.has(key)) return { state: "blocked", code: "COLLECTING", message: "上一次读取收藏还没结束。" };
   const paused = collectPausedUntil(store, workspaceId, now);
@@ -506,7 +518,8 @@ function startFavouritesRun(store: CrosslineStore, workspaceId: string, record: 
     const driver = await (collector.open ?? openCollectBrowser)(profileDir, browser).catch((error: unknown) => error as Error);
     if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
     else {
-      try { result = await collectFavourites({ store, workspaceId, workflowId: record.id, folder, driver, ...(collector.sleep ? { sleep: collector.sleep } : {}), log }); }
+      const { after: _after, ...reading } = plan;
+      try { result = await collectFavourites({ store, workspaceId, workflowId: record.id, folder, driver, ...(collector.sleep ? { sleep: collector.sleep } : {}), log, ...reading }); }
       finally { await driver.close(); }
     }
     releaseProfile(profileDir, "collect");
@@ -523,7 +536,8 @@ function startFavouritesRun(store: CrosslineStore, workspaceId: string, record: 
       "workflow_login", `login:${record.id}:${day}`, [{ label: "去登录", href: loginHref(record.id) }]);
     if (result.state === "failed") sayToPerson(store, workspaceId, `「${summary}」这次没读完：${result.message ?? "浏览器出错"}${result.read.length ? `；已读 ${result.read.length} 条，照常整理` : ""}。`,
       "workflow_done", `failed:${record.id}:${taskId}`, [{ label: "去看设置", href: "/settings#skills" }]);
-    organiseFavourites(store, workspaceId, record, runFree, folder, result, new Date());
+    if (plan.after) plan.after(result);
+    else organiseFavourites(store, workspaceId, record, runFree, folder, result, new Date());
   })().catch((error: unknown) => log({ type: "collect.failed", workspaceId, id: record.id, message: error instanceof Error ? error.message : "" }))
     .finally(() => { releaseProfile(profileDir, "collect"); collecting.delete(key); });
   collecting.set(key, job);

@@ -52,6 +52,7 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-recording-digest": "low",
   // A note's pictures and video frames into words and their visible text, many small runs (note-media.ts): the cheap tier.
   "crossline-media-describer": "low",
+  "crossline-favourite-topics": "low",
   "crossline-goal-splitter": "low",
   // The person's own rules for a line: what every later run on that line follows, so read carefully, not cheaply.
   "crossline-insight-compiler": "mid",

@@ -237,3 +237,9 @@
 .sk-item>summary strong{overflow-wrap:anywhere}
 .sk-item>summary::before{content:"▸";color:var(--graphite)}
 .sk-item[open]>summary::before{content:"▾"}
+
+/* Favourites by topic: the two paces on one line each (2026-10-22). */
+.sk-topics-pace { display: grid; gap: 6px; }
+.sk-topics-pace input[type="number"] { width: 4.5em; }
+.sk-topics-pace label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sk-topics-pace button { justify-self: start; }

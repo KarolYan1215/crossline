@@ -65,12 +65,19 @@ export type CollectLedger = {
   selfId?: string;
   /** Read, and not yet handed to the assistant to organise. */
   unorganised: string[];
+  /**
+   * Every note the list showed, with what the list says of it (title, the token its page needs, type, author): what the topics are made
+   * from and how a night's notes are opened without scrolling the list again (favourites-topics.ts).
+   */
+  listed?: Record<string, { title: string; xsecToken: string; type: string; author?: string }>;
+  listedAt?: string;
 };
 const ledgerKey = (workflowId: string) => `collect.notes.${workflowId}`;
 export function readCollectLedger(store: CrosslineStore, workspaceId: string, workflowId: string): CollectLedger {
   try {
     const raw = JSON.parse(store.getSetting(workspaceId, ledgerKey(workflowId)) ?? "null") as Partial<CollectLedger> | null;
-    return { read: raw?.read ?? {}, unorganised: raw?.unorganised ?? [], ...(raw?.caughtUpAt ? { caughtUpAt: raw.caughtUpAt } : {}), ...(raw?.selfId ? { selfId: raw.selfId } : {}) };
+    return { read: raw?.read ?? {}, unorganised: raw?.unorganised ?? [], ...(raw?.caughtUpAt ? { caughtUpAt: raw.caughtUpAt } : {}), ...(raw?.selfId ? { selfId: raw.selfId } : {}),
+      ...(raw?.listed ? { listed: raw.listed } : {}), ...(raw?.listedAt ? { listedAt: raw.listedAt } : {}) };
   } catch { return { read: {}, unorganised: [] }; }
 }
 export function writeCollectLedger(store: CrosslineStore, workspaceId: string, workflowId: string, ledger: CollectLedger): void {
@@ -131,6 +138,14 @@ export type CollectOptions = {
   mode?: CollectMode;
   /** At most this many notes opened (the trial script). */
   limit?: number;
+  /** Read the list only (to its end in `catch_up`, until notes already listed in `incremental`) and keep it; open no note. */
+  listOnly?: boolean;
+  /** Open these notes, in this order, without scrolling the list: their tokens come from the list kept earlier (`ledger.listed`). */
+  targets?: string[];
+  /** The wait before each note given how many are left (spreading a night's notes over the window); `CATCH_UP_GAP_MS` otherwise. */
+  gapMs?: (remaining: number) => number;
+  /** No note is started that would not finish before this moment (the end of the night's window). */
+  deadline?: Date;
   sleep?: (ms: number) => Promise<void>; random?: () => number; now?: () => Date;
   log?: (event: Record<string, unknown>) => void;
 };
@@ -186,7 +201,7 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       if (XHS_COLLECT_PATH.test(response.url)) {
         const page = parseCollectPage(response.json);
         if (page.hasMore !== undefined) hasMore = page.hasMore;
-        if (page.notes.length && page.notes.every((note) => ledger.read[note.id])) knownPage = true;
+        if (page.notes.length && page.notes.every((note) => ledger.read[note.id] || (options.listOnly && ledger.listed?.[note.id]))) knownPage = true;
         for (const note of page.notes) if (!listed.has(note.id) || !listed.get(note.id)!.xsecToken) listed.set(note.id, note);
       } else if (XHS_FEED_PATH.test(response.url)) details.set(response.url + details.size, response.json);
       else if (XHS_SELF_PATH.test(response.url)) { const id = selfIdFromResponse(response.json); if (id) ledger.selfId = id; }
@@ -195,6 +210,10 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
   };
 
   try {
+    if (options.targets) return await readNotes(options.targets.flatMap((id): ListedNote[] => {
+      const known = ledger.listed?.[id];
+      return known && !ledger.read[id] ? [{ id, xsecToken: known.xsecToken, title: known.title, type: known.type }] : [];
+    }), options.targets.length);
     // Who is signed in: remembered from an earlier run, else from the home page the person would open first.
     if (!ledger.selfId) {
       const status = await driver.goto(XHS_HOME);
@@ -240,15 +259,31 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     }
     result.listEnded = hasMore === false || quiet >= LIST_QUIET_SCREENS;
     result.listed = listed.size;
+    ledger.listed = { ...(ledger.listed ?? {}) };
+    for (const note of listed.values()) ledger.listed[note.id] = { title: note.title, xsecToken: note.xsecToken || ledger.listed[note.id]?.xsecToken || "", type: note.type,
+      ...(note.author?.name ? { author: note.author.name } : {}) };
+    ledger.listedAt = now().toISOString();
+    save();
+    if (options.listOnly) { log({ type: "collect.listed", workflowId, mode, listed: listed.size, ended: result.listEnded, listOnly: true }); return result; }
 
     const unread = [...listed.values()].filter((note) => !ledger.read[note.id]);
     const cap = Math.min(options.limit ?? Infinity, mode === "incremental" ? INCREMENTAL_BATCH : Infinity);
-    const toRead = unread.slice(0, cap);
-    const gap = mode === "incremental" ? INCREMENTAL_GAP_MS : CATCH_UP_GAP_MS;
-    log({ type: "collect.listed", workflowId, mode, listed: listed.size, unread: unread.length, reading: toRead.length, ended: result.listEnded });
+    log({ type: "collect.listed", workflowId, mode, listed: listed.size, unread: unread.length, reading: Math.min(unread.length, cap), ended: result.listEnded });
+    return await readNotes(unread.slice(0, cap), unread.length);
+  } catch (error) {
+    save();
+    return { ...result, state: "failed", message: `浏览器出错：${error instanceof Error ? error.message.slice(0, 200) : "未知错误"}` };
+  }
 
-    for (const note of toRead) {
-      await sleep(between(gap));
+  /** Opens each note in turn and keeps what it shows; `total` is how many were waiting (for `pending`). */
+  async function readNotes(toRead: ListedNote[], total: number): Promise<CollectResult> {
+  try {
+    const gap = mode === "incremental" ? INCREMENTAL_GAP_MS : CATCH_UP_GAP_MS;
+    const unread = { length: total };
+    for (const [index, note] of toRead.entries()) {
+      const wait = options.gapMs ? options.gapMs(toRead.length - index) : between(gap);
+      if (options.deadline && now().getTime() + wait + 60_000 > options.deadline.getTime()) break;
+      await sleep(wait);
       details.clear();
       const url = xhsNoteUrl(note.id, note.xsecToken);
       const noteStatus = await driver.goto(url);
@@ -286,12 +321,13 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       log({ type: "collect.note_read", workflowId, id: note.id, source: detail.source, images: saved.images.length, video: Boolean(saved.video?.file) });
     }
     result.pending = unread.length - result.read.length - result.gone.length;
-    if (mode === "catch_up" && result.listEnded && result.pending === 0 && !options.limit) ledger.caughtUpAt = now().toISOString();
+    if (mode === "catch_up" && result.listEnded && result.pending === 0 && !options.limit && !options.targets) ledger.caughtUpAt = now().toISOString();
     save();
     return result;
   } catch (error) {
     save();
     return { ...result, state: "failed", message: `浏览器出错：${error instanceof Error ? error.message.slice(0, 200) : "未知错误"}` };
+  }
   }
 }
 

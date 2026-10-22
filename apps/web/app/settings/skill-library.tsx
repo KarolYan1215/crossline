@@ -311,6 +311,7 @@ function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSki
           // Read in full before 「接受风险并启用」; once accepted, one line with 「全文」.
           ? <Clamp lines={1} text={`${flow.risks.join("；")}。本人于 ${day(flow.consentedAt)} 接受`} />
           : <>{flow.risks.map((risk) => <span key={risk}>{risk}<br /></span>)}本人接受前不会运行</>}</dd></>}
+      {flow.topics && <TopicsPace flow={flow} topics={flow.topics} send={send} onChanged={onChanged} setNote={setNote} />}
       <dt>步骤</dt><dd><Clamp text={flow.steps.map((step) => step.person ? `${step.title}（本人）` : step.title).join(" → ")} /></dd>
       {person.length > 0 && <><dt>本人完成</dt><dd>{person.map((step) => step.title).join("；")}</dd></>}
       <dt>检查</dt><dd>{flow.risk === "high" ? flow.scriptsAllowedAt ? `脚本扫描发现风险，本人于 ${day(flow.scriptsAllowedAt)} 允许运行` : "脚本扫描发现风险，只用文字"
@@ -449,4 +450,35 @@ function AiToolsCard({ initial }: { initial: AiTool[] }) {
     </form>
     {note && <p role="status" className="st-note">{note}</p>}
   </section>;
+}
+
+/**
+ * Favourites organised by topic: the two paces, each the person's to change (2026-10-22) — notes a day for the day's topic, and the night
+ * window's hours (equal hours: no night reading) — and how far each topic is read.
+ */
+function TopicsPace({ flow, topics, send, onChanged, setNote }: { flow: GrownSkillView; topics: NonNullable<GrownSkillView["topics"]>;
+  send: (method: "POST" | "DELETE", body?: object) => Promise<boolean>; onChanged: (view: GrownSkillView | undefined) => void; setNote: (text: string) => void }) {
+  const [perDay, setPerDay] = useState(topics.perDay);
+  const [from, setFrom] = useState(topics.from);
+  const [to, setTo] = useState(topics.to);
+  const hours = Array.from({ length: 24 }, (_, hour) => hour);
+  const save = async () => {
+    if (await send("POST", { action: "topics", perDay, from, to })) { onChanged({ ...flow, topics: { ...topics, perDay, from, to } }); setNote("已保存整理节奏"); }
+    else setNote("未保存");
+  };
+  const total = topics.progress.reduce((sum, item) => sum + item.total, 0);
+  const done = topics.progress.reduce((sum, item) => sum + item.read, 0);
+  return <>
+    <dt>整理节奏</dt><dd className="sk-topics-pace">
+      <label>每天整理一个话题，最多 <input type="number" min={1} max={500} value={perDay} onChange={(event) => setPerDay(Number(event.target.value))} aria-label="每天最多篇数" /> 篇</label>
+      <label>另在 <select value={from} onChange={(event) => setFrom(Number(event.target.value))} aria-label="夜间开始">{hours.map((hour) => <option key={hour} value={hour}>{hour} 点</option>)}</select>
+        到 <select value={to} onChange={(event) => setTo(Number(event.target.value))} aria-label="夜间结束">{hours.map((hour) => <option key={hour} value={hour}>{hour} 点</option>)}</select>
+        持续整理，不限篇数（两个时间相同则不在夜间整理）</label>
+      <button type="button" className="secondary-button" onClick={() => { void save(); }}>保存</button>
+    </dd>
+    <dt>话题</dt><dd>{topics.progress.length
+      ? <><span>{topics.progress.length} 个话题，已读 {done} / {total} 篇</span><br />
+        <span className="gen"><Clamp lines={2} text={topics.progress.map((item) => `${item.name} ${item.read}/${item.total}`).join("；")} /></span></>
+      : topics.listed ? `已读到 ${topics.listed} 条收藏，正在按标题分话题` : "登录后点「立即运行」读取收藏列表并分话题"}</dd>
+  </>;
 }

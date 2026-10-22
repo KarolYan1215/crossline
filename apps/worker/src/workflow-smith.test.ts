@@ -13,6 +13,7 @@ import { createRemoteBrowsers } from "./remote-browser";
 import { readCollectLedger, type CollectDriver } from "./favourites-reader";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
+import { createTopicClassifier, favouritesTopicStep, installFavouritesTopicsWorkflow, readTopicPlan, writeTopicPlan } from "./favourites-topics";
 
 const REVIEWER = "crossline:crossline-validation-reviewer";
 const estimate = { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
@@ -536,5 +537,64 @@ test("a favourites workflow is read whole by the worker's job first; the assista
     await collectionDone(ws, "flow-xhs");
     expect(runs).toHaveLength(1);
     expect(said().at(-1)).toContain("本期没有新增收藏（已读 2 条）");
+  } finally { configureFavouritesCollector(undefined); }
+});
+
+test("favourites by topic: the list read for its titles, sorted into topics, the day's share of one topic by day and everything in order by night", async () => {
+  store.setSetting(ws, "schedule.preferences", JSON.stringify({ timeZone: "UTC" }));
+  const record = installFavouritesTopicsWorkflow(store, ws, "media", new Date("2026-10-22T11:00:00Z"));
+  expect(record).toMatchObject({ status: "needs_consent", name: "xiaohongshu-favourites-topics" });
+  expect(installFavouritesTopicsWorkflow(store, ws, "media").id).toBe(record.id);
+  consentToGrownSkill(store, ws, record.id);
+  const id = (n: number) => `66bb${String(n).padStart(20, "0")}`;
+  const titles = ["爆款开头一", "爆款开头二", "爆款开头三", "手冲咖啡", "今天"];
+  let queue: Array<{ url: string; status: number; json: unknown }> = [];
+  const opened: string[] = [];
+  const driver: CollectDriver = {
+    goto: async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/explore") queue.push({ url: "https://edith.xiaohongshu.com/api/sns/web/v2/user/me", status: 200, json: { code: 0, data: { user_id: "me" } } });
+      else if (parsed.pathname.startsWith("/user/profile/")) queue.push({ url: "https://edith.xiaohongshu.com/api/sns/web/v2/note/collect/page", status: 200,
+        json: { code: 0, data: { has_more: false, notes: titles.map((title, i) => ({ note_id: id(i + 1), xsec_token: `t${i + 1}`, display_title: title, type: "normal" })) } } });
+      else { const current = parsed.pathname.split("/").pop()!; opened.push(current); queue.push({ url: "https://edith.xiaohongshu.com/api/sns/web/v1/feed", status: 200,
+        json: { code: 0, data: { items: [{ id: current, note_card: { note_id: current, type: "normal", title: "x", desc: "正文", image_list: [] } }] } } }); }
+      return 200;
+    },
+    pause: async () => {}, wheel: async () => {}, snapshot: async () => ({ url: "https://www.xiaohongshu.com/x", title: "", text: "", links: [] }),
+    responses: async () => { const out = queue; queue = []; return out; }, noteState: async () => null, selfProfile: async () => ({}),
+    fetchMedia: async () => ({ state: "failed", status: 404 }), close: async () => {}
+  };
+  configureFavouritesCollector({ outputRoot: root, open: async () => driver, media: () => ({}), sleep: async () => {}, classify: async () => 0 });
+  try {
+    const runs: Array<AgentTaskInput & { taskId: string }> = [];
+    const run = (input: AgentTaskInput & { taskId: string }) => { runs.push(input); return { state: "started" as const, taskId: input.taskId }; };
+    const profiles = path.join(root, "p");
+    const day = new Date("2026-10-22T12:00:00Z");
+    // 「立即运行」 first reads the list for its titles and opens no note.
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, day, { manual: true })).toMatchObject({ state: "started" });
+    await collectionDone(ws, record.id);
+    expect(opened).toEqual([]);
+    expect(Object.values(readCollectLedger(store, ws, record.id).listed ?? {}).map((note) => note.title)).toEqual(titles);
+    // Unsorted titles: the sorting runs, the reading waits.
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, day)).toMatchObject({ state: "blocked", code: "TOPICS_SORTING" });
+    const { rpc } = scriptedRuntime(["crossline:crossline-favourite-topics"], () => JSON.stringify({ topics: [{ name: "小红书开头", why: "开头写法", notes: [1, 2, 3] },
+      { name: "咖啡", why: "", notes: [4] }] }));
+    expect(await createTopicClassifier(store, ".", () => rpc)(ws, record.id)).toBe(5);
+    const plan = readTopicPlan(store, ws, record.id)!;
+    // The title the model left out goes under 「其他」, read last.
+    expect(plan.order.map((topicId) => plan.topics.find((topic) => topic.id === topicId)!.name)).toEqual(["小红书开头", "咖啡", "其他"]);
+    writeTopicPlan(store, ws, record.id, { ...plan, perDay: 2 });
+    // By day: two notes of the first topic, then the day's share is used.
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, day)).toMatchObject({ state: "started" });
+    await collectionDone(ws, record.id);
+    expect(opened).toEqual([id(1), id(2)]);
+    expect(runs.at(-1)!.what).toContain("「小红书开头」");
+    expect(runs.at(-1)!.what).toContain("话题共 3 条，已读 2 条");
+    expect(readTopicPlan(store, ws, record.id)!.days["2026-10-22"]).toMatchObject({ read: [id(1), id(2)] });
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, new Date("2026-10-22T15:00:00Z"))).toMatchObject({ state: "blocked", code: "TOPICS_DONE_FOR_NOW" });
+    // By night (02–08 in the person's zone): everything left, topic after topic, with no count.
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, new Date("2026-10-23T03:00:00Z"))).toMatchObject({ state: "started" });
+    await collectionDone(ws, record.id);
+    expect(opened).toEqual([id(1), id(2), id(3), id(4), id(5)]);
   } finally { configureFavouritesCollector(undefined); }
 });
