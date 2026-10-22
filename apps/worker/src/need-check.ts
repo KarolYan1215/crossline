@@ -54,7 +54,8 @@ export function createNeedChecker(store: CrosslineStore, workspaceId: string, cw
       validateOutput: (output) => validateMaterialSearch(output), onAudit: () => {}, timeoutMs: 30 * 60_000 });
     // A run that failed for the runtime's sake says nothing about the web: tried again on a later pass.
     if (!found.ok && /^(SKILL_|CODEX_)/.test(found.blocker.code)) return "skipped";
-    const kept = found.ok ? await keepSources(found.output.sources, all, today, []) : [];
+    // Covered only when pages opened and the researcher named no gap: general documentation about the subject next to a gap is not it.
+    const kept = found.ok && !found.output.gaps.length ? await keepSources(found.output.sources, all, today, []) : [];
     recordNeedCheck(store, workspaceId, item.workOrderId, item.needId, kept.map((source) => ({ title: source.title, url: source.url })), ownerId, all.now());
     return kept.length ? "public" : "ask";
   };

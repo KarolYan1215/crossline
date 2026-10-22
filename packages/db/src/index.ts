@@ -124,7 +124,7 @@ export type StepPlanInput = {
     /** What the step produces (`STEP_TYPES`), the needs it uses, and on a provide step the need it asks for (packages/core/src/steps.ts). */
     product?: "material" | "output" | "ability" | "action"; uses?: string[]; provides?: string }>;
   /** Material only the person has, asked for before anything that uses it (provide steps). */
-  needs?: Array<{ id: string; what: string; why: string; basis?: string }>;
+  needs?: Array<{ id: string; what: string; why: string; basis?: string; kind?: "personal" | "reference" }>;
   /** The content units read from the person's material, and what only the person can answer (packages/core/src/steps.ts). */
   units?: Array<{ id: string; title: string; docId: string; quote: string }>;
   questions?: Array<{ id: string; text: string; why: string; options: string[] }>;

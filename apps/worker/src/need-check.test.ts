@@ -19,7 +19,8 @@ const seed = () => {
   store.saveWorkOrder({ id: "t", ownerId: "o", workspaceId: ws, identityId: "research", projectId: "ece548", milestoneId: "m", intent: "期中复习",
     state: "approved", riskTier: "routine", estimate, payload: { title: "ECE 548 期中复习" } });
   const raw: StepPlan = { archetypeId: "exam_prep", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", units: [], questions: [],
-    needs: [{ id: "n1", what: "往年期中卷", why: "限时模拟要用", basis: "课程大纲写往年卷在 Canvas" }], steps: [step("a", "限时模拟", { uses: ["n1"] })] };
+    needs: [{ id: "n1", what: "往年期中卷", why: "限时模拟要用", basis: "课程大纲写往年卷在 Canvas", kind: "reference" },
+      { id: "n2", what: "该次运行的链接", why: "定位失败", basis: "通知邮件里有链接", kind: "personal" }], steps: [step("a", "限时模拟", { uses: ["n1", "n2"] })] };
   store.saveStepPlan(ws, "t", normalizeStepPlan(raw).plan, "o", "planned");
 };
 const fetchImpl = (async (input: string | URL | Request) => String(input) === "https://ocw.example.edu/exams"
@@ -31,20 +32,24 @@ const answer = (sources: unknown[]) => () => JSON.stringify({ sources, gaps: [],
 
 test("a need a public page made for the task covers is settled without asking", async () => {
   seed();
+  // The person's own link is never looked for on the web: asked at once.
   expect(needsAwaitingCheck(store, ws)).toMatchObject([{ workOrderId: "t", needId: "n1" }]);
+  expect(needStatesOf(store, ws, "t").get("n2")).toBe("ask");
   const { rpc } = scriptedRuntime([MATERIAL_RESEARCHER_SKILL], answer([{ id: "s1", url: "https://ocw.example.edu/exams", title: "Past Midterms", publisher: "OCW",
     kind: "tutorial", openAccess: "unknown", licenseNote: "", summary: "历年期中卷" }]));
   expect(await createNeedChecker(store, ws, ".", () => rpc, deps)(needsAwaitingCheck(store, ws)[0]!)).toBe("public");
   expect([...provisionsOf(store, ws, "t")]).toEqual([["n1", "public"]]);
   const plan = store.getStepPlan(ws, "t")!;
-  expect(openNeedsOf(plan, plan.steps.find((item) => item.title === "限时模拟")!)).toEqual([]);
+  expect(openNeedsOf(plan, plan.steps.find((item) => item.title === "限时模拟")!)).toEqual(["n2"]);
   expect(needsAwaitingCheck(store, ws)).toEqual([]);
 });
 
 test("nothing found on the web: the person is asked", async () => {
   seed();
-  const { rpc } = scriptedRuntime([MATERIAL_RESEARCHER_SKILL], answer([]));
+  // General pages with a gap named are not the material.
+  const { rpc } = scriptedRuntime([MATERIAL_RESEARCHER_SKILL], () => JSON.stringify({ sources: [{ id: "s1", url: "https://ocw.example.edu/exams", title: "Past Midterms",
+    publisher: "OCW", kind: "tutorial", openAccess: "unknown", licenseNote: "", summary: "别的学校的卷子" }], gaps: ["没有这门课自己的往年卷"], blockers: [] }));
   expect(await createNeedChecker(store, ws, ".", () => rpc, deps)(needsAwaitingCheck(store, ws)[0]!)).toBe("ask");
-  expect([...needStatesOf(store, ws, "t")]).toEqual([["n1", "ask"]]);
+  expect([...needStatesOf(store, ws, "t")]).toEqual([["n1", "ask"], ["n2", "ask"]]);
   expect(needsAwaitingCheck(store, ws)).toEqual([]);
 });

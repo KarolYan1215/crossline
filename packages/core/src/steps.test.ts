@@ -192,13 +192,13 @@ describe("the step type table (3A, 2026-10-22)", () => {
   });
   it("material only the person has is asked for first, and what uses it waits on that", () => {
     const raw = plan([step("a", "practice", { title: "闭卷完成作业 2 第 1 题", product: "ability", uses: ["n1"] }), step("b", "mock", { title: "限时模拟", product: "ability" })], "exam_prep");
-    raw.needs = [{ id: "n1", what: "L3–L8 讲义", why: "练习要按讲义的推导", basis: "[f2] 讲义在 Canvas 上" },
-      { id: "n2", what: "往年卷", why: "", basis: "" }];
+    raw.needs = [{ id: "n1", what: "L3–L8 讲义", why: "练习要按讲义的推导", basis: "[f2] 讲义在 Canvas 上", kind: "reference" },
+      { id: "n2", what: "往年卷", why: "", basis: "", kind: "reference" }];
     const { plan: normalized } = normalizeStepPlan(raw);
     expect(normalized.steps[0]).toMatchObject({ title: "提供L3–L8 讲义", provides: "n1", owner: "person", schedulable: false, executor: "human" });
     expect(normalized.steps[1]!.dependsOn).toContain(normalized.steps[0]!.id);
     // A need nothing on record says the person has is dropped: only one provide step.
-    expect(normalized.needs).toEqual([{ id: "n1", what: "L3–L8 讲义", why: "练习要按讲义的推导", basis: "[f2] 讲义在 Canvas 上" }]);
+    expect(normalized.needs).toEqual([{ id: "n1", what: "L3–L8 讲义", why: "练习要按讲义的推导", basis: "[f2] 讲义在 Canvas 上", kind: "reference" }]);
     expect(normalized.steps.filter((item) => item.provides)).toHaveLength(1);
   });
 });

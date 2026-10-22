@@ -66,7 +66,14 @@ export type PlannedStep = {
  * then on the web for a tutorial or plan made for this very task, and only when neither is enough ask the person — and only for material
  * something on record says they have (`basis`: the fact, file or the task's own words that say so). A need with no basis is dropped.
  */
-export type StepNeed = { id: string; what: string; why: string; basis: string };
+export type StepNeed = { id: string; what: string; why: string; basis: string;
+  /**
+   * `personal`: exists only with the person (their data, their logs, a link or file someone sent them, their own notes) — no web page can
+   * stand in, so the person is asked at once. `reference`: content a public page may give as well (a course's lecture notes, past exams,
+   * a standard) — looked for on the web first. Absent on plans from before it: `reference`. Found on 10-22: a CI run's own link was
+   * "covered" by GitHub's general documentation.
+   */
+  kind?: "personal" | "reference" };
 /**
  * One unit of the task's actual content, read from the person's material — a lecture, a chapter, a problem set, a section of a brief —
  * with the document and the verbatim line it was read from. Quantities are counted from these, never assumed (decided 2026-10-09: a
@@ -128,7 +135,7 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
   completion: COMPLETION_FIELD,
   units: { type: "array", items: object({ id: str, title: str, docId: str, quote: str }) },
   questions: { type: "array", items: object({ id: str, text: str, why: str, options: { type: "array", items: str } }) },
-  needs: { type: "array", items: object({ id: str, what: str, why: str, basis: str }) },
+  needs: { type: "array", items: object({ id: str, what: str, why: str, basis: str, kind: { type: "string", enum: ["personal", "reference"] } }) },
   steps: { type: "array", items: object({
     id: str, role: { type: "string", enum: Object.keys(STEP_ROLES) }, title: str, deliverable: str, doneCriterion: str, share: num,
     estimate: object({ p25Minutes: num, p50Minutes: num, p85Minutes: num }),
@@ -260,7 +267,7 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
   // Only material something on record says the person has: a need without that is guessed, and asking for it wastes their time.
   const needs = (Array.isArray(plan.needs) ? plan.needs : []).filter((need) => need && text(need.what).trim() && text(need.basis).trim()).slice(0, MAX_NEEDS)
     .map((need, index) => ({ id: String(need.id || `n${index + 1}`).slice(0, 40), what: text(need.what).trim().slice(0, 80), why: text(need.why).trim().slice(0, 200),
-      basis: text(need.basis).trim().slice(0, 200) }));
+      basis: text(need.basis).trim().slice(0, 200), kind: need.kind === "personal" ? "personal" as const : "reference" as const }));
   const needIds = new Set(needs.map((need) => need.id));
   for (const step of steps) step.uses = step.uses.filter((id) => needIds.has(id));
   const provides = needs.map((need, index) => ({ id: `provide${index + 1}`, role: "prepare" as StepRole, title: `提供${need.what}`.slice(0, 120),

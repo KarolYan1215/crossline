@@ -38,11 +38,11 @@ test("a step handed to the assistant is remembered for that kind on the line; ac
 
 test("material only the person has holds what uses it until it is uploaded or they say there is none", () => {
   const raw = plan([step("a", "practice", "闭卷完成作业 2 第 1 题", { product: "ability", uses: ["n1"] }), step("b", "summarize", "摘要 L3–L8", { product: "material", uses: ["n1"] })]);
-  raw.needs = [{ id: "n1", what: "L3–L8 讲义", why: "按讲义推导", basis: "讲义在 Canvas 上" }];
+  raw.needs = [{ id: "n1", what: "L3–L8 讲义", why: "按讲义推导", basis: "讲义在 Canvas 上", kind: "reference" }];
   const saved = seed(raw);
   const provide = saved.steps.find((item) => item.provides === "n1")!;
   const summary = saved.steps.find((item) => item.title === "摘要 L3–L8")!;
-  expect(saved.needs).toEqual([{ id: "n1", what: "L3–L8 讲义", why: "按讲义推导", basis: "讲义在 Canvas 上" }]);
+  expect(saved.needs).toEqual([{ id: "n1", what: "L3–L8 讲义", why: "按讲义推导", basis: "讲义在 Canvas 上", kind: "reference" }]);
   expect(openNeedsOf(saved, summary)).toEqual(["n1"]);
   expect(provideMaterial(store, ws, "t", provide.id, "file", [], "o")).toEqual({ ok: false, reason: "没有收到文件" });
   expect(provideMaterial(store, ws, "t", provide.id, "none", [], "o")).toEqual({ ok: true, needId: "n1" });

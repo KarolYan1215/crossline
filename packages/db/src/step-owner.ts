@@ -75,8 +75,11 @@ export type Provision = "file" | "none" | "public";
 export function needStatesOf(store: CrosslineStore, workspaceId: string, workOrderId: string): Map<string, "checking" | "ask"> {
   const checked = new Set(store.listEvents(workspaceId, { type: NEED_CHECKED_EVENT, entityId: workOrderId }).map((event) => (event.payload as { needId?: string }).needId));
   const plan = store.getStepPlan(workspaceId, workOrderId);
+  // The person's own material (their data, a link sent to them) is never on the web: asked at once.
+  const personal = new Set((plan?.needs ?? []).filter((need) => need.kind === "personal").map((need) => need.id));
   const out = new Map<string, "checking" | "ask">();
-  for (const step of plan?.steps ?? []) if (step.provides && step.status === "planned") out.set(step.provides, checked.has(step.provides) ? "ask" : "checking");
+  for (const step of plan?.steps ?? []) if (step.provides && step.status === "planned")
+    out.set(step.provides, checked.has(step.provides) || personal.has(step.provides) ? "ask" : "checking");
   return out;
 }
 

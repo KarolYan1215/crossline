@@ -301,6 +301,9 @@ function pausedFrom(executions: TaskDetail["executions"]): boolean {
 /** The one place a `StoredWorkOrder` plus its already-resolved dependencies becomes a `TaskDetail` —
  * shared by the single-id and batch tiers so their output is byte-identical regardless of which one a
  * caller used to get here. */
+/** The files of a built tutorial (`manual.md` and its per-step sections). */
+const TUTORIAL_FILE = /(?:^|[\\/])(?:manual\.md|nodes[\\/])/;
+
 function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
   milestone: StoredMilestone | undefined; materials: StoredMaterial[]; executions: StoredExecution[];
   materialEvents: StoredEvent[]; archivedEvents: StoredEvent[]; relatedFlywheel: TaskDetail["relatedFlywheel"];
@@ -335,7 +338,11 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     ...(payload.byproductOf ? { byproductOf: payload.byproductOf } : {}),
     materialContract: payload.materialContract ?? [], evidenceContract: payload.evidenceContract ?? [],
     evidenceChecklist: payload.evidenceChecklist ?? [],
-    preparedMaterials: deps.materials.map((item) => ({ id: item.id, uri: item.uri, fileName: item.uri.split("/").pop() ?? item.uri, mediaType: item.mediaType })),
+    // A tutorial built before steps named their product (2026-10-22) is not shown on work that no longer warrants one (a delivery check,
+    // a fix to the person's own system), unless the person asked for it.
+    preparedMaterials: deps.materials.filter((item) => !TUTORIAL_FILE.test(item.uri) || (deps.extras.preparation?.level ?? "tutorial") === "tutorial"
+      || getStore().listEvents(ctx.workspaceId, { type: "tutorial.requested", entityId: order.id }).length > 0)
+      .map((item) => ({ id: item.id, uri: item.uri, fileName: item.uri.split("/").pop() ?? item.uri, mediaType: item.mediaType })),
     executions,
     ...(payload.blocker ? { blocker: payload.blocker } : {}),
     ...(materialBlocker ? { materialBlocker } : {}),
