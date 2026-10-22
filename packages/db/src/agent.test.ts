@@ -143,3 +143,12 @@ test("the daily pass puts a result away or accepts it in the person's place, ear
   reopenAgentResult(store, ws, "adopted", principal);
   expect(listAgentTasks(store, ws).find((task) => task.taskId === "adopted")?.status).toBe("accepted");
 });
+
+test("only an account made from 2026-10-22 has the three kinds on by default; an older one that never chose has none", () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-01T00:00:00Z"));
+  const old = store.createPrincipalWithWorkspace("u-old", "old").workspace.id;
+  vi.useRealTimers();
+  expect(readCategories(store, old)).toEqual({});
+  expect(Object.keys(readCategories(store, ws)).sort()).toEqual(["draft_text", "files_calendar_prep", "read_research_organize"]);
+});

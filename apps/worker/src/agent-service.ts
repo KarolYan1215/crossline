@@ -2,12 +2,12 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { enterUsageWorkspace, type CodexRpcBoundary } from "@crossline/codex";
 import { agentChainsFor, deliverAgentResult, isPaused, listAgentTasks, readCategories, readGrownSkills, requestAgentRetry, requestCategory, type CrosslineStore } from "@crossline/db";
-import { AGENT_CATEGORIES, backgroundSpend, isAgentCategory, retryDue, type AgentCategory, type CostSignal } from "@crossline/core";
+import { AGENT_CATEGORIES, backgroundSpend, deliverableKey, isAgentCategory, retryDue, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, salvageStoppedRun, type AgentOutcome, type AgentTaskInput } from "./agent-task";
 import type { MailLookup } from "./agent-tools";
 import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, ledgerQuestion, retryCandidates, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 import { browserProfilesRoot, sayToPerson, startWorkflowRun } from "./workflow-smith";
-import { ASSISTANT_PREP_HOURS, startingWithin } from "./schedule-window";
+import { ASSISTANT_PREP_HOURS, prepWindow } from "./schedule-window";
 import { ownerOf } from "./owner";
 
 /**
@@ -24,6 +24,11 @@ export const defaultOutputRoot = (): string => process.env.CROSSLINE_AI_OUTPUT_D
 export const AGENT_RUN_LOST = "AGENT_RUN_LOST";
 /** The assistant tick starts nothing once either quota window is this full (decided 2026-10-10). */
 export const QUOTA_CEILING_PERCENT = 95;
+/**
+ * How many assistant runs one account may have going at once (docs/work-split.md §4, the owner's decision of 2026-10-21; it was one).
+ * Each still waits for a slot of the model gate, and the tick still stops at the quota ceiling, a pause or the quota saver.
+ */
+export const ASSISTANT_CONCURRENCY = 2;
 
 export function createAgentService(deps: {
   store: CrosslineStore; repoRoot: string; getClient: () => CodexRpcBoundary | undefined; readCost: () => Promise<CostSignal>;
@@ -50,6 +55,20 @@ export function createAgentService(deps: {
     filesChanged: Array<{ path: string; kind: string }>; searches: string[]; plan?: { explanation: string; steps: Array<{ step: string; status: string }> } } }>();
   const log = deps.log ?? (() => {});
   const mark = (workspaceId: string) => running.get(workspaceId) ?? running.set(workspaceId, new Set()).get(workspaceId)!;
+  // What each run started from the board works on, so a second run never takes the same order (or the same deliverable of its project)
+  // before the first run's request reaches the ledger, where the candidate lists would see it.
+  const working = new Map<string, Map<string, { orderId: string; project: string; deliverable: string }>>();
+  const workOf = (workspaceId: string, orderId: string, stepId?: string) => {
+    const order = deps.store.listWorkOrders(workspaceId).find((item) => item.id === orderId);
+    const step = stepId ? deps.store.getStepPlan(workspaceId, orderId)?.steps.find((item) => item.id === stepId) : undefined;
+    return { orderId, project: order?.projectId ?? "", deliverable: deliverableKey(step?.title ?? order?.intent ?? "") };
+  };
+  const clashes = (workspaceId: string, orderId: string, stepId?: string): boolean => {
+    const runs = [...(working.get(workspaceId)?.values() ?? [])];
+    if (!runs.length) return false;
+    const work = workOf(workspaceId, orderId, stepId);
+    return runs.some((run) => run.orderId === orderId || Boolean(work.deliverable) && run.project === work.project && run.deliverable === work.deliverable);
+  };
   /** Turned away only where no mode is offered: with `modeFor`, every account has the assistant in one mode or the other. */
   const refused = (workspaceId: string) => !deps.modeFor && deps.isOwner !== undefined && !deps.isOwner(workspaceId);
   const runnerFor = (workspaceId: string, control: AbortController, onLive: Parameters<typeof createAgentRunner>[4]["onLive"]) => {
@@ -80,6 +99,7 @@ export function createAgentService(deps: {
     const taskId = planned.input.taskId!;
     if (mark(workspaceId).has(taskId)) return { state: "started", taskId };
     mark(workspaceId).add(taskId);
+    (working.get(workspaceId) ?? working.set(workspaceId, new Map()).get(workspaceId)!).set(taskId, workOf(workspaceId, orderId, stepId));
     const control = new AbortController();
     controls.set(taskId, control);
     const run = runnerFor(workspaceId, control, (record) => live.set(taskId, record));
@@ -103,7 +123,7 @@ export function createAgentService(deps: {
       }
       if (outcome.state === "done") tellWhatItFound(workspaceId, taskId, planned.input.title, outcome);
       log({ type: `agent.${outcome.state}`, workspaceId, taskId, ...(outcome.state === "blocked" ? { code: outcome.code } : {}), ...(delivered ? { delivered } : {}) });
-    })().finally(() => { mark(workspaceId).delete(taskId); controls.delete(taskId); live.delete(taskId); });
+    })().finally(() => { mark(workspaceId).delete(taskId); working.get(workspaceId)?.delete(taskId); controls.delete(taskId); live.delete(taskId); });
     return { state: "started", taskId };
   }
 
@@ -142,7 +162,7 @@ export function createAgentService(deps: {
     if (refused(workspaceId))
       return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
     if (!readCategories(deps.store, workspaceId)[input.category]) return { state: "needs_category_approval", category: input.category, label: AGENT_CATEGORIES[input.category] };
-    if (mark(workspaceId).size) return { state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" };
+    if (mark(workspaceId).size >= ASSISTANT_CONCURRENCY) return { state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" };
     mark(workspaceId).add(input.taskId);
     const control = new AbortController();
     controls.set(input.taskId, control);
@@ -197,48 +217,65 @@ export function createAgentService(deps: {
       const recorded = requestAgentRetry(deps.store, workspaceId, taskId, input, now);
       if (!recorded.ok) return { ok: false, code: recorded.code, message: recorded.code === "TASK_NOT_FOUND" ? "找不到这个助手任务。" : "这个任务正在运行。" };
       if (isPaused(deps.store, workspaceId)) return { ok: true, state: "queued", message: "助手已暂停；恢复后按本人的说明重做。" };
-      if (mark(workspaceId).size) return { ok: true, state: "queued", message: "助手正在做别的事；做完后按本人的说明重做。" };
+      if (mark(workspaceId).size >= ASSISTANT_CONCURRENCY) return { ok: true, state: "queued", message: "助手正在做别的事；做完后按本人的说明重做。" };
       if (!(await quotaAllows(workspaceId))) return { ok: true, state: "queued", message: "额度紧张；额度恢复后按本人的说明重做。" };
       // A clock read after the request was written: the request is due from the moment it was recorded.
+      const before = mark(workspaceId).size;
       await api.pass(workspaceId, new Date(Math.max(now.getTime(), Date.now())), { quotaChecked: true });
-      return mark(workspaceId).size ? { ok: true, state: "started", message: "已按本人的说明重新开始。" } : { ok: true, state: "queued", message: "已记下；稍后按本人的说明重做。" };
+      return mark(workspaceId).size > before ?{ ok: true, state: "started", message: "已按本人的说明重新开始。" } : { ok: true, state: "queued", message: "已记下；稍后按本人的说明重做。" };
     },
 
-    /** On the tick: at most one new task per workspace, only of an approved kind, only with quota to spare, only when none is going. */
+    /**
+     * On the tick: new tasks until `ASSISTANT_CONCURRENCY` run in the workspace, only of an approved kind, only with quota to spare,
+     * never on an order a running task already works on (`clashes`).
+     */
     async pass(workspaceId: string, now = new Date(), options: { quotaChecked?: boolean } = {}): Promise<void> {
       try { sayAccepted(workspaceId, now); } catch { /* the message is a courtesy */ }
-      if (mark(workspaceId).size || refused(workspaceId)) return;
-      // In order: a step 「自动交给 Agent」 handed over whose block has come up (it is wanted now); preparation steps (what the person's
-      // next session is waiting for); whole orders; and, with nothing else waiting, a handed-over step whose block is later this week.
-      // Preparation and whole errands only for work starting within two days (docs/review-2026-10-13.md §6.1): results for later work
-      // went unread and were stale by the time it came up.
-      const soon = startingWithin(deps.store, workspaceId, now, ASSISTANT_PREP_HOURS);
-      // Work that was interrupted (or that the person asked to redo) goes first: it was already under way.
-      const retry = retryCandidates(deps.store, workspaceId, now, soon)[0];
-      const flow = retry || isPaused(deps.store, workspaceId) ? undefined : flowRetry(workspaceId, now);
-      const auto = autoHandoffCandidates(deps.store, workspaceId, now);
-      const step = retry ? undefined : auto.due[0] ?? stepDispatchCandidates(deps.store, workspaceId, soon, now)[0];
-      const order = retry || step ? undefined : dispatchCandidates(deps.store, workspaceId, soon, now)[0];
-      const next = retry ?? step ?? (order ? { orderId: order, stepId: undefined } : auto.early[0]);
-      if (!next && !flow) return;
-      // Its own ceiling (the person's choice, 2026-10-10): it keeps working through economy and stops at 95% of either window, so the
-      // last few percent stay for the person's own captures and plans. An unreadable or exhausted quota pauses it like every other
-      // background pass. Starting by hand from 待确认 is not gated here.
-      if (!options.quotaChecked && !(await quotaAllows(workspaceId))) return;
-      if (!next && flow) {
-        const result = startWorkflowRun(deps.store, workspaceId, flow.record, (input, after) => runFree(workspaceId, { ...input, by: flow.chain.byPerson ? "person" : "system" }, after),
-          browserProfilesRoot(workspaceId), now);
-        log({ type: "agent.retried_workflow", workspaceId, id: flow.record.id, state: result.state });
-        return;
+      if (refused(workspaceId)) return;
+      let quotaChecked = options.quotaChecked ?? false;
+      let flowTried = false;
+      // Tried in this pass already: a candidate that did not start (a kind to ask about, an order the store refused) is not taken again.
+      const tried = new Set<string>();
+      const open = (candidate: { orderId: string; stepId?: string | undefined }) =>
+        !tried.has(`${candidate.orderId}#${candidate.stepId ?? ""}`) && !clashes(workspaceId, candidate.orderId, candidate.stepId);
+      while (mark(workspaceId).size < ASSISTANT_CONCURRENCY) {
+        // In order: a step 「自动交给 Agent」 handed over whose block has come up (it is wanted now); preparation steps (what the person's
+        // next session is waiting for); whole orders; and, with nothing else waiting, a handed-over step whose block is later this week.
+        // Preparation and whole errands only within two days of the person's step they serve (docs/work-split.md §4, `prepWindow`):
+        // results for later work went unread and were stale by the time it came up.
+        const soon = prepWindow(deps.store, workspaceId, now, ASSISTANT_PREP_HOURS);
+        // Work that was interrupted (or that the person asked to redo) goes first: it was already under way.
+        const retry = retryCandidates(deps.store, workspaceId, now, soon).find(open);
+        const flow = retry || flowTried || isPaused(deps.store, workspaceId) ? undefined : flowRetry(workspaceId, now);
+        const auto = autoHandoffCandidates(deps.store, workspaceId, now);
+        const step = retry ? undefined : auto.due.find(open) ?? stepDispatchCandidates(deps.store, workspaceId, soon.steps, now).find(open);
+        const order = retry || step ? undefined : dispatchCandidates(deps.store, workspaceId, soon.orders, now).find((orderId) => open({ orderId }));
+        const next = retry ?? step ?? (order ? { orderId: order, stepId: undefined } : auto.early.find(open));
+        if (!next && !flow) return;
+        // Its own ceiling (the person's choice, 2026-10-10): it keeps working through economy and stops at 95% of either window, so the
+        // last few percent stay for the person's own captures and plans. An unreadable or exhausted quota pauses it like every other
+        // background pass. Starting by hand from 待确认 is not gated here.
+        if (!quotaChecked) {
+          if (!(await quotaAllows(workspaceId))) return;
+          quotaChecked = true;
+        }
+        if (!next && flow) {
+          flowTried = true;
+          const result = startWorkflowRun(deps.store, workspaceId, flow.record, (input, after) => runFree(workspaceId, { ...input, by: flow.chain.byPerson ? "person" : "system" }, after),
+            browserProfilesRoot(workspaceId), now);
+          log({ type: "agent.retried_workflow", workspaceId, id: flow.record.id, state: result.state });
+          continue;
+        }
+        const { orderId, stepId } = next!;
+        tried.add(`${orderId}#${stepId ?? ""}`);
+        const result = start(workspaceId, orderId, undefined, stepId, retry?.chain.byPerson ? "person" : "system");
+        log({ type: retry ? "agent.retried" : "agent.dispatched", workspaceId, orderId, ...(stepId ? { stepId } : {}), state: result.state });
       }
-      const { orderId, stepId } = next!;
-      const result = start(workspaceId, orderId, undefined, stepId, retry?.chain.byPerson ? "person" : "system");
-      log({ type: retry ? "agent.retried" : "agent.dispatched", workspaceId, orderId, ...(stepId ? { stepId } : {}), state: result.state });
     },
 
     /**
      * A run tied to no work order — a workflow being grown, or a grown workflow's scheduled run (docs/skills-library.md §6): the same
-     * owner-only, one-at-a-time, approved-kinds-only machinery as an order's, with `after` told how it ended. A busy assistant or a kind
+     * owner-only, `ASSISTANT_CONCURRENCY`-at-a-time, approved-kinds-only machinery as an order's, with `after` told how it ended. A busy assistant or a kind
      * the person has not allowed is refused, and the caller tries again later.
      */
     runFree(workspaceId: string, input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void): DispatchResult {

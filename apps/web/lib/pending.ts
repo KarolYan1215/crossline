@@ -1,5 +1,5 @@
 import "server-only";
-import type { AccessContext } from "@crossline/core";
+import { onPersonsBoard, type AccessContext } from "@crossline/core";
 import { resultsAwaitingReview } from "@crossline/db";
 import { appNow, getStore } from "./crossline";
 import { countProposedTargets } from "./targets";
@@ -65,7 +65,9 @@ function computePending(ctx: AccessContext): PendingCounts {
   const split = <T>(items: T[], deferred: (item: T) => boolean) => { const later = items.filter(deferred).length; return { now: items.length - later, later }; };
   // A proposal whose steps are still being planned is not a decision yet (`lib/proposal-ready.ts`).
   const preparing = preparingProposalIds(ctx);
-  const proposals = split(orders.filter((order) => order.state === "awaiting_plan_approval" && !preparing.has(order.id)), (order) => Boolean(horizon.orderEntry(order)));
+  // A question to the person waiting as an order (docs/work-split.md) is not a proposal to approve: it reaches the person as an ask.
+  const proposals = split(orders.filter((order) => order.state === "awaiting_plan_approval" && !preparing.has(order.id) && onPersonsBoard(order)),
+    (order) => Boolean(horizon.orderEntry(order)));
   const drafts = split(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "draft"), (milestone) => Boolean(horizon.milestoneEntry(milestone.id)));
   const asks = split(listed(openAsks(ctx)), (ask) => Boolean(ask.entersOn));
   const reviews = split(resultsAwaitingReview(store, ctx.workspaceId), (task) => {

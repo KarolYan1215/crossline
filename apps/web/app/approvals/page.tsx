@@ -1,3 +1,4 @@
+import { onPersonsBoard } from "@crossline/core";
 import { ensureSeeded, getStore, loadCurrentPlan, planToday } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { FirstHint } from "../ui/first-hint";
@@ -37,7 +38,8 @@ export default async function ApprovalsPage() {
   const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");
   // A proposal whose steps are still being planned is not a decision yet (`preparingProposalIds`): it is neither listed nor approvable here.
   const preparing = preparingProposalIds(ctx);
-  const waiting = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval");
+  // Questions to the person waiting as orders (docs/work-split.md) are asked, not approved.
+  const waiting = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval" && onPersonsBoard(item));
   const proposals = waiting.filter((item) => !preparing.has(item.id));
   const preparingCount = waiting.length - proposals.length;
   const claims = getStore().listEvidenceClaims(ctx.workspaceId);

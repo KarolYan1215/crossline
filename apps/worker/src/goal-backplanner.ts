@@ -1,7 +1,7 @@
 import { personProfileFor } from "./planning-profile";
 import { randomUUID } from "node:crypto";
-import { BACKPLAN_SCHEMA, foldInfoRequests, goalSettingKey, mentionsExternalAction, producedArtifacts, usedArtifacts, validateBackplan, withCourse, type BackplanAnswer as Answer,
-  type MissingInput } from "@crossline/core";
+import { assignBackplanOwners, BACKPLAN_SCHEMA, foldInfoRequests, goalSettingKey, isWorkOwner, mentionsExternalAction, producedArtifacts, rollingBackplan, usedArtifacts,
+  validateBackplan, withCourse, workOwner, type BackplanAnswer as Answer, type MissingInput } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { handOffArtifacts, linkArtifactWork, readStoredArtifactPlan, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 
@@ -12,8 +12,21 @@ import { identityLines } from "./lines";
 import { decideFold, existingTasksFor, openTasks, recentlyDoneTasks, recordFold, type Fold } from "./duplicate-guard";
 import { materialExcerpts, relevantFacts } from "./material-context";
 const SKILL = "crossline:crossline-goal-backplanner";
-/** How many next steps an automatic (rolling) backplan keeps. */
+/**
+ * How many items an automatic (rolling) backplan keeps when the answer has no core task of the person's. With one, a round keeps that
+ * core task and its preparation (`rollingBackplan`, docs/work-split.md §3): keeping the first two in dependency order always kept two
+ * pieces of preparation, and the person's own work never came out.
+ */
 export const ROLLING_STEPS = 2;
+
+/**
+ * Whether an order is the person's core work (docs/work-split.md): its recorded owner, or for an order written before owners, what
+ * `workOwner` reads in it. Only these serve a milestone: a milestone with nothing but preparation open is worked backwards again.
+ */
+export function isPersonCore(order: Pick<StoredWorkOrder, "intent" | "payload">): boolean {
+  const owner = (order.payload as { owner?: unknown } | undefined)?.owner;
+  return isWorkOwner(owner) ? owner === "person" : workOwner(order).owner === "person";
+}
 
 /** What the person has already said about this milestone's missing inputs: handed over, or being waited for. */
 function personInputs(store: CrosslineStore, workspaceId: string, milestoneId: string) {
@@ -111,19 +124,23 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       facts, materials,
       suppliedInputs: supplied, waitingInputs: waiting, missingInputs: [] as MissingInput[],
       existingWork: store.listWorkOrders(workspaceId)
-      .filter((order) => order.milestoneId === milestone.id).map((order) => ({ id: order.id, intent: order.intent, state: order.state })),
+      .filter((order) => order.milestoneId === milestone.id).map((order) => ({ id: order.id, intent: order.intent, state: order.state,
+        owner: isPersonCore(order) ? "person" : "assistant" })),
       // Every open task of this line and project (the task library included): work one of them covers is not written again.
       existingTasks: existingTasksFor(store, workspaceId, { identityId: milestone.identityId, projectId: milestone.projectId! }),
       // Work of this line and project finished in the last 30 days: done once, not proposed again (walkthrough W-30).
       recentlyDone: recentlyDoneTasks(store, workspaceId).filter((task) => task.identityId === milestone.identityId && task.projectId === milestone.projectId)
         .slice(0, 20).map((task) => ({ id: task.id, title: task.title.slice(0, 120), intent: task.intent.slice(0, 160) })) };
-    const rolling = options.rolling ? ` Return only the next ${ROLLING_STEPS} items that can start now (existingWork shows what is already done or open); the rest is proposed after these are done.` : "";
+    const rolling = options.rolling ? " Return only the person's next core task that can start now (existingWork shows what is already done or open), with the "
+      + "assistant's items and questions it needs (prepares = its id); the rest is proposed after it is done." : "";
     const run = (missingInputs: MissingInput[]) => {
       const input = { ...context, missingInputs };
       const runSources = [...sources, ...materials.map((item) => item.text), ...missingInputs.flatMap((item) => [item.message, item.what])];
       return runCodexSkill<Answer>(client, input, { skillName: SKILL, cwd, redoOnRepair: true,
         developerInstructions: "Work backwards from this approved milestone to the tasks that deliver it, as the crossline-goal-backplanner Skill describes, "
-          + "and return only the requested JSON. Each item becomes one task card on the person's 任务 page (one deliverable, 30 to 480 minutes, named "
+          + "and return only the requested JSON. Write the person's core tasks first (owner person: their practice, judgement, core output or own acts, "
+          + "named by what they produce), then the preparation each needs as the assistant's items (owner assistant, prepares = that core item's id) "
+          + "or a short question to the person (owner ask). A person's item becomes one task card on the 任务 page (one deliverable, 30 to 480 minutes, named "
           + "with its course or project) that the step planner splits into steps afterwards; a request for a fact is never an item. Read existingTasks and "
           + "recentlyDone first: never write work they cover, and an item that only adds to an open task sets extendsTaskId. Never set a goal, a deadline "
           + "or criteria.",
@@ -140,7 +157,16 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           + rolling).trim(),
         outputSchema: BACKPLAN_SCHEMA, prepareInput: () => input,
         validateOutput: (output) => validateBackplan(output, runSources, dateSources, missingInputs.map((item) => item.id),
-          { produce: artifacts.produce.map((item) => item.id), use: artifacts.use.map((item) => item.id) }, context.existingTasks.map((task) => task.id)), onAudit: () => {},
+          { produce: artifacts.produce.map((item) => item.id), use: artifacts.use.map((item) => item.id) }, context.existingTasks.map((task) => task.id)),
+        // An answer still without a core task of the person's after the repairs is kept as it is (it is all the assistant's preparation and
+        // questions); the round is recorded as such and not repeated on a timer (`milestonesAwaitingBackplan`).
+        softAccept: (rejection, output) => {
+          if (!rejection.message.startsWith("BACKPLAN_NO_PERSON_CORE")) return undefined;
+          try { return validateBackplan(output, runSources, dateSources, missingInputs.map((item) => item.id),
+            { produce: artifacts.produce.map((item) => item.id), use: artifacts.use.map((item) => item.id) }, context.existingTasks.map((task) => task.id),
+            { requireCore: false }); } catch { return undefined; }
+        },
+        onAudit: () => {},
         ...(signal ? { signal } : {}), timeoutMs: 60 * 60_000 });
     };
     const recordBlocked = (code: string, message: string, missingInputs: MissingInput[]) => {
@@ -173,18 +199,26 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
     }
     // A request for a fact that another item needs becomes that item's first step instead of a task (info-request.ts, 2026-10-15).
     const { steps: shaped } = foldInfoRequests(result.output.steps);
-    // Steps come in dependency order (each depends only on earlier ones), so the first ones are the ones that can start.
-    const planned = options.rolling ? shaped.slice(0, ROLLING_STEPS) : shaped;
+    // Who does each item (docs/work-split.md): the person's core tasks, the assistant's preparation for them, questions to the person.
+    // A review-only item is dropped: the gate judges the assistant's work.
+    const { steps: owned, dropped } = assignBackplanOwners(shaped);
+    const noCore = owned.length > 0 && !owned.some((step) => step.owner === "person");
+    // Rolling keeps the person's next core task with what it waits on and its preparation; with no core task, the first items.
+    const planned = options.rolling ? rollingBackplan(owned, ROLLING_STEPS) : owned;
     // Before anything is written: an item that only adds to an open task, or that the merge rules call the same as one, goes into that
-    // task instead of standing beside it, and items depending on it depend on that task.
+    // task instead of standing beside it, and items depending on it depend on that task. The person's work is compared with the person's
+    // work and preparation with preparation: a core task folded into a piece of preparation would leave the milestone without one.
+    const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
+    const core = (taskId: string) => { const order = orders.get(taskId); return !order || isPersonCore(order); };
     const open = openTasks(store, workspaceId);
     const done = recentlyDoneTasks(store, workspaceId);
     const deadline = store.listMilestoneAnchors(workspaceId).find((anchor) => anchor.milestoneId === milestone.id)?.deadline ?? "";
     const folds = new Map<string, Fold>();
     for (const step of planned) {
-      const fold = decideFold(open, { id: `backplan:${key}:${step.id}`, identityId: milestone.identityId, projectId: milestone.projectId!, milestoneId: milestone.id,
+      const mine = (task: { id: string }) => core(task.id) === (step.owner === "person");
+      const fold = decideFold(open.filter(mine), { id: `backplan:${key}:${step.id}`, identityId: milestone.identityId, projectId: milestone.projectId!, milestoneId: milestone.id,
         title: withCourse(step.title, milestone.projectId), intent: step.intent, state: "awaiting_plan_approval", dueDate: "", milestoneDeadline: deadline,
-        progress: 0, hasStepPlan: false, started: false, dependsOn: [] }, step.extendsTaskId ?? "", done);
+        progress: 0, hasStepPlan: false, started: false, dependsOn: [] }, step.extendsTaskId ?? "", done.filter(mine));
       if (fold) folds.set(step.id, fold);
     }
     const steps = planned.filter((step) => !folds.has(step.id));
@@ -194,11 +228,18 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       // What the step *is*, not why or what it leaves behind: 「首轮发布清单草稿」 as evidence made picking topics high-risk.
       const external = mentionsExternalAction(step.intent);
       const riskTier = external ? "high_risk" : step.riskTier;
+      const person = step.owner === "person";
+      const part = { id: `${id}-${person ? "core" : "ai"}`, intent: step.intent, quote: step.sourceQuote, rationale: step.rationale };
       return { id, ownerId: ownerOf(store, workspaceId), workspaceId,
         identityId: milestone.identityId, projectId: milestone.projectId!, milestoneId: milestone.id,
         intent: step.intent, state: "awaiting_plan_approval", riskTier,
         estimate: { ...step.estimate, source: "llm_prior", observationCount: 0, confidence: "low" },
-        payload: { title: withCourse(step.title, milestone.projectId), family: step.family, backplan: { milestoneVersion: milestone.version, sourceQuote: step.sourceQuote,
+        payload: { title: withCourse(step.title, milestone.projectId), family: step.family,
+          // Who does it (docs/work-split.md): the assistant's preparation and the questions stay off the person's board and calendar
+          // (`onPersonsBoard`) and point at the core task they serve; a question carries what to ask.
+          owner: step.owner, ownerReason: step.ownerReason, ...(person ? {} : { prepares: ids.get(step.prepares) ?? "" }),
+          ...(step.owner === "ask" ? { question: step.question } : {}),
+          backplan: { milestoneVersion: milestone.version, sourceQuote: step.sourceQuote,
           rationale: step.rationale, stepId: step.id, ...(step.acquires ? { acquires: step.acquires, inputsFrom,
             missingInput: missing.find((item) => item.id === step.acquires)?.what ?? "" } : {}) }, dependsOn: step.dependsOn.map((dep) => ids.get(dep)).filter((dep): dep is string => Boolean(dep)),
           ...(step.produces ? { produces: step.produces } : {}), ...(step.uses.length ? { uses: step.uses } : {}),
@@ -206,8 +247,8 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
           ...(step.infoRequests?.length ? { infoRequests: step.infoRequests } : {}),
           // How finishing it is taken, as the backplanner judged it (`completion.ts`).
           ...(step.completion ? { completion: step.completion } : {}),
-          automationParts: [], humanCore: [{ id: `${id}-core`, intent: step.intent, quote: step.sourceQuote,
-            rationale: step.rationale, energy: step.energy, interruptible: step.interruptible }],
+          automationParts: person ? [] : [part],
+          humanCore: person ? [{ ...part, energy: step.energy, interruptible: step.interruptible }] : [],
           materialContract: [], evidenceContract: [{ kind: "record", description: step.evidence,
             why: "反推步骤的交付证据", required: true }],
           audit: { threadId: result.audit.threadId ?? "unavailable", turnId: result.audit.turnId ?? "unavailable" },
@@ -218,6 +259,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       type: "goal.backplan_proposed", entityId: milestone.id,
       payload: { milestoneVersion: milestone.version, workOrderIds, ...(options.rolling ? { rolling: true, round: rounds } : {}),
         ...(missing.length ? { missing } : {}), ...(folds.size ? { folded: [...folds].map(([stepId, fold]) => ({ stepId, into: fold.keep, kind: fold.kind })) } : {}),
+        ...(dropped.length ? { reviewDropped: dropped } : {}), ...(noCore ? { noCore: true } : {}),
         dateCandidates: result.output.dateCandidates, source: SKILL } });
     if (inserted) {
       for (const [stepId, fold] of folds) {
@@ -259,7 +301,14 @@ export function milestonesAwaitingBackplan(store: CrosslineStore, workspaceId: s
   const today = now.toISOString().slice(0, 10);
   const deadlines = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   // A task the daily merge kept for several milestones (`alsoServes`) serves each of them: none is split again for having lost its own.
-  const open = new Set(store.listWorkOrders(workspaceId).filter((order) => !["archived", "accepted"].includes(order.state))
+  // Only the person's core work serves (docs/work-split.md §3): a milestone with nothing but preparation open is worked backwards again,
+  // so its core task comes out. The assistant's work from a round that found no core task (`prepares` empty) serves too, or the round
+  // would be asked for again every tick.
+  const serves = (order: StoredWorkOrder) => {
+    const payload = (order.payload ?? {}) as { owner?: unknown; prepares?: string };
+    return isPersonCore(order) || (isWorkOwner(payload.owner) && !payload.prepares);
+  };
+  const open = new Set(store.listWorkOrders(workspaceId).filter((order) => !["archived", "accepted"].includes(order.state) && serves(order))
     .flatMap((order) => [order.milestoneId, ...((order.payload as { alsoServes?: string[] } | undefined)?.alsoServes ?? [])]));
   // Proposed, or tried and refused (the model said the milestone's own text cannot justify a step): either way this
   // version is not tried again on a timer — a refusal repeated every fifteen minutes is quota spent on the same answer.
@@ -268,6 +317,12 @@ export function milestonesAwaitingBackplan(store: CrosslineStore, workspaceId: s
   const blocked = new Set(store.listEvents(workspaceId, { type: "goal.backplan_blocked" })
     .filter((event) => Array.isArray((event.payload as { missing?: unknown }).missing)).map((event) =>
     `${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}`));
+  // A round with no core task of the person's even after being sent back, all of it folded into work already open, wrote nothing that
+  // could serve the milestone: it is not asked for again at this version. (A round that wrote the assistant's work serves while open.)
+  for (const event of store.listEvents(workspaceId, { type: "goal.backplan_proposed" })) {
+    const payload = event.payload as { noCore?: boolean; workOrderIds?: string[]; milestoneVersion?: number };
+    if (payload.noCore && !payload.workOrderIds?.length) blocked.add(`${event.entityId}:${payload.milestoneVersion}`);
+  }
   const states = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order.state]));
   // A round the person discarded entirely is a "no" to this version: it is not proposed again on a timer.
   const declined = new Set(store.listEvents(workspaceId, { type: "goal.backplan_proposed" }).filter((event) => {

@@ -46,6 +46,19 @@ test("a milestone whose criteria are all outputs is refused", () => {
   refused([item("西湖图表交付师兄确认", plan(), { successCriteria: [{ evidenceOf: "output", measure: { kind: "artifact" } }] })], "MILESTONE_OUTCOME_REQUIRED");
 });
 
+// docs/work-split.md §3: a milestone that is only material being ready gives the person nothing of their own to do; readiness is the
+// assistant's preparation, folded into a milestone with a result of the person's.
+test("a milestone whose every criterion is material being ready is refused, whatever the line", () => {
+  refused([item("西湖实验资料汇集", plan(), { successCriteria: [
+    { statement: "三篇对照论文的实验参数已汇集", evidenceOf: "outcome", measure: { kind: "artifact" } },
+    { statement: "仿真输入清单建立", evidenceOf: "output", measure: { kind: "artifact" } }] })], "MILESTONE_PREP_ONLY");
+  const withResult = chain();
+  withResult[0] = item("西湖图表交付师兄确认", plan({ key: "a", stage: 1, deadline: "2026-10-15" }), { successCriteria: [
+    { statement: "三篇对照论文的实验参数已汇集", evidenceOf: "output", measure: { kind: "artifact" } },
+    { statement: "师兄确认第 3、4 张图可用", evidenceOf: "outcome", measure: { kind: "artifact" } }] });
+  expect(() => validateMilestonePlans(withResult, profile, new Set())).not.toThrow();
+});
+
 test("a covered line needs three to five milestones, and later stages cannot be due earlier", () => {
   refused(chain().slice(0, 2), "MILESTONE_CHAIN_TOO_SHORT");
   const backwards = chain();

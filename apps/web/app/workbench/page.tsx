@@ -1,3 +1,4 @@
+import { onPersonsBoard } from "@crossline/core";
 import { stateLabel } from "../../lib/labels";
 import { RestoreButton } from "./restore-button";
 import { archivedBySystem, ensureSeeded, getStore, libraryUntil, loadCurrentPlan, planToday } from "../../lib/crossline";
@@ -69,7 +70,8 @@ export default async function WorkbenchPage({ searchParams }: {
   const milestoneOptions = store.listMilestones(ctx.workspaceId)
     .filter((milestone) => milestone.status === "approved")
     .map((milestone) => ({ id: milestone.id, title: milestone.title, identityId: milestone.identityId }));
-  const live = all.filter((run) => run.state !== "archived");
+  // The assistant's preparation and the questions to the person are not the person's tasks (docs/work-split.md): no card here.
+  const live = all.filter((run) => run.state !== "archived" && onPersonsBoard(run));
   // One batched read for every card instead of one per card — see `loadTaskDetailsBatch`'s own doc comment.
   const taskDetails = timedSync("workbench.details", () => loadTaskDetailsBatch(ctx, live.map((run) => run.id)));
   const slots = nextSlots((await timed("plan.current", () => loadCurrentPlan(ctx))).blocks, today);

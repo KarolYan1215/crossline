@@ -6,6 +6,7 @@
  * something that can be checked in code, so a generic answer is sent back instead of reaching the person.
  */
 import { isCourse } from "./profile-gaps";
+import { isPreparationOnlyCriterion } from "./work-owner";
 export type MilestonePlan = {
   /** Local to one answer, so `dependsOn` can point at a sibling before either has a real id. */
   key: string;
@@ -93,7 +94,7 @@ function refuse(code: string, detail: string): never {
 
 type ProposedMeasure = { kind?: string; unit?: string; comparator?: string; value?: number; bareLine?: number };
 type Proposed = {
-  identityId: string; projectId?: string; title: string; successCriteria: Array<{ evidenceOf?: string; measure?: ProposedMeasure }>; plan?: MilestonePlan;
+  identityId: string; projectId?: string; title: string; successCriteria: Array<{ statement?: string; evidenceOf?: string; measure?: ProposedMeasure }>; plan?: MilestonePlan;
 };
 
 /** How far past the bare line a target has to sit: a line set exactly where the outcome flips is one bad day from missing it. */
@@ -200,6 +201,11 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
     // criteria are all outputs passes on a productive afternoon while the goal stands still.
     if (!item.successCriteria.some((criterion) => criterion.evidenceOf === "outcome")) {
       refuse("MILESTONE_OUTCOME_REQUIRED", `${label} 的验收标准里至少要有一条 evidenceOf=outcome（世界发生了变化，而不只是产出了东西）。`);
+    }
+    // Material being ready is the assistant's preparation, not a result (docs/work-split.md §3): a milestone made only of it gives the
+    // person nothing of their own to do towards it, and its tasks come out as collecting and filing.
+    if (item.successCriteria.length && item.successCriteria.every((criterion) => isPreparationOnlyCriterion(criterion))) {
+      refuse("MILESTONE_PREP_ONLY", `${label} 的标准全是「资料已就绪」类（汇集、整理、清单、样本包）。准备由助手做，不单独成为里程碑：把它并入一个有本人产出的里程碑（本人练习、写出、做出、交出或拿到结果），在那个里程碑的标准里写本人的结果。`);
     }
     keys.set(plan.key, { ...item, plan });
   }

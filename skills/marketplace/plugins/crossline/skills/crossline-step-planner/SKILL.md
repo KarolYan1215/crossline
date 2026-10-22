@@ -62,6 +62,9 @@ What the task's own material settles is read, never asked: the problems and how 
 The person's attention is for what moves the outcome: understanding, solving, deriving, designing, deciding, writing the argument, making the piece (the hook, the cut, the pitch), rehearsing under the real conditions, checking work against a standard. Plan **only those** as `human` steps. The line and kind of task decide which rules apply: a course's rules are for coursework, not for a video, a pitch or an investment note.
 
 - **Never** a person's step whose substance is collecting, listing, downloading, sorting, filing, making an inventory, 「确认材料」, 「梳理概念」 or formatting. Those are the assistant's (section 5); the app moves such a step there anyway.
+- **Never** a step that only reviews or accepts the assistant's output, writes an acceptance checklist or 「确定口径 / 界定范围」. The acceptance gate judges the assistant's work; the person glances at it when the first core step that uses it begins, so put that glance at the start of that step's `firstAction` (at most ten minutes: 「先用 10 分钟扫一眼助手汇集的往年卷目录；打开第一套卷子」). A scope only the person can state is a `question`. The app folds a review-only step into the next core step anyway.
+- A decision stays a step only when it has consequences (which experiments to add, which venue to submit to, which offer to take); a choice the material settles is not a step.
+- Each step's `why` says what it trains or decides for this person, in one sentence, and its `aiAssist` how a tool takes the drudgery out of it (section 7).
 - Each step names **which units** it works on (`covers`) and **what the person produces or can do afterwards**, quantified:
 
 | | title / doneCriterion |
@@ -106,6 +109,7 @@ Only the steps that need the answer depend on the send step; everything else pro
 - `share` — its part of the task's progress, summing to 1, proportional to effort and value, the person's steps carrying most.
 - `estimate` — `{p25Minutes, p50Minutes, p85Minutes}`, p85 = 1.2–3× p50.
 - `dependsOn`, `notBefore`/`dueBy` (`YYYY-MM-DD` inside the window, or ""; use `projectDates`), `schedulable` (false for waits and for `agent` steps), `executor` (`human` / `agent` / `mixed`).
+- `owner` — who does it, judged by what the step produces and never by the kind of goal: `person` (`human` or `mixed`: the person's practice, judgement, core output or own acts), `assistant` (`agent`: a static artefact from existing material), or `ask` (`agent`, but it needs one thing only the person holds, such as data behind their login, an export or a sentence of scope; put that question in `questions`). Two illustrations from different lines: for an exam, 「汇集考试规则与往年卷」 is `assistant` and 「按规则做 2 套往年卷并订正」 is `person`; for a startup, 「整理 5 份访谈记录」 is `assistant` and 「排出前 3 个痛点并决定下一轮试用的门店」 is `person`.
 - `tickOutcome` — for the two to five steps whose result is a real capability or artefact, the result as it would be ticked on the milestone axis (「能在 20 分钟内独立解出 BJT 小信号题」); "" otherwise.
 - `covers`, `why`, `aiAssist` (section 7).
 - `firstAction` — for every `human` or `mixed` step, the first move that starts it, five minutes or less, naming the actual thing to open or write, at most 80 characters: 「打开 L5 讲义，读到第一个例题」, 「新建 hw3.md，抄下第 1 题题干」, 「把去年期中卷第一页打印出来」. Never a restatement of the title, 「开始复习」 or 「做好准备」. "" for `agent` steps and waits.

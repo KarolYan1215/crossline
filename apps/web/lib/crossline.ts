@@ -61,10 +61,10 @@ import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEff
 import { statedShares } from "./plan-stats";
 import { milestonesBeingBackplanned } from "./backplan-status";
 import { nearestDueProposal } from "./urgent-proposal";
-import { completionRule, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
+import { completionRule, onPersonsBoard, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
-import { memoByLedgerAsync } from "./ledger-memo";
+import { memoByLedger, memoByLedgerAsync } from "./ledger-memo";
 const PREFERENCES_SETTING = "schedule.preferences";
 export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
   importance: Record<string, "important" | "ordinary">;
@@ -1170,7 +1170,8 @@ export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): Forecast
   // shows up here as a risk instead of a forecast that assumed it had already started.
   const today = planToday(ctx);
   const opens = new Map(orders.flatMap((order) => { const day = libraryUntil(ctx, order, today); return day ? [[order.id, day] as const] : []; }));
-  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state))).map((item) => {
+  // The person's hours: the assistant's preparation takes none of them (docs/work-split.md).
+  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state) && onPersonsBoard(order))).map((item) => {
     const day = opens.get(item.orderId);
     const start = day ? toZonedInstant(day, "00:00", preferences.timeZone) : undefined;
     return start && (!item.task.notBefore || item.task.notBefore < start) ? { ...item.task, notBefore: start } : item.task;
@@ -1866,8 +1867,12 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
  * The demo work orders every account is seeded with exist to show the flow. Once the person has any work of their own (in any state
  * short of discarded) they stop being recommended or scheduled: Today's 「下一步」 and the plan must never hold a made-up task next to a
  * real midterm. They stay on the Workbench, where they can be discarded.
+ *
+ * Every caller lists the person's own work (Today's 「下一步」, the schedule, its preview and ranking), so the assistant's preparation and
+ * the questions to the person (`payload.owner`, docs/work-split.md) are left out here too: they get no calendar time and no card.
  */
-export function withoutShadowingDemos<T extends { state: string; identityId: string; payload: unknown }>(orders: T[], capacityIds: Set<string>): T[] {
+export function withoutShadowingDemos<T extends { state: string; identityId: string; payload: unknown }>(all: T[], capacityIds: Set<string>): T[] {
+  const orders = all.filter(onPersonsBoard);
   const demo = (order: T) => Boolean((order.payload as { seeded?: boolean }).seeded);
   const hasOwnWork = orders.some((order) => !demo(order) && order.state !== "archived" && !capacityIds.has(order.identityId));
   return hasOwnWork ? orders.filter((order) => !demo(order)) : orders;
@@ -1995,7 +2000,11 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const core = humanCoreOf(order);
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const landing = byproductLanding(ctx, order);
-  const dependsOn = landing ? landing.dependsOn : (order.payload as { dependsOn?: string[] }).dependsOn;
+  // The assistant's preparation for this task takes none of the person's time and is due before it begins (docs/work-split.md §4): it
+  // does not hold the task off the calendar.
+  const offBoard = memoByLedger(getStore(), `off-board:${ctx.workspaceId}`, 5_000, () =>
+    new Set(getStore().listWorkOrders(ctx.workspaceId).filter((item) => !onPersonsBoard(item)).map((item) => item.id)));
+  const dependsOn = (landing ? landing.dependsOn : (order.payload as { dependsOn?: string[] }).dependsOn)?.filter((id) => !offBoard.has(id));
   const preview = previewScope.getStore();
   const release = preview?.notBefore?.[order.id] ?? releaseDayOf(ctx, order);
   const dueDate = preview?.dueDates?.[order.id] ?? landing?.dueDate ?? (order.payload as { dueDate?: string }).dueDate;

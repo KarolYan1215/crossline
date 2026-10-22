@@ -70,6 +70,8 @@ export function autoApprovalEligible(order: Candidate & { id?: string }, options
   const payload = (order.payload ?? {}) as { title?: string; seeded?: boolean; humanCore?: Array<{ intent?: string }>;
     materialContract?: Array<{ description?: string; required?: boolean }> };
   if (payload.seeded) return { eligible: false, reason: "示例任务，不自动生效" };
+  // A question to the person (docs/work-split.md): the assistant takes the work once it is answered, not before.
+  if ((order.payload as { owner?: unknown } | undefined)?.owner === "ask") return { eligible: false, reason: "先等本人回答问题，再由助手做" };
   const what = `${payload.title ?? ""} ${order.intent}`;
   const parts = (payload.humanCore ?? []).map((part) => part.intent ?? "");
   if (PERSONS_CALL.test(what)) return { eligible: false, reason: "这件事本身是本人的选择或决定，需本人确认" };

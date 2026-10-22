@@ -114,6 +114,36 @@ describe("grounded, non-trivial plans", () => {
     expect(normalized.steps.map((item) => item.firstAction?.slice(0, 16))).toEqual(["", "打开 L5 讲义，读到第一个例题", "", ""]);
     expect(normalized.steps[1]!.firstAction).toHaveLength(80);
   });
+  it("each step carries who does it; the assistant never gets a send, and a step needing the person's data becomes a question", () => {
+    const { plan: normalized, warnings } = normalizeStepPlan(plan([
+      step("a", "gather", { title: "汇总三只基金的公开费率", owner: "person" }),
+      step("b", "gather", { title: "整理券商导出的持仓明细", owner: "person" }),
+      step("c", "draft", { title: "写出调仓理由", owner: "person" }),
+      step("d", "submit", { title: "提交调仓指令", executor: "agent", owner: "assistant" })]));
+    expect(normalized.steps.map((item) => [item.owner, item.executor, item.schedulable])).toEqual([
+      ["assistant", "agent", false], ["ask", "agent", false], ["person", "human", true], ["person", "human", true]]);
+    expect(normalized.questions.map((question) => question.text)).toEqual(["「整理券商导出的持仓明细」需本人提供哪些信息或文件？"]);
+    expect(warnings.map((warning) => warning.code)).toEqual(expect.arrayContaining(["STEP_TRIVIAL_TO_AGENT", "STEP_OWNER_ASK", "STEP_OWNER_PERSON"]));
+  });
+  it("a step that only reviews the assistant's output is folded into the first core step's first move, at most ten minutes", () => {
+    const { plan: normalized, warnings } = normalizeStepPlan(plan([
+      step("g", "gather", { title: "汇集期中考试规则与往年卷", executor: "agent", schedulable: false }),
+      step("r", "check", { title: "验收助手整理的规则清单", dependsOn: ["g"], estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 40 } }),
+      step("p", "practice", { title: "做 2 套往年卷并订正", dependsOn: ["r"], firstAction: "打开第一套卷子" })], "writing"));
+    expect(normalized.steps.map((item) => item.title)).toEqual(["汇集期中考试规则与往年卷", "做 2 套往年卷并订正"]);
+    const core = normalized.steps[1]!;
+    expect(core).toMatchObject({ id: "s2", dependsOn: ["s1"], estimate: { p50Minutes: 40 } });
+    expect(core.firstAction).toBe("先用 10 分钟扫一眼「汇集期中考试规则与往年卷」的产出；打开第一套卷子");
+    expect(normalized.steps.reduce((sum, item) => sum + item.share, 0)).toBeCloseTo(1, 2);
+    expect(warnings.map((warning) => warning.code)).toContain("STEP_REVIEW_FOLDED");
+  });
+  it("a step's choice stays the person's, and a startup line's interview synthesis is the person's core", () => {
+    const { plan: normalized } = normalizeStepPlan(plan([
+      step("a", "gather", { title: "收集 5 份试用访谈记录", executor: "agent", schedulable: false }),
+      step("b", "draft", { title: "排出 5 份访谈的前 3 个痛点", dependsOn: ["a"] }),
+      step("c", "decide", { title: "选定下一轮试用的门店", executor: "agent", dependsOn: ["b"] })]));
+    expect(normalized.steps.map((item) => item.owner)).toEqual(["assistant", "person", "person"]);
+  });
   it("a content unit stands only on a verbatim line of the document it names", async () => {
     const { unverifiedUnits } = await import("./steps");
     const docs = [{ id: "doc-1", text: "Week 3: L5 PN Junction electrostatics; L6 Diode I-V" }];

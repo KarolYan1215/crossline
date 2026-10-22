@@ -1,6 +1,6 @@
 import "server-only";
 import type { AccessContext, AvailabilityWindow, FrozenBlock } from "@crossline/core";
-import { CALENDAR_LINES, CATEGORY_LABEL, calendarLineOf, currentFiling, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
+import { CALENDAR_LINES, CATEGORY_LABEL, calendarLineOf, currentFiling, onPersonsBoard, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
 import { isAutoHandoff, isPaused, listAgentTasks, readCategories } from "@crossline/db";
 import {
   ACTIVITY_DETAIL_CONSENT, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant
@@ -155,7 +155,8 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
     today, nowIso, timeZone: zone, items, deadlines,
     labels: Object.fromEntries(identityLines(ctx).map((pack) => [pack.id, pack.label])),
     quietByWeekday: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((weekday) => [weekday, quietRanges(windows, weekday)])),
-    proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean }).seeded)
+    proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean }).seeded
+      && onPersonsBoard(order))
       .map((order) => ({ id: order.id, title: order.intent }))
   };
 }

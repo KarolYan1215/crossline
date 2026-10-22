@@ -2,6 +2,7 @@ import { ARCHETYPE_IDS, STEP_ROLES, archetypeById, isStepRole, type Archetype, t
 import { normalizeAiAssist } from "./ai-tools";
 import { INFO_REQUEST_PERSON_MINUTES, infoRequestTraits } from "./info-request";
 import { COMPLETION_FIELD, type ModelCompletion } from "./completion";
+import { WORK_OWNERS, workOwner, type WorkOwner } from "./work-owner";
 
 /**
  * A task's step graph: the step planner's wire contract, the normalization that makes any answer usable, the warnings a reviewer
@@ -44,6 +45,11 @@ export type PlannedStep = {
    * schema requires it. Not `opener`: that names the day's first message.
    */
   firstAction?: string;
+  /**
+   * Who does it (`work-owner.ts`): `person`, `assistant`, or `ask` (one question to the person, then the assistant). The model gives it,
+   * normalization corrects it and keeps `executor` in step with it. Optional for plans stored before it; the schema requires it.
+   */
+  owner?: WorkOwner;
 };
 /**
  * One unit of the task's actual content, read from the person's material — a lecture, a chapter, a problem set, a section of a brief —
@@ -104,7 +110,8 @@ export const stepPlanSchema = (extraIds: readonly string[] = []) => object({
     dependsOn: { type: "array", items: str }, notBefore: str, dueBy: str, schedulable: { type: "boolean" },
     executor: { type: "string", enum: ["human", "agent", "mixed"] }, tickOutcome: str, covers: { type: "array", items: str }, why: str,
     aiAssist: object({ tool: str, how: str, minutesSaved: num }),
-    firstAction: str
+    firstAction: str,
+    owner: { type: "string", enum: [...WORK_OWNERS] }
   }) },
   usedRefs: { type: "array", items: str }
 });
@@ -215,28 +222,60 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
       tickOutcome: text(step.tickOutcome).trim().slice(0, 120), dependsOn: list(step.dependsOn),
       covers: list(step.covers), why: text(step.why).trim().slice(0, 300),
       aiAssist: normalizeAiAssist(step.aiAssist, toolNames, p50),
-      firstAction: text(step.firstAction).trim().slice(0, FIRST_ACTION_MAX) };
+      firstAction: text(step.firstAction).trim().slice(0, FIRST_ACTION_MAX),
+      owner: (step.owner === "assistant" || step.owner === "ask" || step.owner === "person" ? step.owner : step.executor === "agent" ? "assistant" : "person") as WorkOwner };
   });
-  // Preparation is the assistant's: a person's step that only gathers or files material moves to it, and the assistant's steps never
-  // take time on the person's calendar.
+  const questions = (Array.isArray(plan.questions) ? plan.questions : []).filter((question) => question && question.text)
+    .map((question, index) => ({ id: String(question.id || `q${index + 1}`).slice(0, 40), text: String(question.text).trim().slice(0, 200),
+      why: String(question.why ?? "").trim().slice(0, 300), options: (Array.isArray(question.options) ? question.options : list(question.options))
+        .map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 8) }));
+  // Who does each step (docs/work-split.md): the person only for their own growth and core work. What the assistant can make from the
+  // material is its step, and it never takes time on the person's calendar; what needs one fact only the person holds is a question plus the
+  // assistant's step; reviewing the assistant's output is folded into the first core step below.
+  const reviews = new Set<string>();
   for (const step of steps) {
-    if (!assistant && step.executor === "agent") {
-      step.executor = "human";
-      step.schedulable = step.role !== "wait";
-      warnings.push({ code: "STEP_NO_ASSISTANT", detail: `「${step.title}」改由本人完成：这个账号没有助手` });
+    if (!assistant) {
+      if (step.executor === "agent") {
+        step.executor = "human";
+        step.schedulable = step.role !== "wait";
+        warnings.push({ code: "STEP_NO_ASSISTANT", detail: `「${step.title}」改由本人完成：这个账号没有助手` });
+      }
+      step.owner = "person";
+      if (step.role === "wait") step.firstAction = "";
+      continue;
     }
     // Asking someone for a fact: the assistant drafts the message, the person sends it — sending is an external act (info-request.ts).
     const request = step.role === "prepare" || /草稿|起草/.test(step.title) ? null : infoRequestTraits({ title: step.title, p50Minutes: step.estimate.p50Minutes }).request;
     if (request?.kind === "ask_person" && step.executor !== "human") {
       step.executor = "human";
       step.schedulable = true;
+      step.owner = "person";
       warnings.push({ code: "STEP_INFO_REQUEST_PERSON", detail: `「${step.title}」要向别人发出询问，改由本人检查草稿后发送` });
       continue;
     }
-    if (assistant && step.executor !== "agent" && step.role !== "wait" && TRIVIAL_STEP.test(step.title)) {
-      step.executor = "agent";
-      warnings.push({ code: "STEP_TRIVIAL_TO_AGENT", detail: `「${step.title}」是准备工作，改由助手完成` });
-    }
+    if (step.role !== "wait") {
+      // `executor: "agent"` is the model's word that the assistant does it, whatever `owner` it also wrote; `ask` stays a question.
+      const verdict = workOwner({ title: step.title, owner: step.executor === "agent" && step.owner !== "ask" ? "assistant" : step.owner });
+      // The older, narrower rule still holds where the new one has nothing to say.
+      const owner = verdict.code === "model" && verdict.owner === "person" && TRIVIAL_STEP.test(step.title) ? "assistant" : verdict.owner;
+      if (owner === "person" && step.executor === "agent") {
+        step.executor = "human";
+        step.schedulable = true;
+        warnings.push({ code: "STEP_OWNER_PERSON", detail: `「${step.title}」改由本人完成：${verdict.reason}` });
+      } else if (owner === "assistant" && verdict.code === "review_only" && step.executor !== "agent") {
+        reviews.add(step.id);
+      } else if (owner === "assistant" && step.executor !== "agent") {
+        step.executor = "agent";
+        warnings.push({ code: "STEP_TRIVIAL_TO_AGENT", detail: `「${step.title}」是准备工作，改由助手完成` });
+      } else if (owner === "ask") {
+        step.executor = "agent";
+        const question = verdict.question ?? `「${step.title}」需本人提供哪些信息？`;
+        if (questions.length < 5 && !questions.some((item) => item.text === question))
+          questions.push({ id: `q${questions.length + 1}`, text: question, why: `「${step.title}」需要本人持有的信息，答完由助手接着做`, options: [] });
+        warnings.push({ code: "STEP_OWNER_ASK", detail: `「${step.title}」改为问本人一句后由助手完成` });
+      }
+      step.owner = step.executor === "agent" ? (owner === "ask" ? "ask" : "assistant") : "person";
+    } else step.owner = "person";
     if (step.executor === "agent") step.schedulable = false;
     // A first move is the person's: the assistant's steps and waits have none.
     if (step.executor === "agent" || step.role === "wait") step.firstAction = "";
@@ -261,6 +300,7 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
       }
     }
   }
+  foldReviews(steps, reviews, warnings);
   const total = steps.reduce((sum, step) => sum + step.share, 0);
   if (total <= 0) {
     const minutes = steps.reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
@@ -276,12 +316,46 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
     .map((unit) => ({ id: String(unit.id).slice(0, 40), title: String(unit.title).trim().slice(0, 160), docId: String(unit.docId ?? ""), quote: String(unit.quote ?? "").slice(0, 300) })).slice(0, 60);
   const unitIds = new Set(units.map((unit) => unit.id));
   for (const step of steps) step.covers = step.covers.filter((id) => unitIds.has(id));
-  const questions = (Array.isArray(plan.questions) ? plan.questions : []).filter((question) => question && question.text)
-    .map((question, index) => ({ id: String(question.id || `q${index + 1}`).slice(0, 40), text: String(question.text).trim().slice(0, 200),
-      why: String(question.why ?? "").trim().slice(0, 300), options: (Array.isArray(question.options) ? question.options : list(question.options))
-        .map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 8) })).slice(0, 5);
   return { plan: { archetypeId: plan.archetypeId, rationale: text(plan.rationale).trim().slice(0, 600),
-    quantity: { basis: text(plan.quantity?.basis).slice(0, 60), amount, unit: text(plan.quantity?.unit).slice(0, 12) }, units, questions, steps }, warnings };
+    quantity: { basis: text(plan.quantity?.basis).slice(0, 60), amount, unit: text(plan.quantity?.unit).slice(0, 12) }, units,
+    questions: questions.slice(0, 5), steps }, warnings };
+}
+
+/** How long a glance at the assistant's output takes inside the first core step (docs/work-split.md §3). */
+export const REVIEW_GLANCE_MINUTES = 10;
+
+/**
+ * A person's step that only reviews the assistant's output (or writes an acceptance checklist) is not a step: the acceptance gate judges
+ * the assistant's work, and the person glances at it when the core step that uses it begins. The glance becomes the start of that step's
+ * `firstAction` and at most ten minutes of its estimate; the review step is removed, its dependants take its dependencies, and the ids are
+ * numbered again. A review with no person's step to fold into is left to the assistant.
+ */
+function foldReviews(steps: PlannedStep[], reviews: ReadonlySet<string>, warnings: StepWarning[]) {
+  if (!reviews.size) return;
+  const person = (step: PlannedStep) => !reviews.has(step.id) && step.executor !== "agent" && step.role !== "wait";
+  for (const id of [...reviews]) {
+    const index = steps.findIndex((step) => step.id === id);
+    const review = steps[index]!;
+    const target = steps.find((step) => person(step) && step.dependsOn.includes(id)) ?? steps.slice(index + 1).find(person)
+      ?? [...steps.slice(0, index)].reverse().find(person);
+    if (!target) {
+      review.executor = "agent"; review.owner = "assistant"; review.schedulable = false; review.firstAction = "";
+      warnings.push({ code: "STEP_TRIVIAL_TO_AGENT", detail: `「${review.title}」只是验收，交给验收关卡` });
+      continue;
+    }
+    const source = steps.find((step) => review.dependsOn.includes(step.id) && step.executor === "agent");
+    const glance = `先用 ${REVIEW_GLANCE_MINUTES} 分钟扫一眼${source ? `「${source.title.slice(0, 16)}」的产出` : "助手备好的材料"}；`;
+    target.firstAction = `${glance}${target.firstAction ?? ""}`.slice(0, FIRST_ACTION_MAX);
+    const added = Math.min(REVIEW_GLANCE_MINUTES, review.estimate.p50Minutes);
+    target.estimate = { p25Minutes: target.estimate.p25Minutes + added, p50Minutes: target.estimate.p50Minutes + added, p85Minutes: target.estimate.p85Minutes + added };
+    target.share += review.share;
+    for (const step of steps) if (step.dependsOn.includes(id))
+      step.dependsOn = [...new Set([...step.dependsOn.filter((dep) => dep !== id), ...review.dependsOn])].filter((dep) => dep !== step.id);
+    steps.splice(index, 1);
+    warnings.push({ code: "STEP_REVIEW_FOLDED", detail: `「${review.title}」不单列为步骤：并入「${target.title}」开始时的 ${REVIEW_GLANCE_MINUTES} 分钟` });
+  }
+  const renumber = new Map(steps.map((step, index) => [step.id, `s${index + 1}`]));
+  for (const step of steps) { step.id = renumber.get(step.id)!; step.dependsOn = step.dependsOn.map((dep) => renumber.get(dep) ?? dep); }
 }
 
 /**

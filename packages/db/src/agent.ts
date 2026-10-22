@@ -19,8 +19,21 @@ const CATEGORIES = "agent.categories";
 const DECLINED = "agent.categories.declined";
 const PAUSED = "agent.paused";
 
+/**
+ * The kinds a workspace that never chose has on (docs/work-split.md §4, the owner's decision of 2026-10-21): organizing material,
+ * drafting and file preparation — static products made on this machine, none of which sends, signs in or pays. A default read, not a
+ * write: the first choice the person makes in 设置 saves the whole set, and from then on only what they chose holds.
+ */
+export const DEFAULT_CATEGORIES: readonly AgentCategory[] = ["read_research_organize", "draft_text", "files_calendar_prep"];
+/** Only accounts made from this day on (the owner said 「新账户」): an older one that never chose keeps what it had, nothing on. */
+export const DEFAULT_CATEGORIES_SINCE = "2026-10-22";
 export function readCategories(store: CrosslineStore, workspaceId: string): Partial<Record<AgentCategory, CategoryState>> {
-  try { return JSON.parse(store.getSetting(workspaceId, CATEGORIES) ?? "{}") as Partial<Record<AgentCategory, CategoryState>>; } catch { return {}; }
+  const raw = store.getSetting(workspaceId, CATEGORIES);
+  const created = store.listWorkspaces().find((workspace) => workspace.id === workspaceId)?.createdAt;
+  if (raw === undefined && created !== undefined && created < DEFAULT_CATEGORIES_SINCE) return {};
+  if (raw === undefined)
+    return Object.fromEntries(DEFAULT_CATEGORIES.map((category) => [category, { approvedAt: "", trust: "auto_checked", cleanRuns: 0 } satisfies CategoryState]));
+  try { return JSON.parse(raw) as Partial<Record<AgentCategory, CategoryState>>; } catch { return {}; }
 }
 export function declinedCategories(store: CrosslineStore, workspaceId: string): AgentCategory[] {
   try { return (JSON.parse(store.getSetting(workspaceId, DECLINED) ?? "[]") as unknown[]).filter(isAgentCategory); } catch { return []; }

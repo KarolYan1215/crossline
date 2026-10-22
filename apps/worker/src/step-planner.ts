@@ -3,7 +3,7 @@ import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, readableFromMaterial, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
-  FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, type FinerSplit, type StepTrouble, type SuccessCriterion
+  FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, type FinerSplit, type StepTrouble, type SuccessCriterion
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { aiToolsFor, createRefBook, lessonsFor, listAgentTasks, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
@@ -21,7 +21,8 @@ const JUDGE = "crossline:crossline-progress-judge";
 /** States in which a task is committed and its steps get time on the calendar. */
 const PLANNABLE = ["approved", "preparing", "ready_for_human", "active"];
 const day = (iso: string) => iso.slice(0, 10);
-const AUTO_FIXED = new Set(["STEP_SHARE_NORMALIZED", "STEP_SHARE_MISSING", "STEP_ESTIMATE_MISSING", "STEP_DEPENDENCY_UNKNOWN", "STEP_TRIVIAL_TO_AGENT", "STEP_NO_ASSISTANT"]);
+const AUTO_FIXED = new Set(["STEP_SHARE_NORMALIZED", "STEP_SHARE_MISSING", "STEP_ESTIMATE_MISSING", "STEP_DEPENDENCY_UNKNOWN", "STEP_TRIVIAL_TO_AGENT", "STEP_NO_ASSISTANT",
+  "STEP_OWNER_ASK", "STEP_OWNER_PERSON", "STEP_REVIEW_FOLDED"]);
 /** What a task is searched by: its wording, its project, the milestone it serves, what it must deliver and what it needs. */
 export function taskQuery(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder, options: { core?: boolean } = {}): string {
   const project = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === order.projectId);
@@ -117,7 +118,9 @@ export function tasksAwaitingStepPlan(store: CrosslineStore, workspaceId: string
   const proposal = (order: StoredWorkOrder) => Number(order.state === "awaiting_plan_approval");
   return store.listWorkOrders(workspaceId)
     .filter((order) => (PLANNABLE.includes(order.state) || order.state === "awaiting_plan_approval") && !capacity.has(order.identityId)
-      && !(order.payload as { seeded?: boolean } | undefined)?.seeded)
+      && !(order.payload as { seeded?: boolean } | undefined)?.seeded
+      // The assistant's own work and the questions to the person are not split into the person's steps (docs/work-split.md).
+      && onPersonsBoard(order))
     .filter((order) => !plans.has(order.id) || (replan.get(order.id) ?? "") > plans.get(order.id)!)
     // A plan that failed for a reason of its own is not retried every tick; a request to replan (or a new day) does.
     .filter((order) => !store.listEvents(workspaceId, { type: "task.steps_blocked", entityId: order.id })
@@ -316,7 +319,9 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       developerInstructions: "Write this task's steps as the crossline-step-planner Skill describes and return only the requested JSON. The steps are "
         + "what the person sees on the task and what the scheduler puts on the calendar. Read `materials` first and count the units from them, each quoting "
         + "its file verbatim. The person's steps are only the intellectual core (solving, deriving, deciding, writing, rehearsing), each one focused "
-        + "session with a quantified done criterion and a firstAction of five minutes or less; collecting, listing and filing are the assistant's steps. "
+        + "session with a quantified done criterion, a why naming what it trains or decides, and a firstAction of five minutes or less; collecting, "
+        + "compiling, listing and filing are the assistant's steps (owner assistant), and what needs one fact only the person holds is owner ask with "
+        + "that question in questions. No step only reviews the assistant's output, writes an acceptance checklist or defines scope. "
         + "The rationale is a few short sentences for the person: what the plan rests on, never the input's keys, ids or how units were counted. "
         + "Ask only what neither the material nor person.facts settles, with the likeliest option first. "
         + "usedRefs lists the bracketed ids ([f3], [p1], [l2]) of the facts, preferences and lessons the plan really rests on, [] when none.",

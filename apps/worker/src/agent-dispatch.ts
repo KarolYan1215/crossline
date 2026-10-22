@@ -18,6 +18,7 @@ function assistantLessons(store: CrosslineStore, workspaceId: string, orderId: s
     skill: ["crossline-agent", "crossline-agent-tools"] }).map((lesson) => lesson.text);
 }
 import type { AgentTaskInput } from "./agent-task";
+import type { PrepWindow } from "./schedule-window";
 
 /**
  * From a work order on the board to a task for the assistant, and the rules for starting one without being told.
@@ -127,7 +128,8 @@ export function dispatchCandidates(store: CrosslineStore, workspaceId: string, w
  * The preparation steps the assistant takes over by itself (decided 2026-10-09: what is static is done before the person needs it, and
  * the person's attention goes to the intellectual core). A step the planner gave the assistant (`executor: "agent"`), still planned, of
  * a committed task, never tried before, of a kind the person allowed; a kind not yet allowed is asked about once and the step waits.
- * Soonest-due task first, then in the step order.
+ * Soonest-due task first, then in the step order. `within`: only these steps (`<order>#<step>`, those whose person step starts soon:
+ * `prepWindow`); absent, every step.
  */
 export function stepDispatchCandidates(store: CrosslineStore, workspaceId: string, within?: Set<string>, now = new Date()): Array<{ orderId: string; stepId: string }> {
   if (isPaused(store, workspaceId)) return [];
@@ -139,11 +141,12 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
   const out: Array<{ orderId: string; stepId: string; due: string; seq: number }> = [];
   const made = madeInProject(store, workspaceId);
   for (const plan of store.listStepPlans(workspaceId)) {
-    if (!orders.has(plan.workOrderId) || (within && !within.has(plan.workOrderId))) continue;
+    if (!orders.has(plan.workOrderId)) continue;
     const order = orders.get(plan.workOrderId)!;
     const due = (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "9999";
     for (const step of plan.steps) {
       if (step.executor !== "agent" || step.status !== "planned" || tried.has(`${plan.workOrderId}#${step.id}`)) continue;
+      if (within && !within.has(`${plan.workOrderId}#${step.id}`)) continue;
       // Already made (or being made, or waiting for review) for another task of the same course or project.
       if (made.get(order.projectId)?.has(deliverableKey(step.title))) continue;
       const category = stepCategory(step) ?? "read_research_organize";
@@ -181,7 +184,7 @@ function triedSteps(store: CrosslineStore, workspaceId: string, now = new Date()
  * the order is still open (and the step still planned and not the person's), and its kind is still allowed. The person's own
  * (「交给 Agent」, a retry they asked for) are not held to `within`; the system's own are, as their first run was.
  */
-export function retryCandidates(store: CrosslineStore, workspaceId: string, now = new Date(), within?: Set<string>):
+export function retryCandidates(store: CrosslineStore, workspaceId: string, now = new Date(), within?: PrepWindow):
   Array<{ orderId: string; stepId: string | undefined; chain: AgentChain }> {
   if (isPaused(store, workspaceId)) return [];
   const approved = readCategories(store, workspaceId);
@@ -194,11 +197,12 @@ export function retryCandidates(store: CrosslineStore, workspaceId: string, now 
     if (!retryDue(chain, now) || !order) continue;
     const category = tasks.get(chain.latest.taskId)?.category;
     if (category && !approved[category]) continue;
-    if (!chain.byPerson && within && !within.has(workOrderId)) continue;
     if (stepId) {
       const step = store.getStepPlan(workspaceId, workOrderId)?.steps.find((item) => item.id === stepId);
       if (!step || step.status !== "planned" || step.executor === "human" || !(DISPATCH_STATES.has(order.state) || order.state === "active")) continue;
-    } else if (!DISPATCH_STATES.has(order.state)) continue;
+      // A preparation step by the person step it serves; a step on the calendar by its order, as before.
+      if (!chain.byPerson && within && !(step.executor === "agent" ? within.steps.has(`${workOrderId}#${stepId}`) : within.orders.has(workOrderId))) continue;
+    } else if (!DISPATCH_STATES.has(order.state) || !chain.byPerson && within && !within.orders.has(workOrderId)) continue;
     out.push({ orderId: workOrderId, stepId: stepId || undefined, chain });
   }
   // The person's first, then the longest waiting.

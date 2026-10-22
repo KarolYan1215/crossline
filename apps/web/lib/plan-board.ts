@@ -1,5 +1,5 @@
 import "server-only";
-import { ENERGY_ADVICE_DISMISSED, ENERGY_ADVICE_SETTING, hoursFromText, readEnergyAdvice, statedWeeklyHours, weeklyAvailableHours, type AccessContext, type AvailabilitySource,
+import { ENERGY_ADVICE_DISMISSED, ENERGY_ADVICE_SETTING, hoursFromText, onPersonsBoard, readEnergyAdvice, statedWeeklyHours, weeklyAvailableHours, type AccessContext, type AvailabilitySource,
   type AvailabilityWindow, type EnergyAdvice, type PortraitReport } from "@crossline/core";
 import { DEADLINE_MARGIN_DAYS, PARAMS_ASAP, PARAMS_BUFFERED, type ScheduleParams } from "@crossline/planner";
 import { effectiveParams, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast, planRanking, planToday,
@@ -78,7 +78,8 @@ export function loadForecastCharts(ctx: AccessContext, plan: PersistedPlan, hori
   const orders = store.listWorkOrders(ctx.workspaceId);
   const orderLine = Object.fromEntries(orders.map((order) => [order.id, order.identityId]));
   const proposals: Record<string, number> = {};
-  for (const order of orders) if (order.state === "awaiting_plan_approval" && order.milestoneId) proposals[order.milestoneId] = (proposals[order.milestoneId] ?? 0) + 1;
+  for (const order of orders) if (order.state === "awaiting_plan_approval" && order.milestoneId && onPersonsBoard(order))
+    proposals[order.milestoneId] = (proposals[order.milestoneId] ?? 0) + 1;
   const lineOrder = identityLines(ctx).map((line) => line.id);
   const scheduled = plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today)
     .map((block) => ({ day: block.day!, line: orderLine[block.id.split(":")[1]!] ?? "none", minutes: blockMinutes(block) }));

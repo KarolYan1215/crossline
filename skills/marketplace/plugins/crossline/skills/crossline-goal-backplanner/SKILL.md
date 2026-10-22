@@ -5,7 +5,7 @@ description: Turn one approved milestone into the tasks that deliver it, worked 
 
 # Crossline Goal Backplanner
 
-The person approved a milestone; this Skill fills their task list for it. Each item in `steps` becomes **one task card** on the 任务 page and, in most cases, takes effect at once (the person can take it back). The step planner then splits every task into its own steps with estimates, and the scheduler places those steps before the milestone's deadline. So an item is a coherent piece of work with one deliverable, named so the person recognises it on a card or a calendar block, and not a single action and not the whole milestone.
+The person approved a milestone; this Skill fills their task list for it. Each of the person's items in `steps` becomes **one task card** on the 任务 page and, in most cases, takes effect at once (the person can take it back); the assistant's items are done by the assistant before the person needs them and never become cards, and a question goes to the person's decisions. The step planner then splits every task into its own steps with estimates, and the scheduler places those steps before the milestone's deadline. So an item is a coherent piece of work with one deliverable, named so the person recognises it on a card or a calendar block, and not a single action and not the whole milestone.
 
 Return raw JSON only: `{steps, dateCandidates, blockers}`.
 
@@ -17,30 +17,43 @@ Return raw JSON only: `{steps, dateCandidates, blockers}`.
 - `facts[]` — what the person confirmed (or an assumption, marked 「（假设）」) about this project and line, the most relevant first: the course's grading, the project's state, what they said about it. Read it before naming an input as missing.
 - `materials[]` — `{id, file, text}`: excerpts of the person's files that match this milestone (the project's, else the line's). An input one of them already holds is not missing; a `sourceQuote` may quote an excerpt verbatim.
 - `suppliedInputs[]` — `{what, text}` the person handed over; `waitingInputs[]` — `{what, who, expectedAt}` on their way; `missingInputs[]` — `{id, what, whoHas, message}`, only in the second mode.
-- `existingWork[]` — `{id, intent, state}`: tasks already serving this milestone (open or done).
+- `existingWork[]` — `{id, intent, state, owner}`: tasks already serving this milestone (open or done); `owner` is `person` for the person's core work, `assistant` for preparation.
 - `existingTasks[]` — every open task of this line and project, the task library included: `{id, title, intent, lineId, projectId, dueDate, state}`.
 - `recentlyDone[]` — `{id, title, intent}`: tasks of this line and project finished in the last 30 days.
 - `artifacts` — `{produce[], use[]}` cross-line artifacts (see below); empty lists when none.
 - `personProfile[]` — the interview's conclusions for planning, one short line each: how the person works (peak hours, how long they can go, what drains them, how they react to criticism or friction), what they are good at and enjoy, how their lines are weighed, what they value most and where they are headed. Use it to size, order and phrase the work for this person (put demanding work where they are strong, keep draining work short and early, plan a check-in where their pattern says they tend to stall); never quote it back as a new fact and never let it override a hard date or a file.
 
-## Work backwards from the criteria
+## Work backwards from the criteria, the person's core work first
 
-Start at what the criteria say must be true on the deadline, ask what must exist just before that, and go back until you reach work the person can start now. Every criterion is served by at least one item; the last items produce what the criteria name (the hand-in, the submission, the evidence of the score line). Size the whole against the time left to `deadline`: a milestone due in five days gets the few tasks that fit, not a semester's plan.
+Start at what the criteria say must be true on the deadline, ask what the person must do themselves for that to happen, and go back until you reach work they can start now. Every criterion is served by at least one item; the last items produce what the criteria name (the hand-in, the submission, the evidence of the result). Size the whole against the time left to `deadline`: a milestone due in five days gets the few tasks that fit, not a semester's plan.
+
+Write the **person's core tasks first**, then what each needs prepared. The person's time goes only to what grows them or is really theirs; everything that only gathers or arranges what already exists is the assistant's, done before the person needs it.
 
 An item is **one task of 30 to 480 minutes of usual work (p50)** that ends in something checkable. Split anything larger into several such tasks; merge anything smaller into a neighbour.
 
 | | title | why |
 |---|---|---|
-| 好 | 「整理 ECE 548 第 1–4 讲复习提纲」 | one deliverable, about 2–3 hours |
-| 好 | 「完成 ECE 555 期中往年卷 2 套」 | checkable, sized to a few sittings |
-| 好 | 「起草 MoS2 论文方法部分」 | one section, one draft |
+| 好 | 「完成 ECE 555 期中往年卷 2 套并订正」 | the person's practice, checkable, sized to a few sittings |
+| 好 | 「排出 5 份门店访谈的前 3 个痛点」 | the person's judgement on gathered material |
+| 好 | 「汇集期中考试规则与往年卷」, owner `assistant`, prepares the item above | static material from existing sources: the assistant's |
 | 坏 | 「打开第 3 讲讲义」 | one action: a step, the step planner's job |
 | 坏 | 「复习整门课」「完成论文」 | the whole milestone, not a task |
 | 坏 | 「问助教期中范围」 | a request for a fact: folded into the task that needs it (below) |
+| 坏 | 「制定验收清单」「验收助手整理的材料」 | not a task: the acceptance gate judges the assistant's work, and the person glances at it when the core task begins |
+
+## Who does each item: `owner`, `prepares`, `question`
+
+Judge by what the item produces, never by the line or the kind of goal (a course, a paper, a shop, a channel, a portfolio, a household are read the same way):
+
+- `person` — the value is in the person's own cognition, skill, judgement or relationships: learning and practising (retrieval, problems, hands-on work), writing or making the core output, designing and explaining (an experiment, an argument, a plan), a consequential choice, and acts only they can do (sending, attending, submitting, logging in, paying). Name it by what the person produces, and say in `rationale` what they learn or decide in it.
+- `assistant` — a static artefact made from existing information: collecting, compiling, sorting, summarising, excerpting, checking against a list, an inventory, a ledger, a template, a calculation or simulation run on a plan the person already gave. `prepares` is the id of the person's item that uses it, and that item depends on it.
+- `ask` — the same, but it needs something only the person holds (data behind their login, a screenshot or an export, one sentence of scope). `question` is the one question (at most two facts, ten minutes of their time); the assistant does the rest after the answer. `prepares` as above.
+
+Only `ask` items carry a `question`; `person` items have `prepares` "". Never give the assistant sending, submitting, publishing, logging in, paying, graded answers or a consequential choice. The app corrects an owner that contradicts these rules, and an answer with no core task of the person's is sent back. Two illustrations from different lines (not templates): for a course exam, 「汇集考试规则、往年卷与已出成绩」 (`ask` for the scores in the course portal) prepares 「按规则与已有成绩规划并完成 2 套往年卷」 (`person`); for a research paper, 「按已定参数跑基线仿真」 (`assistant`) prepares 「判断要补哪些实验、怎么补、用哪个工具」 (`person`).
 
 ## Each item
 
-`{id, title, intent, sourceQuote, rationale, dependsOn, estimate, energy, interruptible, family, riskTier, evidence, acquires, produces, uses, completion, extendsTaskId}`:
+`{id, title, intent, sourceQuote, rationale, dependsOn, estimate, energy, interruptible, family, riskTier, evidence, acquires, produces, uses, completion, extendsTaskId, owner, prepares, question}`:
 
 - `id` — unique in this answer (letters, digits, `-`, `_`). `dependsOn` names ids of **earlier** items only, so the list is in an order the work can be done.
 - `title` — the task's name: a short action starting with its verb, at most 24 characters, carrying the course or project name when the milestone has one (「复习 ECE 548 第 3 章」, not 「复习第 3 章」).
@@ -72,7 +85,7 @@ A request for a fact has four marks: its only purpose is one fact, file or confi
 
 - `existingTasks` are open: never write an item one of them covers (the app would fold it in anyway). An item that only adds to one (one more chapter for an existing review, a check on an existing draft) sets `extendsTaskId` to that task's id; the app adds it to that task's steps, and items depending on it depend on that task. Every other item has `extendsTaskId` "".
 - `recentlyDone` is finished work: never propose it again in other words (「整理 5 家门店清单」 after 「核对 5 家门店的名单与联系人」 was finished is the same work). An item may depend on what one of them produced.
-- `existingWork` shows what already serves this milestone; plan what is still missing.
+- `existingWork` shows what already serves this milestone, each with its `owner`; plan what is still missing. Preparation already open is not a reason to stop: when no open item is the person's, write the person's core task it was for.
 
 ## Artifacts across lines
 
