@@ -6,7 +6,7 @@ import {
   type WorkflowAccess
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
-import { readerLaunchOptions, restoreSessionCookies } from "./browser-launch";
+import { readerLaunch, restoreSessionCookies } from "./browser-launch";
 import { breakerKey, judgePage } from "./site-reader";
 
 /**
@@ -333,8 +333,8 @@ async function saveMedia(driver: CollectDriver, folder: string, detail: NoteDeta
  */
 export async function openCollectBrowser(profileDir: string, executablePath: string): Promise<CollectDriver> {
   const { chromium } = await import("playwright-core");
-  // Visible on the person's computer, headless on a server; the login's session cookies put back (browser-launch.ts).
-  const context = await chromium.launchPersistentContext(profileDir, readerLaunchOptions(executablePath));
+  // Visible on the person's computer, on the server's virtual screen on a server; the login's session cookies put back (browser-launch.ts).
+  const context = await chromium.launchPersistentContext(profileDir, await readerLaunch(executablePath));
   await restoreSessionCookies(context, profileDir);
   // Functions handed to the page name nothing (tsx's `__name` wrapper would throw there); see `openBrowser` in site-reader.ts.
   await context.addInitScript({ content: "globalThis.__name = globalThis.__name || ((target) => target);" });

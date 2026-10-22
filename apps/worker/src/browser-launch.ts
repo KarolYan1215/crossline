@@ -1,4 +1,5 @@
 import path from "node:path";
+import { onServerScreen, serverDisplay, type ServerDisplay } from "./server-display";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 /**
@@ -7,8 +8,9 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
  * - `local`: the person's own computer. A login is a visible browser window on their desktop (`openWorkflowLogin`), and the readers
  *   open a visible window too.
  * - `remote`: a machine with no screen of its own — the hosted beta (`CROSSLINE_PUBLIC_BETA=1`), or Linux with no `DISPLAY` or
- *   `WAYLAND_DISPLAY`. A login is a headless browser on the server whose screen is streamed into a dialog on the Crossline page
- *   (`remote-browser.ts`); the readers run headless on the same profile.
+ *   `WAYLAND_DISPLAY`. A login is a browser on the server whose screen is streamed into a dialog on the Crossline page
+ *   (`remote-browser.ts`); the readers run on the same profile. Both have a window on a virtual screen (`server-display.ts`, Xvfb), so
+ *   the browser is an ordinary Chromium and not HeadlessChrome; headless only where Xvfb is missing.
  *
  * `CROSSLINE_LOGIN_MODE=remote|local` overrides both, for a Linux desktop or for trying the popup on Windows.
  */
@@ -26,13 +28,21 @@ export const REMOTE_VIEWPORT = { width: 1280, height: 800 } as const;
 const FLAGS = ["--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-mode"];
 
 /**
- * Launch options for a reader (`site_read`, the favourites job): a visible window on the person's computer, headless on a server. With no
- * executable named (a server with Playwright's own Chromium under `PLAYWRIGHT_BROWSERS_PATH`) Playwright picks its own. Nothing here
- * changes what the browser says it is: no user agent, no stealth flags (CLAUDE.md 「Social platforms」).
+ * Launch options for a reader (`site_read`, the favourites job): a visible window on the person's computer; on a server a window on the
+ * server's virtual screen (`display`), headless when it has none. With no executable named (a server with Playwright's own Chromium under
+ * `PLAYWRIGHT_BROWSERS_PATH`) Playwright picks its own. Nothing here changes what the browser says it is: no user agent, no stealth
+ * flags (CLAUDE.md 「Social platforms」).
  */
-export function readerLaunchOptions(executablePath: string, mode: LoginMode = loginMode()) {
-  return { ...(executablePath ? { executablePath } : {}), headless: mode === "remote",
-    viewport: mode === "remote" ? { ...REMOTE_VIEWPORT } : null, args: FLAGS };
+export function readerLaunchOptions(executablePath: string, mode: LoginMode = loginMode(), display?: ServerDisplay) {
+  if (mode === "local") return { ...(executablePath ? { executablePath } : {}), headless: false, viewport: null, args: FLAGS };
+  const screen = onServerScreen(display, REMOTE_VIEWPORT);
+  return { ...(executablePath ? { executablePath } : {}), headless: screen.headless, ...(screen.env ? { env: screen.env } : {}),
+    viewport: { ...REMOTE_VIEWPORT }, args: [...FLAGS, ...screen.extraArgs] };
+}
+
+/** `readerLaunchOptions` with the server's screen opened first when this is a server. */
+export async function readerLaunch(executablePath: string, mode: LoginMode = loginMode()) {
+  return readerLaunchOptions(executablePath, mode, mode === "remote" ? await serverDisplay() : undefined);
 }
 
 /**

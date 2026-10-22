@@ -5,6 +5,7 @@ import { REMOTE_VIEWPORT, saveSessionCookies } from "./browser-launch";
 import { resolvesPublicly } from "./diligence";
 import { containerMemory } from "./memory";
 import { HOLDER_WORDS, holdProfile, profileHolder, releaseProfile } from "./profile-locks";
+import { onServerScreen, serverDisplay } from "./server-display";
 
 /**
  * Logging in to a site from the hosted beta, in a popup on the Crossline page (decided by the owner on 2026-10-22; docs/skills-library.md
@@ -308,15 +309,18 @@ export function createRemoteBrowsers(deps: RemoteBrowsersDeps) {
 export type RemoteBrowsers = ReturnType<typeof createRemoteBrowsers>;
 
 /**
- * The real login browser: Playwright's headless Chromium on the site's profile. Every request (pages, frames, scripts, sockets) is
+ * The real login browser: Playwright's Chromium on the site's profile, in a window on the server's virtual screen. Every request (pages, frames, scripts, sockets) is
  * checked by `allow`; service workers are blocked so none escapes that check; downloads are refused. A page the site opens (a sign-in
  * popup) is streamed while it is open and the stream goes back to the page under it when it closes. No stealth, no user agent of our
  * own: the browser says what it is.
  */
 export const openRemotePage: OpenRemote = async ({ profileDir, executablePath, viewport, allow }) => {
   const { chromium } = await import("playwright-core");
-  const context = await chromium.launchPersistentContext(profileDir, { ...(executablePath ? { executablePath } : {}), headless: true, viewport,
-    acceptDownloads: false, serviceWorkers: "block", args: ["--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-mode"] });
+  // A window on the server's virtual screen (server-display.ts): an ordinary Chromium, not HeadlessChrome; headless only without Xvfb.
+  const screen = onServerScreen(await serverDisplay(), viewport);
+  const context = await chromium.launchPersistentContext(profileDir, { ...(executablePath ? { executablePath } : {}), headless: screen.headless,
+    ...(screen.env ? { env: screen.env } : {}), viewport, acceptDownloads: false, serviceWorkers: "block",
+    args: ["--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-mode", ...screen.extraArgs] });
   await context.route("**/*", async (route) => { if (await allow(route.request().url())) await route.continue(); else await route.abort("blockedbyclient"); });
   await context.routeWebSocket(/.*/, async (socket) => { if (await allow(socket.url())) socket.connectToServer(); else await socket.close(); });
   type Page = import("playwright-core").Page;

@@ -86,14 +86,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends libsecret-1-0 c
 RUN mkdir -p /data /state && chown node:node /data /state
 WORKDIR /repo
 COPY --from=deps /repo/ /repo/
-# The server's own browser (2026-10-22, docs/skills-library.md 「托管版登录」): Playwright's Chromium headless shell, the build matching
-# the playwright-core the worker imports (so its CDP protocol fits), with the libraries it needs. It is the login browser the person
-# uses in a dialog on the page (remote-browser.ts) and the browser the readers of sites behind a login run headless on. WenQuanYi Micro
-# Hei (about 5 MB) so a Chinese login page is not drawn as empty boxes. Before the source, so a code change does not download it again;
-# about +300 MB on the 2.33 GB image.
+# The server's own browser (2026-10-22, docs/skills-library.md 「托管版登录」): Playwright's full Chromium, the build matching the
+# playwright-core the worker imports (so its CDP protocol fits), with the libraries it needs, and Xvfb: the browser runs with a window on
+# a virtual screen (server-display.ts), an ordinary Chromium rather than HeadlessChrome (the owner's decision; nothing is disguised). It
+# is the login browser the person uses in a dialog on the page (remote-browser.ts) and the browser the readers of sites behind a login
+# run on. WenQuanYi Micro Hei (about 5 MB) so a Chinese login page is not drawn as empty boxes. Before the source, so a code change does
+# not download it again.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-RUN node "$(ls -d /repo/node_modules/.pnpm/playwright-core@*/node_modules/playwright-core | head -1)/cli.js" install --with-deps --only-shell chromium \
-  && apt-get install -y --no-install-recommends fonts-wqy-microhei \
+RUN node "$(ls -d /repo/node_modules/.pnpm/playwright-core@*/node_modules/playwright-core | head -1)/cli.js" install --with-deps chromium \
+  && apt-get install -y --no-install-recommends fonts-wqy-microhei xvfb \
   && rm -rf /var/lib/apt/lists/* \
   && chmod -R a+rX /opt/ms-playwright
 COPY . .
@@ -110,7 +111,9 @@ RUN set -e; \
   cd packages/db && node -e 'new (require("better-sqlite3"))(":memory:").close()'; \
   cd /repo/packages/connectors && node -e 'require(require.resolve("keytar", { paths: [require.resolve("@azure/msal-node-extensions")] }))'; \
   /repo/node_modules/.bin/tsx --version >/dev/null; ffmpeg -version | head -1; \
-  cd /repo/apps/worker && node -e 'import("playwright-core").then(async ({ chromium }) => { const browser = await chromium.launch({ headless: true }); console.log("chromium", browser.version()); await browser.close(); })'
+  Xvfb :91 -screen 0 1280x800x24 -nolisten tcp & xvfb=$!; sleep 1; \
+  cd /repo/apps/worker && DISPLAY=:91 node -e 'import("playwright-core").then(async ({ chromium }) => { const browser = await chromium.launch({ headless: false }); console.log("chromium windowed", browser.version()); await browser.close(); })'; \
+  kill $xvfb
 ENV NODE_ENV=production CROSSLINE_NEXT_DIR=.next-prod CROSSLINE_DATA_DIR=/data CROSSLINE_STATE_DIR=/state \
     CROSSLINE_CODEX_PATH=/opt/codex/codex CROSSLINE_DEPLOYMENT_MODE=private
 USER node

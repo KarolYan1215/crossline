@@ -242,15 +242,15 @@
 
 ## 托管版登录（2026-10-22）
 
-托管站（app.crossline.lol，Linux 容器，没有屏幕）上的人也要能登录需要本人账号的网站：小红书、Canvas（UW 单点登录加 Duo），以及任何工作流在 `access` 里声明要登录的网站。本人定的做法：浏览器运行在服务器上，画面以弹窗形式放进 Crossline 页面，本人在弹窗里点击和输入，如同在本地页面上操作；登录状态留在服务器上的这个浏览器配置目录里，之后的读取（`site_read`、收藏读取）在服务器上用同一配置目录无界面运行。本人接受网站看到的是服务器在香港数据中心的地址。
+托管站（app.crossline.lol，Linux 容器，没有屏幕）上的人也要能登录需要本人账号的网站：小红书、Canvas（UW 单点登录加 Duo），以及任何工作流在 `access` 里声明要登录的网站。本人定的做法：浏览器运行在服务器上，画面以弹窗形式放进 Crossline 页面，本人在弹窗里点击和输入，如同在本地页面上操作；登录状态留在服务器上的这个浏览器配置目录里，之后的读取（`site_read`、收藏读取）在服务器上用同一配置目录运行。本人接受网站看到的是服务器在香港数据中心的地址。
 
 - **用哪条路**（`apps/worker/src/browser-launch.ts` `loginMode`）：worker 没有自己的屏幕时用弹窗——`CROSSLINE_PUBLIC_BETA=1`，或 Linux 上没有 `DISPLAY`/`WAYLAND_DISPLAY`；`CROSSLINE_LOGIN_MODE=remote|local` 可强制。本人电脑上的副本照旧打开可见的浏览器窗口（`openWorkflowLogin`）。判断只在 worker 一处：「登录」请求在服务器上答 `remote: true`，页面据此打开弹窗。
-- **服务器上的浏览器**（`apps/worker/src/remote-browser.ts`）：Playwright 的无界面 Chromium，`launchPersistentContext` 打开读取用的同一配置目录；CDP `Page.startScreencast` 推 JPEG 画面（质量 60，最新一帧留在内存），页面每 400 毫秒取一次比已有更新的画面（`GET /api/remote-browser/frame?after=<序号>`）。点击、滚轮、按键和文字由 `POST /api/remote-browser` 送回：坐标按画面比例传，服务器换算成浏览器像素（`toViewport`）；文字用 `insertText`（输入法、粘贴都可用），按键只收回车、退格、Tab、方向键等一小组。输入的内容不记日志、不保存、不回显。网站另开的窗口（登录弹窗）开着时显示它，关掉后回到原页面。
+- **服务器上的浏览器**（`apps/worker/src/remote-browser.ts`）：Playwright 的 Chromium，在服务器的虚拟屏幕上以有界面方式运行（`apps/worker/src/server-display.ts`：每个 worker 一个 Xvfb，显示号由 `-displayfd` 自选；没有 Xvfb 或 `CROSSLINE_SERVER_DISPLAY=off` 时才退回无界面），`launchPersistentContext` 打开读取用的同一配置目录；CDP `Page.startScreencast` 推 JPEG 画面（质量 60，最新一帧留在内存），页面每 400 毫秒取一次比已有更新的画面（`GET /api/remote-browser/frame?after=<序号>`）。点击、滚轮、按键和文字由 `POST /api/remote-browser` 送回：坐标按画面比例传，服务器换算成浏览器像素（`toViewport`）；文字用 `insertText`（输入法、粘贴都可用），按键只收回车、退格、Tab、方向键等一小组。输入的内容不记日志、不保存、不回显。网站另开的窗口（登录弹窗）开着时显示它，关掉后回到原页面。
 - **只能访问公开网站**：这个浏览器的每个请求（页面、框架、脚本、WebSocket）都检查：只许 https、默认端口、真实域名且解析结果全是公网地址（`remoteUrlAllowed`）；禁用 service worker，不许下载。否则网页可以让服务器上的浏览器访问服务器自己的端口（worker 的 supervisor 就在本机）。单点登录途经的公开网站（login.wisc.edu、Duo）都能过。
 - **限制**：每个工作区同时一个；整台服务器默认同时一个（`CROSSLINE_REMOTE_BROWSERS`）；worker 内存超过高水位线（75%）时不开；10 分钟没有操作、2 分钟没有弹窗来取画面（页面关了）、或开满 30 分钟即关闭，关闭不算登录。弹窗开着时工作流不运行（`LOGIN_WINDOW_OPEN`），读取和收藏任务也不会同时打开这个配置目录（`apps/worker/src/profile-locks.ts`，三者互斥）。
 - **登录完成**：与本地窗口同一条路（`login_done`），浏览器关闭、记 `skill.grown.logged_in`。很多单点登录的会话 Cookie 没有过期时间，浏览器一关就丢，所以关闭时写到配置目录旁（`crossline-session-cookies.json`，仅本人账号自己的 Cookie），读取打开时放回。「去登录」消息链接 `/settings?login=<工作流>#skills`，打开即开始登录。
-- **服务器上的读取**：`site_read` 与收藏读取在服务器上无界面运行（`readerLaunchOptions`），用服务器自己的 Chromium，不用在本人电脑上记下的浏览器路径。边界不变：不伪装（不改 user agent、不加隐身插件、不改 webdriver 标记，无界面浏览器照实报自己是无界面的）、不用代理、不代做验证码（验证码由本人在弹窗里完成）、遇安全验证即停。
-- **镜像与内存**：镜像装 Playwright 对应版本的 Chromium headless shell（`PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`，构建时启动一次确认能用）和文泉驿微米黑（约 5 MB，中文登录页不至于显示成方框），镜像约增大 300 MB。一页 Chromium 约 150–250 MB，算在 worker 的内存上限里，没有另加；靠同时只开一个、高水位线不开、模型闸门在高水位时暂停新运行来保护。
+- **服务器上的读取**：`site_read` 与收藏读取在服务器上同样以有界面方式运行在虚拟屏幕上（`readerLaunch`），用服务器自己的 Chromium，不用在本人电脑上记下的浏览器路径。边界不变：不伪装（不改 user agent、不加隐身插件、不改 webdriver 标记，浏览器照实报自己是什么。机主选择用 Xvfb 跑有界面的 Chromium，而不是伪装无界面浏览器：网站看到的是普通 Chromium，不是 HeadlessChrome）、不用代理、不代做验证码（验证码由本人在弹窗里完成）、遇安全验证即停。
+- **镜像与内存**：镜像装 Playwright 对应版本的完整 Chromium 和 Xvfb（`PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`，构建时在 Xvfb 上以有界面方式启动一次确认能用）和文泉驿微米黑（约 5 MB，中文登录页不至于显示成方框），镜像约增大 300 MB。一页 Chromium 约 150–250 MB，算在 worker 的内存上限里，没有另加；靠同时只开一个、高水位线不开、模型闸门在高水位时暂停新运行来保护。
 - **尚未在服务器上真实验证**：本机用真实 Chromium（无界面）跑通了打开、画面、点击、输入、后退、私网地址被拦、登录完成与 Cookie 保存；服务器镜像的构建、在服务器上完成一次真实登录（小红书扫码、Canvas 的 Duo）还没做。
 
 ## 收藏全量读取（2026-10-22）

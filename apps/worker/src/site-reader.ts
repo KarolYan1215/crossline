@@ -1,7 +1,7 @@
 import type { SkillTools } from "@crossline/codex";
 import { workflowAccess, type GrownSkillRecord, type WorkflowAccess } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
-import { readerLaunchOptions, restoreSessionCookies } from "./browser-launch";
+import { readerLaunch, restoreSessionCookies } from "./browser-launch";
 import { ownerOf } from "./owner";
 import { HOLDER_WORDS, holdProfile, profileHolder, releaseProfile } from "./profile-locks";
 
@@ -209,11 +209,11 @@ export type OpenSite = (profileDir: string, executablePath: string, onSite: (hre
 
 /**
  * The real browser: Playwright driving the browser the person logged in with, on its own profile — a visible window on the person's
- * computer, headless on a server (`readerLaunchOptions`), with the session cookies the login left beside the profile put back.
+ * computer, on the server's virtual screen on a server (`readerLaunch`), with the session cookies the login left beside the profile put back.
  */
 const openBrowser: OpenSite = async (profileDir, executablePath, onSite) => {
   const { chromium } = await import("playwright-core");
-  const context = await chromium.launchPersistentContext(profileDir, readerLaunchOptions(executablePath));
+  const context = await chromium.launchPersistentContext(profileDir, await readerLaunch(executablePath));
   await restoreSessionCookies(context, profileDir);
   // The worker runs under tsx, whose esbuild wraps every named function in `__name(…)`: a function handed to `page.evaluate` then
   // throws 「__name is not defined」 in the page. The first real run that clicked a tab stopped on exactly that (2026-10-20), so the
