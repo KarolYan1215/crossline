@@ -107,7 +107,23 @@ if (lite) {
 }
 const startedAt = Date.now();
 let runs = 0, repairs = 0;
-setUsageSink((usage) => { runs += 1; repairs += usage.repairs ?? 0; });
+// Tokens per Skill and model, so two runs can be compared on what they spent and not only on how many calls they made.
+const spent = new Map<string, { runs: number; input: number; cached: number; output: number; reasoning: number }>();
+setUsageSink((usage) => {
+  runs += 1; repairs += usage.repairs ?? 0;
+  const key = `${usage.skillName.replace(/^crossline:/, "")} · ${usage.model ?? "默认"}${usage.effort ? `/${usage.effort}` : ""}`;
+  const row = spent.get(key) ?? { runs: 0, input: 0, cached: 0, output: 0, reasoning: 0 };
+  row.runs += 1; row.input += usage.inputTokens; row.cached += usage.cachedInputTokens; row.output += usage.outputTokens; row.reasoning += usage.reasoningOutputTokens;
+  spent.set(key, row);
+});
+function tokenReport(): string[] {
+  const rows = [...spent].sort((a, b) => b[1].input - a[1].input);
+  const sum = rows.reduce((all, [, row]) => ({ input: all.input + row.input, cached: all.cached + row.cached, output: all.output + row.output }), { input: 0, cached: 0, output: 0 });
+  const k = (n: number) => `${Math.round(n / 1000)}k`;
+  return ["## 用量", "", `- 合计：输入 ${k(sum.input)}（其中缓存 ${k(sum.cached)}），输出 ${k(sum.output)}`, "",
+    "| Skill · 模型 | 次数 | 输入 | 缓存 | 输出 | 其中推理 |", "|---|---|---|---|---|---|",
+    ...rows.map(([key, row]) => `| ${key} | ${row.runs} | ${k(row.input)} | ${k(row.cached)} | ${k(row.output)} | ${k(row.reasoning)} |`), ""];
+}
 
 // Files the person has on their machine and would upload when asked (not the organised profile: that is the hidden truth). The lite
 // persona has none.
@@ -344,6 +360,7 @@ try {
     ...own.map((item) => `| ${item.label} | ${item.done ? "✓" : "✗"} | ${item.done ? "" : item.detail} |`), "",
     `项目：${store.listProjects(workspaceId).map((project) => project.name).join("、") || "无"}`,
     `已确认事实：${store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed").length} 条`, "",
+    ...tokenReport(),
     ...(lite ? domainReport() : []),
     "## 对话", "", ...transcript
   ].join("\n");
