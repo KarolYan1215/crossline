@@ -30,6 +30,8 @@ case "$1" in
     [ -n "$2" ] && [ -n "$3" ] || { echo "usage: pack <email> <out.tgz>" >&2; exit 2; }
     ws=$(run -w /repo "$image" $tsx scripts/ledger-stamp.ts --db /data/crossline.db --email "$2" | python3 -c "import json,sys;print(json.load(sys.stdin)['workspaceId'])")
     outdir=$(dirname "$3"); mkdir -p "$outdir"
+    # A pack left by an earlier run as root cannot be overwritten by the app's user in the container (2026-10-22: a 10-21 copy blocked it).
+    rm -f "$3"
     run -v "$outdir":/out -w /repo "$image" $tsx scripts/pack-for-server.ts --data /data --workspace "$ws" --to-email "$2" --out /out/$(basename "$3")
     chown "$(stat -c %u:%g "$outdir")" "$3" 2>/dev/null || true
     ;;
