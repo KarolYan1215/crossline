@@ -16,6 +16,9 @@ import type { DispatchResult } from "./agent-service";
 import { identityLines } from "./lines";
 import { ownerOf, runtimesDir } from "./owner";
 import { createSiteReader, SITE_PAGES_PER_RUN, SITE_SCROLLS_MAX, type OpenSite } from "./site-reader";
+import { COLLECT_BREAKER_DAYS, collectFavourites, collectFolder, collectPausedUntil, favouritesAccess, markOrganised, openCollectBrowser, readCollectLedger,
+  type CollectDriver, type CollectResult } from "./favourites-reader";
+import { describeNotes, type NoteMediaDeps } from "./note-media";
 
 /**
  * Grown workflows (docs/skills-library.md §6): the assistant fixes an errand the person keeps having done — or one they asked for in words —
@@ -132,7 +135,7 @@ export function growTask(candidate: GrowCandidate, lineIds: string[], tools: Arr
       `3. skill/workflow.json：{"name","summary","lines","category","trigger","schedule","action","reminder","steps":[{"title","by","external"}],"inputs","outputs","access","risks"}。lines 为 ${JSON.stringify([candidate.lineId])}（只服务这一条主线）；category 为 "${candidate.category}"；trigger 为 "on_request"，本人要求定时或定期（例如「每周五提醒」「每天早上整理」「定期整理」）时为 "schedule"，schedule 为 {"type":"daily"|"weekdays","time":"HH:MM"} 或 {"type":"weekly","days":["MO".."SU"],"time":"HH:MM"}（本人没说时间就选一个合理的，并在 summary 里写出）；只需到点提醒时 action 为 "remind" 并写 reminder，否则为 "run"、reminder 为 ""。inputs 写这件事要读的东西；本人给了文件夹的绝对路径就原样写进 inputs，执行时会把它交给助手。summary 一句话说清每期做什么、交出什么（不超过 40 字，例如「每周五把本周素材剪成一条 60 秒竖版 vlog」），它是每次运行和通知的标题。`,
       "steps 只列这件事真正的步骤，写成动作（「把素材按拍摄时间排好」「导出 1080×1920 成片」），不写「执行工作流」这类空话；不要给本人加「查看结果」「核对产出」：每次的结果都会送到本人面前，本人的步骤只留助手不能做的动作。",
       "发送、上传、发布、投稿、付款这类离开本机的步骤，by 为 \"person\"、external 为 true：工作流在它们之前停下，把要发出的东西备好放在产出目录。读取网页、联网核验、下载公开资料不算离开本机，external 为 false。",
-      "社交平台（小红书、抖音、微博、B 站、知乎、微信、Instagram、X、LinkedIn 等）的账号一律不自动读取：这些平台的规则禁止用工具自动使用账号，读取会让账号被限流或封禁。涉及它们时先联网查该平台对自动化和 AI 的规定，以及有没有官方 API 或官方导出；有官方 API 或导出就用它，没有就把流程写成「本人在 App 里分享、导出或截图交给 Crossline，助手离线整理」，access 不列这个平台，risks 写明原因；不伪装浏览器、不伪造签名、不用代理。"
+      "社交平台（小红书、抖音、微博、B 站、知乎、微信、Instagram、X、LinkedIn 等）：设计前先联网查清该平台对自动化工具和 AI 使用账号的规定（用户协议、社区规范、近期治理公告），以及有没有官方 API 或官方导出；把查到的规定和来源写进 SKILL.md，有官方 API 或导出就用它。没有官方途径时，可以在本人登录的浏览器里读取，但要在 risks 里如实写出平台规定和后果（账号可能被限流或封禁），由本人看过后决定是否启用；不伪装浏览器、不伪造签名或指纹、不用代理、不过验证码。"
       + "要读本人在某个网站上的账号或数据（收藏夹、订单、课程平台等）时：先联网查清能用的接口，写进 SKILL.md——优先官方 API 或官方导出，其次平台允许的工具，最后才是在本人登录的浏览器里读取页面；不要求本人交出密码或 Cookie，不用来路不明的代抓服务。登录由本人在 Crossline 打开的浏览器窗口里完成；执行时需要登录的网站由 Crossline 的读取工具 site_read 代为打开（每个页面只读一次、每期最多几页、遇到安全验证或要求登录就停），助手拿不到浏览器配置目录。所以脚本不自己访问这些网站：SKILL.md 写清每期用 site_read 读哪几个页面（列表页，不逐条打开详情页）、把返回的文字和链接存成什么文件，脚本只负责整理这些文件。在 access 里列出每个网站 {\"service\",\"site\"(https 地址),\"login\"(true/false),\"how\"(用什么接口、怎么读)}，在 risks 里如实写出风险（是否违反平台协议、账号可能受限、验证码、页面改版会失效、读到的数据存在本机哪里）；本人看过风险并同意后才会启用。改动账号的事（移动、删除、取消收藏、点赞、评论、发布）一律是本人的步骤。这次没有登录、读不到真实数据：用离线样例把整理部分跑通，读取部分写好并在 SKILL.md 里说明尚未在真实账号上验证。不读账号时 access 与 risks 为 []。",
       ...(tools.length ? [`本人能用的 AI 工具：${tools.map((tool) => `${tool.name}（${tool.goodFor}${tool.by === "system" ? "；由助手执行" : ""}）`).join("；")}。按今天会用这些工具的人的做法设计：能由助手整份做的步骤归助手，本人的步骤写明用哪个工具、怎么用（具体操作或给它的提示词），只把需要本人判断的部分留给本人。`] : []),
       ...(library.length ? [`这条主线的 skill 库里已有：${library.map((skill) => `$${skill.name}（${skill.description.slice(0, 60)}）`).join("；")}。工作流要用到其中某个时，在 SKILL.md 正文写它的完整名（如上，带 $），执行时会一起启用；不要把它的内容抄进来。`] : []),
@@ -352,8 +355,11 @@ export function finishWorkflowLogin(store: CrosslineStore, workspaceId: string, 
  * login, or why it did not start.
  */
 export function startWorkflowRun(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, runFree: RunFree, profilesRoot: string,
-  now = new Date(), fallbackBrowser = loginBrowser(), openSite?: OpenSite, forbiddenSites?: RegExp): DispatchResult {
+  now = new Date(), fallbackBrowser = loginBrowser(), openSite?: OpenSite): DispatchResult {
   if (openLogins.has(`${workspaceId}:${record.id}`)) return { state: "blocked", code: "LOGIN_WINDOW_OPEN", message: "登录窗口还开着；登录后关掉它再运行。" };
+  // The person's Xiaohongshu favourites are read whole by Crossline's own job (favourites-reader.ts), then organised by the assistant.
+  const favourites = favouritesCollector ? favouritesAccess(record) : undefined;
+  if (favourites && favouritesCollector) return startFavouritesRun(store, workspaceId, record, runFree, profilesRoot, now, fallbackBrowser, favourites, favouritesCollector);
   const { access } = workflowAccess(record);
   const home = grownHomeLine(store, workspaceId, record);
   const personSteps = record.manifest.steps.filter((step) => step.by === "person").map((step) => step.title);
@@ -368,7 +374,7 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
   const reader = access.some((item) => item.login) ? createSiteReader(store, workspaceId, record,
     (item) => ({ dir: accessProfileDir(profilesRoot, item), browser: record.loginBrowsers?.[item.service] || fallbackBrowser || "" }),
     { notify: (text) => sayToPerson(store, workspaceId, text, "workflow_done", `breaker:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: "去看结果", href: "/approvals#assistant" }]),
-      ...(openSite ? { open: openSite } : {}), ...(forbiddenSites ? { forbidden: forbiddenSites } : {}) }) : undefined;
+      ...(openSite ? { open: openSite } : {}) }) : undefined;
   const accountRules = access.length ? [
     `要读取的网站：${access.map((item) => item.login ? `${item.service}（${item.site}，本人已登录）` : `${item.service}（${item.site}，公开页面）`).join("；")}。`,
     ...(reader ? [`需要登录的网站只能用工具 site_read 读取：传网站名和页面地址，它打开本人登录过的浏览器并返回页面上的文字和链接。你拿不到浏览器配置目录，也不要自己启动浏览器去读这些网站。site_read 每个页面只读一次、本期最多 ${SITE_PAGES_PER_RUN} 页；只读工作流说明里的页面（例如收藏页、指定账号主页），不逐条打开详情页，不为核验再次访问。`,
@@ -425,6 +431,109 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
 }
 
 /**
+ * What the favourites job needs that only the worker has: where the notes go, how to open the browser, and how a workspace's pictures
+ * are described and videos heard. Set once by the worker at start (`configureFavouritesCollector`); unset (tests of other paths, a
+ * worker that has not configured it), favourites workflows keep using `site_read`.
+ */
+export type FavouritesCollector = {
+  outputRoot: string;
+  open?: (profileDir: string, browser: string) => Promise<CollectDriver>;
+  media: (workspaceId: string) => NoteMediaDeps;
+  sleep?: (ms: number) => Promise<void>;
+  log?: (event: Record<string, unknown>) => void;
+};
+let favouritesCollector: FavouritesCollector | undefined;
+export function configureFavouritesCollector(collector: FavouritesCollector | undefined): void { favouritesCollector = collector; }
+/** Collections under way, by workspace and workflow: a second start waits (`COLLECTING` is a hold code). */
+const collecting = new Map<string, Promise<void>>();
+/** Resolves when the workflow's collection (and the hand-over to the assistant) is over; for tests and the trial script. */
+export const collectionDone = (workspaceId: string, id: string) => collecting.get(`${workspaceId}:${id}`) ?? Promise.resolve();
+
+function startFavouritesRun(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, runFree: RunFree, profilesRoot: string, now: Date,
+  fallbackBrowser: string | undefined, access: WorkflowAccess, collector: FavouritesCollector): DispatchResult {
+  const key = `${workspaceId}:${record.id}`;
+  if (collecting.has(key)) return { state: "blocked", code: "COLLECTING", message: "上一次读取收藏还没结束。" };
+  const paused = collectPausedUntil(store, workspaceId, now);
+  if (paused) return { state: "blocked", code: "SITE_PAUSED", message: `小红书遇到过安全验证，${paused.slice(0, 16).replace("T", " ")} 前不再读取。` };
+  const browser = record.loginBrowsers?.[access.service] || fallbackBrowser || "";
+  const folder = collectFolder(collector.outputRoot, record.id);
+  mkdirSync(folder, { recursive: true });
+  const taskId = `collect-${record.id.replace(/^flow-/, "")}-${now.getTime().toString(36)}`;
+  const day = now.toISOString().slice(0, 10);
+  const log = collector.log ?? (() => {});
+  const job = (async () => {
+    let result: CollectResult;
+    const driver = await (collector.open ?? openCollectBrowser)(accessProfileDir(profilesRoot, access), browser).catch((error: unknown) => error as Error);
+    if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
+    else {
+      try { result = await collectFavourites({ store, workspaceId, workflowId: record.id, folder, driver, ...(collector.sleep ? { sleep: collector.sleep } : {}), log }); }
+      finally { await driver.close(); }
+    }
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.ran:${taskId}`, type: "collect.ran", entityId: record.id,
+      payload: { taskId, state: result.state, mode: result.mode, listed: result.listed, listEnded: result.listEnded, read: result.read.length, gone: result.gone.length, pending: result.pending } });
+    log({ type: "collect.ran", workspaceId, id: record.id, state: result.state, mode: result.mode, read: result.read.length, pending: result.pending });
+    // Pictures described and videos heard before the assistant sees the notes; a note left undescribed is tried again next run.
+    const ledger = readCollectLedger(store, workspaceId, record.id);
+    if (ledger.unorganised.length) await describeNotes(folder, collector.media(workspaceId), ledger.unorganised).catch(() => undefined);
+    const summary = record.manifest.summary;
+    if (result.state === "check") sayToPerson(store, workspaceId, `「${summary}」读取时遇到了小红书的安全验证或限流，已立刻停下并关闭浏览器，${COLLECT_BREAKER_DAYS} 天内不再读取。本次已读 ${result.read.length} 条，照常整理；请本人在手机上正常使用一段时间。`,
+      "workflow_done", `check:${record.id}:${day}`, [{ label: "去看结果", href: "/approvals#assistant" }]);
+    if (result.state === "login" || result.state === "no_profile") sayToPerson(store, workspaceId, `「${summary}」需要登录小红书${result.read.length ? `（本次已读 ${result.read.length} 条，照常整理）` : ""}。请在设置里点「登录」，登录后关掉窗口，再点「立即运行」。`,
+      "workflow_login", `login:${record.id}:${day}`, [{ label: "去登录", href: "/settings#skills" }]);
+    if (result.state === "failed") sayToPerson(store, workspaceId, `「${summary}」这次没读完：${result.message ?? "浏览器出错"}${result.read.length ? `；已读 ${result.read.length} 条，照常整理` : ""}。`,
+      "workflow_done", `failed:${record.id}:${taskId}`, [{ label: "去看设置", href: "/settings#skills" }]);
+    organiseFavourites(store, workspaceId, record, runFree, folder, result, new Date());
+  })().catch((error: unknown) => log({ type: "collect.failed", workspaceId, id: record.id, message: error instanceof Error ? error.message : "" }))
+    .finally(() => collecting.delete(key));
+  collecting.set(key, job);
+  return { state: "started", taskId };
+}
+
+/** The notes read and not yet organised go to the assistant with the workflow on; nothing is read from the site in that run. */
+function organiseFavourites(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, runFree: RunFree, folder: string, result: CollectResult, now: Date): void {
+  const ids = readCollectLedger(store, workspaceId, record.id).unorganised;
+  const summary = record.manifest.summary;
+  const total = Object.values(readCollectLedger(store, workspaceId, record.id).read).filter((entry) => entry.state === "read").length;
+  const later = result.pending ? `还有 ${result.pending} 条下次按人的节奏继续读。` : "";
+  if (!ids.length) {
+    if (result.state !== "done") return;
+    recordWorkflowResult(store, workspaceId, record.id, `collect:${now.getTime()}`, result.listed ? "done" : "partial", result.listed, record.lastRead?.items ?? 0);
+    sayToPerson(store, workspaceId, result.listed ? `「${summary}」本期没有新增收藏（已读 ${total} 条）。${later}`
+      : `「${summary}」这次没读到收藏，可能需要重新登录或页面改版。请在设置里点「登录」重新登录，再点「立即运行」。`,
+      result.listed ? "workflow_done" : "workflow_login", `nothing:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: result.listed ? "去看结果" : "去登录", href: result.listed ? "/approvals#assistant" : "/settings#skills" }]);
+    return;
+  }
+  const home = grownHomeLine(store, workspaceId, record);
+  const personSteps = record.manifest.steps.filter((step) => step.by === "person").map((step) => step.title);
+  const last = record.lastRead;
+  const lastFolder = last && existsSync(last.directory) && last.directory !== folder ? last.directory : undefined;
+  const title = summary.slice(0, 80);
+  const before = retryContext(store, workspaceId, agentChainKey({ workOrderId: "", stepId: "", title }));
+  const shown = ids.slice(0, 60).map((id) => `note-${id}.md`).join("、");
+  const started = runFree({ taskId: `flow-${record.id.replace(/^flow-/, "")}-${now.getTime().toString(36)}`, category: record.category, ...(home ? { lineId: home } : {}),
+    inputs: [folder, ...(lastFolder ? [lastFolder] : []), ...before.inputs], extraSkills: [grownSkillName(record.id)], title, humanPart: personSteps.join("；") || "查看结果",
+    what: [`按工作流 $${grownSkillName(record.id)} 做本期的这件事：${summary.replace(/[。.\s]+$/, "")}。在由本人完成的步骤之前停下，把要本人在账号里操作的东西备好。`,
+      `本期的收藏笔记已由 Crossline 在本人登录的浏览器里读好，放在只读输入 ${path.basename(folder)}：index.md 是目录，每条笔记一个 note-<id>.md（标题、正文、标签、作者、发布时间、互动数、每张图片的描述与图中文字、视频转写与关键帧描述、原链接），原图和视频在 notes/<id>/。不要再访问小红书。`,
+      `本期新读到 ${ids.length} 条，只整理这些：${shown}${ids.length > 60 ? ` 等（完整列表见 index.md 中最近读取的 ${ids.length} 条）` : ""}。${later}`,
+      ...(lastFolder ? [`上期的整理结果（${path.basename(lastFolder)}，只读）：先读它，把本期新增的并入完整结果，上期已整理的不再重复整理。`] : []),
+      "不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。", ...(before.text ? [before.text] : [])].join("\n") },
+  (outcome) => {
+    if (outcome.state === "done") {
+      markOrganised(store, workspaceId, record.id, ids);
+      recordWorkflowResult(store, workspaceId, record.id, outcome.taskId, "done", result.listed, record.lastRead?.items ?? 0);
+      rememberRead(store, workspaceId, record.id, { at: new Date().toISOString(), taskId: outcome.taskId, directory: outcome.directory, items: total, pages: [] });
+    }
+    sayToPerson(store, workspaceId, outcome.state === "done"
+      ? `本期「${summary}」已做好：新读 ${ids.length} 条（共 ${total} 条）。${later}${personSteps.length ? `留给本人：${personSteps.join("；")}` : ""}`
+      : `本期「${summary}」读好了 ${ids.length} 条，但整理没有做成：${outcome.state === "blocked" || outcome.state === "failed" ? outcome.message : "助手未获准做这类工作"}。笔记文件已在本机，下次运行一起整理。`,
+      "workflow_done", `ran:${record.id}:${outcome.state === "done" ? outcome.taskId : now.toISOString().slice(0, 10)}`, [{ label: "去看结果", href: "/approvals#assistant" }]);
+  });
+  if (started.state === "blocked" && HOLD_CODES.has(started.code)) holdWorkflowRun(store, workspaceId, record.id, now);
+  if (started.state !== "started") sayToPerson(store, workspaceId, `「${summary}」已读好 ${ids.length} 条笔记（存在本机 ${path.basename(folder)}），整理要等一下：${started.state === "blocked" ? started.message : `助手还没获准做「${started.label}」这类工作`}。`,
+    "workflow_done", `waiting:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: "打开设置", href: "/settings#automation" }]);
+}
+
+/**
  * At each tick, the grown workflows whose time has come: a reminder is said to the person; a run starts the assistant with the workflow
  * on (when it is free and the kind is allowed — otherwise the person is told it is due and why it did not start). Recorded as run either way,
  * except when the assistant is busy: then it is held and tried again at the later ticks of the day.
@@ -473,7 +582,7 @@ export function loggedInElsewhere(record: GrownSkillRecord, profilesRoot: string
 }
 
 /** Why a run due now could not start that only time fixes: tried again at the next ticks of the day. */
-const HOLD_CODES = new Set(["AGENT_BUSY", "LOGIN_WINDOW_OPEN"]);
+const HOLD_CODES = new Set(["AGENT_BUSY", "LOGIN_WINDOW_OPEN", "COLLECTING"]);
 
 const unheld = (record: GrownSkillRecord): GrownSkillRecord => { const copy = { ...record }; delete copy.heldSince; return copy; };
 

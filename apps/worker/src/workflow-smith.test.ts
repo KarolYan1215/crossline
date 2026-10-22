@@ -7,7 +7,9 @@ import { LINE_SETTING } from "@crossline/identity-packs";
 import { validateWorkflowManifest } from "@crossline/core";
 import { librarySelection, type AgentOutcome, type AgentTaskInput } from "./agent-task";
 import type { OpenSite, SiteReader } from "./site-reader";
-import { cleanGrownSkills, finishWorkflowLogin, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR, startWorkflowRun, workflowSchedulePass } from "./workflow-smith";
+import { cleanGrownSkills, collectionDone, configureFavouritesCollector, finishWorkflowLogin, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR,
+  startWorkflowRun, workflowSchedulePass } from "./workflow-smith";
+import { readCollectLedger, type CollectDriver } from "./favourites-reader";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
 
@@ -357,7 +359,7 @@ test("a run whose pages listed nothing is partial and points at the login; one t
   const readFavourites = async (index: number) => JSON.parse(await (runs[index] as unknown as { reader: SiteReader }).reader.tools.call("site_read",
     { service: "小红书", url: "https://www.xiaohongshu.com/user/profile/me", click: "收藏", scrolls: 15 })) as { ok: boolean; items: number };
 
-  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe", openSite, /^$/);
+  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe", openSite);
   expect(runs[0]!.what).toContain("用 site_read 的 click 传标签文字切换过去");
   expect(await readFavourites(0)).toMatchObject({ ok: true, items: 2 });
   const first = path.join(root, "flow-1");
@@ -369,7 +371,7 @@ test("a run whose pages listed nothing is partial and points at the login; one t
 
   // The next run gets the last output read-only and the page that worked; this time the page shows nothing.
   listed = [];
-  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe", openSite, /^$/);
+  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe", openSite);
   expect(runs[1]!.inputs).toEqual([first]);
   expect(runs[1]!.what).toContain("上期读到内容的页面：https://www.xiaohongshu.com/user/profile/me（点「收藏」）");
   expect(runs[1]!.what).toContain("本期只整理上期之后新增的，按条目链接去重");
@@ -451,4 +453,55 @@ test("a skill naming another library skill of its line switches that one on too,
   const available = ["crossline-grown:flow-xhs-note", "crossline-public:pub-hooks", "crossline-public:pub-papers"];
   expect(referencedSkills(store, ws, "media", ["crossline-grown:flow-xhs-note"], available)).toEqual(["crossline-public:pub-hooks"]);
   expect(referencedSkills(store, ws, "media", ["crossline-grown:flow-xhs-note"], ["crossline-grown:flow-xhs-note"])).toEqual([]);
+});
+
+test("a favourites workflow is read whole by the worker's job first; the assistant only organises the note files, and they leave the to-organise list once it is done", async () => {
+  favouritesRecord();
+  const id = (n: number) => `66aa${String(n).padStart(20, "0")}`;
+  let queue: Array<{ url: string; status: number; json: unknown }> = [];
+  let current = "";
+  const driver: CollectDriver = {
+    goto: async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/explore") queue.push({ url: "https://edith.xiaohongshu.com/api/sns/web/v2/user/me", status: 200, json: { code: 0, data: { user_id: "me" } } });
+      else if (parsed.pathname.startsWith("/user/profile/")) queue.push({ url: "https://edith.xiaohongshu.com/api/sns/web/v2/note/collect/page", status: 200,
+        json: { code: 0, data: { has_more: false, notes: [1, 2].map((n) => ({ note_id: id(n), xsec_token: "t", display_title: `收藏 ${n}`, type: "normal" })) } } });
+      else { current = parsed.pathname.split("/").pop()!; queue.push({ url: "https://edith.xiaohongshu.com/api/sns/web/v1/feed", status: 200,
+        json: { code: 0, data: { items: [{ id: current, note_card: { note_id: current, type: "normal", title: `收藏 ${current.slice(-1)}`, desc: "正文", image_list: [] } }] } } }); }
+      return 200;
+    },
+    pause: async () => {}, wheel: async () => {}, snapshot: async () => ({ url: "https://www.xiaohongshu.com/x", title: "", text: "", links: [] }),
+    responses: async () => { const out = queue; queue = []; return out; }, noteState: async () => null, selfProfile: async () => ({}),
+    fetchMedia: async () => ({ state: "failed", status: 404 }), close: async () => {}
+  };
+  configureFavouritesCollector({ outputRoot: root, open: async () => driver, media: () => ({}), sleep: async () => {} });
+  try {
+    const runs: Array<AgentTaskInput & { taskId: string; reader?: unknown }> = [];
+    let after: ((outcome: AgentOutcome) => void) | undefined;
+    const run = (input: AgentTaskInput & { taskId: string }, then?: (outcome: AgentOutcome) => void) => { runs.push(input); after = then; return { state: "started" as const, taskId: input.taskId }; };
+    const started = startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe");
+    expect(started).toMatchObject({ state: "started", taskId: expect.stringMatching(/^collect-xhs-/) });
+    // A second start while it reads waits (a hold code), instead of opening the browser twice.
+    expect(startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe")).toMatchObject({ state: "blocked", code: "COLLECTING" });
+    await collectionDone(ws, "flow-xhs");
+    const folder = path.join(root, "collect-xhs");
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.reader).toBeUndefined();
+    expect(runs[0]!.inputs).toEqual([folder]);
+    expect(runs[0]!.what).toContain("不要再访问小红书");
+    expect(runs[0]!.what).toContain(`note-${id(2)}.md`);
+    expect(readFileSync(path.join(folder, `note-${id(1)}.md`), "utf8")).toContain("# 收藏 1");
+    expect(readFileSync(path.join(folder, "index.md"), "utf8")).toContain("共 2 条");
+    expect(readCollectLedger(store, ws, "flow-xhs").unorganised).toHaveLength(2);
+    after!({ ...done("flow-1", path.join(root, "flow-1")), summary: { needsHuman: [] } } as unknown as AgentOutcome);
+    expect(readCollectLedger(store, ws, "flow-xhs").unorganised).toEqual([]);
+    expect(said().at(-1)).toContain("新读 2 条（共 2 条）");
+    expect(readGrownSkills(store, ws)[0]!.lastRead).toMatchObject({ taskId: "flow-1", items: 2 });
+
+    // Nothing new next time: no assistant run, one line to the person.
+    startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe");
+    await collectionDone(ws, "flow-xhs");
+    expect(runs).toHaveLength(1);
+    expect(said().at(-1)).toContain("本期没有新增收藏（已读 2 条）");
+  } finally { configureFavouritesCollector(undefined); }
 });

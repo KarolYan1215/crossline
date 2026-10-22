@@ -234,7 +234,34 @@
 
 本人的小红书账号在「整理小红书收藏」工作流用登录浏览器读了收藏页、搜索页和别人的主页（10-20 两期共 875 条）后，被提示「疑似 AI 浏览」限流。小红书 2026-03《关于打击AI托管运营账号的治理公告》与 2026-04 AI 治理规则禁止用工具自动使用账号；平台从设备环境、登录态加自动化浏览器、浏览节奏识别，没有官方导出收藏的功能，也没有覆盖个人收藏的开放接口（调研来源：澎湃 32747698、IT之家 944156、隐私政策 2025-12-08 版转载）。
 
-- 不做规避：不伪装浏览器、不伪造签名或指纹、不用代理、不过验证码。
-- `site_read` 对 `NO_AUTOMATED_READING` 里的社交平台（小红书、抖音、微博、B 站、知乎、快手、微信、Instagram、Facebook、Threads、X、LinkedIn）一律不打开，不论工作流声明了什么。
-- 生长工作流时，涉及这些平台先联网查它对自动化和 AI 的规定与官方 API／导出；有官方途径就用，没有就把流程写成「本人在 App 里分享、导出或截图交给 Crossline，助手离线整理」，access 不列该平台，risks 写明原因。
-- 小红书的做法：本人每周把想用的笔记收进一个「选题」专辑，挑 5–15 条分享或截图交给 Crossline（约 10–15 分钟），助手只整理交来的内容。限流期间停止一切自动访问，以站内信的申诉入口为准，说明已停用自动化工具。
+当晚本人改了决定（2026-10-22）：「放开今天刚加的「社交平台不自动读取」，我不需要这个，只是设计前要确认好平台规则」。风险由本人对自己的账号承担。现行规则：
+
+- 不再按平台一律拒绝：`NO_AUTOMATED_READING` 与 `site_read` 的 `forbidden` 选项已删除，社交平台和其他需要登录的网站一样，读取与否由工作流声明、本人看过风险后同意决定。
+- 设计在先：生长工作流涉及社交平台时，先联网查清该平台对自动化工具和 AI 使用账号的规定（用户协议、社区规范、近期治理公告）以及有没有官方 API／导出，把规定和来源写进 SKILL.md；有官方途径就用；没有时可在本人登录的浏览器里读，但 risks 必须如实写明平台规定和后果（限流、封禁），本人在「接受风险并启用」时看到。
+- 不变的边界：不伪装浏览器、不改指纹、不打 webdriver 补丁、不用 stealth 插件；不伪造 x-s/x-t 签名、不自己调用或重放网站的 API；不用代理；不过验证码；不做改动账号的事。浏览器窗口始终可见，遇到安全验证就停。
+
+## 收藏全量读取（2026-10-22）
+
+本人的要求：「收藏全部读完如果全部能取全的话，第一次运行就全部取全，后续新增的再按人的速度来读，一次基本只是警告」；「xhs 收藏帖子的实际读取内容是什么？有图片有文字有视频，这些内容中的信息全部要能获取到」；「分析是否能通过直接网页抓包的方式来解决」。
+
+**做法：被动抓包，不主动请求。** 读取由 worker 的独立任务做（`apps/worker/src/favourites-reader.ts`），不在模型回合里：第一次全量约 1000 条、按每条 6–10 秒要几个小时，放在一个回合里的 700 次工具调用会被 20 分钟无事件检测打断；任务写好文件后，助手只整理这些文件（`organiseFavourites`，不再给 `site_read`）。浏览器是本人登录过的 Crossline 配置目录、可见窗口；`page.on("response")` 只保留页面自己发出的三类请求的 JSON：
+
+| 来源 | 地址 | 能拿到的字段 |
+| --- | --- | --- |
+| 收藏列表（页面滚动时自己请求） | `/api/sns/web/v2/note/collect/page`（每页 30 条，`cursor`、`has_more`） | `note_id`、`xsec_token`、`display_title`、`type`（normal/video）、封面、作者 `user_id`/`nickname`、赞数 |
+| 笔记详情（打开笔记页时页面自己请求） | `/api/sns/web/v1/feed` → `data.items[0].note_card` | 标题、正文 `desc`、`tag_list`、`type`、`time`/`last_update_time`、`ip_location`、作者、`interact_info`（赞、收藏、评论、分享）、`image_list`（每张的 `url_default`/`url_pre`/`info_list` 各场景地址、宽高、`live_photo` 与其 `stream`）、`video.media.stream.{h264,h265,av1}[].master_url`/`backup_urls`、`video.consumer.origin_video_key`、`video.capa.duration` |
+| 页面内嵌数据（服务端渲染） | `window.__INITIAL_STATE__.note.noteDetailMap[<id>].note` | 与详情同样的字段，驼峰写法（`noteId`、`imageList`、`interactInfo`、`masterUrl`…）；只在没有抓到详情响应时用 |
+| 可见文字 | `document.body.innerText` | 只有标题和正文文字、话题，没有结构；前两者都没有时才用 |
+| 本人是谁 | `/api/sns/web/v2/user/me`（或 `v1/user/selfinfo`），其次内嵌数据 `user.userInfo`、「我」链接 | `user_id`，用来打开 `/user/profile/<id>?tab=fav&subTab=note` |
+
+字段名对照 xpzouying/xiaohongshu-mcp（`types.go`、`feed_detail.go`）与 NanmiCoder/MediaCrawler（`media_platform/xhs/client.py`、`store/xhs/__init__.py`），两种写法都认（`packages/core/src/xhs-notes.ts`）。这些路径没在真实账号上核对过，以 `scripts/xhs-read-trial.ts` 的输出为准。
+
+**节奏与只读一次。**
+- 第一次（补齐，catch-up）：打开收藏页，滚到底（页面说 `has_more: false`，或连续 3 屏没有新条目），然后逐条打开没读过的笔记，同一个可见窗口，每条之间 6–10 秒（`CATCH_UP_GAP_MS`），不设每期、每日上限。中途停下的补齐，下次接着补齐。
+- 之后（增量）：滚收藏列表，遇到整页都已读就停；只读新收藏，每期最多 15 条（`INCREMENTAL_BATCH`），每条之间 30–120 秒随机（`INCREMENTAL_GAP_MS`）。
+- 每条读完、文件写好就记进 `collect.notes.<workflow>`（读过 / 已失效），所以停下时已读的都留着；已失效的笔记（`NOTE_GONE_TEXT`）不再打开。
+- 第一次安全验证、限流答复（状态 461/471/429、`code` 3000xx、「访问频次异常」等）或验证页地址就整期停下、关浏览器，小红书 7 天内不读（`site.breaker.xiaohongshu.com`，`site_read` 同样遵守）；要求登录就停下并请本人登录（不设暂停）。笔记正文里出现「验证码」不算：只有没拿到笔记数据时才看页面文字。
+
+**每条笔记的全部内容。** 图片（全部，含实况照片的视频）和视频由浏览器自己的请求（`page.request`，带页面的 cookie，笔记页为 referer）存进 `notes/<id>/`，单个文件上限 500 MB。之后（`apps/worker/src/note-media.ts`）：图片和视频关键帧交给 Skill `crossline-media-describer`（low 档）看图，输出描述与图中全部文字；一次最多 12 张、整条笔记一起，约 1000 条笔记（平均 4 张图）约 350 次运行；视频用 ffmpeg 抽 16 kHz 音轨，由录音用的本机 Whisper 转写，再抽 4 张关键帧一起描述。AVIF/HEIC 先用 ffmpeg 转 JPEG。每条写成 `note-<id>.md`（标题、正文、标签、作者、时间、类型、互动、每张图的描述与文字、视频转写与关键帧、原链接），目录写 `index.md`。看图只在 Codex 自己的登录上运行（`SKILL_NEEDS` 的 `vision`）。本机 ffmpeg：winget 的 Gyan.FFmpeg 9.0.2 已在 PATH；`CROSSLINE_FFMPEG` 可另指。
+
+**试读。** `pnpm exec tsx scripts/xhs-read-trial.ts --workspace <id> [--notes N] [--catch-up] [--media]`：用这台电脑上该工作流的配置目录，在账本副本上读，文件写到临时目录，逐条打印每个来源给了什么；只有遇到安全验证时把 7 天暂停写回实时账本。

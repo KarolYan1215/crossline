@@ -8,6 +8,7 @@ import { BACKPLAN_SCHEMA } from "./backplan-schema";
 import { CALENDAR_CLASSIFICATION_SCHEMA } from "./calendar-lines";
 import { FOLDER_LINES_SCHEMA } from "./source-folders";
 import { RECORDING_DIGEST_SCHEMA } from "./recording-digest";
+import { MEDIA_DESCRIPTION_SCHEMA } from "./xhs-notes";
 import { CONCIERGE_SCHEMA } from "./concierge";
 import { MAIL_REPLY_DRAFT_SCHEMA, MAIL_TRIAGE_SCHEMA } from "./mail";
 import { AUTOMATION_PLAN_SCHEMA } from "./automations";
@@ -48,6 +49,8 @@ export type SkillNeeds = {
   /** OpenAI-hosted capabilities: only on a ChatGPT sign-in or OpenAI API key through Codex itself. */
   webSearch?: true;
   image?: true;
+  /** Reads pictures the run is given. No provider's chat bridge has been measured passing images, so only Codex itself runs it. */
+  vision?: true;
   /** The shell assistant: only the machine owner's own Codex. */
   shell?: true;
   /** Test-only Skills are never routed for real work. */
@@ -76,6 +79,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-calendar-classifier": { label: "日历归类", schemas: ["CALENDAR_CLASSIFICATION_SCHEMA"] },
   "crossline-folder-classifier": { label: "文件夹归类", schemas: ["FOLDER_LINES_SCHEMA"] },
   "crossline-recording-digest": { label: "录音整理", schemas: ["RECORDING_DIGEST_SCHEMA"] },
+  "crossline-media-describer": { label: "图片读取", schemas: ["MEDIA_DESCRIPTION_SCHEMA"], vision: true },
   "crossline-goal-splitter": { label: "目标拆分", schemas: ["GOAL_SPLIT_SCHEMA"] },
   "crossline-insight-compiler": { label: "主线 skill 整理", schemas: ["MINE_SKILL_SCHEMA"], webSearch: true },
   "crossline-skill-scout": { label: "公开 skill 检索", schemas: ["SKILL_SCOUT_SCHEMA"], webSearch: true },
@@ -111,6 +115,7 @@ export function capabilityGap(skill: string, capabilities: ProviderCapabilities 
   if (needs.shell && !capabilities.shell) return `${needs.label}只在电脑主人自己的 Codex 上运行。`;
   if (needs.webSearch && !capabilities.webSearch) return `${needs.label}要联网搜索，这个模型连接没有；需要 ChatGPT 登录或 OpenAI API key。`;
   if (needs.image && !capabilities.image) return `${needs.label}要生成图片，这个模型连接没有；需要 ChatGPT 登录或 OpenAI API key。`;
+  if (needs.vision) return `${needs.label}要看图片，这个模型连接还没有检验过看图；需要 ChatGPT 登录。`;
   if (needs.tools && !capabilities.tools) return `${needs.label}要在回答中途查资料，这个模型连接不支持。`;
   return undefined;
 }
@@ -158,7 +163,7 @@ const DEEP_SCHEMA = level(level(level({ type: "object", additionalProperties: fa
 
 const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   AGENT_SUMMARY_SCHEMA, ANALYSIS_OUTPUT_SCHEMA, AUTOMATION_PLAN_SCHEMA, ARCHETYPE_CURATION_SCHEMA, ARTIFACT_PLAN_SCHEMA, BACKGROUND_FACTS_OUTPUT_SCHEMA, BACKPLAN_SCHEMA,
-  CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, MAIL_TRIAGE_SCHEMA, MAIL_REPLY_DRAFT_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, ENERGY_ADVICE_REVIEW_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, RECORDING_DIGEST_SCHEMA, GOAL_SPLIT_SCHEMA,
+  CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, MAIL_TRIAGE_SCHEMA, MAIL_REPLY_DRAFT_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, ENERGY_ADVICE_REVIEW_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, RECORDING_DIGEST_SCHEMA, MEDIA_DESCRIPTION_SCHEMA, GOAL_SPLIT_SCHEMA,
   MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MILESTONE_RISK_SCHEMA, MINE_SKILL_SCHEMA,
   ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA

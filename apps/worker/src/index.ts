@@ -17,7 +17,8 @@ import { agentHistoryPass } from "./agent-history";
 import { createWindowsActivitySource } from "./activity-source";
 import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
-import { createAgentService } from "./agent-service";
+import { createAgentService, defaultOutputRoot } from "./agent-service";
+import { createMediaDescriber, realVideoTools } from "./note-media";
 import { createCalendarPublisher } from "./calendar-publish";
 import { repairDuplicateImports, repairFrozenRace } from "./calendar-repair";
 import { repairLineAttributes } from "./attribute-repair";
@@ -38,7 +39,7 @@ import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, scoutDue } from "./public-skills";
-import { browserProfilesRoot, cleanGrownSkills, finishWorkflowLogin, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
+import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, finishWorkflowLogin, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
   workflowSchedulePass } from "./workflow-smith";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { createMilestoneRiskReviewer, milestonesAwaitingRiskReview } from "./milestone-risk-review";
@@ -1065,6 +1066,23 @@ const mailService = createMailService({ store: analysisStore, secrets, cwd: repo
   // Sorting's to-dos are captures: analysed at once, not at the next tick's intake.
   onCaptured: (workspaceId) => { void autoAnalyzePass(workspaceId).catch(() => undefined); },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
+// The person's Xiaohongshu favourites, read whole by a worker job in their own visible browser (favourites-reader.ts): pictures described
+// on the account's own Codex, videos heard by the recordings' transcriber (ffmpeg on the PATH, or CROSSLINE_FFMPEG).
+configureFavouritesCollector({
+  outputRoot: defaultOutputRoot(),
+  media: (workspaceId) => {
+    const client = accountClient(workspaceId);
+    return { ...(client ? { describe: createMediaDescriber(client, repoRoot) } : {}), ffmpeg: realVideoTools,
+      transcribe: async (wav: string) => {
+        const language = process.env.CROSSLINE_TRANSCRIBE_LANGUAGE?.trim();
+        const heard = await transcriber.transcribeSpeech(readFileSync(wav), "audio.wav", language ? { language } : {});
+        if (heard.state === "transcribed") return { text: heard.text };
+        return { problem: heard.state === "needs_download" ? "语音识别模型还没下载（设置 → 录音里可下载），视频未转写" : heard.state === "silent" ? "视频里没有听到说话" : heard.state === "failed" ? heard.message : "转写被中止" };
+      },
+      log: (event) => console.info(JSON.stringify({ ...event, workspaceId, checkedAt: new Date().toISOString() })) };
+  },
+  log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
+});
 const agentService = createAgentService({
   // The shell assistant runs on the machine owner's runtime only: it works with the operating system user's files, and a guard is a
   // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).

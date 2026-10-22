@@ -19,14 +19,8 @@ export const SITE_PAGES_PER_RUN = 6;
 export const SITE_PAGES_PER_DAY = 12;
 export const SITE_BREAKER_HOURS = 48;
 const PAUSE_MS: [number, number] = [6_000, 10_000];
-const breakerKey = (host: string) => `site.breaker.${host}`;
-
-/**
- * Consumer social platforms whose rules forbid automated use of an account (Xiaohongshu's 2026-03 and 2026-04 AI governance notices; the
- * owner's account was rate-limited for 「疑似 AI 浏览」 after the favourites workflow read it, 2026-10-22). No logged-in reading of them at
- * all: the person shares or exports what they want and the assistant works on that offline (docs/skills-library.md 「社交平台」).
- */
-export const NO_AUTOMATED_READING = /(^|\.)(xiaohongshu\.com|xhscdn\.com|douyin\.com|tiktok\.com|weibo\.com|weibo\.cn|bilibili\.com|zhihu\.com|kuaishou\.com|weixin\.qq\.com|instagram\.com|facebook\.com|threads\.net|x\.com|twitter\.com|linkedin\.com)$/i;
+/** Shared with the favourites reader (`favourites-reader.ts`): a check met by either stops both for that host. */
+export const breakerKey = (host: string) => `site.breaker.${host}`;
 const dayKey = (host: string, day: string) => `site.reads.${host}.${day}`;
 
 const CHECK_TEXT = /安全验证|请完成验证|验证码|滑块|拖动.{0,6}(滑块|完成)|访问异常|异常访问|请求过于频繁|操作频繁|captcha|verify you are (a )?human|unusual traffic|are you a robot|access denied/i;
@@ -237,9 +231,7 @@ export type SiteReader = { tools: SkillTools; close: () => Promise<void>; refusa
  */
 export function createSiteReader(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord,
   profileFor: (access: WorkflowAccess) => { dir: string; browser: string },
-  deps: { open?: OpenSite; now?: () => Date; sleep?: (ms: number) => Promise<void>; notify?: (text: string) => void;
-    /** The hosts never read (`NO_AUTOMATED_READING`); tests of the reader's own rules pass another. */
-    forbidden?: RegExp } = {}): SiteReader {
+  deps: { open?: OpenSite; now?: () => Date; sleep?: (ms: number) => Promise<void>; notify?: (text: string) => void } = {}): SiteReader {
   const sites = workflowAccess(record).access.filter((item) => item.login);
   const now = () => deps.now?.() ?? new Date();
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -264,7 +256,6 @@ export function createSiteReader(store: CrosslineStore, workspaceId: string, rec
     const clickRefused = label ? clickProblem(label) : undefined;
     if (clickRefused) return refuse(`${clickRefused}。`);
     const host = hostOf(access.site);
-    if ((deps.forbidden ?? NO_AUTOMATED_READING).test(host)) return refuse(`${access.service} 的平台规则禁止自动化读取账号，Crossline 不再打开它。本期只整理本人交来的内容；needsHuman 第一项写「请在 ${access.service} App 里把要用的内容分享或截图交给 Crossline」。`);
     const until = store.getSetting(workspaceId, breakerKey(host));
     if (stoppedBy || (until && Date.parse(until) > now().getTime())) return refuse(`${access.service} 已暂停读取${until ? `至 ${until.slice(0, 16).replace("T", " ")}` : ""}：之前遇到了安全验证。用已读到的内容完成本期，不要再读。`);
     // The same page with another tab clicked is another page.

@@ -1,0 +1,25 @@
+{
+  "66aa00000000000000000001": {
+    "comments": { "list": [], "cursor": "", "hasMore": false },
+    "currentTime": 1792648800000,
+    "note": {
+      "noteId": "66aa00000000000000000001",
+      "xsecToken": "ABsampleToken1=",
+      "type": "normal",
+      "title": "周末徒步路线整理（虚构样例）",
+      "desc": "第一段 5 公里，第二段 7 公里，补给点在半山亭。#徒步[话题]#",
+      "time": 1789000000000,
+      "lastUpdateTime": 1789000000000,
+      "ipLocation": "上海",
+      "user": { "userId": "5f0000000000000000000def", "nickname": "样例山友", "avatar": "" },
+      "interactInfo": { "likedCount": "512", "collectedCount": "1024", "commentCount": "36", "shareCount": "9" },
+      "tagList": [{ "id": "t3", "name": "徒步", "type": "topic" }],
+      "imageList": [
+        { "width": 1080, "height": 1440, "urlDefault": "https://sns-webpic-qc.xhscdn.com/sample/a!nd_dft_wlteh_webp_3", "urlPre": "https://sns-webpic-qc.xhscdn.com/sample/a!nd_prv_wlteh_webp_3",
+          "infoList": [{ "imageScene": "WB_DFT", "url": "https://sns-webpic-qc.xhscdn.com/sample/a!nd_dft_wlteh_webp_3" }] },
+        { "width": 1080, "height": 1440, "urlDefault": "https://sns-webpic-qc.xhscdn.com/sample/b!nd_dft_wlteh_webp_3", "urlPre": "", "livePhoto": true,
+          "stream": { "h264": [{ "masterUrl": "https://sns-video-bd.xhscdn.com/live/sample_b.mp4" }] } }
+      ]
+    }
+  }
+}
