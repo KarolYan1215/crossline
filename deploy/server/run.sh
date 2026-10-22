@@ -19,7 +19,7 @@ else
   assess_image="$registry/crossline-assess:$tag"; app_image="$registry/crossline-app:$tag"
   # The packages are private and the host keeps no registry login (a deploy logs in for its own pull and out again), so a restart by
   # hand cannot pull: it then runs the copy of the image already on this host instead of stopping (2026-10-16).
-  # A pull that stops moving is cut after eight minutes and started again, keeping the layers it finished. A deploy (which logs in and
+  # A pull that does not finish in 25 minutes is cut and started again once, keeping the layers it finished. A deploy (which logs in and
   # sets CROSSLINE_PULL_REQUIRED=1) retries any failed pull and, after three, fails instead of restarting on the old image unseen: the
   # first deploy with the fallback alone restarted everything on the old app image after a pull that ended in two seconds with no
   # message (2026-10-21). Before it, a pull left over from a cancelled deploy is stopped, and
@@ -31,10 +31,12 @@ else
   docker image prune -af 2>/dev/null | tail -1 || true
   required="${CROSSLINE_PULL_REQUIRED:-}"
   pull() {
-    for try in 1 2 3; do
-      timeout 480 docker pull "$1" && return 0 || code=$?
-      if [ "$code" = 124 ]; then echo "pull of $1 stalled for eight minutes (try $try of 3)"
-      elif [ "$required" = 1 ]; then echo "pull of $1 failed with exit $code (try $try of 3); $(df -h / | tail -1)"; sleep 10
+    # 25 minutes a try, two tries: the limit is on the whole pull, not on silence, and a 5.3 GB app image pulled whole (its base changed)
+    # took longer than eight minutes to extract on 2026-10-22, so three eight-minute tries cut the same extraction three times.
+    for try in 1 2; do
+      timeout 1500 docker pull "$1" && return 0 || code=$?
+      if [ "$code" = 124 ]; then echo "pull of $1 did not finish in 25 minutes (try $try of 2)"
+      elif [ "$required" = 1 ]; then echo "pull of $1 failed with exit $code (try $try of 2); $(df -h / | tail -1)"; sleep 10
       else break; fi
     done
     if [ "$code" = 124 ] || [ "$required" = 1 ]; then echo "pull of $1 did not finish; nothing restarted"; return 1; fi
