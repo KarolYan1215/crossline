@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore, saveMineVersion } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { currentMineVersion, mineSkillSettingKey, readMineSkill, type MilestoneGateResult } from "@crossline/core";
-import { createInsightCompiler, INSIGHT_COMPILER, linesAwaitingMineSkill, mineMaterials } from "./insight-compiler";
+import { createInsightCompiler, INSIGHT_COMPILER, linesAwaitingMineSkill, mineMaterials, mineMaterialsFingerprint } from "./insight-compiler";
 import { AGENT_SKILL, approveCategory, createAgentRunner } from "./agent-task";
 import { createMilestoneGate, MILESTONE_GATE_SKILL } from "./milestone-gate-runner";
 import { libraryMarketplacePath } from "./skill-library";
@@ -65,6 +65,30 @@ test("the compiled skill is a new version with its sources, an event, and nothin
   expect(mineMaterials(store, ws, "media").map((material) => material.kind)).toEqual(["review", "preference", "edit"]);
   expect(readMineSkill(store.getSetting(ws, mineSkillSettingKey("media")))!.versions.map((item) => item.by)).toEqual(["compiler", "person"]);
 });
+
+test("a line the compiler stopped on waits until its materials change, so it is not refused again and again", async () => {
+  const stop = JSON.stringify({ summary: "", rules: [], blockers: [{ code: "MINE_SKILL_BLOCKED", message: "材料只有课程安排，没有工作方式" }] });
+  const runtime = fakeRuntime([stop], INSIGHT_COMPILER);
+  expect(await createInsightCompiler(store, ws, "C:\\repo", () => runtime.rpc)()).toEqual({ blocked: "MINE_SKILL_BLOCKED", lineId: "media" });
+  expect(store.listEvents(ws, { type: "skill.mine.blocked" }).at(-1)?.payload).toMatchObject({ code: "MINE_SKILL_BLOCKED", fingerprint: expect.any(String) });
+  expect(linesAwaitingMineSkill(store, ws, new Date(Date.now() + 3 * 86_400_000))).toEqual([]);
+  // Something new the person says is new material: the line is due again.
+  store.addPreference({ workspaceId: ws, source: "correction", scope: "media", weight: 1, refId: "y", text: "开头先说结论", createdAt: new Date(Date.now() + 1000).toISOString() });
+  expect(linesAwaitingMineSkill(store, ws)).toEqual(["media"]);
+});
+
+test("a run that failed on the way is tried again on the same materials only after an hour", () => {
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, idempotencyKey: "fail", type: "skill.mine.blocked", entityId: "media",
+    payload: { lineId: "media", code: "SKILL_RUNTIME_FAILED", message: "", fingerprint: undefined, at: new Date().toISOString() } });
+  expect(linesAwaitingMineSkill(store, ws)).toEqual(["media"]);
+  const at = new Date();
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, idempotencyKey: "fail-2", type: "skill.mine.blocked", entityId: "media",
+    payload: { lineId: "media", code: "SKILL_RUNTIME_FAILED", message: "", fingerprint: fingerprintOf("media"), at: at.toISOString() } });
+  expect(linesAwaitingMineSkill(store, ws, new Date(at.getTime() + 10 * 60_000))).toEqual([]);
+  expect(linesAwaitingMineSkill(store, ws, new Date(at.getTime() + 61 * 60_000))).toEqual(["media"]);
+});
+
+const fingerprintOf = (line: string) => mineMaterialsFingerprint(mineMaterials(store, ws, line));
 
 test("a rule that cannot cite the person's words is sent back, and after the repairs only the sourced ones are kept", async () => {
   const invented = { ...play, text: "多用学术引用", quote: "要像论文一样严谨" };

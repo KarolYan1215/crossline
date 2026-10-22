@@ -13,6 +13,8 @@ export const INSIGHT_COMPILER = "crossline:crossline-insight-compiler";
 
 /** Facts alone change often during an interview; a rewrite on facts only waits this long after the last one. */
 const FACT_ONLY_REWRITE_HOURS = 24;
+/** A run that failed for any other reason than the model's own stop is tried again on the same materials after this long. */
+const FAILED_RETRY_HOURS = 1;
 const MAX_FACTS = 60;
 
 const INSTRUCTIONS = "Compile the person's own skill for this one line from the supplied materials, as the Skill describes: only how "
@@ -83,13 +85,20 @@ export const mineMaterialsFingerprint = (materials: Array<{ key: string; text: s
 /**
  * Lines whose skill is out of date with what the person has said since: the materials' fingerprint moved from the one the last compiled
  * version was made from. Something the person decided (a review note, a correction, a gate 「部分」, an edit) rewrites at once; facts alone
- * at most once a day, and a line with neither nothing new to say nor three confirmed facts is left alone.
+ * at most once a day, and a line with neither nothing new to say nor three confirmed facts is left alone. A line the compiler last
+ * stopped on (its `*_BLOCKED`: the materials say nothing about how the work is done) waits until they change, and one whose run failed
+ * waits an hour: on 2026-10-21 one line was refused 13 times in a day on the same 7,440 input tokens, and as the first line waiting it
+ * kept every later line from being compiled.
  */
 export function linesAwaitingMineSkill(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
   return identityLines(store, workspaceId).filter((line) => {
     const materials = mineMaterials(store, workspaceId, line.id);
     const decided = materials.filter((material) => material.kind !== "fact");
     if (!decided.length && materials.length < 3) return false;
+    const blocked = store.listEvents(workspaceId, { type: "skill.mine.blocked", entityId: line.id }).at(-1)?.payload as
+      { fingerprint?: string; code?: string; at?: string } | undefined;
+    if (blocked?.fingerprint && blocked.fingerprint === mineMaterialsFingerprint(materials)
+      && (blocked.code?.endsWith("_BLOCKED") || now.getTime() - Date.parse(blocked.at ?? "") < FAILED_RETRY_HOURS * 3_600_000)) return false;
     const stored = readMineSkill(store.getSetting(workspaceId, mineSkillSettingKey(line.id)));
     // A version the person wrote or brought back stays in force until they decide something new; facts alone never replace it.
     const current = currentMineVersion(stored);
@@ -135,7 +144,8 @@ export function createInsightCompiler(store: CrosslineStore, workspaceId: string
     });
     if (!result.ok) {
       store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.mine:blocked:${target}:${now.getTime()}`,
-        type: "skill.mine.blocked", entityId: target, payload: { lineId: target, code: result.blocker.code, message: result.blocker.message.slice(0, 400) } });
+        type: "skill.mine.blocked", entityId: target, payload: { lineId: target, code: result.blocker.code, message: result.blocker.message.slice(0, 400),
+          fingerprint: mineMaterialsFingerprint(materials), at: now.toISOString() } });
       return { blocked: result.blocker.code, lineId: target };
     }
     const dropped: string[] = [];
