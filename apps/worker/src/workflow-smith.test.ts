@@ -1,14 +1,15 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
-import { CrosslineStore, consentToGrownSkill, createReminderWorkflow, grownHomeLine, readGrownSkills, requestWorkflow, updateGrownSkill } from "@crossline/db";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { CrosslineStore, consentToGrownSkill, createReminderWorkflow, grownHomeLine, readGrownSkills, recordGrownLogin, requestWorkflow, updateGrownSkill } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { validateWorkflowManifest } from "@crossline/core";
 import { librarySelection, type AgentOutcome, type AgentTaskInput } from "./agent-task";
 import type { OpenSite, SiteReader } from "./site-reader";
-import { cleanGrownSkills, collectionDone, configureFavouritesCollector, finishWorkflowLogin, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR,
-  startWorkflowRun, workflowSchedulePass } from "./workflow-smith";
+import { cleanGrownSkills, collectionDone, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR,
+  startWorkflowRun, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
+import { createRemoteBrowsers } from "./remote-browser";
 import { readCollectLedger, type CollectDriver } from "./favourites-reader";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
@@ -327,6 +328,37 @@ test("「我已登录」 closes a login window the browser kept running in the b
   expect(finishWorkflowLogin(store, ws, "flow-xhs", "微博")).toMatchObject({ ok: false });
 });
 
+test("with no screen of its own the login is the server's browser in a dialog: a run waits for it, and 「登录完成」 records it", async () => {
+  vi.stubEnv("CROSSLINE_LOGIN_MODE", "remote");
+  try {
+    favouritesRecord({ loginBrowsers: { 小红书: "C:\\Program Files\\chrome.exe" } });
+    const profiles = path.join(root, "p");
+    const opened: string[] = [];
+    const remote = createRemoteBrowsers({ resolve: (workspaceId, id, service) => workflowLoginTarget(store, workspaceId, id, service, profiles),
+      onLoggedIn: (workspaceId, id, service) => recordGrownLogin(store, workspaceId, id, service, new Date(), ""),
+      open: async ({ profileDir }) => { opened.push(profileDir); return { start: async () => {}, goto: async () => {}, mouse: async () => {}, wheel: async () => {}, text: async () => {},
+        key: async () => {}, back: async () => {}, reload: async () => {}, url: () => "https://www.xiaohongshu.com/", title: async () => "", sessionCookies: async () => [], close: async () => {} }; },
+      memory: () => undefined, isPublicHost: async () => true });
+    configureRemoteLogin(remote);
+    let launched = false;
+    expect(await openWorkflowLogin(store, ws, "flow-xhs", "小红书", profiles, { browser: "x", launch: () => { launched = true; return { close: () => {} }; } }, { width: 390, height: 700 }))
+      .toEqual({ ok: true, remote: true });
+    expect(launched).toBe(false);
+    expect(opened).toEqual([path.join(profiles, "xiaohongshu.com")]);
+    const run = (input: AgentTaskInput & { taskId: string }) => ({ state: "started" as const, taskId: input.taskId });
+    expect(startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, profiles)).toMatchObject({ state: "blocked", code: "LOGIN_WINDOW_OPEN" });
+    expect(await finishWorkflowLogin(store, ws, "flow-xhs", "小红书")).toEqual({ ok: true });
+    expect(readGrownSkills(store, ws)[0]!.logins?.["小红书"]).toBeTruthy();
+    // On the server the run reads with the server's own browser, never a path recorded on the person's computer.
+    const inputs: Array<AgentTaskInput & { taskId: string }> = [];
+    let profileBrowser = "";
+    expect(startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, (input) => { inputs.push(input); return run(input); }, profiles, new Date(), "",
+      async (_dir, browser) => { profileBrowser = browser; return { read: async (url) => ({ url, title: "", text: "", status: 200, links: [] }), close: async () => {} }; }).state).toBe("started");
+    await (inputs[0] as unknown as { reader: SiteReader }).reader.tools.call("site_read", { service: "小红书", url: "https://www.xiaohongshu.com/explore" });
+    expect(profileBrowser).toBe("");
+  } finally { configureRemoteLogin(undefined); vi.unstubAllEnvs(); }
+});
+
 test("a run reading an account opens each page once and stops at a security check; stopped there, the person is told not to run it again soon", () => {
   store.setSetting(ws, "skills.grown", JSON.stringify([{ id: "flow-xhs", kind: "grown", name: "xhs", description: "d", lines: ["media"], category: "files_calendar_prep",
     manifest: favourites, origin: { kind: "asked", text: "t", requestId: "r" }, taskId: "", files: [], scan: { risk: "low", injection: false, findings: [] },
@@ -377,9 +409,10 @@ test("a run whose pages listed nothing is partial and points at the login; one t
   expect(runs[1]!.what).toContain("本期只整理上期之后新增的，按条目链接去重");
   expect(await readFavourites(1)).toMatchObject({ ok: true, items: 0 });
   after!({ ...done("flow-2", root), summary: { needsHuman: [] } } as unknown as AgentOutcome);
-  expect(said().at(-1)).toBe("本期「每周日整理小红书收藏夹，按主题归类并列出可删的重复项」只做了一部分：这次没读到收藏（上期读到 2 条），可能需要重新登录或页面改版。请在设置里点「登录」重新登录，关掉窗口后再点「立即运行」。");
+  expect(said().at(-1)).toBe("本期「每周日整理小红书收藏夹，按主题归类并列出可删的重复项」只做了一部分：这次没读到收藏（上期读到 2 条），可能需要重新登录或页面改版。请在设置里点「登录」重新登录，点「登录完成」后再点「立即运行」。");
   const card = store.listRecentNudges(ws, "2000-01-01T00:00:00Z").at(-1)!.payload.card as { clarify: { options: Array<{ label: string; href?: string }> } };
-  expect(card.clarify.options).toContainEqual(expect.objectContaining({ label: "去登录", href: "/settings#skills" }));
+  // 「去登录」 opens the login of this workflow at once (a dialog on the hosted beta).
+  expect(card.clarify.options).toContainEqual(expect.objectContaining({ label: "去登录", href: "/settings?login=flow-xhs#skills" }));
   // The baseline stays the last run that read something.
   expect(readGrownSkills(store, ws)[0]!.lastRead).toMatchObject({ taskId: "flow-1", items: 2 });
   expect(store.listEvents(ws, { type: "skill.grown.result" }).map((event) => (event.payload as { outcome: string }).outcome)).toEqual(["done", "partial"]);

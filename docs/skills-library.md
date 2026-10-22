@@ -89,7 +89,7 @@
 - **找接口是生长任务的一部分**：助手先联网查清能用的接口并写进 SKILL.md——优先官方 API 或官方导出，其次平台允许的工具，最后才是在本人登录的浏览器里读取页面；不向本人要密码或 Cookie，不用来路不明的代抓服务。
 - **清单里写明读什么、风险是什么**：`workflow.json` 的 `access`（每个网站的名称、https 地址、是否要登录、怎么读）与 `risks`（是否违反平台协议、账号可能受限、验证码、页面改版失效、数据存在本机哪里）。声明了 `access` 的工作流，扫描里的「联网」照记但不再压成只用文字；删除、出目录、凭据、系统、下载执行仍然压。
 - **本人同意之前不运行**：这类工作流装好后是「待本人确认风险」（`needs_consent`），通知里列出风险；设置 → Skill 库里点「接受风险并启用」（`consentToGrownSkill`，`skill.grown.consented` 记下当时看到的读取范围与风险）才启用。普通的「启用」开关不能绕过它。
-- **登录由本人在单独的浏览器窗口里完成**：「登录小红书」让 worker 用 Edge（或 Chrome，`CROSSLINE_LOGIN_BROWSER` 可指定）打开该网站，配置目录是 Crossline 自己的（`%LOCALAPPDATA%\Crossline\browser-profiles\<工作区>\<站点>`，在备份数据目录之外），不碰本人日常浏览器；本人自己扫码或输入，系统不代填。关掉窗口即记为已登录（`skill.grown.logged_in`）；窗口开着时运行会等。
+- **登录由本人在单独的浏览器窗口里完成**（托管站上是服务器上的浏览器画面，见下文「托管版登录」）：「登录小红书」让 worker 用 Edge（或 Chrome，`CROSSLINE_LOGIN_BROWSER` 可指定）打开该网站，配置目录是 Crossline 自己的（`%LOCALAPPDATA%\Crossline\browser-profiles\<工作区>\<站点>`，在备份数据目录之外），不碰本人日常浏览器；本人自己扫码或输入，系统不代填。关掉窗口即记为已登录（`skill.grown.logged_in`）；窗口开着时运行会等。
 - **执行**：定时到点或点「立即运行」时，助手拿到配置目录与浏览器程序，交给工作流的脚本（`--profile`、`--browser`，Playwright `launch_persistent_context`），只读、放慢；不读不复制配置目录里的文件，不在账号里做任何改动（移动、取消收藏、点赞、评论、发布都是本人的步骤）。发现未登录就停下并报「需要登录」，系统给本人发「去登录」。
 - **文件夹输入**：清单的 `inputs` 里本人给出的绝对路径（例如素材文件夹）在执行时作为只读输入交给助手。
 - **每期接着上期做**（2026-10-19）：读到内容的一期把产出目录和读到内容的页面（含切换的标签）记在工作流上（`lastRead`），下一期作为只读输入与指定页面交给助手，只整理新增的；页面上一条也没列出时这一期记为 partial 并请本人重新登录，不说「已做好」。详见下文「收藏 0 条也报已做好之后」。
@@ -239,6 +239,19 @@
 - 不再按平台一律拒绝：`NO_AUTOMATED_READING` 与 `site_read` 的 `forbidden` 选项已删除，社交平台和其他需要登录的网站一样，读取与否由工作流声明、本人看过风险后同意决定。
 - 设计在先：生长工作流涉及社交平台时，先联网查清该平台对自动化工具和 AI 使用账号的规定（用户协议、社区规范、近期治理公告）以及有没有官方 API／导出，把规定和来源写进 SKILL.md；有官方途径就用；没有时可在本人登录的浏览器里读，但 risks 必须如实写明平台规定和后果（限流、封禁），本人在「接受风险并启用」时看到。
 - 不变的边界：不伪装浏览器、不改指纹、不打 webdriver 补丁、不用 stealth 插件；不伪造 x-s/x-t 签名、不自己调用或重放网站的 API；不用代理；不过验证码；不做改动账号的事。浏览器窗口始终可见，遇到安全验证就停。
+
+## 托管版登录（2026-10-22）
+
+托管站（app.crossline.lol，Linux 容器，没有屏幕）上的人也要能登录需要本人账号的网站：小红书、Canvas（UW 单点登录加 Duo），以及任何工作流在 `access` 里声明要登录的网站。本人定的做法：浏览器运行在服务器上，画面以弹窗形式放进 Crossline 页面，本人在弹窗里点击和输入，如同在本地页面上操作；登录状态留在服务器上的这个浏览器配置目录里，之后的读取（`site_read`、收藏读取）在服务器上用同一配置目录无界面运行。本人接受网站看到的是服务器在香港数据中心的地址。
+
+- **用哪条路**（`apps/worker/src/browser-launch.ts` `loginMode`）：worker 没有自己的屏幕时用弹窗——`CROSSLINE_PUBLIC_BETA=1`，或 Linux 上没有 `DISPLAY`/`WAYLAND_DISPLAY`；`CROSSLINE_LOGIN_MODE=remote|local` 可强制。本人电脑上的副本照旧打开可见的浏览器窗口（`openWorkflowLogin`）。判断只在 worker 一处：「登录」请求在服务器上答 `remote: true`，页面据此打开弹窗。
+- **服务器上的浏览器**（`apps/worker/src/remote-browser.ts`）：Playwright 的无界面 Chromium，`launchPersistentContext` 打开读取用的同一配置目录；CDP `Page.startScreencast` 推 JPEG 画面（质量 60，最新一帧留在内存），页面每 400 毫秒取一次比已有更新的画面（`GET /api/remote-browser/frame?after=<序号>`）。点击、滚轮、按键和文字由 `POST /api/remote-browser` 送回：坐标按画面比例传，服务器换算成浏览器像素（`toViewport`）；文字用 `insertText`（输入法、粘贴都可用），按键只收回车、退格、Tab、方向键等一小组。输入的内容不记日志、不保存、不回显。网站另开的窗口（登录弹窗）开着时显示它，关掉后回到原页面。
+- **只能访问公开网站**：这个浏览器的每个请求（页面、框架、脚本、WebSocket）都检查：只许 https、默认端口、真实域名且解析结果全是公网地址（`remoteUrlAllowed`）；禁用 service worker，不许下载。否则网页可以让服务器上的浏览器访问服务器自己的端口（worker 的 supervisor 就在本机）。单点登录途经的公开网站（login.wisc.edu、Duo）都能过。
+- **限制**：每个工作区同时一个；整台服务器默认同时一个（`CROSSLINE_REMOTE_BROWSERS`）；worker 内存超过高水位线（75%）时不开；10 分钟没有操作、2 分钟没有弹窗来取画面（页面关了）、或开满 30 分钟即关闭，关闭不算登录。弹窗开着时工作流不运行（`LOGIN_WINDOW_OPEN`），读取和收藏任务也不会同时打开这个配置目录（`apps/worker/src/profile-locks.ts`，三者互斥）。
+- **登录完成**：与本地窗口同一条路（`login_done`），浏览器关闭、记 `skill.grown.logged_in`。很多单点登录的会话 Cookie 没有过期时间，浏览器一关就丢，所以关闭时写到配置目录旁（`crossline-session-cookies.json`，仅本人账号自己的 Cookie），读取打开时放回。「去登录」消息链接 `/settings?login=<工作流>#skills`，打开即开始登录。
+- **服务器上的读取**：`site_read` 与收藏读取在服务器上无界面运行（`readerLaunchOptions`），用服务器自己的 Chromium，不用在本人电脑上记下的浏览器路径。边界不变：不伪装（不改 user agent、不加隐身插件、不改 webdriver 标记，无界面浏览器照实报自己是无界面的）、不用代理、不代做验证码（验证码由本人在弹窗里完成）、遇安全验证即停。
+- **镜像与内存**：镜像装 Playwright 对应版本的 Chromium headless shell（`PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`，构建时启动一次确认能用）和文泉驿微米黑（约 5 MB，中文登录页不至于显示成方框），镜像约增大 300 MB。一页 Chromium 约 150–250 MB，算在 worker 的内存上限里，没有另加；靠同时只开一个、高水位线不开、模型闸门在高水位时暂停新运行来保护。
+- **尚未在服务器上真实验证**：本机用真实 Chromium（无界面）跑通了打开、画面、点击、输入、后退、私网地址被拦、登录完成与 Cookie 保存；服务器镜像的构建、在服务器上完成一次真实登录（小红书扫码、Canvas 的 Duo）还没做。
 
 ## 收藏全量读取（2026-10-22）
 

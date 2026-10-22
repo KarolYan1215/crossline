@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AI_TOOL_KIND_LABEL, type AiTool, type AiToolKind } from "@crossline/core";
 import { Markdown } from "../ui/markdown";
 import { Clamp } from "../ui/clamp";
 import { LineTag, Tag } from "../ui/tag";
 import { SetupGuide } from "../ui/setup-guide";
+import { RemoteLogin, remoteWindowSize } from "../ui/remote-login";
 import { SKILL_LINK_GUIDE } from "../../lib/setup-guides";
 import type { GrownSkillView, MineSkillView, PublicSkillView, ScriptsView, SkillLibraryView } from "../../lib/skill-library";
 
@@ -49,6 +50,13 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
   const [query, setQuery] = useState("");
   // An item opened from 「最近用过」 or 「待确认」 is shown open.
   const [focus, setFocus] = useState<string | undefined>();
+  // 「去登录」 in a message leads here with `?login=<workflow>`: that workflow is shown open and its login started.
+  const [autoLogin, setAutoLogin] = useState<string | undefined>();
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("login");
+    if (!wanted || !library.grown.some((flow) => flow.id === wanted)) return;
+    setKind("grown"); setFocus(wanted); setAutoLogin(wanted);
+  }, [library.grown]);
   const searching = query.trim().length > 0;
   const listed = (which: Kind) => searching || kind === "all" || kind === which;
   const all = kind === "all";
@@ -95,7 +103,7 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
       <header><h3>生长的工作流 · {grown.length}</h3><small>同类的事采纳过两次，或在输入框里说「以后都这样做」「每周五提醒」，助手会把它写成工作流，建好后通知；发出、发布一类的步骤始终由本人完成</small></header>
       {library.growing > 0 && <p className="st-note">{library.growing} 个工作流正在生成，建好后会通知。</p>}
       {grown.length === 0 ? <p className="muted">尚无。</p>
-        : <ul className="sk-publics">{grownShown.map((flow) => <GrownFlow key={`${flow.id}:${kind}`} flow={flow} shell={library.shell} open={all || focus === flow.id}
+        : <ul className="sk-publics">{grownShown.map((flow) => <GrownFlow key={`${flow.id}:${kind}`} flow={flow} shell={library.shell} open={all || focus === flow.id} autoLogin={autoLogin === flow.id}
           onChanged={(next) => setGrown((items) => next ? items.map((item) => item.id === next.id ? next : item) : items.filter((item) => item.id !== flow.id))} />)}</ul>}
     </section>}
     {listed("public") && (!searching || publicShown.length > 0) && <section className="st-card st-card-wide" aria-label="公开 skills">
@@ -227,19 +235,37 @@ function ScriptsConsent({ view, shell, endpoint, onChanged }: { view: ScriptsVie
   </div>;
 }
 
-function GrownFlow({ flow, shell, open, onChanged }: { flow: GrownSkillView; shell: boolean; open: boolean; onChanged: (flow: GrownSkillView | undefined) => void }) {
+function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSkillView; shell: boolean; open: boolean; autoLogin?: boolean; onChanged: (flow: GrownSkillView | undefined) => void }) {
   const [note, setNote] = useState("");
   const send = async (method: "POST" | "DELETE", body?: object) => fetch(`/api/skills/grown/${encodeURIComponent(flow.id)}`,
     { method, headers: { "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) }).then((response) => response.ok).catch(() => false);
   // 「登录」 and 「立即运行」 are carried out by the worker; its refusal says why in words.
-  const act = async (body: object, success: string): Promise<{ ok: boolean; code?: string }> => {
+  const act = async (body: object, success: string): Promise<{ ok: boolean; code?: string; remote?: boolean }> => {
     const result = await fetch(`/api/skills/grown/${encodeURIComponent(flow.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-      .then((response) => response.json() as Promise<{ ok: boolean; code?: string; message?: string }>).catch(() => ({ ok: false, message: "未完成" }));
-    setNote(result.ok ? success : result.message || "未完成");
+      .then((response) => response.json() as Promise<{ ok: boolean; code?: string; message?: string; remote?: boolean }>)
+      .catch((): { ok: boolean; code?: string; message?: string; remote?: boolean } => ({ ok: false, message: "未完成" }));
+    setNote(result.ok ? (result.remote ? "" : success) : result.message || "未完成");
     return result;
   };
   // Services whose login window this page opened: 「我已登录」 closes it and records the login.
   const [opened, setOpened] = useState<string[]>([]);
+  // A login opened as the server's browser (the hosted beta has no screen to open a window on): shown here in a dialog.
+  const [remote, setRemote] = useState<string | undefined>();
+  const login = async (service: string) => {
+    setNote(`正在打开${service}的登录窗口`);
+    const size = remoteWindowSize(window.innerWidth, window.innerHeight);
+    const result = await act({ action: "login", service, ...size }, `已打开${service}的登录窗口：在窗口里自己登录，登录后点「我已登录${service}」`);
+    if (result.ok && result.remote) setRemote(service);
+    else if (result.ok || result.code === "LOGIN_WINDOW_OPEN") setOpened((all) => [...all, service]);
+  };
+  const started = useRef(false);
+  useEffect(() => {
+    if (!autoLogin || started.current || flow.status !== "active") return;
+    const site = flow.access.find((item) => item.login && !item.loggedInAt) ?? flow.access.find((item) => item.login);
+    if (!site) return;
+    started.current = true;
+    void login(site.service);
+  });
   const verdict = VERDICT[flow.verdict];
   const person = flow.steps.filter((step) => step.person);
   const waiting = flow.status === "needs_consent";
@@ -262,11 +288,9 @@ function GrownFlow({ flow, shell, open, onChanged }: { flow: GrownSkillView; she
               onChanged({ ...flow, access: flow.access.map((one) => one.service === item.service ? { ...one, loggedInAt: new Date().toISOString() } : one) });
             }
           }}>我已登录{item.service}</button>
-          : <button key={item.service} type="button" className="secondary-button" onClick={async () => {
-            // A window opened from another page or tab is still open: offer 「我已登录」 here too.
-            const result = await act({ action: "login", service: item.service }, `已打开${item.service}的登录窗口：在窗口里自己登录，登录后点「我已登录${item.service}」`);
-            if (result.ok || result.code === "LOGIN_WINDOW_OPEN") setOpened((all) => [...all, item.service]);
-          }}>{item.loggedInAt ? `重新登录${item.service}` : `登录${item.service}`}</button>)}
+          // A window opened from another page or tab is still open: offer 「我已登录」 here too.
+          : <button key={item.service} type="button" className="secondary-button" onClick={() => { void login(item.service); }}>
+            {item.loggedInAt ? `重新登录${item.service}` : `登录${item.service}`}</button>)}
         {flow.status === "active" && flow.action === "run" && <button type="button" className="secondary-button"
           onClick={() => { void act({ action: "run" }, "已交给助手，做好后通知"); }}>立即运行</button>}
         <button type="button" className="secondary-button" aria-pressed={flow.pinned} onClick={async () => {
@@ -298,6 +322,11 @@ function GrownFlow({ flow, shell, open, onChanged }: { flow: GrownSkillView; she
     <ScriptsConsent view={flow} shell={shell} endpoint={`/api/skills/grown/${encodeURIComponent(flow.id)}`}
       onChanged={(allowedAt) => { const { scriptsAllowedAt: _was, ...rest } = flow; onChanged(allowedAt ? { ...rest, scriptsAllowedAt: allowedAt } : rest); }} />
     {note && <p role="status" className="st-note">{note}</p>}
+    {remote && <RemoteLogin target={{ workflowId: flow.id, service: remote }} label={remote} onClose={(loggedIn) => {
+      setRemote(undefined);
+      setNote(loggedIn ? `已记下${remote}的登录` : "");
+      if (loggedIn) onChanged({ ...flow, access: flow.access.map((one) => one.service === remote ? { ...one, loggedInAt: new Date().toISOString() } : one) });
+    }} />}
   </details></li>;
 }
 

@@ -55,6 +55,9 @@ fi
 #             MemTotal; idle, the system itself (docker, Caddy, the cloud agent) held ~590 MB, and it keeps an 8 GB swap file the containers
 #             may not use. The fifth runtime was the owner's call on 2026-10-17; web gave back 50 MB (its renders peak near 330 MB)
 #   below:    worker 550m (2, 2), web 400m (2), assess 300m (2) — 1.25 GB on the 1.6 GB host
+# The worker's ceiling also holds the server's login browser and the readers of sites behind a login (headless Chromium, ~150–250 MB a
+# page; apps/worker/src/remote-browser.ts, 2026-10-22). No room is set aside for them: one login browser at a time (CROSSLINE_REMOTE_BROWSERS),
+# none started above the 75% mark, and the model gate already holds new runs while one is open. Raise the worker only if `worker.memory` shows it.
 host_mb=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
 # 录音在服务器转写 (docs/phone-recording.md 「服务器转写」): with CROSSLINE_SERVER_TRANSCRIBE=1 in app.env, on a host of 3.2 GB or more, a
 # fourth container runs SenseVoice at night on one CPU. Measured on 2026-10-20: a 29-minute recording with 9 minutes of speech peaked at

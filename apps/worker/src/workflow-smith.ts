@@ -19,6 +19,9 @@ import { createSiteReader, SITE_PAGES_PER_RUN, SITE_SCROLLS_MAX, type OpenSite }
 import { COLLECT_BREAKER_DAYS, collectFavourites, collectFolder, collectPausedUntil, favouritesAccess, markOrganised, openCollectBrowser, readCollectLedger,
   type CollectDriver, type CollectResult } from "./favourites-reader";
 import { describeNotes, type NoteMediaDeps } from "./note-media";
+import { loginMode } from "./browser-launch";
+import { HOLDER_WORDS, holdProfile, profileHolder, releaseProfile } from "./profile-locks";
+import type { RemoteBrowsers } from "./remote-browser";
 
 /**
  * Grown workflows (docs/skills-library.md §6): the assistant fixes an errand the person keeps having done — or one they asked for in words —
@@ -298,6 +301,30 @@ const LOGIN_FLAGS = ["--no-first-run", "--no-default-browser-check", "--disable-
 type RunFree = (input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void) => DispatchResult;
 /** Login windows still open, by workflow: a run would find the profile in use, so it waits; 「我已登录」 closes the window. */
 const openLogins = new Map<string, { service: string; browser: string; close: () => void }>();
+/**
+ * The server's login browsers (`remote-browser.ts`), set by the worker at start where there is no screen of its own (`loginMode`):
+ * 「登录」 then opens a browser on the server streamed into a dialog on the page, instead of a window on this machine's desktop.
+ */
+let remoteLogins: RemoteBrowsers | undefined;
+export function configureRemoteLogin(remote: RemoteBrowsers | undefined): void { remoteLogins = remote; }
+const remoteLogin = () => remoteLogins && loginMode() === "remote" ? remoteLogins : undefined;
+/** A login for this workflow is open, as a window here or as the server's browser: its profile is in use, so a run waits. */
+const loginOpen = (workspaceId: string, id: string) => openLogins.has(`${workspaceId}:${id}`) || Boolean(remoteLogins?.isOpen(workspaceId, id));
+/** A collection of this workflow is under way (its browser holds the profile): a login waits for it. */
+export const workflowCollecting = (workspaceId: string, id: string) => collecting.has(`${workspaceId}:${id}`);
+/** Where a login for one of a workflow's declared sites lives and opens, or why it cannot (shared with the server's login browsers). */
+export function workflowLoginTarget(store: CrosslineStore, workspaceId: string, id: string, service: string, profilesRoot: string):
+  { profileDir: string; site: string; label: string } | { code: string; message: string } {
+  const record = readGrownSkills(store, workspaceId).find((item) => item.id === id);
+  const access = record ? workflowAccess(record).access.find((item) => item.service === service && item.login) : undefined;
+  if (!record || !access) return { code: "WORKFLOW_ACCESS_NOT_FOUND", message: "这个工作流不需要登录这个网站。" };
+  return { profileDir: accessProfileDir(profilesRoot, access), site: access.site, label: access.service };
+}
+/** The browser a run reads a service with: on a server always the server's own (a path recorded on the person's computer means nothing there). */
+const readerBrowser = (record: GrownSkillRecord, service: string, fallback: string | undefined) =>
+  (loginMode() === "remote" ? fallback : record.loginBrowsers?.[service] || fallback) || "";
+/** Where 「去登录」 leads: the workflow's card in 设置 → Skill 库, which opens the login at once (a dialog on the hosted beta). */
+export const loginHref = (id: string) => `/settings?login=${encodeURIComponent(id)}#skills`;
 
 /**
  * 「登录」: opens the service's site in a browser window of its own (its own profile folder), for the person to log in themselves. Nothing
@@ -305,11 +332,16 @@ const openLogins = new Map<string, { service: string; browser: string; close: ()
  * recorded with the browser it was made in (the run must read with the same one).
  */
 export function openWorkflowLogin(store: CrosslineStore, workspaceId: string, id: string, service: string, profilesRoot: string,
-  deps: { launch?: (browser: string, args: string[], onExit: () => void) => { close: () => void }; browser?: string; now?: () => Date } = {}):
-  { ok: true } | { ok: false; code: string; message: string } {
+  deps: { launch?: (browser: string, args: string[], onExit: () => void) => { close: () => void }; browser?: string; now?: () => Date } = {},
+  viewport: { width?: unknown; height?: unknown } = {}):
+  { ok: true } | { ok: false; code: string; message: string } | Promise<{ ok: true; remote: true } | { ok: false; code: string; message: string }> {
   const record = readGrownSkills(store, workspaceId).find((item) => item.id === id);
   const access = record ? workflowAccess(record).access.find((item) => item.service === service && item.login) : undefined;
   if (!record || !access) return { ok: false, code: "WORKFLOW_ACCESS_NOT_FOUND", message: "这个工作流不需要登录这个网站。" };
+  // No screen here: the login browser runs on the server and the page shows it in a dialog.
+  const remote = remoteLogin();
+  if (remote) return remote.start(workspaceId, { workflowId: id, service, ...viewport })
+    .then((result) => result.ok ? { ok: true as const, remote: true as const } : { ok: false as const, code: result.code, message: result.message });
   const browser = deps.browser ?? loginBrowser();
   if (!browser) return { ok: false, code: "LOGIN_BROWSER_MISSING", message: "这台电脑上没有找到可用的浏览器。" };
   const key = `${workspaceId}:${id}`;
@@ -337,10 +369,15 @@ export function openWorkflowLogin(store: CrosslineStore, workspaceId: string, id
 }
 
 /** 「我已登录」: the person says they are done; the window (and any browser it left running) is closed and the login recorded. */
-export function finishWorkflowLogin(store: CrosslineStore, workspaceId: string, id: string, service: string, now = new Date()): { ok: true } | { ok: false; code: string; message: string } {
+export function finishWorkflowLogin(store: CrosslineStore, workspaceId: string, id: string, service: string, now = new Date()):
+  { ok: true } | { ok: false; code: string; message: string } | Promise<{ ok: true } | { ok: false; code: string; message: string }> {
   const record = readGrownSkills(store, workspaceId).find((item) => item.id === id);
   if (!record || !workflowAccess(record).access.some((item) => item.service === service && item.login))
     return { ok: false, code: "WORKFLOW_ACCESS_NOT_FOUND", message: "这个工作流不需要登录这个网站。" };
+  // The server's browser closes with its cookies kept in the profile; the login is recorded by its `onLoggedIn` (`recordGrownLogin`).
+  const remote = remoteLogin();
+  if (remote?.isOpen(workspaceId, id)) return remote.finish(workspaceId, id, service)
+    .then((result) => result.ok ? { ok: true as const } : { ok: false as const, code: result.code, message: result.message });
   const open = openLogins.get(`${workspaceId}:${id}`);
   openLogins.delete(`${workspaceId}:${id}`);
   open?.close();
@@ -356,7 +393,7 @@ export function finishWorkflowLogin(store: CrosslineStore, workspaceId: string, 
  */
 export function startWorkflowRun(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, runFree: RunFree, profilesRoot: string,
   now = new Date(), fallbackBrowser = loginBrowser(), openSite?: OpenSite): DispatchResult {
-  if (openLogins.has(`${workspaceId}:${record.id}`)) return { state: "blocked", code: "LOGIN_WINDOW_OPEN", message: "登录窗口还开着；登录后关掉它再运行。" };
+  if (loginOpen(workspaceId, record.id)) return { state: "blocked", code: "LOGIN_WINDOW_OPEN", message: "登录窗口还开着；登录后关掉它再运行。" };
   // The person's Xiaohongshu favourites are read whole by Crossline's own job (favourites-reader.ts), then organised by the assistant.
   const favourites = favouritesCollector ? favouritesAccess(record) : undefined;
   if (favourites && favouritesCollector) return startFavouritesRun(store, workspaceId, record, runFree, profilesRoot, now, fallbackBrowser, favourites, favouritesCollector);
@@ -372,7 +409,7 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
   // the first real run, given the profile and told to be gentle, opened every note and re-checked every link until the site's
   // security check came up again and again (2026-10-14). The reader holds the rules in code; the words below only explain them.
   const reader = access.some((item) => item.login) ? createSiteReader(store, workspaceId, record,
-    (item) => ({ dir: accessProfileDir(profilesRoot, item), browser: record.loginBrowsers?.[item.service] || fallbackBrowser || "" }),
+    (item) => ({ dir: accessProfileDir(profilesRoot, item), browser: readerBrowser(record, item.service, fallbackBrowser) }),
     { notify: (text) => sayToPerson(store, workspaceId, text, "workflow_done", `breaker:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: "去看结果", href: "/approvals#assistant" }]),
       ...(openSite ? { open: openSite } : {}) }) : undefined;
   const accountRules = access.length ? [
@@ -397,8 +434,8 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
   (outcome) => {
     const login = outcome.state === "done" ? outcome.summary.needsHuman.find((item) => item.what.startsWith("需要登录"))?.what : undefined;
     if (login) {
-      sayToPerson(store, workspaceId, `「${record.manifest.summary}」这次没读到：${login}。请在设置里点「登录」，在弹出的窗口里登录后关掉窗口，再点「立即运行」。`,
-        "workflow_login", `login:${record.id}:${day}`, [{ label: "去登录", href: "/settings#skills" }]);
+      sayToPerson(store, workspaceId, `「${record.manifest.summary}」这次没读到：${login}。请在设置里点「登录」，在弹出的窗口里登录后点「登录完成」，再点「立即运行」。`,
+        "workflow_login", `login:${record.id}:${day}`, [{ label: "去登录", href: loginHref(record.id) }]);
       return;
     }
     // Stopped at the site's security check: what was read is still delivered, and the person is told not to run it again soon.
@@ -417,8 +454,8 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
       recordWorkflowResult(store, workspaceId, record.id, outcome.taskId, found.items ? "done" : "partial", found.items, previous);
       if (!found.items) {
         const noun = /收藏/.test(record.manifest.summary) ? "收藏" : "内容";
-        sayToPerson(store, workspaceId, `本期「${record.manifest.summary}」只做了一部分：这次没读到${noun}${previous ? `（上期读到 ${previous} 条）` : ""}，可能需要重新登录或页面改版。请在设置里点「登录」重新登录，关掉窗口后再点「立即运行」。`,
-          "workflow_login", `empty:${record.id}:${outcome.taskId}`, [{ label: "去登录", href: "/settings#skills" }, { label: "去看结果", href: "/approvals#assistant" }]);
+        sayToPerson(store, workspaceId, `本期「${record.manifest.summary}」只做了一部分：这次没读到${noun}${previous ? `（上期读到 ${previous} 条）` : ""}，可能需要重新登录或页面改版。请在设置里点「登录」重新登录，点「登录完成」后再点「立即运行」。`,
+          "workflow_login", `empty:${record.id}:${outcome.taskId}`, [{ label: "去登录", href: loginHref(record.id) }, { label: "去看结果", href: "/approvals#assistant" }]);
         return;
       }
       rememberRead(store, workspaceId, record.id, { at: new Date().toISOString(), taskId: outcome.taskId, directory: outcome.directory, items: found.items, pages: found.pages });
@@ -455,7 +492,10 @@ function startFavouritesRun(store: CrosslineStore, workspaceId: string, record: 
   if (collecting.has(key)) return { state: "blocked", code: "COLLECTING", message: "上一次读取收藏还没结束。" };
   const paused = collectPausedUntil(store, workspaceId, now);
   if (paused) return { state: "blocked", code: "SITE_PAUSED", message: `小红书遇到过安全验证，${paused.slice(0, 16).replace("T", " ")} 前不再读取。` };
-  const browser = record.loginBrowsers?.[access.service] || fallbackBrowser || "";
+  const browser = readerBrowser(record, access.service, fallbackBrowser);
+  // A login to the site open (the server's popup browser holds the profile), or a run reading it: the collection waits, like for the assistant.
+  const profileDir = accessProfileDir(profilesRoot, access);
+  if (!holdProfile(profileDir, "collect")) return { state: "blocked", code: "LOGIN_WINDOW_OPEN", message: `${HOLDER_WORDS[profileHolder(profileDir) ?? "login"]}，稍后再读取收藏。` };
   const folder = collectFolder(collector.outputRoot, record.id);
   mkdirSync(folder, { recursive: true });
   const taskId = `collect-${record.id.replace(/^flow-/, "")}-${now.getTime().toString(36)}`;
@@ -463,12 +503,13 @@ function startFavouritesRun(store: CrosslineStore, workspaceId: string, record: 
   const log = collector.log ?? (() => {});
   const job = (async () => {
     let result: CollectResult;
-    const driver = await (collector.open ?? openCollectBrowser)(accessProfileDir(profilesRoot, access), browser).catch((error: unknown) => error as Error);
+    const driver = await (collector.open ?? openCollectBrowser)(profileDir, browser).catch((error: unknown) => error as Error);
     if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
     else {
       try { result = await collectFavourites({ store, workspaceId, workflowId: record.id, folder, driver, ...(collector.sleep ? { sleep: collector.sleep } : {}), log }); }
       finally { await driver.close(); }
     }
+    releaseProfile(profileDir, "collect");
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.ran:${taskId}`, type: "collect.ran", entityId: record.id,
       payload: { taskId, state: result.state, mode: result.mode, listed: result.listed, listEnded: result.listEnded, read: result.read.length, gone: result.gone.length, pending: result.pending } });
     log({ type: "collect.ran", workspaceId, id: record.id, state: result.state, mode: result.mode, read: result.read.length, pending: result.pending });
@@ -478,13 +519,13 @@ function startFavouritesRun(store: CrosslineStore, workspaceId: string, record: 
     const summary = record.manifest.summary;
     if (result.state === "check") sayToPerson(store, workspaceId, `「${summary}」读取时遇到了小红书的安全验证或限流，已立刻停下并关闭浏览器，${COLLECT_BREAKER_DAYS} 天内不再读取。本次已读 ${result.read.length} 条，照常整理；请本人在手机上正常使用一段时间。`,
       "workflow_done", `check:${record.id}:${day}`, [{ label: "去看结果", href: "/approvals#assistant" }]);
-    if (result.state === "login" || result.state === "no_profile") sayToPerson(store, workspaceId, `「${summary}」需要登录小红书${result.read.length ? `（本次已读 ${result.read.length} 条，照常整理）` : ""}。请在设置里点「登录」，登录后关掉窗口，再点「立即运行」。`,
-      "workflow_login", `login:${record.id}:${day}`, [{ label: "去登录", href: "/settings#skills" }]);
+    if (result.state === "login" || result.state === "no_profile") sayToPerson(store, workspaceId, `「${summary}」需要登录小红书${result.read.length ? `（本次已读 ${result.read.length} 条，照常整理）` : ""}。请在设置里点「登录」，登录后点「登录完成」，再点「立即运行」。`,
+      "workflow_login", `login:${record.id}:${day}`, [{ label: "去登录", href: loginHref(record.id) }]);
     if (result.state === "failed") sayToPerson(store, workspaceId, `「${summary}」这次没读完：${result.message ?? "浏览器出错"}${result.read.length ? `；已读 ${result.read.length} 条，照常整理` : ""}。`,
       "workflow_done", `failed:${record.id}:${taskId}`, [{ label: "去看设置", href: "/settings#skills" }]);
     organiseFavourites(store, workspaceId, record, runFree, folder, result, new Date());
   })().catch((error: unknown) => log({ type: "collect.failed", workspaceId, id: record.id, message: error instanceof Error ? error.message : "" }))
-    .finally(() => collecting.delete(key));
+    .finally(() => { releaseProfile(profileDir, "collect"); collecting.delete(key); });
   collecting.set(key, job);
   return { state: "started", taskId };
 }
@@ -500,7 +541,7 @@ function organiseFavourites(store: CrosslineStore, workspaceId: string, record: 
     recordWorkflowResult(store, workspaceId, record.id, `collect:${now.getTime()}`, result.listed ? "done" : "partial", result.listed, record.lastRead?.items ?? 0);
     sayToPerson(store, workspaceId, result.listed ? `「${summary}」本期没有新增收藏（已读 ${total} 条）。${later}`
       : `「${summary}」这次没读到收藏，可能需要重新登录或页面改版。请在设置里点「登录」重新登录，再点「立即运行」。`,
-      result.listed ? "workflow_done" : "workflow_login", `nothing:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: result.listed ? "去看结果" : "去登录", href: result.listed ? "/approvals#assistant" : "/settings#skills" }]);
+      result.listed ? "workflow_done" : "workflow_login", `nothing:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: result.listed ? "去看结果" : "去登录", href: result.listed ? "/approvals#assistant" : loginHref(record.id) }]);
     return;
   }
   const home = grownHomeLine(store, workspaceId, record);

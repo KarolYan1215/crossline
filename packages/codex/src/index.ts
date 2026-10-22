@@ -469,7 +469,9 @@ export async function startCodexSupervisor(options: {
    * A grown workflow, by hand (docs/skills-library.md §6): `login` opens a browser window of its own for the person to log in to a site
    * it reads; `run` starts it now. Both answer at once.
    */
-  workflowAction?: (workspaceId: string, id: string, action: "login" | "login_done" | "run", service: string) => { ok: boolean; [key: string]: unknown };
+  /** `viewport` is the size of the dialog a login on the server is shown in (`remote-browser.ts`); a login on this machine ignores it. */
+  workflowAction?: (workspaceId: string, id: string, action: "login" | "login_done" | "run", service: string, viewport?: { width?: unknown; height?: unknown }) =>
+    { ok: boolean; [key: string]: unknown } | Promise<{ ok: boolean; [key: string]: unknown }>;
   /** The person asked for a workflow in words: grow it now rather than at the next tick. Answers at once. */
   growWorkflows?: (workspaceId: string) => void;
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
@@ -1105,8 +1107,8 @@ export async function startCodexSupervisor(options: {
         }
         if (workflowRoute[2] === "run") { const rt = await modelClient(response, callerWorkspaceId); if (!rt) return; }
         const body = await readJsonBody(request);
-        const result = options.workflowAction(callerWorkspaceId, workflowRoute[1]!, workflowRoute[2] as "login" | "login_done" | "run",
-          typeof body?.service === "string" ? body.service.slice(0, 40) : "");
+        const result = await options.workflowAction(callerWorkspaceId, workflowRoute[1]!, workflowRoute[2] as "login" | "login_done" | "run",
+          typeof body?.service === "string" ? body.service.slice(0, 40) : "", { width: body?.width, height: body?.height });
         // Refusals are answers ({ok:false, code, message}), so the page can say why.
         sendJson(response, 200, result);
         return;

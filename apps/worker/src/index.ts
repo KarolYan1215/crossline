@@ -7,7 +7,7 @@ import { containerMemory, containerPeak } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -42,8 +42,10 @@ import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, scoutDue } from "./public-skills";
-import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, finishWorkflowLogin, growCandidates, growTask, installGrown, markWorkflowRun, openWorkflowLogin, sayToPerson, startWorkflowRun,
-  workflowSchedulePass } from "./workflow-smith";
+import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, loginBrowser, markWorkflowRun,
+  openWorkflowLogin, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
+import { loginMode } from "./browser-launch";
+import { createRemoteBrowsers } from "./remote-browser";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
 import { createMilestoneRiskReviewer, milestonesAwaitingRiskReview } from "./milestone-risk-review";
 import { fileSourceDocuments } from "./source-filing";
@@ -1111,6 +1113,17 @@ configureFavouritesCollector({
   },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
 });
+// Logins where this worker has no screen (the hosted beta): a headless browser on the server, streamed into a dialog on the page
+// (remote-browser.ts). On the person's own computer the login stays a window on their desktop and none of this starts.
+const remoteBrowsers = loginMode() === "remote" ? createRemoteBrowsers({
+  resolve: (workspaceId, workflowId, service) => workflowLoginTarget(analysisStore, workspaceId, workflowId, service, browserProfilesRoot(workspaceId)),
+  onLoggedIn: (workspaceId, workflowId, service) => recordGrownLogin(analysisStore, workspaceId, workflowId, service, new Date(), ""),
+  busy: (workspaceId, workflowId) => workflowCollecting(workspaceId, workflowId) ? "正在读取收藏" : undefined,
+  executablePath: () => loginBrowser(),
+  log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
+}) : undefined;
+configureRemoteLogin(remoteBrowsers);
+if (remoteBrowsers) setInterval(() => { void remoteBrowsers.sweep().catch(() => undefined); }, 30_000).unref();
 const agentService = createAgentService({
   // The shell assistant runs on the machine owner's runtime only: it works with the operating system user's files, and a guard is a
   // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).
@@ -1480,6 +1493,8 @@ if (!capabilitySecret) {
       cost: (workspaceId) => modelProviders.cost(workspaceId), afterChatgptCost: (workspaceId, signal) => modelProviders.afterChatgptCost(workspaceId, signal) },
     services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
       { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle },
+      // The login browser on the server, shown in a dialog on the page (remote-browser.ts); only where there is no screen of our own.
+      ...(remoteBrowsers ? [{ prefix: "/v1/remote-browser", handle: remoteBrowsers.handle }] : []),
       // Linking this computer as a device of the hosted account (docs/device-mode.md); the worker restarts into device mode.
       { prefix: "/v1/device", handle: createDeviceLinkService({ dataDir, secrets, onChanged: restartForMode }).handle }],
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
@@ -1550,8 +1565,8 @@ if (!capabilitySecret) {
     cancelAgentTask: (workspaceId, taskId) => agentService.cancel(workspaceId, taskId),
     retryAgentTask: async (workspaceId, taskId, input) => { const result = await agentService.retry(workspaceId, taskId, input); void workflowPass(workspaceId, new Date().toISOString()).catch(() => undefined); return result; },
     growWorkflows: (workspaceId) => { void workflowPass(workspaceId, new Date().toISOString()).catch(() => undefined); },
-    workflowAction: (workspaceId, id, action, service) => {
-      if (action === "login") return openWorkflowLogin(analysisStore, workspaceId, id, service, browserProfilesRoot(workspaceId));
+    workflowAction: (workspaceId, id, action, service, viewport) => {
+      if (action === "login") return openWorkflowLogin(analysisStore, workspaceId, id, service, browserProfilesRoot(workspaceId), {}, viewport);
       if (action === "login_done") return finishWorkflowLogin(analysisStore, workspaceId, id, service);
       const record = readGrownSkills(analysisStore, workspaceId).find((item) => item.id === id && item.status === "active");
       if (!record) return { ok: false, code: "WORKFLOW_NOT_ACTIVE", message: "这个工作流还没启用。" };
@@ -1720,6 +1735,8 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
     }).finally(() => { ticking = false; });
   }, intervalMinutes * 60_000);
   const shutdown = async () => {
+    // A login browser left open would hold its profile and lose its session cookies; closed the way 「取消」 closes it.
+    await remoteBrowsers?.closeAll().catch(() => undefined);
     await codexSupervisor?.stop();
     analysisStore.close();
     releaseWorkerLock();
