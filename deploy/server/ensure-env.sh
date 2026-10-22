@@ -85,8 +85,12 @@ if grep -q "^CROSSLINE_SPONSOR_MODELS=deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0
 fi
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MODELS "deepseek-ai/DeepSeek-V4.1-Flash=2:8:1024:0.04,zai-org/GLM-5.3-Flash=0.8:2.8:1024:0.23,Qwen/Qwen3.5-122B-A10B=0.8:6.4:262,Qwen/Qwen3.5-35B-A3B=0.4:3.2:262"
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MONTHLY_CNY 30
-# The planning Skills (step planner, backplanner) on GLM-5.3-Flash: the owner's choice of 2026-10-20 after the real-work comparison.
-ensure /srv/crossline/app.env CROSSLINE_SPONSOR_PLANNING_MODEL zai-org/GLM-5.3-Flash
+# The planning Skills (step planner, backplanner) were on GLM-5.3-Flash from 2026-10-20; the second real-work comparison (2026-10-22:
+# GLM only 14% cheaper, 3-6 times slower, up to 55 minutes for one step plan) moved them back to the main model, the owner's decision.
+# Only the value this script wrote is removed; one set by hand stays.
+if grep -q "^CROSSLINE_SPONSOR_PLANNING_MODEL=zai-org/GLM-5.3-Flash$" /srv/crossline/app.env 2>/dev/null; then
+  drop /srv/crossline/app.env CROSSLINE_SPONSOR_PLANNING_MODEL
+fi
 # The main model held on V4.1-Flash while Qwen3.5-122B, which the automatic choice took on 2026-10-21, is compared on real work (the
 # owner's decision the same day): served whenever its current record admits the required Skills, and never pruned.
 ensure /srv/crossline/app.env CROSSLINE_SPONSOR_MAIN_MODEL deepseek-ai/DeepSeek-V4.1-Flash
