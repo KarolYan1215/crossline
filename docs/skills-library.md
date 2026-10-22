@@ -251,6 +251,7 @@
 - **登录完成**：与本地窗口同一条路（`login_done`），浏览器关闭、记 `skill.grown.logged_in`。很多单点登录的会话 Cookie 没有过期时间，浏览器一关就丢，所以关闭时写到配置目录旁（`crossline-session-cookies.json`，仅本人账号自己的 Cookie），读取打开时放回。「去登录」消息链接 `/settings?login=<工作流>#skills`，打开即开始登录。
 - **服务器上的读取**：`site_read` 与收藏读取在服务器上同样以有界面方式运行在虚拟屏幕上（`readerLaunch`），用服务器自己的 Chromium，不用在本人电脑上记下的浏览器路径。边界不变：不伪装（不改 user agent、不加隐身插件、不改 webdriver 标记，浏览器照实报自己是什么。机主选择用 Xvfb 跑有界面的 Chromium，而不是伪装无界面浏览器：网站看到的是普通 Chromium，不是 HeadlessChrome）、不用代理、不代做验证码（验证码由本人在弹窗里完成）、遇安全验证即停。
 - **镜像与内存**：镜像装 Playwright 对应版本的完整 Chromium 和 Xvfb（`PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`，构建时在 Xvfb 上以有界面方式启动一次确认能用）和文泉驿微米黑（约 5 MB，中文登录页不至于显示成方框），镜像约增大 300 MB。一页 Chromium 约 150–250 MB，算在 worker 的内存上限里，没有另加；靠同时只开一个、高水位线不开、模型闸门在高水位时暂停新运行来保护。
+- 2026-10-22 服务器浏览器改为 Xvfb 上的有界面 Chromium 上线（f2a427de35，镜像构建时有界面启动通过）。
 - **尚未在服务器上真实验证**：本机用真实 Chromium（无界面）跑通了打开、画面、点击、输入、后退、私网地址被拦、登录完成与 Cookie 保存；服务器镜像的构建、在服务器上完成一次真实登录（小红书扫码、Canvas 的 Duo）还没做。
 
 ## 收藏全量读取（2026-10-22）
