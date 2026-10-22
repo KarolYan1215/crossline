@@ -150,7 +150,7 @@ jobs:
       - name: Model time per Skill
         run: |
           # Per Skill over the last day: waits before and at the model gate, run time and cache hits (deploy/server/skill-runs.py).
-          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker logs --since 24h crossline-worker 2>&1 | grep -F skill.run > /tmp/skill-runs.jsonl || true'
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker logs --since 24h crossline-worker 2>&1 | grep -E "skill[.](run|redo_on_main_model)" > /tmp/skill-runs.jsonl || true'
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'python3 -' < deploy/server/skill-runs.py || true
       - name: Codex device-code probe
         if: contains(github.event.head_commit.message, '[codex-probe]')
