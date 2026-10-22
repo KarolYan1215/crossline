@@ -277,8 +277,13 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
  * assistant's step; reviewing the assistant's output is returned (the ids) to be folded into the first core step (`foldReviewSteps`).
  * Shared by `normalizeStepPlan` and the one-time reorganisation of plans already stored (`apps/worker/src/work-split-repair.ts`).
  */
+const ACCEPTS_OUTPUT = /^(?:验收|批准|审核|审阅|核验|核对|复核|定稿|审定)/;
+const JUDGES = /结论|科学|正确|边界|权限|规则|选定|决定|取舍/;
+
 export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[], warnings: StepWarning[],
-  options: { assistant?: boolean; /** The task's title: a step of graded homework touching its problems stays the person's. */ taskTitle?: string } = {}): Set<string> {
+  options: { assistant?: boolean; /** The task's title: a step of graded homework touching its problems stays the person's. */ taskTitle?: string;
+    /** Steps (of a stored plan being judged again) that come right after, or wait on, the assistant's already-finished work. */
+    afterAgent?: ReadonlySet<string> } = {}): Set<string> {
   const assistant = options.assistant !== false;
   const reviews = new Set<string>();
   for (const step of steps) {
@@ -305,6 +310,15 @@ export function assignStepOwners(steps: PlannedStep[], questions: StepQuestion[]
       // `executor: "agent"` is the model's word that the assistant does it, whatever `owner` it also wrote; `ask` stays a question.
       const verdict = workOwner({ title: step.title, owner: step.executor === "agent" && step.owner !== "ask" ? "assistant" : step.owner ?? "person",
         ...(options.taskTitle ? { taskTitle: options.taskTitle } : {}) });
+      // Approving what the assistant just made (「验收定义稿」「批准可交付版本」「核验版本基线包」): the step before it, or one it waits on,
+      // is the assistant's, and the step only checks that output. The real account kept a dozen of these after the first rule, which
+      // asked for 「助手」 in the title; a judgement (结论, 边界, 权限), a decision or graded work is not folded.
+      if (step.executor !== "agent" && ACCEPTS_OUTPUT.test(step.title) && !JUDGES.test(step.title) && verdict.code === "model"
+        && (step.dependsOn.some((dep) => steps.find((other) => other.id === dep)?.executor === "agent")
+          || steps[steps.indexOf(step) - 1]?.executor === "agent" || options.afterAgent?.has(step.id))) {
+        reviews.add(step.id);
+        continue;
+      }
       // The older, narrower rule still holds where the new one has nothing to say.
       const owner = verdict.code === "model" && verdict.owner === "person" && TRIVIAL_STEP.test(step.title) ? "assistant" : verdict.owner;
       if (owner === "person" && step.executor === "agent") {
@@ -342,14 +356,21 @@ type StoredStepLike = Omit<PlannedStep, "role" | "covers" | "why"> & { role: str
  * a review-only step is folded into the next person's step. Done steps are not passed and not touched; a dependency on one is kept. The
  * shares are not normalized: the removed review's share moves to the step it folds into, so the task's progress is unchanged.
  */
-export function resplitOpenSteps(open: readonly StoredStepLike[], questions: readonly StepQuestion[], taskTitle?: string):
+export function resplitOpenSteps(open: readonly StoredStepLike[], questions: readonly StepQuestion[], taskTitle?: string,
+  /** The whole plan in its order (finished steps too), so a step approving what the assistant already made is still recognised. */
+  plan: readonly Pick<StoredStepLike, "id" | "executor" | "dependsOn">[] = open):
   { steps: PlannedStep[]; questions: StepQuestion[]; changes: StepOwnerChange[] } {
   const steps: PlannedStep[] = open.map((step) => ({ ...step, role: step.role as StepRole, covers: step.covers ?? [], why: step.why ?? "", dependsOn: [...step.dependsOn],
     estimate: { ...step.estimate }, owner: step.owner ?? (step.executor === "agent" ? "assistant" : "person") }));
   const before = new Map(steps.map((step) => [step.title, step.executor]));
   const asked = questions.map((question) => ({ ...question, options: [...question.options] }));
   const warnings: StepWarning[] = [];
-  const reviews = assignStepOwners(steps, asked, warnings, taskTitle ? { taskTitle } : {});
+  const openIds = new Set(open.map((step) => step.id));
+  const agentDone = new Set(plan.filter((step) => !openIds.has(step.id) && step.executor === "agent").map((step) => step.id));
+  const order = plan.map((step) => step.id);
+  const afterAgent = new Set(open.filter((step) => step.dependsOn.some((dep) => agentDone.has(dep))
+    || agentDone.has(order[order.indexOf(step.id) - 1] ?? "")).map((step) => step.id));
+  const reviews = assignStepOwners(steps, asked, warnings, { ...(taskTitle ? { taskTitle } : {}), afterAgent });
   const reviewed = steps.filter((step) => reviews.has(step.id)).map((step) => ({ id: step.id, title: step.title, executor: step.executor }));
   foldReviewSteps(steps, reviews, warnings);
   const changes: StepOwnerChange[] = [];
@@ -383,8 +404,9 @@ function foldReviews(steps: PlannedStep[], reviews: ReadonlySet<string>, warning
   for (const id of [...reviews]) {
     const index = steps.findIndex((step) => step.id === id);
     const review = steps[index]!;
-    const target = steps.find((step) => person(step) && step.dependsOn.includes(id)) ?? steps.slice(index + 1).find(person)
-      ?? [...steps.slice(0, index)].reverse().find(person);
+    // Only a step that comes after: folding a final check into an earlier draft (seen on the real account) reads backwards; with none
+    // after it, the check is the acceptance gate's.
+    const target = steps.find((step) => person(step) && step.dependsOn.includes(id)) ?? steps.slice(index + 1).find(person);
     if (!target) {
       review.executor = "agent"; review.owner = "assistant"; review.schedulable = false; review.firstAction = "";
       warnings.push({ code: "STEP_TRIVIAL_TO_AGENT", detail: `「${review.title}」只是验收，交给验收关卡` });

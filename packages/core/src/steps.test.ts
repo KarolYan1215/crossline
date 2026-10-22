@@ -137,6 +137,15 @@ describe("grounded, non-trivial plans", () => {
     expect(normalized.steps.reduce((sum, item) => sum + item.share, 0)).toBeCloseTo(1, 2);
     expect(warnings.map((warning) => warning.code)).toContain("STEP_REVIEW_FOLDED");
   });
+  it("approving what the assistant just made is folded whatever its words; a judgement of it is not", () => {
+    const { plan: normalized } = normalizeStepPlan(plan([
+      step("a", "draft", { title: "起草反馈框架", executor: "agent", schedulable: false }),
+      step("b", "check", { title: "验收反馈框架", dependsOn: ["a"] }),
+      step("c", "build", { title: "执行真实数据仿真", executor: "agent", schedulable: false }),
+      step("d", "test", { title: "核验图表科学结论", dependsOn: ["c"] }),
+      step("e", "deliver", { title: "交付图表与数据包", dependsOn: ["d"], firstAction: "打开交付包" })], "writing"));
+    expect(normalized.steps.map((item) => item.title)).toEqual(["起草反馈框架", "执行真实数据仿真", "核验图表科学结论", "交付图表与数据包"]);
+  });
   it("a step's choice stays the person's, and a startup line's interview synthesis is the person's core", () => {
     const { plan: normalized } = normalizeStepPlan(plan([
       step("a", "gather", { title: "收集 5 份试用访谈记录", executor: "agent", schedulable: false }),

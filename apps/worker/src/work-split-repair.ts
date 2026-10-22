@@ -30,7 +30,8 @@ import { sayToPerson, type SayButton } from "./workflow-smith";
  *
  * `planWorkSplit` is the reading alone (no write), for `scripts/work-split-dry-run.ts`.
  */
-export const WORK_SPLIT_REPAIR_MARKER = "repair.work-split.v1";
+// v2 (2026-10-22): run again once approving the assistant's output became a review step whatever its words (`ACCEPTS_OUTPUT` in steps.ts).
+export const WORK_SPLIT_REPAIR_MARKER = "repair.work-split.v2";
 const CANDIDATE_STATES = new Set(["awaiting_plan_approval", "approved", "preparing", "ready_for_human"]);
 const OPEN = new Set(["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active", "blocked", "evidence_review"]);
 
@@ -83,7 +84,7 @@ export function planWorkSplit(store: CrosslineStore, workspaceId: string, now = 
     const plan = plans.get(order.id);
     const open = (plan?.steps ?? []).filter((step) => step.status === "planned");
     if (!plan || !open.length) return { all: false };
-    const result = resplitOpenSteps(open, plan.questions, title);
+    const result = resplitOpenSteps(open, plan.questions, title, plan.steps);
     const split = result.changes.length ? { order, title, plan, ...result } : undefined;
     return { all: result.steps.length > 0 && result.steps.every((step) => step.executor === "agent"), ...(split ? { split } : {}) };
   };

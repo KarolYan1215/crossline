@@ -93,7 +93,7 @@
 - **去重与「任务生成中」**：
   - `planMerges` 不把本人的工作和助手的准备或问题合并，也不把问题并入助手的任务。没有记录 owner 的旧工作单按 `workOwner` 判断。
   - 「任务生成中」（`backplan-status.ts`）只把本人的核心任务算作已在服务里程碑。
-- **一次性整理**（`apps/worker/src/work-split-repair.ts`，标记 `repair.work-split.v1`，每个账户一次，在启动后的 tick 里运行）：
+- **一次性整理**（`apps/worker/src/work-split-repair.ts`，标记 `repair.work-split.v2`（v2 起「验收、批准、核验助手刚做出的产出」的步骤不论措辞都并入下一步），每个账户一次，在启动后的 tick 里运行）：
   1. 对开着的待办（待批准、已批准、准备中、可开始；已记录 owner 的不动）运行 `workOwner`。整体不动的只有三种：正在进行的、本人计过时的、本人自己勾过步骤的（最后一次进度不是助手写的）。助手做完的准备步骤不算进度。
      - 助手类改为 `owner: "assistant"`，`prepares` 指向同一里程碑的本人核心任务，优先选等它的那一项；没有里程碑的才按同项目找，找不到就不挂。已完成的步骤和助手已有的产出记在 `payload.priorWork`，交给助手时写进交代，产出目录作为只读输入；
      - 需要本人信息的改为 `owner: "ask"`，附问题；
