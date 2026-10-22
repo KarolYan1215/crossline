@@ -36,3 +36,4 @@
 - 经验教训表（迁移 20）、使用计数与过期、事实索引加 `read_ledger`、主线技能增量编译、「节省额度」（迁移 21 的 `model_usage.purpose`）、公开 skill 设立一轮加每月补充加 Skill 库「再检索一轮」、开发者模型简单 Skill 按 `skillYuanPerRun` 选：见 CLAUDE.md「Token economy」。
 - 托管账本副本实测：拆步骤事实 15.6k → 12.0k 字，收集分析上下文 87.1k → 74.1k 字，研究线主线技能重编 12k → 1.2k 字。
 - 未做：推理强度对比（第 7 条，待在真实任务上跑）；Codex 路径的技能目录（`skills.include_instructions`）仍开着，它随并发开关的 skill 变化，关掉会改提示内容，留待决定。
+- 2026-10-22 上线托管站（d879758f71）。
