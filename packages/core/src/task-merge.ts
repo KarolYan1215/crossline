@@ -22,7 +22,13 @@ import { infoRequestTraits, type InfoRequest } from "./info-request";
 export type MergeTask = {
   id: string; identityId: string; projectId: string; milestoneId: string; title: string; intent: string; state: string;
   dueDate: string; milestoneDeadline: string; progress: number; hasStepPlan: boolean; started: boolean; dependsOn: string[];
+  /**
+   * Who does it (docs/work-split.md): the person's work is never merged with the assistant's or with a question to the person, however
+   * alike the titles — the assistant's 「汇集期中规则」 prepares the person's 「规划期中复习」, it is not the same task. Absent: the person's.
+   */
+  owner?: "person" | "assistant" | "ask";
 };
+const sideOf = (task: MergeTask) => task.owner ?? "person";
 /** `requests`: for an info-request merge, what each absorbed task asks (it becomes a drafted email and a send in the kept task). */
 export type MergeGroup = { kind: "duplicate" | "info_request"; keep: string; absorb: string[]; reason: string; requests: Record<string, InfoRequest> };
 export type MergePair = { a: string; b: string; why: string };
@@ -68,6 +74,7 @@ const days = (a: string, b: string) => Math.abs(Date.parse(`${a}T12:00:00Z`) - D
 /** What the rules say about two tasks: the same work, not, or the model's to decide. */
 export function comparePair(a: MergeTask, b: MergeTask): { verdict: "same" | "unsure" | "different"; why: string; score: number } {
   if (a.identityId !== b.identityId || a.projectId !== b.projectId) return { verdict: "different", why: "不同主线或项目", score: 0 };
+  if (sideOf(a) !== sideOf(b)) return { verdict: "different", why: "一个是本人的工作，一个是助手的准备或问题", score: 0 };
   if (numbersOf(a.title) !== numbersOf(b.title)) return { verdict: "different", why: "标题中的编号不同", score: 0 };
   if (a.dueDate && b.dueDate && days(a.dueDate, b.dueDate) > DUE_APART_DAYS) return { verdict: "different", why: "截止日相差一周以上", score: 0 };
   const score = textSimilarity(normalizeTaskTitle(a.title), normalizeTaskTitle(b.title));
@@ -103,7 +110,7 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
   const servers = live.filter((task) => !requestIds.has(task.id));
   const leftover: typeof requests = [];
   for (const { task, traits } of requests) {
-    const sameProject = servers.filter((other) => other.identityId === task.identityId && other.projectId === task.projectId);
+    const sameProject = servers.filter((other) => other.identityId === task.identityId && other.projectId === task.projectId && sideOf(other) === sideOf(task));
     const served = sameProject.find((other) => other.dependsOn.includes(task.id))
       ?? (task.milestoneId ? keeperOrNone(sameProject.filter((other) => other.milestoneId === task.milestoneId)) : undefined)
       ?? (!task.milestoneId ? keeperOrNone(sameProject) : undefined);
@@ -117,7 +124,10 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
   }
   // Requests with nothing to serve in one milestone: one email asks them all.
   const byMilestone = new Map<string, typeof requests>();
-  for (const item of leftover) if (item.task.milestoneId) byMilestone.set(`${item.task.projectId}|${item.task.milestoneId}`, [...(byMilestone.get(`${item.task.projectId}|${item.task.milestoneId}`) ?? []), item]);
+  for (const item of leftover) if (item.task.milestoneId) {
+    const key = `${sideOf(item.task)}|${item.task.projectId}|${item.task.milestoneId}`;
+    byMilestone.set(key, [...(byMilestone.get(key) ?? []), item]);
+  }
   for (const items of byMilestone.values()) {
     if (items.length < 2) continue;
     const keep = keeperOf(items.map((item) => item.task));

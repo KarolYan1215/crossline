@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
-  TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, planMerges, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview,
-  type BackgroundKind, type BackgroundSpend, type InfoRequest, type MergeGroup, type MergeTask, type TaskMergeReview
+  TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, isWorkOwner, planMerges, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview, workOwner,
+  type WorkOwner, type BackgroundKind, type BackgroundSpend, type InfoRequest, type MergeGroup, type MergeTask, type TaskMergeReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore, StepPlanInput, StoredWorkOrder } from "@crossline/db";
@@ -44,7 +44,9 @@ export function mergeTasks(store: CrosslineStore, workspaceId: string): MergeTas
     return { id: order.id, identityId: order.identityId, projectId: order.projectId, milestoneId: order.milestoneId, title: taskTitleOf(order),
       intent: order.intent, state: order.state, dueDate: payload.dueDate ?? "", milestoneDeadline: anchors.get(order.milestoneId) ?? "",
       progress: plan ? plan.steps.filter((step) => step.status !== "planned").reduce((sum, step) => sum + step.share, 0) : 0,
-      hasStepPlan: Boolean(plan), started: started.has(order.id), dependsOn: payload.dependsOn ?? [] };
+      hasStepPlan: Boolean(plan), started: started.has(order.id), dependsOn: payload.dependsOn ?? [],
+      // Who does it, as the backplanner reads it: the recorded owner, else what the work produces (docs/work-split.md). Merges stay on one side.
+      owner: isWorkOwner((order.payload as { owner?: unknown } | undefined)?.owner) ? (order.payload as { owner: WorkOwner }).owner : workOwner(order).owner };
   });
 }
 

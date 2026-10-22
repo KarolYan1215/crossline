@@ -10,7 +10,7 @@ import {
 } from "@crossline/core";
 import { continueSkillTurn, releaseThread, runCodexSkill, webResearchBlocker, type CodexRpcBoundary, type SkillRunResult } from "@crossline/codex";
 import { aiToolsFor, doneKinds, listAgentTasks, preparationOf, type CrosslineStore } from "@crossline/db";
-import { aiToolBrief, requiredApproval, taskTitleOf } from "@crossline/core";
+import { aiToolBrief, onPersonsBoard, requiredApproval, taskTitleOf } from "@crossline/core";
 import { claimedTitleMatches } from "./diligence";
 import { arxivPdfAddress, defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
 import { extractText } from "./extract";
@@ -610,7 +610,8 @@ export function pendingTutorials(store: CrosslineStore, workspaceId: string, now
   return [...soon].filter((id) => {
     const order = orders.get(id);
     const plan = planOf.get(id);
-    if (!order || !["approved", "ready_for_human", "active"].includes(order.state) || !plan) return false;
+    // The assistant's own items and the questions to the person (docs/work-split.md) are not the person's to learn: no tutorial.
+    if (!order || !["approved", "ready_for_human", "active"].includes(order.state) || !plan || !onPersonsBoard(order)) return false;
     // Only work that needs one gets a tutorial by itself; the person can still ask for one on the task page.
     if (preparationOf(order, plan, done).level !== "tutorial") return false;
     const build = built.get(id), failure = failed.get(id);

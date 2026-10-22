@@ -27,7 +27,12 @@ export type AskKind =
   | "missed_block" | "source_project" | "calendar_line_unclear" | "interview_open" | "interview_question" | "event_propose" | "step_question"
   | "relation_check" | "background_paused" | "locked_conflict" | "outcome_check" | "progress_check" | "milestone_risk_review"
   /** A course's or the person's own deadline passed with work still open (the daily pass's `milestone.overdue`): 补做 / 新日期 / 放弃. */
-  | "milestone_overdue";
+  | "milestone_overdue"
+  /**
+   * Work the assistant can do once the person gives one thing only they hold (docs/work-split.md, an `ask` work order): a question, never
+   * a task card. Answered, the assistant takes the work; 「不需要」 archives it.
+   */
+  | "prep_question";
 
 export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date"; required: boolean;
   initial?: string; placeholder?: string };

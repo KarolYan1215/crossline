@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
-  availableSlots, calendarLineOf, isCancelledEvent, planNudges, taskTitleOf,
+  availableSlots, calendarLineOf, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
 } from "@crossline/core";
 import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
@@ -60,7 +60,11 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const recent = store.listRecentNudges(ctx.workspaceId, new Date(now.getTime() - 3 * DAY).toISOString());
   const payloadOf = (message: StoredConversationMessage) => message.payload.nudge as NudgePayload | undefined;
   const muted = mutedKinds(ctx, recent, today, now);
-  const orders = store.listWorkOrders(ctx.workspaceId).filter((order) => !(order.payload as { seeded?: boolean }).seeded);
+  const all = store.listWorkOrders(ctx.workspaceId);
+  // Only the person's own work is reminded about (docs/work-split.md): the assistant's preparation and the questions to the person are
+  // neither started, nor confirmed, nor late in the person's day.
+  const orders = all.filter((order) => !(order.payload as { seeded?: boolean }).seeded && onPersonsBoard(order));
+  const servedBy = new Map(all.filter((order) => preparesOf(order)).map((order) => [order.id, preparesOf(order)]));
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const dueOf = (order: (typeof orders)[number]) => (order.payload as { dueDate?: string }).dueDate || anchors.get(order.milestoneId) || "";
   const executions = store.listExecutions(ctx.workspaceId);
@@ -78,8 +82,10 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const nowMinute = minutesOf(clock);
   // What the assistant has ready per task (its accepted results and preparation in review), named when the block comes up.
   const readyFiles = new Map<string, string[]>();
-  for (const task of listAgentTasks(store, ctx.workspaceId).filter((item) => item.status === "accepted" || item.status === "needs_review"))
-    readyFiles.set(task.workOrderId, [...(readyFiles.get(task.workOrderId) ?? []), ...task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1) ?? artifact.path)]);
+  for (const task of listAgentTasks(store, ctx.workspaceId).filter((item) => item.status === "accepted" || item.status === "needs_review")) {
+    const orderId = servedBy.get(task.workOrderId) ?? task.workOrderId;
+    readyFiles.set(orderId, [...(readyFiles.get(orderId) ?? []), ...task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1) ?? artifact.path)]);
+  }
 
   const blocks: NudgeBlock[] = todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {
     const order = byId.get(block.id.split(":")[1]!);
@@ -98,7 +104,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     const stepId = /^v\d+s\d+$/.test(block.id.split(":")[2] ?? "") ? block.id.split(":")[2]! : "";
     return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", day: today, start: block.start, end: block.end, endedTimerAt: "",
       ...(block.energy ? { energy: block.energy } : {}) }];
-  })).map((block) => ({ ...block, endedTimerAt: lastStopped.get(block.orderId)?.slice(11, 16) ?? "" }));
+  })).filter((block) => byId.has(block.orderId)).map((block) => ({ ...block, endedTimerAt: lastStopped.get(block.orderId)?.slice(11, 16) ?? "" }));
 
   // Time left before each due day: the person's free hours (fixed arrangements out, today from now on) less what other work holds.
   const windows = readAvailability(ctx);
@@ -204,7 +210,7 @@ function backgroundDone(ctx: AccessContext, now: Date): Array<{ key: string; tex
     if ((event.payload as { to?: string }).to === "awaiting_plan_approval") proposedAt.set(event.entityId, Date.parse(event.createdAt));
   for (const [id, at] of proposedAt) {
     const order = orders.get(id);
-    if (order?.state === "awaiting_plan_approval" && !preparing.has(id) && Math.max(at, plannedAt.get(id) ?? 0) >= since) out.push({ key: `proposal:${order.id}`, text: `「${taskTitleOf(order)}」已分析好，等待批准。`, label: "去批准", href: "/approvals#proposals" });
+    if (order?.state === "awaiting_plan_approval" && onPersonsBoard(order) && !preparing.has(id) && Math.max(at, plannedAt.get(id) ?? 0) >= since) out.push({ key: `proposal:${order.id}`, text: `「${taskTitleOf(order)}」已分析好，等待批准。`, label: "去批准", href: "/approvals#proposals" });
   }
   return out.slice(0, 5);
 }
@@ -288,7 +294,7 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
     && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title)));
   const work = todays.filter((block) => block.id.startsWith("scheduled:"));
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
-  const soon = store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state))
+  const soon = store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order))
     .map((order) => ({ order, due: (order.payload as { dueDate?: string }).dueDate || anchors.get(order.milestoneId) || "" }))
     .filter((item) => item.due && item.due >= today && item.due <= addDays(today, 3)).sort((a, b) => a.due.localeCompare(b.due));
   // This week's, the same count as Today's stack and 待确认: the ones that can wait are not today's to mention.

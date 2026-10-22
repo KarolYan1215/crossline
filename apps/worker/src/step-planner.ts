@@ -3,7 +3,7 @@ import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, readableFromMaterial, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
-  FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, type FinerSplit, type StepTrouble, type SuccessCriterion
+  FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { aiToolsFor, createRefBook, lessonsFor, listAgentTasks, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
@@ -78,10 +78,12 @@ export function planningContext(store: CrosslineStore, workspaceId: string, orde
  * it was for. It used to be this order's accepted runs only, so each task of one course planned (and ran) the same material catalogue.
  */
 export function existingOutputs(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder) {
-  const own = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === order.id && task.status === "accepted");
+  // What the assistant's own items made for this task (`payload.prepares`, docs/work-split.md) is this task's too: its 「已备好」.
+  const forThis = new Set([order.id, ...store.listWorkOrders(workspaceId).filter((item) => preparesOf(item) === order.id).map((item) => item.id)]);
+  const own = listAgentTasks(store, workspaceId).filter((task) => forThis.has(task.workOrderId) && task.status === "accepted");
   const project = projectAgentOutputs(store, workspaceId, order.projectId, ["accepted", "needs_review"]);
   return [...new Map([...own, ...project].map((task) => [task.taskId, task])).values()].map((task) => ({
-    title: task.title, status: task.status === "accepted" ? "accepted" : "awaiting_review", forThisTask: task.workOrderId === order.id,
+    title: task.title, status: task.status === "accepted" ? "accepted" : "awaiting_review", forThisTask: forThis.has(task.workOrderId),
     files: task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)), note: task.reviewNote }));
 }
 

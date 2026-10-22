@@ -218,7 +218,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       const mine = (task: { id: string }) => core(task.id) === (step.owner === "person");
       const fold = decideFold(open.filter(mine), { id: `backplan:${key}:${step.id}`, identityId: milestone.identityId, projectId: milestone.projectId!, milestoneId: milestone.id,
         title: withCourse(step.title, milestone.projectId), intent: step.intent, state: "awaiting_plan_approval", dueDate: "", milestoneDeadline: deadline,
-        progress: 0, hasStepPlan: false, started: false, dependsOn: [] }, step.extendsTaskId ?? "", done.filter(mine));
+        progress: 0, hasStepPlan: false, started: false, dependsOn: [], owner: step.owner }, step.extendsTaskId ?? "", done.filter(mine));
       if (fold) folds.set(step.id, fold);
     }
     const steps = planned.filter((step) => !folds.has(step.id));

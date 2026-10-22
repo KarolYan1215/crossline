@@ -33,6 +33,13 @@ export function startingWithin(store: CrosslineStore, workspaceId: string, now: 
   return within;
 }
 
+function readOrderStarts(store: CrosslineStore, workspaceId: string): Record<string, string> {
+  try {
+    const value = JSON.parse(store.getSetting(workspaceId, ORDER_STARTS_SETTING) ?? "{}") as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, string> : {};
+  } catch { return {}; }
+}
+
 /** The person's working minutes a day as the worker can know them: the weekly pattern's hours over seven days, at least an hour. */
 export function dailyAvailableMinutes(store: CrosslineStore, workspaceId: string): number {
   const { windows } = resolveAvailability({ saved: store.getSetting(workspaceId, AVAILABILITY_SETTING),
@@ -144,9 +151,17 @@ export function prepWindow(store: CrosslineStore, workspaceId: string, now: Date
   }
 
   const errands = new Set<string>();
+  const orderStarts = readOrderStarts(store, workspaceId);
+  /** Nothing on record says when this is wanted: no block, no due day, its own or its core task's. */
+  const undated = (order: StoredWorkOrder, core?: StoredWorkOrder) => !dueOf(order) && !orderStarts[order.id] && !(core && (dueOf(core) || orderStarts[core.id]
+    || scheduledOrders.has(core.id)));
   for (const order of orders.values()) {
     const prepares = (order.payload as { prepares?: unknown } | undefined)?.prepares;
     const core = typeof prepares === "string" ? orders.get(prepares) : undefined;
+    // The assistant's own item that nothing dates (docs/work-split.md): it takes none of the person's time and would otherwise never come
+    // up, so it is done when the assistant is free.
+    const assistant = (order.payload as { owner?: unknown } | undefined)?.owner === "assistant";
+    if (assistant && undated(order, core)) { errands.add(order.id); continue; }
     if (!core) { if (ordersWithin.has(order.id)) errands.add(order.id); continue; }
     const plan = store.getStepPlan(workspaceId, core.id);
     const first = plan?.steps.filter(personStep).sort((a, b) => a.seq - b.seq)[0];

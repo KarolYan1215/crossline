@@ -1,6 +1,6 @@
 import {
-  AGENT_CATEGORIES, AUTO_HANDOFF_SETTING, DISPATCH_STATES, GROWN_LIBRARY_SETTING, agentChains, deliverableKey, isAgentCategory, isCourse, planAssistantTask, readGrownLibrary,
-  supersededResults,
+  AGENT_CATEGORIES, AUTO_HANDOFF_SETTING, DISPATCH_STATES, GROWN_LIBRARY_SETTING, agentChains, deliverableKey, isAgentCategory, isCourse, planAssistantTask, preparesOf,
+  readGrownLibrary, supersededResults, taskTitleOf,
   type AgentCategory, type AgentChain, type AgentChainMarks, type AgentRunRow, type AssistantPlan
 } from "@crossline/core";
 import path from "node:path";
@@ -251,7 +251,22 @@ export function deliverAgentResult(store: CrosslineStore, workspaceId: string, t
   const evidence = task.artifacts.map((artifact) => ({ kind: "file" as const, uri: pathToFileURL(path.join(task.directory, artifact.path)).href,
     description: `助手产出：${artifact.path}` }));
   const result = store.transitionWorkOrder(workspaceId, order.id, { type: "agent.delivered", taskId }, `agent-delivered:${taskId}`, { evidence });
+  if (result.changed && (order.payload as { owner?: unknown } | undefined)?.owner === "assistant") finishPreparation(store, workspaceId, order, task.title, taskId);
   return { delivered: result.changed };
+}
+
+/**
+ * The assistant's own item, once its accepted result is delivered (docs/work-split.md): done, not judged by the milestone gate — the
+ * milestone's progress is the person's core work, and this was only its preparation. The core task it prepares shows the files under
+ * 「已备好」 (`task-detail.ts`, the step planner's `existingOutputs`) and, while not started, is planned again with them.
+ */
+function finishPreparation(store: CrosslineStore, workspaceId: string, order: { id: string; payload: unknown }, title: string, taskId: string): void {
+  store.transitionWorkOrder(workspaceId, order.id, { type: "evidence.accepted", approvalId: "system:assistant-preparation" }, `prep-accepted:${taskId}`);
+  const core = store.listWorkOrders(workspaceId).find((item) => item.id === preparesOf(order));
+  const ownerId = store.getWorkspaceOwnerId(workspaceId);
+  if (!core || !ownerId || !DISPATCH_STATES.has(core.state) || !store.getStepPlan(workspaceId, core.id)) return;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_replan_requested:prepared:${taskId}`, type: "task.steps_replan_requested", entityId: core.id,
+    payload: { feedback: `助手已备好「${title.slice(0, 60)}」（在本任务的「已备好」里）。本人的步骤直接用它，不再安排收集或整理它的步骤。`, prepared: taskId } });
 }
 
 /** A kind of work the assistant would like to start but has not been allowed to, waiting for the person. */
@@ -360,7 +375,9 @@ export function assistantPlanFor(store: CrosslineStore, workspaceId: string, ord
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.projectId === order.projectId);
   const { dates, undated } = latestFileDates(store, workspaceId);
   const milestoneTitle = store.listMilestones(workspaceId).find((milestone) => milestone.id === order.milestoneId)?.title;
-  const plan = planAssistantTask(order, { projectIsCourse: isCourse(order.projectId, facts, dates, undated), ...(milestoneTitle ? { milestoneTitle } : {}) });
+  const served = preparesOf(order) ? store.listWorkOrders(workspaceId).find((item) => item.id === preparesOf(order)) : undefined;
+  const plan = planAssistantTask(order, { projectIsCourse: isCourse(order.projectId, facts, dates, undated), ...(milestoneTitle ? { milestoneTitle } : {}),
+    ...(served ? { servesTitle: taskTitleOf(served) } : {}) });
   if (!plan.fit) return { ok: false, code: "NOTHING_FOR_ASSISTANT", message: plan.reason };
   return { ok: true, plan, title: order.intent, projectId: order.projectId };
 }

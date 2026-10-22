@@ -357,7 +357,7 @@ test("a run whose pages listed nothing is partial and points at the login; one t
   const readFavourites = async (index: number) => JSON.parse(await (runs[index] as unknown as { reader: SiteReader }).reader.tools.call("site_read",
     { service: "小红书", url: "https://www.xiaohongshu.com/user/profile/me", click: "收藏", scrolls: 15 })) as { ok: boolean; items: number };
 
-  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe", openSite);
+  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe", openSite, /^$/);
   expect(runs[0]!.what).toContain("用 site_read 的 click 传标签文字切换过去");
   expect(await readFavourites(0)).toMatchObject({ ok: true, items: 2 });
   const first = path.join(root, "flow-1");
@@ -369,7 +369,7 @@ test("a run whose pages listed nothing is partial and points at the login; one t
 
   // The next run gets the last output read-only and the page that worked; this time the page shows nothing.
   listed = [];
-  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe", openSite);
+  startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe", openSite, /^$/);
   expect(runs[1]!.inputs).toEqual([first]);
   expect(runs[1]!.what).toContain("上期读到内容的页面：https://www.xiaohongshu.com/user/profile/me（点「收藏」）");
   expect(runs[1]!.what).toContain("本期只整理上期之后新增的，按条目链接去重");

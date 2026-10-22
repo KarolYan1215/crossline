@@ -20,7 +20,8 @@ function reader(pages: (url: string, click?: string) => Page, now = new Date("20
   const told: string[] = [];
   let closed = 0;
   const site = createSiteReader(store, ws, record, () => ({ dir: "C:\\p", browser: "chrome.exe" }), {
-    now: () => now, sleep: async () => {}, notify: (text) => told.push(text),
+    // The reader's own rules, tested on Xiaohongshu's pages; the platform itself is now never opened (the last test).
+    now: () => now, sleep: async () => {}, notify: (text) => told.push(text), forbidden: /^$/,
     open: async () => ({ read: async (url, scrolls, click) => { opened.push(url); calls.push({ url, scrolls, ...(click ? { click } : {}) }); return pages(url, click); },
       close: async () => { closed += 1; } })
   });
@@ -159,4 +160,14 @@ test("a label that is only a button or a link off the site is not clicked, and e
   expect(only.log).not.toContain("click 1");
   const left = fakeDriver([{ url: "https://evil.example/", text: "别处" }], [{ text: "专辑", tabLike: true, href: "", control: false }]);
   await expect(readPage(left.driver, "https://www.xiaohongshu.com/user/profile/me", { scrolls: 3, click: "专辑", onSite: onXhs })).rejects.toThrow("离开了这个网站");
+});
+
+test("a social platform whose rules forbid automated use is never opened, whatever the workflow declared", async () => {
+  let opened = 0;
+  const site = createSiteReader(store, ws, record, () => ({ dir: "C:\p", browser: "chrome.exe" }), {
+    sleep: async () => {}, open: async () => { opened += 1; throw new Error("must not open"); } });
+  const answer = JSON.parse(await site.tools.call("site_read", { service: "小红书", url: "https://www.xiaohongshu.com/user/profile/me?tab=fav" })) as { ok: boolean; message: string };
+  expect(answer).toMatchObject({ ok: false, message: expect.stringContaining("平台规则禁止自动化读取") });
+  expect(opened).toBe(0);
+  expect(store.listEvents(ws, { type: "site.read" })).toHaveLength(0);
 });

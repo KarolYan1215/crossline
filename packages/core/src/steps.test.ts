@@ -122,7 +122,7 @@ describe("grounded, non-trivial plans", () => {
       step("d", "submit", { title: "提交调仓指令", executor: "agent", owner: "assistant" })]));
     expect(normalized.steps.map((item) => [item.owner, item.executor, item.schedulable])).toEqual([
       ["assistant", "agent", false], ["ask", "agent", false], ["person", "human", true], ["person", "human", true]]);
-    expect(normalized.questions.map((question) => question.text)).toEqual(["「整理券商导出的持仓明细」需本人提供哪些信息或文件？"]);
+    expect(normalized.questions.map((question) => question.text)).toEqual(["「整理券商导出的持仓明细」要用到本人的持仓：上传文件或截图，或直接写在这里。"]);
     expect(warnings.map((warning) => warning.code)).toEqual(expect.arrayContaining(["STEP_TRIVIAL_TO_AGENT", "STEP_OWNER_ASK", "STEP_OWNER_PERSON"]));
   });
   it("a step that only reviews the assistant's output is folded into the first core step's first move, at most ten minutes", () => {

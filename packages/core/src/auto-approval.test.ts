@@ -12,6 +12,13 @@ test("internal work takes effect by default — preparation, deep work, mileston
   expect(autoApprovalEligible({ ...base, state: "approved" }).eligible).toBe(false);
 });
 
+test("the assistant's own item takes effect (it needs no decision of the person's); a question never does; one naming the person's act waits", () => {
+  const owned = (intent: string, owner: string) => ({ ...base, intent, payload: { owner, title: intent } });
+  expect(autoApprovalEligible(owned("整理三个候选方案的对比表，供本人决定", "assistant"))).toMatchObject({ eligible: true });
+  expect(autoApprovalEligible(owned("整理本学期已出成绩", "ask")).eligible).toBe(false);
+  expect(autoApprovalEligible(owned("把方法部分发送给导师", "assistant")).eligible).toBe(false);
+});
+
 test("the person's own choice or decision waits for them", () => {
   expect(autoApprovalEligible({ ...base, intent: "从素材库选出四个首轮选题" }).eligible).toBe(false);
   expect(autoApprovalEligible({ ...base, intent: "在10月23日前由本人确认评审时间" }).eligible).toBe(false);

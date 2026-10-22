@@ -4,6 +4,7 @@ import {
   ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
+  isPreparationOnlyMilestone, onPersonsBoard, preparesOf, workOwner,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf
 } from "@crossline/core";
 import { acceptOwnCompletion, listAgentTasks, ownCompletion, type StoredWorkOrder } from "@crossline/db";
@@ -206,7 +207,7 @@ function lastMaterialsBlock(events: ReturnType<ReturnType<typeof getStore>["list
 function materialsAsks({ store, ctx, today }: Source): Ask[] {
   const anchors = deadlines(store, ctx.workspaceId);
   const events = store.listEvents(ctx.workspaceId, { type: ["materials.blocked", "materials.retry_requested"] });
-  return store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "preparing").flatMap((order) => {
+  return store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "preparing" && onPersonsBoard(order)).flatMap((order) => {
     const block = lastMaterialsBlock(events.filter((event) => event.entityId === order.id));
     if (!block) return [];
     const detail = block.payload as { code?: string; message?: string };
@@ -235,7 +236,8 @@ function gateAsks({ store, ctx, today }: Source): Ask[] {
   for (const event of store.listEvents(ctx.workspaceId, { type: ["milestone_gate.blocked", "milestone_gate.retry_requested"] })) {
     if (event.type === "milestone_gate.blocked") runFailures.set(event.entityId, event); else runFailures.delete(event.entityId);
   }
-  for (const order of store.listWorkOrders(ctx.workspaceId)) {
+  // Only the person's own work: the assistant's preparation is accepted when delivered and never judged by the gate (docs/work-split.md).
+  for (const order of store.listWorkOrders(ctx.workspaceId).filter(onPersonsBoard)) {
     const dueDay = dueOf(order, anchors);
     const timing = { urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}), line: order.identityId, preview: taskPreview(order.id, "看交付与判定") };
     const review = (order.payload as { gateReview?: GateReview }).gateReview;
@@ -327,8 +329,9 @@ function riskAsks(source: Source): Ask[] {
   return forecast.goals.flatMap((goal) => {
     const milestone = milestones.get(goal.milestoneId);
     const deadline = goal.confirmedDeadline;
-    if (!milestone || !deadline || deadline < today || reviewed.has(goal.milestoneId)) return [];
-    const own = orders.filter((order) => order.milestoneId === goal.milestoneId && ["approved", "preparing", "ready_for_human", "active"].includes(order.state));
+    // A milestone that is only preparation carries no risk of its own: the milestone it prepares does (docs/work-split.md §5).
+    if (!milestone || !deadline || deadline < today || reviewed.has(goal.milestoneId) || isPreparationOnlyMilestone(milestone)) return [];
+    const own = orders.filter((order) => order.milestoneId === goal.milestoneId && ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order));
     if (!own.length) return [];
     const atRisk = (goal.p85Day === null && deadline <= lastDay) || (goal.slackDays !== null && goal.slackDays < 2);
     if (!atRisk) return [];
@@ -367,7 +370,7 @@ function riskReviewMembers({ store, ctx, today }: Source): Ask[] {
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
   return [...milestones.values()].flatMap((milestone): Ask[] => {
     const entry = stored[milestone.id];
-    if (!entry || !("risks" in entry) || decisions[milestone.id]?.fingerprint === entry.fingerprint) return [];
+    if (!entry || !("risks" in entry) || decisions[milestone.id]?.fingerprint === entry.fingerprint || isPreparationOnlyMilestone(milestone)) return [];
     const anchor = anchors.get(milestone.id);
     const deadline = readGoalSettings(ctx, milestone.id)?.confirmedDeadline || anchor?.deadline || null;
     // Read the way the reviewer read it (`apps/worker/src/milestone-risk-review.ts`): a review of an earlier form is not this one's.
@@ -404,7 +407,8 @@ function overdueAsks({ store, ctx, today }: Source): Ask[] {
   const anchors = deadlines(store, ctx.workspaceId);
   const resolved = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "milestone.overdue_resolved" }))
     .map((event) => `${event.entityId}|${(event.payload as { deadline?: string }).deadline ?? ""}`));
-  const open = store.listWorkOrders(ctx.workspaceId).filter((order) => ["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active", "blocked"].includes(order.state));
+  const open = store.listWorkOrders(ctx.workspaceId).filter((order) => ["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active", "blocked"].includes(order.state)
+    && onPersonsBoard(order));
   const latest = new Map<string, ReturnType<typeof store.listEvents>[number]>();
   for (const event of store.listEvents(ctx.workspaceId, { type: "milestone.overdue" })) latest.set(event.entityId, event);
   return [...latest].flatMap(([milestoneId, event]): Ask[] => {
@@ -488,7 +492,7 @@ function missedAsks({ store, ctx, today }: Source): Ask[] {
     const order = orders.get(orderId);
     const id = `missed:${orderId}:${yesterday}`;
     // Still not begun: approved, preparing or ready. Started (or done, or discarded) is not missed.
-    if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id) || confirmed.has(orderId)) return [];
+    if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id) || confirmed.has(orderId) || !onPersonsBoard(order)) return [];
     const dueDay = dueOf(order, anchors);
     if (!dueDay || daysBetween(today, dueDay) > MISSED_ASK_HORIZON_DAYS) return [];
     return [{ id, kind: "missed_block" as const, entityId: orderId, line: order.identityId, urgency: urgencyFor(dueDay, today), dueDay, preview: taskPreview(orderId),
@@ -502,6 +506,63 @@ function missedAsks({ store, ctx, today }: Source): Ask[] {
         { id: "drop", label: "不做了", fields: [{ id: "reason", label: "为什么不做", kind: "text" as const, required: true }] }
       ] }];
   });
+}
+
+/** At most this many questions on one card (docs/work-split.md: ≤2 questions, ≤10 minutes of the person's time). */
+export const PREP_QUESTIONS_PER_CARD = 2;
+/** The question of an `ask` work order, at most `PREP_QUESTIONS_PER_CARD` sentences of it. */
+export function prepQuestionOf(order: StoredWorkOrder): string {
+  const own = (order.payload as { question?: unknown } | undefined)?.question;
+  const text = (typeof own === "string" && own.trim() ? own.trim() : workOwner({ ...order, owner: "ask" }).question ?? "").replace(/\s+/g, " ");
+  const parts = text.split(/(?<=[？?])/).map((part) => part.trim()).filter(Boolean);
+  return parts.slice(0, PREP_QUESTIONS_PER_CARD).join(" ").slice(0, 240);
+}
+
+/**
+ * Work the assistant can do once the person gives one thing only they hold (docs/work-split.md, an `ask` work order): one question on
+ * 待决事项, never a task card. The answer goes into the order and the order becomes the assistant's; 「不需要」 archives it. As urgent as
+ * the core task it prepares, and important when one waits on it.
+ */
+function prepQuestionAsks({ store, ctx, today }: Source): Ask[] {
+  const anchors = deadlines(store, ctx.workspaceId);
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const byId = new Map(orders.map((order) => [order.id, order]));
+  return orders.filter((order) => (order.payload as { owner?: unknown } | undefined)?.owner === "ask" && !order.tombstone
+    && ["awaiting_plan_approval", "approved", "preparing", "ready_for_human"].includes(order.state)).map((order): Ask => {
+    const served = byId.get(preparesOf(order));
+    const live = served && !["archived", "accepted"].includes(served.state) ? served : undefined;
+    const dueDay = (live ? dueOf(live, anchors) : undefined) ?? dueOf(order, anchors);
+    const question = prepQuestionOf(order);
+    const name = short(taskTitleOf(order), 24);
+    const core = live ? short(taskTitleOf(live), 24) : "";
+    return { id: `prepq:${order.id}`, kind: "prep_question", entityId: order.id, line: order.identityId,
+      urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}), raisedAt: "", fingerprint: question,
+      important: Boolean(live), ...(live ? { preview: taskPreview(live.id, "看要用它的任务") } : {}),
+      freeText: { placeholder: "直接写答案；在文件里的，写文件名或先上传再写在哪" },
+      title: `「${name}」需要本人回答：${short(question, 60)}`,
+      why: `助手${core ? `为「${core}」` : ""}做「${name}」，只差这一点本人知道的信息，回答约需几分钟。回答后由助手做完${core ? `，结果放在「${core}」的「已备好」里` : ""}；这件事不进任务列表，也不占日程。`,
+      options: [
+        { id: "answer", label: "回答，交给助手", recommended: true, detail: "助手按回答做完" },
+        { id: "skip", label: "不需要", detail: "这项准备不做了，归档，可从已归档恢复" }
+      ] };
+  });
+}
+
+/** The answer to a question for the assistant: kept in the order, which becomes the assistant's and takes effect. */
+function answerPrepQuestion(ctx: AccessContext, ask: Ask, optionId: string, note: string): AskResult {
+  const store = getStore();
+  const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
+  if (!order || (order.payload as { owner?: unknown }).owner !== "ask") return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+  if (optionId === "skip") return archiveWorkOrder(ctx, order.id, "本人表示不需要这项准备", { bySystem: true });
+  const answer = note.trim();
+  if (!answer) return { ok: false, code: "ASK_FIELD_REQUIRED" };
+  const question = prepQuestionOf(order);
+  store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), owner: "assistant", question, answer: answer.slice(0, 2000), answeredAt: new Date().toISOString() } });
+  record(ctx, "prep.question_answered", order.id, `prep:answered:${order.id}:${Date.now()}`, { question, answer: answer.slice(0, 2000) });
+  // A proposal until now (it never took effect by itself): the person's answer is the go-ahead, and the assistant takes it on its next pass.
+  if (order.state === "awaiting_plan_approval")
+    store.transitionWorkOrder(ctx.workspaceId, order.id, { type: "plan.approved", approvalId: ctx.principalId }, `prep-answered-approved:${order.id}:${Date.now()}`);
+  return { ok: true };
 }
 
 /** The assistant's work that stopped and will not be run again by itself, with its progress and the next step to choose (`lib/agent-ask.ts`). */
@@ -728,7 +789,7 @@ function lockedConflictAsks({ store, ctx, today, now }: Source): Ask[] {
 
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, overdueAsks, missedAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, overdueAsks, missedAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
@@ -749,7 +810,7 @@ type StepQuestionEntry = { order: StoredWorkOrder; plannedAt: string; version: n
 
 /** The open step questions, one entry per question, the same question from two tasks of one project once (the answer is per project). */
 function openStepQuestions({ store, ctx }: Source): StepQuestionEntry[] {
-  const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state))
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order))
     .map((order) => [order.id, order]));
   const answered = new Set(store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
   const asked = new Set<string>();
@@ -1017,6 +1078,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       }
       return { ok: true };
     }
+    case "prep_question": return answerPrepQuestion(ctx, ask, optionId, choice.note || values.answer || "");
     case "agent_blocked": return answerAgentAsk(ctx, ask, { optionIds: choice.optionIds, values, note: choice.note });
     case "calendar_publish_failed":
       getStore().setSetting(ctx.workspaceId, CALENDAR_PUBLISH_FAILURE, "");

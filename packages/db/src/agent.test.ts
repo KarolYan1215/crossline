@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
-  agentApprovalDecision, approveCategory, CLEAN_RUNS_TO_TRUST, CrosslineStore, declineCategory, decideAgentApproval, isPaused, listAgentTasks, pendingAgentApprovals,
+  agentApprovalDecision, approveCategory, CLEAN_RUNS_TO_TRUST, CrosslineStore, declineCategory, decideAgentApproval, deliverAgentResult, isPaused, listAgentTasks, pendingAgentApprovals,
   pendingCategoryRequests, readCategories, reopenAgentResult, requestAgentApproval, requestCategory, resultsAwaitingReview, reviewAgentTask, setPaused,
   settleAgentResult
 } from "./index";
@@ -151,4 +151,20 @@ test("only an account made from 2026-10-22 has the three kinds on by default; an
   vi.useRealTimers();
   expect(readCategories(store, old)).toEqual({});
   expect(Object.keys(readCategories(store, ws)).sort()).toEqual(["draft_text", "files_calendar_prep", "read_research_organize"]);
+});
+
+test("the assistant's own item, once delivered, is accepted without the gate and the core task it prepares is planned again with it", () => {
+  const owner = store.getWorkspaceOwnerId(ws)!;
+  const estimate = { p25Minutes: 30, p50Minutes: 45, p85Minutes: 90, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
+  const order = (id: string, payload: Record<string, unknown>) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research",
+    projectId: "p", milestoneId: "m", intent: id, state: "approved", riskTier: "routine", estimate, payload });
+  order("core", { owner: "person" });
+  order("prep", { owner: "assistant", prepares: "core" });
+  store.saveStepPlan(ws, "core", { archetypeId: "research_decision", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", units: [], questions: [], steps: [] }, owner, "t");
+  event("agent.task.requested", "tp", { title: "汇集规则", category: "read_research_organize", workOrderId: "prep", delegated: true });
+  event("agent.task.completed", "tp", { directory: "C:/ai/tp", durationMs: 5000, commands: 1, denied: 0, artifacts: [{ path: "规则.md", sha256: "x", bytes: 3 }],
+    needsHuman: 0, checksPassed: true, inputsModified: [], reviewRequired: false });
+  expect(deliverAgentResult(store, ws, "tp")).toEqual({ delivered: true });
+  expect(store.listWorkOrders(ws).find((item) => item.id === "prep")!.state).toBe("accepted");
+  expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "core" })[0]?.payload).toMatchObject({ prepared: "tp" });
 });

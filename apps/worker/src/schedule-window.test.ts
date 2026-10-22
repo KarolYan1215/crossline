@@ -128,3 +128,19 @@ test("a whole errand that prepares another order goes by that order's first open
   expect(prepWindow(store, "w", now).orders.has("errand2")).toBe(true);
   store.close();
 });
+
+test("the assistant's own item that nothing dates is done when the assistant is free; a dated one waits for its window", () => {
+  const store = new CrosslineStore(":memory:");
+  const now = new Date("2026-10-13T12:00:00.000Z");
+  saveOrder(store, "loose", { owner: "assistant" });
+  saveOrder(store, "core", { dueDate: "2026-11-30" });
+  plan(store, "core", [{ id: "a", title: "设计实验", executor: "human" }]);
+  saveOrder(store, "for-core", { owner: "assistant", prepares: "core" });
+  // An owner-less order with neither date nor block is still not prepared for (nothing says it is wanted).
+  saveOrder(store, "old");
+  const window = prepWindow(store, "w", now).orders;
+  expect(window.has("loose")).toBe(true);
+  expect(window.has("for-core")).toBe(false);
+  expect(window.has("old")).toBe(false);
+  store.close();
+});

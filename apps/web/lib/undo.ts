@@ -32,6 +32,14 @@ export type Inverse =
   | { kind: "records.deleted"; ids: string[]; deleted: boolean }
   /** Assistant results the daily pass put away or accepted (apps/worker/src/date-advance.ts) wait for the person again. */
   | { kind: "agent.reopen"; taskIds: string[] }
+  /**
+   * Work orders whose payload an operation rewrote — who does it (`owner`, `prepares`, a question's answer; docs/work-split.md) — get the
+   * payload back. `state`: the state it had then; one that was a proposal and took effect since (the assistant's item auto-approved) is a
+   * proposal again, unless the work went further.
+   */
+  | { kind: "work_order.payload"; entries: Array<{ id: string; payload: unknown; state?: string }> }
+  /** Step plans an operation rewrote get their open steps back (the done ones were never touched; `saveStepPlan` keeps them). */
+  | { kind: "step_plan.restore"; plans: Array<{ workOrderId: string; plan: StepPlanInput }> }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
@@ -136,6 +144,23 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
       case "records.deleted":
         for (const id of inverse.ids) store.setRecordDeleted(ctx.workspaceId, id, inverse.deleted);
         return { ok: true };
+      case "step_plan.restore":
+        for (const entry of inverse.plans) if (store.getStepPlan(ctx.workspaceId, entry.workOrderId))
+          store.saveStepPlan(ctx.workspaceId, entry.workOrderId, entry.plan, ctx.principalId, "undo");
+        return { ok: true };
+      case "work_order.payload": {
+        const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
+        for (const entry of inverse.entries) {
+          const order = orders.get(entry.id);
+          if (!order) continue;
+          store.saveWorkOrder({ ...order, payload: entry.payload });
+          if (entry.state === "awaiting_plan_approval" && ["approved", "preparing", "ready_for_human"].includes(order.state)) {
+            const attempt = store.listEvents(ctx.workspaceId, { type: "approval.revoked", entityId: entry.id }).length;
+            store.transitionWorkOrder(ctx.workspaceId, entry.id, { type: "approval.revoked", reason: "撤销整理" }, `undo-payload:${entry.id}:${attempt}`);
+          }
+        }
+        return { ok: true };
+      }
       case "agent.reopen":
         for (const id of inverse.taskIds) reopenAgentResult(store, ctx.workspaceId, id, ctx.principalId);
         return { ok: true };
@@ -238,9 +263,13 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
   const opened = [...after.waiting].filter(([id, now]) => !before.waiting.has(id) && now.state === "open").map(([id]) => id);
   if (opened.length) items.push({ kind: "waiting.cancel", ids: opened });
   const restored: string[] = [], archived: string[] = [], revoked: string[] = [];
+  const payloads: Array<{ id: string; payload: unknown }> = [];
   for (const [id, now] of after.orders) {
     const was = before.orders.get(id);
     if (!was) continue;
+    // Who does it changed (a question answered and handed to the assistant, docs/work-split.md): the whole payload goes back.
+    const ownership = (payload: unknown) => { const p = (payload ?? {}) as Record<string, unknown>; return JSON.stringify([p.owner, p.prepares, p.question, p.answer]); };
+    if (ownership(was.payload) !== ownership(now.payload)) payloads.push({ id, payload: was.payload });
     if (now.state === "archived" && was.state !== "archived") restored.push(id);
     if (was.state === "archived" && now.state !== "archived") archived.push(id);
     if (["awaiting_plan_approval", "blocked"].includes(was.state) && now.state === "approved") revoked.push(id);
@@ -250,6 +279,7 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
     if (was.estimate.p50Minutes !== now.estimate.p50Minutes)
       items.push({ kind: "work_order.estimate", id, estimate: { p25Minutes: was.estimate.p25Minutes, p50Minutes: was.estimate.p50Minutes, p85Minutes: was.estimate.p85Minutes } });
   }
+  if (payloads.length) items.push({ kind: "work_order.payload", entries: payloads });
   if (restored.length) items.push({ kind: "work_order.restore", ids: restored });
   if (archived.length) items.push({ kind: "work_order.archive", ids: archived });
   if (revoked.length) items.push({ kind: "approval.revoke", ids: revoked });

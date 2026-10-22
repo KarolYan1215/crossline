@@ -1,4 +1,5 @@
 import { stepLeavesMachine } from "./workflows";
+import { workOwner } from "./work-owner";
 
 /** Captures made from what a recording's digest heard the person promise (`apps/worker/src/recording-digest.ts`) carry this id prefix. */
 export const RECORDING_CAPTURE_PREFIX = "recording-";
@@ -72,6 +73,12 @@ export function autoApprovalEligible(order: Candidate & { id?: string }, options
   if (payload.seeded) return { eligible: false, reason: "示例任务，不自动生效" };
   // A question to the person (docs/work-split.md): the assistant takes the work once it is answered, not before.
   if ((order.payload as { owner?: unknown } | undefined)?.owner === "ask") return { eligible: false, reason: "先等本人回答问题，再由助手做" };
+  // The assistant's own preparation (docs/work-split.md): nothing in it is the person's to decide, so it takes effect and the assistant
+  // takes it — unless what it names is the person's after all (sending, a choice, graded answers), which `workOwner` says again here.
+  if ((order.payload as { owner?: unknown } | undefined)?.owner === "assistant") {
+    const verdict = workOwner(order);
+    return verdict.owner === "person" ? { eligible: false, reason: `${verdict.reason}，需本人确认` } : { eligible: true, reason: "助手的准备工作，不占本人时间，默认生效" };
+  }
   const what = `${payload.title ?? ""} ${order.intent}`;
   const parts = (payload.humanCore ?? []).map((part) => part.intent ?? "");
   if (PERSONS_CALL.test(what)) return { eligible: false, reason: "这件事本身是本人的选择或决定，需本人确认" };

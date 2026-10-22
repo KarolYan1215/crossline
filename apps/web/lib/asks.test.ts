@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { askQuadrant } from "@crossline/core";
 vi.mock("server-only", () => ({}));
@@ -275,6 +275,88 @@ test("a block whose completion check was answered yesterday is not asked about a
   store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "block-confirmed:m1", type: "block.confirmed", entityId: "m1",
     payload: { blockId: "scheduled:answered", workOrderId: "answered", day: "2026-10-06", outcome: "not_done" } });
   expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "missed_block").map((ask) => ask.entityId)).toEqual(["silent"]);
+});
+
+describe("work that is not the person's own (docs/work-split.md)", () => {
+  const save = (store: CrosslineStore, id: string, intent: string, state: string, payload: Record<string, unknown>) => store.saveWorkOrder({ id, ownerId: owner,
+    workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "mos2", intent, state: state as never, riskTier: "routine", estimate, payload: { title: intent, ...payload } });
+
+  test("a question for the assistant is one ask, never a task: answered, the work is the assistant's and takes effect; undone, it is a question again", async () => {
+    const store = setup();
+    save(store, "core", "根据已汇集的规则规划期中复习", "approved", { owner: "person", dueDate: "2026-10-08" });
+    save(store, "q", "整理本学期已出成绩", "awaiting_plan_approval", { owner: "ask", prepares: "core", question: "已出的作业和小测成绩各是多少？Gradescope 能导出吗？还有别的吗？" });
+    const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "prep_question")!;
+    expect(ask).toMatchObject({ id: "prepq:q", entityId: "q", urgency: "now", dueDay: "2026-10-08", important: true, preview: { href: "/workbench/core" } });
+    // At most two questions on a card.
+    expect(ask.title).toContain("已出的作业和小测成绩各是多少？");
+    expect(ask.title).not.toContain("还有别的吗");
+    expect(countPending(TEST_CTX)).toMatchObject({ workOrders: 0, asks: 1 });
+    const result = await answerAsk(TEST_CTX, ask.id, { optionIds: ["answer"], note: "作业 2 次各 95，小测 1 次 88" }, {}, NOW);
+    expect(result).toMatchObject({ ok: true });
+    const order = () => store.listWorkOrders(ws).find((item) => item.id === "q")!;
+    expect(order()).toMatchObject({ state: "approved", payload: { owner: "assistant", prepares: "core", answer: "作业 2 次各 95，小测 1 次 88" } });
+    expect(store.listEvents(ws, { type: "prep.question_answered", entityId: "q" })).toHaveLength(1);
+    expect(collectAsks(TEST_CTX, NOW).some((item) => item.kind === "prep_question")).toBe(false);
+    const { undoOp } = await import("./undo");
+    expect(undoOp(TEST_CTX, (result as { op?: { id: string } }).op!.id)).toMatchObject({ ok: true });
+    expect(order()).toMatchObject({ state: "awaiting_plan_approval", payload: { owner: "ask" } });
+  });
+
+  test("撤销 on the work-split reorganisation puts the payloads back, and a proposal that took effect since is a proposal again", async () => {
+    const store = setup();
+    save(store, "prep", "汇集期中规则", "approved", { owner: "assistant", prepares: "", reorganized: "repair.work-split.v1" });
+    save(store, "kept", "汇集讲义", "approved", { owner: "assistant" });
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "op.applied:op-split", type: "op.applied", entityId: "op-split",
+      payload: { bySystem: true, label: "任务分工整理", inverse: { kind: "work_order.payload", entries: [
+        { id: "prep", payload: { title: "汇集期中规则" }, state: "awaiting_plan_approval" }, { id: "kept", payload: { title: "汇集讲义" }, state: "approved" }] } } });
+    const { undoOp } = await import("./undo");
+    expect(undoOp(TEST_CTX, "op-split")).toMatchObject({ ok: true });
+    const get = (id: string) => store.listWorkOrders(ws).find((item) => item.id === id)!;
+    expect(get("prep")).toMatchObject({ state: "awaiting_plan_approval", payload: { title: "汇集期中规则" } });
+    expect((get("prep").payload as { owner?: string }).owner).toBeUndefined();
+    expect(get("kept")).toMatchObject({ state: "approved", payload: { title: "汇集讲义" } });
+  });
+
+  test("撤销 on the reorganisation also gives a task its open steps back", async () => {
+    const store = setup();
+    save(store, "core", "规划期中复习", "approved", { owner: "person" });
+    const plan = (executor: "human" | "agent") => ({ archetypeId: "problem_set", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", units: [], questions: [],
+      steps: [{ id: "s1", role: "do", title: "下载往年卷", deliverable: "", doneCriterion: "", share: 1, estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60 },
+        dependsOn: [], notBefore: "", dueBy: "", schedulable: executor === "human", executor, tickOutcome: "" }] });
+    store.saveStepPlan(ws, "core", plan("agent"), owner, "work-split");
+    store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "op.applied:op-steps", type: "op.applied", entityId: "op-steps",
+      payload: { bySystem: true, label: "任务分工整理", inverse: { kind: "step_plan.restore", plans: [{ workOrderId: "core", plan: plan("human") }] } } });
+    const { undoOp } = await import("./undo");
+    expect(undoOp(TEST_CTX, "op-steps")).toMatchObject({ ok: true });
+    expect(store.getStepPlan(ws, "core")!.steps.map((step) => [step.title, step.executor, step.schedulable])).toEqual([["下载往年卷", "human", true]]);
+  });
+
+  test("「不需要」 archives the question by the system; an answer with no words is refused", async () => {
+    const store = setup();
+    save(store, "q", "确认期中复习范围", "awaiting_plan_approval", { owner: "ask", question: "期中考到第几讲？" });
+    expect(await answerAsk(TEST_CTX, "prepq:q", "answer", {}, NOW)).toMatchObject({ ok: false });
+    expect(await answerAsk(TEST_CTX, "prepq:q", "skip", {}, NOW)).toMatchObject({ ok: true });
+    expect(store.listWorkOrders(ws).find((item) => item.id === "q")!.state).toBe("archived");
+  });
+
+  test("no reminder or question about the assistant's work: not missed yesterday, not at risk, not a gate verdict", () => {
+    const store = setup();
+    save(store, "prep", "形成 ECE 548 各计分组成的当前成绩与待定状态清单", "approved", { owner: "assistant", dueDate: "2026-10-09" });
+    store.setSetting(ws, "schedule.day:2026-10-06", JSON.stringify({ prep: "09:00" }));
+    const kinds = collectAsks(TEST_CTX, NOW).filter((ask) => ask.entityId === "prep" || ask.entityId === "mos2").map((ask) => ask.kind);
+    expect(kinds).not.toContain("missed_block");
+    expect(kinds).not.toContain("milestone_risk");
+  });
+
+  test("a milestone that is only preparation carries no risk card of its own", () => {
+    const store = setup();
+    store.saveMilestone({ id: "mos2", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", title: "考核缺口已可按 A- 分数线识别", status: "approved", version: 3,
+      successCriteria: [{ id: "c1", statement: "ECE 548 与 ECE 555 考核缺口已可按 A- 分数线识别", measure: { kind: "artifact" } }] as never });
+    save(store, "work", "推导第 3 章的状态方程", "approved", { owner: "person", dueDate: "2026-10-09" });
+    save(store, "work2", "完成第 4 章习题", "approved", { owner: "person", dueDate: "2026-10-09" });
+    for (const id of ["work", "work2"]) store.saveWorkOrder({ ...store.listWorkOrders(ws).find((item) => item.id === id)!, estimate: { ...estimate, p50Minutes: 6000, p85Minutes: 9000 } });
+    expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "milestone_risk" && ask.entityId === "mos2")).toBe(false);
+  });
 });
 
 test("a backplan question about a milestone still in the task library waits until its window opens", () => {

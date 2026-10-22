@@ -1,5 +1,5 @@
 import "server-only";
-import { archetypeById, completionRule, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type Preparation, type SuccessCriterion,
+import { archetypeById, completionRule, preparesOf, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type Preparation, type SuccessCriterion,
   type EvidenceQuestionTemplate } from "@crossline/core";
 import { doneKinds, listAgentTasks, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
@@ -25,7 +25,10 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const labels = new Map(identityPacksFor((key) => store.getSetting(workspaceId, key), { includeArchived: true }).map((pack) => [pack.id, pack.label]));
   const executions = store.listExecutions(workspaceId);
   const documents = store.listSourceDocuments(workspaceId);
-  const agentTasks = listAgentTasks(store, workspaceId).filter((task) => ids.has(task.workOrderId));
+  // The assistant's own items for these tasks (`payload.prepares`, docs/work-split.md): what they made is the task's 「已备好」.
+  const preparedFor = new Map(store.listWorkOrders(workspaceId).filter((order) => ids.has(preparesOf(order))).map((order) => [order.id, preparesOf(order)]));
+  const agentTasks = listAgentTasks(store, workspaceId).filter((task) => ids.has(task.workOrderId) || preparedFor.has(task.workOrderId))
+    .map((task) => preparedFor.has(task.workOrderId) ? { ...task, workOrderId: preparedFor.get(task.workOrderId)!, stepId: "" } : task);
   const confirmed = store.listEvents(workspaceId, { type: "criterion.confirmed" });
   const assessed = store.listEvents(workspaceId, { type: "criteria.assessed" });
   const notes = store.listEvents(workspaceId, { type: "task.note" }).filter((event) => ids.has(event.entityId));

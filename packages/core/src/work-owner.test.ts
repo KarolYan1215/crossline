@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPreparationOnlyCriterion, onPersonsBoard, workOwner, type WorkOwner } from "./work-owner";
+import { isPreparationOnlyCriterion, isPreparationOnlyMilestone, onPersonsBoard, workOwner, type WorkOwner } from "./work-owner";
 import { assignBackplanOwners, rollingBackplan, validateBackplan } from "./backplan-schema";
 
 /** [title, the model's owner, the owner workOwner must give]: one table per kind of line, none of them special-cased in the rules. */
@@ -69,6 +69,33 @@ describe("workOwner", () => {
     expect(workOwner({ title: "复习并整理第 3 讲笔记", owner: "person" }).owner).toBe("person");
   });
 
+  // The owner's examples (2026-10-21) and their kind in other lines: designing, interpreting and planning the person's own work, or
+  // writing its core output, are the person's even when the model handed them to the assistant. Production to a plan stays the model's.
+  it("keeps design, interpretation and planning with the person whatever the model said, in any line", () => {
+    for (const title of [
+      "根据已汇集的规则、材料和已有成绩规划复习与练习", "基于材料判断要补哪些实验、怎么补、用什么 AI 工具", "分析已整理的访谈记录，确定 MVP 方案",
+      "规划下季度的选题方向", "评估三只基金是否适合定投", "撰写论文讨论部分", "设计 4 周的训练计划", "确定改版思路", "复盘上月开支并定下预算"
+    ]) expect(workOwner({ title, owner: "assistant" }), title).toMatchObject({ owner: "person" });
+    expect(workOwner({ title: "规划下季度的选题方向", owner: "assistant" }).code).toBe("design");
+  });
+
+  it("leaves production to a plan and compiling of design material with the model or the assistant", () => {
+    expect(workOwner({ title: "编写数据清洗脚本", owner: "assistant" }).owner).toBe("assistant");
+    expect(workOwner({ title: "做第一期视频封面", owner: "assistant" }).owner).toBe("assistant");
+    expect(workOwner({ title: "撰写视频脚本初稿", owner: "assistant" }).owner).toBe("assistant");
+    // The design word names a thing being compiled, after the compiling verb.
+    expect(workOwner({ title: "整理论文写作规范", owner: "person" }).owner).toBe("assistant");
+    expect(workOwner({ title: "汇总三篇论文的分析方法", owner: "person" }).owner).toBe("assistant");
+  });
+
+  it("a step of graded homework that touches its problems or answers is the person's, whatever its verb; one choosing the single option too", () => {
+    expect(workOwner({ title: "完成其余题目并整理最终解答", taskTitle: "完成 ECE 555 作业 4" }).owner).toBe("person");
+    expect(workOwner({ title: "标注首题约束", taskTitle: "完成 ECE 555 作业 3" }).owner).toBe("person");
+    expect(workOwner({ title: "汇总往年卷题型", taskTitle: "准备 ECE 548 期中复习" }).owner).toBe("assistant");
+    expect(workOwner({ title: "下载作业要求", taskTitle: "完成 ECE 555 作业 3" }).owner).toBe("assistant");
+    expect(workOwner({ title: "确认唯一标的与复核范围", owner: "person" }).owner).toBe("person");
+  });
+
   it("reads a purpose clause as what the work is for, not what it does", () => {
     expect(workOwner({ title: "整理三个候选方案的对比表", intent: "整理三个候选方案的对比表，供本人决定", owner: "person" }).owner).toBe("assistant");
     expect(workOwner({ title: "整理投稿要求", intent: "整理目标期刊的投稿要求与格式", owner: "person" }).owner).toBe("assistant");
@@ -99,6 +126,16 @@ describe("onPersonsBoard", () => {
     expect(onPersonsBoard({ payload: { owner: "assistant" } })).toBe(false);
     expect(onPersonsBoard({ payload: { owner: "ask" } })).toBe(false);
     expect(onPersonsBoard({})).toBe(true);
+  });
+});
+
+describe("isPreparationOnlyMilestone", () => {
+  it("is a milestone whose every criterion is readiness or identification, never one with a result of the person's", () => {
+    expect(isPreparationOnlyMilestone({ successCriteria: [{ statement: "ECE 548 与 ECE 555 考核缺口已可按 A- 分数线识别" },
+      { statement: "两门课的评分规则清单覆盖全部计分组成与权重" }] })).toBe(true);
+    expect(isPreparationOnlyMilestone({ successCriteria: [{ statement: "往年卷已汇集" }, { statement: "期中成绩 ≥ 88/100" }] })).toBe(false);
+    expect(isPreparationOnlyMilestone({ successCriteria: [] })).toBe(false);
+    expect(isPreparationOnlyMilestone({ successCriteria: [{ statement: "5 家门店资料清单建立" }] })).toBe(true);
   });
 });
 
@@ -150,5 +187,14 @@ describe("backplan owners", () => {
     const answer = () => ({ steps: [item("a", "汇集期中考试规则与往年卷", { sourceQuote: "期中" })], dateCandidates: [], blockers: [] });
     expect(() => validateBackplan(answer(), ["期中"])).toThrow("BACKPLAN_NO_PERSON_CORE");
     expect(validateBackplan(answer(), ["期中"], undefined, [], undefined, [], { requireCore: false }).steps).toHaveLength(1);
+  });
+});
+
+describe("a written-down standard is read, not asked", () => {
+  it("a course's or a venue's rules go to the assistant; the person's own standard is asked", () => {
+    expect(workOwner({ title: "确认课程项目评分标准" }).owner).toBe("assistant");
+    expect(workOwner({ title: "确认会议投稿格式要求" }).owner).toBe("assistant");
+    expect(workOwner({ title: "确认核心流程完成标准" }).owner).toBe("ask");
+    expect(workOwner({ title: "确定 Crossline 试用者口径" }).owner).toBe("ask");
   });
 });

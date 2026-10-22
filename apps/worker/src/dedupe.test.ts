@@ -38,9 +38,10 @@ test("rules: the same title merges, a numbered sibling or a milestone weeks apar
 
 test("a standalone request becomes the first steps of the task it serves; the merge is said once a day and undoable", async () => {
   store = new CrosslineStore(":memory:");
-  order("ask", "确认 ECE 548 期中考查范围");
-  order("mat", "汇集 ECE 548 复习材料");
-  order("mat2", "整理 ECE 548 复习材料", { payload: { dueDate: "2026-10-25" } });
+  // Recorded as the person's (as orders the person kept doing themselves are): what is merged and folded is decided within one owner.
+  order("ask", "确认 ECE 548 期中考查范围", { payload: { owner: "person" } });
+  order("mat", "汇集 ECE 548 复习材料", { payload: { owner: "person" } });
+  order("mat2", "整理 ECE 548 复习材料", { payload: { dueDate: "2026-10-25", owner: "person" } });
   order("hw2", "完成 ECE 555 作业 2", { projectId: "ece555", milestoneId: "hw" });
   order("hw3", "完成 ECE 555 作业 3", { projectId: "ece555", milestoneId: "hw" });
   store.saveStepPlan(ws, "mat", { archetypeId: "research_decision", quantity: { basis: "", amount: 0, unit: "" }, rationale: "",
@@ -64,6 +65,20 @@ test("a standalone request becomes the first steps of the task it serves; the me
   order("dup", "汇集 ECE 548 复习材料");
   expect(await dedupePass(deps())).toEqual([]);
   expect(mergeTasks(store, ws).find((item) => item.id === "dup")?.state).toBe("approved");
+});
+
+test("the person's work is never merged with the assistant's or with a question, nor a question folded into the assistant's task (docs/work-split.md)", async () => {
+  store = new CrosslineStore(":memory:");
+  order("prep", "汇集 ECE 548 复习材料", { payload: { owner: "assistant" } });
+  order("mine", "汇集 ECE 548 复习材料", { payload: { owner: "person" } });
+  order("q", "确认 ECE 548 期中考查范围", { payload: { owner: "ask", question: "期中考到第几讲？" } });
+  expect(await dedupePass(deps())).toEqual([]);
+  expect(["prep", "mine", "q"].map((id) => store.getWorkOrder(ws, id)!.state)).toEqual(["approved", "approved", "approved"]);
+  // Orders written before owners are read by what they produce: a compiling task and a question are apart from the person's too.
+  order("old-prep", "汇集 ECE 548 往年卷");
+  order("old-q", "确认 ECE 548 期中考查范围");
+  expect(Object.fromEntries(mergeTasks(store, ws).map((task) => [task.id, task.owner])))
+    .toEqual({ prep: "assistant", mine: "person", q: "ask", "old-prep": "assistant", "old-q": "ask" });
 });
 
 test("requests in one milestone with nothing else to serve become one email; a task under way is never absorbed", async () => {

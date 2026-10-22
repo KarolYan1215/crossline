@@ -34,6 +34,25 @@ test("only an approved order the person has not started can be handed over, and 
   expect(taskFromWorkOrder(store, ws, "missing")).toMatchObject({ ok: false, code: "ORDER_NOT_FOUND" });
 });
 
+test("owned work (docs/work-split.md): the assistant's item is handed over whole for the core task it prepares; a question and the person's core task are not", () => {
+  approveCategory(store, ws, "read_research_organize");
+  const owned = (id: string, intent: string, payload: Record<string, unknown>) => store.saveWorkOrder({ id, ownerId: "o", workspaceId: ws, identityId: "research",
+    projectId: "p", milestoneId: "", intent, state: "approved", riskTier: "routine", estimate, payload: { title: intent, ...payload } });
+  owned("core", "根据已汇集的规则和往年卷规划期中复习", { owner: "person" });
+  owned("prep", "汇集期中考试规则与往年卷", { owner: "assistant", prepares: "core", automationParts: [{ id: "a", intent: "汇集期中考试规则与往年卷" }] });
+  owned("q", "整理本学期已出成绩", { owner: "ask", prepares: "core", question: "已出的成绩是多少？" });
+  // A step of it ran before it was reorganised to the assistant: it is still the assistant's to do whole.
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "step-run", type: "agent.task.requested", entityId: "agent-x-v1s1-1",
+    payload: { title: "一步", category: "read_research_organize", workOrderId: "prep", stepId: "v1s1" } });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "step-done", type: "agent.task.completed", entityId: "agent-x-v1s1-1",
+    payload: { directory: "", artifacts: [], checksPassed: true, inputsModified: [], reviewRequired: false } });
+  expect(dispatchCandidates(store, ws)).toEqual(["prep"]);
+  const task = taskFromWorkOrder(store, ws, "prep");
+  if (!task.ok) throw new Error(task.message);
+  expect(task.input).toMatchObject({ delegated: true });
+  expect(task.input.what).toContain("根据已汇集的规则和往年卷规划期中复习");
+});
+
 test("a kind of work that has not been approved is asked about, not started, and the order waits", () => {
   order("wo-1", "写脚本画图", ["写 Python 脚本清洗数据并画图"]);
   expect(dispatchCandidates(store, ws)).toEqual([]);

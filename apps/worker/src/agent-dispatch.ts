@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DISPATCH_STATES, STEP_STARTS_SETTING, agentChainKey, autoHandoffTiming, isAgentCategory, relevantDocuments, retryDue, stepCategory, type AgentCategory, type AgentChain
+  DISPATCH_STATES, STEP_STARTS_SETTING, agentChainKey, onPersonsBoard, autoHandoffTiming, isAgentCategory, relevantDocuments, retryDue, stepCategory, type AgentCategory, type AgentChain
 } from "@crossline/core";
 import {
   agentApprovalDecision, agentChainsFor, assistantPlanFor, decideAgentApproval, declinedCategories, deliverableKey, isAutoHandoff, isPaused, listAgentTasks, readCategories,
@@ -89,11 +89,15 @@ export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, or
     .slice(0, 20).map((fact) => `- ${fact.slot}：${fact.value.slice(0, 200)}`);
   const before = retryContext(store, workspaceId, agentChainKey({ workOrderId: orderId, stepId: "", title: order.intent }));
   const what = [facts.length ? `${plan.what}\n本人确认过的相关事实（可以直接用）：\n${facts.join("\n")}` : plan.what, before.text].filter(Boolean).join("\n");
-  const attempt = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId).length + 1;
+  const runs = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId);
+  const attempt = runs.length + 1;
+  // What the assistant already made for this order (a step of it, before it became the assistant's whole): read only, to build on.
+  const earlier = plan.delegated ? runs.filter((task) => (task.status === "accepted" || task.status === "needs_review") && task.directory && existsSync(task.directory))
+    .map((task) => task.directory) : [];
   return {
     ok: true, category, why: plan.why, graded: plan.graded,
     input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${attempt}`, workOrderId: orderId, title: order.intent, what,
-      category: category ?? "read_research_organize", humanPart: plan.humanPart, inputs: [...inputs, ...before.inputs], ...(plan.notes ? { notes: plan.notes } : {}),
+      category: category ?? "read_research_organize", humanPart: plan.humanPart, inputs: [...new Set([...inputs, ...before.inputs, ...earlier])], ...(plan.notes ? { notes: plan.notes } : {}),
       ...(plan.delegated ? { delegated: true } : {}), lessons: assistantLessons(store, workspaceId, orderId) }
   };
 }
@@ -110,10 +114,14 @@ export function dispatchCandidates(store: CrosslineStore, workspaceId: string, w
   // An order is tried once any run of it (or of a step of it) exists, unless its whole-order runs were interrupted and the next is due.
   const chains = agentChainsFor(store, workspaceId, now);
   const due = new Set(chains.filter((chain) => !chain.latest.stepId && retryDue(chain, now)).map((chain) => chain.latest.workOrderId));
-  const tried = new Set(chains.map((chain) => chain.latest.workOrderId).filter((id) => id && !due.has(id)));
-  for (const chain of chains) if (chain.latest.stepId) tried.add(chain.latest.workOrderId);
+  const tried = new Set(chains.filter((chain) => !chain.latest.stepId).map((chain) => chain.latest.workOrderId).filter((id) => id && !due.has(id)));
+  const orders = store.listWorkOrders(workspaceId);
+  // A step of an order once handed over keeps the rest of the order its person's — except the assistant's own item (docs/work-split.md:
+  // an order reorganised to the assistant after one of its steps ran is still the assistant's to do whole).
+  const assistants = new Set(orders.filter((order) => (order.payload as { owner?: unknown } | undefined)?.owner === "assistant").map((order) => order.id));
+  for (const chain of chains) if (chain.latest.stepId && !assistants.has(chain.latest.workOrderId)) tried.add(chain.latest.workOrderId);
   const out: string[] = [];
-  for (const order of store.listWorkOrders(workspaceId)) {
+  for (const order of orders) {
     if (tried.has(order.id) || order.tombstone || !DISPATCH_STATES.has(order.state) || (within && !within.has(order.id))) continue;
     const result = taskFromWorkOrder(store, workspaceId, order.id);
     // Wording that points at no kind is the person's to decide; nothing starts without a kind.
@@ -136,8 +144,9 @@ export function stepDispatchCandidates(store: CrosslineStore, workspaceId: strin
   const approved = readCategories(store, workspaceId);
   const declined = new Set(declinedCategories(store, workspaceId));
   const tried = triedSteps(store, workspaceId, now);
-  const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active"))
-    .map((order) => [order.id, order]));
+  // The person's tasks only: an order that is the assistant's whole (docs/work-split.md) is handed over whole, not step by step.
+  const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active")
+    && onPersonsBoard(order)).map((order) => [order.id, order]));
   const out: Array<{ orderId: string; stepId: string; due: string; seq: number }> = [];
   const made = madeInProject(store, workspaceId);
   for (const plan of store.listStepPlans(workspaceId)) {
@@ -259,7 +268,7 @@ export function autoHandoffCandidates(store: CrosslineStore, workspaceId: string
   const timing = new Set(store.listExecutions(workspaceId).filter((execution) => !execution.endedAt
     && !(execution.interruptions.at(-1) && !execution.interruptions.at(-1)!.resumedAt)).map((execution) => execution.workOrderId));
   const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active")
-    && !timing.has(order.id)).map((order) => [order.id, order]));
+    && !timing.has(order.id) && onPersonsBoard(order)).map((order) => [order.id, order]));
   const out: Array<{ orderId: string; stepId: string; at: string; when: "due" | "early" }> = [];
   for (const plan of store.listStepPlans(workspaceId)) {
     if (!orders.has(plan.workOrderId)) continue;
