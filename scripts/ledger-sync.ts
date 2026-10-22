@@ -1,4 +1,7 @@
 /**
+ * ONE-OFF MOVES ONLY since 2026-10-22 (docs/device-mode.md): the hosted site is the one primary ledger and this computer is a device of
+ * it; running this on a schedule made both sides' workers spend the same quota on the same work. Kept for moving a ledger by hand.
+ *
  * Keeps the owner's ledger the same on this machine and on the hosted server (docs/ledger-sync.md): whichever side the person
  * last acted on wins and is copied whole over the other. Runs on the owner's Windows machine (it holds the SSH key); the server
  * side is deploy/server/ledger-sync.sh, copied over and run with sudo on each call.

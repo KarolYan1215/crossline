@@ -358,6 +358,30 @@ export const SOURCE_FOLDER_GUIDE: SetupGuideSpec = {
   ]
 };
 
+/**
+ * A computer as a device of the hosted account (docs/device-mode.md): the token made on the hosted 「这台电脑」 card, pasted on the
+ * computer's own `/device` page. Shown beside both buttons.
+ */
+export const DEVICE_LINK_GUIDE: SetupGuideSpec = {
+  title: "连接教程：把电脑设为这个账号的设备",
+  intro: "连接后，电脑上的 Crossline 只读本机的屏幕活动、作息、键鼠节律、授权文件夹和录音，结果立即发到网页版；计划、任务、访谈和所有模型工作只在网页版进行，额度不再花两遍。",
+  providers: [
+    { id: "windows", label: "Windows 上的 Crossline", steps: [
+      "在网页版打开 设置 → 通用 →「这台电脑」，点「生成设备令牌」。令牌只显示一次，复制下来。",
+      "在那台电脑的浏览器打开下方的设备页地址（要先登录电脑上的 Crossline）。",
+      "「网页版地址」填网页版的地址，「设备令牌」粘贴刚才复制的令牌，点「连接」。电脑先用令牌问一次网页版，通过才保存。",
+      "几秒后后台服务以设备模式重启，设备页显示待发送和上次送达的时间；电脑上的其他页面从此打开网页版。",
+      "在设备页确认屏幕活动、作息、键鼠节律、录音转写和文件夹的开关；它们留在电脑上，连接不会改。"],
+    facts: [{ label: "设备页", value: "http://127.0.0.1:3210/device" }, { label: "网页版地址", value: "https://app.crossline.lol" }],
+    note: "令牌用 Windows 自带的数据保护加密保存，只有当前 Windows 用户能读取，不进账本、不进备份。" }
+  ],
+  problems: [
+    { symptom: "提示令牌无效或已撤销", fix: "在网页版「这台电脑」重新生成令牌：再生成一次，旧令牌立即失效。" },
+    { symptom: "设备页提示网页版拒绝了发送", fix: "令牌被撤销或换了新的。在设备页先「断开」，再用新令牌「连接」。没发出去的内容留在电脑上，连上后补发。" },
+    { symptom: "连接后设备页一直显示后台服务没有响应", fix: "后台服务没有被自动拉起（例如用命令行手动启动的）。重新运行启动脚本 scripts\\start-crossline.ps1。" }
+  ]
+};
+
 /** Where each preset's API key is made (apps/worker/src/model-provider.ts `PROVIDER_PRESETS`). */
 const KEY_PAGES: Array<{ id: string; label: string; url: string; note?: string }> = [
   { id: "deepseek", label: "DeepSeek", url: "https://platform.deepseek.com/api_keys", note: "需先在开放平台充值。" },

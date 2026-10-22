@@ -165,9 +165,10 @@ export function slotEnergy(model: EnergyModel, startIso: string, fallback: Energ
  */
 // `records` (docs/domain-lines.md) may only add money and health records through /api/records: payment notifications, a Wallet transaction.
 // `recording` (docs/phone-recording.md) may only upload recordings for the server transcriber.
-export type DeviceTokenScope = "health" | "capture" | "records" | "recording";
-const TOKEN_SETTING: Record<DeviceTokenScope, string> = { health: HEALTH_TOKEN_SETTING, capture: "capture.token.sha256", records: "records.token.sha256",
-  recording: "recording.token.sha256" };
+// `device` (docs/device-mode.md) may only send what a linked computer read on itself: activity aggregates, folder files' text, transcripts.
+export type DeviceTokenScope = "health" | "capture" | "records" | "recording" | "device";
+export const TOKEN_SETTING: Record<DeviceTokenScope, string> = { health: HEALTH_TOKEN_SETTING, capture: "capture.token.sha256", records: "records.token.sha256",
+  recording: "recording.token.sha256", device: "device.token.sha256" };
 
 export function issueDeviceToken(ctx: AccessContext, scope: DeviceTokenScope): string {
   const token = randomBytes(24).toString("base64url");

@@ -1,5 +1,7 @@
 # 本机与服务器账本的长期同步
 
+> **已停用（2026-10-22）。** 两边的 worker 各自跑同一套倒推、步骤规划和助手任务，同一个 ChatGPT 额度花两遍，一边的结果随后被覆盖。本人决定托管站是唯一的主账本，本机改为这个账号的「设备」，只发本机读到的东西：见 [device-mode.md](device-mode.md)。「Crossline Ledger Sync」计划任务已停用，`scripts/install-ledger-sync.ps1` 不再属于正常安装（不加 `-IKnowThisSpendsTwice` 会拒绝）。`scripts/ledger-sync.ts`、`pack-for-server.ts`、`migrate-workspace.ts` 保留，只用于手动的一次性搬迁。下文是停用前的记录。
+
 本人要求（2026-10-20）：本机常驻版（`data/crossline.db`）和托管内测服务器上本人账号的账本始终一致，哪边新就用哪边整份覆盖另一边。此前只有单向搬运（`scripts/pack-for-server.ts` → `[migrate]` / `[migrate-apply]`，docs/beta-launch.md §10.6）。
 
 ## 规则

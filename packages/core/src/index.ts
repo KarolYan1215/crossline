@@ -538,3 +538,4 @@ export * from "./task-merge";
 export * from "./plain-voice";
 export * from "./mail";
 export * from "./automations";
+export * from "./device";

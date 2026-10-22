@@ -337,8 +337,52 @@ async function installLocalPlugin(client: CodexRpcBoundary, plugin: LocalPluginC
   return [...names].sort();
 }
 
+export type SourceFolderHandlers = NonNullable<Parameters<typeof startCodexSupervisor>[0]>["sourceFolders"] & object;
+
+/**
+ * The authorized-folder routes under `/v1/sources/folders` (docs/onboarding-v3.md 「文件夹授权」), answered for the caller's workspace.
+ * Shared by the supervisor and by a linked device's small server (docs/device-mode.md), which keeps folders on the machine they are on.
+ * Returns false when the path is not one of these routes.
+ */
+export async function handleSourceFolderRequest(request: IncomingMessage, response: ServerResponse, pathname: string, callerWorkspaceId: string,
+  folders: SourceFolderHandlers): Promise<boolean> {
+  if (request.headers.origin || (request.method !== "DELETE" && !request.headers["content-type"]?.startsWith("application/json"))) {
+    sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+    return true;
+  }
+  const one = /^\/v1\/sources\/folders\/([A-Za-z0-9-]{1,40})(\/lines|\/exclusions|\/purge)?$/.exec(pathname);
+  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length <= 300).slice(0, 500) : [];
+  try {
+    if (request.method === "POST" && (pathname === "/v1/sources/folders/preview" || pathname === "/v1/sources/folders")) {
+      const body = await readJsonBody(request).catch(() => undefined) as { path?: unknown; exclude?: unknown; include?: unknown; names?: unknown } | undefined;
+      if (typeof body?.path !== "string" || !body.path.trim() || body.path.length > 1000) {
+        sendJson(response, 400, { blocker: { code: "FOLDER_PATH_REQUIRED", message: "需要文件夹路径" } });
+        return true;
+      }
+      sendJson(response, 200, await (pathname.endsWith("/preview") ? folders.preview(callerWorkspaceId, body.path, strings(body.names))
+        : folders.add(callerWorkspaceId, body.path, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) })));
+      return true;
+    }
+    if (request.method === "DELETE" && one && (!one[2] || one[2] === "/purge")) { sendJson(response, 200, await folders.remove(callerWorkspaceId, one[1]!, one[2] === "/purge")); return true; }
+    if (request.method === "POST" && one?.[2] === "/exclusions") {
+      const body = await readJsonBody(request).catch(() => undefined) as { exclude?: unknown; include?: unknown; names?: unknown } | undefined;
+      if (!Array.isArray(body?.exclude) || !Array.isArray(body?.include)) { sendJson(response, 400, { blocker: { code: "FOLDER_RULES_REQUIRED", message: "需要 exclude 与 include 数组" } }); return true; }
+      sendJson(response, 200, await folders.setRules(callerWorkspaceId, one[1]!, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) }));
+      return true;
+    }
+    if (request.method === "POST" && one?.[2] === "/lines") {
+      const body = await readJsonBody(request).catch(() => undefined) as { lines?: unknown } | undefined;
+      const lines = Array.isArray(body?.lines) ? body.lines.filter((line): line is string => typeof line === "string" && line.length <= 80) : undefined;
+      if (!lines) { sendJson(response, 400, { blocker: { code: "FOLDER_LINES_REQUIRED", message: "需要 lines 数组" } }); return true; }
+      sendJson(response, 200, await folders.setLines(callerWorkspaceId, one[1]!, lines));
+      return true;
+    }
+  } catch { sendJson(response, 502, { blocker: { code: "FOLDER_FAILED", message: "文件夹操作没有完成" } }); return true; }
+  return false;
+}
+
 /** Reads a small JSON body. Capped because this listener is reachable by anything on the loopback. */
-async function readJsonBody(request: IncomingMessage, maxBytes = 64_000): Promise<Record<string, unknown> | undefined> {
+export async function readJsonBody(request: IncomingMessage, maxBytes = 64_000): Promise<Record<string, unknown> | undefined> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -354,7 +398,7 @@ async function readJsonBody(request: IncomingMessage, maxBytes = 64_000): Promis
   } catch { return undefined; }
 }
 
-function sendJson(response: ServerResponse, statusCode: number, value: unknown): void {
+export function sendJson(response: ServerResponse, statusCode: number, value: unknown): void {
   response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   response.end(JSON.stringify(value));
 }
@@ -940,39 +984,7 @@ export async function startCodexSupervisor(options: {
       // Authorized folders (docs/onboarding-v3.md 「文件夹授权」). The path is the person's own, typed on this machine; the worker checks it
       // (absolute, an existing folder, not a drive, the user folder, a system folder or the app's own data) before walking anything.
       if (pathname.startsWith("/v1/sources/folders") && options.sourceFolders) {
-        if (request.headers.origin || (request.method !== "DELETE" && !request.headers["content-type"]?.startsWith("application/json"))) {
-          sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
-          return;
-        }
-        const folders = options.sourceFolders;
-        const one = /^\/v1\/sources\/folders\/([A-Za-z0-9-]{1,40})(\/lines|\/exclusions|\/purge)?$/.exec(pathname);
-        const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length <= 300).slice(0, 500) : [];
-        try {
-          if (request.method === "POST" && (pathname === "/v1/sources/folders/preview" || pathname === "/v1/sources/folders")) {
-            const body = await readJsonBody(request).catch(() => undefined) as { path?: unknown; exclude?: unknown; include?: unknown; names?: unknown } | undefined;
-            if (typeof body?.path !== "string" || !body.path.trim() || body.path.length > 1000) {
-              sendJson(response, 400, { blocker: { code: "FOLDER_PATH_REQUIRED", message: "需要文件夹路径" } });
-              return;
-            }
-            sendJson(response, 200, await (pathname.endsWith("/preview") ? folders.preview(callerWorkspaceId, body.path, strings(body.names))
-              : folders.add(callerWorkspaceId, body.path, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) })));
-            return;
-          }
-          if (request.method === "DELETE" && one && (!one[2] || one[2] === "/purge")) { sendJson(response, 200, await folders.remove(callerWorkspaceId, one[1]!, one[2] === "/purge")); return; }
-          if (request.method === "POST" && one?.[2] === "/exclusions") {
-            const body = await readJsonBody(request).catch(() => undefined) as { exclude?: unknown; include?: unknown; names?: unknown } | undefined;
-            if (!Array.isArray(body?.exclude) || !Array.isArray(body?.include)) { sendJson(response, 400, { blocker: { code: "FOLDER_RULES_REQUIRED", message: "需要 exclude 与 include 数组" } }); return; }
-            sendJson(response, 200, await folders.setRules(callerWorkspaceId, one[1]!, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) }));
-            return;
-          }
-          if (request.method === "POST" && one?.[2] === "/lines") {
-            const body = await readJsonBody(request).catch(() => undefined) as { lines?: unknown } | undefined;
-            const lines = Array.isArray(body?.lines) ? body.lines.filter((line): line is string => typeof line === "string" && line.length <= 80) : undefined;
-            if (!lines) { sendJson(response, 400, { blocker: { code: "FOLDER_LINES_REQUIRED", message: "需要 lines 数组" } }); return; }
-            sendJson(response, 200, await folders.setLines(callerWorkspaceId, one[1]!, lines));
-            return;
-          }
-        } catch { sendJson(response, 502, { blocker: { code: "FOLDER_FAILED", message: "文件夹操作没有完成" } }); return; }
+        if (await handleSourceFolderRequest(request, response, pathname, callerWorkspaceId, options.sourceFolders)) return;
       }
       // A subscription link (docs/onboarding-v3.md 「日历接入」): read once here before it is kept, so a link that does not open is refused
       // now rather than failing every tick. The answer is awaited: a read takes a second or two and the person is waiting for it.

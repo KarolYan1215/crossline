@@ -14,6 +14,9 @@ import { retireShadowedDemos } from "./demo-cleanup";
 import { notifyPass } from "./notify";
 import { createActivityTracker } from "./activity-recorder";
 import { agentHistoryPass } from "./agent-history";
+import { createDeviceLinkService, readDeviceLink } from "./device/link";
+import { workerMode } from "./device/mode";
+import { runDeviceWorker } from "./device/worker";
 import { createWindowsActivitySource } from "./activity-source";
 import { createNightlyFlywheel } from "./nightly";
 import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
@@ -857,6 +860,31 @@ if (!claimWorkerLock()) {
 const analysisStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
 // Keys and links that are credentials (a model provider's key, a calendar's private link): DPAPI files, never the ledger.
 const secrets = createDpapiSecretStore(dataDir);
+/**
+ * Linking or unlinking this computer as a device (docs/device-mode.md) changes what the whole worker is, so the worker leaves and the
+ * keeper loop (`keep-running.ps1`) starts it again in the other mode a few seconds later. The lock goes first, or the new process would
+ * read it as alive and stand down.
+ */
+const restartForMode = (): void => {
+  console.info(JSON.stringify({ type: "worker.mode_changed", action: "restart", at: new Date().toISOString() }));
+  setTimeout(() => {
+    try { rmSync(lockPath, { force: true }); } catch { /* goes stale on its own */ }
+    process.exit(0);
+  }, 1_500).unref();
+};
+// A linked device does only what needs this machine and sends it to the hosted site; none of the full worker below runs (no Codex, no
+// model, no plan). Module evaluation stops here for good: the device worker's timers keep the process alive.
+const deviceLink = await readDeviceLink(dataDir, secrets);
+if (workerMode(deviceLink) === "device" && deviceLink) {
+  await runDeviceWorker({ store: analysisStore, dataDir, secrets, link: deviceLink, port: supervisorPort, intervalMinutes,
+    capabilitySecret: process.env.CROSSLINE_SUPERVISOR_CAPABILITY_SECRET?.trim() || undefined, beat, restart: restartForMode,
+    runOnce: process.env.CROSSLINE_RUN_ONCE === "1" });
+  const leave = (code: number) => { analysisStore.close(); try { rmSync(lockPath, { force: true }); } catch { /* stale on its own */ } process.exit(code); };
+  if (process.env.CROSSLINE_RUN_ONCE === "1") leave(0);
+  process.once("SIGINT", () => leave(0));
+  process.once("SIGTERM", () => leave(0));
+  await new Promise<never>(() => undefined);
+}
 // A workspace's own third-party model (R7): Codex reaches it through this local gateway, which adds the key (model-gateway.ts).
 const modelGateway = await startModelGateway({ resolve: (workspaceId, providerId) => modelProviders.upstream(workspaceId, providerId) });
 // The developer's model for accounts that redeemed an invite code (sponsor.ts): only when the server has a key and candidates.
@@ -1451,7 +1479,9 @@ if (!capabilitySecret) {
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId), afterChatgptCost: (workspaceId, signal) => modelProviders.afterChatgptCost(workspaceId, signal) },
     services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
-      { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle }],
+      { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle },
+      // Linking this computer as a device of the hosted account (docs/device-mode.md); the worker restarts into device mode.
+      { prefix: "/v1/device", handle: createDeviceLinkService({ dataDir, secrets, onChanged: restartForMode }).handle }],
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),

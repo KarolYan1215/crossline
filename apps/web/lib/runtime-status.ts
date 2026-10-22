@@ -2,6 +2,7 @@ import { localStamp, type AccessContext } from "@crossline/core";
 import { quotaFallbackOf } from "./background";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { getStore, readSchedulePreferences } from "./crossline";
+import { devicePrimaryUrl } from "./device-mode";
 
 /**
  * Why the AI cannot work at all right now, or null when it can. An error to show, not a decision: it is never one of the asks.
@@ -17,6 +18,8 @@ let cached: { workspaceId: string; at: number; status: RuntimeStatus | null } | 
  */
 export async function runtimeStatus(ctx: AccessContext, now = Date.now()): Promise<RuntimeStatus | null> {
   if (process.env.CROSSLINE_E2E_DATA_DIR || process.env.VITEST) return null;
+  // A linked device runs no model at all (docs/device-mode.md): its one page says its own state.
+  if (devicePrimaryUrl()) return null;
   if (cached && cached.workspaceId === ctx.workspaceId && now - cached.at < 60_000) return cached.status;
   const timeout = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 2_500));
   const account = await Promise.race([requestCodexSupervisor<{ account?: unknown }>(ctx, "/v1/codex/account")

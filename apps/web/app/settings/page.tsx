@@ -8,6 +8,7 @@ import { ServerRecordingCard } from "./server-recording-card";
 import { recordingOverview } from "../../lib/recordings";
 import { TelemetryCard } from "./telemetry-card";
 import { AutostartCard } from "./autostart-card";
+import { DeviceCard } from "./device-card";
 import { autostartAvailable, readAutostart } from "../../lib/autostart";
 import { isLocalInstall } from "../../lib/install-mode";
 import { isHostedBeta } from "../../lib/hosting";
@@ -90,6 +91,7 @@ export default async function SettingsPage() {
   const states = readCategories(store, ctx.workspaceId);
   const host = process.env.CROSSLINE_TAILSCALE_HOSTNAME?.trim();
   const hosted = isHostedBeta();
+  const deviceLinked = hosted && Boolean(store.getSetting(ctx.workspaceId, "device.token.sha256"));
   // 删除账号 is offered on the hosted beta to every account but the machine owner's; 清空数据重新开始 to every hosted account
   // (lib/account-deletion.ts).
   // The signed-in account's email, also said on the mailbox card: mailboxes belong to the account they were connected under.
@@ -122,7 +124,7 @@ export default async function SettingsPage() {
   // The index, with the parts of the long modules under their entry so every card is one click away (2026-10-21). Connections come
   // second: they are what the person most often comes here for.
   const sections: SettingsSection[] = [
-    { id: "general", label: "通用", parts: [{ id: "phone", label: "手机访问与推送" }] },
+    { id: "general", label: "通用", parts: [{ id: "phone", label: "手机访问与推送" }, ...(hosted ? [{ id: "device", label: "这台电脑" }] : [])] },
     { id: "calendar", label: "日历与连接", parts: [{ id: "calendar-subscriptions", label: "订阅日历" }, { id: "mail", label: "邮箱" }, { id: "model", label: "模型连接" }] },
     { id: "notify", label: "时间与提醒" },
     { id: "automation", label: "自动化与助手", parts: [{ id: "automations", label: "自动化" }, { id: "outputs", label: "助手产出" }] },
@@ -155,6 +157,7 @@ export default async function SettingsPage() {
                 <PhonePush privateNetwork={!hosted} />
               </> : <p className="muted">手机访问未开启。</p>}
             </section>
+            {hosted && <DeviceCard siteUrl={process.env.CROSSLINE_WEB_BASE_URL?.trim() || null} />}
             {autostart !== undefined && <AutostartCard on={autostart} />}
             {accountEmail && <ResetAccountCard email={accountEmail} />}
             {deletable && <DeleteAccountCard email={deletable} />}
@@ -209,14 +212,16 @@ export default async function SettingsPage() {
 
         <section id="privacy" className="st-section" aria-labelledby="st-privacy"><h2 id="st-privacy">隐私与屏幕活动</h2>
           {!machine && <p className="muted">{hosted
-            ? "屏幕活动、作息记录、键鼠节律、Codex 使用记录和录音自动转写要读本人电脑，网页版不提供；精力按本人自评和手机记录推算。"
+            ? deviceLinked
+              ? "屏幕活动、作息记录、键鼠节律、Codex 使用记录和录音自动转写由「这台电脑」读取，开关在那台电脑的设备页；读到的结果在这里使用。"
+              : "屏幕活动、作息记录、键鼠节律、Codex 使用记录和录音自动转写要读本人电脑，网页版不提供；在「通用 → 这台电脑」连接本人电脑后可用。精力按本人自评和手机记录推算。"
             : "屏幕活动、作息记录、键鼠节律、Codex 使用记录和录音自动转写读的是运行 Crossline 的那台电脑，只对它的主人开放。"}</p>}
           {machine && <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
             hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
               .map(([category, minutes]) => ({ label: CATEGORY_LABEL[category as ActivityCategory] ?? "其他", minutes }))} />}
           <div id="energy"><EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} privateNetwork={!hosted} /></div>
           {machine && <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />}
-          {machine && usualDay && <section className="st-card" aria-label="电脑前的一天">
+          {(machine || deviceLinked) && usualDay && <section className="st-card" aria-label="电脑前的一天">
             <header><h3>电脑前的一天</h3><small>近 {usualDay.days} 天按小时的平均活跃分钟；只记分钟，供访谈与画像了解作息，不用于排程</small></header>
             <div className="st-hours" role="img" aria-label="每小时平均活跃分钟">{usualDay.active.map((minutes, hour) =>
               <span key={hour} title={`${hour}:00–${hour + 1}:00 · 平均 ${minutes} 分钟，${Math.round(usualDay.present[hour]! * 100)}% 的日子在电脑前`}><i style={{ height: `${(minutes / 60) * 100}%` }} /></span>)}</div>

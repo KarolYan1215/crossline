@@ -2468,6 +2468,25 @@ export class CrosslineStore {
       .run(input.workspaceId, input.at, end, input.app, input.title, input.category, input.idle ? 1 : 0);
   }
 
+  /**
+   * A linked device's segments (docs/device-mode.md): everything from `sinceIso` on is replaced by what the device sent. They arrive with
+   * no title at all — the column is written empty here, whatever the caller has — and `app` is the device's opaque token, not a name.
+   */
+  replaceDeviceActivitySegments(workspaceId: string, sinceIso: string, segments: Array<{ start: string; end: string; app: string; category: string; idle: boolean }>): number {
+    return this.#db.transaction(() => {
+      this.#db.prepare("DELETE FROM activity_segments WHERE workspace_id = ? AND start_at >= ?").run(workspaceId, sinceIso);
+      const insert = this.#db.prepare("INSERT INTO activity_segments (workspace_id, start_at, end_at, app, title, category, idle) VALUES (?, ?, ?, ?, '', ?, ?)");
+      let written = 0;
+      for (const segment of segments) if (segment.start >= sinceIso) { insert.run(workspaceId, segment.start, segment.end, segment.app, segment.category, segment.idle ? 1 : 0); written += 1; }
+      return written;
+    }).immediate();
+  }
+
+  /** Every segment of a workspace goes (a device's detail consent turned off). */
+  deleteActivitySegments(workspaceId: string): number {
+    return Number(this.#db.prepare("DELETE FROM activity_segments WHERE workspace_id = ?").run(workspaceId).changes);
+  }
+
   /** Segments that ended after `sinceIso`, without their titles. */
   listActivitySegments(workspaceId: string, sinceIso: string): StoredActivitySegment[] {
     const rows = this.#db.prepare("SELECT start_at, end_at, app, category, idle FROM activity_segments WHERE workspace_id = ? AND end_at >= ? ORDER BY start_at")
