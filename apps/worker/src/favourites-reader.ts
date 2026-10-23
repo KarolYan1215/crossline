@@ -304,9 +304,18 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
         log({ type: "collect.list_progress", workflowId, screen: screen + 1, listed: listed.size, ...(size ?? {}) });
       }
     }
-    result.listEnded = hasMore === false || quiet >= LIST_QUIET_SCREENS;
+    // Only the list's own answer says it ended. Screens that bring nothing while it never said so is the site no longer serving the list
+    // (2026-10-23: one page, then nothing, an hour after a 461 — and it was taken as the end, so the list counted as complete): held like
+    // a check, so nothing reads on as though the list were whole.
+    result.listEnded = hasMore === false;
     result.listed = listed.size;
     keepListed();
+    if (!result.listEnded && !capped && quiet >= LIST_QUIET_SCREENS && !(mode === "incremental" && knownPage)) {
+      trigger ||= `连续 ${LIST_QUIET_SCREENS} 屏没有新内容，接口没有说已到底（疑似限流）`;
+      save();
+      log({ type: "collect.list_stalled", workflowId, listed: listed.size });
+      return { ...stopAtCheck(`收藏列表（已列出 ${listed.size} 条）`), listed: listed.size };
+    }
     if (capped) {
       result.listCapped = true;
       ledger.listCapped = { at: now().toISOString(), listed: listed.size, memory: options.memory?.describe() ?? "" };

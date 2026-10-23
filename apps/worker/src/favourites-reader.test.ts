@@ -62,6 +62,8 @@ type Script = {
   /** Notes read from the page state instead of a feed answer. */
   stateOnly?: Set<string>;
   bigVideo?: boolean;
+  /** The list stops loading after this many more pages without saying it ended (the site holding back). */
+  stallAfter?: number;
 };
 /** A fake site: the list comes 30 a screen as the page's own answers, each note page fires its own feed answer, media come back as bytes. */
 function fakeSite(script: Script) {
@@ -102,6 +104,7 @@ function fakeSite(script: Script) {
     wheel: async () => {
       log.push("wheel");
       if (!onList) return;
+      if (script.stallAfter !== undefined && listPage >= script.stallAfter) return;
       listPage += 1;
       if (listPage * 30 < script.total) queue.push({ url: COLLECT, status: 200, json: listPageJson(listPage) });
     },
@@ -214,6 +217,17 @@ test("a file over the size cap is not saved and says so; the limit of the trial 
   expect(readCollectLedger(store, ws, "flow-xhs").caughtUpAt).toBeUndefined();
   expect(mediaExtension(Buffer.from("\u0000\u0000\u0000\u0018ftypavif"), "", "jpg")).toBe("avif");
   expect(mediaExtension(Buffer.from("xx"), "image/jpeg", "bin")).toBe("jpg");
+});
+
+test("a list that stops loading without saying it ended is held like a check, not taken as complete", async () => {
+  const site = fakeSite({ total: 300, stallAfter: 1 });
+  const result = await run(site.driver, { listOnly: true, mode: "catch_up" }).result;
+  expect(result).toMatchObject({ state: "check", listEnded: false, listed: 60 });
+  expect(result.trigger).toContain("没有新内容");
+  const ledger = readCollectLedger(store, ws, "flow-xhs");
+  expect(ledger.listedAt).toBeUndefined();
+  expect(Object.keys(ledger.listed ?? {})).toHaveLength(60);
+  expect(siteHold(store, ws, "xiaohongshu.com")).toMatchObject({ where: expect.stringContaining("60 条") });
 });
 
 test("the list is scrolled at a person's pace, with a rest every 30 screens", async () => {
