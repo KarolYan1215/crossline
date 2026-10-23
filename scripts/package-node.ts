@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { CODEX_RELEASE_BINARY_SHA256 } from "../packages/codex/src/index";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
@@ -65,6 +66,8 @@ for (const binary of ["codex.exe", "codex-code-mode-host.exe"]) {
 }
 const codexVersion = run(path.join(stage, "codex", "codex.exe"), ["--version"]).trim();
 if (!/\b0\.163\.0\b/.test(codexVersion)) throw new Error(`CODEX_VERSION_UNEXPECTED ${codexVersion}`);
+// The pinned release build only (codex-baseline.json `release`): a binary from elsewhere is never shipped by accident.
+if (sha256(path.join(stage, "codex", "codex.exe")) !== CODEX_RELEASE_BINARY_SHA256) throw new Error("CODEX_RELEASE_HASH_MISMATCH");
 
 // 3. The Visual C++ runtime, app-local, beside each binary that imports it (a fresh Windows may not have it).
 const vswhere = path.join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Microsoft Visual Studio", "Installer", "vswhere.exe");

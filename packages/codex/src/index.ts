@@ -113,10 +113,10 @@ export const CODEX_GENERATED_PROTOCOL_SHA256 = "0a029db4277456684f035f790bda8ea8
  */
 export const CODEX_FORK_BINARY_SHA256 = "e6300d7fd03c53a11a746e49f12706c313a04eaedb4541f1857799d9551617ac";
 /**
- * The release build of the pinned source that the installed copy ships (docs/local-installer.md, Codex 的 Release 构建): still
- * rust-v0.155.0's until the release build (three hours of thin-LTO linking) is redone from 0.163.0.
+ * The release build of the pinned source that the installers ship (docs/local-installer.md, Codex 的 Release 构建; the 「Crossline 节点」
+ * installer, docs/compute-node.md): rust-v0.163.0, built 2026-10-23.
  */
-export const CODEX_RELEASE_BINARY_SHA256 = "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9";
+export const CODEX_RELEASE_BINARY_SHA256 = "a28abf32699e994bbbbea94f5dd5e9b1615ba9bde1cf6922a275aa23cce9ec8a";
 /**
  * The Linux server of the hosted beta (docs/beta-launch.md §10): upstream's own release of the same tag, rust-v0.163.0
  * (`codex-x86_64-unknown-linux-musl.tar.gz`, asset digest beb339e8… checked on download 2026-10-20). The fork's only change is a
@@ -128,7 +128,9 @@ export const CODEX_LINUX_RELEASE_BINARY_SHA256 = "399ff69c431c066e40de318fba45c2
  * (docs/codex-upgrade-0.163.md 「留给人做的事」): the Linux release on the hosted server until /srv/crossline/codex is replaced. The protocol
  * the worker speaks works with both. Remove an entry once nothing runs it.
  */
-export const CODEX_PREVIOUS_BINARY_SHA256: readonly string[] = ["660e159a49e823ac8e5986cb238f73158ce4b957d40d9292f8de90862644b501"];
+// The second entry is the rust-v0.155.0 release build an installed copy from before 2026-10-23 still ships.
+export const CODEX_PREVIOUS_BINARY_SHA256: readonly string[] = ["660e159a49e823ac8e5986cb238f73158ce4b957d40d9292f8de90862644b501",
+  "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9"];
 
 export function codexProcessEnvironment(
   base: NodeJS.ProcessEnv = process.env,

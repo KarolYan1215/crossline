@@ -174,6 +174,21 @@ test("a token revoked on the site (解除配对) lets the node go at the next he
   expect(hub!.clientFor("ws-owner")).toBeUndefined();
 });
 
+test("a second node for the same account stands by while the first answers, and is told why", async () => {
+  await setUp();
+  await until(() => hub!.clientFor("ws-owner"));
+  const second = fakeRuntime("0.163.0");
+  const other = startNodeAgent({ url: `http://127.0.0.1:${hub!.port}`, token: "good-token-0123456789abcdef", dir: path.join(dir, "second"), spawn: second.spawn,
+    backoffMs: [60_000], refusedWaitMs: 60_000 });
+  try {
+    await until(() => other.status().code === "NODE_ALREADY_CONNECTED" ? true : undefined);
+    expect(other.status()).toMatchObject({ state: "waiting", message: expect.stringContaining("另一台节点在线") });
+    // The first still serves.
+    expect(hub!.clientFor("ws-owner")).toBeDefined();
+    expect(hub!.status("ws-owner")?.state).toBe("ready");
+  } finally { other.stop(); }
+});
+
 test("a node not heard from within the silence limit is let go and its account's runs go back to the server", async () => {
   const { agent } = await setUp({ deadAfterMs: 1 });
   // Ready or not, with a 1 ms limit it cannot stay: the next beat finds it silent.

@@ -33,13 +33,14 @@
     }
   },
   "release": {
-    "purpose": "The binaries the Windows installer ships (docs/local-installer.md). Not yet rebuilt from rust-v0.163.0: the entries below are the rust-v0.155.0 release build.",
+    "purpose": "The binaries the Windows installers ship (docs/local-installer.md, and the 「Crossline 节点」 installer, docs/compute-node.md): the rust-v0.163.0 release build.",
     "v8": "rusty_v8 150.4.0 ptrcomp_sandbox release, fetched by scripts/fetch-rusty-v8.ts from openai/codex rusty-v8-v150.4.0 and checked against vendor/codex/third_party/v8/rusty_v8_150_4_0_release_manifests.sha256",
     "command": "cargo build --release --locked -p codex-cli --bin codex -p codex-code-mode-host --bin codex-code-mode-host (with RUSTY_V8_ARCHIVE and RUSTY_V8_SRC_BINDING_PATH set)",
     "binary": "vendor/codex/codex-rs/target/release/codex.exe",
-    "binarySha256": "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9",
-    "codeModeHostSha256": "a4a0b6d634a7e33dcdab777b90cde478eb19927f7220c0d87dab0490081f862c",
-    "builtOn": "2026-10-13 (rust-v0.155.0), in the worktree serene-mestorf-e26547",
+    "binarySha256": "a28abf32699e994bbbbea94f5dd5e9b1615ba9bde1cf6922a275aa23cce9ec8a",
+    "codeModeHostSha256": "7b129f38801396f34193c10aa375378fbb6b4e207988056ad3e30a855ac6db80",
+    "builtOn": "2026-10-23 (rust-v0.163.0), in the main checkout, about 75 minutes (rustc per rust-toolchain.toml)",
+    "previous": { "binarySha256": "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9", "codeModeHostSha256": "a4a0b6d634a7e33dcdab777b90cde478eb19927f7220c0d87dab0490081f862c", "builtOn": "2026-10-13 (rust-v0.155.0)" },
     "contractTest": "scripts/codex-smoke.ts passed 2026-10-13 with both binaries copied to an empty folder, PATH without cargo or codex, LOCALAPPDATA and CROSSLINE_STATE_DIR in a temporary folder",
     "webSearch": "live web_search on an ephemeral thread completed 2026-10-13 with two webSearch items"
   },

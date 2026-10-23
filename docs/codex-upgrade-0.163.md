@@ -51,7 +51,7 @@
 
 - **Linux（托管服务器）**：上游发布资产 `codex-x86_64-unknown-linux-musl.tar.gz`，资产摘要 `beb339e8…` 下载后核对一致，解出的二进制 SHA-256 `399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215`，写进 `CODEX_LINUX_RELEASE_BINARY_SHA256`。0.155.0 的 Linux 二进制哈希暂时放在 `CODEX_PREVIOUS_BINARY_SHA256` 里继续接受，服务器换好二进制后删掉。
 - **Windows debug（常驻应用）**：在本次 worktree 里构建通过（21 分 34 秒，rustc 1.95.0 按 `rust-toolchain.toml`；`--locked` 复建得到同一个二进制 `09e01f25…`；`Cargo.lock` 只同步了 160 个版本号；补丁自带的 `runtime_migrator_accepts_existing_windows_checksums` 测试通过）。用这个二进制做了一次不调模型的协议探测：按结构化运行的设置 `thread/start`（只读、untrusted、带一个动态工具），跑一个 turn 后 `thread/unsubscribe`，再带同样设置 `thread/resume`，返回 `approvalPolicy: untrusted`、`sandbox: readOnly`、无说明文件；恢复不存在的线程返回 `no rollout found for thread id …`；`thread/compact/start` 被接受。0.163.0 自带的默认模型是 `gpt-6.1-sol`，我们按档位点名的 `gpt-5.6-*` 若账号不再提供，`fitRoute` 会换成账号有的。debug 构建把源码绝对路径编进二进制，只有在仓库根目录构建出来的哈希才是常驻应用实际核对的那个，所以 `CODEX_FORK_BINARY_SHA256` 还是 0.155.0 根目录构建的值。
-- **Windows release（安装包）**：没有重做（V8 预构建包加三个多小时的 thin-LTO 链接），`CODEX_RELEASE_BINARY_SHA256` 仍是 0.155.0 的。
+- **Windows release（安装包）**：2026-10-23 在主检出里重做（约 80 分钟），`codex.exe` SHA-256 `a28abf32…`、`codex-code-mode-host.exe` `7b129f38…`，写进 `CODEX_RELEASE_BINARY_SHA256` 和 `codex-baseline.json` 的 `release`；0.155.0 的 release 哈希移到 `CODEX_PREVIOUS_BINARY_SHA256`，已装的旧完整版照常能用。「Crossline 节点」安装包用的就是这个构建（docs/compute-node.md）。
 
 ## 留给人做的事
 

@@ -47,6 +47,7 @@ export const CLOSE_WORDS: Record<string, string> = {
   NODE_PROTOCOL: "节点程序版本与网页版不同，请更新",
   NODE_PREPARE_FAILED: "节点准备失败",
   NODE_REPLACED: "同一账号的另一台节点连上了",
+  NODE_ALREADY_CONNECTED: "这个账号已有另一台节点在线，这台待命",
   NODE_RUNTIME_EXITED: "本机 Codex 意外退出"
 };
 /** The site no longer accepts this node's token: a standalone node goes back to pairing. */

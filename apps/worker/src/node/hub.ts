@@ -130,8 +130,15 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
       refuse(connection, 4009, "NODE_CODEX_VERSION", `本机 Codex ${connection.codex || "未知"} 与服务器 ${server || "未知"} 不同，节点暂不接活`);
       return;
     }
-    // One node per workspace: a new connection replaces the old one (the computer reconnected after sleep).
+    // One node per workspace, and the one already answering keeps it: two computers (a linked device and the standalone node) would
+    // otherwise take it from each other on every reconnect. A connection that has gone quiet (the computer slept and came back as a
+    // new one) is replaced.
     const previous = connections.get(workspaceId);
+    if (previous && Date.now() - previous.heardAt < (options.heartbeatMs ?? 15_000) * 2 + 1_000) {
+      log({ type: "node.busy", workspaceId, host: connection.host, holder: previous.host });
+      socket.close(4005, "NODE_ALREADY_CONNECTED");
+      return;
+    }
     connections.set(workspaceId, connection);
     if (previous) previous.socket.close(4000, "NODE_REPLACED");
     send(socket, { t: "welcome", workspaceId, roots: options.roots(workspaceId), ...(options.gateway() ? { gateway: options.gateway()! } : {}) });
