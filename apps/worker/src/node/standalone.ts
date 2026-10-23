@@ -180,7 +180,7 @@ function reconcile(): void {
   if (!current) { agent?.stop(); agent = undefined; void pair(); return; }
   if (!account) return;
   if (!agent) {
-    agent = startNodeAgent({ url: state.site, token: current, dir: path.join(home, "relay"), spawn: appServer, host: hostname(),
+    agent = startNodeAgent({ url: state.site, token: current, dir: path.join(home, "relay"), spawn: appServer, host: hostname(), role: "standalone",
       log: (event) => log(event) });
     log({ type: "node.relay_started" });
   }

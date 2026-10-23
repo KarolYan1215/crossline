@@ -58,7 +58,7 @@ async function until<T>(read: () => T | undefined, ms = 20_000): Promise<T> {
   }
 }
 
-async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number; tokenValid?: () => boolean } = {}) {
+async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number; tokenValid?: () => boolean; role?: "device" | "standalone" } = {}) {
   gatewayServer = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
@@ -84,7 +84,8 @@ async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; dea
       { rel: "plugins/crossline/skills/a/SKILL.md", data: Buffer.from("# a") }] : []
   });
   const runtime = fakeRuntime(options.nodeCodex ?? "0.163.0");
-  const agent = startNodeAgent({ url: `http://127.0.0.1:${hub.port}`, token: "good-token-0123456789abcdef", dir, spawn: runtime.spawn, backoffMs: [60_000], refusedWaitMs: 60_000 });
+  const agent = startNodeAgent({ url: `http://127.0.0.1:${hub.port}`, token: "good-token-0123456789abcdef", dir, spawn: runtime.spawn, backoffMs: [60_000], refusedWaitMs: 60_000,
+    role: options.role ?? "device", capacity: 3, host: "PC-A" });
   stopAgent = agent.stop;
   return { runtime, agent, statuses, gateway };
 }
@@ -174,19 +175,28 @@ test("a token revoked on the site (解除配对) lets the node go at the next he
   expect(hub!.clientFor("ws-owner")).toBeUndefined();
 });
 
-test("a second node for the same account stands by while the first answers, and is told why", async () => {
-  await setUp();
-  await until(() => hub!.clientFor("ws-owner"));
+test("a linked device and the standalone node work at once: both are members, the device ranked first, capacities added", async () => {
+  await setUp({ role: "standalone" });
+  await until(() => hub!.members("ws-owner").length === 1 ? true : undefined);
   const second = fakeRuntime("0.163.0");
-  const other = startNodeAgent({ url: `http://127.0.0.1:${hub!.port}`, token: "good-token-0123456789abcdef", dir: path.join(dir, "second"), spawn: second.spawn,
-    backoffMs: [60_000], refusedWaitMs: 60_000 });
+  const device = startNodeAgent({ url: `http://127.0.0.1:${hub!.port}`, token: "good-token-0123456789abcdef", dir: path.join(dir, "second"), spawn: second.spawn,
+    backoffMs: [60_000], refusedWaitMs: 60_000, role: "device", capacity: 5, host: "PC-B" });
   try {
-    await until(() => other.status().code === "NODE_ALREADY_CONNECTED" ? true : undefined);
-    expect(other.status()).toMatchObject({ state: "waiting", message: expect.stringContaining("另一台节点在线") });
-    // The first still serves.
-    expect(hub!.clientFor("ws-owner")).toBeDefined();
-    expect(hub!.status("ws-owner")?.state).toBe("ready");
-  } finally { other.stop(); }
+    await until(() => hub!.members("ws-owner").length === 2 ? true : undefined);
+    expect(hub!.members("ws-owner").map((member) => [member.id, member.capacity, member.priority])).toEqual([["device:PC-B", 5, 2], ["standalone:PC-A", 3, 1]]);
+    expect(hub!.capacity("ws-owner")).toBe(8);
+    expect(hub!.status("ws-owner")).toMatchObject({ state: "ready", host: "PC-B" });
+    expect(hub!.status("ws-owner")?.nodes?.map((node) => [node.role, node.state])).toEqual([["device", "ready"], ["standalone", "ready"]]);
+    // The same computer coming back takes its own place, not the other node's.
+    const again = fakeRuntime("0.163.0");
+    const back = startNodeAgent({ url: `http://127.0.0.1:${hub!.port}`, token: "good-token-0123456789abcdef", dir: path.join(dir, "third"), spawn: again.spawn,
+      backoffMs: [60_000], refusedWaitMs: 60_000, role: "device", capacity: 5, host: "PC-B" });
+    try {
+      await until(() => device.status().code === "NODE_REPLACED" ? true : undefined);
+      await until(() => hub!.members("ws-owner").length === 2 ? true : undefined);
+      expect(hub!.members("ws-owner").map((member) => member.id)).toEqual(["device:PC-B", "standalone:PC-A"]);
+    } finally { back.stop(); }
+  } finally { device.stop(); }
 });
 
 test("a node not heard from within the silence limit is let go and its account's runs go back to the server", async () => {

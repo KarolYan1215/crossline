@@ -3,7 +3,8 @@ import path from "node:path";
 /**
  * The compute node's wire (docs/compute-node.md). One WebSocket from the person's computer to the hosted worker carries JSON frames:
  *
- * - `hello` (node → server, first): the node's Codex runtime version, platform and host name;
+ * - `hello` (node → server, first): the node's Codex runtime version, platform, host name, kind (a linked device or the standalone node)
+ *   and how many runs it takes at once;
  * - `welcome` (server → node): what the server's paths and model gateway look like, so the node can map them onto its own;
  * - `rpc`: one JSON-RPC line of the node's `codex app-server`, either way, unchanged except where the node rewrites a request (below);
  * - `files` (node asks, server answers): a directory under the server's skill roots, mirrored on the node before a plugin is installed;
@@ -18,7 +19,7 @@ import path from "node:path";
 export const NODE_PROTOCOL = 1;
 
 export type NodeFrame =
-  | { t: "hello"; protocol: number; codex: string; platform: string; host: string }
+  | { t: "hello"; protocol: number; codex: string; platform: string; host: string; role?: "device" | "standalone"; capacity?: number }
   | { t: "welcome"; workspaceId: string; roots: string[]; gateway?: string }
   | { t: "rpc"; line: string }
   | { t: "files"; id: number; dir: string }
@@ -47,7 +48,6 @@ export const CLOSE_WORDS: Record<string, string> = {
   NODE_PROTOCOL: "节点程序版本与网页版不同，请更新",
   NODE_PREPARE_FAILED: "节点准备失败",
   NODE_REPLACED: "同一账号的另一台节点连上了",
-  NODE_ALREADY_CONNECTED: "这个账号已有另一台节点在线，这台待命",
   NODE_RUNTIME_EXITED: "本机 Codex 意外退出"
 };
 /** The site no longer accepts this node's token: a standalone node goes back to pairing. */
@@ -55,7 +55,7 @@ export const TOKEN_GONE = new Set(["NODE_TOKEN_INVALID", "NODE_TOKEN_REVOKED"]);
 
 /** What the server's runners send to a runtime (skill-runner.ts, model-catalog.ts, cost.ts, the plugin install); nothing else reaches the node's. */
 export const ALLOWED_METHODS = new Set([
-  "thread/start", "thread/resume", "thread/unsubscribe", "thread/compact/start", "turn/start", "turn/interrupt",
+  "thread/start", "thread/resume", "thread/loaded/list", "thread/unsubscribe", "thread/compact/start", "turn/start", "turn/interrupt",
   "config/read", "skills/list", "skills/config/write", "plugin/install", "plugin/installed", "plugin/list",
   "model/list", "account/read", "account/rateLimits/read", "app/installed", "app/read", "mcpServer/tool/call"
 ]);

@@ -13,6 +13,9 @@
  * - Memory held for a heavy job outside the gate (the collection's browser, `reserved`) counts as in use for background work, and while
  *   any is held nothing is started past the mark by that minute's rule: the room was promised to the job (2026-10-23, after the browser
  *   was killed twice by the container's ceiling). A person's turn is measured on what is really in use.
+ * - An account with compute nodes connected (docs/compute-node.md) has their capacity on top of its share and of the background limit
+ *   (`extraCapacity`): those runs go to the nodes, not to this process. While a node has room (`nodeRoom`) the account's next run is not
+ *   held by this process's memory either, since it will not use it.
  * - Each waiter is told how many runs are ahead of it, so a page can say 「排队中，前面还有 N 个」.
  *
  * Who goes next (decided with the owner on 2026-10-19, docs/model-scheduling.md):
@@ -106,6 +109,10 @@ type GateConfig = {
   probe?: () => MemoryReading | undefined;
   /** Bytes promised to heavy jobs outside the gate and not yet taken by them (apps/worker/src/memory.ts `heldMemory`). */
   reserved?: () => number;
+  /** Runs an account's compute nodes take at once (added to its share and to the background limit). */
+  extraCapacity?: (tenant: string) => number;
+  /** Whether an account's compute nodes have room now, so its next run will not run in this process. */
+  nodeRoom?: (tenant: string) => boolean;
   /** Frees what can be freed (idle runtimes) while memory is high. */
   reclaim?: () => void;
   /** With nothing running and memory still high this long, the next run goes anyway. */
@@ -174,6 +181,13 @@ function readMemory(): MemoryReading | undefined {
 function memoryHigh(background = true): boolean {
   const reading = readMemory();
   return Boolean(reading && reading.limit > 0 && (reading.used + (background ? reservedBytes() : 0)) / reading.limit >= config.highWater);
+}
+
+function extraFor(tenant: string): number {
+  try { return Math.max(0, config.extraCapacity?.(tenant.replace(/#.*$/, "")) ?? 0); } catch { return 0; }
+}
+function roomOnNode(tenant: string): boolean {
+  try { return Boolean(config.nodeRoom?.(tenant.replace(/#.*$/, ""))); } catch { return false; }
 }
 
 function reservedBytes(): number {
@@ -245,7 +259,8 @@ function backgroundLimit(): number {
  */
 function eligible(waiter: Waiter): boolean {
   if (waiter.priority === "interactive") return true;
-  return activeBackground < backgroundLimit() && (activeByTenant.get(waiter.tenant) ?? 0) < (config.tenantLimits?.[waiter.tenant] ?? config.perTenant);
+  const extra = extraFor(waiter.tenant);
+  return activeBackground < backgroundLimit() + extra && (activeByTenant.get(waiter.tenant) ?? 0) < (config.tenantLimits?.[waiter.tenant] ?? config.perTenant) + extra;
 }
 
 function pump(): void {
@@ -253,7 +268,7 @@ function pump(): void {
     const now = config.now();
     const next = ordered(now).find(eligible);
     if (!next) break;
-    if (memoryHigh(next.priority !== "interactive")) {
+    if (memoryHigh(next.priority !== "interactive") && !roomOnNode(next.tenant)) {
       blockedSince ??= now;
       if (config.reclaim && (reclaimedAt === undefined || now - reclaimedAt >= config.pollMs * 6)) {
         reclaimedAt = now;

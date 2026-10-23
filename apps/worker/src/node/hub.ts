@@ -3,19 +3,28 @@ import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
-import { JsonLineRpcClient, type CodexRpcBoundary } from "@crossline/codex";
+import { JsonLineRpcClient, type CodexRpcBoundary, type PoolMember } from "@crossline/codex";
 import { codexVersionOf, IMAGE_FILE, IMAGE_MAX_BYTES, NODE_PROTOCOL, parseFrame, underRoots, type NodeFrame } from "./protocol";
 
 /**
- * The hosted worker's end of the compute node (docs/compute-node.md): the person's computer connects out to `wss://<site>/node` (Caddy
- * hands it to this port on loopback) with its device token, and while it is connected and ready the owner's model runs take its Codex
- * runtime (`clientFor`) instead of this server's. Nothing here starts on its own: a node is accepted only for a workspace whose owner
- * switched it on (`allowed`), and with no node connected every run stays on the server exactly as before.
+ * The hosted worker's end of the compute node (docs/compute-node.md): the person's computers connect out to `wss://<site>/node` (Caddy
+ * hands it to this port on loopback) with a device or node token, and while they are connected and ready the owner's model runs are
+ * spread over them and this server's own runtime (`members`, runtime-pool.ts). Nothing here starts on its own: a node is accepted only for
+ * a workspace whose owner switched it on (`allowed`), and with no node connected every run stays on the server exactly as before.
  *
- * What the node asks of the server is held to the server's skill roots (`files`: a plugin's directory to mirror before installing it) and
- * to its model gateway (`gw`: a provider thread's request, given the key here). The runtime's lines pass through unchanged.
+ * Several nodes of one account work at once: a linked device and the standalone node, or two computers. Each is known by its kind and host
+ * (`key`); the same computer reconnecting (after sleep) replaces its own earlier connection, never another's. A linked device ranks above
+ * the standalone node (the owner: the device-mode computer is the stronger one); each says how many runs it takes at once (`capacity`).
+ *
+ * What a node asks of the server is held to the server's skill roots (`files`: a plugin's directory to mirror before installing it), its
+ * image roots (`image`) and its model gateway (`gw`: a provider thread's request, given the key here). The runtime's lines pass through
+ * unchanged.
  */
-export type NodeStatus = { state: "connected" | "ready" | "refused" | "offline"; host?: string; codex?: string; at: string; message?: string };
+export type NodeRole = "device" | "standalone";
+export type NodeEntry = { key: string; host: string; role: NodeRole; codex: string; capacity: number; state: "connected" | "ready" | "refused" | "offline";
+  at: string; message?: string };
+/** The account's nodes as the card shows them: the best state among them, the strongest ready one's host and Codex, and each node. */
+export type NodeStatus = { state: "connected" | "ready" | "refused" | "offline"; host?: string; codex?: string; at: string; message?: string; nodes?: NodeEntry[] };
 
 export type NodeHubOptions = {
   port: number;
@@ -47,7 +56,11 @@ export type NodeHubOptions = {
 };
 
 export type NodeHub = {
-  /** The node's runtime for this workspace while it is connected and prepared; undefined otherwise. */
+  /** The account's ready nodes as runtime-pool members: strongest kind first. */
+  members: (workspaceId: string) => PoolMember[];
+  /** How many runs the account's ready nodes take at once, together (the model gate adds them to the account's share). */
+  capacity: (workspaceId: string) => number;
+  /** The strongest ready node's runtime, or undefined. */
   clientFor: (workspaceId: string) => CodexRpcBoundary | undefined;
   status: (workspaceId: string) => NodeStatus | undefined;
   port: number;
@@ -57,21 +70,51 @@ export type NodeHub = {
 /** A node may mirror no more than this of one directory. */
 export const MIRROR_MAX_FILES = 800;
 export const MIRROR_MAX_BYTES = 40 * 1_048_576;
+/** Runs a node may take at once, whatever it says; and its rank by kind. */
+export const NODE_CAPACITY_MAX = 8;
+export const ROLE_PRIORITY: Record<NodeRole, number> = { device: 2, standalone: 1 };
+/** Offline and refused nodes stay on the card this long, then leave it. */
+const GONE_SHOWN_MS = 24 * 3_600_000;
 
-type Connection = { socket: WebSocket; workspaceId: string; token: string; client?: JsonLineRpcClient; ready: boolean; heardAt: number; host: string; codex: string };
+type Connection = { socket: WebSocket; workspaceId: string; token: string; client?: JsonLineRpcClient; ready: boolean; heardAt: number;
+  host: string; codex: string; role: NodeRole; capacity: number; key: string };
 
 export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   const log = options.log ?? (() => {});
   const now = options.now ?? (() => new Date());
   const fetchImpl = options.fetch ?? fetch;
   const readTree = options.readTree ?? readDirectory;
-  const connections = new Map<string, Connection>();
+  /** Per workspace, the live connections by key. */
+  const connections = new Map<string, Map<string, Connection>>();
+  /** Per workspace, what each node (by key) last did. */
+  const entries = new Map<string, Map<string, NodeEntry>>();
   const statuses = new Map<string, NodeStatus>();
-  const setStatus = (workspaceId: string, status: Omit<NodeStatus, "at">) => {
-    const full = { ...status, at: now().toISOString() };
-    statuses.set(workspaceId, full);
-    try { options.onStatus?.(workspaceId, full); } catch { /* the record is a courtesy */ }
+  const groupOf = (workspaceId: string) => { let group = connections.get(workspaceId); if (!group) { group = new Map(); connections.set(workspaceId, group); } return group; };
+  const isCurrent = (connection: Connection) => connections.get(connection.workspaceId)?.get(connection.key) === connection;
+  const all = () => [...connections.values()].flatMap((group) => [...group.values()]);
+  const ready = (workspaceId: string) => [...(connections.get(workspaceId)?.values() ?? [])].filter((connection) => connection.ready && connection.client)
+    .sort((a, b) => ROLE_PRIORITY[b.role] - ROLE_PRIORITY[a.role] || b.capacity - a.capacity);
+
+  /** One node's new state, and the account's status built again from all of them. */
+  const setStatus = (workspaceId: string, entry: Omit<NodeEntry, "at">) => {
+    const at = now().toISOString();
+    const nodes = entries.get(workspaceId) ?? new Map<string, NodeEntry>();
+    entries.set(workspaceId, nodes);
+    nodes.set(entry.key, { ...entry, at });
+    // A refusal at the door (switched off) is no node of its own: it leaves the card once a node is in.
+    if (entry.key !== "?" && (entry.state === "connected" || entry.state === "ready")) nodes.delete("?");
+    for (const [key, node] of nodes) if (node.state !== "ready" && node.state !== "connected" && now().getTime() - Date.parse(node.at) > GONE_SHOWN_MS) nodes.delete(key);
+    const list = [...nodes.values()].sort((a, b) => ROLE_PRIORITY[b.role] - ROLE_PRIORITY[a.role] || b.at.localeCompare(a.at));
+    const best = list.find((node) => node.state === "ready") ?? list.find((node) => node.state === "connected");
+    const latest = entry.state === "ready" || entry.state === "connected" ? undefined : { ...entry, at };
+    const shown = best ?? latest ?? list[0]!;
+    const status: NodeStatus = { state: shown.state, at, ...(shown.host ? { host: shown.host } : {}), ...(shown.codex ? { codex: shown.codex } : {}),
+      ...(shown.message ? { message: shown.message } : {}), nodes: list };
+    statuses.set(workspaceId, status);
+    try { options.onStatus?.(workspaceId, status); } catch { /* the record is a courtesy */ }
   };
+  const entryOf = (connection: Connection, state: NodeEntry["state"], message?: string): Omit<NodeEntry, "at"> => ({ key: connection.key, host: connection.host,
+    role: connection.role, codex: connection.codex, capacity: connection.capacity, state, ...(message ? { message } : {}) });
   const send = (socket: WebSocket, frame: NodeFrame) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame)); };
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1_048_576 });
@@ -83,7 +126,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     const workspaceId = token ? options.authenticate(token) : undefined;
     if (!workspaceId) { reject(401, "Unauthorized"); return; }
     if (!options.allowed(workspaceId)) {
-      setStatus(workspaceId, { state: "refused", message: "网页版没有开启「作为算力节点」" });
+      setStatus(workspaceId, { key: "?", host: "", role: "device", codex: "", capacity: 0, state: "refused", message: "网页版没有开启「作为算力节点」" });
       reject(403, "Forbidden");
       return;
     }
@@ -91,7 +134,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   });
 
   function accept(socket: WebSocket, workspaceId: string, token: string): void {
-    const connection: Connection = { socket, workspaceId, token, ready: false, heardAt: Date.now(), host: "", codex: "" };
+    const connection: Connection = { socket, workspaceId, token, ready: false, heardAt: Date.now(), host: "", codex: "", role: "device", capacity: 2, key: "" };
     const hello = setTimeout(() => socket.close(4001, "NODE_HELLO_MISSING"), 15_000);
     const pendingGw = new Map<number, AbortController>();
     socket.on("pong", () => { connection.heardAt = Date.now(); });
@@ -99,7 +142,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
       const frame = parseFrame(raw.toString());
       if (!frame) return;
       if (frame.t === "hello") { clearTimeout(hello); void greet(connection, frame); return; }
-      if (connections.get(workspaceId) !== connection) return;
+      if (!isCurrent(connection)) return;
       if (frame.t === "rpc") {
         try { connection.client?.receiveLine(frame.line); } catch (error) { log({ type: "node.bad_line", workspaceId, message: error instanceof Error ? error.message : "" }); }
         return;
@@ -111,11 +154,11 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     socket.on("close", (code, reason) => {
       clearTimeout(hello);
       for (const controller of pendingGw.values()) controller.abort();
-      if (connections.get(workspaceId) !== connection) return;
-      connections.delete(workspaceId);
+      if (!isCurrent(connection)) return;
+      connections.get(workspaceId)?.delete(connection.key);
       connection.client?.disconnect(new Error("CROSSLINE_NODE_DISCONNECTED"));
-      setStatus(workspaceId, { state: "offline", host: connection.host, codex: connection.codex, message: reason.toString() || String(code) });
-      log({ type: "node.disconnected", workspaceId, code, reason: reason.toString() });
+      setStatus(workspaceId, entryOf(connection, "offline", reason.toString() || String(code)));
+      log({ type: "node.disconnected", workspaceId, host: connection.host, role: connection.role, code, reason: reason.toString() });
     });
     socket.on("error", () => { /* the close that follows says it */ });
   }
@@ -124,45 +167,42 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     const { socket, workspaceId } = connection;
     connection.host = String(hello.host ?? "").slice(0, 60);
     connection.codex = codexVersionOf({ userAgent: hello.codex });
+    connection.role = hello.role === "standalone" ? "standalone" : "device";
+    connection.capacity = Math.max(1, Math.min(NODE_CAPACITY_MAX, Math.floor(Number(hello.capacity) || 2)));
+    connection.key = `${connection.role}:${connection.host}`;
     const server = codexVersionOf({ userAgent: options.serverCodex() });
     if (hello.protocol !== NODE_PROTOCOL) { refuse(connection, 4002, "NODE_PROTOCOL", `节点程序的版本（${hello.protocol}）与网页版（${NODE_PROTOCOL}）不同，请更新本机 Crossline`); return; }
     if (!connection.codex || connection.codex !== server) {
       refuse(connection, 4009, "NODE_CODEX_VERSION", `本机 Codex ${connection.codex || "未知"} 与服务器 ${server || "未知"} 不同，节点暂不接活`);
       return;
     }
-    // One node per workspace, and the one already answering keeps it: two computers (a linked device and the standalone node) would
-    // otherwise take it from each other on every reconnect. A connection that has gone quiet (the computer slept and came back as a
-    // new one) is replaced.
-    const previous = connections.get(workspaceId);
-    if (previous && Date.now() - previous.heardAt < (options.heartbeatMs ?? 15_000) * 2 + 1_000) {
-      log({ type: "node.busy", workspaceId, host: connection.host, holder: previous.host });
-      socket.close(4005, "NODE_ALREADY_CONNECTED");
-      return;
-    }
-    connections.set(workspaceId, connection);
+    // The same computer coming back (after sleep, a restart) takes the place of its own earlier connection; other nodes are left alone.
+    const group = groupOf(workspaceId);
+    const previous = group.get(connection.key);
+    group.set(connection.key, connection);
     if (previous) previous.socket.close(4000, "NODE_REPLACED");
     send(socket, { t: "welcome", workspaceId, roots: options.roots(workspaceId), ...(options.gateway() ? { gateway: options.gateway()! } : {}) });
     connection.client = new JsonLineRpcClient((line) => send(socket, { t: "rpc", line: line.replace(/\n$/, "") }));
-    setStatus(workspaceId, { state: "connected", host: connection.host, codex: connection.codex });
-    log({ type: "node.connected", workspaceId, host: connection.host, codex: connection.codex });
+    setStatus(workspaceId, entryOf(connection, "connected"));
+    log({ type: "node.connected", workspaceId, host: connection.host, role: connection.role, capacity: connection.capacity, codex: connection.codex });
     try {
       await options.prepare(connection.client, workspaceId);
-      if (connections.get(workspaceId) !== connection) return;
+      if (!isCurrent(connection)) return;
       connection.ready = true;
-      setStatus(workspaceId, { state: "ready", host: connection.host, codex: connection.codex });
-      log({ type: "node.ready", workspaceId, host: connection.host });
+      setStatus(workspaceId, entryOf(connection, "ready"));
+      log({ type: "node.ready", workspaceId, host: connection.host, role: connection.role });
     } catch (error) {
       // A preparation cut short by the connection closing is that close, already recorded as offline; only a live one was refused.
-      if (connections.get(workspaceId) !== connection) return;
+      if (!isCurrent(connection)) return;
       refuse(connection, 4010, "NODE_PREPARE_FAILED", `节点准备失败：${error instanceof Error ? error.message.slice(0, 120) : "未知错误"}`);
     }
   }
 
   function refuse(connection: Connection, code: number, reason: string, message: string): void {
-    setStatus(connection.workspaceId, { state: "refused", host: connection.host, codex: connection.codex, message });
-    log({ type: "node.refused", workspaceId: connection.workspaceId, reason, message });
-    if (connections.get(connection.workspaceId) === connection) {
-      connections.delete(connection.workspaceId);
+    setStatus(connection.workspaceId, entryOf(connection, "refused", message));
+    log({ type: "node.refused", workspaceId: connection.workspaceId, host: connection.host, reason, message });
+    if (isCurrent(connection)) {
+      connections.get(connection.workspaceId)?.delete(connection.key);
       connection.client?.disconnect(new Error("CROSSLINE_NODE_DISCONNECTED"));
     }
     connection.socket.close(code, reason);
@@ -217,7 +257,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   // A node that stops answering pings (a laptop asleep, a dropped network) is let go, so its runs fail over instead of hanging; one whose
   // account switched it off, or whose token was revoked or replaced (解除配对), is let go at the next beat.
   const heartbeat = setInterval(() => {
-    for (const connection of connections.values()) {
+    for (const connection of all()) {
       if (options.authenticate(connection.token) !== connection.workspaceId) { refuse(connection, 4004, "NODE_TOKEN_REVOKED", "令牌已撤销或已换新"); continue; }
       if (!options.allowed(connection.workspaceId)) { refuse(connection, 4003, "NODE_SWITCHED_OFF", "网页版已关闭「作为算力节点」"); continue; }
       if (Date.now() - connection.heardAt > (options.deadAfterMs ?? 45_000)) { connection.socket.terminate(); continue; }
@@ -230,11 +270,14 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   const port = (server.address() as { port: number }).port;
   return {
     port,
-    clientFor: (workspaceId) => { const connection = connections.get(workspaceId); return connection?.ready ? connection.client : undefined; },
+    members: (workspaceId) => ready(workspaceId).map((connection) => ({ id: connection.key, client: connection.client!, capacity: connection.capacity,
+      priority: ROLE_PRIORITY[connection.role] })),
+    capacity: (workspaceId) => ready(workspaceId).reduce((sum, connection) => sum + connection.capacity, 0),
+    clientFor: (workspaceId) => ready(workspaceId)[0]?.client,
     status: (workspaceId) => statuses.get(workspaceId),
     close: async () => {
       clearInterval(heartbeat);
-      for (const connection of connections.values()) connection.socket.close(1001, "NODE_HUB_CLOSING");
+      for (const connection of all()) connection.socket.close(1001, "NODE_HUB_CLOSING");
       wss.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

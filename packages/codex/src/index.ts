@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { closeSync, existsSync, mkdirSync, openSync, readSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { readCostSignal } from "./cost";
+import { createRuntimePool, type PoolMember, type RuntimePool } from "./runtime-pool";
 import { verifyCapability } from "./capability";
 import { enterUsageWorkspace } from "./usage";
 import { CALENDAR_APPS, calendarAppStatuses, type CostSignal } from "@crossline/core";
@@ -20,6 +21,7 @@ export * from "./model-policy";
 export * from "./model-catalog";
 export * from "./capability";
 export * from "./agent-mode";
+export * from "./runtime-pool";
 export * from "./runtime-registry";
 export * from "./prices";
 export * from "./providers";
@@ -348,6 +350,8 @@ export type CodexSupervisor = {
   runtimes?: RuntimeRegistry;
   /** The owner runtime's `userAgent` ("crossline/0.163.0 (…)"): a compute node must run the same Codex. */
   runtimeVersion: string;
+  /** The owner's runs spread over this runtime and the compute nodes, when `ownerNodes` was given: its `load` says what runs where. */
+  ownerPool?: RuntimePool;
   stop: () => Promise<void>;
 };
 
@@ -609,10 +613,11 @@ export async function startCodexSupervisor(options: {
    */
   services?: Array<{ prefix: string; handle: (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => Promise<{ status: number; body: unknown } | undefined> }>;
   /**
-   * The owner's runtime on the person's own computer while it is connected as a compute node (docs/compute-node.md): the owner's model
-   * runs take it instead of this process's runtime. Sign-in, the quota read and the shell assistant stay on this process's runtime.
+   * The compute nodes connected for the owner's account (docs/compute-node.md): with them the owner's model runs are spread over this
+   * process's runtime and theirs (`createRuntimePool`, a node with room first). Sign-in, the quota read and the shell assistant stay on
+   * this process's runtime.
    */
-  ownerRemote?: () => CodexRpcBoundary | undefined;
+  ownerNodes?: () => PoolMember[];
 } = {}): Promise<CodexSupervisor> {
   const host = options.host ?? "127.0.0.1";
   // Regenerated every boot: a token signed before a crash or restart must not still be honoured after
@@ -638,8 +643,9 @@ export async function startCodexSupervisor(options: {
       pluginState = { name: options.plugin.name, requiredSkills: options.plugin.requiredSkills, discoveredSkills, state: "blocked" };
     }
   }
-  /** The client the owner's model runs take: the compute node's runtime while it is connected, else this process's. */
-  const ownerClient = () => options.ownerRemote?.() ?? sidecar.client;
+  /** The client the owner's model runs take: a pool over this process's runtime and the connected compute nodes, when there can be any. */
+  const ownerPool = options.ownerNodes ? createRuntimePool(sidecar.client, options.ownerNodes) : undefined;
+  const ownerClient = (): CodexRpcBoundary => ownerPool ?? sidecar.client;
   const runtimes = options.runtimes ? createRuntimeRegistry({ owner: sidecar, ownerClient, ownerWorkspaceId: options.runtimes.ownerWorkspaceId,
     baseDir: options.runtimes.baseDir, ...(options.runtimes.maxRunning ? { maxRunning: options.runtimes.maxRunning } : {}),
     ...(options.runtimes.idleMs ? { idleMs: options.runtimes.idleMs } : {}),
@@ -1414,6 +1420,7 @@ export async function startCodexSupervisor(options: {
     ...(runtimes ? { runtimes } : {}),
     clientFor: (workspaceId: string) => isOwner(workspaceId) ? ownerClient() : runtimes!.current(workspaceId),
     runtimeVersion: runtimeVersion(sidecar.initializeResult),
+    ...(ownerPool ? { ownerPool } : {}),
     readCostSignal: async (workspaceId = "") => !isOwner(workspaceId) ? guestCost(workspaceId) : runtimeBlocker
       ? { available: false, reason: runtimeBlocker.code }
       : costFor(sidecar.client, workspaceId),

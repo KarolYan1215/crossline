@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { cpus, totalmem } from "node:os";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
@@ -30,10 +31,22 @@ export type NodeAgentOptions = {
   spawn: () => AppServerLines;
   log?: (event: Record<string, unknown>) => void;
   host?: string;
+  /** What kind of node this is: a linked device (ranked first) or the standalone 「Crossline 节点」. */
+  role: "device" | "standalone";
+  /** Runs it takes at once; by default from this computer's cores and memory (`nodeCapacity`). */
+  capacity?: number;
   /** Waits between attempts; a refusal (other Codex version, switched off on the site) waits longer. */
   backoffMs?: number[];
   refusedWaitMs?: number;
 };
+
+/**
+ * How many runs this computer takes at once: a model turn waits on the model, not on this machine, but each holds a thread with its
+ * plugins in the runtime; one per two cores and one per 2 GB of memory, the smaller, between 2 and 8.
+ */
+export function nodeCapacity(cores = cpus().length, memoryBytes = totalmem()): number {
+  return Math.max(2, Math.min(8, Math.floor(cores / 2), Math.floor(memoryBytes / (2 * 1024 ** 3))));
+}
 
 export function nodeUrl(site: string): string {
   const url = new URL("/node", site);
@@ -109,7 +122,8 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
           capabilities: { experimentalApi: true, requestAttestation: false } } })); })
         .then((agent) => {
           runtime?.write(JSON.stringify({ method: "initialized" }));
-          send({ t: "hello", protocol: NODE_PROTOCOL, codex: agent, platform: process.platform, host: (options.host ?? hostname()).slice(0, 60) });
+          send({ t: "hello", protocol: NODE_PROTOCOL, codex: agent, platform: process.platform, host: (options.host ?? hostname()).slice(0, 60),
+            role: options.role, capacity: options.capacity ?? nodeCapacity() });
         });
     });
     socket.on("message", (raw) => {

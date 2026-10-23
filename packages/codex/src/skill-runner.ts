@@ -7,6 +7,7 @@ import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTie
 import { createUsageCollector, currentSpendMode, currentUsageWorkspace, reportUsage, type UsageCollector } from "./usage";
 import { currentProviderRouting, decideRoute, noteChatgptUsageLimit, type ThreadProvider } from "./providers";
 import { markClientBusy, priorityForSkill, withModelSlot, type ModelPriority } from "./model-gate";
+import { bindForRun } from "./runtime-pool";
 import { accountModels, fitRoute } from "./model-catalog";
 
 import { registerAgentThread, SANDBOX_PROFILE, sandboxProfile, type AgentMode } from "./agent-mode";
@@ -322,6 +323,8 @@ function underConfigLock<T>(client: object, work: () => Promise<T>): Promise<T> 
 
 /** What one run carries through its turns: the route it was given, and the meter. */
 type RunContext = { route: ModelRoute | undefined; spendMode: SpendMode; usage: UsageCollector;
+  /** The runtime this run was given (runtime-pool.ts: this server's or a compute node's); every request of the run goes to it. */
+  client: CodexRpcBoundary;
   /** Set when this run goes to a provider other than the workspace's Codex sign-in (providers.ts); the thread is started on it. */
   provider?: ThreadProvider;
   /** On a provider: Crossline's own `web_search`/`web_fetch`, standing in for the OpenAI-hosted search the provider does not have. */
@@ -377,7 +380,7 @@ const MAX_STALL_RETRIES = 2;
  * it back off, and reporting what the run used.
  */
 async function executeSkill<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools;
-  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode; tenant?: string },
+  onQueued?: (ahead: number) => void; priority?: ModelPriority; signal?: AbortSignal; agent?: AgentMode; tenant?: string; threadId?: string },
   body: (context: RunContext) => Promise<SkillRunResult<T>>): Promise<SkillRunResult<T>> {
   const queuedAt = Date.now();
   const timing: RunTiming = { laneMs: 0, gateMs: 0, tenant: options.tenant ?? tenantOf(currentUsageWorkspace()) ?? "-" };
@@ -417,14 +420,20 @@ function threadRouteMoved(client: object, threadId: string, context: RunContext)
   return started !== undefined && started !== routeOf(context);
 }
 
-/** How long a run waited before it began, and for which account (logged with the run as `skill.run`). */
-type RunTiming = { laneMs: number; gateMs: number; tenant: string };
+/** How long a run waited before it began, for which account and on which runtime (logged with the run as `skill.run`). */
+type RunTiming = { laneMs: number; gateMs: number; tenant: string; runtime?: string };
 
-/** The run itself, once it holds a slot: counted as in flight on its runtime so the runtime is never reclaimed under it. */
-async function runGated<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools },
+/**
+ * The run itself, once it holds a slot: given its runtime now (a pool's choice — this server's or a compute node's — or the client
+ * itself), and counted as in flight on it so the runtime is never reclaimed under it.
+ */
+async function runGated<T>(client: CodexRpcBoundary, options: { skillName: string; cwd: string; tier?: RouteTier; mainModel?: boolean; provider?: ThreadProvider; extraSkills?: string[]; webTools?: SkillTools; threadId?: string },
   body: (context: RunContext) => Promise<SkillRunResult<T>>, timing: RunTiming): Promise<SkillRunResult<T>> {
+  const bound = bindForRun(client, options.threadId ? { threadId: options.threadId } : undefined);
   markClientBusy(client, 1);
-  try { return await runRouted(client, options, body, timing); } finally { markClientBusy(client, -1); }
+  if (bound.client !== client) markClientBusy(bound.client, 1);
+  try { return await runRouted(bound.client, options, body, { ...timing, runtime: bound.member }); }
+  finally { markClientBusy(client, -1); if (bound.client !== client) markClientBusy(bound.client, -1); bound.release(); }
 }
 
 /**
@@ -476,7 +485,7 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   const webTools = provider ? options.webTools ?? routing?.webTools : undefined;
   // The conformance check (`options.provider`) measures a provider and offers whatever its case needs.
   const functionCalls = !provider || Boolean(options.provider) || routing?.functionCalls === true;
-  const context: RunContext = { route, spendMode, usage: createUsageCollector(), ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [], functionCalls };
+  const context: RunContext = { route, spendMode, usage: createUsageCollector(), client, ...(provider ? { provider } : {}), ...(webTools ? { webTools } : {}), extraSkills: [], functionCalls };
   // The skills this run holds on (its own and the library skills named for it); each is released after the run.
   const holding: string[] = [];
   const extras: string[] = [];
@@ -517,6 +526,7 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
   const tokens = context.usage.total();
   console.info(JSON.stringify({ type: "skill.run", skill: options.skillName, ok: result.ok, provider: provider ? "provider" : "codex",
     ...(context.route?.model ? { model: context.route.model } : {}), ...(context.plugins ? { plugins: context.plugins } : {}),
+    ...(timing.runtime && timing.runtime !== "server" ? { runtime: timing.runtime } : {}),
     laneMs: timing.laneMs, gateMs: timing.gateMs, serviceMs: Date.now() - startedAt,
     input: tokens.inputTokens, cached: tokens.cachedInputTokens, output: tokens.outputTokens }));
   return result;
@@ -1110,7 +1120,9 @@ export async function continueSkillTurn<T>(client: CodexRpcBoundary, threadId: s
 function continueOnThread<T>(client: CodexRpcBoundary, threadId: string, message: string,
   options: ContinueTurnOptions<T>): Promise<SkillRunResult<T>> {
   if (options.signal?.aborted) return Promise.resolve({ ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} });
-  return inLane(threadLanes, `${runtimeKey(client)}:${threadId}`, () => executeSkill(client, options, async (context): Promise<SkillRunResult<T>> => {
+  return inLane(threadLanes, `${runtimeKey(client)}:${threadId}`, () => executeSkill(client, { ...options, threadId }, async (context): Promise<SkillRunResult<T>> => {
+    // The runtime the thread lives on (a compute node's, if it was started there).
+    const client = context.client;
     const audit: AnalysisAudit = { threadId };
     holdThread(client, threadId);
     const scope = openScope(client, options);
@@ -1137,20 +1149,20 @@ function continueOnThread<T>(client: CodexRpcBoundary, threadId: string, message
 export async function runCodexSkill<T>(client: CodexRpcBoundary, input: unknown, options: SkillRunOptions<T>): Promise<SkillRunResult<T>> {
   if (options.signal?.aborted) return { ok: false, blocker: { code: "SKILL_CANCELED", message: "已取消；未开始运行。" }, audit: {} };
   const onChatgpt = !options.provider && decideRoute(options.skillName, currentProviderRouting()).via === "codex";
-  let first = await executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
+  let first = await executeSkill(client, options, (context) => runSkillTurn(context.client, input, options, context));
   // The account's ChatGPT quota refused the run: the worker marks it spent, and where the developer's model now serves this Skill the
   // run goes there once (2026-10-21). Nothing else changes about the run.
   if (onChatgpt && !first.ok && first.blocker.code === "SKILL_USAGE_LIMIT" && !options.signal?.aborted) {
     noteChatgptUsageLimit();
     if (decideRoute(options.skillName, currentProviderRouting()).via === "provider") {
       console.log(JSON.stringify({ type: "skill.rerun_on_sponsor", skill: options.skillName }));
-      first = await executeSkill(client, options, (context) => runSkillTurn(client, input, options, context));
+      first = await executeSkill(client, options, (context) => runSkillTurn(context.client, input, options, context));
     }
   }
   if (!options.redoOnRepair || options.mainModel || !first.ok || !first.audit.repairs || !onSkillModel(options)) return first;
   console.log(JSON.stringify({ type: "skill.redo_on_main_model", skill: options.skillName, repairs: first.audit.repairs }));
   const main = { ...options, mainModel: true };
-  const second = await executeSkill(client, main, (context) => runSkillTurn(client, input, main, context));
+  const second = await executeSkill(client, main, (context) => runSkillTurn(context.client, input, main, context));
   return second.ok ? { ...second, audit: { ...second.audit, redone: { repairs: first.audit.repairs } } } : first;
 }
 

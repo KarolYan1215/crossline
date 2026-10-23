@@ -1558,7 +1558,8 @@ if (!capabilitySecret) {
       // Linking this computer as a device of the hosted account (docs/device-mode.md); the worker restarts into device mode.
       { prefix: "/v1/device", handle: createDeviceLinkService({ dataDir, secrets, onChanged: restartForMode }).handle }],
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
-    ownerRemote: () => { const owner = runtimeOwner(analysisStore); return owner ? nodeHub?.clientFor(owner) : undefined; },
+    // The owner's runs spread over this server's runtime and every compute node connected for the account (runtime-pool.ts).
+    ...(nodeHub ? { ownerNodes: () => { const owner = runtimeOwner(analysisStore); return owner ? nodeHub.members(owner) : []; } } : {}),
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),
     runTaskPass: (workspaceId) => stepPlanPass(workspaceId),
@@ -1691,7 +1692,18 @@ if (!capabilitySecret) {
   setInterval(() => codexSupervisor?.runtimes?.stopIdle(), 60_000).unref();
   // One model run at a time on the hosted beta, and none started above the memory high-water mark (model-gate.ts).
   // The candidates' measurement is no person's account (one tenant, `sponsor-eval`): it may use every background slot nobody else wants.
-  configureModelGate({ probe: () => containerMemory(), reserved: heldMemory, reclaim: () => codexSupervisor?.runtimes?.reclaim(), tenantLimits: { "sponsor-eval": Number.POSITIVE_INFINITY } });
+  configureModelGate({ probe: () => containerMemory(), reserved: heldMemory,
+    // The owner's compute nodes add their capacity to the owner's share, and while one has room the owner's next run is not held by this
+    // process's memory (docs/compute-node.md, 协同).
+    ...(nodeHub ? {
+      extraCapacity: (tenant: string) => tenant === runtimeOwner(analysisStore) ? nodeHub.capacity(tenant) : 0,
+      nodeRoom: (tenant: string) => {
+        if (tenant !== runtimeOwner(analysisStore)) return false;
+        const load = codexSupervisor?.ownerPool?.load() ?? {};
+        return nodeHub.members(tenant).some((member) => (load[member.id] ?? 0) < member.capacity);
+      }
+    } : {}),
+    reclaim: () => codexSupervisor?.runtimes?.reclaim(), tenantLimits: { "sponsor-eval": Number.POSITIVE_INFINITY } });
   // What the health check and the logs read: memory in use, its ceiling and peak, and the gate's line, every five minutes.
   const mb = (bytes: number | undefined) => bytes === undefined ? null : Math.round(bytes / 1048576);
   setInterval(() => {

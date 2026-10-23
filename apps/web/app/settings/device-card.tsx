@@ -5,7 +5,8 @@ import { SegmentedControl } from "../ui/controls";
 import { SetupGuide } from "../ui/setup-guide";
 import { DEVICE_LINK_GUIDE } from "../../lib/setup-guides";
 
-type NodeView = { available: boolean; enabled: boolean; status: { state: string; host?: string; codex?: string; at: string; message?: string } | null;
+type NodeEntryView = { key: string; host: string; role: "device" | "standalone"; capacity: number; state: string; at: string; message?: string };
+type NodeView = { available: boolean; enabled: boolean; status: { state: string; host?: string; codex?: string; at: string; message?: string; nodes?: NodeEntryView[] } | null;
   paired?: { host: string; at: string } | null };
 type Status = { linked: boolean; lastSeen: { at: string; label?: string } | null; folders: Array<{ id: string; label: string; files: number }>; documents: number };
 const time = (iso: string) => new Date(iso).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -55,12 +56,18 @@ export function DeviceCard({ siteUrl }: { siteUrl: string | null }) {
   </section>;
 }
 
+const NODE_STATE_WORDS: Record<string, string> = { ready: "在线", connected: "正在准备", offline: "离线", refused: "没有接入" };
+
 /** What the node's last state means for the person (docs/compute-node.md). */
 function nodeWords(view: NodeView): string {
   const at = view.status?.at ? time(view.status.at) : "";
   if (!view.enabled) return "关闭：模型工作都在服务器上";
   switch (view.status?.state) {
-    case "ready": return `已连接${view.status.host ? ` ${view.status.host}` : ""}：本账号的模型工作在那台电脑上跑`;
+    case "ready": {
+      const ready = (view.status.nodes ?? []).filter((node) => node.state === "ready");
+      return ready.length > 1 ? `${ready.length} 台电脑在线：本账号的模型工作先交给它们，满了再由服务器接着跑`
+        : `已连接${view.status.host ? ` ${view.status.host}` : ""}：本账号的模型工作先交给它，满了再由服务器接着跑`;
+    }
     case "connected": return "已连上，正在准备";
     case "refused": return `没有接入（${at}）：${view.status.message ?? "被拒绝"}`;
     case "offline": return `离线（${at}起）：模型工作暂在服务器上`;
@@ -106,6 +113,9 @@ function ComputeNodeRow() {
     <div className="st-row"><span className="st-row-label">作为算力节点<small>{nodeWords(view)}</small></span>
       <SegmentedControl label="作为算力节点" value={view.enabled ? "on" : "off"} options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]}
         onChange={(next) => void change(next === "on")} /></div>
+    {(view.status?.nodes ?? []).filter((node) => node.key !== "?").map((node) => <div className="st-row" key={node.key}>
+      <span className="st-row-label">{node.host || "一台电脑"}<small>{`${node.role === "device" ? "设备模式，优先" : "独立节点"} · 同时 ${node.capacity} 路`}</small></span>
+      <span className="muted">{NODE_STATE_WORDS[node.state] ?? node.state}{node.message && node.state !== "ready" ? `（${node.message}）` : ""}</span></div>)}
     {view.paired
       ? <div className="st-row"><span className="st-row-label">独立节点<small>{`已配对 ${view.paired.host || "一台电脑"}（${time(view.paired.at)}）`}</small></span>
         <button type="button" className="secondary-button" onClick={() => void unpair()}>解除配对</button></div>

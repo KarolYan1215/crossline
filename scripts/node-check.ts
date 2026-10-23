@@ -42,7 +42,7 @@ const hub = await createNodeHub({
   },
   log: (event) => say(String(event.type), event)
 });
-const agent = startNodeAgent({ url: `http://127.0.0.1:${hub.port}`, token: "x".repeat(24), dir: path.join(work, "node"), spawn: () => spawnAppServerLines(home) });
+const agent = startNodeAgent({ url: `http://127.0.0.1:${hub.port}`, token: "x".repeat(24), dir: path.join(work, "node"), spawn: () => spawnAppServerLines(home), role: "device" });
 
 let failed = false;
 try {
