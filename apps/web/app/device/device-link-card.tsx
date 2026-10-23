@@ -33,11 +33,26 @@ export function DeviceLinkCard() {
   const [token, setToken] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = async () => {
+  /** Set while the background service restarts into the other mode: the page says so instead of showing its absence as an error. */
+  const [restarting, setRestarting] = useState(false);
+  const load = async (): Promise<LinkView> => {
     const response = await fetch("/api/device/link", { cache: "no-store" }).catch(() => undefined);
-    setView(response ? await response.json().catch(() => undefined) as LinkView : { ok: false, message: "后台服务没有响应。" });
+    const next = response ? await response.json().catch(() => undefined) as LinkView ?? { ok: false } : { ok: false, message: "后台服务没有响应。" };
+    setView(next);
+    return next;
   };
   useEffect(() => { void load(); const timer = setInterval(() => void load(), 15_000); return () => clearInterval(timer); }, []);
+  /** After a change that restarts the service: asked every 2 s until it answers in the state the change leads to (a minute and a half at most). */
+  const untilRestarted = async (done: (next: LinkView) => boolean) => {
+    setRestarting(true);
+    for (let tries = 0; tries < 45; tries += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      const next = await load();
+      if (next.ok !== false && done(next)) { setRestarting(false); return; }
+    }
+    setRestarting(false);
+    setNote("后台服务一分半钟内没有回来：请重新启动电脑上的 Crossline。");
+  };
   const link = async () => {
     setBusy(true); setNote("");
     const response = await fetch("/api/device/link", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url, token }) }).catch(() => undefined);
@@ -45,22 +60,22 @@ export function DeviceLinkCard() {
     setBusy(false);
     if (!response?.ok || !body?.ok) { setNote(body?.message ?? "没有连上，请重试。"); return; }
     setToken("");
-    setNote("已连接。后台服务正在以设备模式重启，几秒后这里显示发送情况。");
-    setTimeout(() => void load(), 6_000);
+    setNote("已连接。");
+    void untilRestarted((next) => next.linked === true);
   };
   const unlink = async () => {
     setBusy(true);
     const response = await fetch("/api/device/link", { method: "DELETE" }).catch(() => undefined);
     setBusy(false);
-    setNote(response?.ok ? "已断开。后台服务正在以完整模式重启。" : "没有断开，请重试。");
-    setTimeout(() => void load(), 6_000);
+    setNote(response?.ok ? "已断开。" : "没有断开，请重试。");
+    if (response?.ok) void untilRestarted((next) => next.linked === false);
   };
   const switchNode = async (enabled: boolean) => {
     setBusy(true);
     const response = await fetch("/api/device/node", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) }).catch(() => undefined);
     setBusy(false);
-    setNote(response?.ok ? (enabled ? "已开启。后台服务正在重启，几秒后连上网页版。" : "已关闭。后台服务正在重启。") : "没有保存，请重试。");
-    setTimeout(() => void load(), 6_000);
+    setNote(response?.ok ? (enabled ? "已开启。" : "已关闭。") : "没有保存，请重试。");
+    if (response?.ok) void untilRestarted((next) => next.node?.enabled === enabled);
   };
   const device = view?.device;
   return <section className="st-card" aria-label="设备连接">
@@ -85,9 +100,10 @@ export function DeviceLinkCard() {
         <input type="password" value={token} onChange={(event) => setToken(event.target.value)} autoComplete="off" spellCheck={false} /></label>
       <div className="st-row"><span className="st-row-label" />
         <button type="button" className="primary-button" disabled={busy || !token.trim() || !url.trim()} onClick={() => void link()}>{busy ? "正在连接…" : "连接"}</button></div>
-      {view && view.ok === false && <p className="st-note">{view.message ?? "后台服务没有响应。"}</p>}
+      {view && view.ok === false && !restarting && <p className="st-note">{view.message ?? "后台服务没有响应。"}</p>}
       <SetupGuide guide={DEVICE_LINK_GUIDE} />
     </>}
+    {restarting && <p role="status" className="st-note">后台服务正在重启（换模式），几秒后这里刷新……</p>}
     {note && <p role="status" className="st-note">{note}</p>}
   </section>;
 }

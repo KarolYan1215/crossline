@@ -42,6 +42,8 @@ export type NodeHubOptions = {
   readFile?: (file: string) => Buffer;
   fetch?: typeof fetch;
   heartbeatMs?: number;
+  /** A node silent this long (no pong) is let go; longer than one beat, so a pong late under load never drops a working node. */
+  deadAfterMs?: number;
 };
 
 export type NodeHub = {
@@ -56,7 +58,7 @@ export type NodeHub = {
 export const MIRROR_MAX_FILES = 800;
 export const MIRROR_MAX_BYTES = 40 * 1_048_576;
 
-type Connection = { socket: WebSocket; workspaceId: string; client?: JsonLineRpcClient; ready: boolean; alive: boolean; host: string; codex: string };
+type Connection = { socket: WebSocket; workspaceId: string; client?: JsonLineRpcClient; ready: boolean; heardAt: number; host: string; codex: string };
 
 export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   const log = options.log ?? (() => {});
@@ -89,10 +91,10 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   });
 
   function accept(socket: WebSocket, workspaceId: string): void {
-    const connection: Connection = { socket, workspaceId, ready: false, alive: true, host: "", codex: "" };
+    const connection: Connection = { socket, workspaceId, ready: false, heardAt: Date.now(), host: "", codex: "" };
     const hello = setTimeout(() => socket.close(4001, "NODE_HELLO_MISSING"), 15_000);
     const pendingGw = new Map<number, AbortController>();
-    socket.on("pong", () => { connection.alive = true; });
+    socket.on("pong", () => { connection.heardAt = Date.now(); });
     socket.on("message", (raw) => {
       const frame = parseFrame(raw.toString());
       if (!frame) return;
@@ -143,6 +145,8 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
       setStatus(workspaceId, { state: "ready", host: connection.host, codex: connection.codex });
       log({ type: "node.ready", workspaceId, host: connection.host });
     } catch (error) {
+      // A preparation cut short by the connection closing is that close, already recorded as offline; only a live one was refused.
+      if (connections.get(workspaceId) !== connection) return;
       refuse(connection, 4010, "NODE_PREPARE_FAILED", `节点准备失败：${error instanceof Error ? error.message.slice(0, 120) : "未知错误"}`);
     }
   }
@@ -208,8 +212,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   const heartbeat = setInterval(() => {
     for (const connection of connections.values()) {
       if (!options.allowed(connection.workspaceId)) { refuse(connection, 4003, "NODE_SWITCHED_OFF", "网页版已关闭「作为算力节点」"); continue; }
-      if (!connection.alive) { connection.socket.terminate(); continue; }
-      connection.alive = false;
+      if (Date.now() - connection.heardAt > (options.deadAfterMs ?? 45_000)) { connection.socket.terminate(); continue; }
       try { connection.socket.ping(); } catch { /* terminated next round */ }
     }
   }, options.heartbeatMs ?? 15_000);

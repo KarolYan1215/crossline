@@ -9,8 +9,10 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
  * sent (GET), linking with the hosted site's address and a `device` token (POST `{url, token}` — checked against the site before it is
  * kept), and unlinking (DELETE). The worker keeps the token (DPAPI) and restarts itself into the other mode; this app only relays.
  */
+// The worker restarts into the other mode after every link change: for a few seconds there is nothing to answer, which is not a failure.
 const failed = (error: unknown) => error instanceof CodexSupervisorRequestError
-  ? NextResponse.json({ ok: false, code: error.blocker.code, message: error.blocker.message }, { status: error.status })
+  ? NextResponse.json({ ok: false, code: error.blocker.code, message: error.blocker.code === "CODEX_SUPERVISOR_UNAVAILABLE"
+    ? "后台服务没有响应：可能正在重启，稍等几秒。" : error.blocker.message }, { status: error.status })
   : NextResponse.json({ ok: false, code: "DEVICE_LINK_FAILED", message: "后台服务没有响应。" }, { status: 503 });
 
 export async function GET(request: Request) {

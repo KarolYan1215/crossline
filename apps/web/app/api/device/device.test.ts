@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { ACTIVITY_HOURLY, ACTIVITY_LONG_GAPS, INPUT_RHYTHM_BUCKETS, RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, type AccessContext } from "@crossline/core";
+import { ACTIVITY_HOURLY, ACTIVITY_LONG_GAPS, INPUT_RHYTHM_BUCKETS, NODE_STATUS_SETTING, RECORDING_TRANSCRIBED_EVENT, RUNTIME_OWNER_SETTING, SLEEP_TRACKING_CONSENT, type AccessContext } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 const session: { ctx?: AccessContext | undefined } = {};
 vi.mock("../../../lib/access-guard", () => ({
@@ -12,6 +12,8 @@ vi.mock("../../../lib/access-guard", () => ({
 import { issueDeviceToken } from "../../../lib/energy";
 import { TEST_CTX } from "../../../lib/test-support";
 import { POST as activity } from "./activity/route";
+import { GET as computeStatus, POST as compute } from "./compute/route";
+import { GET as linkStatus } from "./link/route";
 import { GET as hello } from "./hello/route";
 import { POST as recordings } from "./recordings/route";
 import { POST as sources } from "./sources/route";
@@ -117,4 +119,25 @@ test("the 这台电脑 card makes, shows and revokes the token; a revoked token 
   expect(shown).toMatchObject({ linked: true, lastSeen: { label: "KAROL-PC" } });
   await revoke(new Request("https://app.crossline.lol/api/device/token", { method: "DELETE" }));
   expect((await send(activity, "/api/device/activity", made.token, "activity:after000", { consents })).status).toBe(401);
+});
+
+test("「作为算力节点」: only the runtime owner's account may switch it on; the card shows what the hosted worker last saw of the node", async () => {
+  const post = (enabled: boolean) => compute(new Request("https://app.crossline.lol/api/device/compute", { method: "POST", body: JSON.stringify({ enabled }) }));
+  expect(await (await computeStatus(new Request("https://app.crossline.lol/api/device/compute"))).json()).toMatchObject({ available: false, enabled: false });
+  expect((await post(true)).status).toBe(403);
+  store.setSetting(ctx.workspaceId, RUNTIME_OWNER_SETTING, "1");
+  expect(await (await post(true)).json()).toMatchObject({ ok: true, available: true, enabled: true });
+  store.setSetting(ctx.workspaceId, NODE_STATUS_SETTING, JSON.stringify({ state: "ready", host: "KAROL-PC", codex: "0.163.0", at: "2026-10-23T18:00:00.000Z" }));
+  expect(await (await computeStatus(new Request("https://app.crossline.lol/api/device/compute"))).json()).toMatchObject({ enabled: true, status: { state: "ready", host: "KAROL-PC" } });
+  expect(await (await post(false)).json()).toMatchObject({ enabled: false });
+  // A forged origin never switches it.
+  expect((await compute(new Request("https://app.crossline.lol/api/device/compute", { method: "POST", headers: { origin: "https://evil.example" }, body: "{}" }))).status).toBe(403);
+});
+
+test("while the background service restarts into the other mode, the device page is told so in plain words, not an error code", async () => {
+  vi.stubEnv("CROSSLINE_SUPERVISOR_CAPABILITY_SECRET", "s".repeat(32));
+  vi.stubEnv("CROSSLINE_CODEX_SUPERVISOR_URL", "http://127.0.0.1:9");
+  const response = await linkStatus(new Request("http://127.0.0.1:3210/api/device/link"));
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ ok: false, code: "CODEX_SUPERVISOR_UNAVAILABLE", message: expect.stringContaining("可能正在重启") });
 });

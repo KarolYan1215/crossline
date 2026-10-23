@@ -58,7 +58,7 @@ async function until<T>(read: () => T | undefined, ms = 20_000): Promise<T> {
   }
 }
 
-async function setUp(options: { nodeCodex?: string; allowed?: () => boolean } = {}) {
+async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number } = {}) {
   gatewayServer = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
@@ -72,6 +72,7 @@ async function setUp(options: { nodeCodex?: string; allowed?: () => boolean } = 
     authenticate: (token) => token === "good-token-0123456789abcdef" ? "ws-owner" : undefined,
     allowed: options.allowed ?? (() => true),
     heartbeatMs: 50,
+    ...(options.deadAfterMs !== undefined ? { deadAfterMs: options.deadAfterMs } : {}),
     roots: () => [ROOT],
     imageRoots: () => ["/srv/data"],
     readFile: (file) => { if (file === "/srv/data/shot.png") return Buffer.from("PNG-BYTES"); throw new Error("ENOENT"); },
@@ -161,6 +162,15 @@ test("switched off on the site, a connected node is let go at the next heartbeat
   await until(() => hub!.clientFor("ws-owner") === undefined ? true : undefined);
   await until(() => agent.status().state === "refused" ? true : undefined);
   expect(hub!.status("ws-owner")).toMatchObject({ state: "refused", message: expect.stringContaining("已关闭") });
+});
+
+test("a node not heard from within the silence limit is let go and its account's runs go back to the server", async () => {
+  const { agent } = await setUp({ deadAfterMs: 1 });
+  // Ready or not, with a 1 ms limit it cannot stay: the next beat finds it silent.
+  await until(() => agent.status().state === "waiting" ? true : undefined);
+  // Each side learns of the close on its own: the hub's record may land a moment after the node's.
+  await until(() => hub!.status("ws-owner")?.state === "offline" ? true : undefined);
+  expect(hub!.clientFor("ws-owner")).toBeUndefined();
 });
 
 test("when the node goes away its runs fail at once and later runs go back to the server", async () => {
