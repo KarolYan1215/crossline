@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { accountConcurrency, codexProcessEnvironment, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
-import { containerMemory, containerPeak } from "./memory";
+import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
@@ -1117,6 +1117,7 @@ const classifyTopics = createTopicClassifier(analysisStore, repoRoot, (workspace
 configureFavouritesCollector({
   outputRoot: defaultOutputRoot(),
   reclaim: () => codexSupervisor?.runtimes?.reclaim(),
+  memory: createCollectMemory({ reclaim: () => codexSupervisor?.runtimes?.reclaim() }),
   // Sorting the titles is the person's own request at work: it runs while the quota allows core work.
   classify: async (workspaceId, workflowId) => {
     if (!spendAllows(await spendFor(workspaceId), "core")) return 0;
@@ -1656,12 +1657,12 @@ if (!capabilitySecret) {
   setInterval(() => codexSupervisor?.runtimes?.stopIdle(), 60_000).unref();
   // One model run at a time on the hosted beta, and none started above the memory high-water mark (model-gate.ts).
   // The candidates' measurement is no person's account (one tenant, `sponsor-eval`): it may use every background slot nobody else wants.
-  configureModelGate({ probe: () => containerMemory(), reclaim: () => codexSupervisor?.runtimes?.reclaim(), tenantLimits: { "sponsor-eval": Number.POSITIVE_INFINITY } });
+  configureModelGate({ probe: () => containerMemory(), reserved: heldMemory, reclaim: () => codexSupervisor?.runtimes?.reclaim(), tenantLimits: { "sponsor-eval": Number.POSITIVE_INFINITY } });
   // What the health check and the logs read: memory in use, its ceiling and peak, and the gate's line, every five minutes.
   const mb = (bytes: number | undefined) => bytes === undefined ? null : Math.round(bytes / 1048576);
   setInterval(() => {
     const gate = modelGateStatus();
-    console.info(JSON.stringify({ type: "worker.memory", usedMb: mb(gate.memory?.used), limitMb: mb(gate.memory?.limit), peakMb: mb(containerPeak()),
+    console.info(JSON.stringify({ type: "worker.memory", usedMb: mb(gate.memory?.used), limitMb: mb(gate.memory?.limit), peakMb: mb(containerPeak()), heldMb: mb(heldMemory()),
       active: gate.active, queued: gate.queued }));
   }, 5 * 60_000).unref();
 } catch {

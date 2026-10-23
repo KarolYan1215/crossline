@@ -213,6 +213,54 @@ test("a file over the size cap is not saved and says so; the limit of the trial 
   expect(mediaExtension(Buffer.from("xx"), "image/jpeg", "bin")).toBe("jpg");
 });
 
+test("past the memory line the list stops where it is: what it showed is kept, counted as listed and read, and nothing is held", async () => {
+  const site = fakeSite({ total: 100 });
+  let wheels = 0;
+  let told = false;
+  const wheel = site.driver.wheel;
+  site.driver.wheel = async () => { wheels += 1; await wheel(); };
+  // Full once, after two more screens of the list (the page holds every card it has shown); then room again for the notes.
+  const memory = { over: () => (wheels === 2 && !told ? (told = true) : false), mediaBytes: (wanted: number) => wanted, describe: () => "1220 / 1350 MB" };
+  const result = await run(site.driver, { memory }).result;
+  expect(result).toMatchObject({ state: "done", listed: 90, listEnded: false, listCapped: true, pending: 0 });
+  expect(result.read).toHaveLength(90);
+  const ledger = readCollectLedger(store, ws, "flow-xhs");
+  expect(ledger.listCapped).toEqual({ at: "2026-10-22T03:00:00.000Z", listed: 90, memory: "1220 / 1350 MB" });
+  expect(ledger.listedAt).toBe("2026-10-22T03:00:00.000Z");
+  // The notes past the line cannot be reached here: the catch-up counts as done, so later runs are incremental instead of scrolling to the line again.
+  expect(ledger.caughtUpAt).toBe("2026-10-22T03:00:00.000Z");
+  expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
+});
+
+test("past the memory line between notes the run stops itself, keeps what it read and does not hold the site; the next run goes on", async () => {
+  let reads = 0;
+  const memory = { over: () => reads >= 3, mediaBytes: (wanted: number) => wanted, describe: () => "1230 / 1350 MB" };
+  const site = fakeSite({ total: 8 });
+  const writeNote = site.driver.fetchMedia;
+  site.driver.fetchMedia = async (url, referer, max) => { if (url.endsWith("/2")) reads += 1; return writeNote(url, referer, max); };
+  const result = await run(site.driver, { memory }).result;
+  expect(result).toMatchObject({ state: "memory", read: [idOf(8), idOf(7), idOf(6)], pending: 5 });
+  expect(result.message).toContain("1230 / 1350 MB");
+  expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
+  expect(readCollectLedger(store, ws, "flow-xhs").caughtUpAt).toBeUndefined();
+  const next = await run(fakeSite({ total: 8 }).driver).result;
+  expect(next).toMatchObject({ state: "done", mode: "catch_up", pending: 0 });
+  expect(next.read).toEqual([idOf(5), idOf(4), idOf(3), idOf(2), idOf(1)]);
+});
+
+test("a download is held to the room the memory line leaves, and the note says why it was not saved", async () => {
+  const site = fakeSite({ total: 2 });
+  const asked: number[] = [];
+  site.driver.fetchMedia = async (url, _referer, max): Promise<MediaFetch> => {
+    asked.push(max);
+    return url.endsWith(".mp4") && max < 50 * 1_048_576 ? { state: "too_large", bytes: 50 * 1_048_576 } : { state: "ok", bytes: Buffer.from("RIFF0000WEBP"), contentType: "image/webp" };
+  };
+  const memory = { over: () => false, mediaBytes: () => 20 * 1_048_576, describe: () => "" };
+  await run(site.driver, { memory }).result;
+  expect(asked.every((max) => max === 20 * 1_048_576)).toBe(true);
+  expect(readNoteFile(folder, idOf(2))!.video).toMatchObject({ problem: expect.stringContaining("服务器内存只够下载 20 MB") });
+});
+
 test("notes become Markdown: pictures and video stills described in batches, the video heard, and an index", async () => {
   await run(fakeSite({ total: 3 }).driver).result;
   const batches: PictureToDescribe[][] = [];

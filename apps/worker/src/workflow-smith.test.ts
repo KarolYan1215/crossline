@@ -7,6 +7,7 @@ import { LINE_SETTING } from "@crossline/identity-packs";
 import { validateWorkflowManifest } from "@crossline/core";
 import { librarySelection, type AgentOutcome, type AgentTaskInput } from "./agent-task";
 import type { OpenSite, SiteReader } from "./site-reader";
+import { siteHold } from "./site-reader";
 import { cleanGrownSkills, collectionDone, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR,
   resumeByPerson, startWorkflowRun, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { createRemoteBrowsers } from "./remote-browser";
@@ -540,6 +541,24 @@ test("a favourites workflow is read whole by the worker's job first; the assista
   } finally { configureFavouritesCollector(undefined); }
 });
 
+test("with no room for the browser the collection opens nothing, holds nothing, says so once and leaves the next run to try", async () => {
+  favouritesRecord();
+  let opened = 0;
+  let released = 0;
+  const memory = { admit: async () => false, release: () => { released += 1; }, over: () => false, mediaBytes: (wanted: number) => wanted, describe: () => "1100 / 1350 MB" };
+  configureFavouritesCollector({ outputRoot: root, open: async () => { opened += 1; throw new Error("not opened"); }, media: () => ({}), sleep: async () => {}, memory });
+  try {
+    const run = (input: AgentTaskInput & { taskId: string }) => ({ state: "started" as const, taskId: input.taskId });
+    expect(startWorkflowRun(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date(), "chrome.exe")).toMatchObject({ state: "started" });
+    await collectionDone(ws, "flow-xhs");
+    expect(opened).toBe(0);
+    expect(released).toBeGreaterThan(0);
+    expect(store.listEvents(ws, { type: "collect.ran" }).at(-1)!.payload).toMatchObject({ state: "memory" });
+    expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
+    expect(said().at(-1)).toContain("服务器内存不够打开浏览器（1100 / 1350 MB）");
+  } finally { configureFavouritesCollector(undefined); }
+});
+
 test("favourites by topic: the list read for its titles, sorted into topics, the day's share of one topic by day and everything in order by night", async () => {
   store.setSetting(ws, "schedule.preferences", JSON.stringify({ timeZone: "UTC" }));
   const record = installFavouritesTopicsWorkflow(store, ws, "media", new Date("2026-10-22T11:00:00Z"));
@@ -598,7 +617,8 @@ test("favourites by topic: the list read for its titles, sorted into topics, the
     expect(opened).toEqual([id(1), id(2), id(3), id(4), id(5)]);
     // A run that broke holds the site: the tick starts nothing, however late, until the person presses 「立即运行」.
     holdAfterFailure(store, ws, "Target crashed");
-    const soon = new Date(Date.now() + 30 * 86_400_000);
+    // A month on, by night: the list is due again, so only the hold stops it (a wall-clock date made this pass only between 02 and 08 UTC).
+    const soon = new Date("2026-11-22T03:00:00Z");
     expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon)).toMatchObject({ state: "blocked", code: "SITE_PAUSED" });
     expect(resumeByPerson(store, ws, readGrownSkills(store, ws)[0]!)).toEqual(["xiaohongshu.com"]);
     expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon, { manual: true })).not.toMatchObject({ code: "SITE_PAUSED" });

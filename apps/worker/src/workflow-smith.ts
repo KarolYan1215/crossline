@@ -21,6 +21,7 @@ import { collectFavourites, collectFolder, collectHold, favouritesAccess, holdAf
   type CollectDriver, type CollectOptions, type CollectResult } from "./favourites-reader";
 import { describeNotes, type NoteMediaDeps } from "./note-media";
 import { loginMode } from "./browser-launch";
+import type { CollectMemory } from "./memory";
 import { HOLDER_WORDS, holdProfile, profileHolder, releaseProfile } from "./profile-locks";
 import type { RemoteBrowsers } from "./remote-browser";
 
@@ -497,6 +498,8 @@ export type FavouritesCollector = {
   log?: (event: Record<string, unknown>) => void;
   /** Frees what can be freed before the browser opens (idle model runtimes): the page shares the worker's memory ceiling. */
   reclaim?: () => void;
+  /** The browser's share of the worker's memory: room waited for and held before it opens, and the line it stops itself at. */
+  memory?: CollectMemory;
   /** Sorts the listed favourites not yet under a topic (a model run, favourites-topics.ts); the number sorted. */
   classify?: (workspaceId: string, workflowId: string) => Promise<number>;
 };
@@ -535,16 +538,24 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
     let result: CollectResult;
     // The page was killed by the container's memory ceiling twice (2026-10-23) while four idle model runtimes held ~800 MB.
     collector.reclaim?.();
-    const driver = await (collector.open ?? openCollectBrowser)(profileDir, browser, { listOnly: Boolean(plan.listOnly) }).catch((error: unknown) => error as Error);
-    if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
+    // No room for the page after the wait: nothing is opened, nothing is held, and the next run tries again.
+    const room = collector.memory ? await collector.memory.admit() : true;
+    const driver = !room ? undefined
+      : await (collector.open ?? openCollectBrowser)(profileDir, browser, { listOnly: Boolean(plan.listOnly) }).catch((error: unknown) => error as Error);
+    if (!driver) result = { state: "memory", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0,
+      message: `服务器内存不够打开浏览器（${collector.memory?.describe() ?? ""}），稍后再读。` };
+    else if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
     else {
       const { after: _after, ...reading } = plan;
-      try { result = await collectFavourites({ store, workspaceId, workflowId: record.id, folder, driver, ...(collector.sleep ? { sleep: collector.sleep } : {}), log, ...reading }); }
+      try { result = await collectFavourites({ store, workspaceId, workflowId: record.id, folder, driver, ...(collector.sleep ? { sleep: collector.sleep } : {}), log,
+        ...(collector.memory ? { memory: collector.memory } : {}), ...reading }); }
       finally { await driver.close(); }
     }
+    collector.memory?.release();
     releaseProfile(profileDir, "collect");
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.ran:${taskId}`, type: "collect.ran", entityId: record.id,
-      payload: { taskId, state: result.state, mode: result.mode, listed: result.listed, listEnded: result.listEnded, read: result.read.length, gone: result.gone.length, pending: result.pending,
+      payload: { taskId, state: result.state, mode: result.mode, listed: result.listed, listEnded: result.listEnded, ...(result.listCapped ? { listCapped: true } : {}),
+        read: result.read.length, gone: result.gone.length, pending: result.pending,
         ...(result.message ? { message: result.message } : {}), ...(result.trigger ? { trigger: result.trigger } : {}) } });
     // A run that broke is not started again by itself: the person is told and presses 「立即运行」 when they want it (2026-10-23).
     if (result.state === "failed") holdAfterFailure(store, workspaceId, result.message ?? "浏览器出错", new Date());
@@ -557,12 +568,17 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
       "workflow_done", `check:${record.id}:${taskId}`, [{ label: "去看设置", href: "/settings#skills" }]);
     if (result.state === "login" || result.state === "no_profile") sayToPerson(store, workspaceId, `「${summary}」需要登录小红书${result.read.length ? `（本次已读 ${result.read.length} 条，照常整理）` : ""}。请在设置里点「登录」，登录后点「登录完成」，再点「立即运行」。`,
       "workflow_login", `login:${record.id}:${day}`, [{ label: "去登录", href: loginHref(record.id) }]);
+    // Stopped at our own memory line: nothing broke and the site is not held; said once a day.
+    if (result.state === "memory") sayToPerson(store, workspaceId, `「${summary}」${result.message ?? "服务器内存到了上限，稍后再读。"}${result.read.length ? `本次已读 ${result.read.length} 条，照常整理。` : ""}`,
+      "workflow_done", `memory:${record.id}:${day}`, [{ label: "去看设置", href: "/settings#skills" }]);
+    if (result.listCapped) sayToPerson(store, workspaceId, `「${summary}」收藏列表读到 ${result.listed} 条时服务器内存到了上限，先按这 ${result.listed} 条整理；更早的收藏在这台服务器上读不到，要等服务器扩容或算力节点。`,
+      "workflow_done", `capped:${record.id}:${result.listed}`, [{ label: "去看设置", href: "/settings#skills" }]);
     if (result.state === "failed") sayToPerson(store, workspaceId, `「${summary}」这次没读完：${result.message ?? "浏览器出错"}${result.read.length ? `；已读 ${result.read.length} 条，照常整理` : ""}。不会自己重试，点「立即运行」再继续。`,
       "workflow_done", `failed:${record.id}:${taskId}`, [{ label: "去看设置", href: "/settings#skills" }]);
     if (plan.after) plan.after(result);
     else organiseFavourites(store, workspaceId, record, runFree, folder, result, new Date());
   })().catch((error: unknown) => log({ type: "collect.failed", workspaceId, id: record.id, message: error instanceof Error ? error.message : "" }))
-    .finally(() => { releaseProfile(profileDir, "collect"); collecting.delete(key); });
+    .finally(() => { collector.memory?.release(); releaseProfile(profileDir, "collect"); collecting.delete(key); });
   collecting.set(key, job);
   return { state: "started", taskId };
 }

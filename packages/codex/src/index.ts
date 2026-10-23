@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { closeSync, existsSync, mkdirSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { readCostSignal } from "./cost";
 import { verifyCapability } from "./capability";
@@ -205,6 +205,9 @@ export function webResearchBlocker(
     message: `联网查证需要 ${host}，但它不在那里，网页搜索无法启动。把已安装 Codex 应用 bin 目录里的 codex-code-mode-host.exe 复制到这个位置，或在 vendor/codex 里构建 codex-code-mode-host。` };
 }
 
+/** A guest runtime's `oom_score_adj` (Linux): above the owner's runtime and the worker (0), below Chromium's renderers (300). */
+export const GUEST_OOM_SCORE_ADJ = 200;
+
 export async function startCodexAppServer(codexHome?: string): Promise<{
   client: JsonLineRpcClient;
   process: ChildProcessWithoutNullStreams;
@@ -222,6 +225,11 @@ export async function startCodexAppServer(codexHome?: string): Promise<{
     windowsHide: true,
     env
   });
+  // Under a container's ceiling the kernel kills by this score: a guest's runtime (and the plugin servers it starts, which inherit it) goes
+  // before the owner's runtime and the worker itself, whose loss restarts everything (2026-10-23). Raising one's own child needs no privilege.
+  if (codexHome && process.platform === "linux" && child.pid) {
+    try { writeFileSync(`/proc/${child.pid}/oom_score_adj`, String(GUEST_OOM_SCORE_ADJ)); } catch { /* best effort */ }
+  }
   const client = new JsonLineRpcClient((line) => child.stdin.write(line));
   const lines = createInterface({ input: child.stdout });
   const exitHandlers = new Set<() => void>();

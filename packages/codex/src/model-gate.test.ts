@@ -225,6 +225,26 @@ test("with nothing running and memory that never drops, the next run goes after 
   expect(events.some((event) => event.type === "model.gate.memory_forced")).toBe(true);
 });
 
+test("memory promised to the browser counts for background work, which is not forced past the mark while it is held; a person's turn is not held by it", async () => {
+  const events: Array<Record<string, unknown>> = [];
+  let reserved = 300;
+  configureModelGate({ limit: 2, highWater: 0.75, probe: () => ({ used: 500, limit: 1000 }), reserved: () => reserved, pollMs: 5, maxMemoryWaitMs: 20,
+    log: (event) => events.push(event) });
+  const order: string[] = [];
+  const background = withModelSlot({ skill: "crossline:crossline-due-diligence" }, async () => { order.push("background"); });
+  await tick(); await tick(); await tick();
+  // 500 in use + 300 promised = 80%: past the mark, and well past the minute's rule, it still waits.
+  expect(order).toEqual([]);
+  expect(events.some((event) => event.type === "model.gate.memory_forced")).toBe(false);
+  // The person's line is measured on what is in use (50%): it goes at once.
+  await withModelSlot({ skill: "crossline:crossline-onboarding" }, async () => { order.push("person"); });
+  expect(order).toEqual(["person"]);
+  // The browser closes and its promise is released: the background run goes.
+  reserved = 0;
+  await background;
+  expect(order).toEqual(["person", "background"]);
+});
+
 test("a run cancelled while it waits leaves the line without running; a runtime with a run in flight is busy", async () => {
   configureModelGate({ limit: 1, log: () => {} });
   const first = deferred();

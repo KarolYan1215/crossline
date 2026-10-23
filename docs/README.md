@@ -64,4 +64,5 @@
 - [onboarding-prompts.md](onboarding-prompts.md)：访谈对话层、整理层与画像报告的 prompt 结构、目的、实际上下文，对照本人真实访谈找出的问题与 2026-10-20 的修改。
 - [ledger-sync.md](ledger-sync.md)：本机与服务器账本的整本同步（2026-10-22 起停用，只用于一次性搬迁）。
 - [device-mode.md](device-mode.md)：托管站是唯一主账本，本机作为设备只发本机读到的屏幕活动、文件夹与录音转写。
+- [compute-node.md](compute-node.md)：设计稿（2026-10-23，未实现）：本人电脑作为算力节点，经一条出站连接替托管站跑 Codex 运行时、浏览器与转写；账本仍只在托管站，节点不在时回落到服务器；只给本人（A）或经各账号同意也给其他账号（B）。
 - [review-2026-10-20.md](review-2026-10-20.md)：2026-10-20 全系统走查与调研（Muse、Codex/Claude Code、可穿戴、公域用户）。

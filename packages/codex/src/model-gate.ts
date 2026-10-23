@@ -10,6 +10,9 @@
  * - While the process uses more than `CROSSLINE_MEMORY_HIGH_WATER` (75%) of its memory ceiling, nothing new starts: a run already
  *   going finishes first, idle runtimes are reclaimed, and only after a minute of that with nothing running does the next run go anyway
  *   (a reading that never drops must not stop the service for good).
+ * - Memory held for a heavy job outside the gate (the collection's browser, `reserved`) counts as in use for background work, and while
+ *   any is held nothing is started past the mark by that minute's rule: the room was promised to the job (2026-10-23, after the browser
+ *   was killed twice by the container's ceiling). A person's turn is measured on what is really in use.
  * - Each waiter is told how many runs are ahead of it, so a page can say 「排队中，前面还有 N 个」.
  *
  * Who goes next (decided with the owner on 2026-10-19, docs/model-scheduling.md):
@@ -101,6 +104,8 @@ type GateConfig = {
   reserve: number;
   highWater: number;
   probe?: () => MemoryReading | undefined;
+  /** Bytes promised to heavy jobs outside the gate and not yet taken by them (apps/worker/src/memory.ts `heldMemory`). */
+  reserved?: () => number;
   /** Frees what can be freed (idle runtimes) while memory is high. */
   reclaim?: () => void;
   /** With nothing running and memory still high this long, the next run goes anyway. */
@@ -165,9 +170,14 @@ function readMemory(): MemoryReading | undefined {
   try { return config.probe?.(); } catch { return undefined; }
 }
 
-function memoryHigh(): boolean {
+/** Over the mark: for background work (and a new runtime process) memory promised to a heavy job counts as in use; for a person's turn it does not. */
+function memoryHigh(background = true): boolean {
   const reading = readMemory();
-  return Boolean(reading && reading.limit > 0 && reading.used / reading.limit >= config.highWater);
+  return Boolean(reading && reading.limit > 0 && (reading.used + (background ? reservedBytes() : 0)) / reading.limit >= config.highWater);
+}
+
+function reservedBytes(): number {
+  try { return Math.max(0, config.reserved?.() ?? 0); } catch { return 0; }
 }
 
 function schedule(): void {
@@ -213,7 +223,7 @@ function ordered(now: number): Waiter[] {
 
 function tellPositions(): void {
   if (!waiters.some((waiter) => waiter.onQueued)) return;
-  const high = memoryHigh();
+  const high = memoryHigh(false);
   ordered(config.now()).forEach((waiter, index) => {
     // A person's turn waits only for memory, behind other people's turns; background work waits behind background runs going and
     // everything ahead of it in line (a person's turn takes no background slot).
@@ -243,14 +253,14 @@ function pump(): void {
     const now = config.now();
     const next = ordered(now).find(eligible);
     if (!next) break;
-    if (memoryHigh()) {
+    if (memoryHigh(next.priority !== "interactive")) {
       blockedSince ??= now;
       if (config.reclaim && (reclaimedAt === undefined || now - reclaimedAt >= config.pollMs * 6)) {
         reclaimedAt = now;
         try { config.reclaim(); } catch { /* best effort */ }
       }
       // Something is running: its end is the likeliest thing to free memory, so wait for it (and poll meanwhile).
-      if (active > 0 || now - blockedSince < config.maxMemoryWaitMs) {
+      if (active > 0 || now - blockedSince < config.maxMemoryWaitMs || (next.priority !== "interactive" && reservedBytes() > 0)) {
         if (now - blockedSince < config.pollMs) config.log({ type: "model.gate.memory_wait", active, queued: waiters.length, memory: readMemory() });
         schedule();
         break;

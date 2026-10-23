@@ -73,13 +73,18 @@ export type CollectLedger = {
    */
   listed?: Record<string, { title: string; xsecToken: string; type: string; author?: string }>;
   listedAt?: string;
+  /**
+   * The list stopped at the memory line before its end (the page grows with every screen): the notes past it are not reached on this
+   * machine, and the list counts as read for the topics and the catch-up. Kept so the person is told once and the cause is on record.
+   */
+  listCapped?: { at: string; listed: number; memory: string };
 };
 const ledgerKey = (workflowId: string) => `collect.notes.${workflowId}`;
 export function readCollectLedger(store: CrosslineStore, workspaceId: string, workflowId: string): CollectLedger {
   try {
     const raw = JSON.parse(store.getSetting(workspaceId, ledgerKey(workflowId)) ?? "null") as Partial<CollectLedger> | null;
     return { read: raw?.read ?? {}, unorganised: raw?.unorganised ?? [], ...(raw?.caughtUpAt ? { caughtUpAt: raw.caughtUpAt } : {}), ...(raw?.selfId ? { selfId: raw.selfId } : {}),
-      ...(raw?.listed ? { listed: raw.listed } : {}), ...(raw?.listedAt ? { listedAt: raw.listedAt } : {}) };
+      ...(raw?.listed ? { listed: raw.listed } : {}), ...(raw?.listedAt ? { listedAt: raw.listedAt } : {}), ...(raw?.listCapped ? { listCapped: raw.listCapped } : {}) };
   } catch { return { read: {}, unorganised: [] }; }
 }
 export function writeCollectLedger(store: CrosslineStore, workspaceId: string, workflowId: string, ledger: CollectLedger): void {
@@ -127,10 +132,13 @@ export function writeNoteFile(folder: string, note: NoteFile): void {
 }
 
 export type CollectResult = {
-  state: "done" | "check" | "login" | "paused" | "no_profile" | "failed";
+  /** `memory`: the run stopped itself at the memory line (or found no room to open the browser); nothing broke, the next run continues. */
+  state: "done" | "check" | "login" | "paused" | "no_profile" | "failed" | "memory";
   mode: CollectMode;
   /** Notes the list showed this run, and whether it was read to its end. */
   listed: number; listEnded: boolean;
+  /** The list stopped at the memory line before its end; what it showed so far is kept and read. */
+  listCapped?: boolean;
   read: string[]; gone: string[];
   /** Notes listed and still unread after this run (the next run continues). */
   pending: number;
@@ -155,6 +163,8 @@ export type CollectOptions = {
   deadline?: Date;
   sleep?: (ms: number) => Promise<void>; random?: () => number; now?: () => Date;
   log?: (event: Record<string, unknown>) => void;
+  /** The worker's memory line (memory.ts `createCollectMemory`): past it the run stops where it is, and downloads are held to the room left. */
+  memory?: { over: () => boolean; mediaBytes: (wanted: number) => number; describe: () => string };
 };
 
 const MIME_EXT: Array<[RegExp, string]> = [[/png/, "png"], [/jpe?g/, "jpg"], [/webp/, "webp"], [/gif/, "gif"], [/avif/, "avif"], [/hei[cf]/, "heic"], [/mp4/, "mp4"], [/quicktime/, "mov"], [/webm/, "webm"]];
@@ -260,8 +270,15 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     const fromDom = (links: Array<{ text: string; href: string }>) => { for (const note of notesFromLinks(links)) if (!listed.has(note.id)) listed.set(note.id, note); };
     fromDom(shown.links);
     let quiet = 0;
+    let capped = false;
     for (let screen = 0; screen < LIST_SCROLLS_MAX; screen += 1) {
       if (hasMore === false || quiet >= LIST_QUIET_SCREENS || (mode === "incremental" && knownPage)) break;
+      // The page holds every card it has shown: past the memory line the list stops here rather than the kernel killing the page.
+      if (options.memory?.over()) {
+        capped = true;
+        log({ type: "collect.list_capped", workflowId, screen, listed: listed.size, memory: options.memory.describe() });
+        break;
+      }
       const before = listed.size;
       await driver.wheel();
       await driver.pause(2_500 + random() * 1_500);
@@ -282,7 +299,11 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     result.listEnded = hasMore === false || quiet >= LIST_QUIET_SCREENS;
     result.listed = listed.size;
     keepListed();
-    if (result.listEnded || !options.listOnly) ledger.listedAt = now().toISOString();
+    if (capped) {
+      result.listCapped = true;
+      ledger.listCapped = { at: now().toISOString(), listed: listed.size, memory: options.memory?.describe() ?? "" };
+    } else if (result.listEnded) delete ledger.listCapped;
+    if (result.listEnded || capped || !options.listOnly) ledger.listedAt = now().toISOString();
     save();
     if (options.listOnly) { log({ type: "collect.listed", workflowId, mode, listed: listed.size, ended: result.listEnded, listOnly: true }); return result; }
 
@@ -310,6 +331,12 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     for (const [index, note] of toRead.entries()) {
       const wait = options.gapMs ? options.gapMs(toRead.length - index) : between(gap);
       if (options.deadline && now().getTime() + wait + 60_000 > options.deadline.getTime()) break;
+      if (options.memory?.over()) {
+        log({ type: "collect.memory_stop", workflowId, read: result.read.length, memory: options.memory.describe() });
+        save();
+        return { ...result, state: "memory", pending: unread.length - result.read.length - result.gone.length,
+          message: `服务器内存到了上限（${options.memory.describe()}），读到第 ${result.read.length} 条时停下，下次接着读。` };
+      }
       await sleep(wait);
       details.clear();
       const url = xhsNoteUrl(note.id, note.xsecToken);
@@ -338,7 +365,7 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       }
       detail ??= noteFromDom(note.id, page.title || note.title, page.text);
       if (!detail.title && note.title) detail = { ...detail, title: note.title };
-      const saved = await saveMedia(driver, folder, detail, url, () => sleep(between(MEDIA_GAP_MS)));
+      const saved = await saveMedia(driver, folder, detail, url, () => sleep(between(MEDIA_GAP_MS)), options.memory);
       writeNoteFile(folder, { id: note.id, readAt: now().toISOString(), listed: note, detail, ...saved,
         raw: { ...(apiJson !== undefined ? { api: apiJson } : stateJson !== undefined ? { state: stateJson } : {}) } });
       ledger.read[note.id] = { at: now().toISOString(), state: "read" };
@@ -348,7 +375,7 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       log({ type: "collect.note_read", workflowId, id: note.id, source: detail.source, images: saved.images.length, video: Boolean(saved.video?.file) });
     }
     result.pending = unread.length - result.read.length - result.gone.length;
-    if (mode === "catch_up" && result.listEnded && result.pending === 0 && !options.limit && !options.targets) ledger.caughtUpAt = now().toISOString();
+    if (mode === "catch_up" && (result.listEnded || result.listCapped) && result.pending === 0 && !options.limit && !options.targets) ledger.caughtUpAt = now().toISOString();
     save();
     return result;
   } catch (error) {
@@ -359,16 +386,20 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
 }
 
 /** Every picture (and live photo) and the video of a note, through the browser's own requests, into the note's folder. */
-async function saveMedia(driver: CollectDriver, folder: string, detail: NoteDetail, referer: string, rest: () => Promise<void>):
-  Promise<Pick<NoteFile, "images" | "livePhotos" | "video">> {
+async function saveMedia(driver: CollectDriver, folder: string, detail: NoteDetail, referer: string, rest: () => Promise<void>,
+  memory?: CollectOptions["memory"]): Promise<Pick<NoteFile, "images" | "livePhotos" | "video">> {
   const dir = noteDir(folder, detail.id);
   mkdirSync(dir, { recursive: true });
   const one = async (urls: string[], index: number, stem: string, fallback: string): Promise<SavedMedia> => {
     let problem = urls.length ? "" : "页面没有给出地址";
     for (const url of urls) {
       await rest();
-      const fetched = await driver.fetchMedia(url, referer, MEDIA_MAX_BYTES).catch((error): MediaFetch => ({ state: "failed", status: 0, message: error instanceof Error ? error.message : "" }));
-      if (fetched.state === "too_large") return { index, url, problem: `文件超过 ${Math.round(MEDIA_MAX_BYTES / 1048576)} MB（${Math.round(fetched.bytes / 1048576)} MB），没有保存` };
+      // A file is held whole in memory while it is saved: no larger than the room the memory line leaves.
+      const max = memory ? memory.mediaBytes(MEDIA_MAX_BYTES) : MEDIA_MAX_BYTES;
+      const fetched = await driver.fetchMedia(url, referer, max).catch((error): MediaFetch => ({ state: "failed", status: 0, message: error instanceof Error ? error.message : "" }));
+      if (fetched.state === "too_large") return { index, url, problem: max < MEDIA_MAX_BYTES
+        ? `服务器内存只够下载 ${Math.round(max / 1048576)} MB（文件 ${Math.round(fetched.bytes / 1048576)} MB），没有保存`
+        : `文件超过 ${Math.round(MEDIA_MAX_BYTES / 1048576)} MB（${Math.round(fetched.bytes / 1048576)} MB），没有保存` };
       if (fetched.state === "failed") { problem = `下载失败（${fetched.status || fetched.message || "无响应"}）`; continue; }
       const file = `${stem}.${mediaExtension(fetched.bytes, fetched.contentType, fallback)}`;
       writeFileSync(path.join(dir, file), fetched.bytes);
