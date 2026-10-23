@@ -256,13 +256,13 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       if (verdict === "login" || judgePage(shown.url, shown.title, "", 200) === "login") return { ...result, state: "login", message: "小红书要求登录。" };
       fromDom(shown.links);
       quiet = listed.size > before ? 0 : quiet + 1;
+      // Kept as it grows: a page that dies part way (2026-10-23: 「Target crashed」 after 17 minutes) loses nothing listed so far.
+      if (screen % 5 === 4) { keepListed(); save(); }
     }
     result.listEnded = hasMore === false || quiet >= LIST_QUIET_SCREENS;
     result.listed = listed.size;
-    ledger.listed = { ...(ledger.listed ?? {}) };
-    for (const note of listed.values()) ledger.listed[note.id] = { title: note.title, xsecToken: note.xsecToken || ledger.listed[note.id]?.xsecToken || "", type: note.type,
-      ...(note.author?.name ? { author: note.author.name } : {}) };
-    ledger.listedAt = now().toISOString();
+    keepListed();
+    if (result.listEnded || !options.listOnly) ledger.listedAt = now().toISOString();
     save();
     if (options.listOnly) { log({ type: "collect.listed", workflowId, mode, listed: listed.size, ended: result.listEnded, listOnly: true }); return result; }
 
@@ -273,6 +273,13 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
   } catch (error) {
     save();
     return { ...result, state: "failed", message: `浏览器出错：${error instanceof Error ? error.message.slice(0, 200) : "未知错误"}` };
+  }
+
+  /** The notes the list showed, with their titles and tokens, into the ledger. */
+  function keepListed() {
+    ledger.listed = { ...(ledger.listed ?? {}) };
+    for (const note of listed.values()) ledger.listed[note.id] = { title: note.title, xsecToken: note.xsecToken || ledger.listed[note.id]?.xsecToken || "", type: note.type,
+      ...(note.author?.name ? { author: note.author.name } : {}) };
   }
 
   /** Opens each note in turn and keeps what it shows; `total` is how many were waiting (for `pending`). */
@@ -367,11 +374,14 @@ async function saveMedia(driver: CollectDriver, folder: string, detail: NoteDeta
  * API are kept as JSON; nothing is ever requested from that API by this code. Pictures and videos come through the context's own
  * request (the same cookies the page holds, the note as referer).
  */
-export async function openCollectBrowser(profileDir: string, executablePath: string): Promise<CollectDriver> {
+export async function openCollectBrowser(profileDir: string, executablePath: string, options: { listOnly?: boolean } = {}): Promise<CollectDriver> {
   const { chromium } = await import("playwright-core");
   // Visible on the person's computer, on the server's virtual screen on a server; the login's session cookies put back (browser-launch.ts).
   const context = await chromium.launchPersistentContext(profileDir, await readerLaunch(executablePath));
   await restoreSessionCookies(context, profileDir);
+  // Reading the list only needs its titles, which come in the page's own answers: its pictures and videos are not loaded. A list of
+  // ~2000 favourites scrolled with them grew the page past the worker's memory and it crashed (2026-10-23).
+  if (options.listOnly) await context.route("**/*", (route) => ["image", "media", "font"].includes(route.request().resourceType()) ? route.abort() : route.continue());
   // Functions handed to the page name nothing (tsx's `__name` wrapper would throw there); see `openBrowser` in site-reader.ts.
   await context.addInitScript({ content: "globalThis.__name = globalThis.__name || ((target) => target);" });
   const page = context.pages()[0] ?? await context.newPage();

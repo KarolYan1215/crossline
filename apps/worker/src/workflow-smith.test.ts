@@ -13,7 +13,7 @@ import { createRemoteBrowsers } from "./remote-browser";
 import { readCollectLedger, type CollectDriver } from "./favourites-reader";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
-import { createTopicClassifier, favouritesTopicStep, installFavouritesTopicsWorkflow, readTopicPlan, writeTopicPlan } from "./favourites-topics";
+import { closeInterruptedCollections, createTopicClassifier, favouritesTopicStep, installFavouritesTopicsWorkflow, readTopicPlan, writeTopicPlan } from "./favourites-topics";
 
 const REVIEWER = "crossline:crossline-validation-reviewer";
 const estimate = { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
@@ -596,5 +596,15 @@ test("favourites by topic: the list read for its titles, sorted into topics, the
     expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, new Date("2026-10-23T03:00:00Z"))).toMatchObject({ state: "started" });
     await collectionDone(ws, record.id);
     expect(opened).toEqual([id(1), id(2), id(3), id(4), id(5)]);
+    // A run that failed is not started again by the tick for three hours; 「立即运行」 still starts it.
+    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "failed-1", type: "collect.ran", entityId: record.id, payload: { state: "failed" } });
+    const soon = new Date(Date.now() + 3_600_000);
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon)).toMatchObject({ state: "blocked", code: "TOPICS_BACKOFF" });
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon, { manual: true })).not.toMatchObject({ code: "TOPICS_BACKOFF" });
+    // A collection a restart cut off is closed at the next start, without holding the next run.
+    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "started-x", type: "collect.started", entityId: record.id, payload: { taskId: "collect-x" } });
+    expect(closeInterruptedCollections(store, ws)).toEqual(["collect-x"]);
+    expect(closeInterruptedCollections(store, ws)).toEqual([]);
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon)).not.toMatchObject({ code: "TOPICS_BACKOFF" });
   } finally { configureFavouritesCollector(undefined); }
 });

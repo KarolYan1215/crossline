@@ -9,7 +9,7 @@ import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
 import { CrosslineStore, aiToolsFor, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
-import { createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
+import { closeInterruptedCollections, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
 import { NEEDS_PER_PASS, createNeedChecker, needsAwaitingCheck } from "./need-check";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -1192,6 +1192,9 @@ const automationService = createAutomationService({ ...automationDeps, afterRequ
 for (const workspace of analysisStore.listWorkspaces()) {
   const lost = agentService.recoverLost(workspace.id);
   if (lost.length) console.info(JSON.stringify({ type: "agent.recovered_lost", workspaceId: workspace.id, lost, checkedAt: new Date().toISOString() }));
+  // A collection the last worker was running when it stopped never wrote its end: closed, so the page does not show it running.
+  const interrupted = closeInterruptedCollections(analysisStore, workspace.id);
+  if (interrupted.length) console.info(JSON.stringify({ type: "collect.interrupted", workspaceId: workspace.id, interrupted, checkedAt: new Date().toISOString() }));
   const salvaged = agentService.salvageStopped(workspace.id);
   if (salvaged.length) console.info(JSON.stringify({ type: "agent.salvaged", workspaceId: workspace.id, salvaged, checkedAt: new Date().toISOString() }));
   // Once: the locks and 「deleted by the person」 marks that overlapping calendar publishes left behind (before the supervisor serves a publish).

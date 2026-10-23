@@ -478,7 +478,7 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
  */
 export type FavouritesCollector = {
   outputRoot: string;
-  open?: (profileDir: string, browser: string) => Promise<CollectDriver>;
+  open?: (profileDir: string, browser: string, options?: { listOnly?: boolean }) => Promise<CollectDriver>;
   media: (workspaceId: string) => NoteMediaDeps;
   sleep?: (ms: number) => Promise<void>;
   log?: (event: Record<string, unknown>) => void;
@@ -518,7 +518,7 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
     payload: { taskId, listOnly: Boolean(plan.listOnly), notes: plan.targets?.length ?? 0 } });
   const job = (async () => {
     let result: CollectResult;
-    const driver = await (collector.open ?? openCollectBrowser)(profileDir, browser).catch((error: unknown) => error as Error);
+    const driver = await (collector.open ?? openCollectBrowser)(profileDir, browser, { listOnly: Boolean(plan.listOnly) }).catch((error: unknown) => error as Error);
     if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
     else {
       const { after: _after, ...reading } = plan;

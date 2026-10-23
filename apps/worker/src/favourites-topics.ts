@@ -24,6 +24,8 @@ type RunFree = (input: AgentTaskInput & { taskId: string }, after?: (outcome: Ag
 const TOPICS_SKILL = "crossline:crossline-favourite-topics";
 /** The list read again for new favourites at most this often (by night, its first tick). */
 const LIST_REFRESH_DAYS = 7;
+/** After a failed run, the tick waits this long before trying again by itself. */
+const FAILED_WAIT_MS = 3 * 3_600_000;
 /** Batches of titles one classification call sorts before it lets the tick go. */
 const RUNS_PER_CALL = 6;
 
@@ -94,6 +96,11 @@ export function favouritesTopicStep(store: CrosslineStore, workspaceId: string, 
   const plan = readTopicPlan(store, workspaceId, record.id) ?? emptyTopicPlan();
   const ledger = readCollectLedger(store, workspaceId, record.id);
   const clock = nightOf(now, zoneOf(store, workspaceId), plan.window);
+  // A run that failed (the page crashed, the browser would not open) is not started again by itself for a while; 「立即运行」 still is.
+  const last = store.listEvents(workspaceId, { type: "collect.ran", entityId: record.id }).at(-1);
+  const lastRun = last?.payload as { state?: string; interrupted?: boolean } | undefined;
+  if (!options.manual && last && lastRun?.state === "failed" && !lastRun.interrupted && now.getTime() - Date.parse(last.createdAt) < FAILED_WAIT_MS)
+    return { state: "blocked", code: "TOPICS_BACKOFF", message: "上次读取出错，稍后再试。" };
   const start = (job: Parameters<typeof startFavouritesRun>[9]) =>
     startFavouritesRun(store, workspaceId, record, runFree, profilesRoot, now, options.fallbackBrowser, access, collector, job);
   const sortThen = () => { void collector.classify?.(workspaceId, record.id).then((count) => {
@@ -256,4 +263,21 @@ export function installFavouritesTopicsWorkflow(store: CrosslineStore, workspace
     payload: { id, name: record.name, lines: record.lines, category: record.category, trigger: "on_request", final: "usable", origin: "asked" } });
   enableTopicMode(store, workspaceId, id);
   return record;
+}
+
+/**
+ * At worker start: every collection begun (`collect.started`) and never ended (`collect.ran`) was cut off by the restart. Each gets its
+ * end as `failed` with `interrupted`, so the page stops showing it as running and the next run is not held for it.
+ */
+export function closeInterruptedCollections(store: CrosslineStore, workspaceId: string): string[] {
+  const ended = new Set(store.listEvents(workspaceId, { type: "collect.ran" }).map((event) => (event.payload as { taskId?: string }).taskId));
+  const closed: string[] = [];
+  for (const event of store.listEvents(workspaceId, { type: "collect.started" })) {
+    const taskId = (event.payload as { taskId?: string }).taskId;
+    if (!taskId || ended.has(taskId)) continue;
+    store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.ran:${taskId}`, type: "collect.ran", entityId: event.entityId,
+      payload: { taskId, state: "failed", interrupted: true, mode: "catch_up", listed: 0, listEnded: false, read: 0, gone: 0, pending: 0 } });
+    closed.push(taskId);
+  }
+  return closed;
 }
