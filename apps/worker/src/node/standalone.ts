@@ -6,6 +6,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { startNodeAgent, type AppServerLines, type NodeAgentStatus } from "./agent";
+import { API_KEY_SHAPE, loginNodeWithApiKey, withControl } from "./control";
 import { TOKEN_GONE } from "./protocol";
 
 /**
@@ -82,30 +83,8 @@ const codexVersion = (() => {
   return result.status === 0 ? result.stdout.trim() : "";
 })();
 
-/** A short-lived runtime for reading and starting the ChatGPT sign-in (the relay's runtime starts only once signed in and paired). */
-async function control<T>(work: (request: (method: string, params: unknown) => Promise<Record<string, unknown>>, notified: (method: string) => Promise<Record<string, unknown>>) => Promise<T>): Promise<T> {
-  const runtime = appServer();
-  let next = 0;
-  const pending = new Map<number, (message: Record<string, unknown>) => void>();
-  const waiting = new Map<string, (params: Record<string, unknown>) => void>();
-  runtime.onLine((line) => {
-    let message: Record<string, unknown>;
-    try { message = JSON.parse(line) as Record<string, unknown>; } catch { return; }
-    if (typeof message.id === "number" && !message.method) { pending.get(message.id)?.(message); pending.delete(message.id); return; }
-    if (typeof message.method === "string" && message.id === undefined) waiting.get(message.method)?.((message.params ?? {}) as Record<string, unknown>);
-  });
-  const request = (method: string, params: unknown) => new Promise<Record<string, unknown>>((resolve, reject) => {
-    const id = ++next;
-    pending.set(id, (message) => message.error ? reject(new Error(JSON.stringify(message.error))) : resolve((message.result ?? {}) as Record<string, unknown>));
-    runtime.write(JSON.stringify({ id, method, params }));
-  });
-  const notified = (method: string) => new Promise<Record<string, unknown>>((resolve) => waiting.set(method, resolve));
-  try {
-    await request("initialize", { clientInfo: { name: "crossline", title: "Crossline", version: "0.1.0" }, capabilities: { experimentalApi: true, requestAttestation: false } });
-    runtime.write(JSON.stringify({ method: "initialized" }));
-    return await work(request, notified);
-  } finally { runtime.stop(); }
-}
+/** A short-lived runtime for reading and starting the sign-in (the relay's runtime starts only once signed in and paired). */
+const control = <T>(work: Parameters<typeof withControl<T>>[1]) => withControl(appServer, work);
 
 let account: { email?: string; type?: string } | null | undefined;
 let login: { state: "pending" | "failed"; authUrl?: string; message?: string } | undefined;
@@ -113,6 +92,27 @@ async function readAccount(): Promise<void> {
   account = await control(async (request) => (await request("account/read", { refreshToken: false })).account as typeof account ?? null)
     .catch((error: unknown) => { log({ type: "node.account_read_failed", message: error instanceof Error ? error.message : String(error) }); return account ?? null; });
 }
+/**
+ * An OpenAI API key instead of a ChatGPT sign-in (the owner, 2026-10-23: 「节点也要支持 api key」): handed to this program's own Codex,
+ * which keeps it in its own home (`auth.json` under `codex-home`, this Windows user's folder). It never leaves this computer, is never
+ * written to the log and never echoed back; runs on it are billed to that key.
+ */
+async function loginWithApiKey(apiKey: string): Promise<{ ok: boolean; message?: string }> {
+  const signed = await loginNodeWithApiKey(appServer, apiKey);
+  if (!signed.ok) return signed;
+  login = undefined;
+  account = signed.account;
+  log({ type: "node.signed_in", with: "api_key" });
+  reconcile();
+  return { ok: true };
+}
+async function logout(): Promise<void> {
+  agent?.stop(); agent = undefined;
+  await control((request) => request("account/logout", {})).catch(() => undefined);
+  account = null;
+  log({ type: "node.signed_out" });
+}
+
 function startLogin(): Promise<string | undefined> {
   return new Promise((resolveUrl) => {
     login = { state: "pending" };
@@ -217,7 +217,10 @@ button{font:inherit;padding:6px 14px;border-radius:6px;border:1px solid var(--li
 button.primary{background:var(--accent);border-color:var(--accent);color:var(--paper)}</style></head><body><main>
 <h1>Crossline 节点</h1><p class="muted">这台电脑用本人自己的 ChatGPT，替网页版跑本账号的模型工作。账本和计划都在网页版，这里不保存。</p>
 <section><h2>1. 配对</h2><div id="pair"></div></section>
-<section><h2>2. 登录 ChatGPT</h2><div id="login"></div></section>
+<section><h2>2. 登录</h2><div id="login"></div>
+<div id="keyform" style="display:none;margin-top:10px"><p class="muted">或者用 OpenAI 的 API key（按用量计费，花在这个 key 上；key 只存在这台电脑的 Codex 里，不发到网页版）：</p>
+<p><input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" style="font:inherit;padding:5px 8px;width:22em;max-width:100%">
+<button id="usekey">用 API key 登录</button></p><p class="muted" id="keynote"></p></div></section>
 <section><h2>3. 运行状态</h2><div id="node"></div></section>
 <p><small id="meta"></small></p><p><button id="quit">退出节点</button></p></main>
 <script>
@@ -229,12 +232,16 @@ async function load(){const v=await fetch("/status",{cache:"no-store"}).then(r=>
 $("pair").innerHTML=v.paired?'<p class="ok">已配对</p><p class="muted">在网页版「这台电脑」可以解除。</p><button id="unpair">在这台电脑上解除配对</button>'
 :v.code?'<p>在网页版 设置 → 通用 →「这台电脑」的「独立节点」填入：</p><div class="code">'+esc(v.code)+'</div><p class="muted">十分钟内有效，过期自动换新。</p>'
 :'<p class="muted">'+esc(v.pairingError||"正在向网页版要配对码……")+'</p>';
-$("login").innerHTML=v.account?'<p class="ok">已登录 '+esc(v.account.email)+'</p>':!v.accountKnown?'<p class="muted">正在读取……</p>'
+$("keyform").style.display=v.account||!v.accountKnown||(v.login&&v.login.state==="pending")?"none":"block";
+$("login").innerHTML=v.account?'<p class="ok">已登录'+(v.account.type==="apiKey"?"（API key）":" "+esc(v.account.email))+'</p><button id="signout">退出登录 / 换账号</button>':!v.accountKnown?'<p class="muted">正在读取……</p>'
 :v.login&&v.login.state==="pending"?'<p>浏览器已打开 ChatGPT 登录页，登录后这里自动更新。</p>'+((v.login.authUrl||"").startsWith("https://")?'<p><a href="'+esc(v.login.authUrl)+'" target="_blank" rel="noreferrer">没打开就点这里</a></p>':'')
 :'<p>用本人的 ChatGPT 账号登录，模型工作花的是这个账号的额度。</p>'+(v.login&&v.login.message?'<p class="muted">上次没有完成：'+esc(v.login.message)+'</p>':'')+'<button class="primary" id="signin">登录 ChatGPT</button>';
 const n=v.node;$("node").innerHTML=!v.paired||!v.account?'<p class="muted">配对并登录后自动开始。</p>':'<p>'+(n?words[n.state]||n.state:"正在启动")+(n&&n.message?"（"+esc(n.message)+"）":"")+'</p><p class="muted">电脑关机或断网时，模型工作自动回到服务器。</p>';
 $("meta").textContent=v.host+" · "+(v.codex||"Codex 未找到")+" · "+v.site;
-const s=$("signin");if(s)s.onclick=()=>post("/login").then(load);const u=$("unpair");if(u)u.onclick=()=>post("/unpair").then(load);}
+const s=$("signin");if(s)s.onclick=()=>post("/login").then(load);const o=$("signout");if(o)o.onclick=()=>post("/logout").then(load);const u=$("unpair");if(u)u.onclick=()=>post("/unpair").then(load);}
+$("usekey").onclick=()=>{const k=$("apikey").value;$("keynote").textContent="正在验证……";
+fetch("/login-key",{method:"POST",headers:{"x-crossline-node":"1","content-type":"application/json"},body:JSON.stringify({apiKey:k})}).then(r=>r.json())
+.then(a=>{$("apikey").value="";$("keynote").textContent=a.ok?"":a.message||"没有登录";load();});};
 $("quit").onclick=()=>post("/quit").then(()=>{document.body.innerHTML='<main><p>节点已退出。从开始菜单的「Crossline 节点」可以再次启动。</p></main>'});
 load();setInterval(load,3000);</script></body></html>`;
 
@@ -249,6 +256,14 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   if (request.method === "GET" && url.pathname === "/status") { json(200, view()); return; }
   if (request.method !== "POST" || request.headers["x-crossline-node"] !== "1") { json(404, {}); return; }
   if (url.pathname === "/login") { json(200, { authUrl: await startLogin() ?? null }); return; }
+  if (url.pathname === "/login-key") {
+    const body = await readBody(request);
+    const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+    if (!API_KEY_SHAPE.test(apiKey)) { json(400, { ok: false, message: "这不像 OpenAI 的 API key（以 sk- 开头）" }); return; }
+    json(200, await loginWithApiKey(apiKey));
+    return;
+  }
+  if (url.pathname === "/logout") { await logout(); json(200, view()); return; }
   if (url.pathname === "/refresh") { await readAccount(); reconcile(); json(200, view()); return; }
   if (url.pathname === "/unpair") {
     agent?.stop(); agent = undefined; forgetToken(); state = { site: state.site }; writeState(state); reconcile();
@@ -256,6 +271,13 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
   }
   if (url.pathname === "/quit") { json(200, {}); shutdown(); return; }
   json(404, {});
+}
+
+async function readBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) { size += (chunk as Buffer).length; if (size > 4096) return {}; chunks.push(chunk as Buffer); }
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>; } catch { return {}; }
 }
 
 function shutdown(): void {

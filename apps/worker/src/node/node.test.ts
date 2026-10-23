@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { CodexRpcBoundary } from "@crossline/codex";
-import { startNodeAgent, type AppServerLines } from "./agent";
+import { nodeCapacity, startNodeAgent, type AppServerLines } from "./agent";
+import { loginNodeWithApiKey } from "./control";
 import { createNodeHub, type NodeHub, type NodeStatus } from "./hub";
 import { codexVersionOf, nodePath, refusal, rewriteParams, underRoots } from "./protocol";
 
@@ -218,6 +219,44 @@ test("when the node goes away its runs fail at once and later runs go back to th
   expect(typeof await pending === "string" || (await pending as unknown) !== undefined).toBe(true);
   await until(() => hub!.clientFor("ws-owner") === undefined ? true : undefined);
   await expect(client.request("turn/start", {})).rejects.toThrow(/CROSSLINE_NODE_DISCONNECTED/);
+});
+
+test("an OpenAI API key signs the node's Codex in; anything not shaped like one never reaches Codex, and the key is not returned", async () => {
+  let spawned = 0;
+  const seen: Array<{ method: string; params: unknown }> = [];
+  let signedIn = false;
+  const spawn = (): AppServerLines => {
+    spawned += 1;
+    let emit: ((line: string) => void) | undefined;
+    return {
+      write: (line) => {
+        const message = JSON.parse(line) as { id?: number; method?: string; params?: unknown };
+        if (!message.id) return;
+        seen.push({ method: message.method!, params: message.params });
+        if (message.method === "account/login/start") signedIn = true;
+        const result = message.method === "account/read" ? { account: signedIn ? { type: "apiKey" } : null } : {};
+        setTimeout(() => emit?.(JSON.stringify({ id: message.id, result })));
+      },
+      onLine: (handler) => { emit = handler; }, onExit: () => {}, stop: () => {}
+    };
+  };
+  expect(await loginNodeWithApiKey(spawn, "not-a-key")).toMatchObject({ ok: false });
+  expect(spawned).toBe(0);
+  const key = `sk-${"a".repeat(40)}`;
+  const signed = await loginNodeWithApiKey(spawn, key);
+  expect(signed).toEqual({ ok: true, account: { type: "apiKey" } });
+  expect(JSON.stringify(signed)).not.toContain(key);
+  expect(seen.find((item) => item.method === "account/login/start")?.params).toEqual({ type: "apiKey", apiKey: key });
+});
+
+test("a node takes as many runs as it has cores (one per GB of memory at most), between 4 and 16, unless the owner set a number", () => {
+  const GB = 1024 ** 3;
+  expect(nodeCapacity(16, 32 * GB, {})).toBe(16);
+  expect(nodeCapacity(32, 64 * GB, {})).toBe(16);
+  expect(nodeCapacity(8, 6 * GB, {})).toBe(6);
+  expect(nodeCapacity(2, 4 * GB, {})).toBe(4);
+  expect(nodeCapacity(16, 32 * GB, { CROSSLINE_NODE_CAPACITY: "10" })).toBe(10);
+  expect(nodeCapacity(16, 32 * GB, { CROSSLINE_NODE_CAPACITY: "99" })).toBe(16);
 });
 
 test("paths: only the server's skill roots are mirrored; a run's cwd goes to the node's work directory; a prompt is never touched", () => {

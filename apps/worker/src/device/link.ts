@@ -81,6 +81,8 @@ export function setNodeEnabled(dataDir: string, enabled: boolean, now = new Date
  * against the site, then kept), DELETE to unlink. Linking or unlinking calls `onChanged`, which restarts the worker into the other mode.
  */
 export function createDeviceLinkService(deps: { dataDir: string; secrets: SecretStore; fetch?: typeof fetch; status?: () => unknown; nodeStatus?: () => unknown;
+  /** Signs this computer's Codex in with an OpenAI API key for the compute node (never kept or logged here; Codex keeps it). */
+  nodeLogin?: (apiKey: string) => Promise<{ ok: true; account: unknown } | { ok: false; message: string }>;
   onChanged: () => void }) {
   return {
     async handle(method: string, pathname: string, _workspaceId: string, body: Record<string, unknown> | undefined): Promise<{ status: number; body: unknown } | undefined> {
@@ -88,6 +90,11 @@ export function createDeviceLinkService(deps: { dataDir: string; secrets: Secret
       if (pathname === "/v1/device/node") {
         if (method !== "POST") return { status: 405, body: { ok: false, code: "METHOD_NOT_ALLOWED" } };
         if (!readLinkRecord(deps.dataDir)) return { status: 400, body: { ok: false, code: "DEVICE_NOT_LINKED", message: "先连接网页版，再开启算力节点。" } };
+        if (typeof body?.apiKey === "string") {
+          if (!deps.nodeLogin) return { status: 400, body: { ok: false, code: "NODE_LOGIN_UNAVAILABLE", message: "这台电脑现在不能登录。" } };
+          const signed = await deps.nodeLogin(body.apiKey.trim());
+          return signed.ok ? { status: 200, body: { ok: true, account: signed.account } } : { status: 400, body: { ok: false, code: "NODE_API_KEY_REFUSED", message: signed.message } };
+        }
         const enabled = body?.enabled === true;
         if (enabled !== nodeEnabled(deps.dataDir)) { setNodeEnabled(deps.dataDir, enabled); deps.onChanged(); }
         return { status: 200, body: { ok: true, enabled } };

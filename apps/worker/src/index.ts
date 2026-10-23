@@ -201,7 +201,7 @@ async function autoBackplanPass(workspaceId: string, checkedAt = new Date().toIS
     while (ids.length) {
       // Two milestones at a time (the account's share of the gate): each one's tasks are written as soon as its run ends, and the
       // duplicate check runs at that write, so a task the other run just wrote is still caught.
-      await eachLimited(ids, accountConcurrency(), async (id) => {
+      await eachLimited(ids, workspaceConcurrency(workspaceId), async (id) => {
         tried.add(id);
         const outcome = await backplan(id).catch(() => undefined);
         if (outcome) console.info(JSON.stringify({ type: `backplan.auto.${outcome.state}`, checkedAt, workspaceId, milestoneId: id }));
@@ -640,7 +640,7 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
     const tried = new Set<string>();
     let batch = ids;
     while (batch.length) {
-      await eachLimited(batch, accountConcurrency(), async (id) => {
+      await eachLimited(batch, workspaceConcurrency(workspaceId), async (id) => {
         tried.add(id);
         // A replan the person (or the assistant) asked for carries what to change.
         const request = analysisStore.listEvents(workspaceId, { type: "task.steps_replan_requested", entityId: id }).at(-1)?.payload as { feedback?: string } | undefined;
@@ -1152,6 +1152,8 @@ const remoteBrowsers = loginMode() === "remote" ? createRemoteBrowsers({
 configureRemoteLogin(remoteBrowsers);
 if (remoteBrowsers) setInterval(() => { void remoteBrowsers.sweep().catch(() => undefined); }, 30_000).unref();
 const agentService = createAgentService({
+  // The owner's assistant (tools mode on the hosted site) runs through the pool too: its nodes add room for more at once.
+  concurrency: (workspaceId) => workspaceConcurrency(workspaceId),
   // The shell assistant runs on the machine owner's runtime only: it works with the operating system user's files, and a guard is a
   // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).
   store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(), isOwner: machineOwner,
@@ -1486,6 +1488,15 @@ const syncCalendarFor = async (workspaceId: string): Promise<SyncOutcome | null>
   if (calendar) return calendar.sync(workspaceId);
   return hasSubscriptions(analysisStore, workspaceId) ? subscriptionSync(workspaceId)() : null;
 };
+
+/**
+ * How many runs of one workspace a pass starts at once: the account's share of the model gate, plus the runs its compute nodes take
+ * (docs/compute-node.md, 协同: a node is far stronger than this server, so the owner's planning and assistant work fan out across it).
+ */
+function workspaceConcurrency(workspaceId: string): number {
+  try { return accountConcurrency() + (nodeHub && workspaceId === runtimeOwner(analysisStore) ? nodeHub.capacity(workspaceId) : 0); }
+  catch { return accountConcurrency(); }
+}
 
 // The compute node (docs/compute-node.md): on the hosted site the owner's own computer may connect out to `wss://<site>/node` (Caddy
 // hands it to this port) and serve the owner's model runs with its Codex; with no node connected, or the switch off, nothing changes.

@@ -79,6 +79,16 @@ try {
   check(rebound === 421, "another host name is refused");
   const login = await fetch(`http://127.0.0.1:${port}/login`, { method: "POST", headers: { "x-crossline-node": "1" } }).then((r) => r.json() as Promise<{ authUrl?: string }>);
   check(/^https:\/\/auth\.openai\.com\//.test(login.authUrl ?? ""), `the ChatGPT sign-in starts (${(login.authUrl ?? "").slice(0, 40)}…)`);
+  // An API key signs the program's Codex in (a made-up key in a throwaway home: Codex does not check it until a run uses it).
+  const badKey = await fetch(`http://127.0.0.1:${port}/login-key`, { method: "POST", headers: { "x-crossline-node": "1", "content-type": "application/json" },
+    body: JSON.stringify({ apiKey: "nope" }) });
+  check(badKey.status === 400, "a value not shaped like an API key is refused");
+  const keyed = await fetch(`http://127.0.0.1:${port}/login-key`, { method: "POST", headers: { "x-crossline-node": "1", "content-type": "application/json" },
+    body: JSON.stringify({ apiKey: `sk-check-${"0".repeat(40)}` }) }).then((r) => r.json() as Promise<{ ok?: boolean }>);
+  const signedIn = await until(async () => { const v = await view(); return (v?.account as { type?: string } | null)?.type === "apiKey" ? v : undefined; }, 20_000);
+  check(keyed.ok === true && Boolean(signedIn), "an API key signs the program's Codex in, and the page says so");
+  await fetch(`http://127.0.0.1:${port}/logout`, { method: "POST", headers: { "x-crossline-node": "1" } });
+  check((await view())?.account === null, "signing out leaves it signed out");
   await quit();
   await until(async () => child.exitCode !== null ? true : undefined, 15_000);
   // Started again: the token comes back from Windows' data protection, no new code is asked for.

@@ -6,7 +6,7 @@ import { SetupGuide } from "../ui/setup-guide";
 import { DEVICE_LINK_GUIDE } from "../../lib/setup-guides";
 
 type DeviceView = { pending?: number; dead?: number; blocked?: { code: string; at: string }; lastSentAt?: string; lastError?: string; modelNeeded?: number; lastPassAt?: string | null };
-type NodeAgentView = { enabled: boolean; status?: { state: string; message?: string; since?: string } };
+type NodeAgentView = { enabled: boolean; status?: { state: string; message?: string; since?: string; account?: { type?: string; email?: string } | null } };
 type LinkView = { ok?: boolean; linked?: boolean; url?: string; label?: string; linkedAt?: string; tokenReadable?: boolean; device?: DeviceView; node?: NodeAgentView; code?: string; message?: string };
 
 /** What the node agent's state means here (docs/compute-node.md). */
@@ -33,6 +33,7 @@ export function DeviceLinkCard() {
   const [token, setToken] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [apiKey, setApiKey] = useState("");
   /** Set while the background service restarts into the other mode: the page says so instead of showing its absence as an error. */
   const [restarting, setRestarting] = useState(false);
   const load = async (): Promise<LinkView> => {
@@ -70,6 +71,15 @@ export function DeviceLinkCard() {
     setNote(response?.ok ? "已断开。" : "没有断开，请重试。");
     if (response?.ok) void untilRestarted((next) => next.linked === false);
   };
+  const signInWithKey = async () => {
+    setBusy(true);
+    const response = await fetch("/api/device/node", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ apiKey }) }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { ok?: boolean; message?: string } | undefined;
+    setBusy(false);
+    setApiKey("");
+    setNote(body?.ok ? "已用 API key 登录这台电脑的 Codex。" : body?.message ?? "没有登录，请重试。");
+    void load();
+  };
   const switchNode = async (enabled: boolean) => {
     setBusy(true);
     const response = await fetch("/api/device/node", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) }).catch(() => undefined);
@@ -91,6 +101,12 @@ export function DeviceLinkCard() {
       <div className="st-row"><span className="st-row-label">作为算力节点<small>{nodeWords(view.node)}。网页版「这台电脑」也要开启；开机期间这台电脑用本机的 Codex 替网页版跑本账号的模型工作，关机时自动回到服务器</small></span>
         <SegmentedControl label="作为算力节点" value={view.node?.enabled ? "on" : "off"} options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]}
           onChange={(next) => void switchNode(next === "on")} /></div>
+      {view.node?.enabled && <div className="st-row"><span className="st-row-label">节点的 Codex 登录<small>{view.node.status?.account
+        ? view.node.status.account.type === "apiKey" ? "已用 API key 登录" : `已登录 ${view.node.status.account.email ?? ""}`
+        : "用这台电脑的 Codex 登录；也可以填 OpenAI API key（按用量计费，key 只存在这台电脑的 Codex 里）"}</small></span>
+        <span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" autoComplete="off" spellCheck={false}
+          style={{ width: "14em" }} />{" "}
+          <button type="button" className="secondary-button" disabled={busy || !apiKey.trim()} onClick={() => void signInWithKey()}>用 API key 登录</button></span></div>}
       <div className="st-row"><span className="st-row-label">断开<small>回到完整模式：本机重新自己做计划和模型工作</small></span>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void unlink()}>断开</button></div>
     </> : <>

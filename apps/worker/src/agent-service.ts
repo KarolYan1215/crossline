@@ -32,6 +32,8 @@ export const ASSISTANT_CONCURRENCY = 2;
 
 export function createAgentService(deps: {
   store: CrosslineStore; repoRoot: string; getClient: () => CodexRpcBoundary | undefined; readCost: () => Promise<CostSignal>;
+  /** Assistant runs a workspace may have at once; `ASSISTANT_CONCURRENCY` unless its compute nodes add room (docs/compute-node.md). */
+  concurrency?: (workspaceId: string) => number;
   outputRoot?: string; log?: (event: Record<string, unknown>) => void;
   /** The machine owner's workspace; the assistant (a shell on this machine) works for no one else. Absent: everyone (tests). */
   isOwner?: (workspaceId: string) => boolean;
@@ -55,6 +57,7 @@ export function createAgentService(deps: {
     filesChanged: Array<{ path: string; kind: string }>; searches: string[]; plan?: { explanation: string; steps: Array<{ step: string; status: string }> } } }>();
   const log = deps.log ?? (() => {});
   const mark = (workspaceId: string) => running.get(workspaceId) ?? running.set(workspaceId, new Set()).get(workspaceId)!;
+  const limitOf = (workspaceId: string) => Math.max(ASSISTANT_CONCURRENCY, deps.concurrency?.(workspaceId) ?? ASSISTANT_CONCURRENCY);
   // What each run started from the board works on, so a second run never takes the same order (or the same deliverable of its project)
   // before the first run's request reaches the ledger, where the candidate lists would see it.
   const working = new Map<string, Map<string, { orderId: string; project: string; deliverable: string }>>();
@@ -162,7 +165,7 @@ export function createAgentService(deps: {
     if (refused(workspaceId))
       return { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
     if (!readCategories(deps.store, workspaceId)[input.category]) return { state: "needs_category_approval", category: input.category, label: AGENT_CATEGORIES[input.category] };
-    if (mark(workspaceId).size >= ASSISTANT_CONCURRENCY) return { state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" };
+    if (mark(workspaceId).size >= limitOf(workspaceId)) return { state: "blocked", code: "AGENT_BUSY", message: "助手正在做别的事。" };
     mark(workspaceId).add(input.taskId);
     const control = new AbortController();
     controls.set(input.taskId, control);
@@ -217,7 +220,7 @@ export function createAgentService(deps: {
       const recorded = requestAgentRetry(deps.store, workspaceId, taskId, input, now);
       if (!recorded.ok) return { ok: false, code: recorded.code, message: recorded.code === "TASK_NOT_FOUND" ? "找不到这个助手任务。" : "这个任务正在运行。" };
       if (isPaused(deps.store, workspaceId)) return { ok: true, state: "queued", message: "助手已暂停；恢复后按本人的说明重做。" };
-      if (mark(workspaceId).size >= ASSISTANT_CONCURRENCY) return { ok: true, state: "queued", message: "助手正在做别的事；做完后按本人的说明重做。" };
+      if (mark(workspaceId).size >= limitOf(workspaceId)) return { ok: true, state: "queued", message: "助手正在做别的事；做完后按本人的说明重做。" };
       if (!(await quotaAllows(workspaceId))) return { ok: true, state: "queued", message: "额度紧张；额度恢复后按本人的说明重做。" };
       // A clock read after the request was written: the request is due from the moment it was recorded.
       const before = mark(workspaceId).size;
@@ -238,7 +241,7 @@ export function createAgentService(deps: {
       const tried = new Set<string>();
       const open = (candidate: { orderId: string; stepId?: string | undefined }) =>
         !tried.has(`${candidate.orderId}#${candidate.stepId ?? ""}`) && !clashes(workspaceId, candidate.orderId, candidate.stepId);
-      while (mark(workspaceId).size < ASSISTANT_CONCURRENCY) {
+      while (mark(workspaceId).size < limitOf(workspaceId)) {
         // In order: a step 「自动交给 Agent」 handed over whose block has come up (it is wanted now); preparation steps (what the person's
         // next session is waiting for); whole orders; and, with nothing else waiting, a handed-over step whose block is later this week.
         // Preparation and whole errands only within two days of the person's step they serve (docs/work-split.md §4, `prepWindow`):

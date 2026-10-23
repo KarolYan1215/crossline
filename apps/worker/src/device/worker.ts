@@ -13,6 +13,7 @@ import { addFolder, personNames, previewFolder, removeFolder, setFolderLines, se
 import { createTranscriber, createWhisperEngine, modelsDirectory } from "../transcribe";
 import { startNodeAgent } from "../node/agent";
 import { localAppServer } from "../node/local-runtime";
+import { loginNodeWithApiKey, readNodeAccount, type NodeAccount } from "../node/control";
 import { createDeviceLinkService, nodeEnabled, type DeviceLink } from "./link";
 import { DEVICE_PASSES } from "./mode";
 import { createOutbox, type OutboxItem, type SendResult } from "./outbox";
@@ -126,6 +127,9 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
   const node = nodeEnabled(dataDir) && link.token && !options.runOnce
     ? startNodeAgent({ url: link.url, token: link.token, dir: path.join(deviceDir, "node"), host: label, log, spawn: localAppServer, role: "device" }) : undefined;
   if (node) process.on("exit", () => node.stop());
+  // Who this computer's Codex is signed in as, for the device page (read once; an API-key sign-in there updates it).
+  let nodeAccount: NodeAccount | undefined;
+  if (nodeEnabled(dataDir) && !options.runOnce) void readNodeAccount(localAppServer).then((account) => { nodeAccount = account; }).catch(() => undefined);
 
   const ownerOnly = { state: "blocked" as const, code: "FOLDER_OWNER_ONLY", message: "文件夹在这台电脑上，只有它的主人能授权。" };
   const server = await startDeviceServer({
@@ -157,7 +161,12 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
       }
     },
     link: createDeviceLinkService({ dataDir, secrets: options.secrets, fetch: fetchImpl, onChanged: () => { outbox.unblock(); options.restart(); },
-      nodeStatus: () => node?.status() ?? { state: "off" },
+      nodeStatus: () => ({ ...(node?.status() ?? { state: "off" }), account: nodeAccount ?? null }),
+      nodeLogin: async (apiKey) => {
+        const signed = await loginNodeWithApiKey(localAppServer, apiKey);
+        if (signed.ok) { nodeAccount = signed.account; log({ type: "device.node_signed_in", with: "api_key" }); }
+        return signed;
+      },
       status: () => ({ ...outbox.stats(), modelNeeded: state.modelNeeded ?? 0, lastPassAt: state.lastPassAt ?? null, workspaceId: owner ?? null }) }),
     transcription: {
       status: () => transcriber.status(),

@@ -74,6 +74,12 @@ test("the node switch is kept beside the link, needs a link first, restarts the 
   await service.handle("POST", "/v1/device/node", ws, { enabled: true });
   expect(restarts).toBe(1);
   expect((await service.handle("GET", "/v1/device/link", ws, undefined))!.body).toMatchObject({ node: { enabled: true, status: { state: "ready" } } });
+  // An API key for this computer's Codex goes to the sign-in and is not echoed back.
+  const key = `sk-${"b".repeat(40)}`;
+  const withLogin = createDeviceLinkService({ dataDir: dir, secrets, onChanged: () => {}, nodeLogin: async () => ({ ok: true, account: { type: "apiKey" } }) });
+  const signed = await withLogin.handle("POST", "/v1/device/node", ws, { apiKey: key });
+  expect(signed).toMatchObject({ status: 200, body: { ok: true, account: { type: "apiKey" } } });
+  expect(JSON.stringify(signed)).not.toContain(key);
   await service.handle("DELETE", "/v1/device/link", ws, undefined);
   expect(nodeEnabled(dir)).toBe(false);
 });

@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
-import { CLOSE_WORDS, marketplaceRoot, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteParams, turnImages, underRoots, withLocalImages, type NodeFrame } from "./protocol";
+import { CLOSE_WORDS, NODE_CAPACITY_MAX, marketplaceRoot, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteParams, turnImages, underRoots, withLocalImages, type NodeFrame } from "./protocol";
 
 /**
  * The computer's end of the compute node (docs/compute-node.md). On the person's switch (the local `/device` page) a linked device also
@@ -41,11 +41,14 @@ export type NodeAgentOptions = {
 };
 
 /**
- * How many runs this computer takes at once: a model turn waits on the model, not on this machine, but each holds a thread with its
- * plugins in the runtime; one per two cores and one per 2 GB of memory, the smaller, between 2 and 8.
+ * How many runs this computer takes at once. A person's computer is far stronger than the hosted server (2 CPUs, 3.5 GB for everything),
+ * and a model turn mostly waits on the model: one run per logical core, at most one per GB of memory, between 4 and `NODE_CAPACITY_MAX`
+ * (16 on a 16-core, 32 GB machine). `CROSSLINE_NODE_CAPACITY` sets it outright (the owner's own choice, same bounds).
  */
-export function nodeCapacity(cores = cpus().length, memoryBytes = totalmem()): number {
-  return Math.max(2, Math.min(8, Math.floor(cores / 2), Math.floor(memoryBytes / (2 * 1024 ** 3))));
+export function nodeCapacity(cores = cpus().length, memoryBytes = totalmem(), env: NodeJS.ProcessEnv = process.env): number {
+  const set = Number(env.CROSSLINE_NODE_CAPACITY);
+  const measured = Math.min(cores, Math.floor(memoryBytes / 1024 ** 3));
+  return Math.max(4, Math.min(NODE_CAPACITY_MAX, Number.isFinite(set) && set > 0 ? Math.floor(set) : measured));
 }
 
 export function nodeUrl(site: string): string {

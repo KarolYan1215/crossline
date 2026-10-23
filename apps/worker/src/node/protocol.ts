@@ -38,6 +38,9 @@ export function parseFrame(raw: string): NodeFrame | undefined {
   } catch { return undefined; }
 }
 
+/** The most runs one node is given at once, whatever it says (its own default, `nodeCapacity`, stays within it too). */
+export const NODE_CAPACITY_MAX = 16;
+
 /** Why the hub closed a connection (the WebSocket close reason), in the words the node shows. */
 export const CLOSE_WORDS: Record<string, string> = {
   NODE_TOKEN_INVALID: "令牌无效或已撤销",

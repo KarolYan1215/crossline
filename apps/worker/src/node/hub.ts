@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import { JsonLineRpcClient, type CodexRpcBoundary, type PoolMember } from "@crossline/codex";
-import { codexVersionOf, IMAGE_FILE, IMAGE_MAX_BYTES, NODE_PROTOCOL, parseFrame, underRoots, type NodeFrame } from "./protocol";
+import { codexVersionOf, IMAGE_FILE, IMAGE_MAX_BYTES, NODE_CAPACITY_MAX, NODE_PROTOCOL, parseFrame, underRoots, type NodeFrame } from "./protocol";
 
 /**
  * The hosted worker's end of the compute node (docs/compute-node.md): the person's computers connect out to `wss://<site>/node` (Caddy
@@ -70,8 +70,7 @@ export type NodeHub = {
 /** A node may mirror no more than this of one directory. */
 export const MIRROR_MAX_FILES = 800;
 export const MIRROR_MAX_BYTES = 40 * 1_048_576;
-/** Runs a node may take at once, whatever it says; and its rank by kind. */
-export const NODE_CAPACITY_MAX = 8;
+/** A node's rank by kind (its most runs at once is `NODE_CAPACITY_MAX`, protocol.ts). */
 export const ROLE_PRIORITY: Record<NodeRole, number> = { device: 2, standalone: 1 };
 /** Offline and refused nodes stay on the card this long, then leave it. */
 const GONE_SHOWN_MS = 24 * 3_600_000;
@@ -168,7 +167,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     connection.host = String(hello.host ?? "").slice(0, 60);
     connection.codex = codexVersionOf({ userAgent: hello.codex });
     connection.role = hello.role === "standalone" ? "standalone" : "device";
-    connection.capacity = Math.max(1, Math.min(NODE_CAPACITY_MAX, Math.floor(Number(hello.capacity) || 2)));
+    connection.capacity = Math.max(1, Math.min(NODE_CAPACITY_MAX, Math.floor(Number(hello.capacity) || 4)));
     connection.key = `${connection.role}:${connection.host}`;
     const server = codexVersionOf({ userAgent: options.serverCodex() });
     if (hello.protocol !== NODE_PROTOCOL) { refuse(connection, 4002, "NODE_PROTOCOL", `节点程序的版本（${hello.protocol}）与网页版（${NODE_PROTOCOL}）不同，请更新本机 Crossline`); return; }
