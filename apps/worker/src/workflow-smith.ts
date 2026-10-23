@@ -513,6 +513,9 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
   const taskId = `collect-${record.id.replace(/^flow-/, "")}-${now.getTime().toString(36)}`;
   const day = now.toISOString().slice(0, 10);
   const log = collector.log ?? (() => {});
+  // The page shows the workflow as running from here until `collect.ran` (a collection takes minutes to hours).
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.started:${taskId}`, type: "collect.started", entityId: record.id,
+    payload: { taskId, listOnly: Boolean(plan.listOnly), notes: plan.targets?.length ?? 0 } });
   const job = (async () => {
     let result: CollectResult;
     const driver = await (collector.open ?? openCollectBrowser)(profileDir, browser).catch((error: unknown) => error as Error);

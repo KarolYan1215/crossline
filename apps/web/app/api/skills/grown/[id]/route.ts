@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
-import { changeFavouriteTopics, allowScripts, changeGrownSkill, grownSkillAction } from "../../../../../lib/skill-library";
+import { changeFavouriteTopics, grownSkillStatus, allowScripts, changeGrownSkill, grownSkillAction } from "../../../../../lib/skill-library";
 import { writeGuard, validId } from "../../../agent/guard";
+import { resolveAccessContext } from "../../../../../lib/access-guard";
+
+/** Whether the workflow is running now and how far its topics are read (polled by its card while it runs). */
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const access = await resolveAccessContext(request);
+  if ("response" in access) return access.response;
+  const { id } = await context.params;
+  if (!validId(id)) return NextResponse.json({ ok: false, code: "INVALID_SKILL" }, { status: 400 });
+  return NextResponse.json({ ok: true, ...grownSkillStatus(access.ctx, id) });
+}
 
 /**
  * A grown workflow, changed by the person: `{status: "active" | "off"}` turns it on or off, `{pinned}` keeps it from idle removal,

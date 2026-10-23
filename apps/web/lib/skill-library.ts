@@ -2,7 +2,7 @@ import {
   AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scriptCount, scriptsAllowable, scriptsRunnable, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill, readableMineSourceLabel, readableMineText, parseTopicPlan, topicPlanKey, topicProgress, withTopicSettings,
   type AccessContext, type AiTool, type PublicSkillRecord, type StoredMineRule
 } from "@crossline/core";
-import { type CrosslineStore, aiToolsFor, allowSkillScripts, assistantMode, consentToGrownSkill, grownHomeLine, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
+import { type CrosslineStore, aiToolsFor, listAgentTasks, allowSkillScripts, assistantMode, consentToGrownSkill, grownHomeLine, readGrownSkills, readPublicSkills, removeGrownSkill, removePublicSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { getStore } from "./crossline";
 import { identityLines } from "./lines";
@@ -36,7 +36,9 @@ export type GrownSkillView = { id: string; summary: string; name: string; catego
   access: Array<{ service: string; site: string; login: boolean; how: string; loggedInAt?: string }>; risks: string[]; consentedAt?: string;
   risk: "low" | "high"; reasons: string[]; files: number; createdAt: string; lastUsedAt: string; lastRunAt?: string; skillText: string;
   /** Favourites organised by topic: the day's share, the night window, and each topic read so far (packages/core/src/favourite-topics.ts). */
-  topics?: { perDay: number; from: number; to: number; listed: number; progress: Array<{ name: string; total: number; read: number }> } } & ScriptsView;
+  topics?: { perDay: number; from: number; to: number; listed: number; progress: Array<{ name: string; total: number; read: number }> };
+  /** Running now: a collection between `collect.started` and `collect.ran`, or the assistant working on one of its runs. */
+  running?: { since: string; what: string } } & ScriptsView;
 /** `shell`: this account's assistant has a command line (the copy on the person's own computer) and can run an allowed script. */
 export type SkillLibraryView = { mine: MineSkillView[]; grown: GrownSkillView[]; publics: PublicSkillView[]; aiTools: AiTool[];
   removed: Array<{ name: string; reason: string; at: string; by: string }>; growing: number; shell: boolean };
@@ -73,6 +75,7 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
     const payload = event.payload as { name?: string; reason?: string; by?: string };
     return { name: String(payload.name ?? event.entityId), reason: String(payload.reason ?? ""), at: event.createdAt, by: String(payload.by ?? "system") };
   });
+  const agentRuns = listAgentTasks(store, ctx.workspaceId);
   const grown = readGrownSkills(store, ctx.workspaceId).map((record): GrownSkillView => {
     let skillText = "";
     try { skillText = ((JSON.parse(store.getSetting(ctx.workspaceId, grownSkillFilesKey(record.id)) ?? "{}") as { files?: Array<{ path: string; text: string }> }).files ?? [])
@@ -88,7 +91,7 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
       risks: record.manifest.risks ?? [], ...(record.consentedAt ? { consentedAt: record.consentedAt } : {}),
       verdict: record.review.final, risk: record.scan.risk, reasons: record.review.reasons, files: record.files.length, createdAt: record.createdAt,
       lastUsedAt: record.lastUsedAt, ...(record.lastRunAt ? { lastRunAt: record.lastRunAt } : {}), skillText: skillText.replace(/^---[\s\S]*?\n---\n/, ""),
-      ...topicsView(store, ctx.workspaceId, record.id), ...scriptsView(record) };
+      ...topicsView(store, ctx.workspaceId, record.id), ...runningView(store, ctx.workspaceId, record.id, agentRuns), ...scriptsView(record) };
   });
   // Requests made in words that no growing run has picked up yet: the page says they are on their way.
   const tried = new Set(store.listEvents(ctx.workspaceId, { type: "skill.grown.attempted" }).map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
@@ -149,6 +152,20 @@ export function deletePublicSkill(ctx: AccessContext, id: string): { ok: boolean
  * The person turns a grown workflow on or off, keeps it for good, removes it, or — for one that reads an account — accepts its risks,
  * which is the only way such a workflow is switched on.
  */
+/** A collection is taken as over after this long without its end (a worker restarted mid-run never writes `collect.ran`). */
+const COLLECT_STALE_MS = 8 * 3_600_000;
+function runningView(store: CrosslineStore, workspaceId: string, id: string, agentRuns: ReturnType<typeof listAgentTasks>): Pick<GrownSkillView, "running"> {
+  const started = store.listEvents(workspaceId, { type: "collect.started", entityId: id }).at(-1);
+  const ended = store.listEvents(workspaceId, { type: "collect.ran", entityId: id }).at(-1);
+  if (started && (!ended || ended.createdAt < started.createdAt) && Date.now() - Date.parse(started.createdAt) < COLLECT_STALE_MS) {
+    const payload = started.payload as { listOnly?: boolean; notes?: number };
+    return { running: { since: started.createdAt, what: payload.listOnly ? "读取收藏列表" : payload.notes ? `读取 ${payload.notes} 篇笔记` : "读取" } };
+  }
+  const prefix = `flow-${id.replace(/^flow-/, "")}-`;
+  const agent = agentRuns.find((task) => task.taskId.startsWith(prefix) && task.status === "running");
+  return agent ? { running: { since: agent.requestedAt, what: "助手整理中" } } : {};
+}
+
 function topicsView(store: CrosslineStore, workspaceId: string, id: string): Pick<GrownSkillView, "topics"> {
   const plan = parseTopicPlan(store.getSetting(workspaceId, topicPlanKey(id)));
   if (!plan) return {};
@@ -157,6 +174,12 @@ function topicsView(store: CrosslineStore, workspaceId: string, id: string): Pic
   const read = new Set(Object.keys(ledger.read ?? {}));
   return { topics: { perDay: plan.perDay, from: plan.window.from, to: plan.window.to, listed: Object.keys(ledger.listed ?? {}).length,
     progress: topicProgress(plan, read).map(({ name, total, read: done }) => ({ name, total, read: done })) } };
+}
+
+/** Whether a grown workflow is running now, and its topics' progress: what its card polls while it runs. */
+export function grownSkillStatus(ctx: AccessContext, id: string): Pick<GrownSkillView, "running" | "topics"> {
+  const store = getStore();
+  return { ...runningView(store, ctx.workspaceId, id, listAgentTasks(store, ctx.workspaceId)), ...topicsView(store, ctx.workspaceId, id) };
 }
 
 /** The person's own pace for favourites by topic: notes a day and the night window (equal hours: no night reading). */

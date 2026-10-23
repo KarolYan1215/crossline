@@ -258,6 +258,18 @@ function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSki
     if (result.ok && result.remote) setRemote(service);
     else if (result.ok || result.code === "LOGIN_WINDOW_OPEN") setOpened((all) => [...all, service]);
   };
+  // While it runs, the card asks every 30 seconds whether it still does and how far the topics are.
+  useEffect(() => {
+    if (!flow.running) return;
+    const timer = window.setInterval(async () => {
+      const status = await fetch(`/api/skills/grown/${encodeURIComponent(flow.id)}`).then((response) => response.json() as Promise<Pick<GrownSkillView, "running" | "topics"> & { ok: boolean }>)
+        .catch(() => undefined);
+      if (!status?.ok) return;
+      const { running: _was, ...rest } = flow;
+      onChanged({ ...rest, ...(status.running ? { running: status.running } : {}), ...(status.topics ? { topics: status.topics } : {}) });
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [flow, onChanged]);
   const started = useRef(false);
   useEffect(() => {
     if (!autoLogin || started.current || flow.status !== "active") return;
@@ -291,8 +303,14 @@ function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSki
           // A window opened from another page or tab is still open: offer 「我已登录」 here too.
           : <button key={item.service} type="button" className="secondary-button" onClick={() => { void login(item.service); }}>
             {item.loggedInAt ? `重新登录${item.service}` : `登录${item.service}`}</button>)}
-        {flow.status === "active" && flow.action === "run" && <button type="button" className="secondary-button"
-          onClick={() => { void act({ action: "run" }, "已交给助手，做好后通知"); }}>立即运行</button>}
+        {flow.status === "active" && flow.action === "run" && (flow.running
+          ? <button type="button" className="secondary-button" disabled title={`自 ${new Date(flow.running.since).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 起`}>
+            运行中：{flow.running.what}</button>
+          : <button type="button" className="secondary-button" onClick={async () => {
+            const result = await act({ action: "run" }, "已开始运行，做好后通知");
+            // Started: the button says so at once; the card then follows the worker's own record (polled below).
+            if (result.ok) onChanged({ ...flow, running: { since: new Date().toISOString(), what: "启动中" } });
+          }}>立即运行</button>)}
         <button type="button" className="secondary-button" aria-pressed={flow.pinned} onClick={async () => {
           if (await send("POST", { pinned: !flow.pinned })) onChanged({ ...flow, pinned: !flow.pinned }); else setNote("未保存");
         }}>{flow.pinned ? "已保留" : "保留"}</button>
