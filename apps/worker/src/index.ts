@@ -1,8 +1,9 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, codexProcessEnvironment, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, codexProcessEnvironment, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -31,7 +32,7 @@ import { returnTidy } from "./return-tidy";
 import { workSplitRepair } from "./work-split-repair";
 import { dateAdvancePass } from "./date-advance";
 import { createWriteLogin } from "./calendar-write-login";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE_TOKEN_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { startingWithin } from "./schedule-window";
@@ -71,13 +72,15 @@ import { createGraphSync, type SyncOutcome } from "./graph-sync";
 import { addSubscription, hasSubscriptions, removeSubscription, subscriptionSources } from "./calendar-subscriptions";
 import { addFolder, personNames, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders } from "./source-folders";
 import { createFolderClassifier } from "./folder-classifier";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
 import { createMailService } from "./mailbox";
 import { probeSandboxShell } from "./sandbox-probe";
 import { automationPass, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
+import { createNodeHub, type NodeHub } from "./node/hub";
+import { skillLibraryDir } from "./skill-library";
 import { identityLines } from "./lines";
 import { createBackgroundSpend, nonCoreAllowed } from "./spend";
 import { telemetryPass } from "./telemetry";
@@ -1484,6 +1487,35 @@ const syncCalendarFor = async (workspaceId: string): Promise<SyncOutcome | null>
   return hasSubscriptions(analysisStore, workspaceId) ? subscriptionSync(workspaceId)() : null;
 };
 
+// The compute node (docs/compute-node.md): on the hosted site the owner's own computer may connect out to `wss://<site>/node` (Caddy
+// hands it to this port) and serve the owner's model runs with its Codex; with no node connected, or the switch off, nothing changes.
+const nodePort = Number(process.env.CROSSLINE_NODE_PORT ?? (hostedBeta ? 3213 : 0));
+const crosslineMarketplace = path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json");
+const nodeHub: NodeHub | undefined = nodePort > 0 ? await createNodeHub({
+  port: nodePort,
+  authenticate: (token) => {
+    const hash = createHash("sha256").update(token).digest();
+    return analysisStore.listWorkspaces().find((workspace) => {
+      const stored = analysisStore.getSetting(workspace.id, DEVICE_TOKEN_SETTING);
+      return stored?.length === 64 && timingSafeEqual(Buffer.from(stored, "hex"), hash);
+    })?.id;
+  },
+  // Only the runtime owner's account, and only once it switched the node on (the plan's A; other accounts are P4).
+  allowed: (workspaceId) => workspaceId === runtimeOwner(analysisStore) && analysisStore.getSetting(workspaceId, NODE_COMPUTE_SETTING) === "on",
+  roots: (workspaceId) => [path.dirname(path.dirname(path.dirname(crosslineMarketplace))), skillLibraryDir(workspaceId)],
+  // The input box's typed copies of uploads (concierge.ts `asTypedImage`) and everything under the data directory (favourites' pictures).
+  imageRoots: () => [path.join(tmpdir(), "crossline-images"), dataDir],
+  gateway: () => `http://127.0.0.1:${modelGateway.port}`,
+  serverCodex: () => codexSupervisor?.runtimeVersion ?? "",
+  prepare: async (client) => {
+    const skills = await installLocalPlugin(client, { name: "crossline", marketplacePath: crosslineMarketplace, cwd: repoRoot, requiredSkills: REQUIRED_SKILLS });
+    const missing = REQUIRED_SKILLS.filter((name) => !skills.includes(name));
+    if (missing.length) throw new Error(`CODEX_PLUGIN_SKILLS_MISSING ${missing.slice(0, 3).join(",")}`);
+  },
+  onStatus: (workspaceId, status) => analysisStore.setSetting(workspaceId, NODE_STATUS_SETTING, JSON.stringify(status)),
+  log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
+}).catch((error: unknown) => { console.warn(JSON.stringify({ type: "node.hub_failed", message: error instanceof Error ? error.message : String(error) })); return undefined; }) : undefined;
+
 // Independent from BETTER_AUTH_SECRET on purpose: the auth secret leaking should not also hand out the
 // ability to trigger real Codex runs on the loopback supervisor port — see `packages/codex/src/capability.ts`.
 const capabilitySecret = process.env.CROSSLINE_SUPERVISOR_CAPABILITY_SECRET?.trim();
@@ -1525,6 +1557,7 @@ if (!capabilitySecret) {
       // Linking this computer as a device of the hosted account (docs/device-mode.md); the worker restarts into device mode.
       { prefix: "/v1/device", handle: createDeviceLinkService({ dataDir, secrets, onChanged: restartForMode }).handle }],
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
+    ownerRemote: () => { const owner = runtimeOwner(analysisStore); return owner ? nodeHub?.clientFor(owner) : undefined; },
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),
     runTaskPass: (workspaceId) => stepPlanPass(workspaceId),

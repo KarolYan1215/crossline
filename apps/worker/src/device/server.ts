@@ -35,7 +35,7 @@ export function startDeviceServer(options: DeviceServerOptions): Promise<{ serve
         workspaceId = verified.capability.workspaceId;
       }
       if (pathname.startsWith("/v1/sources/folders") && await handleSourceFolderRequest(request, response, pathname, workspaceId, options.folders)) return;
-      if (pathname === "/v1/device/link") {
+      if (pathname === "/v1/device/link" || pathname === "/v1/device/node") {
         const method = request.method ?? "GET";
         if (method !== "GET" && request.headers.origin) { sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } }); return; }
         const answer = await options.link.handle(method, pathname, workspaceId, method === "GET" ? undefined : await readJsonBody(request).catch(() => undefined));

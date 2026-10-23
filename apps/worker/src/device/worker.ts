@@ -11,7 +11,8 @@ import { runtimeOwner } from "../owner";
 import { recordingPass, recordingsOn, transcribeConcurrency } from "../recordings";
 import { addFolder, personNames, previewFolder, removeFolder, setFolderLines, setFolderRules, syncFolders } from "../source-folders";
 import { createTranscriber, createWhisperEngine, modelsDirectory } from "../transcribe";
-import { createDeviceLinkService, type DeviceLink } from "./link";
+import { startNodeAgent } from "../node/agent";
+import { createDeviceLinkService, nodeEnabled, type DeviceLink } from "./link";
 import { DEVICE_PASSES } from "./mode";
 import { createOutbox, type OutboxItem, type SendResult } from "./outbox";
 import { activityItem, readDeviceState, recordingItems, sourceItems, writeDeviceState, type QueuedItem } from "./payloads";
@@ -119,6 +120,12 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
     await agentHistoryPass(store, [owner], dataDir, () => process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago").catch(() => 0);
   };
 
+  // 「作为算力节点」 (docs/compute-node.md): on the person's switch this computer also offers its Codex runtime to the hosted site, which
+  // sends it the account's model runs; it starts none of its own.
+  const node = nodeEnabled(dataDir) && link.token && !options.runOnce
+    ? startNodeAgent({ url: link.url, token: link.token, dir: path.join(deviceDir, "node"), host: label, log }) : undefined;
+  if (node) process.on("exit", () => node.stop());
+
   const ownerOnly = { state: "blocked" as const, code: "FOLDER_OWNER_ONLY", message: "文件夹在这台电脑上，只有它的主人能授权。" };
   const server = await startDeviceServer({
     port: options.port, capabilitySecret: options.capabilitySecret,
@@ -149,6 +156,7 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
       }
     },
     link: createDeviceLinkService({ dataDir, secrets: options.secrets, fetch: fetchImpl, onChanged: () => { outbox.unblock(); options.restart(); },
+      nodeStatus: () => node?.status() ?? { state: "off" },
       status: () => ({ ...outbox.stats(), modelNeeded: state.modelNeeded ?? 0, lastPassAt: state.lastPassAt ?? null, workspaceId: owner ?? null }) }),
     transcription: {
       status: () => transcriber.status(),

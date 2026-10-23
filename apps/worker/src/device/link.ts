@@ -58,21 +58,46 @@ export async function saveDeviceLink(dataDir: string, secrets: SecretStore, inpu
 
 export function clearDeviceLink(dataDir: string, secrets: SecretStore): void {
   rmSync(linkFile(dataDir), { force: true });
+  rmSync(nodeFile(dataDir), { force: true });
   secrets.remove(DEVICE_SECRET_SLOT, DEVICE_SECRET_NAME);
+}
+
+/**
+ * 「作为算力节点」 on this computer (docs/compute-node.md): off unless the person switched it on here, and the hosted site accepts the node
+ * only when it is switched on there too. A file beside the link, for the same reason the link is one.
+ */
+export const nodeFile = (dataDir: string) => path.join(dataDir, "device", "node.json");
+export function nodeEnabled(dataDir: string): boolean {
+  try { return (JSON.parse(readFileSync(nodeFile(dataDir), "utf8")) as { enabled?: unknown }).enabled === true; } catch { return false; }
+}
+export function setNodeEnabled(dataDir: string, enabled: boolean, now = new Date()): void {
+  if (!enabled) { rmSync(nodeFile(dataDir), { force: true }); return; }
+  mkdirSync(path.dirname(nodeFile(dataDir)), { recursive: true });
+  writeFileSync(nodeFile(dataDir), JSON.stringify({ enabled: true, at: now.toISOString() }, null, 2));
 }
 
 /**
  * `/v1/device/link` on the worker's loopback port, in both modes: GET the link and what waits to be sent, POST `{url, token}` (checked
  * against the site, then kept), DELETE to unlink. Linking or unlinking calls `onChanged`, which restarts the worker into the other mode.
  */
-export function createDeviceLinkService(deps: { dataDir: string; secrets: SecretStore; fetch?: typeof fetch; status?: () => unknown; onChanged: () => void }) {
+export function createDeviceLinkService(deps: { dataDir: string; secrets: SecretStore; fetch?: typeof fetch; status?: () => unknown; nodeStatus?: () => unknown;
+  onChanged: () => void }) {
   return {
     async handle(method: string, pathname: string, _workspaceId: string, body: Record<string, unknown> | undefined): Promise<{ status: number; body: unknown } | undefined> {
+      // The compute node switch: kept, then the worker restarts so the device starts or stops offering its runtime.
+      if (pathname === "/v1/device/node") {
+        if (method !== "POST") return { status: 405, body: { ok: false, code: "METHOD_NOT_ALLOWED" } };
+        if (!readLinkRecord(deps.dataDir)) return { status: 400, body: { ok: false, code: "DEVICE_NOT_LINKED", message: "先连接网页版，再开启算力节点。" } };
+        const enabled = body?.enabled === true;
+        if (enabled !== nodeEnabled(deps.dataDir)) { setNodeEnabled(deps.dataDir, enabled); deps.onChanged(); }
+        return { status: 200, body: { ok: true, enabled } };
+      }
       if (pathname !== "/v1/device/link") return undefined;
       if (method === "GET") {
         const link = await readDeviceLink(deps.dataDir, deps.secrets);
         return { status: 200, body: { ok: true, linked: Boolean(link), ...(link ? { url: link.url, label: link.label, linkedAt: link.linkedAt, tokenReadable: Boolean(link.token) } : {}),
-          ...(deps.status ? { device: deps.status() } : {}) } };
+          ...(deps.status ? { device: deps.status() } : {}),
+          node: { enabled: nodeEnabled(deps.dataDir), ...(deps.nodeStatus ? { status: deps.nodeStatus() } : {}) } } };
       }
       if (method === "POST") {
         const url = typeof body?.url === "string" ? primaryOrigin(body.url) : undefined;

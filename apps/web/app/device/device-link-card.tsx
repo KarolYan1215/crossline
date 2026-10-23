@@ -6,7 +6,20 @@ import { SetupGuide } from "../ui/setup-guide";
 import { DEVICE_LINK_GUIDE } from "../../lib/setup-guides";
 
 type DeviceView = { pending?: number; dead?: number; blocked?: { code: string; at: string }; lastSentAt?: string; lastError?: string; modelNeeded?: number; lastPassAt?: string | null };
-type LinkView = { ok?: boolean; linked?: boolean; url?: string; label?: string; linkedAt?: string; tokenReadable?: boolean; device?: DeviceView; code?: string; message?: string };
+type NodeAgentView = { enabled: boolean; status?: { state: string; message?: string; since?: string } };
+type LinkView = { ok?: boolean; linked?: boolean; url?: string; label?: string; linkedAt?: string; tokenReadable?: boolean; device?: DeviceView; node?: NodeAgentView; code?: string; message?: string };
+
+/** What the node agent's state means here (docs/compute-node.md). */
+const nodeWords = (node: NodeAgentView | undefined) => {
+  if (!node?.enabled) return "关闭";
+  switch (node.status?.state) {
+    case "ready": return "已接入：网页版把本账号的模型工作交给这台电脑";
+    case "connecting": return "正在连接";
+    case "refused": return `没有接入：${node.status.message ?? "被拒绝"}，稍后自动重试`;
+    case "waiting": return `连接断开，稍后重连（${node.status.message ?? ""}）`;
+    default: return "正在启动";
+  }
+};
 
 const time = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
 
@@ -42,6 +55,13 @@ export function DeviceLinkCard() {
     setNote(response?.ok ? "已断开。后台服务正在以完整模式重启。" : "没有断开，请重试。");
     setTimeout(() => void load(), 6_000);
   };
+  const switchNode = async (enabled: boolean) => {
+    setBusy(true);
+    const response = await fetch("/api/device/node", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) }).catch(() => undefined);
+    setBusy(false);
+    setNote(response?.ok ? (enabled ? "已开启。后台服务正在重启，几秒后连上网页版。" : "已关闭。后台服务正在重启。") : "没有保存，请重试。");
+    setTimeout(() => void load(), 6_000);
+  };
   const device = view?.device;
   return <section className="st-card" aria-label="设备连接">
     <header><h3>设备连接</h3><small>连接后，这台电脑只读本机的屏幕活动、文件夹和录音，结果立即发到网页版；计划、任务和所有模型工作只在网页版进行</small></header>
@@ -53,6 +73,9 @@ export function DeviceLinkCard() {
         <span className="muted">上次送达 {time(device?.lastSentAt)}</span></div>
       {device?.lastError && !device.blocked && <p className="st-note">上次发送没有成功（{device.lastError}），会自动重试。</p>}
       {Boolean(device?.modelNeeded) && <p className="st-note">有 {device?.modelNeeded} 个录音等着转写：先在下方「录音自动转写」同意下载语音识别模型。</p>}
+      <div className="st-row"><span className="st-row-label">作为算力节点<small>{nodeWords(view.node)}。网页版「这台电脑」也要开启；开机期间这台电脑用本机的 Codex 替网页版跑本账号的模型工作，关机时自动回到服务器</small></span>
+        <SegmentedControl label="作为算力节点" value={view.node?.enabled ? "on" : "off"} options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]}
+          onChange={(next) => void switchNode(next === "on")} /></div>
       <div className="st-row"><span className="st-row-label">断开<small>回到完整模式：本机重新自己做计划和模型工作</small></span>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void unlink()}>断开</button></div>
     </> : <>

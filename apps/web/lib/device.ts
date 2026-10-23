@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ACTIVITY_HOURLY, ACTIVITY_HOURLY_DAYS, ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, DEVICE_DOCUMENTS_SETTING,
   DEVICE_FOLDERS_SETTING, DEVICE_IDEMPOTENCY_HEADER, DEVICE_LIMITS, DEVICE_LAST_SEEN_SETTING, DEVICE_SEEN_KEEP, DEVICE_SEEN_SETTING, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT,
-  RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT,
+  NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT, RUNTIME_OWNER_SETTING, SLEEP_TRACKING_CONSENT,
   type AccessContext, type ActivityHour, type DeviceActivityPayload, type DeviceFolder, type DeviceRecordingsPayload, type DeviceSourcesPayload, type InputRhythmBucket
 } from "@crossline/core";
 import { ACTIVITY_DETAIL_CONSENT, dataDirectory, getStore, LOCAL_ACTIVITY_CONSENT } from "./crossline";
@@ -81,6 +81,24 @@ export function deviceStatus(workspaceId: string): { linked: boolean; lastSeen: 
     lastSeen: read<{ at: string; label?: string } | null>(store.getSetting(workspaceId, DEVICE_LAST_SEEN_SETTING), null),
     folders: read<DeviceFolder[]>(store.getSetting(workspaceId, DEVICE_FOLDERS_SETTING), []),
     documents: Object.keys(read<Record<string, string>>(store.getSetting(workspaceId, DEVICE_DOCUMENTS_SETTING), {})).length };
+}
+
+/**
+ * 「作为算力节点」 on the hosted card (docs/compute-node.md): only the runtime owner's account may switch it on (its runs are the ones a node
+ * serves), and the last thing the hosted worker saw of the node. Switching it off lets a connected node go within one heartbeat (15 s); the
+ * account's runs are on the server again from then.
+ */
+export type ComputeNodeView = { available: boolean; enabled: boolean; status: { state: string; host?: string; codex?: string; at: string; message?: string } | null };
+export function computeNodeStatus(workspaceId: string): ComputeNodeView {
+  const store = getStore();
+  return { available: store.getSetting(workspaceId, RUNTIME_OWNER_SETTING) === "1", enabled: store.getSetting(workspaceId, NODE_COMPUTE_SETTING) === "on",
+    status: read<ComputeNodeView["status"]>(store.getSetting(workspaceId, NODE_STATUS_SETTING), null) };
+}
+export function setComputeNode(workspaceId: string, enabled: boolean): ComputeNodeView {
+  const store = getStore();
+  if (store.getSetting(workspaceId, RUNTIME_OWNER_SETTING) !== "1") return computeNodeStatus(workspaceId);
+  if (enabled) store.setSetting(workspaceId, NODE_COMPUTE_SETTING, "on"); else store.deleteSetting(workspaceId, NODE_COMPUTE_SETTING);
+  return computeNodeStatus(workspaceId);
 }
 
 /** 撤销: the token goes, so the device's next send is refused; what it sent stays (it is the person's material). */

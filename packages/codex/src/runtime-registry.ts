@@ -84,6 +84,8 @@ const EVICT_GRACE_MS = 15_000;
 
 export function createRuntimeRegistry(options: {
   owner: RuntimeSidecar;
+  /** The client the owner's model runs take (the compute node's runtime while connected); `owner.client` when not given. */
+  ownerClient?: () => CodexRpcBoundary;
   ownerWorkspaceId: () => string | undefined;
   /** Where guest homes live: `<baseDir>/<workspaceId>/codex-home`. */
   baseDir: string;
@@ -114,6 +116,7 @@ export function createRuntimeRegistry(options: {
   const logins = new Map<string, RuntimeLogin>();
   const handles = new Map<string, Handle>();
   const isOwner = (workspaceId: string) => !workspaceId || workspaceId === options.ownerWorkspaceId();
+  const ownerClient = () => options.ownerClient?.() ?? options.owner.client;
   const homeOf = (workspaceId: string) => path.join(options.baseDir, workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"), "codex-home");
   const signedIn = (workspaceId: string) => isOwner(workspaceId) || existsSync(path.join(homeOf(workspaceId), "auth.json"));
   const connected = (workspaceId: string) => signedIn(workspaceId) || Boolean(options.hasProvider?.(workspaceId));
@@ -217,7 +220,7 @@ export function createRuntimeRegistry(options: {
   const connectedNow = (workspaceId: string) => { try { options.onConnected?.(workspaceId); } catch { /* the listener's own concern */ } };
 
   const clientFor = async (workspaceId: string, forLogin = false): Promise<{ ok: true; client: CodexRpcBoundary } | { ok: false; blocker: RuntimeBlocker }> => {
-    if (isOwner(workspaceId)) return { ok: true, client: options.owner.client };
+    if (isOwner(workspaceId)) return { ok: true, client: forLogin ? options.owner.client : ownerClient() };
     if (!forLogin && !connected(workspaceId)) return { ok: false, blocker: blocker("RUNTIME_UNCONNECTED") };
     const started = await ensure(workspaceId);
     return "code" in started ? { ok: false, blocker: started } : { ok: true, client: handleFor(workspaceId) };
@@ -226,9 +229,9 @@ export function createRuntimeRegistry(options: {
   return {
     isOwner, connected, signedIn, savedAccount,
     client: (workspaceId) => clientFor(workspaceId),
-    handle: (workspaceId) => isOwner(workspaceId) ? { ok: true, client: options.owner.client }
+    handle: (workspaceId) => isOwner(workspaceId) ? { ok: true, client: ownerClient() }
       : connected(workspaceId) ? { ok: true, client: handleFor(workspaceId) } : { ok: false, blocker: blocker("RUNTIME_UNCONNECTED") },
-    current: (workspaceId) => isOwner(workspaceId) ? options.owner.client : (touch(workspaceId), running.has(workspaceId) ? handleFor(workspaceId) : undefined),
+    current: (workspaceId) => isOwner(workspaceId) ? ownerClient() : (touch(workspaceId), running.has(workspaceId) ? handleFor(workspaceId) : undefined),
     async login(workspaceId, method) {
       // Not through the handle: an account that is not connected yet is exactly the one that logs in.
       const started = isOwner(workspaceId) ? options.owner : await ensure(workspaceId);

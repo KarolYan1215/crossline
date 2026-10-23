@@ -205,6 +205,31 @@ export function webResearchBlocker(
     message: `联网查证需要 ${host}，但它不在那里，网页搜索无法启动。把已安装 Codex 应用 bin 目录里的 codex-code-mode-host.exe 复制到这个位置，或在 vendor/codex 里构建 codex-code-mode-host。` };
 }
 
+/**
+ * The app-server as raw JSON lines, for a compute node (apps/worker/src/node/agent.ts), which relays most lines to the hosted worker
+ * unread instead of answering them itself. Same binary, same environment as `startCodexAppServer`.
+ */
+export function spawnAppServerLines(codexHome?: string): { write: (line: string) => void; onLine: (handler: (line: string) => void) => void;
+  onExit: (handler: () => void) => void; stop: () => void } {
+  const env = { ...codexProcessEnvironment(), ...(codexHome ? { CODEX_HOME: codexHome, CROSSLINE_CODEX_HOME: codexHome } : {}) };
+  mkdirSync(env.CODEX_HOME!, { recursive: true });
+  const codex = resolveCodexCommand(env);
+  const child = spawn(codex.command, [...codex.args, "app-server", "--listen", "stdio://", "--strict-config"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env });
+  const lines = createInterface({ input: child.stdout });
+  child.stderr.resume();
+  const exits = new Set<() => void>();
+  let ended = false;
+  const finish = () => { if (ended) return; ended = true; for (const handler of exits) handler(); };
+  child.once("error", finish);
+  child.once("exit", finish);
+  return {
+    write: (line) => { if (!ended) child.stdin.write(line.endsWith("\n") ? line : `${line}\n`); },
+    onLine: (handler) => { lines.on("line", handler); },
+    onExit: (handler) => { exits.add(handler); },
+    stop: () => { lines.close(); child.kill(); }
+  };
+}
+
 /** A guest runtime's `oom_score_adj` (Linux): above the owner's runtime and the worker (0), below Chromium's renderers (300). */
 export const GUEST_OOM_SCORE_ADJ = 200;
 
@@ -319,6 +344,8 @@ export type CodexSupervisor = {
   /** The runtime serving a workspace, if it is running; a guest's starts through `runtimes.client`. */
   clientFor: (workspaceId: string) => CodexRpcBoundary | undefined;
   runtimes?: RuntimeRegistry;
+  /** The owner runtime's `userAgent` ("crossline/0.163.0 (…)"): a compute node must run the same Codex. */
+  runtimeVersion: string;
   stop: () => Promise<void>;
 };
 
@@ -329,7 +356,7 @@ export type LocalPluginContract = {
   requiredSkills: string[];
 };
 
-async function installLocalPlugin(client: CodexRpcBoundary, plugin: LocalPluginContract): Promise<string[]> {
+export async function installLocalPlugin(client: CodexRpcBoundary, plugin: LocalPluginContract): Promise<string[]> {
   try {
     await client.request("plugin/install", { marketplacePath: plugin.marketplacePath, pluginName: plugin.name });
   } catch { throw new Error("CODEX_PLUGIN_INSTALL_FAILED"); }
@@ -579,6 +606,11 @@ export async function startCodexSupervisor(options: {
    * workspace. A write must come from the web app's server (no browser `Origin`), like every other write here.
    */
   services?: Array<{ prefix: string; handle: (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => Promise<{ status: number; body: unknown } | undefined> }>;
+  /**
+   * The owner's runtime on the person's own computer while it is connected as a compute node (docs/compute-node.md): the owner's model
+   * runs take it instead of this process's runtime. Sign-in, the quota read and the shell assistant stay on this process's runtime.
+   */
+  ownerRemote?: () => CodexRpcBoundary | undefined;
 } = {}): Promise<CodexSupervisor> {
   const host = options.host ?? "127.0.0.1";
   // Regenerated every boot: a token signed before a crash or restart must not still be honoured after
@@ -604,7 +636,9 @@ export async function startCodexSupervisor(options: {
       pluginState = { name: options.plugin.name, requiredSkills: options.plugin.requiredSkills, discoveredSkills, state: "blocked" };
     }
   }
-  const runtimes = options.runtimes ? createRuntimeRegistry({ owner: sidecar, ownerWorkspaceId: options.runtimes.ownerWorkspaceId,
+  /** The client the owner's model runs take: the compute node's runtime while it is connected, else this process's. */
+  const ownerClient = () => options.ownerRemote?.() ?? sidecar.client;
+  const runtimes = options.runtimes ? createRuntimeRegistry({ owner: sidecar, ownerClient, ownerWorkspaceId: options.runtimes.ownerWorkspaceId,
     baseDir: options.runtimes.baseDir, ...(options.runtimes.maxRunning ? { maxRunning: options.runtimes.maxRunning } : {}),
     ...(options.runtimes.idleMs ? { idleMs: options.runtimes.idleMs } : {}),
     ...(options.runtimes.hasProvider ? { hasProvider: options.runtimes.hasProvider } : {}),
@@ -620,7 +654,7 @@ export async function startCodexSupervisor(options: {
   const modelClient = async (response: ServerResponse, workspaceId: string): Promise<CodexRpcBoundary | undefined> => {
     if (isOwner(workspaceId)) {
       if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return undefined; }
-      return sidecar.client;
+      return ownerClient();
     }
     // Not started here: with every runtime busy the start waits its turn, and that wait belongs inside the route's kept-alive answer.
     const runtime = runtimes!.handle(workspaceId);
@@ -1376,7 +1410,8 @@ export async function startCodexSupervisor(options: {
     url: `http://${host}:${address.port}`,
     client: sidecar.client,
     ...(runtimes ? { runtimes } : {}),
-    clientFor: (workspaceId: string) => isOwner(workspaceId) ? sidecar.client : runtimes!.current(workspaceId),
+    clientFor: (workspaceId: string) => isOwner(workspaceId) ? ownerClient() : runtimes!.current(workspaceId),
+    runtimeVersion: runtimeVersion(sidecar.initializeResult),
     readCostSignal: async (workspaceId = "") => !isOwner(workspaceId) ? guestCost(workspaceId) : runtimeBlocker
       ? { available: false, reason: runtimeBlocker.code }
       : costFor(sidecar.client, workspaceId),

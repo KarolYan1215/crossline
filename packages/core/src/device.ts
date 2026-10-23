@@ -20,6 +20,15 @@ export const DEVICE_DOCUMENTS_SETTING = "device.documents";
 /** The hosted setting with the device's folders: label, lines, counts — never the path on that machine. */
 export const DEVICE_FOLDERS_SETTING = "device.folders";
 
+/**
+ * The compute node (docs/compute-node.md): the hosted switch 「作为算力节点」 ("on" while the site accepts this account's computer as the
+ * runtime for its model runs; only the runtime owner may) and the last thing the hosted worker saw of the node (`NodeStatus` JSON).
+ */
+export const NODE_COMPUTE_SETTING = "node.compute";
+export const NODE_STATUS_SETTING = "node.status";
+/** The hosted setting holding the sha256 of the `device` token, which the node signs in with too. */
+export const DEVICE_TOKEN_SETTING = "device.token.sha256";
+
 /** Limits on what one send may carry; anything past them is cut, not refused. */
 export const DEVICE_LIMITS = { daily: 14, hourly: 28 * 24, gaps: 40, rhythm: 14 * 96, segments: 3000, documents: 20, text: 1_500_000, remove: 500,
   folders: 50, transcripts: 10, silent: 50, bodyBytes: 8_000_000 } as const;

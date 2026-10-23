@@ -6,7 +6,7 @@ import { RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, SOURCE_FOLDERS_SET
 import { createMemorySecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
 import { ACTIVITY_DETAIL_CONSENT, LOCAL_ACTIVITY_CONSENT } from "../activity-recorder";
-import { createDeviceLinkService, DEVICE_SECRET_NAME, DEVICE_SECRET_SLOT, linkFile, readDeviceLink } from "./link";
+import { createDeviceLinkService, DEVICE_SECRET_NAME, DEVICE_SECRET_SLOT, linkFile, nodeEnabled, readDeviceLink } from "./link";
 import { DEVICE_PASSES, MODEL_PASSES, PRIMARY_ONLY_PASSES, passesFor, workerMode } from "./mode";
 import { activityItem, appToken, buildActivityPayload, readDeviceState, recordingItems, sourceItems } from "./payloads";
 
@@ -44,6 +44,35 @@ test("the device worker's code imports no model runner, no Codex runtime and not
     expect(offending, file).toEqual([]);
     expect(source, file).not.toMatch(/startCodexSupervisor|runCodexSkill|startCodexAppServer|createModelProviderService/);
   }
+});
+
+test("the compute node is the one way a device runs Codex: only the raw app-server, only on the person's switch, and only for the site's requests", () => {
+  const agent = readFileSync(path.join(import.meta.dirname, "..", "node", "agent.ts"), "utf8");
+  const codexImports = agent.split("\n").filter((line) => /^import /.test(line) && line.includes("@crossline/codex"));
+  expect(codexImports).toEqual(['import { spawnAppServerLines } from "@crossline/codex";']);
+  // It answers and relays; it never starts a thread or a turn of its own.
+  expect(agent).not.toMatch(/runCodexSkill|startCodexSupervisor|startCodexAppServer|method: "(?:thread|turn)\/start"/);
+  // The device worker starts it only when the switch file says so.
+  expect(readFileSync(path.join(import.meta.dirname, "worker.ts"), "utf8")).toMatch(/nodeEnabled\(dataDir\) && link\.token/);
+});
+
+test("the node switch is kept beside the link, needs a link first, restarts the worker when it changes, and goes with the link", async () => {
+  const secrets = createMemorySecretStore();
+  let restarts = 0;
+  const service = createDeviceLinkService({ dataDir: dir, secrets, onChanged: () => { restarts += 1; }, nodeStatus: () => ({ state: "ready" }),
+    fetch: (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch });
+  expect(await service.handle("POST", "/v1/device/node", ws, { enabled: true })).toMatchObject({ status: 400, body: { code: "DEVICE_NOT_LINKED" } });
+  await service.handle("POST", "/v1/device/link", ws, { url: "https://app.crossline.lol", token: "t".repeat(32) });
+  restarts = 0;
+  expect(await service.handle("POST", "/v1/device/node", ws, { enabled: true })).toMatchObject({ status: 200, body: { enabled: true } });
+  expect(nodeEnabled(dir)).toBe(true);
+  expect(restarts).toBe(1);
+  // Saying the same again changes nothing and restarts nothing.
+  await service.handle("POST", "/v1/device/node", ws, { enabled: true });
+  expect(restarts).toBe(1);
+  expect((await service.handle("GET", "/v1/device/link", ws, undefined))!.body).toMatchObject({ node: { enabled: true, status: { state: "ready" } } });
+  await service.handle("DELETE", "/v1/device/link", ws, undefined);
+  expect(nodeEnabled(dir)).toBe(false);
 });
 
 test("the activity snapshot carries no window title and no app name, only a salted token; nothing changes, nothing is queued", () => {
