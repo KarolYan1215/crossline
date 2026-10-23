@@ -495,6 +495,8 @@ export type FavouritesCollector = {
   media: (workspaceId: string) => NoteMediaDeps;
   sleep?: (ms: number) => Promise<void>;
   log?: (event: Record<string, unknown>) => void;
+  /** Frees what can be freed before the browser opens (idle model runtimes): the page shares the worker's memory ceiling. */
+  reclaim?: () => void;
   /** Sorts the listed favourites not yet under a topic (a model run, favourites-topics.ts); the number sorted. */
   classify?: (workspaceId: string, workflowId: string) => Promise<number>;
 };
@@ -531,6 +533,8 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
     payload: { taskId, listOnly: Boolean(plan.listOnly), notes: plan.targets?.length ?? 0 } });
   const job = (async () => {
     let result: CollectResult;
+    // The page was killed by the container's memory ceiling twice (2026-10-23) while four idle model runtimes held ~800 MB.
+    collector.reclaim?.();
     const driver = await (collector.open ?? openCollectBrowser)(profileDir, browser, { listOnly: Boolean(plan.listOnly) }).catch((error: unknown) => error as Error);
     if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
     else {

@@ -1116,6 +1116,7 @@ const mailService = createMailService({ store: analysisStore, secrets, cwd: repo
 const classifyTopics = createTopicClassifier(analysisStore, repoRoot, (workspaceId) => accountClient(workspaceId));
 configureFavouritesCollector({
   outputRoot: defaultOutputRoot(),
+  reclaim: () => codexSupervisor?.runtimes?.reclaim(),
   // Sorting the titles is the person's own request at work: it runs while the quota allows core work.
   classify: async (workspaceId, workflowId) => {
     if (!spendAllows(await spendFor(workspaceId), "core")) return 0;

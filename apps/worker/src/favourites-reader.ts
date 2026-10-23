@@ -54,6 +54,8 @@ export type CollectDriver = {
   selfProfile: () => Promise<{ userId?: string; href?: string }>;
   /** A picture or video through the browser's own request context (its cookies), with the note as referer. */
   fetchMedia: (url: string, referer: string, maxBytes: number) => Promise<MediaFetch>;
+  /** How large the page has grown (its JavaScript heap in MB, its element count): logged while the list scrolls. */
+  metrics?: () => Promise<{ heapMb: number; nodes: number }>;
   close: () => Promise<void>;
 };
 
@@ -270,7 +272,12 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       fromDom(shown.links);
       quiet = listed.size > before ? 0 : quiet + 1;
       // Kept as it grows: a page that dies part way (2026-10-23: 「Target crashed」 after 17 minutes) loses nothing listed so far.
-      if (screen % 5 === 4) { keepListed(); save(); }
+      if (screen % 5 === 4) {
+        keepListed(); save();
+        // What grows while the list scrolls (the page process was killed at ~370 MB with ~520 listed, 2026-10-23).
+        const size = await driver.metrics?.().catch(() => undefined);
+        log({ type: "collect.list_progress", workflowId, screen: screen + 1, listed: listed.size, ...(size ?? {}) });
+      }
     }
     result.listEnded = hasMore === false || quiet >= LIST_QUIET_SCREENS;
     result.listed = listed.size;
@@ -415,6 +422,8 @@ export async function openCollectBrowser(profileDir: string, executablePath: str
       links: [...document.querySelectorAll("a[href]")].slice(0, 3_000).map((anchor) => ({ text: (anchor.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 120),
         href: (anchor as HTMLAnchorElement).href })) }))) }),
     responses: async () => { await Promise.allSettled([...pending]); return queue.splice(0, queue.length); },
+    metrics: () => page.evaluate(() => ({ heapMb: Math.round(((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 1_048_576),
+      nodes: document.getElementsByTagName("*").length })),
     noteState: () => page.evaluate(() => {
       const plain = (value: unknown) => { try { return JSON.parse(JSON.stringify(value ?? null)) as unknown; } catch { return null; } };
       const state = (globalThis as unknown as { __INITIAL_STATE__?: { note?: { noteDetailMap?: unknown } } }).__INITIAL_STATE__;
