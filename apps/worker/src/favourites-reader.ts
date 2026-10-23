@@ -303,7 +303,10 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       result.listCapped = true;
       ledger.listCapped = { at: now().toISOString(), listed: listed.size, memory: options.memory?.describe() ?? "" };
     } else if (result.listEnded) delete ledger.listCapped;
-    if (result.listEnded || capped || !options.listOnly) ledger.listedAt = now().toISOString();
+    // An incremental look that reached notes already listed has seen everything new: the list is up to date. Without this the weekly
+    // refresh never counted as done and opened the favourites page again on every tick of the night.
+    const upToDate = mode === "incremental" && knownPage;
+    if (result.listEnded || capped || upToDate || !options.listOnly) ledger.listedAt = now().toISOString();
     save();
     if (options.listOnly) { log({ type: "collect.listed", workflowId, mode, listed: listed.size, ended: result.listEnded, listOnly: true }); return result; }
 

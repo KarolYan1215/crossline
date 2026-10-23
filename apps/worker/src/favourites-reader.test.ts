@@ -213,6 +213,20 @@ test("a file over the size cap is not saved and says so; the limit of the trial 
   expect(mediaExtension(Buffer.from("xx"), "image/jpeg", "bin")).toBe("jpg");
 });
 
+test("the list alone: read to its end once, then a weekly look that reaches notes already listed counts as up to date", async () => {
+  const first = await run(fakeSite({ total: 65 }).driver, { listOnly: true, mode: "catch_up" }).result;
+  expect(first).toMatchObject({ state: "done", listed: 65, listEnded: true, read: [] });
+  expect(readCollectLedger(store, ws, "flow-xhs").listedAt).toBe("2026-10-22T03:00:00.000Z");
+  // A week later, five new favourites on top: the second page holds only listed notes, so the look stops there and is done.
+  const site = fakeSite({ total: 70 });
+  const later = await run(site.driver, { listOnly: true, mode: "incremental", now: () => new Date("2026-10-29T03:00:00Z") }).result;
+  expect(later).toMatchObject({ state: "done", listEnded: false, read: [] });
+  expect(site.log.filter((line) => line === "wheel")).toHaveLength(1);
+  const ledger = readCollectLedger(store, ws, "flow-xhs");
+  expect(ledger.listedAt).toBe("2026-10-29T03:00:00.000Z");
+  expect(Object.keys(ledger.listed ?? {})).toHaveLength(70);
+});
+
 test("past the memory line the list stops where it is: what it showed is kept, counted as listed and read, and nothing is held", async () => {
   const site = fakeSite({ total: 100 });
   let wheels = 0;
