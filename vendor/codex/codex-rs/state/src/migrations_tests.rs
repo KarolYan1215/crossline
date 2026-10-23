@@ -58,13 +58,111 @@ async fn runtime_migrator_accepts_existing_windows_checksums() {
         .await
         .expect("legacy migration should run");
     let runtime = super::runtime_state_migrator();
-    super::repair_windows_migration_checksums(&pool, &runtime)
+    super::repair_windows_migration_checksums(&pool, &runtime, sqlite.state_db_path().as_path())
         .await
         .expect("legacy checksum should be repaired");
     runtime
         .run(&pool)
         .await
         .expect("runtime should accept legacy Windows checksums");
+}
+
+/// The official Codex app's `%USERPROFILE%\.codex` keeps its CRLF checksums: rewriting them
+/// stops the official app from starting (2026-10-22).
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_checksum_repair_skips_official_codex_home() {
+    let profile = crate::runtime::test_support::unique_temp_dir();
+    let official_home = profile.join(".codex");
+    tokio::fs::create_dir_all(&official_home)
+        .await
+        .expect("official home should be created");
+    let _cleanup = scopeguard::guard(profile.clone(), |profile| {
+        let _ = std::fs::remove_dir_all(profile);
+    });
+    let sqlite = crate::SqliteConfig::new_for_testing(official_home.as_path().abs());
+    let db_path = sqlite.state_db_path();
+    let pool = sqlite
+        .open_read_write_pool(&db_path)
+        .await
+        .expect("sqlite database should open");
+    let first = STATE_MIGRATOR.migrations.first().expect("state migration");
+    let crlf = Migration::new(
+        first.version,
+        first.description.clone(),
+        first.migration_type,
+        sqlx::AssertSqlSafe(
+            first
+                .sql
+                .as_str()
+                .replace("\r\n", "\n")
+                .replace('\n', "\r\n"),
+        )
+        .into_sql_str(),
+        first.no_tx,
+    );
+    let official_checksum = crlf.checksum.to_vec();
+    let legacy = Migrator {
+        migrations: Cow::Owned(vec![crlf]),
+        ignore_missing: false,
+        locking: STATE_MIGRATOR.locking,
+        table_name: STATE_MIGRATOR.table_name.clone(),
+        create_schemas: STATE_MIGRATOR.create_schemas.clone(),
+        no_tx: STATE_MIGRATOR.no_tx,
+    };
+    legacy
+        .run(&pool)
+        .await
+        .expect("official migration should run");
+
+    let runtime = super::runtime_state_migrator();
+    assert!(super::is_official_codex_home_db(
+        db_path.as_path(),
+        Some(profile.as_path())
+    ));
+    super::repair_windows_migration_checksums_for_profile(
+        &pool,
+        &runtime,
+        db_path.as_path(),
+        Some(profile.as_path()),
+    )
+    .await
+    .expect("repair should skip, not fail");
+
+    let stored: Vec<u8> =
+        sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = ?")
+            .bind(first.version)
+            .fetch_one(&pool)
+            .await
+            .expect("checksum row");
+    assert_eq!(stored, official_checksum);
+}
+
+#[cfg(windows)]
+#[test]
+fn official_codex_home_detection_is_exact() {
+    use std::path::Path;
+    let profile = Path::new(r"C:\Users\someone");
+    assert!(super::is_official_codex_home_db(
+        Path::new(r"C:\Users\someone\.codex\state_5.sqlite"),
+        Some(profile)
+    ));
+    assert!(super::is_official_codex_home_db(
+        Path::new(r"c:\users\SOMEONE\.Codex\logs_2.sqlite"),
+        Some(profile)
+    ));
+    assert!(!super::is_official_codex_home_db(
+        Path::new(r"C:\Users\someone\AppData\Local\Crossline\codex-home\state_5.sqlite"),
+        Some(profile)
+    ));
+    assert!(!super::is_official_codex_home_db(
+        Path::new(r"C:\Users\someone\.codex\sqlite\state_5.sqlite"),
+        Some(profile)
+    ));
+    assert!(!super::is_official_codex_home_db(
+        Path::new(r"C:\Users\someone\.codex\state_5.sqlite"),
+        None
+    ));
 }
 
 fn migrator_through(version: i64) -> Migrator {

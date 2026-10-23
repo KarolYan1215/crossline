@@ -106,12 +106,12 @@ export class JsonLineRpcClient {
 export const CODEX_BASELINE_COMMIT = "83086188ae0614bd882818ff1aa23f3194962012";
 export const CODEX_GENERATED_PROTOCOL_SHA256 = "0a029db4277456684f035f790bda8ea8651d4120fe3ab6c17436fadf1dfa7a05";
 /**
- * The debug build at the repository root, which the resident app runs. A debug build embeds the absolute source path, so only a build
- * in that checkout gives this hash: it is still rust-v0.155.0's until the root is rebuilt from the vendored 0.163.0 source
- * (docs/codex-upgrade-0.163.md), and the new hash goes here then. It also names the runtime in provider conformance records
- * (`RUNTIME_VERSION`), which go stale when it changes.
+ * The debug build the resident app runs from `vendor/codex/codex-rs/target/debug/codex.exe`. A debug build embeds the absolute source
+ * path, so the hash depends on where it was built: this one (rust-v0.163.0 plus the fork's `~/.codex` isolation, 2026-10-22) was built
+ * in the worktree `fix/fork-codex-home-isolation` and is copied to the root path. It also names the runtime in provider conformance
+ * records (`RUNTIME_VERSION`), which go stale when it changes.
  */
-export const CODEX_FORK_BINARY_SHA256 = "e6300d7fd03c53a11a746e49f12706c313a04eaedb4541f1857799d9551617ac";
+export const CODEX_FORK_BINARY_SHA256 = "43b258b238205f9ea60d693e0704b3f4f10bec970093bd398aefc589aeb0871a";
 /**
  * The release build of the pinned source that the installed copy ships (docs/local-installer.md, Codex 的 Release 构建): still
  * rust-v0.155.0's until the release build (three hours of thin-LTO linking) is redone from 0.163.0.
@@ -124,11 +124,15 @@ export const CODEX_RELEASE_BINARY_SHA256 = "ce19ac66ee6204888bf6318f0ae1b02f83b3
  */
 export const CODEX_LINUX_RELEASE_BINARY_SHA256 = "399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215";
 /**
- * The previous pin's binaries (rust-v0.155.0), still accepted while each place that runs one is moved to 0.163.0
+ * The previous pins' binaries (rust-v0.155.0, and the root's 0.163.0 debug build without the `~/.codex` isolation), still accepted while each place that runs one is moved to 0.163.0
  * (docs/codex-upgrade-0.163.md 「留给人做的事」): the Linux release on the hosted server until /srv/crossline/codex is replaced. The protocol
  * the worker speaks works with both. Remove an entry once nothing runs it.
  */
-export const CODEX_PREVIOUS_BINARY_SHA256: readonly string[] = ["660e159a49e823ac8e5986cb238f73158ce4b957d40d9292f8de90862644b501"];
+export const CODEX_PREVIOUS_BINARY_SHA256: readonly string[] = [
+  "660e159a49e823ac8e5986cb238f73158ce4b957d40d9292f8de90862644b501",
+  // The root debug build of rust-v0.163.0 before the `~/.codex` isolation (2026-10-20); accepted until the root's copy is replaced.
+  "e6300d7fd03c53a11a746e49f12706c313a04eaedb4541f1857799d9551617ac"
+];
 
 export function codexProcessEnvironment(
   base: NodeJS.ProcessEnv = process.env,
