@@ -15,9 +15,9 @@ import type { AgentOutcome, AgentTaskInput } from "./agent-task";
 import type { DispatchResult } from "./agent-service";
 import { identityLines } from "./lines";
 import { ownerOf, runtimesDir } from "./owner";
-import { createSiteReader, SITE_PAGES_PER_RUN, SITE_SCROLLS_MAX, type OpenSite } from "./site-reader";
+import { createSiteReader, holdWords, releaseSite, siteHold, SITE_PAGES_PER_RUN, SITE_SCROLLS_MAX, type OpenSite } from "./site-reader";
 import { favouritesTopicStep, topicModeOn } from "./favourites-topics";
-import { COLLECT_BREAKER_DAYS, collectFavourites, collectFolder, collectPausedUntil, favouritesAccess, markOrganised, openCollectBrowser, readCollectLedger,
+import { collectFavourites, collectFolder, collectHold, favouritesAccess, holdAfterFailure, markOrganised, openCollectBrowser, readCollectLedger,
   type CollectDriver, type CollectOptions, type CollectResult } from "./favourites-reader";
 import { describeNotes, type NoteMediaDeps } from "./note-media";
 import { loginMode } from "./browser-launch";
@@ -392,6 +392,19 @@ export function finishWorkflowLogin(store: CrosslineStore, workspaceId: string, 
  * for each site it reads the run is told the profile the person logged in with. The person is told when it is ready, when it needs a
  * login, or why it did not start.
  */
+/**
+ * The person pressed 「立即运行」: a site held after a check or a broken run is read again (the hold waits for exactly this). Recorded, so a
+ * later check can be read against who restarted it and when.
+ */
+export function resumeByPerson(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, now = new Date()): string[] {
+  const hosts = [...new Set(workflowAccess(record).access.filter((item) => item.login).map((item) => hostOfSite(item.site)).filter(Boolean))];
+  const released = hosts.filter((host) => { const hold = siteHold(store, workspaceId, host, now); return releaseSite(store, workspaceId, host) && Boolean(hold); });
+  if (released.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `site.resumed:${record.id}:${now.getTime()}`,
+    type: "site.resumed", entityId: record.id, payload: { hosts: released } });
+  return released;
+}
+const hostOfSite = (url: string) => { try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
+
 export function startWorkflowRun(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, runFree: RunFree, profilesRoot: string,
   now = new Date(), fallbackBrowser = loginBrowser(), openSite?: OpenSite): DispatchResult {
   if (loginOpen(workspaceId, record.id)) return { state: "blocked", code: "LOGIN_WINDOW_OPEN", message: "登录窗口还开着；登录后关掉它再运行。" };
@@ -502,8 +515,8 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
   fallbackBrowser: string | undefined, access: WorkflowAccess, collector: FavouritesCollector, plan: FavouritesJob = {}): DispatchResult {
   const key = `${workspaceId}:${record.id}`;
   if (collecting.has(key)) return { state: "blocked", code: "COLLECTING", message: "上一次读取收藏还没结束。" };
-  const paused = collectPausedUntil(store, workspaceId, now);
-  if (paused) return { state: "blocked", code: "SITE_PAUSED", message: `小红书遇到过安全验证，${paused.slice(0, 16).replace("T", " ")} 前不再读取。` };
+  const held = collectHold(store, workspaceId, now);
+  if (held) return { state: "blocked", code: "SITE_PAUSED", message: `小红书读取已停下${held.where ? `（${holdWords(held)}）` : ""}，等本人点「立即运行」再继续。` };
   const browser = readerBrowser(record, access.service, fallbackBrowser);
   // A login to the site open (the server's popup browser holds the profile), or a run reading it: the collection waits, like for the assistant.
   const profileDir = accessProfileDir(profilesRoot, access);
@@ -527,17 +540,20 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
     }
     releaseProfile(profileDir, "collect");
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.ran:${taskId}`, type: "collect.ran", entityId: record.id,
-      payload: { taskId, state: result.state, mode: result.mode, listed: result.listed, listEnded: result.listEnded, read: result.read.length, gone: result.gone.length, pending: result.pending } });
+      payload: { taskId, state: result.state, mode: result.mode, listed: result.listed, listEnded: result.listEnded, read: result.read.length, gone: result.gone.length, pending: result.pending,
+        ...(result.message ? { message: result.message } : {}), ...(result.trigger ? { trigger: result.trigger } : {}) } });
+    // A run that broke is not started again by itself: the person is told and presses 「立即运行」 when they want it (2026-10-23).
+    if (result.state === "failed") holdAfterFailure(store, workspaceId, result.message ?? "浏览器出错", new Date());
     log({ type: "collect.ran", workspaceId, id: record.id, state: result.state, mode: result.mode, read: result.read.length, pending: result.pending });
     // Pictures described and videos heard before the assistant sees the notes; a note left undescribed is tried again next run.
     const ledger = readCollectLedger(store, workspaceId, record.id);
     if (ledger.unorganised.length) await describeNotes(folder, collector.media(workspaceId), ledger.unorganised).catch(() => undefined);
     const summary = record.manifest.summary;
-    if (result.state === "check") sayToPerson(store, workspaceId, `「${summary}」读取时遇到了小红书的安全验证或限流，已立刻停下并关闭浏览器，${COLLECT_BREAKER_DAYS} 天内不再读取。本次已读 ${result.read.length} 条，照常整理；请本人在手机上正常使用一段时间。`,
-      "workflow_done", `check:${record.id}:${day}`, [{ label: "去看结果", href: "/approvals#assistant" }]);
+    if (result.state === "check") sayToPerson(store, workspaceId, `「${summary}」读取时小红书返回了安全验证或限流${result.trigger ? `（${result.trigger}）` : ""}，已立刻停下并关闭浏览器，不会自己重试。本人确认没问题后，在设置里点「立即运行」继续。${result.read.length ? `本次已读 ${result.read.length} 条，照常整理。` : ""}`,
+      "workflow_done", `check:${record.id}:${taskId}`, [{ label: "去看设置", href: "/settings#skills" }]);
     if (result.state === "login" || result.state === "no_profile") sayToPerson(store, workspaceId, `「${summary}」需要登录小红书${result.read.length ? `（本次已读 ${result.read.length} 条，照常整理）` : ""}。请在设置里点「登录」，登录后点「登录完成」，再点「立即运行」。`,
       "workflow_login", `login:${record.id}:${day}`, [{ label: "去登录", href: loginHref(record.id) }]);
-    if (result.state === "failed") sayToPerson(store, workspaceId, `「${summary}」这次没读完：${result.message ?? "浏览器出错"}${result.read.length ? `；已读 ${result.read.length} 条，照常整理` : ""}。`,
+    if (result.state === "failed") sayToPerson(store, workspaceId, `「${summary}」这次没读完：${result.message ?? "浏览器出错"}${result.read.length ? `；已读 ${result.read.length} 条，照常整理` : ""}。不会自己重试，点「立即运行」再继续。`,
       "workflow_done", `failed:${record.id}:${taskId}`, [{ label: "去看设置", href: "/settings#skills" }]);
     if (plan.after) plan.after(result);
     else organiseFavourites(store, workspaceId, record, runFree, folder, result, new Date());

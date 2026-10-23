@@ -7,7 +7,7 @@ import {
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { readerLaunch, restoreSessionCookies } from "./browser-launch";
-import { breakerKey, judgePage } from "./site-reader";
+import { holdSite, judgePage, siteHold, type SiteHold } from "./site-reader";
 
 /**
  * Reading the person's Xiaohongshu favourites in full (docs/skills-library.md 「收藏全量读取」, the owner's decision of 2026-10-22: 「收藏全部
@@ -22,13 +22,13 @@ import { breakerKey, judgePage } from "./site-reader";
  *   seconds apart (`CATCH_UP_GAP_MS`), with no cap. Later runs (incremental): the list until it reaches notes already read, then at most
  *   `INCREMENTAL_BATCH` new notes at a person's pace (`INCREMENTAL_GAP_MS`). A catch-up that stopped part way is continued as catch-up.
  * - Each note is read once (`collect.notes.<workflow>`), marked as soon as its files are written, so a stop keeps everything read.
- * - A security check or a rate-limit answer stops the run at once, closes the browser and keeps the site closed for
- *   `COLLECT_BREAKER_DAYS` (the same key `site_read` obeys); a login page stops the run and asks the person to log in.
+ * - A security check or a rate-limit answer stops the run at once, closes the browser and keeps the site closed until the person starts
+ *   the workflow again (`siteHold`, the same key `site_read` obeys), with what the site answered kept; a login page stops the run and
+ *   asks the person to log in.
  */
 export const CATCH_UP_GAP_MS: readonly [number, number] = [6_000, 10_000];
 export const INCREMENTAL_GAP_MS: readonly [number, number] = [30_000, 120_000];
 export const INCREMENTAL_BATCH = 15;
-export const COLLECT_BREAKER_DAYS = 7;
 /** Each picture or video file at most this large; a larger one is recorded as not saved. */
 export const MEDIA_MAX_BYTES = 500 * 1024 * 1024;
 /** A bound on the list scroll only: ~30 notes load per screen or two, so this covers well past ten thousand favourites. */
@@ -89,10 +89,13 @@ export function markOrganised(store: CrosslineStore, workspaceId: string, workfl
   writeCollectLedger(store, workspaceId, workflowId, { ...ledger, unorganised: ledger.unorganised.filter((id) => !ids.includes(id)) });
 }
 
-/** The site's pause after a check, as an ISO time, when it is still in force. */
-export function collectPausedUntil(store: CrosslineStore, workspaceId: string, now = new Date()): string | undefined {
-  const until = store.getSetting(workspaceId, breakerKey(XHS_HOST));
-  return until && Date.parse(until) > now.getTime() ? until : undefined;
+/** The site's stop after a check or a broken run, while the person has not started it again. */
+export function collectHold(store: CrosslineStore, workspaceId: string, now = new Date()): SiteHold | undefined {
+  return siteHold(store, workspaceId, XHS_HOST, now);
+}
+/** A run that broke on our side (the page crashed, the browser would not open) holds the site too, until the person starts it again. */
+export function holdAfterFailure(store: CrosslineStore, workspaceId: string, why: string, now = new Date()): void {
+  holdSite(store, workspaceId, XHS_HOST, { at: now.toISOString(), where: "读取出错", why: why.slice(0, 160) });
 }
 
 /** The Xiaohongshu login a workflow declared, when the workflow is about the person's favourites. */
@@ -129,7 +132,9 @@ export type CollectResult = {
   read: string[]; gone: string[];
   /** Notes listed and still unread after this run (the next run continues). */
   pending: number;
-  message?: string; until?: string;
+  message?: string;
+  /** What made a check: where it stopped and what the site answered (status, code, message, address). */
+  trigger?: string;
 };
 
 export type CollectOptions = {
@@ -179,15 +184,19 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
   const result: CollectResult = { state: "done", mode, listed: 0, listEnded: false, read: [], gone: [], pending: 0 };
   const save = () => writeCollectLedger(store, workspaceId, workflowId, ledger);
   const between = (range: readonly [number, number]) => range[0] + random() * (range[1] - range[0]);
-  const paused = collectPausedUntil(store, workspaceId, now());
-  if (paused) return { ...result, state: "paused", until: paused, message: `小红书在 ${paused.slice(0, 16).replace("T", " ")} 前暂停读取（之前遇到了安全验证）。` };
+  const held = collectHold(store, workspaceId, now());
+  if (held) return { ...result, state: "paused", message: "小红书读取已停下，等本人点「立即运行」再继续。" };
 
+  /** What the site answered that made the check (kept with the hold and the run's event). */
+  let trigger = "";
   const stopAtCheck = (where: string) => {
-    const until = new Date(now().getTime() + COLLECT_BREAKER_DAYS * 86_400_000).toISOString();
-    store.setSetting(workspaceId, breakerKey(XHS_HOST), until);
-    log({ type: "collect.check", workflowId, where });
-    return { ...result, state: "check" as const, until, message: `读取${where}时遇到了小红书的安全验证或限流，已停下，${COLLECT_BREAKER_DAYS} 天内不再读取。` };
+    holdSite(store, workspaceId, XHS_HOST, { at: now().toISOString(), where, ...(trigger ? { why: trigger } : {}) });
+    log({ type: "collect.check", workflowId, where, trigger });
+    return { ...result, state: "check" as const, ...(trigger ? { trigger: `${where}：${trigger}` } : { trigger: where }),
+      message: `读取${where}时遇到了小红书的安全验证或限流${trigger ? `（${trigger}）` : ""}，已停下。` };
   };
+  /** A page-level check: the address and status are what is known. */
+  const pageCheck = (url: string, status: number) => { trigger ||= `页面 HTTP ${status} ${url.slice(0, 120)}`; };
   /** The page's own answers since the last look: a check or a login out of them, the list pages, the note details, who is signed in. */
   const listed = new Map<string, ListedNote>();
   let hasMore: boolean | undefined;
@@ -197,6 +206,10 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     for (const response of await driver.responses()) {
       if (!xhsCaptured(response.url)) continue;
       const verdict = judgeXhsApi(response.status, response.json);
+      if (verdict === "check") {
+        const body = (response.json ?? {}) as { code?: unknown; msg?: unknown; message?: unknown };
+        trigger = `HTTP ${response.status} code ${String(body.code ?? "")} ${String(body.msg ?? body.message ?? "").slice(0, 60)} ${response.url.replace(/\?.*$/, "").slice(0, 100)}`.replace(/\s+/g, " ").trim();
+      }
       if (verdict !== "ok") return verdict;
       if (XHS_COLLECT_PATH.test(response.url)) {
         const page = parseCollectPage(response.json);
@@ -222,7 +235,7 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       // The home feed's words are other people's notes: only the address, the status, the title and the page's own answers are judged.
       const answered = await take();
       const verdict = answered !== "ok" ? answered : judgePage(shown.url, shown.title, "", status);
-      if (verdict === "check") return stopAtCheck("首页");
+      if (verdict === "check") { pageCheck(shown.url, status); return stopAtCheck("首页"); }
       if (verdict === "login") return { ...result, state: "login", message: "需要登录小红书。" };
       if (!ledger.selfId) {
         const self = await driver.selfProfile();
@@ -240,7 +253,7 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     let shown = await driver.snapshot();
     const first = await take();
     const pageVerdict = judgePage(shown.url, shown.title, "", status);
-    if (first === "check" || pageVerdict === "check") return stopAtCheck("收藏列表");
+    if (first === "check" || pageVerdict === "check") { pageCheck(shown.url, status); return stopAtCheck("收藏列表"); }
     if (first === "login" || pageVerdict === "login") return { ...result, state: "login", message: "小红书要求登录。" };
     const fromDom = (links: Array<{ text: string; href: string }>) => { for (const note of notesFromLinks(links)) if (!listed.has(note.id)) listed.set(note.id, note); };
     fromDom(shown.links);
@@ -252,7 +265,7 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       await driver.pause(2_500 + random() * 1_500);
       const verdict = await take();
       shown = await driver.snapshot();
-      if (verdict === "check" || judgePage(shown.url, shown.title, "", 200) === "check") return stopAtCheck("收藏列表");
+      if (verdict === "check" || judgePage(shown.url, shown.title, "", 200) === "check") { pageCheck(shown.url, 200); return stopAtCheck(`收藏列表第 ${screen + 1} 屏`); }
       if (verdict === "login" || judgePage(shown.url, shown.title, "", 200) === "login") return { ...result, state: "login", message: "小红书要求登录。" };
       fromDom(shown.links);
       quiet = listed.size > before ? 0 : quiet + 1;
@@ -308,7 +321,7 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       // since a note about verification codes would otherwise close the site for a week.
       const urlVerdict = judgePage(page.url, "", "", noteStatus);
       const textVerdict = detail ? "ok" : judgePage(page.url, page.title, page.text, noteStatus);
-      if (urlVerdict === "check" || textVerdict === "check") return { ...stopAtCheck("笔记"), pending: unread.length - result.read.length - result.gone.length };
+      if (urlVerdict === "check" || textVerdict === "check") { pageCheck(page.url, noteStatus); return { ...stopAtCheck("笔记"), pending: unread.length - result.read.length - result.gone.length }; }
       if (urlVerdict === "login" || textVerdict === "login") return { ...result, state: "login", message: "小红书要求登录。", pending: unread.length - result.read.length - result.gone.length };
       if (!detail && NOTE_GONE_TEXT.test(page.text)) {
         ledger.read[note.id] = { at: now().toISOString(), state: "gone" };

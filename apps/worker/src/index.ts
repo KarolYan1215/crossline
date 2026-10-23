@@ -45,7 +45,7 @@ import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-clas
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, scoutDue } from "./public-skills";
 import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, loginBrowser, markWorkflowRun,
-  openWorkflowLogin, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
+  openWorkflowLogin, resumeByPerson, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { loginMode } from "./browser-launch";
 import { createRemoteBrowsers } from "./remote-browser";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
@@ -1596,6 +1596,7 @@ if (!capabilitySecret) {
       const record = readGrownSkills(analysisStore, workspaceId).find((item) => item.id === id && item.status === "active");
       if (!record) return { ok: false, code: "WORKFLOW_NOT_ACTIVE", message: "这个工作流还没启用。" };
       if (isPaused(analysisStore, workspaceId)) return { ok: false, code: "AGENT_PAUSED", message: "助手已暂停。" };
+      resumeByPerson(analysisStore, workspaceId, record);
       const started = startWorkflowRun(analysisStore, workspaceId, record, (input, after) => agentService.runFree(workspaceId, input, after), browserProfilesRoot(workspaceId));
       if (started.state === "started") markWorkflowRun(analysisStore, workspaceId, id, "started_by_person");
       return started.state === "started" ? { ok: true, taskId: started.taskId }

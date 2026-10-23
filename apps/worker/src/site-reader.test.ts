@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import type { GrownSkillRecord } from "@crossline/core";
-import { clickProblem, createSiteReader, itemLinks, judgePage, pageKey, readPage, SITE_BREAKER_HOURS, SITE_PAGES_PER_RUN, SITE_SCROLLS_MAX, type PageDriver, type TabCandidate } from "./site-reader";
+import { clickProblem, createSiteReader, itemLinks, judgePage, pageKey, readPage, releaseSite, siteHold, SITE_PAGES_PER_RUN, SITE_SCROLLS_MAX, type PageDriver, type TabCandidate } from "./site-reader";
 import { loopReason } from "./agent-task";
 
 let store: CrosslineStore;
@@ -41,20 +41,24 @@ test("each page once, only the declared site, and a budget per run", async () =>
   expect(opened).toHaveLength(SITE_PAGES_PER_RUN);
 });
 
-test("a security check closes the browser, stops the site for two days and tells the person; nothing more is opened", async () => {
+test("a security check closes the browser, holds the site until the person restarts it and tells the person; nothing more is opened", async () => {
   const now = new Date("2026-10-15T15:00:00Z");
   const first = reader((url) => url.includes("explore") ? { ...content(url), title: "安全验证", text: "请完成验证后继续访问" } : content(url), now);
   expect((await first.read("https://www.xiaohongshu.com/user/profile/me")).ok).toBe(true);
   expect(await first.read("https://www.xiaohongshu.com/explore/1")).toMatchObject({ ok: false, message: expect.stringContaining("需要本人完成小红书安全验证") });
   expect(first.closed()).toBe(1);
-  expect(first.told[0]).toContain(`${SITE_BREAKER_HOURS} 小时内不再读取`);
+  expect(first.told[0]).toContain("不会自己再读");
   expect(await first.read("https://www.xiaohongshu.com/explore/2")).toMatchObject({ ok: false });
   expect(first.site.stopped()).toBe("需要本人完成小红书安全验证");
   expect(first.site.refusals()).toBe(2);
-  // The next run, a day later, is refused before any browser opens.
-  const next = reader(content, new Date(now.getTime() + 24 * 3_600_000));
-  expect(await next.read("https://www.xiaohongshu.com/user/profile/me")).toMatchObject({ ok: false, message: expect.stringContaining("已暂停读取") });
+  // The next run, even a month later, is refused before any browser opens: time does not lift the hold.
+  const next = reader(content, new Date(now.getTime() + 30 * 86_400_000));
+  expect(await next.read("https://www.xiaohongshu.com/user/profile/me")).toMatchObject({ ok: false, message: expect.stringContaining("已停止读取") });
   expect(next.opened).toEqual([]);
+  expect(siteHold(store, ws, "xiaohongshu.com")).toMatchObject({ where: "页面", why: expect.stringContaining("explore/1") });
+  // The person starts it again: the hold is gone.
+  expect(releaseSite(store, ws, "xiaohongshu.com")).toBe(true);
+  expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
 });
 
 test("the page is judged by what it shows: a check, a login, or content", () => {

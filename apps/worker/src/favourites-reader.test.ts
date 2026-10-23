@@ -5,11 +5,11 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { parseCollectPage, parseFeedResponse, parseInitialStateNote, type GrownSkillRecord } from "@crossline/core";
 import {
-  CATCH_UP_GAP_MS, COLLECT_BREAKER_DAYS, INCREMENTAL_BATCH, INCREMENTAL_GAP_MS, MEDIA_MAX_BYTES, collectFavourites, favouritesAccess, mediaExtension, readCollectLedger,
+  CATCH_UP_GAP_MS, INCREMENTAL_BATCH, INCREMENTAL_GAP_MS, MEDIA_MAX_BYTES, collectFavourites, favouritesAccess, mediaExtension, readCollectLedger,
   readNoteFile, type CapturedResponse, type CollectDriver, type MediaFetch
 } from "./favourites-reader";
 import { describeNotes, type PictureToDescribe } from "./note-media";
-import { breakerKey } from "./site-reader";
+import { breakerKey, releaseSite, siteHold } from "./site-reader";
 
 const fixture = (name: string) => JSON.parse(readFileSync(path.join(import.meta.dirname, "testing", "fixtures", name), "utf8")) as unknown;
 
@@ -169,19 +169,22 @@ test("later runs read only new notes, a few at a time at a person's pace", async
   expect(noteGaps.every((ms) => ms <= INCREMENTAL_GAP_MS[1])).toBe(true);
 });
 
-test("a security check stops the run, keeps what was read and closes the site for a week; a run during the pause does nothing", async () => {
+test("a security check stops the run, keeps what was read and what the site answered, and holds the site until the person restarts it", async () => {
   const site = fakeSite({ total: 10, check: new Set([idOf(7)]) });
   const result = await run(site.driver).result;
   expect(result).toMatchObject({ state: "check", read: [idOf(10), idOf(9), idOf(8)] });
-  const until = store.getSetting(ws, breakerKey("xiaohongshu.com"))!;
-  expect(Date.parse(until) - Date.parse("2026-10-22T03:00:00Z")).toBe(COLLECT_BREAKER_DAYS * 86_400_000);
+  expect(result.trigger).toContain("笔记");
+  expect(siteHold(store, ws, "xiaohongshu.com")).toMatchObject({ where: "笔记" });
   expect(readCollectLedger(store, ws, "flow-xhs").caughtUpAt).toBeUndefined();
 
   const paused = fakeSite({ total: 10 });
   expect(await run(paused.driver).result).toMatchObject({ state: "paused" });
   expect(paused.log).toHaveLength(0);
-  // After the pause the catch-up resumes from the note it stopped on.
-  const resumed = await run(fakeSite({ total: 10 }).driver, { now: () => new Date(Date.parse(until) + 1000) }).result;
+  // Time does not lift it.
+  expect(await run(fakeSite({ total: 10 }).driver, { now: () => new Date("2026-12-01T00:00:00Z") }).result).toMatchObject({ state: "paused" });
+  // Once the person starts it again, the catch-up resumes from the note it stopped on.
+  releaseSite(store, ws, "xiaohongshu.com");
+  const resumed = await run(fakeSite({ total: 10 }).driver).result;
   expect(resumed).toMatchObject({ state: "done", mode: "catch_up" });
   expect(resumed.read[0]).toBe(idOf(7));
   expect(resumed.read).toHaveLength(7);

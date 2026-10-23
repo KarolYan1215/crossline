@@ -8,9 +8,9 @@ import { validateWorkflowManifest } from "@crossline/core";
 import { librarySelection, type AgentOutcome, type AgentTaskInput } from "./agent-task";
 import type { OpenSite, SiteReader } from "./site-reader";
 import { cleanGrownSkills, collectionDone, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR,
-  startWorkflowRun, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
+  resumeByPerson, startWorkflowRun, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { createRemoteBrowsers } from "./remote-browser";
-import { readCollectLedger, type CollectDriver } from "./favourites-reader";
+import { holdAfterFailure, readCollectLedger, type CollectDriver } from "./favourites-reader";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
 import { closeInterruptedCollections, createTopicClassifier, favouritesTopicStep, installFavouritesTopicsWorkflow, readTopicPlan, writeTopicPlan } from "./favourites-topics";
@@ -596,15 +596,17 @@ test("favourites by topic: the list read for its titles, sorted into topics, the
     expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, new Date("2026-10-23T03:00:00Z"))).toMatchObject({ state: "started" });
     await collectionDone(ws, record.id);
     expect(opened).toEqual([id(1), id(2), id(3), id(4), id(5)]);
-    // A run that failed is not started again by the tick for three hours; 「立即运行」 still starts it.
-    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "failed-1", type: "collect.ran", entityId: record.id, payload: { state: "failed" } });
-    const soon = new Date(Date.now() + 3_600_000);
-    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon)).toMatchObject({ state: "blocked", code: "TOPICS_BACKOFF" });
-    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon, { manual: true })).not.toMatchObject({ code: "TOPICS_BACKOFF" });
+    // A run that broke holds the site: the tick starts nothing, however late, until the person presses 「立即运行」.
+    holdAfterFailure(store, ws, "Target crashed");
+    const soon = new Date(Date.now() + 30 * 86_400_000);
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon)).toMatchObject({ state: "blocked", code: "SITE_PAUSED" });
+    expect(resumeByPerson(store, ws, readGrownSkills(store, ws)[0]!)).toEqual(["xiaohongshu.com"]);
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon, { manual: true })).not.toMatchObject({ code: "SITE_PAUSED" });
+    await collectionDone(ws, record.id);
     // A collection a restart cut off is closed at the next start, without holding the next run.
     store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "started-x", type: "collect.started", entityId: record.id, payload: { taskId: "collect-x" } });
     expect(closeInterruptedCollections(store, ws)).toEqual(["collect-x"]);
     expect(closeInterruptedCollections(store, ws)).toEqual([]);
-    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon)).not.toMatchObject({ code: "TOPICS_BACKOFF" });
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon)).not.toMatchObject({ code: "SITE_PAUSED" });
   } finally { configureFavouritesCollector(undefined); }
 });

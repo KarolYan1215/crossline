@@ -33,7 +33,7 @@ live.close();
 const { CrosslineStore, readGrownSkills } = await import("../packages/db/src/index");
 const { workflowAccess } = await import("../packages/core/src/index");
 const { accessProfileDir, browserProfilesRoot, loginBrowser } = await import("../apps/worker/src/workflow-smith");
-const { collectFavourites, collectPausedUntil, favouritesAccess, openCollectBrowser, readNoteFile, COLLECT_BREAKER_DAYS } = await import("../apps/worker/src/favourites-reader");
+const { collectFavourites, collectHold, favouritesAccess, openCollectBrowser, readNoteFile } = await import("../apps/worker/src/favourites-reader");
 const { describeNotes, ffmpegAvailable, realVideoTools } = await import("../apps/worker/src/note-media");
 const { breakerKey } = await import("../apps/worker/src/site-reader");
 
@@ -45,8 +45,8 @@ if (!record || !access) {
   console.error(`这个 workspace 没有读小红书收藏的工作流。已有：${records.map((item) => `${item.id}（${item.manifest.summary}；${workflowAccess(item).access.map((a) => a.service).join("、") || "不读网站"}）`).join("；") || "无"}`);
   process.exit(1);
 }
-const paused = collectPausedUntil(store, workspaceId);
-if (paused) { console.error(`小红书在 ${paused} 前暂停读取（之前遇到过安全验证），这次不读。`); process.exit(1); }
+const held = collectHold(store, workspaceId);
+if (held) { console.error(`小红书读取已停下（${held.where} ${held.why ?? ""}），等本人在设置里点「立即运行」，这次不读。`); process.exit(1); }
 const profile = accessProfileDir(browserProfilesRoot(workspaceId), access);
 const browser = record.loginBrowsers?.[access.service] || loginBrowser() || "";
 console.log(JSON.stringify({ workflow: record.id, summary: record.manifest.summary, profile, browser, out, mode: catchUp ? "catch_up" : `first ${notes}` }, null, 2));
@@ -61,11 +61,11 @@ try {
 console.log(JSON.stringify({ result: { ...result, read: result.read.length, gone: result.gone.length } }, null, 2));
 
 if (result.state === "check") {
-  // The site's pause goes back to the live ledger, so the worker does not read for the same seven days.
+  // The site's hold goes back to the live ledger, so the worker does not read until the person starts it again.
   const liveStore = new CrosslineStore(path.join(dataDir, "crossline.db"));
-  liveStore.setSetting(workspaceId, breakerKey("xiaohongshu.com"), result.until!);
+  liveStore.setSetting(workspaceId, breakerKey("xiaohongshu.com"), store.getSetting(workspaceId, breakerKey("xiaohongshu.com"))!);
   liveStore.close();
-  console.log(`已写入实时账本：小红书 ${COLLECT_BREAKER_DAYS} 天内不再读取（至 ${result.until}）。`);
+  console.log(`已写入实时账本：小红书停读，等本人点「立即运行」（${result.trigger ?? ""}）。`);
 }
 
 // What each source gave, note by note.

@@ -12,17 +12,41 @@ import { HOLDER_WORDS, holdProfile, profileHolder, releaseProfile } from "./prof
  *
  * - the assistant never gets the browser profile (the guard refuses its path); it calls `site_read` and gets the page's text and links;
  * - only the sites the workflow declared, each page once, a few pages a run and a day, with a pause between loads;
- * - a security check, a captcha or an unusual-traffic page closes the browser and stops every read of that site for two days
- *   (`site.breaker.<host>`), and the person is told; a page that sends to the login is a stop too, without the pause.
+ * - a security check, a captcha or an unusual-traffic page closes the browser and stops every read of that site until the person
+ *   starts the workflow again (`site.breaker.<host>`, `siteHold`), and the person is told; a page that sends to the login is a stop
+ *   too, without the hold.
  *
  * There is no disguise here and none is to be added: the window is visible, the pace is a person's, and a check is a stop.
  */
 export const SITE_PAGES_PER_RUN = 6;
 export const SITE_PAGES_PER_DAY = 12;
-export const SITE_BREAKER_HOURS = 48;
 const PAUSE_MS: [number, number] = [6_000, 10_000];
 /** Shared with the favourites reader (`favourites-reader.ts`): a check met by either stops both for that host. */
 export const breakerKey = (host: string) => `site.breaker.${host}`;
+
+/**
+ * A site stopped after a check, or after a collection that broke: held until the person presses 「立即运行」, never lifted by time (the
+ * owner, 2026-10-23: 「取消等七天的要求，只向用户抛出警报，等用户要求重启时再重启」). Kept as `{at, where, why}`: where it stopped and what the
+ * site answered, so a stop can be told apart from our own fault. A value from before is the old pause's end time, held while ahead.
+ */
+export type SiteHold = { at: string; where: string; why?: string };
+export function siteHold(store: CrosslineStore, workspaceId: string, host: string, now = new Date()): SiteHold | undefined {
+  const raw = store.getSetting(workspaceId, breakerKey(host));
+  if (!raw) return undefined;
+  try { const hold = JSON.parse(raw) as SiteHold; if (hold && typeof hold.at === "string") return hold; } catch { /* the old form: an end time */ }
+  return Date.parse(raw) > now.getTime() ? { at: raw, where: "" } : undefined;
+}
+export function holdSite(store: CrosslineStore, workspaceId: string, host: string, hold: SiteHold): void {
+  store.setSetting(workspaceId, breakerKey(host), JSON.stringify(hold));
+}
+/** The person started the workflow again: the hold is lifted (true when there was one). */
+export function releaseSite(store: CrosslineStore, workspaceId: string, host: string): boolean {
+  const held = Boolean(store.getSetting(workspaceId, breakerKey(host)));
+  if (held) store.deleteSetting(workspaceId, breakerKey(host));
+  return held;
+}
+/** How a hold reads to the person. */
+export const holdWords = (hold: SiteHold) => `${hold.where ? `${hold.where}` : ""}${hold.why ? `（${hold.why}）` : ""}`;
 const dayKey = (host: string, day: string) => `site.reads.${host}.${day}`;
 
 const CHECK_TEXT = /安全验证|请完成验证|验证码|滑块|拖动.{0,6}(滑块|完成)|访问异常|异常访问|请求过于频繁|操作频繁|captcha|verify you are (a )?human|unusual traffic|are you a robot|access denied/i;
@@ -265,8 +289,8 @@ export function createSiteReader(store: CrosslineStore, workspaceId: string, rec
     const clickRefused = label ? clickProblem(label) : undefined;
     if (clickRefused) return refuse(`${clickRefused}。`);
     const host = hostOf(access.site);
-    const until = store.getSetting(workspaceId, breakerKey(host));
-    if (stoppedBy || (until && Date.parse(until) > now().getTime())) return refuse(`${access.service} 已暂停读取${until ? `至 ${until.slice(0, 16).replace("T", " ")}` : ""}：之前遇到了安全验证。用已读到的内容完成本期，不要再读。`);
+    const held = siteHold(store, workspaceId, host, now());
+    if (stoppedBy || held) return refuse(`${access.service} 已停止读取：之前遇到了安全验证，等本人重新运行。用已读到的内容完成本期，不要再读。`);
     // The same page with another tab clicked is another page.
     const key = pageKey(String(url)) + (label ? `#${label}` : "");
     if (seen.has(key)) return refuse("这个页面本期已经读过；每个页面只读一次，用上次读到的内容。");
@@ -300,10 +324,9 @@ export function createSiteReader(store: CrosslineStore, workspaceId: string, rec
     log(host, shown.url, verdict);
     if (verdict === "check") {
       stoppedBy = `需要本人完成${access.service}安全验证`;
-      const resume = new Date(now().getTime() + SITE_BREAKER_HOURS * 3_600_000).toISOString();
-      store.setSetting(workspaceId, breakerKey(host), resume);
+      holdSite(store, workspaceId, host, { at: now().toISOString(), where: "页面", why: `HTTP ${shown.status} ${shown.url.slice(0, 120)}` });
       await closeSite(access.service);
-      deps.notify?.(`读取${access.service}时遇到了安全验证，已立刻停下并关闭浏览器，${SITE_BREAKER_HOURS} 小时内不再读取。请本人在手机或常用浏览器里正常使用；已读到的内容照常整理。`);
+      deps.notify?.(`读取${access.service}时遇到了安全验证，已立刻停下并关闭浏览器，不会自己再读。本人确认没问题后，在设置里点「立即运行」继续；已读到的内容照常整理。`);
       return refuse(`${access.service} 出现了安全验证，已停止读取。用已读到的内容完成本期，needsHuman 第一项写「${stoppedBy}」。`);
     }
     if (verdict === "login") {
