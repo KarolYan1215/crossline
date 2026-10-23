@@ -12,8 +12,8 @@
   "patches": [
     {
       "path": "patches/codex-windows-migrations.patch",
-      "sha256": "625f469d4ff1fc71b0a564c3ca339cb2f89ada19364d1684c3e1733a426cf588",
-      "purpose": "Safely repair verified CRLF migration checksums used by existing Windows Codex homes. Regenerated against rust-v0.163.0, which still lacks an equivalent repair; the change itself is the same."
+      "sha256": "76d9188367fb6772c45f1dad4e953c43aa95b13ebe162a2a5f6c2d961a2abf63",
+      "purpose": "Safely repair verified CRLF migration checksums used by existing Windows Codex homes. Regenerated against rust-v0.163.0, which still lacks an equivalent repair. Since 2026-10-22 it also keeps the fork out of the official Codex app's ~/.codex: with CODEX_HOME unset the Windows default home is Crossline's own (utils/home-dir crossline_default_home), and the repair skips databases directly in %USERPROFILE%/.codex (state is_official_codex_home_db)."
     }
   ],
   "build": {

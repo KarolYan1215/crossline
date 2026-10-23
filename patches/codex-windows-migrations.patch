@@ -1,5 +1,5 @@
 diff --git a/codex-rs/state/src/migrations.rs b/codex-rs/state/src/migrations.rs
-index efbb76c..7ed8889 100644
+index efbb76c..73cb9d3 100644
 --- a/codex-rs/state/src/migrations.rs
 +++ b/codex-rs/state/src/migrations.rs
 @@ -1,5 +1,9 @@
@@ -12,18 +12,42 @@ index efbb76c..7ed8889 100644
  use sqlx::migrate::Migrator;
  use sqlx_sqlite::SqlitePool;
  
-@@ -28,6 +32,80 @@ fn runtime_migrator(base: &'static Migrator) -> Migrator {
+@@ -28,6 +32,126 @@ fn runtime_migrator(base: &'static Migrator) -> Migrator {
      }
  }
  
 +/// Windows release builds historically embedded CRLF migration text, while a source checkout may
 +/// contain LF. Repair only checksums that exactly match the same embedded SQL with CRLF line endings;
 +/// every other mismatch remains untouched for SQLx to reject.
++///
++/// Never repairs a database in the official Codex app's `%USERPROFILE%\.codex`: those CRLF
++/// checksums are the official app's own, and rewriting them stops it from starting
++/// ("failed to initialize sqlite state runtime"). There SQLx rejects the mismatch instead.
 +#[cfg(windows)]
 +pub(crate) async fn repair_windows_migration_checksums(
 +    pool: &SqlitePool,
 +    migrator: &Migrator,
++    db_path: &std::path::Path,
 +) -> anyhow::Result<()> {
++    let user_profile = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
++    repair_windows_migration_checksums_for_profile(pool, migrator, db_path, user_profile.as_deref())
++        .await
++}
++
++#[cfg(windows)]
++pub(crate) async fn repair_windows_migration_checksums_for_profile(
++    pool: &SqlitePool,
++    migrator: &Migrator,
++    db_path: &std::path::Path,
++    user_profile: Option<&std::path::Path>,
++) -> anyhow::Result<()> {
++    if is_official_codex_home_db(db_path, user_profile) {
++        tracing::warn!(
++            database = %db_path.display(),
++            "skipping Windows migration checksum repair in the official Codex home"
++        );
++        return Ok(());
++    }
 +    let table_exists = sqlx::query_scalar::<_, i64>(
 +        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
 +    )
@@ -82,10 +106,32 @@ index efbb76c..7ed8889 100644
 +    Ok(())
 +}
 +
++/// True when `db_path` sits directly in `<user_profile>\.codex`, the official Codex app's home.
++#[cfg(windows)]
++pub(crate) fn is_official_codex_home_db(
++    db_path: &std::path::Path,
++    user_profile: Option<&std::path::Path>,
++) -> bool {
++    let (Some(db_dir), Some(user_profile)) = (db_path.parent(), user_profile) else {
++        return false;
++    };
++    let normalize = |path: &std::path::Path| {
++        std::fs::canonicalize(path)
++            .unwrap_or_else(|_| path.to_path_buf())
++            .to_string_lossy()
++            .trim_start_matches(r"\\?\")
++            .trim_end_matches(['\\', '/'])
++            .replace('/', "\\")
++            .to_lowercase()
++    };
++    normalize(db_dir) == normalize(&user_profile.join(".codex"))
++}
++
 +#[cfg(not(windows))]
 +pub(crate) async fn repair_windows_migration_checksums(
 +    _pool: &SqlitePool,
 +    _migrator: &Migrator,
++    _db_path: &std::path::Path,
 +) -> anyhow::Result<()> {
 +    Ok(())
 +}
@@ -94,7 +140,7 @@ index efbb76c..7ed8889 100644
      runtime_migrator(&STATE_MIGRATOR)
  }
 diff --git a/codex-rs/state/src/migrations_tests.rs b/codex-rs/state/src/migrations_tests.rs
-index d8e14b7..3be0275 100644
+index d8e14b7..a486399 100644
 --- a/codex-rs/state/src/migrations_tests.rs
 +++ b/codex-rs/state/src/migrations_tests.rs
 @@ -2,6 +2,8 @@ use codex_utils_absolute_path::test_support::PathExt;
@@ -106,7 +152,7 @@ index d8e14b7..3be0275 100644
  use sqlx::migrate::Migration;
  use sqlx::migrate::Migrator;
  use std::borrow::Cow;
-@@ -14,6 +16,57 @@ use crate::PINNED_THREAD_SECTION_NAME;
+@@ -14,6 +16,155 @@ use crate::PINNED_THREAD_SECTION_NAME;
  
  const CUSTOM_THREAD_SECTION_ID: &str = "01984de2-8f74-7c91-a3b2-5c5e937cf317";
  
@@ -152,7 +198,7 @@ index d8e14b7..3be0275 100644
 +        .await
 +        .expect("legacy migration should run");
 +    let runtime = super::runtime_state_migrator();
-+    super::repair_windows_migration_checksums(&pool, &runtime)
++    super::repair_windows_migration_checksums(&pool, &runtime, sqlite.state_db_path().as_path())
 +        .await
 +        .expect("legacy checksum should be repaired");
 +    runtime
@@ -161,11 +207,109 @@ index d8e14b7..3be0275 100644
 +        .expect("runtime should accept legacy Windows checksums");
 +}
 +
++/// The official Codex app's `%USERPROFILE%\.codex` keeps its CRLF checksums: rewriting them
++/// stops the official app from starting (2026-10-22).
++#[cfg(windows)]
++#[tokio::test]
++async fn windows_checksum_repair_skips_official_codex_home() {
++    let profile = crate::runtime::test_support::unique_temp_dir();
++    let official_home = profile.join(".codex");
++    tokio::fs::create_dir_all(&official_home)
++        .await
++        .expect("official home should be created");
++    let _cleanup = scopeguard::guard(profile.clone(), |profile| {
++        let _ = std::fs::remove_dir_all(profile);
++    });
++    let sqlite = crate::SqliteConfig::new_for_testing(official_home.as_path().abs());
++    let db_path = sqlite.state_db_path();
++    let pool = sqlite
++        .open_read_write_pool(&db_path)
++        .await
++        .expect("sqlite database should open");
++    let first = STATE_MIGRATOR.migrations.first().expect("state migration");
++    let crlf = Migration::new(
++        first.version,
++        first.description.clone(),
++        first.migration_type,
++        sqlx::AssertSqlSafe(
++            first
++                .sql
++                .as_str()
++                .replace("\r\n", "\n")
++                .replace('\n', "\r\n"),
++        )
++        .into_sql_str(),
++        first.no_tx,
++    );
++    let official_checksum = crlf.checksum.to_vec();
++    let legacy = Migrator {
++        migrations: Cow::Owned(vec![crlf]),
++        ignore_missing: false,
++        locking: STATE_MIGRATOR.locking,
++        table_name: STATE_MIGRATOR.table_name.clone(),
++        create_schemas: STATE_MIGRATOR.create_schemas.clone(),
++        no_tx: STATE_MIGRATOR.no_tx,
++    };
++    legacy
++        .run(&pool)
++        .await
++        .expect("official migration should run");
++
++    let runtime = super::runtime_state_migrator();
++    assert!(super::is_official_codex_home_db(
++        db_path.as_path(),
++        Some(profile.as_path())
++    ));
++    super::repair_windows_migration_checksums_for_profile(
++        &pool,
++        &runtime,
++        db_path.as_path(),
++        Some(profile.as_path()),
++    )
++    .await
++    .expect("repair should skip, not fail");
++
++    let stored: Vec<u8> =
++        sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = ?")
++            .bind(first.version)
++            .fetch_one(&pool)
++            .await
++            .expect("checksum row");
++    assert_eq!(stored, official_checksum);
++}
++
++#[cfg(windows)]
++#[test]
++fn official_codex_home_detection_is_exact() {
++    use std::path::Path;
++    let profile = Path::new(r"C:\Users\someone");
++    assert!(super::is_official_codex_home_db(
++        Path::new(r"C:\Users\someone\.codex\state_5.sqlite"),
++        Some(profile)
++    ));
++    assert!(super::is_official_codex_home_db(
++        Path::new(r"c:\users\SOMEONE\.Codex\logs_2.sqlite"),
++        Some(profile)
++    ));
++    assert!(!super::is_official_codex_home_db(
++        Path::new(r"C:\Users\someone\AppData\Local\Crossline\codex-home\state_5.sqlite"),
++        Some(profile)
++    ));
++    assert!(!super::is_official_codex_home_db(
++        Path::new(r"C:\Users\someone\.codex\sqlite\state_5.sqlite"),
++        Some(profile)
++    ));
++    assert!(!super::is_official_codex_home_db(
++        Path::new(r"C:\Users\someone\.codex\state_5.sqlite"),
++        None
++    ));
++}
++
  fn migrator_through(version: i64) -> Migrator {
      Migrator {
          migrations: Cow::Owned(
 diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
-index e35a074..2a8d7f4 100644
+index e35a074..ec5bf48 100644
 --- a/codex-rs/state/src/sqlite.rs
 +++ b/codex-rs/state/src/sqlite.rs
 @@ -8,6 +8,7 @@
@@ -180,7 +324,149 @@ index e35a074..2a8d7f4 100644
          })?;
          let started = Instant::now();
          let migrate_result = async {
-+            repair_windows_migration_checksums(&pool, migrator).await?;
++            repair_windows_migration_checksums(&pool, migrator, path.as_path()).await?;
              if matches!(spec.kind, DbKind::State) {
                  repair_legacy_recency_migration_version(&pool, migrator).await?;
              }
+diff --git a/codex-rs/utils/home-dir/src/lib.rs b/codex-rs/utils/home-dir/src/lib.rs
+index caa4356..b92e50a 100644
+--- a/codex-rs/utils/home-dir/src/lib.rs
++++ b/codex-rs/utils/home-dir/src/lib.rs
+@@ -1,10 +1,13 @@
+ use codex_utils_absolute_path::AbsolutePathBuf;
++#[cfg(not(windows))]
+ use dirs::home_dir;
+ use std::path::PathBuf;
+ 
+ /// Returns the path to the Codex configuration directory, which can be
+ /// specified by the `CODEX_HOME` environment variable. If not set, defaults to
+-/// `~/.codex`.
++/// `~/.codex` — except on Windows, where this Crossline fork defaults to
++/// Crossline's own home (see `crossline_default_home`), so a fork binary started
++/// without `CODEX_HOME` never opens the official Codex app's `~/.codex`.
+ ///
+ /// - If `CODEX_HOME` is set, the value must exist and be a directory. The
+ ///   value will be canonicalized and this function will Err otherwise.
+@@ -49,6 +52,13 @@ fn find_codex_home_from_env(codex_home_env: Option<&str>) -> std::io::Result<Abs
+                 AbsolutePathBuf::from_absolute_path(canonical)
+             }
+         }
++        #[cfg(windows)]
++        None => crossline_default_home(
++            std::env::var_os("CROSSLINE_STATE_DIR").as_deref(),
++            std::env::var_os("LOCALAPPDATA").as_deref(),
++            std::env::var_os("USERPROFILE").as_deref(),
++        ),
++        #[cfg(not(windows))]
+         None => {
+             let mut p = home_dir().ok_or_else(|| {
+                 std::io::Error::new(
+@@ -62,6 +72,49 @@ fn find_codex_home_from_env(codex_home_env: Option<&str>) -> std::io::Result<Abs
+     }
+ }
+ 
++/// Crossline fork: the home used when `CODEX_HOME` is unset. Same rule as
++/// `codexProcessEnvironment` in `packages/codex/src/index.ts`:
++/// `%CROSSLINE_STATE_DIR%\codex-home`, else `%LOCALAPPDATA%\Crossline\codex-home`,
++/// where an MSIX-redirected LOCALAPPDATA (`...\Packages\<pkg>\LocalCache\Local`)
++/// is replaced by `%USERPROFILE%\AppData\Local`.
++///
++/// The fork's Windows migration-checksum repair rewrites the official app's
++/// checksums, so the fork must never fall back to the official `~/.codex`.
++#[cfg(windows)]
++fn crossline_default_home(
++    state_dir: Option<&std::ffi::OsStr>,
++    local_app_data: Option<&std::ffi::OsStr>,
++    user_profile: Option<&std::ffi::OsStr>,
++) -> std::io::Result<AbsolutePathBuf> {
++    let non_empty = |value: Option<&std::ffi::OsStr>| {
++        value
++            .map(|value| value.to_string_lossy().trim().to_string())
++            .filter(|value| !value.is_empty())
++    };
++    if let Some(state_dir) = non_empty(state_dir) {
++        return AbsolutePathBuf::from_absolute_path(PathBuf::from(state_dir).join("codex-home"));
++    }
++    let local_app_data = non_empty(local_app_data).ok_or_else(|| {
++        std::io::Error::new(
++            std::io::ErrorKind::NotFound,
++            "CODEX_HOME is not set and LOCALAPPDATA is unavailable",
++        )
++    })?;
++    let lower = local_app_data.trim_end_matches(['\\', '/']).to_lowercase();
++    let segments: Vec<&str> = lower.split(['\\', '/']).collect();
++    let is_packaged_redirect = segments.len() >= 4
++        && segments[segments.len() - 4] == "packages"
++        && segments[segments.len() - 2] == "localcache"
++        && segments[segments.len() - 1] == "local";
++    let durable = match non_empty(user_profile) {
++        Some(profile) if is_packaged_redirect => {
++            PathBuf::from(profile).join("AppData").join("Local")
++        }
++        _ => PathBuf::from(local_app_data),
++    };
++    AbsolutePathBuf::from_absolute_path(durable.join("Crossline").join("codex-home"))
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::find_codex_home_from_env;
+@@ -122,6 +175,58 @@ mod tests {
+         assert_eq!(resolved, expected);
+     }
+ 
++    #[cfg(windows)]
++    #[test]
++    fn find_codex_home_without_env_never_uses_official_dot_codex() {
++        let resolved =
++            find_codex_home_from_env(/*codex_home_env*/ None).expect("default CODEX_HOME");
++        let mut official = home_dir().expect("home dir");
++        official.push(".codex");
++        assert_ne!(resolved.as_path(), official.as_path());
++        assert!(resolved.as_path().ends_with("codex-home"));
++    }
++
++    #[cfg(windows)]
++    #[test]
++    fn crossline_default_home_follows_codex_process_environment() {
++        use super::crossline_default_home;
++        use std::ffi::OsStr;
++        use std::path::PathBuf;
++        let home = |state: Option<&str>, local: Option<&str>, profile: Option<&str>| {
++            crossline_default_home(
++                state.map(OsStr::new),
++                local.map(OsStr::new),
++                profile.map(OsStr::new),
++            )
++        };
++        let path = |result: std::io::Result<AbsolutePathBuf>| {
++            result.expect("home").as_path().to_path_buf()
++        };
++        assert_eq!(
++            path(home(Some(r"D:\state"), Some(r"C:\Users\u\AppData\Local"), None)),
++            PathBuf::from(r"D:\state\codex-home")
++        );
++        assert_eq!(
++            path(home(None, Some(r"C:\Users\u\AppData\Local"), Some(r"C:\Users\u"))),
++            PathBuf::from(r"C:\Users\u\AppData\Local\Crossline\codex-home")
++        );
++        assert_eq!(
++            path(home(
++                Some("  "),
++                Some(r"C:\Users\u\AppData\Local\Packages\OpenAI.Codex_x\LocalCache\Local"),
++                Some(r"C:\Users\u"),
++            )),
++            PathBuf::from(r"C:\Users\u\AppData\Local\Crossline\codex-home")
++        );
++        assert_eq!(
++            home(None, None, Some(r"C:\Users\u"))
++                .expect_err("no LOCALAPPDATA")
++                .kind(),
++            ErrorKind::NotFound
++        );
++    }
++
++    #[cfg(not(windows))]
+     #[test]
+     fn find_codex_home_without_env_uses_default_home_dir() {
+         let resolved =
