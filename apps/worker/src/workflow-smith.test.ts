@@ -11,7 +11,7 @@ import { siteHold } from "./site-reader";
 import { cleanGrownSkills, collectionDone, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR,
   resumeByPerson, startWorkflowRun, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { createRemoteBrowsers } from "./remote-browser";
-import { holdAfterFailure, readCollectLedger, type CollectDriver } from "./favourites-reader";
+import { holdAfterFailure, readCollectLedger, writeCollectLedger, type CollectDriver } from "./favourites-reader";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
 import { closeInterruptedCollections, createTopicClassifier, favouritesTopicStep, installFavouritesTopicsWorkflow, readTopicPlan, writeTopicPlan } from "./favourites-topics";
@@ -556,6 +556,23 @@ test("with no room for the browser the collection opens nothing, holds nothing, 
     expect(store.listEvents(ws, { type: "collect.ran" }).at(-1)!.payload).toMatchObject({ state: "memory" });
     expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
     expect(said().at(-1)).toContain("服务器内存不够打开浏览器（1100 / 1350 MB）");
+  } finally { configureFavouritesCollector(undefined); }
+});
+
+test("favourites by topic: what was listed before a check is sorted while the site is held, and nothing opens the site", async () => {
+  const record = installFavouritesTopicsWorkflow(store, ws, "media", new Date("2026-10-22T11:00:00Z"));
+  consentToGrownSkill(store, ws, record.id);
+  writeCollectLedger(store, ws, record.id, { read: {}, unorganised: [], listed: { a1: { title: "爆款开头", xsecToken: "t", type: "normal" }, a2: { title: "手冲咖啡", xsecToken: "t", type: "normal" } } });
+  holdAfterFailure(store, ws, "HTTP 461");
+  let opened = 0, sorted = 0;
+  configureFavouritesCollector({ outputRoot: root, open: async () => { opened += 1; throw new Error("no"); }, media: () => ({}), sleep: async () => {}, classify: async () => { sorted += 1; return 0; } });
+  try {
+    const run = (input: AgentTaskInput & { taskId: string }) => ({ state: "started" as const, taskId: input.taskId });
+    const step = favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date("2026-10-23T12:00:00Z"));
+    expect(step).toMatchObject({ state: "blocked", code: "TOPICS_SORTING", message: expect.stringContaining("2 条") });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(sorted).toBe(1);
+    expect(opened).toBe(0);
   } finally { configureFavouritesCollector(undefined); }
 });
 

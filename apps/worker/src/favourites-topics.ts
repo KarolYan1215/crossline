@@ -9,7 +9,7 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { grownHomeLine, readGrownSkills, writeGrownSkills, type CrosslineStore } from "@crossline/db";
 import type { DispatchResult } from "./agent-service";
 import type { AgentOutcome, AgentTaskInput } from "./agent-task";
-import { collectFolder, favouritesAccess, markOrganised, readCollectLedger, type CollectResult } from "./favourites-reader";
+import { collectFolder, collectHold, favouritesAccess, markOrganised, readCollectLedger, type CollectResult } from "./favourites-reader";
 import { linePacks } from "./lines";
 import { ownerOf } from "./owner";
 import { currentFavouritesCollector, rememberRead, sayToPerson, startFavouritesRun } from "./workflow-smith";
@@ -105,6 +105,13 @@ export function favouritesTopicStep(store: CrosslineStore, workspaceId: string, 
         "workflow_done", `topics:${record.id}:${clock.day}`, [{ label: "去看设置", href: "/settings#skills" }], now);
     }
   }).catch(() => undefined); };
+  // 0. What is already listed is sorted even while the site is held or the list unfinished: sorting reads only the titles kept here and
+  //    never opens the site (the owner, 2026-10-23: the 1170 listed before a 461 were to be sorted before the list is read again).
+  const unsorted = Object.keys(ledger.listed ?? {}).filter((id) => !plan.classified.includes(id));
+  if (unsorted.length && (!ledger.listedAt || collectHold(store, workspaceId, now))) {
+    sortThen();
+    return { state: "blocked", code: "TOPICS_SORTING", message: `正在按标题把已列出的 ${unsorted.length} 条收藏分成话题（不访问小红书）。` };
+  }
   // 1. The list, for its titles: once at the start, and again each week by night for what was saved since.
   const stale = !ledger.listedAt || now.getTime() - Date.parse(ledger.listedAt) > LIST_REFRESH_DAYS * 86_400_000;
   if (!ledger.listedAt || (stale && clock.inWindow)) {

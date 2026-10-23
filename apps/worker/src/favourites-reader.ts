@@ -33,6 +33,13 @@ export const INCREMENTAL_BATCH = 15;
 export const MEDIA_MAX_BYTES = 500 * 1024 * 1024;
 /** A bound on the list scroll only: ~30 notes load per screen or two, so this covers well past ten thousand favourites. */
 export const LIST_SCROLLS_MAX = 600;
+/**
+ * The list at a person's reading pace (the owner, 2026-10-23, after 2.5–4 s a screen was answered HTTP 461 at screen 120, 1170 listed in
+ * 6.5 minutes): 6–10 s a screen, and a rest of one to two minutes every 30 screens. About 20–30 minutes for 1200 favourites.
+ */
+export const LIST_SCREEN_GAP_MS: readonly [number, number] = [6_000, 10_000];
+export const LIST_REST_EVERY = 30;
+export const LIST_REST_MS: readonly [number, number] = [60_000, 120_000];
 /** A list that brings nothing new for this many screens in a row has ended. */
 const LIST_QUIET_SCREENS = 3;
 const MEDIA_GAP_MS: readonly [number, number] = [400, 1_200];
@@ -281,13 +288,14 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       }
       const before = listed.size;
       await driver.wheel();
-      await driver.pause(2_500 + random() * 1_500);
+      await driver.pause(between(LIST_SCREEN_GAP_MS));
       const verdict = await take();
       shown = await driver.snapshot();
       if (verdict === "check" || judgePage(shown.url, shown.title, "", 200) === "check") { pageCheck(shown.url, 200); return stopAtCheck(`收藏列表第 ${screen + 1} 屏`); }
       if (verdict === "login" || judgePage(shown.url, shown.title, "", 200) === "login") return { ...result, state: "login", message: "小红书要求登录。" };
       fromDom(shown.links);
       quiet = listed.size > before ? 0 : quiet + 1;
+      if ((screen + 1) % LIST_REST_EVERY === 0) { keepListed(); save(); await sleep(between(LIST_REST_MS)); }
       // Kept as it grows: a page that dies part way (2026-10-23: 「Target crashed」 after 17 minutes) loses nothing listed so far.
       if (screen % 5 === 4) {
         keepListed(); save();

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { parseCollectPage, parseFeedResponse, parseInitialStateNote, type GrownSkillRecord } from "@crossline/core";
 import {
-  CATCH_UP_GAP_MS, INCREMENTAL_BATCH, INCREMENTAL_GAP_MS, MEDIA_MAX_BYTES, collectFavourites, favouritesAccess, mediaExtension, readCollectLedger,
+  CATCH_UP_GAP_MS, INCREMENTAL_BATCH, LIST_REST_EVERY, LIST_REST_MS, INCREMENTAL_GAP_MS, MEDIA_MAX_BYTES, collectFavourites, favouritesAccess, mediaExtension, readCollectLedger,
   readNoteFile, type CapturedResponse, type CollectDriver, type MediaFetch
 } from "./favourites-reader";
 import { describeNotes, type PictureToDescribe } from "./note-media";
@@ -214,6 +214,16 @@ test("a file over the size cap is not saved and says so; the limit of the trial 
   expect(readCollectLedger(store, ws, "flow-xhs").caughtUpAt).toBeUndefined();
   expect(mediaExtension(Buffer.from("\u0000\u0000\u0000\u0018ftypavif"), "", "jpg")).toBe("avif");
   expect(mediaExtension(Buffer.from("xx"), "image/jpeg", "bin")).toBe("jpg");
+});
+
+test("the list is scrolled at a person's pace, with a rest every 30 screens", async () => {
+  const site = fakeSite({ total: 1_000 });
+  const listing = run(site.driver, { listOnly: true, mode: "catch_up" });
+  const result = await listing.result;
+  expect(result.listEnded).toBe(true);
+  const screens = site.log.filter((line) => line === "wheel").length;
+  const rests = listing.gaps.filter((ms) => ms >= LIST_REST_MS[0] && ms <= LIST_REST_MS[1]);
+  expect(rests).toHaveLength(Math.floor(screens / LIST_REST_EVERY));
 });
 
 test("the list alone: read to its end once, then a weekly look that reaches notes already listed counts as up to date", async () => {
