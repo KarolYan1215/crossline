@@ -48,8 +48,11 @@ test("the device worker's code imports no model runner, no Codex runtime and not
 
 test("the compute node is the one way a device runs Codex: only the raw app-server, only on the person's switch, and only for the site's requests", () => {
   const agent = readFileSync(path.join(import.meta.dirname, "..", "node", "agent.ts"), "utf8");
-  const codexImports = agent.split("\n").filter((line) => /^import /.test(line) && line.includes("@crossline/codex"));
-  expect(codexImports).toEqual(['import { spawnAppServerLines } from "@crossline/codex";']);
+  const codexImports = (file: string) => file.split("\n").filter((line) => /^import /.test(line) && line.includes("@crossline/codex"));
+  // The relay itself imports nothing of the Codex package (the standalone node bundles it alone); the device hands it the raw app-server.
+  expect(codexImports(agent)).toEqual([]);
+  expect(codexImports(readFileSync(path.join(import.meta.dirname, "..", "node", "local-runtime.ts"), "utf8")))
+    .toEqual(['import { spawnAppServerLines } from "@crossline/codex";']);
   // It answers and relays; it never starts a thread or a turn of its own.
   expect(agent).not.toMatch(/runCodexSkill|startCodexSupervisor|startCodexAppServer|method: "(?:thread|turn)\/start"/);
   // The device worker starts it only when the switch file says so.

@@ -1,12 +1,13 @@
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { computeNodeStatus, setComputeNode } from "../../../../lib/device";
+import { pairedNode } from "../../../../lib/node-pairing";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 /** 「作为算力节点」 on the hosted 「这台电脑」 card (docs/compute-node.md): whether this account may, whether it is on, what the node did last. */
 export async function GET(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
-  return Response.json({ ok: true, ...computeNodeStatus(access.ctx.workspaceId) });
+  return Response.json({ ok: true, ...computeNodeStatus(access.ctx.workspaceId), paired: pairedNode(access.ctx.workspaceId) });
 }
 
 /** `{enabled}`: switched on, the site accepts this account's computer as the runtime for its model runs; off, it lets it go. */

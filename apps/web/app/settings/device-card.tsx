@@ -5,7 +5,8 @@ import { SegmentedControl } from "../ui/controls";
 import { SetupGuide } from "../ui/setup-guide";
 import { DEVICE_LINK_GUIDE } from "../../lib/setup-guides";
 
-type NodeView = { available: boolean; enabled: boolean; status: { state: string; host?: string; codex?: string; at: string; message?: string } | null };
+type NodeView = { available: boolean; enabled: boolean; status: { state: string; host?: string; codex?: string; at: string; message?: string } | null;
+  paired?: { host: string; at: string } | null };
 type Status = { linked: boolean; lastSeen: { at: string; label?: string } | null; folders: Array<{ id: string; label: string; files: number }>; documents: number };
 const time = (iso: string) => new Date(iso).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -48,7 +49,7 @@ export function DeviceCard({ siteUrl }: { siteUrl: string | null }) {
       <span className="muted">{status.folders.map((folder) => folder.label).join("、")}</span></div>}
     {token && <div className="st-row"><span className="st-row-label">设备令牌<small>复制后粘贴到那台电脑的设备页</small></span><code className="mono" style={{ userSelect: "all", wordBreak: "break-all" }}>{token}</code></div>}
     {token && siteUrl && <div className="st-row"><span className="st-row-label">网页版地址</span><code className="mono" style={{ userSelect: "all" }}>{siteUrl}</code></div>}
-    {status?.linked && <ComputeNodeRow />}
+    <ComputeNodeRow />
     {note && <p role="status" className="st-note">{note}</p>}
     <SetupGuide guide={DEVICE_LINK_GUIDE} />
   </section>;
@@ -74,9 +75,23 @@ function nodeWords(view: NodeView): string {
 function ComputeNodeRow() {
   const [view, setView] = useState<NodeView | undefined>();
   const [note, setNote] = useState("");
+  const [code, setCode] = useState("");
   const load = async () => {
     const response = await fetch("/api/device/compute", { cache: "no-store" }).catch(() => undefined);
     if (response?.ok) setView(await response.json() as NodeView);
+  };
+  const pair = async () => {
+    const response = await fetch("/api/node/pair/approve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { ok?: boolean; host?: string; message?: string } | undefined;
+    if (!body?.ok) { setNote(body?.message ?? "没有配对，请重试"); return; }
+    setCode("");
+    setNote(`已配对${body.host ? ` ${body.host}` : ""}：那台电脑几秒内连上，这里会显示。`);
+    void load();
+  };
+  const unpair = async () => {
+    const response = await fetch("/api/node/pair", { method: "DELETE" }).catch(() => undefined);
+    setNote(response?.ok ? "已解除配对：那台电脑 15 秒内断开。" : "没有解除，请重试");
+    void load();
   };
   useEffect(() => { void load(); const timer = setInterval(() => void load(), 20_000); return () => clearInterval(timer); }, []);
   if (!view?.available) return null;
@@ -91,6 +106,12 @@ function ComputeNodeRow() {
     <div className="st-row"><span className="st-row-label">作为算力节点<small>{nodeWords(view)}</small></span>
       <SegmentedControl label="作为算力节点" value={view.enabled ? "on" : "off"} options={[{ value: "off", label: "关闭" }, { value: "on", label: "开启" }]}
         onChange={(next) => void change(next === "on")} /></div>
+    {view.paired
+      ? <div className="st-row"><span className="st-row-label">独立节点<small>{`已配对 ${view.paired.host || "一台电脑"}（${time(view.paired.at)}）`}</small></span>
+        <button type="button" className="secondary-button" onClick={() => void unpair()}>解除配对</button></div>
+      : <label className="st-row"><span className="st-row-label">独立节点<small>在那台电脑上安装「Crossline 节点」，把它显示的配对码填在这里</small></span>
+        <span><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="XXXX-XXXX" autoComplete="off" spellCheck={false} maxLength={12} style={{ width: "9em" }} />{" "}
+          <button type="button" className="primary-button" disabled={code.replace(/[^A-Za-z0-9]/g, "").length !== 8} onClick={() => void pair()}>配对</button></span></label>}
     {note && <p role="status" className="st-note">{note}</p>}
   </>;
 }

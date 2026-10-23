@@ -28,6 +28,16 @@ export const NODE_COMPUTE_SETTING = "node.compute";
 export const NODE_STATUS_SETTING = "node.status";
 /** The hosted setting holding the sha256 of the `device` token, which the node signs in with too. */
 export const DEVICE_TOKEN_SETTING = "device.token.sha256";
+/**
+ * The standalone compute node (the 「Crossline 节点」 installer, docs/compute-node.md): its own token, made when the person approves its
+ * pairing code on the 「这台电脑」 card, so pairing it never replaces a linked device's token; and the computer it was paired with.
+ */
+export const NODE_TOKEN_SETTING = "node.token.sha256";
+export const NODE_PAIRED_SETTING = "node.paired";
+/** A pairing code: eight letters and digits a person can read aloud (no 0/O, 1/I/L), shown as XXXX-XXXX; valid ten minutes. */
+export const PAIR_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export const PAIR_TTL_MS = 10 * 60_000;
+export const normalizePairCode = (code: string) => code.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 /** Limits on what one send may carry; anything past them is cut, not refused. */
 export const DEVICE_LIMITS = { daily: 14, hourly: 28 * 24, gaps: 40, rhythm: 14 * 96, segments: 3000, documents: 20, text: 1_500_000, remove: 500,

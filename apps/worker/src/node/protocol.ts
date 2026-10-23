@@ -37,6 +37,21 @@ export function parseFrame(raw: string): NodeFrame | undefined {
   } catch { return undefined; }
 }
 
+/** Why the hub closed a connection (the WebSocket close reason), in the words the node shows. */
+export const CLOSE_WORDS: Record<string, string> = {
+  NODE_TOKEN_INVALID: "令牌无效或已撤销",
+  NODE_TOKEN_REVOKED: "令牌已撤销或已换新",
+  NODE_SWITCHED_OFF: "网页版已关闭「作为算力节点」",
+  NODE_NOT_ALLOWED: "网页版没有开启「作为算力节点」",
+  NODE_CODEX_VERSION: "本机 Codex 与服务器版本不同",
+  NODE_PROTOCOL: "节点程序版本与网页版不同，请更新",
+  NODE_PREPARE_FAILED: "节点准备失败",
+  NODE_REPLACED: "同一账号的另一台节点连上了",
+  NODE_RUNTIME_EXITED: "本机 Codex 意外退出"
+};
+/** The site no longer accepts this node's token: a standalone node goes back to pairing. */
+export const TOKEN_GONE = new Set(["NODE_TOKEN_INVALID", "NODE_TOKEN_REVOKED"]);
+
 /** What the server's runners send to a runtime (skill-runner.ts, model-catalog.ts, cost.ts, the plugin install); nothing else reaches the node's. */
 export const ALLOWED_METHODS = new Set([
   "thread/start", "thread/resume", "thread/unsubscribe", "thread/compact/start", "turn/start", "turn/interrupt",

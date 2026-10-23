@@ -4,8 +4,7 @@ import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
-import { spawnAppServerLines } from "@crossline/codex";
-import { marketplaceRoot, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteParams, turnImages, underRoots, withLocalImages, type NodeFrame } from "./protocol";
+import { CLOSE_WORDS, marketplaceRoot, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteParams, turnImages, underRoots, withLocalImages, type NodeFrame } from "./protocol";
 
 /**
  * The computer's end of the compute node (docs/compute-node.md). On the person's switch (the local `/device` page) a linked device also
@@ -17,9 +16,10 @@ import { marketplaceRoot, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteP
  * mapped into this computer's mirror and work directories (`rewriteParams`), and a plugin's files are fetched from the server's skill roots
  * only, before it is installed.
  */
-export type AppServerLines = ReturnType<typeof spawnAppServerLines>;
+/** `codex app-server` as raw JSON lines: the linked device's (`local-runtime.ts`) or the standalone node's own (`standalone.ts`). */
+export type AppServerLines = { write: (line: string) => void; onLine: (handler: (line: string) => void) => void; onExit: (handler: () => void) => void; stop: () => void };
 
-export type NodeAgentStatus = { state: "off" | "connecting" | "ready" | "waiting" | "refused"; message?: string; since: string; runs?: number };
+export type NodeAgentStatus = { state: "off" | "connecting" | "ready" | "waiting" | "refused"; code?: string; message?: string; since: string; runs?: number };
 
 export type NodeAgentOptions = {
   /** The hosted site's origin (`https://app.crossline.lol`). */
@@ -27,7 +27,7 @@ export type NodeAgentOptions = {
   token: string;
   /** Where the mirror of the server's skill directories and the runs' working directory live. */
   dir: string;
-  spawn?: () => AppServerLines;
+  spawn: () => AppServerLines;
   log?: (event: Record<string, unknown>) => void;
   host?: string;
   /** Waits between attempts; a refusal (other Codex version, switched off on the site) waits longer. */
@@ -43,13 +43,15 @@ export function nodeUrl(site: string): string {
 
 export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; status: () => NodeAgentStatus } {
   const log = options.log ?? (() => {});
-  const spawn = options.spawn ?? (() => spawnAppServerLines());
+  const spawn = options.spawn;
   const backoff = options.backoffMs ?? [5_000, 15_000, 60_000, 300_000];
   const mirror = path.join(options.dir, "mirror");
   const work = path.join(options.dir, "work");
   mkdirSync(work, { recursive: true });
   let status: NodeAgentStatus = { state: "connecting", since: new Date().toISOString() };
-  const setStatus = (state: NodeAgentStatus["state"], message?: string) => { status = { state, since: new Date().toISOString(), ...(message ? { message } : {}) }; };
+  const setStatus = (state: NodeAgentStatus["state"], message?: string, code?: string) => {
+    status = { state, since: new Date().toISOString(), ...(code ? { code } : {}), ...(message ? { message } : {}) };
+  };
   let stopped = false;
   let attempt = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -88,7 +90,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
     current = { socket, end };
 
     socket.on("unexpected-response", (_request, response) => {
-      refusedFor = response.statusCode === 401 ? "设备令牌无效或已撤销" : response.statusCode === 403 ? "网页版没有开启「作为算力节点」" : `网页版回答 ${response.statusCode}`;
+      refusedFor = response.statusCode === 401 ? "NODE_TOKEN_INVALID" : response.statusCode === 403 ? "NODE_NOT_ALLOWED" : `HTTP_${response.statusCode}`;
       socket.terminate();
     });
     socket.on("open", () => {
@@ -138,9 +140,10 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
       end();
       if (current?.socket === socket) current = undefined;
       const why = refusedFor ?? reason.toString();
+      const words = CLOSE_WORDS[why] ?? (why.startsWith("HTTP_") ? `网页版回答 ${why.slice(5)}` : why);
       // Refused for something only the person can change (switched off on the site, another Codex version, the token): try again later.
-      const refused = Boolean(refusedFor) || code === 4002 || code === 4003 || code === 4009 || code === 4010;
-      if (refused) setStatus("refused", why || String(code)); else setStatus("waiting", why || `连接断开（${code}）`);
+      const refused = Boolean(refusedFor) || code === 4002 || code === 4003 || code === 4004 || code === 4009 || code === 4010;
+      if (refused) setStatus("refused", words || String(code), why || undefined); else setStatus("waiting", words || `连接断开（${code}）`, why || undefined);
       log({ type: "node.agent_closed", code, reason: why });
       schedule(refused ? options.refusedWaitMs ?? 10 * 60_000 : backoff[Math.min(attempt++, backoff.length - 1)]!);
     });

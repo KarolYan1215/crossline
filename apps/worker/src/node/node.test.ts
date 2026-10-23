@@ -58,7 +58,7 @@ async function until<T>(read: () => T | undefined, ms = 20_000): Promise<T> {
   }
 }
 
-async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number } = {}) {
+async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number; tokenValid?: () => boolean } = {}) {
   gatewayServer = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
@@ -69,7 +69,7 @@ async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; dea
   const statuses: NodeStatus[] = [];
   hub = await createNodeHub({
     port: 0,
-    authenticate: (token) => token === "good-token-0123456789abcdef" ? "ws-owner" : undefined,
+    authenticate: (token) => token === "good-token-0123456789abcdef" && (options.tokenValid?.() ?? true) ? "ws-owner" : undefined,
     allowed: options.allowed ?? (() => true),
     heartbeatMs: 50,
     ...(options.deadAfterMs !== undefined ? { deadAfterMs: options.deadAfterMs } : {}),
@@ -150,7 +150,7 @@ test("another Codex version, or a site that has not switched the node on, is ref
 
   const off = await setUp({ allowed: () => false });
   await until(() => off.agent.status().state === "refused" ? true : undefined);
-  expect(off.agent.status().message).toContain("没有开启");
+  expect(off.agent.status()).toMatchObject({ code: "NODE_NOT_ALLOWED", message: expect.stringContaining("没有开启") });
   expect(hub!.clientFor("ws-owner")).toBeUndefined();
 });
 
@@ -162,6 +162,16 @@ test("switched off on the site, a connected node is let go at the next heartbeat
   await until(() => hub!.clientFor("ws-owner") === undefined ? true : undefined);
   await until(() => agent.status().state === "refused" ? true : undefined);
   expect(hub!.status("ws-owner")).toMatchObject({ state: "refused", message: expect.stringContaining("已关闭") });
+});
+
+test("a token revoked on the site (解除配对) lets the node go at the next heartbeat, and the node is told why", async () => {
+  let valid = true;
+  const { agent } = await setUp({ tokenValid: () => valid });
+  await until(() => hub!.clientFor("ws-owner"));
+  valid = false;
+  await until(() => agent.status().state === "refused" ? true : undefined);
+  expect(agent.status()).toMatchObject({ code: "NODE_TOKEN_REVOKED", message: expect.stringContaining("令牌已撤销") });
+  expect(hub!.clientFor("ws-owner")).toBeUndefined();
 });
 
 test("a node not heard from within the silence limit is let go and its account's runs go back to the server", async () => {

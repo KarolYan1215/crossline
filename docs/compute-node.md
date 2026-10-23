@@ -35,6 +35,30 @@
 
 **还没做：** P2（收藏读取的浏览器、媒体下载和转写交给节点）、P3（shell 助手）、P4（方案 B：其他账号）和方案 C；闸门里节点的独立容量池（现在节点的运行仍按服务器闸门排队）。
 
+## 独立安装包「Crossline 节点」（2026-10-23，本人账号）
+
+本人要求做成一个 exe：电脑上不用装 Codex、不用装 Crossline 完整版，也不拿到源码。
+
+**包里有什么（`scripts/package-node.ts` → `dist/node-installer/Crossline-Node-Setup-<版本>.exe`，`installer/crossline-node.iss`）：**
+
+- `main.mjs`：`apps/worker/src/node/standalone.ts` 连同中继（`agent.ts`、`protocol.ts`）和 `ws` 打包、压缩成一个 68 KB 的文件。打包脚本按 esbuild 的输入清单检查，Crossline 自己的文件只能是这三个，多一个就失败（`NODE_BUNDLE_TOO_WIDE`）。Skill、提示词、计划和校验都不在包里：节点连上后由服务器经镜像装插件。
+- `node.exe`（打包时运行的那个 Node）。
+- `codex\codex.exe`、`codex\codex-code-mode-host.exe`：从 `vendor/codex`（rust-v0.163.0，带 Windows 迁移校验和补丁）编译的 release 版，打包时核对 `--version` 是 0.163.0。
+- 用到 VC++ 运行库的模块旁边放运行库（dumpbin 检查）；许可证；`start.vbs` 用 wscript 无窗口启动。
+- 每用户安装到 `%LOCALAPPDATA%\Crossline Node\app`，不要管理员权限；默认勾选「登录 Windows 时自动运行」（`HKCU\...\Run`，带 `--autostart`）。
+
+**程序做什么（`standalone.ts`）：**
+
+1. **配对。** 没有令牌时向网页版 `POST /api/node/pair` 要配对码（不需要账号），在本机页面上显示 `XXXX-XXXX`，每 3 秒用拿到的秘密 id `GET /api/node/pair?id=` 问一次。本人在网页版「这台电脑」的「独立节点」填入配对码（`POST /api/node/pair/approve`，只有服务器运行时的主人账号能批，即方案 A）。网页版为这台电脑单独生成节点令牌（`node.token.sha256`，不会替换设备令牌），并打开「作为算力节点」。程序取走令牌，令牌只交出一次。配对码 10 分钟有效，过期自动换新；同一地址一小时最多要 12 个码。待批的配对只存在网页进程里，网页重启就作废，程序会重新要。
+2. **令牌保存。** 用 Windows 自带的数据保护（DPAPI，经 PowerShell）加密存到 `token.bin`，只有当前 Windows 用户能解开；启动时读一次放在内存里。
+3. **登录 ChatGPT。** 程序有自己的 Codex 目录（`%LOCALAPPDATA%\Crossline Node\codex-home`），本机页面上点「登录 ChatGPT」走 Codex 本来的浏览器登录，花的是这个账号自己的额度。
+4. **中继。** 配对且登录后启动 `startNodeAgent`，用的是包里的 `codex.exe` 和自己的 Codex 目录。网页版解除配对或换了令牌，下一次心跳（15 秒内）断开（4004 `NODE_TOKEN_REVOKED`），程序删掉令牌、回到配对。
+5. **本机页面。** `http://127.0.0.1:47391/`（被占用就换一个端口，写在 `node.lock` 里）：配对码、登录、运行状态、退出。只认 `127.0.0.1:<端口>` 这个主机名（防 DNS 重绑定），POST 必须带页面自己加的请求头（别的网站无法驱动它）。同时只运行一份：再点快捷方式只会打开已运行那份的页面。
+
+**实测（`scripts/node-standalone-check.ts`，本机 Codex 0.163.0、临时目录、替身网站，不调用模型）：** 源码版和打包压缩后的 `main.mjs` 都通过：配对码配对成功；全新 Codex 目录读作未登录，中继不启动；页面正常；不带请求头的 POST 和别的主机名被拒；ChatGPT 登录能发起（拿到 `auth.openai.com` 地址，不打开窗口、不真的登录）；重启后从 DPAPI 读回令牌，不再要新码；磁盘上的令牌不是明文。
+
+**方案 C 留在设计里：** 现在只有服务器运行时的主人账号能批配对。给其他账号开放前要做「别人的节点不受信任」那一节：网关自己数用量、中继只转发该工作区的路由。
+
 ## 没有节点时
 
 托管站必须能独立运行，这是前提：节点是加速，不是依赖。2026-10-23 先给服务器自身加了内存限额（docs/skills-library.md「内存限额」）：

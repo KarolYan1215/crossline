@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { parseCollectPage, parseFeedResponse, parseInitialStateNote, type GrownSkillRecord } from "@crossline/core";
 import {
@@ -10,6 +10,9 @@ import {
 } from "./favourites-reader";
 import { describeNotes, type PictureToDescribe } from "./note-media";
 import { breakerKey, releaseSite, siteHold } from "./site-reader";
+
+// Whole collections of 70 to 100 notes, each written to disk: on a busy machine one can take longer than vitest's 5 s.
+vi.setConfig({ testTimeout: 30_000 });
 
 const fixture = (name: string) => JSON.parse(readFileSync(path.join(import.meta.dirname, "testing", "fixtures", name), "utf8")) as unknown;
 

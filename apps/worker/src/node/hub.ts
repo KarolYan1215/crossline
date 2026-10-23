@@ -58,7 +58,7 @@ export type NodeHub = {
 export const MIRROR_MAX_FILES = 800;
 export const MIRROR_MAX_BYTES = 40 * 1_048_576;
 
-type Connection = { socket: WebSocket; workspaceId: string; client?: JsonLineRpcClient; ready: boolean; heardAt: number; host: string; codex: string };
+type Connection = { socket: WebSocket; workspaceId: string; token: string; client?: JsonLineRpcClient; ready: boolean; heardAt: number; host: string; codex: string };
 
 export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   const log = options.log ?? (() => {});
@@ -87,11 +87,11 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
       reject(403, "Forbidden");
       return;
     }
-    wss.handleUpgrade(request, socket, head, (ws) => accept(ws, workspaceId));
+    wss.handleUpgrade(request, socket, head, (ws) => accept(ws, workspaceId, token!));
   });
 
-  function accept(socket: WebSocket, workspaceId: string): void {
-    const connection: Connection = { socket, workspaceId, ready: false, heardAt: Date.now(), host: "", codex: "" };
+  function accept(socket: WebSocket, workspaceId: string, token: string): void {
+    const connection: Connection = { socket, workspaceId, token, ready: false, heardAt: Date.now(), host: "", codex: "" };
     const hello = setTimeout(() => socket.close(4001, "NODE_HELLO_MISSING"), 15_000);
     const pendingGw = new Map<number, AbortController>();
     socket.on("pong", () => { connection.heardAt = Date.now(); });
@@ -208,9 +208,10 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   }
 
   // A node that stops answering pings (a laptop asleep, a dropped network) is let go, so its runs fail over instead of hanging; one whose
-  // account switched it off is let go at the next beat.
+  // account switched it off, or whose token was revoked or replaced (解除配对), is let go at the next beat.
   const heartbeat = setInterval(() => {
     for (const connection of connections.values()) {
+      if (options.authenticate(connection.token) !== connection.workspaceId) { refuse(connection, 4004, "NODE_TOKEN_REVOKED", "令牌已撤销或已换新"); continue; }
       if (!options.allowed(connection.workspaceId)) { refuse(connection, 4003, "NODE_SWITCHED_OFF", "网页版已关闭「作为算力节点」"); continue; }
       if (Date.now() - connection.heardAt > (options.deadAfterMs ?? 45_000)) { connection.socket.terminate(); continue; }
       try { connection.socket.ping(); } catch { /* terminated next round */ }

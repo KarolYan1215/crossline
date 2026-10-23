@@ -32,7 +32,7 @@ import { returnTidy } from "./return-tidy";
 import { workSplitRepair } from "./work-split-repair";
 import { dateAdvancePass } from "./date-advance";
 import { createWriteLogin } from "./calendar-write-login";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE_TOKEN_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE_TOKEN_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, NODE_TOKEN_SETTING, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
 import { startingWithin } from "./schedule-window";
@@ -1493,12 +1493,13 @@ const nodePort = Number(process.env.CROSSLINE_NODE_PORT ?? (hostedBeta ? 3213 : 
 const crosslineMarketplace = path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json");
 const nodeHub: NodeHub | undefined = nodePort > 0 ? await createNodeHub({
   port: nodePort,
+  // A linked device's token, or the standalone node's own (paired on the 「这台电脑」 card).
   authenticate: (token) => {
     const hash = createHash("sha256").update(token).digest();
-    return analysisStore.listWorkspaces().find((workspace) => {
-      const stored = analysisStore.getSetting(workspace.id, DEVICE_TOKEN_SETTING);
+    return analysisStore.listWorkspaces().find((workspace) => [DEVICE_TOKEN_SETTING, NODE_TOKEN_SETTING].some((key) => {
+      const stored = analysisStore.getSetting(workspace.id, key);
       return stored?.length === 64 && timingSafeEqual(Buffer.from(stored, "hex"), hash);
-    })?.id;
+    }))?.id;
   },
   // Only the runtime owner's account, and only once it switched the node on (the plan's A; other accounts are P4).
   allowed: (workspaceId) => workspaceId === runtimeOwner(analysisStore) && analysisStore.getSetting(workspaceId, NODE_COMPUTE_SETTING) === "on",
