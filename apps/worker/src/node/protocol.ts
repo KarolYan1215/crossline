@@ -51,7 +51,8 @@ export const CLOSE_WORDS: Record<string, string> = {
   NODE_PROTOCOL: "节点程序版本与网页版不同，请更新",
   NODE_PREPARE_FAILED: "节点准备失败",
   NODE_REPLACED: "同一账号的另一台节点连上了",
-  NODE_RUNTIME_EXITED: "本机 Codex 意外退出"
+  NODE_RUNTIME_EXITED: "本机 Codex 意外退出",
+  NODE_SERVER_STARTING: "网页版刚重启，稍后自动重连"
 };
 /** The site no longer accepts this node's token: a standalone node goes back to pairing. */
 export const TOKEN_GONE = new Set(["NODE_TOKEN_INVALID", "NODE_TOKEN_REVOKED"]);

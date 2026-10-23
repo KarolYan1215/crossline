@@ -200,6 +200,20 @@ test("a linked device and the standalone node work at once: both are members, th
   } finally { device.stop(); }
 });
 
+test("a node that arrives while the server's own runtime is still starting is told to come back soon, not refused for a version", async () => {
+  let version = "";
+  gatewayServer = createServer(); await new Promise<void>((resolve) => gatewayServer!.listen(0, "127.0.0.1", resolve));
+  hub = await createNodeHub({ port: 0, authenticate: () => "ws-owner", allowed: () => true, roots: () => [], gateway: () => undefined,
+    serverCodex: () => version, prepare: async () => {}, heartbeatMs: 50 });
+  const runtime = fakeRuntime("0.163.0");
+  const agent = startNodeAgent({ url: `http://127.0.0.1:${hub.port}`, token: "t".repeat(24), dir, spawn: runtime.spawn, backoffMs: [100], refusedWaitMs: 60_000, role: "device" });
+  stopAgent = agent.stop;
+  await until(() => agent.status().code === "NODE_SERVER_STARTING" ? true : undefined);
+  expect(agent.status().state).toBe("waiting");
+  version = "crossline/0.163.0 (Linux)";
+  await until(() => hub!.clientFor("ws-owner"));
+});
+
 test("a node not heard from within the silence limit is let go and its account's runs go back to the server", async () => {
   const { agent } = await setUp({ deadAfterMs: 1 });
   // Ready or not, with a 1 ms limit it cannot stay: the next beat finds it silent.

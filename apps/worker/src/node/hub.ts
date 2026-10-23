@@ -170,6 +170,8 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     connection.capacity = Math.max(1, Math.min(NODE_CAPACITY_MAX, Math.floor(Number(hello.capacity) || 4)));
     connection.key = `${connection.role}:${connection.host}`;
     const server = codexVersionOf({ userAgent: options.serverCodex() });
+    // The server's own runtime is not up yet (the worker just restarted and a node was quicker): come back in a moment, not in ten minutes.
+    if (!server) { log({ type: "node.server_starting", workspaceId, host: connection.host }); socket.close(4006, "NODE_SERVER_STARTING"); return; }
     if (hello.protocol !== NODE_PROTOCOL) { refuse(connection, 4002, "NODE_PROTOCOL", `节点程序的版本（${hello.protocol}）与网页版（${NODE_PROTOCOL}）不同，请更新本机 Crossline`); return; }
     if (!connection.codex || connection.codex !== server) {
       refuse(connection, 4009, "NODE_CODEX_VERSION", `本机 Codex ${connection.codex || "未知"} 与服务器 ${server || "未知"} 不同，节点暂不接活`);
