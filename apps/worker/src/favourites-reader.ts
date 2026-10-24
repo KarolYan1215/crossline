@@ -9,6 +9,8 @@ import type { CrosslineStore } from "@crossline/db";
 import { readerLaunch, restoreSessionCookies } from "./browser-launch";
 import { holdSite, judgePage, siteHold, type SiteHold } from "./site-reader";
 import { castContext, publicUrlAllowed, type RemotePage, type Viewport } from "./remote-browser";
+import { driveContext } from "./node/browser";
+import type { NodeBrowserLink } from "./node/hub";
 
 /**
  * Reading the person's Xiaohongshu favourites in full (docs/skills-library.md 「收藏全量读取」, the owner's decision of 2026-10-22: 「收藏全部
@@ -69,6 +71,10 @@ export type CollectDriver = {
    * verification is made of them. Only where the page can be shown (the server's browser).
    */
   lend?: () => Promise<{ page: RemotePage; viewport: Viewport; back: () => void }>;
+  /** The window brought to the front of the person's screen (a browser on their own computer). */
+  front?: () => Promise<void>;
+  /** Pictures shown again while a person looks at the page (a browser on their own computer, for a verification). */
+  showMedia?: (on: boolean) => Promise<void> | void;
   close: () => Promise<void>;
 };
 
@@ -512,67 +518,44 @@ export async function openCollectBrowser(profileDir: string, executablePath: str
   const context = await chromium.launchPersistentContext(profileDir, await readerLaunch(executablePath));
   await restoreSessionCookies(context, profileDir);
   // Reading the list only needs its titles, which come in the page's own answers: its pictures and videos are not loaded. A list of
-  // ~2000 favourites scrolled with them grew the page past the worker's memory and it crashed (2026-10-23).
-  // Every request goes only to public https hosts (as the login browser's do), so a page lent to the person cannot reach the server's own.
-  let lentNow = false;
-  await context.route("**/*", async (route) => {
-    const request = route.request();
-    if (!(await publicUrlAllowed(request.url()))) return route.abort("blockedbyclient");
-    return options.listOnly && !lentNow && ["image", "media", "font"].includes(request.resourceType()) ? route.abort() : route.continue();
-  });
-  // Functions handed to the page name nothing (tsx's `__name` wrapper would throw there); see `openBrowser` in site-reader.ts.
-  await context.addInitScript({ content: "globalThis.__name = globalThis.__name || ((target) => target);" });
-  const page = context.pages()[0] ?? await context.newPage();
-  const queue: CapturedResponse[] = [];
-  const pending = new Set<Promise<void>>();
-  page.on("response", (response) => {
-    const url = response.url();
-    if (!xhsCaptured(url)) return;
-    const done = response.json().then((json: unknown) => { queue.push({ url, status: response.status(), json }); },
-      () => { queue.push({ url, status: response.status(), json: null }); }).finally(() => pending.delete(done));
-    pending.add(done);
-  });
-  return {
-    goto: async (url) => (await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }))?.status() ?? 0,
-    pause: (ms) => page.waitForTimeout(ms),
-    wheel: () => page.mouse.wheel(0, 900),
-    snapshot: async () => ({ url: page.url(), ...(await page.evaluate(() => ({ title: document.title, text: (document.body?.innerText ?? "").slice(0, 60_000),
-      links: [...document.querySelectorAll("a[href]")].slice(0, 3_000).map((anchor) => ({ text: (anchor.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 120),
-        href: (anchor as HTMLAnchorElement).href })) }))) }),
-    responses: async () => { await Promise.allSettled([...pending]); return queue.splice(0, queue.length); },
-    metrics: () => page.evaluate(() => ({ heapMb: Math.round(((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 1_048_576),
-      nodes: document.getElementsByTagName("*").length })),
-    noteState: () => page.evaluate(() => {
-      const plain = (value: unknown) => { try { return JSON.parse(JSON.stringify(value ?? null)) as unknown; } catch { return null; } };
-      const state = (globalThis as unknown as { __INITIAL_STATE__?: { note?: { noteDetailMap?: unknown } } }).__INITIAL_STATE__;
-      return plain(state?.note?.noteDetailMap ?? null);
-    }),
-    selfProfile: () => page.evaluate(() => {
-      const state = (globalThis as unknown as { __INITIAL_STATE__?: { user?: { userInfo?: Record<string, unknown> } } }).__INITIAL_STATE__;
-      const info = state?.user?.userInfo as Record<string, unknown> | undefined;
-      const inner = (info && typeof info === "object" && "_value" in info ? info._value : info?.value ?? info) as Record<string, unknown> | undefined;
-      const userId = typeof inner?.userId === "string" ? inner.userId : typeof inner?.user_id === "string" ? inner.user_id : undefined;
-      const me = [...document.querySelectorAll("a[href*='/user/profile/']")].find((anchor) => (anchor.textContent ?? "").trim() === "我") as HTMLAnchorElement | undefined;
-      return { ...(userId ? { userId } : {}), ...(me ? { href: me.href } : {}) };
-    }),
+  // ~2000 favourites scrolled with them grew the page past the worker's memory and it crashed (2026-10-23). Every request goes only to
+  // public https hosts (as the login browser's do), so a page lent to the person cannot reach the server's own.
+  const driver = await driveContext(context, { capture: xhsCaptured, allow: publicUrlAllowed, ...(options.listOnly ? { listOnly: true } : {}) });
+  const page = context.pages()[0]!;
+  return { ...driver,
     lend: async () => {
-      lentNow = true;
+      driver.showMedia(true);
       const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
-      return { page: await castContext(context, viewport, true), viewport, back: () => { lentNow = false; } };
-    },
-    fetchMedia: async (url, referer, maxBytes) => {
-      const headers = { referer };
-      const head = await page.request.head(url, { headers, timeout: 60_000 }).catch(() => undefined);
-      const declared = Number(head?.headers()["content-length"] ?? 0);
-      if (declared > maxBytes) return { state: "too_large", bytes: declared };
-      const response = await page.request.get(url, { headers, timeout: 15 * 60_000 });
-      if (!response.ok()) return { state: "failed", status: response.status() };
-      const bytes = await response.body();
-      if (bytes.length > maxBytes) return { state: "too_large", bytes: bytes.length };
-      return { state: "ok", bytes, contentType: response.headers()["content-type"] ?? "" };
-    },
-    close: () => context.close().catch(() => undefined)
-  };
+      return { page: await castContext(context, viewport, true), viewport, back: () => driver.showMedia(false) };
+    } };
+}
+
+/** The page answers kept by a reader on the person's computer: the same URLs as `xhsCaptured`. */
+const CAPTURED_SOURCES = [XHS_COLLECT_PATH.source, XHS_FEED_PATH.source, XHS_SELF_PATH.source];
+
+/**
+ * The favourites read in a browser on the person's own computer (a node that offers one, docs/compute-node.md): the same driver, each
+ * operation sent over the node's connection. The window is visible on their screen, logged in there, so a verification or login is done
+ * in it; nothing of the server's memory goes to the page.
+ */
+export async function openNodeCollectBrowser(link: NodeBrowserLink, options: { listOnly?: boolean } = {}): Promise<CollectDriver & { host: string }> {
+  const call = <T>(request: Record<string, unknown>, timeoutMs?: number) => link.call(request, timeoutMs) as Promise<T>;
+  await call({ op: "open", site: XHS_HOME, capture: CAPTURED_SOURCES, ...(options.listOnly ? { listOnly: true } : {}) }, 120_000);
+  return {
+    host: link.host,
+    goto: (url) => call<number>({ op: "goto", url }, 90_000),
+    pause: (ms) => call<void>({ op: "pause", ms }, ms + 60_000),
+    wheel: () => call<void>({ op: "wheel" }, 60_000),
+    snapshot: () => call({ op: "snapshot" }, 60_000),
+    responses: async () => (await call<CapturedResponse[] | null>({ op: "responses" }, 60_000)) ?? [],
+    noteState: () => call({ op: "noteState" }, 60_000),
+    selfProfile: async () => (await call<{ userId?: string; href?: string } | null>({ op: "selfProfile" }, 60_000)) ?? {},
+    fetchMedia: (url, referer, maxBytes) => call<MediaFetch>({ op: "fetchMedia", url, referer, maxBytes }, 16 * 60_000),
+    metrics: async () => (await call<{ heapMb: number; nodes: number } | null>({ op: "metrics" }, 60_000)) ?? { heapMb: 0, nodes: 0 },
+    front: () => call<void>({ op: "front" }, 60_000),
+    showMedia: (on: boolean) => call<void>({ op: "showMedia", on }, 60_000),
+    close: () => call<void>({ op: "close" }, 60_000).catch(() => undefined)
+  } as CollectDriver & { host: string };
 }
 
 /** The folder a workflow's notes accumulate in, run after run (the assistant gets it read-only). */

@@ -10,7 +10,9 @@ import path from "node:path";
  * - `files` (node asks, server answers): a directory under the server's skill roots, mirrored on the node before a plugin is installed;
  * - `image` (node asks, server answers): a picture a turn hands the model by its server path (a screenshot in the input box, a favourite's
  *   picture), copied to the node first;
- * - `gw*`: an HTTP request a provider thread made to the model gateway, relayed to the server's gateway, which adds the key.
+ * - `gw*`: an HTTP request a provider thread made to the model gateway, relayed to the server's gateway, which adds the key;
+ * - `browser` (server asks, node answers with `browser-answer`, a large picture or video first in `browser-chunk`s): one operation of a
+ *   reader's browser on the person's computer (browser.ts), offered only by a node whose `hello` says `browser`.
  *
  * The node does not trust the server blindly: only the methods the runners use pass (`ALLOWED_METHODS`), and a thread may not ask for a
  * shell, full access or a permission profile (`refusal`). The hosted worker's own shell assistant never comes here; it uses the server's
@@ -19,7 +21,7 @@ import path from "node:path";
 export const NODE_PROTOCOL = 1;
 
 export type NodeFrame =
-  | { t: "hello"; protocol: number; codex: string; platform: string; host: string; role?: "device" | "standalone"; capacity?: number }
+  | { t: "hello"; protocol: number; codex: string; platform: string; host: string; role?: "device" | "standalone"; capacity?: number; browser?: boolean }
   | { t: "welcome"; workspaceId: string; roots: string[]; gateway?: string }
   | { t: "rpc"; line: string }
   | { t: "files"; id: number; dir: string }
@@ -29,7 +31,12 @@ export type NodeFrame =
   | { t: "gw"; id: number; method: string; path: string; headers: Record<string, string>; body?: string }
   | { t: "gw-head"; id: number; status: number; headers: Record<string, string> }
   | { t: "gw-data"; id: number; data: string }
-  | { t: "gw-end"; id: number; error?: string };
+  | { t: "gw-end"; id: number; error?: string }
+  | { t: "browser"; id: number; request: Record<string, unknown> }
+  | { t: "browser-chunk"; id: number; data: string }
+  | { t: "browser-answer"; id: number; result?: unknown; error?: string };
+/** A picture or video goes back in pieces of this size (each frame stays under the socket's limit). */
+export const BROWSER_CHUNK_BYTES = 8 * 1_048_576;
 
 export function parseFrame(raw: string): NodeFrame | undefined {
   try {

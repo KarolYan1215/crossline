@@ -11,7 +11,9 @@ import { getStore } from "./crossline";
  */
 export type PersonCall = {
   id: string; text: string; urgent: boolean;
-  action: { kind: "remote"; workflowId: string; service: string; label: string; purpose: "verify" | "login" } | { kind: "push" } | { kind: "href"; href: string; label: string };
+  action: { kind: "remote"; workflowId: string; service: string; label: string; purpose: "verify" | "login" } | { kind: "push" } | { kind: "href"; href: string; label: string }
+    /** The reading runs in a browser on the person's own computer: done in that window, then said here (「已在电脑上完成」). */
+    | { kind: "node"; workflowId: string; service: string; host: string };
 };
 
 const VERIFY_STALE_MS = 30 * 60_000;
@@ -20,10 +22,13 @@ export function personCalls(ctx: AccessContext, now = new Date(), hosted = proce
   const store = getStore();
   const calls: PersonCall[] = [];
   try {
-    const pending = JSON.parse(store.getSetting(ctx.workspaceId, VERIFY_PENDING_SETTING) ?? "null") as { workflowId: string; service: string; label: string; where: string; at: string } | null;
+    const pending = JSON.parse(store.getSetting(ctx.workspaceId, VERIFY_PENDING_SETTING) ?? "null") as { workflowId: string; service: string; label: string; where: string; at: string; on?: string; host?: string } | null;
     if (pending && now.getTime() - Date.parse(pending.at) < VERIFY_STALE_MS)
-      calls.push({ id: `verify:${pending.workflowId}:${pending.at}`, urgent: true, text: `${pending.label}在读取${pending.where}时要求验证，请现在完成；完成后读取从停下的地方接着往下。`,
-        action: { kind: "remote", workflowId: pending.workflowId, service: pending.service, label: pending.label, purpose: "verify" } });
+      calls.push(pending.on === "node"
+        ? { id: `verify:${pending.workflowId}:${pending.at}`, urgent: true, text: `读取${pending.label}到${pending.where}时要本人处理：请在电脑「${pending.host ?? ""}」上弹出的${pending.label}窗口里完成，然后点「已在电脑上完成」，读取从停下的地方接着往下。`,
+          action: { kind: "node", workflowId: pending.workflowId, service: pending.service, host: pending.host ?? "" } }
+        : { id: `verify:${pending.workflowId}:${pending.at}`, urgent: true, text: `${pending.label}在读取${pending.where}时要求验证，请现在完成；完成后读取从停下的地方接着往下。`,
+          action: { kind: "remote", workflowId: pending.workflowId, service: pending.service, label: pending.label, purpose: "verify" } });
   } catch { /* none waiting */ }
   for (const record of readGrownSkills(store, ctx.workspaceId)) {
     if (record.mergedInto) continue;

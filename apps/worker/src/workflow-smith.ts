@@ -6,7 +6,7 @@ import {
   AGENT_CATEGORIES, GROW_AFTER_ACCEPTED, GROWN_SKILL_IDLE_DAYS, PUBLIC_SKILL_REVIEW_SCHEMA, accessProfileSlug, categoryFromWording, finalVerdict, grownSkillFilesKey, grownSkillId,
   grownSkillName, scanForDeclaredAccess, scanSkillFiles, scheduleLabel, skillFrontmatter, textTerms, reassignedSteps, validatePublicSkillReview, validateWorkflowManifest,
   workflowAccess, workflowDue, agentChainKey, retryDue, type AgentCategory, type AgentChain, type GrownSkillRecord, type PublicSkillReview, type WorkflowAccess,
-  VERIFY_PENDING_SETTING, type WorkflowManifest, type WorkflowOrigin, type SkillScan
+  VERIFY_PENDING_SETTING, XHS_HOME, type WorkflowManifest, type WorkflowOrigin, type SkillScan
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { agentChainsFor, grownHomeLine, listAgentTasks, readGrownSkills, recordGrownLogin, removeGrownSkill, writeGrownSkills, type CrosslineStore } from "@crossline/db";
@@ -17,13 +17,15 @@ import { identityLines } from "./lines";
 import { ownerOf, runtimesDir } from "./owner";
 import { createSiteReader, holdWords, releaseSite, siteHold, SITE_PAGES_PER_RUN, SITE_SCROLLS_MAX, type OpenSite } from "./site-reader";
 import { favouritesTopicStep, topicModeOn } from "./favourites-topics";
-import { collectFavourites, collectFolder, collectHold, favouritesAccess, holdAfterFailure, markOrganised, openCollectBrowser, readCollectLedger, writeCollectLedger,
+import { collectFavourites, collectFolder, collectHold, favouritesAccess, holdAfterFailure, markOrganised, openCollectBrowser, openNodeCollectBrowser, readCollectLedger, writeCollectLedger,
   type CollectDriver, type CollectOptions, type CollectResult } from "./favourites-reader";
 import { describeNotes, type NoteMediaDeps } from "./note-media";
 import { loginMode } from "./browser-launch";
 import type { CollectMemory } from "./memory";
 import { HOLDER_WORDS, holdProfile, profileHolder, releaseProfile } from "./profile-locks";
 import type { RemoteBrowsers } from "./remote-browser";
+import type { NodeBrowserLink } from "./node/hub";
+import { judgePage } from "./site-reader";
 
 /**
  * Grown workflows (docs/skills-library.md §6): the assistant fixes an errand the person keeps having done — or one they asked for in words —
@@ -382,6 +384,8 @@ export function finishWorkflowLogin(store: CrosslineStore, workspaceId: string, 
   const record = readGrownSkills(store, workspaceId).find((item) => item.id === id);
   if (!record || !workflowAccess(record).access.some((item) => item.service === service && item.login))
     return { ok: false, code: "WORKFLOW_ACCESS_NOT_FOUND", message: "这个工作流不需要登录这个网站。" };
+  // A reading on the person's computer waiting for them (a verification or login done in its window there).
+  if (nodeDone(workspaceId, id)) return { ok: true };
   // The server's browser closes with its cookies kept in the profile; the login is recorded by its `onLoggedIn` (`recordGrownLogin`).
   const remote = remoteLogin();
   if (remote?.isOpen(workspaceId, id)) return remote.finish(workspaceId, id, service)
@@ -511,6 +515,8 @@ export type FavouritesCollector = {
   reclaim?: () => void;
   /** The browser's share of the worker's memory: room waited for and held before it opens, and the line it stops itself at. */
   memory?: CollectMemory;
+  /** A ready node of the account that runs a browser (node/hub.ts `browserFor`): the favourites are read there instead. */
+  nodeBrowser?: (workspaceId: string) => NodeBrowserLink | undefined;
   /** Sorts the listed favourites not yet under a topic (a model run, favourites-topics.ts); the number sorted. */
   classify?: (workspaceId: string, workflowId: string) => Promise<number>;
 };
@@ -545,14 +551,19 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
   // The page shows the workflow as running from here until `collect.ran` (a collection takes minutes to hours).
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.started:${taskId}`, type: "collect.started", entityId: record.id,
     payload: { taskId, listOnly: Boolean(plan.listOnly), notes: plan.targets?.length ?? 0 } });
+  // A computer of the person's that runs a browser (a ready node offering one): the favourites are read there, in their own Chrome or
+  // Edge, and nothing of the page sits in the server's memory (2026-10-24: read on the server, the list filled it at ~1360 notes).
+  const onNode = collector.nodeBrowser?.(workspaceId);
   const job = (async () => {
     let result: CollectResult;
     // The page was killed by the container's memory ceiling twice (2026-10-23) while four idle model runtimes held ~800 MB.
-    collector.reclaim?.();
+    if (!onNode) collector.reclaim?.();
     // No room for the page after the wait: nothing is opened, nothing is held, and the next run tries again.
-    const room = collector.memory ? await collector.memory.admit() : true;
+    const room = onNode || !collector.memory ? true : await collector.memory.admit();
     const driver = !room ? undefined
-      : await (collector.open ?? openCollectBrowser)(profileDir, browser, { listOnly: Boolean(plan.listOnly) }).catch((error: unknown) => error as Error);
+      : await (onNode ? openNodeCollectBrowser(onNode, { listOnly: Boolean(plan.listOnly) })
+        : (collector.open ?? openCollectBrowser)(profileDir, browser, { listOnly: Boolean(plan.listOnly) })).catch((error: unknown) => error as Error);
+    if (onNode && driver && !(driver instanceof Error)) log({ type: "collect.on_node", workspaceId, id: record.id, host: onNode.host });
     if (!driver) result = { state: "memory", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0,
       message: `服务器内存不够打开浏览器（${collector.memory?.describe() ?? ""}），稍后再读。` };
     else if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
@@ -560,7 +571,20 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
       const { after: _after, ...reading } = plan;
       // The site's verification is passed by the person on this page, in the dialog (the server has no screen of its own to show it on).
       const remote = remoteLogin();
-      const verify = remote && driver.lend ? async (where: string) => {
+      // On the person's computer the window is on their screen: they verify (or log in) there, and say so on the page.
+      const nodeVerify = onNode ? async (where: string) => {
+        await driver.front?.().catch(() => undefined);
+        await driver.showMedia?.(true);
+        store.setSetting(workspaceId, VERIFY_PENDING_SETTING, JSON.stringify({ workflowId: record.id, service: access.service, label: access.service, where, at: new Date().toISOString(),
+          on: "node", host: onNode.host }));
+        sayToPerson(store, workspaceId, `「${record.manifest.summary}」读到${where}时要本人处理：请在电脑「${onNode.host}」上弹出的${access.service}窗口里完成，再在 Crossline 里点「已在电脑上完成」，读取会从这里接着往下；15 分钟内没有完成就先停下。`,
+          "workflow_verify", `verify:${record.id}:${Date.now()}`, [{ label: "去处理", href: loginHref(record.id) }]);
+        const done = await waitForNodeDone(workspaceId, record.id, NODE_VERIFY_WAIT_MS);
+        store.deleteSetting(workspaceId, VERIFY_PENDING_SETTING);
+        await driver.showMedia?.(false);
+        return done;
+      } : undefined;
+      const verify = nodeVerify ?? (remote && driver.lend ? async (where: string) => {
         const lent = await driver.lend!();
         return new Promise<boolean>((resolve) => {
           void remote.attach(workspaceId, { workflowId: record.id, service: access.service, label: access.service, page: lent.page, viewport: lent.viewport,
@@ -572,9 +596,11 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
               "workflow_verify", `verify:${record.id}:${Date.now()}`, [{ label: "去验证", href: loginHref(record.id) }]);
           });
         });
-      } : undefined;
+      } : undefined);
+      // Logged out on the person's computer (its own profile, first run there): they log in in the window, then the reading starts.
+      if (onNode && verify) await loginOnNode(driver, () => verify("登录小红书"));
       try { result = await collectFavourites({ store, workspaceId, workflowId: record.id, folder, driver, ...(collector.sleep ? { sleep: collector.sleep } : {}), log,
-        ...(collector.memory ? { memory: collector.memory } : {}), ...(verify ? { verify } : {}), ...reading }); }
+        ...(collector.memory && !onNode ? { memory: collector.memory } : {}), ...(verify ? { verify } : {}), ...reading }); }
       finally { await driver.close(); }
     }
     collector.memory?.release();
@@ -650,6 +676,35 @@ function organiseFromShared(store: CrosslineStore, workspaceId: string, record: 
       : `本期「${record.manifest.summary}」没有做成：${outcome.state === "blocked" || outcome.state === "failed" ? outcome.message : "助手未获准做这类工作"}。`,
       "workflow_done", `ran:${record.id}:${outcome.state === "done" ? outcome.taskId : now.toISOString().slice(0, 10)}`, [{ label: "去看结果", href: "/approvals#assistant" }]);
   });
+}
+
+/** How long a reading on the person's computer waits for them to finish a verification or login in its window. */
+export const NODE_VERIFY_WAIT_MS = 15 * 60_000;
+const nodeWaits = new Map<string, (done: boolean) => void>();
+/** Resolves true when the person says they finished on their computer (`finishWorkflowLogin`), false when the wait runs out. */
+export function waitForNodeDone(workspaceId: string, workflowId: string, ms: number): Promise<boolean> {
+  const key = `${workspaceId}:${workflowId}`;
+  nodeWaits.get(key)?.(false);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { nodeWaits.delete(key); resolve(false); }, ms);
+    nodeWaits.set(key, (done) => { clearTimeout(timer); nodeWaits.delete(key); resolve(done); });
+  });
+}
+/** The person pressed 「已在电脑上完成」: a reading waiting on their computer goes on. False when none was waiting. */
+export function nodeDone(workspaceId: string, workflowId: string): boolean {
+  const resolve = nodeWaits.get(`${workspaceId}:${workflowId}`);
+  resolve?.(true);
+  return Boolean(resolve);
+}
+/** The home page on the person's computer: when it is not logged in, the person is asked to log in in that window, once. */
+async function loginOnNode(driver: CollectDriver, ask: () => Promise<boolean>): Promise<void> {
+  const status = await driver.goto(XHS_HOME).catch(() => 0);
+  await driver.pause(3_000);
+  const shown = await driver.snapshot().catch(() => undefined);
+  const self = await driver.selfProfile().catch(() => ({} as { userId?: string; href?: string }));
+  const loggedOut = !self.userId && !self.href || (shown ? judgePage(shown.url, shown.title, "", status) === "login" : false);
+  await driver.responses().catch(() => []);
+  if (loggedOut) await ask();
 }
 
 /**

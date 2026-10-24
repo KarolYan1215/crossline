@@ -5,7 +5,8 @@ import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
-import { CLOSE_WORDS, NODE_CAPACITY_MAX, marketplaceRoot, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteParams, turnImages, underRoots, withLocalImages, type NodeFrame } from "./protocol";
+import { BROWSER_CHUNK_BYTES, CLOSE_WORDS, NODE_CAPACITY_MAX, marketplaceRoot, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteParams, turnImages, underRoots, withLocalImages, type NodeFrame } from "./protocol";
+import type { BrowserOp, NodeBrowsers } from "./browser";
 
 /**
  * The computer's end of the compute node (docs/compute-node.md). On the person's switch (the local `/device` page) a linked device also
@@ -38,6 +39,8 @@ export type NodeAgentOptions = {
   /** Waits between attempts; a refusal (other Codex version, switched off on the site) waits longer. */
   backoffMs?: number[];
   refusedWaitMs?: number;
+  /** The readers' browsers on this computer (browser.ts): offered to the server when a Chrome or Edge is here. */
+  browsers?: NodeBrowsers;
 };
 
 /**
@@ -93,9 +96,12 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
     const send = (frame: NodeFrame) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame)); };
     const toServer = (line: string) => send({ t: "rpc", line });
     let chain = Promise.resolve();
+    // The browser's operations in the order the server sent them: one page, one person watching it.
+    let browsing = Promise.resolve();
     let initialized: ((agent: string) => void) | undefined;
 
     const end = () => {
+      void options.browsers?.closeAll().catch(() => undefined);
       runtime?.stop();
       runtime = undefined;
       relay?.close();
@@ -126,7 +132,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
         .then((agent) => {
           runtime?.write(JSON.stringify({ method: "initialized" }));
           send({ t: "hello", protocol: NODE_PROTOCOL, codex: agent, platform: process.platform, host: (options.host ?? hostname()).slice(0, 60),
-            role: options.role, capacity: options.capacity ?? nodeCapacity() });
+            role: options.role, capacity: options.capacity ?? nodeCapacity(), ...(options.browsers?.available ? { browser: true } : {}) });
         });
     });
     socket.on("message", (raw) => {
@@ -141,6 +147,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
         return;
       }
       if (frame.t === "rpc") { chain = chain.then(() => fromServer(frame.line)).catch(() => undefined); return; }
+      if (frame.t === "browser") { browsing = browsing.then(() => browse(frame.id, frame.request)).catch(() => undefined); return; }
       if (frame.t === "files-answer") { files.get(frame.id)?.(frame); files.delete(frame.id); return; }
       if (frame.t === "image-answer") { images.get(frame.id)?.(frame); images.delete(frame.id); return; }
       if (frame.t === "gw-head") { const pending = gw.get(frame.id); pending?.response.writeHead(frame.status, frame.headers); return; }
@@ -196,6 +203,23 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
       if (!runtime) return;
       runtime.write(JSON.stringify({ id: message.id, method: message.method,
         params: rewriteParams(turnParams, { roots, mirror, work, ...(gateway ? { gateway } : {}), ...(relayOrigin ? { relay: relayOrigin } : {}) }) }));
+    }
+
+    /** One operation of the reader's browser here, answered; a picture or video goes first in pieces. */
+    async function browse(id: number, request: Record<string, unknown>): Promise<void> {
+      if (!options.browsers?.available) { send({ t: "browser-answer", id, error: "NODE_BROWSER_MISSING" }); return; }
+      try {
+        const result = await options.browsers.handle(request as BrowserOp);
+        const media = result as { state?: string; bytes?: Buffer; contentType?: string } | undefined;
+        if (media && media.state === "ok" && Buffer.isBuffer(media.bytes)) {
+          for (let at = 0; at < media.bytes.length; at += BROWSER_CHUNK_BYTES) send({ t: "browser-chunk", id, data: media.bytes.subarray(at, at + BROWSER_CHUNK_BYTES).toString("base64") });
+          send({ t: "browser-answer", id, result: { state: "ok", contentType: media.contentType ?? "", chunked: true } });
+          return;
+        }
+        send({ t: "browser-answer", id, result: result ?? null });
+      } catch (error) {
+        send({ t: "browser-answer", id, error: error instanceof Error ? error.message.slice(0, 300) : "NODE_BROWSER_FAILED" });
+      }
     }
 
     /** A picture from the server, kept in the work directory under its content's hash. */

@@ -47,6 +47,7 @@ Name: "desktopicon"; Description: "在桌面创建快捷方式"; Flags: unchecke
 
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\codex"
+Type: filesandordirs; Name: "{app}\node_modules"
 
 [Files]
 Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

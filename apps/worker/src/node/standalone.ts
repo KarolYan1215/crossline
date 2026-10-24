@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { startNodeAgent, type AppServerLines, type NodeAgentStatus } from "./agent";
 import { API_KEY_SHAPE, loginNodeWithApiKey, withControl } from "./control";
 import { TOKEN_GONE } from "./protocol";
+import { createNodeBrowsers } from "./browser";
 
 /**
  * 「Crossline 节点」, the standalone compute node (docs/compute-node.md): what the installer ships beside `node.exe` and a release build of
@@ -181,6 +182,7 @@ function reconcile(): void {
   if (!account) return;
   if (!agent) {
     agent = startNodeAgent({ url: state.site, token: current, dir: path.join(home, "relay"), spawn: appServer, host: hostname(), role: "standalone",
+      browsers: createNodeBrowsers({ profilesDir: path.join(home, "browser-profiles") }),
       log: (event) => log(event) });
     log({ type: "node.relay_started" });
   }

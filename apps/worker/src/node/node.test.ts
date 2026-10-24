@@ -8,6 +8,7 @@ import { nodeCapacity, startNodeAgent, type AppServerLines } from "./agent";
 import { loginNodeWithApiKey } from "./control";
 import { createNodeHub, type NodeHub, type NodeStatus } from "./hub";
 import { codexVersionOf, nodePath, refusal, rewriteParams, underRoots } from "./protocol";
+import { publicHttpsOnly, type NodeBrowsers } from "./browser";
 
 // Real sockets and a real relay between two ends in one process: under the full suite's load a test can take longer than vitest's 5 s.
 vi.setConfig({ testTimeout: 30_000 });
@@ -59,7 +60,7 @@ async function until<T>(read: () => T | undefined, ms = 20_000): Promise<T> {
   }
 }
 
-async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number; tokenValid?: () => boolean; role?: "device" | "standalone" } = {}) {
+async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number; tokenValid?: () => boolean; role?: "device" | "standalone"; browsers?: NodeBrowsers } = {}) {
   gatewayServer = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
@@ -86,7 +87,7 @@ async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; dea
   });
   const runtime = fakeRuntime(options.nodeCodex ?? "0.163.0");
   const agent = startNodeAgent({ url: `http://127.0.0.1:${hub.port}`, token: "good-token-0123456789abcdef", dir, spawn: runtime.spawn, backoffMs: [60_000], refusedWaitMs: 60_000,
-    role: options.role ?? "device", capacity: 3, host: "PC-A" });
+    role: options.role ?? "device", capacity: 3, host: "PC-A", ...(options.browsers ? { browsers: options.browsers } : {}) });
   stopAgent = agent.stop;
   return { runtime, agent, statuses, gateway };
 }
@@ -285,4 +286,37 @@ test("paths: only the server's skill roots are mirrored; a run's cwd goes to the
   expect(refusal("skills/config/write", {})).toBeUndefined();
   expect(codexVersionOf({ userAgent: "crossline/0.163.0 (Linux; x86_64)" })).toBe("0.163.0");
   expect(readdirSync(dir)).toEqual([]);
+});
+
+test("a node with a browser drives a reader's page for the server: operations in order, a large video back in pieces; one without is not offered", async () => {
+  const seen: string[] = [];
+  const video = Buffer.alloc(20 * 1_048_576, 7);
+  const browsers: NodeBrowsers = { available: true, closeAll: async () => {},
+    handle: async (request) => { seen.push(request.op); return request.op === "goto" ? 200 : request.op === "fetchMedia" ? { state: "ok", bytes: video, contentType: "video/mp4" } : null; } };
+  await setUp({ browsers });
+  const link = await until(() => hub!.browserFor("ws-owner"));
+  expect(link.host).toBe("PC-A");
+  await link.call({ op: "open", site: "https://www.xiaohongshu.com/explore", capture: ["/feed"] });
+  expect(await link.call({ op: "goto", url: "https://www.xiaohongshu.com/explore" })).toBe(200);
+  const media = await link.call({ op: "fetchMedia", url: "https://sns-video-bd.xhscdn.com/a.mp4", referer: "x", maxBytes: 1e9 }) as { state: string; bytes: Buffer; contentType: string };
+  expect(media).toMatchObject({ state: "ok", contentType: "video/mp4" });
+  expect(media.bytes.equals(video)).toBe(true);
+  expect(seen).toEqual(["open", "goto", "fetchMedia"]);
+});
+
+test("a node without a browser is not offered one", async () => {
+  await setUp();
+  await until(() => hub!.status("ws-owner")?.state === "ready" ? true : undefined);
+  expect(hub!.browserFor("ws-owner")).toBeUndefined();
+});
+
+test("a browser on the person's computer goes only to public https names", async () => {
+  const allow = publicHttpsOnly(async (host) => host === "inside.example.com" ? ["192.168.1.5"] : ["93.184.216.34"]);
+  expect(await allow("https://www.xiaohongshu.com/explore")).toBe(true);
+  expect(await allow("http://www.xiaohongshu.com/")).toBe(false);
+  expect(await allow("https://127.0.0.1/")).toBe(false);
+  expect(await allow("https://localhost/")).toBe(false);
+  expect(await allow("https://inside.example.com/")).toBe(false);
+  expect(await allow("https://example.com:8443/")).toBe(false);
+  expect(await allow("data:image/png;base64,AAAA")).toBe(true);
 });

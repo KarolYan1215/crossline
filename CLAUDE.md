@@ -455,6 +455,12 @@ Design, decisions, the real-ledger demo and what is not done: `docs/skills-libra
     - The reviewer decides by what each produces from what (`crossline.workflow-merge-review.v1` on `TASK_MERGE_REVIEW_SCHEMA`), once per pair of versions.
     - `workflowToKeep` keeps one; the other is switched off with `mergedInto`, and its ways are folded into the kept one's next revision.
     - 撤销合并 undoes it (`unmergeGrownSkill`).
+- **The favourites are read in a browser on the owner's own computer when a node offers one** (2026-10-24, docs/compute-node.md 「浏览器读取放到节点」).
+  - A node with Chrome or Edge says `browser: true` in its hello (`node/browser.ts` `findBrowser`, `createNodeBrowsers`); `hub.browserFor` picks it, and `startFavouritesRun` drives that browser over the node's connection (`openNodeCollectBrowser`; pictures and videos come back in 8 MB `browser-chunk`s).
+  - The window is visible on the person's screen with the node's own profile. A login or verification is done there; 「已在电脑上完成」 on the 小帮手 resolves `waitForNodeDone` through `login_done`.
+  - The node's browser goes only to public https names (`publicHttpsOnly`). `driveContext` is shared with the server's reader.
+  - The standalone installer ships `node_modules/playwright-core` from 1.1.0.
+- **What only the person can do is said by the 小帮手 on every page** (`apps/web/lib/person-calls.ts`, `app/helper-calls.tsx`): a waiting verification opens by itself; a consent, a missing login, a failing mailbox and no push device are listed and done in place.
 - **A site's verification mid-read is passed by the person on the reader's own page** (2026-10-24; HTTP 461/471 is Xiaohongshu's captcha trigger, not a depth limit).
   - The favourites job lends its page to the remote dialog (`attach`, `castContext(…, lent)`), pushes 「去验证」 and goes on from the same screen once the person presses 「验证完成」.
   - It stops as before after 15 minutes unopened, a refusal, or `VERIFICATIONS_PER_RUN` (3).

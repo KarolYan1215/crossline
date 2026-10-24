@@ -1139,6 +1139,8 @@ const mailService = createMailService({ store: analysisStore, secrets, cwd: repo
 const classifyTopics = createTopicClassifier(analysisStore, repoRoot, (workspaceId) => accountClient(workspaceId));
 configureFavouritesCollector({
   outputRoot: defaultOutputRoot(),
+  // The owner's computer reads the favourites when a node of theirs offers a browser (node/browser.ts); the hub is set up further down.
+  nodeBrowser: (workspaceId) => workspaceId === runtimeOwner(analysisStore) ? nodeHub?.browserFor(workspaceId) : undefined,
   reclaim: () => codexSupervisor?.runtimes?.reclaim(),
   memory: createCollectMemory({ reclaim: () => codexSupervisor?.runtimes?.reclaim() }),
   // Sorting the titles is the person's own request at work: it runs while the quota allows core work.

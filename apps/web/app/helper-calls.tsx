@@ -28,17 +28,27 @@ export function HelperCalls() {
   useEffect(() => { setLater(laterOf()); }, []);
   const shown = calls.filter((call) => call.urgent || !(later[call.id] && Date.now() - later[call.id]! < LATER_MS));
   // An urgent call opens its dialog at once, on whatever page this is; closed, it is not forced open again (the badge stays).
-  const urgent = shown.find((call) => call.urgent && call.action.kind === "remote" && !seenUrgent.includes(call.id));
+  const urgent = shown.find((call) => call.urgent && (call.action.kind === "remote" || call.action.kind === "node") && !seenUrgent.includes(call.id));
   useEffect(() => {
     if (!urgent || remote) return;
     setSeenUrgent((ids) => [...ids, urgent.id]);
     if (urgent.action.kind === "remote") setRemote(urgent.action);
+    // On the person's computer the window is theirs: the list opens here with the one button to say it is done.
+    else setOpen(true);
   }, [urgent, remote]);
 
   const act = async (call: PersonCall) => {
     const action = call.action;
     if (action.kind === "href") { window.location.href = action.href; return; }
     if (action.kind === "push") { const result = await enablePush(); setNote(result.message); if (result.ok) refreshHelper(); return; }
+    if (action.kind === "node") {
+      const result = await fetch(`/api/skills/grown/${encodeURIComponent(action.workflowId)}`, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "login_done", service: action.service }) }).then((response) => response.json() as Promise<{ ok: boolean; message?: string }>)
+        .catch(() => ({ ok: false, message: "后台服务没有回应。" }));
+      setNote(result.ok ? "好的，读取接着往下" : result.message ?? "没有送达");
+      if (result.ok) { setOpen(false); refreshHelper(); }
+      return;
+    }
     if (action.purpose === "login") {
       setNote(`正在打开${action.label}的登录窗口`);
       const result = await fetch(`/api/skills/grown/${encodeURIComponent(action.workflowId)}`, { method: "POST", headers: { "content-type": "application/json" },
@@ -60,7 +70,8 @@ export function HelperCalls() {
         <p>{call.text}</p>
         <span className="helper-calls-actions">
           <button type="button" className="primary-button" onClick={() => { void act(call); }}>
-            {call.action.kind === "href" ? call.action.label : call.action.kind === "push" ? "开启推送" : call.action.purpose === "verify" ? "现在验证" : `登录${call.action.label}`}</button>
+            {call.action.kind === "href" ? call.action.label : call.action.kind === "push" ? "开启推送" : call.action.kind === "node" ? "已在电脑上完成"
+              : call.action.purpose === "verify" ? "现在验证" : `登录${call.action.label}`}</button>
           {!call.urgent && <button type="button" className="secondary-button" onClick={() => { putOff(call.id); setLater(laterOf()); }}>明天再说</button>}
         </span>
       </li>)}</ul>
