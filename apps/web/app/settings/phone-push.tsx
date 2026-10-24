@@ -29,8 +29,7 @@ export function PhonePush({ privateNetwork = true }: { privateNetwork?: boolean 
   }, []);
 
   const enable = async () => {
-    setStatus("请求通知权限…");
-    setStatus((await enablePush()).message);
+    setStatus((await enablePush(setStatus)).message);
     await load();
   };
   const test = async () => {

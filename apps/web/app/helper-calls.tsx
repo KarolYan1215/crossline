@@ -40,7 +40,7 @@ export function HelperCalls() {
   const act = async (call: PersonCall) => {
     const action = call.action;
     if (action.kind === "href") { window.location.href = action.href; return; }
-    if (action.kind === "push") { const result = await enablePush(); setNote(result.message); if (result.ok) refreshHelper(); return; }
+    if (action.kind === "push") { const result = await enablePush(setNote); setNote(result.message); if (result.ok) refreshHelper(); return; }
     if (action.kind === "node") {
       const result = await fetch(`/api/skills/grown/${encodeURIComponent(action.workflowId)}`, { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "login_done", service: action.service }) }).then((response) => response.json() as Promise<{ ok: boolean; message?: string }>)
