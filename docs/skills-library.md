@@ -304,3 +304,41 @@
 **每条笔记的全部内容。** 图片（全部，含实况照片的视频）和视频由浏览器自己的请求（`page.request`，带页面的 cookie，笔记页为 referer）存进 `notes/<id>/`，单个文件上限 500 MB。之后（`apps/worker/src/note-media.ts`）：图片和视频关键帧交给 Skill `crossline-media-describer`（low 档）看图，输出描述与图中全部文字；一次最多 12 张、整条笔记一起，约 1000 条笔记（平均 4 张图）约 350 次运行；视频用 ffmpeg 抽 16 kHz 音轨，由录音用的本机 Whisper 转写，再抽 4 张关键帧一起描述。AVIF/HEIC 先用 ffmpeg 转 JPEG。每条写成 `note-<id>.md`（标题、正文、标签、作者、时间、类型、互动、每张图的描述与文字、视频转写与关键帧、原链接），目录写 `index.md`。看图只在 Codex 自己的登录上运行（`SKILL_NEEDS` 的 `vision`）。本机 ffmpeg：winget 的 Gyan.FFmpeg 9.0.2 已在 PATH；`CROSSLINE_FFMPEG` 可另指。
 
 **试读。** `pnpm exec tsx scripts/xhs-read-trial.ts --workspace <id> [--notes N] [--catch-up] [--media]`：用这台电脑上该工作流的配置目录，在账本副本上读，文件写到临时目录，逐条打印每个来源给了什么；只有遇到安全验证时把停读写回实时账本。
+
+## 不重复已做过的（2026-10-24）
+
+本人问「是否会重复分析已经分析过的」。逐项核对：
+
+- **笔记读取**、**按标题分话题**、**图片描述**都按笔记 id 记账（`collect.notes.<工作流>` 的 `read`、话题计划的 `classified`、笔记的 `describedAt`），不会重复。
+- **列表重新从头翻**：列表没有读到底（被限流或停滞）时，下次只能从第一屏重新翻到上次停的地方。这一步只访问页面，不用模型；不调用小红书的接口就跳不过去，所以保留。
+- **整理话题**原来有两处重复，已改：
+  - 每次运行都让助手把**所有话题文件**整份重写。现在只写本次涉及的话题和「话题总览.md」；没涉及的话题由 Crossline 从上次结果复制过来（`carryTopicFiles`）。
+  - 一次整理还没结束、下一次读取又结束时，两次整理会拿到同一批笔记。现在整理中的笔记被占住（`claimOrganising`），第二次只拿新读的。
+- **两个工作流读同一份收藏**。这是最大的一处重复：旧的「每周五整理小红书收藏夹」（`flow-organize-xiaohongshu-media-research`）有自己的账本，按「立即运行」后又从头列了一遍收藏，接着还会把每篇再读一遍。现在一个账号只由按话题整理的工作流访问小红书（`sharedFavouritesReader`）。其他收藏类工作流运行时：
+  - 把自己账本里列过、读过的条目并进它的账本；
+  - 用它读好的笔记文件夹做自己的事，不再打开小红书（`organiseFromShared`）。
+
+## 工作流自我改进（2026-10-24，本人：「crossline 自己能够迭代优化工作流，用户不能使用 coding agent 进行修复」）
+
+`apps/worker/src/workflow-improver.ts`，db 端在 `packages/db/src/skills.ts`。
+
+**信号**（`improvementSignals`，只算上次修订或安装之后的）：
+- 本人在 Skill 库工作流卡片上写的「哪里要改」（`skill.grown.feedback`）；
+- 本人审阅这个工作流的结果时写的意见或退回理由；
+- 本人带话要求重做；
+- 它自己的运行失败两次以上。重启、本人中止、额度不足、网站验证不算，这些改工作流也没用。
+
+**修订**（`workflowImprovePass`，在 workflowPass 里，每个账号都跑，不限机器所有者）：
+- 一个账号同时只修订一个工作流。
+- 本人的意见算本人自己的事，额度够就跑（core）；只有失败时算系统的主意，额度正常才跑（discretionary）。
+- 冷却 6 小时；同一批信号最多试 3 次；本人有新意见时立刻再试。
+- 助手拿到工作流现在的全部文件（只读）、最近两次运行的结果和信号，用 `skill-creator` 写出完整的新 `skill/` 和一份 `CHANGES.md`。
+- 意见用不着改文件，或者问题在 Crossline 程序本身时，助手只写一份 `NO_CHANGE.md` 说明原因，这批信号就算答过了。
+
+**生效**（`installRevision`）：
+- 和新长出的工作流过同一套检查：manifest、扫描、审查。name、lines、category 不变。
+- 旧版本存进 `skills.grown.versions.<id>`，最多 10 个。新版本号 +1，事件 `skill.grown.revised`。
+- 新版读了新网站、用了新登录、写了新风险或多了离开本机的步骤（`revisionWidens`）时，回到「待本人确认风险」。
+- 改完告诉本人改了什么。卡片上的「回到上一版」（`revertGrownSkill`）恢复上一版的文件和检查结果，并把 `improvedAt` 移到当下，同一批信号不会再触发修订。
+
+**改不了的**：Crossline 自己的代码，例如收藏读取器、节奏、验证判断。工作流能改的只有它的 SKILL.md、脚本和 manifest。

@@ -337,6 +337,7 @@ function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSki
       <dt>审查</dt><dd className="gen"><Clamp lines={1} text={flow.reasons.join("；")} /></dd>
       <dt>上次使用</dt><dd>{flow.lastRunAt ? `${day(flow.lastRunAt)} 执行` : day(flow.lastUsedAt)}{flow.pinned ? "" : "；30 天未用会被移除，保留后不再移除"}</dd>
     </dl>
+    <ImproveFlow flow={flow} send={send} onChanged={onChanged} setNote={setNote} />
     {flow.skillText && <details className="advanced sk-full"><summary>工作流全文</summary><Markdown className="long-form" text={flow.skillText} /></details>}
     <ScriptsConsent view={flow} shell={shell} endpoint={`/api/skills/grown/${encodeURIComponent(flow.id)}`}
       onChanged={(allowedAt) => { const { scriptsAllowedAt: _was, ...rest } = flow; onChanged(allowedAt ? { ...rest, scriptsAllowedAt: allowedAt } : rest); }} />
@@ -474,6 +475,35 @@ function AiToolsCard({ initial }: { initial: AiTool[] }) {
  * Favourites organised by topic: the two paces, each the person's to change (2026-10-22) — notes a day for the day's topic, and the night
  * window's hours (equal hours: no night reading) — and how far each topic is read.
  */
+/**
+ * What the person says the workflow should do differently, in words: Crossline revises the workflow itself (the assistant rewrites its
+ * files, checked like a new one) and says what changed; the last revision can be taken back here.
+ */
+function ImproveFlow({ flow, send, onChanged, setNote }: { flow: GrownSkillView; send: (method: "POST" | "DELETE", body?: object) => Promise<boolean>;
+  onChanged: (flow: GrownSkillView | undefined) => void; setNote: (note: string) => void }) {
+  const [text, setText] = useState("");
+  const improvement = flow.improvement;
+  return <div className="sk-improve">
+    <p className="st-hint">第 {improvement.version} 版{improvement.lastChange ? `，${day(improvement.lastChange.at)} 按意见修订：` : "。"}
+      {improvement.lastChange && <span className="gen">{improvement.lastChange.changes.replace(/\s*\n+\s*/g, "；")}</span>}
+      {improvement.improving ? " 正在按意见修订。" : improvement.pending.length ? ` 已收到 ${improvement.pending.length} 条意见，下一轮后台修订。` : ""}</p>
+    <label className="sk-improve-box"><span>哪里要改（写给 Crossline，它会自己改这个工作流）</span>
+      <textarea rows={2} value={text} maxLength={2000} placeholder="例如：话题文件太长，每篇只留三行要点" onChange={(event) => setText(event.target.value)} /></label>
+    <span className="sk-actions">
+      <button type="button" className="secondary-button" disabled={!text.trim()} onClick={async () => {
+        if (await send("POST", { action: "improve", text })) {
+          onChanged({ ...flow, improvement: { ...improvement, pending: [...improvement.pending, text.trim()] } });
+          setText(""); setNote("已收到，后台会按这条意见修订工作流，改好后通知");
+        } else setNote("未保存");
+      }}>让它改进</button>
+      {improvement.canRevert && <button type="button" className="secondary-button" onClick={async () => {
+        if (await send("POST", { action: "revert" })) { onChanged({ ...flow, improvement: { ...improvement, version: Math.max(1, improvement.version - 1), canRevert: false } }); setNote("已回到上一版"); }
+        else setNote("未完成");
+      }}>回到上一版</button>}
+    </span>
+  </div>;
+}
+
 function TopicsPace({ flow, topics, send, onChanged, setNote }: { flow: GrownSkillView; topics: NonNullable<GrownSkillView["topics"]>;
   send: (method: "POST" | "DELETE", body?: object) => Promise<boolean>; onChanged: (view: GrownSkillView | undefined) => void; setNote: (text: string) => void }) {
   const [perDay, setPerDay] = useState(topics.perDay);

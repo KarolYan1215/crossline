@@ -632,6 +632,9 @@ test("favourites by topic: the list read for its titles, sorted into topics, the
     expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, new Date("2026-10-23T03:00:00Z"))).toMatchObject({ state: "started" });
     await collectionDone(ws, record.id);
     expect(opened).toEqual([id(1), id(2), id(3), id(4), id(5)]);
+    // The day's organising run has not ended: the night's run gets only the notes it does not already have.
+    expect(runs.at(-1)!.what).not.toContain(`note-${id(1)}.md`);
+    expect(runs.at(-1)!.what).toContain(`note-${id(3)}.md`);
     // A run that broke holds the site: the tick starts nothing, however late, until the person presses 「立即运行」.
     holdAfterFailure(store, ws, "Target crashed");
     // A month on, by night: the list is due again, so only the hold stops it (a wall-clock date made this pass only between 02 and 08 UTC).

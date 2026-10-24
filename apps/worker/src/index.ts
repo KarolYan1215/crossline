@@ -11,6 +11,7 @@ import { createSponsorService, sponsorFromEnv, type SponsorService } from "./spo
 import { CrosslineStore, aiToolsFor, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { closeInterruptedCollections, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
+import { workflowImprovePass } from "./workflow-improver";
 import { NEEDS_PER_PASS, createNeedChecker, needsAwaitingCheck } from "./need-check";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -502,6 +503,15 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
       ? { state: "blocked", code: "AGENT_PAUSED", message: "助手已暂停。" } : agentService.runFree(workspaceId, input, after), browserProfilesRoot(workspaceId));
     if (started.length) console.info(JSON.stringify({ type: "favourites.topics_started", checkedAt, workspaceId, started }));
   } catch { /* next tick */ }
+  // A workflow the person commented on, or whose runs keep failing, is revised by the assistant (workflow-improver.ts); every account.
+  if (!assistantOff && !agentService.runningTasks(workspaceId).some((taskId) => taskId.startsWith("improve-"))) {
+    try {
+      const spend = await spendFor(workspaceId);
+      const improving = workflowImprovePass(analysisStore, workspaceId, (input, after) => agentService.runFree(workspaceId, input, after),
+        { client: () => accountClient(workspaceId), cwd: repoRoot, workRoot: path.join(dataDir, "workflow-improve"), spend: (kind) => spendAllows(spend, kind) });
+      if (improving) console.info(JSON.stringify({ type: "skill.grown.improve_started", checkedAt, workspaceId, id: improving }));
+    } catch { /* next tick */ }
+  }
   // Growing a workflow writes and tests scripts with the runtime's `skill-creator`: only the shell assistant can (the owner's own Codex).
   if (assistantOff || !machineOwner(workspaceId) || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
   const candidate = growCandidates(analysisStore, workspaceId)[0];

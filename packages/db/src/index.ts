@@ -487,7 +487,7 @@ const PERSON_EVENTS = ["ask.answered", "block.confirmed", "execution.confirmed",
   // read as days away, and the engagement tier held back the planning their answers were for.
   "line.created", "line.updated", "line.ranked", "lines.set_up", "dates.decided", "source.project_assigned",
   // Decisions about skills the person makes on Skill 库 (2026-10-20): a script's leave, a workflow's risks accepted, a site logged in.
-  "skill.scripts_allowed", "skill.scripts_revoked", "skill.grown.consented", "skill.grown.logged_in"];
+  "skill.scripts_allowed", "skill.scripts_revoked", "skill.grown.consented", "skill.grown.logged_in", "skill.grown.feedback", "skill.grown.reverted"];
 const PERSON_ACTIVITY_SQL = `
   SELECT created_at AS at FROM conversation_messages WHERE workspace_id = @ws AND role = 'person' AND created_at >= @since
   UNION ALL SELECT created_at FROM onboarding_messages WHERE workspace_id = @ws AND role = 'user' AND created_at >= @since

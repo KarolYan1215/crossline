@@ -10,6 +10,7 @@ const publicSkill = (id: string, lastUsedAt: string, installedAt = "2026-10-01T0
 const flow = (id: string, over: Partial<GrownSkillView> = {}): GrownSkillView => ({ id, summary: `每周剪辑 ${id}`, name: id, category: "剪辑", lines: ["media"], lineLabel: "自媒体",
   schedule: "每周五 18:00", action: "run", origin: "本人要求", steps: [{ title: "粗剪", person: false }, { title: "发布", person: true }], status: "active", pinned: false,
   verdict: "usable", access: [], risks: [], risk: "low", reasons: ["可用"], files: 1, createdAt: "2026-10-01T00:00:00Z", lastUsedAt: "2026-10-02T00:00:00Z", skillText: "",
+  improvement: { version: 1, canRevert: false, pending: [], improving: false },
   ...scripts, ...over });
 
 test("最近用过 lists what runs used last, newest first; a public skill never called since install is not 'used'", () => {

@@ -183,7 +183,39 @@ export type GrownSkillRecord = {
   lastRead?: { at: string; taskId: string; directory: string; items: number; pages: Array<{ url: string; click?: string }> };
   /** Its time came while the assistant was busy: tried again at the next ticks of that day, past the usual three hours. */
   heldSince?: string;
+  /**
+   * Which version is in force (1 when installed) and when Crossline last revised it from what its runs and the person said
+   * (docs/skills-library.md 「工作流自我改进」); the versions it replaced are kept under `grownVersionsKey`.
+   */
+  version?: number;
+  improvedAt?: string;
 };
+
+/** The versions of a grown workflow a revision replaced, newest last (at most `GROWN_VERSIONS_KEPT`). */
+export const grownVersionsKey = (id: string) => `skills.grown.versions.${id}`;
+export const GROWN_VERSIONS_KEPT = 10;
+/** What the person says a workflow should do differently (Skill 库 「让它改进」): the strongest reason to revise it. */
+export const WORKFLOW_FEEDBACK_EVENT = "skill.grown.feedback";
+export type GrownSkillVersion = {
+  version: number; at: string;
+  /** Why it was replaced (the revision's own note of what changed). */
+  replacedBecause: string;
+  manifest: WorkflowManifest; files: Array<{ path: string; text: string }>;
+  scan: SkillScan; review: PublicSkillReview & { final: PublicSkillVerdict };
+};
+
+/**
+ * Whether a revision reaches further than the version the person agreed to: a site it did not read, a login it did not use, a risk it
+ * did not state, or a step leaving the machine that was not there. Such a revision waits for the person's consent again.
+ */
+export function revisionWidens(before: WorkflowManifest, after: WorkflowManifest): boolean {
+  const sites = new Set((before.access ?? []).map((item) => `${item.site}|${item.login}`));
+  const risks = new Set(before.risks ?? []);
+  const external = new Set(before.steps.filter((step) => step.external).map((step) => step.title));
+  return (after.access ?? []).some((item) => !sites.has(`${item.site}|${item.login}`))
+    || (after.risks ?? []).some((risk) => !risks.has(risk))
+    || after.steps.some((step) => step.external && !external.has(step.title));
+}
 
 export function readGrownLibrary(raw: string | undefined): GrownSkillRecord[] {
   if (!raw) return [];

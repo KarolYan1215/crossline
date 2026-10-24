@@ -1,9 +1,9 @@
 import {
   AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey, scriptsAllowable, scriptsDigest, scriptsRunnable,
-  readGrownLibrary, readMineSkill, readSkillLibrary,
-  type AiTool, type GrownSkillRecord, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
+  readGrownLibrary, readMineSkill, readSkillLibrary, GROWN_VERSIONS_KEPT, WORKFLOW_FEEDBACK_EVENT, grownVersionsKey, revisionWidens,
+  type AiTool, type GrownSkillRecord, type GrownSkillVersion, type WorkflowManifest, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { CrosslineStore } from "./index";
 import { listAgentTasks } from "./agent";
 
@@ -248,4 +248,71 @@ export function removeAiTool(store: CrosslineStore, workspaceId: string, id: str
   if (!current.some((tool) => tool.id === id)) return false;
   store.setSetting(workspaceId, AI_TOOLS_SETTING, JSON.stringify(current.filter((tool) => tool.id !== id)));
   return true;
+}
+
+/** The versions a grown workflow's revisions replaced, oldest first. */
+export function readGrownVersions(store: CrosslineStore, workspaceId: string, id: string): GrownSkillVersion[] {
+  try { const parsed = JSON.parse(store.getSetting(workspaceId, grownVersionsKey(id)) ?? "[]") as GrownSkillVersion[]; return Array.isArray(parsed) ? parsed : []; }
+  catch { return []; }
+}
+const grownFilesOf = (store: CrosslineStore, workspaceId: string, id: string): Array<{ path: string; text: string }> => {
+  try { return (JSON.parse(store.getSetting(workspaceId, grownSkillFilesKey(id)) ?? "{}") as { files?: Array<{ path: string; text: string }> }).files ?? []; }
+  catch { return []; }
+};
+const fileHashes = (files: Array<{ path: string; text: string }>) => files.map((file) => ({ path: file.path,
+  sha256: createHash("sha256").update(file.text, "utf8").digest("hex"), bytes: Buffer.byteLength(file.text, "utf8") }));
+
+/** The person tells a workflow what to do differently (`skill.grown.feedback`); Crossline revises it on its next pass. */
+export function addWorkflowFeedback(store: CrosslineStore, workspaceId: string, id: string, text: string, now = new Date()): boolean {
+  const words = text.trim().slice(0, 2_000);
+  if (!words || !readGrownSkills(store, workspaceId).some((record) => record.id === id)) return false;
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${WORKFLOW_FEEDBACK_EVENT}:${id}:${now.toISOString()}`, type: WORKFLOW_FEEDBACK_EVENT,
+    entityId: id, payload: { id, text: words, by: "person" } });
+  return true;
+}
+
+/**
+ * A revision Crossline made and checked (workflow-improver.ts) put in force: the version it replaces is kept, the files, manifest, scan
+ * and review are replaced, and one that reaches further than what the person agreed to (`revisionWidens`) waits for their consent
+ * again. Its lines never change. Returns the new version's number.
+ */
+export function reviseGrownSkill(store: CrosslineStore, workspaceId: string, id: string,
+  next: { manifest: WorkflowManifest; files: Array<{ path: string; text: string }>; scan: GrownSkillRecord["scan"]; review: GrownSkillRecord["review"]; changes: string; taskId: string },
+  now = new Date()): { version: number; needsConsent: boolean } | undefined {
+  const records = readGrownSkills(store, workspaceId);
+  const record = records.find((item) => item.id === id);
+  if (!record) return undefined;
+  const at = now.toISOString();
+  const version = (record.version ?? 1) + 1;
+  const kept: GrownSkillVersion = { version: record.version ?? 1, at: record.improvedAt ?? record.createdAt, replacedBecause: next.changes.slice(0, 600),
+    manifest: record.manifest, files: grownFilesOf(store, workspaceId, id), scan: record.scan, review: record.review };
+  store.setSetting(workspaceId, grownVersionsKey(id), JSON.stringify([...readGrownVersions(store, workspaceId, id), kept].slice(-GROWN_VERSIONS_KEPT)));
+  const manifest = { ...next.manifest, lines: record.manifest.lines };
+  const needsConsent = Boolean(record.manifest.access?.length || manifest.access?.length) && revisionWidens(record.manifest, manifest);
+  store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: next.files }));
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id !== id ? item : { ...item, manifest, files: fileHashes(next.files), scan: next.scan, review: next.review,
+    version, improvedAt: at, updatedAt: at, ...(needsConsent && item.status === "active" ? { status: "needs_consent" as const } : {}) }));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.revised:${id}:${version}:${at}`, type: "skill.grown.revised",
+    entityId: id, payload: { id, version, changes: next.changes.slice(0, 600), taskId: next.taskId, needsConsent, final: next.review.final } });
+  return { version, needsConsent };
+}
+
+/**
+ * The person takes a revision back: the version before it is in force again, as it was (its files, manifest and checks). The signals the
+ * revision answered are not answered again: `improvedAt` moves to now. Returns the version restored.
+ */
+export function revertGrownSkill(store: CrosslineStore, workspaceId: string, id: string, now = new Date()): number | undefined {
+  const records = readGrownSkills(store, workspaceId);
+  const record = records.find((item) => item.id === id);
+  const versions = readGrownVersions(store, workspaceId, id);
+  const previous = versions.at(-1);
+  if (!record || !previous) return undefined;
+  const at = now.toISOString();
+  store.setSetting(workspaceId, grownVersionsKey(id), JSON.stringify(versions.slice(0, -1)));
+  store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: previous.files }));
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id !== id ? item : { ...item, manifest: previous.manifest, files: fileHashes(previous.files),
+    scan: previous.scan, review: previous.review, version: previous.version, improvedAt: at, updatedAt: at }));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.reverted:${id}:${at}`, type: "skill.grown.reverted",
+    entityId: id, payload: { id, from: record.version ?? 1, to: previous.version } });
+  return previous.version;
 }
