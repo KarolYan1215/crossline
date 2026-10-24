@@ -177,7 +177,11 @@ export function workflowImprovePass(store: CrosslineStore, workspaceId: string, 
     // The files in force as a read-only input (scripts included, whatever the scan allowed to run: the revision may fix them).
     const current = path.join(deps.workRoot, workspaceId, taskId);
     rmSync(current, { recursive: true, force: true });
-    for (const file of storedFiles(store, workspaceId, record.id)) {
+    const files = storedFiles(store, workspaceId, record.id);
+    // A workflow Crossline installed itself (the favourites by topic) keeps its manifest in the record only: it goes in as workflow.json,
+    // or the revision has none to start from (2026-10-24: 「workflow.json 不是对象」).
+    if (!files.some((file) => file.path === "workflow.json")) files.push({ path: "workflow.json", text: JSON.stringify(record.manifest, null, 2) });
+    for (const file of files) {
       const target = path.join(current, "skill", file.path);
       mkdirSync(path.dirname(target), { recursive: true });
       writeFileSync(target, file.text);

@@ -87,6 +87,8 @@ test("what the person says about a workflow makes Crossline revise it, checked l
   expect(runs[0]!.what).toContain("每篇只留三行要点");
   // The files in force are its read-only input.
   expect(readFileSync(path.join(runs[0]!.inputs![0]!, "skill", "SKILL.md"), "utf8")).toContain("小红书收藏按话题整理");
+  // Installed by Crossline itself, it has no workflow.json among its files: the manifest goes in as one.
+  expect(JSON.parse(readFileSync(path.join(runs[0]!.inputs![0]!, "skill", "workflow.json"), "utf8"))).toMatchObject({ name: "xiaohongshu-favourites-topics" });
   // One revision at a time: the next pass starts nothing while it runs.
   expect(workflowImprovePass(store, ws, () => ({ state: "started", taskId: "x" }), { client: () => undefined, cwd: ".", workRoot: path.join(root, "work"), spend: () => true })).toBeUndefined();
   const dir = path.join(root, "revised");
