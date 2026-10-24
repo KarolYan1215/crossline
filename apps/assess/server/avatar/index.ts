@@ -269,6 +269,6 @@ export function avatarImagePath(result: StoredResult): string {
 
 /** The type's template PNG on disk, the woman's or the man's. */
 export function templateImagePath(code: string, variant: TemplateVariant = "female"): string {
-  if (!/^[CD][LX][WB][UV]$/.test(code)) throw new Error(`AVATAR_TYPE_UNKNOWN: ${code}`);
+  if (!/^[RW][OU][BH][AG]$/.test(code)) throw new Error(`AVATAR_TYPE_UNKNOWN: ${code}`);
   return path.join(templatesDir(), `${code}-${variant}.png`);
 }

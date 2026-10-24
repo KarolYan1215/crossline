@@ -2,17 +2,18 @@ import { SCHWARTZ_VALUES, redactPortrait, type PortraitReport } from "./portrait
 export { CHARACTER_EXPRESSIONS, CHARACTER_POSES } from "./portrait-character";
 
 /**
- * Crossline's own typing (redesigned 2026-10-17 with the owner, docs/assess-redesign.md): four dimensions of how a person runs several
- * lines of life, each taken from a body of research and scored 0–100 (0 = left pole, 100 = right pole) — by the quick test from
- * independently measured poles, by the portrait writer from evidence — read as a four-letter code into one of sixteen fixed types in four
- * groups. The names live here, not in the model's answer, so the same profile always lands on the same, comparable, shareable type.
+ * Crossline's own typing (redesigned 2026-10-24 with the owner): what kind of super individual a person is in the AI era — four
+ * dimensions of how they work with AI and how many lines they run, each taken from a body of research and scored 0–100 (0 = left pole,
+ * 100 = right pole) — by the quick test from situational answers, by the portrait writer from evidence — read as a four-letter code into
+ * one of sixteen fixed types in four groups. The names live here, not in the model's answer, so the same profile always lands on the same,
+ * comparable, shareable type. The letters are coordinates only: no page or poster shows them beside a type's name.
  *
- * The sixteen names and the thirty-two figures were kept from the first version (2026-10-08); only the codes moved, letter for letter in
- * the same positions: S→C, G→D, E→L, I→X, M→W, R→B, P→U, A→V. No letter is one of MBTI's (E I S N T F J P) or the first version's.
+ * It replaced the 2026-10-17 typing (主线集中度 / 探索–利用 / 角色边界 / 投入节律, codes like DXBV), which was almost all about running
+ * several lines and said nothing about AI (the owner, 2026-10-24: 「过重地谈论跨人生主线并行，忽略了 AI 时代和超级个体」).
  */
 
-export type TypeAxisId = "concentration" | "orientation" | "boundary" | "pacing";
-/** Each letter is the initial of an English word (`en`), so the code reads as words: DLWU = Diversified, Leverage, Walled, Uniform. */
+export type TypeAxisId = "collab" | "purpose" | "build" | "lines";
+/** Each letter is the initial of an English word (`en`); the eight letters are all different and none is one of MBTI's. */
 export type TypeAxis = {
   id: TypeAxisId;
   /** The dimension's name, and what it measures in one sentence. */
@@ -24,68 +25,62 @@ export type TypeAxis = {
   sources: string;
 };
 export const TYPE_AXES: TypeAxis[] = [
-  { id: "concentration", name: "主线集中度", question: "时间与身份认同集中在一条主线上，还是分布在几条主线上",
-    left: { letter: "C", label: "单线主导", en: "Concentrated", definition: "一条主线占主导地位，其他领域服务于它或为它让路" },
-    right: { letter: "D", label: "多线并行", en: "Diversified", definition: "两条及以上主线获得相近的时间与认同投入" },
-    sources: "Sieber 1974 角色累积；Handy 1989 组合型职业；Unsworth, Yeo & Beck 2014 多目标追求" },
-  { id: "orientation", name: "探索–利用取向", question: "深化已掌握的能力与领域，还是进入陌生的领域与方法",
-    left: { letter: "L", label: "利用", en: "Leverage", definition: "在已掌握的能力与领域内持续改进，追求效率与确定的回报" },
-    right: { letter: "X", label: "探索", en: "eXplore", definition: "主动进入陌生领域、尝试新方法，接受更高的不确定性" },
-    sources: "March 1991；Gupta, Smith & Shalley 2006；Mom, van den Bosch & Volberda 2009" },
-  { id: "boundary", name: "角色边界管理", question: "各条主线之间划清时间与情境的边界，还是让边界可渗透、相互交织",
-    left: { letter: "W", label: "分隔", en: "Walled", definition: "为每条主线划定明确的时间与情境边界，减少相互干扰" },
-    right: { letter: "B", label: "整合", en: "Blended", definition: "各条主线在时间、情境与思维上相互渗透，允许随时切换与借用" },
-    sources: "Nippert-Eng 1996；Ashforth, Kreiner & Fugate 2000；Kreiner 2006" },
-  { id: "pacing", name: "投入节律", question: "投入在时间上均匀分布，还是集中在若干高强度阶段",
-    left: { letter: "U", label: "均匀", en: "Uniform", definition: "投入在时间上分布较为平均，按固定节奏持续推进" },
-    right: { letter: "V", label: "波动", en: "Variable", definition: "投入集中在截止期前或状态好的阶段，其余时间投入较低" },
-    sources: "Gersick 1988 间断平衡；Gevers, Rutte & van Eerde 2006 工作节奏风格" }
+  { id: "collab", name: "协作形态", question: "把活切开分段交给 AI，还是从头到尾和 AI 交织着做",
+    left: { letter: "R", label: "接力", en: "Relay", definition: "先自己拆好任务，把其中几段交给 AI，再把结果接回来" },
+    right: { letter: "W", label: "共生", en: "Weave", definition: "从第一步起就和 AI 一来一回，边做边改，人和 AI 的部分分不开" },
+    sources: "Dell'Acqua, Mollick 等 2023（HBS 24-013，半人马与赛博格）" },
+  { id: "purpose", name: "用 AI 图什么", question: "用 AI 是为了拿到结果，还是为了让自己变强",
+    left: { letter: "O", label: "交付", en: "Output", definition: "要的是能交出去的结果，过程交给 AI 越多越好" },
+    right: { letter: "U", label: "精进", en: "Upskill", definition: "借 AI 学会、看懂、练熟，下次自己也能做" },
+    sources: "Anthropic Economic Index 2025（自动化与增强）；Lee 等 2025（CHI，知识工作者的批判性思考）" },
+  { id: "build", name: "构建方式", question: "先把蓝图想清楚再动手，还是先上手拼出来再改",
+    left: { letter: "B", label: "蓝图", en: "Blueprint", definition: "先定目标、结构和步骤，再按计划推进" },
+    right: { letter: "H", label: "拼装", en: "Hack", definition: "先用手边的东西拼出一版，边试边改，在改的过程里想清楚" },
+    sources: "Turkle & Papert 1990（规划者与拼装者）" },
+  { id: "lines", name: "人生主线", question: "时间和身份集中在一条主线，还是分给几条线",
+    left: { letter: "A", label: "单核", en: "Anchor", definition: "一条主线占主导，AI 省下的时间也投回它" },
+    right: { letter: "G", label: "多星", en: "Galaxy", definition: "同时经营几条分量相近的线，AI 让每条线都能转起来" },
+    sources: "Sieber 1974 角色累积；Ramarajan 2014 多重身份；Teodoridis, Bikard & Vakili 2019 通才与专才" }
 ];
 
 /**
- * The four groups (first two letters: concentration × orientation), each one muted Morandi hue (decided 2026-10-14): `tone` is the
- * figure's outfit colour, `tint` the card's and the figure's backdrop, `colour` the same hue deep enough for text (at least 7:1 on the
- * poster's paper, checked in portrait-type.test.ts) — sage for 工匠组, dusty rose for 求索组, haze blue for 架构组, clay for 开拓组.
+ * The four groups (first two letters: collab × purpose), each one muted Morandi hue (kept from 2026-10-14): `tone` is the figure's outfit
+ * colour, `tint` the card's and the figure's backdrop, `colour` the same hue deep enough for text (at least 7:1 on the poster's paper,
+ * checked in portrait-type.test.ts) — haze blue for 甲方派, sage for 蒸馏派, clay for 机甲派, dusty rose for 共修派.
  */
 export const TYPE_GROUPS: Record<string, { name: string; colour: string; tone: string; tint: string; blurb: string }> = {
-  CL: { name: "工匠组", colour: "#3D4A35", tone: "#8C9A7E", tint: "#E2E6DA", blurb: "集中一条主线，深化已有优势" },
-  CX: { name: "求索组", colour: "#66404A", tone: "#A88C93", tint: "#EBDEE0", blurb: "集中一条主线，开辟新问题" },
-  DL: { name: "架构组", colour: "#34495A", tone: "#8497A6", tint: "#DCE3E9", blurb: "多线并行，深化已有优势" },
-  DX: { name: "开拓组", colour: "#623E29", tone: "#B48C72", tint: "#EFE2D7", blurb: "多线并行，进入新领域" }
+  RO: { name: "甲方派", colour: "#34495A", tone: "#8497A6", tint: "#DCE3E9", blurb: "把活拆开派给 AI，自己验收结果" },
+  RU: { name: "蒸馏派", colour: "#3D4A35", tone: "#8C9A7E", tint: "#E2E6DA", blurb: "让 AI 当师傅，学会了自己上" },
+  WO: { name: "机甲派", colour: "#623E29", tone: "#B48C72", tint: "#EFE2D7", blurb: "和 AI 合体干活，只看产出" },
+  WU: { name: "共修派", colour: "#66404A", tone: "#A88C93", tint: "#EBDEE0", blurb: "和 AI 一起变强" }
 };
 
 /**
- * Sixteen types (names kept from 2026-10-14, codes moved 2026-10-17). `blurb` describes the four positions in plain words; it is also the
- * fallback one-liner for a report written before the writer gave a personal `summary`.
+ * Sixteen types (named by the owner, 2026-10-24). `quote` is the type's line on the poster and the result page, the owner's own; `blurb`
+ * describes the four positions in plain words and is the fallback one-liner for a report written before the writer gave a `summary`.
  */
-export const TYPE_TABLE: Record<string, { name: string; blurb: string }> = {
-  CLWU: { name: "钟表匠", blurb: "专注一条主线，深化既有能力；给主线划出固定时段，按稳定节奏推进" },
-  CLWV: { name: "试验家", blurb: "专注一条主线，深化既有能力；给主线留出完整时段，集中高强度投入" },
-  CLBU: { name: "讲师", blurb: "专注一条主线，深化既有能力；把相邻领域融入主线，按稳定节奏推进" },
-  CLBV: { name: "顾问", blurb: "专注一条主线，深化既有能力；随需求在各场景间切换，投入时多时少" },
-  CXWU: { name: "雕刻家", blurb: "专注一条主线，持续探索新问题；在独立时段里长期、稳定地打磨" },
-  CXWV: { name: "即兴艺人", blurb: "专注一条主线，持续探索新问题；在独立时段里，状态到时集中投入" },
-  CXBU: { name: "布道者", blurb: "专注一条主线，持续探索新问题；把生活其他部分融入主线，稳定推进" },
-  CXBV: { name: "吟游诗人", blurb: "专注一条主线，持续探索新问题；各场景间自由切换，投入随状态起伏" },
-  DLWU: { name: "架构师", blurb: "多线并行，深化各线既有能力；每条线边界清楚，按固定节奏轮转" },
-  DLWV: { name: "改装师", blurb: "多线并行，深化各线既有能力；每条线分开处理，轮流集中突击" },
-  DLBU: { name: "参谋长", blurb: "多线并行，深化各线既有能力；各线互相借力，按稳定节奏统筹推进" },
-  DLBV: { name: "联络官", blurb: "多线并行，深化各线既有能力；各线互相渗透，随时机灵活调配投入" },
-  DXWU: { name: "创始人", blurb: "多线并行，持续进入新领域；每条线边界清楚，长期稳定投入" },
-  DXWV: { name: "发明家", blurb: "多线并行，持续进入新领域；每条线分开推进，阶段性高强度攻关" },
-  DXBU: { name: "旗手", blurb: "多线并行，持续进入新领域；各线汇入一个整体，稳定持续推进" },
-  DXBV: { name: "探险家", blurb: "多线并行，持续进入新领域；各线自由交织，投入随机会起伏" }
+export const TYPE_TABLE: Record<string, { name: string; quote: string; blurb: string }> = {
+  ROBA: { name: "甲方", quote: "我还是觉得第 1 版比较好看", blurb: "先想清楚要什么，把一件事拆好交给 AI，自己把关验收" },
+  ROBG: { name: "塔台", quote: "MU11451，你怎么四百多节降落", blurb: "几条线排好次序，同时派活给 AI，自己盯全局" },
+  ROHA: { name: "甩手掌柜", quote: "你应该是这方面的专家，反正比我专家", blurb: "先把事丢给 AI 跑出一版，能用就交，专心一条主线" },
+  ROHG: { name: "时间管理大师", quote: "做完你的做你的，做完你的做你的", blurb: "好几件事一起丢给 AI，边跑边看，哪条线都不落下" },
+  RUBA: { name: "大学生", quote: "豆包再胡说我给你豆馅掏出来。", blurb: "按计划跟着 AI 学一门，学透为止" },
+  RUBG: { name: "六边形战士", quote: "快用你那无敌的 Claude 想想办法啊！", blurb: "每条线都有学习计划，借 AI 样样补齐" },
+  RUHA: { name: "拆弹专家", quote: "我不敢剪大肥鱼说的那条线", blurb: "AI 给的东西先拆开弄懂，再自己上手" },
+  RUHG: { name: "野生学者", quote: "没有学位，但有 200 个收藏夹", blurb: "什么都想学，跟着 AI 到处试" },
+  WOBA: { name: "铁驭", quote: "铁驭，准备战斗", blurb: "定好目标后和 AI 合体推进一条主线，人机配合只为产出" },
+  WOBG: { name: "舰长", quote: "右满舵，主炮预备！", blurb: "按航线指挥一整船 AI，几条线同时开火" },
+  WOHA: { name: "某神秘光头", quote: "我不明白。机枪手向右 20cm。", blurb: "边打边调，和 AI 一起把一条主线磨出结果" },
+  WOHG: { name: "数字游民", quote: "Wi-Fi 在哪，工位就在哪", blurb: "带着 AI 四处开工，几条线随走随做" },
+  WUBA: { name: "修行者", quote: "闭关七七四十九天，出关即满级", blurb: "定好修炼计划，和 AI 对练，在一条主线上越练越强" },
+  WUBG: { name: "军师", quote: "主公莫慌，AI 已推演三遍", blurb: "和 AI 一起推演每条线的打法，样样心里有数" },
+  WUHA: { name: "炼金术士", quote: "炸炉是必要的等价交换", blurb: "和 AI 一炉一炉试，炸了再来，在一条主线上越试越懂" },
+  WUHG: { name: "百晓生", quote: "江湖上的事，问我就对了", blurb: "和 AI 聊遍各个领域，什么都懂一点，什么都想试" }
 };
-
-/** The first version's code for each type (2026-10-08 to 2026-10-17), for files and texts written under it. */
-export const LEGACY_TYPE_CODE: Record<string, string> = Object.fromEntries(Object.keys(TYPE_TABLE).map((code) => {
-  const back: Record<string, string> = { C: "S", D: "G", L: "E", X: "I", W: "M", B: "R", U: "P", V: "A" };
-  return [code, [...code].map((letter) => back[letter]!).join("")];
-}));
 
 /**
  * What stops the writer's personal type summary from being shown: it must speak to the person (「你…」), and it must not name a type or a
- * code — the page ends it with 「你是 DLWV 改装师。」 itself, from the scores, so the two can never disagree.
+ * code — the page ends it with 「你是某神秘光头。」 itself, from the scores, so the two can never disagree.
  */
 export function typeSummaryProblem(summary: string): string | null {
   const text = summary.trim();
@@ -97,7 +92,7 @@ export function typeSummaryProblem(summary: string): string | null {
 }
 
 export type PortraitType = {
-  code: string; name: string; blurb: string;
+  code: string; name: string; quote: string; blurb: string;
   group: { key: string; name: string; colour: string; tint: string; blurb: string };
   /** The writer's paragraph about this person as this type, without the type's name; none on older reports. */
   summary: string;

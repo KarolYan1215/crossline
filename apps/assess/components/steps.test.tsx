@@ -83,7 +83,8 @@ test("a figure is the person's own drawing or the type's code, never the shared 
   for (const state of ["queued", "drawing", "template"] as const) {
     const html = renderToStaticMarkup(<FigureTile avatar={{ state, url: "/api/avatar/t.png" }} type={type} alt="小林的形象" width={120} height={180} />);
     expect(html).not.toContain("<img");
-    expect(html).toContain(type.code);
+    expect(html).toContain(type.name);
+    expect(html).not.toContain(type.code);
     expect(html.includes("data-waiting")).toBe(state !== "template");
   }
   const waiting = renderToStaticMarkup(<DrawingCard type={type} />);

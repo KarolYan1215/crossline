@@ -89,7 +89,7 @@
 .pt-figure-img{display:block;width:100%;height:100%;object-fit:cover}
 .pt-type-id{display:grid;gap:4px;align-content:center}
 /* The serif's ascent and descent span about 1.45em: a tighter line box lets the code's glyph box run into the name under it. */
-.pt-type-code{margin:0;font-size:72px;line-height:1.45;letter-spacing:.06em;color:var(--group)}
+.pt-type-quote{margin:4px 0 0;font-size:20px;line-height:1.5;color:var(--group)}
 .pt-type-name{margin:0;font-size:48px;line-height:1.45}
 .pt-type-group{margin:0}
 .pt-type-group span{display:inline-block;padding:4px 12px;background:var(--group);color:#fff;font-size:13px}
@@ -177,7 +177,7 @@
 .pt-card-kicker{font-size:12px;letter-spacing:.2em;color:var(--pt-muted)}
 .pt-card-head{display:grid;grid-template-columns:170px minmax(0,1fr);gap:18px;align-items:center}
 .pt-card-figure{display:block;width:100%;height:100%;object-fit:cover}
-.pt-card .pt-type-code{font-size:46px}
+.pt-card .pt-type-quote{font-size:16px}
 .pt-card-title{display:block;margin-top:6px;font-size:32px;line-height:1.15}
 .pt-card .pt-tagline{font-size:15px;padding-left:12px;border-left-width:5px}
 .pt-card-axes{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--pt-track);border-bottom:1px solid var(--pt-track)}
@@ -207,7 +207,7 @@
   .pt-rhythm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .pt-figure-row,.pt-type-head{grid-template-columns:1fr}
   .pt-type-head .pt-figure-disc{width:min(260px,100%);justify-self:center}
-  .pt-type-code{font-size:52px}.pt-type-name{font-size:34px}
+  .pt-type-quote{font-size:17px}.pt-type-name{font-size:34px}
   .pt-page{padding:24px 16px}
   .pt-axes li{grid-template-columns:76px minmax(0,1fr) 76px;column-gap:8px}
   .pt-axis-side{font-size:15px}

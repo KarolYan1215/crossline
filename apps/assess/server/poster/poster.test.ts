@@ -32,7 +32,7 @@ function pngSize(png: Buffer): { width: number; height: number } {
 }
 
 /** Code (from TYPE_AXES order) to scores that land on it, leaning 30 points either way. */
-const scoresFor = (code: string) => ({ concentration: code[0] === "D" ? 80 : 20, orientation: code[1] === "X" ? 80 : 20, boundary: code[2] === "B" ? 80 : 20, pacing: code[3] === "V" ? 80 : 20 });
+const scoresFor = (code: string) => ({ lines: code[0] === "D" ? 80 : 20, purpose: code[1] === "X" ? 80 : 20, collab: code[2] === "B" ? 80 : 20, build: code[3] === "V" ? 80 : 20 });
 
 /** Text boxes never overlap, never run off the canvas, and nothing is set under 24 px. */
 function assertClean(nodes: SatoriNode[], height: number, label: string) {
@@ -150,14 +150,14 @@ describe("fonts", () => {
     const rendered = await toPng(typePosterTree(input.type, input.nickname, figureFrom(input.avatarPath), input.inviteUrl), HEIGHT,
       { collect: true, onMissing: (segment) => missing.push(segment) });
     expect(missing).toEqual([]);
-    expect(rendered.nodes.some((node) => node.textContent === "阿乔··的思维模式类型")).toBe(true);
+    expect(rendered.nodes.some((node) => node.textContent === "阿乔··的超级个体类型")).toBe(true);
   });
 });
 
 test("the poster's one rank line is the clearest lean, never an ambiguous axis while a clear one exists", () => {
-  const type = publicType({ concentration: 52, orientation: 18, boundary: 70, pacing: 45 });
-  expect(strongestAxis(type).id).toBe("orientation");
-  expect(strongestAxis(publicType({ concentration: 55, orientation: 45, boundary: 61, pacing: 50 })).id).toBe("boundary");
+  const type = publicType({ lines: 52, purpose: 18, collab: 70, build: 45 });
+  expect(strongestAxis(type).id).toBe("purpose");
+  expect(strongestAxis(publicType({ lines: 55, purpose: 45, collab: 61, build: 50 })).id).toBe("collab");
 });
 
 describe("layout", () => {
@@ -180,8 +180,8 @@ describe("layout", () => {
         { from: 1, to: 2, kind: "促成", how: "设计作品成为开发的素材" }, { from: 2, to: 0, kind: "反馈回路", how: "使用数据回到社群" }],
       source: "model"
     };
-    for (const [code, chosen] of [["DLWV", longest], ["CLWU", ruleLines("CLWU", ["language", "build", "running"])],
-      ["DXBV", wantsPlan("DXBV", { picks: ["research", "media", "writing"], text: "" }).lines]] as const) {
+    for (const [code, chosen] of [["ROHG", longest], ["ROBA", ruleLines("ROBA", ["language", "collab", "running"])],
+      ["WUHG", wantsPlan("WUHG", { picks: ["research", "media", "writing"], text: "" }).lines]] as const) {
       const type = publicType(scoresFor(code), {}, "", chosen);
       const missing: string[] = [];
       const poster = await toPng(typePosterTree(type, "小林", { dataUri: null }, "https://assess.example.com/t/x"), HEIGHT,
@@ -191,7 +191,8 @@ describe("layout", () => {
         { collect: true, onMissing: (segment) => missing.push(segment) });
       assertClean(long.nodes, long.height, `${code} wants long`);
       expect(missing).toEqual([]);
-      expect(poster.nodes.some((node) => node.textContent === chosen.lines[0].identity)).toBe(true);
+      // The poster no longer prints the lines (2026-10-24); the long image does.
+      expect(long.nodes.some((node) => node.textContent === chosen.lines[0].identity)).toBe(true);
       expect(long.nodes.some((node) => node.textContent === LABELS.moreHeading)).toBe(false);
     }
   });

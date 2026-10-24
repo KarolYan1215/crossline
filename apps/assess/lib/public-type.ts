@@ -1,5 +1,5 @@
-import { TYPE_AXES, TYPE_TABLE, poleBalance, typeFromScores, type PoleScores, type TypeAxisId } from "@crossline/core/assess";
-import { TYPE_LINES, TYPE_SUBTITLE, axisRank, isAmbiguous, partnersOf, relationOf, type Relation } from "@crossline/core/assess-content";
+import { TYPE_AXES, TYPE_TABLE, typeFromScores, type TypeAxisId } from "@crossline/core/assess";
+import { AI_KEEPS, TYPE_KINDRED, TYPE_LINES, TYPE_SUBTITLE, axisRank, isAmbiguous, partnersOf, relationOf, type Relation } from "@crossline/core/assess-content";
 import type { WantLines } from "@crossline/core/assess-wants";
 import type { LineView, PartnerView, PublicType, RelationView } from "./contract";
 
@@ -9,19 +9,20 @@ import type { LineView, PartnerView, PublicType, RelationView } from "./contract
  * the views the result page, the invitation, the pair card and the poster all draw from. Pure.
  */
 export function publicType(scores: Record<TypeAxisId, number>, recorded: Partial<Record<TypeAxisId, number[]>> = {}, seed = "", chosen?: WantLines,
-  poles?: PoleScores): PublicType {
+  aiDoes: string[] = []): PublicType {
   const type = typeFromScores(scores);
   const partners = partnersOf(type.code);
   const partner = (side: { code: string; relation: Relation }): PartnerView =>
     ({ code: side.code, name: TYPE_TABLE[side.code]!.name, relation: side.relation.name, tip: side.relation.tips[0] });
   return {
     code: type.code, name: type.name, subtitle: TYPE_SUBTITLE[type.code]!,
+    aiDoes: [...aiDoes], aiKeeps: AI_KEEPS[type.code]!, kindred: structuredClone(TYPE_KINDRED[type.code]!),
     group: { key: type.group.key, name: type.group.name, colour: type.group.colour, tint: type.group.tint },
     axes: TYPE_AXES.map((axis, index) => {
       const shown = type.axes[index]!;
       return { id: axis.id, leftLetter: axis.left.letter, rightLetter: axis.right.letter, leftLabel: axis.left.label, rightLabel: axis.right.label,
         leftEn: axis.left.en, rightEn: axis.right.en, score: shown.score, letter: shown.letter, ambiguous: isAmbiguous(shown.score),
-        rank: axisRank(axis.id, shown.score, recorded[axis.id] ?? [], seed), balance: poles ? poleBalance(poles[axis.id]) : null };
+        rank: axisRank(axis.id, shown.score, recorded[axis.id] ?? [], seed) };
     }),
     // What the person said they want to do replaces the type's own suggestion, and the extra combinations with it.
     lines: chosen?.lines ?? TYPE_LINES[type.code]!.lines,

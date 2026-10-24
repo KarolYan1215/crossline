@@ -15,7 +15,7 @@ beforeEach(() => { dir = temp.dir(); });
 afterEach(() => temp.cleanup());
 
 const input = (email = "Bob@Example.com"): NewResult =>
-  ({ email, nickname: "阿宝", scores: { concentration: 80, orientation: 30, boundary: 20, pacing: 70 }, code: "DLWV", appearance, sendEmail: true });
+  ({ email, nickname: "阿宝", scores: { lines: 80, purpose: 30, collab: 20, build: 70 }, aiDoes: [], code: "ROHG", appearance, sendEmail: true });
 
 test("a result is stored with a lowercased email, two distinct tokens and the retention date, and read back by each key", () => {
   const now = new Date("2026-10-14T08:00:00Z");
@@ -33,7 +33,7 @@ test("a result is stored with a lowercased email, two distinct tokens and the re
 
 test("the schema is migrated once, inside the user_version gate, with WAL on", () => {
   createResult(input());
-  expect(db().pragma("user_version", { simple: true })).toBe(6);
+  expect(db().pragma("user_version", { simple: true })).toBe(7);
   expect(db().pragma("journal_mode", { simple: true })).toBe("wal");
   expect(fs.existsSync(path.join(dir, "assess.db"))).toBe(true);
   expect(db().prepare("SELECT name FROM pragma_table_info('results')").all().map((row) => (row as { name: string }).name))
@@ -122,8 +122,8 @@ test("an expired result is invisible at once and purged with its pairs", () => {
 
 test("recorded scores collect every kept result per axis; avatars are counted per address", () => {
   createResult(input("a@example.com"));
-  const second = createResult({ ...input("a@example.com"), scores: { concentration: 10, orientation: 90, boundary: 55, pacing: 40 } });
-  expect(recordedScores().concentration?.sort()).toEqual([10, 80]);
+  const second = createResult({ ...input("a@example.com"), scores: { lines: 10, purpose: 90, collab: 55, build: 40 } });
+  expect(recordedScores().lines?.sort()).toEqual([10, 80]);
   expect(avatarsDrawnFor("A@example.com")).toBe(0);
   setAvatarState(second.id, "template");
   expect(avatarsDrawnFor("a@example.com")).toBe(0);

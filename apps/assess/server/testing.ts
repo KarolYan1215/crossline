@@ -27,7 +27,6 @@ export function useTempDataDir(): { dir: () => string; cleanup: () => void } {
 export function answersFor(right: Partial<Record<TypeAxisId, boolean>> = {}): Record<string, number> {
   return Object.fromEntries(QUIZ_ITEMS.map((item) => {
     const towardsRight = right[item.axis] ?? false;
-    if (item.kind === "pole") return [item.id, (item.pole === "right") === towardsRight ? 5 : 1];
     return [item.id, towardsRight === item.aRight ? 1 : 5];
   }));
 }
@@ -36,7 +35,7 @@ export const appearance: Appearance = { presentation: "neutral", hair: "short", 
 
 export function submission(overrides: Partial<SubmitRequest> = {}): SubmitRequest {
   return {
-    answers: answersFor({ concentration: true, orientation: false, boundary: false, pacing: true }), appearance, email: "Alice@Example.com", sendEmail: true,
+    answers: answersFor({ lines: true, purpose: false, collab: false, build: true }), appearance, email: "Alice@Example.com", sendEmail: true,
     nickname: "小艾", startedAt: Date.now() - 5 * 60_000, website: "", ...overrides
   };
 }

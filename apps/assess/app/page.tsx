@@ -13,8 +13,8 @@ export default function Page() {
   return <main className="as-main">
     <TestFlow after={<Samples />}>
       <p className="as-kicker">Crossline 速测</p>
-      <h1>你怎么同时活好几条线</h1>
-      <p>32 道题，再选几项你的样子，约 4–5 分钟。得到一张类型海报：你的思维模式、适合同时推进的 3 条主线，和最合拍的搭子。</p>
+      <h1>你在 AI 时代会是什么样的超级个体</h1>
+      <p>36 个场景二选一，再选几项你的样子，约 5 分钟。得到一张类型海报：你是 16 种 AI 时代超级个体里的哪一种、AI 替你干什么、你不让 AI 碰什么、思想相近的名人，和最合拍的搭子。</p>
       <p className="as-note">基于自评的趣味测评，非心理诊断。</p>
       <LastResultLink />
     </TestFlow>
@@ -29,7 +29,7 @@ function Samples() {
       return <li key={code} style={{ ["--group" as string]: group.colour, ["--group-tint" as string]: group.tint }}>
         {/* eslint-disable-next-line @next/next/no-img-element -- a static example figure */}
         <img src={`/samples/${code}.png`} alt="" width={240} height={360} />
-        <p className="as-sample-name">{TYPE_TABLE[code]!.name} <span className="as-code">{code}</span></p>
+        <p className="as-sample-name">{TYPE_TABLE[code]!.name}</p>
         <p className="as-note">{TYPE_SUBTITLE[code]}</p>
       </li>;
     })}</ul>

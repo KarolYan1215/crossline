@@ -1,104 +1,89 @@
 import { TYPE_AXES, typeFromScores, type PortraitType, type TypeAxisId } from "./portrait-type";
 
 /**
- * The public quick test (docs/energy-and-ecosystem.md §7, docs/beta-launch.md, decided 2026-10-14): thirty-two questions on the four typing dimensions, a short
- * Munich ChronoType Questionnaire and a three-minute psychomotor vigilance test, all scored here as pure functions so the static
- * `apps/assess` site computes everything in the browser — no ledger, no model, no account. Every module this file imports must stay pure.
+ * The public quick test (docs/energy-and-ecosystem.md §7, docs/beta-launch.md, decided 2026-10-14; questions redesigned 2026-10-24):
+ * thirty-six situations on the four typing dimensions, a short Munich ChronoType Questionnaire and a three-minute psychomotor vigilance
+ * test, all scored here as pure functions so the static `apps/assess` site computes everything in the browser — no ledger, no model, no
+ * account. Every module this file imports must stay pure.
  */
 
 /**
- * One question of the quick test (redesigned 2026-10-17, docs/assess-redesign.md): a statement measuring one pole on its own (`pole`),
- * answered on `LIKERT`, or a situation with two options, one per pole (`pair`), answered on `PAIR_SCALE` from 1 (clearly `a`) to 5
- * (clearly `b`). `a` describes the left pole unless `aRight`.
+ * One question of the quick test (redesigned 2026-10-24 with the owner): a situation from one area of life (`scene`) with two options,
+ * one per pole, answered on `PAIR_SCALE` from 1 (clearly `a`) to 5 (clearly `b`). `a` describes the left pole unless `aRight`. Both
+ * options are ones a reasonable person picks, so neither side reads as lazy or behind. `ai` marks the option that hands the work to AI and
+ * says it in a few words (「写初稿」); leaning that way puts the phrase on the poster's 「AI 替你干的」 line (`aiDoes`).
  */
-export type QuizItem =
-  | { id: string; axis: TypeAxisId; kind: "pole"; pole: "left" | "right"; text: string }
-  | { id: string; axis: TypeAxisId; kind: "pair"; text: string; a: string; b: string; aRight: boolean };
+export type QuizItem = { id: string; axis: TypeAxisId; scene: string; text: string; a: string; b: string; aRight: boolean; ai?: { side: "a" | "b"; does: string } };
 
-const pole = (id: string, axis: TypeAxisId, side: "left" | "right", text: string): QuizItem => ({ id, axis, kind: "pole", pole: side, text });
-const pair = (id: string, axis: TypeAxisId, text: string, a: string, b: string, aRight = false): QuizItem => ({ id, axis, kind: "pair", text, a, b, aRight });
+const pair = (id: string, axis: TypeAxisId, scene: string, text: string, a: string, b: string, aRight: boolean, ai?: QuizItem["ai"]): QuizItem =>
+  ({ id, axis, scene, text, a, b, aRight, ...(ai ? { ai } : {}) });
 
 /**
- * Eight questions per dimension: three statements for each pole, measured independently (two high poles and two low ones are both
- * possible and both shown), and two situations that make the person choose. Ordered so neighbours never share a dimension, and a
- * situation comes every few statements. Every statement is positively worded and asks about one behaviour or preference.
+ * Nine situations per dimension across writing, research, code, visuals, video, learning, planning, people, money and daily life,
+ * ordered so neighbours never share a dimension, with the right pole on `a` and on `b` about equally often.
  */
 export const QUIZ_ITEMS: QuizItem[] = [
-  pole("q1", "concentration", "left", "我的时间和精力，大部分投在一件最重要的事上。"),
-  pole("q2", "orientation", "left", "我会反复打磨已经掌握的方法，让它越来越高效。"),
-  pole("q3", "boundary", "left", "我会给不同的事安排固定、分开的时间段。"),
-  pole("q4", "pacing", "left", "我每周在主要的事上投入的时间大致稳定。"),
-  pole("q5", "concentration", "right", "我同时在推进两件以上分量相近的事，如学业、工作、副业或创作。"),
-  pole("q6", "orientation", "right", "我经常主动尝试自己从没做过的领域或方法。"),
-  pole("q7", "boundary", "right", "一天里在几件不同的事之间来回切换，我也能很快进入状态。"),
-  pole("q8", "pacing", "right", "我常在一段时间里高强度投入，之后明显放松一阵。"),
-  pair("q9", "concentration", "回顾过去半年，你的投入更接近哪一种？", "大部分时间集中在一件事上", "时间分配给几件分量相近的事"),
-  pair("q10", "orientation", "有一段空闲的时间，你更可能用来做什么？", "去尝试一个全新的方向", "把擅长的事再推进一步", true),
-  pole("q11", "boundary", "left", "做一件事的时候，我不希望被另一件事的消息打断。"),
-  pole("q12", "pacing", "left", "我习惯每天推进一点，而不是攒到一起做。"),
-  pole("q13", "concentration", "left", "其他事和主线冲突时，我通常先保证主线。"),
-  pole("q14", "orientation", "left", "一件事做出成效后，我会沿着同样的路继续加码。"),
-  pole("q15", "boundary", "right", "我会有意把一件事的成果或人脉用到另一件事上。"),
-  pole("q16", "pacing", "right", "截止日期临近时，我的效率最高。"),
-  pair("q17", "boundary", "你理想的一周安排更接近哪一种？", "几件事穿插进行，随时切换", "每件事有各自固定的时段", true),
-  pair("q18", "pacing", "完成一个需要一个月的项目，你更常见的做法是？", "每天推进一部分", "集中几段时间完成大部分"),
-  pole("q19", "concentration", "right", "少了正在做的任何一条线，我都会觉得自己不完整。"),
-  pole("q20", "orientation", "right", "即使成功的可能不明，我也愿意花时间做新的尝试。"),
-  pole("q21", "boundary", "left", "我倾向于让不同领域的人和事互不交叉。"),
-  pole("q22", "pacing", "left", "截止日期前，我的工作量和平时相差不大。"),
-  pole("q23", "concentration", "left", "我有一件事明显比其他事都重要。"),
-  pole("q24", "orientation", "left", "选择下一步时，我优先考虑能用上现有积累的机会。"),
-  pair("q25", "concentration", "设想未来三年理想的状态，你更倾向于？", "同时经营几个分量相近的方向", "在一个方向上走得很深", true),
-  pair("q26", "orientation", "面前有两个机会，你更可能选择？", "回报较确定、用得上现有能力的", "回报不确定、但能进入新领域的"),
-  pole("q27", "boundary", "right", "做一件事时想到另一件事的点子，我会马上记下或处理。"),
-  pole("q28", "pacing", "right", "状态好的时候，我会连续投入很长时间。"),
-  pole("q29", "concentration", "right", "我会有意识地把时间分给几件同样重要的事，而不是只押在一件上。"),
-  pole("q30", "orientation", "right", "一件事做熟练之后，我会开始寻找新的方向。"),
-  pair("q31", "boundary", "你在不同领域认识的人，更接近哪一种？", "分属不同圈子，很少交叉", "经常互相介绍，交织在一起"),
-  pair("q32", "pacing", "回顾你的投入曲线，更接近哪一种？", "起伏明显，有高峰也有低谷", "比较平稳", true)
+  pair("q1", "collab", "写作", "写一篇长文", "先自己列好提纲，每一节交给 AI 写", "从第一句起就和 AI 一句一句改着写", false, { side: "a", does: "写初稿" }),
+  pair("q2", "purpose", "学习", "学一种新的统计方法", "让 AI 出题考你，自己推一遍", "让 AI 直接把分析跑出来", true, { side: "b", does: "跑分析" }),
+  pair("q3", "build", "编程", "搭一个个人网站", "先画好每个页面的结构", "先让 AI 生成一版，看着改", false, { side: "b", does: "搭网站" }),
+  pair("q4", "lines", "时间", "AI 帮你每周省出 5 个小时", "投回主业，把它做得更深", "开一条新的副线", false),
+  pair("q5", "collab", "编程", "写一段处理表格的小脚本", "打开编辑器的 AI 补全，边写边接受建议", "先把需求描述清楚，等 AI 给出完整代码", true, { side: "b", does: "写代码" }),
+  pair("q6", "purpose", "阅读", "读一份英文合同", "要一份中文要点就够了", "让 AI 逐条解释，下次自己能看懂", false, { side: "a", does: "读合同" }),
+  pair("q7", "build", "自动化", "搭一个自动化流程（比如每周自动整理邮件）", "先拿现成模板跑起来，坏了再修", "先把每一步写清楚", true),
+  pair("q8", "lines", "副业", "朋友约你一起做个副业", "先答应，反正有 AI 撑着", "只有和主业相关才加入", true),
+  pair("q9", "collab", "视觉", "做一张活动海报", "自己定好构图，只让 AI 生成素材", "让 AI 连出 20 版，挑一版再接着让它改", false, { side: "b", does: "出图" }),
+  pair("q10", "purpose", "编程", "AI 写的代码跑通了", "读懂每一行再用", "直接用", true),
+  pair("q11", "build", "旅行", "第一次出国旅行", "出发前定好预算和每天的安排", "订好机票，到了再随时问 AI", false, { side: "b", does: "做攻略" }),
+  pair("q12", "lines", "对话", "翻翻你和 AI 的对话记录", "大多围着同一件事", "什么话题都有", false),
+  pair("q13", "collab", "沟通", "准备一场重要的谈判", "让 AI 扮演对方，从头到尾陪你对练", "自己写好要点，最后让 AI 挑漏洞", true),
+  pair("q14", "purpose", "理财", "做下个季度的预算", "要一张填好的表", "要它的计算逻辑，自己调参数", false, { side: "a", does: "做预算" }),
+  pair("q15", "build", "视频", "拍一期视频", "先拍一堆素材，让 AI 帮你剪出故事", "先写好分镜脚本", true, { side: "a", does: "剪视频" }),
+  pair("q16", "lines", "身份", "介绍自己的时候", "一串斜杠", "一个头衔就够了", true),
+  pair("q17", "collab", "沟通", "回一封很难回的邮件", "自己写好，再让 AI 润色", "把来信丢给 AI，和它一起商量怎么回", false),
+  pair("q18", "purpose", "写作", "写一条小红书文案", "让 AI 讲清楚哪一版为什么好", "让 AI 出 5 版，挑一版发", true, { side: "b", does: "写文案" }),
+  pair("q19", "build", "工具", "试一个新出的 AI 工具", "先看教程和评测", "直接上手乱点", false),
+  pair("q20", "lines", "学习", "刷到一个很火的新领域", "先收藏，等主业忙完再看", "当晚就让 AI 带你入门", false, { side: "b", does: "带我入门" }),
+  pair("q21", "collab", "调研", "调研一个完全陌生的行业", "和 AI 边聊边追问，问到哪算哪", "列好问题清单，让 AI 分头查完给你一份报告", true, { side: "b", does: "查资料" }),
+  pair("q22", "purpose", "求职", "准备一场面试", "让 AI 给出标准答案，背下来", "让 AI 当面试官，答完逐条点评", false, { side: "a", does: "备面试" }),
+  pair("q23", "build", "副业", "开始一个副业", "先发一条试试水，看反馈再说", "先写一页计划，定好目标", true),
+  pair("q24", "lines", "未来", "设想三年以后", "同时经营几个分量相近的方向", "在一个方向上走得很深", true),
+  pair("q25", "collab", "视频", "剪一条视频", "自己剪完，让 AI 配字幕、起标题、做封面", "素材全丢进去，和 AI 一来一回调节奏", false, { side: "a", does: "做字幕封面" }),
+  pair("q26", "purpose", "学习", "遇到一个看不懂的概念", "顺着问到底，直到能讲给别人听", "让 AI 一句话解释完，继续干活", true),
+  pair("q27", "build", "写作", "写一份报告或论文", "先定好结构和论点", "先把想到的全写出来，再整理", false),
+  pair("q28", "lines", "收藏", "你的收藏夹", "几乎都和一件事有关", "五花八门", false),
+  pair("q29", "collab", "旅行", "安排一次旅行", "每天都和 AI 商量第二天去哪", "自己定好大框架，酒店和路线交给 AI 填", true, { side: "b", does: "排行程" }),
+  pair("q30", "purpose", "时间", "AI 帮你省出一小时", "马上去做下一件事", "用来琢磨 AI 刚才是怎么做的", false),
+  pair("q31", "build", "理财", "开始理财", "先小额买一点，边看边学", "先定好配置比例和规则", true),
+  pair("q32", "lines", "取舍", "两件事撞在一起时", "经常难以取舍，两边都想要", "总有一件明显更重要", true),
+  pair("q33", "collab", "对话", "你和 AI 的对话记录，更像哪一种", "一个个独立的小任务，问完就关", "少数几个很长的对话，来回聊了几十轮", false),
+  pair("q34", "purpose", "未来", "一年以后，你更希望", "自己会的东西越来越多", "AI 替你干的活越来越多", true),
+  pair("q35", "build", "计划", "新的一周开始了", "周日晚上排好每天做什么", "每天早上看情况再定", false),
+  pair("q36", "lines", "团队", "如果明天起你有一支 AI 团队", "全员冲一个项目", "每条线各派几个", false)
 ];
 
-/** The five Likert answers to a statement, 1 to 5. */
-export const LIKERT = ["非常不同意", "不同意", "说不准", "同意", "非常同意"] as const;
 /** The five answers to a situation, 1 (clearly the first option) to 5 (clearly the second). */
 export const PAIR_SCALE = ["明显更像 A", "偏 A", "两者差不多", "偏 B", "明显更像 B"] as const;
 
-/** Each pole's own score, 0–100, from its three statements alone. */
-export type PoleScores = Record<TypeAxisId, { left: number; right: number }>;
-
-/** A pole at or above this is strong, at or below `POLE_LOW` weak: both strong (or both weak) is said on the result, not hidden. */
-export const POLE_HIGH = 75;
-export const POLE_LOW = 25;
-/** 「两端都强」, 「两端都弱」, or nothing. */
-export const poleBalance = (poles: { left: number; right: number }): "both_high" | "both_low" | null =>
-  poles.left >= POLE_HIGH && poles.right >= POLE_HIGH ? "both_high" : poles.left <= POLE_LOW && poles.right <= POLE_LOW ? "both_low" : null;
-
 const toHundred = (mean: number) => ((mean - 1) / 4) * 100;
+/** An answer turned towards the right pole: 1 = clearly left, 5 = clearly right. */
+const towardsRight = (item: QuizItem, answer: number) => (item.aRight ? 6 - answer : answer);
 
 /**
- * The poles and the dimension scores from an answer of 1–5 to every question. Each pole is the mean of its three statements mapped to
- * 0–100. A dimension's score (0 = left pole, 100 = right pole) weighs the six statements and the two situations by count: three quarters
- * from the difference of the poles (50 + (right − left) / 2), one quarter from the situations' mean towards the right. A dimension that
- * lands exactly on 50 is decided by the situations, then by the poles, then left: it is shown as 49 or 51. Throws `QUIZ_INCOMPLETE` when
- * a question is unanswered or an answer is not 1–5.
+ * The dimension scores (0 = left pole, 100 = right pole) from an answer of 1–5 to every question: the mean of a dimension's nine answers,
+ * each turned towards the right pole, mapped to 0–100. A dimension that lands exactly on 50 goes to the side more answers leaned to, else
+ * the left, and is shown as 49 or 51. Throws `QUIZ_INCOMPLETE` when a question is unanswered or an answer is not 1–5.
  */
-export function quizResult(answers: Record<string, number>): { scores: Record<TypeAxisId, number>; poles: PoleScores } {
+export function quizResult(answers: Record<string, number>): { scores: Record<TypeAxisId, number> } {
   const missing = QUIZ_ITEMS.filter((item) => ![1, 2, 3, 4, 5].includes(answers[item.id] ?? 0));
   if (missing.length) throw new Error(`QUIZ_INCOMPLETE: ${missing.map((item) => item.id).join(",")}`);
-  const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
   const scores = {} as Record<TypeAxisId, number>;
-  const poles = {} as PoleScores;
   for (const axis of TYPE_AXES) {
-    const items = QUIZ_ITEMS.filter((item) => item.axis === axis.id);
-    const side = (which: "left" | "right") => toHundred(mean(items.filter((item) => item.kind === "pole" && item.pole === which).map((item) => answers[item.id]!)));
-    const left = side("left"), right = side("right");
-    const situations = toHundred(mean(items.flatMap((item) => item.kind === "pair" ? [item.aRight ? 6 - answers[item.id]! : answers[item.id]!] : [])));
-    let score = Math.round(0.75 * (50 + (right - left) / 2) + 0.25 * situations);
-    if (score === 50) score = situations !== 50 ? (situations > 50 ? 51 : 49) : right > left ? 51 : 49;
+    const values = QUIZ_ITEMS.filter((item) => item.axis === axis.id).map((item) => towardsRight(item, answers[item.id]!));
+    let score = Math.round(toHundred(values.reduce((sum, value) => sum + value, 0) / values.length));
+    if (score === 50) score = values.filter((value) => value > 3).length > values.filter((value) => value < 3).length ? 51 : 49;
     scores[axis.id] = score;
-    poles[axis.id] = { left: Math.round(left), right: Math.round(right) };
   }
-  return { scores, poles };
+  return { scores };
 }
 
 /** The dimension scores alone (`quizResult`). */
@@ -106,6 +91,20 @@ export const quizScores = (answers: Record<string, number>): Record<TypeAxisId, 
 
 /** The quick test's type: the same sixteen names as the portrait. */
 export const quizType = (answers: Record<string, number>): PortraitType => typeFromScores(quizScores(answers));
+
+/**
+ * The poster's 「AI 替你干的」 line: the work of the questions where the person leaned towards handing it to AI, most decided first, at
+ * most `limit`, each phrase once. Empty when they leaned towards doing it themselves everywhere.
+ */
+export function aiDoes(answers: Record<string, number>, limit = 3): string[] {
+  const leaning = QUIZ_ITEMS.flatMap((item) => {
+    const answer = answers[item.id];
+    if (!item.ai || !answer) return [];
+    const lean = item.ai.side === "a" ? 3 - answer : answer - 3;
+    return lean > 0 ? [{ does: item.ai.does, lean, order: QUIZ_ITEMS.indexOf(item) }] : [];
+  }).sort((x, y) => y.lean - x.lean || x.order - y.order);
+  return [...new Set(leaning.map((entry) => entry.does))].slice(0, limit);
+}
 
 /** "HH:MM" as decimal hours, or NaN. */
 export function clockHours(clock: string): number {
@@ -207,6 +206,6 @@ export function pvtSummary(trials: PvtTrial[], prematureTaps = 0): PvtSummary {
 }
 export type { PortraitType, TypeAxisId } from "./portrait-type";
 /** The type tables, for the public app, which may import only this module and the other pure subpaths. */
-export { LEGACY_TYPE_CODE, TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, typeFromScores } from "./portrait-type";
+export { TYPE_AXES, TYPE_GROUPS, TYPE_TABLE, typeFromScores } from "./portrait-type";
 /** The quick test ↔ app link contract (`assess-link.ts`): reached as `@crossline/core/assess` or `@crossline/core`, so no new subpath. */
 export * from "./assess-link";

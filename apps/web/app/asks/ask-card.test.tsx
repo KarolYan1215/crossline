@@ -45,12 +45,12 @@ test("an option with required follow-up fields opens them in the card, not in a 
 
 test("an ask about a thing previews it in place, folded until asked, with the link to open it", () => {
   const html = card({ ...base, kind: "interview_question", title: "「当前画像」写的是否符合本人？", preview: { kind: "portrait", href: "/portrait", label: "当前画像" } },
-    { kind: "portrait", image: "/api/portrait/image/character?v=1", code: "DLWV", name: "改装师", tagline: "边做边改", keywords: ["跨界"] });
+    { kind: "portrait", image: "/api/portrait/image/character?v=1", code: "ROHG", name: "改装师", tagline: "边做边改", keywords: ["跨界"] });
   expect(html).toContain('aria-expanded="false"');
   expect(html).toContain("预览：当前画像");
   expect(html).toContain('href="/portrait"');
   expect(html).toMatch(/class="ak-preview" inert="" aria-hidden="true"/);
-  expect(html).toContain("<b>DLWV</b> 改装师");
+  expect(html).toContain("<b>ROHG</b> 改装师");
   expect(html).toContain('src="/api/portrait/image/character?v=1"');
   // Without the summary (Today does not load one), the card keeps the link only.
   const bare = card({ ...base, preview: { kind: "milestones", href: "/milestones", label: "研究主线的里程碑草稿" } });

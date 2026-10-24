@@ -42,13 +42,14 @@ describe("reading what the person sent", () => {
 
 describe("three lines that feed each other", () => {
   test("a choice the owner's written combination holds takes that combination, the person's own type first", () => {
-    const own = presetLines("DLWV", ["startup", "teaching"]);
-    expect(own?.lines).toEqual(TYPE_LINES.DLWV!.lines);
-    expect(own?.loop).toEqual(TYPE_LINES.DLWV!.loop);
+    // The 2026-10-15 combinations moved with their types (DLWV → ROHG, CXBV → WUHA).
+    const own = presetLines("ROHG", ["startup", "teaching"]);
+    expect(own?.lines).toEqual(TYPE_LINES.ROHG!.lines);
+    expect(own?.loop).toEqual(TYPE_LINES.ROHG!.loop);
     // Another type's combination when the person's own does not hold the choice.
-    const other = presetLines("DLWV", ["research", "media", "writing"]);
-    expect(other?.lines).toEqual(TYPE_LINES.CXBV!.lines);
-    expect(presetLines("DLWV", ["music"])).toBeUndefined();
+    const other = presetLines("ROHG", ["research", "media", "writing"]);
+    expect(other?.lines).toEqual(TYPE_LINES.WUHA!.lines);
+    expect(presetLines("ROHG", ["music"])).toBeUndefined();
   });
   test("rules always give three different lines, a loop that fits the poster and links of the five kinds", () => {
     const ids = WANT_OPTIONS.map((option) => option.id);

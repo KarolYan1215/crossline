@@ -58,17 +58,17 @@ function SharePart({ report, state, ordered }: { report: PortraitReport; state: 
   const values = radarValues(report.compass.values);
   return <>
     <section className="pt-page pt-type" style={groupStyle(type)}>
-      <header className="pt-poster-head"><p className="pt-kicker">Crossline 思维模式类型</p><p className="pt-credibility">{CREDIBILITY}</p></header>
+      <header className="pt-poster-head"><p className="pt-kicker">Crossline · AI 时代超级个体类型</p><p className="pt-credibility">{CREDIBILITY}</p></header>
       <div className="pt-type-head">
         <div className="pt-figure-disc"><Figure state={state} className="pt-figure-img" /></div>
         <div className="pt-type-id">
           {type ? <>
-            <p className="pt-type-code pt-serif">{type.code}</p>
             <h1 className="pt-type-name pt-serif">{type.name}</h1>
+            <p className="pt-type-quote pt-serif">「{type.quote}」</p>
             <p className="pt-type-group"><span><b className="pt-serif">{type.group.name}</b> · {type.group.blurb}</span></p>
             {/* The writer's paragraph to the person, ended in code with the type the scores make, so the two never disagree. */}
             <p className="pt-type-blurb" data-reading="">{type.summary
-              ? <><span className="gen">{type.summary.replace(/[，,。.；;、\s]+$/u, "")}，</span>你是 {type.code} {type.name}。</>
+              ? <><span className="gen">{type.summary.replace(/[，,。.；;、\s]+$/u, "")}，</span>你是{type.name}。</>
               : type.blurb}</p>
           </> : <h1 className="pt-type-name gen">{report.cover.archetype ?? report.cover.keywords[0] ?? "个人画像"}</h1>}
         </div>
@@ -159,7 +159,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     setStatus("正在生成分享图片…");
     try {
       const { toBlob } = await import("html-to-image");
-      const names = ["我的思维模式类型.png", "我的精力节律.png", "我的画像.png"];
+      const names = ["我的超级个体类型.png", "我的精力节律.png", "我的画像.png"];
       const blobs: Array<Blob | null> = [];
       for (const node of [card.current, energyCard.current, sharedHalf.current]) blobs.push(await toBlob(node, { pixelRatio: 2, backgroundColor: PAPER }));
       const files = blobs.flatMap((blob, index) => blob ? [new File([blob], names[index]!, { type: "image/png" })] : []);
@@ -189,7 +189,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
   </footer>;
   const shareBar = (where: string) => <div className="pt-share-bar" data-no-export="">
     <button type="button" className="primary-button" onClick={() => void share()}>分享画像</button>
-    <small>{where}只分享前半部分：思维模式类型卡、精力节律卡与画像长图，人名、机构、课程编号等已隐去。</small>
+    <small>{where}只分享前半部分：超级个体类型卡、精力节律卡与画像长图，人名、机构、课程编号等已隐去。</small>
     {status && <small role="status">{status}</small>}
   </div>;
 
@@ -288,12 +288,12 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     {/* What is shared, rendered from the redacted report and never shown: the two 3:4 cards and the first half as one image. */}
     <div className="pt-offscreen" aria-hidden="true" data-no-export="">
       <div ref={card} className="pt-card" style={groupStyle(sharedType)}>
-        <small className="pt-card-kicker">Crossline 思维模式类型{name ? ` · ${name}` : ""}</small>
+        <small className="pt-card-kicker">Crossline · AI 时代超级个体类型{name ? ` · ${name}` : ""}</small>
         <div className="pt-card-head">
           <div className="pt-figure-disc"><Figure state={state} className="pt-card-figure" /></div>
           <div>{sharedType ? <>
-            <p className="pt-type-code pt-serif">{sharedType.code}</p>
             <b className="pt-card-title pt-serif">{sharedType.name}</b>
+            <p className="pt-type-quote pt-serif">「{sharedType.quote}」</p>
           </> : <b className="pt-card-title gen">{shared.cover.archetype ?? "个人画像"}</b>}</div>
         </div>
         {shared.cover.tagline && <p className="pt-tagline gen">「{shared.cover.tagline}」</p>}

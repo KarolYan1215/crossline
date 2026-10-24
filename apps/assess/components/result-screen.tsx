@@ -10,7 +10,7 @@ import { CopyLink, ShareInvite } from "./share-invite";
 import { withName } from "../lib/names";
 import { readStored, writeStored } from "./storage";
 import { WantsInline } from "./wants-step";
-import { AxesList, DimensionNotes, TypeDetails, TypeHeading, groupStyle } from "./type-summary";
+import { AiAndKindred, AxesList, DimensionNotes, TypeDetails, TypeHeading, groupStyle } from "./type-summary";
 
 export { AVATAR_POLL_MS, isDrawing } from "./figure";
 export const DISCLAIMER = "基于自评的趣味测评，非心理诊断";
@@ -118,15 +118,15 @@ export function ResultScreen({ token }: { token: string }) {
     {!mailed && <p className="as-done">{view.sendEmail ? "邮件暂时发不出去" : "你选了不发邮件"}：请收藏本页，或到页面底部复制结果链接，否则换了设备就找不回来。</p>}
     {/* While the figure is drawn there is no poster yet: a waiting card, never the type's shared template (decided 2026-10-16). */}
     {isDrawing(view.avatar) ? <DrawingCard type={type} /> : <>
-      <p className="as-note" aria-live="polite">{view.avatar.state === "template" ? "这次没有画出你的专属形象，海报上先用类型字母代替。"
+      <p className="as-note" aria-live="polite">{view.avatar.state === "template" ? "这次没有画出你的专属形象，海报上先用类型名代替。"
         : wasDrawing ? "专属形象画好了。" : ""}</p>
-      <SavableImage src={view.posterUrl} alt={`${type.name} ${type.code} 的海报`} width={1080} height={1440}
+      <SavableImage src={view.posterUrl} alt={`${type.name}的海报`} width={1080} height={1440}
         downloadName={`crossline-${type.code}.png`} extra={{ src: view.longUrl, label: "长图", downloadName: `crossline-${type.code}-长图.png` }} />
     </>}
 
     <section className="as-block">
       <h2>拉朋友测，看你们是什么关系</h2>
-      <p>朋友用这个链接答完 32 道题，你们的双人卡当场生成{mailed ? "，你也会收到邮件" : ""}。海报上的二维码也是这个链接。</p>
+      <p>朋友用这个链接答完 36 个场景，你们的双人卡当场生成{mailed ? "，你也会收到邮件" : ""}。海报上的二维码也是这个链接。</p>
       <ShareInvite url={view.inviteUrl} title="测测我们是什么关系" text={withName(view.nickname || "你的朋友", "邀请你测测你们是什么关系")} />
     </section>
 
@@ -135,6 +135,7 @@ export function ResultScreen({ token }: { token: string }) {
       <AxesList type={type} />
       <DimensionNotes />
     </section>
+    <AiAndKindred type={type} />
     <TypeDetails type={type} wants={!view.wants || editingWants
       ? view.wantsLeft > 0 && <div className="as-wants-ask">
         {!view.wants && <p>上面是按你的类型推荐的。告诉我们你想同时做哪几件事，按你的选择重新组合：</p>}
@@ -168,7 +169,7 @@ export function ResultScreen({ token }: { token: string }) {
     <section className="as-block">
       <h2>双人卡</h2>
       {view.pairs.length ? <ul className="as-pairs">{view.pairs.map((pair) => <li key={pair.pairToken}>
-        <a href={`/p/${pair.pairToken}`}><span><b>{pair.nickname || "你的朋友"}</b> · {pair.name} {pair.code}</span><span className="as-note">{pair.relation}</span></a>
+        <a href={`/p/${pair.pairToken}`}><span><b>{pair.nickname || "你的朋友"}</b> · {pair.name}</span><span className="as-note">{pair.relation}</span></a>
       </li>)}</ul> : <p className="as-note">还没有人通过你的链接测过。</p>}
     </section>
 

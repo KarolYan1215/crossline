@@ -3,8 +3,8 @@
  * at. The images are `public/samples/<CODE>.png`, made by `scripts/sample-thumbs.ts`.
  */
 export const LANDING_SAMPLES = [
-  { code: "DLWV", variant: "male" },
-  { code: "CXWU", variant: "female" },
-  { code: "DXBV", variant: "female" },
-  { code: "CLWU", variant: "male" }
+  { code: "ROBA", variant: "female" },
+  { code: "WOHA", variant: "male" },
+  { code: "RUHA", variant: "male" },
+  { code: "WUBG", variant: "female" }
 ] as const;
