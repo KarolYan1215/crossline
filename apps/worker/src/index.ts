@@ -12,6 +12,7 @@ import { CrosslineStore, aiToolsFor, recordGrownLogin, lessonsPass, backfillExtr
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { closeInterruptedCollections, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
 import { workflowImprovePass } from "./workflow-improver";
+import { workflowMergeDue, workflowMergePass } from "./workflow-merge";
 import { NEEDS_PER_PASS, createNeedChecker, needsAwaitingCheck } from "./need-check";
 import { autoApproveEligible } from "./auto-approval";
 import { retireShadowedDemos } from "./demo-cleanup";
@@ -502,6 +503,15 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
     const started = favouritesTopicPass(analysisStore, workspaceId, readGrownSkills(analysisStore, workspaceId), (input, after) => assistantOff
       ? { state: "blocked", code: "AGENT_PAUSED", message: "助手已暂停。" } : agentService.runFree(workspaceId, input, after), browserProfilesRoot(workspaceId));
     if (started.length) console.info(JSON.stringify({ type: "favourites.topics_started", checkedAt, workspaceId, started }));
+  } catch { /* next tick */ }
+  // Workflows that do the same job are merged (workflow-merge.ts): once a day, or now when the person asked; a merge is folded in below.
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const due = workflowMergeDue(analysisStore, workspaceId, today);
+    if (due && readGrownSkills(analysisStore, workspaceId).length > 1 && spendAllows(await spendFor(workspaceId), due === "requested" ? "core" : "discretionary")) {
+      const merged = await workflowMergePass(analysisStore, workspaceId, accountClient(workspaceId), repoRoot, today);
+      if (merged.length) console.info(JSON.stringify({ type: "skill.grown.merged", checkedAt, workspaceId, merged }));
+    }
   } catch { /* next tick */ }
   // A workflow the person commented on, or whose runs keep failing, is revised by the assistant (workflow-improver.ts); every account.
   if (!assistantOff && !agentService.runningTasks(workspaceId).some((taskId) => taskId.startsWith("improve-"))) {

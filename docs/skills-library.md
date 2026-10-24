@@ -342,3 +342,27 @@
 - 改完告诉本人改了什么。卡片上的「回到上一版」（`revertGrownSkill`）恢复上一版的文件和检查结果，并把 `improvedAt` 移到当下，同一批信号不会再触发修订。
 
 **改不了的**：Crossline 自己的代码，例如收藏读取器、节奏、验证判断。工作流能改的只有它的 SKILL.md、脚本和 manifest。
+
+## 工作流查重合并（2026-10-24，本人：「不止按名字来，功能相近的就合并」）
+
+核心规则在 `packages/core/src/workflow-merge.ts`，执行在 `apps/worker/src/workflow-merge.ts`，db 端是 `mergeGrownSkills`/`unmergeGrownSkill`。
+
+**挑出要问的两两组合**（`workflowMergeCandidates`）：
+- 两个都没被合并掉，且属于同一主线；
+- 两个都在本人登录的同一网站上读取，或者说明文字（摘要、说明、步骤、产出）相近（bigram 相似度 ≥ 0.3）。
+
+**判断**：复核模型 `crossline-validation-reviewer`，输入版本 `crossline.workflow-merge-review.v1`，沿用 `TASK_MERGE_REVIEW_SCHEMA`。看两者从什么材料产出什么，不看名字；拿不准就判「不同」。每对按两边的版本号只问一次（`workflowPairKey`），修订后会重问。
+
+**合并**：
+- 保留哪个（`workflowToKeep`），按顺序比：
+  1. 负责读取的那个（按话题整理收藏）；
+  2. 启用中的；
+  3. 本人保留的；
+  4. 本人用话要求建的；
+  5. 最近运行过的；
+  6. 建得早的。
+- 另一个关闭，并记下 `mergedInto`。两者都读收藏的话，列过、读过的条目并进保留者的账本。
+- 保留者收到一条系统意见（`mergeBrief`：被合并者的步骤、时间，文件放在 absorbed/ 下）。由工作流自我改进把它独有的做法并进下一版；这一步算系统的主意，按额度规则运行。
+- 本人收到通知。卡片上有「撤销合并」，恢复被合并者原来的状态。
+
+**何时运行**：每天一次（discretionary），或本人在 Skill 库点「检查重复的工作流」（core）。

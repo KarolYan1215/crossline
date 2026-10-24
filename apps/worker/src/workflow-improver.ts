@@ -25,7 +25,9 @@ import { readSkillDir, reviewWorkflow, sayToPerson, SKILL_CREATOR } from "./work
  * site, login, risk or step leaving the machine) waits for their consent again (`revisionWidens`).
  */
 type RunFree = (input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void) => DispatchResult;
-export type ImprovementSignal = { at: string; kind: "feedback" | "review" | "retry" | "failure"; text: string; taskId?: string };
+export type ImprovementSignal = { at: string; kind: "feedback" | "review" | "retry" | "failure" | "merge"; text: string; taskId?: string; absorbed?: string };
+/** Signals that come from the person (their own work, run while the quota lasts); a merge and failures are the system's idea. */
+const fromPerson = (signal: ImprovementSignal) => signal.kind === "feedback" || signal.kind === "review" || signal.kind === "retry";
 
 /** A revision is tried again after this long when the signals it answered are still there (it failed, or found nothing to change). */
 export const IMPROVE_COOLDOWN_MS = 6 * 3_600_000;
@@ -44,8 +46,11 @@ export function improvementSignals(store: CrosslineStore, workspaceId: string, r
   const prefix = workflowRunPrefix(record.id);
   const after = (at: string) => at > since;
   const signals: ImprovementSignal[] = [];
-  for (const event of store.listEvents(workspaceId, { type: WORKFLOW_FEEDBACK_EVENT, entityId: record.id }))
-    if (after(event.createdAt)) signals.push({ at: event.createdAt, kind: "feedback", text: String((event.payload as { text?: string }).text ?? "") });
+  for (const event of store.listEvents(workspaceId, { type: WORKFLOW_FEEDBACK_EVENT, entityId: record.id })) {
+    if (!after(event.createdAt)) continue;
+    const payload = event.payload as { text?: string; absorbed?: string };
+    signals.push({ at: event.createdAt, kind: payload.absorbed ? "merge" : "feedback", text: String(payload.text ?? ""), ...(payload.absorbed ? { absorbed: payload.absorbed } : {}) });
+  }
   for (const event of store.listEvents(workspaceId, { type: "agent.task.reviewed" })) {
     const payload = event.payload as { taskId?: string; note?: string; decision?: string; by?: string };
     if (!String(payload.taskId ?? "").startsWith(prefix) || !payload.note?.trim() || payload.by === "system" || !after(event.createdAt)) continue;
@@ -72,6 +77,7 @@ export function improvementDue(store: CrosslineStore, workspaceId: string, recor
   const signals = improvementSignals(store, workspaceId, record);
   const person = signals.filter((signal) => signal.kind !== "failure");
   if (!person.length && signals.length < FAILURES_TO_IMPROVE) return undefined;
+  // A merge is answered like what the person said: at once, then on the same cooldown.
   const since = record.improvedAt ?? record.createdAt;
   const attempts = store.listEvents(workspaceId, { type: "skill.grown.improve_started", entityId: record.id }).filter((event) => event.createdAt > since);
   const last = attempts.at(-1);
@@ -166,7 +172,7 @@ export function workflowImprovePass(store: CrosslineStore, workspaceId: string, 
   const now = deps.now ?? new Date();
   for (const record of readGrownSkills(store, workspaceId)) {
     const signals = improvementDue(store, workspaceId, record, now);
-    if (!signals || !deps.spend(signals.some((signal) => signal.kind !== "failure") ? "core" : "discretionary")) continue;
+    if (!signals || !deps.spend(signals.some(fromPerson) ? "core" : "discretionary")) continue;
     const taskId = `${improveTaskPrefix(record.id)}${now.getTime().toString(36)}`;
     // The files in force as a read-only input (scripts included, whatever the scan allowed to run: the revision may fix them).
     const current = path.join(deps.workRoot, workspaceId, taskId);
@@ -176,6 +182,13 @@ export function workflowImprovePass(store: CrosslineStore, workspaceId: string, 
       mkdirSync(path.dirname(target), { recursive: true });
       writeFileSync(target, file.text);
     }
+    // A workflow merged into this one: its files beside, so what only it did can be folded in.
+    for (const absorbed of new Set(signals.flatMap((signal) => signal.absorbed ? [signal.absorbed] : [])))
+      for (const file of storedFiles(store, workspaceId, absorbed)) {
+        const target = path.join(current, "absorbed", absorbed, file.path);
+        mkdirSync(path.dirname(target), { recursive: true });
+        writeFileSync(target, file.text);
+      }
     const results = listAgentTasks(store, workspaceId).filter((run) => run.taskId.startsWith(workflowRunPrefix(record.id)) && run.directory && run.status !== "running")
       .slice(-2).map((run) => run.directory);
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.improve_started:${taskId}`, type: "skill.grown.improve_started",

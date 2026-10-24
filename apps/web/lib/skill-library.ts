@@ -2,7 +2,7 @@ import {
   AGENT_CATEGORIES, PUBLIC_SKILL_CATEGORY_LABEL, currentMineVersion, scriptCount, scriptsAllowable, scriptsRunnable, scheduleLabel, ensureMineFrontmatter, mineSkillSettingKey, publicSkillFilesKey, grownSkillFilesKey, readMineSkill, readableMineSourceLabel, readableMineText, parseTopicPlan, topicPlanKey, topicProgress, withTopicSettings,
   type AccessContext, type AiTool, type PublicSkillRecord, type StoredMineRule
 } from "@crossline/core";
-import { type CrosslineStore, addWorkflowFeedback, aiToolsFor, listAgentTasks, allowSkillScripts, assistantMode, consentToGrownSkill, grownHomeLine, readGrownSkills, readGrownVersions, readPublicSkills, removeGrownSkill, removePublicSkill, revertGrownSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
+import { type CrosslineStore, unmergeGrownSkill, addWorkflowFeedback, aiToolsFor, listAgentTasks, allowSkillScripts, assistantMode, consentToGrownSkill, grownHomeLine, readGrownSkills, readGrownVersions, readPublicSkills, removeGrownSkill, removePublicSkill, revertGrownSkill, saveMineVersion, updateGrownSkill } from "@crossline/db";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { getStore } from "./crossline";
 import { identityLines } from "./lines";
@@ -43,7 +43,9 @@ export type GrownSkillView = { id: string; summary: string; name: string; catego
    * Its revisions (docs/skills-library.md 「工作流自我改进」): the version in force, what the last revision changed, whether one can be
    * taken back, and what the person said that no revision has answered yet.
    */
-  improvement: { version: number; lastChange?: { at: string; changes: string }; canRevert: boolean; pending: string[]; improving: boolean } } & ScriptsView;
+  improvement: { version: number; lastChange?: { at: string; changes: string }; canRevert: boolean; pending: string[]; improving: boolean };
+  /** Merged into another workflow that does the same job (switched off until 撤销合并). */
+  mergedInto?: { id: string; summary: string; at: string; why: string } } & ScriptsView;
 /** `shell`: this account's assistant has a command line (the copy on the person's own computer) and can run an allowed script. */
 export type SkillLibraryView = { mine: MineSkillView[]; grown: GrownSkillView[]; publics: PublicSkillView[]; aiTools: AiTool[];
   removed: Array<{ name: string; reason: string; at: string; by: string }>; growing: number; shell: boolean };
@@ -97,7 +99,9 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
       verdict: record.review.final, risk: record.scan.risk, reasons: record.review.reasons, files: record.files.length, createdAt: record.createdAt,
       lastUsedAt: record.lastUsedAt, ...(record.lastRunAt ? { lastRunAt: record.lastRunAt } : {}), skillText: skillText.replace(/^---[\s\S]*?\n---\n/, ""),
       ...topicsView(store, ctx.workspaceId, record.id), ...runningView(store, ctx.workspaceId, record.id, agentRuns), ...scriptsView(record),
-      improvement: improvementView(store, ctx.workspaceId, record, agentRuns) };
+      improvement: improvementView(store, ctx.workspaceId, record, agentRuns),
+      ...(record.mergedInto ? { mergedInto: { id: record.mergedInto.id, at: record.mergedInto.at, why: record.mergedInto.why,
+        summary: readGrownSkills(store, ctx.workspaceId).find((item) => item.id === record.mergedInto!.id)?.manifest.summary ?? "另一个工作流" } } : {}) };
   });
   // Requests made in words that no growing run has picked up yet: the page says they are on their way.
   const tried = new Set(store.listEvents(ctx.workspaceId, { type: "skill.grown.attempted" }).map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
@@ -188,6 +192,19 @@ function improvementView(store: CrosslineStore, workspaceId: string, record: Ret
  */
 export async function improveGrownSkill(ctx: AccessContext, id: string, text: string): Promise<{ ok: boolean; code?: string }> {
   if (!addWorkflowFeedback(getStore(), ctx.workspaceId, id, text)) return { ok: false, code: text.trim() ? "SKILL_NOT_FOUND" : "FEEDBACK_EMPTY" };
+  await requestCodexSupervisor(ctx, "/v1/workflows/grow", { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(10_000) })
+    .catch(() => undefined);
+  return { ok: true };
+}
+
+/** 撤销合并: the workflow merged into another is back as it was. */
+export function unmergeGrownWorkflow(ctx: AccessContext, id: string): { ok: boolean; code?: string } {
+  return unmergeGrownSkill(getStore(), ctx.workspaceId, id) ? { ok: true } : { ok: false, code: "NOT_MERGED" };
+}
+
+/** 「检查重复」: the worker's next workflow pass checks the person's workflows for ones doing the same job, whatever day it is. */
+export async function requestWorkflowMergeCheck(ctx: AccessContext): Promise<{ ok: boolean }> {
+  getStore().setSetting(ctx.workspaceId, "skills.grown.mergeRequested", new Date().toISOString());
   await requestCodexSupervisor(ctx, "/v1/workflows/grow", { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(10_000) })
     .catch(() => undefined);
   return { ok: true };

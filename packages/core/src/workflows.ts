@@ -189,6 +189,8 @@ export type GrownSkillRecord = {
    */
   version?: number;
   improvedAt?: string;
+  /** Merged into another workflow that does the same job (workflow-merge.ts): switched off, with the status it had, until 撤销合并. */
+  mergedInto?: { id: string; at: string; why: string; status: "active" | "off" | "needs_consent" };
 };
 
 /** The versions of a grown workflow a revision replaced, newest last (at most `GROWN_VERSIONS_KEPT`). */

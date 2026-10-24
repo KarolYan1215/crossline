@@ -102,6 +102,7 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
     {listed("grown") && (!searching || grownShown.length > 0) && <section className="st-card st-card-wide" aria-label="生长的工作流">
       <header><h3>生长的工作流 · {grown.length}</h3><small>同类的事采纳过两次，或在输入框里说「以后都这样做」「每周五提醒」，助手会把它写成工作流，建好后通知；发出、发布一类的步骤始终由本人完成</small></header>
       {library.growing > 0 && <p className="st-note">{library.growing} 个工作流正在生成，建好后会通知。</p>}
+      {grown.length > 1 && <MergeCheck id={grown[0]!.id} />}
       {grown.length === 0 ? <p className="muted">尚无。</p>
         : <ul className="sk-publics">{grownShown.map((flow) => <GrownFlow key={`${flow.id}:${kind}`} flow={flow} shell={library.shell} open={all || focus === flow.id} autoLogin={autoLogin === flow.id}
           onChanged={(next) => setGrown((items) => next ? items.map((item) => item.id === next.id ? next : item) : items.filter((item) => item.id !== flow.id))} />)}</ul>}
@@ -337,6 +338,11 @@ function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSki
       <dt>审查</dt><dd className="gen"><Clamp lines={1} text={flow.reasons.join("；")} /></dd>
       <dt>上次使用</dt><dd>{flow.lastRunAt ? `${day(flow.lastRunAt)} 执行` : day(flow.lastUsedAt)}{flow.pinned ? "" : "；30 天未用会被移除，保留后不再移除"}</dd>
     </dl>
+    {flow.mergedInto && <p className="st-note">已合并到「{flow.mergedInto.summary}」（{day(flow.mergedInto.at)}，<span className="gen">{flow.mergedInto.why}</span>）。{" "}
+      <button type="button" className="secondary-button" onClick={async () => {
+        if (await send("POST", { action: "unmerge" })) { const { mergedInto: _was, ...rest } = flow; onChanged({ ...rest, status: "active" }); setNote("已撤销合并"); }
+        else setNote("未完成");
+      }}>撤销合并</button></p>}
     <ImproveFlow flow={flow} send={send} onChanged={onChanged} setNote={setNote} />
     {flow.skillText && <details className="advanced sk-full"><summary>工作流全文</summary><Markdown className="long-form" text={flow.skillText} /></details>}
     <ScriptsConsent view={flow} shell={shell} endpoint={`/api/skills/grown/${encodeURIComponent(flow.id)}`}
@@ -475,6 +481,17 @@ function AiToolsCard({ initial }: { initial: AiTool[] }) {
  * Favourites organised by topic: the two paces, each the person's to change (2026-10-22) — notes a day for the day's topic, and the night
  * window's hours (equal hours: no night reading) — and how far each topic is read.
  */
+/** 「检查重复」: the worker looks for workflows doing the same job (not only by name) and merges them, telling the person. */
+function MergeCheck({ id }: { id: string }) {
+  const [note, setNote] = useState("");
+  return <p className="sk-actions">
+    <button type="button" className="secondary-button" onClick={async () => {
+      const ok = await fetch(`/api/skills/grown/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "merge_check" }) })
+        .then((response) => response.ok).catch(() => false);
+      setNote(ok ? "已开始检查，功能相同的工作流会合并并通知" : "未完成");
+    }}>检查重复的工作流</button>{note && <span role="status" className="st-note">{note}</span>}</p>;
+}
+
 /**
  * What the person says the workflow should do differently, in words: Crossline revises the workflow itself (the assistant rewrites its
  * files, checked like a new one) and says what changed; the last revision can be taken back here.

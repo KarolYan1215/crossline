@@ -262,6 +262,38 @@ const grownFilesOf = (store: CrosslineStore, workspaceId: string, id: string): A
 const fileHashes = (files: Array<{ path: string; text: string }>) => files.map((file) => ({ path: file.path,
   sha256: createHash("sha256").update(file.text, "utf8").digest("hex"), bytes: Buffer.byteLength(file.text, "utf8") }));
 
+/**
+ * Two workflows that do the same job made one (workflow-merge.ts): the one absorbed is switched off and remembers what it was merged
+ * into, and the kept one is given the reason for its next revision (`skill.grown.feedback` by the system, naming the absorbed one), so
+ * what only the absorbed one did is folded into it. Undone by `unmergeGrownSkill`.
+ */
+export function mergeGrownSkills(store: CrosslineStore, workspaceId: string, keepId: string, absorbId: string, why: string, brief: string, now = new Date()): boolean {
+  const records = readGrownSkills(store, workspaceId);
+  const absorb = records.find((item) => item.id === absorbId);
+  if (!absorb || absorb.mergedInto || !records.some((item) => item.id === keepId) || keepId === absorbId) return false;
+  const at = now.toISOString();
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id !== absorbId ? item
+    : { ...item, status: "off" as const, mergedInto: { id: keepId, at, why: why.slice(0, 200), status: item.status }, updatedAt: at }));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.merged:${absorbId}:${at}`, type: "skill.grown.merged",
+    entityId: keepId, payload: { keep: keepId, absorbed: absorbId, why: why.slice(0, 200) } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${WORKFLOW_FEEDBACK_EVENT}:${keepId}:merge:${absorbId}:${at}`, type: WORKFLOW_FEEDBACK_EVENT,
+    entityId: keepId, payload: { id: keepId, text: brief.slice(0, 2_000), by: "system", absorbed: absorbId } });
+  return true;
+}
+
+/** 撤销合并: the absorbed workflow back as it was; the kept one keeps any revision it made (the person can take that back too). */
+export function unmergeGrownSkill(store: CrosslineStore, workspaceId: string, absorbId: string, now = new Date()): boolean {
+  const records = readGrownSkills(store, workspaceId);
+  const absorb = records.find((item) => item.id === absorbId);
+  if (!absorb?.mergedInto) return false;
+  const { mergedInto, ...rest } = absorb;
+  const at = now.toISOString();
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id !== absorbId ? item : { ...rest, status: mergedInto.status, updatedAt: at }));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.unmerged:${absorbId}:${at}`, type: "skill.grown.unmerged",
+    entityId: mergedInto.id, payload: { keep: mergedInto.id, absorbed: absorbId } });
+  return true;
+}
+
 /** The person tells a workflow what to do differently (`skill.grown.feedback`); Crossline revises it on its next pass. */
 export function addWorkflowFeedback(store: CrosslineStore, workspaceId: string, id: string, text: string, now = new Date()): boolean {
   const words = text.trim().slice(0, 2_000);

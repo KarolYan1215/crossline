@@ -125,3 +125,43 @@ test("a revision that reads a new site waits for the person's consent again; one
   expect(await installRevision(store, ws, readGrownSkills(store, ws)[0]!, done("improve-b", none), { client: reviewer().rpc, cwd: "." })).toMatchObject({ state: "unchanged" });
   expect(said().at(-1)).toContain("这次没有改它");
 });
+
+test("two workflows that do the same job are merged, judged by what they do and not their names, and the merge can be undone", async () => {
+  const { unmergeGrownSkill } = await import("@crossline/db");
+  const { workflowMergePass, WORKFLOW_MERGE_REQUESTED } = await import("./workflow-merge");
+  const topics = favouritesFlow();
+  // A weekly favourites workflow with other words and a schedule, and a course workflow with nothing in common.
+  const weekly = { ...topics, id: "flow-weekly-xhs", name: "weekly-xhs", pinned: false, createdAt: "2026-10-01T00:00:00Z",
+    manifest: { ...topics.manifest, name: "weekly-xhs", summary: "每周五 09:00 只读整理收藏，追踪重点作者并给出内容候选", trigger: "schedule" as const,
+      schedule: { type: "weekly" as const, days: ["FR" as const], time: "09:00" } } };
+  const course = { ...topics, id: "flow-course", name: "course", access: [], manifest: { ...topics.manifest, name: "course", summary: "按请求整理课程讲义目录", access: [], risks: [],
+    steps: [{ title: "建立讲义台账", by: "assistant" as const, external: false }], outputs: ["目录.md"] }, description: "课程材料" };
+  store.setSetting(ws, "skills.grown", JSON.stringify([...readGrownSkills(store, ws), weekly, course]));
+  writeCollectLedger(store, ws, weekly.id, { read: {}, unorganised: [], listed: { w1: { title: "旧", xsecToken: "t", type: "normal" } } });
+  store.setSetting(ws, grownSkillFilesKey(weekly.id), JSON.stringify({ files: [{ path: "SKILL.md", text: "# 每周追踪重点作者" }] }));
+  const asked: string[] = [];
+  const { rpc } = scriptedRuntime([REVIEWER], (prompt) => { asked.push(prompt); return JSON.stringify({ pairs: [{ id: "p1", same: true, why: "都读小红书收藏并整理，内容候选可并进话题整理" }] }); });
+  store.setSetting(ws, WORKFLOW_MERGE_REQUESTED, "x");
+  const merged = await workflowMergePass(store, ws, rpc, ".", "2026-10-24");
+  // Only the pair sharing the logged-in site was asked about; the course workflow was never paired.
+  expect(asked.join("\n")).not.toContain("按请求整理课程讲义目录");
+  // The topic workflow reads the favourites, so it is the one kept.
+  expect(merged).toEqual([{ keep: topics.id, absorbed: weekly.id }]);
+  const after = readGrownSkills(store, ws);
+  expect(after.find((item) => item.id === weekly.id)).toMatchObject({ status: "off", mergedInto: { id: topics.id, status: "active" } });
+  expect(Object.keys(readCollectLedger(store, ws, topics.id).listed ?? {})).toContain("w1");
+  expect(said().at(-1)).toContain("已合并");
+  // The kept one's next revision is told to take over the absorbed one's ways, with its files beside.
+  const runs: Array<AgentTaskInput & { taskId: string }> = [];
+  workflowImprovePass(store, ws, (input) => { runs.push(input); return { state: "started", taskId: input.taskId }; },
+    { client: () => undefined, cwd: ".", workRoot: path.join(root, "work"), spend: () => true });
+  expect(runs[0]!.what).toContain("合并工作流「每周五 09:00");
+  expect(readFileSync(path.join(runs[0]!.inputs![0]!, "absorbed", weekly.id, "SKILL.md"), "utf8")).toContain("每周追踪重点作者");
+  // Asked once per version: the next daily pass asks nothing.
+  asked.length = 0;
+  await workflowMergePass(store, ws, rpc, ".", "2026-10-25");
+  expect(asked).toEqual([]);
+  expect(unmergeGrownSkill(store, ws, weekly.id)).toBe(true);
+  expect(readGrownSkills(store, ws).find((item) => item.id === weekly.id)).toMatchObject({ status: "active" });
+  expect(readGrownSkills(store, ws).find((item) => item.id === weekly.id)!.mergedInto).toBeUndefined();
+});
