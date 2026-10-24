@@ -193,6 +193,12 @@ export type GrownSkillRecord = {
   mergedInto?: { id: string; at: string; why: string; status: "active" | "off" | "needs_consent" };
 };
 
+/**
+ * A reader's page waiting for the person's verification (the favourites job, workflow-smith.ts): written while it waits, removed when it
+ * ends, read by the 小帮手 on every page (apps/web/lib/person-calls.ts) so the dialog opens wherever the person is.
+ */
+export const VERIFY_PENDING_SETTING = "remote.verify.pending";
+
 /** The versions of a grown workflow a revision replaced, newest last (at most `GROWN_VERSIONS_KEPT`). */
 export const grownVersionsKey = (id: string) => `skills.grown.versions.${id}`;
 export const GROWN_VERSIONS_KEPT = 10;

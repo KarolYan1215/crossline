@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { pollWhileVisible } from "./ui/visible-poll";
+import type { PersonCall } from "../lib/person-calls";
 
 /** What the 小帮手 is doing, most pressing first: the background stopped, thinking over a line, the assistant at work, a new message. */
 export type HelperMood = "down" | "thinking" | "working" | "unread" | "idle";
@@ -20,8 +21,8 @@ export function announceThinking(thinking: boolean): void {
  * server's answer). Until then the button is a placeholder of the figure's size, so it no longer shows 「小帮手」 as text and then jumps
  * to the round figure a moment later (2026-10-21 walkthrough).
  */
-type Shared = { avatar: string | null; working: boolean; down: boolean; known: boolean };
-let shared: Shared = { avatar: null, working: false, down: false, known: false };
+type Shared = { avatar: string | null; working: boolean; down: boolean; known: boolean; calls: PersonCall[] };
+let shared: Shared = { avatar: null, working: false, down: false, known: false, calls: [] };
 const listeners = new Set<(next: Shared) => void>();
 let polling: (() => void) | undefined;
 
@@ -38,7 +39,7 @@ async function refresh(): Promise<void> {
   const body = await fetch("/api/helper", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).catch(() => null) as
     ({ ok?: boolean } & Omit<Shared, "known">) | null;
   if (!body?.ok) return;
-  shared = { avatar: body.avatar ?? null, working: Boolean(body.working), down: Boolean(body.down), known: true };
+  shared = { avatar: body.avatar ?? null, working: Boolean(body.working), down: Boolean(body.down), known: true, calls: Array.isArray(body.calls) ? body.calls : [] };
   rememberAvatar(shared.avatar);
   for (const listener of listeners) listener(shared);
 }
@@ -59,7 +60,8 @@ export function useHelper(): Shared & { thinking: boolean } {
       const cached = cachedAvatar();
       if (cached !== undefined) { shared = { ...shared, avatar: cached, known: true }; setState(shared); }
     }
-    if (!polling) polling = pollWhileVisible(refresh, 30_000);
+    // Every 15 seconds: a site waiting for the person's verification gives them 15 minutes.
+    if (!polling) polling = pollWhileVisible(refresh, 15_000);
     else setState(shared);
     const onThinking = (event: Event) => setThinking(Boolean((event as CustomEvent<boolean>).detail));
     window.addEventListener(HELPER_THINKING, onThinking);

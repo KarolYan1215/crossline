@@ -53,7 +53,11 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
   // 「去登录」 in a message leads here with `?login=<workflow>`: that workflow is shown open and its login started.
   const [autoLogin, setAutoLogin] = useState<string | undefined>();
   useEffect(() => {
-    const wanted = new URLSearchParams(window.location.search).get("login");
+    const params = new URLSearchParams(window.location.search);
+    const wanted = params.get("login");
+    // `?flow=<workflow>` (the 小帮手's 「查看风险」): that workflow shown open, nothing started.
+    const shown = params.get("flow");
+    if (shown && library.grown.some((flow) => flow.id === shown)) { setKind("grown"); setFocus(shown); }
     if (!wanted || !library.grown.some((flow) => flow.id === wanted)) return;
     setKind("grown"); setFocus(wanted); setAutoLogin(wanted);
   }, [library.grown]);

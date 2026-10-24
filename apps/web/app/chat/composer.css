@@ -131,3 +131,11 @@
 .helper-face[data-size="button"][data-mood="working"]{animation:helper-sway 2.4s ease-in-out infinite}
 .helper-face[data-size="button"][data-mood="down"]{filter:grayscale(1);opacity:.55}
 @media (prefers-reduced-motion:reduce){.helper-face{animation:none!important}}
+/* What only the person can do (helper-calls.tsx): a badge above the 小帮手, the list in a sheet. */
+.helper-calls-badge{font-size:13px;padding:6px 10px;border:1.5px solid var(--ink);background:var(--paper);color:var(--ink);border-radius:999px;cursor:pointer}
+.helper-calls-badge.urgent{background:var(--ink);color:var(--paper)}
+.helper-calls{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.helper-calls li{border:1px solid var(--line);padding:10px 12px;display:grid;gap:8px}
+.helper-calls li.urgent{border:1.5px solid var(--ink)}
+.helper-calls li p{margin:0;font-size:14px}
+.helper-calls-actions{display:flex;flex-wrap:wrap;gap:8px}

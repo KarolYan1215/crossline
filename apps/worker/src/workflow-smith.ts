@@ -6,7 +6,7 @@ import {
   AGENT_CATEGORIES, GROW_AFTER_ACCEPTED, GROWN_SKILL_IDLE_DAYS, PUBLIC_SKILL_REVIEW_SCHEMA, accessProfileSlug, categoryFromWording, finalVerdict, grownSkillFilesKey, grownSkillId,
   grownSkillName, scanForDeclaredAccess, scanSkillFiles, scheduleLabel, skillFrontmatter, textTerms, reassignedSteps, validatePublicSkillReview, validateWorkflowManifest,
   workflowAccess, workflowDue, agentChainKey, retryDue, type AgentCategory, type AgentChain, type GrownSkillRecord, type PublicSkillReview, type WorkflowAccess,
-  type WorkflowManifest, type WorkflowOrigin, type SkillScan
+  VERIFY_PENDING_SETTING, type WorkflowManifest, type WorkflowOrigin, type SkillScan
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { agentChainsFor, grownHomeLine, listAgentTasks, readGrownSkills, recordGrownLogin, removeGrownSkill, writeGrownSkills, type CrosslineStore } from "@crossline/db";
@@ -564,8 +564,10 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
         const lent = await driver.lend!();
         return new Promise<boolean>((resolve) => {
           void remote.attach(workspaceId, { workflowId: record.id, service: access.service, label: access.service, page: lent.page, viewport: lent.viewport,
-            done: (verified) => { lent.back(); resolve(verified); } }).then((attached) => {
+            done: (verified) => { store.deleteSetting(workspaceId, VERIFY_PENDING_SETTING); lent.back(); resolve(verified); } }).then((attached) => {
             if (!attached) { lent.back(); resolve(false); return; }
+            // The 小帮手 opens the dialog on whatever page the person has open (apps/web/lib/person-calls.ts).
+            store.setSetting(workspaceId, VERIFY_PENDING_SETTING, JSON.stringify({ workflowId: record.id, service: access.service, label: access.service, where, at: new Date().toISOString() }));
             sayToPerson(store, workspaceId, `「${record.manifest.summary}」读到${where}时小红书要求验证。点「去验证」，在弹出的画面里由本人完成验证，再点「验证完成」，读取会从这里接着往下；15 分钟内没有打开就先停下。`,
               "workflow_verify", `verify:${record.id}:${Date.now()}`, [{ label: "去验证", href: loginHref(record.id) }]);
           });
