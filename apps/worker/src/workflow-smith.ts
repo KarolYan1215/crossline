@@ -558,8 +558,21 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
     else if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
     else {
       const { after: _after, ...reading } = plan;
+      // The site's verification is passed by the person on this page, in the dialog (the server has no screen of its own to show it on).
+      const remote = remoteLogin();
+      const verify = remote && driver.lend ? async (where: string) => {
+        const lent = await driver.lend!();
+        return new Promise<boolean>((resolve) => {
+          void remote.attach(workspaceId, { workflowId: record.id, service: access.service, label: access.service, page: lent.page, viewport: lent.viewport,
+            done: (verified) => { lent.back(); resolve(verified); } }).then((attached) => {
+            if (!attached) { lent.back(); resolve(false); return; }
+            sayToPerson(store, workspaceId, `「${record.manifest.summary}」读到${where}时小红书要求验证。点「去验证」，在弹出的画面里由本人完成验证，再点「验证完成」，读取会从这里接着往下；15 分钟内没有打开就先停下。`,
+              "workflow_verify", `verify:${record.id}:${Date.now()}`, [{ label: "去验证", href: loginHref(record.id) }]);
+          });
+        });
+      } : undefined;
       try { result = await collectFavourites({ store, workspaceId, workflowId: record.id, folder, driver, ...(collector.sleep ? { sleep: collector.sleep } : {}), log,
-        ...(collector.memory ? { memory: collector.memory } : {}), ...reading }); }
+        ...(collector.memory ? { memory: collector.memory } : {}), ...(verify ? { verify } : {}), ...reading }); }
       finally { await driver.close(); }
     }
     collector.memory?.release();

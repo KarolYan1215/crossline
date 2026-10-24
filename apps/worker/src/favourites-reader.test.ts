@@ -64,6 +64,8 @@ type Script = {
   bigVideo?: boolean;
   /** The list stops loading after this many more pages without saying it ended (the site holding back). */
   stallAfter?: number;
+  /** The list answers HTTP 461 from this page on until a verification is passed (`unblock`). */
+  blockAfter?: number;
 };
 /** A fake site: the list comes 30 a screen as the page's own answers, each note page fires its own feed answer, media come back as bytes. */
 function fakeSite(script: Script) {
@@ -73,6 +75,7 @@ function fakeSite(script: Script) {
   let listPage = 0;
   let onList = false;
   let current = "";
+  let blocked = script.blockAfter !== undefined;
   const listPageJson = (index: number) => {
     // Newest first: note `total` was saved last.
     const ids = Array.from({ length: script.total }, (_, i) => idOf(script.total - i)).slice(index * 30, index * 30 + 30);
@@ -105,6 +108,7 @@ function fakeSite(script: Script) {
       log.push("wheel");
       if (!onList) return;
       if (script.stallAfter !== undefined && listPage >= script.stallAfter) return;
+      if (blocked && listPage >= script.blockAfter!) { queue.push({ url: COLLECT, status: 461, json: { code: 0 } }); return; }
       listPage += 1;
       if (listPage * 30 < script.total) queue.push({ url: COLLECT, status: 200, json: listPageJson(listPage) });
     },
@@ -119,7 +123,7 @@ function fakeSite(script: Script) {
     },
     close: async () => { log.push("close"); }
   };
-  return { driver, log };
+  return { driver, log, unblock: () => { blocked = false; } };
 }
 const run = (driver: CollectDriver, extra: Partial<Parameters<typeof collectFavourites>[0]> = {}) => {
   const gaps: number[] = [];
@@ -228,6 +232,19 @@ test("a list that stops loading without saying it ended is held like a check, no
   expect(ledger.listedAt).toBeUndefined();
   expect(Object.keys(ledger.listed ?? {})).toHaveLength(60);
   expect(siteHold(store, ws, "xiaohongshu.com")).toMatchObject({ where: expect.stringContaining("60 条") });
+});
+
+test("a verification the person passes on the page lets the list go on from where it stopped; one not passed stops it", async () => {
+  const site = fakeSite({ total: 300, blockAfter: 4 });
+  const asked: string[] = [];
+  const result = await run(site.driver, { listOnly: true, mode: "catch_up", verify: async (where) => { asked.push(where); site.unblock(); return true; } }).result;
+  expect(asked).toEqual(["收藏列表第 5 屏"]);
+  expect(result).toMatchObject({ state: "done", listEnded: true, listed: 300 });
+  expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
+  const refused = fakeSite({ total: 300, blockAfter: 4 });
+  writeCollectLedger(store, ws, "flow-xhs", { read: {}, unorganised: [] });
+  const stopped = await run(refused.driver, { listOnly: true, mode: "catch_up", verify: async () => false }).result;
+  expect(stopped).toMatchObject({ state: "check", listEnded: false });
 });
 
 test("a list the site stops at the same depth twice counts as the whole list, and the next run reads instead of scrolling again", async () => {

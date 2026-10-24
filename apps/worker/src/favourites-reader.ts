@@ -8,6 +8,7 @@ import {
 import type { CrosslineStore } from "@crossline/db";
 import { readerLaunch, restoreSessionCookies } from "./browser-launch";
 import { holdSite, judgePage, siteHold, type SiteHold } from "./site-reader";
+import { castContext, publicUrlAllowed, type RemotePage, type Viewport } from "./remote-browser";
 
 /**
  * Reading the person's Xiaohongshu favourites in full (docs/skills-library.md 「收藏全量读取」, the owner's decision of 2026-10-22: 「收藏全部
@@ -63,6 +64,11 @@ export type CollectDriver = {
   fetchMedia: (url: string, referer: string, maxBytes: number) => Promise<MediaFetch>;
   /** How large the page has grown (its JavaScript heap in MB, its element count): logged while the list scrolls. */
   metrics?: () => Promise<{ heapMb: number; nodes: number }>;
+  /**
+   * This page lent to the dialog for the site's verification (the person passes it there): pictures load again while it is lent, since a
+   * verification is made of them. Only where the page can be shown (the server's browser).
+   */
+  lend?: () => Promise<{ page: RemotePage; viewport: Viewport; back: () => void }>;
   close: () => Promise<void>;
 };
 
@@ -175,7 +181,14 @@ export type CollectOptions = {
   log?: (event: Record<string, unknown>) => void;
   /** The worker's memory line (memory.ts `createCollectMemory`): past it the run stops where it is, and downloads are held to the room left. */
   memory?: { over: () => boolean; mediaBytes: (wanted: number) => number; describe: () => string };
+  /**
+   * The site asked for a verification (HTTP 461/471, or the list stopped loading): the person is asked to pass it on this very page, and
+   * the run goes on from where it is when they did (true), or stops as before (false). Absent where the page cannot be shown.
+   */
+  verify?: (where: string) => Promise<boolean>;
 };
+/** Verifications one run asks for before it stops anyway: a site that keeps asking is not read on. */
+export const VERIFICATIONS_PER_RUN = 3;
 
 const MIME_EXT: Array<[RegExp, string]> = [[/png/, "png"], [/jpe?g/, "jpg"], [/webp/, "webp"], [/gif/, "gif"], [/avif/, "avif"], [/hei[cf]/, "heic"], [/mp4/, "mp4"], [/quicktime/, "mov"], [/webm/, "webm"]];
 /** The file's real kind from its first bytes, else the content type, else the fallback. */
@@ -238,6 +251,20 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     save();
     return { ...stopAtCheck(where), listed: total };
   };
+  /** Asks the person to pass the site's verification on this page; true when they did and the run may go on. */
+  let verifications = 0;
+  const askVerify = async (where: string): Promise<boolean> => {
+    if (!options.verify || verifications >= VERIFICATIONS_PER_RUN) return false;
+    verifications += 1;
+    keepListed(); save();
+    log({ type: "collect.verify_asked", workflowId, where, trigger });
+    const passed = await options.verify(where).catch(() => false);
+    log({ type: "collect.verify_answered", workflowId, where, passed });
+    if (!passed) return false;
+    trigger = "";
+    await driver.responses();
+    return true;
+  };
   /** A page-level check: the address and status are what is known. */
   const pageCheck = (url: string, status: number) => { trigger ||= `页面 HTTP ${status} ${url.slice(0, 120)}`; };
   /** The page's own answers since the last look: a check or a login out of them, the list pages, the note details, who is signed in. */
@@ -296,13 +323,15 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     let shown = await driver.snapshot();
     const first = await take();
     const pageVerdict = judgePage(shown.url, shown.title, "", status);
-    if (first === "check" || pageVerdict === "check") { pageCheck(shown.url, status); return listStop("收藏列表"); }
+    if (first === "check" || pageVerdict === "check") { pageCheck(shown.url, status); if (!(await askVerify("收藏列表"))) return listStop("收藏列表"); }
     if (first === "login" || pageVerdict === "login") return { ...result, state: "login", message: "小红书要求登录。" };
     const fromDom = (links: Array<{ text: string; href: string }>) => { for (const note of notesFromLinks(links)) if (!listed.has(note.id)) listed.set(note.id, note); };
     fromDom(shown.links);
     let quiet = 0;
     let capped = false;
     for (let screen = 0; screen < LIST_SCROLLS_MAX; screen += 1) {
+      // A list that stops loading without saying it ended is often the site waiting for a verification on the page.
+      if (quiet >= LIST_QUIET_SCREENS && hasMore !== false && !(mode === "incremental" && knownPage) && await askVerify(`收藏列表（已列出 ${listed.size} 条后停止加载）`)) quiet = 0;
       if (hasMore === false || quiet >= LIST_QUIET_SCREENS || (mode === "incremental" && knownPage)) break;
       // The page holds every card it has shown: past the memory line the list stops here rather than the kernel killing the page.
       if (options.memory?.over()) {
@@ -315,7 +344,11 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       await driver.pause(between(LIST_SCREEN_GAP_MS));
       const verdict = await take();
       shown = await driver.snapshot();
-      if (verdict === "check" || judgePage(shown.url, shown.title, "", 200) === "check") { pageCheck(shown.url, 200); return listStop(`收藏列表第 ${screen + 1} 屏`); }
+      if (verdict === "check" || judgePage(shown.url, shown.title, "", 200) === "check") {
+        pageCheck(shown.url, 200);
+        if (await askVerify(`收藏列表第 ${screen + 1} 屏`)) { quiet = 0; continue; }
+        return listStop(`收藏列表第 ${screen + 1} 屏`);
+      }
       if (verdict === "login" || judgePage(shown.url, shown.title, "", 200) === "login") return { ...result, state: "login", message: "小红书要求登录。" };
       fromDom(shown.links);
       quiet = listed.size > before ? 0 : quiet + 1;
@@ -387,7 +420,8 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       await driver.pause(2_000 + random() * 1_500);
       const verdict = await take();
       const page = await driver.snapshot();
-      if (verdict === "check") return { ...stopAtCheck("笔记"), pending: unread.length - result.read.length - result.gone.length };
+      // Passed on the page: this note stays unread for the next run, and the reading goes on with the next one.
+      if (verdict === "check") { if (await askVerify("笔记")) continue; return { ...stopAtCheck("笔记"), pending: unread.length - result.read.length - result.gone.length }; }
       if (verdict === "login") return { ...result, state: "login", message: "小红书要求登录。", pending: unread.length - result.read.length - result.gone.length };
       let apiJson: unknown;
       let detail: NoteDetail | undefined;
@@ -398,7 +432,11 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       // since a note about verification codes would otherwise close the site for a week.
       const urlVerdict = judgePage(page.url, "", "", noteStatus);
       const textVerdict = detail ? "ok" : judgePage(page.url, page.title, page.text, noteStatus);
-      if (urlVerdict === "check" || textVerdict === "check") { pageCheck(page.url, noteStatus); return { ...stopAtCheck("笔记"), pending: unread.length - result.read.length - result.gone.length }; }
+      if (urlVerdict === "check" || textVerdict === "check") {
+        pageCheck(page.url, noteStatus);
+        if (await askVerify("笔记")) continue;
+        return { ...stopAtCheck("笔记"), pending: unread.length - result.read.length - result.gone.length };
+      }
       if (urlVerdict === "login" || textVerdict === "login") return { ...result, state: "login", message: "小红书要求登录。", pending: unread.length - result.read.length - result.gone.length };
       if (!detail && NOTE_GONE_TEXT.test(page.text)) {
         ledger.read[note.id] = { at: now().toISOString(), state: "gone" };
@@ -475,7 +513,13 @@ export async function openCollectBrowser(profileDir: string, executablePath: str
   await restoreSessionCookies(context, profileDir);
   // Reading the list only needs its titles, which come in the page's own answers: its pictures and videos are not loaded. A list of
   // ~2000 favourites scrolled with them grew the page past the worker's memory and it crashed (2026-10-23).
-  if (options.listOnly) await context.route("**/*", (route) => ["image", "media", "font"].includes(route.request().resourceType()) ? route.abort() : route.continue());
+  // Every request goes only to public https hosts (as the login browser's do), so a page lent to the person cannot reach the server's own.
+  let lentNow = false;
+  await context.route("**/*", async (route) => {
+    const request = route.request();
+    if (!(await publicUrlAllowed(request.url()))) return route.abort("blockedbyclient");
+    return options.listOnly && !lentNow && ["image", "media", "font"].includes(request.resourceType()) ? route.abort() : route.continue();
+  });
   // Functions handed to the page name nothing (tsx's `__name` wrapper would throw there); see `openBrowser` in site-reader.ts.
   await context.addInitScript({ content: "globalThis.__name = globalThis.__name || ((target) => target);" });
   const page = context.pages()[0] ?? await context.newPage();
@@ -511,6 +555,11 @@ export async function openCollectBrowser(profileDir: string, executablePath: str
       const me = [...document.querySelectorAll("a[href*='/user/profile/']")].find((anchor) => (anchor.textContent ?? "").trim() === "我") as HTMLAnchorElement | undefined;
       return { ...(userId ? { userId } : {}), ...(me ? { href: me.href } : {}) };
     }),
+    lend: async () => {
+      lentNow = true;
+      const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
+      return { page: await castContext(context, viewport, true), viewport, back: () => { lentNow = false; } };
+    },
     fetchMedia: async (url, referer, maxBytes) => {
       const headers = { referer };
       const head = await page.request.head(url, { headers, timeout: 60_000 }).catch(() => undefined);

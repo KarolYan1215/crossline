@@ -14,7 +14,7 @@ import "./remote-login.css";
  */
 export type RemoteLoginTarget = { workflowId: string; service: string };
 type Frame = { data: string; width: number; height: number; seq: number };
-type Session = { url: string; title: string; label: string; endsAt: string };
+type Session = { url: string; title: string; label: string; endsAt: string; purpose?: "login" | "verify" };
 type RemoteEvent =
   | { kind: "mouse"; type: "move" | "down" | "up" | "click"; x: number; y: number; button?: "left" | "right" | "middle" }
   | { kind: "wheel"; x: number; y: number; dx: number; dy: number }
@@ -178,13 +178,17 @@ export function RemoteLogin({ target, label, onClose }: { target: RemoteLoginTar
   };
 
   const ends = session?.endsAt ? new Date(session.endsAt) : undefined;
-  return <Sheet title={`登录${label}`} size="wide" open onOpenChange={(open) => { if (!open) void act("cancel"); }}
+  // A reader's own page lent for the site's verification: the same dialog, said as a verification.
+  const verifying = session?.purpose === "verify";
+  return <Sheet title={verifying ? `完成${label}的验证` : `登录${label}`} size="wide" open onOpenChange={(open) => { if (!open) void act("cancel"); }}
     footer={closed ? <button type="button" className="primary-button" onClick={() => onClose(false)}>关闭</button> : <>
-      <button type="button" className="secondary-button" onClick={() => { void act("cancel"); }}>取消</button>
-      <button type="button" className="primary-button" onClick={() => { void finish(); }}>登录完成</button>
+      <button type="button" className="secondary-button" onClick={() => { void act("cancel"); }}>{verifying ? "不验证，先停下" : "取消"}</button>
+      <button type="button" className="primary-button" onClick={() => { void finish(); }}>{verifying ? "验证完成" : "登录完成"}</button>
     </>}>
     <div className="rl-body">
-      <p className="rl-intro">在下方画面里登录{label}：账号、密码、验证码、短信或 Duo 都由本人完成，系统不代填、不保存输入的内容。这个浏览器运行在 Crossline 的服务器上（香港），网站看到的是服务器的地址。登录后点「登录完成」，之后由服务器上的同一浏览器读取。</p>
+      <p className="rl-intro">{verifying
+        ? `${label}在读取中途要求验证。下方是正在读取的那个页面：请本人完成验证（滑块、点选或短信），系统不代做。完成后点「验证完成」，读取会从停下的地方接着往下。`
+        : `在下方画面里登录${label}：账号、密码、验证码、短信或 Duo 都由本人完成，系统不代填、不保存输入的内容。这个浏览器运行在 Crossline 的服务器上（香港），网站看到的是服务器的地址。登录后点「登录完成」，之后由服务器上的同一浏览器读取。`}</p>
       <div className="rl-bar">
         <button type="button" className="secondary-button" disabled={closed} onClick={() => { void act("back"); }} aria-label="后退">←</button>
         <button type="button" className="secondary-button" disabled={closed} onClick={() => { void act("reload"); }}>刷新</button>

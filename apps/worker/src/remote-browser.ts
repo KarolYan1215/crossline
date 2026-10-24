@@ -27,6 +27,8 @@ export const REMOTE_ABANDON_MS = 2 * 60_000;
 export const REMOTE_MAX_MS = 30 * 60_000;
 export const REMOTE_TEXT_MAX = 200;
 export const REMOTE_EVENTS_MAX = 60;
+/** How long a reader waits for the person to open a verification it lent them before it stops as it would have. */
+export const VERIFY_WAIT_MS = 15 * 60_000;
 // One by default: a Chromium page holds ~150–250 MB inside the worker's ceiling, which has no room set aside for it (deploy/server/run.sh),
 // and logging in is rare; a second person waits a few minutes rather than the worker's runtimes being killed for memory.
 const remoteLimit = (env: NodeJS.ProcessEnv = process.env) => Math.max(1, Math.floor(Number(env.CROSSLINE_REMOTE_BROWSERS) || 1));
@@ -119,6 +121,8 @@ export type RemotePage = {
   /** Cookies that end with the browser (see `saveSessionCookies`). */
   sessionCookies: () => Promise<Parameters<typeof saveSessionCookies>[1]>;
   close: () => Promise<void>;
+  /** Stops streaming and leaves the browser to its owner: a page lent for a verification (`attach`) is never closed here. */
+  detach?: () => Promise<void>;
 };
 export type OpenRemote = (options: { profileDir: string; executablePath?: string; viewport: Viewport; allow: (url: string) => Promise<boolean> }) => Promise<RemotePage>;
 
@@ -130,8 +134,11 @@ type Session = {
   workspaceId: string; workflowId: string; service: string; label: string; profileDir: string; viewport: Viewport;
   page: RemotePage; startedAt: number; lastInput: number; lastPoll: number;
   frame?: { data: string; width: number; height: number; seq: number }; seq: number; queue: Promise<void>;
+  /** A page a reader lent for the site's verification (`attach`): its owner is told how it ended, and its browser is not closed here. */
+  lent?: { done: (verified: boolean) => void; polled: boolean };
 };
-export type RemoteView = { workflowId: string; service: string; label: string; url: string; title: string; viewport: Viewport; startedAt: string; endsAt: string };
+/** `verify`: the dialog shows a reader's own page for the person to pass the site's check, then 「验证完成」. */
+export type RemoteView = { workflowId: string; service: string; label: string; url: string; title: string; viewport: Viewport; startedAt: string; endsAt: string; purpose: "login" | "verify" };
 
 export type RemoteBrowsersDeps = {
   resolve: (workspaceId: string, workflowId: string, service: string) => RemoteTarget | { code: string; message: string };
@@ -157,12 +164,18 @@ export function createRemoteBrowsers(deps: RemoteBrowsersDeps) {
   const log = deps.log ?? (() => {});
   const view = async (session: Session): Promise<RemoteView> => ({ workflowId: session.workflowId, service: session.service, label: session.label,
     url: session.page.url(), title: (await session.page.title().catch(() => "")).slice(0, 200), viewport: session.viewport,
-    startedAt: new Date(session.startedAt).toISOString(), endsAt: new Date(session.startedAt + REMOTE_MAX_MS).toISOString() });
+    startedAt: new Date(session.startedAt).toISOString(), endsAt: new Date(session.startedAt + REMOTE_MAX_MS).toISOString(), purpose: session.lent ? "verify" : "login" });
 
   /** Closes a session: its session cookies are kept beside the profile, the profile is let go. Never throws. */
   const close = async (session: Session, reason: string): Promise<void> => {
     if (sessions.get(session.workspaceId) !== session) return;
     sessions.delete(session.workspaceId);
+    if (session.lent) {
+      await session.page.detach?.().catch(() => undefined);
+      log({ type: "remote_browser.verify_ended", workspaceId: session.workspaceId, workflowId: session.workflowId, reason });
+      session.lent.done(reason === "finished");
+      return;
+    }
     try { saveSessionCookies(session.profileDir, await session.page.sessionCookies()); } catch { /* the persistent cookies are in the profile anyway */ }
     await session.page.close().catch(() => undefined);
     releaseProfile(session.profileDir, "login");
@@ -213,11 +226,28 @@ export function createRemoteBrowsers(deps: RemoteBrowsersDeps) {
     } finally { starting.delete(workspaceId); }
   };
 
+  /**
+   * A reader's own page shown in the dialog for the site's verification (the person passes it; nothing is solved for them): no browser
+   * is opened, the reader keeps its page and is told by `done` whether the person pressed 「验证完成」. False when a dialog is already open.
+   */
+  const attach = async (workspaceId: string, input: { workflowId: string; service: string; label: string; page: RemotePage; viewport: Viewport; done: (verified: boolean) => void }): Promise<boolean> => {
+    if (sessions.has(workspaceId) || starting.has(workspaceId)) return false;
+    const at = now();
+    const session: Session = { workspaceId, workflowId: input.workflowId, service: input.service, label: input.label, profileDir: "", viewport: input.viewport,
+      page: input.page, startedAt: at, lastInput: at, lastPoll: at, seq: 0, queue: Promise.resolve(), lent: { done: input.done, polled: false } };
+    try { await input.page.start((frame) => { session.seq += 1; session.frame = { ...frame, seq: session.seq }; }); }
+    catch { return false; }
+    sessions.set(workspaceId, session);
+    log({ type: "remote_browser.verify_opened", workspaceId, workflowId: input.workflowId });
+    return true;
+  };
+
   /** The latest frame when it is newer than `after`, with where the browser is; asking counts as the dialog still being open. */
   const state = async (workspaceId: string, after: number): Promise<RemoteResult> => {
     const session = sessions.get(workspaceId);
     if (!session) return { ok: true, open: false };
     session.lastPoll = now();
+    if (session.lent) session.lent.polled = true;
     const frame = session.frame && session.frame.seq > after ? session.frame : undefined;
     return { ok: true, open: true, session: await view(session), seq: session.frame?.seq ?? 0, ...(frame ? { frame } : {}) };
   };
@@ -257,7 +287,7 @@ export function createRemoteBrowsers(deps: RemoteBrowsersDeps) {
     if (!session || (workflowId && session.workflowId !== workflowId) || (service && session.service !== service))
       return { ok: false, code: "REMOTE_BROWSER_CLOSED", message: "登录窗口已经关闭；需要的话重新登录。" };
     await close(session, "finished");
-    deps.onLoggedIn(workspaceId, session.workflowId, session.service);
+    if (!session.lent) deps.onLoggedIn(workspaceId, session.workflowId, session.service);
     return { ok: true };
   };
 
@@ -271,7 +301,10 @@ export function createRemoteBrowsers(deps: RemoteBrowsersDeps) {
   const sweep = async (): Promise<void> => {
     const at = now();
     for (const session of [...sessions.values()]) {
-      const reason = at - session.startedAt >= REMOTE_MAX_MS ? "expired" : at - session.lastInput >= REMOTE_IDLE_MS ? "idle" : at - session.lastPoll >= REMOTE_ABANDON_MS ? "abandoned" : undefined;
+      // A lent page waits for the person to come to it (a phone notification): it is not abandoned before its dialog was first opened.
+      const abandoned = at - session.lastPoll >= REMOTE_ABANDON_MS && (!session.lent || session.lent.polled);
+      const reason = at - session.startedAt >= REMOTE_MAX_MS ? "expired" : at - session.lastInput >= (session.lent && !session.lent.polled ? VERIFY_WAIT_MS : REMOTE_IDLE_MS) ? "idle"
+        : abandoned ? "abandoned" : undefined;
       if (reason) await close(session, reason);
     }
   };
@@ -304,7 +337,7 @@ export function createRemoteBrowsers(deps: RemoteBrowsersDeps) {
   };
 
   const closeAll = async () => { for (const session of [...sessions.values()]) await close(session, "shutdown"); };
-  return { start, state, input, nav, finish, cancel, sweep, isOpen, handle, closeAll };
+  return { start, attach, state, input, nav, finish, cancel, sweep, isOpen, handle, closeAll };
 }
 export type RemoteBrowsers = ReturnType<typeof createRemoteBrowsers>;
 
@@ -323,6 +356,17 @@ export const openRemotePage: OpenRemote = async ({ profileDir, executablePath, v
     args: ["--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-mode", ...screen.extraArgs] });
   await context.route("**/*", async (route) => { if (await allow(route.request().url())) await route.continue(); else await route.abort("blockedbyclient"); });
   await context.routeWebSocket(/.*/, async (socket) => { if (await allow(socket.url())) socket.connectToServer(); else await socket.close(); });
+  return castContext(context, viewport);
+};
+
+/** Where every page of the server's browsers may go: public https hosts only (the same check the login browser has). */
+export const publicUrlAllowed = remoteUrlAllowed(resolvesPublicly);
+
+/**
+ * A browser context streamed to the dialog: its top page's frames, and the person's input to it. `lent`: the context belongs to a reader
+ * (the favourites job lends its own page for a verification), so `detach` only stops the stream and `close` leaves the browser open.
+ */
+export async function castContext(context: import("playwright-core").BrowserContext, viewport: Viewport, lent = false): Promise<RemotePage> {
   type Page = import("playwright-core").Page;
   type Cdp = import("playwright-core").CDPSession;
   const stack: Page[] = [context.pages()[0] ?? await context.newPage()];
@@ -354,6 +398,13 @@ export const openRemotePage: OpenRemote = async ({ profileDir, executablePath, v
   follow(stack[0]!);
   context.on("page", (page) => { stack.push(page); follow(page); if (onFrame) void cast(page).catch(() => undefined); });
   const button = (name: "left" | "right" | "middle") => ({ button: name });
+  const stop = async () => {
+    onFrame = undefined;
+    const before = cdp;
+    cdp = undefined;
+    await before?.send("Page.stopScreencast").catch(() => undefined);
+    await before?.detach().catch(() => undefined);
+  };
   return {
     start: async (handler) => { onFrame = handler; await cast(top()); },
     goto: async (url) => { await top().goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }); },
@@ -370,6 +421,7 @@ export const openRemotePage: OpenRemote = async ({ profileDir, executablePath, v
     url: () => top().url(),
     title: () => top().title(),
     sessionCookies: async () => (await context.cookies()).filter((cookie) => cookie.expires === -1),
-    close: () => context.close()
+    close: async () => { if (lent) await stop(); else await context.close(); },
+    detach: stop
   };
-};
+}

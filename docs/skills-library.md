@@ -354,6 +354,15 @@
 
 每周夜里的增量查看照旧。
 
+**更正（同日，查了网上的资料）**：461 不是深度上限，是小红书的验证码触发。社区项目把 HTTP 461/471 当成要求人工验证：[xiaohongshu-cli](https://github.com/jackwener/xiaohongshu-cli) 在浏览器里完成验证后重试，[MediaCrawler #757](https://github.com/NanmiCoder/MediaCrawler/issues/757) 也有同样的报告。触发和请求次数有关，翻得再慢也会碰到。
+
+所以改成在原处验证（`verify`，`apps/worker/src/favourites-reader.ts`）：
+- 遇到 461，或者列表停止加载、接口又没说到底时，不关浏览器。正在读取的这个页面借给弹窗（`remote-browser.ts` `attach`，`castContext` 的 lent 模式），并推送「去验证」。
+- 本人在「完成小红书的验证」弹窗里自己完成滑块或点选，点「验证完成」。读取从停下的那一屏接着往下，读笔记时就接着读下一篇。
+- 借出期间页面恢复加载图片，验证要靠图片。页面每个请求都只能去公网 https 地址，和登录浏览器一样。
+- 15 分钟没人打开弹窗、本人点「不验证，先停下」，或者一次运行里已经验证过 3 次（`VERIFICATIONS_PER_RUN`），就照原来的方式停下并暂停这个网站。
+- 前面的深度上限只在本人没有通过验证时才会起作用。
+
 ## 工作流查重合并（2026-10-24，本人：「不止按名字来，功能相近的就合并」）
 
 核心规则在 `packages/core/src/workflow-merge.ts`，执行在 `apps/worker/src/workflow-merge.ts`，db 端是 `mergeGrownSkills`/`unmergeGrownSkill`。

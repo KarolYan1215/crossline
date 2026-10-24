@@ -233,3 +233,27 @@ test("the supervisor service answers the dialog's routes", async () => {
   expect(existsSync(path.join(dir, "ws1", "xiaohongshu.com", SESSION_COOKIES_FILE))).toBe(true);
   expect(await remote.handle("DELETE", "/v1/remote-browser/finish", "ws1", {})).toBeUndefined();
 });
+
+test("a reader's own page is lent for the site's verification: shown as a verification, its browser never closed, its owner told how it ended", async () => {
+  const { remote, fake, logged, advance } = setup();
+  await fake.open({ profileDir: "x", viewport: { width: 1280, height: 800 }, allow: async () => true });
+  const lent = fake.pages[0]!;
+  const answers: boolean[] = [];
+  expect(await remote.attach("ws1", { workflowId: "flow-a", service: "小红书", label: "小红书", page: lent.page, viewport: { width: 1280, height: 800 }, done: (ok) => answers.push(ok) })).toBe(true);
+  // The person comes to it from a phone notification: not abandoned before the dialog first opens, within the wait.
+  advance(5 * 60_000);
+  await remote.sweep();
+  expect(remote.isOpen("ws1", "flow-a")).toBe(true);
+  // Reopening the dialog shows this page, said as a verification.
+  expect(await remote.start("ws1", { workflowId: "flow-a", service: "小红书" })).toMatchObject({ ok: true, session: { purpose: "verify" } });
+  expect(await remote.state("ws1", 0)).toMatchObject({ ok: true, open: true, session: { purpose: "verify" } });
+  expect(await remote.finish("ws1", "flow-a", "小红书")).toEqual({ ok: true });
+  expect(answers).toEqual([true]);
+  expect(lent.closed()).toBe(false);
+  expect(logged).toEqual([]);
+  // One never opened is given up after the wait, and its owner told so.
+  await remote.attach("ws1", { workflowId: "flow-a", service: "小红书", label: "小红书", page: lent.page, viewport: { width: 1280, height: 800 }, done: (ok) => answers.push(ok) });
+  advance(16 * 60_000);
+  await remote.sweep();
+  expect(answers).toEqual([true, false]);
+});
