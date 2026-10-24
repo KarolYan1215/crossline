@@ -154,8 +154,9 @@ export function writeNoteFile(folder: string, note: NoteFile): void {
 }
 
 export type CollectResult = {
-  /** `memory`: the run stopped itself at the memory line (or found no room to open the browser); nothing broke, the next run continues. */
-  state: "done" | "check" | "login" | "paused" | "no_profile" | "failed" | "memory";
+  /** `memory`: the run stopped itself at the memory line (or found no room to open the browser); nothing broke, the next run continues.
+   *  `handover`: stopped between two notes on request (`CollectOptions.handover`); the caller reads the rest elsewhere. */
+  state: "done" | "check" | "login" | "paused" | "no_profile" | "failed" | "memory" | "handover";
   mode: CollectMode;
   /** Notes the list showed this run, and whether it was read to its end. */
   listed: number; listEnded: boolean;
@@ -185,6 +186,12 @@ export type CollectOptions = {
   deadline?: Date;
   sleep?: (ms: number) => Promise<void>; random?: () => number; now?: () => Date;
   log?: (event: Record<string, unknown>) => void;
+  /**
+   * Asked before each note of a `targets` run: true stops the run cleanly between two notes (state `handover`, nothing lost, the ledger
+   * already holds every note read) so the caller can carry on with the rest somewhere else (the person's own computer, once its browser is
+   * ready). The notes are opened one by one from their kept tokens, so the rest of the run needs nothing from this browser.
+   */
+  handover?: () => boolean;
   /** The worker's memory line (memory.ts `createCollectMemory`): past it the run stops where it is, and downloads are held to the room left. */
   memory?: { over: () => boolean; mediaBytes: (wanted: number) => number; describe: () => string };
   /**
@@ -411,6 +418,11 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     const gap = mode === "incremental" ? INCREMENTAL_GAP_MS : CATCH_UP_GAP_MS;
     const unread = { length: total };
     for (const [index, note] of toRead.entries()) {
+      if (options.handover?.()) {
+        save();
+        log({ type: "collect.handover_asked", workflowId, read: result.read.length });
+        return { ...result, state: "handover", pending: unread.length - result.read.length - result.gone.length };
+      }
       const wait = options.gapMs ? options.gapMs(toRead.length - index) : between(gap);
       if (options.deadline && now().getTime() + wait + 60_000 > options.deadline.getTime()) break;
       if (options.memory?.over()) {

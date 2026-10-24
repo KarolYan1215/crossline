@@ -370,3 +370,22 @@ test("only a workflow about Xiaohongshu favourites behind a login goes to the co
   expect(favouritesAccess(record("每周整理收藏", "https://www.zhihu.com/"))).toBeUndefined();
   expect(favouritesAccess(record("每周整理收藏", "https://www.xiaohongshu.com/", false))).toBeUndefined();
 });
+
+test("a run over given notes stops cleanly between two notes when asked to hand over: what was read is kept, nothing is held, and the same notes carry on elsewhere", async () => {
+  const listing = fakeSite({ total: 6 });
+  await run(listing.driver, { listOnly: true }).result;
+  const targets = Array.from({ length: 6 }, (_, i) => idOf(6 - i));
+  const site = fakeSite({ total: 6 });
+  let asked = 0;
+  const first = await run(site.driver, { targets, handover: () => { asked += 1; return asked > 3; } }).result;
+  expect(first).toMatchObject({ state: "handover", pending: 3 });
+  expect(first.read).toEqual(targets.slice(0, 3));
+  expect(readCollectLedger(store, ws, "flow-xhs").unorganised).toEqual(targets.slice(0, 3));
+  expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
+  // The notes already read are not opened again by whoever takes over.
+  const other = fakeSite({ total: 6 });
+  const rest = await run(other.driver, { targets }).result;
+  expect(rest).toMatchObject({ state: "done" });
+  expect(rest.read).toEqual(targets.slice(3));
+  expect(other.log.filter((line) => line.startsWith("goto") && line.includes("/explore/"))).toHaveLength(3);
+});

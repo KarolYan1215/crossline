@@ -528,6 +528,8 @@ export const currentFavouritesCollector = (): FavouritesCollector | undefined =>
  * the default hand-over of everything read to the assistant.
  */
 export type FavouritesJob = Pick<CollectOptions, "listOnly" | "targets" | "gapMs" | "deadline" | "mode" | "now"> & { after?: (result: CollectResult) => void };
+/** Times one run may move from the server's browser to the person's computer (and back, if it went away) between two notes. */
+const HANDOVERS_PER_RUN = 3;
 /** Collections under way, by workspace and workflow: a second start waits (`COLLECTING` is a hold code). */
 const collecting = new Map<string, Promise<void>>();
 /** Resolves when the workflow's collection (and the hand-over to the assistant) is over; for tests and the trial script. */
@@ -553,55 +555,74 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
     payload: { taskId, listOnly: Boolean(plan.listOnly), notes: plan.targets?.length ?? 0 } });
   // A computer of the person's that runs a browser (a ready node offering one): the favourites are read there, in their own Chrome or
   // Edge, and nothing of the page sits in the server's memory (2026-10-24: read on the server, the list filled it at ~1360 notes).
-  const onNode = collector.nodeBrowser?.(workspaceId);
   const job = (async () => {
-    let result: CollectResult;
-    // The page was killed by the container's memory ceiling twice (2026-10-23) while four idle model runtimes held ~800 MB.
-    if (!onNode) collector.reclaim?.();
-    // No room for the page after the wait: nothing is opened, nothing is held, and the next run tries again.
-    const room = onNode || !collector.memory ? true : await collector.memory.admit();
-    const driver = !room ? undefined
-      : await (onNode ? openNodeCollectBrowser(onNode, { listOnly: Boolean(plan.listOnly) })
-        : (collector.open ?? openCollectBrowser)(profileDir, browser, { listOnly: Boolean(plan.listOnly) })).catch((error: unknown) => error as Error);
-    if (onNode && driver && !(driver instanceof Error)) log({ type: "collect.on_node", workspaceId, id: record.id, host: onNode.host });
-    if (!driver) result = { state: "memory", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0,
-      message: `服务器内存不够打开浏览器（${collector.memory?.describe() ?? ""}），稍后再读。` };
-    else if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
-    else {
-      const { after: _after, ...reading } = plan;
-      // The site's verification is passed by the person on this page, in the dialog (the server has no screen of its own to show it on).
-      const remote = remoteLogin();
-      // On the person's computer the window is on their screen: they verify (or log in) there, and say so on the page.
-      const nodeVerify = onNode ? async (where: string) => {
-        await driver.front?.().catch(() => undefined);
-        await driver.showMedia?.(true);
-        store.setSetting(workspaceId, VERIFY_PENDING_SETTING, JSON.stringify({ workflowId: record.id, service: access.service, label: access.service, where, at: new Date().toISOString(),
-          on: "node", host: onNode.host }));
-        sayToPerson(store, workspaceId, `「${record.manifest.summary}」读到${where}时要本人处理：请在电脑「${onNode.host}」上弹出的${access.service}窗口里完成，再在 Crossline 里点「已在电脑上完成」，读取会从这里接着往下；15 分钟内没有完成就先停下。`,
-          "workflow_verify", `verify:${record.id}:${Date.now()}`, [{ label: "去处理", href: loginHref(record.id) }]);
-        const done = await waitForNodeDone(workspaceId, record.id, NODE_VERIFY_WAIT_MS);
-        store.deleteSetting(workspaceId, VERIFY_PENDING_SETTING);
-        await driver.showMedia?.(false);
-        return done;
-      } : undefined;
-      const verify = nodeVerify ?? (remote && driver.lend ? async (where: string) => {
-        const lent = await driver.lend!();
-        return new Promise<boolean>((resolve) => {
-          void remote.attach(workspaceId, { workflowId: record.id, service: access.service, label: access.service, page: lent.page, viewport: lent.viewport,
-            done: (verified) => { store.deleteSetting(workspaceId, VERIFY_PENDING_SETTING); lent.back(); resolve(verified); } }).then((attached) => {
-            if (!attached) { lent.back(); resolve(false); return; }
-            // The 小帮手 opens the dialog on whatever page the person has open (apps/web/lib/person-calls.ts).
-            store.setSetting(workspaceId, VERIFY_PENDING_SETTING, JSON.stringify({ workflowId: record.id, service: access.service, label: access.service, where, at: new Date().toISOString() }));
-            sayToPerson(store, workspaceId, `「${record.manifest.summary}」读到${where}时小红书要求验证。点「去验证」，在弹出的画面里由本人完成验证，再点「验证完成」，读取会从这里接着往下；15 分钟内没有打开就先停下。`,
-              "workflow_verify", `verify:${record.id}:${Date.now()}`, [{ label: "去验证", href: loginHref(record.id) }]);
+    // One stretch of reading in one browser: on the person's computer (`node`) or the server's. A `targets` run on the server hands
+    // over between two notes when the person's computer becomes ready (`handover`), so the rest is read there; nothing read is lost
+    // since the ledger holds every note as soon as it is written.
+    const stretch = async (node: NodeBrowserLink | undefined, canSwitch: boolean): Promise<CollectResult> => {
+      let result: CollectResult;
+      // The page was killed by the container's memory ceiling twice (2026-10-23) while four idle model runtimes held ~800 MB.
+      if (!node) collector.reclaim?.();
+      // No room for the page after the wait: nothing is opened, nothing is held, and the next run tries again.
+      const room = node || !collector.memory ? true : await collector.memory.admit();
+      const driver = !room ? undefined
+        : await (node ? openNodeCollectBrowser(node, { listOnly: Boolean(plan.listOnly) })
+          : (collector.open ?? openCollectBrowser)(profileDir, browser, { listOnly: Boolean(plan.listOnly) })).catch((error: unknown) => error as Error);
+      if (node && driver && !(driver instanceof Error)) log({ type: "collect.on_node", workspaceId, id: record.id, host: node.host });
+      if (!driver) result = { state: "memory", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0,
+        message: `服务器内存不够打开浏览器（${collector.memory?.describe() ?? ""}），稍后再读。` };
+      else if (driver instanceof Error) result = { state: "failed", mode: "catch_up", listed: 0, listEnded: false, read: [], gone: [], pending: 0, message: `打不开浏览器：${driver.message.slice(0, 160)}` };
+      else {
+        const { after: _after, ...reading } = plan;
+        // The site's verification is passed by the person on this page, in the dialog (the server has no screen of its own to show it on).
+        const remote = remoteLogin();
+        // On the person's computer the window is on their screen: they verify (or log in) there, and say so on the page.
+        const nodeVerify = node ? async (where: string) => {
+          await driver.front?.().catch(() => undefined);
+          await driver.showMedia?.(true);
+          store.setSetting(workspaceId, VERIFY_PENDING_SETTING, JSON.stringify({ workflowId: record.id, service: access.service, label: access.service, where, at: new Date().toISOString(),
+            on: "node", host: node.host }));
+          sayToPerson(store, workspaceId, `「${record.manifest.summary}」读到${where}时要本人处理：请在电脑「${node.host}」上弹出的${access.service}窗口里完成，再在 Crossline 里点「已在电脑上完成」，读取会从这里接着往下；15 分钟内没有完成就先停下。`,
+            "workflow_verify", `verify:${record.id}:${Date.now()}`, [{ label: "去处理", href: loginHref(record.id) }]);
+          const done = await waitForNodeDone(workspaceId, record.id, NODE_VERIFY_WAIT_MS);
+          store.deleteSetting(workspaceId, VERIFY_PENDING_SETTING);
+          await driver.showMedia?.(false);
+          return done;
+        } : undefined;
+        const verify = nodeVerify ?? (remote && driver.lend ? async (where: string) => {
+          const lent = await driver.lend!();
+          return new Promise<boolean>((resolve) => {
+            void remote.attach(workspaceId, { workflowId: record.id, service: access.service, label: access.service, page: lent.page, viewport: lent.viewport,
+              done: (verified) => { store.deleteSetting(workspaceId, VERIFY_PENDING_SETTING); lent.back(); resolve(verified); } }).then((attached) => {
+              if (!attached) { lent.back(); resolve(false); return; }
+              // The 小帮手 opens the dialog on whatever page the person has open (apps/web/lib/person-calls.ts).
+              store.setSetting(workspaceId, VERIFY_PENDING_SETTING, JSON.stringify({ workflowId: record.id, service: access.service, label: access.service, where, at: new Date().toISOString() }));
+              sayToPerson(store, workspaceId, `「${record.manifest.summary}」读到${where}时小红书要求验证。点「去验证」，在弹出的画面里由本人完成验证，再点「验证完成」，读取会从这里接着往下；15 分钟内没有打开就先停下。`,
+                "workflow_verify", `verify:${record.id}:${Date.now()}`, [{ label: "去验证", href: loginHref(record.id) }]);
+            });
           });
-        });
-      } : undefined);
-      // Logged out on the person's computer (its own profile, first run there): they log in in the window, then the reading starts.
-      if (onNode && verify) await loginOnNode(driver, () => verify("登录小红书"));
-      try { result = await collectFavourites({ store, workspaceId, workflowId: record.id, folder, driver, ...(collector.sleep ? { sleep: collector.sleep } : {}), log,
-        ...(collector.memory && !onNode ? { memory: collector.memory } : {}), ...(verify ? { verify } : {}), ...reading }); }
-      finally { await driver.close(); }
+        } : undefined);
+        // Logged out on the person's computer (its own profile, first run there): they log in in the window, then the reading starts.
+        if (node && verify) await loginOnNode(driver, () => verify("登录小红书"));
+        try { result = await collectFavourites({ store, workspaceId, workflowId: record.id, folder, driver, ...(collector.sleep ? { sleep: collector.sleep } : {}), log,
+          ...(collector.memory && !node ? { memory: collector.memory } : {}), ...(verify ? { verify } : {}),
+          ...(canSwitch && !node ? { handover: () => Boolean(collector.nodeBrowser?.(workspaceId)) } : {}), ...reading }); }
+        finally { await driver.close(); }
+      }
+      collector.memory?.release();
+      return result;
+    };
+    const switchable = Boolean(plan.targets) && !plan.listOnly;
+    let result = await stretch(collector.nodeBrowser?.(workspaceId), switchable);
+    for (let switches = 1; result.state === "handover"; switches += 1) {
+      const next = collector.nodeBrowser?.(workspaceId);
+      log({ type: "collect.handover", workspaceId, id: record.id, to: next?.host ?? "server", read: result.read.length });
+      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `collect.handover:${taskId}:${switches}`, type: "collect.handover",
+        entityId: record.id, payload: { taskId, to: next?.host ?? "server", read: result.read.length } });
+      const rest = await stretch(next, switches < HANDOVERS_PER_RUN);
+      // The notes this stretch counted as waiting include those the earlier one already read.
+      result = { ...rest, listed: result.listed, listEnded: result.listEnded, read: [...result.read, ...rest.read], gone: [...result.gone, ...rest.gone],
+        pending: Math.max(0, rest.pending - result.read.length - result.gone.length) };
     }
     collector.memory?.release();
     releaseProfile(profileDir, "collect");

@@ -14,6 +14,7 @@ import { createRemoteBrowsers } from "./remote-browser";
 import { holdAfterFailure, readCollectLedger, writeCollectLedger, type CollectDriver } from "./favourites-reader";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
+import type { NodeBrowserLink } from "./node/hub";
 import { closeInterruptedCollections, createTopicClassifier, favouritesTopicStep, installFavouritesTopicsWorkflow, readTopicPlan, writeTopicPlan } from "./favourites-topics";
 
 const REVIEWER = "crossline:crossline-validation-reviewer";
@@ -648,5 +649,71 @@ test("favourites by topic: the list read for its titles, sorted into topics, the
     expect(closeInterruptedCollections(store, ws)).toEqual(["collect-x"]);
     expect(closeInterruptedCollections(store, ws)).toEqual([]);
     expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, soon)).not.toMatchObject({ code: "SITE_PAUSED" });
+  } finally { configureFavouritesCollector(undefined); }
+});
+
+test("a favourites reading that started on the server moves to the person's computer between two notes once its browser is ready, and loses no note", async () => {
+  store.setSetting(ws, "schedule.preferences", JSON.stringify({ timeZone: "UTC" }));
+  const record = installFavouritesTopicsWorkflow(store, ws, "media", new Date("2026-10-22T11:00:00Z"));
+  consentToGrownSkill(store, ws, record.id);
+  const id = (n: number) => `66cc${String(n).padStart(20, "0")}`;
+  const titles = ["一", "二", "三", "四", "五", "六"];
+  const fakeBrowser = (opened: string[], extra: Partial<CollectDriver> = {}): CollectDriver => {
+    let queue: Array<{ url: string; status: number; json: unknown }> = [];
+    return {
+      goto: async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/explore") queue.push({ url: "https://edith.xiaohongshu.com/api/sns/web/v2/user/me", status: 200, json: { code: 0, data: { user_id: "me" } } });
+        else if (parsed.pathname.startsWith("/user/profile/")) queue.push({ url: "https://edith.xiaohongshu.com/api/sns/web/v2/note/collect/page", status: 200,
+          json: { code: 0, data: { has_more: false, notes: titles.map((title, i) => ({ note_id: id(i + 1), xsec_token: `t${i + 1}`, display_title: title, type: "normal" })) } } });
+        else { const current = parsed.pathname.split("/").pop()!; opened.push(current); queue.push({ url: "https://edith.xiaohongshu.com/api/sns/web/v1/feed", status: 200,
+          json: { code: 0, data: { items: [{ id: current, note_card: { note_id: current, type: "normal", title: "x", desc: "正文", image_list: [] } }] } } }); }
+        return 200;
+      },
+      pause: async () => {}, wheel: async () => {}, snapshot: async () => ({ url: "https://www.xiaohongshu.com/x", title: "", text: "", links: [] }),
+      responses: async () => { const out = queue; queue = []; return out; }, noteState: async () => null, selfProfile: async () => ({}),
+      fetchMedia: async () => ({ state: "failed", status: 404 }), close: async () => {}, ...extra
+    };
+  };
+  const onServer: string[] = [];
+  const onNode: string[] = [];
+  const server = fakeBrowser(onServer);
+  const laptop = fakeBrowser(onNode, { selfProfile: async () => ({ userId: "me" }) });
+  const link: NodeBrowserLink = { host: "Karols_Laptop", call: async (request) => {
+    switch (request.op) {
+      case "goto": return laptop.goto(String(request.url));
+      case "pause": return laptop.pause(Number(request.ms));
+      case "snapshot": return laptop.snapshot();
+      case "responses": return laptop.responses();
+      case "noteState": return laptop.noteState();
+      case "selfProfile": return laptop.selfProfile();
+      case "metrics": return { heapMb: 0, nodes: 0 };
+      default: return undefined;
+    }
+  } };
+  const logged: Array<Record<string, unknown>> = [];
+  // The person's computer is not ready when the reading starts; it is by the time two notes are read on the server.
+  configureFavouritesCollector({ outputRoot: root, open: async () => server, media: () => ({}), sleep: async () => {}, classify: async () => 0,
+    nodeBrowser: () => (onServer.length >= 2 ? link : undefined), log: (event) => { logged.push(event); } });
+  try {
+    const runs: Array<AgentTaskInput & { taskId: string }> = [];
+    const run = (input: AgentTaskInput & { taskId: string }) => { runs.push(input); return { state: "started" as const, taskId: input.taskId }; };
+    const profiles = path.join(root, "p");
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, new Date("2026-10-22T12:00:00Z"), { manual: true })).toMatchObject({ state: "started" });
+    await collectionDone(ws, record.id);
+    const { rpc } = scriptedRuntime(["crossline:crossline-favourite-topics"], () => JSON.stringify({ topics: [{ name: "全部", why: "", notes: [1, 2, 3, 4, 5, 6] }] }));
+    expect(await createTopicClassifier(store, ".", () => rpc)(ws, record.id)).toBe(6);
+    onServer.length = 0;
+    // By night: all six are due. Two are read on the server, then the person's computer takes over for the other four.
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, profiles, new Date("2026-10-23T03:00:00Z"))).toMatchObject({ state: "started" });
+    await collectionDone(ws, record.id);
+    expect(onServer).toEqual([id(1), id(2)]);
+    expect(onNode).toEqual([id(3), id(4), id(5), id(6)]);
+    expect(Object.values(readCollectLedger(store, ws, record.id).read).map((entry) => entry.state)).toEqual(Array(6).fill("read"));
+    expect(store.listEvents(ws, { type: "collect.handover" }).map((event) => event.payload)).toEqual([expect.objectContaining({ to: "Karols_Laptop", read: 2 })]);
+    expect(store.listEvents(ws, { type: "collect.ran" }).at(-1)!.payload).toMatchObject({ state: "done", read: 6, pending: 0 });
+    expect(logged.some((event) => event.type === "collect.on_node" && event.host === "Karols_Laptop")).toBe(true);
+    // The assistant is given all six notes, not only the last stretch.
+    for (let n = 1; n <= 6; n += 1) expect(runs.at(-1)!.what).toContain(`note-${id(n)}.md`);
   } finally { configureFavouritesCollector(undefined); }
 });
