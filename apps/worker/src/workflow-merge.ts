@@ -22,6 +22,9 @@ export const WORKFLOW_MERGE_REQUESTED = "skills.grown.mergeRequested";
 /** Answers per pair, keyed by both ids at the versions judged (`workflowPairKey`): a pair is asked once per version. */
 const WORKFLOW_MERGE_JUDGED = "skills.grown.mergeJudged";
 const MAX_PAIRS = 8;
+/** Which reading of 「the same job」 an answer was given under: answers under an older one are asked again (2: close, not only identical). */
+const MERGE_CRITERIA = "c2";
+const judgedKey = (a: GrownSkillRecord, b: GrownSkillRecord) => `${MERGE_CRITERIA}:${workflowPairKey(a, b)}`;
 
 const brief = (record: GrownSkillRecord, files: (id: string) => string) => ({ summary: record.manifest.summary, description: record.description.slice(0, 400),
   steps: record.manifest.steps.map((step) => `${step.title}${step.by === "person" ? "（本人）" : ""}`), outputs: record.manifest.outputs ?? [],
@@ -46,7 +49,7 @@ export async function workflowMergePass(store: CrosslineStore, workspaceId: stri
   const pairs = workflowMergeCandidates(records, (record) => grownHomeLine(store, workspaceId, record));
   let judged: Record<string, { same: boolean; why: string }> = {};
   try { judged = JSON.parse(store.getSetting(workspaceId, WORKFLOW_MERGE_JUDGED) ?? "{}") as typeof judged; } catch { judged = {}; }
-  const open = pairs.filter((pair) => judged[workflowPairKey(byId.get(pair.a)!, byId.get(pair.b)!)] === undefined).slice(0, MAX_PAIRS);
+  const open = pairs.filter((pair) => judged[judgedKey(byId.get(pair.a)!, byId.get(pair.b)!)] === undefined).slice(0, MAX_PAIRS);
   const filesText = (id: string) => {
     try { return ((JSON.parse(store.getSetting(workspaceId, `skills.grown.files.${id}`) ?? "{}") as { files?: Array<{ path: string; text: string }> }).files ?? [])
       .find((file) => file.path === "SKILL.md")?.text ?? ""; } catch { return ""; }
@@ -55,15 +58,15 @@ export async function workflowMergePass(store: CrosslineStore, workspaceId: stri
     const input = { version: "crossline.workflow-merge-review.v1",
       pairs: open.map((pair, index) => ({ id: `p${index + 1}`, a: brief(byId.get(pair.a)!, filesText), b: brief(byId.get(pair.b)!, filesText), rule: pair.why })) };
     const result = await runCodexSkill<TaskMergeReview>(client, input, { skillName: REVIEWER, cwd,
-      developerInstructions: "Decide for each pair whether the two workflows do the same job, as the duplicate-workflow section of the "
-        + "crossline-validation-reviewer Skill describes, and return only the requested JSON. `same: true` merges them into one workflow; "
-        + "judge by what each produces and from what, not by their names. When unsure, false.",
+      developerInstructions: "Decide for each pair whether the two workflows are close enough to be one, as the duplicate-workflow section of the "
+        + "crossline-validation-reviewer Skill describes, and return only the requested JSON. `same: true` merges them into one workflow that "
+        + "produces what both did; judge by what each works from and what it produces, not by their names.",
       outputSchema: TASK_MERGE_REVIEW_SCHEMA as unknown as Record<string, unknown>, prepareInput: () => input,
       validateOutput: (output) => validateTaskMergeReview(output, input.pairs.map((pair) => pair.id)), onAudit: () => {}, timeoutMs: 30 * 60_000 });
     if (result.ok) {
       for (const answer of result.output.pairs) {
         const pair = open[Number(answer.id.slice(1)) - 1];
-        if (pair) judged[workflowPairKey(byId.get(pair.a)!, byId.get(pair.b)!)] = { same: answer.same, why: answer.why };
+        if (pair) judged[judgedKey(byId.get(pair.a)!, byId.get(pair.b)!)] = { same: answer.same, why: answer.why };
       }
       store.setSetting(workspaceId, WORKFLOW_MERGE_JUDGED, JSON.stringify(judged));
     }
@@ -74,7 +77,7 @@ export async function workflowMergePass(store: CrosslineStore, workspaceId: stri
   for (const pair of pairs) {
     if (gone.has(pair.a) || gone.has(pair.b)) continue;
     const a = byId.get(pair.a)!, b = byId.get(pair.b)!;
-    const answer = judged[workflowPairKey(a, b)];
+    const answer = judged[judgedKey(a, b)];
     if (!answer?.same) continue;
     const [keep, absorb] = workflowToKeep(a, b, reader);
     const why = answer.why || pair.why;

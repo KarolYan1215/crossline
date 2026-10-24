@@ -582,7 +582,10 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
     // Stopped at our own memory line: nothing broke and the site is not held; said once a day.
     if (result.state === "memory") sayToPerson(store, workspaceId, `「${summary}」${result.message ?? "服务器内存到了上限，稍后再读。"}${result.read.length ? `本次已读 ${result.read.length} 条，照常整理。` : ""}`,
       "workflow_done", `memory:${record.id}:${day}`, [{ label: "去看设置", href: "/settings#skills" }]);
-    if (result.listCapped) sayToPerson(store, workspaceId, `「${summary}」收藏列表读到 ${result.listed} 条时服务器内存到了上限，先按这 ${result.listed} 条整理；更早的收藏在这台服务器上读不到，要等服务器扩容或算力节点。`,
+    const capWhy = ledger.listCapped?.why;
+    if (result.listCapped) sayToPerson(store, workspaceId, capWhy
+      ? `「${summary}」${capWhy}，就按已列出的 ${result.listed} 条整理：再点「立即运行」开始读笔记，不再从头翻列表；每周会在夜里再看一次有没有新收藏。`
+      : `「${summary}」收藏列表读到 ${result.listed} 条时服务器内存到了上限，先按这 ${result.listed} 条整理；更早的收藏在这台服务器上读不到，要等服务器扩容或算力节点。`,
       "workflow_done", `capped:${record.id}:${result.listed}`, [{ label: "去看设置", href: "/settings#skills" }]);
     if (result.state === "failed") sayToPerson(store, workspaceId, `「${summary}」这次没读完：${result.message ?? "浏览器出错"}${result.read.length ? `；已读 ${result.read.length} 条，照常整理` : ""}。不会自己重试，点「立即运行」再继续。`,
       "workflow_done", `failed:${record.id}:${taskId}`, [{ label: "去看设置", href: "/settings#skills" }]);

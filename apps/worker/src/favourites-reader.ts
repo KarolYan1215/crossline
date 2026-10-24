@@ -84,14 +84,17 @@ export type CollectLedger = {
    * The list stopped at the memory line before its end (the page grows with every screen): the notes past it are not reached on this
    * machine, and the list counts as read for the topics and the catch-up. Kept so the person is told once and the cause is on record.
    */
-  listCapped?: { at: string; listed: number; memory: string };
+  listCapped?: { at: string; listed: number; memory: string; why?: string };
+  /** Where the list was stopped by the site (a check, or no more pages), the last few: two at about the same depth cap the list. */
+  listStops?: Array<{ at: string; listed: number }>;
 };
 const ledgerKey = (workflowId: string) => `collect.notes.${workflowId}`;
 export function readCollectLedger(store: CrosslineStore, workspaceId: string, workflowId: string): CollectLedger {
   try {
     const raw = JSON.parse(store.getSetting(workspaceId, ledgerKey(workflowId)) ?? "null") as Partial<CollectLedger> | null;
     return { read: raw?.read ?? {}, unorganised: raw?.unorganised ?? [], ...(raw?.caughtUpAt ? { caughtUpAt: raw.caughtUpAt } : {}), ...(raw?.selfId ? { selfId: raw.selfId } : {}),
-      ...(raw?.listed ? { listed: raw.listed } : {}), ...(raw?.listedAt ? { listedAt: raw.listedAt } : {}), ...(raw?.listCapped ? { listCapped: raw.listCapped } : {}) };
+      ...(raw?.listed ? { listed: raw.listed } : {}), ...(raw?.listedAt ? { listedAt: raw.listedAt } : {}), ...(raw?.listCapped ? { listCapped: raw.listCapped } : {}),
+      ...(raw?.listStops ? { listStops: raw.listStops } : {}) };
   } catch { return { read: {}, unorganised: [] }; }
 }
 export function writeCollectLedger(store: CrosslineStore, workspaceId: string, workflowId: string, ledger: CollectLedger): void {
@@ -214,6 +217,27 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     return { ...result, state: "check" as const, ...(trigger ? { trigger: `${where}：${trigger}` } : { trigger: where }),
       message: `读取${where}时遇到了小红书的安全验证或限流${trigger ? `（${trigger}）` : ""}，已停下。` };
   };
+  /**
+   * The list stopped by the site. Twice at about the same depth (within 5%) is as far as the site serves the list, whatever the pace
+   * (2026-10-23/24: HTTP 461 at screen ~120 with ~1200 listed, at 2.5–4 s and at 8 s a screen alike): what was listed then counts as the
+   * list, so the next run reads the notes instead of scrolling to the same wall again. The site is held all the same.
+   */
+  const listStop = (where: string): CollectResult => {
+    keepListed();
+    // The depth is how far this run got down the list; the ledger also holds what earlier runs listed.
+    const total = Object.keys(ledger.listed ?? {}).length;
+    const depth = listed.size;
+    const previous = ledger.listStops?.at(-1);
+    ledger.listStops = [...(ledger.listStops ?? []), { at: now().toISOString(), listed: depth }].slice(-5);
+    if (previous && depth > 0 && Math.abs(depth - previous.listed) <= Math.max(20, previous.listed * 0.05)) {
+      ledger.listedAt = now().toISOString();
+      ledger.listCapped = { at: now().toISOString(), listed: total, memory: "", why: `小红书两次都在约 ${total} 条处不再给出收藏列表` };
+      result.listCapped = true;
+      log({ type: "collect.list_depth_capped", workflowId, listed: total, depth, previous: previous.listed });
+    }
+    save();
+    return { ...stopAtCheck(where), listed: total };
+  };
   /** A page-level check: the address and status are what is known. */
   const pageCheck = (url: string, status: number) => { trigger ||= `页面 HTTP ${status} ${url.slice(0, 120)}`; };
   /** The page's own answers since the last look: a check or a login out of them, the list pages, the note details, who is signed in. */
@@ -272,7 +296,7 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     let shown = await driver.snapshot();
     const first = await take();
     const pageVerdict = judgePage(shown.url, shown.title, "", status);
-    if (first === "check" || pageVerdict === "check") { pageCheck(shown.url, status); return stopAtCheck("收藏列表"); }
+    if (first === "check" || pageVerdict === "check") { pageCheck(shown.url, status); return listStop("收藏列表"); }
     if (first === "login" || pageVerdict === "login") return { ...result, state: "login", message: "小红书要求登录。" };
     const fromDom = (links: Array<{ text: string; href: string }>) => { for (const note of notesFromLinks(links)) if (!listed.has(note.id)) listed.set(note.id, note); };
     fromDom(shown.links);
@@ -291,7 +315,7 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       await driver.pause(between(LIST_SCREEN_GAP_MS));
       const verdict = await take();
       shown = await driver.snapshot();
-      if (verdict === "check" || judgePage(shown.url, shown.title, "", 200) === "check") { pageCheck(shown.url, 200); return stopAtCheck(`收藏列表第 ${screen + 1} 屏`); }
+      if (verdict === "check" || judgePage(shown.url, shown.title, "", 200) === "check") { pageCheck(shown.url, 200); return listStop(`收藏列表第 ${screen + 1} 屏`); }
       if (verdict === "login" || judgePage(shown.url, shown.title, "", 200) === "login") return { ...result, state: "login", message: "小红书要求登录。" };
       fromDom(shown.links);
       quiet = listed.size > before ? 0 : quiet + 1;
@@ -312,9 +336,8 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     keepListed();
     if (!result.listEnded && !capped && quiet >= LIST_QUIET_SCREENS && !(mode === "incremental" && knownPage)) {
       trigger ||= `连续 ${LIST_QUIET_SCREENS} 屏没有新内容，接口没有说已到底（疑似限流）`;
-      save();
       log({ type: "collect.list_stalled", workflowId, listed: listed.size });
-      return { ...stopAtCheck(`收藏列表（已列出 ${listed.size} 条）`), listed: listed.size };
+      return listStop(`收藏列表（已列出 ${listed.size} 条）`);
     }
     if (capped) {
       result.listCapped = true;

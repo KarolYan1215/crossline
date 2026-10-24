@@ -343,6 +343,17 @@
 
 **改不了的**：Crossline 自己的代码，例如收藏读取器、节奏、验证判断。工作流能改的只有它的 SKILL.md、脚本和 manifest。
 
+## 收藏列表的深度上限（2026-10-24）
+
+两次 HTTP 461 都出在约第 120 屏、约 1200 条处：一次每屏 2.5–4 秒，一次每屏 8 秒。看来速度不是原因，小红书只把列表给到这个深度。
+
+现在列表被网站停下时，记下这次读到的深度（`listStops`）。连续两次停在差不多的位置（相差不超过 5% 或 20 条）时：
+- 已列出的就算整份列表，写入 `listedAt` 和 `listCapped.why`；
+- 下次「立即运行」直接开始读笔记，不再从头翻到同一处；
+- 网站照样暂停，等本人点「立即运行」。
+
+每周夜里的增量查看照旧。
+
 ## 工作流查重合并（2026-10-24，本人：「不止按名字来，功能相近的就合并」）
 
 核心规则在 `packages/core/src/workflow-merge.ts`，执行在 `apps/worker/src/workflow-merge.ts`，db 端是 `mergeGrownSkills`/`unmergeGrownSkill`。
@@ -351,7 +362,13 @@
 - 两个都没被合并掉，且属于同一主线；
 - 两个都在本人登录的同一网站上读取，或者说明文字（摘要、说明、步骤、产出）相近（bigram 相似度 ≥ 0.3）。
 
-**判断**：复核模型 `crossline-validation-reviewer`，输入版本 `crossline.workflow-merge-review.v1`，沿用 `TASK_MERGE_REVIEW_SCHEMA`。看两者从什么材料产出什么，不看名字；拿不准就判「不同」。每对按两边的版本号只问一次（`workflowPairKey`），修订后会重问。
+**判断**：复核模型 `crossline-validation-reviewer`，输入版本 `crossline.workflow-merge-review.v1`，沿用 `TASK_MERGE_REVIEW_SCHEMA`。不看名字，看两者从什么材料做、为了什么：
+- 同一主线、同一份材料、目的相关，一个工作流能把两者的产出一起做出来，就判「相近」并合并，即使交付物不同。
+- 材料不同，或目的毫不相干，就判「不同」。
+
+第一版只在「同一件事」时合并。上线当天，「收藏话题文档」对「每周内容候选」、「课程材料目录」对「复习提纲」都被判为不同，比本人要的「功能相近就合并」严，当天改成现在这样（`MERGE_CRITERIA` c2；旧标准下的回答会重问）。
+
+每对按两边的版本号只问一次（`workflowPairKey`），修订后会重问。
 
 **合并**：
 - 保留哪个（`workflowToKeep`），按顺序比：

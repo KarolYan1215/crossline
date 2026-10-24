@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { parseCollectPage, parseFeedResponse, parseInitialStateNote, type GrownSkillRecord } from "@crossline/core";
 import {
-  CATCH_UP_GAP_MS, INCREMENTAL_BATCH, LIST_REST_EVERY, LIST_REST_MS, INCREMENTAL_GAP_MS, MEDIA_MAX_BYTES, collectFavourites, favouritesAccess, mediaExtension, readCollectLedger,
+  CATCH_UP_GAP_MS, INCREMENTAL_BATCH, LIST_REST_EVERY, LIST_REST_MS, INCREMENTAL_GAP_MS, MEDIA_MAX_BYTES, collectFavourites, favouritesAccess, mediaExtension, readCollectLedger, writeCollectLedger,
   readNoteFile, type CapturedResponse, type CollectDriver, type MediaFetch
 } from "./favourites-reader";
 import { describeNotes, type PictureToDescribe } from "./note-media";
@@ -228,6 +228,21 @@ test("a list that stops loading without saying it ended is held like a check, no
   expect(ledger.listedAt).toBeUndefined();
   expect(Object.keys(ledger.listed ?? {})).toHaveLength(60);
   expect(siteHold(store, ws, "xiaohongshu.com")).toMatchObject({ where: expect.stringContaining("60 条") });
+});
+
+test("a list the site stops at the same depth twice counts as the whole list, and the next run reads instead of scrolling again", async () => {
+  const first = await run(fakeSite({ total: 300, stallAfter: 1 }).driver, { listOnly: true, mode: "catch_up" }).result;
+  expect(first.listCapped).toBeUndefined();
+  releaseSite(store, ws, "xiaohongshu.com");
+  const second = await run(fakeSite({ total: 300, stallAfter: 1 }).driver, { listOnly: true, mode: "catch_up" }).result;
+  expect(second).toMatchObject({ state: "check", listCapped: true, listed: 60 });
+  const ledger = readCollectLedger(store, ws, "flow-xhs");
+  expect(ledger.listedAt).toBeDefined();
+  expect(ledger.listCapped?.why).toContain("60 条");
+  // A stop much earlier than the last says nothing about the depth: no cap from it.
+  writeCollectLedger(store, ws, "flow-xhs", { read: {}, unorganised: [], listStops: [{ at: "x", listed: 1170 }] });
+  releaseSite(store, ws, "xiaohongshu.com");
+  expect((await run(fakeSite({ total: 300, stallAfter: 1 }).driver, { listOnly: true, mode: "catch_up" }).result).listCapped).toBeUndefined();
 });
 
 test("the list is scrolled at a person's pace, with a rest every 30 screens", async () => {
