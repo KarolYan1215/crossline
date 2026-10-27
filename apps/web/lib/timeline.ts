@@ -6,7 +6,7 @@ import { isAutoHandoff, isPaused, listAgentTasks, readCategories } from "@crossl
 import {
   ACTIVITY_DETAIL_CONSENT, COMMIT_GRACE_MINUTES, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant
 } from "./crossline";
-import { itemsFromPlan, toMinutes, withAgentMarks, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
+import { itemsFromPlan, toMinutes, uniqueDeadlines, withAgentMarks, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
 import { identityLines } from "./lines";
 import { inputEvents } from "./fixed-events";
 
@@ -174,7 +174,7 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   // What is due: each live milestone's deadline, and every confirmed dated fact the person's files gave us.
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
   const projects = store.listProjects(ctx.workspaceId, { includeArchived: true });
-  const deadlines: TimelineDeadline[] = [
+  const deadlines: TimelineDeadline[] = uniqueDeadlines([
     ...milestones.filter((milestone) => milestone.status !== "archived" && anchors.get(milestone.id)?.deadline).map((milestone) => ({
       id: `milestone:${milestone.id}`, day: anchors.get(milestone.id)!.deadline, title: milestone.title, identityId: milestone.identityId,
       detail: milestone.status === "draft" ? "里程碑截止 · 草稿" : "里程碑截止" })),
@@ -186,10 +186,10 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
         const project = projects.find((item) => item.id === fact.projectId || item.name === fact.projectId || item.name === resolved);
         const kind = DATE_KIND_LABEL[/^date_\d{8}_(\w+)$/.exec(fact.slot)?.[1] ?? ""] ?? "日期";
         return { id: `fact:${fact.identityId}:${fact.projectId}:${fact.slot}`, day: fact.value.slice(0, 10),
-          title: project ? `${project.name} · ${fact.value.slice(11)}` : fact.value.slice(11), identityId: fact.identityId,
+          title: project && !fact.value.slice(11).includes(project.name) ? `${project.name} · ${fact.value.slice(11)}` : fact.value.slice(11), identityId: fact.identityId,
           detail: `${kind}${fact.sourceQuote ? ` · 原文「${fact.sourceQuote.slice(0, 80)}」` : ""}` };
       })
-  ];
+  ]);
 
   const windows = readAvailability(ctx);
   const nowIso = instantNow().toISOString();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { MIN_TEXT_PX, conflictingIds, dayRange, itemsFromPlan, itemsOn, layoutDay, minuteInZone, monthGrid, overlapStates, overlapping, packColumns, shiftDay, shiftMonth, toClock, toMinutes, weekDays, weekStart, type TimelineItem } from "./model";
+import { MIN_TEXT_PX, conflictingIds, dayRange, itemsFromPlan, itemsOn, layoutDay, minuteInZone, monthGrid, overlapStates, overlapping, packColumns, shiftDay, shiftMonth, toClock, toMinutes, uniqueDeadlines, weekDays, weekStart, type TimelineItem } from "./model";
 
 test("days and weeks move the way a calendar does, with Monday first", () => {
   expect(shiftDay("2026-10-31", 1)).toBe("2026-11-01");
@@ -151,4 +151,13 @@ describe("layoutDay", () => {
     // Nothing is lost: every item is a block or a bar exactly once.
     expect(pieces.flatMap((piece) => piece.kind === "more" ? [] : [piece.item.id]).sort()).toEqual(day.map((item) => item.id).sort());
   });
+});
+
+test("the same thing due on one day is one marker, the first one kept", () => {
+  expect(uniqueDeadlines([
+    { id: "milestone:m", day: "2026-10-27", title: "ECE 548 期中考试 1 达到 A− 支撑线" },
+    { id: "fact:a", day: "2026-10-27", title: "ECE 548 · ECE 548 期中考试 1" },
+    { id: "fact:b", day: "2026-10-27", title: "ECE 548 · 期中考试 1" },
+    { id: "fact:c", day: "2026-10-28", title: "ECE 548 · 期中考试 1" }
+  ]).map((item) => item.id)).toEqual(["milestone:m", "fact:a", "fact:c"]);
 });

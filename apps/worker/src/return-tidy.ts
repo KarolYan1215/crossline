@@ -111,7 +111,10 @@ export function staleOpenWork(store: CrosslineStore, workspaceId: string, now: D
     if (order.state === "active" || started.has(order.id) || progressOf(order)) return [];
     const milestone = order.milestoneId ? milestones.get(order.milestoneId) : undefined;
     const due = (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "";
-    const why = order.state === "awaiting_plan_approval" && (lastMove.get(order.id) ?? now.toISOString()) <= cutoff ? `提议超过 ${STALE_DAYS} 天无人处理`
+    // A proposal whose own due day went by unapproved is no longer a decision anyone can make in time (2026-10-27: 「确定周五会议议题」
+    // still asked for approval five days after that Friday, and was Today's 「下一步」).
+    const why = order.state === "awaiting_plan_approval" && due && due < today ? `提议的截止 ${due} 已过，仍未批准`
+      : order.state === "awaiting_plan_approval" && (lastMove.get(order.id) ?? now.toISOString()) <= cutoff ? `提议超过 ${STALE_DAYS} 天无人处理`
       : order.milestoneId && milestone?.status !== "approved" ? "所服务的里程碑已不在"
       : due && due <= addDays(today, -STALE_DAYS) ? `截止 ${due} 已过 ${STALE_DAYS} 天以上且未开始`
       : "";

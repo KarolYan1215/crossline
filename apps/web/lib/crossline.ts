@@ -7,7 +7,7 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { approveArtifactRelationsFor, assistantAvailable, CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
-  type CalibrationReport, presetImportance, taskTitleOf, type ImportancePreset, restoreTargetOf,
+  type CalibrationReport, presetImportance, sittingStartOn, taskTitleOf, type ImportancePreset, restoreTargetOf,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent,
   DELAY_SETTING, FROZEN_SETTING, SHIFT_MINUTES, parseFrozen, settleFrozen, shiftFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
@@ -2020,6 +2020,17 @@ function approvedAnchorDays(ctx: AccessContext): Map<string, string> {
   return days;
 }
 
+/** Milestone titles and the calendar's own blocks, read once per ledger change for every planner task. */
+function milestoneTitleOf(ctx: AccessContext, milestoneId: string): string {
+  return memoByLedger(getStore(), `milestone-titles:${ctx.workspaceId}`, 60_000,
+    () => new Map(getStore().listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]))).get(milestoneId) ?? "";
+}
+function fixedBlocksOf(ctx: AccessContext): PersistedScheduleBlock[] {
+  return memoByLedger(getStore(), `fixed-blocks:${ctx.workspaceId}`, 60_000, () =>
+    ((getStore().listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)?.blocks ?? [])
+      .filter((block) => block.day && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title))));
+}
+
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const preferences = readSchedulePreferences(ctx);
   const riskBuffer = riskBufferOf(ctx, order.milestoneId);
@@ -2059,7 +2070,9 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
     ...(() => {
       const day = [milestoneDue,
         dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? dueDate : undefined].filter((value): value is string => Boolean(value)).sort()[0];
-      return day ? { deadline: toZonedInstant(day, "23:59", zone) } : {};
+      // Work towards a sitting (an exam held in that day's class) is due when the sitting begins, not at midnight.
+      const sitting = day && day === milestoneDue && order.milestoneId ? sittingStartOn(milestoneTitleOf(ctx, order.milestoneId), day, fixedBlocksOf(ctx)) : undefined;
+      return day ? { deadline: toZonedInstant(day, sitting ?? "23:59", zone) } : {};
     })(),
     ...(release ? { notBefore: toZonedInstant(release, "00:00", zone) } : {}),
     ...(dependsOn?.length ? { dependsOn } : {}),
