@@ -9,8 +9,9 @@
 
 const DAY = 86_400_000;
 
-/** A finished assistant result nobody reviewed for this long is decided by the system when it is safe to (see `adoptable`). */
-export const RESULT_REVIEW_DAYS = 7;
+/** A finished assistant result nobody reviewed for this long is decided by the system when it is safe to (see `adoptable`): a day, since
+ * 2026-10-27 — at seven, 24 clean results queued on 待确认 for the person to click through, each only listing what it still needed. */
+export const RESULT_REVIEW_DAYS = 1;
 /** One that is not safe to adopt is put away (still in 助手产出) after this long. */
 export const RESULT_EXPIRE_DAYS = 14;
 /** An overdue milestone moved by the system is never due sooner than this many days from today. */
@@ -85,7 +86,7 @@ export function advanceResults(rows: AdvanceResultRow[], now: Date): ResultMove[
     const by = replaced.get(row.taskId);
     if (by) return [{ taskId: row.taskId, action: "supersede", by }];
     const ageDays = (now.getTime() - Date.parse(row.completedAt ?? row.requestedAt)) / DAY;
-    if (adoptable(row)) return ageDays > RESULT_REVIEW_DAYS ? [{ taskId: row.taskId, action: "adopt" }] : [];
+    if (adoptable(row)) return ageDays >= RESULT_REVIEW_DAYS ? [{ taskId: row.taskId, action: "adopt" }] : [];
     return ageDays > RESULT_EXPIRE_DAYS ? [{ taskId: row.taskId, action: "expire" }] : [];
   });
 }

@@ -58,3 +58,19 @@ export function validateTaskTitles(value: unknown, ids: string[]): TaskTitles {
   return { titles: answer.titles.filter((item) => item && known.has(item.id)).map((item) => ({ id: item.id, title: cleanTaskTitle(String(item.title ?? "")) }))
     .filter((item) => item.title) };
 }
+
+/** A milestone that is itself a sitting: an exam, a quiz, a defence or a talk. Work towards it is useless once it has begun. */
+const SITTING = /考试|期中|期末|测验|小测|答辩|展示|汇报|quiz|exam|midterm|final|defen[cs]e|presentation/iu;
+
+/**
+ * When work towards a milestone that is a sitting must be done on its deadline day: the start of that day's earliest fixed block of the
+ * same course (the class meeting the exam is held in, or the exam itself). Without it the deadline was 23:59, and on the real account
+ * the evening after a midterm was filled with practice for it (2026-10-27). `undefined` when the milestone is no sitting, names no
+ * course, or no fixed block of that course falls on the day.
+ */
+export function sittingStartOn(milestoneTitle: string, day: string, blocks: Array<{ day?: string; start: string; title: string }>): string | undefined {
+  const code = courseCodeOf(milestoneTitle);
+  if (!code || !SITTING.test(milestoneTitle)) return undefined;
+  return blocks.filter((block) => block.day === day && /^\d{2}:\d{2}$/.test(block.start) && courseCodeOf(block.title) === code)
+    .map((block) => block.start).sort()[0];
+}

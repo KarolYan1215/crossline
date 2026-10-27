@@ -24,11 +24,11 @@ test("an older result is replaced by the newest finished run of the same work, a
   expect(Object.fromEntries(replaced)).toEqual({ old: "new", mid: "new" });
 });
 
-test("a week unreviewed: a clean result is adopted; two weeks: any other is put away; finished work and settled ones are left alone", () => {
+test("a day unreviewed: a clean result is adopted; two weeks: any other is put away; finished work and settled ones are left alone", () => {
   const now = new Date("2026-10-21T12:00:00Z");
   const moves = advanceResults([
     row("clean-old", { stepId: "s1", completedAt: "2026-10-13T11:00:00Z" }),
-    row("clean-young", { stepId: "s2", completedAt: "2026-10-16T11:00:00Z" }),
+    row("clean-young", { stepId: "s2", completedAt: "2026-10-21T02:00:00Z" }),
     row("failed-old", { stepId: "s3", checksPassed: false, completedAt: "2026-10-06T11:00:00Z" }),
     row("failed-mid", { stepId: "s4", checksPassed: false, completedAt: "2026-10-10T11:00:00Z" }),
     row("external", { stepId: "s5", external: true, completedAt: "2026-10-01T11:00:00Z" }),
