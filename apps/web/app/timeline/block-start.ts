@@ -6,7 +6,8 @@ import type { TimelineItem } from "./model";
  * `TaskActions` as `beforeStart`; a message means the start stops.
  */
 export async function lockOnStart(item: TimelineItem): Promise<string | null> {
-  if (item.kind !== "optional" && item.kind !== "scheduled") return null;
+  // A missed block's time is gone: starting it starts the work now, with nothing to lock.
+  if ((item.kind !== "optional" && item.kind !== "scheduled") || item.missed) return null;
   const response = await fetch("/api/plan/pin", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ blockId: item.id, day: item.day, start: item.start, end: item.end, reason: "pinned" }) }).catch(() => null);
   return response?.ok ? null : "未能锁定这段时间，请重试";

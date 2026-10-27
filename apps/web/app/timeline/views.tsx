@@ -80,14 +80,14 @@ export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, s
               const state = overlapState.get(item.id);
               const title = `${item.title}${item.step ? ` · ${item.step}` : ""} ${timeText(item)}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}${state ? ` · ${OVERLAP_TEXT[state]}` : ""}`;
               const common = {
-                "data-line": lineOf(item.identityId), "data-kind": item.kind, "data-agent": item.agent, "data-work-order": item.workOrderId,
+                "data-line": lineOf(item.identityId), "data-kind": item.kind, "data-missed": item.missed || undefined, "data-agent": item.agent, "data-work-order": item.workOrderId,
                 "data-clash": state === "clash" || undefined, "data-overlap-ok": state === "allowed" || undefined, "aria-pressed": selectedId === item.id,
                 title, onClick: () => onSelect?.(item)
               };
               // Too short for a line of text: a bare colour bar at its true time; what it is shows on hover, in the 「+N 项」 list and beside the day.
               if (piece.kind === "bar") return <button type="button" key={item.id} className="dv-bar" {...common} aria-label={title}
                 style={{ top: piece.top, height: piece.height, ...slot }} />;
-              const resizable = Boolean(onResize && item.kind === "scheduled");
+              const resizable = Boolean(onResize && item.kind === "scheduled" && !item.missed);
               const minutes = toMinutes(end) - toMinutes(item.start);
               return <button type="button" key={item.id} className="dv-block" {...common}
                 data-short={piece.height - piece.textTop < 40 || undefined} data-tight={piece.height - piece.textTop < 24 || undefined}
@@ -156,7 +156,7 @@ export function WeekView({ anchor, today, items, deadlines, labels, selectedId, 
             {packed.map(({ item, column, columns }) => {
               const top = (toMinutes(item.start) / 60) * HOUR_PX;
               const height = Math.max(((toMinutes(item.end) - toMinutes(item.start)) / 60) * HOUR_PX, 14);
-              return <button type="button" key={item.id} className="wk-block" data-line={lineOf(item.identityId)} data-kind={item.kind} data-work-order={item.workOrderId} aria-pressed={selectedId === item.id}
+              return <button type="button" key={item.id} className="wk-block" data-line={lineOf(item.identityId)} data-kind={item.kind} data-missed={item.missed || undefined} data-work-order={item.workOrderId} aria-pressed={selectedId === item.id}
                 data-clash={overlapState.get(item.id) === "clash" || undefined} data-overlap-ok={overlapState.get(item.id) === "allowed" || undefined}
                 style={{ top, height, left: `${(column / columns) * 100}%`, width: `${100 / columns}%` }} onClick={() => onSelect?.(item)}
                 title={`${item.title} ${timeText(item)}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}${overlapState.get(item.id) ? ` · ${OVERLAP_TEXT[overlapState.get(item.id)!]}` : ""}`}>

@@ -38,7 +38,9 @@ export type AskField = { id: string; label: string; kind: "text" | "longtext" | 
   initial?: string; placeholder?: string };
 export type AskOption = { id: string; label: string; detail?: string; recommended?: boolean; fields?: AskField[];
   /** A link instead of an answer: the option opens a page and records nothing. */
-  href?: string };
+  href?: string;
+  /** Answered only with the person's own words in the ask's `freeText` box: never a one-tap button. */
+  needsNote?: boolean };
 export type AskUrgency = "now" | "soon" | "later";
 export type Ask = {
   id: string; kind: AskKind; entityId: string;

@@ -56,7 +56,7 @@ test("locking one segment keeps its id and time, and the task's other minutes ar
   expect(blocks.filter((block) => block.id !== `scheduled:${order.id}:2`).reduce((sum, block) => sum + minutes(block), 0)).toBeGreaterThanOrEqual(60);
 });
 
-test("the commit window: a block starting within fifteen minutes keeps its time until it ends; later ones and locked ones are left alone", () => {
+test("the commit window: a block starting within fifteen minutes keeps its time until an hour after it ends; later ones and locked ones are left alone", () => {
   setup();
   // NOW is 08:00 in Chicago.
   expect(lockBlock(TEST_CTX, "scheduled:locked", { day: "2026-09-18", start: "08:05", end: "08:30" }, "locked")).toEqual({ ok: true });
@@ -69,8 +69,10 @@ test("the commit window: a block starting within fifteen minutes keeps its time 
   expect(added).toBe(1);
   const frozen = readFrozen(TEST_CTX, new Date(NOW));
   expect(frozen.map((item) => [item.blockId, item.reason])).toEqual([["scheduled:locked", "locked"], ["scheduled:soon", "commit"]]);
-  expect(frozen[1]!.until).toBe("2026-09-18T13:40:00.000Z");
-  expect(readFrozen(TEST_CTX, new Date("2026-09-18T13:41:00.000Z")).map((item) => item.blockId)).toEqual([]);
+  // Ends 08:40 (13:40Z); held until 09:40 in case the work runs over, then its work is placed again.
+  expect(frozen[1]!.until).toBe("2026-09-18T14:40:00.000Z");
+  expect(readFrozen(TEST_CTX, new Date("2026-09-18T14:39:00.000Z")).map((item) => item.blockId)).toEqual(["scheduled:soon"]);
+  expect(readFrozen(TEST_CTX, new Date("2026-09-18T14:41:00.000Z")).map((item) => item.blockId)).toEqual([]);
 });
 
 test("改时间 on a held block is previewed without writing, then locks it at the new time; deferring the task voids an older lock", async () => {

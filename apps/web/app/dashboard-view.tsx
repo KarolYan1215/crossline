@@ -191,7 +191,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
             timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals}
             taskDetails={data.calendarDetails} />
         </section>}
-        <div className="today-asks"><AskStack initial={data.asks ?? []} moreHref="/approvals#asks" {...(data.askPreviews ? { previews: data.askPreviews } : {})} /></div>
+        <div className="today-asks" id="asks"><AskStack initial={data.asks ?? []} moreHref="/approvals#asks" {...(data.askPreviews ? { previews: data.askPreviews } : {})} /></div>
       </div>
 
       {data.flywheelGraph && <section className="panel" aria-labelledby="flywheel-title">

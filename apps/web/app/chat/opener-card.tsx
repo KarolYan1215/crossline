@@ -32,8 +32,8 @@ function Lane({ label, blocks, axis, kind }: { label: string; blocks: OpenerBloc
     <ul className="opener-track" aria-label={`${label}：${blocks.length ? blocks.map((block) => `${block.start}–${block.end} ${block.title}${block.step ? ` · ${block.step}` : ""}`).join("；") : "无"}`}>
       {blocks.map((block, index) => {
         const { left, width } = blockSpan(block, axis);
-        return <li key={`${block.start}-${index}`} className="opener-block" data-line={block.line ?? "none"} style={{ left: `${left}%`, width: `${width}%` }}
-          title={`${block.start}–${block.end} ${block.title}${block.step ? ` · ${block.step}` : ""}`} />;
+        return <li key={`${block.start}-${index}`} className="opener-block" data-line={block.line ?? "none"} data-missed={block.missed || undefined} style={{ left: `${left}%`, width: `${width}%` }}
+          title={`${block.start}–${block.end} ${block.title}${block.step ? ` · ${block.step}` : ""}${block.missed ? " · 未完成" : ""}`} />;
       })}
     </ul>
   </div>;
@@ -47,10 +47,12 @@ function Lane({ label, blocks, axis, kind }: { label: string; blocks: OpenerBloc
 export function OpenerCard({ opener }: { opener: OpenerView }) {
   const axis = openerAxis(opener);
   const now = useNowMinute(opener.day, opener.timeZone);
-  const nextWork = (now === undefined ? opener.work : opener.work.filter((block) => minutesOfClock(block.end) > now))[0];
+  const nextWork = (now === undefined ? opener.work : opener.work.filter((block) => !block.missed && minutesOfClock(block.end) > now))[0];
   const ticks: number[] = [];
   for (let minute = Math.ceil(axis.from / 180) * 180; minute <= axis.to; minute += 180) ticks.push(minute);
   const top = opener.asks.top;
+  const planned = opener.work.filter((block) => !block.missed);
+  const missed = opener.work.length - planned.length;
   return <div className="opener-card" aria-label={`${opener.label}的安排`}>
     <div className="opener-head">
       <b>{opener.label}</b>
@@ -68,7 +70,7 @@ export function OpenerCard({ opener }: { opener: OpenerView }) {
         style={{ left: `calc(36px + (100% - 36px) * ${(now - axis.from) / (axis.to - axis.from)})` }} />}
     </div>
     <dl className="opener-facts">
-      <div><dt>工作</dt><dd>{opener.work.length ? `${opener.work.length} 段 · 共 ${hoursText(workMinutes(opener))}` : "今天没有排给工作的时段"}
+      <div><dt>工作</dt><dd>{planned.length ? `${planned.length} 段 · 共 ${hoursText(workMinutes(opener))}` : "今天没有排给工作的时段"}{missed > 0 && ` · ${missed} 段未完成`}
         {nextWork && <span className="opener-next">{now === undefined ? "第一段" : "接下来"} {nextWork.start} {nextWork.title}{nextWork.step ? ` · ${nextWork.step}` : ""}</span>}</dd></div>
       <div><dt>固定</dt><dd>{opener.fixed.length ? opener.fixed.slice(0, 2).map((block) => `${block.start}–${block.end} ${block.title}`).join("；")
         + (opener.fixed.length > 2 ? ` 等 ${opener.fixed.length} 项` : "") : "今天没有固定安排"}</dd></div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Ask } from "@crossline/core";
 import { PENDING_CHANGED } from "../pending-badge";
 import { AskCard } from "./ask-card";
@@ -21,8 +21,13 @@ export function useAskList(initial: Ask[], keep: (ask: Ask) => boolean) {
   const onDone = (id: string) => {
     setAsks((list) => list.filter((item) => item.id !== id));
     window.dispatchEvent(new Event(PENDING_CHANGED));
-    void reload();
   };
+  // Answered here or anywhere else on the page (the day's opener, the input box): the list is fetched again.
+  useEffect(() => {
+    const onChanged = () => void reload();
+    window.addEventListener(PENDING_CHANGED, onChanged);
+    return () => window.removeEventListener(PENDING_CHANGED, onChanged);
+  });
   return { asks, onDone };
 }
 

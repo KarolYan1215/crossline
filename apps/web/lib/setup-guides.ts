@@ -77,11 +77,16 @@ export const MAIL_GUIDE: SetupGuideSpec = {
       "填地址和密码后点「接入」。系统认不出这个域名时，表单会多出「IMAP 服务器」一栏：填上第 1 步问到的地址，再点「接入」。"],
     facts: [{ label: "腾讯企业邮", value: "imap.exmail.qq.com" }, { label: "阿里企业邮", value: "imap.qiye.aliyun.com" },
       { label: "网易企业邮", value: "imap.qiye.163.com" }, { label: "端口", value: "993（SSL）" }],
-    note: "服务器只接受域名，不接受 IP 地址或内网名称。学校邮箱若是 Microsoft 365（Outlook），见「Outlook / Hotmail」一栏；若是 Google（Gmail），按 Gmail 一栏操作。" },
-    { id: "outlook", label: "Outlook / Hotmail", unsupported: true, steps: [
-      "微软已停止用密码读取 Outlook.com、Hotmail、Live 和 Microsoft 365 邮箱，只允许 OAuth 登录；Crossline 暂不支持这类邮箱，填入地址会直接提示不支持。",
-      "替代办法：在 Outlook 网页版「设置」→「邮件」→「转发」里，把邮件转发到一个已接入的 Gmail、QQ 或 163 邮箱。转发由本人在 Outlook 里开启和关闭。"],
-    links: [{ label: "Outlook 转发设置", url: "https://outlook.live.com/mail/0/options/mail/forwarding" }] }
+    note: "服务器只接受域名，不接受 IP 地址或内网名称。学校邮箱若是 Microsoft 365（Outlook），见「Outlook / Hotmail / 组织邮箱」一栏，用转发接入；若是 Google（Gmail），按 Gmail 一栏操作。" },
+    { id: "outlook", label: "Outlook / Hotmail / 组织邮箱", unsupported: true, steps: [
+      "微软已停止用密码读取 Outlook.com、Hotmail、Live 和 Microsoft 365 邮箱，只允许 OAuth 登录；Crossline 暂不支持这类邮箱。多数学校和公司邮箱（如 @wisc.edu）就是 Microsoft 365。",
+      "替代办法是转发。先在这里接入一个 Gmail、QQ 或 163 邮箱（Gmail 用应用密码）。",
+      "用组织账号登录 Outlook 网页版（学校、公司账号在 outlook.office.com，个人账号在 outlook.live.com），进入「设置」→「邮件」→「转发」。",
+      "开启转发，填第 2 步接入的邮箱地址，勾选「保留转发邮件的副本」，点「保存」。",
+      "之后组织邮箱收到的新邮件会进那个邮箱，Crossline 每 15 分钟读一次并分拣。转发由本人在 Outlook 里开启和关闭。"],
+    links: [{ label: "组织账号转发设置", url: "https://outlook.office.com/mail/options/mail/forwarding" },
+      { label: "个人账号转发设置", url: "https://outlook.live.com/mail/0/options/mail/forwarding" }],
+    note: "学校或公司可能禁止自动转发到外部地址：Outlook 不让保存，或转发的邮件一直没有到，就是组织策略挡住了，需要向 IT 部门申请。组织日历不受影响，可在「日历与连接」里用设备码或订阅链接接入。" }
   ],
   problems: [
     { symptom: "提示密码不对、认证失败", fix: "多半填的是登录密码，或授权码没复制全。重新生成应用专用密码或授权码，完整粘贴后再接入。" },

@@ -8,7 +8,7 @@ import {
 } from "@crossline/core";
 import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
 import { listed, openAsks, thisWeek } from "./asks";
-import { calendarFiling, currentWorkState } from "./timeline";
+import { calendarFiling, currentWorkState, missedItems } from "./timeline";
 import { dayLabel, type OpenerView } from "./opener";
 import { interviewStatus } from "./interview-status";
 import { preparingProposalIds } from "./proposal-ready";
@@ -272,7 +272,7 @@ function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Om
  * The day's first words, said when the day's conversation is first opened: the fixed arrangements, the work placed, what bears on a
  * deadline, and the most urgent decision with its own options as buttons (the rest are a link away).
  */
-export async function ensureOpener(ctx: AccessContext, now = new Date()): Promise<boolean> {
+export async function ensureOpener(ctx: AccessContext, now = new Date(), force = false): Promise<boolean> {
   const store = getStore();
   const today = planToday(ctx, now);
   // The day's summary is written once: before the start standard it was written from an empty plan (the 小帮手 on the settings page
@@ -281,9 +281,10 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
   const conversation = store.conversationFor(ctx.workspaceId, today);
   // Written once a day, then kept current: it used to say 「待决事项 2 项，最紧急的是『访谈未完成』」 all day after both were settled. It is
   // read again at most every five minutes (the conversation is polled every 30 s, and each reading places the day's schedule) and rewritten
-  // in place when it changed, unless the person already acted on its buttons.
+  // in place when it changed, unless the person already acted on its buttons. `force`: a decision was just answered from it, so it moves
+  // on to the next one at once.
   const existing = store.listConversationMessages(ctx.workspaceId, conversation.id).find((message) => (message.payload.nudge as NudgePayload | undefined)?.kind === "opener");
-  if (existing) {
+  if (existing && !force) {
     const read = Date.parse(String(existing.payload.openerReadAt ?? existing.createdAt));
     const acted = ((existing.payload.card as Card | undefined)?.items ?? []).some((item) => item.state !== "pending");
     if (acted || now.getTime() - read < OPENER_REFRESH_MS) return false;
@@ -313,8 +314,11 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
   ];
   // The most urgent decision is answerable here when its options need nothing typed.
   const first = asks[0];
-  const answerable = first ? first.options.filter((option) => !option.href && !(option.fields ?? []).some((field) => field.required)).slice(0, 4) : [];
+  const answerable = first ? first.options.filter((option) => !option.href && !option.needsNote && !(option.fields ?? []).some((field) => field.required)).slice(0, 4) : [];
+  // An answer that takes the person's own words is given on the ask's card (Today's stack), never as an empty one-tap answer.
+  const typed = Boolean(first && (first.freeText || first.options.some((option) => option.needsNote)));
   const buttons: NudgeButton[] = [
+    ...(first && typed ? [{ kind: "href" as const, label: "写答案", href: "/#asks" }] : []),
     ...(first ? answerable.map((option): NudgeButton => ({ kind: "action", label: option.label,
       action: { action: "ask.answer", summary: `${first.title.slice(0, 40)}：${option.label}`, args: { askId: first.id, optionId: option.id, fields: [] } } })) : []),
     ...(asks.length ? [{ kind: "href" as const, label: `待决事项（${asks.length}）`, href: "/approvals" }] : []),
@@ -327,8 +331,11 @@ export async function ensureOpener(ctx: AccessContext, now = new Date()): Promis
   const opener: OpenerView = {
     day: today, label: dayLabel(today), timeZone: effectiveSchedulePreferences(ctx).preferences.timeZone,
     fixed: fixed.map((block) => withLine({ start: block.start, end: block.end, title: block.title }, calendarLineOf(filing, block.title))),
-    work: work.map((block) => withLine({ start: block.start, end: block.end, title: block.task ?? block.title, ...(block.step ? { step: block.step } : {}) },
+    work: [...work.map((block) => withLine({ start: block.start, end: block.end, title: block.task ?? block.title, ...(block.step ? { step: block.step } : {}) },
       lineOfOrder.get(block.id.split(":")[1]!))),
+      // What today's plan no longer holds because its time passed undone, kept dashed until 04:00 tomorrow.
+      ...missedItems(ctx, [], {}, now).filter((item) => item.day === today).map((item) => withLine({ start: item.start, end: item.end, title: item.title,
+        ...(item.step ? { step: item.step } : {}), missed: true }, lineOfOrder.get(item.workOrderId ?? "")))].sort((a, b) => a.start.localeCompare(b.start)),
     soon: soon.slice(0, 6).map((item) => withLine({ title: taskTitleOf(item.order), due: item.due }, item.order.identityId)),
     asks: { count: asks.length, ...(first ? { top: withLine({ title: first.title, urgency: first.urgency }, first.line) } : {}) }
   };

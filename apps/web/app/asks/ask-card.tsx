@@ -67,6 +67,8 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
   const links = ask.options.filter((option) => option.href);
   const chosen = answerable.filter((option) => picked.includes(option.id));
   const fields = uniqueFields(chosen.flatMap((option) => option.fields ?? []));
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  const waitsForNote = chosen.some((option) => option.needsNote);
 
   const send = async (path: string, body: Record<string, unknown>) => {
     setBusy(true); setStatus("保存中…");
@@ -81,6 +83,8 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
 
   const chooseOne = (option: AskOption) => {
     if (needsFields(ask, option)) { setPicked([option.id]); setValues(initials([option])); return; }
+    // An answer only words can give: pick it and send the person to the box instead of sending an empty answer.
+    if (option.needsNote && !note.trim()) { setPicked([option.id]); setStatus("先在下方写答案"); noteRef.current?.focus(); return; }
     submit([option.id]);
   };
   const toggle = (option: AskOption) => {
@@ -129,15 +133,15 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
     </div>}
 
     {ask.freeText && <label className="ak-free"><span className="sr-only">用自己的话回答</span>
-      <textarea rows={1} value={note} maxLength={4000} placeholder={ask.freeText.placeholder} data-user-text
+      <textarea ref={noteRef} rows={1} value={note} maxLength={4000} placeholder={ask.freeText.placeholder} data-user-text
         onChange={(event) => setNote(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && note.trim()) { event.preventDefault(); submit(picked); }
         }} />
     </label>}
 
-    {(many || fields.length > 0 || note.trim()) && <div className="execution-actions ak-submit">
-      <button type="button" className="primary-button" disabled={busy || (!picked.length && !note.trim())} onClick={() => {
+    {(many || fields.length > 0 || waitsForNote || note.trim()) && <div className="execution-actions ak-submit">
+      <button type="button" className="primary-button" disabled={busy || (!picked.length && !note.trim()) || (waitsForNote && !note.trim())} onClick={() => {
         const missing = fields.find((field) => field.required && !(values[field.id] ?? "").trim());
         if (missing) { setStatus(`「${missing.label}」未填写`); return; }
         submit(picked);

@@ -57,7 +57,7 @@
 .dv-block[data-kind="calendar"] b{color:var(--ink)}
 .dv-block[data-kind="import"]{background:repeating-linear-gradient(135deg,var(--paper) 0 4px,var(--chalk) 4px 8px);border:2px dashed var(--lc,var(--graphite))}
 /* A proposal still waiting for approval, and a task pencilled in outside working hours: dashed outline on paper, ink text (7:1). */
-.dv-block[data-kind="proposed"],.dv-block[data-kind="optional"]{background:var(--paper);border:2px dashed var(--lc,var(--graphite))}
+.dv-block[data-kind="proposed"],.dv-block[data-kind="optional"],.dv-block[data-missed]{background:var(--paper);border:2px dashed var(--lc,var(--graphite))}
 .dv-block[data-kind="activity"]{background:var(--chalk);border-left-style:dotted}
 .dv-block[data-clash]{box-shadow:inset 0 0 0 2px #C00000}
 .dv-resize{position:absolute;left:0;right:0;bottom:0;height:8px;cursor:ns-resize;touch-action:none;border-bottom:3px solid transparent}
@@ -86,7 +86,7 @@
 
 .wk-block b{display:block;font-size:12px}
 .wk-block small{font-size:12px;opacity:.9}
-.wk-block[data-kind="optional"],.wk-block[data-kind="proposed"]{background:var(--paper);border:1px dashed var(--lc,var(--graphite));border-left-width:4px}
+.wk-block[data-kind="optional"],.wk-block[data-kind="proposed"],.wk-block[data-missed]{background:var(--paper);border:1px dashed var(--lc,var(--graphite));border-left-width:4px}
 .wk-block[data-kind="calendar"]{background:var(--paper);color:var(--lc,var(--ink));border:2px solid var(--lc,var(--graphite))}
 .wk-block[data-kind="import"]{background:repeating-linear-gradient(135deg,var(--paper) 0 4px,var(--chalk) 4px 8px);color:var(--ink);border:2px dashed var(--lc,var(--graphite))}
 .wk-block[data-kind="proposed"]{background:var(--paper);color:var(--ink);border:2px dashed var(--lc,var(--graphite))}

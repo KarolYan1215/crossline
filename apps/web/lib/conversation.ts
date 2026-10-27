@@ -14,7 +14,7 @@ import { executeAction } from "./actions";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { identityLines, lineLabels } from "./lines";
 import { recentOps } from "./undo";
-import { ANSWERED_SETTING, muteNudgeKind } from "./nudges";
+import { ANSWERED_SETTING, ensureOpener, muteNudgeKind } from "./nudges";
 import { readOpener, type OpenerView } from "./opener";
 import { returnPageLines } from "./return";
 import { captureProgress } from "./capture-progress";
@@ -392,6 +392,13 @@ export async function decideCard(ctx: AccessContext, messageId: string,
   store.updateConversationPayload(ctx.workspaceId, messageId, { ...message.payload, card });
   // After the card is written: closing the draft marks every message about it (this one keeps the choice just made).
   if (closeDraft && card.mailReplyId) closeMailReply(store, ctx.workspaceId, card.mailReplyId, closeDraft, "person", now);
+  // A decision answered from the day's opener: the opener shows the next one instead of staying on the settled one.
+  const fromOpener = (message.payload.nudge as { kind?: string } | undefined)?.kind === "opener";
+  if (fromOpener && chosen.some((index) => card.actions[index]?.action === "ask.answer" && card.items[index]?.state === "done")) {
+    await ensureOpener(ctx, now, true);
+    const fresh = store.getConversationMessage(ctx.workspaceId, messageId);
+    if (fresh) return { ok: true, message: view(fresh) };
+  }
   return { ok: true, message: view({ ...message, payload: { ...message.payload, card } }) };
 }
 

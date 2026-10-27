@@ -542,7 +542,7 @@ function prepQuestionAsks({ store, ctx, today }: Source): Ask[] {
       title: `「${name}」需要本人回答：${short(question, 60)}`,
       why: `助手${core ? `为「${core}」` : ""}做「${name}」，只差这一点本人知道的信息，回答约需几分钟。回答后由助手做完${core ? `，结果放在「${core}」的「已备好」里` : ""}；这件事不进任务列表，也不占日程。`,
       options: [
-        { id: "answer", label: "回答，交给助手", recommended: true, detail: "助手按回答做完" },
+        { id: "answer", label: "回答，交给助手", recommended: true, detail: "在下方写答案，助手按回答做完", needsNote: true },
         { id: "skip", label: "不需要", detail: "这项准备不做了，归档，可从已归档恢复" }
       ] };
   });

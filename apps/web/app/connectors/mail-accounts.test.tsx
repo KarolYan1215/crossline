@@ -41,5 +41,5 @@ test("the card says which signed-in account the mailboxes belong to, labels each
   expect(html).toContain("应用专用密码或授权码</span>");
   expect(html).toContain("在邮箱设置里开启 IMAP 后生成的授权码，不是登录密码");
   expect(html).toContain("接入教程：各家邮箱的授权码与服务器");
-  for (const provider of ["Gmail", "QQ 邮箱 / Foxmail", "网易 163 / 126 / yeah", "iCloud", "企业与学校邮箱", "Outlook / Hotmail（不支持）"]) expect(html).toContain(provider);
+  for (const provider of ["Gmail", "QQ 邮箱 / Foxmail", "网易 163 / 126 / yeah", "iCloud", "企业与学校邮箱", "Outlook / Hotmail / 组织邮箱（不支持）"]) expect(html).toContain(provider);
 });

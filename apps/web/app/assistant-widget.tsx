@@ -36,6 +36,7 @@ function shownElsewhere(text: string): boolean {
  */
 export function AssistantWidget() {
   const [open, setOpen] = useState(false);
+  const [full, setFull] = useState(false);
   const [latest, setLatest] = useState<{ id: string; text: string; full: string } | null>(null);
   const [popped, setPopped] = useState(false);
   const [hover, setHover] = useState(false);
@@ -93,10 +94,15 @@ export function AssistantWidget() {
         <HelperFace src={helper.avatar} size="button" mood={mood} /></button>
       : <button type="button" className="assistant-bubble" data-unread={latest ? "" : undefined} data-mood={mood} onClick={openPanel} aria-label={label}>小帮手</button>}
   </div>;
-  return <section className="assistant-panel" aria-label="小帮手">
+  return <section className="assistant-panel" aria-label="小帮手" data-full={full || undefined}
+    onKeyDown={(event) => { if (event.key === "Escape" && full) { event.stopPropagation(); setFull(false); } }}>
     <header>
       <span>{helper.avatar && <HelperFace src={helper.avatar} size="reply" />}小帮手</span>
-      <button type="button" className="text-button" onClick={() => setOpen(false)} aria-label="收起小帮手">收起</button>
+      <span className="assistant-panel-actions">
+        <button type="button" className="text-button" onClick={() => setFull(!full)} aria-pressed={full}
+          aria-label={full ? "退出全屏对话" : "全屏对话"}>{full ? "退出全屏" : "全屏"}</button>
+        <button type="button" className="text-button" onClick={() => { setFull(false); setOpen(false); }} aria-label="收起小帮手">收起</button>
+      </span>
     </header>
     <Conversation variant="panel" />
   </section>;

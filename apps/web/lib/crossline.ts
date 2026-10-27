@@ -668,9 +668,15 @@ export function keepBlocks(ctx: AccessContext, blocks: Array<{ blockId: string; 
 /** How soon before its start a scheduled block stops moving (docs/loop-and-scout.md §2, the commit window). */
 export const COMMIT_WINDOW_MINUTES = 15;
 /**
- * The commit window: a work block under way or starting within fifteen minutes keeps its time until it ends, so the background optimal
- * plan landing a minute later never moves what the person is about to start. A block already started or locked keeps that reason.
- * Writes only when something new enters the window.
+ * How long a work block's time stays held after it ends (the owner, 2026-10-26: 「时间已过有可能是这项任务还在做，过 1h 重排」): until then
+ * its work is not placed again; after it, the work is re-planned and the block stays on its day as 「未完成」 until 04:00 the next morning
+ * (`missedItems` in `lib/timeline.ts`).
+ */
+export const COMMIT_GRACE_MINUTES = 60;
+/**
+ * The commit window: a work block under way or starting within fifteen minutes keeps its time until an hour after it ends, so the
+ * background optimal plan landing a minute later never moves what the person is about to start, and work running over is not moved
+ * away while it is being done. A block already started or locked keeps that reason. Writes only when something new enters the window.
  */
 export function commitSoon(ctx: AccessContext, blocks: Array<{ id: string; day?: string; start: string; end: string }>, now: Date): number {
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
@@ -681,7 +687,7 @@ export function commitSoon(ctx: AccessContext, blocks: Array<{ id: string; day?:
     let start: string, end: string;
     try { start = toZonedInstant(block.day, block.start, zone); end = toZonedInstant(block.day, block.end, zone); } catch { continue; }
     if (Date.parse(start) - now.getTime() > COMMIT_WINDOW_MINUTES * 60_000 || Date.parse(end) <= now.getTime()) continue;
-    list = withFrozen(list, { blockId: block.id, start, end, reason: "commit", until: end });
+    list = withFrozen(list, { blockId: block.id, start, end, reason: "commit", until: new Date(Date.parse(end) + COMMIT_GRACE_MINUTES * 60_000).toISOString() });
     added += 1;
   }
   if (added) writeFrozen(ctx, list);

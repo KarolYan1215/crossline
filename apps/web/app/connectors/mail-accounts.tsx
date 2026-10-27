@@ -168,7 +168,7 @@ export function MailAccounts({ accountEmail }: {
         <small>向管理员或邮箱帮助页确认的服务器地址，只填域名</small></label>}
       <button type="submit" className="primary-button" disabled={busy || !address || !password || provider === "outlook"}>{busy ? "连接中…" : "接入"}</button>
     </form>
-    {provider === "outlook" && <p role="status" className="st-note">Outlook、Hotmail 与 Microsoft 365 邮箱已不允许用密码读取，暂时接不了；替代办法见下方教程的「Outlook / Hotmail」一栏。</p>}
+    {provider === "outlook" && <p role="status" className="st-note">Outlook、Hotmail 与 Microsoft 365 邮箱已不允许用密码读取，暂时接不了；可以用转发接入，步骤见下方教程的「Outlook / Hotmail / 组织邮箱」一栏。</p>}
     {typedPage && <div className="mail-app-password-help">
       <AppPasswordLink page={typedPage} label={`去 Google 生成${refused ? "新的" : ""}应用专用密码`} />
       <small>{typedPage.hint}</small>

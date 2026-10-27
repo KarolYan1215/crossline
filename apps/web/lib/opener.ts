@@ -3,7 +3,9 @@
  * card: a small day timeline in the lines' colours, the most urgent decision on its own, the number waiting as a mark. Pure; the text
  * stays in the card's question for the desktop and phone, and for messages written before this, which carry no payload.
  */
-export type OpenerBlock = { start: string; end: string; title: string; step?: string; line?: string };
+export type OpenerBlock = { start: string; end: string; title: string; step?: string; line?: string;
+  /** Its time passed without the work being done (`missedItems`): drawn dashed, its work already planned again. */
+  missed?: boolean };
 export type OpenerView = {
   /** `YYYY-MM-DD` in the person's zone, and how the card names it (「10 月 15 日 周四」). */
   day: string; label: string; timeZone: string;
@@ -40,7 +42,7 @@ export function blockSpan(block: OpenerBlock, axis: { from: number; to: number }
 
 /** Minutes of work placed in the day. */
 export const workMinutes = (view: Pick<OpenerView, "work">) =>
-  view.work.reduce((sum, block) => sum + Math.max(0, minutesOfClock(block.end) - minutesOfClock(block.start)), 0);
+  view.work.filter((block) => !block.missed).reduce((sum, block) => sum + Math.max(0, minutesOfClock(block.end) - minutesOfClock(block.start)), 0);
 
 export function hoursText(minutes: number): string {
   if (minutes < 60) return `${minutes} 分钟`;
