@@ -51,9 +51,21 @@ export type PersistedScheduleBlock = {
  */
 export function planToday(ctx?: AccessContext,
   now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: (ctx && readSchedulePreferences(ctx)?.timeZone)
-    ?? process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago" }).format(now);
+  return dayFormatter((ctx && readSchedulePreferences(ctx)?.timeZone) ?? process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago").format(now);
 }
+
+/**
+ * Formatters are kept per zone (2026-10-26): building an `Intl.DateTimeFormat` costs far more than using one, and one page asked for
+ * today's day several hundred times. A zone the runtime does not know throws on first use, as before, and is not kept.
+ */
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
+function dayFormatter(timeZone: string): Intl.DateTimeFormat {
+  let formatter = dayFormatters.get(timeZone);
+  if (!formatter) { formatter = new Intl.DateTimeFormat("en-CA", { timeZone }); dayFormatters.set(timeZone, formatter); }
+  return formatter;
+}
+/** Zones already found valid; a stored zone is checked once per process instead of on every read of the preferences. */
+const knownZones = new Set<string>();
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
@@ -231,7 +243,7 @@ export function readSchedulePreferences(ctx: AccessContext): SchedulePreferences
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as SchedulePreferences;
-    new Intl.DateTimeFormat("en", { timeZone: value.timeZone });
+    if (!knownZones.has(value.timeZone)) { new Intl.DateTimeFormat("en", { timeZone: value.timeZone }); knownZones.add(value.timeZone); }
     return value.mode === "buffered" || value.mode === "asap" ? value : null;
   } catch { return null; }
 }
@@ -585,7 +597,24 @@ function planDays(today: string, days = Number(process.env.CROSSLINE_PLAN_WINDOW
  * of the app knew when the person was free. Reading demo data as a commitment is the mistake the rest
  * of this codebase works to prevent, so the examples are gone and this is what replaces them.
  */
+/**
+ * The same local time in the same zone always gives the same instant (or the same refusal), and building a schedule asks for the same
+ * few hundred again and again: kept, bounded (2026-10-26).
+ */
+const zonedInstants = new Map<string, string | Error>();
 export function toZonedInstant(day: string, time: string, zone: string): string {
+  const key = `${day} ${time} ${zone}`;
+  let kept = zonedInstants.get(key);
+  if (kept === undefined) {
+    try { kept = computeZonedInstant(day, time, zone); } catch (error) { kept = error instanceof Error ? error : new Error(String(error)); }
+    if (zonedInstants.size >= 20_000) zonedInstants.clear();
+    zonedInstants.set(key, kept);
+  }
+  if (kept instanceof Error) throw kept;
+  return kept;
+}
+
+function computeZonedInstant(day: string, time: string, zone: string): string {
   const instant = fromZonedTime(`${day}T${time}:00`, zone);
   const local = `${day} ${time}`;
   if (!Number.isFinite(instant.getTime()) || formatInTimeZone(instant, zone, "yyyy-MM-dd HH:mm") !== local) {
