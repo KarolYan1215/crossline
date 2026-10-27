@@ -18,6 +18,8 @@ import { applyChange } from "./impact";
 import { createMilestoneDraft } from "./input";
 import { addLine, identityLines, lineLabels, updateLine } from "./lines";
 import { addDomainRecord, personToday } from "./records";
+import { addReminder, createErrand } from "./life";
+import { setPlaceMinutes, setTravel } from "./travel";
 import { applyTaskOp, recordEnergy } from "./task-ops";
 import { undoOp, withUndo } from "./undo";
 
@@ -83,6 +85,24 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
       endTime: args.endTime, until: args.until, minutes: args.minutes > 0 ? args.minutes : 60, location: args.location });
     if (!result.ok) return { ok: false, code: result.code, message: result.message };
     return { ok: true, href: "/plan", message: `${describeEvent(result.event)}${result.placedBySystem ? "（系统选定的空档）" : ""}${result.moved ? ` · 重排了 ${result.moved} 个冲突的任务块` : ""}` };
+  },
+  "reminder.add": (ctx, args) => {
+    const reminder = addReminder(ctx, { text: args.text.trim(), date: args.date, time: args.time });
+    return { ok: true, message: `${reminder.date === personToday(ctx) ? "今天" : reminder.date.slice(5).replace("-", "/")} ${reminder.time} 在右上角提醒：${reminder.text}` };
+  },
+  "errand.prepare": (ctx, args) => {
+    const result = createErrand(ctx, args);
+    return result.ok ? { ok: true, message: result.message } : { ok: false, code: result.code, message: result.message };
+  },
+  "travel.set": (ctx, args) => {
+    const patch = { ...(args.home.trim() ? { home: args.home } : {}), ...(args.work.trim() ? { work: args.work } : {}),
+      ...(args.defaultMinutes > 0 ? { defaultMinutes: args.defaultMinutes } : {}), ...(args.useMap ? { useMap: args.useMap === "on" } : {}) };
+    const settings = Object.keys(patch).length ? setTravel(ctx, patch) : undefined;
+    if (args.place.trim()) setPlaceMinutes(ctx, args.place, args.minutes > 0 ? args.minutes : "online");
+    const parts = [args.place.trim() ? `去「${args.place.trim()}」${args.minutes > 0 ? `约 ${Math.round(args.minutes)} 分钟` : "按线上（不留路上时间）"}` : "",
+      args.home.trim() ? "已记下住址" : "", args.work.trim() ? "已记下工作或学习地点" : "", args.defaultMinutes > 0 ? `默认通勤 ${Math.round(args.defaultMinutes)} 分钟` : "",
+      settings?.home && settings.useMap ? "有地点的日程按 OpenStreetMap 估算路上时间（住址与地点会发给 OpenStreetMap）" : ""].filter(Boolean);
+    return { ok: true, message: parts.join("；"), href: "/settings#travel" };
   },
   "goal.add": (ctx, args) => {
     const line = identityLines(ctx).find((pack) => pack.id === args.lineId);

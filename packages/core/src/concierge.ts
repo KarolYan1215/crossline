@@ -46,6 +46,17 @@ export const ACTIONS = {
   "event.create": { label: "加入日程", risk: "internal", args: {
     title: str(120), date: day, weekdays: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
     startTime: str(5), endTime: str(5), until: day, minutes: { type: "number" }, lineId: str(64), location: str(300) } },
+  /** 「明天上午提醒我取快递」: something to be told at a moment, with no work in it — said in the bell (and on the phone) then. */
+  "reminder.add": { label: "设提醒", risk: "internal", args: { text: str(200), date: day, time: str(5) } },
+  /**
+   * An outing, a trip, an errand, an appointment the assistant can prepare for (itinerary, a list, directions, opening hours): the
+   * assistant does it by itself, and a departure reminder lists the checks before leaving. The event itself is a separate `event.create`.
+   */
+  "errand.prepare": { label: "交给助手准备", risk: "internal", args: { title: str(120), goal: str(300), location: str(300), date: day, startTime: str(5),
+    prepare: str(300), checklist: { type: "array", maxItems: 8, items: str(60) }, lineId: str(64) } },
+  /** Home and work address, travel time to one place (0 = online), the default travel time, and whether a map may estimate it. */
+  "travel.set": { label: "设置通勤", risk: "internal", args: { home: str(200), work: str(200), place: str(200), minutes: { type: "number" },
+    defaultMinutes: { type: "number" }, useMap: enumOf(["", "on", "off"]) } },
   /**
    * 「我每天能工作 10 小时，周日休息」: the whole weekly pattern, replaced. It used to have no action, so the same line became 「交给访谈」 plus an
    * all-day Sunday event and the plan stayed on 15 hours a week (2026-10-17 walkthrough, W-15).
@@ -93,6 +104,9 @@ type ArgsOf = {
   "record.add": { domain: "wellness" | "wealth"; kind: "income" | "expense" | "workout" | "weight" | "meal" | "metric"; value: number; unit: string;
     currency: string; category: string; note: string; at: string };
   "event.create": { title: string; date: string; weekdays: number[]; startTime: string; endTime: string; until: string; minutes: number; lineId: string; location: string };
+  "reminder.add": { text: string; date: string; time: string };
+  "errand.prepare": { title: string; goal: string; location: string; date: string; startTime: string; prepare: string; checklist: string[]; lineId: string };
+  "travel.set": { home: string; work: string; place: string; minutes: number; defaultMinutes: number; useMap: "" | "on" | "off" };
   "schedule.shift": { minutes: number };
   "availability.set": { windows: Array<{ days: string; start: string; end: string; energy: "low" | "medium" | "high" }> };
   "goal.add": { lineId: string; title: string };
@@ -218,6 +232,28 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       if (args.weekdays.length) return timed && DAY.test(args.until) ? "" : "周期日程需要起止时间和 until 日期";
       if (!DAY.test(args.date)) return "一次性日程需要 date";
       return refs.today && args.date < refs.today ? `日期 ${args.date} 已过去（今天 ${refs.today}）；本周已过的星期几指下一个` : "";
+    }
+    case "reminder.add": {
+      const args = item.args;
+      if (!args.text.trim()) return "提醒内容为空";
+      if (args.date && !DAY.test(args.date)) return "date 须为 YYYY-MM-DD 或空（今天）";
+      if (args.time && !TIME.test(args.time)) return "time 须为 HH:MM 或空（上午 9 点）";
+      return refs.today && args.date && args.date < refs.today ? `日期 ${args.date} 已过去（今天 ${refs.today}）` : "";
+    }
+    case "errand.prepare": {
+      const args = item.args;
+      if (!args.title.trim()) return "缺少事项名称";
+      if (args.date && !DAY.test(args.date)) return "date 须为 YYYY-MM-DD 或空（今天）";
+      if (args.startTime && !TIME.test(args.startTime)) return "startTime 须为 HH:MM 或空";
+      if (args.lineId && !refs.lines.has(args.lineId)) return `主线 id「${args.lineId}」不存在（生活事务 lineId 留空）`;
+      return refs.today && args.date && args.date < refs.today ? `日期 ${args.date} 已过去（今天 ${refs.today}）` : "";
+    }
+    case "travel.set": {
+      const args = item.args;
+      const minutesOk = (value: number) => Number.isFinite(value) && value >= 0 && value <= 240;
+      if (!args.home.trim() && !args.work.trim() && !args.place.trim() && !args.defaultMinutes && !args.useMap) return "没有要设置的内容";
+      if (args.place.trim() && !minutesOk(args.minutes)) return "某地的通勤分钟须为 0–240（0 表示线上）";
+      return minutesOk(args.defaultMinutes) ? "" : "默认通勤分钟须为 0–240";
     }
     case "availability.set": {
       const windows = item.args.windows;
@@ -377,6 +413,11 @@ export type ConciergePack = {
   /** The person's automations (what runs by itself) and how many mailboxes are connected (docs/personal-agent.md). */
   automations?: Array<{ name: string; trigger: string; status: string; lineId?: string }>;
   mailboxes?: number;
+  /**
+   * Getting around (docs/one-input.md 「生活与日程」): whether a home and a work or school address are set (a map then estimates travel),
+   * the default travel minutes, the places whose minutes the person gave, and the reminders still to be said.
+   */
+  life?: { home: boolean; work: boolean; defaultMinutes: number; places: string[]; reminders: string[] };
 };
 
 export function conciergeRefs(pack: ConciergePack): ConciergeRefs {

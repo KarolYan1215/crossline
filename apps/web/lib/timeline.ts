@@ -9,6 +9,7 @@ import {
 import { itemsFromPlan, toMinutes, uniqueDeadlines, withAgentMarks, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
 import { identityLines } from "./lines";
 import { inputEvents } from "./fixed-events";
+import { preparedForEvents } from "./errands";
 
 export type TimelineData = {
   today: string; nowIso: string; timeZone: string;
@@ -161,13 +162,16 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   const projectOfItem = itemProjectResolver(knownProjects, store.listSourceDocuments(ctx.workspaceId));
   const imported = importedProjects(store.listEvents(ctx.workspaceId, { type: "dates.extracted" }), projectOfItem);
   const held = new Map(readFrozen(ctx, instantNow()).map((entry) => [entry.blockId, entry]));
+  const preparedFor = preparedForEvents(ctx);
   const planned = withAgentMarks(itemsFromPlan(plan.blocks, today, meta), agentMarks(ctx)).map((item) => {
     if (item.kind !== "calendar" && item.kind !== "import") return item;
     const named = item.kind === "import" ? { ...item, title: importedTitle(item.id, item.title, imported) } : item;
     if (named.identityId) return named;
     // An event the person added names its line itself; only when it does not is it filed like any calendar title.
     const lineId = (item.id.startsWith("event:") ? eventLine.get(item.id.split(":")[1]!) : "") || calendarLineOf(filing, named.title);
-    return lineId ? { ...named, identityId: lineId } : named;
+    const prepared = item.id.startsWith("event:") ? preparedFor(item) : [];
+    const withPrep = prepared.length ? { ...named, prepared, tag: "已备好" } : named;
+    return lineId ? { ...withPrep, identityId: lineId } : withPrep;
   }).map((item) => withFrozenState(item, held, zone));
   const items = [...planned, ...missedItems(ctx, planned, meta, instantNow()), ...activityItems(ctx, zone, instantNow())];
 

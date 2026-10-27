@@ -23,6 +23,7 @@ import { answerInterviewQuestion, flushPendingAnswers, interviewStatus, type Int
 import { recordStepAnswer, requestStepReplan } from "./steps";
 import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
+import { placesToAsk, setPlaceMinutes } from "./travel";
 import { identityLines } from "./lines";
 import { decisionHorizon } from "./horizon";
 import { answerRelationCheck, relationCheckAsks } from "./artifact-relations";
@@ -738,6 +739,19 @@ function eventAsks({ ctx, today }: Source): Ask[] {
 }
 
 /**
+ * How long it takes to get to a place on the calendar, asked once per place when nothing says (docs/one-input.md 「生活与日程」): no
+ * minutes the person gave, no map estimate (no home address, or the map off), no default. 30 minutes are kept meanwhile.
+ */
+function travelAsks({ ctx, today }: Source): Ask[] {
+  return placesToAsk(ctx).map((place) => ({ id: `travel:${place.location}`, kind: "travel_minutes" as const, entityId: place.location, urgency: urgencyFor(place.day, today),
+    dueDay: place.day, raisedAt: "", fingerprint: place.location, title: `去「${short(place.location, 24)}」路上要多久？`,
+    why: `「${short(place.title, 24)}」（${place.day.slice(5).replace("-", "/")}）在这里。日程前后要留出路上时间，排程才不会把任务排到出门的时候；`
+      + "现在按 30 分钟留。也可以在设置里填住址，由地图估算。",
+    options: [...[10, 20, 30, 45, 60].map((minutes) => ({ id: `m${minutes}`, label: `${minutes} 分钟`, ...(minutes === 30 ? { recommended: true } : {}) })),
+      { id: "online", label: "线上，不用出门" }] }));
+}
+
+/**
  * Background work the worker paused for this workspace (`BACKGROUND_BLOCKER`): an unreadable quota (an API-key login reports no
  * windows) or a spent one. It used to stop with nothing said, so captures sat unanalysed while the page looked normal. A worker that is
  * down is the runtime banner (`lib/runtime-status.ts`), not this one.
@@ -789,7 +803,7 @@ function lockedConflictAsks({ store, ctx, today, now }: Source): Ask[] {
 
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, overdueAsks, missedAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, overdueAsks, missedAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
@@ -1112,6 +1126,9 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       record(ctx, "source.project_assigned", ask.entityId, `source:assigned:${ask.entityId}:${projectId}:${Date.now()}`, { projectId, by: "person" });
       return { ok: true };
     }
+    case "travel_minutes":
+      setPlaceMinutes(ctx, ask.entityId, optionId === "online" ? "online" : Number(optionId.slice(1)) || 30);
+      return { ok: true };
     case "event_propose": {
       decideEvent(ctx, ask.entityId, optionId === "create" ? "create" : optionId === "exists" ? "exists" : "skip");
       // Written now rather than at the next ten-minute pass, so the person sees it on their calendar while they are here.

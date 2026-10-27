@@ -44,7 +44,10 @@ export async function nudgePass(now = new Date()): Promise<number> {
   for (const workspace of store.listWorkspaces()) {
     const ownerId = store.getWorkspaceOwnerId(workspace.id);
     if (!ownerId) continue;
-    try { said += (await nudgesFor(systemContext(workspace.id, ownerId, now), now)).length; } catch { /* next interval */ }
+    const ctx = systemContext(workspace.id, ownerId, now);
+    try { said += (await nudgesFor(ctx, now)).length; } catch { /* next interval */ }
+    // The person's life on the same clock: reminders due, errands prepared, travel times from the map (`lib/life.ts`).
+    try { await (await import("./life")).lifePass(ctx, now); } catch { /* next interval */ }
   }
   return said;
 }

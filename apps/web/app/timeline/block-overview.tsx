@@ -109,7 +109,9 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
     {head}
     {line && <p className="dq-where"><LineTag line={item.identityId}>{line}</LineTag></p>}
     <h4 className="dq-title">{item.title}</h4>
-    <p className="dq-meta"><span className="mono">{slotText(item)}</span> · {KIND_TEXT[item.kind]}</p>
+    <p className="dq-meta"><span className="mono">{slotText(item)}</span> · {item.id.startsWith("travel:") ? `预留的路上时间${item.tag ? `（${item.tag}）` : ""}` : KIND_TEXT[item.kind]}</p>
+    {item.prepared?.length ? <p className="task-prepared"><small>已备好</small>
+      {item.prepared.slice(0, 3).map((file) => <a key={file.href} href={file.href} target="_blank" rel="noreferrer">{file.name}</a>)}</p> : null}
   </div>;
 
   return <div className="dq-focus" data-line={item.identityId ?? "none"} data-compact={compact || undefined}>
