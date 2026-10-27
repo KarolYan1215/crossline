@@ -350,17 +350,17 @@
     }
   ],
   "type": {
-    "concentration": 94,
-    "orientation": 22,
-    "boundary": 31,
-    "pacing": 52,
+    "collab": 70,
+    "purpose": 35,
+    "build": 40,
     "evidence": {
-      "concentration": "四条主线并行并互相取材",
-      "orientation": "反复打磨已验证的方法",
-      "boundary": "为每条线留出整块时段",
-      "pacing": "均匀推进与集中冲刺大致各半"
+      "collab": "从第一步起就和 AI 来回改稿",
+      "purpose": "先要能交出去的结果",
+      "build": "先定结构再分段推进",
+      "lines": "四条主线并行并互相取材"
     },
-    "summary": "你同时推进研究、产品和表达几条线，每条线都在已有积累上继续加深；代价是收尾常被下一阶段的冲刺打断，几条线同时推进时最先吃紧的是专注时段，但这种并行正是你能把几条线接成整体的来源"
+    "summary": "你同时推进研究、产品和表达几条线，每条线都在已有积累上继续加深；代价是收尾常被下一阶段的冲刺打断，几条线同时推进时最先吃紧的是专注时段，但这种并行正是你能把几条线接成整体的来源",
+    "lines": 94
   },
   "character": {
     "outfit": "a light lab coat over a hoodie",
