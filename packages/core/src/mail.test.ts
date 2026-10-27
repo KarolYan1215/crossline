@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  MAIL_DRAFT_NOTE, draftBodyOf, isQuickAccountCheck, draftFileText, mailReplyQuiet, replyDraftsOn, replyReminderDue, validateMailReplyDraft, validateMailTriage, type MailReplyDraft
+  MAIL_DRAFT_NOTE, draftBodyOf, isMailReminderTitle, moneyDirection, draftFileText, mailReplyQuiet, replyDraftsOn, replyReminderDue, validateMailReplyDraft, validateMailTriage, type MailReplyDraft
 } from "./mail";
 
 test("a reply with no wait behind it is a message that needs the person's answer; a named wait must still be open", () => {
@@ -52,10 +52,14 @@ test("one reminder, 48 hours after the person was told, only when the mail named
   expect(replyReminderDue({ ...draft, notifiedAt: undefined } as unknown as MailReplyDraft, new Date("2026-10-22T10:00:00Z"))).toBe(false);
 });
 
-test("an account alert to check is a quick check, not a task; real work from mail is not", () => {
-  expect(isQuickAccountCheck("核实美国银行无卡交易")).toBe(true);
-  expect(isQuickAccountCheck("核查 PayPal 61.00 USD 收款")).toBe(true);
-  expect(isQuickAccountCheck("查看 Chase 账户余额，需要时转入")).toBe(true);
-  expect(isQuickAccountCheck("10/30 前交 ECE 555 HW4（截止已延后）")).toBe(false);
-  expect(isQuickAccountCheck("核查 Crossline beta 失败")).toBe(false);
+test("money in an account alert goes in for payments received and refunds, out otherwise", () => {
+  expect(moneyDirection("PayPal: You've received $61.00 USD")).toBe("income");
+  expect(moneyDirection("您尾号 1234 的卡退款 35.00 元")).toBe("income");
+  expect(moneyDirection("Credit card not present during this transaction $12.99")).toBe("expense");
+});
+
+test("a mail to-do that only asks to look at something is a reminder", () => {
+  expect(isMailReminderTitle("核查 Render 公告涉及应用")).toBe(true);
+  expect(isMailReminderTitle("核查 Crossline beta 失败")).toBe(true);
+  expect(isMailReminderTitle("10/30 前交 ECE 555 HW4")).toBe(false);
 });

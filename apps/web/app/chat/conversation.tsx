@@ -10,6 +10,7 @@ import { undoOperation } from "../undo-center";
 import { Markdown } from "../ui/markdown";
 import { ClampBlock } from "../ui/clamp";
 import { pageVisible } from "../ui/page-visible";
+import { isReminderKind } from "../notice-kinds";
 import { announceThinking, HelperFace, useHelper } from "../helper-state";
 import { OpenerCard } from "./opener-card";
 
@@ -120,7 +121,8 @@ export function Conversation({ variant, placeholder, page }: {
   };
 
   // Today's box shows the latest exchange only; the panel shows the day; a task's entry shows what was said from its page.
-  const shown = variant === "inline" ? lastExchange(messages)
+  // Reminders that ask nothing are the bell's (notice-bell.tsx); Today's box keeps to what was said and what wants an answer.
+  const shown = variant === "inline" ? lastExchange(messages.filter((message) => message.role !== "nudge" || !isReminderKind(message.card?.nudgeKind)))
     : variant === "task" && page ? fromPage(messages, page)
     : variant === "block" && page ? lastExchange(fromPage(messages, page)) : messages;
   // On a page (Today, the return page) a long reply is held to three lines; the full conversation shows it whole.
