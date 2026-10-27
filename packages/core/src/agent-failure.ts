@@ -69,6 +69,8 @@ const INTERRUPTED_WORDS: Record<string, string> = {
   SKILL_CANCELED: "Codex 运行时取消了这一轮",
   SKILL_CANCELLED: "Codex 运行时取消了这一轮",
   SKILL_RUNTIME_EXITED: "Codex 运行时退出了",
+  // Runs recorded before the runner mapped a dropped compute node to SKILL_RUNTIME_EXITED.
+  CROSSLINE_NODE_DISCONNECTED: "算力节点断开了连接，这次运行中断",
   SKILL_RUNTIME_FAILED: "Codex 运行时出错",
   SKILL_THREAD_LOST: "Codex 运行时重启过，这段运行丢失了",
   SKILL_CONFIG_FAILED: "Codex 运行时的设置没能切换",

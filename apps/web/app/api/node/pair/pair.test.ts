@@ -10,7 +10,7 @@ const session: { ctx?: AccessContext | undefined } = {};
 vi.mock("../../../../lib/access-guard", () => ({
   resolveAccessContext: vi.fn(async () => session.ctx ? { ctx: session.ctx } : { response: Response.json({ ok: false }, { status: 401 }) })
 }));
-import { resetPairings } from "../../../../lib/node-pairing";
+import { addressKey, resetPairings } from "../../../../lib/node-pairing";
 import { TEST_CTX } from "../../../../lib/test-support";
 import { GET as computeStatus } from "../../device/compute/route";
 import { POST as approve } from "./approve/route";
@@ -68,4 +68,24 @@ test("a code nobody asked for is refused, codes expire, and one address cannot a
   const later = await begin("203.0.113.8");
   vi.useFakeTimers({ now: Date.now() + 11 * 60_000 });
   try { expect(await ask(later.id)).toEqual({ state: "expired" }); expect((await type(later.code)).status).toBe(404); } finally { vi.useRealTimers(); }
+});
+
+test("an IPv6 /64 counts as one address, and addresses quiet for an hour are forgotten", async () => {
+  expect(addressKey("2001:db8:1:2:aaaa::1")).toBe("2001:db8:1:2::/64");
+  expect(addressKey("2001:0db8:0001:0002:ffff:ffff:ffff:ffff")).toBe("2001:db8:1:2::/64");
+  expect(addressKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
+  expect(addressKey("::ffff:203.0.113.7")).toBe("203.0.113.7");
+  expect(addressKey("203.0.113.7")).toBe("203.0.113.7");
+
+  for (let i = 0; i < 12; i += 1) expect((await begin(`2001:db8:1:2::${(i + 1).toString(16)}`)).ok).toBe(true);
+  expect((await begin("2001:db8:1:2:9999::1")).ok).toBe(false);
+  expect((await begin("2001:db8:1:3::1")).ok).toBe(true);
+
+  const starts = (globalThis as { crosslineNodePairStarts?: Map<string, number[]> }).crosslineNodePairStarts!;
+  expect(starts.size).toBe(2);
+  vi.useFakeTimers({ now: Date.now() + 61 * 60_000 });
+  try {
+    expect((await begin("198.51.100.20")).ok).toBe(true);
+    expect([...starts.keys()]).toEqual(["198.51.100.20"]);
+  } finally { vi.useRealTimers(); }
 });

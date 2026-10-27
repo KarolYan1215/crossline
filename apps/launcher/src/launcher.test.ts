@@ -68,6 +68,8 @@ describe("children", () => {
     const [web, worker] = childSpecs(layout, config, secrets, { version: "0.1.0" }, { PATH: "C:\\Windows" });
     expect(web!.command).toBe(path.join("C:\\Crossline\\app", "node.exe"));
     expect(worker!.command).toBe(web!.command);
+    // The compiled worker, never TypeScript through tsx: no source ships.
+    expect(worker!.args).toEqual([path.join("C:\\Crossline\\app", "apps", "worker", "dist", "index.mjs")]);
     expect(web!.args).toContain("47210");
     expect(web!.env.CROSSLINE_DATA_DIR).toBe(path.join("C:\\Crossline", "data"));
     expect(web!.env.CROSSLINE_CODEX_PATH).toBe(path.join("C:\\Crossline\\app", "codex", "codex.exe"));

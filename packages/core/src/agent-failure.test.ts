@@ -4,7 +4,7 @@ import { AGENT_MAX_RUNS, agentAskProgress, agentChains, classifyAgentFailure, re
 const stop = (code: string, message = "", extra: Partial<AgentRunRow> = {}) => ({ status: "blocked", blockerCode: code, blockerMessage: message, ...extra });
 
 test("an interruption is retried; something that could act outside the machine, a missing answer or a dead end is not", () => {
-  for (const code of ["AGENT_RUN_LOST", "SKILL_STALLED", "SKILL_TIMEOUT", "SKILL_CANCELED", "SKILL_RUNTIME_EXITED", "SKILL_USAGE_LIMIT", "CODEX_SUPERVISOR_UNAVAILABLE"]) {
+  for (const code of ["AGENT_RUN_LOST", "SKILL_STALLED", "SKILL_TIMEOUT", "SKILL_CANCELED", "SKILL_RUNTIME_EXITED", "SKILL_USAGE_LIMIT", "CODEX_SUPERVISOR_UNAVAILABLE", "CROSSLINE_NODE_DISCONNECTED"]) {
     expect(classifyAgentFailure(stop(code))).toMatchObject({ kind: "interrupted", retry: true, external: false });
   }
   expect(classifyAgentFailure({ status: "stale", blockerCode: "", blockerMessage: "" })).toMatchObject({ kind: "interrupted", retry: true });

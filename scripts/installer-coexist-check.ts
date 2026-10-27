@@ -40,7 +40,7 @@ check("resident app answers before", before.web === 200 && before.supervisor ===
 rmSync(root, { recursive: true, force: true });
 mkdirSync(root, { recursive: true });
 const env = { ...process.env, CROSSLINE_LAUNCHER_ROOT: root };
-const child = spawn(path.join(stage, "node.exe"), ["--import", "tsx", path.join(stage, "apps", "launcher", "src", "main.ts"), `--app=${stage}`],
+const child = spawn(path.join(stage, "node.exe"), [path.join(stage, "apps", "launcher", "dist", "main.mjs"), `--app=${stage}`],
   { cwd: path.join(stage, "apps", "launcher"), env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
 let stderr = "";
 child.stderr.on("data", (chunk) => { stderr += String(chunk); });

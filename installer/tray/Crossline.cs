@@ -1,5 +1,5 @@
 // The tray for an installed copy of Crossline (docs/local-installer.md). It owns nothing but the icon and the menu: everything else
-// (ports, secrets, starting and restarting the web app and the worker, updates) is the launcher, `apps\launcher\src\main.ts`, which
+// (ports, secrets, starting and restarting the web app and the worker, updates) is the launcher, `apps\launcher\dist\main.mjs`, which
 // this starts on the bundled node.exe and talks to in lines — commands on its stdin, one JSON event per line on its stdout.
 //
 // The launcher is put in a Windows job object that kills everything in it when the last handle closes, so the tray dying for any
@@ -126,8 +126,9 @@ namespace Crossline
         void StartLauncher()
         {
             var node = Path.Combine(AppDir, "node.exe");
-            var main = Path.Combine(AppDir, "apps", "launcher", "src", "main.ts");
-            var info = new ProcessStartInfo(node, "--import tsx \"" + main + "\" \"--app=" + AppDir + "\"")
+            // Compiled at packaging (scripts/bundle-installed.ts): no TypeScript ships, so no tsx.
+            var main = Path.Combine(AppDir, "apps", "launcher", "dist", "main.mjs");
+            var info = new ProcessStartInfo(node, "\"" + main + "\" \"--app=" + AppDir + "\"")
             {
                 WorkingDirectory = Path.Combine(AppDir, "apps", "launcher"),
                 UseShellExecute = false, CreateNoWindow = true,

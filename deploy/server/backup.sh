@@ -31,7 +31,7 @@ copy() {
   [ -f "$1/$2" ] || { echo "  (no $1/$2)"; return 0; }
   owner=$(stat -c %u:%g "$1/$2")
   chown "$owner" "$out"
-  docker run --rm --user "$owner" -v "$1":/src -v "$out":/out -w /repo/packages/db "$image" node -e '
+  docker run --rm --init --user "$owner" -v "$1":/src -v "$out":/out -w /repo/packages/db "$image" node -e '
     const Database = require("better-sqlite3");
     const [name] = process.argv.slice(1);
     (async () => {
