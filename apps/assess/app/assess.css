@@ -1,7 +1,7 @@
 /* Crossline quick test — style A 「编辑杂志」: paper, ink rules, one accent from the type group. Text is ink #1E1B16 (15:1 on the paper)
    or grey #4F4A42 (7.9:1); the group colour is only ever a bar, a rule or a fill behind ink, never text. Nothing under 12px; Arial with
    the system CJK sans behind it, no web fonts and no third-party scripts. Phone first: one column, 16px gutters, nothing wider than 360. */
-:root{--paper:#F6F2EA;--ink:#1E1B16;--muted:#4F4A42;--track:#DDD5C7;--soft:#ECE5D8;--danger:#8A1C1C;--line:#8C8478;--group:#4F4A42;--group-tint:#ECE5D8;color-scheme:light}
+:root{--paper:#F6F2EA;--ink:#1E1B16;--muted:#4F4A42;--track:#DDD5C7;--soft:#ECE5D8;--danger:#8A1C1C;--line:#8C8478;--group:#4F4A42;--group-tint:#ECE5D8;--side-a:#34495A;--side-b:#623E29;color-scheme:light}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.6 Arial,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;-webkit-text-size-adjust:100%}
 body{overflow-x:hidden}
@@ -42,7 +42,17 @@ button:disabled{cursor:not-allowed;color:var(--muted);border-color:var(--muted)}
 .as-likert legend{padding:0;margin-bottom:12px;width:100%}
 .as-statement{font-size:21px;line-height:1.5;min-height:3em;outline:none}
 .as-pair{margin:0 0 6px;display:grid;gap:6px}
-.as-pair div{display:flex;gap:10px;align-items:baseline;padding:10px 12px;background:var(--soft);border-left:4px solid var(--ink)}
+.as-pair div{display:flex;gap:10px;align-items:baseline;padding:10px 12px;background:var(--soft);border-left:4px solid var(--side-a);min-width:0}
+.as-pair .as-pair-b{border-left-color:var(--side-b)}
+.as-scale{display:flex;align-items:center;justify-content:space-between;gap:2px;padding:14px 0 4px;min-width:0}
+.as-scale-end{font-size:13px;font-weight:700;flex:none;width:30px;line-height:1.2}
+.as-scale-a{color:var(--side-a)}.as-scale-b{color:var(--side-b);text-align:right}
+.as-circle{position:relative;display:grid;place-items:center;flex:1 1 0;min-width:0;height:52px;cursor:pointer}
+.as-circle input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
+.as-circle i{display:block;width:var(--size);height:var(--size);border-radius:50%;border:2px solid var(--line);background:#fff;transition:background .12s,border-color .12s}
+.as-circle[data-side=a] i{border-color:var(--side-a)}.as-circle[data-side=b] i{border-color:var(--side-b)}.as-circle[data-side=mid] i{border-color:var(--muted)}
+.as-circle[data-side=a][data-on] i{background:var(--side-a)}.as-circle[data-side=b][data-on] i{background:var(--side-b)}.as-circle[data-side=mid][data-on] i{background:var(--muted)}
+.as-circle:has(input:focus-visible) i{outline:3px solid var(--ink);outline-offset:3px}
 .as-pair dt{font-weight:700;flex:none}
 .as-pair dd{margin:0;font-size:16px;line-height:1.5}
 .as-option{position:relative;display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 14px;border:2px solid var(--line);background:#fff;cursor:pointer;font-size:16px}

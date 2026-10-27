@@ -9,8 +9,8 @@ import type { PairCardInput, PosterInput } from "./index";
  * stand-in figure drawn here so the tests need neither a template nor an image model.
  */
 
-export const PLANNER = { concentration: 18, orientation: 22, boundary: 41, pacing: 12 } as const; // CLWU, output ambiguous
-export const ROAMER = { concentration: 91, orientation: 84, boundary: 72, pacing: 88 } as const; // DXBV
+export const PLANNER = { collab: 18, purpose: 22, build: 41, lines: 12 } as const; // ROBA, build ambiguous
+export const ROAMER = { collab: 91, purpose: 84, build: 72, lines: 88 } as const; // WUHG
 
 /** A plain cartoon bust on a transparent square, written to `dir`. */
 export function writeFigure(dir: string, name: string, shirt: string): string {
@@ -30,8 +30,8 @@ export function writeFigure(dir: string, name: string, shirt: string): string {
 
 const INVITE = "https://assess.example.com/t/9f2c4a1d0b7e4e1f8a3c5d6e7f809a1b";
 
-export function samplePoster(dir: string, scores: Record<"concentration" | "orientation" | "boundary" | "pacing", number>, nickname: string, shirt: string): PosterInput {
-  const type = publicType(scores);
+export function samplePoster(dir: string, scores: Record<"collab" | "purpose" | "build" | "lines", number>, nickname: string, shirt: string): PosterInput {
+  const type = publicType(scores, {}, "", undefined, ["写初稿", "出图", "查资料"]);
   return { type, nickname, avatarPath: writeFigure(dir, type.code, shirt), inviteUrl: INVITE };
 }
 

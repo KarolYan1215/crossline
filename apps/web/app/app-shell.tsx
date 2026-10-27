@@ -12,6 +12,7 @@ import { LineColors } from "./line-colors";
 import { CameraSampler } from "./camera-sampler";
 import { ReturnPoint } from "./ui/back-link";
 import { TimeZoneSync } from "./time-zone-sync";
+import { HelperCalls } from "./helper-calls";
 
 /**
  * The frame every signed-in page shares: the name, the four working views, the decisions waiting for you, the
@@ -46,6 +47,7 @@ export function AppShell({ active, children, className = "page", focus = false, 
     {corner && <CornerStack>
       <CameraSampler />
       <TimerFloat />
+      <HelperCalls />
       <AssistantWidget />
     </CornerStack>}
     <main className={className}>{banner && <RuntimeBanner />}{children}</main>

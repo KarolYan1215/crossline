@@ -37,7 +37,7 @@ const colourOf = (lineId: string) => LINE_COLOUR[lineId] ?? INK;
  * percentage inside a long bar and beside a short one. `evidence` adds each axis's reason under it.
  */
 /**
- * The English word a type letter stands for, the letter in bold: the code reads as words (DLWV = Diversified, Leverage, Walled, Variable).
+ * The English word a type letter stands for, the letter in bold: the code reads as words (WOHA = Weave, Output, Hack, Anchor).
  * The letter is the word's first capital, which is not always its first character (eXplore).
  */
 function AxisWord({ word }: { word: string }) {

@@ -47,6 +47,7 @@ Name: "desktopicon"; Description: "在桌面创建快捷方式"; Flags: unchecke
 
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\codex"
+Type: filesandordirs; Name: "{app}\node_modules"
 
 [Files]
 Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -60,14 +61,33 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
   ValueData: """{sys}\wscript.exe"" ""{app}\start.vbs"" --autostart"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
-; Stop a running copy before the new one starts (an update), then start: the page opens for pairing and sign-in.
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -Command ""try {{ $l = Get-Content -Raw '{localappdata}\Crossline Node\node.lock' | ConvertFrom-Json; Stop-Process -Id $l.pid -Force }} catch {{}}"""; Flags: runhidden waituntilterminated
+; Start: the page opens for pairing and sign-in. A running copy was stopped before the files were replaced (PrepareToInstall below).
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\start.vbs"""; Description: "现在启动 Crossline 节点"; Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -Command ""try {{ $l = Get-Content -Raw '{localappdata}\Crossline Node\node.lock' | ConvertFrom-Json; Stop-Process -Id $l.pid -Force }} catch {{}}"""; Flags: runhidden; RunOnceId: "StopCrosslineNode"
-
 [Code]
+// Every process running from the app folder (the node program and the Codex it started) is stopped before its files are replaced or
+// removed: a running node.exe cannot be overwritten (DeleteFile error 5 on the first update, 2026-10-23).
+procedure StopRunningCopy(const Folder: String);
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -Command "$f = ''' + Folder + '''; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($f, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 800"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopRunningCopy(ExpandConstant('{app}'));
+  Result := '';
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  StopRunningCopy(ExpandConstant('{app}'));
+  Result := True;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Root: String;

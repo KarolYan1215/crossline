@@ -20,7 +20,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
   const result = render ? getResultByInvite(token) : undefined;
   if (!render || !result || Date.parse(result.expiresAt) <= Date.now()) return posterNotFound();
   const png = await render({
-    type: publicType(result.scores, recordedScores(), result.id, result.wants?.lines, result.poles),
+    type: publicType(result.scores, recordedScores(), result.id, result.wants?.lines, result.aiDoes),
     nickname: result.nickname,
     avatarPath: drawnImagePath(result) ?? "",
     inviteUrl: `${baseUrl()}/t/${result.inviteToken}`,

@@ -53,7 +53,11 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
   // 「去登录」 in a message leads here with `?login=<workflow>`: that workflow is shown open and its login started.
   const [autoLogin, setAutoLogin] = useState<string | undefined>();
   useEffect(() => {
-    const wanted = new URLSearchParams(window.location.search).get("login");
+    const params = new URLSearchParams(window.location.search);
+    const wanted = params.get("login");
+    // `?flow=<workflow>` (the 小帮手's 「查看风险」): that workflow shown open, nothing started.
+    const shown = params.get("flow");
+    if (shown && library.grown.some((flow) => flow.id === shown)) { setKind("grown"); setFocus(shown); }
     if (!wanted || !library.grown.some((flow) => flow.id === wanted)) return;
     setKind("grown"); setFocus(wanted); setAutoLogin(wanted);
   }, [library.grown]);
@@ -102,6 +106,7 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
     {listed("grown") && (!searching || grownShown.length > 0) && <section className="st-card st-card-wide" aria-label="生长的工作流">
       <header><h3>生长的工作流 · {grown.length}</h3><small>同类的事采纳过两次，或在输入框里说「以后都这样做」「每周五提醒」，助手会把它写成工作流，建好后通知；发出、发布一类的步骤始终由本人完成</small></header>
       {library.growing > 0 && <p className="st-note">{library.growing} 个工作流正在生成，建好后会通知。</p>}
+      {grown.length > 1 && <MergeCheck id={grown[0]!.id} />}
       {grown.length === 0 ? <p className="muted">尚无。</p>
         : <ul className="sk-publics">{grownShown.map((flow) => <GrownFlow key={`${flow.id}:${kind}`} flow={flow} shell={library.shell} open={all || focus === flow.id} autoLogin={autoLogin === flow.id}
           onChanged={(next) => setGrown((items) => next ? items.map((item) => item.id === next.id ? next : item) : items.filter((item) => item.id !== flow.id))} />)}</ul>}
@@ -337,6 +342,12 @@ function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSki
       <dt>审查</dt><dd className="gen"><Clamp lines={1} text={flow.reasons.join("；")} /></dd>
       <dt>上次使用</dt><dd>{flow.lastRunAt ? `${day(flow.lastRunAt)} 执行` : day(flow.lastUsedAt)}{flow.pinned ? "" : "；30 天未用会被移除，保留后不再移除"}</dd>
     </dl>
+    {flow.mergedInto && <p className="st-note">已合并到「{flow.mergedInto.summary}」（{day(flow.mergedInto.at)}，<span className="gen">{flow.mergedInto.why}</span>）。{" "}
+      <button type="button" className="secondary-button" onClick={async () => {
+        if (await send("POST", { action: "unmerge" })) { const { mergedInto: _was, ...rest } = flow; onChanged({ ...rest, status: "active" }); setNote("已撤销合并"); }
+        else setNote("未完成");
+      }}>撤销合并</button></p>}
+    <ImproveFlow flow={flow} send={send} onChanged={onChanged} setNote={setNote} />
     {flow.skillText && <details className="advanced sk-full"><summary>工作流全文</summary><Markdown className="long-form" text={flow.skillText} /></details>}
     <ScriptsConsent view={flow} shell={shell} endpoint={`/api/skills/grown/${encodeURIComponent(flow.id)}`}
       onChanged={(allowedAt) => { const { scriptsAllowedAt: _was, ...rest } = flow; onChanged(allowedAt ? { ...rest, scriptsAllowedAt: allowedAt } : rest); }} />
@@ -474,6 +485,46 @@ function AiToolsCard({ initial }: { initial: AiTool[] }) {
  * Favourites organised by topic: the two paces, each the person's to change (2026-10-22) — notes a day for the day's topic, and the night
  * window's hours (equal hours: no night reading) — and how far each topic is read.
  */
+/** 「检查重复」: the worker looks for workflows doing the same job (not only by name) and merges them, telling the person. */
+function MergeCheck({ id }: { id: string }) {
+  const [note, setNote] = useState("");
+  return <p className="sk-actions">
+    <button type="button" className="secondary-button" onClick={async () => {
+      const ok = await fetch(`/api/skills/grown/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "merge_check" }) })
+        .then((response) => response.ok).catch(() => false);
+      setNote(ok ? "已开始检查，功能相同的工作流会合并并通知" : "未完成");
+    }}>检查重复的工作流</button>{note && <span role="status" className="st-note">{note}</span>}</p>;
+}
+
+/**
+ * What the person says the workflow should do differently, in words: Crossline revises the workflow itself (the assistant rewrites its
+ * files, checked like a new one) and says what changed; the last revision can be taken back here.
+ */
+function ImproveFlow({ flow, send, onChanged, setNote }: { flow: GrownSkillView; send: (method: "POST" | "DELETE", body?: object) => Promise<boolean>;
+  onChanged: (flow: GrownSkillView | undefined) => void; setNote: (note: string) => void }) {
+  const [text, setText] = useState("");
+  const improvement = flow.improvement;
+  return <div className="sk-improve">
+    <p className="st-hint">第 {improvement.version} 版{improvement.lastChange ? `，${day(improvement.lastChange.at)} 按意见修订：` : "。"}
+      {improvement.lastChange && <span className="gen">{improvement.lastChange.changes.replace(/\s*\n+\s*/g, "；")}</span>}
+      {improvement.improving ? " 正在按意见修订。" : improvement.pending.length ? ` 已收到 ${improvement.pending.length} 条意见，下一轮后台修订。` : ""}</p>
+    <label className="sk-improve-box"><span>哪里要改（写给 Crossline，它会自己改这个工作流）</span>
+      <textarea rows={2} value={text} maxLength={2000} placeholder="例如：话题文件太长，每篇只留三行要点" onChange={(event) => setText(event.target.value)} /></label>
+    <span className="sk-actions">
+      <button type="button" className="secondary-button" disabled={!text.trim()} onClick={async () => {
+        if (await send("POST", { action: "improve", text })) {
+          onChanged({ ...flow, improvement: { ...improvement, pending: [...improvement.pending, text.trim()] } });
+          setText(""); setNote("已收到，后台会按这条意见修订工作流，改好后通知");
+        } else setNote("未保存");
+      }}>让它改进</button>
+      {improvement.canRevert && <button type="button" className="secondary-button" onClick={async () => {
+        if (await send("POST", { action: "revert" })) { onChanged({ ...flow, improvement: { ...improvement, version: Math.max(1, improvement.version - 1), canRevert: false } }); setNote("已回到上一版"); }
+        else setNote("未完成");
+      }}>回到上一版</button>}
+    </span>
+  </div>;
+}
+
 function TopicsPace({ flow, topics, send, onChanged, setNote }: { flow: GrownSkillView; topics: NonNullable<GrownSkillView["topics"]>;
   send: (method: "POST" | "DELETE", body?: object) => Promise<boolean>; onChanged: (view: GrownSkillView | undefined) => void; setNote: (text: string) => void }) {
   const [perDay, setPerDay] = useState(topics.perDay);

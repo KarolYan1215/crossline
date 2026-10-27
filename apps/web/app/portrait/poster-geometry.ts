@@ -111,7 +111,7 @@ export const POSTER_LABEL_TITLES = ["核心词", "价值核心", "建议底座",
 export function posterSerifText(): string {
   const strings = [
     ...TYPE_AXES.flatMap((axis) => [axis.left.letter, axis.right.letter, axis.left.label, axis.right.label]),
-    ...Object.values(TYPE_TABLE).map((type) => type.name), ...Object.values(TYPE_GROUPS).map((group) => group.name),
+    ...Object.values(TYPE_TABLE).flatMap((type) => [type.name, `「${type.quote}」`]), ...Object.values(TYPE_GROUPS).map((group) => group.name),
     ...SCHWARTZ_VALUES.map((value) => value.name), ...POSTER_SECTION_TITLES, ...POSTER_LABEL_TITLES, ...INTERFACE_SERIF_STRINGS, "0123456789%· "
   ];
   return [...new Set(strings.join(""))].sort().join("");

@@ -34,7 +34,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!result) return json({ found: false } satisfies AssessLinkResponse);
   const answer: AssessLinkResponse = {
     found: true, code: result.code, typeName: TYPE_TABLE[result.code]?.name ?? result.code, group: result.code.slice(0, 2),
-    axes: { concentration: result.scores.concentration, orientation: result.scores.orientation, boundary: result.scores.boundary, pacing: result.scores.pacing },
+    axes: { lines: result.scores.lines, purpose: result.scores.purpose, build: result.scores.build, collab: result.scores.collab },
     takenAt: result.createdAt,
     ...(process.env.ASSESS_BASE_URL ? {
       resultUrl: `${baseUrl()}/r/${result.resultToken}`,

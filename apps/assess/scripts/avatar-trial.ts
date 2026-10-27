@@ -21,7 +21,7 @@ import { templateVariant, templatesDir } from "../server/avatar/templates";
 const PEOPLE: Array<{ id: string; code: string; label: string; appearance: Appearance }> = [
   { id: "trial-1", code: "DLWU", label: "架构师 · 女 · 长发 · 眼镜 · 正式 · 「黑色长直发」", appearance: { presentation: "female", hair: "long", glasses: true, skin: "light", style: "smart", note: "黑色长直发" } },
   { id: "trial-2", code: "CLWV", label: "试验家 · 男 · 短发 · 运动", appearance: { presentation: "male", hair: "short", glasses: false, skin: "medium", style: "sporty", note: "" } },
-  { id: "trial-3", code: "DXBV", label: "探险家 · 中性 · 卷发 · 眼镜 · 深肤色 · 文艺 · 「红色毛线帽」", appearance: { presentation: "neutral", hair: "curly", glasses: true, skin: "deep", style: "artsy", note: "红色毛线帽" } },
+  { id: "trial-3", code: "WUHG", label: "百晓生 · 中性 · 卷发 · 眼镜 · 深肤色 · 文艺 · 「红色毛线帽」", appearance: { presentation: "neutral", hair: "curly", glasses: true, skin: "deep", style: "artsy", note: "红色毛线帽" } },
   { id: "trial-4", code: "CXBU", label: "布道者 · 女 · 扎发 · 休闲 · 「马尾 雀斑」", appearance: { presentation: "female", hair: "tied", glasses: false, skin: "medium", style: "casual", note: "马尾 雀斑" } },
   { id: "trial-5", code: "DLBV", label: "联络官 · 男 · 中长发 · 眼镜 · 正式", appearance: { presentation: "male", hair: "medium", glasses: true, skin: "light", style: "smart", note: "" } },
   { id: "trial-6", code: "CXWV", label: "即兴艺人 · 女 · 短发 · 深肤色 · 文艺 · 「耳环」", appearance: { presentation: "female", hair: "short", glasses: false, skin: "deep", style: "artsy", note: "耳环" } },

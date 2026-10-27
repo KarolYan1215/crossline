@@ -43,8 +43,9 @@ const esbuild = createRequire(fromWorker.resolve("tsx/package.json"))("esbuild")
 const built = await esbuild.build({
   entryPoints: [path.join(repoRoot, "apps", "worker", "src", "node", "standalone.ts")],
   outfile: path.join(stage, "main.mjs"), bundle: true, platform: "node", format: "esm", target: "node22", minify: true, legalComments: "none",
-  // ws loads these native speed-ups when present and works without them.
-  external: ["bufferutil", "utf-8-validate"],
+  // ws loads these native speed-ups when present and works without them; playwright-core (the readers' browser on this computer,
+  // node/browser.ts) is shipped beside main.mjs as its own package, since it cannot be bundled.
+  external: ["bufferutil", "utf-8-validate", "playwright-core"],
   // ws is CommonJS: inside an ES module its `require` calls need one.
   banner: { js: "import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);" },
   metafile: true, logLevel: "warning"
@@ -52,10 +53,16 @@ const built = await esbuild.build({
 const inputs = Object.keys(built.metafile.inputs);
 // Nothing of the server's logic may end up here: only the relay, its protocol, the program and ws.
 const ours = inputs.filter((file) => !file.includes("node_modules")).map((file) => file.replaceAll("\\", "/"));
-const allowed = ["apps/worker/src/node/standalone.ts", "apps/worker/src/node/agent.ts", "apps/worker/src/node/protocol.ts", "apps/worker/src/node/control.ts"];
+const allowed = ["apps/worker/src/node/standalone.ts", "apps/worker/src/node/agent.ts", "apps/worker/src/node/protocol.ts", "apps/worker/src/node/control.ts",
+  "apps/worker/src/node/browser.ts"];
 const unexpected = ours.filter((file) => !allowed.some((name) => file.endsWith(name)));
 if (unexpected.length) throw new Error(`NODE_BUNDLE_TOO_WIDE ${unexpected.join(", ")}`);
 console.log(JSON.stringify({ bundle: "main.mjs", kilobytes: Math.round(statSync(path.join(stage, "main.mjs")).size / 1024), sources: ours }));
+
+// The readers' browser driver: playwright-core as it is installed for the worker (it drives the person's own Chrome or Edge; no browser
+// is shipped).
+const playwright = path.dirname(fromWorker.resolve("playwright-core/package.json"));
+cpSync(playwright, path.join(stage, "node_modules", "playwright-core"), { recursive: true, dereference: true });
 
 // 2. node.exe and Codex.
 cpSync(process.execPath, path.join(stage, "node.exe"));
@@ -111,6 +118,7 @@ writeFileSync(path.join(notices, "README.txt"), [
   `- OpenAI Codex（codex\\codex.exe、codex\\codex-code-mode-host.exe，${codexVersion}），Apache-2.0，见 codex-LICENSE.txt 与 codex-NOTICE.txt；`,
   "  源码固定在 https://github.com/openai/codex 的 rust-v0.163.0（83086188ae0614bd882818ff1aa23f3194962012），附一处 Windows 迁移校验和补丁",
   "- ws（打包在 main.mjs 内），MIT，见 ws-LICENSE.txt",
+  "- playwright-core（node_modules\playwright-core，用来驱动本机的 Chrome 或 Edge 读取本人登录的网站），Apache-2.0，见其目录内的 LICENSE",
   "- Microsoft Visual C++ 运行库（msvcp140*.dll、vcruntime140*.dll，放在用到它们的模块旁边），按 Visual Studio 许可条款中的可分发代码条款随附",
   ""
 ].join("\r\n"));

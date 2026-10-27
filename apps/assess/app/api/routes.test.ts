@@ -53,14 +53,14 @@ test("a submission stores the result, starts the figure, mails the person and an
   expect(Object.keys(answer).sort()).toEqual(["inviteToken", "resultToken"]);
   const stored = getResultByToken(answer.resultToken)!;
   expect(stored.email).toBe("alice@example.com");
-  expect(stored.code).toBe("DLWV");
+  expect(stored.code).toBe("ROHG");
   expect(mocks.enqueueAvatar).toHaveBeenCalledOnce();
   await flushMail();
   expect(mocks.sendMail).toHaveBeenCalledOnce();
   const mail = (mocks.sendMail.mock.calls[0] as unknown as [Record<string, string>])[0];
   expect(mail.to).toBe("alice@example.com");
   expect(mail.from).toBe(SMTP.ASSESS_MAIL_FROM);
-  expect(mail.subject).toContain("DLWV");
+  expect(mail.subject).toContain("ROHG");
   for (const part of [mail.text, mail.html]) {
     expect(part).toContain(`https://assess.example/r/${answer.resultToken}`);
     expect(part).toContain(`https://assess.example/t/${answer.inviteToken}`);
@@ -150,7 +150,7 @@ test("an invitation makes the pair at once, mails the inviter, and a repeat by t
   await flushMail();
   mocks.sendMail.mockClear();
   const invited = await submitOk({ email: "b@example.com", nickname: "阿乙", inviteToken: inviter.inviteToken, sendEmail: false,
-    answers: answersFor({ concentration: false, orientation: true, boundary: true, pacing: false }) });
+    answers: answersFor({ lines: false, purpose: true, collab: true, build: false }) });
   expect(invited.pairToken).toBeDefined();
   await flushMail();
   expect(mocks.sendMail).toHaveBeenCalledOnce();
@@ -184,7 +184,7 @@ test("the inviter cannot answer their own invitation, and an inviter with mail o
 test("the result view: the public type, the template figure when the pipeline cannot answer, the links and the pairs", async () => {
   const inviter = await submitOk({ email: "a@example.com", nickname: "阿甲" });
   const invited = await submitOk({ email: "b@example.com", nickname: "阿乙", inviteToken: inviter.inviteToken,
-    answers: answersFor({ concentration: false, orientation: true, boundary: true, pacing: false }) });
+    answers: answersFor({ lines: false, purpose: true, collab: true, build: false }) });
   const response = await getResult(get(`/api/results/${inviter.resultToken}`), params(inviter.resultToken));
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
@@ -195,8 +195,8 @@ test("the result view: the public type, the template figure when the pipeline ca
     posterUrl: `/api/poster/${inviter.inviteToken}/type.png?f=t`, longUrl: `/api/poster/${inviter.inviteToken}/long.png?f=t`,
     inviteUrl: `https://assess.example/t/${inviter.inviteToken}`
   });
-  expect(view.type.code).toBe("DLWV");
-  expect(view.pairs).toEqual([expect.objectContaining({ pairToken: invited.pairToken, nickname: "阿乙", code: "CXBU" })]);
+  expect(view.type.code).toBe("ROHG");
+  expect(view.pairs).toEqual([expect.objectContaining({ pairToken: invited.pairToken, nickname: "阿乙", code: "WUBA" })]);
   expect(view.pairs[0]!.relation.length).toBeGreaterThan(0);
 
   mocks.avatarStatus.mockReturnValueOnce({ state: "ready", url: "/api/avatar/x.png" } as never);
@@ -251,7 +251,7 @@ test("an address that keeps missing tokens is slowed down", async () => {
   }
   const limited = await getInvite(get("/api/invites/guess-more"), params("guess-more"));
   expect(limited.status).toBe(429);
-  const stored = createResult({ email: "z@example.com", nickname: "", scores: { concentration: 50, orientation: 50, boundary: 50, pacing: 50 }, code: "DXBV", appearance, sendEmail: false });
+  const stored = createResult({ email: "z@example.com", nickname: "", scores: { lines: 50, purpose: 50, collab: 50, build: 50 }, aiDoes: [], code: "WUHG", appearance, sendEmail: false });
   expect((await getInvite(get(`/api/invites/${stored.inviteToken}`, { "x-forwarded-for": "198.51.100.1" }), params(stored.inviteToken))).status).toBe(200);
 });
 

@@ -26,7 +26,7 @@ RUN pnpm --filter @crossline/assess build
 # the poster fonts are read from disk at run time (relative to the server's directory), so they go beside it too.
 RUN set -e; out=apps/assess/.next/standalone/apps/assess; \
     cp -r apps/assess/.next/static "$out/.next/static"; \
-    for dir in public templates fonts; do if [ -d "apps/assess/$dir" ]; then rm -rf "$out/$dir"; cp -r "apps/assess/$dir" "$out/$dir"; fi; done
+    for dir in public templates fonts assets; do if [ -d "apps/assess/$dir" ]; then rm -rf "$out/$dir"; cp -r "apps/assess/$dir" "$out/$dir"; fi; done
 
 FROM node:22-bookworm-slim AS run
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3340 ASSESS_DATA_DIR=/data

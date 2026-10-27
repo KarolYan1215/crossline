@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { QUIZ_ITEMS, clockHours, mctqLite, poleBalance, pvtIsi, pvtSummary, quizResult, quizScores, quizType } from "./assess";
+import { QUIZ_ITEMS, aiDoes, clockHours, mctqLite, pvtIsi, pvtSummary, quizScores, quizType } from "./assess";
 import { TYPE_AXES, portraitType, typeFromScores } from "./portrait-type";
 import { DEFAULT_CALIBRATION } from "./energy-model";
 import { energyRhythm } from "./energy-rhythm";
@@ -7,50 +7,42 @@ import { energyRhythm } from "./energy-rhythm";
 const all = (value: number) => Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, value]));
 
 describe("quiz", () => {
-  test("eight questions per dimension: three statements for each pole and two situations", () => {
+  test("nine situations per dimension, ids unique, neighbours never on one dimension, both options' sides used", () => {
     for (const axis of TYPE_AXES) {
       const items = QUIZ_ITEMS.filter((item) => item.axis === axis.id);
-      expect(items).toHaveLength(8);
-      expect(items.filter((item) => item.kind === "pole" && item.pole === "left")).toHaveLength(3);
-      expect(items.filter((item) => item.kind === "pole" && item.pole === "right")).toHaveLength(3);
-      expect(items.filter((item) => item.kind === "pair")).toHaveLength(2);
+      expect(items).toHaveLength(9);
+      expect(items.some((item) => item.aRight)).toBe(true);
+      expect(items.some((item) => !item.aRight)).toBe(true);
+      // At least five different areas of life per dimension: the questions must not all be about one kind of work.
+      expect(new Set(items.map((item) => item.scene)).size).toBeGreaterThanOrEqual(5);
     }
-    expect(new Set(QUIZ_ITEMS.map((item) => item.id)).size).toBe(32);
+    expect(new Set(QUIZ_ITEMS.map((item) => item.id)).size).toBe(36);
     for (let index = 1; index < QUIZ_ITEMS.length; index++) expect(QUIZ_ITEMS[index]!.axis).not.toBe(QUIZ_ITEMS[index - 1]!.axis);
   });
 
-  // The answer that points every question towards one side: agree with that side's statements, disagree with the other's, and pick that
-  // side's option clearly.
-  const towards = (side: "left" | "right") => Object.fromEntries(QUIZ_ITEMS.map((item) => {
-    if (item.kind === "pole") return [item.id, item.pole === side ? 5 : 1];
-    const aIsSide = (side === "right") === item.aRight;
-    return [item.id, aIsSide ? 1 : 5];
-  }));
+  // Every question answered clearly towards one pole.
+  const towards = (side: "left" | "right") => Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, (side === "right") === item.aRight ? 1 : 5]));
 
-  test("each side's answers land on its pole; the poles are kept apart", () => {
-    expect(quizScores(towards("right"))).toEqual({ concentration: 100, orientation: 100, boundary: 100, pacing: 100 });
-    expect(quizType(towards("right")).code).toBe("DXBV");
-    expect(quizType(towards("left")).code).toBe("CLWU");
-    expect(quizResult(towards("left")).poles.boundary).toEqual({ left: 100, right: 0 });
+  test("each side's answers land on its pole", () => {
+    expect(quizScores(towards("right"))).toEqual({ collab: 100, purpose: 100, build: 100, lines: 100 });
+    expect(quizType(towards("right")).code).toBe("WUHG");
+    expect(quizType(towards("left")).code).toBe("ROBA");
   });
 
-  test("agreeing with both poles is shown as both strong, and the situations decide the letter", () => {
-    const answers = Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, item.kind === "pole" ? 5 : 3]));
-    for (const item of QUIZ_ITEMS.filter((entry) => entry.axis === "orientation" && entry.kind === "pair")) answers[item.id] = item.kind === "pair" && item.aRight ? 2 : 4;
-    const { scores, poles } = quizResult(answers);
-    expect(poles.orientation).toEqual({ left: 100, right: 100 });
-    expect(poleBalance(poles.orientation)).toBe("both_high");
-    expect(scores.orientation).toBe(56);
-    // Everything else even: exactly 50, decided by the poles' order (equal) → left, shown as 49.
-    expect(scores.concentration).toBe(49);
-    expect(poleBalance({ left: 0, right: 25 })).toBe("both_low");
-    expect(poleBalance({ left: 80, right: 50 })).toBeNull();
+  test("all neutral reads just under the middle, decided left; an exact middle goes to the side more answers leaned to", () => {
+    expect(quizScores(all(3))).toEqual({ collab: 49, purpose: 49, build: 49, lines: 49 });
+    const answers = all(3);
+    const lines = QUIZ_ITEMS.filter((item) => item.axis === "lines");
+    // Two answers a step right, one two steps left: the mean is the middle, more answers leaned right.
+    lines.slice(0, 2).forEach((item) => { answers[item.id] = item.aRight ? 2 : 4; });
+    answers[lines[2]!.id] = lines[2]!.aRight ? 5 : 1;
+    expect(quizScores(answers).lines).toBe(51);
   });
 
   test("a single dimension moves only with its own questions", () => {
     const answers = all(3);
-    for (const item of QUIZ_ITEMS.filter((entry) => entry.axis === "pacing" && entry.kind === "pole")) answers[item.id] = item.kind === "pole" && item.pole === "right" ? 4 : 2;
-    expect(quizScores(answers)).toEqual({ concentration: 49, orientation: 49, boundary: 49, pacing: 69 });
+    for (const item of QUIZ_ITEMS.filter((entry) => entry.axis === "build")) answers[item.id] = item.aRight ? 2 : 4;
+    expect(quizScores(answers)).toEqual({ collab: 49, purpose: 49, build: 75, lines: 49 });
   });
 
   test("an unanswered or out-of-range answer is refused", () => {
@@ -60,12 +52,25 @@ describe("quiz", () => {
     expect(() => quizScores({ ...all(3), q1: 6 })).toThrow(/QUIZ_INCOMPLETE: q1/);
   });
 
+  test("「AI 替你干的」 lists the work leaned towards AI, most decided first, at most three, none when nothing leaned there", () => {
+    expect(aiDoes(all(3))).toEqual([]);
+    const handing = Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, item.ai ? (item.ai.side === "a" ? 1 : 5) : 3]));
+    expect(aiDoes(handing)).toHaveLength(3);
+    const one = all(3);
+    const writing = QUIZ_ITEMS.find((item) => item.ai?.does === "写文案")!;
+    const code = QUIZ_ITEMS.find((item) => item.ai?.does === "写代码")!;
+    one[writing.id] = writing.ai!.side === "a" ? 2 : 4;
+    one[code.id] = code.ai!.side === "a" ? 1 : 5;
+    expect(aiDoes(one)).toEqual(["写代码", "写文案"]);
+    for (const item of QUIZ_ITEMS) if (item.ai) expect([...item.ai.does].length, item.id).toBeLessThanOrEqual(6);
+  });
+
   test("the portrait's type and the quiz's type are the same reading of the same scores", () => {
-    const scores = { concentration: 20, orientation: 80, boundary: 50, pacing: 49 };
-    const report = { type: { ...scores, evidence: { concentration: "因为", orientation: "", boundary: "", pacing: "" } } } as unknown as Parameters<typeof portraitType>[0];
-    expect(portraitType(report)).toEqual(typeFromScores(scores, report.type!.evidence));
-    expect(typeFromScores(scores).code).toBe("CXBU");
-    expect(typeFromScores(scores).axes.map((axis) => axis.percent)).toEqual([80, 80, 50, 51]);
+    const scores = { collab: 49, purpose: 80, build: 50, lines: 20 };
+    const report = { type: { ...scores, evidence: { collab: "", purpose: "", build: "", lines: "因为" } } } as unknown as Parameters<typeof portraitType>[0];
+    expect(portraitType(report)).toEqual({ ...typeFromScores(scores, report.type!.evidence), summary: "" });
+    expect(typeFromScores(scores).code).toBe("RUHA");
+    expect(typeFromScores(scores).axes.map((axis) => axis.percent)).toEqual([51, 80, 50, 80]);
   });
 
   test("a report on the first version's axes has no type until it is rewritten", () => {

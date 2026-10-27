@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { changeFavouriteTopics, grownSkillStatus, allowScripts, changeGrownSkill, grownSkillAction } from "../../../../../lib/skill-library";
+import { changeFavouriteTopics, grownSkillStatus, allowScripts, changeGrownSkill, grownSkillAction, improveGrownSkill, requestWorkflowMergeCheck, revertGrownRevision, unmergeGrownWorkflow } from "../../../../../lib/skill-library";
 import { writeGuard, validId } from "../../../agent/guard";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
 
@@ -17,14 +17,30 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
  * `{action: "consent"}` accepts the risks of one that reads an account, `{action: "login", service}` opens a window to log in with (on the
  * hosted beta the server's browser, answered `remote: true` and shown in a dialog; `width`/`height` are the dialog's size) and
  * `{action: "run"}` starts it now; `{action: "allow_scripts" | "disallow_scripts"}` allows the scripts the checks capped to text, or takes it back;
- * `{action: "topics", perDay, from, to}` sets the pace of favourites organised by topic (notes a day, the night window's hours).
+ * `{action: "topics", perDay, from, to}` sets the pace of favourites organised by topic (notes a day, the night window's hours);
+ * `{action: "improve", text}` tells it what to do differently (Crossline revises it), `{action: "revert"}` takes the last revision back,
+ * `{action: "unmerge"}` undoes its merge into another workflow, and `{action: "merge_check"}` (any id) checks all workflows for duplicates now.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const guard = await writeGuard(request);
   if ("response" in guard) return guard.response;
   const { id } = await context.params;
   if (!validId(id)) return NextResponse.json({ ok: false, code: "INVALID_SKILL" }, { status: 400 });
-  const { status, pinned, action, service, width, height, perDay, from, to } = guard.body;
+  const { status, pinned, action, service, width, height, perDay, from, to, text } = guard.body;
+  if (action === "improve") {
+    if (typeof text !== "string" || !text.trim() || text.length > 2_000) return NextResponse.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
+    const result = await improveGrownSkill(guard.ctx, id, text);
+    return NextResponse.json(result, { status: result.ok ? 200 : 404 });
+  }
+  if (action === "unmerge") {
+    const result = unmergeGrownWorkflow(guard.ctx, id);
+    return NextResponse.json(result, { status: result.ok ? 200 : 409 });
+  }
+  if (action === "merge_check") return NextResponse.json(await requestWorkflowMergeCheck(guard.ctx));
+  if (action === "revert") {
+    const result = revertGrownRevision(guard.ctx, id);
+    return NextResponse.json(result, { status: result.ok ? 200 : 409 });
+  }
   if (action === "topics") {
     const number = (value: unknown) => typeof value === "number" ? value : undefined;
     const result = changeFavouriteTopics(guard.ctx, id, { ...(number(perDay) !== undefined ? { perDay: number(perDay)! } : {}),

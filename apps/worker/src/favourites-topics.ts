@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import {
   FAVOURITE_TOPICS_SCHEMA, NOTE_GAP_MS, parseTopicPlan, topicPlanKey, grownSkillFilesKey, grownSkillId, grownSkillName, TITLES_PER_RUN, dayBatch, emptyTopicPlan, mergeTopics, nightBatch, nightOf, topicOfNote, topicProgress, validateFavouriteTopics,
   type FavouriteTopic, type FavouriteTopicPlan, type FavouriteTopicsAnswer, type FavouriteTopicsContext, type GrownSkillRecord
@@ -9,10 +9,10 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { grownHomeLine, readGrownSkills, writeGrownSkills, type CrosslineStore } from "@crossline/db";
 import type { DispatchResult } from "./agent-service";
 import type { AgentOutcome, AgentTaskInput } from "./agent-task";
-import { collectFolder, favouritesAccess, markOrganised, readCollectLedger, type CollectResult } from "./favourites-reader";
+import { collectFolder, collectHold, favouritesAccess, markOrganised, readCollectLedger, type CollectResult } from "./favourites-reader";
 import { linePacks } from "./lines";
 import { ownerOf } from "./owner";
-import { currentFavouritesCollector, rememberRead, sayToPerson, startFavouritesRun } from "./workflow-smith";
+import { claimOrganising, currentFavouritesCollector, rememberRead, sayToPerson, startFavouritesRun } from "./workflow-smith";
 
 /**
  * The favourites organised by topic (packages/core/src/favourite-topics.ts has the rules and the owner's words). This is the worker's side:
@@ -105,6 +105,13 @@ export function favouritesTopicStep(store: CrosslineStore, workspaceId: string, 
         "workflow_done", `topics:${record.id}:${clock.day}`, [{ label: "去看设置", href: "/settings#skills" }], now);
     }
   }).catch(() => undefined); };
+  // 0. What is already listed is sorted even while the site is held or the list unfinished: sorting reads only the titles kept here and
+  //    never opens the site (the owner, 2026-10-23: the 1170 listed before a 461 were to be sorted before the list is read again).
+  const unsorted = Object.keys(ledger.listed ?? {}).filter((id) => !plan.classified.includes(id));
+  if (unsorted.length && (!ledger.listedAt || collectHold(store, workspaceId, now))) {
+    sortThen();
+    return { state: "blocked", code: "TOPICS_SORTING", message: `正在按标题把已列出的 ${unsorted.length} 条收藏分成话题（不访问小红书）。` };
+  }
   // 1. The list, for its titles: once at the start, and again each week by night for what was saved since.
   const stale = !ledger.listedAt || now.getTime() - Date.parse(ledger.listedAt) > LIST_REFRESH_DAYS * 86_400_000;
   if (!ledger.listedAt || (stale && clock.inWindow)) {
@@ -154,12 +161,14 @@ export function favouritesTopicPass(store: CrosslineStore, workspaceId: string, 
 /** What a run read goes to the assistant topic by topic: each topic's document is written or extended from the notes read for it. */
 function organiseTopics(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, runFree: RunFree, folder: string, result: CollectResult, now: Date): void {
   const plan = readTopicPlan(store, workspaceId, record.id);
-  const ids = readCollectLedger(store, workspaceId, record.id).unorganised;
-  if (!plan || !ids.length) return;
+  if (!plan) return;
   const byNote = topicOfNote(plan);
+  // Only notes no organising run already has (claimOrganising), and only those under a topic.
+  const claim = claimOrganising(workspaceId, record.id, readCollectLedger(store, workspaceId, record.id).unorganised.filter((id) => byNote.has(id)));
+  const ids = claim.ids;
   const groups = new Map<FavouriteTopic, string[]>();
   for (const id of ids) { const topic = byNote.get(id); if (topic) groups.set(topic, [...(groups.get(topic) ?? []), id]); }
-  if (!groups.size) return;
+  if (!groups.size) { claim.release(); return; }
   const read = readSet(store, workspaceId, record.id);
   const progress = new Map(topicProgress(plan, read).map((item) => [item.id, item]));
   const last = record.lastRead && existsSync(record.lastRead.directory) && record.lastRead.directory !== folder ? record.lastRead.directory : undefined;
@@ -172,23 +181,58 @@ function organiseTopics(store: CrosslineStore, workspaceId: string, record: Grow
       `按工作流 $${grownSkillName(record.id)} 整理收藏的笔记，按话题写：每个话题一份「话题-<话题名>.md」，再更新「话题总览.md」（每个话题一行：名称、条数、已整理条数、一句话要点）。`,
       `笔记已由 Crossline 在本人登录的浏览器里读好，放在只读输入 ${path.basename(folder)}：index.md 是目录，每条笔记一个 note-<id>.md（标题、正文、标签、作者、发布时间、互动数、每张图片的描述与图中文字、视频转写与关键帧描述、原链接）。不要再访问小红书。`,
       "本次只整理这些：", ...lines,
-      ...(last ? [`上次的整理结果（${path.basename(last)}，只读）：已有的话题文件在其中，把本次新读的并入同一话题的文件后完整输出，未涉及的话题文件原样带上。`] : []),
+      "话题文件和「话题总览.md」都写在任务目录顶层。",
+      ...(last ? [`上次的整理结果（${path.basename(last)}，只读）：已有的话题文件在其中。只写本次涉及的话题：把本次新读的并入上次同名的话题文件后整份写出，已写过的笔记不重写；再写更新后的「话题总览.md」。未涉及的话题文件不要输出，Crossline 会从上次结果原样带上。`] : []),
       "不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。"].join("\n") },
   (outcome) => {
+    claim.release();
     if (outcome.state !== "done") {
       sayToPerson(store, workspaceId, `收藏已读 ${ids.length} 条，但按话题整理没有做成：${"message" in outcome ? outcome.message : "助手未获准做这类工作"}。下次运行一起整理。`,
         "workflow_done", `topics-failed:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: "去看设置", href: "/settings#skills" }], now);
       return;
     }
     markOrganised(store, workspaceId, record.id, ids);
+    // The topics this run did not touch come over from the last result, so every result holds every topic.
+    carryTopicFiles(last, outcome.directory);
     rememberRead(store, workspaceId, record.id, { at: new Date().toISOString(), taskId: outcome.taskId, directory: outcome.directory, items: read.size, pages: [] });
     const finished = [...groups.keys()].filter((topic) => (progress.get(topic.id)?.read ?? 0) >= topic.notes.length).map((topic) => topic.name);
     sayToPerson(store, workspaceId, `收藏按话题整理好了：本次 ${ids.length} 条，涉及 ${[...groups.keys()].map((topic) => `「${topic.name}」`).join("、")}${finished.length ? `；${finished.map((name) => `「${name}」`).join("、")}已整理完` : ""}。${result.state === "check" ? "读取时遇到了安全验证，已停下。" : ""}`,
       "workflow_done", `topics:${record.id}:${outcome.taskId}`, [{ label: "去看结果", href: "/approvals#assistant" }], now);
   });
+  if (started.state !== "started") claim.release();
   if (started.state === "blocked" && started.code !== "AGENT_BUSY")
     sayToPerson(store, workspaceId, `收藏已读 ${ids.length} 条，整理要等一下：${started.message}`, "workflow_done", `topics-wait:${record.id}:${now.toISOString().slice(0, 10)}`,
       [{ label: "打开设置", href: "/settings#automation" }], now);
+}
+
+const TOPIC_FILE = /^话题(-.+|总览)\.md$/;
+/** The folder of a result that holds its topic documents: the result itself, else its one subfolder that does. */
+function topicDir(root: string): string | undefined {
+  if (!existsSync(root)) return undefined;
+  const names = readdirSync(root);
+  if (names.some((name) => TOPIC_FILE.test(name))) return root;
+  for (const name of names) {
+    const dir = path.join(root, name);
+    try { if (statSync(dir).isDirectory() && readdirSync(dir).some((inner) => TOPIC_FILE.test(inner))) return dir; } catch { /* unreadable */ }
+  }
+  return undefined;
+}
+/**
+ * The topic documents a run did not write are copied from the last result into this one (beside the ones it wrote), so the assistant
+ * writes only the topics a run touched instead of every topic again (each run used to output all topic documents in full). Returns
+ * the names carried.
+ */
+export function carryTopicFiles(from: string | undefined, to: string): string[] {
+  const source = from ? topicDir(from) : undefined;
+  if (!source || !existsSync(to)) return [];
+  const target = topicDir(to) ?? to;
+  const carried: string[] = [];
+  for (const name of readdirSync(source)) {
+    if (!TOPIC_FILE.test(name) || existsSync(path.join(target, name))) continue;
+    copyFileSync(path.join(source, name), path.join(target, name));
+    carried.push(name);
+  }
+  return carried;
 }
 
 /** A favourites workflow is put in topic mode with the default share and window (the person changes them in Skill 库). */
@@ -218,7 +262,7 @@ Crossline 已经在本人登录的浏览器里读好笔记（只读输入里的 
 
 「话题总览.md」每个话题一行：名称、条数、已整理条数、一句话要点。
 
-已有的话题文件在上次的整理结果里：把新读的并入同一文件，保持结构，不重复已写过的笔记。只用笔记里有的内容，不编造。
+已有的话题文件在上次的整理结果里：只写本次涉及的话题，把新读的并入同一文件，保持结构，不重复已写过的笔记；未涉及的话题不输出（Crossline 会带上）。只用笔记里有的内容，不编造。
 
 ## Language
 

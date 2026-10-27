@@ -86,11 +86,22 @@ const MIGRATIONS: Migration[] = [
     DELETE FROM email_tests;
     DELETE FROM avatar_draws;
     ALTER TABLE results ADD COLUMN poles_json TEXT NOT NULL DEFAULT '';
+  `),
+  // 7: the AI-era types replaced the multi-line ones (2026-10-24, the owner): every earlier result, pair, beta request and per-address
+  // count is deleted again rather than shown under codes that now mean something else, and each result keeps what the person leaned to
+  // hand to AI (「AI 替你干的」, computed from the answers at submission). `poles_json` stays empty: the new questions have no poles.
+  (db) => db.exec(`
+    DELETE FROM pairs;
+    DELETE FROM beta_requests;
+    DELETE FROM results;
+    DELETE FROM email_tests;
+    DELETE FROM avatar_draws;
+    ALTER TABLE results ADD COLUMN ai_does_json TEXT NOT NULL DEFAULT '';
   `)
 ];
 
-/** The migration that deleted every result of the first version; crossing it also removes their files. */
-const LEGACY_PURGE_VERSION = 6;
+/** The last migration that deleted every earlier result; crossing it also removes their files. */
+const LEGACY_PURGE_VERSION = 7;
 
 let open: { file: string; db: Database.Database } | undefined;
 
@@ -112,7 +123,7 @@ export function db(): Database.Database {
 }
 
 /**
- * Every drawn figure and cached poster of the first version's results, which migration 6 deletes: the avatar and poster folders under the
+ * Every drawn figure and cached poster of earlier results, which migrations 6 and 7 delete: the avatar and poster folders under the
  * data directory go whole (both are rebuilt on use). Only run on a database that held results before, never on a new one.
  */
 function removeLegacyFiles(): void {

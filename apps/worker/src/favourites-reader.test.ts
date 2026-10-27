@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { parseCollectPage, parseFeedResponse, parseInitialStateNote, type GrownSkillRecord } from "@crossline/core";
 import {
-  CATCH_UP_GAP_MS, INCREMENTAL_BATCH, INCREMENTAL_GAP_MS, MEDIA_MAX_BYTES, collectFavourites, favouritesAccess, mediaExtension, readCollectLedger,
+  CATCH_UP_GAP_MS, INCREMENTAL_BATCH, LIST_REST_EVERY, LIST_REST_MS, INCREMENTAL_GAP_MS, MEDIA_MAX_BYTES, collectFavourites, favouritesAccess, mediaExtension, readCollectLedger, writeCollectLedger,
   readNoteFile, type CapturedResponse, type CollectDriver, type MediaFetch
 } from "./favourites-reader";
 import { describeNotes, type PictureToDescribe } from "./note-media";
@@ -62,6 +62,10 @@ type Script = {
   /** Notes read from the page state instead of a feed answer. */
   stateOnly?: Set<string>;
   bigVideo?: boolean;
+  /** The list stops loading after this many more pages without saying it ended (the site holding back). */
+  stallAfter?: number;
+  /** The list answers HTTP 461 from this page on until a verification is passed (`unblock`). */
+  blockAfter?: number;
 };
 /** A fake site: the list comes 30 a screen as the page's own answers, each note page fires its own feed answer, media come back as bytes. */
 function fakeSite(script: Script) {
@@ -71,6 +75,7 @@ function fakeSite(script: Script) {
   let listPage = 0;
   let onList = false;
   let current = "";
+  let blocked = script.blockAfter !== undefined;
   const listPageJson = (index: number) => {
     // Newest first: note `total` was saved last.
     const ids = Array.from({ length: script.total }, (_, i) => idOf(script.total - i)).slice(index * 30, index * 30 + 30);
@@ -102,6 +107,8 @@ function fakeSite(script: Script) {
     wheel: async () => {
       log.push("wheel");
       if (!onList) return;
+      if (script.stallAfter !== undefined && listPage >= script.stallAfter) return;
+      if (blocked && listPage >= script.blockAfter!) { queue.push({ url: COLLECT, status: 461, json: { code: 0 } }); return; }
       listPage += 1;
       if (listPage * 30 < script.total) queue.push({ url: COLLECT, status: 200, json: listPageJson(listPage) });
     },
@@ -116,7 +123,7 @@ function fakeSite(script: Script) {
     },
     close: async () => { log.push("close"); }
   };
-  return { driver, log };
+  return { driver, log, unblock: () => { blocked = false; } };
 }
 const run = (driver: CollectDriver, extra: Partial<Parameters<typeof collectFavourites>[0]> = {}) => {
   const gaps: number[] = [];
@@ -216,6 +223,55 @@ test("a file over the size cap is not saved and says so; the limit of the trial 
   expect(mediaExtension(Buffer.from("xx"), "image/jpeg", "bin")).toBe("jpg");
 });
 
+test("a list that stops loading without saying it ended is held like a check, not taken as complete", async () => {
+  const site = fakeSite({ total: 300, stallAfter: 1 });
+  const result = await run(site.driver, { listOnly: true, mode: "catch_up" }).result;
+  expect(result).toMatchObject({ state: "check", listEnded: false, listed: 60 });
+  expect(result.trigger).toContain("没有新内容");
+  const ledger = readCollectLedger(store, ws, "flow-xhs");
+  expect(ledger.listedAt).toBeUndefined();
+  expect(Object.keys(ledger.listed ?? {})).toHaveLength(60);
+  expect(siteHold(store, ws, "xiaohongshu.com")).toMatchObject({ where: expect.stringContaining("60 条") });
+});
+
+test("a verification the person passes on the page lets the list go on from where it stopped; one not passed stops it", async () => {
+  const site = fakeSite({ total: 300, blockAfter: 4 });
+  const asked: string[] = [];
+  const result = await run(site.driver, { listOnly: true, mode: "catch_up", verify: async (where) => { asked.push(where); site.unblock(); return true; } }).result;
+  expect(asked).toEqual(["收藏列表第 5 屏"]);
+  expect(result).toMatchObject({ state: "done", listEnded: true, listed: 300 });
+  expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
+  const refused = fakeSite({ total: 300, blockAfter: 4 });
+  writeCollectLedger(store, ws, "flow-xhs", { read: {}, unorganised: [] });
+  const stopped = await run(refused.driver, { listOnly: true, mode: "catch_up", verify: async () => false }).result;
+  expect(stopped).toMatchObject({ state: "check", listEnded: false });
+});
+
+test("a list the site stops at the same depth twice counts as the whole list, and the next run reads instead of scrolling again", async () => {
+  const first = await run(fakeSite({ total: 300, stallAfter: 1 }).driver, { listOnly: true, mode: "catch_up" }).result;
+  expect(first.listCapped).toBeUndefined();
+  releaseSite(store, ws, "xiaohongshu.com");
+  const second = await run(fakeSite({ total: 300, stallAfter: 1 }).driver, { listOnly: true, mode: "catch_up" }).result;
+  expect(second).toMatchObject({ state: "check", listCapped: true, listed: 60 });
+  const ledger = readCollectLedger(store, ws, "flow-xhs");
+  expect(ledger.listedAt).toBeDefined();
+  expect(ledger.listCapped?.why).toContain("60 条");
+  // A stop much earlier than the last says nothing about the depth: no cap from it.
+  writeCollectLedger(store, ws, "flow-xhs", { read: {}, unorganised: [], listStops: [{ at: "x", listed: 1170 }] });
+  releaseSite(store, ws, "xiaohongshu.com");
+  expect((await run(fakeSite({ total: 300, stallAfter: 1 }).driver, { listOnly: true, mode: "catch_up" }).result).listCapped).toBeUndefined();
+});
+
+test("the list is scrolled at a person's pace, with a rest every 30 screens", async () => {
+  const site = fakeSite({ total: 1_000 });
+  const listing = run(site.driver, { listOnly: true, mode: "catch_up" });
+  const result = await listing.result;
+  expect(result.listEnded).toBe(true);
+  const screens = site.log.filter((line) => line === "wheel").length;
+  const rests = listing.gaps.filter((ms) => ms >= LIST_REST_MS[0] && ms <= LIST_REST_MS[1]);
+  expect(rests).toHaveLength(Math.floor(screens / LIST_REST_EVERY));
+});
+
 test("the list alone: read to its end once, then a weekly look that reaches notes already listed counts as up to date", async () => {
   const first = await run(fakeSite({ total: 65 }).driver, { listOnly: true, mode: "catch_up" }).result;
   expect(first).toMatchObject({ state: "done", listed: 65, listEnded: true, read: [] });
@@ -313,4 +369,23 @@ test("only a workflow about Xiaohongshu favourites behind a login goes to the co
   expect(favouritesAccess(record("每周整理小红书收藏"))?.service).toBe("小红书");
   expect(favouritesAccess(record("每周整理收藏", "https://www.zhihu.com/"))).toBeUndefined();
   expect(favouritesAccess(record("每周整理收藏", "https://www.xiaohongshu.com/", false))).toBeUndefined();
+});
+
+test("a run over given notes stops cleanly between two notes when asked to hand over: what was read is kept, nothing is held, and the same notes carry on elsewhere", async () => {
+  const listing = fakeSite({ total: 6 });
+  await run(listing.driver, { listOnly: true }).result;
+  const targets = Array.from({ length: 6 }, (_, i) => idOf(6 - i));
+  const site = fakeSite({ total: 6 });
+  let asked = 0;
+  const first = await run(site.driver, { targets, handover: () => { asked += 1; return asked > 3; } }).result;
+  expect(first).toMatchObject({ state: "handover", pending: 3 });
+  expect(first.read).toEqual(targets.slice(0, 3));
+  expect(readCollectLedger(store, ws, "flow-xhs").unorganised).toEqual(targets.slice(0, 3));
+  expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
+  // The notes already read are not opened again by whoever takes over.
+  const other = fakeSite({ total: 6 });
+  const rest = await run(other.driver, { targets }).result;
+  expect(rest).toMatchObject({ state: "done" });
+  expect(rest.read).toEqual(targets.slice(3));
+  expect(other.log.filter((line) => line.startsWith("goto") && line.includes("/explore/"))).toHaveLength(3);
 });

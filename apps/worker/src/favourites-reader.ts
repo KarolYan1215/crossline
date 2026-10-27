@@ -8,6 +8,9 @@ import {
 import type { CrosslineStore } from "@crossline/db";
 import { readerLaunch, restoreSessionCookies } from "./browser-launch";
 import { holdSite, judgePage, siteHold, type SiteHold } from "./site-reader";
+import { castContext, publicUrlAllowed, type RemotePage, type Viewport } from "./remote-browser";
+import { driveContext } from "./node/browser";
+import type { NodeBrowserLink } from "./node/hub";
 
 /**
  * Reading the person's Xiaohongshu favourites in full (docs/skills-library.md 「收藏全量读取」, the owner's decision of 2026-10-22: 「收藏全部
@@ -33,6 +36,13 @@ export const INCREMENTAL_BATCH = 15;
 export const MEDIA_MAX_BYTES = 500 * 1024 * 1024;
 /** A bound on the list scroll only: ~30 notes load per screen or two, so this covers well past ten thousand favourites. */
 export const LIST_SCROLLS_MAX = 600;
+/**
+ * The list at a person's reading pace (the owner, 2026-10-23, after 2.5–4 s a screen was answered HTTP 461 at screen 120, 1170 listed in
+ * 6.5 minutes): 6–10 s a screen, and a rest of one to two minutes every 30 screens. About 20–30 minutes for 1200 favourites.
+ */
+export const LIST_SCREEN_GAP_MS: readonly [number, number] = [6_000, 10_000];
+export const LIST_REST_EVERY = 30;
+export const LIST_REST_MS: readonly [number, number] = [60_000, 120_000];
 /** A list that brings nothing new for this many screens in a row has ended. */
 const LIST_QUIET_SCREENS = 3;
 const MEDIA_GAP_MS: readonly [number, number] = [400, 1_200];
@@ -56,6 +66,15 @@ export type CollectDriver = {
   fetchMedia: (url: string, referer: string, maxBytes: number) => Promise<MediaFetch>;
   /** How large the page has grown (its JavaScript heap in MB, its element count): logged while the list scrolls. */
   metrics?: () => Promise<{ heapMb: number; nodes: number }>;
+  /**
+   * This page lent to the dialog for the site's verification (the person passes it there): pictures load again while it is lent, since a
+   * verification is made of them. Only where the page can be shown (the server's browser).
+   */
+  lend?: () => Promise<{ page: RemotePage; viewport: Viewport; back: () => void }>;
+  /** The window brought to the front of the person's screen (a browser on their own computer). */
+  front?: () => Promise<void>;
+  /** Pictures shown again while a person looks at the page (a browser on their own computer, for a verification). */
+  showMedia?: (on: boolean) => Promise<void> | void;
   close: () => Promise<void>;
 };
 
@@ -77,14 +96,17 @@ export type CollectLedger = {
    * The list stopped at the memory line before its end (the page grows with every screen): the notes past it are not reached on this
    * machine, and the list counts as read for the topics and the catch-up. Kept so the person is told once and the cause is on record.
    */
-  listCapped?: { at: string; listed: number; memory: string };
+  listCapped?: { at: string; listed: number; memory: string; why?: string };
+  /** Where the list was stopped by the site (a check, or no more pages), the last few: two at about the same depth cap the list. */
+  listStops?: Array<{ at: string; listed: number }>;
 };
 const ledgerKey = (workflowId: string) => `collect.notes.${workflowId}`;
 export function readCollectLedger(store: CrosslineStore, workspaceId: string, workflowId: string): CollectLedger {
   try {
     const raw = JSON.parse(store.getSetting(workspaceId, ledgerKey(workflowId)) ?? "null") as Partial<CollectLedger> | null;
     return { read: raw?.read ?? {}, unorganised: raw?.unorganised ?? [], ...(raw?.caughtUpAt ? { caughtUpAt: raw.caughtUpAt } : {}), ...(raw?.selfId ? { selfId: raw.selfId } : {}),
-      ...(raw?.listed ? { listed: raw.listed } : {}), ...(raw?.listedAt ? { listedAt: raw.listedAt } : {}), ...(raw?.listCapped ? { listCapped: raw.listCapped } : {}) };
+      ...(raw?.listed ? { listed: raw.listed } : {}), ...(raw?.listedAt ? { listedAt: raw.listedAt } : {}), ...(raw?.listCapped ? { listCapped: raw.listCapped } : {}),
+      ...(raw?.listStops ? { listStops: raw.listStops } : {}) };
   } catch { return { read: {}, unorganised: [] }; }
 }
 export function writeCollectLedger(store: CrosslineStore, workspaceId: string, workflowId: string, ledger: CollectLedger): void {
@@ -132,8 +154,9 @@ export function writeNoteFile(folder: string, note: NoteFile): void {
 }
 
 export type CollectResult = {
-  /** `memory`: the run stopped itself at the memory line (or found no room to open the browser); nothing broke, the next run continues. */
-  state: "done" | "check" | "login" | "paused" | "no_profile" | "failed" | "memory";
+  /** `memory`: the run stopped itself at the memory line (or found no room to open the browser); nothing broke, the next run continues.
+   *  `handover`: stopped between two notes on request (`CollectOptions.handover`); the caller reads the rest elsewhere. */
+  state: "done" | "check" | "login" | "paused" | "no_profile" | "failed" | "memory" | "handover";
   mode: CollectMode;
   /** Notes the list showed this run, and whether it was read to its end. */
   listed: number; listEnded: boolean;
@@ -163,9 +186,22 @@ export type CollectOptions = {
   deadline?: Date;
   sleep?: (ms: number) => Promise<void>; random?: () => number; now?: () => Date;
   log?: (event: Record<string, unknown>) => void;
+  /**
+   * Asked before each note of a `targets` run: true stops the run cleanly between two notes (state `handover`, nothing lost, the ledger
+   * already holds every note read) so the caller can carry on with the rest somewhere else (the person's own computer, once its browser is
+   * ready). The notes are opened one by one from their kept tokens, so the rest of the run needs nothing from this browser.
+   */
+  handover?: () => boolean;
   /** The worker's memory line (memory.ts `createCollectMemory`): past it the run stops where it is, and downloads are held to the room left. */
   memory?: { over: () => boolean; mediaBytes: (wanted: number) => number; describe: () => string };
+  /**
+   * The site asked for a verification (HTTP 461/471, or the list stopped loading): the person is asked to pass it on this very page, and
+   * the run goes on from where it is when they did (true), or stops as before (false). Absent where the page cannot be shown.
+   */
+  verify?: (where: string) => Promise<boolean>;
 };
+/** Verifications one run asks for before it stops anyway: a site that keeps asking is not read on. */
+export const VERIFICATIONS_PER_RUN = 3;
 
 const MIME_EXT: Array<[RegExp, string]> = [[/png/, "png"], [/jpe?g/, "jpg"], [/webp/, "webp"], [/gif/, "gif"], [/avif/, "avif"], [/hei[cf]/, "heic"], [/mp4/, "mp4"], [/quicktime/, "mov"], [/webm/, "webm"]];
 /** The file's real kind from its first bytes, else the content type, else the fallback. */
@@ -206,6 +242,41 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     log({ type: "collect.check", workflowId, where, trigger });
     return { ...result, state: "check" as const, ...(trigger ? { trigger: `${where}：${trigger}` } : { trigger: where }),
       message: `读取${where}时遇到了小红书的安全验证或限流${trigger ? `（${trigger}）` : ""}，已停下。` };
+  };
+  /**
+   * The list stopped by the site. Twice at about the same depth (within 5%) is as far as the site serves the list, whatever the pace
+   * (2026-10-23/24: HTTP 461 at screen ~120 with ~1200 listed, at 2.5–4 s and at 8 s a screen alike): what was listed then counts as the
+   * list, so the next run reads the notes instead of scrolling to the same wall again. The site is held all the same.
+   */
+  const listStop = (where: string): CollectResult => {
+    keepListed();
+    // The depth is how far this run got down the list; the ledger also holds what earlier runs listed.
+    const total = Object.keys(ledger.listed ?? {}).length;
+    const depth = listed.size;
+    const previous = ledger.listStops?.at(-1);
+    ledger.listStops = [...(ledger.listStops ?? []), { at: now().toISOString(), listed: depth }].slice(-5);
+    if (previous && depth > 0 && Math.abs(depth - previous.listed) <= Math.max(20, previous.listed * 0.05)) {
+      ledger.listedAt = now().toISOString();
+      ledger.listCapped = { at: now().toISOString(), listed: total, memory: "", why: `小红书两次都在约 ${total} 条处不再给出收藏列表` };
+      result.listCapped = true;
+      log({ type: "collect.list_depth_capped", workflowId, listed: total, depth, previous: previous.listed });
+    }
+    save();
+    return { ...stopAtCheck(where), listed: total };
+  };
+  /** Asks the person to pass the site's verification on this page; true when they did and the run may go on. */
+  let verifications = 0;
+  const askVerify = async (where: string): Promise<boolean> => {
+    if (!options.verify || verifications >= VERIFICATIONS_PER_RUN) return false;
+    verifications += 1;
+    keepListed(); save();
+    log({ type: "collect.verify_asked", workflowId, where, trigger });
+    const passed = await options.verify(where).catch(() => false);
+    log({ type: "collect.verify_answered", workflowId, where, passed });
+    if (!passed) return false;
+    trigger = "";
+    await driver.responses();
+    return true;
   };
   /** A page-level check: the address and status are what is known. */
   const pageCheck = (url: string, status: number) => { trigger ||= `页面 HTTP ${status} ${url.slice(0, 120)}`; };
@@ -265,13 +336,15 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     let shown = await driver.snapshot();
     const first = await take();
     const pageVerdict = judgePage(shown.url, shown.title, "", status);
-    if (first === "check" || pageVerdict === "check") { pageCheck(shown.url, status); return stopAtCheck("收藏列表"); }
+    if (first === "check" || pageVerdict === "check") { pageCheck(shown.url, status); if (!(await askVerify("收藏列表"))) return listStop("收藏列表"); }
     if (first === "login" || pageVerdict === "login") return { ...result, state: "login", message: "小红书要求登录。" };
     const fromDom = (links: Array<{ text: string; href: string }>) => { for (const note of notesFromLinks(links)) if (!listed.has(note.id)) listed.set(note.id, note); };
     fromDom(shown.links);
     let quiet = 0;
     let capped = false;
     for (let screen = 0; screen < LIST_SCROLLS_MAX; screen += 1) {
+      // A list that stops loading without saying it ended is often the site waiting for a verification on the page.
+      if (quiet >= LIST_QUIET_SCREENS && hasMore !== false && !(mode === "incremental" && knownPage) && await askVerify(`收藏列表（已列出 ${listed.size} 条后停止加载）`)) quiet = 0;
       if (hasMore === false || quiet >= LIST_QUIET_SCREENS || (mode === "incremental" && knownPage)) break;
       // The page holds every card it has shown: past the memory line the list stops here rather than the kernel killing the page.
       if (options.memory?.over()) {
@@ -281,13 +354,18 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       }
       const before = listed.size;
       await driver.wheel();
-      await driver.pause(2_500 + random() * 1_500);
+      await driver.pause(between(LIST_SCREEN_GAP_MS));
       const verdict = await take();
       shown = await driver.snapshot();
-      if (verdict === "check" || judgePage(shown.url, shown.title, "", 200) === "check") { pageCheck(shown.url, 200); return stopAtCheck(`收藏列表第 ${screen + 1} 屏`); }
+      if (verdict === "check" || judgePage(shown.url, shown.title, "", 200) === "check") {
+        pageCheck(shown.url, 200);
+        if (await askVerify(`收藏列表第 ${screen + 1} 屏`)) { quiet = 0; continue; }
+        return listStop(`收藏列表第 ${screen + 1} 屏`);
+      }
       if (verdict === "login" || judgePage(shown.url, shown.title, "", 200) === "login") return { ...result, state: "login", message: "小红书要求登录。" };
       fromDom(shown.links);
       quiet = listed.size > before ? 0 : quiet + 1;
+      if ((screen + 1) % LIST_REST_EVERY === 0) { keepListed(); save(); await sleep(between(LIST_REST_MS)); }
       // Kept as it grows: a page that dies part way (2026-10-23: 「Target crashed」 after 17 minutes) loses nothing listed so far.
       if (screen % 5 === 4) {
         keepListed(); save();
@@ -296,9 +374,17 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
         log({ type: "collect.list_progress", workflowId, screen: screen + 1, listed: listed.size, ...(size ?? {}) });
       }
     }
-    result.listEnded = hasMore === false || quiet >= LIST_QUIET_SCREENS;
+    // Only the list's own answer says it ended. Screens that bring nothing while it never said so is the site no longer serving the list
+    // (2026-10-23: one page, then nothing, an hour after a 461 — and it was taken as the end, so the list counted as complete): held like
+    // a check, so nothing reads on as though the list were whole.
+    result.listEnded = hasMore === false;
     result.listed = listed.size;
     keepListed();
+    if (!result.listEnded && !capped && quiet >= LIST_QUIET_SCREENS && !(mode === "incremental" && knownPage)) {
+      trigger ||= `连续 ${LIST_QUIET_SCREENS} 屏没有新内容，接口没有说已到底（疑似限流）`;
+      log({ type: "collect.list_stalled", workflowId, listed: listed.size });
+      return listStop(`收藏列表（已列出 ${listed.size} 条）`);
+    }
     if (capped) {
       result.listCapped = true;
       ledger.listCapped = { at: now().toISOString(), listed: listed.size, memory: options.memory?.describe() ?? "" };
@@ -332,6 +418,11 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
     const gap = mode === "incremental" ? INCREMENTAL_GAP_MS : CATCH_UP_GAP_MS;
     const unread = { length: total };
     for (const [index, note] of toRead.entries()) {
+      if (options.handover?.()) {
+        save();
+        log({ type: "collect.handover_asked", workflowId, read: result.read.length });
+        return { ...result, state: "handover", pending: unread.length - result.read.length - result.gone.length };
+      }
       const wait = options.gapMs ? options.gapMs(toRead.length - index) : between(gap);
       if (options.deadline && now().getTime() + wait + 60_000 > options.deadline.getTime()) break;
       if (options.memory?.over()) {
@@ -347,7 +438,8 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       await driver.pause(2_000 + random() * 1_500);
       const verdict = await take();
       const page = await driver.snapshot();
-      if (verdict === "check") return { ...stopAtCheck("笔记"), pending: unread.length - result.read.length - result.gone.length };
+      // Passed on the page: this note stays unread for the next run, and the reading goes on with the next one.
+      if (verdict === "check") { if (await askVerify("笔记")) continue; return { ...stopAtCheck("笔记"), pending: unread.length - result.read.length - result.gone.length }; }
       if (verdict === "login") return { ...result, state: "login", message: "小红书要求登录。", pending: unread.length - result.read.length - result.gone.length };
       let apiJson: unknown;
       let detail: NoteDetail | undefined;
@@ -358,7 +450,11 @@ export async function collectFavourites(options: CollectOptions): Promise<Collec
       // since a note about verification codes would otherwise close the site for a week.
       const urlVerdict = judgePage(page.url, "", "", noteStatus);
       const textVerdict = detail ? "ok" : judgePage(page.url, page.title, page.text, noteStatus);
-      if (urlVerdict === "check" || textVerdict === "check") { pageCheck(page.url, noteStatus); return { ...stopAtCheck("笔记"), pending: unread.length - result.read.length - result.gone.length }; }
+      if (urlVerdict === "check" || textVerdict === "check") {
+        pageCheck(page.url, noteStatus);
+        if (await askVerify("笔记")) continue;
+        return { ...stopAtCheck("笔记"), pending: unread.length - result.read.length - result.gone.length };
+      }
       if (urlVerdict === "login" || textVerdict === "login") return { ...result, state: "login", message: "小红书要求登录。", pending: unread.length - result.read.length - result.gone.length };
       if (!detail && NOTE_GONE_TEXT.test(page.text)) {
         ledger.read[note.id] = { at: now().toISOString(), state: "gone" };
@@ -434,56 +530,44 @@ export async function openCollectBrowser(profileDir: string, executablePath: str
   const context = await chromium.launchPersistentContext(profileDir, await readerLaunch(executablePath));
   await restoreSessionCookies(context, profileDir);
   // Reading the list only needs its titles, which come in the page's own answers: its pictures and videos are not loaded. A list of
-  // ~2000 favourites scrolled with them grew the page past the worker's memory and it crashed (2026-10-23).
-  if (options.listOnly) await context.route("**/*", (route) => ["image", "media", "font"].includes(route.request().resourceType()) ? route.abort() : route.continue());
-  // Functions handed to the page name nothing (tsx's `__name` wrapper would throw there); see `openBrowser` in site-reader.ts.
-  await context.addInitScript({ content: "globalThis.__name = globalThis.__name || ((target) => target);" });
-  const page = context.pages()[0] ?? await context.newPage();
-  const queue: CapturedResponse[] = [];
-  const pending = new Set<Promise<void>>();
-  page.on("response", (response) => {
-    const url = response.url();
-    if (!xhsCaptured(url)) return;
-    const done = response.json().then((json: unknown) => { queue.push({ url, status: response.status(), json }); },
-      () => { queue.push({ url, status: response.status(), json: null }); }).finally(() => pending.delete(done));
-    pending.add(done);
-  });
+  // ~2000 favourites scrolled with them grew the page past the worker's memory and it crashed (2026-10-23). Every request goes only to
+  // public https hosts (as the login browser's do), so a page lent to the person cannot reach the server's own.
+  const driver = await driveContext(context, { capture: xhsCaptured, allow: publicUrlAllowed, ...(options.listOnly ? { listOnly: true } : {}) });
+  const page = context.pages()[0]!;
+  return { ...driver,
+    lend: async () => {
+      driver.showMedia(true);
+      const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
+      return { page: await castContext(context, viewport, true), viewport, back: () => driver.showMedia(false) };
+    } };
+}
+
+/** The page answers kept by a reader on the person's computer: the same URLs as `xhsCaptured`. */
+const CAPTURED_SOURCES = [XHS_COLLECT_PATH.source, XHS_FEED_PATH.source, XHS_SELF_PATH.source];
+
+/**
+ * The favourites read in a browser on the person's own computer (a node that offers one, docs/compute-node.md): the same driver, each
+ * operation sent over the node's connection. The window is visible on their screen, logged in there, so a verification or login is done
+ * in it; nothing of the server's memory goes to the page.
+ */
+export async function openNodeCollectBrowser(link: NodeBrowserLink, options: { listOnly?: boolean } = {}): Promise<CollectDriver & { host: string }> {
+  const call = <T>(request: Record<string, unknown>, timeoutMs?: number) => link.call(request, timeoutMs) as Promise<T>;
+  await call({ op: "open", site: XHS_HOME, capture: CAPTURED_SOURCES, ...(options.listOnly ? { listOnly: true } : {}) }, 120_000);
   return {
-    goto: async (url) => (await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }))?.status() ?? 0,
-    pause: (ms) => page.waitForTimeout(ms),
-    wheel: () => page.mouse.wheel(0, 900),
-    snapshot: async () => ({ url: page.url(), ...(await page.evaluate(() => ({ title: document.title, text: (document.body?.innerText ?? "").slice(0, 60_000),
-      links: [...document.querySelectorAll("a[href]")].slice(0, 3_000).map((anchor) => ({ text: (anchor.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 120),
-        href: (anchor as HTMLAnchorElement).href })) }))) }),
-    responses: async () => { await Promise.allSettled([...pending]); return queue.splice(0, queue.length); },
-    metrics: () => page.evaluate(() => ({ heapMb: Math.round(((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 1_048_576),
-      nodes: document.getElementsByTagName("*").length })),
-    noteState: () => page.evaluate(() => {
-      const plain = (value: unknown) => { try { return JSON.parse(JSON.stringify(value ?? null)) as unknown; } catch { return null; } };
-      const state = (globalThis as unknown as { __INITIAL_STATE__?: { note?: { noteDetailMap?: unknown } } }).__INITIAL_STATE__;
-      return plain(state?.note?.noteDetailMap ?? null);
-    }),
-    selfProfile: () => page.evaluate(() => {
-      const state = (globalThis as unknown as { __INITIAL_STATE__?: { user?: { userInfo?: Record<string, unknown> } } }).__INITIAL_STATE__;
-      const info = state?.user?.userInfo as Record<string, unknown> | undefined;
-      const inner = (info && typeof info === "object" && "_value" in info ? info._value : info?.value ?? info) as Record<string, unknown> | undefined;
-      const userId = typeof inner?.userId === "string" ? inner.userId : typeof inner?.user_id === "string" ? inner.user_id : undefined;
-      const me = [...document.querySelectorAll("a[href*='/user/profile/']")].find((anchor) => (anchor.textContent ?? "").trim() === "我") as HTMLAnchorElement | undefined;
-      return { ...(userId ? { userId } : {}), ...(me ? { href: me.href } : {}) };
-    }),
-    fetchMedia: async (url, referer, maxBytes) => {
-      const headers = { referer };
-      const head = await page.request.head(url, { headers, timeout: 60_000 }).catch(() => undefined);
-      const declared = Number(head?.headers()["content-length"] ?? 0);
-      if (declared > maxBytes) return { state: "too_large", bytes: declared };
-      const response = await page.request.get(url, { headers, timeout: 15 * 60_000 });
-      if (!response.ok()) return { state: "failed", status: response.status() };
-      const bytes = await response.body();
-      if (bytes.length > maxBytes) return { state: "too_large", bytes: bytes.length };
-      return { state: "ok", bytes, contentType: response.headers()["content-type"] ?? "" };
-    },
-    close: () => context.close().catch(() => undefined)
-  };
+    host: link.host,
+    goto: (url) => call<number>({ op: "goto", url }, 90_000),
+    pause: (ms) => call<void>({ op: "pause", ms }, ms + 60_000),
+    wheel: () => call<void>({ op: "wheel" }, 60_000),
+    snapshot: () => call({ op: "snapshot" }, 60_000),
+    responses: async () => (await call<CapturedResponse[] | null>({ op: "responses" }, 60_000)) ?? [],
+    noteState: () => call({ op: "noteState" }, 60_000),
+    selfProfile: async () => (await call<{ userId?: string; href?: string } | null>({ op: "selfProfile" }, 60_000)) ?? {},
+    fetchMedia: (url, referer, maxBytes) => call<MediaFetch>({ op: "fetchMedia", url, referer, maxBytes }, 16 * 60_000),
+    metrics: async () => (await call<{ heapMb: number; nodes: number } | null>({ op: "metrics" }, 60_000)) ?? { heapMb: 0, nodes: 0 },
+    front: () => call<void>({ op: "front" }, 60_000),
+    showMedia: (on: boolean) => call<void>({ op: "showMedia", on }, 60_000),
+    close: () => call<void>({ op: "close" }, 60_000).catch(() => undefined)
+  } as CollectDriver & { host: string };
 }
 
 /** The folder a workflow's notes accumulate in, run after run (the assistant gets it read-only). */

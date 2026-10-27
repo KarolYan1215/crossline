@@ -55,7 +55,12 @@ export type NodeHubOptions = {
   deadAfterMs?: number;
 };
 
+/** A reader's browser on one of the account's computers: the operations of browser.ts, answered over its connection. */
+export type NodeBrowserLink = { host: string; call: (request: Record<string, unknown>, timeoutMs?: number) => Promise<unknown> };
+
 export type NodeHub = {
+  /** A ready node of the account that runs a reader's browser (strongest kind first), or undefined. */
+  browserFor: (workspaceId: string) => NodeBrowserLink | undefined;
   /** The account's ready nodes as runtime-pool members: strongest kind first. */
   members: (workspaceId: string) => PoolMember[];
   /** How many runs the account's ready nodes take at once, together (the model gate adds them to the account's share). */
@@ -76,7 +81,9 @@ export const ROLE_PRIORITY: Record<NodeRole, number> = { device: 2, standalone: 
 const GONE_SHOWN_MS = 24 * 3_600_000;
 
 type Connection = { socket: WebSocket; workspaceId: string; token: string; client?: JsonLineRpcClient; ready: boolean; heardAt: number;
-  host: string; codex: string; role: NodeRole; capacity: number; key: string };
+  host: string; codex: string; role: NodeRole; capacity: number; key: string; browser: boolean;
+  browsing: Map<number, { chunks: Buffer[]; resolve: (value: unknown) => void; reject: (error: Error) => void }> };
+let browserIds = 0;
 
 export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   const log = options.log ?? (() => {});
@@ -133,7 +140,8 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   });
 
   function accept(socket: WebSocket, workspaceId: string, token: string): void {
-    const connection: Connection = { socket, workspaceId, token, ready: false, heardAt: Date.now(), host: "", codex: "", role: "device", capacity: 2, key: "" };
+    const connection: Connection = { socket, workspaceId, token, ready: false, heardAt: Date.now(), host: "", codex: "", role: "device", capacity: 2, key: "",
+      browser: false, browsing: new Map() };
     const hello = setTimeout(() => socket.close(4001, "NODE_HELLO_MISSING"), 15_000);
     const pendingGw = new Map<number, AbortController>();
     socket.on("pong", () => { connection.heardAt = Date.now(); });
@@ -149,10 +157,22 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
       if (frame.t === "files") { answerFiles(socket, workspaceId, frame.id, frame.dir); return; }
       if (frame.t === "image") { answerImage(socket, workspaceId, frame.id, frame.path); return; }
       if (frame.t === "gw") { void relay(socket, frame, pendingGw); return; }
+      if (frame.t === "browser-chunk") { connection.browsing.get(frame.id)?.chunks.push(Buffer.from(frame.data, "base64")); return; }
+      if (frame.t === "browser-answer") {
+        const pending = connection.browsing.get(frame.id);
+        connection.browsing.delete(frame.id);
+        if (!pending) return;
+        if (frame.error) { pending.reject(new Error(frame.error)); return; }
+        const result = frame.result as { chunked?: boolean; contentType?: string } | null;
+        pending.resolve(result && result.chunked ? { state: "ok", contentType: result.contentType ?? "", bytes: Buffer.concat(pending.chunks) } : result);
+        return;
+      }
     });
     socket.on("close", (code, reason) => {
       clearTimeout(hello);
       for (const controller of pendingGw.values()) controller.abort();
+      for (const pending of connection.browsing.values()) pending.reject(new Error("NODE_DISCONNECTED"));
+      connection.browsing.clear();
       if (!isCurrent(connection)) return;
       connections.get(workspaceId)?.delete(connection.key);
       connection.client?.disconnect(new Error("CROSSLINE_NODE_DISCONNECTED"));
@@ -169,7 +189,10 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     connection.role = hello.role === "standalone" ? "standalone" : "device";
     connection.capacity = Math.max(1, Math.min(NODE_CAPACITY_MAX, Math.floor(Number(hello.capacity) || 4)));
     connection.key = `${connection.role}:${connection.host}`;
+    connection.browser = hello.browser === true;
     const server = codexVersionOf({ userAgent: options.serverCodex() });
+    // The server's own runtime is not up yet (the worker just restarted and a node was quicker): come back in a moment, not in ten minutes.
+    if (!server) { log({ type: "node.server_starting", workspaceId, host: connection.host }); socket.close(4006, "NODE_SERVER_STARTING"); return; }
     if (hello.protocol !== NODE_PROTOCOL) { refuse(connection, 4002, "NODE_PROTOCOL", `节点程序的版本（${hello.protocol}）与网页版（${NODE_PROTOCOL}）不同，请更新本机 Crossline`); return; }
     if (!connection.codex || connection.codex !== server) {
       refuse(connection, 4009, "NODE_CODEX_VERSION", `本机 Codex ${connection.codex || "未知"} 与服务器 ${server || "未知"} 不同，节点暂不接活`);
@@ -269,6 +292,16 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   const port = (server.address() as { port: number }).port;
   return {
     port,
+    browserFor: (workspaceId) => {
+      const connection = ready(workspaceId).find((item) => item.browser);
+      if (!connection) return undefined;
+      return { host: connection.host, call: (request, timeoutMs = 10 * 60_000) => new Promise<unknown>((resolve, reject) => {
+        const id = ++browserIds;
+        const timer = setTimeout(() => { connection.browsing.delete(id); reject(new Error("NODE_BROWSER_TIMEOUT")); }, timeoutMs);
+        connection.browsing.set(id, { chunks: [], resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
+        send(connection.socket, { t: "browser", id, request });
+      }) };
+    },
     members: (workspaceId) => ready(workspaceId).map((connection) => ({ id: connection.key, client: connection.client!, capacity: connection.capacity,
       priority: ROLE_PRIORITY[connection.role] })),
     capacity: (workspaceId) => ready(workspaceId).reduce((sum, connection) => sum + connection.capacity, 0),

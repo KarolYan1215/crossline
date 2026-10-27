@@ -1,12 +1,13 @@
-import { TYPE_AXES, TYPE_GROUPS, TYPE_TABLE } from "@crossline/core/assess";
-import { RELATIONS, TYPE_LINES, TYPE_SUBTITLE } from "@crossline/core/assess-content";
+import { QUIZ_ITEMS, TYPE_AXES, TYPE_GROUPS, TYPE_TABLE } from "@crossline/core/assess";
+import { AI_KEEPS, RELATIONS, TYPE_KINDRED, TYPE_LINES, TYPE_SUBTITLE } from "@crossline/core/assess-content";
+import { GROUP_QR_CAPTION } from "./group-qr";
 
 /**
  * Every fixed string the posters print, and the text the font subsets must cover (`posterFixedText`). Pure, so the font script
  * (`scripts/assess-poster-fonts.ts`) and the coverage test read the same list the renderer prints from.
  */
 export const LABELS = {
-  kicker: "思维模式类型",
+  kicker: "超级个体类型",
   pairKicker: "双人关系卡",
   rankTail: "（理论估算）",
   linesHeading: "你也许想做",
@@ -15,11 +16,20 @@ export const LABELS = {
   loopCaption: "在 Crossline 里把这几条线真的跑起来",
   loopExplain: "每一步的产出是下一步的输入，最后一步又回到第一步。",
   best: "最佳搭子",
-  hardest: "一起做事容易吵",
+  hardest: "最难搭子",
+  aiHeading: "你和 AI 的分工",
+  aiDoes: "AI 替你干的",
+  aiDoesNone: "还没有，你什么都想自己来",
+  aiKeeps: "你不让 AI 碰的",
+  kindred: "思想相近的名人",
+  kindredHeading: "思想相近的名人",
+  groupScan: "进 Crossline 群",
   axesHeading: "四个维度",
   partnersHeading: "和谁一起做事",
   scan: "扫码测测我们是什么关系",
   scanSub: "朋友做完，你们的双人卡当场生成",
+  scanShort: "测测我们的关系",
+  scanSubShort: "朋友扫码答完，生成双人卡",
   disclaimer: "基于自评的趣味测评，非心理诊断",
   brand: "Crossline",
   also: "也是",
@@ -28,13 +38,11 @@ export const LABELS = {
   friendA: "你的朋友",
   friendB: "新朋友",
   ambiguous: "浅色字母表示两可",
-  bothHigh: "两端都强",
-  bothLow: "两端都弱",
   sources: "依据：",
   replacement: "·"
 } as const;
 
-/** 「多线并行倾向约超过 93% 的人（理论估算）」 */
+/** 「多星倾向约超过 93% 的人（理论估算）」 */
 export const rankLine = (rank: { pole: string; percent: number; estimated: boolean }): string =>
   `${rank.pole}倾向约超过 ${rank.percent}% 的人${rank.estimated ? LABELS.rankTail : ""}`;
 
@@ -42,7 +50,9 @@ const ASCII = Array.from({ length: 95 }, (_, index) => String.fromCharCode(32 + 
 
 /** Every character a poster can print outside a nickname: fixed copy, the type tables, relations, digits and ASCII. */
 export function posterFixedText(): string {
-  const parts: string[] = [ASCII, ...Object.values(LABELS), "%", "→", "；"];
+  const parts: string[] = [ASCII, ...Object.values(LABELS), "%", "→", "；", "「」", "——", "àéèêç", GROUP_QR_CAPTION];
+  parts.push(...Object.values(AI_KEEPS), ...QUIZ_ITEMS.flatMap((item) => (item.ai ? [item.ai.does] : [])));
+  for (const kindred of Object.values(TYPE_KINDRED)) parts.push(kindred.name, kindred.years, kindred.field, kindred.why, kindred.quote.original, kindred.quote.translation ?? "", kindred.quote.source);
   for (const [code, type] of Object.entries(TYPE_TABLE)) parts.push(code, type.name);
   for (const group of Object.values(TYPE_GROUPS)) parts.push(group.name, group.blurb);
   for (const axis of TYPE_AXES) parts.push(axis.name, axis.left.letter, axis.left.label, axis.left.en, axis.left.definition, axis.right.letter, axis.right.label, axis.right.en,

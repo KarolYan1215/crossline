@@ -24,7 +24,7 @@ test("answering moves on one statement at a time, and the last one leads to the 
   expect(answerCurrent(flow, 7)).toBe(flow);
   expect(answerCurrent(flow, 0)).toBe(flow);
   for (let i = 1; i < QUIZ_LENGTH; i += 1) flow = answerCurrent(flow, 3);
-  expect(answeredCount(flow)).toBe(32);
+  expect(answeredCount(flow)).toBe(36);
   expect(flow.step).toBe("appearance");
 });
 
@@ -113,7 +113,7 @@ test("the request carries every answer, the trimmed fields, the clock, the honey
   const flow: Flow = { ...emptyFlow(), step: "email", startedAt: 123, answers: allAnswered(), appearance: { ...look, note: " 红帽子 " }, email: " a@b.cn ", nickname: " 小林 " };
   const request = buildRequest(flow, { website: "" });
   expect(request).toMatchObject({ email: "a@b.cn", nickname: "小林", sendEmail: true, startedAt: 123, website: "", appearance: { note: "红帽子" } });
-  expect(Object.keys(request!.answers)).toHaveLength(32);
+  expect(Object.keys(request!.answers)).toHaveLength(36);
   expect(request).not.toHaveProperty("inviteToken");
   expect(buildRequest(flow, { website: "", inviteToken: "inv" })?.inviteToken).toBe("inv");
   expect(buildRequest({ ...flow, email: "nope" }, { website: "" })).toBeNull();
