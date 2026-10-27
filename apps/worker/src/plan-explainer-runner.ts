@@ -1,5 +1,5 @@
 import {
-  PLAN_EXPLAINER_OUTPUT_SCHEMA, validatePlanExplanation, goalSettingKey,
+  PLAN_EXPLAINER_OUTPUT_SCHEMA, validatePlanExplanation, goalSettingKey, taskTitleOf,
   type PlanExplainerContext, type PlanExplanation, type PlanRankingInput
 } from "@crossline/core";
 import { recommendNextActions } from "@crossline/planner";
@@ -12,12 +12,11 @@ import { tOfWorkspace } from "./locale";
 export const PLAN_EXPLAINER_SKILL = "crossline:crossline-plan-explainer";
 const ACTIONABLE = ["approved", "preparing", "ready_for_human", "active"];
 
-const INSTRUCTIONS = "Explain the supplied schedule in concise, objective Chinese, third person. The ordering is already decided "
-  + "lexicographically by the app's own scheduler — you narrate why it looks the way it does, you never "
-  + "invent a weighted score or re-rank anything yourself. `nextActionReason` explains why `nextActionId` "
-  + "is first; each entry in `alternatives` explains why that other id is not. Cite the real facts you "
-  + "were given (estimate, energy, deadline, importance) rather than restating them as a list. If nothing "
-  + "was supplied to explain, return a blocker instead of guessing.";
+/** The scenario in short; the Skill holds the rules and the examples. */
+const INSTRUCTIONS = "Explain, for the person reading the plan page's 排程依据, why the scheduler put today's work in this order, as the " // i18n-ignore: model-facing
+  + "crossline-plan-explainer Skill describes, and return only the requested JSON. The order is already decided (urgency tier, then importance, then "
+  + "deadline): narrate it, never re-rank or invent a score, and cite only factors in the input (tier, weight, deadline, first block, estimate, energy, "
+  + "unplacedReason). Name tasks by their title, never by id or by the whole description. Return a blocker only when there is nothing to explain.";
 
 type ExplainerOutcome =
   | { state: "ready"; explanation: PlanExplanation }
@@ -64,7 +63,7 @@ export function buildPlanExplainerContext(store: CrosslineStore, workspaceId: st
     activeWorkOrders: orders.map((order) => {
       const goal = goalOf(order.milestoneId);
       return {
-        id: order.id, intent: order.intent, identityId: order.identityId,
+        id: order.id, title: taskTitleOf(order), intent: order.intent, identityId: order.identityId,
         estimateP50Minutes: order.estimate.p50Minutes,
         energy: (humanCoreOf(order)?.energy as "low" | "medium" | "high" | undefined) ?? null,
         important: ranked.has(order.id) ? ranked.get(order.id)!.weight >= 60 : goal?.importance === "important",

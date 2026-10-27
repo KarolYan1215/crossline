@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { DateBatchCard } from "./date-batch-card";
+import { FileReadList } from "./file-read-list";
+import { InsightCard } from "./insight-card";
 import { DiligencePanel } from "./diligence-panel";
 import { TranscriptionCard, type TranscriptionStatus } from "./transcription-card";
 import { DEEP_STAGES, ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingStage, type OnboardingTone } from "@crossline/core";
@@ -9,10 +11,12 @@ import { QuestionCard } from "./question-card";
 import { StageBar } from "./portrait-panel";
 import { LeftColumn } from "./left-column";
 import { StageView } from "./stage-view";
+import { FirstHint } from "../ui/first-hint";
 import { OpeningCard, openingReply, type OpeningAnswer } from "./opening-card";
-import { announceRound, TurnProgress } from "./turn-progress";
+import { announceRound, FailureDetail, TurnProgress } from "./turn-progress";
 import { SegmentedControl } from "../ui/controls";
 import { AssessCard } from "./assess-card";
+import { QuotaNotice } from "./quota-notice";
 import { withLink } from "./rich-text";
 import { tFor } from "../../lib/i18n";
 import { useLocale } from "../locale-context";
@@ -45,6 +49,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [background, setBackground] = useState(false);
   const [busy, setBusy] = useState<"" | "turn" | "upload" | "dates" | "milestones" | "diligence">("");
   const [error, setError] = useState("");
+  // The last round stopped because the ChatGPT quota was spent: the quota notice then says what to do next (Plus or an invite code).
+  const [usageLimitHit, setUsageLimitHit] = useState(false);
   const [text, setText] = useState("");
   // What was just sent, shown at once: the saved copy only arrives with the next read, after the turn ends.
   const [pendingText, setPendingText] = useState("");
@@ -57,10 +63,17 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [connected, setConnected] = useState<boolean | undefined>();
   // Connecting the model has its own page (/connect, the first stop after signing in); arriving here without it goes back there.
   useEffect(() => {
-    void fetch("/api/codex/account", { cache: "no-store" }).then((response) => response.json())
+    const read = (url: string) => fetch(url, { cache: "no-store" }).then((response) => response.json()).catch(() => undefined);
+    void Promise.all([read("/api/codex/account"), read("/api/model/provider")]).then(([account, provider]: [
+      { account?: unknown; blocker?: unknown } | undefined,
+      { features?: Array<{ skill: string; served: boolean }>; sponsor?: { active?: boolean } | null } | undefined
+    ]) => {
+      // Another model's API that has passed the check for the interview is a connection too (decided 2026-10-17), and so is an invite
+      // code: a round on the developer's model while it is still being tested says so itself, instead of sending the person away.
+      if (provider?.sponsor?.active || provider?.features?.some((feature) => feature.skill.endsWith("crossline-onboarding") && feature.served)) { setConnected(true); return; }
       // Only a definite "not signed in" sends the person there: with the background service unreachable /connect could not help either.
-      .then((answer: { account?: unknown; blocker?: unknown }) => setConnected(answer.account ? true : answer.blocker ? undefined : false))
-      .catch(() => undefined);
+      if (account) setConnected(account.account ? true : account.blocker ? undefined : false);
+    });
   }, []);
   useEffect(() => { if (connected === false && !line) location.replace("/connect?next=/onboarding"); }, [connected, line]);
   const bottom = useRef<HTMLDivElement>(null);
@@ -77,6 +90,14 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     return next;
   }, [line]);
   useEffect(() => { void load(); }, [load]);
+  // While the extraction records the last replies (it runs after the round is shown), the facts, the start ring and the left column
+  // follow it without a refresh. A failing one is not polled: the worker retries it on its own clock.
+  const organizing = Boolean(state?.organizing && (state.organizing.replies || state.organizing.files) && !state.organizing.failing);
+  useEffect(() => {
+    if (!organizing) return;
+    const timer = setInterval(() => { if (document.visibilityState === "visible") void load(); }, 5000);
+    return () => clearInterval(timer);
+  }, [organizing, load]);
   // Attention time (decided 2026-10-12): every 15 seconds while the page is visible, the server is told how long ago the person last typed
   // or clicked; it counts only beats within a minute of input, so the model's thinking time while the person is away is not counted.
   useEffect(() => {
@@ -159,8 +180,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     const response = await fetch("/api/onboarding/turn", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: id, text: message, reread })
     }).catch(() => undefined);
-    const body = await response?.json().catch(() => undefined) as { state?: string; message?: string; blocker?: { message?: string } } | undefined;
+    const body = await response?.json().catch(() => undefined) as { state?: string; code?: string; message?: string; blocker?: { code?: string; message?: string } } | undefined;
     if (!response?.ok || body?.state === "blocked") setError(body?.message ?? body?.blocker?.message ?? t("这一轮没有完成，可以重试。"));
+    setUsageLimitHit((body?.code ?? body?.blocker?.code) === "SKILL_USAGE_LIMIT");
     // The full interview just finished: the portrait report is written now, so it is ready when the person opens it.
     if (body?.state === "ready" && !line) void fetch("/api/portrait", { method: "POST" }).catch(() => {});
     await load();
@@ -274,7 +296,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     if (state.setupLines) {
       const ordered = answer.base ? [answer.base, ...answer.lines.filter((label) => label !== answer.base)] : answer.lines;
       const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ setup: ordered.map((label) => ({ label, ranked: label === answer.base, hard: answer.fixed.includes(label) })) }) }).catch(() => undefined);
+        body: JSON.stringify({ setup: ordered.map((label) => ({ label, ranked: label === answer.base, hard: answer.fixed.includes(label),
+          ...(answer.domains[label] ? { domain: answer.domains[label] } : {}) })) }) }).catch(() => undefined);
       if (!response?.ok) { setError(t("主线没有保存成功，请重试。")); setBusy(""); return; }
     }
     setBusy("");
@@ -295,6 +318,11 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {!opening && !state.focusLine && <div className="ob-tone"><span>{t("语气")}</span>
           <SegmentedControl label={t("访谈语气")} value={state.tone} onChange={(next) => void changeTone(next)}
             options={ONBOARDING_TONES.map((id) => ({ value: id, label: t(ONBOARDING_TONE_LABEL[id].label) }))} /></div>}
+        {/* Inside the header: the column is a fixed grid of rows, and a note that comes and goes must not shift the thread's row. */}
+        {!state.focusLine && <FirstHint id="onboarding-columns" title={t("这一页怎么用")}>
+          {t("中间是访谈：每轮一组问题，答不上来可以选「不确定」或跳过，系统先按假设记下，之后随时可改。")}
+          {" "}{t("左栏放材料和长期目标，文件任何时候都能添加，传错了可以删除。右栏列出开始使用前还差的项，以及正在成形的画像。")}
+        </FirstHint>}
       </header>
       {/* The interview keeps the language it started in; said once, in the page's language, when the two differ. */}
       {state.interviewLocale && state.interviewLocale !== locale && <p className="ob-muted ob-language" role="note">
@@ -310,13 +338,15 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
           const latest = message.seq === messages.at(-1)?.seq;
           return <div className="ob-turn ob-assistant" key={message.seq}>
             <p className="gen">{turn.reply}</p>
+            {turn.insight?.text && state.session && <InsightCard sessionId={state.session.id} seq={message.seq} insight={turn.insight}
+              rating={state.insightRatings?.[String(message.seq)]} onRated={() => void load()} />}
             {latest && turn.nextAction === "ready_for_milestones" && state.readyToStart && <p className="ob-done">{t("信息已基本完整，可以在下方设计里程碑；画像报告随后生成。")}</p>}
           </div>;
         })}
         {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
           && <div className="ob-turn ob-user" data-user-text><p>{pendingText}</p></div>}
         {busy === "turn" && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : sessionId} /></div>}
-        {busy === "" && waiting && !error && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : state.session?.id ?? ""} resumed onRunning={setBackground} onEnded={() => { setBackground(false); void load(); }} onRetry={() => void runTurn("")} /></div>}
+        {busy === "" && waiting && !error && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : state.session?.id ?? ""} resumed failure={state.lastFailure ?? null} onRunning={setBackground} onEnded={() => { setBackground(false); void load(); }} onRetry={() => void runTurn("")} /></div>}
         {answeredElsewhere.size > 0 && !waiting && <p className="ob-moved">{t("本轮有 {{count}} 题已在待决事项答过，会随这一轮一起发送。", { count: answeredElsewhere.size })}</p>}
         {deep && centre[0] && <div ref={asked} className="ob-turn ob-assistant ob-deep" aria-label={t("本轮问题")}>
           <p className="ob-deep-question gen">{centre[0].text}</p>
@@ -336,6 +366,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             <small className="ob-muted">{t("{{count}} 题一起作答，答完一并发送；不确定的可以跳过。", { count: centre.length })}</small>
           </div>
         </div>}
+        {state.adoptedDates && !state.focusLine && <FileReadList data={state.adoptedDates} open={stage === "orientation" || stage === "lines"} onChanged={() => void load()} />}
         {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== "" && busy !== "turn"} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn(t("请把我已添加的文件里的日期重新读一遍，只整理日期。"), true)} />}
         {!state.focusLine && complete && <section className="ob-design" aria-label={t("画像报告")}>
           <b>{t("画像报告")}</b>
@@ -357,7 +388,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {transcription && waitingForAudio && <TranscriptionCard status={transcription} busy={busy !== ""} onDownload={() => void downloadModel()} />}
         <div ref={bottom} />
       </div>
-      {error && <p className="ob-error" role="alert">{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>{t("重试")}</button>}</p>}
+      {!line && <QuotaNotice rounds={state.messages.filter((message) => message.role === "assistant").length} usageLimitHit={usageLimitHit} />}
+      {error && <div className="ob-error" role="alert"><p>{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>{t("重试")}</button>}</p>
+          {waiting && state.lastFailure && <FailureDetail failure={state.lastFailure} />}</div>}
       {!opening && <form className="ob-composer ob-voice" onSubmit={(event) => { event.preventDefault(); if (canSend) void runTurn(composed || ""); }}>
         <textarea value={text} rows={deep ? 4 : open ? 2 : 3} onChange={(event) => setText(event.target.value)} disabled={busy !== ""}
           placeholder={deep ? t("写下你的回答…") : open ? t("补充说明（可选）") : t("想说的都可以写在这里…")} aria-label={t("回答")} />

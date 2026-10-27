@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore, addAiTool, removeAiTool, requestWorkflow, saveMineVersion, writeGrownSkills, writePublicSkills } from "@crossline/db";
 import { currentMineVersion, mineSkillSettingKey, readMineSkill, type PublicSkillRecord } from "@crossline/core";
 vi.mock("server-only", () => ({}));
-import { changeGrownSkill, deletePublicSkill, editMineSkill, loadSkillLibrary, restoreMineSkill } from "./skill-library";
+import { changeFavouriteTopics, changeGrownSkill, deletePublicSkill, editMineSkill, grownSkillStatus, loadSkillLibrary, restoreMineSkill } from "./skill-library";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
@@ -73,4 +73,19 @@ test("the AI tools plans assume are listed: the assistant's own always, the pers
   expect(loadSkillLibrary(TEST_CTX).aiTools.at(-1)).toMatchObject({ name: "剪映", kind: "media", source: "person" });
   expect(removeAiTool(store, ws, tool.id)).toBe(true);
   expect(removeAiTool(store, ws, "crossline-assistant")).toBe(false);
+});
+
+test("a workflow reads as running from the start of its collection to its end, and its pace is the person's to change", () => {
+  const store = setup();
+  const id = "flow-fav";
+  store.setSetting(ws, "collect.topics.flow-fav", JSON.stringify({ perDay: 50, window: { from: 2, to: 8 } }));
+  expect(grownSkillStatus(TEST_CTX, id)).toMatchObject({ topics: { perDay: 50, from: 2, to: 8, listed: 0, progress: [] } });
+  expect(grownSkillStatus(TEST_CTX, id).running).toBeUndefined();
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "s1", type: "collect.started", entityId: id, payload: { taskId: "c1", listOnly: true, notes: 0 } });
+  expect(grownSkillStatus(TEST_CTX, id).running).toMatchObject({ what: "读取收藏列表" });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "r1", type: "collect.ran", entityId: id, payload: { taskId: "c1" } });
+  expect(grownSkillStatus(TEST_CTX, id).running).toBeUndefined();
+  expect(changeFavouriteTopics(TEST_CTX, id, { perDay: 30, from: 1, to: 1 })).toEqual({ ok: true });
+  expect(grownSkillStatus(TEST_CTX, id).topics).toMatchObject({ perDay: 30, from: 1, to: 1 });
+  expect(changeFavouriteTopics(TEST_CTX, "flow-other", { perDay: 30 })).toEqual({ ok: false, code: "NOT_TOPIC_MODE" });
 });

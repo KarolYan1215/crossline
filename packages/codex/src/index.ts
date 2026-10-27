@@ -3,9 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { closeSync, existsSync, mkdirSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { readCostSignal } from "./cost";
+import { createRuntimePool, type PoolMember, type RuntimePool } from "./runtime-pool";
 import { verifyCapability } from "./capability";
 import { currentUsageWorkspace, enterUsageWorkspace } from "./usage";
 import { runLocale } from "./style";
@@ -18,8 +19,10 @@ export * from "./usage";
 export * from "./analysis";
 export * from "./cost";
 export * from "./model-policy";
+export * from "./model-catalog";
 export * from "./capability";
 export * from "./agent-mode";
+export * from "./runtime-pool";
 export * from "./runtime-registry";
 export * from "./prices";
 export * from "./providers";
@@ -103,16 +106,34 @@ export class JsonLineRpcClient {
   }
 }
 
-export const CODEX_BASELINE_COMMIT = "f0a1b8f0849d90960bc406b848f32e5a129b0457";
-export const CODEX_GENERATED_PROTOCOL_SHA256 = "cff5bf0f8f52d3d4fd2d00145462c5a3e21df86ec3b3b652668884831eb5c6a3";
-export const CODEX_FORK_BINARY_SHA256 = "4bcc1d8452c75cd132e010f41ccfaf6afb8699317f9a90d88df0b20be2335497";
-/** The release build of the same pinned source that the installed copy ships (docs/local-installer.md, Codex 的 Release 构建). */
-export const CODEX_RELEASE_BINARY_SHA256 = "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9";
+export const CODEX_BASELINE_COMMIT = "83086188ae0614bd882818ff1aa23f3194962012";
+export const CODEX_GENERATED_PROTOCOL_SHA256 = "0a029db4277456684f035f790bda8ea8651d4120fe3ab6c17436fadf1dfa7a05";
 /**
- * The Linux server of the hosted beta (docs/beta-launch.md §10): upstream's own release of the same tag, rust-v0.155.0
- * (`codex-x86_64-unknown-linux-musl`, asset digest e415cc3a… checked on download). The fork's only change is a Windows migration fix.
+ * The debug build at the repository root, which the resident app runs. A debug build embeds the absolute source path, so only a build
+ * in that checkout gives this hash: it is still rust-v0.155.0's until the root is rebuilt from the vendored 0.163.0 source
+ * (docs/codex-upgrade-0.163.md), and the new hash goes here then. It also names the runtime in provider conformance records
+ * (`RUNTIME_VERSION`), which go stale when it changes.
  */
-export const CODEX_LINUX_RELEASE_BINARY_SHA256 = "660e159a49e823ac8e5986cb238f73158ce4b957d40d9292f8de90862644b501";
+export const CODEX_FORK_BINARY_SHA256 = "e6300d7fd03c53a11a746e49f12706c313a04eaedb4541f1857799d9551617ac";
+/**
+ * The release build of the pinned source that the installers ship (docs/local-installer.md, Codex 的 Release 构建; the 「Crossline 节点」
+ * installer, docs/compute-node.md): rust-v0.163.0, built 2026-10-23.
+ */
+export const CODEX_RELEASE_BINARY_SHA256 = "a28abf32699e994bbbbea94f5dd5e9b1615ba9bde1cf6922a275aa23cce9ec8a";
+/**
+ * The Linux server of the hosted beta (docs/beta-launch.md §10): upstream's own release of the same tag, rust-v0.163.0
+ * (`codex-x86_64-unknown-linux-musl.tar.gz`, asset digest beb339e8… checked on download 2026-10-20). The fork's only change is a
+ * Windows migration fix.
+ */
+export const CODEX_LINUX_RELEASE_BINARY_SHA256 = "399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215";
+/**
+ * The previous pin's binaries (rust-v0.155.0), still accepted while each place that runs one is moved to 0.163.0
+ * (docs/codex-upgrade-0.163.md 「留给人做的事」): the Linux release on the hosted server until /srv/crossline/codex is replaced. The protocol
+ * the worker speaks works with both. Remove an entry once nothing runs it.
+ */
+// The second entry is the rust-v0.155.0 release build an installed copy from before 2026-10-23 still ships.
+export const CODEX_PREVIOUS_BINARY_SHA256: readonly string[] = ["660e159a49e823ac8e5986cb238f73158ce4b957d40d9292f8de90862644b501",
+  "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9"];
 
 export function codexProcessEnvironment(
   base: NodeJS.ProcessEnv = process.env,
@@ -159,9 +180,12 @@ export function resolveCodexCommand(
   const fork = path.resolve(import.meta.dirname, "../../../vendor/codex/codex-rs/target/debug",
     platform === "win32" ? "codex.exe" : "codex");
   const executable = env.CROSSLINE_CODEX_PATH ?? fork;
-  if (!path.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");
+  // The platform's own path rules, as in `webResearchBlocker`: a Windows path is absolute on Windows whatever the host checking it.
+  const rules = platform === "win32" ? path.win32 : path.posix;
+  if (!rules.isAbsolute(executable) || !exists(executable)) throw new Error("CODEX_FORK_BINARY_NOT_FOUND");
   const hash = sha256(executable);
-  if (hash !== CODEX_FORK_BINARY_SHA256 && hash !== CODEX_RELEASE_BINARY_SHA256 && hash !== CODEX_LINUX_RELEASE_BINARY_SHA256) throw new Error("CODEX_FORK_BINARY_MISMATCH");
+  if (hash !== CODEX_FORK_BINARY_SHA256 && hash !== CODEX_RELEASE_BINARY_SHA256 && hash !== CODEX_LINUX_RELEASE_BINARY_SHA256
+    && !CODEX_PREVIOUS_BINARY_SHA256.includes(hash)) throw new Error("CODEX_FORK_BINARY_MISMATCH");
   return { command: executable, args: [] };
 }
 
@@ -186,6 +210,34 @@ export function webResearchBlocker(
     message: tFor(runLocale(undefined, currentUsageWorkspace()))("联网查证需要 {{host}}，但它不在那里，网页搜索无法启动。把已安装 Codex 应用 bin 目录里的 codex-code-mode-host.exe 复制到这个位置，或在 vendor/codex 里构建 codex-code-mode-host。", { host }) };
 }
 
+/**
+ * The app-server as raw JSON lines, for a compute node (apps/worker/src/node/agent.ts), which relays most lines to the hosted worker
+ * unread instead of answering them itself. Same binary, same environment as `startCodexAppServer`.
+ */
+export function spawnAppServerLines(codexHome?: string): { write: (line: string) => void; onLine: (handler: (line: string) => void) => void;
+  onExit: (handler: () => void) => void; stop: () => void } {
+  const env = { ...codexProcessEnvironment(), ...(codexHome ? { CODEX_HOME: codexHome, CROSSLINE_CODEX_HOME: codexHome } : {}) };
+  mkdirSync(env.CODEX_HOME!, { recursive: true });
+  const codex = resolveCodexCommand(env);
+  const child = spawn(codex.command, [...codex.args, "app-server", "--listen", "stdio://", "--strict-config"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env });
+  const lines = createInterface({ input: child.stdout });
+  child.stderr.resume();
+  const exits = new Set<() => void>();
+  let ended = false;
+  const finish = () => { if (ended) return; ended = true; for (const handler of exits) handler(); };
+  child.once("error", finish);
+  child.once("exit", finish);
+  return {
+    write: (line) => { if (!ended) child.stdin.write(line.endsWith("\n") ? line : `${line}\n`); },
+    onLine: (handler) => { lines.on("line", handler); },
+    onExit: (handler) => { exits.add(handler); },
+    stop: () => { lines.close(); child.kill(); }
+  };
+}
+
+/** A guest runtime's `oom_score_adj` (Linux): above the owner's runtime and the worker (0), below Chromium's renderers (300). */
+export const GUEST_OOM_SCORE_ADJ = 200;
+
 export async function startCodexAppServer(codexHome?: string): Promise<{
   client: JsonLineRpcClient;
   process: ChildProcessWithoutNullStreams;
@@ -203,6 +255,11 @@ export async function startCodexAppServer(codexHome?: string): Promise<{
     windowsHide: true,
     env
   });
+  // Under a container's ceiling the kernel kills by this score: a guest's runtime (and the plugin servers it starts, which inherit it) goes
+  // before the owner's runtime and the worker itself, whose loss restarts everything (2026-10-23). Raising one's own child needs no privilege.
+  if (codexHome && process.platform === "linux" && child.pid) {
+    try { writeFileSync(`/proc/${child.pid}/oom_score_adj`, String(GUEST_OOM_SCORE_ADJ)); } catch { /* best effort */ }
+  }
   const client = new JsonLineRpcClient((line) => child.stdin.write(line));
   const lines = createInterface({ input: child.stdout });
   const exitHandlers = new Set<() => void>();
@@ -292,6 +349,10 @@ export type CodexSupervisor = {
   /** The runtime serving a workspace, if it is running; a guest's starts through `runtimes.client`. */
   clientFor: (workspaceId: string) => CodexRpcBoundary | undefined;
   runtimes?: RuntimeRegistry;
+  /** The owner runtime's `userAgent` ("crossline/0.163.0 (…)"): a compute node must run the same Codex. */
+  runtimeVersion: string;
+  /** The owner's runs spread over this runtime and the compute nodes, when `ownerNodes` was given: its `load` says what runs where. */
+  ownerPool?: RuntimePool;
   stop: () => Promise<void>;
 };
 
@@ -302,7 +363,7 @@ export type LocalPluginContract = {
   requiredSkills: string[];
 };
 
-async function installLocalPlugin(client: CodexRpcBoundary, plugin: LocalPluginContract): Promise<string[]> {
+export async function installLocalPlugin(client: CodexRpcBoundary, plugin: LocalPluginContract): Promise<string[]> {
   try {
     await client.request("plugin/install", { marketplacePath: plugin.marketplacePath, pluginName: plugin.name });
   } catch { throw new Error("CODEX_PLUGIN_INSTALL_FAILED"); }
@@ -318,8 +379,53 @@ async function installLocalPlugin(client: CodexRpcBoundary, plugin: LocalPluginC
   return [...names].sort();
 }
 
+export type SourceFolderHandlers = NonNullable<Parameters<typeof startCodexSupervisor>[0]>["sourceFolders"] & object;
+
+/**
+ * The authorized-folder routes under `/v1/sources/folders` (docs/onboarding-v3.md 「文件夹授权」), answered for the caller's workspace.
+ * Shared by the supervisor and by a linked device's small server (docs/device-mode.md), which keeps folders on the machine they are on.
+ * Returns false when the path is not one of these routes.
+ */
+export async function handleSourceFolderRequest(request: IncomingMessage, response: ServerResponse, pathname: string, callerWorkspaceId: string,
+  folders: SourceFolderHandlers): Promise<boolean> {
+  const say = (key: string) => tFor(runLocale(undefined, callerWorkspaceId || undefined))(key);
+  if (request.headers.origin || (request.method !== "DELETE" && !request.headers["content-type"]?.startsWith("application/json"))) {
+    sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
+    return true;
+  }
+  const one = /^\/v1\/sources\/folders\/([A-Za-z0-9-]{1,40})(\/lines|\/exclusions|\/purge)?$/.exec(pathname);
+  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length <= 300).slice(0, 500) : [];
+  try {
+    if (request.method === "POST" && (pathname === "/v1/sources/folders/preview" || pathname === "/v1/sources/folders")) {
+      const body = await readJsonBody(request).catch(() => undefined) as { path?: unknown; exclude?: unknown; include?: unknown; names?: unknown } | undefined;
+      if (typeof body?.path !== "string" || !body.path.trim() || body.path.length > 1000) {
+        sendJson(response, 400, { blocker: { code: "FOLDER_PATH_REQUIRED", message: say("需要文件夹路径") } });
+        return true;
+      }
+      sendJson(response, 200, await (pathname.endsWith("/preview") ? folders.preview(callerWorkspaceId, body.path, strings(body.names))
+        : folders.add(callerWorkspaceId, body.path, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) })));
+      return true;
+    }
+    if (request.method === "DELETE" && one && (!one[2] || one[2] === "/purge")) { sendJson(response, 200, await folders.remove(callerWorkspaceId, one[1]!, one[2] === "/purge")); return true; }
+    if (request.method === "POST" && one?.[2] === "/exclusions") {
+      const body = await readJsonBody(request).catch(() => undefined) as { exclude?: unknown; include?: unknown; names?: unknown } | undefined;
+      if (!Array.isArray(body?.exclude) || !Array.isArray(body?.include)) { sendJson(response, 400, { blocker: { code: "FOLDER_RULES_REQUIRED", message: say("需要 exclude 与 include 数组") } }); return true; }
+      sendJson(response, 200, await folders.setRules(callerWorkspaceId, one[1]!, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) }));
+      return true;
+    }
+    if (request.method === "POST" && one?.[2] === "/lines") {
+      const body = await readJsonBody(request).catch(() => undefined) as { lines?: unknown } | undefined;
+      const lines = Array.isArray(body?.lines) ? body.lines.filter((line): line is string => typeof line === "string" && line.length <= 80) : undefined;
+      if (!lines) { sendJson(response, 400, { blocker: { code: "FOLDER_LINES_REQUIRED", message: say("需要 lines 数组") } }); return true; }
+      sendJson(response, 200, await folders.setLines(callerWorkspaceId, one[1]!, lines));
+      return true;
+    }
+  } catch { sendJson(response, 502, { blocker: { code: "FOLDER_FAILED", message: say("文件夹操作没有完成") } }); return true; }
+  return false;
+}
+
 /** Reads a small JSON body. Capped because this listener is reachable by anything on the loopback. */
-async function readJsonBody(request: IncomingMessage, maxBytes = 64_000): Promise<Record<string, unknown> | undefined> {
+export async function readJsonBody(request: IncomingMessage, maxBytes = 64_000): Promise<Record<string, unknown> | undefined> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -335,7 +441,7 @@ async function readJsonBody(request: IncomingMessage, maxBytes = 64_000): Promis
   } catch { return undefined; }
 }
 
-function sendJson(response: ServerResponse, statusCode: number, value: unknown): void {
+export function sendJson(response: ServerResponse, statusCode: number, value: unknown): void {
   response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   response.end(JSON.stringify(value));
 }
@@ -406,7 +512,9 @@ export async function startCodexSupervisor(options: {
    * A grown workflow, by hand (docs/skills-library.md §6): `login` opens a browser window of its own for the person to log in to a site
    * it reads; `run` starts it now. Both answer at once.
    */
-  workflowAction?: (workspaceId: string, id: string, action: "login" | "login_done" | "run", service: string) => { ok: boolean; [key: string]: unknown };
+  /** `viewport` is the size of the dialog a login on the server is shown in (`remote-browser.ts`); a login on this machine ignores it. */
+  workflowAction?: (workspaceId: string, id: string, action: "login" | "login_done" | "run", service: string, viewport?: { width?: unknown; height?: unknown }) =>
+    { ok: boolean; [key: string]: unknown } | Promise<{ ok: boolean; [key: string]: unknown }>;
   /** The person asked for a workflow in words: grow it now rather than at the next tick. Answers at once. */
   growWorkflows?: (workspaceId: string) => void;
   /** Writes plan blocks to the person's Crossline calendar. Only blocks; never touches any other calendar or event. */
@@ -441,7 +549,7 @@ export async function startCodexSupervisor(options: {
   /** Builds (or rebuilds) a committed task's tutorial without moving its state: the step-by-step guide and the analysis of its materials. */
   buildTutorial?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
   /** Writes (or rewrites) the portrait report from the interview; answered at once, the page follows the ledger. */
-  writePortrait?: (workspaceId: string) => Promise<unknown>;
+  writePortrait?: (workspaceId: string, options: { redrawFigure?: boolean }) => Promise<unknown>;
   judgeMilestone?: (workOrderId: string, workspaceId: string) => Promise<unknown>;
   explainPlan?: (today: string, workspaceId: string, ranking?: unknown) => Promise<unknown>;
   runWeeklyInsight?: (workspaceId: string) => Promise<unknown>;
@@ -482,7 +590,13 @@ export async function startCodexSupervisor(options: {
    * (tests that do not exercise this). The worker always sets it.
    */
   runtimes?: { baseDir: string; ownerWorkspaceId: () => string | undefined; start?: (codexHome: string) => Promise<RuntimeSidecar>;
-    maxRunning?: number; idleMs?: number; hasProvider?: (workspaceId: string) => boolean };
+    maxRunning?: number; idleMs?: number; hasProvider?: (workspaceId: string) => boolean; onConnected?: (workspaceId: string) => void };
+  /**
+   * The machine owner's runtime ended without `stop()` (killed by the kernel when the container ran out of memory, 2026-10-21). Nothing
+   * here restarts it — every caller holds its client — so the worker exits and its supervisor (docker's restart policy, the keeper loop)
+   * starts it again; without this the supervisor answered `CODEX_RUNTIME_EXITED` until someone restarted it by hand.
+   */
+  onRuntimeExit?: () => void;
   /**
    * A workspace's own model provider (R7, providers.ts): its routes under `/v1/model/provider*`, answered for the caller's workspace,
    * and the quota reading that replaces the Codex one while a provider serves that workspace.
@@ -490,9 +604,22 @@ export async function startCodexSupervisor(options: {
   modelProviders?: {
     handle: (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => Promise<{ status: number; body: unknown } | undefined>;
     cost: (workspaceId: string) => CostSignal | undefined;
+    /** The account's own ChatGPT reading, which the developer's model may stand in for while it is spent (model-provider.ts). */
+    afterChatgptCost?: (workspaceId: string, signal: CostSignal) => CostSignal;
   };
   /** This month's spend and cap for a workspace on a pay-per-use (API key) login, which reports no quota windows of its own. */
   monthSpend?: (workspaceId: string) => { spent: number; cap: number };
+  /**
+   * Routes a worker service answers itself under its own prefix (the mailbox, automations — docs/personal-agent.md), for the caller's
+   * workspace. A write must come from the web app's server (no browser `Origin`), like every other write here.
+   */
+  services?: Array<{ prefix: string; handle: (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => Promise<{ status: number; body: unknown } | undefined> }>;
+  /**
+   * The compute nodes connected for the owner's account (docs/compute-node.md): with them the owner's model runs are spread over this
+   * process's runtime and theirs (`createRuntimePool`, a node with room first). Sign-in, the quota read and the shell assistant stay on
+   * this process's runtime.
+   */
+  ownerNodes?: () => PoolMember[];
 } = {}): Promise<CodexSupervisor> {
   const host = options.host ?? "127.0.0.1";
   // Regenerated every boot: a token signed before a crash or restart must not still be honoured after
@@ -518,10 +645,14 @@ export async function startCodexSupervisor(options: {
       pluginState = { name: options.plugin.name, requiredSkills: options.plugin.requiredSkills, discoveredSkills, state: "blocked" };
     }
   }
-  const runtimes = options.runtimes ? createRuntimeRegistry({ owner: sidecar, ownerWorkspaceId: options.runtimes.ownerWorkspaceId,
+  /** The client the owner's model runs take: a pool over this process's runtime and the connected compute nodes, when there can be any. */
+  const ownerPool = options.ownerNodes ? createRuntimePool(sidecar.client, options.ownerNodes) : undefined;
+  const ownerClient = (): CodexRpcBoundary => ownerPool ?? sidecar.client;
+  const runtimes = options.runtimes ? createRuntimeRegistry({ owner: sidecar, ownerClient, ownerWorkspaceId: options.runtimes.ownerWorkspaceId,
     baseDir: options.runtimes.baseDir, ...(options.runtimes.maxRunning ? { maxRunning: options.runtimes.maxRunning } : {}),
     ...(options.runtimes.idleMs ? { idleMs: options.runtimes.idleMs } : {}),
     ...(options.runtimes.hasProvider ? { hasProvider: options.runtimes.hasProvider } : {}),
+    ...(options.runtimes.onConnected ? { onConnected: options.runtimes.onConnected } : {}),
     // A guest's runtime gets the same Crossline plugin the owner's has.
     start: options.runtimes.start ?? (async (home) => {
       const started = await startCodexAppServer(home);
@@ -533,7 +664,7 @@ export async function startCodexSupervisor(options: {
   const modelClient = async (response: ServerResponse, workspaceId: string): Promise<CodexRpcBoundary | undefined> => {
     if (isOwner(workspaceId)) {
       if (runtimeBlocker) { sendJson(response, 503, { blocker: runtimeBlocker }); return undefined; }
-      return sidecar.client;
+      return ownerClient();
     }
     // Not started here: with every runtime busy the start waits its turn, and that wait belongs inside the route's kept-alive answer.
     const runtime = runtimes!.handle(workspaceId);
@@ -548,7 +679,8 @@ export async function startCodexSupervisor(options: {
   const costFor = async (client: CodexRpcBoundary, workspaceId: string): Promise<CostSignal> => {
     const provided = options.modelProviders?.cost(workspaceId);
     if (provided) return provided;
-    const signal = await readCostSignal(client);
+    const read = await readCostSignal(client);
+    const signal = options.modelProviders?.afterChatgptCost?.(workspaceId, read) ?? read;
     if (signal.available || !options.monthSpend) return signal;
     const account = record(record(await client.request("account/read", { refreshToken: false }).catch(() => undefined))?.account);
     if (account?.type !== "apiKey") return signal;
@@ -626,8 +758,10 @@ export async function startCodexSupervisor(options: {
     }
     if (message.method === "account/updated") accountRevision += 1;
   });
+  // `stop()` unsubscribes before it stops the sidecar, so this runs only for an exit nobody asked for.
   const unsubscribeExit = sidecar.onExit(() => {
     runtimeBlocker = { code: "CODEX_RUNTIME_EXITED", message: "Codex app-server exited" };
+    options.onRuntimeExit?.();
   });
   const status = (): CodexSupervisorStatus => runtimeBlocker
     ? { state: "blocked", login, accountRevision, blocker: runtimeBlocker, plugin: pluginState, contract, supervisorBootId }
@@ -780,11 +914,14 @@ export async function startCodexSupervisor(options: {
           sendJson(response, 403, { blocker: { code: "PORTRAIT_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
           return;
         }
+        // `{redrawFigure: true}` is the person asking for a new figure only; anything else writes the words (and keeps the figure).
+        const body = await readJsonBody(request).catch(() => undefined);
+        const redrawFigure = body?.redrawFigure === true;
         const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
         const key = `portrait:${callerWorkspaceId}`;
         if (preparing.has(key)) { sendJson(response, 409, { blocker: { code: "PORTRAIT_ALREADY_WRITING", message: say("画像报告正在生成") } }); return; }
         preparing.add(key);
-        runDetached(() => options.writePortrait!(callerWorkspaceId), () => preparing.delete(key));
+        runDetached(() => options.writePortrait!(callerWorkspaceId, { redrawFigure }), () => preparing.delete(key));
         sendJson(response, 202, { started: true });
         return;
       }
@@ -903,39 +1040,7 @@ export async function startCodexSupervisor(options: {
       // Authorized folders (docs/onboarding-v3.md 「文件夹授权」). The path is the person's own, typed on this machine; the worker checks it
       // (absolute, an existing folder, not a drive, the user folder, a system folder or the app's own data) before walking anything.
       if (pathname.startsWith("/v1/sources/folders") && options.sourceFolders) {
-        if (request.headers.origin || (request.method !== "DELETE" && !request.headers["content-type"]?.startsWith("application/json"))) {
-          sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } });
-          return;
-        }
-        const folders = options.sourceFolders;
-        const one = /^\/v1\/sources\/folders\/([A-Za-z0-9-]{1,40})(\/lines|\/exclusions|\/purge)?$/.exec(pathname);
-        const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length <= 300).slice(0, 500) : [];
-        try {
-          if (request.method === "POST" && (pathname === "/v1/sources/folders/preview" || pathname === "/v1/sources/folders")) {
-            const body = await readJsonBody(request).catch(() => undefined) as { path?: unknown; exclude?: unknown; include?: unknown; names?: unknown } | undefined;
-            if (typeof body?.path !== "string" || !body.path.trim() || body.path.length > 1000) {
-              sendJson(response, 400, { blocker: { code: "FOLDER_PATH_REQUIRED", message: say("需要文件夹路径") } });
-              return;
-            }
-            sendJson(response, 200, await (pathname.endsWith("/preview") ? folders.preview(callerWorkspaceId, body.path, strings(body.names))
-              : folders.add(callerWorkspaceId, body.path, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) })));
-            return;
-          }
-          if (request.method === "DELETE" && one && (!one[2] || one[2] === "/purge")) { sendJson(response, 200, await folders.remove(callerWorkspaceId, one[1]!, one[2] === "/purge")); return; }
-          if (request.method === "POST" && one?.[2] === "/exclusions") {
-            const body = await readJsonBody(request).catch(() => undefined) as { exclude?: unknown; include?: unknown; names?: unknown } | undefined;
-            if (!Array.isArray(body?.exclude) || !Array.isArray(body?.include)) { sendJson(response, 400, { blocker: { code: "FOLDER_RULES_REQUIRED", message: say("需要 exclude 与 include 数组") } }); return; }
-            sendJson(response, 200, await folders.setRules(callerWorkspaceId, one[1]!, { exclude: strings(body.exclude), include: strings(body.include), names: strings(body.names) }));
-            return;
-          }
-          if (request.method === "POST" && one?.[2] === "/lines") {
-            const body = await readJsonBody(request).catch(() => undefined) as { lines?: unknown } | undefined;
-            const lines = Array.isArray(body?.lines) ? body.lines.filter((line): line is string => typeof line === "string" && line.length <= 80) : undefined;
-            if (!lines) { sendJson(response, 400, { blocker: { code: "FOLDER_LINES_REQUIRED", message: say("需要 lines 数组") } }); return; }
-            sendJson(response, 200, await folders.setLines(callerWorkspaceId, one[1]!, lines));
-            return;
-          }
-        } catch { sendJson(response, 502, { blocker: { code: "FOLDER_FAILED", message: say("文件夹操作没有完成") } }); return; }
+        if (await handleSourceFolderRequest(request, response, pathname, callerWorkspaceId, options.sourceFolders)) return;
       }
       // A subscription link (docs/onboarding-v3.md 「日历接入」): read once here before it is kept, so a link that does not open is refused
       // now rather than failing every tick. The answer is awaited: a read takes a second or two and the person is waiting for it.
@@ -1056,8 +1161,8 @@ export async function startCodexSupervisor(options: {
         }
         if (workflowRoute[2] === "run") { const rt = await modelClient(response, callerWorkspaceId); if (!rt) return; }
         const body = await readJsonBody(request);
-        const result = options.workflowAction(callerWorkspaceId, workflowRoute[1]!, workflowRoute[2] as "login" | "login_done" | "run",
-          typeof body?.service === "string" ? body.service.slice(0, 40) : "");
+        const result = await options.workflowAction(callerWorkspaceId, workflowRoute[1]!, workflowRoute[2] as "login" | "login_done" | "run",
+          typeof body?.service === "string" ? body.service.slice(0, 40) : "", { width: body?.width, height: body?.height });
         // Refusals are answers ({ok:false, code, message}), so the page can say why.
         sendJson(response, 200, result);
         return;
@@ -1205,6 +1310,14 @@ export async function startCodexSupervisor(options: {
         finally { if (proposing.get(callerWorkspaceId) === controller) proposing.delete(callerWorkspaceId); }
         return;
       }
+      for (const service of options.services ?? []) {
+        if (!pathname.startsWith(service.prefix)) continue;
+        const method = request.method ?? "GET";
+        if (method !== "GET" && request.headers.origin) { sendJson(response, 403, { blocker: { code: "SYNC_REQUEST_FORBIDDEN", message: "Use the local Web API" } }); return; }
+        const answer = await service.handle(method, pathname, callerWorkspaceId, method === "GET" ? undefined : await readJsonBody(request).catch(() => undefined))
+          .catch(() => ({ status: 502, body: { blocker: { code: "SERVICE_FAILED", message: tFor(runLocale(undefined, callerWorkspaceId || undefined))("后台没有完成这次操作") } } }));
+        if (answer) { sendJson(response, answer.status, answer.body); return; }
+      }
       if (options.modelProviders && pathname.startsWith("/v1/model/provider")) {
         const answer = await options.modelProviders.handle(request.method ?? "GET", pathname, callerWorkspaceId,
           request.method === "GET" ? undefined : await readJsonBody(request));
@@ -1225,8 +1338,11 @@ export async function startCodexSupervisor(options: {
       if (!isOwner(callerWorkspaceId) && pathname.startsWith("/v1/codex/")) {
         const workspace = callerWorkspaceId;
         if (request.method === "GET" && pathname === "/v1/codex/account") {
-          const running = runtimes!.connected(workspace) ? await runtimes!.client(workspace) : undefined;
-          const account = running?.ok ? await running.client.request("account/read", { refreshToken: false }) : { account: null, requiresOpenaiAuth: true };
+          // A runtime already up answers itself; one that is not is never started just to say who is signed in — that cold start
+          // outlasted the red bar's 2.5 s and showed 「后台服务没有运行」 on every page while the worker was fine (2026-10-21).
+          const live = runtimes!.current(workspace);
+          const saved = live ? undefined : runtimes!.savedAccount(workspace);
+          const account = live ? await live.request("account/read", { refreshToken: false }) : { account: saved, requiresOpenaiAuth: !saved };
           // `guest`: this account runs on its own Codex, which it can sign out of here (the owner's is the machine's own).
           sendJson(response, 200, { ...(record(account) ?? {}), login: runtimes!.loginStatus(workspace), guest: true });
           return;
@@ -1306,7 +1422,9 @@ export async function startCodexSupervisor(options: {
     url: `http://${host}:${address.port}`,
     client: sidecar.client,
     ...(runtimes ? { runtimes } : {}),
-    clientFor: (workspaceId: string) => isOwner(workspaceId) ? sidecar.client : runtimes!.current(workspaceId),
+    clientFor: (workspaceId: string) => isOwner(workspaceId) ? ownerClient() : runtimes!.current(workspaceId),
+    runtimeVersion: runtimeVersion(sidecar.initializeResult),
+    ...(ownerPool ? { ownerPool } : {}),
     readCostSignal: async (workspaceId = "") => !isOwner(workspaceId) ? guestCost(workspaceId) : runtimeBlocker
       ? { available: false, reason: runtimeBlocker.code }
       : costFor(sidecar.client, workspaceId),

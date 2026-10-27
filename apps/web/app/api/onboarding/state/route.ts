@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
-import { FIRST_DRAFTS_SETTING, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
-import { INTERVIEW_LOCALE_SETTING, interviewLocale, questionScreenFor } from "@crossline/db";
+import { ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
+import { INTERVIEW_LOCALE_SETTING, extractBacklog, interviewLocale, questionScreenFor } from "@crossline/db";
 import { isLocale } from "@crossline/i18n";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { getStore, planToday } from "../../../../lib/crossline";
-import { folderDocumentIds, projectTimeline, weekSkeleton } from "../../../../lib/onboarding-board";
-import { loadPendingDateBatch } from "../../../../lib/imported-dates";
+import { folderDocumentIds, projectTimeline, weekCapacity, weekSkeleton } from "../../../../lib/onboarding-board";
+import { adoptPendingDates, loadAdoptedDates, loadPendingDateBatch } from "../../../../lib/imported-dates";
 import { loadDiligence } from "../../../../lib/diligence";
 import { identityLines, needsLineSetup } from "../../../../lib/lines";
 import { interviewStatus, pendingAnswerIds, questionsOwnedElsewhere } from "../../../../lib/interview-status";
+import { startConfirmed, startSummary } from "../../../../lib/start-confirm";
 
 /**
  * Everything the onboarding screen shows, in one read: the conversation so far, the projects and facts the
@@ -20,6 +21,8 @@ export async function GET(request: Request) {
   if ("response" in access) return access.response;
   const { workspaceId } = access.ctx;
   const store = getStore();
+  // What the files say is taken, not asked (2026-10-19): a batch of dates still waiting is adopted before anything is read.
+  adoptPendingDates(access.ctx);
   // `?line=<id>`: that line's own interview, kept in its own session (`line-<id>`).
   const lineId = new URL(request.url).searchParams.get("line");
   const focus = lineId ? identityLines(access.ctx).find((line) => line.id === lineId) : undefined;
@@ -41,15 +44,37 @@ export async function GET(request: Request) {
   // whose interview already ended can answer 「没有截止」 here without waiting for a new round.
   const status = focus ? null : interviewStatus(access.ctx);
   const inRound = new Set(lastQuestions.map((question) => question.id));
+  // What the background extraction still owes this conversation (2026-10-19): while it reads the last replies the facts behind the start
+  // standard may not be on record yet, so 「开始使用」 waits for it — unless it is failing, which must not hold the person forever.
+  const organizing = session ? extractBacklog(store, workspaceId, session.id) : { replies: 0, frontReplies: 0, files: 0 };
+  // Only replies that can carry a start-standard fact (the opening and the front stages' answers) and files hold the button.
+  const settling = (organizing.frontReplies > 0 || organizing.files > 0) && !organizing.failing;
+  const ready = Boolean(status?.readyToStart && !settling);
   const start = status ? {
-    readyToStart: status.readyToStart,
+    readyToStart: ready,
+    // The one look before the app opens: what the person confirms, shown once the standard stands and the extraction has caught up.
+    startConfirmed: startConfirmed(access.ctx),
+    ...(ready ? { startSummary: startSummary(access.ctx) } : {}),
     startTotal: status.checklist.filter((item) => item.start).length,
     startMissing: status.startMissing.map(({ id, label, detail, owner }) => ({ id, label, detail, owner })),
     extraQuestions: status.questions.filter((question) => !inRound.has(question.id))
-  } : { readyToStart: true, startTotal: 0, startMissing: [], extraQuestions: [] };
+  } : { readyToStart: true, startConfirmed: true, startTotal: 0, startMissing: [], extraQuestions: [] };
+  const today = planToday(access.ctx);
+  const week = weekSkeleton(access.ctx, today), timeline = projectTimeline(access.ctx, today);
+  const { capacity, draft } = weekCapacity(access.ctx, today, week, timeline);
+  const stageNow = String((session?.coverage as { stage?: string } | undefined)?.stage ?? "orientation");
+  const ratings = Object.fromEntries(Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
+    .filter(([key]) => session && key.startsWith(`${session.id}#`)).map(([key, rating]) => [key.slice(key.indexOf("#") + 1), rating.verdict]));
   return NextResponse.json({
     ...start,
-    ok: true,
+    // Where the interview is, by its own record (`progress` of the last round), for the right column.
+    progress: progressView(readTurnProgress((session?.coverage as { progress?: unknown } | undefined)?.progress), stageNow),
+    capacity, skeleton: start.readyToStart ? draft : [],
+    insightRatings: ratings,
+    adoptedDates: loadAdoptedDates(access.ctx),
+    ok: true, organizing,
+    // Why the last round did not finish, kept after a reload (the worker writes it; the next attempt removes it).
+    lastFailure: session ? readOnboardingFailure(store.getSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}${session.id}`)) : null,
     identities, answeredElsewhere: session ? pendingAnswerIds(access.ctx, session.id) : [],
     setupLines: !focus && needsLineSetup(access.ctx),
     focusLine: focus ? { id: focus.id, label: focus.label } : null,
@@ -63,8 +88,7 @@ export async function GET(request: Request) {
     // The right column's week and project axis (docs/onboarding-v3.md), and how the person asked to be spoken to.
     tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
     toneChosen: Boolean(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
-    week: weekSkeleton(access.ctx, planToday(access.ctx)),
-    timeline: projectTimeline(access.ctx, planToday(access.ctx)),
+    week, timeline,
     session: session ? { id: session.id, state: session.state, coverage: session.coverage } : null,
     // The interview keeps the language it started in (docs/i18n.md); the page says so when it differs from its own.
     interviewLocale: (() => { const locked = session ? store.getSetting(workspaceId, `${INTERVIEW_LOCALE_SETTING}:${session.id}`) : undefined;

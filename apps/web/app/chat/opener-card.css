@@ -13,6 +13,7 @@
 /* Fixed arrangements are outlined, work is filled: the colour is the line, the outline says it is not the plan's. */
 .opener-lane[data-kind="fixed"] .opener-block{background:var(--paper);box-shadow:inset 0 0 0 2px var(--lc,var(--graphite))}
 .opener-lane[data-kind="work"] .opener-block{box-shadow:inset -1px 0 0 var(--paper)}
+.opener-lane[data-kind="work"] .opener-block[data-missed]{background:var(--paper);border:1.5px dashed var(--lc,var(--graphite));box-shadow:none}
 .opener-axis{position:relative;height:18px;margin-left:36px}
 .opener-axis span{position:absolute;top:0;transform:translateX(-50%);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .opener-axis span:first-child{transform:none}

@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
-  agentApprovalDecision, approveCategory, CLEAN_RUNS_TO_TRUST, CrosslineStore, declineCategory, decideAgentApproval, isPaused, listAgentTasks, pendingAgentApprovals,
-  pendingCategoryRequests, readCategories, requestAgentApproval, requestCategory, reviewAgentTask, setPaused
+  agentApprovalDecision, approveCategory, CLEAN_RUNS_TO_TRUST, CrosslineStore, declineCategory, decideAgentApproval, deliverAgentResult, isPaused, listAgentTasks, pendingAgentApprovals,
+  pendingCategoryRequests, readCategories, reopenAgentResult, requestAgentApproval, requestCategory, resultsAwaitingReview, reviewAgentTask, setPaused,
+  settleAgentResult
 } from "./index";
 
 let store: CrosslineStore;
@@ -89,4 +90,81 @@ test("a question from the guard waits for the person, is answered once, and expi
   expect(pendingAgentApprovals(store, ws, new Date(Date.now() + 60 * 60_000))).toEqual([]);
   expect(old).toBeTruthy();
   expect(decideAgentApproval(store, ws, "unknown", "accepted")).toBe(false);
+});
+
+test("a result is no longer a decision once its task is finished or archived, or a later run of the same work replaced it", () => {
+  vi.useFakeTimers();
+  try {
+    const order = (id: string, state: "approved" | "archived") => store.saveWorkOrder({ id, ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, identityId: "research",
+      projectId: "p", milestoneId: "m", intent: id, state, riskTier: "routine", payload: {},
+      estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" } });
+    order("live", "approved");
+    order("gone", "archived");
+    const run = (taskId: string, workOrderId: string, title: string, at: string) => {
+      vi.setSystemTime(new Date(at));
+      event("agent.task.requested", taskId, { title, category: "read_research_organize", workOrderId });
+      event("agent.task.completed", taskId, { directory: "C:\\ai\\t", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true });
+    };
+    run("old", "live", "清单 · 汇集讲义", "2026-10-09T00:00:00Z");
+    run("new", "live", "清单 · 汇集讲义", "2026-10-15T00:00:00Z");
+    run("other-step", "live", "清单 · 起草邮件", "2026-10-10T00:00:00Z");
+    run("dead", "gone", "别的", "2026-10-11T00:00:00Z");
+    run("flow-a", "", "每周整理收藏夹", "2026-10-16T00:00:00Z");
+    run("flow-b", "", "每周整理收藏夹", "2026-10-20T00:00:00Z");
+    expect(resultsAwaitingReview(store, ws).map((task) => task.taskId).sort()).toEqual(["flow-b", "new", "other-step"]);
+    // The replaced and the dead keep their own status: their files are still shown with the task.
+    expect(listAgentTasks(store, ws).filter((task) => task.status === "needs_review")).toHaveLength(6);
+    // Steps of one task whose titles have no step part (「任务 · 」) are different work, each still the person's to look at.
+    run("s4", "live", "两个案例 · ", "2026-10-17T00:00:00Z");
+    event("agent.task.requested", "s5", { title: "两个案例 · ", category: "read_research_organize", workOrderId: "live", stepId: "v1s5" });
+    event("agent.task.completed", "s5", { directory: "C:\\ai\\t", artifacts: [], needsHuman: 1, checksPassed: true, inputsModified: [], reviewRequired: true });
+    expect(resultsAwaitingReview(store, ws).map((task) => task.taskId)).toEqual(expect.arrayContaining(["s4", "s5"]));
+  } finally { vi.useRealTimers(); }
+});
+
+test("the daily pass puts a result away or accepts it in the person's place, earning no trust, and an undo hands it back", () => {
+  approveCategory(store, ws, "read_research_organize");
+  finish("put-away", { reviewReasons: ["涉及对外发送、发布、上传或付款"] });
+  expect(listAgentTasks(store, ws)[0]).toMatchObject({ external: true, completedAt: expect.any(String) });
+  expect(settleAgentResult(store, ws, "put-away", "expired", { day: "2026-10-21" })).toBe(true);
+  expect(settleAgentResult(store, ws, "put-away", "expired", { day: "2026-10-21" })).toBe(false);
+  expect(listAgentTasks(store, ws)[0]).toMatchObject({ status: "needs_review", settled: "expired" });
+  expect(resultsAwaitingReview(store, ws)).toEqual([]);
+  finish("adopted");
+  expect(reviewAgentTask(store, ws, "adopted", "accepted", "代为采纳", { by: "system" })).toMatchObject({ ok: true });
+  expect(listAgentTasks(store, ws).find((task) => task.taskId === "adopted")).toMatchObject({ status: "accepted", reviewedBy: "system" });
+  expect(readCategories(store, ws).read_research_organize).toMatchObject({ cleanRuns: 0 });
+  const principal = store.getWorkspaceOwnerId(ws)!;
+  reopenAgentResult(store, ws, "put-away", principal);
+  reopenAgentResult(store, ws, "adopted", principal);
+  expect(listAgentTasks(store, ws).map((task) => [task.taskId, task.status, task.settled ?? ""]).sort()).toEqual([["adopted", "needs_review", ""], ["put-away", "needs_review", ""]]);
+  // The person's own acceptance is never reopened by an undo of the pass.
+  reviewAgentTask(store, ws, "adopted", "accepted");
+  reopenAgentResult(store, ws, "adopted", principal);
+  expect(listAgentTasks(store, ws).find((task) => task.taskId === "adopted")?.status).toBe("accepted");
+});
+
+test("only an account made from 2026-10-22 has the three kinds on by default; an older one that never chose has none", () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-01T00:00:00Z"));
+  const old = store.createPrincipalWithWorkspace("u-old", "old").workspace.id;
+  vi.useRealTimers();
+  expect(readCategories(store, old)).toEqual({});
+  expect(Object.keys(readCategories(store, ws)).sort()).toEqual(["draft_text", "files_calendar_prep", "read_research_organize"]);
+});
+
+test("the assistant's own item, once delivered, is accepted without the gate and the core task it prepares is planned again with it", () => {
+  const owner = store.getWorkspaceOwnerId(ws)!;
+  const estimate = { p25Minutes: 30, p50Minutes: 45, p85Minutes: 90, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
+  const order = (id: string, payload: Record<string, unknown>) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research",
+    projectId: "p", milestoneId: "m", intent: id, state: "approved", riskTier: "routine", estimate, payload });
+  order("core", { owner: "person" });
+  order("prep", { owner: "assistant", prepares: "core" });
+  store.saveStepPlan(ws, "core", { archetypeId: "research_decision", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", units: [], questions: [], steps: [] }, owner, "t");
+  event("agent.task.requested", "tp", { title: "汇集规则", category: "read_research_organize", workOrderId: "prep", delegated: true });
+  event("agent.task.completed", "tp", { directory: "C:/ai/tp", durationMs: 5000, commands: 1, denied: 0, artifacts: [{ path: "规则.md", sha256: "x", bytes: 3 }],
+    needsHuman: 0, checksPassed: true, inputsModified: [], reviewRequired: false });
+  expect(deliverAgentResult(store, ws, "tp")).toEqual({ delivered: true });
+  expect(store.listWorkOrders(ws).find((item) => item.id === "prep")!.state).toBe("accepted");
+  expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "core" })[0]?.payload).toMatchObject({ prepared: "tp" });
 });

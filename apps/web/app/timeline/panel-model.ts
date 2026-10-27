@@ -9,11 +9,27 @@ import { toMinutes, type TimelineItem } from "./model";
 const length = (item: TimelineItem) => Math.max(0, toMinutes(item.end) - toMinutes(item.start));
 const isWork = (item: TimelineItem) => (item.kind === "scheduled" || item.kind === "optional") && Boolean(item.workOrderId);
 
-/** Minutes of the day by standing: scheduled work, pencilled-in work (outside the person's hours), and fixed commitments. */
-export function dayLoad(items: TimelineItem[], day: string): { planned: number; pencilled: number; fixed: number } {
+/** A fixed item of twenty hours or more marks the day (a rest day, a trip), it does not fill it. */
+const ALL_DAY_MINUTES = 20 * 60;
+
+/**
+ * Minutes of the day by standing: scheduled work, pencilled-in work (outside the person's hours), and fixed commitments — overlapping ones
+ * counted once. An all-day item is named in `allDay` instead of counted: a 00:00–23:59 「周日休息」 read as 「固定日程 24 小时」 (W-25).
+ */
+export function dayLoad(items: TimelineItem[], day: string): { planned: number; pencilled: number; fixed: number; allDay: string[] } {
   const ofDay = items.filter((item) => item.day === day);
   const sum = (kinds: Array<TimelineItem["kind"]>) => ofDay.filter((item) => kinds.includes(item.kind)).reduce((total, item) => total + length(item), 0);
-  return { planned: sum(["scheduled"]), pencilled: sum(["optional"]), fixed: sum(["calendar", "import"]) };
+  const fixedItems = ofDay.filter((item) => item.kind === "calendar" || item.kind === "import");
+  const allDay = fixedItems.filter((item) => length(item) >= ALL_DAY_MINUTES);
+  const spans = fixedItems.filter((item) => length(item) < ALL_DAY_MINUTES).map((item) => [toMinutes(item.start), toMinutes(item.end)] as const)
+    .filter(([from, to]) => to > from).sort((a, b) => a[0] - b[0]);
+  let fixed = 0, reach = -1;
+  for (const [from, to] of spans) {
+    if (to <= reach) continue;
+    fixed += to - Math.max(from, reach);
+    reach = to;
+  }
+  return { planned: sum(["scheduled"]), pencilled: sum(["optional"]), fixed, allDay: [...new Set(allDay.map((item) => item.title))] };
 }
 
 /** The first block of work on the day that has not ended yet (on today, after `nowMinute`; on another day, the first of the day). */

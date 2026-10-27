@@ -1,5 +1,6 @@
 import { clientBusy, waitForMemory } from "./model-gate";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { forgetAccountModels } from "./model-catalog";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { CodexRpcBoundary } from "./index";
 import { tFor } from "@crossline/core";
@@ -28,12 +29,35 @@ const BLOCKERS: Record<RuntimeBlocker["code"], string> = {
 /** The message the person reads, in the workspace's language (docs/i18n.md). */
 const blocker = (code: RuntimeBlocker["code"], workspaceId?: string): RuntimeBlocker => ({ code, message: tFor(runLocale(undefined, workspaceId))(BLOCKERS[code]) });
 
+/**
+ * `account/read`'s account from a Codex `auth.json` (vendor/codex login/src/auth/storage.rs, token_data.rs): an API key, or a ChatGPT
+ * login whose email and plan are claims of the stored ID token. Null when the file is missing or unreadable.
+ */
+export function accountFromAuthFile(file: string): Record<string, unknown> | null {
+  let auth: { auth_mode?: string; OPENAI_API_KEY?: string | null; tokens?: { id_token?: unknown } };
+  try { auth = JSON.parse(readFileSync(file, "utf8")) as typeof auth; } catch { return null; }
+  if (auth.auth_mode === "apikey" || (!auth.tokens && auth.OPENAI_API_KEY)) return { type: "apiKey" };
+  if (!auth.tokens) return null;
+  let claims: { email?: string; "https://api.openai.com/profile"?: { email?: string }; "https://api.openai.com/auth"?: { chatgpt_plan_type?: string } } = {};
+  try {
+    const jwt = typeof auth.tokens.id_token === "string" ? auth.tokens.id_token : "";
+    claims = JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64url").toString("utf8")) as typeof claims;
+  } catch { /* a login without readable claims is still a login */ }
+  return { type: "chatgpt", email: claims.email ?? claims["https://api.openai.com/profile"]?.email ?? null,
+    planType: claims["https://api.openai.com/auth"]?.chatgpt_plan_type ?? "unknown" };
+}
+
 export type RuntimeRegistry = {
   isOwner(workspaceId: string): boolean;
   /** Owner: always. A guest: once its own home holds a login, or it has a model provider of its own (providers.ts). */
   connected(workspaceId: string): boolean;
   /** Owner: always. A guest: only its own Codex sign-in — what serves the Skills a provider cannot. */
   signedIn(workspaceId: string): boolean;
+  /**
+   * A guest's sign-in as `account/read` would give it, read from its home's `auth.json` without starting its process; null when it has
+   * none. The red bar asks every page (2.5 s), and a cold runtime took ~4 s to start just to answer it (2026-10-21).
+   */
+  savedAccount(workspaceId: string): Record<string, unknown> | null;
   /** The runtime for running Skills; starts a connected guest's process. */
   client(workspaceId: string): Promise<{ ok: true; client: CodexRpcBoundary } | { ok: false; blocker: RuntimeBlocker }>;
   /**
@@ -63,6 +87,8 @@ const EVICT_GRACE_MS = 15_000;
 
 export function createRuntimeRegistry(options: {
   owner: RuntimeSidecar;
+  /** The client the owner's model runs take (the compute node's runtime while connected); `owner.client` when not given. */
+  ownerClient?: () => CodexRpcBoundary;
   ownerWorkspaceId: () => string | undefined;
   /** Where guest homes live: `<baseDir>/<workspaceId>/codex-home`. */
   baseDir: string;
@@ -70,6 +96,11 @@ export function createRuntimeRegistry(options: {
   maxRunning?: number;
   /** Whether a workspace has a model provider of its own; such a guest gets its own runtime even without a Codex sign-in. */
   hasProvider?: (workspaceId: string) => boolean;
+  /**
+   * A guest's login just succeeded. Whatever background state was decided while it had no model (a paused background, captures left
+   * unanalysed, first drafts not started) is decided again now instead of at the next tick, up to fifteen minutes later (W-11).
+   */
+  onConnected?: (workspaceId: string) => void;
   /** Longer than a Skill's own stall limit (20 min), so a long turn that is still producing events is never stopped under it. */
   idleMs?: number;
   /** While every runtime is working, how often to look for one that finished, and how long to wait before refusing (three hours). */
@@ -88,9 +119,11 @@ export function createRuntimeRegistry(options: {
   const logins = new Map<string, RuntimeLogin>();
   const handles = new Map<string, Handle>();
   const isOwner = (workspaceId: string) => !workspaceId || workspaceId === options.ownerWorkspaceId();
+  const ownerClient = () => options.ownerClient?.() ?? options.owner.client;
   const homeOf = (workspaceId: string) => path.join(options.baseDir, workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"), "codex-home");
   const signedIn = (workspaceId: string) => isOwner(workspaceId) || existsSync(path.join(homeOf(workspaceId), "auth.json"));
   const connected = (workspaceId: string) => signedIn(workspaceId) || Boolean(options.hasProvider?.(workspaceId));
+  const savedAccount = (workspaceId: string) => isOwner(workspaceId) ? null : accountFromAuthFile(path.join(homeOf(workspaceId), "auth.json"));
 
   const stop = (workspaceId: string) => {
     const entry = running.get(workspaceId);
@@ -174,8 +207,10 @@ export function createRuntimeRegistry(options: {
         if (message.method !== "account/login/completed") return;
         const login = logins.get(workspaceId);
         const params = (message.params ?? {}) as { loginId?: unknown; success?: unknown };
-        if (login && (params.loginId === undefined || params.loginId === login.loginId))
+        if (login && (params.loginId === undefined || params.loginId === login.loginId)) {
           logins.set(workspaceId, { ...login, state: params.success === true ? "completed" : "failed", updatedAt: new Date(now()).toISOString() });
+          if (params.success === true) connectedNow(workspaceId);
+        }
       });
       sidecar.onExit(() => { if (running.get(workspaceId)?.sidecar === sidecar) running.delete(workspaceId); });
       return sidecar;
@@ -184,19 +219,22 @@ export function createRuntimeRegistry(options: {
     } finally { starting.delete(workspaceId); }
   }
 
+  /** Told once per successful login; a listener's failure never reaches the runtime's notification loop. */
+  const connectedNow = (workspaceId: string) => { try { options.onConnected?.(workspaceId); } catch { /* the listener's own concern */ } };
+
   const clientFor = async (workspaceId: string, forLogin = false): Promise<{ ok: true; client: CodexRpcBoundary } | { ok: false; blocker: RuntimeBlocker }> => {
-    if (isOwner(workspaceId)) return { ok: true, client: options.owner.client };
+    if (isOwner(workspaceId)) return { ok: true, client: forLogin ? options.owner.client : ownerClient() };
     if (!forLogin && !connected(workspaceId)) return { ok: false, blocker: blocker("RUNTIME_UNCONNECTED", workspaceId) };
     const started = await ensure(workspaceId);
     return "code" in started ? { ok: false, blocker: started } : { ok: true, client: handleFor(workspaceId) };
   };
 
   return {
-    isOwner, connected, signedIn,
+    isOwner, connected, signedIn, savedAccount,
     client: (workspaceId) => clientFor(workspaceId),
-    handle: (workspaceId) => isOwner(workspaceId) ? { ok: true, client: options.owner.client }
+    handle: (workspaceId) => isOwner(workspaceId) ? { ok: true, client: ownerClient() }
       : connected(workspaceId) ? { ok: true, client: handleFor(workspaceId) } : { ok: false, blocker: blocker("RUNTIME_UNCONNECTED", workspaceId) },
-    current: (workspaceId) => isOwner(workspaceId) ? options.owner.client : (touch(workspaceId), running.has(workspaceId) ? handleFor(workspaceId) : undefined),
+    current: (workspaceId) => isOwner(workspaceId) ? ownerClient() : (touch(workspaceId), running.has(workspaceId) ? handleFor(workspaceId) : undefined),
     async login(workspaceId, method) {
       // Not through the handle: an account that is not connected yet is exactly the one that logs in.
       const started = isOwner(workspaceId) ? options.owner : await ensure(workspaceId);
@@ -213,6 +251,7 @@ export function createRuntimeRegistry(options: {
         ...(typeof answer.verificationUrl === "string" ? { verificationUrl: answer.verificationUrl } : {}),
         ...(typeof answer.userCode === "string" ? { userCode: answer.userCode } : {}) };
       logins.set(workspaceId, login);
+      if (login.state === "completed") connectedNow(workspaceId);
       return login;
     },
     async cancelLogin(workspaceId) {
@@ -227,6 +266,7 @@ export function createRuntimeRegistry(options: {
       await running.get(workspaceId)?.sidecar.client.request("account/logout", {}).catch(() => undefined);
       stop(workspaceId);
       logins.delete(workspaceId);
+      forgetAccountModels(workspaceId);
       rmSync(path.dirname(homeOf(workspaceId)), { recursive: true, force: true });
     },
     stopIdle() { for (const [workspaceId, entry] of [...running]) if (stoppable(workspaceId, entry, idleMs)) stop(workspaceId); },

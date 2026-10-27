@@ -1,21 +1,21 @@
 diff --git a/codex-rs/state/src/migrations.rs b/codex-rs/state/src/migrations.rs
-index 07d3658..9466234 100644
+index efbb76c..7ed8889 100644
 --- a/codex-rs/state/src/migrations.rs
 +++ b/codex-rs/state/src/migrations.rs
 @@ -1,5 +1,9 @@
  use std::borrow::Cow;
-
+ 
 +#[cfg(windows)]
 +use sqlx::Row;
 +#[cfg(windows)]
 +use sqlx::SqlSafeStr;
- use sqlx::SqlitePool;
  use sqlx::migrate::Migrator;
-
-@@ -27,6 +31,80 @@ fn runtime_migrator(base: &'static Migrator) -> Migrator {
+ use sqlx_sqlite::SqlitePool;
+ 
+@@ -28,6 +32,80 @@ fn runtime_migrator(base: &'static Migrator) -> Migrator {
      }
  }
-
+ 
 +/// Windows release builds historically embedded CRLF migration text, while a source checkout may
 +/// contain LF. Repair only checksums that exactly match the same embedded SQL with CRLF line endings;
 +/// every other mismatch remains untouched for SQLx to reject.
@@ -94,7 +94,7 @@ index 07d3658..9466234 100644
      runtime_migrator(&STATE_MIGRATOR)
  }
 diff --git a/codex-rs/state/src/migrations_tests.rs b/codex-rs/state/src/migrations_tests.rs
-index 95cd681..4d9cc18 100644
+index d8e14b7..3be0275 100644
 --- a/codex-rs/state/src/migrations_tests.rs
 +++ b/codex-rs/state/src/migrations_tests.rs
 @@ -2,6 +2,8 @@ use codex_utils_absolute_path::test_support::PathExt;
@@ -107,9 +107,9 @@ index 95cd681..4d9cc18 100644
  use sqlx::migrate::Migrator;
  use std::borrow::Cow;
 @@ -14,6 +16,57 @@ use crate::PINNED_THREAD_SECTION_NAME;
-
+ 
  const CUSTOM_THREAD_SECTION_ID: &str = "01984de2-8f74-7c91-a3b2-5c5e937cf317";
-
+ 
 +#[cfg(windows)]
 +#[tokio::test]
 +async fn runtime_migrator_accepts_existing_windows_checksums() {
@@ -165,18 +165,18 @@ index 95cd681..4d9cc18 100644
      Migrator {
          migrations: Cow::Owned(
 diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
-index f05caf1..3d79f3a 100644
+index e35a074..2a8d7f4 100644
 --- a/codex-rs/state/src/sqlite.rs
 +++ b/codex-rs/state/src/sqlite.rs
-@@ -7,6 +7,7 @@
-
+@@ -8,6 +8,7 @@
+ 
  use crate::DbTelemetry;
  use crate::migrations::repair_legacy_recency_migration_version;
 +use crate::migrations::repair_windows_migration_checksums;
- use crate::runtime::RuntimeDbInitError;
+ use crate::runtime::recovery::RuntimeDbInitError;
  use crate::telemetry;
  use crate::telemetry::DbKind;
-@@ -272,6 +273,7 @@ impl SqliteConfig {
+@@ -316,6 +317,7 @@ impl SqliteConfig {
          })?;
          let started = Instant::now();
          let migrate_result = async {

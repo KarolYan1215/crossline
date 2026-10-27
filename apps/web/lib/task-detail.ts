@@ -1,7 +1,7 @@
 import "server-only";
-import { archetypeById, completionRule, goalSettingKey, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type SuccessCriterion,
+import { archetypeById, completionRule, preparesOf, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type Preparation, type SuccessCriterion,
   type EvidenceQuestionTemplate } from "@crossline/core";
-import { assistantAvailable, listAgentTasks, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
+import { doneKinds, listAgentTasks, needStatesOf, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
 import { effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
@@ -19,16 +19,19 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const t = tFor(locale);
   const ids = new Set(orders.map((order) => order.id));
   const projects = new Map(store.listProjects(workspaceId, { includeArchived: true }).map((project) => [project.id, project.name]));
-  const plans = new Map(store.listStepPlans(workspaceId).filter((plan) => ids.has(plan.workOrderId)).map((plan) => [plan.workOrderId, plan]));
+  const allPlans = store.listStepPlans(workspaceId);
+  const plans = new Map(allPlans.filter((plan) => ids.has(plan.workOrderId)).map((plan) => [plan.workOrderId, plan]));
+  const done = doneKinds(store, workspaceId, allPlans);
   const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const relations = store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" || relation.status === "candidate");
   const labels = new Map(identityPacksFor((key) => store.getSetting(workspaceId, key), { includeArchived: true }).map((pack) => [pack.id, t(pack.label)]));
   const executions = store.listExecutions(workspaceId);
   const documents = store.listSourceDocuments(workspaceId);
-  const agentTasks = listAgentTasks(store, workspaceId).filter((task) => ids.has(task.workOrderId));
-  // 「交给 Agent」 only where the machine's assistant works: for a guest it answered every click with AGENT_OWNER_ONLY.
-  const assistant = assistantAvailable(store, workspaceId);
+  // The assistant's own items for these tasks (`payload.prepares`, docs/work-split.md): what they made is the task's 「已备好」.
+  const preparedFor = new Map(store.listWorkOrders(workspaceId).filter((order) => ids.has(preparesOf(order))).map((order) => [order.id, preparesOf(order)]));
+  const agentTasks = listAgentTasks(store, workspaceId).filter((task) => ids.has(task.workOrderId) || preparedFor.has(task.workOrderId))
+    .map((task) => preparedFor.has(task.workOrderId) ? { ...task, workOrderId: preparedFor.get(task.workOrderId)!, stepId: "" } : task);
   const confirmed = store.listEvents(workspaceId, { type: "criterion.confirmed" });
   const assessed = store.listEvents(workspaceId, { type: "criteria.assessed" });
   const notes = store.listEvents(workspaceId, { type: "task.note" }).filter((event) => ids.has(event.entityId));
@@ -37,6 +40,17 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
   const liveOrders = store.listWorkOrders(workspaceId).filter((order) => order.state !== "archived");
   const label = (line: string) => labels.get(line) ?? line;
   const artifactRelations = relations.filter((relation) => relation.artifactId);
+  const planBlocked = new Set(store.listEvents(workspaceId, { type: "task.steps_blocked" }).map((event) => event.entityId));
+  const capacity = new Set(defaultIdentityPacks().filter((pack) => pack.kind === "capacity").map((pack) => pack.id));
+  // Answers to step questions are kept per project (`step_answer_<hash>`): the person's own, or an assumption the app wrote (「假设：」).
+  const stepAnswers = new Map(store.listProfileFacts(workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT))
+    .map((fact) => [`${fact.projectId}|${fact.slot}`, fact]));
+  const answerOf = (projectId: string, question: string): StepQuestionView["answer"] => {
+    const fact = stepAnswers.get(`${projectId}|${stepAnswerSlot(question)}`);
+    if (!fact) return undefined;
+    const text = fact.value.replace(/^假设：/, "").replace(/^【[^】]*】/, "");
+    return { text, assumed: fact.status !== "confirmed" };
+  };
   const result = new Map<string, TaskExtras>();
   for (const order of orders) {
     const payload = (order.payload ?? {}) as { notBefore?: string; dueDate?: string; byproducts?: Array<{ lineId: string; artifact: string }>;
@@ -83,9 +97,15 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
     const personConfirmed = new Set(confirmed.filter((event) => event.entityId === order.id).map((event) => (event.payload as { criterionId: string }).criterionId));
     result.set(order.id, {
       ...(projects.get(order.projectId) ? { projectName: projects.get(order.projectId)! } : {}),
+      ...(!proposalReady(order, plan, { planBlocked: planBlocked.has(order.id), exempt: capacity.has(order.identityId) }) ? { preparing: true } : {}),
       window: { ...(payload.notBefore ? { notBefore: payload.notBefore } : {}), ...(dueBy ? { dueBy } : {}) },
       ...(plan ? { stepPlan: { archetypeLabel: ((label) => label ? t(label) : plan.archetypeId)(archetypeById(plan.archetypeId)?.label), quantity: plan.quantity, rationale: plan.rationale,
-        progress: taskProgress(plan.steps), steps: plan.steps, units: plan.units, questions: plan.questions } } : {}),
+        progress: taskProgress(finishedSteps(order.state, plan.steps)), units: plan.units,
+        // A provide step says whether the system is still looking (files, then the web) or the person is asked (need-check.ts).
+        steps: (() => { const states = plan.needs?.length ? needStatesOf(store, workspaceId, order.id) : new Map<string, "checking" | "ask">();
+          return finishedSteps(order.state, plan.steps).map((step) => step.provides && states.get(step.provides) ? { ...step, needState: states.get(step.provides)! } : step); })(),
+        questions: plan.questions.map((question) => { const answer = answerOf(order.projectId, question.text); return { ...question, ...(answer ? { answer } : {}) }; }) } } : {}),
+      preparation: preparationOf(order, plan, done),
       supports, workedMinutes: worked, ...(artifactLinks.length ? { artifactLinks } : {}),
       criteria: (milestone?.successCriteria ?? []).map((criterion) => {
         if (personConfirmed.has(criterion.id)) return { id: criterion.id, statement: criterion.statement, quarters: 4, by: "person" as const };
@@ -98,8 +118,10 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       sources: relevantDocuments(documents, { projectId: order.projectId, projectName: projects.get(order.projectId) }).map((doc) => ({ id: doc.id, fileName: doc.fileName })),
       agentOutputs: agentTasks.filter((task) => task.workOrderId === order.id).map((task) => ({ taskId: task.taskId, title: task.title, status: task.status, stepId: task.stepId,
         files: task.artifacts.map((artifact) => ({ path: artifact.path, name: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path })) })),
-      agentSteps: (assistant ? plan?.steps ?? [] : []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title })),
-      notes: notes.filter((event) => event.entityId === order.id).map((event) => { const payload = event.payload as { text?: string; kind?: string };
+      // 「交给 Agent」 for every account: the owner's assistant has a shell, everyone else's works through Crossline's own functions.
+      agentSteps: (plan?.steps ?? []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title })),
+      // 「助手留下的待补」 (written when the daily pass accepted a result in the person's place) shows only while that acceptance stands.
+      notes: notes.filter((event) => event.entityId === order.id && !retractedAgentNote(event.payload, agentTasks)).map((event) => { const payload = event.payload as { text?: string; kind?: string };
         return { at: event.createdAt, text: payload.text ?? "", kind: payload.kind ?? "note" }; }).reverse().slice(0, 30),
       completion: (({ mode, why, by }) => ({ mode, why, by }))(completionRule(order, locale))
     });
@@ -108,6 +130,12 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
 }
 
 type StoredEvent = ReturnType<CrosslineStore["listEvents"]>[number];
+
+/** An `agent_left` note whose result is no longer accepted (the daily pass's acceptance was undone). */
+function retractedAgentNote(payload: unknown, agentTasks: Array<{ taskId: string; status: string }>): boolean {
+  const note = payload as { kind?: string; agentTaskId?: string };
+  return note.kind === "agent_left" && agentTasks.find((task) => task.taskId === note.agentTaskId)?.status !== "accepted";
+}
 
 /**
  * One canonical shape for "everything about this task", read once here instead of being assembled
@@ -173,14 +201,21 @@ export type TaskDetail = {
   background: StoredBackgroundFact[] | null;
 } & TaskExtras;
 
+/** A plan question with its answer: the person's own, or the app's assumption (changeable on the task), or none yet (asked on 待确认). */
+export type StepQuestionView = StoredStepPlan["questions"][number] & { answer?: { text: string; assumed: boolean } };
+
 /** What the card and the task dialog show beyond the analysis: where the task sits, its steps, and what it is judged against. */
 export type TaskExtras = {
   /** The course or project by name (「ECE 555」), not its id. */
   projectName?: string;
+  /** A proposal whose steps are still being planned (`proposalReady` false): not a decision yet, so the card offers no 批准 (W-31). */
+  preparing?: boolean;
   /** Earliest start and latest finish, as the scheduler uses them. */
   window: { notBefore?: string; dueBy?: string };
   stepPlan?: { archetypeLabel: string; quantity: { basis: string; amount: number; unit: string }; rationale: string; progress: number;
-    steps: StoredTaskStep[]; units: StoredStepPlan["units"]; questions: StoredStepPlan["questions"] };
+    steps: Array<StoredTaskStep & { needState?: "checking" | "ask" }>; units: StoredStepPlan["units"]; questions: StepQuestionView[] };
+  /** How the card is prepared before its work starts (docs/task-preparation.md): nothing, its steps, or a full tutorial, and why. */
+  preparation?: Preparation;
   /** Other lines this work feeds: the milestone relations from this task's milestone, and its byproducts. */
   supports: Array<{ line: string; lineLabel: string; target: string; artifact?: string; pending: boolean }>;
   /** Cross-line artifacts at task level: what this task produces for another line's work, and whose output it uses (docs/flywheel-and-views.md §5.5). */
@@ -270,6 +305,9 @@ function pausedFrom(executions: TaskDetail["executions"]): boolean {
 /** The one place a `StoredWorkOrder` plus its already-resolved dependencies becomes a `TaskDetail` —
  * shared by the single-id and batch tiers so their output is byte-identical regardless of which one a
  * caller used to get here. */
+/** The files of a built tutorial (`manual.md` and its per-step sections). */
+const TUTORIAL_FILE = /(?:^|[\\/])(?:manual\.md|nodes[\\/])/;
+
 function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
   milestone: StoredMilestone | undefined; materials: StoredMaterial[]; executions: StoredExecution[];
   materialEvents: StoredEvent[]; archivedEvents: StoredEvent[]; relatedFlywheel: TaskDetail["relatedFlywheel"];
@@ -304,7 +342,11 @@ function assembleTaskDetail(ctx: AccessContext, order: StoredWorkOrder, deps: {
     ...(payload.byproductOf ? { byproductOf: payload.byproductOf } : {}),
     materialContract: payload.materialContract ?? [], evidenceContract: payload.evidenceContract ?? [],
     evidenceChecklist: payload.evidenceChecklist ?? [],
-    preparedMaterials: deps.materials.map((item) => ({ id: item.id, uri: item.uri, fileName: item.uri.split("/").pop() ?? item.uri, mediaType: item.mediaType })),
+    // A tutorial built before steps named their product (2026-10-22) is not shown on work that no longer warrants one (a delivery check,
+    // a fix to the person's own system), unless the person asked for it.
+    preparedMaterials: deps.materials.filter((item) => !TUTORIAL_FILE.test(item.uri) || (deps.extras.preparation?.level ?? "tutorial") === "tutorial"
+      || getStore().listEvents(ctx.workspaceId, { type: "tutorial.requested", entityId: order.id }).length > 0)
+      .map((item) => ({ id: item.id, uri: item.uri, fileName: item.uri.split("/").pop() ?? item.uri, mediaType: item.mediaType })),
     executions,
     ...(payload.blocker ? { blocker: payload.blocker } : {}),
     ...(materialBlocker ? { materialBlocker } : {}),

@@ -3,13 +3,22 @@ name: Hosted beta server
 # Reaches the hosted beta's host over SSH from a GitHub runner: the cloud sessions that drive the deploy have no outbound SSH
 # (docs/beta-launch.md §10.6). Runs on dispatch, or on a push whose commit message carries [server] (diagnose) or [deploy]
 # (pull the images and restart). Needs the repository secret DEPLOY_SSH_KEY (the private key for admin@ the host).
+# Commit-message actions run only for pushes to `main` (decided 2026-10-17), so another branch can never deploy itself.
+# Every day, and on `[backup]` or the `backup` dispatch, the newest server backup (deploy/server/backup.sh) is copied off the host,
+# encrypted with the repository secret BACKUP_PASSPHRASE (AES-256, PBKDF2) and kept as a workflow artifact for 30 days.
+#   Restore: openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in crossline-backup.tgz.enc -out backup.tgz -pass pass:<passphrase>
 on:
   push:
+  schedule:
+    - cron: "40 19 * * *"
   workflow_dispatch:
     inputs:
       action:
-        description: diagnose or deploy
+        description: diagnose, deploy, backup, compare-list, compare or compare-report
         default: diagnose
+      args:
+        description: "compare only: e.g. --email someone@example.com --steps 6 --backplans 3"
+        default: ""
 
 permissions:
   contents: read
@@ -20,9 +29,14 @@ env:
 
 jobs:
   server:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate') || contains(github.event.head_commit.message, '[readiness]') || contains(github.event.head_commit.message, '[usage]')
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.ref == 'refs/heads/main' && (contains(github.event.head_commit.message, '[backup]') || contains(github.event.head_commit.message, '[server]') || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[codex-probe]') || contains(github.event.head_commit.message, '[migrate') || contains(github.event.head_commit.message, '[readiness]') || contains(github.event.head_commit.message, '[usage]')))
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Runs queue instead of overlapping: two deploys at once stopped each other's pulls and wrote the same backup folder (2026-10-21).
+    concurrency:
+      group: hosted-server
+      cancel-in-progress: false
+    # A deploy may retry a stalled pull (deploy/server/run.sh): three tries of eight minutes per image fit.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: SSH key
@@ -38,10 +52,19 @@ jobs:
             uptime; printf "cpus: "; nproc; free -m; df -h / | tail -1
             sudo docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
             sudo docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | head
+            # Where the disk goes: a new app image needs its whole size free while the old one still runs (2026-10-21).
+            sudo docker system df 2>/dev/null || true
+            sudo docker info --format "storage: {{.Driver}} {{.DriverStatus}}" 2>/dev/null || true
+            sudo timeout 120 du -xsh /srv/crossline/data /srv/crossline/compare /srv/backups /var/lib/docker /var/lib/containerd /tmp 2>/dev/null || true
+            ps -eo pid,etime,args | grep -E "docker (pull|run)" | grep -v grep || true
             sudo systemctl is-active caddy
             tail -5 /tmp/build-app.log 2>/dev/null || true
             for p in 3340 3210; do printf "%s " $p; curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$p/ || echo down; done
             for c in assess crossline-web crossline-worker; do echo "== $c"; sudo docker logs --tail 40 $c 2>&1 || true; done
+            # 录音在服务器转写: what waits in each inbox (sizes and stored names only, never the audio) and the transcriber night pass.
+            echo "== recordings"
+            sudo find /srv/crossline/data/recordings/inbox -type f -printf "%TY-%Tm-%Td %TH:%TM %s %p\n" 2>/dev/null | sort | tail -20 || true
+            sudo docker logs --tail 20 crossline-transcriber 2>&1 || true
             echo "== memory"
             # Each container against its ceiling, whether one was killed for memory and how often it restarted, the worker peak, and the
             # model gate (runs waiting for the one slot, waits caused by memory) from the worker log.
@@ -72,6 +95,36 @@ jobs:
             echo "-- search and image for other models (names only; keys counted, never shown)"
             sudo grep -E "^(CROSSLINE_SEARCH_PROVIDER|CROSSLINE_IMAGE_API_STYLE|CROSSLINE_IMAGE_MODEL)=" /srv/crossline/app.env || true
             printf "keys filled: "; sudo grep -cE "^(TAVILY_API_KEY|BOCHA_API_KEY|CROSSLINE_IMAGE_API_KEY)=.+" /srv/crossline/app.env || true
+            echo "-- invites and the sponsor model (names only; the key counted, never shown)"
+            sudo grep -E "^(CROSSLINE_INVITE_APPROVER|CROSSLINE_SPONSOR_BASE_URL|CROSSLINE_SPONSOR_MODELS|CROSSLINE_SPONSOR_MONTHLY_CNY)=" /srv/crossline/app.env || true
+            printf "sponsor key filled: "; sudo grep -cE "^CROSSLINE_SPONSOR_API_KEY=.+" /srv/crossline/app.env || true
+            sudo docker logs --since 7d crossline-worker 2>&1 | grep -E "\"sponsor\." | tail -20 || true
+            # Which tool or item a structured run used that it was never offered (a candidate failing SKILL_TOOL_FORBIDDEN).
+            sudo docker logs --since 1d crossline-worker 2>&1 | grep -E "item_forbidden|tool_call_refused" | cut -c1-300 | tail -20 || true
+            # Which text models the sponsor key can use (ids only), so a candidate is named as SiliconFlow names it. The key stays on the host.
+            echo "-- sponsor catalog"
+            key=$(sudo grep -E "^CROSSLINE_SPONSOR_API_KEY=" /srv/crossline/app.env | cut -d= -f2-)
+            curl -s -m 20 -H "Authorization: Bearer $key" "https://api.siliconflow.cn/v1/models?type=text" \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); [print(x.get(\"id\")) for x in d.get(\"data\",[]) if any(k in str(x.get(\"id\",\"\")).lower() for k in (\"deepseek\",\"glm\",\"qwen\",\"kimi\",\"step\",\"ling\"))]" || true
+            # What is left on the sponsor key (amounts and status only).
+            echo "-- sponsor balance"
+            curl -s -m 20 -H "Authorization: Bearer $key" "https://api.siliconflow.cn/v1/user/info" \
+              | python3 -c "import sys,json; r=json.load(sys.stdin); d=r.get(\"data\") if isinstance(r.get(\"data\"),dict) else {}; print({\"code\": r.get(\"code\"), \"message\": str(r.get(\"message\"))[:80], **{k: d.get(k) for k in (\"balance\",\"chargeBalance\",\"totalBalance\",\"status\")}})" || true
+            unset key
+            # The records the choice is made from: model, measuring version, when, runtime, pass rate and failure codes counted, the last choice
+            # and the candidates pruned (no content). A measurement the runtime cut short shows here as a run of SKILL_LIST_FAILED.
+            echo "-- sponsor records"
+            sudo python3 -c "import json,collections; d=json.load(open(\"/srv/crossline/data/sponsor.json\")); [print(e.get(\"model\"), \"v\"+str(e.get(\"version\")), e[\"record\"].get(\"ranAt\"), e[\"record\"].get(\"runtimeVersion\"), round(e[\"record\"].get(\"passRate\",0),3), dict(collections.Counter(f.get(\"code\") for f in e[\"record\"].get(\"failures\",[])))) for e in d.get(\"evaluations\",[])]; print(\"lastChosen:\", (d.get(\"lastChosen\") or {}).get(\"model\")); print(\"pruned:\", {k: v.get(\"by\") for k, v in (d.get(\"pruned\") or {}).items()})" || true
+            # Which plugins a structured run keeps (skill-runner.ts ownPlugins): what the runtime listed, and the plugin sections of the owner
+            # runtime config (section headers and enabled lines only), then how many plugin MCP servers are running.
+            echo "-- plugins"
+            sudo docker logs --since 6h crossline-worker 2>&1 | grep -E "\"skill.plugins\"" | cut -c1-600 | tail -5 || true
+            sudo docker exec crossline-worker sh -c "grep -n -E \"^\\[(plugins|marketplaces)|^enabled\" /state/codex-home/config.toml" 2>/dev/null | head -30 || true
+            printf "plugin mcp servers: "; sudo docker exec crossline-worker sh -c "grep -l plugins/cache /proc/[0-9]*/cmdline 2>/dev/null | wc -l" || true
+            sudo docker logs --since 6h crossline-worker 2>&1 | grep -E "\"skill.run\"" | grep -o "\"plugins\":\"[a-z]*\"" | sort | uniq -c || true
+            # Every conformance run and every sample-interview turn of every candidate, whole (synthetic cases and a fictional person only).
+            echo "-- sponsor evaluation runs"
+            sudo sh -c "tail -n +1 /srv/crossline/data/sponsor-eval/*.jsonl 2>/dev/null" || true
             # The domains, and their status, held by the Resend account the configured key belongs to. The key never leaves the host.
             echo "-- resend domains for the configured key"
             key=$(sudo grep -E "^CROSSLINE_SMTP_PASSWORD=" /srv/crossline/app.env | cut -d= -f2-)
@@ -80,9 +133,25 @@ jobs:
             unset key
             echo "== codex"
             sudo docker exec crossline-worker /opt/codex/codex --version 2>&1 | tail -1 || true
+            # Code mode and web search need codex-code-mode-host beside the runtime.
+            sudo ls -la /srv/crossline/codex 2>&1 | head -10 || true
             curl -s -m 10 http://127.0.0.1:3211/v1/codex/status | head -c 600; echo
             # OpenAI answers an unsupported region with 403 unsupported_country; 401 means reachable.
             for u in https://auth.openai.com/ https://api.openai.com/v1/models https://chatgpt.com/; do printf "%s " $u; curl -s -m 10 -o /tmp/oa -w "%{http_code} " $u; grep -o "unsupported_country[a-z_]*" /tmp/oa | head -1; echo; done'
+      - name: Recordings
+        run: |
+          # 录音在服务器转写 from a copy of the ledger: recording events of the last three days and, per transcript, lines and speaker
+          # labels (counts only, no text or file names), then what waits for a voiceprint (names only). Read-only.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker run --rm -i -v /srv/crossline/data:/live:ro -w /repo/packages/db \
+            $(sudo docker inspect -f "{{.Config.Image}}" crossline-web) sh -c "mkdir -p /tmp/copy && cp /live/crossline.db* /tmp/copy/ && node -"' \
+            < deploy/server/recordings-report.cjs || true
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'echo "-- voiceprint files"; sudo ls /srv/crossline/data/recordings/voiceprint 2>/dev/null | sed "s/^\(........\)[^.]*/\1…/" || true
+            echo "-- speaker models"; sudo ls -la /srv/crossline/models/sensevoice 2>/dev/null | awk "{print \$5, \$9}"; sudo docker logs crossline-transcriber 2>&1 | grep -E "no_diarization|voiceprint|pass" | tail -10 || true'
+      - name: Model time per Skill
+        run: |
+          # Per Skill over the last day: waits before and at the model gate, run time and cache hits (deploy/server/skill-runs.py).
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker logs --since 24h crossline-worker 2>&1 | grep -E "skill[.](run|redo_on_main_model)" > /tmp/skill-runs.jsonl || true'
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'python3 -' < deploy/server/skill-runs.py || true
       - name: Codex device-code probe
         if: contains(github.event.head_commit.message, '[codex-probe]')
         run: |
@@ -116,38 +185,83 @@ jobs:
                 console.log([r.at.slice(5, 19), r.skill, r.model + \\\":\\\" + r.effort, r.ok ? \\\"ok\\\" : \\\"FAIL \\\" + r.error_code, \\\"repairs=\\\" + r.repairs, \\\"turns=\\\" + r.turns,
                   Math.round(r.duration_ms / 1000) + \\\"s\\\", \\\"out=\\\" + r.output_tokens, \\\"reason=\\\" + r.reasoning_tokens].join(\\\"  \\\"));
             \""
-            echo "== worker repairs and rejections"; sudo docker logs --since 48h crossline-worker 2>&1 | grep -iE "repair|reject|invalid|blocked|stall|SKILL_" | cut -c1-400 | tail -40'
+            echo "== worker repairs and rejections"; sudo docker logs --since 48h crossline-worker 2>&1 | grep -iE "repair|reject|invalid|blocked|stall|SKILL_" | cut -c1-400 | tail -40
+            echo "== interview and the model gate (3h)"; sudo docker logs --since 3h crossline-worker 2>&1 | grep -iE "onboarding|extract|model.gate|sponsor|item_forbidden|skill.stalled" | cut -c1-400 | tail -60'
+          echo "== interview extraction (deploy/server/ledger-report.cjs)"
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker run --rm -i -v /srv/crossline/data:/live:ro -w /repo/packages/db \
+            $(sudo docker inspect -f "{{.Config.Image}}" crossline-web) sh -c "mkdir -p /tmp/copy && cp /live/crossline.db* /tmp/copy/ && node -"' \
+            < deploy/server/ledger-report.cjs
       - name: Migrate the owner's ledger
         if: contains(github.event.head_commit.message, '[migrate]') || contains(github.event.head_commit.message, '[migrate-apply]')
         env:
-          APPLY: ${{ contains(github.event.head_commit.message, '[migrate-apply]') && '1' || '' }}
+          ACTION: ${{ contains(github.event.head_commit.message, '[migrate-apply]') && 'apply' || 'preview' }}
         run: |
-          # Reads /tmp/crossline-transfer.tgz (scripts/pack-for-server.ts) and runs scripts/migrate-workspace.ts --replace in a one-off
-          # container of the app image. [migrate] only previews. [migrate-apply] stops the app, copies the server ledger aside,
-          # writes, and starts the app again — also when the write fails, so the site is never left down.
-          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" "APPLY='$APPLY' sudo -E sh -s" <<'REMOTE'
+          # Reads /tmp/crossline-transfer.tgz (scripts/pack-for-server.ts) through deploy/server/ledger-sync.sh, the same script
+          # scripts/ledger-sync.ts runs over SSH from the owner's machine: [migrate] previews, [migrate-apply] stops the app, copies
+          # the server ledger aside, writes, and starts the app again — also when the write fails, so the site is never left down.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" mkdir -p /tmp/crossline-sync
+          scp -i ~/.ssh/id deploy/server/ledger-sync.sh scripts/ledger-stamp.ts scripts/migrate-workspace.ts scripts/pack-for-server.ts admin@"$HOST":/tmp/crossline-sync/
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" "sudo sh /tmp/crossline-sync/ledger-sync.sh $ACTION"
+      - name: Compare the developer's models on real work
+        if: github.event_name == 'workflow_dispatch' && startsWith(inputs.action, 'compare')
+        env:
+          ACTION: ${{ inputs.action }}
+          ARGS: ${{ inputs.args }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          # scripts/sponsor-compare.ts in a one-off container of the newest app image (pulled with the job's token and logged out again; the
+          # running app is not restarted): `compare-list` counts what each account could be compared on, `compare` starts the comparison
+          # detached (it takes about an hour and spends the developer's key), `compare-report` prints its progress and the newest report.
+          # The ledger is copied by SQLite's online backup into /srv/crossline/compare (root and the app user only); nothing writes the live one.
+          case "$ARGS" in *[!A-Za-z0-9@._,/\ +-]*) echo "args may hold only letters, digits and @._,/+- and spaces"; exit 1;; esac
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "ACTION='$ACTION' ARGS='$ARGS' TOKEN='$TOKEN' ACTOR='$ACTOR' sudo -E sh -s" <<'REMOTE'
           set -e
-          test -f /tmp/crossline-transfer.tgz || { echo "no /tmp/crossline-transfer.tgz uploaded"; exit 1; }
-          dir=/srv/crossline/import; rm -rf $dir; mkdir -p $dir; tar -xzf /tmp/crossline-transfer.tgz -C $dir; chown -R 1000:1000 $dir
-          m() { python3 -c "import json,sys;print(json.load(open('$dir/manifest.json'))[sys.argv[1]])" "$1"; }
-          ws=$(m workspaceId); from=$(m fromData); email=$(m toEmail)
-          echo "workspace $ws  from $from  to $email"
-          image=$(docker inspect -f '{{.Config.Image}}' crossline-web)
-          migrate() {
-            docker run --rm -v /srv/crossline/data:/data -v $dir:/import -w /repo "$image" /repo/node_modules/.bin/tsx scripts/migrate-workspace.ts \
-              --from-db /import/crossline.db --from-data "$from" --workspace "$ws" --to-db /data/crossline.db --to-data /data \
-              --files /import/files --to-email "$email" --replace "$@"
-          }
-          if [ -z "$APPLY" ]; then migrate; exit 0; fi
-          docker stop crossline-worker crossline-web
-          rm -f /srv/crossline/data/worker.lock
-          stamp=$(date +%Y%m%d-%H%M%S); mkdir -p /srv/crossline/backups
-          for f in crossline.db crossline.db-wal crossline.db-shm; do [ -f /srv/crossline/data/$f ] && cp -a /srv/crossline/data/$f /srv/crossline/backups/$f.$stamp; done
-          echo "server ledger copied to /srv/crossline/backups/*.$stamp"
-          status=0; migrate --apply || status=$?
-          docker start crossline-web crossline-worker
-          rm -f /tmp/crossline-transfer.tgz
-          exit $status
+          dir=/srv/crossline/compare
+          registry=ghcr.io/karolyan1215/crossline-app:beta
+          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null && timeout 600 docker pull -q "$registry" || true
+          docker logout ghcr.io >/dev/null
+          image=$registry
+          docker image inspect "$image" >/dev/null 2>&1 || image=$(docker inspect -f '{{.Config.Image}}' crossline-worker)
+          install -d -m 750 -o 1000 -g 1000 $dir $dir/in $dir/out
+          # compare <docker options> <script arguments…>; the evaluation's logs are read for each model's sample-interview replies.
+          compare() { opts="$1"; shift; docker run $opts --network host --env-file /srv/crossline/app.env -e CROSSLINE_DATA_DIR=/tmp/data \
+            -v $dir:/compare -v /srv/crossline/codex:/opt/codex:ro -v /srv/crossline/data/sponsor-eval:/evals:ro -w /repo "$image" \
+            /repo/node_modules/.bin/tsx scripts/sponsor-compare.ts "$@"; }
+          if [ "$ACTION" = compare-report ]; then
+            docker ps -a --filter name=crossline-compare --format "{{.Names}} {{.Status}}"
+            docker logs --tail 40 crossline-compare 2>&1 | tail -40 || true
+            latest=$(ls -1d $dir/out/*/ 2>/dev/null | sort | tail -1)
+            [ -n "$latest" ] || exit 0
+            status=$(docker inspect -f '{{.State.Status}}' crossline-compare 2>/dev/null || echo gone)
+            # A run from before the copies were kept in its folder left them in its container's /tmp: copied out once it has finished.
+            if [ "$status" = exited ] && [ ! -f "$latest/copies/base.db" ]; then
+              mkdir -p "$latest/copies"
+              for f in $(docker diff crossline-compare | awk '$1 == "A" && $2 ~ /^\/tmp\/crossline-compare-[^\/]+\/[^\/]+\.db(-wal|-shm)?$/ { print $2 }'); do
+                docker cp "crossline-compare:$f" "$latest/copies/"
+              done
+              chown -R 1000:1000 "$latest"
+            fi
+            if [ "$status" != running ] && [ -f "$latest/copies/base.db" ]; then
+              compare --rm report --run "/compare/out/$(basename "$latest")" --auth /compare/in/auth.db --dialogues /evals > /dev/null || true
+            fi
+            echo "== $latest"; cat "$latest/report.md" 2>/dev/null || wc -l "$latest/runs.jsonl"
+            exit 0
+          fi
+          owner=$(stat -c %u:%g /srv/crossline/data/crossline.db)
+          for name in crossline.db auth.db; do
+            docker run --rm --user "$owner" -v /srv/crossline/data:/src -v $dir/in:/out -w /repo/packages/db "$image" node -e '
+              const Database = require("better-sqlite3");
+              (async () => { const source = new Database("/src/" + process.argv[1], { fileMustExist: true }); await source.backup("/out/" + process.argv[1]); source.close(); })()
+                .catch((error) => { console.error(error.message); process.exit(1); });' "$name"
+          done
+          chown -R 1000:1000 $dir
+          if [ "$ACTION" = compare-list ]; then compare --rm list --ledger /compare/in/crossline.db; exit 0; fi
+          docker rm -f crossline-compare >/dev/null 2>&1 || true
+          # Its own ceiling, beside the app's: one Codex runtime and two model runs at a time.
+          compare "-d --name crossline-compare --memory 800m --memory-swap 800m -e NODE_OPTIONS=--max-old-space-size=384" \
+            run --ledger /compare/in/crossline.db --out /compare/out --dialogues /evals $ARGS
+          sleep 30; docker logs crossline-compare 2>&1 | tail -10
           REMOTE
       - name: Deploy
         if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
@@ -156,9 +270,36 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           # run.sh on the host is replaced by this commit's, which pulls from ghcr.io.
-          scp -i ~/.ssh/id deploy/server/run.sh deploy/server/ensure-env.sh deploy/server/ensure-swap.sh deploy/server/set-secrets.sh admin@"$HOST":/tmp/
-          ssh -i ~/.ssh/id admin@"$HOST" 'sudo install -m 755 /tmp/run.sh /tmp/ensure-env.sh /tmp/ensure-swap.sh /tmp/set-secrets.sh /srv/crossline/ && sudo sh /srv/crossline/ensure-swap.sh && sudo sh /srv/crossline/ensure-env.sh'
+          scp -i ~/.ssh/id deploy/server/run.sh deploy/server/ensure-env.sh deploy/server/ensure-swap.sh deploy/server/set-secrets.sh deploy/server/backup.sh deploy/server/watchdog.sh admin@"$HOST":/tmp/
+          ssh -i ~/.ssh/id admin@"$HOST" 'sudo install -m 755 /tmp/run.sh /tmp/ensure-env.sh /tmp/ensure-swap.sh /tmp/set-secrets.sh /tmp/backup.sh /tmp/watchdog.sh /srv/crossline/ && sudo sh /srv/crossline/ensure-swap.sh && sudo sh /srv/crossline/ensure-env.sh'
           # The job's own token pulls the private images and is logged out again; nothing long-lived is left on the host.
           ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "
             echo '$TOKEN' | sudo docker login ghcr.io -u '$ACTOR' --password-stdin &&
-            sudo sh /srv/crossline/run.sh; status=\$?; sudo docker logout ghcr.io; sudo docker image prune -f >/dev/null; exit \$status"
+            sudo env CROSSLINE_PULL_REQUIRED=1 sh /srv/crossline/run.sh; status=\$?; sudo docker logout ghcr.io; sudo docker image prune -f >/dev/null; exit \$status"
+      - name: Daily backup, the watchdog and their cron entries
+        if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
+        run: |
+          # After the containers are up again: installs the daily backup and makes the first one, so a deploy is never left without one.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo sh /srv/crossline/backup.sh --install'
+          # The watchdog that restarts a stopped or unanswering service (deploy/server/watchdog.sh), every minute.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo sh /srv/crossline/watchdog.sh --install'
+      - name: Copy the newest backup off the host
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.action == 'backup') || contains(github.event.head_commit.message, '[backup]')
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          test -n "$BACKUP_PASSPHRASE" || { echo "BACKUP_PASSPHRASE is not set: nothing leaves the host unencrypted"; exit 1; }
+          scp -i ~/.ssh/id deploy/server/backup.sh admin@"$HOST":/tmp/
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo install -m 755 /tmp/backup.sh /srv/crossline/ && sudo sh /srv/crossline/backup.sh'
+          # The newest backup and the two env files (the server's secrets, needed to read the restored logins and stored keys), streamed
+          # through openssl: the plaintext never touches the runner's disk.
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" \
+            'sudo tar -czf - -C /srv/backups --dereference latest -C /srv/crossline app.env -C /srv/assess assess.env' \
+            | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_PASSPHRASE -out crossline-backup.tgz.enc
+          ls -l crossline-backup.tgz.enc
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.action == 'backup') || contains(github.event.head_commit.message, '[backup]')
+        with:
+          name: crossline-backup-${{ github.run_id }}
+          path: crossline-backup.tgz.enc
+          retention-days: 30

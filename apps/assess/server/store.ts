@@ -26,6 +26,8 @@ export type StoredResult = {
   email: string;
   nickname: string;
   scores: Record<TypeAxisId, number>;
+  /** 「AI 替你干的」: the work the person leaned to hand to AI, from their answers (`aiDoes`); empty when they leaned to do it all. */
+  aiDoes: string[];
   code: string;
   appearance: Appearance;
   sendEmail: boolean;
@@ -45,7 +47,7 @@ export type StoredPair = { id: string; pairToken: string; inviterId: string; inv
 type ResultRow = {
   id: string; result_token: string; invite_token: string; email: string; nickname: string; scores_json: string; code: string;
   appearance_json: string; send_email: number; avatar_state: AvatarStatus["state"]; avatar_file: string; created_at: string; expires_at: string;
-  wants_json?: string; wants_updates?: number; locale?: string;
+  wants_json?: string; wants_updates?: number; ai_does_json?: string; locale?: string;
 };
 type PairRow = { id: string; pair_token: string; inviter_id: string; invitee_id: string; created_at: string };
 
@@ -80,7 +82,7 @@ export function setWants(resultId: string, wants: StoredWants): boolean {
 
 const toResult = (row: ResultRow): StoredResult => ({
   id: row.id, resultToken: row.result_token, inviteToken: row.invite_token, email: row.email, nickname: row.nickname,
-  scores: JSON.parse(row.scores_json) as Record<TypeAxisId, number>, code: row.code,
+  scores: JSON.parse(row.scores_json) as Record<TypeAxisId, number>, aiDoes: row.ai_does_json ? JSON.parse(row.ai_does_json) as string[] : [], code: row.code,
   appearance: JSON.parse(row.appearance_json) as Appearance, sendEmail: row.send_email === 1,
   avatar: { state: row.avatar_state, file: row.avatar_file }, createdAt: row.created_at, expiresAt: row.expires_at,
   ...readWants(row.wants_json), wantsUpdates: row.wants_updates ?? 0, locale: asLocale(row.locale)
@@ -196,7 +198,7 @@ export function keepOnlyNewest(result: StoredResult): number {
 }
 
 export type NewResult = {
-  email: string; nickname: string; scores: Record<TypeAxisId, number>; code: string; appearance: Appearance; sendEmail: boolean;
+  email: string; nickname: string; scores: Record<TypeAxisId, number>; aiDoes: string[]; code: string; appearance: Appearance; sendEmail: boolean;
   /** The page's language; Chinese when not given. */
   locale?: Locale;
 };
@@ -205,15 +207,15 @@ export type NewResult = {
 export function createResult(input: NewResult, now: Date = new Date()): StoredResult {
   const result: StoredResult = {
     id: randomUUID(), resultToken: newToken(), inviteToken: newToken(), email: input.email.trim().toLowerCase(), nickname: input.nickname,
-    scores: input.scores, code: input.code, appearance: input.appearance, sendEmail: input.sendEmail,
+    scores: input.scores, aiDoes: input.aiDoes, code: input.code, appearance: input.appearance, sendEmail: input.sendEmail,
     avatar: { state: "queued", file: "" }, wantsUpdates: 0, locale: input.locale ?? "zh", createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + RESULT_RETENTION_DAYS * 86_400_000).toISOString()
   };
   db().prepare(`
-    INSERT INTO results (id, result_token, invite_token, email, nickname, scores_json, code, appearance_json, send_email, avatar_state,
+    INSERT INTO results (id, result_token, invite_token, email, nickname, scores_json, ai_does_json, code, appearance_json, send_email, avatar_state,
       avatar_file, created_at, expires_at, locale)
-    VALUES (@id, @resultToken, @inviteToken, @email, @nickname, @scores, @code, @appearance, @sendEmail, 'queued', '', @createdAt, @expiresAt, @locale)`)
-    .run({ ...result, scores: JSON.stringify(result.scores), appearance: JSON.stringify(result.appearance), sendEmail: result.sendEmail ? 1 : 0 });
+    VALUES (@id, @resultToken, @inviteToken, @email, @nickname, @scores, @aiDoes, @code, @appearance, @sendEmail, 'queued', '', @createdAt, @expiresAt, @locale)`)
+    .run({ ...result, scores: JSON.stringify(result.scores), aiDoes: JSON.stringify(result.aiDoes), appearance: JSON.stringify(result.appearance), sendEmail: result.sendEmail ? 1 : 0 });
   recordedMemo = undefined;
   return result;
 }

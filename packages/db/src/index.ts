@@ -1,11 +1,11 @@
 import Database from "better-sqlite3";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { byproductArtifactId, tFor, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria, summarizeRhythm,
+import { tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria,
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
-  type ChecklistAnswer, type WorkRhythm } from "@crossline/core";
+  type ChecklistAnswer, type DomainRecordInput, type StoredDomainRecord } from "@crossline/core";
 import { handOffArtifacts } from "./artifacts";
 import { readLocale } from "./locale";
 
@@ -121,7 +121,11 @@ export type StepPlanInput = {
     schedulable: boolean; executor: "human" | "agent" | "mixed"; tickOutcome: string; covers?: string[]; why?: string;
     aiAssist?: { tool: string; how: string; minutesSaved: number };
     /** A concrete first move of at most five minutes for a person's step ("" for the assistant's steps and waits). */
-    firstAction?: string }>;
+    firstAction?: string;
+    /** What the step produces (`STEP_TYPES`), the needs it uses, and on a provide step the need it asks for (packages/core/src/steps.ts). */
+    product?: "material" | "output" | "ability" | "action"; uses?: string[]; provides?: string }>;
+  /** Material only the person has, asked for before anything that uses it (provide steps). */
+  needs?: Array<{ id: string; what: string; why: string; basis?: string; kind?: "personal" | "reference" }>;
   /** The content units read from the person's material, and what only the person can answer (packages/core/src/steps.ts). */
   units?: Array<{ id: string; title: string; docId: string; quote: string }>;
   questions?: Array<{ id: string; text: string; why: string; options: string[] }>;
@@ -135,6 +139,7 @@ export type StoredStepPlan = {
   workOrderId: string; version: number; archetypeId: string; quantity: StepPlanInput["quantity"]; rationale: string; plannedAt: string;
   units: NonNullable<StepPlanInput["units"]>; questions: NonNullable<StepPlanInput["questions"]>;
   importance?: StepPlanInput["importance"];
+  needs?: StepPlanInput["needs"];
   steps: StoredTaskStep[];
 };
 
@@ -179,11 +184,21 @@ export type StoredProject = {
 /** A file the person gave us, with the text pulled out of it: the only form in which a model ever sees it. */
 export type StoredSourceDocument = {
   id: string; ownerId: string; workspaceId: string; projectId?: string;
+  /** The `src-N` number, fixed at upload (migration 16); set by the store, never by a caller. */
+  refNo?: number;
   kind: "pdf" | "docx" | "image" | "audio" | "text";
   fileName: string; mediaType: string; sha256: string; uri: string;
   extractedText: string; extractionStatus: "pending" | "done" | "failed" | "unsupported";
   extractionNote?: string; createdAt: string;
 };
+
+/**
+ * One passage of a document's text in the full-text index (migration 19, docs/context-selection.md): what the model's `read_chunk` returns
+ * and a search hit points at. `heading` is 「文件名 · 项目 · 线」, indexed with the text, so a query naming the course finds its files.
+ */
+export type DocChunk = { id: number; documentId: string; ord: number; start: number; heading: string; body: string;
+  fileName: string; projectId?: string; identityId?: string };
+export type DocChunkHit = DocChunk & { score: number };
 
 export type StoredOnboardingSession = {
   id: string; ownerId: string; workspaceId: string; codexThreadId?: string;
@@ -198,6 +213,17 @@ export type StoredOnboardingMessage = {
 export type StoredProfileFact = {
   workspaceId: string; identityId: string; projectId: string; slot: string; value: string;
   status: "confirmed" | "inferred"; sourceRef: string; sourceQuote: string; updatedAt: string;
+  /**
+   * The numbered sentences (`evidence_sentences`) the fact rests on; `sourceQuote` is their text, filled by the system. Empty for a
+   * fact no sentence stands behind (an inference, a fact another Skill wrote from text it was given).
+   */
+  sourceSentences?: number[];
+  /** How often an answer that took effect cited it, and when last (migration 20); present only once it has been used. */
+  useCount?: number; lastUsedAt?: string;
+};
+/** One numbered sentence of a reply or a file (`segmentText`). Ids are per workspace and never reused or renumbered. */
+export type StoredSentence = {
+  id: number; sourceKind: "reply" | "document"; sourceId: string; ord: number; start: number; end: number; text: string; retired: boolean;
 };
 
 /**
@@ -222,7 +248,8 @@ export type StoredWaitingItem = {
   state: "open" | "arrived" | "cancelled";
   /** Work orders that cannot start until it arrives. */
   blocks: string[];
-  source: "analysis" | "manual" | "assistant" | "backplan" | "datepair";
+  /** `recording`: what someone else promised the person in a recording (the digest, docs/phone-recording.md). */
+  source: "analysis" | "manual" | "assistant" | "backplan" | "datepair" | "recording";
   createdAt: string; updatedAt: string;
 };
 
@@ -251,10 +278,12 @@ export type StoredModelUsage = {
   workspaceId: string; skill: string; tier: string; model: string; effort: string; spendMode: string; threadId: string;
   ok: boolean; errorCode: string; repairs: number; turns: number; inputTokens: number; cachedInputTokens: number;
   outputTokens: number; reasoningTokens: number; totalTokens: number; durationMs: number; at: string;
+  /** What the run was for when it is not the Skill's own business (`non_core`); absent reads as ''. */
+  purpose?: string;
 };
 export type ModelUsageSummary = {
   skill: string; model: string; runs: number; failed: number; repairs: number;
-  inputTokens: number; outputTokens: number; reasoningTokens: number; totalTokens: number; averageSeconds: number;
+  inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningTokens: number; totalTokens: number; averageSeconds: number;
   /** The slowest single run in the window — what a time limit has to clear, which an average hides. */
   longestSeconds: number;
 };
@@ -266,7 +295,31 @@ export type StoredPreference = {
   scope: string; text: string;
   /** How much it counts: a stated correction 1, a measured pattern more, a single manual edit less. */
   weight: number; refId: string; createdAt: string; deletedAt: string | null;
+  /** How often an answer that took effect cited it, and when last (migration 20); present only once it has been used. */
+  useCount?: number; lastUsedAt?: string;
+  /** Lapsed unused (`expireUnused`): kept and shown, never given to a model, restorable. */
+  invalidatedAt?: string;
+  /** The person kept it (restored a lapsed one): it never lapses again. */
+  confirmedAt?: string;
 };
+
+/**
+ * One lesson from past runs (migration 20, docs/token-economy.md §2): drawn by rule from the ledger or imported once from Codex's memories,
+ * for a line and a task archetype (either empty for every one). `source` is the rule (`rule:review_note` …) or `codex-memory`.
+ */
+export type StoredLesson = {
+  workspaceId: string; id: string; lineId: string | null; archetypeId: string | null; kind: "failure" | "preference" | "knowledge";
+  text: string; source: string; sourceRef: string; keywords: string; createdAt: string; useCount: number; lastUsedAt: string | null;
+  invalidatedAt: string | null;
+};
+/** Something a model was given and cited (`usedRefs`), counted when its answer takes effect. */
+export type UsedRef = { kind: "fact"; identityId: string; projectId: string; slot: string } | { kind: "pref"; id: string } | { kind: "lesson"; id: string };
+/** Preferences the person stated (not read off an edit): they come first in a context. */
+export const STATED_PREFERENCE_SOURCES: ReadonlySet<string> = new Set(["correction", "retrospective", "standard_confirmed", "relation_rejected"]);
+/** Preferences read off an edit, which lapse after `PREFERENCE_LAPSE_DAYS` unused (decided 2026-10-21). */
+export const LAPSING_PREFERENCE_SOURCES: ReadonlySet<string> = new Set(["estimate", "importance", "postpone"]);
+export const PREFERENCE_LAPSE_DAYS = 30;
+export const LESSON_LAPSE_DAYS = 60;
 
 export type StoredDiligenceReport = {
   id: string; ownerId: string; workspaceId: string; scope: string; question: string;
@@ -343,6 +396,10 @@ export type StoredEnergyObservation = {
 };
 
 export type StoredPrincipal = { id: string; betterAuthUserId: string; createdAt: string };
+export type StoredInvite = {
+  id: string; workspaceId: string; email: string; reason: string; status: "pending" | "approved" | "rejected" | "redeemed";
+  createdAt: string; codeHash?: string; decidedAt?: string; redeemedAt?: string; redeemedWorkspaceId?: string;
+};
 export type StoredWorkspace = { id: string; name: string; createdAt: string };
 export type StoredWorkspaceMember = {
   principalId: string; workspaceId: string; role: "viewer" | "member" | "owner"; createdAt: string;
@@ -407,6 +464,9 @@ export type StoredBackgroundFact = { key: string; value: string; why: string; so
  * restore has to step over an empty one rather than refuse the whole backup — while still refusing
  * if one somehow has rows, because skipping those would be losing data quietly.
  */
+/** Tables derived from others and rebuilt from them (migration 19's passages): not exported, skipped on restore, rebuilt after it. */
+const DERIVED_TABLES: readonly string[] = ["doc_chunks"];
+
 const RETIRED_TABLES = ["outbox", "identities", "projects", "milestone_versions", "insight_proposals", "skill_versions"] as const;
 
 /** Columns a migration dropped, by table. Same reason as `RETIRED_TABLES`: old snapshots still list them. */
@@ -426,7 +486,9 @@ const PERSON_EVENTS = ["ask.answered", "block.confirmed", "execution.confirmed",
   "capture.discarded", "milestone.revised", "milestone.retrospective", "approval.revoked", "risk.accepted", "ask.snoozed", "return.answered",
   // Setting up: a line or its goal changed, a batch of dates decided, a file filed. Missing these, someone in the middle of the interview
   // read as days away, and the engagement tier held back the planning their answers were for.
-  "line.created", "line.updated", "line.ranked", "lines.set_up", "dates.decided", "source.project_assigned"];
+  "line.created", "line.updated", "line.ranked", "lines.set_up", "dates.decided", "source.project_assigned",
+  // Decisions about skills the person makes on Skill 库 (2026-10-20): a script's leave, a workflow's risks accepted, a site logged in.
+  "skill.scripts_allowed", "skill.scripts_revoked", "skill.grown.consented", "skill.grown.logged_in", "skill.grown.feedback", "skill.grown.reverted", "skill.grown.unmerged"];
 const PERSON_ACTIVITY_SQL = `
   SELECT created_at AS at FROM conversation_messages WHERE workspace_id = @ws AND role = 'person' AND created_at >= @since
   UNION ALL SELECT created_at FROM onboarding_messages WHERE workspace_id = @ws AND role = 'user' AND created_at >= @since
@@ -435,12 +497,73 @@ const PERSON_ACTIVITY_SQL = `
   UNION ALL SELECT observed_at FROM energy_observations WHERE workspace_id = @ws AND source = 'self_report' AND observed_at >= @since
   UNION ALL SELECT created_at FROM events WHERE workspace_id = @ws AND created_at >= @since
     AND (type IN (${PERSON_EVENTS.map((type) => `'${type}'`).join(",")})
-      OR (type = 'task.step_progress' AND json_extract(payload_json, '$.source') IN ('user', 'person', 'confirm')))`;
+      OR (type = 'task.step_progress' AND json_extract(payload_json, '$.source') IN ('user', 'person', 'confirm'))
+      -- An undoable change made on a page (availability, shares, weights, a lock, a due day…) and an undo (2026-10-20: these were not
+      -- counted, so a plan edit on one side read as no activity and the ledger sync could copy the other side over it). Ops the worker
+      -- writes for itself carry bySystem; the daily merge's older ones are known by their inverse.
+      OR (type = 'op.applied' AND json_extract(payload_json, '$.bySystem') IS NULL
+        AND COALESCE(json_extract(payload_json, '$.inverse.kind'), '') <> 'task.unmerge')
+      OR type = 'op.undone'
+      -- A public skill the person added by its link (the scout's own finds carry no via).
+      OR (type LIKE 'skill.public.%' AND json_extract(payload_json, '$.via') = 'link'))`;
+
+/** A stored id list (`source_sentences`), tolerant of a hand-edited or empty value. */
+function sentenceIds(raw: unknown): number[] {
+  try {
+    const parsed = JSON.parse(typeof raw === "string" && raw ? raw : "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((id): id is number => Number.isInteger(id) && id > 0) : [];
+  } catch { return []; }
+}
+const questionRow = (row: Record<string, string | number | null>): LedgerQuestion => ({ id: Number(row.id), kind: row.kind as LedgerQuestion["kind"],
+  key: String(row.key), text: String(row.text), options: (() => { try { return JSON.parse(String(row.options_json ?? "[]")) as string[]; } catch { return []; } })(),
+  identityId: String(row.identity_id ?? ""), projectId: String(row.project_id ?? ""), status: row.status as LedgerQuestion["status"], answer: String(row.answer ?? ""),
+  answerSentences: sentenceIds(row.answer_sentences), ...(typeof row.repeats === "number" ? { repeats: row.repeats } : {}), askedAt: String(row.asked_at),
+  ...(row.answered_at ? { answeredAt: String(row.answered_at) } : {}) });
+const sentenceRow = (row: Record<string, string | number>): StoredSentence => ({ id: Number(row.id), sourceKind: row.source_kind as StoredSentence["sourceKind"],
+  sourceId: String(row.source_id), ord: Number(row.ord), start: Number(row.start_at), end: Number(row.end_at), text: String(row.text), retired: Number(row.retired) === 1 });
 
 export class CrosslineStore {
   readonly #db: Database.Database;
+  /**
+   * Compiled statements, kept per SQL text (2026-10-26). Every read compiled its SQL again, and one page could make several hundred
+   * reads (one pending count: ~740 settings, ~140 event lists), so compiling was a visible share of a page's time. `pluck` is reset on
+   * the way out, because a statement is shared and one caller's `.pluck()` must not change what the next caller gets.
+   */
+  readonly #statements = new Map<string, Database.Statement>();
   /** The ledger file (`:memory:` in tests); the data directory is the folder it sits in. */
   readonly file: string;
+
+  #prepare(sql: string): Database.Statement {
+    let statement = this.#statements.get(sql);
+    if (!statement) {
+      statement = this.#db.prepare(sql);
+      // Bounded: SQL is built from table names and placeholder counts, never values, but nothing should be able to grow this without end.
+      if (this.#statements.size >= 1000) this.#statements.clear();
+      this.#statements.set(sql, statement);
+    }
+    return statement.reader ? statement.pluck(false) : statement;
+  }
+
+  /**
+   * Rows of a read, kept until the ledger changes (`changeToken`, 2026-10-26). Pages read the same lists dozens of times over (one count
+   * of waiting decisions: 140 event lists, 55 milestone anchor lists, 21 work order lists). The rows are flat values and every caller maps
+   * them into new objects, so sharing them is safe; the array is never handed out, only read.
+   */
+  #rowCache: { token: string; rows: Map<string, readonly unknown[]> } = { token: "", rows: new Map() };
+  #cachedAll<T>(sql: string, params: ReadonlyArray<string | number>): readonly T[] {
+    // Inside a transaction a read may see writes that are then rolled back, which no token records: read it as it is, keep nothing.
+    if (this.#db.inTransaction) return this.#prepare(sql).all(...params) as T[];
+    const token = this.changeToken();
+    if (this.#rowCache.token !== token) this.#rowCache = { token, rows: new Map() };
+    const key = `${sql}\u0000${params.join("\u0000")}`;
+    let rows = this.#rowCache.rows.get(key);
+    if (!rows) {
+      rows = this.#prepare(sql).all(...params);
+      if (this.#rowCache.rows.size >= 256) this.#rowCache.rows.clear();
+      this.#rowCache.rows.set(key, rows);
+    }
+    return rows as readonly T[];
+  }
 
   constructor(path: string) {
     this.file = path;
@@ -728,7 +851,7 @@ export class CrosslineStore {
    */
   /** Each row the query returns (shaped like the retired `plan_changes`) becomes a `plan.change_archived` event; the migration and the restore share it. */
   #archivePlanChangeRows(query: string, params: unknown[] = []): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT OR IGNORE INTO events (event_id, owner_id, workspace_id, idempotency_key, type, entity_id, payload_json, created_at)
       SELECT lower(hex(randomblob(16))), owner_id, workspace_id, 'plan-change-archived:' || id, 'plan.change_archived', plan_version_id,
         json_object('id', id, 'planVersionId', plan_version_id, 'kind', kind, 'triggerEventId', trigger_event_id,
@@ -743,19 +866,19 @@ export class CrosslineStore {
     const params = workspaceId ? [workspaceId] : [];
     const older = `SELECT * FROM plan_versions p ${scope ? `${scope} AND` : "WHERE"} id <> (SELECT id FROM plan_versions q
       WHERE q.workspace_id = p.workspace_id ORDER BY version DESC, created_at DESC LIMIT 1)`;
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT OR IGNORE INTO events (event_id, owner_id, workspace_id, idempotency_key, type, entity_id, payload_json, created_at)
       SELECT lower(hex(randomblob(16))), owner_id, workspace_id, 'plan-version-archived:' || id, 'plan.version_archived', id,
         json_object('id', id, 'version', version, 'status', status, 'payload', json(payload_json), 'createdAt', created_at),
         strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       FROM (${older})`).run(...params);
-    this.#db.prepare(`DELETE FROM plan_versions WHERE id IN (SELECT id FROM (${older}))`).run(...params);
-    this.#db.prepare(`UPDATE plan_versions SET status = 'current' ${scope}`).run(...params);
+    this.#prepare(`DELETE FROM plan_versions WHERE id IN (SELECT id FROM (${older}))`).run(...params);
+    this.#prepare(`UPDATE plan_versions SET status = 'current' ${scope}`).run(...params);
   }
 
   #runMigrations(path: string): void {
     const has = (table: string, column: string) =>
-      (this.#db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((item) => item.name === column);
+      (this.#prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((item) => item.name === column);
 
     const migrations: Array<{ version: number; up: () => void }> = [
       // Everything through v2 is what the probe-based code used to do, restated as ordered steps. A
@@ -806,7 +929,7 @@ export class CrosslineStore {
       { version: 4, up: () => {
         for (const table of RETIRED_TABLES) {
           const rows = this.#hasTable(table)
-            ? (this.#db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count
+            ? (this.#prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count
             : 0;
           // Never drop data. These are empty everywhere they have been looked at, but a row here would
           // mean the assumption was wrong, and finding that out by deleting it is not acceptable.
@@ -840,7 +963,7 @@ export class CrosslineStore {
       { version: 5, up: () => {
         for (const table of RETIRED_TABLES) {
           if (!this.#hasTable(table)) continue;
-          const rows = (this.#db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
+          const rows = (this.#prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
           if (rows > 0) throw new Error("MIGRATION_RETIRED_TABLE_NOT_EMPTY");
           this.#db.exec(`DROP TABLE ${table}`);
         }
@@ -857,7 +980,7 @@ export class CrosslineStore {
       // one binding per Tailscale account per workspace, since there is no node id left to distinguish by.
       { version: 6, up: () => {
         if (!has("tailscale_bindings", "node_key") || this.#columnIsNotNull("tailscale_bindings", "node_key")) {
-          const rows = (this.#db.prepare("SELECT COUNT(*) AS count FROM tailscale_bindings").get() as { count: number }).count;
+          const rows = (this.#prepare("SELECT COUNT(*) AS count FROM tailscale_bindings").get() as { count: number }).count;
           if (rows > 0) throw new Error("MIGRATION_TAILSCALE_BINDINGS_NOT_EMPTY");
           this.#db.exec(`
             DROP TABLE tailscale_bindings;
@@ -1052,6 +1175,107 @@ export class CrosslineStore {
           this.#db.exec("DROP TABLE plan_changes");
         }
         this.#collapsePlanVersions();
+      } },
+      // Invite codes for the hosted beta (2026-10-18): who applied, the owner's decision, the code's hash (never the code), and which
+      // account redeemed it. `workspace_id` is the applicant's, so deleting an account deletes its application with it.
+      { version: 15, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS beta_invites (
+            id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, email TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL, code_hash TEXT, created_at TEXT NOT NULL, decided_at TEXT, redeemed_at TEXT, redeemed_workspace_id TEXT);
+          CREATE INDEX IF NOT EXISTS beta_invites_by_workspace ON beta_invites(workspace_id, created_at);
+          CREATE UNIQUE INDEX IF NOT EXISTS beta_invites_by_code ON beta_invites(code_hash) WHERE code_hash IS NOT NULL;`);
+      } },
+      // Numbered evidence (2026-10-19): the person's replies and files cut into sentences with ids the model cites instead of copying
+      // words (`evidence_sentences`), the sentences each fact rests on (`profile_facts.source_sentences`), and a document number fixed at
+      // upload (`source_documents.ref_no`): `src-N` used to be a position, so removing one file renumbered every later one and the facts
+      // and dates citing them pointed at the wrong file. Existing documents keep the number their position gives them today.
+      { version: 16, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS evidence_sentences (
+            workspace_id TEXT NOT NULL, id INTEGER NOT NULL, source_kind TEXT NOT NULL CHECK(source_kind IN ('reply','document')),
+            source_id TEXT NOT NULL, source_hash TEXT NOT NULL, ord INTEGER NOT NULL, start_at INTEGER NOT NULL, end_at INTEGER NOT NULL,
+            text TEXT NOT NULL, segmenter TEXT NOT NULL, retired INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id));
+          CREATE INDEX IF NOT EXISTS evidence_by_source ON evidence_sentences(workspace_id, source_kind, source_id, retired, ord);
+          CREATE TABLE IF NOT EXISTS workspace_counters (workspace_id TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL,
+            PRIMARY KEY(workspace_id, name));`);
+        if (!has("profile_facts", "source_sentences")) this.#db.exec("ALTER TABLE profile_facts ADD COLUMN source_sentences TEXT NOT NULL DEFAULT '[]'");
+        if (!has("source_documents", "ref_no")) {
+          this.#db.exec("ALTER TABLE source_documents ADD COLUMN ref_no INTEGER");
+          this.#numberDocuments();
+        }
+      } },
+      // The question ledger (2026-10-19): every question put to the person — the interview's, the app's own, 待决, a step plan's — once,
+      // numbered per workspace, with its answer and the sentences it was given in, so a model is shown what was already asked.
+      { version: 17, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS question_ledger (
+            workspace_id TEXT NOT NULL, id INTEGER NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('interview','ask')), key TEXT NOT NULL,
+            text TEXT NOT NULL, options_json TEXT NOT NULL DEFAULT '[]', identity_id TEXT NOT NULL DEFAULT '', project_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL CHECK(status IN ('pending','open','answered','assumed','dropped')), answer TEXT NOT NULL DEFAULT '',
+            answer_sentences TEXT NOT NULL DEFAULT '[]', repeats INTEGER, asked_at TEXT NOT NULL, answered_at TEXT, updated_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, key));
+          CREATE INDEX IF NOT EXISTS question_ledger_by_status ON question_ledger(workspace_id, status, updated_at);`);
+      } },
+      // Records (2026-10-19, docs/domain-lines.md): a wealth line's bookkeeping and a wellness line's measurements, one row per real event
+      // (`dedupe_key`: the same mail, shortcut or confirmation never writes twice). `deleted_at` keeps a removed record out of every sum
+      // while the deletion stays undoable.
+      { version: 18, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS domain_records (
+            workspace_id TEXT NOT NULL, id TEXT NOT NULL, domain TEXT NOT NULL CHECK(domain IN ('wellness','wealth')), kind TEXT NOT NULL,
+            at TEXT NOT NULL, value REAL NOT NULL, unit TEXT NOT NULL DEFAULT '', currency TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '', source TEXT NOT NULL, source_ref TEXT NOT NULL DEFAULT '', dedupe_key TEXT NOT NULL,
+            created_at TEXT NOT NULL, deleted_at TEXT,
+            PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, dedupe_key));
+          CREATE INDEX IF NOT EXISTS domain_records_by_day ON domain_records(workspace_id, domain, at);`);
+      } },
+      // The files' text as passages in a full-text index (2026-10-20, docs/context-selection.md): each about 800 characters with a heading
+      // 「文件名 · 项目 · 线」, in an FTS5 trigram table kept by triggers, so a task's context holds the passages that match it instead of
+      // every file cut blind. Derived from `source_documents` and rebuilt from it here, on restore, and whenever a file is read, re-read,
+      // filed or removed; never exported. `id` is an INTEGER PRIMARY KEY so the external-content index survives a VACUUM.
+      { version: 19, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS doc_chunks (
+            id INTEGER PRIMARY KEY, workspace_id TEXT NOT NULL, document_id TEXT NOT NULL, ord INTEGER NOT NULL, start_at INTEGER NOT NULL,
+            heading TEXT NOT NULL, body TEXT NOT NULL, UNIQUE(workspace_id, document_id, ord));
+          CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks_fts USING fts5(heading, body, content='doc_chunks', content_rowid='id', tokenize='trigram');
+          CREATE TRIGGER IF NOT EXISTS doc_chunks_ai AFTER INSERT ON doc_chunks BEGIN
+            INSERT INTO doc_chunks_fts(rowid, heading, body) VALUES (new.id, new.heading, new.body); END;
+          CREATE TRIGGER IF NOT EXISTS doc_chunks_ad AFTER DELETE ON doc_chunks BEGIN
+            INSERT INTO doc_chunks_fts(doc_chunks_fts, rowid, heading, body) VALUES ('delete', old.id, old.heading, old.body); END;
+          CREATE TRIGGER IF NOT EXISTS doc_chunks_au AFTER UPDATE ON doc_chunks BEGIN
+            INSERT INTO doc_chunks_fts(doc_chunks_fts, rowid, heading, body) VALUES ('delete', old.id, old.heading, old.body);
+            INSERT INTO doc_chunks_fts(rowid, heading, body) VALUES (new.id, new.heading, new.body); END;`);
+        this.#indexDocuments();
+      } },
+      // What the ledger learned from past runs, in place of Codex's own memories (docs/token-economy.md §2, 2026-10-21): lessons drawn by
+      // rule from what already happened (a rejected result's note, the gate's 「部分」, a step far over its cautious estimate, an error
+      // repeated in a week, the Codex memories once imported), keyed by line and archetype; and how often each fact, preference and lesson
+      // was actually used by an answer that took effect, so context is chosen by use and what is never used lapses. Not derived: exported.
+      { version: 20, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS run_lessons (
+            workspace_id TEXT NOT NULL, id TEXT NOT NULL, line_id TEXT, archetype_id TEXT,
+            kind TEXT NOT NULL CHECK(kind IN ('failure','preference','knowledge')), text TEXT NOT NULL, source TEXT NOT NULL,
+            source_ref TEXT NOT NULL DEFAULT '', keywords TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+            use_count INTEGER NOT NULL DEFAULT 0, last_used_at TEXT, invalidated_at TEXT,
+            PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, source, source_ref));
+          CREATE INDEX IF NOT EXISTS run_lessons_by_line ON run_lessons(workspace_id, line_id, archetype_id);`);
+        if (!has("profile_facts", "use_count")) this.#db.exec("ALTER TABLE profile_facts ADD COLUMN use_count INTEGER NOT NULL DEFAULT 0");
+        if (!has("profile_facts", "last_used_at")) this.#db.exec("ALTER TABLE profile_facts ADD COLUMN last_used_at TEXT");
+        if (!has("preference_entries", "use_count")) this.#db.exec("ALTER TABLE preference_entries ADD COLUMN use_count INTEGER NOT NULL DEFAULT 0");
+        if (!has("preference_entries", "last_used_at")) this.#db.exec("ALTER TABLE preference_entries ADD COLUMN last_used_at TEXT");
+        if (!has("preference_entries", "invalidated_at")) this.#db.exec("ALTER TABLE preference_entries ADD COLUMN invalidated_at TEXT");
+        if (!has("preference_entries", "confirmed_at")) this.#db.exec("ALTER TABLE preference_entries ADD COLUMN confirmed_at TEXT");
+      } },
+      // What a run was for, beside which Skill ran (2026-10-21, docs/token-economy.md §2.3): `non_core` for the background work nobody
+      // waits on that the quota saver holds to a share of the week (public skills' monthly search and reviews, line-skill compiling,
+      // research, the nightly flywheel, portrait rewrites, archetype curation, energy advice). One Skill serves both kinds (the reviewer
+      // judges public skills and planners' answers), so the Skill's name cannot say it. Older rows read as '' (not non-core).
+      { version: 21, up: () => {
+        if (!has("model_usage", "purpose")) this.#db.exec("ALTER TABLE model_usage ADD COLUMN purpose TEXT NOT NULL DEFAULT ''");
       } }
     ];
 
@@ -1073,26 +1297,26 @@ export class CrosslineStore {
   }
 
   #hasTable(name: string): boolean {
-    return Boolean(this.#db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+    return Boolean(this.#prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
   }
 
   #columnIsNotNull(table: string, column: string): boolean {
-    const info = this.#db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string; notnull: number }>;
+    const info = this.#prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string; notnull: number }>;
     return info.some((item) => item.name === column && item.notnull === 1);
   }
 
   #migrateLegacyTasks(): void {
-    const legacyTasks = this.#db.prepare(
+    const legacyTasks = this.#prepare(
       "SELECT * FROM tasks WHERE identity_id <> 'health'"
     ).all() as Array<Record<string, string | number | null>>;
-    const insert = this.#db.prepare(`
+    const insert = this.#prepare(`
       INSERT OR IGNORE INTO work_orders (
         id, owner_id, workspace_id, identity_id, project_id, milestone_id,
         intent, state, risk_tier, estimate_json, payload_json, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     this.#db.transaction(() => {
-      this.#db.prepare(`
+      this.#prepare(`
         INSERT OR IGNORE INTO capacity_commitments (
           id, owner_id, workspace_id, title, minimum_minutes, source_task_id, updated_at
         )
@@ -1122,7 +1346,7 @@ export class CrosslineStore {
   // Databases written before the promoted marker left the capture row frozen at the WorkOrder's state,
   // so the same id existed twice and could resurface as analysable. Every promoted id has a WorkOrder.
   #markPromotedCaptures(): void {
-    this.#db.prepare(`
+    this.#prepare(`
       UPDATE captures SET state = 'promoted'
       WHERE state <> 'promoted' AND EXISTS (
         SELECT 1 FROM work_orders w WHERE w.id = captures.id AND w.workspace_id = captures.workspace_id
@@ -1144,7 +1368,7 @@ export class CrosslineStore {
     return this.#db.transaction(() => {
       const event = this.appendEvent({ ...input, idempotencyKey, type: "capture.created", entityId: input.id,
         payload: { title: input.title, context: input.context, mode: "manual" } });
-      if (event.inserted) this.#db.prepare(
+      if (event.inserted) this.#prepare(
         "INSERT INTO captures (id, owner_id, workspace_id, title, context, state, audit_json, attempt) VALUES (?, ?, ?, ?, ?, 'captured', '{}', 0)"
       ).run(input.id, input.ownerId, input.workspaceId, input.title, input.context);
       return input.id;
@@ -1173,7 +1397,7 @@ export class CrosslineStore {
         ownerId: capture.ownerId, workspaceId, idempotencyKey: attempt ? `capture-discarded:${id}:${attempt}` : `capture-discarded:${id}`,
         type: "capture.discarded", entityId: id, payload: { reason: reason.trim().slice(0, 200), from: capture.state }
       });
-      this.#db.prepare("UPDATE captures SET state = 'discarded' WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
+      this.#prepare("UPDATE captures SET state = 'discarded' WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
       return { changed: true };
     })();
   }
@@ -1189,7 +1413,7 @@ export class CrosslineStore {
       const to = from === "captured" ? "captured" : "blocked";
       this.appendEvent({ ownerId: capture.ownerId, workspaceId, idempotencyKey: `capture-restored:${id}:${discards.length}`,
         type: "capture.restored", entityId: id, payload: { to } });
-      this.#db.prepare("UPDATE captures SET state = ? WHERE workspace_id = ? AND id = ?").run(to, workspaceId, id);
+      this.#prepare("UPDATE captures SET state = ? WHERE workspace_id = ? AND id = ?").run(to, workspaceId, id);
       return { changed: true };
     })();
   }
@@ -1208,13 +1432,13 @@ export class CrosslineStore {
       const context = capture.context ? `${capture.context}\n${tFor(readLocale(this, workspaceId))("补充（{{day}}）：{{text}}", { day: new Date().toISOString().slice(0, 10), text })}` : text;
       this.appendEvent({ ownerId: capture.ownerId, workspaceId, idempotencyKey: `capture-context:${id}:${capture.attempt}`,
         type: "capture.context_added", entityId: id, payload: { note: text } });
-      this.#db.prepare("UPDATE captures SET context = ? WHERE workspace_id = ? AND id = ?").run(context, workspaceId, id);
+      this.#prepare("UPDATE captures SET context = ? WHERE workspace_id = ? AND id = ?").run(context, workspaceId, id);
       return { changed: true };
     })();
   }
 
   listCaptures(workspaceId: string): StoredCapture[] {
-    const rows = this.#db.prepare("SELECT * FROM captures WHERE workspace_id = ? ORDER BY rowid").all(workspaceId) as Array<Record<string, string>>;
+    const rows = this.#prepare("SELECT * FROM captures WHERE workspace_id = ? ORDER BY rowid").all(workspaceId) as Array<Record<string, string>>;
     return rows.map((row) => ({ id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
       title: row.title!, context: row.context!, state: row.state as StoredCapture["state"],
       attempt: Number(row.attempt ?? 0), audit: JSON.parse(row.audit_json!) }));
@@ -1247,7 +1471,7 @@ export class CrosslineStore {
         || JSON.stringify(current) !== JSON.stringify(update.expectedWorkOrder)))
         throw new Error("PROPOSAL_VERSION_CHANGED");
       if (isCapture && !["analysis.proposed", "analysis.accepted", "blocked"].includes(event.type)) throw new Error("INVALID_WORK_ORDER_TRANSITION");
-      if (this.#db.prepare("SELECT 1 FROM events WHERE workspace_id = ? AND idempotency_key = ?").get(workspaceId, idempotencyKey)) {
+      if (this.#prepare("SELECT 1 FROM events WHERE workspace_id = ? AND idempotency_key = ?").get(workspaceId, idempotencyKey)) {
         return { changed: false, state };
       }
       // A blocked capture is still raw user text, so a new attempt may re-analyse it. A blocked
@@ -1255,6 +1479,8 @@ export class CrosslineStore {
       const retrying = isCapture && state === "blocked" && event.type === "analysis.proposed";
       const next = advanceWorkOrder({ ...current, state: retrying ? "captured" : state }, event);
       if (!next.ok) throw new Error(next.blocker.code);
+      // A blocked order is accepted only as the person's own completion, never by the gate or a review.
+      if (state === "blocked" && event.type === "evidence.accepted" && !event.onCompletion) throw new Error("INVALID_WORK_ORDER_TRANSITION");
       if (event.type === "analysis.accepted") {
         const context = validateAnalysisContext(update.context);
         const proposal = validateAnalysisProposal(update.proposal, context);
@@ -1289,16 +1515,29 @@ export class CrosslineStore {
           this.#mergeWorkOrderPayload(workspaceId, id, { acceptanceStandard: { fixedAt: update.occurredAt ?? new Date().toISOString(),
             lines: acceptanceStandardLines(payload.evidenceContract) } });
       }
+      // The facts and preferences the analysis said it rested on (`usedRefKeys`, resolved by the runner) count as used once the proposal
+      // takes effect, and only once: a revoked and re-approved proposal is the same answer.
+      if (!isCapture && event.type === "plan.approved") {
+        const payload = ((current as StoredWorkOrder).payload ?? {}) as { usedRefKeys?: UsedRef[]; usedRefsCounted?: boolean };
+        if (payload.usedRefKeys?.length && !payload.usedRefsCounted) {
+          this.markUsed(workspaceId, payload.usedRefKeys, update.occurredAt ?? new Date().toISOString());
+          this.#mergeWorkOrderPayload(workspaceId, id, { usedRefsCounted: true });
+        }
+      }
       const table = isCapture ? "captures" : "work_orders";
       // A promoted capture keeps its raw text and audit but stops being a capture: without this marker
       // the same id would sit in both tables at the same state and could resurface as analysable.
-      this.#db.prepare(`UPDATE ${table} SET state = ? WHERE workspace_id = ? AND id = ?`)
+      this.#prepare(`UPDATE ${table} SET state = ? WHERE workspace_id = ? AND id = ?`)
         .run(isCapture && event.type === "analysis.accepted" ? "promoted" : next.to, workspaceId, id);
       if (!isCapture) this.#recordExecutionEffects(workspaceId, id, current.ownerId, event, update);
       // A delivered task that produces an artifact hands its files to every task that uses it (docs/flywheel-and-views.md §5.5).
       if (!isCapture && (event.type === "human.completed" || event.type === "agent.delivered")) handOffArtifacts(this, workspaceId, id);
+      // An accepted task is finished, so are its steps: pressing 完成 left them at 0/3 with step 1 still 「当前」 and minutes still to go
+      // (walkthrough W-16). Steps the person skipped stay skipped.
+      if (!isCapture && next.to === "accepted") this.#prepare("UPDATE task_steps SET status = 'done', progress_quarter = 4, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND status = 'planned'")
+        .run(update.occurredAt ?? new Date().toISOString(), workspaceId, id);
       if (isCapture && update.attempt !== undefined) {
-        this.#db.prepare("UPDATE captures SET attempt = ? WHERE workspace_id = ? AND id = ?").run(update.attempt, workspaceId, id);
+        this.#prepare("UPDATE captures SET attempt = ? WHERE workspace_id = ? AND id = ?").run(update.attempt, workspaceId, id);
       }
       // Only captures carry an audit row; a promoted WorkOrder keeps its audit inside its own payload.
       if (update.audit && isCapture) this.updateAnalysisAudit(workspaceId, id, update.audit);
@@ -1318,7 +1557,7 @@ export class CrosslineStore {
     const now = notBefore(update.occurredAt ?? new Date().toISOString(), open?.interruptions.at(-1)?.resumedAt
       ?? open?.interruptions.at(-1)?.pausedAt ?? open?.startedAt);
     if (event.type === "human.started") {
-      this.#db.prepare(`
+      this.#prepare(`
         INSERT INTO executions (id, owner_id, workspace_id, work_order_id, started_at, ended_at, pause_minutes, outcome, payload_json)
         VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, ?)
       `).run(randomUUID(), ownerId, workspaceId, id, now,
@@ -1340,7 +1579,7 @@ export class CrosslineStore {
     if (event.type === "human.completed" || event.type === "agent.delivered") {
       const evidence = update.evidence ?? [];
       for (const claim of evidence) {
-        this.#db.prepare(`
+        this.#prepare(`
           INSERT INTO evidence_claims (id, owner_id, workspace_id, work_order_id, kind, uri, review_status, payload_json, created_at)
           VALUES (?, ?, ?, ?, ?, ?, 'submitted', ?, ?)
         `).run(randomUUID(), ownerId, workspaceId, id, claim.kind, claim.uri, JSON.stringify({ description: claim.description }), now);
@@ -1349,7 +1588,7 @@ export class CrosslineStore {
       if (open) {
         const checklistAnswers = update.checklistAnswers ?? [];
         const reported = update.reportedMinutes && update.reportedMinutes > 0 && update.reportedMinutes <= 24 * 60 ? update.reportedMinutes : undefined;
-        this.#db.prepare("UPDATE executions SET ended_at = ?, outcome = ?, payload_json = ? WHERE id = ?")
+        this.#prepare("UPDATE executions SET ended_at = ?, outcome = ?, payload_json = ? WHERE id = ?")
           .run(now, evidence.length ? "completed" : "completed_without_evidence",
             JSON.stringify({ durationObserved: open.durationObserved, interruptions,
               ...(checklistAnswers.length ? { checklistAnswers } : {}),
@@ -1369,34 +1608,34 @@ export class CrosslineStore {
       // (the owner's decision of 2026-10-15, `completionRule` in core): 「ECE 555 作业 2」 marked done is done, with or without a file.
       // The rule still holds for every other acceptance (the gate, a manual review, the assistant's delivery).
       if (order?.milestoneId && !submitted.length && !(event.type === "evidence.accepted" && event.onCompletion)) throw new Error("EVIDENCE_REQUIRED");
-      this.#db.prepare("UPDATE evidence_claims SET review_status = 'accepted' WHERE workspace_id = ? AND work_order_id = ? AND review_status = 'submitted'")
+      this.#prepare("UPDATE evidence_claims SET review_status = 'accepted' WHERE workspace_id = ? AND work_order_id = ? AND review_status = 'submitted'")
         .run(workspaceId, id);
       this.#recordDurationObservationIfCalibratable(workspaceId, id, ownerId, order, update.durationCalibrationBaseline);
       return;
     }
     if (event.type === "acceptance.revoked") {
-      this.#db.prepare("UPDATE evidence_claims SET review_status = 'submitted' WHERE workspace_id = ? AND work_order_id = ? AND review_status = 'accepted'")
+      this.#prepare("UPDATE evidence_claims SET review_status = 'submitted' WHERE workspace_id = ? AND work_order_id = ? AND review_status = 'accepted'")
         .run(workspaceId, id);
       return;
     }
     if (event.type === "blocked") {
-      if (open) this.#db.prepare("UPDATE executions SET ended_at = ?, outcome = 'blocked' WHERE id = ?").run(now, open.id);
-      this.#db.prepare("UPDATE evidence_claims SET review_status = 'rejected' WHERE workspace_id = ? AND work_order_id = ? AND review_status = 'submitted'")
+      if (open) this.#prepare("UPDATE executions SET ended_at = ?, outcome = 'blocked' WHERE id = ?").run(now, open.id);
+      this.#prepare("UPDATE evidence_claims SET review_status = 'rejected' WHERE workspace_id = ? AND work_order_id = ? AND review_status = 'submitted'")
         .run(workspaceId, id);
       // A reason that lives only in the ledger is a reason nobody reads; keep it on the row the UI renders.
       this.#mergeWorkOrderPayload(workspaceId, id, { blocker: { reason: event.reason, at: now } });
     }
     // A session running when its order is discarded ends with it; left open, every reader that counts an open session to now
     // (plan vs actual, the work rhythm) went on adding the wall clock — a demo order discarded mid-timer read as 350 hours of work.
-    if (event.type === "archived" && open) this.#db.prepare("UPDATE executions SET ended_at = ?, outcome = 'archived' WHERE id = ?").run(now, open.id);
+    if (event.type === "archived" && open) this.#prepare("UPDATE executions SET ended_at = ?, outcome = 'archived' WHERE id = ?").run(now, open.id);
     if (event.type === "plan.approved") this.#mergeWorkOrderPayload(workspaceId, id, { blocker: undefined });
   }
 
   #mergeWorkOrderPayload(workspaceId: string, id: string, patch: Record<string, unknown>): void {
-    const row = this.#db.prepare("SELECT payload_json FROM work_orders WHERE workspace_id = ? AND id = ?")
+    const row = this.#prepare("SELECT payload_json FROM work_orders WHERE workspace_id = ? AND id = ?")
       .get(workspaceId, id) as { payload_json: string } | undefined;
     if (!row) return;
-    this.#db.prepare("UPDATE work_orders SET payload_json = ? WHERE workspace_id = ? AND id = ?")
+    this.#prepare("UPDATE work_orders SET payload_json = ? WHERE workspace_id = ? AND id = ?")
       .run(JSON.stringify({ ...JSON.parse(row.payload_json), ...patch }), workspaceId, id);
   }
 
@@ -1433,7 +1672,7 @@ export class CrosslineStore {
   promoteCaptureManually(workspaceId: string, captureId: string, workOrder: StoredWorkOrder,
     idempotencyKey: string): { ok: true } | { ok: false; code: string } {
     return this.#db.transaction((): { ok: true } | { ok: false; code: string } => {
-      if (this.#db.prepare("SELECT 1 FROM events WHERE workspace_id = ? AND idempotency_key = ?")
+      if (this.#prepare("SELECT 1 FROM events WHERE workspace_id = ? AND idempotency_key = ?")
         .get(workspaceId, idempotencyKey)) return { ok: true };
       const capture = this.listCaptures(workspaceId).find((item) => item.id === captureId);
       if (!capture) return { ok: false, code: "CAPTURE_NOT_FOUND" };
@@ -1443,7 +1682,7 @@ export class CrosslineStore {
       if (this.listWorkOrders(workspaceId).some((item) => item.id === workOrder.id))
         return { ok: false, code: "WORK_ORDER_ID_COLLISION" };
       this.saveWorkOrder(workOrder);
-      this.#db.prepare("UPDATE captures SET state = 'promoted' WHERE workspace_id = ? AND id = ?").run(workspaceId, captureId);
+      this.#prepare("UPDATE captures SET state = 'promoted' WHERE workspace_id = ? AND id = ?").run(workspaceId, captureId);
       this.appendEvent({ ownerId: workOrder.ownerId, workspaceId, idempotencyKey,
         type: "capture.promoted_manually", entityId: captureId, payload: { workOrderId: workOrder.id } });
       return { ok: true };
@@ -1490,7 +1729,7 @@ export class CrosslineStore {
 
   #openExecution(workspaceId: string, workOrderId: string):
     { id: string; ownerId: string; startedAt: string; durationObserved: boolean; interruptions: StoredExecution["interruptions"] } | undefined {
-    const row = this.#db.prepare(
+    const row = this.#prepare(
       "SELECT id, owner_id, started_at, payload_json FROM executions WHERE workspace_id = ? AND work_order_id = ? AND ended_at IS NULL ORDER BY started_at DESC"
     ).get(workspaceId, workOrderId) as { id: string; owner_id: string; started_at: string; payload_json: string } | undefined;
     if (!row) return undefined;
@@ -1517,7 +1756,7 @@ export class CrosslineStore {
     // suggestion they confirmed) when they did — that is the only number available for work done away from the
     // timer — and otherwise by its own timer.
     type Session = { id: string; started_at: string; ended_at: string; pause_minutes: number; payload_json: string };
-    const rows = (this.#db.prepare(
+    const rows = (this.#prepare(
       "SELECT id, started_at, ended_at, pause_minutes, payload_json FROM executions WHERE workspace_id = ? AND work_order_id = ? AND ended_at IS NOT NULL ORDER BY started_at"
     ).all(workspaceId, workOrderId) as Session[])
       .map((row) => ({ row, payload: JSON.parse(row.payload_json) as { durationObserved: boolean; reportedMinutes?: number; reportedSource?: "one_tap" | "activity" } }))
@@ -1534,10 +1773,10 @@ export class CrosslineStore {
     // One observation per work order. A revoke-then-reaccept with no new session is a no-op; one with a new
     // session replaces the earlier row, whose minutes the new sum already contains — inserting beside it
     // counted them twice.
-    const existing = this.#db.prepare("SELECT execution_id, observed_minutes FROM duration_observations WHERE workspace_id = ? AND work_order_id = ?")
+    const existing = this.#prepare("SELECT execution_id, observed_minutes FROM duration_observations WHERE workspace_id = ? AND work_order_id = ?")
       .get(workspaceId, workOrderId) as { execution_id: string; observed_minutes: number } | undefined;
     if (existing?.execution_id === last.id && existing.observed_minutes === observedMinutes) return;
-    this.#db.prepare("DELETE FROM duration_observations WHERE workspace_id = ? AND work_order_id = ?").run(workspaceId, workOrderId);
+    this.#prepare("DELETE FROM duration_observations WHERE workspace_id = ? AND work_order_id = ?").run(workspaceId, workOrderId);
     this.recordDurationObservation({
       ownerId, workspaceId, workOrderId, executionId: last.id, identityId: order.identityId, family,
       observedMinutes, wallClockMinutes, pauseMinutes,
@@ -1552,7 +1791,7 @@ export class CrosslineStore {
   #writeInterruptions(executionId: string, interruptions: StoredExecution["interruptions"], durationObserved: boolean): void {
     const pausedMs = interruptions.reduce((total, item) =>
       total + (item.resumedAt ? Date.parse(item.resumedAt) - Date.parse(item.pausedAt) : 0), 0);
-    this.#db.prepare("UPDATE executions SET pause_minutes = ?, payload_json = ? WHERE id = ?")
+    this.#prepare("UPDATE executions SET pause_minutes = ?, payload_json = ? WHERE id = ?")
       .run(Math.round(pausedMs / 60_000), JSON.stringify({ durationObserved, interruptions }), executionId);
   }
 
@@ -1577,12 +1816,12 @@ export class CrosslineStore {
         const last = open.interruptions.at(-1);
         const interruptions = last && !last.resumedAt ? [...open.interruptions.slice(0, -1), { ...last, resumedAt: endedAt }] : open.interruptions;
         if (interruptions !== open.interruptions) this.#writeInterruptions(open.id, interruptions, open.durationObserved);
-        this.#db.prepare("UPDATE executions SET ended_at = ?, outcome = 'confirmed', payload_json = ? WHERE id = ?")
+        this.#prepare("UPDATE executions SET ended_at = ?, outcome = 'confirmed', payload_json = ? WHERE id = ?")
           .run(endedAt, JSON.stringify({ durationObserved: open.durationObserved, interruptions, reportedMinutes: minutes, reportedSource: session.source }), open.id);
         return { executionId: open.id, changed: true };
       }
       const id = randomUUID();
-      this.#db.prepare(`
+      this.#prepare(`
         INSERT INTO executions (id, owner_id, workspace_id, work_order_id, started_at, ended_at, pause_minutes, outcome, payload_json)
         VALUES (?, ?, ?, ?, ?, ?, 0, 'confirmed', ?)
       `).run(id, ownerId, workspaceId, workOrderId, session.startedAt, notBefore(session.endedAt, session.startedAt),
@@ -1600,7 +1839,7 @@ export class CrosslineStore {
       const open = this.#openExecution(workspaceId, workOrderId);
       if (open) return { executionId: open.id };
       const id = randomUUID();
-      this.#db.prepare(`
+      this.#prepare(`
         INSERT INTO executions (id, owner_id, workspace_id, work_order_id, started_at, ended_at, pause_minutes, outcome, payload_json)
         VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, ?)
       `).run(id, ownerId, workspaceId, workOrderId, at ?? new Date().toISOString(), JSON.stringify({ durationObserved: true, interruptions: [] }));
@@ -1637,8 +1876,8 @@ export class CrosslineStore {
 
   listExecutions(workspaceId: string, workOrderId?: string): StoredExecution[] {
     const rows = (workOrderId
-      ? this.#db.prepare("SELECT * FROM executions WHERE workspace_id = ? AND work_order_id = ? ORDER BY started_at, id").all(workspaceId, workOrderId)
-      : this.#db.prepare("SELECT * FROM executions WHERE workspace_id = ? ORDER BY started_at, id").all(workspaceId)) as Array<Record<string, string | number | null>>;
+      ? this.#prepare("SELECT * FROM executions WHERE workspace_id = ? AND work_order_id = ? ORDER BY started_at, id").all(workspaceId, workOrderId)
+      : this.#prepare("SELECT * FROM executions WHERE workspace_id = ? ORDER BY started_at, id").all(workspaceId)) as Array<Record<string, string | number | null>>;
     return rows.map((row) => {
       const payload = JSON.parse(String(row.payload_json)) as {
         durationObserved?: boolean; interruptions?: StoredExecution["interruptions"]; checklistAnswers?: ChecklistAnswer[];
@@ -1656,7 +1895,7 @@ export class CrosslineStore {
   }
 
   listEvidenceClaims(workspaceId: string): StoredEvidenceClaim[] {
-    const rows = this.#db.prepare(
+    const rows = this.#prepare(
       "SELECT * FROM evidence_claims WHERE workspace_id = ? ORDER BY created_at, id"
     ).all(workspaceId) as Array<Record<string, string>>;
     return rows.map((row) => ({
@@ -1668,7 +1907,7 @@ export class CrosslineStore {
   }
 
   saveMaterial(material: StoredMaterial): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO materials (id, owner_id, workspace_id, work_order_id, uri, media_type, source_refs_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, work_order_id, uri) DO NOTHING
@@ -1678,15 +1917,15 @@ export class CrosslineStore {
 
   listMaterials(workspaceId: string, workOrderId?: string): StoredMaterial[] {
     const rows = (workOrderId
-      ? this.#db.prepare("SELECT * FROM materials WHERE workspace_id = ? AND work_order_id = ? ORDER BY created_at, id").all(workspaceId, workOrderId)
-      : this.#db.prepare("SELECT * FROM materials WHERE workspace_id = ? ORDER BY created_at, id").all(workspaceId)) as Array<Record<string, string>>;
+      ? this.#prepare("SELECT * FROM materials WHERE workspace_id = ? AND work_order_id = ? ORDER BY created_at, id").all(workspaceId, workOrderId)
+      : this.#prepare("SELECT * FROM materials WHERE workspace_id = ? ORDER BY created_at, id").all(workspaceId)) as Array<Record<string, string>>;
     return rows.map((row) => ({ id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
       workOrderId: row.work_order_id!, uri: row.uri!, mediaType: row.media_type!,
       sourceRefs: JSON.parse(row.source_refs_json!) as string[], createdAt: row.created_at! }));
   }
 
   saveCaptureAttachment(attachment: StoredCaptureAttachment): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO capture_attachments (id, owner_id, workspace_id, capture_id, uri, media_type, file_name, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, capture_id, uri) DO NOTHING
@@ -1696,8 +1935,8 @@ export class CrosslineStore {
 
   listCaptureAttachments(workspaceId: string, captureId?: string): StoredCaptureAttachment[] {
     const rows = (captureId
-      ? this.#db.prepare("SELECT * FROM capture_attachments WHERE workspace_id = ? AND capture_id = ? ORDER BY created_at, id").all(workspaceId, captureId)
-      : this.#db.prepare("SELECT * FROM capture_attachments WHERE workspace_id = ? ORDER BY created_at, id").all(workspaceId)) as Array<Record<string, string>>;
+      ? this.#prepare("SELECT * FROM capture_attachments WHERE workspace_id = ? AND capture_id = ? ORDER BY created_at, id").all(workspaceId, captureId)
+      : this.#prepare("SELECT * FROM capture_attachments WHERE workspace_id = ? ORDER BY created_at, id").all(workspaceId)) as Array<Record<string, string>>;
     return rows.map((row) => ({ id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
       captureId: row.capture_id!, uri: row.uri!, mediaType: row.media_type!,
       fileName: row.file_name!, createdAt: row.created_at! }));
@@ -1705,64 +1944,64 @@ export class CrosslineStore {
 
   /** The day's conversation of the one input box, made on first use. */
   conversationFor(workspaceId: string, day: string, now = new Date().toISOString()): StoredConversation {
-    this.#db.prepare(`INSERT INTO conversations (id, workspace_id, day, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+    this.#prepare(`INSERT INTO conversations (id, workspace_id, day, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, day) DO NOTHING`).run(`conv-${workspaceId.slice(0, 8)}-${day}`, workspaceId, day, now, now);
-    return this.#conversation(this.#db.prepare("SELECT * FROM conversations WHERE workspace_id = ? AND day = ?").get(workspaceId, day) as Record<string, string>);
+    return this.#conversation(this.#prepare("SELECT * FROM conversations WHERE workspace_id = ? AND day = ?").get(workspaceId, day) as Record<string, string>);
   }
 
   getConversation(workspaceId: string, id: string): StoredConversation | undefined {
-    const row = this.#db.prepare("SELECT * FROM conversations WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined;
+    const row = this.#prepare("SELECT * FROM conversations WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined;
     return row ? this.#conversation(row) : undefined;
   }
 
   listConversations(workspaceId: string, limit = 60): StoredConversation[] {
-    return (this.#db.prepare("SELECT * FROM conversations WHERE workspace_id = ? ORDER BY day DESC LIMIT ?").all(workspaceId, limit) as Array<Record<string, string>>)
+    return (this.#prepare("SELECT * FROM conversations WHERE workspace_id = ? ORDER BY day DESC LIMIT ?").all(workspaceId, limit) as Array<Record<string, string>>)
       .map((row) => this.#conversation(row));
   }
 
   setConversationThread(workspaceId: string, id: string, codexThreadId: string | null): void {
-    this.#db.prepare("UPDATE conversations SET codex_thread_id = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
+    this.#prepare("UPDATE conversations SET codex_thread_id = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
       .run(codexThreadId, new Date().toISOString(), workspaceId, id);
   }
 
   appendConversationMessage(message: Omit<StoredConversationMessage, "createdAt"> & { createdAt?: string }): StoredConversationMessage {
     const createdAt = message.createdAt ?? new Date().toISOString();
-    this.#db.prepare(`INSERT INTO conversation_messages (id, workspace_id, conversation_id, role, text, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    this.#prepare(`INSERT INTO conversation_messages (id, workspace_id, conversation_id, role, text, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(message.id, message.workspaceId, message.conversationId, message.role, message.text, JSON.stringify(message.payload ?? {}), createdAt);
-    this.#db.prepare("UPDATE conversations SET updated_at = ? WHERE workspace_id = ? AND id = ?").run(createdAt, message.workspaceId, message.conversationId);
+    this.#prepare("UPDATE conversations SET updated_at = ? WHERE workspace_id = ? AND id = ?").run(createdAt, message.workspaceId, message.conversationId);
     return { ...message, payload: message.payload ?? {}, createdAt };
   }
 
   /** A card's state changes as the person acts on it (executed, edited, dismissed); the message's words never do. */
   updateConversationPayload(workspaceId: string, messageId: string, payload: Record<string, unknown>): void {
-    this.#db.prepare("UPDATE conversation_messages SET payload_json = ? WHERE workspace_id = ? AND id = ?").run(JSON.stringify(payload), workspaceId, messageId);
+    this.#prepare("UPDATE conversation_messages SET payload_json = ? WHERE workspace_id = ? AND id = ?").run(JSON.stringify(payload), workspaceId, messageId);
   }
 
   /** Only the second look (先快后准) rewrites an answer's words, and only when it changed what the card proposes. */
   updateConversationText(workspaceId: string, messageId: string, text: string): void {
-    this.#db.prepare("UPDATE conversation_messages SET text = ? WHERE workspace_id = ? AND id = ? AND role = 'assistant'").run(text, workspaceId, messageId);
+    this.#prepare("UPDATE conversation_messages SET text = ? WHERE workspace_id = ? AND id = ? AND role = 'assistant'").run(text, workspaceId, messageId);
   }
 
   getConversationMessage(workspaceId: string, id: string): StoredConversationMessage | undefined {
-    const row = this.#db.prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined;
+    const row = this.#prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined;
     return row ? this.#message(row) : undefined;
   }
 
   listConversationMessages(workspaceId: string, conversationId: string): StoredConversationMessage[] {
-    return (this.#db.prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND conversation_id = ? ORDER BY created_at, rowid")
+    return (this.#prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND conversation_id = ? ORDER BY created_at, rowid")
       .all(workspaceId, conversationId) as Array<Record<string, string>>).map((row) => this.#message(row));
   }
 
   /** The system's own messages since a moment, newest last (the nudge engine's memory, and what the worker delivers when the person is away). */
   listRecentNudges(workspaceId: string, sinceIso: string): StoredConversationMessage[] {
-    return (this.#db.prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND role = 'nudge' AND created_at >= ? ORDER BY created_at, rowid")
+    return (this.#prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND role = 'nudge' AND created_at >= ? ORDER BY created_at, rowid")
       .all(workspaceId, sinceIso) as Array<Record<string, string>>).map((row) => this.#message(row));
   }
 
   /** Every conversation is searchable (a note the person jotted lives only here). */
   searchConversationMessages(workspaceId: string, query: string, limit = 30): StoredConversationMessage[] {
     const q = `%${query.replace(/[!%_]/g, (char) => `!${char}`)}%`;
-    return (this.#db.prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND text LIKE ? ESCAPE '!' ORDER BY created_at DESC LIMIT ?")
+    return (this.#prepare("SELECT * FROM conversation_messages WHERE workspace_id = ? AND text LIKE ? ESCAPE '!' ORDER BY created_at DESC LIMIT ?")
       .all(workspaceId, q, limit) as Array<Record<string, string>>).map((row) => this.#message(row));
   }
 
@@ -1777,7 +2016,7 @@ export class CrosslineStore {
   }
 
   saveAssistantThread(thread: StoredAssistantThread): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO assistant_threads (id, owner_id, workspace_id, codex_thread_id, work_order_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET codex_thread_id = excluded.codex_thread_id, updated_at = excluded.updated_at
@@ -1786,7 +2025,7 @@ export class CrosslineStore {
   }
 
   getAssistantThread(workspaceId: string, id: string): StoredAssistantThread | undefined {
-    const row = this.#db.prepare("SELECT * FROM assistant_threads WHERE workspace_id = ? AND id = ?")
+    const row = this.#prepare("SELECT * FROM assistant_threads WHERE workspace_id = ? AND id = ?")
       .get(workspaceId, id) as Record<string, string> | undefined;
     if (!row) return undefined;
     return {
@@ -1801,17 +2040,22 @@ export class CrosslineStore {
   // One block because they are one feature: what we know about the person and where it came from.
 
   saveProject(project: StoredProject): void {
-    this.#db.prepare(`
+    const before = this.#prepare("SELECT name, identity_id FROM workspace_projects WHERE workspace_id = ? AND id = ?")
+      .get(project.workspaceId, project.id) as { name: string; identity_id: string } | undefined;
+    this.#prepare(`
       INSERT INTO workspace_projects (id, owner_id, workspace_id, identity_id, name, status, summary, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, id) DO UPDATE SET identity_id = excluded.identity_id, name = excluded.name,
         status = excluded.status, summary = excluded.summary, updated_at = excluded.updated_at
     `).run(project.id, project.ownerId, project.workspaceId, project.identityId, project.name, project.status,
       project.summary, project.createdAt, project.updatedAt);
+    // Renamed or moved to another line: its files' passages are indexed under the new heading.
+    if (before && (before.name !== project.name || before.identity_id !== project.identityId))
+      this.#refreshHeadings(project.workspaceId, "document_id IN (SELECT id FROM source_documents WHERE workspace_id = ? AND project_id = ?)", [project.workspaceId, project.id]);
   }
 
   listProjects(workspaceId: string, options: { identityId?: string; includeArchived?: boolean } = {}): StoredProject[] {
-    const rows = this.#db.prepare(
+    const rows = this.#prepare(
       "SELECT * FROM workspace_projects WHERE workspace_id = ? ORDER BY created_at, rowid"
     ).all(workspaceId) as Array<Record<string, string>>;
     return rows
@@ -1827,35 +2071,75 @@ export class CrosslineStore {
    * the row that now exists, which is the existing one on a repeat.
    */
   saveSourceDocument(doc: StoredSourceDocument): StoredSourceDocument {
-    this.#db.prepare(`
-      INSERT INTO source_documents (id, owner_id, workspace_id, project_id, kind, file_name, media_type, sha256, uri,
-        extracted_text, extraction_status, extraction_note, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(workspace_id, sha256) DO NOTHING
-    `).run(doc.id, doc.ownerId, doc.workspaceId, doc.projectId ?? null, doc.kind, doc.fileName, doc.mediaType,
-      doc.sha256, doc.uri, doc.extractedText, doc.extractionStatus, doc.extractionNote ?? null, doc.createdAt);
+    this.#db.transaction(() => {
+      if (this.#prepare("SELECT 1 FROM source_documents WHERE workspace_id = ? AND sha256 = ?").get(doc.workspaceId, doc.sha256)) return;
+      this.#prepare(`
+        INSERT INTO source_documents (id, owner_id, workspace_id, project_id, kind, file_name, media_type, sha256, uri,
+          extracted_text, extraction_status, extraction_note, created_at, ref_no)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(doc.id, doc.ownerId, doc.workspaceId, doc.projectId ?? null, doc.kind, doc.fileName, doc.mediaType,
+        doc.sha256, doc.uri, doc.extractedText, doc.extractionStatus, doc.extractionNote ?? null, doc.createdAt,
+        this.#nextNumber(doc.workspaceId, "source_documents.ref_no", "SELECT MAX(ref_no) AS n FROM source_documents WHERE workspace_id = ?"));
+      this.#indexDocument(doc.workspaceId, doc.id);
+    }).immediate();
     return this.listSourceDocuments(doc.workspaceId).find((item) => item.sha256 === doc.sha256)!;
   }
 
+  /**
+   * The next number of a per-workspace sequence that never gives a number twice, even after the row that held it is deleted: a
+   * high-water mark kept in `workspace_counters`, never below what the table itself holds (a restore or an older file has no mark).
+   * Call inside a transaction.
+   */
+  #nextNumber(workspaceId: string, name: string, maxQuery: string): number {
+    const kept = (this.#prepare("SELECT value FROM workspace_counters WHERE workspace_id = ? AND name = ?").get(workspaceId, name) as { value: number } | undefined)?.value ?? 0;
+    const held = Number((this.#prepare(maxQuery).get(workspaceId) as { n: number | null } | undefined)?.n ?? 0);
+    const next = Math.max(kept, held) + 1;
+    this.#prepare(`INSERT INTO workspace_counters (workspace_id, name, value) VALUES (?, ?, ?)
+      ON CONFLICT(workspace_id, name) DO UPDATE SET value = excluded.value`).run(workspaceId, name, next);
+    return next;
+  }
+
+  /**
+   * Read once per change of the ledger (2026-10-26): every file's whole text comes with the list (3 MB on the owner's 141 files, 34 ms a
+   * read), and one count of the decisions waiting read it 25 times. Each caller gets its own copies; the fields are all strings and numbers.
+   */
+  readonly #sourceDocuments = new Map<string, { token: string; documents: StoredSourceDocument[] }>();
+
   listSourceDocuments(workspaceId: string, options: { projectId?: string } = {}): StoredSourceDocument[] {
-    const rows = this.#db.prepare("SELECT * FROM source_documents WHERE workspace_id = ? ORDER BY created_at, rowid")
-      .all(workspaceId) as Array<Record<string, string | null>>;
-    return rows.filter((row) => !options.projectId || row.project_id === options.projectId).map((row) => ({
-      id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
-      ...(row.project_id ? { projectId: row.project_id } : {}),
-      kind: row.kind as StoredSourceDocument["kind"], fileName: row.file_name!, mediaType: row.media_type!,
-      sha256: row.sha256!, uri: row.uri!, extractedText: row.extracted_text ?? "",
+    if (this.#db.inTransaction) return this.#readSourceDocuments(workspaceId).filter((doc) => !options.projectId || doc.projectId === options.projectId);
+    const token = this.changeToken();
+    let kept = this.#sourceDocuments.get(workspaceId);
+    if (kept?.token !== token) {
+      kept = { token, documents: this.#readSourceDocuments(workspaceId) };
+      this.#sourceDocuments.set(workspaceId, kept);
+      if (this.#sourceDocuments.size > 16) this.#sourceDocuments.delete(this.#sourceDocuments.keys().next().value!);
+    }
+    return kept.documents.filter((doc) => !options.projectId || doc.projectId === options.projectId).map((doc) => ({ ...doc }));
+  }
+
+  #readSourceDocuments(workspaceId: string): StoredSourceDocument[] {
+    const rows = this.#prepare("SELECT * FROM source_documents WHERE workspace_id = ? ORDER BY created_at, rowid")
+      .all(workspaceId) as Array<Record<string, string | number | null>>;
+    return rows.map((row) => ({
+      id: String(row.id), ownerId: String(row.owner_id), workspaceId: String(row.workspace_id),
+      ...(row.project_id ? { projectId: String(row.project_id) } : {}),
+      ...(typeof row.ref_no === "number" ? { refNo: row.ref_no } : {}),
+      kind: row.kind as StoredSourceDocument["kind"], fileName: String(row.file_name), mediaType: String(row.media_type),
+      sha256: String(row.sha256), uri: String(row.uri), extractedText: String(row.extracted_text ?? ""),
       extractionStatus: row.extraction_status as StoredSourceDocument["extractionStatus"],
-      ...(row.extraction_note ? { extractionNote: row.extraction_note } : {}), createdAt: row.created_at!
+      ...(row.extraction_note ? { extractionNote: String(row.extraction_note) } : {}), createdAt: String(row.created_at)
     }));
   }
 
   /** Text extraction runs after upload, in the worker, so it is recorded separately from the file itself. */
   setSourceDocumentExtraction(workspaceId: string, id: string,
     result: { status: StoredSourceDocument["extractionStatus"]; text?: string; note?: string }): void {
-    this.#db.prepare(
-      "UPDATE source_documents SET extraction_status = ?, extracted_text = ?, extraction_note = ? WHERE workspace_id = ? AND id = ?"
-    ).run(result.status, result.text ?? "", result.note ?? null, workspaceId, id);
+    this.#db.transaction(() => {
+      this.#prepare(
+        "UPDATE source_documents SET extraction_status = ?, extracted_text = ?, extraction_note = ? WHERE workspace_id = ? AND id = ?"
+      ).run(result.status, result.text ?? "", result.note ?? null, workspaceId, id);
+      this.#indexDocument(workspaceId, id);
+    })();
   }
 
   /**
@@ -1864,20 +2148,165 @@ export class CrosslineStore {
    */
   deleteSourceDocument(workspaceId: string, id: string): { uri: string; uriInUse: boolean } | undefined {
     return this.#db.transaction(() => {
-      const row = this.#db.prepare("SELECT uri FROM source_documents WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as { uri: string } | undefined;
+      const row = this.#prepare("SELECT uri FROM source_documents WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as { uri: string } | undefined;
       if (!row) return undefined;
-      this.#db.prepare("DELETE FROM source_documents WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
-      return { uri: row.uri, uriInUse: Boolean(this.#db.prepare("SELECT 1 FROM source_documents WHERE uri = ? LIMIT 1").get(row.uri)) };
+      this.#prepare("DELETE FROM source_documents WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
+      this.#prepare("DELETE FROM doc_chunks WHERE workspace_id = ? AND document_id = ?").run(workspaceId, id);
+      // The file's words go with it; facts that cited them keep their quote but no longer point at its sentences.
+      const gone = new Set((this.#prepare("SELECT id FROM evidence_sentences WHERE workspace_id = ? AND source_kind = 'document' AND source_id = ?")
+        .all(workspaceId, id) as Array<{ id: number }>).map((sentence) => sentence.id));
+      if (gone.size) {
+        // Kept as blank, retired rows: the ids stay spent, so no later sentence takes a number an earlier turn showed for this file.
+        this.#prepare("UPDATE evidence_sentences SET retired = 1, text = '' WHERE workspace_id = ? AND source_kind = 'document' AND source_id = ?").run(workspaceId, id);
+        const facts = this.#prepare("SELECT identity_id, project_id, slot, source_sentences FROM profile_facts WHERE workspace_id = ? AND source_sentences <> '[]'")
+          .all(workspaceId) as Array<{ identity_id: string; project_id: string; slot: string; source_sentences: string }>;
+        for (const fact of facts) {
+          const ids = sentenceIds(fact.source_sentences);
+          if (ids.some((sentence) => gone.has(sentence))) this.setProfileFactSentences(workspaceId,
+            { identityId: fact.identity_id, projectId: fact.project_id, slot: fact.slot }, ids.filter((sentence) => !gone.has(sentence)));
+        }
+      }
+      return { uri: row.uri, uriInUse: Boolean(this.#prepare("SELECT 1 FROM source_documents WHERE uri = ? LIMIT 1").get(row.uri)) };
     })();
   }
 
   assignSourceDocumentProject(workspaceId: string, id: string, projectId: string | null): void {
-    this.#db.prepare("UPDATE source_documents SET project_id = ? WHERE workspace_id = ? AND id = ?")
-      .run(projectId, workspaceId, id);
+    this.#db.transaction(() => {
+      this.#prepare("UPDATE source_documents SET project_id = ? WHERE workspace_id = ? AND id = ?")
+        .run(projectId, workspaceId, id);
+      // The passages' heading names the project: filed elsewhere, they are found under the new one.
+      this.#refreshHeadings(workspaceId, "document_id = ?", [id]);
+    })();
+  }
+
+  /** The heading every passage of a document is indexed under: 「文件名 · 项目 · 线」 (「未归项目」 for a file filed under none). */
+  #headingOf(workspaceId: string, documentId: string): string | undefined {
+    const row = this.#prepare(`SELECT d.file_name AS file, p.name AS project, p.identity_id AS line FROM source_documents d
+      LEFT JOIN workspace_projects p ON p.workspace_id = d.workspace_id AND p.id = d.project_id WHERE d.workspace_id = ? AND d.id = ?`)
+      .get(workspaceId, documentId) as { file: string; project: string | null; line: string | null } | undefined;
+    return row ? [row.file, row.project ?? "未归项目", row.line ?? ""].filter(Boolean).join(" · ") : undefined; // i18n-ignore: a passage heading in the search index (model-facing)
+  }
+
+  /** Cuts one document's text into passages and indexes them, replacing what it had (none when it has no readable text). */
+  #indexDocument(workspaceId: string, documentId: string): void {
+    this.#prepare("DELETE FROM doc_chunks WHERE workspace_id = ? AND document_id = ?").run(workspaceId, documentId);
+    const row = this.#prepare("SELECT extracted_text AS text, extraction_status AS status FROM source_documents WHERE workspace_id = ? AND id = ?")
+      .get(workspaceId, documentId) as { text: string; status: string } | undefined;
+    if (!row || row.status !== "done" || !row.text.trim()) return;
+    const heading = this.#headingOf(workspaceId, documentId) ?? "";
+    const insert = this.#prepare("INSERT INTO doc_chunks (workspace_id, document_id, ord, start_at, heading, body) VALUES (?, ?, ?, ?, ?, ?)");
+    chunkText(row.text).forEach((chunk, ord) => insert.run(workspaceId, documentId, ord, chunk.start, heading, chunk.text));
+  }
+
+  /** Every document's passages again, for one workspace or all (migration 19 and a restore). */
+  #indexDocuments(workspaceId?: string): void {
+    const ids = this.#prepare(`SELECT workspace_id AS ws, id FROM source_documents ${workspaceId ? "WHERE workspace_id = ?" : ""}`)
+      .all(...(workspaceId ? [workspaceId] : [])) as Array<{ ws: string; id: string }>;
+    for (const { ws, id } of ids) this.#indexDocument(ws, id);
+  }
+
+  /** Rebuilds the passage index of one workspace from its documents. Returns how many passages it now holds. */
+  reindexDocuments(workspaceId: string): number {
+    this.#db.transaction(() => {
+      this.#prepare("DELETE FROM doc_chunks WHERE workspace_id = ?").run(workspaceId);
+      this.#indexDocuments(workspaceId);
+    })();
+    return Number((this.#prepare("SELECT COUNT(*) AS n FROM doc_chunks WHERE workspace_id = ?").get(workspaceId) as { n: number }).n);
+  }
+
+  #refreshHeadings(workspaceId: string, where: string, params: unknown[]): void {
+    const documents = this.#prepare(`SELECT DISTINCT document_id AS id FROM doc_chunks WHERE workspace_id = ? AND ${where}`)
+      .all(workspaceId, ...params) as Array<{ id: string }>;
+    const update = this.#prepare("UPDATE doc_chunks SET heading = ? WHERE workspace_id = ? AND document_id = ? AND heading <> ?");
+    for (const { id } of documents) { const heading = this.#headingOf(workspaceId, id) ?? ""; update.run(heading, workspaceId, id, heading); }
+  }
+
+  #docChunk(row: Record<string, string | number | null>): DocChunk {
+    return { id: Number(row.id), documentId: String(row.document_id), ord: Number(row.ord), start: Number(row.start_at), heading: String(row.heading),
+      body: String(row.body), fileName: String(row.file_name ?? ""), ...(row.project_id ? { projectId: String(row.project_id) } : {}),
+      ...(row.identity_id ? { identityId: String(row.identity_id) } : {}) };
+  }
+
+  /**
+   * The passages of this workspace's files that match a query, best first (docs/context-selection.md). Terms of three characters or more
+   * go through the trigram index (bm25, the heading weighted double); two-character ones (「组会」, 「HW」) are matched by LIKE and add to
+   * the score. A passage of `projectId` counts double and one of `identityId`'s line 1.4×; `within` keeps only those. Read-only.
+   */
+  searchDocChunks(workspaceId: string, query: string, options: { projectId?: string; identityId?: string; within?: "project" | "line" | "all";
+    documentIds?: string[]; limit?: number } = {}): DocChunkHit[] {
+    const terms = searchTerms(query);
+    const scores = new Map<number, number>();
+    if (terms.long.length) {
+      try {
+        const rows = this.#prepare(`SELECT c.id AS id, bm25(doc_chunks_fts, 2.0, 1.0) AS rank FROM doc_chunks_fts JOIN doc_chunks c ON c.id = doc_chunks_fts.rowid
+          WHERE doc_chunks_fts MATCH ? AND c.workspace_id = ? ORDER BY rank LIMIT 400`).all(ftsMatchExpression(terms.long), workspaceId) as Array<{ id: number; rank: number }>;
+        for (const row of rows) scores.set(row.id, -row.rank);
+      } catch { /* an expression the index cannot read finds nothing, never fails the caller */ }
+    }
+    const top = Math.max(1, ...scores.values());
+    // A two-character word alone is a weak signal (「输入」 is in every file about voice input): with longer terms in the query it only
+    // lifts passages they already found; with none, it is all there is to search by.
+    const longFound = new Set(scores.keys());
+    const like = this.#prepare("SELECT id FROM doc_chunks WHERE workspace_id = ? AND (body LIKE ? ESCAPE '!' OR heading LIKE ? ESCAPE '!') LIMIT 800");
+    for (const term of terms.short) {
+      const pattern = `%${term.replace(/[!%_]/g, (char) => `!${char}`)}%`;
+      for (const row of like.all(workspaceId, pattern, pattern) as Array<{ id: number }>)
+        if (!terms.long.length || longFound.has(row.id)) scores.set(row.id, (scores.get(row.id) ?? 0) + top * 0.3);
+    }
+    if (!scores.size) return [];
+    const ids = [...scores.keys()];
+    const rows: Array<Record<string, string | number | null>> = [];
+    for (let at = 0; at < ids.length; at += 500) {
+      const slice = ids.slice(at, at + 500);
+      rows.push(...this.#prepare(`SELECT c.*, d.file_name, d.project_id, p.identity_id FROM doc_chunks c
+        JOIN source_documents d ON d.workspace_id = c.workspace_id AND d.id = c.document_id
+        LEFT JOIN workspace_projects p ON p.workspace_id = d.workspace_id AND p.id = d.project_id
+        WHERE c.workspace_id = ? AND c.id IN (${slice.map(() => "?").join(", ")})`).all(workspaceId, ...slice) as Array<Record<string, string | number | null>>);
+    }
+    const allowed = options.documentIds ? new Set(options.documentIds) : undefined;
+    const ownProject = (chunk: DocChunk) => Boolean(options.projectId) && chunk.projectId === options.projectId;
+    const ownLine = (chunk: DocChunk) => Boolean(options.identityId) && chunk.identityId === options.identityId;
+    return rows.map((row) => this.#docChunk(row))
+      .filter((chunk) => !allowed || allowed.has(chunk.documentId))
+      .filter((chunk) => options.within === "project" ? ownProject(chunk) : options.within === "line" ? ownProject(chunk) || ownLine(chunk) : true)
+      .map((chunk) => ({ ...chunk, score: scores.get(chunk.id)! * (ownProject(chunk) ? 2 : ownLine(chunk) ? 1.4 : 1) }))
+      .sort((a, b) => b.score - a.score || a.id - b.id)
+      .slice(0, options.limit ?? 40);
+  }
+
+  /** One passage by id, only within this workspace, with the ids of the passages before and after it in its file. */
+  readDocChunk(workspaceId: string, id: number): (DocChunk & { previousId?: number; nextId?: number; total: number }) | undefined {
+    const row = this.#prepare(`SELECT c.*, d.file_name, d.project_id, p.identity_id FROM doc_chunks c
+      JOIN source_documents d ON d.workspace_id = c.workspace_id AND d.id = c.document_id
+      LEFT JOIN workspace_projects p ON p.workspace_id = d.workspace_id AND p.id = d.project_id
+      WHERE c.workspace_id = ? AND c.id = ?`).get(workspaceId, id) as Record<string, string | number | null> | undefined;
+    if (!row) return undefined;
+    const chunk = this.#docChunk(row);
+    const near = (ord: number) => (this.#prepare("SELECT id FROM doc_chunks WHERE workspace_id = ? AND document_id = ? AND ord = ?")
+      .get(workspaceId, chunk.documentId, ord) as { id: number } | undefined)?.id;
+    const previousId = near(chunk.ord - 1), nextId = near(chunk.ord + 1);
+    const total = Number((this.#prepare("SELECT COUNT(*) AS n FROM doc_chunks WHERE workspace_id = ? AND document_id = ?")
+      .get(workspaceId, chunk.documentId) as { n: number }).n);
+    return { ...chunk, total, ...(previousId !== undefined ? { previousId } : {}), ...(nextId !== undefined ? { nextId } : {}) };
+  }
+
+  /** How many passages each of the workspace's documents is cut into (a document with no readable text is absent). */
+  docChunkCounts(workspaceId: string): Map<string, number> {
+    return new Map((this.#prepare("SELECT document_id AS id, COUNT(*) AS n FROM doc_chunks WHERE workspace_id = ? GROUP BY document_id")
+      .all(workspaceId) as Array<{ id: string; n: number }>).map((row) => [row.id, Number(row.n)]));
+  }
+
+  /** A document's first passages in order (the opening of a file of the task that no search term reached). */
+  documentChunks(workspaceId: string, documentId: string, limit = 3): DocChunk[] {
+    return (this.#prepare(`SELECT c.*, d.file_name, d.project_id, p.identity_id FROM doc_chunks c
+      JOIN source_documents d ON d.workspace_id = c.workspace_id AND d.id = c.document_id
+      LEFT JOIN workspace_projects p ON p.workspace_id = d.workspace_id AND p.id = d.project_id
+      WHERE c.workspace_id = ? AND c.document_id = ? ORDER BY c.ord LIMIT ?`).all(workspaceId, documentId, limit) as Array<Record<string, string | number | null>>)
+      .map((row) => this.#docChunk(row));
   }
 
   saveOnboardingSession(session: StoredOnboardingSession): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO onboarding_sessions (id, owner_id, workspace_id, codex_thread_id, state, coverage_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, id) DO UPDATE SET codex_thread_id = excluded.codex_thread_id, state = excluded.state,
@@ -1895,14 +2324,77 @@ export class CrosslineStore {
 
   /** The workspace's current onboarding conversation: the most recently touched one. A line's own interview (`line-<id>`) is not it. */
   getLatestOnboardingSession(workspaceId: string): StoredOnboardingSession | undefined {
-    const row = this.#db.prepare(
+    const row = this.#prepare(
       "SELECT * FROM onboarding_sessions WHERE workspace_id = ? AND id NOT LIKE 'line-%' ORDER BY updated_at DESC, rowid DESC LIMIT 1"
     ).get(workspaceId) as Record<string, string> | undefined;
     return row ? this.#onboardingSessionFrom(row) : undefined;
   }
 
+  /**
+   * Records a question in the ledger (`question_ledger`) once per `key` and returns its number. A question asked again keeps its number;
+   * an answered or assumed one never goes back to open or pending (re-asking what was answered is the duplicate the ledger exists to
+   * catch), and a dropped one opens again when it is asked again.
+   */
+  recordQuestion(workspaceId: string, question: { kind: LedgerQuestion["kind"]; key: string; text: string; options?: string[]; identityId?: string;
+    projectId?: string; status: "pending" | "open" | "dropped"; repeats?: number; at: string }): number {
+    return this.#db.transaction(() => {
+      const row = this.#prepare("SELECT id, status FROM question_ledger WHERE workspace_id = ? AND key = ?").get(workspaceId, question.key) as
+        { id: number; status: LedgerQuestion["status"] } | undefined;
+      if (row) {
+        const settled = row.status === "answered" || row.status === "assumed";
+        const status = settled ? row.status : row.status === "open" && question.status === "pending" ? "open" : question.status;
+        this.#prepare(`UPDATE question_ledger SET text = ?, options_json = ?, identity_id = ?, project_id = ?, status = ?, repeats = COALESCE(?, repeats),
+          updated_at = ? WHERE workspace_id = ? AND id = ?`).run(question.text, JSON.stringify(question.options ?? []), question.identityId ?? "",
+          question.projectId ?? "", status, question.repeats ?? null, question.at, workspaceId, row.id);
+        return row.id;
+      }
+      const id = Number((this.#prepare("SELECT COALESCE(MAX(id), 0) + 1 AS id FROM question_ledger WHERE workspace_id = ?").get(workspaceId) as { id: number }).id);
+      this.#prepare(`INSERT INTO question_ledger (workspace_id, id, kind, key, text, options_json, identity_id, project_id, status, repeats, asked_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(workspaceId, id, question.kind, question.key, question.text, JSON.stringify(question.options ?? []),
+        question.identityId ?? "", question.projectId ?? "", question.status, question.repeats ?? null, question.at, question.at);
+      return id;
+    }).immediate();
+  }
+
+  /** The person's answer to a numbered question (or the assumption that stands in for one), with the sentences it was given in. */
+  answerQuestion(workspaceId: string, id: number, answer: { text: string; sentences?: number[]; status?: "answered" | "assumed"; at: string }): void {
+    this.#prepare(`UPDATE question_ledger SET status = ?, answer = ?, answer_sentences = ?, answered_at = ?, updated_at = ? WHERE workspace_id = ? AND id = ?`)
+      .run(answer.status ?? "answered", answer.text, JSON.stringify(answer.sentences ?? []), answer.at, answer.at, workspaceId, id);
+  }
+
+  /** Takes an unanswered question out of what is asked (its cause went away, or it repeated an answered one). Answers are never undone. */
+  dropQuestion(workspaceId: string, id: number, at: string): void {
+    this.#prepare("UPDATE question_ledger SET status = 'dropped', updated_at = ? WHERE workspace_id = ? AND id = ? AND status IN ('pending','open')")
+      .run(at, workspaceId, id);
+  }
+
+  listQuestions(workspaceId: string, options: { kind?: LedgerQuestion["kind"]; statuses?: LedgerQuestion["status"][]; keyPrefix?: string } = {}): LedgerQuestion[] {
+    const rows = this.#prepare("SELECT * FROM question_ledger WHERE workspace_id = ? ORDER BY id").all(workspaceId) as Array<Record<string, string | number | null>>;
+    return rows.map(questionRow).filter((question) => (!options.kind || question.kind === options.kind)
+      && (!options.statuses || options.statuses.includes(question.status)) && (!options.keyPrefix || question.key.startsWith(options.keyPrefix)));
+  }
+
+  questionByKey(workspaceId: string, key: string): LedgerQuestion | undefined {
+    const row = this.#prepare("SELECT * FROM question_ledger WHERE workspace_id = ? AND key = ?").get(workspaceId, key) as Record<string, string | number | null> | undefined;
+    return row ? questionRow(row) : undefined;
+  }
+
+  /**
+   * Runs several writes as one transaction: all of them land or none does. The interview's extraction writes facts, projects, dates and the
+   * portrait from one answer, and a throw half-way used to leave half of it written and the run to be repeated over it.
+   */
+  atomically<T>(work: () => T): T {
+    return this.#db.transaction(work).immediate();
+  }
+
+  /** Every interview conversation of the workspace, the line interviews included. */
+  listOnboardingSessions(workspaceId: string): StoredOnboardingSession[] {
+    return (this.#prepare("SELECT * FROM onboarding_sessions WHERE workspace_id = ? ORDER BY created_at, rowid").all(workspaceId) as Array<Record<string, string>>)
+      .map((row) => this.#onboardingSessionFrom(row));
+  }
+
   getOnboardingSession(workspaceId: string, id: string): StoredOnboardingSession | undefined {
-    const row = this.#db.prepare("SELECT * FROM onboarding_sessions WHERE workspace_id = ? AND id = ?")
+    const row = this.#prepare("SELECT * FROM onboarding_sessions WHERE workspace_id = ? AND id = ?")
       .get(workspaceId, id) as Record<string, string> | undefined;
     return row ? this.#onboardingSessionFrom(row) : undefined;
   }
@@ -1910,10 +2402,10 @@ export class CrosslineStore {
   /** Appends at the next sequence number, atomically, and returns it. */
   appendOnboardingMessage(message: Omit<StoredOnboardingMessage, "seq">): number {
     return this.#db.transaction(() => {
-      const next = (this.#db.prepare(
+      const next = (this.#prepare(
         "SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM onboarding_messages WHERE workspace_id = ? AND session_id = ?"
       ).get(message.workspaceId, message.sessionId) as { n: number }).n;
-      this.#db.prepare(
+      this.#prepare(
         "INSERT INTO onboarding_messages (session_id, workspace_id, seq, role, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?)"
       ).run(message.sessionId, message.workspaceId, next, message.role, JSON.stringify(message.content), message.createdAt);
       return next;
@@ -1921,7 +2413,7 @@ export class CrosslineStore {
   }
 
   listOnboardingMessages(workspaceId: string, sessionId: string): StoredOnboardingMessage[] {
-    const rows = this.#db.prepare(
+    const rows = this.#prepare(
       "SELECT * FROM onboarding_messages WHERE workspace_id = ? AND session_id = ? ORDER BY seq"
     ).all(workspaceId, sessionId) as Array<Record<string, string | number>>;
     return rows.map((row) => ({ sessionId: String(row.session_id), workspaceId: String(row.workspace_id),
@@ -1934,9 +2426,9 @@ export class CrosslineStore {
    * downgraded back to `inferred` by a later guess: confirming is a human act and inferring is not.
    */
   upsertProfileFact(fact: StoredProfileFact): void {
-    this.#db.prepare(`
-      INSERT INTO profile_facts (workspace_id, identity_id, project_id, slot, value, status, source_ref, source_quote, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    this.#prepare(`
+      INSERT INTO profile_facts (workspace_id, identity_id, project_id, slot, value, status, source_ref, source_quote, source_sentences, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, identity_id, project_id, slot) DO UPDATE SET
         value = CASE WHEN profile_facts.status = 'confirmed' AND excluded.status = 'inferred'
           THEN profile_facts.value ELSE excluded.value END,
@@ -1945,25 +2437,74 @@ export class CrosslineStore {
           THEN profile_facts.source_ref ELSE excluded.source_ref END,
         source_quote = CASE WHEN profile_facts.status = 'confirmed' AND excluded.status = 'inferred'
           THEN profile_facts.source_quote ELSE excluded.source_quote END,
+        source_sentences = CASE WHEN profile_facts.status = 'confirmed' AND excluded.status = 'inferred'
+          THEN profile_facts.source_sentences ELSE excluded.source_sentences END,
         updated_at = excluded.updated_at
     `).run(fact.workspaceId, fact.identityId, fact.projectId, fact.slot, fact.value, fact.status,
-      fact.sourceRef, fact.sourceQuote, fact.updatedAt);
+      fact.sourceRef, fact.sourceQuote, JSON.stringify(fact.sourceSentences ?? []), fact.updatedAt);
+  }
+
+  /** Gives a fact its sentences without touching anything else (facts written before numbered evidence). */
+  setProfileFactSentences(workspaceId: string, key: { identityId: string; projectId: string; slot: string }, ids: number[]): void {
+    this.#prepare("UPDATE profile_facts SET source_sentences = ? WHERE workspace_id = ? AND identity_id = ? AND project_id = ? AND slot = ?")
+      .run(JSON.stringify(ids), workspaceId, key.identityId, key.projectId, key.slot);
+  }
+
+  /**
+   * The numbered sentences of one reply or file, cut on first use and kept: ids are per workspace, given once, and never move, so a
+   * citation stored today means the same words next year. When the source's text changed (a file read again), its old sentences are
+   * retired, never renumbered or deleted, and the new text gets new ids.
+   */
+  ensureEvidence(workspaceId: string, sourceKind: StoredSentence["sourceKind"], sourceId: string, text: string): StoredSentence[] {
+    const hash = createHash("sha256").update(text).digest("hex").slice(0, 32);
+    return this.#db.transaction(() => {
+      const current = this.#prepare("SELECT source_hash FROM evidence_sentences WHERE workspace_id = ? AND source_kind = ? AND source_id = ? AND retired = 0 LIMIT 1")
+        .get(workspaceId, sourceKind, sourceId) as { source_hash: string } | undefined;
+      if (current?.source_hash === hash) return this.sentencesOf(workspaceId, sourceKind, sourceId);
+      if (current) this.#prepare("UPDATE evidence_sentences SET retired = 1 WHERE workspace_id = ? AND source_kind = ? AND source_id = ?")
+        .run(workspaceId, sourceKind, sourceId);
+      const segments = segmentText(text);
+      // Reserve the whole run of ids at once: never one a removed file's sentence held.
+      const first = this.#nextNumber(workspaceId, "evidence_sentences.id", "SELECT MAX(id) AS n FROM evidence_sentences WHERE workspace_id = ?");
+      if (segments.length > 1) this.#prepare("UPDATE workspace_counters SET value = ? WHERE workspace_id = ? AND name = ?")
+        .run(first + segments.length - 1, workspaceId, "evidence_sentences.id");
+      const next = first;
+      const insert = this.#prepare(`INSERT INTO evidence_sentences (workspace_id, id, source_kind, source_id, source_hash, ord, start_at, end_at, text, segmenter, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const at = new Date().toISOString();
+      segments.forEach((segment, ord) => insert.run(workspaceId, next + ord, sourceKind, sourceId, hash, ord, segment.start, segment.end,
+        segment.text, SEGMENTER_VERSION, at));
+      return this.sentencesOf(workspaceId, sourceKind, sourceId);
+    }).immediate();
+  }
+
+  /** The current (not retired) sentences of one source, in order. */
+  sentencesOf(workspaceId: string, sourceKind: StoredSentence["sourceKind"], sourceId: string): StoredSentence[] {
+    return (this.#prepare("SELECT * FROM evidence_sentences WHERE workspace_id = ? AND source_kind = ? AND source_id = ? AND retired = 0 ORDER BY ord")
+      .all(workspaceId, sourceKind, sourceId) as Array<Record<string, string | number>>).map(sentenceRow);
+  }
+
+  /** Sentences by id, retired ones included (a stored citation still reads the words it was made on). */
+  sentencesById(workspaceId: string, ids: number[]): StoredSentence[] {
+    if (!ids.length) return [];
+    return (this.#prepare(`SELECT * FROM evidence_sentences WHERE workspace_id = ? AND id IN (${ids.map(() => "?").join(",")}) ORDER BY id`)
+      .all(workspaceId, ...ids) as Array<Record<string, string | number>>).map(sentenceRow);
   }
 
   listProfileFacts(workspaceId: string, options: { identityId?: string; projectId?: string } = {}): StoredProfileFact[] {
-    const rows = this.#db.prepare(
-      "SELECT * FROM profile_facts WHERE workspace_id = ? ORDER BY identity_id, project_id, slot"
-    ).all(workspaceId) as Array<Record<string, string>>;
+    const rows = this.#cachedAll<Record<string, string>>("SELECT * FROM profile_facts WHERE workspace_id = ? ORDER BY identity_id, project_id, slot", [workspaceId]);
     return rows.filter((row) => (!options.identityId || row.identity_id === options.identityId)
       && (options.projectId === undefined || row.project_id === options.projectId))
       .map((row) => ({ workspaceId: row.workspace_id!, identityId: row.identity_id!, projectId: row.project_id ?? "",
         slot: row.slot!, value: row.value!, status: row.status as StoredProfileFact["status"],
-        sourceRef: row.source_ref!, sourceQuote: row.source_quote ?? "", updatedAt: row.updated_at! }));
+        sourceRef: row.source_ref!, sourceQuote: row.source_quote ?? "", updatedAt: row.updated_at!,
+        ...(sentenceIds(row.source_sentences).length ? { sourceSentences: sentenceIds(row.source_sentences) } : {}),
+        ...(Number(row.use_count ?? 0) > 0 ? { useCount: Number(row.use_count) } : {}), ...(row.last_used_at ? { lastUsedAt: String(row.last_used_at) } : {}) }));
   }
 
   /** The person rejecting a fact the interview inferred (or correcting one it got wrong). */
   deleteProfileFact(workspaceId: string, identityId: string, projectId: string, slot: string): boolean {
-    return this.#db.prepare(
+    return this.#prepare(
       "DELETE FROM profile_facts WHERE workspace_id = ? AND identity_id = ? AND project_id = ? AND slot = ?"
     ).run(workspaceId, identityId, projectId, slot).changes > 0;
   }
@@ -1974,29 +2515,48 @@ export class CrosslineStore {
    */
   recordActivityReading(input: { workspaceId: string; at: string; intervalSeconds: number; app: string; title: string; category: string; idle: boolean }): void {
     const end = new Date(Date.parse(input.at) + input.intervalSeconds * 1000).toISOString();
-    const last = this.#db.prepare("SELECT id, end_at, app, title, category, idle FROM activity_segments WHERE workspace_id = ? ORDER BY id DESC LIMIT 1")
+    const last = this.#prepare("SELECT id, end_at, app, title, category, idle FROM activity_segments WHERE workspace_id = ? ORDER BY id DESC LIMIT 1")
       .get(input.workspaceId) as { id: number; end_at: string; app: string; title: string; category: string; idle: number } | undefined;
     const sameWindow = last && last.app === input.app && last.title === input.title && last.category === input.category && Boolean(last.idle) === input.idle;
     // A reading that arrives more than two intervals after the last one is a gap (asleep, worker off), not a continuation.
     const close = last && Date.parse(input.at) - Date.parse(last.end_at) <= input.intervalSeconds * 2000;
     if (sameWindow && close && Date.parse(end) > Date.parse(last.end_at)) {
-      this.#db.prepare("UPDATE activity_segments SET end_at = ? WHERE id = ?").run(end, last.id);
+      this.#prepare("UPDATE activity_segments SET end_at = ? WHERE id = ?").run(end, last.id);
       return;
     }
-    this.#db.prepare("INSERT INTO activity_segments (workspace_id, start_at, end_at, app, title, category, idle) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    this.#prepare("INSERT INTO activity_segments (workspace_id, start_at, end_at, app, title, category, idle) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .run(input.workspaceId, input.at, end, input.app, input.title, input.category, input.idle ? 1 : 0);
+  }
+
+  /**
+   * A linked device's segments (docs/device-mode.md): everything from `sinceIso` on is replaced by what the device sent. They arrive with
+   * no title at all — the column is written empty here, whatever the caller has — and `app` is the device's opaque token, not a name.
+   */
+  replaceDeviceActivitySegments(workspaceId: string, sinceIso: string, segments: Array<{ start: string; end: string; app: string; category: string; idle: boolean }>): number {
+    return this.#db.transaction(() => {
+      this.#prepare("DELETE FROM activity_segments WHERE workspace_id = ? AND start_at >= ?").run(workspaceId, sinceIso);
+      const insert = this.#prepare("INSERT INTO activity_segments (workspace_id, start_at, end_at, app, title, category, idle) VALUES (?, ?, ?, ?, '', ?, ?)");
+      let written = 0;
+      for (const segment of segments) if (segment.start >= sinceIso) { insert.run(workspaceId, segment.start, segment.end, segment.app, segment.category, segment.idle ? 1 : 0); written += 1; }
+      return written;
+    }).immediate();
+  }
+
+  /** Every segment of a workspace goes (a device's detail consent turned off). */
+  deleteActivitySegments(workspaceId: string): number {
+    return Number(this.#prepare("DELETE FROM activity_segments WHERE workspace_id = ?").run(workspaceId).changes);
   }
 
   /** Segments that ended after `sinceIso`, without their titles. */
   listActivitySegments(workspaceId: string, sinceIso: string): StoredActivitySegment[] {
-    const rows = this.#db.prepare("SELECT start_at, end_at, app, category, idle FROM activity_segments WHERE workspace_id = ? AND end_at >= ? ORDER BY start_at")
+    const rows = this.#prepare("SELECT start_at, end_at, app, category, idle FROM activity_segments WHERE workspace_id = ? AND end_at >= ? ORDER BY start_at")
       .all(workspaceId, sinceIso) as Array<{ start_at: string; end_at: string; app: string; category: string; idle: number }>;
     return rows.map((row) => ({ workspaceId, start: row.start_at, end: row.end_at, app: row.app, category: row.category, idle: Boolean(row.idle) }));
   }
 
   /** The newest entries with their titles, for the one screen that shows the person what is kept. */
   recentActivityEntries(workspaceId: string, limit: number): RecentActivityEntry[] {
-    const rows = this.#db.prepare("SELECT start_at, end_at, app, title, category, idle FROM activity_segments WHERE workspace_id = ? ORDER BY id DESC LIMIT ?")
+    const rows = this.#prepare("SELECT start_at, end_at, app, title, category, idle FROM activity_segments WHERE workspace_id = ? ORDER BY id DESC LIMIT ?")
       .all(workspaceId, limit) as Array<{ start_at: string; end_at: string; app: string; title: string; category: string; idle: number }>;
     return rows.map((row) => ({ workspaceId, start: row.start_at, end: row.end_at, app: row.app, title: row.title, category: row.category, idle: Boolean(row.idle) }));
   }
@@ -2006,24 +2566,36 @@ export class CrosslineStore {
    * `rowsBefore` are deleted. Returns how many titles were blanked and rows deleted.
    */
   pruneActivity(workspaceId: string, titlesBefore: string, rowsBefore: string): { blanked: number; deleted: number } {
-    const blanked = this.#db.prepare("UPDATE activity_segments SET title = '' WHERE workspace_id = ? AND end_at < ? AND title <> ''").run(workspaceId, titlesBefore).changes;
-    const deleted = this.#db.prepare("DELETE FROM activity_segments WHERE workspace_id = ? AND end_at < ?").run(workspaceId, rowsBefore).changes;
+    const blanked = this.#prepare("UPDATE activity_segments SET title = '' WHERE workspace_id = ? AND end_at < ? AND title <> ''").run(workspaceId, titlesBefore).changes;
+    const deleted = this.#prepare("DELETE FROM activity_segments WHERE workspace_id = ? AND end_at < ?").run(workspaceId, rowsBefore).changes;
     return { blanked: Number(blanked), deleted: Number(deleted) };
   }
 
   /** Blanks every stored title, whatever its age. */
   clearActivityTitles(workspaceId: string): number {
-    return Number(this.#db.prepare("UPDATE activity_segments SET title = '' WHERE workspace_id = ? AND title <> ''").run(workspaceId).changes);
+    return Number(this.#prepare("UPDATE activity_segments SET title = '' WHERE workspace_id = ? AND title <> ''").run(workspaceId).changes);
   }
 
   saveModelUsage(usage: StoredModelUsage): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO model_usage (workspace_id, skill, tier, model, effort, spend_mode, thread_id, ok, error_code, repairs, turns,
-        input_tokens, cached_input_tokens, output_tokens, reasoning_tokens, total_tokens, duration_ms, at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        input_tokens, cached_input_tokens, output_tokens, reasoning_tokens, total_tokens, duration_ms, at, purpose)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(usage.workspaceId, usage.skill, usage.tier, usage.model, usage.effort, usage.spendMode, usage.threadId, usage.ok ? 1 : 0,
       usage.errorCode, usage.repairs, usage.turns, usage.inputTokens, usage.cachedInputTokens, usage.outputTokens, usage.reasoningTokens,
-      usage.totalTokens, usage.durationMs, usage.at);
+      usage.totalTokens, usage.durationMs, usage.at, usage.purpose ?? "");
+  }
+
+  /**
+   * Token sums since `sinceIso` per purpose and model: what the weighted cost of a span is computed from (weights and prices are linear,
+   * so sums are enough; `runCost` in core applies them). The quota saver reads the person's week with it.
+   */
+  modelUsageByPurpose(workspaceId: string, sinceIso: string): Array<{ purpose: string; model: string; runs: number; inputTokens: number; cachedInputTokens: number; outputTokens: number }> {
+    return (this.#prepare(`
+      SELECT purpose, model, COUNT(*) AS runs, SUM(input_tokens) AS input_tokens, SUM(cached_input_tokens) AS cached_input_tokens, SUM(output_tokens) AS output_tokens
+      FROM model_usage WHERE workspace_id = ? AND at >= ? GROUP BY purpose, model
+    `).all(workspaceId, sinceIso) as Array<Record<string, string | number>>).map((row) => ({ purpose: String(row.purpose), model: String(row.model),
+      runs: Number(row.runs), inputTokens: Number(row.input_tokens), cachedInputTokens: Number(row.cached_input_tokens), outputTokens: Number(row.output_tokens) }));
   }
 
   /** Per Skill and model since `sinceIso`, biggest spender first. */
@@ -2033,80 +2605,176 @@ export class CrosslineStore {
    */
   addPreference(entry: Omit<StoredPreference, "id" | "createdAt" | "deletedAt"> & { createdAt?: string }): StoredPreference {
     const createdAt = entry.createdAt ?? new Date().toISOString();
-    const existing = entry.refId ? this.#db.prepare("SELECT id FROM preference_entries WHERE workspace_id = ? AND source = ? AND ref_id = ? AND deleted_at IS NULL")
+    const existing = entry.refId ? this.#prepare("SELECT id FROM preference_entries WHERE workspace_id = ? AND source = ? AND ref_id = ? AND deleted_at IS NULL")
       .get(entry.workspaceId, entry.source, entry.refId) as { id: string } | undefined : undefined;
     const id = existing?.id ?? `pref-${randomUUID()}`;
-    this.#db.prepare(`INSERT INTO preference_entries (workspace_id, id, source, scope, text, weight, ref_id, created_at, deleted_at)
+    // A signal given again is live again, whatever lapsed before.
+    this.#prepare(`INSERT INTO preference_entries (workspace_id, id, source, scope, text, weight, ref_id, created_at, deleted_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(workspace_id, id) DO UPDATE SET scope = excluded.scope, text = excluded.text,
-      weight = excluded.weight, created_at = excluded.created_at`)
+      weight = excluded.weight, created_at = excluded.created_at, invalidated_at = NULL`)
       .run(entry.workspaceId, id, entry.source, entry.scope, entry.text.slice(0, 500), entry.weight, entry.refId, createdAt);
     return { ...entry, id, createdAt, deletedAt: null };
   }
 
   /**
-   * The live preferences as the lines a model is given: those for one of `scopes` or for everything, the weightiest and newest first,
-   * at most `limit`. Every analysis, step plan and milestone design reads them through here.
+   * The live preferences a model is given: those for one of `scopes` or for everything, at most `limit` — what the person stated (or kept)
+   * first, then the most used, the most recently used, the weightiest, the newest (decided 2026-10-21). Every analysis, step plan and
+   * milestone design reads them through here; a lapsed one is left out.
    */
-  preferenceLines(workspaceId: string, scopes: string[], limit = 20): string[] {
+  preferenceEntries(workspaceId: string, scopes: string[], limit = 20): StoredPreference[] {
     const wanted = new Set([...scopes, "all"]);
+    const stated = (entry: StoredPreference) => Number(Boolean(entry.confirmedAt) || STATED_PREFERENCE_SOURCES.has(entry.source));
     return this.listPreferences(workspaceId).filter((entry) => wanted.has(entry.scope) || scopes.some((scope) => entry.scope.startsWith(`${scope}:`)))
-      .sort((a, b) => b.weight - a.weight || b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((entry) => entry.text);
+      .sort((a, b) => stated(b) - stated(a) || (b.useCount ?? 0) - (a.useCount ?? 0) || (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? "")
+        || b.weight - a.weight || b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
   }
 
-  listPreferences(workspaceId: string, options: { includeDeleted?: boolean } = {}): StoredPreference[] {
-    const rows = this.#db.prepare(`SELECT * FROM preference_entries WHERE workspace_id = ?${options.includeDeleted ? "" : " AND deleted_at IS NULL"} ORDER BY created_at DESC`)
+  /** `preferenceEntries` as the lines a model is given. */
+  preferenceLines(workspaceId: string, scopes: string[], limit = 20): string[] {
+    return this.preferenceEntries(workspaceId, scopes, limit).map((entry) => entry.text);
+  }
+
+  /** `includeInvalidated`: lapsed entries too (Settings lists them to restore). */
+  listPreferences(workspaceId: string, options: { includeDeleted?: boolean; includeInvalidated?: boolean } = {}): StoredPreference[] {
+    const rows = this.#prepare(`SELECT * FROM preference_entries WHERE workspace_id = ?${options.includeDeleted ? "" : " AND deleted_at IS NULL"}${
+      options.includeInvalidated ? "" : " AND invalidated_at IS NULL"} ORDER BY created_at DESC`)
       .all(workspaceId) as Array<Record<string, string | number | null>>;
     return rows.map((row) => ({ workspaceId, id: String(row.id), source: String(row.source) as StoredPreference["source"], scope: String(row.scope),
       text: String(row.text), weight: Number(row.weight), refId: String(row.ref_id ?? ""), createdAt: String(row.created_at),
-      deletedAt: row.deleted_at === null ? null : String(row.deleted_at) }));
+      deletedAt: row.deleted_at === null ? null : String(row.deleted_at),
+      ...(Number(row.use_count ?? 0) > 0 ? { useCount: Number(row.use_count) } : {}), ...(row.last_used_at ? { lastUsedAt: String(row.last_used_at) } : {}),
+      ...(row.invalidated_at ? { invalidatedAt: String(row.invalidated_at) } : {}), ...(row.confirmed_at ? { confirmedAt: String(row.confirmed_at) } : {}) }));
+  }
+
+  /** The person keeping a lapsed preference: live again and confirmed, so it never lapses again. */
+  restorePreference(workspaceId: string, id: string, at = new Date().toISOString()): boolean {
+    return this.#prepare(`UPDATE preference_entries SET invalidated_at = NULL, confirmed_at = ? WHERE workspace_id = ? AND id = ?
+      AND deleted_at IS NULL AND invalidated_at IS NOT NULL`).run(at, workspaceId, id).changes > 0;
+  }
+
+  /**
+   * Keeps one lesson. A rule offers the same `source` + `sourceRef` every day it runs, so a lesson is written once — a lapsed one is not
+   * written again; `inserted` says whether this call added it.
+   */
+  saveLesson(input: Omit<StoredLesson, "id" | "useCount" | "lastUsedAt" | "invalidatedAt" | "createdAt"> & { createdAt?: string }): { inserted: boolean; id: string } {
+    const id = `lesson-${randomUUID()}`;
+    const inserted = this.#prepare(`INSERT OR IGNORE INTO run_lessons (workspace_id, id, line_id, archetype_id, kind, text, source, source_ref, keywords, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.workspaceId, id, input.lineId || null, input.archetypeId || null, input.kind,
+      input.text.trim().slice(0, 300), input.source, input.sourceRef, input.keywords.slice(0, 300), input.createdAt ?? new Date().toISOString()).changes > 0;
+    if (inserted) return { inserted, id };
+    const row = this.#prepare("SELECT id FROM run_lessons WHERE workspace_id = ? AND source = ? AND source_ref = ?")
+      .get(input.workspaceId, input.source, input.sourceRef) as { id: string };
+    return { inserted, id: row.id };
+  }
+
+  listLessons(workspaceId: string, options: { includeInvalidated?: boolean } = {}): StoredLesson[] {
+    const rows = this.#prepare(`SELECT * FROM run_lessons WHERE workspace_id = ?${options.includeInvalidated ? "" : " AND invalidated_at IS NULL"} ORDER BY created_at, rowid`)
+      .all(workspaceId) as Array<Record<string, string | number | null>>;
+    return rows.map((row) => ({ workspaceId, id: String(row.id), lineId: row.line_id === null ? null : String(row.line_id),
+      archetypeId: row.archetype_id === null ? null : String(row.archetype_id), kind: String(row.kind) as StoredLesson["kind"], text: String(row.text),
+      source: String(row.source), sourceRef: String(row.source_ref), keywords: String(row.keywords), createdAt: String(row.created_at),
+      useCount: Number(row.use_count), lastUsedAt: row.last_used_at === null ? null : String(row.last_used_at),
+      invalidatedAt: row.invalidated_at === null ? null : String(row.invalidated_at) }));
+  }
+
+  /** What an answer that took effect cited (`usedRefs`): each counted once more, used now. Returns how many rows moved. */
+  markUsed(workspaceId: string, refs: UsedRef[], at = new Date().toISOString()): number {
+    const fact = this.#prepare("UPDATE profile_facts SET use_count = use_count + 1, last_used_at = ? WHERE workspace_id = ? AND identity_id = ? AND project_id = ? AND slot = ?");
+    const pref = this.#prepare("UPDATE preference_entries SET use_count = use_count + 1, last_used_at = ? WHERE workspace_id = ? AND id = ?");
+    const lesson = this.#prepare("UPDATE run_lessons SET use_count = use_count + 1, last_used_at = ? WHERE workspace_id = ? AND id = ?");
+    return this.#db.transaction(() => refs.reduce((sum, ref) => sum + (ref.kind === "fact" ? fact.run(at, workspaceId, ref.identityId, ref.projectId, ref.slot)
+      : ref.kind === "pref" ? pref.run(at, workspaceId, ref.id) : lesson.run(at, workspaceId, ref.id)).changes, 0))();
+  }
+
+  /**
+   * What lapses unused (decided 2026-10-21; no model call): a preference read off an edit (estimate, importance, postponing) not cited for
+   * 30 days, unless the person kept it; a lesson not cited for 60. Neither is deleted: Settings lists a lapsed preference to restore.
+   */
+  expireUnused(workspaceId: string, now = new Date()): { preferences: number; lessons: number } {
+    const at = now.toISOString();
+    const before = (days: number) => new Date(now.getTime() - days * 86_400_000).toISOString();
+    const sources = [...LAPSING_PREFERENCE_SOURCES];
+    const preferences = this.#prepare(`UPDATE preference_entries SET invalidated_at = ? WHERE workspace_id = ? AND deleted_at IS NULL
+      AND invalidated_at IS NULL AND confirmed_at IS NULL AND source IN (${sources.map(() => "?").join(", ")}) AND COALESCE(last_used_at, created_at) < ?`)
+      .run(at, workspaceId, ...sources, before(PREFERENCE_LAPSE_DAYS)).changes;
+    const lessons = this.#prepare("UPDATE run_lessons SET invalidated_at = ? WHERE workspace_id = ? AND invalidated_at IS NULL AND COALESCE(last_used_at, created_at) < ?")
+      .run(at, workspaceId, before(LESSON_LAPSE_DAYS)).changes;
+    return { preferences, lessons };
   }
 
   saveLearnedArchetype(workspaceId: string, archetype: { id: string; label: string } & Record<string, unknown>, basis: unknown, at = new Date().toISOString()): void {
-    this.#db.prepare(`INSERT INTO learned_archetypes (workspace_id, id, label, archetype_json, basis_json, created_at, retired_at) VALUES (?, ?, ?, ?, ?, ?, NULL)
+    this.#prepare(`INSERT INTO learned_archetypes (workspace_id, id, label, archetype_json, basis_json, created_at, retired_at) VALUES (?, ?, ?, ?, ?, ?, NULL)
       ON CONFLICT(workspace_id, id) DO UPDATE SET label = excluded.label, archetype_json = excluded.archetype_json, basis_json = excluded.basis_json, retired_at = NULL`)
       .run(workspaceId, archetype.id, archetype.label, JSON.stringify(archetype), JSON.stringify(basis ?? {}), at);
   }
 
   listLearnedArchetypes(workspaceId: string, options: { includeRetired?: boolean } = {}): Array<{ id: string; label: string; archetype: unknown; basis: unknown; createdAt: string; retiredAt: string | null }> {
-    const rows = this.#db.prepare(`SELECT * FROM learned_archetypes WHERE workspace_id = ?${options.includeRetired ? "" : " AND retired_at IS NULL"} ORDER BY created_at`)
+    const rows = this.#prepare(`SELECT * FROM learned_archetypes WHERE workspace_id = ?${options.includeRetired ? "" : " AND retired_at IS NULL"} ORDER BY created_at`)
       .all(workspaceId) as Array<Record<string, string | null>>;
     return rows.map((row) => ({ id: String(row.id), label: String(row.label), archetype: JSON.parse(String(row.archetype_json)),
       basis: JSON.parse(String(row.basis_json ?? "{}")), createdAt: String(row.created_at), retiredAt: row.retired_at ?? null }));
   }
 
   retireLearnedArchetype(workspaceId: string, id: string, at = new Date().toISOString()): boolean {
-    return this.#db.prepare("UPDATE learned_archetypes SET retired_at = ? WHERE workspace_id = ? AND id = ? AND retired_at IS NULL").run(at, workspaceId, id).changes > 0;
+    return this.#prepare("UPDATE learned_archetypes SET retired_at = ? WHERE workspace_id = ? AND id = ? AND retired_at IS NULL").run(at, workspaceId, id).changes > 0;
   }
 
   /** The person removing something the system learned: it stops reaching any model, and stays on record as removed. */
   deletePreference(workspaceId: string, id: string, at = new Date().toISOString()): boolean {
-    return this.#db.prepare("UPDATE preference_entries SET deleted_at = ? WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL").run(at, workspaceId, id).changes > 0;
+    return this.#prepare("UPDATE preference_entries SET deleted_at = ? WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL").run(at, workspaceId, id).changes > 0;
   }
 
   /** Tokens and runs per UTC day since `sinceIso`, oldest first: the settings page's seven-day trend. */
   dailyModelUsage(workspaceId: string, sinceIso: string): Array<{ day: string; runs: number; totalTokens: number }> {
-    const rows = this.#db.prepare(`
+    const rows = this.#prepare(`
       SELECT substr(at, 1, 10) AS day, COUNT(*) AS runs, SUM(total_tokens) AS total_tokens
       FROM model_usage WHERE workspace_id = ? AND at >= ? GROUP BY day ORDER BY day
     `).all(workspaceId, sinceIso) as Array<{ day: string; runs: number; total_tokens: number }>;
     return rows.map((row) => ({ day: row.day, runs: Number(row.runs), totalTokens: Number(row.total_tokens) }));
   }
 
+  /** Runs that ended in failure since `sinceIso`, per Skill and code (a lesson's rule reads repeats). */
+  failedModelRuns(workspaceId: string, sinceIso: string): Array<{ skill: string; errorCode: string; runs: number; lastAt: string }> {
+    return (this.#prepare(`SELECT skill, error_code, COUNT(*) AS runs, MAX(at) AS last_at FROM model_usage WHERE workspace_id = ? AND at >= ? AND ok = 0
+      AND error_code <> '' GROUP BY skill, error_code ORDER BY runs DESC`).all(workspaceId, sinceIso) as Array<{ skill: string; error_code: string; runs: number; last_at: string }>)
+      .map((row) => ({ skill: row.skill, errorCode: row.error_code, runs: Number(row.runs), lastAt: row.last_at }));
+  }
+
+  /** The workspace each Codex thread ran for, from `model_usage` (importing Codex's memories into the right account). */
+  threadWorkspaces(threadIds: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    const query = this.#prepare("SELECT workspace_id FROM model_usage WHERE thread_id = ? GROUP BY workspace_id");
+    for (const threadId of new Set(threadIds)) {
+      const rows = query.all(threadId) as Array<{ workspace_id: string }>;
+      // A thread seen under two workspaces cannot be placed; it is skipped rather than given to either.
+      if (rows.length === 1) out.set(threadId, rows[0]!.workspace_id);
+    }
+    return out;
+  }
+
+  /** Finished work whose observed minutes passed `ratio` × the analysis's cautious (p85) estimate. */
+  durationOverruns(workspaceId: string, ratio: number): Array<{ workOrderId: string; observedMinutes: number; p85Minutes: number; observedAt: string }> {
+    return (this.#prepare(`SELECT work_order_id, observed_minutes, COALESCE(llm_p85_minutes, baseline_p85_minutes) AS p85, observed_at FROM duration_observations
+      WHERE workspace_id = ? AND censored = 0 AND COALESCE(llm_p85_minutes, baseline_p85_minutes) > 0
+        AND observed_minutes > ? * COALESCE(llm_p85_minutes, baseline_p85_minutes)`).all(workspaceId, ratio) as Array<Record<string, string | number>>)
+      .map((row) => ({ workOrderId: String(row.work_order_id), observedMinutes: Number(row.observed_minutes), p85Minutes: Number(row.p85), observedAt: String(row.observed_at) }));
+  }
+
   /** Each Skill's latest run: when, and whether it ended well (the background tasks page). */
   lastModelRuns(workspaceId: string): Array<{ skill: string; at: string; ok: boolean }> {
-    return (this.#db.prepare(`SELECT skill, at, ok FROM model_usage m WHERE workspace_id = ? AND at = (SELECT MAX(at) FROM model_usage x WHERE x.workspace_id = m.workspace_id AND x.skill = m.skill)`)
+    return (this.#prepare(`SELECT skill, at, ok FROM model_usage m WHERE workspace_id = ? AND at = (SELECT MAX(at) FROM model_usage x WHERE x.workspace_id = m.workspace_id AND x.skill = m.skill)`)
       .all(workspaceId) as Array<{ skill: string; at: string; ok: number }>).map((row) => ({ skill: row.skill, at: row.at, ok: row.ok === 1 }));
   }
 
   summarizeModelUsage(workspaceId: string, sinceIso: string): ModelUsageSummary[] {
-    const rows = this.#db.prepare(`
+    const rows = this.#prepare(`
       SELECT skill, model, COUNT(*) AS runs, SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed, SUM(repairs) AS repairs,
-        SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(reasoning_tokens) AS reasoning_tokens,
+        SUM(input_tokens) AS input_tokens, SUM(cached_input_tokens) AS cached_input_tokens, SUM(output_tokens) AS output_tokens, SUM(reasoning_tokens) AS reasoning_tokens,
         SUM(total_tokens) AS total_tokens, AVG(duration_ms) AS avg_ms, MAX(duration_ms) AS max_ms
       FROM model_usage WHERE workspace_id = ? AND at >= ? GROUP BY skill, model ORDER BY total_tokens DESC, runs DESC
     `).all(workspaceId, sinceIso) as Array<Record<string, number | string>>;
     return rows.map((row) => ({ skill: String(row.skill), model: String(row.model), runs: Number(row.runs), failed: Number(row.failed),
-      repairs: Number(row.repairs), inputTokens: Number(row.input_tokens), outputTokens: Number(row.output_tokens),
+      repairs: Number(row.repairs), inputTokens: Number(row.input_tokens), cachedInputTokens: Number(row.cached_input_tokens), outputTokens: Number(row.output_tokens),
       reasoningTokens: Number(row.reasoning_tokens), totalTokens: Number(row.total_tokens), averageSeconds: Math.round(Number(row.avg_ms) / 100) / 10, longestSeconds: Math.round(Number(row.max_ms) / 100) / 10 }));
   }
 
@@ -2120,15 +2788,15 @@ export class CrosslineStore {
     usage: Array<{ id: number; skill: string; ok: boolean; code: string; repairs: number; ms: number; input: number; cached: number; output: number; at: string }>;
     rounds: Array<{ seq: number; createdAt: string; stage?: string }>;
   } {
-    const events = (this.#db.prepare("SELECT rowid AS row, type, entity_id, payload_json, created_at FROM events WHERE workspace_id = ? AND rowid > ? ORDER BY rowid LIMIT ?")
+    const events = (this.#prepare("SELECT rowid AS row, type, entity_id, payload_json, created_at FROM events WHERE workspace_id = ? AND rowid > ? ORDER BY rowid LIMIT ?")
       .all(workspaceId, cursor.eventRow, limit) as Array<{ row: number; type: string; entity_id: string; payload_json: string; created_at: string }>)
       .map((row) => ({ row: Number(row.row), type: row.type, entityId: row.entity_id, createdAt: row.created_at,
         payload: (() => { try { return JSON.parse(row.payload_json) as unknown; } catch { return {}; } })() }));
-    const usage = (this.#db.prepare(`SELECT id, skill, ok, error_code, repairs, duration_ms, input_tokens, cached_input_tokens, output_tokens, at
+    const usage = (this.#prepare(`SELECT id, skill, ok, error_code, repairs, duration_ms, input_tokens, cached_input_tokens, output_tokens, at
       FROM model_usage WHERE workspace_id = ? AND id > ? ORDER BY id LIMIT ?`).all(workspaceId, cursor.usageId, limit) as Array<Record<string, string | number>>)
       .map((row) => ({ id: Number(row.id), skill: String(row.skill), ok: Number(row.ok) === 1, code: String(row.error_code), repairs: Number(row.repairs),
         ms: Number(row.duration_ms), input: Number(row.input_tokens), cached: Number(row.cached_input_tokens), output: Number(row.output_tokens), at: String(row.at) }));
-    const rounds = (this.#db.prepare(`SELECT user.seq AS seq, user.created_at AS created_at,
+    const rounds = (this.#prepare(`SELECT user.seq AS seq, user.created_at AS created_at,
         (SELECT content_json FROM onboarding_messages a WHERE a.workspace_id = user.workspace_id AND a.session_id = user.session_id
           AND a.role = 'assistant' AND a.seq < user.seq ORDER BY a.seq DESC LIMIT 1) AS asked
       FROM onboarding_messages user WHERE user.workspace_id = ? AND user.role = 'user' AND user.created_at > ? ORDER BY user.created_at LIMIT ?`)
@@ -2145,7 +2813,7 @@ export class CrosslineStore {
     // A save that does not mention the artifact references (an edited date from the input box) keeps the stored ones.
     const stored = anchor.outputs === undefined || anchor.inputs === undefined
       ? this.listMilestoneAnchors(anchor.workspaceId).find((item) => item.milestoneId === anchor.milestoneId) : undefined;
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO milestone_anchors (workspace_id, milestone_id, stage, deadline, baseline, target, stakeholders_json,
         source_fact_ids_json, depends_on_json, updated_at, outputs_json, inputs_json)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2160,7 +2828,7 @@ export class CrosslineStore {
 
   saveWaitingItem(item: Omit<StoredWaitingItem, "createdAt" | "updatedAt"> & { createdAt?: string }): { inserted: boolean } {
     const now = new Date().toISOString();
-    const result = this.#db.prepare(`
+    const result = this.#prepare(`
       INSERT INTO waiting_items (id, owner_id, workspace_id, title, who, expected_at, approximate, follow_up_at, state, blocks_json, source, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
     `).run(item.id, item.ownerId, item.workspaceId, item.title, item.who, item.expectedAt, item.approximate ? 1 : 0,
@@ -2171,7 +2839,7 @@ export class CrosslineStore {
   }
 
   listWaitingItems(workspaceId: string, options: { state?: StoredWaitingItem["state"] } = {}): StoredWaitingItem[] {
-    const rows = this.#db.prepare(`SELECT * FROM waiting_items WHERE workspace_id = ?${options.state ? " AND state = ?" : ""} ORDER BY follow_up_at, id`)
+    const rows = this.#prepare(`SELECT * FROM waiting_items WHERE workspace_id = ?${options.state ? " AND state = ?" : ""} ORDER BY follow_up_at, id`)
       .all(...(options.state ? [workspaceId, options.state] : [workspaceId])) as Array<Record<string, string | number>>;
     return rows.map((row) => ({ id: String(row.id), ownerId: String(row.owner_id), workspaceId: String(row.workspace_id),
       title: String(row.title), who: String(row.who), expectedAt: String(row.expected_at), approximate: Number(row.approximate) === 1,
@@ -2187,7 +2855,7 @@ export class CrosslineStore {
       const added = blocks.filter((block) => !item.blocks.includes(block));
       if (!added.length) return { changed: false };
       const next = [...item.blocks, ...added];
-      this.#db.prepare("UPDATE waiting_items SET blocks_json = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
+      this.#prepare("UPDATE waiting_items SET blocks_json = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
         .run(JSON.stringify(next), new Date().toISOString(), workspaceId, id);
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.blocks_added:${id}:${next.join(",")}`, type: "waiting.blocks_added",
         entityId: id, payload: { added } });
@@ -2208,9 +2876,9 @@ export class CrosslineStore {
       const now = new Date().toISOString();
       if (answer.kind === "deferred") {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(answer.followUpAt)) throw new Error("WAITING_FOLLOW_UP_INVALID");
-        this.#db.prepare("UPDATE waiting_items SET follow_up_at = ?, updated_at = ? WHERE workspace_id = ? AND id = ?").run(answer.followUpAt, now, workspaceId, id);
+        this.#prepare("UPDATE waiting_items SET follow_up_at = ?, updated_at = ? WHERE workspace_id = ? AND id = ?").run(answer.followUpAt, now, workspaceId, id);
       } else {
-        this.#db.prepare("UPDATE waiting_items SET state = ?, updated_at = ? WHERE workspace_id = ? AND id = ?").run(answer.kind, now, workspaceId, id);
+        this.#prepare("UPDATE waiting_items SET state = ?, updated_at = ? WHERE workspace_id = ? AND id = ?").run(answer.kind, now, workspaceId, id);
       }
       const attempt = this.listEvents(workspaceId, { type: ["waiting.arrived", "waiting.cancelled", "waiting.deferred"], entityId: id }).length;
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.${answer.kind}:${id}:${attempt}`, type: `waiting.${answer.kind}`, entityId: id,
@@ -2228,7 +2896,7 @@ export class CrosslineStore {
       const item = this.listWaitingItems(workspaceId).find((row) => row.id === id);
       if (!item) throw new Error("WAITING_ITEM_NOT_FOUND");
       if (item.state === "open" && item.followUpAt === followUpAt) return { changed: false };
-      this.#db.prepare("UPDATE waiting_items SET state = 'open', follow_up_at = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
+      this.#prepare("UPDATE waiting_items SET state = 'open', follow_up_at = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
         .run(followUpAt, new Date().toISOString(), workspaceId, id);
       const attempt = this.listEvents(workspaceId, { type: "waiting.reopened", entityId: id }).length;
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.reopened:${id}:${attempt}`, type: "waiting.reopened", entityId: id,
@@ -2248,16 +2916,17 @@ export class CrosslineStore {
       const now = new Date().toISOString();
       const kept = (previous?.steps ?? []).filter((step) => step.status !== "planned");
       const keptIds = new Set(kept.map((step) => step.id));
-      this.#db.prepare("DELETE FROM task_steps WHERE workspace_id = ? AND work_order_id = ? AND status = 'planned'").run(workspaceId, workOrderId);
-      this.#db.prepare(`INSERT INTO task_step_plans (workspace_id, work_order_id, version, archetype_id, quantity_json, rationale, planned_at, detail_json)
+      this.#prepare("DELETE FROM task_steps WHERE workspace_id = ? AND work_order_id = ? AND status = 'planned'").run(workspaceId, workOrderId);
+      this.#prepare(`INSERT INTO task_step_plans (workspace_id, work_order_id, version, archetype_id, quantity_json, rationale, planned_at, detail_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, work_order_id) DO UPDATE SET version = excluded.version,
         archetype_id = excluded.archetype_id, quantity_json = excluded.quantity_json, rationale = excluded.rationale, planned_at = excluded.planned_at,
         detail_json = excluded.detail_json`)
         .run(workspaceId, workOrderId, version, plan.archetypeId, JSON.stringify(plan.quantity), plan.rationale, now,
-          JSON.stringify({ units: plan.units ?? [], questions: plan.questions ?? [], ...(plan.importance ? { importance: plan.importance } : {}) }));
+          JSON.stringify({ units: plan.units ?? [], questions: plan.questions ?? [], ...(plan.importance ? { importance: plan.importance } : {}),
+            ...(plan.needs?.length ? { needs: plan.needs } : {}) }));
       // New ids continue after the kept ones so a dependency on a done step still points at it.
       const offset = kept.length;
-      const insert = this.#db.prepare(`INSERT INTO task_steps (workspace_id, work_order_id, id, seq, role, title, deliverable, done_criterion, share,
+      const insert = this.#prepare(`INSERT INTO task_steps (workspace_id, work_order_id, id, seq, role, title, deliverable, done_criterion, share,
         p25_minutes, p50_minutes, p85_minutes, depends_on_json, not_before, due_by, schedulable, executor, tick_outcome, status, progress_quarter, updated_at, detail_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', 0, ?, ?)`);
       const rename = new Map(plan.steps.map((step, index) => [step.id, keptIds.has(step.id) ? step.id : `v${version}s${index + 1}`]));
@@ -2266,7 +2935,8 @@ export class CrosslineStore {
         insert.run(workspaceId, workOrderId, rename.get(step.id)!, offset + index, step.role, step.title, step.deliverable, step.doneCriterion,
           step.share, step.estimate.p25Minutes, step.estimate.p50Minutes, step.estimate.p85Minutes,
           JSON.stringify(step.dependsOn.map((dep) => rename.get(dep) ?? dep)), step.notBefore, step.dueBy, step.schedulable ? 1 : 0,
-          step.executor, step.tickOutcome, now, JSON.stringify({ covers: step.covers ?? [], why: step.why ?? "", ...(step.aiAssist?.tool ? { aiAssist: step.aiAssist } : {}), ...(step.firstAction ? { firstAction: step.firstAction } : {}) }));
+          step.executor, step.tickOutcome, now, JSON.stringify({ covers: step.covers ?? [], why: step.why ?? "", ...(step.aiAssist?.tool ? { aiAssist: step.aiAssist } : {}), ...(step.firstAction ? { firstAction: step.firstAction } : {}),
+            ...(step.product ? { product: step.product } : {}), ...(step.uses?.length ? { uses: step.uses } : {}), ...(step.provides ? { provides: step.provides } : {}) }));
       });
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_planned:${workOrderId}:${version}`, type: "task.steps_planned",
         entityId: workOrderId, payload: { version, archetypeId: plan.archetypeId, steps: plan.steps.length, kept: kept.length, reason } });
@@ -2279,11 +2949,11 @@ export class CrosslineStore {
   }
 
   listStepPlans(workspaceId: string, workOrderId?: string): StoredStepPlan[] {
-    const plans = this.#db.prepare(`SELECT * FROM task_step_plans WHERE workspace_id = ?${workOrderId ? " AND work_order_id = ?" : ""}`)
-      .all(...(workOrderId ? [workspaceId, workOrderId] : [workspaceId])) as Array<Record<string, string | number>>;
+    const plans = this.#cachedAll<Record<string, string | number>>(`SELECT * FROM task_step_plans WHERE workspace_id = ?${workOrderId ? " AND work_order_id = ?" : ""}`,
+      workOrderId ? [workspaceId, workOrderId] : [workspaceId]);
     if (!plans.length) return [];
-    const steps = this.#db.prepare(`SELECT * FROM task_steps WHERE workspace_id = ?${workOrderId ? " AND work_order_id = ?" : ""} ORDER BY work_order_id, seq`)
-      .all(...(workOrderId ? [workspaceId, workOrderId] : [workspaceId])) as Array<Record<string, string | number>>;
+    const steps = this.#cachedAll<Record<string, string | number>>(`SELECT * FROM task_steps WHERE workspace_id = ?${workOrderId ? " AND work_order_id = ?" : ""} ORDER BY work_order_id, seq`,
+      workOrderId ? [workspaceId, workOrderId] : [workspaceId]);
     const byOrder = new Map<string, StoredTaskStep[]>();
     for (const row of steps) {
       const list = byOrder.get(String(row.work_order_id)) ?? [];
@@ -2293,14 +2963,15 @@ export class CrosslineStore {
         dependsOn: JSON.parse(String(row.depends_on_json)) as string[], notBefore: String(row.not_before), dueBy: String(row.due_by),
         schedulable: Number(row.schedulable) === 1, executor: row.executor as StoredTaskStep["executor"], tickOutcome: String(row.tick_outcome),
         status: row.status as StoredTaskStep["status"], progressQuarter: Number(row.progress_quarter), updatedAt: String(row.updated_at),
-        ...(JSON.parse(String(row.detail_json ?? "{}")) as { covers?: string[]; why?: string; aiAssist?: { tool: string; how: string; minutesSaved: number }; firstAction?: string }) });
+        ...(JSON.parse(String(row.detail_json ?? "{}")) as Pick<StoredTaskStep, "covers" | "why" | "aiAssist" | "firstAction" | "product" | "uses" | "provides">) });
       byOrder.set(String(row.work_order_id), list);
     }
     return plans.map((row) => ({ workOrderId: String(row.work_order_id), version: Number(row.version), archetypeId: String(row.archetype_id),
       quantity: JSON.parse(String(row.quantity_json)) as StoredStepPlan["quantity"], rationale: String(row.rationale),
       plannedAt: String(row.planned_at),
-      ...(() => { const detail = JSON.parse(String(row.detail_json ?? "{}")) as Partial<Pick<StoredStepPlan, "units" | "questions" | "importance">>;
-        return { units: detail.units ?? [], questions: detail.questions ?? [], ...(detail.importance ? { importance: detail.importance } : {}) }; })(),
+      ...(() => { const detail = JSON.parse(String(row.detail_json ?? "{}")) as Partial<Pick<StoredStepPlan, "units" | "questions" | "importance" | "needs">>;
+        return { units: detail.units ?? [], questions: detail.questions ?? [], ...(detail.importance ? { importance: detail.importance } : {}),
+          ...(detail.needs?.length ? { needs: detail.needs } : {}) }; })(),
       steps: byOrder.get(String(row.work_order_id)) ?? [] }));
   }
 
@@ -2311,13 +2982,23 @@ export class CrosslineStore {
       const step = this.getStepPlan(workspaceId, workOrderId)?.steps.find((item) => item.id === stepId);
       if (!step) throw new Error("STEP_NOT_FOUND");
       if (step.estimate.p50Minutes === estimate.p50Minutes) return { changed: false };
-      this.#db.prepare("UPDATE task_steps SET p25_minutes = ?, p50_minutes = ?, p85_minutes = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
+      this.#prepare("UPDATE task_steps SET p25_minutes = ?, p50_minutes = ?, p85_minutes = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
         .run(estimate.p25Minutes, estimate.p50Minutes, estimate.p85Minutes, new Date().toISOString(), workspaceId, workOrderId, stepId);
       const attempt = this.listEvents(workspaceId, { type: "task.step_estimated", entityId: workOrderId }).length;
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_estimated:${workOrderId}:${stepId}:${attempt}`, type: "task.step_estimated",
         entityId: workOrderId, payload: { stepId, before: step.estimate, after: estimate } });
       return { changed: true };
     }).immediate();
+  }
+
+  /** Who does one step, as the person chose it on the task (`step-owner.ts`): the assistant's steps take no calendar time. */
+  setStepExecutor(workspaceId: string, workOrderId: string, stepId: string, executor: "human" | "agent"): { changed: boolean } {
+    const step = this.getStepPlan(workspaceId, workOrderId)?.steps.find((item) => item.id === stepId);
+    if (!step) throw new Error("STEP_NOT_FOUND");
+    if (step.executor === executor) return { changed: false };
+    this.#prepare("UPDATE task_steps SET executor = ?, schedulable = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
+      .run(executor, executor === "agent" || step.role === "wait" ? 0 : 1, new Date().toISOString(), workspaceId, workOrderId, stepId);
+    return { changed: true };
   }
 
   /** Progress on one step: quarters (0–4), done, or skipped. Each change is its own event. */
@@ -2329,7 +3010,7 @@ export class CrosslineStore {
       const quarter = change.status === "done" ? 4 : Math.max(0, Math.min(4, Math.round(change.progressQuarter ?? step.progressQuarter)));
       const status = change.status ?? (quarter === 4 ? "done" : step.status === "done" ? "planned" : step.status);
       if (quarter === step.progressQuarter && status === step.status) return { changed: false };
-      this.#db.prepare("UPDATE task_steps SET progress_quarter = ?, status = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
+      this.#prepare("UPDATE task_steps SET progress_quarter = ?, status = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
         .run(quarter, status, new Date().toISOString(), workspaceId, workOrderId, stepId);
       const attempt = this.listEvents(workspaceId, { type: "task.step_progress", entityId: workOrderId }).length;
       this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_progress:${workOrderId}:${stepId}:${attempt}`, type: "task.step_progress",
@@ -2339,8 +3020,7 @@ export class CrosslineStore {
   }
 
   listMilestoneAnchors(workspaceId: string): StoredMilestoneAnchor[] {
-    const rows = this.#db.prepare("SELECT * FROM milestone_anchors WHERE workspace_id = ? ORDER BY stage, milestone_id")
-      .all(workspaceId) as Array<Record<string, string | number>>;
+    const rows = this.#cachedAll<Record<string, string | number>>("SELECT * FROM milestone_anchors WHERE workspace_id = ? ORDER BY stage, milestone_id", [workspaceId]);
     return rows.map((row) => ({ workspaceId: String(row.workspace_id), milestoneId: String(row.milestone_id), stage: Number(row.stage),
       deadline: String(row.deadline), baseline: String(row.baseline), target: String(row.target),
       stakeholders: JSON.parse(String(row.stakeholders_json)), sourceFactIds: JSON.parse(String(row.source_fact_ids_json)),
@@ -2349,7 +3029,7 @@ export class CrosslineStore {
   }
 
   saveDiligenceReport(report: StoredDiligenceReport): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO diligence_reports (id, owner_id, workspace_id, scope, question, findings_json, proposals_json,
         sources_json, status, note, run_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2362,7 +3042,7 @@ export class CrosslineStore {
   }
 
   listDiligenceReports(workspaceId: string): StoredDiligenceReport[] {
-    const rows = this.#db.prepare("SELECT * FROM diligence_reports WHERE workspace_id = ? ORDER BY run_at DESC, rowid DESC")
+    const rows = this.#prepare("SELECT * FROM diligence_reports WHERE workspace_id = ? ORDER BY run_at DESC, rowid DESC")
       .all(workspaceId) as Array<Record<string, string | null>>;
     return rows.map((row) => ({ id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!, scope: row.scope!,
       question: row.question!, findings: JSON.parse(row.findings_json ?? "[]"),
@@ -2371,7 +3051,7 @@ export class CrosslineStore {
   }
 
   saveAssistantAttachment(attachment: StoredAssistantAttachment): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO assistant_attachments (id, owner_id, workspace_id, thread_id, uri, media_type, file_name, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, thread_id, uri) DO NOTHING
@@ -2381,8 +3061,8 @@ export class CrosslineStore {
 
   listAssistantAttachments(workspaceId: string, threadId?: string): StoredAssistantAttachment[] {
     const rows = (threadId
-      ? this.#db.prepare("SELECT * FROM assistant_attachments WHERE workspace_id = ? AND thread_id = ? ORDER BY created_at, id").all(workspaceId, threadId)
-      : this.#db.prepare("SELECT * FROM assistant_attachments WHERE workspace_id = ? ORDER BY created_at, id").all(workspaceId)) as Array<Record<string, string>>;
+      ? this.#prepare("SELECT * FROM assistant_attachments WHERE workspace_id = ? AND thread_id = ? ORDER BY created_at, id").all(workspaceId, threadId)
+      : this.#prepare("SELECT * FROM assistant_attachments WHERE workspace_id = ? ORDER BY created_at, id").all(workspaceId)) as Array<Record<string, string>>;
     return rows.map((row) => ({ id: row.id!, ownerId: row.owner_id!, workspaceId: row.workspace_id!,
       threadId: row.thread_id!, uri: row.uri!, mediaType: row.media_type!,
       fileName: row.file_name!, createdAt: row.created_at! }));
@@ -2392,19 +3072,45 @@ export class CrosslineStore {
     this.#db.transaction(() => {
       const capture = this.listCaptures(workspaceId).find((item) => item.id === id);
       if (!capture) throw new Error("CAPTURE_NOT_FOUND");
-      this.#db.prepare("UPDATE captures SET audit_json = ? WHERE workspace_id = ? AND id = ?")
+      this.#prepare("UPDATE captures SET audit_json = ? WHERE workspace_id = ? AND id = ?")
         .run(JSON.stringify({ ...capture.audit, ...audit }), workspaceId, id);
     })();
   }
 
+  /** Keeps one record; a second one with the same `dedupeKey` is not written (`inserted: false`) and the first stays as it was. */
+  addRecord(workspaceId: string, input: DomainRecordInput, now = new Date().toISOString()): { inserted: boolean; record: StoredDomainRecord } {
+    const record: StoredDomainRecord = { ...input, id: randomUUID(), workspaceId, createdAt: now };
+    const result = this.#prepare(`INSERT OR IGNORE INTO domain_records (workspace_id, id, domain, kind, at, value, unit, currency, category, note, source,
+      source_ref, dedupe_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(workspaceId, record.id, input.domain, input.kind, input.at,
+      input.value, input.unit, input.currency, input.category, input.note, input.source, input.sourceRef, input.dedupeKey, now);
+    if (result.changes) return { inserted: true, record };
+    const existing = this.listRecords(workspaceId, { includeDeleted: true }).find((item) => item.dedupeKey === input.dedupeKey)!;
+    return { inserted: false, record: existing };
+  }
+
+  /** Records of a workspace, oldest first; `since` is a day (`YYYY-MM-DD`) compared with each record's own day. */
+  listRecords(workspaceId: string, filter: { domain?: "wellness" | "wealth"; since?: string; includeDeleted?: boolean } = {}): StoredDomainRecord[] {
+    const rows = this.#prepare(`SELECT * FROM domain_records WHERE workspace_id = ? ${filter.domain ? "AND domain = ?" : ""}
+      ${filter.since ? "AND substr(at, 1, 10) >= ?" : ""} ${filter.includeDeleted ? "" : "AND deleted_at IS NULL"} ORDER BY at, created_at`)
+      .all(workspaceId, ...(filter.domain ? [filter.domain] : []), ...(filter.since ? [filter.since] : [])) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({ id: String(row.id), workspaceId, domain: row.domain as "wellness" | "wealth", kind: row.kind as DomainRecordInput["kind"],
+      at: String(row.at), value: Number(row.value), unit: String(row.unit), currency: String(row.currency), category: String(row.category), note: String(row.note),
+      source: row.source as DomainRecordInput["source"], sourceRef: String(row.source_ref), dedupeKey: String(row.dedupe_key), createdAt: String(row.created_at) }));
+  }
+
+  /** Marks a record removed (kept for undo) or brings it back. */
+  setRecordDeleted(workspaceId: string, id: string, deleted: boolean, at = new Date().toISOString()): boolean {
+    return this.#prepare("UPDATE domain_records SET deleted_at = ? WHERE workspace_id = ? AND id = ?").run(deleted ? at : null, workspaceId, id).changes > 0;
+  }
+
   appendEvent(event: LedgerEventInput): { inserted: boolean; eventId: string } {
-    const existing = this.#db.prepare(
+    const existing = this.#prepare(
       "SELECT event_id FROM events WHERE workspace_id = ? AND idempotency_key = ?"
     ).get(event.workspaceId, event.idempotencyKey) as { event_id: string } | undefined;
     if (existing) return { inserted: false, eventId: existing.event_id };
 
     const eventId = randomUUID();
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO events (
         event_id, owner_id, workspace_id, idempotency_key, type, entity_id, payload_json, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -2447,8 +3153,7 @@ export class CrosslineStore {
     }
     // rowid is the order things actually happened. Ordering by (created_at, event_id) let a random
     // UUID decide the sequence of same-millisecond events, which defeats an append-only ledger.
-    const rows = this.#db.prepare(`SELECT * FROM events WHERE ${where.join(" AND ")} ORDER BY rowid`)
-      .all(...values) as Array<Record<string, string>>;
+    const rows = this.#cachedAll<Record<string, string>>(`SELECT * FROM events WHERE ${where.join(" AND ")} ORDER BY rowid`, values);
     return rows.map((row) => ({
       eventId: row.event_id!,
       ownerId: row.owner_id!,
@@ -2471,7 +3176,7 @@ export class CrosslineStore {
       if (!checked.ok) throw new Error(checked.blocker.code);
       verifiability = checked.verifiability;
     }
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO milestones (
         id, owner_id, workspace_id, identity_id, title, version, status, updated_at, project_id,
         success_criteria_json, verifiability, template_id, confidence, evidence_question_bank_json
@@ -2529,7 +3234,7 @@ export class CrosslineStore {
     // it possible for A and B to each have their own `(id, version)` pair land on the same literal
     // values, at which point this returned both rows to whichever workspace asked. `m.workspace_id = ?`
     // on the join, not just the subquery, is what keeps the two from being able to leak into each other.
-    const rows = this.#db.prepare(`
+    const rows = this.#cachedAll<Record<string, string | number>>(`
       SELECT m.* FROM milestones m
       JOIN (
         SELECT id, MAX(version) AS version FROM milestones
@@ -2537,7 +3242,7 @@ export class CrosslineStore {
       ) latest ON latest.id = m.id AND latest.version = m.version
       WHERE m.workspace_id = ?
       ORDER BY m.identity_id, m.id
-    `).all(workspaceId, workspaceId) as Array<Record<string, string | number>>;
+    `, [workspaceId, workspaceId]);
     return rows.map((row) => this.#mapMilestoneRow(row));
   }
 
@@ -2545,7 +3250,7 @@ export class CrosslineStore {
    * (`milestones_workspace(workspace_id, id)`) rather than the full-workspace scan `listMilestones`
    * does, for callers (like `task-detail.ts`'s single-id tier) that only need one milestone. */
   getMilestone(workspaceId: string, id: string): StoredMilestone | undefined {
-    const row = this.#db.prepare(`
+    const row = this.#prepare(`
       SELECT m.* FROM milestones m
       JOIN (
         SELECT id, MAX(version) AS version FROM milestones
@@ -2568,9 +3273,9 @@ export class CrosslineStore {
 
   listMilestoneTemplates(workspaceId: string, identityId?: string): StoredMilestoneTemplate[] {
     const rows = (identityId
-      ? this.#db.prepare("SELECT * FROM milestone_templates WHERE workspace_id = ? AND identity_id = ? ORDER BY id")
+      ? this.#prepare("SELECT * FROM milestone_templates WHERE workspace_id = ? AND identity_id = ? ORDER BY id")
         .all(workspaceId, identityId)
-      : this.#db.prepare("SELECT * FROM milestone_templates WHERE workspace_id = ? ORDER BY identity_id, id")
+      : this.#prepare("SELECT * FROM milestone_templates WHERE workspace_id = ? ORDER BY identity_id, id")
         .all(workspaceId)) as Array<Record<string, string>>;
     return rows.map((row) => this.#mapMilestoneTemplateRow(row));
   }
@@ -2579,7 +3284,7 @@ export class CrosslineStore {
    * replace rather than the versioned history `milestones` keeps for criteria a gate may already have
    * judged against. */
   saveMilestoneTemplate(template: Omit<StoredMilestoneTemplate, "createdAt"> & { workspaceId: string }): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO milestone_templates (
         id, workspace_id, kind, identity_id, title_hint,
         success_criteria_defaults_json, evidence_question_defaults_json, source, created_at
@@ -2601,7 +3306,7 @@ export class CrosslineStore {
    * request racing the first, or a workspace that already has its builtins) is a no-op rather than
    * stomping a user's own edit to a builtin row id. */
   seedMilestoneTemplates(workspaceId: string, templates: Array<Omit<StoredMilestoneTemplate, "createdAt" | "source">>): void {
-    const insert = this.#db.prepare(`
+    const insert = this.#prepare(`
       INSERT OR IGNORE INTO milestone_templates (
         id, workspace_id, kind, identity_id, title_hint,
         success_criteria_defaults_json, evidence_question_defaults_json, source, created_at
@@ -2619,7 +3324,7 @@ export class CrosslineStore {
   saveMilestoneRelation(relation: Omit<StoredMilestoneRelation, RelationExtras> & Partial<Pick<StoredMilestoneRelation, RelationExtras>>): void {
     // A relation with no evidence decides nothing, so it is not allowed to claim approval.
     const status = relation.status === "approved" && !(relation.evidence ?? []).length ? "candidate" : relation.status;
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO milestone_relations (
         id, owner_id, workspace_id, from_milestone_id, to_milestone_id, kind, status,
         evidence_json, counterexample_json, cost_minutes, last_validated_at, explanation, refuted_when, updated_at,
@@ -2652,7 +3357,7 @@ export class CrosslineStore {
   }
 
   listMilestoneRelations(workspaceId: string): StoredMilestoneRelation[] {
-    const rows = this.#db.prepare(
+    const rows = this.#prepare(
       "SELECT * FROM milestone_relations WHERE workspace_id = ? AND status <> 'archived' ORDER BY id"
     ).all(workspaceId) as Array<Record<string, string>>;
     return rows.map((row) => this.#relationOf(row));
@@ -2660,7 +3365,7 @@ export class CrosslineStore {
 
   /** One relation by id, archived ones included — a re-derivation must not bring back one the person removed or the gate refuted. */
   getMilestoneRelation(workspaceId: string, id: string): StoredMilestoneRelation | undefined {
-    const row = this.#db.prepare("SELECT * FROM milestone_relations WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined;
+    const row = this.#prepare("SELECT * FROM milestone_relations WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined;
     return row ? this.#relationOf(row) : undefined;
   }
 
@@ -2697,7 +3402,7 @@ export class CrosslineStore {
     const skipped: string[] = [];
     this.#db.transaction(() => {
       for (const id of ids) {
-        const row = this.#db.prepare(
+        const row = this.#prepare(
           "SELECT status, evidence_json FROM milestone_relations WHERE workspace_id = ? AND id = ?"
         ).get(workspaceId, id) as { status?: string; evidence_json?: string } | undefined;
         if (!row || row.status !== "candidate") { skipped.push(id); continue; }
@@ -2707,7 +3412,7 @@ export class CrosslineStore {
           skipped.push(id);
           continue;
         }
-        this.#db.prepare("UPDATE milestone_relations SET status = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
+        this.#prepare("UPDATE milestone_relations SET status = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
           .run(decision, new Date().toISOString(), workspaceId, id);
         decided.push(id);
       }
@@ -2838,7 +3543,7 @@ export class CrosslineStore {
    * person said at a moment must never be silently rewritten.
    */
   upsertDailyActivity(input: { ownerId: string; workspaceId: string; day: string; aggregate: Record<string, number>; observedAt: string }): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO energy_observations (
         id, owner_id, workspace_id, source, level, confidence, aggregate_json, observed_at
       ) VALUES (?, ?, ?, 'local_activity', 'uncalibrated', 'low', ?, ?)
@@ -2848,7 +3553,7 @@ export class CrosslineStore {
   }
 
   saveEnergyObservation(observation: StoredEnergyObservation): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO energy_observations (
         id, owner_id, workspace_id, source, level, confidence, aggregate_json, observed_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -2862,13 +3567,13 @@ export class CrosslineStore {
 
   /** Absent means never asked — which is different from asked and declined. */
   getSetting(workspaceId: string, key: string): string | undefined {
-    const row = this.#db.prepare("SELECT value FROM settings WHERE workspace_id = ? AND key = ?")
+    const row = this.#prepare("SELECT value FROM settings WHERE workspace_id = ? AND key = ?")
       .get(workspaceId, key) as { value: string } | undefined;
     return row?.value;
   }
 
   setSetting(workspaceId: string, key: string, value: string): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(workspaceId, key, value, new Date().toISOString());
@@ -2876,13 +3581,13 @@ export class CrosslineStore {
 
   /** Every setting whose key starts with one of `prefixes` (what an undo snapshot compares before and after). */
   listSettings(workspaceId: string, prefixes: readonly string[]): Map<string, string> {
-    const rows = this.#db.prepare("SELECT key, value FROM settings WHERE workspace_id = ?").all(workspaceId) as Array<{ key: string; value: string }>;
+    const rows = this.#prepare("SELECT key, value FROM settings WHERE workspace_id = ?").all(workspaceId) as Array<{ key: string; value: string }>;
     return new Map(rows.filter((row) => prefixes.some((prefix) => row.key.startsWith(prefix))).map((row) => [row.key, row.value]));
   }
 
   /** Back to never set — what undoing the first save of a setting restores. */
   deleteSetting(workspaceId: string, key: string): void {
-    this.#db.prepare("DELETE FROM settings WHERE workspace_id = ? AND key = ?").run(workspaceId, key);
+    this.#prepare("DELETE FROM settings WHERE workspace_id = ? AND key = ?").run(workspaceId, key);
   }
 
   /**
@@ -2920,7 +3625,7 @@ export class CrosslineStore {
    * left open is not activity, and nothing the system did on its own counts. Background spending follows this.
    */
   lastPersonActivity(workspaceId: string): string | undefined {
-    return (this.#db.prepare(`SELECT MAX(at) AS at FROM (${PERSON_ACTIVITY_SQL})`).get({ ws: workspaceId, since: "" }) as { at: string | null }).at ?? undefined;
+    return (this.#prepare(`SELECT MAX(at) AS at FROM (${PERSON_ACTIVITY_SQL})`).get({ ws: workspaceId, since: "" }) as { at: string | null }).at ?? undefined;
   }
 
   /**
@@ -2928,17 +3633,17 @@ export class CrosslineStore {
    * return page finds the person's last absence in the gaps between them.
    */
   personActivityTimes(workspaceId: string, since: string): string[] {
-    const rows = this.#db.prepare(`SELECT at FROM (${PERSON_ACTIVITY_SQL}) WHERE at IS NOT NULL ORDER BY at`).all({ ws: workspaceId, since }) as Array<{ at: string }>;
+    const rows = this.#prepare(`SELECT at FROM (${PERSON_ACTIVITY_SQL}) WHERE at IS NOT NULL ORDER BY at`).all({ ws: workspaceId, since }) as Array<{ at: string }>;
     return rows.map((row) => row.at);
   }
 
   /** Deletes a workspace's observations from one source (the camera's, when its consent is withdrawn). Returns how many went. */
   deleteEnergyObservations(workspaceId: string, source: StoredEnergyObservation["source"]): number {
-    return this.#db.prepare("DELETE FROM energy_observations WHERE workspace_id = ? AND source = ?").run(workspaceId, source).changes;
+    return this.#prepare("DELETE FROM energy_observations WHERE workspace_id = ? AND source = ?").run(workspaceId, source).changes;
   }
 
   listEnergyObservations(workspaceId: string): StoredEnergyObservation[] {
-    const rows = this.#db.prepare(
+    const rows = this.#prepare(
       "SELECT * FROM energy_observations WHERE workspace_id = ? ORDER BY observed_at DESC, id"
     ).all(workspaceId) as Array<Record<string, string | null>>;
     return rows.map((row) => ({
@@ -2953,7 +3658,7 @@ export class CrosslineStore {
 
 
   listCapacityCommitments(workspaceId: string): CapacityCommitment[] {
-    const rows = this.#db.prepare(
+    const rows = this.#prepare(
       "SELECT * FROM capacity_commitments WHERE workspace_id = ? ORDER BY id"
     ).all(workspaceId) as Array<Record<string, string | number | null>>;
     return rows.map((row) => ({
@@ -2977,9 +3682,7 @@ export class CrosslineStore {
   }
 
   listWorkOrders(workspaceId: string): StoredWorkOrder[] {
-    const rows = this.#db.prepare(
-      "SELECT * FROM work_orders WHERE workspace_id = ? ORDER BY updated_at, id"
-    ).all(workspaceId) as Array<Record<string, string>>;
+    const rows = this.#cachedAll<Record<string, string>>("SELECT * FROM work_orders WHERE workspace_id = ? ORDER BY updated_at, id", [workspaceId]);
     return rows.map((row) => this.#mapWorkOrderRow(row));
   }
 
@@ -2987,14 +3690,14 @@ export class CrosslineStore {
    * only need one work order — `task-detail.ts`'s single-id tier — instead of `listWorkOrders`'s full
    * per-workspace scan. */
   getWorkOrder(workspaceId: string, id: string): StoredWorkOrder | undefined {
-    const row = this.#db.prepare(
+    const row = this.#prepare(
       "SELECT * FROM work_orders WHERE workspace_id = ? AND id = ?"
     ).get(workspaceId, id) as Record<string, string> | undefined;
     return row ? this.#mapWorkOrderRow(row) : undefined;
   }
 
   saveWorkOrder(workOrder: StoredWorkOrder): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO work_orders (
         id, owner_id, workspace_id, identity_id, project_id, milestone_id,
         intent, state, risk_tier, estimate_json, payload_json, updated_at
@@ -3020,7 +3723,7 @@ export class CrosslineStore {
   /** Publish one backplan as a unit so a crash cannot leave half a set of draft steps. */
   saveBackplanDrafts(workspaceId: string, drafts: StoredWorkOrder[], event: LedgerEventInput): boolean {
     return this.#db.transaction(() => {
-      if (this.#db.prepare("SELECT 1 FROM events WHERE workspace_id = ? AND idempotency_key = ?")
+      if (this.#prepare("SELECT 1 FROM events WHERE workspace_id = ? AND idempotency_key = ?")
         .get(workspaceId, event.idempotencyKey)) return false;
       const existing = new Set(this.listWorkOrders(workspaceId).map((item) => item.id));
       if (drafts.some((draft) => draft.workspaceId !== workspaceId || draft.state !== "awaiting_plan_approval"
@@ -3033,7 +3736,7 @@ export class CrosslineStore {
   }
 
   savePlanVersion(plan: StoredPlanVersion): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO plan_versions (id, owner_id, workspace_id, version, status, payload_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, id) DO UPDATE SET status = excluded.status, payload_json = excluded.payload_json
@@ -3041,7 +3744,7 @@ export class CrosslineStore {
   }
 
   listPlanVersions(workspaceId: string): StoredPlanVersion[] {
-    const rows = this.#db.prepare(
+    const rows = this.#prepare(
       "SELECT * FROM plan_versions WHERE workspace_id = ? ORDER BY version DESC, created_at DESC"
     ).all(workspaceId) as Array<Record<string, string | number>>;
     return rows.map((row) => ({
@@ -3068,7 +3771,8 @@ export class CrosslineStore {
       "assistant_threads", "assistant_attachments", "milestone_templates",
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
-      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages",
+      "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences", "question_ledger", "workspace_counters", "domain_records",
+      "run_lessons",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by
@@ -3079,12 +3783,12 @@ export class CrosslineStore {
     // `ORDER BY rowid` for the same reason `listEvents` uses it: without it SQLite may return rows in
     // any order, so two exports of an unchanged database would not compare equal.
     const scopedByWorkspaceId = (tableName: string) =>
-      this.#db.prepare(`SELECT * FROM ${tableName} WHERE workspace_id = ? ORDER BY rowid`)
+      this.#prepare(`SELECT * FROM ${tableName} WHERE workspace_id = ? ORDER BY rowid`)
         .all(workspaceId) as Array<Record<string, string | number | null>>;
     const tableQueries: Record<string, () => Array<Record<string, string | number | null>>> = {
-      workspaces: () => this.#db.prepare("SELECT * FROM workspaces WHERE id = ? ORDER BY rowid")
+      workspaces: () => this.#prepare("SELECT * FROM workspaces WHERE id = ? ORDER BY rowid")
         .all(workspaceId) as Array<Record<string, string | number | null>>,
-      principals: () => this.#db.prepare(
+      principals: () => this.#prepare(
         "SELECT * FROM principals WHERE id IN (SELECT principal_id FROM workspace_members WHERE workspace_id = ?) ORDER BY rowid"
       ).all(workspaceId) as Array<Record<string, string | number | null>>
     };
@@ -3115,7 +3819,7 @@ export class CrosslineStore {
    * losing it means a full re-read rather than a lost row.
    */
   saveSyncCursor(input: { ownerId: string; workspaceId: string; provider: string; collection: string; cursor: string | null }): void {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO external_bindings (id, owner_id, workspace_id, provider, external_id, etag, sync_cursor, mode, updated_at)
       VALUES (?, ?, ?, ?, ?, NULL, ?, 'read_only', ?)
       ON CONFLICT(workspace_id, provider, external_id) DO UPDATE SET
@@ -3125,7 +3829,7 @@ export class CrosslineStore {
   }
 
   readSyncCursor(workspaceId: string, provider: string, collection: string): string | null {
-    const row = this.#db.prepare(
+    const row = this.#prepare(
       "SELECT sync_cursor FROM external_bindings WHERE workspace_id = ? AND provider = ? AND external_id = ?"
     ).get(workspaceId, provider, collection) as { sync_cursor?: string | null } | undefined;
     return row?.sync_cursor ?? null;
@@ -3133,7 +3837,7 @@ export class CrosslineStore {
 
   /** Whether any of this workspace's per-source cursors for a provider has ever recorded a real sync. */
   hasAnySyncCursor(workspaceId: string, provider: string): boolean {
-    const row = this.#db.prepare(
+    const row = this.#prepare(
       "SELECT 1 FROM external_bindings WHERE workspace_id = ? AND provider = ? AND sync_cursor IS NOT NULL LIMIT 1"
     ).get(workspaceId, provider);
     return Boolean(row);
@@ -3141,13 +3845,17 @@ export class CrosslineStore {
 
   /** Every real table in this database, so the restore path can validate against reality. */
   tableNames(): string[] {
-    return (this.#db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-      .all() as Array<{ name: string }>).map((row) => row.name);
+    const rows = this.#prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+      .all() as Array<{ name: string; sql: string | null }>;
+    // A full-text index (and the tables SQLite keeps for it) and the passages it indexes are derived from `source_documents`: rebuilt on
+    // restore, never carried in a backup (they would double its size and could disagree with the files they were cut from).
+    const virtual = rows.filter((row) => /^CREATE VIRTUAL TABLE/i.test(row.sql ?? "")).map((row) => row.name);
+    return rows.map((row) => row.name).filter((name) => !DERIVED_TABLES.includes(name)
+      && !virtual.some((table) => name === table || name.startsWith(`${table}_`)));
   }
 
   #columnsOf(tableName: string): string[] {
-    return (this.#db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>).map((row) => row.name);
+    return (this.#prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>).map((row) => row.name);
   }
 
   /**
@@ -3171,6 +3879,8 @@ export class CrosslineStore {
       // would have been wrong and skipping it would lose data without saying so.
       // A backup taken before migration 14 still carries the plan differences: they are archived as events below, not refused.
       if (!known.has(tableName) && tableName === "plan_changes") continue;
+      // Derived passages are rebuilt from the documents below, whatever a snapshot carries.
+      if (DERIVED_TABLES.includes(tableName)) continue;
       if (!known.has(tableName) && retired.has(tableName)) {
         if (rows.length) throw new Error("RESTORE_RETIRED_TABLE_NOT_EMPTY");
         continue;
@@ -3178,8 +3888,8 @@ export class CrosslineStore {
       if (!known.has(tableName)) throw new Error("RESTORE_UNKNOWN_TABLE");
       const columns = this.#columnsOf(tableName);
       const occupied = columns.includes("workspace_id")
-        ? this.#db.prepare(`SELECT 1 FROM ${tableName} WHERE workspace_id = ? LIMIT 1`).get(snapshot.workspaceId)
-        : this.#db.prepare(`SELECT 1 FROM ${tableName} LIMIT 1`).get();
+        ? this.#prepare(`SELECT 1 FROM ${tableName} WHERE workspace_id = ? LIMIT 1`).get(snapshot.workspaceId)
+        : this.#prepare(`SELECT 1 FROM ${tableName} LIMIT 1`).get();
       if (occupied) throw new Error("RESTORE_TARGET_NOT_EMPTY");
     }
 
@@ -3189,7 +3899,7 @@ export class CrosslineStore {
       // at commit instead of demanding the importer know the dependency order between tables.
       this.#db.pragma("defer_foreign_keys = ON");
       for (const [tableName, rows] of Object.entries(snapshot.tables)) {
-        if (!known.has(tableName)) continue;
+        if (!known.has(tableName) || DERIVED_TABLES.includes(tableName)) continue;
         counts[tableName] = rows.length;
         const first = rows[0];
         if (!first) continue;
@@ -3206,7 +3916,7 @@ export class CrosslineStore {
           }
           return false;
         });
-        const statement = this.#db.prepare(
+        const statement = this.#prepare(
           `INSERT INTO ${tableName} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`
         );
         for (const row of rows) statement.run(columns.map((column) => row[column] ?? null));
@@ -3216,25 +3926,40 @@ export class CrosslineStore {
         counts.plan_changes = changes.length;
         const fields = ["id", "owner_id", "workspace_id", "plan_version_id", "kind", "trigger_event_id", "explanation", "before_json", "after_json", "status"];
         this.#db.exec(`CREATE TEMP TABLE restored_plan_changes (${fields.join(" TEXT, ")} TEXT)`);
-        const insert = this.#db.prepare(`INSERT INTO restored_plan_changes VALUES (${fields.map(() => "?").join(", ")})`);
+        const insert = this.#prepare(`INSERT INTO restored_plan_changes VALUES (${fields.map(() => "?").join(", ")})`);
         for (const row of changes) insert.run(fields.map((field) => row[field] ?? null));
         this.#archivePlanChangeRows("SELECT * FROM temp.restored_plan_changes");
         this.#db.exec("DROP TABLE temp.restored_plan_changes");
       }
       this.#collapsePlanVersions(snapshot.workspaceId);
+      // A backup taken before migration 16 has no document numbers: they get the ones their position gave them when it was taken.
+      this.#numberDocuments(snapshot.workspaceId);
+      // The passage index is not in a backup: it is cut again from the restored documents.
+      this.#prepare("DELETE FROM doc_chunks WHERE workspace_id = ?").run(snapshot.workspaceId);
+      this.#indexDocuments(snapshot.workspaceId);
     })();
     return counts;
   }
 
+  /** Gives every document without a fixed `src-N` number the next ones, in upload order (migration 16 and older backups). */
+  #numberDocuments(workspaceId?: string): void {
+    const scope = workspaceId ? "AND workspace_id = ?" : "";
+    this.#prepare(`UPDATE source_documents SET ref_no = (
+        SELECT numbered.n FROM (SELECT rowid AS r, ROW_NUMBER() OVER (PARTITION BY workspace_id ORDER BY created_at, rowid)
+          + (SELECT COALESCE(MAX(ref_no), 0) FROM source_documents kept WHERE kept.workspace_id = d.workspace_id) AS n
+          FROM source_documents d WHERE ref_no IS NULL) numbered WHERE numbered.r = source_documents.rowid)
+      WHERE ref_no IS NULL ${scope}`).run(...(workspaceId ? [workspaceId] : []));
+  }
+
   getPrincipalByBetterAuthId(betterAuthUserId: string): StoredPrincipal | undefined {
-    const row = this.#db.prepare("SELECT * FROM principals WHERE better_auth_user_id = ?")
+    const row = this.#prepare("SELECT * FROM principals WHERE better_auth_user_id = ?")
       .get(betterAuthUserId) as Record<string, string> | undefined;
     if (!row) return undefined;
     return { id: row.id!, betterAuthUserId: row.better_auth_user_id!, createdAt: row.created_at! };
   }
 
   getWorkspaceMembership(principalId: string, workspaceId: string): StoredWorkspaceMember | undefined {
-    const row = this.#db.prepare(
+    const row = this.#prepare(
       "SELECT * FROM workspace_members WHERE principal_id = ? AND workspace_id = ?"
     ).get(principalId, workspaceId) as Record<string, string> | undefined;
     if (!row) return undefined;
@@ -3251,7 +3976,7 @@ export class CrosslineStore {
    */
   issueDeviceLease(lease: { id: string; principalId: string; workspaceId: string; deviceId: string;
     issuedAt: string; expiresAt: string }): StoredDeviceLease {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO device_leases (id, principal_id, workspace_id, device_id, issued_at, expires_at, revoked_at)
       VALUES (?, ?, ?, ?, ?, ?, NULL)
       ON CONFLICT(workspace_id, device_id) DO UPDATE SET
@@ -3265,7 +3990,7 @@ export class CrosslineStore {
    * a revoked lease stays in this list (with `revokedAt` set) rather than disappearing, so the owner can
    * see it was actually revoked instead of just no longer appearing. */
   listDeviceLeases(workspaceId: string): StoredDeviceLease[] {
-    const rows = this.#db.prepare(
+    const rows = this.#prepare(
       "SELECT * FROM device_leases WHERE workspace_id = ? ORDER BY issued_at DESC"
     ).all(workspaceId) as Array<Record<string, string | null>>;
     return rows.map((row) => ({
@@ -3275,7 +4000,7 @@ export class CrosslineStore {
   }
 
   getDeviceLease(workspaceId: string, deviceId: string): StoredDeviceLease | undefined {
-    const row = this.#db.prepare(
+    const row = this.#prepare(
       "SELECT * FROM device_leases WHERE workspace_id = ? AND device_id = ?"
     ).get(workspaceId, deviceId) as Record<string, string | null> | undefined;
     if (!row) return undefined;
@@ -3286,7 +4011,7 @@ export class CrosslineStore {
   }
 
   revokeDeviceLease(workspaceId: string, deviceId: string): { changed: boolean } {
-    const result = this.#db.prepare(
+    const result = this.#prepare(
       "UPDATE device_leases SET revoked_at = ? WHERE workspace_id = ? AND device_id = ? AND revoked_at IS NULL"
     ).run(new Date().toISOString(), workspaceId, deviceId);
     return { changed: result.changes > 0 };
@@ -3297,7 +4022,7 @@ export class CrosslineStore {
    * one could not) rather than accumulating duplicates. */
   saveTailscaleBinding(binding: { id: string; principalId: string; workspaceId: string; tailscaleLogin: string;
     nodeKey?: string; createdAt: string }): StoredTailscaleBinding {
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO tailscale_bindings (id, principal_id, workspace_id, tailscale_login, node_key, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, tailscale_login) DO UPDATE SET
@@ -3307,7 +4032,7 @@ export class CrosslineStore {
   }
 
   listTailscaleBindings(workspaceId: string): StoredTailscaleBinding[] {
-    const rows = this.#db.prepare(
+    const rows = this.#prepare(
       "SELECT * FROM tailscale_bindings WHERE workspace_id = ? ORDER BY created_at"
     ).all(workspaceId) as Array<Record<string, string | null>>;
     return rows.map((row) => ({
@@ -3318,7 +4043,7 @@ export class CrosslineStore {
   }
 
   revokeTailscaleBinding(workspaceId: string, tailscaleLogin: string): { changed: boolean } {
-    const result = this.#db.prepare(
+    const result = this.#prepare(
       "DELETE FROM tailscale_bindings WHERE workspace_id = ? AND tailscale_login = ?"
     ).run(workspaceId, tailscaleLogin);
     return { changed: result.changes > 0 };
@@ -3336,7 +4061,7 @@ export class CrosslineStore {
     llm?: { p50Minutes: number; p85Minutes: number } | null; actualSource?: StoredDurationObservation["actualSource"];
     contextVersion?: string; censored?: boolean;
   }): { changed: boolean } {
-    const result = this.#db.prepare(`
+    const result = this.#prepare(`
       INSERT INTO duration_observations (
         id, owner_id, workspace_id, work_order_id, execution_id, identity_id, family,
         observed_minutes, wall_clock_minutes, pause_minutes, interruption_dominant,
@@ -3353,14 +4078,14 @@ export class CrosslineStore {
   }
 
   listDurationObservations(workspaceId: string, identityId: string, family: string): StoredDurationObservation[] {
-    return this.#durationRows(this.#db.prepare(
+    return this.#durationRows(this.#prepare(
       "SELECT * FROM duration_observations WHERE workspace_id = ? AND identity_id = ? AND family = ? ORDER BY observed_at, id"
     ).all(workspaceId, identityId, family) as Array<Record<string, string | number>>);
   }
 
   /** Every observation in the workspace, oldest first — what a person-level calibration is fitted on. */
   listAllDurationObservations(workspaceId: string): StoredDurationObservation[] {
-    return this.#durationRows(this.#db.prepare("SELECT * FROM duration_observations WHERE workspace_id = ? ORDER BY observed_at, id")
+    return this.#durationRows(this.#prepare("SELECT * FROM duration_observations WHERE workspace_id = ? ORDER BY observed_at, id")
       .all(workspaceId) as Array<Record<string, string | number>>);
   }
 
@@ -3381,25 +4106,29 @@ export class CrosslineStore {
     }));
   }
 
-  /**
-   * How this workspace's person actually works: stretches of work-like activity from the screen record (when they agreed to it)
-   * and how finished tasks compared with what was estimated for them. Measurements only; see `summarizeRhythm`.
-   */
-  workRhythm(workspaceId: string, sinceIso: string): WorkRhythm {
-    const orders = new Map(this.listWorkOrders(workspaceId).map((order) => [order.id, order]));
-    const finished = this.listExecutions(workspaceId).flatMap((execution) => {
-      const order = orders.get(execution.workOrderId);
-      if (!order || !execution.endedAt || !execution.durationObserved || execution.outcome === "blocked") return [];
-      const actualMinutes = (Date.parse(execution.endedAt) - Date.parse(execution.startedAt)) / 60_000 - execution.pauseMinutes;
-      // What was estimated *for this order when it was written*: its own stored estimate, never a later recalibration.
-      return [{ actualMinutes, estimatedMinutes: order.estimate.p50Minutes }];
-    });
-    return summarizeRhythm({ segments: this.listActivitySegments(workspaceId, sinceIso).map((segment) => ({ start: segment.start, end: segment.end, category: segment.category, idle: segment.idle })), finished });
+  /** One beta invite: an application, then the owner's decision, then the redemption (see `packages/db/src/invites.ts`). */
+  saveInvite(invite: StoredInvite): void {
+    this.#prepare(`INSERT INTO beta_invites (id, workspace_id, email, reason, status, code_hash, created_at, decided_at, redeemed_at, redeemed_workspace_id)
+      VALUES (@id, @workspaceId, @email, @reason, @status, @codeHash, @createdAt, @decidedAt, @redeemedAt, @redeemedWorkspaceId)
+      ON CONFLICT(id) DO UPDATE SET status = excluded.status, code_hash = excluded.code_hash, decided_at = excluded.decided_at,
+        redeemed_at = excluded.redeemed_at, redeemed_workspace_id = excluded.redeemed_workspace_id`)
+      .run({ codeHash: null, decidedAt: null, redeemedAt: null, redeemedWorkspaceId: null, ...invite });
+  }
+
+  /** Invites by id, applicant workspace, or code hash; newest first. */
+  listInvites(filter: { id?: string; workspaceId?: string; codeHash?: string } = {}): StoredInvite[] {
+    const where = [filter.id ? "id = @id" : "", filter.workspaceId ? "workspace_id = @workspaceId" : "", filter.codeHash ? "code_hash = @codeHash" : ""].filter(Boolean);
+    const rows = this.#prepare(`SELECT * FROM beta_invites ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC, rowid DESC`)
+      .all(Object.fromEntries(Object.entries(filter).filter(([, value]) => value))) as Array<Record<string, string | null>>;
+    return rows.map((row) => ({ id: row.id!, workspaceId: row.workspace_id!, email: row.email!, reason: row.reason ?? "",
+      status: row.status as StoredInvite["status"], createdAt: row.created_at!,
+      ...(row.code_hash ? { codeHash: row.code_hash } : {}), ...(row.decided_at ? { decidedAt: row.decided_at } : {}),
+      ...(row.redeemed_at ? { redeemedAt: row.redeemed_at } : {}), ...(row.redeemed_workspace_id ? { redeemedWorkspaceId: row.redeemed_workspace_id } : {}) }));
   }
 
   listWorkspaces(): StoredWorkspace[] {
     // rowid breaks a same-millisecond tie by creation order; the random id would make "the first workspace" a coin flip.
-    const rows = this.#db.prepare("SELECT * FROM workspaces ORDER BY created_at, rowid")
+    const rows = this.#prepare("SELECT * FROM workspaces ORDER BY created_at, rowid")
       .all() as Array<Record<string, string>>;
     return rows.map((row) => ({ id: row.id!, name: row.name!, createdAt: row.created_at! }));
   }
@@ -3411,7 +4140,7 @@ export class CrosslineStore {
    * member (no invite path exists yet), so this is that row's `principal_id`.
    */
   getWorkspaceOwnerId(workspaceId: string): string | undefined {
-    const row = this.#db.prepare(
+    const row = this.#prepare(
       "SELECT principal_id FROM workspace_members WHERE workspace_id = ? AND role = 'owner' ORDER BY created_at LIMIT 1"
     ).get(workspaceId) as { principal_id?: string } | undefined;
     return row?.principal_id;
@@ -3428,11 +4157,11 @@ export class CrosslineStore {
     return this.#db.transaction(() => {
       const existing = this.getPrincipalByBetterAuthId(betterAuthUserId);
       if (existing) {
-        const membership = this.#db.prepare(
+        const membership = this.#prepare(
           "SELECT workspace_id FROM workspace_members WHERE principal_id = ? AND role = 'owner' ORDER BY created_at LIMIT 1"
         ).get(existing.id) as { workspace_id: string } | undefined;
         if (!membership) throw new Error("PRINCIPAL_WITHOUT_OWNER_WORKSPACE");
-        const workspaceRow = this.#db.prepare("SELECT * FROM workspaces WHERE id = ?")
+        const workspaceRow = this.#prepare("SELECT * FROM workspaces WHERE id = ?")
           .get(membership.workspace_id) as Record<string, string>;
         return {
           principal: existing,
@@ -3442,11 +4171,11 @@ export class CrosslineStore {
       const now = new Date().toISOString();
       const principal: StoredPrincipal = { id: randomUUID(), betterAuthUserId, createdAt: now };
       const workspace: StoredWorkspace = { id: randomUUID(), name: workspaceName, createdAt: now };
-      this.#db.prepare("INSERT INTO principals (id, better_auth_user_id, created_at) VALUES (?, ?, ?)")
+      this.#prepare("INSERT INTO principals (id, better_auth_user_id, created_at) VALUES (?, ?, ?)")
         .run(principal.id, principal.betterAuthUserId, principal.createdAt);
-      this.#db.prepare("INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?)")
+      this.#prepare("INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?)")
         .run(workspace.id, workspace.name, workspace.createdAt);
-      this.#db.prepare(
+      this.#prepare(
         "INSERT INTO workspace_members (principal_id, workspace_id, role, created_at) VALUES (?, ?, 'owner', ?)"
       ).run(principal.id, workspace.id, now);
       return { principal, workspace };
@@ -3465,7 +4194,7 @@ export class CrosslineStore {
    */
   resolvePrincipalWorkspace(betterAuthUserId: string, workspaceName: string):
     { principal: StoredPrincipal; workspace: StoredWorkspace; role: StoredWorkspaceMember["role"] } {
-    const fast = this.#db.prepare(`
+    const fast = this.#prepare(`
       SELECT p.id AS principal_id, p.created_at AS principal_created_at, wm.role AS role,
              w.id AS workspace_id, w.name AS workspace_name, w.created_at AS workspace_created_at
       FROM principals p
@@ -3486,9 +4215,69 @@ export class CrosslineStore {
     return { principal, workspace, role: membership.role };
   }
 
+  /**
+   * 「清空数据重新开始」: every row the workspace holds goes, as in `purgeWorkspace`, except what makes it the same account — its members,
+   * device leases, Tailscale bindings and audit trail, the model spend it has run up, and the settings and events whose key or type starts
+   * with one of `keep`'s prefixes (the machine-owner mark, the model connection and its conformance record). The workspace itself stays, so
+   * the next page lands on an empty board and the interview, signed in as before. Returns the work orders and the stored files only this
+   * workspace pointed at, for the caller to remove.
+   */
+  resetWorkspace(workspaceId: string, keep: { settingPrefixes: string[]; eventTypePrefixes: string[] }): { rows: number; workOrderIds: string[]; fileUris: string[] } {
+    const untouched = new Set(["workspace_members", "device_leases", "tailscale_bindings", "audit_events", "model_usage", "settings", "events", "beta_invites"]);
+    const kept = (value: string, prefixes: string[]) => prefixes.some((prefix) => value.startsWith(prefix));
+    return this.#db.transaction(() => {
+      const workOrderIds = this.#prepare("SELECT DISTINCT id FROM work_orders WHERE workspace_id = ?").pluck().all(workspaceId) as string[];
+      const fileUris = this.#prepare(`SELECT DISTINCT uri FROM source_documents WHERE workspace_id = ?
+        AND uri NOT IN (SELECT uri FROM source_documents WHERE workspace_id <> ?)`).pluck().all(workspaceId, workspaceId) as string[];
+      const tables = (this.#prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").pluck().all() as string[])
+        .filter((name) => !untouched.has(name)
+          && (this.#prepare(`PRAGMA table_info("${name}")`).all() as Array<{ name: string }>).some((column) => column.name === "workspace_id"));
+      let rows = 0;
+      for (const name of tables) rows += this.#prepare(`DELETE FROM "${name}" WHERE workspace_id = ?`).run(workspaceId).changes;
+      const deleteSetting = this.#prepare("DELETE FROM settings WHERE workspace_id = ? AND key = ?");
+      for (const key of this.#prepare("SELECT key FROM settings WHERE workspace_id = ?").pluck().all(workspaceId) as string[]) {
+        if (!kept(key, keep.settingPrefixes)) rows += deleteSetting.run(workspaceId, key).changes;
+      }
+      const deleteEvents = this.#prepare("DELETE FROM events WHERE workspace_id = ? AND type = ?");
+      for (const type of this.#prepare("SELECT DISTINCT type FROM events WHERE workspace_id = ?").pluck().all(workspaceId) as string[]) {
+        if (!kept(type, keep.eventTypePrefixes)) rows += deleteEvents.run(workspaceId, type).changes;
+      }
+      return { rows, workOrderIds, fileUris };
+    }).immediate();
+  }
+
+  /**
+   * Deletes a workspace and everything recorded in it (the person's 「删除账号」, decided 2026-10-17): every row of every table that
+   * carries this `workspace_id` — found from the schema, so a table added later is covered without a change here — then the workspace,
+   * then each member principal that belongs to no other workspace. One transaction: a failure leaves the workspace whole.
+   * Returns what the caller still has to remove outside this database: the Better Auth users whose principal went, the work orders
+   * (their material folders) and the stored files no other workspace points at.
+   */
+  purgeWorkspace(workspaceId: string): { rows: number; betterAuthUserIds: string[]; workOrderIds: string[]; fileUris: string[] } {
+    return this.#db.transaction(() => {
+      const members = this.#prepare("SELECT principal_id FROM workspace_members WHERE workspace_id = ?").pluck().all(workspaceId) as string[];
+      const workOrderIds = this.#prepare("SELECT DISTINCT id FROM work_orders WHERE workspace_id = ?").pluck().all(workspaceId) as string[];
+      const fileUris = this.#prepare(`SELECT DISTINCT uri FROM source_documents WHERE workspace_id = ?
+        AND uri NOT IN (SELECT uri FROM source_documents WHERE workspace_id <> ?)`).pluck().all(workspaceId, workspaceId) as string[];
+      const tables = (this.#prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").pluck().all() as string[])
+        .filter((name) => (this.#prepare(`PRAGMA table_info("${name}")`).all() as Array<{ name: string }>).some((column) => column.name === "workspace_id"));
+      let rows = 0;
+      for (const name of tables) rows += this.#prepare(`DELETE FROM "${name}" WHERE workspace_id = ?`).run(workspaceId).changes;
+      rows += this.#prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId).changes;
+      const betterAuthUserIds: string[] = [];
+      for (const principalId of members) {
+        if (this.#prepare("SELECT 1 FROM workspace_members WHERE principal_id = ? LIMIT 1").get(principalId)) continue;
+        const row = this.#prepare("SELECT better_auth_user_id FROM principals WHERE id = ?").get(principalId) as { better_auth_user_id: string } | undefined;
+        if (row) betterAuthUserIds.push(row.better_auth_user_id);
+        rows += this.#prepare("DELETE FROM principals WHERE id = ?").run(principalId).changes;
+      }
+      return { rows, betterAuthUserIds, workOrderIds, fileUris };
+    }).immediate();
+  }
+
   appendAuditEvent(event: Omit<StoredAuditEvent, "id" | "createdAt">): StoredAuditEvent {
     const record: StoredAuditEvent = { ...event, id: randomUUID(), createdAt: new Date().toISOString() };
-    this.#db.prepare(`
+    this.#prepare(`
       INSERT INTO audit_events
         (id, principal_id, workspace_id, role, auth_method, request_id, idempotency_key,
          codex_thread_id, codex_turn_id, codex_call_id, action, payload_json, created_at)
@@ -3506,9 +4295,11 @@ export class CrosslineStore {
    * worker): two reads, for caching what is derived from the ledger until it changes.
    */
   changeToken(): string {
-    const dataVersion = this.#db.pragma("data_version", { simple: true });
-    const ownChanges = this.#db.prepare("SELECT total_changes()").pluck().get();
-    return `${String(dataVersion)}:${String(ownChanges)}`;
+    const dataVersion = this.#prepare("PRAGMA data_version").pluck().get();
+    const ownChanges = this.#prepare("SELECT total_changes()").pluck().get();
+    // A table created or dropped by this connection moves neither of the two above; the store's own row cache must not outlive it.
+    const schema = this.#prepare("PRAGMA schema_version").pluck().get();
+    return `${String(dataVersion)}:${String(ownChanges)}:${String(schema)}`;
   }
 
   close(): void {
@@ -3551,3 +4342,13 @@ export * from "./artifacts";
 export * from "./portrait";
 export * from "./skills";
 export * from "./locale";
+export * from "./invites";
+export * from "./evidence-backfill";
+export * from "./onboarding-extract";
+export * from "./records";
+export * from "./automations";
+export * from "./mail-replies";
+export * from "./own-completion";
+export * from "./preparation";
+export * from "./step-owner";
+export * from "./lessons";

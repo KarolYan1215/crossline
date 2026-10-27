@@ -23,7 +23,7 @@ const { GET: posterGET } = await import("./[token]/[kind]/route");
 const { GET: pairGET } = await import("./pair/[pairToken]/route");
 
 const result = (id: string, scores: StoredResult["scores"], nickname: string, expiresAt = "2099-01-01T00:00:00Z"): StoredResult => ({
-  id, resultToken: `result-${id}`, inviteToken: `invite-${id}`, email: `${id}@example.com`, nickname, scores, code: "", sendEmail: true,
+  id, resultToken: `result-${id}`, inviteToken: `invite-${id}`, email: `${id}@example.com`, nickname, scores, aiDoes: [], code: "", sendEmail: true,
   appearance: { presentation: "neutral", hair: "short", glasses: false, skin: "medium", style: "casual", note: "" },
   avatar: { state: "template", file: "" }, createdAt: "2026-10-14T00:00:00Z", expiresAt
 });
@@ -33,9 +33,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   results.clear();
   pairs.clear();
-  results.set("a", result("a", { scope: 20, basis: 20, output: 20, rhythm: 20 }, "小林"));
-  results.set("b", result("b", { scope: 80, basis: 80, output: 80, rhythm: 80 }, "阿乔"));
-  results.set("old", result("old", { scope: 80, basis: 80, output: 80, rhythm: 80 }, "过期", "2020-01-01T00:00:00Z"));
+  results.set("a", result("a", { lines: 20, purpose: 20, collab: 20, build: 20 }, "小林"));
+  results.set("b", result("b", { lines: 80, purpose: 80, collab: 80, build: 80 }, "阿乔"));
+  results.set("old", result("old", { lines: 80, purpose: 80, collab: 80, build: 80 }, "过期", "2020-01-01T00:00:00Z"));
   pairs.set("pair-ab", { id: "p1", pairToken: "pair-ab", inviterId: "a", inviteeId: "b", createdAt: "2026-10-14T00:00:00Z" });
 });
 
@@ -49,7 +49,7 @@ describe("GET /api/poster/[token]/[kind]", () => {
       expect(Buffer.from(await response.arrayBuffer()).equals(PNG)).toBe(true);
     }
     const input = vi.mocked(poster.renderTypePoster).mock.calls[0]![0];
-    expect(input.type.code).toBe("SEMP");
+    expect(input.type.code).toBe("ROBA");
     expect(input.nickname).toBe("小林");
     expect(input.avatarPath).toBe("/figures/a.png");
     expect(input.inviteUrl).toMatch(/\/t\/invite-a$/);
@@ -70,8 +70,8 @@ describe("GET /api/poster/pair/[pairToken]", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/png");
     const input = vi.mocked(poster.renderPairCard).mock.calls[0]![0];
-    expect([input.a.type.code, input.b.type.code]).toEqual(["SEMP", "GIRA"]);
-    expect(input.primary.name).toBe("镜像对手");
+    expect([input.a.type.code, input.b.type.code]).toEqual(["ROBA", "WUHG"]);
+    expect(input.primary.name).toBe("互补镜像");
     expect(input.inviteUrl).toMatch(/\/t\/invite-a$/);
     // The card URL the views hand out carries `.png` (server/views.ts pairCardUrl).
     expect((await pairGET(new Request("http://x/api"), call({ pairToken: "pair-ab.png" }))).status).toBe(200);

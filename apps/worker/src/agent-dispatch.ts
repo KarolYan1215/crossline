@@ -3,14 +3,23 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DISPATCH_STATES, STEP_STARTS_SETTING, agentChainKey, autoHandoffTiming, isAgentCategory, relevantDocuments, retryDue, stepCategory, type AgentCategory, type AgentChain
+  DISPATCH_STATES, STEP_STARTS_SETTING, agentChainKey, onPersonsBoard, autoHandoffTiming, isAgentCategory, relevantDocuments, retryDue, stepCategory, type AgentCategory, type AgentChain
 } from "@crossline/core";
 import {
   agentApprovalDecision, agentChainsFor, assistantPlanFor, decideAgentApproval, declinedCategories, deliverableKey, isAutoHandoff, isPaused, listAgentTasks, readCategories,
-  requestAgentApproval, requestCategory, type CrosslineStore
+  agentQuestionAnswers, expireAgentQuestion, lessonsFor, openNeedsOf, requestAgentApproval, requestAgentQuestion, requestCategory, type AgentQuestion, type CrosslineStore
 } from "@crossline/db";
+
+/** What earlier work of this line and kind taught (docs/token-economy.md §2), for the assistant's input. */
+function assistantLessons(store: CrosslineStore, workspaceId: string, orderId: string): string[] {
+  const order = store.listWorkOrders(workspaceId).find((item) => item.id === orderId);
+  if (!order) return [];
+  return lessonsFor(store, workspaceId, { lineId: order.identityId, archetypeId: store.getStepPlan(workspaceId, orderId)?.archetypeId,
+    skill: ["crossline-agent", "crossline-agent-tools"] }).map((lesson) => lesson.text);
+}
 import type { AgentTaskInput } from "./agent-task";
 import { tOfWorkspace } from "./locale";
+import type { PrepWindow } from "./schedule-window";
 
 /**
  * From a work order on the board to a task for the assistant, and the rules for starting one without being told.
@@ -54,7 +63,7 @@ function taskFromStep(store: CrosslineStore, workspaceId: string, orderId: strin
     input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${stepId}-${attempt}`, workOrderId: orderId, stepId, title,
       what: `完成任务「${order.intent}」中的一个准备步骤：${step.title}\n产出：${step.deliverable || "（未写明）"}\n完成标准：${step.doneCriterion || "（未写明）"}${context ? `\n${context}` : ""}\n产出是直接可用的成品（文件），不是计划或说明；只依据给出的文件与公开来源，找不到的写明。${before.text ? `\n${before.text}` : ""}`,
       category: category ?? "read_research_organize", humanPart: "该任务的其余步骤由本人完成；需要本人判断或选择的内容列入待本人处理。", inputs: [...inputs, ...before.inputs],
-      ...(step.executor === "agent" ? { prep: true } : {}) } };
+      ...(step.executor === "agent" ? { prep: true } : {}), lessons: assistantLessons(store, workspaceId, orderId) } };
   /* i18n-ignore-end */
 }
 
@@ -86,12 +95,16 @@ export function taskFromWorkOrder(store: CrosslineStore, workspaceId: string, or
     .slice(0, 20).map((fact) => `- ${fact.slot}：${fact.value.slice(0, 200)}`); // i18n-ignore: model-facing
   const before = retryContext(store, workspaceId, agentChainKey({ workOrderId: orderId, stepId: "", title: order.intent }));
   const what = [facts.length ? `${plan.what}\n本人确认过的相关事实（可以直接用）：\n${facts.join("\n")}` : plan.what, before.text].filter(Boolean).join("\n"); // i18n-ignore: model-facing
-  const attempt = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId).length + 1;
+  const runs = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === orderId);
+  const attempt = runs.length + 1;
+  // What the assistant already made for this order (a step of it, before it became the assistant's whole): read only, to build on.
+  const earlier = plan.delegated ? runs.filter((task) => (task.status === "accepted" || task.status === "needs_review") && task.directory && existsSync(task.directory))
+    .map((task) => task.directory) : [];
   return {
     ok: true, category, why: plan.why, graded: plan.graded,
     input: { taskId: `agent-${orderId.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${attempt}`, workOrderId: orderId, title: order.intent, what,
-      category: category ?? "read_research_organize", humanPart: plan.humanPart, inputs: [...inputs, ...before.inputs], ...(plan.notes ? { notes: plan.notes } : {}),
-      ...(plan.delegated ? { delegated: true } : {}) }
+      category: category ?? "read_research_organize", humanPart: plan.humanPart, inputs: [...new Set([...inputs, ...before.inputs, ...earlier])], ...(plan.notes ? { notes: plan.notes } : {}),
+      ...(plan.delegated ? { delegated: true } : {}), lessons: assistantLessons(store, workspaceId, orderId) }
   };
 }
 
@@ -107,10 +120,14 @@ export function dispatchCandidates(store: CrosslineStore, workspaceId: string, w
   // An order is tried once any run of it (or of a step of it) exists, unless its whole-order runs were interrupted and the next is due.
   const chains = agentChainsFor(store, workspaceId, now);
   const due = new Set(chains.filter((chain) => !chain.latest.stepId && retryDue(chain, now)).map((chain) => chain.latest.workOrderId));
-  const tried = new Set(chains.map((chain) => chain.latest.workOrderId).filter((id) => id && !due.has(id)));
-  for (const chain of chains) if (chain.latest.stepId) tried.add(chain.latest.workOrderId);
+  const tried = new Set(chains.filter((chain) => !chain.latest.stepId).map((chain) => chain.latest.workOrderId).filter((id) => id && !due.has(id)));
+  const orders = store.listWorkOrders(workspaceId);
+  // A step of an order once handed over keeps the rest of the order its person's — except the assistant's own item (docs/work-split.md:
+  // an order reorganised to the assistant after one of its steps ran is still the assistant's to do whole).
+  const assistants = new Set(orders.filter((order) => (order.payload as { owner?: unknown } | undefined)?.owner === "assistant").map((order) => order.id));
+  for (const chain of chains) if (chain.latest.stepId && !assistants.has(chain.latest.workOrderId)) tried.add(chain.latest.workOrderId);
   const out: string[] = [];
-  for (const order of store.listWorkOrders(workspaceId)) {
+  for (const order of orders) {
     if (tried.has(order.id) || order.tombstone || !DISPATCH_STATES.has(order.state) || (within && !within.has(order.id))) continue;
     const result = taskFromWorkOrder(store, workspaceId, order.id);
     // Wording that points at no kind is the person's to decide; nothing starts without a kind.
@@ -125,23 +142,28 @@ export function dispatchCandidates(store: CrosslineStore, workspaceId: string, w
  * The preparation steps the assistant takes over by itself (decided 2026-10-09: what is static is done before the person needs it, and
  * the person's attention goes to the intellectual core). A step the planner gave the assistant (`executor: "agent"`), still planned, of
  * a committed task, never tried before, of a kind the person allowed; a kind not yet allowed is asked about once and the step waits.
- * Soonest-due task first, then in the step order.
+ * Soonest-due task first, then in the step order. `within`: only these steps (`<order>#<step>`, those whose person step starts soon:
+ * `prepWindow`); absent, every step.
  */
 export function stepDispatchCandidates(store: CrosslineStore, workspaceId: string, within?: Set<string>, now = new Date()): Array<{ orderId: string; stepId: string }> {
   if (isPaused(store, workspaceId)) return [];
   const approved = readCategories(store, workspaceId);
   const declined = new Set(declinedCategories(store, workspaceId));
   const tried = triedSteps(store, workspaceId, now);
-  const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active"))
-    .map((order) => [order.id, order]));
+  // The person's tasks only: an order that is the assistant's whole (docs/work-split.md) is handed over whole, not step by step.
+  const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active")
+    && onPersonsBoard(order)).map((order) => [order.id, order]));
   const out: Array<{ orderId: string; stepId: string; due: string; seq: number }> = [];
   const made = madeInProject(store, workspaceId);
   for (const plan of store.listStepPlans(workspaceId)) {
-    if (!orders.has(plan.workOrderId) || (within && !within.has(plan.workOrderId))) continue;
+    if (!orders.has(plan.workOrderId)) continue;
     const order = orders.get(plan.workOrderId)!;
     const due = (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "9999";
     for (const step of plan.steps) {
       if (step.executor !== "agent" || step.status !== "planned" || tried.has(`${plan.workOrderId}#${step.id}`)) continue;
+      if (within && !within.has(`${plan.workOrderId}#${step.id}`)) continue;
+      // Material only the person has, not given yet (an upload or 「没有」 on the provide step): nothing that uses it is made before.
+      if (openNeedsOf(plan, step).length) continue;
       // Already made (or being made, or waiting for review) for another task of the same course or project.
       if (made.get(order.projectId)?.has(deliverableKey(step.title))) continue;
       const category = stepCategory(step) ?? "read_research_organize";
@@ -179,7 +201,7 @@ function triedSteps(store: CrosslineStore, workspaceId: string, now = new Date()
  * the order is still open (and the step still planned and not the person's), and its kind is still allowed. The person's own
  * (「交给 Agent」, a retry they asked for) are not held to `within`; the system's own are, as their first run was.
  */
-export function retryCandidates(store: CrosslineStore, workspaceId: string, now = new Date(), within?: Set<string>):
+export function retryCandidates(store: CrosslineStore, workspaceId: string, now = new Date(), within?: PrepWindow):
   Array<{ orderId: string; stepId: string | undefined; chain: AgentChain }> {
   if (isPaused(store, workspaceId)) return [];
   const approved = readCategories(store, workspaceId);
@@ -192,11 +214,12 @@ export function retryCandidates(store: CrosslineStore, workspaceId: string, now 
     if (!retryDue(chain, now) || !order) continue;
     const category = tasks.get(chain.latest.taskId)?.category;
     if (category && !approved[category]) continue;
-    if (!chain.byPerson && within && !within.has(workOrderId)) continue;
     if (stepId) {
       const step = store.getStepPlan(workspaceId, workOrderId)?.steps.find((item) => item.id === stepId);
       if (!step || step.status !== "planned" || step.executor === "human" || !(DISPATCH_STATES.has(order.state) || order.state === "active")) continue;
-    } else if (!DISPATCH_STATES.has(order.state)) continue;
+      // A preparation step by the person step it serves; a step on the calendar by its order, as before.
+      if (!chain.byPerson && within && !(step.executor === "agent" ? within.steps.has(`${workOrderId}#${stepId}`) : within.orders.has(workOrderId))) continue;
+    } else if (!DISPATCH_STATES.has(order.state) || !chain.byPerson && within && !within.orders.has(workOrderId)) continue;
     out.push({ orderId: workOrderId, stepId: stepId || undefined, chain });
   }
   // The person's first, then the longest waiting.
@@ -255,7 +278,7 @@ export function autoHandoffCandidates(store: CrosslineStore, workspaceId: string
   const timing = new Set(store.listExecutions(workspaceId).filter((execution) => !execution.endedAt
     && !(execution.interruptions.at(-1) && !execution.interruptions.at(-1)!.resumedAt)).map((execution) => execution.workOrderId));
   const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && (DISPATCH_STATES.has(order.state) || order.state === "active")
-    && !timing.has(order.id)).map((order) => [order.id, order]));
+    && !timing.has(order.id) && onPersonsBoard(order)).map((order) => [order.id, order]));
   const out: Array<{ orderId: string; stepId: string; at: string; when: "due" | "early" }> = [];
   for (const plan of store.listStepPlans(workspaceId)) {
     if (!orders.has(plan.workOrderId)) continue;
@@ -296,6 +319,34 @@ export function ledgerAsk(store: CrosslineStore, workspaceId: string, taskId: st
     }
     decideAgentApproval(store, workspaceId, id, "declined");
     return false;
+  };
+}
+
+/** What the run is told about a question nobody answered in time (the Skill says what to do with it). */
+// i18n-ignore: what the run is told (model-facing)
+export const QUESTION_UNANSWERED = "本人暂未回答。按最稳妥的做法继续，并把这个问题写进 needsHuman。";
+
+/**
+ * A question the assistant asks mid-run (Codex's `request_user_input`), put to the person the way guard questions are: written to the
+ * ledger, shown on 待确认, answered there. Unanswered within ten minutes it expires and the run is told to go on the safest way.
+ */
+export function ledgerQuestion(store: CrosslineStore, workspaceId: string, taskId: string, title: string,
+  options: { timeoutMs?: number; pollMs?: number; sleep?: (ms: number) => Promise<void>; onAsked?: (id: string, questions: AgentQuestion[]) => void } = {}) {
+  const timeoutMs = options.timeoutMs ?? 10 * 60_000;
+  const pollMs = options.pollMs ?? 3_000;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  return async (questions: AgentQuestion[]): Promise<Record<string, string[]>> => {
+    const unanswered = Object.fromEntries(questions.map((question) => [question.id, [QUESTION_UNANSWERED]]));
+    const id = requestAgentQuestion(store, workspaceId, taskId, title, questions);
+    if (!id) return unanswered;
+    options.onAsked?.(id, questions);
+    for (let waited = 0; waited <= timeoutMs; waited += pollMs) {
+      const answers = agentQuestionAnswers(store, workspaceId, id);
+      if (answers) return { ...unanswered, ...Object.fromEntries(Object.entries(answers).filter(([, value]) => value.length)) };
+      await sleep(pollMs);
+    }
+    expireAgentQuestion(store, workspaceId, id);
+    return unanswered;
   };
 }
 

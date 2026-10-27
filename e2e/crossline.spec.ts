@@ -63,7 +63,7 @@ function ensureOwnNextStep(): void {
 // ranking and the overload list are removed rather than hidden because how many rows they hold changes their height.
 const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-aside,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
   + ".task-card-slot a,.pl-hours,.pl-svg,.pl-timeline>header small,.pl-advice-count{visibility:hidden}"
-  + ".pl-rank-table,.pl-library,.pl-explain p,.pl-over-list,.pl-stat .pl-chart-foot,.forecast-delta{display:none}";
+  + ".ui-first-hint,.pl-rank-table,.pl-library,.pl-explain p,.pl-over-list,.pl-stat .pl-chart-foot,.forecast-delta{display:none}";
 
 test.beforeEach(async ({ page }, testInfo) => {
   if (testInfo.project.name === "desktop-chrome") await ensureScheduleSetup(page);
@@ -120,7 +120,8 @@ test("Plan is the long view: no calendar, a milestone timeline and three charts 
   await expect(page.locator(".mo-cell, .wk-col, .dv-block")).toHaveCount(0);
   for (const chart of ["里程碑时间轴", "容量与需求", "主线投入：计划与实际", "估时准确度", "时段与精力"]) await expect(page.getByRole("region", { name: chart })).toBeVisible();
   await expect(page.getByRole("button", { name: "立即同步日历" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "发布到 Crossline 日历" })).toBeVisible();
+  // No writer account in the e2e ledger, so there is no Crossline calendar to publish to (W-20).
+  await expect(page.getByRole("button", { name: "发布到 Crossline 日历" })).toHaveCount(0);
   // Each milestone mark opens its drawer on 主线 (the default eight-week horizon).
   await expect(page.locator('.pl-ms-point[href^="/milestones?open="]').first()).toBeVisible();
   // Eight weekly bars by default; four once the horizon is switched, kept in the address.
@@ -155,6 +156,8 @@ test("editing availability re-runs the scheduler instead of only storing a prefe
   const grid = page.locator(".pl-grid");
   await page.getByRole("radio", { name: "擦除" }).click();
   for (const row of await grid.locator("tbody tr").all()) {
+    // Rows below the fold would take the drag on whatever covers that point instead.
+    await row.scrollIntoViewIfNeeded();
     const first = (await row.locator("td").first().boundingBox())!, last = (await row.locator("td").last().boundingBox())!;
     await page.mouse.move(first.x + 3, first.y + first.height / 2);
     await page.mouse.down();
@@ -217,7 +220,7 @@ test("goal confirmation and permission-mode rejection persist through the real p
     page.waitForNavigation({ waitUntil: "load" }),
     drawer.locator('input[type="date"]').fill("2026-09-30", { force: true })
   ]);
-  await page.locator('.mt-marker[aria-label^="稳定推进当前实验与论文"]').click();
+  // The save reloads the page and opens the same drawer again (2026-10-18), so the new deadline is read where it was written.
   await expect(page.locator(".ui-sheet").locator('input[type="date"]')).toHaveValue("2026-09-30");
   await page.goto("/plan");
   // The confirmed deadline places that milestone's mark on the plan page's timeline.
@@ -295,7 +298,7 @@ test("the app opens with the network down, and the offline capture queues", asyn
 
   await page.reload();
   // The headline claim: the shell came from the cache, not the server.
-  await expect(page.getByRole("link", { name: "任务" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "任务", exact: true })).toBeVisible();
   await expect(page.locator(".analog-clock")).toBeVisible();
 
   // And a capture taken while down is kept rather than lost.
@@ -546,10 +549,13 @@ test("Today's flywheel graph draws each line around its goal and opens a milesto
   await expect.poll(async () => { await page.mouse.wheel(0, -200); return node.getAttribute("transform"); }).not.toBe(before);
   // Once it answers, a wheel turn zooms again and the page stays where it is.
   const zoomed = await node.getAttribute("transform");
-  const scrolled = await page.evaluate(() => window.scrollY);
+  // Where the drawing sits in the window, not `scrollY`: something inserted above it after load (a daytime nudge) moves `scrollY`
+  // through scroll anchoring while the view stays put, and that made this test pass at night and fail by day.
+  const top = async () => (await graph.locator("svg.fw-graph").boundingBox())!.y;
+  const placed = await top();
   await page.mouse.wheel(0, -200);
   await expect.poll(() => node.getAttribute("transform")).not.toBe(zoomed);
-  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+  expect(Math.abs((await top()) - placed)).toBeLessThan(2);
   await graph.getByRole("button", { name: "复位" }).click();
   await Promise.all([page.waitForURL(/\/milestones\?open=/), node.locator("circle").first().click()]);
 });
@@ -677,6 +683,9 @@ test("确认时间块：通知打开的小页上点「超出预估 · 30 分钟�
 test("设置里的 Skill 库：主线 skill 逐条带来源；编辑存为新版本，回到旧版另存为新版本；公开 skill 可删除", async ({ page }, testInfo) => {
   await ensureSkillLibrary(page);
   await page.goto("/settings#skills");
+  // The library opens folded to its summary (2026-10-21); 「全部展开」 lists every kind with each item open.
+  const expandAll = () => page.getByRole("button", { name: "全部展开" }).click();
+  await expandAll();
   const mine = page.getByRole("region", { name: "本人的主线 skill" });
   await expect(mine.getByText("以冲突和焦虑作为内容核心切口，并以 solution 完成变现。")).toBeVisible();
   await expect(mine.getByText(/来源：2026-10-14 本人采纳助手结果/)).toBeVisible();
@@ -700,6 +709,7 @@ test("设置里的 Skill 库：主线 skill 逐条带来源；编辑存为新版
   expect(current.markdown).toMatch(/^---\nname: /);
 
   await page.reload();
+  await expandAll();
   await mine.getByText(/历次版本/).click();
   await mine.getByRole("button", { name: "回到此版" }).last().click();
   await expect(mine.getByRole("status")).toContainText("已回到第 1 版");

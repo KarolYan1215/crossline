@@ -2,8 +2,8 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createReminderWorkflow, requestWorkflow, reviewAgentTask } from "@crossline/db";
-import { ACTIONS, describeEvent, scheduleLabel, templateCriterion, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
+import { createReminderWorkflow, requestAutomation, reviewAgentTask } from "@crossline/db";
+import { ACTIONS, describeEvent, scheduleLabel, templateCriterion, windowDays, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
 import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, getStore, saveMilestoneTemplate,
   shiftToday, startWorkOrderExecution } from "./crossline";
@@ -17,14 +17,16 @@ import { scheduleEvent } from "./event-scheduling";
 import { applyChange } from "./impact";
 import { createMilestoneDraft } from "./input";
 import { addLine, identityLines, lineLabels, updateLine } from "./lines";
+import { addDomainRecord, personToday } from "./records";
 import { applyTaskOp, recordEnergy } from "./task-ops";
 import { undoOp, withUndo } from "./undo";
 import { localeFor, tOf } from "./locale";
 
 /** What carrying out one action did: `message` is shown on the card; `opId` is what the card's 撤销 takes back. */
-export type ActionOutcome = { ok: true; message: string; opId?: string; href?: string } | { ok: false; message: string };
+export type ActionOutcome = { ok: true; message: string; opId?: string; href?: string; captureId?: string } | { ok: false; message: string };
 
-type Done = { ok: true; message?: string; href?: string } | { ok: false; code: string; message?: string };
+/** `captureId`: the capture a task.create wrote, so its card can say later what became of it (`captureProgress`). */
+type Done = { ok: true; message?: string; href?: string; captureId?: string } | { ok: false; code: string; message?: string };
 type Handler<K extends ActionId> = (ctx: AccessContext, args: ActionArgs<K>) => Done | Promise<Done>;
 
 /**
@@ -46,7 +48,7 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     analyzeNewCapturesInBackground(ctx);
     // No approved milestone is needed any more: the analysis files the task under its line unbound, so a new account's first task is
     // analysed and scheduled on its first day.
-    return { ok: true, message: tOf(ctx)("已收集，正在分析估时与步骤"), href: "/workbench" };
+    return { ok: true, message: tOf(ctx)("已收集，正在分析估时与步骤"), href: "/workbench", captureId: id };
   },
   // The note is the conversation's own message, searchable from the box; nothing else is written.
   "note.add": (ctx) => ({ ok: true, message: tOf(ctx)("已记下，可在对话记录中搜索") }),
@@ -61,10 +63,23 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     return result.ok ? { ok: true, message: tOf(ctx)("已撤销：{{label}}", { label: result.label }) } : result;
   },
   "energy.report": (ctx, args) => recordEnergy(ctx, args.level, args.note),
+  "record.add": (ctx, args) => {
+    const result = addDomainRecord(ctx, { domain: args.domain, kind: args.kind, value: args.value, unit: args.unit, currency: args.domain === "wealth" ? args.currency || "CNY" : "",
+      category: args.category, note: args.note, at: args.at || personToday(ctx), source: "input", sourceRef: "" });
+    return result.ok ? { ok: true, message: tOf(ctx)("已记下") } : { ok: false, code: result.code, message: result.message };
+  },
   // 「后面都推 10 分钟」: today's plan starts later; started and locked blocks stay. Undone like any `schedule.` setting.
   "schedule.shift": (ctx, args) => {
     const result = shiftToday(ctx, args.minutes);
     return result.ok ? { ok: true, message: result.message, href: "/" } : result;
+  },
+  "availability.set": (ctx, args) => {
+    const windows = args.windows.map((window) => ({ days: windowDays(window.days), start: window.start, end: window.end, energy: window.energy }));
+    const result = applyChange(ctx, { kind: "availability", windows });
+    if (!result.ok) return result;
+    const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+    const hours = windows.reduce((sum, window) => sum + window.days.length * (minutes(window.end) - minutes(window.start)), 0) / 60;
+    return { ok: true, href: "/plan", message: tOf(ctx)("每周可用时段改为约 {{count}} 小时", { count: Math.round(hours) }) };
   },
   "event.create": async (ctx, args) => {
     const result = await scheduleEvent(ctx, { title: args.title, lineId: args.lineId, date: args.date, weekdays: args.weekdays, startTime: args.startTime,
@@ -85,7 +100,11 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     return result.ok ? { ok: true, message: tOf(ctx)("草稿已建立，在主线页批准"), href: `/milestones?open=${encodeURIComponent(result.id)}` } : result;
   },
   "line.add": (ctx, args) => {
-    const result = addLine(ctx, { label: args.label, goal: "" });
+    const result = addLine(ctx, { label: args.label, goal: "", ...(args.domain ? { domain: args.domain } : {}) });
+    if (!result.ok && result.code === "LINE_DOMAIN_TAKEN") {
+      // One live line per domain: say which line has it, so the person can change that one instead of adding a second.
+      return { ok: false, code: result.code, message: tOf(ctx)("「{{name}}」已经负责这个领域，可在主线页修改那条主线", { name: lineLabels(ctx)[result.lineId ?? ""] ?? tOf(ctx)("另一条主线") }) };
+    }
     return result.ok ? { ok: true, message: tOf(ctx)("这条主线的访谈可以开始了"), href: `/onboarding?line=${encodeURIComponent(result.id)}` } : result;
   },
   "profile.tell": (ctx, args) => {
@@ -114,10 +133,11 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     // No line, no guess: the first line is not a default (a media request filed under research was grown in research's way).
     const target = line;
     if (!target) return { ok: false, code: "LINE_REQUIRED", message: tOf(ctx)("请说明这件事服务哪条主线") };
-    requestWorkflow(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
-    // Grown now, not at the worker's next tick; a worker that is down picks it up when it is back.
-    void requestCodexSupervisor(ctx, "/v1/workflows/grow", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
-    return { ok: true, message: tOf(ctx)("已交给助手建成工作流，建好后会通知；发出、发布一类的步骤仍由本人完成"), href: "/settings#skills" };
+    // An automation for every account (docs/personal-agent.md, 2026-10-19): the worker designs it from the words now — a trigger it
+    // watches and what the assistant does each time — and says when it is ready. A worker that is down takes it up when it is back.
+    requestAutomation(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
+    void requestCodexSupervisor(ctx, "/v1/automations/design", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
+    return { ok: true, message: tOf(ctx)("已交给助手建成自动化，建好后会通知，并说明它按什么条件运行；发出、发布一类的步骤仍由本人完成"), href: "/settings#automation" };
   },
   "proposal.decide": (ctx, args) => {
     if (args.decision !== "approve") return archiveWorkOrder(ctx, args.workOrderId, args.reason.trim() || tOf(ctx)("在输入框中拒绝"));
@@ -240,7 +260,8 @@ export async function executeAction(ctx: AccessContext, item: ProposedAction): P
     const result = item.action === "undo" ? await handler(ctx, item.args) : await withUndo(ctx, label, () => handler(ctx, item.args));
     if (!result.ok) return { ok: false, message: result.message ?? (FAILURE[result.code] ? t(FAILURE[result.code]!) : t("未完成（{{code}}）", { code: result.code })) };
     const op = "op" in result ? (result as { op?: { id: string } }).op : undefined;
-    return { ok: true, message: result.message ?? t("已完成"), ...(op ? { opId: op.id } : {}), ...(result.href ? { href: result.href } : {}) };
+    return { ok: true, message: result.message ?? t("已完成"), ...(op ? { opId: op.id } : {}), ...(result.href ? { href: result.href } : {}),
+      ...(result.captureId ? { captureId: result.captureId } : {}) };
   } catch (error) {
     return { ok: false, message: error instanceof Error && FAILURE[error.message] ? t(FAILURE[error.message]!) : t("未完成，请重试") };
   }

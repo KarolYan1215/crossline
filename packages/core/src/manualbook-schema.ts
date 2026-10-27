@@ -35,6 +35,8 @@ export type ManualDesignContext = {
   /** What is known about the person that bears on how to do this (confirmed facts only). */
   profile: Array<{ id: string; value: string }>;
   constraints: string[];
+  /** Where the person lives and works and in what language (`MaterialSearchContext.setting`): research questions fit it. */
+  setting?: string[];
   /** The task's own steps, when it has a step plan: the tutorial follows them, one part per step, in this order. */
   plannedSteps?: Array<{ id: string; title: string; role: string; doneCriterion: string; covers?: string[]; why?: string;
     /** The tool the plan expects the person to speed this step with (docs/skills-library.md §7). */
@@ -102,9 +104,10 @@ export function validateManualDesign(value: unknown, context: ManualDesignContex
     if (!SLUG.test(node.id)) refuse("MANUAL_NODE_ID_INVALID", `步骤 id「${node.id}」只能是小写字母、数字和连字符，字母开头。`);
     if (ids.has(node.id)) refuse("MANUAL_NODE_ID_DUPLICATE", `步骤 id「${node.id}」重复。`);
     ids.add(node.id);
-    // Every step is researched (decided 2026-10-09): one written only from what the person already has told them nothing new.
-    if (!node.needsResearch || node.researchQuestions.length < 2) refuse("MANUAL_RESEARCH_QUESTION_MISSING",
-      `每一步都要联网查资料：步骤「${node.title}」需要 needsResearch=true 和至少两个具体的检索问题，其中至少一个能在公开网页上找到答案（教材、公开课讲义、官方文档或标准）。`);
+    // Only a step that needs knowledge or a method from outside the person's own files is researched (2026-10-21, replacing 「every step
+    // is researched」 of 2026-10-09): a researcher run is 35–90k tokens, and 「提交」「核对」 steps were researched like the rest.
+    if (node.needsResearch && node.researchQuestions.length < 2) refuse("MANUAL_RESEARCH_QUESTION_MISSING",
+      `步骤「${node.title}」标了需要查资料（needsResearch=true），就要有至少两个具体的检索问题，其中至少一个能在公开网页上找到答案（教材、公开课讲义、官方文档或标准）；不需要查的步骤写 needsResearch=false、researchQuestions 为空。`);
   }
   for (const edge of out.edges) {
     if (!ids.has(edge.from) || !ids.has(edge.to)) refuse("MANUAL_EDGE_UNKNOWN_NODE", `连线 ${edge.from} → ${edge.to} 指向不存在的步骤。`);
@@ -148,6 +151,9 @@ export type MaterialSearchContext = {
   node: Pick<ManualNode, "id" | "title" | "kind" | "goal" | "steps" | "researchQuestions">;
   localFiles: string[];
   constraints: string[];
+  /** Where the person lives and works and in what language, from their own confirmed facts: a tutorial for a Hangzhou investor cited US
+   * federal archiving standards and SEC filings for want of it (2026-10-18 walkthrough). Absent when nothing is on record. */
+  setting?: string[];
 };
 
 export const MATERIAL_SEARCH_SCHEMA = object({
@@ -191,6 +197,9 @@ const OPEN_ACCESS_HOSTS: Array<{ host: RegExp; why: string }> = [
   { host: /(^|\.)proceedings\.mlr\.press$|(^|\.)jmlr\.org$/, why: "PMLR / JMLR（开放获取）" },
   { host: /(^|\.)plos\.org$|(^|\.)journals\.plos\.org$/, why: "PLOS（CC-BY 开放获取）" },
   { host: /(^|\.)zenodo\.org$/, why: "Zenodo（带许可的公开存档）" },
+  // Open courseware under CC licences (2026-10-22: an ECE 548 tutorial kept MIT's lecture notes as summaries only).
+  { host: /(^|\.)ocw\.mit\.edu$/, why: "MIT OpenCourseWare（CC BY-NC-SA 开放课件）" },
+  { host: /(^|\.)openstax\.org$|(^|\.)libretexts\.org$/, why: "OpenStax / LibreTexts（CC BY 开放教材）" },
   { host: /(^|\.)docs\.python\.org$|(^|\.)developer\.mozilla\.org$|(^|\.)docs\.github\.com$/, why: "公开技术文档" }
 ];
 

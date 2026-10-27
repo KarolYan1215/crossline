@@ -167,6 +167,26 @@ describe("batches and arrangements", () => {
       recurring({ id: "group", title: "组会", startTime: "10:00", endTime: "11:00" })], windows, [{ id: "ece555", name: "ECE 555" }]);
     expect(kept.map((item) => item.id)).toEqual(["class", "group"]);
   });
+
+  // The lite run of 2026-10-20: a job has no end date, and the model wrote 「持续进行中，结束时间」 (exactly the field's ten characters) as `to`.
+  test("a weekly arrangement with no end date runs 26 weeks from its start instead of being dropped", () => {
+    const work = recurring({ id: "work", title: "上班", project: "上班", weekdays: [1, 2, 3, 4, 5], startTime: "09:30", endTime: "18:30",
+      from: "2026-10-20", to: "持续进行中，结束时间", sourceRef: "src-3", quote: "Mon and Fri 2:30PM - 3:45PM Plant Sci 108" });
+    const { extraction, dropped } = sanitizeDateExtraction({ dates: [], recurring: [work], questions: [] }, { ...known, today: "2026-10-20" });
+    expect(dropped).toEqual([]);
+    expect(extraction.recurring[0]?.to).toBe("2027-04-20");
+  });
+
+  // The lite run of 2026-10-20: 「工作日 9:30–18:30 上班」 lay wholly outside the evening hours the person stated and named no project,
+  // so it was dropped and the hard line's fixed schedule could never be collected.
+  test("a hard line's own schedule is kept outside the stated hours, by its project or its title", () => {
+    const windows = [{ days: [1, 2, 3, 4, 5], start: "20:00", end: "24:00" }];
+    const work = { startTime: "09:30", endTime: "18:30", weekdays: [1, 2, 3, 4, 5] };
+    const kept = withoutOffHours([recurring({ id: "byProject", title: "到岗", project: "上班", ...work }),
+      recurring({ id: "byTitle", title: "上班（工作日）", project: "", ...work }), recurring({ id: "lunch", title: "午饭", project: "" })],
+    windows, [], [{ id: "line-x", label: "上班" }]);
+    expect(kept.map((item) => item.id)).toEqual(["byProject", "byTitle"]);
+  });
 });
 
 // A turn after the person confirmed a batch returned the same dates as a new batch to confirm (2026-10-15 walkthrough).

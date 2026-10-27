@@ -231,6 +231,7 @@ export type AgentProgressRecord = {
   commands?: Array<{ command: string; exitCode: number | null }>;
   filesChanged?: string[]; searches?: string[];
   decisions?: Array<{ rule: string; reason: string; outcome: string }>;
+  plan?: { explanation: string; steps: Array<{ step: string; status: string }> };
 };
 const base = (file: string) => file.split(/[\\/]/).at(-1) ?? file;
 const list = (items: string[], max: number, locale?: Locale) => items.length > max

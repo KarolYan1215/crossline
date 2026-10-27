@@ -15,12 +15,13 @@ test("eligible proposals take effect with the system as approver and are told in
   store.saveWorkOrder(order("deep", "写论文方法部分", "deep_work", "milestone"));
   store.saveWorkOrder(order("send", "把提纲发送给同学", "preparation"));
   store.saveWorkOrder(order("pick", "选定首轮选题", "review", "high_risk"));
-  expect(autoApproveEligible(store, "w")).toEqual(["prep", "deep"]);
+  // Orders written in the same millisecond come back in either order; which ones took effect is what counts.
+  expect(autoApproveEligible(store, "w").sort()).toEqual(["deep", "prep"]);
   const states = Object.fromEntries(store.listWorkOrders("w").map((item) => [item.id, item.state]));
   expect(states).toEqual({ prep: "approved", deep: "approved", send: "awaiting_plan_approval", pick: "awaiting_plan_approval" });
   const transition = store.listEvents("w", { type: "work_order.transitioned", entityId: "prep" }).at(-1)!;
   expect(JSON.stringify(transition.payload)).toContain(AUTO_APPROVER_ID);
-  expect(store.listEvents("w", { type: "work_order.auto_approved" }).map((event) => event.entityId)).toEqual(["prep", "deep"]);
+  expect(store.listEvents("w", { type: "work_order.auto_approved" }).map((event) => event.entityId).sort()).toEqual(["deep", "prep"]);
   const said = nudges(store);
   expect(said).toHaveLength(1);
   const text = JSON.stringify(said[0]!.payload);

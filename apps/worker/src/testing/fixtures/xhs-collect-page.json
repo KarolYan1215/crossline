@@ -1,0 +1,19 @@
+{
+  "code": 0,
+  "success": true,
+  "msg": "成功",
+  "data": {
+    "cursor": "66aa00000000000000000002",
+    "has_more": true,
+    "notes": [
+      { "note_id": "66aa00000000000000000001", "xsec_token": "ABsampleToken1=", "display_title": "周末徒步路线整理（虚构样例）", "type": "normal",
+        "user": { "user_id": "5f0000000000000000000def", "nickname": "样例山友", "avatar": "" },
+        "interact_info": { "liked": false, "liked_count": "512" },
+        "cover": { "url_default": "https://sns-webpic-qc.xhscdn.com/sample/a!nd_dft_wlteh_webp_3", "width": 1080, "height": 1440 } },
+      { "note_id": "66aa00000000000000000002", "xsec_token": "ABsampleToken2=", "display_title": "三分钟学会手冲咖啡（虚构样例）", "type": "video",
+        "user": { "user_id": "5f0000000000000000000abc", "nickname": "样例咖啡师", "avatar": "" },
+        "interact_info": { "liked": false, "liked_count": "1.2万" },
+        "cover": { "url_default": "https://sns-webpic-qc.xhscdn.com/sample/cover!nd_dft_wlteh_webp_3", "width": 1080, "height": 1440 } }
+    ]
+  }
+}

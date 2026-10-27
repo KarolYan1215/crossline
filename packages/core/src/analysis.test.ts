@@ -257,6 +257,14 @@ test("v2: a byproduct must serve another existing line, once, with a concrete ar
     .toThrow("ANALYSIS_BYPRODUCT_INVALID");
 });
 
+test("a context takes up to APPROVED_MILESTONES_LIMIT approved milestones, not the list default of 32 (41 had refused every analysis)", () => {
+  const milestone = v2Context.approvedMilestones[0]!;
+  const many = Array.from({ length: 41 }, (_, index) => ({ ...milestone, id: `${milestone.id}-${index}` }));
+  expect(core.validateAnalysisContext({ ...v2Context, approvedMilestones: many }).approvedMilestones).toHaveLength(41);
+  const over = Array.from({ length: core.APPROVED_MILESTONES_LIMIT + 1 }, (_, index) => ({ ...milestone, id: `${milestone.id}-${index}` }));
+  expect(() => core.validateAnalysisContext({ ...v2Context, approvedMilestones: over })).toThrow("ANALYSIS_CONTEXT_INVALID");
+});
+
 test("v2 context no longer carries correction factors to the model", () => {
   expect(() => core.validateAnalysisContext({ ...v2Context, rhythm: { focusRunMinutes: 0, productiveMinutesPerDay: 0, planActualRatio: 1.4, observedDays: 0, completed: 3 } }))
     .toThrow("ANALYSIS_CONTEXT_INVALID");

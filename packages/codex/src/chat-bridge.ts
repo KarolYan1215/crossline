@@ -1,11 +1,13 @@
 /**
  * A thin local translator so a model that only speaks Chat Completions can still be driven by Codex (decided 2026-10-13: every
- * provider goes through the same Codex path). Codex 0.155 accepts only `wire_api = "responses"`; its requests are stateless
+ * provider goes through the same Codex path). Codex (0.155, still in 0.163) accepts only `wire_api = "responses"`; its requests are stateless
  * (`store: false`, `stream: true`, no `previous_response_id` — the whole conversation is in `input` every time), so one request maps
  * to one Chat Completions call and nothing is kept between them.
  *
  * This file is the translation only (pure functions); `model-gateway.ts` is the local listener that uses it.
  */
+import { thinkingVariant } from "@crossline/core";
+
 export type BridgeUpstream = {
   /** Everything before `/chat/completions`, e.g. `https://api.deepseek.com/v1`. */
   baseUrl: string;
@@ -16,6 +18,11 @@ export type BridgeUpstream = {
   responseFormat?: "json_schema" | "json_object";
   /** Passes `reasoning.effort` on as `reasoning_effort`; off by default because most compatible endpoints reject the field. */
   reasoningEffort?: boolean;
+  /**
+   * The endpoint takes SiliconFlow's `enable_thinking` / `thinking_budget`: a model named `<model>@think:off|<tokens>` is sent as
+   * `<model>` with those set (`thinkingVariant`). Without it the name goes through as written.
+   */
+  thinkingControl?: boolean;
 };
 
 type Json = Record<string, unknown>;
@@ -47,8 +54,36 @@ export type ChatRequest = { body: Json; dropped: string[]; tools: Record<string,
 const flatName = (name: string, namespace?: string) =>
   (namespace && namespace !== "functions" ? `${namespace}__${name}` : name).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 
+/** A sentence telling the model not to use JSON, which a freeform tool says and a bridged one must not. */
+const NO_JSON_SENTENCE = /[^.。\n]*\b(do not|don't|never)\b[^.。\n]*\bjson\b[^.。\n]*[.。]?/gi;
+/** A freeform tool's description as a JSON function: its "not JSON" sentence dropped, and how to send the text said instead. */
+export function freeformDescription(description: string): string {
+  const kept = description.replace(NO_JSON_SENTENCE, "").replace(/\n{3,}/g, "\n\n").trim();
+  return `${kept}\n\nCall this function with one argument, \`input\`: the whole text of the call exactly as described above `
+    + `(for a patch, from "*** Begin Patch" to "*** End Patch"), as a JSON string.`;
+}
+
+/**
+ * Codex puts a Skill's text (`<skill>…</skill>`, the same few thousand tokens every run) after the input it was named in, which differs
+ * every run, so no run's Skill text could come from the provider's cache. Within each run of user messages, the Skill blocks are moved
+ * ahead of the rest: the order of the Skill blocks among themselves, and of everything else, is kept.
+ */
+export function stableFirst(messages: Json[]): void {
+  const isSkill = (message: Json) => message.role === "user" && /^\s*<skill>/.test(typeof message.content === "string" ? message.content
+    : Array.isArray(message.content) ? text(record(message.content[0])?.text) : "");
+  let start = 0;
+  for (let index = 0; index <= messages.length; index += 1) {
+    if (index < messages.length && messages[index]!.role === "user") continue;
+    // messages[start..index) is one run of user messages.
+    const run = messages.slice(start, index);
+    const skills = run.filter(isSkill);
+    if (skills.length && skills.length < run.length) messages.splice(start, run.length, ...skills, ...run.filter((message) => !isSkill(message)));
+    start = index + 1;
+  }
+}
+
 /** One Responses request as one Chat Completions request. `dropped` names what had no Chat Completions form. */
-export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "responseFormat" | "reasoningEffort"> = {}): ChatRequest {
+export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "responseFormat" | "reasoningEffort" | "thinkingControl"> = {}): ChatRequest {
   const dropped = new Set<string>();
   const system: string[] = [];
   if (text(request.instructions)) system.push(text(request.instructions));
@@ -64,7 +99,11 @@ export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "r
     const flat = flatName(tool.name, namespace);
     if (names[flat]) return;
     names[flat] = { name: tool.name, ...(namespace && namespace !== "functions" ? { namespace } : {}), custom };
-    tools.push({ type: "function", function: { name: flat, description: text(tool.description), parameters: custom
+    // A freeform tool (apply_patch) arrives here as a JSON function: its own description says not to wrap the text in JSON, which
+    // contradicts the `{input}` argument it must now be sent in, so that sentence is replaced by how to call it (the grammar cannot be
+    // carried over to Chat Completions).
+    const description = custom ? freeformDescription(text(tool.description)) : text(tool.description);
+    tools.push({ type: "function", function: { name: flat, description, parameters: custom
       ? { type: "object", properties: { input: { type: "string" } }, required: ["input"], additionalProperties: false }
       : record(tool.parameters) ?? { type: "object", properties: {} } } });
   };
@@ -75,8 +114,14 @@ export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "r
     const type = item.type ?? (item.role ? "message" : undefined);
     if (type === "message") {
       const role = text(item.role);
-      // Many compatible endpoints accept one leading system message only; developer text is instructions wherever Codex put it.
-      if (role === "system" || role === "developer") { const body = contentText(item.content); if (body) system.push(body); }
+      // Many compatible endpoints accept one leading system message only: developer text before the conversation is that message. Text
+      // Codex adds later stays where it came, as a marked user message, so the system message and everything before it are the same
+      // in every request of a thread and the provider can serve that prefix from its cache (2026-10-19).
+      if (role === "system" || role === "developer") {
+        const body = contentText(item.content);
+        if (body && !messages.length) system.push(body);
+        else if (body) messages.push({ role: "user", content: `<instructions>\n${body}\n</instructions>` });
+      }
       else if (role === "assistant") messages.push({ role: "assistant", content: contentText(item.content) });
       else messages.push({ role: "user", content: userContent(item.content) });
     } else if (type === "additional_tools") {
@@ -105,21 +150,33 @@ export function responsesToChat(request: Json, upstream: Pick<BridgeUpstream, "r
     if ((upstream.responseFormat ?? "json_schema") === "json_schema")
       responseFormat = { type: "json_schema", json_schema: { name: text(format.name) || "output", schema: format.schema, strict: format.strict !== false } };
     else {
-      responseFormat = { type: "json_object" };
-      system.push(`Reply with one JSON object only, no prose and no code fence, that validates against this JSON Schema:\n${JSON.stringify(format.schema)}`);
+      // JSON mode makes every reply a JSON object, so a model offered functions could never call one first: on SiliconFlow's DeepSeek
+      // the tools assistant finished in seven seconds with no call and nothing made, and the interview's lookups were never used
+      // (2026-10-19). With functions on offer the JSON is asked for in words, for the final reply only; the runner reads it and its
+      // repair loop sends back anything that is not JSON.
+      if (!tools.length) responseFormat = { type: "json_object" };
+      // Without a schema the endpoint enforces, models echoed the input's own keys (`version`, `caseId`, `prompt`) into the answer
+      // (GLM on SiliconFlow, 2026-10-18): the answer's keys are the schema's, and only those.
+      const lead = tools.length
+        ? "Call the functions you need first, as many times as the task needs. When you are finished, your final reply is one JSON object only"
+        : "Reply with one JSON object only";
+      system.push(`${lead}, no prose and no code fence, that validates against this JSON Schema. Use exactly the schema's own properties: never copy keys or fields from the user's message into the answer.\n${JSON.stringify(format.schema)}`);
     }
   }
 
   const effort = text(record(request.reasoning)?.effort);
+  stableFirst(messages);
+  const variant = upstream.thinkingControl ? thinkingVariant(text(request.model)) : undefined;
   const body: Json = {
-    model: request.model,
+    model: variant ? variant.base : request.model,
     messages: [...(system.length ? [{ role: "system", content: system.join("\n\n") }] : []), ...messages],
     stream: true,
     stream_options: { include_usage: true },
     ...(tools.length ? { tools, tool_choice: request.tool_choice === "none" ? "none" : "auto",
       ...(typeof request.parallel_tool_calls === "boolean" ? { parallel_tool_calls: request.parallel_tool_calls } : {}) } : {}),
     ...(responseFormat ? { response_format: responseFormat } : {}),
-    ...(upstream.reasoningEffort && effort ? { reasoning_effort: effort } : {})
+    ...(upstream.reasoningEffort && effort ? { reasoning_effort: effort } : {}),
+    ...(variant?.thinking ? { enable_thinking: variant.thinking.enable, ...(variant.thinking.budget ? { thinking_budget: variant.thinking.budget } : {}) } : {})
   };
   return { body, dropped: [...dropped], tools: names };
 }
@@ -261,7 +318,7 @@ export function upstreamFailure(status: number, body: string): { code: string; m
     if (typeof error?.message === "string") message = error.message;
   } catch { /* not JSON: the raw text is the message */ }
   const code = /context|too long|maximum.*tokens|token limit/i.test(message) && status === 400 ? "context_length_exceeded"
-    : status === 402 || /insufficient.*(balance|quota)|余额不足|arrearage/i.test(message) ? "insufficient_quota"
+    : status === 402 || /insufficient.*(balance|quota)|(balance|quota).{0,20}insufficient|余额不足|arrearage/i.test(message) ? "insufficient_quota"
     : status === 429 ? "rate_limit_exceeded"
     : status === 503 || status === 529 ? "server_is_overloaded"
     : status >= 500 ? "server_error" : "invalid_request";

@@ -21,12 +21,19 @@ const readableRationale = (text: string, bare: string) =>
 /** The margin rule the architect is held to (`MARGIN_RATIO`): a line within 3% of the bare line is flagged, not refused. */
 const MARGIN = 0.03;
 
-function useAction() {
+/** Reloads with the drawer open again (`?open=<id>`): a plain reload closed it after every edit, and the person lost their place. */
+function reopen(id: string) {
+  const url = new URL(location.href);
+  url.searchParams.set("open", id);
+  location.replace(url.toString());
+}
+
+function useAction(reopenId?: string) {
   const [state, setState] = useState<{ busy: boolean; message: string }>({ busy: false, message: "" });
-  const run = async (pending: string, work: () => Promise<Response | undefined>, failed: string) => {
+  const run = async (pending: string, work: () => Promise<Response | undefined>, failed: string, keepOpen = true) => {
     setState({ busy: true, message: pending });
     const response = await work();
-    if (response?.ok) { location.reload(); return; }
+    if (response?.ok) { if (reopenId && keepOpen) reopen(reopenId); else location.reload(); return; }
     setState({ busy: false, message: failed });
   };
   return { ...state, run };
@@ -41,17 +48,18 @@ function useAction() {
  */
 export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: BoardMilestone; labels: Record<string, string>; onClose: () => void }) {
   const t = useT();
-  const action = useAction();
+  const action = useAction(milestone.id);
   const [weight, setWeight] = useState(milestone.weight);
   const approved = milestone.status === "approved";
   const saveGoal = (body: Record<string, unknown>) => action.run(t("保存中…"), () => post(`/api/goals/${encodeURIComponent(milestone.id)}`, body), t("未保存，请重试。"));
   const decideDraft = (decision: "approved" | "archived") => action.run(decision === "approved" ? t("批准中…") : t("撤销中…"),
-    () => post("/api/milestones/approve-batch", { ids: [milestone.id], decision }), t("操作未完成，请刷新后重试。"));
+    () => post("/api/milestones/approve-batch", { ids: [milestone.id], decision }), t("操作未完成，请刷新后重试。"), decision === "approved");
   // Every edit here is a new version of the milestone (`/api/milestones`), so the criteria a past verdict was judged against stay readable.
   const saveMilestone = (patch: { title?: string; status?: string; successCriteria?: SuccessCriterion[] }, pending = t("保存中…"), failed = t("未保存，请检查后重试。")) =>
     action.run(pending, () => post("/api/milestones", {
       id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId, title: milestone.title, status: milestone.status,
-      successCriteria: milestone.successCriteria, ...(milestone.templateId ? { templateId: milestone.templateId } : {}), ...patch }), failed);
+      successCriteria: milestone.successCriteria, ...(milestone.templateId ? { templateId: milestone.templateId } : {}), ...patch }), failed,
+    patch.status !== "archived");
   const saveThreshold = (criterionId: string, value: number) => saveMilestone({
     successCriteria: milestone.successCriteria.map((criterion: SuccessCriterion) => criterion.id === criterionId && criterion.measure.kind === "threshold"
       ? { ...criterion, measure: { ...criterion.measure, value } } : criterion) }, t("保存中…"), t("未保存，请检查数值。"));
@@ -111,7 +119,11 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
         <h3>{t("验收标准")} <span className="mono md-sub">{milestone.criteria.filter((criterion) => criterion.quarters === 4).length}/{milestone.criteria.length}</span></h3>
         {milestone.criteria.length === 0 && <p className="md-sub">{t("尚无验收标准：关联任务仍按各自证据验收，但里程碑进度无法记录。")}</p>}
         {milestone.criteria.map((criterion) => <CriterionRow key={criterion.id} criterion={criterion} busy={action.busy}
-          onSave={(value) => void saveThreshold(criterion.id, value)} />)}
+          onSave={(value) => void saveThreshold(criterion.id, value)}
+          onReword={(statement) => void saveMilestone({ successCriteria: milestone.successCriteria.map((item: SuccessCriterion) =>
+            item.id === criterion.id ? { ...item, statement } : item) })}
+          {...(milestone.successCriteria.length > 1 ? { onRemove: () => void saveMilestone({
+            successCriteria: milestone.successCriteria.filter((item: SuccessCriterion) => item.id !== criterion.id) }, t("去掉中…"), t("未去掉：至少保留一条衡量结果的标准。")) } : {})} />)}
         {milestone.successCriteria.length < 10 && <AddCriterion busy={action.busy}
           onAdd={(criterion) => void saveMilestone({ successCriteria: [...milestone.successCriteria, criterion] })} />}
       </section>
@@ -189,10 +201,16 @@ function TickStrip({ milestone }: { milestone: BoardMilestone }) {
   </div>;
 }
 
-function CriterionRow({ criterion, busy, onSave }: { criterion: BoardCriterion; busy: boolean; onSave: (value: number) => void }) {
+/**
+ * One criterion: its reading as a ring, a score line edited in place, and its wording changed or the criterion taken out — before
+ * 2026-10-18 an approved milestone's criteria could only be added to. Each change is a new version, so past verdicts stay readable.
+ */
+function CriterionRow({ criterion, busy, onSave, onReword, onRemove }: { criterion: BoardCriterion; busy: boolean; onSave: (value: number) => void;
+  onReword: (statement: string) => void; onRemove?: (() => void) | undefined }) {
   const t = useT();
   const threshold = criterion.threshold;
   const [value, setValue] = useState(threshold ? String(threshold.value) : "");
+  const [wording, setWording] = useState<string | null>(null);
   const number = Number(value);
   const bare = threshold?.bare;
   const thin = threshold && bare !== undefined && Number.isFinite(number)
@@ -200,7 +218,15 @@ function CriterionRow({ criterion, busy, onSave }: { criterion: BoardCriterion; 
   return <div className="md-criterion">
     <ProgressRing quarters={criterion.quarters} label={criterion.statement} />
     <div>
-      <p>{criterion.statement}</p>
+      {wording === null
+        ? <p>{criterion.statement} <button type="button" className="text-button" disabled={busy} onClick={() => setWording(criterion.statement)}>{t("改")}</button>
+          {onRemove && <button type="button" className="text-button" disabled={busy} onClick={onRemove}>{t("去掉")}</button>}</p>
+        : <form className="md-reword" onSubmit={(event) => { event.preventDefault(); const next = wording.trim();
+            if (next && next !== criterion.statement) onReword(next); else setWording(null); }}>
+          <input value={wording} maxLength={300} aria-label={t("验收标准")} autoFocus onChange={(event) => setWording(event.target.value)} />
+          <button type="submit" disabled={busy || !wording.trim()}>{t("保存")}</button>
+          <button type="button" className="text-button" onClick={() => setWording(null)}>{t("取消")}</button>
+        </form>}
       {criterion.observed && <small className="gen">{criterion.observed}</small>}
       {threshold && <div className="md-threshold">
         <Bullet label={criterion.statement} target={Number.isFinite(number) ? number : threshold.value} {...(bare !== undefined ? { bare } : {})}

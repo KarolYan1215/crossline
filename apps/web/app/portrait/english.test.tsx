@@ -19,11 +19,11 @@ test("the rhythm readings are English, with what is missing said in words", () =
 });
 
 test("the axes name each pole by its English word alone, and the radar names Schwartz's values in English", () => {
-  const type = typeFromScores({ scope: 80, basis: 30, output: 40, rhythm: 70 });
+  const type = typeFromScores({ collab: 80, purpose: 30, build: 40, lines: 70 }, {}, "en");
   const html = en(<DivergingAxes type={type} />);
-  expect(html).toContain("<b>G</b>eneralist");
-  expect(html).not.toContain("深耕");
-  expect(html).not.toContain("跨界");
+  expect(html).toContain("<b>W</b>eave");
+  expect(html).not.toContain("接力");
+  expect(html).not.toContain("共生");
   const radar = en(<ValuesRadar values={[{ name: "自主", score: 80, evidence: "" }, { name: "成就", score: 60, evidence: "" }, { name: "安全", score: 40, evidence: "" }]} />);
   expect(radar).toContain("Self-direction");
   expect(radar).toContain("Achievement");

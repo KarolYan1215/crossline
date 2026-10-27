@@ -17,6 +17,8 @@ export type SkillUsage = {
   threadId?: string; ok: boolean; errorCode?: string; repairs: number; turns: number; durationMs: number; at: string;
   /** Wall-clock seconds of each turn in order, so one stalled turn shows up as itself instead of inside a long total. */
   turnSeconds?: number[];
+  /** What the run was for when the caller said (see `withUsagePurpose`). */
+  purpose?: string;
 } & TokenBreakdown;
 
 export const emptyBreakdown = (): TokenBreakdown => ({ inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 });
@@ -58,12 +60,22 @@ const workspaceContext = new AsyncLocalStorage<{ workspaceId: string }>();
  * attributed without every runner passing a workspace id down to the Skill layer.
  */
 export function enterUsageWorkspace(workspaceId: string): void { workspaceContext.enterWith({ workspaceId }); }
+/** The same, for one call only: what concurrent callers use, since `enterWith` would leak into the caller's context. */
+export function withUsageWorkspace<T>(workspaceId: string, run: () => Promise<T>): Promise<T> { return workspaceContext.run({ workspaceId }, run); }
 /** The workspace this async chain is working for, if one was entered. */
 export const currentUsageWorkspace = (): string | undefined => workspaceContext.getStore()?.workspaceId;
 
-export function reportUsage(usage: Omit<SkillUsage, "workspaceId">): void {
+const purposeContext = new AsyncLocalStorage<string>();
+/**
+ * Says what the runs inside `run` are for, when the Skill's name does not (the quota saver's `non_core`: the reviewer judging public
+ * skills is non-core, the same Skill judging a step plan is not). Scoped to the call, so concurrent passes never take each other's.
+ */
+export function withUsagePurpose<T>(purpose: string, run: () => Promise<T>): Promise<T> { return purposeContext.run(purpose, run); }
+
+export function reportUsage(usage: Omit<SkillUsage, "workspaceId" | "purpose">): void {
   const workspaceId = workspaceContext.getStore()?.workspaceId;
-  try { usageSink?.({ ...usage, ...(workspaceId ? { workspaceId } : {}) }); } catch { /* accounting must never fail the work it accounts for */ }
+  const purpose = purposeContext.getStore();
+  try { usageSink?.({ ...usage, ...(workspaceId ? { workspaceId } : {}), ...(purpose ? { purpose } : {}) }); } catch { /* accounting must never fail the work it accounts for */ }
 }
 
 let spendProvider: ((workspaceId: string | undefined) => Promise<SpendMode>) | undefined;

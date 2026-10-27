@@ -26,8 +26,8 @@ const ask = (body: unknown, auth: string | null = `Bearer ${SECRET}`, ip = "203.
   body: JSON.stringify(body)
 }));
 
-const stored = (email: string, scores = { scope: 80, basis: 30, output: 72, rhythm: 66 }, code = "GERA", now?: Date) =>
-  createResult({ email, nickname: "小鹿", scores, code, appearance: { ...appearance, note: "红帽子" }, sendEmail: true }, now);
+const stored = (email: string, scores = { lines: 80, purpose: 30, collab: 72, build: 66 }, code = "WOHG", now?: Date) =>
+  createResult({ email, nickname: "小鹿", scores, aiDoes: [], code, appearance: { ...appearance, note: "红帽子" }, sendEmail: true }, now);
 
 test("without ASSESS_LINK_SECRET the route does not exist", async () => {
   delete process.env.ASSESS_LINK_SECRET;
@@ -41,26 +41,26 @@ test("a missing, wrong or differently long secret is 401 and reveals nothing", a
   for (const auth of [null, "Bearer ", "Bearer wrong", `Bearer ${SECRET}x`, SECRET, `Basic ${SECRET}`]) {
     const response = await ask({ email: "a@example.com" }, auth);
     expect(response.status).toBe(401);
-    expect(await response.text()).not.toContain("GERA");
+    expect(await response.text()).not.toContain("WOHG");
   }
 });
 
 test("the newest live result under the address: type and scores only, never appearance, nickname or anyone else", async () => {
-  stored("other@example.com", { scope: 10, basis: 90, output: 10, rhythm: 10 }, "SIMP");
-  stored("a@example.com", { scope: 20, basis: 20, output: 20, rhythm: 20 }, "SEMP", new Date(Date.now() - 86_400_000));
+  stored("other@example.com", { lines: 10, purpose: 90, collab: 10, build: 10 }, "RUBA");
+  stored("a@example.com", { lines: 20, purpose: 20, collab: 20, build: 20 }, "ROBA", new Date(Date.now() - 86_400_000));
   const latest = stored("a@example.com");
   const response = await ask({ email: "  A@Example.com " });
   expect(response.status).toBe(200);
   const body = await response.json();
   expect(body).toEqual({
-    found: true, code: "GERA", typeName: "联络官", group: "GE", axes: { scope: 80, basis: 30, output: 72, rhythm: 66 },
+    found: true, code: "WOHG", typeName: "数字游民", group: "WO", axes: { lines: 80, purpose: 30, collab: 72, build: 66 },
     takenAt: latest.createdAt, resultUrl: `https://assess.example/r/${latest.resultToken}`,
     figureUrl: `https://assess.example/api/avatar/${latest.inviteToken}.png?size=small`
   });
   expect(parseAssessLinkResponse(body)).toEqual(body);
   const text = JSON.stringify(body);
   // The figure is addressed by the invitation token, which is public anyway (it is the poster's QR code).
-  for (const leaked of ["小鹿", "红帽子", "a@example.com", "SIMP"]) expect(text).not.toContain(leaked);
+  for (const leaked of ["小鹿", "红帽子", "a@example.com", "RUBA"]) expect(text).not.toContain(leaked);
 });
 
 test("an address with no result, or whose result was deleted, is found: false", async () => {
@@ -80,15 +80,15 @@ test("a malformed address is refused, and lookups are rate limited per address, 
 });
 
 test("the response parser refuses anything off-contract", () => {
-  const good = { found: true, code: "GERA", typeName: "联络官", group: "GE", axes: { scope: 80, basis: 30, output: 72, rhythm: 66 }, takenAt: "2026-10-15T00:00:00.000Z" };
+  const good = { found: true, code: "WOHG", typeName: "数字游民", group: "WO", axes: { lines: 80, purpose: 30, collab: 72, build: 66 }, takenAt: "2026-10-15T00:00:00.000Z" };
   expect(parseAssessLinkResponse(good)).toEqual(good);
   expect(parseAssessLinkResponse({ found: false })).toEqual({ found: false });
-  expect(parseAssessLinkResponse({ found: false, code: "GERA" })).toBeNull();
+  expect(parseAssessLinkResponse({ found: false, code: "WOHG" })).toBeNull();
   expect(parseAssessLinkResponse({ ...good, nickname: "小鹿" })).toBeNull();
   expect(parseAssessLinkResponse({ ...good, code: "XXXX" })).toBeNull();
-  expect(parseAssessLinkResponse({ ...good, group: "SE" })).toBeNull();
-  expect(parseAssessLinkResponse({ ...good, axes: { ...good.axes, scope: 101 } })).toBeNull();
-  expect(parseAssessLinkResponse({ ...good, axes: { scope: 1, basis: 2, output: 3 } })).toBeNull();
+  expect(parseAssessLinkResponse({ ...good, group: "XX" })).toBeNull();
+  expect(parseAssessLinkResponse({ ...good, axes: { ...good.axes, lines: 101 } })).toBeNull();
+  expect(parseAssessLinkResponse({ ...good, axes: { lines: 1, purpose: 2, collab: 3 } })).toBeNull();
   expect(parseAssessLinkResponse({ ...good, takenAt: "yesterday" })).toBeNull();
   expect(parseAssessLinkResponse({ ...good, resultUrl: "javascript:alert(1)" })).toBeNull();
   expect(parseAssessLinkResponse({ ...good, figureUrl: "javascript:alert(1)" })).toBeNull();
@@ -99,12 +99,12 @@ test("the response parser refuses anything off-contract", () => {
 });
 
 test("with only the newest result kept per address, the link answers that one", async () => {
-  const old = stored("one@example.com", { scope: 20, basis: 20, output: 20, rhythm: 20 }, "SEMP", new Date(Date.now() - 60_000));
+  const old = stored("one@example.com", { lines: 20, purpose: 20, collab: 20, build: 20 }, "ROBA", new Date(Date.now() - 60_000));
   keepOnlyNewest(old);
   const newest = stored("one@example.com");
   keepOnlyNewest(newest);
   expect(getResultById(old.id)).toBeUndefined();
-  expect(await (await ask({ email: "one@example.com" })).json()).toMatchObject({ found: true, code: "GERA", takenAt: newest.createdAt });
+  expect(await (await ask({ email: "one@example.com" })).json()).toMatchObject({ found: true, code: "WOHG", takenAt: newest.createdAt });
 });
 
 test("without ASSESS_BASE_URL neither link is given", async () => {

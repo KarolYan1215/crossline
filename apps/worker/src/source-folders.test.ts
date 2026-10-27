@@ -177,7 +177,7 @@ test("past the limit the most recently changed files are read, and the rest are 
   expect(scan.files.filter((file) => file.capped).map((file) => file.relative.replace(/\\/g, "/")).sort()).toEqual(["bulk/n0.txt", "bulk/n1.txt", "bulk/n2.txt", "bulk/n3.txt"]);
   // Leaving the subfolder out brings it under the limit.
   expect((await scanFolder(path.join(root, "course"), { exclude: ["bulk"] })).over).toBe(0);
-}, 60_000);  // writes 1002 real files: seconds under a loaded full run
+}, 180_000);  // writes 1002 real files: 90 s in a loaded full run on Windows (2026-10-20), where every file is scanned on write
 
 test("revoking keeps what was read by default; purging deletes what this folder brought in, never an upload, and is recorded", async () => {
   put("shared.md", "uploaded too");

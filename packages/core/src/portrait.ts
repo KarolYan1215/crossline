@@ -26,8 +26,12 @@ export const SAY_DO_DIMENSIONS = [
   { id: "acceptance", label: "外部验收" },
   { id: "waiting", label: "回应等待" }
 ] as const satisfies ReadonlyArray<{ id: SayDoId; label: string }>;
-/** Stored beside each report; a report below this was written against the older, free-form dimensions and is rewritten once. */
-export const PORTRAIT_SCHEMA_VERSION = 3;
+/**
+ * Stored beside each report; a report below this is rewritten once. 3 → 4 (2026-10-17): the type moved from the first version's four axes
+ * (scope/basis/output/rhythm) to the four research dimensions in `TYPE_AXES`. 4 → 5 (2026-10-24): the AI-era dimensions
+ * (collab/purpose/build/lines) replaced the multi-line ones (concentration/orientation/boundary/pacing).
+ */
+export const PORTRAIT_SCHEMA_VERSION = 5;
 /**
  * The portrait report written when the interview ends (decided 2026-10-08), by Skill `crossline-portrait-writer`, as structured data so the
  * page can draw it: the first half is the person's portrait and insight, meant to be shared (cover, the real problem, compass and energy,
@@ -57,7 +61,8 @@ export type PortraitReport = {
    * their four-letter type by `portraitType`; the names are fixed in code, not written here. `summary` (schema 3, 2026-10-14): one paragraph
    * to the person — strengths and costs of how they work now, on balance positive — that the page ends with 「你是 <code> <name>。」.
    */
-  type?: { scope: number; basis: number; output: number; rhythm: number; evidence: { scope: string; basis: string; output: string; rhythm: string }; summary?: string };
+  type?: { collab: number; purpose: number; build: number; lines: number;
+    evidence: { collab: string; purpose: string; build: string; lines: string }; summary?: string };
   /**
    * What varies in their cartoon figure (`CHARACTER_STANDARD` fixes the rest): outfit, up to three props, a pose and an expression, and
    * `appearance` — how the person says they look (gender presentation, hair, the clothes they wear), only from their own words, "" when
@@ -88,8 +93,8 @@ export const PORTRAIT_SCHEMA = object({
   gap: GAP,
   insights: { type: "array", maxItems: 6, items: object({ insight: text(300), advice: text(400), solves: text(200), priority: { type: "string", enum: ["high", "medium", "low"] },
     impact: score(1, 5), effort: score(1, 5) }) },
-  type: object({ scope: score(0, 100), basis: score(0, 100), output: score(0, 100), rhythm: score(0, 100),
-    evidence: object({ scope: text(80), basis: text(80), output: text(80), rhythm: text(80) }), summary: text(160) }),
+  type: object({ collab: score(0, 100), purpose: score(0, 100), build: score(0, 100), lines: score(0, 100),
+    evidence: object({ collab: text(80), purpose: text(80), build: text(80), lines: text(80) }), summary: text(160) }),
   character: object({ outfit: text(80), props: list(3, 40), pose: { type: "string", enum: [...CHARACTER_POSES] }, expression: { type: "string", enum: [...CHARACTER_EXPRESSIONS] },
     appearance: text(160) }),
   sensitive: list(30, 60)

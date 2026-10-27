@@ -11,8 +11,8 @@ import { pairRelation, publicType } from "./public-type";
  * - a result token starting `drawing` shows the figure being drawn for two polls, then ready;
  * - an email `error-<CODE>@…` on submit answers that refusal, to preview its wording.
  */
-const INVITER = publicType({ scope: 78, basis: 44, output: 30, rhythm: 70 });
-const VISITOR = publicType({ scope: 22, basis: 30, output: 76, rhythm: 35 });
+const INVITER = publicType({ lines: 78, purpose: 44, collab: 30, build: 70 });
+const VISITOR = publicType({ lines: 22, purpose: 30, collab: 76, build: 35 });
 
 const escapeXml = (text: string) => text.replace(/[<>&"]/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "\"": "&quot;" })[char]!);
 const svgUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;

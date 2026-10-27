@@ -21,6 +21,15 @@ test("a discarded order, or a health commitment, is not 'own work' and does not 
   expect(withoutShadowingDemos(orders, new Set(["health"])).map((item) => item.id)).toEqual(["research-starter-work-order", "old", "sleep"]);
 });
 
+// docs/work-split.md: the assistant's preparation and the questions to the person are not the person's work on Today or the calendar.
+test("the assistant's preparation and the questions to the person are left out, and do not count as the person's own work", () => {
+  const orders = [order("research-starter-work-order", "active", true), { ...order("prep", "approved"), payload: { owner: "assistant", prepares: "core" } },
+    { ...order("ask", "awaiting_plan_approval"), payload: { owner: "ask" } }];
+  expect(withoutShadowingDemos(orders, none).map((item) => item.id)).toEqual(["research-starter-work-order"]);
+  const withCore = [...orders, { ...order("core", "approved"), payload: { owner: "person" } }];
+  expect(withoutShadowingDemos(withCore, none).map((item) => item.id)).toEqual(["core"]);
+});
+
 // 「今天可用」 at 21:10 used to say 420 minutes: the whole day's pattern, no matter how much of it was over.
 test("today's available minutes count only what is left from now", async () => {
   const { remainingMinutes } = await import("./crossline");

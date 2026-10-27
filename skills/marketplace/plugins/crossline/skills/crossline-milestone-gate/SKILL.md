@@ -1,28 +1,61 @@
 ---
 name: crossline-milestone-gate
-description: Judge submitted evidence against an approved milestone and its outgoing flywheel relations without performing or rewriting the work.
+description: Judge submitted evidence for one task against its own acceptance standard, the person's line skill and its milestone's criteria, without performing or rewriting the work.
 ---
 
-# Crossline milestone gate
+# Crossline Milestone Gate
 
-Accept the supplied milestone version, identity evidence policy, evidence claims and readable artifact text, execution facts, and current outgoing relations. Return only the requested strict JSON object.
+A task reached `evidence_review` with something handed in, usually files the assistant delivered (when the person presses 完成 on their own work, that is acceptance and this gate does not run). This Skill decides whether to accept it. `pass` accepts it at once; the person can revoke that. Any other verdict sends it back to the person on 待确认 with your reasons, so `observed`, `shortfall`, `reasoning`, `gaps` and `fit.why` are what they read to decide what to do. Every judgement also records how far the milestone has moved.
 
-Two different questions are being answered, and they must not be collapsed into one.
+Return raw JSON only, matching the schema.
 
-**Did this work order deliver what it promised?** That is `contractCoverage`, judged against the supplied `evidenceContract`, and it is the only thing `verdict` decides. Return **one entry per supplied requirement**, copying `requirement` back **verbatim** — the receiving layer matches on that exact string, so a paraphrase counts as uncovered. Each supplied requirement carries `required`. `pass` is allowed exactly when every supplied requirement **with `required: true`** has a non-null `satisfiedBy`; a `required: false` requirement is still reported in `contractCoverage` (with `satisfiedBy: null` when it is missing) but never holds `pass` back. Also, no incomplete item may block passing, and `blockers` must be empty. Omitting a requirement is not a way to pass it. The `evidenceContract` is the acceptance standard fixed when the person approved the task (they may have edited it then): judge against it alone, and never add a requirement, a quality bar or a format of your own.
+## Input `crossline.milestone-gate.v1`
 
-**How far has the milestone moved?** That is `criteriaVerdict`. When the milestone has no criteria, `successCriteria` is empty and `criteriaVerdict` is an empty array — there is no progress to record, and that is not a reason to withhold `pass`. Otherwise judge every milestone criterion exactly once and report it honestly — `met`, `partial`, `unmet` or `unverifiable`. A milestone spans many work orders, so an `unmet` criterion here is normal and is **not** a reason to withhold `pass`. Never mark a criterion `met` to justify a verdict. For `met` or `partial`, quote the evidence verbatim; for `unmet` or `unverifiable`, leave `evidenceQuote` as an empty string and say what is missing in `observed` and `shortfall` — there is nothing to quote for something the evidence does not contain, and inventing a quote is rejected.
+- `milestone` — `{id, title, version, successCriteria[]}`; criteria may be empty.
+- `evidenceContract[]` — `{requirement, required}`: the task's acceptance standard, fixed when the person approved it (they may have edited it then).
+- `evidenceClaims[]` — `{id, kind, text}`: **exactly the text you may quote** (the person's descriptions, the readable content of delivered files, completion answers). A quote from anywhere else is refused.
+- `execution` — when the work started and ended, pauses, interruptions.
+- `outgoingRelations[]` — `{id, targetMilestoneId, targetIdentityId, kind, status}`: links from this milestone to other lines.
+- `mineSkill` — the person's own skill for this line (their plays, preferences and red lines, each with its source), or null.
 
-**Does it follow the person's own way of doing this line's work?** That is `fit`. When `mineSkill` is supplied it is the person's own skill for this line — their plays, preferences and red lines, each with where it came from. Read the delivered artifacts against every rule. `fit.fits` is false when the delivery goes against any play or preference, or crosses any red line; then list each broken rule in `fit.violated` (the rule's own words, briefly) and say in `fit.why` what in the delivery breaks it and what following it would look like. When the contract is covered but `fit.fits` is false, `verdict` is `partial` — never `pass`: work that does what the task asked but not the way this person does it goes back to them. A generic convention (a platform's usual style, a research report's caution) never overrides the person's rule; only the red lines are hard limits. When `mineSkill` is null, `fit` is `{ fits: true, violated: [], why: "" }`.
+## Three questions, kept apart
 
-Quote exact submitted artifact text for every criterion, satisfied contract item, unplanned gain, and flywheel assessment; never paraphrase into a quote. Use `refuted` only when evidence contradicts an existing relation; `partial` when the contract is covered but `fit.fits` is false; otherwise use `insufficient` when the pass conditions above do not hold.
+**1. Did this task deliver what it promised? (`contractCoverage`, decides `verdict`)** Return **one entry per supplied requirement**, `requirement` copied back **verbatim** (matched on the exact string; a paraphrase counts as uncovered), `satisfiedBy` the claim id that covers it or null, `reasoning`, and `quote` (verbatim from that claim when covered, "" when not). A `required: false` requirement is reported but never holds `pass` back. Judge against the contract alone: never add a requirement, a quality bar or a format of your own.
 
-**Write every human-readable field in Chinese** — `observed`, `shortfall`, `reasoning`, `finding`, `suggestion`, `what`, `whatWouldSatisfyIt`, `why` and the rest. These strings are shown on the approvals and workbench pages, whose copy is Chinese; an English explanation there is one the reader has to translate before they can act on it. Verbatim quotes stay in the language of the source text, because a translated quote is no longer a quote.
+**2. Does it follow the person's way of doing this line's work? (`fit`)** With `mineSkill`, read the delivery against every rule. `fit.fits` is false when it goes against a play or preference or crosses a red line; then `fit.violated` lists each broken rule in its own words, briefly, and `fit.why` says what in the delivery breaks it and what following it would look like. A generic convention (a platform's usual style, a research report's caution) never overrides the person's rule; only red lines are hard limits. With `mineSkill` null, `fit` is `{"fits": true, "violated": [], "why": ""}`.
 
-Do not modify criteria, create milestones or relations, accept external effects, or perform missing work. Proposed next milestones remain proposals. A deterministic receiving layer rejects inconsistent verdicts.
+**3. How far has the milestone moved? (`criteriaVerdict`)** One entry per milestone criterion, exactly once each: `met`, `partial`, `unmet` or `unverifiable`, with `observed` (what you saw) and `shortfall` (what is missing, or null). A milestone spans many tasks, so `unmet` here is normal and is **not** a reason to withhold `pass`; never mark a criterion `met` to justify a verdict. `met` and `partial` quote the evidence verbatim in `evidenceQuote`; `unmet` and `unverifiable` leave it "" (there is nothing to quote for what the evidence lacks). With no criteria, `criteriaVerdict` is [].
+
+## The verdict
+
+- `pass` — every `required: true` requirement has a `satisfiedBy`, no `incomplete` item has `isBlockingPass`, `blockers` is empty, and `fit.fits` is true.
+- `partial` — the contract is covered but `fit.fits` is false: the work did what the task asked, not the way this person does it.
+- `refuted` — the contract is not covered and the evidence contradicts an outgoing relation (report it in `flywheelAssessment` with `supports: "contradicts"`).
+- `insufficient` — the contract is not covered otherwise.
+
+The receiving layer recomputes these rules and refuses an answer whose verdict disagrees with its own entries.
+
+## The other fields
+
+- `flywheelAssessment[]` — only for outgoing relations the evidence actually speaks to: `{relationId, targetMilestoneId, targetIdentityId, supports: advances|neutral|contradicts, whatIsNowPossible, whatIsStillMissing, evidenceQuote}`, with a verbatim quote. Leave out relations the evidence says nothing about.
+- `unplannedGains[]` — something useful the delivery holds beyond the contract, each with a verbatim `evidenceQuote` and the milestones it `mayEnable`.
+- `improvements[]` — `{area: evidence|method|scope|pace, observation, suggestion}`, for the person's next attempt.
+- `incomplete[]` — what is unfinished, which requirements it blocks, and whether it blocks passing.
+- `gaps[]` — `{code, whatWouldSatisfyIt}`: what would have to be handed in for the missing requirements.
+- `proposedNextMilestones[]` — `{title, why}`, proposals only.
+- `blockers[]` — only when the evidence cannot be judged at all.
+
+Example: requirement 「首篇小红书笔记提纲」 is covered by the delivered outline, but the line skill's rule 「先抛冲突，再给 solution」 and the outline opens with a three-paragraph background summary → `contractCoverage` satisfied, `fit: {fits: false, violated: ["先抛冲突，再给 solution"], why: "提纲前三段是背景综述，第 4 段才出现冲突；按本人的打法，第一段应直接写出冲突，再给出解决办法"}`, `verdict: "partial"`.
+
+| | observed / shortfall |
+|---|---|
+| 好 | 「提纲列出 5 个小节，未包含配图说明」 / 「缺少契约要求的配图清单」 |
+| 坏 | 「内容不够完善」 / 「需要改进」 (nothing the person can act on) |
+
+Do not modify criteria, create milestones or relations, accept external effects, or perform missing work.
 
 ## Language
 
 **Output language.** Write in the language the run's style instructions name (「Output language」): Simplified Chinese by default, English when the person's workspace is in English. The Chinese wording rules below describe the Chinese case; in English apply their English equivalent with the fixed terms Track, Milestone, Task, Step, Long-term goal, Target score and the verbs Approve, Accept, Undo. Quotes from the person, a file or a source stay verbatim in their own language; ids, codes and enum values stay as the schema defines them.
 
-Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Text quoted from the person or a source stays verbatim.
+Every human-readable field: Simplified Chinese, concise, standard academic or workplace register, objective third person (no 你/您, no 我, no greetings or filler). Fixed terms: 主线, 里程碑, 任务, 步骤, 长期目标, 分数线; verbs 批准, 验收, 撤销. Verbatim quotes stay in the language of the evidence: a translated quote is no longer a quote.

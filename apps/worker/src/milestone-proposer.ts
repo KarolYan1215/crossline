@@ -1,9 +1,11 @@
+import { personProfileFor } from "./planning-profile";
 import { randomUUID } from "node:crypto";
 import {
   ARTIFACT_PLAN_SCHEMA, ARTIFACT_PLAN_VERSION, MILESTONE_PROPOSAL_SCHEMA, deriveArtifactRelations, goalSettingKey, keptArtifactPlan, lineArtifacts, mergeArtifactPlan,
-  profileFactId, relationFulfilment, supplyWarnings, validateArtifactPlan, validateMilestoneProposal, keepMilestoneProposal, computeMilestoneConfidence,
+  profileFactId, relationFulfilment, supplyWarnings, MILESTONE_DRAFTING_SETTING, readMilestoneDrafting, validateArtifactPlan, validateMilestoneProposal, keepMilestoneProposal, computeMilestoneConfidence,
   type ArtifactMilestone, type ArtifactPlanContext, type CheckedArtifactPlan, type LineArtifacts, type MilestoneProposal, type MilestoneProposalContext,
-  type StoredArtifactPlan, tFor
+  type StoredArtifactPlan, type MilestoneDrafting, tFor,
+  domainMilestoneTemplates
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import {
@@ -14,46 +16,27 @@ import {
 import { ownerOf } from "./owner";
 import { localeOf } from "./locale";
 import { identityLines } from "./lines";
+import { materialExcerpts } from "./material-context";
 export const MILESTONE_ARCHITECT_SKILL = "crossline:crossline-milestone-architect";
 export const ARTIFACT_PLANNER_SKILL = "crossline:crossline-artifact-planner";
 
-const INSTRUCTIONS = "Propose milestones for the supplied identities. Return only the requested JSON. "
-  + "Every milestone needs a checkable target: at least one non-judgement criterion, and for anything graded (exam, quiz, homework, project) a threshold criterion with a real score line — never just 'completed'. A course is a chain of its graded parts in date order. "
-  + "A course with no target_grade fact on record gets one proposed by you in targetProposals (value and why, from the person's long-term goals), cited as <identityId>/<projectId>/target_grade in sourceFactIds. "
-  + "Every number is worked backwards from the result the person wants (plan.outcome), written out in plan.derivation: the least this milestone must reach for that result to hold is bareLine, and the threshold value is set beyond it with at least 3% margin — never a number chosen because it sounds reasonable. "
-  + "A line with thin information still gets its chain: state what you assumed in assumptions. Use blockers only when nothing can be proposed for any line. "
-  + "A milestone is a state of the world the user could argue they had reached, not a task. Each needs "
-  + "two to four criteria, and at least one criterion must have evidenceOf=\"outcome\" — something that "
-  + "changed, not something that now exists — because a milestone whose criteria are all outputs passes "
-  + "on a productive afternoon of writing documents while the goal stands still. Do not invent numbers "
-  + "the user never gave you: when the honest measure is a judgement, use a judgement measure and say in "
-  + "failsWhen what would make it not met. Do not duplicate an existing milestone. If the input is too "
-  + "vague to produce a checkable criterion, return a blocker naming what is missing. When one of the "
-  + "supplied templates genuinely fits, set templateId to its id and build criteria that actually match "
-  + "its shape, not just its title — otherwise set templateId to null; never invent a templateId that was "
-  + "not in the input. Always fill evidenceQuestionBank with 1-3 concrete completion-time questions "
-  + "(checkbox or text, Codex-ask style) that actually check whether the milestone was reached; it is used "
-  + "verbatim when templateId is null, and only ignored (replaced by the template's own bank) when a "
-  + "template was chosen, so fill it in properly either way. When the input carries a `profile`, design "
-  + "from it instead: every milestone gets a `plan` with a local `key`, a `stage` (1 first), a real "
-  + "`deadline` worked backwards from the dates and hard requirements in the profile, a `baseline` (where "
-  + "the person is now), a `target` (what done means in their words), `stakeholders`, `sourceFactIds` "
-  + "copied exactly from the supplied fact ids (at least one confirmed), and `dependsOn` naming the earlier "
-  + "milestone keys it builds on. Give each line in `profile.requiredIdentities` three to five milestones "
-  + "chained in stage order, titled for this person's own work and never as a template. When `diligence` is "
-  + "present it is web research the person has already accepted: build milestones on its findings and dates "
-  + "(an accepted application deadline is a hard date), and do not re-propose what it already covers. Quantify "
-  + "criteria wherever the facts allow (count, threshold worked back from the outcome, or an artefact that must exist); use judgement only "
-  + "when nothing countable captures the result. When the input carries `artifacts`, every artifact this line is promised to another line is "
-  + "declared in plan.outputs of the milestone due in time for those waiting for it, and a milestone that builds on another line's artifact lists "
-  + "its id in plan.inputs and uses it in plan.derivation; both are [] otherwise. The links between lines are derived from these references. "
-  + "Write every human-readable field in Chinese, concise and in the third person.";
+/**
+ * The scenario in short, for the system prompt; the Skill holds the rules and the examples. It used to be a second, older copy of the
+ * Skill (「three to five milestones per line」 long after a chain became per project) and the two disagreed.
+ */
+const INSTRUCTIONS = "Design milestones as the crossline-milestone-architect Skill describes and return only the requested JSON. "
+  + "They become drafts on the person's 主线 page; once approved, tasks are worked back from their criteria and the scheduler plans toward their deadlines. " // i18n-ignore: model-facing
+  + "A milestone is a result that has happened by its deadline (an exam score, a submission, someone's reply), never an ongoing condition and never a task. "
+  + "With a `profile` you design one line: at least three milestones in it, a chain of one to five for every project in requiredProjects, each with a plan "
+  + "whose deadline is worked back from the dates in the profile, and every score line derived from plan.outcome with a bareLine and at least 3% margin, written "
+  + "out in plan.derivation. A course with no target_grade on record gets one in targetProposals. The line's long-term goal (identities[].summary) is the "
+  + "direction; never copy it into a title. Thin information is an assumption, not a blocker. With `artifacts`, declare plan.outputs and plan.inputs as the Skill says.";
 
-const INSTRUCTIONS_ARTIFACTS = "Plan, before any milestone is designed, what each line in planLines produces this period and the few cross-line "
-  + "supply pairs where one line's artifact measurably saves another line work, as the Skill describes. Return only the requested JSON. At most two "
-  + "pairs leave a line; every pair has a numeric transfer with a unit, a lag in days, and a counterfactual saying what the receiving line would "
-  + "spend or lack without it. Do not repeat what `kept` already holds. When `feedback` is present, fix what it names. Write every human-readable "
-  + "field in Chinese, concise and in the third person.";
+const INSTRUCTIONS_ARTIFACTS = "Plan what each line in planLines produces this period and the few cross-line supply pairs, as the "
+  + "crossline-artifact-planner Skill describes, and return only the requested JSON. The milestones of these lines are designed from this plan next, and "
+  + "each pair becomes a link the person checks on the receiving milestone's deadline, so a pair names an artifact someone can hand over, a numeric "
+  + "transfer with its unit, a lag in days and what the receiving line would spend or lack without it. At most two pairs leave a line, and none is a valid "
+  + "answer. Never list again what `kept` holds. When `feedback` is present, fix what it names.";
 
 export type ProposalOutcome =
   | { state: "proposed"; drafts: Array<{ id: string; identityId: string; title: string }>; assumptions: string[]; threadId?: string;
@@ -149,11 +132,22 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
     && !(options.replaceUntouchedDrafts && isUntouchedDraft(milestone)));
   const facts = store.listProfileFacts(workspaceId);
   const identities = identityLines(store, workspaceId);
+  // A domain line's templates are added the first time its milestones are designed (INSERT OR IGNORE: a person's own edits stay).
+  for (const pack of identities) if (pack.domain) store.seedMilestoneTemplates(workspaceId, domainMilestoneTemplates(pack.id, pack.domain));
   const now = options.now?.() ?? (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date());
   return {
+    // How the person works and what the plan serves (planningProfile): every line's chain is paced for this person.
+    personProfile: personProfileFor(store, workspaceId),
     version: "crossline.milestone-proposal.v1",
     // A line's long-term goal, when the person gave one, is what its milestones are worked toward.
-    identities: identities.map((pack) => ({ id: pack.id, label: pack.label, summary: pack.goal ? `长期目标：${pack.goal}` : pack.workflowTemplates.join(", ") })), // i18n-ignore: model-facing
+    // The attributes the person chose are named too, so the milestones serve what they adopted and nothing the model adds to it.
+    /* i18n-ignore-start: model-facing */
+    identities: identities.map((pack) => ({ id: pack.id, label: pack.label, summary: pack.goal
+      ? `长期目标：${pack.goal}${pack.goalParts?.length ? `（本人选定的定语：${pack.goalParts.join("；")}）` : ""}` : pack.workflowTemplates.join(", ")
+      // A domain line's milestones are numbers against the person's own baseline (its facts' health_* / wealth_* slots), never advice.
+      + (pack.domain === "wealth" ? "。财富领域：里程碑是可核对的数字（应急金月数、储蓄率、还清的负债），不含买卖建议" : "")
+      + (pack.domain === "wellness" ? "。健康领域：里程碑是可测的数字（体重、每周运动次数、配速、体检指标），尊重 health_limits，不含医疗建议" : "") })),
+    /* i18n-ignore-end */
     // Drafts are included so the Skill does not re-propose something already waiting for a decision.
     existingMilestones: milestones.map((milestone) => ({
       id: milestone.id, identityId: milestone.identityId, title: milestone.title, status: milestone.status
@@ -322,6 +316,15 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     const assumptions: string[] = [];
     const skipped: Array<{ identityId: string; code: string; message: string }> = [];
     let lastThread: string | undefined;
+    // Progress for the 主线 page, line by line (`MILESTONE_DRAFTING_SETTING`). A run limited to some lines keeps what the last run said
+    // about the others.
+    const previous = readMilestoneDrafting(store.getSetting(workspaceId, MILESTONE_DRAFTING_SETTING));
+    const others = <T>(list: T[] | undefined, lineOf: (item: T) => string) => (list ?? []).filter((item) => !lines.includes(lineOf(item)));
+    const drafting: MilestoneDrafting = { startedAt: clockNow(now).toISOString(), lines, done: [],
+      skipped: others(previous?.skipped, (item) => item.lineId),
+      thin: [...others(previous?.thin, (line) => line), ...thinLines(context, allLines).filter((id) => !only?.length || only.includes(id))] };
+    const saveDrafting = () => store.setSetting(workspaceId, MILESTONE_DRAFTING_SETTING, JSON.stringify(drafting));
+    saveDrafting();
     // Drafts about to be replaced (untouched, in a line designed now, not from this run) are neither producers nor consumers any more.
     const planned = new Set(lines);
     const replaced = (milestone: { id: string; identityId: string; status: string; version: number }) =>
@@ -338,13 +341,24 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     for (const identityId of lines) {
       if (signal?.aborted) break;
       // Recomputed per line: a line designed earlier in this run is already a producer or consumer for the next one.
-      const own = lineContext(context, identityId, crossLine ? lineArtifacts(plan, identityId, artifactMilestones(store, workspaceId, replaced), labelsOf(context)) : undefined);
+      const lined = lineContext(context, identityId, crossLine ? lineArtifacts(plan, identityId, artifactMilestones(store, workspaceId, replaced), labelsOf(context)) : undefined);
+      // Beyond the planning profile and the line's facts: the passages of this line's files that match its goal and projects.
+      const materials = materialExcerpts(store, workspaceId, [...lined.identities.map((identity) => `${identity.label} ${identity.summary.replace(/^长期目标：|本人选定的定语：/g, "")}`),
+        ...(lined.profile?.projects ?? []).map((project) => project.name), context.request].join(" "), { identityId, within: "line" });
+      const own = materials.length ? { ...lined, materials } : lined;
       const { result, threadId } = await runLine(client, own, signal);
       if (threadId) lastThread = threadId;
-      if (!result.ok) { skipped.push({ identityId, code: result.blocker.code, message: result.blocker.message }); continue; }
+      if (!result.ok) {
+        skipped.push({ identityId, code: result.blocker.code, message: result.blocker.message });
+        drafting.skipped.push({ lineId: identityId, why: tFor(localeOf(store, workspaceId))("这次没有设计出来：{{reason}}", { reason: result.blocker.message }) });
+        saveDrafting();
+        continue;
+      }
       persistTargetProposals(store, workspaceId, result.output.targetProposals ?? []);
       const saved = persistProposals(store, workspaceId, result.output.milestones, context.request, own.artifacts);
       drafts.push(...saved);
+      drafting.done.push(identityId);
+      saveDrafting();
       if (result.audit.warnings?.length) {
         const entityId = `line:${identityId}`;
         const version = store.listEvents(workspaceId, { type: "validation.warned", entityId }).length + 1;
@@ -358,6 +372,8 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
         assumptions.push(t("「{{name}}」分数线暂定为 {{value}}（{{why}}）；各里程碑的分数线均由此倒推，可在「主线」页修改并重算。", { name, value: proposal.value, why: proposal.why }));
       }
     }
+    drafting.finishedAt = clockNow(now).toISOString();
+    saveDrafting();
     if (!drafts.length) {
       return { state: "blocked", code: skipped[0]?.code ?? "PROPOSAL_EMPTY",
         message: skipped.map((item) => t("{{line}}：{{message}}", { line: labelOf(context, item.identityId, t), message: item.message })).join(locale === "en" ? "; " : "；").slice(0, 400)
@@ -374,6 +390,9 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
     return { state: "proposed", drafts, assumptions, relations, ...(skipped.length ? { skipped } : {}), ...(lastThread ? { threadId: lastThread } : {}) };
   };
 }
+
+/** The clock a run reads, as the context does: the test seam, else `CROSSLINE_FIXED_NOW`, else now. */
+const clockNow = (now?: () => Date) => now?.() ?? (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date());
 
 const labelsOf = (context: MilestoneProposalContext) => Object.fromEntries(context.identities.map((identity) => [identity.id, identity.label]));
 /** A line's name for the person: a default pack's label in the workspace's language, a name the person gave as written. */

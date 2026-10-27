@@ -1,4 +1,4 @@
-import { interviewChecklist, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
+import { ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
 import { interviewLocale, readLocale } from "./locale";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
@@ -10,7 +10,7 @@ type DateRow = { id: string; project?: string; kind?: string; sourceRef?: string
  * Every dated item read from files or replies, pending or confirmed (an excluded one does not count; a pending one already over is
  * history, never offered, so it waits for nobody), with its project, kind and whether it repeats weekly.
  */
-function datedItems(store: CrosslineStore, workspaceId: string, today: string) {
+export function datedItems(store: CrosslineStore, workspaceId: string, today: string) {
   const decided = new Map(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => [event.entityId,
     event.payload as { superseded?: boolean; included?: string[] }]));
   return store.listEvents(workspaceId, { type: "dates.extracted" }).flatMap((event) => {
@@ -50,7 +50,8 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     dates,
     availability: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed") || store.getSetting(workspaceId, "schedule.availability")),
     unfiledFiles: extras.unfiledFiles,
-    portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile),
+    // 「准」 on an observation in each deep stage confirms the portrait piece by piece (2026-10-19), as the one 「符合」 at the end does.
+    portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile) || portraitConfirmedByInsights(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))),
     // Labels in the interview's language (docs/i18n.md): the list is about the interview.
     locale: extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)
   });
@@ -116,9 +117,26 @@ export function calendarRecurringTitles(store: CrosslineStore, workspaceId: stri
 export function questionScreenFor(store: CrosslineStore, workspaceId: string): QuestionScreenInput {
   const meetingFacts = store.listProfileFacts(workspaceId).filter((fact) => fact.projectId && /^(meeting|class)_?times?$|^no_meetings$/.test(fact.slot)
     && fact.status === "confirmed").map((fact) => fact.projectId);
+  let profiles: Record<string, StoredLineProfile> = {};
+  try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* none */ }
   return {
     projects: store.listProjects(workspaceId).map(({ id, name }) => ({ id, name })),
     meetings: [...new Set([...meetingProjects(store, workspaceId), ...meetingFacts])],
-    calendarRecurring: calendarRecurringTitles(store, workspaceId)
+    calendarRecurring: calendarRecurringTitles(store, workspaceId),
+    goalPickerLines: Object.entries(profiles).filter(([, profile]) => lineAttributes(profile, "").length > 0).map(([id]) => id)
   };
+}
+
+/**
+ * Whether the person confirmed what the interview recorded before using the app (`START_CONFIRMED_SETTING`). An account already in use
+ * when the confirmation came in is not asked for it: one that reached the start standard before `START_CONFIRM_SINCE`, or that already
+ * has milestones or tasks on its board.
+ */
+export function startConfirmedFor(store: CrosslineStore, workspaceId: string): boolean {
+  if (store.getSetting(workspaceId, START_CONFIRMED_SETTING)) return true;
+  try {
+    const reached = (JSON.parse(store.getSetting(workspaceId, ATTENTION_SETTING) ?? "null") as { ready?: { at?: string } } | null)?.ready?.at;
+    if (reached && reached < START_CONFIRM_SINCE) return true;
+  } catch { /* an unreadable record says nothing */ }
+  return store.listMilestones(workspaceId).length > 0 || store.listWorkOrders(workspaceId).length > 0;
 }

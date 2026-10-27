@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { allowDiscretionarySpend, backgroundSpend, engagementTier, spendAllows, type CostSignal } from "./cost";
+import { allowDiscretionarySpend, backgroundSpend, chatgptExhausted, chatgptQuotaSpent, CORE_STOP_PERCENT, engagementTier, spendAllows, type CostSignal } from "./cost";
+import { evalHoldActive } from "./background";
 
 const policy = { windowSharePercent: 80, longWindowCeilingPercent: 90 };
 const signal = (over: Partial<Extract<CostSignal, { available: true }>> = {}): CostSignal => ({
@@ -84,4 +85,53 @@ test("spending follows the person: active runs everything the quota allows, cool
   expect(kinds.map((kind) => spendAllows({ ...normal, engagement: "active" }, kind))).toEqual([true, true, true]);
   expect(kinds.map((kind) => spendAllows({ ...normal, engagement: "cooling" }, kind))).toEqual([true, false, false]);
   expect(kinds.map((kind) => spendAllows({ ...normal, engagement: "dormant" }, kind))).toEqual([false, false, false]);
+});
+
+test("a spent quota names when the fullest window comes back, and says the person's own turns stop too", async () => {
+  const { degradedService } = await import("./cost");
+  const spend = backgroundSpend({ available: true, limitReached: false,
+    short: { usedPercent: 40, windowDurationMins: 300, resetsAt: Date.UTC(2026, 9, 18, 9) / 1000 },
+    long: { usedPercent: 100, windowDurationMins: 10_080, resetsAt: Date.UTC(2026, 9, 20, 3) / 1000 } });
+  expect(spend.blocker).toMatchObject({ code: "BUDGET_EXHAUSTED", resetsAt: "2026-10-20T03:00:00.000Z" });
+  expect(degradedService("BUDGET_EXHAUSTED").personTurns).toBe(false);
+  expect(degradedService("COST_SIGNAL_UNAVAILABLE").works).toContain("排程与日历：按现有任务和步骤照常重排，写入 Crossline 日历");
+});
+
+test("near the end of the quota core work stops first and intake runs on to the last of it", () => {
+  const at = (short: number): CostSignal => ({ available: true, limitReached: false,
+    short: { usedPercent: short, windowDurationMins: 300, resetsAt: null } });
+  const allowed = (used: number) => (["intake", "core", "discretionary"] as const).map((kind) => spendAllows(backgroundSpend(at(used)), kind));
+  expect(allowed(90)).toEqual([true, true, false]);
+  expect(allowed(CORE_STOP_PERCENT)).toEqual([true, false, false]);
+  expect(allowed(100)).toEqual([false, false, false]);
+});
+
+test("a spent ChatGPT reading is marked until the spent window resets; a refused run alone holds half an hour", () => {
+  const reset = Date.UTC(2026, 9, 21, 7, 57) / 1000;
+  expect(chatgptQuotaSpent(signal())).toBeUndefined();
+  expect(chatgptQuotaSpent({ available: false, reason: "x" })).toBeUndefined();
+  expect(chatgptQuotaSpent(signal({ limitReached: true, short: { usedPercent: 100, windowDurationMins: 300, resetsAt: reset } })))
+    .toEqual({ until: new Date(reset * 1000).toISOString() });
+  // An API-key login's month is the person's own cap, not ChatGPT's quota.
+  expect(chatgptQuotaSpent(signal({ limitReached: true, money: { spent: 11, cap: 10 } }))).toBeUndefined();
+  const now = new Date("2026-10-21T07:00:00.000Z");
+  expect(chatgptExhausted(JSON.stringify({ at: now.toISOString(), source: "quota", until: "2026-10-21T07:57:00.000Z" }), now)).toBeDefined();
+  expect(chatgptExhausted(JSON.stringify({ at: now.toISOString(), source: "quota", until: "2026-10-21T06:59:00.000Z" }), now)).toBeUndefined();
+  expect(chatgptExhausted(JSON.stringify({ at: "2026-10-21T06:45:00.000Z", source: "usage_limit" }), now)).toBeDefined();
+  expect(chatgptExhausted(JSON.stringify({ at: "2026-10-21T06:20:00.000Z", source: "usage_limit" }), now)).toBeUndefined();
+  expect(chatgptExhausted("", now)).toBeUndefined();
+  expect(chatgptExhausted("not json", now)).toBeUndefined();
+});
+
+test("a local evaluation on the same sign-in holds discretionary work only, and only while its process lives and the hold is fresh", () => {
+  const spend = { ...backgroundSpend(signal()), held: true };
+  expect([spendAllows(spend, "intake"), spendAllows(spend, "core"), spendAllows(spend, "discretionary")]).toEqual([true, true, false]);
+  const now = new Date("2026-10-21T04:00:00Z");
+  const hold = (startedAt: string, pid = 42) => JSON.stringify({ pid, startedAt });
+  const alive = (pid: number) => pid === 42;
+  expect(evalHoldActive(hold("2026-10-21T03:30:00Z"), now, alive)).toBe(true);
+  expect(evalHoldActive(hold("2026-10-21T03:30:00Z", 7), now, alive)).toBe(false);   // the script is gone
+  expect(evalHoldActive(hold("2026-10-20T21:30:00Z"), now, alive)).toBe(false);      // older than the cap: its pid may be reused
+  expect(evalHoldActive(undefined, now, alive)).toBe(false);
+  expect(evalHoldActive("{not json", now, alive)).toBe(false);
 });

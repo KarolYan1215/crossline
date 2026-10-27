@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { portraitLabels, portraitType, redactPortrait, type EnergyRhythm, type PortraitReport, type PortraitType, type SayDoReading } from "@crossline/core";
 import { LineNetwork, type NetworkEdge } from "../ui/line-network";
+import { FigurePicker } from "./figure-picker";
 import { AdviceMatrix, DivergingAxes, EnergyScatter, Fit, GapChart, IdentityBars, RhythmChart, ValuesRadar } from "./portrait-charts";
 import { radarValues, rhythmStats } from "./poster-geometry";
 import { joinList, type Locale, type Translate } from "../../lib/i18n";
@@ -34,11 +35,11 @@ const roleOf = (line: Line, t: Translate) => line.hard ? t("硬约束") : line.r
 const edgesOf = (report: PortraitReport): NetworkEdge[] => report.lines.items.flatMap((item) => item.feeds.map((feed, index) => ({
   id: `${item.lineId}>${feed.toLineId}:${index}`, from: item.lineId, to: feed.toLineId, kind: "", explanation: feed.how, status: "confirmed" as const })));
 
-/** The cartoon figure for this version, when drawn. */
+/** The person's cartoon figure (the one they picked, else the latest drawn), when there is one. */
 function Figure({ state, className }: { state: State; className: string }) {
   const t = useT();
-  const at = state.images.character;
-  return at ? <img className={className} src={`/api/portrait/image/character?v=${encodeURIComponent(at)}`} alt={t("代表这一类型的卡通形象")} /> : null;
+  const src = state.images.character;
+  return src ? <img className={className} src={src} alt={t("代表这一类型的卡通形象")} /> : null;
 }
 
 /** A hard-coded section title, set in the poster's serif, with its number. */
@@ -47,10 +48,10 @@ const Heading = ({ number, children }: { number: string; children: string }) => 
 /** How a label cell is set: the writer's core word in the model's face, the top Schwartz value (a fixed name) in the poster's serif. */
 const cellClass = (cell: { title: string }, t: Translate) => cell.title === t("核心词") ? "gen" : cell.title === t("价值核心") ? "pt-serif" : undefined;
 
-/** The type's closing sentence after the writer's summary, 「…，你是 GEMA 改装师。」, in the page's language. */
+/** The type's closing sentence after the writer's summary, 「…，你是某神秘光头。」, in the page's language. */
 function summaryWithType(summary: string, type: PortraitType, t: Translate, locale: Locale) {
   const text = summary.replace(/[，,。.；;、\s]+$/u, "");
-  const closing = t("你是 {{code}} {{name}}。", { code: type.code, name: t(type.name) });
+  const closing = t("你是{{name}}。", { name: t(type.name) });
   return locale === "en" ? <><span className="gen">{text}.</span> {closing}</> : <><span className="gen">{text}，</span>{closing}</>;
 }
 
@@ -74,13 +75,13 @@ function SharePart({ report, state, ordered }: { report: PortraitReport; state: 
   const values = radarValues(report.compass.values);
   return <>
     <section className="pt-page pt-type" style={groupStyle(type)}>
-      <header className="pt-poster-head"><p className="pt-kicker">{t("Crossline 思维模式类型")}</p><p className="pt-credibility">{t(CREDIBILITY)}</p></header>
+      <header className="pt-poster-head"><p className="pt-kicker">{t("Crossline · AI 时代超级个体类型")}</p><p className="pt-credibility">{t(CREDIBILITY)}</p></header>
       <div className="pt-type-head">
         <div className="pt-figure-disc"><Figure state={state} className="pt-figure-img" /></div>
         <div className="pt-type-id">
           {type ? <>
-            <p className="pt-type-code pt-serif">{type.code}</p>
             <h1 className="pt-type-name pt-serif">{t(type.name)}</h1>
+            <p className="pt-type-quote pt-serif">{t("「{{quote}}」", { quote: t(type.quote) })}</p>
             <p className="pt-type-group"><span><b className="pt-serif">{t(type.group.name)}</b> · {t(type.group.blurb)}</span></p>
             {/* The writer's paragraph to the person, ended in code with the type the scores make, so the two never disagree. */}
             <p className="pt-type-blurb" data-reading="">{type.summary ? summaryWithType(type.summary, type, t, locale) : t(type.blurb)}</p>
@@ -161,6 +162,12 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     return () => clearInterval(timer);
   }, [state.writing, drawing]);
 
+  // The picker says which figure is now the person's; the page shows that one at once.
+  const showFigure = useCallback((url: string | null) => setState((current) => {
+    const images = { ...current.images };
+    if (url) images.character = url; else delete images.character;
+    return images.character === current.images.character ? current : { ...current, images };
+  }), []);
   const write = async () => {
     setStatus("");
     const response = await fetch("/api/portrait", { method: "POST" }).catch(() => null);
@@ -171,7 +178,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     setStatus(t("正在生成分享图片…"));
     try {
       const { toBlob } = await import("html-to-image");
-      const names = [t("我的思维模式类型.png"), t("我的精力节律.png"), t("我的画像.png")];
+      const names = [t("我的超级个体类型.png"), t("我的精力节律.png"), t("我的画像.png")];
       const blobs: Array<Blob | null> = [];
       for (const node of [card.current, energyCard.current, sharedHalf.current]) blobs.push(await toBlob(node, { pixelRatio: 2, backgroundColor: PAPER }));
       const files = blobs.flatMap((blob, index) => blob ? [new File([blob], names[index]!, { type: "image/png" })] : []);
@@ -201,8 +208,8 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
   </footer>;
   const shareBar = (again: boolean) => <div className="pt-share-bar" data-no-export="">
     <button type="button" className="primary-button" onClick={() => void share()}>{t("分享画像")}</button>
-    <small>{again ? t("此按钮同样只分享前半部分：思维模式类型卡、精力节律卡与画像长图，人名、机构、课程编号等已隐去。")
-      : t("只分享前半部分：思维模式类型卡、精力节律卡与画像长图，人名、机构、课程编号等已隐去。")}</small>
+    <small>{again ? t("此按钮同样只分享前半部分：超级个体类型卡、精力节律卡与画像长图，人名、机构、课程编号等已隐去。")
+      : t("只分享前半部分：超级个体类型卡、精力节律卡与画像长图，人名、机构、课程编号等已隐去。")}</small>
     {status && <small role="status">{status}</small>}
   </div>;
 
@@ -213,6 +220,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
       <button type="button" disabled={state.writing} onClick={() => void write()}>{state.writing ? t("重新生成中…") : t("重新生成")}</button>
       {drawing && <small role="status">{t("卡通形象生成中…")}</small>}
     </div>
+    <FigurePicker onCurrent={showFigure} />
 
     <div className="pt-doc">
       <SharePart report={raw} state={state} ordered={ordered} />
@@ -301,12 +309,12 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     {/* What is shared, rendered from the redacted report and never shown: the two 3:4 cards and the first half as one image. */}
     <div className="pt-offscreen" aria-hidden="true" data-no-export="">
       <div ref={card} className="pt-card" style={groupStyle(sharedType)}>
-        <small className="pt-card-kicker">{t("Crossline 思维模式类型")}{name ? ` · ${name}` : ""}</small>
+        <small className="pt-card-kicker">{t("Crossline · AI 时代超级个体类型")}{name ? ` · ${name}` : ""}</small>
         <div className="pt-card-head">
           <div className="pt-figure-disc"><Figure state={state} className="pt-card-figure" /></div>
           <div>{sharedType ? <>
-            <p className="pt-type-code pt-serif">{sharedType.code}</p>
             <b className="pt-card-title pt-serif">{t(sharedType.name)}</b>
+            <p className="pt-type-quote pt-serif">{t("「{{quote}}」", { quote: t(sharedType.quote) })}</p>
           </> : <b className="pt-card-title gen">{shared.cover.archetype ?? t("个人画像")}</b>}</div>
         </div>
         {shared.cover.tagline && <p className="pt-tagline gen">{t("「{{tagline}}」", { tagline: shared.cover.tagline })}</p>}

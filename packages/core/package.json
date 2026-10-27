@@ -9,6 +9,7 @@
     "./assess-content": "./src/assess-content.ts",
     "./assess-wants": "./src/assess-wants.ts",
     "./energy-rhythm": "./src/energy-rhythm.ts",
+    "./device": "./src/device.ts",
     "./i18n": "./src/i18n.ts"
   },
   "scripts": {

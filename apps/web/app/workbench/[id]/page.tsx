@@ -19,7 +19,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
   const { id } = await params;
   const detail = loadTaskDetail(ctx, id);
   if (!detail) notFound();
-  return <SubpageShell active={"任务"} title={detail.intent} back={<BackLink scope={`/workbench/${encodeURIComponent(detail.id)}`} fallback="/workbench" />}>
+  return <SubpageShell active={"任务"} title={detail.title} back={<BackLink scope={`/workbench/${encodeURIComponent(detail.id)}`} fallback="/workbench" />}>
     <div className="task-page" data-line={detail.identityId}>
       <TaskPanels detail={detail} anchors />
     </div>

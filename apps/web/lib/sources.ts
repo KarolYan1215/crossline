@@ -1,13 +1,14 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { SOURCE_SIZE_LIMIT, sourceKindFor, type AccessContext, type SourceKind } from "@crossline/core";
 import type { StoredSourceDocument } from "@crossline/db";
 import { dataDirectory, getStore } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { tOf } from "./locale";
+import { folderDocumentIds } from "./onboarding-board";
 
 /**
  * Files the person hands over so the system can learn about them: a syllabus, a lecture plan, notes, a
@@ -85,4 +86,30 @@ export async function uploadSources(ctx: AccessContext, files: Array<{ fileName:
 export async function formFiles(form: FormData): Promise<Array<{ fileName: string; mediaType: string; buffer: Buffer }>> {
   const files = form.getAll("file").filter((entry): entry is File => entry instanceof File);
   return Promise.all(files.map(async (file) => ({ fileName: file.name || "file", mediaType: file.type, buffer: Buffer.from(await file.arrayBuffer()) })));
+}
+
+export type SourceRemoveResult = { ok: true; fileName: string } | { ok: false; code: "SOURCE_NOT_FOUND" | "SOURCE_FROM_FOLDER" };
+
+/**
+ * Takes back a file the person uploaded by mistake (2026-10-17 walkthrough, W-6): it had no way out, and kept being asked about as a
+ * project's material. The row goes, so nothing asks which project it belongs to any more; the stored copy goes too unless another row
+ * (an identical upload, another workspace's) still reads it, and only ever a copy inside `sources/`. A folder's file is excluded in the
+ * folder's own card instead, where the exclusion is kept and obeyed on every scan.
+ */
+export function removeUploadedSource(ctx: AccessContext, id: string): SourceRemoveResult {
+  const store = getStore();
+  const doc = store.listSourceDocuments(ctx.workspaceId).find((item) => item.id === id);
+  if (!doc) return { ok: false, code: "SOURCE_NOT_FOUND" };
+  if (folderDocumentIds(ctx).has(id)) return { ok: false, code: "SOURCE_FROM_FOLDER" };
+  const gone = store.deleteSourceDocument(ctx.workspaceId, id);
+  if (!gone) return { ok: false, code: "SOURCE_NOT_FOUND" };
+  if (!gone.uriInUse) {
+    try {
+      const file = path.resolve(fileURLToPath(gone.uri));
+      if (file.startsWith(sourcesRoot() + path.sep)) rmSync(file, { force: true });
+    } catch { /* not a local copy */ }
+  }
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `source.removed:${id}`, type: "source.removed", entityId: id,
+    payload: { fileName: doc.fileName, kind: doc.kind, by: "person" } });
+  return { ok: true, fileName: doc.fileName };
 }

@@ -43,6 +43,32 @@ export function ReviewButtons({ taskId }: { taskId: string }) {
   </div>;
 }
 
+/**
+ * The person's answer to a question a run asked mid-way: one of its options, or their own words. The run waits up to ten minutes, then
+ * goes on the safest way, so the card says so.
+ */
+export function QuestionAnswer({ id, questions }: { id: string; questions: Array<{ id: string; header: string; question: string; options: Array<{ label: string; description: string }> }> }) {
+  const { act, busy, message, t } = useAct();
+  const [chosen, setChosen] = useState<Record<string, string>>({});
+  const [own, setOwn] = useState<Record<string, string>>({});
+  const answers = Object.fromEntries(questions.map((question) => [question.id, [own[question.id]?.trim() || chosen[question.id] || ""].filter(Boolean)]));
+  const ready = questions.every((question) => answers[question.id]!.length);
+  return <div className="assistant-question">
+    {questions.map((question) => <fieldset key={question.id}>
+      <legend>{question.header ? `${question.header}：` : ""}{question.question}</legend>
+      {question.options.length > 0 && <span className="assistant-actions">{question.options.map((option) =>
+        <button key={option.label} type="button" className="secondary-button" aria-pressed={chosen[question.id] === option.label} title={option.description || undefined}
+          onClick={() => setChosen((all) => ({ ...all, [question.id]: option.label }))}>{option.label}</button>)}</span>}
+      <label><span className="sr-only">{t("自己的回答")}</span><input value={own[question.id] ?? ""} maxLength={1000} placeholder={t(question.options.length ? "或者自己写" : "回答")}
+        onChange={(event) => setOwn((all) => ({ ...all, [question.id]: event.target.value }))} /></label>
+    </fieldset>)}
+    <span className="assistant-actions">
+      <button type="button" className="primary-button" disabled={busy || !ready} onClick={() => void act(`/api/agent/questions/${encodeURIComponent(id)}`, { answers })}>{t("回答")}</button>
+      {message && <small role="status">{message}</small>}
+    </span>
+  </div>;
+}
+
 /** An answer to a question the guard put to the person mid-run. */
 export function ApprovalButtons({ id }: { id: string }) {
   const { act, busy, message, t } = useAct();

@@ -54,17 +54,18 @@ void pdfBytes;
 const deps = (over: Partial<ManualbookDeps> = {}) => ({ readCost: async () => healthy, webBlocker: () => undefined, now: () => new Date("2026-10-02T12:00:00.000Z"),
   safeGet: { fetchImpl, isPublicHost: async () => true }, ...over });
 
-const respond = (writeCites = ["s1"]) => (prompt: string) => {
+// Source ids are made unique per step (`n1-s1`, `n2-s1`): the writer answers every step in one conversation.
+const respond = (writeCites?: string[]) => (prompt: string) => {
   if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify(design);
   if (prompt.includes("crossline.manualbook.search.v1")) return JSON.stringify(search);
-  return JSON.stringify(writeup(writeCites));
+  return JSON.stringify(writeup(writeCites ?? [prompt.includes("放 6 个晶体管") ? "n2-s1" : "n1-s1"]));
 };
 
 test("a task becomes a manualbook: a flow, per-step files, downloaded open-access text, and a manifest whose checksums match", async () => {
   const { rpc } = scriptedRuntime(SKILLS, respond());
   const build = createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps());
   const outcome = await build("w1");
-  // Both steps are researched (every step is, since 2026-10-09), and each keeps the two sources that open.
+  // Both steps are marked as needing research, and each keeps the two sources that open.
   expect(outcome).toMatchObject({ state: "ready", nodes: 2, sources: 4, downloaded: 2 });
 
   const files = listManualbookFiles(dir, "w1");
@@ -78,7 +79,7 @@ test("a task becomes a manualbook: a flow, per-step files, downloaded open-acces
   const manifest = JSON.parse(readFileSync(path.join(dir, "w1", "manifest.json"), "utf8")) as {
     files: Array<{ path: string; sha256: string }>; sources: Array<{ id: string; kept: string; license: string }>;
   };
-  expect(manifest.sources.map((source) => [source.id, source.kept])).toEqual([["s1", "full_text"], ["s2", "summary_only"], ["s1", "full_text"], ["s2", "summary_only"]]);
+  expect(manifest.sources.map((source) => [source.id, source.kept])).toEqual([["n1-s1", "full_text"], ["n1-s2", "summary_only"], ["n2-s1", "full_text"], ["n2-s2", "summary_only"]]);
   expect(manifest.sources[0]!.license).toContain("arXiv");
   for (const entry of manifest.files) {
     expect(createHash("sha256").update(readFileSync(path.join(dir, "w1", entry.path))).digest("hex"), entry.path).toBe(entry.sha256);
@@ -109,13 +110,52 @@ test("a write-up that cites a source it was never given is refused for that step
     if (prompt.includes("crossline.manualbook.search.v1")) return JSON.stringify(search);
     writes += 1;
     // Every step is researched now, so the good one cites a source it was given.
-    return JSON.stringify(writeup(prompt.includes("放 6 个晶体管") ? ["s1"] : ["s9"]));
+    return JSON.stringify(writeup(prompt.includes("放 6 个晶体管") ? ["n2-s1"] : ["s9"]));
   });
   const outcome = await createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps())("w1");
   expect(outcome).toMatchObject({ state: "ready" });
   expect(writes).toBeGreaterThanOrEqual(2);
   const analysis = readFileSync(path.join(dir, "w1", "nodes/learn/analysis.md"), "utf8");
   expect(analysis).toContain("没有写成");
+});
+
+test("only steps marked as needing outside material are researched, and a step another tutorial of the project researched reuses its sources", async () => {
+  const marked = { ...design, nodes: [design.nodes[0]!, { ...design.nodes[1]!, needsResearch: false, researchQuestions: [] }] };
+  const { rpc, prompts } = scriptedRuntime(SKILLS, (prompt) => {
+    if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify(marked);
+    if (prompt.includes("crossline.manualbook.search.v1")) return JSON.stringify(search);
+    return JSON.stringify(writeup(prompt.includes("放 6 个晶体管") ? [] : ["n1-s1"]));
+  });
+  const outcome = await createManualbookBuilder(store, WS, dir, "C:\\repo", () => rpc, deps())("w1");
+  expect(outcome).toMatchObject({ state: "ready", nodes: 2, sources: 2 });
+  expect(prompts().filter((prompt) => prompt.includes("crossline.manualbook.search.v1"))).toHaveLength(1);
+  expect(store.listEvents(WS, { type: "manualbook.built", entityId: "w1" })[0]?.payload).toMatchObject({ researched: 1, inputsVersion: 2 });
+
+  // The next task of the same project has a step of the same title: no new search for it.
+  store.saveWorkOrder({ id: "w3", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "画 8T SRAM 单元",
+    state: "preparing", riskTier: "milestone", estimate: { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior", observationCount: 0, confidence: "low" },
+    payload: { materialContract: [{ id: "c1", description: "Cadence 入门教程", required: true }], evidenceContract: [{ kind: "record", description: "一张 8T 原理图", required: true }] } });
+  const again = scriptedRuntime(SKILLS, (prompt) => {
+    if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify({ ...marked, nodes: [marked.nodes[0]!, { ...marked.nodes[1]!, serves: ["w3-evidence-0"] }] });
+    if (prompt.includes("crossline.manualbook.search.v1")) return JSON.stringify(search);
+    return JSON.stringify(writeup(prompt.includes("放 6 个晶体管") ? [] : ["n1-s1"]));
+  });
+  expect(await createManualbookBuilder(store, WS, dir, "C:\\repo", () => again.rpc, deps())("w3")).toMatchObject({ state: "ready", sources: 2 });
+  expect(again.prompts().some((prompt) => prompt.includes("crossline.manualbook.search.v1"))).toBe(false);
+  expect(readFileSync(path.join(dir, "w3", "nodes/learn/task.md"), "utf8")).toContain("沿用「");
+});
+
+test("a build that stops after its research does not search the same steps again on the next try", async () => {
+  const first = scriptedRuntime(SKILLS, (prompt) => {
+    if (prompt.includes("crossline.manualbook.design.v1")) return JSON.stringify(design);
+    if (prompt.includes("crossline.manualbook.search.v1")) return JSON.stringify(search);
+    return JSON.stringify(writeup(["nope"]));
+  });
+  expect(await createManualbookBuilder(store, WS, dir, "C:\\repo", () => first.rpc, deps())("w1")).toMatchObject({ state: "blocked", code: "MANUALBOOK_NOTHING_WRITTEN" });
+  const second = scriptedRuntime(SKILLS, respond());
+  expect(await createManualbookBuilder(store, WS, dir, "C:\\repo", () => second.rpc, deps())("w1")).toMatchObject({ state: "ready", sources: 4 });
+  expect(second.prompts().some((prompt) => prompt.includes("crossline.manualbook.search.v1"))).toBe(false);
+  expect(existsSync(path.join(dir, "w1", ".research-draft.json"))).toBe(false);
 });
 
 test("without web research the manualbook is still built, with the gap stated", async () => {
@@ -172,47 +212,75 @@ test("a tutorial is built for committed work without moving it, from its steps a
   const outcome = await createManualbookBuilder(store, WS, dir, "C:\repo", () => rpc, deps())("hw2", { mode: "tutorial" });
   expect(outcome).toMatchObject({ state: "ready", nodes: 2 });
   expect(store.getWorkOrder(WS, "hw2")?.state).toBe("ready_for_human");
-  // The writer read the homework itself.
-  expect(prompts.some((prompt) => prompt.includes("Problem 1 inverter VTC"))).toBe(true);
+  // The writer read the homework itself — once: both steps are written in one conversation, the second turn carrying only its own step.
+  expect(prompts.filter((prompt) => prompt.includes("Problem 1 inverter VTC"))).toHaveLength(1);
+  const second = prompts.find((prompt) => prompt.startsWith('{"version":"crossline.manualbook.write.v1","next":true'));
+  expect(second).toContain("逐题求解");
+  expect(second).not.toContain("$crossline");
   const materials = JSON.parse(readFileSync(path.join(dir, "hw2", "materials.json"), "utf8")) as Array<{ docId?: string; notes: Array<{ note: string }> }>;
   expect(materials).toEqual([expect.objectContaining({ docId: "doc1", notes: [expect.objectContaining({ note: "第 1 题要求反相器 VTC" }), expect.anything()] })]);
 });
 
-test("a tutorial is made just in time: only for work starting within a week, again when its inputs change or it is a week old", () => {
+test("a tutorial is made just in time: only for work that needs one, starting within three days, again when its inputs change", () => {
   const now = new Date("2026-10-13T12:00:00.000Z");
-  // The ledger stamps events with the wall clock; pin it to the test's `now`, or the week-old rebuild below stops holding as real time passes.
+  // The ledger stamps events with the wall clock; pin it to the test's `now`, or the rebuild windows below stop holding as real time passes.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(now);
   onTestFinished(() => { vi.useRealTimers(); });
   const hours = (n: number) => new Date(now.getTime() + n * 3_600_000).toISOString();
-  store.saveWorkOrder({ id: "hw3", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "作业 3", state: "approved", riskTier: "routine",
-    estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
-  store.saveStepPlan(WS, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps: [plannedStep("a", "解题")] }, "o", "t");
+  const at = (n: number) => new Date(now.getTime() + n * 3_600_000);
+  const order = (id: string, intent: string, archetypeId: string, steps: ReturnType<typeof plannedStep>[]) => {
+    store.saveWorkOrder({ id, ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent, state: "approved", riskTier: "routine",
+      estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+    store.saveStepPlan(WS, id, { archetypeId, quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "", steps }, "o", "t");
+  };
+  order("hw3", "作业 3", "problem_set", [plannedStep("a", "解题"), plannedStep("c", "检查")]);
+  // A 30-minute send gets none, however soon it starts (W-17); nor does gathering and deciding work of any length (2026-10-21).
+  order("send", "把名单发给陈默", "problem_set", [plannedStep("s", "发名单")]);
+  order("rules", "汇集两门课程评分规则", "research_decision", [{ ...plannedStep("g", "比较评分规则"), role: "compare" }, { ...plannedStep("d", "定下复习重点"), role: "decide" },
+    { ...plannedStep("e", "记下结论"), role: "record" }]);
   expect(pendingTutorials(store, WS, now)).toEqual([]);
-  // Nine days out: not yet. w1 is still preparing (material preparation handles it).
-  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(9 * 24), w1: hours(5) }));
+  // Four days out: not yet. w1 is still preparing (material preparation handles it).
+  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(4 * 24), w1: hours(5) }));
   expect(pendingTutorials(store, WS, now)).toEqual([]);
-  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(30), w1: hours(5) }));
+  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(30), w1: hours(5), send: hours(2), rules: hours(3) }));
   expect(pendingTutorials(store, WS, now)).toEqual(["hw3"]);
   // Built from today's inputs: nothing to do.
   const built = (key: string, inputs: string) => store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: key, type: "manualbook.built", entityId: "hw3",
-    payload: { nodes: 1, sources: 0, downloaded: 0, inputs } });
+    payload: { nodes: 1, sources: 0, downloaded: 0, inputs, inputsVersion: 2 } });
   built("b1", tutorialInputs(store, WS, "hw3"));
   expect(pendingTutorials(store, WS, now)).toEqual([]);
-  // The step plan changed: made again.
+  // The step plan changed: made again, but not within a day of the last build (a day of replans is one rebuild).
   store.saveStepPlan(WS, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 2, unit: "题" }, rationale: "", steps: [plannedStep("a", "解第 1 题"), plannedStep("b", "解第 2 题")] }, "o", "replan");
-  expect(pendingTutorials(store, WS, now)).toEqual(["hw3"]);
+  expect(pendingTutorials(store, WS, at(3))).toEqual([]);
+  expect(pendingTutorials(store, WS, at(25))).toEqual(["hw3"]);
+  vi.setSystemTime(at(25));
   built("b2", tutorialInputs(store, WS, "hw3"));
-  expect(pendingTutorials(store, WS, now)).toEqual([]);
-  // A week later the same inputs are made again.
-  expect(pendingTutorials(store, WS, new Date(now.getTime() + 8 * 86_400_000 - 30 * 3_600_000 + 3_600_000))).toEqual([]);
-  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: new Date(now.getTime() + 8 * 86_400_000 + 3_600_000).toISOString() }));
-  expect(pendingTutorials(store, WS, new Date(now.getTime() + 8 * 86_400_000))).toEqual(["hw3"]);
+  // The due day moving or an unrelated file filed under the project no longer counts as a change; a week's age alone does not either.
+  store.saveWorkOrder({ ...store.getWorkOrder(WS, "hw3")!, payload: { dueDate: "2026-10-20" } });
+  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ hw3: hours(9 * 24) }));
+  expect(pendingTutorials(store, WS, at(8 * 24))).toEqual([]);
   // A failure after the last build waits for the person.
-  vi.setSystemTime(new Date(now.getTime() + 8 * 86_400_000));
+  store.saveStepPlan(WS, "hw3", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 3, unit: "题" }, rationale: "", steps: [plannedStep("a", "解第 1 题"), plannedStep("b", "解第 3 题")] }, "o", "replan2");
+  expect(pendingTutorials(store, WS, at(8 * 24))).toEqual(["hw3"]);
+  vi.setSystemTime(at(8 * 24));
   store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: "tb", type: "tutorial.blocked", entityId: "hw3", payload: { code: "X", message: "" } });
-  expect(pendingTutorials(store, WS, new Date(now.getTime() + 8 * 86_400_000))).toEqual([]);
+  expect(pendingTutorials(store, WS, at(8 * 24))).toEqual([]);
   vi.useRealTimers();
+});
+
+test("a tutorial waits for the assistant's preparation before the person's first step, until a day before the work", () => {
+  const now = new Date("2026-10-13T12:00:00.000Z");
+  const hours = (n: number) => new Date(now.getTime() + n * 3_600_000).toISOString();
+  store.saveWorkOrder({ id: "exam", ownerId: "o", workspaceId: WS, identityId: "research", projectId: "p", milestoneId: "", intent: "期中复习", state: "approved", riskTier: "routine",
+    estimate: { p25Minutes: 60, p50Minutes: 120, p85Minutes: 240, source: "llm_prior", observationCount: 0, confidence: "low" }, payload: {} });
+  store.saveStepPlan(WS, "exam", { archetypeId: "exam_prep", quantity: { basis: "知识点数", amount: 4, unit: "个" }, rationale: "", steps: [
+    { ...plannedStep("g", "汇集讲义与往年题"), role: "gather", executor: "agent" as const, schedulable: false }, { ...plannedStep("l", "推导第 3–5 讲"), role: "learn" },
+    { ...plannedStep("p", "做往年题"), role: "practice" }] }, "o", "t");
+  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ exam: hours(48) }));
+  expect(pendingTutorials(store, WS, now)).toEqual([]);
+  store.setSetting(WS, "schedule.orderStarts", JSON.stringify({ exam: hours(20) }));
+  expect(pendingTutorials(store, WS, now)).toEqual(["exam"]);
 });
 
 test("a page that refuses automated readers (403/429) keeps its link and summary, marked as not checked; one that does not exist is dropped", async () => {

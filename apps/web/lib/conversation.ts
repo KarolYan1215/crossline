@@ -1,39 +1,47 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { formatInTimeZone } from "date-fns-tz";
-import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
+import { closeMailReply, resultsAwaitingReview, type StoredConversationMessage } from "@crossline/db";
 import {
-  ACTIONS, LINE_PROFILES_SETTING, actionProblem, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
-  type AccessContext, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
+  ACTIONS, AUTOMATIONS_SETTING, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
+  type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
+import { DOMAIN_PACKS } from "@crossline/identity-packs";
 import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability } from "./crossline";
 import { openAsks } from "./asks";
 import { executeAction } from "./actions";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { identityLines, lineLabels } from "./lines";
 import { recentOps } from "./undo";
-import { ANSWERED_SETTING, muteNudgeKind } from "./nudges";
+import { ANSWERED_SETTING, ensureOpener, muteNudgeKind } from "./nudges";
 import { readOpener, type OpenerView } from "./opener";
 import { returnPageLines } from "./return";
 import { tOf } from "./locale";
+import { captureProgress } from "./capture-progress";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
-export type PageContext = { kind: string; entityId: string };
+/** `stepId`: on a task, the step its block is for (Today's day panel), so 「这一步」 names that step rather than the first open one. */
+export type PageContext = { kind: string; entityId: string; stepId?: string };
 export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 
 /** One action on a card and what became of it. */
-export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; message?: string; opId?: string; href?: string };
+export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; message?: string; opId?: string; href?: string; captureId?: string };
 /** An assistant message's card: what the turn proposed, the question back, and the state of each. */
 /**
  * An option of a card's question. A turn's options carry candidate actions; a nudge's buttons may instead open a page (`href`),
- * acknowledge (`ack`), ask about this kind less (`mute`) or invite typing (`say`). Choosing any of them is the answer.
+ * acknowledge (`ack`), ask about this kind less (`mute`) or invite typing (`say`). Choosing any of them is the answer — except `copy`, which
+ * puts the text at `href` on the clipboard and leaves the card open. `close` (on an `ack`) closes the card's mail reply draft
+ * (`Card.mailReplyId`) as answered or as needing no answer.
  */
-export type CardOption = ClarifyOption & { kind?: "action" | "ack" | "mute" | "href" | "say"; href?: string };
+export type CardOption = ClarifyOption & { kind?: "action" | "ack" | "mute" | "href" | "say" | "copy"; href?: string; close?: "replied" | "dismissed" };
 export type Card = {
   actions: ProposedAction[]; items: CardItem[];
   clarify: { question: string; options: CardOption[]; chosen?: number };
   /** Set on a nudge's card: which rule raised it (for 「少问这类」). */
   nudgeKind?: string;
+  /** Set on a message about a mail reply draft: the draft its 「已回复」 and 「不用回」 close. */
+  mailReplyId?: string;
   confidence: ConciergeTurn["confidence"]; error?: string;
   /** The words this card is a reading of (for remembering a correction of it). */
   heard?: string;
@@ -94,7 +102,8 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
   const profiles = (() => { try { return JSON.parse(store.getSetting(ctx.workspaceId, LINE_PROFILES_SETTING) ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   return {
     now: now.toISOString(), today, timeZone, page: { ...page, title: pageTitle },
-    lines: identityLines(ctx).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [], hard: Boolean(line.hard), description: profiles[line.id]?.description ?? "" })),
+    lines: identityLines(ctx).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [], hard: Boolean(line.hard), description: profiles[line.id]?.description ?? "",
+      ...(line.domain ? { domain: DOMAIN_PACKS[line.domain].label } : {}) })),
     tasks: orders.filter((order) => OPEN.includes(order.state)).map((order) => {
       const payload = (order.payload ?? {}) as { dueDate?: string; notBefore?: string };
       return { id: order.id, title: taskTitleOf(order), line: label(order.identityId), project: projects.get(order.projectId) ?? "", state: order.state,
@@ -111,9 +120,12 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     plan: upcoming.map((block) => ({ day: block.day!, start: block.start, end: block.end, title: block.title,
       kind: block.id.split(":")[0] === "graph_calendar" ? "calendar" : block.id.split(":")[0]! })),
     capacity,
+    weeklyPattern: weeklyPattern(readAvailability(ctx)),
+    automations: readAutomations(store.getSetting(ctx.workspaceId, AUTOMATIONS_SETTING)).map((item) => ({ name: item.name, trigger: triggerLabel(item.trigger), status: item.status, lineId: item.lineId })),
+    mailboxes: readMailAccounts(store.getSetting(ctx.workspaceId, MAIL_ACCOUNTS_SETTING)).length,
     ops: recentOps(ctx, now).map((op) => ({ id: op.id, label: op.label, at: op.at })),
     /* i18n-ignore-start: the pack is model context */
-    agentResults: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review")
+    agentResults: resultsAwaitingReview(store, ctx.workspaceId)
       .map((task) => ({ taskId: task.taskId, title: task.title, summary: `产出：${task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1)).slice(0, 6).join("、") || "无"}${task.needsHuman ? `；${task.needsHuman} 项需本人完成` : ""}` })), /* i18n-ignore-end */
     materials: docs.map((doc) => ({ id: doc.id, fileName: doc.fileName, project: doc.projectId ? projects.get(doc.projectId) ?? "" : "" })),
     projects: store.listProjects(ctx.workspaceId).map((project) => ({ id: project.id, name: project.name, line: label(project.identityId) })),
@@ -144,12 +156,14 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
   return [
     `现在：${formatInTimeZone(now, pack.timeZone, "yyyy-MM-dd EEE HH:mm")}（${pack.timeZone}）`,
     `今天：${today.length ? today.map((block) => `${block.start}–${block.end} ${block.title}`).join("；") : "无安排"}`,
+    `每周可用时段（改动用 availability.set，给出改后的完整时段）：${pack.weeklyPattern?.join("；") || "未设置"}`,
     `未来 7 天可用于工作的时间（可用时段扣除固定安排；已排任务）：${pack.capacity.map((day) => `${day.day.slice(5)} ${(day.availableMinutes / 60).toFixed(1)}h；已排 ${(day.scheduledMinutes / 60).toFixed(1)}h`).join(" · ")}`,
     `待决事项 ${pack.asks.length} 项${pack.asks.length ? `，最紧急：${pack.asks.slice(0, 3).map((ask) => ask.title).join("；")}` : ""}`,
     `待批准的任务提案 ${pack.proposals.length} 项；里程碑草稿 ${pack.milestones.filter((item) => item.status === "draft").length} 个；待审阅的助手成果 ${pack.agentResults.length} 项`,
     `最近一次精力记录：${pack.energy ? `${pack.energy.level}（${formatInTimeZone(new Date(pack.energy.at), pack.timeZone, "MM-dd HH:mm")}）` : "无"}`,
+    `自动化（改哪个就用 workflow.request 写明改法）：${pack.automations?.length ? pack.automations.map((item) => `${item.name}（${item.trigger}${item.status === "off" ? "，已暂停" : ""}${item.lineId ? `，主线 ${item.lineId}` : ""}）`).join("；") : "无"}；已接入邮箱 ${pack.mailboxes ?? 0} 个`,
     `当前页面：${pack.page.kind}${pack.page.title ? `「${pack.page.title}」(${pack.page.entityId})` : ""}`,
-    `主线（id | 名称）：${pack.lines.map((line) => `${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""}`).join("；") || "无"}`,
+    `主线（id | 名称）：${pack.lines.map((line) => `${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""}${line.domain ? `（${line.domain}）` : ""}`).join("；") || "无"}`,
     `项目（id | 名称 | 主线）：${pack.projects.map((project) => `${project.id} | ${project.name} | ${project.line}`).join("；") || "无"}`,
     ...pageTask(pack),
     ...pageLine(pack),
@@ -175,11 +189,12 @@ export function pageLine(pack: ConciergePack): string[] {
     `关于这条主线的情况交给访谈时 profile.tell 的 lineId 填 ${line.id}；修改长期目标同样交给该主线的访谈（由本人在卡片上确认）。`];
 }
 
-function pageTask(pack: ConciergePack): string[] {
+export function pageTask(pack: ConciergePack): string[] {
   if (pack.page.kind !== "task") return [];
   const task = pack.tasks.find((item) => item.id === pack.page.entityId);
   if (!task) return [];
-  const current = task.steps.find((step) => step.status === "planned");
+  // From a picked block the step is that block's own, while it is still open; otherwise the first open step.
+  const current = task.steps.find((step) => step.id === pack.page.stepId && step.status === "planned") ?? task.steps.find((step) => step.status === "planned");
   return [`本页任务：${task.id} | ${task.title} | 截止 ${task.dueDate || "—"}；步骤（id | 标题 | 状态，▶ 为当前步骤）：`,
     ...task.steps.map((step) => `- ${step === current ? "▶ " : ""}${step.id} | ${step.title} | ${step.status}${step.executor === "agent" ? "（助手做）" : ""}`)];
 }
@@ -199,7 +214,21 @@ export async function cardChoices(ctx: AccessContext): Promise<CardChoices> {
 /** Today's conversation (made on first use), oldest first. */
 export function loadConversation(ctx: AccessContext, day = planToday(ctx)): { id: string; day: string; messages: MessageView[] } {
   const conversation = getStore().conversationFor(ctx.workspaceId, day);
-  return { id: conversation.id, day, messages: getStore().listConversationMessages(ctx.workspaceId, conversation.id).map(view) };
+  return { id: conversation.id, day, messages: withCaptureProgress(ctx, getStore().listConversationMessages(ctx.workspaceId, conversation.id).map(view)) };
+}
+
+/** A 「收集」 card's line follows its capture: analysed, done, accepted (W-16). Read when shown; the stored card is not rewritten. */
+function withCaptureProgress(ctx: AccessContext, messages: MessageView[]): MessageView[] {
+  if (!messages.some((message) => message.card?.items.some((item) => item.captureId))) return messages;
+  const store = getStore();
+  const captures = new Map(store.listCaptures(ctx.workspaceId).map((capture) => [capture.id, capture]));
+  return messages.map((message) => !message.card?.items.some((item) => item.captureId) ? message : { ...message, card: { ...message.card,
+    items: message.card.items.map((item) => {
+      if (!item.captureId || item.state !== "done") return item;
+      const order = store.getWorkOrder(ctx.workspaceId, item.captureId);
+      const now = captureProgress(captures.get(item.captureId), order && { id: order.id, state: order.state, title: taskTitleOf(order) }, tOf(ctx));
+      return now ? { ...item, message: now.message, ...(now.href ? { href: now.href } : {}) } : item;
+    }) } });
 }
 
 export const searchConversation = (ctx: AccessContext, query: string) =>
@@ -243,8 +272,12 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
   const attached = attachedFiles(docs, pack);
   // From the return page: what the absence left to settle, and which task and step a line typed beside one is about.
   const returning = input.page.kind === "return" ? ["", ...returnPageLines(ctx, input.page, now)].join("\n") : "";
+  // A screenshot dropped with the line (a payment, a meal) is shown to the model itself, so it can read the numbers into a record card the
+  // person confirms (docs/domain-lines.md); at most three, stored files only.
+  const images = docs.filter((doc) => /\.(png|jpe?g|webp|gif)$/i.test(doc.fileName) && doc.uri.startsWith("file:")).slice(0, 3)
+    .map((doc) => fileURLToPath(doc.uri));
   const request = { conversationId: conversation.id, text: input.text || "（只附了文件）", mentions: input.mentions, // i18n-ignore: model context
-    snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${returning}${attached}`, pack, history,
+    snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${returning}${attached}`, pack, history, ...(images.length ? { images } : {}),
     ...(corrected ? { corrected: true } : {}) };
   let reply: { text: string; card: Card };
   let warnings: string[] = [];
@@ -318,7 +351,8 @@ async function reviewCard(ctx: AccessContext, messageId: string, body: Record<st
 
 function fallback(ctx: AccessContext, text: string, why: string, code: string): { text: string; card: Card } {
   const action: ProposedAction = { action: "task.create", summary: text.slice(0, 200), args: { title: text.slice(0, 240), context: "", lineId: "", dueDate: "", milestoneId: "" } };
-  return { text: tOf(ctx)("未能理解这句话（{{why}}）。原话已保存在对话里，可稍后重新发送；也可以先作为新任务收集。", { why }),
+  // Not 「未能理解」: the model was not reached, or refused the round; saying it misunderstood hid the real reason (2026-10-19).
+  return { text: tOf(ctx)("这句话还没有得到回答：{{why}}。原话已保存在对话里，可稍后重新发送；也可以先作为新任务收集。", { why: why.replace(/[。.]$/, "") }),
     card: { actions: [action], items: [{ state: "pending" }], clarify: { question: "", options: [] }, confidence: "low", error: code } };
 }
 
@@ -339,11 +373,13 @@ export async function decideCard(ctx: AccessContext, messageId: string,
   applyEdits(ctx, message.id, card, decision.edits ?? {});
   const candidates = new Set(card.clarify.options.flatMap((option) => option.actions));
   let chosen: number[];
+  let closeDraft: CardOption["close"];
   if (decision.option !== undefined) {
     const option = card.clarify.options[decision.option];
-    if (!option || card.clarify.chosen !== undefined) return { ok: false, code: "OPTION_NOT_AVAILABLE" };
+    if (!option || option.kind === "copy" || card.clarify.chosen !== undefined) return { ok: false, code: "OPTION_NOT_AVAILABLE" };
     card.clarify.chosen = decision.option;
     if (option.kind === "mute" && card.nudgeKind) muteNudgeKind(ctx, card.nudgeKind, now);
+    if (option.close && card.mailReplyId) closeDraft = option.close;
     chosen = option.actions;
     // The candidates not chosen will never run.
     for (const index of candidates) if (!option.actions.includes(index) && card.items[index]?.state === "pending") card.items[index] = { state: "dismissed" };
@@ -362,6 +398,15 @@ export async function decideCard(ctx: AccessContext, messageId: string,
     }
   }
   store.updateConversationPayload(ctx.workspaceId, messageId, { ...message.payload, card });
+  // After the card is written: closing the draft marks every message about it (this one keeps the choice just made).
+  if (closeDraft && card.mailReplyId) closeMailReply(store, ctx.workspaceId, card.mailReplyId, closeDraft, "person", now);
+  // A decision answered from the day's opener: the opener shows the next one instead of staying on the settled one.
+  const fromOpener = (message.payload.nudge as { kind?: string } | undefined)?.kind === "opener";
+  if (fromOpener && chosen.some((index) => card.actions[index]?.action === "ask.answer" && card.items[index]?.state === "done")) {
+    await ensureOpener(ctx, now, true);
+    const fresh = store.getConversationMessage(ctx.workspaceId, messageId);
+    if (fresh) return { ok: true, message: view(fresh) };
+  }
   return { ok: true, message: view({ ...message, payload: { ...message.payload, card } }) };
 }
 
@@ -393,5 +438,16 @@ function applyEdits(ctx: AccessContext, messageId: string, card: Card, edits: Re
 }
 
 const outcomeItem = (outcome: Awaited<ReturnType<typeof executeAction>>): CardItem => outcome.ok
-  ? { state: "done", message: outcome.message, ...(outcome.opId ? { opId: outcome.opId } : {}), ...(outcome.href ? { href: outcome.href } : {}) }
+  ? { state: "done", message: outcome.message, ...(outcome.opId ? { opId: outcome.opId } : {}), ...(outcome.href ? { href: outcome.href } : {}),
+    ...(outcome.captureId ? { captureId: outcome.captureId } : {}) }
   : { state: "failed", message: outcome.message };
+
+// i18n-ignore-start: the concierge's own reading of the week (model context)
+const WEEKDAY_LABEL = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+const ENERGY_LABEL = { high: "高", medium: "中", low: "低" } as const;
+// i18n-ignore-end
+/** The weekly pattern as the concierge reads it: one line per band, days in week order from Monday. */
+export function weeklyPattern(windows: AvailabilityWindow[]): string[] {
+  const order = (day: number) => (day + 6) % 7;
+  return windows.map((window) => `${[...window.days].sort((a, b) => order(a) - order(b)).map((day) => WEEKDAY_LABEL[day]).join(" ")} ${window.start}–${window.end} ${ENERGY_LABEL[window.energy]}`);
+}

@@ -106,6 +106,9 @@ export class Supervisor {
     mkdirSync(this.logDir, { recursive: true });
     const log = { out: createWriteStream(path.join(this.logDir, `${spec.name}.log`), { flags: "a" }),
       err: createWriteStream(path.join(this.logDir, `${spec.name}.err.log`), { flags: "a" }) };
+    // A log file that cannot be opened or written (its folder removed, a full disk) must not take the launcher down: an unheard stream
+    // error is an uncaught exception. The child keeps running and its output is lost, which is the lesser harm.
+    for (const stream of [log.out, log.err]) stream.on("error", () => undefined);
     const startedAt = this.now();
     const child = this.spawnChild(spec, log);
     this.#children.set(spec.name, child);

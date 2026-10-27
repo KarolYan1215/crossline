@@ -50,7 +50,7 @@ test("a run reports the model it ran on, its tokens, its turns and how long it t
   const result = await runCodexSkill(rpc, {}, options(MID));
   expect(result.ok).toBe(true);
   expect(usage).toHaveLength(1);
-  expect(usage[0]).toMatchObject({ workspaceId: "ws-1", skillName: MID, tier: "mid", model: "gpt-5.6-terra", effort: "high", spendMode: "normal",
+  expect(usage[0]).toMatchObject({ workspaceId: "ws-1", skillName: MID, tier: "mid", model: "gpt-5.6-terra", effort: "medium", spendMode: "normal",
     ok: true, turns: 1, inputTokens: 1200, cachedInputTokens: 200, outputTokens: 300, reasoningOutputTokens: 100, totalTokens: 1500 });
   expect(usage[0]!.durationMs).toBeGreaterThanOrEqual(0);
 });
@@ -66,7 +66,7 @@ test("when the budget is tight the run steps down a tier, and the report says wh
   setSpendModeProvider(async () => "economy");
   const { rpc } = fakeRuntime(["{}"], TOP, { usage: { input: 10, output: 5 } });
   await runCodexSkill(rpc, {}, options(TOP));
-  expect(usage[0]).toMatchObject({ spendMode: "economy", tier: "top", model: "gpt-5.6-terra", effort: "high" });
+  expect(usage[0]).toMatchObject({ spendMode: "economy", tier: "top", model: "gpt-5.6-terra", effort: "medium" });
 });
 
 test("the milestone gate never steps down, however tight the budget", async () => {

@@ -1,6 +1,7 @@
 import { mentionsExternalAction } from "./external-action";
 import { AGENT_MAX_RUNS, classifyAgentFailure } from "./agent-failure";
 import { tFor, type Locale } from "./i18n";
+import { workOwner } from "./work-owner";
 
 /**
  * Which work the assistant may take, and what to hand it.
@@ -71,13 +72,21 @@ const parts = (value: unknown): Part[] => Array.isArray(value) ? value as Part[]
  * Whether a work order has anything the assistant can take, and in what words to hand it over. `category` is `undefined` when the
  * wording does not point at one kind: the person chooses at dispatch, and nothing starts by itself.
  */
-export function planAssistantTask(order: DispatchableOrder, context: { projectIsCourse: boolean; milestoneTitle?: string; locale?: Locale | undefined }): AssistantPlan {
+export type AssistantContext = { projectIsCourse: boolean; milestoneTitle?: string;
+  /** For an assistant item: the title of the person's core task it prepares (`payload.prepares`). */
+  servesTitle?: string; locale?: Locale | undefined };
+
+export function planAssistantTask(order: DispatchableOrder, context: AssistantContext): AssistantPlan {
   const t = tFor(context.locale);
   const payload = (order.payload ?? {}) as { automationParts?: unknown; humanCore?: unknown; materialContract?: unknown; evidenceContract?: unknown;
-    family?: string; riskTier?: string };
+    family?: string; riskTier?: string; owner?: unknown };
   const ai = parts(payload.automationParts).filter((part) => part.intent?.trim());
   const human = parts(payload.humanCore).filter((part) => part.intent?.trim());
-  if (!ai.length) return delegateWhole(order, human, context);
+  // Owned work (docs/work-split.md): a question waits for its answer; the assistant's own item is handed over whole; the person's core
+  // task gives the assistant only the automatable parts its analysis named, never the whole.
+  if (payload.owner === "ask") return { fit: false, reason: t("这件事先等本人回答一个问题，再交给助手。") };
+  if (payload.owner === "assistant") return assistantOwned(order, ai, context);
+  if (!ai.length) return payload.owner === "person" ? { fit: false, reason: t("这是本人的核心工作，由本人做；助手只做它的准备。") } : delegateWhole(order, human, context);
 
   const wording = ai.map((part) => part.intent!).join("；");
   const scored = KEYWORDS.map(([category, pattern]) => ({ category, hits: (wording.match(new RegExp(pattern.source, `${pattern.flags.replace("g", "")}g`)) ?? []).length }));
@@ -97,8 +106,7 @@ export function planAssistantTask(order: DispatchableOrder, context: { projectIs
     /* i18n-ignore-end */
     humanPart: human.length ? human.map((part) => part.intent).join("；") : t("审阅并决定如何使用产出"),
     graded,
-    // i18n-ignore: an instruction to the assistant
-    notes: graded ? "这是带评分的课程工作：只做学习辅助（讲解、你自己设计的练习、检查你写的、整理资料），不要生成可提交的答案、代码、报告或图表。" : "",
+    notes: graded ? GRADED_NOTE : "",
     delegated: false
   };
 }
@@ -107,33 +115,64 @@ const categoryOf = (text: string): AgentCategory | undefined => KEYWORDS
   .map(([category, pattern]) => ({ category, hits: (text.match(new RegExp(pattern.source, `${pattern.flags.replace("g", "")}g`)) ?? []).length }))
   .filter((entry) => entry.hits > 0).sort((a, b) => b.hits - a.hits)[0]?.category;
 
-/** An errand small and internal enough to hand over whole (see the file comment); anything else stays the person's. */
-function delegateWhole(order: DispatchableOrder, human: Part[], context: { projectIsCourse: boolean; milestoneTitle?: string; locale?: Locale | undefined }): AssistantPlan {
+/** The learning-aid note for graded coursework: what the assistant may and may not make for it (an instruction to the assistant). */
+const GRADED_NOTE = "这是带评分的课程工作：只做学习辅助（讲解、你自己设计的练习、检查本人写的、整理资料），不要生成可提交的答案、代码、报告或图表。"; // i18n-ignore
+
+/**
+ * An errand small and internal enough to hand over whole (see the file comment), for an order written before owners: what it produces
+ * decides (`workOwner`, docs/work-split.md), not its family, its milestone's title or the words of the course it belongs to. Sending,
+ * submitting, publishing, logging in, paying, graded answers, a consequential choice and the person's own practice or design stay theirs.
+ */
+function delegateWhole(order: DispatchableOrder, human: Part[], context: AssistantContext): AssistantPlan {
   const t = tFor(context.locale);
-  const nothing = { fit: false as const, reason: t("该任务没有可交给助手的部分，需本人完成。") };
-  const payload = (order.payload ?? {}) as { family?: string; evidenceContract?: unknown };
-  if (payload.family !== "preparation" && payload.family !== "review") return nothing;
-  const text = `${order.intent} ${human.map((part) => part.intent).join(" ")} ${context.milestoneTitle ?? ""}`;
   if (mentionsExternalAction(order.intent, ...human.map((part) => part.intent))) return { fit: false, reason: t("这件事要对外（发送、提交、发布等），不整件交给助手。") };
-  if (context.projectIsCourse && GRADED.test(text)) return { fit: false, reason: t("这是带评分的课程工作，不整件交给助手。") };
   // Choosing, deciding, doing it in person: the step *is* the person's judgement. One real run was handed 「选定一项创始人正在处理的
   // 真实事项」 and chose for them — and chose the app itself.
   if (PERSONS_CALL.test(order.intent)) return { fit: false, reason: t("该步骤需本人选择或决定，不整件交给助手。") };
+  const verdict = workOwner(order, context.locale);
+  if (verdict.owner !== "assistant") return { fit: false, reason: verdict.owner === "ask" ? t("这件事需要本人先提供信息。") : t("{{reason}}，不整件交给助手。", { reason: verdict.reason }) };
+  return wholePlan(order, context, t("这是一件从已有信息就能做出的准备工作，整件交给助手做，做完的文件直接作为证据交验收。"));
+}
+
+/**
+ * The assistant's own item (`payload.owner === "assistant"`, written by the backplanner or the work-split reorganisation): handed over
+ * whole, its result delivered as its evidence and shown as 「已备好」 on the core task it prepares. What `workOwner` still calls the
+ * person's — a send, a choice, graded answers, practice — is never handed over, whatever the owner on record says.
+ */
+function assistantOwned(order: DispatchableOrder, ai: Part[], context: AssistantContext): AssistantPlan {
+  const t = tFor(context.locale);
+  const verdict = workOwner(order, context.locale);
+  if (verdict.owner === "person" && verdict.code !== "model") return { fit: false, reason: t("{{reason}}，不交给助手。", { reason: verdict.reason }) };
+  return wholePlan(order, context, context.servesTitle ? t("这是为「{{title}}」做的准备，由助手做完，结果放在该任务的「已备好」里。", { title: context.servesTitle })
+    : t("这是助手的准备工作，由助手做完。"), ai);
+}
+
+function wholePlan(order: DispatchableOrder, context: AssistantContext, why: string, ai: Part[] = []): AssistantPlan {
+  const payload = (order.payload ?? {}) as { evidenceContract?: unknown; question?: unknown; answer?: unknown; priorWork?: { done?: string[]; outputs?: string[] } };
+  const done = (payload.priorWork?.done ?? []).filter(Boolean).slice(0, 12), made = (payload.priorWork?.outputs ?? []).filter(Boolean).slice(0, 12);
+  const t = tFor(context.locale);
   const evidence = Array.isArray(payload.evidenceContract)
     ? (payload.evidenceContract as Array<{ description?: string }>).map((item) => item.description).filter(Boolean) : [];
-  const category = categoryOf(order.intent) ?? "read_research_organize";
+  const parts = ai.map((part) => part.intent!).filter((text) => text.trim() && text.trim() !== order.intent.trim());
+  const graded = context.projectIsCourse && GRADED.test(order.intent);
+  const answer = typeof payload.answer === "string" && payload.answer.trim() ? payload.answer.trim() : "";
+  const question = typeof payload.question === "string" ? payload.question.trim() : "";
   return {
-    fit: true, category, delegated: true, graded: false, notes: "",
-    why: payload.family === "review"
-      ? t("这是一件内部的检查工作，整件交给助手做，做完的文件直接作为证据交验收。")
-      : t("这是一件内部的准备工作，整件交给助手做，做完的文件直接作为证据交验收。"),
+    fit: true, category: categoryOf(`${order.intent} ${parts.join(" ")}`) ?? "read_research_organize", delegated: true, graded, notes: graded ? GRADED_NOTE : "",
+    why,
+    // The task handed to the assistant is an instruction to a model, kept in one language.
     /* i18n-ignore-start */
     what: [`这件事整件交给你做：${order.intent}`,
+      parts.length ? `具体包括：${parts.join("；")}` : "",
+      context.servesTitle ? `它是为本人的任务「${context.servesTitle}」准备的：产出要让本人直接拿来用，不替本人做判断、设计或作答。` : "",
+      answer ? `本人对「${question || "需要的信息"}」的回答：${answer}` : "",
+      // Work moved to the assistant part way (docs/work-split.md §5): what is done is built on, not done again.
+      done.length || made.length ? `这件事已做完的部分：${[...done, ...made.map((name) => `文件「${name}」`)].join("；")}。接着做，不要重做已做好的部分。` : "",
       evidence.length ? `交付物必须满足：${evidence.join("；")}` : "交付物：一份能直接用的文件",
       "只用你查得到、读得到的内容；需要本人才知道的事实（他的经历、别人的回复、私有数据），写进 needsHuman 说明缺什么，绝不编造。",
-      "交付物写成 Markdown 或纯文本文件，放在工作目录里，并在 artifacts 里列出。"].join("\n"),
+      "交付物写成 Markdown 或纯文本文件，放在工作目录里，并在 artifacts 里列出。"].filter(Boolean).join("\n"),
     /* i18n-ignore-end */
-    humanPart: t("审阅产出，决定用不用")
+    humanPart: context.servesTitle ? t("本人在「{{title}}」里使用这些产出", { title: context.servesTitle }) : t("审阅产出，决定用不用")
   };
 }
 

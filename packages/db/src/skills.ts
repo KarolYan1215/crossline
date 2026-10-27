@@ -1,9 +1,9 @@
 import {
-  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey,
-  readGrownLibrary, readMineSkill, readSkillLibrary, tFor,
-  type AiTool, type GrownSkillRecord, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
+  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey, scriptsAllowable, scriptsDigest, scriptsRunnable,
+  readGrownLibrary, readMineSkill, readSkillLibrary, tFor, GROWN_VERSIONS_KEPT, WORKFLOW_FEEDBACK_EVENT, grownVersionsKey, revisionWidens,
+  type AiTool, type GrownSkillRecord, type GrownSkillVersion, type WorkflowManifest, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { CrosslineStore } from "./index";
 import { readLocale } from "./locale";
 import { listAgentTasks } from "./agent";
@@ -31,11 +31,12 @@ export const readPublicSkills = (store: CrosslineStore, workspaceId: string) => 
 export const writePublicSkills = (store: CrosslineStore, workspaceId: string, records: PublicSkillRecord[]) =>
   store.setSetting(workspaceId, SKILL_LIBRARY_SETTING, JSON.stringify(records));
 
-/** The files installed for a public skill: everything fetched, or — for one allowed only as text — everything but its scripts. */
+/** The files installed for a public skill: everything fetched, or — for one allowed only as text, until the person allows its scripts — everything but them. */
 export function installedPublicFiles(store: CrosslineStore, workspaceId: string, record: PublicSkillRecord): Array<{ path: string; text: string }> {
   let stored: { files?: Array<{ path: string; text: string }> } | undefined;
   try { stored = JSON.parse(store.getSetting(workspaceId, publicSkillFilesKey(record.id)) ?? "{}") as typeof stored; } catch { stored = undefined; }
-  return (stored?.files ?? []).filter((file) => record.review.final === "usable" || !isScriptFile(file.path));
+  const scripts = scriptsRunnable(record);
+  return (stored?.files ?? []).filter((file) => scripts || !isScriptFile(file.path));
 }
 
 export const readGrownSkills = (store: CrosslineStore, workspaceId: string) => readGrownLibrary(store.getSetting(workspaceId, GROWN_LIBRARY_SETTING));
@@ -59,11 +60,38 @@ export function grownHomeLine(store: CrosslineStore, workspaceId: string, record
     ?? (record.lines.length === 1 ? record.lines[0] : undefined);
 }
 
-/** A grown workflow's files: all of them, or — when the scan or the review allowed it only as text — all but its scripts. */
+/** A grown workflow's files: all of them, or — when the scan or the review allowed it only as text and the person has not allowed its scripts — all but them. */
 export function installedGrownFiles(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord): Array<{ path: string; text: string }> {
   let stored: { files?: Array<{ path: string; text: string }> } | undefined;
   try { stored = JSON.parse(store.getSetting(workspaceId, grownSkillFilesKey(record.id)) ?? "{}") as typeof stored; } catch { stored = undefined; }
-  return (stored?.files ?? []).filter((file) => record.review.final === "usable" || !isScriptFile(file.path));
+  const scripts = scriptsRunnable(record);
+  return (stored?.files ?? []).filter((file) => scripts || !isScriptFile(file.path));
+}
+
+/**
+ * The person allows a skill's scripts after reading the scan, or takes the leave back (`skill.scripts_allowed`, with what the scan found
+ * and the files it covers). Only for a skill the checks capped to text; one they refused stays refused. The worker reinstalls the plugin
+ * on its next run, since the files it installs changed.
+ */
+export function allowSkillScripts(store: CrosslineStore, workspaceId: string, kind: "public" | "grown", id: string, allow: boolean, now = new Date()): boolean {
+  const at = now.toISOString();
+  const change = <T extends PublicSkillRecord | GrownSkillRecord>(records: T[], write: (next: T[]) => void): T | undefined => {
+    const record = records.find((item) => item.id === id);
+    if (!record || !scriptsAllowable(record) || (!allow && !record.scriptsAllowed)) return undefined;
+    write(records.map((item) => {
+      if (item.id !== id) return item;
+      const { scriptsAllowed: _old, ...rest } = item;
+      return (allow ? { ...rest, scriptsAllowed: { at, digest: scriptsDigest(item.files) }, updatedAt: at } : { ...rest, updatedAt: at }) as T;
+    }));
+    return record;
+  };
+  const record = kind === "public" ? change(readPublicSkills(store, workspaceId), (next) => writePublicSkills(store, workspaceId, next))
+    : change(readGrownSkills(store, workspaceId), (next) => writeGrownSkills(store, workspaceId, next));
+  if (!record) return false;
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.scripts:${kind}:${id}:${at}`, type: allow ? "skill.scripts_allowed" : "skill.scripts_revoked",
+    entityId: id, payload: { id, kind, files: record.files.filter((file) => isScriptFile(file.path)).map((file) => file.path),
+      findings: record.scan.findings.map((finding) => `${finding.file}:${finding.line} ${finding.rule}`).slice(0, 20) } });
+  return true;
 }
 
 /** The person turns a grown workflow off or on, or keeps it (`pinned`: never removed for being idle). */
@@ -174,9 +202,26 @@ export function aiToolsFor(store: CrosslineStore, workspaceId: string): AiTool[]
     try { summary = JSON.parse(store.getSetting(workspaceId, AGENT_HISTORY_SUMMARY) ?? "null") ?? undefined; } catch { summary = undefined; }
   }
   const tools = allAiTools(store.getSetting(workspaceId, AI_TOOLS_SETTING), detectedAiTools(summary));
-  // The shell assistant works only for the machine owner's account (`AGENT_OWNER_ONLY`): a guest's plans must not hand it steps that
-  // would never run (found walking the app as an invitee, 2026-10-15).
-  return assistantAvailable(store, workspaceId) ? tools : tools.filter((tool) => tool.kind !== "assistant");
+  // Every account has the assistant now (docs/personal-agent.md, 2026-10-19): the owner's with a shell, everyone else's through
+  // Crossline's own functions — which cannot run scripts or edit media, so its line says what it does there.
+  const mode = assistantMode(store, workspaceId);
+  return mode === "shell" ? tools
+    : tools.map((tool) => tool.id === "crossline-assistant" ? { ...tool, goodFor: mode === "sandbox" ? SANDBOX_ASSISTANT_GOOD_FOR : TOOLS_ASSISTANT_GOOD_FOR } : tool);
+}
+
+/** Where the server runs the shell in Codex's Linux sandbox: scripts and data work, without network in its commands. */
+export const SANDBOX_ASSISTANT_GOOD_FOR = "整份做琐事：汇集整理材料、起草、数据处理与脚本（在沙箱里运行）、联网查证、读邮箱、定期跑自动化；不发送不发布";
+
+/** What the assistant does where it has no shell: reading, writing and organising, the web, the mailbox; not scripts or media. */
+export const TOOLS_ASSISTANT_GOOD_FOR = "整份做琐事：汇集与整理材料、起草文档与表格、联网查证、读邮箱找信息、定期跑自动化；不运行脚本、不剪辑，不发送不发布";
+
+/**
+ * How the assistant works for this workspace: `shell` on the machine owner's own Codex (everything the computer can do, behind the
+ * guard), `tools` for everyone else — Crossline's own functions (agent-tools.ts), on whatever model serves the account.
+ */
+export function assistantMode(store: CrosslineStore, workspaceId: string, env: NodeJS.ProcessEnv = process.env): "shell" | "sandbox" | "tools" {
+  // `sandbox` as the server configured it; the worker falls back to tools by itself when a sandbox does not start (sandbox-probe.ts).
+  return assistantAvailable(store, workspaceId, env) ? "shell" : env.CROSSLINE_SANDBOX_SHELL?.trim() === "on" && process.platform === "linux" ? "sandbox" : "tools";
 }
 
 /**
@@ -204,4 +249,103 @@ export function removeAiTool(store: CrosslineStore, workspaceId: string, id: str
   if (!current.some((tool) => tool.id === id)) return false;
   store.setSetting(workspaceId, AI_TOOLS_SETTING, JSON.stringify(current.filter((tool) => tool.id !== id)));
   return true;
+}
+
+/** The versions a grown workflow's revisions replaced, oldest first. */
+export function readGrownVersions(store: CrosslineStore, workspaceId: string, id: string): GrownSkillVersion[] {
+  try { const parsed = JSON.parse(store.getSetting(workspaceId, grownVersionsKey(id)) ?? "[]") as GrownSkillVersion[]; return Array.isArray(parsed) ? parsed : []; }
+  catch { return []; }
+}
+const grownFilesOf = (store: CrosslineStore, workspaceId: string, id: string): Array<{ path: string; text: string }> => {
+  try { return (JSON.parse(store.getSetting(workspaceId, grownSkillFilesKey(id)) ?? "{}") as { files?: Array<{ path: string; text: string }> }).files ?? []; }
+  catch { return []; }
+};
+const fileHashes = (files: Array<{ path: string; text: string }>) => files.map((file) => ({ path: file.path,
+  sha256: createHash("sha256").update(file.text, "utf8").digest("hex"), bytes: Buffer.byteLength(file.text, "utf8") }));
+
+/**
+ * Two workflows that do the same job made one (workflow-merge.ts): the one absorbed is switched off and remembers what it was merged
+ * into, and the kept one is given the reason for its next revision (`skill.grown.feedback` by the system, naming the absorbed one), so
+ * what only the absorbed one did is folded into it. Undone by `unmergeGrownSkill`.
+ */
+export function mergeGrownSkills(store: CrosslineStore, workspaceId: string, keepId: string, absorbId: string, why: string, brief: string, now = new Date()): boolean {
+  const records = readGrownSkills(store, workspaceId);
+  const absorb = records.find((item) => item.id === absorbId);
+  if (!absorb || absorb.mergedInto || !records.some((item) => item.id === keepId) || keepId === absorbId) return false;
+  const at = now.toISOString();
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id !== absorbId ? item
+    : { ...item, status: "off" as const, mergedInto: { id: keepId, at, why: why.slice(0, 200), status: item.status }, updatedAt: at }));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.merged:${absorbId}:${at}`, type: "skill.grown.merged",
+    entityId: keepId, payload: { keep: keepId, absorbed: absorbId, why: why.slice(0, 200) } });
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${WORKFLOW_FEEDBACK_EVENT}:${keepId}:merge:${absorbId}:${at}`, type: WORKFLOW_FEEDBACK_EVENT,
+    entityId: keepId, payload: { id: keepId, text: brief.slice(0, 2_000), by: "system", absorbed: absorbId } });
+  return true;
+}
+
+/** 撤销合并: the absorbed workflow back as it was; the kept one keeps any revision it made (the person can take that back too). */
+export function unmergeGrownSkill(store: CrosslineStore, workspaceId: string, absorbId: string, now = new Date()): boolean {
+  const records = readGrownSkills(store, workspaceId);
+  const absorb = records.find((item) => item.id === absorbId);
+  if (!absorb?.mergedInto) return false;
+  const { mergedInto, ...rest } = absorb;
+  const at = now.toISOString();
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id !== absorbId ? item : { ...rest, status: mergedInto.status, updatedAt: at }));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.unmerged:${absorbId}:${at}`, type: "skill.grown.unmerged",
+    entityId: mergedInto.id, payload: { keep: mergedInto.id, absorbed: absorbId } });
+  return true;
+}
+
+/** The person tells a workflow what to do differently (`skill.grown.feedback`); Crossline revises it on its next pass. */
+export function addWorkflowFeedback(store: CrosslineStore, workspaceId: string, id: string, text: string, now = new Date()): boolean {
+  const words = text.trim().slice(0, 2_000);
+  if (!words || !readGrownSkills(store, workspaceId).some((record) => record.id === id)) return false;
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `${WORKFLOW_FEEDBACK_EVENT}:${id}:${now.toISOString()}`, type: WORKFLOW_FEEDBACK_EVENT,
+    entityId: id, payload: { id, text: words, by: "person" } });
+  return true;
+}
+
+/**
+ * A revision Crossline made and checked (workflow-improver.ts) put in force: the version it replaces is kept, the files, manifest, scan
+ * and review are replaced, and one that reaches further than what the person agreed to (`revisionWidens`) waits for their consent
+ * again. Its lines never change. Returns the new version's number.
+ */
+export function reviseGrownSkill(store: CrosslineStore, workspaceId: string, id: string,
+  next: { manifest: WorkflowManifest; files: Array<{ path: string; text: string }>; scan: GrownSkillRecord["scan"]; review: GrownSkillRecord["review"]; changes: string; taskId: string },
+  now = new Date()): { version: number; needsConsent: boolean } | undefined {
+  const records = readGrownSkills(store, workspaceId);
+  const record = records.find((item) => item.id === id);
+  if (!record) return undefined;
+  const at = now.toISOString();
+  const version = (record.version ?? 1) + 1;
+  const kept: GrownSkillVersion = { version: record.version ?? 1, at: record.improvedAt ?? record.createdAt, replacedBecause: next.changes.slice(0, 600),
+    manifest: record.manifest, files: grownFilesOf(store, workspaceId, id), scan: record.scan, review: record.review };
+  store.setSetting(workspaceId, grownVersionsKey(id), JSON.stringify([...readGrownVersions(store, workspaceId, id), kept].slice(-GROWN_VERSIONS_KEPT)));
+  const manifest = { ...next.manifest, lines: record.manifest.lines };
+  const needsConsent = Boolean(record.manifest.access?.length || manifest.access?.length) && revisionWidens(record.manifest, manifest);
+  store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: next.files }));
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id !== id ? item : { ...item, manifest, files: fileHashes(next.files), scan: next.scan, review: next.review,
+    version, improvedAt: at, updatedAt: at, ...(needsConsent && item.status === "active" ? { status: "needs_consent" as const } : {}) }));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.revised:${id}:${version}:${at}`, type: "skill.grown.revised",
+    entityId: id, payload: { id, version, changes: next.changes.slice(0, 600), taskId: next.taskId, needsConsent, final: next.review.final } });
+  return { version, needsConsent };
+}
+
+/**
+ * The person takes a revision back: the version before it is in force again, as it was (its files, manifest and checks). The signals the
+ * revision answered are not answered again: `improvedAt` moves to now. Returns the version restored.
+ */
+export function revertGrownSkill(store: CrosslineStore, workspaceId: string, id: string, now = new Date()): number | undefined {
+  const records = readGrownSkills(store, workspaceId);
+  const record = records.find((item) => item.id === id);
+  const versions = readGrownVersions(store, workspaceId, id);
+  const previous = versions.at(-1);
+  if (!record || !previous) return undefined;
+  const at = now.toISOString();
+  store.setSetting(workspaceId, grownVersionsKey(id), JSON.stringify(versions.slice(0, -1)));
+  store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: previous.files }));
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id !== id ? item : { ...item, manifest: previous.manifest, files: fileHashes(previous.files),
+    scan: previous.scan, review: previous.review, version: previous.version, improvedAt: at, updatedAt: at }));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.reverted:${id}:${at}`, type: "skill.grown.reverted",
+    entityId: id, payload: { id, from: record.version ?? 1, to: previous.version } });
+  return previous.version;
 }

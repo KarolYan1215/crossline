@@ -22,13 +22,15 @@ export type Question = {
 export type AssistantTurn = {
   reply: string; questions: Question[]; nextAction: "ask" | "ready_for_milestones"; stage?: string;
   coverage: Array<{ identityId: string; filled: string[]; missing: string[] }>;
+  /** The deep stages' observation, kept only when its quotes are in the replies it names (`checkInsight`). */
+  insight?: { text: string; refs: Array<{ replyId: string; quote: string }> };
 };
 export type Message = { seq: number; role: "assistant" | "user"; content: unknown; createdAt: string };
 export type DateBatchItem = {
   id: string; kind: "date" | "recurring"; title: string; project: string; confidence: "high" | "medium" | "low";
   when: string; quote: string; sourceRef: string; note: string; checked: boolean; blocks: number;
 };
-export type DateBatch = { id: string; documentCount: number; items: DateBatchItem[]; questions: string[]; dropped: number };
+export type DateBatch = { id: string; documentCount: number; items: DateBatchItem[]; questions: string[]; dropped: string[] };
 export type DiligenceReport = {
   id: string; identityId: string; question: string; status: "queued" | "running" | "done" | "failed"; runAt: string; note?: string;
   findings: Array<{ id: string; claim: string; sourceIds: string[]; confidence: string; staleWhen: string }>;
@@ -42,6 +44,17 @@ export type OnboardingState = {
   readyToStart: boolean;
   /** The worker's own first milestone drafts: being designed, or that run ended with none. */
   firstDrafts?: "none" | "running" | "stalled";
+  /** Why the last round did not finish (`onboarding.lastFailure:<session>`), or null. */
+  lastFailure?: { code: string; message: string; detail?: string; at: string } | null;
+  /**
+   * What the background extraction still owes the conversation: replies and files not yet recorded, and its last failure while it keeps
+   * failing (`extractBacklog`). Absent on a state read before it existed.
+   */
+  organizing?: { replies: number; files: number; failing?: { code: string; message: string; retryAt?: string } };
+  /** Whether the person confirmed what was recorded before using the app (or their account was in use before that existed). */
+  startConfirmed?: boolean;
+  /** What they confirm, once the start standard stands and the extraction has caught up (`startSummary`). */
+  startSummary?: import("../../lib/start-confirm").StartSummary;
   /** How many start items there are (they are per line, so not a fixed five). */
   startTotal: number;
   /** The start items still open, in checklist order. */
@@ -52,6 +65,15 @@ export type OnboardingState = {
   answeredElsewhere?: string[];
   diligence: DiligenceReport[];
   dateBatch: DateBatch | null;
+  /** What was read from the files and adopted without a click (or left out as unsure), each removable (`loadAdoptedDates`). */
+  adoptedDates?: { items: Array<DateBatchItem & { batchId: string; adopted: boolean }>; dropped: string[] };
+  /** Where the interview is, by its own progress record: part n of five, how much of it is clear, and what it asks next. */
+  progress?: { index: number; total: number; label: string; clear: number; of: number; next: string };
+  /** The capacity conflict and, once the start standard stands, the week's draft (`weekCapacity`). */
+  capacity?: import("@crossline/core").WeekCapacity;
+  skeleton?: import("@crossline/core").SkeletonBlock[];
+  /** The person's 准 / 不准 per round (round seq → verdict). */
+  insightRatings?: Record<string, "fits" | "off">;
   identities: Identity[];
   session: { id: string; state: "active" | "complete"; coverage: { coverage?: AssistantTurn["coverage"]; stage?: string } } | null;
   /** A new account sets its lines before the conversation starts. */

@@ -44,7 +44,8 @@ test("every required item needs a step that serves it, and a step cannot serve a
 
 test("a step that needs research must say what to look for", () => {
   refused(design({ nodes: [node("learn", { serves: ["c1"], researchQuestions: ["只有一个"] }), node("draw", { serves: ["c2"] })] }), "MANUAL_RESEARCH_QUESTION_MISSING");
-  refused(design({ nodes: [node("learn", { serves: ["c1"], needsResearch: false }), node("draw", { serves: ["c2"] })] }), "MANUAL_RESEARCH_QUESTION_MISSING");
+  // A step that needs nothing from outside the person's own files is not researched (2026-10-21).
+  expect(() => validateManualDesign(design({ nodes: [node("learn", { serves: ["c1"], needsResearch: false, researchQuestions: [] }), node("draw", { serves: ["c2"] })] }), context)).not.toThrow();
 });
 
 test("topological order puts every step after what it depends on, and is absent for a loop", () => {
@@ -63,6 +64,7 @@ test("only public https pages are accepted as found sources", () => {
 test("a full text is kept only from an open-access host AND when the model did not say it is closed", () => {
   expect(openAccessVerdict({ url: "https://arxiv.org/abs/1706.03762", openAccess: "yes" })).toMatchObject({ download: true });
   expect(openAccessVerdict({ url: "https://arxiv.org/abs/1706.03762", openAccess: "unknown" })).toMatchObject({ download: true });
+  expect(openAccessVerdict({ url: "https://ocw.mit.edu/courses/6-012-microelectronic-devices-and-circuits-fall-2005/lec2.pdf", openAccess: "unknown" })).toMatchObject({ download: true });
   expect(openAccessVerdict({ url: "https://arxiv.org/abs/1706.03762", openAccess: "no" })).toMatchObject({ download: false });
   // The model saying "open access" about a publisher's paywalled page changes nothing: the host is not on the list.
   expect(openAccessVerdict({ url: "https://www.sciencedirect.com/science/article/pii/X", openAccess: "yes" })).toMatchObject({ download: false });

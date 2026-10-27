@@ -107,8 +107,8 @@ describe("energy-aware planning", () => {
       frozenBlocks: [] });
       const blocks = result.plan.blocks.filter((block) => block.taskId === "due");
       expect(blocks.filter((block) => !block.efficiency).map(minutesOf)).toEqual([60]);
-      // 30 minutes of work left, at 0.8 of an hour per hour: 38 minutes on the clock.
-      expect(blocks.filter((block) => block.efficiency === .8).reduce((sum, block) => sum + minutesOf(block), 0)).toBe(38);
+      // 30 minutes of work left, at 0.8 of an hour per hour: 38 minutes on the clock, 40 on the five-minute grid.
+      expect(blocks.filter((block) => block.efficiency === .8).reduce((sum, block) => sum + minutesOf(block), 0)).toBe(40);
       expect(workOf(blocks)).toBeGreaterThanOrEqual(90);
     });
 
@@ -127,8 +127,8 @@ describe("energy-aware planning", () => {
       expect(waiting.plan.blocks).toEqual([]);
       const pressed = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [{ ...task, deadline: at("18:00") }], availability: evening, frozenBlocks: [] });
       const blocks = pressed.plan.blocks;
-      // 120 minutes of work at 0.65: 185 on the clock, as five sessions of 37 with four ten-minute rests.
-      expect(blocks.map(minutesOf)).toEqual([37, 37, 37, 37, 37]);
+      // 120 minutes of work at 0.65: 185 on the clock, as five sessions on the five-minute grid with four ten-minute rests.
+      expect(blocks.map(minutesOf)).toEqual([40, 40, 35, 35, 35]);
       expect(blocks.every((block) => block.efficiency === .65)).toBe(true);
       for (let i = 1; i < blocks.length; i += 1) expect(Date.parse(blocks[i]!.start) - Date.parse(blocks[i - 1]!.end)).toBeGreaterThanOrEqual(10 * 60_000);
       expect(workOf(blocks)).toBeGreaterThanOrEqual(120);
@@ -139,8 +139,26 @@ describe("energy-aware planning", () => {
         { id: "outline", title: "整理复习提纲", estimate: exact(200), inputsReady: true, deadlineTier: 2 }
       ], availability: [{ start: at("14:00"), end: at("18:00"), energy: "high" }], frozenBlocks: [] });
       const blocks = result.plan.blocks;
-      expect(blocks.map(minutesOf)).toEqual([67, 67, 66]);
+      expect(blocks.map(minutesOf)).toEqual([70, 65, 65]);
       for (let i = 1; i < blocks.length; i += 1) expect(Date.parse(blocks[i]!.start) - Date.parse(blocks[i - 1]!.end)).toBeGreaterThanOrEqual(10 * 60_000);
+    });
+
+    test("every block starts and ends on a five-minute mark, odd estimates and odd free time included", async () => {
+      const result = await planSchedule({ now: new Date("2026-09-14T13:02:00.000Z"), horizonDays: 1, mode: "asap", tasks: [
+        { id: "a", title: "读论文", estimate: exact(37), inputsReady: true, deadlineTier: 2 },
+        { id: "b", title: "写摘要", estimate: exact(23), inputsReady: true, deadlineTier: 3, energy: "high" },
+        { id: "c", title: "回邮件", estimate: exact(8), inputsReady: true, deadlineTier: 3 }
+      ], availability: [{ start: "2026-09-14T13:07:00.000Z", end: "2026-09-14T15:53:00.000Z", energy: "medium" }], frozenBlocks: [] });
+      expect(result.plan.blocks.length).toBe(3);
+      for (const block of result.plan.blocks) {
+        expect(Date.parse(block.start) % 300_000).toBe(0);
+        expect(Date.parse(block.end) % 300_000).toBe(0);
+        expect(Date.parse(block.start)).toBeGreaterThanOrEqual(Date.parse("2026-09-14T13:10:00.000Z"));
+        expect(Date.parse(block.end)).toBeLessThanOrEqual(Date.parse("2026-09-14T15:50:00.000Z"));
+      }
+      const sorted = [...result.plan.blocks].sort((x, y) => Date.parse(x.start) - Date.parse(y.start));
+      for (let i = 1; i < sorted.length; i += 1) expect(Date.parse(sorted[i]!.start)).toBeGreaterThanOrEqual(Date.parse(sorted[i - 1]!.end));
+      expect(Object.fromEntries(result.plan.blocks.map((block) => [block.taskId, minutesOf(block)]))).toEqual({ a: 40, b: 30, c: 10 });
     });
 
     test("work that cannot be interrupted stays one block, lengthened", async () => {
@@ -504,6 +522,18 @@ describe("energy-aware planning", () => {
       const minutes = result.plan.blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
       expect(minutes).toBe(360);
       expect(result.notes).toBeUndefined();
+    });
+
+    test("work marked one-sitting but longer than any sitting is placed in sessions, with a note (W-48)", async () => {
+      // A 6-hour step whose longest free stretch is 5 hours: kept whole it found no weekday and was pencilled into a Sunday.
+      const result = await planSchedule({ now: start, horizonDays: 3, mode: "asap",
+        tasks: [{ ...task({ interruptible: false }), estimate: { p25Minutes: 300, p50Minutes: 360, p85Minutes: 420, confidence: "medium" as const } }],
+        availability: [slot(0, "13:00", "18:00"), slot(1, "13:00", "18:00")], frozenBlocks: [] });
+      expect(result.status).toBe("feasible");
+      const minutes = result.plan.blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
+      expect(minutes).toBe(360);
+      expect(result.plan.blocks.length).toBeGreaterThan(1);
+      expect(result.notes).toEqual([expect.objectContaining({ taskId: "long", code: "SITTING_SPLIT" })]);
     });
 
     test("slots too low-energy for the job do not count toward the longest stretch", async () => {

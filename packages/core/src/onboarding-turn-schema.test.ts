@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ONBOARDING_TURN_SCHEMA, droppedOnboardingItems, keepOnboardingTurn, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
+import { ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, onboardingDialogueSchema, onboardingExtractSchema, droppedOnboardingItems, keepOnboardingTurn, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
 
 const known = {
   identities: ["research", "startup", "media", "investment"],
@@ -44,7 +44,22 @@ test("the schema is strict: every object lists all its properties and forbids ex
     walk(object.items);
     object.anyOf?.forEach(walk);
   };
-  walk(ONBOARDING_TURN_SCHEMA);
+  for (const schema of [ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, onboardingDialogueSchema({ lines: ["research"], projects: ["p1"] }),
+    onboardingExtractSchema({ lines: ["research"] })]) walk(schema);
+});
+
+test("each layer has its own fields, and a turn's lines and projects are enums the model picks from", () => {
+  expect(Object.keys(ONBOARDING_DIALOGUE_SCHEMA.properties)).toEqual(["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress"]);
+  expect(Object.keys(ONBOARDING_EXTRACT_SCHEMA.properties)).toEqual(["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles",
+    "goalEdits", "availability", "profileSections"]);
+  const question = (onboardingDialogueSchema({ lines: ["research", "media"], projects: ["ece555"] }).properties.questions as { items: { properties: Record<string, { enum?: string[] }> } }).items.properties;
+  expect(question.identityId!.enum).toEqual(["", "person", "research", "media"]);
+  expect(question.projectId!.enum).toEqual(["", "ece555"]);
+  const extract = onboardingExtractSchema({ lines: ["research"] }).properties as Record<string, { items: { properties: Record<string, { enum?: string[] }> } }>;
+  expect(extract.slotUpdates!.items.properties.identityId!.enum).toEqual(["research", "person"]);
+  // A fact may name a project the same answer detects, so its project stays open text.
+  expect(extract.slotUpdates!.items.properties.projectId!.enum).toBeUndefined();
+  expect(extract.lineProfiles!.items.properties.lineId!.enum).toEqual(["research"]);
 });
 
 test("a quote must really be in the cited reply, and a made-up quote is refused", () => {
@@ -112,15 +127,17 @@ test("when repairs run out, a turn keeps everything but the facts and questions 
 });
 
 const attribute = (text: string, kind: "domain" | "ability" | "state" = "domain", sourceRef = "reply-1") => ({ text, kind, sourceRef });
-const SIX = [attribute("神经形态计算"), attribute("器件物理"), attribute("能独立立项", "ability"), attribute("能写基金申请", "ability"),
+const SIX = [attribute("神经形态计算"), attribute("器件物理"), attribute("严谨", "ability"), attribute("独立", "ability"),
   attribute("持续产出", "state"), attribute("被同行认可", "state")];
 
-test("a line's attribute candidates are 6–12 independent, cited attributes, or none at all", () => {
+test("a line's attribute candidates are 3–12 independent, cited attributes, or none at all", () => {
   const ok = validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "研究描述", attributeCandidates: SIX }] }), known);
   expect(ok.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(SIX.map((item) => item.text));
   // An empty list keeps the candidates on record (a line still thin, or a turn that only refines the description).
   expect(validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [] }] }), known).lineProfiles).toHaveLength(1);
-  expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 3) }] }), "ONBOARDING_ATTRIBUTES_COUNT");
+  // Three is enough to compose a goal from (2026-10-19: asked for six, a real run left every line empty); two is not.
+  expect(validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 3) }] }), known).lineProfiles?.[0]?.attributeCandidates).toHaveLength(3);
+  expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: SIX.slice(0, 2) }] }), "ONBOARDING_ATTRIBUTES_COUNT");
   expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX, attribute("x", "domain", "reply-9")] }] }), "ONBOARDING_UNKNOWN_SOURCE_REF");
   expectRejected(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX, attribute("严谨、高产", "state")] }] }), "ONBOARDING_ATTRIBUTE_NOT_ATOMIC");
 });
@@ -150,14 +167,36 @@ test("a goal edit must cite the reply that asked for it, and is never a free-sta
   expectRejected(turn({ goalEdits: [{ ...edit, parts: [{ text: "器件", kind: "domain" }, { text: "器件物理", kind: "domain" }] }] }), "ONBOARDING_ATTRIBUTE_DUPLICATE");
 });
 
-test("when repairs run out, bad attributes are dropped one by one, and fewer than six left keeps the ones on record", () => {
+test("when repairs run out, bad attributes are dropped one by one; fewer than three left replace only a list no longer than them", () => {
   const kept = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d",
-    attributeCandidates: [...SIX, attribute("神经形态计算的"), attribute("编造", "domain", "reply-7")] }],
+    attributeCandidates: [...SIX, attribute("神经形态计算的"), attribute("编造", "domain", "reply-7"), attribute("发表三篇顶会论文")] }],
     goalEdits: [{ lineId: "research", parts: [{ text: "器件物理", kind: "domain" }], sourceRef: "inference" }] }), known);
   expect(kept?.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(SIX.map((item) => item.text));
   expect(kept?.goalEdits).toEqual([]);
-  const thin = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d", attributeCandidates: [...SIX.slice(0, 5), attribute("x", "domain", "reply-9")] }] }), known);
-  expect(thin?.lineProfiles?.[0]?.attributeCandidates).toEqual([]);
+  const thin = turn({ lineProfiles: [{ lineId: "research", description: "d", attributeCandidates: [...SIX.slice(0, 2), attribute("x", "domain", "reply-9")] }] });
+  // A line with nothing on record gets the two real ones (an empty list there kept the start standard from standing, W-71)…
+  expect(keepOnboardingTurn(thin, known)?.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(["神经形态计算", "器件物理"]);
+  // …a line with a fuller list keeps its own.
+  expect(keepOnboardingTurn(thin, { ...known, attributesOnRecord: { research: 6 } })?.lineProfiles?.[0]?.attributeCandidates).toEqual([]);
+});
+
+test("a candidate that is an action, a count or an achievement is sent back naming every one, with how to write an attribute", () => {
+  try {
+    validateOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "", attributeCandidates: [...SIX.slice(0, 3),
+      attribute("能独立立项", "ability"), attribute("发表三篇顶会论文", "state"), attribute("写公众号长文")] }] }), known);
+    throw new Error("expected a refusal");
+  } catch (error) {
+    expect((error as Error).message).toBe("ONBOARDING_ATTRIBUTE_NOT_DESCRIPTIVE");
+    const detail = (error as Error & { detail?: string }).detail ?? "";
+    for (const text of ["能独立立项", "发表三篇顶会论文", "写公众号长文", "形容词", "少给几个也可以"]) expect(detail).toContain(text);
+  }
+  // Dropped when kept: the rest of the line stands, and a line left with only actions keeps nothing new (its record stays).
+  const pruned = keepOnboardingTurn(turn({ lineProfiles: [{ lineId: "research", description: "d", attributeCandidates: [attribute("严谨", "ability"),
+    attribute("能写基金申请", "ability"), attribute("拿到教职")] }, { lineId: "media", description: "m", attributeCandidates: [attribute("写公众号长文"), attribute("10w+ 粉丝")] }] }), known);
+  expect(pruned?.lineProfiles?.map((line) => line.attributeCandidates.map((item) => item.text))).toEqual([["严谨"], []]);
+  // What the person asked for in so many words is theirs: a goal edit keeps its wording even when it reads like an action.
+  const edit = { lineId: "research", parts: [{ text: "器件物理", kind: "domain" as const }, { text: "能独立立项", kind: "ability" as const }], sourceRef: "reply-1" };
+  expect(validateOnboardingTurn(turn({ goalEdits: [edit] }), known).goalEdits?.[0]?.parts.map((part) => part.text)).toEqual(["器件物理", "能独立立项"]);
 });
 
 test("droppedOnboardingItems counts what pruning left out across facts, questions and candidates", () => {

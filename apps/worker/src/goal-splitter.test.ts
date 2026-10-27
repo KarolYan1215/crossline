@@ -102,3 +102,15 @@ test("a line with only the interview's old whole-sentence candidates gets them s
   expect(identityLines(store, workspaceId).find((line) => line.id === "line-empty")!.goalParts ?? []).toEqual([]);
   expect(linesAwaitingCandidateSplit(store, workspaceId)).toEqual([]);
 });
+
+test("an old suggestion's parts that are actions or achievements are not offered as chips, unless nothing else is left", async () => {
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ "line-empty": { description: "", goalCandidates: ["成为有耐心的、外推人类知识边界的投资者"] } }));
+  const empty = { lineId: "line-empty", goals: [{ goal: "成为有耐心的、外推人类知识边界的投资者",
+    parts: [{ text: "有耐心", kind: "state" }, { text: "外推人类知识边界", kind: "state" }] }] };
+  const runtime = fakeRuntime([JSON.stringify({ lines: [researchSplit, mediaGood, empty] })], GOAL_SPLITTER);
+  await createGoalSplitter(store, workspaceId, "C:\\repo", () => runtime.rpc)();
+  const profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles")!) as Record<string, { attributes: Array<{ text: string }> }>;
+  expect(profiles["line-empty"]!.attributes.map((item) => item.text)).toEqual(["有耐心"]);
+  // The person's own adopted goal is split as written, whatever its parts read like.
+  expect(identityLines(store, workspaceId).find((line) => line.id === "research")!.goalParts).toEqual(["神经形态计算方向", "能独立立项"]);
+});

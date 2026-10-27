@@ -1,0 +1,88 @@
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { CrosslineStore } from "@crossline/db";
+import { RECORDING_SERVER_CONSENT, RECORDING_TRANSCRIBED_EVENT } from "@crossline/core";
+vi.mock("server-only", () => ({}));
+import { issueDeviceToken } from "../../../../lib/energy";
+import { setServerRecordingConsent } from "../../../../lib/recordings";
+import { TEST_CTX } from "../../../../lib/test-support";
+import { POST } from "./route";
+
+let data: string;
+let store: CrosslineStore;
+let workspaceId: string;
+beforeEach(() => {
+  data = mkdtempSync(path.join(tmpdir(), "crossline-upload-"));
+  vi.stubEnv("CROSSLINE_DATA_DIR", data);
+  store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  workspaceId = store.createPrincipalWithWorkspace("phone-owner", "个人").workspace.id;
+});
+afterEach(() => { store.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); rmSync(data, { recursive: true, force: true }); });
+
+const send = (bearer: string, body: BodyInit, name = "2026-10-20 09.30.m4a", headers: Record<string, string> = {}) =>
+  POST(new Request(`http://127.0.0.1:3210/api/recordings/upload?name=${encodeURIComponent(name)}`, { method: "POST",
+    headers: { authorization: `Bearer ${bearer}`, "content-type": "audio/mp4", ...headers }, body }));
+const inbox = () => path.join(data, "recordings", "inbox", workspaceId);
+
+test("only the recording token uploads, only with the server consent on, and the file waits in the inbox with its name", async () => {
+  const ctx = { ...TEST_CTX, workspaceId };
+  const capture = issueDeviceToken(ctx, "capture"), recording = issueDeviceToken(ctx, "recording");
+  expect((await send(capture, "audio")).status).toBe(401);
+  expect((await send(recording, "audio")).status).toBe(403);
+  store.setSetting(workspaceId, RECORDING_SERVER_CONSENT, "granted");
+  expect((await send(recording, "audio bytes")).status).toBe(200);
+  const files = readdirSync(inbox()).sort();
+  expect(files).toHaveLength(2);
+  expect(files[0]).toMatch(/^\d+-[0-9a-f]{8}\.m4a$/);
+  expect(readFileSync(path.join(inbox(), files[0]!), "utf8")).toBe("audio bytes");
+  expect(JSON.parse(readFileSync(path.join(inbox(), files[1]!), "utf8"))).toMatchObject({ name: "2026-10-20 09.30.m4a", size: 11 });
+  expect((await send(recording, "x", "notes.txt", { "content-type": "text/plain" })).status).toBe(415);
+  expect((await send(recording, "x", "a.m4a", { "content-length": String(400 * 1024 * 1024) })).status).toBe(413);
+  // Turned off: uploads are refused again and what was waiting is deleted.
+  expect(setServerRecordingConsent(store, workspaceId, false, { keep: true, dataDir: data, ownerId: ctx.principalId })).toEqual({ deleted: 0, discarded: 1 });
+  expect(existsSync(inbox())).toBe(false);
+  expect((await send(recording, "audio")).status).toBe(403);
+});
+
+test("a Voice Memos recording with no extension and no audio type is taken as m4a; a document or picture is still refused", async () => {
+  const recording = issueDeviceToken({ ...TEST_CTX, workspaceId }, "recording");
+  store.setSetting(workspaceId, RECORDING_SERVER_CONSENT, "granted");
+  expect((await send(recording, "voice memo", "新录音 3", { "content-type": "application/octet-stream" })).status).toBe(200);
+  expect((await send(recording, "voice memo 2", "2026-10-20 at 9.30 AM", { "content-type": "" })).status).toBe(200);
+  const sides = readdirSync(inbox()).filter((name) => name.endsWith(".json")).map((name) => (JSON.parse(readFileSync(path.join(inbox(), name), "utf8")) as { name: string }).name).sort();
+  expect(sides).toEqual(["2026-10-20 at 9.30 AM.m4a", "新录音 3.m4a"]);
+  expect(readdirSync(inbox()).filter((name) => !name.endsWith(".json")).every((name) => name.endsWith(".m4a"))).toBe(true);
+  expect((await send(recording, "x", "photo", { "content-type": "image/png" })).status).toBe(415);
+  expect((await send(recording, "x", "notes.docx", { "content-type": "application/octet-stream" })).status).toBe(415);
+});
+
+test("an upload whose opening bytes are audio is kept whatever name and type it came with; text in a recording's place is refused and said", async () => {
+  const recording = issueDeviceToken({ ...TEST_CTX, workspaceId }, "recording");
+  store.setSetting(workspaceId, RECORDING_SERVER_CONSENT, "granted");
+  const m4a = Buffer.concat([Buffer.from([0, 0, 0, 0x1c]), Buffer.from("ftypM4A isomM4A mp42"), Buffer.alloc(64)]);
+  expect((await send(recording, m4a, "", { "content-type": "text/plain" })).status).toBe(200);
+  const wav = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVEfmt "), Buffer.alloc(32)]);
+  expect((await send(recording, wav, "新录音", { "content-type": "application/json" })).status).toBe(200);
+  expect(readdirSync(inbox()).filter((name) => !name.endsWith(".json")).map((name) => name.split(".").pop()).sort()).toEqual(["m4a", "wav"]);
+  const refused = await send(recording, "新录音 3, 0:12", "", { "content-type": "text/plain" });
+  expect(refused.status).toBe(415);
+  expect((await refused.json() as { message: string }).message).toContain("text/plain，内容是文字：「新录音 3, 0:12」");
+});
+
+test("the same audio uploaded again is recognised on arrival: not kept while one waits, nor after it was transcribed", async () => {
+  const recording = issueDeviceToken({ ...TEST_CTX, workspaceId }, "recording");
+  store.setSetting(workspaceId, RECORDING_SERVER_CONSENT, "granted");
+  const audio = Buffer.concat([Buffer.from([0, 0, 0, 0x1c]), Buffer.from("ftypM4A isomM4A mp42"), Buffer.alloc(200, 7)]);
+  expect(await (await send(recording, audio, "新录音 3")).json()).toMatchObject({ ok: true, size: audio.length });
+  const again = await (await send(recording, audio, "新录音 3")).json() as { duplicate?: boolean };
+  expect(again.duplicate).toBe(true);
+  expect(readdirSync(inbox()).filter((name) => !name.endsWith(".json"))).toHaveLength(1);
+  // Transcribed and gone from the inbox: still recognised by the ledger's record of it.
+  const sha = (JSON.parse(readFileSync(path.join(inbox(), readdirSync(inbox()).find((name) => name.endsWith(".json"))!), "utf8")) as { sha256: string }).sha256;
+  rmSync(inbox(), { recursive: true, force: true });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId, idempotencyKey: `recording.transcribed:${sha}`, type: RECORDING_TRANSCRIBED_EVENT, entityId: sha, payload: {} });
+  expect(await (await send(recording, audio, "新录音 3")).json()).toMatchObject({ ok: true, duplicate: true });
+  expect(existsSync(inbox()) ? readdirSync(inbox()).filter((name) => !name.endsWith(".json")) : []).toHaveLength(0);
+});

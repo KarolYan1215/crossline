@@ -1,4 +1,5 @@
 import "server-only";
+import { addDomainRecord, lineOfDomain } from "./records";
 import type { AccessContext } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
 import { activityMinutes, completeWorkOrderExecution, effectiveSchedulePreferences, getStore, startWorkOrderExecution, toZonedInstant } from "./crossline";
@@ -82,6 +83,7 @@ export function confirmBlock(ctx: AccessContext, messageId: string, answer: Conf
     const card = payload.card as Card | undefined;
     if (card) store.updateConversationPayload(ctx.workspaceId, messageId, { ...payload, card: { ...card, clarify: { ...card.clarify, chosen: 0 } } });
     store.setSetting(ctx.workspaceId, ANSWERED_SETTING, now.toISOString());
+    if (outcome !== "not_done") recordWorkout(ctx, order, block, typeof extra.minutes === "number" ? extra.minutes : blockMinutes);
   };
 
   if (answer.kind === "not_done") {
@@ -114,4 +116,24 @@ export function confirmBlock(ctx: AccessContext, messageId: string, answer: Conf
   record(answer.kind, { minutes, source, finished: true });
   // Finishing is accepting (2026-10-15): a milestone-bound task no longer needs evidence, so `needsEvidence` is never set.
   return { ok: true, done: "task", minutes };
+}
+
+/** Exercise named in a task or step title: only such work on the health line is a workout record. */
+const EXERCISE = /跑步|慢跑|夜跑|晨跑|快走|散步|骑行|单车|游泳|健身|力量|撸铁|瑜伽|拉伸|普拉提|跳绳|徒步|爬山|球|运动|训练|有氧|HIIT|run|jog|gym|workout|yoga|swim|cycl|hike|lift/i;
+
+/**
+ * A block confirmed done on the health line (docs/domain-lines.md) is a workout record when its task or step names an exercise: the
+ * confirmation already says how long it took, so the person never logs it twice. Once per block (`confirm:<order>:<step>:<day>`).
+ */
+function recordWorkout(ctx: AccessContext, order: { id: string; identityId: string; intent: string; payload: unknown },
+  block: { stepId?: string | undefined; day: string; step?: string | undefined; title?: string | undefined }, minutes: number): void {
+  const line = lineOfDomain(ctx, "wellness");
+  if (!line || order.identityId !== line.id) return;
+  const name = [block.step, block.title, (order.payload as { title?: string }).title, order.intent].filter(Boolean).join(" ");
+  if (!EXERCISE.test(name)) return;
+  /* i18n-ignore-start: the record's stored unit and category, as every other source writes them */
+  addDomainRecord(ctx, { domain: "wellness", kind: "workout", at: block.day, value: Math.max(1, Math.round(minutes)), unit: "分钟", currency: "",
+    category: (block.step || block.title || "运动").slice(0, 40), note: "", source: "confirm", sourceRef: order.id,
+    dedupeKey: `confirm:${order.id}:${block.stepId ?? ""}:${block.day}` });
+  /* i18n-ignore-end */
 }

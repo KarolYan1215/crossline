@@ -25,13 +25,22 @@ export type AskKind =
   | "backplan_input" | "waiting_due" | "capture_blocked" | "materials_blocked" | "gate_insufficient" | "gate_failed"
   | "evidence_manual" | "milestone_risk" | "agent_blocked" | "calendar_publish_failed" | "calendar_sync_failed" | "codex_signed_out"
   | "missed_block" | "source_project" | "calendar_line_unclear" | "interview_open" | "interview_question" | "event_propose" | "step_question"
-  | "relation_check" | "background_paused" | "locked_conflict" | "outcome_check" | "progress_check" | "milestone_risk_review";
+  | "relation_check" | "background_paused" | "locked_conflict" | "outcome_check" | "progress_check" | "milestone_risk_review"
+  /** A course's or the person's own deadline passed with work still open (the daily pass's `milestone.overdue`): 补做 / 新日期 / 放弃. */
+  | "milestone_overdue"
+  /**
+   * Work the assistant can do once the person gives one thing only they hold (docs/work-split.md, an `ask` work order): a question, never
+   * a task card. Answered, the assistant takes the work; 「不需要」 archives it.
+   */
+  | "prep_question";
 
 export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date"; required: boolean;
   initial?: string; placeholder?: string };
 export type AskOption = { id: string; label: string; detail?: string; recommended?: boolean; fields?: AskField[];
   /** A link instead of an answer: the option opens a page and records nothing. */
-  href?: string };
+  href?: string;
+  /** Answered only with the person's own words in the ask's `freeText` box: never a one-tap button. */
+  needsNote?: boolean };
 export type AskUrgency = "now" | "soon" | "later";
 export type Ask = {
   id: string; kind: AskKind; entityId: string;
@@ -66,7 +75,13 @@ export type Ask = {
   progress?: AskProgress;
   /** A milestone's reviewed risks, drawn with their level (`milestone_risk_review`). */
   risks?: MilestoneRisk[];
+  /**
+   * The rows a folded card stands for (a batch of milestone risk reviews), drawn as a short list the person can scan — name, deadline,
+   * level, kinds — instead of one sentence naming all of them (2026-10-21 walkthrough: 25 milestones in one `why`).
+   */
+  items?: AskItem[];
 };
+export type AskItem = { id: string; title: string; dueDay?: string; line?: string; href?: string; risks?: MilestoneRisk[] };
 export type AskPreview = { kind: "portrait" | "milestones" | "plan" | "task" | "file" | "agent"; href: string; label: string };
 export type AskProgress = {
   /** One sentence: what the run was doing. */
@@ -170,6 +185,15 @@ export function validateAskAnswer(ask: Ask, optionId: string, values: Record<str
 
 /** The longest answer in the person's own words (`Ask.freeText`). */
 export const ASK_NOTE_MAX = 4000;
+/**
+ * The longest a card's time on screen counts as deciding: past five minutes the person had walked away. What a decision cost is the
+ * system's own price (the 2026-10-18 evaluation: without it nothing can show the system saves more time than it takes).
+ */
+export const DECISION_SECONDS_MAX = 300;
+/** A client's reported seconds on screen, or undefined when it reported none or something that is not a time. */
+export function decisionSeconds(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.min(DECISION_SECONDS_MAX, Math.round(value)) : undefined;
+}
 /**
  * Checks a choice that may hold several options (`select: "many"`) and/or the person's own words (`freeText`). Exactly one
  * option for a single-choice ask; at least one for a multiple-choice ask; none at all only when there is a note and the ask

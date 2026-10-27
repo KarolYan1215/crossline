@@ -1,7 +1,7 @@
 import { AGENT_CATEGORIES } from "@crossline/core";
 import type { AccessContext } from "@crossline/core";
 import { loadAssistant, loadTaskAudit, outputNames, readTaskFile, type AssistantView, type TaskAudit } from "../../lib/agent";
-import { ApprovalButtons, CategoryDecision, RetryCheckButton, ReviewButtons, SendBackItem } from "./assistant-controls";
+import { ApprovalButtons, CategoryDecision, QuestionAnswer, RetryCheckButton, ReviewButtons, SendBackItem } from "./assistant-controls";
 import { csvHead, groupOutputs, markdownHead, workflowSteps, type OutputItem } from "./assistant-outputs";
 import { Markdown } from "../ui/markdown";
 import { Namer, cleanText, humanTable, humanizeMarkdown } from "../materials/humanize";
@@ -147,11 +147,11 @@ function RunRecord({ audit, t, locale }: { audit: TaskAudit["audit"]; t: Transla
 /** The assistant's part of 待确认: kinds of work it asks to start, questions it put mid-run, and results waiting for review. */
 export function AssistantReview({ ctx, deferred = () => undefined }: { ctx: AccessContext; deferred?: (workOrderId: string) => string | undefined }) {
   const view = loadAssistant(ctx);
-  const results = view.tasks.filter((task) => task.status === "needs_review");
+  const results = view.reviews;
   // Results for work that need not start within a week are folded (decided 2026-10-10), the soonest to come up first.
   const review = results.filter((task) => !deferred(task.workOrderId));
   const later = results.filter((task) => deferred(task.workOrderId)).sort((a, b) => deferred(a.workOrderId)!.localeCompare(deferred(b.workOrderId)!));
-  if (!view.categoryRequests.length && !view.approvals.length && !results.length) return null;
+  if (!view.categoryRequests.length && !view.approvals.length && !view.questions.length && !results.length) return null;
   const t = tOf(ctx);
   const card = (task: AssistantView["tasks"][number]) => <article key={task.taskId} className="assistant-task" data-status={task.status}>
     <h3>{task.title}</h3>
@@ -163,7 +163,11 @@ export function AssistantReview({ ctx, deferred = () => undefined }: { ctx: Acce
     <ReviewButtons taskId={task.taskId} />
   </article>;
   return <section className="pending-block" id="assistant" aria-label={t("助手")}>
-    <h2>{t("助手 · {{count}}", { count: view.categoryRequests.length + view.approvals.length + review.length })}</h2>
+    <h2>{t("助手 · {{count}}", { count: view.categoryRequests.length + view.approvals.length + view.questions.length + review.length })}</h2>
+    {view.questions.map((question) => <div key={question.id} className="assistant-ask">
+      <p><strong>{t("运行中的提问")}</strong>{question.title && <> · {question.title}</>} <small className="muted">{t("10 分钟内未回答，助手按最稳妥的做法继续")}</small></p>
+      <QuestionAnswer id={question.id} questions={question.questions} />
+    </div>)}
     {view.categoryRequests.map((request) => <div key={request.category} className="assistant-ask">
       <p><strong>{t("请求开始「{{label}}」类工作", { label: t(request.label) })}</strong>{request.workOrderTitle && <> · {t("起因：{{title}}", { title: request.workOrderTitle })}</>}</p>
       <CategoryDecision category={request.category} label={t(request.label)} />

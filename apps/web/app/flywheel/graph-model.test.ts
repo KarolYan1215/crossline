@@ -1,8 +1,17 @@
 import { describe, expect, test } from "vitest";
 import {
   anchorId, buildGraph, classifyEdge, createSimulation, edgeGeometry, fitTransform, graphLoops, hashOf, layoutGraph, loopCentre, milestoneRadius, neighbours,
-  ringSlots, type FlywheelGraphData
+  ringSlots, wrapLabel, type FlywheelGraphData
 } from "./graph-model";
+
+test("a goal wraps onto two lines after a comma or 「的」, and ends in 「…」 only when two lines cannot hold it", () => {
+  const goal = "成为神经形态计算的、把脑机制转化为芯片设计的研究者";
+  expect(wrapLabel(goal, 16)).toEqual(["成为神经形态计算的、", "把脑机制转化为芯片设计的研究者"]);
+  expect(wrapLabel("短目标", 16)).toEqual(["短目标"]);
+  expect(wrapLabel(goal, 10)).toEqual(["成为神经形态计算的、", "把脑机制转化为芯片…"]);
+  expect(wrapLabel("成为能独立完成神经形态芯片设计流程的工程师", 10)).toEqual(["成为能独立完成神经形", "态芯片设计流程的工…"]);
+  expect(wrapLabel(goal, 10, 6).join("")).toBe(goal);
+});
 
 const lines = [
   { id: "research", label: "研究者", goal: "成为神经形态计算方向能独立立项的研究者", openTasks: 5 },

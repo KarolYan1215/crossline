@@ -67,7 +67,7 @@ export function repairFrozenRace(store: CrosslineStore, workspaceId: string, own
     // The same shape the web's undo writes (`recordOp`), so 撤销 in the input box and on 待确认 can take it back for a day.
     const id = `op-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `op.applied:${id}`, type: "op.applied", entityId: id,
-      payload: { label: tOfWorkspace(store, workspaceId)("解除 {{count}} 个由日历回读误加的锁定", { count: released.length }), inverse: { kind: "settings.restore", entries: [{ key: FROZEN_SETTING, value: frozenRaw }] } } });
+      payload: { bySystem: true, label: tOfWorkspace(store, workspaceId)("解除 {{count}} 个由日历回读误加的锁定", { count: released.length }), inverse: { kind: "settings.restore", entries: [{ key: FROZEN_SETTING, value: frozenRaw }] } } });
   }
   return { released: released.map((entry) => entry.blockId!), republished };
 }

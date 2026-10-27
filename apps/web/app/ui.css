@@ -57,7 +57,7 @@
 .dv-block[data-kind="calendar"] b{color:var(--ink)}
 .dv-block[data-kind="import"]{background:repeating-linear-gradient(135deg,var(--paper) 0 4px,var(--chalk) 4px 8px);border:2px dashed var(--lc,var(--graphite))}
 /* A proposal still waiting for approval, and a task pencilled in outside working hours: dashed outline on paper, ink text (7:1). */
-.dv-block[data-kind="proposed"],.dv-block[data-kind="optional"]{background:var(--paper);border:2px dashed var(--lc,var(--graphite))}
+.dv-block[data-kind="proposed"],.dv-block[data-kind="optional"],.dv-block[data-missed]{background:var(--paper);border:2px dashed var(--lc,var(--graphite))}
 .dv-block[data-kind="activity"]{background:var(--chalk);border-left-style:dotted}
 .dv-block[data-clash]{box-shadow:inset 0 0 0 2px #C00000}
 .dv-resize{position:absolute;left:0;right:0;bottom:0;height:8px;cursor:ns-resize;touch-action:none;border-bottom:3px solid transparent}
@@ -86,7 +86,7 @@
 
 .wk-block b{display:block;font-size:12px}
 .wk-block small{font-size:12px;opacity:.9}
-.wk-block[data-kind="optional"],.wk-block[data-kind="proposed"]{background:var(--paper);border:1px dashed var(--lc,var(--graphite));border-left-width:4px}
+.wk-block[data-kind="optional"],.wk-block[data-kind="proposed"],.wk-block[data-missed]{background:var(--paper);border:1px dashed var(--lc,var(--graphite));border-left-width:4px}
 .wk-block[data-kind="calendar"]{background:var(--paper);color:var(--lc,var(--ink));border:2px solid var(--lc,var(--graphite))}
 .wk-block[data-kind="import"]{background:repeating-linear-gradient(135deg,var(--paper) 0 4px,var(--chalk) 4px 8px);color:var(--ink);border:2px dashed var(--lc,var(--graphite))}
 .wk-block[data-kind="proposed"]{background:var(--paper);color:var(--ink);border:2px dashed var(--lc,var(--graphite))}
@@ -148,6 +148,7 @@
 .energy-capsule-basis{font-size:12px;color:var(--graphite)}
 .energy-capsule-correct{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--graphite)}
 .today-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:8px;background:none;border:0}
+.today-proposal-note{margin:0 0 8px;padding:8px 10px;border-left:3px solid var(--ink);font-size:13px;line-height:1.6}
 .capture-line{display:block}
 .capture-line>*+*{margin-top:6px}
 .care-band{display:block;padding:0;border:0}
@@ -191,6 +192,10 @@
 .assistant-actions{display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center}
 .assistant-actions input,.assistant-actions select{font:inherit;font-size:14px;max-width:100%;min-width:0}
 .assistant-ask{display:grid;gap:4px;padding:6px 0;border-bottom:1px solid var(--mist)}
+.assistant-question{display:grid;gap:8px}
+.assistant-question fieldset{display:grid;gap:6px;margin:0;padding:0;border:0;min-width:0}
+.assistant-question legend{padding:0;font-size:14px;overflow-wrap:anywhere}
+.assistant-question input{width:100%;max-width:480px}
 .assistant-task{display:grid;gap:6px;padding:10px 12px;border:1px solid var(--mist);border-left:4px solid var(--ink);margin:8px 0}
 .assistant-task h3{margin:0;font-size:16px}
 .assistant-detail{display:grid;gap:6px;font-size:14px}
@@ -206,3 +211,16 @@
 .md-text ul,.md-text ol{padding-left:20px}
 .md-text li{margin:2px 0}
 .md-text code{font-family:var(--f-mono);font-size:13px;background:var(--chalk);padding:0 3px}
+
+/* Today's change summary (schedule-summary.tsx): a task's or an event's name is cut at its own width with an ellipsis, the whole name
+   on hover, instead of being sliced to a character count in the middle of a word (2026-10-21 walkthrough). */
+.schedule-summary .ss-text{min-width:0;line-height:1.5}
+.schedule-summary .ss-name{display:inline-block;max-width:min(16em,60vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+/* 「待确认共 N →」 beside a stack of asks: the larger number the header badge shows, said in words beside the asks' own count. */
+.pending-total-link{white-space:nowrap;font-size:13px}
+@media (max-width:680px){
+  /* Thumb-sized: 「钉回原位」 and the link out of the stack were 28px tall on a phone. */
+  .schedule-summary button,.ask-stack-nav .pending-total-link{min-height:44px;display:inline-flex;align-items:center}
+  .schedule-summary li{padding:4px 0;border-top:1px solid var(--mist)}
+  .schedule-summary li:first-child{border-top:0}
+}

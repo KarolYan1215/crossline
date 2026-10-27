@@ -33,7 +33,7 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
   const proposal = detail.state === "awaiting_plan_approval";
   const finished = detail.state === "accepted" || detail.state === "archived";
   const step = currentStep(detail);
-  const wait = today ? waitReason(detail, today, locale) : proposal ? { kind: "approval" as const, label: t("等本人批准") } : undefined;
+  const wait = today || proposal ? waitReason(detail, today ?? "", locale) : undefined;
   const due = detail.window.dueBy;
   const distance = due && today && !finished ? dueDistance(due, today, locale) : undefined;
   const openFrom = (event: MouseEvent | KeyboardEvent) => {
@@ -58,7 +58,7 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
     {proposal && <CompletionChoice detail={detail} />}
     {slot && <p className="task-card-slot"><small>{t("下一次")}</small> <a href={`/plan?day=${slot.day}`} className="mono">{slotLabel(locale, slot)}</a></p>}
     <Prepared detail={detail} />
-    <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id} onOpen={() => setOpen(true)}
+    <TaskActions workOrderId={detail.id} state={detail.state} approvable={!detail.preparing} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id} onOpen={() => setOpen(true)}
       offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }} />
     <TaskDialog detail={detail} open={open} onOpenChange={setOpen} />
   </article>;
@@ -70,8 +70,8 @@ function CardStep({ detail, step, proposal, finished, waiting }: {
 }) {
   const t = useT(), locale = useLocale();
   if (finished) return null;
-  // A proposal is shown with what the person will do first; its tutorial is written once approved work is a week from its first block
-  // (`TUTORIAL_LEAD_DAYS`, 2026-10-15), so the card says when rather than showing nothing. One without steps yet is still being prepared.
+  // A proposal is shown with what the person will do first; its tutorial, when it gets one (`preparation`), is written once approved work is three days
+  // from its first block (`TUTORIAL_LEAD_DAYS`, 2026-10-21), so the card says when rather than showing nothing. One without steps yet is still being prepared.
   if (!detail.stepPlan) return <p className="task-card-step-note">{proposal ? t("准备中：步骤规划生成后再请本人确认。")
     : <>{t("步骤规划中 · 全程约")} <span className="mono">{minutesText(locale, detail.estimate.p50Minutes)}</span></>}</p>;
   if (!step) return <p className="task-card-step-note">{t("步骤已完成")}</p>;
@@ -81,6 +81,6 @@ function CardStep({ detail, step, proposal, finished, waiting }: {
     <p className="task-card-step-title"><small>{t(proposal ? "第一步" : "当前")}</small><span>{step.title}</span>
       {step.schedulable && <span className="mono task-card-minutes">{t("约 {{duration}}", { duration: minutesText(locale, step.estimate.p50Minutes) })}</span>}</p>
     {step.firstAction && <p className="task-card-first"><small>{t("先做")}</small><span className="gen">{step.firstAction}</span></p>}
-    {proposal && <p className="task-card-step-note">{t("开工前一周会备好教程。")}</p>}
+    {proposal && detail.preparation?.level === "tutorial" && <p className="task-card-step-note">{t("开工前三天会备好教程。")}</p>}
   </div>;
 }

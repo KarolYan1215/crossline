@@ -25,7 +25,8 @@ export function TaskMaterials({ detail, live, anchors }: { detail: TaskDetail; l
     <div className="task-tutorial" {...(anchors ? { id: "tutorial" } : {})}>
       <p className="task-tutorial-head"><span className="task-subhead">{t("教程")}</span>
         <a href={`/materials/${encodeURIComponent(detail.id)}`}>{t("打开阅读页")}</a></p>
-      <TutorialView workOrderId={detail.id} building={detail.state === "preparing"} canBuild={live} layout="toc"
+      <TutorialView workOrderId={detail.id} building={detail.state === "preparing"} auto={detail.preparation?.level === "tutorial"}
+        {...(detail.preparation ? { reason: detail.preparation.reason } : {})} canBuild={live} layout="toc"
         {...(currentStep(detail) ? { currentStepId: currentStep(detail)!.id } : {})} />
     </div>
   </div>;

@@ -1,9 +1,10 @@
 import "server-only";
+import { formatInTimeZone } from "date-fns-tz";
 import type { AccessContext, AvailabilityWindow, FrozenBlock } from "@crossline/core";
-import { CALENDAR_LINES, activityCategoryLabel, calendarLineOf, currentFiling, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
+import { CALENDAR_LINES, activityCategoryLabel, calendarLineOf, currentFiling, onPersonsBoard, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
 import { isAutoHandoff, isPaused, listAgentTasks, readCategories } from "@crossline/db";
 import {
-  ACTIVITY_DETAIL_CONSENT, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant
+  ACTIVITY_DETAIL_CONSENT, COMMIT_GRACE_MINUTES, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant
 } from "./crossline";
 import { itemsFromPlan, toMinutes, withAgentMarks, type TimelineDeadline, type TimelineItem } from "../app/timeline/model";
 import { identityLines } from "./lines";
@@ -105,6 +106,46 @@ function withFrozenState(item: TimelineItem, held: Map<string, FrozenBlock>, zon
   return { ...item, frozen: entry.reason, ...(entry.overlapOk ? { overlapOk: true } : {}), ...(entry.via ? { lockedVia: entry.via } : {}) };
 }
 
+/** The local hour a day's missed blocks leave its views (the owner, 2026-10-26: 「次日四点之后才消失」). */
+export const MISSED_KEPT_UNTIL = "04:00";
+const OPEN_STATES = new Set(["approved", "preparing", "ready_for_human", "active"]);
+
+/**
+ * Work blocks whose time passed without the work being done, kept on their day as 「未完成」 (dashed) until 04:00 the next morning, so
+ * the person can still start or finish them from there. The schedule keeps no past: an hour after its end (`COMMIT_GRACE_MINUTES`) a
+ * block's work is placed again and the block leaves the plan, so they are read from what the nudge pass saw under way
+ * (`nudge.blocks:<day>`, `seenBlocksKey` in `lib/nudges.ts`). A block whose step or order is done leaves with it.
+ */
+export function missedItems(ctx: AccessContext, current: TimelineItem[], meta: Record<string, { identityId: string; milestone?: string }>, now: Date): TimelineItem[] {
+  const store = getStore();
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const today = planToday(ctx, now);
+  const clock = formatInTimeZone(now, zone, "HH:mm");
+  const yesterday = new Date(Date.parse(`${today}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  const days = clock < MISSED_KEPT_UNTIL ? [yesterday, today] : [today];
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => OPEN_STATES.has(order.state) && !order.tombstone).map((order) => [order.id, order]));
+  const graceMs = COMMIT_GRACE_MINUTES * 60_000;
+  const shown = new Set(current.map((item) => `${item.id}|${item.day}|${item.start}`));
+  type Seen = { id: string; orderId: string; stepId: string; title: string; step: string; start: string; end: string; began?: boolean };
+  const out: TimelineItem[] = [];
+  for (const day of days) {
+    let seen: Record<string, Seen> = {};
+    try { seen = JSON.parse(store.getSetting(ctx.workspaceId, `nudge.blocks:${day}`) ?? "{}") as Record<string, Seen>; } catch { continue; }
+    for (const block of Object.values(seen)) {
+      if (!block.began || !orders.has(block.orderId) || shown.has(`${block.id}|${day}|${block.start}`)) continue;
+      let end: number;
+      try { end = Date.parse(toZonedInstant(day, block.end, zone)); } catch { continue; }
+      if (end + graceMs > now.getTime()) continue;
+      if (block.stepId && store.getStepPlan(ctx.workspaceId, block.orderId)?.steps.find((step) => step.id === block.stepId)?.status !== "planned") continue;
+      const known = meta[block.orderId];
+      out.push({ id: `missed:${block.id}`, title: block.title, day, start: block.start, end: block.end, kind: "scheduled", tag: "未完成", missed: true,
+        ...(block.step ? { step: block.step } : {}), ...(known ? { identityId: known.identityId } : {}), ...(known?.milestone ? { milestone: known.milestone } : {}),
+        workOrderId: block.orderId, ...(block.stepId ? { stepId: block.stepId } : {}), source: "排程", readOnly: true });
+    }
+  }
+  return out;
+}
+
 /** Everything the three calendar views draw, read once: the plan's blocks, what is due, and the person's own hours. */
 export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnType<typeof loadCurrentPlan>>): Promise<TimelineData> {
   const store = getStore();
@@ -124,14 +165,15 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   const projectOfItem = itemProjectResolver(knownProjects, store.listSourceDocuments(ctx.workspaceId));
   const imported = importedProjects(store.listEvents(ctx.workspaceId, { type: "dates.extracted" }), projectOfItem);
   const held = new Map(readFrozen(ctx, instantNow()).map((entry) => [entry.blockId, entry]));
-  const items = [...withAgentMarks(itemsFromPlan(plan.blocks, today, meta), agentMarks(ctx)).map((item) => {
+  const planned = withAgentMarks(itemsFromPlan(plan.blocks, today, meta), agentMarks(ctx)).map((item) => {
     if (item.kind !== "calendar" && item.kind !== "import") return item;
     const named = item.kind === "import" ? { ...item, title: importedTitle(item.id, item.title, imported) } : item;
     if (named.identityId) return named;
     // An event the person added names its line itself; only when it does not is it filed like any calendar title.
     const lineId = (item.id.startsWith("event:") ? eventLine.get(item.id.split(":")[1]!) : "") || calendarLineOf(filing, named.title);
     return lineId ? { ...named, identityId: lineId } : named;
-  }).map((item) => withFrozenState(item, held, zone)), ...activityItems(ctx, zone, instantNow())];
+  }).map((item) => withFrozenState(item, held, zone));
+  const items = [...planned, ...missedItems(ctx, planned, meta, instantNow()), ...activityItems(ctx, zone, instantNow())];
 
   // What is due: each live milestone's deadline, and every confirmed dated fact the person's files gave us.
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
@@ -159,7 +201,8 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
     today, nowIso, timeZone: zone, items, deadlines,
     labels: Object.fromEntries(identityLines(ctx).map((pack) => [pack.id, t(pack.label)])),
     quietByWeekday: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((weekday) => [weekday, quietRanges(windows, weekday)])),
-    proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean }).seeded)
+    proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean }).seeded
+      && onPersonsBoard(order))
       .map((order) => ({ id: order.id, title: order.intent }))
   };
 }

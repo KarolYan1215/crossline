@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import type { TimelineDeadline, TimelineItem } from "../timeline/model";
 import { useT } from "../locale-context";
 import type { Translate } from "../../lib/i18n";
+import { unplacedTaskIds } from "../../lib/unplaced";
 
 export type ScheduleBlockData = {
   id: string;
@@ -35,11 +36,11 @@ export type CalendarData = {
 
 
 /**
- * The planner reports one blocker per unplaced *step*, while 「排程顺序」 lists tasks — counting blockers said 「13 项未排入」 over a list
- * with one. Counted per task here: wholly unplaced, and placed in part (some steps have a block, some do not).
+ * Counted per task (`unplacedTaskIds`): wholly unplaced, and placed in part (some steps have a block, some do not). Counting blockers
+ * once said 「13 项未排入」 over a list with one.
  */
 function unplacedNote(plan: PlanVersionData, t: Translate): string {
-  const blocked = new Set((plan.schedule?.blockers ?? []).map((blocker) => blocker.taskId.split("#")[0]!));
+  const blocked = unplacedTaskIds(plan.schedule?.blockers ?? []);
   if (!blocked.size) return "";
   const placed = new Set(plan.blocks.filter((block) => block.id.startsWith("scheduled:")).map((block) => block.id.split(":")[1]));
   const partial = [...blocked].filter((id) => placed.has(id)).length, none = blocked.size - partial;
@@ -51,7 +52,11 @@ function unplacedNote(plan: PlanVersionData, t: Translate): string {
  * calendar, the horizon (`aside`), and the schedule's status. The plan takes effect by default (docs/loop-and-scout.md §1): there is
  * no version to approve and no difference to settle.
  */
-export function PlanView({ plan, aside }: { plan: PlanVersionData; aside?: ReactNode }) {
+/**
+ * `calendarWrite`: an account to write the Crossline calendar with is chosen. Without one (the hosted beta has no Microsoft calendar at
+ * all) there is nothing to publish to, so the button is not offered (2026-10-17 walkthrough, W-20).
+ */
+export function PlanView({ plan, aside, calendarWrite = false }: { plan: PlanVersionData; aside?: ReactNode; calendarWrite?: boolean }) {
   const t = useT();
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done" | "error">("idle");
   const [syncNote, setSyncNote] = useState("");
@@ -97,10 +102,10 @@ export function PlanView({ plan, aside }: { plan: PlanVersionData; aside?: React
         {syncState === "syncing" ? t("读取日历中…") : syncState === "error" ? t("同步失败，重试") : t("立即同步日历")}
       </button>
       {syncState === "done" && <span role="status" className="plan-sync-note">{syncNote}</span>}
-      <button type="button" className="plan-sync" disabled={publishState === "publishing"} onClick={publish}
+      {calendarWrite && <button type="button" className="plan-sync" disabled={publishState === "publishing"} onClick={publish}
         title={t("立即写入 Crossline 日历（每 10 分钟自动写入；只写名为 Crossline 的日历）")}>
         {publishState === "publishing" ? t("写入中…") : t("发布到 Crossline 日历")}
-      </button>
+      </button>}
       {(publishState === "done" || publishState === "error") && <span role="status" className="plan-sync-note">{publishNote}</span>}
       {aside && <span className="plan-bar-aside">{aside}</span>}
     </div>

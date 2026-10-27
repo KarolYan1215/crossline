@@ -205,7 +205,7 @@ export function presetLines(code: string, chosen: string[], locale?: Locale): Wa
  */
 export function ruleLines(code: string, chosen: string[], locale?: Locale): WantLines {
   const t = tFor(locale);
-  const own = TYPE_LINES[code]?.lines ?? TYPE_LINES.GEMA!.lines;
+  const own = TYPE_LINES[code]?.lines ?? TYPE_LINES.ROHG!.lines;
   const options = chosen.map((id) => OPTION.get(id)).filter((option): option is WantOption => Boolean(option)).slice(0, 3);
   const taken = new Set(options.map((option) => option.identity));
   // Fill from the type's own lines with an option of the same identity when there is one, else a plain stand-in.

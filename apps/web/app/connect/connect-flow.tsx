@@ -1,20 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CodexAccountControl } from "../connectors/codex-account-control";
 import { useT } from "../locale-context";
+import { ModelProviderCard } from "../settings/model-provider-card";
+import { FirstHint } from "../ui/first-hint";
+import { InvitePanel } from "./invite-panel";
 
 /**
- * Connects the model, then moves on by itself; an account already connected never sees this page for more than a moment. The control
- * is always mounted: it is what reads the connection, so rendering it only once the answer is known left the page waiting forever.
+ * Connects a model, then moves on by itself; an account already connected never sees this page for more than a moment. Either path
+ * counts (the owner's decision of 2026-10-17): the person's own ChatGPT, or another model's API that has passed the check for the
+ * interview. Both controls are always mounted: they are what read the connection, so rendering them only once the answer is known left
+ * the page waiting forever.
  */
 export function ConnectFlow({ next }: { next: string }) {
   const t = useT();
-  const [connected, setConnected] = useState<boolean>();
+  const [chatgpt, setChatgpt] = useState<boolean>();
+  const [api, setApi] = useState<boolean>();
+  const [invited, setInvited] = useState(false);
+  const connected = Boolean(chatgpt || api || invited);
+  const sponsored = useCallback(() => setInvited(true), []);
   useEffect(() => { if (connected) location.replace(next); }, [connected, next]);
   return <div className="connect-flow">
-    <p>{t("和 AI 的深度访谈、跨人生主线报告和跨主线排程计划，都用本人的 ChatGPT 额度运行。连接一次即可，约 1 分钟。")}</p>
-    <CodexAccountControl onConnected={setConnected} />
+    <p>{t("访谈、画像报告和每周的排程都由本人连接的 AI 模型来做：本人的 ChatGPT 账号，或者本人的模型 API key。连接一次即可，之后不用再管。")}</p>
+    <FirstHint id="connect" title={t("不确定选哪种？")}>
+      {t("有 ChatGPT 账号就选上面的「用一次性代码连接」：按三步做完约 1 分钟，用的是这个 ChatGPT 账号自己的额度，不另收费。")}{" "}
+      {t("没有 ChatGPT 账号、但有 DeepSeek、Kimi 等的 API key，就用下面的「其他模型」；它要先自动检验 10–20 分钟，期间可以离开此页。")}
+    </FirstHint>
+    <CodexAccountControl onConnected={setChatgpt} />
+    <h2 className="connect-or">{t("或者用其他模型的 API")}</h2>
+    <p className="muted">{t("DeepSeek、Kimi、通义千问、智谱 GLM、OpenAI API、OpenRouter 等。保存后自动检验回答格式，约 10–20 分钟；访谈一项通过就进入访谈，网页搜索和画形象这类功能仍要 ChatGPT 账号。")}</p>
+    <ModelProviderCard onReady={setApi} />
+    <h2 className="connect-or">{t("没有 ChatGPT Plus，也没有 API key")}</h2>
+    <InvitePanel onRedeemed={sponsored} onSponsored={sponsored}
+      lead={t("ChatGPT 免费账号的额度通常做不完访谈。可以申请用开发者提供的模型，通过后用邀请码完成访谈和日常使用。")} />
     <p className="muted" role="status">{connected ? t("已连接，正在进入访谈…") : t("连接后自动进入访谈。")}</p>
   </div>;
 }

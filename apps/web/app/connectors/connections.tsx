@@ -48,7 +48,7 @@ export function CalendarModule({ ctx }: { ctx: AccessContext }) {
         <a href="/approvals#asks">{t("去处理")}</a></div>}
     </section>}
     <CalendarApps />
-    <CalendarSubscriptions />
+    <div id="calendar-subscriptions"><CalendarSubscriptions /></div>
     <SourceFolders />
     {graph && <CalendarSources />}
   </div>;
@@ -57,8 +57,8 @@ export function CalendarModule({ ctx }: { ctx: AccessContext }) {
 /** Accounts and devices: the model service, the private network identity, devices allowed to queue offline. */
 export function ConnectionsSection() {
   return <div className="st-modules">
-    <CodexAccountControl />
-    <ModelProviderCard />
+    <div id="model"><CodexAccountControl /></div>
+    <ModelProviderCard local={!isHostedBeta()} />
     {!isHostedBeta() && <TailscaleTrust />}
     <DeviceLeases />
   </div>;

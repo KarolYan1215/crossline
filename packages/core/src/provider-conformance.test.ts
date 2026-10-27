@@ -51,6 +51,15 @@ test("admission: everything structured passes → served; what needs web, images
   expect(capabilityGap("crossline-portrait-illustrator")).toContain("图片");
 });
 
+test("admission: a model that never calls the offered function keeps the Skills that need functions out; a record from before the case is read as before", () => {
+  const runs = allPassing().map((item) => item.caseId === "ADVERSARIAL_TOOLS" ? run("ADVERSARIAL_TOOLS", false) : item);
+  const admitted = admittedSkills(summarizeConformance(base, runs));
+  for (const skill of ["crossline-agent-tools", "crossline-concierge", "crossline-onboarding-extract"]) expect(admitted).not.toContain(skill);
+  expect(admitted).toContain("crossline-task-titler");
+  const older = admittedSkills(summarizeConformance(base, allPassing().filter((item) => item.caseId !== "ADVERSARIAL_TOOLS")));
+  expect(older).toContain("crossline-agent-tools");
+});
+
 test("admission: one repair on a critical schema keeps that Skill out; a failure elsewhere keeps only its own Skill out", () => {
   const runs = allPassing();
   runs[runs.findIndex((item) => item.caseId === "MILESTONE_GATE_OUTPUT_SCHEMA")] = run("MILESTONE_GATE_OUTPUT_SCHEMA", true, 1);
@@ -84,4 +93,12 @@ test("the third-party note says what this install actually adds: search and the 
   expect(unavailableOnThirdParty({ webSearch: false, image: true })).toContain("联网查证在这台服务器上只在");
   expect(unavailableOnThirdParty({ webSearch: true, image: true })).toContain("由 Crossline 自己完成");
   expect(unavailableOnThirdParty({ webSearch: true, image: true })).toContain("日历用订阅链接接入");
+});
+
+test("a record made before the interview was split into two schemas still admits both layers", async () => {
+  const { admittedSkills, summarizeConformance, conformanceCases } = await import("./provider-conformance");
+  const runs = conformanceCases().filter((item) => !item.id.startsWith("ONBOARDING_")).flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 1 })));
+  const record = summarizeConformance({ providerId: "p", model: "m", runtimeVersion: "r", ranAt: "2026-10-18T00:00:00Z" },
+    [...runs, { caseId: "ONBOARDING_TURN_SCHEMA", ok: true, repairs: 0, ms: 1 }]);
+  expect(admittedSkills(record)).toEqual(expect.arrayContaining(["crossline-onboarding", "crossline-onboarding-extract"]));
 });

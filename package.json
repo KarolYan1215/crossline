@@ -29,11 +29,11 @@
     "@types/node": "latest",
     "@vitejs/plugin-react": "6.1.1",
     "subset-font": "^2.9.0",
-    "tsx": "4.23.13",
     "typescript": "latest",
     "vitest": "latest"
   },
   "dependencies": {
-    "better-sqlite3": "13.0.3"
+    "better-sqlite3": "13.0.3",
+    "tsx": "4.23.13"
   }
 }

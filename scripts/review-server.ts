@@ -9,16 +9,22 @@ import path from "node:path";
  * account. Sign up with any test address; `scripts/review-seed.ts` then adds step plans to the example tasks.
  *
  *   pnpm exec tsx scripts/review-server.ts
+ *
+ * `dev` runs `next dev` on the same port against its own build directory (`.next-review`) instead of the resident build, for looking at
+ * a change before `pnpm build:prod` — rebuilding `.next-prod` under the running resident server breaks its styles (CLAUDE.md).
+ *
+ *   pnpm exec tsx scripts/review-server.ts dev
  */
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const webRoot = path.join(repoRoot, "apps", "web");
 export const REVIEW_DATA_DIR = path.join(tmpdir(), "crossline-review");
+const dev = process.argv.includes("dev");
 // Kept between restarts (a rebuild restarts the server); `REVIEW_RESET=1` starts from an empty board.
 if (process.env.REVIEW_RESET === "1") rmSync(REVIEW_DATA_DIR, { recursive: true, force: true });
 mkdirSync(REVIEW_DATA_DIR, { recursive: true });
-const child = spawn(process.execPath, [path.join(webRoot, "node_modules", "next", "dist", "bin", "next"), "start", "--hostname", "127.0.0.1", "--port", "3320"], {
+const child = spawn(process.execPath, [path.join(webRoot, "node_modules", "next", "dist", "bin", "next"), dev ? "dev" : "start", "--hostname", "127.0.0.1", "--port", "3320"], {
   cwd: webRoot, stdio: "inherit",
-  env: { ...process.env, CROSSLINE_DATA_DIR: REVIEW_DATA_DIR, CROSSLINE_NEXT_DIR: ".next-prod", CROSSLINE_SEED_EXAMPLES: "1",
+  env: { ...process.env, CROSSLINE_DATA_DIR: REVIEW_DATA_DIR, CROSSLINE_NEXT_DIR: dev ? ".next-review" : ".next-prod", CROSSLINE_SEED_EXAMPLES: "1",
     BETTER_AUTH_SECRET: "review-secret-not-for-production-use",
     // `localhost`, not 127.0.0.1: cookies do not keep ports apart, so signing in to the review copy at 127.0.0.1 replaced the resident
     // app's (127.0.0.1:3210) session in the same browser and signed the person out of their real account.

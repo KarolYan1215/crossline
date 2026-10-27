@@ -1,5 +1,5 @@
 // i18n-exempt: the example board, written as if by the person (tests and e2e only)
-import { DEFAULT_AVAILABILITY, LINE_PROFILES_SETTING, type AccessContext, type StoredLineProfile } from "@crossline/core";
+import { DEFAULT_AVAILABILITY, LINE_PROFILES_SETTING, START_CONFIRMED_SETTING, type AccessContext, type StoredLineProfile } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { LINE_SETTING, defaultIdentityPacks, type LineSpec } from "@crossline/identity-packs";
 
@@ -8,7 +8,8 @@ const EXAMPLE_AT = "2026-09-01T00:00:00.000Z";
 /**
  * What the start standard asks for (`readyToStart`), written for the example board: each built-in line with a description, two
  * candidates and an adopted goal, the default weekly hours as the interview's proposal (the same windows the scheduler uses when none
- * is stored, so the schedule does not change), and one current project per line that the person said has no deadline. Only what is not
+ * is stored, so the schedule does not change), one current project per line that the person said has no deadline, and the person's
+ * confirmation of all of it (`START_CONFIRMED_SETTING`). Only what is not
  * there yet is written, so it is safe to run on every load. Used by `ensureSeeded` with example data on, and by tests.
  */
 export function seedExampleReadiness(store: CrosslineStore, ctx: AccessContext): void {
@@ -41,4 +42,5 @@ export function seedExampleReadiness(store: CrosslineStore, ctx: AccessContext):
       store.upsertProfileFact({ workspaceId: ws, identityId: pack.id, projectId: id, slot: "no_deadline", value: "没有截止", status: "confirmed",
         sourceRef: "reply-1", sourceQuote: "没有截止", updatedAt: EXAMPLE_AT });
   }
+  if (!store.getSetting(ws, START_CONFIRMED_SETTING)) store.setSetting(ws, START_CONFIRMED_SETTING, JSON.stringify({ at: EXAMPLE_AT, via: "person" }));
 }

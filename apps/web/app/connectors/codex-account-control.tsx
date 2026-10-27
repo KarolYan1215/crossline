@@ -39,7 +39,7 @@ export function reconcileCodexLoginUrl(loginUrl: string | undefined, state: Acco
 export function visibleCodexBlocker(state: AccountState | undefined, t: Translate = tFor(undefined)): { code: string; message: string } | undefined {
   const blocker = state?.blocker ?? state?.supervisor?.blocker ?? loginOf(state)?.blocker;
   // The worker being down or not configured reaches here as the supervisor's own English; the page says it in words (copy-style).
-  return blocker && /SUPERVISOR|CAPABILITY/.test(blocker.code) ? { code: blocker.code, message: t("后台服务没有连上，稍后点 ↻ 刷新。") } : blocker;
+  return blocker && /SUPERVISOR|CAPABILITY/.test(blocker.code) ? { code: blocker.code, message: t("后台服务没有连上，稍后点「↻ 刷新状态」。") } : blocker;
 }
 
 /**
@@ -105,7 +105,7 @@ export function CodexAccountControl({ onConnected }: {
     <header><h3>{t("模型连接")}</h3><Tag tone={account ? "ok" : "warn"}>{account ? t("已连接") : state ? t("未连接") : t("检查中")}</Tag></header>
     <div className="st-row"><span className="st-row-label">{account
       ? account.type === "apiKey" ? t("API key（按用量计费，每月上限见「模型额度」）") : account.email ?? t("ChatGPT 账号")
-      : !state ? t("正在读取登录状态…") : guest ? t("这个账号用自己的 Codex：分析、拆分与规划都在它上面运行，不使用电脑主人的额度与记忆。") : t("分析、拆分与助手功能需要登录 ChatGPT 账号")}
+      : !state ? t("正在读取登录状态…") : guest ? t("用本人的 ChatGPT 账号连接：访谈、分析与规划都用这个账号的额度，和其他人的账号互不相通。") : t("分析、拆分与助手功能需要登录 ChatGPT 账号")}
       {blocker && <small role="status">{blocker.message}</small>}</span>
       <span className="st-row-actions">
         {state && !account && !loginUrl && local && <button type="button" className="primary-button" disabled={busy}
@@ -115,7 +115,7 @@ export function CodexAccountControl({ onConnected }: {
         {loginUrl && !login?.userCode && <a href={loginUrl} target="_blank" rel="noreferrer">{t("打开登录页 →")}</a>}
         {loginUrl && <button type="button" disabled={busy} onClick={cancelLogin}>{t("取消")}</button>}
         {account && guest && <button type="button" disabled={busy} onClick={() => void post({ action: "logout" })}>{t("退出登录")}</button>}
-        <button type="button" onClick={refresh} aria-label={t("刷新登录状态")} title={t("刷新")}>↻</button>
+        <button type="button" onClick={refresh} title={t("重新读取登录状态")}>{t("↻ 刷新状态")}</button>
       </span></div>
     {state && !account && deviceCode && <ol className="codex-steps">
       {/* OpenAI refuses every code until this switch is on, and a code entered before it is spent (owner's run, 2026-10-15). */}
@@ -126,12 +126,14 @@ export function CodexAccountControl({ onConnected }: {
     {login?.state === "pending" && login.userCode && <div className="st-row"><span className="st-row-label">{t("在 OpenAI 的页面输入这串代码")}
       <small>{t("代码只给本人用，不要发给别人。页面提示要先启用设备代码登录时，按上面第 1 步开启后点「获取新代码」。")}</small></span>
       <b className="mono codex-user-code">{login.userCode}</b>
+      {/* The address as text too: a person on another device, or one whose pop-ups are blocked, types it in themselves (W-5). */}
+      {loginUrl && <small className="codex-verification-url">{t("OpenAI 页面地址：")}<span className="mono">{loginUrl}</span></small>}
       <span className="st-row-actions">
         {loginUrl && <button type="button" className="primary-button" onClick={() => copyAndOpen(login.userCode, loginUrl)}>{t("复制代码并打开 OpenAI 页面")}</button>}
         <button type="button" disabled={busy} onClick={() => void (async () => { await cancelLogin(); await post({ type: "chatgptDeviceCode" }); })()}>{t("获取新代码")}</button></span></div>}
     {login?.state === "failed" && deviceCode && !account && <p className="muted" role="status">{t("这串代码没有通过。确认已按第 1 步开启设备代码登录，再点「用一次性代码连接」取一串新代码。")}</p>}
     {!account && guest && <form className="st-row" onSubmit={(event) => { event.preventDefault(); if (apiKey.trim()) void post({ type: "apiKey", apiKey }); }}>
-      <label className="st-row-label">{t("或填写 OpenAI API key")}<small>{t("只交给这个账号自己的运行时保存，本应用不留存、不显示。")}</small>
+      <label className="st-row-label">{t("或填写 OpenAI API key")}<small>{t("只保存在这个账号自己的模型连接里，本应用不留存、不显示。")}</small>
         <input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" /></label>
       <span className="st-row-actions"><button type="submit" disabled={busy || !apiKey.trim()}>{t("保存")}</button></span>
     </form>}

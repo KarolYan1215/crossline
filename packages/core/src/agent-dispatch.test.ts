@@ -29,25 +29,42 @@ const order = (over: Partial<DispatchableOrder> & { ai?: string[]; human?: strin
 const plan = (o: ReturnType<typeof order>, course = false) => planAssistantTask(o, { projectIsCourse: course });
 
 describe("what the assistant is handed", () => {
-  test("nothing automatable means nothing to dispatch, and the reason says so", () => {
-    expect(plan(order({ ai: [] }))).toMatchObject({ fit: false, reason: expect.stringContaining("需本人完成") });
+  test("the person's own work with nothing automatable is not dispatched, and the reason says so", () => {
+    expect(plan(order({ ai: [], intent: "推导第 3 章的状态方程" }))).toMatchObject({ fit: false, reason: expect.stringContaining("不整件交给助手") });
   });
 
-  // A step worked back from a milestone has no AI/human split, so on the real account nothing was ever handed over.
-  test("a small internal errand with no split is handed over whole; sending, deep work and graded coursework are not", () => {
+  // A step worked back from a milestone has no AI/human split, so on the real account nothing was ever handed over. What it produces
+  // decides now (docs/work-split.md): not its family, not its course's words.
+  test("a small internal errand with no split is handed over whole; sending, the person's own work and a choice are not", () => {
     const step = (intent: string, family: string) => ({ ...order({ ai: [], human: [intent], intent }),
       payload: { automationParts: [], humanCore: [{ id: "h", intent }], family, evidenceContract: [{ description: "版本与输入规范的摘录和链接" }] } });
-    const whole = plan(step("确认目标 NeuroSim 版本，并取得对应的输入规范", "preparation"));
+    const whole = plan(step("汇集 NeuroSim 输入规范与版本说明", "deep_work"));
     expect(whole).toMatchObject({ fit: true, delegated: true, category: "data_code_sim", humanPart: "审阅产出，决定用不用" });
     expect(whole.fit && whole.what).toContain("版本与输入规范的摘录和链接");
     expect(whole.fit && whole.what).toContain("needsHuman");
     expect(plan(step("给师兄发邮件要数据", "preparation"))).toMatchObject({ fit: false });
     expect(plan(step("写完仿真并出图", "deep_work"))).toMatchObject({ fit: false });
-    expect(plan(step("整理 ECE 548 期中考试复习提纲", "preparation"), true)).toMatchObject({ fit: false });
+    expect(plan(step("判断要补哪些实验", "preparation"))).toMatchObject({ fit: false });
+    // Compiling a course's material is the assistant's; the note keeps it from making anything that could be handed in.
+    expect(plan(step("整理 ECE 548 期中考试复习提纲", "preparation"), true)).toMatchObject({ fit: true, graded: true, notes: expect.stringContaining("学习辅助") });
     expect(plan(order({ ai: ["整理文献"] }))).toMatchObject({ fit: true, delegated: false });
     // Choosing is the person's: a real run chose 「真实事项」 for them (and chose the app itself).
     expect(plan(step("选定一项创始人正在处理的真实事项，记录使用前状态", "preparation"))).toMatchObject({ fit: false });
     expect(plan(step("从素材库选出四个首轮选题", "review"))).toMatchObject({ fit: false });
+  });
+
+  test("owned work: the assistant's item goes whole, a question waits, the person's core task is never handed over whole", () => {
+    const owned = (intent: string, owner: string, extra: Record<string, unknown> = {}) => ({ id: "x", intent, state: "approved", projectId: "p",
+      payload: { owner, automationParts: [{ id: "a", intent }], humanCore: [], ...extra } });
+    const item = planAssistantTask(owned("汇集期中考试规则与往年卷", "assistant", { answer: "考到第 7 讲", question: "考到第几讲？" }),
+      { projectIsCourse: true, servesTitle: "规划期中复习与练习" });
+    expect(item).toMatchObject({ fit: true, delegated: true, graded: true });
+    expect(item.fit && item.what).toContain("规划期中复习与练习");
+    expect(item.fit && item.what).toContain("考到第 7 讲");
+    expect(planAssistantTask(owned("整理已出成绩", "ask"), { projectIsCourse: false })).toMatchObject({ fit: false });
+    expect(planAssistantTask({ ...owned("写方法部分初稿", "person"), payload: { owner: "person", automationParts: [] } }, { projectIsCourse: false })).toMatchObject({ fit: false });
+    // An assistant item that names a send or a choice stays the person's whatever the owner on record says.
+    expect(planAssistantTask(owned("给导师发送方法部分", "assistant"), { projectIsCourse: false })).toMatchObject({ fit: false });
   });
 
   test("the AI parts become the task and the human core stays the person's", () => {

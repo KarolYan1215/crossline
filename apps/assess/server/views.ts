@@ -64,7 +64,7 @@ export function wantLinesFor(result: StoredResult, locale?: Locale): WantLines |
 
 /** The public type of a result in the reader's language, with the lines the person said they want once they have. */
 export const typeOf = (result: StoredResult, recorded = recordedScores(), locale?: Locale) =>
-  publicType(result.scores, recorded, result.id, wantLinesFor(result, locale), locale);
+  publicType(result.scores, recorded, result.id, wantLinesFor(result, locale), result.aiDoes, locale);
 
 export function resultView(result: StoredResult, locale?: Locale): ResultView {
   const pairs = listPairs(result.id).flatMap((pair) => {

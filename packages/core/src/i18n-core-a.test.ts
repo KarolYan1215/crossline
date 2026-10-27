@@ -45,7 +45,7 @@ describe("core text in English", () => {
     expect(prediction.basis).toEqual(["Slept about 8.0 h (inferred from computer idle time)", "Awake for 3.0 h", "Calibrated to 1 self-report"]);
     expect(predictEnergy("2026-10-16T10:00:00Z", [], { low: 0, high: 20, reports: 0, agreement: 0 }, () => 10, 0, "en").basis).toEqual(["Last sleep unknown"]);
     const physiology = [{ day: "2026-10-16", wristTempDeltaC: 0.6 }];
-    expect(dayCapacity("2026-10-16T10:00:00Z", "2026-10-16", [], physiology, "en").basis).toEqual(["Wrist temperature 0.6°C above usual"]);
+    expect(dayCapacity("2026-10-16T10:00:00Z", "2026-10-16", [], physiology, {}, "en").basis).toEqual(["Wrist temperature 0.6°C above usual"]);
   });
 
   test("milestone risks, plurals included, and the Chinese unchanged", () => {

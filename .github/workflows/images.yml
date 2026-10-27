@@ -2,12 +2,11 @@ name: Hosted beta images
 
 # Builds the two images the hosted beta runs (docs/beta-launch.md §10.6) and pushes them to ghcr.io, so the 2 GB server only pulls:
 # `next build` on that server paged it to a standstill twice.
+# Only `main` builds them (decided 2026-10-17): a push to any other branch used to overwrite `:beta`, so an unfinished branch was one
+# `[deploy]` away from the live site.
 on:
   push:
-    # The bilingual branch is built and reviewed apart from the hosted beta: a push here must never replace the `:beta` images
-    # the server pulls (decided 2026-10-16). It is merged, or built by hand, only when the owner says so.
-    branches-ignore:
-      - "claude/i18n-**"
+    branches: [main]
     paths-ignore:
       - "docs/**"
       - "**/*.md"

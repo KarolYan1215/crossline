@@ -4,6 +4,7 @@
 **/.next
 **/.next-*
 **/out
+**/dist
 **/data
 **/data-e2e
 **/*.db
@@ -18,9 +19,24 @@ vendor
 .vendor
 .claude
 .crossline-evidence
+.github
+docs
+patches
 e2e
 playwright-report
 test-results
 coverage
 installer
 deploy/app/*.env
+# Built by the image itself (Serwist writes it during the Next build).
+apps/web/public/sw.js
+apps/web/public/sw.js.map
+# Not run from this image: the quick test is its own image (apps/assess/Dockerfile; its 54 MB of figure templates were most of this
+# context), the collector is a Cloudflare Worker and the launcher is the installed copy's. Their manifests stay, because a frozen
+# install checks the lockfile against every workspace project.
+apps/assess/*
+!apps/assess/package.json
+apps/collector/*
+!apps/collector/package.json
+apps/launcher/*
+!apps/launcher/package.json

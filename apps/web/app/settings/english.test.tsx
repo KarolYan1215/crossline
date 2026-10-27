@@ -52,10 +52,10 @@ describe("settings in English", () => {
   });
 
   test("background work counts tokens the English way and says what runs now", () => {
-    const html = english(<BackgroundModule overview={{ timeZone: "America/Chicago",
+    const html = english(<BackgroundModule overview={{ timeZone: "America/Chicago", saver: true,
       engagement: { tier: "cooling", lastActiveAt: "2026-10-10T07:49:00.000Z" },
       kinds: [{ kind: "tutorials", label: "任务教程", explained: "为 48 小时内要做的任务查资料、写教程", paused: false, lastRunAt: "2026-10-12T19:07:16.000Z",
-        lastOk: false, weekRuns: 25, weekTokens: 7_140_000 }], running: [] }} />);
+        lastOk: false, weekRuns: 25, weekTokens: 7_140_000, weekCacheShare: null }], running: [] }} />);
     expect(html).toContain("Only capture analysis and calendar filing");
     expect(html).toContain("Your latest action 10/10 02:49");
     expect(html).toContain("Last run 10/12 14:07 (failed)");

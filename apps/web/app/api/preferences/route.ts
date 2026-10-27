@@ -8,8 +8,12 @@ export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
-  const body = (await request.json().catch(() => ({}))) as { remove?: unknown; period?: unknown; retireArchetype?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { remove?: unknown; restore?: unknown; period?: unknown; retireArchetype?: unknown };
   const store = getStore();
+  // A preference that lapsed unused (30 days) is kept: restoring it makes it the person's own, and it never lapses again.
+  if (typeof body.restore === "string") {
+    return store.restorePreference(access.ctx.workspaceId, body.restore) ? Response.json({ ok: true }) : Response.json({ ok: false, code: "PREFERENCE_NOT_FOUND" }, { status: 404 });
+  }
   if (typeof body.remove === "string") {
     return store.deletePreference(access.ctx.workspaceId, body.remove) ? Response.json({ ok: true }) : Response.json({ ok: false, code: "PREFERENCE_NOT_FOUND" }, { status: 404 });
   }

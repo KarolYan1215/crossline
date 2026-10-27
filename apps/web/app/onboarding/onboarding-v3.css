@@ -34,6 +34,8 @@
 .ob-doclist li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 6px;border-top:1px solid var(--mist);padding-top:4px}
 .ob-doclist li span{flex:1 1 10em;min-width:0;overflow-wrap:anywhere}
 .ob-doclist li small{color:var(--graphite)}
+.ob-doclist .ob-doc-remove{min-height:26px;padding:0 8px;border:1px solid var(--mist);font-size:12px;color:var(--ink)}
+.ob-doclist .ob-doc-remove:hover{border-color:var(--ink)}
 .ob-doclist li[data-status="failed"] small,.ob-doclist li[data-status="unsupported"] small{color:#5E1212}
 .ob-card .st-card{border:0;padding:0;background:transparent}
 .ob-goal{display:grid;gap:4px;padding-top:8px;border-top:1px solid var(--mist);border-left:4px solid var(--lc,var(--ink));padding-left:8px}
@@ -60,6 +62,9 @@
 .ob3 .ob-composer{border-top:1.5px solid var(--ink);padding:10px 14px;background:var(--paper)}
 .ob3 .ob-composer textarea{border:1px solid var(--ink);background:#FFFDF9;border-radius:0;font-size:15px}
 .ob3 .ob-error{color:#5E1212;padding:6px 14px}
+.ob3 .ob-quota{display:grid;gap:8px;margin:8px 14px;padding:10px 12px;border-left:3px solid #8A5A00;background:#FBF6EA}
+.ob3 .ob-quota[data-verdict="spent"]{border-left-color:#5E1212}
+.ob3 .ob-quota>p{margin:0}
 .ob3 .ob-design,.ob3 .ob-diligence,.ob3 .ob-dates{border:1px solid var(--ink);background:var(--paper);font-family:var(--f-sans)}
 
 /* Opening */
@@ -82,6 +87,8 @@
 .ob-ring-row{display:grid;grid-template-columns:64px minmax(0,1fr);gap:12px;align-items:center}
 .ob-ring-row>div{display:grid;gap:3px}
 .ob-ring-row b{font-size:16px}
+.ob-ring-row .ob-ring-next{margin-top:4px;font-size:12px;line-height:1.6;color:var(--graphite)}
+.ob-ring-row .ob-organizing{display:block;margin-top:4px;font-size:12px;line-height:1.6;color:var(--graphite)}
 .ob-ring-row small{font-size:13px;color:var(--graphite)}
 .ob-ring-row .ob-btn{justify-self:start;text-decoration:none;margin-top:4px}
 .ob-ring-on{stroke:#085E3A}
@@ -185,3 +192,43 @@
 .ob-opening-note h3{margin:0;font-size:15px}
 .ob-opening-note p{margin:0;line-height:1.75}
 .ob-opening-sign{justify-self:end;color:var(--muted, inherit)}
+.ob-dates-dropped{margin:8px 0;font-size:13px}.ob-dates-dropped summary{cursor:pointer}.ob-dates-dropped ul{margin:6px 0;padding-left:18px}
+.ob-centre-head .ui-first-hint{flex:1 1 100%;margin:0}
+/* The one look before the app opens (start-confirm.tsx). */
+.ob-start-confirm{display:grid;gap:14px;font-size:14px;line-height:1.6}
+.ob-start-confirm h3{margin:0 0 4px;font-size:15px}
+.ob-start-confirm ul{margin:4px 0 0;padding-left:18px}
+.ob-start-confirm p{margin:2px 0}
+.ob-start-line{border-left:3px solid var(--lc, var(--rule));padding:4px 0 6px 10px;margin-bottom:8px}
+.ob-start-error{margin:0 auto 0 0;color:#5E1212;font-size:13px}
+
+/* The folded technical line under a round that did not finish. */
+.ob-failure-detail { margin-top: 6px; font-size: 13px; }
+.ob-failure-detail summary { cursor: pointer; color: var(--ob-muted, inherit); }
+.ob-failure-detail p { margin: 4px 0 0; overflow-wrap: anywhere; }
+
+/* What each part gives back (2026-10-19): the progress strip, the observation card, the capacity note, the week's draft, the file list. */
+.ob-progress{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--ink);background:var(--paper)}
+.ob-progress b{font-size:14px}
+.ob-progress small{font-size:13px;color:var(--ink)}
+
+.ob-insight{display:grid;gap:6px;margin-top:8px;padding:8px 12px;border-left:4px solid var(--ink);background:var(--paper)}
+.ob-insight-label{font-size:13px}
+.ob-insight-quotes{margin:0;padding:0;list-style:none;display:grid;gap:2px;font-size:13px;color:var(--graphite)}
+.ob-insight-rate{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ob-insight-rate button[aria-pressed="true"]{background:var(--ink) !important;color:var(--paper) !important}
+.ob-capacity{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--ink);margin-bottom:10px}
+.ob-capacity b{font-size:14px}
+.ob-capacity ul{margin:0;padding-left:18px;display:grid;gap:2px;font-size:13px}
+.ob-draft{opacity:.85}
+.ob-draft-note{display:grid;gap:4px;margin:8px 0}
+.ob-draft-note ul{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13px}
+.ob-draft-note li{display:flex;gap:4px;align-items:center}
+.ob-file-list{padding:10px 12px;display:grid;gap:6px}
+.ob-file-list summary{cursor:pointer;font-size:14px}
+.ob-file-list ul{margin:0;padding:0;list-style:none;display:grid;gap:4px}
+.ob-file-list li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:13px;border-top:1px solid var(--mist);padding-top:4px}
+.ob-file-list li blockquote{flex-basis:100%;margin:2px 0 0;padding-left:8px;border-left:2px solid var(--mist);color:var(--graphite)}
+.ob-line-name{flex-direction:column;align-items:stretch;margin-top:8px}
+.ob-line-name label{display:flex;gap:8px;align-items:center;white-space:nowrap}
+.ob-line-name label input{flex:1;min-width:0}

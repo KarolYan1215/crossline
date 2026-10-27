@@ -146,14 +146,15 @@ export const MILESTONE_PROPOSAL_SCHEMA = object({
   }), 20),
   targetProposals: list(object({ projectId: str, value: str, why: str }), 8),
   assumptions: strList,
-  blockers: list(object({ code: str, message: str }), 10),
-  // Whether the delivery follows the person's own line skill. `violated` names each broken rule; a delivery that covers its contract
-  // but breaks one is `partial`, not `pass`.
-  fit: object({ fits: { type: "boolean" }, violated: strList, why: emptyableStr })
+  // `fit` (the gate's judgement of the person's line skill) was copied in here by mistake with the gate's own field: in strict mode the
+  // architect had to answer a question about a delivery that does not exist. It belongs to `MILESTONE_GATE_OUTPUT_SCHEMA` only.
+  blockers: list(object({ code: str, message: str }), 10)
 });
 
 export type MilestoneProposalContext = {
   version: "crossline.milestone-proposal.v1";
+  /** The interview's conclusions for planning (`planningProfile`): how the person works, what drains them, direction, line allocation. */
+  personProfile?: string[];
   identities: Array<{ id: string; label: string; summary: string }>;
   existingMilestones: Array<{ id: string; identityId: string; title: string; status: string }>;
   recentWork: Array<{ milestoneId: string; intent: string; state: string }>;
@@ -174,6 +175,11 @@ export type MilestoneProposalContext = {
    * The milestones declare them in `plan.outputs` / `plan.inputs`; the cross-line relations are derived from those references.
    */
   artifacts?: LineArtifacts;
+  /**
+   * Excerpts of the person's files that match this line (one line per run; docs/context-selection.md): its projects' files first. A
+   * deadline or a graded part a file states is read here; a milestone still rests on facts (`sourceFactIds`), never on an excerpt alone.
+   */
+  materials?: Array<{ id: string; file: string; text: string }>;
 };
 
 export function validateMilestoneProposal(value: unknown, context: MilestoneProposalContext): MilestoneProposal {
@@ -241,6 +247,7 @@ export const MILESTONE_SOFT_CODES = new Set(["MILESTONE_TITLE_GENERIC", "MILESTO
   "MILESTONE_OUTCOME_UNSTATED", "MILESTONE_OUTCOME_REQUIRED", "MILESTONE_TARGET_UNPROPOSED", "MILESTONE_TARGET_NOT_CITED", "MILESTONE_TARGET_REQUIRED",
   "MILESTONE_COURSE_PARTS_MISSING", "MILESTONE_PROJECT_MISSING", "MILESTONE_CHAIN_TOO_SHORT", "MILESTONE_CHAIN_TOO_LONG", "MILESTONE_SOURCE_UNCONFIRMED",
   "MILESTONE_SOURCE_REQUIRED", "MILESTONE_BASELINE_REQUIRED", "MILESTONE_ORDER_INCONSISTENT", "MILESTONE_NOT_CHAINED", "MILESTONE_DEPENDENCY_ORDER",
+  "MILESTONE_PREP_ONLY",
   "PROPOSAL_TARGET_UNREASONED", ...ARTIFACT_SOFT_CODES]);
 
 /**

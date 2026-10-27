@@ -36,9 +36,10 @@ export function pageFromLocation(): PageContext {
 export function Conversation({ variant, placeholder, page }: {
   /**
    * `inline`: Today's box with the latest exchange under it; `panel`: the whole day's conversation, with search; `task`: a task's own
-   * entry — the box first, then only what was said from this task's page.
+   * entry — the box first, then only what was said from this task's page; `block`: the same for a block picked on Today's day panel,
+   * showing only this task's latest exchange, held short.
    */
-  variant: "inline" | "panel" | "task"; placeholder?: string;
+  variant: "inline" | "panel" | "task" | "block"; placeholder?: string;
   /** Fixed for an entry that belongs to one object (a task dialog); otherwise read from the address. */
   page?: PageContext;
 }) {
@@ -120,10 +121,12 @@ export function Conversation({ variant, placeholder, page }: {
   };
 
   // Today's box shows the latest exchange only; the panel shows the day; a task's entry shows what was said from its page.
-  const shown = variant === "inline" ? lastExchange(messages) : variant === "task" && page ? fromPage(messages, page) : messages;
+  const shown = variant === "inline" ? lastExchange(messages)
+    : variant === "task" && page ? fromPage(messages, page)
+    : variant === "block" && page ? lastExchange(fromPage(messages, page)) : messages;
   // On a page (Today, the return page) a long reply is held to three lines; the full conversation shows it whole.
-  const item = (message: MessageView) => <MessageItem key={message.id} message={message} onUpdate={update} choices={choices} compact={variant === "inline"} />;
-  if (variant === "task") return <div className="conversation" data-variant={variant}>
+  const item = (message: MessageView) => <MessageItem key={message.id} message={message} onUpdate={update} choices={choices} compact={variant === "inline" || variant === "block"} />;
+  if (variant === "task" || variant === "block") return <div className="conversation" data-variant={variant}>
     <Composer mode="capture" busy={busy} placeholder={t(placeholder ?? "对该任务的指令或问题：改截止、这一步做完了、记进度、推迟、讲解某一步…")} onSubmit={submit}>
       {busy && <small className="muted composer-status" role="status">{t("正在理解…")}</small>}
       {status && <small className="muted composer-status" role="status">{status}</small>}
@@ -136,7 +139,8 @@ export function Conversation({ variant, placeholder, page }: {
       {shown.map(item)}
       <div ref={endRef} />
     </ol>}
-    <Composer mode="capture" busy={busy} placeholder={t(placeholder ?? "任务、改期、回答待决、撤销、日程、问题……一句话即可")} onSubmit={submit}
+    <Composer mode="capture" busy={busy} placeholder={t(placeholder ?? "任务、改期、回答待决、撤销、日程、问题……一句话即可")}
+      {...(placeholder ? {} : { shortPlaceholder: t("一句话：任务、改期、问题……") })} onSubmit={submit}
       takeShare={variant === "inline"}>
       {busy && <small className="muted composer-status" role="status">{t("正在理解…")}</small>}
       {status && <small className="muted composer-status" role="status">{status}</small>}
@@ -188,6 +192,7 @@ export function CardView({ messageId, card, onUpdate, choices, body }: { message
   // Fields changed on the card, by action index; sent with 执行 and checked again on the server.
   const [edits, setEdits] = useState<Record<number, Record<string, unknown>>>({});
   const [editing, setEditing] = useState<number | null>(null);
+  const [copied, setCopied] = useState<number | null>(null);
   const decide = async (decision: { option?: number; dismiss?: boolean; indexes?: number[] }) => {
     setWorking(true); setError("");
     try {
@@ -221,11 +226,19 @@ export function CardView({ messageId, card, onUpdate, choices, body }: { message
             const focusBox = () => document.querySelector<HTMLTextAreaElement>(".conversation textarea")?.focus();
             // A turn's option with nothing to carry out: the person says more in the box (nothing to record yet).
             if (!option.kind && !option.actions.length) { focusBox(); return; }
+            // 复制: the text at `href` to the clipboard; not an answer, so the card stays open for 已回复 / 不用回.
+            if (option.kind === "copy" && option.href) {
+              const text = await fetch(option.href, { cache: "no-store" }).then((response) => response.ok ? response.text() : "").catch(() => "");
+              const copied = text ? await navigator.clipboard?.writeText(text).then(() => true, () => false) : false;
+              setError(copied ? "" : t("没能复制，请打开草稿后手动复制"));
+              setCopied(copied ? index : null);
+              return;
+            }
             // A nudge's button is the answer whatever it does: recorded first, then the page opens or the box takes focus.
             await decide({ option: index });
             if (option.kind === "href" && option.href) window.location.assign(option.href);
             if (option.kind === "say") focusBox();
-          }}>{t(option.label)}</button>)}</div>}
+          }}>{copied === index ? t("已复制") : t(option.label)}</button>)}</div>}
     </div>}
     {pending.length > 0 && <div className="conversation-actions">
       <button type="button" className="primary-button" disabled={working || card.reviewing} onClick={() => void decide({ indexes: pending })}>

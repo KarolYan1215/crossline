@@ -4,10 +4,10 @@ import { withCourse } from "./task-title";
  * Dates a person's own documents state — class meetings, quiz and homework dates, exams, deadlines.
  *
  * Reading these out of a syllabus is a job for a model, but a wrong date on a calendar is worse than no
- * date, so nothing here is trusted on the model's say-so. Every date must come with a verbatim quote from
- * the file, and the quote has to actually contain that day (`10/27`, `27th Oct.`, `Oct 27`, `10月27日`):
- * a model that mis-reads a table row, or adds a year the file never mentions, produces a quote that does
- * not support its own date, and the whole extraction is sent back for repair.
+ * date, so nothing here is trusted on the model's say-so. Every date cites the numbered sentence of the file
+ * it was read from (since 2026-10-19; a verbatim quote before), and that sentence has to actually contain the
+ * day (`10/27`, `27th Oct.`, `Oct 27`, `10月27日`): a model that mis-reads a table row, or adds a year the file
+ * never mentions, cites a sentence that does not support its own date, and that date is dropped.
  *
  * Nothing is written to the calendar from here. The result is a batch the person confirms as a whole.
  */
@@ -48,13 +48,21 @@ const object = (properties: Record<string, unknown>) =>
   ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 const confidence = { type: "string", enum: ["high", "medium", "low"] } as const;
 
+/**
+ * What the model writes (2026-10-19): times as minutes after midnight and the evidence as sentence numbers (`refs`), never copied words or
+ * typed clock strings; `resolveDateRefs` turns an answer into a `DateExtraction`, filling `sourceRef`, `quote` and `HH:MM` from the
+ * ledger, and `sanitizeDateExtraction` then checks each item against the sentences it cites.
+ */
+const REFS = { type: "array", minItems: 1, maxItems: 6, items: { type: "integer", minimum: 1 } } as const;
+const minute = { type: "integer", minimum: 0, maximum: 1439 } as const;
+const minuteOrNone = { anyOf: [minute, { type: "null" }] } as const;
 export const DATE_EXTRACTION_SCHEMA = object({
   dates: {
     type: "array", maxItems: 60,
     items: object({
-      id: text(60, 1), date: text(10, 10), startTime: text(5), endTime: text(5),
+      id: text(60, 1), date: text(10, 10), startMinute: minuteOrNone, endMinute: minuteOrNone,
       kind: { type: "string", enum: [...DATE_KINDS] }, title: text(160, 1), project: text(80),
-      sourceRef: text(60, 1), quote: text(400, 1), confidence, note: text(300)
+      refs: REFS, confidence, note: text(300)
     })
   },
   recurring: {
@@ -62,9 +70,9 @@ export const DATE_EXTRACTION_SCHEMA = object({
     items: object({
       id: text(60, 1), title: text(160, 1), project: text(80),
       weekdays: { type: "array", minItems: 1, maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
-      startTime: text(5, 5), endTime: text(5, 5), from: text(10, 10), to: text(10, 10),
+      startMinute: minute, endMinute: minute, from: text(10, 10), to: text(10, 10),
       exceptions: { type: "array", maxItems: 30, items: text(10, 10) }, location: text(120),
-      sourceRef: text(60, 1), quote: text(400, 1), confidence
+      refs: REFS, confidence
     })
   },
   questions: { type: "array", maxItems: 10, items: text(300, 1) },
@@ -72,10 +80,16 @@ export const DATE_EXTRACTION_SCHEMA = object({
     type: "array", maxItems: 12,
     items: object({
       id: text(60, 1), kind: { type: "string", enum: [...DATE_KINDS] }, title: text(160, 1), project: text(80),
-      sourceRef: text(60, 1), quote: text(400, 1), note: text(300)
+      refs: REFS, note: text(300)
     })
   }
 });
+
+/** `HH:MM` for minutes after midnight; "" for none. */
+export function clockOf(minutes: unknown): string {
+  if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes < 0 || minutes > 1440) return "";
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -186,6 +200,18 @@ export function validateDateExtraction(value: unknown, known: Known): DateExtrac
   return out;
 }
 
+/** How long an arrangement with no end date (a job, a standing meeting) is taken to run: half a year, within the range a date may lie in. */
+const OPEN_ENDED_DAYS = 182;
+/**
+ * A weekly arrangement whose start is a date and whose end is not one is ongoing: a job has no end date, and the lite run of 2026-10-20
+ * wrote 「持续进行中，结束时间」 (exactly the field's ten characters), which dropped the hard line's whole schedule as 「not a valid range」.
+ */
+function openEnded(meeting: RecurringMeeting): RecurringMeeting {
+  if (!validDate(meeting.from) || validDate(meeting.to)) return meeting;
+  const [y, m, d] = meeting.from.split("-").map(Number) as [number, number, number];
+  return { ...meeting, to: new Date(Date.UTC(y, m - 1, d + OPEN_ENDED_DAYS)).toISOString().slice(0, 10) };
+}
+
 /**
  * Per-item: every date stands on its own quote, so one that cannot be verified is dropped and the rest are
  * kept. Failing the whole answer for one misquoted row (a model joining two lines that are not adjacent in
@@ -209,7 +235,7 @@ export function sanitizeDateExtraction(value: unknown, known: Known):
     }
   });
   const dates = attempt(out.dates, (item) => checkDate(item, known));
-  const recurring = attempt(out.recurring, (meeting) => checkMeeting(meeting, known));
+  const recurring = attempt(out.recurring.map(openEnded), (meeting) => checkMeeting(meeting, known));
   const undated = attempt(out.undated ?? [], (item) => checkSource(known, item.sourceRef, item.quote, item.title));
   if (out.dates.length + out.recurring.length > 0 && dates.length + recurring.length === 0) {
     reject("DATE_NOTHING_VERIFIABLE", `一条都没能在原文里核实：${dropped.slice(0, 3).map((item) => item.reason).join("；")}`); // i18n-ignore
@@ -250,6 +276,30 @@ export function mergeDateExtractions(earlier: DateExtraction[], next: DateExtrac
 }
 
 /**
+ * Ids made from what an item is, not from where the model counted it (2026-10-19): each extraction run is a fresh thread that numbers its
+ * dates from d1 again, and merging by the model's ids let a later run's d1 replace an earlier run's unanswered d1. The same date read
+ * twice gets the same id (the newer reading wins); two different dates never share one.
+ */
+export function withContentIds(extraction: DateExtraction): DateExtraction {
+  const norm = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  const hash = (text: string) => { let h = 5381; for (const char of text) h = ((h * 33) ^ char.codePointAt(0)!) >>> 0; return h.toString(36); };
+  const unique = <T extends { id: string }>(items: T[], key: (item: T) => string, prefix: string) => {
+    const seen = new Map<string, number>();
+    return items.map((item) => {
+      const base = `${prefix}${hash(key(item))}`;
+      const n = (seen.get(base) ?? 0) + 1;
+      seen.set(base, n);
+      return { ...item, id: n > 1 ? `${base}-${n}` : base };
+    });
+  };
+  return { ...extraction,
+    dates: unique(extraction.dates, (item) => `${item.date}|${item.startTime}|${item.kind}|${norm(item.title)}`, "d-"),
+    recurring: unique(extraction.recurring, (item) => `${[...item.weekdays].sort().join(",")}|${item.startTime}|${item.endTime}|${norm(item.title)}`, "w-"),
+    ...(extraction.undated ? { undated: unique(extraction.undated, (item) => `${item.kind}|${norm(item.title)}`, "u-") } : {}),
+    ...(extraction.past ? { past: unique(extraction.past, (item) => JSON.stringify({ ...item, id: "" }), "p-") } : {}) };
+}
+
+/**
  * What the person already answered is not offered again. Every interview turn may return the files' dates, and a turn after the person
  * confirmed a batch returned the same 24 dates as a new one to confirm (2026-10-15 walkthrough) — confirming it twice would put every class
  * on the calendar twice. A date matches on day, start time and kind within its project, or on day and title; a weekly arrangement on its
@@ -268,11 +318,15 @@ export function withoutDecidedDates(next: DateExtraction, decided: Array<DateCan
 /**
  * Weekly arrangements that fall wholly outside the hours the person works and belong to no project — meals, sleep — say nothing the
  * available hours do not already say. Kept out of the batch, they are not offered for confirmation or for the calendar. A course's
- * class is kept even outside those hours: it is still an arrangement the person may want on the calendar.
+ * class is kept even outside those hours: it is still an arrangement the person may want on the calendar. So is a hard line's own
+ * schedule (上班 9:30–18:30, named by its project or its title): it lies outside the free hours by definition, and it is the fixed
+ * schedule the start standard asks for.
  */
 export function withoutOffHours(recurring: RecurringMeeting[], windows: Array<{ days: number[]; start: string; end: string }>,
-  projects: Array<{ id: string; name: string }>): RecurringMeeting[] {
-  const belongs = (item: RecurringMeeting) => Boolean(item.project) && projects.some((project) =>
+  projects: Array<{ id: string; name: string }>, hardLines: Array<{ id: string; label: string }> = []): RecurringMeeting[] {
+  const ofHardLine = (item: RecurringMeeting) => hardLines.some((line) =>
+    item.project === line.id || item.project === line.label || (line.label.length >= 2 && item.title.includes(line.label)));
+  const belongs = (item: RecurringMeeting) => ofHardLine(item) || Boolean(item.project) && projects.some((project) =>
     item.project === project.id || item.project === project.name || item.project.includes(project.name));
   const overlaps = (item: RecurringMeeting) => item.weekdays.some((day) => windows.some((window) =>
     window.days.includes(day) && window.start < item.endTime && window.end > item.startTime));

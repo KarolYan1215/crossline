@@ -41,6 +41,9 @@
 @media (prefers-reduced-motion:reduce){.login-steps li[data-state="current"][data-busy] .login-step-mark::after{animation:none;border-color:var(--ink)}}
 .login-privacy{display:flex;gap:8px;align-items:flex-start;margin:0;font-size:13px;line-height:1.6;color:var(--graphite)}
 .login-privacy svg{flex:none;margin-top:3px}
+/* A sentence with a link inside: a block, not a flex row — as flex items its text and link became three squeezed columns (W-1). */
+.login-note{margin:0;font-size:13px;line-height:1.6;color:var(--graphite)}
+.login-note a,.login-privacy a{color:var(--ink);text-decoration:underline}
 .login-error{margin:0;padding:8px 10px;border-left:3px solid #8A1C1C;background:#F3E3DD;color:#5E1212;font-size:14px}
 
 @media (max-width:820px){

@@ -42,13 +42,14 @@ describe("reading what the person sent", () => {
 
 describe("three lines that feed each other", () => {
   test("a choice the owner's written combination holds takes that combination, the person's own type first", () => {
-    const own = presetLines("GEMA", ["startup", "teaching"]);
-    expect(own?.lines).toEqual(TYPE_LINES.GEMA!.lines);
-    expect(own?.loop).toEqual(TYPE_LINES.GEMA!.loop);
+    // The 2026-10-15 combinations moved with their types (DLWV → ROHG, CXBV → WUHA).
+    const own = presetLines("ROHG", ["startup", "teaching"]);
+    expect(own?.lines).toEqual(TYPE_LINES.ROHG!.lines);
+    expect(own?.loop).toEqual(TYPE_LINES.ROHG!.loop);
     // Another type's combination when the person's own does not hold the choice.
-    const other = presetLines("GEMA", ["research", "media", "writing"]);
-    expect(other?.lines).toEqual(TYPE_LINES.SIRA!.lines);
-    expect(presetLines("GEMA", ["music"])).toBeUndefined();
+    const other = presetLines("ROHG", ["research", "media", "writing"]);
+    expect(other?.lines).toEqual(TYPE_LINES.WUHA!.lines);
+    expect(presetLines("ROHG", ["music"])).toBeUndefined();
   });
   test("rules always give three different lines, a loop that fits the poster and links of the five kinds", () => {
     const ids = WANT_OPTIONS.map((option) => option.id);
@@ -69,18 +70,18 @@ describe("three lines that feed each other", () => {
     }
   });
   test("rules order the lines from learning to spreading to earning, and a body line is a constraint, not a supplier", () => {
-    const lines = ruleLines("SEMP", ["startup", "research", "media"]);
+    const lines = ruleLines("CLWU", ["startup", "research", "media"]);
     expect(lines.lines.map((line) => line.identity)).toEqual(["研究者", "创作者", "创业者"]);
     expect(lines.loop).toEqual(["研究发现", "做成内容", "卖成生意", "用户需求回到研究"]);
     expect(lines.links.map((link) => link.kind)).toEqual(["复用", "提供输入", "反馈回路"]);
-    const body = ruleLines("SEMP", ["fitness", "build"]);
+    const body = ruleLines("CLWU", ["fitness", "build"]);
     expect(body.links.find((link) => link.from === 2)?.kind).toBe("约束");
   });
   test("the plan: a fitting combination needs no model unless the free line says something the options do not cover", () => {
-    expect(wantsPlan("GEMA", { picks: ["startup", "teaching"], text: "" })).toMatchObject({ needsModel: false, lines: { source: "preset" } });
-    expect(wantsPlan("GEMA", { picks: ["startup", "teaching"], text: "想养一只猫" })).toMatchObject({ needsModel: true, lines: { source: "preset" } });
-    expect(wantsPlan("GEMA", { picks: ["music", "fitness"], text: "" })).toMatchObject({ needsModel: true, lines: { source: "rules" } });
-    expect(wantsPlan("GEMA", { picks: [], text: "想做播客" }).lines.lines.map((line) => line.identity)).toContain("创作者");
+    expect(wantsPlan("DLWV", { picks: ["startup", "teaching"], text: "" })).toMatchObject({ needsModel: false, lines: { source: "preset" } });
+    expect(wantsPlan("DLWV", { picks: ["startup", "teaching"], text: "想养一只猫" })).toMatchObject({ needsModel: true, lines: { source: "preset" } });
+    expect(wantsPlan("DLWV", { picks: ["music", "fitness"], text: "" })).toMatchObject({ needsModel: true, lines: { source: "rules" } });
+    expect(wantsPlan("DLWV", { picks: [], text: "想做播客" }).lines.lines.map((line) => line.identity)).toContain("创作者");
   });
 });
 

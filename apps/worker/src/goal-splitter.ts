@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  GOAL_SPLIT_SCHEMA, duplicateAttributes, keepGoalSplit, lineAttributes, recomposes, validateGoalSplit,
+  GOAL_SPLIT_SCHEMA, attributeProblem, duplicateAttributes, keepGoalSplit, lineAttributes, recomposes, validateGoalSplit,
   type AttributeCandidate, type GoalSplit, type GoalSplitContext, type StoredLineProfile
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -57,7 +57,8 @@ export function createGoalSplitter(store: CrosslineStore, workspaceId: string, c
     const context: GoalSplitContext = { version: "crossline.goal-split.v1", lines };
     const result = await runCodexSkill<GoalSplit>(client, context, {
       skillName: GOAL_SPLITTER, cwd, outputSchema: GOAL_SPLIT_SCHEMA,
-      developerInstructions: "Split each long-term goal into its attributes as the Skill describes: cut the sentence's own words, never add, drop or reword. Return raw JSON only.",
+      developerInstructions: "Cut each long-term goal sentence into its attributes as the Skill describes, so the line's card can offer them as "
+        + "chips: only the sentence's own words, in order, never added to, dropped or reworded, even where a part reads like an action. Return raw JSON only.",
       prepareInput: () => context, validateOutput: (output) => validateGoalSplit(output, context),
       // Repairs spent: every goal that splits cleanly keeps its split, every other one stays whole.
       softAccept: (_rejection, output) => keepGoalSplit(output, context),
@@ -74,11 +75,15 @@ export function createGoalSplitter(store: CrosslineStore, workspaceId: string, c
       // Old candidates: their parts become the line's attribute candidates (repeats and parts contained in another dropped); nothing chosen.
       const candidateLine = candidateLines.find((item) => item.id === answered.lineId);
       if (candidateLine) {
-        const added: AttributeCandidate[] = [];
+        const split: AttributeCandidate[] = [];
         for (const part of answered.goals.flatMap((goal) => goal.parts)) {
-          if (!part.text.trim() || duplicateAttributes([...added.map((item) => item.text), part.text]).some((pair) => pair.includes(part.text))) continue;
-          added.push({ text: part.text.trim(), kind: part.kind, sourceRef: "goal" });
+          if (!part.text.trim() || duplicateAttributes([...split.map((item) => item.text), part.text]).some((pair) => pair.includes(part.text))) continue;
+          split.push({ text: part.text.trim(), kind: part.kind, sourceRef: "goal" });
         }
+        // These were the old interview's suggestions, never the person's words: a part that is an action or an achievement (「外推人类知识
+        // 边界」) is not offered as a chip. When nothing else is left the parts stay as they are, so the line is not left with nothing.
+        const descriptive = split.filter((item) => !attributeProblem(item.text));
+        const added = descriptive.length ? descriptive : split;
         if (!added.length || profiles[candidateLine.id]?.attributes?.length) continue;
         profiles[candidateLine.id] = { ...profiles[candidateLine.id], description: profiles[candidateLine.id]?.description ?? "", attributes: added };
         store.appendEvent({ ownerId, workspaceId, idempotencyKey: `line:candidates-split:${candidateLine.id}`, type: "line.candidates_split", entityId: candidateLine.id,

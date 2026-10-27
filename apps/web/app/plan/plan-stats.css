@@ -53,10 +53,19 @@
 .pl-ms-bar{fill:var(--lc,var(--graphite))}
 .pl-ms-track{stroke:var(--lc,var(--graphite));stroke-width:2;opacity:.5}
 .pl-ms-leader{stroke:var(--mist);stroke-width:1}
-.pl-ms-label{fill:var(--ink);color:var(--ink)}
+/* A halo in the card's colour, so a month line or the today line never cuts through a name. */
+.pl-ms-label{fill:var(--ink);color:var(--ink);paint-order:stroke;stroke:var(--paper);stroke-width:3px;stroke-linejoin:round}
 .pl-ms-today{stroke:var(--ink);stroke-width:1;stroke-dasharray:2 3}
 .pl-ms-point{cursor:pointer;outline:none}
-.pl-ms-point:hover .pl-ms-label,.pl-ms-point:focus-visible .pl-ms-label{text-decoration:underline}
+.pl-ms-point:hover .pl-ms-label,.pl-ms-point:focus-visible .pl-ms-label,.pl-ms-point[data-focus] .pl-ms-label{text-decoration:underline}
+.pl-ms-point[data-focus] .pl-ms-leader{stroke:var(--ink)}
+/* The strip above the axis: the milestone in focus, in full. Fixed height, so the axis never moves under the pointer. */
+.pl-ms-focus{height:52px;overflow-y:auto;padding:4px 10px;border:1px solid var(--mist);border-left:4px solid var(--lc,var(--mist));background:var(--paper);
+  font-size:13px;line-height:1.5;color:var(--ink)}
+.pl-ms-focus p{margin:0}
+.pl-ms-focus-title b{font-size:14px}
+.pl-ms-focus-title .ui-tag{margin-right:4px;vertical-align:1px}
+.pl-ms-focus-hint{color:var(--graphite)}
 .pl-ms-point:focus-visible .pl-ms-mark{stroke:var(--ink);stroke-width:2}
 .pl-ms-mark{stroke:var(--paper);stroke-width:1.5}
 .pl-ms-mark[data-state="on_track"]{fill:var(--lc,var(--ink))}

@@ -1,6 +1,7 @@
 import {
-  AGENT_CATEGORIES, AUTO_HANDOFF_SETTING, DISPATCH_STATES, GROWN_LIBRARY_SETTING, agentChains, isAgentCategory, isCourse, planAssistantTask, readGrownLibrary,
-  tFor, type AgentCategory, type AgentChain, type AgentChainMarks, type AgentRunRow, type AssistantPlan
+  AGENT_CATEGORIES, AUTO_HANDOFF_SETTING, DISPATCH_STATES, GROWN_LIBRARY_SETTING, agentChains, deliverableKey, isAgentCategory, isCourse, planAssistantTask, preparesOf,
+  readGrownLibrary, supersededResults, taskTitleOf, tFor,
+  type AgentCategory, type AgentChain, type AgentChainMarks, type AgentRunRow, type AssistantPlan
 } from "@crossline/core";
 import { readLocale } from "./locale";
 import path from "node:path";
@@ -19,8 +20,21 @@ const CATEGORIES = "agent.categories";
 const DECLINED = "agent.categories.declined";
 const PAUSED = "agent.paused";
 
+/**
+ * The kinds a workspace that never chose has on (docs/work-split.md §4, the owner's decision of 2026-10-21): organizing material,
+ * drafting and file preparation — static products made on this machine, none of which sends, signs in or pays. A default read, not a
+ * write: the first choice the person makes in 设置 saves the whole set, and from then on only what they chose holds.
+ */
+export const DEFAULT_CATEGORIES: readonly AgentCategory[] = ["read_research_organize", "draft_text", "files_calendar_prep"];
+/** Only accounts made from this day on (the owner said 「新账户」): an older one that never chose keeps what it had, nothing on. */
+export const DEFAULT_CATEGORIES_SINCE = "2026-10-22";
 export function readCategories(store: CrosslineStore, workspaceId: string): Partial<Record<AgentCategory, CategoryState>> {
-  try { return JSON.parse(store.getSetting(workspaceId, CATEGORIES) ?? "{}") as Partial<Record<AgentCategory, CategoryState>>; } catch { return {}; }
+  const raw = store.getSetting(workspaceId, CATEGORIES);
+  const created = store.listWorkspaces().find((workspace) => workspace.id === workspaceId)?.createdAt;
+  if (raw === undefined && created !== undefined && created < DEFAULT_CATEGORIES_SINCE) return {};
+  if (raw === undefined)
+    return Object.fromEntries(DEFAULT_CATEGORIES.map((category) => [category, { approvedAt: "", trust: "auto_checked", cleanRuns: 0 } satisfies CategoryState]));
+  try { return JSON.parse(raw) as Partial<Record<AgentCategory, CategoryState>>; } catch { return {}; }
 }
 export function declinedCategories(store: CrosslineStore, workspaceId: string): AgentCategory[] {
   try { return (JSON.parse(store.getSetting(workspaceId, DECLINED) ?? "[]") as unknown[]).filter(isAgentCategory); } catch { return []; }
@@ -92,12 +106,16 @@ export type AgentTaskRow = {
   siteRefusals: number;
   /** A run stopped part way whose files were offered for review as they were (`salvageStoppedRun`). */
   partial: boolean;
+  /** When it was handed over (`agent.task.completed`). */
+  completedAt?: string;
+  /** The guard flagged a send, publish, upload or payment on the way (`resultNeedsPerson`'s reason). */
+  external: boolean;
+  /** Put away by the daily pass without a decision (`settleAgentResult`): replaced by a later run, or unreviewed too long. Files are kept. */
+  settled?: "superseded" | "expired";
+  /** Who accepted or rejected it: the person, or the daily pass accepting it in their place (`reviewAgentTask(…, { by: "system" })`). */
+  reviewedBy?: "person" | "system";
 };
-/**
- * What a step delivers, as a comparison key: the step part of a run's `「task」 · 「step」` title, without case, spaces or punctuation.
- * Two tasks of one course both planned 「汇集课程讲义、作业与样题，形成材料目录」; the key is what makes them the same work.
- */
-export const deliverableKey = (title: string): string => (title.split(" · ").at(-1) ?? title).toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+export { deliverableKey };
 
 /**
  * The assistant's runs for any work order of a project, of the given statuses: what already exists (or is being made) for that course
@@ -114,7 +132,8 @@ const STALE_AFTER_MS = 8 * 3_600_000;
 
 export function listAgentTasks(store: CrosslineStore, workspaceId: string, now = new Date()): AgentTaskRow[] {
   const rows = new Map<string, AgentTaskRow>();
-  const events = store.listEvents(workspaceId, { type: ["agent.task.requested", "agent.task.completed", "agent.task.blocked", "agent.task.reviewed"] });
+  const events = store.listEvents(workspaceId, { type: ["agent.task.requested", "agent.task.completed", "agent.task.blocked", "agent.task.reviewed",
+    "agent.task.settled", "agent.task.reopened"] });
   for (const event of events) {
     const p = event.payload as Record<string, unknown>;
     const taskId = event.entityId;
@@ -122,7 +141,7 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
       rows.set(taskId, { taskId, title: String(p.title ?? ""), category: isAgentCategory(p.category) ? p.category : "read_research_organize", workOrderId: String(p.workOrderId ?? ""),
         requestedAt: event.createdAt, status: "running", directory: "", durationMs: 0, commands: 0, denied: 0, artifacts: [], needsHuman: 0, checksPassed: false, inputsModified: [], blockerCode: "", blockerMessage: "", reviewNote: "", autoApproved: p.autoApproved === true,
         delegated: p.delegated === true, stepId: typeof p.stepId === "string" ? p.stepId : "", by: p.by === "person" ? "person" : "system", deniedRules: [],
-        siteRefusals: 0, partial: false });
+        siteRefusals: 0, partial: false, external: false });
       continue;
     }
     const row = rows.get(taskId);
@@ -133,7 +152,9 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
       Object.assign(row, { status: p.reviewRequired === false ? "accepted" : "needs_review", directory: String(p.directory ?? ""), durationMs: Number(p.durationMs ?? 0),
         commands: Number(p.commands ?? 0), denied: Number(p.denied ?? 0), artifacts: Array.isArray(p.artifacts) ? p.artifacts as AgentTaskRow["artifacts"] : [],
         needsHuman: Number(p.needsHuman ?? 0), checksPassed: p.checksPassed === true, inputsModified: Array.isArray(p.inputsModified) ? p.inputsModified.map(String) : [],
-        partial: p.partial === true });
+        partial: p.partial === true, completedAt: event.createdAt,
+        external: Array.isArray(p.reviewReasons) && p.reviewReasons.some((reason) => /涉及对外/.test(String(reason))) });
+      delete row.settled;
     } else if (event.type === "agent.task.blocked") {
       Object.assign(row, { status: "blocked", blockerCode: String(p.code ?? ""), blockerMessage: String(p.message ?? ""), durationMs: Number(p.durationMs ?? 0), commands: Number(p.commands ?? 0), denied: Number(p.decisions ?? 0),
         endedAt: event.createdAt, deniedRules: Array.isArray(p.deniedRules) ? p.deniedRules.map(String) : [], siteRefusals: Number(p.siteRefusals ?? 0),
@@ -141,6 +162,17 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
     } else if (event.type === "agent.task.reviewed") {
       row.status = p.decision === "accepted" ? "accepted" : "rejected";
       row.reviewNote = String(p.note ?? "");
+      row.reviewedBy = p.by === "system" ? "system" : "person";
+    } else if (event.type === "agent.task.settled") {
+      if (row.status === "needs_review" && (p.how === "superseded" || p.how === "expired")) row.settled = p.how;
+    } else if (event.type === "agent.task.reopened") {
+      // An undo of the daily pass: the result is the person's to look at again, whatever the pass did with it.
+      if (row.status === "needs_review" || (row.status === "accepted" && row.reviewedBy === "system")) {
+        row.status = "needs_review";
+        delete row.settled;
+        delete row.reviewedBy;
+        row.reviewNote = "";
+      }
     }
   }
   for (const row of rows.values()) {
@@ -149,8 +181,42 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
   return [...rows.values()].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
 }
 
-/** The person's verdict on a finished task: records it, and moves the kind's trust accordingly. */
-export function reviewAgentTask(store: CrosslineStore, workspaceId: string, taskId: string, decision: "accepted" | "rejected", note = ""):
+/**
+ * The finished results that are still the person's to look at: `needs_review`, less the ones nobody can act on any more (2026-10-21,
+ * walking the real account: 35 results waited, the oldest from 10-08) — a result for a task since accepted or archived, and an older run
+ * of the same piece of work (same task and deliverable, or the same grown workflow) that a later finished run replaced. Those keep their
+ * status and their files; they are only no longer a decision. 待确认, its count and the input box read this.
+ */
+export function resultsAwaitingReview(store: CrosslineStore, workspaceId: string, rows: AgentTaskRow[] = listAgentTasks(store, workspaceId)): AgentTaskRow[] {
+  const gone = new Set(store.listWorkOrders(workspaceId).filter((order) => order.state === "accepted" || order.state === "archived").map((order) => order.id));
+  // Same work = same order and step, or the same deliverable after a replan re-ided the step (`sameWork` in core).
+  const replaced = supersededResults(rows.filter((row) => !row.settled));
+  return rows.filter((row) => row.status === "needs_review" && !row.settled && !(row.workOrderId && gone.has(row.workOrderId)) && !replaced.has(row.taskId));
+}
+
+/**
+ * Puts a waiting result away without a decision (the daily pass, `apps/worker/src/date-advance.ts`): replaced by a later run of the same
+ * work, or unreviewed so long and not safe to accept in the person's place. Its status and files stay; it is only no longer a decision.
+ */
+export function settleAgentResult(store: CrosslineStore, workspaceId: string, taskId: string, how: "superseded" | "expired", detail: { by?: string; day: string }): boolean {
+  const ownerId = store.getWorkspaceOwnerId(workspaceId);
+  if (!ownerId) return false;
+  return store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:settled:${taskId}:${how}:${detail.day}`, type: "agent.task.settled", entityId: taskId,
+    payload: { taskId, how, ...(detail.by ? { supersededBy: detail.by } : {}) } }).inserted;
+}
+
+/** The undo of the daily pass for one result: a settled one, or one the system accepted, is waiting for the person again. */
+export function reopenAgentResult(store: CrosslineStore, workspaceId: string, taskId: string, principalId: string): void {
+  store.appendEvent({ ownerId: principalId, workspaceId, idempotencyKey: `agent:reopened:${taskId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
+    type: "agent.task.reopened", entityId: taskId, payload: { taskId } });
+}
+
+/**
+ * The person's verdict on a finished task: records it, and moves the kind's trust accordingly. `by: "system"` is the daily pass accepting
+ * an old, clean result in the person's place: the same effects (delivered, step done), recorded as the system's, and no trust earned.
+ */
+export function reviewAgentTask(store: CrosslineStore, workspaceId: string, taskId: string, decision: "accepted" | "rejected", note = "",
+  options: { by?: "system"; /** false: accepted as the assistant's part only, the order is not handed in (it left work for the person). */ deliver?: boolean } = {}):
   { ok: true; trust: CategoryState | undefined } | { ok: false; code: "TASK_NOT_FOUND" | "TASK_NOT_REVIEWABLE" } {
   const task = listAgentTasks(store, workspaceId).find((row) => row.taskId === taskId);
   if (!task) return { ok: false, code: "TASK_NOT_FOUND" };
@@ -158,12 +224,12 @@ export function reviewAgentTask(store: CrosslineStore, workspaceId: string, task
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!ownerId) return { ok: false, code: "TASK_NOT_FOUND" };
   store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:reviewed:${taskId}:${Date.now()}`, type: "agent.task.reviewed", entityId: taskId,
-    payload: { taskId, decision, note: note.slice(0, 500), category: task.category } });
+    payload: { taskId, decision, note: note.slice(0, 500), category: task.category, ...(options.by ? { by: options.by } : {}) } });
   // A result that failed its own checks, or left originals changed, does not count towards trust even if the person is kind.
   const clean = decision === "accepted" && task.checksPassed && task.inputsModified.length === 0;
-  const trust = recordReview(store, workspaceId, task.category, clean);
+  const trust = options.by === "system" ? readCategories(store, workspaceId)[task.category] : recordReview(store, workspaceId, task.category, clean);
   // Accepting a delegated task's result is accepting it as the work: it goes to the gate as the order's evidence.
-  if (decision === "accepted") deliverAgentResult(store, workspaceId, taskId);
+  if (decision === "accepted" && options.deliver !== false) deliverAgentResult(store, workspaceId, taskId);
   // A step it did is that step done.
   if (decision === "accepted" && task.stepId && task.workOrderId) {
     try { store.updateStepProgress(workspaceId, task.workOrderId, task.stepId, { status: "done" }, ownerId, "agent"); } catch { /* the step was replanned away */ }
@@ -186,7 +252,23 @@ export function deliverAgentResult(store: CrosslineStore, workspaceId: string, t
   const evidence = task.artifacts.map((artifact) => ({ kind: "file" as const, uri: pathToFileURL(path.join(task.directory, artifact.path)).href,
     description: tFor(readLocale(store, workspaceId))("助手产出：{{path}}", { path: artifact.path }) }));
   const result = store.transitionWorkOrder(workspaceId, order.id, { type: "agent.delivered", taskId }, `agent-delivered:${taskId}`, { evidence });
+  if (result.changed && (order.payload as { owner?: unknown } | undefined)?.owner === "assistant") finishPreparation(store, workspaceId, order, task.title, taskId);
   return { delivered: result.changed };
+}
+
+/**
+ * The assistant's own item, once its accepted result is delivered (docs/work-split.md): done, not judged by the milestone gate — the
+ * milestone's progress is the person's core work, and this was only its preparation. The core task it prepares shows the files under
+ * 「已备好」 (`task-detail.ts`, the step planner's `existingOutputs`) and, while not started, is planned again with them.
+ */
+function finishPreparation(store: CrosslineStore, workspaceId: string, order: { id: string; payload: unknown }, title: string, taskId: string): void {
+  store.transitionWorkOrder(workspaceId, order.id, { type: "evidence.accepted", approvalId: "system:assistant-preparation" }, `prep-accepted:${taskId}`);
+  const core = store.listWorkOrders(workspaceId).find((item) => item.id === preparesOf(order));
+  const ownerId = store.getWorkspaceOwnerId(workspaceId);
+  if (!core || !ownerId || !DISPATCH_STATES.has(core.state) || !store.getStepPlan(workspaceId, core.id)) return;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.steps_replan_requested:prepared:${taskId}`, type: "task.steps_replan_requested", entityId: core.id,
+    // i18n-ignore: the brief for the next plan (model-facing)
+    payload: { feedback: `助手已备好「${title.slice(0, 60)}」（在本任务的「已备好」里）。本人的步骤直接用它，不再安排收集或整理它的步骤。`, prepared: taskId } });
 }
 
 /** A kind of work the assistant would like to start but has not been allowed to, waiting for the person. */
@@ -237,6 +319,51 @@ export function pendingAgentApprovals(store: CrosslineStore, workspaceId: string
 }
 
 /**
+ * A question the assistant put to the person in the middle of a run (Codex's `request_user_input`, 2026-10-19): what only the person
+ * knows and the work cannot go on without. Each question has an id, a short header, the question and its options; the person answers on
+ * 待确认 with options or their own words. Unanswered it expires (`agent.question.expired`), and the run goes on the safest way.
+ */
+export type AgentQuestion = { id: string; header: string; question: string; options: Array<{ label: string; description: string }> };
+export type AgentQuestionRow = { id: string; taskId: string; title: string; questions: AgentQuestion[]; requestedAt: string };
+export function requestAgentQuestion(store: CrosslineStore, workspaceId: string, taskId: string, title: string, questions: AgentQuestion[]): string | undefined {
+  const ownerId = store.getWorkspaceOwnerId(workspaceId);
+  if (!ownerId || !questions.length) return undefined;
+  const id = `aq-${Math.random().toString(36).slice(2, 10)}`;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:requested:${id}`, type: "agent.question.requested", entityId: id,
+    payload: { id, taskId, title: title.slice(0, 200), questions: questions.slice(0, 3).map((question) => ({ id: question.id.slice(0, 80), header: question.header.slice(0, 60),
+      question: question.question.slice(0, 600), options: question.options.slice(0, 6).map((option) => ({ label: option.label.slice(0, 120), description: option.description.slice(0, 300) })) })) } });
+  return id;
+}
+/** The person's answers, one list per question id (an option's label, or their own words). Refused once answered or expired. */
+export function answerAgentQuestion(store: CrosslineStore, workspaceId: string, id: string, answers: Record<string, string[]>): boolean {
+  const ownerId = store.getWorkspaceOwnerId(workspaceId);
+  const asked = store.listEvents(workspaceId, { type: "agent.question.requested", entityId: id })[0];
+  if (!ownerId || !asked || agentQuestionClosed(store, workspaceId, id)) return false;
+  const ids = new Set(((asked.payload as { questions?: AgentQuestion[] }).questions ?? []).map((question) => question.id));
+  const kept = Object.fromEntries(Object.entries(answers).filter(([key, value]) => ids.has(key) && Array.isArray(value))
+    .map(([key, value]) => [key, value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim().slice(0, 1000)).slice(0, 6)]));
+  if (!Object.values(kept).some((value) => value.length)) return false;
+  return store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:answered:${id}`, type: "agent.question.answered", entityId: id, payload: { id, answers: kept } }).inserted;
+}
+export function agentQuestionAnswers(store: CrosslineStore, workspaceId: string, id: string): Record<string, string[]> | undefined {
+  const answered = store.listEvents(workspaceId, { type: "agent.question.answered", entityId: id })[0];
+  return answered ? (answered.payload as { answers: Record<string, string[]> }).answers : undefined;
+}
+export function expireAgentQuestion(store: CrosslineStore, workspaceId: string, id: string): void {
+  const ownerId = store.getWorkspaceOwnerId(workspaceId);
+  if (!ownerId || agentQuestionClosed(store, workspaceId, id)) return;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:expired:${id}`, type: "agent.question.expired", entityId: id, payload: { id } });
+}
+const agentQuestionClosed = (store: CrosslineStore, workspaceId: string, id: string) =>
+  store.listEvents(workspaceId, { type: "agent.question.answered", entityId: id }).length > 0 || store.listEvents(workspaceId, { type: "agent.question.expired", entityId: id }).length > 0;
+export function pendingAgentQuestions(store: CrosslineStore, workspaceId: string, now = new Date(), maxAgeMs = 15 * 60_000): AgentQuestionRow[] {
+  const closed = new Set([...store.listEvents(workspaceId, { type: "agent.question.answered" }), ...store.listEvents(workspaceId, { type: "agent.question.expired" })].map((event) => event.entityId));
+  return store.listEvents(workspaceId, { type: "agent.question.requested" })
+    .filter((event) => !closed.has(event.entityId) && now.getTime() - Date.parse(event.createdAt) <= maxAgeMs)
+    .map((event) => ({ ...(event.payload as Omit<AgentQuestionRow, "requestedAt">), requestedAt: event.createdAt }));
+}
+
+/**
  * Whether a work order can go to the assistant, and in what words: the same reading the worker dispatches from and the Workbench shows,
  * so the button never promises what the worker would refuse.
  */
@@ -252,7 +379,9 @@ export function assistantPlanFor(store: CrosslineStore, workspaceId: string, ord
   const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.projectId === order.projectId);
   const { dates, undated } = latestFileDates(store, workspaceId);
   const milestoneTitle = store.listMilestones(workspaceId).find((milestone) => milestone.id === order.milestoneId)?.title;
-  const plan = planAssistantTask(order, { projectIsCourse: isCourse(order.projectId, facts, dates, undated), ...(milestoneTitle ? { milestoneTitle } : {}), locale });
+  const served = preparesOf(order) ? store.listWorkOrders(workspaceId).find((item) => item.id === preparesOf(order)) : undefined;
+  const plan = planAssistantTask(order, { projectIsCourse: isCourse(order.projectId, facts, dates, undated), ...(milestoneTitle ? { milestoneTitle } : {}),
+    ...(served ? { servesTitle: taskTitleOf(served) } : {}), locale });
   if (!plan.fit) return { ok: false, code: "NOTHING_FOR_ASSISTANT", message: plan.reason };
   return { ok: true, plan, title: order.intent, projectId: order.projectId };
 }
@@ -313,7 +442,10 @@ export function requestAgentRetry(store: CrosslineStore, workspaceId: string, ta
   const only = (input.only ?? []).map((item) => item.trim().slice(0, 300)).filter(Boolean).slice(0, 20);
   if (task.status === "needs_review" && !task.partial) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:reviewed:${taskId}:redo:${now.getTime()}`,
     type: "agent.task.reviewed", entityId: taskId, payload: { taskId, decision: "redo", note: (input.note ?? "").slice(0, 500), category: task.category } });
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:retry:${taskId}:${now.getTime()}`, type: "agent.retry_requested", entityId: taskId,
+  // Keyed on how many times this task was asked for already, not the clock: two requests in one millisecond shared a key and the
+  // second (with its words) was silently dropped by `appendEvent`.
+  const attempt = store.listEvents(workspaceId, { type: "agent.retry_requested", entityId: taskId }).length;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:retry:${taskId}:${attempt}`, type: "agent.retry_requested", entityId: taskId,
     payload: { taskId, note: (input.note ?? "").trim().slice(0, 4000), ...(only.length ? { only } : {}), ...(input.approach ? { approach: input.approach.slice(0, 300) } : {}), by: "person" } });
   return { ok: true };
 }

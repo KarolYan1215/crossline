@@ -27,7 +27,9 @@ describe("the card's reading of a task", () => {
   });
 
   test("each state that is not the person's to work on is a wait, with its reason", () => {
-    expect(waitReason(detail({ state: "awaiting_plan_approval" }), TODAY)?.label).toBe("等本人批准 · 步骤规划中");
+    expect(waitReason(detail({ state: "awaiting_plan_approval" }), TODAY)?.label).toBe("等本人批准");
+    // Steps still being planned: not a decision yet, so not 「等本人批准」 (W-31).
+    expect(waitReason(detail({ state: "awaiting_plan_approval", preparing: true }), TODAY)).toEqual({ kind: "preparing", label: "步骤规划中，规划好后再请本人批准" });
     expect(waitReason(detail({ state: "blocked", blocker: { reason: "证据不足" } }), TODAY)?.label).toBe("已退回 · 证据不足");
     expect(waitReason(detail({ state: "preparing", materialBlocker: { message: "缺讲义" } }), TODAY)?.label).toBe("材料准备已停止 · 缺讲义");
     expect(waitReason(detail({ state: "evidence_review" }), TODAY)?.kind).toBe("gate");
@@ -74,7 +76,8 @@ test("a task sent back with a ledger code reads in words, never the code", () =>
 });
 
 test("in English the card reads in English, and a waiting step written in English loses its own 'Wait for'", () => {
-  expect(waitReason(detail({ state: "awaiting_plan_approval" }), TODAY, "en")?.label).toBe("Waiting for your approval · steps being planned");
+  expect(waitReason(detail({ state: "awaiting_plan_approval" }), TODAY, "en")?.label).toBe("Waiting for your approval");
+  expect(waitReason(detail({ state: "awaiting_plan_approval", preparing: true }), TODAY, "en")?.label).toBe("Steps being planned · your approval is asked once they are ready");
   expect(waitReason(detail({ state: "blocked", blocker: { reason: "MILESTONE_GATE_INSUFFICIENT" } }), TODAY, "en")?.label).toBe("Sent back · Not enough evidence to accept");
   expect(waitReason(detail({ window: { notBefore: "2026-10-18" } }), TODAY, "en")?.label).toBe("Can start from Oct 18");
   const waiting = (title: string) => waitReason(detail({ stepPlan: plan([step("a", { title, schedulable: false, notBefore: "2026-10-20" })]) }), TODAY, "en")?.label;

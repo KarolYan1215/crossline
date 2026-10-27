@@ -13,7 +13,23 @@ export type AgentMode = {
   onItem: (item: AgentItem, phase: "started" | "completed") => void;
   /** The answer to one of the runtime's requests. Throwing refuses it. */
   answer: (method: string, params: Record<string, unknown>) => unknown | Promise<unknown>;
+  /**
+   * Run the shell inside Codex's own Linux sandbox (bubblewrap) instead of with full access (docs/personal-agent.md §8): writes only in
+   * `writable`, reads only the system's own folders and `readable`, `deny` unreadable whatever else says, no network. Absent: full access
+   * (the machine owner's own computer, behind the guard).
+   */
+  sandbox?: { writable: string; readable: string[]; deny: string[]; env?: Record<string, string> };
 };
+
+/** The permission profile a sandboxed assistant thread runs under (Codex `[permissions.<id>]`). */
+export const SANDBOX_PROFILE = "crossline-task";
+export function sandboxProfile(sandbox: NonNullable<AgentMode["sandbox"]>): Record<string, unknown> {
+  const filesystem: Record<string, string> = { ":minimal": "read" };
+  for (const path of sandbox.deny) filesystem[path] = "deny";
+  for (const path of sandbox.readable) filesystem[path] = "read";
+  filesystem[sandbox.writable] = "write";
+  return { [SANDBOX_PROFILE]: { description: "Crossline assistant task", filesystem, network: { enabled: false } } };
+}
 
 type Handler = AgentMode["answer"];
 const registries = new WeakMap<object, Map<string, Handler>>();

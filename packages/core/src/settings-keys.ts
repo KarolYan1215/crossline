@@ -9,6 +9,15 @@ export const goalSettingKey = (milestoneId: string) => `goal.settings:${mileston
 export const AVAILABILITY_SETTING = "schedule.availability";
 /** What the interview proposed from the rhythm the person described (`{windows, why}`); used until a pattern is saved. */
 export const AVAILABILITY_PROPOSED_SETTING = "schedule.availability.proposed";
+/**
+ * The person's one look over what the interview recorded before the app opens (`{at, via: "person"}`, 2026-10-19, P2 of the interview
+ * redesign): the start standard stands, the extraction has caught up, and they confirmed the lines, projects, deadlines and hours.
+ */
+export const START_CONFIRMED_SETTING = "onboarding.startConfirmed";
+/** Accounts that met the start standard before the confirmation existed are not asked for it (`startConfirmedFor`). */
+// When the confirmation went live (deployed 2026-10-19 04:11 UTC). It said 2026-10-20 at first, which exempted every account that reached
+// the standard on the launch day itself, so nobody saw the sheet (found walking the live beta).
+export const START_CONFIRM_SINCE = "2026-10-19T04:00:00.000Z";
 /** `"1"` on the one workspace whose account owns this machine's Codex runtime and the shell assistant (decided once by the worker). */
 export const RUNTIME_OWNER_SETTING = "deployment.runtimeOwner";
 

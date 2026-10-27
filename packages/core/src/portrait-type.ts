@@ -3,61 +3,85 @@ export { CHARACTER_EXPRESSIONS, CHARACTER_POSES } from "./portrait-character";
 import { tFor, type Locale } from "./i18n";
 
 /**
- * Crossline's own personality typing (decided 2026-10-08, after the popular result pages of MBTI-style tests): four axes about how a
- * person runs several lines of work, each scored 0–100 by the portrait writer from evidence, read as a four-letter code into one of
- * sixteen fixed types in four groups. The names live here, not in the model's answer, so the same profile always lands on the same,
- * comparable, shareable type — the model only says where on each axis the person stands and why.
+ * Crossline's own typing (redesigned 2026-10-24 with the owner): what kind of super individual a person is in the AI era — four
+ * dimensions of how they work with AI and how many lines they run, each taken from a body of research and scored 0–100 (0 = left pole,
+ * 100 = right pole) — by the quick test from situational answers, by the portrait writer from evidence — read as a four-letter code into
+ * one of sixteen fixed types in four groups. The names live here, not in the model's answer, so the same profile always lands on the same,
+ * comparable, shareable type. The letters are coordinates only: no page or poster shows them beside a type's name.
+ *
+ * It replaced the 2026-10-17 typing (主线集中度 / 探索–利用 / 角色边界 / 投入节律, codes like DXBV), which was almost all about running
+ * several lines and said nothing about AI (the owner, 2026-10-24: 「过重地谈论跨人生主线并行，忽略了 AI 时代和超级个体」).
  */
 
-export type TypeAxisId = "scope" | "basis" | "output" | "rhythm";
-/** Each letter is the initial of an English word (`en`), so the code reads as words: GEMA = Generalist, Evidence, Making, Adapting. */
-export const TYPE_AXES: Array<{ id: TypeAxisId; left: { letter: string; label: string; en: string }; right: { letter: string; label: string; en: string }; question: string }> = [
-  { id: "scope", left: { letter: "S", label: "深耕", en: "Specialist" }, right: { letter: "G", label: "跨界", en: "Generalist" }, question: "注意力集中在一条线做深，还是在几条线之间连起来" },
-  { id: "basis", left: { letter: "E", label: "实证", en: "Evidence" }, right: { letter: "I", label: "直觉", en: "Intuition" }, question: "做判断靠数据与证据，还是靠感觉与远景" },
-  { id: "output", left: { letter: "M", label: "造物", en: "Making" }, right: { letter: "R", label: "传播", en: "Reaching" }, question: "成就感来自做出东西，还是来自影响他人" },
-  { id: "rhythm", left: { letter: "P", label: "规划", en: "Planning" }, right: { letter: "A", label: "应变", en: "Adapting" }, question: "按计划推进，还是边做边调整" }
+export type TypeAxisId = "collab" | "purpose" | "build" | "lines";
+/** Each letter is the initial of an English word (`en`); the eight letters are all different and none is one of MBTI's. */
+export type TypeAxis = {
+  id: TypeAxisId;
+  /** The dimension's name, and what it measures in one sentence. */
+  name: string;
+  question: string;
+  left: { letter: string; label: string; en: string; definition: string };
+  right: { letter: string; label: string; en: string; definition: string };
+  /** The research it rests on, as short citations. */
+  sources: string;
+};
+export const TYPE_AXES: TypeAxis[] = [
+  { id: "collab", name: "协作形态", question: "把活切开分段交给 AI，还是从头到尾和 AI 交织着做",
+    left: { letter: "R", label: "接力", en: "Relay", definition: "先自己拆好任务，把其中几段交给 AI，再把结果接回来" },
+    right: { letter: "W", label: "共生", en: "Weave", definition: "从第一步起就和 AI 一来一回，边做边改，人和 AI 的部分分不开" },
+    sources: "Dell'Acqua, Mollick 等 2023（HBS 24-013，半人马与赛博格）" },
+  { id: "purpose", name: "用 AI 图什么", question: "用 AI 是为了拿到结果，还是为了让自己变强",
+    left: { letter: "O", label: "交付", en: "Output", definition: "要的是能交出去的结果，过程交给 AI 越多越好" },
+    right: { letter: "U", label: "精进", en: "Upskill", definition: "借 AI 学会、看懂、练熟，下次自己也能做" },
+    sources: "Anthropic Economic Index 2025（自动化与增强）；Lee 等 2025（CHI，知识工作者的批判性思考）" },
+  { id: "build", name: "构建方式", question: "先把蓝图想清楚再动手，还是先上手拼出来再改",
+    left: { letter: "B", label: "蓝图", en: "Blueprint", definition: "先定目标、结构和步骤，再按计划推进" },
+    right: { letter: "H", label: "拼装", en: "Hack", definition: "先用手边的东西拼出一版，边试边改，在改的过程里想清楚" },
+    sources: "Turkle & Papert 1990（规划者与拼装者）" },
+  { id: "lines", name: "人生主线", question: "时间和身份集中在一条主线，还是分给几条线",
+    left: { letter: "A", label: "单核", en: "Anchor", definition: "一条主线占主导，AI 省下的时间也投回它" },
+    right: { letter: "G", label: "多星", en: "Galaxy", definition: "同时经营几条分量相近的线，AI 让每条线都能转起来" },
+    sources: "Sieber 1974 角色累积；Ramarajan 2014 多重身份；Teodoridis, Bikard & Vakili 2019 通才与专才" }
 ];
 
 /**
- * The four groups (first two letters), each one muted Morandi hue (decided 2026-10-14: not the purple/green/blue/yellow of the popular
- * MBTI test): `tone` is the figure's outfit colour, `tint` the card's and the figure's backdrop, `colour` the same hue deep enough for
- * text (at least 7:1 on the poster's paper, checked in portrait-type.test.ts) — sage for 工匠组, dusty rose for 求索组, haze blue for
- * 架构组, clay for 开拓组.
+ * The four groups (first two letters: collab × purpose), each one muted Morandi hue (kept from 2026-10-14): `tone` is the figure's outfit
+ * colour, `tint` the card's and the figure's backdrop, `colour` the same hue deep enough for text (at least 7:1 on the poster's paper,
+ * checked in portrait-type.test.ts) — haze blue for 甲方派, sage for 蒸馏派, clay for 机甲派, dusty rose for 共修派.
  */
 export const TYPE_GROUPS: Record<string, { name: string; colour: string; tone: string; tint: string; blurb: string }> = {
-  SE: { name: "工匠组", colour: "#3D4A35", tone: "#8C9A7E", tint: "#E2E6DA", blurb: "在一处做深，用证据说话" },
-  SI: { name: "求索组", colour: "#66404A", tone: "#A88C93", tint: "#EBDEE0", blurb: "在一处做深，跟随内在的问题" },
-  GE: { name: "架构组", colour: "#34495A", tone: "#8497A6", tint: "#DCE3E9", blurb: "连接多条线，用证据搭结构" },
-  GI: { name: "开拓组", colour: "#623E29", tone: "#B48C72", tint: "#EFE2D7", blurb: "连接多条线，凭远景开新路" }
+  RO: { name: "甲方派", colour: "#34495A", tone: "#8497A6", tint: "#DCE3E9", blurb: "把活拆开派给 AI，自己验收结果" },
+  RU: { name: "蒸馏派", colour: "#3D4A35", tone: "#8C9A7E", tint: "#E2E6DA", blurb: "让 AI 当师傅，学会了自己上" },
+  WO: { name: "机甲派", colour: "#623E29", tone: "#B48C72", tint: "#EFE2D7", blurb: "和 AI 合体干活，只看产出" },
+  WU: { name: "共修派", colour: "#66404A", tone: "#A88C93", tint: "#EBDEE0", blurb: "和 AI 一起变强" }
 };
 
 /**
- * Sixteen types (renamed 2026-10-14 so no two share a word): one role noun each, kept within the group's image, and the two of a pair that
- * differ only in rhythm read as opposites (钟表匠 ↔ 试验家). `blurb` is the fallback one-liner for a report written before the writer gave
- * a personal `summary`.
+ * Sixteen types (named by the owner, 2026-10-24). `quote` is the type's line on the poster and the result page, the owner's own; `blurb`
+ * describes the four positions in plain words and is the fallback one-liner for a report written before the writer gave a `summary`.
  */
-export const TYPE_TABLE: Record<string, { name: string; blurb: string }> = {
-  SEMP: { name: "钟表匠", blurb: "守着一个领域，按证据和计划把东西做到经得起检验" },
-  SEMA: { name: "试验家", blurb: "守着一个领域边做边试，让结果替自己说话" },
-  SERP: { name: "讲师", blurb: "守着一个领域，按体系把证据讲清楚、讲成课" },
-  SERA: { name: "顾问", blurb: "守着一个领域随问随答，拿证据回应每个问题" },
-  SIMP: { name: "雕刻家", blurb: "循着心里的问题，在一个领域长期打磨一件作品" },
-  SIMA: { name: "即兴艺人", blurb: "在一个领域里凭灵感随手做出新东西" },
-  SIRP: { name: "布道者", blurb: "守着一个信念，系统地把它讲给更多人" },
-  SIRA: { name: "吟游诗人", blurb: "在一个领域边走边追问，随时把所得分享出去" },
-  GEMP: { name: "架构师", blurb: "连起多条线，按证据和计划组成一个系统" },
-  GEMA: { name: "改装师", blurb: "连起多条线，拿现成的东西快速拼成能用的产品" },
-  GERP: { name: "参谋长", blurb: "连起多条线，梳理证据，提出并推行方案" },
-  GERA: { name: "联络官", blurb: "连起多条线，随时用证据在不同圈子之间牵线" },
-  GIMP: { name: "创始人", blurb: "连起多条线，凭远景按计划汇成一项事业" },
-  GIMA: { name: "发明家", blurb: "在多个领域间跳跃，不断造出新东西" },
-  GIRP: { name: "旗手", blurb: "描绘一个跨领域的愿景，按计划带动他人" },
-  GIRA: { name: "探险家", blurb: "在多个领域开路，把所见随时带给别人" }
+export const TYPE_TABLE: Record<string, { name: string; quote: string; blurb: string }> = {
+  ROBA: { name: "甲方", quote: "我还是觉得第 1 版比较好看", blurb: "先想清楚要什么，把一件事拆好交给 AI，自己把关验收" },
+  ROBG: { name: "塔台", quote: "MU11451，你怎么四百多节降落", blurb: "几条线排好次序，同时派活给 AI，自己盯全局" },
+  ROHA: { name: "甩手掌柜", quote: "你应该是这方面的专家，反正比我专家", blurb: "先把事丢给 AI 跑出一版，能用就交，专心一条主线" },
+  ROHG: { name: "时间管理大师", quote: "做完你的做你的，做完你的做你的", blurb: "好几件事一起丢给 AI，边跑边看，哪条线都不落下" },
+  RUBA: { name: "大学生", quote: "豆包再胡说我给你豆馅掏出来。", blurb: "按计划跟着 AI 学一门，学透为止" },
+  RUBG: { name: "六边形战士", quote: "快用你那无敌的 Claude 想想办法啊！", blurb: "每条线都有学习计划，借 AI 样样补齐" },
+  RUHA: { name: "拆弹专家", quote: "我不敢剪大肥鱼说的那条线", blurb: "AI 给的东西先拆开弄懂，再自己上手" },
+  RUHG: { name: "野生学者", quote: "没有学位，但有 200 个收藏夹", blurb: "什么都想学，跟着 AI 到处试" },
+  WOBA: { name: "铁驭", quote: "铁驭，准备战斗", blurb: "定好目标后和 AI 合体推进一条主线，人机配合只为产出" },
+  WOBG: { name: "舰长", quote: "右满舵，主炮预备！", blurb: "按航线指挥一整船 AI，几条线同时开火" },
+  WOHA: { name: "某神秘光头", quote: "我不明白。机枪手向右 20cm。", blurb: "边打边调，和 AI 一起把一条主线磨出结果" },
+  WOHG: { name: "数字游民", quote: "Wi-Fi 在哪，工位就在哪", blurb: "带着 AI 四处开工，几条线随走随做" },
+  WUBA: { name: "修行者", quote: "闭关七七四十九天，出关即满级", blurb: "定好修炼计划，和 AI 对练，在一条主线上越练越强" },
+  WUBG: { name: "军师", quote: "主公莫慌，AI 已推演三遍", blurb: "和 AI 一起推演每条线的打法，样样心里有数" },
+  WUHA: { name: "炼金术士", quote: "炸炉是必要的等价交换", blurb: "和 AI 一炉一炉试，炸了再来，在一条主线上越试越懂" },
+  WUHG: { name: "百晓生", quote: "江湖上的事，问我就对了", blurb: "和 AI 聊遍各个领域，什么都懂一点，什么都想试" }
 };
 
 /**
  * What stops the writer's personal type summary from being shown: it must speak to the person (「你…」), and it must not name a type or a
- * code — the page ends it with 「你是 GEMA 改装师。」 itself, from the scores, so the two can never disagree.
+ * code — the page ends it with 「你是某神秘光头。」 itself, from the scores, so the two can never disagree.
  */
 // The problems are repair messages to the portrait writer, not interface text. An English report speaks to "you" and is held to the
 // English type names as well.
@@ -75,7 +99,7 @@ export function typeSummaryProblem(summary: string): string | null {
 /* i18n-ignore-end */
 
 export type PortraitType = {
-  code: string; name: string; blurb: string;
+  code: string; name: string; quote: string; blurb: string;
   group: { key: string; name: string; colour: string; tint: string; blurb: string };
   /** The writer's paragraph about this person as this type, without the type's name; none on older reports. */
   summary: string;
@@ -100,13 +124,15 @@ export function typeFromScores(scores: Record<TypeAxisId, number>, evidence: Par
   const code = axes.map((axis) => axis.letter).join("");
   const groupKey = code.slice(0, 2);
   const type = TYPE_TABLE[code]!, group = TYPE_GROUPS[groupKey]!;
-  return { code, name: t(type.name), blurb: t(type.blurb), summary: "",
+  return { code, name: t(type.name), quote: t(type.quote), blurb: t(type.blurb), summary: "",
     group: { key: groupKey, ...group, name: t(group.name), blurb: t(group.blurb) }, axes };
 }
 
 /** The person's type from the writer's axis scores, with the writer's summary; none for a report written before the axes existed. */
 export function portraitType(report: PortraitReport, locale?: Locale): PortraitType | null {
-  return report.type ? { ...typeFromScores(report.type, report.type.evidence, locale), summary: (report.type.summary ?? "").trim() } : null;
+  // A report written on the first version's axes (scope/basis/output/rhythm) has no type until it is rewritten (schema 4).
+  if (!report.type || !TYPE_AXES.every((axis) => typeof report.type![axis.id] === "number")) return null;
+  return { ...typeFromScores(report.type, report.type.evidence, locale), summary: (report.type.summary ?? "").trim() };
 }
 
 export type PortraitLabelCell = { title: string; value: string; detail?: string };
@@ -151,7 +177,8 @@ export const CHARACTER_STANDARD = [
   "Absolutely no text, letters, numbers, logos or brand marks anywhere. Square 1:1 frame."
 ].join(" ");
 
-const LINE_COLOUR_NAME: Record<string, string> = { research: "deep blue (#0A5198)", startup: "burnt orange (#8C3709)", media: "plum (#792E9C)", investment: "forest green (#085E3A)", health: "ochre (#664E00)" };
+const LINE_COLOUR_NAME: Record<string, string> = { research: "deep blue (#0A5198)", startup: "burnt orange (#8C3709)", media: "plum (#792E9C)", investment: "forest green (#085E3A)", health: "ochre (#664E00)",
+  "line-wellness": "olive (#4A5200)", "line-wealth": "deep teal (#005B66)" };
 
 /** The one image prompt for the person's figure: the standard, their group's backdrop, and the writer's redacted choices. */
 export function characterPrompt(report: PortraitReport): string | null {

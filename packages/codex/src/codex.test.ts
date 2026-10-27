@@ -12,6 +12,7 @@ type TestSupervisor = {
 type StartSupervisor = (options: {
   port: number;
   sidecarFactory: () => Promise<unknown>;
+  onRuntimeExit?: () => void;
 }) => Promise<TestSupervisor>;
 
 function supervisorStarter(): StartSupervisor | undefined {
@@ -399,6 +400,24 @@ describe("Codex app-server boundary", () => {
     }
   });
 
+  test("an exit nobody asked for is reported once so the worker can restart; stopping the supervisor is not", async () => {
+    const startSupervisor = supervisorStarter();
+    if (!startSupervisor) return;
+    let exits = 0;
+    const killed = fakeSidecar();
+    const first = await startSupervisor(
+      { port: 0, sidecarFactory: async () => killed.handle, onRuntimeExit: () => { exits += 1; } });
+    killed.exit();
+    expect(exits).toBe(1);
+    await first.stop();
+    const stopped = fakeSidecar();
+    const second = await startSupervisor(
+      { port: 0, sidecarFactory: async () => stopped.handle, onRuntimeExit: () => { exits += 1; } });
+    await second.stop();
+    stopped.exit();
+    expect(exits).toBe(1);
+  });
+
   test("the durable boundary cancels the active login without stopping the sidecar", async () => {
     const startSupervisor = supervisorStarter();
     expect(startSupervisor).toBeTypeOf("function");
@@ -448,6 +467,13 @@ describe("codex executable resolution", () => {
     const shipped = "C:\\Users\\k\\AppData\\Local\\Crossline\\app\\codex\\codex.exe";
     expect(codexModule.resolveCodexCommand({ CROSSLINE_CODEX_PATH: shipped }, (file) => file === shipped, "win32",
       () => codexModule.CODEX_RELEASE_BINARY_SHA256)).toEqual({ command: shipped, args: [] });
+  });
+
+  test("the server's Linux release is accepted at the new pin, and at the previous one until the host's binary is replaced", () => {
+    const server = "/opt/codex/codex";
+    for (const hash of [codexModule.CODEX_LINUX_RELEASE_BINARY_SHA256, ...codexModule.CODEX_PREVIOUS_BINARY_SHA256])
+      expect(codexModule.resolveCodexCommand({ CROSSLINE_CODEX_PATH: server }, (file) => file === server, "linux", () => hash)).toEqual({ command: server, args: [] });
+    expect(codexModule.CODEX_PREVIOUS_BINARY_SHA256).not.toContain(codexModule.CODEX_LINUX_RELEASE_BINARY_SHA256);
   });
 
   test("a changed executable is refused before app-server starts", () => {
@@ -591,6 +617,27 @@ describe("each account's own Codex", () => {
       expect((await call("ws-owner", "POST", "/v1/captures/auto-analyze", {})).status).toBe(202);
       expect(supervisor.clientFor("ws-guest")).toBeUndefined();
       expect(supervisor.clientFor("ws-owner")).toBe(owner.handle.client);
+    } finally { await supervisor.stop(); rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test("a signed-in guest whose runtime is not up is told who it is from its saved login, without starting the runtime", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(path.join(tmpdir(), "crossline-guest-"));
+    const home = path.join(dir, "ws-guest", "codex-home");
+    mkdirSync(home, { recursive: true });
+    const claims = Buffer.from(JSON.stringify({ email: "guest@example.com", "https://api.openai.com/auth": { chatgpt_plan_type: "plus" } })).toString("base64url");
+    writeFileSync(path.join(home, "auth.json"), JSON.stringify({ auth_mode: "chatgpt", OPENAI_API_KEY: null, tokens: { id_token: `h.${claims}.s` } }));
+    const owner = fakeSidecar();
+    let started = 0;
+    const supervisor = await codexModule.startCodexSupervisor({ port: 0, sidecarFactory: async () => owner.handle, capabilitySecret: SECRET,
+      runtimes: { baseDir: dir, ownerWorkspaceId: () => "ws-owner", start: async () => { started += 1; return fakeSidecar().handle as never; } },
+      autoAnalyzeCaptures: async () => undefined });
+    try {
+      const { supervisorBootId } = await (await fetch(`${supervisor.url}/v1/codex/status`)).json() as { supervisorBootId: string };
+      const answer = await fetch(`${supervisor.url}/v1/codex/account`, { headers: { "x-crossline-capability": sign("ws-guest", "GET /v1/codex/account", supervisorBootId) } });
+      expect(await answer.json()).toMatchObject({ account: { type: "chatgpt", email: "guest@example.com", planType: "plus" }, requiresOpenaiAuth: false, guest: true });
+      expect(started).toBe(0);
     } finally { await supervisor.stop(); rmSync(dir, { recursive: true, force: true }); }
   });
 });

@@ -4,13 +4,17 @@ import { dataDir } from "../config";
 import { writeFileAtomic } from "./files";
 
 /**
- * The daily cost guard: how many paid image calls today, kept in `dataDir()/avatar-budget.json` so a restart does not reset it. A day is
+ * The daily count of paid calls, and an optional ceiling on it: how many paid image calls today, kept in `dataDir()/avatar-budget.json` so a restart does not reset it. A day is
  * a calendar day in China (UTC+8), where the people taking the test are. Every call to the model takes a slot — a retry too — so the
  * count can only overstate what was spent, never understate it. Reads and writes are synchronous, so two figures enqueued in the same
  * process cannot both take the last slot; one process owns the file (the standalone server is one process).
  */
 
-export const DEFAULT_DAILY_LIMIT = 300;
+/**
+ * No ceiling on figures by default (the owner's decision of 2026-10-17): what bounds the cost is each address's own limit,
+ * `AVATARS_PER_EMAIL`, not a number shared by everyone that the first busy day would use up. `ASSESS_IMAGE_DAILY_LIMIT` still sets one.
+ */
+export const DEFAULT_DAILY_LIMIT = Number.POSITIVE_INFINITY;
 
 /** One counter file per kind of paid call: `avatar` (images) and `text` (the 「你也许想做」 copy). */
 export type BudgetName = "avatar" | "text";

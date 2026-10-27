@@ -20,6 +20,13 @@ export type SleepEpisode = { sleepAt: string; wakeAt: string; source: string };
 export const SLEEP_TRACKING_CONSENT = "activity.sleepTracking";
 export const ACTIVITY_LAST_ACTIVE = "activity.lastActiveAt";
 export const ACTIVITY_LONG_GAPS = "activity.longGaps";
+/**
+ * 手机健康数据, its own consent (decided 2026-10-20): what a phone's shortcut sends (sleep, bed and wake moments, the day's heart-rate,
+ * temperature, steps and daylight). Generating the health token turns it on, since that is the person setting the shortcut up; an
+ * account that had a token before this consent existed counts as on. Off deletes what was kept and the token.
+ */
+export const PHONE_HEALTH_CONSENT = "health.phone";
+export const phoneHealthGranted = (consent: string | null | undefined, hasToken: boolean) => consent === "granted" || (!consent && hasToken);
 
 /** One day's readings from a phone or watch: heart-rate variability, resting heart rate, wrist temperature against its own baseline. */
 export type DailyPhysiology = { day: string; hrvMs?: number; restingHr?: number; wristTempDeltaC?: number; steps?: number; daylightMin?: number };
@@ -251,13 +258,25 @@ export function sleepDebt(at: string, episodes: SleepEpisode[], need = sleepNeed
 export type DayCapacity = { multiplier: number; basis: string[] };
 
 /**
+ * The phone's daily activity readings that may lower capacity (decided 2026-10-20), each only once its covariate has passed the rolling
+ * backtest on the person's own reports (`judgeCovariate`): the value is the fitted coefficient, whose sign says which way the reading
+ * moves the person's energy. Absent means not admitted.
+ */
+export type DailyActivityId = "steps" | "daylightMin";
+export type AdmittedActivity = Partial<Record<DailyActivityId, number>>;
+const ACTIVITY_LABEL: Record<DailyActivityId, [string, string]> = { steps: ["步数低于本人近期水平", "步数高于本人近期水平"],
+  daylightMin: ["日照少于本人近期水平", "日照多于本人近期水平"] };
+
+/**
  * How much of the day can be filled, as a multiplier on the day's share (decided 2026-10-14, docs/energy-and-ecosystem.md §3.3): it
  * only ever lowers, and only on evidence — a weighted sleep shortfall over half an hour a night, heart-rate variability or resting heart
  * rate a standard deviation off the person's own 28-day baseline (four days of baseline before either counts), a wrist temperature half a
- * degree up. The sizes are priors, not fitted: each costs at most a tenth, and the day keeps at least 70%.
+ * degree up, and the phone's steps and daylight once their backtest admits them (`admitted`). The sizes are priors, not fitted: each
+ * costs at most a tenth, and the day keeps at least 70%.
  */
 /** `day` is the person's local date (YYYY-MM-DD) the phone's readings are filed under. */
-export function dayCapacity(at: string, day: string, episodes: SleepEpisode[], physiology: DailyPhysiology[], locale?: Locale): DayCapacity {
+export function dayCapacity(at: string, day: string, episodes: SleepEpisode[], physiology: DailyPhysiology[], admitted: AdmittedActivity = {},
+  locale?: Locale): DayCapacity {
   const t = tFor(locale);
   let multiplier = 1;
   const basis: string[] = [];
@@ -285,6 +304,16 @@ export function dayCapacity(at: string, day: string, episodes: SleepEpisode[], p
   if (restingZ !== undefined && restingZ > 1) {
     multiplier -= Math.min(0.1, 0.05 * restingZ);
     basis.push(t("静息心率高于本人近期水平"));
+  }
+  // Steps and daylight by the same rule, in the direction the person's own reports showed: only a day a standard deviation off their
+  // baseline on the side that went with lower energy counts.
+  for (const id of ["steps", "daylightMin"] as const) {
+    const beta = admitted[id];
+    if (!beta) continue;
+    const z = zOf(today?.[id], before.flatMap((item) => item[id] !== undefined ? [item[id]!] : []));
+    if (z === undefined || Math.abs(z) <= 1 || Math.sign(beta) * z >= 0) continue;
+    multiplier -= Math.min(0.1, 0.05 * Math.abs(z));
+    basis.push(t(ACTIVITY_LABEL[id][z < 0 ? 0 : 1]));
   }
   if (today?.wristTempDeltaC !== undefined && today.wristTempDeltaC >= 0.5) {
     multiplier -= 0.1;

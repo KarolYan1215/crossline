@@ -3,7 +3,7 @@ import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
 import { DEFAULT_AVAILABILITY } from "@crossline/core";
-import { HEALTH_SLEEP_SETTING, energyModel, issueHealthToken, slotEnergy, storeHealthSummary, workspaceForHealthToken } from "./energy";
+import { HEALTH_SLEEP_SETTING, energyModel, issueHealthToken, phoneDailyLatest, phoneHealthOn, setPhoneHealth, slotEnergy, storeHealthSummary, workspaceForHealthToken } from "./energy";
 import { nudgesFor } from "./nudges";
 import { ENERGY_VOI_SETTING } from "./crossline";
 import { loadConversation } from "./conversation";
@@ -94,6 +94,7 @@ test("with nights known and reports that agree, the model is sure enough for the
 
 test("the phone's bed and wake moments become a night; the day's other readings are kept within range and merged per day", () => {
   const store = setup();
+  store.setSetting(ws, "health.phone", "granted");
   storeHealthSummary(ws, { events: [{ type: "bed", at: "2026-10-10T04:30:00Z" }, { type: "wake", at: "2026-10-10T12:10:00Z" }, { type: "nap", at: "2026-10-10T13:00:00Z" }] });
   storeHealthSummary(ws, { day: "2026-10-10", restingHr: 58, wristTempDeltaC: 0.62, steps: -5, daylightMin: 95 });
   storeHealthSummary(ws, { day: "2026-10-10", hrvMs: 51, source: "android-health" });
@@ -126,6 +127,7 @@ test("an optional signal moves a reading only after it earns it: off by consent,
     const wake = Date.parse("2026-10-01T12:00:00Z") + index * 86_400_000;
     return { start: new Date(wake - 8 * 3_600_000).toISOString(), end: new Date(wake).toISOString() };
   });
+  store.setSetting(ws, "health.phone", "granted");
   storeHealthSummary(ws, { sleep: nights });
   // Twenty-eight afternoon reports (16:00 and 17:00 local, where the sleep model alone reads medium) whose level follows how broken up
   // the input was in the hour before.
@@ -138,7 +140,7 @@ test("an optional signal moves a reading only after it earns it: off by consent,
     store.saveEnergyObservation({ id: `r${index}`, ownerId: "x", workspaceId: ws, source: "self_report", level, confidence: "high", aggregate: { responseSeconds: 2 }, observedAt });
   }
   store.setSetting(ws, "activity.inputRhythm.buckets", JSON.stringify(buckets));
-  expect(energyModel(TEST_CTX, DEFAULT_AVAILABILITY).covariates).toEqual([]);
+  expect(energyModel(TEST_CTX, DEFAULT_AVAILABILITY).covariates.filter((item) => item.use === "now")).toEqual([]);
   store.setSetting(ws, "activity.inputRhythm", "granted");
   const model = energyModel(TEST_CTX, DEFAULT_AVAILABILITY);
   const fragmentation = model.covariates.find((item) => item.id === "input.fragmentation")!;
@@ -146,4 +148,55 @@ test("an optional signal moves a reading only after it earns it: off by consent,
   expect(fragmentation.hitsWith).toBeGreaterThan(fragmentation.hitsWithout);
   const last = "2026-10-14T22:00:00.000Z";
   expect(model.predict(last).basis.join(" ")).toContain("按键鼠停顿");
+});
+
+test("手机健康数据 has its own switch: making the token turns it on, an older token counts as on, off deletes the record and the token", async () => {
+  const store = setup();
+  const { workspace } = store.createPrincipalWithWorkspace("phone-owner", "个人");
+  const ctx = { ...TEST_CTX, workspaceId: workspace.id };
+  expect(phoneHealthOn(workspace.id)).toBe(false);
+  // A token made before the switch existed: no consent row, counted as on.
+  store.setSetting(workspace.id, "health.token.sha256", "0".repeat(64));
+  expect(phoneHealthOn(workspace.id)).toBe(true);
+  store.deleteSetting(workspace.id, "health.token.sha256");
+  const token = issueHealthToken(ctx);
+  expect(store.getSetting(workspace.id, "health.phone")).toBe("granted");
+  const send = () => healthPost(new Request("http://127.0.0.1:3210/api/health/sleep", { method: "POST", headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ sleep: [{ start: "2026-10-10T04:10:00Z", end: "2026-10-10T12:05:00Z" }], day: "2026-10-10", steps: 4200, daylightMin: 35 }) }));
+  expect((await send()).status).toBe(200);
+  expect(phoneDailyLatest(workspace.id)).toEqual({ day: "2026-10-10", steps: 4200, daylightMin: 35 });
+  expect(energyModel(ctx, DEFAULT_AVAILABILITY).episodes).toHaveLength(1);
+  setPhoneHealth(workspace.id, false);
+  for (const key of ["health.sleep", "health.daily", "health.events", "health.token.sha256"]) expect(store.getSetting(workspace.id, key)).toBeUndefined();
+  expect((await send()).status).toBe(401);
+  // Even with something left behind, nothing is read while it is off.
+  store.setSetting(workspace.id, HEALTH_SLEEP_SETTING, JSON.stringify([{ sleepAt: "2026-10-10T04:10:00.000Z", wakeAt: "2026-10-10T12:05:00.000Z", source: "ios-health" }]));
+  expect(energyModel(ctx, DEFAULT_AVAILABILITY).episodes).toEqual([]);
+  expect(phoneDailyLatest(workspace.id)).toBeUndefined();
+});
+
+test("the phone's steps lower the day's capacity only after the backtest on the person's reports admits them, and never move a reading of now", () => {
+  const store = setup();
+  store.setSetting(ws, "health.phone", "granted");
+  const days = Array.from({ length: 16 }, (_, index) => new Date(Date.parse("2026-10-01T12:00:00Z") + index * 86_400_000).toISOString().slice(0, 10));
+  storeHealthSummary(ws, { sleep: days.map((day) => ({ start: `${day}T04:00:00Z`, end: `${day}T12:00:00Z` })) });
+  // Each day's level follows how much the person walked: two afternoon reports a day (16:00 and 17:00 local) on fifteen days.
+  days.slice(0, 15).forEach((day, index) => {
+    const level = (["low", "medium", "high"] as const)[index % 3]!;
+    storeHealthSummary(ws, { day, steps: level === "low" ? 2000 + index * 10 : level === "medium" ? 7000 + index * 10 : 12000 + index * 10 });
+    for (const hour of [21, 22]) store.saveEnergyObservation({ id: `r${day}${hour}`, ownerId: "x", workspaceId: ws, source: "self_report", level, confidence: "high",
+      aggregate: {}, observedAt: `${day}T${hour}:00:00.000Z` });
+  });
+  const today = days[15]!;
+  storeHealthSummary(ws, { day: today, steps: 300 });
+  const model = energyModel(TEST_CTX, DEFAULT_AVAILABILITY);
+  const steps = model.covariates.find((item) => item.id === "phone.steps")!;
+  expect(steps).toMatchObject({ use: "capacity", enabled: true });
+  const capacity = model.capacity(`${today}T15:00:00.000Z`, today);
+  expect(capacity.multiplier).toBeLessThan(1);
+  expect(capacity.basis).toContain("步数低于本人近期水平");
+  expect(model.predict(`${today}T21:00:00.000Z`).basis.join(" ")).not.toContain("步数");
+  // Without the backtest's admission (the same day, no reports at all), the steps change nothing.
+  for (const observation of store.listEnergyObservations(ws)) store.deleteEnergyObservations(ws, observation.source);
+  expect(energyModel(TEST_CTX, DEFAULT_AVAILABILITY).capacity(`${today}T15:00:00.000Z`, today).multiplier).toBe(1);
 });

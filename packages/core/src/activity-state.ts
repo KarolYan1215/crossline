@@ -32,6 +32,53 @@ export const PRODUCTIVE: ReadonlySet<ActivityCategory> = new Set(["coding", "res
 export type InputRhythm = { activeSec: number; pauses: number; mousePx: number };
 export type ActivityReading = { at: string; idleMs: number; app: string; title: string; rhythm?: InputRhythm };
 
+/**
+ * When the person is at the computer, hour by hour (2026-10-20, the owner asked for idle time to be kept as information about the person):
+ * active and idle minutes per clock hour, the last 28 days, under the same consent as the daily aggregate (localActivity.consent, or the
+ * detailed level) — minutes only, no app, no title. Off deletes them. `atComputerByHour` turns them into the person's usual day.
+ */
+export const ACTIVITY_HOURLY = "activity.hourly";
+export const ACTIVITY_HOURLY_DAYS = 28;
+export type ActivityHour = { start: string; active: number; idle: number };
+
+/**
+ * The usual day at the computer: for each local hour, the average active minutes over the days that have any reading, and the share of
+ * those days on which the person was active in that hour at all. Undefined before three days of readings.
+ */
+export function atComputerByHour(hours: ActivityHour[], timeZone: string): { days: number; active: number[]; present: number[] } | undefined {
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" });
+  const byDay = new Map<string, number[]>();
+  for (const hour of hours) {
+    const parts = Object.fromEntries(fmt.formatToParts(new Date(hour.start)).map((part) => [part.type, part.value]));
+    const day = `${parts.year}-${parts.month}-${parts.day}`, at = Number(parts.hour) % 24;
+    const row = byDay.get(day) ?? Array.from({ length: 24 }, () => 0);
+    row[at]! += hour.active;
+    byDay.set(day, row);
+  }
+  if (byDay.size < 3) return undefined;
+  const rows = [...byDay.values()];
+  const active = Array.from({ length: 24 }, (_, at) => Math.round(rows.reduce((sum, row) => sum + row[at]!, 0) / rows.length));
+  const present = Array.from({ length: 24 }, (_, at) => Math.round((rows.filter((row) => row[at]! >= 5).length / rows.length) * 100) / 100);
+  return { days: rows.length, active, present };
+}
+
+/** The usual day at the computer in words, for the interview and the portrait (habits, not the schedule): the hours present on most days. */
+export function atComputerLines(hours: ActivityHour[], timeZone: string): string[] {
+  const day = atComputerByHour(hours, timeZone);
+  if (!day) return [];
+  const ranges: string[] = [];
+  for (let at = 0; at < 24; at += 1) {
+    if (day.present[at]! < 0.5) continue;
+    let end = at;
+    while (end + 1 < 24 && day.present[end + 1]! >= 0.5) end += 1;
+    ranges.push(`${at}–${end + 1} 点`); // i18n-ignore: a line for the interview and portrait models
+    at = end;
+  }
+  const total = Math.round(day.active.reduce((sum, minutes) => sum + minutes, 0) / 6) / 10;
+  // i18n-ignore: for the interview and portrait models, not shown
+  return [`电脑前（近 ${day.days} 天，屏幕活动记录，只计分钟）：平均每天活跃约 ${total} 小时${ranges.length ? `，多数日子在 ${ranges.join("、")}` : ""}`];
+}
+
 /** 键鼠节律, its own consent (off unless turned on; off deletes what was kept), and where its quarter-hour totals are kept (14 days). */
 export const INPUT_RHYTHM_CONSENT = "activity.inputRhythm";
 export const INPUT_RHYTHM_BUCKETS = "activity.inputRhythm.buckets";

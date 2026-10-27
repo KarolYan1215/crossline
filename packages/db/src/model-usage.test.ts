@@ -23,6 +23,18 @@ test("runs are summed per skill and model, biggest spender first, inside one wor
   expect(summary[1]).toMatchObject({ runs: 1, failed: 1, totalTokens: 90 });
 });
 
+test("a run's purpose is kept (migration 21), and the week's tokens are summed per purpose and model from a given instant", () => {
+  store.saveModelUsage(usage());
+  store.saveModelUsage(usage({ purpose: "non_core", skill: "crossline:crossline-validation-reviewer", inputTokens: 500, cachedInputTokens: 100, outputTokens: 50 }));
+  store.saveModelUsage(usage({ purpose: "non_core", inputTokens: 500, cachedInputTokens: 300, outputTokens: 10 }));
+  store.saveModelUsage(usage({ purpose: "non_core", at: "2026-09-01T00:00:00.000Z" }));
+  expect(store.schemaVersion()).toBeGreaterThanOrEqual(21);
+  const rows = store.modelUsageByPurpose("w1", "2026-10-01T00:00:00.000Z").sort((a, b) => a.purpose.localeCompare(b.purpose));
+  expect(rows).toEqual([
+    { purpose: "", model: "gpt-5.6-sol", runs: 1, inputTokens: 1000, cachedInputTokens: 0, outputTokens: 200 },
+    { purpose: "non_core", model: "gpt-5.6-sol", runs: 2, inputTokens: 1000, cachedInputTokens: 400, outputTokens: 60 }]);
+});
+
 test("usage is part of the export, so a backup carries what the work cost", () => {
   store.saveModelUsage(usage({ workspaceId: "w1" }));
   const snapshot = store.exportSnapshot("w1") as { tables?: Record<string, unknown[]> };

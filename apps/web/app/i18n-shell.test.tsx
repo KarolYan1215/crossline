@@ -8,10 +8,12 @@ import { AuthLayout } from "./login/auth-layout";
 import { LOGIN_SERIF } from "./ui/serif-strings";
 import { ScheduleSummary } from "./schedule-summary";
 import { BottomNav } from "./bottom-nav";
+import { AppShell } from "./app-shell";
 import { DashboardView, type DashboardData } from "./dashboard-view";
 import { authErrorMessage } from "./auth-errors";
 import { dayLabel, formatMinutes } from "./ui/controls";
 import { previewText } from "./helper-state";
+import type { ScheduleChange } from "../lib/crossline";
 
 /** The shared frame and the ways in, switched to English (docs/i18n.md); with no locale everything stays Chinese (the other tests). */
 const en = (node: React.ReactNode) => renderToStaticMarkup(<LocaleProvider locale="en">{node}</LocaleProvider>);
@@ -38,6 +40,20 @@ describe("the shell in English", () => {
     expect(renderToStaticMarkup(<AuthLayout title={LOGIN_SERIF.signup}><p /></AuthLayout>)).toContain("login-tagline pt-serif");
   });
 
+  test("every signed-in frame carries the language switch, the interview's focus frame too", () => {
+    // The ordinary frame: the four views, the side items and the switch.
+    const page = en(<AppShell active="今日" corner={false} banner={false}><p /></AppShell>);
+    expect(page).toMatch(/running-head.*locale-switch/s);
+    expect(page).toContain(">Today<");
+    // The interview before the start standard (`focus`): no working view, only Settings — and still the switch, kept in the header on a
+    // phone too since that frame has no bottom bar (`data-focus`, mobile.css).
+    const focus = en(<AppShell focus><p /></AppShell>);
+    expect(focus).toMatch(/running-head[^>]*data-focus.*locale-switch/s);
+    expect(focus).toContain(">Settings<");
+    expect(focus).not.toContain(">Today<");
+    expect(focus).not.toContain("bottom-nav");
+  });
+
   test("on a phone the language switch sits under More", () => {
     const html = en(<BottomNav active="今日" />);
     expect(html).toContain("More");
@@ -49,6 +65,17 @@ describe("the shell in English", () => {
       to: { day: "2026-10-13", start: "11:30", end: "12:30" }, cause: "11:30 Sync up" }]} />);
     expect(html).toContain("&quot;HW 3&quot; moved 30 min later because of 11:30 Sync up");
     expect(html).toContain("Pin back");
+  });
+
+  test("folded schedule lines stay one English sentence each, names drawn inside them", () => {
+    const hw3: ScheduleChange = { blockId: "scheduled:hw3", title: "HW 3", day: "2026-10-13", from: { start: "11:00", end: "12:00" },
+      to: { day: "2026-10-13", start: "11:30", end: "12:30" }, cause: "11:30 Sync up" };
+    const text = (node: React.ReactNode) => en(node).replace(/<[^>]+>/g, "");
+    expect(text(<ScheduleSummary changes={[hw3, { ...hw3, blockId: "scheduled:hw3:2" }]} />))
+      .toContain("2 blocks of &quot;HW 3&quot; moved 30 min later because of 11:30 Sync up");
+    const splits = ["A", "B", "C", "D"].map((title) => ({ orderId: title, title, step: "", days: 2 }));
+    expect(text(<ScheduleSummary changes={[]} splits={splits} />))
+      .toContain("4 steps went undone for 2 days, so they have been split into smaller steps; the first takes 15 min at most: &quot;A&quot;, &quot;B&quot;, &quot;C&quot; (4 in all)");
   });
 
   test("Today's head and empty state", () => {

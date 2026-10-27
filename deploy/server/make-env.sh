@@ -24,12 +24,11 @@ CROSSLINE_AUTO_PUBLISH=off
 BETTER_AUTH_SECRET=$(rand 48)
 CROSSLINE_SUPERVISOR_CAPABILITY_SECRET=$(rand 48)
 CROSSLINE_SECRET_KEY=$(rand 32)
-# Who may create an account: anyone while there are fewer than CROSSLINE_SIGNUP_CAP accounts (people arrive by the public test or
-# straight to the interview), the addresses listed here always; past the cap an address goes on the waiting list file.
+# Who may create an account: anyone (the owner's decision of 2026-10-17: no cap, no list). CROSSLINE_SIGNUP_CAP=<n> would admit anyone
+# while there are fewer than n accounts and put the rest on the waiting list file. CROSSLINE_SIGNUP_ALLOWLIST is left out on purpose: a
+# list with no cap admits only the list.
 CROSSLINE_PUBLIC_BETA=1
-CROSSLINE_SIGNUP_CAP=30
 CROSSLINE_SIGNUP_WAITLIST_FILE=/data/signup-waitlist.txt
-CROSSLINE_SIGNUP_ALLOWLIST=
 # Sign-in codes go out through this SMTP account (Resend: host smtp.resend.com, port 465, user resend, password = API key).
 CROSSLINE_SMTP_HOST=smtp.resend.com
 CROSSLINE_SMTP_PORT=465
@@ -57,7 +56,6 @@ ASSESS_MAIL_FROM=Crossline 测评 <noreply@mail.crossline.lol>
 ASSESS_IMAGE_PROVIDER=ark
 ASSESS_IMAGE_MODEL=doubao-seedream-5-0-pro-260628
 ASSESS_IMAGE_API_KEY=
-ASSESS_IMAGE_DAILY_LIMIT=300
 EOF
   echo "wrote $ASSESS"
 fi

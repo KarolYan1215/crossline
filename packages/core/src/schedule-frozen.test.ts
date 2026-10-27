@@ -12,6 +12,12 @@ describe("schedule.frozen", () => {
     expect(parseFrozen(raw, now).map((item) => item.blockId)).toEqual(["keep", "still"]);
   });
 
+  test("a commit hold outlives its block's end until its grace runs out", () => {
+    const raw = JSON.stringify([block("grace", { reason: "commit", start: "2026-10-12T13:30:00.000Z", end: "2026-10-12T14:30:00.000Z", until: "2026-10-12T15:30:00.000Z" }),
+      block("lapsed", { reason: "commit", start: "2026-10-12T12:00:00.000Z", end: "2026-10-12T13:00:00.000Z", until: "2026-10-12T14:00:00.000Z" })]);
+    expect(parseFrozen(raw, now).map((item) => item.blockId)).toEqual(["grace"]);
+  });
+
   test("a bad or empty value reads as nothing frozen", () => {
     expect(parseFrozen("not json", now)).toEqual([]);
     expect(parseFrozen(undefined, now)).toEqual([]);

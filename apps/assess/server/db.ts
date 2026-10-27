@@ -75,12 +75,38 @@ const MIGRATIONS: Migration[] = [
     ALTER TABLE results ADD COLUMN wants_json TEXT NOT NULL DEFAULT '';
     ALTER TABLE results ADD COLUMN wants_updates INTEGER NOT NULL DEFAULT 0;
   `),
-  // 6: the language of the page the test was finished on (2026-10-16, docs/i18n.md): the result mail and the inviter's notices are
-  // written in it. Every result made before this was made on the Chinese page.
+  // 6: the four dimensions replaced the first version's axes (2026-10-17, docs/assess-redesign.md), and the owner chose to delete every
+  // earlier result at once rather than show it under codes that now mean something else: results, pairs, beta requests, and the per-address
+  // counts of tests and figures (everyone retakes, so each address gets its full allowance again). The figure and poster files are removed
+  // after the migration (`removeLegacyFiles`). Each result now also keeps its poles' own scores.
+  (db) => db.exec(`
+    DELETE FROM pairs;
+    DELETE FROM beta_requests;
+    DELETE FROM results;
+    DELETE FROM email_tests;
+    DELETE FROM avatar_draws;
+    ALTER TABLE results ADD COLUMN poles_json TEXT NOT NULL DEFAULT '';
+  `),
+  // 7: the AI-era types replaced the multi-line ones (2026-10-24, the owner): every earlier result, pair, beta request and per-address
+  // count is deleted again rather than shown under codes that now mean something else, and each result keeps what the person leaned to
+  // hand to AI (「AI 替你干的」, computed from the answers at submission). `poles_json` stays empty: the new questions have no poles.
+  (db) => db.exec(`
+    DELETE FROM pairs;
+    DELETE FROM beta_requests;
+    DELETE FROM results;
+    DELETE FROM email_tests;
+    DELETE FROM avatar_draws;
+    ALTER TABLE results ADD COLUMN ai_does_json TEXT NOT NULL DEFAULT '';
+  `),
+  // 8: the language of the page the test was finished on (docs/i18n.md): the result mail and the inviter's notices are written in it.
+  // Every result made before this was made on the Chinese page.
   (db) => db.exec(`
     ALTER TABLE results ADD COLUMN locale TEXT NOT NULL DEFAULT 'zh';
   `)
 ];
+
+/** The last migration that deleted every earlier result; crossing it also removes their files. */
+const LEGACY_PURGE_VERSION = 7;
 
 let open: { file: string; db: Database.Database } | undefined;
 
@@ -101,6 +127,18 @@ export function db(): Database.Database {
   return handle;
 }
 
+/**
+ * Every drawn figure and cached poster of earlier results, which migrations 6 and 7 delete: the avatar and poster folders under the
+ * data directory go whole (both are rebuilt on use). Only run on a database that held results before, never on a new one.
+ */
+function removeLegacyFiles(): void {
+  for (const folder of ["avatars", "posters"]) {
+    try { fs.rmSync(path.join(dataDir(), folder), { recursive: true, force: true }); }
+    catch (error) { console.warn(JSON.stringify({ event: "assess.legacy_files_remove_failed", folder, error: String(error) })); }
+  }
+  console.info(JSON.stringify({ event: "assess.legacy_results_purged" }));
+}
+
 export function closeDb(): void {
   open?.db.close();
   open = undefined;
@@ -108,6 +146,7 @@ export function closeDb(): void {
 
 function migrate(handle: Database.Database): void {
   const current = handle.pragma("user_version", { simple: true }) as number;
+  if (current > 0 && current < LEGACY_PURGE_VERSION) removeLegacyFiles();
   for (let version = current; version < MIGRATIONS.length; version++) {
     handle.transaction(() => {
       MIGRATIONS[version]!(handle);

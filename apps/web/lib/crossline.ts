@@ -51,18 +51,32 @@ export type PersistedScheduleBlock = {
  */
 export function planToday(ctx?: AccessContext,
   now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: (ctx && readSchedulePreferences(ctx)?.timeZone)
-    ?? process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago" }).format(now);
+  return dayFormatter((ctx && readSchedulePreferences(ctx)?.timeZone) ?? process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago").format(now);
 }
+
+/**
+ * Formatters are kept per zone (2026-10-26): building an `Intl.DateTimeFormat` costs far more than using one, and one page asked for
+ * today's day several hundred times. A zone the runtime does not know throws on first use, as before, and is not kept.
+ */
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
+function dayFormatter(timeZone: string): Intl.DateTimeFormat {
+  let formatter = dayFormatters.get(timeZone);
+  if (!formatter) { formatter = new Intl.DateTimeFormat("en-CA", { timeZone }); dayFormatters.set(timeZone, formatter); }
+  return formatter;
+}
+/** Zones already found valid; a stored zone is checked once per process instead of on every read of the preferences. */
+const knownZones = new Set<string>();
 
 /** The key the weekly availability lives under. One settings row, not a new table. */
 export { AVAILABILITY_SETTING } from "@crossline/core";
-import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEfficiency, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
+import { FIRST_DRAFTS_SETTING, firstDraftsState, STEP_ENERGY_CEILING, learnedEfficiency, type EfficiencySample, type StepRole, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BYPRODUCT_LAG_DAYS, RELATION_KIND_LABEL, isCancelledEvent, resolveAvailability, hoursFromText, type AvailabilitySource, type PortraitReport } from "@crossline/core";
 import { statedShares } from "./plan-stats";
-import { completionRule, type CompletionMode, type CompletionOutcome } from "@crossline/core";
+import { milestonesBeingBackplanned } from "./backplan-status";
+import { nearestDueProposal } from "./urgent-proposal";
+import { completionRule, onPersonsBoard, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
-import { memoByLedgerAsync } from "./ledger-memo";
+import { memoByLedger, memoByLedgerAsync } from "./ledger-memo";
 import { localeFor, tOf } from "./locale";
 import { intlLocale, tFor, type Locale } from "./i18n";
 const PREFERENCES_SETTING = "schedule.preferences";
@@ -71,16 +85,30 @@ export type SchedulePreferences = { timeZone: string; mode: "buffered" | "asap";
   /** The four packing numbers set on the plan page; absent, `mode` stands for its preset. */
   params?: ScheduleParams };
 
-export type GoalSettings = { importance: "important" | "ordinary";
+export type GoalSettings = {
+  /** The older important/ordinary choice; absent when nobody chose one, so the system's preset weight keeps applying. */
+  importance?: "important" | "ordinary";
   confirmedDeadline: string | null; sourceQuote: string | null;
   /** 0–100, set with the slider; `importance` follows it (60 and above is important). */
   weight?: number };
 const goalKey = goalSettingKey;
 
+/** The notes the two risk questions saved a moved date with: settings carrying them and a bare 「ordinary」 had it written for them. */
+const IMPLIED_ORDINARY = new Set(["在「可能赶不上」的询问里推迟", "在里程碑风险的询问里调整截止"]);
+
 export function readGoalSettings(ctx: AccessContext, id: string): GoalSettings | null {
   const raw = getStore().getSetting(ctx.workspaceId, goalKey(id));
   if (!raw) return null;
-  try { return JSON.parse(raw) as GoalSettings; } catch { return null; }
+  try {
+    const settings = JSON.parse(raw) as GoalSettings;
+    // Moving a date from a risk question used to write 「ordinary」 the person never chose (fixed 2026-10-18): read as no choice, so the
+    // preset weight applies again on accounts that answered one before the fix.
+    if (settings.importance === "ordinary" && settings.weight === undefined && IMPLIED_ORDINARY.has(settings.sourceQuote ?? "")) {
+      const { importance: _implied, ...rest } = settings;
+      return rest;
+    }
+    return settings;
+  } catch { return null; }
 }
 
 /**
@@ -96,16 +124,17 @@ export function saveGoalSettings(ctx: AccessContext, id: string, input: { import
   const weight = typeof input.weight === "number" && Number.isFinite(input.weight) ? Math.max(0, Math.min(100, Math.round(input.weight))) : previous?.weight;
   const importance = input.importance === "important" || input.importance === "ordinary" ? input.importance
     : typeof input.weight === "number" && weight !== undefined ? (weight >= 60 ? "important" : "ordinary")
-    // A partial save (only a deadline, say) on a goal with no settings yet keeps the importance the schedule already used for it.
-    : input.importance === undefined ? previous?.importance ?? readSchedulePreferences(ctx)?.importance[id] ?? "ordinary" : undefined;
-  if (importance !== "important" && importance !== "ordinary") return { ok: false, code: "GOAL_IMPORTANCE_INVALID" };
+    // A partial save (only a deadline, say) keeps whatever importance was in effect — none chosen means the preset keeps applying; it
+    // used to default to 「ordinary」, which moved a milestone the presets weighed at 65 out of 「重要·有期限」.
+    : input.importance === undefined ? previous?.importance ?? readSchedulePreferences(ctx)?.importance[id] : "invalid";
+  if (importance !== undefined && importance !== "important" && importance !== "ordinary") return { ok: false, code: "GOAL_IMPORTANCE_INVALID" };
   const date = input.confirmedDeadline === undefined ? previous?.confirmedDeadline ?? null : input.confirmedDeadline;
   if (date !== null && (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)
     || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date))
     return { ok: false, code: "GOAL_DEADLINE_INVALID" };
   const quote = typeof input.sourceQuote === "string" ? input.sourceQuote.trim() : previous?.sourceQuote ?? "";
   if (quote.length > 500) return { ok: false, code: "GOAL_QUOTE_TOO_LONG" };
-  const next: GoalSettings = { importance, confirmedDeadline: date as string | null,
+  const next: GoalSettings = { ...(importance ? { importance } : {}), confirmedDeadline: date as string | null,
     sourceQuote: quote || null, ...(weight !== undefined ? { weight } : {}) };
   const store = getStore();
   if (JSON.stringify(previous) === JSON.stringify(next)) return { ok: true };
@@ -179,6 +208,27 @@ export function effectiveParams(ctx: AccessContext): ScheduleParams {
   return previewScope.getStore()?.params ?? paramsFor(effectiveSchedulePreferences(ctx).preferences);
 }
 
+/**
+ * The zone the person's own device reports (2026-10-21): the hosted beta runs in Hong Kong with `CROSSLINE_TIME_ZONE=Asia/Shanghai`, so
+ * without it every account that had not picked a zone was planned, reminded and shown on the server's clock — and saving any schedule
+ * number copied that default into the saved preferences, where it stayed. The page reports `Intl`'s zone; when it differs from the one on
+ * record it becomes `schedule.preferences.timeZone`, which every reader (the web's and the worker's) takes before the server's. The
+ * device's zone, not one guessed from the IP address: a VPN, a proxy or the phone's mobile network moves an IP's apparent place, and the
+ * device's own setting is what its clock shows.
+ */
+export function syncDeviceTimeZone(ctx: AccessContext, timeZone: unknown): { ok: true; changed: boolean } | { ok: false; code: string } {
+  const zone = typeof timeZone === "string" ? timeZone.trim() : "";
+  if (!zone || zone.length > 64) return { ok: false, code: "SCHEDULE_TIME_ZONE_INVALID" };
+  try { new Intl.DateTimeFormat("en", { timeZone: zone }); } catch { return { ok: false, code: "SCHEDULE_TIME_ZONE_INVALID" }; }
+  const current = effectiveSchedulePreferences(ctx).preferences;
+  if (current.timeZone === zone && readSchedulePreferences(ctx)) return { ok: true, changed: false };
+  const store = getStore();
+  store.setSetting(ctx.workspaceId, PREFERENCES_SETTING, JSON.stringify({ ...current, timeZone: zone } satisfies SchedulePreferences));
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `schedule:time_zone:${randomUUID()}`,
+    type: "schedule.time_zone_detected", entityId: ctx.workspaceId, payload: { previous: current.timeZone, next: zone } });
+  return { ok: true, changed: current.timeZone !== zone };
+}
+
 export function saveScheduleParams(ctx: AccessContext, value: unknown): { ok: true } {
   const params = normalizeParams(value);
   const current = effectiveSchedulePreferences(ctx).preferences;
@@ -195,7 +245,7 @@ export function readSchedulePreferences(ctx: AccessContext): SchedulePreferences
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as SchedulePreferences;
-    new Intl.DateTimeFormat("en", { timeZone: value.timeZone });
+    if (!knownZones.has(value.timeZone)) { new Intl.DateTimeFormat("en", { timeZone: value.timeZone }); knownZones.add(value.timeZone); }
     return value.mode === "buffered" || value.mode === "asap" ? value : null;
   } catch { return null; }
 }
@@ -286,7 +336,10 @@ export function readLineShares(ctx: AccessContext): Record<string, number> | nul
   } catch { /* unreadable: fall back to what was said */ }
   let portrait: PortraitReport | undefined;
   try { portrait = (JSON.parse(store.getSetting(ctx.workspaceId, "portrait.report") ?? "{}") as { report?: PortraitReport }).report; } catch { /* none yet */ }
-  return statedShares(portrait?.lines?.items ?? null, store.listProfileFacts(ctx.workspaceId), hoursFromText);
+  // The portrait's suggested share (`targetShare`) over the one the person described (`share`): the owner chose on 2026-10-20 to plan
+  // on the suggestion, which keeps the hard line as the calendar's base and gives each other line what it feeds back to it.
+  const items = portrait?.lines?.items?.map((item) => ({ lineId: item.lineId, share: item.targetShare ?? item.share })) ?? null;
+  return statedShares(items, store.listProfileFacts(ctx.workspaceId), hoursFromText);
 }
 
 /** Each line's share as the person set it: whole percents for known lines, together at most 100; `{}` goes back to what they said. */
@@ -548,7 +601,24 @@ function planDays(today: string, days = Number(process.env.CROSSLINE_PLAN_WINDOW
  * of the app knew when the person was free. Reading demo data as a commitment is the mistake the rest
  * of this codebase works to prevent, so the examples are gone and this is what replaces them.
  */
+/**
+ * The same local time in the same zone always gives the same instant (or the same refusal), and building a schedule asks for the same
+ * few hundred again and again: kept, bounded (2026-10-26).
+ */
+const zonedInstants = new Map<string, string | Error>();
 export function toZonedInstant(day: string, time: string, zone: string): string {
+  const key = `${day} ${time} ${zone}`;
+  let kept = zonedInstants.get(key);
+  if (kept === undefined) {
+    try { kept = computeZonedInstant(day, time, zone); } catch (error) { kept = error instanceof Error ? error : new Error(String(error)); }
+    if (zonedInstants.size >= 20_000) zonedInstants.clear();
+    zonedInstants.set(key, kept);
+  }
+  if (kept instanceof Error) throw kept;
+  return kept;
+}
+
+function computeZonedInstant(day: string, time: string, zone: string): string {
   const instant = fromZonedTime(`${day}T${time}:00`, zone);
   const local = `${day} ${time}`;
   if (!Number.isFinite(instant.getTime()) || formatInTimeZone(instant, zone, "yyyy-MM-dd HH:mm") !== local) {
@@ -631,9 +701,15 @@ export function keepBlocks(ctx: AccessContext, blocks: Array<{ blockId: string; 
 /** How soon before its start a scheduled block stops moving (docs/loop-and-scout.md §2, the commit window). */
 export const COMMIT_WINDOW_MINUTES = 15;
 /**
- * The commit window: a work block under way or starting within fifteen minutes keeps its time until it ends, so the background optimal
- * plan landing a minute later never moves what the person is about to start. A block already started or locked keeps that reason.
- * Writes only when something new enters the window.
+ * How long a work block's time stays held after it ends (the owner, 2026-10-26: 「时间已过有可能是这项任务还在做，过 1h 重排」): until then
+ * its work is not placed again; after it, the work is re-planned and the block stays on its day as 「未完成」 until 04:00 the next morning
+ * (`missedItems` in `lib/timeline.ts`).
+ */
+export const COMMIT_GRACE_MINUTES = 60;
+/**
+ * The commit window: a work block under way or starting within fifteen minutes keeps its time until an hour after it ends, so the
+ * background optimal plan landing a minute later never moves what the person is about to start, and work running over is not moved
+ * away while it is being done. A block already started or locked keeps that reason. Writes only when something new enters the window.
  */
 export function commitSoon(ctx: AccessContext, blocks: Array<{ id: string; day?: string; start: string; end: string }>, now: Date): number {
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
@@ -644,7 +720,7 @@ export function commitSoon(ctx: AccessContext, blocks: Array<{ id: string; day?:
     let start: string, end: string;
     try { start = toZonedInstant(block.day, block.start, zone); end = toZonedInstant(block.day, block.end, zone); } catch { continue; }
     if (Date.parse(start) - now.getTime() > COMMIT_WINDOW_MINUTES * 60_000 || Date.parse(end) <= now.getTime()) continue;
-    list = withFrozen(list, { blockId: block.id, start, end, reason: "commit", until: end });
+    list = withFrozen(list, { blockId: block.id, start, end, reason: "commit", until: new Date(Date.parse(end) + COMMIT_GRACE_MINUTES * 60_000).toISOString() });
     added += 1;
   }
   if (added) writeFrozen(ctx, list);
@@ -741,6 +817,9 @@ function offHoursWindows(windows: AvailabilityWindow[]): AvailabilityWindow[] {
   return [0, 1, 2, 3, 4, 5, 6].flatMap((weekday) => {
     const covered = windows.filter((window) => window.days.includes(weekday))
       .map((window) => [minutes(window.start), Math.min(minutes(window.end) || 1440, 1440)] as const).sort((a, b) => a[0] - b[0]);
+    // A day with no hours at all is a day off: overflow is pencilled around working days, not into the rest day (it put nine hours on a
+    // Sunday the person keeps free, 2026-10-18 walkthrough, W-48).
+    if (!covered.length) return [];
     const out: AvailabilityWindow[] = [];
     let cursor = 7 * 60;
     for (const [from, to] of covered) {
@@ -795,7 +874,7 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
   return orders.flatMap((order) => {
     const base = plannerTaskOf(ctx, order);
     const steps = openSteps(order.id);
-    if (!steps.length) return [{ task: base, orderId: order.id, title: order.intent, step: undefined as string | undefined }];
+    if (!steps.length) return [{ task: base, orderId: order.id, title: base.title, step: undefined as string | undefined }];
     const open = new Set(steps.map((step) => step.id));
     const external = (base.dependsOn ?? []).flatMap((id) => plannerIdsOf(id));
     return steps.map((step) => {
@@ -812,8 +891,9 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
       const ceiling = STEP_ENERGY_CEILING[step.role as StepRole];
       const energy = taskEnergy && ceiling && ENERGY_RANK[ceiling] < ENERGY_RANK[taskEnergy] ? ceiling : taskEnergy;
       const id = stepTaskId(order.id, step.id);
-      return { orderId: order.id, title: `${order.intent} · ${step.title}`, step: step.title as string | undefined, task: { ...rest, id,
-        title: `${order.intent} · ${step.title}`, estimate: scaledEstimate({ ...base.estimate, ...step.estimate }, overrides[id]),
+      // The task's short name: its description reached the plan page's notes and blockers as a whole paragraph (2026-10-18 walkthrough).
+      return { orderId: order.id, title: `${taskTitleOf(order)} · ${step.title}`, step: step.title as string | undefined, task: { ...rest, id,
+        title: `${taskTitleOf(order)} · ${step.title}`, estimate: scaledEstimate({ ...base.estimate, ...step.estimate }, overrides[id]),
         ...(energy ? { energy } : {}), ...(notBefore ? { notBefore } : {}), ...(deadline ? { deadline } : {}),
         ...(internal.length || external.length ? { dependsOn: internal.length ? internal : external } : {}) } };
     });
@@ -822,18 +902,42 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
 
 /**
  * The person's own yield in slots short of the work's energy, from the blocks they confirmed (`block.confirmed` carries the block's
- * energy since 2026-10-14), or undefined while the assumed 0.8 and 0.65 predict as well.
+ * energy since 2026-10-14), or undefined while the assumed 0.8 and 0.65 predict as well. Blocks that produced nothing go in as
+ * `done: false` — answered 「未执行」, or seen under way on a past day (`nudge.blocks:<day>`) with no timer that day and no answer — and
+ * `learnedEfficiency` counts them only when its backtest favours that (2026-10-20).
  */
-function personalEfficiency(ctx: AccessContext): [number, number] | undefined {
-  type Confirmed = { outcome?: string; minutes?: number; blockMinutes?: number;
-    energy?: { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number } };
-  return learnedEfficiency(getStore().listEvents(ctx.workspaceId, { type: "block.confirmed" }).flatMap((event) => {
+export function personalEfficiency(ctx: AccessContext, now = new Date()): [number, number] | undefined {
+  type Energy = { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number };
+  type Confirmed = { blockId?: string; day?: string; outcome?: string; minutes?: number; blockMinutes?: number; energy?: Energy };
+  const store = getStore();
+  const confirmed = store.listEvents(ctx.workspaceId, { type: "block.confirmed" });
+  const samples: EfficiencySample[] = confirmed.flatMap((event) => {
     const payload = event.payload as Confirmed;
-    return payload.energy && payload.minutes && payload.blockMinutes && payload.outcome !== "not_done"
-      ? [{ at: event.createdAt, slot: payload.energy.slot, need: payload.energy.need, planned: payload.energy.efficiency,
-        blockMinutes: payload.blockMinutes, minutes: payload.minutes }] : [];
-  }));
+    if (!payload.energy || !payload.blockMinutes) return [];
+    const base = { at: event.createdAt, slot: payload.energy.slot, need: payload.energy.need, planned: payload.energy.efficiency, blockMinutes: payload.blockMinutes };
+    if (payload.outcome === "not_done") return [{ ...base, minutes: 0, done: false }];
+    return payload.minutes ? [{ ...base, minutes: payload.minutes }] : [];
+  });
+  const answered = new Set(confirmed.map((event) => { const payload = event.payload as Confirmed; return `${payload.blockId}|${payload.day}`; }));
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const startedOn = new Set(store.listExecutions(ctx.workspaceId).map((execution) => `${execution.workOrderId}|${formatInTimeZone(new Date(execution.startedAt), zone, "yyyy-MM-dd")}`));
+  const today = planToday(ctx, now);
+  for (let back = 1; back <= MISSED_LOOKBACK_DAYS; back += 1) {
+    const day = new Date(Date.parse(`${today}T12:00:00Z`) - back * 86_400_000).toISOString().slice(0, 10);
+    let seen: Record<string, { id: string; orderId: string; start: string; end: string; began?: boolean; energy?: Energy }> = {};
+    try { seen = JSON.parse(store.getSetting(ctx.workspaceId, `nudge.blocks:${day}`) ?? "{}"); } catch { continue; }
+    for (const block of Object.values(seen)) {
+      if (!block.began || !block.energy || answered.has(`${block.id}|${day}`) || startedOn.has(`${block.orderId}|${day}`)) continue;
+      const [sh, sm] = block.start.split(":").map(Number), [eh, em] = block.end.split(":").map(Number);
+      const blockMinutes = ((eh ?? 0) * 60 + (em ?? 0)) - ((sh ?? 0) * 60 + (sm ?? 0));
+      if (blockMinutes > 0) samples.push({ at: toZonedInstant(day, block.end, zone), slot: block.energy.slot, need: block.energy.need,
+        planned: block.energy.efficiency, blockMinutes, minutes: 0, done: false });
+    }
+  }
+  return learnedEfficiency(samples);
 }
+/** How far back the blocks seen under way are read for ones that went by unused. */
+const MISSED_LOOKBACK_DAYS = 28;
 
 /**
  * Everything the scheduler is given for the person's week, built once: the planner input itself plus the pieces `scheduledBlocks`
@@ -905,7 +1009,7 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
   const frozen = settleFrozen(readFrozen(ctx, now).filter((item) => expanded.some((entry) => entry.task.id === plannerIdOfBlock(item.blockId))),
     busyInstants, (blockId) => releaseAt.get(plannerIdOfBlock(blockId))).kept;
   const pinned = frozen.map((item) => ({ taskId: plannerIdOfBlock(item.blockId), start: item.start, end: item.end }));
-  const efficiency = personalEfficiency(ctx);
+  const efficiency = personalEfficiency(ctx, now);
   const input: PlanningInput = { locale: localeFor(ctx),
     now,
     horizonDays: days.length,
@@ -1051,6 +1155,20 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     ...(result.notes?.length ? { notes: result.notes } : {}), ...(inPreview() ? {} : { inputHash: hash, optimal: Boolean(cached) }) } };
 }
 
+/**
+ * How far a forecast that judges risk must run: past the furthest deadline of an approved milestone (a week beyond it), never under
+ * the usual eight weeks nor over 26. An eight-week run called work due in 100 days 「八周内无法排完」 and asked about it as at risk —
+ * not finishing inside the run says nothing about a deadline that lies beyond it (2026-10-21, the owner's account).
+ */
+export function riskHorizonDays(ctx: AccessContext): number {
+  const today = planToday(ctx);
+  const furthest = getStore().listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved")
+    .map((milestone) => milestoneDeadline(ctx, milestone.id) ?? "").filter((day) => day > today).sort().at(-1);
+  if (!furthest) return 56;
+  const days = Math.round((Date.parse(`${furthest}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000) + 8;
+  return Math.min(182, Math.max(56, days));
+}
+
 /** `horizonDays`: how far the simulation runs — eight weeks unless the plan page asks for four weeks or up to six months. */
 export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): ForecastResult & { inferredRegularBlocks: number } {
   ensureSeeded(ctx);
@@ -1093,7 +1211,8 @@ export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): Forecast
   // shows up here as a risk instead of a forecast that assumed it had already started.
   const today = planToday(ctx);
   const opens = new Map(orders.flatMap((order) => { const day = libraryUntil(ctx, order, today); return day ? [[order.id, day] as const] : []; }));
-  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state))).map((item) => {
+  // The person's hours: the assistant's preparation takes none of them (docs/work-split.md).
+  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state) && onPersonsBoard(order))).map((item) => {
     const day = opens.get(item.orderId);
     const start = day ? toZonedInstant(day, "00:00", preferences.timeZone) : undefined;
     return start && (!item.task.notBefore || item.task.notBefore < start) ? { ...item.task, notBefore: start } : item.task;
@@ -1794,8 +1913,12 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
  * The demo work orders every account is seeded with exist to show the flow. Once the person has any work of their own (in any state
  * short of discarded) they stop being recommended or scheduled: Today's 「下一步」 and the plan must never hold a made-up task next to a
  * real midterm. They stay on the Workbench, where they can be discarded.
+ *
+ * Every caller lists the person's own work (Today's 「下一步」, the schedule, its preview and ranking), so the assistant's preparation and
+ * the questions to the person (`payload.owner`, docs/work-split.md) are left out here too: they get no calendar time and no card.
  */
-export function withoutShadowingDemos<T extends { state: string; identityId: string; payload: unknown }>(orders: T[], capacityIds: Set<string>): T[] {
+export function withoutShadowingDemos<T extends { state: string; identityId: string; payload: unknown }>(all: T[], capacityIds: Set<string>): T[] {
+  const orders = all.filter(onPersonsBoard);
   const demo = (order: T) => Boolean((order.payload as { seeded?: boolean }).seeded);
   const hasOwnWork = orders.some((order) => !demo(order) && order.state !== "archived" && !capacityIds.has(order.identityId));
   return hasOwnWork ? orders.filter((order) => !demo(order)) : orders;
@@ -1882,27 +2005,57 @@ const riskBufferOf = (ctx: AccessContext, milestoneId: string | undefined): numb
   return decision?.how === "accept" && decision.fingerprint === stored.fingerprint ? riskBufferDays(stored.risks) : 0;
 };
 
+/**
+ * A milestone's deadline for scheduling: the one set on the goal, else — for an approved milestone — the date it was approved with,
+ * which lives on its anchor. Approving a draft writes no goal setting, so the scheduler read every backplanned task of a fresh account
+ * as having no deadline at all, ordered it by importance alone and left work due in a week unplaced (2026-10-18 walkthrough).
+ */
+export function milestoneDeadline(ctx: AccessContext, milestoneId: string): string | undefined {
+  if (!milestoneId) return undefined;
+  const confirmed = readGoalSettings(ctx, milestoneId)?.confirmedDeadline;
+  if (confirmed) return confirmed;
+  const day = approvedAnchorDays(ctx).get(milestoneId);
+  return day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined;
+}
+
+/** Approved milestones' anchor dates, read once per ledger change: the planner asks for every task, and each read was two full scans. */
+const anchorDaysCache = new WeakMap<object, { key: string; days: Map<string, string> }>();
+function approvedAnchorDays(ctx: AccessContext): Map<string, string> {
+  const store = getStore();
+  const key = `${ctx.workspaceId}:${store.changeToken()}`;
+  const cached = anchorDaysCache.get(store);
+  if (cached?.key === key) return cached.days;
+  const approved = new Set(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "approved").map((milestone) => milestone.id));
+  const days = new Map(store.listMilestoneAnchors(ctx.workspaceId).filter((anchor) => approved.has(anchor.milestoneId)).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  anchorDaysCache.set(store, { key, days });
+  return days;
+}
+
 const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
   const preferences = readSchedulePreferences(ctx);
   const riskBuffer = riskBufferOf(ctx, order.milestoneId);
-  const goal = readGoalSettings(ctx, order.milestoneId);
+  const milestoneDue = milestoneDeadline(ctx, order.milestoneId);
   const weight = effectiveWeight(ctx, order.milestoneId);
   const important = weight >= IMPORTANT_WEIGHT;
   // A task with its own due day (a homework due Monday) has a deadline whether or not its milestone's was confirmed.
   const ownDue = (order.payload as { dueDate?: string }).dueDate;
-  const hasDeadline = Boolean(goal?.confirmedDeadline) || Boolean(ownDue && /^\d{4}-\d{2}-\d{2}$/.test(ownDue));
+  const hasDeadline = Boolean(milestoneDue) || Boolean(ownDue && /^\d{4}-\d{2}-\d{2}$/.test(ownDue));
   // Before the person saved any preferences the older rule applies to work without a deadline; a deadline always lifts it.
   const tier = hasDeadline ? important ? 1 : 2 : preferences ? important ? 3 : 4
     : order.state === "approved" ? 3 : order.identityId === (process.env.CROSSLINE_PRIMARY_CLOCK_ID ?? linePacks(ctx).find((pack) => pack.masterClock)?.id) ? 1 : 2;
   const core = humanCoreOf(order);
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const landing = byproductLanding(ctx, order);
-  const dependsOn = landing ? landing.dependsOn : (order.payload as { dependsOn?: string[] }).dependsOn;
+  // The assistant's preparation for this task takes none of the person's time and is due before it begins (docs/work-split.md §4): it
+  // does not hold the task off the calendar.
+  const offBoard = memoByLedger(getStore(), `off-board:${ctx.workspaceId}`, 5_000, () =>
+    new Set(getStore().listWorkOrders(ctx.workspaceId).filter((item) => !onPersonsBoard(item)).map((item) => item.id)));
+  const dependsOn = (landing ? landing.dependsOn : (order.payload as { dependsOn?: string[] }).dependsOn)?.filter((id) => !offBoard.has(id));
   const preview = previewScope.getStore();
   const release = preview?.notBefore?.[order.id] ?? releaseDayOf(ctx, order);
   const dueDate = preview?.dueDates?.[order.id] ?? landing?.dueDate ?? (order.payload as { dueDate?: string }).dueDate;
   return {
-    id: order.id, title: order.intent, identityId: order.identityId, milestoneId: order.milestoneId, weight,
+    id: order.id, title: taskTitleOf(order), identityId: order.identityId, milestoneId: order.milestoneId, weight,
     estimate: scaledEstimate(resolvedEstimate(ctx, order), preview?.estimates?.[order.id]),
     ...(core?.energy ? { energy: core.energy as "low" | "medium" | "high" } : {}),
     // Materials stand between the proposal and the human until the order reaches ready_for_human — when it needs any. An approved
@@ -1911,10 +2064,11 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
     inputsReady: inputsReady(order),
     // A byproduct's landing never outranks real work: lowest tier, with its own T+2 window once the main order is done.
     deadlineTier: (landing ? 4 : tier) as 1 | 2 | 3 | 4,
-    // The earlier of the goal's confirmed deadline and the task's own due date (the capture's 「10月21号前」, a homework's due day):
-    // a homework due before the exam it counts towards is due on its own day.
+    // The earlier of the milestone's deadline and the task's own due date (the capture's 「10月21号前」, a homework's due day): a
+    // homework due before the exam it counts towards is due on its own day. The milestone's deadline used to count only once schedule
+    // preferences had been saved, which a new account never has.
     ...(() => {
-      const day = [goal?.confirmedDeadline && preferences ? goal.confirmedDeadline : undefined,
+      const day = [milestoneDue,
         dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? dueDate : undefined].filter((value): value is string => Boolean(value)).sort()[0];
       return day ? { deadline: toZonedInstant(day, "23:59", zone) } : {};
     })(),
@@ -2298,6 +2452,14 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     return { nodes: nodes.map(({ id, identityId, title, latestSignal }) => ({ id, identityId, title, latestSignal })), edges };
   })();
 
+  const stepPlans = new Map(store.listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, plan]));
+  const planBlocked = new Set(store.listEvents(ctx.workspaceId, { type: "task.steps_blocked" }).map((event) => event.entityId));
+  const readyProposals = orders.filter((order) => order.state === "awaiting_plan_approval" && !(order.payload as { seeded?: boolean } | undefined)?.seeded
+    && proposalReady(order, stepPlans.get(order.id), { planBlocked: planBlocked.has(order.id), exempt: capacityIdentityIds.has(order.identityId) }));
+  // Unapproved work is never scheduled, so a proposal due within a week is named above 「下一步」 (W-31).
+  const anchorDays = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  const urgentProposal = nearestDueProposal(readyProposals.map((order) => ({ id: order.id, title: taskTitleOf(order),
+    due: (order.payload as { dueDate?: string } | undefined)?.dueDate || (order.milestoneId ? readGoalSettings(ctx, order.milestoneId)?.confirmedDeadline ?? anchorDays.get(order.milestoneId) : undefined) })), libraryDay);
   const energySelected = capacity.level !== "uncalibrated";
   const primaryReason = energySelected
     ? actions.primary?.deadline && Date.parse(actions.primary.deadline) - now.getTime() <= 24 * 60 * 60_000
@@ -2326,11 +2488,14 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
       : { ...capacity, blockers: capacity.blockers.filter((blocker) => blocker.code !== "LOCAL_ACTIVITY_NOT_AUTHORISED") },
     energyEstimate: energyEstimateFor(ctx, now, today),
     energyLearning: energyCalibration(outcomes),
-    awaitingApproval: orders.filter((order) => order.state === "awaiting_plan_approval").length,
+    // Only proposals that are decisions already: one whose steps are still being planned is not counted (`proposalReady`, W-31).
+    awaitingApproval: readyProposals.length,
+    ...(urgentProposal ? { urgentProposal } : {}),
     // Milestones that exist and wait for approval, and whether any exist at all: an empty 「下一步」 says which step comes next.
     milestones: { drafts: new Set(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "draft").map((item) => item.id)).size,
       any: store.listMilestones(ctx.workspaceId).some((item) => item.status !== "archived"),
-      firstDrafts: firstDraftsState(store.getSetting(ctx.workspaceId, FIRST_DRAFTS_SETTING), store.listMilestones(ctx.workspaceId).some((item) => item.status !== "archived"), now) },
+      firstDrafts: firstDraftsState(store.getSetting(ctx.workspaceId, FIRST_DRAFTS_SETTING), store.listMilestones(ctx.workspaceId).some((item) => item.status !== "archived"), now),
+      backplanning: milestonesBeingBackplanned(store, ctx.workspaceId, libraryDay) },
     ...(primary ? { primary } : {}),
     ...(higherPriority ? { higherPriority } : {}),
     ...(lowEnergy ? { lowEnergy } : {}),

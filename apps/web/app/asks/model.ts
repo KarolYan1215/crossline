@@ -30,11 +30,13 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
   event_propose: { answered: "写入 Crossline 日历，提前 10 分钟提醒。", unanswered: "日历中不出现该日程；排程照样避开这段时间。" },
   step_question: { answered: "任务的步骤按回答重新安排。", unanswered: "步骤保持现有安排。" },
   relation_check: { answered: "记录这条飞轮关系是否兑现，计入兑现率。", unanswered: "这条关系的兑现情况不计入。" },
-  background_paused: { answered: "查看额度，恢复后自动继续。", unanswered: "新收集的事项等恢复后再分析。" },
+  background_paused: { answered: "查看额度；恢复后自动补上，排程与提醒一直照常。", unanswered: "排程、日历与提醒照常；分析与拆步骤等额度恢复后自动补上。" },
   locked_conflict: { answered: "挪开锁定块，或保留两件事的重叠。", unanswered: "锁定块与新日程继续重叠。" },
   outcome_check: { answered: "完成情况或结果记入任务与里程碑进度；说了出结果的日期就到那天再问。", unanswered: "任务保持已验收，完成情况不计入里程碑进度。" },
   progress_check: { answered: "这一步的进度按回答记下，排程按剩下的部分安排。", unanswered: "进度保持原样，不影响别的事。" },
-  milestone_risk_review: { answered: "接受则它的任务提前 1–2 天排完；也可调整截止或降低标准。", unanswered: "排程不变，不为这项风险提前。" }
+  milestone_risk_review: { answered: "接受则它的任务提前 1–2 天排完；也可调整截止或降低标准。", unanswered: "排程不变，不为这项风险提前。" },
+  prep_question: { answered: "助手按回答把这项准备做完，结果放进要用它的任务的「已备好」。", unanswered: "这项准备不开始；要用它的任务照常排，开始时材料可能不全。" },
+  milestone_overdue: { answered: "补做则截止不变、剩下的工作照常排；改日期则按新截止排；放弃则里程碑和未开始的任务归档。", unanswered: "截止停在已过的日期，剩下的工作按已过期排。" }
 };
 
 /** What an answer does and what silence does. An option's own detail is preferred over the kind's sentence when it is the recommended one. */
@@ -50,7 +52,7 @@ export function askOutcome(ask: Pick<Ask, "kind" | "options">, locale?: Locale):
 export type AskSource = { label: string; href: string };
 
 const WORK_ORDER_KINDS = new Set<AskKind>(["materials_blocked", "gate_insufficient", "gate_failed", "evidence_manual", "missed_block", "locked_conflict", "step_question"]);
-const MILESTONE_KINDS = new Set<AskKind>(["backplan_input", "milestone_risk", "milestone_risk_review"]);
+const MILESTONE_KINDS = new Set<AskKind>(["backplan_input", "milestone_risk", "milestone_risk_review", "milestone_overdue"]);
 
 /**
  * The first 「…」 or 《…》 in a title — or, in an English title, the first “…” or "…" — the name of the thing the ask is about. Titles are
@@ -72,7 +74,8 @@ export function askSources(ask: Pick<Ask, "kind" | "entityId" | "title" | "optio
   const id = encodeURIComponent(ask.entityId);
   const sources: AskSource[] = [];
   if (WORK_ORDER_KINDS.has(ask.kind)) sources.push({ label: ask.kind === "step_question" ? t("任务") : named("任务"), href: `/workbench/${id}` });
-  if (MILESTONE_KINDS.has(ask.kind)) sources.push({ label: named("里程碑"), href: `/milestones?open=${id}` });
+  // A folded card (`entityId: "batch"`, several milestones) has no one milestone to open; its preview links the page.
+  if (MILESTONE_KINDS.has(ask.kind) && ask.entityId !== "batch") sources.push({ label: named("里程碑"), href: `/milestones?open=${id}` });
   if (ask.kind === "source_project") sources.push({ label: named("文件"), href: `/api/source-documents/${id}/file` });
   if (ask.kind === "capture_blocked") sources.push({ label: t("收集"), href: "/workbench" });
   if (ask.kind === "interview_question") sources.push({ label: t("访谈"), href: "/onboarding" });
@@ -94,10 +97,14 @@ export function byQuadrant(asks: Ask[]): Record<AskQuadrant, Ask[]> {
   return groups;
 }
 
-/** The request body for `POST /api/asks/answer`. A single option also goes as `optionId`, which the route has always taken. */
-export function answerBody(askId: string, optionIds: string[], values: Record<string, string>, note: string): Record<string, unknown> {
+/**
+ * The request body for `POST /api/asks/answer`. A single option also goes as `optionId`, which the route has always taken; `seconds` is
+ * how long the card was on screen (`useVisibleSeconds`).
+ */
+export function answerBody(askId: string, optionIds: string[], values: Record<string, string>, note: string, seconds?: number): Record<string, unknown> {
   const text = note.trim();
-  return { askId, optionIds, ...(optionIds.length === 1 ? { optionId: optionIds[0] } : {}), values, ...(text ? { note: text } : {}) };
+  return { askId, optionIds, ...(optionIds.length === 1 ? { optionId: optionIds[0] } : {}), values, ...(text ? { note: text } : {}),
+    ...(seconds === undefined ? {} : { seconds }) };
 }
 
 /** The person's words for a refused answer. */
@@ -132,3 +139,12 @@ export function entryHistogram(entries: string[], today: string, days = 28): Arr
 
 /** 「10/17」 / "Oct 17". */
 export const shortDay = (day: string, locale?: Locale) => shortDate(locale, day);
+
+/** How many rows of a folded card are shown before 「另有 N 个」. */
+export const ASK_ITEMS_SHOWN = 5;
+
+/** A folded card's rows: the first few, and how many more there are (none once expanded). */
+export function itemsShown<T>(items: T[], expanded: boolean, limit = ASK_ITEMS_SHOWN): { shown: T[]; more: number } {
+  if (expanded || items.length <= limit) return { shown: items, more: 0 };
+  return { shown: items.slice(0, limit), more: items.length - limit };
+}

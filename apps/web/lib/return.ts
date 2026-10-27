@@ -1,5 +1,5 @@
 import "server-only";
-import { taskTitleOf, type AccessContext, type ProgressLevelId } from "@crossline/core";
+import { onPersonsBoard, taskTitleOf, type AccessContext, type ProgressLevelId } from "@crossline/core";
 import { listAgentTasks } from "@crossline/db";
 import { archiveWorkOrder, completeWorkOrderExecution, effectiveSchedulePreferences, getStore, planToday, startWorkOrderExecution, toZonedInstant } from "./crossline";
 import { rejectMilestoneDrafts } from "./approvals";
@@ -125,7 +125,7 @@ export function returnView(ctx: AccessContext, since: string, now: Date, until?:
   const answeredOrders = new Set(answers.filter((answer) => !answer.stepId).map((answer) => answer.orderId));
   const answeredSteps = new Set(answers.filter((answer) => answer.stepId).map((answer) => `${answer.orderId}#${answer.stepId}`));
   const items = store.listWorkOrders(ctx.workspaceId).flatMap((order): ReturnItem[] => {
-    if (!OPEN.includes(order.state) || order.tombstone || answeredOrders.has(order.id) || (order.payload as { seeded?: boolean }).seeded) return [];
+    if (!OPEN.includes(order.state) || order.tombstone || answeredOrders.has(order.id) || (order.payload as { seeded?: boolean }).seeded || !onPersonsBoard(order)) return [];
     const dueDay = (order.payload as { dueDate?: string }).dueDate || anchors.get(order.milestoneId) || "";
     const plannedDays = planned.get(order.id) ?? [];
     const all = store.getStepPlan(ctx.workspaceId, order.id)?.steps ?? [];
@@ -155,7 +155,7 @@ export function returnView(ctx: AccessContext, since: string, now: Date, until?:
     hoursAway: Math.floor(((until ? Date.parse(until) : now.getTime()) - Date.parse(since)) / 3_600_000), items,
     happened: {
       assistantDone: listAgentTasks(store, ctx.workspaceId).filter((task) => ["needs_review", "accepted"].includes(task.status) && finishedAt(task) >= since).length,
-      proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval").length,
+      proposals: store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "awaiting_plan_approval" && onPersonsBoard(order)).length,
       calendarChanges: store.listEvents(ctx.workspaceId, { type: "plan.reality_changed" }).filter((event) => event.createdAt >= since).length,
       deadlinesSoon: approvedDeadlines
     },

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
-  TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, planMerges, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview, tFor,
-  type BackgroundKind, type BackgroundSpend, type InfoRequest, type MergeGroup, type MergeTask, type TaskMergeReview
+  TASK_MERGE_REVIEW_SCHEMA, infoRequestSteps, isWorkOwner, planMerges, scopeRenames, spendAllows, taskTitleOf, textSimilarity, normalizeTaskTitle, validateTaskMergeReview, workOwner, tFor,
+  type WorkOwner, type BackgroundKind, type BackgroundSpend, type InfoRequest, type MergeGroup, type MergeTask, type TaskMergeReview
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore, StepPlanInput, StoredWorkOrder } from "@crossline/db";
@@ -45,7 +45,9 @@ export function mergeTasks(store: CrosslineStore, workspaceId: string): MergeTas
     return { id: order.id, identityId: order.identityId, projectId: order.projectId, milestoneId: order.milestoneId, title: taskTitleOf(order),
       intent: order.intent, state: order.state, dueDate: payload.dueDate ?? "", milestoneDeadline: anchors.get(order.milestoneId) ?? "",
       progress: plan ? plan.steps.filter((step) => step.status !== "planned").reduce((sum, step) => sum + step.share, 0) : 0,
-      hasStepPlan: Boolean(plan), started: started.has(order.id), dependsOn: payload.dependsOn ?? [] };
+      hasStepPlan: Boolean(plan), started: started.has(order.id), dependsOn: payload.dependsOn ?? [],
+      // Who does it, as the backplanner reads it: the recorded owner, else what the work produces (docs/work-split.md). Merges stay on one side.
+      owner: isWorkOwner((order.payload as { owner?: unknown } | undefined)?.owner) ? (order.payload as { owner: WorkOwner }).owner : workOwner(order).owner };
   });
 }
 
@@ -127,7 +129,7 @@ export function applyMerge(store: CrosslineStore, workspaceId: string, group: Me
   // One undoable operation, in the shape the web's undo log reads (apps/web/lib/undo.ts).
   const opId = `op-${now.getTime().toString(36)}-${randomUUID().slice(0, 6)}`;
   store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `op.applied:${opId}`, type: "op.applied", entityId: opId,
-    payload: { label: label.slice(0, 160), inverse: { kind: "task.unmerge", keepId: keep.id, payload: beforePayload, plan: beforePlan, restore: absorbed.map((order) => order.id) } } });
+    payload: { bySystem: true, label: label.slice(0, 160), inverse: { kind: "task.unmerge", keepId: keep.id, payload: beforePayload, plan: beforePlan, restore: absorbed.map((order) => order.id) } } });
   store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.merged:${keep.id}:${opId}`, type: "task.merged", entityId: keep.id,
     payload: { kind: group.kind, absorbed: absorbed.map((order) => order.id), reason: group.reason, opId } });
   return { keep: keep.id, absorbed: absorbed.map((order) => order.id), label, merged };
@@ -146,7 +148,9 @@ export async function reviewPairs(store: CrosslineStore, workspaceId: string, cl
       due: (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "" }; };
     const input = { version: "crossline.task-merge-review.v1", pairs: open.map((pair, index) => ({ id: `p${index + 1}`, a: brief(pair.a), b: brief(pair.b), rule: pair.why })) };
     const result = await runCodexSkill<TaskMergeReview>(client, input, { skillName: REVIEWER, cwd,
-      developerInstructions: "Decide for each pair whether the two tasks are the same piece of work, as the Skill's duplicate-task section describes. Return raw JSON only.",
+      developerInstructions: "Decide for each pair whether the two open tasks are the same piece of work, as the duplicate-task section of the "
+        + "crossline-validation-reviewer Skill describes, and return only the requested JSON. `same: true` merges them into one task that serves both "
+        + "milestones; doing one must also deliver the other. Different deliverables are never the same however close the words; when unsure, false.",
       outputSchema: TASK_MERGE_REVIEW_SCHEMA as unknown as Record<string, unknown>, prepareInput: () => input,
       validateOutput: (output) => validateTaskMergeReview(output, input.pairs.map((pair) => pair.id)), onAudit: () => {}, timeoutMs: 30 * 60_000 });
     if (result.ok) {
@@ -168,12 +172,14 @@ const readJudged = (store: CrosslineStore, workspaceId: string): Record<string, 
  * the same day only asks the reviewer about pairs left open because the quota was not normal at the first run (`DEDUPE_REVIEW_DAY_SETTING`).
  */
 export async function dedupePass(deps: { store: CrosslineStore; workspaceId: string; cwd: string; client: () => CodexRpcBoundary | undefined;
-  spend: () => Promise<BackgroundSpend>; paused: (kind: BackgroundKind) => boolean; enterUsage: (workspaceId: string) => void; now?: Date }) {
+  spend: () => Promise<BackgroundSpend>; paused: (kind: BackgroundKind) => boolean; enterUsage: (workspaceId: string) => void; now?: Date;
+  /** The return tidy-up (`return-tidy.ts`): run now whatever ran today, the reviewer as core work, and say nothing of its own. */
+  force?: boolean }) {
   const { store, workspaceId } = deps;
   const now = deps.now ?? new Date();
   const day = localDay(store, workspaceId, now);
   if (deps.paused("planning")) return [];
-  const catchUp = store.getSetting(workspaceId, DEDUPE_DAY_SETTING) === day;
+  const catchUp = !deps.force && store.getSetting(workspaceId, DEDUPE_DAY_SETTING) === day;
   if (catchUp && store.getSetting(workspaceId, DEDUPE_REVIEW_DAY_SETTING) === day) return [];
   const judged = readJudged(store, workspaceId);
   const sameKeys = () => new Set(Object.entries(readJudged(store, workspaceId)).filter(([, same]) => same).map(([key]) => key));
@@ -184,17 +190,39 @@ export async function dedupePass(deps: { store: CrosslineStore; workspaceId: str
   if (catchUp && !open.length) return [];
   if (!catchUp) store.setSetting(workspaceId, DEDUPE_DAY_SETTING, day);
   const client = deps.client();
-  if (open.length && client && spendAllows(await deps.spend(), "discretionary")) {
+  if (open.length && client && spendAllows(await deps.spend(), deps.force ? "core" : "discretionary")) {
     store.setSetting(workspaceId, DEDUPE_REVIEW_DAY_SETTING, day);
     deps.enterUsage(workspaceId);
     const same = await reviewPairs(store, workspaceId, client, deps.cwd, open).catch(() => undefined);
     if (same?.size) ({ groups, unsure } = planMerges(mergeTasks(store, workspaceId), same, locale));
   } else if (catchUp) return [];
+  if (!catchUp) renameByScope(store, workspaceId, now);
   // Requests first, so a task that took one in and is then merged as a duplicate carries it along.
   const ordered = [...groups.filter((group) => group.kind === "info_request"), ...groups.filter((group) => group.kind === "duplicate")];
   const done = ordered.map((group) => applyMerge(store, workspaceId, group, now)).filter((item): item is NonNullable<typeof item> => Boolean(item));
-  if (done.length) sayToPerson(store, workspaceId, [t("今天的自检合并了 {{count}} 个重复或只需一封邮件的任务：", { count: done.reduce((sum, item) => sum + item.absorbed.length, 0) }),
+  if (done.length && !deps.force) sayToPerson(store, workspaceId, [t("今天的自检合并了 {{count}} 个重复或只需一封邮件的任务：", { count: done.reduce((sum, item) => sum + item.absorbed.length, 0) }),
     ...done.map((item) => `- ${item.merged}`), t("可在任务页「已归档」的「已合并」里撤销。")].join("\n"),
     "tasks_merged", catchUp ? `merged:${day}:review` : `merged:${day}`, [{ label: t("查看", { context: "view" }), href: "/approvals" }], now);
+  return done;
+}
+
+/**
+ * Tasks the merge keeps apart that read alike get their milestone in the name (`scopeRenames`): 「汇集 ECE 548 复习材料（期中考试 1）」 and
+ * 「…（期末考试）」. Each is recorded as a `task.renamed` event.
+ */
+export function renameByScope(store: CrosslineStore, workspaceId: string, now = new Date()): Array<{ id: string; title: string }> {
+  const owner = ownerOf(store, workspaceId);
+  const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone.title]));
+  const orders = new Map(store.listWorkOrders(workspaceId).map((order) => [order.id, order]));
+  const done: Array<{ id: string; title: string }> = [];
+  for (const rename of scopeRenames(mergeTasks(store, workspaceId), milestones, localeOf(store, workspaceId))) {
+    const order = orders.get(rename.id);
+    if (!order) continue;
+    const before = taskTitleOf(order);
+    store.saveWorkOrder({ ...order, payload: { ...((order.payload ?? {}) as Record<string, unknown>), title: rename.title } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `task.renamed:${order.id}:${rename.title}`, type: "task.renamed", entityId: order.id,
+      payload: { at: now.toISOString(), by: "system", before, title: rename.title, reason: tFor(localeOf(store, workspaceId))("与同名任务服务不同里程碑，名称注明「{{scope}}」", { scope: rename.scope }) } });
+    done.push({ id: order.id, title: rename.title });
+  }
   return done;
 }

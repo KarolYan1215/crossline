@@ -1,6 +1,8 @@
 import { effectiveSchedulePreferences, getStore, lastNight } from "../../lib/crossline";
 import { localStamp } from "@crossline/core";
-import { loadWeeklyReview } from "../../lib/review";
+import { loadWeekInvestment, loadWeeklyReview } from "../../lib/review";
+import { BarChart } from "../ui/charts";
+import "./review.css";
 import { SubpageShell } from "../subpage-shell";
 import { RevokeAcceptance } from "./revoke-acceptance";
 import { DecideRelations } from "./decide-relations";
@@ -26,6 +28,8 @@ export const dynamic = "force-dynamic";
 const criterionKind: Record<string, string> = {
   count: "计数", artifact: "产物", threshold: "阈值", judgement: "判断"
 };
+const LOAD = { low: "低", medium: "中", high: "高" } as const;
+const LOAD_RANK = { low: 0, medium: 1, high: 2 } as const;
 const metLabel: Record<string, string> = { met: "已达成", partial: "部分达成", unmet: "未达成", unverifiable: "无法核实" };
 
 export default async function ReviewPage() {
@@ -43,8 +47,26 @@ export default async function ReviewPage() {
   const identities = linePacks(ctx).filter((pack) => pack.kind === "identity").map((pack) => ({ id: pack.id, label: pack.label }));
   const t = tOf(ctx);
 
+  const week = loadWeekInvestment(ctx);
+  const hoursOf = (minutes: number) => Math.round(minutes / 6) / 10;
+  const weekMax = Math.max(...week.lines.flatMap((line) => [hoursOf(line.planned), hoursOf(line.actual)]), 1);
+
   return <SubpageShell active={"主线"} eyebrow={t("证据驱动")} title={t("周复盘")} description={t("本周的验收、里程碑进展与待定的跨主线关系；没有记录的指标标为「未标定」。")}>
-    <section className="review-block">
+    {/* Sections fill the width: the wide ones run across it, the rest pair up in two columns on a large screen (2026-10-21). */}
+    <div className="review-grid">
+    {week.hasData && <section className="review-block review-wide" aria-label={t("本周各线投入")}>
+      <h2>{t("本周各线投入")}</h2>
+      <p className="review-note">{t("{{start}}–{{end}}，单位小时。计划按日程记下的 {{count}} 天累计，实际为计时。", { start: week.start.slice(5).replace("-", "/"), end: week.end.slice(5).replace("-", "/"), count: week.recordedDays })}</p>
+      <div className="review-week">
+        <div><h3 className="review-week-head">{t("计划")}</h3>
+          <BarChart label={t("本周各线计划小时")} unit=" h" max={weekMax} data={week.lines.map((line) => ({ label: line.label, line: line.line, value: hoursOf(line.planned),
+            title: t("{{line}} · 计划 {{hours}} 小时", { line: line.label, hours: hoursOf(line.planned) }) }))} /></div>
+        <div><h3 className="review-week-head">{t("实际计时")}</h3>
+          <BarChart label={t("本周各线实际计时小时")} unit=" h" max={weekMax} data={week.lines.map((line) => ({ label: line.label, line: line.line, value: hoursOf(line.actual),
+            title: t("{{line}} · 实际计时 {{hours}} 小时", { line: line.label, hours: hoursOf(line.actual) }) }))} /></div>
+      </div>
+    </section>}
+    <section className="review-block review-wide">
       <h2>{t("本周自动验收")}</h2>
       <p className="review-note">
         {t("关联里程碑的任务由系统按证据自动验收，每一条都列在这里。任一条都可撤销：撤销后回到证据复核，已交的证据保留。")}
@@ -62,14 +84,26 @@ export default async function ReviewPage() {
         })}</div>}
     </section>
 
-    {diligence.length > 0 && <section className="review-block">
+    {review.taskLoad.length > 0 && <section className="review-block">
+      <h2>{t("本周做完后的累不累")}</h2>
+      <p className="review-note">{t("做完任务时本人选的「这件事累不累」，与排程时按任务估计的精力需求并列；只在这里列出，不改排程。")}</p>
+      <ul className="review-list">{review.taskLoad.map((item) => <li key={item.workOrderId}>
+        <b><a href={`/workbench/${encodeURIComponent(item.workOrderId)}`}>{item.title}</a></b>
+        <small>{lineLabel.get(item.identityId) ?? item.identityId} · {t("本人说：{{load}}", { load: t(LOAD[item.actual]) })}{item.expected ? ` · ${t("原估精力需求：{{load}}", { load: t(LOAD[item.expected]) })}` : ""}</small>
+        {item.expected && item.expected !== item.actual && <Tag tone={LOAD_RANK[item.actual] > LOAD_RANK[item.expected] ? "warn" : "neutral"}>
+          {LOAD_RANK[item.actual] > LOAD_RANK[item.expected] ? t("比预想累") : t("比预想轻松")}</Tag>}
+      </li>)}</ul>
+    </section>}
+
+    {diligence.length > 0 && <section className="review-block review-wide review-diligence">
       <h2>{t("本周调研结论")}</h2>
-      <p className="review-note">{t("网上调研得出的提议在这里一周批一次；采纳后只作为里程碑设计的参考，不会直接变成任务。")}</p>
+      <p className="review-note">{t("网上调研得出的提议在这里一周批一次；采纳「任务」类提议会收进待分析、变成任务；其余类型采纳后作为下次设计里程碑的参考。")}</p>
       <DiligenceReview reports={diligence} identities={identities} />
     </section>}
 
-    <section className="review-block">
+    <section className="review-block review-wide">
       <h2>{t("里程碑达成标准")}</h2>
+      <div className="review-milestones">
       {review.milestoneProgress.map((milestone) => <article key={milestone.id} className="review-milestone">
         <a className="card-cover-link" href={`/milestones/${encodeURIComponent(milestone.id)}`} aria-label={milestone.title} />
         <MilestonePreview detail={milestoneDetails.get(milestone.id)} />
@@ -87,6 +121,7 @@ export default async function ReviewPage() {
         {milestone.verifiability === "judgement_only"
           && <em className="review-flag">{t("全部为判断型标准 —— 无法客观判负，值得额外复核。")}</em>}
       </article>)}
+      </div>
     </section>
 
     <section className="review-block">
@@ -104,7 +139,7 @@ export default async function ReviewPage() {
         </li>)}</ul>}
     </section>
 
-    <section className="review-block">
+    <section className="review-block review-wide">
       <h2>{t("候选关系")}</h2>
       <p className="review-note">
         {t("排序依据全部是可数事实：目标是否停滞、是否复用已有产物、有无反例、历史成本。没有综合评分。")}
@@ -159,6 +194,7 @@ export default async function ReviewPage() {
         ? <p className="review-empty">{t("暂无待判断的问题；周复盘运行后在此列出。")}</p>
         : <ul className="review-list">{review.questions.map((item) => <li key={item.id}><b>{item.question}</b></li>)}</ul>}
     </section>
+    </div>
 
     <p className="muted">{t("已验收作业 {{accepted}} / {{total}}（只来自账本里的真实状态）。", { accepted, total: workOrders.length })}</p>
   </SubpageShell>;

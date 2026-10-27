@@ -38,6 +38,7 @@ function shownElsewhere(text: string): boolean {
 export function AssistantWidget() {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const [full, setFull] = useState(false);
   const [latest, setLatest] = useState<{ id: string; text: string; full: string } | null>(null);
   const [popped, setPopped] = useState(false);
   const [hover, setHover] = useState(false);
@@ -86,15 +87,24 @@ export function AssistantWidget() {
       <button type="button" className="assistant-nudge-close" aria-label={t("收起这条提示")} title={t("收起")}
         onClick={() => { setPopped(false); setHover(false); }}>×</button>
     </div>}
-    {helper.avatar
+    {!helper.known
+      // Not yet known whether there is a figure: a quiet circle the figure's size, so nothing jumps when the answer comes.
+      ? <button type="button" className="assistant-bubble helper-bubble" data-pending="" onClick={openPanel} aria-label={label} title={label}>
+        <span className="helper-face" data-size="button" aria-hidden="true" /></button>
+      : helper.avatar
       ? <button type="button" className="assistant-bubble helper-bubble" data-mood={mood} data-unread={latest && !shown ? "" : undefined} onClick={openPanel} aria-label={label} title={label}>
         <HelperFace src={helper.avatar} size="button" mood={mood} /></button>
       : <button type="button" className="assistant-bubble" data-unread={latest ? "" : undefined} data-mood={mood} onClick={openPanel} aria-label={label}>{t("小帮手")}</button>}
   </div>;
-  return <section className="assistant-panel" aria-label={t("小帮手")}>
+  return <section className="assistant-panel" aria-label={t("小帮手")} data-full={full || undefined}
+    onKeyDown={(event) => { if (event.key === "Escape" && full) { event.stopPropagation(); setFull(false); } }}>
     <header>
       <span>{helper.avatar && <HelperFace src={helper.avatar} size="reply" />}{t("小帮手")}</span>
-      <button type="button" className="text-button" onClick={() => setOpen(false)} aria-label={t("收起小帮手")}>{t("收起")}</button>
+      <span className="assistant-panel-actions">
+        <button type="button" className="text-button" onClick={() => setFull(!full)} aria-pressed={full}
+          aria-label={full ? t("退出全屏对话") : t("全屏对话")}>{full ? t("退出全屏") : t("全屏")}</button>
+        <button type="button" className="text-button" onClick={() => { setFull(false); setOpen(false); }} aria-label={t("收起小帮手")}>{t("收起")}</button>
+      </span>
     </header>
     <Conversation variant="panel" />
   </section>;

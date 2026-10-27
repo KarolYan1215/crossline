@@ -1,80 +1,92 @@
-import { randomUUID } from "node:crypto";
+import { transcriptDocumentIds } from "./recording-digest";
 import {
-  AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary,
-  EMPTY_PROFILE_MODEL, GOAL_EDITS_SETTING, ONBOARDING_TURN_SCHEMA, duplicateAttributes, type PendingGoalEdit, type StoredLineProfile, PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingTurn, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, mergeFacts, sanitizeDateExtraction, validateOnboardingTurn,
-  gapCoveredBy, screenQuestions, screenAssumption, mergeDateExtractions, withoutDecidedDates, withoutOffHours, resolveAvailability, AVAILABILITY_SETTING, AVAILABILITY_PROPOSED_SETTING, type DateExtraction,
-  type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, readTone,
-  type KnownSources, type OnboardingTurn, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, readPartialTurn, type OnboardingProgress, calendarWeek, tFor, type Locale
+  AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour,
+  PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
+  validateOnboardingDialogue, locateQuote,
+  gapCoveredBy, screenQuestions, screenAssumption,
+  type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, TYPE_TABLE, readTone,
+  checkInsight, readTurnProgress,
+  type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
+  tFor, type Locale
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
-import { interviewChecklistFor, interviewGapsFor, interviewLocale, lockInterviewLocale, questionScreenFor, unfiledFilesIn, type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument } from "@crossline/db";
+import {
+  EXTRACT_REREAD_SETTING, extractBacklog, firstSentenceOf, markFinishing, interviewChecklistFor, interviewGapsFor, interviewLocale, lockInterviewLocale, queueExtractDocs, questionScreenFor, readExtractDocs, unfiledFilesIn,
+  type CrosslineStore, type StoredOnboardingMessage, type StoredSourceDocument
+} from "@crossline/db";
 import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { identityLines } from "./lines";
+import { ledgerForModel, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
+import { createOnboardingExtractor, extractionReached, requestExtraction } from "./onboarding-extract";
+import { personTimeZone, readProfileModel } from "./onboarding-persist";
+import { paceContext, storedProgress } from "./onboarding-pace";
+import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
 export const ONBOARDING_SKILL = "crossline:crossline-onboarding";
 
-/** Each document is cut to this much text per turn; the full text stays in the ledger for citation checks. */
+/** Each document is cut to this much text per turn. */
 const SOURCE_TEXT_PER_DOCUMENT = 14_000;
 const SOURCE_TEXT_TOTAL = 60_000;
 /** New files one turn reads at most; more wait for the next turn. */
 const SOURCES_PER_TURN = 12;
+/** How long the round that ends the interview waits for the extraction before the portrait's items stop holding it. */
+const FINISH_WAIT_MS = 90_000;
+/** How long a round with a blocking app question waits for the extraction of the reply it may answer. */
+const BLOCKING_WAIT_MS = 30_000;
+/** Facts the extraction recorded since the last turn, at most this many lines in `recorded`. */
+const RECORDED_SHOWN = 40;
+/** Questions of the ledger shown to the model each round; repeats of older ones are still caught in code (`resolveRepeats`). */
+const LEDGER_SHOWN = 15;
 
+// The scenario in brief; the Skill has the rules and the examples (a second copy here drifted from it, 2026-10-19).
 // i18n-ignore-start: instructions to the interview Skill (model-facing)
-const INSTRUCTIONS = "You interview a Crossline user as the Skill describes: a life designer's interview in stages (orientation, "
-  + "lines, situation, compass, energy, details), never proposing milestones. The first two stages gather the start standard: checklist "
-  + "items marked `start` must be answered by the person or read from a file, never written as 「假设：」; while one is open stay in the "
-  + "current stage and keep asking, and once all are in say in `reply` that the person can start using the app while the interview goes "
-  + "on here. The person already set their lines (`lines`: identity "
-  + "nouns, their order, which are hard constraints); do not propose new ones. Each turn: a short reflection on what was just said in the "
-  + "person's chosen `tone`, addressing them as 「你」 (name a contradiction, a self-imposed limit, or gravity mistaken for a problem; never "
-  + "judge a choice or decide for the person). In orientation, lines and details follow it with a batch of up to five fact questions that "
-  + "do not depend on each other; in situation, compass and energy with two to four questions that do not need each other's answers "
-  + "(usually more than one: the stage has several sides to ask about), most important first, keeping only a follow-up that builds on "
-  + "another answer for the next round; follow a "
-  + "thread that carries a clue before returning to the stage. Ask about the hard-constraint lines' rules first (fixed schedule, terms, "
-  + "deadlines), put every fixed weekly arrangement the person states into `fileDates.recurring` quoting their reply, and as soon as the "
-  + "person has said when they can work (or a stage has enough to infer it) propose weekly available hours in `availability` — do not wait "
-  + "for every fixed arrangement: classes and meetings are subtracted from these hours automatically. Every single/multi question has concrete candidate options (8-14 when the "
-  + "space is large) and allows the person's own answer. Rewrite `profile` in full every turn (your synthesis). In the lines stage write "
-  + "each line's personal description and 6-12 attribute candidates for its long-term goal in `lineProfiles[].attributeCandidates` — never "
-  + "whole sentences: each one independent quality (a field, an ability or a lasting state, labelled `kind` domain/ability/state), a short "
-  + "phrase without 「成为」 or a trailing 「的」, cited by `sourceRef` to the reply-N or src-N it comes from, and no two overlapping (after removing "
-  + "「的」 and punctuation neither may contain the other); the person combines them into 「成为 A 的、B 的<身份>」 themselves. Leave the list empty "
-  + "while a line is still thin and ask more. When the person asks in so many words to change a line's goal (「把目标改成…」), put the new "
-  + "attributes in `goalEdits` citing that reply — it is shown to them to adopt, never applied by you; otherwise `goalEdits` is empty. "
-  + "Facts about the person in general use identityId \"person\". When `focusLine` is "
-  + "set, interview only that line (stage `details`) and refresh its `lineProfiles` entry whenever what was said changes its description "
-  + "or attributes. Every confirmed slotUpdate cites a reply-N or src-N with a verbatim sourceQuote; your "
-  + "own conclusions are sourceRef 'inference', status 'inferred', empty quote. Never invent dates, numbers or names. Files that arrive "
-  + "are for you to read: every date they state goes into `fileDates`, each with a verbatim quote containing the day and a title that names its course or project (「ECE 555 期末考试」, never a bare 「期末考试」); never ask which course or project a file belongs to (the app asks that itself; a settled file carries its projectId); never turn TBD into "
-  + "a date (list it in `undated`). When `history` is present the conversation is being resumed: continue it, do not greet again or re-ask "
-  + "what is answered. All human-readable fields in Chinese.";
+const INSTRUCTIONS = "You are the interviewer of Crossline's first-run interview, as the Skill describes. The person reads your `reply` and answers "
+  + "your question cards; another run records facts, dates, goal attributes, hours and the portrait from the same replies and files, so you "
+  + "write only `reply`, `questions`, `coverage`, `nextAction`, `stage`, `insight` and `progress`. Five parts: orientation, lines, situation, "
+  + "compass, energy (`details` for one line when `focusLine` is set); never propose milestones. Start from `progress`, your own record of "
+  + "the last round, and write it again from this round's answers. Read `abstract`, `questionLedger` and the earlier replies in this thread "
+  + "first and never ask what they already hold; when a reply answered part of a question, ask only the rest. One question asks one thing; "
+  + "options state no number or threshold nobody gave. Ask only what changes the plan or the portrait and only the person knows; a rough time is enough; per line at most two or three core "
+  + "deadlines. Checklist items marked `start` take only the person's word or a file. A long-term goal attribute is a word the person would "
+  + "use about who they want to be on a line (严谨, 有影响力, 受学生欢迎), never an achievement or an action: ask about it only while "
+  + "`goalPicker` says the line has no candidates. `reply`: one to three plain sentences in the person's `tone`, addressing them as 「你」; "
+  + "it never corrects how the person describes their own hours or problem, says a tension once, and answers a request about the app "
+  + "(re-reading files) with what was done. "
+  + "In situation, compass and energy write one `insight` connecting two of their replies, with exact short spans in `refs`. When `history` "
+  + "is present the conversation is being resumed: continue it. A line in `domainGuides` (健康 / 财富) is asked from its `ask` list, in order, "
+  + "with numbers as ranges; never ask account numbers, balances, holdings or passwords, never advise trades, diagnoses or doses. "
+  + "Human-readable fields in Chinese.";
 // i18n-ignore-end
 
 export type OnboardingTurnOutcome =
   | { state: "asked" | "ready"; sessionId: string }
-  | { state: "blocked"; sessionId: string; code: string; message: string };
+  | { state: "blocked"; sessionId: string; code: string; message: string; detail?: string };
 
-type Announced = { announcedSources?: string[]; calendarSent?: string };
+/** What the dialogue's thread has been shown: the files, the calendar week, and when it last heard what the extraction recorded. */
+type Announced = { announcedSources?: string[]; calendarSent?: string; heardAt?: string };
 
 export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId: string, cwd: string,
   getClient: () => CodexRpcBoundary | undefined, options: {
     /** Hold a premature 「ready」 to the completion list (on in the app; tests of other behaviour turn it off). */
     checklist?: boolean;
+    /**
+     * The extraction (onboarding-extract.ts) starts with every turn. `background` (the app): the person gets the round without waiting for
+     * it, except a round that would end the interview, which waits so the checklist is read after it. `await`: the round waits for it
+     * (scripts and tests that read the ledger right after). `off`: not started (the sponsor's sample interview measures the dialogue).
+     */
+    extract?: "background" | "await" | "off";
   } = {}) {
+  const extractMode = options.extract ?? "background";
   const identities = () => identityLines(store, workspaceId)
     .map((pack) => ({ id: pack.id, label: pack.label }));
 
-  /** Everything a quote can be checked against, rebuilt from the ledger on every turn. */
-  function knownSources(messages: StoredOnboardingMessage[], docs: Map<string, StoredSourceDocument>): KnownSources {
+  /** What a question may name: the lines and projects on record. The dialogue cites nothing. */
+  function knownSources(): KnownSources {
     return {
       identities: identities().map((item) => item.id),
       projectIds: store.listProjects(workspaceId, { includeArchived: true }).map((project) => project.id),
-      replies: Object.fromEntries(messages.filter((message) => message.role === "user")
-        .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")])),
-      sources: Object.fromEntries([...docs].filter(([, doc]) => doc.extractionStatus === "done")
-        .map(([id, doc]) => [id, doc.extractedText]))
+      replies: {}, sources: {}
     };
   }
 
@@ -84,13 +96,20 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   /** The completion list as of now: the system's own record of what the interview still owes, never shown to the person. */
   const checklistNow = () => interviewChecklistFor(store, workspaceId, identityLines(store, workspaceId)
     .map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: unfiled().length, today: todayIso() });
-  const openChecklist = () => checklistNow().filter((item) => !item.done).map(({ label, detail, owner, start }) => ({ label, detail, owner, ...(start ? { start } : {}) }));
+  // Start items first, then what the interview itself still owes; a project's details are deferred (asked when its task is planned).
+  const openChecklist = (limit = 8, skip: (item: { group: string }) => boolean = () => false) => checklistNow()
+    .filter((item) => !item.done && !item.deferred && !skip(item)).sort((a, b) => Number(Boolean(b.start)) - Number(Boolean(a.start)))
+    .slice(0, limit).map(({ label, detail, owner, start }) => ({ label, detail, owner, ...(start ? { start } : {}) }));
   /** Whether a start item is still open: then the front stages do not move on. */
   const startOpen = () => checklistNow().some((item) => item.start && !item.done);
 
   /** The person's coding-agent hours, time only, when they allowed it (Settings → 隐私). */
   const workHistory = () => {
-    try { return agentHistoryLines(JSON.parse(store.getSetting(workspaceId, AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null); } catch { return []; }
+    let lines: string[] = [];
+    try { lines = agentHistoryLines(JSON.parse(store.getSetting(workspaceId, AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null); } catch { /* none */ }
+    // When the person is at the computer, from the screen-activity record (minutes only), when they allowed it.
+    try { lines = [...lines, ...atComputerLines(JSON.parse(store.getSetting(workspaceId, ACTIVITY_HOURLY) ?? "[]") as ActivityHour[], personTimeZone(store, workspaceId))]; } catch { /* none */ }
+    return lines;
   };
 
   /** What the ledger still lacks, as of now. */
@@ -108,134 +127,36 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     return taken;
   };
 
+  /** The files a turn hands over, as their text within the turn's reading budget. */
   const clipDocuments = (entries: Array<[string, StoredSourceDocument]>) => {
     let budget = SOURCE_TEXT_TOTAL;
     return entries.map(([id, doc]) => {
-      const text = doc.extractedText.slice(0, Math.min(SOURCE_TEXT_PER_DOCUMENT, budget));
-      budget -= text.length;
-      return { id, fileName: doc.fileName, kind: doc.kind, projectId: doc.projectId ?? "", text };
+      const limit = Math.min(SOURCE_TEXT_PER_DOCUMENT, budget);
+      budget -= Math.min(limit, doc.extractedText.length);
+      return { id, fileName: doc.fileName, kind: doc.kind, projectId: doc.projectId ?? "", text: doc.extractedText.slice(0, limit) };
     });
   };
 
-  /** The portrait so far (`profile.model`) and the report (`profile.blueprint`), kept in settings so every page and a rebuilt thread read the same. */
-  const readProfile = (): ProfileModel => {
-    try { return { ...EMPTY_PROFILE_MODEL, ...(JSON.parse(store.getSetting(workspaceId, "profile.model") ?? "{}") as Partial<ProfileModel>) }; }
-    catch { return EMPTY_PROFILE_MODEL; }
+  /** Facts the extraction wrote after `since`, as short lines, and the lines and projects they are about. */
+  const recordedSince = (since: string | undefined) => {
+    const facts = store.listProfileFacts(workspaceId).filter((fact) => !since || fact.updatedAt > since).sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+    return { lines: facts.slice(-RECORDED_SHOWN).map((fact) => `${fact.identityId}${fact.projectId ? `/${fact.projectId}` : ""} · ${fact.slot} = ${fact.value.slice(0, 120)}（${fact.status === "confirmed" ? "确认" : "推断"}）`),
+      identities: [...new Set(facts.map((fact) => fact.identityId))], projects: [...new Set(facts.map((fact) => fact.projectId).filter(Boolean))] };
   };
 
-  /** Writes what a validated turn learned. Facts the person already confirmed are protected by the store. */
-  function persistTurn(turn: OnboardingTurn, sessionId: string, ownerId: string): void {
-    const now = new Date().toISOString();
-    // A line's own interview adds to the facts but does not rewrite the person's whole portrait.
-    if (!sessionId.startsWith("line-") && turn.profile) store.setSetting(workspaceId, "profile.model", JSON.stringify(turn.profile));
-    // Each line's personal description and attribute candidates, kept by line so a later turn or a line's own interview refines one line
-    // only. An empty candidate list keeps those on record; new ones replace them, except the attributes split from the adopted goal.
-    if (turn.lineProfiles?.length) {
-      let current: Record<string, StoredLineProfile> = {};
-      try { current = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* rebuilt below */ }
-      for (const line of turn.lineProfiles) {
-        const previous = current[line.lineId] ?? {};
-        const fresh = line.attributeCandidates ?? [];
-        const fromGoal = (previous.attributes ?? []).filter((item) => item.sourceRef === "goal"
-          && !duplicateAttributes([...fresh.map((other) => other.text), item.text]).some((pair) => pair.includes(item.text)));
-        current[line.lineId] = fresh.length
-          ? { description: line.description || previous.description || "", attributes: [...fresh, ...fromGoal] }
-          : { ...previous, description: line.description || previous.description || "" };
-      }
-      store.setSetting(workspaceId, "lines.profiles", JSON.stringify(current));
-    }
-    // A goal change the person asked for waits for their click on the line's card; a newer request for the same line replaces it.
-    if (turn.goalEdits?.length) {
-      let edits: Record<string, PendingGoalEdit> = {};
-      try { edits = JSON.parse(store.getSetting(workspaceId, GOAL_EDITS_SETTING) ?? "{}") as Record<string, PendingGoalEdit>; } catch { /* rebuilt below */ }
-      // In the order the person said them: a change they worded themselves is not reordered.
-      for (const edit of turn.goalEdits) edits[edit.lineId] = { parts: edit.parts.map((part) => part.text), sourceRef: edit.sourceRef, at: now };
-      store.setSetting(workspaceId, GOAL_EDITS_SETTING, JSON.stringify(edits));
-    }
-    // Available hours worked out from a hard-constraint line's rules: a proposal, confirmed (or not) on the plan page.
-    if (turn.availability?.windows.length) store.setSetting(workspaceId, "schedule.availability.proposed",
-      JSON.stringify({ ...turn.availability, at: now }));
-    for (const project of turn.projectsDetected) {
-      const existing = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === project.id);
-      store.saveProject({ id: project.id, ownerId, workspaceId, identityId: project.identityId, name: project.name,
-        status: existing?.status ?? "active", summary: project.summary || existing?.summary || "",
-        createdAt: existing?.createdAt ?? now, updatedAt: now });
-    }
-    for (const update of turn.slotUpdates) {
-      store.upsertProfileFact({ workspaceId, identityId: update.identityId, projectId: update.projectId, slot: update.slot,
-        value: update.value, status: update.status, sourceRef: update.sourceRef, sourceQuote: update.sourceQuote, updatedAt: now });
-    }
-    // A connection between lines is a guess until the person confirms it, so it is kept as an inferred fact
-    // keyed by its two ends and kind, not as a milestone relation (there may not be milestones yet).
-    for (const candidate of turn.flywheelCandidates) {
-      store.upsertProfileFact({ workspaceId, identityId: candidate.fromIdentityId, projectId: "",
-        slot: `flywheel_${candidate.toIdentityId}_${candidate.kind}`, value: candidate.explanation, status: "inferred",
-        sourceRef: candidate.evidenceRefs[0] ?? "inference", sourceQuote: "", updatedAt: now });
-    }
-    void sessionId;
-  }
-
-  function personTimeZone(): string {
-    try {
-      const raw = store.getSetting(workspaceId, "schedule.preferences");
-      const zone = raw ? (JSON.parse(raw) as { timeZone?: unknown }).timeZone : undefined;
-      if (typeof zone === "string" && zone) return zone;
-    } catch { /* an unreadable setting falls back to the default zone */ }
-    return "America/Chicago";
-  }
-
-  /**
-   * The dates the model read out of the files that came with this turn become one batch for the person to confirm.
-   * Each is checked against the file's own text; what cannot be verified is dropped and counted, and a newer batch
-   * retires an older one nobody answered, so re-reading the files never leaves two batches asking about the same dates.
-   */
-  function persistFileDates(turn: OnboardingTurn, ownerId: string, documentIds: string[], sources: Record<string, string>, today: string,
-    reread: boolean): void {
-    const read = turn.fileDates;
-    if (!read || (!read.dates.length && !read.recurring.length && !read.questions.length && !(read.undated ?? []).length)) return;
-    let checked;
-    try { checked = sanitizeDateExtraction({ dates: read.dates, recurring: read.recurring, questions: read.questions, undated: read.undated ?? [] }, { sources, today }); }
-    catch { return; /* nothing it read could be verified: no batch, and the interview itself is not failed over it */ }
-    // Meals and sleep are what the available hours already leave out: only filtered against hours the person stated (this turn's, the
-    // interview's earlier proposal, or what they painted), never against the generic default.
-    const stated = turn.availability?.windows.length ? turn.availability.windows : (() => {
-      const resolved = resolveAvailability({ saved: store.getSetting(workspaceId, AVAILABILITY_SETTING),
-        proposed: store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING), facts: [] });
-      return resolved.source === "saved" || resolved.source === "interview" ? resolved.windows : undefined;
-    })();
-    // What the person already confirmed or turned down in an earlier batch is not offered again.
-    const decidedEvents = store.listEvents(workspaceId, { type: "dates.decided" })
-      .map((event) => ({ id: event.entityId, payload: event.payload as { superseded?: boolean; included?: string[]; excluded?: string[] } }))
-      .filter((event) => !event.payload.superseded);
-    const extracted = new Map(store.listEvents(workspaceId, { type: "dates.extracted" }).map((event) => [event.entityId, event.payload as unknown as DateExtraction]));
-    const decided = decidedEvents.flatMap((event) => {
-      const batch = extracted.get(event.id);
-      const ids = new Set([...(event.payload.included ?? []), ...(event.payload.excluded ?? [])]);
-      return batch ? [...batch.dates, ...batch.recurring].filter((item) => ids.has(item.id)) : [];
-    });
-    const unseen = withoutDecidedDates(checked.extraction, decided);
-    const fresh = { ...unseen, recurring: stated ? withoutOffHours(unseen.recurring, stated,
-      store.listProjects(workspaceId, { includeArchived: true })) : unseen.recurring };
-    if (!fresh.dates.length && !fresh.recurring.length && !fresh.questions.length && !(fresh.undated ?? []).length) return;
-    const answered = new Set(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => event.entityId));
-    const open = store.listEvents(workspaceId, { type: "dates.extracted" }).filter((event) => !answered.has(event.entityId));
-    // A re-read replaces what nobody answered; any other turn adds to it, so an earlier batch's dates are never lost to a later turn.
-    const carried = reread ? [] : open.map((event) => event.payload as unknown as DateExtraction & { documentIds?: string[] });
-    const merged = mergeDateExtractions(carried, fresh);
-    const batchId = randomUUID();
-    for (const old of open.map((event) => event.entityId)) {
-      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:superseded:${old}`, type: "dates.decided", entityId: old,
-        payload: { superseded: true, by: batchId, merged: !reread, included: [], excluded: [], blocks: 0 } });
-    }
-    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:extracted:${batchId}`, type: "dates.extracted", entityId: batchId,
-      payload: { documentIds: [...new Set([...carried.flatMap((batch) => batch.documentIds ?? []), ...documentIds])], dates: merged.dates,
-        recurring: merged.recurring, questions: merged.questions, undated: merged.undated ?? [], past: merged.past ?? [], dropped: checked.dropped } });
-  }
+  const readProfile = (): ProfileModel => readProfileModel(store, workspaceId);
+  const extractor = createOnboardingExtractor(store, workspaceId, cwd, getClient);
 
   return async function turn(input: { sessionId: string; text: string; reread?: boolean }): Promise<OnboardingTurnOutcome> {
     const client = getClient();
     const sessionId = input.sessionId;
-    const blocked = (code: string, message: string): OnboardingTurnOutcome => ({ state: "blocked", sessionId, code, message });
+    // A round that did not finish says why, and keeps saying it after a reload (2026-10-19: testers saw a bare 「这一轮还没有得到回答」
+    // and could not tell a busy provider from a broken round). Cleared when the next attempt starts.
+    const blocked = (code: string, message: string, detail?: string): OnboardingTurnOutcome => {
+      if (code !== "ONBOARDING_MESSAGE_EMPTY") store.setSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}${sessionId}`,
+        JSON.stringify({ code, message, ...(detail ? { detail } : {}), at: new Date().toISOString() }));
+      return { state: "blocked", sessionId, code, message, ...(detail ? { detail } : {}) };
+    };
     // Errors before the round starts are said in the interview's language, else the workspace's.
     const said = tFor(interviewLocale(store, workspaceId) ?? localeOf(store, workspaceId));
     if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", said("Codex 运行时不可用。"));
@@ -260,13 +181,22 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     }
     // The language this interview started in, kept to its end whatever the interface is switched to (docs/i18n.md).
     const locale = lockInterviewLocale(store, workspaceId, sessionId);
+    store.deleteSetting(workspaceId, `${ONBOARDING_LAST_FAILURE}${sessionId}`);
     const userMessage = messages.at(-1)!;
     const replyId = `reply-${userMessage.seq}`;
     const replyText = String((userMessage.content as { text?: string }).text ?? "");
+    const docs = sourceIds(store.listSourceDocuments(workspaceId));
+    const known = knownSources();
+    // The reply's numbered sentences: what the ledger's answers and the app's own facts below point at, and what the extraction cites.
+    const replySentences = store.ensureEvidence(workspaceId, "reply", `${sessionId}#${userMessage.seq}`, replyText);
+    /** The sentences of this reply a quote the system took from it covers. */
+    const sentencesFor = (quote: string) => {
+      const span = locateQuote(replyText, quote);
+      return span ? replySentences.filter((sentence) => sentence.start < span.end && sentence.end > span.start).map((sentence) => sentence.id) : [];
+    };
 
     // The person's answers to the questions the app itself asked (target grade, an unconfirmed line, a TBD date) are facts the moment they
-    // are given, written here and not left for the model to remember: the label they picked is a verbatim span of their reply.
-    let portraitConfirmedNow = false;
+    // are given, written here and not left for a model to remember: the label they picked is a verbatim span of their reply.
     for (const answer of answeredGapFacts(replyText, currentGaps())) {
       if (answer.file) {
         // The same record 待决事项 writes, so a file filed here is filed everywhere.
@@ -276,31 +206,53 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           entityId: documentId, payload: { projectId, by: "person" } });
         else store.appendEvent({ ownerId, workspaceId, idempotencyKey: `source:cleared:${documentId}:${replyId}`, type: "source.project_cleared", entityId: documentId, payload: { by: "person" } });
       } else if (answer.confirmPortrait) {
-        portraitConfirmedNow = true;
-        const profile = readProfile();
-        store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(profile), at: now }));
-        store.appendEvent({ ownerId, workspaceId, idempotencyKey: `profile:confirmed:${replyId}`, type: "profile.confirmed", entityId: workspaceId, payload: { via: "interview" } });
+        // Recorded for the portrait as it stands; the extraction records it again for the portrait it rewrites from this reply.
+        store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(readProfile()), at: now }));
+        store.appendEvent({ ownerId, workspaceId, idempotencyKey: `profile:confirmed:${replyId}`, type: "profile.confirmed", entityId: workspaceId,
+          payload: { via: "interview", sessionId, replySeq: userMessage.seq } });
       } else if (answer.slot) {
         store.upsertProfileFact({ workspaceId, identityId: answer.identityId, projectId: answer.projectId, slot: answer.slot, value: answer.value,
-          status: "confirmed", sourceRef: replyId, sourceQuote: answer.quote, updatedAt: now });
+          status: "confirmed", sourceRef: replyId, sourceQuote: answer.quote, sourceSentences: sentencesFor(answer.quote), updatedAt: now });
       }
     }
+    // The question ledger: the answers this reply gives, then the app's own questions as of now (answered ones stay answered).
+    recordReplyAnswers(store, workspaceId, sessionId, replyText, replySentences, now);
+    syncGapQuestions(store, workspaceId, currentGaps(), now);
 
-    const docs = sourceIds(store.listSourceDocuments(workspaceId));
-    const timeZone = personTimeZone();
-    const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString().slice(0, 10);
-    const known = knownSources(messages, docs);
+    const timeZone = personTimeZone(store, workspaceId);
+    const today = todayIso();
+    const coverage = session.coverage as Announced;
     // A re-read hands every file over again, as if none had been seen.
-    const announced = input.reread ? new Set<string>() : new Set((session.coverage as Announced).announcedSources ?? []);
+    const announced = input.reread ? new Set<string>() : new Set(coverage.announcedSources ?? []);
+    // A file shown before and read again since (new text, so new sentence numbers) is shown again, and extracted again.
+    const extracted = readExtractDocs(store, workspaceId);
+    for (const [id, doc] of docs) {
+      if (!announced.has(id) || doc.extractionStatus !== "done" || !(extracted[doc.id]! > 0)) continue;
+      if (store.ensureEvidence(workspaceId, "document", doc.id, doc.extractedText)[0]?.id !== extracted[doc.id]) announced.delete(id);
+    }
     // A turn takes the new files that fit its reading budget; the rest wait for the next turn instead of being marked read with their text
     // cut away (an authorized folder can bring hundreds at once). The model is told how many still wait.
-    const unread = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id));
+    // A phone recording's raw transcript is read through its digest (「… 摘要.md」, recording-digest.ts): all-day transcripts are mostly
+    // talk the interview has no use for, and would take the whole reading budget.
+    const transcripts = transcriptDocumentIds(store, workspaceId);
+    const unread = [...docs].filter(([id, doc]) => doc.extractionStatus === "done" && !announced.has(id) && !transcripts.has(id));
     const fresh = withinBudget(unread);
     const waiting = unread.length - fresh.length;
     // What the connected calendars hold in the coming week: sent on the first turn and again whenever it changed.
     const week = calendarWeek(((store.listPlanVersions(workspaceId)[0]?.payload as { blocks?: [] } | undefined)?.blocks ?? []), today);
     const weekSent = JSON.stringify(week);
-    const calendarChanged = week.length > 0 && (input.reread || weekSent !== (session.coverage as Announced).calendarSent);
+    const calendarChanged = week.length > 0 && (input.reread || weekSent !== coverage.calendarSent);
+
+    // The extraction starts now, beside the dialogue: this reply, and the files this turn shows — as many as the dialogue reads, a re-read
+    // included, so files go to the extraction at the dialogue's pace. A file already extracted at its current text is not queued again (a
+    // turn that failed shows its files once more), except on a re-read.
+    if (input.reread) store.setSetting(workspaceId, EXTRACT_REREAD_SETTING, "1");
+    queueExtractDocs(store, workspaceId, fresh.map(([, doc]) => doc.id)
+      .filter((id) => input.reread || !(extracted[id]! > 0 && firstSentenceOf(store, workspaceId, id) === extracted[id])));
+    const ask = () => requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), sessionId);
+    const extraction = extractMode === "off" ? Promise.resolve() : ask();
+    const caughtUp = (timeoutMs?: number) => extractMode === "off" ? Promise.resolve(false)
+      : extractionReached(store, workspaceId, sessionId, userMessage.seq, ask, timeoutMs).catch(() => false);
 
     // `line-<id>`: the interview of one line, added after the first one.
     const focus = sessionId.startsWith("line-") ? identityLines(store, workspaceId).find((line) => line.id === sessionId.slice(5)) : undefined;
@@ -308,11 +260,18 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     let threadId = session.codexThreadId;
     let announcedNow = announced;
     let sent = fresh;
-    const validateOutput = (output: unknown) => validateOnboardingTurn(output, known);
-    const softAccept = (_rejection: Error, output: unknown) => keepOnboardingTurn(output, known);
-    // A turn that only needs one or two items dropped is kept now instead of rewritten in full by a repair.
+    const heardAt = new Date().toISOString();
+    const recorded = recordedSince(coverage.heardAt);
+    // The short ledger the round starts from: the last round's progress record, an abstract of the ledger, and the latest ratings.
+    const pace = () => paceContext(store, workspaceId, sessionId, { today, recent: recorded.lines, progress: storedProgress(session!.coverage),
+      lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [] })) });
+    const ids = { lines: identities().map((item) => item.id), projects: store.listProjects(workspaceId).map((project) => project.id) };
+    const outputSchema = onboardingDialogueSchema(ids);
+    const validateOutput = (output: unknown) => validateOnboardingDialogue(output, known);
+    const softAccept = (_rejection: Error, output: unknown) => keepOnboardingDialogue(output, known);
+    // A turn that only needs one or two questions dropped is kept now instead of rewritten in full by a repair.
     const keepEarly = (_rejection: Error, output: unknown) => {
-      const kept = keepOnboardingTurn(output, known);
+      const kept = keepOnboardingDialogue(output, known);
       return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX ? kept : undefined;
     };
 
@@ -322,9 +281,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       try {
         const kept = JSON.parse(store.getSetting(workspaceId, ASSESS_RESULT_SETTING) ?? "null") as { source?: string; code?: string; typeName?: string;
           axes?: Record<string, number>; takenAt?: string } | null;
-        return kept?.source === "public-assess" && kept.code && kept.typeName && kept.axes && kept.takenAt
+        // Only a result on the current four dimensions (a code of `TYPE_TABLE`); one kept from the first version is left out.
+        return kept?.source === "public-assess" && kept.code && TYPE_TABLE[kept.code] && kept.typeName && kept.axes && kept.takenAt
           ? { code: kept.code, typeName: kept.typeName, axes: kept.axes, takenAt: kept.takenAt,
-            note: "本人在公开测评（32 题自评）中的结果，由本人确认带入；只作佐证，画像四轴仍按访谈证据评分，不照抄" } : undefined; // i18n-ignore: model-facing
+            note: "本人在公开测评（32 题自评）中的结果，由本人确认带入；只作佐证，画像四个维度仍按访谈证据评分，不照抄" } : undefined; // i18n-ignore: model-facing
       } catch { return undefined; }
     })();
 
@@ -338,13 +298,17 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : "orientation")),
         checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen() }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
+        questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
         ...(publicAssessment ? { publicAssessment } : {}),
         lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, rank: line.rank ?? null, hard: Boolean(line.hard), goals: line.goals ?? [],
-          ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}) }))
+          ...(line.goalParts?.length ? { goalParts: line.goalParts } : {}), ...(line.domain ? { domain: DOMAIN_PACKS[line.domain].label } : {}) })),
+        // A line's own interview gets its own checklist only; the main interview gets every domain line's.
+        ...(() => { const guides = domainGuides(identityLines(store, workspaceId)).filter((guide) => !focusLine || guide.lineId === focusLine.id);
+          return guides.length ? { domainGuides: guides } : {}; })()
       };
-      return runCodexSkill<OnboardingTurn>(client, context, {
-        skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: ONBOARDING_TURN_SCHEMA, keepThread: true, locale,
+      return runCodexSkill<OnboardingDialogue>(client, context, {
+        skillName: ONBOARDING_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema, keepThread: true, locale,
         prepareInput: () => context, validateOutput, softAccept, keepEarly,
         onAudit: (audit) => { if (audit.threadId) threadId = audit.threadId; }, onProgress, onQueued,
         timeoutMs: 60 * 60_000
@@ -381,15 +345,16 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       if (!session.codexThreadId) {
         result = await startThread(fresh);
       } else {
-        // Later turns carry only what is new: the reply, and any file that arrived since the last turn.
+        // Later turns carry only what is new: the reply, any file that arrived since the last turn, and what the extraction recorded.
         const newSources = clipDocuments(fresh);
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
-        const pace = stagePace(messages, { startOpen: startOpen() });
-        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...pace,
+        const rounds = stagePace(messages, { startOpen: startOpen() });
+        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...rounds,
+          questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(),
           tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}),
-        ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
-        result = await continueSkillTurn<OnboardingTurn>(client, session.codexThreadId, message, {
-          skillName: ONBOARDING_SKILL, cwd, locale, outputSchema: ONBOARDING_TURN_SCHEMA, validateOutput, softAccept, keepEarly,
+          ...(publicAssessment ? { publicAssessment } : {}), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}) });
+        result = await continueSkillTurn<OnboardingDialogue>(client, session.codexThreadId, message, {
+          skillName: ONBOARDING_SKILL, cwd, locale, outputSchema, validateOutput, softAccept, keepEarly,
           onAudit: () => {}, onProgress, onQueued, timeoutMs: 60 * 60_000
         });
         // The runtime forgets a conversation when it restarts. The interview does not: the profile, the files and
@@ -402,16 +367,22 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         }
       }
     } finally { clearInterval(heartbeat); store.deleteSetting(workspaceId, progressKey); }
-    if (!result.ok) return blocked(result.blocker.code, result.blocker.message);
+    if (!result.ok) return blocked(result.blocker.code, result.blocker.message, result.blocker.detail);
 
-    persistTurn(result.output, sessionId, ownerId);
-    // The 「符合」 was said in this reply, and this turn rewrote the portrait with that reply in hand: the confirmation holds for the
-    // portrait it wrote. Re-recording it here stops the confirmation being asked for again every round (the hosted walkthrough of
-    // 2026-10-16 answered 「符合」 four rounds running, and the interview never reached 「已完成」).
-    if (portraitConfirmedNow && !sessionId.startsWith("line-"))
-      store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(readProfile()), at: new Date().toISOString() }));
-    // A fixed weekly arrangement the person said (「每周二四上午组会」) is quoted from their reply, so replies count as sources here too.
-    persistFileDates(result.output, ownerId, sent.map(([, doc]) => doc.id), { ...known.sources, ...known.replies }, today, input.reread === true);
+    // The checklist and the app's questions are read after the extraction when the round would end the interview (so a fact this reply
+    // gave is on record), or always when asked to wait; otherwise from what the ledger held, and what this reply settled joins next round.
+    if (extractMode === "await") await extraction.catch(() => undefined);
+    // The dialogue says the interview can end: the extraction finalizes every deep section and writes the synthesis on its next run.
+    if (result.output.nextAction === "ready_for_milestones" && !focusLine && extractMode !== "off") markFinishing(store, workspaceId, sessionId);
+    // A round that would end the interview waits for the extraction, but not without end: on a slow model a run takes minutes and the
+    // deep stages' replies queue behind each other (2026-10-19: the last round took ten minutes). What is still being written is the
+    // portrait, which no question can settle, so after `FINISH_WAIT_MS` the portrait's items no longer hold the end.
+    const ending = result.output.nextAction === "ready_for_milestones";
+    if (extractMode === "await") await caughtUp();
+    else if (ending) await caughtUp(FINISH_WAIT_MS);
+    // An app question that blocks is asked every round until answered: when this reply may have answered it in prose, the round waits a
+    // little for the extraction, so it is not asked again right under the answer.
+    else if (currentGaps().some((gap) => gap.blocking)) await caughtUp(BLOCKING_WAIT_MS);
     // Questions that are not the person's to answer (a room, class times already on record, whether a calendar event repeats) are taken
     // out before the round is stored; what something rests on is written as an assumption the person can correct.
     const screen = screenQuestions(result.output.questions, questionScreenFor(store, workspaceId));
@@ -419,17 +390,37 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       const assumption = screenAssumption(item);
       if (assumption) store.upsertProfileFact({ workspaceId, ...assumption, status: "inferred", sourceRef: "inference", sourceQuote: "", updatedAt: new Date().toISOString() });
     }
-    const paced = paceDeepRound({ ...result.output, questions: screen.keep }, Boolean(focusLine));
-    const output = withSomethingToAnswer(withChecklist(paced.deep ? paced.output : withGapQuestions(paced.output, currentGaps(), messages, { freshDocuments: sent.map(([, doc]) => doc.id), locale }),
-      focusLine || options.checklist === false ? [] : openChecklist(), locale), currentGaps(), messages, locale);
-    store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: output, createdAt: new Date().toISOString() });
+    // What the ledger says this round repeats: an answered question asked again goes; an app question the model asked itself is not added.
+    const repeated = resolveRepeats(store, workspaceId, sessionId, screen.keep);
+    if (repeated.dropped.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:questions-repeated:${sessionId}:${replyId}:${heardAt}`,
+      type: "onboarding.questions_repeated", entityId: sessionId, payload: { replyId, dropped: repeated.dropped } });
+    const gapsNow = currentGaps().filter((gap) => !repeated.coveredGaps.has(gap.question.id));
+    const paced = paceDeepRound({ ...result.output, questions: repeated.questions }, Boolean(focusLine));
+    const touched = { lines: recorded.identities, projects: recorded.projects, portrait: Boolean(readProfile().portrait) };
+    const stillWriting = ending && extractMode === "background" && extractBacklog(store, workspaceId, sessionId).replies > 0;
+    const owed = focusLine || options.checklist === false ? [] : openChecklist(Infinity, (item) => stillWriting && item.group === "画像");
+    const output = withSomethingToAnswer(withChecklist(paced.deep ? paced.output
+      : withGapQuestions(paced.output, gapsNow, messages, { freshDocuments: sent.map(([, doc]) => doc.id), touched, locale }), owed, locale), gapsNow, messages, locale);
+    // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
+    const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
+      .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
+    const insight = checkInsight(result.output.insight, replies, output.stage);
+    const progress = readTurnProgress(result.output.progress);
+    const { insight: _raw, progress: _rawProgress, ...rest } = output;
+    const stored = { ...rest, ...(insight ? { insight } : {}), ...(progress ? { progress } : {}) };
+    const roundSeq = store.appendOnboardingMessage({ sessionId, workspaceId, role: "assistant", content: stored, createdAt: new Date().toISOString() });
+    recordRound(store, workspaceId, sessionId, roundSeq, output.questions, new Date().toISOString());
+    // Saved over the session as it is now, so a stage the extraction never writes is not lost to the copy read at the start.
+    const current = store.getOnboardingSession(workspaceId, sessionId) ?? session;
     store.saveOnboardingSession({
-      ...session, ...(threadId ? { codexThreadId: threadId } : {}),
+      ...current, ...(threadId ? { codexThreadId: threadId } : {}),
       state: output.nextAction === "ready_for_milestones" ? "complete" : "active",
-      coverage: { ...session.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}),
-        announcedSources: [...announcedNow, ...sent.map(([id]) => id)], ...(week.length ? { calendarSent: weekSent } : {}) },
+      coverage: { ...current.coverage, coverage: output.coverage, ...(output.stage ? { stage: output.stage } : {}), ...(progress ? { progress } : {}),
+        announcedSources: [...announcedNow, ...sent.map(([id]) => id)], heardAt, ...(week.length ? { calendarSent: weekSent } : {}) },
       updatedAt: new Date().toISOString()
     });
+    // The synthesis is written by a run made after this one; the person does not wait for it.
+    if (output.nextAction === "ready_for_milestones" && !focusLine && extractMode !== "off") void ask().catch(() => undefined);
     return { state: output.nextAction === "ready_for_milestones" ? "ready" : "asked", sessionId };
   };
 }
@@ -439,7 +430,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
  * (`interviewChecklist`): a premature 「ready」 goes back to asking, says what is missing, and — when the model asked nothing — asks for it.
  * Items only the person can settle (confirming the portrait, adopting a goal) do not hold the interview; they show on the screen.
  */
-export function withChecklist(output: OnboardingTurn, open: Array<{ label: string; detail: string; owner: "interview" | "person" }>, locale?: Locale): OnboardingTurn {
+export function withChecklist<T extends OnboardingDialogue>(output: T, open: Array<{ label: string; detail: string; owner: "interview" | "person" }>, locale?: Locale): T {
   const owed = open.filter((item) => item.owner === "interview");
   if (output.nextAction !== "ready_for_milestones" || !owed.length) return output;
   const t = tFor(locale);
@@ -465,7 +456,7 @@ const OPEN_QUESTION: Record<OnboardingStage, string> = {
  * a round with a reply and an empty box the moment the start standard stood. Then the app's waiting questions join, else one open question
  * for the stage.
  */
-export function withSomethingToAnswer(output: OnboardingTurn, gaps: ProfileGap[], messages: StoredOnboardingMessage[], locale?: Locale): OnboardingTurn {
+export function withSomethingToAnswer<T extends OnboardingDialogue>(output: T, gaps: ProfileGap[], messages: StoredOnboardingMessage[], locale?: Locale): T {
   if (output.nextAction !== "ask" || output.questions.length) return output;
   const withGaps = withGapQuestions(output, gaps, messages, { ...(locale ? { locale } : {}) });
   if (withGaps.questions.length) return withGaps;
@@ -485,7 +476,7 @@ export const DEEP_QUESTIONS_PER_ROUND = 4;
  * only a question that builds on another's answer waits for a later round — which the model is told to judge. The app's own fact
  * questions still wait for a fact round (the screen lists them beside the conversation meanwhile), so a deep round stays about depth.
  */
-export function paceDeepRound(output: OnboardingTurn, focus: boolean): { output: OnboardingTurn; deep: boolean } {
+export function paceDeepRound<T extends OnboardingDialogue>(output: T, focus: boolean): { output: T; deep: boolean } {
   const deep = !focus && DEEP_STAGES.has(output.stage as OnboardingStage) && output.nextAction === "ask";
   return { deep, output: deep ? { ...output, questions: output.questions.slice(0, DEEP_QUESTIONS_PER_ROUND) } : output };
 }
@@ -496,21 +487,27 @@ export function paceDeepRound(output: OnboardingTurn, focus: boolean): { output:
  * relevant, one other joins, so nothing waits forever. A gap the model already asked in its own words is not asked twice; one that blocks
  * is asked every round until answered, and turns a premature 「ready」 back into 「ask」.
  */
-export function withGapQuestions(output: OnboardingTurn, gaps: ProfileGap[], messages: StoredOnboardingMessage[],
-  round: { freshDocuments?: string[]; locale?: Locale } = {}): OnboardingTurn {
+export function withGapQuestions<T extends OnboardingDialogue>(output: T, gaps: ProfileGap[], messages: StoredOnboardingMessage[],
+  round: {
+    freshDocuments?: string[];
+    /** What the extraction recorded since the last round (lines, projects) and whether a portrait is written: what this round touched. */
+    touched?: { lines: string[]; projects: string[]; portrait: boolean };
+    /** The interview's language: the app's own question texts are written in it. */
+    locale?: Locale;
+  } = {}): T {
   const asked = new Set(messages.flatMap((message) => message.role === "assistant"
     ? ((message.content as { questions?: Array<{ id: string }> }).questions ?? []).map((question) => question.id) : []));
   const open = gaps.filter((gap) => {
     if (output.questions.some((question) => question.id === gap.question.id)) return false;
     // Already asked by the model in its own words: a line it asks anything about, a project question that is about the same thing.
-    if (gapCoveredBy(gap, output.questions)) return false;
+    if (gapCoveredBy(gap, output.questions, gaps)) return false;
     return gap.blocking || !asked.has(gap.question.id);
   });
-  const lines = new Set([...output.questions.map((question) => question.identityId), ...output.slotUpdates.map((update) => update.identityId)].filter(Boolean));
-  const projects = new Set([...output.questions.map((question) => question.projectId), ...output.slotUpdates.map((update) => update.projectId)].filter(Boolean));
+  const lines = new Set([...output.questions.map((question) => question.identityId), ...(round.touched?.lines ?? [])].filter(Boolean));
+  const projects = new Set([...output.questions.map((question) => question.projectId), ...(round.touched?.projects ?? [])].filter(Boolean));
   const fresh = new Set(round.freshDocuments ?? []);
   const relevant = (gap: ProfileGap) => gap.code === "FILE_UNFILED" ? fresh.has(gap.documentId ?? "")
-    : gap.code === "PORTRAIT_UNCONFIRMED" || gap.code === "APPEARANCE" ? Boolean(output.profile?.portrait)
+    : gap.code === "PORTRAIT_UNCONFIRMED" || gap.code === "APPEARANCE" ? Boolean(round.touched?.portrait)
     : gap.projectId ? projects.has(gap.projectId) || lines.has(gap.identityId) : lines.has(gap.identityId);
   const blockingGaps = open.filter((gap) => gap.blocking);
   const near = open.filter((gap) => !gap.blocking && relevant(gap));
@@ -546,7 +543,8 @@ export function stagePace(messages: Array<{ role: string; content: unknown }>, o
 /** The conversation as plain lines, for a thread that has to be rebuilt. Questions are kept; option lists are not. */
 function conversationSoFar(messages: StoredOnboardingMessage[]): NonNullable<OnboardingTurnContext["history"]> {
   return messages.slice(-24).map((message) => {
-    if (message.role === "user") return { id: `reply-${message.seq}`, role: "user" as const, text: String((message.content as { text?: string }).text ?? "").slice(0, 4000) };
+    if (message.role === "user") return { id: `reply-${message.seq}`, role: "user" as const,
+      text: String((message.content as { text?: string }).text ?? "").slice(0, 4000) };
     const turn = message.content as { reply?: string; questions?: Array<{ text?: string }> };
     return { id: `assistant-${message.seq}`, role: "assistant" as const,
       text: [turn.reply ?? "", ...(turn.questions ?? []).map((question) => question.text ?? "")].filter(Boolean).join("\n").slice(0, 4000) };

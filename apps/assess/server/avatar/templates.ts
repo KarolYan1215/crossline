@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
  *    names the build machine's source path, which is why step 2 alone is not enough;
  * 4. `<cwd>/apps/assess/templates` — a script run from the repository root.
  *
- * The first directory that holds `GEMA-female.png` wins and is remembered.
+ * The first directory that holds `ROBA-female.png` wins and is remembered.
  */
 
 export type TemplateVariant = "female" | "male";
@@ -44,7 +44,7 @@ function candidates(): string[] {
 export function templatesDir(): string {
   if (resolved) return resolved;
   const all = candidates();
-  const found = all.find((dir) => fs.existsSync(path.join(dir, "GEMA-female.png")));
+  const found = all.find((dir) => fs.existsSync(path.join(dir, "ROBA-female.png")));
   if (found) resolved = found;
   return found ?? all[0]!;
 }

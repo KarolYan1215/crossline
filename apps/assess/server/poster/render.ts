@@ -5,10 +5,11 @@ import { TYPE_AXES, TYPE_GROUPS } from "@crossline/core/assess";
 import { RELATIONS, latinGap } from "@crossline/core/assess-content";
 import type { PartnerView, PublicAxis, PublicType, RelationView } from "../../lib/contract";
 import { faceFor, posterFonts, safe, type Family } from "./fonts";
-import { posterLabels, poleExplanations, rankLine, type PosterLabels } from "./labels";
+import { posterLabels, rankLine, type PosterLabels } from "./labels";
 import { tFor, type Locale } from "../../lib/i18n";
 import { withName } from "../../lib/names";
 import { qrDataUri } from "./qr";
+import { groupQr } from "./group-qr";
 
 /**
  * The three posters as satori trees, style A 「编辑杂志」 (CLAUDE.md, the portrait paragraph): paper #F6F2EA, ink #1E1B16, grey #4F4A42
@@ -64,41 +65,37 @@ function panel(figure: Figure, type: PublicType, width: number): El {
         box({}, letter(type.axes[2]!), letter(type.axes[3]!))));
 }
 
-/** The four letters, each the group's colour; a letter within ten of the middle (both plausible) is drawn faint. */
-function codeLetters(type: PublicType, size: number): El {
-  return box({ alignItems: "flex-end" }, ...type.axes.map((axis, index) =>
-    text(axis.letter, "Serif", { fontSize: size, fontWeight: 700, color: type.group.colour, opacity: axis.ambiguous ? 0.38 : 1, marginRight: index < 3 ? size * 0.12 : 0, lineHeight: 1 })));
-}
-
 /** The axis leaned to furthest (a clear lean before an ambiguous one): the poster's one 「约超过 X% 的人」. */
 export function strongestAxis(type: PublicType): PublicAxis {
   return [...type.axes].sort((a, b) => Number(a.ambiguous) - Number(b.ambiguous) || Math.abs(b.score - 50) - Math.abs(a.score - 50))[0]!;
 }
 
-/** The size a type's name is set at: Chinese as before; an English name shrunk to fit the column on one line. */
-function nameSize(name: string, base: number, locale: Locale | undefined, column: number): number {
+/** The size a type's name is set at: Chinese by its length, as before; an English name shrunk to fit the column on one line. */
+function nameSize(name: string, base: number, locale: Locale | undefined, column: number, floor = 48): number {
   if (locale !== "en") return base;
-  // Noto Serif's bold Latin averages about 0.6 em a character.
-  return Math.max(48, Math.min(base, Math.floor(column / (Array.from(name).length * 0.6))));
+  // Noto Serif's bold Latin averages about 0.6 em a character; capitals run wider, so a little room is kept.
+  return Math.max(Math.min(floor, base), Math.min(base, Math.floor(column / (Array.from(name).length * 0.66))));
 }
 
 function hero(type: PublicType, nickname: string, figure: Figure, compact: boolean, locale: Locale | undefined, labels: PosterLabels): El {
   const t = tFor(locale);
   const name = nickname.trim();
   // i18n-ignore: 「的」 joins a nickname to the Chinese label; the English sentence is one key
-  const owner = !name ? labels.kicker : locale === "en" ? t("{{name}}的思维模式类型", { name }) : `${withName(name, "的")}${labels.kicker}`;
+  const owner = !name ? labels.kicker : locale === "en" ? t("{{name}}的超级个体类型", { name }) : `${withName(name, "的")}${labels.kicker}`;
   const group = TYPE_GROUPS[type.group.key];
-  // English runs to more lines beside the figure, so on the poster the figure is a little smaller.
-  const panelWidth = compact ? (locale === "en" ? 260 : 300) : 280;
+  // English runs to more lines further down the poster, so there the figure is a little smaller.
+  const panelWidth = compact ? (locale === "en" ? 236 : 250) : 280;
   const column = INNER - panelWidth - 44;
+  const chineseSize = type.name.length > 4 ? (compact ? 72 : 84) : (compact ? 92 : 108);
   return box({ width: "100%", alignItems: "center" },
     panel(figure, type, panelWidth),
     box({ flexDirection: "column", marginLeft: 44, flexGrow: 1, flexShrink: 1, minWidth: 0 },
       text(owner, "Sans", { fontSize: 26, color: GREY, marginBottom: 10 }),
-      codeLetters(type, compact ? 58 : 64),
-      text(type.name, "Serif", { fontSize: nameSize(type.name, compact ? 92 : 108, locale, column), fontWeight: 700, color: INK, lineHeight: 1.15, marginTop: 4 }),
-      text(group ? `${type.group.name} · ${t(group.blurb)}` : type.group.name, "Sans", { fontSize: 24, color: GREY, marginTop: 4, ...(locale === "en" ? { lineHeight: 1.3 } : {}) }),
-      text(type.subtitle, "Serif", { fontSize: compact ? (locale === "en" ? 28 : 32) : 34, color: INK, lineHeight: locale === "en" ? 1.3 : 1.4, marginTop: 12, textWrap: "balance" }),
+      text(type.name, "Serif", { fontSize: nameSize(type.name, locale === "en" ? (compact ? 92 : 108) : chineseSize, locale, column), fontWeight: 700, color: INK, lineHeight: 1.15, marginTop: 4 }),
+      text(group ? `${type.group.name} · ${t(group.blurb)}` : type.group.name, "Sans", { fontSize: 24, color: type.group.colour, fontWeight: 700, marginTop: 6,
+        ...(locale === "en" ? { lineHeight: 1.3 } : {}) }),
+      text(t("「{{quote}}」", { quote: type.subtitle }), "Serif", { fontSize: compact ? (locale === "en" ? 28 : 32) : 34, color: INK, lineHeight: locale === "en" ? 1.3 : 1.4,
+        marginTop: 12, textWrap: "balance" }),
       compact ? box({ marginTop: 18, paddingTop: 12, borderTop: `2px solid ${type.group.colour}` },
         text(rankLine(strongestAxis(type).rank, locale), "Sans", { fontSize: locale === "en" ? 24 : 26, fontWeight: 700, color: INK, ...(locale === "en" ? { lineHeight: 1.3 } : {}) })) : null));
 }
@@ -113,8 +110,9 @@ function axisBar(axis: PublicAxis, colour: string, height: number): El {
     box({ position: "absolute", top: -6, left: "50%", width: 2, height: height + 12, backgroundColor: INK }));
 }
 
-const POLE_WIDTH = 178;
-/** English pole names are longer ("Generalist G 80%"): a wider column at 24 px keeps each on one line. */
+// Two-character pole names and the letter as a small coordinate (「接力 R 78%」), 2026-10-24.
+const POLE_WIDTH = 196;
+/** English pole names are longer ("Blueprint B 80%"): a wider column at 24 px keeps each on one line. */
 const POLE_WIDTH_EN = 230;
 const poleWidth = (locale?: Locale) => locale === "en" ? POLE_WIDTH_EN : POLE_WIDTH;
 
@@ -123,7 +121,8 @@ function pole(label: string, letter: string, percent: number | null, align: "lef
   const on = percent !== null;
   const size = locale === "en" ? 24 : 28;
   const style = { fontSize: size, color: on ? INK : GREY, fontWeight: on ? 700 : 400 };
-  const name = text(align === "left" ? `${letter} ${label}` : `${label} ${letter}`, "Serif", style);
+  const coordinate = text(letter, "Sans", { fontSize: 24, color: GREY, [align === "left" ? "marginLeft" : "marginRight"]: 6 });
+  const name = box({ alignItems: "baseline" }, ...(align === "left" ? [text(label, "Serif", style), coordinate] : [coordinate, text(label, "Serif", style)]));
   const value = on ? text(`${percent}%`, "Sans", { fontSize: size, fontWeight: 700, color: INK, [align === "left" ? "marginLeft" : "marginRight"]: locale === "en" ? 8 : 12 }) : null;
   return box({ width: poleWidth(locale), flexShrink: 0, justifyContent: align === "left" ? "flex-start" : "flex-end", alignItems: "baseline" },
     ...(align === "left" ? [name, value] : [value, name]));
@@ -138,7 +137,8 @@ function axisRow(axis: PublicAxis, colour: string, withRank = true, locale?: Loc
       pole(axis.leftLabel, axis.leftLetter, right ? null : percent, "left", locale),
       axisBar(axis, colour, 16),
       pole(axis.rightLabel, axis.rightLetter, right ? percent : null, "right", locale)),
-    withRank ? text(rankLine(axis.rank, locale), "Sans", { fontSize: 24, color: GREY, lineHeight: 1.25, marginTop: 2, marginLeft: poleWidth(locale) + 16 }) : null);
+    withRank ? text(rankLine(axis.rank, locale), "Sans",
+      { fontSize: 24, color: GREY, lineHeight: 1.25, marginTop: 2, marginLeft: poleWidth(locale) + 16 }) : null);
 }
 
 /** The four steps as a cycle: across the top, down, back along the bottom, up — the last step feeding the first. */
@@ -165,10 +165,10 @@ function loopCycle(loop: PublicType["loop"], colour: string, tint: string, local
     ...loop.map(step));
 }
 
-/** The three lines and the cycle they feed; the poster prints its heading above the lines and the call to run them on a row of its own. */
 /** The gap between a line's field and its identity: a Latin identity after Chinese, and always in English. */
 const fieldGap = (line: { domain: string; identity: string }, locale?: Locale) => line.domain && (locale === "en" || latinGap(line.identity)) ? 8 : 0;
 
+/** The three lines and the cycle they feed; the poster prints its heading above the lines and the call to run them on a row of its own. */
 function linesBlock(type: PublicType, withLabels: boolean, locale: Locale | undefined, labels: PosterLabels): El {
   const t = tFor(locale);
   const en = locale === "en";
@@ -201,25 +201,65 @@ function comboLine(combo: PublicType["lines"], size: number, marginTop: number, 
     ]));
 }
 
-function partner(label: string, view: PartnerView, colour: string, tips: string[], when?: string): El {
+function partner(label: string, view: PartnerView, colour: string, tips: string[], when?: string, locale?: Locale): El {
   return box({ flexDirection: "column", width: (INNER - 48) / 2 },
     text(label, "Sans", { fontSize: 24, color: GREY }),
-    box({ alignItems: "baseline", marginTop: 8 },
-      text(view.name, "Serif", { fontSize: 38, fontWeight: 700, color: INK }),
-      text(view.code, "Serif", { fontSize: 26, fontWeight: 700, color: GREY, marginLeft: 12, letterSpacing: 2 })),
+    text(view.name, "Serif", { fontSize: nameSize(view.name, 38, locale, (INNER - 48) / 2, 28), fontWeight: 700, color: INK, marginTop: 8 }),
     text(view.relation, "Sans", { fontSize: 28, fontWeight: 700, color: colour, marginTop: 6 }),
     when ? text(when, "Sans", { fontSize: 24, color: GREY, marginTop: 4 }) : null,
     ...tips.map((tip) => text(tip, "Sans", { fontSize: 24, color: INK, lineHeight: 1.45, marginTop: 6 })));
 }
 
-function qrBlock(inviteUrl: string, size: number, labels: PosterLabels, locale?: Locale): El {
+/** 「AI 替你干的」 from the person's answers and 「你不让 AI 碰的」, the type's own line. */
+function aiBlock(type: PublicType, labels: PosterLabels, locale?: Locale): El {
+  const en = locale === "en";
+  const row = (label: string, value: string, marginTop: number) => box({ alignItems: "baseline", marginTop, width: "100%" },
+    text(label, "Sans", { fontSize: en ? 24 : 26, fontWeight: 700, color: type.group.colour, width: en ? 240 : 210, flexShrink: 0, ...(en ? { lineHeight: 1.3, marginRight: 12 } : {}) }),
+    text(value, "Serif", { fontSize: en ? 28 : 32, fontWeight: 700, color: INK, lineHeight: 1.35, flexShrink: 1 }));
+  return box({ flexDirection: "column", width: "100%" },
+    row(labels.aiDoes, type.aiDoes.length ? type.aiDoes.join(" · ") : labels.aiDoesNone, 0),
+    row(labels.aiKeeps, type.aiKeeps, 10));
+}
+
+/** The person whose way of working is close to the type: name, years and field, then the line in the original (slanted) and ours. */
+function kindredBlock(type: PublicType, withWhy: boolean, labels: PosterLabels, locale?: Locale): El {
+  const { kindred } = type;
+  const latin = !/[一-鿿]/.test(kindred.quote.original);
+  return box({ flexDirection: "column", width: "100%" },
+    box({ alignItems: "baseline", flexWrap: "wrap" },
+      text(labels.kindred, "Sans", { fontSize: 24, color: GREY, marginRight: 16 }),
+      text(kindred.name, "Serif", { fontSize: 34, fontWeight: 700, color: INK, marginRight: 14 }),
+      text(`${kindred.years} · ${kindred.field}`, "Sans", { fontSize: 24, color: GREY })),
+    withWhy ? text(kindred.why, "Sans", { fontSize: 24, color: INK, marginTop: 6 }) : null,
+    text(kindred.quote.original, latin ? "Sans" : "Serif", { fontSize: latin ? 24 : 28, color: INK, lineHeight: 1.35, marginTop: 8,
+      borderLeft: `4px solid ${type.group.colour}`, paddingLeft: 16, ...(latin ? { transform: "skewX(-8deg)" } : { fontWeight: 700 }) }),
+    kindred.quote.translation ? text(kindred.quote.translation, locale === "en" ? "Sans" : "Serif", { fontSize: locale === "en" ? 24 : 26, color: INK, lineHeight: 1.35,
+      marginTop: 2, paddingLeft: 20 }) : null,
+    // The English poster prints only ASCII: a hyphen where the Chinese has 「——」.
+    text(`${locale === "en" ? "-" : "——"} ${kindred.quote.source}`, "Sans", { fontSize: 24, color: GREY, marginTop: 2, paddingLeft: 20 }));
+}
+
+/** The WeChat group's code (`group-qr.ts`), modules only on the paper, its caption on the left; nothing when no file is set. */
+function groupQrBlock(size: number, labels: PosterLabels, locale?: Locale): El | null {
+  const qr = groupQr();
+  if (!qr) return null;
+  return box({ alignItems: "center", justifyContent: "flex-end", width: (INNER - 32) / 2 },
+    box({ flexDirection: "column", alignItems: "flex-end", marginRight: 18, flexShrink: 1 },
+      text(labels.groupScan, "Serif", { fontSize: 28, fontWeight: 700, color: INK }),
+      // The default caption has its English; one set through the environment is printed as it was written.
+      text(tFor(locale)(qr.caption), "Sans", { fontSize: 24, color: GREY, marginTop: 6, textAlign: "right" })),
+    h("img", { src: qr.dataUri, width: size, height: size, style: { flexShrink: 0 } }));
+}
+
+function qrBlock(inviteUrl: string, size: number, labels: PosterLabels, locale?: Locale, half = false): El {
   const qr = qrDataUri(inviteUrl, INK);
-  return box({ alignItems: "center", ...(locale === "en" ? { flexShrink: 1, minWidth: 0 } : {}) },
+  const en = locale === "en";
+  return box({ alignItems: "center", ...(half ? { width: (INNER - 32) / 2 } : {}), ...(en ? { flexShrink: 1, minWidth: 0 } : {}) },
     box({ width: size + 16, height: size + 16, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", flexShrink: 0 },
       h("img", { src: qr.uri, width: size, height: size })),
-    box({ flexDirection: "column", marginLeft: 26, ...(locale === "en" ? { flexShrink: 1, minWidth: 0 } : {}) },
-      text(labels.scan, "Serif", { fontSize: 32, fontWeight: 700, color: INK }),
-      text(labels.scanSub, "Sans", { fontSize: 24, color: GREY, marginTop: 8 })));
+    box({ flexDirection: "column", marginLeft: half ? 18 : 26, flexShrink: 1, ...(en ? { minWidth: 0 } : {}) },
+      text(half ? labels.scanShort : labels.scan, "Serif", { fontSize: half ? 28 : 32, fontWeight: 700, color: INK }),
+      text(half ? labels.scanSubShort : labels.scanSub, "Sans", { fontSize: 24, color: GREY, marginTop: half ? 6 : 8 })));
 }
 
 /** The Crossline mark: two lines crossing, then the name. */
@@ -244,23 +284,29 @@ const page = (height: number | undefined, ...children: Child[]) =>
 
 export function typePosterTree(type: PublicType, nickname: string, figure: Figure, inviteUrl: string, locale?: Locale): El {
   const labels = posterLabels(locale);
+  const group = groupQrBlock(104, labels, locale);
+  // English runs to more lines (a tip, the AI lines, a quote's translation), so its sections sit a little closer.
+  const gap = locale === "en" ? 8 : 12;
   return page(HEIGHT,
     hero(type, nickname, figure, true, locale, labels),
-    rule(17),
-    box({ flexDirection: "column", width: "100%" }, ...type.axes.map((axis, index) => box({ marginTop: index ? 16 : 0, width: "100%" }, axisRow(axis, type.group.colour, false, locale)))),
-    rule(17),
-    linesBlock(type, true, locale, labels),
-    rule(17),
+    rule(gap),
+    box({ flexDirection: "column", width: "100%" }, ...type.axes.map((axis, index) => box({ marginTop: index ? 8 : 0, width: "100%" }, axisRow(axis, type.group.colour, false, locale)))),
+    rule(gap),
+    aiBlock(type, labels, locale),
+    rule(gap),
+    kindredBlock(type, false, labels, locale),
+    rule(gap),
     box({ width: "100%", justifyContent: "space-between" },
-      partner(labels.best, type.best, type.group.colour, [type.best.tip]),
-      partner(labels.hardest, type.hardest, type.group.colour, [type.hardest.tip])),
+      partner(labels.best, type.best, type.group.colour, [type.best.tip], undefined, locale),
+      partner(labels.hardest, type.hardest, type.group.colour, [type.hardest.tip], undefined, locale)),
     box({ flexGrow: 1 }),
-    rule(17),
-    box({ width: "100%", justifyContent: "space-between", alignItems: "flex-end" },
-      qrBlock(inviteUrl, 112, labels, locale),
-      box({ flexDirection: "column", alignItems: "flex-end", ...(locale === "en" ? { width: 300, flexShrink: 0, marginLeft: 20 } : {}) },
-        text(labels.disclaimer, "Sans", { fontSize: 24, color: GREY, marginBottom: 10, ...(locale === "en" ? { textAlign: "right" } : {}) }),
-        brand(labels))));
+    rule(gap),
+    box({ width: "100%", justifyContent: "space-between", alignItems: "center" },
+      qrBlock(inviteUrl, 96, labels, locale, Boolean(group)),
+      group),
+    box({ width: "100%", justifyContent: "space-between", alignItems: "center", marginTop: 12 },
+      text(labels.disclaimer, "Sans", { fontSize: 24, color: GREY, ...(locale === "en" ? { flexShrink: 1, marginRight: 20 } : {}) }),
+      brand(labels)));
 }
 
 /** A relation from its shown name, in either language. */
@@ -275,29 +321,36 @@ export function longImageTree(type: PublicType, nickname: string, figure: Figure
   const labels = posterLabels(locale);
   const axisDetail = (axis: PublicAxis, index: number) => {
     const definition = TYPE_AXES.find((item) => item.id === axis.id)!;
-    const [leftText, rightText] = poleExplanations(definition.question, locale, definition.id);
+    const leftText = t(definition.left.definition), rightText = t(definition.right.definition);
     // In English the pole's name already is the English word, so it is not printed twice.
     const pole = (letter: string, label: string, en: string, explanation: string, on: boolean) => box({ flexDirection: "column", width: (INNER - 40) / 2 },
       box({ alignItems: "baseline" },
         text(`${letter} ${label}`, "Serif", { fontSize: 30, fontWeight: 700, color: on ? type.group.colour : INK }),
         en !== label ? text(en, "Sans", { fontSize: 24, color: GREY, marginLeft: 10 }) : null),
       text(explanation, "Sans", { fontSize: 24, color: INK, lineHeight: 1.45, marginTop: 4 }));
-    return box({ flexDirection: "column", width: "100%", marginTop: index ? 30 : 0 },
+    return box({ flexDirection: "column", width: "100%", marginTop: index ? 34 : 0 },
+      text(t(definition.name), "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginBottom: 10 }),
       axisRow(axis, type.group.colour, true, locale),
       box({ width: "100%", justifyContent: "space-between", marginTop: 14 },
         pole(axis.leftLetter, axis.leftLabel, axis.leftEn, leftText, axis.score < 50),
-        pole(axis.rightLetter, axis.rightLabel, axis.rightEn, rightText, axis.score >= 50)));
+        pole(axis.rightLetter, axis.rightLabel, axis.rightEn, rightText, axis.score >= 50)),
+      text(`${labels.sources}${t(definition.sources)}`, "Sans", { fontSize: 24, color: GREY, lineHeight: 1.45, marginTop: 10 }));
   };
   const detail = (label: string, view: PartnerView) => {
     const relation = relationByName(view.relation, locale);
-    return partner(label, view, type.group.colour, relation ? relation.tips.map((tip, index) => `${index + 1}. ${t(tip)}`) : [view.tip], relation ? t(relation.when) : undefined);
+    return partner(label, view, type.group.colour, relation ? relation.tips.map((tip, index) => `${index + 1}. ${t(tip)}`) : [view.tip], relation ? t(relation.when) : undefined, locale);
   };
+  const group = groupQrBlock(140, labels, locale);
   return page(undefined,
     hero(type, nickname, figure, false, locale, labels),
     rule(34),
     section(labels.axesHeading,
       type.axes.some((axis) => axis.ambiguous) ? text(labels.ambiguous, "Sans", { fontSize: 24, color: GREY, marginBottom: 20 }) : null,
       ...type.axes.map(axisDetail)),
+    rule(34),
+    section(labels.aiHeading, aiBlock(type, labels, locale)),
+    rule(34),
+    section(labels.kindredHeading, kindredBlock(type, true, labels, locale)),
     rule(34),
     section(labels.linesHeading, linesBlock(type, false, locale, labels),
       text(labels.loopHeading, "Serif", { fontSize: 28, fontWeight: 700, color: INK, marginTop: 24 }),
@@ -318,7 +371,7 @@ export function longImageTree(type: PublicType, nickname: string, figure: Figure
         detail(labels.best, type.best),
         detail(labels.hardest, type.hardest))),
     rule(34),
-    qrBlock(inviteUrl, 168, labels, locale),
+    box({ width: "100%", justifyContent: "space-between", alignItems: "center" }, qrBlock(inviteUrl, 140, labels, locale, Boolean(group)), group),
     box({ height: 40 }),
     footer(labels, locale));
 }
@@ -329,37 +382,36 @@ export function pairCardTree(a: Side, b: Side, primary: RelationView, secondary:
   locale?: Locale): El {
   const t = tFor(locale);
   const labels = posterLabels(locale);
+  const en = locale === "en";
   const person = (side: Side, fallback: string) => box({ flexDirection: "column", alignItems: "center", width: (INNER - 60) / 2 },
-    panel(side.figure, side.type, locale === "en" ? 260 : 300),
+    panel(side.figure, side.type, en ? 260 : 300),
     text(side.nickname.trim() || fallback, "Sans", { fontSize: 32, fontWeight: 700, color: INK, marginTop: 20 }),
-    box({ alignItems: "baseline", marginTop: 6 },
-      text(side.type.name, "Serif", { fontSize: 46, fontWeight: 700, color: INK }),
-      text(side.type.code, "Serif", { fontSize: 28, fontWeight: 700, color: side.type.group.colour, marginLeft: 12, letterSpacing: 2 })));
+    text(side.type.name, "Serif", { fontSize: nameSize(side.type.name, 46, locale, (INNER - 60) / 2), fontWeight: 700, color: INK, marginTop: 6 }));
   return page(HEIGHT,
     text(labels.pairKicker, "Sans", { fontSize: 26, color: GREY, marginBottom: 22 }),
     box({ width: "100%", justifyContent: "space-between", alignItems: "flex-start" }, person(a, labels.friendA), person(b, labels.friendB)),
-    rule(30),
-    text(primary.name, "Serif", { fontSize: nameSize(primary.name, locale === "en" ? 72 : 92, locale, INNER), fontWeight: 700, color: INK, lineHeight: 1.1 }),
+    rule(en ? 26 : 30),
+    text(primary.name, "Serif", { fontSize: nameSize(primary.name, en ? 72 : 92, locale, INNER), fontWeight: 700, color: INK, lineHeight: 1.1 }),
     text(primary.when, "Sans", { fontSize: 26, color: GREY, marginTop: 10 }),
     ...primary.tips.map((tip, index) => box({ marginTop: index ? 10 : 22, alignItems: "flex-start" },
       text(String(index + 1), "Serif", { fontSize: 30, fontWeight: 700, color: a.type.group.colour, width: 36, lineHeight: 1.4 }),
-      text(tip, "Sans", { fontSize: locale === "en" ? 28 : 30, color: INK, lineHeight: locale === "en" ? 1.3 : 1.4, flexShrink: 1 }))),
-    secondary ? box({ marginTop: 22, alignItems: "baseline", flexWrap: locale === "en" ? "wrap" : "nowrap" },
-      text(t("{{also}}：", { also: labels.also }), "Sans", { fontSize: 26, color: GREY, ...(locale === "en" ? { marginRight: 8 } : {}) }),
+      text(tip, "Sans", { fontSize: en ? 28 : 30, color: INK, lineHeight: en ? 1.3 : 1.4, flexShrink: 1 }))),
+    secondary ? box({ marginTop: 22, alignItems: "baseline", flexWrap: en ? "wrap" : "nowrap" },
+      text(t("{{also}}：", { also: labels.also }), "Sans", { fontSize: 26, color: GREY, ...(en ? { marginRight: 8 } : {}) }),
       text(secondary.name, "Serif", { fontSize: 30, fontWeight: 700, color: INK }),
-      text(t("（{{when}}）", { when: secondary.when }), "Sans", { fontSize: 24, color: GREY, flexShrink: 1, ...(locale === "en" ? { marginLeft: 8 } : {}) })) : null,
-    rule(30),
+      text(t("（{{when}}）", { when: secondary.when }), "Sans", { fontSize: 24, color: GREY, flexShrink: 1, ...(en ? { marginLeft: 8 } : {}) })) : null,
+    rule(en ? 26 : 30),
     box({ alignItems: "baseline", flexWrap: "wrap" },
       text(labels.shared, "Sans", { fontSize: 24, color: GREY, marginRight: 20 }),
       sharedLines.length
         ? box({ alignItems: "baseline", flexWrap: "wrap" }, ...sharedLines.map((line) => text(line, "Serif", { fontSize: 34, fontWeight: 700, color: INK, marginRight: 22 })))
-        : text(labels.noShared, "Serif", { fontSize: locale === "en" ? 30 : 34, fontWeight: 700, color: INK })),
+        : text(labels.noShared, "Serif", { fontSize: en ? 30 : 34, fontWeight: 700, color: INK })),
     box({ flexGrow: 1 }),
-    rule(22),
+    rule(en ? 20 : 22),
     box({ width: "100%", justifyContent: "space-between", alignItems: "flex-end" },
       qrBlock(inviteUrl, 128, labels, locale),
-      box({ flexDirection: "column", alignItems: "flex-end", ...(locale === "en" ? { width: 300, flexShrink: 0, marginLeft: 20 } : {}) },
-        text(labels.disclaimer, "Sans", { fontSize: 24, color: GREY, marginBottom: 10, ...(locale === "en" ? { textAlign: "right" } : {}) }),
+      box({ flexDirection: "column", alignItems: "flex-end", ...(en ? { width: 300, flexShrink: 0, marginLeft: 20 } : {}) },
+        text(labels.disclaimer, "Sans", { fontSize: 24, color: GREY, marginBottom: 10, ...(en ? { textAlign: "right" } : {}) }),
         brand(labels))));
 }
 

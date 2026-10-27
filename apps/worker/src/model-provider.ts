@@ -1,6 +1,7 @@
+import { caseTools } from "./conformance-tools";
 import {
-  admittedSkills, conformanceCases, conformanceCurrent, jsonSchemaProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
-  capabilityGap, tFor, THIRD_PARTY_CAPABILITIES, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
+  admittedSkills, callsFunctions, conformanceCases, conformanceCurrent, conformanceProblems, SKILL_NEEDS, summarizeConformance, unavailableOnThirdParty,
+  capabilityGap, CHATGPT_EXHAUSTED_SETTING, chatgptExhausted, chatgptQuotaSpent, tFor, THIRD_PARTY_CAPABILITIES, type ChatgptExhausted, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
 } from "@crossline/core";
 import {
   CODEX_FORK_BINARY_SHA256, isLocalProvider, MODEL_PROVIDER_SETTING, providerConfigProblem, runCodexSkill, threadProvider,
@@ -10,6 +11,7 @@ import { imageBackendFromEnv, webSearchFromEnv, type ImageBackend, type SecretSt
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
 import { localeOf } from "./locale";
+import type { SponsorService } from "./sponsor";
 import { createWebTools } from "./web-tools";
 
 /**
@@ -51,11 +53,18 @@ export function createModelProviderService(options: {
   /** What Crossline adds on top of a provider (docs/beta-launch.md §10.4); from the environment unless given. Null turns one off. */
   search?: WebSearchBackend | null;
   image?: ImageBackend | null;
+  /** The server runs the shell assistant inside Codex's Linux sandbox (sandbox-probe.ts): another model may then drive it too. */
+  sandboxShell?: boolean;
+  /** A conformance run just finished: what was decided while the provider was not admitted is decided again (W-11). */
+  onConformance?: (workspaceId: string) => void;
+  /** The developer's model for accounts that redeemed an invite code (`sponsor.ts`); a workspace's own provider comes first. */
+  sponsor?: () => SponsorService | undefined;
 }) {
   const now = options.now ?? (() => new Date());
   const search = options.search === undefined ? webSearchFromEnv() : options.search ?? undefined;
   const image = options.image === undefined ? imageBackendFromEnv() : options.image ?? undefined;
-  const capabilities = { ...THIRD_PARTY_CAPABILITIES, webSearch: Boolean(search), image: Boolean(image) };
+  // The shell assistant on another model only inside Codex's Linux sandbox, where the server allows it (sandbox-probe.ts).
+  const capabilities = { ...THIRD_PARTY_CAPABILITIES, webSearch: Boolean(search), image: Boolean(image), shell: Boolean(options.sandboxShell) };
   const keys = new Map<string, string | null>();
   const testing = new Map<string, Progress>();
 
@@ -78,18 +87,66 @@ export function createModelProviderService(options: {
     return keys.get(workspaceId) ?? undefined;
   };
 
+  /** The developer's model, for an account that redeemed a code and has no provider of its own. */
+  const sponsorRouting = (workspaceId: string): ProviderRouting | undefined => {
+    const sponsor = options.sponsor?.();
+    if (!sponsor?.active(workspaceId)) return undefined;
+    const pick = sponsor.chosen();
+    const budget = sponsor.budget(workspaceId);
+    const base = { gatewayUrl: options.gateway.urlFor(workspaceId, "sponsor"), codexSignedIn: options.signedIn(workspaceId), capabilities,
+      ...(search ? { webTools: createWebTools(search) } : {}) };
+    if (!pick) return { ...base, provider: sponsor.providerFor(""), admitted: new Set(),
+      blocked: { code: "MODEL_SPONSOR_PENDING", message: tFor(localeOf(options.store, workspaceId))("开发者提供的模型还在检验，通常一小时内可用；也可以先连接自己的 ChatGPT。") } };
+    if (budget && budget.spent >= budget.cap) return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(),
+      blocked: { code: "MODEL_SPONSOR_BUDGET", message: tFor(localeOf(options.store, workspaceId))("本月邀请额度（¥{{cap}}）已用完，下月 1 日恢复；也可以在 设置 → 模型连接 连接自己的 ChatGPT 或 API。", { cap: budget.cap }) } };
+    return { ...base, provider: sponsor.providerFor(pick.model), admitted: new Set(admittedSkills(pick.record, capabilities)), functionCalls: callsFunctions(pick.record),
+      modelFor: (skill: string) => sponsor.modelFor(skill) };
+  };
+
+  /** The account's own ChatGPT quota is spent (`CHATGPT_EXHAUSTED_SETTING`), until when; undefined once it is back. */
+  const spentChatgpt = (workspaceId: string) => chatgptExhausted(options.store.getSetting(workspaceId, CHATGPT_EXHAUSTED_SETTING), now());
+  /** The developer's model serving this account now (chosen, under the month's cap), or undefined. */
+  const sponsorServes = (workspaceId: string): ProviderRouting | undefined => {
+    const sponsored = sponsorRouting(workspaceId);
+    return sponsored && !sponsored.blocked ? sponsored : undefined;
+  };
+  const markSpent = (workspaceId: string, mark: ChatgptExhausted) => {
+    const previous = spentChatgpt(workspaceId);
+    // Written only when it says something new, so `at` stays the moment the quota first ran out.
+    if (previous && previous.source === mark.source && previous.until === mark.until) return;
+    options.store.setSetting(workspaceId, CHATGPT_EXHAUSTED_SETTING, JSON.stringify(previous ? { ...mark, at: previous.at } : mark));
+    console.log(JSON.stringify({ type: "model.chatgpt_exhausted", workspaceId, source: mark.source, until: mark.until ?? null,
+      sponsor: Boolean(sponsorServes(workspaceId)) }));
+  };
+  const clearSpent = (workspaceId: string) => {
+    if (!options.store.getSetting(workspaceId, CHATGPT_EXHAUSTED_SETTING)) return;
+    options.store.setSetting(workspaceId, CHATGPT_EXHAUSTED_SETTING, "");
+    console.log(JSON.stringify({ type: "model.chatgpt_restored", workspaceId }));
+  };
+
   const routing = (workspaceId: string | undefined): ProviderRouting | undefined => {
     if (!workspaceId) return undefined;
     const provider = config(workspaceId);
-    if (!provider) return undefined;
+    if (!provider) {
+      // An account with its own ChatGPT and the developer's model runs on ChatGPT, and on the developer's model only while ChatGPT's
+      // quota is spent (2026-10-21); what the developer's model cannot serve then stops with that said, never back to a spent ChatGPT.
+      if (!options.signedIn(workspaceId)) return sponsorRouting(workspaceId);
+      const spent = spentChatgpt(workspaceId);
+      const sponsored = spent ? sponsorServes(workspaceId) : undefined;
+      return spent && sponsored ? { ...sponsored, codexSignedIn: false, chatgptExhausted: spent.until ? { until: spent.until } : {} } : undefined;
+    }
     const record = current(workspaceId, provider);
     return { provider, gatewayUrl: options.gateway.urlFor(workspaceId, provider.id),
-      admitted: new Set(record ? admittedSkills(record, capabilities) : []), codexSignedIn: options.signedIn(workspaceId),
+      admitted: new Set(record ? admittedSkills(record, capabilities) : []), functionCalls: Boolean(record && callsFunctions(record)), codexSignedIn: options.signedIn(workspaceId),
       capabilities, ...(search ? { webTools: createWebTools(search) } : {}) };
   };
 
   /** What the gateway forwards to for a route; a Sign in with ChatGPT plan is OpenAI's own Responses endpoint. */
   const upstream = async (workspaceId: string, providerId: string): Promise<GatewayUpstream | undefined> => {
+    if (providerId === "sponsor") {
+      const sponsor = options.sponsor?.();
+      return sponsor && (workspaceId.startsWith("sponsor-eval:") || (!config(workspaceId) && sponsor.active(workspaceId))) ? sponsor.upstream(workspaceId) : undefined;
+    }
     const provider = config(workspaceId);
     if (!provider || provider.id !== providerId) return undefined;
     const secret = await key(workspaceId);
@@ -103,9 +160,41 @@ export function createModelProviderService(options: {
    */
   const cost = (workspaceId: string): CostSignal | undefined => {
     const provider = config(workspaceId);
-    if (!provider || options.signedIn(workspaceId)) return undefined;
+    // An account with its own ChatGPT is read there first (`afterChatgptCost` decides whether the developer's model stands in).
+    if (!provider) return options.signedIn(workspaceId) ? undefined : options.sponsor?.()?.cost(workspaceId);
+    if (options.signedIn(workspaceId)) return undefined;
     return isLocalProvider(provider.baseUrl) ? { available: true, limitReached: false }
       : { available: false, reason: "PROVIDER_BUDGET_UNKNOWN" };
+  };
+
+  /** The developer's model's month as the reading background work goes by, while it stands in for a spent ChatGPT. */
+  const sponsorCost = (workspaceId: string, fallback: CostSignal): CostSignal =>
+    sponsorServes(workspaceId) ? options.sponsor?.()?.cost(workspaceId) ?? fallback : fallback;
+  /**
+   * The account's own ChatGPT reading, for an account that also holds the developer's model: a spent quota is marked (until its reset)
+   * and, while the developer's model serves, its month's cap is the reading background work goes by; a quota that is back clears the
+   * mark. Any other account's reading is returned as it was.
+   */
+  const afterChatgptCost = (workspaceId: string, signal: CostSignal): CostSignal => {
+    if (config(workspaceId) || !options.sponsor?.()?.active(workspaceId)) return signal;
+    const spent = chatgptQuotaSpent(signal);
+    if (spent) {
+      markSpent(workspaceId, { at: now().toISOString(), source: "quota", ...(spent.until ? { until: spent.until } : {}) });
+      return sponsorCost(workspaceId, signal);
+    }
+    // A reading that shows the quota back ends the mark; a refused run's own mark is kept for its hold (a reading can lag the refusal).
+    if (signal.available) {
+      const mark = spentChatgpt(workspaceId);
+      if (!mark || mark.source === "quota") clearSpent(workspaceId);
+      else return sponsorCost(workspaceId, signal);
+    }
+    return signal;
+  };
+  /** A run on the account's own ChatGPT came back `SKILL_USAGE_LIMIT`: marked spent, so the next route may go to the developer's model. */
+  const noteUsageLimit = (workspaceId: string) => {
+    if (config(workspaceId) || !options.sponsor?.()?.active(workspaceId)) return;
+    if (spentChatgpt(workspaceId)) return;
+    markSpent(workspaceId, { at: now().toISOString(), source: "usage_limit" });
   };
 
   async function runConformance(workspaceId: string, cases: ConformanceCase[] = conformanceCases()): Promise<ConformanceRecord | { blocked: string }> {
@@ -123,12 +212,15 @@ export function createModelProviderService(options: {
       for (const item of cases) for (let attempt = 0; attempt < item.runs; attempt += 1) {
         const started = Date.now();
         const input = { version: "crossline.conformance.v1", caseId: item.id, prompt: item.prompt };
+        const offered = caseTools(item);
         const result = await runCodexSkill<unknown>(client, input, { skillName: CONFORMANCE_SKILL, cwd: options.cwd, provider: thread,
+          ...(offered.tools ? { tools: offered.tools } : {}),
           developerInstructions: "Answer the conformance case as the Skill describes. Return raw JSON only.", outputSchema: item.schema,
           prepareInput: () => input, onAudit: () => {}, timeoutMs: 20 * 60_000,
           validateOutput: (output) => {
-            const problems = jsonSchemaProblems(output, item.schema);
+            const problems = conformanceProblems(item.id, output, item.schema);
             if (problems.length) throw Object.assign(new Error("CONFORMANCE_SCHEMA_VIOLATED"), { detail: problems.slice(0, 6).join("; ") });
+            offered.check(output);
             return output;
           } });
         runs.push({ caseId: item.id, ok: result.ok, repairs: result.audit.repairs ?? 0, ms: Date.now() - started, ...(result.ok ? {} : { code: result.blocker.code }) });
@@ -138,6 +230,7 @@ export function createModelProviderService(options: {
     const record = summarizeConformance({ providerId: provider.id, model: provider.model, runtimeVersion: RUNTIME_VERSION, ranAt: now().toISOString() }, runs);
     options.store.appendEvent({ ownerId: ownerOf(options.store, workspaceId), workspaceId, idempotencyKey: `${CONFORMANCE_EVENT}:${provider.id}:${record.ranAt}`,
       type: CONFORMANCE_EVENT, entityId: provider.id, payload: record });
+    try { options.onConformance?.(workspaceId); } catch { /* the listener's own concern */ }
     return record;
   }
 
@@ -148,19 +241,22 @@ export function createModelProviderService(options: {
     const provider = config(workspaceId);
     const record = provider ? latest(workspaceId, provider) : undefined;
     const valid = provider ? current(workspaceId, provider) : undefined;
-    const admitted = new Set(valid ? admittedSkills(valid, capabilities) : []);
+    // An invited account with no provider of its own is served by the developer's model: its admitted Skills count as served.
+    const sponsored = provider ? undefined : sponsorRouting(workspaceId);
+    const admitted = new Set(valid ? admittedSkills(valid, capabilities) : sponsored && !sponsored.blocked ? sponsored.admitted : []);
     const features = Object.entries(SKILL_NEEDS).filter(([, needs]) => !needs.testOnly).map(([skill, needs]) => {
       const gap = capabilityGap(skill, capabilities, locale);
       const failed = record?.runs.filter((run) => needs.schemas.includes(run.caseId) && !run.ok).length ?? 0;
       return { skill, label: t(needs.label), critical: Boolean(needs.critical), served: admitted.has(skill),
-        reason: admitted.has(skill) ? "" : gap ?? (!valid ? t("还没有检验，或检验已过期") : failed ? t("检验中 {{count}} 次没有按格式回答", { count: failed })
-          : needs.critical ? t("要求每次都一次答对") : t("整体通过率不到 90%")) };
+        reason: admitted.has(skill) ? "" : gap ?? (sponsored ? sponsored.blocked?.message ?? t("开发者提供的模型没有通过这项功能的检验") : !valid ? t("还没有检验，或检验已过期")
+          : failed ? t("检验中 {{count}} 次没有按格式回答", { count: failed }) : needs.critical ? t("要求每次都一次答对") : t("整体通过率不到 90%")) };
     });
     return { provider: provider ?? null, presets: PROVIDER_PRESETS.map((preset) => ({ ...preset, label: t(preset.label) })),
       unavailable: unavailableOnThirdParty(capabilities, locale), signedIn: options.signedIn(workspaceId),
       conformance: record ? { ranAt: record.ranAt, model: record.model, passRate: record.passRate, repairRate: record.repairRate, p95Ms: record.p95Ms,
         runs: record.runs.length, failures: record.failures, current: Boolean(valid) } : null,
-      features, testing: testing.get(workspaceId) ?? null };
+      features, testing: testing.get(workspaceId) ?? null, sponsor: options.sponsor?.()?.view(workspaceId) ?? null,
+      sponsorBlocked: sponsored?.blocked ?? null };
   };
 
   async function save(workspaceId: string, body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
@@ -214,6 +310,7 @@ export function createModelProviderService(options: {
     return undefined;
   }
 
-  return { routing, upstream, cost, runConformance, view, handle, hasProvider: (workspaceId: string) => Boolean(config(workspaceId)) };
+  return { routing, upstream, cost, afterChatgptCost, noteUsageLimit, runConformance, view, handle, capabilities,
+    hasProvider: (workspaceId: string) => Boolean(config(workspaceId)) || Boolean(options.sponsor?.()?.active(workspaceId)) };
 }
 export type ModelProviderService = ReturnType<typeof createModelProviderService>;

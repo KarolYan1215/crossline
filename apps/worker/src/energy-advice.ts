@@ -1,6 +1,6 @@
 import {
-  ACTIVITY_LONG_GAPS, ENERGY_ADVICE_PERIOD_DAYS, ENERGY_ADVICE_REVIEW_SCHEMA, ENERGY_ADVICE_SETTING, SLEEP_TRACKING_CONSENT, adviceId, adviceProfiles, energyAdviceRule,
-  mergeSleep, readEnergyAdvice, resolveAvailability, sleepFromGaps, sleepFromPhoneEvents, spendAllows, validateEnergyAdviceReview, withAdjustments, workedRhythm, zoneClock,
+  ACTIVITY_LONG_GAPS, ENERGY_ADVICE_PERIOD_DAYS, ENERGY_ADVICE_REVIEW_SCHEMA, ENERGY_ADVICE_SETTING, PHONE_HEALTH_CONSENT, SLEEP_TRACKING_CONSENT, adviceId, adviceProfiles, energyAdviceRule,
+  mergeSleep, phoneHealthGranted, readEnergyAdvice, resolveAvailability, sleepFromGaps, sleepFromPhoneEvents, spendAllows, validateEnergyAdviceReview, withAdjustments, workedRhythm, zoneClock,
   type BackgroundKind, type BackgroundSpend, type EnergyAdvice, type EnergyAdviceReview, type EnergyAdviceReviewRecord, type EnergyLevel, type PhoneSleepEvent, type SleepEpisode
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
@@ -12,10 +12,10 @@ import { defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./saf
 
 export const ENERGY_ADVISOR = "crossline:crossline-energy-advisor";
 
-const INSTRUCTIONS = "Review the rule-made energy advice against published research on sleep, circadian timing and alertness, and against "
-  + "this person's own evidence. Search the web and open every page you cite; cite only pages you opened, by id. Keep the advice "
-  + "(verdict agree), move one to four bands by one level (verdict adjust, each with sources), or say the record is too thin (verdict "
-  + "insufficient). The person's own reports outrank general findings. Return raw JSON only.";
+const INSTRUCTIONS = "Check the rule-made weekly energy advice once against published research on sleep, circadian timing and alertness, "
+  + "and against this person's own evidence; the person's own reports outrank general findings. Search the web and cite only pages you opened, "
+  + "by id. Keep it (verdict agree), move one to four bands by one level each (verdict adjust, each with its sources), or say the record is too "
+  + "thin (verdict insufficient). The summary is one sentence the person reads beside the advice. Return raw JSON only.";
 
 /**
  * The person's sleep as the web's energy model reads it (apps/web/lib/energy.ts): the screen's long idle stretches only with the 作息记录
@@ -25,7 +25,9 @@ const INSTRUCTIONS = "Review the rule-made energy advice against published resea
 export function sleepFor(store: CrosslineStore, workspaceId: string, hourOf: (iso: string) => number): SleepEpisode[] {
   const read = <T>(key: string, fallback: T): T => { try { const raw = store.getSetting(workspaceId, key); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } };
   const screen = store.getSetting(workspaceId, SLEEP_TRACKING_CONSENT) === "granted" ? sleepFromGaps(read(ACTIVITY_LONG_GAPS, [] as Array<{ from: string; to: string }>), hourOf) : [];
-  return mergeSleep(screen, [...read("health.sleep", [] as SleepEpisode[]), ...sleepFromPhoneEvents(read("health.events", [] as PhoneSleepEvent[]))]);
+  // 手机健康数据 is its own consent (the web's `phoneHealthOn`): off, the phone's record is not read even if some is left.
+  const phone = phoneHealthGranted(store.getSetting(workspaceId, PHONE_HEALTH_CONSENT), Boolean(store.getSetting(workspaceId, "health.token.sha256")));
+  return mergeSleep(screen, phone ? [...read("health.sleep", [] as SleepEpisode[]), ...sleepFromPhoneEvents(read("health.events", [] as PhoneSleepEvent[]))] : []);
 }
 
 const zoneOf = (store: CrosslineStore, workspaceId: string): string => {
@@ -143,7 +145,8 @@ export async function energyAdvicePass(input: { store: CrosslineStore; workspace
   running.add(workspaceId);
   try {
     input.enterUsage?.(workspaceId);
-    const review = spendAllows(spend, "discretionary");
+    // The review is non-core: the quota saver may hold it (docs/token-economy.md §2.3); the rule-based advice is written regardless.
+    const review = spendAllows(spend, "discretionary", { nonCore: true });
     const advice = await computeEnergyAdvice(store, workspaceId, input.cwd, { client: input.client(), review,
       ...(review ? {} : { skippedBecause: tOfWorkspace(store, workspaceId)("额度偏紧，本周未做联网复核") }) });
     console.info(JSON.stringify({ type: "energy.advice", workspaceId, ...("insufficient" in advice ? { insufficient: true } : { id: advice.id, review: advice.review.state }) }));

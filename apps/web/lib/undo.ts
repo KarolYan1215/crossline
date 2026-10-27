@@ -1,6 +1,6 @@
 import "server-only";
-import { retractedEventIdsIn, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
-import { taskTitleOf, type AccessContext, type WorkOrderState } from "@crossline/core";
+import { reopenAgentResult, retractedEventIdsIn, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
+import { PORTRAIT_FIGURE_SETTING, taskTitleOf, type AccessContext, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 import { tOf } from "./locale";
 
@@ -29,6 +29,18 @@ export type Inverse =
   | { kind: "source.project"; entries: Array<{ id: string; projectId: string | null }> }
   /** The daily merge (apps/worker/src/dedupe.ts): the absorbed tasks come back and the kept one gets its payload and step plan back. */
   | { kind: "task.unmerge"; keepId: string; payload: unknown; plan: StepPlanInput | null; restore: string[] }
+  /** Records (docs/domain-lines.md) the operation added are removed again; ones it removed come back. */
+  | { kind: "records.deleted"; ids: string[]; deleted: boolean }
+  /** Assistant results the daily pass put away or accepted (apps/worker/src/date-advance.ts) wait for the person again. */
+  | { kind: "agent.reopen"; taskIds: string[] }
+  /**
+   * Work orders whose payload an operation rewrote — who does it (`owner`, `prepares`, a question's answer; docs/work-split.md) — get the
+   * payload back. `state`: the state it had then; one that was a proposal and took effect since (the assistant's item auto-approved) is a
+   * proposal again, unless the work went further.
+   */
+  | { kind: "work_order.payload"; entries: Array<{ id: string; payload: unknown; state?: string }> }
+  /** Step plans an operation rewrote get their open steps back (the done ones were never touched; `saveStepPlan` keeps them). */
+  | { kind: "step_plan.restore"; plans: Array<{ workOrderId: string; plan: StepPlanInput }> }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
@@ -130,6 +142,29 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
         if (keep && inverse.plan) store.saveStepPlan(ctx.workspaceId, inverse.keepId, inverse.plan, ctx.principalId, "unmerged");
         return { ok: true };
       }
+      case "records.deleted":
+        for (const id of inverse.ids) store.setRecordDeleted(ctx.workspaceId, id, inverse.deleted);
+        return { ok: true };
+      case "step_plan.restore":
+        for (const entry of inverse.plans) if (store.getStepPlan(ctx.workspaceId, entry.workOrderId))
+          store.saveStepPlan(ctx.workspaceId, entry.workOrderId, entry.plan, ctx.principalId, "undo");
+        return { ok: true };
+      case "work_order.payload": {
+        const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
+        for (const entry of inverse.entries) {
+          const order = orders.get(entry.id);
+          if (!order) continue;
+          store.saveWorkOrder({ ...order, payload: entry.payload });
+          if (entry.state === "awaiting_plan_approval" && ["approved", "preparing", "ready_for_human"].includes(order.state)) {
+            const attempt = store.listEvents(ctx.workspaceId, { type: "approval.revoked", entityId: entry.id }).length;
+            store.transitionWorkOrder(ctx.workspaceId, entry.id, { type: "approval.revoked", reason: tOf(ctx)("撤销整理") }, `undo-payload:${entry.id}:${attempt}`);
+          }
+        }
+        return { ok: true };
+      }
+      case "agent.reopen":
+        for (const id of inverse.taskIds) reopenAgentResult(store, ctx.workspaceId, id, ctx.principalId);
+        return { ok: true };
       case "source.project":
         for (const entry of inverse.entries) store.assignSourceDocumentProject(ctx.workspaceId, entry.id, entry.projectId);
         return { ok: true };
@@ -193,9 +228,9 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
 }
 
 /** Settings an operation may change and an undo puts back. Device, account and calendar-write state are not operations. */
-const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines"] as const;
+const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines", PORTRAIT_FIGURE_SETTING] as const;
 /** Ledger markers that hide or close something when written; undoing the operation that wrote them brings it back. */
-const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged", "source.project_cleared"];
+const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged", "source.project_cleared", "milestone.overdue_resolved"];
 
 type Snapshot = ReturnType<typeof snapshot>;
 function snapshot(ctx: AccessContext) {
@@ -209,6 +244,7 @@ function snapshot(ctx: AccessContext) {
     milestones: new Map(store.listMilestones(ctx.workspaceId).map((item) => [item.id, item.status])),
     settings: store.listSettings(ctx.workspaceId, UNDOABLE_SETTINGS),
     sources: new Map(store.listSourceDocuments(ctx.workspaceId).map((doc) => [doc.id, doc.projectId ?? null])),
+    records: new Set(store.listRecords(ctx.workspaceId).map((record) => record.id)),
     eventIds: new Set(store.listEvents(ctx.workspaceId, { type: RETRACTABLE_EVENTS }).map((event) => event.eventId))
   };
 }
@@ -222,12 +258,19 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
     if (was.state === "open" && now && (now.state !== "open" || now.followUpAt !== was.followUpAt)) reopen.push({ id, followUpAt: was.followUpAt });
   }
   if (reopen.length) items.push({ kind: "waiting.reopen", items: reopen });
+  const addedRecords = [...after.records].filter((id) => !before.records.has(id)), removedRecords = [...before.records].filter((id) => !after.records.has(id));
+  if (addedRecords.length) items.push({ kind: "records.deleted", ids: addedRecords, deleted: true });
+  if (removedRecords.length) items.push({ kind: "records.deleted", ids: removedRecords, deleted: false });
   const opened = [...after.waiting].filter(([id, now]) => !before.waiting.has(id) && now.state === "open").map(([id]) => id);
   if (opened.length) items.push({ kind: "waiting.cancel", ids: opened });
   const restored: string[] = [], archived: string[] = [], revoked: string[] = [];
+  const payloads: Array<{ id: string; payload: unknown }> = [];
   for (const [id, now] of after.orders) {
     const was = before.orders.get(id);
     if (!was) continue;
+    // Who does it changed (a question answered and handed to the assistant, docs/work-split.md): the whole payload goes back.
+    const ownership = (payload: unknown) => { const p = (payload ?? {}) as Record<string, unknown>; return JSON.stringify([p.owner, p.prepares, p.question, p.answer]); };
+    if (ownership(was.payload) !== ownership(now.payload)) payloads.push({ id, payload: was.payload });
     if (now.state === "archived" && was.state !== "archived") restored.push(id);
     if (was.state === "archived" && now.state !== "archived") archived.push(id);
     if (["awaiting_plan_approval", "blocked"].includes(was.state) && now.state === "approved") revoked.push(id);
@@ -237,6 +280,7 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
     if (was.estimate.p50Minutes !== now.estimate.p50Minutes)
       items.push({ kind: "work_order.estimate", id, estimate: { p25Minutes: was.estimate.p25Minutes, p50Minutes: was.estimate.p50Minutes, p85Minutes: was.estimate.p85Minutes } });
   }
+  if (payloads.length) items.push({ kind: "work_order.payload", entries: payloads });
   if (restored.length) items.push({ kind: "work_order.restore", ids: restored });
   if (archived.length) items.push({ kind: "work_order.archive", ids: archived });
   if (revoked.length) items.push({ kind: "approval.revoke", ids: revoked });

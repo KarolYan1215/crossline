@@ -14,9 +14,9 @@ beforeEach(() => {
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
 
 test("an answer to a proposal is recorded, can be changed, and leaves the rest of the report alone", () => {
-  expect(decideDiligenceProposal(TEST_CTX, "r1", "p1", "accepted")).toEqual({ ok: true });
+  expect(decideDiligenceProposal(TEST_CTX, "r1", "p1", "accepted")).toEqual({ ok: true, captured: true });
   expect(loadDiligence(TEST_CTX)[0]?.proposals[0]?.status).toBe("accepted");
-  expect(decideDiligenceProposal(TEST_CTX, "r1", "p1", "pending")).toEqual({ ok: true });
+  expect(decideDiligenceProposal(TEST_CTX, "r1", "p1", "pending")).toEqual({ ok: true, captured: false });
   expect(loadDiligence(TEST_CTX)[0]).toMatchObject({ status: "done", proposals: [{ status: "pending" }], sources: [{ finalUrl: "https://example.edu/a" }] });
 });
 
@@ -29,4 +29,30 @@ test("another workspace's reports are never visible or decidable", () => {
   const other = { ...TEST_CTX, workspaceId: "someone-else" };
   expect(loadDiligence(other)).toEqual([]);
   expect(decideDiligenceProposal(other, "r1", "p1", "accepted")).toEqual({ ok: false, code: "DILIGENCE_PROPOSAL_NOT_FOUND" });
+});
+
+test("accepting a task writes it down once as a capture, so it is analysed into a task", () => {
+  decideDiligenceProposal(TEST_CTX, "r1", "p1", "accepted");
+  decideDiligenceProposal(TEST_CTX, "r1", "p1", "pending");
+  expect(decideDiligenceProposal(TEST_CTX, "r1", "p1", "accepted")).toEqual({ ok: true, captured: false });
+  const captures = globalThis.crosslineStore!.listCaptures(TEST_CTX.workspaceId);
+  expect(captures).toHaveLength(1);
+  expect(captures[0]).toMatchObject({ id: "diligence-r1-p1", title: "x" });
+  expect(captures[0]?.context).toContain("来自调研建议");
+});
+
+test("the page shows what was looked for, not the researcher's rules", async () => {
+  const { questionShown } = await import("./diligence");
+  expect(questionShown("找出适合这个人当前阶段和身份约束的外部机会（比赛、孵化器、资助、合作渠道）。只列这个人按 facts 里的身份……不要假设这个人是学生。"))
+    .toBe("找出适合本人当前阶段和身份约束的外部机会（比赛、孵化器、资助、合作渠道）。");
+});
+
+test("a proposal the researcher named in Chinese can be decided, and its capture id stays plain", () => {
+  const store = globalThis.crosslineStore!;
+  store.saveDiligenceReport({ id: "r2", ownerId: "o", workspaceId: TEST_CTX.workspaceId, scope: "startup", question: "q", status: "done",
+    runAt: "2026-10-02T00:00:00.000Z", findings: [], sources: [],
+    proposals: [{ id: "建议一", title: "核验资格", why: "y", kind: "task", dueDate: "", findingIds: [], status: "pending" }] });
+  expect(decideDiligenceProposal(TEST_CTX, "r2", "建议一", "accepted")).toEqual({ ok: true, captured: true });
+  const capture = store.listCaptures(TEST_CTX.workspaceId).find((item) => item.title === "核验资格")!;
+  expect(capture.id).toMatch(/^diligence-r2-[a-f0-9]{12}$/);
 });

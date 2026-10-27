@@ -10,6 +10,7 @@
 import type { TaskOpType } from "./assistant-schema";
 import { SHIFT_MINUTES } from "./schedule-frozen";
 import { tFor, type Locale } from "./i18n";
+import { recordProblem } from "./records";
 
 export type ActionRisk = "internal" | "commitment";
 
@@ -36,16 +37,29 @@ export const ACTIONS = {
   "ask.snooze": { label: "稍后再问", risk: "internal", args: { askId: str(200), until: enumOf(["tomorrow", "week"]) } },
   "undo": { label: "撤销", risk: "internal", args: { opId: str(64) } },
   "energy.report": { label: "记录精力", risk: "internal", args: { level: enumOf(["low", "medium", "high"]), note: str(300) } },
+  // A record of money or health (docs/domain-lines.md): read from the person's line, a pasted text or an attached screenshot; the card
+  // shows the numbers and nothing is written until the person confirms them.
+  "record.add": { label: "记一笔", risk: "internal", args: { domain: enumOf(["wellness", "wealth"]),
+    kind: enumOf(["income", "expense", "workout", "weight", "meal", "metric"]), value: { type: "number" }, unit: str(16), currency: str(8),
+    category: str(40), note: str(200), at: day } },
   /** 「后面都推 10 分钟」: today's plan from now on starts later; what the person started or locked stays. */
   "schedule.shift": { label: "整体顺延", risk: "internal", args: { minutes: { type: "number" } } },
   "event.create": { label: "加入日程", risk: "internal", args: {
     title: str(120), date: day, weekdays: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
     startTime: str(5), endTime: str(5), until: day, minutes: { type: "number" }, lineId: str(64), location: str(300) } },
+  /**
+   * 「我每天能工作 10 小时，周日休息」: the whole weekly pattern, replaced. It used to have no action, so the same line became 「交给访谈」 plus an
+   * all-day Sunday event and the plan stayed on 15 hours a week (2026-10-17 walkthrough, W-15).
+   */
+  "availability.set": { label: "修改可用时段", risk: "internal", args: {
+    // `days` is a string ("1,2,3,4,5,6"; 0 = Sunday): an array here nests past the strict-mode depth limit.
+    windows: { type: "array", maxItems: 21, items: object({ days: str(20), start: str(5), end: str(5), energy: enumOf(["low", "medium", "high"]) }) } } },
   "goal.add": { label: "新增长期目标", risk: "internal", args: { lineId: str(64), title: str(60) } },
   "milestone.draft": { label: "新建里程碑草稿", risk: "internal", args: { lineId: str(64), title: str(200), date: day, target: str(500) } },
-  "line.add": { label: "新增主线", risk: "internal", args: { label: str(12) } },
+  // `domain` (docs/domain-lines.md): "" for an ordinary line, else 健康 / 财富 — at most one live line each.
+  "line.add": { label: "新增主线", risk: "internal", args: { label: str(12), domain: enumOf(["", "wellness", "wealth"]) } },
   "profile.tell": { label: "交给访谈", risk: "internal", args: { text: str(2000), lineId: str(64) } },
-  "workflow.request": { label: "建成工作流", risk: "internal", args: { text: str(1000), lineId: str(64), reminder: str(200), time: str(5),
+  "workflow.request": { label: "建成自动化", risk: "internal", args: { text: str(1000), lineId: str(64), reminder: str(200), time: str(5),
     weekdays: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } } } },
   "proposal.decide": { label: "处理任务提案", risk: "commitment", args: { workOrderId: str(128), decision: enumOf(["approve", "reject"]), reason: str(300) } },
   "milestones.decide": { label: "处理里程碑草稿", risk: "commitment", args: { milestoneIds: { type: "array", maxItems: 20, items: str(128) },
@@ -77,11 +91,14 @@ type ArgsOf = {
   "ask.snooze": { askId: string; until: "tomorrow" | "week" };
   "undo": { opId: string };
   "energy.report": { level: "low" | "medium" | "high"; note: string };
+  "record.add": { domain: "wellness" | "wealth"; kind: "income" | "expense" | "workout" | "weight" | "meal" | "metric"; value: number; unit: string;
+    currency: string; category: string; note: string; at: string };
   "event.create": { title: string; date: string; weekdays: number[]; startTime: string; endTime: string; until: string; minutes: number; lineId: string; location: string };
   "schedule.shift": { minutes: number };
+  "availability.set": { windows: Array<{ days: string; start: string; end: string; energy: "low" | "medium" | "high" }> };
   "goal.add": { lineId: string; title: string };
   "milestone.draft": { lineId: string; title: string; date: string; target: string };
-  "line.add": { label: string };
+  "line.add": { label: string; domain: "" | "wellness" | "wealth" };
   /** `lineId`: that line's own interview (the person is on its card or page); "" = the whole interview. */
   "profile.tell": { text: string; lineId: string };
   "workflow.request": { text: string; lineId: string; reminder: string; time: string; weekdays: number[] };
@@ -141,6 +158,12 @@ export type ConciergeRefs = {
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** `availability.set`'s days ("1,2,3"; 0 = Sunday): the distinct weekdays in order, or [] when any part is not one. */
+export function windowDays(text: string): number[] {
+  const parts = text.split(/[,，\s]+/).filter(Boolean);
+  if (!parts.length || parts.some((part) => !/^[0-6]$/.test(part))) return [];
+  return [...new Set(parts.map(Number))].sort((a, b) => a - b);
+}
 
 /* i18n-ignore-start: why an action cannot run, sent back to the model to repair against */
 /** Why one proposed action cannot be carried out, in words the model can repair against; "" when it can. */
@@ -160,7 +183,7 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     case "workflow.request": return !String(a.text ?? "").trim() ? "内容为空"
       : String(a.reminder ?? "").trim() && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(a.time ?? "")) ? "提醒须有 HH:MM 的时间" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在`
       // A workflow is written in one line's way and used on that line only; with none named it used to land on the first line.
-      : !String(a.reminder ?? "").trim() && !item.args.lineId ? "工作流须写明服务哪条主线（lineId）；看不出是哪条时用 clarify 列出主线让本人选" : "";
+      : !String(a.reminder ?? "").trim() && !item.args.lineId ? "自动化须写明服务哪条主线（lineId）；看不出是哪条时用 clarify 列出主线让本人选" : "";
     case "profile.tell": return !String(a.text ?? "").trim() ? "内容为空" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在` : "";
     case "task.op": {
       const args = item.args;
@@ -185,6 +208,8 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     case "ask.snooze": return refs.asks.has(item.args.askId) ? "" : `待决事项 id「${item.args.askId}」不存在`;
     case "undo": return refs.ops.has(item.args.opId) ? "" : `操作 id「${item.args.opId}」不在最近 24 小时的可撤销操作里`;
     case "energy.report": return "";
+    // The same checks the store applies; an empty day is today.
+    case "record.add": return recordProblem({ ...item.args, at: item.args.at || new Date().toISOString().slice(0, 10) });
     case "schedule.shift": return Number.isInteger(item.args.minutes) && item.args.minutes >= SHIFT_MINUTES.min && item.args.minutes <= SHIFT_MINUTES.max
       ? "" : `顺延分钟数须为 ${SHIFT_MINUTES.min}–${SHIFT_MINUTES.max} 的整数`;
     case "event.create": {
@@ -196,11 +221,17 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       if (!DAY.test(args.date)) return "一次性日程需要 date";
       return refs.today && args.date < refs.today ? `日期 ${args.date} 已过去（今天 ${refs.today}）；本周已过的星期几指下一个` : "";
     }
+    case "availability.set": {
+      const windows = item.args.windows;
+      if (!windows.length) return "需要至少一个时段（完整的新每周时段，不是改动的部分）";
+      const bad = windows.find((window) => !windowDays(window.days).length || !TIME.test(window.start) || !TIME.test(window.end) || window.end <= window.start);
+      return bad ? "每个时段需要 days（逗号分隔的 0–6，0 = 周日）和 HH:MM 起止时间，且结束晚于开始（跨午夜拆成两段）" : "";
+    }
     case "goal.add": case "milestone.draft":
       if (!refs.lines.has(item.args.lineId)) return `主线 id「${item.args.lineId}」不存在`;
       if (!item.args.title.trim()) return "标题为空";
       return item.action === "milestone.draft" && item.args.date && !DAY.test(item.args.date) ? "date 须为 YYYY-MM-DD 或空" : "";
-    case "line.add": return item.args.label.trim() ? "" : "主线名为空";
+    case "line.add": return item.args.label.trim() || item.args.domain ? "" : "主线名为空";
     case "proposal.decide": return refs.proposals.has(item.args.workOrderId) ? "" : `「${item.args.workOrderId}」不是待批准的任务提案`;
     case "milestones.decide": {
       const unknown = item.args.milestoneIds.filter((id) => !refs.draftMilestones.has(id));
@@ -321,9 +352,10 @@ export const actionLabel = (item: ProposedAction, locale?: Locale): string => tF
  */
 export type ConciergePack = {
   now: string; today: string; timeZone: string;
-  page: { kind: string; entityId: string; title: string };
+  /** `stepId`: on a task, the step the person is looking at (a picked block on Today's day panel); absent, the first open step. */
+  page: { kind: string; entityId: string; title: string; stepId?: string };
   /** `description` is the interview's reading of the line (`lines.profiles`), "" before one exists. */
-  lines: Array<{ id: string; label: string; goals: string[]; hard: boolean; description: string }>;
+  lines: Array<{ id: string; label: string; goals: string[]; hard: boolean; description: string; domain?: string }>;
   tasks: Array<{ id: string; title: string; line: string; project: string; state: string; dueDate: string; notBefore: string; usualMinutes: number;
     nextBlock: string; steps: Array<{ id: string; title: string; status: string; minutes: number; executor: string }> }>;
   proposals: Array<{ id: string; title: string; line: string }>;
@@ -333,6 +365,8 @@ export type ConciergePack = {
   plan: Array<{ day: string; start: string; end: string; title: string; kind: string }>;
   /** Per day of the next seven: the person's available hours minus fixed arrangements (what work can use), and what work already holds. */
   capacity: Array<{ day: string; availableMinutes: number; scheduledMinutes: number }>;
+  /** The weekly pattern the plan uses, one band per item (「周一 周二 09:00–12:00 高」), so `availability.set` can change part of it. */
+  weeklyPattern?: string[];
   ops: Array<{ id: string; label: string; at: string }>;
   agentResults: Array<{ taskId: string; title: string; summary: string }>;
   materials: Array<{ id: string; fileName: string; project: string }>;
@@ -343,6 +377,9 @@ export type ConciergePack = {
   preferences: string[];
   energy: { level: string; at: string } | null;
   forecast: Array<{ milestoneId: string; title: string; deadline: string; usualFinish: string; cautiousFinish: string; atRisk: boolean }>;
+  /** The person's automations (what runs by itself) and how many mailboxes are connected (docs/personal-agent.md). */
+  automations?: Array<{ name: string; trigger: string; status: string; lineId?: string }>;
+  mailboxes?: number;
 };
 
 export function conciergeRefs(pack: ConciergePack): ConciergeRefs {

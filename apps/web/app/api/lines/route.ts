@@ -1,22 +1,26 @@
+import { isLineDomain } from "@crossline/identity-packs";
 import { resolveAccessContext } from "../../../lib/access-guard";
 import { tOf } from "../../../lib/locale";
 import { addLine, linePacks, rankLines, setupLines, updateLine } from "../../../lib/lines";
 import { isCrossSiteWrite } from "../../../lib/same-origin";
 import { withUndo } from "../../../lib/undo";
 
-/** The workspace's lines: id, name, colour, long-term goal, archived or not. */
+/** The workspace's lines: id, name, colour, long-term goal, domain, archived or not. */
 export async function GET(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   return Response.json({ ok: true, lines: linePacks(access.ctx, { includeArchived: true }).filter((pack) => pack.kind === "identity")
     .map((pack) => ({ id: pack.id, label: pack.label, color: pack.color ?? pack.id, goal: pack.goal ?? "", goals: pack.goals ?? [], goalParts: pack.goalParts ?? [],
-      hard: Boolean(pack.hard), rank: pack.rank ?? null })) });
+      hard: Boolean(pack.hard), rank: pack.rank ?? null, domain: pack.domain ?? null })) });
 }
 
+/** A second line of a domain is a conflict (409, with the line that has it), not a malformed request. */
+const status = (result: { ok: boolean; code?: string }) => result.ok ? 200 : result.code === "LINE_NOT_FOUND" ? 404 : result.code === "LINE_DOMAIN_TAKEN" ? 409 : 400;
+
 /**
- * `{label, goals?, color?, hard?}` adds a line (its interview follows); `{id, label?, goals?, goalParts?, color?, archived?, hard?, rank?}` changes one
- * (`goalParts`: the attributes a goal is composed from, in order — §4.1; checked, and `goals[0]` becomes the composed sentence);
- * `{order: [ids]}` sets the 12–24 month order (unlisted lines run in parallel). All undoable.
+ * `{label, goals?, color?, hard?, domain?}` adds a line (its interview follows); `{id, label?, goals?, goalParts?, color?, archived?, hard?, rank?,
+ * domain?}` changes one (`goalParts`: the attributes a goal is composed from, in order — §4.1; checked, and `goals[0]` becomes the composed
+ * sentence; `domain: null` removes the line's domain); `{order: [ids]}` sets the 12–24 month order (unlisted lines run in parallel). All undoable.
  */
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
@@ -28,9 +32,10 @@ export async function POST(request: Request) {
   // The opening screen: every line at once, in order.
   if (Array.isArray(body.setup)) {
     const lines = (body.setup as Array<Record<string, unknown>>).filter((item) => item && typeof item.label === "string")
-      .map((item) => ({ label: String(item.label), ranked: item.ranked === true, hard: item.hard === true })).slice(0, 8);
+      .map((item) => ({ label: String(item.label), ranked: item.ranked === true, hard: item.hard === true,
+        ...(isLineDomain(item.domain) ? { domain: item.domain } : {}) })).slice(0, 8);
     const result = await withUndo(access.ctx, tOf(access.ctx)("设定主线"), () => setupLines(access.ctx, lines));
-    return Response.json(result, { status: result.ok ? 200 : 400 });
+    return Response.json(result, { status: status(result) });
   }
   if (Array.isArray(body.order)) {
     const order = (body.order as unknown[]).filter((id): id is string => typeof id === "string");
@@ -40,12 +45,13 @@ export async function POST(request: Request) {
     const change = { ...(text(body.label) !== undefined ? { label: text(body.label)! } : {}), ...(text(body.goal) !== undefined ? { goal: text(body.goal)! } : {}),
       ...(goals ? { goals } : {}), ...(body.goalParts !== undefined ? { goalParts: body.goalParts as string[] } : {}), ...(typeof body.hard === "boolean" ? { hard: body.hard } : {}),
       ...(body.rank === null || typeof body.rank === "number" ? { rank: body.rank as number | null } : {}),
-      ...(text(body.color) ? { color: text(body.color)! } : {}), ...(typeof body.archived === "boolean" ? { archived: body.archived } : {}) };
+      ...(text(body.color) ? { color: text(body.color)! } : {}), ...(typeof body.archived === "boolean" ? { archived: body.archived } : {}),
+      ...(body.domain === null ? { domain: null } : isLineDomain(body.domain) ? { domain: body.domain } : {}) };
     const name = text(body.label) ?? linePacks(access.ctx, { includeArchived: true }).find((pack) => pack.id === body.id)?.label ?? body.id;
     const result = await withUndo(access.ctx, tOf(access.ctx)(body.goalParts !== undefined ? "修改长期目标：{{name}}" : "修改主线：{{name}}", { name }), () => updateLine(access.ctx, body.id as string, change));
-    return Response.json(result, { status: result.ok ? 200 : result.code === "LINE_NOT_FOUND" ? 404 : 400 });
+    return Response.json(result, { status: status(result) });
   }
   const result = await withUndo(access.ctx, tOf(access.ctx)("新增主线：{{name}}", { name: text(body.label) ?? "" }), () => addLine(access.ctx, { label: text(body.label) ?? "", goal: text(body.goal) ?? "", ...(goals ? { goals } : {}),
-    ...(body.hard === true ? { hard: true } : {}), ...(text(body.color) ? { color: text(body.color)! } : {}) }));
-  return Response.json(result, { status: result.ok ? 200 : 400 });
+    ...(body.hard === true ? { hard: true } : {}), ...(text(body.color) ? { color: text(body.color)! } : {}), ...(isLineDomain(body.domain) ? { domain: body.domain } : {}) }));
+  return Response.json(result, { status: status(result) });
 }

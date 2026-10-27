@@ -73,9 +73,17 @@
 .corner-stack{position:fixed;right:16px;bottom:76px;z-index:60;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none}
 .corner-stack>*{pointer-events:auto}
 .corner-stack .timer-float,.corner-stack .assistant-bubble-wrap,.corner-stack .assistant-bubble-wrap .assistant-bubble{position:static}
+/* Scrolling down tucks the bubble to the screen's edge, a 14px sliver left to show it is there; scrolling up, the page's top and foot,
+   hovering or focusing it bring it back (CornerStack `nextTucked`). A message being shown keeps it out. The timer never tucks. */
+.corner-stack .assistant-bubble-wrap{transition:transform .2s ease-out,opacity .2s ease-out}
+.corner-stack[data-tucked] .assistant-bubble-wrap:not([data-popped]):not(:hover):not(:focus-within){transform:translateX(calc(100% + 2px));opacity:.7}
+@media (prefers-reduced-motion:reduce){.corner-stack .assistant-bubble-wrap{transition:none}}
+/* On a wide screen there is no bottom bar to clear, so the corner sits low, inside the page's own foot room, not 76px up over the cards. */
+@media (min-width:681px){.corner-stack{bottom:20px}}
 /* On a phone the corner must stay small: with the timer, its alert and the nudge preview stacked it covered the input box. The bubble
    already carries the unread mark, and opening it shows the message, so the preview is left out there. */
-@media (max-width:680px){.corner-stack{right:8px;bottom:calc(60px + env(safe-area-inset-bottom))}.corner-stack .assistant-nudge-preview{display:none}}
+@media (max-width:680px){.corner-stack{right:8px;bottom:calc(60px + env(safe-area-inset-bottom))}.corner-stack .assistant-nudge-preview{display:none}
+  .corner-stack[data-tucked] .assistant-bubble-wrap:not([data-popped]):not(:hover):not(:focus-within){transform:translateX(calc(100% - 6px))}}
 /* Room at the foot of every page as tall as the corner reaches (`--corner-clearance`, measured by CornerStack), so nothing is left
    under the bubble once scrolled to the end. `:root` outranks the plain `.page` rules in globals.css and mobile.css. */
 :root .page,:root .subpage{padding-bottom:max(28px,var(--corner-clearance,0px))}
@@ -123,3 +131,11 @@
 .helper-face[data-size="button"][data-mood="working"]{animation:helper-sway 2.4s ease-in-out infinite}
 .helper-face[data-size="button"][data-mood="down"]{filter:grayscale(1);opacity:.55}
 @media (prefers-reduced-motion:reduce){.helper-face{animation:none!important}}
+/* What only the person can do (helper-calls.tsx): a badge above the 小帮手, the list in a sheet. */
+.helper-calls-badge{font-size:13px;padding:6px 10px;border:1.5px solid var(--ink);background:var(--paper);color:var(--ink);border-radius:999px;cursor:pointer}
+.helper-calls-badge.urgent{background:var(--ink);color:var(--paper)}
+.helper-calls{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.helper-calls li{border:1px solid var(--line);padding:10px 12px;display:grid;gap:8px}
+.helper-calls li.urgent{border:1.5px solid var(--ink)}
+.helper-calls li p{margin:0;font-size:14px}
+.helper-calls-actions{display:flex;flex-wrap:wrap;gap:8px}

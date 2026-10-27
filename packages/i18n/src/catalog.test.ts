@@ -39,7 +39,8 @@ function sourceFiles(dir: string): string[] {
   try { entries = readdirSync(absolute); } catch { return []; }
   return entries.flatMap((name) => {
     if (["node_modules", "testing", "fixtures", ".next", "dist"].includes(name) || name.startsWith(".next")) return [];
-    const relative = path.join(dir, name);
+    // Forward slashes on every platform: `I18N_SCOPE` prefixes are written that way, and on Windows `path.join` gives backslashes.
+    const relative = `${dir}/${name}`;
     if (statSync(path.join(ROOT, relative)).isDirectory()) return sourceFiles(relative);
     return /\.(ts|tsx|mjs)$/.test(name) && !/\.test\.|\.spec\.|\.d\.ts$/.test(name) ? [relative] : [];
   });

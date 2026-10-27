@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import "@crossline/i18n/catalog/assess";
-import { LIKERT, QUIZ_ITEMS } from "./assess";
-import { RELATIONS, TYPE_LINES, TYPE_SUBTITLE, lineText, localizeLine, localizeRelation } from "./assess-content";
+import { PAIR_SCALE, QUIZ_ITEMS, TYPE_AXES, TYPE_GROUPS, TYPE_TABLE } from "./assess";
+import { AI_KEEPS, RELATIONS, TYPE_KINDRED, TYPE_LINES, TYPE_SUBTITLE, lineText, localizeLine, localizeRelation } from "./assess-content";
 import {
   WANT_LIMITS, WANT_LIMITS_EN, WANT_OPTIONS, WANTS_TEXT_MAX, WANTS_TEXT_MAX_EN, optionsInText, parseWants, presetLines, ruleLines, validateWantLines,
   wantLabel, wantsPlan
@@ -12,16 +12,33 @@ const en = tFor("en");
 const HAN = /[㐀-鿿]/;
 
 describe("the quick test in English", () => {
-  test("every statement, answer, subtitle, line, loop step and relation has English, and the type tables stay Chinese", () => {
-    for (const item of QUIZ_ITEMS) expect(HAN.test(en(item.text)), item.text).toBe(false);
-    expect(LIKERT.map((label) => en(label))).toEqual(["Strongly disagree", "Disagree", "Not sure", "Agree", "Strongly agree"]);
+  test("every situation, option, answer, quote, line, loop step, relation and kindred person has English, and the type tables stay Chinese", () => {
+    for (const item of QUIZ_ITEMS) {
+      for (const text of [item.text, item.a, item.b, item.ai?.does ?? ""]) expect(HAN.test(en(text)), text).toBe(false);
+      expect(HAN.test(en(item.scene, { context: "scene" })), item.scene).toBe(false);
+    }
+    expect(PAIR_SCALE.map((label) => en(label))).toEqual(["Clearly A", "Leaning A", "About the same", "Leaning B", "Clearly B"]);
     for (const subtitle of Object.values(TYPE_SUBTITLE)) expect(HAN.test(en(subtitle)), subtitle).toBe(false);
+    for (const keep of Object.values(AI_KEEPS)) expect(HAN.test(en(keep)), keep).toBe(false);
+    for (const type of Object.values(TYPE_TABLE)) for (const text of [type.name, type.quote, type.blurb]) expect(HAN.test(en(text)), text).toBe(false);
+    for (const group of Object.values(TYPE_GROUPS)) for (const text of [group.name, group.blurb]) expect(HAN.test(en(text)), text).toBe(false);
+    for (const axis of TYPE_AXES) {
+      for (const text of [axis.name, axis.question, axis.sources, axis.left.label, axis.left.definition, axis.right.label, axis.right.definition]) {
+        expect(HAN.test(en(text)), text).toBe(false);
+      }
+      expect([en(axis.left.label), en(axis.right.label)]).toEqual([axis.left.en, axis.right.en]);
+    }
+    for (const kindred of Object.values(TYPE_KINDRED)) {
+      for (const text of [kindred.name, kindred.years, kindred.field, kindred.why, kindred.quote.translation ?? kindred.quote.original, kindred.quote.source]) {
+        expect(HAN.test(en(text)), text).toBe(false);
+      }
+    }
     for (const lines of Object.values(TYPE_LINES)) {
       for (const line of [...lines.lines, ...lines.more.flat()]) expect(HAN.test(lineText(line, "en")), lineText(line)).toBe(false);
       for (const step of lines.loop) expect(HAN.test(en(step)), step).toBe(false);
     }
     for (const relation of Object.values(RELATIONS)) expect(HAN.test(JSON.stringify(localizeRelation(relation, "en"))), relation.name).toBe(false);
-    expect(TYPE_LINES.SEMP!.lines[0]).toEqual({ domain: "人工智能", identity: "研究者" });
+    expect(TYPE_LINES.ROBA!.lines[0]).toEqual({ domain: "人工智能", identity: "研究者" });
   });
 
   test("a line reads field-first in English and unchanged in Chinese", () => {
@@ -34,11 +51,11 @@ describe("the quick test in English", () => {
   });
 
   test("the rules and the written combinations write English for an English page, and Chinese exactly as before otherwise", () => {
-    const zh = ruleLines("GEMA", ["research", "media", "startup"]);
+    const zh = ruleLines("ROHG", ["research", "media", "startup"]);
     expect(zh.loop).toEqual(["研究发现", "做成内容", "卖成生意", "用户需求回到研究"]);
     expect(zh.links.map((link) => link.how)).toEqual(["研究发现成为内容的素材", "内容给生意带来输入", "用户需求回到研究"]);
     expect(zh.locale).toBeUndefined();
-    const english = ruleLines("GEMA", ["research", "media", "startup"], "en");
+    const english = ruleLines("ROHG", ["research", "media", "startup"], "en");
     expect(english.locale).toBe("en");
     expect(english.lines.map((line) => line.identity)).toEqual(["Researcher", "Creator", "Entrepreneur"]);
     expect(english.loop).toEqual(["Findings", "Made into content", "Sold as a business", "User needs back to research"]);
@@ -46,13 +63,13 @@ describe("the quick test in English", () => {
     // The relation kind stays the Chinese label every set keeps; it is translated where it is shown.
     expect(english.links.map((link) => link.kind)).toEqual(zh.links.map((link) => link.kind));
     for (const text of [...english.loop, ...english.links.map((link) => link.how)]) expect(HAN.test(text), text).toBe(false);
-    const body = ruleLines("SEMP", ["fitness", "writing"], "en");
+    const body = ruleLines("ROBA", ["fitness", "writing"], "en");
     expect(body.links.some((link) => /takes time but keeps|Make time for/.test(link.how))).toBe(true);
-    const preset = presetLines("SEMP", ["research", "startup"], "en")!;
+    const preset = presetLines("ROBA", ["research", "startup"], "en")!;
     expect(preset.lines[0]).toEqual({ domain: "AI", identity: "Researcher" });
     expect(preset.links[0]!.how).toBe("Code from research, then shipped as a tool");
-    expect(presetLines("SEMP", ["research", "startup"])!.links[0]!.how).toBe("课题里的代码，接着做成工具上架");
-    expect(wantsPlan("GEMA", { picks: ["build"], text: "start a podcast" }, "en").lines.lines.map((line) => line.identity)).toContain("Developer");
+    expect(presetLines("ROBA", ["research", "startup"])!.links[0]!.how).toBe("课题里的代码，接着做成工具上架");
+    expect(wantsPlan("ROHG", { picks: ["build"], text: "start a podcast" }, "en").lines.lines.map((line) => line.identity)).toContain("Developer");
   });
 
   test("a free line in English names options by whole words; Chinese is read as before", () => {

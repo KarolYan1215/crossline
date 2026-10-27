@@ -26,6 +26,18 @@ test("a replan keeps the steps already done and replaces the rest; progress is r
   store.close();
 });
 
+test("accepting a task closes its open steps; a skipped step stays skipped (W-16)", () => {
+  const store = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "wo-1", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p", milestoneId: "",
+    intent: "发名单", state: "evidence_review", riskTier: "routine", payload: {},
+    estimate: { p25Minutes: 10, p50Minutes: 17, p85Minutes: 30, source: "llm_prior", observationCount: 0, confidence: "low" } });
+  store.saveStepPlan("w", "wo-1", plan([step("s1", "read"), step("s2", "solve", ["s1"])]), "o", "initial");
+  store.updateStepProgress("w", "wo-1", "v1s2", { status: "skipped" }, "o", "user");
+  store.transitionWorkOrder("w", "wo-1", { type: "evidence.accepted", approvalId: "o", onCompletion: true }, "done:wo-1");
+  expect(store.getStepPlan("w", "wo-1")!.steps.map((s) => [s.status, s.progressQuarter])).toEqual([["done", 4], ["skipped", 0]]);
+  store.close();
+});
+
 test("step plans travel with a snapshot and restore", () => {
   const store = new CrosslineStore(":memory:");
   store.saveStepPlan("w", "wo-1", plan([step("s1", "read")]), "o", "initial");

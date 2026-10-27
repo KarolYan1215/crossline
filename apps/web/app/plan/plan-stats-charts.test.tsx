@@ -55,11 +55,14 @@ describe("plan charts", () => {
     const crowded = ["a", "b", "c", "d", "e", "f"].map((id, index) => row(id, `2026-10-${String(20 + index).padStart(2, "0")}`));
     const html = renderToStaticMarkup(<MilestoneTimeline today="2026-10-10" weeks={8} spanDays={56} labels={labels} lineOrder={["research"]}
       rows={[...crowded, row("late", "2027-03-01"), row("overdue", "2026-10-01"), row("done", "2026-10-15")]} done={["done"]} />);
-    // The overdue one shares the first row; four names in at most three rows; the late and the done ones are counted.
+    // Six markers a day apart stack as a staircase in three lanes, a name cut short where the next leader rises; the overdue one at the
+    // left edge shares a lane; the three left without a name are counted, and the late and the done ones are counted apart.
     expect(html.match(/class="pl-ms-label"/g)!.length).toBe(4);
     expect(html.match(/class="pl-ms-point"/g)!.length).toBe(7);
     expect(html).toContain(">+3<");
     expect(html).toContain("另有 3 个里程碑未标名称");
+    // The strip above the axis says how to read a name in full.
+    expect(html).toContain("指向或聚焦圆点，这里显示里程碑全名");
     expect(html).toContain("范围内未完成 7 个 · 范围外或已完成 2 个");
     expect(html).not.toContain("open=late");
   });
@@ -78,6 +81,10 @@ describe("plan charts", () => {
     expect(html).toContain("科研 · 未来 7 天计划 5 h");
     expect(html).toContain("pl-bar-planned");
     expect(html).toContain("pl-bar-actual");
+    // The top tick's label (12px, centred on its grid line) stays clear of the unit 「h/周」, whose baseline is at 10.
+    const gridTops = [...html.matchAll(/<line x1="[\d.]+" x2="[\d.]+" y1="([\d.]+)"[^>]*class="pl-grid-line"/g)].map((match) => Number(match[1]));
+    expect(gridTops.length).toBeGreaterThan(1);
+    expect(Math.min(...gridTops) - 6).toBeGreaterThanOrEqual(10 + 3 + 2);
     const empty = renderToStaticMarkup(<InvestmentChart labels={labels} data={{ weeks: [], next7: {}, hasActual: false, hasPlanned: false, lines: [] }} />);
     expect(empty).toContain("尚无实测");
   });

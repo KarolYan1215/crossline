@@ -33,11 +33,23 @@ const clock = (seconds: number, locale?: Locale) => {
  * keep working on the left meanwhile, or leave: the round calls them back (a desktop notification once allowed here, the tab's title, and
  * the tray on the installed copy).
  */
-export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning, onRetry }: { sessionId: string;
+/** The folded technical line under a failed round: the code, when, and the provider's own words when there are any. */
+export function FailureDetail({ failure }: { failure: { code: string; detail?: string; at: string } }) {
+  const at = new Date(failure.at);
+  const when = Number.isNaN(at.getTime()) ? "" : `${at.getHours()}:${String(at.getMinutes()).padStart(2, "0")}`;
+  const t = tFor(useLocale());
+  return <details className="ob-failure-detail"><summary>{t("技术信息")}</summary>
+    <p className="ob-muted">{failure.code}{when ? ` · ${when}` : ""}{failure.detail ? ` · ${failure.detail}` : ""}</p>
+  </details>;
+}
+
+export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning, onRetry, failure = null }: { sessionId: string;
   /** Opened on a page that was reloaded mid-turn: shown only while the worker says a turn runs, and `onEnded` when it stops. */
   resumed?: boolean; onEnded?: () => void; onRunning?: (running: boolean) => void;
   /** A reply is waiting but no turn runs for it (the background was restarted): send it again. */
-  onRetry?: () => void }) {
+  onRetry?: () => void;
+  /** Why the last round stopped, kept by the worker: said instead of the bare 「没有得到回答」. */
+  failure?: { code: string; message: string; detail?: string; at: string } | null }) {
   const locale = useLocale();
   const t = tFor(locale);
   const [progress, setProgress] = useState<OnboardingProgress | null>(null);
@@ -67,18 +79,24 @@ export function TurnProgress({ sessionId, resumed = false, onEnded, onRunning, o
   // The answer was sent but nothing is answering it: a worker restart drops a turn that was waiting or running (2026-10-15 walkthrough,
   // where the page showed the answer and nothing else, with no way on).
   if (resumed && !progress && !seen && empty >= 3 && onRetry) return <div className="ob-turn ob-assistant ob-progress" role="alert">
-    <p className="ob-progress-head">{t("这一轮没有在后台运行（后台服务重启过），回答已保存。")}</p>
+    {/* Not only a restart: a round refused before it ran (the developer's model still being checked, no model connected) ends the same way. */}
+    <p className="ob-progress-head">{failure ? t("这一轮没有完成：{{message}}", { message: failure.message }) : t("这一轮还没有得到回答，刚才的回答已保存。")}</p>
+    {failure && <FailureDetail failure={failure} />}
     <button type="button" className="ob-btn ob-primary" onClick={onRetry}>{t("重新发送这一轮")}</button>
   </div>;
   if (resumed && !progress) return null;
   const started = progress ? Date.parse(progress.startedAt) : shownFrom;
   const elapsed = Math.max(0, Math.round((now - (Number.isFinite(started) ? started : shownFrom)) / 1000));
+  // The round itself writes questions only; facts and dates are the extraction's, counted on a round stored before it existed.
   const counted = progress && progress.facts + progress.dates + progress.questions > 0;
+  const recordedToo = progress && progress.facts + progress.dates > 0;
   return <div className="ob-turn ob-assistant ob-progress" role="status" aria-label={t("这一轮的进度")}>
     <p className="ob-progress-head"><span className="ob-progress-dot" aria-hidden="true" />{progressHeadline(progress, locale)}</p>
     {progress?.reply && <p className="gen ob-progress-reply">{progress.reply}</p>}
-    {counted && <p className="ob-progress-counts">{withBold(t("已整理 {{facts}} 条事实 · {{dates}} 个日期 · {{questions}} 个问题", { facts: MARK + "facts" + MARK, dates: MARK + "dates" + MARK, questions: MARK + "questions" + MARK }),
-      { facts: progress.facts, dates: progress.dates, questions: progress.questions })}</p>}
+    {counted && (recordedToo
+      ? <p className="ob-progress-counts">{withBold(t("已整理 {{facts}} 条事实 · {{dates}} 个日期 · {{questions}} 个问题", { facts: MARK + "facts" + MARK, dates: MARK + "dates" + MARK, questions: MARK + "questions" + MARK }),
+        { facts: progress.facts, dates: progress.dates, questions: progress.questions })}</p>
+      : <p className="ob-progress-counts">{withBold(t("已写好 {{questions}} 个问题", { questions: MARK + "questions" + MARK }), { questions: progress.questions })}</p>)}
     <small className="ob-muted">{t("已用 {{elapsed}}，通常 1–4 分钟。可以先在左边确认日期、采用长期目标，或者离开本页，好了会提醒。", { elapsed: clock(elapsed, locale) })}</small>
     {notify === "default" && <button type="button" className="ob-btn ob-quiet" onClick={() => void Notification.requestPermission().then(setNotify)}>{t("好了用桌面通知提醒我")}</button>}
   </div>;

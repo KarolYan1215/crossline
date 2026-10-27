@@ -46,7 +46,9 @@ export type DashboardData = {
   monthLabel: string;
   /** Proposals the system has made that wait for the person; with nothing recommendable yet, Today says so instead of asking for more input. */
   awaitingApproval?: number;
-  milestones?: { drafts: number; any: boolean; firstDrafts: "none" | "running" | "stalled" };
+  /** A proposal due within a week, still waiting for the person: unapproved work is not scheduled, so Today names it (W-31). */
+  urgentProposal?: { id: string; title: string; due: string };
+  milestones?: { drafts: number; any: boolean; firstDrafts: "none" | "running" | "stalled"; backplanning?: number };
   capacity: {
     level: "low" | "medium" | "high" | "uncalibrated";
     confidence?: "low" | "medium" | "high";
@@ -103,6 +105,15 @@ export type DashboardData = {
 };
 
 const basisLabel = { self_report: "自评", execution_history: "执行记录", local_activity: "本机活动" } as const;
+/** 「10/24」 from an ISO day. */
+const shortDay = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+
+/** A translated sentence with one value set in bold: translated with a marker in the value's place (one sentence, one key), split there. */
+const MARK = "\u0000";
+function boldAt(text: string, value: string) {
+  const [before = "", after = ""] = text.split(MARK);
+  return <>{before}<b className="mono">{value}</b>{after}</>;
+}
 const capacityLevelLabel = { low: "低", medium: "中", high: "高" } as const;
 
 // The label must name what the reading came from. Calling every observation a self-report was wrong
@@ -161,11 +172,14 @@ export function DashboardView({ data }: { data: DashboardData }) {
       <section className={`today-grid${alternatives.length ? "" : " today-grid-single"}`} aria-label={t("下一步")}>
         <div className="today-next">
           <h2 className="section-label">{t("下一步")}</h2>
+          {data.urgentProposal && <p className="today-proposal-note" role="note">{boldAt(t("「{{title}}」{{due}} 截止，还在等本人批准；批准后才会排进日历。", { title: data.urgentProposal.title, due: MARK }), shortDay(data.urgentProposal.due))} <a href="/approvals#proposals">{t("去批准")}</a></p>}
           {primaryDetail ? <TaskCard variant="hero" detail={primaryDetail} reason={data.primary!.reason} slot={data.slotById?.get(primaryDetail.id)} />
             : <p className="panel today-empty">{data.awaitingApproval
               ? <><b className="mono">{data.awaitingApproval}</b> {t("项提案待批准，批准后在此推荐下一步。", { count: data.awaitingApproval })} <a href="/approvals#proposals">{t("前往批准")}</a></>
               : data.milestones?.drafts
                 ? <><b className="mono">{data.milestones.drafts}</b> {t("个里程碑草稿待批准；批准后系统从它们倒推任务并排进日历。", { count: data.milestones.drafts })} <a href="/milestones">{t("前往主线")}</a></>
+                : data.milestones?.backplanning
+                  ? boldAt(t("系统正在从已批准的 {{n}} 个里程碑倒推任务（每个几分钟），出来的任务会排进日历并显示在这里。也可以先在上方输入框写下手头要做的事。", { n: MARK, count: data.milestones.backplanning }), String(data.milestones.backplanning))
                 : data.milestones?.firstDrafts === "running"
                   ? t("系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在「主线」页等待批准。也可以先在上方输入框写下手头要做的事。")
                   : data.milestones?.firstDrafts === "stalled"
@@ -189,7 +203,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
             timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals}
             taskDetails={data.calendarDetails} />
         </section>}
-        <div className="today-asks"><AskStack initial={data.asks ?? []} moreHref="/approvals#asks" {...(data.askPreviews ? { previews: data.askPreviews } : {})} /></div>
+        <div className="today-asks" id="asks"><AskStack initial={data.asks ?? []} moreHref="/approvals#asks" {...(data.askPreviews ? { previews: data.askPreviews } : {})} /></div>
       </div>
 
       {data.flywheelGraph && <section className="panel" aria-labelledby="flywheel-title">

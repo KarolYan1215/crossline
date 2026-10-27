@@ -27,3 +27,23 @@ export function addAttentionBeat(record: AttentionRecord | undefined, beat: Atte
     ...(record?.complete ? { complete: record.complete } : beat.complete ? { complete: mark } : {})
   };
 }
+
+/** The setup targets the attention time is held to (docs/loop-and-scout.md §7): the start standard within 30 minutes, everything within 90. */
+export const ATTENTION_TARGET_MINUTES = { ready: 30, complete: 90 } as const;
+
+export type AttentionSummary = {
+  /** Attention minutes in the interview so far. */
+  minutes: number;
+  /** When each target was first reached: attention minutes, rounds, and whether within its target; absent until reached. */
+  ready?: { minutes: number; rounds: number; withinTarget: boolean };
+  complete?: { minutes: number; rounds: number; withinTarget: boolean };
+};
+
+/** The interview's attention record as 系统体检 shows it (2026-10-20: it was written and never read); undefined before any beat. */
+export function attentionSummary(record: AttentionRecord | undefined): AttentionSummary | undefined {
+  if (!record) return undefined;
+  const minutes = (seconds: number) => Math.round(seconds / 6) / 10;
+  const mark = (item: AttentionMark | undefined, target: number) => item ? { minutes: minutes(item.seconds), rounds: item.rounds, withinTarget: item.seconds <= target * 60 } : undefined;
+  const ready = mark(record.ready, ATTENTION_TARGET_MINUTES.ready), complete = mark(record.complete, ATTENTION_TARGET_MINUTES.complete);
+  return { minutes: minutes(record.seconds), ...(ready ? { ready } : {}), ...(complete ? { complete } : {}) };
+}

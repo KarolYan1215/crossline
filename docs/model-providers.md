@@ -48,7 +48,7 @@
 
 另外，助手以 `danger-full-access` 和 worker 的操作系统用户运行（`startAgentThread`）：多账号时它在技术上能读到别的 workspace 的 `data/`。守卫是绊线不是沙箱（`docs/assistant-agent.md`），所以**助手只能给机器主人的 workspace 用**。
 
-### 1.3 已核实的运行时能力（`vendor/codex`，rust-v0.155.0）
+### 1.3 已核实的运行时能力（`vendor/codex`，rust-v0.155.0 时核实；2026-10-20 升到 rust-v0.163.0 后这里列的仍成立，见 `docs/codex-upgrade-0.163.md`）
 
 - 登录：`account/login/start` 支持 `apiKey`、`chatgpt`（浏览器回调）、`chatgptDeviceCode`；`chatgptAuthTokens` 标注为 OpenAI 内部、不得使用（`app-server-protocol/src/protocol/v2/account.rs` `LoginAccountParams`）。**没有「按请求换账号」的接口**——一个进程一个 auth manager。
 - 提供方：`thread/start` 有 `model_provider`（`v2/thread.rs`）；内置 `openai`、`amazon-bedrock`、`ollama`（11434）、`lmstudio`（1234）；自定义提供方写在 `model_providers.<id>`，字段有 `base_url`、`env_key`、`auth`（命令取 token）、`http_headers`、`query_params`（`model-provider-info/src/lib.rs`）。
@@ -215,6 +215,8 @@ export interface RuntimeRegistry {
 ### 3.5 额度
 
 本机模型（loopback 地址）不计费：`{available:true}`，后台照常。按量付费的第三方，应用不知道价格，读数是 `PROVIDER_BUDGET_UNKNOWN`（不可读）→ `backgroundSpend` 让后台暂停，本人发起的操作照常；额度卡片写明原因。工作区有自己的 Codex 登录时仍读 Codex 的窗口。给第三方定价和月上限是后续工作（价目表在 `prices.ts`，额度逻辑归 R1）。
+
+**自己的 ChatGPT 与开发者模型并存时（2026-10-21，所有者决定）。** 兑换过邀请码（`model.sponsor`）、又登录了自己 ChatGPT 的账号（含机器所有者）平时走自己的 ChatGPT；开发者模型只在 ChatGPT 额度用尽时顶上。标记是账本设置 `model.chatgptExhausted` `{at, source, until?}`（`CHATGPT_EXHAUSTED_SETTING`，core `cost.ts`），由 worker 写：supervisor 每次读到该账号 ChatGPT 的额度都经过 `afterChatgptCost`（`apps/worker/src/model-provider.ts`）——读数已满（与 `backgroundSpend` 暂停的线相同：`limitReached` 或某窗口 100%）就记 `source: "quota"`、`until` 为满的窗口的重置时间，并且在开发者模型可用（已选定、本月未超上限）时把开发者模型的月度读数交给后台闸门，后台不再暂停；读数恢复即清除标记，切回 ChatGPT。一次在 ChatGPT 上的运行返回 `SKILL_USAGE_LIMIT` 时（`setUsageLimitHandler` → `noteUsageLimit`）记 `source: "usage_limit"`，没有重置时间就保持 30 分钟（`USAGE_LIMIT_HOLD_MS`，读数滞后时不被清掉），这次运行在开发者模型上重跑一次（`runCodexSkill`）；接着进行的对话（输入框、访谈）这一轮答 `SKILL_THREAD_LOST`，由调用方在新路线上重建，之后线程记住自己开在哪个模型来源上（`threadRoutes`），路线变了的线程一律按丢失重建。标记有效期间 `routing()` 返回开发者模型并带 `codexSignedIn: false` 与 `chatgptExhausted`：开发者模型没通过或能力不够的 Skill（网页搜索、生成图片、shell 助手等）直接以「ChatGPT 额度已用尽……开发者提供的模型做不了」停下，不再送回已用尽的 ChatGPT。开发者模型本月也用完时照旧暂停，提示 ChatGPT 的恢复时间。界面：设置 → 后台任务显示「改用开发者模型」与恢复时间（`quotaFallbackOf`），每页顶部是一条非报错的提示（`RuntimeStatus` `sponsor_standin`）。没有自己 ChatGPT 的受邀账号不变，仍只走开发者模型。直接给某个账号授权用 `scripts/grant-sponsor.ts --email … --data … [--apply]`（走申请—批准—兑换这三步，不发邮件，不打印邀请码）。
 
 ### 3.6 Sign in with ChatGPT 套餐共享
 

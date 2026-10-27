@@ -188,18 +188,34 @@ test("a capture an older version blocked for want of an approved milestone is pi
   expect((await analysis.createCaptureAnalyzer(store, ws, "C:\\repo")(rpc, "c")).state).toBe("awaiting_plan_approval");
 });
 
+test("an account with more approved milestones than the old cap of 32 is analysed, and a capture that cap blocked is picked up again", async () => {
+  const ws = "personal-crossline";
+  for (let index = 0; index < 41; index += 1)
+    store.saveMilestone({ id: `m${index}`, ownerId: "local-owner", workspaceId: ws, identityId: "research", projectId: "p", title: `Milestone ${index}`, version: 1, status: "approved" });
+  store.transitionWorkOrder(ws, "c", { type: "analysis.proposed", proposalId: "c" }, "analysis:c:0:start", { attempt: 0 });
+  store.transitionWorkOrder(ws, "c", { type: "blocked", reason: "ANALYSIS_CONTEXT_INVALID" }, "analysis:c:0:finish",
+    { audit: { blocker: { code: "ANALYSIS_CONTEXT_INVALID", message: "分析被阻塞" } } });
+  expect(analysis.capturesAwaitingAutoAnalysis(store, ws)).toEqual(["c"]);
+  const { rpc } = fakeRuntime([JSON.stringify({ ...proposal, milestoneId: "" })]);
+  expect((await analysis.createCaptureAnalyzer(store, ws, "C:\repo")(rpc, "c")).state).toBe("awaiting_plan_approval");
+});
+
 test("files the person already uploaded reach the analysis as supplied material, so it does not ask for them again", () => {
   const ws = "personal-crossline";
   store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId: ws, kind: "pdf", fileName: "ECE 548 syllabus.pdf", mediaType: "application/pdf", sha256: "1", uri: "file:///1",
     extractedText: "Midterm 1  Oct 27\nChapters 1-4", extractionStatus: "done", createdAt: "2026-10-05T00:00:00.000Z" });
   store.saveSourceDocument({ id: "d2", ownerId: "o", workspaceId: ws, kind: "pdf", fileName: "scan.pdf", mediaType: "application/pdf", sha256: "2", uri: "file:///2",
     extractedText: "", extractionStatus: "failed", createdAt: "2026-10-05T00:00:00.000Z" });
-  const inputs = analysis.uploadedMaterialInputs(store, ws);
-  expect(inputs).toHaveLength(1);
-  expect(inputs[0]!.id).toBe("uploaded-d1");
+  store.saveSourceDocument({ id: "d3", ownerId: "o", workspaceId: ws, kind: "text", fileName: "recipes.txt", mediaType: "text/plain", sha256: "3", uri: "file:///3",
+    extractedText: "番茄炒蛋：先炒蛋再炒番茄。", extractionStatus: "done", createdAt: "2026-10-05T00:00:00.000Z" });
+  const inputs = analysis.uploadedMaterialInputs(store, ws, "复习 ECE 548 midterm 前几章");
+  // The passage that matches the capture, then one line naming the other readable file; the unreadable scan is not offered.
+  expect(inputs.map((input) => input.id)).toEqual(["uploaded-d1-1", "uploaded-other-files"]);
   expect(inputs[0]!.text).toContain("ECE 548 syllabus.pdf");
   expect(inputs[0]!.text).toContain("Midterm 1 Oct 27 Chapters 1-4");
   expect(inputs[0]!.text).toContain("不必再向用户要");
+  expect(inputs[1]!.text).toContain("recipes.txt");
+  expect(inputs[1]!.text).not.toContain("番茄");
 });
 
 // 「10月8号左右师兄会给我数据…10月21号前交」: the waiting item, the release date and the due date land where the

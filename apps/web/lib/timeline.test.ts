@@ -74,3 +74,27 @@ test("a calendar event takes the line it was filed under, and none once the line
   filing("research=旧名");
   expect(await lineOf("ECE 555 Lecture")).toBeUndefined();
 });
+
+test("a block whose time passed undone stays on its day as 「未完成」 after the grace hour, and leaves at 04:00 the next morning", async () => {
+  const store = globalThis.crosslineStore!;
+  const { missedItems } = await import("./timeline");
+  const ws = TEST_CTX.workspaceId;
+  const estimate = { p25Minutes: 30, p50Minutes: 45, p85Minutes: 90, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
+  const order = (id: string, state: "approved" | "accepted") => store.saveWorkOrder({ id, ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research",
+    projectId: "p", milestoneId: "", intent: id, state, riskTier: "routine", estimate, payload: {} });
+  order("open", "approved"); order("done", "accepted");
+  const seen = (id: string, orderId: string, start: string, end: string) => ({ id, orderId, stepId: "", title: orderId, step: "", day: "2026-10-26", start, end, endedTimerAt: "", began: true });
+  store.setSetting(ws, "nudge.blocks:2026-10-26", JSON.stringify({
+    "scheduled:open": seen("scheduled:open", "open", "14:00", "15:00"),
+    "scheduled:done": seen("scheduled:done", "done", "14:00", "15:00"),
+    "scheduled:open:2": seen("scheduled:open:2", "open", "19:30", "20:30")
+  }));
+  const zone = "America/Chicago";
+  store.setSetting(ws, "schedule.preferences", JSON.stringify({ timeZone: zone }));
+  const at = (local: string) => new Date(`${local}-05:00`);
+  // 21:00: the 14:00 block is an hour past and open; the 19:30–20:30 one is still in its grace hour; the accepted one is gone.
+  expect(missedItems(TEST_CTX, [], {}, at("2026-10-26T21:00:00")).map((item) => [item.id, item.missed, item.tag])).toEqual([["missed:scheduled:open", true, "未完成"]]);
+  // Still there at 03:59 the next day, gone at 04:00.
+  expect(missedItems(TEST_CTX, [], {}, at("2026-10-27T03:59:00")).map((item) => item.id)).toEqual(["missed:scheduled:open", "missed:scheduled:open:2"]);
+  expect(missedItems(TEST_CTX, [], {}, at("2026-10-27T04:00:00"))).toEqual([]);
+});

@@ -1,7 +1,7 @@
 // i18n-exempt: test support (sample data)
 import type { StoredResult } from "../store";
 
-/** A stored result for the avatar tests: GEMA, an address and a nickname that must never reach the image model. */
+/** A stored result for the avatar tests: ROHG, an address and a nickname that must never reach the image model. */
 export function storedResult(overrides: Partial<StoredResult> = {}): StoredResult {
   return {
     id: "res_0001",
@@ -9,8 +9,9 @@ export function storedResult(overrides: Partial<StoredResult> = {}): StoredResul
     inviteToken: "inv_public_token_0001",
     email: "someone@example.com",
     nickname: "小林同学",
-    scores: { scope: 80, basis: 30, output: 20, rhythm: 70 },
-    code: "GEMA",
+    scores: { lines: 80, purpose: 30, collab: 20, build: 70 },
+    code: "ROHG",
+    aiDoes: [],
     appearance: { presentation: "female", hair: "long", glasses: true, skin: "medium", style: "artsy", note: "" },
     sendEmail: true,
     avatar: { state: "queued", file: "" },

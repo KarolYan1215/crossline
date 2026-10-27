@@ -68,6 +68,8 @@ function writePlugin(dir: string, plugin: PluginFiles): void {
   mkdirSync(skillsDir, { recursive: true });
   for (const entry of readdirSync(skillsDir)) if (!plugin.skills.has(entry)) rmSync(path.join(skillsDir, entry), { recursive: true, force: true });
   for (const [name, files] of plugin.skills) {
+    // A file no longer installed (scripts whose leave was taken back) must not stay behind: the runtime copies the whole folder.
+    rmSync(path.join(skillsDir, name), { recursive: true, force: true });
     for (const [relative, content] of files) {
       const target = path.join(skillsDir, name, relative);
       mkdirSync(path.dirname(target), { recursive: true });

@@ -45,7 +45,7 @@ test("real RPC boundary isolates one analysis thread and collects a strict final
   expect(result).toMatchObject({ ok: true, proposal, audit: { threadId: "thread-1", turnId: "turn-1" } });
   expect(audits).toEqual([{ threadId: "thread-1" }, { threadId: "thread-1", turnId: "turn-1" }]);
   expect(fake.requests.find((r) => r.method === "thread/start")?.params).toMatchObject({ environments: [], dynamicTools: [], approvalPolicy: "untrusted", sandbox: "read-only", model: "gpt-5.6-terra" });
-  expect(fake.requests.find((r) => r.method === "turn/start")?.params).toMatchObject({ environments: [], outputSchema: { additionalProperties: false }, model: "gpt-5.6-terra", effort: "high" });
+  expect(fake.requests.find((r) => r.method === "turn/start")?.params).toMatchObject({ environments: [], outputSchema: { additionalProperties: false }, model: "gpt-5.6-terra", effort: "medium" });
   expect(fake.requests.find((r) => r.method === "thread/start")?.params).not.toHaveProperty("baseInstructions");
   expect(fake.requests.find((r) => r.method === "turn/start")?.params.input).toMatchObject([{ text: expect.stringMatching(/^\$crossline-automation-stripper\n\n/) }]);
   expect(fake.requests.filter((r) => r.method === "skills/config/write").map((r) => r.params)).toEqual([
@@ -53,12 +53,17 @@ test("real RPC boundary isolates one analysis thread and collects a strict final
   ]);
 });
 
-test("task-scoped skill toggles are serialized and restored", async () => {
+test("two runs of one Skill may overlap: it is switched on once, held by both, and switched back off by the last", async () => {
   const fake = runtime();
   await Promise.all([
     codex.runCodexAnalysis(fake.client, context, { skillName: "crossline-automation-stripper", cwd: "C:\\repo", onAudit: () => {} }),
     codex.runCodexAnalysis(fake.client, context, { skillName: "crossline-automation-stripper", cwd: "C:\\repo", onAudit: () => {} })
   ]);
+  expect(fake.requests.filter((request) => request.method === "thread/start")).toHaveLength(2);
+  expect(fake.requests.filter((request) => request.method === "skills/config/write").map((request) => request.params.enabled))
+    .toEqual([true, false]);
+  // Alone, a run switches its Skill on and back off as before.
+  await codex.runCodexAnalysis(fake.client, context, { skillName: "crossline-automation-stripper", cwd: "C:\\repo", onAudit: () => {} });
   expect(fake.requests.filter((request) => request.method === "skills/config/write").map((request) => request.params.enabled))
     .toEqual([true, false, true, false]);
 });

@@ -11,7 +11,7 @@ import { dataDir } from "../config";
  */
 
 /** Bump when the layout changes, so posters drawn by the old layout are not served. */
-export const LAYOUT_VERSION = 7;
+export const LAYOUT_VERSION = 9;
 const KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const PRUNE_EVERY_MS = 60 * 60 * 1000;
 

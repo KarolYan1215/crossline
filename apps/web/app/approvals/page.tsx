@@ -1,5 +1,7 @@
+import { onPersonsBoard } from "@crossline/core";
 import { ensureSeeded, getStore, loadCurrentPlan, planToday } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
+import { FirstHint } from "../ui/first-hint";
 import { AcceptEvidenceButton, JudgeMilestoneButton, ProposalBatchForm, RevokeAutoApprovalButton } from "./approval-actions";
 import { AssistantReview } from "./assistant-review";
 import { recentAutoApprovals } from "../../lib/approvals";
@@ -10,6 +12,7 @@ import { gateUntilReady } from "../../lib/start-gate";
 import { TaskCard } from "../task/task-card";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { countPending } from "../../lib/pending";
+import { LivePendingCount } from "../pending-badge";
 import { loadAsks } from "../../lib/asks";
 import { loadAssistant } from "../../lib/agent";
 import { preparingProposalIds } from "../../lib/proposal-ready";
@@ -42,7 +45,8 @@ export default async function ApprovalsPage() {
   const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");
   // A proposal whose steps are still being planned is not a decision yet (`preparingProposalIds`): it is neither listed nor approvable here.
   const preparing = preparingProposalIds(ctx);
-  const waiting = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval");
+  // Questions to the person waiting as orders (docs/work-split.md) are asked, not approved.
+  const waiting = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval" && onPersonsBoard(item));
   const proposals = waiting.filter((item) => !preparing.has(item.id));
   const preparingCount = waiting.length - proposals.length;
   const claims = getStore().listEvidenceClaims(ctx.workspaceId);
@@ -83,7 +87,7 @@ export default async function ApprovalsPage() {
     ...laterAsks.map((ask) => ask.entersOn!),
     ...laterProposals.map((item) => entersOn.get(item.id)!),
     ...getStore().listMilestones(ctx.workspaceId).filter((item) => item.status === "draft").flatMap((item) => horizon.milestoneEntry(item.id) ?? []),
-    ...loadAssistant(ctx).tasks.filter((task) => task.status === "needs_review").flatMap((task) => deferredOrder(task.workOrderId) ?? [])
+    ...loadAssistant(ctx).reviews.flatMap((task) => deferredOrder(task.workOrderId) ?? [])
   ];
   // The earliest suggested block per proposal (a split task has several; the first is when it would start).
   const slotOf = new Map<string, { day: string; start: string; end: string }>();
@@ -104,22 +108,34 @@ export default async function ApprovalsPage() {
     </div>;
   };
   const autoItem = (item: (typeof autoApproved)[number]) => <li key={item.id}>
-    <a href={`/workbench/${encodeURIComponent(item.id)}`}>{item.intent}</a>
+    <a href={`/workbench/${encodeURIComponent(item.id)}`} title={item.intent}>{item.title}</a>
     {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · {t("已开始做")}</small>}
   </li>;
   const assistantCount = pending.assistantKinds + pending.assistantQuestions + pending.assistantReviews;
   // Drafts, targets and interview items are decided where they live (主线, 访谈); here they are counted and linked. What is decided here
   // is laid out below: the week's questions in four quadrants, then the assistant's results, evidence and task proposals.
+  // The two live counts sit inside one translated sentence (docs/i18n.md): it is split around their marks, which come in this order in
+  // both languages.
+  const sentence = pending.later.total
+    ? t("本周 {{total}} 项待确认，其中待决事项 {{asks}} 项；另有 {{later}} 项以后再定，不计入。只有需本人选择、授权登录或涉及对外动作的才需确认，其余自动生效，24 小时内可撤销。", { total: "\u0000", asks: "\u0001", later: pending.later.total })
+    : t("本周 {{total}} 项待确认，其中待决事项 {{asks}} 项。只有需本人选择、授权登录或涉及对外动作的才需确认，其余自动生效，24 小时内可撤销。", { total: "\u0000", asks: "\u0001" });
+  const [head = "", rest = ""] = sentence.split("\u0000");
+  const [middle = "", tail = ""] = rest.split("\u0001");
   return <SubpageShell active={"待确认"} title={t("待确认")}
-    description={pending.later.total
-      ? t("本周 {{count}} 项待决定，另有 {{later}} 项以后再定。只有需本人选择、授权登录或涉及对外动作的才需确认，其余自动生效，24 小时内可撤销。", { count: pending.total, later: pending.later.total })
-      : t("本周 {{count}} 项待决定。只有需本人选择、授权登录或涉及对外动作的才需确认，其余自动生效，24 小时内可撤销。", { count: pending.total })}>
+    description={<>{head}<LivePendingCount initial={pending.total} />{middle}<LivePendingCount initial={pending.asks} field="asks" />{tail}</>}>
     <PendingSummary later={laterDays} today={planToday(ctx)} locale={locale}
       here={[{ label: t("助手"), count: assistantCount, href: "#assistant" }, { label: t("待验收"), count: evidenceReviews.length, href: "#evidence" },
         { label: t("任务提案"), count: pending.workOrders, href: "#proposals" }, { label: t("最近自动生效"), count: autoApproved.length, href: "#auto" }]}
       elsewhere={[{ label: t("里程碑草稿"), count: pending.milestoneDrafts, href: "/milestones" }, { label: t("分数线待审阅"), count: pending.targets, href: "/milestones" },
         { label: t("调研建议"), count: pending.research, href: "/review" }, { label: t("文件中的日期"), count: pending.dates, href: "/onboarding" },
         { label: t("访谈问题"), count: pending.questions, href: "/onboarding" }]} />
+    <FirstHint id="approvals" title={t("四个格子怎么排")}>
+      <ul className="ui-first-hint-list">
+        <li>{t("按「紧急」和「重要」分进四格，先处理「紧急重要」")}</li>
+        <li>{t("紧急：两天内不定就会误事；重要：关系到权重高的里程碑或开始使用的基本信息")}</li>
+        <li>{t("每格一次摊开一张，答完下一张自动顶上来，也可以「明天再问」")}</li>
+      </ul>
+    </FirstHint>
     <AskBoard initial={weekAsks} previews={previews} />
     <AssistantReview ctx={ctx} deferred={deferredOrder} />
     {evidenceReviews.length > 0 && <section className="approval-ledger" id="evidence" aria-label={t("待验收")}>

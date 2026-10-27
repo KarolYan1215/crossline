@@ -61,3 +61,14 @@ test("confidence is medium when the same number of criteria swap to a different 
     ({ ...criterion, measure: { kind: "count", unit: "次", atLeast: 1 } }));
   expect(computeMilestoneConfidence(swapped, template)).toBe("medium");
 });
+
+test("a domain line gets six templates keyed to its own id, each with a measurable criterion", async () => {
+  const { domainMilestoneTemplates } = await import("./milestone-templates");
+  for (const domain of ["wellness", "wealth"] as const) {
+    const templates = domainMilestoneTemplates("line-x", domain);
+    expect(templates).toHaveLength(6);
+    expect(templates.every((template) => template.identityId === "line-x" && template.id.startsWith("line-x-"))).toBe(true);
+    expect(templates.every((template) => template.successCriteriaDefaults.length > 0 && template.evidenceQuestionDefaults.length > 0)).toBe(true);
+  }
+  expect(domainMilestoneTemplates("line-wealth", "wealth")[0]!.titleHint).toContain("应急金");
+});

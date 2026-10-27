@@ -8,32 +8,73 @@
  * the person's own profile under `data/profile/`, never committed): it answers only what it is asked, never volunteers, uploads a file only
  * when asked for one. The interview runs as it does for a real new user, from an empty first message, until it says it is done or the turn
  * limit. Dates it reads are confirmed as a person would; nothing else is answered for them. The report scores the interview against its
- * own completion list (`interviewChecklistFor`, the interview's items only — the person's own clicks are not the interview's to earn),
+ * own completion list (`interviewChecklistFor`, the interview's items only — the person's own clicks are not the interview's to earn; 「完整」 is
+ * `interviewComplete`, which leaves out what the design defers to later: a project's details and the synthesis),
  * per course and project, and prints turns, questions and minutes. It spends real quota and takes hours; it is never run as a side effect.
  *
  * Time (decided 2026-10-12): the targets count only the person's attention — start standard (`readyToStart`) in at most 6 rounds and 30
  * minutes, the full checklist in 90. Every file is added before the first round (the materials step) and the first reply is the screen's
  * own `MATERIALS_FIRST_REPLY`. The person's clicks are simulated as the screen would take them: confirming read dates, adopting the first
- * two attribute candidates as a line's goal, and 「画像符合我」 once the interview says it is done. Simulated attention time is
+ * attribute candidates (two, or the one there is) as a line's goal, and 「画像符合我」 once the interview says it is done. Simulated attention time is
  * (questions shown + clicks) × 20 seconds per round; the model's time is reported apart and not counted. Any target missed sets exit code 1.
+ *
+ * `--lite` (docs/domain-lines.md, 2026-10-19): the lite edition's opening — an office worker whose fixed-schedule line is 职场人 (they say 上班) plus the two
+ * domain lines 健康管理者 (wellness) and 理财者 (wealth), set through `setupLines` as the opening card does, the first reply being the card's
+ * own words with 【版本】极简 (`openingReply`), no files. The persona is `scripts/personas/office-worker-lite.md`. The report then adds a
+ * 「领域主线」 section: the questions asked under each domain line against its `domainGuides` ask list, the facts that landed under the
+ * fixed `health_*` / `wealth_*` slots, and any question that asked for an account number, an exact balance, holdings, a diagnosis or a
+ * dose (each one a defect).
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { register } from "node:module";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { enterUsageWorkspace, runCodexSkill, setUsageSink, startCodexSupervisor } from "../packages/codex/src/index";
-import { PROFILE_CONFIRMED, composeGoal, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
+import { EVAL_HOLD_FILE, PROFILE_CONFIRMED, composeGoal, interviewComplete, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor } from "../packages/db/src/index";
+import { domainGuides } from "../packages/identity-packs/src/index";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
+import { openingReply } from "../apps/web/app/onboarding/opening-card";
 import { extractText, sha256 } from "../apps/worker/src/extract";
 import { identityLines } from "../apps/worker/src/lines";
+import { createOnboardingExtractor, extractionSettled, requestExtraction } from "../apps/worker/src/onboarding-extract";
 import { createOnboardingSessionRunner } from "../apps/worker/src/onboarding-session";
 import { readMatrixConfig, startProviderHarness } from "./provider-harness";
 
+// The web library guards itself with `import "server-only"`, which only Next resolves; here it is an empty module.
+register("data:text/javascript,export async function resolve(s,c,n){if(s==='server-only')return{url:'data:text/javascript,',shortCircuit:true};return n(s,c)}");
+
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
+
+/**
+ * The run spends the machine owner's own Codex quota, which the resident app spends too: while it runs, the resident worker holds the
+ * owner's discretionary background work (tutorials, skill scouting, the validation review; `EVAL_HOLD_FILE`). The resident data
+ * directory is the main checkout's, also when this runs from a worktree; `CROSSLINE_RESIDENT_DATA_DIR` names another.
+ */
+function residentDataDir(): string {
+  if (process.env.CROSSLINE_RESIDENT_DATA_DIR) return path.resolve(process.env.CROSSLINE_RESIDENT_DATA_DIR);
+  try {
+    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: repoRoot, encoding: "utf8", windowsHide: true }).trim();
+    return path.join(path.dirname(common), "data");
+  } catch { return path.join(repoRoot, "data"); }
+}
+const holdFile = path.join(residentDataDir(), EVAL_HOLD_FILE);
+const holding = existsSync(path.join(path.dirname(holdFile), "crossline.db"));
+const releaseHold = () => { if (holding) rmSync(holdFile, { force: true }); };
+if (holding) {
+  writeFileSync(holdFile, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), by: "scripts/onboarding-eval.ts" }));
+  // A normal end, a thrown error and Ctrl+C each take the hold back; a hard kill leaves it to the worker's pid and age checks.
+  process.on("exit", releaseHold);
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { releaseHold(); process.exit(130); });
+}
+console.info(JSON.stringify({ residentHold: holding ? holdFile : "none (no resident ledger found)" }));
+const lite = args.includes("--lite");
 const turnLimit = Number(args[args.indexOf("--turns") + 1]) || 20;
-const personaFile = args.find((arg) => arg.endsWith(".md")) ?? path.join(repoRoot, "data", "profile", "karolyan1215.profile.md");
+const personaFile = args.find((arg) => arg.endsWith(".md"))
+  ?? (lite ? path.join(repoRoot, "scripts", "personas", "office-worker-lite.md") : path.join(repoRoot, "data", "profile", "karolyan1215.profile.md"));
 if (!existsSync(personaFile)) throw new Error(`persona sheet not found: ${personaFile}`);
 const persona = readFileSync(personaFile, "utf8").replace(/^>.*$/gm, "").slice(0, 12_000);
 
@@ -41,19 +82,53 @@ const dataDir = mkdtempSync(path.join(tmpdir(), "crossline-onboarding-eval-"));
 const store = new CrosslineStore(path.join(dataDir, "crossline.db"));
 const { workspace, principal } = store.createPrincipalWithWorkspace("onboarding-eval", "eval");
 const workspaceId = workspace.id;
-// What the person set on the opening screen before the interview: the identity nouns, the base line and the hard constraint — no goals.
-store.setSetting(workspaceId, "lines.v1", JSON.stringify([
-  { id: "research", label: "研究者", color: "research", goal: "", createdAt: "", rank: 1, hard: true },
-  { id: "startup", label: "创业者", color: "startup", goal: "", createdAt: "" },
-  { id: "media", label: "创作者", color: "media", goal: "", createdAt: "" },
-  { id: "investment", label: "投资者", color: "investment", goal: "", createdAt: "" }]));
+/** The opening card's lite answer: 职场人 (the person's 上班) as the base and the one fixed schedule, 健康 and 财富 as domain lines. */
+const LITE_OPENING = { tone: "neutral" as const, edition: "lite" as const, lines: ["职场人", "健康管理者", "理财者"],
+  domains: { 健康管理者: "wellness" as const, 理财者: "wealth" as const }, base: "职场人", fixed: ["职场人"],
+  // The person says 上班; the line is named for a person (2026-10-20), as the card names it.
+  said: { 职场人: "上班" } };
+if (lite) {
+  // The web library's store is this one (`getStore` reads the global first), so `setupLines` writes the same ledger the interview reads.
+  process.env.CROSSLINE_DATA_DIR = dataDir;
+  (globalThis as { crosslineStore?: unknown }).crosslineStore = store;
+  const { setupLines } = await import("../apps/web/lib/lines");
+  const ctx = { principalId: principal.id, workspaceId, role: "owner", identity: { provider: "credential", issuer: "onboarding-eval", subject: principal.id },
+    authMethod: "session", requestId: "onboarding-eval" } as import("../packages/core/src/index").AccessContext;
+  const set = setupLines(ctx, LITE_OPENING.lines.map((label) => ({ label, ranked: label === LITE_OPENING.base, hard: LITE_OPENING.fixed.includes(label),
+    ...(LITE_OPENING.domains[label as keyof typeof LITE_OPENING.domains] ? { domain: LITE_OPENING.domains[label as keyof typeof LITE_OPENING.domains] } : {}) })));
+  if (!set.ok) throw new Error(`setupLines refused: ${set.code}`);
+} else {
+  // What the person set on the opening screen before the interview: the identity nouns, the base line and the hard constraint — no goals.
+  store.setSetting(workspaceId, "lines.v1", JSON.stringify([
+    { id: "research", label: "研究者", color: "research", goal: "", createdAt: "", rank: 1, hard: true },
+    { id: "startup", label: "创业者", color: "startup", goal: "", createdAt: "" },
+    { id: "media", label: "创作者", color: "media", goal: "", createdAt: "" },
+    { id: "investment", label: "投资者", color: "investment", goal: "", createdAt: "" }]));
+}
 const startedAt = Date.now();
 let runs = 0, repairs = 0;
-setUsageSink((usage) => { runs += 1; repairs += usage.repairs ?? 0; });
+// Tokens per Skill and model, so two runs can be compared on what they spent and not only on how many calls they made.
+const spent = new Map<string, { runs: number; input: number; cached: number; output: number; reasoning: number }>();
+setUsageSink((usage) => {
+  runs += 1; repairs += usage.repairs ?? 0;
+  const key = `${usage.skillName.replace(/^crossline:/, "")} · ${usage.model ?? "默认"}${usage.effort ? `/${usage.effort}` : ""}`;
+  const row = spent.get(key) ?? { runs: 0, input: 0, cached: 0, output: 0, reasoning: 0 };
+  row.runs += 1; row.input += usage.inputTokens; row.cached += usage.cachedInputTokens; row.output += usage.outputTokens; row.reasoning += usage.reasoningOutputTokens;
+  spent.set(key, row);
+});
+function tokenReport(): string[] {
+  const rows = [...spent].sort((a, b) => b[1].input - a[1].input);
+  const sum = rows.reduce((all, [, row]) => ({ input: all.input + row.input, cached: all.cached + row.cached, output: all.output + row.output }), { input: 0, cached: 0, output: 0 });
+  const k = (n: number) => `${Math.round(n / 1000)}k`;
+  return ["## 用量", "", `- 合计：输入 ${k(sum.input)}（其中缓存 ${k(sum.cached)}），输出 ${k(sum.output)}`, "",
+    "| Skill · 模型 | 次数 | 输入 | 缓存 | 输出 | 其中推理 |", "|---|---|---|---|---|---|",
+    ...rows.map(([key, row]) => `| ${key} | ${row.runs} | ${k(row.input)} | ${k(row.cached)} | ${k(row.output)} | ${k(row.reasoning)} |`), ""];
+}
 
-// Files the person has on their machine and would upload when asked (not the organised profile: that is the hidden truth).
+// Files the person has on their machine and would upload when asked (not the organised profile: that is the hidden truth). The lite
+// persona has none.
 const downloads = path.join(homedir(), "Downloads");
-const available = new Map([
+const available = new Map(lite ? [] : [
   ["F26-ECE555-Syllabus.pdf", path.join(downloads, "course_files_export", "F26-ECE555-Syllabus.pdf")],
   ["F26-ECE555-Course Schedule.pdf", path.join(downloads, "course_files_export", "F26-ECE555-Course Schedule.pdf")],
   ["Course Overview.docx", path.join(downloads, "Course Overview.docx")],
@@ -88,14 +163,18 @@ function confirmDates(): number {
 
 const json = <T,>(key: string, fallback: T): T => { try { return JSON.parse(store.getSetting(workspaceId, key) ?? "null") ?? fallback; } catch { return fallback; } };
 
-/** A person adopting a long-term goal from the candidates (「采用」 under the portrait): the first two attributes, for every line without a goal. */
+/**
+ * A person adopting a long-term goal from the candidates (「采用」 under the portrait): the first two attributes, or the one there is, for
+ * every line without a goal. The screen composes a goal from a single chip; requiring two left a line with one candidate unadopted for
+ * good, because the interview does not ask a line's goal again once the picker has candidates (the lite run of 2026-10-20).
+ */
 function adoptGoals(): number {
   const specs = json<Array<{ id: string; label: string; goal: string; goals?: string[]; goalParts?: string[] }>>("lines.v1", []);
   const profiles = json<Record<string, StoredLineProfile>>("lines.profiles", {});
   let clicks = 0;
   const next = specs.map((line) => {
     const parts = (profiles[line.id]?.attributes ?? []).slice(0, 2).map((attribute) => attribute.text);
-    if ((line.goals ?? []).length || parts.length < 2) return line;
+    if ((line.goals ?? []).length || !parts.length) return line;
     clicks += 1;
     const goal = composeGoal(parts, line.label);
     return { ...line, goal, goals: [goal], goalParts: parts };
@@ -115,6 +194,36 @@ function confirmPortrait(): number {
 
 const checklistNow = () => interviewChecklistFor(store, workspaceId,
   identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] })), { unfiledFiles: null });
+
+/**
+ * The lite run's own section: per domain line, its `domainGuides` ask list and the questions asked under it (`identityId`), the facts under
+ * the fixed slots, and the questions that asked what the Skills are told never to ask. The match between an ask item and a question is
+ * read by a person from the two lists side by side; only the red lines are checked by pattern.
+ */
+function domainReport(): string[] {
+  const lines = identityLines(store, workspaceId);
+  const guides = domainGuides(lines);
+  const facts = store.listProfileFacts(workspaceId);
+  const redLines: Array<[string, RegExp]> = [
+    ["账号或卡号", /账号|卡号|账户号|开户行/], ["精确余额", /精确|准确到|具体余额|余额是多少|多少钱/],
+    ["持仓", /持仓|仓位|买了什么|哪只|哪几只/], ["密码", /密码/], ["诊断", /诊断|是不是.*病|什么病/], ["药物或剂量", /剂量|吃什么药|用药|毫克|mg\b/]];
+  const out = ["## 领域主线", ""];
+  for (const guide of guides) {
+    const own = asked.filter((question) => question.identityId === guide.lineId);
+    out.push(`### ${guide.label}（${guide.domain}）`, "", `清单（${guide.ask.length} 项）：`, ...guide.ask.map((item, index) => `${index + 1}. ${item}`), "",
+      `问到的问题（${own.length} 个）：`, ...(own.length ? own.map((question) => `- ${question.text}`) : ["- 无"]), "");
+    const prefix = guide.domain === "健康" ? "health_" : "wealth_";
+    const landed = facts.filter((fact) => fact.slot.startsWith(prefix));
+    out.push(`固定槽位（${guide.slots.length} 个）落了 ${new Set(landed.map((fact) => fact.slot)).size} 个：`,
+      ...(landed.length ? landed.map((fact) => `- ${fact.identityId} · ${fact.slot} = ${fact.value}（${fact.status}）`) : ["- 无"]),
+      ...(() => { const stray = facts.filter((fact) => fact.identityId === guide.lineId && !fact.slot.startsWith(prefix));
+        return stray.length ? ["", `这条线上落在别的槽位的事实（${stray.length} 条）：`, ...stray.map((fact) => `- ${fact.slot} = ${fact.value}（${fact.status}）`)] : []; })(), "");
+  }
+  const defects = asked.flatMap((question) => redLines.filter(([, pattern]) => pattern.test(question.text) || question.options.some((option) => pattern.test(option.label)))
+    .map(([label]) => `- ${label}：${question.text}`));
+  out.push(`红线（账号、精确余额、持仓、密码、诊断、剂量）：${defects.length ? `${defects.length} 处` : "无"}`, ...defects, "");
+  return out;
+}
 
 /** Seconds a real person is taken to spend on one question or one click (decided 2026-10-12). */
 const SECONDS_PER_ANSWER = 20;
@@ -141,7 +250,7 @@ const harness = args.includes("--provider") && providerArg ? await (async () => 
 })() : undefined;
 // Entered here, not inside the helper above: entering a workspace only reaches the async chain it is called in.
 if (harness) enterUsageWorkspace(workspaceId);
-const interview = createOnboardingSessionRunner(store, workspaceId, repoRoot, () => client);
+const interview = createOnboardingSessionRunner(store, workspaceId, repoRoot, () => client, { extract: "await" });
 const PERSONA_SCHEMA = { type: "object", additionalProperties: false, required: ["answers", "freeText", "upload"], properties: {
   answers: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false, required: ["questionId", "picked", "other"], properties: {
     questionId: { type: "string", minLength: 1, maxLength: 120 }, picked: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 200 } },
@@ -150,10 +259,13 @@ const PERSONA_SCHEMA = { type: "object", additionalProperties: false, required: 
 type PersonaAnswer = { answers: Array<{ questionId: string; picked: string[]; other: string }>; freeText: string; upload: string[] };
 
 const transcript: string[] = [];
+// Every question shown, with the line it was asked under, for the domain-line report.
+const asked: Question[] = [];
 // The materials step: everything the person has is added before the first round, and the interview reads it before asking.
 const uploaded = [...available.keys()];
 for (const name of uploaded) await upload(name);
-let text = uploaded.length ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY;
+// The lite opening is the card's own words (tone, edition, lines, base, fixed schedule), as the real first reply is.
+let text = lite ? openingReply(LITE_OPENING, uploaded.length > 0) : uploaded.length ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY;
 let turns = 0, questionsAsked = 0, state = "", attentionSeconds = 0;
 const modelSeconds: number[] = [];
 let readyAt: { rounds: number; minutes: number } | undefined, completeAt: { rounds: number; minutes: number } | undefined;
@@ -161,19 +273,27 @@ try {
   while (turns < turnLimit) {
     turns += 1;
     const turnStarted = Date.now();
-    const outcome = await interview({ sessionId: "eval", text });
+    let outcome = await interview({ sessionId: "eval", text });
+    // A rate limit from the model service is not the interview's doing: wait and resend, as the person would press 重试 (the saved
+    // message is not stored twice). Four tries, a minute more each time.
+    for (let attempt = 1; attempt <= 4 && outcome.state === "blocked" && /限流|rate limit|too many/i.test(outcome.message); attempt += 1) {
+      console.info(JSON.stringify({ turn: turns, rateLimited: attempt, waitSeconds: attempt * 60 }));
+      await new Promise((resolve) => setTimeout(resolve, attempt * 60_000));
+      outcome = await interview({ sessionId: "eval", text });
+    }
     modelSeconds.push((Date.now() - turnStarted) / 1000);
     state = outcome.state;
     if (outcome.state === "blocked") { transcript.push(`第 ${turns} 轮：中断 ${outcome.code} ${outcome.message}`); break; }
     const last = store.listOnboardingMessages(workspaceId, "eval").at(-1)!;
     const turn = last.content as { reply: string; questions: Question[]; stage?: string; nextAction: string };
     questionsAsked += turn.questions.length;
+    asked.push(...turn.questions);
     const clicks = confirmDates() + adoptGoals() + (outcome.state === "ready" ? confirmPortrait() : 0);
     attentionSeconds += (turn.questions.length + clicks) * SECONDS_PER_ANSWER;
     const items = checklistNow();
     const minutesNow = Math.round(attentionSeconds / 6) / 10;
     if (!readyAt && readyToStart(items)) readyAt = { rounds: turns, minutes: minutesNow };
-    if (!completeAt && items.every((item) => item.done)) completeAt = { rounds: turns, minutes: minutesNow };
+    if (!completeAt && interviewComplete(items)) completeAt = { rounds: turns, minutes: minutesNow };
     transcript.push(`### 第 ${turns} 轮（${turn.stage ?? ""}）\n\n${turn.reply}\n\n${turn.questions.map((question, index) => `${index + 1}. ${question.text}`).join("\n")}`);
     console.info(JSON.stringify({ turn: turns, stage: turn.stage, questions: turn.questions.length, clicks, next: turn.nextAction,
       attentionMinutes: minutesNow, modelSeconds: Math.round(modelSeconds.at(-1)!), ready: Boolean(readyAt), complete: Boolean(completeAt) }));
@@ -181,9 +301,14 @@ try {
     const context = { version: "crossline.eval-persona.v1", persona, reply: turn.reply,
       questions: turn.questions.map(({ id, text: body, kind, options }) => ({ id, text: body, kind, options: options.map((option) => ({ label: option.label })) })),
       files: [...available.keys()] };
-    const played = await runCodexSkill<PersonaAnswer>(client, context, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
+    const play = () => runCodexSkill<PersonaAnswer>(client, context, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
       developerInstructions: "Play the person as the Skill describes. Return raw JSON only.", outputSchema: PERSONA_SCHEMA, prepareInput: () => context,
       validateOutput: (output) => output as PersonaAnswer, onAudit: () => {}, timeoutMs: 30 * 60_000 });
+    let played = await play();
+    for (let attempt = 1; attempt <= 4 && !played.ok && /限流|rate limit|too many/i.test(played.blocker.message); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 60_000));
+      played = await play();
+    }
     if (!played.ok) { transcript.push(`模拟用户未能作答：${played.blocker.code}`); break; }
     for (const name of played.output.upload) await upload(name);
     const answers = Object.fromEntries(played.output.answers.map((answer) => {
@@ -193,6 +318,20 @@ try {
     }));
     text = composeAnswers(turn.questions, answers, played.output.freeText) || "不确定。";
     transcript.push(`**回答**${played.output.upload.length ? `（上传：${played.output.upload.join("、")}）` : ""}\n\n${text}`);
+  }
+  // The interview said it is done: the synthesis that 「画像符合我」 confirms is written by the extraction's finishing runs, which the
+  // worker's tick asks for in the app. Asked for here, then the person's one click, then the app's own completeness rule (2026-10-20: the
+  // eval used to score straight away and closed the runtime under the finishing run, so the full checklist could never be reached).
+  if (state === "ready" && !completeAt) {
+    const extractor = createOnboardingExtractor(store, workspaceId, repoRoot, () => client);
+    await extractionSettled(workspaceId);
+    for (let run = 0; run < 3 && !json<Partial<ProfileModel>>("profile.model", {}).portrait; run += 1) {
+      await requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), "eval");
+    }
+    const clicks = confirmPortrait();
+    attentionSeconds += clicks * SECONDS_PER_ANSWER;
+    if (interviewComplete(checklistNow())) completeAt = { rounds: turns, minutes: Math.round(attentionSeconds / 6) / 10 };
+    console.info(JSON.stringify({ finished: true, portrait: clicks > 0, complete: Boolean(completeAt) }));
   }
 } finally {
   const lines = identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] }));
@@ -221,6 +360,8 @@ try {
     ...own.map((item) => `| ${item.label} | ${item.done ? "✓" : "✗"} | ${item.done ? "" : item.detail} |`), "",
     `项目：${store.listProjects(workspaceId).map((project) => project.name).join("、") || "无"}`,
     `已确认事实：${store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed").length} 条`, "",
+    ...tokenReport(),
+    ...(lite ? domainReport() : []),
     "## 对话", "", ...transcript
   ].join("\n");
   const out = path.join(repoRoot, "data", "eval");

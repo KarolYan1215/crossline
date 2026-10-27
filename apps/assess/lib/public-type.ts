@@ -1,8 +1,22 @@
 import { TYPE_AXES, TYPE_TABLE, typeFromScores, type TypeAxisId } from "@crossline/core/assess";
-import { TYPE_LINES, TYPE_SUBTITLE, axisRank, isAmbiguous, localizeLine, localizeRelation, partnersOf, relationOf, type LineIdentity, type Relation } from "@crossline/core/assess-content";
+import { AI_KEEPS, TYPE_KINDRED, TYPE_LINES, TYPE_SUBTITLE, axisRank, isAmbiguous, localizeLine, localizeRelation, partnersOf, relationOf, type Kindred,
+  type LineIdentity, type Relation } from "@crossline/core/assess-content";
 import type { WantLines } from "@crossline/core/assess-wants";
-import type { LineView, PartnerView, PublicType, RelationView } from "./contract";
+import type { KindredView, LineView, PartnerView, PublicType, RelationView } from "./contract";
 import { tFor, type Locale } from "./i18n";
+
+/**
+ * The kindred person in the reader's language. The quote's original stays as it was said; in English its translation is the catalogue's
+ * English of our Chinese one (of the original itself when it is Chinese), left out when that is the original (an English quote).
+ */
+export function kindredView(kindred: Kindred, locale?: Locale): KindredView {
+  if (locale !== "en") return structuredClone(kindred);
+  const t = tFor(locale);
+  const { original, translation, source } = kindred.quote;
+  const english = translation ? t(translation) : /[一-鿿]/.test(original) ? t(original) : undefined;
+  return { name: t(kindred.name), years: t(kindred.years), field: t(kindred.field), why: t(kindred.why),
+    quote: { original, ...(english && english !== original ? { translation: english } : {}), source: t(source) } };
+}
 
 /**
  * The public face of a result, built from its four axis scores alone (and, for the rank, the recorded scores of everyone so far, and
@@ -15,7 +29,7 @@ import { tFor, type Locale } from "./i18n";
  * their relation kinds, kept as Chinese labels, are translated.
  */
 export function publicType(scores: Record<TypeAxisId, number>, recorded: Partial<Record<TypeAxisId, number[]>> = {}, seed = "", chosen?: WantLines,
-  locale?: Locale): PublicType {
+  aiDoes: string[] = [], locale?: Locale): PublicType {
   const t = tFor(locale);
   const type = typeFromScores(scores);
   const partners = partnersOf(type.code);
@@ -27,6 +41,8 @@ export function publicType(scores: Record<TypeAxisId, number>, recorded: Partial
   const lines = (combo: LineIdentity[]) => combo.map((line) => localizeLine(line, locale)) as [LineView, LineView, LineView];
   return {
     code: type.code, name: t(type.name), subtitle: t(TYPE_SUBTITLE[type.code]!),
+    // The AI phrases are fixed text from the questions (kept on the result in Chinese), so they follow the reader's language.
+    aiDoes: aiDoes.map((does) => t(does)), aiKeeps: t(AI_KEEPS[type.code]!), kindred: kindredView(TYPE_KINDRED[type.code]!, locale),
     group: { key: type.group.key, name: t(type.group.name), colour: type.group.colour, tint: type.group.tint },
     axes: TYPE_AXES.map((axis, index) => {
       const shown = type.axes[index]!;

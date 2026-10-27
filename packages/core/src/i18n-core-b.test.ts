@@ -84,14 +84,17 @@ describe("text built in English, unchanged in Chinese", () => {
       dates: [], availability: false, unfiledFiles: 2, portraitConfirmed: false, locale: "en" });
     expect(items.find((item) => item.id === "line_goal:research")?.label).toBe("\"Research\" has at least one long-term goal chosen");
     expect(items.find((item) => item.id === "files_filed")?.detail).toBe("2 files still need a project (see Decisions)");
-    expect(items.find((item) => item.id === "portrait_fields")?.detail).toMatch(/^Missing: One-line portrait, Core tension, /);
+    expect(items.find((item) => item.id === "portrait_fields")?.detail).toMatch(/^Missing: The real problem, View of work, /);
+    // The synthesis is its own item now, written after the interview (never asked).
+    expect(items.find((item) => item.id === "portrait_synthesis")?.detail).toBe("Being written: One-line portrait and Core tension");
   });
 
   test("the thinking-style type and the poster labels", () => {
-    const type = typeFromScores({ scope: 80, basis: 20, output: 30, rhythm: 70 }, {}, "en");
-    expect(type).toMatchObject({ code: "GEMA", name: "Modder", group: { name: "Structure group" } });
-    expect(type.axes.map((axis) => axis.label)).toEqual(["Generalist", "Evidence", "Making", "Adapting"]);
-    expect(typeFromScores({ scope: 80, basis: 20, output: 30, rhythm: 70 }).name).toBe("改装师");
+    const scores = { collab: 20, purpose: 30, build: 80, lines: 20 };
+    const type = typeFromScores(scores, {}, "en");
+    expect(type).toMatchObject({ code: "ROHA", name: "Hands-Off Boss", group: { name: "Client group" } });
+    expect(type.axes.map((axis) => axis.label)).toEqual(["Relay", "Output", "Hack", "Anchor"]);
+    expect(typeFromScores(scores).name).toBe("甩手掌柜");
     const report = { cover: { coreWord: "Bridge" }, compass: { values: [] }, lines: { items: [{ lineId: "research", targetShare: 60 }] } } as never;
     expect(portraitLabels(report, { lineLabel: () => "Research", locale: "en" }).cells).toEqual([
       { title: "Core word", value: "Bridge" }, { title: "Suggested base", value: "Research", detail: "About 60% suggested" }]);

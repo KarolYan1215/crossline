@@ -82,3 +82,21 @@ test("a homework from the course's dates the person already has is not written t
   expect(materializeDatePairs(store, ws, now)).toEqual([]);
   expect(store.listEvents(ws, { type: "task.duplicate_prevented" })).toHaveLength(1);
 });
+
+test("the backplanner does not write again what the person just finished (W-30)", async () => {
+  store = new CrosslineStore(":memory:");
+  store.saveMilestone({ id: "m3", ownerId: "o", workspaceId: ws, identityId: "research", projectId: "ece548", title: "试用门店上线", status: "approved", version: 1 });
+  order("done", "核对5家试用门店的名单与联系人", { state: "accepted", milestoneId: "", intent: "核对5家试用门店的名单与联系人，补齐缺的电话" });
+  store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: "accepted:done", type: "work_order.transitioned", entityId: "done",
+    payload: { from: "active", to: "accepted" } });
+  const answer = { steps: [
+    backplanStep({ title: "整理5家试用门店清单", intent: "整理5家试用门店的名单与联系人", sourceQuote: "试用门店上线" }),
+    backplanStep({ id: "s2", title: "给试用门店发上线通知", intent: "给每家试用门店写上线通知", sourceQuote: "试用门店上线", dependsOn: ["s1"] })
+  ], dateCandidates: [], blockers: [] };
+  const runtime = fakeRuntime([JSON.stringify(answer)], "crossline:crossline-goal-backplanner");
+  expect((await createGoalBackplanner(store, ws, "C:\\repo", () => runtime.rpc)("m3")).state).toBe("proposed");
+  const created = store.listWorkOrders(ws).filter((item) => item.milestoneId === "m3");
+  expect(created.map((item) => (item.payload as { title: string }).title)).toEqual(["ECE 548 给试用门店发上线通知"]);
+  expect(created[0]!.payload).toMatchObject({ dependsOn: ["done"] });
+  expect(store.listEvents(ws, { type: "task.duplicate_prevented" })[0]?.payload).toMatchObject({ kind: "done", keep: "done" });
+});

@@ -12,7 +12,7 @@ import { withName } from "../lib/names";
 import { useLocale, useT } from "./locale-context";
 import { readStored, writeStored } from "./storage";
 import { WantsInline } from "./wants-step";
-import { AxesList, TypeDetails, TypeHeading, groupStyle } from "./type-summary";
+import { AiAndKindred, AxesList, DimensionNotes, TypeDetails, TypeHeading, groupStyle } from "./type-summary";
 
 export { AVATAR_POLL_MS, isDrawing } from "./figure";
 export const DISCLAIMER = "基于自评的趣味测评，非心理诊断";
@@ -29,7 +29,7 @@ export const BETA_EMAIL = "karolyan1215@gmail.com";
 /** A mail to the owner, subject filled in and the type code in the body, so the request says who it is from. */
 export const betaMailto = (code: string, name: string, locale?: Locale): string => {
   const t = tFor(locale);
-  return `mailto:${BETA_EMAIL}?subject=${encodeURIComponent(t("Crossline 内测申请"))}&body=${encodeURIComponent(`${t("我的速测类型：{{name}} {{code}}", { name, code })}\n${t("想申请 Crossline 内测。")}`)}`;
+  return `mailto:${BETA_EMAIL}?subject=${encodeURIComponent(t("Crossline 模型额度申请"))}&body=${encodeURIComponent(`${t("我的速测类型：{{name}} {{code}}", { name, code })}\n${t("想申请用开发者提供的模型使用 Crossline。")}`)}`;
 };
 
 type State = { kind: "loading" } | { kind: "error"; code: ClientErrorCode } | { kind: "ready"; view: ResultView } | { kind: "deleted" };
@@ -130,24 +130,26 @@ export function ResultScreen({ token }: { token: string }) {
       : t("你选了不发邮件：请收藏本页，或到页面底部复制结果链接，否则换了设备就找不回来。")}</p>}
     {/* While the figure is drawn there is no poster yet: a waiting card, never the type's shared template (decided 2026-10-16). */}
     {isDrawing(view.avatar) ? <DrawingCard type={type} /> : <>
-      <p className="as-note" aria-live="polite">{view.avatar.state === "template" ? t("这次没有画出你的专属形象，海报上先用类型字母代替。")
+      <p className="as-note" aria-live="polite">{view.avatar.state === "template" ? t("这次没有画出你的专属形象，海报上先用类型名代替。")
         : wasDrawing ? t("专属形象画好了。") : ""}</p>
-      <SavableImage src={view.posterUrl} alt={t("{{name}} {{code}} 的海报", { name: type.name, code: type.code })} width={1080} height={1440}
+      <SavableImage src={view.posterUrl} alt={t("{{name}}的海报", { name: type.name })} width={1080} height={1440}
         downloadName={`crossline-${type.code}.png`}
         extra={{ src: view.longUrl, label: t("长图"), downloadName: t("crossline-{{code}}-长图.png", { code: type.code }) }} />
     </>}
 
     <section className="as-block">
       <h2>{t("拉朋友测，看你们是什么关系")}</h2>
-      <p>{mailed ? t("朋友用这个链接答完 32 题，你们的双人卡当场生成，你也会收到邮件。海报上的二维码也是这个链接。")
-        : t("朋友用这个链接答完 32 题，你们的双人卡当场生成。海报上的二维码也是这个链接。")}</p>
+      <p>{mailed ? t("朋友用这个链接答完 36 个场景，你们的双人卡当场生成，你也会收到邮件。海报上的二维码也是这个链接。")
+        : t("朋友用这个链接答完 36 个场景，你们的双人卡当场生成。海报上的二维码也是这个链接。")}</p>
       <ShareInvite url={view.inviteUrl} title={t("测测我们是什么关系")} text={withName(view.nickname || t("你的朋友"), t("邀请你测测你们是什么关系"), locale)} />
     </section>
 
     <section className="as-block">
-      <h2>{t("四条轴")}</h2>
+      <h2>{t("四个维度")}</h2>
       <AxesList type={type} />
+      <DimensionNotes />
     </section>
+    <AiAndKindred type={type} />
     <TypeDetails type={type} wants={!view.wants || editingWants
       ? view.wantsLeft > 0 && <div className="as-wants-ask">
         {!view.wants && <p>{t("上面是按你的类型推荐的。告诉我们你想同时做哪几件事，按你的选择重新组合：")}</p>}
@@ -160,12 +162,12 @@ export function ResultScreen({ token }: { token: string }) {
       <h2>{t("把这三条线真的跑起来")}</h2>
       <p>{t("Crossline 把你同时推进的几条线拆成里程碑，排进同一份日程，每天告诉你先做哪件；做完的东西留作证据，能看见每条线走了多远。")}</p>
       {view.appUrl ? <>
-        <p className="as-note">{t("内测现在开放，免费，名额有限。用你在这里留的邮箱登录，这份结果会自动带进 App，作为访谈的起点。")}</p>
+        <p className="as-note">{t("内测现在开放，免费，注册即可使用。用你在这里留的邮箱登录，这份结果会自动带进 App，作为访谈的起点。")}</p>
         <ol className="as-steps">
-          <li><b>{t("准备一个能用 Codex 的 ChatGPT 账号。")}</b>{t("App 用你自己的 ChatGPT 额度做访谈和规划，不需要另付费用。")}</li>
-          <li><b>{t("在 ChatGPT 打开一项设置（只需一次）。")}</b>{t("ChatGPT 网页版 → 设置 → 安全 → 开启「为 Codex、Excel、PowerPoint 和 Word 启用设备代码登录」。不开的话，第 4 步的代码会被拒绝。")}</li>
+          <li><b>{t("准备一个能用 Codex 的 ChatGPT 账号，或一个模型 API key。")}</b>{t("App 用你自己的 ChatGPT 额度或 API 做访谈和规划，不向你收费。")}</li>
+          <li><b>{t("用 ChatGPT 的话，先打开一项设置（只需一次）。")}</b>{t("ChatGPT 网页版 → 设置 → 安全 → 开启「为 Codex、Excel、PowerPoint 和 Word 启用设备代码登录」。不开的话，第 4 步的代码会被拒绝。")}</li>
           <li><b>{t("打开 App，用邮箱验证码登录。")}</b>{t("第一次登录就是注册，不用设密码。")}</li>
-          <li><b>{t("连接你的 ChatGPT。")}</b>{t("页面会给一串一次性代码，在 OpenAI 的页面登录你的账号并输入它，几秒后显示「已连接」。")}</li>
+          <li><b>{t("连接模型。")}</b>{t("用 ChatGPT：页面会给一串一次性代码，在 OpenAI 的页面登录并输入它，几秒后显示「已连接」；用 API：选模型、填入 key，检测通过后即可使用。服务器忙时会排队，稍等即可。")}</li>
           <li><b>{t("和 AI 做一次深度访谈。")}</b>{t("先把简历、课表、课程大纲拖进去，约 30 分钟得到一份全面的 AI 时代超级个体跨人生主线报告和跨主线排程计划。")}</li>
         </ol>
         <a className="as-button as-primary" href={view.appUrl} target="_blank" rel="noreferrer">{t("打开 Crossline →")}</a>
@@ -175,13 +177,14 @@ export function ResultScreen({ token }: { token: string }) {
           : <button type="button" className="as-primary" disabled={beta.busy} onClick={() => void askBeta()}>{beta.busy ? t("正在提交…") : t("申请内测")}</button>}
         {beta.error && <p className="as-error" role="alert">{beta.error}</p>}
       </>}
-      <p className="as-note">{t("也可以直接发邮件到")} <a href={betaMailto(type.code, type.name, locale)}>{BETA_EMAIL}</a> {t("申请；在各大平台私信我也可以。")}</p>
+      <p className="as-note">{view.appUrl ? t("没有 ChatGPT Plus 也没有 API key，想用开发者提供的模型？发邮件到") : t("也可以直接发邮件到")}{" "}
+        <a href={betaMailto(type.code, type.name, locale)}>{BETA_EMAIL}</a> {t("申请；在各大平台私信我也可以。")}</p>
     </section>
 
     <section className="as-block">
       <h2>{t("双人卡")}</h2>
       {view.pairs.length ? <ul className="as-pairs">{view.pairs.map((pair) => <li key={pair.pairToken}>
-        <a href={`/p/${pair.pairToken}`}><span><b>{pair.nickname || t("你的朋友")}</b> · {pair.name} {pair.code}</span><span className="as-note">{pair.relation}</span></a>
+        <a href={`/p/${pair.pairToken}`}><span><b>{pair.nickname || t("你的朋友")}</b> · {pair.name}</span><span className="as-note">{pair.relation}</span></a>
       </li>)}</ul> : <p className="as-note">{t("还没有人通过你的链接测过。")}</p>}
     </section>
 
@@ -190,7 +193,7 @@ export function ResultScreen({ token }: { token: string }) {
       <p>{mailed ? t("这个页面的链接已发到你的邮箱（没收到就看看垃圾邮件）。") : view.sendEmail ? t("邮件暂时发不出去。请收藏本页，或复制下面的链接自己保存，这是回到结果的唯一入口。")
         : t("你选了不发邮件。请收藏本页，或复制下面的链接自己保存，这是回到结果的唯一入口。")}</p>
       {!mailed && ownUrl && <CopyLink url={ownUrl} label={t("我的结果链接（只给自己看）")} />}
-      <p className="as-note">{t("结果保存到 {{date}}，到期自动删除。保存的是四条轴的分数、邮箱、署名、外貌选项和你想做的事，不存每道题的答案。", { date: dateText(view.expiresAt, locale) })}</p>
+      <p className="as-note">{t("结果保存到 {{date}}，到期自动删除。保存的是四个维度的分数、邮箱、署名、外貌选项和你想做的事，不存每道题的答案。", { date: dateText(view.expiresAt, locale) })}</p>
       {confirming ? <div className="as-confirm" role="group" aria-label={t("确认删除")} id="as-delete">
         <p>{t("删除后，海报、邀请链接和所有双人卡都会失效，不能恢复。")}</p>
         <div className="as-row">

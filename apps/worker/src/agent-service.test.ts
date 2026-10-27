@@ -38,6 +38,7 @@ const service = (over: { cost?: CostSignal; script?: boolean; answer?: string } 
 const settled = async (svc: ReturnType<typeof service>["svc"]) => { for (let i = 0; i < 200 && svc.runningTasks(ws).length; i += 1) await new Promise((resolve) => setTimeout(resolve, 10)); };
 
 test("handing over an order of a kind that is not approved asks about the kind and starts nothing", async () => {
+  store.setSetting(ws, "agent.categories", "{}");
   order("wo-1", ["整理并摘要这三篇文献"]);
   const { svc, turns } = service();
   expect(svc.dispatch(ws, "wo-1")).toMatchObject({ state: "needs_category_approval", category: "read_research_organize" });
@@ -93,27 +94,62 @@ test("a result that leaves something for the person waits for their review inste
 });
 
 test("wording that points at no kind needs the person to choose one; choosing one is enough", () => {
+  store.setSetting(ws, "agent.categories", "{}");
   order("wo-1", ["推进这件事"]);
   const { svc } = service({ script: false });
   expect(svc.dispatch(ws, "wo-1")).toMatchObject({ state: "blocked", code: "CATEGORY_REQUIRED" });
   expect(svc.dispatch(ws, "wo-1", "draft_text")).toMatchObject({ state: "needs_category_approval", category: "draft_text" });
 });
 
-test("the tick starts one approved order by itself, but not at 95% of either window or with the quota unreadable, or a task is already going", async () => {
+test("the tick starts approved orders by itself, two at a time, but not at 95% of either window or with the quota unreadable", async () => {
   approveCategory(store, ws, "read_research_organize");
   order("wo-1", ["整理并摘要这三篇文献"]);
   order("wo-2", ["整理并摘要另外三篇文献"]);
+  order("wo-3", ["整理并摘要第三组文献"]);
   for (const cost of [{ ...healthy, short: { usedPercent: 97, windowDurationMins: 300, resetsAt: null } },
     { ...healthy, long: { usedPercent: 95, windowDurationMins: 10080, resetsAt: null } }, { available: false as const, reason: "apiKey" }]) {
     await service({ cost }).svc.pass(ws);
     expect(listAgentTasks(store, ws)).toHaveLength(0);
   }
-  const { svc } = service();
+  const { svc } = service({ script: false });
+  await svc.pass(ws);
+  // Two runs on two different orders, and nothing more while both are going.
+  expect(svc.runningTasks(ws)).toHaveLength(2);
+  await svc.pass(ws);
+  expect(svc.runningTasks(ws)).toHaveLength(2);
+  expect(svc.runFree(ws, { taskId: "free-1", title: "x", what: "x", category: "read_research_organize", humanPart: "" })).toMatchObject({ state: "blocked", code: "AGENT_BUSY" });
+  await settled(svc);
+  expect(listAgentTasks(store, ws).map((task) => task.workOrderId).sort()).toEqual(["wo-1", "wo-2"]);
+});
+
+test("a new account has organizing, drafting and file preparation on without choosing; its first choice is kept", async () => {
+  const { readCategories, categoryMode } = await import("@crossline/db");
+  expect(Object.keys(readCategories(store, ws)).sort()).toEqual(["draft_text", "files_calendar_prep", "read_research_organize"]);
+  expect(categoryMode(readCategories(store, ws).draft_text)).toBe("auto");
+  // Nothing that sends, signs in or pays; code and media stay off until asked.
+  expect(readCategories(store, ws).data_code_sim).toBeUndefined();
+  order("wo-1", ["整理并摘要这三篇文献"]);
+  const { svc } = service({ script: false });
   await svc.pass(ws);
   expect(svc.runningTasks(ws)).toHaveLength(1);
-  await svc.pass(ws);
   await settled(svc);
-  expect(listAgentTasks(store, ws).map((task) => task.workOrderId)).toEqual(["wo-1"]);
+  // Turning one off writes the set: the other two stay on, the one turned off stays off.
+  setCategoryMode(store, ws, "draft_text", "off");
+  expect(Object.keys(readCategories(store, ws)).sort()).toEqual(["files_calendar_prep", "read_research_organize"]);
+});
+
+test("two runs never take the same order, nor the same deliverable of one project", async () => {
+  approveCategory(store, ws, "read_research_organize");
+  order("wo-1", ["整理并摘要这三篇文献"]);
+  // A second task of the same project whose single errand has the same name as wo-1's: made once.
+  store.saveWorkOrder({ id: "wo-2", ownerId: "o", workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: "任务 wo-1", state: "approved",
+    riskTier: "routine", estimate, payload: { automationParts: [{ id: "a0", intent: "整理并摘要这三篇文献" }], humanCore: [{ id: "h", intent: "自己决定" }], materialContract: [] } });
+  const starts = JSON.parse(store.getSetting(ws, "schedule.orderStarts") ?? "{}") as Record<string, string>;
+  store.setSetting(ws, "schedule.orderStarts", JSON.stringify({ ...starts, "wo-2": new Date(Date.now() + 3_600_000).toISOString() }));
+  const { svc } = service({ script: false });
+  await svc.pass(ws);
+  expect(svc.runningTasks(ws)).toHaveLength(1);
+  await settled(svc);
 });
 
 

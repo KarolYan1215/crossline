@@ -9,17 +9,46 @@ import type { Locale } from "@crossline/core";
  * In the workspace's language (docs/i18n.md, 2026-10-16): Chinese until the person switches to English, then English for everything
  * written from then on. Each SKILL.md's 「Language」 section defers to the 「Output language」 line here, which comes last and wins.
  */
+/**
+ * Plain voice (2026-10-18, the owner's direction after reading six models' sample interviews): text should read as a person who knows the
+ * facts, not as a model. Each rule names what to write instead, because a bare ban leaves the model to improvise the same shape again.
+ * The patterns are the ones Wikipedia's 「Signs of AI writing」 and the Chinese humanizer checklists list (negative parallelism, em dashes,
+ * aphorism, grouped threes, summary endings), and the ones counted in the candidates' replies.
+ */
+export const PLAIN_VOICE = [
+  "Plain voice (every sentence a person will read):",
+  "- No dashes as connectors (——, —, –). Write two sentences, or join with a comma or a colon.",
+  "- No contrast frames: 不是……而是……, 不是……是……, 与其……不如……, 并非……, 不在于……而在于……, 不只是……更是……, 真正的……是……. Say the point itself as a plain statement: write 「三条线共用晚上的时间，每天切换多次。」, not 「真正卡住你的不是线太多，而是切换」.",
+  "- No figures of speech: no 框, 地基, 底色, 双刃剑, 燃料, 杠杆, 飞轮, 账, 锚, 缝, 土壤, 碎片. Use the literal words (时间, 截止, 每周小时数, 进度). Terms the app itself uses (主线, 底座 for the line the person chose as base) are fine.",
+  "- No coaching formulas: 先别……, 先把……算清/理清/看清, ……才是关键, 落地, 本质上, 说明你……. Ask the question or state the fact directly.",
+  "- No aphorisms, no grouped threes for rhythm, no closing line that sums up or lifts the tone, no repeating the person's own words back as an opening. One or two sentences that add something are better than four that restate.",
+  "- Prefer the person's concrete facts (dates, hours, counts, names they used) over adjectives. Short sentences; ordinary words."
+];
+
 const STYLE_ZH = [
   "Writing style for every human-readable field:",
   "- Output language: Simplified Chinese.",
   "- Simplified Chinese, concise, in standard academic or workplace register; prefer noun phrases with figures over sentences.",
   "- Objective third person. Do not address the reader as 你/您 and do not speak as 我; no greetings, apologies, encouragement or filler.",
   "- Fixed vocabulary: 主线 (line), 里程碑 (milestone), 任务 (task), 步骤 (step), 长期目标 (long-term goal), 分数线 (score line); verbs 批准, 验收, 撤销.",
-  "- The hierarchy, named the same way everywhere: a 主线 is an identity noun (研究者, 创作者, 投资者); a 长期目标 is 「成为 ___ 的 <身份>」 (who the person is becoming; never dated, never \"done\"); a 里程碑 states an achieved, checkable state (「ECE 555 总评达到 A−」「首条小红书笔记获得 50 次收藏」); a 任务's name is a short action starting with its verb (「完成 ECE 555 作业 2」「起草 MVP 访谈提纲」, at most 24 characters) while its description is free; a 步骤 is a concrete, schedulable action.",
+  "- The hierarchy, named the same way everywhere: a 主线 is an identity noun (研究者, 创作者, 投资者); a 长期目标 is 「成为 ___ 的 <身份>」 (who the person is becoming; never dated, never \"done\"), its blank short adjectives in the person's own words (「严谨、高产的研究者」), never an achievement or an action (「发表三篇论文的」「能独立立项的」 are milestones or 「独立的」); a 里程碑 states an achieved, checkable state (「ECE 555 总评达到 A−」「首条小红书笔记获得 50 次收藏」); a 任务's name is a short action starting with its verb (「完成 ECE 555 作业 2」「起草 MVP 访谈提纲」, at most 24 characters) while its description is free; a 步骤 is a concrete, schedulable action.",
   "- Questions, where the output asks any, are neutral and short (「每周可投入时长？」), never chatty.",
-  "- No internal field names or statistics jargon in text the person reads: not p25/p50/p85, not ids, codes or JSON keys. Say 「通常 180 分钟」「保守 4 小时」 instead of 「p50 180」.",
-  "- Never invent facts about the person; state an assumption as an assumption."
+  "- No internal field names or statistics jargon in text the person reads: not p25/p50/p85, not ids (doc-2, s5, q1, a line's id), codes or the input's keys (materials, units, person.answers, mustDeliver, systemMayPrepare). Name the thing as the person knows it: 「课程大纲」 for doc-1, 「第 5 步」 for s5, 「第 1 个问题」 for q1, 「任务材料」 for materials, and 「通常 180 分钟」「保守 4 小时」 instead of 「p50 180」.",
+  "- Do not narrate the rules you were given or how you applied them (「units 计 0」「按 0 个办理环节计数」「按规则先清空内容单元」). Say what the result rests on; when there was nothing to count, say nothing about counting.",
+  "- Never invent facts about the person; state an assumption as an assumption.",
+  ...PLAIN_VOICE
 ].join("\n");
+
+/** The same plain voice for English output: the shapes that read as machine-made in English, each with what to write instead. */
+const PLAIN_VOICE_EN = [
+  "Plain voice (every sentence a person will read):",
+  "- No dashes as connectors (—, –). Write two sentences, or join with a comma or a colon.",
+  "- No contrast frames: \"not X but Y\", \"it's not X, it's Y\", \"rather than X, Y\", \"the real X is Y\", \"more than just X\". Say the point itself as a plain statement: write \"The three tracks share the evenings and switch several times a day.\", not \"What really holds you back isn't the number of tracks, it's the switching\".",
+  "- No figures of speech (framework, foundation, double-edged sword, fuel, lever, flywheel, anchor, soil). Use the literal words (time, deadline, hours per week, progress). Terms the app itself uses (Track, base for the track the person chose as base) are fine.",
+  "- No coaching formulas: \"first, let's...\", \"get clear on...\", \"... is the key\", \"at its core\", \"this shows that you...\". Ask the question or state the fact directly.",
+  "- No aphorisms, no grouped threes for rhythm, no closing line that sums up or lifts the tone, no repeating the person's own words back as an opening. One or two sentences that add something are better than four that restate.",
+  "- Prefer the person's concrete facts (dates, hours, counts, names they used) over adjectives. Short sentences; ordinary words."
+];
 
 const STYLE_EN = [
   "Writing style for every human-readable field:",
@@ -27,11 +56,13 @@ const STYLE_EN = [
   "- Concise, plain product and workplace register; prefer noun phrases with figures over long sentences.",
   "- Objective third person in stored text; no greetings, apologies, encouragement or filler.",
   "- Fixed vocabulary: Track (主线), Milestone (里程碑), Task (任务), Step (步骤), Long-term goal (长期目标), Target score (分数线); verbs Approve, Accept, Undo.",
-  "- The hierarchy, named the same way everywhere: a Track is an identity noun (Researcher, Creator, Investor); a Long-term goal is \"Become a ___ <identity>\" (who the person is becoming; never dated, never \"done\"); a Milestone states an achieved, checkable state (\"ECE 555 final grade at A−\", \"First Xiaohongshu note reaches 50 saves\"); a Task's name is a short action starting with its verb (\"Finish ECE 555 Homework 2\", \"Draft MVP interview guide\", at most 60 characters) while its description is free; a Step is a concrete, schedulable action.",
+  "- The hierarchy, named the same way everywhere: a Track is an identity noun (Researcher, Creator, Investor); a Long-term goal is \"Become a ___ <identity>\" (who the person is becoming; never dated, never \"done\"), its blank short adjectives in the person's own words (\"rigorous, prolific researcher\"), never an achievement or an action (\"who has published three papers\", \"able to start projects independently\" are milestones or \"independent\"); a Milestone states an achieved, checkable state (\"ECE 555 final grade at A−\", \"First Xiaohongshu note reaches 50 saves\"); a Task's name is a short action starting with its verb (\"Finish ECE 555 Homework 2\", \"Draft MVP interview guide\", at most 60 characters) while its description is free; a Step is a concrete, schedulable action.",
   "- Questions, where the output asks any, are neutral and short (\"Hours available per week?\"), never chatty.",
-  "- No internal field names or statistics jargon in text the person reads: not p25/p50/p85, not ids, codes or JSON keys. Say \"usually 180 min\", \"cautiously 4 h\" instead of \"p50 180\".",
+  "- No internal field names or statistics jargon in text the person reads: not p25/p50/p85, not ids (doc-2, s5, q1, a line's id), codes or the input's keys (materials, units, person.answers, mustDeliver, systemMayPrepare). Name the thing as the person knows it: \"the syllabus\" for doc-1, \"step 5\" for s5, \"question 1\" for q1, \"the task's materials\" for materials, and \"usually 180 min\", \"cautiously 4 h\" instead of \"p50 180\".",
+  "- Do not narrate the rules you were given or how you applied them (\"units counted as 0\", \"cleared the content units per the rules\"). Say what the result rests on; when there was nothing to count, say nothing about counting.",
   "- Times are 24-hour (14:30); durations \"45 min\", \"1 h 30 min\".",
-  "- Never invent facts about the person; state an assumption as an assumption."
+  "- Never invent facts about the person; state an assumption as an assumption.",
+  ...PLAIN_VOICE_EN
 ].join("\n");
 
 /** The style block for a run in this language. */

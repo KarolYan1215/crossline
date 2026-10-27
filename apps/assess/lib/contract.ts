@@ -31,7 +31,7 @@ export const NICKNAME_MAX = 12;
 
 /** POST /api/results */
 export type SubmitRequest = {
-  /** Every one of the 32 statements answered 1–5. */
+  /** Every one of the 32 questions answered 1–5. */
   answers: Record<string, number>;
   appearance: Appearance;
   email: string;
@@ -68,6 +68,9 @@ export type PublicAxis = {
   rank: { pole: string; percent: number; estimated: boolean };
 };
 
+/** The person whose way of working is close to the type, with one line of theirs (original, our translation, where it is from). */
+export type KindredView = { name: string; years: string; field: string; why: string; quote: { original: string; translation?: string; source: string } };
+
 /** A recommended line, 「<domain>的<identity>」: the identity large on the poster, the field small; a licensed profession has no field. */
 export type LineView = { domain: string; identity: string };
 
@@ -75,7 +78,14 @@ export type PartnerView = { code: string; name: string; relation: string; tip: s
 
 /** The part of a result anyone holding a link may see: never the email, the answers or the appearance. */
 export type PublicType = {
-  code: string; name: string; subtitle: string;
+  /** The four letters: a coordinate for links and files, never printed beside the name. */
+  code: string; name: string;
+  /** The type's quote (「我还是觉得第 1 版比较好看」). */
+  subtitle: string;
+  /** 「AI 替你干的」, from the person's answers (empty when they leaned to do it all), and 「你不让 AI 碰的」, the type's own line. */
+  aiDoes: string[];
+  aiKeeps: string;
+  kindred: KindredView;
   group: { key: string; name: string; colour: string; tint: string };
   axes: PublicAxis[];
   /** The first combination, offered as 「你也许想做」, with `loop`. */

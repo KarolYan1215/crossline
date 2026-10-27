@@ -2,56 +2,38 @@
 
 import { useEffect, useState } from "react";
 import { useLocale, useT } from "../locale-context";
+import { SetupGuide } from "../ui/setup-guide";
+import { phonePushGuide } from "../../lib/setup-guides";
+import { enablePush, pushBlocker } from "../push-enable";
 
 type Device = { device: string; origin: string; createdAt: string; endpointHost: string };
-
-const toKey = (base64: string) => {
-  const padded = `${base64}${"=".repeat((4 - (base64.length % 4)) % 4)}`.replace(/-/g, "+").replace(/_/g, "/");
-  return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
-};
-/** The device's name as stored with its subscription, in the language the page was in when it was turned on. */
-const deviceName = (t: (key: string) => string) => /iPhone/.test(navigator.userAgent) ? "iPhone" : /iPad/.test(navigator.userAgent) ? "iPad"
-  : /Android/.test(navigator.userAgent) ? t("Android 手机") : t("这台设备的浏览器");
 
 /**
  * Turns on notifications for this device. An iPhone only allows it for the app added to the home screen and opened from there, and
  * only on the https (tailnet) address — each condition is said plainly instead of the button silently doing nothing.
  */
-export function PhonePush() {
+export function PhonePush({ privateNetwork = true }: { privateNetwork?: boolean } = {}) {
   const t = useT();
   const en = useLocale() === "en";
   const [devices, setDevices] = useState<Device[]>([]);
   const [status, setStatus] = useState("");
   const [blocker, setBlocker] = useState("");
+  // The guide opens on the tab for the device the page is open on.
+  const [device, setDevice] = useState<string | undefined>();
   const load = async () => {
     const body = await fetch("/api/push", { cache: "no-store" }).then((r) => r.json()).catch(() => null) as { devices?: Device[] } | null;
     setDevices(body?.devices ?? []);
   };
   useEffect(() => {
     void load();
-    const standalone = window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
-    if (location.protocol !== "https:") setBlocker(t("要在手机上用 https 的 Tailscale 地址打开这一页，才能开启推送。"));
-    else if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window))
-      setBlocker(/iPhone|iPad/.test(navigator.userAgent) && !standalone
-        ? t("iPhone 只给添加到主屏幕的 App 推送：先点分享 →「添加到主屏幕」，再从主屏幕的图标打开这一页。")
-        : t("这个浏览器不支持网页推送。"));
+    setDevice(/iPhone|iPad/.test(navigator.userAgent) ? "iphone" : /Android/.test(navigator.userAgent) ? "android" : "desktop");
+    const blocked = pushBlocker(t);
+    if (blocked) setBlocker(blocked);
   }, []);
 
   const enable = async () => {
-    setStatus(t("请求通知权限…"));
-    try {
-      if (await Notification.requestPermission() !== "granted") { setStatus(t("没有得到通知权限：可以在系统设置 → 通知 里给 Crossline 打开。")); return; }
-      const { publicKey } = await fetch("/api/push", { cache: "no-store" }).then((r) => r.json()) as { publicKey: string };
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription()
-        ?? await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: toKey(publicKey) });
-      const response = await fetch("/api/push/subscribe", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ subscription: subscription.toJSON(), origin: location.origin, device: deviceName(t) }) });
-      setStatus(response.ok ? t("已开启。可以发一条测试推送看看。") : t("没保存上，请重试。"));
-      await load();
-    } catch (error) {
-      setStatus(t("开启失败：{{reason}}", { reason: error instanceof Error ? error.message : t("未知原因") }));
-    }
+    setStatus((await enablePush(setStatus, t)).message);
+    await load();
   };
   const test = async () => {
     setStatus(t("发送中…"));
@@ -70,5 +52,6 @@ export function PhonePush() {
         {devices.length > 0 && <button type="button" onClick={() => void test()}>{t("发一条测试推送")}</button>}
       </div>}
     {status && <small role="status">{status}</small>}
+    <SetupGuide guide={phonePushGuide(privateNetwork)} selected={device} />
   </div>;
 }

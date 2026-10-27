@@ -1,4 +1,4 @@
-import type { Effectiveness } from "@crossline/core";
+import { ATTENTION_TARGET_MINUTES, type AttentionSummary, type Effectiveness } from "@crossline/core";
 import { Bullet, Ring, Sparkline, StackedBar } from "../ui/charts";
 import { Tag } from "../ui/tag";
 import { joinList, tFor, type Locale } from "../../lib/i18n";
@@ -11,7 +11,7 @@ const h = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
  * deadline work, the cost of running the system, and how much committed work gets the treatments the evidence supports. All from the
  * ledger; nothing here is a model's judgement.
  */
-export function EffectivenessCard({ data, labels, locale }: { data: Effectiveness & { decisionMinutesMeasured: false }; labels: Record<string, string>; locale?: Locale }) {
+export function EffectivenessCard({ data, labels, locale }: { data: Effectiveness & { setup?: AttentionSummary }; labels: Record<string, string>; locale?: Locale }) {
   const t = tFor(locale);
   const lines = Object.entries(data.priorities.minutesByLine).sort((a, b) => b[1] - a[1]);
   const coverage = data.estimates.coverageCalibrated ?? data.estimates.coverageRaw;
@@ -41,11 +41,27 @@ export function EffectivenessCard({ data, labels, locale }: { data: Effectivenes
       {lines.length ? <StackedBar label={t("近 7 天各主线投入")} unit=" h" segments={lines.map(([line, minutes]) => ({ label: labels[line] ?? line, value: h(minutes), line }))} />
         : <small className="muted">{t("尚无计时记录")}</small>}
     </div>
-    <div className="st-health-cell">
-      <div className="ui-stat"><b>{data.overhead.decisionsPerDay}</b><span>{t("每日决定次数")}</span></div>
-      <div className="ui-stat"><b>{data.overhead.pendingNow}</b><span>{t("当前待决")}</span></div>
-      <div className="ui-stat"><b>{data.overhead.medianCaptureToScheduled === null ? "—" : t("{{n}} 分", { n: data.overhead.medianCaptureToScheduled })}</b><span>{t("收集到排入（中位）")}</span></div>
+    <div className="st-health-cell st-health-wide">
+      <div><b>{t("系统本身的成本")}</b><small>{data.overhead.decisionsTimed
+        ? t("决策用时只计待决卡片在屏幕上的时间（单张最多 5 分钟）；近 7 天 {{count}} 次回答有计时", { count: data.overhead.decisionsTimed })
+        : t("待决卡片从现在起记录在屏幕上的时间，回答几次后显示决策用时")}{data.overhead.planDaysRecorded
+        ? t("；计划变动为已排时段被挪开或撤下的工作块，{{count}} 天有记录", { count: data.overhead.planDaysRecorded }) : ""}</small></div>
+      <div className="st-health-stats">
+        <div className="ui-stat"><b>{data.overhead.decisionsPerDay}</b><span>{t("每日决定次数")}</span></div>
+        <div className="ui-stat"><b>{data.overhead.decisionsTimed ? t("{{n}} 分", { n: data.overhead.decisionMinutesPerDay }) : "—"}</b><span>{t("每日决策用时")}</span></div>
+        <div className="ui-stat"><b>{data.overhead.planChangesPerDay === null ? "—" : data.overhead.planChangesPerDay}</b><span>{t("每日计划变动（块）")}</span></div>
+        <div className="ui-stat"><b>{data.overhead.pendingNow}</b><span>{t("当前待决")}</span></div>
+        <div className="ui-stat"><b>{data.overhead.medianCaptureToScheduled === null ? "—" : t("{{n}} 分", { n: data.overhead.medianCaptureToScheduled })}</b><span>{t("收集到排入（中位）")}</span></div>
+        {data.overhead.setupMinutes !== null && !data.setup && <div className="ui-stat"><b>{t("{{n}} 分", { n: data.overhead.setupMinutes })}</b><span>{t("访谈投入（一次性）")}</span></div>}
+      </div>
     </div>
+    {data.setup && <div className="st-health-cell">
+      <div className="ui-stat"><b>{data.setup.ready ? t("{{n}} 分", { n: data.setup.ready.minutes }) : "—"}</b><span>{t("访谈到可开始")}</span></div>
+      <div className="ui-stat"><b>{data.setup.complete ? t("{{n}} 分", { n: data.setup.complete.minutes }) : "—"}</b><span>{t("访谈到完整")}</span></div>
+      <div><b>{t("访谈用时 {{n}} 分", { n: data.setup.minutes })}</b><small>{t("只计页面在前台且一分钟内有操作的时间；目标：可开始 ≤{{ready}} 分、完整 ≤{{complete}} 分", { ready: ATTENTION_TARGET_MINUTES.ready, complete: ATTENTION_TARGET_MINUTES.complete })}
+        {data.setup.ready ? t("；第 {{n}} 轮可开始", { n: data.setup.ready.rounds }) : ""}{data.setup.complete ? t("，第 {{n}} 轮完整", { n: data.setup.complete.rounds }) : ""}</small>
+        {[data.setup.ready, data.setup.complete].some((mark) => mark && !mark.withinTarget) && <Tag tone="risk">{t("超出目标")}</Tag>}</div>
+    </div>}
     <div className="st-health-cell">
       {data.relations.rate === null ? <div className="ui-stat"><b>—</b></div> : <Ring label={t("跨线关系兑现率")} value={data.relations.rate} />}
       <div><b>{t("跨线关系兑现率")}</b><small>{data.relations.checked ? t("{{count}} 条飞轮关系已到核对日，部分兑现按一半计", { count: data.relations.checked }) : t("尚无到核对日的飞轮关系")}</small>

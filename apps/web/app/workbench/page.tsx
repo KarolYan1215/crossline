@@ -1,3 +1,4 @@
+import { onPersonsBoard } from "@crossline/core";
 import { stateLabel } from "../../lib/labels";
 import { RestoreButton } from "./restore-button";
 import { archivedBySystem, ensureSeeded, getStore, libraryUntil, loadCurrentPlan, planToday } from "../../lib/crossline";
@@ -15,6 +16,8 @@ import { timed, timedSync } from "../../lib/sections";
 import { localeFor } from "../../lib/locale";
 import { tFor } from "../../lib/i18n";
 import { punct, shortDate } from "../task/format";
+import { milestonesBeingBackplanned } from "../../lib/backplan-status";
+import { FirstHint } from "../ui/first-hint";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +31,7 @@ const SECTIONS: Array<{ group: TaskGroup; title: string; hint: string }> = [
 ];
 const WAIT_HEADINGS: Array<{ kinds: string[]; title: string }> = [
   { kinds: ["returned", "approval"], title: "等本人决定" },
-  { kinds: ["input", "release", "material"], title: "等他人、材料或开放日" },
+  { kinds: ["input", "release", "material", "preparing"], title: "等他人、材料、步骤规划或开放日" },
   { kinds: ["gate"], title: "等验收" }
 ];
 
@@ -71,7 +74,8 @@ export default async function WorkbenchPage({ searchParams }: {
   const milestoneOptions = store.listMilestones(ctx.workspaceId)
     .filter((milestone) => milestone.status === "approved")
     .map((milestone) => ({ id: milestone.id, title: milestone.title, identityId: milestone.identityId }));
-  const live = all.filter((run) => run.state !== "archived");
+  // The assistant's preparation and the questions to the person are not the person's tasks (docs/work-split.md): no card here.
+  const live = all.filter((run) => run.state !== "archived" && onPersonsBoard(run));
   // One batched read for every card instead of one per card — see `loadTaskDetailsBatch`'s own doc comment.
   const taskDetails = timedSync("workbench.details", () => loadTaskDetailsBatch(ctx, live.map((run) => run.id)));
   const slots = nextSlots((await timed("plan.current", () => loadCurrentPlan(ctx))).blocks, today);
@@ -92,9 +96,21 @@ export default async function WorkbenchPage({ searchParams }: {
     <TaskCard detail={entry.detail} slot={entry.slot} today={today} />
   </div>;
   const nothing = !live.length && !captures.length;
+  const backplanning = nothing ? milestonesBeingBackplanned(getStore(), ctx.workspaceId, today) : 0;
   const shownLines = lines.filter((line) => lineCounts.has(line.id));
   return <SubpageShell active={"任务"} title={t("任务")}>
-    {nothing ? <p className="panel today-empty">{t("还没有任务。任务有两个来源：批准「主线」页的里程碑草稿后，系统从它们倒推出任务；或者在今日页的输入框写下要做的事，系统整理成任务。")}</p>
+    {!nothing && <FirstHint id="workbench" title={t("这一页怎么看")}>
+      <ul className="ui-first-hint-list">
+        <li>{t("现在：正在计时、今天有时段或今天到期")}</li>
+        <li>{t("接下来：之后有时段")}</li>
+        <li>{t("在等：等本人批准、等他人或材料、等验收")}</li>
+        <li>{t("任务库：所属里程碑还远，进入三周窗口后才排进日历")}</li>
+        <li>{t("点开任务卡看步骤和材料；开始计时后右下角倒计时，做完按完成，本人提交即视为验收")}</li>
+      </ul>
+    </FirstHint>}
+    {nothing ? <p className="panel today-empty">{backplanning
+      ? t("系统正在从已批准的 {{count}} 个里程碑倒推任务（每个几分钟），出来的任务会出现在这里。", { count: backplanning })
+      : t("还没有任务。任务有两个来源：批准「主线」页的里程碑草稿后，系统从它们倒推出任务；或者在今日页的输入框写下要做的事，系统整理成任务。")}</p>
       : <div className="tasks-top">
         <nav className="tasks-index" aria-label={t("任务分组")}>
           {SECTIONS.map((section) => <a key={section.group} href={`#tasks-${section.group}`}><span>{t(section.title)}</span><b className="mono">{count(section.group)}</b></a>)}

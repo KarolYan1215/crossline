@@ -116,3 +116,14 @@ test("a block moved elsewhere before it began is never asked about", async () =>
   store.saveWorkOrder({ ...store.listWorkOrders(ws)[0]!, state: "archived" });
   expect((await nudgesFor(TEST_CTX, at("21:00"))).filter((item) => item.kind === "block_confirm")).toEqual([]);
 });
+
+test("on the health line, a confirmed exercise block is a workout record with the confirmed minutes; other lines and other work write none", async () => {
+  const { store, at } = setup();
+  // The task's line is the health line, and its steps name an exercise.
+  store.setSetting(ws, "lines.v1", JSON.stringify([{ id: "research", label: "健康管理者", color: "olive", goal: "", createdAt: "", domain: "wellness" }]));
+  store.saveStepPlan(ws, "ece555-hw3", plan([step("s1", "跑步 5 公里"), step("s2", "力量训练", ["s1"])]), TEST_CTX.principalId, "replan");
+  const { message } = await askAboutFirstBlock(at);
+  const view = confirmView(TEST_CTX, message.id)!;
+  confirmBlock(TEST_CTX, message.id, { kind: "under", minutes: 10 });
+  expect(store.listRecords(ws).map((item) => [item.kind, item.value, item.source])).toEqual([["workout", view.blockMinutes - 10, "confirm"]]);
+});

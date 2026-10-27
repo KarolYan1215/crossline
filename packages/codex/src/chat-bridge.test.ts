@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { createChatStreamTranslator, responsesToChat, upstreamFailure } from "./chat-bridge";
+import { createChatStreamTranslator, freeformDescription, responsesToChat, stableFirst, upstreamFailure } from "./chat-bridge";
 
 /** Parses the SSE lines a translator produced back into events. */
 const events = (lines: string[]) => lines.map((line) => JSON.parse(line.split("\ndata: ")[1]!) as Record<string, unknown> & { type: string });
@@ -36,6 +36,17 @@ test("a provider with JSON mode only gets json_object and the schema in its inst
   const { body } = responsesToChat({ model: "m", input: [], text: { format: { type: "json_schema", strict: true, schema, name: "s" } } }, { responseFormat: "json_object" });
   expect(body.response_format).toEqual({ type: "json_object" });
   expect((body.messages as Array<{ content: string }>)[0]!.content).toContain(JSON.stringify(schema));
+});
+
+test("with functions on offer, JSON mode is not forced: the model may call them first and gives the JSON as its final reply", () => {
+  const schema = { type: "object", properties: { a: { type: "string" } } };
+  const { body } = responsesToChat({ model: "m", input: [], tools: [{ type: "function", name: "read_file", description: "", parameters: { type: "object", properties: {} } }],
+    text: { format: { type: "json_schema", strict: true, schema, name: "s" } } }, { responseFormat: "json_object" });
+  expect(body.response_format).toBeUndefined();
+  expect(body.tool_choice).toBe("auto");
+  const system = (body.messages as Array<{ content: string }>)[0]!.content;
+  expect(system).toContain("Call the functions you need first");
+  expect(system).toContain(JSON.stringify(schema));
 });
 
 test("tools: namespaces flatten to ns__name and come back with their namespace; earlier calls and outputs replay as tool messages", () => {
@@ -102,4 +113,49 @@ test("upstream errors land on the codes Codex already treats: full context, spen
   expect(upstreamFailure(402, JSON.stringify({ error: { message: "Insufficient Balance" } }))).toEqual({ code: "insufficient_quota", message: "Insufficient Balance" });
   expect(upstreamFailure(429, "slow down").code).toBe("rate_limit_exceeded");
   expect(upstreamFailure(500, "").code).toBe("server_error");
+});
+
+test("a freeform tool travels as a function whose description no longer says 'not JSON' and says how to send the text", () => {
+  const description = "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON. The patch starts with *** Begin Patch.";
+  const out = freeformDescription(description);
+  expect(out).not.toMatch(/do not wrap the patch in JSON/i);
+  expect(out).toContain("Use the `apply_patch` tool to edit files.");
+  expect(out).toContain("The patch starts with *** Begin Patch.");
+  expect(out).toContain("one argument, `input`");
+  const { body } = responsesToChat({ model: "m", input: [], tools: [{ type: "custom", name: "apply_patch", description }] });
+  const tool = (body.tools as Array<{ function: { name: string; description: string } }>)[0]!;
+  expect(tool.function.name).toBe("apply_patch");
+  expect(tool.function.description).toBe(out);
+});
+
+test("a thinking variant is sent to an endpoint that takes it as the base model with thinking off or capped; elsewhere the name goes through", () => {
+  const request = (model: string) => ({ model, input: [{ type: "message", role: "user", content: "hi" }] });
+  expect(responsesToChat(request("deepseek-ai/DeepSeek-V4.1-Flash@think:off"), { thinkingControl: true }).body)
+    .toMatchObject({ model: "deepseek-ai/DeepSeek-V4.1-Flash", enable_thinking: false });
+  const capped = responsesToChat(request("deepseek-ai/DeepSeek-V4.1-Flash@think:2048"), { thinkingControl: true }).body;
+  expect(capped).toMatchObject({ model: "deepseek-ai/DeepSeek-V4.1-Flash", enable_thinking: true, thinking_budget: 2048 });
+  expect(responsesToChat(request("deepseek-ai/DeepSeek-V4.1-Flash"), { thinkingControl: true }).body).not.toHaveProperty("enable_thinking");
+  expect(responsesToChat(request("qwen3:8b@think:off")).body).toMatchObject({ model: "qwen3:8b@think:off" });
+});
+
+test("a Skill's text goes ahead of the input it was named in, and instructions Codex adds mid-thread stay where they came", () => {
+  const skill = "<skill>\n<name>crossline:crossline-step-planner</name>\n<path>/s/SKILL.md</path>\nrules\n</skill>";
+  const chat = responsesToChat({ model: "m", instructions: "base", input: [
+    { type: "message", role: "developer", content: [{ type: "input_text", text: "<permissions>x</permissions>" }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "$crossline:crossline-step-planner\n\n{\"task\":1}" }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: skill }] },
+    { type: "message", role: "assistant", content: [{ type: "output_text", text: "{}" }] },
+    { type: "message", role: "developer", content: [{ type: "input_text", text: "model changed" }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "repair: field missing" }] }
+  ] });
+  const messages = chat.body.messages as Array<{ role: string; content: unknown }>;
+  expect(messages.map((message) => message.role)).toEqual(["system", "user", "user", "assistant", "user", "user"]);
+  expect(messages[0]!.content).toBe("base\n\n<permissions>x</permissions>");
+  expect(String(messages[1]!.content)).toMatch(/^<skill>/);
+  expect(String(messages[2]!.content)).toContain("{\"task\":1}");
+  expect(messages[4]!.content).toBe("<instructions>\nmodel changed\n</instructions>");
+  // Moving is idempotent: the same history always gives the same opening, so every request of a thread shares its prefix.
+  const again = [...messages.slice(1)];
+  stableFirst(again);
+  expect(again).toEqual(messages.slice(1));
 });

@@ -22,12 +22,18 @@ test("the opening card speaks English and offers the common roles as English wor
 });
 
 test("the first reply is said in English on an English screen, and stays Chinese otherwise", () => {
-  const reply = openingReply({ tone: "direct", lines: ["Researcher", "Entrepreneur"], base: "", fixed: [] }, true, "en");
+  const reply = openingReply({ tone: "neutral", edition: "full", lines: ["Researcher", "Entrepreneur"], domains: {}, base: "", fixed: [] }, true, "en");
+  expect(reply).toContain("[Edition] Full");
   expect(reply).toContain("[My tracks] Researcher, Entrepreneur");
   expect(reply).toContain("[Base for the next 12–24 months] Several, equally");
   expect(reply).toContain("[Tracks with a fixed schedule] None");
   expect(reply.endsWith("I've added my materials. Please read what you can from them first, then ask about what's missing.")).toBe(true);
-  expect(openingReply({ tone: "direct", lines: ["研究者"], base: "", fixed: [] }, false)).toContain("【我的主线】研究者");
+  expect(openingReply({ tone: "neutral", edition: "full", lines: ["研究者"], domains: {}, base: "", fixed: [] }, false)).toContain("【我的主线】研究者");
+  // The lite edition on an English screen: the domain lines are English words, named with their domain, and still recognised as domains.
+  const lite = openingReply({ tone: "neutral", edition: "lite", lines: ["Professional", "Health manager"], domains: { "Health manager": "wellness" },
+    base: "Professional", fixed: ["Professional"], said: { Professional: "Work" } }, false, "en");
+  expect(lite).toContain("[My tracks] Professional, Health manager (Health)");
+  expect(lite).toContain("[Something with a fixed schedule] Work (track: Professional)");
 });
 
 test("the wait says what the turn is doing in English", () => {
@@ -51,9 +57,9 @@ test("the week's days and tooltips are English", () => {
 test("the date batch counts in English, with plurals", () => {
   const item = { id: "d1", kind: "date" as const, title: "Midterm", project: "ece548", confidence: "high" as const, when: "Oct 27", quote: "10/27 Midterm",
     sourceRef: "src-1", note: "", checked: true, blocks: 0 };
-  const html = en(<DateBatchCard batch={{ id: "b", documentCount: 1, items: [item], questions: [], dropped: 2 }} busy={false} onDecide={() => {}} onRedo={() => {}} />);
+  const html = en(<DateBatchCard batch={{ id: "b", documentCount: 1, items: [item], questions: [], dropped: ["Quiz 1", "Quiz 2"] }} busy={false} onDecide={() => {}} onRedo={() => {}} />);
   expect(html).toContain("1 item found in 1 file");
   expect(html).toContain("Add to calendar (1 item)");
-  expect(html).toContain("2 more items couldn&#x27;t be verified against the source and were dropped, not saved.");
+  expect(html).toContain("2 more items had no sentence in the source stating their date, so they weren&#x27;t saved");
   expect(html).toContain("High confidence");
 });

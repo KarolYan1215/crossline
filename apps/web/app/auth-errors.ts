@@ -39,7 +39,7 @@ const AUTH_ERROR_TEXT: Record<string, string> = {
   CHATGPT_EMAIL_MISSING: "这个 ChatGPT 账号没有提供邮箱，无法登录。",
   // The hosted beta's sign-up rules (packages/auth signupCap / signupAllowlist).
   SIGNUP_FULL: "内测名额已满，已记下这个邮箱，有名额时会发邮件通知你。",
-  SIGNUP_NOT_INVITED: "这个邮箱还没有内测资格。先做公开测评并在结果页点「申请内测」，或联系发给你链接的人。",
+  SIGNUP_NOT_INVITED: "这个邮箱不在注册名单里。请联系发给你链接的人。",
   account_not_linked:"这个邮箱已有 Crossline 账号，但登录方或原账号没有确认这个邮箱；请先用原来的方式登录。"
 };
 

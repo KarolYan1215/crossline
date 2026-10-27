@@ -5,7 +5,7 @@ import { SegmentedControl } from "../ui/controls";
 import { LineTag, Tag } from "../ui/tag";
 import { useT } from "../locale-context";
 
-type Row = { id: string; source: string; sourceLabel: string; scopeLabel: string; line?: string; text: string; day: string };
+type Row = { id: string; source: string; sourceLabel: string; scopeLabel: string; line?: string; text: string; day: string; lapsed?: boolean };
 type Period = "off" | "biweekly" | "monthly";
 const post = (body: unknown) => fetch("/api/preferences", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .then((response) => response.ok).catch(() => false);
@@ -28,15 +28,19 @@ export function PersonalizationModule({ rows, period, learned }: { rows: Row[]; 
   const shown = filter === ALL ? list : list.filter((row) => row.sourceLabel === filter);
   return <div className="st-modules">
     <section className="st-card st-card-wide" aria-label={t("已学到的偏好")}>
-      <header><h3>{t("已学到的偏好 · {{n}}", { n: list.length })}</h3><small>{t("之后的分析、步骤拆分与里程碑设计都会参考；删除后不再使用")}</small></header>
+      <header><h3>{t("已学到的偏好 · {{n}}", { n: list.length })}</h3><small>{t("之后的分析、步骤拆分与里程碑设计都会参考；删除后不再使用。估时、重要性与推迟类 30 天未被用到会失效，可恢复")}</small></header>
       {list.length === 0 ? <p className="muted">{t("尚无记录。向小帮手纠正分类或步骤、修改估时与重要性、填写里程碑回顾后，会出现在这里。")}</p> : <>
         {sources.length > 1 && <SegmentedControl label={t("来源")} value={filter} onChange={setFilter}
           options={[ALL, ...sources].map((value) => ({ value, label: t(value) }))} />}
         <ul className="st-prefs">{shown.map((row) => <li key={row.id}>
           <Tag>{t(row.sourceLabel)}</Tag>
           {row.line ? <LineTag line={row.line}>{t(row.scopeLabel)}</LineTag> : <Tag>{t(row.scopeLabel)}</Tag>}
+          {row.lapsed && <Tag>{t("已失效")}</Tag>}
           <span className="st-pref-text">{row.text}</span>
           <small className="mono">{row.day}</small>
+          {row.lapsed && <button type="button" className="text-button" title={t("30 天未被使用而失效；恢复后不再自动失效")} onClick={async () => {
+            if (await post({ restore: row.id })) setList((current) => current.map((item) => item.id === row.id ? { ...item, lapsed: false } : item)); else setNote(t("恢复未完成"));
+          }}>{t("恢复")}</button>}
           <button type="button" className="st-pref-remove" aria-label={t("删除：{{text}}", { text: row.text })} title={t("删除")} onClick={async () => {
             if (await post({ remove: row.id })) setList((current) => current.filter((item) => item.id !== row.id)); else setNote(t("删除未完成"));
           }}>×</button>

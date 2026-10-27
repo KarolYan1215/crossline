@@ -25,11 +25,11 @@ pnpm exec tsx scripts/assess-templates.ts placeholders
    $env:ASSESS_IMAGE_API_KEY = "sk-..."
    ```
    出候选图用文生图模型，默认 `black-forest-labs/FLUX.1-dev`，可以用 `ASSESS_IMAGE_TEMPLATE_MODEL` 换。
-2. 先看提示词（不花钱）：`pnpm exec tsx scripts/assess-templates.ts prompt GEMA`
+2. 先看提示词（不花钱）：`pnpm exec tsx scripts/assess-templates.ts prompt DLWV`
 3. 出候选图：每种类型男女各 1 张，存到 `candidates/<CODE>-female.png` / `<CODE>-male.png`。共 32 张，走硅基流动时按每张约 0.015 美元估算约 0.5 美元。已经存在的候选不会重画，加 `--force` 才重画；也可以只画几种：
    ```powershell
    pnpm exec tsx scripts/assess-templates.ts candidates            # 全部 16 种
-   pnpm exec tsx scripts/assess-templates.ts candidates GEMA SEMP  # 只画这两种
+   pnpm exec tsx scripts/assess-templates.ts candidates DLWV CLWU  # 只画这两种
    ```
 4. 生成总览图 `candidates/sheet.png`（32 张逐一编号，女在前、男在后）：`pnpm exec tsx scripts/assess-templates.ts sheet`。本人逐张看候选图，按这几条挑：
    - 16 张放在一起像同一个系列（同一画风、同样的线条和比例）；

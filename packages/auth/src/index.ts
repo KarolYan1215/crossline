@@ -59,6 +59,24 @@ function mailer(smtp: SmtpConfig) {
 }
 
 /**
+ * Mail that is not about signing in (the beta invite flow): the same SMTP account and the same e2e mailbox as the auth mail, so a test
+ * reads it back the same way. Unlike the auth mail it throws when the message does not go out, so the caller can say so.
+ */
+export function createMailSender(config: { smtp?: SmtpConfig; testMailboxDir?: string }): ((mail: { to: string; subject: string; text: string }) => Promise<void>) | undefined {
+  if (config.testMailboxDir) {
+    const dir = config.testMailboxDir;
+    return async ({ to, subject, text }) => {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, `${Date.now()}-${randomUUID()}.json`), JSON.stringify({ to, subject, url: text.match(/https?:\/\/\S+/)?.[0] ?? "", text }));
+    };
+  }
+  if (!config.smtp) return undefined;
+  const smtp = config.smtp;
+  const transport = mailer(smtp);
+  return async ({ to, subject, text }) => { await transport.sendMail({ from: smtp.from, to, subject, text }); };
+}
+
+/**
  * A factory, not a singleton: tests build one against a temp `authDbPath`, `apps/web` builds exactly
  * one against `CROSSLINE_DATA_DIR` and caches it the same way `getStore()` caches `CrosslineStore`.
  *
@@ -77,18 +95,18 @@ function mailer(smtp: SmtpConfig) {
  */
 function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
   const transport = options.smtp ? mailer(options.smtp) : undefined;
-  /** `url` is what the message carries (a link or a code: the e2e sink records it as is); `text`, when given, is the whole body around it. */
-  const sendMail = (to: string, subject: string, url: string, text?: string): Promise<void> => {
+  const sendMail = (to: string, subject: string, text: string): Promise<void> => {
     // The e2e sink takes priority when both are set (it never is in production — see the `testMailboxDir`
     // doc comment) so a captured message never silently also tries a real SMTP round trip.
     if (options.testMailboxDir) {
       mkdirSync(options.testMailboxDir, { recursive: true });
       writeFileSync(path.join(options.testMailboxDir, `${Date.now()}-${randomUUID()}.json`),
-        JSON.stringify({ to, subject, url }));
+        // `url` is the link a test follows; the body now explains it around the link, so the link is read back out of it.
+        JSON.stringify({ to, subject, url: text.match(/https?:\/\/\S+/)?.[0] ?? text, text }));
       return Promise.resolve();
     }
     if (!transport || !options.smtp) return Promise.resolve();
-    return transport.sendMail({ from: options.smtp.from, to, subject, text: text ?? url }).then(() => undefined);
+    return transport.sendMail({ from: options.smtp.from, to, subject, text }).then(() => undefined);
   };
   const emailCapable = Boolean(options.smtp || options.testMailboxDir);
   // Better Auth sends through `runInBackgroundOrAwait`, which catches every error and only logs it, so a message that did not go out
@@ -104,8 +122,8 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     try { chosen = userId ? options.accountLocale?.(userId) : undefined; } catch { chosen = undefined; }
     return chosen ?? localeFromCookieHeader(headers?.get("cookie"));
   };
-  const deliver = async (to: string, subject: string, url: string, text?: string) => {
-    try { await sendMail(to, subject, url, text); undelivered.delete(to.toLowerCase()); }
+  const deliver = async (to: string, subject: string, text: string) => {
+    try { await sendMail(to, subject, text); undelivered.delete(to.toLowerCase()); }
     catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       undelivered.set(to.toLowerCase(), reason);
@@ -143,7 +161,8 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
     // The hosted beta (docs/beta-launch.md §10.6): who may create an account, by any path — email code, password or Google. Existing
     // accounts sign in as before. Listed addresses always may; with `CROSSLINE_SIGNUP_CAP` anyone else may while the accounts number
     // fewer than the cap (people come by the public test or straight to the interview, and neither path should need an invitation);
-    // past it the address goes on the waiting list. A list with no cap admits only the list.
+    // past it the address goes on the waiting list. A list with no cap admits only the list — so open sign-up must carry no list at all:
+    // dropping the cap while the owner's own address stayed listed closed the hosted beta to everyone else (2026-10-17).
     ...(signupAllowlist() || signupCap() ? { databaseHooks: { user: { create: { before: async (user: { email: string }, context?: { headers?: Headers | undefined } | null) => {
       const email = user.email.trim().toLowerCase();
       if (signupAllowlist()?.has(email)) return { data: user };
@@ -168,20 +187,20 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       emailAndPassword: {
         enabled: true,
         requireEmailVerification: true,
+        // A bare link read as phishing and said nothing about what it does or how long it lasts (2026-10-18 walkthrough); the
+        // reset token lives an hour (Better Auth's default `resetPasswordTokenExpiresIn`). Written in the reader's language (docs/i18n.md).
         sendResetPassword: async ({ user, url }, request) => {
           const t = tFor(mailLocale(user.email, request?.headers));
-          // Better Auth's reset link lasts an hour (`resetPasswordTokenExpiresIn`, its default).
-          await deliver(user.email, t("重置 Crossline 密码"), url,
-            t("打开下面的链接，为 Crossline 账号设置新密码：\n\n{{url}}\n\n链接 1 小时内有效。如果没有申请重置密码，忽略这封邮件即可，原密码不变。", { url }));
+          await deliver(user.email, t("重置 Crossline 密码"),
+            t("有人请求重置这个邮箱的 Crossline 密码。打开下面的链接设置新密码（1 小时内有效）：\n\n{{url}}\n\n如果不是本人操作，忽略这封邮件即可，密码不会改变。", { url }));
         }
       },
       emailVerification: {
         sendOnSignUp: true,
         sendVerificationEmail: async ({ user, url }, request) => {
           const t = tFor(mailLocale(user.email, request?.headers));
-          // The verification link lasts an hour (`emailVerification.expiresIn`, Better Auth's default).
-          await deliver(user.email, t("验证你的 Crossline 邮箱"), url,
-            t("打开下面的链接，验证这个邮箱并完成 Crossline 注册：\n\n{{url}}\n\n链接 1 小时内有效。如果不是本人注册，忽略这封邮件即可。", { url }));
+          await deliver(user.email, t("验证你的 Crossline 邮箱"),
+            t("打开下面的链接验证这个邮箱，之后就能登录 Crossline：\n\n{{url}}\n\n如果不是本人注册，忽略这封邮件即可。", { url }));
         }
       },
       hooks: {
@@ -214,8 +233,8 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
 
 /**
  * The invited addresses, lower-cased; undefined when sign-up is open. Two sources, read on each use: `CROSSLINE_SIGNUP_ALLOWLIST`
- * (comma-separated) and the file `CROSSLINE_SIGNUP_ALLOWLIST_FILE` (one address per line, `#` comments), which the server refreshes
- * from the public test's 「申请内测」 requests — so an invitation takes effect without a restart. Naming a file closes sign-up even while
+ * (comma-separated) and the file `CROSSLINE_SIGNUP_ALLOWLIST_FILE` (one address per line, `#` comments), re-read on every sign-up, so an
+ * address added to the file by hand takes effect without a restart (nothing writes it automatically). Naming a file closes sign-up even while
  * it is empty or missing: an unreadable list must never mean an open door.
  */
 export function signupAllowlist(env: NodeJS.ProcessEnv = process.env): Set<string> | undefined {
@@ -272,6 +291,23 @@ export type ResolvedAccessContext = { ctx: AccessContext } | { error: "UNAUTHENT
  * anywhere else today, which is exactly the gap `isolation.test.ts`'s own doc comment names: nothing
  * previously verified the caller was allowed to use the `workspaceId` it passed.
  */
+/**
+ * Removes a Better Auth user for good — sessions, linked sign-ins (password, Google, ChatGPT) and the user row — the way Better Auth's
+ * own delete-user route does, without its email round trip: the web asks for the account's email typed out instead (「删除账号」,
+ * decided 2026-10-17). Pending email codes for the address go too.
+ */
+export async function deleteAuthUser(auth: CrosslineAuth, userId: string, email?: string): Promise<void> {
+  const adapter = (await auth.$context).internalAdapter;
+  await adapter.deleteUserSessions(userId);
+  await adapter.deleteAccounts(userId);
+  await adapter.deleteUser(userId);
+  if (email) {
+    for (const identifier of [`sign-in-otp-${email}`, `email-verification-otp-${email}`, `forget-password-otp-${email}`, email]) {
+      await adapter.deleteVerificationByIdentifier(identifier).catch(() => undefined);
+    }
+  }
+}
+
 export async function requireAccessContext(
   auth: CrosslineAuth, store: CrosslineStore, request: Request, localAccount?: ReadLocalCodexAccount
 ): Promise<ResolvedAccessContext> {

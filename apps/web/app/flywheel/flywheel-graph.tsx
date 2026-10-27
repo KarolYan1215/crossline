@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { RELATION_KIND_LABEL } from "@crossline/core";
 import {
-  buildGraph, createSimulation, edgeGeometry, fitTransform, graphLoops, layoutGraph, loopCentre, neighbours,
+  buildGraph, createSimulation, edgeGeometry, fitTransform, graphLoops, layoutGraph, loopCentre, neighbours, wrapLabel,
   type FlywheelGraphData, type GraphEdge, type GraphNode, type Point
 } from "./graph-model";
 import { useLocale, useT } from "../locale-context";
@@ -232,17 +232,24 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
             if (!p) return null;
             const anchor = node.kind === "anchor";
             const named = anchor || showNames || Boolean(lit?.has(node.id));
-            const label = anchor ? short(node.label, width < 600 ? 10 : 16) : short(node.label, 14);
+            // A goal takes two lines, and all of it while hovered or focused; a milestone's name stays one short line.
+            // A Latin goal in English keeps about twice the characters per line, as `clip` does for names.
+            const perLine = (width < 600 ? 10 : 16) * (locale === "en" && !/[⺀-鿿]/u.test(node.label) ? 2 : 1);
+            const label = anchor ? wrapLabel(node.label, perLine, hover === node.id ? 6 : 2) : [short(node.label, 14)];
             return <g key={node.id} className="fw-node" data-kind={node.kind} data-line={node.line} data-status={node.status} data-dim={dim([node.id])}
               transform={`translate(${r1(p.x)},${r1(p.y)})`} onPointerDown={onNodeDown(node)}
               onPointerEnter={() => setHover(node.id)} onPointerLeave={() => setHover((current) => current === node.id ? null : current)}
               {...(node.milestoneId ? { role: "link", tabIndex: 0, "aria-label": t(node.status === "draft" ? "{{line}} · {{title}}，{{count}} 项未完成，草稿，打开主线页" : "{{line}} · {{title}}，{{count}} 项未完成，打开主线页",
                 { line: lineLabel.get(node.line) ?? "", title: node.label, count: node.openTasks ?? 0 }),
                 onFocus: () => setHover(node.id), onBlur: () => setHover(null),
-                onKeyDown: (event: ReactKeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMilestone(node.milestoneId!); } } } : { "aria-hidden": true })}>
+                onKeyDown: (event: ReactKeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMilestone(node.milestoneId!); } } }
+                // An anchor can be focused to read its whole goal, as hovering shows it.
+                : anchor ? { role: "img", tabIndex: 0, "aria-label": t("{{line}}的长期目标：{{goal}}", { line: lineLabel.get(node.line) ?? "", goal: node.label }),
+                  onFocus: () => setHover(node.id), onBlur: () => setHover(null) } : { "aria-hidden": true })}>
               <title>{anchor ? `${lineLabel.get(node.line) ?? ""}${t("：")}${node.label}` : `${node.label} · ${t("{{count}} 项未完成", { count: node.openTasks ?? 0 })}${node.status === "draft" ? ` · ${t("草稿")}` : ""}`}</title>
               {anchor ? <><circle r={node.radius} className="fw-anchor-ring" /><circle r={5} className="fw-anchor-dot" /></> : <circle r={node.radius} className="fw-dot" />}
-              {named && <text y={node.radius + 15} textAnchor="middle" className={anchor ? "fw-label fw-label-goal" : "fw-label"}>{label}</text>}
+              {named && <text y={node.radius + 15} textAnchor="middle" className={anchor ? "fw-label fw-label-goal" : "fw-label"}>
+                {label.map((line, index) => <tspan key={index} x={0} dy={index ? 16 : 0}>{line}</tspan>)}</text>}
             </g>;
           })}
           {loops.map((loop) => {
@@ -281,7 +288,7 @@ export function FlywheelGraph({ data }: { data: FlywheelGraphData }) {
     <ul className="fw-lines" aria-label={t("各主线")}>
       {data.lines.map((line) => <li key={line.id} data-line={line.id}>
         <i aria-hidden="true" /><a href="/milestones"><b>{line.label}</b></a> · <span className="mono">{line.openTasks}</span>{t(" 项进行中")}
-        {line.goal && <small title={line.goal}>{short(line.goal, 36)}</small>}
+        {line.goal && <small title={line.goal}>{line.goal}</small>}
       </li>)}
     </ul>
     {/* The key is reference, read once: folded so the graph is not followed by a block of explanation. */}

@@ -36,8 +36,8 @@ function Lane({ label, blocks, axis, kind }: { label: string; blocks: OpenerBloc
       ? blocks.map((block) => `${block.start}–${block.end} ${block.title}${block.step ? ` · ${block.step}` : ""}`).join(locale === "en" ? "; " : "；") : t("无") })}>
       {blocks.map((block, index) => {
         const { left, width } = blockSpan(block, axis);
-        return <li key={`${block.start}-${index}`} className="opener-block" data-line={block.line ?? "none"} style={{ left: `${left}%`, width: `${width}%` }}
-          title={`${block.start}–${block.end} ${block.title}${block.step ? ` · ${block.step}` : ""}`} />;
+        return <li key={`${block.start}-${index}`} className="opener-block" data-line={block.line ?? "none"} data-missed={block.missed || undefined} style={{ left: `${left}%`, width: `${width}%` }}
+          title={`${block.start}–${block.end} ${block.title}${block.step ? ` · ${block.step}` : ""}${block.missed ? ` · ${t("未完成")}` : ""}`} />;
       })}
     </ul>
   </div>;
@@ -53,16 +53,18 @@ export function OpenerCard({ opener }: { opener: OpenerView }) {
   const locale = useLocale();
   const axis = openerAxis(opener);
   const now = useNowMinute(opener.day, opener.timeZone);
-  const nextWork = (now === undefined ? opener.work : opener.work.filter((block) => minutesOfClock(block.end) > now))[0];
+  const nextWork = (now === undefined ? opener.work : opener.work.filter((block) => !block.missed && minutesOfClock(block.end) > now))[0];
   const ticks: number[] = [];
   for (let minute = Math.ceil(axis.from / 180) * 180; minute <= axis.to; minute += 180) ticks.push(minute);
   const top = opener.asks.top;
+  const planned = opener.work.filter((block) => !block.missed);
+  const missed = opener.work.length - planned.length;
   return <div className="opener-card" aria-label={t("{{day}}的安排", { day: dayLabel(opener.day, locale) })}>
     <div className="opener-head">
       <b>{dayLabel(opener.day, locale)}</b>
       {opener.asks.count > 0
         ? <a className="opener-badge" href="/approvals" aria-label={t("待决 {{count}} 项", { count: opener.asks.count })}>{t("待决")} <span>{opener.asks.count}</span></a>
-        : <span className="opener-badge" data-empty="">{t("没有待决")}</span>}
+        : <span className="opener-badge" data-empty="" title={t("待批准的里程碑和提案在待确认页")}>{t("没有要回答的问题")}</span>}
     </div>
     <div className="opener-figure">
       <Lane label={"固定"} blocks={opener.fixed} axis={axis} kind="fixed" />
@@ -74,7 +76,7 @@ export function OpenerCard({ opener }: { opener: OpenerView }) {
         style={{ left: `calc(36px + (100% - 36px) * ${(now - axis.from) / (axis.to - axis.from)})` }} />}
     </div>
     <dl className="opener-facts">
-      <div><dt>{t("工作")}</dt><dd>{opener.work.length ? t("{{count}} 段 · 共 {{hours}}", { count: opener.work.length, hours: hoursText(workMinutes(opener), locale) }) : t("今天没有排给工作的时段")}
+      <div><dt>{t("工作")}</dt><dd>{planned.length ? t("{{count}} 段 · 共 {{hours}}", { count: planned.length, hours: hoursText(workMinutes(opener), locale) }) : t("今天没有排给工作的时段")}{missed > 0 && t(" · {{count}} 段未完成", { count: missed })}
         {nextWork && <span className="opener-next">{now === undefined ? t("第一段") : t("接下来")} {nextWork.start} {nextWork.title}{nextWork.step ? ` · ${nextWork.step}` : ""}</span>}</dd></div>
       <div><dt>{t("固定")}</dt><dd>{opener.fixed.length ? opener.fixed.slice(0, 2).map((block) => `${block.start}–${block.end} ${block.title}`).join(locale === "en" ? "; " : "；")
         + (opener.fixed.length > 2 ? t(" 等 {{count}} 项", { count: opener.fixed.length }) : "") : t("今天没有固定安排")}</dd></div>
@@ -82,7 +84,8 @@ export function OpenerCard({ opener }: { opener: OpenerView }) {
         {opener.soon.map((item) => <li key={`${item.title}-${item.due}`} data-line={item.line ?? "none"}>{item.title}<small>{md(item.due)}</small></li>)}</ul></dd></div>}
     </dl>
     {top && <div className="opener-urgent" data-line={top.line ?? "none"}>
-      <small>{t("最紧急 · {{when}}", { when: t(URGENCY[top.urgency]) })}</small>
+      {/* 「最紧急」 only for what cannot wait two days; the top of a calmer list is just the first to settle. */}
+      <small>{t(top.urgency === "now" ? "最紧急 · {{when}}" : "先定这件 · {{when}}", { when: t(URGENCY[top.urgency]) })}</small>
       <b>{top.title}</b>
     </div>}
   </div>;

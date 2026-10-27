@@ -24,6 +24,8 @@ export type TimelineItem = {
   workOrderId?: string;
   /** The step the block is for (`v<version>s<n>`), when the plan placed a step rather than the whole task. */
   stepId?: string;
+  /** Its time passed without the work being done: drawn dashed as 「未完成」 until 04:00 the next morning, its work already planned again. */
+  missed?: boolean;
   /** The assistant has this block's step: `planned` = 「自动交给 Agent」 will start it when the block comes up; `running` = it is at work on it. */
   agent?: "planned" | "running";
   /**
@@ -130,7 +132,7 @@ export type OverlapState = "clash" | "allowed";
  */
 export function overlapStates(items: TimelineItem[]): Map<string, OverlapState> {
   const out = new Map<string, OverlapState>();
-  const relevant = items.filter((item) => item.kind !== "activity");
+  const relevant = items.filter((item) => item.kind !== "activity" && !item.missed);
   for (let i = 0; i < relevant.length; i += 1) for (let j = i + 1; j < relevant.length; j += 1) {
     const a = relevant[i]!, b = relevant[j]!;
     if (a.day !== b.day || !overlaps(a, b)) continue;

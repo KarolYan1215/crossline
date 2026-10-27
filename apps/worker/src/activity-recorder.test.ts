@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import type { ActivityReading } from "@crossline/core";
+import { ACTIVITY_HOURLY, atComputerByHour, atComputerLines, type ActivityReading } from "@crossline/core";
 import { ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_LONG_GAPS, ACTIVITY_PAUSED_UNTIL, createActivityTracker, LOCAL_ACTIVITY_CONSENT, SLEEP_TRACKING_CONSENT } from "./activity-recorder";
 import { parseReadingLine } from "./activity-source";
 
@@ -138,4 +138,33 @@ test("the source's rhythm fields are kept only when all three are sane numbers",
   expect(parseReadingLine(JSON.stringify({ idleMs: 5, app: "a", title: "b", activeSec: 40, pauses: 3, mousePx: 1200 }), at)?.rhythm)
     .toEqual({ activeSec: 40, pauses: 3, mousePx: 1200 });
   expect(parseReadingLine(JSON.stringify({ idleMs: 5, app: "a", title: "b", activeSec: -1, pauses: 3, mousePx: 1200 }), at)?.rhythm).toBeUndefined();
+});
+
+test("idle and active minutes are kept per hour under the activity consent, survive a restart, and go when it is withdrawn", () => {
+  const { store, tracker, w } = setup();
+  try {
+    store.setSetting(w, LOCAL_ACTIVITY_CONSENT, "granted");
+    tracker.handle(reading(0));
+    tracker.handle(reading(1, "Code.exe", "x", 300_000));
+    expect(JSON.parse(store.getSetting(w, ACTIVITY_HOURLY)!)).toEqual([{ start: "2026-09-20T10:00:00.000Z", active: 1, idle: 1 }]);
+    // A new tracker (the worker restarted) carries on from the stored day instead of counting from zero.
+    const restarted = createActivityTracker(store, () => [w], 60);
+    restarted.handle(reading(2));
+    expect(store.listEnergyObservations(w)[0]!.aggregate).toMatchObject({ activeMinutes: 2, idleMinutes: 1, sampleCount: 3 });
+    expect(JSON.parse(store.getSetting(w, ACTIVITY_HOURLY)!)[0]).toMatchObject({ active: 2, idle: 1 });
+    store.setSetting(w, LOCAL_ACTIVITY_CONSENT, "denied");
+    restarted.handle(reading(3));
+    expect(store.getSetting(w, ACTIVITY_HOURLY)).toBeUndefined();
+  } finally { store.close(); }
+});
+
+test("the usual day at the computer is read from at least three days of hours", () => {
+  const hours = ["2026-09-20", "2026-09-21", "2026-09-22"].flatMap((day) => [
+    { start: `${day}T14:00:00.000Z`, active: 50, idle: 10 }, { start: `${day}T15:00:00.000Z`, active: 40, idle: 20 }]);
+  expect(atComputerByHour(hours.slice(0, 4), "America/Chicago")).toBeUndefined();
+  const day = atComputerByHour(hours, "America/Chicago")!;
+  expect(day.days).toBe(3);
+  expect(day.active[9]).toBe(50);
+  expect(day.present[10]).toBe(1);
+  expect(atComputerLines(hours, "America/Chicago")[0]).toContain("9–11 点");
 });

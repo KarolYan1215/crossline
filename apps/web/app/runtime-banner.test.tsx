@@ -13,3 +13,17 @@ test("a signed-out runtime says where to sign in", () => {
   const html = renderToStaticMarkup(<RuntimeAlert status={{ code: "signed_out", title: "模型服务未登录", message: "已暂停。" }} />);
   expect(html).toContain('href="/settings#model"');
 });
+
+test("an invited account waiting for the developer's model is told so, not sent to connect as though nothing were connected", () => {
+  const html = renderToStaticMarkup(<RuntimeAlert status={{ code: "sponsor_waiting", title: "邀请码已生效，模型还在检验", message: "开发者提供的模型还在检验。" }} />);
+  expect(html).toContain("模型还在检验");
+  expect(html).not.toContain("去连接");
+  expect(html).toContain("连接自己的模型");
+});
+
+test("the developer's model standing in for a spent ChatGPT is a status notice, not an alert", () => {
+  const html = renderToStaticMarkup(<RuntimeAlert status={{ code: "sponsor_standin", title: "已改用开发者提供的模型", message: "ChatGPT 额度已用尽。" }} />);
+  expect(html).toContain('role="status"');
+  expect(html).not.toContain('role="alert"');
+  expect(html).toContain('data-code="sponsor_standin"');
+});

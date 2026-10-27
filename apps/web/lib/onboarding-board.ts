@@ -1,6 +1,9 @@
 import "server-only";
-import { SOURCE_FOLDERS_SETTING, readSourceFolders, sourceFolderIndexSetting, calendarWeek, type AccessContext, type AvailabilityWindow, type DateCandidate, type RecurringMeeting, type WeekCalendarEvent } from "@crossline/core";
-import { getStore, resolvedAvailability } from "./crossline";
+import { SOURCE_FOLDERS_SETTING, readSourceFolders, sourceFolderIndexSetting, calendarWeek, capacityConflict, lineWeights, skeletonDraft,
+  type AccessContext, type AvailabilityWindow, type BusySpan, type DateCandidate, type RecurringMeeting, type SkeletonBlock, type WeekCalendarEvent, type WeekCapacity } from "@crossline/core";
+import { getStore, readLineShares, resolvedAvailability } from "./crossline";
+import { identityLines } from "./lines";
+import { localeFor } from "./locale";
 
 /**
  * What the interview's right column draws besides the profile itself (docs/onboarding-v3.md): the week as it stands — the hours the
@@ -77,4 +80,26 @@ export function folderDocumentIds(ctx: AccessContext): Set<string> {
     catch { /* unreadable index: nothing to hide */ }
   }
   return ids;
+}
+
+/**
+ * What the week gives back at each part of the interview (2026-10-19): the capacity conflict once the lines are known — hours, what the
+ * fixed schedule takes, what is left per line, deadlines that crowd together in four weeks — and, once the start standard stands, a draft
+ * of the week with the free time handed to the lines by their weight. Computed from the ledger; nothing here is a model's reading.
+ */
+export function weekCapacity(ctx: AccessContext, today: string, week: WeekSkeleton, timeline: ProjectTimeline): { capacity: WeekCapacity; draft: SkeletonBlock[] } {
+  const busy: BusySpan[] = [
+    ...week.fixed.flatMap((item) => item.weekdays.map((weekday) => ({ weekday, start: item.start, end: item.end }))),
+    ...week.calendar.map((event) => ({ weekday: event.weekday % 7, start: event.start, end: event.end }))
+  ];
+  const deadlines = [
+    ...timeline.flatMap((project) => project.items.map((item) => ({ date: item.date, title: `${project.name} ${item.title}`.slice(0, 40) }))),
+    ...timeline.filter((project) => /^\d{4}-\d{2}-\d{2}/.test(project.deadline)).map((project) => ({ date: project.deadline.slice(0, 10), title: project.name }))
+  ];
+  const lines = identityLines(ctx);
+  const weights = lineWeights(lines.map((line) => ({ id: line.id, rank: line.rank ?? null })), readLineShares(ctx));
+  const weightOf = new Map(weights.map((line) => [line.id, line.weight]));
+  const capacity = capacityConflict({ windows: week.windows, busy, deadlines, today,
+    lines: lines.map((line) => ({ id: line.id, label: line.label, weight: weightOf.get(line.id) ?? 1 })), locale: localeFor(ctx) });
+  return { capacity, draft: skeletonDraft(week.windows, busy, weights) };
 }

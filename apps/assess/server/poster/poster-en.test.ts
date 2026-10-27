@@ -27,7 +27,9 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const scoresFor = (code: string) => ({ scope: code[0] === "G" ? 80 : 20, basis: code[1] === "I" ? 80 : 20, output: code[2] === "R" ? 80 : 20, rhythm: code[3] === "A" ? 80 : 20 });
+const scoresFor = (code: string) => ({ collab: code[0] === "W" ? 80 : 20, purpose: code[1] === "U" ? 80 : 20, build: code[2] === "H" ? 80 : 20, lines: code[3] === "G" ? 80 : 20 });
+/** The longest 「AI 替你干的」 a poster can print: three phrases. */
+const AI_DOES = ["做字幕封面", "跑分析", "带我入门"];
 const URL = "https://assess.example.com/t/x";
 const NICKNAME = "Alexandrina M";
 
@@ -56,12 +58,12 @@ describe("English posters", () => {
     const serif = new Set(readFileSync(path.join(fontsDir(), "poster-serif.glyphs.txt"), "utf8"));
     const text = posterEnglishText().join("");
     expect([...new Set(text)].filter((char) => !sans.has(char) || !serif.has(char))).toEqual([]);
-    expect(posterLabels("en").kicker).toBe("Thinking style");
+    expect(posterLabels("en").kicker).toBe("Super individual type");
   });
 
   test("every type's poster and long image in English: nothing overlaps, nothing under 24 px, all on the canvas", { timeout: 120_000 }, async () => {
     for (const code of TYPE_CODES) {
-      const type = publicType(scoresFor(code), {}, "", undefined, "en");
+      const type = publicType(scoresFor(code), {}, "", undefined, AI_DOES, "en");
       const missing: string[] = [];
       const poster = await toPng(typePosterTree(type, NICKNAME, { dataUri: null }, URL, "en"), HEIGHT, { collect: true, onMissing: (segment) => missing.push(segment) });
       assertClean(poster.nodes, HEIGHT, `${code} poster`);
@@ -80,9 +82,9 @@ describe("English posters", () => {
         { from: 1, to: 2, kind: "促成", how: "Designs feed development" }, { from: 2, to: 0, kind: "反馈回路", how: "Usage data back to the group" }],
       source: "model", locale: "en"
     };
-    for (const [code, chosen] of [["GEMA", longest], ["SEMP", ruleLines("SEMP", ["language", "build", "running"], "en")],
-      ["GIRA", wantsPlan("GIRA", { picks: ["research", "media", "writing"], text: "" }, "en").lines]] as const) {
-      const type = publicType(scoresFor(code), {}, "", chosen, "en");
+    for (const [code, chosen] of [["WOHA", longest], ["ROBA", ruleLines("ROBA", ["language", "build", "running"], "en")],
+      ["RUHG", wantsPlan("RUHG", { picks: ["research", "media", "writing"], text: "" }, "en").lines]] as const) {
+      const type = publicType(scoresFor(code), {}, "", chosen, AI_DOES, "en");
       const poster = await toPng(typePosterTree(type, NICKNAME, { dataUri: null }, URL, "en"), HEIGHT, { collect: true });
       assertClean(poster.nodes, HEIGHT, `${code} wants poster`);
       const long = await toPng(longImageTree(type, NICKNAME, { dataUri: null }, URL, "en"), undefined, { collect: true });
@@ -94,7 +96,7 @@ describe("English posters", () => {
     for (const a of TYPE_CODES) {
       for (const b of TYPE_CODES) {
         const relation = pairRelation(a, b, undefined, undefined, "en");
-        const side = (code: string) => ({ type: publicType(scoresFor(code), {}, "", undefined, "en"), nickname: NICKNAME, figure: { dataUri: null } });
+        const side = (code: string) => ({ type: publicType(scoresFor(code), {}, "", undefined, [], "en"), nickname: NICKNAME, figure: { dataUri: null } });
         const card = await toPng(pairCardTree(side(a), side(b), relation.primary, relation.secondary, relation.sharedLines, URL, "en"), HEIGHT, { collect: true });
         assertClean(card.nodes, HEIGHT, `${a}x${b} pair`);
       }

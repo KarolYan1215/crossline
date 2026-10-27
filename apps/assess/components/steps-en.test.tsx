@@ -10,19 +10,21 @@ import { EmailStep } from "./email-step";
 import { LocaleProvider } from "./locale-context";
 import { SavableImage } from "./poster";
 import { QuizStep } from "./quiz-step";
-import { AxesList, TypeDetails } from "./type-summary";
+import { AiAndKindred, AxesList, DimensionNotes, TypeDetails, TypeHeading } from "./type-summary";
 import { WantsStep } from "./wants-step";
 
 const noop = () => {};
 const english = (node: ReactNode) => renderToStaticMarkup(<LocaleProvider locale="en">{node}</LocaleProvider>);
 const HAN = /[㐀-鿿]/;
 
-test("a statement screen in English: the statement rewritten for English readers, the five answers and the controls", () => {
+test("a situation screen in English: the situation and its two options rewritten for English readers, the five answers and the controls", () => {
   const flow = { ...emptyFlow(), step: "quiz" as const, startedAt: 0, index: 0, answers: { q1: 4 } };
   const html = english(<QuizStep flow={flow} onChoose={noop} onBack={noop} onNext={noop} />);
-  expect(html).toContain("I often apply what I learn in one field to a completely different one.");
-  expect(html).toContain("Strongly disagree");
-  expect(html).toContain("1 of 32 answered");
+  expect(html).toContain("Write a long article");
+  expect(html).toContain("Outline it yourself, then hand each section to AI to write");
+  expect(html).toContain(" / 36 · Writing");
+  expect(html).toContain("Clearly A");
+  expect(html).toContain("1 of 36 answered");
   expect(html).toContain("Keyboard: press 1–5 to answer");
   expect(html).not.toMatch(HAN);
   // The same screen with no provider is Chinese, as before.
@@ -45,9 +47,13 @@ test("the appearance, email and wants steps in English carry no Chinese", () => 
 });
 
 test("the result's type and details in English, built in English by the server and labelled in English here", () => {
-  const type = publicType({ scope: 80, basis: 20, output: 20, rhythm: 80 }, {}, "seed", undefined, "en");
-  const html = english(<><AxesList type={type} /><TypeDetails type={type} /></>);
-  expect(html).toContain("Generalist 80%");
+  const type = publicType({ collab: 20, purpose: 20, build: 80, lines: 80 }, {}, "seed", undefined, ["写初稿"], "en");
+  const html = english(<><TypeHeading type={type} /><AxesList type={type} /><DimensionNotes /><AiAndKindred type={type} /><TypeDetails type={type} /></>);
+  expect(html).toContain("Time Management Guru");
+  expect(html).toContain("Galaxy 80%");
+  expect(html).toContain("Where the four dimensions come from");
+  expect(html).toContain("first drafts");
+  expect(html).toContain("Richard Branson");
   expect(html).toContain("ahead of about");
   expect(html).toContain("You might try");
   expect(html).toContain("Best partner:");

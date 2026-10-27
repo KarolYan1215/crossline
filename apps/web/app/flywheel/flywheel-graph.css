@@ -24,6 +24,7 @@
 .fw-anchor-dot{fill:var(--lc,var(--ink))}
 .fw-node:focus-visible{outline:none}
 .fw-node:focus-visible .fw-dot{stroke:var(--ink);stroke-width:3}
+.fw-node:focus-visible .fw-anchor-ring{stroke:var(--ink);stroke-width:4}
 .fw-label{font-size:12px;fill:var(--ink);paint-order:stroke;stroke:var(--paper);stroke-width:3px;stroke-linejoin:round;pointer-events:none}
 .fw-label-goal{font-size:13px;font-weight:700}
 .fw-node[data-dim],.fw-edge[data-dim]{opacity:.15}

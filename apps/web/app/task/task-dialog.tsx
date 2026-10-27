@@ -20,6 +20,7 @@ import { StepMaterials, TaskMaterials } from "./task-materials";
 import { stepAnchor, tutorialAnchor } from "../materials/tutorial-model";
 import { useLocale, useT } from "../locale-context";
 import { dayText, minutesText } from "./format";
+import { FirstHint } from "../ui/first-hint";
 
 const post = (path: string, body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .then((response) => response.ok).catch(() => false);
@@ -31,6 +32,46 @@ type Step = NonNullable<TaskDetail["stepPlan"]>["steps"][number];
  * there, the others a line each that opens on a click. Editing (reorder, rename, add, remove, a one-line replan) is a mode of its own, so
  * the list reads as a plan rather than a form.
  */
+type StepQuestion = NonNullable<TaskDetail["stepPlan"]>["questions"][number];
+
+/**
+ * The plan's questions with what they rest on now: the person's answer, the app's assumption (only important tasks' first two questions
+ * are put to the person; the rest are assumed so nothing waits), or still waiting on 待确认. Any of them can be changed here, which
+ * plans the task again with it.
+ */
+function StepQuestions({ workOrderId, questions }: { workOrderId: string; questions: StepQuestion[] }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [status, setStatus] = useState("");
+  const t = useT();
+  const save = async (question: StepQuestion, answer: string) => {
+    if (!answer.trim()) { setStatus(t("回答未填写")); return; }
+    setStatus(t("保存中…"));
+    const ok = await post(`/api/work-orders/${encodeURIComponent(workOrderId)}/step-answer`, { question: question.text, answer });
+    if (!ok) { setStatus(t("未能保存，请重试")); return; }
+    setEditing(null); setStatus(t("已记下，步骤会按此重排"));
+    window.location.reload();
+  };
+  return <div className="steps-questions">
+    <small>{t("计划依据的问题")}</small>
+    <ul>{questions.map((question) => <li key={question.id}>
+      <span>{question.text}</span>
+      {question.answer
+        ? <span className={question.answer.assumed ? "steps-answer-assumed" : "steps-answer"}>{t(question.answer.assumed ? "按假设：{{text}}" : "已答：{{text}}", { text: question.answer.text })}</span>
+        : <a href="/approvals">{t("待回答")}</a>}
+      {editing === question.id
+        ? <span className="steps-answer-edit">
+          {question.options.map((option) => <button key={option} type="button" className="text-button" onClick={() => void save(question, option)}>{option}</button>)}
+          <input type="text" value={draft} maxLength={300} placeholder={t("或自己写")} onChange={(event) => setDraft(event.target.value)} />
+          <button type="button" className="secondary-button" onClick={() => void save(question, draft)}>{t("保存")}</button>
+          <button type="button" className="text-button" onClick={() => setEditing(null)}>{t("取消")}</button>
+        </span>
+        : <button type="button" className="text-button" onClick={() => { setEditing(question.id); setDraft(""); setStatus(""); }}>{t(question.answer ? "改" : "回答")}</button>}
+    </li>)}</ul>
+    {status && <small role="status">{status}</small>}
+  </div>;
+}
+
 function StepsPanel({ detail }: { detail: TaskDetail }) {
   const plan = detail.stepPlan;
   const current = currentStep(detail);
@@ -50,7 +91,7 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
       <button type="button" className="text-button" onClick={() => setEditing(true)}>{t("调整步骤")}</button></p>
     {plan.rationale && <p className="gen steps-rationale"><Clamp text={plainEstimateWords(plan.rationale, locale)} /></p>}
     {plan.units.length > 0 && <p className="steps-units"><small>{t("依据材料的内容")}</small>{plan.units.map((unit) => <span key={unit.id} className="tag" title={unit.quote}>{unit.title}</span>)}</p>}
-    {plan.questions.length > 0 && <p className="steps-questions"><small>{t("需要本人回答后才能定下的")}</small>{plan.questions.map((question) => <a key={question.id} href="/approvals">{question.text}</a>)}</p>}
+    {plan.questions.length > 0 && <StepQuestions workOrderId={detail.id} questions={plan.questions} />}
     <ol className="steps-list">{plan.steps.map((step, index) => {
       const open = expanded.has(step.id);
       const kind = step.status !== "planned" ? "done" : step.executor === "agent" ? "agent" : step === current ? "current" : "open";
@@ -109,10 +150,73 @@ function StepDetail({ detail, step, kind, onStatus }: { detail: TaskDetail; step
     {step.executor === "human" && kind !== "done" && detail.preparedMaterials.some((item) => /manual\.md$/.test(item.uri)) && <p className="step-line"><small>{t("教程")}</small>
       <a href={`#${tutorialAnchor(step.id)}`}>{t("本步的教程与材料")}</a></p>}
     {kind !== "done" && kind !== "agent" && step.schedulable && <div className="step-line"><small>{t("时长")}</small><StepDuration workOrderId={detail.id} stepId={step.id} estimate={step.estimate} /></div>}
+    {kind !== "done" && step.provides && <ProvideBox workOrderId={detail.id} step={step} onStatus={onStatus} />}
+    {kind !== "done" && !step.provides && <OwnerSwitch workOrderId={detail.id} step={step} onStatus={onStatus} />}
     {kind !== "done" && step.executor !== "human" && <p className="step-line"><span />
       <button type="button" className="secondary-button step-agent" onClick={() => void post("/api/agent/dispatch", { workOrderId: detail.id, stepId: step.id })
         .then((ok) => onStatus(ok ? t("已交给 Agent：{{title}}", { title: step.title }) : t("未能交给 Agent")))}>{t("由 Agent 完成该步骤")}</button></p>}
   </div>;
+}
+
+/**
+ * Who does the step, as the person sees fit (4A): a step of the person's whose product is material or an output can go to the assistant, and
+ * any assistant's step can be taken back. The choice holds for that kind of step on the line; acts, practice and decisions stay the person's
+ * (the server says why when it refuses).
+ */
+function OwnerSwitch({ workOrderId, step, onStatus }: { workOrderId: string; step: Step; onStatus: (text: string) => void }) {
+  const toAssistant = step.executor !== "agent";
+  const t = useT();
+  if (toAssistant && (step.product === "ability" || step.product === "action" || step.role === "decide" || step.role === "wait")) return null;
+  const choose = async () => {
+    onStatus(t("保存中…"));
+    const response = await fetch(stepsApi(workOrderId), { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "owner", stepId: step.id, owner: toAssistant ? "assistant" : "person" }) }).catch(() => null);
+    const body = await response?.json().catch(() => ({})) as { ok?: boolean; message?: string } | undefined;
+    if (!body?.ok) { onStatus(body?.message ? t("未改：{{message}}", { message: body.message }) : t("未能保存，请重试")); return; }
+    location.reload();
+  };
+  return <p className="step-line"><small>{t("由谁做")}</small><span>{t(toAssistant ? "本人" : "助手")}
+    <button type="button" className="text-button" title={t("以后这条线上同类的步骤也这样分")} onClick={() => void choose()}>{t(toAssistant ? "交给助手" : "改为本人做")}</button></span></p>;
+}
+
+/**
+ * A provide step: material only the person has (their notes, the problem set behind their course login). Uploading it or saying there is
+ * none settles the step; until then the tutorial sections and the assistant's work that use it wait.
+ */
+function ProvideBox({ workOrderId, step, onStatus }: { workOrderId: string; step: Step; onStatus: (text: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const t = useT();
+  const upload = async () => {
+    const files = [...(input.current?.files ?? [])];
+    if (!files.length) { onStatus(t("还没有选文件")); return; }
+    setBusy(true); onStatus(t("上传中…"));
+    const form = new FormData();
+    form.set("stepId", step.id);
+    for (const file of files) form.append("file", file);
+    const ok = await fetch(`/api/work-orders/${encodeURIComponent(workOrderId)}/steps/provide`, { method: "POST", body: form }).then((response) => response.ok).catch(() => false);
+    setBusy(false);
+    if (!ok) { onStatus(t("未能上传，请重试")); return; }
+    location.reload();
+  };
+  const none = async () => {
+    setBusy(true);
+    const ok = await post(stepsApi(workOrderId), { action: "provide_none", stepId: step.id });
+    setBusy(false);
+    if (!ok) { onStatus(t("未能保存，请重试")); return; }
+    location.reload();
+  };
+  const checking = (step as { needState?: string }).needState === "checking";
+  return <div className="step-line step-provide"><small>{t("提交材料")}</small>
+    <span>
+      <span className="muted">{t(checking ? "系统正在已有文件和网上查找这份材料，找到就不用提交；手里有也可以直接上传。"
+        : "已有文件和网上都没找到。用到这份材料的教程和助手准备，在提交或说明没有之后才生成。")}</span>
+      <input ref={input} type="file" multiple aria-label={t("上传：{{name}}", { name: step.deliverable || step.title })} disabled={busy} />
+      <span className="step-provide-actions">
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => void upload()}>{t("上传")}</button>
+        <button type="button" className="text-button" disabled={busy} onClick={() => void none()}>{t("没有")}</button>
+      </span>
+    </span></div>;
 }
 
 /** The step list as a form: drag or arrow to reorder, rename in place, add, remove, save; or ask for a replan in one line. */
@@ -205,7 +309,7 @@ function RecordPanel({ detail }: { detail: TaskDetail }) {
  */
 export function TaskDialog({ detail, open, onOpenChange }: { detail: TaskDetail; open: boolean; onOpenChange: (open: boolean) => void }) {
   const t = useT();
-  return <Sheet title={detail.title} open={open} onOpenChange={onOpenChange}
+  return <Sheet title={detail.title} size="wide" open={open} onOpenChange={onOpenChange}
     footer={<a className="secondary" href={`/workbench/${encodeURIComponent(detail.id)}`}>{t("完整页面")}</a>}>
     <TaskPanels detail={detail} />
   </Sheet>;
@@ -248,11 +352,19 @@ export function TaskPanels({ detail, anchors = false }: { detail: TaskDetail; an
         {detail.supports.map((item) => <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}
         {detail.artifactLinks?.map((item) => <ArtifactTag key={`${item.direction}:${item.line}:${item.title}`} {...item} />)}</p>}
     </header>
-    <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id}
+    <TaskActions workOrderId={detail.id} state={detail.state} approvable={!detail.preparing} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id}
       offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }}>
       {live && !postponing && <button type="button" onClick={() => setPostponing(true)}>{t("推迟")}</button>}
     </TaskActions>
     {postponing && <PostponePanel workOrderId={detail.id} onClose={() => setPostponing(false)} />}
+    {live && <FirstHint id="task-detail" title={t("做一项任务")}>
+      <ul className="ui-first-hint-list">
+        <li>{t("从上往下读：步骤（当前一步标「当前」，「先做」是开头五分钟的动作）→ 材料与教程 → 提交与完成。")}</li>
+        <li>{t("开始计时后右下角倒计时当前一步；做完一步点它左边的圆环。")}</li>
+        <li>{t("整件做完在「提交与完成」里按完成（可附成果）：本人提交即视为验收，任务离开日历。")}</li>
+        <li>{t("下面的输入框可以改截止、记录卡在哪或请系统讲解某一步。")}</li>
+      </ul>
+    </FirstHint>}
     {/* One way in for everything about this task: ask about it, change it, record what happened. Changes come back as a card to apply. */}
     <div className="task-entry">
       <Conversation variant="task" page={{ kind: "task", entityId: detail.id }}
@@ -260,7 +372,7 @@ export function TaskPanels({ detail, anchors = false }: { detail: TaskDetail; an
     </div>
     <nav className="task-sections" aria-label={t("任务内容")}>{SECTIONS.map(([id, label], index) =>
       <button key={id} type="button" onClick={() => refs.current[id]?.scrollIntoView({ behavior: "smooth", block: "start" })}><span className="mono">{index + 1}</span> {t(label)}</button>)}</nav>
-    {SECTIONS.map(([id, label], index) => <section key={id} className="task-section" aria-labelledby={`${detail.id}-${id}`} ref={(element) => { refs.current[id] = element; }}
+    {SECTIONS.map(([id, label], index) => <section key={id} className="task-section" data-section={id} aria-labelledby={`${detail.id}-${id}`} ref={(element) => { refs.current[id] = element; }}
       {...(anchors ? { id } : {})}>
       <h3 id={`${detail.id}-${id}`} className="task-section-title"><span className="mono">{index + 1}</span> {t(label)}</h3>
       {id === "steps" && <StepsPanel detail={detail} />}

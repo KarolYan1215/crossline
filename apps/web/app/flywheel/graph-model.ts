@@ -253,3 +253,26 @@ export function loopCentre(loop: GraphLoop, graph: Graph, at: (id: string) => Po
   if (!points.length) return undefined;
   return { x: points.reduce((sum, p) => sum + p.x, 0) / points.length, y: points.reduce((sum, p) => sum + p.y, 0) / points.length };
 }
+
+/** Where a label may break: after a list comma, a clause mark, 「的」 or a space. */
+const BREAK_AFTER = /[、，,；;：:\s的]/u;
+
+/**
+ * A label in at most `maxLines` lines of about `perLine` characters, broken after a comma or 「的」 in the second half of a line when
+ * there is one, and ending in 「…」 only when even that does not hold it. A line's long-term goal was cut to one line of sixteen
+ * characters (「成为神经形态计算的、把脑机制转…」, 2026-10-21 walkthrough); now it takes two, and the whole of it on hover or focus.
+ */
+export function wrapLabel(text: string, perLine: number, maxLines = 2): string[] {
+  let rest = Array.from(text.trim());
+  const lines: string[] = [];
+  while (rest.length && lines.length < maxLines) {
+    if (rest.length <= perLine) { lines.push(rest.join("")); break; }
+    if (lines.length === maxLines - 1) { lines.push(`${rest.slice(0, perLine - 1).join("").trimEnd()}…`); break; }
+    let cut = perLine;
+    for (let index = perLine; index > Math.ceil(perLine / 2); index -= 1) if (BREAK_AFTER.test(rest[index - 1]!)) { cut = index; break; }
+    lines.push(rest.slice(0, cut).join("").trimEnd());
+    rest = rest.slice(cut);
+    while (rest.length && /\s/u.test(rest[0]!)) rest = rest.slice(1);
+  }
+  return lines;
+}

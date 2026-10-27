@@ -35,7 +35,7 @@ describe("the plan page's geometry in both languages", () => {
 describe("the plan page in English", () => {
   test("the top row and the schedule's status", () => {
     const html = renderToStaticMarkup(<LocaleProvider locale="en"><PlanView plan={{ ...plan,
-      schedule: { status: "partial", blockers: [{ taskId: "w2", code: "NO_CAPACITY", message: "" }], solver: "feasible_time_limit" } }} /></LocaleProvider>);
+      schedule: { status: "partial", blockers: [{ taskId: "w2", code: "NO_CAPACITY", message: "" }], solver: "feasible_time_limit" } }} calendarWrite /></LocaleProvider>);
     expect(html).toContain("Sync calendar now");
     expect(html).toContain("Publish to the Crossline calendar");
     expect(html).toContain("Some tasks are not scheduled");

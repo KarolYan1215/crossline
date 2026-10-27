@@ -46,12 +46,12 @@ test("an option with required follow-up fields opens them in the card, not in a 
 
 test("an ask about a thing previews it in place, folded until asked, with the link to open it", () => {
   const html = card({ ...base, kind: "interview_question", title: "「当前画像」写的是否符合本人？", preview: { kind: "portrait", href: "/portrait", label: "当前画像" } },
-    { kind: "portrait", image: "/api/portrait/image/character?v=1", code: "GEMA", name: "改装师", tagline: "边做边改", keywords: ["跨界"] });
+    { kind: "portrait", image: "/api/portrait/image/character?v=1", code: "ROHG", name: "改装师", tagline: "边做边改", keywords: ["跨界"] });
   expect(html).toContain('aria-expanded="false"');
   expect(html).toContain("预览：当前画像");
   expect(html).toContain('href="/portrait"');
   expect(html).toMatch(/class="ak-preview" inert="" aria-hidden="true"/);
-  expect(html).toContain("<b>GEMA</b> 改装师");
+  expect(html).toContain("<b>ROHG</b> 改装师");
   expect(html).toContain('src="/api/portrait/image/character?v=1"');
   // Without the summary (Today does not load one), the card keeps the link only.
   const bare = card({ ...base, preview: { kind: "milestones", href: "/milestones", label: "研究主线的里程碑草稿" } });
@@ -70,6 +70,19 @@ test("a stopped assistant run shows what it finished, where it stopped, and what
   expect(html).toContain("需本人决定或提供");
   expect(html).toContain("涉及外部");
   expect(html).toContain('placeholder="补充助手缺的信息"');
+});
+
+test("a folded risk card lists its milestones as rows (name, deadline, level bars, kinds), five shown and the rest behind 「另有 N 个」", () => {
+  const items = Array.from({ length: 7 }, (_, index) => ({ id: `m${index}`, title: `里程碑 ${index}`, href: `/milestones?open=m${index}`,
+    ...(index === 6 ? {} : { dueDay: `2026-11-0${index + 1}` }), risks: [{ level: index === 0 ? "high" as const : "medium" as const, kind: "time" as const, note: "紧" }] }));
+  const html = card({ ...base, kind: "milestone_risk_review", entityId: "batch", title: "7 个里程碑有风险待过目", why: "审查在 7 个里程碑上找出风险。", items });
+  expect(html.match(/<li data-level=/g)).toHaveLength(5);
+  expect(html).toContain('<a class="ak-item-name" href="/milestones?open=m0" title="里程碑 0">里程碑 0</a>');
+  expect(html).toContain("截止 11/1");
+  expect(html).toContain('aria-label="高风险"');
+  expect(html).toContain('<span class="risk-kind">时间紧</span>');
+  expect(html).toContain("另有 2 个");
+  expect(html).not.toContain("里程碑 6");
 });
 
 test("待确认 lays the week's asks out in four quadrants, each a drawer with its top ask open", () => {

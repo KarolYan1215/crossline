@@ -3,7 +3,7 @@ import { CrosslineStore } from "@crossline/db";
 
 vi.mock("server-only", () => ({}));
 const { ensureSeeded } = await import("./crossline");
-const { loadPendingDateBatch, decideDateBatch } = await import("./imported-dates");
+const { loadPendingDateBatch, decideDateBatch, adoptPendingDates, loadAdoptedDates, changeAdoptedDate } = await import("./imported-dates");
 const { TEST_CTX } = await import("./test-support");
 
 let store: CrosslineStore;
@@ -21,7 +21,7 @@ const extract = (batchId = "b1") => store.appendEvent({
     ],
     recurring: [{ id: "class", title: "ECE 555 上课", project: "", weekdays: [1, 5], startTime: "14:30", endTime: "15:45", from: "2026-10-05", to: "2026-10-16",
       exceptions: [], location: "Plant Sci 108", sourceRef: "src-3", quote: "Mon and Fri 2:30PM - 3:45PM", confidence: "high" }],
-    questions: ["#2 是作业还是 quiz？"], dropped: [{ id: "x" }]
+    questions: ["#2 是作业还是 quiz？"], dropped: [{ id: "x" }, { id: "y", title: "Quiz 4" }]
   }
 });
 
@@ -37,7 +37,7 @@ test("a pending batch lists weekly patterns and dates, with uncertain rows unche
   expect(byId.exam).toMatchObject({ checked: true, blocks: 0 });
   expect(byId.quiz).toMatchObject({ checked: false, confidence: "low" });
   expect(batch.questions).toEqual(["#2 是作业还是 quiz？"]);
-  expect(batch.dropped).toBe(1);
+  expect(batch.dropped).toEqual(["（未命名的一项）", "Quiz 4"]);
 });
 
 test("confirming writes only the chosen items: timed ones become blocks, untimed ones become facts", () => {
@@ -76,4 +76,22 @@ test("a dated item and the weekly pattern in the same slot become one block, the
   decideDateBatch(TEST_CTX, "b1", ["class", "quiz"]);
   const friday = planBlocks().filter((block) => block.day === "2026-10-09");
   expect(friday.map((block) => block.id)).toEqual(["import:b1:quiz"]);
+});
+
+test("dates from files are adopted without a click; an item can be taken off the list and put back", () => {
+  extract();
+  expect(adoptPendingDates(TEST_CTX)).toBe(2);
+  expect(loadPendingDateBatch(TEST_CTX)).toBeNull();
+  const list = loadAdoptedDates(TEST_CTX);
+  // The reader's unsure quiz is listed apart, not adopted.
+  expect(list.items.filter((item) => item.adopted).map((item) => item.id).sort()).toEqual(["class", "exam"]);
+  expect(list.items.find((item) => item.id === "quiz")).toMatchObject({ adopted: false });
+  expect(planBlocks()).toHaveLength(4);
+  expect(changeAdoptedDate(TEST_CTX, "b1", "class", false)).toEqual({ ok: true });
+  expect(planBlocks()).toHaveLength(0);
+  expect(changeAdoptedDate(TEST_CTX, "b1", "exam", false)).toEqual({ ok: true });
+  expect(store.listProfileFacts(TEST_CTX.workspaceId).some((item) => item.slot === "date_20261027_exam")).toBe(false);
+  expect(changeAdoptedDate(TEST_CTX, "b1", "quiz", true)).toEqual({ ok: true });
+  expect(planBlocks().map((block) => block.id)).toEqual(["import:b1:quiz"]);
+  expect(loadAdoptedDates(TEST_CTX).items.filter((item) => item.adopted).map((item) => item.id)).toEqual(["quiz"]);
 });

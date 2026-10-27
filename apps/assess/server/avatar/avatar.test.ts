@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { avatarsDrawnFor, forgetFailedDraw, setAvatarState } from "../store";
-import { budgetDay, budgetFile, spentToday, takeSlot } from "./budget";
+import { budgetDay, budgetFile, dailyLimit, spentToday, takeSlot } from "./budget";
 import { FakeImageProvider, TINY_PNG } from "./fake-provider";
 import { RETRY_AFTER_MS, avatarImagePath, avatarQueueIdle, avatarStatus, configureAvatarPipeline, enqueueAvatar, retryAvatarIfDue, templateImagePath } from "./index";
 import { ARK_DEFAULT_MODEL, ArkProvider, ProviderError, arkSize, downloadImage, providerFromEnv, providerSummary } from "./provider";
@@ -77,6 +77,12 @@ describe("settling on the template at once", () => {
     expect(provider.edits).toHaveLength(0);
   });
 
+  test("there is no daily ceiling unless one is set: each address's own limit is what bounds the figures", () => {
+    expect(dailyLimit()).toBe(Number.POSITIVE_INFINITY);
+    vi.stubEnv("ASSESS_IMAGE_DAILY_LIMIT", "40");
+    expect(dailyLimit()).toBe(40);
+  });
+
   test("once today's budget is spent, every further figure is the template", async () => {
     vi.stubEnv("ASSESS_IMAGE_DAILY_LIMIT", "1");
     const provider = new FakeImageProvider();
@@ -101,7 +107,7 @@ describe("drawing", () => {
     const file = vi.mocked(setAvatarState).mock.calls.at(-1)![2]!;
     expect(file).toBe(path.join("avatars", "res_0001.png"));
     expect(fs.readFileSync(path.join(dir, file))).toEqual(TINY_PNG);
-    expect(provider.edits[0]!.reference.equals(fs.readFileSync(templateImagePath("GEMA")))).toBe(true);
+    expect(provider.edits[0]!.reference.equals(fs.readFileSync(templateImagePath("ROHG")))).toBe(true);
 
     const ready = { ...result, avatar: { state: "ready" as const, file } };
     expect(avatarStatus(ready).url).toMatch(/^\/api\/avatar\/inv_public_token_0001\.png\?v=\d+$/);
@@ -238,13 +244,16 @@ describe("what the pages and posters are given", () => {
     expect(avatarStatus(old)).toEqual({ state: "template", url: "/api/avatar/inv_public_token_0001.png" });
     const missing = storedResult({ avatar: { state: "ready", file: "avatars/gone.png" } });
     expect(avatarStatus(missing).state).toBe("template");
-    expect(avatarImagePath(missing)).toBe(templateImagePath("GEMA"));
+    expect(avatarImagePath(missing)).toBe(templateImagePath("ROHG"));
   });
 
   test("every type has a woman's and a man's template PNG on disk, full length 2:3", () => {
-    for (const code of ["SEMP", "SEMA", "SERP", "SERA", "SIMP", "SIMA", "SIRP", "SIRA", "GEMP", "GEMA", "GERP", "GERA", "GIMP", "GIMA", "GIRP", "GIRA"]) {
+    for (const code of ["ROBA", "ROHA", "WOBA", "WOHA", "RUBA", "RUHA", "WUBA", "WUHA", "ROBG", "ROHG", "WOBG", "WOHG", "RUBG", "RUHG", "WUBG", "WUHG"]) {
       for (const variant of ["female", "male"] as const) {
-        const png = fs.readFileSync(templateImagePath(code, variant));
+        // Only the header: the 32 templates are ~55 MB, and reading them whole timed this test out under a full parallel run.
+        const png = Buffer.alloc(24);
+        const fd = fs.openSync(templateImagePath(code, variant), "r");
+        try { fs.readSync(fd, png, 0, 24, 0); } finally { fs.closeSync(fd); }
         expect(png.subarray(1, 4).toString()).toBe("PNG");
         expect(png.readUInt32BE(20) / png.readUInt32BE(16)).toBeCloseTo(1.5, 2);
       }
@@ -255,8 +264,8 @@ describe("what the pages and posters are given", () => {
   test("the template follows how the person presents; 中性 gets one of the two, the same one every time", () => {
     pipeline(null);
     const man = storedResult({ appearance: { ...storedResult().appearance, presentation: "male" } });
-    expect(avatarImagePath(man)).toBe(templateImagePath("GEMA", "male"));
-    expect(avatarImagePath(storedResult())).toBe(templateImagePath("GEMA", "female"));
+    expect(avatarImagePath(man)).toBe(templateImagePath("ROHG", "male"));
+    expect(avatarImagePath(storedResult())).toBe(templateImagePath("ROHG", "female"));
     expect(templateVariant("neutral", "res_a")).toBe(templateVariant("neutral", "res_a"));
     const picks = new Set(Array.from({ length: 20 }, (_, index) => templateVariant("neutral", `res_${index}`)));
     expect([...picks].sort()).toEqual(["female", "male"]);
@@ -272,7 +281,7 @@ describe("Volcengine Ark's request", () => {
       ? answer({ model: "m", created: 1, data: [{ url: "https://ark-content.tos-cn-beijing.volces.com/x.jpeg", size: "1024x1536" }] })
       : new Response(new Uint8Array(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0])), { status: 200 }));
     const provider = new ArkProvider({ apiKey: "ark-secret", model: "doubao-seedream-5-0-pro-260628", fetchImpl: fetchImpl as unknown as typeof fetch });
-    const reference = fs.readFileSync(templateImagePath("GEMA"));
+    const reference = fs.readFileSync(templateImagePath("ROHG"));
     const image = await provider.edit({ reference, prompt: "Edit this cartoon character.", seed: 3_000_000_000 });
     expect(image[0]).toBe(0xff);
     const [url, init] = calls(fetchImpl)[0]!;

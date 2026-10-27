@@ -134,7 +134,7 @@ test("a model that fails, answers badly or is talked into anything else falls ba
 
 test("with no model the rules answer at once; the pair card's shared lines follow what both people chose", async () => {
   const inviter = await submitOk({ email: "a@example.com" });
-  const invited = await submitOk({ email: "b@example.com", inviteToken: inviter.inviteToken, answers: answersFor({ scope: false, basis: true, output: true, rhythm: false }) });
+  const invited = await submitOk({ email: "b@example.com", inviteToken: inviter.inviteToken, answers: answersFor({ lines: false, purpose: true, collab: true, build: false }) });
   await wantsPost(inviter.resultToken, { picks: ["music", "fitness"], text: "" });
   await wantsPost(invited.resultToken, { picks: ["music", "photo"], text: "" });
   const pair = await (await getPair(get(`/api/pairs/${invited.pairToken}`), params(invited.pairToken!))).json() as PairView;

@@ -6,7 +6,7 @@ import { fakeRuntime } from "./testing/fake-runtime";
 
 const workspaceId = "personal-crossline";
 const ownerId = "local-owner";
-const step = (over: Record<string, unknown> = {}) => ({ id: "s1", intent: "整理实验方案", sourceQuote: "稳定推进实验",
+const step = (over: Record<string, unknown> = {}) => ({ id: "s1", intent: "设计实验方案", sourceQuote: "稳定推进实验",
   rationale: "先列可执行步骤", dependsOn: [],
   estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 75 },
   energy: "high", interruptible: false, family: "preparation", riskTier: "routine", evidence: "实验方案记录", acquires: "", ...over });
@@ -192,25 +192,35 @@ test("an older refusal that carries only the joined message becomes one missing 
 });
 
 // The first real automatic run turned one milestone into a ten-step chain at once (pending went from 11 to 20).
-test("rolling mode keeps the next two steps, proposes the next round once they are done, and stops when a round is discarded", async () => {
+// docs/work-split.md: rolling used to keep the first two items in dependency order, which were always preparation, so the person's own
+// work never came out. Now a round is the person's next core task with its preparation, and only core work serves the milestone.
+test("rolling mode keeps the person's next core task and its preparation, proposes the next round once it is done, and stops when a round is discarded", async () => {
   const { milestonesAwaitingBackplan } = await import("./goal-backplanner");
   const store = new CrosslineStore(":memory:");
   store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p", title: "稳定推进实验", status: "approved", version: 1 });
   store.saveMilestoneAnchor({ workspaceId, milestoneId: "m", stage: 1, deadline: "2026-10-12", baseline: "", target: "", stakeholders: [],
     sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
-  const chain = [step({ id: "s1", family: "deep_work" }), step({ id: "s2", dependsOn: ["s1"], family: "deep_work" }), step({ id: "s3", dependsOn: ["s2"], family: "deep_work" })];
+  const chain = [step({ id: "a1", intent: "汇集三篇对照论文的实验参数", owner: "person" }),
+    step({ id: "c1", dependsOn: ["a1"], family: "deep_work", owner: "person" }),
+    step({ id: "a2", intent: "按已定参数跑基线仿真", dependsOn: ["c1"], owner: "assistant", prepares: "c2" }),
+    step({ id: "c2", intent: "判断要补哪些实验", dependsOn: ["a2"], family: "deep_work", owner: "person" })];
   const runtime = fakeRuntime([JSON.stringify({ steps: chain, dateCandidates: [], blockers: [] })], "crossline:crossline-goal-backplanner");
   const backplan = createGoalBackplanner(store, workspaceId, "C:\repo", () => runtime.rpc, { rolling: true });
   const first = await backplan("m");
   expect(first.state).toBe("proposed");
-  expect(store.listWorkOrders(workspaceId)).toHaveLength(2);
+  const round = store.listWorkOrders(workspaceId);
+  expect(round).toHaveLength(2);
+  const core = round.find((order) => order.intent === "设计实验方案")!;
+  // The model called the gathering the person's; it is the assistant's, prepares the core task and stays off the person's board.
+  expect(round.find((order) => order.id !== core.id)!.payload).toMatchObject({ owner: "assistant", prepares: core.id, automationParts: [{ intent: "汇集三篇对照论文的实验参数" }], humanCore: [] });
+  expect(core.payload).toMatchObject({ owner: "person", humanCore: [{ intent: "设计实验方案" }] });
   const now = new Date("2026-10-06T12:00:00Z");
   expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual([]);
-  // Both done: the next round may be proposed.
-  for (const order of store.listWorkOrders(workspaceId)) store.saveWorkOrder({ ...order, state: "accepted" });
+  // The core task done (its preparation still open): the next round may be proposed.
+  store.saveWorkOrder({ ...core, state: "accepted" });
   expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual(["m"]);
   await backplan("m");
-  expect(store.listWorkOrders(workspaceId)).toHaveLength(4);
+  expect(store.listWorkOrders(workspaceId).length).toBeGreaterThan(2);
   // The person discards the whole second round: no third round on a timer.
   for (const order of store.listWorkOrders(workspaceId).filter((item) => item.state !== "accepted")) store.saveWorkOrder({ ...order, state: "archived" });
   expect(milestonesAwaitingBackplan(store, workspaceId, now)).toEqual([]);

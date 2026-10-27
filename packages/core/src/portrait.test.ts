@@ -28,13 +28,13 @@ test("the shared version hides every sensitive span but keeps line ids", () => {
 
 test("the type is read from the axis scores into a fixed name and group; the figure follows one standard and never carries a sensitive span", () => {
   const typed: PortraitReport = { ...report,
-    type: { scope: 82, basis: 30, output: 40, rhythm: 55, evidence: { scope: "四条主线并行", basis: "强调数据可追溯", output: "做仿真与产品", rhythm: "边做边调" } },
+    type: { collab: 55, purpose: 30, build: 40, lines: 82, evidence: { collab: "和 AI 边做边调", purpose: "要能交付的结果", build: "先定结构", lines: "四条主线并行" } },
     character: { outfit: "a lab coat over a hoodie from UW–Madison", props: ["a notebook", "a small oscilloscope"], pose: "standing confidently", expression: "focused" },
     lines: { allocation: "", items: [{ lineId: "research", description: "", goals: [], feeds: [{ toLineId: "media", how: "" }], targetShare: 60 },
       { lineId: "media", description: "", goals: [], feeds: [{ toLineId: "startup", how: "" }], targetShare: 20 }, { lineId: "startup", description: "", goals: [], feeds: [{ toLineId: "research", how: "" }], targetShare: 20 }] } };
   const type = portraitType(typed)!;
-  expect([type.code, type.name, type.group.name]).toEqual(["GEMA", "改装师", "架构组"]);
-  expect(type.axes.map((axis) => [axis.label, axis.percent])).toEqual([["跨界", 82], ["实证", 70], ["造物", 60], ["应变", 55]]);
+  expect([type.code, type.name, type.group.name]).toEqual(["WOBG", "舰长", "机甲派"]);
+  expect(type.axes.map((axis) => [axis.label, axis.percent])).toEqual([["共生", 55], ["交付", 70], ["蓝图", 60], ["多星", 82]]);
   const prompt = characterPrompt(typed)!;
   expect(prompt).toContain(CHARACTER_STANDARD);
   expect(prompt).toContain("deep blue");
@@ -44,7 +44,7 @@ test("the type is read from the axis scores into a fixed name and group; the fig
 
 test("the person's own appearance replaces the neutral defaults; the base line's colour moves to accessories and the circle keeps the group tint", () => {
   const typed: PortraitReport = { ...report,
-    type: { scope: 82, basis: 30, output: 40, rhythm: 55, evidence: { scope: "", basis: "", output: "", rhythm: "" } },
+    type: { lines: 82, purpose: 30, build: 40, collab: 55, evidence: { lines: "", purpose: "", build: "", collab: "" } },
     character: { outfit: "an all-black hoodie and black trousers", props: ["a notebook"], pose: "standing confidently", expression: "focused",
       appearance: "male, long wolf-cut hair, dressed all in black" },
     lines: { allocation: "", items: [{ lineId: "research", description: "", goals: [], feeds: [], targetShare: 60 }, { lineId: "media", description: "", goals: [], feeds: [], targetShare: 40 }] } };
@@ -77,7 +77,7 @@ test("the fixed dimensions: Schwartz's ten values in circle order, six energy ca
   expect([...ENERGY_CATEGORIES]).toEqual(["深度工作", "学习输入", "创造产出", "沟通协作", "行政事务", "休息恢复"]);
   expect(SAY_DO_DIMENSIONS.map((dimension) => dimension.label)).toEqual(SAY_DO);
   expect(SAY_DO_DIMENSIONS.map((dimension) => dimension.id)).toEqual(["plan", "on_time", "follow_through", "acceptance", "waiting"]);
-  expect(PORTRAIT_SCHEMA_VERSION).toBe(3);
+  expect(PORTRAIT_SCHEMA_VERSION).toBe(5);
 });
 
 test("the schema asks for exactly those dimensions, a short core word, and no 'does' score", () => {
@@ -131,9 +131,10 @@ test("类型名互不共用字词；字母是英文词首字母；个人简介�
   const names = Object.values(TYPE_TABLE).map((type) => type.name);
   expect(new Set(names).size).toBe(16);
   for (const name of names) expect(names.filter((other) => other !== name && (other.includes(name) || name.includes(other)))).toEqual([]);
-  for (const axis of TYPE_AXES) for (const side of [axis.left, axis.right]) expect(side.en[0]).toBe(side.letter);
+  for (const type of Object.values(TYPE_TABLE)) expect(type.quote.length).toBeGreaterThan(3);
+  for (const axis of TYPE_AXES) for (const side of [axis.left, axis.right]) expect(side.en.replace(/[^A-Z]/g, "")[0]).toBe(side.letter);
   expect(typeSummaryProblem("你习惯把几条线接在一起，代价是收尾常被打断，")).toBeNull();
   expect(typeSummaryProblem("习惯把几条线接在一起")).toContain("「你」");
-  expect(typeSummaryProblem("你是改装师")).toContain("改装师");
+  expect(typeSummaryProblem("你是军师")).toContain("军师");
   expect(typeSummaryProblem("你像 ENTP 一样")).toContain("外部人格类型");
 });

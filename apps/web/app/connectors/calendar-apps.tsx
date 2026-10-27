@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import type { CalendarAppStatus } from "@crossline/core";
 import { Tag } from "../ui/tag";
 import { useT } from "../locale-context";
+import { SetupGuide } from "../ui/setup-guide";
+import { CALENDAR_APPS_GUIDE } from "../../lib/setup-guides";
 
 /**
  * Google and Outlook calendar as ChatGPT connectors of this account's Codex: connected or not, and a button that opens ChatGPT's own
@@ -51,5 +53,6 @@ export function CalendarAppsView({ apps, problem, busy, onRefresh }: {
     {apps && apps.some((app) => !app.connected) && !problem && <div className="calendar-sources-actions">
       <button type="button" className="secondary-button" disabled={busy} onClick={onRefresh}>{busy ? t("读取中…") : t("已连接，刷新")}</button>
     </div>}
+    {apps && apps.some((app) => !app.connected) && <SetupGuide guide={CALENDAR_APPS_GUIDE} />}
   </section>;
 }

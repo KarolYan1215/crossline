@@ -2,8 +2,8 @@ import { RELATION_KINDS } from "./flywheel-schema";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
 import { SCHWARTZ_VALUES } from "./portrait";
 import {
-  ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, cleanAttribute, duplicateAttributes, guessKind,
-  notAtomic, type AttributeCandidate, type AttributeKind
+  ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, attributeProblem, cleanAttribute, duplicateAttributes,
+  guessKind, notAtomic, type AttributeCandidate, type AttributeKind
 } from "./line-attributes";
 
 /**
@@ -17,9 +17,10 @@ import {
  *
  * So a turn does not return milestones. It returns:
  *   - `questions`: several at once, each with generously many candidate answers;
- *   - `slotUpdates`: facts it learned, each tied to the reply or file it came from and, unless it is an
- *     explicit inference, to a verbatim quote from that source — the same grounding rule the rest of
- *     this app already uses, because a profile built on invented facts is worse than an empty one;
+ *   - `slotUpdates`: facts it learned, each tied, unless it is an explicit inference, to the numbered
+ *     sentences of the reply or file it came from (`refs`; the system fills the quote in) — the same
+ *     grounding rule the rest of this app already uses, because a profile built on invented facts is
+ *     worse than an empty one;
  *   - `projectsDetected`: the separate things the person works on inside a line;
  *   - `flywheelCandidates`: connections between lines, always `inferred` here — only the person can
  *     confirm one.
@@ -28,22 +29,31 @@ export type TurnQuestion = {
   id: string; text: string; kind: "single" | "multi" | "free";
   options: Array<{ id: string; label: string; detail: string }>;
   allowOther: boolean; identityId: string; projectId: string;
+  /**
+   * The question ledger's number of the question this one asks again (`questionLedger`, 「#12」), 0 for a new one (2026-10-19). An answered
+   * question asked again is dropped from the round; one of the app's own waiting questions asked in the model's words is not added again.
+   */
+  repeats?: number;
 };
+/**
+ * A fact as the rest of the app reads it. The model does not write `sourceRef` or `sourceQuote` any more (2026-10-19): it cites numbered
+ * sentences (`refs` in `ONBOARDING_TURN_SCHEMA`) and `resolveOnboardingRefs` fills both in from the ledger, with the ids in `sentences`.
+ */
 export type SlotUpdate = {
   identityId: string; projectId: string; slot: string; value: string;
-  status: "confirmed" | "inferred"; sourceRef: string; sourceQuote: string;
+  status: "confirmed" | "inferred"; sourceRef: string; sourceQuote: string; sentences?: number[];
 };
 export type DetectedProject = { id: string; identityId: string; name: string; summary: string };
 export type FlywheelCandidate = {
   fromIdentityId: string; toIdentityId: string; kind: (typeof RELATION_KINDS)[number];
-  explanation: string; evidenceRefs: string[]; status: "inferred";
+  explanation: string; evidenceRefs: string[]; status: "inferred"; sentences?: number[];
 };
 export type TurnCoverage = { identityId: string; filled: string[]; missing: string[] };
 
 /**
  * Where the interview is (decided 2026-10-08, reordered 2026-10-12): the person sets their lines first on a structured screen (identity
  * nouns, order, hard constraints); the interview then goes, a batch of independent questions at a time, in two parts. The front part —
- * `orientation` (read every file first, then the hard lines' rules and the weekly hours) and `lines` (a personal description and 6–12
+ * `orientation` (read every file first, then the hard lines' rules and the weekly hours) and `lines` (a personal description and 3–12
  * attribute candidates for the long-term goal of each, and each line's current project with its deadline) — gathers the start standard
  * (`readyToStart`); the back part — where they stand, their compass, their energy, and each line's specifics — writes the portrait, in the
  * same interview. A line's own interview (`focusLine`) runs only `details` for that line. The portrait report is written afterwards by its own Skill.
@@ -56,13 +66,14 @@ export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
  */
 export const DEEP_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["situation", "compass", "energy"]);
 /** How the interview talks, chosen by the person at the start (default neutral); a setting, so it can change mid-interview. */
-export const ONBOARDING_TONES = ["direct", "warm", "neutral"] as const;
+// Two voices since 2026-10-18 (the owner's decision): 「直接犀利」 asked for exactly the 点破/反转 writing that reads as machine-made, so it
+// is gone, and an account that chose it reads as neutral (`readTone`).
+export const ONBOARDING_TONES = ["neutral", "warm"] as const;
 export type OnboardingTone = (typeof ONBOARDING_TONES)[number];
 export const ONBOARDING_TONE_SETTING = "onboarding.tone";
 export const ONBOARDING_TONE_LABEL: Record<OnboardingTone, { label: string; detail: string }> = {
-  direct: { label: "直接犀利", detail: "点破自我设限和逻辑漏洞，不绕弯，不做无谓攻击" },
-  warm: { label: "温和支持", detail: "先肯定再追问，语气柔和" },
-  neutral: { label: "中性客观", detail: "就事论事，不加情绪" }
+  neutral: { label: "冷静客观", detail: "就事论事，讲清依据，不带情绪" },
+  warm: { label: "温柔体贴", detail: "先回应感受，再问事情，语气柔和" }
 };
 export function readTone(value: string | null | undefined): OnboardingTone {
   return (ONBOARDING_TONES as readonly string[]).includes(value ?? "") ? value as OnboardingTone : "neutral";
@@ -95,9 +106,10 @@ export type ProfileModel = {
 export const EMPTY_PROFILE_MODEL: ProfileModel = { portrait: "", coreConflict: "", problem: "", gravity: [], designable: [], reframes: [], workView: "",
   lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "", values: [] };
 /**
- * For each line: a personal description from what was said, and 6–12 mutually independent attributes (`attributeCandidates`) the person
- * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from and labelled with its kind
- * (decided 2026-10-10; it replaced whole-sentence `goalCandidates`, which the model filled by permuting the same few attributes). An empty
+ * For each line: a personal description from what was said, and 3–12 mutually independent attributes (`attributeCandidates`) the person
+ * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from, labelled with its kind, and an
+ * adjective or a short field qualifier rather than an action or an achievement (decided 2026-10-10; it replaced whole-sentence
+ * `goalCandidates`, which the model filled by permuting the same few attributes; the wording rule is the owner's of 2026-10-19). An empty
  * list keeps the candidates already on record. `goalCandidates` is only ever on turns stored before.
  */
 export type LineProfile = { lineId: string; description: string; attributeCandidates: AttributeCandidate[]; goalCandidates?: string[] };
@@ -129,9 +141,31 @@ export type OnboardingTurn = {
   /** Filled once a hard-constraint line's rules are known (empty `windows` otherwise). */
   availability?: AvailabilityProposal;
   profile?: ProfileModel;
+  /** The dialogue's observation of the round (deep stages only; dropped in code when its quotes do not check out). */
+  insight?: TurnInsight;
+  /** The dialogue's own record of where the interview stands, handed back next round. */
+  progress?: TurnProgress;
 };
 
-/** What the Skill is shown at the start of the interview (later turns only carry the new reply). */
+/**
+ * An observation (观察卡): two things the person said in different replies, connected, with the pattern named and no advice. `refs` name
+ * the replies (`reply-N`) and a short verbatim span of each; `checkInsight` keeps the card only when every span is in its reply.
+ */
+export type TurnInsight = { text: string; refs: Array<{ replyId: string; quote: string }> };
+/**
+ * The interview's progress record (2026-10-19, the owner's decision): which part it is in, what of that part is clear and what is not,
+ * whether this round's answers finished the part, and what to ask next. Written by the dialogue every round, kept by the app and handed
+ * back at the start of the next round, so the stage is steered by the interview's own judgement and not re-derived from a long ledger.
+ */
+/** A domain line's checklist as the interview is given it (built by `domainGuides` in @crossline/identity-packs). */
+export type DomainGuideContext = { lineId: string; label: string; domain: string; ask: string[]; slots: string[]; attributeHints: string[] };
+
+export type TurnProgress = { part: OnboardingStage; covered: string[]; open: string[]; partDone: boolean; next: string };
+
+/**
+ * What the dialogue is shown at the start of the interview (later turns only carry the new reply). The dialogue cites nothing, so it reads
+ * the person's words and the files as they are; numbered sentences go only to the extraction (`OnboardingExtractContext`).
+ */
 export type OnboardingTurnContext = {
   version: "crossline.onboarding.turn.v1";
   /** `YYYY-MM-DD` in the person's zone, so a date written without a year lands in the right one. */
@@ -139,11 +173,14 @@ export type OnboardingTurnContext = {
   identities: Array<{ id: string; label: string }>;
   projects: Array<{ id: string; identityId: string; name: string; summary: string }>;
   facts: Array<{ identityId: string; projectId: string; slot: string; value: string; status: string }>;
+  /** Each file's text, cut to the turn's reading budget. */
   sources: Array<{ id: string; fileName: string; kind: string; projectId: string; text: string }>;
   /** A line's own interview: only this line is asked about. Absent for the full interview. */
   focusLine?: { id: string; label: string; goal: string } | null;
   /** The person's lines as set on the opening screen: identity noun, order (null = parallel), hard constraint, chosen goals. */
-  lines?: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts?: string[] }>;
+  lines?: Array<{ id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts?: string[]; domain?: string }>;
+  /** The domain lines' fixed checklists (健康 / 财富, docs/domain-lines.md): asked instead of improvised, recorded under fixed slots. */
+  domainGuides?: DomainGuideContext[];
   /** The portrait so far and the stage reached, so a rebuilt thread carries on rather than starting over. */
   profile?: ProfileModel; stage?: OnboardingStage;
   /** How the person asked to be spoken to (`ONBOARDING_TONE_SETTING`); also sent with every later turn, since it can change. */
@@ -169,9 +206,74 @@ export type OnboardingTurnContext = {
    */
   stageRounds?: number;
   moveOn?: string;
-  /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. User lines carry their `reply-N` id. */
+  /** Only when the conversation had to be rebuilt in a fresh thread: what was said before, oldest first. */
   history?: Array<{ id: string; role: "user" | "assistant"; text: string }>;
+  /**
+   * The question ledger (`ledgerLines`): what was already asked, numbered, with its status and answer — the interview's own, the app's
+   * waiting ones (待问) and answered ones. A question that asks one of these again names its number in `repeats`.
+   */
+  questionLedger?: string[];
+  /** The person's reply, as they wrote it. */
   reply: { id: string; text: string };
+  /**
+   * Facts the background extraction recorded since the dialogue last heard (「research/ece555 · deadline = 12 月中（确认）」): what the
+   * ledger now holds, so the dialogue neither asks it again nor contradicts it. Later turns only; the first turn has `facts`.
+   */
+  recorded?: string[];
+  /**
+   * The short ledger (2026-10-19): the interview's own progress record from the last round (`progressLines`), what the ledger holds in at
+   * most fifteen lines (`interviewAbstract`), and how the person rated the latest observations.
+   */
+  progress?: string[];
+  abstract?: string[];
+  observations?: string[];
+  /**
+   * Each line with no long-term goal yet, and whether the picker beside the conversation offers attribute candidates for it (「创作者：还没有
+   * 候选定语」): the dialogue asks what the person wants to become on a line only while it offers none.
+   */
+  goalPicker?: string[];
+};
+
+/**
+ * What one extraction run is shown (2026-10-19): a fresh thread each time, so everything it needs is here — the replies and files not
+ * yet extracted as numbered sentences, a short index of what the ledger already holds, and tools to read any earlier sentence
+ * (`search_evidence`, `read_sentences`) instead of the whole conversation.
+ */
+export type OnboardingExtractContext = {
+  version: "crossline.onboarding.extract.v1";
+  today: string; timeZone: string;
+  lines: Array<{ id: string; label: string; hard: boolean; goals: string[]; domain?: string }>;
+  /** The domain lines' fixed slots and goal adjectives, so their facts are recorded under the same names every time. */
+  domainGuides?: DomainGuideContext[];
+  projects: Array<{ id: string; identityId: string; name: string; summary: string }>;
+  /** The ledger's facts, one line each (`identity/project · slot = value（确认|推断）`): what is already known, to update rather than repeat. */
+  facts: string[];
+  /** Each line's description and attribute candidates on record. */
+  lineProfiles: Array<{ lineId: string; description: string; attributes: string[] }>;
+  /**
+   * Lines that have a description and no goal adopted but no attribute candidates yet: this run owes them candidates, drawn from everything
+   * said about the line (looked up), or the person has nothing to compose a goal from and cannot start (2026-10-19 walkthrough).
+   */
+  candidatesWanted?: string[];
+  /** The portrait so far; null for a line's own interview, which does not touch it. */
+  profile: ProfileModel | null;
+  /**
+   * What this run owes the portrait besides keeping a section current when the new material bears on it: the deep sections whose stage
+   * is over, to rewrite whole from everything said (looked up), and the synthesis, once all three are over. Null for a line's interview.
+   */
+  profileTask: { finalize: ProfileSection[]; synthesize: boolean } | null;
+  stage: OnboardingStage;
+  focusLine: { id: string; label: string } | null;
+  /** The person's replies not yet extracted, oldest first, each with the questions it answers and its numbered sentences. */
+  replies: Array<{ id: string; asked: string[]; sentences: string }>;
+  /** Files not yet extracted, as numbered sentences within the run's reading budget. */
+  sources: Array<{ id: string; fileName: string; kind: string; projectId: string; sentences: string }>;
+  /** Files that did not fit this run; the next run takes them. */
+  sourcesWaiting?: number;
+  /** Every file is being read again: dates it states replace the batch nobody answered. */
+  reread: boolean;
+  /** The person's ratings of the interview's observations (「准：…」/「不准：…」): what they said fits them, and what they said does not. */
+  observations?: string[];
 };
 
 /** What the validator may check a citation against. Never sent to the model. */
@@ -182,80 +284,182 @@ export type KnownSources = {
   replies: Record<string, string>;
   /** Every extracted document, by id (`src-N`). */
   sources: Record<string, string>;
+  /** The numbered sentences the model was shown, by id: which reply or file each is in and where (`resolveOnboardingRefs`). */
+  sentences?: Map<number, EvidenceSentence>;
+  /**
+   * How many attribute candidates each line already has on record (the extraction knows; absent counts as none). A list pruned below
+   * `ATTRIBUTE_CANDIDATES_MIN` replaces the ones on record only when it is at least as long, so dropping bad items never empties a line
+   * that had nothing and never shrinks one that had more (`keepCandidates`).
+   */
+  attributesOnRecord?: Record<string, number>;
 };
+/** One citable sentence: the reply (`reply-N`) or file (`src-N`) it is in, and its offsets in that text. */
+export type EvidenceSentence = { ref: string; start: number; end: number; text: string };
 
 const text = (max: number, min = 1) => ({ type: "string", minLength: min, maxLength: max }) as const;
 const slug = { type: "string", minLength: 1, maxLength: 80 } as const;
 const object = (properties: Record<string, unknown>) =>
   ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+/** Sentence numbers (2026-10-19): the model points at what it was shown instead of copying it, and the system fills the words in. */
+export const REFS = { type: "array", maxItems: 8, items: { type: "integer", minimum: 1 } } as const;
+const pick = <K extends string>(fields: Record<string, unknown>, keys: readonly K[]) => Object.fromEntries(keys.map((key) => [key, fields[key]]));
 
-export const ONBOARDING_TURN_SCHEMA = object({
-  reply: text(1500),
-  questions: {
-    // A batch of questions that do not depend on each other (decided 2026-10-08): answered one by one on screen and sent together. A question
-    // whose answer depends on another's waits for the next turn.
-    type: "array", maxItems: 5,
-    items: object({
-      id: slug, text: text(400), kind: { type: "string", enum: ["single", "multi", "free"] },
-      options: {
-        type: "array", maxItems: 14,
-        items: object({ id: slug, label: text(120), detail: { type: "string", maxLength: 300 } })
-      },
-      allowOther: { type: "boolean" },
-      // "" = about the person generally / about the connections between lines.
-      identityId: { type: "string", maxLength: 80 }, projectId: { type: "string", maxLength: 80 }
-    })
-  },
-  slotUpdates: {
-    type: "array", maxItems: 40,
-    items: object({
-      identityId: slug, projectId: { type: "string", maxLength: 80 }, slot: slug, value: text(600),
-      status: { type: "string", enum: ["confirmed", "inferred"] },
-      // `reply-N`, `src-N`, or `inference`.
-      sourceRef: slug, sourceQuote: { type: "string", maxLength: 600 }
-    })
-  },
-  projectsDetected: {
-    type: "array", maxItems: 8,
-    items: object({ id: slug, identityId: slug, name: text(120), summary: { type: "string", maxLength: 500 } })
-  },
-  flywheelCandidates: {
-    type: "array", maxItems: 12,
-    items: object({
-      fromIdentityId: slug, toIdentityId: slug, kind: { type: "string", enum: [...RELATION_KINDS] },
-      explanation: text(500), evidenceRefs: { type: "array", maxItems: 6, items: slug },
-      status: { type: "string", enum: ["inferred"] }
-    })
-  },
-  coverage: {
-    type: "array", maxItems: 8,
-    items: object({
-      identityId: slug,
-      filled: { type: "array", maxItems: 30, items: slug }, missing: { type: "array", maxItems: 30, items: slug }
-    })
-  },
-  fileDates: DATE_EXTRACTION_SCHEMA,
-  nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
-  stage: { type: "string", enum: [...ONBOARDING_STAGES] },
-  lineProfiles: { type: "array", maxItems: 8, items: object({ lineId: slug, description: { type: "string", maxLength: 800 },
-    attributeCandidates: { type: "array", maxItems: ATTRIBUTE_CANDIDATES_MAX,
-      items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD, sourceRef: slug }) } }) },
-  goalEdits: { type: "array", maxItems: 8, items: object({ lineId: slug,
-    parts: { type: "array", maxItems: 12, items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD }) }, sourceRef: slug }) },
-  availability: object({ windows: { type: "array", maxItems: 14, items: object({ days: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
-    start: text(5), end: text(5), energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
-  profile: object({
-    portrait: { type: "string", maxLength: 300 }, coreConflict: { type: "string", maxLength: 400 }, problem: { type: "string", maxLength: 600 },
-    gravity: { type: "array", maxItems: 8, items: text(200) }, designable: { type: "array", maxItems: 8, items: text(200) },
-    reframes: { type: "array", maxItems: 4, items: object({ fallacy: text(200), reframe: text(300) }) },
-    workView: { type: "string", maxLength: 600 }, lifeView: { type: "string", maxLength: 600 }, consistency: { type: "string", maxLength: 600 }, trueNorth: { type: "string", maxLength: 300 },
-    energyMap: { type: "array", maxItems: 12, items: object({ activity: text(80), skill: { type: "string", enum: ["high", "low"] }, love: { type: "string", enum: ["high", "low"] },
-      charge: { type: "string", enum: ["charge", "drain"] } }) },
-    flow: { type: "array", maxItems: 8, items: text(200) }, says: { type: "string", maxLength: 400 }, does: { type: "string", maxLength: 400 },
-    anchor: { type: "string", maxLength: 400 }, realWant: { type: "string", maxLength: 400 }, allocation: { type: "string", maxLength: 600 },
-    values: { type: "array", maxItems: 10, items: object({ value: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: { type: "integer", minimum: 0, maximum: 100 } }) }
-  })
-});
+/** Each field of the working portrait, as the schema of the whole portrait and of its sections both write it. */
+const PROFILE_FIELD_SCHEMAS: Record<string, unknown> = {
+  portrait: { type: "string", maxLength: 300 }, coreConflict: { type: "string", maxLength: 400 }, problem: { type: "string", maxLength: 600 },
+  gravity: { type: "array", maxItems: 8, items: text(200) }, designable: { type: "array", maxItems: 8, items: text(200) },
+  reframes: { type: "array", maxItems: 4, items: object({ fallacy: text(200), reframe: text(300) }) },
+  workView: { type: "string", maxLength: 600 }, lifeView: { type: "string", maxLength: 600 }, consistency: { type: "string", maxLength: 600 }, trueNorth: { type: "string", maxLength: 300 },
+  energyMap: { type: "array", maxItems: 12, items: object({ activity: text(80), skill: { type: "string", enum: ["high", "low"] }, love: { type: "string", enum: ["high", "low"] },
+    charge: { type: "string", enum: ["charge", "drain"] } }) },
+  flow: { type: "array", maxItems: 8, items: text(200) }, says: { type: "string", maxLength: 400 }, does: { type: "string", maxLength: 400 },
+  anchor: { type: "string", maxLength: 400 }, realWant: { type: "string", maxLength: 400 }, allocation: { type: "string", maxLength: 600 },
+  values: { type: "array", maxItems: 10, items: object({ value: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: { type: "integer", minimum: 0, maximum: 100 } }) }
+};
+
+/**
+ * The portrait in four sections (2026-10-19, P3 of the interview redesign). It used to be rewritten whole every round, so each round
+ * re-worded what the person had already confirmed and spent output on fields nothing new bore on. Now the extraction writes a section only
+ * when new material bears on it, rewrites a deep stage's section whole once that stage is over (`finalize`), and writes the synthesis only
+ * once all three deep stages are over — it sums up what they found, so it waits for them.
+ */
+export const PROFILE_SECTIONS = ["situation", "compass", "energy", "synthesis"] as const;
+export type ProfileSection = (typeof PROFILE_SECTIONS)[number];
+export const DEEP_SECTIONS = ["situation", "compass", "energy"] as const;
+export const SECTION_FIELDS: Record<ProfileSection, Array<keyof ProfileModel>> = {
+  situation: ["problem", "gravity", "designable", "reframes"],
+  compass: ["workView", "lifeView", "consistency", "trueNorth", "values"],
+  energy: ["energyMap", "flow", "says", "does", "anchor", "realWant"],
+  synthesis: ["portrait", "coreConflict", "allocation"]
+};
+/** One section as the extraction writes it: its fields whole, and the sentences it rests on (`refs` on the wire). */
+export type SectionUpdate = Partial<ProfileModel> & { sentences?: number[] };
+export type ProfileSections = Partial<Record<ProfileSection, SectionUpdate | null>>;
+/** What the ledger keeps about each section (`PROFILE_SECTIONS_SETTING`): the sentences it rests on, whether its stage is over, when written. */
+export const PROFILE_SECTIONS_SETTING = "profile.sections";
+/** `emptyRuns`: runs asked to finalize this section that wrote nothing for it; it is final with nothing only after `SECTION_EMPTY_RUNS_MAX`. */
+export type SectionRecord = { sentences: number[]; final: boolean; at: string; emptyRuns?: number };
+/** Runs a section may come back empty when asked to finalize before it is closed as it stands (2026-10-19: one empty answer closed it for good). */
+export const SECTION_EMPTY_RUNS_MAX = 2;
+/** Whether a section is done: final with something it rests on, or closed after its empty runs. A record the old rule closed empty is open again. */
+export const sectionClosed = (record: Pick<SectionRecord, "final" | "sentences" | "emptyRuns"> | undefined): boolean =>
+  Boolean(record?.final && (record.sentences?.length || (record.emptyRuns ?? 0) >= SECTION_EMPTY_RUNS_MAX));
+
+/** The portrait with the sections a run was allowed to write put in; every other field stays as it was. */
+export function mergeProfileSections(profile: ProfileModel, sections: ProfileSections | undefined, allowed: ReadonlySet<ProfileSection>): ProfileModel {
+  const next = { ...profile } as Record<string, unknown>;
+  for (const section of PROFILE_SECTIONS) {
+    const update = sections?.[section];
+    if (!update || !allowed.has(section)) continue;
+    for (const field of SECTION_FIELDS[section]) if (update[field] !== undefined) next[field] = update[field];
+  }
+  return withValues({ ...EMPTY_PROFILE_MODEL, ...(next as Partial<ProfileModel>) });
+}
+
+/**
+ * The ids a turn may name, as enums made for that turn (2026-10-19): a line or project the model names is then one the schema itself
+ * offers, instead of a string the validator refuses after the fact. Without them (`undefined`) a field is a plain slug, which is what
+ * the exported schemas below carry for the conformance check and the strict-mode rules.
+ */
+export type TurnIds = { lines: string[]; projects?: string[] };
+const enumOf = (values: string[], fallback: object) => values.length ? { type: "string", enum: [...new Set(values)] } : fallback;
+
+/** Every field either layer of a turn may write, made once so the two schemas below never drift apart. */
+function turnFields(ids?: TurnIds) {
+  // A line the answer names (never "person"); a line or the person; what a question is about ("" for the person in general or across lines).
+  const line = ids ? enumOf(ids.lines.filter((id) => id !== PERSON_LINE), slug) : slug;
+  const lineOrPerson = ids ? enumOf([...ids.lines, PERSON_LINE], slug) : slug;
+  const about = ids ? enumOf(["", PERSON_LINE, ...ids.lines], { type: "string", maxLength: 80 }) : { type: "string", maxLength: 80 };
+  // A question may only be about a project on record; a fact may also name one the same answer detects.
+  const askedProject = ids?.projects ? enumOf(["", ...ids.projects], { type: "string", maxLength: 80 }) : { type: "string", maxLength: 80 };
+  return {
+    reply: text(1500),
+    questions: {
+      // A batch of questions that do not depend on each other (decided 2026-10-08): answered one by one on screen and sent together. A question
+      // whose answer depends on another's waits for the next turn.
+      type: "array", maxItems: 5,
+      items: object({
+        id: slug, text: text(400), kind: { type: "string", enum: ["single", "multi", "free"] },
+        options: {
+          type: "array", maxItems: 14,
+          // A short label; `detail` only when the label does not explain itself (2026-10-19: long option notes were half of what made a round tiring).
+          items: object({ id: slug, label: text(120), detail: { type: "string", maxLength: 80 } })
+        },
+        allowOther: { type: "boolean" },
+        identityId: about, projectId: askedProject,
+        // The ledger number of the question this one repeats (`questionLedger`), 0 when it is new.
+        repeats: { type: "integer", minimum: 0 }
+      })
+    },
+    slotUpdates: {
+      type: "array", maxItems: 40,
+      items: object({
+        identityId: lineOrPerson, projectId: { type: "string", maxLength: 80 }, slot: slug, value: text(600),
+        status: { type: "string", enum: ["confirmed", "inferred"] },
+        // The numbered sentences the fact rests on; empty for an inference.
+        refs: REFS
+      })
+    },
+    projectsDetected: {
+      type: "array", maxItems: 8,
+      items: object({ id: slug, identityId: lineOrPerson, name: text(120), summary: { type: "string", maxLength: 500 } })
+    },
+    flywheelCandidates: {
+      type: "array", maxItems: 12,
+      items: object({
+        fromIdentityId: lineOrPerson, toIdentityId: lineOrPerson, kind: { type: "string", enum: [...RELATION_KINDS] },
+        explanation: text(500), refs: REFS,
+        status: { type: "string", enum: ["inferred"] }
+      })
+    },
+    coverage: {
+      type: "array", maxItems: 8,
+      items: object({
+        identityId: lineOrPerson,
+        filled: { type: "array", maxItems: 30, items: slug }, missing: { type: "array", maxItems: 30, items: slug }
+      })
+    },
+    fileDates: DATE_EXTRACTION_SCHEMA,
+    nextAction: { type: "string", enum: ["ask", "ready_for_milestones"] },
+    stage: { type: "string", enum: [...ONBOARDING_STAGES] },
+    // One observation in the deep stages (2026-10-19, the owner's decision): two things the person said, in different replies, connected and
+    // the pattern named, no advice. `text` empty for none. Checked in code (`checkInsight`): each quote must be in the reply it names.
+    insight: object({ text: { type: "string", maxLength: 300 },
+      refs: { type: "array", maxItems: 3, items: object({ replyId: { type: "string", maxLength: 20 }, quote: { type: "string", maxLength: 80 } }) } }),
+    // The interview's own progress record, rewritten every round and handed back at the start of the next (`TurnProgress`).
+    progress: object({ part: { type: "string", enum: [...ONBOARDING_STAGES] }, covered: { type: "array", maxItems: 8, items: text(60) },
+      open: { type: "array", maxItems: 8, items: text(60) }, partDone: { type: "boolean" }, next: text(160) }),
+    lineProfiles: { type: "array", maxItems: 8, items: object({ lineId: line, description: { type: "string", maxLength: 800 },
+      attributeCandidates: { type: "array", maxItems: ATTRIBUTE_CANDIDATES_MAX,
+        items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD, refs: REFS }) } }) },
+    goalEdits: { type: "array", maxItems: 8, items: object({ lineId: line,
+      parts: { type: "array", maxItems: 12, items: object({ text: text(ATTRIBUTE_MAX_LENGTH), kind: ATTRIBUTE_KIND_FIELD }) }, refs: REFS }) },
+    availability: object({ windows: { type: "array", maxItems: 14, items: object({ days: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
+      startMinute: { type: "integer", minimum: 0, maximum: 1440 }, endMinute: { type: "integer", minimum: 0, maximum: 1440 },
+      energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
+    profile: object(PROFILE_FIELD_SCHEMAS),
+    // The portrait by section (2026-10-19, P3): null leaves a section as it is; a section written is written whole, with the sentences it rests on.
+    profileSections: object(Object.fromEntries(PROFILE_SECTIONS.map((section) => [section,
+      { anyOf: [object({ ...pick(PROFILE_FIELD_SCHEMAS, SECTION_FIELDS[section]), refs: REFS }), { type: "null" }] }])))
+  };
+}
+
+/**
+ * The two layers of an interview turn (2026-10-19, P2 of the redesign). The person waits only for the **dialogue**: what was taken in,
+ * and the next questions. The **extraction** — facts with their sentence numbers, projects, dates, line attributes, hours, the
+ * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
+ */
+export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress"] as const;
+export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "profileSections"] as const;
+export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
+export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
+export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
+export const ONBOARDING_EXTRACT_SCHEMA = onboardingExtractSchema();
+/** What the person waits for, and what is stored as the round. */
+export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress">;
+/** What the background run writes to the ledger. */
+export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
+  | "availability"> & { fileDates?: DateExtraction; profileSections?: ProfileSections };
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -273,11 +477,22 @@ function reject(code: string, detail: string): never {
 // The refusals below are repair messages to the interview model, not interface text.
 /* i18n-ignore-start */
 export function validateOnboardingTurn(value: unknown, known: KnownSources): OnboardingTurn {
+  return checkTurn(value, known, ATTRIBUTE_CANDIDATES_MIN);
+}
+
+/**
+ * The turn's rules. `minimumCandidates` is how many attribute candidates a non-empty list must hold: three for a model's answer, one for
+ * a turn `keepOnboardingTurn` already pruned, whose short lists `keepCandidates` let through on purpose.
+ */
+function checkTurn(value: unknown, known: KnownSources, minimumCandidates: number): OnboardingTurn {
   const turn = value as OnboardingTurn | undefined;
   if (!turn || typeof turn.reply !== "string" || !Array.isArray(turn.questions) || !Array.isArray(turn.slotUpdates)
     || !Array.isArray(turn.projectsDetected) || !Array.isArray(turn.flywheelCandidates) || !Array.isArray(turn.coverage)
     || (turn.nextAction !== "ask" && turn.nextAction !== "ready_for_milestones")) {
-    reject("ONBOARDING_TURN_SCHEMA_INVALID", "输出结构不符合要求。");
+    // Which part is wrong, so a repair has something to act on (a bare 「输出结构不符合要求」 was sent back three times in a row).
+    const missing = !turn ? ["整个回答"] : [typeof turn.reply !== "string" ? "reply" : "", ...(["questions", "slotUpdates", "projectsDetected", "flywheelCandidates", "coverage"] as const)
+      .filter((key) => !Array.isArray((turn as Record<string, unknown>)[key])), turn.nextAction !== "ask" && turn.nextAction !== "ready_for_milestones" ? "nextAction" : ""].filter(Boolean);
+    reject("ONBOARDING_TURN_SCHEMA_INVALID", `输出结构不符合要求：${missing.join("、")} 缺失或类型不对（列表字段没有内容时写 []）。`);
   }
   const identities = new Set([...known.identities, PERSON_LINE]);
   const projectIds = new Set(known.projectIds);
@@ -331,7 +546,7 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
   if (turn.nextAction === "ask" && !turn.questions.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题。");
   for (const line of turn.lineProfiles ?? []) {
     if (!identities.has(line.lineId) || line.lineId === PERSON_LINE) reject("ONBOARDING_IDENTITY_UNKNOWN", `主线描述里的主线「${line.lineId}」不存在。`);
-    const problem = attributeProblem(line.attributeCandidates ?? [], citable);
+    const problem = candidatesProblem(line.attributeCandidates ?? [], citable, minimumCandidates);
     if (problem) reject(problem.code, `主线「${line.lineId}」的定语候选：${problem.detail}`);
   }
   for (const edit of turn.goalEdits ?? []) {
@@ -344,7 +559,7 @@ export function validateOnboardingTurn(value: unknown, known: KnownSources): Onb
     if (duplicate) reject("ONBOARDING_ATTRIBUTE_DUPLICATE", `长期目标修改里「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个。`);
   }
   for (const window of turn.availability?.windows ?? []) if (!/^\d{2}:\d{2}$/.test(window.start) || !/^\d{2}:\d{2}$/.test(window.end) || window.end <= window.start)
-    reject("ONBOARDING_AVAILABILITY_INVALID", `可用时段 ${window.start}–${window.end} 不合法：用 HH:MM，且结束晚于开始。`);
+    reject("ONBOARDING_AVAILABILITY_INVALID", `可用时段 ${window.start}–${window.end} 不合法：startMinute 和 endMinute 是从零点起的分钟数（0–1440），结束晚于开始。`);
   /* i18n-ignore-end */
   // A turn recorded before the portrait existed has none of it; every live answer carries all of it (strict schema).
   return { ...turn, stage: turn.stage ?? "details", questions: turn.questions.map((question) => ({ ...question, kind: questionKind(question) })),
@@ -380,37 +595,54 @@ const kindOf = (part: { text: string; kind?: string }): AttributeKind =>
 const cleanCandidates = (list: AttributeCandidate[]) => list.map((item) => ({ text: cleanAttribute(item.text), kind: kindOf(item), sourceRef: item.sourceRef }))
   .filter((item) => item.text);
 
+/** What every repair about a candidate's wording ends with: what an attribute is, and that fewer real ones beat made-up ones. */
+/* i18n-ignore-start: a repair message to the model */
+const ATTRIBUTE_HOW = "定语说的是本人想在这条线上成为什么样的人，取自本人原话：形容词或形容性短语（严谨、高产、独立、有影响力、值得信赖、受学生欢迎）或短的领域限定（器件物理方向）；"
+  + "本人只说了要做什么、要拿到什么时，不要硬改成定语，去掉这一个，少给几个也可以。";
+/* i18n-ignore-end */
+
 /**
  * What is wrong with one line's attribute candidates, if anything: an empty list is allowed (it keeps the ones on record); otherwise
- * 6–12, each cited to a reply or file, each one thing, and no two saying the same (after removing 「的」 and punctuation, one contains
- * the other). The detail names the offending attributes so the repair has something to act on.
+ * 3–12, each cited to a reply or file, each one thing, each describing the person rather than an action or an achievement
+ * (`attributeProblem`), and no two saying the same (after removing 「的」 and punctuation, one contains the other). The detail names
+ * the offending attributes, all of them at once for wording, so one repair can fix them together.
  */
 /* i18n-ignore-start: repair messages to the model */
-function attributeProblem(list: AttributeCandidate[], citable: (ref: string) => boolean): { code: string; detail: string } | undefined {
+function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) => boolean, minimum = ATTRIBUTE_CANDIDATES_MIN): { code: string; detail: string } | undefined {
   if (!list.length) return undefined;
   for (const item of list) {
-    if (!citable(item.sourceRef)) return { code: "ONBOARDING_UNKNOWN_SOURCE_REF", detail: `「${item.text}」引用了不存在的来源「${item.sourceRef}」；每个定语注明来自哪条回复（reply-N）或哪个文件（src-N）。` };
+    if (!citable(item.sourceRef)) return { code: "ONBOARDING_UNKNOWN_SOURCE_REF", detail: `「${item.text}」没有引用本轮给出的句子；每个定语在 refs 里写出它来自的句子编号。` };
     if (!cleanAttribute(item.text)) return { code: "ONBOARDING_ATTRIBUTE_EMPTY", detail: "有一个定语是空的。" };
     if (notAtomic(item.text)) return { code: "ONBOARDING_ATTRIBUTE_NOT_ATOMIC", detail: `「${item.text}」含有并列，一个定语只写一件事，拆成两个。` };
   }
+  const wording = list.map((item) => attributeProblem(item.text)).filter((problem): problem is string => Boolean(problem));
+  if (wording.length) return { code: "ONBOARDING_ATTRIBUTE_NOT_DESCRIPTIVE", detail: `${wording.slice(0, 3).join("；")}。${ATTRIBUTE_HOW}` };
   const duplicate = duplicateAttributes(list.map((item) => cleanAttribute(item.text)))[0];
   if (duplicate) return { code: "ONBOARDING_ATTRIBUTE_DUPLICATE", detail: `「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个或改成互不重叠的两个。` };
-  if (list.length < ATTRIBUTE_CANDIDATES_MIN || list.length > ATTRIBUTE_CANDIDATES_MAX) {
-    return { code: "ONBOARDING_ATTRIBUTES_COUNT", detail: `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个；信息还不够时留空数组并继续追问。` };
+  if (list.length < minimum || list.length > ATTRIBUTE_CANDIDATES_MAX) {
+    return { code: "ONBOARDING_ATTRIBUTES_COUNT", detail: list.length < ATTRIBUTE_CANDIDATES_MIN
+      ? `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个：从本人已说的话和文件里补到至少 ${ATTRIBUTE_CANDIDATES_MIN} 个（每个引用句子编号）；`
+        + "只补本人用过的形容说法，本人确实只说了这些时就保持这几个；本人对这条线几乎什么都没说时才留空数组。"
+      : `写 ${ATTRIBUTE_CANDIDATES_MIN}–${ATTRIBUTE_CANDIDATES_MAX} 个，现在是 ${list.length} 个，留下最有区别的 ${ATTRIBUTE_CANDIDATES_MAX} 个。` };
   }
   return undefined;
 }
 /* i18n-ignore-end */
 
-/** The candidates that pass on their own (cited, one thing, not repeating an earlier one); fewer than six left means none (keep those on record). */
-function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => boolean): AttributeCandidate[] {
+/**
+ * The candidates that pass on their own (cited, one thing, describing the person, not repeating an earlier one). Fewer than three left
+ * replace the ones on record only when the line has no more than that on record (`onRecord`): a line with nothing gets the one or two
+ * real attributes rather than none — an empty list there is what kept the start standard from standing (2026-10-19, W-71) — while a
+ * line that already has a fuller list keeps it.
+ */
+function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => boolean, onRecord = 0): AttributeCandidate[] {
   const kept: AttributeCandidate[] = [];
   for (const item of list) {
     const text = cleanAttribute(item.text);
-    if (!text || !citable(item.sourceRef) || notAtomic(text) || duplicateAttributes([...kept.map((other) => other.text), text]).length) continue;
+    if (!text || !citable(item.sourceRef) || notAtomic(text) || attributeProblem(text) || duplicateAttributes([...kept.map((other) => other.text), text]).length) continue;
     kept.push({ text, kind: kindOf(item), sourceRef: item.sourceRef });
   }
-  return kept.length >= ATTRIBUTE_CANDIDATES_MIN ? kept.slice(0, ATTRIBUTE_CANDIDATES_MAX) : [];
+  return kept.length >= ATTRIBUTE_CANDIDATES_MIN || (kept.length > 0 && kept.length >= onRecord) ? kept.slice(0, ATTRIBUTE_CANDIDATES_MAX) : [];
 }
 
 /**
@@ -424,14 +656,13 @@ function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => bo
  * availability windows. The interview keeps a pruned turn at once when this is small (`ONBOARDING_KEEP_EARLY_MAX`) rather than asking
  * the model to rewrite the whole answer, which costs a full regeneration (2026-10-16: two repairs were two thirds of a 174 s turn).
  */
-export function droppedOnboardingItems(original: unknown, kept: OnboardingTurn): number {
+export function droppedOnboardingItems(original: unknown, kept: Partial<OnboardingTurn>): number {
   const turn = original as Partial<OnboardingTurn> | undefined;
   const count = (list: unknown) => Array.isArray(list) ? list.length : 0;
   const candidates = (lines: unknown) => Array.isArray(lines)
     ? lines.reduce((sum: number, line: { attributeCandidates?: unknown }) => sum + count(line?.attributeCandidates), 0) : 0;
-  return Math.max(0, count(turn?.slotUpdates) - kept.slotUpdates.length) + Math.max(0, count(turn?.questions) - kept.questions.length)
-    + Math.max(0, count(turn?.projectsDetected) - kept.projectsDetected.length)
-    + Math.max(0, count(turn?.flywheelCandidates) - count(kept.flywheelCandidates)) + Math.max(0, count(turn?.goalEdits) - count(kept.goalEdits))
+  const lost = (key: "slotUpdates" | "questions" | "projectsDetected" | "flywheelCandidates" | "goalEdits") => Math.max(0, count(turn?.[key]) - count(kept[key]));
+  return lost("slotUpdates") + lost("questions") + lost("projectsDetected") + lost("flywheelCandidates") + lost("goalEdits")
     + Math.max(0, candidates(turn?.lineProfiles) - candidates(kept.lineProfiles))
     + Math.max(0, count(turn?.availability?.windows) - count(kept.availability?.windows));
 }
@@ -456,10 +687,11 @@ export function keepOnboardingTurn(value: unknown, known: KnownSources): Onboard
     flywheelCandidates: (turn.flywheelCandidates ?? []).filter((candidate) => identities.has(candidate.fromIdentityId) && identities.has(candidate.toIdentityId)
       && candidate.fromIdentityId !== candidate.toIdentityId && candidate.evidenceRefs.every((ref) => ref === "inference" || sourceText(ref) !== undefined)),
     lineProfiles: (turn.lineProfiles ?? []).filter((line) => identities.has(line.lineId) && line.lineId !== PERSON_LINE)
-      .map((line) => ({ ...line, attributeCandidates: keepCandidates(line.attributeCandidates ?? [], (ref) => sourceText(ref) !== undefined) })),
+      .map((line) => ({ ...line, attributeCandidates: keepCandidates(line.attributeCandidates ?? [], (ref) => sourceText(ref) !== undefined,
+        known.attributesOnRecord?.[line.lineId] ?? 0) })),
     goalEdits: (turn.goalEdits ?? []).filter((edit) => identities.has(edit.lineId) && edit.lineId !== PERSON_LINE && edit.sourceRef in known.replies
       && edit.parts.some((part) => cleanAttribute(part.text)) && !duplicateAttributes(edit.parts.map((part) => cleanAttribute(part.text)).filter(Boolean)).length),
     ...(turn.availability ? { availability: { ...turn.availability, windows: turn.availability.windows.filter((window) => /^\d{2}:\d{2}$/.test(window.start)
       && /^\d{2}:\d{2}$/.test(window.end) && window.end > window.start) } } : {}) };
-  try { return validateOnboardingTurn(pruned, known); } catch { return undefined; }
+  try { return checkTurn(pruned, known, 1); } catch { return undefined; }
 }

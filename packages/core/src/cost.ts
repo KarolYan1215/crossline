@@ -1,5 +1,6 @@
 import { budgetPolicy } from "./index";
 import { tFor, type Locale } from "./i18n";
+import type { QuotaSaver } from "./quota-saver";
 
 /**
  * What discretionary work is allowed to spend, expressed without naming a currency or a vendor.
@@ -99,7 +100,18 @@ export const BACKGROUND_BLOCKER = "background.blocker";
 /** `message` is for the person; `reason` is the runtime's own words, kept for logs and for telling a down worker apart. */
 export type BackgroundSpend = { mode: SpendMode; blocker?: { code: string; message: string; resetsAt?: string; reason?: string };
   /** Absent reads as `active` (callers that do not track the person). */
-  engagement?: Engagement };
+  engagement?: Engagement;
+  /** The fullest window's share used, when the reading has one: core work stops at `CORE_STOP_PERCENT`, intake runs on to 100%. */
+  usedPercent?: number;
+  /** A local evaluation is spending this account's quota (`EVAL_HOLD_FILE`): discretionary work waits until it ends. */
+  held?: boolean;
+  /** 节省额度 (`quotaSaverReading`): absent reads as off, the rules before it. */
+  saver?: QuotaSaver };
+/**
+ * Core background work stops here and leaves the last of the quota to intake (capture analysis, calendar filing) and the person's own
+ * turns: what the person just put in is turned into something usable last of all (2026-10-21).
+ */
+export const CORE_STOP_PERCENT = 95;
 
 /**
  * The one reading of the quota for background work. It replaced eight copies of the same check that disagreed about an
@@ -121,13 +133,80 @@ export function backgroundSpend(signal: CostSignal, locale?: Locale): Background
       ...(resetsAt ? { resetsAt } : {}) } };
   }
   const { mode } = budgetPolicy(used);
+  // The window that is spent says when it comes back: the person is told the hour, not just 「暂停」.
+  const fullest = [signal.short, signal.long].filter((window): window is CostWindow => Boolean(window))
+    .sort((a, b) => b.usedPercent - a.usedPercent)[0];
+  const resetsAt = fullest?.resetsAt ? new Date(fullest.resetsAt * 1000).toISOString() : undefined;
   return mode === "manual_core_only"
-    ? { mode, blocker: { code: "BUDGET_EXHAUSTED", message: t("模型额度已用 {{used}}%，后台自动工作暂停到额度恢复。", { used: Math.round(used) }) } }
-    : { mode };
+    ? { mode, blocker: { code: "BUDGET_EXHAUSTED", message: t("模型额度已用 {{used}}%，后台自动工作暂停到额度恢复。", { used: Math.round(used) }), ...(resetsAt ? { resetsAt } : {}) } }
+    : { mode, usedPercent: used };
 }
 
-export function spendAllows(spend: BackgroundSpend, kind: SpendKind): boolean {
+/**
+ * The account's own ChatGPT quota is spent while it also holds the developer's model (2026-10-21, the owner's 「chatgpt额度达到时，如果
+ * 账号有赞助模型授权，应该切换成赞助模型继续」). The worker writes `{at, source, until?}` when a reading shows the quota spent (`quota`,
+ * `until` the spent window's reset) or a run came back `SKILL_USAGE_LIMIT` (`usage_limit`, which carries no reset); every Skill the
+ * developer's model may serve goes there until then, and the next reading that shows the quota back clears it.
+ */
+export const CHATGPT_EXHAUSTED_SETTING = "model.chatgptExhausted";
+export type ChatgptExhausted = { at: string; source: "quota" | "usage_limit"; until?: string };
+/** How long a refused run alone (no reading with a reset time) keeps the account on the developer's model before ChatGPT is tried again. */
+export const USAGE_LIMIT_HOLD_MS = 30 * 60_000;
+
+/** Whether a reading of the ChatGPT quota says it is spent, and until when: the same line `backgroundSpend` pauses at. */
+export function chatgptQuotaSpent(signal: CostSignal): { until?: string } | undefined {
+  if (!signal.available || signal.money) return undefined;
+  const spend = backgroundSpend(signal);
+  if (spend.mode !== "manual_core_only" || !spend.blocker) return undefined;
+  return spend.blocker.resetsAt ? { until: spend.blocker.resetsAt } : {};
+}
+
+/** The stored mark while it still holds: until its reset time, or `USAGE_LIMIT_HOLD_MS` after a refused run that gave none. */
+export function chatgptExhausted(raw: string | undefined, now: Date): ChatgptExhausted | undefined {
+  if (!raw) return undefined;
+  let mark: ChatgptExhausted;
+  try { mark = JSON.parse(raw) as ChatgptExhausted; } catch { return undefined; }
+  if (!mark?.at) return undefined;
+  const end = mark.until ? Date.parse(mark.until) : Date.parse(mark.at) + USAGE_LIMIT_HOLD_MS;
+  return Number.isFinite(end) && end > now.getTime() ? mark : undefined;
+}
+
+/**
+ * What still works while background work is paused, and what waits (the 2026-10-18 evaluation: the person saw only 「已暂停」 and a
+ * stopped-looking system). The schedule, the calendar, reminders, timing and completion need no model at all; analysis, step plans,
+ * tutorials, research and the assistant do. A spent quota (`RATE_LIMIT_REACHED`, or `BUDGET_EXHAUSTED`, which the policy writes only
+ * at 100%) also stops the person's own turns — the input box's replies and the interview; a quota that cannot be read does not say so.
+ */
+export function degradedService(code: string): { works: string[]; paused: string[]; personTurns: boolean } {
+  const personTurns = code !== "RATE_LIMIT_REACHED" && code !== "BUDGET_EXHAUSTED";
+  return {
+    works: ["排程与日历：按现有任务和步骤照常重排，写入 Crossline 日历", "计时、完成确认与提交", "提醒与手机推送",
+      "手动改截止、时长和步骤", "回答待决事项（需要重排的，恢复后补上）", ...(personTurns ? ["输入框对话与访谈"] : [])],
+    paused: ["新收集事项的分析与拆分", "拆步骤与按回答重排", "教程与调研", "助手代办", ...(personTurns ? [] : ["输入框的对话回复与访谈"])],
+    personTurns
+  };
+}
+
+/**
+ * The one gate for every background pass. `nonCore` marks the work the quota saver holds (docs/token-economy.md §2.3, `quota-saver.ts`):
+ * with the saver on it must also pass its kind's own rule, find the quota normal or the person's night, and find non-core work under its
+ * share of the week; with the saver off its kind's rule alone decides, as before. Core work is never held by the saver.
+ */
+export function spendAllows(spend: BackgroundSpend, kind: SpendKind, options: { nonCore?: boolean } = {}): boolean {
+  if (!kindAllows(spend, kind)) return false;
+  if (!options.nonCore || !spend.saver?.on) return true;
+  return (spend.mode === "normal" || spend.saver.night) && !spend.saver.overShare;
+}
+
+/** Whether the saver, not the quota or the person's absence, is what stops non-core work now: the person is told once a week. */
+export function saverStopsNonCore(spend: BackgroundSpend, kind: SpendKind): boolean {
+  return Boolean(spend.saver?.on && spend.saver.overShare && kindAllows(spend, kind));
+}
+
+function kindAllows(spend: BackgroundSpend, kind: SpendKind): boolean {
   const engagement = spend.engagement ?? "active";
   if (engagement === "dormant" || (engagement === "cooling" && kind !== "intake")) return false;
-  return kind === "discretionary" ? spend.mode === "normal" : spend.mode !== "manual_core_only";
+  if (kind === "discretionary") return spend.mode === "normal" && !spend.held;
+  if (kind === "core" && (spend.usedPercent ?? 0) >= CORE_STOP_PERCENT) return false;
+  return spend.mode !== "manual_core_only";
 }

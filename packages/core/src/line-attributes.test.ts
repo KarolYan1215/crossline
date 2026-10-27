@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import {
-  GOAL_SPLIT_SCHEMA, checkGoalParts, cleanAttribute, composeGoal, duplicateAttributes, goalCore, guessKind, insertByKind, keepGoalSplit, lineAttributes,
-  notAtomic, orderAttributes, recomposes, validateGoalSplit, type AttributeKind, type GoalSplitContext
+  ATTRIBUTE_LONGEST, GOAL_SPLIT_SCHEMA, attributeLength, attributeProblem, checkGoalParts, cleanAttribute, composeGoal, duplicateAttributes, goalCore, guessKind,
+  insertByKind, keepGoalSplit, lineAttributes, notAtomic, orderAttributes, recomposes, validateGoalSplit, type AttributeKind, type GoalSplitContext
 } from "./line-attributes";
 import { structuredOutputProblems } from "./structured-output";
 
@@ -9,8 +9,18 @@ test("a goal is composed 「成为 A 的、B 的<身份>」 from the chosen part
   expect(composeGoal(["神经形态计算方向", "能独立立项"], "研究者")).toBe("成为神经形态计算方向的、能独立立项的研究者");
   expect(composeGoal(["有影响力"], "创作者")).toBe("成为有影响力的创作者");
   expect(composeGoal([], "创作者")).toBe("");
+  expect(composeGoal(["AI 排班与备料产品", "产品设计能力"], "产品人")).toBe("成为 AI 排班与备料的、有产品设计能力的产品人");
   // A part typed with its own 的 or 成为 is not doubled.
   expect(composeGoal(["成为科普的", " 有影响力的 "], "创作者")).toBe("成为科普的、有影响力的创作者");
+});
+
+test("a composed goal reads as Chinese: fields share one 的, the noun's stem is not said twice, Latin gets its space (W-24)", () => {
+  expect(composeGoal(["即刻内容创作", "公众号长文创作"], "创作者")).toBe("成为即刻内容、公众号长文的创作者");
+  expect(composeGoal(["AI 排班与备料", "连锁门店运营"], "创业者")).toBe("成为 AI 排班与备料、连锁门店运营的创业者");
+  // A part that is only the stem keeps it: nothing would be left.
+  expect(composeGoal(["创作", "有影响力"], "创作者")).toBe("成为创作的、有影响力的创作者");
+  // A split is still checked against the parts exactly as written.
+  expect(recomposes(["即刻内容创作", "公众号长文创作"], "创作者", "成为即刻内容创作的、公众号长文创作的创作者")).toBe(true);
 });
 
 test("cleaning keeps the phrase and drops what composing adds back", () => {
@@ -51,6 +61,47 @@ test("an unlabelled attribute's kind is read by rule: abilities, lasting states,
   expect(guessKind("持续产出")).toBe("state");
   expect(guessKind("被同行认可")).toBe("state");
   expect(guessKind("神经形态计算方向")).toBe("domain");
+});
+
+test("an attribute describes who the person becomes: adjectives and short fields pass, actions, counts and achievements do not (the owner's rule, 2026-10-19)", () => {
+  for (const text of ["严谨", "高产", "独立", "有影响力", "值得信赖", "受学生欢迎", "器件物理方向", "神经形态计算方向", "财务自由", "判断力强", "做事严谨",
+    "表达清晰", "科普", "长文方向", "AI 教育方向", "被同行认可", "持续产出", "稳定更新", "有产品设计能力", "成为严谨的"]) expect(attributeProblem(text), text).toBeUndefined();
+  // Nouns and idioms that begin like a verb or hold a numeral are not caught: 能源, 会计, 写作, 完成度, 开发能力, Web3, 5G, 百家号.
+  for (const text of ["能源方向", "能量充沛", "能动性强", "会计方向", "写作扎实", "完成度高", "获得感强", "开发能力强", "出版行业", "Web3 方向",
+    "5G 通信方向", "3D 打印方向", "一流", "十项全能", "百家号方向", "以人为本", "把关严格"]) expect(attributeProblem(text), text).toBeUndefined();
+  const caught: Array<[string, string]> = [["能独立立项", "「能」加动作"], ["可以独立带学生", "「可以」加动作"], ["擅长叙事", "「擅长」加动作"],
+    ["会讲故事", "「会」加动作"], ["发表三篇顶会论文", "带数量"], ["10w+ 粉丝", "带数量"], ["Top 3 期刊", "带数量"], ["年入百万", "带数量"],
+    ["写公众号长文", "以「写」开头"], ["做出有人付费的产品", "以「做出」开头"], ["外推人类知识边界", "以「外推」开头"], ["实现财务自由", "以「实现」开头"],
+    ["坚持写作", "以「坚持」开头"], ["以长期研究", "以「以」开头"], ["把脑机制转化为硬件结构", "以「把」开头"], ["博士毕业", "以「毕业」结尾"],
+    ["独立立项", "以「立项」结尾"], ["公司上市", "以「上市」结尾"]];
+  for (const [text, why] of caught) expect(attributeProblem(text), text).toContain(why);
+  // A sentence is not an attribute, however it starts.
+  expect(attributeLength("AI 教育方向")).toBe(5);
+  const long = "在人工智能教育与科学传播交叉领域里被同行持续认可";
+  expect(attributeLength(long)).toBeGreaterThan(ATTRIBUTE_LONGEST);
+  expect(attributeProblem(long)).toContain("是一句话");
+});
+
+test("in English, adjectives and fields pass; an ability with its verb or a leading achieving verb does not", () => {
+  for (const text of ["rigorous", "independent", "influential", "signal processing", "trusted by peers", "candid"]) expect(attributeProblem(text), text).toBeUndefined();
+  expect(attributeProblem("able to lead projects")).toContain('"able to" plus an action');
+  expect(attributeProblem("good at storytelling")).toContain('"good at" plus an action');
+  expect(attributeProblem("publish three papers")).toContain('starts with "publish"');
+  expect(attributeProblem("launch a product")).toContain('starts with "launch"');
+});
+
+test("adjectives are abilities or states when nobody labelled them, so a goal composed of them reads as Chinese", () => {
+  expect(guessKind("严谨")).toBe("ability");
+  expect(guessKind("判断力强")).toBe("ability");
+  expect(guessKind("做事严谨")).toBe("ability");
+  expect(guessKind("值得信赖")).toBe("state");
+  expect(guessKind("受学生欢迎")).toBe("state");
+  // A field that merely begins with such a word stays a field.
+  expect(guessKind("独立游戏")).toBe("domain");
+  expect(guessKind("开放科学")).toBe("domain");
+  // Abilities in a row share one 的, as fields do; a field and an adjective never do.
+  expect(composeGoal(["器件物理方向", "严谨", "高产", "有影响力"], "研究者")).toBe("成为器件物理方向的、严谨、高产的、有影响力的研究者");
+  expect(composeGoal(["科普", "有影响力", "值得信赖"], "创作者")).toBe("成为科普的、有影响力、值得信赖的创作者");
 });
 
 test("recomposing ignores whitespace, punctuation and the 的 that joining adds, and nothing else", () => {

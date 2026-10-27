@@ -72,7 +72,8 @@ export function parseFrozen(raw: string | undefined | null, now: Date): FrozenBl
   return value.filter((item): item is FrozenBlock => Boolean(item) && typeof item === "object"
     && typeof (item as FrozenBlock).blockId === "string" && typeof (item as FrozenBlock).start === "string"
     && typeof (item as FrozenBlock).end === "string" && REASONS.has((item as FrozenBlock).reason))
-    .filter((item) => Date.parse(item.end) > at && (!item.until || Date.parse(item.until) > at));
+    // A commit hold outlives its block's end until `until` (the grace hour: the work may still be under way, so it is not placed again yet).
+    .filter((item) => (Date.parse(item.end) > at || item.reason === "commit") && (!item.until || Date.parse(item.until) > at));
 }
 
 /** Adds or replaces the entry for its block id. */

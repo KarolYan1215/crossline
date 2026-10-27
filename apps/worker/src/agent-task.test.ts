@@ -29,6 +29,8 @@ const runner = (rpc: ReturnType<typeof fake>["rpc"], extra: { ask?: (r: { kind: 
   createAgentRunner(store, workspaceId, "C:\\repo", () => rpc, { outputRoot: path.join(root, "ai"), homeDir: "C:\\Users\\karol", ...extra });
 
 test("a kind of work that has not been approved does not start, and no thread is opened for it", async () => {
+  // The person already chose, and chose nothing (a workspace that never chose has three kinds on by default).
+  store.setSetting(workspaceId, "agent.categories", "{}");
   const { rpc, threadStarts } = fake([summary()]);
   expect(await runner(rpc)({ ...input, taskId: "t0" })).toMatchObject({ state: "needs_category_approval", category: "read_research_organize" });
   expect(threadStarts()).toHaveLength(0);
@@ -114,7 +116,7 @@ test("a kind earns trust only through accepted results, and loses it at the firs
   for (let i = 1; i < CLEAN_RUNS_TO_TRUST; i += 1) expect(recordReview(store, workspaceId, "data_code_sim", true)?.trust).toBe("review_all");
   expect(recordReview(store, workspaceId, "data_code_sim", true)?.trust).toBe("auto_checked");
   expect(recordReview(store, workspaceId, "data_code_sim", false)).toMatchObject({ trust: "review_all", cleanRuns: 0 });
-  expect(recordReview(store, workspaceId, "files_calendar_prep", true)).toBeUndefined();
+  expect(recordReview(store, workspaceId, "media_edit", true)).toBeUndefined();
 });
 
 test("a trusted kind is accepted on its checks alone, unless it left something for the person", async () => {

@@ -6,6 +6,7 @@
  * something that can be checked in code, so a generic answer is sent back instead of reaching the person.
  */
 import { isCourse } from "./profile-gaps";
+import { isPreparationOnlyCriterion } from "./work-owner";
 export type MilestonePlan = {
   /** Local to one answer, so `dependsOn` can point at a sibling before either has a real id. */
   key: string;
@@ -93,7 +94,7 @@ function refuse(code: string, detail: string): never {
 
 type ProposedMeasure = { kind?: string; unit?: string; comparator?: string; value?: number; bareLine?: number };
 type Proposed = {
-  identityId: string; projectId?: string; title: string; successCriteria: Array<{ evidenceOf?: string; measure?: ProposedMeasure }>; plan?: MilestonePlan;
+  identityId: string; projectId?: string; title: string; successCriteria: Array<{ statement?: string; evidenceOf?: string; measure?: ProposedMeasure }>; plan?: MilestonePlan;
 };
 
 /** How far past the bare line a target has to sit: a line set exactly where the outcome flips is one bad day from missing it. */
@@ -162,7 +163,7 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
       refuse("MILESTONE_NOT_MEASURABLE", `${label} 的达成标准全是「判断」型。至少要有一条能用数字或「某个产出物存在」直接核对的标准（count / threshold / artifact）。`);
     }
     if (GRADED.test(`${item.title} ${plan.target}`) && !kinds.includes("threshold")) {
-      refuse("MILESTONE_NOT_MEASURABLE", `${label} 是有分数的事（考试、小测、作业或项目），需要一条 threshold 型标准给出分数线，比如「成绩 ≥ 85 分」「平均正确率 ≥ 80%」。人没说过目标分数时，按大纲里的评分占比给一个合理的，并在 assumptions 里写明「这是我替你定的，请确认」。`);
+      refuse("MILESTONE_NOT_MEASURABLE", `${label} 是有分数的事（考试、小测、作业或项目），需要一条 threshold 型标准给出分数线，比如「成绩 ≥ 85 分」「平均正确率 ≥ 80%」。课程没有目标成绩时，先在 targetProposals 里提出一个，再按大纲里的评分占比从它倒推这一项的分数线（bareLine 和留了余量的 value）；其他部分的预计成绩写进 derivation 和 assumptions。`);
     }
     // Every number is worked back from the result the person wants, and says how much room was left. 「≥ 85」 with nothing behind it is a
     // guess that looks like a standard; the derivation is what the person can check, and the margin is what absorbs a bad day.
@@ -196,12 +197,17 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
     }
     // A guess the person never confirmed cannot be what a goal is built on.
     if (!plan.sourceFactIds.some((id) => confirmed.has(id))) {
-      refuse("MILESTONE_SOURCE_UNCONFIRMED", `${label} 引用的事实全是推断，至少要有一条是你已经确认过的。`);
+      refuse("MILESTONE_SOURCE_UNCONFIRMED", `${label} 引用的事实全是推断，至少要有一条 status 为 confirmed 的事实（本人说过的或文件里写着的）。`);
     }
     // The gate reads submitted evidence, and an output is trivially easy to evidence: a milestone whose
     // criteria are all outputs passes on a productive afternoon while the goal stands still.
     if (!item.successCriteria.some((criterion) => criterion.evidenceOf === "outcome")) {
       refuse("MILESTONE_OUTCOME_REQUIRED", `${label} 的验收标准里至少要有一条 evidenceOf=outcome（世界发生了变化，而不只是产出了东西）。`);
+    }
+    // Material being ready is the assistant's preparation, not a result (docs/work-split.md §3): a milestone made only of it gives the
+    // person nothing of their own to do towards it, and its tasks come out as collecting and filing.
+    if (item.successCriteria.length && item.successCriteria.every((criterion) => isPreparationOnlyCriterion(criterion))) {
+      refuse("MILESTONE_PREP_ONLY", `${label} 的标准全是「资料已就绪」类（汇集、整理、清单、样本包）。准备由助手做，不单独成为里程碑：把它并入一个有本人产出的里程碑（本人练习、写出、做出、交出或拿到结果），在那个里程碑的标准里写本人的结果。`);
     }
     keys.set(plan.key, { ...item, plan });
   }

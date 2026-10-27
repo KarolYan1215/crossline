@@ -16,7 +16,8 @@ export async function POST(request: Request) {
   const mentions: Mention[] = Array.isArray(body.mentions) ? (body.mentions as Array<Record<string, unknown>>)
     .filter((item) => KINDS.has(String(item.kind)) && typeof item.id === "string" && /^[a-zA-Z0-9_:-]{1,128}$/.test(item.id))
     .map((item) => ({ kind: item.kind as Mention["kind"], id: String(item.id), title: String(item.title ?? "").slice(0, 200) })).slice(0, 20) : [];
-  const raw = (body.page && typeof body.page === "object" ? body.page : {}) as { kind?: unknown; entityId?: unknown };
-  const page = { kind: typeof raw.kind === "string" ? raw.kind.slice(0, 32) : "", entityId: typeof raw.entityId === "string" ? raw.entityId.slice(0, 128) : "" };
+  const raw = (body.page && typeof body.page === "object" ? body.page : {}) as { kind?: unknown; entityId?: unknown; stepId?: unknown };
+  const page = { kind: typeof raw.kind === "string" ? raw.kind.slice(0, 32) : "", entityId: typeof raw.entityId === "string" ? raw.entityId.slice(0, 128) : "",
+    ...(typeof raw.stepId === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(raw.stepId) ? { stepId: raw.stepId } : {}) };
   return Response.json({ ok: true, messages: await conversationTurn(access.ctx, { text, mentions, page, files }) });
 }

@@ -1,5 +1,5 @@
 import "server-only";
-import { ASSESS_DECLINED_SETTING, ASSESS_LINK_PATH, ASSESS_RESULT_SETTING, parseAssessLinkResponse, type AssessLinkResponse } from "@crossline/core";
+import { ASSESS_DECLINED_SETTING, ASSESS_LINK_PATH, ASSESS_RESULT_SETTING, TYPE_TABLE, parseAssessLinkResponse, type AssessLinkResponse } from "@crossline/core";
 
 /**
  * The public quick test's result, carried into the app (contract: `packages/core/src/assess-link.ts`; decided by the owner 2026-10-15).
@@ -39,7 +39,8 @@ export async function lookupAssess(email: string, fetcher: Fetcher = fetch, env:
 export function storedAssess(store: Settings, workspaceId: string): AssessStored | undefined {
   try {
     const value = JSON.parse(store.getSetting(workspaceId, ASSESS_RESULT_SETTING) ?? "null") as AssessStored | null;
-    return value?.source === "public-assess" && value.found ? value : undefined;
+    // A result kept under the first version's codes (before 2026-10-17) is not this test's any more: offered again once retaken.
+    return value?.source === "public-assess" && value.found && TYPE_TABLE[value.code] ? value : undefined;
   } catch { return undefined; }
 }
 

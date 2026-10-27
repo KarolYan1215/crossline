@@ -20,17 +20,20 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   const store = getStore();
-  if (!store.getWorkOrder(access.ctx.workspaceId, id)) return NextResponse.json({ built: false }, { status: 404 });
+  const order = store.getWorkOrder(access.ctx.workspaceId, id);
+  if (!order) return NextResponse.json({ built: false }, { status: 404 });
+  // A finished task's tutorial is not being written any more, whatever the last progress event says (the worker stops it; W-16).
+  const closed = ["accepted", "archived"].includes(order.state);
 
   const root = path.resolve(dataDirectory(), "materials", id);
   // Where the latest build stands: running (asked for, or reporting progress, within the last two hours), stopped with a reason, or done.
   const last = store.listEvents(access.ctx.workspaceId, { type: ["tutorial.requested", "manualbook.progress", "manualbook.built", "materials.blocked",
     "tutorial.blocked", "materials.retry_requested"], entityId: id }).at(-1);
-  const building = Boolean(last && ["tutorial.requested", "manualbook.progress", "materials.retry_requested"].includes(last.type)
+  const building = Boolean(!closed && last && ["tutorial.requested", "manualbook.progress", "materials.retry_requested"].includes(last.type)
     && Date.now() - Date.parse(last.createdAt) < 2 * 3_600_000);
   const progress = building && last?.type === "manualbook.progress" ? last.payload : null;
   const blocker = last && (last.type === "materials.blocked" || last.type === "tutorial.blocked") ? (last.payload as { message?: string }).message ?? tOf(access.ctx)("教程未能生成") : null;
-  if (!existsSync(path.join(root, "flow.json"))) return NextResponse.json({ built: false, building, progress, blocker, materials: [] });
+  if (!existsSync(path.join(root, "flow.json"))) return NextResponse.json({ built: false, building, closed, progress, blocker, materials: [] });
   const inside = (relative: string) => { const target = path.resolve(root, relative); return target.startsWith(root + path.sep) ? target : undefined; };
   let flow: { nodes: Array<{ id: string; title: string; kind: string; goal: string; stage: number }>; edges: Array<{ from: string; to: string }> };
   try { flow = JSON.parse(read(path.join(root, "flow.json"))); } catch { return NextResponse.json({ built: false }, { status: 500 }); }
@@ -52,7 +55,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try { listed = JSON.parse(read(path.join(root, "materials.json")) || "[]"); } catch { /* a book built before materials were listed */ }
   // The task's own steps, so the reading page puts each section under its step and links the two both ways.
   const steps = (store.getStepPlan(access.ctx.workspaceId, id)?.steps ?? []).map((step) => ({ id: step.id, title: step.title, status: step.status }));
-  return NextResponse.json({ built: true, building, progress, blocker, flow, manual: read(path.join(root, "manual.md")), nodes, steps,
+  return NextResponse.json({ built: true, building, closed, progress, blocker, flow, manual: read(path.join(root, "manual.md")), nodes, steps,
     materials: listed.map((item, index) => ({ index, ...(item.id ? { id: item.id } : {}), title: item.title, publisher: item.publisher, kept: item.kept,
       ...(item.docId ? { docId: item.docId } : {}), ...(item.url ? { url: item.url } : {}), notes: item.notes.length,
       nodes: [...new Set(item.notes.map((note) => note.node).filter((node): node is string => typeof node === "string"))] })) },

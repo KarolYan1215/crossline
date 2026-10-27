@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore, saveMineVersion } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { currentMineVersion, mineSkillSettingKey, readMineSkill, type MilestoneGateResult } from "@crossline/core";
-import { createInsightCompiler, INSIGHT_COMPILER, linesAwaitingMineSkill, mineMaterials } from "./insight-compiler";
+import { createInsightCompiler, INSIGHT_COMPILER, linesAwaitingMineSkill, mineMaterials, mineMaterialsFingerprint } from "./insight-compiler";
 import { AGENT_SKILL, approveCategory, createAgentRunner } from "./agent-task";
 import { createMilestoneGate, MILESTONE_GATE_SKILL } from "./milestone-gate-runner";
 import { libraryMarketplacePath } from "./skill-library";
@@ -35,13 +35,15 @@ beforeEach(() => {
 });
 afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
-const play = { kind: "play", text: "笔记先制造冲突、点出焦虑，再给出可购买的 solution；不写成科研报告体", sources: ["m1"],
-  quote: "自媒体的核心是制造冲突和贩卖焦虑，再通过卖 solution 变现", url: "" };
-const compiled = JSON.stringify({ summary: "以冲突和焦虑开场，以 solution 收尾。", rules: [play], blockers: [] });
+// The review note's material id: a short hash of its key, the same on every run.
+const reviewId = () => mineMaterials(store, ws, "media").find((material) => material.kind === "review")!.id;
+const playRule = () => ({ op: "add", ruleId: "", kind: "play", text: "笔记先制造冲突、点出焦虑，再给出可购买的 solution；不写成科研报告体", sources: [reviewId()],
+  quote: "自媒体的核心是制造冲突和贩卖焦虑，再通过卖 solution 变现", url: "" });
+const compiled = () => JSON.stringify({ summary: "以冲突和焦虑开场，以 solution 收尾。", rules: [playRule()], blockers: [] });
 
 test("the review note on the line's work is the material, and only lines with something to say are waiting", () => {
   const materials = mineMaterials(store, ws, "media");
-  expect(materials).toEqual([expect.objectContaining({ id: "m1", kind: "review", text: NOTE, label: expect.stringContaining("本人采纳助手结果") })]);
+  expect(materials).toEqual([expect.objectContaining({ id: expect.stringMatching(/^m[0-9a-f]{6,}$/), kind: "review", text: NOTE, label: expect.stringContaining("本人采纳助手结果") })]);
   expect(mineMaterials(store, ws, "research")).toEqual([]);
   expect(linesAwaitingMineSkill(store, ws)).toEqual(["media"]);
 });
@@ -66,9 +68,68 @@ test("the compiled skill is a new version with its sources, an event, and nothin
   expect(readMineSkill(store.getSetting(ws, mineSkillSettingKey("media")))!.versions.map((item) => item.by)).toEqual(["compiler", "person"]);
 });
 
+test("a recompile is shown only the new material and the previous rules, whose sources stay citable; a removal alone runs no model", async () => {
+  const first = fakeRuntime([compiled], INSIGHT_COMPILER);
+  await createInsightCompiler(store, ws, "C:\\repo", () => first.rpc)();
+  const reviewKey = reviewId();
+  store.addPreference({ workspaceId: ws, source: "correction", scope: "media", weight: 1, refId: "t", text: "标题不超过 15 个字，开头先抛冲突",
+    createdAt: new Date(Date.now() + 1000).toISOString() });
+  expect(linesAwaitingMineSkill(store, ws)).toEqual(["media"]);
+  const added = mineMaterials(store, ws, "media").find((material) => material.kind === "preference")!;
+  // The review note keeps its id although a material now comes before it in no particular order.
+  expect(reviewId()).toBe(reviewKey);
+
+  const second = fakeRuntime([JSON.stringify({ summary: "", blockers: [], rules: [
+    { op: "add", ruleId: "", kind: "preference", text: "标题不超过 15 个字", sources: [added.id], quote: "标题不超过 15 个字", url: "" },
+    { ...playRule(), op: "revise", ruleId: "r1", text: "开头先抛冲突、点出焦虑，结尾给可购买的 solution" }] })], INSIGHT_COMPILER);
+  expect(await createInsightCompiler(store, ws, "C:\\repo", () => second.rpc)()).toMatchObject({ version: 2, rules: 2, dropped: [] });
+  const input = JSON.parse(second.prompts()[0]!.split("\n\n").slice(1).join("\n\n")) as { version: string; materials: Array<{ id: string }>;
+    previousRules: Array<{ id: string; sources: string[] }> };
+  expect(input.version).toBe("crossline.mine-skill.v2");
+  expect(input.materials.map((material) => material.id)).toEqual([added.id]);
+  expect(second.prompts()[0]).not.toContain("而不是做得像科研报告一样");
+  expect(input.previousRules).toEqual([expect.objectContaining({ id: "r1", sources: [reviewKey] })]);
+  const version = currentMineVersion(readMineSkill(store.getSetting(ws, mineSkillSettingKey("media"))))!;
+  expect(version.rules!.map((rule) => rule.text)).toEqual(["开头先抛冲突、点出焦虑，结尾给可购买的 solution", "标题不超过 15 个字"]);
+  // The summary nobody rewrote is the one before.
+  expect(version.markdown).toContain("以冲突和焦虑开场，以 solution 收尾。");
+  expect(linesAwaitingMineSkill(store, ws)).toEqual([]);
+
+  // The preference is deleted: nothing new to show, so no run; the rule that rested only on it goes.
+  store.deletePreference(ws, store.listPreferences(ws).find((entry) => entry.refId === "t")!.id);
+  expect(linesAwaitingMineSkill(store, ws, new Date(Date.now() + 2 * 86_400_000))).toEqual(["media"]);
+  const third = fakeRuntime([compiled], INSIGHT_COMPILER);
+  expect(await createInsightCompiler(store, ws, "C:\\repo", () => third.rpc)("media")).toMatchObject({ version: 3, rules: 1, dropped: ["标题不超过 15 个字：所依据的材料已不在"] });
+  expect(third.turns()).toBe(0);
+});
+
+test("a line the compiler stopped on waits until its materials change, so it is not refused again and again", async () => {
+  const stop = JSON.stringify({ summary: "", rules: [], blockers: [{ code: "MINE_SKILL_BLOCKED", message: "材料只有课程安排，没有工作方式" }] });
+  const runtime = fakeRuntime([stop], INSIGHT_COMPILER);
+  expect(await createInsightCompiler(store, ws, "C:\\repo", () => runtime.rpc)()).toEqual({ blocked: "MINE_SKILL_BLOCKED", lineId: "media" });
+  expect(store.listEvents(ws, { type: "skill.mine.blocked" }).at(-1)?.payload).toMatchObject({ code: "MINE_SKILL_BLOCKED", fingerprint: expect.any(String) });
+  expect(linesAwaitingMineSkill(store, ws, new Date(Date.now() + 3 * 86_400_000))).toEqual([]);
+  // Something new the person says is new material: the line is due again.
+  store.addPreference({ workspaceId: ws, source: "correction", scope: "media", weight: 1, refId: "y", text: "开头先说结论", createdAt: new Date(Date.now() + 1000).toISOString() });
+  expect(linesAwaitingMineSkill(store, ws)).toEqual(["media"]);
+});
+
+test("a run that failed on the way is tried again on the same materials only after an hour", () => {
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, idempotencyKey: "fail", type: "skill.mine.blocked", entityId: "media",
+    payload: { lineId: "media", code: "SKILL_RUNTIME_FAILED", message: "", fingerprint: undefined, at: new Date().toISOString() } });
+  expect(linesAwaitingMineSkill(store, ws)).toEqual(["media"]);
+  const at = new Date();
+  store.appendEvent({ ownerId: store.getWorkspaceOwnerId(ws)!, workspaceId: ws, idempotencyKey: "fail-2", type: "skill.mine.blocked", entityId: "media",
+    payload: { lineId: "media", code: "SKILL_RUNTIME_FAILED", message: "", fingerprint: fingerprintOf("media"), at: at.toISOString() } });
+  expect(linesAwaitingMineSkill(store, ws, new Date(at.getTime() + 10 * 60_000))).toEqual([]);
+  expect(linesAwaitingMineSkill(store, ws, new Date(at.getTime() + 61 * 60_000))).toEqual(["media"]);
+});
+
+const fingerprintOf = (line: string) => mineMaterialsFingerprint(mineMaterials(store, ws, line));
+
 test("a rule that cannot cite the person's words is sent back, and after the repairs only the sourced ones are kept", async () => {
-  const invented = { ...play, text: "多用学术引用", quote: "要像论文一样严谨" };
-  const runtime = fakeRuntime([JSON.stringify({ summary: "", rules: [play, invented], blockers: [] })], INSIGHT_COMPILER);
+  const invented = { ...playRule(), text: "多用学术引用", quote: "要像论文一样严谨" };
+  const runtime = fakeRuntime([JSON.stringify({ summary: "", rules: [playRule(), invented], blockers: [] })], INSIGHT_COMPILER);
   const outcome = await createInsightCompiler(store, ws, "C:\\repo", () => runtime.rpc)();
   expect(runtime.prompts()[1]).toContain("找不到逐字原文");
   expect(outcome).toMatchObject({ version: 1, rules: 1 });
@@ -86,7 +147,9 @@ test("the assistant runs with the line's own skill on beside its own, and switch
     const run = createAgentRunner(store, ws, "C:\\repo", () => runtime.rpc, { outputRoot, libraryDir: dir, homeDir: outputRoot });
     const outcome = await run({ taskId: "t-mine", title: "第二篇笔记", what: "写第二篇小红书笔记", category: "read_research_organize", humanPart: "确认选题", workOrderId: "wo-note" });
     expect(outcome).toMatchObject({ state: "done" });
-    expect(runtime.prompts()[0]!.split("\n")[0]).toBe("$crossline:crossline-agent $crossline-mine:media");
+    // The Skill and its input first; the library skill, which follows the line, after them (the prompt cache, docs/token-economy.md §2.5).
+    expect(runtime.prompts()[0]!.split("\n")[0]).toBe("$crossline:crossline-agent");
+    expect(runtime.inputs()[0]).toContain("$crossline-mine:media");
     const calls = runtime.configCalls();
     expect(calls[0]).toMatchObject({ method: "plugin/install", params: { pluginName: "crossline-mine", marketplacePath: libraryMarketplacePath(dir) } });
     expect(calls.filter((call) => call.method === "skills/config/write").map((call) => call.params.enabled)).toEqual([true, false]);

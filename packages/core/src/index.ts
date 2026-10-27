@@ -19,6 +19,7 @@ export * from "./milestone-risk";
 export * from "./artifact-plan";
 export * from "./onboarding-turn-schema";
 export * from "./line-attributes";
+export * from "./records";
 export * from "./profile-gaps";
 export * from "./agent-guard";
 export * from "./agent-summary";
@@ -26,6 +27,7 @@ export * from "./agent-dispatch";
 export * from "./agent-failure";
 export * from "./source-kinds";
 export * from "./date-schema";
+export * from "./date-advance";
 export * from "./diligence-schema";
 export * from "./manualbook-schema";
 export * from "./activity-state";
@@ -36,14 +38,18 @@ export * from "./weekly-insight-schema";
 export * from "./structured-output";
 export * from "./text-hygiene";
 export * from "./text-width";
-export * from "./rhythm";
 export * from "./backplan-schema";
 export * from "./external-action";
 export * from "./settings-keys";
+export * from "./milestone-drafting";
 export * from "./auto-approval";
 export * from "./calibration";
 export * from "./telemetry";
 export * from "./effectiveness";
+export * from "./plan-churn";
+export * from "./interview-quota";
+export * from "./sponsor";
+export * from "./quota-saver";
 import type { EvidenceQuestionTemplate } from "./milestone-templates";
 import { tFor, type Locale } from "./i18n";
 export type EnergyLevel = "low" | "medium" | "high";
@@ -360,7 +366,9 @@ const WORK_ORDER_TRANSITIONS: Partial<Record<WorkOrderState, Partial<Record<Work
   ready_for_human: { "human.started": "active", "approval.revoked": "awaiting_plan_approval", "agent.delivered": "evidence_review", blocked: "blocked", archived: "archived" },
   active: { "human.completed": "evidence_review", blocked: "blocked", archived: "archived" },
   evidence_review: { "evidence.accepted": "accepted", blocked: "blocked", archived: "archived" },
-  blocked: { "plan.approved": "approved", archived: "archived" },
+  // `evidence.accepted` here only with `onCompletion` (the store refuses any other): the person had pressed 完成, and a gate that refused
+  // it afterwards — before 2026-10-15, when 完成 became the acceptance — is not the last word on their own homework.
+  blocked: { "plan.approved": "approved", "evidence.accepted": "accepted", archived: "archived" },
   accepted: { "acceptance.revoked": "evidence_review", archived: "archived" }
 };
 
@@ -421,9 +429,10 @@ const APPROVAL_TIERS = {
   // choice (2026-10-06). What may be written did not move: only that calendar, only events this app made and
   // the person has not changed, deletes only in the future, previews never. See CLAUDE.md, Safety boundaries.
   write_focus_block: "automatic",
-  // Dates read out of the person's own files, confirmed as one batch. Never automatic: a wrong date on a
-  // calendar is worse than a missing one, so the person sees every item with its quote first.
-  import_dated_items: "batch",
+  // Dates read out of the person's own files, each checked against the sentence that states the day. Adopted
+  // without a click since 2026-10-19 (the owner's decision: what the files say is taken, not asked); the
+  // reader's low-confidence items are left out, and every adopted one can be removed from the list.
+  import_dated_items: "automatic",
   // Saving the full text of a page the model found: only from an open-access host on the short list in
   // `openAccessVerdict`; any other page keeps its link and summary, and keeping its text is never permitted.
   download_open_access: "automatic",
@@ -495,9 +504,15 @@ export * from "./relevance";
 export * from "./task-title";
 export * from "./calendar-lines";
 export * from "./belonging";
+export * from "./sentences";
+export * from "./onboarding-refs";
+export * from "./question-ledger";
 export * from "./interview-checklist";
 export * from "./fixed-events";
 export * from "./portrait";
+export * from "./portrait-figure";
+export * from "./planning-profile";
+export * from "./context-selection";
 export * from "./portrait-type";
 export * from "./assess";
 export * from "./assess-link";
@@ -511,12 +526,25 @@ export * from "./background";
 export * from "./mine-skill";
 export * from "./public-skills";
 export * from "./workflows";
+export * from "./work-owner";
 export * from "./ai-tools";
 export * from "./provider-conformance";
+export { dropEnumSlips } from "./json-schema-check";
 export * from "./local-stamp";
 export * from "./onboarding-progress";
+export * from "./onboarding-pace";
 export * from "./calendar-subscriptions";
 export * from "./source-folders";
+export * from "./recordings";
+export * from "./recording-digest";
+export * from "./xhs-notes";
+export * from "./favourite-topics";
 export * from "./info-request";
+export * from "./tutorial-worth";
 export * from "./completion";
 export * from "./task-merge";
+export * from "./workflow-merge";
+export * from "./plain-voice";
+export * from "./mail";
+export * from "./automations";
+export * from "./device";

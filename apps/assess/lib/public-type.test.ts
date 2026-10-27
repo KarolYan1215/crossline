@@ -2,27 +2,28 @@ import { expect, test } from "vitest";
 import { pairRelation, publicType } from "./public-type";
 
 test("a public type carries no answers, names both poles, marks near-middle axes and ranks each axis", () => {
-  const view = publicType({ scope: 80, basis: 45, output: 20, rhythm: 90 });
-  expect(view.code).toBe("GEMA");
-  expect(view.name).toBe("改装师");
+  const view = publicType({ lines: 80, purpose: 45, collab: 20, build: 90 }, {}, "", undefined, ["写初稿"]);
+  expect(view.code).toBe("ROHG");
+  expect(view.name).toBe("时间管理大师");
   expect(view.subtitle.length).toBeGreaterThan(4);
   expect(view.axes.map((axis) => axis.ambiguous)).toEqual([false, true, false, false]);
-  expect(view.axes[0]).toMatchObject({ letter: "G", rank: { pole: "跨界", estimated: true } });
+  expect(view.axes[0]).toMatchObject({ letter: "R", rank: { pole: "接力", estimated: true } });
+  expect(view).toMatchObject({ aiDoes: ["写初稿"], aiKeeps: expect.any(String), kindred: { name: "理查德·布兰森" } });
   expect(view.lines).toHaveLength(3);
   expect(view.best.code).not.toBe(view.hardest.code);
   expect(JSON.stringify(view)).not.toMatch(/@|answers|appearance/);
 });
 
 test("a pair names its relations and the lines both types suit", () => {
-  const pair = pairRelation("SEMP", "SEMA");
-  expect(pair.primary.name).toBe("进度条之争");
-  expect(pair.secondary?.name).toBe("复刻搭子");
-  expect(pairRelation("SEMP", "GIMA").sharedLines).toEqual(["创业者"]);
-  expect(pairRelation("SEMP", "SIMA").sharedLines).toEqual([]);
+  const pair = pairRelation("ROBA", "ROHA");
+  expect(pair.primary.name).toBe("图纸派和手感派");
+  expect(pair.secondary?.name).toBe("同频搭子");
+  expect(pairRelation("ROBA", "RUHG").sharedLines).toEqual(["创业者"]);
+  expect(pairRelation("ROBA", "RUHA").sharedLines).toEqual([]);
 });
 
 test("a strong lean's rank is capped and keyed by the result: one result always shows the same number", () => {
-  const strong = { scope: 98, basis: 2, output: 97, rhythm: 99 };
+  const strong = { lines: 98, purpose: 2, collab: 97, build: 99 };
   const one = publicType(strong, {}, "result-a").axes.map((axis) => axis.rank.percent);
   expect(publicType(strong, {}, "result-a").axes.map((axis) => axis.rank.percent)).toEqual(one);
   for (const percent of one) expect(percent).toBeGreaterThanOrEqual(91), expect(percent).toBeLessThanOrEqual(96);

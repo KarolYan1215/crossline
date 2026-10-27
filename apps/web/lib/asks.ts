@@ -1,25 +1,26 @@
 import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
-  ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
+  ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
-  validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskOption, type AskPreview, type AskSnooze,
+  validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
+  isPreparationOnlyMilestone, onPersonsBoard, preparesOf, workOwner,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf
 } from "@crossline/core";
-import { listAgentTasks, type StoredWorkOrder } from "@crossline/db";
+import { acceptOwnCompletion, listAgentTasks, ownCompletion, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
-  acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, getStore, loadGoalForecast,
-  markMaterialsReady, planToday, plannerIdOfBlock, readFrozen, readGoalSettings, retryMaterialPreparation, saveGoalSettings, TASK_LIBRARY_WINDOW_DAYS,
-  heldConflicts, unlockBlock, writeFrozen, readRiskDecisions, RISK_DECISIONS_SETTING, type RiskDecision
+  acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast,
+  markMaterialsReady, planToday, plannerIdOfBlock, readFrozen, readGoalSettings, retryMaterialPreparation, saveGoalSettings, saveMilestoneEdit, TASK_LIBRARY_WINDOW_DAYS,
+  heldConflicts, unlockBlock, writeFrozen, readRiskDecisions, RISK_DECISIONS_SETTING, riskHorizonDays, type RiskDecision
 } from "./crossline";
 import { requestAutoBackplan } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
 import { calendarFiling } from "./timeline";
-import { answerInterviewQuestion, flushPendingAnswers, interviewStatus } from "./interview-status";
-import { requestStepReplan } from "./steps";
+import { answerInterviewQuestion, flushPendingAnswers, interviewStatus, type InterviewStatus } from "./interview-status";
+import { recordStepAnswer, requestStepReplan } from "./steps";
 import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
 import { identityLines } from "./lines";
@@ -151,7 +152,11 @@ function waitingIndex(store: Source["store"], workspaceId: string) {
 /** 「…到了吗？」 on the day something the person waits for was due — the waiting card, now one ask among the others. */
 function waitingAsks({ store, ctx, today, t, locale }: Source): Ask[] {
   const index = waitingIndex(store, ctx.workspaceId);
-  const due = index.open.filter((item) => item.followUpAt <= today);
+  // A reply from the one a wait is on, seen in the person's mailbox (mail triage), brings the question forward to today.
+  const replies = new Map(store.listEvents(ctx.workspaceId, { type: "waiting.mail_seen" })
+    .map((event) => [event.entityId, { ...(event.payload as { from?: string; subject?: string }), at: event.createdAt }]));
+  const replied = (item: WaitingItem) => { const reply = replies.get(item.id); return reply && reply.at > item.updatedAt ? reply : undefined; };
+  const due = index.open.filter((item) => item.followUpAt <= today || replied(item));
   // One card for one wait: an item whose twin is already asked about is answered with it.
   return due.filter((item, position) => !due.slice(0, position).some((earlier) => index.withTwins(earlier).includes(item))).map((item) => {
     const twins = index.withTwins(item);
@@ -161,9 +166,12 @@ function waitingAsks({ store, ctx, today, t, locale }: Source): Ask[] {
     const blocked = twins.flatMap((twin) => twin.blocks);
     return { id: `wait:${item.id}`, kind: "waiting_due" as const, entityId: item.id, urgency: "now" as const, dueDay: item.followUpAt,
       important: forMilestone || blocked.length > 0, ...(blocked[0] ? { preview: taskPreview(t, blocked[0], t("看等它的任务")) } : {}),
-      raisedAt: item.updatedAt, fingerprint: item.followUpAt,
+      raisedAt: item.updatedAt, fingerprint: `${item.followUpAt}${replied(item) ? `:mail:${replied(item)!.at}` : ""}`,
       title: item.who ? t("{{who}}的「{{title}}」到了吗？", { who: item.who, title: short(item.title, 50) }) : t("「{{title}}」到了吗？", { title: short(item.title, 50) }),
-      why: (item.approximate ? t("原定大约 {{day}} 到。", { day: dayText(locale, item.expectedAt) }) : t("原定 {{day}} 到。", { day: dayText(locale, item.expectedAt) }))
+      why: (replied(item) ? t("邮箱里收到 {{from}} 的邮件「{{subject}}」，可能就是它。", { from: short(replied(item)!.from ?? "", 40), subject: short(replied(item)!.subject ?? "", 50) })
+          + (locale === "en" ? " " : "") : "")
+        + (item.approximate ? t("原定大约 {{day}} 到。", { day: dayText(locale, item.expectedAt) }) : t("原定 {{day}} 到。", { day: dayText(locale, item.expectedAt) }))
+        + (locale === "en" ? " " : "")
         + (forMilestone ? t("到了以后系统会带着它重新拆这个里程碑的步骤。") : t("在它到之前，依赖它的 {{count}} 项工作不会排进日历。", { count: blocks })),
       options: [
         { id: "arrived", label: t("到了"), recommended: true, ...(forMilestone ? { detail: t("写一句放在哪、有什么，重拆更准"),
@@ -203,7 +211,7 @@ function lastMaterialsBlock(events: ReturnType<ReturnType<typeof getStore>["list
 function materialsAsks({ store, ctx, today, t }: Source): Ask[] {
   const anchors = deadlines(store, ctx.workspaceId);
   const events = store.listEvents(ctx.workspaceId, { type: ["materials.blocked", "materials.retry_requested"] });
-  return store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "preparing").flatMap((order) => {
+  return store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "preparing" && onPersonsBoard(order)).flatMap((order) => {
     const block = lastMaterialsBlock(events.filter((event) => event.entityId === order.id));
     if (!block) return [];
     const detail = block.payload as { code?: string; message?: string };
@@ -232,7 +240,8 @@ function gateAsks({ store, ctx, today, t }: Source): Ask[] {
   for (const event of store.listEvents(ctx.workspaceId, { type: ["milestone_gate.blocked", "milestone_gate.retry_requested"] })) {
     if (event.type === "milestone_gate.blocked") runFailures.set(event.entityId, event); else runFailures.delete(event.entityId);
   }
-  for (const order of store.listWorkOrders(ctx.workspaceId)) {
+  // Only the person's own work: the assistant's preparation is accepted when delivered and never judged by the gate (docs/work-split.md).
+  for (const order of store.listWorkOrders(ctx.workspaceId).filter(onPersonsBoard)) {
     const dueDay = dueOf(order, anchors);
     const timing = { urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}), line: order.identityId, preview: taskPreview(t, order.id, t("看交付与判定")) };
     const review = (order.payload as { gateReview?: GateReview }).gateReview;
@@ -251,7 +260,9 @@ function gateAsks({ store, ctx, today, t }: Source): Ask[] {
             + (review.fit!.why ? t("{{reason}}。", { reason: clause(review.fit!.why) }) : "") + t("改后重新提交即重新判定。")
           : needs.length ? t("验收尚缺：{{needs}}。补充后重新提交即重新判定。", { needs: clause(needs.join(t("；"))) }) : t("验收证据不足。补充后重新提交即重新判定。"),
         options: [
-          { id: "redo", label: t("重新排上，补做缺的"), recommended: true },
+          // The person had pressed 完成 themselves: that is the acceptance now (2026-10-15), so ending it is the first answer.
+          ...(ownCompletion(store, ctx.workspaceId, order.id) ? [{ id: "done", label: t("已经交了，结束"), detail: t("按本人点的完成算验收通过"), recommended: true }] : []),
+          { id: "redo", label: t("重新排上，补做缺的"), recommended: !ownCompletion(store, ctx.workspaceId, order.id) },
           { id: "look", label: t("去看判定细节"), href: `/workbench/${encodeURIComponent(order.id)}` },
           { id: "drop", label: t("不做了"), fields: [{ id: "reason", label: t("为什么不做"), kind: "text", required: true }] }
         ] });
@@ -276,6 +287,8 @@ function gateAsks({ store, ctx, today, t }: Source): Ask[] {
   return asks;
 }
 
+/** The name inside 「…」 (or, in English, "…") of an ask's title, without the brackets; the whole title when there is none. */
+const quotedTitle = (title: string) => /「([^」]+)」/.exec(title)?.[1] ?? /"([^"]+)"/.exec(title)?.[1] ?? title;
 /** 「10/17」 / "Oct 17". */
 const format = (day: string, locale?: Locale) => locale === "en" ? monthDay(locale, day.slice(0, 10)) : `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
 /** Items listed as each language lists them inline: 「A、B、C」 / "A, B, C". */
@@ -289,14 +302,14 @@ const dayText = (locale: Locale, day: string) => locale === "en" ? monthDay(loca
  * and only of the steps already split out — said so, because with rolling backplans there are usually more.
  */
 export function explainRisk(input: { deadline: string; today: string; p50Day: string | null; p85Day: string | null; slackDays: number | null;
-  steps: number; p50Minutes: number; p85Minutes: number; moreToSplit: boolean }, locale?: Locale): string {
+  steps: number; p50Minutes: number; p85Minutes: number; moreToSplit: boolean; horizonDays?: number }, locale?: Locale): string {
   const t = tFor(locale);
   const left = daysBetween(input.today, input.deadline);
   const hours = (minutes: number) => Math.max(0.5, Math.round(minutes / 30) / 2);
   const join = locale === "en" ? " " : "";
   const parts = [t("截止 {{day}}（剩 {{count}} 天）。", { day: format(input.deadline, locale), count: left })
     + join + t("已拆分的 {{count}} 个步骤剩余约 {{low}}–{{high}} 小时。", { count: input.steps, low: hours(input.p50Minutes), high: hours(input.p85Minutes) })];
-  if (!input.p85Day) parts.push(t("按当前可用时段与优先于它的工作，八周内无法排完（或前置步骤尚未完成）。"));
+  if (!input.p85Day) parts.push(t("按当前可用时段与优先于它的工作，截止前（预测到 {{count}} 周后）无法排完（或前置步骤尚未完成）。", { count: Math.round((input.horizonDays ?? 56) / 7) }));
   else {
     const late = input.slackDays !== null && input.slackDays < 0;
     const values = { usual: input.p50Day ? format(input.p50Day, locale) : "—", cautious: format(input.p85Day, locale) };
@@ -311,9 +324,18 @@ export function explainRisk(input: { deadline: string; today: string; p50Day: st
 
 const ACCEPT_RISK_DAYS = 7;
 
-/** A milestone whose known work finishes too close to (or after) its deadline. Tability's three-check rule, as a question. */
-function riskAsks({ store, ctx, today, t, locale }: Source): Ask[] {
-  const forecast = loadGoalForecast(ctx);
+/**
+ * A milestone whose known work finishes too close to (or after) its deadline. Tability's three-check rule, as a question. Not while the
+ * reviewer's risk question on the same milestone waits: the two asked about one milestone side by side, with overlapping answers
+ * (2026-10-18 walkthrough); the review goes first and this one comes up afterwards if the forecast still says so.
+ */
+function riskAsks(source: Source): Ask[] {
+  const { store, ctx, today, t, locale } = source;
+  const reviewed = new Set(riskReviewMembers(source).map((ask) => ask.entityId));
+  // The run reaches past every deadline it judges: a deadline beyond the run would otherwise read as never finishing.
+  const horizonDays = riskHorizonDays(ctx);
+  const forecast = loadGoalForecast(ctx, horizonDays);
+  const lastDay = new Date(Date.parse(`${today}T00:00:00Z`) + (horizonDays - 1) * DAY).toISOString().slice(0, 10);
   const orders = store.listWorkOrders(ctx.workspaceId);
   const accepted = live(ctx, store.listEvents(ctx.workspaceId, { type: "risk.accepted" }));
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
@@ -322,10 +344,11 @@ function riskAsks({ store, ctx, today, t, locale }: Source): Ask[] {
   return forecast.goals.flatMap((goal) => {
     const milestone = milestones.get(goal.milestoneId);
     const deadline = goal.confirmedDeadline;
-    if (!milestone || !deadline || deadline < today) return [];
-    const own = orders.filter((order) => order.milestoneId === goal.milestoneId && ["approved", "preparing", "ready_for_human", "active"].includes(order.state));
+    // A milestone that is only preparation carries no risk of its own: the milestone it prepares does (docs/work-split.md §5).
+    if (!milestone || !deadline || deadline < today || reviewed.has(goal.milestoneId) || isPreparationOnlyMilestone(milestone)) return [];
+    const own = orders.filter((order) => order.milestoneId === goal.milestoneId && ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order));
     if (!own.length) return [];
-    const atRisk = goal.p85Day === null || (goal.slackDays !== null && goal.slackDays < 2);
+    const atRisk = (goal.p85Day === null && deadline <= lastDay) || (goal.slackDays !== null && goal.slackDays < 2);
     if (!atRisk) return [];
     // 「接受这个风险」 holds for a week, and only while it does not get worse.
     const slack = goal.slackDays ?? -999;
@@ -339,7 +362,7 @@ function riskAsks({ store, ctx, today, t, locale }: Source): Ask[] {
       title: t("「{{title}}」可能赶不上 {{day}}", { title: short(milestone.title), day: format(deadline, locale) }),
       why: explainRisk({ deadline, today, p50Day: goal.p50Day, p85Day: goal.p85Day, slackDays: goal.slackDays, steps: own.length,
         p50Minutes: own.reduce((sum, order) => sum + order.estimate.p50Minutes, 0), p85Minutes: own.reduce((sum, order) => sum + order.estimate.p85Minutes, 0),
-        moreToSplit: rolling.has(goal.milestoneId) }, locale),
+        moreToSplit: rolling.has(goal.milestoneId), horizonDays }, locale),
       options: [
         { id: "time", label: t("加可用时间"), href: "/plan#availability" },
         { id: "extend", label: t("推迟截止"), fields: [{ id: "date", label: t("推迟到"), kind: "date" as const, required: true }] },
@@ -355,14 +378,14 @@ function riskAsks({ store, ctx, today, t, locale }: Source): Ask[] {
  * 「接受，按风险提前安排」 lets the scheduler aim the milestone's work 1–2 days early (`riskBufferOf` in `lib/crossline.ts`). Asked once per
  * review: any answer is kept against the review's fingerprint, so a later review of an edited milestone asks again.
  */
-function riskReviewAsks({ store, ctx, today, t, locale }: Source): Ask[] {
+function riskReviewMembers({ store, ctx, today, t, locale }: Source): Ask[] {
   const stored = parseMilestoneRisks(store.getSetting(ctx.workspaceId, MILESTONE_RISKS_SETTING));
   const decisions = readRiskDecisions(ctx);
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
   return [...milestones.values()].flatMap((milestone): Ask[] => {
     const entry = stored[milestone.id];
-    if (!entry || !("risks" in entry) || decisions[milestone.id]?.fingerprint === entry.fingerprint) return [];
+    if (!entry || !("risks" in entry) || decisions[milestone.id]?.fingerprint === entry.fingerprint || isPreparationOnlyMilestone(milestone)) return [];
     const anchor = anchors.get(milestone.id);
     const deadline = readGoalSettings(ctx, milestone.id)?.confirmedDeadline || anchor?.deadline || null;
     // Read the way the reviewer read it (`apps/worker/src/milestone-risk-review.ts`): a review of an earlier form is not this one's.
@@ -373,7 +396,9 @@ function riskReviewAsks({ store, ctx, today, t, locale }: Source): Ask[] {
     const level = riskLevelOf(risks)!;
     return [{ id: `riskreview:${milestone.id}`, kind: "milestone_risk_review", entityId: milestone.id, line: milestone.identityId, risks,
       preview: milestonePreview(t, milestone.id), urgency: urgencyFor(deadline ?? undefined, today), ...(deadline ? { dueDay: deadline } : {}),
-      raisedAt: entry.at, fingerprint: entry.fingerprint, important: level === "high",
+      // A high risk is important by itself; otherwise the milestone's weight decides (`lib/horizon.ts` annotates it). An explicit
+      // `false` here overrode a weight of 65 and filed a milestone due in six days under 不重要不紧急 (W-29).
+      raisedAt: entry.at, fingerprint: entry.fingerprint, ...(level === "high" ? { important: true } : {}),
       title: t("「{{title}}」有{{level}}风险：{{kinds}}", { title: short(milestone.title), level: t(MILESTONE_RISK_LEVEL_LABEL[level]),
         kinds: listOf(locale, risks.map((risk) => t(MILESTONE_RISK_KIND_LABEL[risk.kind]))) }),
       why: t("审查认为：{{notes}}。", { notes: clause(risks.map((risk) => risk.note).join(locale === "en" ? "; " : "；")) })
@@ -386,6 +411,85 @@ function riskReviewAsks({ store, ctx, today, t, locale }: Source): Ask[] {
         { id: "ignore", label: t("不用管"), detail: t("排程不变，这次审查不再问") }
       ] }];
   });
+}
+
+/**
+ * A deadline the system does not move — a course's, or one the person set — passed with the milestone's work still open (the worker's
+ * daily pass writes `milestone.overdue` once per deadline, `apps/worker/src/date-advance.ts`; the person's own other milestones it moves
+ * by itself). Asked once: 补做 keeps the date and the work, a new date is the person's, 放弃 archives the milestone and its unstarted work.
+ * It goes away when answered, when the date is changed elsewhere, or when no work is left.
+ */
+function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
+  const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
+  const anchors = deadlines(store, ctx.workspaceId);
+  const resolved = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "milestone.overdue_resolved" }))
+    .map((event) => `${event.entityId}|${(event.payload as { deadline?: string }).deadline ?? ""}`));
+  const open = store.listWorkOrders(ctx.workspaceId).filter((order) => ["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active", "blocked"].includes(order.state)
+    && onPersonsBoard(order));
+  const latest = new Map<string, ReturnType<typeof store.listEvents>[number]>();
+  for (const event of store.listEvents(ctx.workspaceId, { type: "milestone.overdue" })) latest.set(event.entityId, event);
+  return [...latest].flatMap(([milestoneId, event]): Ask[] => {
+    const milestone = milestones.get(milestoneId);
+    const { deadline, why } = event.payload as { deadline: string; why?: string };
+    const current = readGoalSettings(ctx, milestoneId)?.confirmedDeadline || anchors.get(milestoneId);
+    const left = open.filter((order) => order.milestoneId === milestoneId);
+    if (!milestone || current !== deadline || deadline >= today || resolved.has(`${milestoneId}|${deadline}`) || !left.length) return [];
+    return [{ id: `overdue:${milestoneId}:${deadline}`, kind: "milestone_overdue", entityId: milestoneId, line: milestone.identityId,
+      preview: milestonePreview(t, milestoneId), urgency: "soon", dueDay: deadline, raisedAt: event.createdAt, fingerprint: deadline, important: true,
+      title: t("「{{title}}」的截止 {{day}} 已过，还有 {{count}} 个任务没完成", { title: short(milestone.title), day: format(deadline, locale), count: left.length }),
+      why: t(why === "course" ? "这是课程给定的日期，系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。"
+        : "这个日期是本人定的，系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。"),
+      options: [
+        { id: "makeup", label: t("补做"), detail: t("截止不变，剩下的工作照常排"), recommended: true },
+        { id: "extend", label: t("改为新日期"), fields: [{ id: "date", label: t("截止改到"), kind: "date" as const, required: true }] },
+        { id: "drop", label: t("放弃这个里程碑"), detail: t("里程碑和未开始的任务归档，可从已归档恢复") }
+      ] }];
+  });
+}
+
+/** Set by 「逐个决定」 on the folded card: while the same reviews wait, each is its own card again. */
+const RISK_REVIEW_SPLIT = "asks.riskReview.split";
+const riskBatchFingerprint = (members: Ask[]) => members.map((ask) => `${ask.entityId}:${ask.fingerprint}`).sort().join("|");
+
+/**
+ * Two or more reviewed risks waiting are one card, not one each (2026-10-17 walkthrough, W-29: approving twelve milestones put twelve
+ * risk questions on the board, five this week). The card is as urgent as its nearest deadline and important when any risk is high or
+ * any milestone weighs 60 or more; 「全部接受」 and 「全部不用管」 settle them together, 「逐个决定」 splits them back into one card each.
+ */
+function riskReviewAsks(source: Source): Ask[] {
+  const members = riskReviewMembers(source);
+  if (members.length < 2) return members;
+  const fingerprint = riskBatchFingerprint(members);
+  if (source.store.getSetting(source.ctx.workspaceId, RISK_REVIEW_SPLIT) === fingerprint) return members;
+  return [riskReviewBatch(source.ctx, members, source.today, fingerprint)];
+}
+
+export function riskReviewBatch(ctx: AccessContext, members: Ask[], today: string, fingerprint: string): Ask {
+  const due = members.map((ask) => ask.dueDay).filter((day): day is string => Boolean(day)).sort()[0];
+  const weight = Math.max(0, ...members.map((ask) => effectiveWeight(ctx, ask.entityId)));
+  const high = members.some((ask) => ask.important);
+  // The members as rows the card draws (name, deadline, level, kinds), highest level first, then nearest deadline: a folded card of
+  // 25 milestones used to say them all in one sentence (2026-10-21 walkthrough). The sentence keeps only the counts.
+  const titles = new Map(getStore().listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]));
+  const rank = (ask: Ask) => { const level = riskLevelOf(ask.risks ?? []); return level === "high" ? 0 : level === "medium" ? 1 : 2; };
+  const items: AskItem[] = [...members].sort((a, b) => rank(a) - rank(b) || (a.dueDay ?? "9999").localeCompare(b.dueDay ?? "9999"))
+    .map((ask) => ({ id: ask.entityId, title: titles.get(ask.entityId) ?? quotedTitle(ask.title), ...(ask.dueDay ? { dueDay: ask.dueDay } : {}),
+      ...(ask.line ? { line: ask.line } : {}), href: `/milestones?open=${encodeURIComponent(ask.entityId)}`, risks: ask.risks ?? [] }));
+  const levels = { high: items.filter((item) => riskLevelOf(item.risks ?? []) === "high").length };
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
+  return { id: "riskreview:batch", kind: "milestone_risk_review", entityId: "batch", urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}),
+    raisedAt: members.map((ask) => ask.raisedAt).sort().at(-1) ?? "", fingerprint, important: high || weight >= IMPORTANT_WEIGHT, importance: weight,
+    preview: { kind: "milestones", href: "/milestones", label: t("看里程碑") },
+    title: t("{{count}} 个里程碑有风险待过目", { count: members.length }), items,
+    why: (levels.high ? t("审查在 {{count}} 个里程碑上找出风险，其中 {{high}} 个为高风险，逐个列在下方。", { count: members.length, high: levels.high })
+      : t("审查在 {{count}} 个里程碑上找出风险，逐个列在下方。", { count: members.length }))
+      + (locale === "en" ? " " : "") + t("接受后，排程让各自的任务提前 1–2 天排完；不接受则排程不变。"),
+    options: [
+      { id: "accept", label: t("全部接受，按风险提前安排"), recommended: true, detail: t("各自的任务提前 1–2 天排完") },
+      { id: "split", label: t("逐个决定"), detail: t("拆成每个里程碑一张卡，可分别调整截止或降低标准") },
+      { id: "ignore", label: t("全部不用管"), detail: t("排程不变，这次审查不再问") }
+    ] };
 }
 
 /**
@@ -409,7 +513,7 @@ function missedAsks({ store, ctx, today, t, locale }: Source): Ask[] {
     const order = orders.get(orderId);
     const id = `missed:${orderId}:${yesterday}`;
     // Still not begun: approved, preparing or ready. Started (or done, or discarded) is not missed.
-    if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id) || confirmed.has(orderId)) return [];
+    if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id) || confirmed.has(orderId) || !onPersonsBoard(order)) return [];
     const dueDay = dueOf(order, anchors);
     if (!dueDay || daysBetween(today, dueDay) > MISSED_ASK_HORIZON_DAYS) return [];
     return [{ id, kind: "missed_block" as const, entityId: orderId, line: order.identityId, urgency: urgencyFor(dueDay, today), dueDay, preview: taskPreview(t, orderId),
@@ -424,6 +528,67 @@ function missedAsks({ store, ctx, today, t, locale }: Source): Ask[] {
         { id: "drop", label: t("不做了"), fields: [{ id: "reason", label: t("为什么不做"), kind: "text" as const, required: true }] }
       ] }];
   });
+}
+
+/** At most this many questions on one card (docs/work-split.md: ≤2 questions, ≤10 minutes of the person's time). */
+export const PREP_QUESTIONS_PER_CARD = 2;
+/** The question of an `ask` work order, at most `PREP_QUESTIONS_PER_CARD` sentences of it. */
+export function prepQuestionOf(order: StoredWorkOrder): string {
+  const own = (order.payload as { question?: unknown } | undefined)?.question;
+  const text = (typeof own === "string" && own.trim() ? own.trim() : workOwner({ ...order, owner: "ask" }).question ?? "").replace(/\s+/g, " ");
+  const parts = text.split(/(?<=[？?])/).map((part) => part.trim()).filter(Boolean);
+  return parts.slice(0, PREP_QUESTIONS_PER_CARD).join(" ").slice(0, 240);
+}
+
+/**
+ * Work the assistant can do once the person gives one thing only they hold (docs/work-split.md, an `ask` work order): one question on
+ * 待决事项, never a task card. The answer goes into the order and the order becomes the assistant's; 「不需要」 archives it. As urgent as
+ * the core task it prepares, and important when one waits on it.
+ */
+function prepQuestionAsks({ store, ctx, today, t, locale }: Source): Ask[] {
+  const anchors = deadlines(store, ctx.workspaceId);
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const byId = new Map(orders.map((order) => [order.id, order]));
+  return orders.filter((order) => (order.payload as { owner?: unknown } | undefined)?.owner === "ask" && !order.tombstone
+    && ["awaiting_plan_approval", "approved", "preparing", "ready_for_human"].includes(order.state)).map((order): Ask => {
+    const served = byId.get(preparesOf(order));
+    const live = served && !["archived", "accepted"].includes(served.state) ? served : undefined;
+    const dueDay = (live ? dueOf(live, anchors) : undefined) ?? dueOf(order, anchors);
+    const question = prepQuestionOf(order);
+    const name = short(taskTitleOf(order), 24);
+    const core = live ? short(taskTitleOf(live), 24) : "";
+    return { id: `prepq:${order.id}`, kind: "prep_question", entityId: order.id, line: order.identityId,
+      urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}), raisedAt: "", fingerprint: question,
+      important: Boolean(live), ...(live ? { preview: taskPreview(t, live.id, t("看要用它的任务")) } : {}),
+      freeText: { placeholder: t("直接写答案；在文件里的，写文件名或先上传再写在哪") },
+      title: t("「{{name}}」需要本人回答：{{question}}", { name, question: short(question, 60) }),
+      why: (core ? t("助手为「{{core}}」做「{{name}}」，只差这一点本人知道的信息，回答约需几分钟。", { core, name })
+        : t("助手做「{{name}}」，只差这一点本人知道的信息，回答约需几分钟。", { name }))
+        + (locale === "en" ? " " : "")
+        + (core ? t("回答后由助手做完，结果放在「{{core}}」的「已备好」里；这件事不进任务列表，也不占日程。", { core })
+          : t("回答后由助手做完；这件事不进任务列表，也不占日程。")),
+      options: [
+        { id: "answer", label: t("回答，交给助手"), recommended: true, detail: t("在下方写答案，助手按回答做完"), needsNote: true },
+        { id: "skip", label: t("不需要"), detail: t("这项准备不做了，归档，可从已归档恢复") }
+      ] };
+  });
+}
+
+/** The answer to a question for the assistant: kept in the order, which becomes the assistant's and takes effect. */
+function answerPrepQuestion(ctx: AccessContext, ask: Ask, optionId: string, note: string): AskResult {
+  const store = getStore();
+  const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
+  if (!order || (order.payload as { owner?: unknown }).owner !== "ask") return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+  if (optionId === "skip") return archiveWorkOrder(ctx, order.id, tOf(ctx)("本人表示不需要这项准备"), { bySystem: true });
+  const answer = note.trim();
+  if (!answer) return { ok: false, code: "ASK_FIELD_REQUIRED" };
+  const question = prepQuestionOf(order);
+  store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), owner: "assistant", question, answer: answer.slice(0, 2000), answeredAt: new Date().toISOString() } });
+  record(ctx, "prep.question_answered", order.id, `prep:answered:${order.id}:${Date.now()}`, { question, answer: answer.slice(0, 2000) });
+  // A proposal until now (it never took effect by itself): the person's answer is the go-ahead, and the assistant takes it on its next pass.
+  if (order.state === "awaiting_plan_approval")
+    store.transitionWorkOrder(ctx.workspaceId, order.id, { type: "plan.approved", approvalId: ctx.principalId }, `prep-answered-approved:${order.id}:${Date.now()}`);
+  return { ok: true };
 }
 
 /** The assistant's work that stopped and will not be run again by itself, with its progress and the next step to choose (`lib/agent-ask.ts`). */
@@ -527,25 +692,48 @@ const interviewPlaceholder = (t: Translate, question: { id: string; kind: string
 
 const STAGE_LABEL: Record<string, string> = { orientation: "开场与规则", situation: "现状", compass: "指南针", energy: "能量", lines: "主线", details: "细节" };
 
+const stageWhere = (status: InterviewStatus, t: Translate) =>
+  status.stage ? t("访谈在「{{stage}}」阶段（第 {{index}}/{{count}} 阶段）", { stage: STAGE_LABEL[status.stage] ? t(STAGE_LABEL[status.stage]!) : status.stage,
+    index: status.stageIndex, count: status.stageCount }) : t("访谈");
+
 /**
  * The main interview stopped with questions still open. The system works meanwhile — approved milestones are worked back and scheduled —
  * but milestone drafts, long-term goals and the proposed hours are designed from what the interview has, so the gap is named here.
  */
-function interviewAsks({ ctx, t, locale }: Source): Ask[] {
+function interviewAsks({ ctx, now, t }: Source): Ask[] {
   const status = interviewStatus(ctx);
   // While the interview runs, its questions are asked in it, round by round; only once the start standard stands and the person uses the
-  // app (已可开始) with the portrait unfinished are they asked here as well, each answerable in place (decided 2026-10-08, 2026-10-12).
+  // app (已可开始) with the portrait unfinished are they asked here as well, answerable in place (decided 2026-10-08, 2026-10-12).
   if (!status.started || status.complete || !status.parked) return [];
-  const where = status.stage ? t("访谈在「{{stage}}」阶段（第 {{index}}/{{count}} 阶段）", { stage: STAGE_LABEL[status.stage] ? t(STAGE_LABEL[status.stage]!) : status.stage,
-    index: status.stageIndex, count: status.stageCount }) : t("访谈");
-  const questions = status.questions.map((question): Ask => {
+  // One card, not one per question: the later stages' questions each became an ask and piled eight 「不急」 cards onto Today
+  // (2026-10-17 walkthrough, W-21). The first open question not snoozed is asked in place; answering it brings up the next, since an
+  // answered question leaves `status.questions` until the round goes to the interview together.
+  const today = planToday(ctx, now);
+  const held = new Map(snoozes(ctx).map((snooze) => [snooze.askId, snooze]));
+  const questions = interviewQuestionAsks(status, t);
+  const shown = questions.find((ask) => { const snooze = held.get(ask.id); return !snooze || snooze.until <= today || snooze.fingerprint !== ask.fingerprint; });
+  if (shown) return [shown];
+  if (questions.length) return [];
+  return [{ id: "interview:open", kind: "interview_open", entityId: "interview", urgency: "later", raisedAt: "",
+    fingerprint: `${status.stage}:${status.openQuestions}`,
+    title: t("访谈未完成"),
+    why: t("{{where}}，下一轮问题出来后可以在这里或访谈页回答。期间系统照常使用；补齐后，长期目标、里程碑草稿与建议的可用时段按新信息更新。", { where: stageWhere(status, t) }),
+    options: [{ id: "open", label: t("回到访谈"), href: "/onboarding", recommended: true }] }];
+}
+
+/** Every open interview question as an answerable ask: `interviewAsks` lists one of them, `answerAsk` accepts any. */
+function interviewQuestionAsks(status: InterviewStatus, t: Translate): Ask[] {
+  const where = stageWhere(status, t);
+  const count = status.questions.length;
+  return status.questions.map((question): Ask => {
     const single = question.kind !== "free" && question.options.length > 0;
     const other: AskField = { id: "other", label: t("补充"), kind: "text", required: false, placeholder: t("可不填") };
     const portrait = question.id === "gap-portrait" || question.id === "gap-appearance";
     return { id: `iq:${question.id}`, kind: "interview_question", entityId: question.id, urgency: "later", raisedAt: "",
       fingerprint: `${status.sessionId}:${question.id}`, ...(question.identityId ? { line: question.identityId } : {}),
-      title: question.text,
-      why: t("{{where}}的问题。本轮的问题都答完后，会一起交给访谈，接着下一轮。", { where }),
+      title: count > 1 ? t("访谈还有 {{count}} 个问题：{{question}}", { count, question: question.text }) : question.text,
+      why: count > 1 ? t("{{where}}的问题。答完这个显示下一个，也可以回到访谈一起回答。本轮的问题都答完后，会一起交给访谈，接着下一轮。", { where })
+        : t("{{where}}的问题。本轮的问题都答完后，会一起交给访谈，接着下一轮。", { where }),
       // A line resting on guesses and a project's deadline are start items: milestones are designed from them.
       important: START_GAP.test(question.id),
       select: question.kind === "multi" ? "many" : "one",
@@ -556,12 +744,6 @@ function interviewAsks({ ctx, t, locale }: Source): Ask[] {
           ...(question.allowOther ? { fields: [other] } : {}) }))
         : [{ id: "free", label: t("回答"), fields: [{ id: "other", label: t("回答"), kind: "longtext" as const, required: true }] }] };
   });
-  return [{ id: "interview:open", kind: "interview_open", entityId: "interview", urgency: "later", raisedAt: "",
-    fingerprint: `${status.stage}:${status.openQuestions}`,
-    title: t("访谈未完成"),
-    why: (status.openQuestions ? t("{{where}}，{{count}} 个问题列在下面，可以在这里逐个回答。", { where, count: status.openQuestions }) : t("{{where}}。", { where }))
-      + (locale === "en" ? " " : "") + t("期间系统照常使用；补齐后，长期目标、里程碑草稿与建议的可用时段按新信息更新。"),
-    options: [{ id: "open", label: t("回到访谈"), href: "/onboarding", recommended: true }] }, ...questions];
 }
 
 /**
@@ -581,7 +763,7 @@ function eventAsks({ ctx, today, t, locale }: Source): Ask[] {
       why: t(event.repeat ? "周期性日程：{{what}}；来自{{source}}，在已同步的日历里没有找到。创建后写入 Crossline 日历——作为一个每周重复的系列，提前 10 分钟提醒；排程本来就会绕开这段时间。"
         : "一次性日程：{{what}}；来自{{source}}，在已同步的日历里没有找到。创建后写入 Crossline 日历——作为单个事件，提前 10 分钟提醒；排程本来就会绕开这段时间。", {
         what: `${describeEvent(event, locale)}${event.location ? `${locale === "en" ? ", " : "，"}${event.location}` : ""}`,
-        source: event.source === "interview" ? t("访谈中的口述") : t("上传的文件") }),
+        source: event.source === "interview" ? t("访谈中的口述") : event.source === "recording" ? t("录音里听到的话（按 1 小时计）") : t("上传的文件") }),
       options: [{ id: "create", label: t("创建"), recommended: true }, { id: "exists", label: t("已在别的日历里"), detail: t("不再提醒") },
         { id: "skip", label: t("不需要"), detail: t("不写入日历") }] };
   });
@@ -592,13 +774,21 @@ function eventAsks({ ctx, today, t, locale }: Source): Ask[] {
  * windows) or a spent one. It used to stop with nothing said, so captures sat unanalysed while the page looked normal. A worker that is
  * down is the runtime banner (`lib/runtime-status.ts`), not this one.
  */
-function backgroundAsks({ store, ctx, t }: Source): Ask[] {
+function backgroundAsks({ store, ctx, t, locale }: Source): Ask[] {
   const paused = readFailure(store, ctx.workspaceId, BACKGROUND_BLOCKER) as ({ resetsAt?: string; reason?: string } & NonNullable<ReturnType<typeof readFailure>>) | null;
   if (!paused || paused.reason === "CODEX_SUPERVISOR_UNAVAILABLE") return [];
   const until = paused.resetsAt ? t("，预计 {{at}} 恢复", { at: localStamp(paused.resetsAt, effectiveSchedulePreferences(ctx).preferences.timeZone) }) : "";
-  return [{ id: `background:${paused.code}`, kind: "background_paused", entityId: "background", urgency: "soon", raisedAt: paused.at,
-    fingerprint: paused.code, title: t("后台自动工作已暂停"),
-    why: t("{{reason}}{{until}}。新收集的事项会在恢复后自动分析；需要现在处理的可以在任务页手动点「分析」。", { reason: clause(paused.message), until }),
+  // What still works is said first (2026-10-18 evaluation): the schedule, calendar, reminders and timing need no model, and a person
+  // told only 「已暂停」 read the whole system as stopped.
+  const service = degradedService(paused.code);
+  const spent = paused.code === "RATE_LIMIT_REACHED" || paused.code === "BUDGET_EXHAUSTED";
+  const items = (list: string[]) => list.map((item) => t(item)).join(locale === "en" ? "; " : "；");
+  // Every analysis, plan and draft waits on this, so it is both urgent and important: on 待确认 it sat in 不重要不紧急 while Today's
+  // opener called it the most urgent thing (2026-10-17 walkthrough, W-22).
+  return [{ id: `background:${paused.code}`, kind: "background_paused", entityId: "background", urgency: "now", important: true, raisedAt: paused.at,
+    fingerprint: paused.code, title: spent ? t("模型额度用完了：排程照常，AI 生成暂停") : t("后台自动工作已暂停"),
+    why: t("{{reason}}{{until}}。照常可用：{{works}}。暂停到恢复：{{paused}}。恢复后自动补上，不需要操作。",
+      { reason: clause(paused.message), until, works: items(service.works), paused: items(service.paused) }),
     options: [{ id: "settings", label: t("去看额度"), href: "/settings#usage", recommended: true }] }];
 }
 
@@ -635,7 +825,7 @@ function lockedConflictAsks({ store, ctx, today, now, t, locale }: Source): Ask[
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, missedAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, overdueAsks, missedAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
@@ -645,14 +835,20 @@ export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
 
 /**
  * What a task's step plan could not read from the person's material or facts (decided 2026-10-09): the exam's scope, what they already
- * master, the format of the deliverable. Asked here with the plan's own options; the answer is a confirmed fact every later plan reads,
- * and the task is planned again with it.
+ * master, the format of the deliverable. Asked with the plan's own options; the answer is a confirmed fact every later plan reads, and
+ * the task is planned again with it.
+ *
+ * Several open questions of one project come as one card (2026-10-18 evaluation: approving 19 milestones raised about 60 of them, one
+ * card each): 「都按建议」 settles them all in one tap, 「逐条改」 opens one line per question where an empty line keeps the suggestion.
+ * Batching interruptions is what the notification evidence supports (Fitz et al. 2019); each answer stays changeable on the task.
  */
-function stepQuestionAsks({ store, ctx, today, t, locale }: Source): Ask[] {
-  const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state))
+type StepQuestionEntry = { order: StoredWorkOrder; plannedAt: string; version: number; question: { text: string; why?: string; options: string[] } };
+
+/** The open step questions, one entry per question, the same question from two tasks of one project once (the answer is per project). */
+function openStepQuestions({ store, ctx }: Source): StepQuestionEntry[] {
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order))
     .map((order) => [order.id, order]));
   const answered = new Set(store.listProfileFacts(ctx.workspaceId).filter((fact) => fact.slot.startsWith(STEP_ANSWER_SLOT)).map((fact) => `${fact.projectId}|${fact.slot}`));
-  // The answer is kept per project, so the same question from two tasks of one project is one question: asked once, it answers both.
   const asked = new Set<string>();
   // What a task's own files answer (the problem set, how it is handed in, the AI rule) is read from them, never asked: the worker's task
   // pass writes it as an assumption, and it is left out here already so it never shows meanwhile.
@@ -660,14 +856,64 @@ function stepQuestionAsks({ store, ctx, today, t, locale }: Source): Ask[] {
   return store.listStepPlans(ctx.workspaceId).flatMap((plan) => {
     const order = orders.get(plan.workOrderId);
     if (!order) return [];
-    const due = (order.payload as { dueDate?: string } | undefined)?.dueDate;
     return plan.questions.filter((question) => {
       const key = `${order.projectId}|${stepAnswerSlot(question.text)}`;
       if (withFiles.has(order.projectId) && readableFromMaterial(question.text)) return false;
       return !answered.has(key) && !asked.has(key) && Boolean(asked.add(key));
-    }).map((question): Ask => ({
+    }).map((question) => ({ order, plannedAt: plan.plannedAt, version: plan.version, question }));
+  });
+}
+
+/** At most this many questions on one project card; the rest come on the next one. */
+const STEP_QUESTIONS_PER_CARD = 8;
+
+/** Questions with a suggestion, grouped by project where a project has two or more; the others are asked one by one. */
+function stepQuestionGroups(source: Source): { groups: Map<string, StepQuestionEntry[]>; single: StepQuestionEntry[] } {
+  const byProject = new Map<string, StepQuestionEntry[]>();
+  const single: StepQuestionEntry[] = [];
+  for (const entry of openStepQuestions(source)) {
+    if (!entry.order.projectId || !entry.question.options[0]) { single.push(entry); continue; }
+    byProject.set(entry.order.projectId, [...(byProject.get(entry.order.projectId) ?? []), entry]);
+  }
+  const groups = new Map<string, StepQuestionEntry[]>();
+  for (const [projectId, entries] of byProject) {
+    if (entries.length >= 2) groups.set(projectId, entries.slice(0, STEP_QUESTIONS_PER_CARD)); else single.push(...entries);
+  }
+  return { groups, single };
+}
+
+const URGENCY_RANK = { now: 0, soon: 1, later: 2 } as const;
+
+function stepQuestionAsks(source: Source): Ask[] {
+  const { store, ctx, today, t, locale } = source;
+  const { groups, single } = stepQuestionGroups(source);
+  const projects = new Map(store.listProjects(ctx.workspaceId, { includeArchived: true }).map((project) => [project.id, project.name]));
+  const dueOf = (order: StoredWorkOrder) => (order.payload as { dueDate?: string } | undefined)?.dueDate;
+  const batched = [...groups.entries()].map(([projectId, entries]): Ask => {
+    const dueDay = entries.map((entry) => dueOf(entry.order)).filter((day): day is string => Boolean(day)).sort()[0];
+    const urgency = entries.map((entry) => urgencyFor(dueOf(entry.order), today)).sort((a, b) => URGENCY_RANK[a] - URGENCY_RANK[b])[0]!;
+    const name = projects.get(projectId) ?? projectId;
+    return {
+      id: `stepq:p:${projectId}`, kind: "step_question", entityId: projectId, line: entries[0]!.order.identityId,
+      urgency, ...(dueDay ? { dueDay } : {}), raisedAt: entries.map((entry) => entry.plannedAt).sort().at(-1)!,
+      fingerprint: entries.map((entry) => `${entry.version}:${stepAnswerSlot(entry.question.text)}`).join("|"),
+      important: true, preview: taskPreview(t, entries[0]!.order.id),
+      title: t("「{{name}}」有 {{count}} 个问题只有本人知道", { name: short(name, 20), count: entries.length }),
+      why: t("{{list}}。", { list: entries.map((entry, index) => t("{{n}}. 「{{task}}」{{question}} → 建议：{{option}}", { n: index + 1,
+        task: short(taskTitleOf(entry.order), 16), question: clause(entry.question.text), option: entry.question.options[0] })).join(locale === "en" ? "; " : "；") })
+        + (locale === "en" ? " " : "") + t("可以都按建议处理，之后在任务详情里随时改；也可以逐条写自己的答案，留空的按建议。"),
+      options: [
+        { id: "accept", label: t("都按建议"), detail: t("每个任务按回答重排一次步骤；之后可在任务详情里改"), recommended: true },
+        { id: "edit", label: t("逐条改"), fields: entries.map((entry, index) => ({ id: `q${index}`, label: `${index + 1}. ${short(entry.question.text, 40)}`,
+          kind: "text" as const, required: false, placeholder: t("留空按建议：{{option}}", { option: entry.question.options[0] }) })) }
+      ]
+    };
+  });
+  const one = single.map(({ order, plannedAt, version, question }): Ask => {
+    const due = dueOf(order);
+    return {
       id: `stepq:${order.id}:${stepAnswerSlot(question.text)}`, kind: "step_question", entityId: order.id, line: order.identityId,
-      urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}), raisedAt: plan.plannedAt, fingerprint: `${plan.version}:${question.text}`,
+      urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}), raisedAt: plannedAt, fingerprint: `${version}:${question.text}`,
       // The step planner asks only for important work and only what it cannot read from the material: its plan waits on the answer.
       important: true, preview: taskPreview(t, order.id),
       freeText: { placeholder: question.options[0] ? t("例如：{{option}}，或用自己的话说", { option: question.options[0] }) : t("用自己的话回答") },
@@ -677,8 +923,27 @@ function stepQuestionAsks({ store, ctx, today, t, locale }: Source): Ask[] {
       options: [...question.options.map((option, index) => ({ id: `o${index}`, label: option,
         fields: [{ id: "other", label: t("补充"), kind: "text" as const, required: false, placeholder: t("可不填") }] })),
         { id: "free", label: t("都不是，我来写"), fields: [{ id: "other", label: t("回答"), kind: "text" as const, required: true }] }]
-    }));
+    };
   });
+  return [...batched, ...one];
+}
+
+/** A project card's answer: each question its own line or the suggestion; each task asked is planned again once, with all its answers. */
+function answerStepQuestionBatch(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>): AskResult {
+  const entries = stepQuestionGroups({ store: getStore(), ctx, today: planToday(ctx), now: appNow(), t: tOf(ctx), locale: localeFor(ctx) }).groups.get(ask.entityId);
+  if (!entries?.length) return { ok: false, code: "STEP_QUESTION_GONE" };
+  if (optionId !== "accept" && optionId !== "edit") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+  const byOrder = new Map<string, string[]>();
+  entries.forEach((entry, index) => {
+    const own = optionId === "edit" ? (values[`q${index}`] ?? "").trim() : "";
+    const answer = own || entry.question.options[0]!;
+    /* i18n-ignore-start: the fact's quote and the replan note are read by the step planner (model context) */
+    recordStepAnswer(ctx, entry.order, entry.question.text, answer, own || `按建议：${answer}`);
+    byOrder.set(entry.order.id, [...(byOrder.get(entry.order.id) ?? []), `「${entry.question.text}」：${answer}`]);
+  });
+  for (const [orderId, lines] of byOrder) requestStepReplan(ctx, orderId, `本人回答了${lines.join("；")}。按此重新安排步骤。`);
+  /* i18n-ignore-end */
+  return { ok: true };
 }
 
 function snoozes(ctx: AccessContext): AskSnooze[] {
@@ -785,7 +1050,10 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       return { ok: true };
     }
     case "materials_blocked": return optionId === "retry" ? retryMaterialPreparation(ctx, ask.entityId) : markMaterialsReady(ctx, ask.entityId, "human");
-    case "gate_insufficient": return optionId === "drop" ? archiveWorkOrder(ctx, ask.entityId, values.reason!) : approveWorkOrderProposal(ctx, ask.entityId);
+    case "gate_insufficient":
+      if (optionId === "done") return acceptOwnCompletion(store, ctx.workspaceId, ask.entityId, `own-completion:${ask.entityId}:${ask.fingerprint}`)
+        ? { ok: true } : { ok: false, code: "NOT_COMPLETED_BY_PERSON" };
+      return optionId === "drop" ? archiveWorkOrder(ctx, ask.entityId, values.reason!) : approveWorkOrderProposal(ctx, ask.entityId);
     case "gate_failed": {
       record(ctx, "milestone_gate.retry_requested", ask.entityId, `milestone-gate:retry:${ask.entityId}:${Date.now()}`, { requestedBy: ctx.principalId });
       await requestCodexSupervisor(ctx, `/v1/work-orders/${ask.entityId}/milestone-gate`, { method: "POST", headers: { "content-type": "application/json" },
@@ -795,12 +1063,31 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     case "evidence_manual": return acceptWorkOrderEvidence(ctx, ask.entityId);
     case "milestone_risk": {
       if (optionId === "extend") {
-        const settings = readGoalSettings(ctx, ask.entityId);
-        return saveGoalSettings(ctx, ask.entityId, { importance: settings?.importance ?? "ordinary", confirmedDeadline: values.date!,
-          sourceQuote: tOf(ctx)("在「可能赶不上」的询问里推迟") });
+        // Only the date: passing an importance here demoted every milestone moved this way to 「ordinary」 (2026-10-18 walkthrough).
+        return saveGoalSettings(ctx, ask.entityId, { confirmedDeadline: values.date!, sourceQuote: tOf(ctx)("在「可能赶不上」的询问里推迟") });
       }
-      const goal = loadGoalForecast(ctx).goals.find((item) => item.milestoneId === ask.entityId);
+      const goal = loadGoalForecast(ctx, riskHorizonDays(ctx)).goals.find((item) => item.milestoneId === ask.entityId);
       record(ctx, "risk.accepted", ask.entityId, `risk:accepted:${ask.entityId}:${Date.now()}`, { slackDays: goal?.slackDays ?? -999, p85Day: goal?.p85Day ?? null });
+      return { ok: true };
+    }
+    case "milestone_overdue": {
+      const deadline = ask.fingerprint;
+      const resolve = (how: string) => record(ctx, "milestone.overdue_resolved", ask.entityId, `milestone-overdue:resolved:${ask.entityId}:${deadline}:${Date.now()}`, { deadline, how });
+      if (optionId === "extend") {
+        const saved = saveGoalSettings(ctx, ask.entityId, { confirmedDeadline: values.date!, sourceQuote: tOf(ctx)("在「截止已过」的询问里改期") });
+        if (!saved.ok) return saved;
+      } else if (optionId === "drop") {
+        const milestone = store.listMilestones(ctx.workspaceId).find((item) => item.id === ask.entityId);
+        if (!milestone) return { ok: false, code: "MILESTONE_NOT_FOUND" };
+        const saved = saveMilestoneEdit(ctx, { id: milestone.id, identityId: milestone.identityId, projectId: milestone.projectId ?? "", title: milestone.title,
+          status: "archived", successCriteria: milestone.successCriteria ?? [], ...(milestone.templateId ? { templateId: milestone.templateId } : {}) });
+        if (!saved.ok) return saved;
+        // Work being timed stays; the rest of the milestone's open work goes with it.
+        for (const order of store.listWorkOrders(ctx.workspaceId).filter((item) => item.milestoneId === milestone.id
+          && ["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "blocked"].includes(item.state)))
+          archiveWorkOrder(ctx, order.id, tOf(ctx)("里程碑「{{title}}」截止已过，本人选择放弃", { title: short(milestone.title, 20) }));
+      } else if (optionId !== "makeup") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+      resolve(optionId);
       return { ok: true };
     }
     case "missed_block": {
@@ -832,6 +1119,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       }
       return { ok: true };
     }
+    case "prep_question": return answerPrepQuestion(ctx, ask, optionId, choice.note || values.answer || "");
     case "agent_blocked": return answerAgentAsk(ctx, ask, { optionIds: choice.optionIds, values, note: choice.note });
     case "calendar_publish_failed":
       getStore().setSetting(ctx.workspaceId, CALENDAR_PUBLISH_FAILURE, "");
@@ -839,6 +1127,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       void autoPublishPass().catch(() => {});
       return { ok: true };
     case "step_question": {
+      if (ask.id.startsWith("stepq:p:")) return answerStepQuestionBatch(ctx, ask, optionId, values as Record<string, string>);
       const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
       const plan = order ? store.getStepPlan(ctx.workspaceId, order.id) : undefined;
       const question = plan?.questions.find((item) => ask.id.endsWith(stepAnswerSlot(item.text)));
@@ -846,8 +1135,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       const labels = ask.options.filter((item) => choice.optionIds.includes(item.id) && item.id !== "free").map((item) => item.label);
       const answer = [...new Set([...labels, (values.other ?? "").trim(), choice.note].filter(Boolean))].join("；");
       if (!answer) return { ok: false, code: "STEP_ANSWER_EMPTY" };
-      store.upsertProfileFact({ workspaceId: ctx.workspaceId, identityId: order.identityId, projectId: order.projectId, slot: stepAnswerSlot(question.text),
-        value: `【${question.text}】${answer}`, status: "confirmed", sourceRef: "ask", sourceQuote: answer, updatedAt: new Date().toISOString() });
+      recordStepAnswer(ctx, order, question.text, answer);
       // i18n-ignore: feedback for the step planner (model context)
       requestStepReplan(ctx, order.id, `本人回答了「${question.text}」：${answer}。按此重新安排步骤。`);
       return { ok: true };
@@ -884,12 +1172,22 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     case "outcome_check": return answerOutcome(ctx, ask, optionId, values, choice.note);
     case "progress_check": return answerProgress(ctx, ask, optionId, choice.note);
     case "milestone_risk_review": {
+      if (ask.entityId === "batch") {
+        const members = riskReviewMembers({ store, ctx, today: planToday(ctx), now: appNow(), t: tOf(ctx), locale: localeFor(ctx) });
+        if (optionId === "split") {
+          store.setSetting(ctx.workspaceId, RISK_REVIEW_SPLIT, ask.fingerprint);
+          return { ok: true };
+        }
+        if (optionId !== "accept" && optionId !== "ignore") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+        const at = new Date().toISOString();
+        store.setSetting(ctx.workspaceId, RISK_DECISIONS_SETTING, JSON.stringify({ ...readRiskDecisions(ctx),
+          ...Object.fromEntries(members.map((member) => [member.entityId, { fingerprint: member.fingerprint, how: optionId, at } satisfies RiskDecision])) }));
+        return { ok: true };
+      }
       const how: RiskDecision["how"] | undefined = optionId === "accept" ? "accept" : optionId === "extend" ? "extend" : optionId === "ignore" ? "ignore" : undefined;
       if (!how) return { ok: false, code: "ASK_OPTION_UNKNOWN" };
       if (how === "extend") {
-        const settings = readGoalSettings(ctx, ask.entityId);
-        const saved = saveGoalSettings(ctx, ask.entityId, { importance: settings?.importance ?? "ordinary", confirmedDeadline: values.date!,
-          sourceQuote: tOf(ctx)("在里程碑风险的询问里调整截止") });
+        const saved = saveGoalSettings(ctx, ask.entityId, { confirmedDeadline: values.date!, sourceQuote: tOf(ctx)("在里程碑风险的询问里调整截止") });
         if (!saved.ok) return saved;
       }
       // A `schedule.` setting, so the answer is undone with the rest of the operation.
@@ -928,9 +1226,11 @@ function withNoteInFields(ask: Ask, optionIds: string[], values: Record<string, 
  * option id (the original shape) or `{optionIds, note}`: several options where the ask takes several, and the person's own words where it
  * takes them. Where nothing downstream reads the words they are kept on the `ask.answered` event.
  */
-export async function answerAsk(ctx: AccessContext, askId: string, choice: string | { optionIds?: string[]; note?: string },
+export async function answerAsk(ctx: AccessContext, askId: string, choice: string | { optionIds?: string[]; note?: string; seconds?: number },
   values: Record<string, unknown>, now = appNow()): Promise<AskResult> {
-  const ask = collectAsks(ctx, now).find((item) => item.id === askId);
+  // An interview question further down the round is not listed (one card at a time) but is still the person's to answer.
+  const ask = collectAsks(ctx, now).find((item) => item.id === askId)
+    ?? (askId.startsWith("iq:") && interviewStatus(ctx).parked ? interviewQuestionAsks(interviewStatus(ctx), tOf(ctx)).find((item) => item.id === askId) : undefined);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const optionIds = typeof choice === "string" ? [choice] : choice.optionIds ?? [];
   const note = typeof choice === "string" ? "" : choice.note ?? "";
@@ -943,20 +1243,31 @@ export async function answerAsk(ctx: AccessContext, askId: string, choice: strin
   const t = tFor(locale);
   const label = listOf(locale, checked.options.map((option) => option.label)) || t("自己回答");
   const result = await withUndo(ctx, t("{{label}}：{{title}}", { label, title: ask.title }), () => answerOne(ctx, ask, { optionIds: ids, note: checked.note }, checked.values));
+  // The question ledger keeps the answer beside the question, numbered, for the models that read it.
+  if (result.ok && ask.kind !== "interview_question") {
+    const store = getStore();
+    const id = store.questionByKey(ctx.workspaceId, `ask:${ask.id}`)?.id ?? recordAsk(ctx, ask, now.toISOString());
+    /* i18n-ignore-start: the question ledger is read by models */
+    store.answerQuestion(ctx.workspaceId, id, { text: [checked.options.map((option) => option.label).join("、"), checked.note].filter(Boolean).join("。补充："),
+      at: now.toISOString() });
+    /* i18n-ignore-end */
+  }
   if (result.ok) record(ctx, "ask.answered", ask.entityId, `ask:answered:${ask.id}:${ids.join("+") || "note"}:${now.getTime()}`,
-    { askId: ask.id, kind: ask.kind, optionId: ids[0] ?? "", ...(ids.length > 1 ? { optionIds: ids } : {}), ...(checked.note ? { note: checked.note } : {}) });
+    { askId: ask.id, kind: ask.kind, optionId: ids[0] ?? "", ...(ids.length > 1 ? { optionIds: ids } : {}), ...(checked.note ? { note: checked.note } : {}),
+      // Seconds the card was on screen before the answer, when the page measured it: the decision's cost on 系统体检.
+      ...(typeof choice !== "string" && choice.seconds !== undefined ? { seconds: choice.seconds } : {}) });
   return result;
 }
 
 /** 「明天再问」/「下周再问」: hidden until then, back sooner if what it is about changes. */
-export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = appNow()): AskResult {
+export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = appNow(), seconds?: number): AskResult {
   const ask = collectAsks(ctx, now).find((item) => item.id === askId);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const until = snoozeUntil(choice, planToday(ctx, now));
   // Recorded as an operation, so 「明天再问」 pressed by mistake can be undone like any other answer.
   const before = new Set(getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).map((event) => event.eventId));
   record(ctx, "ask.snoozed", ask.entityId, `ask:snoozed:${ask.id}:${now.getTime()}`,
-    { askId: ask.id, until, fingerprint: ask.fingerprint } satisfies AskSnooze);
+    { askId: ask.id, until, fingerprint: ask.fingerprint, ...(seconds === undefined ? {} : { seconds }) } satisfies AskSnooze & { seconds?: number });
   const added = getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).filter((event) => !before.has(event.eventId)).map((event) => event.eventId);
   if (added.length) recordOp(ctx, tOf(ctx)(choice === "tomorrow" ? "明天再问：{{title}}" : "下周再问：{{title}}", { title: ask.title }), { kind: "event.retract", eventIds: added });
   return { ok: true };
@@ -967,10 +1278,34 @@ export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" 
  * an urgent message all count the same things. Called on the web's own timer.
  */
 export function writeAttentionSnapshot(ctx: AccessContext, pending: number, now = new Date()): void {
-  const asks = listed(openAsks(ctx, now)).map((ask) => ({ id: ask.id, title: ask.title, urgency: ask.urgency, dueDay: ask.dueDay ?? null,
+  const open = openAsks(ctx, now);
+  syncAskLedger(ctx, open, now.toISOString());
+  const asks = listed(open).map((ask) => ({ id: ask.id, title: ask.title, urgency: ask.urgency, dueDay: ask.dueDay ?? null,
     path: ask.urgency === "now" ? "/" : "/approvals#asks" }));
   getStore().setSetting(ctx.workspaceId, ATTENTION_SNAPSHOT, JSON.stringify({ at: now.toISOString(), pending, asks }));
   // A round whose remaining questions were dead (answered, no longer asked, screened out) still holds the answers given on 待决事项:
   // they go to the interview here, on the same timer, so a restarted resident app settles it by itself.
   void flushPendingAnswers(ctx, sendInterviewReply(ctx)).catch(() => undefined);
+}
+
+/** One ask in the question ledger (`ask:<id>`), open; returns its number. The interview's own questions are kept by the interview. */
+function recordAsk(ctx: AccessContext, ask: Ask, at: string): number {
+  return getStore().recordQuestion(ctx.workspaceId, { kind: "ask", key: `ask:${ask.id}`, text: ask.title, options: ask.options.map((option) => option.label),
+    identityId: ask.line ?? "", status: "open", at });
+}
+
+/**
+ * 待决事项 in the question ledger (2026-10-19), on the web's ten-minute timer: every open ask once, numbered, and an ask whose cause went
+ * away no longer asked. Step questions are asks, so they are here too.
+ */
+export function syncAskLedger(ctx: AccessContext, asks: Ask[], at: string): void {
+  const live = new Set<string>();
+  for (const ask of asks) {
+    if (ask.kind === "interview_question") continue;
+    live.add(`ask:${ask.id}`);
+    recordAsk(ctx, ask, at);
+  }
+  const store = getStore();
+  for (const question of store.listQuestions(ctx.workspaceId, { kind: "ask", statuses: ["pending", "open"] }))
+    if (!live.has(question.key)) store.dropQuestion(ctx.workspaceId, question.id, at);
 }

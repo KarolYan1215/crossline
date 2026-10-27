@@ -3,10 +3,12 @@ use crate::outgoing_message::ConnectionRequestId;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadGoal;
 use codex_app_server_protocol::ThreadHistoryBuilder;
+use codex_app_server_protocol::ThreadHistoryTurnMetadata;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadSettings;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnError;
+use codex_app_server_protocol::TurnItemsView;
 use codex_core::CodexThread;
 use codex_core::ThreadConfigSnapshot;
 use codex_file_watcher::WatchRegistration;
@@ -32,6 +34,9 @@ use tokio::sync::watch;
 use tracing::error;
 
 type PendingInterruptQueue = Vec<ConnectionRequestId>;
+
+// Removing an unload entry drops its sender and wakes deferred listener attachment.
+pub(crate) type PendingThreadUnloads = Arc<Mutex<HashMap<ThreadId, watch::Sender<()>>>>;
 
 pub(crate) struct PendingThreadResumeRequest {
     pub(crate) request_id: ConnectionRequestId,
@@ -97,8 +102,8 @@ pub(crate) struct TurnSummary {
 
 #[derive(Default)]
 pub(crate) struct ThreadState {
+    goal_resume_lock: Arc<Mutex<()>>,
     pub(crate) pending_interrupts: PendingInterruptQueue,
-    pub(crate) pending_rollbacks: Option<(ConnectionRequestId, oneshot::Sender<()>)>,
     pub(crate) turn_summary: TurnSummary,
     pub(crate) last_terminal_turn_id: Option<String>,
     /// Lets an internal runtime replacement wait until the old listener has processed Core's
@@ -146,7 +151,6 @@ impl ThreadState {
             let _ = cancel_tx.send(());
         }
         self.shutdown_drain_waiter = None;
-        self.pending_rollbacks = None;
         self.listener_command_tx = None;
         self.current_turn_history.reset();
         self.listener_thread = None;
@@ -165,6 +169,23 @@ impl ThreadState {
 
     pub(crate) fn active_turn_snapshot(&self) -> Option<Turn> {
         self.current_turn_history.active_turn_snapshot()
+    }
+
+    /// Returns the same turn ID as `active_turn_snapshot` without cloning its items.
+    pub(crate) fn active_turn_id(&self) -> Option<&str> {
+        self.current_turn_history.active_turn_id()
+    }
+
+    pub(crate) fn active_turn_snapshot_with_items_view(
+        &self,
+        items_view: TurnItemsView,
+    ) -> Option<Turn> {
+        self.current_turn_history
+            .active_turn_snapshot_with_items_view(items_view)
+    }
+
+    pub(crate) fn active_turn_metadata_snapshot(&self) -> Option<ThreadHistoryTurnMetadata> {
+        self.current_turn_history.active_turn_metadata_snapshot()
     }
 
     pub(crate) fn register_shutdown_drain_waiter(&mut self) -> oneshot::Receiver<()> {
@@ -252,28 +273,6 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn clear_listener_releases_pending_rollback() {
-        let (completion_tx, mut completion_rx) = oneshot::channel();
-        let mut state = ThreadState {
-            pending_rollbacks: Some((
-                ConnectionRequestId {
-                    connection_id: ConnectionId(1),
-                    request_id: RequestId::Integer(1),
-                },
-                completion_tx,
-            )),
-            ..Default::default()
-        };
-
-        state.clear_listener();
-
-        assert_eq!(
-            completion_rx.try_recv(),
-            Err(oneshot::error::TryRecvError::Closed)
-        );
-    }
-
-    #[test]
     fn note_thread_settings_reports_only_effective_changes() {
         let mut state = ThreadState::default();
         let initial = thread_settings("mock-model");
@@ -291,6 +290,7 @@ mod tests {
 
     fn thread_settings(model: &str) -> ThreadSettings {
         ThreadSettings {
+            disabled_plugin_ids: Vec::new(),
             cwd: AbsolutePathBuf::from_absolute_path("/tmp").expect("absolute path"),
             approval_policy: AskForApproval::OnRequest,
             approvals_reviewer: ApprovalsReviewer::User,
@@ -365,6 +365,21 @@ pub(crate) struct ThreadStateManager {
 }
 
 impl ThreadStateManager {
+    /// Coordinates goal edits with cold/path-based resume for just this thread.
+    pub(crate) async fn lock_goal_resume(
+        &self,
+        thread_id: ThreadId,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = self
+            .thread_state(thread_id)
+            .await
+            .lock()
+            .await
+            .goal_resume_lock
+            .clone();
+        lock.lock_owned().await
+    }
+
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -482,11 +497,37 @@ impl ThreadStateManager {
                 thread_id = %thread_id,
                 listener_generation = thread_state.listener_generation,
                 had_listener = thread_state.cancel_tx.is_some(),
-                had_active_turn = thread_state.active_turn_snapshot().is_some(),
+                had_active_turn = thread_state.active_turn_id().is_some(),
                 "clearing thread listener during thread-state teardown"
             );
             thread_state.clear_listener();
         }
+    }
+
+    /// Removes an unsubscribed listener's entry without clearing a replacement's state.
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "the listener generation must stay fixed while removing its map entry"
+    )]
+    pub(crate) async fn remove_unsubscribed_listener(
+        &self,
+        thread_id: ThreadId,
+        expected: &Arc<Mutex<ThreadState>>,
+        generation: u64,
+    ) -> bool {
+        let mut thread_state = expected.lock().await;
+        let mut state = self.state.lock().await;
+        if thread_state.listener_generation != generation
+            || !state.threads.get(&thread_id).is_some_and(|entry| {
+                Arc::ptr_eq(&entry.state, expected) && entry.connection_ids.is_empty()
+            })
+        {
+            return false;
+        }
+        state.threads.remove(&thread_id);
+        self.unregister_listener_command_tx(thread_id);
+        thread_state.clear_listener();
+        true
     }
 
     pub(crate) async fn clear_all_listeners(&self) {
@@ -506,7 +547,7 @@ impl ThreadStateManager {
                 thread_id = %thread_id,
                 listener_generation = thread_state.listener_generation,
                 had_listener = thread_state.cancel_tx.is_some(),
-                had_active_turn = thread_state.active_turn_snapshot().is_some(),
+                had_active_turn = thread_state.active_turn_id().is_some(),
                 "clearing thread listener during app-server shutdown"
             );
             thread_state.clear_listener();

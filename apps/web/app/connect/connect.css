@@ -1,2 +1,11 @@
 .connect-flow{display:grid;gap:16px;max-width:760px}
 .connect-flow>p{margin:0}
+.connect-or{font-size:16px;margin:12px 0 0;padding-top:16px;border-top:1px solid var(--mist)}
+.invite-panel{display:grid;gap:8px;padding:10px 12px;background:var(--chalk);font-size:14px}
+.invite-panel p{margin:0}
+.invite-panel label{display:grid;gap:4px}
+.invite-panel textarea,.invite-panel input{min-width:0;max-width:100%}
+.invite-redeem{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.invite-redeem label{flex:1 1 180px}
+.invite-apply summary{cursor:pointer}
+.invite-apply[open]{display:grid;gap:8px}

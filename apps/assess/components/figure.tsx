@@ -17,8 +17,8 @@ export function FigureTile({ avatar, type, alt, width, height }: { avatar: Avata
   if (avatar.state === "ready") return <img className="as-figure" src={smallFigure(avatar.url)} alt={alt} width={width} height={height} />;
   const waiting = isDrawing(avatar);
   return <div className="as-figure as-figure-tile" data-waiting={waiting || undefined} role="img"
-    aria-label={waiting ? t("{{alt}}正在画", { alt }) : `${type.name} ${type.code}`}>
-    <span aria-hidden="true">{type.code}</span>
+    aria-label={waiting ? t("{{alt}}正在画", { alt }) : type.name}>
+    <span aria-hidden="true">{type.name}</span>
   </div>;
 }
 
@@ -26,7 +26,7 @@ export function FigureTile({ avatar, type, alt, width, height }: { avatar: Avata
 export function DrawingCard({ type }: { type: PublicType }) {
   const t = useT();
   return <div className="as-drawing" role="status">
-    <div className="as-drawing-figure" aria-hidden="true"><span>{type.code}</span><i /></div>
+    <div className="as-drawing-figure" aria-hidden="true"><span>{type.name}</span><i /></div>
     <p className="as-drawing-title">{t("正在画你的专属形象")}</p>
     <p className="as-note">{t("按你选的外貌来画，通常一两分钟；同时测的人多时要排队，可能要等几分钟。画好后海报会出现在这里，不用刷新；也可以先离开，结果链接已发到你的邮箱。")}</p>
   </div>;

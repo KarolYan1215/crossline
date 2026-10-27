@@ -5,6 +5,14 @@
 .pt-empty{display:grid;gap:10px;justify-items:start;padding:14px;border:1px solid var(--mist)}
 .pt-wrap{display:grid;gap:12px}
 .pt-toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 10px;background:var(--paper);border:1px solid var(--mist)}
+/* Which figure the 小帮手 shows: one card per figure ever drawn or added, the current one outlined. */
+.pt-figures{display:grid;gap:8px;padding:8px 10px;border:1px solid var(--mist)}
+.pt-figures summary{cursor:pointer;font-weight:600}
+.pt-figure-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
+.pt-figure-list li{display:grid;gap:6px;justify-items:center;padding:8px;border:1px solid var(--mist);text-align:center;font-size:13px}
+.pt-figure-list li[data-current]{border:2px solid var(--ink)}
+.pt-figure-list img{width:112px;height:112px;object-fit:cover;object-position:top;border-radius:8px;background:var(--chalk)}
+.pt-figure-actions{display:flex;flex-wrap:wrap;gap:8px}
 /* The document is paper whatever the app's theme: these colours are the poster's, not the page's. #6B655C (the draft's grey) is
    5.2:1 on the paper, so the grey here is #4F4A42 (7.9:1); the group colour as text on paper is about 7.1:1, so text beside a bar is ink. */
 .pt-doc{--pt-paper:#F6F2EA;--pt-ink:#1C1A17;--pt-muted:#4F4A42;--pt-track:#DDD5C7;--pt-soft:#ECE5D8;--pt-accent:var(--group,#0A5198);--pt-accent-text:#08427A;
@@ -81,7 +89,7 @@
 .pt-figure-img{display:block;width:100%;height:100%;object-fit:cover}
 .pt-type-id{display:grid;gap:4px;align-content:center}
 /* The serif's ascent and descent span about 1.45em: a tighter line box lets the code's glyph box run into the name under it. */
-.pt-type-code{margin:0;font-size:72px;line-height:1.45;letter-spacing:.06em;color:var(--group)}
+.pt-type-quote{margin:4px 0 0;font-size:20px;line-height:1.5;color:var(--group)}
 .pt-type-name{margin:0;font-size:48px;line-height:1.45}
 .pt-type-group{margin:0}
 .pt-type-group span{display:inline-block;padding:4px 12px;background:var(--group);color:#fff;font-size:13px}
@@ -90,9 +98,9 @@
 .pt-tagline{margin:0;padding-left:16px;border-left:6px solid var(--group);font-size:20px;line-height:1.5;font-weight:700}
 /* the axes: both poles named, the bar from the middle towards the one leaned to (`axisBar`) */
 .pt-axes{margin:0;padding:0;list-style:none;display:grid;gap:14px}
-.pt-axes li{display:grid;grid-template-columns:64px minmax(0,1fr) 64px;column-gap:12px;row-gap:4px;align-items:center}
+.pt-axes li{display:grid;grid-template-columns:88px minmax(0,1fr) 88px;column-gap:12px;row-gap:4px;align-items:center}
 .pt-axes small{grid-column:2;font-size:12px;line-height:1.5;color:var(--pt-muted)}
-.pt-axis-side{font-size:17px;font-weight:400;color:var(--pt-muted)}
+.pt-axis-side{white-space:nowrap;font-size:17px;font-weight:400;color:var(--pt-muted)}
 .pt-axes li>.pt-axis-side:last-of-type{text-align:right}
 .pt-axis-side[data-on]{color:var(--pt-ink);font-weight:700}
 .pt-axis-side .pt-serif{font-weight:inherit}
@@ -169,7 +177,7 @@
 .pt-card-kicker{font-size:12px;letter-spacing:.2em;color:var(--pt-muted)}
 .pt-card-head{display:grid;grid-template-columns:170px minmax(0,1fr);gap:18px;align-items:center}
 .pt-card-figure{display:block;width:100%;height:100%;object-fit:cover}
-.pt-card .pt-type-code{font-size:46px}
+.pt-card .pt-type-quote{font-size:16px}
 .pt-card-title{display:block;margin-top:6px;font-size:32px;line-height:1.15}
 .pt-card .pt-tagline{font-size:15px;padding-left:12px;border-left-width:5px}
 .pt-card-axes{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--pt-track);border-bottom:1px solid var(--pt-track)}
@@ -199,9 +207,9 @@
   .pt-rhythm-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .pt-figure-row,.pt-type-head{grid-template-columns:1fr}
   .pt-type-head .pt-figure-disc{width:min(260px,100%);justify-self:center}
-  .pt-type-code{font-size:52px}.pt-type-name{font-size:34px}
+  .pt-type-quote{font-size:17px}.pt-type-name{font-size:34px}
   .pt-page{padding:24px 16px}
-  .pt-axes li{grid-template-columns:58px minmax(0,1fr) 58px;column-gap:8px}
+  .pt-axes li{grid-template-columns:76px minmax(0,1fr) 76px;column-gap:8px}
   .pt-axis-side{font-size:15px}
   .pt-labels{grid-template-columns:1fr}
   .pt-cols,.pt-compass,.pt-lines{grid-template-columns:1fr}

@@ -34,7 +34,7 @@ export async function ensurePortrait(page: Page): Promise<void> {
     const workspaceId = realWorkspaceId(store);
     if (store.getSetting(workspaceId, "portrait.report")) return;
     const report = JSON.parse(readFileSync(path.join(import.meta.dirname, "fixtures", "portrait-report.json"), "utf8")) as unknown;
-    store.setSetting(workspaceId, "portrait.report", JSON.stringify({ version: 1, at: "2026-10-12T09:00:00.000Z", schema: 2, report }));
+    store.setSetting(workspaceId, "portrait.report", JSON.stringify({ version: 1, at: "2026-10-12T09:00:00.000Z", schema: 4, report }));
   } finally { store.close(); }
 }
 

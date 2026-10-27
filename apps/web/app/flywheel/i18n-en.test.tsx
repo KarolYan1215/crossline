@@ -28,8 +28,10 @@ describe("the flywheel graph in English", () => {
   });
 
   test("an English goal is cut by width, keeping more letters than a Chinese one would", () => {
-    const anchor = html.match(/class="fw-label fw-label-goal">([^<]+)</)?.[1] ?? "";
-    expect(anchor.endsWith("…")).toBe(true);
-    expect(anchor.length).toBeGreaterThan(16);
+    // The goal takes two lines (`wrapLabel`): the first holds more letters than a Chinese line's sixteen, the last ends in 「…」.
+    const goal = html.match(/class="fw-label fw-label-goal">(.*?)<\/text>/)?.[1] ?? "";
+    const lines = [...goal.matchAll(/<tspan[^>]*>([^<]*)<\/tspan>/g)].map((match) => match[1]!);
+    expect(lines.at(-1)?.endsWith("…")).toBe(true);
+    expect(lines[0]!.length).toBeGreaterThan(16);
   });
 });

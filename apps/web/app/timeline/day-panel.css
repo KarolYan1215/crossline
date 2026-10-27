@@ -37,6 +37,12 @@
 .dq-defer label{display:inline-flex;gap:4px;align-items:center}
 .dq-defer input{font:inherit;font-size:13px;min-width:0}
 .dq-empty{margin:0;font-size:13px;color:var(--graphite)}
+/* The input box with the picked block's task as its page: one line, the task's latest exchange under it. */
+.dq-entry{min-width:0;padding-top:6px;border-top:1px solid var(--mist)}
+.dq-entry .conversation-log{max-height:240px;overflow:auto}
+@media (max-width:680px){
+  .dq-entry .composer-send,.dq-entry .composer-box .ui-menu-trigger{width:44px;height:44px}
+}
 
 .dq-links{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding-top:8px;border-top:1px solid var(--mist);font-size:13px}
 .dq-link{display:inline-flex;gap:6px;align-items:center}

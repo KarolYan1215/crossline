@@ -41,7 +41,7 @@ export function InviteScreen({ token }: { token: string }) {
         <FigureTile avatar={invite.avatar} type={invite.type} alt={t("{{name}}的形象", { name: inviter })} width={160} height={240} />
         <TypeHeading type={invite.type} as="h2" />
       </div> : failure ? <p className="as-error" role="alert">{errorMessage(failure, locale)}</p> : <p className="as-note" role="status">{t("正在读取邀请…")}</p>}
-      <p>{t("32 道题，约 4–5 分钟。答完当场看到你们的双人卡。")}</p>
+      <p>{t("36 个场景二选一，约 5 分钟。答完当场看到你们的双人卡。")}</p>
       <p className="as-note">{t(DISCLAIMER)}</p>
     </TestFlow>
   </main>;

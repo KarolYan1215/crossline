@@ -62,7 +62,7 @@ async function askModel(model: TextModel, result: StoredResult, wants: WantsInpu
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TEXT_TIMEOUT_MS);
   try {
-    const messages = wantsMessages(publicType(result.scores, {}, result.id, undefined, locale), wants, locale);
+    const messages = wantsMessages(publicType(result.scores, {}, result.id, undefined, result.aiDoes, locale), wants, locale);
     const answer = await model.complete(messages, controller.signal);
     const first = judge(answer, locale);
     if (first.ok) return first.lines;

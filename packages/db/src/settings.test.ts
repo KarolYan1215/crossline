@@ -36,3 +36,30 @@ test("the person's latest own action: what they said, timed, answered or reporte
   expect(store.lastPersonActivity("w")! > "2026-10-04T09:00:00.000Z").toBe(true);
   store.close();
 });
+
+test("an undoable change made on a page and an undo are the person acting; the worker's own ops are not", async () => {
+  const { CrosslineStore } = await import("./index");
+  const store = new CrosslineStore(":memory:");
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "op.applied:merge", type: "op.applied", entityId: "op-1",
+    payload: { label: "合并", inverse: { kind: "task.unmerge" } } });
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "op.applied:repair", type: "op.applied", entityId: "op-2",
+    payload: { bySystem: true, label: "解除锁定", inverse: { kind: "settings.restore", entries: [] } } });
+  expect(store.lastPersonActivity("w")).toBeUndefined();
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "op.applied:shares", type: "op.applied", entityId: "op-3",
+    payload: { label: "修改主线份额", inverse: { kind: "settings.restore", entries: [] } } });
+  const after = store.lastPersonActivity("w");
+  expect(after).toBeDefined();
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "op.undone:op-3", type: "op.undone", entityId: "op-3", payload: {} });
+  expect(store.lastPersonActivity("w")! >= after!).toBe(true);
+  store.close();
+});
+
+test("a public skill added by its link is the person acting; one the scout found is not", async () => {
+  const { CrosslineStore } = await import("./index");
+  const store = new CrosslineStore(":memory:");
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "scout", type: "skill.public.installed", entityId: "pub-a", payload: { id: "pub-a" } });
+  expect(store.lastPersonActivity("w")).toBeUndefined();
+  store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "link", type: "skill.public.installed", entityId: "pub-b", payload: { id: "pub-b", via: "link" } });
+  expect(store.lastPersonActivity("w")).toBeDefined();
+  store.close();
+});

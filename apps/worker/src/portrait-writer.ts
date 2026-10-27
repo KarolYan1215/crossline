@@ -1,4 +1,5 @@
-import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, tFor, type AgentHistorySummary } from "@crossline/core";
+import { folderDocuments } from "./source-folders";
+import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, tFor, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { interviewLocale, sayDoFor, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -107,17 +108,24 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
       .filter((text) => { budget -= text.length; return budget > 0; }).reverse();
     const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.slot.startsWith("flywheel_")).slice(0, 120)
       .map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status }));
-    // What the person handed over about themselves (a profile, a CV, notes) — files not filed under any one project — read as well.
+    // What the person handed over about themselves (a profile, a CV, notes) — files they uploaded themselves and filed under no project —
+    // read as well. Files read from an authorized folder are left out: on the owner's ledger the unfiled set was sixty files, downloaded
+    // lecture notes among them, and the first two filled the whole budget (docs/onboarding-prompts.md).
     let room = 24_000;
-    const documents = store.listSourceDocuments(workspaceId).filter((doc) => !doc.projectId && doc.extractionStatus === "done" && doc.extractedText.trim())
+    const fromFolders = folderDocuments(store, workspaceId);
+    const documents = store.listSourceDocuments(workspaceId).filter((doc) => !doc.projectId && !fromFolders.has(doc.id) && doc.extractionStatus === "done" && doc.extractedText.trim())
       .map((doc) => { const text = doc.extractedText.slice(0, Math.max(0, Math.min(12_000, room))); room -= text.length; return { fileName: doc.fileName, text }; })
       .filter((doc) => doc.text);
     // How the person actually spends their working hours with coding agents (time only, when they allowed it): evidence of habit, not a plan.
-    const workHistory = agentHistoryLines(json<AgentHistorySummary | null>(AGENT_HISTORY_SUMMARY, null));
+    const workHistory = [...agentHistoryLines(json<AgentHistorySummary | null>(AGENT_HISTORY_SUMMARY, null)),
+      ...atComputerLines(json<ActivityHour[]>(ACTIVITY_HOURLY, []), process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago")];
     const context = { version: "crossline.portrait.v1", lines, profile: json<Record<string, unknown>>("profile.model", {}), facts, replies, documents, doing,
       ...(workHistory.length ? { workHistory } : {}) };
     const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, ...languageOf(),
-      developerInstructions: "Write the portrait report as the Skill describes, from the supplied material only. Return raw JSON only.",
+      developerInstructions: "Write the person's portrait report as the Skill describes, from the supplied material only: the report they get "
+        + "right after the interview, a shareable first half and a private second half. Every sentence specific to this person, in their own concrete "
+        + "terms; long-term goals are the ones they chose, never an achievement dressed as one. Use a document only where it is about the person; "
+        + "plain statements, no 「并非……而是」 contrasts, an abstract phrase at most once, advice as a step they may take, never a rule. Return raw JSON only.", // i18n-ignore: model-facing
       outputSchema: PORTRAIT_SCHEMA, prepareInput: () => context, validateOutput: (output) => checked(output, lineIds),
       softAccept: (rejection, output) => keepIncomplete(rejection, () => checked(output, lineIds, { lenient: true })),
       onAudit: () => {}, timeoutMs: 60 * 60_000 });

@@ -43,7 +43,7 @@ orphans("evidence 指向不存在的作业",
   `SELECT c.id AS id, c.work_order_id AS target FROM evidence_claims c
    WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = c.work_order_id AND w.workspace_id = c.workspace_id)`);
 orphans("等待项指向不存在的作业",
-  `SELECT COUNT(*) AS n FROM waiting_items i, json_each(i.blocks_json) b
+  `SELECT i.id AS id, b.value AS target FROM waiting_items i, json_each(i.blocks_json) b
    WHERE NOT EXISTS (SELECT 1 FROM work_orders w WHERE w.id = b.value AND w.workspace_id = i.workspace_id)`);
 orphans("material 指向不存在的作业",
   `SELECT m.id AS id, m.work_order_id AS target FROM materials m
@@ -81,8 +81,63 @@ for (const table of retired.filter((name) => present.includes(name))) {
   findings.push(`schema 陈旧：${table} 本应在迁移 4 删除`);
 }
 
+// Numbered evidence (migration 16): a fact pointing at a sentence that is not there, or a sentence whose reply or file is gone. Removing
+// a file deletes its sentences and unhooks the facts, so either is a half-applied change, not normal use.
+if (Number(db.pragma("user_version", { simple: true })) >= 16) {
+  for (const [table, column] of [["profile_facts", "source_sentences"], ["source_documents", "ref_no"]] as const)
+    if (!columns(table).includes(column)) findings.push(`schema 不完整：${table} 缺少 ${column}（半迁移）`);
+  if (!present.includes("evidence_sentences")) findings.push("schema 不完整：缺少 evidence_sentences（半迁移）");
+  else {
+    const dangling = (db.prepare(`SELECT f.slot AS slot, s.value AS id FROM profile_facts f, json_each(f.source_sentences) s
+      WHERE NOT EXISTS (SELECT 1 FROM evidence_sentences e WHERE e.workspace_id = f.workspace_id AND e.id = s.value)`).all() as Array<{ slot: string; id: number }>);
+    for (const row of dangling) findings.push(`事实指向不存在的句子：${row.slot} → [${row.id}]`);
+    orphans("句子的文件已不存在",
+      `SELECT DISTINCT e.source_id AS id, e.source_id AS target FROM evidence_sentences e WHERE e.source_kind = 'document' AND e.retired = 0
+       AND NOT EXISTS (SELECT 1 FROM source_documents d WHERE d.workspace_id = e.workspace_id AND d.id = e.source_id)`);
+    orphans("句子的回复已不存在",
+      `SELECT DISTINCT e.source_id AS id, e.source_id AS target FROM evidence_sentences e WHERE e.source_kind = 'reply'
+       AND NOT EXISTS (SELECT 1 FROM onboarding_messages m WHERE m.workspace_id = e.workspace_id
+         AND m.session_id || '#' || m.seq = e.source_id AND m.role = 'user')`);
+    const numbers = db.prepare(`SELECT workspace_id AS ws, ref_no AS n, COUNT(*) AS c FROM source_documents WHERE ref_no IS NOT NULL
+      GROUP BY workspace_id, ref_no HAVING COUNT(*) > 1`).all() as Array<{ ws: string; n: number }>;
+    for (const row of numbers) findings.push(`文件编号重复：src-${row.n}（${row.ws}）`);
+    const unnumbered = (db.prepare("SELECT COUNT(*) AS c FROM source_documents WHERE ref_no IS NULL").get() as { c: number }).c;
+    if (unnumbered) findings.push(`${unnumbered} 个文件没有固定编号（迁移 16 未回填）`);
+  }
+}
+
+// The passage index (migration 19, docs/context-selection.md): derived from the documents and kept by the store and by triggers, so a
+// passage of a file that is gone, a readable file with no passages, or an index that does not hold every passage is a half-applied change.
+if (Number(db.pragma("user_version", { simple: true })) >= 19) {
+  if (!present.includes("doc_chunks") || !present.includes("doc_chunks_fts")) findings.push("schema 不完整：缺少 doc_chunks 或其全文索引（半迁移）");
+  else {
+    orphans("段落的文件已不存在",
+      `SELECT DISTINCT c.document_id AS id, c.document_id AS target FROM doc_chunks c
+       WHERE NOT EXISTS (SELECT 1 FROM source_documents d WHERE d.workspace_id = c.workspace_id AND d.id = c.document_id)`);
+    const unindexed = (db.prepare(`SELECT COUNT(*) AS c FROM source_documents d WHERE d.extraction_status = 'done' AND trim(d.extracted_text) <> ''
+      AND NOT EXISTS (SELECT 1 FROM doc_chunks c WHERE c.workspace_id = d.workspace_id AND c.document_id = d.id)`).get() as { c: number }).c;
+    if (unindexed) findings.push(`${unindexed} 个已读文件没有段落（全文索引未建）`);
+    const chunks = (db.prepare("SELECT COUNT(*) AS c FROM doc_chunks").get() as { c: number }).c;
+    const indexed = (db.prepare("SELECT COUNT(*) AS c FROM doc_chunks_fts_docsize").get() as { c: number }).c;
+    if (chunks !== indexed) findings.push(`全文索引与段落不一致：段落 ${chunks}，索引 ${indexed}`);
+  }
+}
+
+// Lessons and use counts (migration 20, docs/token-economy.md §2): the table and the counting columns, and no lesson longer than a context
+// line may be (the store cuts at 300, so a longer one was written around it).
+if (Number(db.pragma("user_version", { simple: true })) >= 20) {
+  if (!present.includes("run_lessons")) findings.push("schema 不完整：缺少 run_lessons（半迁移）");
+  for (const [table, column] of [["profile_facts", "use_count"], ["profile_facts", "last_used_at"], ["preference_entries", "use_count"],
+    ["preference_entries", "last_used_at"], ["preference_entries", "invalidated_at"], ["preference_entries", "confirmed_at"]] as const)
+    if (!columns(table).includes(column)) findings.push(`schema 不完整：${table} 缺少 ${column}（半迁移）`);
+  if (present.includes("run_lessons")) {
+    const long = (db.prepare("SELECT COUNT(*) AS c FROM run_lessons WHERE length(text) > 300").get() as { c: number }).c;
+    if (long) findings.push(`${long} 条经验教训超过 300 字`);
+  }
+}
+
 const version = Number(db.pragma("user_version", { simple: true }));
-const wal = (() => { try { return statSync(`${file}-wal`).size; } catch { return 0; } })();
+const wal =(() => { try { return statSync(`${file}-wal`).size; } catch { return 0; } })();
 const counts = Object.fromEntries(["events", "work_orders", "captures", "milestones", "materials"]
   .map((table) => [table, (db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c]));
 db.close();

@@ -23,7 +23,13 @@ import { tFor, type Locale } from "./i18n";
 export type MergeTask = {
   id: string; identityId: string; projectId: string; milestoneId: string; title: string; intent: string; state: string;
   dueDate: string; milestoneDeadline: string; progress: number; hasStepPlan: boolean; started: boolean; dependsOn: string[];
+  /**
+   * Who does it (docs/work-split.md): the person's work is never merged with the assistant's or with a question to the person, however
+   * alike the titles — the assistant's 「汇集期中规则」 prepares the person's 「规划期中复习」, it is not the same task. Absent: the person's.
+   */
+  owner?: "person" | "assistant" | "ask";
 };
+const sideOf = (task: MergeTask) => task.owner ?? "person";
 /** `requests`: for an info-request merge, what each absorbed task asks (it becomes a drafted email and a send in the kept task). */
 export type MergeGroup = { kind: "duplicate" | "info_request"; keep: string; absorb: string[]; reason: string; requests: Record<string, InfoRequest> };
 export type MergePair = { a: string; b: string; why: string };
@@ -44,7 +50,7 @@ const STATE_RANK: Record<string, number> = { active: 4, ready_for_human: 3, prep
 const COURSE = /[A-Z]{2,5}\s?\d{3}/gi;
 /* i18n-ignore-start: words compared with titles the person or a model wrote, never shown */
 const SYNONYMS: Array<[RegExp, string]> = [
-  [/汇集|汇总|收集|整合|搜集|归集/g, "整理"], [/核实|取得|获取|明确|查明|弄清/g, "确认"], [/资料|素材/g, "材料"], [/目录|列表/g, "清单"],
+  [/汇集|汇总|收集|整合|搜集|归集/g, "整理"], [/核实|核对|取得|获取|明确|查明|弄清/g, "确认"], [/资料|素材/g, "材料"], [/目录|列表|名单/g, "清单"],
   [/考查|考核/g, "考试"], [/建立|编制|制作/g, "建立"],
   // The same in English, matched once spaces are gone (the text is lowercased first).
   [/gather|compile|collect|assemble|aggregate|consolidate|organi[sz]e|sortout/g, "organize"], [/verify|obtain|clarify|findout|lookup/g, "confirm"],
@@ -78,6 +84,7 @@ const days = (a: string, b: string) => Math.abs(Date.parse(`${a}T12:00:00Z`) - D
 export function comparePair(a: MergeTask, b: MergeTask, locale?: Locale): { verdict: "same" | "unsure" | "different"; why: string; score: number } {
   const t = tFor(locale);
   if (a.identityId !== b.identityId || a.projectId !== b.projectId) return { verdict: "different", why: t("不同主线或项目"), score: 0 };
+  if (sideOf(a) !== sideOf(b)) return { verdict: "different", why: t("一个是本人的工作，一个是助手的准备或问题"), score: 0 };
   if (numbersOf(a.title) !== numbersOf(b.title)) return { verdict: "different", why: t("标题中的编号不同"), score: 0 };
   if (a.dueDate && b.dueDate && days(a.dueDate, b.dueDate) > DUE_APART_DAYS) return { verdict: "different", why: t("截止日相差一周以上"), score: 0 };
   const score = textSimilarity(normalizeTaskTitle(a.title), normalizeTaskTitle(b.title));
@@ -114,7 +121,7 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
   const servers = live.filter((task) => !requestIds.has(task.id));
   const leftover: typeof requests = [];
   for (const { task, traits } of requests) {
-    const sameProject = servers.filter((other) => other.identityId === task.identityId && other.projectId === task.projectId);
+    const sameProject = servers.filter((other) => other.identityId === task.identityId && other.projectId === task.projectId && sideOf(other) === sideOf(task));
     const served = sameProject.find((other) => other.dependsOn.includes(task.id))
       ?? (task.milestoneId ? keeperOrNone(sameProject.filter((other) => other.milestoneId === task.milestoneId)) : undefined)
       ?? (!task.milestoneId ? keeperOrNone(sameProject) : undefined);
@@ -129,7 +136,10 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
   }
   // Requests with nothing to serve in one milestone: one email asks them all.
   const byMilestone = new Map<string, typeof requests>();
-  for (const item of leftover) if (item.task.milestoneId) byMilestone.set(`${item.task.projectId}|${item.task.milestoneId}`, [...(byMilestone.get(`${item.task.projectId}|${item.task.milestoneId}`) ?? []), item]);
+  for (const item of leftover) if (item.task.milestoneId) {
+    const key = `${sideOf(item.task)}|${item.task.projectId}|${item.task.milestoneId}`;
+    byMilestone.set(key, [...(byMilestone.get(key) ?? []), item]);
+  }
   for (const items of byMilestone.values()) {
     if (items.length < 2) continue;
     const keep = keeperOf(items.map((item) => item.task));
@@ -172,6 +182,42 @@ export function planMerges(tasks: MergeTask[], sameByModel: ReadonlySet<string> 
 function keeperOrNone(tasks: MergeTask[]): MergeTask | undefined { return tasks.length ? keeperOf(tasks) : undefined; }
 
 /**
+ * Tasks that read the same but serve different milestones (2026-10-22, the owner: two 「汇集 ECE 548 复习材料」, one per exam, are two
+ * pieces of work and stay two — their names must say which exam). For every set of open tasks on one line and project whose titles are
+ * the same once normalized and that serve milestones the merge keeps apart, each title gets its milestone's scope (`milestoneScope`)
+ * unless it already names it. Returns only the titles that change.
+ */
+export function scopeRenames(tasks: readonly MergeTask[], milestoneTitles: ReadonlyMap<string, string>, locale?: Locale): Array<{ id: string; title: string; scope: string }> {
+  const groups = new Map<string, MergeTask[]>();
+  for (const task of tasks) if (KEEPABLE.has(task.state) && task.milestoneId) {
+    const key = `${task.identityId}|${task.projectId}|${normalizeTaskTitle(task.title)}`;
+    groups.set(key, [...(groups.get(key) ?? []), task]);
+  }
+  const out: Array<{ id: string; title: string; scope: string }> = [];
+  for (const members of groups.values()) {
+    if (new Set(members.map((task) => task.milestoneId)).size < 2) continue;
+    for (const task of members) {
+      const scope = milestoneScope(milestoneTitles.get(task.milestoneId) ?? "", task.milestoneDeadline, locale);
+      if (!scope || squash(task.title).includes(squash(scope))) continue;
+      out.push({ id: task.id, title: locale === "en" ? `${task.title} (${scope})` : `${task.title}（${scope}）`, scope });
+    }
+  }
+  return out;
+}
+const squash = (text: string) => text.replace(/[\s\p{P}\p{S}]+/gu, "").toLowerCase();
+/**
+ * The short name of what a milestone is: its title without the course code and without the target that follows (「ECE 548 期中考试 1 达到
+ * A− 支撑线」 → 「期中考试 1」); its deadline (「10/27 截止」) when nothing short is left.
+ */
+export function milestoneScope(title: string, deadline = "", locale?: Locale): string {
+  // i18n-ignore: words read against a milestone title
+  const head = title.replace(COURSE, "").split(/达到|达成|拿到|取得|完成|提交|通过|支撑|[，,:：;；(（≥]|\b(?:reach|achieve|get|complete|submit|pass)\b/i)[0]!.trim();
+  if (head && head.length <= 12) return head;
+  const day = /^\d{4}-(\d{2})-(\d{2})/.exec(deadline);
+  return day ? tFor(locale)("{{month}}/{{day}} 截止", { month: Number(day[1]), day: Number(day[2]) }) : "";
+}
+
+/**
  * Checked before a new task is kept (the owner's direction of 2026-10-15: planning should not write a task the board already has; the
  * daily merge is only the backstop). The open task `candidate` is the same work as, by the same rules the daily merge uses — the closest
  * one when several match. A pair the rules leave unsure is not stopped here: it is created and left to the daily merge and its reviewer.
@@ -197,4 +243,19 @@ export function validateTaskMergeReview(value: unknown, ids: readonly string[]):
   if (!answer || !Array.isArray(answer.pairs)) throw new Error("TASK_MERGE_REVIEW_INVALID");
   return { pairs: answer.pairs.filter((pair) => pair && ids.includes(pair.id) && typeof pair.same === "boolean")
     .map((pair) => ({ id: pair.id, same: pair.same, why: String(pair.why ?? "").trim().slice(0, 200) })) };
+}
+
+/**
+ * A new item that is the same work as a task already finished (walkthrough W-30, 2026-10-17: the backplanner wrote 「整理5家试用门店
+ * 清单」 a few minutes after the person had finished 「核对5家试用门店的名单与联系人」). Same rules as an open duplicate; `done` are accepted
+ * tasks, which the open-task check never looked at. The closest one when several match.
+ */
+export function doneDuplicateOf(candidate: MergeTask, done: readonly MergeTask[]): { keep: MergeTask; why: string } | undefined {
+  let best: { keep: MergeTask; why: string; score: number } | undefined;
+  for (const other of done) {
+    if (other.id === candidate.id || other.state !== "accepted") continue;
+    const pair = comparePair(candidate, other);
+    if (pair.verdict === "same" && (!best || pair.score > best.score)) best = { keep: other, why: pair.why, score: pair.score };
+  }
+  return best && { keep: best.keep, why: best.why };
 }

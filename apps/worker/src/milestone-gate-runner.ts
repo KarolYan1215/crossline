@@ -14,22 +14,13 @@ export const MILESTONE_GATE_SKILL = "crossline:crossline-milestone-gate";
 // Enough of an artifact to judge, bounded so one large file cannot crowd out the rest of the evidence.
 const ARTIFACT_TEXT_LIMIT = 40_000;
 
-const INSTRUCTIONS = "Judge the submitted evidence. Return only the requested JSON. Every quote must be "
-  + "copied verbatim from the supplied evidence text — never paraphrased, never invented. `verdict` "
-  + "answers one question only: did this work order deliver what its evidenceContract promised? The evidenceContract is the "
-  + "acceptance standard fixed when the person approved the task: judge by it alone and never add a requirement of your own. `pass` "
-  + "is allowed exactly when every supplied evidenceContract requirement with required=true appears in "
-  + "contractCoverage with a non-null satisfiedBy, nothing incomplete blocks passing, and there are no "
-  + "blockers; requirements with required=false are still reported but never hold back pass. Copy "
-  + "each requirement string back verbatim; a paraphrased or omitted requirement counts as uncovered. "
-  + "Separately, judge every milestone criterion exactly once and report it honestly; a milestone spans "
-  + "many work orders, so an unmet criterion is normal and is not a reason to withhold pass, and a "
-  + "criterion must never be marked met to justify a verdict. Quote verbatim only for met or partial; "
-  + "for unmet or unverifiable leave evidenceQuote empty and explain in observed and shortfall. Do not "
-  + "modify criteria, do not perform missing work, and do not accept external effects. When mineSkill is given, it is the "
-  + "person's own way of doing this line's work: judge fit against each of its rules and red lines, name every broken rule in "
-  + "fit.violated, and when the contract is covered but a rule is broken the verdict is partial, never pass. Without mineSkill, "
-  + "fit.fits is true and violated is empty.";
+/** The scenario in short; the Skill holds the rules, the verdict table and the example. */
+const INSTRUCTIONS = "Judge the evidence handed in for this task, as the crossline-milestone-gate Skill describes, and return only the requested JSON. "
+  + "`pass` accepts the task at once; any other verdict goes back to the person with your reasons, so observed, shortfall, reasoning and fit.why "
+  + "say concretely what is there and what is missing. The verdict answers only whether the task delivered its evidenceContract (the standard the "
+  + "person approved; add nothing to it) in the way the person's line skill (mineSkill) requires: copy every requirement back verbatim, and a covered "
+  + "contract that breaks a rule of mineSkill is partial (with mineSkill null, fit.fits is true). Judge every milestone criterion once and honestly; an unmet one is normal and never blocks "
+  + "pass. Every quote is copied verbatim from evidenceClaims; unmet and unverifiable criteria carry an empty quote. Never perform missing work.";
 
 type GateOutcome =
   | { state: "accepted" | "held"; workOrderId: string; verdict: MilestoneGateResult["verdict"] }

@@ -3,8 +3,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { AGENT_CATEGORIES, AGENT_CATEGORY_EXPLAINED, isSecretPath, type AccessContext, type AgentCategory } from "@crossline/core";
 import {
-  CLEAN_RUNS_TO_TRUST, declinedCategories, isPaused, listAgentTasks, pendingAgentApprovals, pendingCategoryRequests, readCategories,
-  type AgentApprovalRow, type AgentTaskRow
+  CLEAN_RUNS_TO_TRUST, declinedCategories, isPaused, listAgentTasks, pendingAgentApprovals, pendingAgentQuestions, pendingCategoryRequests, readCategories, resultsAwaitingReview,
+  type AgentApprovalRow, type AgentQuestionRow, type AgentTaskRow
 } from "@crossline/db";
 import { getStore } from "./crossline";
 import { namesFrom, type Names } from "../app/materials/humanize";
@@ -22,7 +22,11 @@ export type AssistantView = {
   categories: CategoryView[];
   categoryRequests: Array<{ category: AgentCategory; label: string; explained: string; why: string; workOrderId: string; workOrderTitle: string }>;
   approvals: AgentApprovalRow[];
+  /** Questions a run asked mid-way (Codex's `request_user_input`), waiting for the person's answer. */
+  questions: AgentQuestionRow[];
   tasks: Array<AgentTaskRow & { workOrderTitle: string }>;
+  /** The results still the person's to look at (`resultsAwaitingReview`): not one for finished or archived work, not one a later run replaced. */
+  reviews: Array<AgentTaskRow & { workOrderTitle: string }>;
 };
 
 export function loadAssistant(ctx: AccessContext): AssistantView {
@@ -30,6 +34,8 @@ export function loadAssistant(ctx: AccessContext): AssistantView {
   const approved = readCategories(store, ctx.workspaceId);
   const declined = new Set(declinedCategories(store, ctx.workspaceId));
   const titles = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.intent]));
+  const tasks = listAgentTasks(store, ctx.workspaceId).map((task) => ({ ...task, workOrderTitle: titles.get(task.workOrderId) ?? "" }));
+  const reviewable = new Set(resultsAwaitingReview(store, ctx.workspaceId, tasks).map((task) => task.taskId));
   return {
     paused: isPaused(store, ctx.workspaceId),
     categories: (Object.keys(AGENT_CATEGORIES) as AgentCategory[]).map((category) => ({
@@ -41,7 +47,9 @@ export function loadAssistant(ctx: AccessContext): AssistantView {
       ...request, label: AGENT_CATEGORIES[request.category], explained: AGENT_CATEGORY_EXPLAINED[request.category], workOrderTitle: titles.get(request.workOrderId) ?? ""
     })),
     approvals: pendingAgentApprovals(store, ctx.workspaceId),
-    tasks: listAgentTasks(store, ctx.workspaceId).map((task) => ({ ...task, workOrderTitle: titles.get(task.workOrderId) ?? "" }))
+    questions: pendingAgentQuestions(store, ctx.workspaceId),
+    tasks,
+    reviews: tasks.filter((task) => reviewable.has(task.taskId))
   };
 }
 
@@ -50,8 +58,8 @@ export function countAssistantPending(ctx: AccessContext): { categories: number;
   const store = getStore();
   return {
     categories: pendingCategoryRequests(store, ctx.workspaceId).length,
-    approvals: pendingAgentApprovals(store, ctx.workspaceId).length,
-    reviews: listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review").length
+    approvals: pendingAgentApprovals(store, ctx.workspaceId).length + pendingAgentQuestions(store, ctx.workspaceId).length,
+    reviews: resultsAwaitingReview(store, ctx.workspaceId).length
   };
 }
 
@@ -101,14 +109,14 @@ const MIME: Record<string, string> = {
 const FILE_LIMIT = 8 * 1024 * 1024;
 
 /** One file from a task's directory, for the review page to open. Never a path that leaves the directory, a secret, or something huge. */
-export function readTaskFile(ctx: AccessContext, taskId: string, relative: string): { body: Buffer; type: string } | undefined {
+export function readTaskFile(ctx: AccessContext, taskId: string, relative: string, limit = FILE_LIMIT): { body: Buffer; type: string } | undefined {
   const directory = taskDirectory(ctx, taskId);
   if (!directory || !relative || path.isAbsolute(relative)) return undefined;
   const full = path.resolve(directory, relative);
   if (!full.toLowerCase().startsWith(`${path.resolve(directory).toLowerCase()}${path.sep}`) || isSecretPath(full)) return undefined;
   try {
     const stat = statSync(full);
-    if (!stat.isFile() || stat.size > FILE_LIMIT) return undefined;
+    if (!stat.isFile() || stat.size > limit) return undefined;
     // An SVG is shown as text, not run: it can carry script, and this is an origin the person is signed in on.
     const type = MIME[path.extname(full).toLowerCase()];
     return { body: readFileSync(full), type: type === "image/svg+xml" ? "text/plain; charset=utf-8" : type ?? "application/octet-stream" };

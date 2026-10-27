@@ -88,3 +88,79 @@ test("routes cannot be guessed or aimed elsewhere: an unknown route, a workspace
   expect(gw.urlFor("ws-a", "p")).not.toBe(gw.urlFor("ws-b", "p"));
   expect(provider.seen).toHaveLength(0);
 });
+
+const ok = (response: import("node:http").ServerResponse) => {
+  response.writeHead(200, { "content-type": "text/event-stream" });
+  response.end(sse([{ choices: [{ delta: { content: "{}" }, finish_reason: "stop" }] }]));
+};
+const busy = (response: import("node:http").ServerResponse, status = 429) => {
+  response.writeHead(status, { "content-type": "application/json" });
+  response.end(JSON.stringify({ error: { message: "System is too busy now, 满载" } }));
+};
+const post = (url: string, skill: string, model = "m-main") => fetch(`${url}/responses`, { method: "POST",
+  headers: { "content-type": "application/json", ...(skill ? { "x-crossline-skill": skill } : {}) }, body: JSON.stringify({ model, input: [] }) });
+
+test("a background request refused for load waits and tries the same model again; nobody sees the refusal", async () => {
+  let refusals = 2;
+  const provider = await upstream((_seen, response) => { if (refusals-- > 0) busy(response); else ok(response); });
+  const events: Array<Record<string, unknown>> = [];
+  const started = await startModelGateway({ resolve: () => ({ kind: "chat", baseUrl: provider.base, key: "k", fallback: () => ["m-other"] }),
+    backoffMs: [10, 10, 10], quickRetryMs: 10, log: (event) => events.push(event) });
+  closers.push(started.close);
+  const answer = await post(started.urlFor("ws", "sponsor"), "crossline:crossline-step-planner");
+  expect(await answer.text()).toContain("response.completed");
+  // Three requests, all to the same model: background work is not moved to another (dearer) model.
+  expect(provider.seen.map((seen) => seen.body.model)).toEqual(["m-main", "m-main", "m-main"]);
+  expect(events.map((event) => event.action)).toEqual(["retry", "retry"]);
+});
+
+test("a person's request refused for load is tried once more, then on the next model that passed this Skill's checks", async () => {
+  const provider = await upstream((seen, response) => { if (seen.body.model === "m-main") busy(response, 503); else ok(response); });
+  const events: Array<Record<string, unknown>> = [];
+  const asked: string[] = [];
+  const started = await startModelGateway({ resolve: () => ({ kind: "chat", baseUrl: provider.base, key: "k",
+    fallback: (skill, model) => { asked.push(`${skill}|${model}`); return ["m-main", "m-backup"]; } }),
+    backoffMs: [10], quickRetryMs: 10, log: (event) => events.push(event) });
+  closers.push(started.close);
+  const answer = await post(started.urlFor("ws", "sponsor"), "crossline:crossline-onboarding");
+  expect(await answer.text()).toContain("response.completed");
+  expect(provider.seen.map((seen) => seen.body.model)).toEqual(["m-main", "m-main", "m-backup"]);
+  expect(asked).toEqual(["crossline:crossline-onboarding|m-main"]);
+  expect(events.map((event) => event.action)).toEqual(["retry", "fallback"]);
+  // With no other model to go to, the refusal reaches Codex as a rate limit it retries itself.
+  const none = await startModelGateway({ resolve: () => ({ kind: "chat", baseUrl: provider.base, key: "k" }), backoffMs: [10], quickRetryMs: 10, log: () => {} });
+  closers.push(none.close);
+  expect(await (await post(none.urlFor("ws", "sponsor"), "crossline:crossline-concierge")).text()).toMatch(/response.failed/);
+});
+
+test("a route being measured waits out a refusal like background work, even for a person's Skill, and never changes model", async () => {
+  let refusals = 2;
+  const provider = await upstream((_seen, response) => { if (refusals-- > 0) busy(response); else ok(response); });
+  const events: Array<Record<string, unknown>> = [];
+  const started = await startModelGateway({ resolve: () => ({ kind: "chat", baseUrl: provider.base, key: "k", patient: true }),
+    backoffMs: [10, 10, 10], quickRetryMs: 10, log: (event) => events.push(event) });
+  closers.push(started.close);
+  const answer = await post(started.urlFor("sponsor-eval:m-main", "sponsor"), "crossline:crossline-onboarding");
+  expect(await answer.text()).toContain("response.completed");
+  expect(provider.seen.map((seen) => seen.body.model)).toEqual(["m-main", "m-main", "m-main"]);
+  expect(events.map((event) => [event.interactive, event.action])).toEqual([[false, "retry"], [false, "retry"]]);
+});
+
+test("the limit on requests in flight to one model halves on a refusal and grows back with successes", async () => {
+  let inFlight = 0, most = 0, refuse = true;
+  const provider = await upstream((_seen, response) => {
+    inFlight += 1; most = Math.max(most, inFlight);
+    if (refuse) { refuse = false; inFlight -= 1; busy(response); return; }
+    setTimeout(() => { inFlight -= 1; ok(response); }, 30);
+  });
+  const started = await startModelGateway({ resolve: () => ({ kind: "chat", baseUrl: provider.base, key: "k" }), initialConcurrency: 4,
+    backoffMs: [10, 10], quickRetryMs: 10, log: () => {} });
+  closers.push(started.close);
+  const url = started.urlFor("ws", "sponsor");
+  // The first refusal halves 4 to 2: at most two of the six requests reach the model at once afterwards.
+  await post(url, "crossline:crossline-task-titler").then((answer) => answer.text());
+  most = 0;
+  await Promise.all(Array.from({ length: 6 }, () => post(url, "crossline:crossline-task-titler").then((answer) => answer.text())));
+  expect(most).toBeLessThanOrEqual(3);
+  expect(most).toBeGreaterThanOrEqual(2);
+});

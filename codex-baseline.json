@@ -1,48 +1,69 @@
 {
   "repository": "https://github.com/KarolYan1215/codex.git",
   "upstream": "https://github.com/openai/codex.git",
-  "tag": "rust-v0.155.0",
-  "commit": "f0a1b8f0849d90960bc406b848f32e5a129b0457",
+  "tag": "rust-v0.163.0",
+  "commit": "83086188ae0614bd882818ff1aa23f3194962012",
   "integration": "app-server-stdio",
+  "previous": {
+    "tag": "rust-v0.155.0",
+    "commit": "f0a1b8f0849d90960bc406b848f32e5a129b0457",
+    "note": "Upgraded 2026-10-20 (docs/codex-upgrade-0.163.md). The Windows debug and release hashes below are still the 0.155.0 builds until each is rebuilt from this source; the hosted server's 0.155.0 Linux binary stays accepted (CODEX_PREVIOUS_BINARY_SHA256) until it is replaced."
+  },
   "patches": [
     {
       "path": "patches/codex-windows-migrations.patch",
-      "sha256": "ed1f1df3da82293fcb4495287090edda9c43e5629d1050f413c8c6eb2f72651c",
-      "purpose": "Safely repair verified CRLF migration checksums used by existing Windows Codex homes."
+      "sha256": "625f469d4ff1fc71b0a564c3ca339cb2f89ada19364d1684c3e1733a426cf588",
+      "purpose": "Safely repair verified CRLF migration checksums used by existing Windows Codex homes. Regenerated against rust-v0.163.0, which still lacks an equivalent repair; the change itself is the same."
     }
   ],
   "build": {
     "command": "cargo build --locked -p codex-cli --bin codex",
-    "lockfileSha256": "cc4f57de668d3ebfe59b05ae538161c042f031684b3ac71401b09cc04a1bd30a",
-    "lockfileNote": "The release tag recorded 152 workspace packages as 0.0.0; Cargo synchronized only those entries to 0.155.0 before the locked rebuild.",
+    "lockfileSha256": "cae541406f7ec43a418e126be2bcd5de00b243e7bbf6382570028727d99c1069",
+    "lockfileNote": "The release tag recorded 160 workspace packages as 0.0.0; Cargo synchronized only those entries to 0.163.0 before the locked rebuild (git diff shows 160 version lines changed and nothing else).",
     "binary": "vendor/codex/codex-rs/target/debug/codex.exe",
-    "binarySha256": "4bcc1d8452c75cd132e010f41ccfaf6afb8699317f9a90d88df0b20be2335497",
-    "binaryNote": "The fork source moved from an untracked local clone at .vendor/codex-fork to a squashed Git subtree tracked in-repo at vendor/codex, same pinned commit and patch. This hash is from the build at the repo root (C:\\Users\\karol\\Documents\\ChatGPT\\Multi-ID\\vendor\\codex), where the worker actually resolves the binary from. Rust debug builds embed the absolute source path, so an identical source tree built under a different checkout path (e.g. a throwaway git-worktree import location) produces a different binary hash; lockfileSha256 above is unchanged and reproduced byte-for-byte from both locations, which is the actual provenance proof."
+    "binarySha256": "e6300d7fd03c53a11a746e49f12706c313a04eaedb4541f1857799d9551617ac",
+    "binaryNote": "rust-v0.163.0 built at the repo root on 2026-10-20 (the worker resolves the binary from here). Rust debug builds embed the absolute source path, so the worktree build below has another hash; lockfileSha256 is the provenance proof.",
+    "worktreeBuild": {
+      "builtOn": "2026-10-20, in the worktree agent-abcaf4eff22c451b2 (21 min 34 s, rustc 1.95.0 from rust-toolchain.toml)",
+      "binarySha256": "09e01f2540a33bc5cc46142305c1d152d2d2e198372dcb79bb5138fc751d8693",
+      "version": "codex-cli 0.163.0",
+      "lockedRebuild": "cargo build --locked reproduced the same binary in 9 s",
+      "patchTest": "cargo test --locked -p codex-state runtime_migrator_accepts_existing_windows_checksums --lib: 1 passed",
+      "protocolProbe": "thread/start (read-only, untrusted, dynamic tool), thread/unsubscribe, thread/resume with the same settings after a turn (approvalPolicy untrusted, sandbox readOnly, no instruction sources), thread/resume of an unknown thread answering 'no rollout found for thread id …', thread/compact/start accepted"
+    }
   },
   "release": {
-    "purpose": "The binaries the Windows installer ships (docs/local-installer.md).",
+    "purpose": "The binaries the Windows installers ship (docs/local-installer.md, and the 「Crossline 节点」 installer, docs/compute-node.md): the rust-v0.163.0 release build.",
     "v8": "rusty_v8 150.4.0 ptrcomp_sandbox release, fetched by scripts/fetch-rusty-v8.ts from openai/codex rusty-v8-v150.4.0 and checked against vendor/codex/third_party/v8/rusty_v8_150_4_0_release_manifests.sha256",
     "command": "cargo build --release --locked -p codex-cli --bin codex -p codex-code-mode-host --bin codex-code-mode-host (with RUSTY_V8_ARCHIVE and RUSTY_V8_SRC_BINDING_PATH set)",
     "binary": "vendor/codex/codex-rs/target/release/codex.exe",
-    "binarySha256": "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9",
-    "codeModeHostSha256": "a4a0b6d634a7e33dcdab777b90cde478eb19927f7220c0d87dab0490081f862c",
-    "builtOn": "2026-10-13, in the worktree serene-mestorf-e26547",
+    "binarySha256": "a28abf32699e994bbbbea94f5dd5e9b1615ba9bde1cf6922a275aa23cce9ec8a",
+    "codeModeHostSha256": "7b129f38801396f34193c10aa375378fbb6b4e207988056ad3e30a855ac6db80",
+    "builtOn": "2026-10-23 (rust-v0.163.0), in the main checkout, about 75 minutes (rustc per rust-toolchain.toml)",
+    "previous": { "binarySha256": "ce19ac66ee6204888bf6318f0ae1b02f83b35f512ca5144f1e8bf42b9f7b11b9", "codeModeHostSha256": "a4a0b6d634a7e33dcdab777b90cde478eb19927f7220c0d87dab0490081f862c", "builtOn": "2026-10-13 (rust-v0.155.0)" },
     "contractTest": "scripts/codex-smoke.ts passed 2026-10-13 with both binaries copied to an empty folder, PATH without cargo or codex, LOCALAPPDATA and CROSSLINE_STATE_DIR in a temporary folder",
     "webSearch": "live web_search on an ephemeral thread completed 2026-10-13 with two webSearch items"
   },
-  "runtimeVersion": "codex-cli 0.155.0",
-  "runtimeUserAgent": "crossline/0.155.0 (Windows 10.0.26200; x86_64) dumb (crossline; 0.1.0)",
+  "linuxRelease": {
+    "purpose": "The hosted server's runtime (deploy/app/Dockerfile mounts it at /opt/codex).",
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.163.0/codex-x86_64-unknown-linux-musl.tar.gz",
+    "assetSha256": "beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4",
+    "binarySha256": "399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215",
+    "checkedOn": "2026-10-20: downloaded, asset digest matched GitHub's, binary hashed after extraction"
+  },
+  "runtimeVersion": "codex-cli 0.163.0",
+  "runtimeUserAgent": "crossline/0.163.0 (Windows 10.0.26200; x86_64) dumb (crossline; 0.1.0)",
   "generatedProtocol": {
     "command": "codex app-server generate-ts --experimental --out <temporary-directory>",
-    "sha256": "cff5bf0f8f52d3d4fd2d00145462c5a3e21df86ec3b3b652668884831eb5c6a3",
-    "fileCount": 861,
-    "observedAgainstRuntime": "codex-cli 0.155.0"
+    "sha256": "0a029db4277456684f035f790bda8ea8651d4120fe3ab6c17436fadf1dfa7a05",
+    "sha256Method": "cd <out>; find . -type f | LC_ALL=C sort | xargs sha256sum | sha256sum",
+    "fileCount": 896,
+    "observedAgainstRuntime": "codex-cli 0.163.0 (worktree build)"
   },
   "contractTest": {
     "command": "pnpm exec tsx scripts/codex-smoke.ts",
-    "result": "passed",
-    "observedOn": "2026-09-22",
-    "observedRuntime": "crossline/0.155.0",
+    "result": "pending",
+    "note": "Runs against the repo root's binary, which is still 0.155.0; it requires crossline/0.163.0 now and passes once the root is rebuilt. Last passed 2026-09-22 against crossline/0.155.0.",
     "verified": [
       "pinned binary SHA-256",
       "plugin/install",

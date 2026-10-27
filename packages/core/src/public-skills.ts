@@ -126,14 +126,21 @@ export type SkillScoutContext = {
   wanted: Array<{ lineId: string; task: string }>;
   installed: Array<{ id: string; name: string; repo: string; path: string }>;
   categories: Array<{ id: PublicSkillCategory; label: string }>;
+  /**
+   * `setup`: the one search for lines just set up (2026-10-21, docs/token-economy.md §2.4, replacing the rounds 「until every need is
+   * covered」): `lines` holds only those lines, and there is no second round.
+   */
+  mode?: "routine" | "setup";
 };
 export type SkillCandidate = { name: string; repo: string; path: string; category: PublicSkillCategory; lines: string[]; why: string };
 export type SkillScoutAnswer = { candidates: SkillCandidate[]; blockers: Array<{ code: string; message: string }> };
 
 const str = (max: number) => ({ type: "string", minLength: 1, maxLength: max }) as const;
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
+/** One answer's candidates: a setup search for several lines at once may name up to eight a line; the worker keeps eight a line. */
+export const SKILL_SCOUT_CANDIDATES_MAX = 20;
 export const SKILL_SCOUT_SCHEMA = object({
-  candidates: { type: "array", maxItems: 8, items: object({
+  candidates: { type: "array", maxItems: SKILL_SCOUT_CANDIDATES_MAX, items: object({
     name: str(80), repo: str(200), path: { type: "string", maxLength: 200 },
     category: { type: "string", enum: [...PUBLIC_SKILL_CATEGORIES] },
     lines: { type: "array", maxItems: 8, items: str(80) }, why: str(400)
@@ -203,6 +210,43 @@ export function validatePublicSkillReview(value: unknown): PublicSkillReview {
 }
 
 /**
+ * Several candidates of one line in one review run (2026-10-21, docs/token-economy.md §2.4: the public-skill reviews were 12% of the
+ * ChatGPT quota, with a 24% cache share, one run per candidate). At most `PUBLIC_SKILL_BATCH_MAX` a run; a candidate whose files shown
+ * to the reviewer exceed `PUBLIC_SKILL_BATCH_CHARS` is reviewed alone, so a batch never cuts what any one review sees.
+ */
+export const PUBLIC_SKILL_BATCH_MAX = 5;
+export const PUBLIC_SKILL_BATCH_CHARS = 40_000;
+export type PublicSkillBatchReview = { reviews: Array<PublicSkillReview & { id: string }> };
+export const PUBLIC_SKILL_BATCH_REVIEW_SCHEMA = object({
+  reviews: { type: "array", minItems: 1, maxItems: PUBLIC_SKILL_BATCH_MAX, items: object({
+    id: str(20), verdict: { type: "string", enum: ["usable", "text_only", "reject"] },
+    reasons: { type: "array", minItems: 1, maxItems: 8, items: str(300) }
+  }) }
+});
+/** Every id in the batch answered exactly once, each like a single review. */
+// Repair messages to the reviewer Skill, not interface text.
+/* i18n-ignore-start */
+export function validatePublicSkillBatchReview(value: unknown, ids: readonly string[]): PublicSkillBatchReview {
+  const answer = value as PublicSkillBatchReview;
+  if (!answer || !Array.isArray(answer.reviews)) throw Object.assign(new Error("SKILL_REVIEW_SHAPE_INVALID"), { detail: "reviews 为每个 id 一条" });
+  const seen = answer.reviews.map((review) => review?.id);
+  const missing = ids.filter((id) => !seen.includes(id));
+  const unknown = seen.filter((id) => !ids.includes(id));
+  const repeated = seen.filter((id, index) => seen.indexOf(id) !== index);
+  if (missing.length || unknown.length || repeated.length) {
+    throw Object.assign(new Error("SKILL_REVIEW_IDS_INVALID"), { detail: [missing.length ? `缺少 ${missing.join("、")}` : "",
+      unknown.length ? `没有这些 id：${unknown.join("、")}` : "", repeated.length ? `重复：${repeated.join("、")}` : ""].filter(Boolean).join("；") });
+  }
+  for (const review of answer.reviews) {
+    try { validatePublicSkillReview(review); } catch (error) {
+      throw Object.assign(new Error("SKILL_REVIEW_SHAPE_INVALID"), { detail: `${review.id}：${(error as { detail?: string }).detail ?? ""}` });
+    }
+  }
+  return answer;
+}
+/* i18n-ignore-end */
+
+/**
  * What is installed, from both checks: the model's verdict, capped by the scan. A risky script means at most text (scripts/ removed); an
  * injection statement means the text itself is not given to a model, so the skill is refused.
  */
@@ -211,6 +255,22 @@ export function finalVerdict(scan: SkillScan, review: PublicSkillReview): Public
   if (scan.risk === "high") return "text_only";
   return review.verdict;
 }
+
+/**
+ * The person's leave to run a skill's scripts after reading what the scan found (2026-10-19, the owner's decision): a skill the checks
+ * capped to text keeps its scripts once the person allows them. The leave is tied to the files they saw — an update or a re-grown
+ * workflow brings new files and asks again — and never covers a skill refused outright (an injection, or the review's `reject`).
+ */
+export type ScriptsAllowance = { at: string; digest: string };
+export const scriptsDigest = (files: Array<{ path: string; sha256: string }>) =>
+  files.map((file) => `${file.path}:${file.sha256}`).sort().join("|");
+type ScriptsRecord = { review: { final: PublicSkillVerdict }; scan: SkillScan; files: Array<{ path: string; sha256: string }>; scriptsAllowed?: ScriptsAllowance };
+export const scriptCount = (record: Pick<ScriptsRecord, "files">) => record.files.filter((file) => isScriptFile(file.path)).length;
+/** Whether the leave can be given: a skill with scripts that the checks capped to text, not one they refused. */
+export const scriptsAllowable = (record: ScriptsRecord) => record.review.final === "text_only" && !record.scan.injection && scriptCount(record) > 0;
+/** Whether a skill's scripts are installed with it: reviewed usable, or allowed by the person for exactly these files. */
+export const scriptsRunnable = (record: ScriptsRecord) => record.review.final === "usable"
+  || scriptsAllowable(record) && record.scriptsAllowed?.digest === scriptsDigest(record.files);
 
 // ── The library record ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -224,6 +284,7 @@ export type PublicSkillRecord = {
   review: PublicSkillReview & { final: PublicSkillVerdict };
   installedAt: string; updatedAt: string; lastUsedAt: string;
   why: string;
+  scriptsAllowed?: ScriptsAllowance;
 };
 
 export function readSkillLibrary(raw: string | undefined): PublicSkillRecord[] {

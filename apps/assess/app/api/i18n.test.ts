@@ -64,10 +64,13 @@ test("each reader sees a result in their own language, and the poster addresses 
   const mine = await submitAs({}, { sendEmail: false });
   const chinese = await view(mine.resultToken);
   const english = await view(mine.resultToken, EN);
-  expect(chinese.type.name).toBe("改装师");
-  expect(english.type.name).toBe("Modder");
+  expect(chinese.type.name).toBe("时间管理大师");
+  expect(english.type.name).toBe("Time Management Guru");
   expect(english.type.code).toBe(chinese.type.code);
-  expect(english.type.axes.map((axis) => axis.leftLabel)).toEqual(["Specialist", "Evidence", "Making", "Planning"]);
+  expect(english.type.axes.map((axis) => axis.leftLabel)).toEqual(["Relay", "Output", "Blueprint", "Anchor"]);
+  expect(english.type.kindred.name).toBe("Richard Branson");
+  expect(english.type.kindred.quote.translation).toBeUndefined();
+  expect(english.type.aiKeeps).toBe("My calendar (if AI fills it in, I'll rearrange it)");
   expect(english.type.best.relation).toMatch(/^[A-Za-z]/);
   expect(chinese.posterUrl).not.toContain("l=");
   expect(english.posterUrl).toMatch(/&l=en$/);
@@ -78,7 +81,7 @@ test("the result mail is in the language of the page the test was finished on; t
   const inviter = await submitAs(EN, { email: "a@example.com" });
   await flushMail();
   const resultMail = mocks.sendMail.mock.calls.at(-1)![0];
-  expect(resultMail.subject).toMatch(/^Your test result: Modder GEMA$/);
+  expect(resultMail.subject).toMatch(/^Your test result: Time Management Guru ROHG$/);
   expect(resultMail.html).toContain('<html lang="en">');
   expect(resultMail.text).toContain("Delete it now:");
   expect(getResultByToken(inviter.resultToken)?.locale).toBe("en");
@@ -139,7 +142,7 @@ test("the pair card is in the reader's language, its shared lines included", asy
   const inviter = await submitAs({}, { email: "a@example.com", sendEmail: false });
   const invited = await submitAs({}, { email: "b@example.com", sendEmail: false, inviteToken: inviter.inviteToken });
   const english = await (await getPair(get(`/api/pairs/${invited.pairToken}`, EN), params(invited.pairToken!))).json() as PairView;
-  expect(english.primary.name).toBe("Carbon copies");
+  expect(english.primary.name).toBe("Same wavelength");
   expect(english.sharedLines.every((line) => /^[A-Za-z]/.test(line))).toBe(true);
   expect(english.cardUrl).toMatch(/&l=en$/);
 });

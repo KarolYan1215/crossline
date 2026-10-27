@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { ATTENTION_SNAPSHOT, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, monthDay, resolveAvailability, tFor, type AvailabilityWindow, type Locale } from "@crossline/core";
+import { ATTENTION_SNAPSHOT, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, inferWorkState, monthDay, resolveAvailability, tFor, type ActivitySegment, type AvailabilityWindow, type Locale } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
+import { ACTIVITY_DETAIL_CONSENT } from "./activity-recorder";
 import { localeOf } from "./locale";
 
 /**
@@ -124,8 +125,21 @@ const localParts = (now: Date, zone: string) => {
 };
 
 /**
+ * Whether the person is away from this computer now, by the screen record of the last quarter hour (`inferWorkState`), read only with
+ * the detail consent the record exists under. Unknown is not away.
+ */
+export function awayFromScreen(store: CrosslineStore, workspaceId: string, now: Date): boolean {
+  if (store.getSetting(workspaceId, ACTIVITY_DETAIL_CONSENT) !== "granted") return false;
+  const segments: ActivitySegment[] = store.listActivitySegments(workspaceId, new Date(now.getTime() - 20 * 60_000).toISOString())
+    .map((segment) => ({ start: segment.start, end: segment.end, app: segment.app, category: segment.category as ActivitySegment["category"], idle: segment.idle }));
+  return inferWorkState({ segments, now: now.toISOString(), calendar: [] }).state === "away";
+}
+
+/**
  * One pass for one workspace. Each message goes to the desktop (`deliver`) and, when `push` is given, to the person's subscribed
- * phones; it is recorded as sent if either reached them, so a laptop that is closed does not make the phone ask again later.
+ * phones; it is recorded as sent if either reached them, so a laptop that is closed does not make the phone ask again later. While
+ * the screen record says the person is away from the computer (2026-10-20), a message goes to the phone only, and to the desktop
+ * only if no phone took it — a toast on an empty desk is a message they find late and twice.
  */
 export async function notifyPass(store: CrosslineStore, workspaceId: string, now: Date,
   deliver: (title: string, body: string, url: string) => Promise<boolean> = showToast, baseUrl = process.env.CROSSLINE_WEB_BASE_URL || "http://127.0.0.1:3210",
@@ -136,6 +150,13 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   const { windows } = resolveAvailability({ saved: store.getSetting(workspaceId, AVAILABILITY_SETTING),
     proposed: store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING), facts: store.listProfileFacts(workspaceId) });
   const { today, clock, weekday } = localParts(now, zone);
+  const away = Boolean(push) && awayFromScreen(store, workspaceId, now);
+  const both = async (title: string, body: string, url: string, message: Parameters<NonNullable<typeof push>>[1]): Promise<boolean> => {
+    const toPhone = () => push ? push(workspaceId, message).catch(() => false) : Promise.resolve(false);
+    if (away) return await toPhone() || deliver(title, body, url);
+    const [desktop, phone] = await Promise.all([deliver(title, body, url), toPhone()]);
+    return desktop || phone;
+  };
   const sentEvents = store.listEvents(workspaceId, { type: "notification.sent" });
   const sent = new Set(sentEvents.map((event) => String((event.payload as { key?: string }).key ?? "")));
   const urgentSentToday = sentEvents.filter((event) => (event.payload as { kind?: string; day?: string }).kind === "urgent"
@@ -165,9 +186,7 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   });
   const delivered: string[] = [];
   for (const item of planned) {
-    const [desktop, phone] = await Promise.all([deliver(item.title, item.body, `${baseUrl}${item.path}`),
-      push ? push(workspaceId, { title: item.title, body: item.body, path: item.path, tag: item.key }).catch(() => false) : Promise.resolve(false)]);
-    if (!desktop && !phone) continue;
+    if (!await both(item.title, item.body, `${baseUrl}${item.path}`, { title: item.title, body: item.body, path: item.path, tag: item.key })) continue;
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `notify:${item.key}`, type: "notification.sent", entityId: workspaceId,
       payload: { key: item.key, kind: item.kind, day: today, title: item.title } });
     delivered.push(item.key);
@@ -190,10 +209,7 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
     const start = confirm ? undefined : ((message.payload.card as { actions?: Array<{ action?: string; args?: { type?: string; workOrderId?: string } }> } | undefined)?.actions ?? [])
       .find((action) => action.action === "task.op" && action.args?.type === "start")?.args?.workOrderId;
     const path = confirm ? `/confirm/${encodeURIComponent(message.id)}` : start ? `/workbench/${encodeURIComponent(start)}` : "/";
-    const [desktop, phone] = await Promise.all([deliver("Crossline", body, `${baseUrl}${confirm ? path : "/"}`),
-      push ? push(workspaceId, { title: "Crossline", body, path, tag: nudge.fingerprint ?? message.id, ...(start ? { start } : {}) }).catch(() => false)
-        : Promise.resolve(false)]);
-    if (!desktop && !phone) continue;
+    if (!await both("Crossline", body, `${baseUrl}${confirm ? path : "/"}`, { title: "Crossline", body, path, tag: nudge.fingerprint ?? message.id, ...(start ? { start } : {}) })) continue;
     store.updateConversationPayload(workspaceId, message.id, { ...message.payload, nudge: { ...nudge, delivery: "pushed" } });
     delivered.push(`nudge:${nudge.fingerprint ?? message.id}`);
   }

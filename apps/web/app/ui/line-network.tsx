@@ -3,13 +3,42 @@
 import { useState } from "react";
 import { RELATION_KIND_LABEL, RELATION_KIND_MEANING, flywheelLoops } from "@crossline/core";
 import type { Translate } from "../../lib/i18n";
-import { useLocale, useT } from "../locale-context";
+import { useT } from "../locale-context";
 
 export type NetworkLine = { id: string; label: string; rank?: number | null; hard?: boolean };
 /** One way a line feeds another. `candidate` = proposed, not yet judged by the person; drawn dashed until they say it holds. */
 export type NetworkEdge = { id: string; from: string; to: string; kind: string; explanation: string; status: "confirmed" | "candidate" };
 
 const SIZE = 360, C = SIZE / 2, R = 122, NODE = 32;
+const LABEL_H = 18;
+type Point = { x: number; y: number };
+type LabelInput = { id: string; text: string; start: Point; control: Point; end: Point };
+
+/**
+ * Where each edge's kind label goes: on its own curve, at the middle if that is free, else a little towards either end; a label that
+ * fits nowhere without touching a node or another label is left out (the edge's `<title>` and the list below still name it). Labels at
+ * the curve's middle overlapped as soon as three lines fed each other (2026-10-17 walkthrough, W-9), and the box was narrower than a
+ * four-character kind.
+ */
+export function placeEdgeLabels(edges: LabelInput[], nodes: Point[]): Map<string, { x: number; y: number; width: number }> {
+  const placed: Array<{ x: number; y: number; width: number }> = [];
+  const out = new Map<string, { x: number; y: number; width: number }>();
+  const on = (edge: LabelInput, t: number) => ({ x: (1 - t) ** 2 * edge.start.x + 2 * (1 - t) * t * edge.control.x + t ** 2 * edge.end.x,
+    y: (1 - t) ** 2 * edge.start.y + 2 * (1 - t) * t * edge.control.y + t ** 2 * edge.end.y });
+  const clear = (p: Point, width: number) =>
+    placed.every((other) => Math.abs(other.x - p.x) * 2 >= other.width + width + 2 || Math.abs(other.y - p.y) >= LABEL_H + 2)
+    && nodes.every((node) => Math.max(Math.abs(node.x - p.x) - width / 2, 0) ** 2 + Math.max(Math.abs(node.y - p.y) - LABEL_H / 2, 0) ** 2 >= (NODE + 2) ** 2)
+    && p.x - width / 2 >= 0 && p.x + width / 2 <= SIZE && p.y - LABEL_H / 2 >= 0 && p.y + LABEL_H / 2 <= SIZE;
+  for (const edge of edges) {
+    if (!edge.text) continue;
+    // A Chinese kind is a few full-width characters; an English one is a longer word of narrower letters (docs/i18n.md).
+    const width = /[^\x00-\x7f]/.test(edge.text) ? edge.text.length * 12 + 10 : edge.text.length * 6.6 + 10;
+    const spot = [0.5, 0.38, 0.62, 0.28, 0.72].map((t) => on(edge, t)).find((p) => clear(p, width));
+    if (spot) { const label = { ...spot, width }; placed.push(label); out.set(edge.id, label); }
+  }
+  return out;
+}
+
 const roleOf = (line: NetworkLine, t: Translate) => line.hard ? t("硬约束") : line.rank === 1 ? t("底座") : line.rank ? t("第 {{rank}}", { rank: line.rank }) : "";
 const safe = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_");
 
@@ -23,7 +52,6 @@ export function LineNetwork({ lines, edges, onConfirm, onReject, title = "主线
   onConfirm?: (edge: NetworkEdge) => void; onReject?: (edge: NetworkEdge) => void;
 }) {
   const t = useT();
-  const locale = useLocale();
   // A relation kind's label and meaning, in the page's language.
   const kindLabel = (kind: string) => RELATION_KIND_LABEL[kind] ? t(RELATION_KIND_LABEL[kind]!) : "";
   const [selected, setSelected] = useState<string | null>(null);
@@ -50,10 +78,11 @@ export function LineNetwork({ lines, edges, onConfirm, onReject, title = "主线
     const mx = (a.x + b.x) / 2 - (dy / d) * bend, my = (a.y + b.y) / 2 + (dx / d) * bend;
     const toward = (from: { x: number; y: number }, gap: number) => { const len = Math.hypot(mx - from.x, my - from.y) || 1; return { x: from.x + ((mx - from.x) / len) * gap, y: from.y + ((my - from.y) / len) * gap }; };
     const start = toward(a, NODE + 2), end = toward(b, NODE + 6);
-    // The label sits on the curve itself (a quadratic's midpoint), not at the control point.
-    const lx = 0.25 * start.x + 0.5 * mx + 0.25 * end.x, ly = 0.25 * start.y + 0.5 * my + 0.25 * end.y;
-    return { edge, d: `M${start.x.toFixed(1)},${start.y.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${end.x.toFixed(1)},${end.y.toFixed(1)}`, lx, ly };
+    return { edge, start, control: { x: mx, y: my }, end,
+      d: `M${start.x.toFixed(1)},${start.y.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${end.x.toFixed(1)},${end.y.toFixed(1)}` };
   });
+  const labels = placeEdgeLabels(geometry.map(({ edge, start, control, end }) => ({ id: edge.id, text: kindLabel(edge.kind), start, control, end })),
+    [...at.values()]);
 
   // `title` is a Chinese key (or already translated, which `t` returns as it is).
   return <section className="ln" aria-label={t(title || "主线飞轮")}>
@@ -66,16 +95,11 @@ export function LineNetwork({ lines, edges, onConfirm, onReject, title = "主线
           data-status={edge.status} data-dim={selected && selected !== edge.id ? "" : undefined} data-on={selected === edge.id ? "" : undefined}
           markerEnd={`url(#ln-arrow-${safe(edge.from)})`} onClick={interactive ? () => setSelected(selected === edge.id ? null : edge.id) : undefined}>
           <title>{t("{{from}} → {{to}}：{{kind}}。{{explanation}}", { from: name(edge.from), to: name(edge.to), kind: kindLabel(edge.kind), explanation: edge.explanation })}</title></path>)}
-        {geometry.map(({ edge, lx, ly }) => {
-          if (!RELATION_KIND_LABEL[edge.kind]) return null;
-          // English kind names are longer than two characters: the box follows the word.
-          const half = locale === "en" ? Math.max(17, kindLabel(edge.kind).length * 3.3 + 5) : 17;
-          return <g key={`l-${edge.id}`} className="ln-label" data-line={edge.from}
-            data-dim={selected && selected !== edge.id ? "" : undefined} onClick={interactive ? () => setSelected(selected === edge.id ? null : edge.id) : undefined}>
-            <rect x={lx - half} y={ly - 9} width={half * 2} height={18} rx={2} />
-            <text x={lx} y={ly + 4} textAnchor="middle">{kindLabel(edge.kind)}</text>
-          </g>;
-        })}
+        {geometry.map(({ edge }) => { const label = labels.get(edge.id); return label ? <g key={`l-${edge.id}`} className="ln-label" data-line={edge.from}
+          data-dim={selected && selected !== edge.id ? "" : undefined} onClick={interactive ? () => setSelected(selected === edge.id ? null : edge.id) : undefined}>
+          <rect x={label.x - label.width / 2} y={label.y - LABEL_H / 2} width={label.width} height={LABEL_H} rx={2} />
+          <text x={label.x} y={label.y + 4} textAnchor="middle">{kindLabel(edge.kind)}</text>
+        </g> : null; })}
         {lines.map((line) => { const p = at.get(line.id)!; const role = roleOf(line, t); return <g key={line.id} data-line={line.id} className="ln-node">
           <circle cx={p.x} cy={p.y} r={NODE} strokeWidth={line.rank === 1 || line.hard ? 4 : 2} />
           <text x={p.x} y={p.y + 5} textAnchor="middle">{line.label}</text>

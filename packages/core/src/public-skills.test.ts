@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import {
   PUBLIC_SKILL_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, finalVerdict, licenseFromText, licenseVerdict, parseGithubRepo, publicSkillId, publicSkillRelevance, renameSkill,
-  safeRepoPath, scanSkillFiles, skillFrontmatter, structuredOutputProblems, validateSkillScout, type PublicSkillRecord, type SkillScoutContext
+  safeRepoPath, scanSkillFiles, scriptCount, scriptsAllowable, scriptsDigest, scriptsRunnable, skillFrontmatter, structuredOutputProblems, validateSkillScout, type PublicSkillRecord, type SkillScoutContext
 } from "./index";
 
 test("both schemas keep to the strict-mode rules", () => {
@@ -90,4 +90,21 @@ test("reading a system font to draw a title is not leaving the directory (the gr
   expect(scanSkillFiles([{ path: "scripts/make_vlog.py",
     text: "    for candidate in (Path(\"C:/Windows/Fonts/msyh.ttc\"), Path(\"C:/Windows/Fonts/arial.ttf\")):" }])).toEqual({ risk: "low", injection: false, findings: [] });
   expect(scanSkillFiles([{ path: "scripts/a.py", text: "open(\"C:/Users/me/Documents/notes.txt\")" }]).findings.map((finding) => finding.rule)).toContain("outside");
+});
+
+test("a skill's scripts run when reviewed usable, or when the person allowed exactly these files; never for a refused skill", () => {
+  const files = [{ path: "SKILL.md", sha256: "a" }, { path: "scripts/run.py", sha256: "b" }];
+  const capped = { review: { final: "text_only" as const }, scan: { risk: "high" as const, injection: false, findings: [] }, files };
+  expect(scriptCount(capped)).toBe(1);
+  expect(scriptsAllowable(capped)).toBe(true);
+  expect(scriptsRunnable(capped)).toBe(false);
+  const allowed = { ...capped, scriptsAllowed: { at: "2026-10-19T00:00:00Z", digest: scriptsDigest(files) } };
+  expect(scriptsRunnable(allowed)).toBe(true);
+  // Another version of the script is not what the person read.
+  expect(scriptsRunnable({ ...allowed, files: [files[0]!, { path: "scripts/run.py", sha256: "c" }] })).toBe(false);
+  // Injected text, or the review's refusal, cannot be overridden; a skill without scripts has nothing to allow.
+  expect(scriptsRunnable({ ...allowed, scan: { ...capped.scan, injection: true } })).toBe(false);
+  expect(scriptsRunnable({ ...allowed, review: { final: "reject" as const } })).toBe(false);
+  expect(scriptsAllowable({ ...capped, files: [files[0]!] })).toBe(false);
+  expect(scriptsRunnable({ ...capped, review: { final: "usable" as const } })).toBe(true);
 });

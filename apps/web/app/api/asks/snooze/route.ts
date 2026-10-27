@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { decisionSeconds } from "@crossline/core";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { snoozeAsk } from "../../../../lib/asks";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
@@ -8,9 +9,9 @@ export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
-  const body = await request.json().catch(() => null) as { askId?: unknown; choice?: unknown } | null;
+  const body = await request.json().catch(() => null) as { askId?: unknown; choice?: unknown; seconds?: unknown } | null;
   if (typeof body?.askId !== "string" || (body.choice !== "tomorrow" && body.choice !== "week"))
     return NextResponse.json({ ok: false, code: "INVALID_SNOOZE" }, { status: 400 });
-  const result = snoozeAsk(access.ctx, body.askId, body.choice);
+  const result = snoozeAsk(access.ctx, body.askId, body.choice, undefined, decisionSeconds(body.seconds));
   return NextResponse.json(result, { status: result.ok ? 200 : 404 });
 }

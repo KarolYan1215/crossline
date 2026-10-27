@@ -18,7 +18,9 @@ export const when = (iso: string | null, timeZone: string): string => iso ? loca
 const tokens = (n: number, locale: Locale) => locale === "en" ? (n >= 1_000_000 ? `${Math.round(n / 100_000) / 10}M` : n >= 10_000 ? `${Math.round(n / 1_000)}k` : String(n))
   : n >= 10_000 ? `${Math.round(n / 1_000) / 10} 万` : String(n); // i18n-ignore: the Chinese branch of a per-language number format
 
-type Progress = { commands: Array<{ command: string; status: string; exitCode: number | null }>; files: string[]; searches: string[] } | null;
+type Progress = { commands: Array<{ command: string; status: string; exitCode: number | null }>; files: string[]; searches: string[];
+  plan?: { explanation: string; steps: Array<{ step: string; status: string }> } } | null;
+const STEP_MARK: Record<string, string> = { completed: "已完成", inProgress: "进行中", pending: "待做" };
 
 /** One running assistant task: what it has done so far, polled every few seconds, and 「中止」. */
 function RunningTask({ task, timeZone }: { task: BackgroundOverview["running"][number]; timeZone: string }) {
@@ -48,6 +50,9 @@ function RunningTask({ task, timeZone }: { task: BackgroundOverview["running"][n
     <div className="st-row"><span className="st-row-label">{task.title}<small>{t("开始于 {{when}}", { when: when(task.startedAt, timeZone) })}</small></span>
       {state === "ended" ? <Tag tone="neutral">{t("已结束")}</Tag>
         : <button type="button" className="secondary-button" disabled={state === "stopping"} onClick={() => void stop()}>{state === "stopping" ? t("中止中…") : t("中止")}</button>}</div>
+    {progress?.plan?.steps.length ? <ol className="bg-plan" aria-label={t("助手的步骤")}>
+      {progress.plan.steps.map((item, index) => <li key={`p-${index}`} data-status={item.status}>{STEP_MARK[item.status] ? t(STEP_MARK[item.status]!) : item.status} · {item.step}</li>)}
+    </ol> : null}
     {progress && (progress.commands.length + progress.files.length + progress.searches.length) > 0 && <ol className="bg-steps">
       {progress.searches.map((query) => <li key={`s-${query}`}>{t("搜索：{{query}}", { query })}</li>)}
       {progress.commands.slice(-8).map((command, index) => <li key={`c-${index}`} className="mono">{command.command}{command.exitCode !== null && command.exitCode !== 0 ? t("（退出码 {{code}}）", { code: command.exitCode }) : ""}</li>)}
@@ -66,16 +71,34 @@ export function BackgroundModule({ overview }: { overview: BackgroundOverview })
     const response = await fetch("/api/background", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, paused }) }).catch(() => undefined);
     if (!response?.ok) setKinds(before);
   };
+  const [saver, setSaver] = useState(overview.saver);
+  const toggleSaver = async (on: boolean) => {
+    setSaver(on);
+    const response = await fetch("/api/background", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ saver: on }) }).catch(() => undefined);
+    if (!response?.ok) setSaver(!on);
+  };
   const tier = TIER[overview.engagement.tier];
   return <div className="st-modules">
     <section className="st-card" aria-label={t("后台任务")}>
       <header><h3>{t("后台任务")}</h3><small>{t("后台开销跟着最近一次本人操作走：48 小时内照常，7 天内只做收集分析与日历归类，更久不调用模型")}</small></header>
       <div className="st-row"><span className="st-row-label">{t("当前状态")}<small>{t("最近一次本人操作 {{when}}", { when: when(overview.engagement.lastActiveAt, overview.timeZone) })}</small></span>
-        <Tag tone={tier.tone}>{t(tier.text)}</Tag></div>
+        <Tag tone={tier.tone}>{overview.quotaPause ? t("额度暂停中") : overview.quotaFallback ? t("改用开发者模型") : t(tier.text)}</Tag></div>
+      {overview.quotaFallback && <p className="bg-degraded" role="status">{overview.quotaFallback.message}{overview.quotaFallback.resetsAt ? t("ChatGPT 额度预计 {{when}} 恢复，之后自动切回。", { when: when(overview.quotaFallback.resetsAt, overview.timeZone) }) : t("额度恢复后自动切回。")}</p>}
+      {overview.quotaPause && <div className="bg-degraded" role="status">
+        <p>{overview.quotaPause.message}{overview.quotaPause.resetsAt ? t("预计 {{when}} 恢复。", { when: when(overview.quotaPause.resetsAt, overview.timeZone) }) : ""}{t("恢复后自动补上，不需要操作。")}</p>
+        <div><b>{t("照常可用")}</b><ul>{overview.quotaPause.works.map((item) => <li key={item}>{item}</li>)}</ul></div>
+        <div><b>{t("暂停到恢复")}</b><ul>{overview.quotaPause.paused.map((item) => <li key={item}>{item}</li>)}</ul></div>
+      </div>}
+      <div className="st-row">
+        <span className="st-row-label">{t("节省额度")}<small>{t("开启时，调研、技能搜寻等非必需的后台工作只在额度宽裕或夜间运行；规划与助手不受影响")}</small></span>
+        <SegmentedControl label={t("节省额度")} value={saver ? "on" : "off"} options={[{ value: "on", label: t("开启", { context: "state" }) }, { value: "off", label: t("关闭", { context: "state" }) }]}
+          onChange={(value) => void toggleSaver(value === "on")} />
+      </div>
       {kinds.map((item) => <div key={item.kind} className="st-row">
         <span className="st-row-label">{t(item.label)}<small>{[t(item.explained),
           t("上次 {{when}}", { when: when(item.lastRunAt, overview.timeZone) }) + (item.lastOk === false ? t("（失败）") : ""),
-          t("近 7 天 {{count}} 次、{{tokens}} tokens", { count: item.weekRuns, tokens: tokens(item.weekTokens, locale) })].join(" · ")}</small></span>
+          t("近 7 天 {{count}} 次、{{tokens}} tokens", { count: item.weekRuns, tokens: tokens(item.weekTokens, locale) })
+            + (item.weekCacheShare !== null ? t("（输入的 {{share}}% 来自缓存）", { share: Math.round(item.weekCacheShare * 100) }) : "")].join(" · ")}</small></span>
         <SegmentedControl label={t("{{kind}}是否运行", { kind: t(item.label) })} value={item.paused ? "paused" : "on"} options={[{ value: "on", label: t("运行", { context: "state" }) }, { value: "paused", label: t("暂停", { context: "state" }) }]}
           onChange={(value) => void toggle(item.kind, value === "paused")} />
       </div>)}

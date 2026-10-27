@@ -20,7 +20,7 @@ try {
     state?: string; contract?: { runtimeVersion?: string; relationStatus?: string }; supervisorBootId?: string
   };
   if (status.state !== "ready" || status.contract?.relationStatus !== "verified"
-    || !status.contract.runtimeVersion?.startsWith("crossline/0.155.0 ") || typeof status.supervisorBootId !== "string")
+    || !status.contract.runtimeVersion?.startsWith("crossline/0.163.0 ") || typeof status.supervisorBootId !== "string")
     throw new Error(`CODEX_FORK_SMOKE_FAILED ${JSON.stringify(status)}`);
   // `/v1/codex/status` is the one route exempt from the gate — everything else must refuse a request
   // that carries no capability token, proving the gate is actually wired into the real HTTP path.

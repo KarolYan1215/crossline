@@ -1,7 +1,39 @@
 import "server-only";
-import { rankCandidates, stalledIdentities, type AccessContext, type CandidateRelation } from "@crossline/core";
-import { getStore } from "./crossline";
+import { rankCandidates, stalledIdentities, taskTitleOf, type AccessContext, type CandidateRelation } from "@crossline/core";
+import { effectiveSchedulePreferences, getStore, planToday } from "./crossline";
+import { identityLines, lineLabels } from "./lines";
 import { tOf } from "./locale";
+import { investment } from "./plan-stats";
+import { readScheduledMinutes } from "./schedule-memory";
+
+/**
+ * This week's hours per line, planned against timed (2026-10-21, for the review page's one figure): the last seven days, the planned
+ * figure from the day lengths the schedule recorded (`schedule.minutes:<day>`, only days with a record), the timed one from the sessions
+ * that started in them. The same arithmetic as the plan page's 「主线投入」 (`investment`), cut to the latest week. Lines with neither
+ * are left out; `hasData` is false when nothing was recorded at all, and the page then draws nothing.
+ */
+export function loadWeekInvestment(ctx: AccessContext): { start: string; end: string; recordedDays: number; hasData: boolean;
+  lines: Array<{ line: string; label: string; planned: number; actual: number }> } {
+  const store = getStore();
+  const today = planToday(ctx);
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const running = new Set(orders.filter((order) => order.state === "active").map((order) => order.id));
+  const plannedByDay: Record<string, Record<string, number> | null> = {};
+  for (let back = 6; back >= 0; back -= 1) {
+    const day = new Date(Date.parse(`${today}T12:00:00Z`) - back * 86_400_000).toISOString().slice(0, 10);
+    plannedByDay[day] = readScheduledMinutes(ctx, day);
+  }
+  const now = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString();
+  const result = investment({ today, zone, now, lineOrder: identityLines(ctx).map((line) => line.id), plannedByDay,
+    orderLine: Object.fromEntries(orders.map((order) => [order.id, order.identityId])),
+    executions: store.listExecutions(ctx.workspaceId).filter((item) => item.endedAt || running.has(item.workOrderId)), next7: {}, stated: null });
+  const week = result.weeks.at(-1)!;
+  const labels = lineLabels(ctx);
+  const lines = result.lines.map(({ line }) => ({ line, label: labels[line] ?? line, planned: week.planned[line] ?? 0, actual: week.actual[line] ?? 0 }))
+    .filter((line) => line.planned > 0 || line.actual > 0);
+  return { start: week.start, end: week.end, recordedDays: week.recordedDays, hasData: lines.length > 0, lines };
+}
 
 export type WeeklyReview = {
   /** Compensating control for automatic acceptance: every one is listed, never folded into a count. */
@@ -29,7 +61,15 @@ export type WeeklyReview = {
   /** Report-only proposals from `crossline-weekly-insight` — read here, never applied automatically;
    * there is no generic "apply an overlay patch" mechanism in this app to wire an apply button to. */
   insightProposals: Array<{ id: string; claim: string; observationCount: number; period: string; proposedOverlayPatch: string }>;
+  /**
+   * 「这件事累不累」 as the person answered it after finishing (`actualLoad` on `energy.observed`, 2026-10-20: it was stored and never
+   * read), beside the energy the task was planned to need, this week's latest answer per task, the ones that differ first. Read here,
+   * not learned from: it is a word about a task, not a measurement of a slot, and too sparse to backtest.
+   */
+  taskLoad: Array<{ workOrderId: string; title: string; identityId: string; expected?: Level; actual: Level }>;
 };
+type Level = "low" | "medium" | "high";
+const RANK: Record<Level, number> = { low: 0, medium: 1, high: 2 };
 
 const daysBetween = (fromIso: string, to: Date) =>
   Math.floor((to.getTime() - Date.parse(fromIso)) / 86_400_000);
@@ -141,8 +181,23 @@ export function loadWeeklyReview(ctx: AccessContext, now = new Date()): WeeklyRe
     return { identityId, daysSinceLastPass: latest ? daysBetween(latest, now) : null };
   }), 7);
 
+  const loads = new Map<string, Level>();
+  for (const event of events) {
+    const payload = event.payload as { context?: string; workOrderId?: string; actualLoad?: string };
+    if (event.type === "energy.observed" && event.createdAt >= since && payload.context === "after_task" && payload.workOrderId
+      && (payload.actualLoad === "low" || payload.actualLoad === "medium" || payload.actualLoad === "high")) loads.set(payload.workOrderId, payload.actualLoad);
+  }
+  const taskLoad: WeeklyReview["taskLoad"] = [...loads].flatMap(([workOrderId, actual]): WeeklyReview["taskLoad"] => {
+    const order = orders.find((item) => item.id === workOrderId);
+    if (!order) return [];
+    const need = ((order.payload as { humanCore?: Array<{ energy?: string }> }).humanCore ?? [])[0]?.energy;
+    const expected = need === "low" || need === "medium" || need === "high" ? need as Level : undefined;
+    return [{ workOrderId, title: taskTitleOf(order), identityId: order.identityId, ...(expected ? { expected } : {}), actual }];
+  }).sort((a, b) => Math.abs(RANK[b.actual] - RANK[b.expected ?? b.actual]) - Math.abs(RANK[a.actual] - RANK[a.expected ?? a.actual]));
+
   return {
     autoAccepted,
+    taskLoad,
     milestoneProgress: milestones.filter((milestone) => milestone.status === "approved").map((milestone) => ({
       id: milestone.id, title: milestone.title, identityId: milestone.identityId,
       verifiability: milestone.verifiability,

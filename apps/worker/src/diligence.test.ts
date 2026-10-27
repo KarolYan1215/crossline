@@ -86,6 +86,19 @@ test("unverifiable sources are dropped with everything that depended only on the
   expect(report!.note).toContain("无法核实");
 });
 
+test("the opportunities question assumes no student status and carries who the person is", async () => {
+  store.upsertProfileFact({ workspaceId, identityId: "person", projectId: "", slot: "city", value: "杭州", status: "confirmed", sourceRef: "reply-2", sourceQuote: "杭州", updatedAt: "2026-10-02T00:00:00.000Z" });
+  store.upsertProfileFact({ workspaceId, identityId: "person", projectId: "", slot: "school", value: "假设：在读", status: "inferred", sourceRef: "", sourceQuote: "", updatedAt: "2026-10-02T00:00:00.000Z" });
+  const { rpc, prompts } = fakeRuntime([answer()]);
+  const fetchImpl = fetchByUrl({ "https://example.edu/accelerator": () => page("Student Accelerator Program — apply by Nov 15") });
+  const run = createDiligenceRunner(store, workspaceId, "C:\\repo", () => rpc, { fetchImpl, isPublicHost: publicHost, readCost: cost, now: NOW, webBlocker: () => undefined });
+  await run("startup");
+  const sent = prompts().join("\n");
+  expect(sent).not.toContain("是否对在读学生开放");
+  expect(sent).toContain("杭州");
+  expect(sent).not.toContain("假设：在读");
+});
+
 test("a report in which no source can be opened is a failure, and writes no conclusions", async () => {
   const { rpc } = fakeRuntime([answer()]);
   const run = createDiligenceRunner(store, workspaceId, "C:\\repo", () => rpc, { fetchImpl: fetchByUrl({}), isPublicHost: publicHost, readCost: cost, now: NOW, webBlocker: () => undefined });

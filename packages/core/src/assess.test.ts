@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { QUIZ_ITEMS, clockHours, mctqLite, pvtIsi, pvtSummary, quizScores, quizType } from "./assess";
+import { QUIZ_ITEMS, aiDoes, clockHours, mctqLite, pvtIsi, pvtSummary, quizScores, quizType } from "./assess";
 import { TYPE_AXES, portraitType, typeFromScores } from "./portrait-type";
 import { DEFAULT_CALIBRATION } from "./energy-model";
 import { energyRhythm } from "./energy-rhythm";
@@ -7,44 +7,75 @@ import { energyRhythm } from "./energy-rhythm";
 const all = (value: number) => Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, value]));
 
 describe("quiz", () => {
-  test("eight statements per axis, four keyed to each pole", () => {
+  test("nine situations per dimension, ids unique, neighbours never on one dimension, both options' sides used", () => {
     for (const axis of TYPE_AXES) {
       const items = QUIZ_ITEMS.filter((item) => item.axis === axis.id);
-      expect(items).toHaveLength(8);
-      expect(items.filter((item) => item.reverse)).toHaveLength(4);
+      expect(items).toHaveLength(9);
+      expect(items.some((item) => item.aRight)).toBe(true);
+      expect(items.some((item) => !item.aRight)).toBe(true);
+      // At least five different areas of life per dimension: the questions must not all be about one kind of work.
+      expect(new Set(items.map((item) => item.scene)).size).toBeGreaterThanOrEqual(5);
     }
-    expect(new Set(QUIZ_ITEMS.map((item) => item.id)).size).toBe(32);
+    expect(new Set(QUIZ_ITEMS.map((item) => item.id)).size).toBe(36);
+    for (let index = 1; index < QUIZ_ITEMS.length; index++) expect(QUIZ_ITEMS[index]!.axis).not.toBe(QUIZ_ITEMS[index - 1]!.axis);
   });
 
-  test("agreeing with everything cancels out on every axis; reversed statements are keyed the other way", () => {
-    expect(quizScores(all(5))).toEqual({ scope: 50, basis: 50, output: 50, rhythm: 50 });
-    // Agree with the right-keyed statements, disagree with the reversed ones: every axis at its right pole.
-    const right = Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, item.reverse ? 1 : 5]));
-    expect(quizScores(right)).toEqual({ scope: 100, basis: 100, output: 100, rhythm: 100 });
-    expect(quizType(right).code).toBe("GIRA");
-    const left = Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, item.reverse ? 5 : 1]));
-    expect(quizType(left).code).toBe("SEMP");
+  // Every question answered clearly towards one pole.
+  const towards = (side: "left" | "right") => Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, (side === "right") === item.aRight ? 1 : 5]));
+
+  test("each side's answers land on its pole", () => {
+    expect(quizScores(towards("right"))).toEqual({ collab: 100, purpose: 100, build: 100, lines: 100 });
+    expect(quizType(towards("right")).code).toBe("WUHG");
+    expect(quizType(towards("left")).code).toBe("ROBA");
   });
 
-  test("a single axis moves only with its own statements", () => {
+  test("all neutral reads just under the middle, decided left; an exact middle goes to the side more answers leaned to", () => {
+    expect(quizScores(all(3))).toEqual({ collab: 49, purpose: 49, build: 49, lines: 49 });
     const answers = all(3);
-    for (const item of QUIZ_ITEMS.filter((entry) => entry.axis === "basis")) answers[item.id] = item.reverse ? 2 : 4;
-    expect(quizScores(answers)).toEqual({ scope: 50, basis: 75, output: 50, rhythm: 50 });
+    const lines = QUIZ_ITEMS.filter((item) => item.axis === "lines");
+    // Two answers a step right, one two steps left: the mean is the middle, more answers leaned right.
+    lines.slice(0, 2).forEach((item) => { answers[item.id] = item.aRight ? 2 : 4; });
+    answers[lines[2]!.id] = lines[2]!.aRight ? 5 : 1;
+    expect(quizScores(answers).lines).toBe(51);
   });
 
-  test("an unanswered or out-of-range statement is refused", () => {
+  test("a single dimension moves only with its own questions", () => {
+    const answers = all(3);
+    for (const item of QUIZ_ITEMS.filter((entry) => entry.axis === "build")) answers[item.id] = item.aRight ? 2 : 4;
+    expect(quizScores(answers)).toEqual({ collab: 49, purpose: 49, build: 75, lines: 49 });
+  });
+
+  test("an unanswered or out-of-range answer is refused", () => {
     const answers = all(3);
     delete answers.q7;
     expect(() => quizScores(answers)).toThrow(/QUIZ_INCOMPLETE: q7/);
     expect(() => quizScores({ ...all(3), q1: 6 })).toThrow(/QUIZ_INCOMPLETE: q1/);
   });
 
+  test("「AI 替你干的」 lists the work leaned towards AI, most decided first, at most three, none when nothing leaned there", () => {
+    expect(aiDoes(all(3))).toEqual([]);
+    const handing = Object.fromEntries(QUIZ_ITEMS.map((item) => [item.id, item.ai ? (item.ai.side === "a" ? 1 : 5) : 3]));
+    expect(aiDoes(handing)).toHaveLength(3);
+    const one = all(3);
+    const writing = QUIZ_ITEMS.find((item) => item.ai?.does === "写文案")!;
+    const code = QUIZ_ITEMS.find((item) => item.ai?.does === "写代码")!;
+    one[writing.id] = writing.ai!.side === "a" ? 2 : 4;
+    one[code.id] = code.ai!.side === "a" ? 1 : 5;
+    expect(aiDoes(one)).toEqual(["写代码", "写文案"]);
+    for (const item of QUIZ_ITEMS) if (item.ai) expect([...item.ai.does].length, item.id).toBeLessThanOrEqual(6);
+  });
+
   test("the portrait's type and the quiz's type are the same reading of the same scores", () => {
-    const scores = { scope: 20, basis: 80, output: 50, rhythm: 49 };
-    const report = { type: { ...scores, evidence: { scope: "因为", basis: "", output: "", rhythm: "" } } } as unknown as Parameters<typeof portraitType>[0];
-    expect(portraitType(report)).toEqual(typeFromScores(scores, report.type!.evidence));
-    expect(typeFromScores(scores).code).toBe("SIRP");
-    expect(typeFromScores(scores).axes.map((axis) => axis.percent)).toEqual([80, 80, 50, 51]);
+    const scores = { collab: 49, purpose: 80, build: 50, lines: 20 };
+    const report = { type: { ...scores, evidence: { collab: "", purpose: "", build: "", lines: "因为" } } } as unknown as Parameters<typeof portraitType>[0];
+    expect(portraitType(report)).toEqual({ ...typeFromScores(scores, report.type!.evidence), summary: "" });
+    expect(typeFromScores(scores).code).toBe("RUHA");
+    expect(typeFromScores(scores).axes.map((axis) => axis.percent)).toEqual([51, 80, 50, 80]);
+  });
+
+  test("a report on the first version's axes has no type until it is rewritten", () => {
+    const report = { type: { scope: 20, basis: 80, output: 50, rhythm: 49, evidence: {} } } as unknown as Parameters<typeof portraitType>[0];
+    expect(portraitType(report)).toBeNull();
   });
 });
 

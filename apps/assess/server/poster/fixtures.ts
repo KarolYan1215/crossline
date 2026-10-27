@@ -11,8 +11,8 @@ import type { PairCardInput, PosterInput } from "./index";
  * stand-in figure drawn here so the tests need neither a template nor an image model.
  */
 
-export const PLANNER = { scope: 18, basis: 22, output: 41, rhythm: 12 } as const; // SEMP, output ambiguous
-export const ROAMER = { scope: 91, basis: 84, output: 72, rhythm: 88 } as const; // GIRA
+export const PLANNER = { collab: 18, purpose: 22, build: 41, lines: 12 } as const; // ROBA, build ambiguous
+export const ROAMER = { collab: 91, purpose: 84, build: 72, lines: 88 } as const; // WUHG
 
 /** A plain cartoon bust on a transparent square, written to `dir`. */
 export function writeFigure(dir: string, name: string, shirt: string): string {
@@ -32,8 +32,8 @@ export function writeFigure(dir: string, name: string, shirt: string): string {
 
 const INVITE = "https://assess.example.com/t/9f2c4a1d0b7e4e1f8a3c5d6e7f809a1b";
 
-export function samplePoster(dir: string, scores: Record<"scope" | "basis" | "output" | "rhythm", number>, nickname: string, shirt: string, locale?: Locale): PosterInput {
-  const type = publicType(scores, {}, "", undefined, locale);
+export function samplePoster(dir: string, scores: Record<"collab" | "purpose" | "build" | "lines", number>, nickname: string, shirt: string, locale?: Locale): PosterInput {
+  const type = publicType(scores, {}, "", undefined, ["写初稿", "出图", "查资料"], locale);
   return { type, nickname, avatarPath: writeFigure(dir, type.code, shirt), inviteUrl: INVITE, ...(locale ? { locale } : {}) };
 }
 

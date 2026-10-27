@@ -1,0 +1,43 @@
+{
+  "code": 0,
+  "success": true,
+  "msg": "成功",
+  "data": {
+    "cursor_score": "",
+    "current_time": 1792648800000,
+    "items": [
+      {
+        "id": "66aa00000000000000000002",
+        "model_type": "note",
+        "note_card": {
+          "note_id": "66aa00000000000000000002",
+          "type": "video",
+          "title": "三分钟学会手冲咖啡（虚构样例）",
+          "desc": "器具：手冲壶、滤杯、滤纸。水温 92 度，粉水比 1:15。#咖啡[话题]# #手冲[话题]#",
+          "time": 1790000000000,
+          "last_update_time": 1790000500000,
+          "ip_location": "浙江",
+          "user": { "user_id": "5f0000000000000000000abc", "nickname": "样例咖啡师", "avatar": "https://sns-avatar-qc.xhscdn.com/avatar/sample.jpg" },
+          "interact_info": { "liked": false, "liked_count": "1.2万", "collected": true, "collected_count": "8034", "comment_count": "321", "share_count": "77" },
+          "tag_list": [{ "id": "t1", "name": "咖啡", "type": "topic" }, { "id": "t2", "name": "手冲", "type": "topic" }],
+          "image_list": [
+            { "width": 1080, "height": 1440, "url_default": "https://sns-webpic-qc.xhscdn.com/sample/cover!nd_dft_wlteh_webp_3", "url_pre": "https://sns-webpic-qc.xhscdn.com/sample/cover!nd_prv_wlteh_webp_3",
+              "info_list": [{ "image_scene": "WB_PRV", "url": "https://sns-webpic-qc.xhscdn.com/sample/cover!nd_prv_wlteh_webp_3" }, { "image_scene": "WB_DFT", "url": "https://sns-webpic-qc.xhscdn.com/sample/cover!nd_dft_wlteh_webp_3" }] }
+          ],
+          "video": {
+            "capa": { "duration": 183 },
+            "consumer": { "origin_video_key": "pre_post/sample-origin-key" },
+            "media": {
+              "video_id": 1,
+              "stream": {
+                "h264": [{ "master_url": "https://sns-video-bd.xhscdn.com/stream/sample_h264.mp4", "backup_urls": ["https://sns-video-hw.xhscdn.com/stream/sample_h264.mp4"] }],
+                "h265": [{ "master_url": "https://sns-video-bd.xhscdn.com/stream/sample_h265.mp4", "backup_urls": [] }],
+                "av1": []
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

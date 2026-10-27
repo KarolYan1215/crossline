@@ -91,7 +91,7 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const today = planToday(ctx);
   const lines = identityLines(ctx).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] }));
   const checklist = interviewChecklistFor(store, ctx.workspaceId, lines, { unfiledFiles: unfiledFiles(ctx, today).length, today });
-  const open = checklist.filter((item) => !item.done);
+  const open = checklist.filter((item) => !item.done && !item.deferred);
   const readyToStart = startReady(checklist), startMissing = startOpen(checklist);
   if (!session) return { started: false, complete: false, awaitingPerson: false, parked: false, readyToStart, startMissing, stage: "", stageIndex: 0, stageCount,
     questions: [], screened: [], openQuestions: 0, checklist, sessionId: "" };
@@ -110,8 +110,9 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const owned = questionsOwnedElsewhere(ctx, round);
   const pending = readPending(ctx, session.id, lastAssistant?.seq ?? 0);
   const inRound = new Set(round.map((question) => question.id));
-  const gaps = answered ? [] : interviewGapsFor(store, ctx.workspaceId, lines, today)
-    .filter((gap) => gap.code !== "FILE_UNFILED" && !inRound.has(gap.question.id) && !gapCoveredBy(gap, round)).map((gap) => gap.question as InterviewQuestion);
+  const allGaps = answered ? [] : interviewGapsFor(store, ctx.workspaceId, lines, today);
+  const gaps = allGaps.filter((gap) => gap.code !== "FILE_UNFILED" && !inRound.has(gap.question.id) && !gapCoveredBy(gap, round, allGaps))
+    .map((gap) => gap.question as InterviewQuestion);
   const seen = new Set<string>();
   const questions = [...round.filter((question) => !owned.has(question.id) && !question.id.startsWith("gap-file-")), ...gaps]
     .filter((question) => !pending.answers[question.id] && !seen.has(question.id) && Boolean(seen.add(question.id)));

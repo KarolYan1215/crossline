@@ -22,7 +22,7 @@ const full: ChecklistInput = {
 test("a complete record ticks every item, the portrait included", () => {
   const items = interviewChecklist(full);
   expect(items.filter((item) => !item.done)).toEqual([]);
-  expect(items.map((item) => item.id)).toEqual(["portrait_fields", "portrait_grounded", "portrait_confirmed", "line_desc:research", "line_goal:research",
+  expect(items.map((item) => item.id)).toEqual(["portrait_fields", "portrait_synthesis", "portrait_grounded", "portrait_confirmed", "line_desc:research", "line_goal:research",
     "hard_schedule:research", "availability", "line_project:research", "project:ece555", "files_filed"]);
 });
 
@@ -81,6 +81,11 @@ test("每条主线至少一个当前项目且知道截止；「没有截止」�
   // 只有 `-default` 项目不算「当前项目」。
   const onlyDefault = { ...full, projects: full.projects.filter((project) => project.id.endsWith("-default")) };
   expect(interviewChecklist(onlyDefault).find((item) => item.id === "line_project:research")?.detail).toBe("尚无当前项目");
+  // 本人说「这条线先不规划」（应用自己的问题记为 confirmed 的 `skipped`）就是这一项的答案；推断的不算（2026-10-20 极简版评测）。
+  const skipped = (status: string) => ({ ...onlyDefault, facts: [...onlyDefault.facts,
+    { identityId: "research", projectId: "", slot: "skipped", status, sourceRef: "reply-6", value: "有，但现在不想规划" }] });
+  expect(interviewChecklist(skipped("confirmed")).find((item) => item.id === "line_project:research")?.done).toBe(true);
+  expect(interviewChecklist(skipped("inferred")).find((item) => item.id === "line_project:research")?.done).toBe(false);
 });
 
 // The interview rewrites the portrait every round; an exact match lost the person's 「符合」 to a reworded clause and asked again, every

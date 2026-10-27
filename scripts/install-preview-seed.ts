@@ -25,15 +25,15 @@ const session = `preview-${stage}-${Date.now()}`;
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
 
 store.setSetting(ws, "lines.v1", JSON.stringify([
-  { id: "researcher", label: "研究者", color: "research", goal: "", goals: reached("details") ? ["成为能独立立项的、神经形态计算方向的研究者"] : [],
-    goalParts: reached("details") ? ["能独立立项", "神经形态计算方向"] : [], createdAt: now, rank: 1, hard: true },
+  { id: "researcher", label: "研究者", color: "research", goal: "", goals: reached("details") ? ["成为神经形态计算方向的、独立的研究者"] : [],
+    goalParts: reached("details") ? ["神经形态计算方向", "独立"] : [], createdAt: now, rank: 1, hard: true },
   { id: "founder", label: "创业者", color: "startup", goal: "", goals: reached("complete") ? ["成为能把想法做成产品的、教育科技方向的创业者"] : [],
     goalParts: reached("complete") ? ["能把想法做成产品", "教育科技方向"] : [], createdAt: now }
 ]));
 store.setSetting(ws, "onboarding.tone", "direct");
 store.setSetting(ws, "lines.profiles", JSON.stringify({
   researcher: { description: "博三，做忆阻器片上训练；导师组周会固定，课程两门。", attributes: [
-    { text: "能独立立项", kind: "ability", sourceRef: "reply-1" }, { text: "神经形态计算方向", kind: "domain", sourceRef: "src-1" },
+    { text: "独立", kind: "ability", sourceRef: "reply-1" }, { text: "神经形态计算方向", kind: "domain", sourceRef: "src-1" },
     { text: "被同行认可", kind: "state", sourceRef: "reply-1" }, { text: "善于讲清复杂问题", kind: "ability", sourceRef: "reply-3" }] },
   founder: { description: "在做一个帮研究生排期的小工具，想验证有没有人愿意付费。", attributes: [
     { text: "能把想法做成产品", kind: "ability", sourceRef: "reply-1" }, { text: "教育科技", kind: "domain", sourceRef: "reply-1" }] }

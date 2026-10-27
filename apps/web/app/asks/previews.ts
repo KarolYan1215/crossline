@@ -1,6 +1,7 @@
 import "server-only";
 import { portraitType, taskTitleOf, type AccessContext, type Ask, type PortraitReport } from "@crossline/core";
 import { getStore } from "../../lib/crossline";
+import { currentFigure, figureUrl } from "../../lib/figures";
 import { stateLabelFor } from "../../lib/labels";
 import { tOf } from "../../lib/locale";
 import type { AskPreviewData, AskPreviews } from "./types";
@@ -61,13 +62,11 @@ function portraitPreview(ctx: AccessContext): AskPreviewData | null {
   try { saved = JSON.parse(store.getSetting(ctx.workspaceId, "portrait.report") ?? "{}"); } catch { /* none */ }
   const report = saved.report;
   if (!report) return null;
-  let drawn: { version?: number; images?: Record<string, { at?: string }> } = {};
-  try { drawn = JSON.parse(store.getSetting(ctx.workspaceId, "portrait.images") ?? "{}"); } catch { /* none */ }
-  const figure = drawn.version === saved.version ? drawn.images?.character : undefined;
+  const figure = currentFigure(ctx);
   const type = portraitType(report);
   return {
     kind: "portrait",
-    ...(figure ? { image: `/api/portrait/image/character?v=${encodeURIComponent(figure.at ?? String(saved.version ?? ""))}` } : {}),
+    ...(figure ? { image: figureUrl(figure) } : {}),
     ...(type ? { code: type.code, name: type.name } : {}),
     ...(report.cover.tagline ? { tagline: report.cover.tagline } : {}),
     ...(report.cover.portrait ? { summary: report.cover.portrait.slice(0, 220) } : {}),

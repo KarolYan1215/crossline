@@ -1,0 +1,18 @@
+/* The weekly review fills the page (2026-10-21): it used the left half for one long column of text. Wide sections run across, the rest
+   pair up in two columns on a large screen; lists of things to decide become grids of cards. */
+.review-grid{display:grid;grid-template-columns:minmax(0,1fr);column-gap:28px;align-items:start}
+@media (min-width:1100px){
+  .review-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-flow:row dense}
+  .review-grid>.review-wide{grid-column:1 / -1}
+}
+.review-grid>.review-block{min-width:0}
+
+/* This week's hours per line: planned beside timed, one scale. */
+.review-week{display:grid;gap:12px 28px;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));max-width:980px}
+.review-week-head{margin:0 0 4px;font-size:13px;font-weight:700;color:var(--ink)}
+
+/* Milestones and research proposals as cards. */
+.review-milestones{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr))}
+.review-milestones .review-milestone{padding:8px 10px;border:1px solid var(--mist);border-top:1px solid var(--mist);display:grid;gap:4px;align-content:start}
+.review-diligence .ob-dd-proposals{grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));align-items:start}
+.review-diligence .ob-dd-actions{flex-wrap:wrap}

@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { TaskDetail } from "../../lib/task-detail";
 import type { TimelineItem } from "./model";
 import type { LineLabels } from "./views";
 import { BlockOverview } from "./block-overview";
 import { dayLoad, hoursLabel, nextBlock } from "./panel-model";
 import { useLocale, useT } from "../locale-context";
+import { usePendingView } from "../pending-badge";
 import "./day-panel.css";
 
 export type QuickProposal = { id: string; title: string };
@@ -32,12 +33,10 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
 }) {
   const t = useT();
   const locale = useLocale();
-  const [asks, setAsks] = useState<number | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    void fetch("/api/pending").then((response) => response.json()).then((body: { asks?: number }) => setAsks(body.asks ?? 0)).catch(() => setAsks(null));
-  }, []);
+  // The same reading as the stack beside it and the header badge (`usePendingView`), so the three never disagree.
+  const asks = usePendingView()?.asks ?? null;
   const load = dayLoad(items, day);
   const total = Math.max(1, load.planned + load.pencilled + load.fixed);
   const next = nextBlock(items, day, today, nowMinute);
@@ -50,7 +49,8 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
         <i data-kind="optional" style={{ width: `${(load.pencilled / total) * 100}%` }} />
         <i data-kind="fixed" style={{ width: `${(load.fixed / total) * 100}%` }} />
       </span>
-      <small>{t("已排 {{hours}}", { hours: hoursLabel(load.planned, locale) })}{load.pencilled ? ` · ${t("预排 {{hours}}", { hours: hoursLabel(load.pencilled, locale) })}` : ""}{load.fixed ? ` · ${t("固定日程 {{hours}}", { hours: hoursLabel(load.fixed, locale) })}` : ""}</small>
+      <small>{t("已排 {{hours}}", { hours: hoursLabel(load.planned, locale) })}{load.pencilled ? ` · ${t("预排 {{hours}}", { hours: hoursLabel(load.pencilled, locale) })}` : ""}{load.fixed ? ` · ${t("固定日程 {{hours}}", { hours: hoursLabel(load.fixed, locale) })}` : ""}
+        {load.allDay.length ? ` · ${t("全天：{{items}}", { items: load.allDay.join(t("、")) })}` : ""}</small>
     </section>
     <section className="dq-switch" aria-live="polite" aria-label={selected ? t("选中的日程") : t("下一项")}>
       {selected ? <BlockOverview key={selected.id} item={selected} items={items} today={today} labels={labels} details={details} heading={t("选中的日程")} onClose={onDeselect} />
@@ -67,7 +67,7 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
           setBusy(false); setStatus(t("未能批准，请到待确认页处理"));
         }}>{t("全部批准")}</button>
       </span>}
-      {asks !== null && asks > 0 && <a className="dq-link" href="/approvals#asks">{t("待决事项")} · <b className="mono">{asks}</b></a>}
+      {asks !== null && asks > 0 && <a className="dq-link" href="/approvals#asks" title={t("本周的待决事项；待确认页还列有任务提案与助手成果")}>{t("待决事项")} · <b className="mono">{asks}</b></a>}
       <a className="dq-link" href="/plan#time">{t("调整可用时段")}</a>
     </nav>
     {status && <small role="status">{status}</small>}

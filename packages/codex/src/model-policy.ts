@@ -19,15 +19,18 @@ export type RouteTier = "top" | "mid" | "low";
 /** What the account's remaining quota allows, as `budgetPolicy` reads it. */
 export type SpendMode = "normal" | "economy" | "manual_core_only";
 
+// One model, three efforts (2026-10-20, the owner: the sol/terra/luna table spent the quota too fast in testing).
 export const DEFAULT_TIERS: Record<RouteTier, ModelRoute> = {
-  top: { model: "gpt-5.6-sol", effort: "medium" },
-  mid: { model: "gpt-5.6-terra", effort: "high" },
-  low: { model: "gpt-5.6-luna", effort: "high" }
+  top: { model: "gpt-5.6-terra", effort: "high" },
+  mid: { model: "gpt-5.6-terra", effort: "medium" },
+  low: { model: "gpt-5.6-terra", effort: "low" }
 };
 
 /** Keyed by the Skill's own name, without the `crossline:` plugin prefix. */
 export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-onboarding": "top",
+  // The interview's second layer (2026-10-19): facts, dates and line attributes from numbered sentences. Careful reading, not synthesis.
+  "crossline-onboarding-extract": "mid",
   "crossline-milestone-architect": "top",
   "crossline-artifact-planner": "top",
   // Reads drafts critically for what could keep them from being reached; a judgement, not a lookup.
@@ -46,6 +49,10 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-task-titler": "low",
   "crossline-calendar-classifier": "low",
   "crossline-folder-classifier": "low",
+  "crossline-recording-digest": "low",
+  // A note's pictures and video frames into words and their visible text, many small runs (note-media.ts): the cheap tier.
+  "crossline-media-describer": "low",
+  "crossline-favourite-topics": "low",
   "crossline-goal-splitter": "low",
   // The person's own rules for a line: what every later run on that line follows, so read carefully, not cheaply.
   "crossline-insight-compiler": "mid",
@@ -63,15 +70,24 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-background-facts": "low",
   "crossline-plan-explainer": "low",
   // The assistant that works on the person's machine: coding and multi-step work, so the strongest tier, and never stepped down.
-  "crossline-agent": "top"
+  "crossline-agent": "top",
+  // The assistant without a shell: reading, writing and organising through Crossline's functions, on any model.
+  "crossline-agent-tools": "mid",
+  // New mail sorted from headers and opening lines: many small runs, so the cheap tier.
+  "crossline-mail-triage": "low",
+  // One short answer to one message the person must reply to, structured and without tools: the cheap tier (docs/personal-agent.md §3.1).
+  "crossline-mail-reply-drafter": "low",
+  // One request in words into a trigger and steps, once per automation.
+  "crossline-automation-designer": "mid"
 };
 
 /**
  * Where a Skill needs something other than its tier's default, so one Skill can think less (or more) without moving tier. The one input
  * box answers while the person waits: measured on the thirty-sentence replay (`scripts/concierge-replay.ts`, 2026-10-09), medium effort
- * read as well as high (29 and 28 of 30, the misses not the same sentences) with a median of 11.4 s against 12.3 s.
+ * read as well as high (29 and 28 of 30, the misses not the same sentences) with a median of 11.4 s against 12.3 s. That override lowered
+ * luna's high effort; on the one-model table the low tier is already below medium, so the input box takes its tier's effort as it is.
  */
-export const SKILL_OVERRIDES: Record<string, Partial<ModelRoute>> = { "crossline-concierge": { effort: "medium" } };
+export const SKILL_OVERRIDES: Record<string, Partial<ModelRoute>> = {};
 
 /**
  * Skills that never step down a tier when the budget is tight. The gate decides whether work counts as done and

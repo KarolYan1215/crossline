@@ -2,8 +2,8 @@ import { AppShell } from "../app-shell";
 import { OnboardingWorkspace } from "./onboarding-workspace";
 import "./onboarding-v3.css";
 import { requireSessionContext } from "../../lib/access-guard";
-import { interviewStatus } from "../../lib/interview-status";
 import { tOf } from "../../lib/locale";
+import { startReadiness } from "../../lib/start-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,8 @@ export default async function OnboardingPage({ searchParams }: { searchParams: P
   const ctx = await requireSessionContext();
   const { line } = await searchParams;
   const valid = line && /^[a-z0-9-]{1,40}$/.test(line) ? line : undefined;
-  const focus = !valid && !interviewStatus(ctx).readyToStart;
+  // The frame opens once the person can use every page: the start standard stands and they confirmed it.
+  const focus = !valid && !startReadiness(ctx).ready;
   const t = tOf(ctx);
   return <AppShell active={"设置"} className="ob-page" focus={focus} corner={false}>
     <h1 className="sr-only">{t("访谈")}</h1>

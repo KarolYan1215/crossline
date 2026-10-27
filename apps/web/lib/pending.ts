@@ -1,6 +1,6 @@
 import "server-only";
-import { profileGaps, type AccessContext } from "@crossline/core";
-import { interviewLocale, latestFileDates, listAgentTasks, readLocale } from "@crossline/db";
+import { onPersonsBoard, type AccessContext } from "@crossline/core";
+import { resultsAwaitingReview } from "@crossline/db";
 import { appNow, getStore } from "./crossline";
 import { countProposedTargets } from "./targets";
 import { countAssistantPending } from "./agent";
@@ -8,7 +8,7 @@ import { loadDiligence } from "./diligence";
 import { loadPendingDateBatch } from "./imported-dates";
 import { listed, openAsks } from "./asks";
 import { decisionHorizon } from "./horizon";
-import { identityLines } from "./lines";
+import { interviewStatus } from "./interview-status";
 import { preparingProposalIds } from "./proposal-ready";
 import { memoByLedger } from "./ledger-memo";
 
@@ -30,7 +30,10 @@ export type PendingCounts = {
   research: number;
   /** A batch of dates read from files. */
   dates: number;
-  /** Questions the profile still needs answered: a line resting only on guesses. */
+  /**
+   * Interview questions waiting while the start standard is still open — exactly the ones the interview page shows (`interviewStatus`,
+   * screened). Once the person uses the app they are an ask (`interviewAsks` in `lib/asks.ts`) and counted under `asks` instead.
+   */
   questions: number;
   /** Targets the architect proposed (a course's grade) that the person has not yet accepted or changed. */
   targets: number;
@@ -62,10 +65,12 @@ function computePending(ctx: AccessContext): PendingCounts {
   const split = <T>(items: T[], deferred: (item: T) => boolean) => { const later = items.filter(deferred).length; return { now: items.length - later, later }; };
   // A proposal whose steps are still being planned is not a decision yet (`lib/proposal-ready.ts`).
   const preparing = preparingProposalIds(ctx);
-  const proposals = split(orders.filter((order) => order.state === "awaiting_plan_approval" && !preparing.has(order.id)), (order) => Boolean(horizon.orderEntry(order)));
+  // A question to the person waiting as an order (docs/work-split.md) is not a proposal to approve: it reaches the person as an ask.
+  const proposals = split(orders.filter((order) => order.state === "awaiting_plan_approval" && !preparing.has(order.id) && onPersonsBoard(order)),
+    (order) => Boolean(horizon.orderEntry(order)));
   const drafts = split(store.listMilestones(ctx.workspaceId).filter((milestone) => milestone.status === "draft"), (milestone) => Boolean(horizon.milestoneEntry(milestone.id)));
   const asks = split(listed(openAsks(ctx)), (ask) => Boolean(ask.entersOn));
-  const reviews = split(listAgentTasks(store, ctx.workspaceId).filter((task) => task.status === "needs_review"), (task) => {
+  const reviews = split(resultsAwaitingReview(store, ctx.workspaceId), (task) => {
     const order = orders.find((item) => item.id === task.workOrderId);
     return Boolean(order && horizon.orderEntry(order));
   });
@@ -81,14 +86,7 @@ function computePending(ctx: AccessContext): PendingCounts {
     assistantQuestions: assistant.approvals,
     assistantReviews: reviews.now,
     asks: asks.now,
-    questions: profileGaps({
-      identities: identityLines(ctx).map((pack) => ({ id: pack.id, label: pack.label })),
-      projects: store.listProjects(ctx.workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),
-      facts: store.listProfileFacts(ctx.workspaceId),
-      undated: latestFileDates(store, ctx.workspaceId).undated,
-      // The interview's language, which its own questions are asked in (only counted here).
-      locale: interviewLocale(store, ctx.workspaceId) ?? readLocale(store, ctx.workspaceId)
-    }).filter((gap) => gap.blocking).length
+    questions: interviewQuestionsOutsideAsks(ctx)
   };
   // Candidate relations and research proposals are judged in the weekly review (`/review`), not one by one as they arrive (the
   // person's decision, 2026-10-13): whether to take one is a judgement about direction, not a fact only they can give. They stay listed
@@ -97,4 +95,14 @@ function computePending(ctx: AccessContext): PendingCounts {
   const later = { workOrders: proposals.later, milestoneDrafts: drafts.later, asks: asks.later, assistantReviews: reviews.later };
   return { ...counts, total: Object.values(today).reduce((sum, value) => sum + value, 0),
     later: { ...later, total: Object.values(later).reduce((sum, value) => sum + value, 0) } };
+}
+
+/**
+ * The badge once counted the profile's blocking gaps unscreened, so a question the interview page had screened out (or that a file
+ * already answered) showed as 「访谈问题 1」 with nowhere to answer it (2026-10-17 walkthrough, W-13). It now reads the same list the
+ * interview page does; while parked those questions are an ask, and once the checklist is complete there are none.
+ */
+function interviewQuestionsOutsideAsks(ctx: AccessContext): number {
+  const status = interviewStatus(ctx);
+  return status.started && !status.parked && !status.complete ? status.openQuestions : 0;
 }

@@ -1,10 +1,11 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
-import type { Ask, AskField, AskOption, AskProgress } from "@crossline/core";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { DECISION_SECONDS_MAX, type Ask, type AskField, type AskOption, type AskProgress } from "@crossline/core";
 import { Tag } from "../ui/tag";
 import { Clamp } from "../ui/clamp";
 import { RiskList } from "../milestones/risk-glyph";
+import { AskItems } from "./ask-items";
 import { answerBody, answerProblem, askOutcome, askSources, shortDay } from "./model";
 import type { AskPreviewData } from "./types";
 import { useLocale, useT } from "../locale-context";
@@ -20,6 +21,33 @@ async function post(path: string, body: Record<string, unknown>): Promise<{ ok?:
 }
 
 /** An option needs its follow-up fields filled before it can be sent: a required one, or optional ones with nowhere else to say it. */
+/**
+ * Seconds the card has been at least half on screen while the page was in front: what deciding it cost, sent with the answer (capped
+ * at `DECISION_SECONDS_MAX`, past which the person had walked away). A list shows several cards at once, so mounting is not looking.
+ */
+function useVisibleSeconds(ref: RefObject<HTMLElement | null>): () => number {
+  const total = useRef(0);
+  const since = useRef<number | null>(null);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    let inView = typeof IntersectionObserver === "undefined";
+    const update = () => {
+      const on = inView && document.visibilityState === "visible";
+      const now = performance.now();
+      if (on && since.current === null) since.current = now;
+      if (!on && since.current !== null) { total.current += now - since.current; since.current = null; }
+    };
+    const observer = typeof IntersectionObserver === "undefined" ? undefined
+      : new IntersectionObserver(([entry]) => { inView = Boolean(entry?.isIntersecting && entry.intersectionRatio >= 0.5); update(); }, { threshold: [0, 0.5, 1] });
+    observer?.observe(element);
+    document.addEventListener("visibilitychange", update);
+    update();
+    return () => { observer?.disconnect(); document.removeEventListener("visibilitychange", update); inView = false; update(); };
+  }, [ref]);
+  return () => Math.min(DECISION_SECONDS_MAX, Math.round((total.current + (since.current === null ? 0 : performance.now() - since.current)) / 1000));
+}
+
 const needsFields = (ask: Ask, option: AskOption) => Boolean(option.fields?.length) && (option.fields!.some((field) => field.required) || !ask.freeText);
 
 /**
@@ -36,10 +64,14 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const t = useT(), locale = useLocale();
+  const cardRef = useRef<HTMLLIElement>(null);
+  const seconds = useVisibleSeconds(cardRef);
   const answerable = ask.options.filter((option) => !option.href);
   const links = ask.options.filter((option) => option.href);
   const chosen = answerable.filter((option) => picked.includes(option.id));
   const fields = uniqueFields(chosen.flatMap((option) => option.fields ?? []));
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  const waitsForNote = chosen.some((option) => option.needsNote);
 
   const send = async (path: string, body: Record<string, unknown>) => {
     setBusy(true); setStatus(t("保存中…"));
@@ -48,12 +80,14 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
     if (result?.ok) { onDone(ask.id); return; }
     setStatus(answerProblem(result?.code, locale));
   };
-  const submit = (optionIds: string[]) => void send("/api/asks/answer", answerBody(ask.id, optionIds, values, note));
+  const submit = (optionIds: string[]) => void send("/api/asks/answer", answerBody(ask.id, optionIds, values, note, seconds()));
   const initials = (options: AskOption[]) => Object.fromEntries(options.flatMap((option) => option.fields ?? [])
     .filter((field) => field.initial).map((field) => [field.id, field.initial!]));
 
   const chooseOne = (option: AskOption) => {
     if (needsFields(ask, option)) { setPicked([option.id]); setValues(initials([option])); return; }
+    // An answer only words can give: pick it and send the person to the box instead of sending an empty answer.
+    if (option.needsNote && !note.trim()) { setPicked([option.id]); setStatus(t("先在下方写答案")); noteRef.current?.focus(); return; }
     submit([option.id]);
   };
   const toggle = (option: AskOption) => {
@@ -64,7 +98,7 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
   const outcome = askOutcome(ask, locale);
   const sources = askSources(ask, locale);
 
-  return <li className="ask-card ak-card" data-line={ask.line} data-urgency={ask.urgency} data-kind={ask.kind}>
+  return <li ref={cardRef} className="ask-card ak-card" data-line={ask.line} data-urgency={ask.urgency} data-kind={ask.kind}>
     <AskMeta ask={ask} />
     {level === 4 ? <h4 className="ak-title">{ask.title}</h4> : <h3 className="ak-title">{ask.title}</h3>}
     <dl className="ak-brief">
@@ -76,6 +110,7 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
       <a key={source.href} href={source.href} {...(source.href.startsWith("/api/") ? { target: "_blank", rel: "noreferrer" } : {})}>{source.label}</a>)}</p>}
     {ask.progress && <AgentProgressView progress={ask.progress} />}
     {ask.risks && <div className="ak-risks"><RiskList risks={ask.risks} gen /></div>}
+    {ask.items && <AskItems items={ask.items} />}
     {ask.preview && <PreviewToggle href={ask.preview.href} label={ask.preview.label} data={preview} />}
 
     {many
@@ -101,15 +136,15 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
     </div>}
 
     {ask.freeText && <label className="ak-free"><span className="sr-only">{t("用自己的话回答")}</span>
-      <textarea rows={1} value={note} maxLength={4000} placeholder={ask.freeText.placeholder} data-user-text
+      <textarea ref={noteRef} rows={1} value={note} maxLength={4000} placeholder={ask.freeText.placeholder} data-user-text
         onChange={(event) => setNote(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && note.trim()) { event.preventDefault(); submit(picked); }
         }} />
     </label>}
 
-    {(many || fields.length > 0 || note.trim()) && <div className="execution-actions ak-submit">
-      <button type="button" className="primary-button" disabled={busy || (!picked.length && !note.trim())} onClick={() => {
+    {(many || fields.length > 0 || waitsForNote || note.trim()) && <div className="execution-actions ak-submit">
+      <button type="button" className="primary-button" disabled={busy || (!picked.length && !note.trim()) || (waitsForNote && !note.trim())} onClick={() => {
         const missing = fields.find((field) => field.required && !(values[field.id] ?? "").trim());
         if (missing) { setStatus(t("「{{label}}」未填写", { label: missing.label })); return; }
         submit(picked);
@@ -118,8 +153,8 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
     </div>}
 
     <p className="ask-later">
-      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "tomorrow" })}>{t("明天再问")}</button>
-      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "week" })}>{t("下周再问")}</button>
+      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "tomorrow", seconds: seconds() })}>{t("明天再问")}</button>
+      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "week", seconds: seconds() })}>{t("下周再问")}</button>
       {status && <small role="status">{status}</small>}
     </p>
   </li>;

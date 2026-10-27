@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 import { SCHWARTZ_VALUES } from "@crossline/core";
 import { ValuesRadar } from "../portrait/portrait-charts";
 import { FlywheelPreview, type Link } from "./flywheel-preview";
+import { StartConfirm } from "./start-confirm";
 import type { OnboardingState } from "./onboarding-types";
 import type { ProjectTimeline, WeekSkeleton } from "../../lib/onboarding-board";
-import { weekdayShort } from "../../lib/i18n";
+import type { SkeletonBlock } from "@crossline/core";
+import { tFor, weekdayShort, type Locale } from "../../lib/i18n";
 import { useLocale, useT } from "../locale-context";
 
 /**
@@ -21,8 +23,10 @@ const VIEWS: Array<{ key: StageKey; label: string }> = [
   { key: "energy", label: "能量" }, { key: "projects", label: "项目" }, { key: "structure", label: "全貌" }
 ];
 /** Which picture each interview stage builds. */
-export function viewForStage(stage: string, complete: boolean): StageKey {
+export function viewForStage(stage: string, complete: boolean, ready = false): StageKey {
   if (complete) return "structure";
+  // Once the start standard stands the week's draft is the payoff: it comes forward until the deep parts begin.
+  if (ready && (stage === "orientation" || stage === "lines")) return "week";
   return ({ orientation: "lines", lines: "lines", situation: "week", compass: "compass", energy: "energy", details: "projects" } as Record<string, StageKey>)[stage] ?? "lines";
 }
 
@@ -30,16 +34,30 @@ export function viewForStage(stage: string, complete: boolean): StageKey {
 export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "startMissing">, stage: string): { label: string; minutes: number } {
   // A start item is per line and most are settled by one answer, several to a round: about 2.5 minutes each, never more than half an hour.
   if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, Math.min(30, Math.ceil(state.startMissing.length * 2.5))) };
-  const order = ["orientation", "lines", "situation", "compass", "energy", "details"];
+  const order = ["orientation", "lines", "situation", "compass", "energy"];
   const left = Math.max(1, order.length - Math.max(0, order.indexOf(stage)));
   return { label: "画像访谈还剩约", minutes: left * 5 };
+}
+
+/** Codes that mean no model can run for this account yet: the conversation already says so in the same words, under the reply. */
+const NO_MODEL = new Set(["MODEL_SPONSOR_PENDING", "MODEL_SPONSOR_BUDGET", "RUNTIME_UNCONNECTED", "MODEL_NOT_ADMITTED", "MODEL_CAPABILITY_MISSING"]);
+
+/** What the background extraction is doing, in a line, or nothing when it is caught up. */
+export function organizingNote(organizing: OnboardingState["organizing"], locale?: Locale): string {
+  const t = tFor(locale);
+  if (!organizing || (!organizing.replies && !organizing.files)) return "";
+  // 「系统会自动重试；访谈可以继续」 beside a round that could not run either was wrong on both counts (live beta, 2026-10-19).
+  if (organizing.failing && NO_MODEL.has(organizing.failing.code)) return "";
+  if (organizing.failing) return t("刚才的回答还没整理进记录，系统会自动重试；访谈可以继续。");
+  return organizing.files && !organizing.replies ? t("正在整理 {{count}} 份材料…", { count: organizing.files }) : t("正在整理刚才的回答…");
 }
 
 export function StageView({ state, stage, complete, onChanged }: {
   state: OnboardingState; stage: string; complete: boolean; onChanged: () => void;
 }) {
   const t = useT();
-  const current = viewForStage(stage, complete);
+  const locale = useLocale();
+  const current = viewForStage(stage, complete, state.readyToStart);
   const [shown, setShown] = useState<StageKey>(current);
   // A new stage brings its picture forward; a picture the person opened stays until the stage moves on.
   useEffect(() => setShown(current), [current]);
@@ -47,16 +65,30 @@ export function StageView({ state, stage, complete, onChanged }: {
   const total = state.startTotal;
   const done = Math.max(0, total - state.startMissing.length);
   const left = minutesLeft(state, stage);
-  const missing = state.startMissing.map((item) => item.label);
+  // A long-term goal is adopted in the left column, not answered in the conversation: its missing item links there (W-8).
+  const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
+  const progress = state.progress;
+  const organizing = organizingNote(state.organizing, locale);
   return <aside className="ob-stage" aria-label={t("正在成形")}>
+    {progress && !state.focusLine && <section className="ob-progress" aria-label={t("访谈进度")}>
+      <b>{complete ? t("访谈已完成") : progress.of
+        ? t("第 {{index}}/{{total}} 部分 · {{label}} · 已谈清 {{clear}}/{{of}}", { index: progress.index, total: progress.total, label: t(progress.label), clear: progress.clear, of: progress.of })
+        : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: progress.index, total: progress.total, label: t(progress.label) })}</b>
+      {!complete && progress.next && <small>{t("接下来：")}<span className="gen">{progress.next}</span></small>}
+    </section>}
     <section className="ob-ring-row" aria-label={t("开始使用的进度")}>
       <Ring done={state.readyToStart ? Math.max(1, total) : done} total={Math.max(1, total)} />
       <div>
         <b>{state.readyToStart ? t("可以开始使用") : total ? t("开始使用前还差 {{count}} 项", { count: state.startMissing.length }) : t("先回答中间的第一组问题")}</b>
         {complete ? <small>{t("访谈已完成")}</small> : total > 0 && <small>{t("{{label}} {{minutes}} 分钟", { label: t(left.label), minutes: left.minutes })}</small>}
-        {!state.readyToStart && missing.length > 0 && <ul className="ob-ring-missing">{missing.slice(0, 3).map((label) => <li key={label}>{t(label)}</li>)}
+        {organizing && <small className="ob-organizing" role="status">{organizing}</small>}
+        {!state.readyToStart && missing.length > 0 && <ul className="ob-ring-missing">{missing.slice(0, 3).map(({ label, href }) => <li key={label}>{href ? <a href={href}>{t("{{label}}（在左栏采用）", { label: t(label) })}</a> : t(label)}</li>)}
           {missing.length > 3 && <li>{t("等 {{count}} 项", { count: missing.length - 3 })}</li>}</ul>}
-        {state.readyToStart && <a className="ob-btn ob-primary" href="/">{t("开始使用")}</a>}
+        {/* The first time, the person looks over what the plan will rest on before every page opens; after that it is a plain link. */}
+        {state.readyToStart && (state.startConfirmed === false && state.startSummary ? <StartConfirm summary={state.startSummary} />
+          : <a className="ob-btn ob-primary" href="/">{t("开始使用")}</a>)}
+        {/* Two ways on from here, said once: the button looked like the end of the interview (2026-10-18 walkthrough). */}
+        {state.readyToStart && !complete && <small className="ob-ring-next">{t("现在就能排日程；接着答完剩下几轮会拿到画像报告。先去用的话，剩下的问题会出现在待确认里，随时回来接着答。")}</small>}
       </div>
     </section>
     <nav className="ob-stage-tabs" aria-label={t("各阶段的图")}>
@@ -66,8 +98,10 @@ export function StageView({ state, stage, complete, onChanged }: {
         onClick={() => setShown(view.key)}>{t(view.label, { context: "view" })}</button>)}
     </nav>
     <div className="ob-stage-body">
+      {/* The capacity conflict, once the lines are known: hours, what the fixed schedule takes, deadlines that crowd together. */}
+      {(shown === "lines" || shown === "week") && stage !== "orientation" && state.capacity && <CapacityNote capacity={state.capacity} />}
       {shown === "lines" && <LinesView state={state} onChanged={onChanged} />}
-      {shown === "week" && <WeekView week={state.week} />}
+      {shown === "week" && <WeekView week={state.week} draft={state.skeleton ?? []} lines={state.lines} />}
       {shown === "compass" && <CompassView profile={state.profile} />}
       {shown === "energy" && <EnergyView profile={state.profile} />}
       {shown === "projects" && <ProjectsView timeline={state.timeline} lines={state.lines} />}
@@ -109,11 +143,22 @@ function LinesView({ state, onChanged }: { state: OnboardingState; onChanged: ()
 
 /** Monday first: 1..6, 0 as weekday numbers. */
 const DAYS = [1, 2, 3, 4, 5, 6, 0];
+/** Colours for lines without a colour of their own (a line the person named), so the draft still tells them apart. */
+const DRAFT_PALETTE = ["#2f6f8f", "#8a5a2b", "#5b6b2e", "#7a3f6e", "#3f5f7a"];
+
+/** The capacity conflict in plain sentences (`capacityConflict`), computed from the ledger. */
+function CapacityNote({ capacity }: { capacity: import("@crossline/core").WeekCapacity }) {
+  const t = useT();
+  return <section className="ob-capacity" aria-label={t("容量")}>
+    <b>{t("你的一周")}</b>
+    <ul>{capacity.notes.map((note) => <li key={note}>{note}</li>)}</ul>
+  </section>;
+}
 const dayIndex = (weekday: number) => (weekday + 6) % 7; // 0 = Sunday in the data, Monday first on screen.
 const minutes = (time: string) => { const [h, m] = time.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
 
 /** The week as it stands: working hours by energy, and the fixed arrangements over them (dashed while still waiting for confirmation). */
-export function WeekView({ week }: { week: WeekSkeleton }) {
+export function WeekView({ week, draft = [], lines = [] }: { week: WeekSkeleton; draft?: SkeletonBlock[]; lines?: OnboardingState["lines"] }) {
   const t = useT();
   const locale = useLocale();
   // 「一」 … 「日」 over the columns in Chinese, "Mon" … "Sun" in English; 「周三」 / "Wed" in the tooltips.
@@ -134,6 +179,10 @@ export function WeekView({ week }: { week: WeekSkeleton }) {
       {week.windows.flatMap((window, w) => window.days.map((day) => <rect key={`${w}-${day}`} x={left + dayIndex(day) * column + 2} width={column - 4}
         y={y(window.start)} height={Math.max(2, y(window.end) - y(window.start))} className="ob-window" data-energy={window.energy}>
         <title>{t("{{day}} {{start}}–{{end}} 可用（精力{{energy}}）", { day: dayName(day), start: window.start, end: window.end, energy: energy(window.energy) })}</title></rect>))}
+      {draft.map((block, index) => <rect key={`draft-${index}`} x={left + dayIndex(block.weekday) * column + 3} width={column - 6}
+        y={y(block.start)} height={Math.max(2, y(block.end) - y(block.start))} className="ob-draft" data-line={block.lineId}
+        style={{ fill: `var(--lc, ${DRAFT_PALETTE[Math.max(0, lines.findIndex((line) => line.id === block.lineId)) % DRAFT_PALETTE.length]})` }}>
+        <title>{t("{{line}} · {{day}} {{start}}–{{end}}（草稿）", { line: lines.find((line) => line.id === block.lineId)?.label ?? "", day: dayName(block.weekday), start: block.start, end: block.end })}</title></rect>)}
       {week.calendar.map((event, index) => <rect key={`cal-${index}`} x={left + dayIndex(event.weekday) * column + 4} width={column - 8}
         y={y(event.start)} height={Math.max(3, y(event.end) - y(event.start))} className="ob-calendar">
         <title>{t("{{title}} · {{day}} {{start}}–{{end}}（{{source}}）", { title: event.title, day: dayName(event.weekday), start: event.start, end: event.end, source: event.source })}</title></rect>)}
@@ -145,6 +194,11 @@ export function WeekView({ week }: { week: WeekSkeleton }) {
     <p className="ob-legend"><span className="ob-key" data-k="high" />{t("精力高")} <span className="ob-key" data-k="medium" />{t("中", { context: "legend" })} <span className="ob-key" data-k="low" />{t("低", { context: "legend" })}
       <span className="ob-key" data-k="fixed" />{t("固定安排")} <span className="ob-key" data-k="pending" />{t("待确认", { context: "pending" })}
       {week.calendar.length > 0 && <><span className="ob-key" data-k="calendar" />{t("日历")}</>}</p>
+    {draft.length > 0 && <div className="ob-draft-note"><b>{t("本周骨架草稿")}</b>
+      <ul>{lines.map((line, index) => { const hours = draft.filter((block) => block.lineId === line.id)
+        .reduce((sum, block) => sum + minutes(block.end) - minutes(block.start), 0) / 60;
+        return hours > 0 ? <li key={line.id} data-line={line.id}><span className="ob-key" style={{ background: `var(--lc, ${DRAFT_PALETTE[index % DRAFT_PALETTE.length]})` }} />{t("{{line}} 约 {{hours}} 小时", { line: line.label, hours: Math.round(hours) })}</li> : null; })}</ul>
+      <small className="ob-muted">{t("按主线主次分配空闲时间的草稿；开始使用后，排程按真实任务和截止安排。")}</small></div>}
     <p className="ob-muted">{week.source === "default" ? t("还不知道可用时间，先按默认的每周 39 小时画；说出工作时间后会更新。")
       : week.source === "interview" ? t("每周可用约 {{hours}} 小时（访谈提议，可在计划页修改）。", { hours: Math.round(hours) })
       : week.source === "stated_hours" ? t("每周可用约 {{hours}} 小时（按说过的每周小时数推算）。", { hours: Math.round(hours) })

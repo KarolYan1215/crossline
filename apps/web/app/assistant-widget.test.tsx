@@ -18,11 +18,15 @@ describe("assistant widget", () => {
     expect(html).not.toContain("assistant-panel");
   });
 
-  test("before a figure is known (a new account, a guest that cannot draw images) the bubble is the text button 小帮手", () => {
+  test("before it is known whether there is a figure, the bubble is a quiet circle the figure's size, not the text 小帮手 (no jump)", () => {
+    // 2026-10-21 walkthrough: the text button showed first and turned into the round figure a moment later. Once the answer says there
+    // is no figure (a new account, a guest that cannot draw images) the text button 小帮手 is shown; that needs the effect, so e2e covers it.
     const html = renderToStaticMarkup(<AssistantWidget />);
-    expect(html).toContain(">小帮手</button>");
+    expect(html).toContain('data-pending=""');
+    expect(html).toContain('<span class="helper-face" data-size="button" aria-hidden="true"></span>');
     expect(html).toContain('aria-label="打开小帮手"');
-    expect(html).not.toContain("helper-face");
+    expect(html).not.toContain(">小帮手</button>");
+    expect(source).toContain(">{t(\"小帮手\")}</button>");
   });
 
   test("never reads or writes this application's own repository", () => {

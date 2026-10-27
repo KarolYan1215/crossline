@@ -3,6 +3,10 @@ import { useEffect, useState } from "react";
 import { SUBSCRIPTION_GUIDES, type CalendarSubscription } from "@crossline/core";
 import { useLocale, useT } from "../locale-context";
 import type { Translate } from "../../lib/i18n";
+import { SetupGuide } from "../ui/setup-guide";
+import { subscriptionGuide } from "../../lib/setup-guides";
+
+const GUIDE = subscriptionGuide(SUBSCRIPTION_GUIDES);
 
 const ago = (at: string | undefined, now: number, t: Translate) => {
   if (!at) return "";
@@ -42,7 +46,9 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
     const body = await response?.json().catch(() => undefined) as { state?: string; events?: number; message?: string } | undefined;
     if (body?.state === "added") {
       setLink(""); setLabel("");
-      setMessage(t("已接入，读到未来九周的 {{count}} 个日程。", { count: body.events ?? 0 }));
+      // All-day events (holidays, birthdays) are never read in: say so when that is why nothing came, or a holiday calendar reads as broken.
+      setMessage(body.events ? t("已接入，读到未来九周的 {{count}} 个日程（全天日程不读入）。", { count: body.events })
+        : t("已接入。未来九周里没有读到有具体时间的日程：全天日程（节假日、生日）和标为「空闲」的不读入。"));
       onChanged?.();
     } else setMessage(body?.message ?? t("没能接入这个日历，稍后再试。"));
     await load();
@@ -50,12 +56,12 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
   };
   const remove = async (id: string) => {
     setBusy(true);
-    await fetch(`/api/calendar/subscriptions?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
+    const response = await fetch(`/api/calendar/subscriptions?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
+    setMessage(response?.ok ? t("已移除，这本日历的日程已从计划里拿掉。") : t("没能移除，稍后再试。"));
     await load();
     onChanged?.();
     setBusy(false);
   };
-  const steps = SUBSCRIPTION_GUIDES.find((item) => item.app === guide)?.steps ?? [];
   // One click after copying the link on the calendar's page: read the clipboard and connect. A browser that will not give the clipboard
   // (permission refused, or not a secure page) leaves the box below to paste into by hand.
   const pasteAndAdd = async () => {
@@ -65,7 +71,7 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
   };
 
   return <section className="st-card calendar-subscriptions" aria-label={t("订阅日历")}>
-    <header><h3>{t("订阅日历")}</h3><small>{t("点你用的日历，在打开的页面拷贝订阅链接，回来点「粘贴并接入」。只读，不用登录。")}</small></header>
+    <header><h3>{t("订阅日历")}</h3><small>{t("点所用的日历，在打开的页面复制订阅链接，回来点「粘贴并接入」。只读，不用登录。")}</small></header>
     {items?.map((item) => <div className="st-row" key={item.id}>
       <span className="st-row-label">{item.label}
         <small>{item.host}{item.lastError ? ` · ${item.lastError}` : item.lastReadAt ? ` · ${ago(item.lastReadAt, now, t)}${en ? ", " : "，"}${t("{{count}} 个日程", { count: item.lastEvents ?? 0 })}` : ""}</small>
@@ -76,7 +82,6 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
       {SUBSCRIPTION_GUIDES.map((item) => <a key={item.app} href={item.url} target="_blank" rel="noreferrer" className="ob-btn secondary-button"
         aria-current={guide === item.app || undefined} onClick={() => setGuide(item.app)}>{t(item.app)} ↗</a>)}
     </div>
-    {guide && <ol className="calendar-subscriptions-guide">{steps.map((step) => <li key={step}>{t(step)}</li>)}</ol>}
     <button type="button" className="ob-btn primary-button" disabled={busy} onClick={() => void pasteAndAdd()}>{busy ? t("读取中…") : t("粘贴并接入")}</button>
     <form className="calendar-subscriptions-form" onSubmit={(event) => { event.preventDefault(); if (link.trim()) void add(); }}>
       <input type="url" inputMode="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder={t("或手动粘贴：webcal://… 或 https://…ics")} aria-label={t("日历订阅链接")} disabled={busy} />
@@ -84,6 +89,8 @@ export function CalendarSubscriptions({ onChanged }: { onChanged?: () => void })
       <button type="submit" className="ob-btn secondary-button" disabled={busy || !link.trim()}>{t("接入")}</button>
     </form>
     {message && <p role="status" className="muted">{message}</p>}
+    {/* Keyed on the chosen app so picking one opens the guide on its steps, as the list under the buttons used to. */}
+    <SetupGuide key={guide ?? "none"} guide={GUIDE} selected={guide} {...(guide ? { open: true } : {})} />
     <small className="muted">{t("链接相当于这本日历的钥匙：加密保存，只用来读取，不进备份。")}</small>
   </section>;
 }

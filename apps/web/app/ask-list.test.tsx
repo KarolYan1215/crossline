@@ -25,6 +25,8 @@ test("Today's stack opens only the top ask, shows the next two as edges, and can
   expect(html.match(/· 推荐/g)).toHaveLength(1);
   expect(html).toContain('href="/milestones"');
   expect(html).toContain("明天再问");
+  // The link out names what it opens: all of 待确认 (the header badge's number once read), not a second unexplained 「全部」.
+  expect(html).toMatch(/<a href="\/approvals#asks" class="pending-total-link" title="待确认包括待决事项、任务提案、助手成果等[^"]*">全部待确认 →<\/a>/);
   expect(renderToStaticMarkup(<AskStack initial={[]} />)).toBe("");
 });
 

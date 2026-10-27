@@ -1,11 +1,11 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import {
-  currentRiskReview, FIRST_DRAFTS_SETTING, firstDraftsState, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskCriteriaKeys,
-  ruleMilestoneRisks, supplyWarnings, taskProgress, timeOrderProblem, type AccessContext, type MilestoneRisk, type SuccessCriterion
+  currentRiskReview, draftingProgress, FIRST_DRAFTS_SETTING, firstDraftsState, MILESTONE_DRAFTING_SETTING, readMilestoneDrafting, type DraftingProgress, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskCriteriaKeys,
+  ruleMilestoneRisks, supplyWarnings, taskProgress, taskTitleOf, timeOrderProblem, type AccessContext, type MilestoneRisk, type SuccessCriterion
 } from "@crossline/core";
 import { readStoredArtifactPlan } from "@crossline/db";
-import { effectiveWeight, getStore, importancePresets, loadCurrentPlan, loadGoalForecast, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel, saveGoalSettings } from "./crossline";
+import { appNow, effectiveWeight, getStore, importancePresets, loadCurrentPlan, loadGoalForecast, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel, saveGoalSettings } from "./crossline";
 import { listCourseTargets } from "./targets";
 import { identityLines } from "./lines";
 import { localeFor, tOf } from "./locale";
@@ -18,7 +18,9 @@ import { tFor } from "./i18n";
  */
 export type BoardTick = { id: string; workOrderId: string; taskTitle: string; outcome: string; day: string | null;
   /** done: reached (filled); planned: ahead (hollow); postponed: its planned day passed without it (hollow, dashed, moved to `day`). */
-  state: "done" | "planned" | "postponed"; plannedDay: string | null };
+  state: "done" | "planned" | "postponed"; plannedDay: string | null;
+  /** The step the tick belongs to, and the day of its first block in the current schedule (null when the scheduler has not placed it). */
+  stepTitle: string; scheduledDay: string | null };
 export type BoardCriterion = { id: string; statement: string; quarters: number; observed?: string;
   threshold?: { comparator: "gte" | "lte"; value: number; bare?: number; unit: string } };
 export type BoardRelation = { id: string; direction: "out" | "in"; otherId: string; otherTitle: string; otherLine: string; kindLabel: string;
@@ -51,6 +53,8 @@ export type MilestoneBoard = {
   today: string; milestones: BoardMilestone[]; courses: BoardCourse[]; labels: Record<string, string>; lineOrder: string[];
   /** With no milestone yet: whether the worker is designing the first drafts on its own, or that run ended without any. */
   firstDrafts?: "none" | "running" | "stalled";
+  /** The last design run, line by line: lines still being designed, and why a line was left without drafts (`draftingProgress`). */
+  drafting?: DraftingProgress;
   stats: { ticksDone: number; ticksPlanned: number; reuse: number; nearest?: { id: string; title: string; line: string; days: number } };
 };
 
@@ -120,9 +124,9 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
       const doneDay = step.status === "done" ? step.updatedAt.slice(0, 10) : null;
       const plannedDay = step.dueBy || scheduled;
       const postponed = !doneDay && Boolean(plannedDay && plannedDay < today);
-      return { id: `${order.id}#${step.id}`, workOrderId: order.id, taskTitle: order.intent, outcome: step.tickOutcome,
+      return { id: `${order.id}#${step.id}`, workOrderId: order.id, taskTitle: taskTitleOf(order), outcome: step.tickOutcome,
         day: doneDay ?? (postponed ? scheduled ?? today : plannedDay ?? null), state: doneDay ? "done" as const : postponed ? "postponed" as const : "planned" as const,
-        plannedDay: plannedDay ?? null };
+        plannedDay: plannedDay ?? null, stepTitle: step.title, scheduledDay: scheduled };
     }));
     const reading = readings.get(milestone.id) ?? new Map();
     const criteria: BoardCriterion[] = milestone.successCriteria.map((criterion) => {
@@ -200,6 +204,8 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
   return {
     today, milestones: board, courses, labels, lineOrder: Object.keys(labels),
     firstDrafts: firstDraftsState(getStore().getSetting(ctx.workspaceId, FIRST_DRAFTS_SETTING), board.length > 0),
+    drafting: draftingProgress(readMilestoneDrafting(getStore().getSetting(ctx.workspaceId, MILESTONE_DRAFTING_SETTING)),
+      new Set(board.map((milestone) => milestone.identityId)), appNow(), locale),
     stats: {
       ticksDone: allTicks.filter((tick) => tick.state === "done" && tick.day && tick.day >= weekStart && tick.day <= today).length,
       ticksPlanned: allTicks.filter((tick) => tick.day && tick.day >= weekStart && tick.day < weekEnd).length,

@@ -6,14 +6,11 @@ import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
 export const FLYWHEEL_SKILL = "crossline:crossline-flywheel-scout";
 
-const INSTRUCTIONS = "Search the public web for information that would help finish the supplied "
-  + "milestones. Return only the requested JSON. Every finding must name one supplied milestoneId, "
-  + "cite the URL you actually read, the date you read it, and the condition that would make it stale. "
-  + "You may also propose relations between two DIFFERENT supplied milestones when what you read gives "
-  + "a concrete reason one helps the other: state the claim in `explanation`, state in `refutedWhen` "
-  + "what would show that claim is wrong, and cite the source you actually read. Do not propose tasks, "
-  + "do not propose new milestones, do not change anything, and do not invent sources. Returning no "
-  + "findings and no relations is a valid answer.";
+const INSTRUCTIONS = "Search the public web at night for what would help finish the person's approved milestones. Each finding names one "
+  + "supplied milestoneId and cites the page you read, the date you read it and what would make it stale. A relation joins two DIFFERENT "
+  + "supplied milestones on different lines, only when what you read gives a concrete reason one helps the other, with the claim in "
+  + "`explanation`, what would show it wrong in `refutedWhen`, and the source. Everything is a candidate the person decides; propose no tasks "
+  + "or milestones and invent no sources. Returning nothing is a valid answer. Return only the requested JSON.";
 
 export function buildFlywheelContext(store: CrosslineStore, workspaceId: string): FlywheelContext {
   const milestones = store.listMilestones(workspaceId).filter((item) => item.status === "approved");

@@ -5,17 +5,22 @@ import { authClient, emailCode } from "../auth-client";
 import { authErrorMessage } from "../auth-errors";
 import { useT } from "../locale-context";
 
-export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled = false, verified = false, errorCode }: { googleEnabled: boolean;
+export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled = false, verified = false, reset = false, deleted = false, errorCode }: { googleEnabled: boolean;
   emailEnabled?: boolean; chatgptEnabled?: boolean; verified?: boolean;
+  /** Back from 「设置新密码」 (`/login?reset=1`): say it worked and open the password tab, which it used to leave the person to guess. */
+  reset?: boolean;
+  /** Back from 删除账号 (`/login?deleted=1`): the page used to look as if nothing had happened. */
+  deleted?: boolean;
   /** A redirect back from a sign-in that failed elsewhere (ChatGPT, Google), as `/login?error=CODE`. */
   errorCode?: string }) {
   const t = useT();
-  const [status, setStatus] = useState(errorCode ? authErrorMessage({ code: errorCode }, t("登录没有完成，请重试。"), t) : verified ? t("邮箱已验证，请登录。") : "");
+  const [status, setStatus] = useState(errorCode ? authErrorMessage({ code: errorCode }, t("登录没有完成，请重试。"), t) : verified ? t("邮箱已验证，请登录。") : reset ? t("密码已更新，用新密码登录。")
+    : deleted ? t("账号已删除，资料已从服务器上清除。用同一个邮箱再登录会建一个新的空账号。") : "");
   const [error, setError] = useState(Boolean(errorCode));
   const [busy, setBusy] = useState(false);
   // 「邮箱验证码」 signs in (and on first use, signs up) without a password; offered only where mail can be sent.
   // The code is the default: one address, one code, and a first-time address is an account — no password, no separate verification mail.
-  const [mode, setMode] = useState<"password" | "code">(emailEnabled ? "code" : "password");
+  const [mode, setMode] = useState<"password" | "code">(emailEnabled && !reset ? "code" : "password");
   const [codeSentTo, setCodeSentTo] = useState("");
   // The address that was refused for being unverified: the person can have the link sent again right here.
   const [unverified, setUnverified] = useState("");

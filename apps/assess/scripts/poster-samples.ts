@@ -26,14 +26,14 @@ const SAMPLES = TYPE_CODES.map((code, index) => {
   const strength = (axis: number) => axis === soft ? 57 : 72 + ((index * 7 + axis * 5) % 22);
   return {
     code,
-    scores: { scope: lean(code[0] === "G", strength(0)), basis: lean(code[1] === "I", strength(1)), output: lean(code[2] === "R", strength(2)), rhythm: lean(code[3] === "A", strength(3)) },
+    scores: { collab: lean(code[0] === "W", strength(0)), purpose: lean(code[1] === "U", strength(1)), build: lean(code[2] === "H", strength(2)), lines: lean(code[3] === "G", strength(3)) },
     nickname: NICKNAMES[index % NICKNAMES.length]!,
     variant: index % 2 ? "male" as const : "female" as const
   };
 });
 
 for (const [index, sample] of SAMPLES.entries()) {
-  const type = publicType(sample.scores, {}, `sample-${index}`);
+  const type = publicType(sample.scores, {}, `sample-${index}`, undefined, ["写初稿", "出图", "查资料"].slice(0, 1 + (index % 3)));
   if (type.code !== sample.code) throw new Error(`scores for ${sample.code} landed on ${type.code}`);
   const png = await renderTypePoster({ type, nickname: sample.nickname, avatarPath: templateImagePath(type.code, sample.variant), inviteUrl: invite });
   const file = path.join(out, `poster-${type.code}.png`);
@@ -42,7 +42,7 @@ for (const [index, sample] of SAMPLES.entries()) {
 }
 
 // Two pair cards: one pair with no line in common, one that shares some.
-for (const [codeA, codeB] of [["GEMA", "SIMP"], ["GERA", "GIRP"]] as const) {
+for (const [codeA, codeB] of [["ROBA", "WUHG"], ["WOHA", "ROHA"]] as const) {
   const a = SAMPLES.find((sample) => sample.code === codeA)!, b = SAMPLES.find((sample) => sample.code === codeB)!;
   const typeA = publicType(a.scores, {}, `pair-${codeA}`), typeB = publicType(b.scores, {}, `pair-${codeB}`);
   const card = await renderPairCard({

@@ -8,6 +8,13 @@
       "port": 3320
     },
     {
+      "name": "review-dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["exec", "tsx", "scripts/review-server.ts", "dev"],
+      "port": 3320,
+      "url": "http://localhost:3320"
+    },
+    {
       "name": "beta",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["exec", "tsx", "scripts/beta-instance.ts", "web"],

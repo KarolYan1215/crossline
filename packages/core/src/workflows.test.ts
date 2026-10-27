@@ -32,6 +32,10 @@ test("a scheduled workflow is due on its days after its time, once a day, and no
   expect(workflowDue(weekly, undefined, new Date("2026-10-16T22:30:00Z"), zone)).toBe(false);
   expect(workflowDue(weekly, "2026-10-16T23:05:00Z", new Date("2026-10-16T23:30:00Z"), zone)).toBe(false);
   expect(workflowDue(weekly, undefined, new Date("2026-10-17T02:30:00Z"), zone)).toBe(false);
+  // Held at its time because the assistant was busy: still due that evening, not the next day, and not once it has run.
+  expect(workflowDue(weekly, undefined, new Date("2026-10-17T02:30:00Z"), zone, "2026-10-16T23:05:00Z")).toBe(true);
+  expect(workflowDue(weekly, undefined, new Date("2026-10-17T02:30:00Z"), zone, "2026-10-09T23:05:00Z")).toBe(false);
+  expect(workflowDue(weekly, "2026-10-17T02:00:00Z", new Date("2026-10-17T02:30:00Z"), zone, "2026-10-16T23:05:00Z")).toBe(false);
   expect(workflowDue(weekly, undefined, new Date("2026-10-15T23:30:00Z"), zone)).toBe(false);
   expect(workflowDue({ type: "weekdays", time: "09:00" }, undefined, new Date("2026-10-17T14:30:00Z"), zone)).toBe(false);
   expect(workflowDue({ type: "daily", time: "09:00" }, "2026-10-16T14:05:00Z", new Date("2026-10-17T14:30:00Z"), zone)).toBe(true);

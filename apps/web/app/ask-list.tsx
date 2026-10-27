@@ -6,6 +6,7 @@ import { AskCard } from "./asks/ask-card";
 import { AskDeck, DeckNav, useAskList, useDeck } from "./asks/ask-drawer";
 import type { AskPreviews } from "./asks/types";
 import { useT } from "./locale-context";
+import { PendingTotalLink } from "./pending-badge";
 
 /**
  * The system's questions, a few at a time: each says what is asked, why, what an answer does and what silence does, with its options
@@ -53,7 +54,9 @@ export function AskStack({ initial, moreHref, previews }: { initial: Ask[]; more
   if (!count) return null;
   return <section className="ask-list ask-stack" id="asks" aria-label={t("待决事项")}>
     <header><h2>{t("待决事项")} · {count}</h2>
-      <DeckNav at={at} count={count} go={go} label={t("切换待决事项")}>{moreHref && <a href={moreHref}>{t("全部")}</a>}</DeckNav></header>
+      {/* 「待决事项」 counts these questions only; the badge in the header counts all of 待确认, so the link says that larger number
+          beside it instead of a second unexplained one (2026-10-21 walkthrough). */}
+      <DeckNav at={at} count={count} go={go} label={t("切换待决事项")}>{moreHref && <PendingTotalLink href={moreHref} />}</DeckNav></header>
     <AskDeck asks={asks} at={at} pick={pick} onDone={onDone} previews={previews} />
   </section>;
 }
