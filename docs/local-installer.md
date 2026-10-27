@@ -23,8 +23,13 @@
 
 ```text
 %LOCALAPPDATA%\Crossline\
-  app\            node.exe、Crossline.exe（托盘）、apps\（web 的 .next-prod、worker、launcher 源码）、packages\、skills\、
+  app\            node.exe、Crossline.exe（托盘）、apps\（web 的 .next-prod、worker 与 launcher 的 dist\*.mjs）、skills\、
                   node_modules\（hoisted）、codex\codex.exe、codex\codex-code-mode-host.exe、licenses\、release.json
+```
+
+不随包带任何 TypeScript 源码（2026-10-27）：worker 和启动器由 `scripts/bundle-installed.ts` 打成压缩过的单个 ES 模块（`@crossline/*` 打进包内，其余依赖从 hoisted 的 `node_modules` 按包名加载），不写 source map；`packages\` 只剩各自的 `package.json`（hoisted 安装要用）；`.next-prod` 不带 `cache\` 和 `types\`。打包时 stage 里出现任何 `.map` 或我们自己的 `.ts` 就失败；打包进来的源文件只要不是 worker、启动器和 `packages/*/src`（或是测试、测试辅助），也失败。Skill 的 `SKILL.md` 照原样随包，Codex 运行时要读它们的文字。服务器镜像（`scripts/build-worker.mjs`）照旧带 source map，安装包不用它的产物。
+
+```text
   data\           crossline.db、auth.db、materials\、portrait\、logs\、launcher-secrets.json 等（即 CROSSLINE_DATA_DIR）
   state\          codex-home\（测试者本人的 Codex 登录与记忆）、auth\（Outlook 登录缓存）、runtimes\（即 CROSSLINE_STATE_DIR）
   backups\        更新前的 data\ 副本，保留最近 3 份

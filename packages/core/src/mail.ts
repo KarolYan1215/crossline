@@ -217,3 +217,22 @@ export function replyReminderDue(draft: MailReplyDraft, now: Date): boolean {
   return Boolean(draft.notifiedAt && !draft.remindedAt && draft.replyBy
     && now.getTime() - Date.parse(draft.notifiedAt) >= MAIL_REPLY_REMIND_HOURS * 3_600_000);
 }
+
+/**
+ * Mail to-dos that only ask to look at something (an unusual charge, a payment received, a provider's notice) are reminders, not work:
+ * on the real account each became a task with an AI analysis, a step plan, a line it did not belong to and an assistant run that asked
+ * for the transaction records (2026-10-27).
+ */
+const CHECK_VERB = /^(核实|核查|核对|查看|确认|检查|留意)/u;
+export const MAIL_CHECK_NUDGE_KIND = "mail_check";
+
+/**
+ * A to-do sorted out of mail whose name only asks to look at something (核实 / 核查 / 查看 / 确认 / 留意 …): a reminder, not work to plan.
+ * Judged only on what came from mail, where a check is almost always reading a notice.
+ */
+export const isMailReminderTitle = (title: string): boolean => CHECK_VERB.test(title.trim()) || /^了解|^关注/u.test(title.trim());
+
+/** Which way the money in an account alert went: in for a payment received, a deposit or a refund; out for anything else (a charge). */
+export function moneyDirection(text: string): "income" | "expense" {
+  return /收款|入账|到账|退款|存入|工资|received|deposit|refund|credited|paid you|sent you/iu.test(text) ? "income" : "expense";
+}

@@ -27,3 +27,10 @@ test("an unparseable Origin is not trusted", () => {
   expect(isCrossSiteWrite(request({ origin: "not-a-url", host: "127.0.0.1:3210" }))).toBe(true);
   expect(isCrossSiteWrite(request({ origin: "http://127.0.0.1:3210" }))).toBe(true);
 });
+
+test("a browser that leaves Origin out is still refused when it says the request came from another site", () => {
+  expect(isCrossSiteWrite(request({ "sec-fetch-site": "cross-site", host: "127.0.0.1:3210" }))).toBe(true);
+  expect(isCrossSiteWrite(request({ "sec-fetch-site": "cross-site", origin: "http://127.0.0.1:3210", host: "127.0.0.1:3210" }))).toBe(true);
+  expect(isCrossSiteWrite(request({ "sec-fetch-site": "same-origin", host: "127.0.0.1:3210" }))).toBe(false);
+  expect(isCrossSiteWrite(request({ "sec-fetch-site": "none", host: "127.0.0.1:3210" }))).toBe(false);
+});

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { cleanTaskTitle, courseCodeOf, taskTitleOf, validateTaskTitles, withCourse } from "./task-title";
+import { cleanTaskTitle, courseCodeOf, sittingStartOn, taskTitleOf, validateTaskTitles, withCourse } from "./task-title";
 
 test("a task's name is one short action; a long sentence is cut at its first clause", () => {
   expect(cleanTaskTitle("完成 ECE 555 作业 2。")).toBe("完成 ECE 555 作业 2");
@@ -34,4 +34,13 @@ test("a project marked uncertain in English names no course either", () => {
   expect(courseCodeOf("Possibly ECE 548")).toBeUndefined();
   expect(courseCodeOf("ECE 548 Digital Design")).toBe("ECE 548");
   expect(courseCodeOf("课程待确认（可能为 ECE 548）")).toBeUndefined();
+});
+
+test("work towards an exam is due when that day's class of the same course starts", () => {
+  const blocks = [{ day: "2026-10-27", start: "13:00", title: "ECE 548 课程" }, { day: "2026-10-27", start: "11:00", title: "导师 1V1" },
+    { day: "2026-10-28", start: "09:00", title: "ECE 548 课程" }];
+  expect(sittingStartOn("ECE 548 期中考试 1 达到 A− 支撑线", "2026-10-27", blocks)).toBe("13:00");
+  expect(sittingStartOn("ECE 548 作业 3 提交", "2026-10-27", blocks)).toBeUndefined();
+  expect(sittingStartOn("ECE 555 期中考试", "2026-10-27", blocks)).toBeUndefined();
+  expect(sittingStartOn("ECE 548 期中考试 1", "2026-10-29", blocks)).toBeUndefined();
 });

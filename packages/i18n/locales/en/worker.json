@@ -805,5 +805,18 @@
   "只接受 993 或 143 端口": "Only ports 993 and 143 are accepted",
   "服务器地址解析不到公开地址": "The server address does not resolve to a public address",
   "没有这个文件夹": "There is no such folder",
-  "连不上邮箱服务器，请检查服务器地址。": "Cannot reach the mail server. Check the server address."
+  "连不上邮箱服务器，请检查服务器地址。": "Cannot reach the mail server. Check the server address.",
+  "邮件里的核对事项": "A check-up item from mail",
+  "转为提醒：{{why}}": "Turned into a reminder: {{why}}",
+  "邮件核对事项转为提醒 {{count}} 个_one": "{{count}} mail check-up item turned into a reminder",
+  "邮件核对事项转为提醒 {{count}} 个_other": "{{count}} mail check-up items turned into reminders",
+  "{{count}} 个从邮件来的核对事项不再作为任务排程，改成提醒：{{titles}} 等。_one": "{{count}} check-up item from mail is no longer scheduled as a task and is now a reminder: {{titles}} and more.",
+  "{{count}} 个从邮件来的核对事项不再作为任务排程，改成提醒：{{titles}} 等。_other": "{{count}} check-up items from mail are no longer scheduled as tasks and are now reminders: {{titles}} and more.",
+  "{{count}} 个从邮件来的核对事项不再作为任务排程，改成提醒：{{titles}}。_one": "{{count}} check-up item from mail is no longer scheduled as a task and is now a reminder: {{titles}}.",
+  "{{count}} 个从邮件来的核对事项不再作为任务排程，改成提醒：{{titles}}。_other": "{{count}} check-up items from mail are no longer scheduled as tasks and are now reminders: {{titles}}.",
+  "需要时在对应 App 或官网里看一眼即可；以后这类邮件直接出现在右上角的提醒里。": " Check them in the relevant app or website when needed; from now on such mail shows up in the reminders at the top right.",
+  "撤销：恢复这些任务": "Undo: restore these tasks",
+  "已自动记账 {{value}} {{currency}}。": "Recorded {{value}} {{currency}} automatically. ",
+  "邮件提醒：{{title}}。{{noted}}来自 {{from}}「{{subject}}」。不是本人操作的话在对应 App 或官网里处理，不要点邮件里的链接。": "Mail reminder: {{title}}. {{noted}}From {{from}}, \"{{subject}}\". If this was not you, deal with it in the relevant app or website; do not click links in the mail.",
+  "提议的截止 {{due}} 已过，仍未批准": "The proposal's due date {{due}} has passed and it is still not approved"
 }

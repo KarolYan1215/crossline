@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { CodexRpcBoundary } from "@crossline/codex";
-import { nodeCapacity, startNodeAgent, type AppServerLines } from "./agent";
+import { NODE_LIVENESS_MS, nodeCapacity, reconnectDelayMs, silentTooLong, startNodeAgent, type AppServerLines } from "./agent";
 import { loginNodeWithApiKey } from "./control";
 import { createNodeHub, type NodeHub, type NodeStatus } from "./hub";
 import { codexVersionOf, nodePath, refusal, rewriteParams, underRoots } from "./protocol";
@@ -272,6 +272,22 @@ test("a node takes as many runs as it has cores (one per GB of memory at most), 
   expect(nodeCapacity(2, 4 * GB, {})).toBe(4);
   expect(nodeCapacity(16, 32 * GB, { CROSSLINE_NODE_CAPACITY: "10" })).toBe(10);
   expect(nodeCapacity(16, 32 * GB, { CROSSLINE_NODE_CAPACITY: "99" })).toBe(16);
+});
+
+test("a node dials again after a jittered wait and takes a link silent for three beats as dead", () => {
+  const steps = [5_000, 15_000, 60_000];
+  expect(reconnectDelayMs(steps, 0, () => 0)).toBe(3_750);
+  expect(reconnectDelayMs(steps, 0, () => 1)).toBe(6_250);
+  expect(reconnectDelayMs(steps, 1, () => 0.5)).toBe(15_000);
+  expect(reconnectDelayMs(steps, 9, () => 0.5)).toBe(60_000);
+  for (let i = 0; i < 50; i++) {
+    const wait = reconnectDelayMs(steps, 2);
+    expect(wait).toBeGreaterThanOrEqual(45_000);
+    expect(wait).toBeLessThanOrEqual(75_000);
+  }
+  expect(silentTooLong(0, NODE_LIVENESS_MS)).toBe(false);
+  expect(silentTooLong(0, NODE_LIVENESS_MS + 1)).toBe(true);
+  expect(silentTooLong(1_000, 5_000, 2_000)).toBe(true);
 });
 
 test("paths: only the server's skill roots are mirrored; a run's cwd goes to the node's work directory; a prompt is never touched", () => {

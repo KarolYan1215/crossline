@@ -35,9 +35,22 @@ export async function generateMetadata(): Promise<Metadata> {
 /** `viewport-fit=cover` so the bottom tab bar can reach the screen edge and pad itself past the iPhone's home indicator. */
 export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#0A0A0A" };
 
+/**
+ * Every view is a full page load (the back link and the saved scroll position rely on it), and on the hosted beta a page costs one
+ * round trip to Hong Kong plus its render, 0.4–1.3 s measured from Chicago (2026-10-27). Chromium fetches a view's page while the pointer
+ * rests on its link (`moderate`: about 200 ms of hover, or a press), so the click usually finds it already here. Prefetch only, never
+ * prerender: a prerendered page would run its scripts (presence, the day's opener) for a page the person may not open. Other browsers
+ * ignore the rules. Pages with a side effect on open (`/return`, `/confirm`) are not listed.
+ */
+const SPECULATION_RULES = JSON.stringify({ prefetch: [{ eagerness: "moderate", where: { or: [
+  "/", "/milestones", "/plan", "/workbench", "/workbench/*", "/approvals", "/settings", "/review", "/portrait"
+].map((path) => ({ href_matches: path })) } }] });
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const locale = await getLocale();
   return <html lang={htmlLang(locale)}>
-    <body><LocaleProvider locale={locale}>{children}{isLocalInstall() && <PageBeacon />}</LocaleProvider></body>
+    <body><LocaleProvider locale={locale}>{children}{isLocalInstall() && <PageBeacon />}</LocaleProvider>
+      <script type="speculationrules" dangerouslySetInnerHTML={{ __html: SPECULATION_RULES }} />
+    </body>
   </html>;
 }

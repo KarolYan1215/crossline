@@ -42,6 +42,21 @@ export type TimelineItem = {
 /** A date something is due by, shown as a flag on the day rather than a block of time. */
 export type TimelineDeadline = { id: string; day: string; title: string; identityId?: string; detail?: string };
 
+/**
+ * One marker per thing due on a day. The same exam came back three times on one day (2026-10-27): once as a dated fact under the course,
+ * once under a duplicate of it, once named with the course twice. Titles are compared without course codes, spaces and punctuation; the
+ * first one wins, so a milestone listed first keeps its marker.
+ */
+export function uniqueDeadlines(deadlines: TimelineDeadline[]): TimelineDeadline[] {
+  const seen = new Set<string>();
+  return deadlines.filter((item) => {
+    const key = `${item.day}|${item.title.replace(/[A-Za-z]{2,5}\s?\d{3,4}[A-Za-z]?/gu, "").replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export const MINUTES_PER_DAY = 1440;
 
 export const toMinutes = (time: string): number => {

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { CODEX_RELEASE_BINARY_SHA256 } from "../packages/codex/src/index";
+import { bundleInstalled, sourceMaps } from "./bundle-installed";
 
 /**
  * Builds the Windows installer (docs/local-installer.md, work package 2):
@@ -11,9 +12,10 @@ import { CODEX_RELEASE_BINARY_SHA256 } from "../packages/codex/src/index";
  *     [--ms-client-id …] [--release-base https://github.com/<owner>/<repo>/releases/download] [--skip-web-build]
  *
  * 1. builds the web app into apps/web/.next-prod (unless --skip-web-build);
- * 2. stages a tree that mirrors the repository under dist/installer/stage — the workspace's package.json files and sources, the
- *    built web app, the Skills — and installs production dependencies into it as one hoisted node_modules, on the same node.exe
- *    that is then shipped (so native modules match its ABI);
+ * 2. stages a tree that mirrors the repository under dist/installer/stage — the workspace's package.json files, the built web app,
+ *    the worker and the launcher as minified bundles (scripts/bundle-installed.ts; no TypeScript source and no source map ships), the
+ *    Skills — and installs production dependencies into it as one hoisted node_modules, on the same node.exe that is then shipped
+ *    (so native modules match its ABI);
  * 3. adds node.exe, the release Codex runtime and its code-mode host (checked against the pinned hash), their licences, the tray
  *    (compiled here with the .NET Framework C# compiler) and release.json;
  * 4. compiles installer/crossline.iss with Inno Setup and writes latest.json for the public releases repository.
@@ -39,7 +41,6 @@ function run(command: string, commandArgs: string[], cwd: string, env: NodeJS.Pr
 const sha256 = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
 const copy = (from: string, to: string, filter?: (source: string) => boolean) =>
   cpSync(path.join(repoRoot, from), path.join(stage, to), { recursive: true, ...(filter ? { filter } : {}) });
-const notTest = (source: string) => !/\.test\.tsx?$/.test(source) && !source.includes(`${path.sep}testing${path.sep}`);
 
 // 1. The web build.
 if (!args.includes("--skip-web-build")) run("pnpm.cmd", ["build:prod"], repoRoot);
@@ -50,24 +51,41 @@ rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 for (const file of ["package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml", "tsconfig.base.json"]) copy(file, file);
 const workspaces = ["apps/web", "apps/worker", "apps/launcher", ...readdirSync(path.join(repoRoot, "packages")).map((name) => `packages/${name}`)];
-for (const workspace of workspaces) {
-  copy(`${workspace}/package.json`, `${workspace}/package.json`);
-  if (existsSync(path.join(repoRoot, workspace, "tsconfig.json"))) copy(`${workspace}/tsconfig.json`, `${workspace}/tsconfig.json`);
-  if (workspace !== "apps/web") copy(`${workspace}/src`, `${workspace}/src`, notTest);
-}
+// Only each workspace's package.json (the frozen install needs them): no TypeScript source ships. The worker and the launcher go in
+// as minified bundles with the workspace packages inside (scripts/bundle-installed.ts), the web app as its Next build.
+for (const workspace of workspaces) copy(`${workspace}/package.json`, `${workspace}/package.json`);
 // Every app in the workspace must be present for a frozen install; the ones not shipped are reduced to their package.json.
 for (const name of readdirSync(path.join(repoRoot, "apps"))) {
   if (!existsSync(path.join(stage, "apps", name)) && existsSync(path.join(repoRoot, "apps", name, "package.json"))) copy(`apps/${name}/package.json`, `apps/${name}/package.json`);
 }
-copy("apps/web/.next-prod", "apps/web/.next-prod", (source) => !source.includes(`${path.sep}cache${path.sep}`) && !source.endsWith(`${path.sep}cache`));
+// Not the build cache, and not `types/` — Next's type-check stubs, which `next start` never reads and which name the builder's paths.
+const nextBuild = path.join(repoRoot, "apps", "web", ".next-prod");
+const notShippedBuild = (source: string) => {
+  const top = path.relative(nextBuild, source).split(path.sep)[0];
+  return top !== "cache" && top !== "types";
+};
+copy("apps/web/.next-prod", "apps/web/.next-prod", notShippedBuild);
 copy("apps/web/public", "apps/web/public");
 copy("apps/web/next.config.mjs", "apps/web/next.config.mjs");
+// The Skills stay as they are: the Codex runtime reads each SKILL.md as text.
 copy("skills", "skills");
+const bundles = await bundleInstalled(stage);
+console.log(JSON.stringify({ bundles }));
 
 // Production dependencies, flat, with real files (hoisted), built by the node that ships.
 const node = process.execPath;
 run("pnpm.cmd", ["install", "--prod", "--frozen-lockfile", "--config.node-linker=hoisted", "--config.package-import-method=copy"], stage, { ...process.env, npm_config_nodedir: "" });
 rmSync(path.join(stage, "node_modules", "@crossline"), { recursive: true, force: true });
+// Third-party packages' own source maps are dead weight; then nothing may carry one (a Next build with source maps on, a bundle).
+for (const map of sourceMaps(path.join(stage, "node_modules"))) rmSync(map, { force: true });
+const maps = sourceMaps(stage);
+if (maps.length) throw new Error(`SOURCE_MAP_STAGED ${maps.slice(0, 10).map((file) => path.relative(stage, file)).join(", ")}`);
+// Nothing of the repository's TypeScript either (a package's own .d.ts under node_modules is not ours).
+const ownSource = readdirSync(stage, { withFileTypes: true, recursive: true })
+  .filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name) && !/\.d\.ts$/.test(entry.name))
+  .map((entry) => path.relative(stage, path.join(entry.parentPath, entry.name)))
+  .filter((file) => !file.split(path.sep).includes("node_modules"));
+if (ownSource.length) throw new Error(`TYPESCRIPT_STAGED ${ownSource.slice(0, 10).join(", ")}`);
 // Runtime libraries for other systems are dead weight in a Windows-only build.
 const onnx = path.join(stage, "node_modules", "onnxruntime-node", "bin");
 if (existsSync(onnx)) for (const napi of readdirSync(onnx)) for (const platform of readdirSync(path.join(onnx, napi))) {

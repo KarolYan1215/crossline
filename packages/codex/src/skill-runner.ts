@@ -643,6 +643,21 @@ function isThreadLost(error: unknown): boolean {
   return /thread not found|no rollout found/i.test(text);
 }
 
+/**
+ * The runtime went away under a pending request: the local app-server exited or was stopped, or a compute node's connection
+ * dropped. All three are the same interruption as `crossline/runtimeDisconnected` mid-turn, so they get its code and are retried;
+ * a dropped node used to surface as its own code, which the assistant's retry rule read as a dead end.
+ */
+const RUNTIME_GONE = new Set(["CODEX_APP_SERVER_EXITED", "CODEX_APP_SERVER_STOPPED", "CROSSLINE_NODE_DISCONNECTED"]);
+
+/** The blocker code for whatever ended a run. */
+export function skillErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (RUNTIME_GONE.has(message)) return "SKILL_RUNTIME_EXITED";
+  if (/^[A-Z][A-Z_]{2,}$/.test(message)) return message;
+  return isThreadLost(error) ? "SKILL_THREAD_LOST" : "SKILL_RUNTIME_FAILED";
+}
+
 type Detailed = Error & { detail?: string };
 const withDetail = (error: Error, detail: string | undefined): Error => {
   if (detail) (error as Detailed).detail = detail;
@@ -1095,10 +1110,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
 function failureResult<T>(client: CodexRpcBoundary, error: unknown, audit: AnalysisAudit, locale?: Locale): SkillRunResult<T> {
   const t = said(locale);
   if (audit.threadId && audit.turnId) void client.request("turn/interrupt", { threadId: audit.threadId, turnId: audit.turnId }).catch(() => {});
-  const message = error instanceof Error ? error.message : "";
-  const code = /^[A-Z][A-Z_]{2,}$/.test(message) ? message
-    : message === "CODEX_APP_SERVER_EXITED" || message === "CODEX_APP_SERVER_STOPPED" ? "SKILL_RUNTIME_EXITED"
-    : isThreadLost(error) ? "SKILL_THREAD_LOST" : "SKILL_RUNTIME_FAILED";
+  const code = skillErrorCode(error);
   // Each message says what the person can actually do; no raw model or auth text ever reaches it.
   const advice: Record<string, string> = {
     SKILL_USAGE_LIMIT: "Codex 用量额度已用完；额度恢复后可重试。",
@@ -1401,7 +1413,7 @@ export async function compactThread(client: CodexRpcBoundary, threadId: string, 
       try { return await runCompaction(client, threadId, skillName); } finally { markClientBusy(client, -1); }
     }) ?? outcome;
   } catch (error) {
-    outcome = { ok: false, code: error instanceof Error && /^[A-Z][A-Z_]{2,}$/.test(error.message) ? error.message : isThreadLost(error) ? "SKILL_THREAD_LOST" : "SKILL_RUNTIME_FAILED" };
+    outcome = { ok: false, code: skillErrorCode(error) };
   } finally {
     // Kept for the conversation as after any turn.
     releaseThread(client, threadId, THREAD_KEEP_MS);

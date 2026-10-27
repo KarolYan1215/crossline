@@ -585,5 +585,18 @@
   "{{title}}：选择": "{{title}}: choose",
   "{{label}}（不支持）": "{{label}} (not supported)",
   "{{label}}的步骤": "Steps for {{label}}",
-  "常见出错": "Common problems"
+  "常见出错": "Common problems",
+  "在单独的小窗口里打开，切到别的标签页或程序时也留在最上层": "Open in a small separate window that stays on top when you switch tabs or apps",
+  "把小帮手钉在桌面": "Pin the Helper to the desktop",
+  "钉在桌面": "Pin to desktop",
+  "小帮手 · Crossline": "Helper · Crossline",
+  "小帮手：在休息": "Helper: resting",
+  "收起钉在桌面的小帮手": "Close the pinned Helper",
+  "打开 Crossline": "Open Crossline",
+  "记一下": "Capture",
+  "昨天 {{clock}}": "Yesterday {{clock}}",
+  "在小帮手里处理": "Handle in Helper",
+  "提醒，{{count}} 条未读_one": "Reminders, {{count}} unread",
+  "提醒，{{count}} 条未读_other": "Reminders, {{count}} unread",
+  "近 7 天没有提醒。": "No reminders in the last 7 days."
 }

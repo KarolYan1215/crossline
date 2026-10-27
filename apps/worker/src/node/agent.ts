@@ -40,6 +40,8 @@ export type NodeAgentOptions = {
   /** Waits between attempts; a refusal (other Codex version, switched off on the site) waits longer. */
   backoffMs?: number[];
   refusedWaitMs?: number;
+  /** Nothing from the hub (a frame, a ping or a pong) for this long and the link is taken as dead: terminated and dialled again. */
+  livenessMs?: number;
   /** The readers' browsers on this computer (browser.ts): offered to the server when a Chrome or Edge is here. */
   browsers?: NodeBrowsers;
 };
@@ -54,6 +56,19 @@ export function nodeCapacity(cores = cpus().length, memoryBytes = totalmem(), en
   const measured = Math.min(cores, Math.floor(memoryBytes / 1024 ** 3));
   return Math.max(4, Math.min(NODE_CAPACITY_MAX, Number.isFinite(set) && set > 0 ? Math.floor(set) : measured));
 }
+
+/**
+ * The wait before dialling again: the backoff step for this attempt, spread over ±25%, so nodes cut off together (the hosted worker
+ * restarting) do not all come back in the same second.
+ */
+export function reconnectDelayMs(backoff: readonly number[], attempt: number, random: () => number = Math.random): number {
+  const base = backoff[Math.min(Math.max(0, attempt), backoff.length - 1)] ?? 5_000;
+  return Math.round(base * (0.75 + 0.5 * Math.min(1, Math.max(0, random()))));
+}
+
+/** Three of the hub's 15-second beats without a word: a half-open link (a sleeping laptop, a NAT that forgot it) that `close` never reports. */
+export const NODE_LIVENESS_MS = 45_000;
+export const silentTooLong = (heardAt: number, now: number, livenessMs = NODE_LIVENESS_MS) => now - heardAt > livenessMs;
 
 export function nodeUrl(site: string): string {
   const url = new URL("/node", site);
@@ -82,7 +97,22 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
   function connect(): void {
     if (stopped) return;
     setStatus("connecting");
-    const socket = new WebSocket(nodeUrl(options.url), { headers: { authorization: `Bearer ${options.token}` }, maxPayload: 64 * 1_048_576 });
+    const socket = new WebSocket(nodeUrl(options.url), { headers: { authorization: `Bearer ${options.token}` }, maxPayload: 64 * 1_048_576,
+      handshakeTimeout: 30_000 });
+    // The hub pings every 15 s and this end pings it too; any frame, ping or pong counts as hearing from it.
+    const livenessMs = options.livenessMs ?? NODE_LIVENESS_MS;
+    let heardAt = Date.now();
+    const hear = () => { heardAt = Date.now(); };
+    socket.on("ping", hear);
+    socket.on("pong", hear);
+    const liveness = setInterval(() => {
+      if (silentTooLong(heardAt, Date.now(), livenessMs)) {
+        log({ type: "node.agent_silent", ms: Date.now() - heardAt });
+        socket.terminate();
+        return;
+      }
+      if (socket.readyState === WebSocket.OPEN) { try { socket.ping(); } catch { /* the close that follows decides */ } }
+    }, Math.max(1_000, Math.min(15_000, Math.floor(livenessMs / 3))));
     let runtime: AppServerLines | undefined;
     let relay: Server | undefined;
     let roots: string[] = [];
@@ -102,6 +132,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
     let initialized: ((agent: string) => void) | undefined;
 
     const end = () => {
+      clearInterval(liveness);
       void options.browsers?.closeAll().catch(() => undefined);
       runtime?.stop();
       runtime = undefined;
@@ -117,6 +148,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
       socket.terminate();
     });
     socket.on("open", () => {
+      hear();
       attempt = 0;
       runtime = spawn();
       runtime.onLine((line) => {
@@ -137,6 +169,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
         });
     });
     socket.on("message", (raw) => {
+      hear();
       const frame = parseFrame(raw.toString());
       if (!frame) return;
       if (frame.t === "welcome") {
@@ -170,7 +203,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
       const refused = Boolean(refusedFor) || code === 4002 || code === 4003 || code === 4004 || code === 4009 || code === 4010;
       if (refused) setStatus("refused", words || String(code), why || undefined); else setStatus("waiting", words || `连接断开（${code}）`, why || undefined);
       log({ type: "node.agent_closed", code, reason: why });
-      schedule(refused ? options.refusedWaitMs ?? 10 * 60_000 : backoff[Math.min(attempt++, backoff.length - 1)]!);
+      schedule(refused ? options.refusedWaitMs ?? 10 * 60_000 : reconnectDelayMs(backoff, attempt++));
     });
     socket.on("error", () => { /* the close that follows decides */ });
 

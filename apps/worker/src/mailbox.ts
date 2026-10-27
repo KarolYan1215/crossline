@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   MAIL_ACCOUNTS_SETTING, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
-  amountsInText, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage
+  amountsInText, isMailReminderTitle, MAIL_CHECK_NUDGE_KIND, moneyDirection, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage
 } from "@crossline/core";
 import {
   createImapMail, hostAllowed, presetFor, unsupportedProvider, type ImapFactory, type ImapMail, type MailHeader, type SecretStore
@@ -13,6 +13,7 @@ import { draftReplies, followUpReplies, type ReplyCandidate } from "./mail-repli
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
 import { tOfWorkspace } from "./locale";
+import { sayToPerson } from "./workflow-smith";
 
 /**
  * The person's mailbox in the worker (docs/personal-agent.md, 2026-10-19). Accounts are added after one successful sign-in, the
@@ -169,6 +170,7 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   const batch = messages.filter((message) => sorting.has(message.accountId)).slice(-40);
   if (!batch.length) return { state: "skipped", reason: "nothing" };
   if (!deps.client) return { state: "skipped", reason: "no_client" };
+  const t = tOfWorkspace(deps.store, workspaceId);
   const waiting = deps.store.listWaitingItems(workspaceId, { state: "open" });
   const keyed = batch.map((message, index) => ({ ...message, key: index + 1 }));
   const input = {
@@ -185,7 +187,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       + "doing nothing costs them (a deadline, a question only they can answer, an account or money alert to check); its title is the inbox line, "
       + "verb first, with the day. date for a dated event the mail asks nothing about; reply with the wait's id when the sender is who an open wait "
       + "is on, or with an empty waitingId when a real person or office waits for the person's answer by mail (a draft is written, never sent); info "
-      + "for news about the person's own things that needs nothing; ignore for promotions, digests, cold pitches, spam and phishing. "
+      + "for news about the person's own things that needs nothing, and for notices a service sends to all customers or about its own systems (security "
+      + "advisories, incidents, CI or deploy results, terms changes) unless they name the person's own resource and a day to act; ignore for promotions, digests, cold pitches, spam and phishing. "
       + "transaction for a payment, purchase, refund, transfer or salary the mail itself states with an amount: direction, amount, currency "
       + "(ISO, e.g. CNY) and merchant exactly as the mail shows them; an unusual or unrecognised charge is todo, not transaction. Other kinds "
       + "leave direction and currency empty and amount 0.",
@@ -210,6 +213,25 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       const { key: _key, ...mail } = message;
       needsReply.push({ ...mail, why: item.why });
       log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind: "needs_reply", title: item.why.slice(0, 140), at });
+      continue;
+    }
+    // A mail to-do that only asks to look at something (a charge, a payment, a notice) is said once as a reminder, not planned as a task.
+    if (kind === "todo" && isMailReminderTitle(item.title)) {
+      const title = item.title.trim().slice(0, 120);
+      // The amount the mail states is written to the bookkeeping by itself (the owner, 2026-10-27: 「上传交易记录太麻烦了，删掉，自动记录」);
+      // nobody is asked to upload a statement, and it never becomes a task.
+      const stated = amountsInText(`${message.subject} ${message.snippet}`)[0];
+      let noted = "";
+      if (stated && bookkeeping.has(message.accountId)) {
+        const written = recordAndJudge(deps.store, workspaceId, ownerId, { domain: "wealth", kind: moneyDirection(`${message.subject} ${message.snippet}`),
+          at: (message.date || at).slice(0, 10), value: stated.value, unit: "元", currency: stated.currency, category: item.merchant.trim().slice(0, 40),
+          note: t("邮件：{{subject}}", { subject: message.subject }).slice(0, 200), source: "mail", sourceRef: mailKey(message), dedupeKey: `mail:${mailKey(message)}` },
+        { lineId: wealthLine, now: deps.now?.() ?? new Date() });
+        if (written.ok) { noted = t("已自动记账 {{value}} {{currency}}。", { value: stated.value, currency: stated.currency }); if (written.inserted) recorded += 1; }
+      }
+      sayToPerson(deps.store, workspaceId, t("邮件提醒：{{title}}。{{noted}}来自 {{from}}「{{subject}}」。不是本人操作的话在对应 App 或官网里处理，不要点邮件里的链接。", { title, noted, from: message.from, subject: message.subject.slice(0, 80) }),
+        MAIL_CHECK_NUDGE_KIND, `mail-check:${mailKey(message)}`, [{ label: t("少问这类"), kind: "mute" }], deps.now?.() ?? new Date());
+      log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind, title: title.slice(0, 140), at });
       continue;
     }
     if ((kind === "todo" || kind === "date") && captured < MAIL_INBOX_PER_PASS) {

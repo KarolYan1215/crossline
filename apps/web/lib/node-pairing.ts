@@ -20,17 +20,42 @@ const started = ((globalThis as { crosslineNodePairStarts?: Map<string, number[]
 /** At most this many codes per address an hour, and this many waiting at once: enough for a person, not for guessing at scale. */
 const PER_ADDRESS_HOUR = 12;
 const PENDING_MAX = 200;
+const HOUR_MS = 3_600_000;
 
-const sweep = (now: number) => { for (const [id, pairing] of pairings) if (pairing.expiresAt <= now) pairings.delete(id); };
+/**
+ * The key an address is counted under. One IPv6 subscriber usually holds a whole /64, so counting each address apart would hand one
+ * person billions of quotas: an IPv6 address counts by its first four groups. IPv4 (and IPv4 mapped into IPv6) counts as it is.
+ */
+export function addressKey(address: string): string {
+  const raw = address.trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/%.*$/, "");
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(raw);
+  if (mapped) return mapped[1]!;
+  if (!raw.includes(":")) return raw;
+  const [head = "", tail = ""] = raw.split("::");
+  const front = head ? head.split(":") : [];
+  const back = raw.includes("::") ? (tail ? tail.split(":") : []) : [];
+  const groups = raw.includes("::") ? [...front, ...Array<string>(Math.max(0, 8 - front.length - back.length)).fill("0"), ...back] : front;
+  return `${groups.slice(0, 4).map((group) => (group || "0").replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
+/** Expired pairings go, and so does every address whose last code is over an hour old: the count map no longer grows forever. */
+const sweep = (now: number) => {
+  for (const [id, pairing] of pairings) if (pairing.expiresAt <= now) pairings.delete(id);
+  for (const [key, times] of started) {
+    const recent = times.filter((at) => now - at < HOUR_MS);
+    if (recent.length) started.set(key, recent); else started.delete(key);
+  }
+};
 const newCode = () => Array.from({ length: 8 }, () => PAIR_CODE_ALPHABET[randomInt(PAIR_CODE_ALPHABET.length)]).join("");
 export const showCode = (code: string) => `${code.slice(0, 4)}-${code.slice(4)}`;
 
 export type PairStart = { ok: true; id: string; code: string; expiresAt: string } | { ok: false; code: "NODE_PAIR_BUSY" };
 export function startPairing(address: string, host: string, now = Date.now()): PairStart {
   sweep(now);
-  const recent = (started.get(address) ?? []).filter((at) => now - at < 3_600_000);
+  const key = addressKey(address);
+  const recent = started.get(key) ?? [];
   if (recent.length >= PER_ADDRESS_HOUR || pairings.size >= PENDING_MAX) return { ok: false, code: "NODE_PAIR_BUSY" };
-  started.set(address, [...recent, now]);
+  started.set(key, [...recent, now]);
   let code = newCode();
   while ([...pairings.values()].some((pairing) => pairing.code === code)) code = newCode();
   const pairing: Pairing = { id: randomBytes(24).toString("base64url"), code, host: host.slice(0, 60), expiresAt: now + PAIR_TTL_MS };

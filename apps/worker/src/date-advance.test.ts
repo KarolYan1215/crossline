@@ -52,7 +52,7 @@ test("one day's pass: old results replaced, decided or put away; overdue milesto
   const [stepA] = store.getStepPlan(ws, "t-steps")!.steps;
   result("old-run", "t-steps", stepA!.id, "任务 · 盘点文件", "2026-10-05T10:00:00Z");
   result("new-run", "t-steps", stepA!.id, "任务 · 盘点文件", "2026-10-12T10:00:00Z", {}, [{ what: "提供原始数据", why: "只有本人有" }]);
-  result("young", "t-steps", "", "任务 · 起草邮件", "2026-10-18T10:00:00Z");
+  result("young", "t-steps", "", "任务 · 起草邮件", "2026-10-21T02:00:00Z");
   result("failed", "t-steps", "", "任务 · 核对来源", "2026-10-05T10:00:00Z", { checksPassed: false });
   result("failed-young", "t-steps", "", "任务 · 核对日期", "2026-10-12T10:00:00Z", { checksPassed: false });
   expect(resultsAwaitingReview(store, ws).map((row) => row.taskId).sort()).toEqual(["failed", "failed-young", "new-run", "young"]);
@@ -167,7 +167,7 @@ test("the message says what moved and why, and nothing when nothing did", () => 
   const empty = { superseded: [], adopted: [], expired: [], shifted: [], asked: [], archived: [], drafts: [] };
   expect(advanceMessage(empty)).toBe("");
   expect(advanceMessage({ ...empty, adopted: [{ taskId: "a", title: "x", left: 2 }], shifted: [{ id: "m", title: "样本包", from: "2026-10-17", to: "2026-10-29" }] }))
-    .toBe("按今天的日期整理了待办：1 个助手成果交付超过 7 天无人审阅、自检都通过，已代为采纳，留给本人的 2 件事写在各自任务的记录里；"
+    .toBe("按今天的日期整理了待办：1 个助手成果交付超过 1 天无人审阅、自检都通过，已代为采纳，留给本人的 2 件事写在各自任务的记录里；"
       + "1 个里程碑已过截止、还有没做完的工作，按保守完成日留 2 天余量顺延：「样本包」10/17 → 10/29。助手成果的文件都还在「助手产出」里；24 小时内可撤销。");
 });
 
@@ -188,4 +188,16 @@ test("a result made on another machine still leaves its items on the task: read 
   expect(notes).toContain("助手留下的待补：确认数据版本");
   expect(notes).toContain("助手留下 2 件待补，列在助手结果「任务 · 汇总」里（原记录不在这台机器上）");
   vi.unstubAllEnvs();
+});
+
+test("a proposal whose own due day went by unapproved is archived by the system the next day", () => {
+  at("2026-10-19T10:00:00Z");
+  store.saveWorkOrder({ id: "late-proposal", ownerId: owner, workspaceId: ws, identityId: "media", projectId: "xhs", milestoneId: "", intent: "确定周五会议议题",
+    state: "awaiting_plan_approval", riskTier: "routine", estimate, payload: { dueDate: "2026-10-20" } });
+  store.saveWorkOrder({ id: "fresh-proposal", ownerId: owner, workspaceId: ws, identityId: "media", projectId: "xhs", milestoneId: "", intent: "选定首轮选题",
+    state: "awaiting_plan_approval", riskTier: "routine", estimate, payload: { dueDate: "2026-10-25" } });
+  event("op.undone", "x", {});
+  at(NOW.toISOString());
+  const outcome = dateAdvancePass(store, ws)!;
+  expect(outcome.archived.map((item) => item.id)).toEqual(["late-proposal"]);
 });

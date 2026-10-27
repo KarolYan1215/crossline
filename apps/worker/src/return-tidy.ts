@@ -113,7 +113,10 @@ export function staleOpenWork(store: CrosslineStore, workspaceId: string, now: D
     if (order.state === "active" || started.has(order.id) || progressOf(order)) return [];
     const milestone = order.milestoneId ? milestones.get(order.milestoneId) : undefined;
     const due = (order.payload as { dueDate?: string } | undefined)?.dueDate ?? "";
-    const why = order.state === "awaiting_plan_approval" && (lastMove.get(order.id) ?? now.toISOString()) <= cutoff ? t("提议超过 {{days}} 天无人处理", { days: STALE_DAYS })
+    // A proposal whose own due day went by unapproved is no longer a decision anyone can make in time (2026-10-27: 「确定周五会议议题」
+    // still asked for approval five days after that Friday, and was Today's 「下一步」).
+    const why = order.state === "awaiting_plan_approval" && due && due < today ? t("提议的截止 {{due}} 已过，仍未批准", { due })
+      : order.state === "awaiting_plan_approval" && (lastMove.get(order.id) ?? now.toISOString()) <= cutoff ? t("提议超过 {{days}} 天无人处理", { days: STALE_DAYS })
       : order.milestoneId && milestone?.status !== "approved" ? t("所服务的里程碑已不在")
       : due && due <= addDays(today, -STALE_DAYS) ? t("截止 {{due}} 已过 {{days}} 天以上且未开始", { due, days: STALE_DAYS })
       : "";
@@ -122,10 +125,10 @@ export function staleOpenWork(store: CrosslineStore, workspaceId: string, now: D
 }
 
 /** Archives work by the system with the reason (recoverable from 已归档). */
-export function archiveBySystem(store: CrosslineStore, workspaceId: string, items: Array<{ order: StoredWorkOrder; why: string }>, by: "return" | "date"): TidyOutcome["archived"] {
+export function archiveBySystem(store: CrosslineStore, workspaceId: string, items: Array<{ order: StoredWorkOrder; why: string }>, by: "return" | "date" | "mail"): TidyOutcome["archived"] {
   const owner = ownerOf(store, workspaceId);
   const t = tFor(localeOf(store, workspaceId));
-  const reasonOf = (why: string) => by === "return" ? t("回来整理：{{why}}", { why }) : t("到期整理：{{why}}", { why });
+  const reasonOf = (why: string) => by === "return" ? t("回来整理：{{why}}", { why }) : by === "mail" ? t("转为提醒：{{why}}", { why }) : t("到期整理：{{why}}", { why });
   return items.map(({ order, why }) => {
     const attempt = store.listEvents(workspaceId, { type: "work_order.archived", entityId: order.id }).length;
     const suffix = attempt ? `:${attempt}` : "";

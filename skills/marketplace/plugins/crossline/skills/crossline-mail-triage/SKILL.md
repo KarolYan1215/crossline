@@ -22,7 +22,7 @@ What happens with your answer: a `transaction` becomes one line of the person's 
 - **reply**, two cases:
   - the sender is who one of `waiting` is on (match `from` against `who`), and the message is that answer or news about it. `waitingId` is that item's id. Only when the sender clearly matches.
   - otherwise, a real person or office writing to the person asks a question only the person can answer, or waits on their decision or confirmation, and what is wanted is an answer by mail (not a form, a payment or a hand-in). `waitingId` is empty.
-- **info**: about something of the person's, worth knowing, nothing to do now: an order confirmation that states no amount (one that does is transaction), a shipping update, a statement or grade posted, a confirmation that something they did went through.
+- **info**: about something of the person's, worth knowing, nothing to do now — including notices a service sends to all its customers or about its own systems (a security bulletin or advisory, an incident or status report, a build, CI or deploy result, a policy or terms change, a product update), unless the message names the person's own account or resource **and** asks them to act by a day: an order confirmation that states no amount (one that does is transaction), a shipping update, a statement or grade posted, a confirmation that something they did went through.
 - **ignore**: not about anything of the person's: promotions, newsletters, digests (「people you may know」, 「new jobs for you」), cold sales or recruiting pitches, spam and phishing.
 
 A message that asks nothing and costs nothing if left is `info`, however important its subject. When it does ask something of the person, it is `todo`, even when it comes from a bank or a platform's automatic system.
@@ -37,12 +37,15 @@ A message that asks nothing and costs nothing if left is `info`, however importa
 | LinkedIn: same subject, opening is a sales or recruiting pitch from a stranger | ignore | 「陌生人的推销跟进」 |
 | Department: 「Seminar moved to Nov 4, 3pm, Room 1240」 | date | 「11/4 15:00 系里讲座，1240 教室」 |
 | Shop: 「Your order has shipped」 | info | 「订单已发货，无需处理」 |
+| Hosting provider: 「Security advisory: update Node.js runtimes」, sent to every customer | info | 「服务商面向全部客户的安全公告」 |
+| GitHub: 「Run failed: deploy — main」 | info | 「CI 运行结果通知」 |
 | Bank: 「信用卡消费提醒：星巴克 消费人民币 35.00 元」 | transaction | `expense`, 35, CNY, 星巴克; `why` 「银行消费提醒」 |
 | Shop: 「Order receipt — total $42.50」 | transaction | `expense`, 42.5, USD, the shop's name |
 | From the advisor the person is waiting on for comments | reply | `waitingId` of that wait |
 
 ## Writing it
 
+- An account or money alert is a few minutes' check, not a project: its title is that check, starting with 核实 / 查看 / 确认 and naming the account (「核实 Chase 一笔无卡交易」). The app says it to the person as one message instead of planning it.
 - `title` (todo and date only): the task as the person would write it in their own inbox: starting with the verb, with the day when the mail names one, and the course code, institution or person's name that makes it findable. Empty for reply, info and ignore.
 - `why`: a few words naming what decided it (「银行的异常交易提醒」「推广邮件」「任务板上已有同一截止」).
 - `waitingId`: empty except for a reply to something the person was waiting for.
