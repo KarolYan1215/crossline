@@ -6,8 +6,9 @@ import type { LauncherConfig, Layout, Release, Secrets } from "./config";
 export type ChildSpec = { name: "web" | "worker"; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv };
 
 /**
- * The installed tree mirrors the repository (`app\apps\web`, `app\apps\worker\src`, `app\packages\*`, `app\skills`, one hoisted
- * `app\node_modules`), so every path the worker derives from its own location still lands where it does in a checkout. Both
+ * The installed tree mirrors the repository (`app\apps\web`, `app\apps\worker\dist`, `app\skills`, one hoisted `app\node_modules`),
+ * and the worker's bundle sits at the depth of the `src` folder it replaces, so every path the worker derives from its own location
+ * still lands where it does in a checkout. Both
  * children run on the `node.exe` shipped beside them, never one on PATH.
  */
 export function childSpecs(layout: Layout, config: LauncherConfig, secrets: Secrets, release: Release, base: NodeJS.ProcessEnv = process.env): ChildSpec[] {
@@ -49,8 +50,9 @@ export function childSpecs(layout: Layout, config: LauncherConfig, secrets: Secr
   return [
     { name: "web", command: node, cwd: path.join(layout.app, "apps", "web"), env,
       args: [path.join(layout.app, "node_modules", "next", "dist", "bin", "next"), "start", "--hostname", "127.0.0.1", "--port", String(config.webPort)] },
+    // The worker ships compiled (scripts/bundle-installed.ts): one minified module, no TypeScript and no tsx.
     { name: "worker", command: node, cwd: path.join(layout.app, "apps", "worker"), env,
-      args: ["--import", "tsx", path.join(layout.app, "apps", "worker", "src", "index.ts")] }
+      args: [path.join(layout.app, "apps", "worker", "dist", "index.mjs")] }
   ];
 }
 
