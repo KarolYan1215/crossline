@@ -64,3 +64,9 @@ export function plainEstimateWords(text: string, locale?: Locale): string {
   return text.replace(/(?<![A-Za-z0-9])p\s?50(?![0-9])\s*/giu, word("通常")).replace(/(?<![A-Za-z0-9])p\s?85(?![0-9])\s*/giu, word("保守"))
     .replace(/(?<![A-Za-z0-9])p\s?25(?![0-9])\s*/giu, word("乐观"));
 }
+
+/**
+ * Two sentence ends in a row, from a template's own 「。」 after a piece that already ended one (「…不发布。。」「…要求。；- …」): the last
+ * one is kept. Applied where the system speaks to the person, so every template is covered at once.
+ */
+export const tidySentenceEnds = (text: string): string => text.replace(/[。；](?=[。；])/g, "").replace(/([！？!?])。/g, "$1");

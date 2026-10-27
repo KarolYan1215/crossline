@@ -17,7 +17,7 @@ import { identityLines } from "./lines";
 import { ownerOf, runtimesDir } from "./owner";
 import { createSiteReader, holdWords, isCheckNeeded, isLoginNeeded, releaseSite, siteHold, SITE_PAGES_PER_RUN, SITE_SCROLLS_MAX, type OpenSite } from "./site-reader";
 import { localeOf, tOfWorkspace } from "./locale";
-import { joinList, tFor, type Locale } from "@crossline/core";
+import { joinList, tFor, tidySentenceEnds, type Locale } from "@crossline/core";
 import { favouritesTopicStep, topicModeOn } from "./favourites-topics";
 import { collectFavourites, collectFolder, collectHold, favouritesAccess, holdAfterFailure, markOrganised, openCollectBrowser, openNodeCollectBrowser, readCollectLedger, writeCollectLedger,
   type CollectDriver, type CollectOptions, type CollectResult } from "./favourites-reader";
@@ -202,7 +202,7 @@ export function sayToPerson(store: CrosslineStore, workspaceId: string, text: st
   store.appendConversationMessage({ id, workspaceId, conversationId: conversation.id, role: "nudge", text: "", createdAt: now.toISOString(),
     payload: { nudge: { kind, fingerprint, urgent: false, counted: true, delivery: "pending" },
       card: { actions, items: actions.map(() => ({ state: "pending" })),
-        clarify: { question: text, options: extra.ack === false ? options : [...options, { label: tOfWorkspace(store, workspaceId)("知道了"), actions: [], kind: "ack" }] },
+        clarify: { question: tidySentenceEnds(text), options: extra.ack === false ? options : [...options, { label: tOfWorkspace(store, workspaceId)("知道了"), actions: [], kind: "ack" }] },
         confidence: "high", nudgeKind: kind, ...extra.card } } });
   return id;
 }

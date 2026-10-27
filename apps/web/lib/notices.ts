@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import type { AccessContext } from "@crossline/core";
+import { tidySentenceEnds, type AccessContext } from "@crossline/core";
 import { getStore, planToday } from "./crossline";
 import { PRESENCE_FRESH_MS, PRESENCE_SETTING } from "./nudges";
 import { isReminderKind, type NoticesBody, type NoticeView } from "../app/notice-kinds";
@@ -14,7 +14,7 @@ const MOMENT_KINDS = new Set(["block_start", "latest_start", "timer_overrun"]);
 const MOMENT_MS = 12 * 3_600_000;
 
 type Clarify = { question?: string; options?: Array<{ label: string; kind?: string; href?: string }> };
-const plain = (text: string) => text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`~#>]+/g, "").replace(/\s+/g, " ").trim();
+const plain = (text: string) => tidySentenceEnds(text).replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`~#>]+/g, "").replace(/\s+/g, " ").trim();
 
 /** The bell's list: the system's own messages of the last week that ask nothing (`isReminderKind`), newest first, with the unread count. */
 export function listNotices(ctx: AccessContext, now = new Date()): NoticesBody {
@@ -56,6 +56,6 @@ export function addNotice(ctx: AccessContext, text: string, kind: string, links:
   store.appendConversationMessage({ id, workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "nudge", text: "", createdAt: now.toISOString(),
     payload: { nudge: { kind, fingerprint: `${kind}:${id}`, counted: false, urgent: false, delivery },
       card: { actions: [], items: [], confidence: "high", nudgeKind: kind,
-        clarify: { question: text, options: [...links.map((link) => ({ label: link.label, actions: [], kind: "href", href: link.href })), { label: "知道了", actions: [], kind: "ack" }] } } } });
+        clarify: { question: tidySentenceEnds(text), options: [...links.map((link) => ({ label: link.label, actions: [], kind: "href", href: link.href })), { label: "知道了", actions: [], kind: "ack" }] } } } });
   return id;
 }

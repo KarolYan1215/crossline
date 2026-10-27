@@ -591,7 +591,7 @@ function prepQuestionAsks({ store, ctx, today, t, locale }: Source): Ask[] {
       important: Boolean(live), ...(live ? { preview: taskPreview(t, live.id, t("看要用它的任务")) } : {}),
       freeText: { placeholder: t("直接写答案；在文件里的，写文件名或先上传再写在哪") },
       // The question often names the work itself (「「X」要用到本人的…」): said once.
-      title: question.startsWith(`「${taskTitleOf(order)}」`) ? short(question, 80) : t("「{{name}}」需要本人回答：{{question}}", { name, question: short(question, 60) }),
+      title: ((quoted) => Boolean(quoted) && (taskTitleOf(order).includes(quoted!) || quoted!.includes(taskTitleOf(order))))(/^「([^」]+)」/.exec(question)?.[1]) ? short(question, 80) : t("「{{name}}」需要本人回答：{{question}}", { name, question: short(question, 60) }),
       why: (core ? t("助手为「{{core}}」做「{{name}}」，只差这一点本人知道的信息，回答约需几分钟。", { core, name })
         : t("助手做「{{name}}」，只差这一点本人知道的信息，回答约需几分钟。", { name }))
         + (locale === "en" ? " " : "")
