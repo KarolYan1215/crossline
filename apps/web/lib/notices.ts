@@ -9,6 +9,9 @@ import { isReminderKind, type NoticesBody, type NoticeView } from "../app/notice
 export const NOTICES_READ_SETTING = "notices.readAt";
 const SHOWN_DAYS = 7;
 const SHOWN_MAX = 40;
+/** Kinds about a moment — a block about to start, the latest start, a timer running over: stale the same day, so they leave the bell after 12 hours. */
+const MOMENT_KINDS = new Set(["block_start", "latest_start", "timer_overrun"]);
+const MOMENT_MS = 12 * 3_600_000;
 
 type Clarify = { question?: string; options?: Array<{ label: string; kind?: string; href?: string }> };
 const plain = (text: string) => text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`~#>]+/g, "").replace(/\s+/g, " ").trim();
@@ -23,6 +26,7 @@ export function listNotices(ctx: AccessContext, now = new Date()): NoticesBody {
     const kind = payload?.nudge?.kind ?? payload?.card?.nudgeKind ?? "";
     const text = plain(payload?.card?.clarify?.question ?? message.text ?? "");
     if (!isReminderKind(kind) || !text) return [];
+    if (MOMENT_KINDS.has(kind) && now.getTime() - Date.parse(message.createdAt) > MOMENT_MS) return [];
     const options = payload?.card?.clarify?.options ?? [];
     return [{ id: message.id, kind, text, at: message.createdAt,
       links: options.filter((option) => option.kind === "href" && option.href?.startsWith("/")).map((option) => ({ label: option.label, href: option.href! })),

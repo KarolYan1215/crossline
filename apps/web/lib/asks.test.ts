@@ -265,6 +265,21 @@ test("work given a time yesterday and never started is asked about when it bears
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "missed_block")).toBe(false);
 });
 
+test("two or more blocks not started yesterday are one card: 都顺延 settles them all, 逐个处理 splits them", async () => {
+  const store = setup();
+  for (const id of ["a", "b"]) store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",
+    milestoneId: "", intent: `任务 ${id}`, state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-09" } });
+  store.setSetting(ws, "schedule.day:2026-10-06", JSON.stringify({ a: "09:00", b: "14:00" }));
+  const missed = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "missed_block");
+  expect(missed().map((ask) => ask.entityId)).toEqual(["batch"]);
+  expect(missed()[0]!.items!.map((item) => item.id).sort()).toEqual(["a", "b"]);
+  expect(await answerAsk(TEST_CTX, missed()[0]!.id, "split", {}, NOW)).toMatchObject({ ok: true });
+  expect(missed().map((ask) => ask.entityId).sort()).toEqual(["a", "b"]);
+  store.setSetting(ws, "asks.missed.split", "");
+  expect(await answerAsk(TEST_CTX, missed()[0]!.id, "roll", {}, NOW)).toMatchObject({ ok: true });
+  expect(missed()).toEqual([]);
+});
+
 test("a block whose completion check was answered yesterday is not asked about again the next day", () => {
   const store = setup();
   const save = (id: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",

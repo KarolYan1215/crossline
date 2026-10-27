@@ -117,12 +117,12 @@ describe("grounded, non-trivial plans", () => {
   it("each step carries who does it; the assistant never gets a send, and a step needing the person's data becomes a question", () => {
     const { plan: normalized, warnings } = normalizeStepPlan(plan([
       step("a", "gather", { title: "汇总三只基金的公开费率", owner: "person" }),
-      step("b", "gather", { title: "整理券商导出的持仓明细", owner: "person" }),
+      step("b", "gather", { title: "整理本学期已出成绩", owner: "person" }),
       step("c", "draft", { title: "写出调仓理由", owner: "person" }),
       step("d", "submit", { title: "提交调仓指令", executor: "agent", owner: "assistant" })]));
     expect(normalized.steps.map((item) => [item.owner, item.executor, item.schedulable])).toEqual([
       ["assistant", "agent", false], ["ask", "agent", false], ["person", "human", true], ["person", "human", true]]);
-    expect(normalized.questions.map((question) => question.text)).toEqual(["「整理券商导出的持仓明细」要用到本人的持仓：上传文件或截图，或直接写在这里。"]);
+    expect(normalized.questions.map((question) => question.text)).toEqual(["「整理本学期已出成绩」要用到本人的已出成绩：上传文件或截图，或直接写在这里。"]);
     expect(warnings.map((warning) => warning.code)).toEqual(expect.arrayContaining(["STEP_TRIVIAL_TO_AGENT", "STEP_OWNER_ASK", "STEP_OWNER_PERSON"]));
   });
   it("a step that only reviews the assistant's output is folded into the first core step's first move, at most ten minutes", () => {

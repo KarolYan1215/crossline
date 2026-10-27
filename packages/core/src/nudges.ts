@@ -125,7 +125,7 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
       const prepared = block.prepared?.length ? block.prepared.slice(0, 3).join(en ? ", " : "、") : "";
       const text = [
         t("{{start}} 做{{label}}（{{minutes}} 分），关系到 {{due}} 的截止。", { start: block.start, label, minutes: end - start, due: md(block.dueDay) }),
-        block.firstAction ? t("第一步：{{action}}。", { action: block.firstAction }) : "",
+        block.firstAction ? t("第一步：{{action}}。", { action: block.firstAction.replace(/[。．.！!；;\s]+$/u, "") }) : "",
         !prepared ? "" : block.prepared!.length > 3 ? t("已备好：{{items}} 等 {{count}} 份。", { items: prepared, count: block.prepared!.length })
           : t("已备好：{{items}}。", { items: prepared })
       ].filter(Boolean).join(en ? " " : "");

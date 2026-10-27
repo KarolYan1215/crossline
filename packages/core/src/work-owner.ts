@@ -64,6 +64,14 @@ const DRAFTING = /(?:起草|草拟|拟写|拟定|准备)[^，。；,;]{0,12}(?:�
 const PURPOSE = /(?:供|以便|便于|用于|留待|好让|之后由?本人|再由本人|由本人|交由本人)[^，。；,;]*/g;
 /** Acts that leave the machine or commit the person to someone. 「登录」 is apart: what sits behind a login is the person's to hand over. */
 const ACTS = /发送|发出|寄出|寄给|发给|提交|上交|递交|交给(?!助手|系统|AI|Agent|agent)|投稿|发布|上传|发帖|发文|转发|回复(?:邮件|对方|评论|老师|导师|客户)|联系|致电|打电话|约见|预约|报名|签署|签约|付款|支付|汇款|转账|下单|购买|买入|卖出|申购|赎回|交易|删除|出席|参加|参与(?:会议|面试|比赛|考试|评审)|面试|答辩|演讲|上台|汇报|路演|向[^，。；,;]{0,10}(?:确认|询问|请教|了解|申请|索取|要)|问(?:助教|老师|导师|师兄|师姐|同事|客户|对方)|\b(?:send|submit|publish|post|upload|pay|sign|buy|sell|trade|attend|present|e-?mail)\b/i;
+/**
+ * The person's money records: compiling them is never asked of the person (2026-10-27, the owner: 「助手还要你上传交易记录太麻烦了，删掉，
+ * 自动记录」). They come in by themselves (bookkeeping from mail, the phone, connected mailboxes); the assistant works from what is recorded
+ * and marks what is missing. Moving money (下单, 转账 …) is still the person's.
+ */
+const MONEY_RECORDS = /账户(?:记录|资料|基线|明细|数据)?|账单|流水|对账单|持仓|余额|收支|交易(?:记录|明细|流水)|\b(?:transactions?|statements?|balances?|holdings)\b/i;
+const MOVES_MONEY = /买入|卖出|下单|申购|赎回|付款|支付|汇款|转账|\b(?:buy|sell|trade|pay|transfer)\b/i;
+export const isMoneyRecordWork = (text: string): boolean => isStaticArtifactWork(text) && MONEY_RECORDS.test(text) && !MOVES_MONEY.test(text);
 const LOGIN = /登录|登入|\blog ?in\b|\bsign ?in\b/i;
 const DECISION = /选定|选出|挑选|(?<!题)选择(?!题)|决定|拍板|取舍|定夺|敲定|决策(?!底稿|表|模板|清单|记录|材料|资料|依据)|确定(?:方案|人选|方向|选题|策略|是否|哪|优先)|(?:确认|确定)[^，。；,;]{0,4}唯一|\b(?:decide|choose|pick|select)\b/i;
 /** Graded work the person hands in (an exam is sat, not planned in steps): homework, problem sets, a lab report, a course project. */
@@ -154,6 +162,7 @@ export function workOwner(item: WorkItemLike, locale?: Locale): WorkOwnerVerdict
     ? { owner, code, reason, question: questionOf(item, lead, ask, locale) } : { owner, code, reason };
   // What never goes to the assistant, whatever the model said.
   const staticWork = isStaticArtifactWork(lead);
+  if (isMoneyRecordWork(lead)) return keep("assistant", "static_artifact", t("钱的记录自动来：助手用已记的账和邮箱里的账单做，缺的标为缺失，不问本人"));
   // The shared external words also name things (「邮件」「券商」「订单」); compiling from them is not acting on them, so for static work
   // only the acts themselves count.
   if (ACTS.test(act) || (!staticWork && stepLeavesMachine(act))) return keep("person", "external", t("要对外发出、提交、联系、出席或付款，只能本人做"));

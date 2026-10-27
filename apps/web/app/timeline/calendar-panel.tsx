@@ -42,6 +42,14 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
     if (picked) setSelected(picked);
   });
 
+  // A link to a day (an event just added from the input box: `/?day=YYYY-MM-DD#calendar`) opens the calendar on that day.
+  useEffect(() => {
+    const day = new URLSearchParams(window.location.search).get("day");
+    if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+    setView("day"); setAnchor(day);
+    document.getElementById("calendar")?.scrollIntoView({ block: "start" });
+  }, []);
+
   // The week opens at the start of the working day rather than at midnight.
   useEffect(() => {
     const body = document.querySelector<HTMLElement>("[data-scroll-to-morning]");
@@ -65,7 +73,7 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
     : t("{{year}} 年 {{month}} 月", { year, month: locale === "en"
       ? new Date(Date.UTC(Number(year), Number(month) - 1, 15)).toLocaleDateString(intlLocale(locale), { month: "long", timeZone: "UTC" }) : month });
 
-  return <section className="cal" aria-label={t("日历")}>
+  return <section className="cal" id="calendar" aria-label={t("日历")}>
     <header className="cal-head">
       <div className="cal-tabs" role="tablist" aria-label={t("日历视图")}>
         {VIEWS.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => { setView(id); setSelected(undefined); }}>{t(label)}</button>)}

@@ -33,7 +33,7 @@ import { repairDuplicateImports, repairFrozenRace } from "./calendar-repair";
 import { repairLineAttributes } from "./attribute-repair";
 import { returnTidy } from "./return-tidy";
 import { workSplitRepair } from "./work-split-repair";
-import { mailReminderRepair } from "./mail-reminder-repair";
+import { mailReminderRepair, moneyAskRepair } from "./mail-reminder-repair";
 import { dateAdvancePass } from "./date-advance";
 import { createWriteLogin } from "./calendar-write-login";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE_TOKEN_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, NODE_TOKEN_SETTING, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, htmlLang, tFor, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
@@ -757,6 +757,8 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   try {
     const reminded = mailReminderRepair(analysisStore, workspace.id);
     if (reminded.length) console.info(JSON.stringify({ type: "repair.mail_reminders", workspaceId: workspace.id, archived: reminded.length, checkedAt }));
+    const money = moneyAskRepair(analysisStore, workspace.id);
+    if (money.length) console.info(JSON.stringify({ type: "repair.money_asks", workspaceId: workspace.id, moved: money.length, checkedAt }));
   } catch (error) { console.warn(JSON.stringify({ type: "repair.mail_reminders_failed", workspaceId: workspace.id, error: String(error), checkedAt })); }
   // Back after two days or more: overdue milestones of their own moved, old work archived, duplicates merged now (return-tidy.ts).
   const tidied = await returnTidy(analysisStore, workspace.id, { mergeNow: async () => (await dedupePass({ store: analysisStore, workspaceId: workspace.id,

@@ -345,8 +345,9 @@ function riskAsks(source: Source): Ask[] {
   return forecast.goals.flatMap((goal) => {
     const milestone = milestones.get(goal.milestoneId);
     const deadline = goal.confirmedDeadline;
-    // A milestone that is only preparation carries no risk of its own: the milestone it prepares does (docs/work-split.md §5).
-    if (!milestone || !deadline || deadline < today || reviewed.has(goal.milestoneId) || isPreparationOnlyMilestone(milestone)) return [];
+    // A milestone that is only preparation carries no risk of its own: the milestone it prepares does (docs/work-split.md §5). One due
+    // today is past asking (an exam an hour away cannot get more time); the next day's date pass moves or asks about it.
+    if (!milestone || !deadline || deadline <= today || reviewed.has(goal.milestoneId) || isPreparationOnlyMilestone(milestone)) return [];
     const own = orders.filter((order) => order.milestoneId === goal.milestoneId && ["approved", "preparing", "ready_for_human", "active"].includes(order.state) && onPersonsBoard(order));
     if (!own.length) return [];
     const atRisk = (goal.p85Day === null && deadline <= lastDay) || (goal.slackDays !== null && goal.slackDays < 2);
@@ -500,7 +501,34 @@ export function riskReviewBatch(ctx: AccessContext, members: Ask[], today: strin
  * that they cannot tell what slipped. Everything else rolls forward without a question.
  */
 const MISSED_ASK_HORIZON_DAYS = 7;
-function missedAsks({ store, ctx, today, t, locale }: Source): Ask[] {
+/** Set by 「逐个处理」 on the folded card: while the same blocks wait, each is its own card again. */
+const MISSED_SPLIT = "asks.missed.split";
+
+/**
+ * Two or more of yesterday's blocks not started are one card (2026-10-27 walkthrough: a day away put six 「昨天 … 没开始」 cards in a
+ * row on Today). The scheduler has already moved them; 「都顺延」 settles them in one tap, 「逐个处理」 splits them back.
+ */
+function missedAsks(source: Source): Ask[] {
+  const members = missedMembers(source);
+  if (members.length < 2) return members;
+  const fingerprint = members.map((ask) => ask.id).sort().join("|");
+  if (source.store.getSetting(source.ctx.workspaceId, MISSED_SPLIT) === fingerprint) return members;
+  const { t, today, locale } = source;
+  const due = members.map((ask) => ask.dueDay).filter((day): day is string => Boolean(day)).sort()[0];
+  const items: AskItem[] = [...members].sort((a, b) => (a.dueDay ?? "9999").localeCompare(b.dueDay ?? "9999")).map((ask) => ({ id: ask.entityId,
+    title: taskTitleOf(source.store.listWorkOrders(source.ctx.workspaceId).find((order) => order.id === ask.entityId) ?? { intent: quotedTitle(ask.title) }),
+    ...(ask.dueDay ? { dueDay: ask.dueDay } : {}), ...(ask.line ? { line: ask.line } : {}), href: `/workbench/${encodeURIComponent(ask.entityId)}` }));
+  return [{ id: `missed:batch:${members[0]!.fingerprint}`, kind: "missed_block", entityId: "batch", urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}),
+    raisedAt: members.map((ask) => ask.raisedAt).sort().at(-1) ?? "", fingerprint, items,
+    title: t("昨天排好的 {{count}} 项工作没开始", { count: members.length }),
+    why: t("它们都已顺延到后面的空档，最近的截止是 {{day}}。顺延没问题就点一下；要补记做过的或不做了，点「逐个处理」。", { day: due ? format(due, locale) : "—" }),
+    options: [
+      { id: "roll", label: t("都顺延"), detail: t("按重新排的时间做"), recommended: true },
+      { id: "split", label: t("逐个处理"), detail: t("拆成每项一张卡，可补记、改期或不做") }
+    ] }];
+}
+
+function missedMembers({ store, ctx, today, t, locale }: Source): Ask[] {
   const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
   const placed = readScheduledDay(ctx, yesterday);
   if (!Object.keys(placed).length) return [];
@@ -562,7 +590,8 @@ function prepQuestionAsks({ store, ctx, today, t, locale }: Source): Ask[] {
       urgency: urgencyFor(dueDay, today), ...(dueDay ? { dueDay } : {}), raisedAt: "", fingerprint: question,
       important: Boolean(live), ...(live ? { preview: taskPreview(t, live.id, t("看要用它的任务")) } : {}),
       freeText: { placeholder: t("直接写答案；在文件里的，写文件名或先上传再写在哪") },
-      title: t("「{{name}}」需要本人回答：{{question}}", { name, question: short(question, 60) }),
+      // The question often names the work itself (「「X」要用到本人的…」): said once.
+      title: question.startsWith(`「${taskTitleOf(order)}」`) ? short(question, 80) : t("「{{name}}」需要本人回答：{{question}}", { name, question: short(question, 60) }),
       why: (core ? t("助手为「{{core}}」做「{{name}}」，只差这一点本人知道的信息，回答约需几分钟。", { core, name })
         : t("助手做「{{name}}」，只差这一点本人知道的信息，回答约需几分钟。", { name }))
         + (locale === "en" ? " " : "")
@@ -1105,6 +1134,13 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       return { ok: true };
     }
     case "missed_block": {
+      if (ask.entityId === "batch") {
+        if (optionId === "split") { store.setSetting(ctx.workspaceId, MISSED_SPLIT, ask.fingerprint); return { ok: true }; }
+        if (optionId !== "roll") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+        for (const member of missedMembers({ store, ctx, today: planToday(ctx), now: appNow(), t: tOf(ctx), locale: localeFor(ctx) }))
+          record(ctx, "missed.handled", member.entityId, `missed:handled:${member.id}:${Date.now()}`, { askId: member.id, how: "roll" });
+        return { ok: true };
+      }
       const handled = () => record(ctx, "missed.handled", ask.entityId, `missed:handled:${ask.id}:${Date.now()}`, { askId: ask.id, how: optionId });
       if (optionId === "drop") { const result = archiveWorkOrder(ctx, ask.entityId, values.reason!); if (result.ok) handled(); return result; }
       if (optionId === "later") {

@@ -818,5 +818,6 @@
   "撤销：恢复这些任务": "Undo: restore these tasks",
   "已自动记账 {{value}} {{currency}}。": "Recorded {{value}} {{currency}} automatically. ",
   "邮件提醒：{{title}}。{{noted}}来自 {{from}}「{{subject}}」。不是本人操作的话在对应 App 或官网里处理，不要点邮件里的链接。": "Mail reminder: {{title}}. {{noted}}From {{from}}, \"{{subject}}\". If this was not you, deal with it in the relevant app or website; do not click links in the mail.",
-  "提议的截止 {{due}} 已过，仍未批准": "The proposal's due date {{due}} has passed and it is still not approved"
+  "提议的截止 {{due}} 已过，仍未批准": "The proposal's due date {{due}} has passed and it is still not approved",
+  "不问本人：用自动记下的账、已连邮箱里的账单和已有资料做，缺的写明缺失": "Not asked: done from the records kept automatically, statements in connected mailboxes and existing material, with gaps marked"
 }

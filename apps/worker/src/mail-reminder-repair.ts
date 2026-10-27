@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { isMailReminderTitle, taskTitleOf } from "@crossline/core";
+import { isMailReminderTitle, isMoneyRecordWork, taskTitleOf } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { archiveBySystem } from "./return-tidy";
 import { ownerOf } from "./owner";
@@ -40,4 +40,29 @@ export function mailReminderRepair(store: CrosslineStore, workspaceId: string, n
     + t("需要时在对应 App 或官网里看一眼即可；以后这类邮件直接出现在右上角的提醒里。"), "mail_check", `mail-reminder-repair:${workspaceId}`,
   [{ label: t("撤销"), action: { action: "undo", summary: t("撤销：恢复这些任务"), args: { opId } } }], now);
   return archived.map((item) => item.id);
+}
+
+export const MONEY_ASK_REPAIR = "repair.money-asks.v1";
+const ASKING = new Set(["awaiting_plan_approval", "approved", "preparing", "ready_for_human"]);
+
+/**
+ * Once per workspace (2026-10-27, the owner: 「助手还要你上传交易记录太麻烦了，删掉，自动记录」): preparation that waited for the person to
+ * upload account records, statements or holdings becomes the assistant's, to be done from what is recorded automatically (bookkeeping from
+ * mail, connected mailboxes, earlier records) with the gaps marked. New work is judged the same way by `workOwner`.
+ */
+export function moneyAskRepair(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
+  if (store.getSetting(workspaceId, MONEY_ASK_REPAIR)) return [];
+  store.setSetting(workspaceId, MONEY_ASK_REPAIR, now.toISOString());
+  const t = tOfWorkspace(store, workspaceId);
+  const answer = t("不问本人：用自动记下的账、已连邮箱里的账单和已有资料做，缺的写明缺失");
+  const moved: string[] = [];
+  for (const order of store.listWorkOrders(workspaceId)) {
+    if ((order.payload as { owner?: unknown } | undefined)?.owner !== "ask" || order.tombstone || !ASKING.has(order.state)) continue;
+    if (!isMoneyRecordWork(taskTitleOf(order)) && !isMoneyRecordWork(order.intent)) continue;
+    store.saveWorkOrder({ ...order, payload: { ...(order.payload as object), owner: "assistant", answer, answeredAt: now.toISOString() } });
+    if (order.state === "awaiting_plan_approval")
+      store.transitionWorkOrder(workspaceId, order.id, { type: "plan.approved", approvalId: "system:money-ask-repair" }, `money-ask-repair:${order.id}`);
+    moved.push(order.id);
+  }
+  return moved;
 }

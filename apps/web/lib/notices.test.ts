@@ -26,3 +26,13 @@ test("the bell lists reminders newest first, leaves out what asks for an answer,
   markNoticesRead(TEST_CTX, at(60).toISOString());
   expect(listNotices(TEST_CTX, now).unread).toBe(1);
 });
+
+test("a reminder about a moment (a block about to start) leaves the bell after 12 hours; others stay the week", () => {
+  globalThis.crosslineStore = new CrosslineStore(":memory:");
+  const now = new Date();
+  const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 3_600_000);
+  addNotice(TEST_CTX, "09:35 做作业", "block_start", [], hoursAgo(13));
+  addNotice(TEST_CTX, "10:00 做阅读", "block_start", [], hoursAgo(2));
+  addNotice(TEST_CTX, "助手做完了", "background_done", [], hoursAgo(30));
+  expect(listNotices(TEST_CTX, now).items.map((item) => item.text)).toEqual(["10:00 做阅读", "助手做完了"]);
+});

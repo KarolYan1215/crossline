@@ -89,7 +89,7 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
       endTime: args.endTime, until: args.until, minutes: args.minutes > 0 ? args.minutes : 60, location: args.location });
     if (!result.ok) return { ok: false, code: result.code, message: result.message };
     const t = tOf(ctx);
-    return { ok: true, href: "/plan", message: describeEvent(result.event, localeFor(ctx)) + (result.placedBySystem ? t("（系统选定的空档）") : "")
+    return { ok: true, href: `/?day=${result.event.repeat?.from ?? result.event.date}#calendar`, message: describeEvent(result.event, localeFor(ctx)) + (result.placedBySystem ? t("（系统选定的空档）") : "")
       + (result.moved ? t(" · 重排了 {{count}} 个冲突的任务块", { count: result.moved }) : "") };
   },
   "reminder.add": (ctx, args) => {

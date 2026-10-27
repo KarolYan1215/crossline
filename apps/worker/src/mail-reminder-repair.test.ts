@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { MAIL_REMINDER_REPAIR, mailReminderRepair } from "./mail-reminder-repair";
+import { MAIL_REMINDER_REPAIR, mailReminderRepair, moneyAskRepair } from "./mail-reminder-repair";
 
 let store: CrosslineStore;
 afterEach(() => store?.close());
@@ -30,4 +30,20 @@ test("mail check to-dos nobody started become one reminder, once; work and other
   expect(store.getSetting(workspace.id, MAIL_REMINDER_REPAIR)).toBeTruthy();
   expect(store.listRecentNudges(workspace.id, "2000-01-01").length).toBe(1);
   expect(mailReminderRepair(store, workspace.id)).toEqual([]);
+});
+
+test("preparation that waited for the person's account records becomes the assistant's, once; other questions stay", () => {
+  store = new CrosslineStore(":memory:");
+  const { workspace, principal } = store.createPrincipalWithWorkspace("u", "w");
+  const order = (id: string, intent: string, state = "approved") => store.saveWorkOrder({ id, ownerId: principal.id, workspaceId: workspace.id, identityId: "investment",
+    projectId: "", milestoneId: "", intent, state: state as never, riskTier: "routine", estimate, payload: { title: intent, owner: "ask" } });
+  order("a", "汇集10月至12月账户记录", "awaiting_plan_approval");
+  order("b", "整理月末账户基线");
+  order("c", "确定 Crossline 试用者口径");
+  expect(moneyAskRepair(store, workspace.id).sort()).toEqual(["a", "b"]);
+  const byId = new Map(store.listWorkOrders(workspace.id).map((item) => [item.id, item]));
+  expect((byId.get("a")!.payload as { owner?: string }).owner).toBe("assistant");
+  expect(byId.get("a")!.state).toBe("approved");
+  expect((byId.get("c")!.payload as { owner?: string }).owner).toBe("ask");
+  expect(moneyAskRepair(store, workspace.id)).toEqual([]);
 });

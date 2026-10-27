@@ -970,5 +970,10 @@
   "准备工作未能建立": "The preparation could not be set up",
   "助手已暂停，准备材料暂不生成；出发提醒已设好": "The assistant is paused, so no preparation is made for now; the departure reminder is set",
   "助手开始准备「{{prepare}}」，好了会在提醒里说；出发前会提醒": "The assistant is preparing \"{{prepare}}\" and will say so in the reminders when it is ready; there will be a reminder before you leave",
-  "「{{title}}」（{{day}}）的准备已备好：{{files}}。": "The preparation for \"{{title}}\" ({{day}}) is ready: {{files}}."
+  "「{{title}}」（{{day}}）的准备已备好：{{files}}。": "The preparation for \"{{title}}\" ({{day}}) is ready: {{files}}.",
+  "昨天排好的 {{count}} 项工作没开始": "{{count}} pieces of work planned for yesterday were not started",
+  "它们都已顺延到后面的空档，最近的截止是 {{day}}。顺延没问题就点一下；要补记做过的或不做了，点「逐个处理」。": "They have all moved to later free time; the nearest deadline is {{day}}. If that is fine, one tap; to record work already done or drop some, choose \"One by one\".",
+  "都顺延": "Roll all forward",
+  "逐个处理": "One by one",
+  "拆成每项一张卡，可补记、改期或不做": "One card each: record it, move it or drop it"
 }

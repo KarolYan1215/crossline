@@ -36,7 +36,7 @@ const cases: Array<[string, WorkOwner, WorkOwner]> = [
   ["练习 20 分钟间歇跑", "assistant", "person"],
   ["预约复查", "assistant", "person"],
   // Finance
-  ["整理券商导出的持仓明细", "person", "ask"],
+  ["整理券商导出的持仓明细", "person", "assistant"],
   ["汇总三只基金的公开费率与回撤", "person", "assistant"],
   ["卖出一半仓位", "assistant", "person"],
   ["决定下季度的定投比例", "ask", "person"],
@@ -44,7 +44,7 @@ const cases: Array<[string, WorkOwner, WorkOwner]> = [
   ["整理三家医院的招聘要求对照表", "person", "assistant"],
   ["演练面试自我介绍", "assistant", "person"],
   ["登录医院人事系统查看排班", "person", "ask"],
-  ["汇总本月家庭开支账单", "person", "ask"],
+  ["汇总本月家庭开支账单", "person", "assistant"],
   ["提交护士执业注册申请", "assistant", "person"],
   // Acceptance checklists and reviewing the assistant's output are not the person's tasks
   ["制定验收清单", "person", "assistant"],
@@ -104,7 +104,7 @@ describe("workOwner", () => {
   it("reads a stored work order: its title, intent and payload owner", () => {
     const order = { intent: "汇集 ECE 555 期中考试规则与往年卷", payload: { title: "ECE 555 汇集期中规则" } };
     expect(workOwner(order)).toMatchObject({ owner: "assistant", code: "static_artifact" });
-    expect(workOwner({ intent: "整理账户导出的交易记录", payload: { owner: "assistant" } })).toMatchObject({ owner: "ask" });
+    expect(workOwner({ intent: "整理账户导出的交易记录", payload: { owner: "assistant" } })).toMatchObject({ owner: "assistant" });
   });
 
   it("an ask carries a question: the model's, else one made from the work's name", () => {
@@ -207,4 +207,10 @@ describe("the same rules for work written in English", () => {
     expect(workOwner({ title: "Tidy up the solutions", taskTitle: "Homework 4", owner: "assistant" }).owner).toBe("person");
     expect(workOwner({ title: "整理最终解答", taskTitle: "作业 4", owner: "assistant" }).owner).toBe("person");
   });
+});
+
+it("compiling the person's money records is the assistant's, never a question; moving money stays the person's", () => {
+  for (const title of ["汇集10月至12月账户记录", "整理月末账户基线", "整理本月交易记录", "汇总信用卡账单"])
+    expect(workOwner({ title, owner: "ask" })).toMatchObject({ owner: "assistant", code: "static_artifact" });
+  expect(workOwner({ title: "买入一手英伟达", owner: "assistant" }).owner).toBe("person");
 });
