@@ -303,7 +303,8 @@ export async function ensureOpener(ctx: AccessContext, now = new Date(), force =
   const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
   // The text version (push, older pages) stays a few short lines: two of each with names cut short, the rest counted. The card drawn
   // from `opener` below carries the whole day.
-  const short = (text: string) => text.length > 16 ? `${text.slice(0, 15)}…` : text;
+  // An ask's title often already quotes its task (「「X」需要本人回答…」): the outer quotes are this line's, so the title's own go.
+  const short = (raw: string) => { const text = raw.replace(/^「(.+?)」/u, "$1"); return text.length > 16 ? `${text.slice(0, 15)}…` : text; };
   const few = (parts: string[]) => `${parts.slice(0, 2).join("；")}${parts.length > 2 ? ` 等 ${parts.length} 项` : ""}`;
   const lines = [
     `${Number(today.slice(5, 7))} 月 ${Number(today.slice(8, 10))} 日 周${"日一二三四五六"[new Date(`${today}T12:00:00Z`).getUTCDay()]}。`,
