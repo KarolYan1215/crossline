@@ -9,6 +9,7 @@ import { captureLine } from "../offline-command-forms";
 import { undoOperation } from "../undo-center";
 import { Markdown } from "../ui/markdown";
 import { ClampBlock } from "../ui/clamp";
+import { pageVisible } from "../ui/page-visible";
 import { announceThinking, HelperFace, useHelper } from "../helper-state";
 import { OpenerCard } from "./opener-card";
 
@@ -65,7 +66,7 @@ export function Conversation({ variant, placeholder, page }: {
   useEffect(() => {
     void load(true);
     // Another page or device may have added to today's conversation, and the system speaks first now and then (docs/one-input.md §4).
-    const refresh = () => { if (document.visibilityState === "visible") void load(); };
+    const refresh = () => { if (pageVisible()) void load(); };
     document.addEventListener("visibilitychange", refresh);
     const timer = setInterval(refresh, 30_000);
     return () => { document.removeEventListener("visibilitychange", refresh); clearInterval(timer); };

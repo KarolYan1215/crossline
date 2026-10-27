@@ -88,6 +88,8 @@ export function Composer({ mode, placeholder, shortPlaceholder, onSubmit, busy =
   useEffect(() => {
     if (!takeShare) return;
     const params = new URLSearchParams(location.search);
+    // 「记一下」 from the installed app's shortcuts: the box, ready to type in.
+    if (params.get("focus") === "input") { history.replaceState(null, "", location.pathname); textRef.current?.focus(); return; }
     const shared = [params.get("share_title"), params.get("share_text"), params.get("share_url")].map((part) => part?.trim()).filter(Boolean);
     if (!shared.length) return;
     setText([...new Set(shared)].join(" "));

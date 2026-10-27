@@ -67,6 +67,7 @@ namespace Crossline
             SynchronizationContext.SetSynchronizationContext(ui);
             var menu = new ContextMenuStrip();
             menu.Items.Add("打开 Crossline", null, (s, e) => Send("open"));
+            menu.Items.Add("打开小帮手（Ctrl+Alt+H）", null, (s, e) => OpenHelper());
             menu.Items.Add(updateItem);
             updateItem.Click += (s, e) => { if (pendingUpdate != null) ConfirmUpdate(); else Send("check-update"); };
             autostartItem.Checked = AutostartEnabled();
@@ -86,7 +87,40 @@ namespace Crossline
                 else if (balloonOpens != null && url != null) Process.Start(url.TrimEnd('/') + balloonOpens);
             };
             job = CreateKillOnCloseJob();
+            hotkey = new HotkeyWindow(OpenHelper);
             StartLauncher();
+        }
+
+        readonly HotkeyWindow hotkey;
+
+        // The 小帮手 alone (`/helper`) in a small window of its own: Edge's app window when Edge is there (no tabs or address bar, sized
+        // for it), else the default browser. Opened from the menu or Ctrl+Alt+H anywhere in Windows.
+        void OpenHelper()
+        {
+            var baseUrl = url ?? ConfiguredUrl();
+            if (baseUrl == null) { icon.ShowBalloonTip(5000, "Crossline", "Crossline 还在启动，稍后再打开小帮手。", ToolTipIcon.Info); return; }
+            var target = baseUrl.TrimEnd('/') + "/helper";
+            try
+            {
+                // "msedge" is found through App Paths by the shell, wherever Edge is installed.
+                Process.Start(new ProcessStartInfo("msedge", "--app=\"" + target + "\" --window-size=380,560") { UseShellExecute = true });
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                try { Process.Start(target); } catch (System.ComponentModel.Win32Exception) { }
+            }
+        }
+
+        // The page's address from launcher.json when the launcher has not said it yet (the tray just started).
+        static string ConfiguredUrl()
+        {
+            try
+            {
+                var text = File.ReadAllText(Path.Combine(Root, "launcher.json"));
+                var port = Regex.Match(text, "\"webPort\":\\s*(\\d+)");
+                return port.Success ? "http://127.0.0.1:" + port.Groups[1].Value : null;
+            }
+            catch (IOException) { return null; }
         }
 
         void StartLauncher()
@@ -231,7 +265,42 @@ namespace Crossline
         {
             icon.Visible = false;
             icon.Dispose();
+            hotkey.Dispose();
             if (job != IntPtr.Zero) CloseHandle(job);
+        }
+
+        // ---- Ctrl+Alt+H anywhere in Windows: a hidden message-only window receives WM_HOTKEY (the tray icon has no window) -------
+        sealed class HotkeyWindow : NativeWindow, IDisposable
+        {
+            const int WM_HOTKEY = 0x0312;
+            const int Id = 0x4348; // "CH"
+            const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_NOREPEAT = 0x4000;
+            static readonly IntPtr HWND_MESSAGE = new IntPtr(-3);
+            readonly Action onPress;
+            readonly bool registered;
+
+            public HotkeyWindow(Action onPress)
+            {
+                this.onPress = onPress;
+                CreateHandle(new CreateParams { Parent = HWND_MESSAGE });
+                // Another program already holding Ctrl+Alt+H leaves only the menu item; nothing is taken from it.
+                registered = RegisterHotKey(Handle, Id, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, (uint)Keys.H);
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == Id) { onPress(); return; }
+                base.WndProc(ref m);
+            }
+
+            public void Dispose()
+            {
+                if (registered) UnregisterHotKey(Handle, Id);
+                DestroyHandle();
+            }
+
+            [DllImport("user32.dll", SetLastError = true)] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint key);
+            [DllImport("user32.dll", SetLastError = true)] static extern bool UnregisterHotKey(IntPtr hWnd, int id);
         }
 
         // ---- job object: everything the launcher starts dies with the tray -------------------------------------------------------

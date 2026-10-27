@@ -3,6 +3,7 @@
 import { defaultCache } from "@serwist/next/worker";
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
 import { Serwist } from "serwist";
+import { OPEN_HELPER_MESSAGE } from "./helper-pet";
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -46,7 +47,14 @@ self.addEventListener("notificationclick", (event) => {
       await fetch(`/api/work-orders/${encodeURIComponent(data.start)}/execution`, { method: "POST", credentials: "include",
         headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start" }) }).catch(() => undefined);
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    const open = windows.find((client) => new URL(client.url).origin === new URL(url, self.location.origin).origin);
+    const target = new URL(url, self.location.origin);
+    const open = windows.find((client) => new URL(client.url).origin === target.origin);
+    // About the 小帮手: the window already open shows it in place (its widget opens the panel; `/helper` already is it), not a reload.
+    if (open && target.pathname === "/helper") {
+      await open.focus();
+      if (new URL(open.url).pathname !== "/helper") open.postMessage({ type: OPEN_HELPER_MESSAGE });
+      return;
+    }
     if (open) { await open.focus(); await open.navigate(url).catch(() => undefined); return; }
     await self.clients.openWindow(url);
   })());

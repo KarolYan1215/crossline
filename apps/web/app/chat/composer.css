@@ -125,7 +125,10 @@
 @keyframes helper-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes helper-nod{0%,82%,100%{transform:rotate(0)}86%{transform:rotate(-9deg)}91%{transform:rotate(7deg)}96%{transform:rotate(-3deg)}}
 @keyframes helper-sway{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
-.helper-face[data-size="button"][data-mood="idle"]{animation:helper-float 4s ease-in-out infinite}
+/* Idle: breathing (a slow rise with a slight swell) and, once a cycle, a quick squash that reads as a blink. */
+@keyframes helper-idle{0%,100%{transform:translateY(0) scale(1)}45%{transform:translateY(-3px) scale(1.02)}86%{transform:translateY(0) scale(1)}
+  89%{transform:scale(1.02,.93)}92%{transform:scale(1)}}
+.helper-face[data-size="button"][data-mood="idle"]{animation:helper-idle 6s ease-in-out infinite}
 .helper-face[data-size="button"][data-mood="unread"]{animation:helper-nod 4s ease-in-out infinite;box-shadow:0 0 0 3px var(--paper),0 0 0 5px var(--now-ink)}
 .helper-face[data-size="button"][data-mood="thinking"]{animation:helper-float .9s ease-in-out infinite}
 .helper-face[data-size="button"][data-mood="working"]{animation:helper-sway 2.4s ease-in-out infinite}
@@ -139,3 +142,30 @@
 .helper-calls li.urgent{border:1.5px solid var(--ink)}
 .helper-calls li p{margin:0;font-size:14px}
 .helper-calls-actions{display:flex;flex-wrap:wrap;gap:8px}
+
+/* ── 小帮手 as a desktop pet (helper-pet-client.tsx `PetFace`) ──
+   Three layers, so their motions never fight over one transform: the outer one leans a few px toward the pointer, the middle one bounces
+   when poked, the face keeps its mood's own motion. Asleep (night, or the person away) it tilts and breathes slowly with a small 「z」. */
+.helper-pet{position:relative;display:inline-block;line-height:0;transform:translate(var(--look-x,0px),var(--look-y,0px));transition:transform .3s ease-out}
+.helper-pet-body{display:inline-block;line-height:0;transform-origin:50% 85%}
+@keyframes helper-poke{0%{transform:none}30%{transform:translateY(-6px) scale(1.04,.96)}60%{transform:translateY(0) scale(.97,1.03)}100%{transform:none}}
+.helper-pet[data-poke] .helper-pet-body{animation:helper-poke .45s ease-out}
+@keyframes helper-sleep{0%,100%{transform:rotate(-10deg) translateY(2px) scale(.98)}50%{transform:rotate(-10deg) translateY(2px) scale(1.01)}}
+.helper-pet[data-pose="sleep"] .helper-pet-body{animation:helper-sleep 5s ease-in-out infinite}
+.helper-pet[data-pose="sleep"] .helper-face{filter:saturate(.55)}
+.helper-pet[data-pose="sleep"]:has(.helper-face[data-size="button"])::after{content:"z";position:absolute;top:-4px;right:-2px;padding:0 4px;
+  font:700 12px/16px Arial,sans-serif;color:var(--ink);background:var(--paper);border:1px solid var(--ink);border-radius:8px}
+@media (prefers-reduced-motion:reduce){.helper-pet{transition:none;transform:none}.helper-pet-body{animation:none!important;transform:none}}
+/* The 小帮手 is the handle the corner is dragged by (CornerStack): a press that moves is a drag, not a page scroll. */
+.corner-stack [data-drag-handle]{touch-action:none}
+.corner-stack[data-dragging]{cursor:grabbing;user-select:none}
+.corner-stack[data-dragging] .assistant-bubble-wrap{transition:none}
+
+/* ── The 小帮手 on its own: `/helper` and the pinned Picture-in-Picture window, down to 360×520 ── */
+.helper-page{margin:0;padding:0;min-height:100dvh;background:var(--paper)}
+.assistant-panel.helper-pocket{position:static;inset:auto;z-index:auto;width:auto;height:100dvh;max-height:none;border:0;box-shadow:none}
+.helper-pocket>header{gap:8px}
+.helper-pocket-who{display:inline-flex;align-items:center;gap:8px;min-width:0}
+.helper-pocket-state{font-size:12px;color:var(--graphite);white-space:nowrap}
+.helper-pocket .assistant-panel-actions{align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.helper-pocket .helper-calls-badge{font-size:12px;padding:4px 8px}
