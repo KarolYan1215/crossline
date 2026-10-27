@@ -19,7 +19,10 @@ export function mailReminderRepair(store: CrosslineStore, workspaceId: string, n
   store.setSetting(workspaceId, MAIL_REMINDER_REPAIR, now.toISOString());
   const started = new Set(store.listEvents(workspaceId, { type: "work_order.transitioned" })
     .filter((event) => (event.payload as { event?: { type?: string } }).event?.type === "human.started").map((event) => event.entityId));
-  const touched = (id: string) => started.has(id) || (store.getStepPlan(workspaceId, id)?.steps ?? []).some((step) => step.status === "done" || (step.progressQuarter ?? 0) > 0);
+  // Started by the person: a timer, or one of their own steps done or under way. The assistant's preparation counts for nothing here —
+  // it ran by itself on every one of these (2026-10-27).
+  const touched = (id: string) => started.has(id) || (store.getStepPlan(workspaceId, id)?.steps ?? [])
+    .some((step) => step.executor !== "agent" && (step.status === "done" || (step.progressQuarter ?? 0) > 0));
   const reminders = store.listWorkOrders(workspaceId).filter((order) => order.id.startsWith("cap-mail-") && OPEN.has(order.state) && !order.tombstone
     && !touched(order.id) && isMailReminderTitle(taskTitleOf(order)));
   if (!reminders.length) return [];

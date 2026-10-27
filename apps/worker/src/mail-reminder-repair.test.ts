@@ -15,6 +15,13 @@ test("mail check to-dos nobody started become one reminder, once; work and other
   order("cap-mail-b", "核查 Render 公告涉及应用", "awaiting_plan_approval");
   order("cap-mail-c", "10/30 前交 ECE 555 HW4");
   order("cap-typed", "核查实验数据");
+  order("cap-mail-started", "核实 HSBC 账单");
+  const base = { deliverable: "x.md", doneCriterion: "完成", share: 0.5, estimate: { p25Minutes: 5, p50Minutes: 10, p85Minutes: 15 }, dependsOn: [], notBefore: "", dueBy: "", tickOutcome: "", schedulable: true };
+  store.saveStepPlan(workspace.id, "cap-mail-a", { archetypeId: "errand", quantity: { basis: "项", amount: 1, unit: "项" }, rationale: "", steps: [
+    { ...base, id: "s1", role: "gather", title: "核查清单", executor: "agent" }] }, principal.id, "planned");
+  store.saveStepPlan(workspace.id, "cap-mail-started", { archetypeId: "errand", quantity: { basis: "项", amount: 1, unit: "项" }, rationale: "", steps: [
+    { ...base, id: "s1", role: "act", title: "登录核对", executor: "human" }] }, principal.id, "planned");
+  for (const id of ["cap-mail-a", "cap-mail-started"]) { const step = store.getStepPlan(workspace.id, id)!.steps[0]!; store.updateStepProgress(workspace.id, id, step.id, { status: "done" }, principal.id, "test"); }
   expect(mailReminderRepair(store, workspace.id).sort()).toEqual(["cap-mail-a", "cap-mail-b"]);
   const states = new Map(store.listWorkOrders(workspace.id).map((item) => [item.id, item.state]));
   expect(states.get("cap-mail-a")).toBe("archived");
