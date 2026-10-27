@@ -30,12 +30,20 @@ mkdir -p "$state"
 now=$(date -u +%s)
 say() { echo "$(date -u +%FT%TZ) $*"; }
 
+# The worker's heartbeat lock outlives a stopped worker and reads as fresh for 45 minutes, so a worker started over it exits
+# (worker.already_running) and restarts in a loop; run.sh removes it the same way once the old worker is stopped.
+drop_worker_lock() {
+  [ "$1" = crossline-worker ] && rm -f /srv/crossline/data/worker.lock
+  return 0
+}
+
 check() {
   name=$1 url=$2
   docker inspect "$name" >/dev/null 2>&1 || return 0   # never deployed here (e.g. no transcriber): nothing to keep up
   running=$(docker inspect -f '{{.State.Running}}' "$name")
   if [ "$running" != true ]; then
     say "$name not running; starting"
+    drop_worker_lock "$name"
     docker start "$name" >/dev/null && rm -f "$state/$name"
     return 0
   fi
@@ -50,7 +58,9 @@ check() {
   say "$name did not answer $url ($misses in a row)"
   if [ "$misses" -ge 3 ]; then
     say "$name restarting"
-    docker restart -t 20 "$name" >/dev/null && rm -f "$state/$name"
+    docker stop -t 20 "$name" >/dev/null 2>&1 || true
+    drop_worker_lock "$name"
+    docker start "$name" >/dev/null && rm -f "$state/$name"
   fi
 }
 

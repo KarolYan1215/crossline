@@ -18,7 +18,7 @@ image=$(docker inspect -f '{{.Config.Image}}' crossline-web)
 here=$(cd "$(dirname "$0")" && pwd)
 mounts=""
 for s in ledger-stamp.ts migrate-workspace.ts pack-for-server.ts; do [ -f "$here/$s" ] && mounts="$mounts -v $here/$s:/repo/scripts/$s:ro"; done
-run() { docker run --rm -v $data:/data $mounts "$@"; }
+run() { docker run --rm --init -v $data:/data $mounts "$@"; }
 tsx=/repo/node_modules/.bin/tsx
 
 case "$1" in

@@ -82,10 +82,18 @@ default_env() { # file key value
   grep -q "^$2=." "$1" 2>/dev/null || printf -- '-e %s=%s ' "$2" "$3"
 }
 
+# Stopped with SIGTERM and 30 s to finish before it is removed: `docker rm -f` is a SIGKILL, so the worker's shutdown handler (close
+# the login browsers, stop Codex, close the ledger, release worker.lock) never ran. `--init` puts tini at PID 1, which reaps the
+# zombies Chromium, Xvfb, ffmpeg and the Codex runtimes leave behind (Node as PID 1 never waits on orphans) and forwards signals.
+stop_container() {
+  docker stop -t 30 "$1" >/dev/null 2>&1 || true
+  docker rm -f "$1" >/dev/null 2>&1 || true
+}
+
 start() {
   name="$1"; shift
-  docker rm -f "$name" >/dev/null 2>&1 || true
-  docker run -d --name "$name" --restart unless-stopped "$@" >/dev/null
+  stop_container "$name"
+  docker run -d --init --name "$name" --restart unless-stopped "$@" >/dev/null
   echo "started $name"
 }
 
@@ -107,7 +115,7 @@ if [ "$want" = all ] || [ "$want" = web ]; then
   # A Node heap ceiling under the container's: the heap is collected harder before the container is anywhere near being killed.
   # Through apps/web/queue-server.mjs when the image has it: page renders wait in line (four at a time) instead of all holding memory.
   web_cmd="node_modules/.bin/next start --hostname 127.0.0.1 --port 3210"
-  if docker run --rm --entrypoint test "$app_image" -f /repo/apps/web/queue-server.mjs; then web_cmd="node queue-server.mjs --hostname 127.0.0.1 --port 3210"; fi
+  if docker run --rm --init --entrypoint test "$app_image" -f /repo/apps/web/queue-server.mjs; then web_cmd="node queue-server.mjs --hostname 127.0.0.1 --port 3210"; fi
   start crossline-web --network host --env-file /srv/crossline/app.env --memory $web_mem --memory-swap $web_mem -e NODE_OPTIONS=--max-old-space-size=$web_heap \
     $(default_env /srv/crossline/app.env CROSSLINE_WEB_CONCURRENCY $web_renders) \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
@@ -116,12 +124,12 @@ fi
 if [ "$want" = all ] || [ "$want" = worker ]; then
   # The worker's heartbeat lock outlives a removed container and reads as fresh for 45 minutes, so the new worker would exit
   # (worker.already_running) and restart in a loop. The old container is removed first, so no other worker holds it.
-  docker rm -f crossline-worker >/dev/null 2>&1 || true
+  stop_container crossline-worker
   rm -f /srv/crossline/data/worker.lock
   # The prebuilt worker (scripts/build-worker.mjs) when the image has it, else tsx as before. The Codex runtimes are its children and
   # live outside the Node heap, so the heap gets well under half the container.
   worker_cmd="/repo/node_modules/.bin/tsx src/index.ts"
-  if docker run --rm --entrypoint test "$app_image" -f /repo/apps/worker/dist/index.mjs; then worker_cmd="node dist/index.mjs"; fi
+  if docker run --rm --init --entrypoint test "$app_image" -f /repo/apps/worker/dist/index.mjs; then worker_cmd="node dist/index.mjs"; fi
   start crossline-worker --network host --env-file /srv/crossline/app.env --memory $worker_mem --memory-swap $worker_mem -e NODE_OPTIONS=--max-old-space-size=$worker_heap \
     $(default_env /srv/crossline/app.env CROSSLINE_MODEL_CONCURRENCY $model_runs) $(default_env /srv/crossline/app.env CROSSLINE_GUEST_RUNTIMES $guest_runtimes) \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
@@ -159,12 +167,12 @@ if [ "$want" = all ] || [ "$want" = transcriber ]; then
     chmod 644 "$models"/* 2>/dev/null || true
     if [ "$ok" = 1 ]; then
       transcriber_cmd="/repo/node_modules/.bin/tsx src/transcriber.ts"
-      if docker run --rm --entrypoint test "$app_image" -f /repo/apps/worker/dist/transcriber.mjs; then transcriber_cmd="node dist/transcriber.mjs"; fi
+      if docker run --rm --init --entrypoint test "$app_image" -f /repo/apps/worker/dist/transcriber.mjs; then transcriber_cmd="node dist/transcriber.mjs"; fi
       start crossline-transcriber --network none --env-file /srv/crossline/app.env --memory $transcriber_mem --memory-swap $transcriber_mem --cpus 1 \
         -e NODE_OPTIONS=--max-old-space-size=160 -e CROSSLINE_SENSEVOICE_DIR=/models -e CROSSLINE_TRANSCRIBE_THREADS=1 \
         -v /srv/crossline/data:/data -v "$models":/models:ro -w /repo/apps/worker "$app_image" $transcriber_cmd
     fi
   else
-    docker rm -f crossline-transcriber >/dev/null 2>&1 && echo "removed crossline-transcriber" || true
+    docker inspect crossline-transcriber >/dev/null 2>&1 && { stop_container crossline-transcriber; echo "removed crossline-transcriber"; } || true
   fi
 fi

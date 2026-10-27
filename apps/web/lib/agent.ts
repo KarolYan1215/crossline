@@ -7,6 +7,7 @@ import {
   type AgentApprovalRow, type AgentQuestionRow, type AgentTaskRow
 } from "@crossline/db";
 import { getStore } from "./crossline";
+import { containedPath } from "./contained-path";
 import { namesFrom, type Names } from "../app/materials/humanize";
 
 /**
@@ -111,9 +112,9 @@ const FILE_LIMIT = 8 * 1024 * 1024;
 /** One file from a task's directory, for the review page to open. Never a path that leaves the directory, a secret, or something huge. */
 export function readTaskFile(ctx: AccessContext, taskId: string, relative: string, limit = FILE_LIMIT): { body: Buffer; type: string } | undefined {
   const directory = taskDirectory(ctx, taskId);
-  if (!directory || !relative || path.isAbsolute(relative)) return undefined;
-  const full = path.resolve(directory, relative);
-  if (!full.toLowerCase().startsWith(`${path.resolve(directory).toLowerCase()}${path.sep}`) || isSecretPath(full)) return undefined;
+  if (!directory) return undefined;
+  const full = containedPath(directory, relative);
+  if (!full || isSecretPath(full) || isSecretPath(path.resolve(directory, relative))) return undefined;
   try {
     const stat = statSync(full);
     if (!stat.isFile() || stat.size > limit) return undefined;

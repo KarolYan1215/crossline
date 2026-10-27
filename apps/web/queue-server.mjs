@@ -9,6 +9,7 @@
  *   images and every write (POST and the like — a person's action, or a wait on the worker that holds little memory) never wait.
  * - While the process holds more than `CROSSLINE_WEB_HIGH_WATER` (80%) of its container's memory, nothing new starts until a request
  *   in flight ends; with none in flight the next one goes anyway, so a reading that never drops cannot stop the site.
+ * - The line is bounded (2026-10-27): past 50 waiting, or after 30 s in it, a page is answered 503 with `Retry-After: 5`.
  *
  *   node queue-server.mjs --hostname 127.0.0.1 --port 3210
  *
@@ -20,6 +21,7 @@
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import next from "next";
+import { createLine } from "./queue-line.mjs";
 
 const argument = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at >= 0 ? process.argv[at + 1] : fallback; };
 const hostname = argument("hostname", "127.0.0.1");
@@ -47,21 +49,6 @@ const ceiling = (() => {
 })();
 const memoryHigh = () => ceiling !== undefined && process.memoryUsage().rss / ceiling >= highWater;
 
-let active = 0;
-/** Two lines, kept for routes that may queue later: pages first, then anything polled. Today only pages queue (`waits`). */
-const lines = { page: [], poll: [] };
-let timer;
-let logged = 0;
-
-function pump() {
-  while ((lines.page.length || lines.poll.length) && active < limit) {
-    if (memoryHigh() && active > 0) { if (!timer) timer = setTimeout(() => { timer = undefined; pump(); }, 250); return; }
-    const next = lines.page.shift() ?? lines.poll.shift();
-    active += 1;
-    next();
-  }
-}
-
 /** Per route (ids folded to `:id`) for the last minute: how long requests waited in line and how long serving them took. */
 let stats = new Map();
 const routeOf = (url) => (url ?? "/").split("?")[0].replace(/\/[A-Za-z0-9_-]{16,}|\/\d[\w-]*/g, "/:id");
@@ -87,56 +74,24 @@ setInterval(() => {
   }
 }, 60_000).unref();
 
-/** A slot a request still holds after this goes back to the pool, so no request — however it ends, or fails to — can stop the line. */
-const SLOT_MAX_MS = 120_000;
-
 /**
- * Runs `work` once a slot is free (pages before polls) and frees the slot when the response ends or the person goes away. A person
- * who leaves while still waiting leaves the line at once: the first version attached its listeners only when the turn came, after the
- * connection had already closed, so each such slot was never freed and four of them stopped the site (2026-10-16).
+ * The line itself (queue-line.mjs): pages before polls, a slot freed when the response ends or the person goes away (a person who
+ * leaves while still waiting leaves the line at once — the first version leaked a slot per abandoned request and four stopped the site,
+ * 2026-10-16), no slot held past two minutes, and at most `CROSSLINE_WEB_QUEUE_MAX` (50) waiting for at most
+ * `CROSSLINE_WEB_QUEUE_WAIT_MS` (30 s) before a 503 with `Retry-After: 5`.
  */
-function inLine(request, response, work) {
-  const queuedAt = Date.now();
-  const route = routeOf(request.url);
-  const kind = route.startsWith("/api/") ? "poll" : "page";
-  let started = false;
-  const turn = () => {
-    started = true;
-    let freed = false;
-    const startedAt = Date.now();
-    const free = () => {
-      if (freed) return;
-      freed = true; active -= 1;
-      clearTimeout(watchdog);
-      record(route, startedAt - queuedAt, Date.now() - startedAt);
-      pump();
-    };
-    const watchdog = setTimeout(free, SLOT_MAX_MS);
-    watchdog.unref?.();
-    // Gone while waiting (a closed tab, a timed-out client): nothing to render, the slot goes straight back.
-    if (response.destroyed || response.writableEnded) { free(); return; }
-    response.once("close", free);
-    response.once("finish", free);
-    const waited = startedAt - queuedAt;
-    // A wait worth knowing about, at most once a minute so a busy minute is one line.
-    if (waited > 2_000 && Date.now() - logged > 60_000) {
-      logged = Date.now();
-      console.info(JSON.stringify({ type: "web.queue", waitedMs: waited, waiting: lines.page.length + lines.poll.length, active, rssMb: Math.round(process.memoryUsage().rss / 1048576) }));
-    }
-    Promise.resolve().then(work).catch((error) => {
-      console.error(JSON.stringify({ type: "web.request_failed", error: error instanceof Error ? error.message : String(error) }));
-      if (!response.headersSent && !response.destroyed) { response.statusCode = 500; response.end(); }
-      free();
-    });
-  };
-  lines[kind].push(turn);
-  response.once("close", () => {
-    if (started) return;
-    const at = lines[kind].indexOf(turn);
-    if (at >= 0) lines[kind].splice(at, 1);
-  });
-  pump();
-}
+const { inLine } = createLine({
+  limit,
+  memoryHigh,
+  maxQueued: Math.max(1, Number(process.env.CROSSLINE_WEB_QUEUE_MAX) || 50),
+  maxWaitMs: Math.max(1_000, Number(process.env.CROSSLINE_WEB_QUEUE_WAIT_MS) || 30_000),
+  record,
+  routeOf,
+  log: (event) => {
+    const line = JSON.stringify(event.type === "web.queue" ? { ...event, rssMb: Math.round(process.memoryUsage().rss / 1048576) } : event);
+    if (event.type === "web.request_failed") console.error(line); else console.info(line);
+  }
+});
 
 const app = next({ dev: false, hostname, port, dir: import.meta.dirname });
 const handle = app.getRequestHandler();

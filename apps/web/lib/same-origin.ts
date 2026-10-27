@@ -12,8 +12,13 @@ import "server-only";
  * A request with no `Origin` is not a browser form post — it is a local tool or a script, which this
  * app is expected to support. The guard exists to stop another *site* writing here, not to stop the
  * owner's own terminal.
+ *
+ * A browser that sends no `Origin` still says where the request came from in `Sec-Fetch-Site`, which a
+ * page cannot set: `cross-site` is refused whatever `Origin` says or leaves out. A request with neither
+ * header (curl, the worker) still passes.
  */
 export function isCrossSiteWrite(request: Request): boolean {
+  if (request.headers.get("sec-fetch-site")?.trim().toLowerCase() === "cross-site") return true;
   const origin = request.headers.get("origin");
   if (!origin) return false;
   const host = request.headers.get("host");
