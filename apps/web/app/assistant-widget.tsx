@@ -8,6 +8,8 @@ import { isHelperShortcut, OPEN_HELPER_MESSAGE, POSE_LABEL } from "./helper-pet"
 import { HelperPocket, isTypingTarget, openPinnedWindow, PetFace, pinSupport, useLaunchTarget, usePetPose } from "./helper-pet-client";
 import { OverlayContainer } from "./ui/overlay";
 import { setPinnedVisible } from "./ui/page-visible";
+import { isReminderKind } from "./notice-kinds";
+import { OPEN_HELPER_EVENT } from "./notice-bell";
 
 const SEEN_KEY = "crossline-nudge-seen";
 /** The last message the bubble popped out for, so one message pops once, not again on every page it is still unread on. */
@@ -63,8 +65,10 @@ export function AssistantWidget() {
     const ping = () => {
       if (document.visibilityState !== "visible") return;
       void fetch("/api/presence", { method: "POST" }).catch(() => {});
-      void fetch("/api/conversation").then((response) => response.ok ? response.json() : null).then((body: { messages?: Array<{ id: string; role: string; card?: { clarify: { question: string; chosen?: number } } }> } | null) => {
-        const nudge = [...(body?.messages ?? [])].reverse().find((message) => message.role === "nudge" && message.card?.clarify.chosen === undefined);
+      void fetch("/api/conversation").then((response) => response.ok ? response.json() : null).then((body: { messages?: Array<{ id: string; role: string; card?: { nudgeKind?: string; clarify: { question: string; chosen?: number } } }> } | null) => {
+        const nudge = [...(body?.messages ?? [])].reverse().find((message) => message.role === "nudge" && message.card?.clarify.chosen === undefined
+          // Reminders that ask nothing pop up under the bell (notice-bell.tsx); the figure speaks only for what wants an answer.
+          && !isReminderKind(message.card?.nudgeKind));
         if (!nudge || nudge.id === readKey(SEEN_KEY)) { setLatest(null); return; }
         const full = plainText(nudge.card!.clarify.question);
         setLatest((current) => current?.id === nudge.id ? current : { id: nudge.id, text: previewText(full), full });
@@ -111,8 +115,10 @@ export function AssistantWidget() {
     };
     const onMessage = (event: MessageEvent) => { if ((event.data as { type?: string } | null)?.type === OPEN_HELPER_MESSAGE) openRef.current(); };
     window.addEventListener("keydown", onKey);
+    const onOpen = () => openRef.current();
+    window.addEventListener(OPEN_HELPER_EVENT, onOpen);
     navigator.serviceWorker?.addEventListener("message", onMessage);
-    return () => { window.removeEventListener("keydown", onKey); navigator.serviceWorker?.removeEventListener("message", onMessage); };
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener(OPEN_HELPER_EVENT, onOpen); navigator.serviceWorker?.removeEventListener("message", onMessage); };
   }, []);
   // 「钉在桌面」: the same 小帮手 in a window that stays above every tab and app (or the `/helper` popup where that is not available).
   const pinToDesktop = async () => {

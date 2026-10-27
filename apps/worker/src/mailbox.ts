@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   MAIL_ACCOUNTS_SETTING, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
-  amountsInText, isQuickAccountCheck, MAIL_CHECK_NUDGE_KIND, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage
+  amountsInText, isMailReminderTitle, MAIL_CHECK_NUDGE_KIND, moneyDirection, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage
 } from "@crossline/core";
 import {
   createImapMail, hostAllowed, presetFor, unsupportedProvider, type ImapFactory, type ImapMail, type MailHeader, type SecretStore
@@ -211,14 +211,22 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind: "needs_reply", title: item.why.slice(0, 140), at });
       continue;
     }
-    // A few minutes' check of the person's own account is said once, not planned as a task (isQuickAccountCheck).
-    if (kind === "todo" && isQuickAccountCheck(item.title)) {
+    // A mail to-do that only asks to look at something (a charge, a payment, a notice) is said once as a reminder, not planned as a task.
+    if (kind === "todo" && isMailReminderTitle(item.title)) {
       const title = item.title.trim().slice(0, 120);
-      sayToPerson(deps.store, workspaceId, `邮件提醒：${title}。来自 ${message.from}「${message.subject.slice(0, 80)}」。请在对应 App 或官网里查看，不要点邮件里的链接。`,
-        MAIL_CHECK_NUDGE_KIND, `mail-check:${mailKey(message)}`, [
-          { label: "转成任务", action: { action: "task.create", summary: `新建任务：${title}`, args: { title, context: `来自邮件：${message.from}「${message.subject}」`, lineId: "", dueDate: "", milestoneId: "" } } },
-          { label: "少问这类", kind: "mute" }
-        ], deps.now?.() ?? new Date());
+      // The amount the mail states is written to the bookkeeping by itself (the owner, 2026-10-27: 「上传交易记录太麻烦了，删掉，自动记录」);
+      // nobody is asked to upload a statement, and it never becomes a task.
+      const stated = amountsInText(`${message.subject} ${message.snippet}`)[0];
+      let noted = "";
+      if (stated && bookkeeping.has(message.accountId)) {
+        const written = recordAndJudge(deps.store, workspaceId, ownerId, { domain: "wealth", kind: moneyDirection(`${message.subject} ${message.snippet}`),
+          at: (message.date || at).slice(0, 10), value: stated.value, unit: "元", currency: stated.currency, category: item.merchant.trim().slice(0, 40),
+          note: `邮件：${message.subject}`.slice(0, 200), source: "mail", sourceRef: mailKey(message), dedupeKey: `mail:${mailKey(message)}` },
+        { lineId: wealthLine, now: deps.now?.() ?? new Date() });
+        if (written.ok) { noted = `已自动记账 ${stated.value} ${stated.currency}。`; if (written.inserted) recorded += 1; }
+      }
+      sayToPerson(deps.store, workspaceId, `邮件提醒：${title}。${noted}来自 ${message.from}「${message.subject.slice(0, 80)}」。不是本人操作的话在对应 App 或官网里处理，不要点邮件里的链接。`,
+        MAIL_CHECK_NUDGE_KIND, `mail-check:${mailKey(message)}`, [{ label: "少问这类", kind: "mute" }], deps.now?.() ?? new Date());
       log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind, title: title.slice(0, 140), at });
       continue;
     }

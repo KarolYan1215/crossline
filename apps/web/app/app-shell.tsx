@@ -13,6 +13,7 @@ import { CameraSampler } from "./camera-sampler";
 import { ReturnPoint } from "./ui/back-link";
 import { TimeZoneSync } from "./time-zone-sync";
 import { HelperCalls } from "./helper-calls";
+import { NoticeBell } from "./notice-bell";
 
 /**
  * The frame every signed-in page shares: the name, the four working views, the decisions waiting for you, the
@@ -38,6 +39,7 @@ export function AppShell({ active, children, className = "page", focus = false, 
       <div className="system-state">
         {(focus ? SIDE_ITEMS.filter((item) => item.href === "/settings") : SIDE_ITEMS).map((item) => <a href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>
           {item.label}{item.badge && <PendingBadge />}</a>)}
+        {!focus && <NoticeBell />}
         <UndoCenter />
         <SignOutButton />
       </div>

@@ -203,15 +203,20 @@ export function replyReminderDue(draft: MailReplyDraft, now: Date): boolean {
 }
 
 /**
- * A mail to-do that is a few minutes' check of the person's own account (an unusual charge, a login, a balance, a bill), not work. On
- * the real account each became a task with an AI analysis, a step plan, a line it did not belong to and an assistant run that asked for
- * the transaction records (2026-10-27: Chase, HSBC, PayPal). It is said once as a message instead, with 「转成任务」 for the rare one
- * that is real work.
+ * Mail to-dos that only ask to look at something (an unusual charge, a payment received, a provider's notice) are reminders, not work:
+ * on the real account each became a task with an AI analysis, a step plan, a line it did not belong to and an assistant run that asked
+ * for the transaction records (2026-10-27).
  */
 const CHECK_VERB = /^(核实|核查|核对|查看|确认|检查|留意)/u;
-const ACCOUNT_WORDS = /交易|扣款|消费|余额|账单|付款|收款|转账|退款|登录|密码|验证码|账户|账号|信用卡|银行卡|卡片|订阅|续费|PayPal|Chase|HSBC|Venmo|Zelle|Apple Pay/iu;
-export function isQuickAccountCheck(title: string): boolean {
-  const text = title.trim();
-  return CHECK_VERB.test(text) && ACCOUNT_WORDS.test(text) && text.length <= 60;
-}
 export const MAIL_CHECK_NUDGE_KIND = "mail_check";
+
+/**
+ * A to-do sorted out of mail whose name only asks to look at something (核实 / 核查 / 查看 / 确认 / 留意 …): a reminder, not work to plan.
+ * Judged only on what came from mail, where a check is almost always reading a notice.
+ */
+export const isMailReminderTitle = (title: string): boolean => CHECK_VERB.test(title.trim()) || /^了解|^关注/u.test(title.trim());
+
+/** Which way the money in an account alert went: in for a payment received, a deposit or a refund; out for anything else (a charge). */
+export function moneyDirection(text: string): "income" | "expense" {
+  return /收款|入账|到账|退款|存入|工资|received|deposit|refund|credited|paid you|sent you/iu.test(text) ? "income" : "expense";
+}
