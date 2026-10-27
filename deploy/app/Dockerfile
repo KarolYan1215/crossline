@@ -43,6 +43,7 @@ COPY packages/codex/package.json packages/codex/
 COPY packages/connectors/package.json packages/connectors/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
+COPY packages/i18n/package.json packages/i18n/
 COPY packages/identity-packs/package.json packages/identity-packs/
 COPY packages/planner/package.json packages/planner/
 
