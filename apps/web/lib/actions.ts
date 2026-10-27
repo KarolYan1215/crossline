@@ -18,9 +18,12 @@ import { applyChange } from "./impact";
 import { createMilestoneDraft } from "./input";
 import { addLine, identityLines, lineLabels, updateLine } from "./lines";
 import { addDomainRecord, personToday } from "./records";
+import { addReminder, createErrand } from "./life";
+import { setPlaceMinutes, setTravel } from "./travel";
 import { applyTaskOp, recordEnergy } from "./task-ops";
 import { undoOp, withUndo } from "./undo";
 import { localeFor, tOf } from "./locale";
+import { monthDay } from "./i18n";
 
 /** What carrying out one action did: `message` is shown on the card; `opId` is what the card's 撤销 takes back. */
 export type ActionOutcome = { ok: true; message: string; opId?: string; href?: string; captureId?: string } | { ok: false; message: string };
@@ -88,6 +91,28 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     const t = tOf(ctx);
     return { ok: true, href: "/plan", message: describeEvent(result.event, localeFor(ctx)) + (result.placedBySystem ? t("（系统选定的空档）") : "")
       + (result.moved ? t(" · 重排了 {{count}} 个冲突的任务块", { count: result.moved }) : "") };
+  },
+  "reminder.add": (ctx, args) => {
+    const reminder = addReminder(ctx, { text: args.text.trim(), date: args.date, time: args.time });
+    const t = tOf(ctx);
+    const when = reminder.date === personToday(ctx) ? t("今天") : localeFor(ctx) === "en" ? monthDay("en", reminder.date) : reminder.date.slice(5).replace("-", "/");
+    return { ok: true, message: t("{{when}} {{time}} 在右上角提醒：{{text}}", { when, time: reminder.time, text: reminder.text }) };
+  },
+  "errand.prepare": (ctx, args) => {
+    const result = createErrand(ctx, args);
+    return result.ok ? { ok: true, message: result.message } : { ok: false, code: result.code, message: result.message };
+  },
+  "travel.set": (ctx, args) => {
+    const patch = { ...(args.home.trim() ? { home: args.home } : {}), ...(args.work.trim() ? { work: args.work } : {}),
+      ...(args.defaultMinutes > 0 ? { defaultMinutes: args.defaultMinutes } : {}), ...(args.useMap ? { useMap: args.useMap === "on" } : {}) };
+    const settings = Object.keys(patch).length ? setTravel(ctx, patch) : undefined;
+    if (args.place.trim()) setPlaceMinutes(ctx, args.place, args.minutes > 0 ? args.minutes : "online");
+    const t = tOf(ctx);
+    const place = args.place.trim();
+    const parts = [place ? (args.minutes > 0 ? t("去「{{place}}」约 {{count}} 分钟", { place, count: Math.round(args.minutes) }) : t("去「{{place}}」按线上（不留路上时间）", { place })) : "",
+      args.home.trim() ? t("已记下住址") : "", args.work.trim() ? t("已记下工作或学习地点") : "", args.defaultMinutes > 0 ? t("默认通勤 {{count}} 分钟", { count: Math.round(args.defaultMinutes) }) : "",
+      settings?.home && settings.useMap ? t("有地点的日程按 OpenStreetMap 估算路上时间（住址与地点会发给 OpenStreetMap）") : ""].filter(Boolean);
+    return { ok: true, message: parts.join(t("；")), href: "/settings#travel" };
   },
   "goal.add": (ctx, args) => {
     const line = identityLines(ctx).find((pack) => pack.id === args.lineId);

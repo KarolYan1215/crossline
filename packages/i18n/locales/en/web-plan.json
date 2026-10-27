@@ -763,5 +763,7 @@
   "网上调研得出的提议在这里一周批一次；采纳「任务」类提议会收进待分析、变成任务；其余类型采纳后作为下次设计里程碑的参考。": "Proposals from web research are decided here once a week. An accepted \"task\" proposal is captured for analysis and becomes a task; other kinds, once accepted, inform the next milestone design.",
   "关于这项任务：改期、拆细、提问……": "About this task: reschedule, split, ask…",
   "全天：{{items}}": "All day: {{items}}",
-  "本周的待决事项；待确认页还列有任务提案与助手成果": "This week's decisions; the Decisions page also lists task proposals and assistant results"
+  "本周的待决事项；待确认页还列有任务提案与助手成果": "This week's decisions; the Decisions page also lists task proposals and assistant results",
+  "预留的路上时间（{{tag}}）": "Travel time kept free ({{tag}})",
+  "预留的路上时间": "Travel time kept free"
 }

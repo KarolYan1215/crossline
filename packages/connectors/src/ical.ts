@@ -80,7 +80,8 @@ export function readIcal(text: string, options: { sourceId: string; from: Date; 
       provider: "graph_calendar", externalId: `ical:${options.sourceId}:${uid}:${occurrence}`,
       // One per occurrence: occurrences share the UID, and the sync collapses items that share an iCalUid.
       iCalUid: `${uid}@${occurrence}`,
-      title: event.summary || tFor(options.locale)("（无标题）"), start: startAt.toISOString(), end: endAt.toISOString()
+      title: event.summary || tFor(options.locale)("（无标题）"), start: startAt.toISOString(), end: endAt.toISOString(),
+      ...(event.location?.trim() ? { location: event.location.trim().slice(0, 300) } : {})
     });
   };
 

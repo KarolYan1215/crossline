@@ -37,6 +37,8 @@ export type TimelineItem = {
   lockedVia?: "calendar";
   source: string;
   readOnly: boolean;
+  /** What the assistant prepared for an event the person added (an errand's itinerary or list), shown as 「已备好」. */
+  prepared?: Array<{ href: string; name: string }>;
 };
 
 /** A date something is due by, shown as a flag on the day rather than a block of time. */

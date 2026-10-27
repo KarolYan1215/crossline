@@ -12,6 +12,8 @@ export type ExternalItem = {
   start?: string;
   end?: string;
   etag?: string;
+  /** Where it happens, as the calendar says (a room, an address, a meeting link). */
+  location?: string;
   /** The source says this is gone. A delta page reports deletions as tombstones, not as absence. */
   removed?: boolean;
 };
@@ -643,6 +645,8 @@ export class GraphReadSource {
         provider: "graph_calendar", externalId: "",
         title: typeof row.subject === "string" && row.subject ? row.subject : UNTITLED,
         ...(typeof row.iCalUId === "string" ? { iCalUid: row.iCalUId } : {}),
+        ...(typeof (row.location as { displayName?: unknown } | undefined)?.displayName === "string" && (row.location as { displayName: string }).displayName.trim()
+          ? { location: (row.location as { displayName: string }).displayName.trim().slice(0, 300) } : {}),
         ...(start?.dateTime ? { start: start.dateTime } : {}),
         ...(end?.dateTime ? { end: end.dateTime } : {}),
         ...(typeof row["@odata.etag"] === "string" ? { etag: row["@odata.etag"] } : {})

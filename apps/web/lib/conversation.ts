@@ -8,7 +8,8 @@ import {
   type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
 import { DOMAIN_PACKS } from "@crossline/identity-packs";
-import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability } from "./crossline";
+import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability, travelStateOf } from "./crossline";
+import { readReminders } from "./life";
 import { openAsks } from "./asks";
 import { executeAction } from "./actions";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
@@ -123,6 +124,15 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     weeklyPattern: weeklyPattern(readAvailability(ctx)),
     automations: readAutomations(store.getSetting(ctx.workspaceId, AUTOMATIONS_SETTING)).map((item) => ({ name: item.name, trigger: triggerLabel(item.trigger), status: item.status, lineId: item.lineId })),
     mailboxes: readMailAccounts(store.getSetting(ctx.workspaceId, MAIL_ACCOUNTS_SETTING)).length,
+    // The model's snapshot, not the interface.
+    /* i18n-ignore-start */
+    life: (() => {
+      const travel = travelStateOf(ctx);
+      return { home: Boolean(travel.settings.home), work: Boolean(travel.settings.work), defaultMinutes: travel.settings.defaultMinutes,
+        places: Object.entries(travel.places).slice(0, 20).map(([place, minutes]) => `${place} ${minutes === "online" ? "线上" : `${minutes} 分钟`}`),
+        reminders: readReminders(ctx).filter((item) => !item.firedAt).slice(-10).map((item) => `${item.date} ${item.time || "出发前"} ${item.text}`) };
+    })(),
+    /* i18n-ignore-end */
     ops: recentOps(ctx, now).map((op) => ({ id: op.id, label: op.label, at: op.at })),
     /* i18n-ignore-start: the pack is model context */
     agentResults: resultsAwaitingReview(store, ctx.workspaceId)
@@ -162,6 +172,8 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
     `待批准的任务提案 ${pack.proposals.length} 项；里程碑草稿 ${pack.milestones.filter((item) => item.status === "draft").length} 个；待审阅的助手成果 ${pack.agentResults.length} 项`,
     `最近一次精力记录：${pack.energy ? `${pack.energy.level}（${formatInTimeZone(new Date(pack.energy.at), pack.timeZone, "MM-dd HH:mm")}）` : "无"}`,
     `自动化（改哪个就用 workflow.request 写明改法）：${pack.automations?.length ? pack.automations.map((item) => `${item.name}（${item.trigger}${item.status === "off" ? "，已暂停" : ""}${item.lineId ? `，主线 ${item.lineId}` : ""}）`).join("；") : "无"}；已接入邮箱 ${pack.mailboxes ?? 0} 个`,
+    `出行：住址${pack.life?.home ? "已设（有地点的日程由地图估算路上时间）" : "未设"}；工作或学习地点${pack.life?.work ? "已设" : "未设"}；默认路上时间${pack.life?.defaultMinutes ? ` ${pack.life.defaultMinutes} 分钟` : "未设"}${pack.life?.places.length ? `；本人给过的：${pack.life.places.join("，")}` : ""}`,
+    `待提醒：${pack.life?.reminders.length ? pack.life.reminders.join("；") : "无"}`,
     `当前页面：${pack.page.kind}${pack.page.title ? `「${pack.page.title}」(${pack.page.entityId})` : ""}`,
     `主线（id | 名称）：${pack.lines.map((line) => `${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""}${line.domain ? `（${line.domain}）` : ""}`).join("；") || "无"}`,
     `项目（id | 名称 | 主线）：${pack.projects.map((project) => `${project.id} | ${project.name} | ${project.line}`).join("；") || "无"}`,

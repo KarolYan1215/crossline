@@ -1220,5 +1220,18 @@
   "每刻钟的输入秒数、停顿和指针移动距离": "Seconds of input, pauses and pointer distance per quarter hour",
   "网页版不是谁的电脑：在本人电脑上的 Crossline 打开这个页面。": "The web version is nobody's computer: open this page in Crossline on your own computer.",
   "本机读什么、发到哪里。连接网页版后，这是电脑上唯一留下的页面。": "What this computer reads and where it goes. Once linked to the web version, this is the only page left on the computer.",
-  "本机的读取只对这台电脑的主人开放。": "This computer's readings are open only to its owner."
+  "本机的读取只对这台电脑的主人开放。": "This computer's readings are open only to its owner.",
+  "出行": "Travel",
+  "有地点的日程前后留出路上时间，排程避开这段时间；线上日程不留": "Events at a place get travel time before and after them, and the schedule keeps it free; online events get none",
+  "住址": "Home address",
+  "填写后，有地点的日程由 OpenStreetMap 估算路上时间；住址与日程地点会发给 OpenStreetMap": "Once filled in, travel time to events at a place is estimated by OpenStreetMap; your address and event locations are sent to OpenStreetMap",
+  "街道、城市": "Street, city",
+  "工作或学习地点": "Work or study place",
+  "日程地点写「公司」「学校」时按这里估算": "Used when an event's location says \"office\" or \"school\"",
+  "可留空": "Optional",
+  "地图估算": "Map estimate",
+  "关闭后不向任何服务发送地址": "When off, no address is sent to any service",
+  "默认路上时间": "Default travel time",
+  "没有住址或地图估算不到时使用；不设则逐个地点询问，期间按 30 分钟留": "Used when there is no address or the map cannot estimate; if unset, each place is asked about once, with 30 minutes kept meanwhile",
+  "逐个询问": "Ask per place"
 }

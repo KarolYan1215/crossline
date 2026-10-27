@@ -714,5 +714,12 @@
   "免费账号的额度较少，访谈约 {{rounds}} 轮，可能做不完；做两轮后这里会按实际用量估算还够几轮。": "A free account has little quota and the interview takes about {{rounds}} rounds, so it may not finish; after two rounds this shows how many rounds are left from the actual usage.",
   "{{host}} 的页面内容变化时（每 {{count}} 小时看一次）_one": "When the page on {{host}} changes (checked every {{count}} hour)",
   "每周可用约 {{available}} 小时，固定安排占其中 {{fixed}} 小时，剩约 {{free}} 小时给 {{count}} 条主线。_one": "About {{available}} h a week available; fixed commitments take {{fixed}} h of it, leaving about {{free}} h for {{count}} track.",
-  "算力节点断开了连接，这次运行中断": "The compute node disconnected and this run was interrupted"
+  "算力节点断开了连接，这次运行中断": "The compute node disconnected and this run was interrupted",
+  "设提醒": "Set a reminder",
+  "交给助手准备": "Have the assistant prepare",
+  "设置通勤": "Set travel",
+  "路上": "Travel",
+  "通勤": "Travel",
+  "约 {{count}} 分钟_one": "About {{count}} min",
+  "约 {{count}} 分钟_other": "About {{count}} min"
 }

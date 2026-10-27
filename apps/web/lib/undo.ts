@@ -267,7 +267,8 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
   const payloads: Array<{ id: string; payload: unknown }> = [];
   for (const [id, now] of after.orders) {
     const was = before.orders.get(id);
-    if (!was) continue;
+    // An errand the operation set going (`createErrand`) is taken back with it.
+    if (!was) { if ((now.payload as { errand?: unknown } | undefined)?.errand && now.state !== "archived") archived.push(id); continue; }
     // Who does it changed (a question answered and handed to the assistant, docs/work-split.md): the whole payload goes back.
     const ownership = (payload: unknown) => { const p = (payload ?? {}) as Record<string, unknown>; return JSON.stringify([p.owner, p.prepares, p.question, p.answer]); };
     if (ownership(was.payload) !== ownership(now.payload)) payloads.push({ id, payload: was.payload });

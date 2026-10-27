@@ -666,5 +666,7 @@
   "任务库：所属里程碑还远，进入三周窗口后才排进日历": "Library: its milestone is far off; it is put on the calendar once inside the three-week window",
   "点开任务卡看步骤和材料；开始计时后右下角倒计时，做完按完成，本人提交即视为验收": "Open a task card for its steps and materials; after Start timer a countdown runs in the bottom-right corner; finish it when done, and handing it in counts as acceptance",
   "系统正在从已批准的 {{count}} 个里程碑倒推任务（每个几分钟），出来的任务会出现在这里。_one": "Working back tasks from {{count}} approved milestone (a few minutes each); they will appear here.",
-  "系统正在从已批准的 {{count}} 个里程碑倒推任务（每个几分钟），出来的任务会出现在这里。_other": "Working back tasks from {{count}} approved milestones (a few minutes each); they will appear here."
+  "系统正在从已批准的 {{count}} 个里程碑倒推任务（每个几分钟），出来的任务会出现在这里。_other": "Working back tasks from {{count}} approved milestones (a few minutes each); they will appear here.",
+  "日程前后按这个时间留出路上时间，同一地点不再问。": "Travel time of this length is kept before and after events there; the same place is not asked again.",
+  "按 30 分钟留出路上时间。": "30 minutes of travel time are kept."
 }

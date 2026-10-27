@@ -33,6 +33,8 @@ export type RealityBlock = {
    * Absent on a block imported before there was more than one source, and on seeded blocks.
    */
   sourceKey?: string;
+  /** Where the event happens, when its calendar says (a physical place gets travel time around it). */
+  location?: string;
 };
 
 export type RealityChange =
@@ -101,7 +103,7 @@ export function realityChanges(previous: RealityBlock[], next: RealityBlock[], t
  * emptier than they are.
  */
 export function toRealityBlock(item: {
-  provider: string; externalId: string; title: string; start?: string; end?: string;
+  provider: string; externalId: string; title: string; start?: string; end?: string; location?: string;
 }, timeZone?: string, source?: { key: string; label: string }, locale?: Locale): RealityBlock | undefined {
   if (!item.start || !item.end) return undefined;
   const start = new Date(item.start.endsWith("Z") ? item.start : `${item.start}Z`);
@@ -122,7 +124,8 @@ export function toRealityBlock(item: {
     start: clock.format(start),
     end: clock.format(end),
     source: source?.label ?? (item.provider === "graph_calendar" ? tFor(locale)("日历") : item.provider),
-    ...(source ? { sourceKey: source.key } : {})
+    ...(source ? { sourceKey: source.key } : {}),
+    ...(item.location ? { location: item.location } : {})
   };
 }
 

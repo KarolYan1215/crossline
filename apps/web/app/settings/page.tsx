@@ -24,6 +24,7 @@ import { UsageCard } from "./usage-card";
 import { QuotaCard } from "./quota-card";
 import { readQuota } from "../../lib/quota";
 import { NotifyLevel } from "./notify-level";
+import { TravelCard } from "./travel-card";
 import { PhonePush } from "./phone-push";
 import { EffectivenessCard } from "./effectiveness-card";
 import { AutomationModule, type RecentTask } from "./automation";
@@ -40,7 +41,7 @@ import { loadAssistant } from "../../lib/agent";
 import { agentTaskStatusLabel } from "../../lib/labels";
 import { permissionModeEnabled } from "../../lib/permission-mode";
 import {
-  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, dataDirectory, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, readAvailability, toZonedInstant
+  ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, dataDirectory, effectiveSchedulePreferences, getStore, LOCAL_ACTIVITY_CONSENT, planToday, readAvailability, toZonedInstant, travelStateOf
 } from "../../lib/crossline";
 import { requireSessionContext } from "../../lib/access-guard";
 import { identityLines, lineLabels } from "../../lib/lines";
@@ -131,7 +132,7 @@ export default async function SettingsPage() {
   const sections: SettingsSection[] = [
     { id: "general", label: t("通用"), parts: [{ id: "phone", label: t("手机访问与推送") }, ...(hosted ? [{ id: "device", label: t("这台电脑") }] : [])] },
     { id: "calendar", label: t("日历与连接"), parts: [{ id: "calendar-subscriptions", label: t("订阅日历") }, { id: "mail", label: t("邮箱") }, { id: "model", label: t("模型连接") }] },
-    { id: "notify", label: t("时间与提醒") },
+    { id: "notify", label: t("时间与提醒"), parts: [{ id: "travel", label: t("出行") }] },
     { id: "automation", label: t("自动化与助手"), parts: [{ id: "automations", label: t("自动化") }, { id: "outputs", label: t("助手产出") }] },
     { id: "background", label: t("后台任务") },
     { id: "personal", label: t("个性化") },
@@ -189,6 +190,7 @@ export default async function SettingsPage() {
               <div className="st-row"><span className="st-row-label">{t("可用时段、排程参数与重要性")}<small>{t("在「计划」页设置，修改前预览影响")}</small></span>
                 <a className="secondary-button" href="/plan#why">{t("打开计划")}</a></div>
             </section>
+            <TravelCard initial={travelStateOf(ctx).settings} />
           </div>
         </section>
 

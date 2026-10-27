@@ -32,7 +32,9 @@ export type AskKind =
    * Work the assistant can do once the person gives one thing only they hold (docs/work-split.md, an `ask` work order): a question, never
    * a task card. Answered, the assistant takes the work; 「不需要」 archives it.
    */
-  | "prep_question";
+  | "prep_question"
+  /** How long getting to a place on the calendar takes, when nothing says (no word, no map, no default): 30 minutes are kept meanwhile. */
+  | "travel_minutes";
 
 export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date"; required: boolean;
   initial?: string; placeholder?: string };

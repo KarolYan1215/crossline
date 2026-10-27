@@ -8,7 +8,7 @@ import { approveArtifactRelationsFor, assistantAvailable, CrosslineStore, type E
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
   type CalibrationReport, presetImportance, sittingStartOn, taskTitleOf, type ImportancePreset, restoreTargetOf,
-  type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent,
+  type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent, readTravelState, travelBlocks,
   DELAY_SETTING, FROZEN_SETTING, SHIFT_MINUTES, parseFrozen, settleFrozen, shiftFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { forecastGoals, normalizeParams, paramsFor, planHeadDiffers, planSchedule, recommendNextActions, scheduleInputHash, type ForecastResult, type PlanResult,
@@ -40,6 +40,8 @@ export type PersistedScheduleBlock = {
    * counted on there. The completion check records it, so the factors can be learned (`learnedEfficiency`).
    */
   energy?: { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number };
+  /** Where it happens (an event the person added, a synced calendar event): a physical place gets 「路上」 blocks around it. */
+  location?: string;
 };
 
 /**
@@ -1191,7 +1193,7 @@ export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): Forecast
     return real ? [] : [{ day, start: start!, end: end! }];
   }));
   const busy = [...committed.map((block) => ({ day: block.day!, start: block.start, end: block.end })), ...inferred,
-    ...personEventBlocks(ctx, days).map((block) => ({ day: block.day!, start: block.start, end: block.end }))];
+    ...((events) => [...events, ...travelBlocks(events, travelStateOf(ctx), localeFor(ctx))])(personEventBlocks(ctx, days)).map((block) => ({ day: block.day!, start: block.start, end: block.end }))];
   const slots = availableSlots(readAvailability(ctx), days, busy);
   const capacity = days.map((day) => ({ day, netMinutes: slots.filter((slot) => slot.day === day).reduce((sum, slot) => {
     try { return sum + (Date.parse(toZonedInstant(day, slot.end, preferences.timeZone))
@@ -1232,9 +1234,14 @@ function personEventBlocks(ctx: AccessContext, days: string[]): PersistedSchedul
  * on read like the schedule itself. A cancelled meeting still on the calendar (imported before cancellations were dropped) holds no time.
  */
 function committedBlocks(ctx: AccessContext, payload: unknown): PersistedScheduleBlock[] {
-  return [...((payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? []).filter((block) => !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title))),
+  const blocks = [...((payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? []).filter((block) => !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title))),
     ...personEventBlocks(ctx, planDays(planToday(ctx)))];
+  // Getting to an event at a physical place, and back, is busy time too (「路上」, `travelBlocks`).
+  return [...blocks, ...travelBlocks(blocks, travelStateOf(ctx), localeFor(ctx))];
 }
+
+/** The person's travel settings, places and map estimates (`readTravelState`). */
+export const travelStateOf = (ctx: AccessContext) => readTravelState((key) => getStore().getSetting(ctx.workspaceId, key));
 
 /**
  * The energy question's value-of-information gate (docs/energy-and-ecosystem.md §6): would the answer change what the person does in

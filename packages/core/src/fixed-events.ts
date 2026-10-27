@@ -110,5 +110,6 @@ export const graphWeekdays = (weekdays: number[]) => weekdays.map((day) => GRAPH
 export function fixedEventBlocks(events: FixedEvent[], days: string[], locale?: Locale) {
   const t = tFor(locale);
   return events.filter(validFixedEvent).flatMap((event) => occurrences(event, days).map((day) => ({ id: `event:${event.id}:${day}`, lane: "human" as const,
-    title: event.title, day, start: event.start, end: event.end, source: event.repeat ? t("日程·每周") : t("日程", { context: "source" }), readOnly: true })));
+    title: event.title, day, start: event.start, end: event.end, source: event.repeat ? t("日程·每周") : t("日程", { context: "source" }), readOnly: true,
+    ...(event.location ? { location: event.location } : {}) })));
 }

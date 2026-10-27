@@ -36,6 +36,7 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
   progress_check: { answered: "这一步的进度按回答记下，排程按剩下的部分安排。", unanswered: "进度保持原样，不影响别的事。" },
   milestone_risk_review: { answered: "接受则它的任务提前 1–2 天排完；也可调整截止或降低标准。", unanswered: "排程不变，不为这项风险提前。" },
   prep_question: { answered: "助手按回答把这项准备做完，结果放进要用它的任务的「已备好」。", unanswered: "这项准备不开始；要用它的任务照常排，开始时材料可能不全。" },
+  travel_minutes: { answered: "日程前后按这个时间留出路上时间，同一地点不再问。", unanswered: "按 30 分钟留出路上时间。" },
   milestone_overdue: { answered: "补做则截止不变、剩下的工作照常排；改日期则按新截止排；放弃则里程碑和未开始的任务归档。", unanswered: "截止停在已过的日期，剩下的工作按已过期排。" }
 };
 

@@ -86,7 +86,8 @@ function planReality(payload: unknown, today: string): RealityBlock[] {
       // Missing on anything imported before there was more than one calendar. Those blocks came from
       // the single default-calendar read, and the pass below adopts them into whichever source now
       // reports them; any that nobody reports are ghosts and get dropped.
-      ...(typeof block.sourceKey === "string" ? { sourceKey: block.sourceKey } : {})
+      ...(typeof block.sourceKey === "string" ? { sourceKey: block.sourceKey } : {}),
+      ...(typeof block.location === "string" && block.location ? { location: block.location } : {})
     }));
 }
 
