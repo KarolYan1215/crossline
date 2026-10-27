@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   MAIL_ACCOUNTS_SETTING, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
-  amountsInText, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage
+  amountsInText, isQuickAccountCheck, MAIL_CHECK_NUDGE_KIND, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage
 } from "@crossline/core";
 import {
   createImapMail, hostAllowed, presetFor, unsupportedProvider, type ImapFactory, type ImapMail, type MailHeader, type SecretStore
@@ -12,6 +12,7 @@ import type { MailLookup } from "./agent-tools";
 import { draftReplies, followUpReplies, type ReplyCandidate } from "./mail-replies";
 import { identityLines } from "./lines";
 import { ownerOf } from "./owner";
+import { sayToPerson } from "./workflow-smith";
 
 /**
  * The person's mailbox in the worker (docs/personal-agent.md, 2026-10-19). Accounts are added after one successful sign-in, the
@@ -182,7 +183,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       + "doing nothing costs them (a deadline, a question only they can answer, an account or money alert to check); its title is the inbox line, "
       + "verb first, with the day. date for a dated event the mail asks nothing about; reply with the wait's id when the sender is who an open wait "
       + "is on, or with an empty waitingId when a real person or office waits for the person's answer by mail (a draft is written, never sent); info "
-      + "for news about the person's own things that needs nothing; ignore for promotions, digests, cold pitches, spam and phishing. "
+      + "for news about the person's own things that needs nothing, and for notices a service sends to all customers or about its own systems (security "
+      + "advisories, incidents, CI or deploy results, terms changes) unless they name the person's own resource and a day to act; ignore for promotions, digests, cold pitches, spam and phishing. "
       + "transaction for a payment, purchase, refund, transfer or salary the mail itself states with an amount: direction, amount, currency "
       + "(ISO, e.g. CNY) and merchant exactly as the mail shows them; an unusual or unrecognised charge is todo, not transaction. Other kinds "
       + "leave direction and currency empty and amount 0.",
@@ -207,6 +209,17 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       const { key: _key, ...mail } = message;
       needsReply.push({ ...mail, why: item.why });
       log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind: "needs_reply", title: item.why.slice(0, 140), at });
+      continue;
+    }
+    // A few minutes' check of the person's own account is said once, not planned as a task (isQuickAccountCheck).
+    if (kind === "todo" && isQuickAccountCheck(item.title)) {
+      const title = item.title.trim().slice(0, 120);
+      sayToPerson(deps.store, workspaceId, `邮件提醒：${title}。来自 ${message.from}「${message.subject.slice(0, 80)}」。请在对应 App 或官网里查看，不要点邮件里的链接。`,
+        MAIL_CHECK_NUDGE_KIND, `mail-check:${mailKey(message)}`, [
+          { label: "转成任务", action: { action: "task.create", summary: `新建任务：${title}`, args: { title, context: `来自邮件：${message.from}「${message.subject}」`, lineId: "", dueDate: "", milestoneId: "" } } },
+          { label: "少问这类", kind: "mute" }
+        ], deps.now?.() ?? new Date());
+      log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind, title: title.slice(0, 140), at });
       continue;
     }
     if ((kind === "todo" || kind === "date") && captured < MAIL_INBOX_PER_PASS) {
