@@ -6,6 +6,7 @@
  * newest messages, and what was done with each; never the full text, which is read from the server when a run needs it.
  */
 import { tFor, type Locale } from "./i18n";
+import { BOOKABLE_EVENTS, INCOME_CATEGORIES, MONEY_EVENTS, MONEY_INSTRUMENTS, SPEND_CATEGORIES, type MoneyReading } from "./money-events";
 
 export const MAIL_ACCOUNTS_SETTING = "mail.accounts";
 /** What the sorting did with each recent message, newest last (at most `MAIL_LOG_KEEP`). */
@@ -26,7 +27,32 @@ export type MailAccount = {
   lastError?: { code: string; message: string; at: string };
 };
 /** `needs_reply`: sorted as `reply` with no wait behind it — the sender expects an answer from the person (a draft may follow). */
-export type MailLogEntry = { accountId: string; uid: number; from: string; subject: string; date: string; kind: MailTriageKind | "needs_reply"; title: string; at: string };
+export type MailLogEntry = { accountId: string; uid: number; from: string; subject: string; date: string; kind: MailTriageKind | "needs_reply"; title: string; at: string;
+  /** The message's own key (`mailMessageKey`): the same mail in a second mailbox is not sorted again. Absent on entries written before. */
+  key?: string };
+
+/**
+ * One key for a message wherever it arrives (docs/mail-bookkeeping.md §4.3, layer 0): its Message-ID, else its sender, subject, minute
+ * and opening. The same mail forwarded to a second connected mailbox, or re-sent by the provider, is one message.
+ */
+export function mailMessageKey(message: { messageId?: string | undefined; fromAddress?: string | undefined; subject: string; date: string; snippet?: string | undefined }): string {
+  const id = (message.messageId ?? "").trim().replace(/^<|>$/g, "").toLowerCase();
+  const basis = id ? `id:${id}` : `h:${(message.fromAddress ?? "").toLowerCase()}|${message.subject.trim()}|${message.date.slice(0, 16)}|${(message.snippet ?? "").slice(0, 200)}`;
+  // Two 32-bit FNV-1a passes (forwards and backwards) and the length: no crypto here, since core also runs in the browser.
+  let forward = 0x811c9dc5, backward = 0x811c9dc5;
+  for (let index = 0; index < basis.length; index += 1) {
+    forward = Math.imul(forward ^ basis.charCodeAt(index), 0x01000193) >>> 0;
+    backward = Math.imul(backward ^ basis.charCodeAt(basis.length - 1 - index), 0x01000193) >>> 0;
+  }
+  return `${id ? "m" : "h"}${forward.toString(36)}${backward.toString(36)}${basis.length.toString(36)}`;
+}
+
+/** The name a sender goes by: 「PayPal」 from `PayPal <service@paypal.com>`, the address when there is no other name. */
+export const senderName = (from: string): string => {
+  const first = from.split(",")[0]?.trim() ?? "";
+  const named = /^(.*?)\s*<([^>]*)>?$/.exec(first);
+  return (named?.[1]?.replace(/^"|"$/g, "").trim() || named?.[2]?.trim() || first).slice(0, 60);
+};
 
 export function readMailAccounts(raw: string | null | undefined): MailAccount[] {
   try { const parsed = JSON.parse(raw ?? "[]") as MailAccount[]; return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item.id === "string") : []; }
@@ -56,23 +82,34 @@ export function appPasswordPage(address: string, locale?: Locale): AppPasswordPa
 export type MailTriageKind = "todo" | "date" | "reply" | "transaction" | "info" | "ignore";
 export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply", string> = { todo: "待办", date: "日期", reply: "回复了等待项", transaction: "记账",
   info: "知悉", ignore: "略过", needs_reply: "需要回复" };
-/** `transaction` (a payment, a refund, a salary, a receipt): `direction`, `amount`, `currency` and `merchant` as the mail states them; empty otherwise. */
-export type MailTriage = { items: Array<{ uid: number; kind: MailTriageKind; title: string; waitingId: string; why: string;
-  direction: "" | "income" | "expense"; amount: number; currency: string; merchant: string }> };
+/**
+ * `money` is filled for any mail about money (docs/mail-bookkeeping.md §4.1): which event it is, and the amount, currency, merchant, day,
+ * order numbers and card digits exactly as the mail shows them. Code books only the events where money moved, and checks every field
+ * against the mail's own text (`moneyEventFromMail`); `event` "" and the rest empty when the mail is not about money.
+ */
+export type MailTriage = { items: Array<{ uid: number; kind: MailTriageKind; title: string; waitingId: string; why: string; money: MoneyReading }> };
 
 export const MAIL_TRIAGE_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items"], properties: {
     items: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false,
-      required: ["uid", "kind", "title", "waitingId", "why", "direction", "amount", "currency", "merchant"], properties: {
+      required: ["uid", "kind", "title", "waitingId", "why", "money"], properties: {
       uid: { type: "integer", minimum: 1 },
       kind: { type: "string", enum: ["todo", "date", "reply", "transaction", "info", "ignore"] },
       title: { type: "string", maxLength: 140 },
       waitingId: { type: "string", maxLength: 128 },
       why: { type: "string", maxLength: 200 },
-      direction: { type: "string", enum: ["", "income", "expense"] },
-      amount: { type: "number", minimum: 0 },
-      currency: { type: "string", maxLength: 8 },
-      merchant: { type: "string", maxLength: 60 } } } } }
+      money: { type: "object", additionalProperties: false,
+        required: ["event", "amount", "amountLabel", "currency", "merchant", "category", "occurredOn", "refs", "last4", "instrument"], properties: {
+        event: { type: "string", enum: [...MONEY_EVENTS] },
+        amount: { type: "number", minimum: 0 },
+        amountLabel: { type: "string", maxLength: 40 },
+        currency: { type: "string", maxLength: 8 },
+        merchant: { type: "string", maxLength: 60 },
+        category: { type: "string", enum: ["", ...SPEND_CATEGORIES, ...INCOME_CATEGORIES] },
+        occurredOn: { type: "string", maxLength: 10 },
+        refs: { type: "array", maxItems: 4, items: { type: "string", maxLength: 60 } },
+        last4: { type: "string", maxLength: 4 },
+        instrument: { type: "string", enum: [...MONEY_INSTRUMENTS] } } } } } } }
 } as const;
 
 /**
@@ -94,7 +131,7 @@ export function validateMailTriage(value: unknown, uids: number[], waitingIds: s
     if (item.kind === "reply" && item.waitingId && !waitingIds.includes(item.waitingId)) {
       problems.push(`uid ${item.uid} 的 waitingId「${item.waitingId}」不是正在等的事项（需要本人回复、不是在等的回信时 waitingId 留空）`);
     }
-    if (item.kind === "transaction" && !(item.amount > 0 && item.direction)) problems.push(`uid ${item.uid} 是记账却没有 amount 或 direction`);
+    if (item.money && BOOKABLE_EVENTS.includes(item.money.event) && !(item.money.amount > 0)) problems.push(`uid ${item.uid} 的 money.event 是 ${item.money.event} 却没有 amount`);
   }
   if (problems.length) throw Object.assign(new Error("MAIL_TRIAGE_INVALID"), { detail: problems.slice(0, 6).join("；") });
   return answer;
@@ -232,7 +269,3 @@ export const MAIL_CHECK_NUDGE_KIND = "mail_check";
  */
 export const isMailReminderTitle = (title: string): boolean => CHECK_VERB.test(title.trim()) || /^了解|^关注/u.test(title.trim());
 
-/** Which way the money in an account alert went: in for a payment received, a deposit or a refund; out for anything else (a charge). */
-export function moneyDirection(text: string): "income" | "expense" {
-  return /收款|入账|到账|退款|存入|工资|received|deposit|refund|credited|paid you|sent you/iu.test(text) ? "income" : "expense";
-}

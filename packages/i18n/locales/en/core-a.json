@@ -497,5 +497,15 @@
   "离开_activityInline": "away",
   "「{{line}}」已有 {{count}} 条出边_one": "\"{{line}}\" already has {{count}} outgoing link",
   "「{{line}}」已有 {{count}} 条出边_other": "\"{{line}}\" already has {{count}} outgoing links",
-  "钱的记录自动来：助手用已记的账和邮箱里的账单做，缺的标为缺失，不问本人": "Money records come in by themselves: the assistant works from what is recorded and the statements in mail, marks gaps, and does not ask"
+  "钱的记录自动来：助手用已记的账和邮箱里的账单做，缺的标为缺失，不问本人": "Money records come in by themselves: the assistant works from what is recorded and the statements in mail, marks gaps, and does not ask",
+  "买菜日用": "Groceries & household",
+  "交通": "Transport",
+  "住房水电": "Housing & utilities",
+  "订阅与软件": "Subscriptions & software",
+  "购物": "Shopping",
+  "医疗健康": "Health",
+  "人情与转给他人": "Gifts & transfers to others",
+  "工资": "Salary",
+  "转入": "Transfers in",
+  "其他收入": "Other income"
 }

@@ -454,7 +454,10 @@ export const CONCIERGE_TOOL_SPECS = [
   { name: "list_projects", description: "本人的项目（课程、论文、账户等）：id、名称、主线", inputSchema: NONE },
   { name: "read_material", description: "读一个文件的文本（从 offset 起约 6000 字）", inputSchema: { type: "object",
     properties: { id: { type: "string" }, offset: { type: "integer" } }, required: ["id", "offset"], additionalProperties: false } },
-  { name: "get_profile_facts", description: "本人确认过的情况（背景、课程评分、目标等），按关键词筛选", inputSchema: QUERY }
+  { name: "get_profile_facts", description: "本人确认过的情况（背景、课程评分、目标等），按关键词筛选", inputSchema: QUERY },
+  { name: "ledger_query", description: "查总账：某月（YYYY-MM，空为本月）按分类、商户、账户、种类（expense 支出含退款冲减 / income / refund）筛选的已记账合计（按币种）与最多 30 笔明细。回答花了多少钱只用它的数字",
+    inputSchema: { type: "object", properties: { month: { type: "string" }, category: { type: "string" }, merchant: { type: "string" }, account: { type: "string" }, kind: { type: "string" } },
+      required: ["month", "category", "merchant", "account", "kind"], additionalProperties: false } }
 ] as const;
 
 const matches = (query: string, ...texts: string[]) => {

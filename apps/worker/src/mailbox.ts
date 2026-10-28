@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
   MAIL_ACCOUNTS_SETTING, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
-  amountsInText, isMailReminderTitle, MAIL_CHECK_NUDGE_KIND, moneyDirection, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage
+  isMailReminderTitle, mailMessageKey, moneyEventFromMail, senderName, MAIL_CHECK_NUDGE_KIND, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage,
+  type MoneyReading
 } from "@crossline/core";
 import {
   createImapMail, hostAllowed, presetFor, unsupportedProvider, type ImapFactory, type ImapMail, type MailHeader, type SecretStore
 } from "@crossline/connectors";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { mailRepliesView, recordAndJudge, type CrosslineStore } from "@crossline/db";
+import { mailRepliesView, recordMoneyEvidence, voidByEvidence, type CrosslineStore } from "@crossline/db";
 import type { MailLookup } from "./agent-tools";
 import { draftReplies, followUpReplies, type ReplyCandidate } from "./mail-replies";
 import { identityLines } from "./lines";
@@ -167,7 +168,14 @@ export async function readNewMail(deps: MailDeps, workspaceId: string, force = f
 export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | undefined; cwd: string }, workspaceId: string, messages: NewMail[]):
   Promise<{ state: "done"; captured: number; replies: number; sorted: number; needsReply: ReplyCandidate[]; recorded: number } | { state: "skipped"; reason: string }> {
   const sorting = new Set(accounts(deps.store, workspaceId).filter((account) => account.triage).map((account) => account.id));
-  const batch = messages.filter((message) => sorting.has(message.accountId)).slice(-40);
+  // Layer 0 of the dedupe (docs/mail-bookkeeping.md §4.3): the same mail in two mailboxes, or seen again, is sorted once.
+  const sortedKeys = new Set(readMailLog(deps.store.getSetting(workspaceId, MAIL_LOG_SETTING)).map((entry) => entry.key).filter(Boolean));
+  const unique = new Map<string, NewMail>();
+  for (const message of messages.filter((item) => sorting.has(item.accountId)).slice(-40)) {
+    const key = mailMessageKey(message);
+    if (!sortedKeys.has(key) && !unique.has(key)) unique.set(key, message);
+  }
+  const batch = [...unique.values()];
   if (!batch.length) return { state: "skipped", reason: "nothing" };
   if (!deps.client) return { state: "skipped", reason: "no_client" };
   const t = tOfWorkspace(deps.store, workspaceId);
@@ -189,9 +197,16 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       + "is on, or with an empty waitingId when a real person or office waits for the person's answer by mail (a draft is written, never sent); info "
       + "for news about the person's own things that needs nothing, and for notices a service sends to all customers or about its own systems (security "
       + "advisories, incidents, CI or deploy results, terms changes) unless they name the person's own resource and a day to act; ignore for promotions, digests, cold pitches, spam and phishing. "
-      + "transaction for a payment, purchase, refund, transfer or salary the mail itself states with an amount: direction, amount, currency "
-      + "(ISO, e.g. CNY) and merchant exactly as the mail shows them; an unusual or unrecognised charge is todo, not transaction. Other kinds "
-      + "leave direction and currency empty and amount 0.",
+      + "transaction for a mail whose money already moved (a payment made or received, a receipt, a refund, a salary); an unusual or "
+      + "unrecognised charge is todo. money for every mail about money, whatever its kind: event is charge (paid, card used), receipt (a shop's "
+      + "order or receipt), refund, income (salary, money received), authorization (pending, hold), own_transfer (card bill paid, top-up, between "
+      + "own accounts), statement (bill, balance, minimum due), request (a payment request sent, received, expired or cancelled), failed (declined, "
+      + "failed, cancelled, reversed), alert (login, security, balance or limit), upcoming (a renewal or trial ending); amount is the total actually "
+      // i18n-ignore: model-facing
+      + "paid or received and amountLabel the words beside it (Total, 合计, You sent), never a subtotal, tax, balance or limit; currency ISO; "
+      + "merchant as written; category one of the list or empty; occurredOn the transaction's own day YYYY-MM-DD if the mail states it; refs the "
+      + "order, invoice or transaction numbers copied exactly; last4 the card's last four digits if shown; instrument how it was paid. A mail not "
+      + "about money has event empty, amount 0 and the rest empty.",
     // The prompt cache (docs/token-economy.md §2.5): the lines, open tasks and waits every pass shares, before this pass's mail and date.
     stableKeys: ["lines", "openTasks", "waiting"],
     prepareInput: () => input, validateOutput: (output) => validateMailTriage(output, keyed.map((message) => message.key), waiting.map((item) => item.id)),
@@ -205,33 +220,53 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   const needsReply: ReplyCandidate[] = [];
   const bookkeeping = new Set(accounts(deps.store, workspaceId).filter((account) => account.triage && account.bookkeeping !== false).map((account) => account.id));
   const wealthLine = identityLines(deps.store, workspaceId).find((line) => line.domain === "wealth")?.id;
+  const today = deps.now?.() ?? new Date();
+  /**
+   * The bookkeeping for one mail (docs/mail-bookkeeping.md §4): only a charge, receipt, refund or income whose amount the mail itself states
+   * is kept, as evidence of one transaction (merged with the receipt, the bank alert or the notification of the same payment); a failure
+   * voids what it matches. Nobody is asked to upload anything (the owner, 2026-10-27). Returns the line said in the reminder, and whether
+   * the mail now counts as a transaction.
+   */
+  const book = (message: (typeof keyed)[number], money: MoneyReading | undefined): { said: string; counted: boolean } => {
+    if (!money?.event || !bookkeeping.has(message.accountId)) return { said: "", counted: false };
+    const verdict = moneyEventFromMail(money, { subject: message.subject, body: message.body ?? message.snippet, date: message.date || at, fromAddress: message.fromAddress });
+    if (verdict.book) {
+      const written = recordMoneyEvidence(deps.store, workspaceId, ownerId, { ...verdict.evidence, sourceKey: `mail:${mailMessageKey(message)}`, source: "mail",
+        sourceRef: mailKey(message), note: t("邮件：{{subject}}", { subject: message.subject }).slice(0, 200) }, { lineId: wealthLine, now: today });
+      const amount = { value: verdict.evidence.value, currency: verdict.evidence.currency };
+      if (written.state === "booked" || written.state === "refund_linked") {
+        recorded += 1;
+        return { said: verdict.evidence.kind === "refund" ? t("已记退款 {{value}} {{currency}}，从支出里扣除。", amount) : t("已记账 {{value}} {{currency}}。", amount), counted: true };
+      }
+      if (written.state === "attached" || written.state === "seen") return { said: t("和已记的一笔是同一笔，没有重复记账。"), counted: true };
+      if (written.state === "possible_duplicate") return { said: t("可能和已记的一笔重复，先不计入，每周一起确认。"), counted: true };
+      return { said: "", counted: false };
+    }
+    if (verdict.voids) {
+      const voided = voidByEvidence(deps.store, workspaceId, verdict.voids, t("付款未成功：{{subject}}", { subject: message.subject }), today);
+      if (voided) return { said: t("这笔付款没有成功，已撤回 {{value}} {{currency}} 的记账。", { value: voided.value, currency: voided.currency }), counted: false };
+    }
+    return { said: "", counted: false };
+  };
   for (const item of result.output.items) {
     const message = keyed.find((entry) => entry.key === item.uid);
     if (!message) continue;
     let kind: MailLogEntry["kind"] = item.kind;
+    const key = mailMessageKey(message);
+    const money = book(message, item.money);
     if (kind === "reply" && !item.waitingId) {
-      const { key: _key, ...mail } = message;
+      const { key: _key, body: _body, ...mail } = message;
       needsReply.push({ ...mail, why: item.why });
-      log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind: "needs_reply", title: item.why.slice(0, 140), at });
+      log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind: "needs_reply", title: item.why.slice(0, 140), at, key });
       continue;
     }
     // A mail to-do that only asks to look at something (a charge, a payment, a notice) is said once as a reminder, not planned as a task.
     if (kind === "todo" && isMailReminderTitle(item.title)) {
       const title = item.title.trim().slice(0, 120);
-      // The amount the mail states is written to the bookkeeping by itself (the owner, 2026-10-27: 「上传交易记录太麻烦了，删掉，自动记录」);
-      // nobody is asked to upload a statement, and it never becomes a task.
-      const stated = amountsInText(`${message.subject} ${message.snippet}`)[0];
-      let noted = "";
-      if (stated && bookkeeping.has(message.accountId)) {
-        const written = recordAndJudge(deps.store, workspaceId, ownerId, { domain: "wealth", kind: moneyDirection(`${message.subject} ${message.snippet}`),
-          at: (message.date || at).slice(0, 10), value: stated.value, unit: "元", currency: stated.currency, category: item.merchant.trim().slice(0, 40),
-          note: t("邮件：{{subject}}", { subject: message.subject }).slice(0, 200), source: "mail", sourceRef: mailKey(message), dedupeKey: `mail:${mailKey(message)}` },
-        { lineId: wealthLine, now: deps.now?.() ?? new Date() });
-        if (written.ok) { noted = t("已自动记账 {{value}} {{currency}}。", { value: stated.value, currency: stated.currency }); if (written.inserted) recorded += 1; }
-      }
-      sayToPerson(deps.store, workspaceId, t("邮件提醒：{{title}}。{{noted}}来自 {{from}}「{{subject}}」。不是本人操作的话在对应 App 或官网里处理，不要点邮件里的链接。", { title, noted, from: message.from, subject: message.subject.slice(0, 80) }),
+      sayToPerson(deps.store, workspaceId, t("邮件提醒：{{title}}。{{noted}}来自 {{from}}「{{subject}}」。不是本人操作的话在对应 App 或官网里处理，不要点邮件里的链接。",
+        { title, noted: money.said, from: senderName(message.from), subject: message.subject.slice(0, 80) }),
         MAIL_CHECK_NUDGE_KIND, `mail-check:${mailKey(message)}`, [{ label: t("少问这类"), kind: "mute" }], deps.now?.() ?? new Date());
-      log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind, title: title.slice(0, 140), at });
+      log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind, title: title.slice(0, 140), at, key });
       continue;
     }
     if ((kind === "todo" || kind === "date") && captured < MAIL_INBOX_PER_PASS) {
@@ -242,25 +277,14 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       `mail:capture:${mailKey(message)}`);
       captured += 1;
     } else if (kind === "todo" || kind === "date") kind = "info";
-    // A payment mail is a record only when its own subject or opening states the same amount: the model sorts, it never supplies a number.
-    if (kind === "transaction") {
-      const stated = amountsInText(`${message.subject} ${message.snippet}`);
-      const currency = item.currency.trim().toUpperCase() === "RMB" ? "CNY" : item.currency.trim().toUpperCase();
-      const confirmed = bookkeeping.has(message.accountId) && stated.some((entry) => entry.value === item.amount && (!currency || entry.currency === currency));
-      if (confirmed && item.direction) {
-        const written = recordAndJudge(deps.store, workspaceId, ownerId, { domain: "wealth", kind: item.direction, at: (message.date || at).slice(0, 10), value: item.amount,
-          unit: "元", currency: currency || stated.find((entry) => entry.value === item.amount)!.currency, category: item.merchant.trim().slice(0, 40),
-          note: tOfWorkspace(deps.store, workspaceId)("邮件：{{subject}}", { subject: message.subject }).slice(0, 200), source: "mail", sourceRef: mailKey(message), dedupeKey: `mail:${mailKey(message)}` },
-        { lineId: wealthLine, now: deps.now?.() ?? new Date() });
-        if (written.ok && written.inserted) recorded += 1;
-      } else kind = "info";
-    }
+    // A payment mail is a record only when code finds what the model read in the mail itself (`book`): the model sorts, it never supplies a number.
+    if (kind === "transaction" && !money.counted) kind = "info";
     if (kind === "reply") {
       deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${mailKey(message)}`, type: "waiting.mail_seen",
         entityId: item.waitingId, payload: { from: message.from, subject: message.subject, date: message.date, at } });
       replies += 1;
     }
-    log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind, title: item.title.slice(0, 140), at });
+    log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind, title: item.title.slice(0, 140), at, key });
   }
   const kept = [...readMailLog(deps.store.getSetting(workspaceId, MAIL_LOG_SETTING)), ...log].slice(-MAIL_LOG_KEEP);
   deps.store.setSetting(workspaceId, MAIL_LOG_SETTING, JSON.stringify(kept));
@@ -325,7 +349,8 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
       }
       // Kept for the next pass unless sorted.
       if (batch.length || stored.length) {
-        deps.store.setSetting(workspaceId, UNSORTED_SETTING, JSON.stringify(sorted?.state === "skipped" ? batch : sortingOff));
+        // The body is only for checking amounts this pass; it is never kept.
+        deps.store.setSetting(workspaceId, UNSORTED_SETTING, JSON.stringify((sorted?.state === "skipped" ? batch : sortingOff).map(({ body: _body, ...rest }) => rest)));
       }
       // Drafts for what needs the person's answer: this pass's, and those a passing failure held back (three days at most).
       let drafts: Awaited<ReturnType<typeof draftReplies>> | undefined;

@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, openSync, readSync, closeSync } fr
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  CONCIERGE_SCHEMA, CONCIERGE_TOOL_SPECS, answerFromPack, conciergeRefs, keepUsable, validateConciergeTurn,
+  CONCIERGE_SCHEMA, CONCIERGE_TOOL_SPECS, answerFromPack, queryLedger, conciergeRefs, keepUsable, validateConciergeTurn,
   tFor, type ConciergePack, type ConciergeTurn
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
@@ -55,6 +55,15 @@ export function conciergeTools(store: CrosslineStore, workspaceId: string, pack:
     specs: CONCIERGE_TOOL_SPECS.map((spec) => ({ name: spec.name, description: spec.description, inputSchema: spec.inputSchema as Record<string, unknown> })),
     call: (name, raw) => {
       const args = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+      if (name === "ledger_query") {
+        // The month by the person's own calendar when none is named.
+        let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
+        try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
+        const thisMonth = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit" }).format(new Date()).slice(0, 7);
+        const month = /^\d{4}-\d{2}$/.test(String(args.month ?? "")) ? String(args.month) : thisMonth;
+        return JSON.stringify(queryLedger(store.listRecords(workspaceId, { domain: "wealth" }), { month, category: String(args.category ?? ""), merchant: String(args.merchant ?? ""),
+          account: String(args.account ?? ""), kind: String(args.kind ?? "") }));
+      }
       if (name !== "read_material") return answerFromPack(pack, name, args);
       const doc = store.listSourceDocuments(workspaceId).find((item) => item.id === String(args.id ?? ""));
       // i18n-ignore-start: tool answers, read by the model

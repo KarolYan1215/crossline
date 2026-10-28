@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  MAIL_DRAFT_NOTE, draftBodyOf, isMailReminderTitle, moneyDirection, draftFileText, mailReplyQuiet, replyDraftsOn, replyReminderDue, validateMailReplyDraft, validateMailTriage, type MailReplyDraft
+  MAIL_DRAFT_NOTE, draftBodyOf, isMailReminderTitle, draftFileText, mailReplyQuiet, replyDraftsOn, replyReminderDue, validateMailReplyDraft, validateMailTriage, type MailReplyDraft
 } from "./mail";
 
 test("a reply with no wait behind it is a message that needs the person's answer; a named wait must still be open", () => {
@@ -50,12 +50,6 @@ test("one reminder, 48 hours after the person was told, only when the mail named
   expect(replyReminderDue({ ...draft, remindedAt: "2026-10-21T10:00:00Z" }, new Date("2026-10-22T10:00:00Z"))).toBe(false);
   expect(replyReminderDue({ ...draft, replyBy: "" }, new Date("2026-10-22T10:00:00Z"))).toBe(false);
   expect(replyReminderDue({ ...draft, notifiedAt: undefined } as unknown as MailReplyDraft, new Date("2026-10-22T10:00:00Z"))).toBe(false);
-});
-
-test("money in an account alert goes in for payments received and refunds, out otherwise", () => {
-  expect(moneyDirection("PayPal: You've received $61.00 USD")).toBe("income");
-  expect(moneyDirection("您尾号 1234 的卡退款 35.00 元")).toBe("income");
-  expect(moneyDirection("Credit card not present during this transaction $12.99")).toBe("expense");
 });
 
 test("a mail to-do that only asks to look at something is a reminder", () => {

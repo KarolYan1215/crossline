@@ -63,9 +63,9 @@ test("new mail is read once per check; sorting turns a to-do into an inbox line 
   store.saveWaitingItem({ id: "wait-data", ownerId: "user-1", workspaceId, title: "测量数据", who: "Prof Lin", expectedAt: "2026-10-25", approximate: false,
     followUpAt: "2026-10-25", state: "open", blocks: [], source: "manual" });
   const answer = JSON.stringify({ items: [
-    { uid: 1, kind: "todo", title: "10/30 前交 HW1（截止延后）", waitingId: "", why: "老师通知延期", direction: "", amount: 0, currency: "", merchant: "" },
-    { uid: 2, kind: "reply", title: "", waitingId: "wait-data", why: "等的数据到了", direction: "", amount: 0, currency: "", merchant: "" },
-    { uid: 3, kind: "ignore", title: "", waitingId: "", why: "简报", direction: "", amount: 0, currency: "", merchant: "" }] });
+    { uid: 1, kind: "todo", title: "10/30 前交 HW1（截止延后）", waitingId: "", why: "老师通知延期", money: { event: "", amount: 0, amountLabel: "", currency: "", merchant: "", category: "", occurredOn: "", refs: [], last4: "", instrument: "" } },
+    { uid: 2, kind: "reply", title: "", waitingId: "wait-data", why: "等的数据到了", money: { event: "", amount: 0, amountLabel: "", currency: "", merchant: "", category: "", occurredOn: "", refs: [], last4: "", instrument: "" } },
+    { uid: 3, kind: "ignore", title: "", waitingId: "", why: "简报", money: { event: "", amount: 0, amountLabel: "", currency: "", merchant: "", category: "", occurredOn: "", refs: [], last4: "", instrument: "" } }] });
   const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
   const done = await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh);
   expect(done).toEqual({ state: "done", captured: 1, replies: 1, sorted: 3, needsReply: [], recorded: 0 });
@@ -87,13 +87,33 @@ test("a payment mail becomes one wealth record only when its own text states the
   now = new Date("2026-10-19T09:20:00Z");
   const fresh = await readNewMail(deps, workspaceId);
   const answer = JSON.stringify({ items: [
-    { uid: 1, kind: "transaction", title: "", waitingId: "", why: "银行消费提醒", direction: "expense", amount: 35, currency: "CNY", merchant: "星巴克" },
+    { uid: 1, kind: "transaction", title: "", waitingId: "", why: "银行消费提醒", money: { event: "charge", amount: 35, amountLabel: "", currency: "CNY", merchant: "星巴克", category: "餐饮", occurredOn: "", refs: [], last4: "1234", instrument: "card" } },
     // The amount appears nowhere in this mail's text: it is not written, and the mail is only noted.
-    { uid: 2, kind: "transaction", title: "", waitingId: "", why: "订单收据", direction: "expense", amount: 88, currency: "USD", merchant: "Shop" }] });
+    { uid: 2, kind: "transaction", title: "", waitingId: "", why: "订单收据", money: { event: "receipt", amount: 88, amountLabel: "Total", currency: "USD", merchant: "Shop", category: "购物", occurredOn: "", refs: [], last4: "", instrument: "" } }] });
   const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
   expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh)).toMatchObject({ state: "done", recorded: 1 });
-  expect(store.listRecords(workspaceId).map((item) => [item.kind, item.value, item.currency, item.category, item.source])).toEqual([["expense", 35, "CNY", "星巴克", "mail"]]);
+  expect(store.listRecords(workspaceId).map((item) => [item.kind, item.value, item.currency, item.category, item.source, item.account])).toEqual([["expense", 35, "CNY", "餐饮", "mail", "card ••1234"]]);
   expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["transaction", "info"]);
+});
+
+test("an expired payment request is never booked; the same mail in a second mailbox is sorted once", async () => {
+  const { store, workspaceId, secrets, resolve } = setup();
+  const box = mailbox();
+  let now = new Date("2026-10-28T00:00:00Z");
+  const deps = { store, secrets, resolve, factory: box.factory, now: () => now };
+  await addMailAccount(deps, workspaceId, { address: "me@qq.com", password: "app-pass" });
+  await readNewMail(deps, workspaceId);
+  box.messages.push({ uid: 1, subject: "Your $61.00 USD request expired", body: "The request you sent for $61.00 USD has expired." });
+  now = new Date("2026-10-28T00:20:00Z");
+  const fresh = await readNewMail(deps, workspaceId);
+  const answer = JSON.stringify({ items: [{ uid: 1, kind: "todo", title: "核实 PayPal 61 美元收款请求失效", waitingId: "", why: "收款请求过期",
+    money: { event: "charge", amount: 61, amountLabel: "", currency: "USD", merchant: "PayPal", category: "", occurredOn: "", refs: [], last4: "", instrument: "paypal" } }] });
+  const { rpc, turns } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
+  // The same message read again through another account: one model turn, one log line.
+  const copy = fresh.map((message) => ({ ...message, accountId: "other", uid: 9 }));
+  expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, [...fresh, ...copy])).toMatchObject({ state: "done", recorded: 0, sorted: 1 });
+  expect(store.listRecords(workspaceId)).toEqual([]);
+  expect(turns()).toBe(1);
 });
 
 test("with bookkeeping switched off on an account, a payment mail is only noted, and nothing is written", async () => {
@@ -109,7 +129,7 @@ test("with bookkeeping switched off on an account, a payment mail is only noted,
   box.messages.push({ uid: 1, subject: "信用卡消费提醒", body: "您尾号 1234 的信用卡在 星巴克 消费人民币 35.00 元。" });
   now = new Date("2026-10-19T09:20:00Z");
   const fresh = await readNewMail(deps, workspaceId);
-  const answer = JSON.stringify({ items: [{ uid: 1, kind: "transaction", title: "", waitingId: "", why: "银行消费提醒", direction: "expense", amount: 35, currency: "CNY", merchant: "星巴克" }] });
+  const answer = JSON.stringify({ items: [{ uid: 1, kind: "transaction", title: "", waitingId: "", why: "银行消费提醒", money: { event: "charge", amount: 35, amountLabel: "", currency: "CNY", merchant: "星巴克", category: "餐饮", occurredOn: "", refs: [], last4: "1234", instrument: "card" } }] });
   const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
   expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh)).toMatchObject({ state: "done", recorded: 0 });
   expect(store.listRecords(workspaceId)).toEqual([]);
@@ -135,7 +155,7 @@ test("connecting sorts at once; mail read while sorting was off is kept and sort
   const box = mailbox();
   box.messages.push({ uid: 1, subject: "HW1 extended to Oct 30", body: "Please submit by Oct 30." });
   let now = new Date("2026-10-19T09:00:00Z");
-  const answer = JSON.stringify({ items: [{ uid: 1, kind: "todo", title: "10/30 前交 HW1", waitingId: "", why: "老师通知延期", direction: "", amount: 0, currency: "", merchant: "" }] });
+  const answer = JSON.stringify({ items: [{ uid: 1, kind: "todo", title: "10/30 前交 HW1", waitingId: "", why: "老师通知延期", money: { event: "", amount: 0, amountLabel: "", currency: "", merchant: "", category: "", occurredOn: "", refs: [], last4: "", instrument: "" } }] });
   const { rpc, turns } = fakeRuntime([answer, answer], MAIL_TRIAGE_SKILL);
   const captured: string[] = [];
   const service = createMailService({ store, secrets, resolve, factory: box.factory, now: () => now, cwd: "/repo", client: () => rpc,

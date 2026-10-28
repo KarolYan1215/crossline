@@ -28,6 +28,8 @@ export type AskKind =
   | "relation_check" | "background_paused" | "locked_conflict" | "outcome_check" | "progress_check" | "milestone_risk_review"
   /** A course's or the person's own deadline passed with work still open (the daily pass's `milestone.overdue`): 补做 / 新日期 / 放弃. */
   | "milestone_overdue"
+  /** Money records the ledger kept apart as possible duplicates (docs/mail-bookkeeping.md §4.3): one card for all of them. */
+  | "ledger_duplicate"
   /**
    * Work the assistant can do once the person gives one thing only they hold (docs/work-split.md, an `ask` work order): a question, never
    * a task card. Answered, the assistant takes the work; 「不需要」 archives it.

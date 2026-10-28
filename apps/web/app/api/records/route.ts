@@ -53,7 +53,7 @@ export async function POST(request: Request) {
   const today = personToday(ctx);
   const source = bearer ? "phone" as const : "input" as const;
   const outcome = { stored: 0, duplicates: 0, skipped: [] as Array<{ id: string; reason: string }> };
-  const keep = (id: string, input: Omit<DomainRecordInput, "source" | "dedupeKey" | "sourceRef">) => {
+  const keep = (id: string, input: Omit<DomainRecordInput, "source" | "dedupeKey" | "sourceRef"> & { merchant?: string; app?: string }) => {
     const result = addDomainRecord(ctx, { ...input, source, sourceRef: id, ...(id ? { dedupeKey: `${source}:${id}` } : {}) });
     if (!result.ok) outcome.skipped.push({ id, reason: result.message });
     else if (result.inserted) outcome.stored += 1;
@@ -65,13 +65,13 @@ export async function POST(request: Request) {
     const domain = item?.domain, kind = item?.kind;
     if (!isLineDomain(domain) || !(RECORD_KINDS[domain] as readonly unknown[]).includes(kind)) { outcome.skipped.push({ id, reason: tOf(ctx)("未知的领域或种类") }); continue; }
     keep(id, { domain, kind: kind as DomainRecordInput["kind"], value: Number(item.value), unit: str(item.unit, 16), currency: domain === "wealth" ? str(item.currency, 8).toUpperCase() || "CNY" : "",
-      category: str(item.category, 40) || str(item.merchant, 40), note: str(item.note, 200), at: str(item.at, 40) || today });
+      category: str(item.category, 40) || str(item.merchant, 40), note: str(item.note, 200), at: str(item.at, 40) || today, merchant: str(item.merchant, 60), app: "wallet" });
   }
   for (const item of (Array.isArray(body.notifications) ? body.notifications : []).slice(0, 50) as Array<Record<string, unknown>>) {
     const id = str(item?.id, 120);
     const read = recordFromNotification({ id, app: str(item?.app, 60), title: str(item?.title, 200), text: str(item?.text, 400), at: str(item?.at, 40) }, today);
     if (!read.ok) { outcome.skipped.push({ id, reason: read.reason }); continue; }
-    keep(id, read.record);
+    keep(id, { ...read.record, app: str(item?.app, 60) });
   }
   return Response.json({ ok: true, ...outcome });
 }

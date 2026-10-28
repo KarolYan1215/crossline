@@ -522,6 +522,10 @@ const questionRow = (row: Record<string, string | number | null>): LedgerQuestio
 const sentenceRow = (row: Record<string, string | number>): StoredSentence => ({ id: Number(row.id), sourceKind: row.source_kind as StoredSentence["sourceKind"],
   sourceId: String(row.source_id), ord: Number(row.ord), start: Number(row.start_at), end: Number(row.end_at), text: String(row.text), retired: Number(row.retired) === 1 });
 
+/** One piece of evidence of a money record as `record_evidence` keeps it (docs/mail-bookkeeping.md §4.3). */
+export type RecordEvidenceRow = { recordId: string; source: string; sourceKey: string; sourceRef: string; role: string; kind: string; amount: number; currency: string;
+  merchant: string; merchantKey: string; refs: string[]; last4: string; instrument: string; occurredOn: string; senderKey: string };
+
 export class CrosslineStore {
   readonly #db: Database.Database;
   /**
@@ -1276,6 +1280,25 @@ export class CrosslineStore {
       // judges public skills and planners' answers), so the Skill's name cannot say it. Older rows read as '' (not non-core).
       { version: 21, up: () => {
         if (!has("model_usage", "purpose")) this.#db.exec("ALTER TABLE model_usage ADD COLUMN purpose TEXT NOT NULL DEFAULT ''");
+      } },
+      // The ledger (2026-10-28, docs/mail-bookkeeping.md §4.4): a money record is one real transaction, and each mail, notification or entry
+      // that shows it is a row of `record_evidence` (unique per source item, so the same mail in two mailboxes or seen twice is one piece).
+      // Beside the record: the merchant's key and account, where its category came from, whether it waits on the person (a possible
+      // duplicate), the expense a refund belongs to, and why it was voided. Older rows read as booked with nothing beside them.
+      { version: 22, up: () => {
+        for (const [column, ddl] of [["merchant_key", "TEXT NOT NULL DEFAULT ''"], ["account", "TEXT NOT NULL DEFAULT ''"], ["category_by", "TEXT NOT NULL DEFAULT ''"],
+          ["status", "TEXT NOT NULL DEFAULT 'booked'"], ["possible_dup_of", "TEXT NOT NULL DEFAULT ''"], ["refund_of", "TEXT NOT NULL DEFAULT ''"],
+          ["void_reason", "TEXT NOT NULL DEFAULT ''"]] as const) {
+          if (!has("domain_records", column)) this.#db.exec(`ALTER TABLE domain_records ADD COLUMN ${column} ${ddl}`);
+        }
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS record_evidence (
+            workspace_id TEXT NOT NULL, id TEXT NOT NULL, record_id TEXT NOT NULL, source TEXT NOT NULL, source_key TEXT NOT NULL, source_ref TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL DEFAULT '', merchant TEXT NOT NULL DEFAULT '',
+            merchant_key TEXT NOT NULL DEFAULT '', refs TEXT NOT NULL DEFAULT '[]', last4 TEXT NOT NULL DEFAULT '', instrument TEXT NOT NULL DEFAULT '',
+            occurred_on TEXT NOT NULL, sender_key TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, source_key));
+          CREATE INDEX IF NOT EXISTS record_evidence_by_record ON record_evidence(workspace_id, record_id);`);
       } }
     ];
 
@@ -3079,10 +3102,12 @@ export class CrosslineStore {
 
   /** Keeps one record; a second one with the same `dedupeKey` is not written (`inserted: false`) and the first stays as it was. */
   addRecord(workspaceId: string, input: DomainRecordInput, now = new Date().toISOString()): { inserted: boolean; record: StoredDomainRecord } {
-    const record: StoredDomainRecord = { ...input, id: randomUUID(), workspaceId, createdAt: now };
+    const record: StoredDomainRecord = { merchantKey: "", account: "", categoryBy: "", status: "booked", possibleDupOf: "", refundOf: "", voidReason: "",
+      ...input, id: randomUUID(), workspaceId, createdAt: now };
     const result = this.#prepare(`INSERT OR IGNORE INTO domain_records (workspace_id, id, domain, kind, at, value, unit, currency, category, note, source,
-      source_ref, dedupe_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(workspaceId, record.id, input.domain, input.kind, input.at,
-      input.value, input.unit, input.currency, input.category, input.note, input.source, input.sourceRef, input.dedupeKey, now);
+      source_ref, dedupe_key, created_at, merchant_key, account, category_by, status, possible_dup_of, refund_of) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(workspaceId, record.id, input.domain, input.kind, input.at, input.value, input.unit, input.currency, input.category, input.note, input.source,
+        input.sourceRef, input.dedupeKey, now, record.merchantKey, record.account, record.categoryBy, record.status, record.possibleDupOf, record.refundOf);
     if (result.changes) return { inserted: true, record };
     const existing = this.listRecords(workspaceId, { includeDeleted: true }).find((item) => item.dedupeKey === input.dedupeKey)!;
     return { inserted: false, record: existing };
@@ -3095,7 +3120,50 @@ export class CrosslineStore {
       .all(workspaceId, ...(filter.domain ? [filter.domain] : []), ...(filter.since ? [filter.since] : [])) as Array<Record<string, unknown>>;
     return rows.map((row) => ({ id: String(row.id), workspaceId, domain: row.domain as "wellness" | "wealth", kind: row.kind as DomainRecordInput["kind"],
       at: String(row.at), value: Number(row.value), unit: String(row.unit), currency: String(row.currency), category: String(row.category), note: String(row.note),
-      source: row.source as DomainRecordInput["source"], sourceRef: String(row.source_ref), dedupeKey: String(row.dedupe_key), createdAt: String(row.created_at) }));
+      source: row.source as DomainRecordInput["source"], sourceRef: String(row.source_ref), dedupeKey: String(row.dedupe_key), createdAt: String(row.created_at),
+      merchantKey: String(row.merchant_key ?? ""), account: String(row.account ?? ""), categoryBy: String(row.category_by ?? "") as StoredDomainRecord["categoryBy"],
+      status: (row.status === "pending_review" ? "pending_review" : "booked") as StoredDomainRecord["status"], possibleDupOf: String(row.possible_dup_of ?? ""),
+      refundOf: String(row.refund_of ?? ""), voidReason: String(row.void_reason ?? "") }));
+  }
+
+  /** Changes a record's ledger fields, category, kind or value in place (the ledger page, the matcher, the repair). */
+  updateRecord(workspaceId: string, id: string, patch: Partial<Pick<StoredDomainRecord, "category" | "kind" | "value" | "at" | "note" | "merchantKey" | "account"
+    | "categoryBy" | "status" | "possibleDupOf" | "refundOf" | "voidReason">>): boolean {
+    const columns: Record<string, string> = { category: "category", kind: "kind", value: "value", at: "at", note: "note", merchantKey: "merchant_key", account: "account",
+      categoryBy: "category_by", status: "status", possibleDupOf: "possible_dup_of", refundOf: "refund_of", voidReason: "void_reason" };
+    const entries = Object.entries(patch).filter(([key, value]) => columns[key] && value !== undefined);
+    if (!entries.length) return false;
+    return this.#prepare(`UPDATE domain_records SET ${entries.map(([key]) => `${columns[key]} = ?`).join(", ")} WHERE workspace_id = ? AND id = ?`)
+      .run(...entries.map(([, value]) => value as string | number), workspaceId, id).changes > 0;
+  }
+
+  /** Keeps one piece of evidence of a record; a source item already kept is not kept again (`inserted: false`). */
+  addRecordEvidence(workspaceId: string, evidence: RecordEvidenceRow, now = new Date().toISOString()): { inserted: boolean; id: string } {
+    const id = randomUUID();
+    const result = this.#prepare(`INSERT OR IGNORE INTO record_evidence (workspace_id, id, record_id, source, source_key, source_ref, role, kind, amount, currency, merchant,
+      merchant_key, refs, last4, instrument, occurred_on, sender_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(workspaceId, id,
+      evidence.recordId, evidence.source, evidence.sourceKey, evidence.sourceRef, evidence.role, evidence.kind, evidence.amount, evidence.currency, evidence.merchant,
+      evidence.merchantKey, JSON.stringify(evidence.refs), evidence.last4, evidence.instrument, evidence.occurredOn, evidence.senderKey, now);
+    if (result.changes) return { inserted: true, id };
+    const existing = this.#prepare("SELECT id FROM record_evidence WHERE workspace_id = ? AND source_key = ?").get(workspaceId, evidence.sourceKey) as { id: string };
+    return { inserted: false, id: existing.id };
+  }
+
+  /** The evidence of a workspace's records, or of the records named. */
+  listRecordEvidence(workspaceId: string, recordIds?: string[]): Array<RecordEvidenceRow & { id: string; createdAt: string }> {
+    const rows = this.#prepare("SELECT * FROM record_evidence WHERE workspace_id = ? ORDER BY created_at, rowid").all(workspaceId) as Array<Record<string, unknown>>;
+    const wanted = recordIds ? new Set(recordIds) : undefined;
+    return rows.filter((row) => !wanted || wanted.has(String(row.record_id))).map((row) => ({ id: String(row.id), recordId: String(row.record_id), source: String(row.source),
+      sourceKey: String(row.source_key), sourceRef: String(row.source_ref), role: String(row.role), kind: String(row.kind), amount: Number(row.amount), currency: String(row.currency),
+      merchant: String(row.merchant), merchantKey: String(row.merchant_key), refs: (() => { try { return JSON.parse(String(row.refs)) as string[]; } catch { return []; } })(),
+      last4: String(row.last4), instrument: String(row.instrument), occurredOn: String(row.occurred_on), senderKey: String(row.sender_key), createdAt: String(row.created_at) }));
+  }
+
+  /** Moves evidence to another record (a merge, or a split into a record of its own). */
+  moveRecordEvidence(workspaceId: string, evidenceIds: string[], recordId: string): number {
+    let moved = 0;
+    for (const id of evidenceIds) moved += this.#prepare("UPDATE record_evidence SET record_id = ? WHERE workspace_id = ? AND id = ?").run(recordId, workspaceId, id).changes;
+    return moved;
   }
 
   /** Marks a record removed (kept for undo) or brings it back. */
@@ -3772,7 +3840,7 @@ export class CrosslineStore {
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
       "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences", "question_ledger", "workspace_counters", "domain_records",
-      "run_lessons",
+      "run_lessons", "record_evidence",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by

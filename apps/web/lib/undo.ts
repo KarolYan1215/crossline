@@ -1,6 +1,6 @@
 import "server-only";
 import { reopenAgentResult, retractedEventIdsIn, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
-import { PORTRAIT_FIGURE_SETTING, taskTitleOf, type AccessContext, type WorkOrderState } from "@crossline/core";
+import { PORTRAIT_FIGURE_SETTING, taskTitleOf, type AccessContext, type StoredDomainRecord, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 import { tOf } from "./locale";
 
@@ -31,6 +31,10 @@ export type Inverse =
   | { kind: "task.unmerge"; keepId: string; payload: unknown; plan: StepPlanInput | null; restore: string[] }
   /** Records (docs/domain-lines.md) the operation added are removed again; ones it removed come back. */
   | { kind: "records.deleted"; ids: string[]; deleted: boolean }
+  /** Ledger fields of records an operation changed (docs/mail-bookkeeping.md: category, kind, status, the duplicate and refund links) go back. */
+  | { kind: "records.fields"; entries: Array<{ id: string; patch: Partial<Pick<StoredDomainRecord, "kind" | "category" | "categoryBy" | "status" | "possibleDupOf" | "refundOf" | "voidReason">> }> }
+  /** Evidence an operation moved between records (a merge, a split) goes back to the record it was on. */
+  | { kind: "records.evidence"; entries: Array<{ id: string; recordId: string }> }
   /** Assistant results the daily pass put away or accepted (apps/worker/src/date-advance.ts) wait for the person again. */
   | { kind: "agent.reopen"; taskIds: string[] }
   /**
@@ -145,6 +149,12 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
       case "records.deleted":
         for (const id of inverse.ids) store.setRecordDeleted(ctx.workspaceId, id, inverse.deleted);
         return { ok: true };
+      case "records.fields":
+        for (const entry of inverse.entries) store.updateRecord(ctx.workspaceId, entry.id, entry.patch);
+        return { ok: true };
+      case "records.evidence":
+        for (const entry of inverse.entries) store.moveRecordEvidence(ctx.workspaceId, [entry.id], entry.recordId);
+        return { ok: true };
       case "step_plan.restore":
         for (const entry of inverse.plans) if (store.getStepPlan(ctx.workspaceId, entry.workOrderId))
           store.saveStepPlan(ctx.workspaceId, entry.workOrderId, entry.plan, ctx.principalId, "undo");
@@ -228,7 +238,7 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
 }
 
 /** Settings an operation may change and an undo puts back. Device, account and calendar-write state are not operations. */
-const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines", PORTRAIT_FIGURE_SETTING] as const;
+const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines", "ledger.", PORTRAIT_FIGURE_SETTING] as const;
 /** Ledger markers that hide or close something when written; undoing the operation that wrote them brings it back. */
 const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged", "source.project_cleared", "milestone.overdue_resolved"];
 
@@ -245,6 +255,9 @@ function snapshot(ctx: AccessContext) {
     settings: store.listSettings(ctx.workspaceId, UNDOABLE_SETTINGS),
     sources: new Map(store.listSourceDocuments(ctx.workspaceId).map((doc) => [doc.id, doc.projectId ?? null])),
     records: new Set(store.listRecords(ctx.workspaceId).map((record) => record.id)),
+    recordFields: new Map(store.listRecords(ctx.workspaceId, { includeDeleted: true }).map((record) => [record.id,
+      { kind: record.kind, category: record.category, categoryBy: record.categoryBy, status: record.status, possibleDupOf: record.possibleDupOf, refundOf: record.refundOf, voidReason: record.voidReason }])),
+    evidence: new Map(store.listRecordEvidence(ctx.workspaceId).map((item) => [item.id, item.recordId])),
     eventIds: new Set(store.listEvents(ctx.workspaceId, { type: RETRACTABLE_EVENTS }).map((event) => event.eventId))
   };
 }
@@ -261,6 +274,13 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
   const addedRecords = [...after.records].filter((id) => !before.records.has(id)), removedRecords = [...before.records].filter((id) => !after.records.has(id));
   if (addedRecords.length) items.push({ kind: "records.deleted", ids: addedRecords, deleted: true });
   if (removedRecords.length) items.push({ kind: "records.deleted", ids: removedRecords, deleted: false });
+  const fieldChanges = [...before.recordFields].flatMap(([id, was]) => {
+    const now = after.recordFields.get(id);
+    return now && JSON.stringify(now) !== JSON.stringify(was) ? [{ id, patch: was }] : [];
+  });
+  if (fieldChanges.length) items.push({ kind: "records.fields", entries: fieldChanges });
+  const moves = [...before.evidence].flatMap(([id, recordId]) => after.evidence.has(id) && after.evidence.get(id) !== recordId ? [{ id, recordId }] : []);
+  if (moves.length) items.push({ kind: "records.evidence", entries: moves });
   const opened = [...after.waiting].filter(([id, now]) => !before.waiting.has(id) && now.state === "open").map(([id]) => id);
   if (opened.length) items.push({ kind: "waiting.cancel", ids: opened });
   const restored: string[] = [], archived: string[] = [], revoked: string[] = [];

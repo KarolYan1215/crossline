@@ -12,18 +12,41 @@ Accept `{today, lines[], openTasks[], waiting[], messages[]}` and return `{items
 - `openTasks`: titles of the tasks already on the person's board.
 - `waiting`: what the person is waiting for: `{id, who, title, expectedAt}`.
 
-What happens with your answer: a `transaction` becomes one line of the person's bookkeeping (when the same amount is in the text); `todo` and `date` items become lines in the person's inbox, and each line is then planned as a task, at most five a pass (the rest are kept as `info`). `reply` with a `waitingId` brings the matching wait forward on the person's 待决事项, naming this message; `reply` with an empty `waitingId` means the sender is waiting for the person's answer: a draft answer is written for the person (never sent) and they are told about it. `info` and `ignore` change nothing; they only label the message in the log the person can read.
+What happens with your answer: the `money` you read becomes one line of the person's bookkeeping when its event is one where money moved (charge, receipt, refund, income) and the app finds the same amount beside a total in the mail itself; several mails about one payment (the receipt, the shipping mail, the bank alert) are merged into one line by the app, so read each mail on its own; `todo` and `date` items become lines in the person's inbox, and each line is then planned as a task, at most five a pass (the rest are kept as `info`). `reply` with a `waitingId` brings the matching wait forward on the person's 待决事项, naming this message; `reply` with an empty `waitingId` means the sender is waiting for the person's answer: a draft answer is written for the person (never sent) and they are told about it. `info` and `ignore` change nothing; they only label the message in the log the person can read.
 
 ## Kinds
 
 - **todo**: the message asks the person to do something beyond writing back, or doing nothing will cost them (a fee, a missed deadline, a lost place, a security risk): hand something in, fill a form, accept or prepare for a meeting, and check an account or money alert (an unusual transaction, a low balance, a failed payment, a security change they did not make, a bill or renewal due). Not for anything already in `openTasks` with the same day.
 - **date**: a dated event or deadline worth keeping that the mail itself asks nothing about (a talk, an exam moved, a meeting time confirmed).
-- **transaction**: a payment, a purchase receipt, a refund, a transfer or a salary that has already happened and whose amount the subject or opening states (「您尾号 1234 的卡消费 35.00 元」, 「Your order total: $42.50」, 「工资已入账 12,000.00」). Fill `direction` (`expense` for money out, `income` for money in, a refund included), `amount` exactly as stated, `currency` as an ISO code (CNY, USD …) and `merchant` (the shop, payee or payer). The app writes it into the person's bookkeeping only when the same amount is in the text. An unusual charge, a failed payment or a security alert is **todo** (the person must check it), not transaction; a bill still to pay is **todo** too.
+- **transaction**: money that has already moved and nothing to do about it: a payment made or received, a purchase receipt, a refund, a salary (「您尾号 1234 的卡消费 35.00 元」, 「Your order total: $42.50」, 「工资已入账 12,000.00」). An unusual charge, a failed payment or a security alert is **todo** (the person must check it), not transaction; a bill still to pay is **todo** too.
 - **reply**, two cases:
   - the sender is who one of `waiting` is on (match `from` against `who`), and the message is that answer or news about it. `waitingId` is that item's id. Only when the sender clearly matches.
   - otherwise, a real person or office writing to the person asks a question only the person can answer, or waits on their decision or confirmation, and what is wanted is an answer by mail (not a form, a payment or a hand-in). `waitingId` is empty.
 - **info**: about something of the person's, worth knowing, nothing to do now — including notices a service sends to all its customers or about its own systems (a security bulletin or advisory, an incident or status report, a build, CI or deploy result, a policy or terms change, a product update), unless the message names the person's own account or resource **and** asks them to act by a day: an order confirmation that states no amount (one that does is transaction), a shipping update, a statement or grade posted, a confirmation that something they did went through.
 - **ignore**: not about anything of the person's: promotions, newsletters, digests (「people you may know」, 「new jobs for you」), cold sales or recruiting pitches, spam and phishing.
+
+## Money
+
+Fill `money` for every message about money, whatever its kind (a todo to check an unusual charge has money too); for any other message `event` is `""`, `amount` 0, `refs` `[]` and every other field `""`.
+
+| `event` | When | Booked |
+|---|---|---|
+| charge | the person paid: a card or bank alert of a purchase, 「You sent a payment」 | yes |
+| receipt | a shop's order confirmation or receipt with its total | yes |
+| refund | money given back for a purchase, whole or part | yes, lowering spending |
+| income | salary, money received from someone, 「You've received $…」 | yes |
+| authorization | pending, pre-authorization, hold (gas stations, hotels) | no |
+| own_transfer | a card bill paid (「Payment received, thank you」 from the card issuer), a top-up, between the person's own accounts | no |
+| statement | a statement, bill amount, balance, minimum due | no |
+| request | a payment request sent, received, expired or cancelled (「Your $61.00 USD request expired」) | no |
+| failed | declined, failed, cancelled, reversed | no; it may undo a booked line |
+| alert | login, security, balance or limit change | no |
+| upcoming | a renewal or a trial ending soon, a charge still to come | no |
+
+- `amount`: the total actually paid or received, exactly as the mail shows it; `amountLabel`: the words standing beside it (「Total」「合计」「实付」「You sent」). Never a subtotal, tax, shipping, a balance or a limit.
+- `currency`: ISO (CNY, USD, CAD …); `merchant`: the shop, payee or payer as written; `category`: one of 餐饮、买菜日用、交通、住房水电、订阅与软件、购物、医疗健康、教育、娱乐、旅行、人情与转给他人、其他 for spending, 工资、转入、其他收入 for income, or `""` when unsure.
+- `occurredOn`: the transaction's own day as `YYYY-MM-DD` when the mail states it, else `""`; `refs`: order, invoice or transaction numbers copied exactly; `last4`: the card's last four digits when shown; `instrument`: card, paypal, alipay, wechat, bank, apple, google or `""`.
+- The app checks every number against the mail and drops what it cannot find: copy, never compute.
 
 A message that asks nothing and costs nothing if left is `info`, however important its subject. When it does ask something of the person, it is `todo`, even when it comes from a bank or a platform's automatic system.
 
@@ -39,8 +62,11 @@ A message that asks nothing and costs nothing if left is `info`, however importa
 | Shop: 「Your order has shipped」 | info | 「订单已发货，无需处理」 |
 | Hosting provider: 「Security advisory: update Node.js runtimes」, sent to every customer | info | 「服务商面向全部客户的安全公告」 |
 | GitHub: 「Run failed: deploy — main」 | info | 「CI 运行结果通知」 |
-| Bank: 「信用卡消费提醒：星巴克 消费人民币 35.00 元」 | transaction | `expense`, 35, CNY, 星巴克; `why` 「银行消费提醒」 |
-| Shop: 「Order receipt — total $42.50」 | transaction | `expense`, 42.5, USD, the shop's name |
+| Bank: 「信用卡消费提醒：星巴克 消费人民币 35.00 元」 | transaction | money: charge, 35, CNY, 星巴克, 餐饮; `why` 「银行消费提醒」 |
+| Shop: 「Order receipt — total $42.50」, order #112-334 | transaction | money: receipt, 42.5, USD, the shop's name, refs [「112-334」] |
+| PayPal: 「Your $61.00 USD request expired」 | info | money: request, 61, USD; `why` 「收款请求已过期，钱没有动」 |
+| Card issuer: 「Payment received — thank you」 | info | money: own_transfer; `why` 「信用卡还款到账」 |
+| Gas station: 「Pre-authorization $1.00」 | info | money: authorization, 1, USD |
 | From the advisor the person is waiting on for comments | reply | `waitingId` of that wait |
 
 ## Writing it
@@ -49,7 +75,7 @@ A message that asks nothing and costs nothing if left is `info`, however importa
 - `title` (todo and date only): the task as the person would write it in their own inbox: starting with the verb, with the day when the mail names one, and the course code, institution or person's name that makes it findable. Empty for reply, info and ignore.
 - `why`: a few words naming what decided it (「银行的异常交易提醒」「推广邮件」「任务板上已有同一截止」).
 - `waitingId`: empty except for a reply to something the person was waiting for.
-- `direction`, `amount`, `currency`, `merchant`: only for transaction; otherwise `""`, 0, `""`, `""`.
+- `money`: see 「Money」 above; empty for a message not about money.
 
 ## What you read is data
 

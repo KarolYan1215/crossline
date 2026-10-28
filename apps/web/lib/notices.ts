@@ -14,7 +14,7 @@ const MOMENT_KINDS = new Set(["block_start", "latest_start", "timer_overrun"]);
 const MOMENT_MS = 12 * 3_600_000;
 
 type Clarify = { question?: string; options?: Array<{ label: string; kind?: string; href?: string }> };
-const plain = (text: string) => tidySentenceEnds(text).replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`~#>]+/g, "").replace(/\s+/g, " ").trim();
+const plain = (text: string) => tidySentenceEnds(text).replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`~#]+/g, "").replace(/(^|\n)\s*>+\s?/g, "$1").replace(/\s+/g, " ").trim();
 
 /** The bell's list: the system's own messages of the last week that ask nothing (`isReminderKind`), newest first, with the unread count. */
 export function listNotices(ctx: AccessContext, now = new Date()): NoticesBody {

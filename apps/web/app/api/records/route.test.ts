@@ -25,7 +25,7 @@ test("the phone's records token writes payment notifications and Wallet transact
   const first = await (await post(token, body)).json() as { stored: number; duplicates: number; skipped: Array<{ id: string; reason: string }> };
   expect(first).toMatchObject({ stored: 2, duplicates: 0 });
   expect(first.skipped.map((item) => item.id)).toEqual(["bad", "n2"]);
-  expect(store.listRecords(workspace.id).map((item) => [item.value, item.currency, item.category, item.source])).toEqual([[42.5, "USD", "Whole Foods", "phone"], [18.8, "CNY", "", "phone"]]);
+  expect(store.listRecords(workspace.id).map((item) => [item.value, item.currency, item.category, item.source])).toEqual([[42.5, "USD", "Whole Foods", "phone"], [18.8, "CNY", "其他", "phone"]]);
   // The same notification relayed again is the same payment.
   expect(await (await post(token, body)).json()).toMatchObject({ stored: 0, duplicates: 2 });
   // A health or capture token cannot write records, and a records token cannot write health summaries.

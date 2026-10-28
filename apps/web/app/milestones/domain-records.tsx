@@ -22,7 +22,7 @@ export type DomainRecordsCard = {
 
 /** Kept in Chinese (they are the keys); translated where shown. */
 const SOURCE: Record<string, string> = { input: "输入框", mail: "邮件", phone: "手机", confirm: "完成确认", photo: "截图" };
-const KIND: Record<string, string> = { income: "收入", expense: "支出", workout: "运动", weight: "体重", meal: "饮食", metric: "指标" };
+const KIND: Record<string, string> = { income: "收入", expense: "支出", refund: "退款", workout: "运动", weight: "体重", meal: "饮食", metric: "指标" };
 const money = (locale: Locale, value: number) => value.toLocaleString(intlLocale(locale), { maximumFractionDigits: 2 });
 /** 「10 月」 / "Oct" for a `YYYY-MM` month. */
 const monthLabel = (locale: Locale, t: Translate, month: string) =>
@@ -104,6 +104,7 @@ export function DomainRecords({ card }: { card: DomainRecordsCard }) {
           <span>{item.category}</span><span className="lb-records-bar" style={{ width: `${Math.round(item.amount / largest * 100)}%` }} aria-hidden="true" />
           <span className="mono">{money(locale, item.amount)}</span></li>)}
       </ul>}
+      <a className="text-button lb-records-ledger" href="/ledger">{t("打开总账")}</a>
     </> : <p className="lb-records-line"><span>{t("近 7 天运动 {{count}} 次 · {{minutes}} 分钟", { count: card.workouts, minutes: card.workoutMinutes })}</span>
       <span>{card.weight ? t("体重 {{value}} kg（{{day}}）", { value: card.weight.value, day: card.weight.at.slice(5) }) : t("体重 —")}</span></p>}
     <RecordTrend card={card} />
@@ -113,7 +114,7 @@ export function DomainRecords({ card }: { card: DomainRecordsCard }) {
         {card.recent.map((row) => <li key={row.id}>
           <span className="mono">{row.at.slice(5, 10)}</span>
           <span>{KIND[row.kind] ? t(KIND[row.kind]!) : row.kind}{row.category ? ` · ${row.category}` : ""}</span>
-          <span className="mono">{row.kind === "income" || row.kind === "expense" ? `${money(locale, row.value)} ${row.currency}` : `${row.value} ${row.unit}`}</span>
+          <span className="mono">{row.kind === "income" || row.kind === "expense" || row.kind === "refund" ? `${money(locale, row.value)} ${row.currency}` : `${row.value} ${row.unit}`}</span>
           <small className="muted">{SOURCE[row.source] ? t(SOURCE[row.source]!) : row.source}</small>
           <button type="button" className="text-button" aria-label={t("删除 {{day}} 的这条记录", { day: row.at.slice(5, 10) })} onClick={() => void remove(row.id)}>{t("删除")}</button>
         </li>)}

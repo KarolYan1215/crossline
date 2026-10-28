@@ -7,7 +7,7 @@ import type { SuccessCriterion } from "./index";
  * estimate stored as truth: a model may read one out of a sentence, a mail or a screenshot, but code checks it and the person confirms what
  * they did not type. Records feed the line card's summary and judge a domain milestone's threshold (`recordReadings`).
  */
-export const RECORD_KINDS = { wellness: ["workout", "weight", "meal", "metric"], wealth: ["income", "expense"] } as const;
+export const RECORD_KINDS = { wellness: ["workout", "weight", "meal", "metric"], wealth: ["income", "expense", "refund"] } as const;
 export type RecordDomain = keyof typeof RECORD_KINDS;
 export type RecordKind = (typeof RECORD_KINDS)[RecordDomain][number];
 /**
@@ -31,12 +31,19 @@ export type DomainRecordInput = {
   source: RecordSource; sourceRef: string;
   /** One record per real event: a repeated mail, shortcut or confirmation is the same key and is not written twice. */
   dedupeKey: string;
-};
-export type StoredDomainRecord = DomainRecordInput & { id: string; workspaceId: string; createdAt: string };
+} & Partial<LedgerFields>;
+/**
+ * What the ledger keeps beside a money record (docs/mail-bookkeeping.md §4.4, §5.1): the merchant's key and the account it went through,
+ * where its category came from (`person` is never overwritten), whether it counts (`pending_review`: maybe a duplicate of `possibleDupOf`,
+ * asked about, not summed), the expense a refund belongs to, and why a record was voided.
+ */
+export type LedgerFields = { merchantKey: string; account: string; categoryBy: "" | "person" | "rule" | "model" | "builtin"; status: "booked" | "pending_review";
+  possibleDupOf: string; refundOf: string; voidReason: string };
+export type StoredDomainRecord = DomainRecordInput & LedgerFields & { id: string; workspaceId: string; createdAt: string };
 
 const DAY = /^\d{4}-\d{2}-\d{2}/;
 const KIND_UNIT: Record<RecordKind, { min: number; max: number }> = {
-  income: { min: 0.01, max: 10_000_000 }, expense: { min: 0.01, max: 10_000_000 },
+  income: { min: 0.01, max: 10_000_000 }, expense: { min: 0.01, max: 10_000_000 }, refund: { min: 0.01, max: 10_000_000 },
   weight: { min: 20, max: 300 }, workout: { min: 1, max: 600 }, meal: { min: 0, max: 5000 }, metric: { min: -1_000_000, max: 1_000_000 }
 };
 
@@ -66,8 +73,12 @@ export type RecordMetrics = {
   weight: { value: number; at: string } | null;
 };
 
-type MetricRecord = Pick<DomainRecordInput, "kind" | "at" | "value" | "currency" | "category">;
-const isMoney = (record: Pick<DomainRecordInput, "kind">) => record.kind === "income" || record.kind === "expense";
+type MetricRecord = Pick<DomainRecordInput, "kind" | "at" | "value" | "currency" | "category"> & { status?: string };
+/** A record that counts: a possible duplicate waiting for the person's answer does not. */
+const counts = (record: { status?: string }) => record.status !== "pending_review";
+const isMoney = (record: Pick<DomainRecordInput, "kind"> & { status?: string }) => (record.kind === "income" || record.kind === "expense" || record.kind === "refund") && counts(record);
+/** Spending net of refunds: a refund lowers its category and its month, it is never income. */
+const spent = (records: MetricRecord[]) => records.reduce((total, record) => total + (record.kind === "expense" ? record.value : record.kind === "refund" ? -record.value : 0), 0);
 /** The currency most of these money records use (CNY with none). */
 function currencyOf(money: MetricRecord[]): string {
   const counts = new Map<string, number>();
@@ -81,16 +92,16 @@ export function recordMetrics(records: MetricRecord[], today: string): RecordMet
   const money = records.filter((record) => isMoney(record) && record.at.slice(0, 7) === month);
   const currency = currencyOf(money);
   const inCurrency = money.filter((record) => (record.currency || "CNY") === currency);
-  const sum = (kind: string) => round(inCurrency.filter((record) => record.kind === kind).reduce((total, record) => total + record.value, 0));
-  const income = sum("income"), expense = sum("expense");
+  const income = round(inCurrency.filter((record) => record.kind === "income").reduce((total, record) => total + record.value, 0));
+  const expense = round(spent(inCurrency));
   const byCategory = new Map<string, number>();
-  for (const record of inCurrency) if (record.kind === "expense") byCategory.set(record.category || "其他", (byCategory.get(record.category || "其他") ?? 0) + record.value);
+  for (const record of inCurrency) if (record.kind !== "income") byCategory.set(record.category || "其他", (byCategory.get(record.category || "其他") ?? 0) + (record.kind === "refund" ? -record.value : record.value));
   const weekStart = new Date(Date.parse(today) - 6 * 86_400_000).toISOString().slice(0, 10);
-  const workouts = records.filter((record) => record.kind === "workout" && record.at.slice(0, 10) >= weekStart && record.at.slice(0, 10) <= today);
-  const weights = records.filter((record) => record.kind === "weight").sort((a, b) => a.at.localeCompare(b.at));
+  const workouts = records.filter((record) => record.kind === "workout" && counts(record) && record.at.slice(0, 10) >= weekStart && record.at.slice(0, 10) <= today);
+  const weights = records.filter((record) => record.kind === "weight" && counts(record)).sort((a, b) => a.at.localeCompare(b.at));
   const latest = weights.at(-1);
   return { month, currency, income, expense, savingsRate: income > 0 ? round((1 - expense / income) * 100) : null,
-    categories: [...byCategory].map(([category, amount]) => ({ category, amount: round(amount) })).sort((a, b) => b.amount - a.amount),
+    categories: [...byCategory].map(([category, amount]) => ({ category, amount: round(amount) })).filter((item) => item.amount > 0).sort((a, b) => b.amount - a.amount),
     workouts: workouts.length, workoutMinutes: round(workouts.reduce((total, record) => total + record.value, 0)),
     weight: latest ? { value: latest.value, at: latest.at.slice(0, 10) } : null };
 }
@@ -119,8 +130,9 @@ export function recordTrends(records: MetricRecord[], today: string, currency = 
   });
   const money = records.filter((record) => isMoney(record) && months.includes(record.at.slice(0, 7)));
   const chosen = currency || currencyOf(money);
-  const sum = (month: string, kind: string) => round(money.filter((record) => record.kind === kind && record.at.slice(0, 7) === month && (record.currency || "CNY") === chosen)
-    .reduce((total, record) => total + record.value, 0));
+  const inMonth = (month: string) => money.filter((record) => record.at.slice(0, 7) === month && (record.currency || "CNY") === chosen);
+  const sum = (month: string, kind: string) => round(kind === "expense" ? spent(inMonth(month))
+    : inMonth(month).filter((record) => record.kind === kind).reduce((total, record) => total + record.value, 0));
   const monday = addDays(today, -((new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7));
   const weeks = Array.from({ length: TREND_WEEKS }, (_, index) => addDays(monday, -7 * (TREND_WEEKS - 1 - index))).map((start) => {
     const end = addDays(start, 6);

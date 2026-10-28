@@ -1,6 +1,7 @@
 import { effectiveSchedulePreferences, getStore, lastNight } from "../../lib/crossline";
 import { localStamp } from "@crossline/core";
 import { loadWeekInvestment, loadWeeklyReview } from "../../lib/review";
+import { loadLedger } from "../../lib/ledger";
 import { BarChart } from "../ui/charts";
 import "./review.css";
 import { SubpageShell } from "../subpage-shell";
@@ -38,6 +39,8 @@ export default async function ReviewPage() {
   const workOrders = getStore().listWorkOrders(ctx.workspaceId);
   const accepted = workOrders.filter((workOrder) => workOrder.state === "accepted").length;
   const review = loadWeeklyReview(ctx);
+  // The same numbers as the monthly report and the ledger page (docs/mail-bookkeeping.md §5.3).
+  const money = loadLedger(ctx);
   const taskDetails = loadTaskDetailsBatch(ctx, review.autoAccepted.map((item) => item.workOrderId));
   const milestoneDetails = loadMilestoneDetailsBatch(ctx, review.milestoneProgress.map((item) => item.id));
   const insightKeys = new Map(permissionCandidates(ctx).filter((item) => item.kind === "insight" && item.eligible).map((item) => [item.id, item.key]));
@@ -65,6 +68,13 @@ export default async function ReviewPage() {
           <BarChart label={t("本周各线实际计时小时")} unit=" h" max={weekMax} data={week.lines.map((line) => ({ label: line.label, line: line.line, value: hoursOf(line.actual),
             title: t("{{line}} · 实际计时 {{hours}} 小时", { line: line.label, hours: hoursOf(line.actual) }) }))} /></div>
       </div>
+    </section>}
+    {money.hasRecords && <section className="review-block review-wide" aria-label={t("本月花钱")}>
+      <h2>{t("本月花钱")}</h2>
+      <p className="review-note">{t("{{month}} 已花 {{spent}} {{currency}}，收入 {{income}}", { month: money.month, spent: money.summary.spent, currency: money.summary.currency, income: money.summary.income })}
+        {money.summary.savingsRate !== null ? t("，储蓄率 {{rate}}%", { rate: Math.round(money.summary.savingsRate) }) : ""}{t("。")} <a href="/ledger">{t("看总账")}</a></p>
+      {money.summary.categories.length > 0 && <BarChart label={t("本月各类支出")} data={money.summary.categories.filter((item) => item.amount > 0).slice(0, 6)
+        .map((item) => ({ label: t(item.category), value: item.amount, line: "investment" }))} />}
     </section>}
     <section className="review-block review-wide">
       <h2>{t("本周自动验收")}</h2>

@@ -7,7 +7,7 @@ import {
   isPreparationOnlyMilestone, onPersonsBoard, preparesOf, workOwner,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf
 } from "@crossline/core";
-import { acceptOwnCompletion, listAgentTasks, ownCompletion, type StoredWorkOrder } from "@crossline/db";
+import { acceptOwnCompletion, listAgentTasks, ownCompletion, resolvePossibleDuplicate, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
   acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast,
@@ -508,6 +508,31 @@ const MISSED_SPLIT = "asks.missed.split";
  * Two or more of yesterday's blocks not started are one card (2026-10-27 walkthrough: a day away put six 「昨天 … 没开始」 cards in a
  * row on Today). The scheduler has already moved them; 「都顺延」 settles them in one tap, 「逐个处理」 splits them back.
  */
+/**
+ * Money records the ledger kept apart as possible duplicates (docs/mail-bookkeeping.md §4.3): one card listing them all, never urgent.
+ * 「都按两笔计入」 counts them; the ledger page merges the ones that are the same. Left unanswered for a week, they count (the worker).
+ */
+function ledgerDuplicateAsks({ store, ctx, t }: Source): Ask[] {
+  const all = store.listRecords(ctx.workspaceId, { domain: "wealth" });
+  const pending = all.filter((record) => record.status === "pending_review");
+  if (!pending.length) return [];
+  const byId = new Map(all.map((record) => [record.id, record]));
+  const items: AskItem[] = pending.map((record) => {
+    const other = byId.get(record.possibleDupOf);
+    return { id: record.id, title: other
+      ? t("{{day}} {{amount}} {{currency}}（可能与 {{other}} 的同一笔）", { day: record.at.slice(5, 10), amount: record.value, currency: record.currency, other: other.at.slice(5, 10) })
+      : t("{{day}} {{amount}} {{currency}}", { day: record.at.slice(5, 10), amount: record.value, currency: record.currency }), href: "/ledger" };
+  });
+  return [{ id: "ledger:duplicates", kind: "ledger_duplicate", entityId: "batch", urgency: "later", raisedAt: pending.map((record) => record.createdAt).sort().at(-1) ?? "",
+    fingerprint: pending.map((record) => record.id).sort().join("|"), items,
+    title: t("{{count}} 笔记账可能重复", { count: pending.length }),
+    why: t("同一笔钱可能既来了收据又来了银行提醒，系统拿不准时先不计入汇总。是同一笔的去总账合并；不确定就按两笔计入。"),
+    options: [
+      { id: "separate", label: t("都按两笔计入"), detail: t("每笔都计入汇总") },
+      { id: "review", label: t("去总账逐笔看"), detail: t("在总账页合并或分开"), href: "/ledger", recommended: true }
+    ] }];
+}
+
 function missedAsks(source: Source): Ask[] {
   const members = missedMembers(source);
   if (members.length < 2) return members;
@@ -868,7 +893,7 @@ function lockedConflictAsks({ store, ctx, today, now, t, locale }: Source): Ask[
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, overdueAsks, missedAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, travelAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, overdueAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
@@ -1131,6 +1156,13 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
           archiveWorkOrder(ctx, order.id, tOf(ctx)("里程碑「{{title}}」截止已过，本人选择放弃", { title: short(milestone.title, 20) }));
       } else if (optionId !== "makeup") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
       resolve(optionId);
+      return { ok: true };
+    }
+    case "ledger_duplicate": {
+      if (optionId !== "separate") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+      for (const record of store.listRecords(ctx.workspaceId, { domain: "wealth" }).filter((item) => item.status === "pending_review")) {
+        resolvePossibleDuplicate(store, ctx.workspaceId, record.id, false);
+      }
       return { ok: true };
     }
     case "missed_block": {

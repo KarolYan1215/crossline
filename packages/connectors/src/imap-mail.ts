@@ -13,7 +13,9 @@ import { simpleParser } from "mailparser";
 export type MailServer = { host: string; port: number; secure: boolean };
 export type MailHeader = { uid: number; from: string; fromAddress: string; to: string; subject: string; date: string; snippet: string;
   /** The message's own Message-ID and the one it answers (In-Reply-To), "" when absent: how a sent answer is matched to its message. */
-  messageId?: string; inReplyTo?: string };
+  messageId?: string; inReplyTo?: string;
+  /** The first `BODY` characters of the text, for checking what a model read (an amount, an order number) against the mail itself; never sent to a model and never stored. */
+  body?: string };
 /** A message the person was asked to answer, as the sent-mail check looks for it. */
 export type ReplyThread = { messageId: string; fromAddress: string; subject: string; date: string };
 export type MailMessage = MailHeader & { text: string };
@@ -49,10 +51,12 @@ export function hostAllowed(host: string): boolean {
 }
 
 const addressText = (list: Array<{ name?: string | undefined; address?: string | undefined }> | undefined) =>
-  (list ?? []).map((item) => item.name ? `${item.name} <${item.address ?? ""}>` : item.address ?? "").filter(Boolean).join(", ");
+  (list ?? []).map((item) => item.name && item.name.trim().toLowerCase() !== (item.address ?? "").toLowerCase() ? `${item.name} <${item.address ?? ""}>` : item.address ?? "")
+    .filter(Boolean).join(", ");
 const iso = (value: Date | string | undefined) => { const date = value ? new Date(value) : undefined; return date && !Number.isNaN(date.getTime()) ? date.toISOString() : ""; };
 const plain = (text: string) => text.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").replace(/[ \t]+/g, " ").trim();
 const SNIPPET = 300;
+const BODY = 8000;
 const PARTIAL_BYTES = 48_000;
 const FULL_BYTES = 2_000_000;
 
@@ -162,7 +166,7 @@ export function createImapMail(server: MailServer, user: string, rawPassword: st
     const text = await textOf(message.source);
     return { uid: message.uid, from: addressText(message.envelope?.from), fromAddress: (message.envelope?.from?.[0]?.address ?? "").toLowerCase(),
       to: addressText(message.envelope?.to), subject: (message.envelope?.subject ?? "").slice(0, 300), date: iso(message.envelope?.date ?? message.internalDate),
-      snippet: text.slice(0, SNIPPET), messageId: message.envelope?.messageId ?? "", inReplyTo: message.envelope?.inReplyTo ?? "" };
+      snippet: text.slice(0, SNIPPET), body: text.slice(0, BODY), messageId: message.envelope?.messageId ?? "", inReplyTo: message.envelope?.inReplyTo ?? "" };
   };
   const QUERY = { uid: true, envelope: true, internalDate: true, source: { start: 0, maxLength: PARTIAL_BYTES } } as const;
 
