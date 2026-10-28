@@ -598,5 +598,13 @@
   "在小帮手里处理": "Handle in Helper",
   "提醒，{{count}} 条未读_one": "Reminders, {{count}} unread",
   "提醒，{{count}} 条未读_other": "Reminders, {{count}} unread",
-  "近 7 天没有提醒。": "No reminders in the last 7 days."
+  "近 7 天没有提醒。": "No reminders in the last 7 days.",
+  "今天没有排好的下一项。": "Nothing else is scheduled for today.",
+  "开始计时：{{title}}": "Timer started: {{title}}",
+  "没能开始「{{title}}」，在任务页可以看原因。": "Could not start “{{title}}”. The task page says why.",
+  "小帮手的快捷动作": "Helper quick actions",
+  "开始下一项计时": "Start timing the next item",
+  "记一下：要记的事": "Note it: what to remember",
+  "打开今日": "Open Today",
+  "先藏起来（Ctrl+Alt+H 唤回）": "Hide for now (Ctrl+Alt+H brings it back)"
 }

@@ -84,6 +84,7 @@ namespace Crossline
             icon.BalloonTipClicked += (s, e) =>
             {
                 if (balloonOpens == "update") { if (pendingUpdate != null) ConfirmUpdate(); }
+                else if (balloonOpens != null && balloonOpens.StartsWith("link:https://")) Process.Start(balloonOpens.Substring(5));
                 else if (balloonOpens != null && url != null) Process.Start(url.TrimEnd('/') + balloonOpens);
             };
             job = CreateKillOnCloseJob();
@@ -185,6 +186,16 @@ namespace Crossline
                 if (path == null || !path.StartsWith("/")) return;
                 balloonOpens = path;
                 icon.ShowBalloonTip(10000, Field(line, "title") ?? "Crossline", Field(line, "text") ?? "", ToolTipIcon.Info);
+                return;
+            }
+            if (type == "update-discontinued")
+            {
+                // The full installed copy is no longer published (2026-10-28): its last word, said once. Nothing here is removed; a click
+                // opens the page the signed manifest named (https only, checked by the launcher).
+                var link = Field(line, "link");
+                balloonOpens = link != null && link.StartsWith("https://") ? "link:" + link : null;
+                updateItem.Text = "已停止更新";
+                icon.ShowBalloonTip(20000, "Crossline 本机版已停止更新", Field(line, "notice") ?? "", ToolTipIcon.Info);
                 return;
             }
             if (type == "update-available")

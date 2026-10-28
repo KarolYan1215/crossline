@@ -28,7 +28,7 @@ MinVersion=10.0.17763
 OutputDir={#OutputDir}
 OutputBaseFilename=Crossline-Node-Setup-{#AppVersion}
 SetupIconFile={#IconFile}
-UninstallDisplayIcon={app}\node.exe
+UninstallDisplayIcon={app}\CrosslineNode.exe
 UninstallDisplayName=Crossline 节点
 Compression=lzma2/max
 SolidCompression=yes
@@ -53,16 +53,21 @@ Type: filesandordirs; Name: "{app}\node_modules"
 Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{userprograms}\Crossline 节点"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\start.vbs"""; IconFilename: "{app}\node.exe"
-Name: "{userdesktop}\Crossline 节点"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\start.vbs"""; IconFilename: "{app}\node.exe"; Tasks: desktopicon
+; The tray (CrosslineNode.exe) starts the node program, holds the icon and the menu, Ctrl+Alt+H and the 小帮手's desktop window.
+Name: "{userprograms}\Crossline 节点"; Filename: "{app}\CrosslineNode.exe"
+Name: "{userdesktop}\Crossline 节点"; Filename: "{app}\CrosslineNode.exe"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Crossline Node"; \
-  ValueData: """{sys}\wscript.exe"" ""{app}\start.vbs"" --autostart"; Flags: uninsdeletevalue; Tasks: autostart
+; The same value the tray's 「开机时启动」 writes, so the two always agree.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Crossline Node";   ValueData: """{app}\CrosslineNode.exe"" --background"; Flags: uninsdeletevalue; Tasks: autostart
+; Removed on uninstall even when the person switched it on later from the tray.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Crossline Node"; Flags: uninsdeletevalue
 
 [Run]
-; Start: the page opens for pairing and sign-in. A running copy was stopped before the files were replaced (PrepareToInstall below).
-Filename: "{sys}\wscript.exe"; Parameters: """{app}\start.vbs"""; Description: "现在启动 Crossline 节点"; Flags: nowait postinstall skipifsilent
+; Start: the tray opens the node's page for pairing and sign-in, and the 小帮手 window.
+Filename: "{app}\CrosslineNode.exe"; Description: "现在启动 Crossline 节点"; Flags: nowait postinstall skipifsilent
+; An update runs silently from the tray, which has already quit: start the new version.
+Filename: "{app}\CrosslineNode.exe"; Parameters: "--background"; Flags: nowait; Check: WizardSilent
 
 [Code]
 // Every process running from the app folder (the node program and the Codex it started) is stopped before its files are replaced or
