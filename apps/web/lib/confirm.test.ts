@@ -20,13 +20,14 @@ const step = (id: string, title: string, dependsOn: string[] = []) => ({ id, rol
   share: 0.5, estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60 }, dependsOn, notBefore: "", dueBy: "", schedulable: true, executor: "human" as const, tickOutcome: "" });
 const plan = (steps: StepPlanInput["steps"]): StepPlanInput => ({ archetypeId: "problem_set", quantity: { basis: "题目数", amount: 4, unit: "题" }, rationale: "按题拆分", steps });
 
-function setup(options: { milestoneId?: string; family?: string | null; steps?: number } = {}) {
+function setup(options: { milestoneId?: string; family?: string | null; steps?: number; dueDate?: string } = {}) {
   const at = (clock: string) => { vi.stubEnv("CROSSLINE_FIXED_NOW", toZonedInstant(DAY, clock, ZONE)); return new Date(toZonedInstant(DAY, clock, ZONE)); };
   at("08:30");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
   store.saveWorkOrder({ id: "ece555-hw3", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "ece555",
     milestoneId: options.milestoneId ?? "", intent: "完成 ECE 555 作业 3", state: "approved", riskTier: "routine", estimate,
-    payload: { dueDate: "2026-10-14", materialContract: [], ...(options.family === null ? {} : { family: options.family ?? "deep_work" }) } });
+    // Due tomorrow: the block is asked about on its own; a later due day waits for the evening wrap-up (docs/rituals.md).
+    payload: { dueDate: options.dueDate ?? "2026-10-13", materialContract: [], ...(options.family === null ? {} : { family: options.family ?? "deep_work" }) } });
   const steps = [step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题", ["s1"])].slice(0, options.steps ?? 2);
   store.saveStepPlan(ws, "ece555-hw3", plan(steps), TEST_CTX.principalId, "initial");
   return { store, at };

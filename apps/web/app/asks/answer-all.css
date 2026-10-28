@@ -1,0 +1,6 @@
+/* 「全部按推荐」 (docs/rituals.md): one button, a short confirmation listing the kinds, a result with 撤销. */
+.answer-all { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.answer-all-confirm { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--mist); border-radius: 8px; max-width: 560px; }
+.answer-all-confirm p, .answer-all-confirm ul { margin: 0; }
+.answer-all-confirm ul { padding-left: 18px; }
+.answer-all-actions { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -97,10 +97,23 @@ export async function previewChange(ctx: AccessContext, requested: Change, optio
   const change = resolveChange(ctx, requested);
   const order = isTaskChange(change) ? getStore().listWorkOrders(ctx.workspaceId).find((item) => item.id === change.workOrderId) : undefined;
   if (isTaskChange(change) && !order) throw new Error("WORK_ORDER_NOT_FOUND");
+  return compare(ctx, overridesFor(change), order, options);
+}
+
+/**
+ * Several changes at once, given as the preview's own overrides: the weekly commitment's 推 and 砍 (docs/rituals.md), each task's
+ * `notBefore` and new due day together, previewed before 「确认本周」 writes them.
+ */
+export function previewOverrides(ctx: AccessContext, overrides: PreviewOverrides): Promise<Impact> {
+  return compare(ctx, overrides, undefined, {});
+}
+
+async function compare(ctx: AccessContext, overrides: PreviewOverrides, order: { id: string; intent: string } | undefined,
+  options: { chartsHorizonDays?: number }): Promise<Impact> {
   // Both sides inside a preview, so both are the greedy plan: the cached optimal plan against a greedy "after" would report the
   // difference between the two engines as the change's effect (docs/loop-and-scout.md §2).
   const before = await withPreview({}, () => snapshot(ctx, order?.id, options.chartsHorizonDays));
-  const after = await withPreview(overridesFor(change), () => snapshot(ctx, order?.id, options.chartsHorizonDays));
+  const after = await withPreview(overrides, () => snapshot(ctx, order?.id, options.chartsHorizonDays));
   const milestones = getStore().listMilestones(ctx.workspaceId);
   const labels = new Map(Object.entries(lineLabels(ctx)));
   const risk = (goal: { slackDays: number | null }) => goal.slackDays !== null && goal.slackDays < DEADLINE_MARGIN_DAYS;

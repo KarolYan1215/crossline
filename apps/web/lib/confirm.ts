@@ -11,8 +11,8 @@ import type { Card } from "./conversation";
  * 按预估完成, 超出 / 少于预估 by some minutes, or 未执行. The block's times are the ones it had when the question was asked: the
  * schedule is derived, and by now the unfinished step has already been moved elsewhere.
  */
-export type ConfirmAnswer = { kind: "as_planned" | "over" | "under" | "not_done"; minutes?: number; useActivity?: boolean; evidence?: EvidenceClaimInput[] };
-export type ConfirmOutcome = { ok: true; done: "step" | "task" | "not_done"; minutes?: number; needsEvidence?: true; already?: true } | { ok: false; code: string };
+export type ConfirmAnswer = { kind: "as_planned" | "over" | "under" | "partial" | "not_done"; minutes?: number; useActivity?: boolean; evidence?: EvidenceClaimInput[] };
+export type ConfirmOutcome = { ok: true; done: "step" | "task" | "partial" | "not_done"; minutes?: number; needsEvidence?: true; already?: true } | { ok: false; code: string };
 export type ConfirmView = {
   messageId: string; orderId: string; title: string; step: string; day: string; start: string; end: string; blockMinutes: number;
   lastStep: boolean; milestoneBound: boolean; activityMinutes?: number; answered?: { outcome: string; minutes?: number };
@@ -56,14 +56,25 @@ export function confirmView(ctx: AccessContext, messageId: string): ConfirmView 
 }
 
 export function confirmBlock(ctx: AccessContext, messageId: string, answer: ConfirmAnswer, now = new Date()): ConfirmOutcome {
-  const store = getStore();
   const found = blockOf(ctx, messageId);
   if (!found) return { ok: false, code: "CONFIRM_NOT_FOUND" };
-  const { block, payload } = found;
+  return confirmBlockAt(ctx, messageId, found.block, answer, now, found.payload);
+}
+
+/** Whether a block was already answered, under its question's id or the wrap-up's key (`lib/wrap.ts`). */
+export const blockAnswer = (ctx: AccessContext, key: string) => answeredOf(ctx, key);
+
+/**
+ * One block's answer, written under `key`: the completion check's message id, or the evening wrap-up's `wrap:<day>:<block>`. Both write
+ * the same `block.confirmed`, so the next day's 「昨天没开始」, the efficiency fit and the morning brief read them alike. `partial`
+ * (the wrap-up's 「部分」) records the block's time as worked and half the step done; the step stays open and is placed again.
+ */
+export function confirmBlockAt(ctx: AccessContext, messageId: string, block: Block, answer: ConfirmAnswer, now = new Date(), payload?: Record<string, unknown>): ConfirmOutcome {
+  const store = getStore();
   const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === block.orderId);
   if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
   const previous = answeredOf(ctx, messageId);
-  if (previous) return { ok: true, done: previous.outcome === "not_done" ? "not_done" : isLastStep(ctx, block) ? "task" : "step", already: true,
+  if (previous) return { ok: true, done: previous.outcome === "not_done" || previous.outcome === "partial" ? previous.outcome : isLastStep(ctx, block) ? "task" : "step", already: true,
     ...(previous.minutes ? { minutes: previous.minutes } : {}) };
 
   const { start, end } = instants(ctx, block);
@@ -80,8 +91,8 @@ export function confirmBlock(ctx: AccessContext, messageId: string, answer: Conf
       entityId: messageId, payload: { blockId: block.id, workOrderId: block.orderId, stepId: block.stepId, day: block.day, outcome, blockMinutes,
         ...(block.energy ? { energy: block.energy } : {}), ...extra } });
     // The card counts as answered, so the question is not taken as ignored (three ignored in a row would mute the kind).
-    const card = payload.card as Card | undefined;
-    if (card) store.updateConversationPayload(ctx.workspaceId, messageId, { ...payload, card: { ...card, clarify: { ...card.clarify, chosen: 0 } } });
+    const card = payload?.card as Card | undefined;
+    if (payload && card) store.updateConversationPayload(ctx.workspaceId, messageId, { ...payload, card: { ...card, clarify: { ...card.clarify, chosen: 0 } } });
     store.setSetting(ctx.workspaceId, ANSWERED_SETTING, now.toISOString());
     if (outcome !== "not_done") recordWorkout(ctx, order, block, typeof extra.minutes === "number" ? extra.minutes : blockMinutes);
   };
@@ -89,6 +100,14 @@ export function confirmBlock(ctx: AccessContext, messageId: string, answer: Conf
   if (answer.kind === "not_done") {
     record("not_done");
     return { ok: true, done: "not_done" };
+  }
+
+  if (answer.kind === "partial") {
+    store.recordConfirmedSession(ctx.workspaceId, block.orderId, ctx.principalId, { startedAt: start, endedAt: end, minutes, source, key: `confirmed-session:${messageId}` });
+    const step = block.stepId ? store.getStepPlan(ctx.workspaceId, block.orderId)?.steps.find((item) => item.id === block.stepId) : undefined;
+    if (step && step.status !== "done") store.updateStepProgress(ctx.workspaceId, block.orderId, step.id, { progressQuarter: Math.max(step.progressQuarter, 2) }, ctx.principalId, "confirm");
+    record("partial", { minutes, source });
+    return { ok: true, done: "partial", minutes };
   }
 
   if (!last) {

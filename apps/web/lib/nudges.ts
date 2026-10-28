@@ -13,6 +13,7 @@ import { dayLabel, type OpenerView } from "./opener";
 import { interviewStatus } from "./interview-status";
 import { preparingProposalIds } from "./proposal-ready";
 import { energyModel } from "./energy";
+import { loadWrap } from "./wrap";
 import { outcomeNudgeInputs } from "./outcome-check";
 import { progressNudgeInputs } from "./progress-check";
 import { systemContext } from "./auto-publish";
@@ -111,7 +112,13 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     const stepId = /^v\d+s\d+$/.test(block.id.split(":")[2] ?? "") ? block.id.split(":")[2]! : "";
     return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", day: today, start: block.start, end: block.end, endedTimerAt: "",
       ...(block.energy ? { energy: block.energy } : {}) }];
-  })).filter((block) => byId.has(block.orderId)).map((block) => ({ ...block, endedTimerAt: lastStopped.get(block.orderId)?.slice(11, 16) ?? "" }));
+  })).filter((block) => byId.has(block.orderId)).map((block) => {
+    const due = dueOf(byId.get(block.orderId)!);
+    return { ...block, endedTimerAt: lastStopped.get(block.orderId)?.slice(11, 16) ?? "", ...(due ? { dueDay: due } : {}) };
+  });
+  // The evening wrap-up (docs/rituals.md): with available hours today, blocks not due by tomorrow wait for it instead of a push each.
+  const wrapView = loadWrap(ctx, now);
+  const wrap = wrapView.at ? { at: wrapView.at, open: wrapView.open, done: wrapView.done } : undefined;
 
   // Time left before each due day: the person's free hours (fixed arrangements out, today from now on) less what other work holds.
   const windows = readAvailability(ctx);
@@ -155,7 +162,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     sent: new Set(recent.flatMap((message) => [payloadOf(message)?.fingerprint ?? "", ...(payloadOf(message)?.covers ?? [])])),
     countedToday: recent.filter((message) => payloadOf(message)?.counted && message.createdAt.slice(0, 10) >= addDays(today, -1)
       && local(message.createdAt).slice(0, 10) === today).length,
-    blocks, ending, slack, finished, ...(energyCheck ? { energyCheck } : {}),
+    blocks, ending, slack, finished, ...(energyCheck ? { energyCheck } : {}), ...(wrap ? { wrap } : {}),
     // Finished work whose result is not known yet: asked at an idle moment (completion.ts).
     outcomes: outcomeNudgeInputs(ctx, now),
     // A step the person said they did part of while away, without saying how far (the return page).

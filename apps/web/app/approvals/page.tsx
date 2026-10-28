@@ -13,6 +13,7 @@ import { TaskCard } from "../task/task-card";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { countPending } from "../../lib/pending";
 import { LivePendingCount } from "../pending-badge";
+import { AnswerAll } from "../asks/answer-all";
 import { loadAsks } from "../../lib/asks";
 import { loadAssistant } from "../../lib/agent";
 import { preparingProposalIds } from "../../lib/proposal-ready";
@@ -136,6 +137,7 @@ export default async function ApprovalsPage() {
         <li>{t("每格一次摊开一张，答完下一张自动顶上来，也可以「明天再问」")}</li>
       </ul>
     </FirstHint>
+    <AnswerAll />
     <AskBoard initial={weekAsks} previews={previews} />
     <AssistantReview ctx={ctx} deferred={deferredOrder} />
     {evidenceReviews.length > 0 && <section className="approval-ledger" id="evidence" aria-label={t("待验收")}>

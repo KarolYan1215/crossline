@@ -7,7 +7,9 @@
 import type { ProposedAction } from "./concierge";
 import { tFor, type Locale, type Translate } from "./i18n";
 
-export type NudgeKind = "block_start" | "block_confirm" | "latest_start" | "timer_overrun" | "background_done" | "energy_check" | "outcome_check" | "progress_check";
+export type NudgeKind = "block_start" | "block_confirm" | "latest_start" | "timer_overrun" | "background_done" | "energy_check" | "outcome_check" | "progress_check"
+  /** The evening wrap-up (docs/rituals.md): the day's blocks confirmed together at the end of the last available hours. */
+  | "day_wrap";
 
 /**
  * How far a step got, as the person says it in one tap (the return page's 「做了一部分」 and the `progress_check` question that follows a
@@ -61,7 +63,9 @@ export type NudgeBlock = {
  */
 export type NudgeEnding = { id: string; orderId: string; stepId: string; title: string; step: string; day: string; start: string; end: string; endedTimerAt: string;
   /** The block's slot and work energy and the factor the plan used, carried to the completion check (absent on older blocks). */
-  energy?: { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number } };
+  energy?: { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number };
+  /** The task's due day, when it has one: a block due tomorrow or sooner is still asked about on its own when the wrap-up is on. */
+  dueDay?: string };
 /** How much time is left for one task with a due day: free minutes before it (after other work's blocks) against what remains of it. */
 export type NudgeSlack = { orderId: string; title: string; dueDay: string; remainingMinutes: number; freeMinutes: number; dailyMinutes: number };
 
@@ -94,6 +98,13 @@ export type NudgeInput = {
    * moment under the same rules as `outcomes` — never urgent, one at a time. `laterLabel` is the cue to say it in words.
    */
   progressChecks?: Array<{ askId: string; orderId: string; question: string; options: Array<{ id: string; label: string }>; laterLabel: string; fingerprint: string }>;
+  /**
+   * The evening wrap-up (docs/rituals.md): `at` is the end of today's last available window, `open` how many of today's blocks wait to
+   * be confirmed, `done` whether the person already wrapped up. While it is set, a block is asked about on its own only when its task is
+   * due tomorrow or sooner (the answer changes tonight's or tomorrow's plan); every other block waits for the wrap-up — the completion
+   * check's one push per block became one message at the end of the day.
+   */
+  wrap?: { at: string; open: number; done: boolean };
   /** The language the nudges are written in (the texts handed in — titles, questions, `why` — are shown as given). */
   locale?: Locale;
 };
@@ -140,11 +151,16 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
     const start = minutesOf(block.start), end = minutesOf(block.end);
     const stopped = block.endedTimerAt && minutesOf(block.endedTimerAt) >= start;
     if (now < end || now >= end + CONFIRM_WINDOW_MINUTES || stopped || input.timer?.orderId === block.orderId) continue;
+    if (input.wrap && !(block.dueDay && block.dueDay <= input.tomorrow)) continue;
     const label = quoted(t, block.title, block.step);
     out.push({ kind: "block_confirm", fingerprint: `confirm:${block.id}:${input.today}`, urgent: true, counted: true, block,
       text: t("{{start}}–{{end}} 的{{label}}做得怎么样？", { start: block.start, end: block.end, label }),
       buttons: [{ kind: "href", label: t("确认"), href: CONFIRM_HREF }, mute] });
   }
+  if (input.wrap && !input.wrap.done && input.wrap.open > 0 && now >= minutesOf(input.wrap.at))
+    out.push({ kind: "day_wrap", fingerprint: `wrap:${input.today}`, urgent: false, counted: false,
+      text: t("今天还有 {{count}} 块工作没确认。收工时一起过一遍：完成、部分或没做，没做的顺延。", { count: input.wrap.open }),
+      buttons: [{ kind: "href", label: t("收工"), href: "/wrap" }, mute] });
   for (const item of input.slack) {
     const slack = item.freeMinutes - item.remainingMinutes;
     if (slack >= item.dailyMinutes) continue;

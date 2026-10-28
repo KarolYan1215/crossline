@@ -38,6 +38,23 @@ test("no question for a block whose timer the person already stopped, one whose 
   expect(planNudges(base({ blocks: [], ending: [late], clock: "23:40", night: true }))).toEqual([]);
 });
 
+test("with the evening wrap-up on, a block is asked about alone only when its task is due by tomorrow; the rest wait for one wrap-up message", () => {
+  const block = { id: "scheduled:read:v2s1", orderId: "read", stepId: "v2s1", title: "读 ECE 548 第 5 讲", step: "", day: "2026-10-10", start: "15:00", end: "15:30", endedTimerAt: "" };
+  const at = { blocks: [], clock: "15:40", now: "2026-10-10T20:40:00.000Z" };
+  const wrap = { at: "21:00", open: 2, done: false };
+  expect(planNudges(base({ ...at, ending: [block], wrap }))).toEqual([]);
+  expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-20" }], wrap }))).toEqual([]);
+  expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-11" }], wrap })).map((item) => item.kind)).toEqual(["block_confirm"]);
+  const [nudge] = planNudges(base({ blocks: [], ending: [], clock: "21:05", wrap }));
+  expect(nudge).toMatchObject({ kind: "day_wrap", fingerprint: "wrap:2026-10-10", counted: false, urgent: false });
+  expect(nudge!.buttons[0]).toEqual({ kind: "href", label: "收工", href: "/wrap" });
+  expect(planNudges(base({ blocks: [], ending: [], clock: "20:59", wrap }))).toEqual([]);
+  expect(planNudges(base({ blocks: [], ending: [], clock: "21:05", wrap: { ...wrap, done: true } }))).toEqual([]);
+  expect(planNudges(base({ blocks: [], ending: [], clock: "21:05", wrap: { ...wrap, open: 0 } }))).toEqual([]);
+  // Quiet hours: left to the morning brief.
+  expect(planNudges(base({ blocks: [], ending: [], clock: "23:10", night: true, wrap: { ...wrap, at: "22:30" } }))).toEqual([]);
+});
+
 test("too little time before a due day: tight below a day's worth of free time, late below zero (and late is urgent)", () => {
   const tight = planNudges(base({ blocks: [], slack: [{ orderId: "o", title: "ECE 548 复习", dueDay: "2026-10-27", remainingMinutes: 600, freeMinutes: 800, dailyMinutes: 420 }] }));
   expect(tight[0]).toMatchObject({ kind: "latest_start", urgent: false, fingerprint: "latest:o:2026-10-27:tight" });

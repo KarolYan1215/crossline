@@ -4,7 +4,7 @@
  * top right and needs nothing more. The day's opener is neither: it is Today's head.
  */
 export const INPUT_NUDGE_KINDS: ReadonlySet<string> = new Set([
-  "block_confirm", "energy_check", "outcome_check", "progress_check", "agent_question", "opener"
+  "block_confirm", "day_wrap", "energy_check", "outcome_check", "progress_check", "agent_question", "opener"
 ]);
 
 export const isReminderKind = (kind: string | undefined): boolean => !INPUT_NUDGE_KINDS.has(kind ?? "");

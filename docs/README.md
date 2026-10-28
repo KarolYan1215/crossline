@@ -38,6 +38,7 @@
 | [assistant-agent.md](assistant-agent.md) | 带 shell 的助手：设计、守卫、信任与审阅流程 |
 | [task-preparation.md](task-preparation.md) | 任务卡的准备流程（2026-10-21）：不备 / 按步骤 / 完整教程三级的规则，教程的开工前 3 天、只查需要的步骤、复用已查资料、一本教程一个撰写对话，改前改后的 token 实测与估算 |
 | [context-selection.md](context-selection.md) | 只把当前任务需要的信息放进上下文：文件段落的全文索引、候选与模型自选的两个查阅工具、各处预算、实测 |
+| [rituals.md](rituals.md) | 每周承诺（保 / 推 / 砍，一次撤销）、晚间收工（替换逐块确认推送）、待确认「全部按推荐」、风险周报与计数统一（2026-10-28 定，已实现） |
 | [structured-output.md](structured-output.md) | 模型的结构化输出怎么约束、怎么校验、怎么修正，出问题怎么查，现有的实测数据 |
 | [codex-fork-runtime.md](codex-fork-runtime.md) | 固定在 `vendor/codex` 的 Codex 运行时：来源、补丁、构建、哈希校验、升级方式、supervisor 令牌 |
 | [codex-upgrade-0.163.md](codex-upgrade-0.163.md) | 0.155.0 → 0.163.0：协议差异、显式压缩、自动化续跑、没采用的上游新能力、待换的二进制 |

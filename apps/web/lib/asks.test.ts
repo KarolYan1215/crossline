@@ -209,7 +209,7 @@ test("a reviewed medium or high risk is put to the person first: only 「接受�
   expect(buffer()).toBeUndefined();
 });
 
-test("several reviewed risks are one card, as pressing as its nearest deadline and heaviest milestone; 「逐个决定」 splits it back (W-29)", async () => {
+test("risks are one weekly card, as pressing as its nearest deadline and heaviest milestone; asked again mid-week only when one turns high (2026-10-28)", async () => {
   const store = setup();
   const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
   const { readRiskDecisions, saveGoalSettings } = await import("./crossline");
@@ -224,29 +224,74 @@ test("several reviewed risks are one card, as pressing as its nearest deadline a
   store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({
     mos2: { fingerprint: review("实测 MoS₂ 参数已可直接驱动 NeuroSim", "2026-11-30"), at: "2026-10-06T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "capacity", note: "同月还有三个截止" }] },
     pitch: { fingerprint: review("首批 5 家门店签试用", "2026-10-13"), at: "2026-10-06T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "time", note: "只剩一周" }] } }));
-  const risky = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "milestone_risk_review");
-  const [batch, ...rest] = risky();
+  const risky = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "milestone_risk_review" || ask.kind === "risk_digest" || ask.kind === "milestone_risk");
+  const [card, ...rest] = risky();
   expect(rest).toEqual([]);
-  expect(batch).toMatchObject({ id: "riskreview:batch", title: "2 个里程碑有风险待过目", urgency: "soon", dueDay: "2026-10-13", important: true });
-  expect(askQuadrant(batch!)).toBe("important");
-  // The members are rows the card draws (2026-10-21: 25 milestones in one sentence), nearest deadline first at equal level; the
-  // sentence keeps only the count.
-  expect(batch!.items).toEqual([
+  expect(card).toMatchObject({ id: "risk:weekly", kind: "risk_digest", title: "本周 2 个里程碑有风险", urgency: "soon", dueDay: "2026-10-13", important: true });
+  expect(askQuadrant(card!)).toBe("important");
+  // The members are rows the card draws, nearest deadline first at equal level; the sentence keeps only the count.
+  expect(card!.items).toEqual([
     { id: "pitch", title: "首批 5 家门店签试用", dueDay: "2026-10-13", line: "startup", href: "/milestones?open=pitch", risks: [{ level: "medium", kind: "time", note: "只剩一周" }] },
     expect.objectContaining({ id: "mos2", title: "实测 MoS₂ 参数已可直接驱动 NeuroSim", dueDay: "2026-11-30" })
   ]);
-  expect(batch!.why).toContain("2 个里程碑上找出风险");
-  expect(batch!.why).not.toContain("首批");
-  expect(batch!.options.map((option) => option.id)).toEqual(["accept", "split", "ignore"]);
-  // 逐个决定: one card each, the 65-weighted one no longer filed as unimportant by an explicit `important: false`.
-  expect(await answerAsk(TEST_CTX, batch!.id, "split", {}, NOW)).toMatchObject({ ok: true });
-  expect(risky().map((ask) => ask.entityId).sort()).toEqual(["mos2", "pitch"]);
-  expect(risky().find((ask) => ask.entityId === "pitch")!.important).toBeUndefined();
-  // A new review changes the set, so it folds again; 「全部接受」 answers every member.
-  store.setSetting(ws, "asks.riskReview.split", "");
-  expect(await answerAsk(TEST_CTX, "riskreview:batch", "accept", {}, NOW)).toMatchObject({ ok: true });
+  expect(card!.why).not.toContain("首批");
+  expect(card!.options.map((option) => option.id)).toEqual(["accept", "ignore", "plan"]);
+  // 「全部接受」 answers every member and is undone as one.
+  expect(await answerAsk(TEST_CTX, card!.id, "accept", {}, NOW)).toMatchObject({ ok: true });
   expect(Object.keys(readRiskDecisions(TEST_CTX)).sort()).toEqual(["mos2", "pitch"]);
   expect(risky()).toEqual([]);
+  // A new medium risk mid-week waits for next week's card; one that turns high comes at once.
+  const newReview = (level: "medium" | "high") => store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({
+    ...JSON.parse(store.getSetting(ws, MILESTONE_RISKS_SETTING)!),
+    pitch: { fingerprint: review("首批 5 家门店签试用", "2026-10-13"), at: "2026-10-07T10:00:00Z", source: "model", risks: [{ level, kind: "dependency", note: "门店还没回" }] } }));
+  newReview("medium");
+  store.setSetting(ws, "schedule.riskDecisions", JSON.stringify({ mos2: readRiskDecisions(TEST_CTX).mos2 }));
+  expect(risky()).toEqual([]);
+  newReview("high");
+  expect(risky().map((ask) => ask.id)).toEqual(["risk:weekly"]);
+  // Next week the waiting medium ones come back on the card.
+  const nextWeek = new Date("2026-10-12T15:00:00.000Z");
+  vi.stubEnv("CROSSLINE_FIXED_NOW", nextWeek.toISOString());
+  newReview("medium");
+  expect(collectAsks(TEST_CTX, nextWeek).filter((ask) => ask.kind === "risk_digest" || ask.kind === "milestone_risk_review").map((ask) => ask.entityId)).toEqual(["pitch"]);
+});
+
+test("「全部按推荐」 settles only kinds with a safe default, under one undo", async () => {
+  const store = setup();
+  const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
+  const { answerAllPlan, runAnswerAll } = await import("./answer-all");
+  const { readRiskDecisions } = await import("./crossline");
+  const { undoOp } = await import("./undo");
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mos2", stage: 1, deadline: "2026-11-30", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint: milestoneRiskFingerprint({ title: "实测 MoS₂ 参数已可直接驱动 NeuroSim",
+    deadline: "2026-11-30", criteria: [], dependsOn: [] }), at: "2026-10-06T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "capacity", note: "同月还有三个截止" }] } }));
+  // A capture the analysis refused: a question only the person can answer, never settled by the button.
+  store.capture({ id: "cap", ownerId: owner, workspaceId: ws, title: "整理组会意见", context: "" }, "cap-1");
+  store.transitionWorkOrder(ws, "cap", { type: "analysis.proposed", proposalId: "cap" }, "a1");
+  store.transitionWorkOrder(ws, "cap", { type: "blocked", reason: "ANALYSIS_POLICY_BLOCKED" }, "a2",
+    { audit: { blocker: { code: "ANALYSIS_POLICY_BLOCKED", message: "不清楚要交付什么" } } });
+  // A proposal whose own due day has passed: put away.
+  store.saveWorkOrder({ id: "old", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: "旧提议",
+    state: "awaiting_plan_approval", riskTier: "routine", estimate, payload: { dueDate: "2026-10-05" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "t-old", type: "work_order.transitioned", entityId: "old", payload: {} });
+  // Its steps are planned, so it is a decision on 待确认 (a proposal still being planned is not shown, and not put away either).
+  store.saveStepPlan(ws, "old", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" }, rationale: "一步", steps: [{ id: "s1", role: "solve",
+    title: "做完", deliverable: "解答", doneCriterion: "写完", share: 1, estimate: { p25Minutes: 30, p50Minutes: 45, p85Minutes: 60 }, dependsOn: [], notBefore: "", dueBy: "",
+    schedulable: true, executor: "human", tickOutcome: "" }] }, owner, "initial");
+  const plan = answerAllPlan(TEST_CTX, NOW);
+  expect(plan.asks.map((step) => step.kind)).toEqual(["risk_digest"]);
+  expect(plan.proposals.map((item) => item.id)).toEqual(["old"]);
+  expect(plan.groups).toEqual(expect.arrayContaining([{ group: "risk", count: 1 }, { group: "proposal", count: 1 }]));
+  const result = await runAnswerAll(TEST_CTX, NOW);
+  expect(result).toMatchObject({ ok: true, done: 2, failed: 0 });
+  expect(readRiskDecisions(TEST_CTX).mos2).toMatchObject({ how: "accept" });
+  expect(store.listWorkOrders(ws).find((order) => order.id === "old")!.state).toBe("archived");
+  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "capture_blocked")).toBe(true);
+  // One undo takes all of it back.
+  expect(undoOp(TEST_CTX, result.op!.id)).toMatchObject({ ok: true });
+  expect(store.listWorkOrders(ws).find((order) => order.id === "old")!.state).toBe("awaiting_plan_approval");
+  expect(readRiskDecisions(TEST_CTX).mos2).toBeUndefined();
 });
 
 test("work given a time yesterday and never started is asked about when it bears on a deadline this week; the rest just rolls", async () => {

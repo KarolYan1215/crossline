@@ -1191,6 +1191,38 @@ export function riskHorizonDays(ctx: AccessContext): number {
 export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): ForecastResult & { inferredRegularBlocks: number } {
   ensureSeeded(ctx);
   const store = getStore();
+  const { capacity, inferred } = netCapacity(ctx, horizonDays);
+  // An approved milestone's own deadline is one the person confirmed by approving it; the goal setting only overrides it.
+  // Without the fallback no milestone had a deadline here unless it was typed a second time, so nothing was ever at risk.
+  const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+  const goals = store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved")
+    .map((item) => { const weight = effectiveWeight(ctx, item.id); return { id: item.id, title: item.title, weight,
+      importance: weight >= IMPORTANT_WEIGHT ? "important" as const : "ordinary" as const,
+      confirmedDeadline: readGoalSettings(ctx, item.id)?.confirmedDeadline ?? anchors.get(item.id) ?? null }; });
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const preferences = effectiveSchedulePreferences(ctx).preferences;
+  // Step by step where a task has a plan, so the forecast counts only the work that is left.
+  // A task waiting in the library starts no earlier than the day it enters the schedule, so a window that opens too late for the work
+  // shows up here as a risk instead of a forecast that assumed it had already started.
+  const today = planToday(ctx);
+  const opens = new Map(orders.flatMap((order) => { const day = libraryUntil(ctx, order, today); return day ? [[order.id, day] as const] : []; }));
+  // The person's hours: the assistant's preparation takes none of them (docs/work-split.md).
+  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state) && onPersonsBoard(order)), { hold: false }).map((item) => {
+    const day = opens.get(item.orderId);
+    const start = day ? toZonedInstant(day, "00:00", preferences.timeZone) : undefined;
+    return start && (!item.task.notBefore || item.task.notBefore < start) ? { ...item.task, notBefore: start } : item.task;
+  });
+  const completedIds = new Set(orders.filter((order) => order.state === "accepted").map((order) => order.id));
+  return { ...forecastGoals(goals, tasks, capacity, completedIds), inferredRegularBlocks: inferred };
+}
+
+/**
+ * What each of the next `horizonDays` days leaves of the person's available hours once the calendar, their own fixed events and the
+ * travel to them are taken out: the forecast's capacity, and the weekly commitment's (docs/rituals.md). A regular calendar event seen on
+ * two or more weeks is assumed again past the first week, where the synced calendar does not reach yet.
+ */
+export function netCapacity(ctx: AccessContext, horizonDays: number): { capacity: Array<{ day: string; netMinutes: number; source: "declared" | "calendar_adjusted" }>; inferred: number } {
+  const store = getStore();
   const preferences = effectiveSchedulePreferences(ctx).preferences;
   const days = planDays(planToday(ctx), horizonDays);
   const committed = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)
@@ -1216,27 +1248,14 @@ export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): Forecast
       - Date.parse(toZonedInstant(day, slot.start, preferences.timeZone))) / 60_000; }
     catch { return sum; }
   }, 0), source: busy.some((block) => block.day === day) ? "calendar_adjusted" as const : "declared" as const }));
-  // An approved milestone's own deadline is one the person confirmed by approving it; the goal setting only overrides it.
-  // Without the fallback no milestone had a deadline here unless it was typed a second time, so nothing was ever at risk.
-  const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
-  const goals = store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved")
-    .map((item) => { const weight = effectiveWeight(ctx, item.id); return { id: item.id, title: item.title, weight,
-      importance: weight >= IMPORTANT_WEIGHT ? "important" as const : "ordinary" as const,
-      confirmedDeadline: readGoalSettings(ctx, item.id)?.confirmedDeadline ?? anchors.get(item.id) ?? null }; });
-  const orders = store.listWorkOrders(ctx.workspaceId);
-  // Step by step where a task has a plan, so the forecast counts only the work that is left.
-  // A task waiting in the library starts no earlier than the day it enters the schedule, so a window that opens too late for the work
-  // shows up here as a risk instead of a forecast that assumed it had already started.
-  const today = planToday(ctx);
-  const opens = new Map(orders.flatMap((order) => { const day = libraryUntil(ctx, order, today); return day ? [[order.id, day] as const] : []; }));
-  // The person's hours: the assistant's preparation takes none of them (docs/work-split.md).
-  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state) && onPersonsBoard(order)), { hold: false }).map((item) => {
-    const day = opens.get(item.orderId);
-    const start = day ? toZonedInstant(day, "00:00", preferences.timeZone) : undefined;
-    return start && (!item.task.notBefore || item.task.notBefore < start) ? { ...item.task, notBefore: start } : item.task;
-  });
-  const completedIds = new Set(orders.filter((order) => order.state === "accepted").map((order) => order.id));
-  return { ...forecastGoals(goals, tasks, capacity, completedIds), inferredRegularBlocks: inferred.length };
+  return { capacity, inferred: inferred.length };
+}
+
+/** The person's minutes left on each order (its open steps' usual estimates, else the whole task's), the way the forecast counts them. */
+export function remainingMinutesOf(ctx: AccessContext, orders: ActionableOrder[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const item of plannerItemsFor(ctx, orders, { hold: false })) out.set(item.orderId, (out.get(item.orderId) ?? 0) + item.task.estimate.p50Minutes);
+  return out;
 }
 
 /** The input-box events (`schedule.events`) on these days, as plan blocks. */

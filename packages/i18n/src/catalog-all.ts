@@ -9,6 +9,7 @@ import web_shell from "../locales/en/web-shell.json";
 import web_tasks from "../locales/en/web-tasks.json";
 import web_lib from "../locales/en/web-lib.json";
 import worker from "../locales/en/worker.json";
+import rituals from "../locales/en/rituals.json";
 
 /** Every English catalogue, for the web app and the worker (server-side size does not matter; the web's client reads the same set). */
-export const ALL_CATALOGS = [common, core_a, core_b, assess, web_settings, web_onboarding, web_plan, web_shell, web_tasks, web_lib, worker] as Array<Record<string, string>>;
+export const ALL_CATALOGS = [common, core_a, core_b, assess, web_settings, web_onboarding, web_plan, web_shell, web_tasks, web_lib, worker, rituals] as Array<Record<string, string>>;
