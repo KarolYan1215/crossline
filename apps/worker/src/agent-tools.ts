@@ -1,5 +1,5 @@
 // i18n-exempt: the toolbox answers the tools-mode assistant (model-facing); the one line the person reads (a capture's context) is translated where it is written
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { SkillTools } from "@crossline/codex";
@@ -59,6 +59,8 @@ export function createAgentToolbox(deps: {
   const calls: ToolCall[] = [];
   const actions: ToolboxAction[] = [];
   const written = new Set<string>();
+  /** How many times each path given to the model was written this run, by the path as the model names it. */
+  const writes = new Map<string, number>();
   /** Copies of the person's files: counted against their own allowance, so organising large files leaves room to write the index. */
   const copied = new Set<string>();
   const read = deps.readFile ?? ((uri: string) => readFileSync(uri.replace(/^file:\/\//, "")));
@@ -300,11 +302,22 @@ export function createAgentToolbox(deps: {
   return {
     specs, calls, actions, written: () => [...written, ...copied],
     async call(name, args) {
-      // What a call is about, offset included: reading one long file page by page is not going round in circles.
+      // What a call is about, offset included: reading one long file page by page is not going round in circles. Nor is reading a file
+      // again after writing it: the write count is part of the subject (2026-10-28: two runs that wrote, re-read and revised their own
+      // drafts were stopped as 「read_file 重复 6 次」 with nothing reviewed).
       const subject = (() => { const a = (args ?? {}) as Record<string, unknown>;
-        return `${String(a.path ?? a.from ?? a.id ?? a.query ?? a.text ?? a.folder ?? "").slice(0, 160)}${typeof a.offset === "number" ? `@${a.offset}` : ""}`; })();
+        const target = String(a.path ?? a.from ?? a.id ?? a.query ?? a.text ?? a.folder ?? "").slice(0, 160);
+        const edits = name === "read_file" ? writes.get(target.replace(/\\/g, "/")) ?? 0 : 0;
+        // Writing a file again with new content is revising it; only the same content written again is a repeat.
+        const content = name === "write_file" && typeof a.content === "string" ? `=${createHash("sha256").update(a.content).digest("hex").slice(0, 8)}` : "";
+        return `${target}${typeof a.offset === "number" ? `@${a.offset}` : ""}${edits ? `#${edits}` : ""}${content}`; })();
       try {
         const answer = await call(name, args);
+        if (name === "write_file" || name === "move_file" || name === "copy_file") {
+          const a = (args ?? {}) as Record<string, unknown>;
+          const changed = String(a.to ?? a.path ?? "").replace(/\\/g, "/");
+          if (changed) writes.set(changed, (writes.get(changed) ?? 0) + 1);
+        }
         calls.push({ tool: name, subject, ok: true });
         return answer;
       } catch (error) {

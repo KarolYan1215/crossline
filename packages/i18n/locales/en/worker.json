@@ -845,5 +845,6 @@
   "变化最大的：{{list}}。": "Biggest changes: {{list}}. ",
   "周期扣费合计每年约 {{amount}}。": "Recurring charges come to about {{amount}} a year. ",
   "超出月度上限 {{amount}}。": "Over the monthly limit by {{amount}}. ",
-  "在月度上限内，还剩 {{amount}}。": "Within the monthly limit, {{amount}} to spare. "
+  "在月度上限内，还剩 {{amount}}。": "Within the monthly limit, {{amount}} to spare. ",
+  "考试 {{day}} 已过，备考不再安排": "Exam on {{day}} has passed; preparation is no longer scheduled"
 }

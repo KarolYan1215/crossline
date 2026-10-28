@@ -60,14 +60,14 @@ test("one day's pass: old results replaced, decided or put away; overdue milesto
   // Milestones: the person's own one overdue with a chain behind it, a course's and one whose date the person typed.
   milestone("pack", "xhs", "2026-10-17");
   milestone("feedback", "xhs", "2026-10-24");
-  milestone("exam", "ece555", "2026-10-16");
+  milestone("hw", "ece555", "2026-10-16");
   milestone("talk", "talks", "2026-10-19");
   milestone("done-ms", "xhs2", "2026-10-10");
   store.upsertProfileFact({ workspaceId: ws, identityId: "media", projectId: "ece555", slot: "grading", value: "作业 30%", status: "confirmed", sourceRef: "doc", sourceQuote: "", updatedAt: "2026-10-01T00:00:00Z" });
   store.setSetting(ws, goalSettingKey("talk"), JSON.stringify({ confirmedDeadline: "2026-10-19" }));
   event("goal.settings_confirmed", "talk", { previous: null, next: { confirmedDeadline: "2026-10-19" } });
   order("t-feedback", "feedback", "approved");
-  order("t-exam", "exam", "approved", "ece555");
+  order("t-hw", "hw", "approved", "ece555");
   order("t-talk", "talk", "ready_for_human", "talks");
   order("t-done", "done-ms", "accepted", "xhs2");
   store.setSetting(ws, MILESTONE_FORECAST_SETTING, JSON.stringify({ at: "2026-10-21T08:00:00Z", goals: { pack: { p50Day: "2026-10-25", p85Day: "2026-10-27" } } }));
@@ -102,11 +102,11 @@ test("one day's pass: old results replaced, decided or put away; overdue milesto
   // The person's own milestone goes to the forecast's cautious finish plus two days, its chain after it; course and typed dates stay.
   expect(Object.fromEntries(outcome.shifted.map((item) => [item.id, `${item.from}→${item.to}`]))).toEqual({
     pack: "2026-10-17→2026-10-29", feedback: "2026-10-24→2026-11-05" });
-  expect(store.getSetting(ws, goalSettingKey("exam"))).toBeUndefined();
+  expect(store.getSetting(ws, goalSettingKey("hw"))).toBeUndefined();
   expect(JSON.parse(store.getSetting(ws, goalSettingKey("talk"))!)).toEqual({ confirmedDeadline: "2026-10-19" });
-  expect(outcome.asked.map((item) => item.id).sort()).toEqual(["exam", "talk"]);
+  expect(outcome.asked.map((item) => item.id).sort()).toEqual(["hw", "talk"]);
   expect(store.listEvents(ws, { type: "milestone.overdue" }).map((item) => [item.entityId, (item.payload as { why: string }).why]).sort())
-    .toEqual([["exam", "course"], ["talk", "person"]]);
+    .toEqual([["hw", "course"], ["talk", "person"]]);
 
   expect(outcome.archived.map((item) => item.id)).toEqual(["t-proposal"]);
   expect(outcome.drafts.map((item) => item.id)).toEqual(["old-draft"]);
@@ -200,4 +200,22 @@ test("a proposal whose own due day went by unapproved is archived by the system 
   at(NOW.toISOString());
   const outcome = dateAdvancePass(store, ws)!;
   expect(outcome.archived.map((item) => item.id)).toEqual(["late-proposal"]);
+});
+
+test("an exam whose day has passed puts its preparation away and asks how it went, once", () => {
+  // A course (its grading on record) and a midterm two days ago, with practice still open and one being timed.
+  store.upsertProfileFact({ workspaceId: ws, identityId: "media", projectId: "ece548", slot: "grading", value: "期中 25%", status: "confirmed", sourceRef: "doc", sourceQuote: "", updatedAt: "2026-10-01T00:00:00Z" });
+  milestone("ECE 548 期中考试 1 达到 A− 支撑线", "ece548", "2026-10-19");
+  order("t-practice", "ECE 548 期中考试 1 达到 A− 支撑线", "approved", "ece548");
+  order("t-proposal-prep", "ECE 548 期中考试 1 达到 A− 支撑线", "awaiting_plan_approval", "ece548");
+  order("t-timing", "ECE 548 期中考试 1 达到 A− 支撑线", "active", "ece548");
+  event("op.undone", "x", {});
+  at(NOW.toISOString());
+  const outcome = dateAdvancePass(store, ws)!;
+  expect(outcome.archived.map((item) => item.id).sort()).toEqual(["t-practice", "t-proposal-prep"]);
+  expect(store.listWorkOrders(ws).find((item) => item.id === "t-timing")!.state).toBe("active");
+  expect(outcome.asked.map((item) => item.id)).toEqual(["ECE 548 期中考试 1 达到 A− 支撑线"]);
+  expect(store.listEvents(ws, { type: "milestone.overdue" }).map((item) => (item.payload as { why: string }).why)).toEqual(["sitting"]);
+  // Not moved like the person's own milestones: an exam's date is the course's.
+  expect(outcome.shifted).toEqual([]);
 });

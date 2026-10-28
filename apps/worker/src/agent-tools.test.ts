@@ -176,3 +176,14 @@ test("a sandboxed shell run is started under the task profile — writes in its 
     { taskId: "t-sb2", title: "整理", what: "整理", category: "read_research_organize", humanPart: "看结果" });
   expect(refused).toMatchObject({ state: "blocked", code: "SKILL_SANDBOX_UNSUPPORTED" });
 });
+
+test("reading back a draft after each revision is not a loop; reading an unchanged file over and over still is", async () => {
+  const tools = box();
+  for (let round = 0; round < 6; round += 1) {
+    await tools.call("write_file", { path: "draft.md", content: `# 第 ${round} 版` });
+    await tools.call("read_file", { path: "draft.md" });
+  }
+  expect(toolLoopReason(tools.calls)).toBeUndefined();
+  for (let round = 0; round < 6; round += 1) await tools.call("read_file", { path: "input/0/syllabus.txt" });
+  expect(toolLoopReason(tools.calls)).toMatch(/read_file/);
+});

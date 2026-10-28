@@ -4,7 +4,7 @@ import {
   ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
-  isPreparationOnlyMilestone, onPersonsBoard, preparesOf, workOwner,
+  isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf
 } from "@crossline/core";
 import { acceptOwnCompletion, listAgentTasks, ownCompletion, resolvePossibleDuplicate, type StoredWorkOrder } from "@crossline/db";
@@ -67,8 +67,11 @@ const taskPreview = (t: Translate, orderId: string, label = t("看任务")): Ask
 const milestonePreview = (t: Translate, milestoneId: string, label = t("看里程碑")): AskPreview => ({ kind: "milestones", href: `/milestones?open=${encodeURIComponent(milestoneId)}`, label });
 const filePreview = (t: Translate, documentId: string, label = t("打开文件")): AskPreview => ({ kind: "file", href: `/api/source-documents/${encodeURIComponent(documentId)}/file`, label });
 
-function deadlines(store: Source["store"], workspaceId: string) {
-  return new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
+/** Each milestone's deadline as the scheduler reads it: the goal setting first, else the anchor. The anchor alone kept the date a milestone
+ * was approved with after the system or the person moved it, so asks said 「关系到 10/24 的截止」 for work now due in November (2026-10-28). */
+function deadlines(store: Source["store"], ctx: Source["ctx"]) {
+  return new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) =>
+    [anchor.milestoneId, readGoalSettings(ctx, anchor.milestoneId)?.confirmedDeadline || anchor.deadline]));
 }
 const dueOf = (order: StoredWorkOrder, anchors: Map<string, string>) =>
   (order.payload as { dueDate?: string } | undefined)?.dueDate ?? anchors.get(order.milestoneId);
@@ -76,7 +79,7 @@ const dueOf = (order: StoredWorkOrder, anchors: Map<string, string>) =>
 /** A backplan the model refused, or split with missing inputs: one ask per missing thing it named. */
 function backplanAsks({ store, ctx, today, t }: Source): Ask[] {
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
-  const anchors = deadlines(store, ctx.workspaceId);
+  const anchors = deadlines(store, ctx);
   const declined = new Set(store.listEvents(ctx.workspaceId, { type: "goal.backplan_declined" })
     .map((event) => `${event.entityId}:${(event.payload as { milestoneVersion?: number }).milestoneVersion}`));
   const resolved = new Set(store.listEvents(ctx.workspaceId, { type: "goal.backplan_input_resolved" })
@@ -210,7 +213,7 @@ function lastMaterialsBlock(events: ReturnType<ReturnType<typeof getStore>["list
 }
 
 function materialsAsks({ store, ctx, today, t }: Source): Ask[] {
-  const anchors = deadlines(store, ctx.workspaceId);
+  const anchors = deadlines(store, ctx);
   const events = store.listEvents(ctx.workspaceId, { type: ["materials.blocked", "materials.retry_requested"] });
   return store.listWorkOrders(ctx.workspaceId).filter((order) => order.state === "preparing" && onPersonsBoard(order)).flatMap((order) => {
     const block = lastMaterialsBlock(events.filter((event) => event.entityId === order.id));
@@ -235,7 +238,7 @@ type GateReview = { verdict?: string; gaps?: Array<{ whatWouldSatisfyIt: string 
 
 /** The gate's own 「not enough」, and a gate run that did not happen — two different things, asked differently. */
 function gateAsks({ store, ctx, today, t }: Source): Ask[] {
-  const anchors = deadlines(store, ctx.workspaceId);
+  const anchors = deadlines(store, ctx);
   const asks: Ask[] = [];
   const runFailures = new Map<string, ReturnType<typeof store.listEvents>[number]>();
   for (const event of store.listEvents(ctx.workspaceId, { type: ["milestone_gate.blocked", "milestone_gate.retry_requested"] })) {
@@ -423,7 +426,7 @@ function riskReviewMembers({ store, ctx, today, t, locale }: Source): Ask[] {
  */
 function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
-  const anchors = deadlines(store, ctx.workspaceId);
+  const anchors = deadlines(store, ctx);
   const resolved = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "milestone.overdue_resolved" }))
     .map((event) => `${event.entityId}|${(event.payload as { deadline?: string }).deadline ?? ""}`));
   const open = store.listWorkOrders(ctx.workspaceId).filter((order) => ["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active", "blocked"].includes(order.state)
@@ -435,7 +438,21 @@ function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
     const { deadline, why } = event.payload as { deadline: string; why?: string };
     const current = readGoalSettings(ctx, milestoneId)?.confirmedDeadline || anchors.get(milestoneId);
     const left = open.filter((order) => order.milestoneId === milestoneId);
-    if (!milestone || current !== deadline || deadline >= today || resolved.has(`${milestoneId}|${deadline}`) || !left.length) return [];
+    if (!milestone || current !== deadline || deadline >= today || resolved.has(`${milestoneId}|${deadline}`)) return [];
+    // An exam or a defence is over once its day passed (its preparation is put away by the worker): the question is how it went.
+    if (why === "sitting") return [{ id: `overdue:${milestoneId}:${deadline}`, kind: "milestone_overdue", entityId: milestoneId, line: milestone.identityId,
+      preview: milestonePreview(t, milestoneId), urgency: "soon", dueDay: deadline, raisedAt: event.createdAt, fingerprint: deadline, important: true,
+      title: t("「{{title}}」{{day}} 已经考过了，结果怎样？", { title: short(milestone.title), day: format(deadline, locale) }),
+      why: t("考试日期已过，备考的任务不再排进日程。有成绩就写下来，按这个里程碑的分数线记进度；成绩还没出就说一声，以后不再问。"),
+      freeText: { placeholder: t("例如：86 分") },
+      options: [
+        { id: "taken", label: t("考过了"), detail: t("有成绩就填，没有可空着"), recommended: true,
+          fields: [{ id: "score", label: t("成绩"), kind: "text" as const, required: false, placeholder: t("例如：86 分") }] },
+        { id: "pending", label: t("成绩还没出"), detail: t("备考任务收起，不再问") },
+        { id: "extend", label: t("考试改期了"), fields: [{ id: "date", label: t("新的考试日期"), kind: "date" as const, required: true }] },
+        { id: "drop", label: t("没有参加"), detail: t("里程碑归档，可从已归档恢复") }
+      ] }];
+    if (!left.length) return [];
     return [{ id: `overdue:${milestoneId}:${deadline}`, kind: "milestone_overdue", entityId: milestoneId, line: milestone.identityId,
       preview: milestonePreview(t, milestoneId), urgency: "soon", dueDay: deadline, raisedAt: event.createdAt, fingerprint: deadline, important: true,
       title: t("「{{title}}」的截止 {{day}} 已过，还有 {{count}} 个任务没完成", { title: short(milestone.title), day: format(deadline, locale), count: left.length }),
@@ -557,7 +574,7 @@ function missedMembers({ store, ctx, today, t, locale }: Source): Ask[] {
   const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - DAY).toISOString().slice(0, 10);
   const placed = readScheduledDay(ctx, yesterday);
   if (!Object.keys(placed).length) return [];
-  const anchors = deadlines(store, ctx.workspaceId);
+  const anchors = deadlines(store, ctx);
   const handled = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: "missed.handled" })).map((event) => (event.payload as { askId?: string }).askId));
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
   // A block the person already answered the completion check for (any answer, 未执行 included) is not asked about again.
@@ -600,7 +617,7 @@ export function prepQuestionOf(order: StoredWorkOrder): string {
  * the core task it prepares, and important when one waits on it.
  */
 function prepQuestionAsks({ store, ctx, today, t, locale }: Source): Ask[] {
-  const anchors = deadlines(store, ctx.workspaceId);
+  const anchors = deadlines(store, ctx);
   const orders = store.listWorkOrders(ctx.workspaceId);
   const byId = new Map(orders.map((order) => [order.id, order]));
   return orders.filter((order) => (order.payload as { owner?: unknown } | undefined)?.owner === "ask" && !order.tombstone
@@ -1154,7 +1171,16 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
         for (const order of store.listWorkOrders(ctx.workspaceId).filter((item) => item.milestoneId === milestone.id
           && ["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "blocked"].includes(item.state)))
           archiveWorkOrder(ctx, order.id, tOf(ctx)("里程碑「{{title}}」截止已过，本人选择放弃", { title: short(milestone.title, 20) }));
-      } else if (optionId !== "makeup") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+      } else if (optionId === "taken") {
+        // A score against the milestone's threshold is its progress, recorded as a score from the person's outcome check is.
+        const milestone = store.listMilestones(ctx.workspaceId).filter((item) => item.id === ask.entityId && item.status === "approved").at(-1);
+        const score = (values.score ?? "").trim() || (/\d/.test(choice.note ?? "") ? (choice.note ?? "").trim() : "");
+        const readings = milestone && score ? outcomeCriteriaVerdict(milestone.successCriteria, score, localeFor(ctx)) : [];
+        if (milestone && readings.length) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId,
+          idempotencyKey: `milestone_gate.judged:sitting:${milestone.id}:${deadline}`, type: "milestone_gate.judged", entityId: milestone.id,
+          payload: { milestoneId: milestone.id, milestoneVersion: milestone.version, verdict: readings.every((item) => item.met === "met") ? "pass" : "partial",
+            source: "person_outcome", criteriaVerdict: readings } });
+      } else if (optionId !== "makeup" && optionId !== "pending") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
       resolve(optionId);
       return { ok: true };
     }

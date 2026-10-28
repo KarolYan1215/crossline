@@ -57,7 +57,9 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       gateReview?: { criteriaVerdict?: Array<{ criterionId: string; met: string; observed: string }> } };
     let goalDeadline: string | undefined;
     try { goalDeadline = (JSON.parse(store.getSetting(workspaceId, goalSettingKey(order.milestoneId)) ?? "{}") as { confirmedDeadline?: string }).confirmedDeadline; } catch { /* none */ }
-    const dueBy = [payload.dueDate, goalDeadline, anchors.get(order.milestoneId)].filter((value): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value))).sort()[0];
+    // The goal setting replaces the anchor's date; taking the earlier of the two showed a moved milestone's old day (2026-10-28:
+    // 「选定首轮选题」 read 10/19 on its card and 11/2 on Today).
+    const dueBy = [payload.dueDate, goalDeadline || anchors.get(order.milestoneId)].filter((value): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value))).sort()[0];
     const plan = plans.get(order.id);
     const milestone = milestones.get(order.milestoneId);
     const supports = [

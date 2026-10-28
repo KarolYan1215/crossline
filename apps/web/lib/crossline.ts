@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
-import { approveArtifactRelationsFor, assistantAvailable, CrosslineStore, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
+import { approveArtifactRelationsFor, assistantAvailable, CrosslineStore, openNeedsOf, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
   type CalibrationReport, presetImportance, sittingStartOn, taskTitleOf, type ImportancePreset, restoreTargetOf,
@@ -866,17 +866,33 @@ const ENERGY_RANK = { low: 1, medium: 2, high: 3 } as const;
  * planner task, keeping the task's tier, deadline and release, the step's own window, and its dependencies (on earlier steps, and for
  * its first steps on the work the task itself waits for). A task without a plan yet is placed whole, as before.
  */
-function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[]) {
+function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[], { hold = true }: { hold?: boolean } = {}) {
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const overrides = previewScope.getStore()?.estimates ?? {};
   const stepPlans = new Map(getStore().listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, plan]));
   const openSteps = (orderId: string) => stepPlans.get(orderId)?.steps.filter((step) => step.status === "planned" && step.schedulable) ?? [];
-  const plannerIdsOf = (orderId: string) => { const steps = openSteps(orderId); return steps.length ? steps.map((step) => stepTaskId(orderId, step.id)) : [orderId]; };
+  // A step that uses material nobody has supplied yet, or comes after an unfinished wait (a reply, data from someone else), takes no
+  // calendar time until it arrives, and neither does anything after it (2026-10-28: 「完成 ECE 555 作业 3」 waited for its problem set and
+  // still held three morning hours; the NeuroSim task's checking steps filled an afternoon behind 「等待实测数据回传」, because a wait step
+  // is not on the calendar and so was dropped as a dependency). The forecast (`hold: false`) still counts the work.
+  const waitingOnMaterial = (orderId: string) => {
+    const plan = stepPlans.get(orderId);
+    const blocked = new Set(hold ? plan?.steps.filter((step) => step.status === "planned" && (step.role === "wait" || openNeedsOf(plan, step).length))
+      .map((step) => step.id) ?? [] : []);
+    for (let grew = blocked.size > 0; grew;) {
+      grew = false;
+      for (const step of plan!.steps) if (!blocked.has(step.id) && step.dependsOn.some((dep) => blocked.has(dep))) { blocked.add(step.id); grew = true; }
+    }
+    return blocked;
+  };
+  const allOpenSteps = openSteps;
+  const readySteps = (orderId: string) => { const blocked = waitingOnMaterial(orderId); return allOpenSteps(orderId).filter((step) => !blocked.has(step.id)); };
+  const plannerIdsOf = (orderId: string) => { const steps = readySteps(orderId); return steps.length ? steps.map((step) => stepTaskId(orderId, step.id)) : [orderId]; };
   const localToday = formatInTimeZone(process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date(), zone, "yyyy-MM-dd");
   return orders.flatMap((order) => {
     const base = plannerTaskOf(ctx, order);
-    const steps = openSteps(order.id);
-    if (!steps.length) return [{ task: base, orderId: order.id, title: base.title, step: undefined as string | undefined }];
+    const steps = readySteps(order.id);
+    if (!steps.length) return allOpenSteps(order.id).length ? [] : [{ task: base, orderId: order.id, title: base.title, step: undefined as string | undefined }];
     const open = new Set(steps.map((step) => step.id));
     const external = (base.dependsOn ?? []).flatMap((id) => plannerIdsOf(id));
     return steps.map((step) => {
@@ -1214,7 +1230,7 @@ export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): Forecast
   const today = planToday(ctx);
   const opens = new Map(orders.flatMap((order) => { const day = libraryUntil(ctx, order, today); return day ? [[order.id, day] as const] : []; }));
   // The person's hours: the assistant's preparation takes none of them (docs/work-split.md).
-  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state) && onPersonsBoard(order))).map((item) => {
+  const tasks = plannerItemsFor(ctx, orders.filter((order) => ACTIONABLE.includes(order.state) && onPersonsBoard(order)), { hold: false }).map((item) => {
     const day = opens.get(item.orderId);
     const start = day ? toZonedInstant(day, "00:00", preferences.timeZone) : undefined;
     return start && (!item.task.notBefore || item.task.notBefore < start) ? { ...item.task, notBefore: start } : item.task;

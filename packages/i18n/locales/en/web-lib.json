@@ -1080,5 +1080,17 @@
   "都按两笔计入": "Count all as two",
   "每笔都计入汇总": "Every one counts in the totals",
   "去总账逐笔看": "Review them in the ledger",
-  "在总账页合并或分开": "Merge or keep apart on the ledger page"
+  "在总账页合并或分开": "Merge or keep apart on the ledger page",
+  "「{{title}}」{{day}} 已经考过了，结果怎样？": "\"{{title}}\" was on {{day}}. How did it go?",
+  "考试日期已过，备考的任务不再排进日程。有成绩就写下来，按这个里程碑的分数线记进度；成绩还没出就说一声，以后不再问。": "The exam date has passed, so preparation is no longer scheduled. If you have a score, write it down and it counts against this milestone's line; if the score is not out yet, say so and this will not be asked again.",
+  "例如：86 分": "e.g. 86",
+  "考过了": "Took it",
+  "有成绩就填，没有可空着": "Fill in the score if you have it, or leave it blank",
+  "成绩": "Score",
+  "成绩还没出": "Score not out yet",
+  "备考任务收起，不再问": "Preparation is put away; not asked again",
+  "考试改期了": "The exam was moved",
+  "新的考试日期": "New exam date",
+  "没有参加": "Did not take it",
+  "里程碑归档，可从已归档恢复": "The milestone is archived; it can be restored from Archived"
 }

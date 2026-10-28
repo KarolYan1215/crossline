@@ -6,7 +6,7 @@ import {
   type AgentCategory, type Automation, type AutomationPlan, type AutomationRun
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { approveCategory, readCategories, requestAutomation, type CrosslineStore } from "@crossline/db";
+import { approveCategory, listAgentTasks, readCategories, requestAutomation, type CrosslineStore } from "@crossline/db";
 import type { AgentOutcome, AgentTaskInput } from "./agent-task";
 import type { DispatchResult } from "./agent-service";
 import { identityLines } from "./lines";
@@ -365,18 +365,34 @@ export function createAutomationService(deps: AutomationDeps & { afterRequest?: 
  * box's own action, so the designer takes it up like anything they said. Where the shell assistant works, the errand is grown into a
  * workflow instead (workflow-smith.ts), so this is for everyone else.
  */
+/** At most one 「建成自动化」 suggestion in this long: they are a courtesy, and four in a row buried the 小帮手's page (2026-10-28). */
+const SUGGEST_GAP_MS = 7 * 86_400_000;
+/** A pattern is worth automating only when it served this many different pieces of work, not one task's retries. */
+const SUGGEST_MIN_ORDERS = 3;
+
 export function suggestFromRepeats(store: CrosslineStore, workspaceId: string, candidates: Array<{ lineId: string; text: string; origin: { kind: string; taskIds?: string[] } }>, now = new Date()): number {
-  const suggested = new Set(store.listEvents(workspaceId, { type: "automation.suggested" }).map((event) => event.entityId));
+  const events = store.listEvents(workspaceId, { type: "automation.suggested" });
+  const suggested = new Set(events.map((event) => event.entityId));
+  // Runs already offered once are not offered again under a bigger set: the key used to be the set itself, so every further accepted
+  // run of the same errand asked again (2026-10-28: four suggestions for the NeuroSim and sample-pack errands, 2→3→5 runs).
+  const offered = new Set(events.flatMap((event) => (event.payload as { taskIds?: string[] }).taskIds ?? []));
+  const last = events.map((event) => Date.parse(event.createdAt)).filter(Number.isFinite).sort((a, b) => b - a)[0] ?? 0;
+  if (now.getTime() - last < SUGGEST_GAP_MS) return 0;
+  const orderOf = new Map(listAgentTasks(store, workspaceId, now).map((row) => [row.taskId, row.workOrderId ?? row.taskId]));
   let made = 0;
   for (const candidate of candidates) {
+    if (made) break;
     if (candidate.origin.kind !== "repeated" || !candidate.origin.taskIds?.length) continue;
+    if (candidate.origin.taskIds.some((id) => offered.has(id))) continue;
+    const orders = new Set(candidate.origin.taskIds.map((id) => orderOf.get(id) ?? id));
+    if (orders.size < SUGGEST_MIN_ORDERS) continue;
     const key = `sugg-${createHash("sha256").update([...candidate.origin.taskIds].sort().join(",")).digest("hex").slice(0, 12)}`;
     if (suggested.has(key)) continue;
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `automation.suggested:${key}`, type: "automation.suggested", entityId: key,
       payload: { lineId: candidate.lineId, text: candidate.text.slice(0, 300), taskIds: candidate.origin.taskIds } });
     const t = tFor(localeOf(store, workspaceId));
     const text = t("以后自动做这类事：{{text}}", { text: candidate.text.slice(0, 200) });
-    sayToPerson(store, workspaceId, t("助手已经做过 {{count}} 次类似的事（{{text}}），都已采纳。要不要以后自动做？可以按时做，也可以在有新邮件、新文件或任务完成时做。", { count: candidate.origin.taskIds.length, text: candidate.text.slice(0, 80) }),
+    sayToPerson(store, workspaceId, t("助手已经做过 {{count}} 次类似的事（{{text}}），都已采纳。要不要以后自动做？可以按时做，也可以在有新邮件、新文件或任务完成时做。", { count: orders.size, text: candidate.text.slice(0, 80) }),
       "automation_suggest", key, [{ label: t("建成自动化"), action: { action: "workflow.request", summary: text.slice(0, 200),
         args: { text, lineId: candidate.lineId, reminder: "", time: "", weekdays: [] } } }, { label: t("去设置里写清楚"), href: "/settings#automation" }], now);
     made += 1;

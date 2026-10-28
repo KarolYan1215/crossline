@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
-  advanceResults, conservativeFinish, daysBetween, engagementTier, monthDay, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
+  advanceResults, conservativeFinish, daysBetween, engagementTier, isSittingMilestone, monthDay, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
 } from "@crossline/core";
 import { localeOf } from "./locale";
-import { listAgentTasks, reviewAgentTask, settleAgentResult, type CrosslineStore } from "@crossline/db";
+import { listAgentTasks, reviewAgentTask, settleAgentResult, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { DEADLINE_MARGIN_DAYS } from "@crossline/planner";
 import { localToday } from "./analysis";
 import { ownerOf } from "./owner";
@@ -36,6 +36,8 @@ export const ADVANCE_DAY_SETTING = "advance.day";
 /** Written by the web's attention timer (`apps/web/lib/schedule-memory.ts`): `{ at, goals: { [milestoneId]: { p50Day, p85Day } } }`. */
 export const MILESTONE_FORECAST_SETTING = "milestone.forecast";
 const FORECAST_FRESH_MS = 36 * 3_600_000;
+/** How long after a sitting the person is asked how it went; an older one is history. */
+const SITTING_ASK_DAYS = 14;
 const DAY = 86_400_000;
 const OPEN = new Set(["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active", "blocked"]);
 
@@ -154,8 +156,23 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   const movable = approved.filter((milestone) => !fixed(milestone))
     .map((milestone) => ({ id: milestone.id, line: milestone.identityId, project: milestone.projectId ?? "", deadline: deadlineOf(milestone.id) }));
   const seeds: Array<{ id: string; to: string; days: number }> = [];
+  const judged = new Set(store.listEvents(workspaceId, { type: "milestone_gate.judged" }).map((event) => (event.payload as { milestoneId?: string }).milestoneId));
+  const sittingPrep: Array<{ order: StoredWorkOrder; why: string }> = [];
   for (const milestone of approved) {
     const deadline = deadlineOf(milestone.id);
+    // An exam or a defence on a date that does not move is over once its day has passed: preparing for it is put away (anything being
+    // timed stays), and the question is how it went, not whether to 补做 (2026-10-28: the day after the ECE 548 midterm its practice
+    // was still Today's first card, and the ask recommended making it up).
+    if (deadline && deadline < today && fixed(milestone) && isSittingMilestone(milestone.title)) {
+      for (const order of open.filter((item) => item.milestoneId === milestone.id && item.state !== "active"))
+        sittingPrep.push({ order, why: t("考试 {{day}} 已过，备考不再安排", { day: md(deadline, locale) }) });
+      if (daysBetween(deadline, today) <= SITTING_ASK_DAYS && !judged.has(milestone.id)) {
+        const asked = store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone-overdue:sitting:${milestone.id}:${deadline}`, type: "milestone.overdue",
+          entityId: milestone.id, payload: { deadline, why: "sitting" } });
+        if (asked.inserted) outcome.asked.push({ id: milestone.id, title: milestone.title, deadline });
+      }
+      continue;
+    }
     if (!deadline || deadline >= today || !open.some((order) => order.milestoneId === milestone.id)) continue;
     if (fixed(milestone)) {
       const asked = store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone-overdue:${milestone.id}:${deadline}`, type: "milestone.overdue",
@@ -173,7 +190,8 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   const restore: UndoEntry[] = [...written.restore];
 
   // 3. Old proposals, drafts and work.
-  outcome.archived = archiveBySystem(store, workspaceId, staleOpenWork(store, workspaceId, now, today), "date");
+  const sittingIds = new Set(sittingPrep.map((item) => item.order.id));
+  outcome.archived = archiveBySystem(store, workspaceId, [...sittingPrep, ...staleOpenWork(store, workspaceId, now, today).filter((item) => !sittingIds.has(item.order.id))], "date");
   const cutoff = new Date(now.getTime() - STALE_DAYS * DAY).toISOString();
   const lastAt = (type: string) => { const out = new Map<string, string>(); for (const event of store.listEvents(workspaceId, { type })) if ((out.get(event.entityId) ?? "") < event.createdAt) out.set(event.entityId, event.createdAt); return out; };
   const proposed = lastAt("milestone.proposed"), revised = lastAt("milestone.revised");

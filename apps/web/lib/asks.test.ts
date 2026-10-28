@@ -660,6 +660,22 @@ test("a course's or the person's own deadline that passed with work open is aske
   expect(overdue()).toEqual([]);
 });
 
+test("an exam whose day passed asks how it went, even with its preparation put away; a score is the milestone's progress", async () => {
+  const store = setup();
+  store.saveMilestone({ id: "mid", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece548", title: "ECE 548 期中考试 1 达到 A− 支撑线", status: "approved", version: 1,
+    successCriteria: [{ id: "score", statement: "期中分数不低于 85", evidenceOf: "outcome", required: true, measure: { kind: "threshold", comparator: "gte", value: 85, unit: "分" } }] });
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mid", stage: 1, deadline: "2026-10-05", baseline: "", target: "", stakeholders: [], sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "milestone-overdue:sitting:mid:2026-10-05", type: "milestone.overdue", entityId: "mid",
+    payload: { deadline: "2026-10-05", why: "sitting" } });
+  const asks = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "milestone_overdue");
+  expect(asks().map((ask) => ask.title)).toEqual(["「ECE 548 期中考试 1 达到 A− 支撑线」10/5 已经考过了，结果怎样？"]);
+  expect(asks()[0]!.options.map((option) => option.id)).toEqual(["taken", "pending", "extend", "drop"]);
+  expect(await answerAsk(TEST_CTX, "overdue:mid:2026-10-05", "taken", { score: "88 分" }, NOW)).toMatchObject({ ok: true });
+  expect(asks()).toEqual([]);
+  const judged = store.listEvents(ws, { type: "milestone_gate.judged" }).map((event) => event.payload as { milestoneId: string; source: string; verdict: string });
+  expect(judged).toEqual([expect.objectContaining({ milestoneId: "mid", source: "person_outcome" })]);
+});
+
 test("撤销 on the daily pass hands its assistant results back to the person", async () => {
   const store = setup();
   const { undoOp } = await import("./undo");

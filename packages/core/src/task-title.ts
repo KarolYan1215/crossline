@@ -69,6 +69,9 @@ const SITTING = /考试|期中|期末|测验|小测|答辩|展示|汇报|quiz|ex
  * the evening after a midterm was filled with practice for it (2026-10-27). `undefined` when the milestone is no sitting, names no
  * course, or no fixed block of that course falls on the day.
  */
+/** Whether a milestone is a sitting (an exam, a defence, a talk): once its day has passed, preparing for it is over. */
+export const isSittingMilestone = (milestoneTitle: string) => SITTING.test(milestoneTitle);
+
 export function sittingStartOn(milestoneTitle: string, day: string, blocks: Array<{ day?: string; start: string; title: string }>): string | undefined {
   const code = courseCodeOf(milestoneTitle);
   if (!code || !SITTING.test(milestoneTitle)) return undefined;

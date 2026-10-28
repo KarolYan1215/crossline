@@ -37,6 +37,24 @@ test("a task with a step plan is placed step by step, in dependency order, skipp
   expect(blocks.every((block) => block.title.includes(" · 步骤"))).toBe(true);
 });
 
+test("work after an unfinished wait takes no calendar time until the wait is done", async () => {
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T13:00:00.000Z");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "buffered", windows: ALWAYS, importance: {} });
+  await loadCurrentPlan(TEST_CTX);
+  const order = store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.identityId === "research")!;
+  store.saveWorkOrder({ ...order, state: "ready_for_human" });
+  // Ask for the data, wait for it, then check it: checking before the data arrives is an afternoon spent on nothing.
+  const saved = store.saveStepPlan(TEST_CTX.workspaceId, order.id, { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 3, unit: "题" },
+    rationale: "", steps: [step("a", "contact", 15), step("w", "wait", 0, ["a"], false), step("b", "test", 90, ["w"]), step("c", "deliver", 20, ["b"])] }, "o", "t");
+  const stepOf = (id: string) => plannerIdOfBlock(id).split("#")[1];
+  const placed = async () => new Set((await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith(`scheduled:${order.id}`)).map((block) => stepOf(block.id)));
+  expect(await placed()).toEqual(new Set(["v1s1"]));
+  store.updateStepProgress(TEST_CTX.workspaceId, order.id, saved.steps[0]!.id, { status: "done" }, "o", "test");
+  store.updateStepProgress(TEST_CTX.workspaceId, order.id, saved.steps[1]!.id, { status: "done" }, "o", "test");
+  expect(await placed()).toEqual(new Set(["v1s3", "v1s4"]));
+});
+
 test("a step whose own day has come is still placed before the task's deadline", async () => {
   // Thursday 9/17, 21:00 in Chicago: today's hours are over.
   vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T02:00:00.000Z");

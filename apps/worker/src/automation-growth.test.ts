@@ -28,26 +28,32 @@ function setup() {
   return { store, workspaceId: workspace.id, ownerId: principal.id, order, errand };
 }
 
-test("two accepted errands of one kind on one line are offered as an automation once, and its button builds one on that line", async () => {
+test("accepted errands of one kind on one line for three pieces of work are offered as an automation once, and its button builds one on that line", async () => {
   const { store, workspaceId, ownerId, order, errand } = setup();
   order("wo-1", "research", "整理本周课程邮件");
   order("wo-2", "research", "整理上周课程邮件");
   order("wo-3", "media", "整理选题");
+  order("wo-4", "research", "整理前周课程邮件");
   errand("t1", "wo-1", "整理本周课程邮件成待办清单");
   // One errand is not a pattern yet.
   expect(suggestFromRepeats(store, workspaceId, growCandidates(store, workspaceId, NOW), NOW)).toBe(0);
   errand("t2", "wo-2", "整理上周课程邮件成待办清单");
   // An errand of the same kind on another line does not count towards this one.
   errand("t3", "wo-3", "整理课程邮件成待办清单");
+  expect(growCandidates(store, workspaceId, NOW).filter((item) => item.origin.kind === "repeated").map((item) => item.lineId)).toEqual(["research"]);
+  // Two pieces of work, or one task run again, are not yet worth automating.
+  expect(suggestFromRepeats(store, workspaceId, growCandidates(store, workspaceId, NOW), NOW)).toBe(0);
+  errand("t2b", "wo-2", "整理上周课程邮件成待办清单（重跑）");
+  expect(suggestFromRepeats(store, workspaceId, growCandidates(store, workspaceId, NOW), NOW)).toBe(0);
+  errand("t4", "wo-4", "整理前周课程邮件成待办清单");
   const candidates = growCandidates(store, workspaceId, NOW);
-  expect(candidates.filter((item) => item.origin.kind === "repeated").map((item) => item.lineId)).toEqual(["research"]);
   expect(suggestFromRepeats(store, workspaceId, candidates, NOW)).toBe(1);
   // Said once: the same pair is not offered again.
   expect(suggestFromRepeats(store, workspaceId, growCandidates(store, workspaceId, NOW), NOW)).toBe(0);
 
   const [nudge] = store.listEvents(workspaceId, { type: "automation.suggested" });
   expect(nudge!.payload).toMatchObject({ lineId: "research" });
-  expect([...(nudge!.payload as { taskIds: string[] }).taskIds].sort()).toEqual(["t1", "t2"]);
+  expect((nudge!.payload as { taskIds: string[] }).taskIds).toEqual(expect.arrayContaining(["t1", "t2", "t4"]));
   const card = store.listConversationMessages(workspaceId, store.conversationFor(workspaceId, "2026-10-19").id).find((message) => message.role === "nudge")!.payload as {
     card: { actions: Array<{ action: string; args: { text: string; lineId: string } }>; clarify: { options: Array<{ label: string; kind: string }> } } };
   expect(card.card.clarify.options.map((option) => option.label)).toEqual(["建成自动化", "去设置里写清楚", "知道了"]);
