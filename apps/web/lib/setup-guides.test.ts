@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { MAIL_PRESETS } from "@crossline/connectors";
 import { healthRecordsFromPhone, SUBSCRIPTION_GUIDES } from "@crossline/core";
 import {
-  CALENDAR_APPS_GUIDE, CALENDAR_WRITER_GUIDE, captureShortcutGuide, DEVICE_LINK_GUIDE, LOCAL_RECORDING_GUIDE, MAIL_GUIDE, mailGuideId, modelProviderGuide, phoneHealthGuide,
+  CALENDAR_APPS_GUIDE, CALENDAR_WRITER_GUIDE, captureShortcutGuide, DEVICE_LINK_GUIDE, IMPORT_GUIDE, LOCAL_RECORDING_GUIDE, MAIL_GUIDE, mailGuideId, modelProviderGuide, phoneHealthGuide,
   phonePushGuide, recordingUploadGuide, recordsGuide, SKILL_LINK_GUIDE, SOURCE_FOLDER_GUIDE, subscriptionGuide, type SetupGuideSpec
 } from "./setup-guides";
 
@@ -11,7 +11,7 @@ const local = { base: "https://box.tailnet.ts.net", privateNetwork: true };
 const ALL: SetupGuideSpec[] = [MAIL_GUIDE, phoneHealthGuide(hosted), phoneHealthGuide(local), captureShortcutGuide(hosted), recordsGuide(hosted),
   recordingUploadGuide("https://app.crossline.lol/api/recordings/upload?name="), LOCAL_RECORDING_GUIDE, phonePushGuide(true), phonePushGuide(false),
   CALENDAR_WRITER_GUIDE, CALENDAR_APPS_GUIDE, SOURCE_FOLDER_GUIDE, modelProviderGuide(true), modelProviderGuide(false), SKILL_LINK_GUIDE,
-  subscriptionGuide(SUBSCRIPTION_GUIDES), DEVICE_LINK_GUIDE];
+  subscriptionGuide(SUBSCRIPTION_GUIDES), DEVICE_LINK_GUIDE, IMPORT_GUIDE];
 const textOf = (guide: SetupGuideSpec) => [guide.title, guide.intro ?? "", ...guide.providers.flatMap((provider) => [provider.label, ...provider.steps,
   ...(provider.facts ?? []).flatMap((fact) => [fact.label, fact.value]), provider.note ?? ""]),
   ...(guide.problems ?? []).flatMap((problem) => [problem.symptom, problem.fix])].join("\n");

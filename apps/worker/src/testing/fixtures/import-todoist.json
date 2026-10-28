@@ -1,0 +1,21 @@
+{
+  "projects": { "results": [
+    { "id": "6Jf8VQXxpwv56VQ7", "name": "ECE 555", "color": "blue", "is_archived": false },
+    { "id": "6Jf8VQXxpwv56VQ8", "name": "Personal", "color": "grey", "is_archived": false }
+  ], "next_cursor": null },
+  "tasksPage1": { "results": [
+    { "id": "6X7rM8997g3RQmvh", "user_id": "2671355", "project_id": "6Jf8VQXxpwv56VQ7", "section_id": null, "parent_id": null, "content": "Submit HW4",
+      "description": "Problems 1-5, upload PDF to Canvas", "checked": false, "labels": ["school"], "priority": 4,
+      "due": { "date": "2026-11-03", "string": "Nov 3", "lang": "en", "is_recurring": false }, "deadline": null, "added_at": "2026-10-20T08:00:00.000000Z" },
+    { "id": "6X7rfFVPjhvv84XG", "user_id": "2671355", "project_id": "6Jf8VQXxpwv56VQ7", "section_id": null, "parent_id": null, "content": "整理 ECE 555 课堂笔记",
+      "description": "", "checked": false, "labels": [], "priority": 1, "due": null, "deadline": null, "added_at": "2026-10-02T08:00:00.000000Z" }
+  ], "next_cursor": "c2Vjb25k" },
+  "tasksPage2": { "results": [
+    { "id": "6X7rfEVP8hvv25ZQ", "user_id": "2671355", "project_id": "6Jf8VQXxpwv56VQ8", "section_id": null, "parent_id": null, "content": "报名秋季马拉松",
+      "description": "", "checked": false, "labels": ["health"], "priority": 1,
+      "due": { "date": "2026-11-20T09:00:00Z", "datetime": "2026-11-20T09:00:00Z", "string": "Nov 20 9am", "lang": "en", "is_recurring": false },
+      "deadline": { "date": "2026-08-30", "lang": "en" }, "added_at": "2026-07-01T08:00:00.000000Z" },
+    { "id": "6X7rfEVP8hvv25ZR", "user_id": "2671355", "project_id": "6Jf8VQXxpwv56VQ8", "section_id": null, "parent_id": null, "content": "学日语",
+      "description": "", "checked": false, "labels": [], "priority": 1, "due": null, "deadline": null, "added_at": "2026-01-01T08:00:00.000000Z" }
+  ], "next_cursor": null }
+}

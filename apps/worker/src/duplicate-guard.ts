@@ -67,7 +67,7 @@ export function decideFold(open: readonly MergeTask[], candidate: MergeTask, ext
  * (the step planner reads every earlier request, so this holds even when the task has no plan yet).
  */
 export function recordFold(store: CrosslineStore, workspaceId: string, fold: Fold,
-  added: { id: string; title: string; intent: string; source: "analysis" | "backplan" | "datepair" }): void {
+  added: { id: string; title: string; intent: string; source: "analysis" | "backplan" | "datepair" | "import" }): void {
   const ownerId = ownerOf(store, workspaceId);
   store.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.duplicate_prevented:${added.id}`, type: "task.duplicate_prevented", entityId: fold.keep,
     payload: { kind: fold.kind, keep: fold.keep, candidate: { id: added.id, title: added.title, intent: added.intent }, source: added.source, why: fold.why } });

@@ -441,3 +441,44 @@ export const SKILL_LINK_GUIDE: SetupGuideSpec = {
     { symptom: "结果显示「只用文字」", fix: "扫描发现脚本有风险，脚本没有安装；在该 skill 的详情里可以查看扫描结果并决定是否允许。" }
   ]
 };
+
+/**
+ * 「从其他工具导入」 (docs/personal-agent.md §9, 2026-10-28): where each tool keeps the token the person makes for themselves, and how a
+ * list without an API comes in (an export, a paste, a screenshot). The menu names are the tools' own, quoted as they appear.
+ */
+export const IMPORT_GUIDE: SetupGuideSpec = {
+  title: "导入教程：各工具的令牌与导出",
+  intro: "只读取，不改原工具里的任何东西（Todoist 可选择在 Crossline 完成后关闭原任务，默认关闭）。读到的条目先给出建议，一屏核对后才收进来。",
+  providers: [
+    { id: "todoist", label: "Todoist", steps: [
+      "在电脑浏览器登录 Todoist 网页版。",
+      "点左上角头像 →「设置」→「集成」→「开发者」。",
+      "复制「API 令牌」（40 位字母数字），粘贴到下方「令牌」一栏，点「接入」。",
+      "接入后先读一遍全部未完成任务，给出核对清单；以后每天读一次新增的任务，可以关闭。"],
+    links: [{ label: "Todoist 集成设置", url: "https://app.todoist.com/app/settings/integrations/developer" }, { label: "Todoist API 文档", url: "https://developer.todoist.com/api/v1/" }],
+    note: "令牌能读写整个 Todoist 账号，只保存在服务器的加密存储里，不进账本和备份。断开即删除；在 Todoist 里重新生成令牌，旧令牌也立即失效。" },
+    { id: "ticktick", label: "TickTick / 滴答清单", steps: [
+      "TickTick：在电脑浏览器登录 TickTick 网页版，点头像 →「Settings」→「Account」→「API Token」，生成并复制令牌，粘贴到下方，点「接入」。",
+      "滴答清单（国内版）没有这个令牌：在网页版「设置」→「账户与安全」→「生成备份」，下载 CSV 文件，在下方「上传 CSV 或截图」里上传。",
+      "TickTick 也可以用同样的备份 CSV 导入：「Settings」→「Account」→「Generate Backup」。"],
+    links: [{ label: "TickTick 网页版", url: "https://ticktick.com/webapp" }, { label: "滴答清单网页版", url: "https://dida365.com/webapp" }, { label: "TickTick 开放 API", url: "https://developer.ticktick.com/docs/openapi.md" }],
+    note: "TickTick 不回写：在 Crossline 完成的任务不会改动 TickTick。" },
+    { id: "notion", label: "Notion", steps: [
+      "打开 Notion 的集成页面，点「New integration」，类型选「Internal」，名称填 Crossline，工作区选存放待办的那一个，保存。",
+      "在集成的「Capabilities」里只勾选「Read content」，复制「Internal Integration Secret」（以 ntn_ 开头）。",
+      "在 Notion 里打开要导入的数据库，点右上角「…」→「Connections」→ 选 Crossline。没有这一步，集成看不到这个数据库。",
+      "回到这里粘贴令牌，点「接入」，在出现的列表里选这个数据库。"],
+    facts: [{ label: "读取的属性", value: "标题、状态（Status / Select / 勾选框）、第一个日期属性、多选标签" }],
+    links: [{ label: "Notion 集成页面", url: "https://www.notion.so/profile/integrations" }, { label: "Notion API 文档", url: "https://developers.notion.com/docs/create-a-notion-integration" }],
+    note: "Notion 不回写。状态是 Done、Complete 或「已完成」的条目会建议为「已做完」。" },
+    { id: "other", label: "其他工具（粘贴、CSV、截图）", steps: [
+      "能导出 CSV 的工具（Microsoft To Do 通过第三方导出、Things、Any.do、OmniFocus、Excel 表格）：导出后在下方上传 CSV。第一行要有标题列（Title、Content、Task、任务、标题之一），日期列和状态列会一并读取。",
+      "只有文字的清单（备忘录、微信收藏、Markdown）：全选复制，粘贴到下方文本框，一行一条，带「[x]」的视为已做完。",
+      "只能截图的（手机 App 的清单页）：截图后上传，系统逐行读出文字；读截图要用 ChatGPT 登录的模型。"] }
+  ],
+  problems: [
+    { symptom: "提示令牌无效或已被撤销", fix: "令牌复制不全，或已在原工具里重新生成过。重新复制完整令牌后再接入。" },
+    { symptom: "Notion 提示看不到任何数据库", fix: "数据库还没有连接到这个集成：在数据库页面右上角「…」→「Connections」里选 Crossline。" },
+    { symptom: "上传 CSV 后没有读到条目", fix: "第一行缺少标题列。在表格里把任务名那一列的表头改成 Title 再导出。" }
+  ]
+};

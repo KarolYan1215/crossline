@@ -83,6 +83,7 @@ import { homedir, tmpdir } from "node:os";
 import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
 import { createMailService } from "./mailbox";
+import { createImportService } from "./importer";
 import { probeSandboxShell } from "./sandbox-probe";
 import { automationPass, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
@@ -734,6 +735,9 @@ async function intakeTick(workspace: { id: string }, checkedAt: string): Promise
   }
   // The mailbox (docs/personal-agent.md): new mail read and sorted; to-dos and dates it finds become captures, analysed just below.
   await mailService.pass(workspace.id).catch(() => undefined);
+  // Lists kept in other tools (docs/personal-agent.md §9): each connected one read once a day, its new items sorted into captures; Todoist
+  // write-back for accounts that switched it on.
+  await importService.pass(workspace.id).catch(() => undefined);
   // A new capture is classified, estimated and split without anyone pressing 分析: the person's job is to write it down, the
   // system's is to turn it into a proposal waiting in 待确认. Capped per tick; a capture that came back blocked is left for the person
   // rather than retried on a timer.
@@ -1159,6 +1163,14 @@ const mailService = createMailService({ store: analysisStore, secrets, cwd: repo
   sortAllowed: async (workspaceId) => !paused(workspaceId, "intake") && spendAllows(await spendFor(workspaceId), "intake"),
   onNewMail: (workspaceId, messages) => { onNewMail(analysisStore, workspaceId, messages); },
   // Sorting's to-dos are captures: analysed at once, not at the next tick's intake.
+  onCaptured: (workspaceId) => { void autoAnalyzePass(workspaceId).catch(() => undefined); },
+  log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
+// Lists brought from Todoist, TickTick, Notion, a paste, a CSV or a screenshot (docs/personal-agent.md §9): tokens in the secret store,
+// sorting is intake work like mail's, a screenshot is read by the picture reader on the account's own Codex.
+const importService = createImportService({ store: analysisStore, secrets, dataDir, cwd: repoRoot, client: accountClient,
+  sortAllowed: async (workspaceId) => !paused(workspaceId, "intake") && spendAllows(await spendFor(workspaceId), "intake"),
+  describe: (workspaceId) => { const client = accountClient(workspaceId); return client ? createMediaDescriber(client, repoRoot) : undefined; },
+  timeZone: (workspaceId) => calendarZone(workspaceId),
   onCaptured: (workspaceId) => { void autoAnalyzePass(workspaceId).catch(() => undefined); },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
 // The person's Xiaohongshu favourites, read whole by a worker job in their own visible browser (favourites-reader.ts): pictures described
@@ -1613,7 +1625,7 @@ if (!capabilitySecret) {
       ...(hostedBeta ? { maxRunning: guestRuntimeLimit() ?? 2, idleMs: 10 * 60_000 } : {}) },
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId), afterChatgptCost: (workspaceId, signal) => modelProviders.afterChatgptCost(workspaceId, signal) },
-    services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
+    services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
       { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle },
       // The login browser on the server, shown in a dialog on the page (remote-browser.ts); only where there is no screen of our own.
       ...(remoteBrowsers ? [{ prefix: "/v1/remote-browser", handle: remoteBrowsers.handle }] : []),

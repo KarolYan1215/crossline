@@ -4,6 +4,7 @@ import { useState } from "react";
 import { lineAttributes } from "@crossline/core";
 import { AttributePicker, type AttributeOption } from "../ui/attribute-picker";
 import { CalendarSubscriptions } from "../connectors/calendar-subscriptions";
+import { ImportCard } from "../connectors/import-card";
 import { SourceFolders } from "../connectors/source-folders";
 import { FolderPicker } from "./folder-picker";
 import { FactList } from "./profile-panel";
@@ -75,6 +76,8 @@ export function LeftColumn({ state, busy, accept, onUpload, onChanged, heldQuest
       {/* Only the subscription link brings calendar events in: the ChatGPT connectors' card shows a status and imports nothing, and
           on the interview it sent an invitee off to connect Google for nothing (2026-10-15 walkthrough). It stays under 设置. */}
       <CalendarSubscriptions onChanged={onChanged} />
+      {/* Lists kept in Todoist, TickTick, Notion or anywhere else, brought in on the first day (docs/personal-agent.md §9). */}
+      <ImportCard compact onChanged={onChanged} />
     </section>
 
     {heldQuestions.length > 0 && <section className="ob-card ob-voice" aria-label={t("待补充的事实")}>

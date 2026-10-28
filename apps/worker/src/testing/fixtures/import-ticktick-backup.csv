@@ -1,0 +1,10 @@
+"Date: 2026-10-28+0000"
+"Version: 7.1"
+"Status:
+0 Normal
+1 Completed
+2 Archived"
+"Folder Name","List Name","Title","Kind","Tags","Content","Is Check list","Start Date","Due Date","Reminder","Repeat","Priority","Status","Created Time","Completed Time","Order","Timezone","Is All Day","Is Floating","Column Name","Column Order","View Mode","taskId","parentId"
+"","收集箱","回复导师邮件","TEXT","","关于周会时间","N","","","","","0","2","2026-10-20T02:00:00+0000","2026-10-21T02:00:00+0000","-1","Asia/Shanghai","","false","","","list","101",""
+"学习","ECE 555","Midterm review, chapters 1-6","TEXT","school,exam","","N","","2026-11-05T16:00:00+0000","","","3","0","2026-10-10T02:00:00+0000","","-2","Asia/Shanghai","true","false","","","list","102",""
+"","收集箱","买牙膏","TEXT","","","N","","","","","0","0","2026-10-25T02:00:00+0000","","-3","Asia/Shanghai","","false","","","list","103",""

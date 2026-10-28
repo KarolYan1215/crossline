@@ -8,6 +8,7 @@ import { CrosslineStore, createRefBook, withRef, type RefBook, type StoredCaptur
 import { identityLines } from "./lines";
 import { tOfWorkspace } from "./locale";
 import { existingTasksFor, foldNewTask } from "./duplicate-guard";
+import { importedDueDate } from "./importer";
 import { analysisMaterialInputs } from "./material-context";
 import { ledgerLookup, ledgerSummary, READ_LEDGER_INSTRUCTIONS, type LedgerEntry } from "./ledger-index";
 
@@ -262,7 +263,8 @@ export function recordWaitingAndDates(store: CrosslineStore, workspaceId: string
   if (!order) return;
   const payload = order.payload as { dates?: AnalysisDate[]; waitingOn?: AnalysisWaitingOn };
   const release = (payload.dates ?? []).filter((item) => item.kind === "release").map((item) => item.date).sort().at(-1);
-  const due = (payload.dates ?? []).filter((item) => item.kind === "due").map((item) => item.date).sort()[0];
+  // A task brought from another tool keeps the day it had there when the analysis read none (docs/personal-agent.md §9).
+  const due = (payload.dates ?? []).filter((item) => item.kind === "due").map((item) => item.date).sort()[0] ?? importedDueDate(store, workspaceId, workOrderId);
   const waiting = payload.waitingOn;
   const waitingDate = waiting && (waiting.who.trim() || waiting.what.trim()) && waiting.expectedDate ? waiting.expectedDate : undefined;
   const notBefore = [release, waitingDate].filter((date): date is string => Boolean(date)).sort().at(-1);
