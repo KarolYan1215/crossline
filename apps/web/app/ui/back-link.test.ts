@@ -46,6 +46,29 @@ describe("coming back to a page", () => {
     expect(tab.store.has("crossline:returning")).toBe(false);
   });
 
+  test("a move in the page: back (a popstate) saves the page left and restores the page returned to; the referrer is the page shown before", async () => {
+    const tab = fakeTab("/workbench");
+    const listeners = new Map<string, () => void>();
+    (tab.window as unknown as { addEventListener: (type: string, run: () => void) => void }).addEventListener = (type, run) => void listeners.set(type, run);
+    const state = await import("./return-state");
+    expect(state.notePageShown()).toBeUndefined();
+    tab.folds[0]!.open = true;
+    state.saveReturnState();
+    // A link followed in the page: the address changes, no document loads.
+    vi.stubGlobal("location", { pathname: "/plan", search: "", origin: "http://127.0.0.1:3210" });
+    state.forgetReturnDecision();
+    expect(state.notePageShown()).toBe("/workbench");
+    expect(state.returningSnapshot()).toBeNull();
+    // The browser's back: the router answers it in the page.
+    tab.window.scrollY = 120;
+    vi.stubGlobal("location", { pathname: "/workbench", search: "", origin: "http://127.0.0.1:3210" });
+    listeners.get("popstate")!();
+    expect(JSON.parse(tab.store.get("crossline:return:/plan")!).scrollY).toBe(120);
+    state.forgetReturnDecision();
+    expect(state.returningSnapshot()?.scrollY).toBe(640);
+    expect(state.notePageShown()).toBe("/plan");
+  });
+
   test("the browser's own back restores without a mark", async () => {
     const tab = fakeTab("/", "back_forward");
     tab.store.set("crossline:return:/", JSON.stringify({ scrollY: 300, details: {}, extra: { "task-dialog:wo-1:hero": true } }));

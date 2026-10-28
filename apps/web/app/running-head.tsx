@@ -6,18 +6,18 @@ import { SignOutButton } from "./sign-out-button";
 import { LocaleSwitch } from "./locale-switch";
 import { NoticeBell } from "./notice-bell";
 import { useT } from "./locale-context";
+import { NavLink } from "./ui/nav-link";
 
 /** The header every signed-in page shares (from `AppShell`); a client component so its labels follow the page's language (docs/i18n.md). */
 export function RunningHead({ active, focus }: { active?: string | undefined; focus: boolean }) {
   const t = useT();
-  // `data-focus`: no bottom bar on this page, so on a phone the language switch stays in the header (mobile.css).
-  return <header className="running-head" data-focus={focus || undefined}>
-    <a className="wordmark" href="/">Crossline</a>
+    return <header className="running-head" data-focus={focus || undefined}>
+    <NavLink className="wordmark" href="/">Crossline</NavLink>
     <nav aria-label={t("主导航")}>{(focus ? [] : NAV_ITEMS).map((item) =>
-      <a href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>{t(item.label)}</a>)}</nav>
+      <NavLink href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>{t(item.label)}</NavLink>)}</nav>
     <div className="system-state">
-      {(focus ? SIDE_ITEMS.filter((item) => item.href === "/settings") : SIDE_ITEMS).map((item) => <a href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>
-        {t(item.label)}{item.badge && <PendingBadge />}</a>)}
+      {(focus ? SIDE_ITEMS.filter((item) => item.href === "/settings") : SIDE_ITEMS).map((item) => <NavLink href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>
+        {t(item.label)}{item.badge && <PendingBadge />}</NavLink>)}
       {!focus && <NoticeBell />}
       <LocaleSwitch sync />
       <UndoCenter />

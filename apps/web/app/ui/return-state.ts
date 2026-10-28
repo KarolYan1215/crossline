@@ -46,6 +46,34 @@ export function saveReturnState(): void {
   write(LAST, pageKey());
 }
 
+/**
+ * Moves between views happen in the page since 2026-10-28 (`NavLink`, `BackLink`): no new document loads, so neither `document.referrer` nor
+ * the navigation's type says where the person came from or that they went back. The page shown and the one before it are kept here, and
+ * the browser's back and forward (a `popstate`, which the router answers in the page) mark the page they lead to as returned to — after
+ * saving the page being left as it is at that moment, since nothing else gets a chance to.
+ */
+let shown: string | undefined;
+let previous: string | undefined;
+let poppedTo: string | undefined;
+
+/** Notes that the current address is the page on screen; returns the in-app page shown before it, if the person came from one in the page. */
+export function notePageShown(): string | undefined {
+  const key = pageKey();
+  if (key !== shown) { if (shown !== undefined) previous = shown; shown = key; }
+  return previous;
+}
+
+/** The page shown before this one in this document (a move in the page), or undefined when this document opened on this page. */
+export function previousInApp(): string | undefined { return previous; }
+
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("popstate", () => {
+    // The address has already changed; what is on screen is still the page being left.
+    if (shown !== undefined && shown !== pageKey()) write(`${SNAPSHOT}${shown}`, takeSnapshot());
+    poppedTo = pageKey();
+  });
+}
+
 /** The page this tab was on before the current one (as `saveReturnState` last wrote it while leaving). */
 export function lastPage(): string | null { return read<string>(LAST); }
 
@@ -65,8 +93,10 @@ export function returningSnapshot(): ReturnSnapshot | null {
   let back = false;
   try { back = key === initialKey && (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type === "back_forward"; }
   catch { back = false; }
-  if (marked || back) snapshot = read<ReturnSnapshot>(`${SNAPSHOT}${key}`);
+  const popped = poppedTo === key;
+  if (marked || back || popped) snapshot = read<ReturnSnapshot>(`${SNAPSHOT}${key}`);
   if (marked) { try { storage()?.removeItem(RETURNING); } catch { /* blocked */ } }
+  if (popped) poppedTo = undefined;
   decided = { key, snapshot };
   return snapshot;
 }

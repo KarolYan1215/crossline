@@ -59,3 +59,16 @@ test("a page whose turn comes in time is served, not timed out", async () => {
   expect(second.statusCode).toBe(200);
   expect(second.body).toBe("ok");
 });
+
+test("a page someone opened goes before pages the router fetched ahead on hover", async () => {
+  const line = createLine({ limit: 1, maxQueued: 5, maxWaitMs: 30_000 });
+  const rendering = fakeResponse();
+  line.inLine({ url: "/" }, asResponse(rendering), () => undefined);
+  const served: string[] = [];
+  const prefetch = fakeResponse(), opened = fakeResponse();
+  line.inLine({ url: "/plan", headers: { "next-router-prefetch": "1" } }, asResponse(prefetch), () => { served.push("prefetch"); prefetch.end(); });
+  line.inLine({ url: "/workbench" }, asResponse(opened), () => { served.push("opened"); opened.end(); });
+  rendering.end("done");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(served).toEqual(["opened", "prefetch"]);
+});

@@ -5,6 +5,7 @@ import { countPending } from "./pending";
 import { writeAttentionSnapshot } from "./asks";
 import { systemContext } from "./auto-publish";
 import { adoptPendingDates } from "./imported-dates";
+import { yieldToRequests } from "./yield";
 
 /** How often the web refreshes what the worker's notifications read. */
 export const ATTENTION_INTERVAL_MS = 10 * 60_000;
@@ -22,8 +23,12 @@ export async function attentionPass(now = new Date()): Promise<number> {
     const ownerId = store.getWorkspaceOwnerId(workspace.id);
     if (!ownerId) continue;
     const ctx = systemContext(workspace.id, ownerId, now);
+    // Each step is synchronous work of up to seconds on a big account: requests are answered between them (lib/yield.ts).
+    await yieldToRequests();
     try { adoptPendingDates(ctx); } catch { /* left for the interview page */ }
+    await yieldToRequests();
     try { await recordScheduledToday(ctx, now); } catch { /* the asks still go out */ }
+    await yieldToRequests();
     try { writeAttentionSnapshot(ctx, countPending(ctx).total, now); written += 1; } catch { /* next interval */ }
   }
   return written;

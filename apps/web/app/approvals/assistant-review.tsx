@@ -1,5 +1,6 @@
 import { AGENT_CATEGORIES } from "@crossline/core";
 import type { AccessContext } from "@crossline/core";
+import type { ReactNode } from "react";
 import { loadAssistant, loadTaskAudit, outputNames, readTaskFile, type AssistantView, type TaskAudit } from "../../lib/agent";
 import { ApprovalButtons, CategoryDecision, QuestionAnswer, RetryCheckButton, ReviewButtons, SendBackItem } from "./assistant-controls";
 import { csvHead, groupOutputs, markdownHead, workflowSteps, type OutputItem } from "./assistant-outputs";
@@ -145,7 +146,18 @@ function RunRecord({ audit, t, locale }: { audit: TaskAudit["audit"]; t: Transla
 }
 
 /** The assistant's part of 待确认: kinds of work it asks to start, questions it put mid-run, and results waiting for review. */
-export function AssistantReview({ ctx, deferred = () => undefined }: { ctx: AccessContext; deferred?: (workOrderId: string) => string | undefined }) {
+/** One result's body on its own, for reading it after the page is shown (`assistantResult` in actions.tsx). */
+export function AssistantResultBody({ ctx, taskId }: { ctx: AccessContext; taskId: string }) {
+  const task = loadAssistant(ctx).tasks.find((item) => item.taskId === taskId);
+  return task ? <TaskBody ctx={ctx} task={task} /> : null;
+}
+
+/**
+ * `body` draws a result's body in its place; the page passes one that reads it once it nears the screen (2026-10-28: the results' files,
+ * previews and records were a third of 待确认's HTML on the owner's account). Without it the body is drawn with the page.
+ */
+export function AssistantReview({ ctx, deferred = () => undefined, body }: { ctx: AccessContext; deferred?: (workOrderId: string) => string | undefined;
+  body?: (taskId: string) => ReactNode }) {
   const view = loadAssistant(ctx);
   const results = view.reviews;
   // Results for work that need not start within a week are folded (decided 2026-10-10), the soonest to come up first.
@@ -159,7 +171,7 @@ export function AssistantReview({ ctx, deferred = () => undefined }: { ctx: Acce
       {task.workOrderId && <a href={`/workbench/${encodeURIComponent(task.workOrderId)}`}>{t("对应任务")}</a>}
       {task.autoApproved && <Tag tone="info">{t("来自自动生效的任务")}</Tag>}
       {deferred(task.workOrderId) && <small>{t("{{day}} 起列入本周", { day: entryDay(localeFor(ctx), deferred(task.workOrderId)!) })}</small>}</p>
-    <TaskBody ctx={ctx} task={task} />
+    {body ? body(task.taskId) : <TaskBody ctx={ctx} task={task} />}
     <ReviewButtons taskId={task.taskId} />
   </article>;
   return <section className="pending-block" id="assistant" aria-label={t("助手")}>

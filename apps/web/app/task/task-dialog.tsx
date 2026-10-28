@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { STEP_ROLES, localStamp, plainEstimateWords } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
 import { Sheet } from "../ui/overlay";
@@ -309,10 +310,30 @@ function RecordPanel({ detail }: { detail: TaskDetail }) {
  */
 export function TaskDialog({ detail, open, onOpenChange }: { detail: TaskDetail; open: boolean; onOpenChange: (open: boolean) => void }) {
   const t = useT();
+  const full = useWholeDetail(detail, open);
   return <Sheet title={detail.title} size="wide" open={open} onOpenChange={onOpenChange}
-    footer={<a className="secondary" href={`/workbench/${encodeURIComponent(detail.id)}`}>{t("完整页面")}</a>}>
-    <TaskPanels detail={detail} />
+    footer={<Link className="secondary" href={`/workbench/${encodeURIComponent(detail.id)}`} prefetch={false}>{t("完整页面")}</Link>}>
+    {full === "failed" ? <p role="alert">{t("读取失败")}</p> : full ? <TaskPanels detail={full} /> : <p role="status" className="muted">{t("正在读取…")}</p>}
   </Sheet>;
+}
+
+/**
+ * A card from a list page carries only what the card shows (`cardView`): the whole detail is read when its dialog opens, and again when
+ * the page hands the card a newer copy (after an action refreshed the page). A whole detail is used as it is.
+ */
+function useWholeDetail(detail: TaskDetail, open: boolean): TaskDetail | "failed" | undefined {
+  const [loaded, setLoaded] = useState<{ from: TaskDetail; value: TaskDetail | "failed" }>();
+  useEffect(() => {
+    if (!detail.partial || !open || loaded?.from === detail) return;
+    let live = true;
+    void fetch(`/api/work-orders/${encodeURIComponent(detail.id)}/detail`, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() as Promise<{ detail: TaskDetail }> : Promise.reject(new Error(String(response.status))))
+      .then((body) => { if (live) setLoaded({ from: detail, value: body.detail }); })
+      .catch(() => { if (live) setLoaded({ from: detail, value: "failed" }); });
+    return () => { live = false; };
+  }, [detail, open, loaded]);
+  if (!detail.partial) return detail;
+  return loaded?.from === detail ? loaded.value : undefined;
 }
 
 const SECTIONS = [["steps", "步骤"], ["materials", "材料与教程"], ["finish", "提交与完成"]] as const;
