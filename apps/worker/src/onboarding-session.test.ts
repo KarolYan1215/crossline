@@ -193,7 +193,7 @@ const withDates = (fileDates: object) => turn({ fileDates, questions: [], nextAc
 /** The portrait's sections closed, so a test about dates is not also asked for the sections a finished interview owes (P3). */
 const sectionsClosed = () => store.setSetting(workspaceId, "profile.sections", JSON.stringify(Object.fromEntries(["situation", "compass", "energy", "synthesis"]
   .map((section) => [section, { sentences: [1], final: true, at: "2026-10-19T00:00:00.000Z" }]))));
-const dateItem = (over: object = {}) => ({ id: "d1", date: "2026-10-27", startMinute: null, endMinute: null, kind: "exam", title: "ECE 548 期中 1", project: "",
+const dateItem = (over: object = {}) => ({ id: "d1", date: "2027-10-27", startMinute: null, endMinute: null, kind: "exam", title: "ECE 548 期中 1", project: "",
   refs: [2, 3], confidence: "high", note: "", ...over });
 
 test("dates the model read out of a file become one verified batch, and what cannot be verified is dropped and counted", async () => {
@@ -201,7 +201,7 @@ test("dates the model read out of a file become one verified batch, and what can
     extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1\nExam: 17th December Wednesday", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
   const { rpc } = fakeRuntime([withDates({
     // [2] says 27 October: a date of 3 November citing it is dropped.
-    dates: [dateItem(), dateItem({ id: "d2", title: "编造的考试", date: "2026-11-03", refs: [2] })],
+    dates: [dateItem(), dateItem({ id: "d2", title: "编造的考试", date: "2027-11-03", refs: [2] })],
     recurring: [], questions: ["这些材料是哪门课的？"]
   })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
