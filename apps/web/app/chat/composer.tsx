@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { looksLikeImportList } from "@crossline/core";
 import { useAttachmentDrop } from "../attachment-drop";
 import { MenuButton } from "../ui/controls";
 import { useT } from "../locale-context";
@@ -78,6 +79,16 @@ export function Composer({ mode, placeholder, shortPlaceholder, onSubmit, busy =
   // 「无匹配」 only once the answer for what is typed now is in; before that the list says it is searching.
   const [searching, setSearching] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  // A long list pasted from another tool can go through the import's one-screen check instead of one capture (docs/personal-agent.md §9).
+  const [imported, setImported] = useState<"" | "busy" | "done" | "failed">("");
+  const asImport = async () => {
+    setImported("busy");
+    const form = new FormData();
+    form.set("text", text);
+    const response = await fetch("/api/import/upload", { method: "POST", body: form }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { ok?: boolean } | undefined;
+    if (body?.ok) { setText(""); setImported("done"); } else setImported("failed");
+  };
   const hint = hintFor(placeholder, shortPlaceholder, useNarrow(NARROW_HINT));
   // Neither what is typed nor the hint may be cut off on a narrow phone: fit on every change, on mount and when the width changes.
   useEffect(() => {
@@ -165,6 +176,11 @@ export function Composer({ mode, placeholder, shortPlaceholder, onSubmit, busy =
       <button type="submit" className="composer-send" disabled={busy || (!text.trim() && !fileNames.length)} aria-label={t("发送")}>{busy ? "…" : "↑"}</button>
       <input ref={fileInputRef} type="file" multiple accept={ACCEPTED} hidden onChange={onInputChange} name="attachments" />
     </div>
+    {mode === "capture" && !batch && looksLikeImportList(text) && <p className="composer-import">
+      {t("这像是从别处复制的一份清单。")}
+      <button type="button" className="secondary-button" disabled={imported === "busy"} onClick={() => void asImport()}>{t("按导入核对处理")}</button></p>}
+    {imported === "done" && <p className="composer-import" role="status">{t("已放进导入核对。")} <a href="/settings#import">{t("去核对")}</a></p>}
+    {imported === "failed" && <p className="composer-import" role="status">{t("没能交给导入核对，可以直接发送。")}</p>}
     {picker && <div className="composer-picker" role="listbox" aria-label={t("引用")}>
       {!picker.fromAt && <input autoFocus value={picker.query} placeholder={t("搜索")} aria-label={t("搜索引用")} onChange={(event) => setPicker({ ...picker, query: event.target.value })}
         onKeyDown={(event) => { if (event.key === "Escape") setPicker(null); if (event.key === "Enter") { event.preventDefault(); if (results[0]) choose(results[0]); } }} />}

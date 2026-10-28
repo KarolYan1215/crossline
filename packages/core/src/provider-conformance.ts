@@ -12,6 +12,7 @@ import { MEDIA_DESCRIPTION_SCHEMA } from "./xhs-notes";
 import { FAVOURITE_TOPICS_SCHEMA } from "./favourite-topics";
 import { CONCIERGE_SCHEMA } from "./concierge";
 import { MAIL_REPLY_DRAFT_SCHEMA, MAIL_TRIAGE_SCHEMA } from "./mail";
+import { IMPORT_TRIAGE_SCHEMA } from "./task-import";
 import { AUTOMATION_PLAN_SCHEMA } from "./automations";
 import { DATE_EXTRACTION_SCHEMA } from "./date-schema";
 import { DILIGENCE_OUTPUT_SCHEMA } from "./diligence-schema";
@@ -101,6 +102,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-agent-tools": { label: "助手", schemas: ["AGENT_SUMMARY_SCHEMA"], tools: true },
   "crossline-mail-triage": { label: "邮件整理", schemas: ["MAIL_TRIAGE_SCHEMA"] },
   "crossline-mail-reply-drafter": { label: "邮件回复草稿", schemas: ["MAIL_REPLY_DRAFT_SCHEMA"] },
+  "crossline-import-triage": { label: "导入清单整理", schemas: ["IMPORT_TRIAGE_SCHEMA"] },
   "crossline-automation-designer": { label: "自动化设计", schemas: ["AUTOMATION_PLAN_SCHEMA"] }
 };
 
@@ -172,7 +174,7 @@ const DEEP_SCHEMA = level(level(level({ type: "object", additionalProperties: fa
 
 const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   AGENT_SUMMARY_SCHEMA, ANALYSIS_OUTPUT_SCHEMA, AUTOMATION_PLAN_SCHEMA, ARCHETYPE_CURATION_SCHEMA, ARTIFACT_PLAN_SCHEMA, BACKGROUND_FACTS_OUTPUT_SCHEMA, BACKPLAN_SCHEMA,
-  CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, MAIL_TRIAGE_SCHEMA, MAIL_REPLY_DRAFT_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, ENERGY_ADVICE_REVIEW_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, RECORDING_DIGEST_SCHEMA, MEDIA_DESCRIPTION_SCHEMA, FAVOURITE_TOPICS_SCHEMA, GOAL_SPLIT_SCHEMA,
+  CALENDAR_CLASSIFICATION_SCHEMA, CONCIERGE_SCHEMA, MAIL_TRIAGE_SCHEMA, MAIL_REPLY_DRAFT_SCHEMA, IMPORT_TRIAGE_SCHEMA, DATE_EXTRACTION_SCHEMA, DILIGENCE_OUTPUT_SCHEMA, ENERGY_ADVICE_REVIEW_SCHEMA, FLYWHEEL_OUTPUT_SCHEMA, FOLDER_LINES_SCHEMA, RECORDING_DIGEST_SCHEMA, MEDIA_DESCRIPTION_SCHEMA, FAVOURITE_TOPICS_SCHEMA, GOAL_SPLIT_SCHEMA,
   MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MILESTONE_RISK_SCHEMA, MINE_SKILL_SCHEMA,
   ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA
@@ -268,7 +270,9 @@ export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CAL
   // Several public-skill reviews in one answer (2026-10-21): the single review's object, in a list keyed by id.
   PUBLIC_SKILL_BATCH_REVIEW_SCHEMA: "PUBLIC_SKILL_REVIEW_SCHEMA",
   // Favourites by topic (2026-10-22): a list of objects with two short strings and a list of numbers, like calendar filing's list.
-  FAVOURITE_TOPICS_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA" };
+  FAVOURITE_TOPICS_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA",
+  // Sorting an imported list (2026-10-28): a list of small objects with an enum and short strings, like mail sorting and calendar filing.
+  IMPORT_TRIAGE_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA" };
 const caseRuns = (record: ConformanceRecord) => {
   const runs = record.runs.flatMap((run) => LEGACY_CASES[run.caseId] ? LEGACY_CASES[run.caseId]!.split("|").map((caseId) => ({ ...run, caseId })) : [run]);
   const proxied = Object.entries(SCHEMA_PROXIES).filter(([schema]) => !runs.some((run) => run.caseId === schema))

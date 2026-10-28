@@ -42,7 +42,7 @@ export const INTERACTIVE_SKILLS: readonly string[] = ["crossline-onboarding", "c
  * that changes it is read is made twice. They wait behind a person's turn and still count as background for the slot kept for a person.
  */
 export const INTAKE_SKILLS: readonly string[] = ["crossline-mail-triage", "crossline-automation-stripper", "crossline-calendar-classifier",
-  "crossline-folder-classifier", "crossline-recording-digest", "crossline-onboarding-extract", "crossline-background-facts"];
+  "crossline-folder-classifier", "crossline-recording-digest", "crossline-onboarding-extract", "crossline-background-facts", "crossline-import-triage"];
 /**
  * Background Skills that turn what the person just did (approved milestones, a finished interview, an analysed capture) into work on their
  * board. They go after intake and before discretionary runs (tutorials, research, the assistant): after 12 milestones were approved the

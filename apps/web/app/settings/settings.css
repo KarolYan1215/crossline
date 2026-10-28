@@ -136,6 +136,27 @@
 .calendar-subscriptions-providers a[aria-current]{outline:2px solid var(--ink);outline-offset:1px}
 .ob-left .calendar-subscriptions-form{grid-template-columns:minmax(0,1fr)}
 @media (max-width:640px){.calendar-subscriptions-form{grid-template-columns:minmax(0,1fr)}}
+/* Bringing other tools' lists in (connectors/import-card.tsx, import-review.tsx). */
+.import-source{flex-wrap:wrap;gap:6px 10px}
+.import-option{display:inline-flex;gap:4px;align-items:center;font-size:13px}
+.import-connect{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
+.import-connect input,.import-paste textarea{min-width:0;font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink)}
+.import-paste{display:grid;gap:6px}
+.import-paste textarea{width:100%;resize:vertical}
+.import-paste-actions,.import-databases,.import-review-actions{display:flex;flex-wrap:wrap;gap:6px}
+.import-file{cursor:pointer}
+.import-card-compact>summary{cursor:pointer;font-weight:600;padding:4px 0}
+.import-card-compact[open]{display:grid;gap:8px}
+.import-group{margin-top:12px}
+.import-group h4{margin:0 0 4px;border-left:3px solid var(--line-color,var(--ink));padding-left:6px}
+.import-items{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.import-items li{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,160px);gap:2px 8px;padding:6px 0;border-bottom:1px solid var(--mist);align-items:center}
+.import-items li:not([data-kept]) .import-item-title{color:var(--muted,#555)}
+.import-item-main{display:flex;gap:6px;align-items:flex-start;min-width:0}
+.import-item-title{overflow-wrap:anywhere}
+.import-item-meta{grid-column:1;padding-left:22px}
+.import-items select{grid-column:2;grid-row:1 / span 2;font:inherit;font-size:13px;min-width:0}
+@media (max-width:640px){.import-items li{grid-template-columns:minmax(0,1fr)}.import-items select{grid-column:1;grid-row:auto}.import-connect{grid-template-columns:minmax(0,1fr)}}
 /* Authorized folders (connectors/source-folders.tsx): the path, what would be read, and each folder's lines. */
 .source-folder{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid var(--mist)}
 .source-folder-lines{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center}

@@ -48,6 +48,7 @@ import { identityLines, lineLabels } from "../../lib/lines";
 import { AutomationsCard } from "./automations-card";
 import { OutputsCard } from "./outputs-card";
 import { MailAccounts } from "../connectors/mail-accounts";
+import { ImportCard } from "../connectors/import-card";
 import { interviewStatus } from "../../lib/interview-status";
 import { timed, timedSync } from "../../lib/sections";
 import { memoForAsync } from "../../lib/ledger-memo";
@@ -131,7 +132,7 @@ export default async function SettingsPage() {
   // second: they are what the person most often comes here for.
   const sections: SettingsSection[] = [
     { id: "general", label: t("通用"), parts: [{ id: "phone", label: t("手机访问与推送") }, ...(hosted ? [{ id: "device", label: t("这台电脑") }] : [])] },
-    { id: "calendar", label: t("日历与连接"), parts: [{ id: "calendar-subscriptions", label: t("订阅日历") }, { id: "mail", label: t("邮箱") }, { id: "model", label: t("模型连接") }] },
+    { id: "calendar", label: t("日历与连接"), parts: [{ id: "calendar-subscriptions", label: t("订阅日历") }, { id: "mail", label: t("邮箱") }, { id: "import", label: t("从其他工具导入") }, { id: "model", label: t("模型连接") }] },
     { id: "notify", label: t("时间与提醒"), parts: [{ id: "travel", label: t("出行") }] },
     { id: "automation", label: t("自动化与助手"), parts: [{ id: "automations", label: t("自动化") }, { id: "outputs", label: t("助手产出") }] },
     { id: "background", label: t("后台任务") },
@@ -176,7 +177,7 @@ export default async function SettingsPage() {
 
         <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar">{t("日历与连接")}</h2>
           <CalendarModule ctx={ctx} />
-          <div className="st-modules"><div id="mail"><MailAccounts accountEmail={sessionEmail} /></div></div>
+          <div className="st-modules"><div id="mail"><MailAccounts accountEmail={sessionEmail} /></div><div id="import"><ImportCard /></div></div>
           <ConnectionsSection />
         </section>
 

@@ -169,3 +169,6 @@
 .helper-pocket-state{font-size:12px;color:var(--graphite);white-space:nowrap}
 .helper-pocket .assistant-panel-actions{align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .helper-pocket .helper-calls-badge{font-size:12px;padding:4px 8px}
+
+/* A pasted list offered to the import's check (docs/personal-agent.md §6). */
+.composer-import{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 0;font-size:13px}

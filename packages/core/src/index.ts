@@ -442,7 +442,10 @@ const APPROVAL_TIERS = {
 
   // Reads. Listed rather than left to a default, because being a read is the reason, and a reason that
   // lives in a fall-through is a reason nobody can check.
-  read_sync: "automatic"
+  read_sync: "automatic",
+  // Closing a task in Todoist that Crossline imported, once it is finished here (docs/personal-agent.md §9). Only after the person switched
+  // 「完成后在 Todoist 里关闭」 on for that account (off by default); never another service, never a task Crossline did not import.
+  close_imported_task: "automatic"
 } as const satisfies Record<string, "automatic" | "batch" | "per_item" | "never">;
 
 export type ApprovalAction = keyof typeof APPROVAL_TIERS;
@@ -549,5 +552,6 @@ export * from "./task-merge";
 export * from "./workflow-merge";
 export * from "./plain-voice";
 export * from "./mail";
+export * from "./task-import";
 export * from "./automations";
 export * from "./device";

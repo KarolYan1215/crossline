@@ -113,3 +113,17 @@ Codex 是 vendor 进来的（`vendor/codex`，写这段时是 rust-v0.155.0，20
 - 往授权文件夹回写（本人电脑上的整理）：需要本人决定是否放开。
 - 自动化之间串联（一个的产出作为另一个的触发）：目前通过「新文件」「任务完成」间接实现。
 - 工具模式不运行脚本、不剪辑音视频；需要时只在电脑主人的 Codex 上。
+
+## 9. 从其他工具导入（2026-10-28）
+
+从旧工具迁来的人，第一天就把原来的清单带进来，并对齐到自己的主线。
+
+- **来源**（只读，凭据只在 worker 的密钥存储 `import-<来源 id>`，账本只存来源、标签与最后读取：`import.sources`；断开即删令牌）：
+  - Todoist：个人 API 令牌（设置 → 集成 → 开发者），API v1 `GET /api/v1/tasks`、`/api/v1/projects`，按 `cursor` 翻页（<https://developer.todoist.com/api/v1/>）。`deadline` 优先于 `due`。
+  - TickTick：个人 API 令牌（Settings → Account → API Token，开放 API <https://developer.ticktick.com/docs/openapi.md>），读收集箱和每个清单的未完成任务。滴答清单（国内版）没有令牌，用它的备份 CSV 走 CSV 导入。
+  - Notion：internal integration 的密钥 + 本人把数据库连接给该集成；不带数据库的令牌先返回它能看到的数据库让本人选（令牌此时不保存）。读标题、Status/Select/勾选框、第一个日期属性、多选标签；`Notion-Version: 2022-06-28`。
+  - 粘贴文本 / 上传 CSV / 截图：网页把内容写到 `<数据目录>/imports/<工作区>/`，worker 读一次即删除（supervisor 路由只收 64 KB 的 JSON）。CSV 自动找标题列（TickTick 备份前几行的说明、Todoist 导出的 `section`/`note` 行都跳过）；截图用现有看图 Skill `crossline-media-describer` 逐行读出文字（只在 Codex 上，提供方模型会被拒），再按粘贴文本处理。
+- **分拣不按条调用模型**：`crossline-import-triage`（low tier，intake 优先级，`IMPORT_TRIAGE_SCHEMA`）一次 40 条，给出主线、项目、截止、keep / merge / done / drop / someday 与理由。代码再核一遍：merge 必须指向看到的未完成任务，否则改回 keep；模型说 keep 而合并规则（`comparePair`，`importDuplicateOf`：导入条目还没有项目，按对方任务的项目与执行者比较）认出已有任务的，改成 merge。没有模型（未连接、额度、运行失败）时只用规则给建议，批次照样可核对。
+- **导入核对**：一屏按主线分组列出全部条目，keep 与 merge 默认勾选，可逐条改主线或去掉，一次确认（`ImportReview`，设置 → 日历与连接 「从其他工具导入」，访谈页左栏「材料与日历」也有入口，输入框粘贴六行以上的清单时提示「按导入核对处理」）。确认后：勾选的写成 capture（id `import-<来源>-<外部 id>`，幂等键 `import:<来源>:<外部 id>`，正文带来源、原清单、本人选的主线、截止、标签、备注），交给现有自动分析；勾选的 merge 记为目标任务上的 `task.duplicate_prevented`，不另建任务。分析没读出截止时用导入时的日子（`importedDueDate`，经 `import.item_captured` 事件）。整批条目记进 `import.seen`（按服务的外部 id），之后的读取不再提供；「都不要」也记住。
+- **每天增量**（默认开，可按来源关）：每 20 小时读一次新增；模型分拣过的批次自动生效（每天最多 10 条进收集箱，其余留在批次里等本人），告诉本人一次；只按规则分拣的等本人核对。上一批未核对时不再读。
+- **回写**：只有 Todoist，按账号开关「完成后在 Todoist 里关闭」，默认关。导入的任务（或被并入的已有任务）在 Crossline 验收后，调用 `POST /api/v1/tasks/{id}/close`，每条只关一次（`import.closed_upstream`）。`requiredApproval("close_imported_task")` 为 `automatic`：开关本身就是本人的批准。TickTick、Notion 不回写。
