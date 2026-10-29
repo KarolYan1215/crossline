@@ -1,0 +1,3306 @@
+{
+ "strategy": "procrastinator",
+ "seed": 7,
+ "start": "2026-10-29",
+ "days": 30,
+ "workspace": "bf8be609",
+ "runtimeS": 446,
+ "refusedFetches": 0,
+ "persona": {
+  "openBase": 0.55,
+  "startBias": -0.3,
+  "adherence": 0.7,
+  "presentBias": 0.6,
+  "askBudgetS": 90,
+  "wrapProb": 0.35,
+  "bulkDoneWhenTired": 0.2,
+  "captureRate": 0.6,
+  "bed": 1515,
+  "sleepH": 7.2,
+  "honest": 0.9
+ },
+ "daysOut": [
+  {
+   "day": "2026-10-29",
+   "weekday": 4,
+   "sleptH": 8.1,
+   "sleepDebtH": 0.3,
+   "usesApp": true,
+   "opens": 1,
+   "returnItems": 12,
+   "decisionS": 129,
+   "decisions": 15,
+   "todayTimelineItems": 12,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 19,
+   "laterAsks": 10,
+   "todayReminders": 2,
+   "todayChars": 657,
+   "askKinds": "prep_question,milestone_risk_review,milestone_risk,milestone_overdue,risk_digest,relation_check,step_question,calendar_publish_failed,event_propose,agent_blocked",
+   "ans_prep_question": 1,
+   "ans_milestone_risk_review": 1,
+   "ans_milestone_risk": 1,
+   "ignored": 1,
+   "scheduledMin": 410,
+   "availableMin": 540,
+   "feasibility": 0.76,
+   "unplacedNone": 1,
+   "unplacedPartial": 0,
+   "blocksToday": 10,
+   "distinctTasksToday": 5,
+   "switchesToday": 6,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 0,
+   "churnCompared": 0,
+   "pendingTotal": 20,
+   "pendingAsks": 16,
+   "pendingLater": {
+    "workOrders": 4,
+    "milestoneDrafts": 0,
+    "asks": 10,
+    "assistantReviews": 1,
+    "total": 15
+   },
+   "asksOpenAll": 26,
+   "captureBacklog": 0,
+   "started": 6,
+   "workedMin": 185,
+   "captures": 3,
+   "wrapRows": 6,
+   "wrapOpenBefore": 6,
+   "nudges": 10,
+   "nudgesCounted": 5,
+   "nudgesUrgent": 5,
+   "pendingTotalNight": 20,
+   "trust": 0.6,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-10-30",
+   "weekday": 5,
+   "sleptH": 8.2,
+   "sleepDebtH": 0.1,
+   "usesApp": false,
+   "scheduledMin": 430,
+   "availableMin": 555,
+   "feasibility": 0.77,
+   "unplacedNone": 1,
+   "unplacedPartial": 0,
+   "blocksToday": 9,
+   "distinctTasksToday": 6,
+   "switchesToday": 7,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 9,
+   "churnCompared": 10,
+   "pendingTotal": 25,
+   "pendingAsks": 21,
+   "pendingLater": {
+    "workOrders": 4,
+    "milestoneDrafts": 0,
+    "asks": 9,
+    "assistantReviews": 1,
+    "total": 14
+   },
+   "asksOpenAll": 30,
+   "captureBacklog": 3,
+   "skipped": 2,
+   "started": 4,
+   "workedMin": 158,
+   "captures": 1,
+   "wrapRows": 6,
+   "wrapOpenBefore": 6,
+   "nudges": 5,
+   "nudgesCounted": 4,
+   "nudgesUrgent": 5,
+   "pendingTotalNight": 25,
+   "trust": 0.62,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-10-31",
+   "weekday": 6,
+   "sleptH": 6.8,
+   "sleepDebtH": 1.3,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 14,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 22,
+   "laterAsks": 9,
+   "todayReminders": 2,
+   "todayChars": 790,
+   "askKinds": "milestone_risk,missed_block,step_question,milestone_overdue,risk_digest,relation_check,calendar_publish_failed,prep_question,event_propose,agent_blocked",
+   "decisions": 3,
+   "decisionS": 86,
+   "ans_milestone_risk": 3,
+   "snoozed": 1,
+   "scheduledMin": 535,
+   "availableMin": 630,
+   "feasibility": 0.85,
+   "unplacedNone": 1,
+   "unplacedPartial": 0,
+   "blocksToday": 12,
+   "distinctTasksToday": 5,
+   "switchesToday": 6,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 10,
+   "churnCompared": 10,
+   "pendingTotal": 22,
+   "pendingAsks": 18,
+   "pendingLater": {
+    "workOrders": 4,
+    "milestoneDrafts": 0,
+    "asks": 9,
+    "assistantReviews": 1,
+    "total": 14
+   },
+   "asksOpenAll": 28,
+   "captureBacklog": 4,
+   "started": 5,
+   "workedMin": 122,
+   "captures": 9,
+   "skipped": 1,
+   "wrapRows": 6,
+   "wrapOpenBefore": 6,
+   "nudges": 0,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 22,
+   "trust": 0.63,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-01",
+   "weekday": 0,
+   "sleptH": 7.5,
+   "sleepDebtH": 1.7,
+   "usesApp": true,
+   "opens": 1,
+   "returnItems": 1,
+   "decisionS": 99,
+   "decisions": 4,
+   "todayTimelineItems": 12,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 20,
+   "laterAsks": 9,
+   "todayReminders": 2,
+   "todayChars": 843,
+   "askKinds": "milestone_risk,step_question,missed_block,milestone_overdue,risk_digest,relation_check,calendar_publish_failed,prep_question,event_propose,agent_blocked",
+   "ans_milestone_risk": 2,
+   "ans_step_question": 1,
+   "ignored": 1,
+   "scheduledMin": 525,
+   "availableMin": 630,
+   "feasibility": 0.83,
+   "unplacedNone": 1,
+   "unplacedPartial": 0,
+   "blocksToday": 12,
+   "distinctTasksToday": 4,
+   "switchesToday": 3,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 9,
+   "churnCompared": 9,
+   "pendingTotal": 21,
+   "pendingAsks": 17,
+   "pendingLater": {
+    "workOrders": 4,
+    "milestoneDrafts": 0,
+    "asks": 9,
+    "assistantReviews": 1,
+    "total": 14
+   },
+   "asksOpenAll": 26,
+   "captureBacklog": 13,
+   "started": 5,
+   "workedMin": 153,
+   "captures": 2,
+   "skipped": 1,
+   "wrapRows": 6,
+   "wrapOpenBefore": 6,
+   "nudges": 0,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 21,
+   "trust": 0.64,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-02",
+   "weekday": 1,
+   "sleptH": 6.2,
+   "sleepDebtH": 3.2,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 15,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 21,
+   "laterAsks": 9,
+   "todayReminders": 2,
+   "todayChars": 789,
+   "askKinds": "milestone_risk,waiting_due,missed_block,milestone_overdue,risk_digest,relation_check,calendar_publish_failed,step_question,prep_question,event_propose,agent_blocked",
+   "decisions": 7,
+   "decisionS": 171,
+   "ans_milestone_risk": 3,
+   "snoozed": 8,
+   "approvalsVisit": true,
+   "ans_milestone_overdue": 1,
+   "ans_risk_digest": 1,
+   "ignored": 6,
+   "ans_missed_block": 1,
+   "ans_calendar_publish_failed": 1,
+   "scheduledMin": 470,
+   "availableMin": 555,
+   "feasibility": 0.85,
+   "unplacedNone": 1,
+   "unplacedPartial": 0,
+   "blocksToday": 12,
+   "distinctTasksToday": 6,
+   "switchesToday": 5,
+   "blocksUnder30": 4,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 10,
+   "churnCompared": 11,
+   "pendingTotal": 10,
+   "pendingAsks": 6,
+   "pendingLater": {
+    "workOrders": 4,
+    "milestoneDrafts": 0,
+    "asks": 9,
+    "assistantReviews": 1,
+    "total": 14
+   },
+   "asksOpenAll": 23,
+   "captureBacklog": 15,
+   "started": 5,
+   "workedMin": 121,
+   "skipped": 1,
+   "captures": 2,
+   "wrapRows": 6,
+   "wrapOpenBefore": 6,
+   "nudges": 3,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 11,
+   "trust": 0.65,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-03",
+   "weekday": 2,
+   "sleptH": 5.9,
+   "sleepDebtH": 4.8,
+   "usesApp": false,
+   "scheduledMin": 475,
+   "availableMin": 555,
+   "feasibility": 0.86,
+   "unplacedNone": 2,
+   "unplacedPartial": 0,
+   "blocksToday": 10,
+   "distinctTasksToday": 6,
+   "switchesToday": 7,
+   "blocksUnder30": 3,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 9,
+   "churnCompared": 10,
+   "pendingTotal": 20,
+   "pendingAsks": 16,
+   "pendingLater": {
+    "workOrders": 4,
+    "milestoneDrafts": 0,
+    "asks": 9,
+    "assistantReviews": 1,
+    "total": 14
+   },
+   "asksOpenAll": 28,
+   "captureBacklog": 17,
+   "captures": 3,
+   "started": 3,
+   "workedMin": 70,
+   "skipped": 1,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "nudges": 3,
+   "nudgesCounted": 3,
+   "nudgesUrgent": 3,
+   "pendingTotalNight": 20,
+   "trust": 0.66,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-04",
+   "weekday": 3,
+   "sleptH": 6.6,
+   "sleepDebtH": 5.4,
+   "usesApp": true,
+   "opens": 1,
+   "returnItems": 1,
+   "decisionS": 122,
+   "decisions": 8,
+   "todayTimelineItems": 12,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 17,
+   "laterAsks": 9,
+   "todayReminders": 2,
+   "todayChars": 717,
+   "askKinds": "milestone_risk,waiting_due,missed_block,milestone_overdue,relation_check,calendar_publish_failed,step_question,prep_question,event_propose,agent_blocked",
+   "ans_milestone_risk": 3,
+   "snoozed": 1,
+   "scheduledMin": 530,
+   "availableMin": 630,
+   "feasibility": 0.84,
+   "unplacedNone": 2,
+   "unplacedPartial": 0,
+   "blocksToday": 13,
+   "distinctTasksToday": 5,
+   "switchesToday": 6,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 7,
+   "churnCompared": 7,
+   "pendingTotal": 18,
+   "pendingAsks": 13,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 9,
+    "assistantReviews": 1,
+    "total": 13
+   },
+   "asksOpenAll": 26,
+   "captureBacklog": 20,
+   "started": 5,
+   "workedMin": 130,
+   "captures": 3,
+   "confirmAnswered": 4,
+   "skipped": 2,
+   "wrapRows": 7,
+   "wrapOpenBefore": 3,
+   "nudges": 6,
+   "nudgesCounted": 6,
+   "nudgesUrgent": 6,
+   "pendingTotalNight": 18,
+   "trust": 0.67,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-05",
+   "weekday": 4,
+   "sleptH": 7.7,
+   "sleepDebtH": 4.9,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 13,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 14,
+   "laterAsks": 8,
+   "todayReminders": 2,
+   "todayChars": 749,
+   "askKinds": "milestone_risk,milestone_overdue,relation_check,calendar_publish_failed,step_question,prep_question,event_propose,agent_blocked",
+   "decisions": 7,
+   "decisionS": 111,
+   "ans_milestone_risk": 3,
+   "snoozed": 1,
+   "scheduledMin": 440,
+   "availableMin": 540,
+   "feasibility": 0.81,
+   "unplacedNone": 2,
+   "unplacedPartial": 0,
+   "blocksToday": 9,
+   "distinctTasksToday": 5,
+   "switchesToday": 4,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 5,
+   "churnCompared": 6,
+   "pendingTotal": 13,
+   "pendingAsks": 10,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 8,
+    "assistantReviews": 0,
+    "total": 11
+   },
+   "asksOpenAll": 23,
+   "captureBacklog": 23,
+   "started": 5,
+   "workedMin": 90,
+   "skipped": 1,
+   "confirmAnswered": 4,
+   "captures": 2,
+   "wrapRows": 6,
+   "wrapOpenBefore": 2,
+   "nudges": 4,
+   "nudgesCounted": 4,
+   "nudgesUrgent": 4,
+   "pendingTotalNight": 13,
+   "trust": 0.66,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-06",
+   "weekday": 5,
+   "sleptH": 7,
+   "sleepDebtH": 5.2,
+   "usesApp": false,
+   "scheduledMin": 470,
+   "availableMin": 555,
+   "feasibility": 0.85,
+   "unplacedNone": 2,
+   "unplacedPartial": 0,
+   "blocksToday": 10,
+   "distinctTasksToday": 5,
+   "switchesToday": 4,
+   "blocksUnder30": 1,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 5,
+   "churnCompared": 6,
+   "pendingTotal": 17,
+   "pendingAsks": 14,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 8,
+    "assistantReviews": 0,
+    "total": 11
+   },
+   "asksOpenAll": 27,
+   "captureBacklog": 25,
+   "started": 4,
+   "workedMin": 83,
+   "confirmAnswered": 1,
+   "decisions": 1,
+   "decisionS": 6,
+   "skipped": 1,
+   "captures": 4,
+   "wrapRows": 5,
+   "wrapOpenBefore": 4,
+   "nudges": 6,
+   "nudgesCounted": 3,
+   "nudgesUrgent": 3,
+   "pendingTotalNight": 17,
+   "trust": 0.69,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-07",
+   "weekday": 6,
+   "sleptH": 6.5,
+   "sleepDebtH": 5.8,
+   "usesApp": false,
+   "scheduledMin": 535,
+   "availableMin": 630,
+   "feasibility": 0.85,
+   "unplacedNone": 3,
+   "unplacedPartial": 0,
+   "blocksToday": 11,
+   "distinctTasksToday": 5,
+   "switchesToday": 4,
+   "blocksUnder30": 1,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 3,
+   "churnCompared": 5,
+   "pendingTotal": 17,
+   "pendingAsks": 14,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 8,
+    "assistantReviews": 0,
+    "total": 11
+   },
+   "asksOpenAll": 27,
+   "captureBacklog": 29,
+   "started": 4,
+   "workedMin": 71,
+   "skipped": 1,
+   "wrapRows": 5,
+   "wrapOpenBefore": 5,
+   "nudges": 2,
+   "nudgesCounted": 2,
+   "nudgesUrgent": 2,
+   "pendingTotalNight": 17,
+   "trust": 0.72,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-08",
+   "weekday": 0,
+   "sleptH": 7.3,
+   "sleepDebtH": 5.7,
+   "usesApp": false,
+   "scheduledMin": 535,
+   "availableMin": 630,
+   "feasibility": 0.85,
+   "unplacedNone": 4,
+   "unplacedPartial": 0,
+   "blocksToday": 12,
+   "distinctTasksToday": 5,
+   "switchesToday": 4,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 4,
+   "churnCompared": 6,
+   "pendingTotal": 15,
+   "pendingAsks": 12,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 8,
+    "assistantReviews": 0,
+    "total": 11
+   },
+   "asksOpenAll": 25,
+   "captureBacklog": 29,
+   "skipped": 1,
+   "started": 4,
+   "workedMin": 89,
+   "captures": 3,
+   "wrapRows": 5,
+   "wrapOpenBefore": 5,
+   "nudges": 0,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 15,
+   "trust": 0.75,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-09",
+   "weekday": 1,
+   "sleptH": 6.1,
+   "sleepDebtH": 6.8,
+   "usesApp": false,
+   "scheduledMin": 470,
+   "availableMin": 555,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 9,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 2,
+   "churnCompared": 4,
+   "pendingTotal": 21,
+   "pendingAsks": 18,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 8,
+    "assistantReviews": 0,
+    "total": 11
+   },
+   "asksOpenAll": 28,
+   "captureBacklog": 32,
+   "started": 4,
+   "workedMin": 92,
+   "captures": 6,
+   "skipped": 2,
+   "wrapRows": 6,
+   "wrapOpenBefore": 6,
+   "nudges": 1,
+   "nudgesCounted": 1,
+   "nudgesUrgent": 1,
+   "pendingTotalNight": 21,
+   "trust": 0.78,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-10",
+   "weekday": 2,
+   "sleptH": 7.1,
+   "sleepDebtH": 6.6,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 14,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 18,
+   "laterAsks": 8,
+   "todayReminders": 3,
+   "todayChars": 580,
+   "askKinds": "milestone_overdue,relation_check,risk_digest,prep_question,calendar_publish_failed,step_question,event_propose,agent_blocked",
+   "decisions": 4,
+   "decisionS": 78,
+   "ans_milestone_overdue": 4,
+   "scheduledMin": 470,
+   "availableMin": 555,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 11,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 2,
+   "churnCompared": 2,
+   "pendingTotal": 17,
+   "pendingAsks": 14,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 8,
+    "assistantReviews": 0,
+    "total": 11
+   },
+   "asksOpenAll": 24,
+   "captureBacklog": 38,
+   "started": 4,
+   "workedMin": 99,
+   "captures": 1,
+   "skipped": 2,
+   "wrapRows": 6,
+   "wrapOpenBefore": 6,
+   "nudges": 3,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 17,
+   "trust": 0.81,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-11",
+   "weekday": 3,
+   "sleptH": 7.6,
+   "sleepDebtH": 6,
+   "usesApp": false,
+   "scheduledMin": 520,
+   "availableMin": 630,
+   "feasibility": 0.83,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 12,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 4,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 2,
+   "churnCompared": 2,
+   "pendingTotal": 18,
+   "pendingAsks": 15,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 8,
+    "assistantReviews": 0,
+    "total": 11
+   },
+   "asksOpenAll": 24,
+   "captureBacklog": 39,
+   "started": 3,
+   "workedMin": 87,
+   "skipped": 3,
+   "wrapRows": 6,
+   "wrapOpenBefore": 6,
+   "nudges": 0,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 18,
+   "trust": 0.84,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-12",
+   "weekday": 4,
+   "sleptH": 6.3,
+   "sleepDebtH": 6.8,
+   "usesApp": false,
+   "scheduledMin": 460,
+   "availableMin": 540,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 9,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 1,
+   "churnCompared": 1,
+   "pendingTotal": 20,
+   "pendingAsks": 17,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 8,
+    "assistantReviews": 0,
+    "total": 11
+   },
+   "asksOpenAll": 25,
+   "captureBacklog": 39,
+   "started": 2,
+   "workedMin": 57,
+   "captures": 2,
+   "skipped": 4,
+   "wrapRows": 6,
+   "wrapOpenBefore": 6,
+   "nudges": 0,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 20,
+   "trust": 0.87,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-13",
+   "weekday": 5,
+   "sleptH": 7.1,
+   "sleepDebtH": 6.7,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 12,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 17,
+   "laterAsks": 8,
+   "todayReminders": 2,
+   "todayChars": 504,
+   "askKinds": "waiting_due,prep_question,risk_digest,milestone_overdue,relation_check,calendar_publish_failed,step_question,event_propose,agent_blocked",
+   "decisions": 4,
+   "decisionS": 72,
+   "ans_waiting_due": 1,
+   "ans_prep_question": 1,
+   "ans_risk_digest": 1,
+   "ans_milestone_overdue": 1,
+   "scheduledMin": 535,
+   "availableMin": 555,
+   "feasibility": 0.96,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 10,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 2,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 2,
+   "churnCompared": 2,
+   "pendingTotal": 16,
+   "pendingAsks": 13,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 8,
+    "assistantReviews": 0,
+    "total": 11
+   },
+   "asksOpenAll": 21,
+   "captureBacklog": 41,
+   "started": 3,
+   "workedMin": 89,
+   "skipped": 1,
+   "captures": 3,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "nudges": 1,
+   "nudgesCounted": 1,
+   "nudgesUrgent": 1,
+   "pendingTotalNight": 16,
+   "trust": 0.9,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-14",
+   "weekday": 6,
+   "sleptH": 7.2,
+   "sleepDebtH": 6.5,
+   "usesApp": false,
+   "scheduledMin": 535,
+   "availableMin": 630,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 10,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 1,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 9,
+   "churnCompared": 10,
+   "pendingTotal": 17,
+   "pendingAsks": 14,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 8,
+    "assistantReviews": 0,
+    "total": 11
+   },
+   "asksOpenAll": 22,
+   "captureBacklog": 44,
+   "skipped": 4,
+   "captures": 2,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "wrapped": true,
+   "decisions": 4,
+   "decisionS": 16,
+   "falseDone": 1,
+   "nudges": 3,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 17,
+   "trust": 0.93,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-15",
+   "weekday": 0,
+   "sleptH": 7.1,
+   "sleepDebtH": 6.4,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 9,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 16,
+   "laterAsks": 7,
+   "todayReminders": 2,
+   "todayChars": 673,
+   "askKinds": "milestone_risk,risk_digest,relation_check,milestone_overdue,calendar_publish_failed,prep_question,step_question,event_propose,agent_blocked",
+   "decisions": 6,
+   "decisionS": 65,
+   "ans_milestone_risk": 1,
+   "ans_risk_digest": 1,
+   "snoozed": 1,
+   "ignored": 1,
+   "scheduledMin": 535,
+   "availableMin": 630,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 8,
+   "distinctTasksToday": 2,
+   "switchesToday": 1,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 10,
+   "churnCompared": 10,
+   "pendingTotal": 16,
+   "pendingAsks": 13,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 21,
+   "captureBacklog": 46,
+   "started": 2,
+   "workedMin": 72,
+   "captures": 6,
+   "skipped": 2,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "wrapped": true,
+   "nudges": 1,
+   "nudgesCounted": 1,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 16,
+   "trust": 0.93,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-16",
+   "weekday": 1,
+   "sleptH": 6.8,
+   "sleepDebtH": 6.6,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 10,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 15,
+   "laterAsks": 7,
+   "todayReminders": 2,
+   "todayChars": 597,
+   "askKinds": "risk_digest,prep_question,relation_check,milestone_overdue,calendar_publish_failed,step_question,event_propose,agent_blocked",
+   "decisions": 2,
+   "decisionS": 42,
+   "ans_risk_digest": 1,
+   "ans_prep_question": 1,
+   "snoozed": 2,
+   "scheduledMin": 470,
+   "availableMin": 555,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 7,
+   "distinctTasksToday": 2,
+   "switchesToday": 1,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 11,
+   "churnCompared": 11,
+   "pendingTotal": 14,
+   "pendingAsks": 11,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 20,
+   "captureBacklog": 52,
+   "started": 3,
+   "workedMin": 75,
+   "captures": 4,
+   "skipped": 1,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "nudges": 3,
+   "nudgesCounted": 2,
+   "nudgesUrgent": 3,
+   "pendingTotalNight": 14,
+   "trust": 0.94,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-17",
+   "weekday": 2,
+   "sleptH": 6.2,
+   "sleepDebtH": 7.4,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 12,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 13,
+   "laterAsks": 7,
+   "todayReminders": 3,
+   "todayChars": 763,
+   "askKinds": "relation_check,milestone_overdue,calendar_publish_failed,step_question,event_propose,agent_blocked",
+   "snoozed": 2,
+   "decisionS": 39,
+   "decisions": 2,
+   "ans_milestone_overdue": 1,
+   "ans_calendar_publish_failed": 1,
+   "scheduledMin": 470,
+   "availableMin": 555,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 8,
+   "distinctTasksToday": 2,
+   "switchesToday": 1,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 15,
+   "churnCompared": 15,
+   "pendingTotal": 12,
+   "pendingAsks": 9,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 18,
+   "captureBacklog": 56,
+   "started": 3,
+   "workedMin": 78,
+   "captures": 3,
+   "skipped": 1,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "nudges": 1,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 1,
+   "pendingTotalNight": 13,
+   "trust": 0.95,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-18",
+   "weekday": 3,
+   "sleptH": 6.4,
+   "sleepDebtH": 7.9,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 9,
+   "todayNextCards": 0,
+   "todayAsks": 4,
+   "weekAsks": 13,
+   "laterAsks": 7,
+   "todayReminders": 2,
+   "todayChars": 752,
+   "askKinds": "milestone_risk,relation_check,calendar_publish_failed,step_question,event_propose,agent_blocked",
+   "decisions": 3,
+   "decisionS": 73,
+   "ans_milestone_risk": 1,
+   "ignored": 5,
+   "snoozed": 6,
+   "ans_calendar_publish_failed": 1,
+   "approvalsVisit": true,
+   "ans_step_question": 1,
+   "scheduledMin": 535,
+   "availableMin": 630,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 8,
+   "distinctTasksToday": 2,
+   "switchesToday": 1,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 14,
+   "churnCompared": 14,
+   "pendingTotal": 7,
+   "pendingAsks": 4,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 17,
+   "captureBacklog": 59,
+   "skipped": 2,
+   "started": 2,
+   "workedMin": 56,
+   "captures": 3,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "nudges": 5,
+   "nudgesCounted": 1,
+   "nudgesUrgent": 1,
+   "pendingTotalNight": 8,
+   "trust": 0.95,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-19",
+   "weekday": 4,
+   "sleptH": 7.4,
+   "sleepDebtH": 7.3,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 11,
+   "todayNextCards": 0,
+   "todayAsks": 3,
+   "weekAsks": 10,
+   "laterAsks": 7,
+   "todayReminders": 2,
+   "todayChars": 582,
+   "askKinds": "milestone_risk,milestone_overdue,calendar_publish_failed,event_propose,step_question,agent_blocked",
+   "decisions": 3,
+   "decisionS": 60,
+   "ans_milestone_risk": 1,
+   "ans_milestone_overdue": 1,
+   "ans_calendar_publish_failed": 1,
+   "scheduledMin": 460,
+   "availableMin": 540,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 7,
+   "distinctTasksToday": 2,
+   "switchesToday": 1,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 14,
+   "churnCompared": 14,
+   "pendingTotal": 10,
+   "pendingAsks": 7,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 17,
+   "captureBacklog": 62,
+   "started": 4,
+   "workedMin": 121,
+   "captures": 3,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "nudges": 1,
+   "nudgesCounted": 1,
+   "nudgesUrgent": 1,
+   "pendingTotalNight": 11,
+   "trust": 0.95,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-20",
+   "weekday": 5,
+   "sleptH": 7.8,
+   "sleepDebtH": 6.4,
+   "usesApp": false,
+   "scheduledMin": 450,
+   "availableMin": 555,
+   "feasibility": 0.81,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 7,
+   "distinctTasksToday": 2,
+   "switchesToday": 1,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 15,
+   "churnCompared": 15,
+   "pendingTotal": 12,
+   "pendingAsks": 9,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 19,
+   "captureBacklog": 65,
+   "skipped": 3,
+   "captures": 3,
+   "started": 1,
+   "workedMin": 33,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "nudges": 0,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 12,
+   "trust": 0.95,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-21",
+   "weekday": 6,
+   "sleptH": 7.4,
+   "sleepDebtH": 6,
+   "usesApp": false,
+   "scheduledMin": 535,
+   "availableMin": 630,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 8,
+   "distinctTasksToday": 2,
+   "switchesToday": 1,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 16,
+   "churnCompared": 16,
+   "pendingTotal": 13,
+   "pendingAsks": 10,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 20,
+   "captureBacklog": 68,
+   "skipped": 4,
+   "started": 1,
+   "workedMin": 40,
+   "captures": 3,
+   "wrapRows": 5,
+   "wrapOpenBefore": 5,
+   "nudges": 0,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 13,
+   "trust": 0.95,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-22",
+   "weekday": 0,
+   "sleptH": 7.1,
+   "sleepDebtH": 6,
+   "usesApp": false,
+   "scheduledMin": 535,
+   "availableMin": 630,
+   "feasibility": 0.85,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 9,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 1,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 15,
+   "churnCompared": 15,
+   "pendingTotal": 13,
+   "pendingAsks": 10,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 20,
+   "captureBacklog": 71,
+   "started": 4,
+   "workedMin": 103,
+   "skipped": 2,
+   "captures": 2,
+   "wrapRows": 6,
+   "wrapOpenBefore": 6,
+   "nudges": 8,
+   "nudgesCounted": 4,
+   "nudgesUrgent": 4,
+   "pendingTotalNight": 13,
+   "trust": 0.95,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-23",
+   "weekday": 1,
+   "sleptH": 7.7,
+   "sleepDebtH": 5.4,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 9,
+   "todayNextCards": 0,
+   "todayAsks": 3,
+   "weekAsks": 10,
+   "laterAsks": 7,
+   "todayReminders": 2,
+   "todayChars": 474,
+   "askKinds": "milestone_overdue,risk_digest,calendar_publish_failed,event_propose,step_question,agent_blocked",
+   "decisions": 3,
+   "decisionS": 52,
+   "ans_milestone_overdue": 1,
+   "ans_risk_digest": 1,
+   "ans_calendar_publish_failed": 1,
+   "scheduledMin": 455,
+   "availableMin": 555,
+   "feasibility": 0.82,
+   "unplacedNone": 8,
+   "unplacedPartial": 0,
+   "blocksToday": 7,
+   "distinctTasksToday": 2,
+   "switchesToday": 1,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 14,
+   "churnCompared": 15,
+   "pendingTotal": 10,
+   "pendingAsks": 7,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 17,
+   "captureBacklog": 73,
+   "started": 3,
+   "workedMin": 105,
+   "captures": 7,
+   "skipped": 1,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "nudges": 1,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 1,
+   "pendingTotalNight": 11,
+   "trust": 0.95,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-24",
+   "weekday": 2,
+   "sleptH": 6.2,
+   "sleepDebtH": 6.4,
+   "usesApp": true,
+   "opens": 1,
+   "todayTimelineItems": 11,
+   "todayNextCards": 0,
+   "todayAsks": 3,
+   "weekAsks": 10,
+   "laterAsks": 7,
+   "todayReminders": 2,
+   "todayChars": 518,
+   "askKinds": "milestone_overdue,risk_digest,calendar_publish_failed,event_propose,step_question,agent_blocked",
+   "decisions": 7,
+   "decisionS": 69,
+   "ans_milestone_overdue": 1,
+   "ans_risk_digest": 1,
+   "ans_calendar_publish_failed": 1,
+   "scheduledMin": 530,
+   "availableMin": 555,
+   "feasibility": 0.95,
+   "unplacedNone": 9,
+   "unplacedPartial": 0,
+   "blocksToday": 8,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 16,
+   "churnCompared": 19,
+   "pendingTotal": 10,
+   "pendingAsks": 7,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 17,
+   "captureBacklog": 80,
+   "started": 4,
+   "workedMin": 103,
+   "captures": 3,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "wrapped": true,
+   "falseDone": 1,
+   "nudges": 3,
+   "nudgesCounted": 2,
+   "nudgesUrgent": 3,
+   "pendingTotalNight": 11,
+   "trust": 0.95,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-25",
+   "weekday": 3,
+   "sleptH": 7.5,
+   "sleepDebtH": 5.9,
+   "usesApp": false,
+   "scheduledMin": 530,
+   "availableMin": 630,
+   "feasibility": 0.84,
+   "unplacedNone": 9,
+   "unplacedPartial": 0,
+   "blocksToday": 7,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 16,
+   "churnCompared": 16,
+   "pendingTotal": 15,
+   "pendingAsks": 12,
+   "pendingLater": {
+    "workOrders": 3,
+    "milestoneDrafts": 0,
+    "asks": 7,
+    "assistantReviews": 0,
+    "total": 10
+   },
+   "asksOpenAll": 19,
+   "captureBacklog": 83,
+   "started": 4,
+   "workedMin": 135,
+   "captures": 1,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "nudges": 3,
+   "nudgesCounted": 3,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 15,
+   "trust": 0.95,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-26",
+   "weekday": 4,
+   "sleptH": 7.1,
+   "sleepDebtH": 5.9,
+   "usesApp": false,
+   "scheduledMin": 510,
+   "availableMin": 540,
+   "feasibility": 0.94,
+   "unplacedNone": 9,
+   "unplacedPartial": 1,
+   "blocksToday": 8,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 17,
+   "churnCompared": 17,
+   "pendingTotal": 17,
+   "pendingAsks": 13,
+   "pendingLater": {
+    "workOrders": 2,
+    "milestoneDrafts": 0,
+    "asks": 6,
+    "assistantReviews": 0,
+    "total": 8
+   },
+   "asksOpenAll": 19,
+   "captureBacklog": 84,
+   "captures": 1,
+   "skipped": 4,
+   "started": 1,
+   "workedMin": 23,
+   "wrapRows": 5,
+   "wrapOpenBefore": 5,
+   "nudges": 3,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 17,
+   "trust": 0.95,
+   "fatigue": 0
+  },
+  {
+   "day": "2026-11-27",
+   "weekday": 5,
+   "sleptH": 7.1,
+   "sleepDebtH": 5.9,
+   "usesApp": false,
+   "scheduledMin": 570,
+   "availableMin": 630,
+   "feasibility": 0.9,
+   "unplacedNone": 10,
+   "unplacedPartial": 0,
+   "blocksToday": 9,
+   "distinctTasksToday": 3,
+   "switchesToday": 2,
+   "blocksUnder30": 0,
+   "firstActionCoverage": 1,
+   "blocksWithoutStepPlan": 0,
+   "gatedViolations": 0,
+   "churnMoved": 18,
+   "churnCompared": 18,
+   "pendingTotal": 18,
+   "pendingAsks": 14,
+   "pendingLater": {
+    "workOrders": 2,
+    "milestoneDrafts": 0,
+    "asks": 6,
+    "assistantReviews": 0,
+    "total": 8
+   },
+   "asksOpenAll": 20,
+   "captureBacklog": 85,
+   "started": 3,
+   "workedMin": 103,
+   "captures": 3,
+   "skipped": 1,
+   "wrapRows": 4,
+   "wrapOpenBefore": 4,
+   "nudges": 0,
+   "nudgesCounted": 0,
+   "nudgesUrgent": 0,
+   "pendingTotalNight": 18,
+   "trust": 0.95,
+   "fatigue": 0
+  }
+ ],
+ "deadlines": [
+  {
+   "id": "032b3b59-c3b7-4c8c-81db-6a602e78259b",
+   "title": "完成西湖 NeuroSim 仿真",
+   "line": "research",
+   "due": "2026-10-25",
+   "finalDue": "2026-11-07",
+   "state": "active",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "7507f8b9-d341-42bc-be30-bb52aa6b5c33",
+   "title": "确认 sleep replay 评审时间",
+   "line": "research",
+   "due": "2026-10-23",
+   "finalDue": "2026-11-08",
+   "state": "preparing",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "backplan-1480ef76-d949-421b-9dc9-7f72009be8ed",
+   "title": "选定首轮选题",
+   "line": "media",
+   "due": "2026-11-02",
+   "finalDue": "2026-11-02",
+   "state": "awaiting_plan_approval",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "datepair-ece555-hw3",
+   "title": "完成 ECE 555 作业 3",
+   "line": "research",
+   "due": "2026-11-02",
+   "finalDue": "2026-11-02",
+   "state": "active",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "datepair-ece555-hw4",
+   "title": "完成 ECE 555 作业 4",
+   "line": "research",
+   "due": "2026-11-20",
+   "finalDue": "2026-11-20",
+   "state": "approved",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "backplan-b65e8541-abb4-4df7-a092-703e4b0627b0",
+   "title": "制作科研首轮内容包",
+   "line": "media",
+   "due": "2026-10-31",
+   "finalDue": "2026-11-08",
+   "state": "active",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "backplan-db88634d-57b5-4bef-b04f-d1cad7b17a15",
+   "title": "编制 Crossline 自用记录",
+   "line": "startup",
+   "due": "2026-10-23",
+   "finalDue": "2026-11-18",
+   "state": "approved",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "backplan-81591074-471a-43c4-b7d7-c729e2c31ce4",
+   "title": "汇集当前论文材料",
+   "line": "research",
+   "due": "2026-10-31",
+   "finalDue": "2026-11-08",
+   "state": "active",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "backplan-4e6113c3-f75b-4d13-8337-1e9725dd5db0",
+   "title": "取得科研过程样本包",
+   "line": "media",
+   "due": "2026-10-31",
+   "finalDue": "2026-11-08",
+   "state": "active",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "recording-91c2456b-6fbb-4543-84d6-7fa3d64eb662-0",
+   "title": "确定 sleep replay 周五会议议题",
+   "line": "research",
+   "due": "2026-10-22",
+   "finalDue": "2026-10-22",
+   "state": "archived",
+   "acceptedDay": null,
+   "archivedBy": "到期整理：提议的截止 2026-10-22 已过，仍未批准"
+  },
+  {
+   "id": "backplan-3bce3159-6fc6-465d-8833-f8b5893b050c",
+   "title": "发布小红书首轮科研内容",
+   "line": "media",
+   "due": "2026-11-12",
+   "finalDue": "2026-11-12",
+   "state": "awaiting_plan_approval",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "backplan-cfecb852-08a8-4501-8c73-fdbdf76789a6",
+   "title": "完成 ECE 548 作业 1、2 订正",
+   "line": "research",
+   "due": "2026-10-27",
+   "finalDue": "2026-10-27",
+   "state": "archived",
+   "acceptedDay": null,
+   "archivedBy": "到期整理：考试 10/27 已过，备考不再安排"
+  },
+  {
+   "id": "backplan-1e8c2187-0f3f-436d-abad-f836e53e64ec",
+   "title": "审定西湖论文结果叙事",
+   "line": "research",
+   "due": "2026-10-31",
+   "finalDue": "2026-11-08",
+   "state": "active",
+   "acceptedDay": null,
+   "archivedBy": null
+  },
+  {
+   "id": "backplan-829139f4-48d0-458f-b375-1fd10cd95cbe",
+   "title": "完成 ECE 555 小测3练习",
+   "line": "research",
+   "due": "2026-11-23",
+   "finalDue": "2026-11-23",
+   "state": "active",
+   "acceptedDay": null,
+   "archivedBy": null
+  }
+ ],
+ "truth": {
+  "steps": 21,
+  "done": 14
+ },
+ "started": 101,
+ "events": [
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T09:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[{\"taskId\":\"agent-7cd62a02-6\",\"title\":\"形成课程讲义、作业与样题的完整材料集及目录。\",\"left\":2},{\"taskId\":\"agent-fdfd52f0-5\",\"title\":\"形成首轮科研问题、可核查依据及材料位置清单。\",\"left\":1},{\"taskId\":\"agent-fdfd52f0-v1s5-4\",\"title\":\"形成首轮科研问题、可核查依据及材料位置清单。 · 固化问题与依据清单\",\"left\":1},{\"taskId\":\"agent-fdfd52f0-v1s3-3\",\"title\":\"形成首轮科研问题、可核查依据及材料位置清单。 · 形成首轮问题候选包\",\"left\":1},{\"taskId\":\"agent-b4f44be1-v2s1-1\",\"title\":\"核查 Host"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T14:42:00.000Z",
+   "kind": "return_page",
+   "detail": "7d away, 12 items"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T14:43:00.000Z",
+   "kind": "nudge:block_start",
+   "detail": "09:45 做「完成 ECE 555 作业 3 · 标注首题约束」（20 分），关系到 11/2 的截止。第一步：打开作业 3 题面，在首题旁标注输入、输出和限制。已备好：material-inventory.csv、material-ca"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T14:43:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「审定西湖论文结果叙事」按保守估时还需 3.9 小时，10/31 截止前只剩 2.8 小时 可用，来不及。"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T14:43:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「汇集当前论文材料」余量已不足一天：10/31 截止前可用 3 小时，还需 15 分钟。最晚现在开始。"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T14:43:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:45「完成 ECE 555 作业 3」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T14:46:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 标注首题约束 p=0.86 e=0.79 d=0.65"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T15:11:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 独立完成首题草稿 p=0.89 e=0.79 d=0.65"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T15:41:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「标注首题约束」已计时 50 分钟，比通常的 15 分钟多一半。"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T17:31:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是15:30「汇集当前论文材料」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T18:01:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「完成 ECE 555 作业 3」余量已不足一天：11/2 截止前可用 14.5 小时，还需 4.2 小时。最晚现在开始。"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T20:31:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是15:35「完成 ECE 555 作业 3」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T20:56:00.000Z",
+   "kind": "nudge:block_start",
+   "detail": "16:00 做「汇集当前论文材料 · 查明目标投稿规范」（15 分），关系到 10/31 的截止。第一步：打开存有「目标投稿规范」的页面或账户。已备好：当前版本文件清单.md、当前版本文件清单.csv。"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T21:01:00.000Z",
+   "kind": "start",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.71 e=0.69 d=0.75"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T21:16:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「查明目标投稿规范」已计时 15 分钟，比通常的 10 分钟多一半。"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T21:16:00.000Z",
+   "kind": "start",
+   "detail": "取得科研过程样本包 · 向研究主线确认版本 p=0.88 e=0.69 d=0.45"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T22:01:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay 评审时间 · 批准并发送约期沟通 p=0.89 e=0.69 d=0.3"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-29T22:01:00.000Z",
+   "kind": "start_refused",
+   "detail": "7507f8b9-d341-42bc-be30-bb52aa6b5c33 MATERIALS_PREPARING"
+  },
+  {
+   "day": "2026-10-29",
+   "at": "2026-10-30T01:56:00.000Z",
+   "kind": "start",
+   "detail": "制作科研首轮内容包 · 选定两个真实案例 p=0.91 e=0.71 d=0.45"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T09:00:00.000Z",
+   "kind": "return_tidy",
+   "detail": "{\"archived\":0}"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T09:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T14:45:00.000Z",
+   "kind": "skip",
+   "detail": "完成 ECE 555 作业 3 · 标注首题约束 p=0.56 e=0.80 d=0.65"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T15:06:00.000Z",
+   "kind": "nudge:block_start",
+   "detail": "10:10 做「完成 ECE 555 作业 3 · 独立完成首题草稿」（90 分），关系到 11/2 的截止。第一步：在草稿页写下首题已知量、目标量和第一条方程或设计约束。已备好：material-inventory.csv、materia"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T15:11:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 独立完成首题草稿 p=0.63 e=0.80 d=0.65"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T21:16:00.000Z",
+   "kind": "skip",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.35 e=0.70 d=0.75"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T21:31:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "16:15–16:30 的「汇集当前论文材料 · 查明目标投稿规范」做得怎么样？"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T21:31:00.000Z",
+   "kind": "start",
+   "detail": "取得科研过程样本包 · 向研究主线确认版本 p=0.76 e=0.70 d=0.45"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T22:01:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「向研究主线确认版本」已计时 75 分钟，比通常的 35 分钟多一半。"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T22:16:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay 评审时间 · 批准并发送约期沟通 p=0.73 e=0.70 d=0.3"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T22:16:00.000Z",
+   "kind": "start_refused",
+   "detail": "7507f8b9-d341-42bc-be30-bb52aa6b5c33 EXECUTION_NOT_STARTABLE"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-30T22:46:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "17:15–17:45 的「确认 sleep replay 评审时间 · 批准并发送约期沟通」做得怎么样？"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-31T01:56:00.000Z",
+   "kind": "start",
+   "detail": "制作科研首轮内容包 · 选定两个真实案例 p=0.77 e=0.72 d=0.45"
+  },
+  {
+   "day": "2026-10-30",
+   "at": "2026-10-31T03:51:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "20:55–22:30 的「制作科研首轮内容包 · 选定两个真实案例」做得怎么样？"
+  },
+  {
+   "day": "2026-10-31",
+   "at": "2026-10-31T09:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-10-31",
+   "at": "2026-10-31T14:01:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 标注首题约束 p=0.89 e=0.75 d=0.65"
+  },
+  {
+   "day": "2026-10-31",
+   "at": "2026-10-31T14:26:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 独立完成首题草稿 p=0.94 e=0.75 d=0.65"
+  },
+  {
+   "day": "2026-10-31",
+   "at": "2026-10-31T16:26:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 复核首题草稿 p=0.94 e=0.75 d=0.65"
+  },
+  {
+   "day": "2026-10-31",
+   "at": "2026-10-31T19:31:00.000Z",
+   "kind": "start",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.68 e=0.55 d=0.75"
+  },
+  {
+   "day": "2026-10-31",
+   "at": "2026-10-31T19:46:00.000Z",
+   "kind": "start",
+   "detail": "取得科研过程样本包 · 向研究主线确认版本 p=0.85 e=0.55 d=0.45"
+  },
+  {
+   "day": "2026-10-31",
+   "at": "2026-10-31T20:31:00.000Z",
+   "kind": "skip",
+   "detail": "制作科研首轮内容包 · 选定两个真实案例 p=0.88 e=0.65 d=0.45"
+  },
+  {
+   "day": "2026-11-01",
+   "at": "2026-11-01T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-01",
+   "at": "2026-11-01T15:03:00.000Z",
+   "kind": "return_page",
+   "detail": "7d away, 1 items"
+  },
+  {
+   "day": "2026-11-01",
+   "at": "2026-11-01T15:06:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 标注首题约束 p=0.94 e=0.73 d=0.65"
+  },
+  {
+   "day": "2026-11-01",
+   "at": "2026-11-01T15:31:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 独立完成首题草稿 p=0.97 e=0.73 d=0.65"
+  },
+  {
+   "day": "2026-11-01",
+   "at": "2026-11-01T17:31:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 复核首题草稿 p=0.97 e=0.73 d=0.65"
+  },
+  {
+   "day": "2026-11-01",
+   "at": "2026-11-01T20:31:00.000Z",
+   "kind": "start",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.70 e=0.53 d=0.75"
+  },
+  {
+   "day": "2026-11-01",
+   "at": "2026-11-01T20:46:00.000Z",
+   "kind": "skip",
+   "detail": "取得科研过程样本包 · 向研究主线确认版本 p=0.85 e=0.53 d=0.45"
+  },
+  {
+   "day": "2026-11-01",
+   "at": "2026-11-01T21:31:00.000Z",
+   "kind": "start",
+   "detail": "制作科研首轮内容包 · 选定两个真实案例 p=0.90 e=0.63 d=0.45"
+  },
+  {
+   "day": "2026-11-02",
+   "at": "2026-11-02T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[{\"id\":\"proposed-4bcb5477-a052-455d-94cc-98a19c10d5bf\",\"title\":\"Crossline 科研任务数据结构已通过真实样本校准\",\"from\":\"2026-11-01\",\"to\":\"2026-11-05\"},{\"id\":\"proposed-3e7c0d30-abac-4b2c-856b-c1dc7d0cdff1\",\"title\":\"Crossline 自用效果获得验证\",\"from\":\"2026-11-03\",\"to\":\"2026-11-07\"}],\"asked\":[],\"archived\":[],\"drafts\":[],\"opId\":\"op-mvz38740-9323a4\"}"
+  },
+  {
+   "day": "2026-11-02",
+   "at": "2026-11-02T14:20:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:00「完成 ECE 555 作业 3」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-02",
+   "at": "2026-11-02T15:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:20「完成 ECE 555 作业 3」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-02",
+   "at": "2026-11-02T15:01:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 标注首题约束 p=0.98 e=0.67 d=0.65"
+  },
+  {
+   "day": "2026-11-02",
+   "at": "2026-11-02T15:26:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 独立完成首题草稿 p=0.99 e=0.67 d=0.65"
+  },
+  {
+   "day": "2026-11-02",
+   "at": "2026-11-02T17:26:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 复核首题草稿 p=0.99 e=0.67 d=0.65"
+  },
+  {
+   "day": "2026-11-02",
+   "at": "2026-11-02T18:31:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是14:00「完成 ECE 555 作业 3」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-02",
+   "at": "2026-11-02T23:11:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 作业 3 · 独立完成首题草稿 p=0.99 e=0.57 d=0.65"
+  },
+  {
+   "day": "2026-11-02",
+   "at": "2026-11-03T04:11:00.000Z",
+   "kind": "start",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.76 e=0.59 d=0.75"
+  },
+  {
+   "day": "2026-11-02",
+   "at": "2026-11-03T04:26:00.000Z",
+   "kind": "skip",
+   "detail": "取得科研过程样本包 · 向研究主线确认版本 p=0.86 e=0.59 d=0.45"
+  },
+  {
+   "day": "2026-11-03",
+   "at": "2026-11-03T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[{\"id\":\"proposed-c09986ed-6718-4cc8-a4c7-e30a6d449848\",\"title\":\"“科研如何实际发生”首轮内容获得真实读者反馈\",\"deadline\":\"2026-11-02\"}],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-03",
+   "at": "2026-11-03T15:06:00.000Z",
+   "kind": "start",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.45 e=0.61 d=0.75"
+  },
+  {
+   "day": "2026-11-03",
+   "at": "2026-11-03T15:21:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「查明目标投稿规范」已计时 75 分钟，比通常的 10 分钟多一半。"
+  },
+  {
+   "day": "2026-11-03",
+   "at": "2026-11-03T15:21:00.000Z",
+   "kind": "start",
+   "detail": "审定西湖论文结果叙事 · 判定三项结果论证主张 p=0.45 e=0.61 d=0.75"
+  },
+  {
+   "day": "2026-11-03",
+   "at": "2026-11-03T20:36:00.000Z",
+   "kind": "start",
+   "detail": "取得科研过程样本包 · 向研究主线确认版本 p=0.64 e=0.41 d=0.45"
+  },
+  {
+   "day": "2026-11-03",
+   "at": "2026-11-03T21:06:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「向研究主线确认版本」已计时 165 分钟，比通常的 35 分钟多一半。"
+  },
+  {
+   "day": "2026-11-03",
+   "at": "2026-11-03T21:21:00.000Z",
+   "kind": "skip",
+   "detail": "制作科研首轮内容包 · 选定两个真实案例 p=0.62 e=0.51 d=0.45"
+  },
+  {
+   "day": "2026-11-03",
+   "at": "2026-11-03T22:56:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "15:20–16:55 的「制作科研首轮内容包 · 选定两个真实案例」做得怎么样？"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T14:12:00.000Z",
+   "kind": "return_page",
+   "detail": "7d away, 1 items"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T15:06:00.000Z",
+   "kind": "start",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.79 e=0.58 d=0.75"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T15:21:00.000Z",
+   "kind": "start",
+   "detail": "审定西湖论文结果叙事 · 判定三项结果论证主张 p=0.84 e=0.58 d=0.75"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T16:26:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "09:20–10:20 的「审定西湖论文结果叙事 · 判定三项结果论证主张」做得怎么样？"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T16:41:00.000Z",
+   "kind": "start",
+   "detail": "审定西湖论文结果叙事 · 判定三项结果论证主张 p=0.87 e=0.58 d=0.75"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T17:46:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "10:40–11:40 的「审定西湖论文结果叙事 · 判定三项结果论证主张」做得怎么样？"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T20:21:00.000Z",
+   "kind": "skip",
+   "detail": "取得科研过程样本包 · 向研究主线确认版本 p=0.85 e=0.38 d=0.45"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T21:06:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "14:20–15:05 的「取得科研过程样本包 · 向研究主线确认版本」做得怎么样？"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T21:06:00.000Z",
+   "kind": "start",
+   "detail": "制作科研首轮内容包 · 选定两个真实案例 p=0.87 e=0.48 d=0.45"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T21:36:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「选定两个真实案例」已计时 315 分钟，比通常的 45 分钟多一半。"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T22:56:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "15:05–16:40 的「制作科研首轮内容包 · 选定两个真实案例」做得怎么样？"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-04T23:41:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay 评审时间 · 批准并发送约期沟通 p=0.85 e=0.48 d=0.3"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-05T00:01:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "17:40–18:00 的「确认 sleep replay 评审时间 · 批准并发送约期沟通」做得怎么样？"
+  },
+  {
+   "day": "2026-11-04",
+   "at": "2026-11-05T03:26:00.000Z",
+   "kind": "start",
+   "detail": "完成西湖 NeuroSim 仿真 · 交付图表与数据包 p=0.85 e=0.50 d=0.75"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[\"agent-b4f44be1-v3s1-2\",\"agent-2e78259b-v1s5-4\",\"agent-2e78259b-v1s2-2\"],\"shifted\":[],\"asked\":[],\"archived\":[{\"id\":\"cap-mail-4c5b03f7-7f2\",\"title\":\"核实 OpenAI 账户新登录\",\"why\":\"提议超过 14 天无人处理\"},{\"id\":\"cap-mail-b4367366-4b3\",\"title\":\"核实 Google 账户新登录\",\"why\":\"提议超过 14 天无人处理\"}],\"drafts\":[],\"opId\":\"op-mw3djr40-742bef\"}"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T15:21:00.000Z",
+   "kind": "start",
+   "detail": "完成西湖 NeuroSim 仿真 · 交付图表与数据包 p=0.92 e=0.60 d=0.75"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T16:21:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "09:20–10:15 的「完成西湖 NeuroSim 仿真 · 交付图表与数据包」做得怎么样？"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T16:21:00.000Z",
+   "kind": "skip",
+   "detail": "完成西湖 NeuroSim 仿真 · 核验图表科学结论 p=0.92 e=0.60 d=0.75"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T17:51:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "10:20–11:50 的「完成西湖 NeuroSim 仿真 · 核验图表科学结论」做得怎么样？"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T21:31:00.000Z",
+   "kind": "start",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.81 e=0.50 d=0.75"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T21:46:00.000Z",
+   "kind": "start",
+   "detail": "取得科研过程样本包 · 向研究主线确认版本 p=0.84 e=0.50 d=0.45"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T22:31:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay 评审时间 · 批准并发送约期沟通 p=0.85 e=0.50 d=0.3"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T22:31:00.000Z",
+   "kind": "start_refused",
+   "detail": "7507f8b9-d341-42bc-be30-bb52aa6b5c33 EXECUTION_NOT_STARTABLE"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T23:01:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "16:30–17:00 的「确认 sleep replay 评审时间 · 批准并发送约期沟通」做得怎么样？"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T23:21:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay 评审时间 · 界定机制规格与待决问题 p=0.89 e=0.50 d=0.3"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-05T23:21:00.000Z",
+   "kind": "start_refused",
+   "detail": "7507f8b9-d341-42bc-be30-bb52aa6b5c33 EXECUTION_NOT_STARTABLE"
+  },
+  {
+   "day": "2026-11-05",
+   "at": "2026-11-06T00:01:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "17:20–18:00 的「确认 sleep replay 评审时间 · 界定机制规格与待决问题」做得怎么样？"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-06T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[{\"id\":\"proposed-4bcb5477-a052-455d-94cc-98a19c10d5bf\",\"title\":\"Crossline 科研任务数据结构已通过真实样本校准\",\"from\":\"2026-11-05\",\"to\":\"2026-11-09\"},{\"id\":\"proposed-3e7c0d30-abac-4b2c-856b-c1dc7d0cdff1\",\"title\":\"Crossline 自用效果获得验证\",\"from\":\"2026-11-07\",\"to\":\"2026-11-11\"}],\"asked\":[],\"archived\":[],\"drafts\":[],\"opId\":\"op-mw4szls0-000e16\"}"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-06T14:39:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:00「完成西湖 NeuroSim 仿真」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-06T15:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:05「完成西湖 NeuroSim 仿真」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-06T15:06:00.000Z",
+   "kind": "start",
+   "detail": "完成西湖 NeuroSim 仿真 · 交付图表与数据包 p=0.76 e=0.59 d=0.75"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-06T16:06:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "09:05–10:00 的「完成西湖 NeuroSim 仿真 · 交付图表与数据包」做得怎么样？"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-06T16:06:00.000Z",
+   "kind": "start",
+   "detail": "完成西湖 NeuroSim 仿真 · 核验图表科学结论 p=0.81 e=0.59 d=0.75"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-06T17:06:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "10:05–11:00 的「完成西湖 NeuroSim 仿真 · 核验图表科学结论」做得怎么样？"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-06T19:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是14:00「完成西湖 NeuroSim 仿真」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-06T22:51:00.000Z",
+   "kind": "skip",
+   "detail": "完成西湖 NeuroSim 仿真 · 核验图表科学结论 p=0.78 e=0.49 d=0.75"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-06T23:51:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "16:50–17:50 的「完成西湖 NeuroSim 仿真 · 核验图表科学结论」做得怎么样？"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-07T03:21:00.000Z",
+   "kind": "start",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.58 e=0.51 d=0.75"
+  },
+  {
+   "day": "2026-11-06",
+   "at": "2026-11-07T03:36:00.000Z",
+   "kind": "start",
+   "detail": "取得科研过程样本包 · 向研究主线确认版本 p=0.63 e=0.51 d=0.45"
+  },
+  {
+   "day": "2026-11-07",
+   "at": "2026-11-07T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-07",
+   "at": "2026-11-07T15:06:00.000Z",
+   "kind": "start",
+   "detail": "完成西湖 NeuroSim 仿真 · 交付图表与数据包 p=0.93 e=0.57 d=0.75"
+  },
+  {
+   "day": "2026-11-07",
+   "at": "2026-11-07T16:06:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "09:05–10:00 的「完成西湖 NeuroSim 仿真 · 交付图表与数据包」做得怎么样？"
+  },
+  {
+   "day": "2026-11-07",
+   "at": "2026-11-07T16:06:00.000Z",
+   "kind": "start",
+   "detail": "完成西湖 NeuroSim 仿真 · 核验图表科学结论 p=0.94 e=0.57 d=0.75"
+  },
+  {
+   "day": "2026-11-07",
+   "at": "2026-11-07T17:06:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "10:05–11:00 的「完成西湖 NeuroSim 仿真 · 核验图表科学结论」做得怎么样？"
+  },
+  {
+   "day": "2026-11-07",
+   "at": "2026-11-07T20:41:00.000Z",
+   "kind": "start",
+   "detail": "完成西湖 NeuroSim 仿真 · 交付图表与数据包 p=0.92 e=0.37 d=0.75"
+  },
+  {
+   "day": "2026-11-07",
+   "at": "2026-11-07T23:11:00.000Z",
+   "kind": "start",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.71 e=0.47 d=0.75"
+  },
+  {
+   "day": "2026-11-07",
+   "at": "2026-11-07T23:26:00.000Z",
+   "kind": "skip",
+   "detail": "取得科研过程样本包 · 向研究主线确认版本 p=0.76 e=0.47 d=0.45"
+  },
+  {
+   "day": "2026-11-08",
+   "at": "2026-11-08T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[{\"id\":\"proposed-14140751-64c3-4805-bd2b-6773f27bee4e\",\"title\":\"真实数据仿真图表已获合作师兄接收\",\"deadline\":\"2026-11-07\"}],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-08",
+   "at": "2026-11-08T15:01:00.000Z",
+   "kind": "skip",
+   "detail": "汇集当前论文材料 · 查明目标投稿规范 p=0.93 e=0.57 d=0.75"
+  },
+  {
+   "day": "2026-11-08",
+   "at": "2026-11-08T15:16:00.000Z",
+   "kind": "start",
+   "detail": "审定西湖论文结果叙事 · 判定三项结果论证主张 p=0.93 e=0.57 d=0.75"
+  },
+  {
+   "day": "2026-11-08",
+   "at": "2026-11-08T16:36:00.000Z",
+   "kind": "start",
+   "detail": "审定西湖论文结果叙事 · 判定三项结果论证主张 p=0.95 e=0.57 d=0.75"
+  },
+  {
+   "day": "2026-11-08",
+   "at": "2026-11-08T22:11:00.000Z",
+   "kind": "start",
+   "detail": "审定西湖论文结果叙事 · 判定三项结果论证主张 p=0.93 e=0.47 d=0.75"
+  },
+  {
+   "day": "2026-11-08",
+   "at": "2026-11-09T04:21:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay 评审时间 · 批准并发送约期沟通 p=0.95 e=0.49 d=0.3"
+  },
+  {
+   "day": "2026-11-08",
+   "at": "2026-11-09T04:21:00.000Z",
+   "kind": "start_refused",
+   "detail": "7507f8b9-d341-42bc-be30-bb52aa6b5c33 EXECUTION_NOT_STARTABLE"
+  },
+  {
+   "day": "2026-11-09",
+   "at": "2026-11-09T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[{\"id\":\"proposed-fcb32583-2997-44c3-ae8c-e79e03b70832\",\"title\":\"“科研如何实际发生”首轮内容包已具备双形式发布依据\",\"deadline\":\"2026-11-08\"},{\"id\":\"proposed-2b21b92a-eacf-4357-a7b0-15c4810599a7\",\"title\":\"Sleep replay 硬件机制已通过导师设计评审\",\"deadline\":\"2026-11-08\"},{\"id\":\"proposed-6c85ba20-6280-43d9-96d1-24fd7789ea72\",\"title\":\"西湖合作论文已在截止日前投出\",\"deadline\":\"2026-11-08\"}]"
+  },
+  {
+   "day": "2026-11-09",
+   "at": "2026-11-09T15:06:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.25 e=0.53 d=0.65"
+  },
+  {
+   "day": "2026-11-09",
+   "at": "2026-11-09T16:11:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.31 e=0.53 d=0.65"
+  },
+  {
+   "day": "2026-11-09",
+   "at": "2026-11-09T20:06:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 试填1条真实反馈 p=0.18 e=0.33 d=0.45"
+  },
+  {
+   "day": "2026-11-09",
+   "at": "2026-11-09T22:06:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 检验3条反馈的重复信号 p=0.27 e=0.43 d=0.45"
+  },
+  {
+   "day": "2026-11-09",
+   "at": "2026-11-09T22:51:00.000Z",
+   "kind": "start",
+   "detail": "设计反馈选题映射模板 · 确认字段与依据位置 p=0.27 e=0.43 d=0.45"
+  },
+  {
+   "day": "2026-11-09",
+   "at": "2026-11-09T23:21:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「抽取模板字段缺口」已计时 30 分钟，比通常的 10 分钟多一半。"
+  },
+  {
+   "day": "2026-11-09",
+   "at": "2026-11-10T03:51:00.000Z",
+   "kind": "start",
+   "detail": "设计反馈选题映射模板 · 批准最终模板 p=0.22 e=0.45 d=0.45"
+  },
+  {
+   "day": "2026-11-10",
+   "at": "2026-11-10T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[{\"id\":\"proposed-4bcb5477-a052-455d-94cc-98a19c10d5bf\",\"title\":\"Crossline 科研任务数据结构已通过真实样本校准\",\"from\":\"2026-11-09\",\"to\":\"2026-11-13\"},{\"id\":\"proposed-3e7c0d30-abac-4b2c-856b-c1dc7d0cdff1\",\"title\":\"Crossline 自用效果获得验证\",\"from\":\"2026-11-11\",\"to\":\"2026-11-15\"}],\"asked\":[],\"archived\":[],\"drafts\":[],\"opId\":\"op-mwair0g0-a83522\"}"
+  },
+  {
+   "day": "2026-11-10",
+   "at": "2026-11-10T14:45:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:00「完成 ECE 555 小测3练习」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-10",
+   "at": "2026-11-10T15:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:55「完成 ECE 555 小测3练习」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-10",
+   "at": "2026-11-10T15:01:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.64 e=0.54 d=0.65"
+  },
+  {
+   "day": "2026-11-10",
+   "at": "2026-11-10T16:01:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.71 e=0.54 d=0.65"
+  },
+  {
+   "day": "2026-11-10",
+   "at": "2026-11-10T18:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是14:15「设计反馈选题映射模板」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-10",
+   "at": "2026-11-10T20:16:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 试填1条真实反馈 p=0.53 e=0.34 d=0.45"
+  },
+  {
+   "day": "2026-11-10",
+   "at": "2026-11-10T20:31:00.000Z",
+   "kind": "start",
+   "detail": "设计反馈选题映射模板 · 检验3条反馈的重复信号 p=0.60 e=0.34 d=0.45"
+  },
+  {
+   "day": "2026-11-10",
+   "at": "2026-11-10T21:16:00.000Z",
+   "kind": "start",
+   "detail": "设计反馈选题映射模板 · 确认字段与依据位置 p=0.65 e=0.44 d=0.45"
+  },
+  {
+   "day": "2026-11-10",
+   "at": "2026-11-10T22:36:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 批准最终模板 p=0.58 e=0.44 d=0.45"
+  },
+  {
+   "day": "2026-11-11",
+   "at": "2026-11-11T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-11",
+   "at": "2026-11-11T15:16:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.29 e=0.56 d=0.65"
+  },
+  {
+   "day": "2026-11-11",
+   "at": "2026-11-11T16:21:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.36 e=0.56 d=0.65"
+  },
+  {
+   "day": "2026-11-11",
+   "at": "2026-11-11T20:06:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 试填1条真实反馈 p=0.20 e=0.36 d=0.45"
+  },
+  {
+   "day": "2026-11-11",
+   "at": "2026-11-11T20:21:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 检验3条反馈的重复信号 p=0.25 e=0.36 d=0.45"
+  },
+  {
+   "day": "2026-11-11",
+   "at": "2026-11-11T21:06:00.000Z",
+   "kind": "start",
+   "detail": "设计反馈选题映射模板 · 确认字段与依据位置 p=0.30 e=0.46 d=0.45"
+  },
+  {
+   "day": "2026-11-11",
+   "at": "2026-11-11T22:26:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 批准最终模板 p=0.24 e=0.46 d=0.45"
+  },
+  {
+   "day": "2026-11-12",
+   "at": "2026-11-12T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-12",
+   "at": "2026-11-12T15:01:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.29 e=0.53 d=0.65"
+  },
+  {
+   "day": "2026-11-12",
+   "at": "2026-11-12T16:06:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.36 e=0.53 d=0.65"
+  },
+  {
+   "day": "2026-11-12",
+   "at": "2026-11-12T21:36:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 试填1条真实反馈 p=0.23 e=0.43 d=0.45"
+  },
+  {
+   "day": "2026-11-12",
+   "at": "2026-11-12T21:51:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 检验3条反馈的重复信号 p=0.29 e=0.43 d=0.45"
+  },
+  {
+   "day": "2026-11-12",
+   "at": "2026-11-12T22:36:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 确认字段与依据位置 p=0.29 e=0.43 d=0.45"
+  },
+  {
+   "day": "2026-11-12",
+   "at": "2026-11-13T03:51:00.000Z",
+   "kind": "skip",
+   "detail": "设计反馈选题映射模板 · 批准最终模板 p=0.24 e=0.45 d=0.45"
+  },
+  {
+   "day": "2026-11-13",
+   "at": "2026-11-13T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[{\"id\":\"proposed-64caca0e-98f8-4b4e-9abe-59b89d4bef94\",\"title\":\"首轮科研内容已以图文和视频共同发布\",\"deadline\":\"2026-11-12\"}],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-13",
+   "at": "2026-11-13T15:06:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.75 e=0.53 d=0.65"
+  },
+  {
+   "day": "2026-11-13",
+   "at": "2026-11-13T16:11:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.75 e=0.53 d=0.65"
+  },
+  {
+   "day": "2026-11-13",
+   "at": "2026-11-13T20:06:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.58 e=0.33 d=0.65"
+  },
+  {
+   "day": "2026-11-13",
+   "at": "2026-11-13T22:51:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.63 e=0.43 d=0.65"
+  },
+  {
+   "day": "2026-11-13",
+   "at": "2026-11-13T23:51:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「汇集控制规格与验收模板」已计时 60 分钟，比通常的 35 分钟多一半。"
+  },
+  {
+   "day": "2026-11-14",
+   "at": "2026-11-14T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[{\"id\":\"proposed-789cfa50-3b57-48de-a002-9d15d5a8de4a\",\"title\":\"核心科技股持仓形成有证据的处置结论\",\"from\":\"2026-11-13\",\"to\":\"2026-11-17\"},{\"id\":\"proposed-4bcb5477-a052-455d-94cc-98a19c10d5bf\",\"title\":\"Crossline 科研任务数据结构已通过真实样本校准\",\"from\":\"2026-11-13\",\"to\":\"2026-11-17\"},{\"id\":\"proposed-3e7c0d30-abac-4b2c-856b-c1dc7d0cdff1\",\"title\":\"Crossline 自用效果获得验证\",\"from\":\"202"
+  },
+  {
+   "day": "2026-11-14",
+   "at": "2026-11-14T14:48:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:00「完成 ECE 555 小测3练习」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-14",
+   "at": "2026-11-14T15:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是10:00「完成 ECE 555 小测3练习」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-14",
+   "at": "2026-11-14T15:01:00.000Z",
+   "kind": "skip",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.33 e=0.54 d=0.65"
+  },
+  {
+   "day": "2026-11-14",
+   "at": "2026-11-14T16:06:00.000Z",
+   "kind": "skip",
+   "detail": "完成 ECE 555 小测3练习 · 完成小测3限时模拟 p=0.33 e=0.54 d=0.65"
+  },
+  {
+   "day": "2026-11-14",
+   "at": "2026-11-14T18:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是14:00「确认 sleep replay SRAM基线」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-14",
+   "at": "2026-11-14T20:06:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.23 e=0.34 d=0.65"
+  },
+  {
+   "day": "2026-11-14",
+   "at": "2026-11-14T21:11:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.27 e=0.44 d=0.65"
+  },
+  {
+   "day": "2026-11-15",
+   "at": "2026-11-15T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-15",
+   "at": "2026-11-15T15:01:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.73 e=0.55 d=0.65"
+  },
+  {
+   "day": "2026-11-15",
+   "at": "2026-11-15T16:16:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.78 e=0.55 d=0.65"
+  },
+  {
+   "day": "2026-11-15",
+   "at": "2026-11-15T20:06:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.60 e=0.35 d=0.65"
+  },
+  {
+   "day": "2026-11-15",
+   "at": "2026-11-15T21:11:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.65 e=0.45 d=0.65"
+  },
+  {
+   "day": "2026-11-15",
+   "at": "2026-11-16T03:41:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「完成 ECE 555 作业 4」余量已不足一天：11/20 截止前可用 15.2 小时，还需 5.2 小时。最晚现在开始。"
+  },
+  {
+   "day": "2026-11-16",
+   "at": "2026-11-16T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-16",
+   "at": "2026-11-16T14:54:00.000Z",
+   "kind": "nudge:block_start",
+   "detail": "09:00 做「完成 ECE 555 小测3练习 · 订正并闭卷重做错题」（75 分），关系到 11/23 的截止。第一步：打开模拟答卷，在第一道错题旁写下错误原因。"
+  },
+  {
+   "day": "2026-11-16",
+   "at": "2026-11-16T15:01:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.80 e=0.54 d=0.65"
+  },
+  {
+   "day": "2026-11-16",
+   "at": "2026-11-16T16:16:00.000Z",
+   "kind": "skip",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.80 e=0.54 d=0.65"
+  },
+  {
+   "day": "2026-11-16",
+   "at": "2026-11-16T20:06:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.60 e=0.34 d=0.65"
+  },
+  {
+   "day": "2026-11-16",
+   "at": "2026-11-16T21:46:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「完成 ECE 555 作业 4」按保守估时还需 5.2 小时，11/20 截止前只剩 5 小时 可用，来不及。"
+  },
+  {
+   "day": "2026-11-16",
+   "at": "2026-11-16T22:51:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.65 e=0.44 d=0.65"
+  },
+  {
+   "day": "2026-11-16",
+   "at": "2026-11-16T23:21:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「汇集控制规格与验收模板」已计时 55 分钟，比通常的 35 分钟多一半。"
+  },
+  {
+   "day": "2026-11-17",
+   "at": "2026-11-17T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[{\"id\":\"proposed-1827505b-0327-4eb8-b9ce-0237e157d37d\",\"title\":\"6T SRAM 基线单元已通过保持、读写与噪声裕量验证\",\"from\":\"2026-11-16\",\"to\":\"2026-11-20\"}],\"asked\":[],\"archived\":[],\"drafts\":[],\"opId\":\"op-mwkitz40-66c772\"}"
+  },
+  {
+   "day": "2026-11-17",
+   "at": "2026-11-17T14:49:00.000Z",
+   "kind": "nudge:block_start",
+   "detail": "09:00 做「完成 ECE 555 小测3练习 · 订正并闭卷重做错题」（55 分），关系到 11/23 的截止。第一步：打开模拟答卷，在第一道错题旁写下错误原因。"
+  },
+  {
+   "day": "2026-11-17",
+   "at": "2026-11-17T15:01:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.75 e=0.50 d=0.65"
+  },
+  {
+   "day": "2026-11-17",
+   "at": "2026-11-17T16:01:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.81 e=0.50 d=0.65"
+  },
+  {
+   "day": "2026-11-17",
+   "at": "2026-11-17T20:16:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.59 e=0.30 d=0.65"
+  },
+  {
+   "day": "2026-11-17",
+   "at": "2026-11-17T21:21:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.65 e=0.40 d=0.65"
+  },
+  {
+   "day": "2026-11-18",
+   "at": "2026-11-18T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[{\"id\":\"proposed-789cfa50-3b57-48de-a002-9d15d5a8de4a\",\"title\":\"核心科技股持仓形成有证据的处置结论\",\"from\":\"2026-11-17\",\"to\":\"2026-11-21\"}],\"asked\":[],\"archived\":[],\"drafts\":[],\"opId\":\"op-mwly9ts0-921c74\"}"
+  },
+  {
+   "day": "2026-11-18",
+   "at": "2026-11-18T14:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:00「完成 ECE 555 小测3练习」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-18",
+   "at": "2026-11-18T15:01:00.000Z",
+   "kind": "nudge:block_start",
+   "detail": "09:05 做「完成 ECE 555 小测3练习 · 订正并闭卷重做错题」（75 分），关系到 11/23 的截止。第一步：打开模拟答卷，在第一道错题旁写下错误原因。"
+  },
+  {
+   "day": "2026-11-18",
+   "at": "2026-11-18T15:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:05「完成 ECE 555 小测3练习」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-18",
+   "at": "2026-11-18T15:06:00.000Z",
+   "kind": "skip",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.77 e=0.49 d=0.65"
+  },
+  {
+   "day": "2026-11-18",
+   "at": "2026-11-18T16:21:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.77 e=0.49 d=0.65"
+  },
+  {
+   "day": "2026-11-18",
+   "at": "2026-11-18T18:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是14:00「确认 sleep replay SRAM基线」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-18",
+   "at": "2026-11-18T20:06:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.59 e=0.29 d=0.65"
+  },
+  {
+   "day": "2026-11-18",
+   "at": "2026-11-18T21:11:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.64 e=0.39 d=0.65"
+  },
+  {
+   "day": "2026-11-18",
+   "at": "2026-11-18T23:16:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「完成 ECE 555 小测3练习」余量已不足一天：11/23 截止前可用 12.1 小时，还需 2.5 小时。最晚现在开始。"
+  },
+  {
+   "day": "2026-11-19",
+   "at": "2026-11-19T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[{\"id\":\"proposed-4bcb5477-a052-455d-94cc-98a19c10d5bf\",\"title\":\"Crossline 科研任务数据结构已通过真实样本校准\",\"deadline\":\"2026-11-18\"}],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-19",
+   "at": "2026-11-19T15:06:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.81 e=0.51 d=0.65"
+  },
+  {
+   "day": "2026-11-19",
+   "at": "2026-11-19T16:21:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.86 e=0.51 d=0.65"
+  },
+  {
+   "day": "2026-11-19",
+   "at": "2026-11-19T21:36:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.66 e=0.41 d=0.65"
+  },
+  {
+   "day": "2026-11-19",
+   "at": "2026-11-19T22:41:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.66 e=0.41 d=0.65"
+  },
+  {
+   "day": "2026-11-19",
+   "at": "2026-11-19T23:41:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「汇集控制规格与验收模板」已计时 325 分钟，比通常的 35 分钟多一半。"
+  },
+  {
+   "day": "2026-11-20",
+   "at": "2026-11-20T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-20",
+   "at": "2026-11-20T15:26:00.000Z",
+   "kind": "skip",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.56 e=0.54 d=0.65"
+  },
+  {
+   "day": "2026-11-20",
+   "at": "2026-11-20T16:41:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.56 e=0.54 d=0.65"
+  },
+  {
+   "day": "2026-11-20",
+   "at": "2026-11-20T20:01:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.26 e=0.34 d=0.65"
+  },
+  {
+   "day": "2026-11-20",
+   "at": "2026-11-20T22:51:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.30 e=0.44 d=0.65"
+  },
+  {
+   "day": "2026-11-21",
+   "at": "2026-11-21T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[{\"id\":\"proposed-1827505b-0327-4eb8-b9ce-0237e157d37d\",\"title\":\"6T SRAM 基线单元已通过保持、读写与噪声裕量验证\",\"from\":\"2026-11-20\",\"to\":\"2026-11-24\"}],\"asked\":[],\"archived\":[],\"drafts\":[],\"opId\":\"op-mwq8lds0-8c7416\"}"
+  },
+  {
+   "day": "2026-11-21",
+   "at": "2026-11-21T15:06:00.000Z",
+   "kind": "skip",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.73 e=0.56 d=0.65"
+  },
+  {
+   "day": "2026-11-21",
+   "at": "2026-11-21T16:21:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.73 e=0.56 d=0.65"
+  },
+  {
+   "day": "2026-11-21",
+   "at": "2026-11-21T20:06:00.000Z",
+   "kind": "skip",
+   "detail": "设计收益风险配置字段 · 核定字段口径与验收条件 p=0.39 e=0.36 d=0.2"
+  },
+  {
+   "day": "2026-11-21",
+   "at": "2026-11-21T20:51:00.000Z",
+   "kind": "skip",
+   "detail": "设计收益风险配置字段 · 核定字段口径与验收条件 p=0.39 e=0.36 d=0.2"
+  },
+  {
+   "day": "2026-11-21",
+   "at": "2026-11-21T21:31:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.32 e=0.46 d=0.65"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[{\"id\":\"proposed-789cfa50-3b57-48de-a002-9d15d5a8de4a\",\"title\":\"核心科技股持仓形成有证据的处置结论\",\"from\":\"2026-11-21\",\"to\":\"2026-11-25\"}],\"asked\":[],\"archived\":[],\"drafts\":[],\"opId\":\"op-mwro18g0-58b70b\"}"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T14:44:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「完成 ECE 555 小测3练习」余量已不足一天：11/23 截止前可用 4.1 小时，还需 2.5 小时。最晚现在开始。"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T14:44:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:00「完成 ECE 555 小测3练习」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T15:01:00.000Z",
+   "kind": "nudge:block_start",
+   "detail": "09:05 做「完成 ECE 555 小测3练习 · 订正并闭卷重做错题」（75 分），关系到 11/23 的截止。第一步：打开模拟答卷，在第一道错题旁写下错误原因。"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T15:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:05「完成 ECE 555 小测3练习」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T15:06:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.84 e=0.56 d=0.65"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T16:21:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「完成 ECE 555 小测3练习」按保守估时还需 2.5 小时，11/23 截止前只剩 2.4 小时 可用，来不及。"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T16:21:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.84 e=0.56 d=0.65"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T17:36:00.000Z",
+   "kind": "skip",
+   "detail": "设计收益风险配置字段 · 核定字段口径与验收条件 p=0.44 e=0.56 d=0.2"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T18:01:00.000Z",
+   "kind": "nudge:block_confirm",
+   "detail": "10:20–11:35 的「完成 ECE 555 小测3练习 · 订正并闭卷重做错题」做得怎么样？"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T18:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是14:00「设计收益风险配置字段」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T20:51:00.000Z",
+   "kind": "start",
+   "detail": "设计收益风险配置字段 · 核定字段口径与验收条件 p=0.41 e=0.36 d=0.2"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-22T21:31:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.26 e=0.46 d=0.65"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-23T04:41:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.27 e=0.48 d=0.65"
+  },
+  {
+   "day": "2026-11-22",
+   "at": "2026-11-23T04:56:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「汇集控制规格与验收模板」已计时 340 分钟，比通常的 35 分钟多一半。"
+  },
+  {
+   "day": "2026-11-23",
+   "at": "2026-11-23T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[{\"id\":\"proposed-38b58685-ead6-4b8c-94c0-42e78e582e23\",\"title\":\"ECE 555 四次作业成绩已支撑 A− 总评\",\"deadline\":\"2026-11-22\"}],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-23",
+   "at": "2026-11-23T15:18:00.000Z",
+   "kind": "nudge:block_start",
+   "detail": "09:20 做「完成 ECE 555 小测3练习 · 订正并闭卷重做错题」（75 分），关系到 11/23 的截止。第一步：打开模拟答卷，在第一道错题旁写下错误原因。"
+  },
+  {
+   "day": "2026-11-23",
+   "at": "2026-11-23T15:21:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.99 e=0.58 d=0.65"
+  },
+  {
+   "day": "2026-11-23",
+   "at": "2026-11-23T16:36:00.000Z",
+   "kind": "start",
+   "detail": "完成 ECE 555 小测3练习 · 订正并闭卷重做错题 p=0.99 e=0.58 d=0.65"
+  },
+  {
+   "day": "2026-11-23",
+   "at": "2026-11-23T20:01:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.68 e=0.38 d=0.65"
+  },
+  {
+   "day": "2026-11-23",
+   "at": "2026-11-23T22:51:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.73 e=0.48 d=0.65"
+  },
+  {
+   "day": "2026-11-24",
+   "at": "2026-11-24T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[{\"id\":\"proposed-b84a5231-2ba3-41b3-882f-a86583ca8c1c\",\"title\":\"ECE 555 五次小测平均成绩已支撑 A− 总评\",\"deadline\":\"2026-11-23\"}],\"archived\":[{\"id\":\"backplan-53b802b9-ef57-41a9-a976-52e1d25ec798\",\"title\":\"ECE 555 汇总小测范围与材料\",\"why\":\"考试 11/23 已过，备考不再安排\"}],\"drafts\":[],\"opId\":\"op-mwuiwxs0-163884\"}"
+  },
+  {
+   "day": "2026-11-24",
+   "at": "2026-11-24T14:50:00.000Z",
+   "kind": "nudge:block_start",
+   "detail": "09:00 做「设计收益风险配置字段 · 核定字段口径与验收条件」（75 分），关系到 11/30 的截止。第一步：打开《收益、风险与配置字段清单草案》，从收益口径栏开始批注。已备好：收益、风险与配置字段清单草案.md、README.md。"
+  },
+  {
+   "day": "2026-11-24",
+   "at": "2026-11-24T15:01:00.000Z",
+   "kind": "start",
+   "detail": "设计收益风险配置字段 · 核定字段口径与验收条件 p=0.82 e=0.55 d=0.2"
+  },
+  {
+   "day": "2026-11-24",
+   "at": "2026-11-24T15:31:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「核定字段口径与验收条件」已计时 70 分钟，比通常的 45 分钟多一半。"
+  },
+  {
+   "day": "2026-11-24",
+   "at": "2026-11-24T16:16:00.000Z",
+   "kind": "start",
+   "detail": "确定 ECE 555 项目方案 · 比较数据通路候选方案 p=0.70 e=0.55 d=0.65"
+  },
+  {
+   "day": "2026-11-24",
+   "at": "2026-11-24T16:46:00.000Z",
+   "kind": "nudge:timer_overrun",
+   "detail": "「取得项目任务书及附件」已计时 30 分钟，比通常的 10 分钟多一半。"
+  },
+  {
+   "day": "2026-11-24",
+   "at": "2026-11-24T20:16:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.67 e=0.35 d=0.65"
+  },
+  {
+   "day": "2026-11-24",
+   "at": "2026-11-24T21:21:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 定义 replay 接口映射 p=0.72 e=0.45 d=0.65"
+  },
+  {
+   "day": "2026-11-25",
+   "at": "2026-11-25T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[{\"id\":\"proposed-1827505b-0327-4eb8-b9ce-0237e157d37d\",\"title\":\"6T SRAM 基线单元已通过保持、读写与噪声裕量验证\",\"from\":\"2026-11-24\",\"to\":\"2026-11-28\"}],\"asked\":[{\"id\":\"proposed-9bd912f0-715b-458b-bd4f-4f9a6c6582ef\",\"title\":\"ECE 548 期中考试 2 达到 A− 支撑线\",\"deadline\":\"2026-11-24\"}],\"archived\":[],\"drafts\":[],\"opId\":\"op-mwvycsg0-2400ff\"}"
+  },
+  {
+   "day": "2026-11-25",
+   "at": "2026-11-25T15:03:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「设计收益风险配置字段」余量已不足一天：11/30 截止前可用 10.5 小时，还需 1.3 小时。最晚现在开始。"
+  },
+  {
+   "day": "2026-11-25",
+   "at": "2026-11-25T15:03:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「设计反馈选题映射模板」余量已不足一天：11/30 截止前可用 11.6 小时，还需 2.3 小时。最晚现在开始。"
+  },
+  {
+   "day": "2026-11-25",
+   "at": "2026-11-25T15:03:00.000Z",
+   "kind": "nudge:latest_start",
+   "detail": "「核查 Crossline beta 失败」余量已不足一天：11/30 截止前可用 13.3 小时，还需 4 小时。最晚现在开始。"
+  },
+  {
+   "day": "2026-11-25",
+   "at": "2026-11-25T15:06:00.000Z",
+   "kind": "start",
+   "detail": "设计收益风险配置字段 · 核定字段口径与验收条件 p=0.53 e=0.56 d=0.2"
+  },
+  {
+   "day": "2026-11-25",
+   "at": "2026-11-25T16:21:00.000Z",
+   "kind": "start",
+   "detail": "确定 ECE 555 项目方案 · 比较数据通路候选方案 p=0.35 e=0.56 d=0.65"
+  },
+  {
+   "day": "2026-11-25",
+   "at": "2026-11-25T20:01:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 搭建 6T 三态测试平台 p=0.32 e=0.36 d=0.65"
+  },
+  {
+   "day": "2026-11-25",
+   "at": "2026-11-25T21:11:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 搭建 6T 三态测试平台 p=0.37 e=0.46 d=0.65"
+  },
+  {
+   "day": "2026-11-26",
+   "at": "2026-11-26T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[{\"id\":\"proposed-789cfa50-3b57-48de-a002-9d15d5a8de4a\",\"title\":\"核心科技股持仓形成有证据的处置结论\",\"from\":\"2026-11-25\",\"to\":\"2026-11-29\"}],\"asked\":[],\"archived\":[],\"drafts\":[],\"opId\":\"op-mwxdsn40-931c27\"}"
+  },
+  {
+   "day": "2026-11-26",
+   "at": "2026-11-26T14:45:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是09:00「设计收益风险配置字段」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-26",
+   "at": "2026-11-26T15:01:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是10:15「确定 ECE 555 项目方案」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-26",
+   "at": "2026-11-26T15:01:00.000Z",
+   "kind": "skip",
+   "detail": "设计收益风险配置字段 · 核定字段口径与验收条件 p=0.58 e=0.56 d=0.2"
+  },
+  {
+   "day": "2026-11-26",
+   "at": "2026-11-26T16:16:00.000Z",
+   "kind": "skip",
+   "detail": "确定 ECE 555 项目方案 · 比较数据通路候选方案 p=0.36 e=0.56 d=0.65"
+  },
+  {
+   "day": "2026-11-26",
+   "at": "2026-11-26T17:11:00.000Z",
+   "kind": "start",
+   "detail": "确定 ECE 555 项目方案 · 比较数据通路候选方案 p=0.36 e=0.56 d=0.65"
+  },
+  {
+   "day": "2026-11-26",
+   "at": "2026-11-26T18:31:00.000Z",
+   "kind": "nudge:energy_check",
+   "detail": "现在精力怎么样？接下来是15:30「确认 sleep replay SRAM基线」。回答后，今天剩下和之后的时段会按精力重新安排。"
+  },
+  {
+   "day": "2026-11-26",
+   "at": "2026-11-26T21:36:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 搭建 6T 三态测试平台 p=0.38 e=0.46 d=0.65"
+  },
+  {
+   "day": "2026-11-26",
+   "at": "2026-11-26T22:46:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 搭建 6T 三态测试平台 p=0.38 e=0.46 d=0.65"
+  },
+  {
+   "day": "2026-11-27",
+   "at": "2026-11-27T10:00:00.000Z",
+   "kind": "date_advance",
+   "detail": "{\"superseded\":[],\"adopted\":[],\"expired\":[],\"shifted\":[],\"asked\":[],\"archived\":[],\"drafts\":[]}"
+  },
+  {
+   "day": "2026-11-27",
+   "at": "2026-11-27T15:06:00.000Z",
+   "kind": "start",
+   "detail": "设计收益风险配置字段 · 核定字段口径与验收条件 p=0.65 e=0.56 d=0.2"
+  },
+  {
+   "day": "2026-11-27",
+   "at": "2026-11-27T16:21:00.000Z",
+   "kind": "start",
+   "detail": "确定 ECE 555 项目方案 · 比较数据通路候选方案 p=0.39 e=0.56 d=0.65"
+  },
+  {
+   "day": "2026-11-27",
+   "at": "2026-11-27T20:01:00.000Z",
+   "kind": "start",
+   "detail": "确认 sleep replay SRAM基线 · 搭建 6T 三态测试平台 p=0.35 e=0.36 d=0.65"
+  },
+  {
+   "day": "2026-11-27",
+   "at": "2026-11-27T21:11:00.000Z",
+   "kind": "skip",
+   "detail": "确认 sleep replay SRAM基线 · 搭建 6T 三态测试平台 p=0.40 e=0.46 d=0.65"
+  }
+ ]
+}

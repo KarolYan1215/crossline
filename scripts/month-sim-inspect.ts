@@ -23,7 +23,24 @@ if (prefixes[0] === "--prep") {
   }
   console.log({ products, levels });
 }
-for (const prefix of prefixes.filter((item) => item !== "--prep")) {
+// `--plan <iso>`: the schedule as the web app derives it at that instant (on a copy: run it on a copy, it writes the attention settings).
+const planAt = prefixes.indexOf("--plan");
+if (planAt >= 0) {
+  const { register } = await import("node:module");
+  register("data:text/javascript,export async function resolve(s,c,n){if(s==='server-only')return{url:'data:text/javascript,',shortCircuit:true};return n(s,c)}");
+  process.env.CROSSLINE_FIXED_NOW = prefixes[planAt + 1]!;
+  process.env.CROSSLINE_BACKGROUND_SOLVE = "off";
+  (globalThis as { crosslineStore?: unknown }).crosslineStore = store;
+  const web = await import("../apps/web/lib/crossline");
+  const principalId = store.getWorkspaceOwnerId(ws)!;
+  const ctx = { principalId, workspaceId: ws, role: "owner", identity: { provider: "credential", issuer: "inspect", subject: principalId }, authMethod: "session",
+    requestId: "inspect" } as import("../packages/core/src/index").AccessContext;
+  const plan = await web.loadCurrentPlan(ctx);
+  for (const block of plan.blocks.filter((item) => item.id.startsWith("scheduled:")).sort((a, b) => `${a.day} ${a.start}`.localeCompare(`${b.day} ${b.start}`)).slice(0, 40))
+    console.log(`${block.day} ${block.start}-${block.end} ${block.id.slice(10, 60)} ${block.title.slice(0, 30)}`);
+  console.log("blockers", JSON.stringify(plan.schedule.blockers).slice(0, 800));
+}
+for (const prefix of prefixes.filter((item, index) => item !== "--prep" && !(planAt >= 0 && (index === planAt || index === planAt + 1)))) {
   const order = store.listWorkOrders(ws).find((item) => item.id.startsWith(prefix));
   if (!order) { console.log("none", prefix); continue; }
   const plan = store.getStepPlan(ws, order.id);
