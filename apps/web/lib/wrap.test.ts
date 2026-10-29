@@ -54,6 +54,19 @@ test("`/wrap?day=` reaches back seven days and no further, and an earlier day's 
   expect(loadWrap(TEST_CTX, nextMorning, DAY).open).toBe(0);
 });
 
+test("a session left open on a task no longer under way is not counted as today's timing (W-150)", () => {
+  const now = at("05:49");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  const order = (id: string, state: "active" | "accepted") => store.saveWorkOrder({ id, ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research",
+    projectId: "p", milestoneId: "", intent: `任务 ${id}`, state, riskTier: "routine", estimate, payload: {} });
+  order("left", "accepted");
+  order("now", "active");
+  // Started two days ago and never stopped; the task was accepted since. And a real timer started at 05:19.
+  store.openSession(ws, "left", TEST_CTX.principalId, toZonedInstant("2026-10-10", "21:00", ZONE));
+  store.openSession(ws, "now", TEST_CTX.principalId, toZonedInstant(DAY, "05:19", ZONE));
+  expect(loadWrap(TEST_CTX, now).timedMinutes).toBe(30);
+});
+
 test("a block due later waits for the wrap-up; 部分 keeps the step open with half done, and 收工 ends the day's message", async () => {
   at("08:30");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
