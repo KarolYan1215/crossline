@@ -324,7 +324,9 @@ async function handleAsks(now: Date, today: string, row: DayRow, asks: Awaited<R
 }
 
 // ── one simulated day ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
-type Started = { blockId: string; orderId: string; start: string; end: string; worked: number; outcome?: "done" | "partial" | "not_done" };
+type Started = { blockId: string; orderId: string; start: string; end: string; worked: number; outcome?: "done" | "partial" | "not_done";
+  /** When the timer started (an instant): it runs for the minutes really worked, not the whole block (closed-loop-1030, second round). */
+  timerFrom: number };
 const startedAll: Started[] = [];
 const acceptedBefore = new Set(store.listWorkOrders(ws).filter((order) => order.state === "accepted").map((order) => order.id));
 const dueAtStart = new Map<string, string>();
@@ -362,7 +364,7 @@ async function simulateDay(index: number, today: string) {
   const capacity = web.netCapacity(ctx, 1).capacity.find((day) => day.day === today);
   row.availableMin = Math.round(capacity?.netMinutes ?? 0);
   // The measured cap the plan is held to today (closed-loop-1030 §1), and its basis.
-  if (measuredView && dayCapacityOf && measuredCapacityOn) try { const view = measuredView(ctx, morning); row.capMin = measuredCapacityOn() ? dayCapacityOf(ctx, today, Number(row.availableMin), view) : null; row.capBasis = view.basis; }
+  if (measuredView && dayCapacityOf && measuredCapacityOn) try { const view = measuredView(ctx, morning); row.capMin = measuredCapacityOn() ? dayCapacityOf(ctx, today, Number(row.availableMin), view) : null; row.capBasis = view.basis; row.capFactor = (view as { factor?: { factor: number } }).factor?.factor ?? null; }
   catch (error) { note(today, morning, "error", `measured ${String(error)}`); }
   // Deadline warnings (closed-loop-1030 §4): the first morning each milestone at risk is on a card.
   try {
@@ -458,7 +460,9 @@ async function simulateDay(index: number, today: string) {
       run.outcome = real.progress >= real.required ? "done" : run.worked > 0 ? "partial" : "not_done";
       state.lastWorkedOrder = run.orderId; state.lastWorkedEnd = minute;
       // The floating timer's 结束 is a pause (TimerFloat): the person presses it when the block is over.
-      web.pauseWorkOrderExecution(ctx, run.orderId, "块结束", now.toISOString());
+      // The timer runs for what was really worked (block × adherence × energy), then the person stops it; it used to run to the block's
+      // end, which made every started block read as fully worked (closed-loop-results.md, first round).
+      web.pauseWorkOrderExecution(ctx, run.orderId, "块结束", new Date(Math.min(now.getTime(), run.timerFrom + run.worked * 60_000)).toISOString());
       running.delete(id);
     }
     // Blocks under way now: start or not.
@@ -492,7 +496,7 @@ async function simulateDay(index: number, today: string) {
       const result = paused ? web.resumeWorkOrderExecution(ctx, orderId!, now.toISOString()) : web.startWorkOrderExecution(ctx, orderId!, now.toISOString());
       if (!result.ok) note(today, now, "start_refused", `${orderId} ${result.code}`);
       const worked = Math.round(length * PERSONA.adherence * (switching ? 0.85 : 1) * clamp(energy + 0.2, 0.5, 1.1));
-      const run: Started = { blockId: block.id, orderId: orderId!, start: block.start, end: block.end, worked };
+      const run: Started = { blockId: block.id, orderId: orderId!, start: block.start, end: block.end, worked, timerFrom: now.getTime() };
       running.set(block.id, run); startedAll.push(run);
       row.started = Number(row.started ?? 0) + 1; row.workedMin = Number(row.workedMin ?? 0) + worked;
     }
