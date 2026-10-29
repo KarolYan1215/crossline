@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import type { CapacityWeek, GoalRow, Investment } from "../../lib/plan-stats";
-import { CapacityChart, EstimateChart, InvestmentChart, MilestoneTimeline, RhythmMini } from "./plan-stats-charts";
+import type { CapacityWeek } from "../../lib/plan-stats";
+import { CapacityChart, EstimateChart, RhythmMini } from "./plan-stats-charts";
+import { LineShareChart, PlanKpiRow, UnplacedCard } from "./plan-head";
 
 const labels = { research: "科研", media: "自媒体" };
 const week = (index: number, extra: Partial<CapacityWeek> = {}): CapacityWeek => ({ week: index + 1, start: `2026-10-${String(10 + index * 7).padStart(2, "0")}`,
@@ -23,70 +24,52 @@ describe("plan charts", () => {
     expect(html).not.toContain("各周需求均在可用小时内");
   });
 
-  test("milestone timeline: one axis per line, each mark opens its milestone and carries its state; several states make a split square", () => {
-    const row = (extra: Partial<GoalRow>): GoalRow => ({ id: "m", title: "里程碑", line: "research", p50Day: null, p85Day: null, deadline: null, slackDays: null, atRisk: false,
-      remainingP50Minutes: 0, remainingP85Minutes: 0, libraryDay: null, status: "no_tasks", bottleneck: null, proposals: 0, ...extra });
-    const rows = [
-      row({ id: "a", title: "期中考试", p50Day: "2026-10-20", p85Day: "2026-10-24", deadline: "2026-10-25", slackDays: 1, atRisk: true, remainingP50Minutes: 600, remainingP85Minutes: 900, status: "forecast" }),
-      row({ id: "b", title: "论文投稿", deadline: "2027-02-01", libraryDay: "2026-11-02", remainingP50Minutes: 1200, status: "unfinished", bottleneck: "八周内容量或步骤依赖不足" }),
-      row({ id: "c", title: "首期视频", line: "media" }),
-      row({ id: "d", title: "导师评审", proposals: 1, deadline: "2026-11-20" })
-    ];
-    const html = renderToStaticMarkup(<MilestoneTimeline today="2026-10-10" weeks={26} spanDays={182} labels={labels} lineOrder={["research", "media"]} rows={rows} />);
-    // The server render draws the wide axis (the measured width starts wide); full names are on the marks.
-    for (const title of ["期中考试", "论文投稿", "导师评审"]) expect(html).toContain(`>${title}</text>`);
-    // Undated milestones are counted, not drawn.
-    expect(html).not.toContain("首期视频");
-    expect(html).toContain('href="/milestones?open=a"');
-    expect(html).toContain('data-deadline="2026-10-25"');
-    expect(html).toContain('data-states="risk"');
-    expect(html).toContain('data-states="risk library"');
-    expect(html).toContain("pl-ms-combo");
-    expect(html).toContain('data-states="unprepared"');
-    expect(html).toContain("1 项提案待批准");
-    expect(html).toContain("2026年11月");
-    expect(html).toContain("2027年1月");
-    expect(html).toContain("范围内未完成 3 个 · 范围外或已完成 1 个 · 有完不成风险 2 · 待准备 1");
+  test("the four figures: usable, scheduled with its bar, unplaced linked to its reasons, and the estimate bias or 「尚无实测」", () => {
+    const html = renderToStaticMarkup(<PlanKpiRow configuredWeekly={39} labels={labels} estimates={{ covered: 0, coverage: null, points: [] }}
+      kpis={{ usableMinutes: 2340, scheduledMinutes: 1860, unplaced: { count: 2, minutes: 270, earliest: "2026-11-02" }, bias: null }} />);
+    expect(html).toContain("本周可用");
+    expect(html).toContain(">39<");
+    expect(html).toContain("/ 39 h");
+    expect(html).toContain("--pct:79%");
+    expect(html).toContain("项 · 4.5 h");
+    expect(html).toContain('href="#why"');
+    expect(html).toContain("最早截止 11/2 · 看原因");
+    expect(html).toContain("尚无实测");
+    expect(html).toContain('href="/settings#usage"');
+    const timed = renderToStaticMarkup(<PlanKpiRow configuredWeekly={39} labels={labels} estimates={{ covered: 1, coverage: 1, points: [{ id: "a", line: "research", estimate: 40, p85: 60, actual: 50, covered: true }] }}
+      kpis={{ usableMinutes: 600, scheduledMinutes: 0, unplaced: { count: 0, minutes: 0, earliest: null }, bias: { percent: 18, samples: 9 } }} />);
+    expect(timed).toContain(">+18<");
+    expect(timed).toContain("实测 9 次，中位数");
+    expect(timed).toContain("全部排进");
   });
 
-  test("milestone timeline: only the horizon's unfinished and the overdue are drawn; a line keeps three rows of names and counts the rest", () => {
-    const row = (id: string, deadline: string): GoalRow => ({ id, title: `里程碑名称很长的一项第${id}号`, line: "research", p50Day: null, p85Day: null, deadline, slackDays: 5,
-      atRisk: false, remainingP50Minutes: 60, remainingP85Minutes: 90, libraryDay: null, status: "forecast", bottleneck: null, proposals: 0 });
-    const crowded = ["a", "b", "c", "d", "e", "f"].map((id, index) => row(id, `2026-10-${String(20 + index).padStart(2, "0")}`));
-    const html = renderToStaticMarkup(<MilestoneTimeline today="2026-10-10" weeks={8} spanDays={56} labels={labels} lineOrder={["research"]}
-      rows={[...crowded, row("late", "2027-03-01"), row("overdue", "2026-10-01"), row("done", "2026-10-15")]} done={["done"]} />);
-    // Six markers a day apart stack as a staircase in three lanes, a name cut short where the next leader rises; the overdue one at the
-    // left edge shares a lane; the three left without a name are counted, and the late and the done ones are counted apart.
-    expect(html.match(/class="pl-ms-label"/g)!.length).toBe(4);
-    expect(html.match(/class="pl-ms-point"/g)!.length).toBe(7);
-    expect(html).toContain(">+3<");
-    expect(html).toContain("另有 3 个里程碑未标名称");
-    // The strip above the axis says how to read a name in full.
-    expect(html).toContain("指向或聚焦圆点，这里显示里程碑全名");
-    expect(html).toContain("范围内未完成 7 个 · 范围外或已完成 2 个");
-    expect(html).not.toContain("open=late");
+  test("排不下的原因: each task with its line, hours, deadline and the planner's reason; its one action is more hours, push or drop is the weekly commitment's", () => {
+    const html = renderToStaticMarkup(<UnplacedCard labels={labels} today="2026-10-28" items={[
+      { id: "w1", title: "整理关注清单", line: "research", deadline: "2026-11-03", notBefore: null, minutes: 150, partial: false, reason: "截止前的「中」精力时段只剩 1.5h" },
+      { id: "w2", title: "可验证假设", line: "media", deadline: null, notBefore: "2026-10-30", minutes: 120, partial: false, reason: null },
+      { id: "w3", title: "期中复习", line: "research", deadline: null, notBefore: null, minutes: 60, partial: true, reason: null }]} />);
+    expect(html).toContain('id="why"');
+    expect(html).toContain('href="/workbench/w1"');
+    expect(html).toContain("截止前的「中」精力时段只剩 1.5h");
+    expect(html).toContain("10/30 前不可开始");
+    expect(html).toContain("部分步骤未排入");
+    expect(html).toContain("2.5 h");
+    expect(html.match(/href="#time"/g)).toHaveLength(3);
+    expect(html).toContain('href="/commit"');
+    expect(html).not.toContain("推迟");
+    expect(renderToStaticMarkup(<UnplacedCard labels={labels} today="2026-10-28" items={[]} />)).toContain("都排进了可用时段");
   });
 
-  test("planned against timed: a histogram per line with planned, timed and next-seven-days bars; 「尚无实测」 when nothing is recorded", () => {
-    const data: Investment = { weeks: [0, 1, 2, 3].map((index) => ({ start: `2026-09-${13 + index * 7}`, end: `2026-09-${19 + index * 7}`, recordedDays: index === 3 ? 2 : 0,
-      planned: index === 3 ? { research: 240 } : {}, actual: index === 3 ? { research: 180, media: 60 } : {} })),
-      next7: { research: 300 }, hasActual: true, hasPlanned: true,
-      lines: [{ line: "research", stated: 60, actualShare: 75, plannedShare: 100 }, { line: "media", stated: 40, actualShare: 25, plannedShare: 0 }] };
-    const html = renderToStaticMarkup(<InvestmentChart data={data} labels={labels} />);
-    expect(html).toContain("科研");
-    expect(html).toContain("所述 60%");
-    // 240 planned minutes over 2 recorded days is 14 hours a week; 180 timed over four weeks is 0.75 hours a week.
-    expect(html).toContain("科研 · 计划 14 h/周（按有记录的 2 天折算） · 所述 60% · 实际 75% · 计划 100%");
-    expect(html).toContain("科研 · 实际计时 0.8 h/周（近 4 周平均）");
-    expect(html).toContain("科研 · 未来 7 天计划 5 h");
-    expect(html).toContain("pl-bar-planned");
-    expect(html).toContain("pl-bar-actual");
-    // The top tick's label (12px, centred on its grid line) stays clear of the unit 「h/周」, whose baseline is at 10.
-    const gridTops = [...html.matchAll(/<line x1="[\d.]+" x2="[\d.]+" y1="([\d.]+)"[^>]*class="pl-grid-line"/g)].map((match) => Number(match[1]));
-    expect(gridTops.length).toBeGreaterThan(1);
-    expect(Math.min(...gridTops) - 6).toBeGreaterThanOrEqual(10 + 3 + 2);
-    const empty = renderToStaticMarkup(<InvestmentChart labels={labels} data={{ weeks: [], next7: {}, hasActual: false, hasPlanned: false, lines: [] }} />);
-    expect(empty).toContain("尚无实测");
+  test("lines against their share over the coming weeks only, with the look back linked to the weekly review", () => {
+    const html = renderToStaticMarkup(<LineShareChart labels={labels} lineOrder={["research", "media"]} shares={{ research: 50 }}
+      capacity={[week(0, { lines: [{ line: "research", scheduled: 240, pending: 60, extra: 0 }, { line: "media", scheduled: 60, pending: 0, extra: 0 }] }), week(1)]} />);
+    expect(html).toContain("未来 2 周 · 每周小时");
+    // Half of 600 usable minutes a week is 5 hours; 300 planned minutes over two weeks is 2.5 hours a week, 2 of them scheduled.
+    expect(html).toContain("份额 50%，约 5 小时/周");
+    expect(html).toContain("计划 2.5 小时/周，其中已排 2 小时");
+    expect(html).toContain('data-line="media"');
+    expect(html).toContain('href="/review"');
+    expect(html).not.toContain("实际计时");
   });
 
   test("estimates: log scatter with the diagonal and coverage; 「尚无实测」 without data", () => {

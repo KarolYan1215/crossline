@@ -1,15 +1,15 @@
 import "server-only";
-import { ENERGY_ADVICE_DISMISSED, ENERGY_ADVICE_SETTING, hoursFromText, onPersonsBoard, readEnergyAdvice, statedWeeklyHours, weeklyAvailableHours, type AccessContext, type AvailabilitySource,
-  type AvailabilityWindow, type EnergyAdvice, type PortraitReport } from "@crossline/core";
-import { DEADLINE_MARGIN_DAYS, PARAMS_ASAP, PARAMS_BUFFERED, type ScheduleParams } from "@crossline/planner";
+import { ENERGY_ADVICE_DISMISSED, ENERGY_ADVICE_SETTING, onPersonsBoard, readEnergyAdvice, statedWeeklyHours, weeklyAvailableHours, type AccessContext, type AvailabilitySource,
+  type AvailabilityWindow, type EnergyAdvice } from "@crossline/core";
+import { DEADLINE_MARGIN_DAYS, PARAMS_ASAP, PARAMS_BUFFERED, type ForecastResult, type ScheduleParams } from "@crossline/planner";
 import { effectiveParams, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast, planRanking, planToday,
   LINE_SHARES_SETTING, readAvailability, readGoalSettings, readLineShares, resolvedAvailability, type PersistedPlan, type RankedTask } from "./crossline";
 import { suggestedAvailabilityFor } from "./timeline";
 import { identityLines, lineLabels } from "./lines";
-import { readScheduledMinutes } from "./schedule-memory";
+import { unplacedTaskIds } from "./unplaced";
 import type { ForecastSummary } from "./forecast-diff";
-import { addDays, availabilityGrid, capacityWeeks, estimatePoints, goalRows, horizonFor, investment, rhythmGrid, statedShares,
-  type ForecastCharts, type Horizon, type Investment, type EstimatePoint } from "./plan-stats";
+import { addDays, availabilityGrid, capacityWeeks, estimatePoints, goalRows, horizonFor, milestoneMarks, planKpis, rhythmGrid, unplacedItems,
+  type ForecastCharts, type GoalRow, type Horizon, type EstimatePoint, type MilestoneState, type PlanKpis, type UnplacedItem } from "./plan-stats";
 
 /**
  * The plan page, read once (decided 2026-10-10: the calendar left this page; it is long-range statistics over the chosen horizon and the
@@ -27,8 +27,10 @@ export type PlanBoard = {
   inferredRegularBlocks: number;
   /** The forecast's dates and weekly net minutes, for 「与上次查看时相比」. */
   forecastSummary: ForecastSummary;
-  investment: Investment;
   estimates: { points: EstimatePoint[]; covered: number; coverage: number | null };
+  /** What the schedule could not place in full, with the planner's reason (「排不下的原因」), and the four figures over the page. */
+  unplaced: UnplacedItem[];
+  kpis: PlanKpis;
   /** Minutes worked per weekday × hour over the last eight weeks, and the availability pattern on the same grid. */
   rhythm: { worked: number[][]; available: number[][]; since: string };
   /** The scheduler's own ordering, read-only (decided 2026-10-15: importance is the agent's, set on each milestone's card; due days on task cards). */
@@ -77,23 +79,40 @@ export function loadForecastCharts(ctx: AccessContext, plan: PersistedPlan, hori
   const titleOf = Object.fromEntries(milestones.map((item) => [item.id, item.title]));
   const orders = store.listWorkOrders(ctx.workspaceId);
   const orderLine = Object.fromEntries(orders.map((order) => [order.id, order.identityId]));
-  const proposals: Record<string, number> = {};
-  for (const order of orders) if (order.state === "awaiting_plan_approval" && order.milestoneId && onPersonsBoard(order))
-    proposals[order.milestoneId] = (proposals[order.milestoneId] ?? 0) + 1;
   const lineOrder = identityLines(ctx).map((line) => line.id);
   const scheduled = plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day && block.day >= today)
     .map((block) => ({ day: block.day!, line: orderLine[block.id.split(":")[1]!] ?? "none", minutes: blockMinutes(block) }));
   const tomorrow = addDays(today, 1), weekOut = addDays(today, 7);
   const next7: Record<string, number> = {};
   for (const block of scheduled) if (block.day >= tomorrow && block.day <= weekOut) next7[block.line] = (next7[block.line] ?? 0) + block.minutes;
-  const unforecast = new Set(forecast.goals.filter((goal) => !goal.confirmedDeadline && effectiveWeight(ctx, goal.milestoneId) < IMPORTANT_WEIGHT)
-    .map((goal) => goal.milestoneId));
   return {
     capacity: capacityWeeks({ today, weeks: forecast.weeks, lineOf, titleOf, scheduled, lineOrder }),
-    goals: goalRows({ goals: forecast.goals, lineOf, lineOrder, marginDays: DEADLINE_MARGIN_DAYS, unforecast, library: ranking, proposals }),
+    goals: goalRowsFor(ctx, forecast, ranking),
     next7, windows: readAvailability(ctx), inferredRegularBlocks: forecast.inferredRegularBlocks,
     summary: { goals: forecast.goals, weeks: forecast.weeks.map((week) => ({ week: week.week, netMinutes: week.netMinutes })) }
   };
+}
+
+/** Each approved milestone's finish range and what is in its way, from one forecast run and the scheduler's own ordering. */
+export function goalRowsFor(ctx: AccessContext, forecast: ForecastResult, ranking: RankedTask[]): GoalRow[] {
+  const store = getStore();
+  const lineOf = Object.fromEntries(store.listMilestones(ctx.workspaceId).map((item) => [item.id, item.identityId]));
+  const proposals: Record<string, number> = {};
+  for (const order of store.listWorkOrders(ctx.workspaceId)) if (order.state === "awaiting_plan_approval" && order.milestoneId && onPersonsBoard(order))
+    proposals[order.milestoneId] = (proposals[order.milestoneId] ?? 0) + 1;
+  const unforecast = new Set(forecast.goals.filter((goal) => !goal.confirmedDeadline && effectiveWeight(ctx, goal.milestoneId) < IMPORTANT_WEIGHT)
+    .map((goal) => goal.milestoneId));
+  return goalRows({ goals: forecast.goals, lineOf, lineOrder: identityLines(ctx).map((line) => line.id), marginDays: DEADLINE_MARGIN_DAYS, unforecast,
+    library: ranking, proposals });
+}
+
+/**
+ * What the schedule says of each approved milestone (decided 2026-10-28: the plan page's milestone axis left for 主线, its state colours
+ * with it): at risk, nothing ready to work on, or waiting in the task library; none means on track. `forecast` should reach every
+ * approved deadline (`riskHorizonDays`), or a milestone past its end would read as one that does not finish.
+ */
+export function milestonePlanStates(ctx: AccessContext, plan: PersistedPlan, forecast: ForecastResult): Map<string, MilestoneState[]> {
+  return new Map(milestoneMarks(goalRowsFor(ctx, forecast, planRanking(ctx, plan)), planToday(ctx)).map((mark) => [mark.id, mark.states]));
 }
 
 export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan, requestedHorizon?: string): Promise<PlanBoard> {
@@ -114,30 +133,17 @@ export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan, req
     for (let cell = Math.floor(minutesOf(block.start) / 30); cell < Math.ceil(minutesOf(block.end) / 30) && cell < 48; cell += 1) busy[weekday]![cell]! += 1;
   }
 
-  // Planned against timed: the recorded day lengths of the last four weeks; today's also from the live plan, in case the timer has not run.
+  // Looking back (planned against timed, per line) is the weekly review's (2026-10-28); the page keeps the timed rhythm for the grid.
   const orders = store.listWorkOrders(ctx.workspaceId);
-  const orderLine = Object.fromEntries(orders.map((order) => [order.id, order.identityId]));
-  const plannedByDay: Record<string, Record<string, number> | null> = {};
-  for (let back = 27; back >= 0; back -= 1) { const day = addDays(today, -back); plannedByDay[day] = readScheduledMinutes(ctx, day); }
-  const live: Record<string, number> = {};
-  for (const block of plan.blocks) if (block.id.startsWith("scheduled:") && block.day === today) {
-    const order = block.id.split(":")[1]!;
-    live[order] = (live[order] ?? 0) + blockMinutes(block);
-  }
-  if (Object.keys(live).length || plannedByDay[today]) {
-    const merged = { ...(plannedByDay[today] ?? {}) };
-    for (const [order, minutes] of Object.entries(live)) merged[order] = Math.max(merged[order] ?? 0, minutes);
-    plannedByDay[today] = merged;
-  }
   const now = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString();
   // A session with no end counts to now only while its order is actually running: one left open by an order discarded before
   // sessions ended with it would otherwise read as weeks of work.
   const running = new Set(orders.filter((order) => order.state === "active").map((order) => order.id));
   const executions = store.listExecutions(ctx.workspaceId).filter((item) => item.endedAt || running.has(item.workOrderId));
-  let portrait: PortraitReport | undefined;
-  try { portrait = (JSON.parse(store.getSetting(ctx.workspaceId, "portrait.report") ?? "{}") as { report?: PortraitReport }).report; } catch { /* none yet */ }
   const facts = store.listProfileFacts(ctx.workspaceId);
   const since = addDays(today, -55);
+  const estimates = estimatePoints(store.listAllDurationObservations(ctx.workspaceId));
+  const unplaced = unplacedItems(ranking, unplacedTaskIds(plan.schedule?.blockers ?? []));
 
   const advice = readEnergyAdvice(store.getSetting(ctx.workspaceId, ENERGY_ADVICE_SETTING));
   return {
@@ -149,9 +155,7 @@ export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan, req
       source: resolvedAvailability(ctx).source
     },
     shares: { effective: readLineShares(ctx) ?? {}, custom: Boolean(getStore().getSetting(ctx.workspaceId, LINE_SHARES_SETTING)) },
-    investment: investment({ today, zone: timeZone, now, lineOrder, plannedByDay, orderLine, executions, next7: charts.next7,
-      stated: statedShares(portrait?.lines?.items ?? null, facts, hoursFromText) }),
-    estimates: estimatePoints(store.listAllDurationObservations(ctx.workspaceId)),
+    estimates, unplaced, kpis: planKpis({ capacity: charts.capacity, unplaced, estimates: estimates.points }),
     rhythm: { worked: rhythmGrid(executions.filter((item) => item.startedAt.slice(0, 10) >= since), timeZone, now),
       available: availabilityGrid(readAvailability(ctx)), since },
     ranking,

@@ -43,26 +43,30 @@ describe("plan page", () => {
     globalThis.crosslineStore = undefined;
   }, 20000);
 
-  // Decided 2026-10-10: the calendar is on Today only. Laid out again 2026-10-15: a milestone timeline per line on top, three charts,
-  // then the week's hours and energy beside the timed rhythm, the long-term goals, and one advanced fold — no tabs, no importance slider.
-  test("no calendar: the timeline, three charts, time and energy, long-term goals and an advanced fold — no tabs and no importance slider", async () => {
+  // Decided 2026-10-10: the calendar is on Today only. Laid out again 2026-10-28 (docs/plans/page-drafts-1028/plan.html): four figures,
+  // one line about milestones (their timeline is on 主线), three cards, the week's hours and energy, and the shares and packing numbers in
+  // the open — no milestone axis, no look back, no tabs, no importance slider.
+  test("no calendar and no milestone axis: four figures, three cards, time and energy, shares and the packing numbers in the open", async () => {
     const store = new CrosslineStore(":memory:");
     globalThis.crosslineStore = store;
     const { default: PlanPage } = await import("./page");
     const html = renderToStaticMarkup(await PlanPage({ searchParams: Promise.resolve({ horizon: "4" }) }));
-    for (const title of ["里程碑时间轴", "容量与需求", "主线投入：计划 vs 实际", "估时准确度", "时段与精力", "近 8 周实际节律", "排程依据", "高级：排程参数、主线份额与排程顺序"])
+    for (const title of ["本周可用", "本周已排", "未排进", "估时偏差", "容量与需求", "各线排程 vs 份额", "排不下的原因", "时段与精力", "近 8 周实际节律",
+      "主线份额", "高级", "排程顺序表", "复制到工作日"])
       expect(html).toContain(title);
+    expect(html).toContain("里程碑时间轴在「主线」→");
     expect(html).toMatch(/aria-checked="true"[^>]*>4 周</);
     expect(html).not.toContain('aria-label="设置项"');
     expect(html).not.toContain("重要性预设依据");
-    expect(html).not.toContain("里程碑完成预测");
+    expect(html).not.toContain("pl-ms-point");
+    expect(html).not.toContain("主线投入：计划 vs 实际");
+    expect(html).not.toContain("pl-advanced-body");
     // The day axis of the grid runs to 24.
     expect(html).toMatch(/data-edge="end"[^>]*>24</);
-    // No day / week / month calendar any more, and 「本周已排」 is no longer said twice.
+    // No day / week / month calendar any more.
     expect(html).not.toContain("mo-cell");
     expect(html).not.toContain("wk-col");
-    expect(html).not.toContain("本周已排");
-    // Nothing has been timed on a fresh account: the measured charts say so instead of drawing empty axes.
+    // Nothing has been timed on a fresh account: the figure says so in a word, the rhythm likewise.
     expect(html).toContain("尚无实测");
     expect(html).toContain("尚无计时记录");
     store.close();

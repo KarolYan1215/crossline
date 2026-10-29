@@ -5,7 +5,10 @@ import {
   ruleMilestoneRisks, supplyWarnings, taskProgress, taskTitleOf, timeOrderProblem, type AccessContext, type MilestoneRisk, type SuccessCriterion
 } from "@crossline/core";
 import { readStoredArtifactPlan } from "@crossline/db";
-import { appNow, effectiveWeight, getStore, importancePresets, loadCurrentPlan, loadGoalForecast, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel, saveGoalSettings } from "./crossline";
+import { appNow, effectiveWeight, getStore, importancePresets, loadCurrentPlan, loadGoalForecast, milestonesRetiredBySystem, planToday, readGoalSettings, relationKindLabel,
+  riskHorizonDays, saveGoalSettings } from "./crossline";
+import { milestonePlanStates } from "./plan-board";
+import type { MilestoneState } from "./plan-stats";
 import { listCourseTargets } from "./targets";
 import { identityLines } from "./lines";
 import { localeFor, tOf } from "./locale";
@@ -44,6 +47,11 @@ export type BoardMilestone = {
   weight: number; presetWeight: number; ownWeight: boolean;
   /** What could keep it from being reached: the reviewer's answer for this version (`model`), else the deterministic estimate (`rules`). */
   risks: MilestoneRisk[]; riskSource: "model" | "rules";
+  /**
+   * An approved milestone's place in the schedule (`milestonePlanStates`): at risk of not finishing, nothing ready to work on, or its work
+   * still in the task library; empty when on track, absent for a draft or with no forecast. Drawn as the marker's outer ring.
+   */
+  planStates?: MilestoneState[];
   retrospective?: { tasks: number; workedMinutes: number; reused: number; readings: Array<{ statement: string; observed: string }>;
     /** What the person recorded about it, once they have; it goes into the ledger and from there into their preferences. */
     note?: string };
@@ -76,7 +84,8 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
   const projects = new Map(store.listProjects(ctx.workspaceId, { includeArchived: true }).map((project) => [project.id, project.name]));
   const orders = store.listWorkOrders(ctx.workspaceId).filter((order) => order.state !== "archived");
   const plans = new Map(store.listStepPlans(ctx.workspaceId).map((plan) => [plan.workOrderId, plan]));
-  const blocks = (await loadCurrentPlan(ctx)).blocks;
+  const plan = await loadCurrentPlan(ctx);
+  const blocks = plan.blocks;
   const firstBlock = new Map<string, string>();
   for (const block of blocks) {
     if (!block.id.startsWith("scheduled:") || !block.day) continue;
@@ -110,9 +119,15 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
   const presets = importancePresets(ctx);
   const draftWeights = readDraftWeights(ctx);
   const storedRisks = parseMilestoneRisks(store.getSetting(ctx.workspaceId, MILESTONE_RISKS_SETTING));
-  // The forecast's room before each approved milestone's deadline, for the rule estimate; the page still draws without it.
+  // The forecast's room before each approved milestone's deadline, for the rule estimate, and what the schedule says of each (the state
+  // colours the plan page used to draw, 2026-10-28), run far enough to reach every approved deadline; the page still draws without it.
   let slack = new Map<string, number | null>();
-  try { slack = new Map(loadGoalForecast(ctx).goals.map((goal) => [goal.milestoneId, goal.p85Minutes > 0 ? goal.slackDays : null])); } catch { /* no forecast */ }
+  let planStates = new Map<string, MilestoneState[]>();
+  try {
+    const forecast = loadGoalForecast(ctx, riskHorizonDays(ctx));
+    slack = new Map(forecast.goals.map((goal) => [goal.milestoneId, goal.p85Minutes > 0 ? goal.slackDays : null]));
+    planStates = milestonePlanStates(ctx, plan, forecast);
+  } catch { /* no forecast */ }
 
   const board: BoardMilestone[] = milestones.map((milestone) => {
     const anchor = anchors.get(milestone.id);
@@ -186,6 +201,7 @@ export async function loadMilestoneBoard(ctx: AccessContext): Promise<MilestoneB
           riskSource: reviewed ? "model" as const : "rules" as const };
       })(),
       confirmedDeadline: goal?.confirmedDeadline ?? null,
+      ...(milestone.status === "approved" && planStates.has(milestone.id) ? { planStates: planStates.get(milestone.id)! } : {}),
       ...(achieved ? { retrospective: { tasks: own.length, workedMinutes: worked,
         reused: relationRows.filter((relation) => relation.direction === "out" && !relation.pending).length,
         readings: criteria.map((criterion) => ({ statement: criterion.statement, observed: criterion.observed ?? "" })),

@@ -62,8 +62,10 @@ function ensureOwnNextStep(): void {
 // The plan page's charts, ranking lists and capacity figures come from the same time-limited solve, so they are left out as well; the
 // ranking and the overload list are removed rather than hidden because how many rows they hold changes their height.
 const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-aside,.td-load,.td-due,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
-  + ".task-card-slot a,.pl-hours,.pl-svg,.pl-timeline>header small,.pl-advice-count{visibility:hidden}"
-  + ".ui-first-hint,.pl-rank-table,.pl-library,.pl-explain p,.pl-over-list,.pl-stat .pl-chart-foot,.forecast-delta{display:none}";
+  + ".task-card-slot a,.pl-hours,.pl-svg,.pl-timeline>header small,.pl-advice-count,.pl-kpi-value,.pl-kpi-note,.pl-kpi-bar,.pl-share-rows,.pl-milestones>span,"
+  + ".schedule-status{visibility:hidden}"
+  + ".ui-first-hint,.pl-rank-table,.pl-library,.pl-explain p,.pl-over-list,.pl-stat .pl-chart-foot,.forecast-delta,.pl-unplaced-list,.pl-unplaced .pl-empty,"
+  + ".pl-count,.plan-page>.subpage-inner>.pl-chart-foot{display:none}";
 
 test.beforeEach(async ({ page }, testInfo) => {
   if (testInfo.project.name === "desktop-chrome") await ensureScheduleSetup(page);
@@ -116,33 +118,37 @@ test("a task card opens its dialog in place, and the dialog's full-page link sho
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("dialog").getByRole("heading", { name: title })).toBeVisible();
 });
-test("Plan is the long view: no calendar, a milestone timeline and three charts over a chosen horizon, nothing to approve", async ({ page }, testInfo) => {
+test("Plan is the long view: four figures, three cards and the week's hours over a chosen horizon, nothing to approve", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/plan");
   const plan = page.locator("[data-plan-version]");
   await expect(plan).toHaveAttribute("data-plan-version", "personal-plan-v1");
-  // The calendar is on Today only (decided 2026-10-10).
-  await expect(page.locator(".mo-cell, .wk-col, .dv-block")).toHaveCount(0);
-  for (const chart of ["里程碑时间轴", "容量与需求", "主线投入：计划与实际", "估时准确度", "时段与精力"]) await expect(page.getByRole("region", { name: chart })).toBeVisible();
+  // The calendar is on Today only (decided 2026-10-10), the milestone timeline on 主线 (2026-10-28).
+  await expect(page.locator(".mo-cell, .wk-col, .dv-block, .pl-ms-point")).toHaveCount(0);
+  for (const region of ["本周可用", "本周已排", "未排进", "估时偏差", "容量与需求", "各线排程 vs 份额", "排不下的原因", "时段与精力", "主线份额", "高级"])
+    await expect(page.getByRole("region", { name: region })).toBeVisible();
+  await expect(page.getByRole("link", { name: "里程碑时间轴在「主线」→" })).toHaveAttribute("href", "/milestones");
   await expect(page.getByRole("button", { name: "立即同步日历" })).toBeVisible();
   // No writer account in the e2e ledger, so there is no Crossline calendar to publish to (W-20).
   await expect(page.getByRole("button", { name: "发布到 Crossline 日历" })).toHaveCount(0);
-  // Each milestone mark opens its drawer on 主线 (the default eight-week horizon).
-  await expect(page.locator('.pl-ms-point[href^="/milestones?open="]').first()).toBeVisible();
   // Eight weekly bars by default; four once the horizon is switched, kept in the address.
   await expect(page.locator(".pl-cd-week")).toHaveCount(8);
   await Promise.all([page.waitForURL(/horizon=4/), page.getByRole("radiogroup", { name: "统计范围" }).getByRole("radio", { name: "4 周" }).click()]);
   await expect(page.locator(".pl-cd-week")).toHaveCount(4);
-  // No settings tabs and no importance slider (decided 2026-10-15): the packing numbers, shares and ordering sit in one advanced fold.
+  // No settings tabs and no importance slider (decided 2026-10-15); the shares and packing numbers are in the open, the ordering a click away.
   await expect(page.getByRole("radiogroup", { name: "设置项" })).toHaveCount(0);
   await expect(page.locator(".pl-rank-weight, .pl-imp-basis[aria-label$='重要性预设依据']")).toHaveCount(0);
-  await expect(page.locator("details.pl-advanced > summary")).toHaveText("高级：排程参数、主线份额与排程顺序");
+  await page.getByRole("button", { name: "排程顺序表" }).click();
+  await expect(page.getByRole("dialog", { name: "排程顺序" })).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.goto("/plan");
   // The plan takes effect by default (docs/loop-and-scout.md §1): no version to approve, no differences to settle.
   await expect(page.getByText("批准本批变更")).toHaveCount(0);
   if (testInfo.project.name === "desktop-chrome") {
     await page.waitForTimeout(800);
     await page.addStyleTag({ content: STABLE_FOR_SCREENSHOT });
+    // The page is taller than the window, so the fixed corner helper lands wherever the element screenshot scrolled to.
+    await page.addStyleTag({ content: ".corner-stack{visibility:hidden}" });
     await expect(page.locator(".subpage")).toHaveScreenshot("plan-diff.png");
   }
 });
@@ -171,7 +177,7 @@ test("editing availability re-runs the scheduler instead of only storing a prefe
   }
   await page.getByRole("radio", { name: "高精力" }).click();
   await grid.locator("tbody tr").last().locator("td").nth(12).click();
-  await page.getByRole("button", { name: "预览影响" }).click();
+  await page.locator("#time").getByRole("button", { name: "预览影响" }).click();
   await expect(page.getByRole("dialog", { name: "改动影响" })).toBeVisible();
   // While the preview is open the charts above draw the change, with the current values as ghosts.
   await expect(capacity.locator(".pl-preview-note")).toBeVisible();
@@ -220,16 +226,17 @@ test("goal confirmation and permission-mode rejection persist through the real p
   // The deadline is edited where it is shown: the milestone's drawer, opened from its marker on the timeline (a label may be left out
   // where labels would overlap; the marker never is).
   await page.locator('.mt-marker[aria-label^="稳定推进当前实验与论文"]').click();
-  const drawer = page.locator(".ui-sheet");
+  // At 1440px the drawer stays beside the timeline (2026-10-28); narrower it opens as a sheet.
+  const drawer = page.locator('.ms-dock[aria-label="里程碑：稳定推进当前实验与论文"], .ui-sheet');
   await Promise.all([
     page.waitForNavigation({ waitUntil: "load" }),
     drawer.locator('input[type="date"]').fill("2026-09-30", { force: true })
   ]);
   // The save reloads the page and opens the same drawer again (2026-10-18), so the new deadline is read where it was written.
-  await expect(page.locator(".ui-sheet").locator('input[type="date"]')).toHaveValue("2026-09-30");
-  await page.goto("/plan");
-  // The confirmed deadline places that milestone's mark on the plan page's timeline.
-  await expect(page.locator('.pl-ms-point[data-deadline="2026-09-30"]')).toHaveCount(1);
+  await expect(page.locator('.ms-dock[aria-label="里程碑：稳定推进当前实验与论文"], .ui-sheet').locator('input[type="date"]')).toHaveValue("2026-09-30");
+  // The confirmed deadline places that milestone's marker on the timeline (the plan page's own axis left for here on 2026-10-28).
+  await page.goto("/milestones");
+  await expect(page.locator('.mt-marker[aria-label^="稳定推进当前实验与论文"]')).toHaveAttribute("aria-label", /截止 9\/30/);
 
   const store = openStore();
   try { store.appendEvent({ ownerId: "e2e-tester", workspaceId: realWorkspaceId(store),

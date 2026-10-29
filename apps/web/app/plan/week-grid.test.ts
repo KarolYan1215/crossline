@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gridFromWindows, gridHours, windowsFromGrid } from "./week-grid";
+import { copyToWeekdays, gridFromWindows, gridHours, windowsFromGrid } from "./week-grid";
 
 describe("week grid", () => {
   it("round-trips windows, merging days with the same run into one window", () => {
@@ -19,5 +19,14 @@ describe("week grid", () => {
     expect(windowsFromGrid(grid)).toEqual([{ days: [2], start: "09:00", end: "11:00", energy: "high" },
       { days: [2], start: "11:00", end: "12:00", energy: "low" }, { days: [2], start: "22:00", end: "23:59", energy: "medium" }]);
     expect(gridFromWindows(windowsFromGrid(grid))).toEqual(grid);
+  });
+
+  it("copies one day's row to Monday–Friday and leaves the weekend alone", () => {
+    const grid = gridFromWindows([{ days: [3], start: "09:00", end: "12:00", energy: "high" }, { days: [6], start: "10:00", end: "11:00", energy: "low" }]);
+    const copied = copyToWeekdays(grid, 3);
+    expect(windowsFromGrid(copied)).toEqual([{ days: [1, 2, 3, 4, 5], start: "09:00", end: "12:00", energy: "high" },
+      { days: [6], start: "10:00", end: "11:00", energy: "low" }]);
+    expect(grid[1]!.every((value) => value === 0)).toBe(true);
+    expect(copyToWeekdays(copied, 2)).toBe(copied);
   });
 });

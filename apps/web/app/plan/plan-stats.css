@@ -1,13 +1,13 @@
-/* ── plan page: the milestone timeline, the three charts, time and energy (decided 2026-10-15) ── */
+/* ── plan page: the head, the three cards, time and energy (decided 2026-10-15; laid out again 2026-10-28) ── */
 
-/* Energy has its own hue (teal), one no line uses, in three steps; milestone states use red (risk), grey (task library) and hollow (not ready). */
-:root{--en-3:#00616B;--en-2:#3F9AA3;--en-1:#A9D6DA;--ms-risk:#A1262B;--ms-library:#767676}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--en-3:#5FD0D9;--en-2:#2C8790;--en-1:#1E4A4F;--ms-risk:#FF8A80;--ms-library:#9A9A9A}}
-:root[data-theme="dark"]{--en-3:#5FD0D9;--en-2:#2C8790;--en-1:#1E4A4F;--ms-risk:#FF8A80;--ms-library:#9A9A9A}
+/* Energy has its own hue (teal), one no line uses, in three steps. */
+:root{--en-3:#00616B;--en-2:#3F9AA3;--en-1:#A9D6DA}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--en-3:#5FD0D9;--en-2:#2C8790;--en-1:#1E4A4F}}
+:root[data-theme="dark"]{--en-3:#5FD0D9;--en-2:#2C8790;--en-1:#1E4A4F}
 
 .pl-stats{display:grid;gap:12px;min-width:0;grid-template-columns:minmax(0,1fr);align-items:start}
 @media (min-width:700px) and (max-width:1099px){.pl-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.pl-stats>:first-child{grid-column:1 / -1}}
-@media (min-width:1100px){.pl-stats{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,.72fr)}}
+@media (min-width:1100px){.pl-stats{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr) minmax(0,.95fr)}}
 .pl-stat{position:relative}
 .pl-chart-box{position:relative;min-width:0}
 .pl-svg{display:block;max-width:100%;height:auto}
@@ -20,9 +20,7 @@
 .pl-preview-note{margin:0;font-size:12px;color:var(--ink)}
 .pl-horizon{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px}
 .pl-horizon small{font-size:12px;color:var(--graphite)}
-.plan-bar-aside{margin-left:auto}
-.pl-why{display:grid;gap:8px}
-.pl-why h3,.pl-params h3,.pl-compare h3,.pl-library h3{margin:0;font-size:13px}
+.pl-compare h3,.pl-library h3{margin:0;font-size:13px}
 
 /* legend keys added by these charts (the base .pl-key is in plan.css) */
 .pl-legend>span{display:inline-flex;align-items:center}
@@ -35,52 +33,6 @@
 .pl-key[data-k="outside"]{width:10px;border-radius:50%;background:var(--paper);border:2px solid var(--ink)}
 .pl-key[data-k="heat"]{background:color-mix(in srgb,var(--ink) 60%,var(--paper))}
 .pl-key[data-k="lvbar"]{height:4px;background:var(--en-3);vertical-align:2px}
-.pl-key[data-k^="ms-"]{width:10px;height:10px;border-radius:50%}
-.pl-key[data-k="ms-on"]{background:conic-gradient(var(--c-research) 0 25%,var(--c-startup) 0 50%,var(--c-media) 0 75%,var(--c-investment) 0)}
-.pl-key[data-k="ms-risk"]{background:var(--ms-risk)}
-.pl-key[data-k="ms-unprepared"]{background:var(--paper);border:1.5px solid var(--ink)}
-.pl-key[data-k="ms-library"]{background:var(--ms-library)}
-.pl-key[data-k="ms-combo"]{border-radius:0;border:1px solid var(--ink);background:linear-gradient(to right,var(--ms-risk) 0 50%,var(--ms-library) 50%)}
-.pl-key[data-k="bar-planned"]{background:color-mix(in srgb,var(--ink) 18%,var(--paper));border:1.5px solid var(--ink)}
-.pl-key[data-k="bar-actual"]{background:var(--ink)}
-.pl-key[data-k="bar-next"]{background:transparent;border:1.5px dashed var(--ink)}
-
-/* 1. one timeline per line */
-.pl-timeline>header small{font-size:12px}
-.pl-timeline>header .forecast-delta{flex-basis:100%}
-.pl-ms-line{fill:var(--ink);color:var(--ink);font-weight:700}
-.pl-svg .pl-ms-line{font-size:13px}
-.pl-ms-bar{fill:var(--lc,var(--graphite))}
-.pl-ms-track{stroke:var(--lc,var(--graphite));stroke-width:2;opacity:.5}
-.pl-ms-leader{stroke:var(--mist);stroke-width:1}
-/* A halo in the card's colour, so a month line or the today line never cuts through a name. */
-.pl-ms-label{fill:var(--ink);color:var(--ink);paint-order:stroke;stroke:var(--paper);stroke-width:3px;stroke-linejoin:round}
-.pl-ms-today{stroke:var(--ink);stroke-width:1;stroke-dasharray:2 3}
-.pl-ms-point{cursor:pointer;outline:none}
-.pl-ms-point:hover .pl-ms-label,.pl-ms-point:focus-visible .pl-ms-label,.pl-ms-point[data-focus] .pl-ms-label{text-decoration:underline}
-.pl-ms-point[data-focus] .pl-ms-leader{stroke:var(--ink)}
-/* The strip above the axis: the milestone in focus, in full. Fixed height, so the axis never moves under the pointer. */
-.pl-ms-focus{height:52px;overflow-y:auto;padding:4px 10px;border:1px solid var(--mist);border-left:4px solid var(--lc,var(--mist));background:var(--paper);
-  font-size:13px;line-height:1.5;color:var(--ink)}
-.pl-ms-focus p{margin:0}
-.pl-ms-focus-title b{font-size:14px}
-.pl-ms-focus-title .ui-tag{margin-right:4px;vertical-align:1px}
-.pl-ms-focus-hint{color:var(--graphite)}
-.pl-ms-point:focus-visible .pl-ms-mark{stroke:var(--ink);stroke-width:2}
-.pl-ms-mark{stroke:var(--paper);stroke-width:1.5}
-.pl-ms-mark[data-state="on_track"]{fill:var(--lc,var(--ink))}
-.pl-ms-mark[data-state="risk"]{fill:var(--ms-risk)}
-.pl-ms-mark[data-state="library"]{fill:var(--ms-library)}
-.pl-ms-mark[data-state="unprepared"]{fill:var(--paper);stroke:var(--ink);stroke-width:1.5}
-.pl-ms-combo .pl-ms-mark{stroke:none}
-.pl-ms-combo-frame{fill:none;stroke:var(--ink);stroke-width:1}
-.pl-ms-ghost{fill:none;stroke:var(--graphite);stroke-width:1.3;stroke-dasharray:2 2}
-.pl-ms-list{display:grid;gap:10px}
-.pl-ms-list section{display:grid;gap:4px;border-left:3px solid var(--lc,var(--mist));padding-left:8px}
-.pl-ms-list ol{margin:0;padding:0;list-style:none;display:grid;gap:4px}
-.pl-ms-list li a{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;color:var(--ink);text-decoration:none;font-size:13px}
-.pl-ms-list li a .mono{font-size:12px;color:var(--graphite)}
-.pl-ms-name{min-width:0}
 
 /* 2. capacity and demand */
 .pl-seg{fill:var(--lc,var(--graphite))}
@@ -103,11 +55,6 @@
 .pl-tip small{display:block;padding-left:12px;color:var(--graphite)}
 .pl-tip-line{display:block}
 .pl-swatch{display:inline-block;width:8px;height:8px;margin-right:4px;background:var(--lc,var(--graphite))}
-
-/* 3. planned against timed hours */
-.pl-bar-planned{fill:color-mix(in srgb,var(--lc,var(--ink)) 20%,var(--paper));stroke:var(--lc,var(--ink));stroke-width:1.5}
-.pl-bar-actual{fill:var(--lc,var(--ink))}
-.pl-bar-next{fill:none;stroke:var(--lc,var(--ink));stroke-width:1.5;stroke-dasharray:3 2}
 
 /* 4. estimates */
 .pl-est{display:grid;gap:6px;justify-items:start}
@@ -139,17 +86,109 @@
 .pl-advice-sources{display:flex;flex-wrap:wrap;gap:4px 12px}
 .pl-advice-sources a{font-size:12px;color:var(--ink)}
 
-/* 6. long-term goals, and the advanced fold */
-.pl-goals ul{margin:0;padding:0;list-style:none;display:grid;gap:4px}
-.pl-goals li{display:grid;grid-template-columns:minmax(64px,auto) minmax(0,1fr) auto;gap:4px 12px;align-items:baseline;padding:3px 0 3px 8px;border-left:3px solid var(--lc,var(--mist));font-size:13px}
-.pl-goals li small{font-size:12px;color:var(--graphite)}
-.pl-advanced-body{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(360px,100%),1fr))}
-.pl-advanced-body .pl-why{grid-column:1 / -1}
+.pl-advice .pl-advice-basis{font-size:12px;color:var(--graphite)}
+
+/* ── 2026-10-28 redesign (docs/plans/page-drafts-1028/plan.html): the frame's warm tokens inside the page, as Today does ── */
+html:has(.plan-page) body{background:var(--ds-bg)}
+.plan-page{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--shade:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);color:var(--ink)}
+body:has(.plan-page) .running-head{background:var(--ds-bg)}
+.plan-page .subpage-inner{gap:16px;padding-top:10px}
+.plan-page .pl-card{padding:16px 18px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
+.plan-page .pl-card>header h2{font-size:19px;font-weight:600;line-height:1.2}
+.plan-page :is(.primary-button,.secondary-button,.pl-tool,.ui-segmented,.ui-segmented button,input,select){border-radius:var(--ds-radius-control)}
+.plan-page .primary-button{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
+.plan-page .primary-button:hover{background:var(--ds-accent-ink);color:var(--ds-on-accent)}
+.plan-page .ui-line-tag{border:0;border-radius:999px;padding:0 8px;background:color-mix(in srgb,var(--lc,var(--graphite)) 14%,var(--ds-card));color:var(--ink);font-weight:600}
+.plan-page .pl-empty{border-radius:var(--ds-radius-control)}
+.pl-tool{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 10px;border:1px solid var(--ds-line);background:var(--ds-card);color:var(--ink);font:inherit;font-size:13px;cursor:pointer}
+.pl-tool:hover:not(:disabled){background:var(--ds-chalk)}
+.pl-tool:disabled{opacity:.55;cursor:default}
+.pl-preview-button{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
+.pl-card-foot{margin:0;padding-top:8px;border-top:1px solid var(--ds-line);font-size:13px}
+.pl-card-foot a{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+
+/* head: title and subtitle on the left, horizon and icons on the right */
+.pl-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px 18px;padding:14px 0 2px}
+.pl-head h1{margin:0;font-size:clamp(30px,3vw,38px);font-weight:600;line-height:1.05;color:var(--ink)}
+.pl-head p{margin:6px 0 0;font-size:13px;color:var(--graphite)}
+.pl-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.pl-actions .ds-icon{border-color:var(--ds-line)}
+.pl-why-link{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 8px;border-radius:var(--ds-radius-control);font-size:13px;color:var(--ink)}
+.pl-why-link:hover{background:var(--ds-chalk)}
+.plan-sync-note{flex-basis:100%;text-align:right;font-size:12px;color:var(--graphite)}
+
+/* four figures */
+.pl-kpis{display:grid;gap:14px;grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:1100px){.pl-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){.pl-kpis{gap:10px}.pl-kpi{padding:12px}.pl-kpi-value>span{font-size:26px}}
+.pl-kpi{display:grid;gap:4px;align-content:start;min-width:0;padding:14px 16px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
+.pl-kpi[data-alarm]{border-color:color-mix(in srgb,var(--ds-alarm) 45%,var(--ds-line))}
+.pl-kpi-label{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--graphite)}
+.pl-kpi[data-alarm] .pl-kpi-label{color:var(--ds-alarm-ink)}
+.pl-kpi-label svg{width:15px;height:15px}
+.pl-kpi-value{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px;font-weight:600;color:var(--ink)}
+.pl-kpi-value>span{font-size:32px;line-height:1.1}
+.pl-kpi[data-alarm] .pl-kpi-value>span{color:var(--ds-alarm-ink)}
+.pl-kpi-value small{font-size:14px;font-weight:400;color:var(--graphite)}
+.pl-kpi-note{font-size:12px;color:var(--graphite)}
+.pl-kpi-note a,.pl-kpi-note .text-button{color:var(--ink);text-decoration:underline;text-underline-offset:3px;font-size:12px;padding:0;min-height:0}
+.pl-kpi-bar{display:block;height:6px;border-radius:3px;background:var(--ds-chalk);overflow:hidden}
+.pl-kpi-bar i{display:block;width:var(--pct);height:100%;background:var(--ds-accent)}
+
+/* the schedule's status and the milestone line */
+.plan-page .schedule-status{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0;padding:8px 14px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);
+  background:var(--ds-card);font-size:13px;color:var(--graphite)}
+.plan-page .schedule-status strong{color:var(--ink)}
+.plan-page .schedule-status a{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.pl-milestones{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:10px 14px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);
+  background:var(--ds-chalk);font-size:13px;color:var(--ink)}
+.pl-milestones>a{margin-left:auto;color:var(--ink)}
+.pl-milestones .forecast-delta{flex-basis:100%;font-size:12px}
+.pl-milestones .forecast-delta ul{margin:2px 0 0;padding-left:18px}
+
+/* 排不下的原因 */
+.pl-count{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:999px;background:var(--ds-alarm-ink);color:var(--ds-bg);font-size:12px;font-weight:700}
+.pl-unplaced-list{margin:0;padding:0;list-style:none;display:grid;gap:0}
+.pl-unplaced-list li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;padding:10px 0;border-top:1px solid var(--ds-line)}
+.pl-unplaced-list li:first-child{border-top:0;padding-top:0}
+.pl-unplaced-title{font-weight:600;color:var(--ink);text-decoration:none}
+.pl-unplaced-title:hover{text-decoration:underline}
+.pl-unplaced-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:4px 0 0;font-size:12px;color:var(--graphite)}
+.pl-unplaced-meta .mono{display:inline-flex;align-items:center;gap:3px}
+.pl-unplaced-reason{margin:4px 0 0;font-size:13px;color:var(--ink)}
+.pl-add-time{border-color:var(--ds-line) !important}
+
+/* 各线排程 vs 份额 */
+.pl-share-rows{margin:0;padding:0;list-style:none;display:grid;gap:12px}
+.pl-share-rows li{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:10px;align-items:center}
+.pl-share-name{font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-share-bars{position:relative;display:grid;gap:4px}
+.pl-share-bar{display:block;height:9px;min-width:2px;border-radius:5px}
+.pl-share-bar[data-k="share"]{background:color-mix(in srgb,var(--lc,var(--graphite)) 22%,var(--ds-card))}
+.pl-share-bar[data-k="planned"]{background:var(--lc,var(--graphite))}
+.pl-share-ghost{position:absolute;left:0;bottom:0;height:9px;border:1.5px dashed var(--graphite);border-radius:5px}
+.pl-share-figures{font-size:12px;line-height:1.35;color:var(--graphite);text-align:right}
+.pl-key[data-k="share"]{background:color-mix(in srgb,var(--ink) 18%,var(--paper));border-radius:3px}
+.pl-key[data-k="planned"]{background:var(--ink);border-radius:3px}
+
+/* 时段与精力 */
+.pl-time-hint{font-size:12px;color:var(--graphite)}
+.plan-page .pl-grid td{border-radius:3px}
+
+/* 主线份额 and 高级, side by side */
+.pl-settings{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr));align-items:start}
+.pl-head-actions{display:inline-flex;gap:6px;margin-left:auto}
+.pl-shares .pl-param{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:center}
+.pl-param-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
+.plan-page .pl-params{max-width:none}
+.pl-param-box{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;padding:8px 10px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-bg);font-size:13px}
+.pl-advanced .pl-explain{padding-top:10px;border-top:1px solid var(--ds-line)}
 
 @media (max-width:640px){
-  .plan-bar-aside{margin-left:0}
-  .pl-goals li{grid-template-columns:minmax(0,1fr) auto}
-  .pl-goals li>span{grid-column:1 / -1;grid-row:2}
+  .pl-head{align-items:flex-start}
+  .pl-actions{justify-content:flex-start}
+  .plan-sync-note{text-align:left}
+  .pl-milestones>a{margin-left:0}
+  .pl-share-rows li{grid-template-columns:56px minmax(0,1fr)}
+  .pl-share-figures{grid-column:1 / -1;text-align:left}
 }
-.pl-ms-more{font-weight:700;fill:var(--ink);color:var(--ink)}
-.pl-advice .pl-advice-basis{font-size:12px;color:var(--graphite)}
