@@ -40,7 +40,7 @@ import { dateAdvancePass } from "./date-advance";
 import { createWriteLogin } from "./calendar-write-login";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE_TOKEN_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, NODE_TOKEN_SETTING, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, htmlLang, tFor, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
-import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials } from "./manualbook";
+import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials, prepareMaterialsAhead } from "./manualbook";
 import { startingWithin } from "./schedule-window";
 import { createProgressJudge, createStepPlanner, createWarningReviewer, reportsAwaitingJudgement, requestFinerSplits, requestOutdatedReplans, settleOldQuestions, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { createArchetypeCurator, curationDue } from "./archetype-curator";
@@ -812,6 +812,8 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   // Preparation: materials, tutorials, the person's own skills, research, the assistant.
   // Material preparation is the one background job that writes into the project directory, so it only
   // ever runs for work orders the human already approved into `preparing`.
+  // Work starting within a day gets its materials now, not when the person presses 开始 (docs/plans/closed-loop-1030.md §5).
+  try { prepareMaterialsAhead(analysisStore, workspace.id, new Date()); } catch { /* next tick */ }
   for (const workOrderId of pendingMaterialWorkOrders(analysisStore, workspace.id)) {
     const outcome = await getMaterialPreparer(workspace.id)(workOrderId).catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: `materials.${outcome.state}`, checkedAt, workspaceId: workspace.id, ...outcome }));

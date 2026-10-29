@@ -1791,6 +1791,9 @@ export function startWorkOrderExecution(ctx: AccessContext, workOrderId: string,
       return { ok: false, code: "MATERIALS_PREPARING" };
     }
     store.transitionWorkOrder(ctx.workspaceId, workOrderId, { type: "materials.not_required" }, `materials-not-required:${workOrderId}:${run}`);
+  } else if (workOrder.state === "preparing") {
+    // Prepared ahead of its first block (docs/plans/closed-loop-1030.md §5) and not ready yet: said as what it is.
+    return { ok: false, code: "MATERIALS_PREPARING" };
   } else if (workOrder.state !== "ready_for_human") {
     return { ok: false, code: "EXECUTION_NOT_STARTABLE" };
   }

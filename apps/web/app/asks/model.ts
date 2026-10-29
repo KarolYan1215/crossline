@@ -122,7 +122,10 @@ export function answerProblem(code: string | undefined, locale?: Locale): string
     case "ASK_SINGLE_CHOICE": return t("这一题只能选一项");
     case "ASK_NOTE_NOT_TAKEN": return t("这一题需要从选项中选择");
     case "ASK_OPTION_UNKNOWN": return t("先选一项");
-    case "ASK_NOT_FOUND": return t("这条已经处理过了");
+    // Gone because it was answered, or because another answer settled what it was about (a risk card after the weekly digest): either way
+    // nothing is left to do (docs/plans/closed-loop-1030.md §5).
+    case "ASK_NOT_FOUND": return t("情况已变化，这条不用处理了");
+    case "ASK_DATE_INVALID": return t("日期要是今天或以后");
     default: return t("未保存，请重试");
   }
 }

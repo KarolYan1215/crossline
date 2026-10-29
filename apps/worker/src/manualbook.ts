@@ -499,6 +499,27 @@ export function pendingMaterialWorkOrders(store: CrosslineStore, workspaceId: st
     .map((order) => order.id);
 }
 
+/** How far ahead of its first block a task's materials are prepared (docs/plans/closed-loop-1030.md §5). */
+export const MATERIALS_LEAD_HOURS = 24;
+
+/**
+ * Approved work with a material contract and no materials yet, whose first block starts within a day (`startingWithin`, the same window
+ * the assistant's preparation uses), goes to `preparing` now, so the materials are there when the block comes. It used to wait for the
+ * person to press 开始, which sent the block into 「材料准备中」 and wasted it (the month simulation, twice). Returns the ids moved.
+ */
+export function prepareMaterialsAhead(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
+  const soon = startingWithin(store, workspaceId, now, MATERIALS_LEAD_HOURS);
+  const moved: string[] = [];
+  for (const order of store.listWorkOrders(workspaceId)) {
+    if (order.state !== "approved" || order.tombstone || !soon.has(order.id) || !onPersonsBoard(order)) continue;
+    if (!((order.payload as { materialContract?: unknown[] } | undefined)?.materialContract ?? []).length) continue;
+    if (store.listMaterials(workspaceId, order.id).length) continue;
+    const changed = store.transitionWorkOrder(workspaceId, order.id, { type: "automation.started" }, `materials-preparing:${order.id}:ahead`);
+    if (changed.changed) moved.push(order.id);
+  }
+  return moved;
+}
+
 /** Folder listing for the person: what a built manualbook contains, for tests and for the task page. */
 export function listManualbookFiles(materialsDir: string, workOrderId: string): string[] {
   const root = path.join(materialsDir, workOrderId);

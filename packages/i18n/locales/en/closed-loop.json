@@ -33,5 +33,7 @@
   "{{count}} 个已开始的任务过了本人定的截止，按实测进度的保守完成日留 2 天余量顺延：{{items}}": "{{count}} started tasks passed a due day the person set and were moved to the cautious finish at the measured pace with 2 days to spare: {{items}}",
   "「{{title}}」按实测进度余量已不足两天：{{due}} 截止前可用 {{free}}，还需 {{remaining}}。": "“{{title}}” has under two days to spare at the measured pace: {{free}} free before {{due}}, {{remaining}} still needed.",
   "{{label}}截止推到 {{day}}": "{{label}} due day moved to {{day}}",
-  "去本周承诺": "Go to this week's commitment"
+  "去本周承诺": "Go to this week's commitment",
+  "情况已变化，这条不用处理了": "Things have changed; this one needs nothing now",
+  "日期要是今天或以后": "The date has to be today or later"
 }
