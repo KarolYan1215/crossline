@@ -23,9 +23,13 @@ export const PROGRESS_LEVELS = [
 export type ProgressLevelId = typeof PROGRESS_LEVELS[number]["id"];
 export type NotifyLevelName = "off" | "less" | "normal" | "more";
 
-/** A button: an action carried out on click, a page to open, an acknowledgement, 「少问这类」, or a cue to type. */
+/**
+ * A button: an action carried out on click, a page to open, an acknowledgement, 「少问这类」, or a cue to type. `more` puts it behind
+ * the card's 「更多」 fold, for a way out that should not sit beside the step it competes with (2026-10-30: 「推到明天」 beside
+ * 「开始计时」 at the moment of starting).
+ */
 export type NudgeButton =
-  | { kind: "action"; label: string; action: ProposedAction }
+  | { kind: "action"; label: string; action: ProposedAction; more?: true }
   | { kind: "href"; label: string; href: string }
   | { kind: "ack"; label: string }
   | { kind: "mute"; label: string }
@@ -157,7 +161,7 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
       ].filter(Boolean).join(en ? " " : "");
       out.push({ kind: "block_start", fingerprint: `start:${block.id}:${input.today}`, urgent: true, counted: false, text,
         buttons: [{ kind: "action", label: t("开始计时"), action: op(block.orderId, "start", t("开始{{label}}", { label })) },
-          { kind: "action", label: t("推到明天"), action: op(block.orderId, "defer", t("{{label}}推到明天", { label }), { date: input.tomorrow }) }, mute] });
+          { kind: "action", label: t("推到明天"), action: op(block.orderId, "defer", t("{{label}}推到明天", { label }), { date: input.tomorrow }), more: true }, mute] });
     }
   }
   // The completion check (docs/loop-and-scout.md §3): every block of the day, once it ends, is asked about once — one tap records

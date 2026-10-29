@@ -290,7 +290,7 @@ function nudgeCard(id: string, text: string, buttons: NudgeButton[], kind: Nudge
     if (button.kind !== "action") return { label: button.label, actions: [] as number[], kind: button.kind,
       ...(button.kind === "href" ? { href: button.href.replace("{message}", encodeURIComponent(id)) } : {}) };
     actions.push(button.action);
-    return { label: button.label, actions: [actions.length - 1], kind: "action" as const };
+    return { label: button.label, actions: [actions.length - 1], kind: "action" as const, ...(button.more ? { more: true as const } : {}) };
   });
   return { actions, items: actions.map(() => ({ state: "pending" })), clarify: { question: text, options }, confidence: "high", nudgeKind: kind };
 }

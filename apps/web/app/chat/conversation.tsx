@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ACTIONS, cardActionIndexes, type ConciergeTurn } from "@crossline/core";
-import type { Card, CardChoices, MessageView, PageContext } from "../../lib/conversation";
+import type { Card, CardChoices, CardOption, MessageView, PageContext } from "../../lib/conversation";
 import { CardFields, editableFields } from "./card-fields";
 import { Composer, type ComposerInput } from "./composer";
 import { captureLine } from "../offline-command-forms";
@@ -206,6 +206,24 @@ export function CardView({ messageId, card, onUpdate, choices, body }: { message
       else setError(body?.code === "CARD_REVIEWING" ? t("仍在核对，稍候再执行") : t("未能执行，请刷新后重试"));
     } finally { setWorking(false); }
   };
+  const optionButton = (option: CardOption, index: number) =>
+    <button type="button" key={index} disabled={working} onClick={async () => {
+      const focusBox = () => document.querySelector<HTMLTextAreaElement>(".conversation textarea")?.focus();
+      // A turn's option with nothing to carry out: the person says more in the box (nothing to record yet).
+      if (!option.kind && !option.actions.length) { focusBox(); return; }
+      // 复制: the text at `href` to the clipboard; not an answer, so the card stays open for 已回复 / 不用回.
+      if (option.kind === "copy" && option.href) {
+        const text = await fetch(option.href, { cache: "no-store" }).then((response) => response.ok ? response.text() : "").catch(() => "");
+        const copied = text ? await navigator.clipboard?.writeText(text).then(() => true, () => false) : false;
+        setError(copied ? "" : t("没能复制，请打开草稿后手动复制"));
+        setCopied(copied ? index : null);
+        return;
+      }
+      // A nudge's button is the answer whatever it does: recorded first, then the page opens or the box takes focus.
+      await decide({ option: index });
+      if (option.kind === "href" && option.href) window.location.assign(option.href);
+      if (option.kind === "say") focusBox();
+    }}>{copied === index ? t("已复制") : t(option.label)}</button>;
   const visible = cardActionIndexes({ actions: card.actions, clarify: card.clarify } as ConciergeTurn);
   const chosen = card.clarify.chosen !== undefined ? card.clarify.options[card.clarify.chosen] : undefined;
   const ran = [...visible, ...(chosen?.actions ?? [])];
@@ -224,24 +242,9 @@ export function CardView({ messageId, card, onUpdate, choices, body }: { message
     {card.clarify.question && <div className="conversation-clarify">
       {body ?? (card.nudgeKind ? <Markdown text={card.clarify.question} /> : <p>{card.clarify.question}</p>)}
       {chosen ? <small className="muted">{t("已选：{{label}}", { label: chosen.label })}</small>
-        : <div className="conversation-options">{card.clarify.options.map((option, index) =>
-          <button type="button" key={index} disabled={working} onClick={async () => {
-            const focusBox = () => document.querySelector<HTMLTextAreaElement>(".conversation textarea")?.focus();
-            // A turn's option with nothing to carry out: the person says more in the box (nothing to record yet).
-            if (!option.kind && !option.actions.length) { focusBox(); return; }
-            // 复制: the text at `href` to the clipboard; not an answer, so the card stays open for 已回复 / 不用回.
-            if (option.kind === "copy" && option.href) {
-              const text = await fetch(option.href, { cache: "no-store" }).then((response) => response.ok ? response.text() : "").catch(() => "");
-              const copied = text ? await navigator.clipboard?.writeText(text).then(() => true, () => false) : false;
-              setError(copied ? "" : t("没能复制，请打开草稿后手动复制"));
-              setCopied(copied ? index : null);
-              return;
-            }
-            // A nudge's button is the answer whatever it does: recorded first, then the page opens or the box takes focus.
-            await decide({ option: index });
-            if (option.kind === "href" && option.href) window.location.assign(option.href);
-            if (option.kind === "say") focusBox();
-          }}>{copied === index ? t("已复制") : t(option.label)}</button>)}</div>}
+        : <div className="conversation-options">{card.clarify.options.map((option, index) => option.more ? null : optionButton(option, index))}
+          {card.clarify.options.some((option) => option.more) && <details className="conversation-more"><summary>{t("更多")}</summary>
+            {card.clarify.options.map((option, index) => option.more ? optionButton(option, index) : null)}</details>}</div>}
     </div>}
     {pending.length > 0 && <div className="conversation-actions">
       <button type="button" className="primary-button" disabled={working || card.reviewing} onClick={() => void decide({ indexes: pending })}>

@@ -39,5 +39,7 @@
   "超出实测 · 可能来不及": "Past the measured pace · may not finish in time",
   "超出实测 · 可能来不及。": "Past the measured pace: it may not be finished in time.",
   "系数 {{factor}}": "factor {{factor}}",
-  "系数 {{factor}}（上周兑现 {{share}}%）": "factor {{factor}} ({{share}}% of last week's plan kept)"
+  "系数 {{factor}}（上周兑现 {{share}}%）": "factor {{factor}} ({{share}}% of last week's plan kept)",
+  "没做完的话，下次从哪接（可不填）": "If not finished: where to pick it up next time (optional)",
+  "下次从哪接": "Where to pick it up next time"
 }

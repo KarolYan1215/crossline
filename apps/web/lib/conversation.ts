@@ -35,7 +35,7 @@ export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; mes
  * puts the text at `href` on the clipboard and leaves the card open. `close` (on an `ack`) closes the card's mail reply draft
  * (`Card.mailReplyId`) as answered or as needing no answer.
  */
-export type CardOption = ClarifyOption & { kind?: "action" | "ack" | "mute" | "href" | "say" | "copy"; href?: string; close?: "replied" | "dismissed" };
+export type CardOption = ClarifyOption & { kind?: "action" | "ack" | "mute" | "href" | "say" | "copy"; href?: string; close?: "replied" | "dismissed"; more?: true };
 export type Card = {
   actions: ProposedAction[]; items: CardItem[];
   clarify: { question: string; options: CardOption[]; chosen?: number };

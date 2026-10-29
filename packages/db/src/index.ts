@@ -3024,6 +3024,27 @@ export class CrosslineStore {
     return { changed: true };
   }
 
+  /**
+   * Where to pick a step up again, in the person's words when they stopped part way (2026-10-30): it becomes the step's first action,
+   * which the next block's start reminder and the timer show. Unfinished work is resumed more readily than it is remembered
+   * (Ghibellini & Meier 2025), so the note is for coming back, not a record. The previous first action is kept in the event.
+   */
+  setStepResumeNote(workspaceId: string, workOrderId: string, stepId: string, note: string, ownerId: string): { changed: boolean } {
+    return this.#db.transaction(() => {
+      const row = this.#prepare("SELECT detail_json FROM task_steps WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
+        .get(workspaceId, workOrderId, stepId) as { detail_json?: string } | undefined;
+      if (!row) throw new Error("STEP_NOT_FOUND");
+      const detail = JSON.parse(String(row.detail_json ?? "{}")) as { firstAction?: string };
+      if (detail.firstAction === note) return { changed: false };
+      this.#prepare("UPDATE task_steps SET detail_json = ?, updated_at = ? WHERE workspace_id = ? AND work_order_id = ? AND id = ?")
+        .run(JSON.stringify({ ...detail, firstAction: note }), new Date().toISOString(), workspaceId, workOrderId, stepId);
+      const attempt = this.listEvents(workspaceId, { type: "task.step_resume_noted", entityId: workOrderId }).length;
+      this.appendEvent({ ownerId, workspaceId, idempotencyKey: `task.step_resume_noted:${workOrderId}:${stepId}:${attempt}`, type: "task.step_resume_noted",
+        entityId: workOrderId, payload: { stepId, note, before: detail.firstAction ?? "" } });
+      return { changed: true };
+    }).immediate();
+  }
+
   /** Progress on one step: quarters (0–4), done, or skipped. Each change is its own event. */
   updateStepProgress(workspaceId: string, workOrderId: string, stepId: string,
     change: { progressQuarter?: number; status?: StoredTaskStep["status"] }, ownerId: string, source: string): { changed: boolean } {

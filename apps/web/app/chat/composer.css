@@ -53,6 +53,10 @@
 .conversation-clarify p{margin:0;font-weight:700}
 .conversation-options{display:flex;flex-wrap:wrap;gap:6px}
 .conversation-options button{padding:5px 10px;border:1px solid var(--ink);font-size:13px;background:var(--paper)}
+.conversation-more{flex-basis:100%;font-size:13px}
+.conversation-more>summary{cursor:pointer;color:var(--muted);width:fit-content}
+.conversation-more[open]{display:flex;flex-wrap:wrap;gap:6px}
+.conversation-more[open]>summary{flex-basis:100%}
 .conversation-search{display:grid;gap:4px}
 .conversation-search input{width:100%}
 .conversation-search ul{margin:0;padding:0;list-style:none;display:grid;gap:4px;max-height:160px;overflow:auto;font-size:12px}

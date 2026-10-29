@@ -26,6 +26,18 @@ test("a replan keeps the steps already done and replaces the rest; progress is r
   store.close();
 });
 
+test("a resume note becomes the step's first action; the one it replaced is kept in the event", () => {
+  const store = new CrosslineStore(":memory:");
+  store.saveStepPlan("w", "wo-1", plan([{ ...step("s1", "solve"), firstAction: "打开题目" }]), "o", "initial");
+  expect(store.setStepResumeNote("w", "wo-1", "v1s1", "从第 3 题的第二问接着推", "o").changed).toBe(true);
+  expect(store.getStepPlan("w", "wo-1")!.steps[0]!.firstAction).toBe("从第 3 题的第二问接着推");
+  expect(store.setStepResumeNote("w", "wo-1", "v1s1", "从第 3 题的第二问接着推", "o").changed).toBe(false);
+  expect(store.listEvents("w", { type: "task.step_resume_noted" }).map((event) => event.payload))
+    .toEqual([{ stepId: "v1s1", note: "从第 3 题的第二问接着推", before: "打开题目" }]);
+  expect(() => store.setStepResumeNote("w", "wo-1", "nope", "x", "o")).toThrow("STEP_NOT_FOUND");
+  store.close();
+});
+
 test("accepting a task closes its open steps; a skipped step stays skipped (W-16)", () => {
   const store = new CrosslineStore(":memory:");
   store.saveWorkOrder({ id: "wo-1", ownerId: "o", workspaceId: "w", identityId: "research", projectId: "p", milestoneId: "",

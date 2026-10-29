@@ -1,4 +1,4 @@
-import { chooseOwnerOfStep, confirmCriterion, editSteps, loadStepPlan, recordStepProgress, reportProgress, requestStepReplan, settleProvideStep } from "../../../../../lib/steps";
+import { chooseOwnerOfStep, confirmCriterion, editSteps, loadStepPlan, noteResumePoint, recordStepProgress, reportProgress, requestStepReplan, settleProvideStep } from "../../../../../lib/steps";
 import { rejectUnsafeRequest } from "../guard";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
 
@@ -17,7 +17,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
  * - `{action: "report", text}`: a progress report for the judge;
  * - `{action: "confirm_criterion", criterionId}`: a standard met with nothing to hand in;
  * - `{action: "owner", stepId, owner: "person" | "assistant"}`: who does the step, kept for that kind of step on the line;
- * - `{action: "provide_none", stepId}`: the material a provide step asks for does not exist (files go to `steps/provide`).
+ * - `{action: "provide_none", stepId}`: the material a provide step asks for does not exist (files go to `steps/provide`);
+ * - `{action: "resume_note", stepId, text}`: where to pick the step up again, which becomes its first action.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
@@ -31,6 +32,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     case "owner": return typeof body.stepId === "string" && (body.owner === "person" || body.owner === "assistant")
       ? respond(chooseOwnerOfStep(guard.ctx, id, body.stepId, body.owner)) : respond({ ok: false, code: "STEP_INVALID" });
     case "provide_none": return typeof body.stepId === "string" ? respond(settleProvideStep(guard.ctx, id, body.stepId, "none")) : respond({ ok: false, code: "STEP_INVALID" });
+    case "resume_note": return typeof body.stepId === "string" ? respond(noteResumePoint(guard.ctx, id, body.stepId, String(body.text ?? ""))) : respond({ ok: false, code: "STEP_INVALID" });
     case "confirm_criterion": return typeof body.criterionId === "string" ? respond(confirmCriterion(guard.ctx, id, body.criterionId)) : respond({ ok: false, code: "CRITERION_INVALID" });
     case "edit": {
       const steps = Array.isArray(body.steps) ? (body.steps as Array<{ id?: unknown; title?: unknown }>).map((item) => ({

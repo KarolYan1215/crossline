@@ -13,6 +13,8 @@ test("fifteen minutes before a block that bears on a deadline, it says so with �
   expect(nudge).toMatchObject({ kind: "block_start", urgent: true, counted: false, fingerprint: "start:scheduled:hw2:v1s1:2026-10-10" });
   expect(nudge!.text).toContain("关系到 10/12 的截止");
   expect(nudge!.buttons.map((button) => button.label)).toEqual(["开始计时", "推到明天", "少问这类"]);
+  // 推到明天 sits behind the card's 「更多」 fold, not beside 开始计时 at the moment of starting (2026-10-30).
+  expect(nudge!.buttons.filter((button) => "more" in button && button.more).map((button) => button.label)).toEqual(["推到明天"]);
   expect(nudge!.text).not.toContain("第一步");
   // The step's first move, when the plan has one, is said with it so the block is easy to begin.
   expect(planNudges(base({ blocks: [{ ...base().blocks[0]!, firstAction: "打开作业 PDF，抄下第 1 题" }] }))[0]!.text).toContain("第一步：打开作业 PDF，抄下第 1 题。");

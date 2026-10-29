@@ -26,6 +26,7 @@ export function TimerFloat() {
   const [closing, setClosing] = useState<ActiveTimer | null>(null);
   const [alerted, setAlerted] = useState<Set<string>>(new Set());
   const [overdue, setOverdue] = useState<ActiveTimer | null>(null);
+  const [resume, setResume] = useState("");
   const loaded = useRef(false);
   const t = useT();
 
@@ -65,6 +66,9 @@ export function TimerFloat() {
   };
   const answer = async (stepDone: boolean) => {
     if (closing && stepDone && closing.stepId) await post(closing.workOrderId, "steps", { action: "progress", stepId: closing.stepId, status: "done" });
+    // Stopped part way: 「下次从哪接」 becomes the step's first action, shown at the next block's start (optional, never asked twice).
+    if (closing && !stepDone && closing.stepId && resume.trim()) await post(closing.workOrderId, "steps", { action: "resume_note", stepId: closing.stepId, text: resume });
+    setResume("");
     setClosing(null);
     location.reload();
   };
@@ -92,6 +96,8 @@ export function TimerFloat() {
     {closing && <div className="timer-alert" role="alertdialog" aria-label={t("本次计时已结束")}>
       <p><b>{t("本次计时已结束")}</b>{closing.stepTitle ? ` · ${closing.stepTitle}` : ""}</p>
       {closing.stepId ? <><small>{t("该步骤是否已完成？")}</small>
+        <input type="text" className="timer-resume" maxLength={80} value={resume} onChange={(event) => setResume(event.target.value)}
+          placeholder={t("没做完的话，下次从哪接（可不填）")} aria-label={t("下次从哪接")} />
         <span><button type="button" className="primary-button" onClick={() => void answer(true)}>{t("已完成")}</button>
           <button type="button" onClick={() => void answer(false)}>{t("未完成")}</button></span></>
         : <button type="button" onClick={() => void answer(false)}>{t("关闭")}</button>}

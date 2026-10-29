@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { stepAnswerSlot, taskProgress, type AccessContext } from "@crossline/core";
+import { clipWidth, FIRST_ACTION_MAX, stepAnswerSlot, taskProgress, type AccessContext } from "@crossline/core";
 import { chooseStepOwner, provideMaterial, type StoredStepPlan, type StoredWorkOrder } from "@crossline/db";
 import { getStore } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
@@ -125,6 +125,17 @@ export function recordStepProgress(ctx: AccessContext, workOrderId: string, step
     return { ok: true, changed: getStore().updateStepProgress(ctx.workspaceId, workOrderId, stepId, change, ctx.principalId, "person").changed };
   } catch (error) {
     return { ok: false, code: error instanceof Error ? error.message : "STEP_PROGRESS_FAILED" };
+  }
+}
+
+/** The person's 「下次从哪接」 when a session ends with the step unfinished: the step's first action from now on. */
+export function noteResumePoint(ctx: AccessContext, workOrderId: string, stepId: string, text: string): { ok: true; changed: boolean } | { ok: false; code: string } {
+  const note = clipWidth(text.replace(/\s+/gu, " ").trim(), FIRST_ACTION_MAX);
+  if (!note) return { ok: false, code: "RESUME_NOTE_EMPTY" };
+  try {
+    return { ok: true, changed: getStore().setStepResumeNote(ctx.workspaceId, workOrderId, stepId, note, ctx.principalId).changed };
+  } catch (error) {
+    return { ok: false, code: error instanceof Error ? error.message : "RESUME_NOTE_FAILED" };
   }
 }
 

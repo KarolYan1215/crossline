@@ -182,6 +182,7 @@
 .timer-alert p{margin:0}
 .timer-alert small{color:var(--graphite)}
 .timer-alert span{display:flex;gap:6px}
+.timer-resume{min-height:30px;padding:4px 8px;border:1px solid var(--mist);font-size:13px;background:var(--paper);color:var(--ink)}
 .timer-alert .primary-button{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 @media (max-width:760px){.timer-float{bottom:calc(116px + env(safe-area-inset-bottom));right:8px}}
 
