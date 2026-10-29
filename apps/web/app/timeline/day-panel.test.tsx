@@ -26,13 +26,26 @@ const render = (props: Partial<Parameters<typeof DayQuickActions>[0]>) => render
   proposals={[]} nowMinute={9 * 60} labels={{ research: "研究者" }} details={{ "wo-1": detail() }} {...props} />);
 
 describe("the panel beside the day", () => {
+  test("today's recommended work without a block of its own is listed under the next block; with nothing at all, the empty note says why", () => {
+    const html = render({ suggestions: [{ id: "wo-1", title: "撰写综述初稿", label: "下一步" }, { id: "wo-2", title: "准备晚饭", label: "低精力备选", line: "research" }] });
+    expect(html).toContain("也可以先做");
+    expect(html).toContain('href="/workbench/wo-2"');
+    expect(html).toContain("低精力备选");
+    // The next block's own task is not listed twice.
+    expect(html).not.toContain('href="/workbench/wo-1"');
+    const none = render({ items: [], suggestions: [], emptyNote: "两项提案待批准" });
+    expect(none).toContain("两项提案待批准");
+  });
+
   test("with nothing picked: the load on top, the next block with its start, and the row of ways out at the bottom", () => {
     const html = render({ proposals: [{ id: "p1", title: "提案" }] });
     expect(html).toContain("当日负荷");
     expect(html).toContain("已排 1 小时");
     expect(html).toContain("下一项");
     expect(html).toContain("开始计时");
-    expect(html).not.toContain("完成并提交材料");
+    // Opened by default with the block's actions (2026-10-29), without the in-place edits and the person's part.
+    for (const action of ["完成并提交材料", "推迟", "锁定在此时间"]) expect(html).toContain(action);
+    expect(html).not.toContain("本人负责");
     expect(html).toContain("待批准任务 · ");
     expect(html).toContain("全部批准");
     expect(html).toContain("调整可用时段");
@@ -50,7 +63,7 @@ describe("the panel beside the day", () => {
     expect(html).toContain("本步时长");
     expect(html).toContain("本人负责");
     expect(html).toContain("确定综述的论证主线");
-    for (const action of ["开始计时", "完成并提交材料", "推迟", "交给 Agent", "返回下一项"]) expect(html).toContain(action);
+    for (const action of ["开始计时", "完成并提交材料", "推迟", "交给助手", "返回下一项"]) expect(html).toContain(action);
   });
 
   test("a picked work block can be locked at its time, and a locked one unlocked", () => {
@@ -61,10 +74,10 @@ describe("the panel beside the day", () => {
   });
 
   test("交给 Agent only for a step the system can do; a block the assistant has says so instead", () => {
-    expect(render({ selected: block({ id: "scheduled:wo-1:v1s1", stepId: "v1s1", step: "确定论证主线" }) })).not.toContain("交给 Agent");
+    expect(render({ selected: block({ id: "scheduled:wo-1:v1s1", stepId: "v1s1", step: "确定论证主线" }) })).not.toContain("交给助手");
     const running = render({ selected: block({ agent: "running" }) });
     expect(running).toContain("Agent 执行中");
-    expect(running).not.toContain("交给 Agent");
+    expect(running).not.toContain("交给助手");
     expect(render({ selected: block({ agent: "planned" }) })).toContain("Agent 将执行");
   });
 

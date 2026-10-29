@@ -4,18 +4,21 @@ import { useEffect, useState } from "react";
 import { AnalogClock, DigitalClock } from "../analog-clock";
 import { useLocale, useT } from "../locale-context";
 import { monthDay, weekdayShort } from "../../lib/i18n";
-import { weekDays, weekdayOf } from "../timeline/model";
+import { weekdayOf } from "../timeline/model";
 import { CALENDAR_ANCHOR, CALENDAR_DAY } from "./calendar-events";
+import type { WeekDayLoad } from "./week-load";
+import { Flag } from "lucide-react";
+import { hoursLabel } from "../timeline/panel-model";
 
 /**
  * Today's head band (2026-10-28 redesign): the day's number large, the month and weekday beside it, the dial and the time in digits,
- * and the week as a strip — today filled, a dot under each day that has something on the calendar, the day the calendar shows outlined.
- * Pressing a day opens it on the calendar below.
+ * and the week as a strip — today filled, the day the calendar shows outlined, and under each day a thin bar of how full its work is
+ * and a flag on a day something is due (2026-10-29, scenarios.md §4.11). Pressing a day opens it on the calendar below.
  */
-export function DayHead({ nowIso, timeZone, fixed, dateLabel, monthLabel, today, busyDays }: {
+export function DayHead({ nowIso, timeZone, fixed, dateLabel, monthLabel, today, week }: {
   nowIso: string; timeZone: string; fixed: boolean; dateLabel: string; monthLabel: string; today: string;
-  /** Days of this week with anything on the calendar. */
-  busyDays: string[];
+  /** Each day of this week: how full its work is and whether something is due on it (`weekLoad`). */
+  week: WeekDayLoad[];
 }) {
   const t = useT();
   const locale = useLocale();
@@ -29,7 +32,6 @@ export function DayHead({ nowIso, timeZone, fixed, dateLabel, monthLabel, today,
     window.dispatchEvent(new CustomEvent(CALENDAR_DAY, { detail: day }));
     document.getElementById("calendar")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   };
-  const busy = new Set(busyDays);
   return <section className="td-head" aria-label={t("今天")}>
     <h1 className="td-date">
       <span className="td-day ds-serif">{dateLabel}</span>
@@ -41,11 +43,14 @@ export function DayHead({ nowIso, timeZone, fixed, dateLabel, monthLabel, today,
         <small>{timeZone}</small></span>
     </div>
     <nav className="td-week" aria-label={t("本周")}>
-      {weekDays(today).map((day) => <button key={day} type="button" data-today={day === today || undefined} aria-pressed={day === shown}
-        aria-label={t("在日历中打开 {{day}}", { day: `${monthDay(locale, day)} ${weekdayShort(locale, weekdayOf(day))}` })} onClick={() => open(day)}>
+      {week.map(({ day, work, load, deadline }) => <button key={day} type="button" data-today={day === today || undefined} aria-pressed={day === shown}
+        aria-label={t("在日历中打开 {{day}}", { day: `${monthDay(locale, day)} ${weekdayShort(locale, weekdayOf(day))}` })}
+        title={[work ? t("已排 {{hours}}", { hours: hoursLabel(work, locale) }) : "", deadline ? t("有截止") : ""].filter(Boolean).join(" · ") || undefined}
+        onClick={() => open(day)}>
         <small>{weekdayShort(locale, weekdayOf(day))}</small>
         <b>{Number(day.slice(8, 10))}</b>
-        <i data-busy={busy.has(day) || undefined} aria-hidden="true" />
+        <i className="td-load" aria-hidden="true"><i style={{ width: `${Math.round(load * 100)}%` }} data-full={load >= 0.9 || undefined} /></i>
+        <span className="td-due" aria-hidden="true">{deadline && <Flag size={12} strokeWidth={1.6} />}</span>
       </button>)}
     </nav>
   </section>;

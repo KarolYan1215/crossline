@@ -59,10 +59,5 @@ export function stepOfBlock<T extends { id: string; status: string; schedulable:
   return (item.stepId ? steps.find((step) => step.id === item.stepId) : undefined) ?? steps.find((step) => step.status === "planned" && step.schedulable);
 }
 
-/** Open schedulable steps other than this one: when there are any, finishing the block is not finishing the task. */
-export function otherOpenSteps(stepId: string | undefined, steps: Array<{ id: string; status: string; schedulable: boolean }>): number {
-  return steps.filter((step) => step.status === "planned" && step.schedulable && step.id !== stepId).length;
-}
-
 /** 「1.5 小时」 / "1.5 h". */
 export const hoursLabel = (minutes: number, locale?: Locale) => hoursText(locale, minutes);

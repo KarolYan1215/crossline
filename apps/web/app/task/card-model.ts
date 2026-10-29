@@ -22,6 +22,23 @@ export function workStep(detail: Pick<CardDetail, "stepPlan">): Step | undefined
   return detail.stepPlan?.steps.find((step) => step.status === "planned" && step.schedulable && step.executor !== "agent");
 }
 
+/**
+ * What is left of the person's work, usual and cautious: the open steps that take calendar time added up (the assistant's take none), or
+ * the task's own estimate while it has no steps. The card's 「剩」 chip and the detail's 剩余 figure read it.
+ */
+export function remainingMinutes(detail: Pick<TaskDetail, "stepPlan" | "estimate">): { p50: number; p85: number } {
+  if (!detail.stepPlan) return { p50: detail.estimate.p50Minutes, p85: detail.estimate.p85Minutes };
+  const open = detail.stepPlan.steps.filter((step) => step.status === "planned" && step.schedulable && step.executor !== "agent");
+  return open.reduce((sum, step) => ({ p50: sum.p50 + step.estimate.p50Minutes, p85: sum.p85 + step.estimate.p85Minutes }), { p50: 0, p85: 0 });
+}
+
+/** 「3.5h」 / "3.5 h": a remaining figure on a chip, where minutes and hours in words take too much room. */
+export function hoursShort(minutes: number, locale?: Locale): string {
+  if (minutes < 60) return tFor(locale)("{{m}} 分", { m: minutes });
+  const hours = Math.round(minutes / 6) / 10;
+  return locale === "en" ? `${hours} h` : `${hours}h`;
+}
+
 export type Segment = { id: string; title: string; weight: number; fill: number; kind: "done" | "current" | "waiting" | "agent" | "open" };
 
 /** One segment per step, as wide as its share of the task, filled as far as it is done. */

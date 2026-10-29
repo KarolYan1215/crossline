@@ -61,7 +61,7 @@ function ensureOwnNextStep(): void {
  */
 // The plan page's charts, ranking lists and capacity figures come from the same time-limited solve, so they are left out as well; the
 // ranking and the overload list are removed rather than hidden because how many rows they hold changes their height.
-const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-aside,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
+const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-aside,.td-load,.td-due,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
   + ".task-card-slot a,.pl-hours,.pl-svg,.pl-timeline>header small,.pl-advice-count{visibility:hidden}"
   + ".ui-first-hint,.pl-rank-table,.pl-library,.pl-explain p,.pl-over-list,.pl-stat .pl-chart-foot,.forecast-delta{display:none}";
 
@@ -78,8 +78,9 @@ test("Today keeps capture semantic-only and health outside identity navigation",
   await expect(page.locator(".composer select")).toHaveCount(0);
   await expect(page.locator('.composer textarea[name="title"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "提交完成证据" })).toHaveCount(0);
-  // The next step is a row in 「需要处理」 with its usual presses as icons (2026-10-28 redesign).
-  await expect(page.locator('.nd-row[data-kind="task"] .task-actions').first()).toBeVisible();
+  // The next step is the calendar's next block, opened beside the day (2026-10-29, scenarios.md §4.1); 「需要处理」 only enters 待确认.
+  await expect(page.locator(".dv-aside .dq-switch")).toBeVisible();
+  await expect(page.locator('.nd-row[data-kind="task"]')).toHaveCount(0);
   // The pending count depends on what other tests have written by now, so it is hidden (not masked: hidden keeps its place).
   await page.addStyleTag({ content: STABLE_FOR_SCREENSHOT });
   if (testInfo.project.name === "desktop-chrome") await expect(page).toHaveScreenshot("today-paper-grid.png", { fullPage: true });
@@ -88,12 +89,14 @@ test("Today keeps capture semantic-only and health outside identity navigation",
 test("a task card opens its dialog in place, and the dialog's full-page link shows the same task", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
-  // The next step's row opens its full card in place (2026-10-28 redesign); the card opens the dialog as before.
-  await page.locator('.nd-row[data-kind="task"] .nd-title').first().click();
-  const hero = page.locator('.task-card[data-variant="hero"]');
-  const title = (await hero.locator(".task-card-title").textContent())!.trim();
-  // Clicking the card (not one of its controls) opens the dialog without leaving Today.
-  await hero.locator(".task-card-title").click();
+  // A block picked on the calendar opens its task beside the day (2026-10-29: the 「下一步」 card folded into the calendar); its 「打开」
+  // opens the task dialog without leaving Today.
+  const calendar = page.getByRole("region", { name: "今天的时间轴" });
+  await calendar.getByRole("tab", { name: "周", exact: true }).click();
+  await calendar.locator('.wk-block[data-kind="scheduled"]').first().click();
+  const focus = calendar.locator(".dv-aside .dq-focus");
+  const title = (await focus.locator(".dq-title").textContent())!.trim();
+  await focus.getByRole("button", { name: "打开", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("heading", { name: title })).toBeVisible();
@@ -271,7 +274,9 @@ test("mobile navigation and reduced motion remain usable", async ({ page }, test
   await expect(page.getByRole("link", { name: "今日" })).toBeVisible();
   // What is waiting and the settings sit behind the fifth tab.
   await expect(page.getByText("更多")).toBeVisible();
-  await expect(page.locator('.nd-row[data-kind="task"]').first()).toBeVisible();
+  // 待确认 is a tab of its own on a phone (2026-10-29); the plan sits behind 「更多」.
+  await expect(page.locator(".bottom-nav").getByRole("link", { name: "待确认" })).toBeVisible();
+  await expect(page.locator(".dv-aside .dq-switch")).toBeVisible();
 });
 
 /**
@@ -403,12 +408,12 @@ test("a work order started on one device becomes a conflict when another device'
 });
 
 /**
- * The system's questions on Today, as rows of 「需要处理」 (2026-10-28): something awaited that was due above a backplan that split nothing,
- * each opened and answered in place from options already written out — one with a follow-up form — and the 待确认 count going down,
- * without a page reload. (A backplan's missing inputs are no longer
- * asked about: the split makes getting each one a step, docs/review-2026-10-13.md §11.)
+ * The system's questions: Today lists the urgent one as a row of 「需要处理」 that opens it on 待确认 (2026-10-29, scenarios.md §3.1), where
+ * something awaited that was due and a backplan that split nothing are answered one card at a time from options already written out —
+ * one with a follow-up form, one with the number keys — and the 待确认 count goes down without a page reload. (A backplan's missing
+ * inputs are no longer asked about: the split makes getting each one a step, docs/review-2026-10-13.md §11.)
  */
-test("Today asks what only the person knows, with options and follow-ups, and moves to the next on answering", async ({ page }, testInfo) => {
+test("Today points at what only the person knows; 待确认 asks it with options and follow-ups, and moves to the next on answering", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
   let milestoneTitle = "";
@@ -425,20 +430,16 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
   await page.goto("/");
   const list = page.getByRole("region", { name: /件需要处理$/ });
   await expect(list.getByRole("heading", { name: /件需要处理$/ })).toBeVisible();
-  // Rows, most urgent first: the awaited item (due today) above the backplan that split nothing; a row opens its full card in place.
+  // Today lists the urgent ones as rows that enter 待确认 (2026-10-29, scenarios.md §3.1): no card is answered there.
   const waitingRow = list.locator('.nd-row[data-kind="ask"]').filter({ hasText: "师兄的「实测数据」到了吗？" });
-  const backplanRow = list.locator('.nd-row[data-kind="ask"]').filter({ hasText: `「${milestoneTitle.slice(0, 10)}` });
-  const waiting = list.locator(".ask-card").filter({ hasText: "师兄的「实测数据」到了吗？" });
-  const backplan = list.locator(".ask-card").filter({ hasText: "未能自动拆分" });
   await expect(waitingRow).toBeVisible();
-  await expect(backplanRow).toBeVisible();
-  await backplanRow.locator(".nd-title").click();
-  await expect(backplan).toBeVisible();
-  await expect(waiting).toHaveCount(0);
-  // Opening another row closes the first, without answering anything.
-  await waitingRow.locator(".nd-title").click();
+  await expect(list.locator(".ask-card")).toHaveCount(0);
+  // 「打开」 brings that card to the front of 待确认's deck.
+  await Promise.all([page.waitForURL(/\/approvals\?ask=/), waitingRow.locator(".nd-open").click()]);
+  const deck = page.locator(".ap-deck");
+  const waiting = deck.locator(".ask-card").filter({ hasText: "师兄的「实测数据」到了吗？" });
+  const backplan = deck.locator(".ask-card").filter({ hasText: "未能自动拆分" });
   await expect(waiting).toBeVisible();
-  await expect(backplan).toHaveCount(0);
   const badge = page.locator(".side-nav .pending-badge");
   const badgeMinusTotal = async () => (await badge.count() ? Number(await badge.textContent()) : 0)
     - await page.evaluate(async () => ((await (await fetch("/api/pending", { cache: "no-store" })).json()) as { total: number }).total);
@@ -446,12 +447,18 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
   await waiting.getByRole("button", { name: /^还没，推迟/ }).click();
   await waiting.getByLabel("推迟到").fill("2026-09-16");
   await waiting.getByRole("button", { name: "确定：还没，推迟" }).click();
-  // The answered row leaves, and the header's count follows without a reload.
-  await expect(list.locator(".nd-row").filter({ hasText: "实测数据」到了吗" })).toHaveCount(0);
-  await backplanRow.locator(".nd-title").click();
-  await expect(backplan).toBeVisible();
+  // The answered card leaves, and the header's count follows without a reload.
+  await expect(waiting).toHaveCount(0);
   await expect.poll(badgeMinusTotal).toBe(0);
-  await backplan.getByRole("button", { name: /^暂不拆分该里程碑/ }).click();
+  // The kinds narrow the deck: the backplan that split nothing is under 「步骤与准备」; its option is picked with the number keys.
+  await page.locator(".ap-kinds").getByRole("button", { name: /步骤与准备/ }).click();
+  await expect(backplan).toBeVisible();
+  const option = backplan.getByRole("button", { name: /^暂不拆分该里程碑/ });
+  const key = await option.locator(".ak-key").textContent();
+  await page.locator("body").click({ position: { x: 1, y: 1 } });
+  await page.keyboard.press(key!.trim());
+  await expect(option).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Enter");
   await expect(backplan).toHaveCount(0);
   await expect.poll(badgeMinusTotal).toBe(0);
   const after = openStore();

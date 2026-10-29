@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { LineTag } from "../ui/tag";
 import type { TaskDetail } from "../../lib/task-detail";
 import type { TimelineItem } from "./model";
 import type { LineLabels } from "./views";
@@ -11,6 +12,8 @@ import { usePendingView } from "../pending-badge";
 import "./day-panel.css";
 
 export type QuickProposal = { id: string; title: string };
+/** A recommended task (the next step, or an alternative for low energy or a short gap) with what it is and why. */
+export type Suggestion = { id: string; title: string; label: string; reason?: string | undefined; line?: string | undefined };
 
 const post = async (url: string, body: unknown) => {
   const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
@@ -20,16 +23,21 @@ const post = async (url: string, body: unknown) => {
 /**
  * The column beside the day. Fixed on top: the day's load. Below it, one thing at a time — the block the person picked on the timeline
  * (its task, step, due date, duration, the person's part, its next block, and what can be done from here), or, with nothing picked, the
- * next block to start. At the bottom, one row of ways out: the waiting proposals (with 全部批准), the decisions waiting, the hours.
- * The detail strip that used to sit under the calendar is gone; this is the one place a block is looked at and acted on.
+ * next block to start, opened the same way with its first action (2026-10-29: Today's 「下一步」 card folded into the calendar,
+ * scenarios.md §4.1). Under it, today's recommended work that has no block of its own. At the bottom, one row of ways out: the waiting
+ * proposals (with 全部批准), the decisions waiting, the wrap-up, the week's commitment, the hours.
  */
-export function DayQuickActions({ day, today, items, proposals, nowMinute, selected, onDeselect, labels = {}, details }: {
+export function DayQuickActions({ day, today, items, proposals, nowMinute, selected, onDeselect, labels = {}, details, suggestions = [], emptyNote }: {
   day: string; today: string; items: TimelineItem[]; proposals: QuickProposal[]; nowMinute: number | undefined;
   /** The block picked on the timeline; without one the panel shows the next block. */
   selected?: TimelineItem | undefined; onDeselect?: (() => void) | undefined;
   labels?: LineLabels;
   /** Task details read with the page, by work order id; a task missing here is read on demand. */
   details?: Record<string, TaskDetail> | undefined;
+  /** Today's recommended work; one already shown as the next block is left out. */
+  suggestions?: Suggestion[] | undefined;
+  /** What to say when nothing is put forward. */
+  emptyNote?: ReactNode;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -40,6 +48,7 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
   const load = dayLoad(items, day);
   const total = Math.max(1, load.planned + load.pencilled + load.fixed);
   const next = nextBlock(items, day, today, nowMinute);
+  const others = suggestions.filter((item) => item.id !== next?.workOrderId);
 
   return <div className="dq">
     <section className="dq-load" aria-label={t("当日负荷")}>
@@ -57,7 +66,16 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
         : next ? <BlockOverview key={next.id} item={next} items={items} today={today} labels={labels} details={details} compact
           heading={next.kind === "optional" ? t("下一项（预排）") : t("下一项")} />
         : <p className="dq-empty">{day === today ? t("今天没有待开始的任务。") : t("当日没有排入任务。")}{t("点选时间轴上的日程查看详情。")}</p>}
+      {!selected && !next && !others.length && emptyNote && <p className="dq-empty">{emptyNote}</p>}
     </section>
+    {!selected && others.length > 0 && <section className="dq-suggest" aria-label={t("推荐")}>
+      <h3>{next ? t("也可以先做") : t("推荐")}</h3>
+      <ul>{others.map((item) => <li key={item.id} {...(item.line ? { "data-line": item.line } : {})}>
+        {item.line && labels[item.line] && <LineTag line={item.line}>{labels[item.line]}</LineTag>}
+        <a href={`/workbench/${encodeURIComponent(item.id)}`} title={item.reason}>{item.title}</a>
+        <small>{t(item.label)}</small>
+      </li>)}</ul>
+    </section>}
     <nav className="dq-links" aria-label={t("当日入口")}>
       {proposals.length > 0 && <span className="dq-link">
         <a href="/approvals#proposals" title={proposals.slice(0, 6).map((item) => item.title).join("\n")}>{t("待批准任务")} · <b className="mono">{proposals.length}</b></a>

@@ -40,17 +40,19 @@ export function Slider({ value, onChange, onCommit, preset, label, min = 0, max 
 export const dayLabel = (value: string, locale?: Locale) => { const day = new Date(`${value.slice(0, 10)}T12:00:00`); return `${day.getMonth() + 1}/${day.getDate()} ${weekdayShort(locale, day.getDay())}`; };
 
 /** `empty` is a Chinese key (or already translated). */
-export function DateChip({ value, onChange, label, empty = "未定" }: { value: string | undefined; onChange: (value: string) => void; label: string; empty?: string }) {
+/** `icon`: the chip drawn as that icon alone (a pencil beside a figure that already shows the date); the label stays its name and tip. */
+export function DateChip({ value, onChange, label, empty = "未定", icon }: { value: string | undefined; onChange: (value: string) => void; label: string; empty?: string; icon?: ReactNode }) {
   const t = useT();
   const locale = useLocale();
   const input = useRef<HTMLInputElement>(null);
   const day = value ? new Date(`${value}T12:00:00`) : undefined;
-  return <span className="ui-date-chip">
-    <button type="button" aria-label={t("{{label}}：{{value}}", { label, value: value ?? t(empty) })} onClick={() => {
+  const name = t("{{label}}：{{value}}", { label, value: value ?? t(empty) });
+  return <span className="ui-date-chip" data-icon={icon ? "" : undefined}>
+    <button type="button" aria-label={name} title={icon ? label : undefined} onClick={() => {
       const element = input.current;
       if (!element) return;
       try { element.showPicker(); } catch { element.focus(); }
-    }}>{value && day ? dayLabel(value, locale) : t(empty)}</button>
+    }}>{icon ?? (value && day ? dayLabel(value, locale) : t(empty))}</button>
     <input ref={input} type="date" tabIndex={-1} aria-hidden="true" value={value ?? ""} onChange={(event) => event.target.value && onChange(event.target.value)} />
   </span>;
 }

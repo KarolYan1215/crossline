@@ -14,9 +14,10 @@ import type { CalendarData } from "./plan/plan-view";
 import { FlywheelGraph } from "./flywheel/flywheel-graph";
 import type { Reminder } from "../lib/reminders";
 import { DayHead } from "./today/day-head";
-import { NeedsCard, type NeedTask } from "./today/needs-card";
+import { NeedsCard } from "./today/needs-card";
 import { OverviewCard } from "./today/overview-card";
-import { weekDays } from "./timeline/model";
+import { weekLoad } from "./today/week-load";
+import type { Suggestion } from "./timeline/quick-actions";
 import "./today/today.css";
 import type { FlywheelGraphData } from "./flywheel/graph-model";
 import { tFor, type Locale, type Translate } from "../lib/i18n";
@@ -135,19 +136,17 @@ const capacityLabel = (capacity: DashboardData["capacity"], t: Translate) =>
  */
 export function DashboardView({ data }: { data: DashboardData }) {
   const t = tFor(data.locale);
-  const primaryDetail = data.primary ? data.taskDetailById.get(data.primary.id) : undefined;
-  const alternatives = ([[data.higherPriority, "更高优先级"], [data.lowEnergy, "低精力备选"], [data.shortGap, "短空档备选"]] as const)
-    .flatMap(([item, label]) => { const detail = item && item.id !== data.primary?.id ? data.taskDetailById.get(item.id) : undefined; return detail ? [[label, detail, item!.reason] as const] : []; })
-    .filter(([, detail], index, list) => list.findIndex(([, other]) => other.id === detail.id) === index);
-  const tasks: NeedTask[] = [
-    ...(primaryDetail ? [{ detail: primaryDetail, label: "下一步", reason: data.primary!.reason, slot: data.slotById?.get(primaryDetail.id), hero: true }] : []),
-    ...alternatives.map(([label, detail, reason]) => ({ detail, label, reason, slot: data.slotById?.get(detail.id) }))
-  ];
+  // The next step and its alternatives (2026-10-29): the calendar's next block is the next step; what is recommended without a block
+  // today is listed beside it in the day panel, each with the words that say why.
+  const suggestions: Suggestion[] = ([[data.primary, "下一步"], [data.higherPriority, "更高优先级"], [data.lowEnergy, "低精力备选"], [data.shortGap, "短空档备选"]] as const)
+    .flatMap(([item, label]) => { const detail = item ? data.taskDetailById.get(item.id) : undefined;
+      return detail ? [{ id: detail.id, title: detail.title, label, reason: item!.reason, line: detail.identityId }] : []; })
+    .filter((item, index, list) => list.findIndex((other) => other.id === item.id) === index);
 
   const hasSeed = [data.primary, ...data.upcoming].some((item) => item && data.taskDetailById.get(item.id)?.seeded);
   const today = data.calendar?.today ?? data.nowIso.slice(0, 10);
-  const week = new Set(weekDays(today));
-  const busyDays = [...new Set((data.calendar?.items ?? []).filter((item) => item.kind !== "activity" && week.has(item.day)).map((item) => item.day))];
+  const week = weekLoad(data.calendar?.items ?? [], data.calendar?.deadlines ?? [], today, data.calendar?.quietByWeekday);
+  const graph = data.flywheelGraph;
 
   // What to say when no work is put forward: which step comes next (drafts, backplanning, the interview).
   const empty = data.awaitingApproval
@@ -163,16 +162,13 @@ export function DashboardView({ data }: { data: DashboardData }) {
             : data.milestones && !data.milestones.any
               ? <>{t("访谈结束（或停下 20 分钟）后，系统按访谈为每条主线设计里程碑草稿，批准后倒推出任务。想现在就设计，在")} <a href="/onboarding">{t("访谈页")}</a> {t("点「设计里程碑草稿」。")}</>
               : t("暂无可执行任务。收集一项工作后，系统完成拆解与排程。");
-  const notes = <>
-    {data.urgentProposal && <p className="today-proposal-note nd-note" role="note">{boldAt(t("「{{title}}」{{due}} 截止，还在等本人批准；批准后才会排进日历。", { title: data.urgentProposal.title, due: MARK }), shortDay(data.urgentProposal.due))} <a href="/approvals#proposals">{t("去批准")}</a></p>}
-    {hasSeed && <p role="note" className="seed-notice">{t("下面有系统预置的示例作业（用来演示流程），不需要的可以直接丢弃。")}</p>}
-  </>;
+  const notes = data.urgentProposal && <p className="today-proposal-note nd-note" role="note">{boldAt(t("「{{title}}」{{due}} 截止，还在等本人批准；批准后才会排进日历。", { title: data.urgentProposal.title, due: MARK }), shortDay(data.urgentProposal.due))} <a href="/approvals#proposals">{t("去批准")}</a></p>;
 
   return <>
     <OfflineReplay workspaceId={data.workspaceId} />
     <AppShell active={"今日"} className="page today-page">
       <DayHead nowIso={data.nowIso} timeZone={data.timeZone} fixed={data.clockPinned} dateLabel={data.dateLabel} monthLabel={data.monthLabel}
-        today={today} busyDays={busyDays} />
+        today={today} week={week} />
 
       <div className="td-grid">
         <div className="td-main">
@@ -181,7 +177,9 @@ export function DashboardView({ data }: { data: DashboardData }) {
             <ScheduleSummary changes={data.scheduleChanges ?? []} splits={data.finerSplits ?? []} />
             <CalendarPanel items={data.calendar.items} deadlines={data.calendar.deadlines} today={data.calendar.today} nowIso={data.calendar.nowIso}
               timeZone={data.calendar.timeZone} labels={data.calendar.labels} quietByWeekday={data.calendar.quietByWeekday} proposals={data.calendar.proposals}
-              taskDetails={data.calendarDetails} />
+              taskDetails={data.calendarDetails} suggestions={suggestions} emptyNote={empty} />
+            {/* Only on the example ledger: one line, out of the way (scenarios.md §4.12). */}
+            {hasSeed && <p role="note" className="seed-notice td-seed">{t("下面有系统预置的示例作业（用来演示流程），不需要的可以直接丢弃。")}</p>}
           </section>}
           <section className="td-card td-input capture-line" aria-labelledby="capture-title">
             <header className="td-card-head"><h2 id="capture-title" className="ds-serif">{t("输入")}</h2><small>{t("收集、修改、回答、提问，先确认再生效")}</small></header>
@@ -204,17 +202,18 @@ export function DashboardView({ data }: { data: DashboardData }) {
               <div key={item.title}><dt>{item.title}</dt><dd>{t("最低 {{minutes}} 分钟", { minutes: item.minimumMinutes })}</dd></div>)}</dl>}
           </EnergyCard>
           <OverviewCard availableMinutes={data.todayCapacity.availableMinutes} committedMinutes={data.todayCapacity.committedMinutes} weekCount={data.progress.weekCount} />
-          <NeedsCard asks={data.asks ?? []} previews={data.askPreviews} tasks={tasks} reminders={data.reminders ?? []} labels={data.calendar?.labels ?? {}}
-            today={today} notes={notes} empty={empty} />
+          <NeedsCard asks={data.asks ?? []} reminders={data.reminders ?? []} labels={data.calendar?.labels ?? {}} today={today} notes={notes} />
         </div>
       </div>
 
       {/* An advanced fold (copy-audit): the graph is there for whoever opens it. */}
-      {data.flywheelGraph && <details className="td-card td-fold advanced">
-        <summary><h2 id="flywheel-title" className="ds-serif">{t("飞轮图谱")}</h2><small>{t("各主线的里程碑与跨主线关系")}</small></summary>
+      {graph && <details className="td-card td-fold advanced">
+        <summary><h2 id="flywheel-title" className="ds-serif">{t("飞轮图谱")}</h2><small>{t("{{lines}} 条主线 · {{approved}} 条已批准关系 · {{candidates}} 条候选", {
+          lines: graph.lines.length, approved: graph.relations.filter((relation) => relation.status === "approved").length,
+          candidates: graph.relations.filter((relation) => relation.status === "candidate").length })}</small></summary>
         <section aria-label={t("飞轮图谱")}>
           <p className="td-fold-link"><a href="/milestones">{t("打开主线 →")}</a></p>
-          <FlywheelGraph data={data.flywheelGraph} />
+          <FlywheelGraph data={graph} />
         </section>
       </details>}
     </AppShell>

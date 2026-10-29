@@ -16,10 +16,10 @@ import { ImpactCard, useImpact } from "../task/impact";
 import { shiftDay, type TimelineItem } from "./model";
 import type { LineLabels } from "./views";
 import { lockOnStart } from "./block-start";
-import { CompleteDialog } from "./complete-dialog";
+import { TaskCompletionSheet } from "../task/task-completion";
 import { HeldBlock } from "./held-block";
 import { useReturnState } from "../ui/return-state";
-import { agentStepFor, followingBlock, otherOpenSteps, stepOfBlock } from "./panel-model";
+import { agentStepFor, followingBlock, stepOfBlock } from "./panel-model";
 
 /** Kept in Chinese (they are the keys); translated where shown. */
 const KIND_TEXT: Record<TimelineItem["kind"], string> = {
@@ -79,7 +79,8 @@ const slotText = (item: TimelineItem, locale: Locale) => `${dayWithWeekday(local
  * the due date and this step's duration (both edited in place and previewed), what falls to the person, the task's next block — and
  * what can be done from here: start, pause, resume (a pencilled-in block is made formal first), 完成并提交材料, 交给 Agent when the system
  * can do the step, and 推迟 to tomorrow or a chosen day, previewed; under them, the one input box with this task and step as its page.
- * `compact` is the 下一项 form: the line, the task, the time, the start.
+ * `compact` is the 下一项 form, opened by default (2026-10-29): the line, the task, the time, the step and its first action, and the
+ * same actions (start, complete, postpone, lock, hand over, open) — without the in-place edits, the person's part and the input box.
  */
 export function BlockOverview({ item, items, today, labels, details, compact = false, heading, onClose }: {
   item: TimelineItem; items: TimelineItem[]; today: string; labels: LineLabels; details?: Record<string, TaskDetail> | undefined;
@@ -148,11 +149,11 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
       <Prepared detail={detail} />
     </>}
     {detail && <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={Boolean(agentStepId)} agentStepId={agentStepId}
-      beforeStart={() => lockOnStart(item, locale)} onOpen={compact ? undefined : () => setOpen(true)}
+      beforeStart={() => lockOnStart(item, locale)} onOpen={() => setOpen(true)}
       offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }}>
-      {!compact && ["approved", "ready_for_human", "active"].includes(detail.state) && <button type="button" onClick={() => setCompleting(true)}>{t("完成并提交材料")}</button>}
-      {!compact && live && !FINISHED.includes(detail.state) && <button type="button" aria-expanded={postponing} onClick={() => setPostponing((value) => !value)}>{t("推迟")}</button>}
-      {!compact && live && !FINISHED.includes(detail.state) && <LockToggle item={item} />}
+      {["approved", "ready_for_human", "active"].includes(detail.state) && <button type="button" onClick={() => setCompleting(true)}>{t("完成并提交材料")}</button>}
+      {live && !FINISHED.includes(detail.state) && <button type="button" aria-expanded={postponing} onClick={() => setPostponing((value) => !value)}>{t("推迟")}</button>}
+      {live && !FINISHED.includes(detail.state) && <LockToggle item={item} />}
     </TaskActions>}
     {!compact && live && !FINISHED.includes(detail.state) && <HeldBlock item={item} items={items} title={detail.title} />}
     {postponing && detail && <div className="dq-defer" role="group" aria-label={t("推迟到")}>
@@ -168,8 +169,8 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
       <Conversation key={detail.id} variant="block" page={{ kind: "task", entityId: detail.id, ...(step ? { stepId: step.id } : {}) }}
         placeholder={t("关于这项任务：改期、拆细、提问……")} />
     </div>}
-    {detail && !compact && <TaskDialog detail={detail} open={open} onOpenChange={setOpen} />}
-    {detail && completing && <CompleteDialog open={completing} onOpenChange={setCompleting} workOrderId={detail.id} title={detail.title} state={detail.state}
-      stepId={step?.id} stepTitle={step?.title} otherSteps={otherOpenSteps(step?.id, steps)} />}
+    {detail && <TaskDialog detail={detail} open={open} onOpenChange={setOpen} />}
+    {/* The task's own completion form (scenarios.md §4.8): the block panel is an entry to it, not a second form. */}
+    {detail && completing && <TaskCompletionSheet task={detail} stepId={step?.id} open={completing} onOpenChange={setCompleting} />}
   </div>;
 }

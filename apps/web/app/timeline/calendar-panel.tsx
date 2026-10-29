@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { nextBlock } from "./panel-model";
 import { minuteInZone, monthOf, shiftDay, shiftMonth, weekDays, weekdayOf, type TimelineDeadline, type TimelineItem } from "./model";
 import { DayTimeline, MonthView, WeekView, type LineLabels } from "./views";
 import { ImpactCard, useImpact } from "../task/impact";
-import { DayQuickActions, type QuickProposal } from "./quick-actions";
+import { DayQuickActions, type QuickProposal, type Suggestion } from "./quick-actions";
 import { useReturnState } from "../ui/return-state";
 import type { TaskDetail } from "../../lib/task-detail";
 import { useLocale, useT } from "../locale-context";
@@ -21,7 +22,7 @@ const VIEWS: Array<[CalendarView, string]> = [["day", "日"], ["week", "周"], [
  * Day, week and month over one list of items. The three views are the same data at three scales, with one selection: pick a block
  * and the panel beside the day shows its task and what can be done with it (a pick in the week opens that day).
  */
-export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, labels, quietByWeekday, proposals, initialView = "day", taskDetails }: {
+export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, labels, quietByWeekday, proposals, initialView = "day", taskDetails, suggestions, emptyNote }: {
   items: TimelineItem[]; deadlines: TimelineDeadline[]; today: string; nowIso: string; timeZone: string; labels: LineLabels;
   /** Unavailable stretches by weekday (0 is Sunday), from the person's availability. */
   quietByWeekday?: Record<number, Array<[string, string]>>; initialView?: CalendarView;
@@ -29,6 +30,10 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
   proposals?: QuickProposal[] | undefined;
   /** Details of the tasks behind the blocks, read with the page (Today); a task not here is read when its block is picked. */
   taskDetails?: Record<string, TaskDetail> | undefined;
+  /** Today's recommended work that has no block of its own today (the next step and its alternatives), listed in the day panel. */
+  suggestions?: Suggestion[] | undefined;
+  /** What the day panel says when nothing is put forward: which step comes next (drafts, backplanning, the interview). */
+  emptyNote?: ReactNode;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -103,9 +108,11 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
       </div>
     </header>
     {view === "day" && <DayTimeline day={anchor} items={items} deadlines={deadlines} labels={labels} selectedId={selected?.id} onSelect={pick}
+      nextId={selected ? undefined : nextBlock(items, anchor, today, anchor === today ? nowMinute : undefined)?.id}
       nowMinute={anchor === today ? nowMinute : undefined} quiet={quietByWeekday?.[weekdayOf(anchor)]}
       aside={<DayQuickActions day={anchor} today={today} items={items} proposals={proposals ?? []} nowMinute={anchor === today ? nowMinute : undefined}
-        selected={selected} onDeselect={() => setSelected(undefined)} labels={labels} details={taskDetails} />}
+        selected={selected} onDeselect={() => setSelected(undefined)} labels={labels} details={taskDetails}
+        suggestions={anchor === today ? suggestions : undefined} emptyNote={anchor === today ? emptyNote : undefined} />}
       onResize={(item, deltaMinutes) => {
         // `scheduled:<task>[:<step>][:<n>]` — a step id is `v<version>s<n>`, which tells it from a block index.
         const [, workOrderId, segment] = item.id.split(":");

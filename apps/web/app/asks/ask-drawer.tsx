@@ -58,14 +58,16 @@ export function DeckNav({ at, count, go, label, children }: { at: number; count:
  * A drawer of asks: the top one open, the next two as edges beneath it (clicking one brings it up). Answering the top one brings up the
  * next by itself.
  */
-export function AskDeck({ asks, at, pick, onDone, previews, level }: {
+export function AskDeck({ asks, at, pick, onDone, previews, level, keys = false }: {
   asks: Ask[]; at: number; pick: (index: number) => void; onDone: (id: string) => void; previews?: AskPreviews | undefined; level?: 3 | 4;
+  /** The top card answers to number keys, Enter and H (待确认). */
+  keys?: boolean;
 }) {
   const top = asks[at];
   if (!top) return null;
   const below = asks.slice(at + 1, at + 3);
   return <div className="ak-deck">
-    <ol className="ask-deck"><AskCard key={top.id} ask={top} preview={previews?.[top.id]} onDone={onDone} {...(level ? { level } : {})} /></ol>
+    <ol className="ask-deck"><AskCard key={top.id} ask={top} preview={previews?.[top.id]} onDone={onDone} keys={keys} {...(level ? { level } : {})} /></ol>
     {below.map((ask, depth) => <button key={ask.id} type="button" className="ask-peek" data-depth={depth + 1} data-line={ask.line}
       onClick={() => pick(at + depth + 1)}>{ask.title}</button>)}
   </div>;

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { itemsFromPlan, withAgentMarks, type TimelineItem } from "./model";
-import { agentStepFor, dayLoad, followingBlock, nextBlock, otherOpenSteps, stepOfBlock } from "./panel-model";
+import { agentStepFor, dayLoad, followingBlock, nextBlock, stepOfBlock } from "./panel-model";
 
 const item = (id: string, over: Partial<TimelineItem>): TimelineItem =>
   ({ id, title: id, day: "2026-10-12", start: "09:00", end: "10:00", kind: "scheduled", source: "排程", readOnly: false, ...over });
@@ -53,11 +53,9 @@ describe("the day panel", () => {
     expect(agentStepFor(item("x", {}), steps)).toBe("v1s2");
   });
 
-  test("the step shown is the block's own, else the task's current one; finishing it leaves the others open", () => {
+  test("the step shown is the block's own, else the task's current one", () => {
     expect(stepOfBlock(item("x", { stepId: "v1s3" }), steps)?.id).toBe("v1s3");
     expect(stepOfBlock(item("x", {}), steps)?.id).toBe("v1s2");
-    expect(otherOpenSteps("v1s2", steps)).toBe(1);
-    expect(otherOpenSteps(undefined, steps)).toBe(2);
   });
 });
 

@@ -848,8 +848,9 @@ const stageWhere = (status: InterviewStatus, t: Translate) =>
  */
 function interviewAsks({ ctx, now, t }: Source): Ask[] {
   const status = interviewStatus(ctx);
-  // While the interview runs, its questions are asked in it, round by round; only once the start standard stands and the person uses the
-  // app (已可开始) with the portrait unfinished are they asked here as well, answerable in place (decided 2026-10-08, 2026-10-12).
+  // While the interview runs, its questions are asked in it, round by round; once the start standard stands and the person uses the app
+  // (已可开始) with the portrait unfinished they are raised here too, still answerable from the input box, but no longer listed on 待确认 or
+  // Today (`listed`, scenarios.md §3.8, 2026-10-29): 待确认 links to the interview with their count.
   if (!status.started || status.complete || !status.parked) return [];
   // One card, not one per question: the later stages' questions each became an ask and piled eight 「不急」 cards onto Today
   // (2026-10-17 walkthrough, W-21). The first open question not snoozed is asked in place; answering it brings up the next, since an
@@ -1132,8 +1133,11 @@ export async function loadAsks(ctx: AccessContext, now?: Date): Promise<Ask[]> {
  * The asks that are listed and counted (Today's stack, 待确认, the badge, the opener). A follow-up on finished work (`outcome_check`) is
  * only ever asked by the 小帮手 at an idle moment (decided 2026-10-15): it stays answerable — from the nudge's buttons or typed into the
  * box — but is never a decision waiting on the person. The same holds for 「做到哪了」 after a partial answer on the return page (`progress_check`).
+ * The interview's own questions are answered in the interview, where they have their context (scenarios.md §3.8, 2026-10-29): 待确认
+ * shows one line 「访谈还有 N 题 → 继续访谈」 from `PendingCounts.questions`, and an `iq:` answer typed into the box still goes through.
  */
-export const listed = (asks: Ask[]) => asks.filter((ask) => ask.kind !== "outcome_check" && ask.kind !== "progress_check");
+const UNLISTED = new Set<Ask["kind"]>(["outcome_check", "progress_check", "interview_question", "interview_open"]);
+export const listed = (asks: Ask[]) => asks.filter((ask) => !UNLISTED.has(ask.kind));
 
 export type AskResult = { ok: true } | { ok: false; code: string };
 

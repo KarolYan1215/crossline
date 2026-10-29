@@ -195,15 +195,22 @@ test("answers given before the screen to questions it now keeps from the person 
 });
 
 // W-13: the badge counted the profile's blocking gaps unscreened, so it showed 「访谈问题 1」 that no page listed.
-test("the badge counts the interview's questions as the interview page shows them, and once parked only as the one ask", async () => {
+// 2026-10-29 (scenarios.md §3.8): the interview's questions are answered in the interview; 待确认 links there with the count, outside the total.
+test("the interview's questions are counted as the interview page shows them, outside the total and the listed asks", async () => {
   const { store } = setup();
   const { countPending } = await import("./pending");
+  const { listed } = await import("./asks");
   const status = interviewStatus(TEST_CTX);
   expect(countPending(TEST_CTX).questions).toBe(status.openQuestions);
   seedReadyToStart(store, ws);
   const parked = countPending(TEST_CTX);
-  expect(parked.questions).toBe(0);
+  expect(parked.questions).toBe(interviewStatus(TEST_CTX).openQuestions);
+  expect(parked.questions).toBeGreaterThan(0);
+  const { questions, relations, research, later, total, ...counted } = parked;
+  expect(total).toBe(Object.values(counted).reduce((sum, value) => sum + value, 0));
+  // Still raised (an answer typed into the box goes through), never listed.
   expect(collectAsks(TEST_CTX, SOON).filter((ask) => ask.kind.startsWith("interview_"))).toHaveLength(1);
+  expect(listed(collectAsks(TEST_CTX, SOON)).filter((ask) => ask.kind.startsWith("interview_"))).toHaveLength(0);
 });
 
 test("a snoozed interview question gives way to the next one; answering a question not listed still works", async () => {

@@ -19,22 +19,33 @@ export const SIDE_ITEMS = [
 ] as const;
 
 /**
- * The side bar's second group (2026-10-28, the frame's redesign): what waits for a decision, bringing work in from other tools, the
- * portrait and the settings. Wider than `SIDE_ITEMS`, which the narrow header keeps short; the phone's 「更多」 lists these too.
+ * The side bar's groups (2026-10-28 frame redesign; the rhythm group 2026-10-29, docs/plans/page-drafts-1028/scenarios.md §4): the four
+ * working views with 待确认 under them; under 「节奏与回顾」 the week's commitment, the day's wrap-up, the weekly review and the portrait;
+ * importing and the settings at the foot. The phone's tab bar is 今日 / 主线 / 任务 / 待确认 (`PHONE_TABS`), and 计划 joins the rest behind
+ * 「更多」 (`PHONE_MORE`).
  */
-/**
- * The side bar's 「节奏与回顾」 group (2026-10-28, docs/plans/page-drafts-1028/scenarios.md §1): the week's commitment, the evening wrap-up
- * and the weekly review — pages visited at a time of the week or day, not to work in. The weekly review had no way in but the 主线 page.
- */
-export const RITUAL_ITEMS = [
+export const DECIDE_ITEM = { label: "待确认", href: "/approvals", badge: true } as const;
+
+export const RHYTHM_ITEMS = [
   { label: "本周承诺", href: "/commit", badge: false },
   { label: "收工", href: "/wrap", badge: false },
-  { label: "周复盘", href: "/review", badge: false }
+  { label: "周复盘", href: "/review", badge: false },
+  { label: "画像", href: "/portrait", badge: false }
 ] as const;
 
-export const SECONDARY_ITEMS = [
-  { label: "待确认", href: "/approvals", badge: true },
+export const FOOT_ITEMS = [
   { label: "导入", href: "/settings#import", badge: false },
-  { label: "画像", href: "/portrait", badge: false },
   { label: "设置", href: "/settings", badge: false }
 ] as const;
+
+/** Every side-bar entry below the four working views, in order. */
+export const SECONDARY_ITEMS = [DECIDE_ITEM, ...RHYTHM_ITEMS, ...FOOT_ITEMS] as const;
+
+export const PHONE_TABS = [
+  { label: "今日", href: "/", badge: false },
+  { label: "主线", href: "/milestones", badge: false },
+  { label: "任务", href: "/workbench", badge: false },
+  DECIDE_ITEM
+] as const;
+
+export const PHONE_MORE = [{ label: "计划", href: "/plan", badge: false }, ...RHYTHM_ITEMS, ...FOOT_ITEMS] as const;
