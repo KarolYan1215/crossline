@@ -59,6 +59,10 @@ export type OnboardingState = {
   startTotal: number;
   /** The start items still open, in checklist order. */
   startMissing: Array<{ id: string; label: string; detail: string; owner: "interview" | "person" }>;
+  /** Every start item with whether it is done (absent on a state read before 2026-10-28): the right column lists them by kind. */
+  startItems?: Array<{ id: string; label: string; done: boolean }>;
+  /** Whether the portrait is written and confirmed; confirming it is done on the portrait page (2026-10-28), the interview links there. */
+  portraitState?: { written: boolean; confirmed: boolean };
   /** The app's own questions not in the open round (`profileGaps`), answered in the same reply. */
   extraQuestions: Question[];
   /** Questions of the open round the person already answered on 待决事项 (those answers go in front of the next reply). */

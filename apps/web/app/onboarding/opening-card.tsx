@@ -104,16 +104,17 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
 
   return <section className="ob-opening ob-voice" aria-label={t("开始访谈")}>
     <div className="ob-opening-intro">
-      {/* The owner's own note, word for word (2026-10-16); the only signed text in the app. */}
-      <section className="ob-opening-note" aria-label={t("开发者的话")}>
-        <h3>{t("开发者的话")}</h3>
+      {/* The owner's own note, word for word (2026-10-16); the only signed text in the app. Folded since 2026-10-28: unfolded it pushed the
+          questions below the first screen; the plan and the time it takes stay in view. */}
+      <details className="ob-opening-note" aria-label={t("开发者的话")}>
+        <summary><b>{t("开发者的话")}</b><small>{t("为什么做 Crossline，约 1 分钟读完")}</small></summary>
         <p>{t("AI把一个人能做的事放大了好几倍。查资料、写代码、做内容、跑分析，都不再需要一整个团队。在这个时代，一个人同时做研究、创业、写东西、投资，第一次变得现实。")}</p>
         <p>{t("但精力没有随着能力放大。一天里真正清醒的时间还是有限的，想做的许多事南辕北辙，哪怕交给AI也只是完成任务，却无法替你成长：读懂一篇论文、想清楚一个产品、练成一门手艺，都需要人类活动的参与。")}</p>
         <p>{t("现在的personal agent专注于解放劳动力，告诉你哪些事Agent可以代劳，解构后却没有建构，不告诉你什么时候做什么比较好，怎么做才能提升自我，怎样让不同成果相辅相成。")}{t("界面也不是照着人的注意力设计的。")}{t("Crossline 则更关注人类该关注什么：基于你的精力节律和每条主线真实进度，再决定哪些交给 AI、哪些留给你，并把留给你的事放进你状态最好的时段。")}</p>
         <p>{t("同时推进几条线的人，缺的往往不是计划，而是一张能同时看见所有主线和自己精力的图：哪条线在消耗你，哪条线的产出能喂给另一条，一天里哪几个小时适合深度工作。")}{t("这次访谈就是来画这张图的。")}{t("画好之后，AI 按它把各条线实时排进同一张日历。")}</p>
         <p>{t("做完之后，开始任务之前，你会得到一份独属于你的报告，欢迎诸君，在AI时代夺回属于人类的部分。")}</p>
         <p className="ob-opening-sign">——Y.K.</p>
-      </section>
+      </details>
       <ol className="ob-opening-plan">
         <li><b>{t("认识你")}</b><span>{t("你有哪些想成为的身份，各自正在做什么、大概什么时候截止；时间说个大概就行，材料里有的不再问。")}</span></li>
         <li><b>{t("聊深一点")}</b><span>{t("你现在的处境、为什么做这些、日常的精力情况。每一轮都会给你一条关于你自己的观察。")}</span></li>

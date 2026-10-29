@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Check, Circle } from "lucide-react";
 import { SCHWARTZ_VALUES } from "@crossline/core";
 import { ValuesRadar } from "../portrait/portrait-charts";
 import { FlywheelPreview, type Link } from "./flywheel-preview";
@@ -63,34 +64,55 @@ export function StageView({ state, stage, complete, onChanged }: {
   useEffect(() => setShown(current), [current]);
   const reached = VIEWS.findIndex((view) => view.key === current);
   const total = state.startTotal;
-  const done = Math.max(0, total - state.startMissing.length);
   const left = minutesLeft(state, stage);
   // A long-term goal is adopted in the left column, not answered in the conversation: its missing item links there (W-8).
   const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
   const progress = state.progress;
   const organizing = organizingNote(state.organizing, locale);
+  // The start items by kind (they are per line): one row each, done when every line's is, the open ones named under it.
+  const groups = START_GROUPS.map((group) => {
+    const items = (state.startItems ?? []).filter((item) => item.id.split(":")[0] === group.prefix);
+    return { ...group, items, open: missing.filter((item) => state.startItems ? items.some((one) => one.label === item.label) : false) };
+  }).filter((group) => group.items.length > 0);
+  // A state read before the items were sent lists what is missing as before.
+  const loose = state.startItems ? [] : missing;
   return <aside className="ob-stage" aria-label={t("正在成形")}>
-    {progress && !state.focusLine && <section className="ob-progress" aria-label={t("访谈进度")}>
-      <b>{complete ? t("访谈已完成") : progress.of
-        ? t("第 {{index}}/{{total}} 部分 · {{label}} · 已谈清 {{clear}}/{{of}}", { index: progress.index, total: progress.total, label: t(progress.label), clear: progress.clear, of: progress.of })
-        : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: progress.index, total: progress.total, label: t(progress.label) })}</b>
-      {!complete && progress.next && <small>{t("接下来：")}<span className="gen">{progress.next}</span></small>}
-    </section>}
-    <section className="ob-ring-row" aria-label={t("开始使用的进度")}>
-      <Ring done={state.readyToStart ? Math.max(1, total) : done} total={Math.max(1, total)} />
-      <div>
+    {/* The start standard only (2026-10-28): the old ring read 100% beside the time the rest of the interview still takes. */}
+    <section className="ob-start" aria-label={t("开始使用的进度")}>
+      <header>
         <b>{state.readyToStart ? t("可以开始使用") : total ? t("开始使用前还差 {{count}} 项", { count: state.startMissing.length }) : t("先回答中间的第一组问题")}</b>
-        {complete ? <small>{t("访谈已完成")}</small> : total > 0 && <small>{t("{{label}} {{minutes}} 分钟", { label: t(left.label), minutes: left.minutes })}</small>}
-        {organizing && <small className="ob-organizing" role="status">{organizing}</small>}
-        {!state.readyToStart && missing.length > 0 && <ul className="ob-ring-missing">{missing.slice(0, 3).map(({ label, href }) => <li key={label}>{href ? <a href={href}>{t("{{label}}（在左栏采用）", { label: t(label) })}</a> : t(label)}</li>)}
-          {missing.length > 3 && <li>{t("等 {{count}} 项", { count: missing.length - 3 })}</li>}</ul>}
-        {/* The first time, the person looks over what the plan will rest on before every page opens; after that it is a plain link. */}
-        {state.readyToStart && (state.startConfirmed === false && state.startSummary ? <StartConfirm summary={state.startSummary} />
-          : <a className="ob-btn ob-primary" href="/">{t("开始使用")}</a>)}
-        {/* Two ways on from here, said once: the button looked like the end of the interview (2026-10-18 walkthrough). */}
-        {state.readyToStart && !complete && <small className="ob-ring-next">{t("现在就能排日程；接着答完剩下几轮会拿到画像报告。先去用的话，剩下的问题会出现在待确认里，随时回来接着答。")}</small>}
-      </div>
+        {!state.readyToStart && total > 0 && <small>{t("约 {{minutes}} 分钟", { minutes: left.minutes })}</small>}
+      </header>
+      {organizing && <small className="ob-organizing" role="status">{organizing}</small>}
+      {groups.length > 0 && <ul className="ob-start-list">{groups.map((group) => { const open = group.items.some((item) => !item.done);
+        return <li key={group.prefix} data-done={!open || undefined}>
+          {open ? <Circle size={15} strokeWidth={1.75} aria-hidden="true" /> : <Check size={15} strokeWidth={2} aria-hidden="true" />}
+          <span>{t(group.label)}{open && group.open.length > 0 && <small>{group.open.slice(0, 3).map(({ label, href }) =>
+            href ? <a key={label} href={href}>{t("{{label}}（在左栏采用）", { label: t(label) })}</a> : <span key={label}>{t(label)}</span>)}
+            {group.open.length > 3 && <span>{t("等 {{count}} 项", { count: group.open.length - 3 })}</span>}</small>}</span>
+        </li>; })}</ul>}
+      {!state.readyToStart && loose.length > 0 && <ul className="ob-ring-missing">{loose.slice(0, 3).map(({ label, href }) => <li key={label}>{href ? <a href={href}>{t("{{label}}（在左栏采用）", { label: t(label) })}</a> : t(label)}</li>)}
+        {loose.length > 3 && <li>{t("等 {{count}} 项", { count: loose.length - 3 })}</li>}</ul>}
+      {/* The first time, the person looks over what the plan will rest on before every page opens; after that it is a plain link. */}
+      {state.readyToStart && (state.startConfirmed === false && state.startSummary ? <StartConfirm summary={state.startSummary} />
+        : <a className="ob-btn ob-primary" href="/">{t("开始使用")}</a>)}
+      {/* Two ways on from here, said once: the button looked like the end of the interview (2026-10-18 walkthrough). */}
+      {state.readyToStart && !complete && <small className="ob-ring-next">{t("现在就能排日程；接着答完剩下几轮会拿到画像报告。先去用的话，剩下的问题会出现在待确认里，随时回来接着答。")}</small>}
     </section>
+    {/* The portrait's own progress, apart from the start standard; confirming the portrait is done on the portrait page (scenarios.md §3-10). */}
+    {!state.focusLine && <section className="ob-portrait-progress" aria-label={t("画像进度")}>
+      <b>{t("画像进度")}</b>
+      {progress && <small>{complete ? t("访谈已完成") : progress.of
+        ? t("第 {{index}}/{{total}} 部分 · {{label}} · 已谈清 {{clear}}/{{of}}", { index: progress.index, total: progress.total, label: t(progress.label), clear: progress.clear, of: progress.of })
+        : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: progress.index, total: progress.total, label: t(progress.label) })}</small>}
+      {!complete && progress?.next && <small>{t("接下来：")}<span className="gen">{progress.next}</span></small>}
+      {state.readyToStart && !complete && <small>{t("{{label}} {{minutes}} 分钟", { label: t(left.label), minutes: left.minutes })}</small>}
+      {state.portraitState?.written
+        ? state.portraitState.confirmed ? <a href="/portrait">{t("画像已确认符合本人 · 查看画像 →")}</a>
+          : <a href="/portrait#pt-s-type">{t("画像已写好，去画像页确认是否符合 →")}</a>
+        : <small>{t("写完后在画像页确认是否符合")}</small>}
+    </section>}
+    <section className="ob-stage-views">
     <nav className="ob-stage-tabs" aria-label={t("各阶段的图")}>
       {VIEWS.map((view, index) => <button key={view.key} type="button" aria-current={shown === view.key || undefined}
         // The week is there from the start once a calendar or a file has put something in it.
@@ -107,19 +129,15 @@ export function StageView({ state, stage, complete, onChanged }: {
       {shown === "projects" && <ProjectsView timeline={state.timeline} lines={state.lines} />}
       {shown === "structure" && <StructureView state={state} />}
     </div>
+    </section>
   </aside>;
 }
 
-/** The start items done, as an arc: they are per line, so a count of segments would be unreadable for four lines. */
-function Ring({ done, total }: { done: number; total: number }) {
-  const t = useT();
-  const r = 26, c = 2 * Math.PI * r, share = Math.min(1, done / total);
-  return <svg className="ob-ring" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label={t("开始使用的 {{total}} 项已完成 {{done}} 项", { total, done })}>
-    <circle cx="32" cy="32" r={r} fill="none" strokeWidth="7" className="ob-ring-off" />
-    <circle cx="32" cy="32" r={r} fill="none" strokeWidth="7" className="ob-ring-on" strokeDasharray={`${share * c} ${c}`} transform="rotate(-90 32 32)" />
-    <text x="32" y="37" textAnchor="middle" className="ob-ring-text">{Math.round(share * 100)}%</text>
-  </svg>;
-}
+/** The five kinds of start item (`interviewChecklist`, `start: true`), by the prefix of their ids. */
+const START_GROUPS = [
+  { prefix: "line_desc", label: "每条主线的描述" }, { prefix: "line_goal", label: "长期目标（本人选定）" }, { prefix: "hard_schedule", label: "固定日程" },
+  { prefix: "availability", label: "每周可用时间" }, { prefix: "line_project", label: "每条主线的当前项目与截止" }
+];
 
 async function post(body: Record<string, unknown>): Promise<boolean> {
   const response = await fetch("/api/profile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);

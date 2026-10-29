@@ -687,6 +687,9 @@ test("确认时间块：通知打开的小页上点「超出预估 · 30 分钟�
 
 test("设置里的 Skill 库：主线 skill 逐条带来源；编辑存为新版本，回到旧版另存为新版本；公开 skill 可删除", async ({ page }, testInfo) => {
   await ensureSkillLibrary(page);
+  // Settings shows one module at a time (2026-10-28) and opens the one the address names; arriving from another page, as a notification's
+  // link does — a hash move inside a page still loading can land before the page is listening.
+  await page.goto("about:blank");
   await page.goto("/settings#skills");
   // The library opens folded to its summary (2026-10-21); 「全部展开」 lists every kind with each item open.
   const expandAll = () => page.getByRole("button", { name: "全部展开" }).click();

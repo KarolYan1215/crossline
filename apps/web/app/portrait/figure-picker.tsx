@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PenLine, RefreshCw, Upload } from "lucide-react";
 import { refreshHelper } from "../helper-state";
 import { intlLocale, type Locale, type Translate } from "../../lib/i18n";
 import { useLocale, useT } from "../locale-context";
@@ -17,11 +18,15 @@ const dayOf = (iso: string, locale: Locale) => iso ? new Date(iso).toLocaleDateS
  * 「用这一版作小帮手」. A rewritten report keeps the figure; 「重画一版」 asks for a new one and keeps the old ones. Every choice is undoable
  * from the top bar.
  */
-export function FigurePicker({ onCurrent }: { onCurrent: (url: string | null) => void }) {
+export function FigurePicker({ onCurrent, appearance }: { onCurrent: (url: string | null) => void; appearance: { text: string; skipped: boolean } }) {
   const t = useT();
   const locale = useLocale();
   const [figures, setFigures] = useState<Figure[]>([]);
   const [status, setStatus] = useState("");
+  const [saved, setSaved] = useState(appearance.text);
+  const [look, setLook] = useState(appearance.text);
+  // Nothing said yet opens the box; a description on record is one line with a pencil.
+  const [editing, setEditing] = useState(!appearance.text);
   const [redrawing, setRedrawing] = useState<number | null>(null);
   const upload = useRef<HTMLInputElement>(null);
 
@@ -64,24 +69,48 @@ export function FigurePicker({ onCurrent }: { onCurrent: (url: string | null) =>
   };
 
   const chosen = figures.some((figure) => figure.current && !figure.latest);
-  return <details className="pt-figures" data-no-export="">
-    <summary>{t("小帮手形象")}{figures.length ? t("（{{count}} 版）", { count: figures.length }) : ""}</summary>
+  const current = figures.find((figure) => figure.current);
+  const saveLook = async (skip: boolean) => {
+    setStatus("");
+    const response = await fetch("/api/portrait/appearance", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(skip ? { skip: true } : { text: look }) }).catch(() => null);
+    if (response?.ok) { setSaved(skip ? "" : look.trim()); setEditing(false); setStatus(skip ? "已记下：用中性形象" : "已记下外形描述；点「重画一版」按新描述画"); }
+    else setStatus("没有保存，请重试");
+  };
+  return <section className="pt-figures" id="pt-figure-card" data-no-export="" aria-labelledby="pt-figure-title">
+    <header>{current ? <img src={current.url} alt="" /> : <span className="pt-figure-blank" aria-hidden="true" />}
+      <b id="pt-figure-title">{t("小帮手形象")}</b>{figures.length > 0 && <small>{t("{{count}} 版", { count: figures.length })}</small>}</header>
+    {/* How the person looks, the one description the figure is drawn from (2026-10-28: here, beside 重画, and no longer asked in the interview again). */}
+    <div className="pt-look">
+      <small>{t("外形描述（只用来画形象）")}</small>
+      {editing ? <form onSubmit={(event) => { event.preventDefault(); if (look.trim()) void saveLook(false); }}>
+        <textarea value={look} rows={2} maxLength={200} onChange={(event) => setLook(event.target.value)} aria-label={t("外形描述")}
+          placeholder={t("例如：男，狼尾长发，常穿全黑")} />
+        <span><button type="submit" className="primary-button" disabled={!look.trim()}>{t("保存")}</button>
+          {!saved && <button type="button" className="text-button" onClick={() => void saveLook(true)}>{t("不描述，用中性形象")}</button>}
+          {saved && <button type="button" className="text-button" onClick={() => { setLook(saved); setEditing(false); }}>{t("取消")}</button>}</span>
+      </form> : <button type="button" className="pt-look-now" onClick={() => setEditing(true)} aria-label={t("修改外形描述")}>
+        <span className="gen">{saved}</span><PenLine size={15} strokeWidth={1.75} aria-hidden="true" /></button>}
+    </div>
+    <div className="pt-figure-actions">
+      {chosen && <button type="button" className="secondary-button" onClick={() => void choose(null)}>{t("改用最新画的一版")}</button>}
+      <button type="button" className="secondary-button" disabled={redrawing !== null} onClick={() => void redraw()}><RefreshCw size={15} strokeWidth={1.75} aria-hidden="true" />{redrawing !== null ? t("重画中…") : t("重画一版")}</button>
+      <button type="button" className="secondary-button" onClick={() => upload.current?.click()}><Upload size={15} strokeWidth={1.75} aria-hidden="true" />{t("上传一张")}</button>
+      <input ref={upload} type="file" accept="image/png,image/jpeg,image/webp" hidden
+        onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void add(file); }} />
+    </div>
+    {status && <small role="status">{t(status)}</small>}
+    {figures.length > 0 && <details className="pt-figure-versions">
+    <summary>{t("全部 {{count}} 版", { count: figures.length })}</summary>
     <p className="muted">{t("小帮手和画像使用同一个形象。重新生成画像不会更换形象；只有本人改了外貌描述，或在这里要求重画，才会画新的一版。")}</p>
-    {figures.length > 0 && <ul className="pt-figure-list">
+    <ul className="pt-figure-list">
       {figures.map((figure) => <li key={figure.file} data-current={figure.current ? "" : undefined}>
         <img src={figure.url} alt={labelOf(figure, t)} loading="lazy" />
         <span>{labelOf(figure, t)}{figure.at ? ` · ${dayOf(figure.at, locale)}` : ""}{figure.latest ? ` · ${t("最新")}` : ""}</span>
         {figure.current ? <strong>{t("当前小帮手")}</strong>
           : <button type="button" onClick={() => void choose(figure.file)}>{t("用这一版作小帮手")}</button>}
       </li>)}
-    </ul>}
-    <div className="pt-figure-actions">
-      {chosen && <button type="button" onClick={() => void choose(null)}>{t("改用最新画的一版")}</button>}
-      <button type="button" disabled={redrawing !== null} onClick={() => void redraw()}>{redrawing !== null ? t("重画中…") : t("重画一版")}</button>
-      <button type="button" onClick={() => upload.current?.click()}>{t("上传一张")}</button>
-      <input ref={upload} type="file" accept="image/png,image/jpeg,image/webp" hidden
-        onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void add(file); }} />
-    </div>
-    {status && <small role="status">{t(status)}</small>}
-  </details>;
+    </ul>
+    </details>}
+  </section>;
 }

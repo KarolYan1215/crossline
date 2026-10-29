@@ -18,7 +18,8 @@ export default async function OnboardingPage({ searchParams }: { searchParams: P
   // The frame opens once the person can use every page: the start standard stands and they confirmed it.
   const focus = !valid && !startReadiness(ctx).ready;
   const t = tOf(ctx);
-  return <AppShell active={"设置"} className="ob-page" focus={focus} corner={false}>
+  // No view of the frame is this page: the side bar marks none (it used to mark 设置).
+  return <AppShell className="ob-page" focus={focus} corner={false}>
     <h1 className="sr-only">{t("访谈")}</h1>
     <OnboardingWorkspace line={valid} />
   </AppShell>;

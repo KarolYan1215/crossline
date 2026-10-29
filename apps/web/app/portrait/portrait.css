@@ -2,17 +2,75 @@
 /* Noto Serif SC Bold (SIL OFL 1.1), cut to the characters `posterSerifText` lists by scripts/poster-font-subset.ts. */
 @font-face{font-family:"Crossline Poster Serif";src:url(/fonts/poster-serif.woff2) format("woff2");font-weight:700;font-display:block}
 .pt-serif{font-family:"Crossline Poster Serif",var(--f-display);font-weight:700}
-.pt-empty{display:grid;gap:10px;justify-items:start;padding:14px;border:1px solid var(--mist)}
-.pt-wrap{display:grid;gap:12px}
-.pt-toolbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 10px;background:var(--paper);border:1px solid var(--mist)}
-/* Which figure the 小帮手 shows: one card per figure ever drawn or added, the current one outlined. */
-.pt-figures{display:grid;gap:8px;padding:8px 10px;border:1px solid var(--mist)}
-.pt-figures summary{cursor:pointer;font-weight:600}
+/* The page around the report (2026-10-28 redesign): the warm design layer (shell.css `--ds-*`), the actions beside the title, the
+   contents in two groups and the figure card on the left, the report itself unchanged on its paper. */
+html:has(.portrait-page) body{background:var(--ds-bg)}
+.portrait-page{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--shade:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);color:var(--ink)}
+body:has(.portrait-page) .running-head{background:var(--ds-bg)}
+.portrait-page :is(.primary-button,.secondary-button,.text-button){display:inline-flex;align-items:center;gap:6px;border-radius:var(--ds-radius-control)}
+.portrait-page .primary-button{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
+.portrait-page .primary-button:hover{background:var(--ds-accent-ink);color:var(--ds-on-accent)}
+.portrait-page textarea{border-radius:var(--ds-radius-control);font:inherit;font-size:14px;width:100%;box-sizing:border-box;resize:vertical}
+.pt-head{border-bottom:0;padding:18px 0 4px;align-items:flex-end}
+.pt-head h1{font-size:30px;font-weight:600;line-height:1.15}
+.pt-head h1::before{display:none}
+.pt-head p{font-size:13px}
+.pt-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
+.pt-actions small{font-size:12px;color:var(--graphite)}
+.pt-actions .ds-icon{border-color:var(--ds-line);background:var(--ds-card);color:var(--ink)}
+.pt-share{min-height:34px;padding:0 14px}
+.pt-empty{display:grid;gap:10px;justify-items:start;padding:18px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:var(--ds-radius);box-shadow:var(--ds-shadow)}
+.pt-empty p{margin:0}
+.pt-empty-list{margin:0;padding-left:18px;display:grid;gap:4px;font-size:13px;color:var(--graphite)}
+.pt-wrap{display:grid;gap:16px}
+.pt-layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:20px;align-items:start}
+.pt-side{position:sticky;top:12px;display:grid;gap:12px;max-height:calc(100vh - 24px);overflow-y:auto}
+.pt-toc{display:grid;gap:1px;padding:8px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:var(--ds-radius);box-shadow:var(--ds-shadow)}
+.pt-toc-group{display:flex;align-items:center;gap:6px;margin:8px 10px 2px;font-size:12px;color:var(--graphite)}
+.pt-toc-group:first-child{margin-top:4px}
+.pt-toc a{padding:6px 10px;border-radius:var(--ds-radius-control);font-size:13.5px;color:var(--ink);text-decoration:none}
+.pt-toc a:hover{background:var(--ds-chalk)}
+.pt-toc a[aria-current="true"]{background:var(--ds-accent-soft);font-weight:600}
+.pt-toc-note{margin:2px 10px 6px;font-size:12px;line-height:1.5;color:var(--graphite)}
+.pt-layout .pt-doc{border:1px solid var(--ds-line);border-radius:var(--ds-radius);overflow:hidden}
+.pt-doc [id^="pt-s-"]{scroll-margin-top:16px}
+/* 「这份画像符合本人吗？」, under the type page, on the poster's paper but never exported. */
+.pt-confirm{box-sizing:border-box;width:min(794px,100%);display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:12px 16px;margin:0 0 4px;
+  background:#EFE9DD;color:#1C1A17;border-radius:10px;font-size:14px}
+.pt-confirm small{font-size:12px;color:#4F4A42}
+.pt-confirm[data-state="done"]{background:transparent;border:1px solid #DDD5C7}
+.pt-confirm-actions{margin-left:auto;display:flex;flex-wrap:wrap;gap:6px}
+.pt-confirm :is(.primary-button,.secondary-button,.text-button){min-height:32px;padding:4px 12px;font-size:13px}
+.pt-confirm .secondary-button{background:#FCFBF8;color:#1C1A17;border-color:#D9D3C7}
+.pt-confirm .text-button{color:#1C1A17}
+.pt-confirm .primary-button{background:#3E5A4C;border-color:#3E5A4C;color:#fff}
+.pt-confirm-note{flex-basis:100%;display:grid;gap:6px}
+.pt-confirm-note textarea{background:#FCFBF8;color:#1C1A17;border:1px solid #D9D3C7;padding:6px 8px}
+.pt-confirm-note span{display:flex;gap:6px}
+/* The figure card: the current figure, how the person looks, redraw and upload; every version folded below. */
+.pt-figures{display:grid;gap:10px;padding:12px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:var(--ds-radius);box-shadow:var(--ds-shadow);scroll-margin-top:16px}
+.pt-figures>header{display:flex;align-items:center;gap:10px}
+.pt-figures>header img,.pt-figure-blank{width:36px;height:36px;border-radius:50%;object-fit:cover;object-position:top;background:var(--ds-chalk);border:1px solid var(--ds-line)}
+.pt-figures>header small{margin-left:auto;font-size:12px;color:var(--graphite)}
+.pt-look{display:grid;gap:4px}
+.pt-look>small{font-size:12px;color:var(--graphite)}
+.pt-look form{display:grid;gap:6px}
+.pt-look form span{display:flex;flex-wrap:wrap;gap:6px}
+.pt-look-now{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;width:100%;padding:6px 10px;border:1px solid var(--ds-line);border-radius:10px;background:var(--ds-card);color:var(--ink);text-align:left;font-size:13px;cursor:pointer}
+.pt-figure-versions summary{cursor:pointer;font-size:13px}
+.pt-figure-versions{display:grid;gap:8px}
 .pt-figure-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
-.pt-figure-list li{display:grid;gap:6px;justify-items:center;padding:8px;border:1px solid var(--mist);text-align:center;font-size:13px}
-.pt-figure-list li[data-current]{border:2px solid var(--ink)}
+.pt-figure-list li{display:grid;gap:6px;justify-items:center;padding:8px;border:1px solid var(--mist);border-radius:10px;text-align:center;font-size:13px}
+.pt-figure-list li[data-current]{border:2px solid var(--ds-accent)}
 .pt-figure-list img{width:112px;height:112px;object-fit:cover;object-position:top;border-radius:8px;background:var(--chalk)}
-.pt-figure-actions{display:flex;flex-wrap:wrap;gap:8px}
+.pt-figure-actions{display:flex;flex-wrap:wrap;gap:6px}
+.pt-figure-actions .secondary-button{min-height:30px;padding:3px 10px;font-size:13px}
+@media (max-width:1024px){
+  .pt-layout{grid-template-columns:minmax(0,1fr)}
+  .pt-side{position:static;max-height:none;overflow:visible}
+  .pt-toc{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+  .pt-toc-group,.pt-toc-note{grid-column:1/-1}
+}
 /* The document is paper whatever the app's theme: these colours are the poster's, not the page's. #6B655C (the draft's grey) is
    5.2:1 on the paper, so the grey here is #4F4A42 (7.9:1); the group colour as text on paper is about 7.1:1, so text beside a bar is ink. */
 .pt-doc{--pt-paper:#F6F2EA;--pt-ink:#1C1A17;--pt-muted:#4F4A42;--pt-track:#DDD5C7;--pt-soft:#ECE5D8;--pt-accent:var(--group,#0A5198);--pt-accent-text:#08427A;
@@ -163,8 +221,6 @@
 .pt-goal-strip li{display:grid;gap:2px;border-left:6px solid var(--lc,var(--pt-ink));padding:4px 0 4px 10px;font-size:13px}
 .pt-num{display:inline-grid;place-items:center;width:22px;height:22px;border:2px solid var(--pt-ink);font-size:12px;font-weight:700}
 .pt-insights li[data-priority="high"] .pt-num{background:var(--pt-ink);color:#fff}
-.pt-share-bar{justify-self:center;width:min(794px,100%);box-sizing:border-box;display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0;padding:12px 14px;border:2px solid var(--pt-ink);background:var(--pt-paper)}
-.pt-share-bar small{font-size:12px;color:var(--pt-muted)}
 /* what is shared: rendered off screen, exported only */
 .pt-offscreen{position:fixed;left:-20000px;top:0;pointer-events:none}
 .pt-shared-half{width:794px}
@@ -242,3 +298,5 @@
 :lang(en) .pt-card-labels dd{font-size:15px;overflow-wrap:anywhere}
 :lang(en) .pt-card-axes li{font-size:12px}
 @media (max-width:820px){:lang(en) .pt-axes li{grid-template-columns:80px minmax(0,1fr) 80px}:lang(en) .pt-axes .pt-axis-en{font-size:13px}}
+
+html:has(.portrait-page){background:var(--ds-bg)}
