@@ -33,6 +33,7 @@ export * from "./date-advance";
 export * from "./diligence-schema";
 export * from "./manualbook-schema";
 export * from "./activity-state";
+export * from "./measured-capacity";
 export * from "./plan-explainer-schema";
 export * from "./reality";
 export * from "./replay";

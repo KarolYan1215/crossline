@@ -20,6 +20,11 @@ export type AgentHistorySummary = {
   byHour: number[]; byWeekday: number[];
   /** Minutes per local day, oldest first. */
   daily: Array<{ day: string; minutes: number }>;
+  /**
+   * When the person worked, as merged stretches (no folder, no tool): one of measured work time's signals (docs/plans/closed-loop-1030.md
+   * §1), joined in time with the timer and the screen. Absent on a summary written before 2026-10-30.
+   */
+  spans?: Array<{ start: string; end: string }>;
 };
 
 /** Joins timestamps (ms, any order) into spans: consecutive events at most `GAP_MS` apart are one stretch of work. */
@@ -71,8 +76,15 @@ export function summarizeAgentHistory(spans: ActivitySpan[], now: Date, timeZone
       activeDays: new Set(stamps.map((at) => localParts(at, timeZone).day)).size,
       lastActive: stamps.length ? localParts(Math.max(...stamps), timeZone).day : "" };
   }).sort((a, b) => b.minutes - a.minutes);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const span of spans.filter((item) => item.end >= since).map((item) => ({ start: Math.max(item.start, since), end: item.end })).sort((a, b) => a.start - b.start)) {
+    const last = merged.at(-1);
+    if (last && span.start <= last.end) last.end = Math.max(last.end, span.end);
+    else merged.push({ ...span });
+  }
   return { updatedAt: now.toISOString(), days, timeZone, totalMinutes: all.size, folders, byHour, byWeekday,
-    daily: [...daily].sort((a, b) => a[0].localeCompare(b[0])).map(([day, minutes]) => ({ day, minutes })) };
+    daily: [...daily].sort((a, b) => a[0].localeCompare(b[0])).map(([day, minutes]) => ({ day, minutes })),
+    spans: merged.map((span) => ({ start: new Date(span.start).toISOString(), end: new Date(span.end).toISOString() })) };
 }
 
 /* i18n-ignore-start: these lines are context for a model, not interface text */
