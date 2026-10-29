@@ -19,9 +19,6 @@
 .task-card-due b{color:var(--ink);font-weight:700}
 .task-card-due small{font-size:12px}
 .task-card-distance::before{content:"·";margin:0 4px}
-.task-card-due[data-overdue] b,.task-card-due[data-overdue] .task-card-distance{color:#8A1F24}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .task-card-due[data-overdue] b,:root:not([data-theme="light"]) .task-card-due[data-overdue] .task-card-distance{color:#FF8A80}}
-:root[data-theme="dark"] .task-card-due[data-overdue] b,:root[data-theme="dark"] .task-card-due[data-overdue] .task-card-distance{color:#FF8A80}
 .task-card-title{margin:0;font-size:16px;line-height:1.35;overflow-wrap:anywhere}
 .task-card[data-variant="hero"] .task-card-title{font-size:clamp(18px,2vw,24px)}
 .task-card-milestone,.task-card-reason{font-size:13px;color:var(--graphite)}
@@ -225,21 +222,10 @@
 .task-detail-progress{display:flex;align-items:center;gap:10px}
 .task-detail-progress small{font-size:12px;color:var(--graphite);white-space:nowrap}
 .task-detail-cross{display:flex;flex-wrap:wrap;gap:4px;margin:0}
-.task-sections{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--mist);padding-bottom:6px}
-.task-sections button{min-height:32px;padding:4px 12px;border:1px solid var(--mist);font-size:13px;background:var(--paper)}
-.task-sections button:hover{border-color:var(--ink)}
 .task-section{display:grid;gap:10px;padding-top:4px;scroll-margin-top:72px}
 .task-section-title{margin:0;font-size:15px;display:flex;align-items:center;gap:8px}
 .task-section-title .mono{display:inline-grid;place-items:center;width:22px;height:22px;border:1.5px solid var(--lc,var(--ink));font-size:12px}
 .task-subhead{margin:0 0 4px;font-size:13px;color:var(--graphite);font-weight:700}
-/* In a wide sheet (`.ui-sheet[data-size="wide"]`, whose body is the size container) the steps and the materials sit side by side; the
-   head, the actions, the input box, hand-in and the record run across the whole width. */
-@container (min-width:880px){
-  .task-dialog{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);column-gap:20px;align-items:start}
-  .task-dialog>*{grid-column:1 / -1}
-  .task-dialog>.task-section[data-section="steps"]{grid-column:1}
-  .task-dialog>.task-section[data-section="materials"]{grid-column:2}
-}
 .steps-meta{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0}
 .steps-meta small{font-size:12px;color:var(--graphite)}
 .steps-meta .text-button{min-height:32px;padding:4px 10px;font-size:13px}
@@ -295,7 +281,7 @@
 
 @media (max-width:760px){
   .task-card{padding:12px}
-  .task-actions>button,.task-actions-choices button,.task-actions .ui-menu-trigger,.task-sections button,.tasks-index a,.tasks-filter a,.back-link,
+  .task-actions>button,.task-actions-choices button,.task-actions .ui-menu-trigger,.tasks-index a,.tasks-filter a,.back-link,
   .steps-meta .text-button,.steps-actions button,.steps-fix button,.progress-report button,.step-tools button,.task-tutorial-head a{min-height:44px}
   .step-tools button{min-width:44px}
   .step-head{min-height:44px}
@@ -311,3 +297,249 @@
 .step-provide > span { display: grid; gap: 6px; min-width: 0; }
 .step-provide input[type="file"] { max-width: 100%; font-size: 14px; }
 .step-provide-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* ── 2026-10-28 redesign of 任务 and the task detail (docs/plans/page-drafts-1028/workbench.html, task.html; tokens in shell.css) ──
+   Inside the task pages, the task dialog and every task card the original names point at the warm tokens, as Today does. */
+html:has(.tk-page) body{background:var(--ds-bg)}
+body:has(.tk-page) .running-head{background:var(--ds-bg)}
+.tk-page,.task-dialog,.task-card,.tk-complete{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--shade:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);
+  --now:var(--ds-accent);--now-ink:var(--ds-accent-ink)}
+:is(.tk-page,.task-dialog,.task-card,.tk-complete) :is(button,input,select,textarea,.ui-menu-trigger,.back-link){border-radius:var(--ds-radius-control)}
+:is(.tk-page,.task-dialog,.task-card,.tk-complete) .primary-button{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
+:is(.tk-page,.task-dialog,.task-card,.tk-complete) .primary-button:hover{background:var(--ds-accent-ink);border-color:var(--ds-accent-ink);color:var(--ds-on-accent)}
+:is(.tk-page,.task-dialog,.task-card,.tk-complete) .secondary-button{border:1px solid var(--ds-line);background:var(--ds-card);color:var(--ink)}
+:is(.tk-page,.task-dialog,.task-card,.tk-complete) .secondary-button:hover{border-color:var(--ds-muted)}
+.tk-page .back-link,.subpage:has(.tk-page) .back-link{border-color:var(--ds-line);background:var(--ds-card)}
+
+/* A line as a small tag: its colour as a light ground, the words in ink (≥7:1 on the tinted ground). */
+.task-card-chipline,.tk-line{display:inline-flex;align-items:center;gap:5px;padding:0 9px;border-radius:999px;line-height:22px;font-size:12px;font-weight:600;
+  background:color-mix(in srgb,var(--lc,var(--graphite)) 14%,var(--ds-card));color:var(--ink);white-space:nowrap}
+.task-card-chipline .task-card-dot,.tk-line .task-card-dot{display:none}
+
+/* ── the card ── */
+.task-card{gap:10px;padding:14px 16px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
+.task-card:hover{border-color:var(--ds-muted)}
+.task-card[data-state="active"]{box-shadow:inset 4px 0 0 var(--ds-accent),var(--ds-shadow)}
+.task-card-head{align-items:center;flex-wrap:nowrap}
+.task-card-line{flex:1 1 auto;min-width:0;flex-wrap:nowrap;overflow:hidden}
+.task-card-project{white-space:nowrap}
+.task-card-serves{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--graphite)}
+.task-card-due{flex:none;align-items:center;gap:5px;padding:0 9px;border:1px solid var(--ds-line);border-radius:999px;line-height:22px;font-size:12px}
+.task-card-due b{font-weight:600}
+.task-card-due svg{color:var(--graphite)}
+.task-card-due[data-overdue]{border-color:var(--ds-alarm-soft);background:var(--ds-alarm-soft)}
+.task-card-due[data-overdue] b,.task-card-due[data-overdue] .task-card-distance,.task-card-due[data-overdue] svg{color:var(--ds-alarm-ink)}
+.task-card-title{font-size:16px;font-weight:700}
+.task-card .step-strip{height:6px;gap:4px}
+.task-card .step-seg,.task-detail .step-seg,.tk-detail .step-seg{border-radius:999px}
+.task-card-first{grid-template-columns:3em minmax(0,1fr)}
+.task-card-wait{border-radius:var(--ds-radius-control)}
+.task-card-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0}
+.task-chip{display:inline-flex;align-items:center;gap:5px;min-height:24px;padding:0 9px;border:1px solid var(--ds-line);border-radius:999px;background:var(--ds-card);
+  font-size:12px;color:var(--ink);text-decoration:none;white-space:nowrap}
+a.task-chip:hover{border-color:var(--ds-muted)}
+.task-chip svg{flex:none;color:var(--graphite)}
+.task-chip[data-tone="ready"],.task-chip[data-tone="running"]{border-color:transparent;background:var(--ds-accent-soft);color:var(--ds-accent-ink)}
+.task-chip[data-tone="ready"] svg,.task-chip[data-tone="running"] svg{color:var(--ds-accent-ink)}
+.task-card-tools{display:grid;gap:8px;cursor:default}
+.task-card .task-actions{gap:6px;padding-top:0}
+.task-card .task-actions .ds-icon,.tk-detail .task-actions .ds-icon{border-color:var(--ds-line);background:var(--ds-card)}
+.task-card .task-actions .ds-icon:hover,.tk-detail .task-actions .ds-icon:hover{border-color:var(--ds-muted);background:var(--ds-chalk)}
+.task-actions-main{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 14px;font-weight:700}
+.task-card .task-actions .ui-menu-trigger,.tk-detail .task-actions .ui-menu-trigger{min-width:32px;min-height:32px;border-color:var(--ds-line);background:var(--ds-card)}
+.task-card .postpone,.task-card .task-quick-edit{padding:10px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-chalk)}
+
+/* ── 任务 ── */
+.tk-page{display:grid;gap:4px}
+.tk-page .task-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));gap:14px}
+.tk-collect{margin:10px 0 2px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-chalk)}
+p.tk-collect{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:10px 14px;font-size:13px}
+.tk-collect>summary{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:10px 14px;cursor:pointer;list-style:none;font-size:14px}
+.tk-collect>summary::-webkit-details-marker{display:none}
+.tk-collect-titles{display:inline-flex;flex-wrap:wrap;gap:4px 10px;min-width:0;color:var(--graphite);font-size:13px}
+.tk-collect-titles q{quotes:"「" "」"}
+.tk-collect>summary .secondary-button{display:inline-flex;align-items:center;gap:5px;min-height:30px;padding:3px 12px;margin-left:auto;font-size:13px}
+.tk-collect-open{font-size:13px;color:var(--ink);text-decoration:underline}
+.tk-collect>summary .secondary-button+.tk-collect-open{margin-left:0}
+.tk-collect>summary .tk-collect-titles+.tk-collect-open{margin-left:auto}
+.tk-collect[open]>summary{border-bottom:1px solid var(--ds-line)}
+.tk-collect>.work-order-list,.tk-collect>.tasks-empty{padding:10px 14px}
+.tasks-top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px 16px;margin:14px 0 2px}
+.tasks-top-right{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.tasks-index{gap:8px}
+.tasks-index a{align-items:center;min-height:36px;padding:4px 14px;border:1px solid var(--ds-line);border-radius:999px;background:var(--ds-card);font-size:14px;text-decoration:none}
+.tasks-index a b{font-size:13px;font-weight:700}
+.tasks-index a:hover{border-color:var(--ds-muted)}
+.tasks-index a[aria-current]{background:var(--ds-ink);border-color:var(--ds-ink);color:var(--ds-bg)}
+.tasks-filter a{border:0;border-radius:999px;min-height:28px;padding:2px 10px;font-size:12px;font-weight:600;
+  background:color-mix(in srgb,var(--lc,var(--graphite)) 14%,var(--ds-card));color:var(--ink);text-decoration:none}
+.tasks-filter a .task-card-dot{display:none}
+.tasks-filter a[aria-current]{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.tasks-by{display:inline-flex;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);overflow:hidden;background:var(--ds-card)}
+.tasks-by a{display:inline-flex;align-items:center;min-height:32px;padding:3px 12px;font-size:13px;color:var(--graphite);text-decoration:none}
+.tasks-by a+a{border-left:1px solid var(--ds-line)}
+.tasks-by a[aria-current]{background:var(--ds-accent-soft);color:var(--ds-accent-ink);font-weight:700}
+.tk-archive-link{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-card);color:var(--graphite)}
+.tk-archive-link:hover{color:var(--ink);border-color:var(--ds-muted)}
+.tk-page .tasks-section{margin-top:22px}
+.tk-page .tasks-section-head{border-bottom:0;padding-bottom:0}
+.tk-page .tasks-section-head h2{font-size:20px}
+.tk-page .work-order-drawer{margin-top:16px;padding:12px 16px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card)}
+.tk-page .work-order-drawer>summary small{font-size:13px;font-weight:400;color:var(--graphite)}
+.tk-wait-list{list-style:none;margin:8px 0 0;padding:0;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
+.tk-wait{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:6px 14px;padding:10px 14px;font-size:13px}
+.tk-wait+.tk-wait{border-top:1px solid var(--ds-line)}
+.tk-wait-title{padding:0;border:0;background:none;color:var(--ink);font-size:14px;font-weight:700;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.tk-wait-title:hover{text-decoration:underline}
+.tk-wait-why{display:inline-flex;align-items:center;gap:5px;color:var(--graphite)}
+.tk-wait-go{display:inline-flex;align-items:center;min-height:30px;padding:3px 12px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-card);
+  font-size:13px;color:var(--ink);text-decoration:none;white-space:nowrap}
+.tk-wait-go:hover{border-color:var(--ds-muted)}
+.tk-wait[data-kind="returned"] .tk-wait-why{color:var(--ds-alarm-ink)}
+.tk-input{margin-top:22px;padding:12px 14px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
+@media (max-width:760px){
+  .tasks-top{display:grid;justify-content:stretch}
+  .tasks-index{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -2px;padding:2px}
+  .tasks-index a{flex:none;min-height:44px}
+  .tasks-top-right{gap:6px}
+  .tk-wait{grid-template-columns:minmax(0,1fr) auto}
+  .tk-wait .tk-line{grid-column:1 / -1;justify-self:start}
+  .tk-wait-why{grid-column:1}
+  .tk-wait-go{min-height:44px}
+}
+
+/* ── the task detail (page and dialog): head with four figures and the actions, then steps | materials + hand-in ── */
+.task-page.tk-page{container-type:inline-size}
+.task-dialog.tk-detail{display:grid;gap:16px}
+.tk-card{min-width:0;padding:16px 18px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
+.tk-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px 20px;align-items:end}
+.tk-head>.tk-tags,.tk-head>.task-dialog-description,.tk-head>.postpone,.tk-head>.tk-agent-running{grid-column:1 / -1}
+.tk-tags{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:0;font-size:13px}
+.tk-project{font-size:13px;color:var(--graphite)}
+.tk-milestone{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.tk-cross{display:inline-flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+.tk-figures{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 24px;min-width:0}
+.tk-figure{position:relative;display:grid;align-content:start;gap:2px;min-width:0}
+.tk-figure-label{display:inline-flex;align-items:center;gap:4px;min-height:24px;font-size:12px;color:var(--graphite)}
+.tk-figure-label .ui-date-chip button,.tk-figure-edit{display:inline-grid;place-items:center;width:24px;height:24px;min-height:24px;padding:0;border:0;background:none;color:var(--graphite)}
+.tk-figure-label .ui-date-chip button:hover,.tk-figure-edit:hover{color:var(--ink);background:var(--ds-chalk)}
+.tk-figure-value{font-size:30px;line-height:1.15;font-weight:600;color:var(--ink);white-space:nowrap}
+.tk-figure-value small{font-size:14px;font-weight:400;color:var(--graphite)}
+.tk-figure-value .tk-figure-day{font-size:14px;color:var(--ink)}
+.tk-figure-sub{font-size:12px;color:var(--graphite)}
+.tk-figure .step-strip{margin-top:4px;height:6px;gap:4px}
+.tk-figure .impact-card,.tk-figure .ui-duration,.tk-figure-note{margin-top:6px}
+.tk-figure .impact-card{position:absolute;top:100%;left:0;z-index:5;width:max(260px,100%);box-shadow:var(--ds-shadow);border-radius:var(--ds-radius-control)}
+.tk-figure-note{font-size:12px;color:var(--graphite)}
+.tk-figure-sub .task-chip{margin-top:2px}
+.tk-head-actions .task-actions,.tk-dock .task-actions{justify-content:flex-end;gap:6px}
+.tk-agent-running{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0;padding:6px 10px;border-radius:var(--ds-radius-control);background:var(--ds-accent-soft);
+  font-size:13px;color:var(--ds-accent-ink)}
+.tk-agent-running a{color:var(--ds-accent-ink);text-decoration:underline}
+.tk-cols{display:grid;gap:16px;min-width:0}
+.tk-side{display:grid;gap:16px;align-content:start;min-width:0}
+.tk-section-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;margin:0 0 12px}
+.tk-section-head .task-section-title{font-size:18px}
+.tk-section-tools{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.tk-section-tools small{font-size:12px;color:var(--graphite)}
+.tk-section-tools .text-button,.tk-section-link{display:inline-flex;align-items:center;gap:5px;min-height:30px;padding:3px 10px;border:1px solid var(--ds-line);
+  border-radius:var(--ds-radius-control);background:var(--ds-card);font-size:13px;color:var(--ink);text-decoration:none}
+.tk-detail .task-section{padding-top:16px;gap:0}
+.tk-detail .task-section-title .mono{display:none}
+.tk-switch{display:none}
+.tk-dock{display:none}
+/* Steps as cards: the current one outlined in the accent and opened, waits dashed. */
+.tk-detail .steps-list{gap:8px}
+.tk-detail .steps-list .step-row{padding:10px 12px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-card)}
+.tk-detail .steps-list .step-row[data-kind="current"]{border:1.5px solid var(--ds-accent);border-left-width:1.5px;box-shadow:0 0 0 3px var(--ds-accent-soft)}
+.tk-detail .steps-list .step-row[data-wait]{border-style:dashed}
+.step-owner{display:inline-flex;align-items:center;padding:0 8px;border:1px solid var(--ds-line);border-radius:999px;line-height:20px;font-size:12px;color:var(--ink)}
+.step-owner[data-tone="external"]{border-color:transparent;background:#F3EAD3;color:#5C430F}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .step-owner[data-tone="external"]{background:#3A3220;color:#EBD9AE}}
+:root[data-theme="dark"] .step-owner[data-tone="external"]{background:#3A3220;color:#EBD9AE}
+.tk-detail .step-first{margin:6px 0 2px;padding:8px 10px;border-radius:var(--ds-radius-control);background:var(--ds-chalk)}
+.step-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:6px 0 0}
+.step-actions :is(button,a){display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:4px 12px;font-size:13px;color:var(--ink);text-decoration:none}
+.step-actions .text-button{border:1px solid transparent;background:none}
+.step-actions .text-button:hover{border-color:var(--ds-line)}
+.steps-questions{display:block;margin-top:10px;padding:8px 12px;border-radius:var(--ds-radius-control);background:var(--ds-chalk);font-size:13px}
+.steps-questions>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;cursor:pointer;list-style:none}
+.steps-questions>summary::-webkit-details-marker{display:none}
+.steps-questions>summary span{color:var(--graphite)}
+.steps-questions>summary .steps-questions-open{margin-left:auto;color:var(--ink);text-decoration:underline}
+.steps-questions[open]>summary{margin-bottom:6px}
+.materials-preparing{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:0 0 10px;font-size:13px}
+.finish-probe{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:0;font-size:13px}
+.finish-probe small{color:var(--graphite)}
+.tk-detail .task-record{border-top:1px solid var(--ds-line);padding-top:10px}
+.tk-detail .task-record>summary{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--graphite);cursor:pointer}
+.tk-detail .task-entry{display:block;padding:12px 14px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
+
+/* The completion form (task-completion.tsx), on the task and in its sheet. */
+.tk-complete{display:grid;gap:10px;padding-top:12px;border-top:1px solid var(--ds-line);scroll-margin-top:72px}
+.ui-sheet .tk-complete{border-top:0;padding-top:0}
+.tk-complete p{margin:0}
+.tk-complete-task small{color:var(--graphite)}
+.tk-complete-field{display:grid;gap:4px;font-size:13px}
+.tk-complete-field span{color:var(--graphite);font-size:12px}
+.tk-complete-field input{width:100%;min-height:36px}
+.tk-drop{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:12px;border:1px dashed var(--mist);border-radius:var(--ds-radius-control);font-size:13px}
+.tk-drop[data-over]{border-color:var(--ink);background:var(--chalk)}
+.tk-drop button{min-height:32px;padding:4px 12px;border:1px solid var(--mist);background:var(--paper)}
+.tk-drop small{flex-basis:100%;color:var(--graphite);font-size:12px}
+.tk-files{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:13px}
+.tk-files li{display:flex;align-items:center;gap:8px}
+.tk-files li span{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.tk-files li button{width:28px;height:28px;border:1px solid var(--mist)}
+.tk-complete fieldset{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0;padding:0;border:0}
+.tk-complete legend{padding:0 0 4px;font-size:12px;color:var(--graphite)}
+.tk-complete fieldset button{min-height:30px;padding:3px 10px;border:1px solid var(--mist);font-size:13px}
+.tk-complete fieldset button[aria-pressed="true"]{border-color:var(--ds-accent);background:var(--ds-accent-soft);color:var(--ds-accent-ink);font-weight:700}
+.tk-complete fieldset input{width:6em;min-height:30px}
+.tk-complete .evidence-checklist{display:grid;gap:8px}
+.tk-complete-hint{font-size:13px;color:var(--graphite)}
+.tk-complete-actions{display:flex;flex-wrap:wrap;gap:8px}
+.tk-complete-actions button{min-height:36px;padding:6px 14px;border:1px solid var(--mist)}
+.tk-complete small[role="status"]{font-size:13px}
+
+/* Wide (a page or a sheet of 880px or more): steps on the left, materials and hand-in on the right; the actions beside the figures. */
+@container (min-width:880px){
+  .tk-cols{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);align-items:start}
+}
+/* Narrow: the figures two by two, one of the three parts at a time behind a switch, the actions docked at the foot. */
+@container (max-width:879px){
+  .tk-head{grid-template-columns:minmax(0,1fr)}
+  .tk-head-actions{display:none}
+  .tk-figures{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .tk-figure{padding:10px 12px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-card)}
+  .tk-figure-value{font-size:26px}
+  .tk-switch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);overflow:hidden;background:var(--ds-card)}
+  .tk-switch button{min-height:44px;border:0;border-radius:0;background:none;font-size:14px;color:var(--graphite)}
+  .tk-switch button+button{border-left:1px solid var(--ds-line)}
+  .tk-switch button[aria-selected="true"]{background:var(--ds-accent-soft);color:var(--ds-accent-ink);font-weight:700}
+  .tk-cols .task-section:not([data-shown]){display:none}
+  .tk-cols .tk-side:not(:has(.task-section[data-shown])){display:none}
+  .tk-dock{display:block;position:sticky;bottom:0;z-index:5;margin:0 -2px;padding:10px 2px calc(10px + env(safe-area-inset-bottom));background:var(--ds-bg);border-top:1px solid var(--ds-line)}
+  .tk-dock .task-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(44px,auto));justify-content:stretch}
+  .tk-dock .task-actions-main{justify-content:center;min-height:44px}
+}
+@media (max-width:680px){
+  .task-page .tk-dock{bottom:calc(49px + env(safe-area-inset-bottom))}
+}
+
+/* Second look at the screenshots (2026-10-28). */
+.tk-detail .step-first{grid-template-columns:auto minmax(0,1fr)}
+.finish-panel .tk-complete-task{display:none}
+:is(.tk-detail,.task-card) .ui-tag{border-color:var(--ds-line);border-radius:999px;padding:0 8px;line-height:20px;background:var(--ds-card);color:var(--ink)}
+:is(.tk-detail,.task-card) .ui-tag[data-tone="info"]{border-color:transparent;background:var(--ds-accent-soft);color:var(--ds-accent-ink)}
+:is(.tk-detail,.task-card) .ui-tag[data-tone="warn"],:is(.tk-detail,.task-card) .ui-tag[data-tone="risk"]{border-color:transparent;background:#F3EAD3;color:#5C430F}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) :is(.tk-detail,.task-card) .ui-tag:is([data-tone="warn"],[data-tone="risk"]){background:#3A3220;color:#EBD9AE}}
+:root[data-theme="dark"] :is(.tk-detail,.task-card) .ui-tag:is([data-tone="warn"],[data-tone="risk"]){background:#3A3220;color:#EBD9AE}
+.tk-detail .ui-supports{border-color:transparent;background:color-mix(in srgb,var(--lc,var(--graphite)) 14%,var(--ds-card));color:var(--ink)}
+@media (max-width:680px){
+  /* One row of actions on a phone: the whole card already opens the task. */
+  .task-card .task-actions-open{display:none}
+  .task-card .task-actions{flex-wrap:nowrap}
+  .task-card .task-actions .ds-icon,.task-card .task-actions .ui-menu-trigger{width:40px;height:40px;min-width:40px}
+  .task-card .task-actions-main{min-height:40px;padding:4px 10px;white-space:nowrap}
+}

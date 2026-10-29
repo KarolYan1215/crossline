@@ -300,7 +300,7 @@ function discardReasonFrom(state: string, events: StoredEvent[]): string | undef
 
 /** Same "is there an open execution with an unresolved interruption" read Workbench's own card does —
  * duplicated here (not exported from workbench/page.tsx, which is a route file, not a library) so the
- * detail view can embed the real `ExecutionActions` instead of only ever being read-only. */
+ * detail view can embed the real completion form (`TaskCompletion`) instead of only ever being read-only. */
 function pausedFrom(executions: TaskDetail["executions"]): boolean {
   const open = executions.find((item) => !item.endedAt);
   return Boolean(open?.interruptions.at(-1) && !open.interruptions.at(-1)!.resumedAt);
@@ -477,7 +477,8 @@ export function cardView(detail: TaskDetail, { panel = false }: { panel?: boolea
     ...detail, partial: true,
     // Today's day panel also names what falls to the person (`panel`).
     humanCore: panel ? detail.humanCore.map((part) => ({ id: part.id, intent: part.intent })) : [], automationParts: [], estimateBreakdown: [], byproducts: [], materialContract: [], evidenceContract: [], evidenceChecklist: [],
-    executions: [], relatedFlywheel: [], background: null, criteria: [], sources: [], notes: [], supports: [], artifactLinks: [],
+    // The open session only: the card's 「计时中」 chip counts from its start.
+    executions: detail.executions.filter((item) => !item.endedAt), relatedFlywheel: [], background: null, criteria: [], sources: [], notes: [], supports: [], artifactLinks: [],
     // The card's 「已备好」 reads whether a tutorial exists and the assistant's files by name.
     preparedMaterials: detail.preparedMaterials.filter((item) => /manual\.md$/.test(item.uri)),
     agentOutputs: detail.agentOutputs.filter((task) => task.status === "accepted" || task.status === "needs_review")

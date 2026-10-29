@@ -1,51 +1,69 @@
 "use client";
 
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { CalendarClock, CalendarDays, Check, Flag, Pencil, Sparkles } from "lucide-react";
 import type { TaskDetail } from "../../lib/task-detail";
 import { useReturnState } from "../ui/return-state";
+import { ICON, IconButton } from "../ui/icon-button";
 import { useLocale, useT } from "../locale-context";
 import type { Locale } from "../../lib/i18n";
 import { dayText, minutesText } from "./format";
-import { currentStep, dueDistance, waitReason } from "./card-model";
+import { currentStep, dueDistance, hoursShort, remainingMinutes, waitReason } from "./card-model";
 import { CompletionChoice } from "./completion-choice";
-import { Prepared } from "./prepared";
+import { preparedFiles } from "./prepared";
+import { PostponePanel } from "./postpone";
+import { RunningChip } from "./running-chip";
+import { TaskQuickEdit } from "./quick-edit";
 import { StepStrip } from "./step-strip";
 import { TaskActions } from "./task-actions";
+import { COMPLETABLE, TaskCompletionSheet } from "./task-completion";
 import { TaskDialog } from "./task-dialog";
 
 export type TaskSlot = { day: string; start: string; end: string };
 const slotLabel = (locale: Locale, slot: TaskSlot) => `${dayText(locale, slot.day)} ${slot.start}–${slot.end}`;
+const SMALL = { ...ICON, size: 14 } as const;
 
 /**
- * The one task card, used on Today, Tasks, Approvals and the weekly review (redesigned 2026-10-15). It answers, in reading order: which
- * line (the colour and its name, with the course), which task, how far along (the step picture), what to do now (the current step and its
- * first five-minute move), what it waits for if anything, when it next has time and when it is due. Everything else — the description,
- * risk, cross-line support, the due date and duration editors — is in the task dialog the whole card opens. `reason` is Today's own
- * wording for the recommendation; `today` lets the due day say how far off it is (left out where the page has no "today" of its own).
+ * The one task card, used on Today, Tasks, Approvals and the weekly review (redesigned 2026-10-15, then 2026-10-28 after the page drafts).
+ * It answers, in reading order: which line and which milestone it serves, when it is due, which task, how far along (the step picture),
+ * what to do now (the current step and its first five-minute move), what it waits for if anything, then one row of chips — the next
+ * block or the running timer, what is left, what is ready — and one row of actions: the primary press with its words, then icons for
+ * 完成, 交给助手, 推迟, 改截止或时长, 打开 and more. The description, risk, cross-line support and the rest are in the task dialog the
+ * whole card opens. `reason` is Today's own wording for the recommendation; `today` lets the due day say how far off it is.
  */
 export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
   detail: TaskDetail; slot?: TaskSlot | undefined; reason?: string; today?: string | undefined; variant?: "hero" | "compact";
 }) {
   const [open, setOpen] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [tool, setTool] = useState<"postpone" | "edit" | null>(null);
   const t = useT(), locale = useLocale();
   // Coming back from the task's full page reopens the dialog it was opened from.
   useReturnState(`task-dialog:${detail.id}:${variant}`, open, (value) => setOpen(value === true));
   const proposal = detail.state === "awaiting_plan_approval";
   const finished = detail.state === "accepted" || detail.state === "archived";
+  const live = !finished && detail.state !== "evidence_review";
   const step = currentStep(detail);
   const wait = today || proposal ? waitReason(detail, today ?? "", locale) : undefined;
   const due = detail.window.dueBy;
   const distance = due && today && !finished ? dueDistance(due, today, locale) : undefined;
+  const left = remainingMinutes(detail);
+  const ready = preparedFiles(detail);
+  const tutorial = detail.preparedMaterials.some((item) => /manual\.md$/.test(item.uri));
+  const readyCount = ready.length + (tutorial ? 1 : 0);
   const openFrom = (event: MouseEvent | KeyboardEvent) => {
-    if ((event.target as HTMLElement).closest("button, a, input, select, textarea, [role=dialog], [popover]")) return;
+    if ((event.target as HTMLElement).closest("button, a, input, select, textarea, label, [role=dialog], [popover], .task-card-tools")) return;
     setOpen(true);
   };
+  const toggle = (next: "postpone" | "edit") => setTool((current) => current === next ? null : next);
   return <article className="task-card" data-variant={variant} data-line={detail.identityId} data-state={detail.state}
     tabIndex={0} aria-label={t("{{title}}，打开详情", { title: detail.title })} onClick={openFrom} onKeyDown={(event) => { if (event.key === "Enter") openFrom(event); }}>
     <header className="task-card-head">
-      <span className="task-card-line"><i className="task-card-dot" aria-hidden="true" />{detail.identityLabel}{detail.projectName && <span className="task-card-project">{detail.projectName}</span>}</span>
-      {due && <span className="task-card-due" data-overdue={distance?.overdue || undefined}>
-        <small>{t("截止")}</small> <b className="mono">{dayText(locale, due)}</b>{distance && <small className="task-card-distance">{distance.text}</small>}
+      <span className="task-card-line"><span className="task-card-chipline"><i className="task-card-dot" aria-hidden="true" />{detail.identityLabel}</span>
+        {detail.projectName && <span className="task-card-project">{detail.projectName}</span>}
+        {detail.milestone && variant !== "hero" && <span className="task-card-serves" title={detail.milestone.title}>→ {detail.milestone.title}</span>}</span>
+      {due && <span className="task-card-due" data-overdue={distance?.overdue || undefined} title={t("截止")}>
+        <Flag {...SMALL} /><small className="sr-only">{t("截止")}</small> <b className="mono">{dayText(locale, due)}</b>{distance && <small className="task-card-distance">{distance.text}</small>}
       </span>}
     </header>
     <h3 className="task-card-title">{detail.title}</h3>
@@ -56,11 +74,30 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
     <CardStep detail={detail} step={step} proposal={proposal} finished={finished} waiting={wait?.kind === "input"} />
     {wait && <p className="task-card-wait" data-kind={wait.kind}>{wait.label}</p>}
     {proposal && <CompletionChoice detail={detail} />}
-    {slot && <p className="task-card-slot"><small>{t("下一次")}</small> <a href={`/plan?day=${slot.day}`} className="mono">{slotLabel(locale, slot)}</a></p>}
-    <Prepared detail={detail} />
-    <TaskActions workOrderId={detail.id} state={detail.state} approvable={!detail.preparing} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id} onOpen={() => setOpen(true)}
-      offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }} />
-    <TaskDialog detail={detail} open={open} onOpenChange={setOpen} />
+    {!finished && <p className="task-card-chips">
+      {detail.state === "active" ? <RunningChip detail={detail} />
+        : slot && <a className="task-chip" href={`/plan?day=${slot.day}`} title={t("下一次")}><CalendarDays {...SMALL} /><span className="sr-only">{t("下一次")}</span><span className="mono">{slotLabel(locale, slot)}</span></a>}
+      {left.p50 > 0 && <span className="task-chip" title={t("剩余约 {{duration}}，保守 {{cautious}}", { duration: minutesText(locale, left.p50), cautious: minutesText(locale, left.p85) })}>
+        {t("剩 {{hours}}", { hours: hoursShort(left.p50, locale) })}</span>}
+      {readyCount > 0 && <a className="task-chip" data-tone="ready" href={`/workbench/${encodeURIComponent(detail.id)}#materials`}
+        title={[...(tutorial ? [t("教程")] : []), ...ready.map((file) => file.name)].join("\n")}><Sparkles {...SMALL} />{t("已备好 {{count}}", { count: readyCount })}</a>}
+    </p>}
+    <div className="task-card-tools">
+      <TaskActions iconic labelPrimary workOrderId={detail.id} state={detail.state} approvable={!detail.preparing} paused={detail.paused}
+        agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id} onOpen={() => setOpen(true)}
+        offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }}>
+        {COMPLETABLE.includes(detail.state) && (detail.state === "active"
+          ? <button type="button" className="primary-button task-actions-main" onClick={() => setCompleting(true)}><Check {...ICON} /><span>{t("完成")}</span></button>
+          : <IconButton label={t("完成并提交材料")} icon={<Check {...ICON} />} onClick={() => setCompleting(true)} />)}
+        {live && !proposal && <IconButton label={t("推迟")} icon={<CalendarClock {...ICON} />} aria-expanded={tool === "postpone"} onClick={() => toggle("postpone")} />}
+        {live && <IconButton label={t("改截止或时长")} icon={<Pencil {...ICON} />} aria-expanded={tool === "edit"} onClick={() => toggle("edit")} />}
+      </TaskActions>
+      {tool === "postpone" && <PostponePanel workOrderId={detail.id} onClose={() => setTool(null)} />}
+      {tool === "edit" && <TaskQuickEdit workOrderId={detail.id} dueBy={detail.window.dueBy} samples={detail.estimate.observationCount} line={detail.identityId}
+        estimate={step?.estimate ?? detail.estimate} stepId={step?.id} durationLabel={step ? t("本步时长") : t("时长")} />}
+    </div>
+    <TaskDialog detail={detail} slot={slot} today={today} open={open} onOpenChange={setOpen} />
+    {completing && <TaskCompletionSheet task={detail} stepId={step?.id} open={completing} onOpenChange={setCompleting} />}
   </article>;
 }
 

@@ -50,7 +50,7 @@ describe("the panel beside the day", () => {
     expect(html).toContain("本步时长");
     expect(html).toContain("本人负责");
     expect(html).toContain("确定综述的论证主线");
-    for (const action of ["开始计时", "完成并提交材料", "推迟", "交给 Agent", "返回下一项"]) expect(html).toContain(action);
+    for (const action of ["开始计时", "完成并提交材料", "推迟", "交给助手", "返回下一项"]) expect(html).toContain(action);
   });
 
   test("a picked work block can be locked at its time, and a locked one unlocked", () => {
@@ -61,10 +61,10 @@ describe("the panel beside the day", () => {
   });
 
   test("交给 Agent only for a step the system can do; a block the assistant has says so instead", () => {
-    expect(render({ selected: block({ id: "scheduled:wo-1:v1s1", stepId: "v1s1", step: "确定论证主线" }) })).not.toContain("交给 Agent");
+    expect(render({ selected: block({ id: "scheduled:wo-1:v1s1", stepId: "v1s1", step: "确定论证主线" }) })).not.toContain("交给助手");
     const running = render({ selected: block({ agent: "running" }) });
     expect(running).toContain("Agent 执行中");
-    expect(running).not.toContain("交给 Agent");
+    expect(running).not.toContain("交给助手");
     expect(render({ selected: block({ agent: "planned" }) })).toContain("Agent 将执行");
   });
 

@@ -7,7 +7,7 @@ const MAX_FILES = 5;
 
 /**
  * Uploads a file as task-completion evidence for AI review (see 工作块 E) — writes to
- * `.crossline-evidence/<workOrderId>/`, with no ledger row of its own: the caller (`ExecutionActions`)
+ * `.crossline-evidence/<workOrderId>/`, with no ledger row of its own: the caller (`TaskCompletion`)
  * includes the returned `uri` in a `kind:"file"` entry of the `evidence` array it then submits to
  * `POST /api/work-orders/[id]/execution`, and that route's `human.completed` handling is what actually
  * writes the `evidence_claims` row. Restricted to `active` orders — a file only makes sense attached to a

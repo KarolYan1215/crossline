@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { compareInGroup, currentStep, dueDistance, groupOf, stepSegments, waitReason, type CardDetail } from "./card-model";
+import { compareInGroup, currentStep, dueDistance, groupOf, hoursShort, remainingMinutes, stepSegments, waitReason, type CardDetail } from "./card-model";
 
 type Step = NonNullable<CardDetail["stepPlan"]>["steps"][number];
 const step = (id: string, over: Partial<Step> = {}): Step => ({
@@ -87,4 +87,15 @@ test("in English the card reads in English, and a waiting step written in Englis
   expect(dueDistance("2026-10-16", "2026-10-15", "en").text).toBe("Due tomorrow");
   expect(dueDistance("2026-10-20", TODAY, "en").text).toBe("5 days left");
   expect(dueDistance("2026-10-14", TODAY, "en")).toEqual({ text: "1 day overdue", overdue: true });
+});
+
+// The card's 「剩」 chip and the detail's 剩余 figure (2026-10-28): the person's open steps that take calendar time, else the task's estimate.
+test("what is left counts the person's open schedulable steps, not done ones, waits or the assistant's", () => {
+  const estimate = { p25Minutes: 60, p50Minutes: 90, p85Minutes: 150, source: "llm_prior", observationCount: 0, confidence: "low" } as const;
+  const steps = plan([step("a", { status: "done" }), step("b", { executor: "agent" }), step("c"), step("d", { schedulable: false }), step("e")]);
+  expect(remainingMinutes({ estimate, stepPlan: steps })).toEqual({ p50: 60, p85: 90 });
+  expect(remainingMinutes({ estimate })).toEqual({ p50: 90, p85: 150 });
+  expect(hoursShort(210)).toBe("3.5h");
+  expect(hoursShort(210, "en")).toBe("3.5 h");
+  expect(hoursShort(45)).toBe("45 分");
 });
