@@ -16,10 +16,10 @@ import { ImpactCard, useImpact } from "../task/impact";
 import { shiftDay, type TimelineItem } from "./model";
 import type { LineLabels } from "./views";
 import { lockOnStart } from "./block-start";
-import { CompleteDialog } from "./complete-dialog";
+import { TaskCompletionSheet } from "../task/task-completion";
 import { HeldBlock } from "./held-block";
 import { useReturnState } from "../ui/return-state";
-import { agentStepFor, followingBlock, otherOpenSteps, stepOfBlock } from "./panel-model";
+import { agentStepFor, followingBlock, stepOfBlock } from "./panel-model";
 
 /** Kept in Chinese (they are the keys); translated where shown. */
 const KIND_TEXT: Record<TimelineItem["kind"], string> = {
@@ -170,7 +170,7 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
         placeholder={t("关于这项任务：改期、拆细、提问……")} />
     </div>}
     {detail && <TaskDialog detail={detail} open={open} onOpenChange={setOpen} />}
-    {detail && completing && <CompleteDialog open={completing} onOpenChange={setCompleting} workOrderId={detail.id} title={detail.title} state={detail.state}
-      stepId={step?.id} stepTitle={step?.title} otherSteps={otherOpenSteps(step?.id, steps)} />}
+    {/* The task's own completion form (scenarios.md §4.8): the block panel is an entry to it, not a second form. */}
+    {detail && completing && <TaskCompletionSheet task={detail} stepId={step?.id} open={completing} onOpenChange={setCompleting} />}
   </div>;
 }

@@ -321,6 +321,8 @@ body:has(.tk-page) .running-head{background:var(--ds-bg)}
 .task-card:hover{border-color:var(--ds-muted)}
 .task-card[data-state="active"]{box-shadow:inset 4px 0 0 var(--ds-accent),var(--ds-shadow)}
 .task-card-head{align-items:center;flex-wrap:nowrap}
+/* On a phone a long due label (「已过 45 天」) goes under the line instead of pushing the page sideways (design audit, 2026-10-29). */
+@media (max-width:480px){.task-card-head{flex-wrap:wrap}}
 .task-card-line{flex:1 1 auto;min-width:0;flex-wrap:nowrap;overflow:hidden}
 .task-card-project{white-space:nowrap}
 .task-card-serves{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--graphite)}
