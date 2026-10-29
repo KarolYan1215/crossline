@@ -114,3 +114,17 @@
 /* ── the input box's icons (chat/composer.tsx) ── */
 .composer-tools{display:inline-flex;gap:2px;align-items:center}
 .composer-send{display:inline-grid;place-items:center}
+
+/* With the side bar (≥1025px) the corner — the 小帮手, the timer and 「需要你处理」 — sits at the foot of the bar instead of over the page:
+   at the right edge it covered the right column's buttons on every page (2026-10-29, the live check after the redesign). The bar's own
+   foot keeps room as tall as the corner reaches (`--corner-clearance`, measured by CornerStack), the conversation opens beside the bar,
+   and pages no longer reserve room at their foot for it. */
+@media (min-width:1025px){
+  .corner-stack{left:12px;right:auto;bottom:14px;align-items:flex-start}
+  .corner-stack .assistant-bubble-wrap{flex-direction:row-reverse}
+  .corner-stack[data-tucked] .assistant-bubble-wrap:not([data-popped]):not(:hover):not(:focus-within){transform:none;opacity:1}
+  .assistant-panel{left:calc(var(--ds-side-w) + 12px);right:auto;bottom:14px}
+  .side-nav-foot{padding-bottom:calc(var(--corner-clearance,0px) + 8px)}
+  .side-nav-foot>.side-nav-helper{display:none}
+  :root .page,:root .subpage{padding-bottom:28px}
+}
