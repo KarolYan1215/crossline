@@ -34,7 +34,7 @@ export default async function ReturnPage() {
   // Today at the top, drawn the way Today's conversation draws it (written here when this is the day's first page).
   await ensureOpener(ctx, now).catch(() => false);
   const opener = loadConversation(ctx).messages.find((message) => message.card?.nudgeKind === "opener");
-  return <SubpageShell active={"今日"} title={t("欢迎回来")}>
+  return <SubpageShell active={"今日"} title={t("欢迎回来")} serif>
     <ReturnPanel view={view} opener={opener} cleaned={cleaned ? { orders: before.stale.orders, milestones: before.stale.milestones, opId: cleaned.op?.id } : undefined} />
   </SubpageShell>;
 }

@@ -25,7 +25,7 @@ export default async function DevicePage() {
   const locale = localeFor(ctx);
   const t = tFor(locale);
   // `active` names the view in the frame's own table, not shown text.
-  if (isHostedBeta()) return <SubpageShell title={t("这台电脑")} active={"设置"}><p className="muted">{t("网页版不是谁的电脑：在本人电脑上的 Crossline 打开这个页面。")}</p></SubpageShell>;
+  if (isHostedBeta()) return <SubpageShell title={t("这台电脑")} serif active={"设置"}><p className="muted">{t("网页版不是谁的电脑：在本人电脑上的 Crossline 打开这个页面。")}</p></SubpageShell>;
   const store = getStore();
   const setting = (key: string) => store.getSetting(ctx.workspaceId, key);
   const level = (value: string | null | undefined) => value === "granted" || value === "denied" ? value : "unasked";
@@ -48,7 +48,7 @@ export default async function DevicePage() {
     }
   }
   const summary = (() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })();
-  return <SubpageShell title={t("这台电脑")} active={"设置"} description={t("本机读什么、发到哪里。连接网页版后，这是电脑上唯一留下的页面。")}>
+  return <SubpageShell title={t("这台电脑")} serif active={"设置"} description={t("本机读什么、发到哪里。连接网页版后，这是电脑上唯一留下的页面。")}>
     <div className="st-modules">
       <DeviceLinkCard />
       {machine ? <>

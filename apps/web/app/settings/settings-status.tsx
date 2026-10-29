@@ -18,7 +18,7 @@ export function SettingsStatus({ rows }: { rows: ConnectionRow[] }) {
   const broken = rows.filter((row) => row.state === "warn").length;
   return <section className="st-status" aria-labelledby="st-status-title">
     <header>
-      <h2 id="st-status-title">{t("连接状态")}</h2>
+      <h2 id="st-status-title" className="ds-serif">{t("连接状态")}</h2>
       <small>{broken ? t("{{count}} 项需要处理", { count: broken }) : t("全部正常或未设置")}</small>
     </header>
     <ul>{ordered.map((row) => { const Icon = ICONS[row.kind]; return <li key={row.id} data-state={row.state}>

@@ -1,0 +1,46 @@
+name: E2E on Linux
+
+# Runs the end-to-end suite on Linux with Playwright's own Chromium, by hand only. With `update` it re-records the Linux visual baselines
+# (`*-linux.png`) and uploads them as an artifact to be committed; nothing is pushed from here. The Linux baselines had gone stale since
+# 2026-10-10 because no workflow ran e2e on Linux and the Windows machine cannot record them (2026-10-29).
+on:
+  workflow_dispatch:
+    inputs:
+      update:
+        description: "Re-record changed Linux baselines and upload them"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      # The version comes from package.json's packageManager; naming one here too fails with ERR_PNPM_BAD_PM_VERSION.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # keytar loads libsecret at import; the pages are Chinese, so a CJK face is needed or every glyph is a box.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libsecret-1-0 fonts-noto-cjk
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Run e2e
+        run: |
+          export CROSSLINE_E2E_CHROME_PATH="$(node -e "console.log(require('@playwright/test').chromium.executablePath())")"
+          if [ "${{ inputs.update }}" = "true" ]; then pnpm exec tsx scripts/run-e2e.ts --update-snapshots=changed; else pnpm exec tsx scripts/run-e2e.ts; fi
+      - if: always() && inputs.update
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-baselines
+          path: e2e/**/*-linux.png
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: test-results/

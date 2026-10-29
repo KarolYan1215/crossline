@@ -14,7 +14,7 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
   gateUntilReady(ctx);
   const { month } = await searchParams;
   const t = tOf(ctx);
-  return <SubpageShell active={"主线"} title={t("总账")} description={t("邮件、手机和输入框记下的每一笔，去重后汇成一本账；数字都由记录算出。")}>
+  return <SubpageShell active={"主线"} title={t("总账")} serif description={t("邮件、手机和输入框记下的每一笔，去重后汇成一本账；数字都由记录算出。")}>
     <LedgerBoard view={loadLedger(ctx, month)} />
   </SubpageShell>;
 }

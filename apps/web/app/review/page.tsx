@@ -88,10 +88,10 @@ export default async function ReviewPage() {
         <Figure value={toDecide} unit={t("项")} {...(toDecide ? { tone: "alarm" as const } : {})} /></a></li>
     </ul>
 
-    <h2 className="rv-part" id="decide">{t("要拍板的")}</h2>
+    <h2 className="rv-part ds-serif" id="decide">{t("要拍板的")}</h2>
     <div className="review-grid">
     <section className="rd-card review-block review-wide" aria-labelledby="rv-relations">
-      <header className="rd-card-head"><h2 id="rv-relations">{t("候选关系")}</h2><small>{t("{{count}} 条待定", { count: review.candidates.kept.length })}</small></header>
+      <header className="rd-card-head"><h2 id="rv-relations" className="ds-serif">{t("候选关系")}</h2><small>{t("{{count}} 条待定", { count: review.candidates.kept.length })}</small></header>
       <p className="review-note">
         {t("排序依据全部是可数事实：目标是否停滞、是否复用已有产物、有无反例、历史成本。没有综合评分。")}
       </p>
@@ -117,13 +117,13 @@ export default async function ReviewPage() {
     </section>
 
     {diligence.length > 0 && <section className="rd-card review-block review-wide review-diligence" aria-labelledby="rv-diligence">
-      <header className="rd-card-head"><h2 id="rv-diligence">{t("本周调研结论")}</h2><small>{t("{{count}} 条待定", { count: pendingProposals })}</small></header>
+      <header className="rd-card-head"><h2 id="rv-diligence" className="ds-serif">{t("本周调研结论")}</h2><small>{t("{{count}} 条待定", { count: pendingProposals })}</small></header>
       <p className="review-note">{t("网上调研得出的提议在这里一周批一次；采纳「任务」类提议会收进待分析、变成任务；其余类型采纳后作为下次设计里程碑的参考。")}</p>
       <DiligenceReview reports={diligence} identities={identities} />
     </section>}
 
     <section className="rd-card review-block" aria-labelledby="rv-findings">
-      <header className="rd-card-head"><h2 id="rv-findings">{t("本周信息域扩展")}</h2></header>
+      <header className="rd-card-head"><h2 id="rv-findings" className="ds-serif">{t("本周信息域扩展")}</h2></header>
       {night.state !== "none" && <p className="review-note">{night.state === "ran" ? t("最近一次夜间扩展：{{count}} 条候选", { count: night.proposals }) : t("最近一次夜间扩展未运行：{{reason}}", { reason: t(night.reason) })}</p>}
       {review.findings.length === 0
         ? <p className="review-empty">{t("本周无扩展记录。夜间扩展仅在配额刷新且电脑空闲时运行。")}</p>
@@ -138,7 +138,7 @@ export default async function ReviewPage() {
     </section>
 
     <section className="rd-card review-block" aria-labelledby="rv-insights">
-      <header className="rd-card-head"><h2 id="rv-insights">{t("本周洞察提案")}</h2></header>
+      <header className="rd-card-head"><h2 id="rv-insights" className="ds-serif">{t("本周洞察提案")}</h2></header>
       <p className="review-note">
         {t("只读提案，不会自动改写任何设置；少于 3 次可比较的观测不会生成洞察。")}
       </p>
@@ -153,11 +153,11 @@ export default async function ReviewPage() {
     </section>
     </div>
 
-    <h2 className="rv-part">{t("回看")}</h2>
+    <h2 className="rv-part ds-serif">{t("回看")}</h2>
     {/* Sections fill the width: the wide ones run across it, the rest pair up in two columns on a large screen (2026-10-21). */}
     <div className="review-grid">
     {week.hasData && <section className="rd-card review-block review-wide" aria-labelledby="rv-week">
-      <header className="rd-card-head"><h2 id="rv-week">{t("本周各线投入")}</h2>
+      <header className="rd-card-head"><h2 id="rv-week" className="ds-serif">{t("本周各线投入")}</h2>
         <small>{t("{{start}}–{{end}}，单位小时。计划按日程记下的 {{count}} 天累计，实际为计时。", { start: week.start.slice(5).replace("-", "/"), end: week.end.slice(5).replace("-", "/"), count: week.recordedDays })}</small></header>
       <div className="review-week">
         <div><h3 className="review-week-head">{t("计划")}</h3>
@@ -170,7 +170,7 @@ export default async function ReviewPage() {
     </section>}
 
     <section className="rd-card review-block review-wide" aria-labelledby="rv-auto">
-      <header className="rd-card-head"><h2 id="rv-auto">{t("本周自动验收")}</h2></header>
+      <header className="rd-card-head"><h2 id="rv-auto" className="ds-serif">{t("本周自动验收")}</h2></header>
       <p className="review-note">
         {t("关联里程碑的任务由系统按证据自动验收，每一条都列在这里。任一条都可撤销：撤销后回到证据复核，已交的证据保留。")}
       </p>
@@ -188,7 +188,7 @@ export default async function ReviewPage() {
     </section>
 
     {review.taskLoad.length > 0 && <section className="rd-card review-block" aria-labelledby="rv-load">
-      <header className="rd-card-head"><h2 id="rv-load">{t("本周做完后的累不累")}</h2></header>
+      <header className="rd-card-head"><h2 id="rv-load" className="ds-serif">{t("本周做完后的累不累")}</h2></header>
       <p className="review-note">{t("做完任务时本人选的「这件事累不累」，与排程时按任务估计的精力需求并列；只在这里列出，不改排程。")}</p>
       <ul className="review-list">{review.taskLoad.map((item) => <li key={item.workOrderId}>
         <b><a href={`/workbench/${encodeURIComponent(item.workOrderId)}`}>{item.title}</a></b>
@@ -206,7 +206,7 @@ export default async function ReviewPage() {
     </section>}
 
     <section className="rd-card review-block review-wide" aria-labelledby="rv-criteria">
-      <header className="rd-card-head"><h2 id="rv-criteria">{t("里程碑达成标准")}</h2></header>
+      <header className="rd-card-head"><h2 id="rv-criteria" className="ds-serif">{t("里程碑达成标准")}</h2></header>
       <div className="review-milestones">
       {review.milestoneProgress.map((milestone) => <article key={milestone.id} className="review-milestone">
         <a className="card-cover-link" href={`/milestones/${encodeURIComponent(milestone.id)}`} aria-label={milestone.title} />
@@ -229,7 +229,7 @@ export default async function ReviewPage() {
     </section>
 
     {review.stalled.length > 0 && <section className="rd-card review-block" aria-labelledby="rv-stalled">
-      <header className="rd-card-head"><h2 id="rv-stalled">{t("停转提示")}</h2></header>
+      <header className="rd-card-head"><h2 id="rv-stalled" className="ds-serif">{t("停转提示")}</h2></header>
       <p className="review-note">{t("只是提示，不会自动运行、不会自动花配额。")}</p>
       <ul className="review-list">{review.stalled.map((item) => <li key={item.identityId}>
         <b>{t("{{line}} 线已有 {{days}} 天没有里程碑通过", { line: item.identityId, days: item.daysSinceLastPass })}</b>
@@ -237,7 +237,7 @@ export default async function ReviewPage() {
     </section>}
 
     <section className="rd-card review-block" aria-labelledby="rv-questions">
-      <header className="rd-card-head"><h2 id="rv-questions">{t("待判断的问题")}</h2></header>
+      <header className="rd-card-head"><h2 id="rv-questions" className="ds-serif">{t("待判断的问题")}</h2></header>
       {review.questions.length === 0
         ? <p className="review-empty">{t("暂无待判断的问题；周复盘运行后在此列出。")}</p>
         : <ul className="review-list">{review.questions.map((item) => <li key={item.id}><b>{item.question}</b></li>)}</ul>}

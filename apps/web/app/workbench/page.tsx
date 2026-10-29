@@ -138,7 +138,7 @@ export default async function WorkbenchPage({ searchParams }: {
   };
   const isWaiting = (entry: Entry) => Boolean(waitReason(entry.detail, today));
 
-  return <SubpageShell active={"任务"} title={t("任务")} description={nothing ? undefined : summary}>
+  return <SubpageShell active={"任务"} title={t("任务")} serif description={nothing ? undefined : summary}>
     <div className="tk-page tasks-page">
       <CollectBar count={captures.length} titles={captures.slice(0, 3).map((capture) => capture.title)}
         pending={captures.filter((capture) => capture.state !== "analyzing").map((capture) => capture.id)}>
@@ -183,7 +183,7 @@ export default async function WorkbenchPage({ searchParams }: {
         if (!entries.length && (section.group !== "now" || nothing)) return null;
         return <section key={section.group} id={`tasks-${section.group}`} className="tasks-section" aria-labelledby={`tasks-${section.group}-title`}>
           <header className="tasks-section-head">
-            <h2 id={`tasks-${section.group}-title`}>{t(section.title)} <span className="mono">{entries.length}</span></h2>
+            <h2 id={`tasks-${section.group}-title`} className="ds-serif">{t(section.title)} <span className="mono">{entries.length}</span></h2>
             <small>{t(section.hint)}</small>
           </header>
           {!entries.length ? <p className="tasks-empty">{t(count("next") ? "今天没有排到时段的任务；「接下来」里最早的一项可以提前开始。" : "今天没有排到时段的任务。")}</p>

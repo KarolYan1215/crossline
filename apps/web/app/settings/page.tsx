@@ -153,7 +153,7 @@ export default async function SettingsPage() {
   // `active` names the view in the frame's own table (i18n-ignore on the next line), not shown text.
   return <AppShell active="设置" className="subpage settings-page"><div className="subpage-inner">
     <SettingsBrowser title={t("设置")} sub={t("每项改动即时保存，保存失败会还原")} sections={sections} status={<SettingsStatus rows={connections} />}>
-        <section id="general" className="st-section" aria-labelledby="st-general"><h2 id="st-general">{t("通用")}</h2>
+        <section id="general" className="st-section" aria-labelledby="st-general"><h2 id="st-general" className="ds-serif">{t("通用")}</h2>
           <div className="st-modules">
             <LanguageCard />
             {!isLocalInstall() && isEmailAuthConfigured() && <PasswordCard />}
@@ -180,13 +180,13 @@ export default async function SettingsPage() {
           </div>
         </section>
 
-        <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar">{t("日历与连接")}</h2>
+        <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar" className="ds-serif">{t("日历与连接")}</h2>
           <CalendarModule ctx={ctx} />
           <div className="st-modules"><div id="mail"><MailAccounts accountEmail={sessionEmail} /></div><div id="import"><ImportCard /></div></div>
           <ConnectionsSection />
         </section>
 
-        <section id="notify" className="st-section" aria-labelledby="st-notify"><h2 id="st-notify">{t("时间与提醒")}</h2>
+        <section id="notify" className="st-section" aria-labelledby="st-notify"><h2 id="st-notify" className="ds-serif">{t("时间与提醒")}</h2>
           <div className="st-modules">
             <section className="st-card" aria-label={t("通知")}>
               <header><h3>{t("通知")}</h3><small>{store.getSetting(ctx.workspaceId, "calendar.write.account")
@@ -203,7 +203,7 @@ export default async function SettingsPage() {
           </div>
         </section>
 
-        <section id="automation" className="st-section" aria-labelledby="st-automation"><h2 id="st-automation">{t("自动化与助手")}</h2>
+        <section id="automation" className="st-section" aria-labelledby="st-automation"><h2 id="st-automation" className="ds-serif">{t("自动化与助手")}</h2>
           {/* The shell assistant runs as this machine's user (decided 2026-10-10); every other account's works through Crossline's functions. */}
           {!machine && <p className="muted">{hosted
             ? t("网页版的助手通过 Crossline 自己的功能工作：读写和整理文件、查网页、读已接入的邮箱、把待办放进收件箱、按时或按条件跑自动化；不在电脑上执行命令。")
@@ -218,19 +218,19 @@ export default async function SettingsPage() {
             <div id="outputs"><OutputsCard /></div></div>
         </section>
 
-        <section id="background" className="st-section" aria-labelledby="st-background"><h2 id="st-background">{t("后台任务")}</h2>
+        <section id="background" className="st-section" aria-labelledby="st-background"><h2 id="st-background" className="ds-serif">{t("后台任务")}</h2>
           <BackgroundModule overview={backgroundOverview(ctx)} />
         </section>
 
-        <section id="personal" className="st-section" aria-labelledby="st-personal"><h2 id="st-personal">{t("个性化")}</h2>
+        <section id="personal" className="st-section" aria-labelledby="st-personal"><h2 id="st-personal" className="ds-serif">{t("个性化")}</h2>
           <PersonalizationModule {...loadPreferences(ctx)} />
         </section>
 
-        <section id="skills" className="st-section" aria-labelledby="st-skills"><h2 id="st-skills">{t("Skill 库")}</h2>
+        <section id="skills" className="st-section" aria-labelledby="st-skills"><h2 id="st-skills" className="ds-serif">{t("Skill 库")}</h2>
           <SkillLibraryLoader />
         </section>
 
-        <section id="privacy" className="st-section" aria-labelledby="st-privacy"><h2 id="st-privacy">{t("隐私与屏幕活动")}</h2>
+        <section id="privacy" className="st-section" aria-labelledby="st-privacy"><h2 id="st-privacy" className="ds-serif">{t("隐私与屏幕活动")}</h2>
           {!machine && <p className="muted">{hosted
             ? deviceLinked
               ? t("屏幕活动、作息记录、键鼠节律、Codex 使用记录和录音自动转写由「这台电脑」读取，开关在那台电脑的设备页；读到的结果在这里使用。")
@@ -249,18 +249,18 @@ export default async function SettingsPage() {
           {isLocalInstall() && <TelemetryCard on={setting(TELEMETRY_ENABLED_SETTING) !== "0"} />}
         </section>
 
-        <section id="energy" className="st-section" aria-labelledby="st-energy"><h2 id="st-energy">{t("精力与手机健康")}</h2>
+        <section id="energy" className="st-section" aria-labelledby="st-energy"><h2 id="st-energy" className="ds-serif">{t("精力与手机健康")}</h2>
           <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} privateNetwork={!hosted} />
         </section>
 
-        {(machine || recordings.server) && <section id="recordings" className="st-section" aria-labelledby="st-recordings"><h2 id="st-recordings">{t("录音转写")}</h2>
+        {(machine || recordings.server) && <section id="recordings" className="st-section" aria-labelledby="st-recordings"><h2 id="st-recordings" className="ds-serif">{t("录音转写")}</h2>
           <div className="st-section-cards">
             {machine && <RecordingCard overview={recordings} />}
             {recordings.server && <ServerRecordingCard server={recordings.server} done={recordings.done} />}
           </div>
         </section>}
 
-        <section id="usage" className="st-section" aria-labelledby="st-usage"><h2 id="st-usage">{t("用量与体检")}</h2>
+        <section id="usage" className="st-section" aria-labelledby="st-usage"><h2 id="st-usage" className="ds-serif">{t("用量与体检")}</h2>
           <div className="st-modules">
             <section className="st-card" aria-label={t("系统体检")}><header><h3>{t("系统体检")}</h3><small>{t("每日从账本计算")}</small></header>
               <EffectivenessCard locale={locale} data={await timed("settings.effectiveness", () => memoForAsync(`effectiveness:${ctx.workspaceId}`, 5 * 60_000, () => loadEffectiveness(ctx)))} labels={lineLabels(ctx)} />

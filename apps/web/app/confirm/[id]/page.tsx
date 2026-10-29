@@ -15,7 +15,7 @@ export default async function ConfirmPage({ params }: { params: Promise<{ id: st
   const view = confirmView(ctx, id);
   if (!view) notFound();
   const t = tOf(ctx);
-  return <SubpageShell active={"今日"} title={t("确认时间块")}>
+  return <SubpageShell active={"今日"} title={t("确认时间块")} serif>
     <ConfirmForm view={view} />
   </SubpageShell>;
 }

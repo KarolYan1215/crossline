@@ -128,7 +128,7 @@ export function CommitBoard({ view, labels }: { view: WeeklyCommitView; labels: 
         const rows = view.rows.filter((row) => (groups[row.id] ?? "keep") === group);
         return <section key={group} className="rd-card cm-column" data-group={group} aria-label={t(COLUMN[group].title)}>
           <header className="cm-column-head">
-            {COLUMN[group].icon}<h2>{t(COLUMN[group].title)}</h2>
+            {COLUMN[group].icon}<h2 className="ds-serif">{t(COLUMN[group].title)}</h2>
             <small>{t("{{count}} 项 · {{time}}", { count: rows.length, time: minutes(rows.reduce((sum, row) => sum + row.minutes, 0)) })}</small>
           </header>
           {rows.length ? <ul className="cm-rows">{rows.map((row) => rowOf(row, group))}</ul>
@@ -138,7 +138,7 @@ export function CommitBoard({ view, labels }: { view: WeeklyCommitView; labels: 
       })}</div>}
 
     {preview && <section className="rd-card rd-preview" aria-live="polite">
-      <h2>{t("确认后的影响")}</h2>
+      <h2 className="ds-serif">{t("确认后的影响")}</h2>
       <p>{t("确认后：未排进日历的任务 {{before}} → {{after}} 个。", { before: preview.impact.week.unplacedBefore, after: preview.impact.week.unplacedAfter })}</p>
       {preview.impact.milestones.length > 0 && <ul>{preview.impact.milestones.slice(0, 6).map((item) => <li key={item.id}>
         {item.shiftDays > 0 ? t("「{{title}}」保守完成日推后 {{count}} 天", { title: item.title, count: item.shiftDays })

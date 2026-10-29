@@ -151,7 +151,7 @@ export function SettingsBrowser({ title, sub, sections, status, children }: {
   const total = Object.values(found).reduce((sum, count) => sum + count, 0);
   return <div className="st-browse" data-ready={ready || undefined}>
     <header className="subpage-header st-head">
-      <div><h1>{title}</h1><p className="muted">{sub}</p></div>
+      <div><h1 className="ds-serif">{title}</h1><p className="muted">{sub}</p></div>
       <label className="st-search">
         <Search {...ICON} />
         <input ref={search} type="search" value={query} onChange={(event) => setQuery(event.target.value)}

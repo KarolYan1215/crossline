@@ -38,6 +38,9 @@
 @font-face{font-family:"Crossline Poster Serif Latin";src:url(/fonts/poster-serif-latin-400.woff2) format("woff2");font-weight:400;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 /* The display serif: only on strings written in code (the wordmark, the day's date and clock, card titles). */
 .ds-serif{font-family:var(--f-serif-display);font-variant-numeric:lining-nums tabular-nums;letter-spacing:0}
+/* A utility face: a page's own `h1`/`h2` rule must not take it back, and a count inside a serif title (`.mono`) reads in the same face
+   (2026-10-29: titles on 任务, 待确认, 设置 and 周复盘 stayed in Arial under their pages' heading rules). */
+.ds-serif,.ds-serif .mono{font-family:var(--f-serif-display) !important}
 
 /* ── icon buttons (ui/icon-button.tsx) ── */
 .ds-icon{display:inline-grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:1px solid transparent;border-radius:var(--ds-radius-control);

@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
  */
 export function RitualHead({ title, sub, actions }: { title: string; sub?: ReactNode; actions?: ReactNode }) {
   return <header className="rd-head">
-    <div className="rd-head-text"><h1>{title}</h1>{sub && <p>{sub}</p>}</div>
+    <div className="rd-head-text"><h1 className="ds-serif">{title}</h1>{sub && <p>{sub}</p>}</div>
     {actions && <div className="rd-head-actions">{actions}</div>}
   </header>;
 }

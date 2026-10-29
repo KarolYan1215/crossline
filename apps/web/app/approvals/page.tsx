@@ -101,7 +101,7 @@ export default async function ApprovalsPage() {
 
   return <AppShell active={"待确认"} className="subpage ap-page"><div className="subpage-inner">
     <header className="subpage-header ap-head">
-      <div><h1>{t("待确认")}</h1>
+      <div><h1 className="ds-serif">{t("待确认")}</h1>
         <p className="muted">{head}<LivePendingCount initial={pending.total} />{tail}<span className="ap-head-rule"> · {t("只有本人选择、授权或对外动作才在这里，其余自动生效，24 小时内可撤销")}</span></p></div>
       <AnswerAll head />
     </header>
@@ -120,7 +120,7 @@ export default async function ApprovalsPage() {
       <aside className="ap-right" aria-label={t("可批量处理的")}>
         <AssistantReview ctx={ctx} deferred={deferredOrder} compact body={(taskId) => <LazyRegion load={assistantResult.bind(null, taskId)} minHeight={160} />} />
         {evidenceReviews.length > 0 && <section className="ap-card approval-ledger" id="evidence" aria-label={t("待验收")}>
-          <h2 className="ap-card-title">{t("待验收 · {{count}}", { count: evidenceReviews.length })}</h2>
+          <h2 className="ap-card-title ds-serif">{t("待验收 · {{count}}", { count: evidenceReviews.length })}</h2>
           {evidenceReviews.map((item) => {
             const own = claims.filter((claim) => claim.workOrderId === item.id && claim.reviewStatus === "submitted");
             const execution = executions.filter((entry) => entry.workOrderId === item.id).at(-1);
@@ -157,7 +157,7 @@ export default async function ApprovalsPage() {
         </section>}
         {permissionModeEnabled(ctx) && <PermissionModePanel initialCandidates={permissionCandidates(ctx).filter((item) => item.kind !== "insight")} />}
         {autoApproved.length > 0 && <section className="ap-card ap-auto" id="auto" aria-label={t("最近自动生效")}>
-          <h2 className="ap-card-title">{t("最近自动生效 · {{count}}", { count: autoApproved.length })}<small>{t("24 小时内可撤销")}</small></h2>
+          <h2 className="ap-card-title ds-serif">{t("最近自动生效 · {{count}}", { count: autoApproved.length })}<small>{t("24 小时内可撤销")}</small></h2>
           {/* The newest few in view; the rest folded, so a busy day does not turn the section into a page-long list. */}
           <ul>{autoApproved.slice(0, AUTO_SHOWN).map(autoItem)}</ul>
           {autoApproved.length > AUTO_SHOWN && <details className="fold advanced"><summary>{t("其余 {{count}} 项", { count: autoApproved.length - AUTO_SHOWN })}</summary>

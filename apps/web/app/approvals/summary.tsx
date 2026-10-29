@@ -41,7 +41,7 @@ export function ElsewhereCard({ items }: { items: Array<{ label: string; count: 
   const shown = items.filter((item) => item.count > 0);
   if (!shown.length) return null;
   return <section className="ap-card ap-elsewhere" aria-label={t("不在这里处理")}>
-    <h2 className="ap-card-title">{t("不在这里处理")}</h2>
+    <h2 className="ap-card-title ds-serif">{t("不在这里处理")}</h2>
     <ul>{shown.map((item) => <li key={item.label}><span>{item.label} · <b className="mono">{item.count}</b></span> <a href={item.href}>{item.go}</a></li>)}</ul>
   </section>;
 }

@@ -185,7 +185,7 @@ export function AssistantReview({ ctx, deferred = () => undefined, body, compact
     <ReviewButtons taskId={task.taskId} />
   </article>;
   return <section className="pending-block" id="assistant" aria-label={t("助手")}>
-    <h2>{t("助手 · {{count}}", { count: view.categoryRequests.length + view.approvals.length + view.questions.length + review.length })}</h2>
+    <h2 className="ds-serif">{t("助手 · {{count}}", { count: view.categoryRequests.length + view.approvals.length + view.questions.length + review.length })}</h2>
     {view.questions.map((question) => <div key={question.id} className="assistant-ask">
       <p><strong>{t("运行中的提问")}</strong>{question.title && <> · {question.title}</>} <small className="muted">{t("10 分钟内未回答，助手按最稳妥的做法继续")}</small></p>
       <QuestionAnswer id={question.id} questions={question.questions} />

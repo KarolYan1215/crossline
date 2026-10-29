@@ -41,7 +41,7 @@ describe("workbench page", () => {
     // The card says the whole task's usual length while it has no steps yet; with a block today it sits under 现在.
     expect(html).toContain("全程约");
     expect(html).not.toContain(">1 时 10 分<");
-    expect(html).toMatch(/<h2 id="tasks-now-title">现在[\s\S]*id="work-order-wo-1"/);
+    expect(html).toMatch(/<h2 id="tasks-now-title" class="ds-serif">现在[\s\S]*id="work-order-wo-1"/);
 
     store.close();
     globalThis.crosslineStore = undefined;

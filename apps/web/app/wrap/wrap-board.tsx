@@ -99,7 +99,7 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
     <div className="wr-grid">
       <section className="rd-card wr-blocks" aria-labelledby="wr-blocks-title">
         <header className="rd-card-head">
-          <h2 id="wr-blocks-title">{view.today ? t("今天开始过的块") : t("那天开始过的块")}</h2>
+          <h2 id="wr-blocks-title" className="ds-serif">{view.today ? t("今天开始过的块") : t("那天开始过的块")}</h2>
           <small>{t("一键记录，写法与完成确认相同")}</small>
           {open > 1 && <button type="button" className="secondary-button rd-icon-text" disabled={Boolean(busy)} onClick={() => void allDone()}>
             <CheckCheck {...ICON} />{t("全部按预估完成")}</button>}
@@ -112,12 +112,12 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
 
       <div className="wr-side">
         <section className="rd-card" aria-labelledby="wr-all-title">
-          <header className="rd-card-head"><h2 id="wr-all-title"><Sparkles {...ICON} />{t("可按推荐处理")}</h2></header>
+          <header className="rd-card-head"><h2 id="wr-all-title" className="ds-serif"><Sparkles {...ICON} />{t("可按推荐处理")}</h2></header>
           <AnswerAll />
           <p className="rd-note">{t("需要本人回答的问题留在待确认，明早简报会再列一次。")} <a href="/approvals#asks">{t("去待确认")}</a></p>
         </section>
         {view.today && <section className="rd-card" aria-labelledby="wr-next-title">
-          <header className="rd-card-head"><h2 id="wr-next-title">{t("明天")}</h2><a href="/">{t("打开今日")}</a></header>
+          <header className="rd-card-head"><h2 id="wr-next-title" className="ds-serif">{t("明天")}</h2><a href="/">{t("打开今日")}</a></header>
           {tomorrow.length ? <ul className="wr-next">{tomorrow.map((block) => <li key={`${block.start}-${block.title}`}>
             <span className="ds-serif">{block.start}</span>
             {block.line && labels[block.line] && <LineTag line={block.line}>{labels[block.line]}</LineTag>}
