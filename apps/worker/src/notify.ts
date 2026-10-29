@@ -143,7 +143,7 @@ export function awayFromScreen(store: CrosslineStore, workspaceId: string, now: 
  */
 export async function notifyPass(store: CrosslineStore, workspaceId: string, now: Date,
   deliver: (title: string, body: string, url: string) => Promise<boolean> = showToast, baseUrl = process.env.CROSSLINE_WEB_BASE_URL || "http://127.0.0.1:3210",
-  push?: (workspaceId: string, message: { title: string; body: string; path: string; tag: string; start?: string }) => Promise<boolean>): Promise<string[]> {
+  push?: (workspaceId: string, message: { title: string; body: string; path: string; tag: string; start?: string; confirm?: string }) => Promise<boolean>): Promise<string[]> {
   const level = (store.getSetting(workspaceId, NOTIFY_LEVEL_SETTING) as NotifyLevel | undefined) ?? "normal";
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
   try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
@@ -211,7 +211,9 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
     // The evening wrap-up opens its own page (a link that writes nothing, like the confirm page).
     const wrap = nudge.kind === "day_wrap";
     const path = confirm ? `/confirm/${encodeURIComponent(message.id)}` : wrap ? "/wrap" : start ? `/workbench/${encodeURIComponent(start)}` : "/";
-    if (!await both("Crossline", body, `${baseUrl}${confirm || wrap ? path : "/"}`, { title: "Crossline", body, path, tag: nudge.fingerprint ?? message.id, ...(start ? { start } : {}) })) continue;
+    if (!await both("Crossline", body, `${baseUrl}${confirm || wrap ? path : "/"}`, { title: "Crossline", body, path, tag: nudge.fingerprint ?? message.id, ...(start ? { start } : {}),
+      // A completion check carries its message: the phone answers 做了 / 没做 in place (docs/plans/closed-loop-1030.md §2).
+      ...(confirm ? { confirm: message.id } : {}) })) continue;
     store.updateConversationPayload(workspaceId, message.id, { ...message.payload, nudge: { ...nudge, delivery: "pushed" } });
     delivered.push(`nudge:${nudge.fingerprint ?? message.id}`);
   }

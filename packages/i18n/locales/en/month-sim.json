@@ -1,4 +1,3 @@
 {
-  "系统已经自动顺延过 {{times}} 次，这个里程碑的工作仍未完成，这次不再自动改。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。": "The system has already moved this date {{times}} times on its own and the milestone's work is still not finished, so it will not move it again. Make it up (the date stays and the remaining work keeps being scheduled), set a new date, or drop the milestone.",
-  "计时过的块全部按预估完成": "Mark every timed block done as estimated"
+  "系统已经自动顺延过 {{times}} 次，这个里程碑的工作仍未完成，这次不再自动改。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。": "The system has already moved this date {{times}} times on its own and the milestone's work is still not finished, so it will not move it again. Make it up (the date stays and the remaining work keeps being scheduled), set a new date, or drop the milestone."
 }

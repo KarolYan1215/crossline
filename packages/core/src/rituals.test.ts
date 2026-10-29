@@ -95,10 +95,13 @@ describe("weeklyCommitDue", () => {
   });
 });
 
-test("the wrap-up's one tap records as done only the timed blocks not yet answered", () => {
+test("the wrap-up's one tap records only the worked blocks not yet answered; under 70% of the planned minutes is 部分", () => {
   const rows = [{ blockId: "a", timedMinutes: 40 }, { blockId: "b", timedMinutes: 0 }, { blockId: "c", timedMinutes: 25 }];
   expect(bulkDoneRows(rows, { c: "partial" }).map((row) => row.blockId)).toEqual(["a"]);
   expect(bulkDoneRows(rows, {}).map((row) => row.blockId)).toEqual(["a", "c"]);
+  const timed = [{ blockId: "full", timedMinutes: 50, start: "09:00", end: "10:00" }, { blockId: "half", timedMinutes: 30, start: "10:00", end: "11:00" },
+    { blockId: "screen", timedMinutes: 0, workMinutes: 45, start: "11:00", end: "12:00" }, { blockId: "none", timedMinutes: 0, workMinutes: 0, start: "13:00", end: "14:00" }];
+  expect(bulkDoneRows(timed, {}).map((row) => [row.blockId, row.outcome])).toEqual([["full", "done"], ["half", "partial"], ["screen", "done"]]);
 });
 
 test("the wrap-up comes at the end of the day's last available window", () => {

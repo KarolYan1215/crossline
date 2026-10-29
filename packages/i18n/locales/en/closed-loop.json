@@ -2,5 +2,15 @@
   "所述 {{stated}} h/周 · 按所述排": "Stated {{stated}} h/week · planned on what was stated",
   "所述 {{stated}} h/周 · 实测近 28 天 {{measured}} h/周 · 按所述排": "Stated {{stated}} h/week · measured {{measured}} h/week over the last 28 days · planned on what was stated",
   "所述 {{stated}} h/周 · 实测不足 5 天 · 按所述的一半排": "Stated {{stated}} h/week · fewer than 5 days measured · planned at half of what was stated",
-  "所述 {{stated}} h/周 · 实测近 28 天 {{measured}} h/周 · 按实测排": "Stated {{stated}} h/week · measured {{measured}} h/week over the last 28 days · planned on what was measured"
+  "所述 {{stated}} h/周 · 实测近 28 天 {{measured}} h/周 · 按实测排": "Stated {{stated}} h/week · measured {{measured}} h/week over the last 28 days · planned on what was measured",
+  "今天排过的块": "Today's scheduled blocks",
+  "那天排过的块": "That day's scheduled blocks",
+  "按计时、屏幕活动和 Codex 用时预填了推断，一键记录，写法与完成确认相同": "Prefilled with what the timer, screen activity and Codex time suggest; one tap records it, the same way as the completion check",
+  "推断都对": "All inferences right",
+  "做过的块按预估完成（不足七成记部分）": "Worked blocks done as estimated (under 70% recorded as partial)",
+  "推断：做了": "Inferred: done",
+  "推断：部分": "Inferred: partly done",
+  "推断：可能没做": "Inferred: probably not done",
+  "✓ 做了": "✓ Done",
+  "✗ 没做": "✗ Not done"
 }

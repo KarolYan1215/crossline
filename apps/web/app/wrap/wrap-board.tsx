@@ -22,6 +22,8 @@ const OUTCOMES: Array<{ id: WrapOutcome; label: string; icon: typeof Check }> = 
 const choiceOf = (answered: string | undefined): WrapOutcome | undefined =>
   !answered ? undefined : answered === "not_done" ? "not_done" : answered === "partial" ? "partial" : "done";
 const ANSWERED: Record<WrapOutcome, string> = { done: "已记为完成", partial: "已记为做了一部分", not_done: "没做，已顺延" };
+/** What the passive signals say about a block not yet recorded (docs/plans/closed-loop-1030.md §2), marked as inferred. */
+const INFERRED: Record<WrapOutcome, string> = { done: "推断：做了", partial: "推断：部分", not_done: "推断：可能没做" };
 
 /**
  * The evening wrap-up's page (docs/rituals.md; the 2026-10-28 redesign after `docs/plans/page-drafts-1028/wrap.html`): four figures for
@@ -38,9 +40,9 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
   const [busy, setBusy] = useState<string | undefined>();
   const [finished, setFinished] = useState(view.done);
   const [failed, setFailed] = useState(false);
-  const post = async (blockId: string, outcome: WrapOutcome): Promise<boolean> => {
+  const post = async (blockId: string, outcome: WrapOutcome, inferred = false): Promise<boolean> => {
     const response = await fetch("/api/wrap", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ blockId, outcome, ...(view.today ? {} : { day: view.day }) }) }).catch(() => undefined);
+      body: JSON.stringify({ blockId, outcome, ...(inferred ? { inferred: true } : {}), ...(view.today ? {} : { day: view.day }) }) }).catch(() => undefined);
     const body = await response?.json().catch(() => undefined) as { ok?: boolean } | undefined;
     return Boolean(body?.ok);
   };
@@ -53,17 +55,30 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
     setAnswers((current) => ({ ...current, [blockId]: outcome }));
     window.dispatchEvent(new Event(PENDING_CHANGED));
   };
-  // 「计时过的块全部按预估完成」: each block not yet recorded whose timer ran inside it, one after another, through the same call as its own
-  // 完成. A block nobody timed is left to its own three-part control: one tap at the end of a tiring day used to record every block whose
-  // time had passed as done, timed or not, and the work it never got was dropped from the plan (the month simulation's overloaded person
-  // did this 18 times in a month; docs/reports/2026-10-30-overnight/month-sim.md).
+  // 「按预估完成」: each block not yet recorded in which work went on (its timer, or the screen and Codex), one after another, through the
+  // same call as its own 完成 — and one worked for under 70% of its minutes as 部分 (docs/plans/closed-loop-1030.md §3). A block nobody
+  // touched is left to its own three-part control: one tap at the end of a tiring day used to record every block whose time had passed as
+  // done, and the work it never got was dropped from the plan (docs/reports/2026-10-30-overnight/month-sim.md).
   const bulk = bulkDoneRows(view.rows, answers);
   const allDone = async () => {
     setBusy("all");
     setFailed(false);
     const recorded: Record<string, WrapOutcome> = {};
     for (const row of bulk) {
-      if (await post(row.blockId, "done")) recorded[row.blockId] = "done"; else setFailed(true);
+      if (await post(row.blockId, row.outcome)) recorded[row.blockId] = row.outcome; else setFailed(true);
+    }
+    setAnswers((current) => ({ ...current, ...recorded }));
+    setBusy(undefined);
+    window.dispatchEvent(new Event(PENDING_CHANGED));
+  };
+  // 「推断都对」: every block not yet recorded as its inference says (docs/plans/closed-loop-1030.md §2); any one can be changed before.
+  const inferredOpen = view.rows.filter((row) => !answers[row.blockId]);
+  const allInferred = async () => {
+    setBusy("inferred");
+    setFailed(false);
+    const recorded: Record<string, WrapOutcome> = {};
+    for (const row of inferredOpen) {
+      if (await post(row.blockId, row.inferred, true)) recorded[row.blockId] = row.inferred; else setFailed(true);
     }
     setAnswers((current) => ({ ...current, ...recorded }));
     setBusy(undefined);
@@ -104,10 +119,12 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
     <div className="wr-grid">
       <section className="rd-card wr-blocks" aria-labelledby="wr-blocks-title">
         <header className="rd-card-head">
-          <h2 id="wr-blocks-title" className="ds-serif">{view.today ? t("今天开始过的块") : t("那天开始过的块")}</h2>
-          <small>{t("一键记录，写法与完成确认相同")}</small>
+          <h2 id="wr-blocks-title" className="ds-serif">{view.today ? t("今天排过的块") : t("那天排过的块")}</h2>
+          <small>{t("按计时、屏幕活动和 Codex 用时预填了推断，一键记录，写法与完成确认相同")}</small>
+          {inferredOpen.length > 0 && <button type="button" className="primary-button rd-icon-text" disabled={Boolean(busy)} onClick={() => void allInferred()}>
+            <CheckCheck {...ICON} />{t("推断都对")}</button>}
           {bulk.length > 1 && <button type="button" className="secondary-button rd-icon-text" disabled={Boolean(busy)} onClick={() => void allDone()}>
-            <CheckCheck {...ICON} />{t("计时过的块全部按预估完成")}</button>}
+            <Check {...ICON} />{t("做过的块按预估完成（不足七成记部分）")}</button>}
         </header>
         {view.rows.length ? <ul className="wr-rows">{view.rows.map((row) => <Block key={row.blockId} row={row} label={row.line ? labels[row.line] : undefined}
           chosen={answers[row.blockId]} disabled={Boolean(busy)} timed={timed(row.timedMinutes)} onAnswer={(outcome) => void answer(row.blockId, outcome)} />)}</ul>
@@ -139,7 +156,8 @@ function Block({ row, label, chosen, disabled, timed, onAnswer }: { row: WrapRow
   disabled: boolean; timed: string; onAnswer: (outcome: WrapOutcome) => void }) {
   const t = useT();
   return <li data-line={row.line ?? "none"}>
-    <div className="wr-when"><b className="ds-serif">{row.start}–{row.end}</b><small>{timed}</small></div>
+    <div className="wr-when"><b className="ds-serif">{row.start}–{row.end}</b><small>{timed}</small>
+      {!chosen && <small className="wr-inferred" data-inferred={row.inferred}>{t(INFERRED[row.inferred])}</small>}</div>
     <div className="wr-what">
       <div className="wr-title">{label && <LineTag line={row.line}>{label}</LineTag>}
         <a href={`/workbench/${encodeURIComponent(row.orderId)}`} title={row.title}>{row.title}</a></div>
@@ -149,7 +167,8 @@ function Block({ row, label, chosen, disabled, timed, onAnswer }: { row: WrapRow
     <div className="wr-choices" role="group" aria-label={t("{{title}} 做得怎么样", { title: row.title })}>
       {OUTCOMES.map((item) => {
         const Icon = item.icon;
-        return <button key={item.id} type="button" aria-pressed={chosen === item.id} disabled={disabled || Boolean(chosen)} onClick={() => onAnswer(item.id)}>
+        return <button key={item.id} type="button" aria-pressed={chosen === item.id} data-inferred={!chosen && row.inferred === item.id ? "" : undefined}
+          disabled={disabled || Boolean(chosen)} onClick={() => onAnswer(item.id)}>
           <Icon {...ICON} />{t(item.label)}</button>;
       })}
     </div>

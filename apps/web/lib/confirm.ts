@@ -11,7 +11,11 @@ import type { Card } from "./conversation";
  * 按预估完成, 超出 / 少于预估 by some minutes, or 未执行. The block's times are the ones it had when the question was asked: the
  * schedule is derived, and by now the unfinished step has already been moved elsewhere.
  */
-export type ConfirmAnswer = { kind: "as_planned" | "over" | "under" | "partial" | "not_done"; minutes?: number; useActivity?: boolean; evidence?: EvidenceClaimInput[] };
+export type ConfirmAnswer = { kind: "as_planned" | "over" | "under" | "partial" | "not_done"; minutes?: number; useActivity?: boolean; evidence?: EvidenceClaimInput[];
+  /** Answered on the phone's notification (✓做了 / ✗没做) without opening the app: the event says so (`source: "push"`). */
+  via?: "push";
+  /** Answered by accepting what the passive signals inferred (the wrap-up's 「都对」): the event keeps that it was inferred. */
+  inferred?: boolean };
 export type ConfirmOutcome = { ok: true; done: "step" | "task" | "partial" | "not_done"; minutes?: number; needsEvidence?: true; already?: true } | { ok: false; code: string };
 export type ConfirmView = {
   messageId: string; orderId: string; title: string; step: string; day: string; start: string; end: string; blockMinutes: number;
@@ -89,7 +93,7 @@ export function confirmBlockAt(ctx: AccessContext, messageId: string, block: Blo
   const record = (outcome: string, extra: Record<string, unknown> = {}) => {
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `block-confirmed:${messageId}`, type: "block.confirmed",
       entityId: messageId, payload: { blockId: block.id, workOrderId: block.orderId, stepId: block.stepId, day: block.day, outcome, blockMinutes,
-        ...(block.energy ? { energy: block.energy } : {}), ...extra } });
+        ...(block.energy ? { energy: block.energy } : {}), ...extra, ...(answer.via === "push" ? { source: "push" } : {}), ...(answer.inferred ? { inferred: true } : {}) } });
     // The card counts as answered, so the question is not taken as ignored (three ignored in a row would mute the kind).
     const card = payload?.card as Card | undefined;
     if (payload && card) store.updateConversationPayload(ctx.workspaceId, messageId, { ...payload, card: { ...card, clarify: { ...card.clarify, chosen: 0 } } });

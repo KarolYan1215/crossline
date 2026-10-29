@@ -114,6 +114,8 @@ body:has(.rd-page) .running-head{background:var(--ds-bg)}
 .wr-choices button[aria-pressed="true"]{background:var(--ds-accent);color:var(--ds-on-accent)}
 .wr-choices button:disabled{cursor:default}
 .wr-choices button:disabled:not([aria-pressed="true"]){color:var(--graphite)}
+.wr-choices button[data-inferred]:not([aria-pressed="true"]){box-shadow:inset 0 -2px 0 var(--ds-accent);font-weight:600}
+.wr-when .wr-inferred{font-style:normal;color:var(--ink)}
 .wr-next{margin:0;padding:0;list-style:none;display:grid;gap:8px}
 .wr-next li{display:flex;align-items:center;gap:10px;min-width:0;font-size:14px}
 .wr-next .ds-serif{flex:none;width:48px;font-size:15px}

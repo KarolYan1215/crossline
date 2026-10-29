@@ -65,7 +65,12 @@ export type NudgeEnding = { id: string; orderId: string; stepId: string; title: 
   /** The block's slot and work energy and the factor the plan used, carried to the completion check (absent on older blocks). */
   energy?: { slot: "low" | "medium" | "high"; need: "low" | "medium" | "high"; efficiency: number };
   /** The task's due day, when it has one: a block due tomorrow or sooner is still asked about on its own when the wrap-up is on. */
-  dueDay?: string };
+  dueDay?: string;
+  /**
+   * What the passive signals say about the block (`inferBlockOutcome`: its timer, the screen in work categories, Codex): with the
+   * wrap-up on, a block due by tomorrow is asked about during the day only when it probably was not done (docs/plans/closed-loop-1030.md §2).
+   */
+  inferred?: "done" | "partial" | "not_done" };
 /** How much time is left for one task with a due day: free minutes before it (after other work's blocks) against what remains of it. */
 export type NudgeSlack = { orderId: string; title: string; dueDay: string; remainingMinutes: number; freeMinutes: number; dailyMinutes: number };
 
@@ -153,7 +158,7 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
     const start = minutesOf(block.start), end = minutesOf(block.end);
     const stopped = block.endedTimerAt && minutesOf(block.endedTimerAt) >= start;
     if (now < end || now >= end + CONFIRM_WINDOW_MINUTES || stopped || input.timer?.orderId === block.orderId) continue;
-    if (input.wrap && !(block.dueDay && block.dueDay <= input.tomorrow)) continue;
+    if (input.wrap && !(block.dueDay && block.dueDay <= input.tomorrow && (block.inferred === undefined || block.inferred === "not_done"))) continue;
     const label = quoted(t, block.title, block.step);
     out.push({ kind: "block_confirm", fingerprint: `confirm:${block.id}:${input.today}`, urgent: true, counted: true, block,
       text: t("{{start}}–{{end}} 的{{label}}做得怎么样？", { start: block.start, end: block.end, label }),

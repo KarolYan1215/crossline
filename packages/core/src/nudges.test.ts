@@ -45,6 +45,10 @@ test("with the evening wrap-up on, a block is asked about alone only when its ta
   expect(planNudges(base({ ...at, ending: [block], wrap }))).toEqual([]);
   expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-20" }], wrap }))).toEqual([]);
   expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-11" }], wrap })).map((item) => item.kind)).toEqual(["block_confirm"]);
+  // The passive signals say it was done or partly done: not asked during the day, it waits for the wrap-up (closed-loop-1030 §2).
+  expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-11", inferred: "done" as const }], wrap }))).toEqual([]);
+  expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-11", inferred: "partial" as const }], wrap }))).toEqual([]);
+  expect(planNudges(base({ ...at, ending: [{ ...block, dueDay: "2026-10-11", inferred: "not_done" as const }], wrap })).map((item) => item.kind)).toEqual(["block_confirm"]);
   const [nudge] = planNudges(base({ blocks: [], ending: [], clock: "21:05", wrap }));
   expect(nudge).toMatchObject({ kind: "day_wrap", fingerprint: "wrap:2026-10-10", counted: false, urgent: false });
   expect(nudge!.buttons[0]).toEqual({ kind: "href", label: "收工", href: "/wrap" });

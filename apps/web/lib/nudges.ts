@@ -3,10 +3,11 @@ import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
-  availableSlots, calendarLineOf, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
+  availableSlots, calendarLineOf, inferBlockOutcome, type InferredOutcome, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
 } from "@crossline/core";
-import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability } from "./crossline";
+import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability, toZonedInstant } from "./crossline";
+import { blockWorkMinutes } from "./measured-capacity";
 import { listed, openAsks, thisWeek } from "./asks";
 import { calendarFiling, currentWorkState, missedItems } from "./timeline";
 import { dayLabel, type OpenerView } from "./opener";
@@ -118,7 +119,15 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
       ...(block.energy ? { energy: block.energy } : {}) }];
   })).filter((block) => byId.has(block.orderId)).map((block) => {
     const due = dueOf(byId.get(block.orderId)!);
-    return { ...block, endedTimerAt: lastStopped.get(block.orderId)?.slice(11, 16) ?? "", ...(due ? { dueDay: due } : {}) };
+    // What the passive signals say about a block that just ended (docs/plans/closed-loop-1030.md §2): read only inside the confirm window,
+    // where it decides whether the block is asked about at all.
+    const end = minutesOf(block.end);
+    let inferred: InferredOutcome | undefined;
+    if (nowMinute >= end && nowMinute < end + 30) {
+      try { inferred = inferBlockOutcome(blockWorkMinutes(ctx, block.orderId, toZonedInstant(today, block.start, zone), toZonedInstant(today, block.end, zone), now), end - minutesOf(block.start)); }
+      catch { inferred = undefined; }
+    }
+    return { ...block, endedTimerAt: lastStopped.get(block.orderId)?.slice(11, 16) ?? "", ...(due ? { dueDay: due } : {}), ...(inferred ? { inferred } : {}) };
   });
   // The evening wrap-up (docs/rituals.md): with available hours today, blocks not due by tomorrow wait for it instead of a push each.
   const wrapView = loadWrap(ctx, now);

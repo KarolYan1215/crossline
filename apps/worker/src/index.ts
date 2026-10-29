@@ -1815,7 +1815,7 @@ if (process.env.CROSSLINE_RUN_ONCE === "1") {
   // materials, and a morning brief that arrives at noon is not a morning brief. Reads only; never overlaps.
   // The person's phones (Web Push through the platform's push service, encrypted for the device; see packages/connectors/src/web-push.ts).
   // Devices the service reports gone are dropped, so a removed home-screen app is not retried every two minutes.
-  const pushToPhones = async (workspaceId: string, message: { title: string; body: string; path: string; tag: string }): Promise<boolean> => {
+  const pushToPhones = async (workspaceId: string, message: { title: string; body: string; path: string; tag: string; start?: string; confirm?: string }): Promise<boolean> => {
     const devices = listPushSubscriptions(analysisStore, workspaceId);
     if (!devices.length) return false;
     const keys = loadVapidKeys(dataDir);

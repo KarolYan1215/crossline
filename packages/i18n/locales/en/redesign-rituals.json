@@ -11,11 +11,9 @@
   "{{from}}–{{to}} · 先定下要做的，排不下的推到下周或不做": "{{from}}–{{to}} · Settle what to do first; what does not fit moves to next week or is dropped",
   "{{range}} · 回看上周做成了什么、时间投到了哪，再拍板长期判断；没有记录的指标标为「未标定」。": "{{range}} · Look back at what the week finished and where the time went, then decide the long-range calls; anything not recorded is marked \"not calibrated\".",
   "「确认本周」把这周记为已承诺，这周不会再问；新增的工作超出可用时间时会再问一次。": "\"Confirm this week\" records the week as committed, so it is not asked again this week; it is asked once more if new work runs past the available time.",
-  "一键记录，写法与完成确认相同": "One tap each, written as the completion check writes it",
   "上周承诺保留 {{kept}} · 推 {{deferred}} 项 · 砍 {{dropped}} 项 · 完成 {{accepted}} 件": "Last week's commitment kept {{kept}} · pushed {{deferred}} · dropped {{dropped}} · finished {{accepted}}",
   "上周没有确认承诺 · 完成 {{accepted}} 件": "Last week was not committed · finished {{accepted}}",
   "上周详情在周复盘 →": "Last week in detail: weekly review →",
-  "今天开始过的块": "Blocks that started today",
   "今天没有开始过的工作块；没开始的已顺延，不用记。": "No work block started today; those that did not start have already rolled forward, nothing to record.",
   "今天的安排：{{summary}}": "Today: {{summary}}",
   "今天计时": "Timed today",
@@ -74,7 +72,6 @@
   "这周没有截止、已开始或排程器排上的工作，不需要保、推或砍。": "Nothing this week is due, started or placed by the scheduler, so there is nothing to keep, push or drop.",
   "逾期 {{count}} 天_one": "{{count}} day overdue",
   "逾期 {{count}} 天_other": "{{count}} days overdue",
-  "那天开始过的块": "Blocks that started that day",
   "那天没有开始过的工作块。": "No work block started that day.",
   "里程碑重要性 {{weight}}": "Milestone importance {{weight}}"
 }

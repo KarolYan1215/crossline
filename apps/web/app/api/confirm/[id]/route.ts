@@ -34,7 +34,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const note = String(form.get("note") ?? "").trim().slice(0, 500);
   if (note) evidence.push({ kind: "record", uri: `note:${view.orderId}`, description: note });
   const minutes = Number(form.get("minutes") ?? 0);
-  const result = confirmBlock(access.ctx, id, { kind, ...(Number.isFinite(minutes) && minutes > 0 ? { minutes } : {}),
+  const result = confirmBlock(access.ctx, id, { kind, ...(form.get("via") === "push" ? { via: "push" as const } : {}), ...(Number.isFinite(minutes) && minutes > 0 ? { minutes } : {}),
     ...(form.get("useActivity") === "1" ? { useActivity: true } : {}), ...(evidence.length ? { evidence } : {}) });
   return Response.json(result, { status: result.ok ? 200 : 400 });
 }

@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 import { loadCurrentPlan, toZonedInstant } from "./crossline";
 import { nudgesFor } from "./nudges";
 import { answerWrapBlock, finishWrap, loadWrap } from "./wrap";
+import { confirmBlock } from "./confirm";
 import { TEST_CTX } from "./test-support";
 
 /**
@@ -117,4 +118,41 @@ test("收工 keeps tomorrow's first blocks (the ones the page just showed) where
   expect(frozen.every((item) => item.reason === "keep" && item.until === toZonedInstant(tomorrow, "23:59", ZONE))).toBe(true);
   // A second 收工 keeps nothing twice.
   expect(await finishWrap(TEST_CTX, at("23:05"))).toEqual({ ok: true, kept: 0 });
+});
+
+test("the wrap-up prefills what the signals infer; 推断都对 writes it marked inferred; a block due tomorrow worked on is not asked by day (closed-loop-1030 §2)", async () => {
+  at("08:30");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "hw", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "",
+    intent: "完成 ECE 555 作业 3", state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-13", materialContract: [], family: "deep_work" } });
+  store.saveStepPlan(ws, "hw", plan([step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题", ["s1"])]), TEST_CTX.principalId, "initial");
+  const first = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith("scheduled:hw") && block.day === DAY)
+    .sort((a, b) => a.start.localeCompare(b.start))[0]!;
+  await nudgesFor(TEST_CTX, at(plus(first.start, -10)));
+  await nudgesFor(TEST_CTX, at(plus(first.start, 1)));
+  // The person timed the whole block (started on time, stopped two minutes before its end): due tomorrow, but done, so not asked.
+  store.recordConfirmedSession(ws, "hw", TEST_CTX.principalId, { startedAt: toZonedInstant(DAY, first.start, ZONE), endedAt: toZonedInstant(DAY, plus(first.end, -2), ZONE),
+    minutes: 40, source: "one_tap", key: "timed" });
+  expect((await nudgesFor(TEST_CTX, at(plus(first.end, 2)))).map((item) => item.kind)).not.toContain("block_confirm");
+  const view = loadWrap(TEST_CTX, at(plus(first.end, 3)));
+  expect(view.rows).toEqual([expect.objectContaining({ blockId: first.id, inferred: "done" })]);
+  expect(answerWrapBlock(TEST_CTX, first.id, "done", at(plus(first.end, 4)), undefined, { inferred: true })).toMatchObject({ ok: true });
+  expect(store.listEvents(ws, { type: "block.confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ outcome: "as_planned", inferred: true })]);
+});
+
+test("a block due tomorrow with no sign of work is asked by day, and the phone's ✗没做 writes the answer marked as a push", async () => {
+  at("08:30");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "hw", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "",
+    intent: "完成 ECE 555 作业 3", state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-13", materialContract: [], family: "deep_work" } });
+  store.saveStepPlan(ws, "hw", plan([step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题", ["s1"])]), TEST_CTX.principalId, "initial");
+  const first = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith("scheduled:hw") && block.day === DAY)
+    .sort((a, b) => a.start.localeCompare(b.start))[0]!;
+  await nudgesFor(TEST_CTX, at(plus(first.start, -10)));
+  await nudgesFor(TEST_CTX, at(plus(first.start, 1)));
+  const asked = (await nudgesFor(TEST_CTX, at(plus(first.end, 2)))).filter((item) => item.kind === "block_confirm");
+  expect(asked).toHaveLength(1);
+  const message = store.listRecentNudges(ws, toZonedInstant(DAY, "00:00", ZONE)).find((item) => (item.payload.nudge as { kind?: string }).kind === "block_confirm")!;
+  expect(confirmBlock(TEST_CTX, message.id, { kind: "not_done", via: "push" }, at(plus(first.end, 5)))).toMatchObject({ ok: true, done: "not_done" });
+  expect(store.listEvents(ws, { type: "block.confirmed" }).map((event) => event.payload)).toEqual([expect.objectContaining({ outcome: "not_done", source: "push" })]);
 });

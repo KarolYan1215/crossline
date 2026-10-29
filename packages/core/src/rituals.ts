@@ -17,6 +17,7 @@
  * Everything here is pure: the web gathers the inputs and carries the result out.
  */
 import type { Ask, AskKind } from "./asks";
+import { asPlannedOutcome } from "./measured-capacity";
 
 const DAY = 86_400_000;
 const plusDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * DAY).toISOString().slice(0, 10);
@@ -159,11 +160,18 @@ export function wrapTimeOf(windows: Window[], weekday: number, rest: ReadonlyArr
   return cut ?? end;
 }
 /**
- * The rows the wrap-up's one-tap 「计时过的块全部按预估完成」 records as done: not yet answered, and the timer ran inside the block. A block
- * nobody timed may not have been touched at all; recording it done drops its work from the plan, so it keeps its own three-part control.
+ * The rows the wrap-up's one-tap 「按预估完成」 records, and how: not yet answered, and work went on inside the block — its timer ran, or
+ * the passive signals saw work (`workMinutes`, docs/plans/closed-loop-1030.md §3). A block nobody touched keeps its own three-part control:
+ * recording it done drops its work from the plan. One worked for under 70% of its planned minutes is recorded as 部分, not 完成, so the
+ * step stays open and the rest is placed again (the month simulation's tired 「一键」 had marked 41 half-done blocks done).
  */
-export function bulkDoneRows<T extends { blockId: string; timedMinutes: number }>(rows: T[], answered: Record<string, unknown>): T[] {
-  return rows.filter((row) => !answered[row.blockId] && row.timedMinutes > 0);
+export function bulkDoneRows<T extends { blockId: string; timedMinutes: number; workMinutes?: number; start?: string; end?: string }>(rows: T[],
+  answered: Record<string, unknown>): Array<T & { outcome: "done" | "partial" }> {
+  const clock = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+  return rows.filter((row) => !answered[row.blockId] && Math.max(row.timedMinutes, row.workMinutes ?? 0) > 0).map((row) => {
+    const planned = row.start && row.end ? clock(row.end) - clock(row.start) : 0;
+    return { ...row, outcome: asPlannedOutcome(Math.max(row.timedMinutes, row.workMinutes ?? 0), planned) };
+  });
 }
 /** Quiet hours: nothing is pushed then; the morning brief says what was left. */
 export const QUIET_FROM = "23:00";

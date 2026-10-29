@@ -1,5 +1,6 @@
 import "server-only";
-import { isRestEvent, withFrozen, wrapTimeOf, type AccessContext, type NudgeEnding } from "@crossline/core";
+import { inferBlockOutcome, isRestEvent, withFrozen, wrapTimeOf, type AccessContext, type InferredOutcome, type NudgeEnding } from "@crossline/core";
+import { blockWorkMinutes } from "./measured-capacity";
 import { formatInTimeZone } from "date-fns-tz";
 import { appNow, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant, writeFrozen } from "./crossline";
 import { blockAnswer, confirmBlockAt, type ConfirmOutcome } from "./confirm";
@@ -19,7 +20,12 @@ export type WrapRow = { blockId: string; orderId: string; title: string; step: s
   /** The task's line, for its tag. */
   line?: string;
   /** Minutes the timer ran for this task inside the block's own times (0: not timed). */
-  timedMinutes: number };
+  timedMinutes: number;
+  /**
+   * Work minutes inside the block from every signal joined in time — this task's timer, the screen in work categories, Codex — and what
+   * they say about it (`inferBlockOutcome`; docs/plans/closed-loop-1030.md §2). Shown on the row as 「推断」 and taken by 「推断都对」.
+   */
+  workMinutes: number; inferred: InferredOutcome };
 export type WrapView = { day: string; at?: string; rows: WrapRow[]; open: number; done: boolean;
   /** Whether `day` is today: an earlier day (`/wrap?day=`) is caught up on, not wrapped up. */
   today: boolean;
@@ -83,7 +89,9 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
       const from = Date.parse(toZonedInstant(day, block.start, zone)), to = Date.parse(toZonedInstant(day, block.end, zone));
       const timed = Math.round(spans.filter((span) => span.orderId === block.orderId).reduce((sum, span) => sum + overlap(span, from, to), 0));
       const line = lineOf.get(block.orderId);
+      const workMinutes = Math.max(timed, blockWorkMinutes(ctx, block.orderId, new Date(from).toISOString(), new Date(to).toISOString(), now));
       return { blockId: block.id, orderId: block.orderId, title: block.title, step: block.step, start: block.start, end: block.end, timedMinutes: timed,
+        workMinutes, inferred: inferBlockOutcome(workMinutes, Math.round((to - from) / 60_000)),
         ...(line ? { line } : {}), ...(answered.has(block.id) ? { answered: answered.get(block.id)! } : {}) };
     });
   const weekday = Number(formatInTimeZone(now, zone, "i")) % 7;
@@ -100,7 +108,8 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
  * One block's answer from the wrap-up. 完成 is 「按预估完成」; 部分 keeps the step open with half of it done; 没做 rolls forward. `day`
  * is an earlier day within `WRAP_DAYS_BACK` (`/wrap?day=`), written the same way, keyed `wrap:<that day>:<block>`.
  */
-export function answerWrapBlock(ctx: AccessContext, blockId: string, outcome: WrapOutcome, now = appNow(), requestedDay?: string): ConfirmOutcome {
+export function answerWrapBlock(ctx: AccessContext, blockId: string, outcome: WrapOutcome, now = appNow(), requestedDay?: string,
+  options: { inferred?: boolean } = {}): ConfirmOutcome {
   const day = requestedDay ? wrapDayOf(ctx, requestedDay, now) : planToday(ctx, now);
   const block = seenBlocks(ctx, day).find((item) => item.id === blockId && item.began);
   if (!block) return { ok: false, code: "CONFIRM_NOT_FOUND" };
@@ -108,7 +117,7 @@ export function answerWrapBlock(ctx: AccessContext, blockId: string, outcome: Wr
   const already = blockAnswer(ctx, keyOf(day, blockId))?.outcome ?? loadWrap(ctx, now, day).rows.find((row) => row.blockId === blockId)?.answered;
   if (already) return { ok: true, done: already === "not_done" || already === "partial" ? already : "step", already: true };
   return confirmBlockAt(ctx, keyOf(day, blockId), { ...block, day: block.day || day },
-    { kind: outcome === "done" ? "as_planned" : outcome }, now);
+    { kind: outcome === "done" ? "as_planned" : outcome, ...(options.inferred ? { inferred: true } : {}) }, now);
 }
 
 /** How many of tomorrow's first blocks the wrap-up shows (`app/wrap/page.tsx`) and 「收工」 then keeps. */
