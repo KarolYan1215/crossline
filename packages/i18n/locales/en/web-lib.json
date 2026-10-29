@@ -180,6 +180,8 @@
   "需要一段连续时间，现有最长空档不够": "It needs one continuous stretch, and the longest free slot is too short",
   "本周只排入 45 分钟进度": "Only 45 min of progress scheduled this week",
   "前置任务尚未验收": "An earlier task is not accepted yet",
+  "在等：{{what}}": "Waiting: {{what}}",
+  "剩下的步骤在等前一步或材料，暂不排入": "Its remaining steps wait for an earlier step or for material, so it is not scheduled yet",
   "{{count}} 个里程碑草稿待批准_one": "{{count}} milestone draft to approve",
   "{{count}} 个里程碑草稿待批准_other": "{{count}} milestone drafts to approve",
   "等待批准里程碑": "Waiting for an approved milestone",
