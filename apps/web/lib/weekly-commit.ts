@@ -4,7 +4,7 @@ import {
   type AccessContext, type CommitGroup, type CommitSuggestion, type CommitTask, type WeeklyCommitRecord
 } from "@crossline/core";
 import { formatInTimeZone } from "date-fns-tz";
-import { appNow, archiveWorkOrder, effectiveSchedulePreferences, effectiveWeight, getStore, milestoneDeadline, netCapacity, planToday, remainingMinutesOf } from "./crossline";
+import { appNow, archiveWorkOrder, effectiveSchedulePreferences, effectiveWeight, firstAcceptedAt, getStore, milestoneDeadline, netCapacity, planToday, remainingMinutesOf } from "./crossline";
 import { UPCOMING_SETTING } from "./schedule-memory";
 import { previewOverrides, type Impact } from "./impact";
 import { tOf } from "./locale";
@@ -28,7 +28,29 @@ export type WeeklyCommitView = {
   /** Why it is asked now, or undefined when the page was opened by hand with nothing due. */
   due?: "weekly" | "overload";
   last?: WeeklyCommitRecord;
+  /** One line about the week before (its detail is the weekly review's): what its commitment kept, pushed and cut, and what was finished. */
+  lastWeek?: LastWeekRecap;
 };
+export type LastWeekRecap = { week: string; committed: boolean; keptMinutes: number; deferred: number; dropped: number; accepted: number };
+
+/**
+ * The week before `week`: its latest `week.committed` (if it was committed) and the tasks first accepted in it, by the person's own days.
+ * Undefined when nothing was committed and nothing finished, so a new account is not shown a row of zeros.
+ */
+export function lastWeekRecap(ctx: AccessContext, week: string): LastWeekRecap | undefined {
+  const store = getStore();
+  const previous = plusDays(week, -7);
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const committed = store.listEvents(ctx.workspaceId, { type: "week.committed" })
+    .filter((event) => (event.payload as { week?: string }).week === previous).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const payload = (committed?.payload ?? {}) as { keptMinutes?: number; deferred?: number; dropped?: number };
+  const accepted = [...firstAcceptedAt(ctx.workspaceId).values()].filter((iso) => {
+    const day = formatInTimeZone(new Date(iso), zone, "yyyy-MM-dd");
+    return day >= previous && day < week;
+  }).length;
+  if (!committed && !accepted) return undefined;
+  return { week: previous, committed: Boolean(committed), keptMinutes: payload.keptMinutes ?? 0, deferred: payload.deferred ?? 0, dropped: payload.dropped ?? 0, accepted };
+}
 
 /**
  * The week's work: on the person's board and open, not held past the week (`notBefore`), and either due by the week's end (overdue
@@ -71,7 +93,8 @@ export function loadWeeklyCommit(ctx: AccessContext, now = appNow()): WeeklyComm
     .sort((a, b) => COMMIT_GROUPS.indexOf(a.suggestion.group) - COMMIT_GROUPS.indexOf(b.suggestion.group) || (a.dueDay ?? "9999").localeCompare(b.dueDay ?? "9999"));
   const demandMinutes = tasks.reduce((sum, item) => sum + item.task.minutes, 0);
   const due = weeklyCommitDue({ today, clock, last, demandMinutes, capacityMinutes })?.reason;
-  return { week, weekEnd, capacityMinutes, demandMinutes, rows, ...(due ? { due } : {}), ...(last ? { last } : {}) };
+  const lastWeek = lastWeekRecap(ctx, week);
+  return { week, weekEnd, capacityMinutes, demandMinutes, rows, ...(due ? { due } : {}), ...(last ? { last } : {}), ...(lastWeek ? { lastWeek } : {}) };
 }
 
 /** The person's groups, every row present: what they did not touch keeps its suggestion. */

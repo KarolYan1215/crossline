@@ -11,7 +11,7 @@ import { TEXT_LIMITS, textBlockAudit } from "./text-blocks.js";
  *
  * Strict since the product pass finished (2026-10-08): any finding fails. `COPY_AUDIT_REPORT=1` only prints them, for a page being reworked.
  */
-const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/return", "/materials/[id]", "/materials/view"];
+const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/return", "/materials/[id]", "/materials/view", "/commit", "/wrap"];
 
 /** The material pages need a tutorial and an upload to draw (`ensureMaterials`); every other entry is its own address. */
 const addressOf = async (page: Page, path: string) => path === "/materials/[id]" ? (await ensureMaterials(page)).tutorial

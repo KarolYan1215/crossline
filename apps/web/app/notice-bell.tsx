@@ -35,13 +35,25 @@ export function toastCandidate(body: NoticesBody, toasted: string): NoticeView |
   return newest && newest.at > body.readAt && newest.id !== toasted ? newest : undefined;
 }
 
+/** Today's messages, then earlier ones (this browser's day), each newest first; an empty group is left out. Exported for its test. */
+export function noticeGroups(items: NoticeView[], now = new Date()): Array<{ today: boolean; items: NoticeView[] }> {
+  const day = (date: Date) => date.toLocaleDateString("en-CA");
+  const today = items.filter((item) => day(new Date(item.at)) === day(now));
+  const earlier = items.filter((item) => day(new Date(item.at)) !== day(now));
+  return [{ today: true, items: today }, { today: false, items: earlier }].filter((group) => group.items.length > 0);
+}
+
+/**
+ * One message: what happened, and only ways to go somewhere — the page it links to, or the 小帮手 for one that also carries buttons that
+ * act. The bell decides nothing itself (docs/plans/page-drafts-1028/scenarios.md conclusion 6).
+ */
 function NoticeItem({ item, onDone }: { item: NoticeView; onDone: () => void }) {
   const t = useT();
   return <>
     <p>{item.text}</p>
     {(item.links.length > 0 || item.actionable) && <div className="notice-links">
       {item.links.map((link) => <a key={link.href + link.label} href={link.href} onClick={onDone}>{link.label}</a>)}
-      {item.actionable && <button type="button" onClick={() => { window.dispatchEvent(new Event(OPEN_HELPER_EVENT)); onDone(); }}>{t("在小帮手里处理")}</button>}
+      {item.actionable && <button type="button" onClick={() => { window.dispatchEvent(new Event(OPEN_HELPER_EVENT)); onDone(); }}>{t("在小帮手里处理")} →</button>}
     </div>}
   </>;
 }
@@ -99,12 +111,16 @@ export function NoticeBell() {
       {unread > 0 && <span className="notice-dot">{unread > 9 ? "9+" : unread}</span>}
     </button>
     {open && <div className="notice-panel" role="dialog" aria-label={t("提醒")}>
-      <h2>{t("提醒")}</h2>
+      <header className="notice-panel-head"><h2>{t("提醒")}</h2><small>{t("系统做过的事和发过的提醒；要拍板的在待确认")}</small></header>
       {!body?.items.length ? <p className="muted">{t("近 7 天没有提醒。")}</p>
-        : <ol>{body.items.map((item) => <li key={item.id} {...(item.at > (body.readAt ?? "") && unread ? { "data-unread": "" } : {})}>
-          <time dateTime={item.at}>{noticeTime(item.at, new Date(), locale)}</time>
-          <NoticeItem item={item} onDone={() => setOpen(false)} />
-        </li>)}</ol>}
+        : noticeGroups(body.items).map((group) => <section key={group.today ? "today" : "earlier"} className="notice-group">
+          <h3>{group.today ? t("今天") : t("更早")}</h3>
+          <ol>{group.items.map((item) => <li key={item.id} {...(item.at > (body.readAt ?? "") && unread ? { "data-unread": "" } : {})}>
+            <time dateTime={item.at}>{noticeTime(item.at, new Date(), locale)}</time>
+            <NoticeItem item={item} onDone={() => setOpen(false)} />
+          </li>)}</ol>
+        </section>)}
+      <a className="notice-panel-foot" href="/approvals" onClick={() => setOpen(false)}>{t("去待确认 →")}</a>
     </div>}
     {/* On the page's top layer: inside the header it sat under the banners that follow it. */}
     {toast && !open && createPortal(<div className="notice-toast" role="status" aria-live="polite">

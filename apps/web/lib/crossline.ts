@@ -2266,7 +2266,7 @@ const dayOf = (iso: string) => iso.slice(0, 10);
 
 /** Every WorkOrder's first arrival at `accepted`, deduped by entity — a revoke-then-reaccept cycle must
  * not count as two completions of the same thing. */
-function firstAcceptedAt(workspaceId: string): Map<string, string> {
+export function firstAcceptedAt(workspaceId: string): Map<string, string> {
   const earliest = new Map<string, string>();
   for (const event of getStore().listEvents(workspaceId, { type: "work_order.transitioned" })) {
     if ((event.payload as { to?: string }).to !== "accepted") continue;

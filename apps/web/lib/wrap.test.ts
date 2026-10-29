@@ -23,6 +23,37 @@ const at = (clock: string) => { vi.stubEnv("CROSSLINE_FIXED_NOW", toZonedInstant
 const plus = (clock: string, minutes: number) => { const total = Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3)) + minutes;
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`; };
 
+test("`/wrap?day=` reaches back seven days and no further, and an earlier day's block is written under that day's key", async () => {
+  at("08:30");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "hw", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "",
+    intent: "完成 ECE 555 作业 3", state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-16", materialContract: [], family: "deep_work" } });
+  store.saveStepPlan(ws, "hw", plan([step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题", ["s1"])]), TEST_CTX.principalId, "initial");
+  const first = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith("scheduled:hw") && block.day === DAY)
+    .sort((a, b) => a.start.localeCompare(b.start))[0]!;
+  await nudgesFor(TEST_CTX, at(plus(first.start, -10)));
+  await nudgesFor(TEST_CTX, at(plus(first.start, 1)));
+
+  // The next morning: today's own wrap-up is empty, yesterday's still holds the block, with its line.
+  const nextMorning = new Date(Date.parse(toZonedInstant("2026-10-13", "09:00", ZONE)));
+  vi.stubEnv("CROSSLINE_FIXED_NOW", nextMorning.toISOString());
+  const { wrapDayOf } = await import("./wrap");
+  expect(wrapDayOf(TEST_CTX, DAY, nextMorning)).toBe(DAY);
+  expect(wrapDayOf(TEST_CTX, "2026-10-05", nextMorning)).toBe("2026-10-13");
+  expect(wrapDayOf(TEST_CTX, "2026-10-06", nextMorning)).toBe("2026-10-06");
+  expect(wrapDayOf(TEST_CTX, "2026-10-14", nextMorning)).toBe("2026-10-13");
+  expect(wrapDayOf(TEST_CTX, "nonsense", nextMorning)).toBe("2026-10-13");
+  expect(loadWrap(TEST_CTX, nextMorning).rows).toEqual([]);
+  const yesterday = loadWrap(TEST_CTX, nextMorning, DAY);
+  expect(yesterday).toMatchObject({ day: DAY, today: false, open: 1 });
+  expect(yesterday.rows).toEqual([expect.objectContaining({ blockId: first.id, line: "research", timedMinutes: 0 })]);
+
+  expect(answerWrapBlock(TEST_CTX, first.id, "not_done", nextMorning, DAY)).toMatchObject({ ok: true, done: "not_done" });
+  expect(store.listEvents(ws, { type: "block.confirmed" })).toEqual([expect.objectContaining({ entityId: `wrap:${DAY}:${first.id}`,
+    payload: expect.objectContaining({ blockId: first.id, day: DAY, outcome: "not_done" }) })]);
+  expect(loadWrap(TEST_CTX, nextMorning, DAY).open).toBe(0);
+});
+
 test("a block due later waits for the wrap-up; 部分 keeps the step open with half done, and 收工 ends the day's message", async () => {
   at("08:30");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");

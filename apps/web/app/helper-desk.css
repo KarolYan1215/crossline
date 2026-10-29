@@ -5,7 +5,8 @@
    mood, a blink when idle) > figure (breathing). */
 html:has(.helper-desk-page),html:has(.helper-desk-page) body,.helper-page.helper-desk-page{background:transparent!important}
 .helper-desk-page{min-height:100dvh;overflow:hidden}
-.desk{position:fixed;inset:0;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;padding:8px 12px 6px;
+/* The 2026-10-28 frame: the warm tokens (shell.css) under the names the pet uses. */
+.desk{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--line:var(--ds-chalk);position:fixed;inset:0;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;padding:8px 12px 6px;
   font:14px/1.5 Arial,"Microsoft YaHei",sans-serif;color:var(--ink)}
 .desk-stage{position:relative;display:flex;flex-direction:column;align-items:center;margin-right:8px}
 .desk-figure-button{position:relative;padding:0;border:0;background:none;line-height:0;cursor:grab;touch-action:none;border-radius:12px}
@@ -15,10 +16,10 @@ html:has(.helper-desk-page),html:has(.helper-desk-page) body,.helper-page.helper
 /* The figure is drawn on its own backdrop (CHARACTER_STANDARD), so it stands as a card with the ink border the page uses: hard edges keep
    the window's colour-key transparency clean (a soft fade would leave a dark halo). */
 .desk-figure{display:block;width:112px;height:168px;background-color:var(--paper);background-repeat:no-repeat;background-size:cover;
-  background-position:50% 30%;border:1.5px solid var(--ink);border-radius:14px;transform-origin:50% 100%;animation:desk-breathe 4.2s ease-in-out infinite}
+  background-position:50% 30%;border:1px solid var(--ds-line);border-radius:14px;box-shadow:var(--ds-shadow);transform-origin:50% 100%;animation:desk-breathe 4.2s ease-in-out infinite}
 .desk-figure-none{display:flex;align-items:center;justify-content:center;width:72px;height:72px;border:1.5px solid var(--ink);border-radius:50%;
   background:var(--paper);font-size:13px;line-height:1.2}
-.desk-dot{position:absolute;top:6px;right:10px;width:12px;height:12px;border-radius:50%;background:#C00000;box-shadow:0 0 0 2px var(--paper)}
+.desk-dot{position:absolute;top:6px;right:10px;width:12px;height:12px;border-radius:50%;background:var(--ds-alarm);box-shadow:0 0 0 2px var(--paper)}
 @keyframes desk-breathe{0%,100%{transform:scale(1,1)}50%{transform:scale(.996,1.018)}}
 /* Idle: a blink every few seconds (a quick squash of the body). */
 @keyframes desk-blink{0%,93%,100%{transform:none}95%{transform:scale(1.01,.965)}97%{transform:none}}
@@ -26,7 +27,7 @@ html:has(.helper-desk-page),html:has(.helper-desk-page) body,.helper-page.helper
 /* Thinking: head tilted, a slow bob, three dots rising in a thought bubble. */
 @keyframes desk-ponder{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 .desk[data-pose="thinking"] .desk-body{animation:desk-ponder 2.6s ease-in-out infinite}
-.desk-thought{position:absolute;top:-6px;right:-8px;z-index:1;display:flex;gap:4px;padding:6px 8px;border:1.5px solid var(--ink);border-radius:14px;
+.desk-thought{position:absolute;top:-6px;right:-8px;z-index:1;display:flex;gap:4px;padding:6px 8px;border:1px solid var(--ds-line);border-radius:14px;
   background:var(--paper)}
 .desk-thought i{width:6px;height:6px;border-radius:50%;background:var(--ink);animation:desk-dots 1.2s ease-in-out infinite}
 .desk-thought i:nth-child(2){animation-delay:.2s}
@@ -53,21 +54,23 @@ html:has(.helper-desk-page),html:has(.helper-desk-page) body,.helper-page.helper
 .desk-alert{position:absolute;top:0;right:4px;z-index:1;width:22px;height:22px;border-radius:50%;background:var(--ink);color:var(--paper);
   font:700 14px/22px Arial,sans-serif;text-align:center}
 /* The bubble, the small input and the menu: paper cards, as on the page. */
-.desk-bubble{position:relative;display:flex;align-items:flex-start;gap:4px;max-width:260px;margin-right:24px;padding:8px 10px;border:1.5px solid var(--ink);
-  border-radius:12px;background:var(--paper);box-shadow:0 2px 0 var(--ink)}
-.desk-bubble::after{content:"";position:absolute;bottom:-8px;right:40px;width:12px;height:12px;background:var(--paper);border-right:1.5px solid var(--ink);
-  border-bottom:1.5px solid var(--ink);transform:rotate(45deg)}
+.desk-bubble{position:relative;display:flex;align-items:flex-start;gap:4px;max-width:260px;margin-right:24px;padding:8px 12px;border:1px solid var(--ds-line);
+  border-radius:var(--ds-radius);background:var(--paper);box-shadow:var(--ds-shadow)}
+.desk-bubble::after{content:"";position:absolute;bottom:-8px;right:40px;width:12px;height:12px;background:var(--paper);border-right:1px solid var(--ds-line);
+  border-bottom:1px solid var(--ds-line);transform:rotate(45deg)}
 .desk-bubble-text{flex:1;min-width:0;padding:0;border:0;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
 .desk-bubble-close{padding:0 4px;border:0;background:none;color:var(--graphite);font-size:16px;line-height:1;cursor:pointer}
 @keyframes desk-say{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .desk-bubble[data-message]{animation:desk-say .25s ease-out}
-.desk-panel{width:min(316px,calc(100vw - 24px));max-height:calc(100dvh - 210px);overflow:auto;padding:8px 10px;border:1.5px solid var(--ink);
-  border-radius:12px;background:var(--paper)}
+.desk-panel{width:min(316px,calc(100vw - 24px));max-height:calc(100dvh - 210px);overflow:auto;padding:10px 12px;border:1px solid var(--ds-line);
+  border-radius:var(--ds-radius);background:var(--paper);box-shadow:var(--ds-shadow)}
 .desk-panel>header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;font-weight:700}
 .desk-panel-actions{display:inline-flex;align-items:center;gap:6px}
-.desk-panel .helper-calls-badge{font-size:12px;padding:4px 8px}
-.desk-menu{display:grid;min-width:180px;margin-right:24px;padding:4px;border:1.5px solid var(--ink);border-radius:10px;background:var(--paper)}
-.desk-menu button{padding:7px 10px;border:0;border-radius:6px;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.desk-panel .helper-calls-badge{font-size:12px;padding:4px 10px}
+.desk-panel :is(.primary-button,.secondary-button,.text-button,.conversation-options button){border-radius:var(--ds-radius-control)}
+.desk-panel .primary-button{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
+.desk-menu{display:grid;min-width:180px;margin-right:24px;padding:4px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--paper);box-shadow:var(--ds-shadow)}
+.desk-menu button{padding:7px 10px;border:0;border-radius:var(--ds-radius-control);background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
 .desk-menu button:hover,.desk-menu button:focus-visible{background:var(--line)}
 .desk-menu .desk-menu-cancel{color:var(--graphite)}
 .desk[data-still] *,.desk[data-still] *::after{animation:none!important;transition:none!important}

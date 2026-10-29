@@ -1,0 +1,66 @@
+/*
+ * The 小帮手 on its own (`/helper` and the pinned window, helper-pet-client.tsx `HelperPocket`) in the 2026-10-28 frame
+ * (docs/plans/page-drafts-1028/helper.html): head, today's band, running assistant chips, then the whole conversation and the box.
+ */
+.helper-page:not(.helper-desk-page){background:var(--ds-bg)}
+.assistant-panel.helper-pocket{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);--rule:var(--ds-line);
+  grid-template-rows:auto auto minmax(0,1fr);background:var(--ds-card);color:var(--ink);font-family:Arial,"DengXian","Microsoft YaHei",sans-serif}
+.helper-pocket>.hw-head{gap:8px;padding:12px 14px;border-bottom:1px solid var(--ds-line);font-family:inherit;font-size:14px;color:var(--ink)}
+.hw-name{display:grid!important;gap:1px;min-width:0}
+.hw-name b{font-size:15px;font-weight:600}
+.hw-name small{font-size:12px;line-height:1.35;color:var(--graphite);white-space:normal}
+.helper-pocket .hw-name small::before{content:"";display:inline-block;width:7px;height:7px;margin-right:5px;border-radius:50%;background:var(--ds-accent);vertical-align:1px}
+.helper-pocket .hw-name small[data-pose="down"]::before{background:var(--ds-alarm)}
+.helper-pocket .helper-face{border-color:var(--ds-line)}
+.helper-pocket .assistant-panel-actions{gap:6px}
+.helper-pocket .helper-calls-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border:1px solid transparent;border-radius:999px;
+  background:var(--ds-alarm-soft);color:var(--ds-alarm-ink);font-size:12px;font-weight:600}
+.helper-pocket .helper-calls-badge.urgent{background:var(--ds-alarm-ink);color:var(--ds-card)}
+.helper-pocket a.ds-icon{text-decoration:none}
+
+/* ── today ── */
+.hw-today{display:grid;gap:10px;padding:10px 14px 12px;border-bottom:1px solid var(--ds-line)}
+.hw-band{display:grid;gap:2px}
+.hw-band-track{position:relative;height:18px;border-radius:5px;background:var(--ds-chalk);overflow:hidden}
+.hw-band-block{position:absolute;top:2px;bottom:2px;border-radius:3px;background:var(--lc,var(--ds-accent))}
+.hw-band-block[data-kind="fixed"]{background:var(--ds-card);box-shadow:inset 0 0 0 2px var(--lc,var(--ds-muted))}
+.hw-band-block[data-missed]{background:transparent;box-shadow:inset 0 0 0 1.5px var(--lc,var(--ds-muted));opacity:.7}
+.hw-band-now{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--ds-alarm)}
+.hw-band-axis{position:relative;height:16px;font-size:12px;color:var(--graphite)}
+.hw-band-axis span{position:absolute;transform:translateX(-50%)}
+.hw-band-axis span:first-child{transform:none}
+.hw-band-axis span:last-child{transform:translateX(-100%)}
+.hw-band-next{margin:0;font-size:12px;line-height:1.45;color:var(--graphite);overflow-wrap:anywhere}
+
+/* ── running assistant tasks ── */
+.hw-chips{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.hw-chip{display:grid;grid-template-columns:auto minmax(0,1fr) 56px auto auto;align-items:center;gap:8px;padding:5px 6px 5px 12px;border:1px solid var(--ds-line);
+  border-radius:999px;background:var(--ds-bg);font-size:12px}
+.hw-chip>svg{color:var(--ds-accent-ink)}
+.hw-chip-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.hw-chip-bar{height:5px;border-radius:3px;background:var(--ds-line);overflow:hidden}
+.hw-chip-bar i{display:block;height:100%;border-radius:3px;background:var(--ds-accent)}
+.hw-chip-bar[data-indeterminate] i{animation:hw-slide 1.6s ease-in-out infinite}
+@keyframes hw-slide{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+@media (prefers-reduced-motion:reduce){.hw-chip-bar[data-indeterminate] i{animation:none}}
+.hw-chip-note{color:var(--graphite);white-space:nowrap}
+.hw-chip[data-state="ended"]{opacity:.7}
+.hw-chip .ds-icon{width:26px;height:26px;border-radius:50%}
+
+/* ── the conversation in the narrow window ── */
+.helper-pocket .conversation{grid-row:3;padding:10px 14px 12px}
+.helper-pocket .conversation-search input{border-radius:var(--ds-radius-control);border:1px solid var(--ds-line);background:var(--ds-bg)}
+.helper-pocket .conversation-person p{border-radius:12px 12px 4px 12px;background:var(--ds-accent-soft)}
+.helper-pocket .conversation-card{border:1px solid var(--ds-line);border-left:3px solid var(--ds-accent);border-radius:10px;background:var(--ds-bg)}
+.helper-pocket .conversation-options button{border-color:var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-card)}
+.helper-pocket .conversation-options button:first-child{border-color:var(--ds-accent);background:var(--ds-accent);color:var(--ds-on-accent)}
+.helper-pocket :is(.primary-button,.secondary-button,.text-button){border-radius:var(--ds-radius-control)}
+.helper-pocket .primary-button{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
+.helper-pocket .composer-box{border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card)}
+.helper-pocket .composer-box:focus-within{border-color:var(--ds-accent)}
+.helper-pocket .composer-send{background:var(--ds-accent);color:var(--ds-on-accent)}
+/* The day's opener draws its own day timeline: here the band above already does, and 「没有要回答的问题」 is not a button to press. */
+.helper-pocket .opener-figure{display:none}
+.helper-pocket .opener-badge[data-empty]{display:none}
+.helper-pocket .opener-badge{border-radius:999px;border-color:var(--ds-line)}
+.helper-pocket .opener-urgent{border:1px solid var(--ds-line);border-left:4px solid var(--lc,var(--ds-accent));border-radius:8px}

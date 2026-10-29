@@ -66,3 +66,11 @@ test("「按建议确认」 on the card applies the suggestion; 「这周不调�
   expect(collectAsks(TEST_CTX, MONDAY).some((item) => item.kind === "weekly_commit")).toBe(false);
   expect(applyWeeklyCommit(TEST_CTX, { first: "sideways" }, { now: MONDAY })).toEqual({ ok: false, code: "COMMIT_GROUP_INVALID" });
 });
+
+test("last week's line reads that week's commitment; a week with no commitment and nothing finished shows no line", () => {
+  const store = setup();
+  expect(loadWeeklyCommit(TEST_CTX, MONDAY).lastWeek).toBeUndefined();
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "week.committed:prev", type: "week.committed", entityId: ws,
+    payload: { week: "2026-10-05", capacityMinutes: 1800, demandMinutes: 2000, keptMinutes: 1500, deferred: 2, dropped: 1, reason: "weekly" } });
+  expect(loadWeeklyCommit(TEST_CTX, MONDAY).lastWeek).toMatchObject({ week: "2026-10-05", committed: true, keptMinutes: 1500, deferred: 2, dropped: 1 });
+});

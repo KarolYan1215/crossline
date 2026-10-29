@@ -9,7 +9,7 @@ import { ensureMaterials, ensurePortrait, ensureSkillLibrary } from "./ledger.js
  * Disabled controls and text that is hidden on purpose (visibility, opacity 0) are exempt from contrast: WCAG exempts inactive
  * controls, and a hidden element is not read.
  */
-const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding", "/review", "/portrait", "/return", "/materials/[id]", "/materials/view", "/helper"];
+const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/onboarding", "/review", "/portrait", "/return", "/materials/[id]", "/materials/view", "/helper", "/commit", "/wrap"];
 
 /** The material pages need a tutorial and an upload to draw (`ensureMaterials`); every other entry is its own address. */
 const addressOf = async (page: Page, path: string) => path === "/materials/[id]" ? (await ensureMaterials(page)).tutorial

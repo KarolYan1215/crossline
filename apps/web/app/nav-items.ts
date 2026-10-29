@@ -22,6 +22,16 @@ export const SIDE_ITEMS = [
  * The side bar's second group (2026-10-28, the frame's redesign): what waits for a decision, bringing work in from other tools, the
  * portrait and the settings. Wider than `SIDE_ITEMS`, which the narrow header keeps short; the phone's 「更多」 lists these too.
  */
+/**
+ * The side bar's 「节奏与回顾」 group (2026-10-28, docs/plans/page-drafts-1028/scenarios.md §1): the week's commitment, the evening wrap-up
+ * and the weekly review — pages visited at a time of the week or day, not to work in. The weekly review had no way in but the 主线 page.
+ */
+export const RITUAL_ITEMS = [
+  { label: "本周承诺", href: "/commit", badge: false },
+  { label: "收工", href: "/wrap", badge: false },
+  { label: "周复盘", href: "/review", badge: false }
+] as const;
+
 export const SECONDARY_ITEMS = [
   { label: "待确认", href: "/approvals", badge: true },
   { label: "导入", href: "/settings#import", badge: false },

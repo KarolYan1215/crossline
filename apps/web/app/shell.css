@@ -59,6 +59,7 @@
   .side-nav nav{display:grid;gap:14px}
   .side-nav-group{display:grid;gap:2px}
   .side-nav-group+.side-nav-group{padding-top:14px;border-top:1px solid var(--ds-line)}
+  .side-nav-group-label{padding:0 10px 4px;font-size:12px;color:var(--ds-muted)}
   .side-nav a,.side-nav-foot>button{display:flex;align-items:center;gap:10px;min-height:38px;padding:7px 10px;border-radius:var(--ds-radius-control);
     font-size:14px;color:var(--ds-muted);text-align:left;width:100%}
   .side-nav a svg,.side-nav-foot svg{flex:none}

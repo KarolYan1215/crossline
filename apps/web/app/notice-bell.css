@@ -1,26 +1,36 @@
-/* The bell at the top right: reminders that ask nothing (notice-bell.tsx). Ink on paper, no radius, like the rest of the frame. */
+/* The bell at the top right: what the system did and the reminders it sent, which ask nothing (notice-bell.tsx). The 2026-10-28 frame:
+   a card with the warm tokens (shell.css), today's messages apart from earlier ones, every button a way somewhere, never a decision. */
 .notice-bell{position:relative;display:inline-flex}
-.notice-bell-button{position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:28px;padding:0;
-  border:1px solid transparent;background:none;color:var(--graphite);cursor:pointer}
-.notice-bell-button:hover,.notice-bell-button:focus-visible,.notice-bell-button[aria-expanded="true"]{color:var(--ink);border-color:var(--mist)}
-.notice-dot{position:absolute;top:-4px;right:-6px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#C00000;color:#FFFFFF;
-  font:600 12px/16px Arial,sans-serif;text-align:center;box-shadow:0 0 0 2px var(--paper)}
-.notice-panel{position:absolute;top:calc(100% + 6px);right:0;z-index:120;width:min(380px,calc(100vw - 32px));max-height:min(70vh,560px);overflow:auto;
-  background:var(--paper);border:1px solid var(--ink);padding:12px 14px;color:var(--ink);font-family:Arial,sans-serif;font-size:14px;white-space:normal}
-.notice-panel h2{margin:0 0 8px;font-size:14px}
+.notice-bell-button{position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;
+  border:1px solid transparent;border-radius:var(--ds-radius-control);background:none;color:var(--graphite);cursor:pointer}
+.notice-bell-button:hover,.notice-bell-button:focus-visible,.notice-bell-button[aria-expanded="true"]{color:var(--ink);background:var(--chalk)}
+.notice-dot{position:absolute;top:-4px;right:-6px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--ds-alarm-ink);color:var(--ds-bg);
+  font:600 12px/16px Arial,sans-serif;text-align:center;box-shadow:0 0 0 2px var(--ds-bg)}
+.notice-panel{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);
+  position:absolute;top:calc(100% + 8px);right:0;z-index:120;width:min(400px,calc(100vw - 32px));max-height:min(72vh,600px);overflow:auto;
+  display:grid;gap:4px;padding:14px 16px 12px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:var(--ds-radius);box-shadow:var(--ds-shadow);
+  color:var(--ds-ink);font-family:Arial,"DengXian","Microsoft YaHei",sans-serif;font-size:14px;white-space:normal}
+.notice-panel-head{display:grid;gap:2px;margin-bottom:4px}
+.notice-panel-head h2{margin:0;font-size:16px;font-weight:600}
+.notice-panel-head small{font-size:12px;color:var(--ds-muted)}
+.notice-group h3{margin:8px 0 2px;font-size:12px;font-weight:600;color:var(--ds-muted)}
 .notice-panel ol{margin:0;padding:0;list-style:none;display:grid;gap:0}
-.notice-panel li{display:grid;gap:4px;padding:10px 0;border-top:1px solid var(--mist)}
-.notice-panel li[data-unread]{border-left:3px solid #C00000;padding-left:8px}
-.notice-panel time{font-size:12px;color:var(--graphite)}
+.notice-panel li{display:grid;gap:4px;padding:10px 0 10px 12px;border-top:1px solid var(--ds-line);border-left:3px solid transparent}
+.notice-panel li[data-unread]{border-left-color:var(--ds-alarm)}
+.notice-panel time{font-size:12px;color:var(--ds-muted)}
 .notice-panel p{margin:0;line-height:1.5}
 .notice-links{display:flex;flex-wrap:wrap;gap:6px}
-.notice-links a,.notice-links button{font:inherit;font-size:13px;padding:3px 8px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);text-decoration:none;cursor:pointer}
-.notice-links a:hover,.notice-links button:hover{background:var(--chalk)}
+.notice-links a,.notice-links button{font:inherit;font-size:13px;padding:3px 10px;border:1px solid var(--ds-line);border-radius:999px;background:var(--ds-bg);
+  color:var(--ds-ink);text-decoration:none;cursor:pointer}
+.notice-links a:hover,.notice-links button:hover{border-color:var(--ds-accent);background:var(--ds-accent-soft)}
+.notice-panel-foot{justify-self:end;margin-top:6px;font-size:12px;color:var(--ds-muted);text-decoration:underline}
+.notice-panel-foot:hover{color:var(--ds-ink)}
 .notice-toast{position:fixed;top:56px;right:16px;z-index:130;width:min(360px,calc(100vw - 32px));display:flex;align-items:flex-start;gap:4px;
-  background:var(--paper);border:1px solid var(--ink);border-left:3px solid #C00000;box-shadow:0 6px 20px rgba(0,0,0,.12);animation:notice-in .18s ease-out}
-.notice-toast-body{flex:1;text-align:left;font:14px/1.5 Arial,sans-serif;color:var(--ink);background:none;border:0;padding:10px 4px 10px 12px;cursor:pointer;white-space:normal}
-.notice-toast-close{order:2;border:0;background:none;color:var(--graphite);font-size:18px;line-height:1;padding:8px 10px;cursor:pointer}
-.notice-toast-close:hover,.notice-toast-close:focus-visible{color:var(--ink)}
+  background:var(--ds-card);border:1px solid var(--ds-line);border-left:3px solid var(--ds-alarm);border-radius:var(--ds-radius-control);box-shadow:var(--ds-shadow);
+  animation:notice-in .18s ease-out}
+.notice-toast-body{flex:1;text-align:left;font:14px/1.5 Arial,"DengXian","Microsoft YaHei",sans-serif;color:var(--ds-ink);background:none;border:0;padding:10px 4px 10px 12px;cursor:pointer;white-space:normal}
+.notice-toast-close{order:2;border:0;background:none;color:var(--ds-muted);font-size:18px;line-height:1;padding:8px 10px;cursor:pointer}
+.notice-toast-close:hover,.notice-toast-close:focus-visible{color:var(--ds-ink)}
 @keyframes notice-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.notice-toast{animation:none}}
 @media (max-width:680px){.notice-bell-button{width:44px;height:44px}.notice-toast{top:auto;bottom:calc(76px + env(safe-area-inset-bottom))}}

@@ -1,6 +1,14 @@
 import { expect, test } from "vitest";
 import { isReminderKind } from "./notice-kinds";
-import { toastCandidate } from "./notice-bell";
+import { noticeGroups, toastCandidate } from "./notice-bell";
+
+test("the bell lists today's messages apart from earlier ones, leaving an empty group out", () => {
+  const now = new Date(2026, 9, 27, 12, 0);
+  const item = (id: string, at: Date) => ({ id, kind: "mail_check", text: id, at: at.toISOString(), links: [], actionable: false });
+  const groups = noticeGroups([item("a", new Date(2026, 9, 27, 9, 0)), item("b", new Date(2026, 9, 26, 18, 0))], now);
+  expect(groups.map((group) => [group.today, group.items.map((entry) => entry.id)])).toEqual([[true, ["a"]], [false, ["b"]]]);
+  expect(noticeGroups([item("b", new Date(2026, 9, 26, 18, 0))], now).map((group) => group.today)).toEqual([false]);
+});
 
 test("what asks for an answer stays with the helper; everything else is a reminder", () => {
   expect(isReminderKind("block_confirm")).toBe(false);

@@ -1,20 +1,138 @@
-/* The weekly commitment and the evening wrap-up (docs/rituals.md): one card, a row per task or block, the choices at the row's end. */
-.ritual-card { max-width: 880px; display: grid; gap: 14px; }
-.ritual-card p { margin: 0; }
-.ritual-lead { font-size: 14px; }
-.ritual-meter { display: grid; gap: 6px; }
-.ritual-meter-bar { height: 10px; border-radius: 5px; background: var(--chalk); overflow: hidden; }
-.ritual-meter-bar span { display: block; height: 100%; background: var(--ink); }
-.ritual-meter-bar span[data-over] { background: var(--graphite); }
-.ritual-warn { font-size: 13px; font-weight: 600; }
-.ritual-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.ritual-rows li { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 8px 10px;
-  border-left: 3px solid var(--lc, var(--mist)); background: var(--paper); }
-.ritual-rows li[data-group="drop"] .ritual-row-main a { text-decoration: line-through; }
-.ritual-row-main { display: grid; gap: 2px; min-width: 0; flex: 1 1 240px; }
-.ritual-row-main a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ritual-row-main small { font-size: 13px; }
-.ritual-choices, .ritual-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.ritual-answered { font-size: 13px; color: var(--graphite); }
-.ritual-preview { display: grid; gap: 4px; font-size: 13px; }
-.ritual-preview ul { margin: 0; padding-left: 18px; }
+/*
+ * The ritual pages — 本周承诺, 收工 and 周复盘 — in the 2026-10-28 frame (tokens in shell.css; drafts in docs/plans/page-drafts-1028/).
+ * Inside `.rd-page` the original names point at the new tokens, as Today does, so the shared pieces they reuse (tags, task and question
+ * cards, charts) take the warm palette without rules of their own.
+ */
+html:has(.rd-page) body{background:var(--ds-bg)}
+.rd-page{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--shade:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);
+  --now:var(--ds-accent);--now-ink:var(--ds-accent-ink);color:var(--ink)}
+body:has(.rd-page) .running-head{background:var(--ds-bg)}
+.rd-inner{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;max-width:1240px;padding:8px 0 0}
+
+/* ── head ── */
+.rd-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px;padding:14px 0 4px}
+.rd-head-text{display:grid;gap:6px;min-width:0}
+.rd-head h1{margin:0;font-size:32px;line-height:1.1;font-weight:600;color:var(--ink)}
+.rd-head p{margin:0;font-size:13px;line-height:1.5;color:var(--graphite)}
+.rd-head-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.rd-icon-text{display:inline-flex;align-items:center;gap:6px}
+.rd-status{display:inline-flex;align-items:center;gap:6px;margin:0;font-size:13px;color:var(--graphite)}
+
+/* Controls in the warm style: 8px corners, the accent for the one primary press. */
+.rd-page :is(.primary-button,.secondary-button,.text-button,button.ask-option,.answer-all button){border-radius:var(--ds-radius-control)}
+.rd-page .primary-button{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
+.rd-page .primary-button:hover{background:var(--ds-accent-ink);color:var(--ds-on-accent)}
+.rd-page .secondary-button{background:var(--ds-card);border-color:var(--ds-line);color:var(--ink)}
+.rd-page .secondary-button:hover{border-color:var(--ds-accent)}
+.rd-page .ui-line-tag{flex:none;border:0;border-radius:999px;padding:0 8px;background:color-mix(in srgb,var(--lc,var(--graphite)) 14%,var(--ds-card));color:var(--ink);font-weight:600}
+
+/* ── cards ── */
+.rd-card{position:relative;min-width:0;padding:16px 18px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:var(--ds-radius);box-shadow:var(--ds-shadow)}
+.rd-card-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin:0 0 10px}
+.rd-card-head h2{display:inline-flex;align-items:center;gap:8px;margin:0;font-size:18px;font-weight:600;line-height:1.25;color:var(--ink)}
+.rd-card-head small{font-size:12px;color:var(--graphite)}
+.rd-card-head>button,.rd-card-head>a{margin-left:auto}
+.rd-card-head>a{font-size:12px;color:var(--graphite);text-decoration:underline}
+.rd-label{display:block;font-size:12px;color:var(--graphite)}
+.rd-figure{display:inline-flex;align-items:baseline;gap:4px;font-weight:600;color:var(--ink)}
+.rd-figure .ds-serif{font-size:32px;line-height:1.1;font-weight:700}
+.rd-figure small{font-size:13px;font-weight:400;color:var(--graphite)}
+.rd-figure[data-tone="alarm"] .ds-serif{color:var(--ds-alarm-ink)}
+.rd-figure-text{font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.rd-figure-text .ds-serif{font-size:22px}
+.rd-note,.rd-empty-line{margin:8px 0 0;font-size:13px;line-height:1.55;color:var(--graphite)}
+.rd-note a,.rd-empty-line a{color:var(--ink);text-decoration:underline}
+.rd-warn{margin:0;font-size:13px;font-weight:600;color:var(--ds-alarm-ink)}
+.rd-alert{margin:0;font-size:13px;color:var(--ds-alarm-ink)}
+.rd-done p,.rd-empty p{margin:0 0 8px}
+.rd-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.rd-preview h2{margin:0 0 6px;font-size:16px}
+.rd-preview p{margin:0}
+.rd-preview ul{margin:6px 0 0;padding-left:18px;font-size:13px;line-height:1.6}
+
+/* ── KPI row (收工) ── */
+.rd-kpis{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}
+.rd-kpis li{display:grid;gap:6px;align-content:start}
+
+/* ── 本周承诺: the capacity card ── */
+.cm-capacity{display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px 32px;align-items:end}
+.cm-figures{display:flex;gap:28px}
+.cm-figures>div{display:grid;gap:4px}
+.cm-meter{display:grid;gap:6px;min-width:0}
+.cm-meter-labels{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;font-size:12px;color:var(--graphite)}
+.cm-meter-bar{position:relative;height:14px;border-radius:7px;background:var(--ds-chalk);box-shadow:inset 0 0 0 1px var(--ds-line);overflow:hidden}
+.cm-meter-kept{position:absolute;inset:0 auto 0 0;border-radius:7px 0 0 7px;background:var(--ds-accent)}
+.cm-meter-over{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(-45deg,var(--ds-alarm) 0 4px,var(--ds-alarm-soft) 4px 8px)}
+.cm-meter-line{position:absolute;top:-2px;bottom:-2px;width:2px;margin-left:-1px;background:var(--ink)}
+.cm-recap{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 12px;border-radius:var(--ds-radius-control);
+  background:var(--ds-chalk);font-size:13px;color:var(--ink);text-decoration:none}
+.cm-recap svg{color:var(--graphite)}
+.cm-recap u{margin-left:auto;font-size:12px;color:var(--graphite)}
+.cm-recap:hover u{color:var(--ink)}
+
+/* ── 本周承诺: three columns ── */
+.cm-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}
+.cm-column-head{display:flex;align-items:center;gap:8px;margin:0 0 6px}
+.cm-column-head h2{margin:0;font-size:18px;font-weight:600}
+.cm-column-head small{font-size:13px;color:var(--graphite)}
+.cm-column[data-group="keep"] .cm-column-head svg{color:var(--ds-accent-ink)}
+.cm-column[data-group="drop"] .cm-column-head svg{color:var(--ds-alarm-ink)}
+.cm-rows{margin:0;padding:0;list-style:none;display:grid}
+.cm-rows li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:start;padding:10px 0;border-top:1px solid var(--ds-line)}
+.cm-rows li:first-child{border-top:0}
+.cm-grip{padding-top:2px;color:var(--ds-line)}
+.cm-row-main{display:grid;gap:3px;min-width:0}
+.cm-row-title{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0}
+.cm-row-title a{min-width:0;font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+.cm-row-title a:hover{text-decoration:underline}
+.cm-column[data-group="drop"] .cm-row-title a{text-decoration:line-through;text-decoration-color:var(--graphite)}
+.cm-row-main small{font-size:12px;line-height:1.45;color:var(--graphite)}
+.cm-reason{font-style:normal}
+.cm-row-moves{display:flex;gap:4px}
+.rd-page .cm-move{border-color:var(--ds-line);background:var(--ds-card)}
+.cm-none{margin:4px 0 0;font-size:13px;color:var(--graphite)}
+.cm-foot{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--ds-line);font-size:12px;color:var(--graphite)}
+
+/* ── 收工 ── */
+.wr-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,420px);gap:20px;align-items:start}
+.wr-side{display:grid;gap:20px;min-width:0}
+.wr-rows{margin:0;padding:0;list-style:none;display:grid}
+.wr-rows li{display:grid;grid-template-columns:110px minmax(0,1fr) auto;gap:8px 16px;align-items:center;padding:12px 0;border-top:1px solid var(--ds-line)}
+.wr-when{display:grid;gap:2px}
+.wr-when b{font-size:16px;font-weight:600}
+.wr-when small,.wr-what small{font-size:12px;color:var(--graphite)}
+.wr-what{display:grid;gap:3px;min-width:0}
+.wr-title{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0}
+.wr-title a{min-width:0;font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+.wr-title a:hover{text-decoration:underline}
+.wr-what .wr-answered{color:var(--ds-accent-ink)}
+.wr-choices{display:inline-flex;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);overflow:hidden;background:var(--ds-card)}
+.wr-choices button{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:4px 14px;border:0;border-left:1px solid var(--ds-line);border-radius:0;
+  background:transparent;color:var(--ink);font-size:13px;cursor:pointer}
+.wr-choices button:first-child{border-left:0}
+.wr-choices button:hover:not(:disabled){background:var(--ds-chalk)}
+.wr-choices button[aria-pressed="true"]{background:var(--ds-accent);color:var(--ds-on-accent)}
+.wr-choices button:disabled{cursor:default}
+.wr-choices button:disabled:not([aria-pressed="true"]){color:var(--graphite)}
+.wr-next{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+.wr-next li{display:flex;align-items:center;gap:10px;min-width:0;font-size:14px}
+.wr-next .ds-serif{flex:none;width:48px;font-size:15px}
+.wr-next-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd-page .answer-all{margin:0}
+
+/* ── narrow ── */
+@media (max-width:1100px){
+  .cm-columns{grid-template-columns:minmax(0,1fr)}
+  .wr-grid{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:760px){
+  .cm-capacity{grid-template-columns:minmax(0,1fr)}
+  .cm-figures{gap:18px;flex-wrap:wrap}
+  .rd-head h1{font-size:26px}
+  .wr-rows li{grid-template-columns:minmax(0,1fr)}
+  .wr-choices{width:100%}
+  .wr-choices button{flex:1 1 0;justify-content:center;min-height:44px}
+  .rd-card{padding:14px}
+  .rd-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .rd-figure .ds-serif{font-size:26px}
+}

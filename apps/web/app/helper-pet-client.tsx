@@ -6,6 +6,10 @@ import { HelperCalls } from "./helper-calls";
 import { HelperFace, helperMood, useHelper } from "./helper-state";
 import { useT } from "./locale-context";
 import { AWAY_MS, isNight, lookAt, petPose, POSE_LABEL, type PetPose } from "./helper-pet";
+import { ArrowUpRight, Minimize2 } from "lucide-react";
+import { ICON, IconButton } from "./ui/icon-button";
+import { HelperBand, RunningChip, useHelperDay } from "./helper-window";
+import "./helper-window.css";
 
 /** The window a node belongs to: the tab, or the pinned Picture-in-Picture window it was drawn into. */
 function viewOf(ref: RefObject<HTMLElement | null>): Window | null {
@@ -176,30 +180,40 @@ export async function openPinnedWindow(): Promise<Window | null> {
 }
 
 /**
- * The 小帮手 on its own, compact enough for a 360×520 window: the figure with what it is doing, what only the person can do, and today's
- * conversation. Shown by `/helper` and inside the pinned window; it says the page is present every minute, like the corner widget.
+ * The 小帮手 on its own, for a narrow window (the 2026-10-28 redesign after `docs/plans/page-drafts-1028/helper.html`; scene: away from
+ * Crossline's pages, say a line or glance at the next block). From the top: the figure with what it is doing and how many assistant runs
+ * are going, what only the person can do outside the app (`HelperCalls`), 打开 Crossline or 收起; today as one band with the next block;
+ * each running assistant task as a chip with its progress and 停止; then the day's whole conversation with search, and the input box.
+ * Shown by `/helper` and inside the pinned window; it says the page is present every minute, like the corner widget.
  */
 export function HelperPocket({ onClose }: { onClose?: () => void }) {
   const t = useT();
   const ref = useRef<HTMLElement>(null);
   const { pose, avatar } = usePetPose(ref);
+  const day = useHelperDay();
   usePresence(ref);
   // On `/helper` itself 「打开小帮手」 is already here; inside the pinned window the tab's widget takes the launch.
   useLaunchTarget(() => {}, !onClose);
+  const running = day?.running ?? [];
+  const doing = pose === "idle" ? "" : t(POSE_LABEL[pose]).replace(/^[^：:]+[：:]\s*/, "");
+  const status = [doing, running.length ? t("{{count}} 项助手任务在跑", { count: running.length }) : ""].filter(Boolean).join(" · ");
   return <section ref={ref} className="assistant-panel helper-pocket" aria-label={t("小帮手")}>
-    <header>
+    <header className="hw-head">
       <span className="helper-pocket-who">
         {avatar && <PetFace src={avatar} pose={pose} size="reply" />}
-        <span>{t("小帮手")}</span>
-        <span className="helper-pocket-state" role="status">{pose === "idle" ? "" : t(POSE_LABEL[pose]).replace(/^[^：:]+[：:]\s*/, "")}</span>
+        <span className="hw-name"><b>{t("小帮手")}</b><small className="helper-pocket-state" role="status" data-pose={pose}>{status || t("在这里")}</small></span>
       </span>
       <span className="assistant-panel-actions">
         <HelperCalls />
         {onClose
-          ? <button type="button" className="text-button" onClick={onClose} aria-label={t("收起钉在桌面的小帮手")}>{t("收起")}</button>
-          : <a className="text-button" href="/" target="crossline-main">{t("打开 Crossline")}</a>}
+          ? <IconButton label={t("收起钉在桌面的小帮手")} icon={<Minimize2 {...ICON} />} onClick={onClose} />
+          : <a className="ds-icon" href="/" target="crossline-main" aria-label={t("打开 Crossline")} title={t("打开 Crossline")}><ArrowUpRight {...ICON} /></a>}
       </span>
     </header>
+    {day && <div className="hw-today">
+      <HelperBand day={day} />
+      {running.length > 0 && <ul className="hw-chips" aria-label={t("正在运行的助手任务")}>{running.map((task) => <RunningChip key={task.taskId} task={task} />)}</ul>}
+    </div>}
     <Conversation variant="panel" />
   </section>;
 }
