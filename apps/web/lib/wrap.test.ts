@@ -96,7 +96,25 @@ test("a block due later waits for the wrap-up; 部分 keeps the step open with h
   expect(store.listEvents(ws, { type: "block.confirmed" })).toHaveLength(1);
   expect(loadWrap(TEST_CTX, at(plus(view.at!, 7))).open).toBe(0);
 
-  finishWrap(TEST_CTX, at(plus(view.at!, 8)));
+  await finishWrap(TEST_CTX, at(plus(view.at!, 8)));
   expect(loadWrap(TEST_CTX, at(plus(view.at!, 8))).done).toBe(true);
   expect(answerWrapBlock(TEST_CTX, "scheduled:none", "done", at(plus(view.at!, 9)))).toMatchObject({ ok: false, code: "CONFIRM_NOT_FOUND" });
+});
+
+test("收工 keeps tomorrow's first blocks (the ones the page just showed) where they are the next morning", async () => {
+  at("21:00");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  store.saveWorkOrder({ id: "hw", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "",
+    intent: "完成 ECE 555 作业 3", state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-16", materialContract: [], family: "deep_work" } });
+  store.saveStepPlan(ws, "hw", plan([step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题", ["s1"])]), TEST_CTX.principalId, "initial");
+  const tomorrow = "2026-10-13";
+  const shown = (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith("scheduled:") && block.day === tomorrow)
+    .sort((a, b) => a.start.localeCompare(b.start)).slice(0, 3);
+  expect(shown.length).toBeGreaterThan(0);
+  expect(await finishWrap(TEST_CTX, at("23:00"))).toEqual({ ok: true, kept: shown.length });
+  const frozen = JSON.parse(store.getSetting(ws, "schedule.frozen")!) as Array<{ blockId: string; reason: string; until: string }>;
+  expect(frozen.map((item) => item.blockId).sort()).toEqual(shown.map((block) => block.id).sort());
+  expect(frozen.every((item) => item.reason === "keep" && item.until === toZonedInstant(tomorrow, "23:59", ZONE))).toBe(true);
+  // A second 收工 keeps nothing twice.
+  expect(await finishWrap(TEST_CTX, at("23:05"))).toEqual({ ok: true, kept: 0 });
 });

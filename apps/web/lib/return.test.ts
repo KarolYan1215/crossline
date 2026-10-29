@@ -151,6 +151,20 @@ test("each step that had a time while away is its own item, named 「任务 · �
   expect(store.listEvents(ws, { type: "return.answered" }).map((event) => (event.payload as { stepId?: string }).stepId)).toEqual([s1, s2]);
 });
 
+test("an overdue task listed by its current step is settled by one answer: the next step does not come up as a new item", () => {
+  const { store, order } = setup();
+  const now = new Date();
+  const since = new Date(now.getTime() - 4 * DAY);
+  said(store, since);
+  order("late", "完成 ECE 555 作业 2", { dueDate: new Date(now.getTime() - 2 * DAY).toISOString().slice(0, 10) });
+  store.saveStepPlan(ws, "late", { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 6, unit: "题" }, rationale: "按题拆分",
+    steps: [step("s1", "推导第 1–2 题"), step("s2", "推导第 3–4 题"), step("s3", "推导第 5–6 题")] }, TEST_CTX.principalId, "t");
+  const [s1] = store.getStepPlan(ws, "late")!.steps.map((item) => item.id);
+  expect(returnView(TEST_CTX, since.toISOString(), now).items.map((item) => item.key)).toEqual([`late#${s1}`]);
+  expect(answerReturn(TEST_CTX, "late", "rolled", { stepId: s1! }, now)).toEqual({ ok: true });
+  expect(returnView(TEST_CTX, since.toISOString(), now).items).toEqual([]);
+});
+
 test("finishing the last open step hands the task in", () => {
   const { store, order } = setup();
   const now = new Date();

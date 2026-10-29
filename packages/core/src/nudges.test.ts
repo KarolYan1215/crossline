@@ -72,6 +72,17 @@ test("a timer half again over the step's usual minutes asks whether the step is 
   expect(planNudges(base({ blocks: [], timer: { ...timer, startedAt: "2026-10-10T19:30:00.000Z" } }))).toEqual([]);
 });
 
+test("a timer paused overnight and resumed counts only the minutes it ran, not the night", () => {
+  // Started yesterday, paused for the night (23 h 50 m), resumed this morning: it has run 45 minutes against a 30-minute step.
+  const timer = { orderId: "hw2", title: "完成 ECE 555 作业 2", stepId: "v1s1", stepTitle: "拆解题目", startedAt: "2026-10-09T19:15:00.000Z", usualMinutes: 30 };
+  const quiet = { timerRunning: true, inMeeting: false, answeredRecently: false };
+  const [nudge] = planNudges(base({ blocks: [], timer: { ...timer, pausedMinutes: 23 * 60 + 50 }, quiet }));
+  expect(nudge).toMatchObject({ kind: "timer_overrun" });
+  expect(nudge!.text).toContain("45 分钟");
+  // Paused for longer: 15 minutes run, under the usual 30, nothing to say.
+  expect(planNudges(base({ blocks: [], timer: { ...timer, pausedMinutes: 24 * 60 + 20 }, quiet }))).toEqual([]);
+});
+
 test("busy, muted, capped: only the urgent get through while busy, a muted kind never, and the counted stop at the day's cap", () => {
   const finished = [{ key: "agent:a", text: "助手做完了「索引」", label: "去审阅", href: "/approvals#assistant" }];
   expect(planNudges(base({ blocks: [], finished, quiet: { timerRunning: false, inMeeting: true, answeredRecently: false } }))).toEqual([]);

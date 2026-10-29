@@ -172,7 +172,8 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     // A step the person said they did part of while away, without saying how far (the return page).
     progressChecks: progressNudgeInputs(ctx, now),
     ...(running && timerOrder ? { timer: { orderId: timerOrder.id, title: taskTitleOf(timerOrder), stepId: currentStep?.id ?? "", stepTitle: currentStep?.title ?? "",
-      startedAt: running.startedAt, usualMinutes: currentStep?.estimate.p50Minutes ?? timerOrder.estimate.p50Minutes } } : {})
+      startedAt: running.startedAt, usualMinutes: currentStep?.estimate.p50Minutes ?? timerOrder.estimate.p50Minutes,
+      ...(running.pauseMinutes ? { pausedMinutes: running.pauseMinutes } : {}) } } : {})
   });
   for (const nudge of planned) say(ctx, nudge.text, nudge.buttons, { kind: nudge.kind, fingerprint: nudge.fingerprint, counted: nudge.counted, urgent: nudge.urgent,
     ...(nudge.covers ? { covers: nudge.covers } : {}), ...(nudge.block ? { block: nudge.block } : {}), ...(nudge.step ? { step: nudge.step } : {}) }, now);

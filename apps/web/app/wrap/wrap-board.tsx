@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { bulkDoneRows } from "@crossline/core";
 import { Check, CheckCheck, Hourglass, Moon, SkipForward, Sparkles } from "lucide-react";
 import type { WrapOutcome, WrapRow, WrapView } from "../../lib/wrap";
 import { dayLabel } from "../../lib/opener";
@@ -25,7 +26,7 @@ const ANSWERED: Record<WrapOutcome, string> = { done: "已记为完成", partial
 /**
  * The evening wrap-up's page (docs/rituals.md; the 2026-10-28 redesign after `docs/plans/page-drafts-1028/wrap.html`): four figures for
  * the day (timed, blocks done, blocks still to record, tomorrow's first block); each block that started with 完成 / 部分 / 没做 as one
- * three-part control, and 「全部按预估完成」 for those not yet recorded; 「全部按推荐」 for the day's decisions with a safe default; tomorrow's
+ * three-part control, and 「计时过的块全部按预估完成」 for the timed ones not yet recorded; 「全部按推荐」 for the day's decisions with a safe default; tomorrow's
  * first three blocks; then 「收工」. An earlier day (`?day=`) shows the same rows with no 收工 and no tomorrow.
  */
 export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: Record<string, string>; tomorrow: NextDayBlock[] }) {
@@ -52,12 +53,16 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
     setAnswers((current) => ({ ...current, [blockId]: outcome }));
     window.dispatchEvent(new Event(PENDING_CHANGED));
   };
-  // 「全部按预估完成」: each block not yet recorded, one after another, through the same call as its own 完成.
+  // 「计时过的块全部按预估完成」: each block not yet recorded whose timer ran inside it, one after another, through the same call as its own
+  // 完成. A block nobody timed is left to its own three-part control: one tap at the end of a tiring day used to record every block whose
+  // time had passed as done, timed or not, and the work it never got was dropped from the plan (the month simulation's overloaded person
+  // did this 18 times in a month; docs/reports/2026-10-30-overnight/month-sim.md).
+  const bulk = bulkDoneRows(view.rows, answers);
   const allDone = async () => {
     setBusy("all");
     setFailed(false);
     const recorded: Record<string, WrapOutcome> = {};
-    for (const row of view.rows.filter((item) => !answers[item.blockId])) {
+    for (const row of bulk) {
       if (await post(row.blockId, "done")) recorded[row.blockId] = "done"; else setFailed(true);
     }
     setAnswers((current) => ({ ...current, ...recorded }));
@@ -101,8 +106,8 @@ export function WrapBoard({ view, labels, tomorrow }: { view: WrapView; labels: 
         <header className="rd-card-head">
           <h2 id="wr-blocks-title" className="ds-serif">{view.today ? t("今天开始过的块") : t("那天开始过的块")}</h2>
           <small>{t("一键记录，写法与完成确认相同")}</small>
-          {open > 1 && <button type="button" className="secondary-button rd-icon-text" disabled={Boolean(busy)} onClick={() => void allDone()}>
-            <CheckCheck {...ICON} />{t("全部按预估完成")}</button>}
+          {bulk.length > 1 && <button type="button" className="secondary-button rd-icon-text" disabled={Boolean(busy)} onClick={() => void allDone()}>
+            <CheckCheck {...ICON} />{t("计时过的块全部按预估完成")}</button>}
         </header>
         {view.rows.length ? <ul className="wr-rows">{view.rows.map((row) => <Block key={row.blockId} row={row} label={row.line ? labels[row.line] : undefined}
           chosen={answers[row.blockId]} disabled={Boolean(busy)} timed={timed(row.timedMinutes)} onAnswer={(outcome) => void answer(row.blockId, outcome)} />)}</ul>

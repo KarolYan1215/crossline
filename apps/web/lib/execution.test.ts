@@ -41,6 +41,20 @@ test("an unbound work order runs approve → start → pause → resume → comp
   expect(execution.interruptions).toMatchObject([{ reason: "被组会打断" }]);
 });
 
+test("pausing or resuming an active order whose session a confirmed block already closed is refused, not thrown", () => {
+  const store = seed("approved", [], "");
+  expect(startWorkOrderExecution(TEST_CTX, "w1", "2026-10-29T14:00:00.000Z")).toEqual({ ok: true });
+  // The completion check closes the session over the block's own times; the task stays active.
+  store.recordConfirmedSession(TEST_CTX.workspaceId, "w1", TEST_CTX.principalId, { startedAt: "2026-10-29T14:00:00.000Z", endedAt: "2026-10-29T15:00:00.000Z",
+    minutes: 60, source: "one_tap", key: "confirmed-session:t" });
+  expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("active");
+  expect(pauseWorkOrderExecution(TEST_CTX, "w1", "块结束")).toEqual({ ok: false, code: "NO_ACTIVE_EXECUTION" });
+  expect(resumeWorkOrderExecution(TEST_CTX, "w1")).toEqual({ ok: false, code: "NO_ACTIVE_EXECUTION" });
+  // Starting again opens a new session, which pauses as usual.
+  expect(startWorkOrderExecution(TEST_CTX, "w1")).toEqual({ ok: true });
+  expect(pauseWorkOrderExecution(TEST_CTX, "w1", "块结束")).toEqual({ ok: true });
+});
+
 test("work the assistant handed in still waits for the gate: a milestone-bound review cannot be accepted by hand", () => {
   const store = seed("evidence_review");
   expect(acceptWorkOrderEvidence(TEST_CTX, "w1")).toEqual({ ok: false, code: "MILESTONE_GATE_REQUIRED" });

@@ -1,7 +1,7 @@
 import "server-only";
-import { wrapTimeOf, type AccessContext, type NudgeEnding } from "@crossline/core";
+import { withFrozen, wrapTimeOf, type AccessContext, type NudgeEnding } from "@crossline/core";
 import { formatInTimeZone } from "date-fns-tz";
-import { appNow, effectiveSchedulePreferences, getStore, planToday, readAvailability, toZonedInstant } from "./crossline";
+import { appNow, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant, writeFrozen } from "./crossline";
 import { blockAnswer, confirmBlockAt, type ConfirmOutcome } from "./confirm";
 
 /** The nudge pass's record of today's blocks (`seenBlocksKey` in `lib/nudges.ts`, which imports this file). */
@@ -107,8 +107,31 @@ export function answerWrapBlock(ctx: AccessContext, blockId: string, outcome: Wr
     { kind: outcome === "done" ? "as_planned" : outcome }, now);
 }
 
-/** 「收工」: the day is wrapped up, so no wrap-up message comes tonight. */
-export function finishWrap(ctx: AccessContext, now = appNow()): { ok: true } {
-  getStore().setSetting(ctx.workspaceId, WRAP_DONE(planToday(ctx, now)), now.toISOString());
-  return { ok: true };
+/** How many of tomorrow's first blocks the wrap-up shows (`app/wrap/page.tsx`) and 「收工」 then keeps. */
+export const WRAP_KEEP_BLOCKS = 3;
+
+/**
+ * 「收工」: the day is wrapped up, so no wrap-up message comes tonight — and tomorrow's first blocks, which the page has just shown, stay
+ * where they are (`keep` until the end of tomorrow; released like any kept block when something lands on them, and cleared by a change
+ * that re-plans everything). Without it the next morning's plan was derived afresh and moved about half of them (the month simulation:
+ * 8 of 15 kept for the procrastinating person; docs/reports/2026-10-30-overnight/month-sim.md) — a frozen near horizon is the classic cure
+ * for a plan that keeps changing under the person (Blackburn, Kropp & Millen 1986 on MRP nervousness).
+ */
+export async function finishWrap(ctx: AccessContext, now = appNow()): Promise<{ ok: true; kept: number }> {
+  const today = planToday(ctx, now);
+  getStore().setSetting(ctx.workspaceId, WRAP_DONE(today), now.toISOString());
+  const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const first = (await loadCurrentPlan(ctx)).blocks.filter((block) => block.id.startsWith("scheduled:") && block.day === tomorrow)
+    .sort((a, b) => a.start.localeCompare(b.start)).slice(0, WRAP_KEEP_BLOCKS);
+  const until = toZonedInstant(tomorrow, "23:59", zone);
+  let list = readFrozen(ctx, now);
+  let kept = 0;
+  for (const block of first) {
+    if (list.some((item) => item.blockId === block.id)) continue;
+    list = withFrozen(list, { blockId: block.id, start: toZonedInstant(tomorrow, block.start, zone), end: toZonedInstant(tomorrow, block.end, zone), reason: "keep", until });
+    kept += 1;
+  }
+  if (kept) writeFrozen(ctx, list);
+  return { ok: true, kept };
 }
