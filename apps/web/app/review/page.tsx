@@ -54,7 +54,7 @@ export default async function ReviewPage() {
   const hoursOf = (minutes: number) => Math.round(minutes / 6) / 10;
   const weekMax = Math.max(...week.lines.flatMap((line) => [hoursOf(line.planned), hoursOf(line.actual)]), 1);
 
-  return <SubpageShell active={"主线"} eyebrow={t("证据驱动")} title={t("周复盘")} description={t("本周的验收、里程碑进展与待定的跨主线关系；没有记录的指标标为「未标定」。")}>
+  return <SubpageShell active={"周复盘"} eyebrow={t("证据驱动")} title={t("周复盘")} description={t("本周的验收、里程碑进展与待定的跨主线关系；没有记录的指标标为「未标定」。")}>
     {/* Sections fill the width: the wide ones run across it, the rest pair up in two columns on a large screen (2026-10-21). */}
     <div className="review-grid">
     {week.hasData && <section className="review-block review-wide" aria-label={t("本周各线投入")}>

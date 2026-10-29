@@ -37,6 +37,13 @@
 .dq-defer label{display:inline-flex;gap:4px;align-items:center}
 .dq-defer input{font:inherit;font-size:13px;min-width:0}
 .dq-empty{margin:0;font-size:13px;color:var(--graphite)}
+.dq-empty+.dq-empty{margin-top:6px}
+/* Today's recommended work without a block of its own today (the old 「下一步」 card's alternatives). */
+.dq-suggest{display:grid;gap:4px;min-width:0}
+.dq-suggest ul{margin:0;padding:0;list-style:none;display:grid;gap:4px}
+.dq-suggest li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;min-width:0;font-size:13px}
+.dq-suggest a{min-width:0;color:var(--ink);overflow-wrap:anywhere}
+.dq-suggest small{font-size:12px;color:var(--graphite)}
 /* The input box with the picked block's task as its page: one line, the task's latest exchange under it. */
 .dq-entry{min-width:0;padding-top:6px;border-top:1px solid var(--mist)}
 .dq-entry .conversation-log{max-height:240px;overflow:auto}

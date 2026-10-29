@@ -9,6 +9,9 @@ vi.mock("server-only", () => ({}));
 import { DashboardView, type DashboardData } from "./dashboard-view";
 
 const noPreviews = { taskDetailById: new Map(), milestoneDetailById: new Map() };
+/** Today's calendar on 2026-09-14 (09:00 in Chicago), with the given blocks. */
+const calendarWith = (items: NonNullable<DashboardData["calendar"]>["items"] = []): NonNullable<DashboardData["calendar"]> => ({
+  today: "2026-09-14", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", items, deadlines: [], labels: { research: "科研" }, quietByWeekday: {} });
 /** A loaded task, as `loadTaskDetailsBatch` hands the page one. */
 const detailFor = (id: string, intent: string, identityId: string, state = "ready_for_human") => ({
   id, ownerId: "test-owner", viewerId: "test-owner", workspaceId: "test-workspace", paused: false, identityId, identityLabel: identityId, accent: "#000", title: intent, intent, state,
@@ -20,6 +23,7 @@ const detailFor = (id: string, intent: string, identityId: string, state = "read
 describe("dashboard view", () => {
   test("renders one next action, two alternatives, and all identity lanes", () => {
     const html = renderToStaticMarkup(<DashboardView data={{
+      calendar: calendarWith(),
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
       dateLabel: "14",
       monthLabel: "SEP · 2026",
@@ -54,7 +58,9 @@ describe("dashboard view", () => {
     for (const label of ["科研", "创业", "自媒体", "投资"]) expect(html).toContain(label);
   });
 
-  test("工作块 F: a card with a loaded TaskDetail gets inline start/complete controls, not a link to Workbench", () => {
+  // 2026-10-29 (scenarios.md §4.1): the 「下一步」 card is gone; the calendar's next block is outlined and the panel beside the day opens
+  // on it with the block's actions.
+  test("工作块 F: the next block opens beside the day with start, complete and postpone in place, not a link to Workbench", () => {
     const taskDetailById = new Map([["paper", {
       id: "paper", ownerId: "test-owner", viewerId: "test-owner", workspaceId: "test-workspace", paused: false,
       identityId: "research", identityLabel: "科研", accent: "#6D5EF5", title: "完成论文结果段", intent: "完成论文结果段",
@@ -74,17 +80,19 @@ describe("dashboard view", () => {
       care: [],
       identities: [],
       upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
-      taskDetailById, milestoneDetailById: new Map()
+      taskDetailById, milestoneDetailById: new Map(),
+      calendar: calendarWith([{ id: "scheduled:paper", title: "完成论文结果段", day: "2026-09-14", start: "10:00", end: "11:00", kind: "scheduled",
+        workOrderId: "paper", identityId: "research", source: "排程", readOnly: false } as NonNullable<DashboardData["calendar"]>["items"][number]]),
+      calendarDetails: { paper: taskDetailById.get("paper")! }
     }} />);
-    // One primary action on the card: start the timer. Completion and evidence live in the task dialog.
     expect(html).toContain("开始计时");
     expect(html).not.toContain("前往任务详情执行并提交证据");
     expect(html).not.toContain("开始前精力");
-    // The row's title opens the full task card in place; the open icon opens the task dialog.
-    expect(html).toMatch(/class="nd-title" aria-expanded="false">完成论文结果段</);
-    expect(html).toContain('aria-label="打开"');
-    expect(html).toContain('aria-label="完成并提交材料"');
-    expect(html).toContain('aria-label="推迟"');
+    expect(html).toMatch(/data-work-order="paper"[^>]*data-next="true"|data-next="true"[^>]*data-work-order="paper"/);
+    for (const action of ["完成并提交材料", "推迟", "下一项"]) expect(html).toContain(action);
+    // No 「下一步」 card and no second copy of the task in 「需要处理」.
+    expect(html).not.toContain('data-variant="hero"');
+    expect(html).not.toContain('data-kind="task"');
   });
 
   test("includes a usable quick capture form", () => {
@@ -116,7 +124,8 @@ describe("dashboard view", () => {
     }} />);
     expect(html).toContain("running-head");
     expect(html).toContain('class="side-nav"');
-    for (const label of ["今日", "主线", "计划", "任务", "待确认", "导入", "画像", "设置", "小帮手"]) expect(html).toContain(label);
+    for (const label of ["今日", "主线", "计划", "任务", "待确认", "导入", "画像", "设置", "小帮手", "节奏与回顾", "本周承诺", "收工", "周复盘"]) expect(html).toContain(label);
+    expect(html).toContain('href="/review"');
     expect(html).not.toContain("CARE / CAPACITY");
   });
 });
@@ -201,7 +210,7 @@ describe("dashboard view with nothing to recommend yet", () => {
     dateLabel: "14", monthLabel: "SEP · 2026",
     capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [] },
     progress: { streakDays: 0, weekCount: 0 }, care: [], identities: [], upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
-    ...noPreviews, ...extra
+    calendar: calendarWith(), ...noPreviews, ...extra
   } as DashboardData} />);
 
   test("with proposals waiting it says so and links to them, instead of asking for more input", () => {

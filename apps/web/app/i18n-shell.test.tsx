@@ -84,7 +84,8 @@ describe("the shell in English", () => {
       dateLabel: "14", monthLabel: "SEP · 2026", awaitingApproval: 1,
       capacity: { level: "uncalibrated", observationCount: 0, basis: [], blockers: [] },
       progress: { streakDays: 0, weekCount: 3 }, care: [], identities: [], upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 120, committedMinutes: 30 },
-      flywheel: [], flywheelStrip: { nodes: [], edges: [] }, taskDetailById: new Map(), milestoneDetailById: new Map()
+      flywheel: [], flywheelStrip: { nodes: [], edges: [] }, taskDetailById: new Map(), milestoneDetailById: new Map(),
+      calendar: { today: "2026-09-14", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", items: [], deadlines: [], labels: {}, quietByWeekday: {} }
     } as DashboardData} /></LocaleProvider>);
     expect(html).toContain("Energy not calibrated");
     expect(html).toContain("2 h");

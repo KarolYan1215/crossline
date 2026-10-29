@@ -31,8 +31,8 @@ export type PendingCounts = {
   /** A batch of dates read from files. */
   dates: number;
   /**
-   * Interview questions waiting while the start standard is still open — exactly the ones the interview page shows (`interviewStatus`,
-   * screened). Once the person uses the app they are an ask (`interviewAsks` in `lib/asks.ts`) and counted under `asks` instead.
+   * The interview's open questions — exactly the ones the interview page shows (`interviewStatus`, screened) — while it is unfinished.
+   * They are answered in the interview (scenarios.md §3.8, 2026-10-29), so 待确认 links to it with this count; not in `total`.
    */
   questions: number;
   /** Targets the architect proposed (a course's grade) that the person has not yet accepted or changed. */
@@ -86,12 +86,13 @@ function computePending(ctx: AccessContext): PendingCounts {
     assistantQuestions: assistant.approvals,
     assistantReviews: reviews.now,
     asks: asks.now,
-    questions: interviewQuestionsOutsideAsks(ctx)
+    questions: interviewQuestions(ctx)
   };
   // Candidate relations and research proposals are judged in the weekly review (`/review`), not one by one as they arrive (the
   // person's decision, 2026-10-13): whether to take one is a judgement about direction, not a fact only they can give. They stay listed
   // there and are left out of the number that asks for today's decisions.
-  const { relations: _weekly, research: _weeklyResearch, ...today } = counts;
+  // The interview's questions are answered in the interview, not counted as decisions (scenarios.md §3.8).
+  const { relations: _weekly, research: _weeklyResearch, questions: _interview, ...today } = counts;
   const later = { workOrders: proposals.later, milestoneDrafts: drafts.later, asks: asks.later, assistantReviews: reviews.later };
   return { ...counts, total: Object.values(today).reduce((sum, value) => sum + value, 0),
     later: { ...later, total: Object.values(later).reduce((sum, value) => sum + value, 0) } };
@@ -99,10 +100,10 @@ function computePending(ctx: AccessContext): PendingCounts {
 
 /**
  * The badge once counted the profile's blocking gaps unscreened, so a question the interview page had screened out (or that a file
- * already answered) showed as 「访谈问题 1」 with nowhere to answer it (2026-10-17 walkthrough, W-13). It now reads the same list the
- * interview page does; while parked those questions are an ask, and once the checklist is complete there are none.
+ * already answered) showed as 「访谈问题 1」 with nowhere to answer it (2026-10-17 walkthrough, W-13). It reads the same list the interview
+ * page does; once the checklist is complete there are none.
  */
-function interviewQuestionsOutsideAsks(ctx: AccessContext): number {
+function interviewQuestions(ctx: AccessContext): number {
   const status = interviewStatus(ctx);
-  return status.started && !status.parked && !status.complete ? status.openQuestions : 0;
+  return status.started && !status.complete ? status.openQuestions : 0;
 }

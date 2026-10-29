@@ -56,9 +56,13 @@ const needsFields = (ask: Ask, option: AskOption) => Boolean(option.fields?.leng
  * opens them under the options); a multiple-choice ask is ticked and confirmed once; the person's own words go in the input that is
  * always there when the ask takes them, its placeholder the recommended answer.
  */
-export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview?: AskPreviewData | undefined; onDone: (id: string) => void; level?: 3 | 4 }) {
+export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask: Ask; preview?: AskPreviewData | undefined; onDone: (id: string) => void; level?: 3 | 4;
+  /** The card in front on 待确认 (2026-10-29): number keys pick an option, Enter sends it, H asks again tomorrow — only while nothing takes typing. */
+  keys?: boolean }) {
   const many = ask.select === "many";
   const [picked, setPicked] = useState<string[]>([]);
+  /** An option picked from the keyboard waits for Enter instead of being sent at once. */
+  const [keyed, setKeyed] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("");
@@ -95,8 +99,38 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
     setPicked(next);
     setValues((current) => ({ ...initials(answerable.filter((item) => next.includes(item.id))), ...current }));
   };
+  const confirm = () => {
+    const missing = fields.find((field) => field.required && !(values[field.id] ?? "").trim());
+    if (missing) { setStatus(t("「{{label}}」未填写", { label: missing.label })); return; }
+    submit(picked);
+  };
+  const latest = useRef({ answerable, picked, busy, chooseOne, toggle, confirm, snooze: () => {} });
+  const snooze = (choice: "tomorrow" | "week") => void send("/api/asks/snooze", { askId: ask.id, choice, seconds: seconds() });
+  latest.current = { answerable, picked, busy, chooseOne, toggle, confirm, snooze: () => snooze("tomorrow") };
+  useEffect(() => {
+    if (!keys) return;
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented || event.isComposing || !keysFree(event.target)) return;
+      const now = latest.current;
+      if (now.busy) return;
+      const digit = /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
+      const option = digit >= 0 ? now.answerable[digit] : undefined;
+      if (option) {
+        event.preventDefault();
+        if (many) { now.toggle(option); return; }
+        if (needsFields(ask, option) || option.needsNote) { now.chooseOne(option); return; }
+        setPicked([option.id]); setKeyed(true); setStatus("");
+        return;
+      }
+      if (event.key === "Enter" && now.picked.length) { event.preventDefault(); now.confirm(); return; }
+      if (event.key === "h" || event.key === "H") { event.preventDefault(); now.snooze(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [keys, many, ask]);
   const outcome = askOutcome(ask, locale);
   const sources = askSources(ask, locale);
+  const keyOf = (option: AskOption) => keys ? answerable.indexOf(option) : -1;
 
   return <li ref={cardRef} className="ask-card ak-card" data-line={ask.line} data-urgency={ask.urgency} data-kind={ask.kind}>
     <AskMeta ask={ask} />
@@ -119,13 +153,15 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
         {answerable.map((option) => <label key={option.id} className="ask-option ak-check" data-checked={picked.includes(option.id) || undefined}>
           <input type="checkbox" checked={picked.includes(option.id)} onChange={() => toggle(option)} />
           <span><b>{option.label}{option.recommended && <span className="ask-recommended"> · {t("推荐")}</span>}</b>{option.detail && <small>{option.detail}</small>}</span>
+          <OptionKey index={keyOf(option)} />
         </label>)}
         {links.map((option) => <OptionLink key={option.id} option={option} />)}
       </fieldset>
       : <div className="ask-options" role="group" aria-label={t("选一项")}>
         {answerable.map((option) => <button key={option.id} type="button" className="ask-option" disabled={busy} aria-pressed={picked.includes(option.id)}
-          onClick={() => chooseOne(option)}>
+          onClick={() => { setKeyed(false); chooseOne(option); }}>
           <b>{option.label}{option.recommended && <span className="ask-recommended"> · {t("推荐")}</span>}</b>{option.detail && <small>{option.detail}</small>}
+          <OptionKey index={keyOf(option)} />
         </button>)}
         {links.map((option) => <OptionLink key={option.id} option={option} />)}
       </div>}
@@ -143,24 +179,38 @@ export function AskCard({ ask, preview, onDone, level = 3 }: { ask: Ask; preview
         }} />
     </label>}
 
-    {(many || fields.length > 0 || waitsForNote || note.trim()) && <div className="execution-actions ak-submit">
-      <button type="button" className="primary-button" disabled={busy || (!picked.length && !note.trim()) || (waitsForNote && !note.trim())} onClick={() => {
-        const missing = fields.find((field) => field.required && !(values[field.id] ?? "").trim());
-        if (missing) { setStatus(t("「{{label}}」未填写", { label: missing.label })); return; }
-        submit(picked);
-      }}>{many ? (picked.length ? t("确定（{{count}} 项）", { count: picked.length }) : t("确定")) : chosen[0] ? t("确定：{{label}}", { label: chosen[0].label }) : t("提交")}</button>
-      {!many && chosen.length > 0 && <button type="button" className="secondary-button" onClick={() => { setPicked([]); setValues({}); }}>{t("换一个")}</button>}
+    {(many || fields.length > 0 || waitsForNote || note.trim() || (keyed && picked.length > 0)) && <div className="execution-actions ak-submit">
+      <button type="button" className="primary-button" disabled={busy || (!picked.length && !note.trim()) || (waitsForNote && !note.trim())} onClick={confirm}>
+        {many ? (picked.length ? t("确定（{{count}} 项）", { count: picked.length }) : t("确定")) : chosen[0] ? t("确定：{{label}}", { label: chosen[0].label }) : t("提交")}</button>
+      {!many && chosen.length > 0 && <button type="button" className="secondary-button" onClick={() => { setPicked([]); setValues({}); setKeyed(false); }}>{t("换一个")}</button>}
     </div>}
 
     <p className="ask-later">
-      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "tomorrow", seconds: seconds() })}>{t("明天再问")}</button>
-      <button type="button" className="text-button" disabled={busy} onClick={() => void send("/api/asks/snooze", { askId: ask.id, choice: "week", seconds: seconds() })}>{t("下周再问")}</button>
+      <button type="button" className="text-button" disabled={busy} onClick={() => snooze("tomorrow")}>{t("明天再问")}</button>
+      <button type="button" className="text-button" disabled={busy} onClick={() => snooze("week")}>{t("下周再问")}</button>
       {status && <small role="status">{status}</small>}
     </p>
   </li>;
 }
 
 const uniqueFields = (fields: AskField[]) => fields.filter((field, index) => fields.findIndex((other) => other.id === field.id) === index);
+
+/**
+ * Whether a key press is free for the card's shortcuts: not typed into a field, a slider or something editable, and no dialog open — a
+ * letter typed through an input method must never answer a question. Exported for the deck's J / K.
+ */
+export function keysFree(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  if (element && (/^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) || element.isContentEditable || element.closest?.('[role="slider"],[role="dialog"],dialog'))) return false;
+  const active = typeof document === "undefined" ? null : document.activeElement as HTMLElement | null;
+  if (active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable)) return false;
+  return typeof document === "undefined" || !document.querySelector("dialog[open],[role=dialog]");
+}
+
+/** The number key that picks an option, shown at its right edge. */
+function OptionKey({ index }: { index: number }) {
+  return index >= 0 && index < 9 ? <kbd className="ak-key" aria-hidden="true">{index + 1}</kbd> : null;
+}
 
 function OptionLink({ option }: { option: AskOption }) {
   return <a className="ask-option ak-link" href={option.href}><b>{option.label} →</b>{option.detail && <small>{option.detail}</small>}</a>;

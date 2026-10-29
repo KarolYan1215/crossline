@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Sparkles } from "lucide-react";
 import { useT } from "../locale-context";
 import { PENDING_CHANGED } from "../pending-badge";
 import type { Translate } from "../../lib/i18n";
@@ -24,7 +25,9 @@ export function groupText(t: Translate, group: Group): string {
  * 「全部按推荐」 (docs/rituals.md): the decisions this week that have a safe default, settled together. The button says how many before it is
  * pressed, the confirmation lists them by kind, and the result offers one 撤销. Shows nothing when there is nothing it may settle.
  */
-export function AnswerAll() {
+export function AnswerAll({ head = false }: {
+  /** 待确认's page head (2026-10-29): the button reads 「全部按推荐 · N 项」 with the kinds beside it before it is pressed. */
+  head?: boolean } = {}) {
   const t = useT();
   const [plan, setPlan] = useState<Plan | undefined>();
   const [open, setOpen] = useState(false);
@@ -68,8 +71,11 @@ export function AnswerAll() {
     {result.opId && !result.undone && <button type="button" className="text-button" disabled={busy} onClick={() => void undo()}>{t("撤销")}</button>}
   </div>;
   if (!plan?.total) return null;
-  return <div className="answer-all">
-    {!open ? <button type="button" className="secondary-button" onClick={() => setOpen(true)}>{t("全部按推荐（{{count}} 项）", { count: plan.total })}</button>
+  return <div className="answer-all" data-head={head || undefined}>
+    {!open ? head
+      ? <><button type="button" className="primary-button" onClick={() => setOpen(true)}><Sparkles size={18} strokeWidth={1.6} aria-hidden="true" />{t("全部按推荐 · {{count}} 项", { count: plan.total })}</button>
+        <small className="answer-all-kinds">{plan.groups.map((group) => groupText(t, group)).join(" · ")} · {t("一次撤销")}</small></>
+      : <button type="button" className="secondary-button" onClick={() => setOpen(true)}>{t("全部按推荐（{{count}} 项）", { count: plan.total })}</button>
       : <div className="answer-all-confirm">
         <p>{t("将按每张卡的推荐处理 {{count}} 项：", { count: plan.total })}</p>
         <ul>{plan.groups.map((group) => <li key={group.group}>{groupText(t, group)}</li>)}</ul>

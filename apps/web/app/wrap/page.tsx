@@ -14,7 +14,7 @@ export default async function WrapPage() {
   gateUntilReady(ctx);
   const view = loadWrap(ctx);
   const t = tOf(ctx);
-  return <SubpageShell active={"今日"} title={t("收工")}>
+  return <SubpageShell active={"收工"} title={t("收工")}>
     <WrapBoard view={view} />
   </SubpageShell>;
 }

@@ -30,8 +30,11 @@ body:has(.today-page) .running-head{background:var(--ds-bg)}
 .td-week button[data-today] b{background:var(--ds-accent);color:var(--ds-on-accent)}
 .td-week button[aria-pressed="true"]:not([data-today]) b{box-shadow:inset 0 0 0 1.5px var(--ds-accent)}
 .td-week button:hover{background:var(--ds-chalk)}
-.td-week i{width:4px;height:4px;border-radius:50%}
-.td-week i[data-busy]{background:var(--ds-accent)}
+.td-week .td-load{display:block;width:26px;height:3px;border-radius:2px;overflow:hidden;background:var(--ds-line)}
+.td-week .td-load>i{display:block;height:100%;background:var(--ds-accent)}
+.td-week .td-load>i[data-full]{background:var(--ds-alarm)}
+.td-week .td-due{display:grid;place-items:center;height:12px;color:var(--ds-alarm)}
+.td-week .td-due svg{fill:currentColor}
 
 /* ── layout ── */
 .td-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,380px);gap:20px;align-items:start}
@@ -61,6 +64,8 @@ body:has(.today-page) .running-head{background:var(--ds-bg)}
 .today-page .cal-legend span::before{border-radius:3px}
 .today-page .dv-scroll{max-height:clamp(360px,calc(100vh - 430px),760px);border-radius:10px;border-color:var(--ds-line)}
 .today-page .dv-block{border-radius:6px;outline-color:var(--ds-card)}
+/* The next block to start, which the panel beside the day shows while nothing is picked (scenarios.md §4.1). */
+.dv-block[data-next],.dv-bar[data-next]{box-shadow:inset 0 0 0 2px var(--ds-accent-ink)}
 .today-page .dv-flag{border-radius:999px}
 .today-page .dv-now i{color:var(--ds-on-accent);border-radius:4px}
 .today-page .dq{border-radius:10px;border-color:var(--ds-line);background:var(--ds-bg)}
@@ -133,7 +138,7 @@ body:has(.today-page) .running-head{background:var(--ds-bg)}
 .nd-head-links .pending-total-link{font-size:12px;color:var(--graphite)}
 .nd .answer-all{margin:0 0 8px}
 .nd-note{margin:8px 0;font-size:13px;line-height:1.55;color:var(--graphite)}
-.nd .seed-notice{border-radius:8px}
+.td-seed{margin:10px 0 0;padding:4px 10px;border-radius:8px;font-size:12px}
 .nd-list{margin:0;padding:0;list-style:none;display:grid}
 .nd-row{display:grid;gap:4px;min-width:0;padding:10px 0;border-top:1px solid var(--ds-line)}
 .nd-line{display:flex;align-items:center;gap:8px;min-width:0}
@@ -155,8 +160,11 @@ body:has(.today-page) .running-head{background:var(--ds-bg)}
 .nd-quick span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nd-quick:hover{border-color:var(--ds-accent)}
 .nd-row small[role="status"]{font-size:12px;color:var(--graphite)}
-.nd-expand{margin:6px 0 0;padding:0;list-style:none}
-.nd-expand .ask-card,.nd-expand .task-card{border-radius:10px}
+.nd-row[data-kind="missed"] .nd-title{font-weight:600}
+.nd-actions .nd-open{text-decoration:none}
+.nd-foot{margin:10px 0 0;padding-top:10px;border-top:1px solid var(--ds-line);font-size:12px}
+.nd-foot .pending-total-link{color:var(--graphite)}
+.td-card-head>small{font-size:12px;color:var(--graphite)}
 
 /* ── flywheel fold ── */
 .td-fold{margin-top:20px}

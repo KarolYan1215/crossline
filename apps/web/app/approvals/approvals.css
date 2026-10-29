@@ -1,20 +1,134 @@
-/* 待确认: the summary line on top, the evidence and auto-approved sections, and the assistant's results shown by what they are for. */
-.ap-summary{display:flex;flex-wrap:wrap;align-items:center;gap:6px 22px;margin:10px 0 0;font-size:13px}
-.ap-summary-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 0;margin:0;color:var(--graphite)}
-.ap-summary-line>span:first-child{font-size:12px;font-weight:700;margin-right:8px}
-.ap-summary-line a{color:var(--ink);text-decoration:none}
-.ap-summary-line a:hover b{text-decoration:underline}
-.ap-later{display:grid;grid-template-columns:auto 168px;grid-template-rows:auto auto;column-gap:10px;align-items:end;color:var(--ink);text-decoration:none}
-.ap-later-label{grid-row:1 / span 2;align-self:center;font-size:13px}
-.ap-later-label small{font-size:12px;color:var(--graphite)}
-.ap-later-bars{width:168px;height:24px;display:block}
+/*
+ * 待确认 (2026-10-29, docs/plans/page-drafts-1028/approvals.html): the head with its count, time and 「全部按推荐」; three columns — the
+ * quadrants, kinds and links on the left, one question in the middle, what is handled in batches on the right. One column on a phone,
+ * in the order of use (approvals-mobile.html).
+ */
+.ap-page .subpage-inner{gap:16px}
+.ap-head{align-items:center;border-bottom:0;padding:16px 0 4px}
+.ap-head h1{font-size:30px;font-weight:600;line-height:1.15}
+.ap-head p{font-size:13px;color:var(--ds-muted)}
+.ap-head .answer-all{margin:0;max-width:520px;justify-content:flex-end}
+.ap-head .answer-all .primary-button{display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:6px 14px;border-radius:var(--ds-radius-control);
+  border:0;background:var(--ds-accent);color:var(--ds-on-accent);font-weight:600}
+.answer-all-kinds{font-size:12px;color:var(--ds-muted)}
+.ap-grid{display:grid;grid-template-columns:minmax(210px,240px) minmax(0,1fr) minmax(280px,340px);gap:18px;align-items:start}
+.ap-left,.ap-right,.ap-center{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;min-width:0;align-content:start}
+.ap-card{min-width:0;padding:14px 16px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:var(--ds-radius);box-shadow:var(--ds-shadow)}
+.ap-card-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0 0 10px;font-size:15px;font-weight:600;color:var(--ds-ink)}
+.ap-card-title small{font-size:12px;font-weight:400;color:var(--ds-muted)}
+
+/* Left: the four quadrants as counts, the kinds, the keys. */
+.ap-quads .ap-card-title,.ap-kinds .ap-card-title,.ap-elsewhere .ap-card-title{font-size:12px;font-weight:400;color:var(--ds-muted)}
+.ap-quad-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.ap-quad-grid button{display:grid;justify-items:start;gap:2px;min-height:64px;padding:8px 10px;border:1px solid var(--ds-line);border-radius:10px;
+  background:var(--ds-card);color:var(--ds-ink);text-align:left;cursor:pointer}
+.ap-quad-grid button b{font-size:22px;font-weight:600;line-height:1.1}
+.ap-quad-grid button span{font-size:12px;color:var(--ds-muted)}
+.ap-quad-grid button[aria-pressed="true"]{border-color:var(--ds-accent);box-shadow:inset 0 0 0 1px var(--ds-accent);background:var(--ds-accent-soft)}
+.ap-quad-grid button:disabled{cursor:default;opacity:1}
+.ap-quad-grid button:disabled b{color:var(--ds-muted)}
+.ap-keys{display:flex;flex-wrap:wrap;align-items:center;gap:6px 5px;margin:12px 0 0;padding-top:10px;border-top:1px solid var(--ds-line);font-size:12px;color:var(--ds-muted)}
+.ap-keys kbd,.ak-key{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 4px;border:1px solid var(--ds-line);border-radius:5px;
+  background:var(--ds-bg);font-family:inherit;font-size:12px;color:var(--ds-ink)}
+.ap-kinds ul{list-style:none;margin:0;padding:0;display:grid}
+.ap-kinds li+li{border-top:1px solid var(--ds-line)}
+.ap-kinds button{display:flex;align-items:center;gap:8px;width:100%;min-height:38px;padding:6px 4px;background:transparent;border:0;color:var(--ds-ink);
+  font:inherit;font-size:13px;text-align:left;cursor:pointer;border-radius:6px}
+.ap-kinds button span{flex:1 1 auto;min-width:0}
+.ap-kinds button[aria-pressed="true"]{background:var(--ds-accent-soft);font-weight:600}
+.ap-kinds button:hover{background:var(--ds-chalk)}
+.ap-later{display:grid;gap:8px;color:var(--ds-ink);text-decoration:none}
+.ap-later-label{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:13px}
+.ap-later-label small{flex-basis:100%;font-size:12px;color:var(--ds-muted)}
+.ap-later-bars{width:100%;height:24px;display:block}
 .ap-later-slot{fill:transparent}
-.ap-later-bar{fill:var(--ink)}
-.ap-later-tick{fill:var(--graphite)}
-.ap-later-axis{display:flex;justify-content:space-between;font-size:12px;color:var(--graphite)}
-.ap-later-axis small{font-size:12px}
-.approval-ledger{margin:12px 0}
-.approval-ledger>h2,.ap-auto>h2{margin:0;font-size:15px;font-weight:700}
+.ap-later-bar{fill:var(--ds-accent)}
+.ap-later-tick{fill:var(--ds-muted)}
+.ap-elsewhere ul{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:13px}
+.ap-elsewhere li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 8px}
+.ap-elsewhere a{color:var(--ds-ink)}
+
+/* Middle: one question at a time. */
+.ap-deck{display:grid;gap:10px;min-width:0}
+.ap-deck-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+.ap-quad-tag,.ap-kind-tag{display:inline-flex;align-items:center;min-height:24px;padding:0 10px;border-radius:999px;font-size:12px}
+.ap-quad-tag{background:var(--ds-chalk);color:var(--ds-ink)}
+.ap-quad-tag[data-quadrant="urgent_important"],.ap-quad-tag[data-quadrant="urgent"]{background:var(--ds-alarm-soft);color:var(--ds-alarm-ink)}
+.ap-kind-tag{background:var(--ds-accent-soft);color:var(--ds-accent-ink)}
+.ap-clear{font-size:12px}
+.ap-deck-nav{margin-left:auto;display:inline-flex;align-items:center;gap:2px;font-size:13px;color:var(--ds-muted)}
+.ap-deck .ak-deck{display:grid;gap:0}
+.ap-deck .ask-deck{list-style:none;margin:0;padding:0}
+.ap-deck .ak-card{gap:10px;padding:18px 20px;background:var(--ds-card);border:1px solid var(--ds-line);border-left-width:1px;border-radius:var(--ds-radius);box-shadow:var(--ds-shadow)}
+.ap-deck .ak-title{font-size:19px;font-weight:600;line-height:1.4}
+.ap-deck .ak-brief{grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 16px;padding:12px 14px;border-radius:10px;background:var(--ds-chalk)}
+.ap-deck .ak-brief>div{display:grid;gap:2px;align-content:start}
+.ap-deck .ask-options{grid-template-columns:minmax(0,1fr);gap:8px}
+.ap-deck .ask-option{position:relative;padding:12px 44px 12px 14px;border-radius:10px;border-color:var(--ds-line);font-size:14px;background:var(--ds-card)}
+.ap-deck .ask-option b{font-weight:600}
+.ap-deck .ask-option[aria-pressed="true"],.ap-deck .ak-check[data-checked]{border-color:var(--ds-accent);outline:1px solid var(--ds-accent);background:var(--ds-accent-soft)}
+.ap-deck .ask-option .ak-key{position:absolute;top:10px;right:12px}
+.ap-deck .ak-check .ak-key{position:absolute;top:10px;right:12px}
+.ap-deck .ak-free textarea{border-radius:var(--ds-radius-control);border-color:var(--ds-line)}
+.ap-deck .ak-submit .primary-button{border-radius:var(--ds-radius-control)}
+.ap-deck .ask-peek{margin:0 14px;border-radius:0 0 10px 10px}
+.ap-empty p,.ap-empty-filter{margin:0;font-size:14px;color:var(--ds-muted)}
+.ak-key{margin-left:auto}
+
+/* Right: what is handled in batches. */
+.ap-right .pending-block{margin:0;padding:14px 16px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:var(--ds-radius);box-shadow:var(--ds-shadow)}
+.ap-right .pending-block>h2{margin:0 0 8px;font-size:15px;font-weight:600}
+.ar-row{border-top:1px solid var(--ds-line);padding:8px 0}
+.ar-row>summary{display:grid;gap:2px;cursor:pointer;list-style:none}
+.ar-row>summary::-webkit-details-marker{display:none}
+.ar-row>summary h3{margin:0;font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.ar-row>summary small{font-size:12px;color:var(--ds-muted)}
+.ar-row[open]>summary h3{text-decoration:underline}
+.ar-row .ar-outputs{grid-template-columns:minmax(0,1fr)}
+.approval-ledger{margin:0}
+.approval-ledger article{display:grid;gap:4px;padding:8px 0;border-top:1px solid var(--ds-line);font-size:13px}
+.approval-ledger article p{margin:0}
+.ap-proposals .proposal-batch-bar{flex-wrap:wrap}
+.ap-proposals .work-order-list,.ap-proposals #proposals.work-order-list{grid-template-columns:minmax(0,1fr)}
+/* A proposal's card in the narrow column: its rows wrap instead of pushing the page sideways. */
+.ap-right .task-card{min-width:0;overflow-wrap:anywhere}
+.ap-right .task-card .task-completion-choice{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.ap-right .task-card .ui-segmented{flex-wrap:wrap;max-width:100%}
+.ap-auto ul{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:13px}
+.ap-auto li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 8px}
+.ap-later-fold{margin-top:4px}
+
+@media (max-width:1280px){
+  .ap-grid{grid-template-columns:minmax(200px,230px) minmax(0,1fr)}
+  .ap-right{grid-column:2}
+}
+@media (max-width:900px){
+  .ap-grid{grid-template-columns:minmax(0,1fr)}
+  .ap-right{grid-column:auto}
+  .ap-left{display:contents}
+  .ap-quads{order:1}
+  .ap-center{order:2}
+  .ap-right{order:3}
+  .ap-later{order:4}
+  .ap-elsewhere{order:5}
+  .ap-kinds{order:6}
+  .ap-quad-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .ap-quad-grid button{justify-items:center;text-align:center}
+  .ap-deck .ak-brief{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:680px){
+  .ap-head{display:grid;gap:10px}
+  .ap-head h1{font-size:26px}
+  .ap-head-rule{display:none}
+  .ap-head .answer-all{justify-content:flex-start}
+  .ap-keys,.ak-key{display:none}
+  .ap-quads{padding:0;background:transparent;border:0;box-shadow:none}
+  .ap-quads .ap-card-title{display:none}
+  .ap-deck .ak-card{padding:14px}
+  .ap-deck .ak-title{font-size:17px}
+  .ap-deck .ask-option{padding-right:14px;min-height:44px}
+  .ap-quad-grid button,.ap-kinds button{min-height:56px}
+}
 
 /* An assistant result: deliverables by use, each with its preview. */
 .ar-outputs{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:10px;align-items:start}

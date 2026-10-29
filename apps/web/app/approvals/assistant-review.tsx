@@ -156,8 +156,10 @@ export function AssistantResultBody({ ctx, taskId }: { ctx: AccessContext; taskI
  * `body` draws a result's body in its place; the page passes one that reads it once it nears the screen (2026-10-28: the results' files,
  * previews and records were a third of 待确认's HTML on the owner's account). Without it the body is drawn with the page.
  */
-export function AssistantReview({ ctx, deferred = () => undefined, body }: { ctx: AccessContext; deferred?: (workOrderId: string) => string | undefined;
-  body?: (taskId: string) => ReactNode }) {
+export function AssistantReview({ ctx, deferred = () => undefined, body, compact = false }: { ctx: AccessContext; deferred?: (workOrderId: string) => string | undefined;
+  body?: (taskId: string) => ReactNode;
+  /** 待确认's right column (2026-10-29): each result is one row — what it is, its kind and time — that opens to the whole result and its review. */
+  compact?: boolean }) {
   const view = loadAssistant(ctx);
   const results = view.reviews;
   // Results for work that need not start within a week are folded (decided 2026-10-10), the soonest to come up first.
@@ -165,7 +167,15 @@ export function AssistantReview({ ctx, deferred = () => undefined, body }: { ctx
   const later = results.filter((task) => deferred(task.workOrderId)).sort((a, b) => deferred(a.workOrderId)!.localeCompare(deferred(b.workOrderId)!));
   if (!view.categoryRequests.length && !view.approvals.length && !view.questions.length && !results.length) return null;
   const t = tOf(ctx);
-  const card = (task: AssistantView["tasks"][number]) => <article key={task.taskId} className="assistant-task" data-status={task.status}>
+  const card = (task: AssistantView["tasks"][number]) => compact ? <details key={task.taskId} className="assistant-task ar-row" data-status={task.status}>
+    <summary><h3>{task.title}</h3>
+      <small>{t(AGENT_CATEGORIES[task.category])} · {t("用时 {{duration}}", { duration: minutes(t, task.durationMs) })}
+        {deferred(task.workOrderId) ? ` · ${t("{{day}} 起列入本周", { day: entryDay(localeFor(ctx), deferred(task.workOrderId)!) })}` : ""}</small></summary>
+    <p className="assistant-meta">{task.workOrderId && <a href={`/workbench/${encodeURIComponent(task.workOrderId)}`}>{t("对应任务")}</a>}
+      {task.autoApproved && <Tag tone="info">{t("来自自动生效的任务")}</Tag>}</p>
+    {body ? body(task.taskId) : <TaskBody ctx={ctx} task={task} />}
+    <ReviewButtons taskId={task.taskId} />
+  </details> : <article key={task.taskId} className="assistant-task" data-status={task.status}>
     <h3>{task.title}</h3>
     <p className="assistant-meta"><Tag>{t(AGENT_CATEGORIES[task.category])}</Tag><small>{t("用时 {{duration}}", { duration: minutes(t, task.durationMs) })}</small>
       {task.workOrderId && <a href={`/workbench/${encodeURIComponent(task.workOrderId)}`}>{t("对应任务")}</a>}

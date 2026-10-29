@@ -14,7 +14,7 @@ export default async function CommitPage() {
   gateUntilReady(ctx);
   const view = loadWeeklyCommit(ctx);
   const t = tOf(ctx);
-  return <SubpageShell active={"计划"} title={t("本周承诺")}>
+  return <SubpageShell active={"本周承诺"} title={t("本周承诺")}>
     <CommitBoard view={view} />
   </SubpageShell>;
 }

@@ -29,10 +29,12 @@ const clockOf = (minutes: number) => `${String(Math.floor(minutes / 60)).padStar
  * title reads in full and the step sits under it. Blocks that share time sit side by side. A scheduled block's bottom edge is dragged to
  * change its duration; `aside` is the column beside it (the quick actions), which used to restate each block's title.
  */
-export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, selectedId, onSelect, onResize, aside }: {
+export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, selectedId, nextId, onSelect, onResize, aside }: {
   day: string; items: TimelineItem[]; deadlines: TimelineDeadline[]; nowMinute: number | undefined; labels: LineLabels;
   /** Stretches of the day that are not available (sleep, meals), drawn pale. */
   quiet?: Array<[string, string]> | undefined; selectedId?: string | undefined; onSelect?: ((item: TimelineItem) => void) | undefined;
+  /** The next block to start (outlined): what the panel beside the day shows while nothing is picked. */
+  nextId?: string | undefined;
   /** A scheduled block's bottom edge dragged: how many minutes longer (or shorter, negative) it should be. */
   onResize?: ((item: TimelineItem, deltaMinutes: number) => void) | undefined;
   aside?: ReactNode;
@@ -88,6 +90,7 @@ export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, s
               const common = {
                 "data-line": lineOf(item.identityId), "data-kind": item.kind, "data-missed": item.missed || undefined, "data-agent": item.agent, "data-work-order": item.workOrderId,
                 "data-clash": state === "clash" || undefined, "data-overlap-ok": state === "allowed" || undefined, "aria-pressed": selectedId === item.id,
+                "data-next": nextId === item.id || undefined,
                 title, onClick: () => onSelect?.(item)
               };
               // Too short for a line of text: a bare colour bar at its true time; what it is shows on hover, in the 「+N 项」 list and beside the day.

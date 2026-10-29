@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import type { Ask } from "@crossline/core";
 import { AskCard } from "./ask-card";
-import { AskBoard } from "./ask-board";
+import { AskBoard, askGroup, filterAsks } from "./ask-board";
+import { clearMinutes } from "../approvals/estimate";
 import { LocaleProvider } from "../locale-context";
 
 const base: Ask = { id: "iq:goals", kind: "interview_question", entityId: "q", title: "研究主线的长期目标是哪些？", why: "访谈在「主线」阶段的问题。",
@@ -85,20 +86,41 @@ test("a folded risk card lists its milestones as rows (name, deadline, level bar
   expect(html).not.toContain("里程碑 6");
 });
 
-test("待确认 lays the week's asks out in four quadrants, each a drawer with its top ask open", () => {
+test("待确认 counts the week's asks in four quadrant cells and by kind, and answers one at a time with number keys shown", () => {
   const asks: Ask[] = [
     { ...base, id: "1", title: "紧急重要一", urgency: "now", important: true }, { ...base, id: "2", title: "紧急重要二", urgency: "now", important: true },
-    { ...base, id: "3", title: "重要不紧急一", importance: 70 }, { ...base, id: "4", title: "以后的", entersOn: "2026-10-30" }];
+    { ...base, id: "3", title: "重要不紧急一", importance: 70, kind: "waiting_due" }, { ...base, id: "4", title: "以后的", entersOn: "2026-10-30" }];
   const html = renderToStaticMarkup(<AskBoard initial={asks} previews={{}} />);
   expect(html).toContain("待决事项 · 3");
-  for (const label of ["紧急重要", "重要不紧急", "紧急不重要", "不重要不紧急"]) expect(html).toContain(`aria-label="${label}"`);
-  expect(html).toContain('<h4 class="ak-title">紧急重要一</h4>');
+  for (const [label, count] of [["紧急重要", 2], ["重要不紧急", 1], ["紧急不重要", 0], ["不重要不紧急", 0]] as const) expect(html).toContain(`aria-label="${label} ${count} 项"`);
+  // One card in front, the next as an edge under it; its options carry their number keys.
+  expect(html).toContain('<h3 class="ak-title">紧急重要一</h3>');
   expect(html).toContain('data-depth="1" data-line="research">紧急重要二');
-  expect(html).toContain('aria-label="紧急重要 2，重要不紧急 1，紧急不重要 0，不重要不紧急 0"');
-  expect(html).toContain('href="#q-urgent_important"');
+  expect(html).toContain('<kbd class="ak-key" aria-hidden="true">1</kbd>');
+  expect(html).toContain("1 / 3");
+  // Kinds: the interview's group and waiting items.
+  expect(html).toContain("等待到期");
   expect(html).not.toContain("以后的");
-  expect(html.match(/data-empty="true"/g)).toHaveLength(2);
   expect(renderToStaticMarkup(<AskBoard initial={[]} previews={{}} />)).toContain("本周暂无待决事项。");
+});
+
+test("a filter narrows the deck to one quadrant or one kind, in quadrant order", () => {
+  const asks: Ask[] = [{ ...base, id: "a", kind: "waiting_due" }, { ...base, id: "b", urgency: "now", important: true }, { ...base, id: "c", kind: "missed_block", urgency: "now" }];
+  const all = filterAsks(asks, {}).map((ask) => ask.id);
+  expect(all[0]).toBe("b");
+  expect([...all].sort()).toEqual(["a", "b", "c"]);
+  expect(filterAsks(asks, { quadrant: "urgent_important" }).map((ask) => ask.id)).toEqual(["b"]);
+  expect(filterAsks(asks, { group: "等待到期" }).map((ask) => ask.id)).toEqual(["a"]);
+  expect(filterAsks(asks, { group: "日程与承诺" }).map((ask) => ask.id)).toEqual(["c"]);
+  expect(askGroup({ kind: "risk_digest" })).toBe("风险与逾期");
+  expect(askGroup({ kind: "relation_check" })).toBe("其他");
+});
+
+test("the head's estimate: each kind at its own pace, the person's own median once five answers were timed", () => {
+  expect(clearMinutes({ asks: 0, workOrders: 0, evidence: 0, assistantReviews: 0, assistantOther: 0 })).toBe(0);
+  expect(clearMinutes({ asks: 4, workOrders: 2, evidence: 1, assistantReviews: 2, assistantOther: 0 })).toBe(9);
+  expect(clearMinutes({ asks: 4, workOrders: 0, evidence: 0, assistantReviews: 0, assistantOther: 0 }, [10, 20, 30, 40, 50])).toBe(2);
+  expect(clearMinutes({ asks: 1, workOrders: 0, evidence: 0, assistantReviews: 0, assistantOther: 0 }, [600, 600])).toBe(1);
 });
 
 test("in English the card's own words are English; the ask's own text is shown as written", () => {
