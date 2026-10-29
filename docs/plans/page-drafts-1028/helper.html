@@ -1,0 +1,95 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小帮手 · 设计草稿</title><style>
+:root{--bg:#F6F4EF;--side:#EFECE6;--card:#FCFBF8;--line:#E6E1D8;--line2:#D9D3C7;--ink:#1F2420;--muted:#4A4943;--accent:#3E5A4C;--accent-ink:#2F463A;--accent-soft:#DDE6E0;--warn:#A3402A;--warn-ink:#8A321F;--warn-soft:#F5E4DE;--amber-soft:#F3EAD3;--amber-ink:#6A4E12;
+--serif:"Source Serif 4",Georgia,"Noto Serif SC","Source Han Serif SC","Songti SC",SimSun,serif;--sans:Arial,"DengXian","等线","Microsoft YaHei",sans-serif;--gen:"Microsoft YaHei","微软雅黑",Arial,sans-serif}
+*{box-sizing:border-box}html,body{margin:0}body{font-variant-numeric:lining-nums;background:var(--bg);color:var(--ink);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+.ic{flex:none;vertical-align:middle}
+.serif{font-family:var(--serif)}.gen{font-family:var(--gen)}.muted{color:var(--muted)}.num{font-family:var(--serif);font-variant-numeric:tabular-nums lining-nums}
+button{font:inherit;color:inherit;cursor:pointer}
+a{color:var(--accent-ink)}
+/* shell */
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+.side{background:var(--side);border-right:1px solid var(--line);padding:22px 14px 16px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
+.side .num,.brand{font-variant-numeric:lining-nums}.brand{font-family:var(--serif);font-size:21px;font-weight:600;padding:2px 10px 18px;letter-spacing:.2px}
+.brand small{display:block;font:12px var(--sans);color:var(--muted);letter-spacing:0;margin-top:2px}
+.nav a{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:8px;color:var(--ink);text-decoration:none;font-size:14px}
+.nav a:hover{background:#E6E2DA}.nav a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.nav .badge{margin-left:auto;background:var(--accent);color:#fff;font-size:12px;border-radius:999px;padding:0 7px;line-height:19px}
+.nav .badge.soft{background:transparent;color:var(--muted);padding:0}
+.nav-h{font-size:12px;color:var(--muted);padding:14px 10px 4px}
+.side-foot{margin-top:auto;display:flex;flex-direction:column;gap:6px}
+.helper-chip{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 10px}
+.avatar{width:34px;height:34px;border-radius:50%;background:radial-gradient(circle at 50% 38%,#C9B8A2 0 30%,#8FA596 31% 100%);flex:none;border:1px solid var(--line2)}
+.helper-chip b{font-size:13px;display:block}.helper-chip span{font-size:12px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block}
+.dot.warn{background:var(--warn)}
+.acct{display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:13px;color:var(--muted)}
+.acct .sp{margin-left:auto;display:flex;gap:0}.acct .ibtn{width:28px;height:28px}.acct>span:nth-child(2){white-space:nowrap}
+.main{min-width:0;padding:26px 34px 120px}
+.ph{display:flex;align-items:flex-end;gap:18px;margin-bottom:20px}
+.ph h1{font-family:var(--serif);font-weight:600;font-size:30px;line-height:1.15;margin:0}
+.ph .sub{color:var(--muted);font-size:13px;margin-top:5px}
+.ph .acts{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* primitives */
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px rgba(40,36,28,.04),0 4px 14px rgba(40,36,28,.035);padding:18px}
+.card h2,.h2{font-family:var(--serif);font-weight:600;font-size:18px;margin:0;line-height:1.3}
+.card h3{font-size:14px;margin:0;font-weight:700}
+.ch{display:flex;align-items:center;gap:10px;margin-bottom:12px}.ch .r{margin-left:auto;display:flex;gap:6px;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:8px;border:1px solid var(--line2);background:var(--card);font-size:13.5px;white-space:nowrap}
+.btn:hover{background:#F1EEE7}.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}.btn.pri:hover{background:var(--accent-ink)}
+.btn.ghost{border-color:transparent;background:transparent}.btn.sm{height:28px;padding:0 10px;font-size:13px}.btn.warn{color:var(--warn-ink);border-color:#E3C3B8}
+.ibtn{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:8px;border:1px solid var(--line2);background:var(--card);color:var(--ink)}
+.ibtn:hover{background:#F1EEE7}.ibtn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}.ibtn.ghost{border-color:transparent;background:transparent}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:20px;padding:0 9px;border-radius:999px;white-space:nowrap}
+.l-research{background:#E1E9F2;color:#1E3B5E}.l-startup{background:#F1E4D8;color:#5E3214}.l-media{background:#ECE2F1;color:#4D2762}.l-invest{background:#DEEBE3;color:#1C4630}.l-health{background:#F1E9D3;color:#54440E}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:20px;padding:0 8px;border-radius:999px;border:1px solid var(--line2);color:var(--muted);white-space:nowrap;background:var(--card)}
+.chip.acc{background:var(--accent-soft);border-color:transparent;color:var(--accent-ink)}.chip.warn{background:var(--warn-soft);border-color:transparent;color:var(--warn-ink)}.chip.amber{background:var(--amber-soft);border-color:transparent;color:var(--amber-ink)}.chip.solid{background:var(--ink);color:#fff;border-color:var(--ink)}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden;background:var(--card)}
+.seg button{border:0;background:transparent;height:30px;padding:0 12px;font-size:13px;display:inline-flex;align-items:center;gap:6px}.seg button+button{border-left:1px solid var(--line2)}.seg button.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.grid{display:grid;gap:16px}
+.kpi{display:flex;flex-direction:column;gap:2px}.kpi .v{font-variant-numeric:lining-nums tabular-nums;font-family:var(--serif);font-size:30px;line-height:1.1;font-weight:600}.kpi .v small{font-size:15px;color:var(--muted);font-weight:400}.kpi .k{font-size:12.5px;color:var(--muted)}
+.bar{height:6px;border-radius:999px;background:#ECE8E0;overflow:hidden;display:flex}.bar i{display:block;height:100%;background:var(--accent)}
+.strip{display:flex;gap:3px}.strip i{height:6px;border-radius:3px;background:#E6E1D8;flex:1}.strip i.done{background:var(--accent)}.strip i.cur{background:#fff;box-shadow:inset 0 0 0 1.5px var(--accent)}.strip i.agent{background:repeating-linear-gradient(135deg,#CFC8BA 0 3px,#EDE9E1 3px 6px)}.strip i.wait{background:transparent;box-shadow:inset 0 0 0 1px #BDB6A8;}
+.row{display:flex;align-items:center;gap:10px}.wrap{flex-wrap:wrap}.sp{margin-left:auto}
+.hr{height:1px;background:var(--line);margin:14px 0}
+.kbd{font:12px/18px var(--sans);border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:0 5px;color:var(--muted);background:var(--card)}
+.input{display:flex;align-items:center;gap:10px;border:1px solid var(--line2);background:var(--card);border-radius:12px;padding:8px 8px 8px 12px;color:var(--muted)}
+.input .grow{flex:1}.send{width:36px;height:36px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;border:0}
+.dock{position:sticky;bottom:18px;margin-top:22px;z-index:5}.dock .input{box-shadow:0 6px 24px rgba(40,36,28,.10);padding:10px 10px 10px 14px;font-size:14px}
+.list>li{list-style:none}.list{margin:0;padding:0}
+.note{font-size:13px;color:var(--muted)}
+.callout{border:1px solid var(--line);background:#F3F0E9;border-radius:10px;padding:10px 12px;font-size:13px}
+.ring{--p:60;width:46px;height:46px;border-radius:50%;background:conic-gradient(var(--accent) calc(var(--p)*1%),#E6E1D8 0);display:grid;place-items:center}.ring::after{content:"";width:34px;height:34px;border-radius:50%;background:var(--card)}
+/* spec sheet */
+.spec{margin:56px 0 0;border-top:3px double var(--line2);padding-top:26px}
+.spec h2{font-family:var(--serif);font-size:22px;margin:0 0 4px}.spec .lead{color:var(--muted);margin:0 0 16px}
+.spec .cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:18px}
+.spec .cols ul{margin:6px 0 0;padding-left:18px}.spec .cols li{margin:3px 0}
+.spec table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}
+.spec th,.spec td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}.spec th{background:#F1EEE7;font-weight:600}
+.spec code{font:12px Consolas,monospace;background:#EFECE6;padding:0 4px;border-radius:4px}
+.sev{font-size:12px;border-radius:999px;padding:0 7px;line-height:19px}.sev.h{background:var(--warn-soft);color:var(--warn-ink)}.sev.m{background:var(--amber-soft);color:var(--amber-ink)}.sev.l{background:#E9E6DF;color:var(--muted)}
+body{background:#E9E6DF}.stage{display:grid;grid-template-columns:420px minmax(0,1fr);gap:40px;max-width:1240px;margin:0 auto;padding:36px 30px}
+  .panel{background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 50px rgba(40,36,28,.16);height:820px;display:flex;flex-direction:column;overflow:hidden}
+  .ph2{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--card)}.ph2 .avatar{width:44px;height:44px}
+  .daystrip{display:flex;height:22px;border-radius:6px;overflow:hidden;background:#ECE8E0;margin:10px 16px 0;position:relative}.daystrip i{display:block;height:100%}.daystrip .now{position:absolute;top:-3px;bottom:-3px;width:2px;background:#A3402A}
+  .feed{flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px}.bub{max-width:86%;padding:10px 12px;border-radius:12px;font-size:13.5px;line-height:1.6}.bub.me{margin-left:auto;background:var(--accent-soft)}.bub.ai{background:var(--card);border:1px solid var(--line)}
+  .act{border:1px solid var(--line);border-radius:10px;padding:10px;background:#FAF8F3;margin-top:8px;font-size:13px}.run{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 12px;font-size:12.5px}
+  .stage .spec .cols{grid-template-columns:1fr}.stage .spec{margin-top:24px}.comp{padding:12px 14px;border-top:1px solid var(--line);background:var(--card)}</style></head><body><div class="stage"><div class="panel">
+    <div class="ph2"><span class="avatar"></span><div><b class="serif" style="font-size:17px">小帮手</b><div class="note"><i class="dot"></i> 整理收集中 · 2 项助手任务在跑</div></div><span class="sp row"><button class="ibtn " title="搜索对话" aria-label="搜索对话"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></button><button class="ibtn " title="钉在桌面" aria-label="钉在桌面"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5M9 10.8V4h6v6.8l3 3.2H6z"/></svg></button><button class="ibtn " title="打开 Crossline" aria-label="打开 Crossline"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button></span></div>
+    <div class="daystrip"><i style="width:18%;background:transparent"></i><i style="width:10%;background:#2F5B8C"></i><i style="width:8%;background:transparent"></i><i style="width:10%;background:#2F5B8C"></i><i style="width:14%;background:transparent"></i><i style="width:7%;background:#6E3D86"></i><span class="now" style="left:62%"></span></div>
+    <div class="row note" style="padding:4px 16px 0;font-size:12px"><span>09</span><span class="sp">现在 19:12 · 下一块 19:30 小红书选题</span></div>
+    <div class="feed">
+      <div class="run"><svg class="ic " width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 13v1M15 13v1M9.5 17h5"/></svg> 助手 · 汇集本周可公开片段 <span class="bar" style="width:70px"><i style="width:60%"></i></span> 已读 8 份 <button class="ibtn ghost" title="停止" aria-label="停止"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <div class="bub ai gen"><b>待决事项 1 项</b><div class="act">「STAT 610 作业 4」第 3 题按哪种格式提交？<div class="row" style="margin-top:8px"><button class="btn sm pri"><span>只交 PDF（推荐）</span></button><button class="btn sm"><span>其他</span></button></div></div></div>
+      <div class="bub me gen">考完后的复习不用排了，晚上早点睡</div>
+      <div class="bub ai gen">读成两件事：
+        <div class="act"><b>1. 归档「期中复习订正」</b> · 理由：考完不再需要<div class="row" style="margin-top:6px"><button class="btn sm pri"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>确认</span></button><button class="btn sm"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg><span>改</span></button></div></div>
+        <div class="act"><b>2. 今晚 22:00 后设为休息</b> · 让出 22:00–23:00 的 1 块<div class="row" style="margin-top:6px"><button class="btn sm pri"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>确认</span></button><button class="btn sm"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg><span>改</span></button></div></div></div>
+      <div class="bub ai gen" style="font-size:12.5px"><svg class="ic " width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> 已执行 2 项 <button class="btn sm ghost"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg><span>撤销</span></button></div>
+    </div>
+    <div class="comp"><div class="input"><button class="ibtn ghost" title="附件" aria-label="附件"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button class="ibtn ghost" title="提及" aria-label="提及"><svg class="ic " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></svg></button><span class="grow">任务、改期、回答待决、撤销……一句话</span><button class="send"><svg class="ic " width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div><div class="row note" style="margin-top:6px;font-size:12px"><span class="kbd">Alt</span>+<span class="kbd">Shift</span>+<span class="kbd">H</span> 随时呼出</div></div>
+  </div>
+  <div><h1 class="serif" style="font-size:30px;margin:0 0 6px">小帮手 · 独立页</h1><p class="muted" style="max-width:560px">/helper 是钉在桌面（Document Picture-in-Picture）和托盘呼出的窄窗口。草稿按 420px 宽设计：顶部形象与状态，下方今天的一条时间带，中间是同一天的对话（含待决卡、运行中的助手任务芯片、可撤销的执行结果），底部输入框。</p>
+  <section class="spec"><h2>这页的逻辑修复 · 小帮手</h2><p class="lead">现状把今日页的整块日面板原样塞进窄窗口：空时间轴占满宽度、「没有要回答的问题」像一个按钮、对话区空白。窄窗口应只保留「此刻」需要的三样：下一块、一个待决、对话。</p>
+  <div class="cols"><div class="card"><h3>保留并移位</h3><ul><li>当天对话与搜索（<code>Conversation</code> · <code>/api/conversation/search</code>）</li><li>待决事项最急的一项（<code>AskStack</code> 顶卡）</li><li>形象与动作状态（<code>helperMood</code>、<code>HelperFace</code>）</li><li>钉在桌面、打开 Crossline、快捷键</li></ul></div><div class="card"><h3>合并</h3><ul><li>日面板缩成一条时间带 + 「下一块」一行</li><li>运行中的助手任务（<code>/v1/agent/tasks/:id/progress</code>）成为顶部芯片，带停止（借鉴 Manus 的运行中芯片）</li><li>执行结果卡与撤销（<code>withUndo</code>）并入对话流</li></ul></div><div class="card"><h3>删除或降级（及理由）</h3><ul><li>窄窗口内的完整日/周/月日历（回今日页看）</li><li>「没有要回答的问题」按钮样式（无待决时不显示）</li></ul></div></div>
+  <table><thead><tr><th style="width:26%">原有功能</th><th style="width:30%">现有组件</th><th>草稿中的去处</th></tr></thead><tbody><tr><td>形象、状态动画</td><td><code>HelperFace · helperMood</code></td><td>顶部头像与状态行</td></tr><tr><td>搜索对话</td><td><code>/api/conversation/search</code></td><td>顶部搜索图标</td></tr><tr><td>钉在桌面 / 打开主窗口</td><td><code>helper/page.tsx</code></td><td>顶部图标</td></tr><tr><td>当天时间轴</td><td><code>CalendarPanel</code></td><td>一条时间带 + 下一块</td></tr><tr><td>待决事项</td><td><code>AskStack</code></td><td>对话流中的待决卡</td></tr><tr><td>助手运行进度与停止</td><td><code>agent progress / cancel</code></td><td>顶部芯片</td></tr><tr><td>卡片确认 / 修改 / 撤销</td><td><code>/api/conversation/decide · card-fields.tsx</code></td><td>对话卡内按钮</td></tr><tr><td>输入、附件、@ 提及</td><td><code>composer.tsx</code></td><td>底部输入框</td></tr></tbody></table></section></div></div></body></html>
