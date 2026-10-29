@@ -4,6 +4,7 @@ import type { AccessContext } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
 import { activityMinutes, completeWorkOrderExecution, effectiveSchedulePreferences, getStore, startWorkOrderExecution, toZonedInstant } from "./crossline";
 import { ANSWERED_SETTING, type NudgePayload } from "./nudges";
+import { autoCloseFinished } from "./auto-close";
 import type { Card } from "./conversation";
 
 /**
@@ -119,6 +120,8 @@ export function confirmBlockAt(ctx: AccessContext, messageId: string, block: Blo
     if (block.stepId && store.getStepPlan(ctx.workspaceId, block.orderId)?.steps.some((step) => step.id === block.stepId))
       store.updateStepProgress(ctx.workspaceId, block.orderId, block.stepId, { status: "done" }, ctx.principalId, "confirm");
     record(answer.kind, { minutes, source });
+    // The person's last step done with only the assistant's or a wait left: the task hands itself in (docs/plans/closed-loop-1030.md §3).
+    try { autoCloseFinished(ctx, now); } catch { /* the attention timer tries again */ }
     return { ok: true, done: "step", minutes };
   }
 

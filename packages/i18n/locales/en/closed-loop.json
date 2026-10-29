@@ -12,5 +12,10 @@
   "推断：部分": "Inferred: partly done",
   "推断：可能没做": "Inferred: probably not done",
   "✓ 做了": "✓ Done",
-  "✗ 没做": "✗ Not done"
+  "✗ 没做": "✗ Not done",
+  "自动交上「{{title}}」": "Handed in “{{title}}” by itself",
+  "自动交上 {{count}} 个任务": "Handed in {{count}} tasks by themselves",
+  "{{names}}等 {{count}} 个任务本人的步骤都做完了，已按完成交上；剩下的助手或等待步骤不再占本人时间。24 小时内可撤销。": "{{names}} and others, {{count}} tasks in all, have every step of the person's done and were handed in as finished; the assistant's or waiting steps left take none of the person's time. Undo within 24 hours.",
+  "{{names}}本人的步骤都做完了，已按完成交上；剩下的助手或等待步骤不再占本人时间。24 小时内可撤销。": "{{names}}: every step of the person's is done, so it was handed in as finished; the assistant's or waiting steps left take none of the person's time. Undo within 24 hours.",
+  "撤销自动交上": "Undo handing in by itself"
 }

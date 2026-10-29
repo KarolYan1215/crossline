@@ -45,6 +45,8 @@ export type Inverse =
   | { kind: "work_order.payload"; entries: Array<{ id: string; payload: unknown; state?: string }> }
   /** Step plans an operation rewrote get their open steps back (the done ones were never touched; `saveStepPlan` keeps them). */
   | { kind: "step_plan.restore"; plans: Array<{ workOrderId: string; plan: StepPlanInput }> }
+  /** Tasks handed in by themselves once the person's steps were done (`lib/auto-close.ts`): open again, approved, the rest of their steps as left. */
+  | { kind: "work_order.reopen"; ids: string[] }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
@@ -169,6 +171,19 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
             const attempt = store.listEvents(ctx.workspaceId, { type: "approval.revoked", entityId: entry.id }).length;
             store.transitionWorkOrder(ctx.workspaceId, entry.id, { type: "approval.revoked", reason: tOf(ctx)("撤销整理") }, `undo-payload:${entry.id}:${attempt}`);
           }
+        }
+        return { ok: true };
+      }
+      case "work_order.reopen": {
+        const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
+        for (const id of inverse.ids) {
+          if (orders.get(id)?.state !== "accepted") continue;
+          const attempt = store.listEvents(ctx.workspaceId, { type: "work_order.reopened", entityId: id }).length;
+          const reason = tOf(ctx)("撤销自动交上");
+          store.transitionWorkOrder(ctx.workspaceId, id, { type: "acceptance.revoked", reason }, `undo-auto-close:${id}:${attempt}:revoke`);
+          store.transitionWorkOrder(ctx.workspaceId, id, { type: "blocked", reason }, `undo-auto-close:${id}:${attempt}:hold`);
+          store.transitionWorkOrder(ctx.workspaceId, id, { type: "plan.approved", approvalId: ctx.principalId }, `undo-auto-close:${id}:${attempt}:open`);
+          store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.reopened:${id}:${attempt}`, type: "work_order.reopened", entityId: id, payload: { reason } });
         }
         return { ok: true };
       }
