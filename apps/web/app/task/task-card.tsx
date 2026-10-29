@@ -111,7 +111,11 @@ function CardStep({ detail, step, proposal, finished, waiting }: {
   // from its first block (`TUTORIAL_LEAD_DAYS`, 2026-10-21), so the card says when rather than showing nothing. One without steps yet is still being prepared.
   if (!detail.stepPlan) return <p className="task-card-step-note">{proposal ? t("准备中：步骤规划生成后再请本人确认。")
     : <>{t("步骤规划中 · 全程约")} <span className="mono">{minutesText(locale, detail.estimate.p50Minutes)}</span></>}</p>;
-  if (!step) return <p className="task-card-step-note">{t("步骤已完成")}</p>;
+  if (!step) {
+    // Every open step is the assistant's: 「步骤已完成」 read as done on a task with 0 of 3 steps done (W-145).
+    const assistant = detail.stepPlan.steps.find((item) => item.status === "planned" && item.executor === "agent");
+    return <p className="task-card-step-note">{assistant ? t("助手在做：{{title}}", { title: assistant.title }) : t("步骤已完成")}</p>;
+  }
   // A waiting step is said once, by the wait line under it.
   if (waiting) return null;
   return <div className="task-card-step">

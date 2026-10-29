@@ -7,6 +7,7 @@ import { requestCodexSupervisor } from "./codex-runtime";
 import { answerAsk, collectAsks, explainRisk, openAsks, snoozeAsk, writeAttentionSnapshot } from "./asks";
 import { countPending } from "./pending";
 import { TEST_CTX } from "./test-support";
+import { applyChange } from "./impact";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.clearAllMocks(); vi.unstubAllEnvs(); });
 
@@ -322,6 +323,17 @@ test("two or more blocks not started yesterday are one card: 都顺延 settles t
   expect(missed().map((ask) => ask.entityId).sort()).toEqual(["a", "b"]);
   store.setSetting(ws, "asks.missed.split", "");
   expect(await answerAsk(TEST_CTX, missed()[0]!.id, "roll", {}, NOW)).toMatchObject({ ok: true });
+  expect(missed()).toEqual([]);
+});
+
+test("a task the person deferred to a later day is not asked about as missed (W-141)", async () => {
+  const store = setup();
+  store.saveWorkOrder({ id: "moved", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",
+    milestoneId: "", intent: "任务 moved", state: "approved", riskTier: "routine", estimate, payload: { dueDate: "2026-10-10" } });
+  store.setSetting(ws, "schedule.day:2026-10-06", JSON.stringify({ moved: "09:00" }));
+  const missed = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "missed_block");
+  expect(missed().map((ask) => ask.entityId)).toEqual(["moved"]);
+  expect(applyChange(TEST_CTX, { kind: "defer", workOrderId: "moved", date: "2026-10-08" })).toMatchObject({ ok: true });
   expect(missed()).toEqual([]);
 });
 

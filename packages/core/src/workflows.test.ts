@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { accessProfileSlug, categoryFromWording, grownSkillId, scanForDeclaredAccess, reassignedSteps, scheduleLabel, stepLeavesMachine, validateWorkflowManifest, workflowDue, type WorkflowManifest } from "./index";
+import { accessProfileSlug, categoryFromWording, grownSkillId, monthlyFromDays, scanForDeclaredAccess, reassignedSteps, scheduleLabel, stepLeavesMachine, validateAutomationPlan,
+  validateWorkflowManifest, workflowDue, type WorkflowManifest } from "./index";
 
 const manifest: WorkflowManifest = {
   name: "weekly-vlog-cut", summary: "每周把素材剪成一条 3 分钟 vlog", lines: ["media"], category: "media_edit", trigger: "schedule",
@@ -22,6 +23,31 @@ test("every step that leaves the machine is the person's, whatever the manifest 
     expect(() => validateWorkflowManifest(bad, ["media"])).toThrow("WORKFLOW_MANIFEST_INVALID");
   }
   expect(validateWorkflowManifest({ ...manifest, trigger: "on_request", schedule: null }, ["media"]).schedule).toBeNull();
+});
+
+test("a monthly or quarterly schedule runs on its day of the month, every n months, and a 「季度」 request is not stored as weekly (W-146)", () => {
+  const zone = "America/Chicago";
+  const quarterly = monthlyFromDays("QUARTERLY:1", "09:00")!;
+  expect(quarterly).toEqual({ type: "monthly", day: 1, months: 3, time: "09:00" });
+  expect(monthlyFromDays("每月15", "08:00")).toEqual({ type: "monthly", day: 15, months: 1, time: "08:00" });
+  expect(monthlyFromDays("MO,FR", "08:00")).toBeUndefined();
+  // 2026-11-01 09:30 in Chicago is 15:30 UTC.
+  expect(workflowDue(quarterly, undefined, new Date("2026-11-01T15:30:00Z"), zone)).toBe(true);
+  expect(workflowDue(quarterly, undefined, new Date("2026-11-02T15:30:00Z"), zone)).toBe(false);
+  // Ran on 11/1: not on 12/1 or 1/1, again on 2/1.
+  expect(workflowDue(quarterly, "2026-11-01T15:05:00Z", new Date("2026-12-01T15:30:00Z"), zone)).toBe(false);
+  expect(workflowDue(quarterly, "2026-11-01T15:05:00Z", new Date("2027-01-01T15:30:00Z"), zone)).toBe(false);
+  expect(workflowDue(quarterly, "2026-11-01T15:05:00Z", new Date("2027-02-01T15:30:00Z"), zone)).toBe(true);
+  // Day 31 in a 30-day month is its last day.
+  expect(workflowDue({ type: "monthly", day: 31, months: 1, time: "09:00" }, undefined, new Date("2026-11-30T15:30:00Z"), zone)).toBe(true);
+  expect(scheduleLabel(quarterly)).toBe("每季度 1 日 09:00");
+  expect(scheduleLabel({ type: "monthly", day: 15, months: 1, time: "08:00" })).toBe("每月 15 日 08:00");
+  const plan = { name: "季度投资资料包", summary: "", lineId: "investment", assumptions: "", replaces: "", enabled: true,
+    trigger: { type: "schedule" as const, time: "09:00", days: "QUARTERLY:1", hours: 0, from: "", keywords: "", url: "", event: "" },
+    action: { kind: "run" as const, instructions: "读取本季度材料并写入季度资料包", reminder: "", category: "read_research_organize", outputs: "" },
+    steps: [{ title: "写入季度资料包", by: "assistant" as const }] };
+  expect(validateAutomationPlan(plan, ["investment"]).trigger).toEqual({ type: "schedule", schedule: quarterly });
+  expect(validateWorkflowManifest({ ...manifest, schedule: quarterly }, ["media"]).schedule).toEqual(quarterly);
 });
 
 test("a scheduled workflow is due on its days after its time, once a day, and not hours late", () => {

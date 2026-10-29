@@ -265,7 +265,8 @@ function ActionRow({ card, index, editing, onEdit, fields, changed }: { card: Ca
     <small className="conversation-state">{undone || (changed && item.state === "pending" ? t("已修改，待执行") : STATE_WORD[item.state] ? t(STATE_WORD[item.state]!) : "")}</small>
     {onEdit && <button type="button" className="text-button" aria-expanded={editing} onClick={onEdit}>{editing ? t("收起") : t("修改")}</button>}
     {editing && fields}
-    {item.message && <small className="muted">{item.message}</small>}
+    {/* A handler with nothing to add says 「已完成」, which only repeated 「已执行」 beside it (「已执行 已完成」, W-148). */}
+    {item.message && !(item.state === "done" && item.message === t("已完成")) && <small className="muted">{item.message}</small>}
     {item.state === "done" && <span className="conversation-links">
       {item.href && <a href={item.href}>{t("查看 →")}</a>}
       {item.opId && !undone && <button type="button" className="text-button" onClick={async () => {

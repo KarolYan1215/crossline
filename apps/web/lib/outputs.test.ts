@@ -47,3 +47,17 @@ test("the folder holds what each run handed over, by line and by task, without i
   expect(bytes.includes(Buffer.from("make.py"))).toBe(false);
   expect(outputZip(TEST_CTX, { taskId: "nothing" })).toBeUndefined();
 });
+
+test("a run whose directory is not on this server is counted, not listed: its links would answer FILE_NOT_FOUND (W-143)", () => {
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  run(store, "agent-here", { "清单.md": "# 在" }, { title: "在服务器上" });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "req-agent-gone", type: "agent.task.requested", entityId: "agent-gone",
+    payload: { taskId: "agent-gone", title: "在旧电脑上", category: "read_research_organize", workOrderId: "" } });
+  store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: "done-agent-gone", type: "agent.task.completed", entityId: "agent-gone",
+    payload: { taskId: "agent-gone", directory: path.join(tmpdir(), "no-such-crossline-run-dir"), reviewRequired: false,
+      artifacts: [{ path: "旧.md", sha256: "x", bytes: 10 }] } });
+  const folder = outputFolder(TEST_CTX);
+  expect(folder.lines.flatMap((line) => line.tasks.map((task) => task.title))).toEqual(["在服务器上"]);
+  expect(folder.elsewhere).toBe(1);
+  expect(folder.files).toBe(1);
+});

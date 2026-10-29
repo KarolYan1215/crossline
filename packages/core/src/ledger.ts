@@ -36,8 +36,16 @@ export function ledgerCategory(record: Pick<LedgerRecord, "kind" | "category">):
   if (fixed.includes(record.category)) return record.category;
   return record.kind === "income" ? "其他收入" : builtInCategory(merchantKey(record.category ?? "")) || "其他";
 }
-/** A merchant's name for display: the record's own (its note's first part) or its key. */
-const merchantName = (record: LedgerRecord) => record.merchantKey || record.category || "其他";
+/**
+ * A merchant's key for grouping: the record's own, or — for a record written before merchants were kept, whose free-text category was the
+ * merchant (「Apple」) — that text keyed the same way, so one shop is one line in 商户前 10 名 (it was 「Apple 12.0」 and 「Apple 3.0」, W-149).
+ */
+const merchantName = (record: LedgerRecord) => {
+  if (record.merchantKey) return record.merchantKey;
+  const fixed: readonly string[] = record.kind === "income" ? INCOME_CATEGORIES : SPEND_CATEGORIES;
+  if (!record.category || fixed.includes(record.category)) return record.category || "其他";
+  return merchantKey(record.category) || record.category;
+};
 
 /** The currency most of these records use (CNY with none). */
 export function mainCurrency(records: LedgerRecord[]): string {

@@ -1,6 +1,6 @@
 import { isAgentCategory, type AgentCategory } from "./agent-dispatch";
 import { joinList, tFor, type Locale } from "./i18n";
-import { stepLeavesMachine, workflowDue, scheduleLabel, WEEKDAYS, type Weekday, type WorkflowSchedule } from "./workflows";
+import { monthlyFromDays, stepLeavesMachine, workflowDue, scheduleLabel, WEEKDAYS, type Weekday, type WorkflowSchedule } from "./workflows";
 
 /**
  * Automations (docs/personal-agent.md, 2026-10-19): what the person asks for in words — 「每天早上 8 点把邮箱里和课程有关的整理成清单」,
@@ -133,9 +133,9 @@ export function validateAutomationPlan(value: unknown, lineIds: string[], existi
     case "schedule": {
       if (!TIME.test(t.time)) problem("schedule 的 time 须为 HH:MM");
       const days = list(t.days.toUpperCase()).filter((day): day is Weekday => (WEEKDAYS as readonly string[]).includes(day));
-      const schedule: WorkflowSchedule = !t.days.trim() || /DAILY|每天/i.test(t.days) ? { type: "daily", time: t.time }
+      const schedule: WorkflowSchedule = monthlyFromDays(t.days, t.time) ?? (!t.days.trim() || /DAILY|每天/i.test(t.days) ? { type: "daily", time: t.time }
         : /WEEKDAYS|工作日/i.test(t.days) ? { type: "weekdays", time: t.time }
-        : days.length ? { type: "weekly", days, time: t.time } : problem("schedule 的 days 写 DAILY、WEEKDAYS 或 MO,TU,…");
+        : days.length ? { type: "weekly", days, time: t.time } : problem("schedule 的 days 写 DAILY、WEEKDAYS、MO,TU,…、MONTHLY:日 或 QUARTERLY:日"));
       trigger = { type: "schedule", schedule };
       break;
     }

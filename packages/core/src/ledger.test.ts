@@ -83,4 +83,10 @@ describe("categories written before the fixed lists", () => {
     expect(ledgerCategory({ kind: "income", category: "bonus" })).toBe("其他收入");
     expect(ledgerSummary([rec("2026-10-24", 11.99, { category: "Apple" })], { today: "2026-10-28" }).categories.map((item) => item.category)).toEqual(["其他"]);
   });
+
+  it("an old record whose category is its merchant joins the same merchant's newer records, and the line card shows fixed categories (W-149)", () => {
+    const records = [rec("2026-10-24", 11.99, { category: "Apple", merchantKey: "" }), rec("2026-10-28", 2.99, { category: "订阅与软件", merchantKey: "apple" })];
+    expect(ledgerSummary(records, { today: "2026-10-29" }).merchants).toEqual([{ merchant: "apple", amount: 14.98, count: 2 }]);
+    expect(recordMetrics(records, "2026-10-29").categories.map((item) => item.category).sort()).toEqual(["其他", "订阅与软件"]);
+  });
 });

@@ -18,7 +18,7 @@ What happens with your answer: Crossline watches the trigger itself, for free. W
 
 Pick the one the request means:
 
-- `schedule`: at a time. `time` HH:MM in the person's zone, `days` `DAILY`, `WEEKDAYS` or a list like `MO,WE,FR`. 「每天早上」 without a time is 08:00; 「每周」 without a day is Monday.
+- `schedule`: at a time. `time` HH:MM in the person's zone, `days` `DAILY`, `WEEKDAYS`, a list like `MO,WE,FR`, `MONTHLY:<day>` (每月, day 1–31) or `QUARTERLY:<day>` (每季度; `MONTHS:<n>:<day>` for every n months). 「每天早上」 without a time is 08:00; 「每周」 without a day is Monday; 「每月」/「每季度」 without a day is the 1st. Never turn a monthly or quarterly request into a weekly one.
 - `interval`: every `hours` hours (1–168), for 「每隔几小时看一下」.
 - `mail`: new mail. `from` is part of the sender's address or name (empty for anyone), `keywords` comma-separated words in the subject or opening (empty for all mail). Only when `connected.mail` is true; otherwise use a schedule and say in `assumptions` that the mailbox must be connected in 设置 → 日历与连接.
 - `watch`: a public page changing. `url` is the exact https address the request names, `hours` how often to look (default 6). Never invent a url: when the request names a site but no page, use the address the person gave, or choose `schedule` and say so.

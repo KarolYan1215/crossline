@@ -73,6 +73,13 @@ const MONEY_RECORDS = /账户(?:记录|资料|基线|明细|数据)?|账单|流�
 const MOVES_MONEY = /买入|卖出|下单|申购|赎回|付款|支付|汇款|转账|\b(?:buy|sell|trade|pay|transfer)\b/i;
 export const isMoneyRecordWork = (text: string): boolean => isStaticArtifactWork(text) && MONEY_RECORDS.test(text) && !MOVES_MONEY.test(text);
 const LOGIN = /登录|登入|\blog ?in\b|\bsign ?in\b/i;
+/**
+ * Changing a setting in the person's own app or account (「在 Progressive 应用中核对驾驶员并启用 Accident Response 功能」): it happens behind
+ * their login, on their account, so it is theirs. The step was planned for the assistant on the real account (W-144). A list or a guide
+ * about it (「整理应用内启用核对清单」) is a thing, not the act.
+ */
+const ACCOUNT_SETTING = /(?:启用|开启|开通|激活|停用|关闭|绑定|解绑|注销)[^，。；,;]{0,24}?(?:功能|服务|订阅|自动续费|账户|账号|权限|通知|两步验证|双重验证)|\b(?:enable|turn on|activate|deactivate|link|unlink)\b[^,.;]{0,30}?\b(?:feature|service|subscription|account|notifications?)\b/i;
+const ABOUT_A_SETTING = /核对清单|清单|说明|步骤|教程|指南|截图|checklist|guide|instructions/i;
 const DECISION = /选定|选出|挑选|(?<!题)选择(?!题)|决定|拍板|取舍|定夺|敲定|决策(?!底稿|表|模板|清单|记录|材料|资料|依据)|确定(?:方案|人选|方向|选题|策略|是否|哪|优先)|(?:确认|确定)[^，。；,;]{0,4}唯一|\b(?:decide|choose|pick|select)\b/i;
 /** Graded work the person hands in (an exam is sat, not planned in steps): homework, problem sets, a lab report, a course project. */
 const GRADED_TASK = /作业|习题|大作业|实验报告|课程项目|homework|\bhw\s?\d|assignment|problem set/i;
@@ -166,6 +173,7 @@ export function workOwner(item: WorkItemLike, locale?: Locale): WorkOwnerVerdict
   // The shared external words also name things (「邮件」「券商」「订单」); compiling from them is not acting on them, so for static work
   // only the acts themselves count.
   if (ACTS.test(act) || (!staticWork && stepLeavesMachine(act))) return keep("person", "external", t("要对外发出、提交、联系、出席或付款，只能本人做"));
+  if (ACCOUNT_SETTING.test(leadText) && !ABOUT_A_SETTING.test(leadText)) return keep("person", "external", t("改的是本人账户或应用里的设置，只能本人登录后做"));
   if (DECISION.test(act)) return keep("person", "decision", t("有后果的选择由本人做"));
   if (GRADED.test(leadText) && ANSWERS.test(leadText) && !staticWork) return keep("person", "graded", t("带评分的作答由本人完成"));
   // A step of graded work (「整理最终解答」「标注首题约束」 in 作业 4): its problems and answers are the person's, whatever verb the step uses.

@@ -654,11 +654,16 @@ function missedMembers({ store, ctx, today, t, locale }: Source): Ask[] {
   // A block the person already answered the completion check for (any answer, 未执行 included) is not asked about again.
   const confirmed = new Set(store.listEvents(ctx.workspaceId, { type: "block.confirmed" })
     .filter((event) => (event.payload as { day?: string }).day === yesterday).map((event) => String((event.payload as { workOrderId?: string }).workOrderId)));
+  // A task the person moved to a later day since (the input box's 「推到明天」, 推迟 on the task) has been answered already (W-141).
+  const deferred = new Set(store.listEvents(ctx.workspaceId, { type: "work_order.deferred" })
+    .filter((event) => event.createdAt.slice(0, 10) >= yesterday && String((event.payload as { after?: string }).after ?? "") > yesterday)
+    .map((event) => event.entityId));
   return Object.entries(placed).flatMap(([orderId, start]) => {
     const order = orders.get(orderId);
     const id = `missed:${orderId}:${yesterday}`;
     // Still not begun: approved, preparing or ready. Started (or done, or discarded) is not missed.
-    if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id) || confirmed.has(orderId) || !onPersonsBoard(order)) return [];
+    if (!order || !["approved", "preparing", "ready_for_human"].includes(order.state) || handled.has(id) || confirmed.has(orderId) || deferred.has(orderId)
+      || !onPersonsBoard(order)) return [];
     const dueDay = dueOf(order, anchors);
     if (!dueDay || daysBetween(today, dueDay) > MISSED_ASK_HORIZON_DAYS) return [];
     return [{ id, kind: "missed_block" as const, entityId: orderId, line: order.identityId, urgency: urgencyFor(dueDay, today), dueDay, preview: taskPreview(t, orderId),

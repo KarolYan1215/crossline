@@ -46,6 +46,10 @@ const cases: Array<[string, WorkOwner, WorkOwner]> = [
   ["登录医院人事系统查看排班", "person", "ask"],
   ["汇总本月家庭开支账单", "person", "assistant"],
   ["提交护士执业注册申请", "assistant", "person"],
+  // A setting in the person's own app or account (W-144): behind their login, theirs; a list about it is a thing
+  ["核对驾驶员并启用功能", "assistant", "person"],
+  ["在 Progressive 应用中启用 Accident Response 功能", "assistant", "person"],
+  ["整理应用内启用核对清单", "person", "assistant"],
   // Acceptance checklists and reviewing the assistant's output are not the person's tasks
   ["制定验收清单", "person", "assistant"],
   ["验收助手整理的材料目录", "person", "assistant"],

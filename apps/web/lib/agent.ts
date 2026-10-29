@@ -82,6 +82,13 @@ function taskDirectory(ctx: AccessContext, taskId: string): string | undefined {
   return typeof directory === "string" && existsSync(path.join(directory, "audit.json")) ? directory : undefined;
 }
 
+/**
+ * Whether a run's files are on this machine. A run made by the owner's resident Windows copy before the hosted site became the one ledger
+ * (2026-10-22, docs/device-mode.md) carried its directory over in the ledger but not its files: on the hosted beta 61 of 105 delivered runs
+ * pointed at a `C:\…` folder, and every one of their download links answered FILE_NOT_FOUND (W-143).
+ */
+export const runFilesHere = (directory: string): boolean => Boolean(directory) && existsSync(path.join(directory, "audit.json"));
+
 export function loadTaskAudit(ctx: AccessContext, taskId: string): TaskAudit | undefined {
   const directory = taskDirectory(ctx, taskId);
   if (!directory) return undefined;

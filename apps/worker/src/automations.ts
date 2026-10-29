@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   AUTOMATION_PLAN_SCHEMA, AUTOMATION_RUNS_SETTING, AUTOMATIONS_MAX, AUTOMATIONS_SETTING, AGENT_CATEGORIES, addedLines, fileMatches,
-  mailMatches, previousRunNote, readAutomationRuns, readAutomations, tFor, timeTriggerDue, triggerLabel, validateAutomationPlan,
+  mailMatches, monthlyDays, previousRunNote, readAutomationRuns, readAutomations, tFor, timeTriggerDue, triggerLabel, validateAutomationPlan,
   type AgentCategory, type Automation, type AutomationPlan, type AutomationRun
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -141,7 +141,8 @@ export function flatTrigger(trigger: Automation["trigger"]): AutomationPlan["tri
   const base = { type: trigger.type, time: "", days: "", hours: 0, from: "", keywords: "", url: "", event: "" };
   switch (trigger.type) {
     case "schedule": return { ...base, time: trigger.schedule.time,
-      days: trigger.schedule.type === "daily" ? "DAILY" : trigger.schedule.type === "weekdays" ? "WEEKDAYS" : trigger.schedule.days.join(",") };
+      days: trigger.schedule.type === "daily" ? "DAILY" : trigger.schedule.type === "weekdays" ? "WEEKDAYS"
+        : trigger.schedule.type === "monthly" ? monthlyDays(trigger.schedule) : trigger.schedule.days.join(",") };
     case "interval": return { ...base, hours: trigger.hours };
     case "mail": return { ...base, from: trigger.from, keywords: trigger.keywords.join(",") };
     case "watch": return { ...base, url: trigger.url, hours: trigger.hours };

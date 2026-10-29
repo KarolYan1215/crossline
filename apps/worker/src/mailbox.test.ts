@@ -180,3 +180,14 @@ test("connecting sorts at once; mail read while sorting was off is kept and sort
   await vi.waitFor(() => expect(turns()).toBe(2));
   await vi.waitFor(() => expect(store.getSetting(workspaceId, "mail.unsorted")).toBe("[]"));
 });
+
+test("a company's survey invitation is a promotion, not a todo: the Skill and the runner both say so (W-147)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const path = await import("node:path");
+  const skill = readFileSync(path.resolve(import.meta.dirname, "../../../skills/marketplace/plugins/crossline/skills/crossline-mail-triage/SKILL.md"), "utf8");
+  // On the real account 「Help shape the future of Codex」 became the task 「填写 Codex 使用体验问卷」 on 10-28.
+  expect(skill).toMatch(/Help shape the future of <product>.*\| ignore \|/);
+  expect(skill).toMatch(/Course staff.*feedback survey.*\| todo \|/);
+  const source = readFileSync(path.resolve(import.meta.dirname, "mailbox.ts"), "utf8");
+  expect(source).toContain("a company's survey or feedback invitation");
+});
