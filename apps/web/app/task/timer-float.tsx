@@ -34,8 +34,11 @@ export function TimerFloat() {
   useEffect(() => {
     if (!loaded.current) { loaded.current = true; void load(); }
     const tick = setInterval(() => setNow(Date.now()), 1000);
-    const refresh = setInterval(() => void load(), 60_000);
-    return () => { clearInterval(tick); clearInterval(refresh); };
+    // Only while the page is in front, and once on coming back: a tab left in the background asked every minute for hours (2026-10-30).
+    const refresh = setInterval(() => { if (document.visibilityState === "visible") void load(); }, 60_000);
+    const back = () => { if (document.visibilityState === "visible") void load(); };
+    document.addEventListener("visibilitychange", back);
+    return () => { clearInterval(tick); clearInterval(refresh); document.removeEventListener("visibilitychange", back); };
   }, []);
 
   const running = timers.filter((timer) => !timer.paused);
