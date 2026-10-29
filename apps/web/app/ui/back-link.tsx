@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, type MouseEvent } from "react";
+import { useAppRouter } from "./use-app-router";
 import { useT } from "../locale-context";
-import { forgetReturnDecision, lastPage, markReturning, pageKey, restoreFrame, returningSnapshot, saveReturnState } from "./return-state";
+import { forgetReturnDecision, lastPage, markReturning, notePageShown, pageKey, previousInApp, restoreFrame, returningSnapshot, saveReturnState } from "./return-state";
 
 /**
  * Mounted once by the shared frame: saves the page's state as the person leaves it (a click that may navigate, a fold toggled, scrolling,
@@ -10,8 +11,12 @@ import { forgetReturnDecision, lastPage, markReturning, pageKey, restoreFrame, r
  */
 export function ReturnPoint() {
   useEffect(() => {
+    const movedInPage = notePageShown() !== undefined;
     const snapshot = returningSnapshot();
     if (snapshot) restoreFrame(snapshot);
+    // A view opened by a move in the page starts at the top, as a loaded page did: the router scrolls only as far as the content under the
+    // sticky header. Not when the address names a place on the page.
+    else if (movedInPage && !location.hash) window.scrollTo(0, 0);
     let timer = 0;
     const save = () => saveReturnState();
     const onScroll = () => { window.clearTimeout(timer); timer = window.setTimeout(save, 200); };
@@ -66,13 +71,17 @@ export function resolveOrigin(scope: string, { referrer, last, stored, reload }:
  */
 export function BackLink({ scope, fallback = "/workbench" }: { scope: string; fallback?: string }) {
   const t = useT();
+  const router = useAppRouter();
   const [origin, setOrigin] = useState<string | null>(null);
   useEffect(() => {
+    // After a move in the page the document's referrer is still the first page's: the page shown before this one is the referrer then.
+    const before = notePageShown();
+    const referrer = before !== undefined ? `${location.origin}${before}` : document.referrer;
     let stored: string | null = null;
     try { stored = window.sessionStorage.getItem(`${ORIGIN}${scope}`); } catch { stored = null; }
     let reload = false;
     try { reload = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type === "reload"; } catch { reload = false; }
-    const resolved = resolveOrigin(scope, { referrer: document.referrer, last: lastPage(), stored, reload });
+    const resolved = resolveOrigin(scope, { referrer, last: lastPage(), stored, reload });
     try {
       if (resolved) window.sessionStorage.setItem(`${ORIGIN}${scope}`, resolved);
       else window.sessionStorage.removeItem(`${ORIGIN}${scope}`);
@@ -84,9 +93,10 @@ export function BackLink({ scope, fallback = "/workbench" }: { scope: string; fa
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     event.preventDefault();
     markReturning(target);
-    let previous = "";
-    try { const from = new URL(document.referrer); previous = from.origin === location.origin ? `${from.pathname}${from.search}` : ""; } catch { previous = ""; }
+    let previous = previousInApp() ?? "";
+    if (!previous) try { const from = new URL(document.referrer); previous = from.origin === location.origin ? `${from.pathname}${from.search}` : ""; } catch { previous = ""; }
     if (origin && previous === origin && window.history.length > 1) window.history.back();
+    else if (router) router.push(target);
     else window.location.assign(target);
   };
   return <a className="back-link" href={target} onClick={go}><span aria-hidden="true">←</span> {t("返回{{place}}", { place: t(placeLabel(target), { context: "place" }) })}</a>;

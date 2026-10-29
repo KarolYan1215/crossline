@@ -3,6 +3,8 @@
  * the hosted beta while every loader took milliseconds on the example board). Each section adds its duration to a table on
  * `globalThis`, which `queue-server.mjs` logs once a minute as `web.sections` (count, p50, p95, total) and clears. Costs a clock read.
  */
+import { yieldToRequests } from "./yield";
+
 type Table = Map<string, number[]>;
 const table = (): Table => ((globalThis as { __crosslineSections?: Table }).__crosslineSections ??= new Map());
 
@@ -18,7 +20,13 @@ export function timedSync<T>(name: string, run: () => T): T {
   try { return run(); } finally { note(name, started); }
 }
 
+/**
+ * An async section first lets waiting requests through (lib/yield.ts): a page's sections are synchronous derivation of up to seconds on
+ * a big account, and without a turn of the event loop between them `/api/health` and every poll waited for the whole page (2026-10-28).
+ * The wait is not counted in the section's time.
+ */
 export async function timed<T>(name: string, run: () => Promise<T> | T): Promise<T> {
+  await yieldToRequests();
   const started = performance.now();
   try { return await run(); } finally { note(name, started); }
 }

@@ -7,12 +7,12 @@ import { AnalyzeButton } from "./analyze-button";
 import { PromoteForm } from "./promote-form";
 import { requireSessionContext } from "../../lib/access-guard";
 import { gateUntilReady } from "../../lib/start-gate";
-import { loadTaskDetailsBatch, type TaskDetail } from "../../lib/task-detail";
+import { cardView, loadTaskDetailsBatch, type TaskDetail } from "../../lib/task-detail";
 import { nextSlots } from "../../lib/steps";
 import { TaskCard } from "../task/task-card";
 import { compareInGroup, groupOf, waitReason, type TaskGroup } from "../task/card-model";
 import { identityLines } from "../../lib/lines";
-import { timed, timedSync } from "../../lib/sections";
+import { timed } from "../../lib/sections";
 import { localeFor } from "../../lib/locale";
 import { tFor } from "../../lib/i18n";
 import { punct, shortDate } from "../task/format";
@@ -77,14 +77,15 @@ export default async function WorkbenchPage({ searchParams }: {
   // The assistant's preparation and the questions to the person are not the person's tasks (docs/work-split.md): no card here.
   const live = all.filter((run) => run.state !== "archived" && onPersonsBoard(run));
   // One batched read for every card instead of one per card — see `loadTaskDetailsBatch`'s own doc comment.
-  const taskDetails = timedSync("workbench.details", () => loadTaskDetailsBatch(ctx, live.map((run) => run.id)));
+  const taskDetails = await timed("workbench.details", () => loadTaskDetailsBatch(ctx, live.map((run) => run.id)));
   const slots = nextSlots((await timed("plan.current", () => loadCurrentPlan(ctx))).blocks, today);
   const groups = new Map<TaskGroup, Entry[]>();
   const lineCounts = new Map<string, number>();
   for (const run of live) {
     const detail = taskDetails.get(run.id);
     if (!detail) continue;
-    const entry: Entry = { id: run.id, detail, slot: slots.get(run.id), library: library.get(run.id) };
+    // The card's copy: its dialog reads the whole detail when opened (`cardView`).
+    const entry: Entry = { id: run.id, detail: cardView(detail), slot: slots.get(run.id), library: library.get(run.id) };
     const group = groupOf(detail, { today, slot: entry.slot, library: entry.library });
     if (group !== "done") lineCounts.set(run.identityId, (lineCounts.get(run.identityId) ?? 0) + 1);
     if (lineFilter && run.identityId !== lineFilter) continue;

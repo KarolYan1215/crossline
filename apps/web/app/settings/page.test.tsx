@@ -38,8 +38,10 @@ describe("settings page", () => {
     }
     expect(html.indexOf('id="st-calendar"')).toBeLessThan(html.indexOf('id="st-notify"'));
     for (const guide of ["接入教程：各家邮箱的授权码与服务器", "接入教程：手机健康数据", "接入教程：Siri「记一下」", "接入教程：各日历的订阅链接"]) expect(html).toContain(guide);
-    // The Skill library opens folded to its summary.
-    expect(html).toContain("Skill 库概览");
+    // The Skill library is read after the page is shown (`SkillLibraryLoader`, 2026-10-28); its folded summary is tested in skill-library.test.tsx.
+    expect(html).toContain('id="skills"');
+    expect(html).toContain("正在读取…");
+    expect(html).not.toContain("Skill 库概览");
     globalThis.crosslineStore.close();
     globalThis.crosslineStore = undefined;
   }, 20000);

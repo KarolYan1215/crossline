@@ -201,6 +201,8 @@ export type TaskDetail = {
    * none have been extracted yet — the detail view shows "未设置背景资料" for that case rather than the
    * section simply not existing. */
   background: StoredBackgroundFact[] | null;
+  /** A card's copy (`cardView`): only what the card shows; the task dialog reads the whole detail when it opens. */
+  partial?: boolean;
 } & TaskExtras;
 
 /** A plan question with its answer: the person's own, or the app's assumption (changeable on the task), or none yet (asked on 待确认). */
@@ -464,6 +466,35 @@ export function loadMilestoneDetail(ctx: AccessContext, milestoneId: string): Mi
  * should call this once with all N ids rather than let each `TaskPreview` call `loadTaskDetail`
  * separately, which is what turned this into an N+1 the first time it shipped.
  */
+/**
+ * What a task card shows, and nothing the card does not (2026-10-28). A list page passed every card's whole detail to the browser — the
+ * steps with their reasons and coverage, sources, contracts, background facts, the gate's review — which made 任务 524 KB and 待确认 240 KB
+ * of HTML on the owner's account, each byte twice (as HTML and again as the page's data). The card keeps its fields; the dialog it opens
+ * reads the whole detail then (`GET /api/work-orders/[id]/detail`). The day panel and the task's own page still get the whole detail.
+ */
+export function cardView(detail: TaskDetail, { panel = false }: { panel?: boolean } = {}): TaskDetail {
+  const card: TaskDetail = {
+    ...detail, partial: true,
+    // Today's day panel also names what falls to the person (`panel`).
+    humanCore: panel ? detail.humanCore.map((part) => ({ id: part.id, intent: part.intent })) : [], automationParts: [], estimateBreakdown: [], byproducts: [], materialContract: [], evidenceContract: [], evidenceChecklist: [],
+    executions: [], relatedFlywheel: [], background: null, criteria: [], sources: [], notes: [], supports: [], artifactLinks: [],
+    // The card's 「已备好」 reads whether a tutorial exists and the assistant's files by name.
+    preparedMaterials: detail.preparedMaterials.filter((item) => /manual\.md$/.test(item.uri)),
+    agentOutputs: detail.agentOutputs.filter((task) => task.status === "accepted" || task.status === "needs_review")
+      .map((task) => ({ taskId: task.taskId, title: "", status: task.status, stepId: task.stepId, files: task.files }))
+  };
+  delete card.gateReview; delete card.suggestedMinutes;
+  if (detail.stepPlan) card.stepPlan = {
+    archetypeLabel: detail.stepPlan.archetypeLabel, quantity: detail.stepPlan.quantity, rationale: "", progress: detail.stepPlan.progress, units: [], questions: [],
+    // What the strip, the current step and the wait line read.
+    steps: detail.stepPlan.steps.map((step) => ({
+      id: step.id, title: step.title, status: step.status, progressQuarter: step.progressQuarter, executor: step.executor, schedulable: step.schedulable,
+      share: step.share, notBefore: step.notBefore, estimate: step.estimate, firstAction: step.firstAction, needState: step.needState
+    }) as typeof step)
+  };
+  return card;
+}
+
 export function loadTaskDetailsBatch(ctx: AccessContext, workOrderIds: string[]): Map<string, TaskDetail> {
   const result = new Map<string, TaskDetail>();
   if (!workOrderIds.length) return result;

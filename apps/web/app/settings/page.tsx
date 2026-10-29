@@ -32,8 +32,7 @@ import { BackgroundModule } from "./background-module";
 import { backgroundOverview } from "../../lib/background";
 import { SettingsNav, type SettingsSection } from "./settings-nav";
 import { PersonalizationModule } from "./personalization";
-import { SkillLibraryModule } from "./skill-library";
-import { loadSkillLibrary } from "../../lib/skill-library";
+import { SkillLibraryLoader } from "./skill-library";
 import { loadPreferences } from "../../lib/preferences";
 import { CalendarModule, ConnectionsSection } from "../connectors/connections";
 import { loadEffectiveness } from "../../lib/effectiveness";
@@ -219,7 +218,7 @@ export default async function SettingsPage() {
         </section>
 
         <section id="skills" className="st-section" aria-labelledby="st-skills"><h2 id="st-skills">{t("Skill 库")}</h2>
-          <SkillLibraryModule library={loadSkillLibrary(ctx)} />
+          <SkillLibraryLoader />
         </section>
 
         <section id="privacy" className="st-section" aria-labelledby="st-privacy"><h2 id="st-privacy">{t("隐私与屏幕活动")}</h2>

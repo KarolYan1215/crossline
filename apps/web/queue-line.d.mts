@@ -12,6 +12,6 @@ export declare function createLine(options: {
   log?: (event: Record<string, unknown>) => void;
   routeOf?: (url: string | undefined) => string;
 }): {
-  inLine: (request: Pick<IncomingMessage, "url">, response: ServerResponse, work: () => unknown) => void;
+  inLine: (request: Pick<IncomingMessage, "url"> & { headers?: IncomingMessage["headers"] }, response: ServerResponse, work: () => unknown) => void;
   state: () => { active: number; waiting: number };
 };

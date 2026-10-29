@@ -6,6 +6,7 @@ import { blocksToPublish } from "./calendar-publish";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { publishFixedEvents } from "./fixed-events";
 import { onOptimalWritten } from "./optimal-schedule";
+import { yieldToRequests } from "./yield";
 
 const LAST_HASH = "calendar.autopublish.hash";
 /** How often the web process looks for a changed schedule to publish. */
@@ -37,6 +38,7 @@ export async function autoPublishPass(now = new Date()): Promise<Array<{ workspa
   if (requiredApproval("write_focus_block") !== "automatic") return [];
   const outcomes: Array<{ workspaceId: string; state: string }> = [];
   for (const workspace of getStore().listWorkspaces()) {
+    await yieldToRequests();
     const state = await publishWorkspace(workspace.id, now);
     if (state) outcomes.push({ workspaceId: workspace.id, state });
   }

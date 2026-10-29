@@ -44,6 +44,26 @@ export const matchesSkill = (query: string, ...texts: Array<string | undefined>)
  * and editing in place. The public skills: where each came from (repository, directory, commit), its licence, what the scan and the review
  * found, when a run last used it, and removing it.
  */
+/**
+ * The library read after the page is shown (2026-10-28): every skill's rules, versions, sources and scan were 92 KB of the settings
+ * page's 228 on the owner's account, sent twice (as HTML and as the page's data) for a module most visits never open.
+ */
+export function SkillLibraryLoader() {
+  const t = useT();
+  const [library, setLibrary] = useState<SkillLibraryView | "failed">();
+  useEffect(() => {
+    let live = true;
+    void fetch("/api/skills/library", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() as Promise<{ library: SkillLibraryView }> : Promise.reject(new Error(String(response.status))))
+      .then((body) => { if (live) setLibrary(body.library); })
+      .catch(() => { if (live) setLibrary("failed"); });
+    return () => { live = false; };
+  }, []);
+  if (library === "failed") return <p role="alert">{t("读取失败")}</p>;
+  if (!library) return <p role="status" className="muted">{t("正在读取…")}</p>;
+  return <SkillLibraryModule library={library} />;
+}
+
 export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
   const t = useT();
   const { sep, aside } = marks(useLocale());

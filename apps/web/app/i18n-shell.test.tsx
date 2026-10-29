@@ -54,10 +54,10 @@ describe("the shell in English", () => {
     expect(focus).not.toContain("bottom-nav");
   });
 
-  test("on a phone the language switch sits under More", () => {
+  test("on a phone the language switch stays in the header, not under More (2026-10-28)", () => {
     const html = en(<BottomNav active="今日" />);
     expect(html).toContain("More");
-    expect(html).toMatch(/bottom-nav-more-panel.*locale-switch/s);
+    expect(html).not.toContain("locale-switch");
   });
 
   test("a schedule change reads as one English sentence", () => {

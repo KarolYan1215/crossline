@@ -34,7 +34,9 @@ export function createLine({ limit, memoryHigh = () => false, maxQueued = 50, ma
   function inLine(request, response, work) {
     const queuedAt = Date.now();
     const route = routeOf(request.url);
-    const kind = route.startsWith("/api/") ? "poll" : "page";
+    // A request the router marks as a prefetch (`next-router-prefetch`: the route tree it asks for when a link is hovered, 2026-10-28)
+    // waits behind a page someone opened.
+    const kind = route.startsWith("/api/") || request.headers?.["next-router-prefetch"] ? "poll" : "page";
     // A full line: told to come back rather than added to it (a free slot still takes the request at once).
     if (active >= limit && waiting() >= maxQueued) {
       log({ type: "web.queue_full", waiting: waiting(), active });

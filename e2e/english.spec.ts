@@ -105,7 +105,6 @@ test("the frame is English: the navigation and the switch back to Chinese", asyn
   await page.waitForLoadState("networkidle");
   const nav = testInfo.project.name.includes("mobile") ? page.locator(".bottom-nav") : page.locator("header");
   await expect(nav.getByText("Today", { exact: true }).first()).toBeVisible();
-  // On a phone the switch is under 「More」.
-  if (testInfo.project.name.includes("mobile")) await page.locator(".bottom-nav-more > summary").click();
+  // On a phone too the switch is in the header (2026-10-28).
   await expect(page.getByRole("button", { name: "切换到中文" }).first()).toBeVisible();
 });

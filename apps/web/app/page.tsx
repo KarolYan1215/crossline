@@ -6,7 +6,7 @@ import { gateUntilReady } from "../lib/start-gate";
 import { returnDue } from "../lib/return";
 import { currentWorkState, loadTimeline } from "../lib/timeline";
 import { loadCurrentPlan } from "../lib/crossline";
-import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../lib/task-detail";
+import { cardView, loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../lib/task-detail";
 import { loadAsks } from "../lib/asks";
 import { loadReminders } from "../lib/reminders";
 import { loadAskPreviews } from "./asks/previews";
@@ -39,7 +39,9 @@ export default async function HomePage() {
   const weekEnd = shiftDay(calendar.today, 7);
   const calendarOrderIds = [...new Set(calendar.items.filter((item) => item.workOrderId && item.day >= calendar.today && item.day < weekEnd)
     .map((item) => item.workOrderId!))];
-  const details = timedSync("today.details", () => loadTaskDetailsBatch(ctx, [...new Set([...taskWorkOrderIds, ...calendarOrderIds])]));
+  // The cards' and the panel's copy (`cardView`); a task dialog opened from either reads the whole detail.
+  const details = new Map([...await timed("today.details", () => loadTaskDetailsBatch(ctx, [...new Set([...taskWorkOrderIds, ...calendarOrderIds])]))]
+    .map(([id, detail]) => [id, cardView(detail, { panel: true })] as const));
   // Kept out of `loadDashboard` for the same reason: `lib/asks.ts` imports from `lib/crossline.ts`.
   const asks = await timed("asks", () => loadAsks(ctx));
   return <DashboardView data={{

@@ -1,4 +1,5 @@
 import withSerwistInit from "@serwist/next";
+import { cspPolicy } from "./lib/csp-policy.mjs";
 
 // Three states, not two: `local` (plain loopback, `pnpm dev`'s default) and `private` (this same app,
 // still bound to loopback, reached from elsewhere on the tailnet only through `tailscale serve`'s own
@@ -31,49 +32,31 @@ export default withSerwist({
     "@crossline/workflows",
     "@crossline/i18n"
   ],
-  // Loopback-only (`local`) has never needed these — nothing outside this device can address the app at
-  // all, so a browser enforcing them buys nothing. `private` is the first mode where a real network path
-  // (the tailnet, via Tailscale Serve's HTTPS termination) reaches this app from another device, which is
-  // exactly the boundary these headers exist to harden.
+  // Views move in the page (app/ui/nav-link.tsx) and fetch the next one while the pointer rests on its link; a page fetched ahead is
+  // kept 30 seconds for the click (`static` is what `prefetch={true}` and `router.prefetch` use). A page reached without a prefetch is
+  // never kept (`dynamic` stays 0), and an action that reloads or refreshes the page drops them all.
+  experimental: { staleTimes: { dynamic: 0, static: 30 } },
   async headers() {
-    if (deploymentMode === "local") return [];
-    // `default-src 'self'` alone also blocks the inline bootstrap scripts/styles Next.js itself injects
-    // into every page for hydration — found by actually logging in under `private` mode rather than only
-    // checking the header was present: React never hydrated (`Minified React error #412`), so the login
-    // form's `onSubmit` handler never attached and the browser fell back to a native GET submission,
-    // putting the password in the URL's query string in plain text. A per-request nonce is the strict
-    // fix, but it requires every route to render dynamically (`docs: Content Security Policy` guide),
-    // which would break `/offline`'s whole reason for existing — that page is precached by the service
-    // worker specifically so it works with no live request to render it. This app has no user-generated
-    // HTML and embeds no third-party script or style origin, so the actual protection this CSP buys is
-    // `'self'` blocking any injected content from ever loading off-origin; explicitly allowing inline
-    // execution for the app's own first-party scripts/styles does not give that up.
-    return [{
+    // Pages may be kept by the browser itself, never by anything shared: `private, no-cache` (revalidate before every use) in place of
+    // Next's `no-store` for a dynamic page, which keeps a page out of Chromium's back/forward cache. (It did not keep Chrome from using a
+    // page its Speculation Rules fetched ahead: both headers served the click from the prefetch, measured 2026-10-28, W-129.) Everything here is the person's own, hence `private`. The API keeps its own.
+    const pages = { source: "/((?!api/|_next/|sw\\.js).*)", headers: [{ key: "Cache-Control", value: "private, no-cache" }] };
+    // Loopback-only (`local`) has never needed the rest — nothing outside this device can address the app at all. `private` is the first
+    // mode where a real network path (the tailnet through Tailscale Serve, the hosted beta behind Caddy) reaches this app.
+    if (deploymentMode === "local") return [pages];
+    return [pages, {
       source: "/:path*",
       headers: [
         { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
-        { key: "Content-Security-Policy", value: [
-          "default-src 'self'",
-          // 'wasm-unsafe-eval' lets the page compile WebAssembly (MediaPipe for 摄像头精力采样, docs/energy-and-ecosystem.md §8) without
-          // allowing JavaScript eval; the wasm itself is served from this origin.
-          "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
-          "style-src 'self' 'unsafe-inline'",
-          "img-src 'self' blob: data:",
-          // FullCalendar (the Plan A-lens and the Workbench timeline view) ships its own icon font as a
-          // `data:` URI. With no `font-src` at all it fell back to `default-src 'self'`, which blocks
-          // `data:` — found live, walking the Workbench timeline view on a phone-width viewport: the
-          // prev/next toolbar buttons rendered as empty glyph boxes instead of arrows.
-          "font-src 'self' data:",
-          "worker-src 'self'",
-          "object-src 'none'",
-          "base-uri 'self'",
-          "form-action 'self'",
-          "frame-ancestors 'none'"
-        ].join("; ") },
         { key: "X-Content-Type-Options", value: "nosniff" },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         { key: "X-Frame-Options", value: "DENY" }
       ]
-    }];
+    },
+    // Pages get their Content Security Policy per response, with a nonce (proxy.ts, lib/csp.ts). What else can be opened as a document —
+    // an assistant's file served from the API — or runs as one — the service worker — gets the same policy with no inline script at all.
+    // It used to be one static header for everything with `'unsafe-inline'` scripts, because Next's own bootstrap scripts are inline
+    // (without it React never hydrated and the login form fell back to a GET with the password in the address); the nonce covers them now.
+    ...["/api/:path*", "/sw.js"].map((source) => ({ source, headers: [{ key: "Content-Security-Policy", value: cspPolicy(undefined) }] }))];
   }
 });

@@ -20,6 +20,7 @@ import { systemContext } from "./auto-publish";
 import type { Card } from "./conversation";
 import { localeFor } from "./locale";
 import { monthDay, tFor, type Locale } from "./i18n";
+import { yieldToRequests } from "./yield";
 
 /** How often the engine looks (docs/one-input.md §4): often enough that 「15 分钟后开始」 is said on time. */
 export const NUDGE_INTERVAL_MS = 2 * 60_000;
@@ -48,7 +49,10 @@ export async function nudgePass(now = new Date()): Promise<number> {
     const ownerId = store.getWorkspaceOwnerId(workspace.id);
     if (!ownerId) continue;
     const ctx = systemContext(workspace.id, ownerId, now);
+    // Synchronous work per account: requests are answered between accounts and steps (lib/yield.ts).
+    await yieldToRequests();
     try { said += (await nudgesFor(ctx, now)).length; } catch { /* next interval */ }
+    await yieldToRequests();
     // The person's life on the same clock: reminders due, errands prepared, travel times from the map (`lib/life.ts`).
     try { await (await import("./life")).lifePass(ctx, now); } catch { /* next interval */ }
   }

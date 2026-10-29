@@ -1,33 +1,31 @@
-import { onPersonsBoard } from "@crossline/core";
 import { ensureSeeded, getStore, loadCurrentPlan, planToday } from "../../lib/crossline";
 import { SubpageShell } from "../subpage-shell";
 import { FirstHint } from "../ui/first-hint";
+import { LazyRegion } from "../ui/lazy-region";
 import { AcceptEvidenceButton, JudgeMilestoneButton, ProposalBatchForm, RevokeAutoApprovalButton } from "./approval-actions";
 import { AssistantReview } from "./assistant-review";
+import { assistantResult, laterApprovals } from "./actions";
+import { ProposalItem, orderProposals } from "./proposals";
 import { recentAutoApprovals } from "../../lib/approvals";
 import { permissionCandidates, permissionModeEnabled } from "../../lib/permission-mode";
 import { PermissionModePanel } from "./permission-mode-panel";
 import { requireSessionContext } from "../../lib/access-guard";
 import { gateUntilReady } from "../../lib/start-gate";
-import { TaskCard } from "../task/task-card";
 import { loadTaskDetailsBatch } from "../../lib/task-detail";
 import { countPending } from "../../lib/pending";
 import { LivePendingCount } from "../pending-badge";
 import { AnswerAll } from "../asks/answer-all";
 import { loadAsks } from "../../lib/asks";
 import { loadAssistant } from "../../lib/agent";
-import { preparingProposalIds } from "../../lib/proposal-ready";
-import { decisionHorizon } from "../../lib/horizon";
-import { AskList } from "../ask-list";
 import { AskBoard } from "../asks/ask-board";
 import { loadAskPreviews } from "../asks/previews";
 import { uniqueAsks } from "../asks/model";
 import { PendingSummary } from "./summary";
 import "./approvals.css";
-import { timed, timedSync } from "../../lib/sections";
+import { timed } from "../../lib/sections";
 import { localeFor } from "../../lib/locale";
 import { tFor } from "../../lib/i18n";
-import { entryDay, punct } from "../task/format";
+import { punct } from "../task/format";
 
 export const dynamic = "force-dynamic";
 
@@ -44,12 +42,7 @@ export default async function ApprovalsPage() {
   const locale = localeFor(ctx), t = tFor(locale);
   const plan = await timed("plan.current", () => loadCurrentPlan(ctx));
   const evidenceReviews = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "evidence_review");
-  // A proposal whose steps are still being planned is not a decision yet (`preparingProposalIds`): it is neither listed nor approvable here.
-  const preparing = preparingProposalIds(ctx);
-  // Questions to the person waiting as orders (docs/work-split.md) are asked, not approved.
-  const waiting = getStore().listWorkOrders(ctx.workspaceId).filter((item) => item.state === "awaiting_plan_approval" && onPersonsBoard(item));
-  const proposals = waiting.filter((item) => !preparing.has(item.id));
-  const preparingCount = waiting.length - proposals.length;
+  const { preparingCount, horizon, entersOn, slotOf, week: weekProposals, later: laterProposals } = orderProposals(ctx, plan);
   const claims = getStore().listEvidenceClaims(ctx.workspaceId);
   // A revoked acceptance puts the order back here with the same evidence, and the gate deliberately
   // will not re-judge it on its own — so without the reason on screen the order looks stuck for no
@@ -64,24 +57,16 @@ export default async function ApprovalsPage() {
     if (event.type === "milestone_gate.blocked") gateBlocks.set(event.entityId, event.payload as { code: string; message: string });
     else gateBlocks.delete(event.entityId);
   }
-  const pending = timedSync("pending", () => countPending(ctx));
+  const pending = await timed("pending", () => countPending(ctx));
   const asks = uniqueAsks(await timed("asks", () => loadAsks(ctx)));
   const weekAsks = asks.filter((ask) => !ask.entersOn), laterAsks = asks.filter((ask) => ask.entersOn);
-  const previews = timedSync("approvals.previews", () => loadAskPreviews(ctx, asks));
-  const horizon = decisionHorizon(ctx);
-  const anchors = new Map(getStore().listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
+  // The week's only: what waits under 「以后再定」 is read when that fold is opened (`later.tsx`).
+  const previews = await timed("approvals.previews", () => loadAskPreviews(ctx, weekAsks));
   const executions = getStore().listExecutions(ctx.workspaceId);
   const ordersById = new Map(getStore().listWorkOrders(ctx.workspaceId).map((item) => [item.id, item]));
   const deferredOrder = (workOrderId: string) => { const order = ordersById.get(workOrderId); return order ? horizon.orderEntry(order) : undefined; };
-  const taskDetails = timedSync("approvals.details", () => loadTaskDetailsBatch(ctx, [...evidenceReviews, ...proposals].map((item) => item.id)));
+  const taskDetails = await timed("approvals.details", () => loadTaskDetailsBatch(ctx, [...evidenceReviews, ...weekProposals].map((item) => item.id)));
   const autoApproved = recentAutoApprovals(ctx);
-  // Soonest milestone deadline first. Proposals whose work need not start within a week wait folded under 「以后再定」, the soonest
-  // to come up first, and come into the week's list by themselves (`lib/horizon.ts`).
-  const deadlineOf = (milestoneId: string) => anchors.get(milestoneId)?.deadline ?? "9999-12-31";
-  const sortedProposals = [...proposals].sort((a, b) => deadlineOf(a.milestoneId).localeCompare(deadlineOf(b.milestoneId)));
-  const entersOn = new Map(sortedProposals.map((item) => [item.id, horizon.orderEntry(item)]));
-  const weekProposals = sortedProposals.filter((item) => !entersOn.get(item.id));
-  const laterProposals = sortedProposals.filter((item) => entersOn.get(item.id)).sort((a, b) => entersOn.get(a.id)!.localeCompare(entersOn.get(b.id)!));
   // When each decision that can wait comes into the week: asks, proposals, milestone drafts and assistant results — the same four
   // `pending.later` counts.
   const laterDays = [
@@ -90,24 +75,8 @@ export default async function ApprovalsPage() {
     ...getStore().listMilestones(ctx.workspaceId).filter((item) => item.status === "draft").flatMap((item) => horizon.milestoneEntry(item.id) ?? []),
     ...loadAssistant(ctx).reviews.flatMap((task) => deferredOrder(task.workOrderId) ?? [])
   ];
-  // The earliest suggested block per proposal (a split task has several; the first is when it would start).
-  const slotOf = new Map<string, { day: string; start: string; end: string }>();
-  for (const block of [...plan.blocks].filter((item) => item.id.startsWith("proposed:") && item.day)
-    .sort((a, b) => `${a.day} ${a.start}`.localeCompare(`${b.day} ${b.start}`))) {
-    const id = block.id.split(":")[1]!;
-    if (!slotOf.has(id)) slotOf.set(id, { day: block.day!, start: block.start, end: block.end });
-  }
-  const renderProposal = (item: (typeof proposals)[number]) => {
-    const detail = taskDetails.get(item.id);
-    if (!detail) return null;
-    const slot = slotOf.get(item.id);
-    const enters = entersOn.get(item.id);
-    return <div key={item.id} className="proposal-item">
-      <label className="proposal-check"><input type="checkbox" name="proposal" value={item.id} defaultChecked /><span className="sr-only">{t("选中「{{title}}」", { title: item.intent })}</span></label>
-      <TaskCard detail={detail} slot={slot} />
-      {enters && <small className="proposal-enters">{t("{{day}} 起列入本周", { day: entryDay(locale, enters) })}</small>}
-    </div>;
-  };
+  const renderProposal = (item: (typeof weekProposals)[number]) => <ProposalItem key={item.id} item={item} detail={taskDetails.get(item.id)}
+    slot={slotOf.get(item.id)} enters={entersOn.get(item.id)} locale={locale} />;
   const autoItem = (item: (typeof autoApproved)[number]) => <li key={item.id}>
     <a href={`/workbench/${encodeURIComponent(item.id)}`} title={item.intent}>{item.title}</a>
     {item.undoable ? <RevokeAutoApprovalButton workOrderId={item.id} /> : <small> · {t("已开始做")}</small>}
@@ -139,7 +108,7 @@ export default async function ApprovalsPage() {
     </FirstHint>
     <AnswerAll />
     <AskBoard initial={weekAsks} previews={previews} />
-    <AssistantReview ctx={ctx} deferred={deferredOrder} />
+    <AssistantReview ctx={ctx} deferred={deferredOrder} body={(taskId) => <LazyRegion load={assistantResult.bind(null, taskId)} minHeight={160} />} />
     {evidenceReviews.length > 0 && <section className="approval-ledger" id="evidence" aria-label={t("待验收")}>
       <h2>{t("待验收 · {{count}}", { count: evidenceReviews.length })}</h2>
       {evidenceReviews.map((item) => {
@@ -186,12 +155,8 @@ export default async function ApprovalsPage() {
     {pending.later.total > 0 && <details className="fold advanced" id="later">
       {/* The same total as the line on top; the assistant's results it counts are listed in their own section. */}
       <summary>{t("以后再定 · {{count}} 项（工作一周后才需开始，到时自动列入本周）", { count: pending.later.total })}</summary>
-      <AskList initial={laterAsks} scope="later" heading={t("以后再定的待决事项")} previews={previews} />
-      {pending.later.assistantReviews > 0 && <p><a href="#assistant">{t("{{count}} 份助手成果", { count: pending.later.assistantReviews })}</a>{t("在「助手」一节，对应任务一周后才需开始。")}</p>}
-      {pending.later.milestoneDrafts > 0 && <p><a href="/milestones">{t("{{count}} 个里程碑草稿", { count: pending.later.milestoneDrafts })}</a>{t("在主线页，截止较远。")}</p>}
-      {laterProposals.length > 0 && <ProposalBatchForm count={laterProposals.length}>
-        <section className="work-order-list">{laterProposals.map(renderProposal)}</section>
-      </ProposalBatchForm>}
+      {/* Read when opened (`later.tsx`): it was a sixth of the page and few visits open it. */}
+      <LazyRegion load={laterApprovals} when="open" />
     </details>}
   </SubpageShell>;
 }

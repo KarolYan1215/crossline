@@ -15,7 +15,7 @@ import { gateUntilReady } from "../../lib/start-gate";
 import { MilestonePreview } from "../task-preview";
 import { TaskCard } from "../task/task-card";
 import { Tag } from "../ui/tag";
-import { loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../../lib/task-detail";
+import { cardView, loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../../lib/task-detail";
 import { linePacks } from "../../lib/lines";
 
 import { loadDiligence } from "../../lib/diligence";
@@ -86,7 +86,7 @@ export default async function ReviewPage() {
         : <div className="review-cards">{review.autoAccepted.map((item) => {
           const detail = taskDetails.get(item.workOrderId);
           return <div key={item.workOrderId} className="review-card">
-            {detail ? <TaskCard detail={detail} /> : <b>{item.intent}</b>}
+            {detail ? <TaskCard detail={cardView(detail)} /> : <b>{item.intent}</b>}
             <p className="review-card-meta"><small>{t("自动验收 · {{at}}", { at: localStamp(item.acceptedAt, effectiveSchedulePreferences(ctx).preferences.timeZone) })}</small>
               {item.questioned && <Tag tone="warn">{t("关系已被反证，需复核")}</Tag>}
               <RevokeAcceptance workOrderId={item.workOrderId} /></p>

@@ -27,7 +27,6 @@
 .phone-push ul{margin:0;padding-left:18px}
 
 @media (max-width:680px){
-  /* The language switch moves under 「更多」 on a phone (docs/i18n.md): the header keeps the one that syncs, hidden, except on a page with no bottom bar. */
-  .running-head:not([data-focus]) .system-state .locale-switch{display:none}
-  .bottom-nav-more-panel .locale-switch{display:block;width:100%;text-align:left;padding:10px 14px;min-height:44px;border:0;border-top:1px solid var(--mist);background:none;font-family:var(--f-mono);font-size:12px;color:var(--graphite)}
+  /* The language switch stays in the header on a phone too (2026-10-28; it had been one tap deeper, under 「更多」): a 44px target. */
+  .system-state .locale-switch{min-height:44px}
 }
