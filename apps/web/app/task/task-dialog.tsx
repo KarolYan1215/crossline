@@ -1,28 +1,36 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { STEP_ROLES, localStamp, plainEstimateWords } from "@crossline/core";
+import { BookOpen, Bot, CalendarClock, Check, Clock, Pencil, SlidersHorizontal } from "lucide-react";
+import { localStamp, plainEstimateWords, stepLeavesMachine } from "@crossline/core";
 import type { TaskDetail } from "../../lib/task-detail";
+import type { Locale, Translate } from "../../lib/i18n";
+import { weekdayShort } from "../../lib/i18n";
 import { Sheet } from "../ui/overlay";
-import { ProgressRing } from "../ui/controls";
+import { DateChip, DurationBar, ProgressRing } from "../ui/controls";
 import { ArtifactTag, SupportsTag, Tag } from "../ui/tag";
 import { Clamp } from "../ui/clamp";
+import { ICON, IconButton } from "../ui/icon-button";
 import { riskLabel, riskTone, stateLabelFor } from "../../lib/labels";
 import { Conversation } from "../chat/conversation";
-import { ExecutionActions } from "../execution-actions";
-import { currentStep } from "./card-model";
+import { EnergyProbe } from "../energy-probe";
+import { currentStep, hoursShort, remainingMinutes, type TaskSlotLike } from "./card-model";
 import { CompletionChoice } from "./completion-choice";
+import { ImpactCard, useImpact } from "./impact";
 import { PostponePanel } from "./postpone";
-import { StepDuration, TaskQuickEdit } from "./quick-edit";
+import { StepDuration } from "./quick-edit";
+import { RunningChip } from "./running-chip";
 import { StepStrip } from "./step-strip";
 import { TaskActions } from "./task-actions";
+import { COMPLETABLE, TaskCompletion } from "./task-completion";
 import { StepMaterials, TaskMaterials } from "./task-materials";
+import { useWholeDetail } from "./whole-detail";
 import { stepAnchor, tutorialAnchor } from "../materials/tutorial-model";
 import { useLocale, useT } from "../locale-context";
-import { dayText, minutesText } from "./format";
-import { FirstHint } from "../ui/first-hint";
+import { dayText, minutesText, shortDate } from "./format";
 
+const SMALL = { ...ICON, size: 14 } as const;
 const post = (path: string, body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .then((response) => response.ok).catch(() => false);
 const stepsApi = (id: string) => `/api/work-orders/${encodeURIComponent(id)}/steps`;
@@ -53,50 +61,56 @@ function StepQuestions({ workOrderId, questions }: { workOrderId: string; questi
     setEditing(null); setStatus(t("已记下，步骤会按此重排"));
     window.location.reload();
   };
-  return <div className="steps-questions">
-    <small>{t("计划依据的问题")}</small>
+  const answered = questions.filter((question) => question.answer && !question.answer.assumed).length;
+  const assumed = questions.filter((question) => question.answer?.assumed).length;
+  const waiting = questions.length - answered - assumed;
+  // One line under the steps; the list opens on a click. A question still waiting is answered on 待确认 (its one home), only changed here.
+  return <details className="steps-questions advanced">
+    <summary><b>{t("计划依据的问题")}</b>
+      <span>{t("已答 {{count}}", { count: answered })}</span><span>{t("按假设 {{count}}", { count: assumed })}</span>
+      {waiting > 0 && <span>{t("待回答 {{count}}（在待确认）", { count: waiting })}</span>}
+      <span className="steps-questions-open">{t("查看或修改")}</span></summary>
     <ul>{questions.map((question) => <li key={question.id}>
       <span>{question.text}</span>
       {question.answer
         ? <span className={question.answer.assumed ? "steps-answer-assumed" : "steps-answer"}>{t(question.answer.assumed ? "按假设：{{text}}" : "已答：{{text}}", { text: question.answer.text })}</span>
-        : <a href="/approvals">{t("待回答")}</a>}
-      {editing === question.id
+        : <a href="/approvals">{t("在待确认回答")}</a>}
+      {!question.answer ? null : editing === question.id
         ? <span className="steps-answer-edit">
           {question.options.map((option) => <button key={option} type="button" className="text-button" onClick={() => void save(question, option)}>{option}</button>)}
           <input type="text" value={draft} maxLength={300} placeholder={t("或自己写")} onChange={(event) => setDraft(event.target.value)} />
           <button type="button" className="secondary-button" onClick={() => void save(question, draft)}>{t("保存")}</button>
           <button type="button" className="text-button" onClick={() => setEditing(null)}>{t("取消")}</button>
         </span>
-        : <button type="button" className="text-button" onClick={() => { setEditing(question.id); setDraft(""); setStatus(""); }}>{t(question.answer ? "改" : "回答")}</button>}
+        : <button type="button" className="text-button" onClick={() => { setEditing(question.id); setDraft(""); setStatus(""); }}>{t("改")}</button>}
     </li>)}</ul>
     {status && <small role="status">{status}</small>}
-  </div>;
+  </details>;
 }
 
-function StepsPanel({ detail }: { detail: TaskDetail }) {
+function StepsPanel({ detail, editing, onEditing }: { detail: TaskDetail; editing: boolean; onEditing: (editing: boolean) => void }) {
   const plan = detail.stepPlan;
   const current = currentStep(detail);
-  const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(current ? [current.id] : []));
   const [status, setStatus] = useState("");
   const t = useT(), locale = useLocale();
-  const division = (detail.humanCore.length > 0 || detail.automationParts.length > 0) && <dl className="steps-division">
-    {detail.humanCore.length > 0 && <div><dt>{t("本人负责")}</dt>{detail.humanCore.map((part) => <dd key={part.id} className="gen">{part.intent}</dd>)}</div>}
+  // The person's part is not said again when it only repeats the task's name (the 2026-10-28 review found 「本人负责 · <the title>」).
+  const own = detail.humanCore.filter((part) => part.intent.trim() !== detail.title.trim() && part.intent.trim() !== detail.intent.trim());
+  const division = (own.length > 0 || detail.automationParts.length > 0) && <dl className="steps-division">
+    {own.length > 0 && <div><dt>{t("本人负责")}</dt>{own.map((part) => <dd key={part.id} className="gen">{part.intent}</dd>)}</div>}
     {detail.automationParts.length > 0 && <div><dt>{t("系统准备")}</dt>{detail.automationParts.map((part) => <dd key={part.id} className="gen">{part.intent}</dd>)}</div>}
   </dl>;
   if (!plan) return <div className="steps-panel"><p className="muted">{t("步骤规划中，完成后显示在此处。")}</p>{division}</div>;
-  if (editing) return <div className="steps-panel"><StepsEditor detail={detail} onDone={() => setEditing(false)} />{division}</div>;
+  if (editing) return <div className="steps-panel"><StepsEditor detail={detail} onDone={() => onEditing(false)} />{division}</div>;
   const toggle = (id: string) => setExpanded((set) => { const next = new Set(set); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   return <div className="steps-panel">
-    <p className="steps-meta"><small>{plan.archetypeLabel} · {plan.quantity.amount > 0 ? `${plan.quantity.amount} ${plan.quantity.unit}` : plan.quantity.basis}</small>
-      <button type="button" className="text-button" onClick={() => setEditing(true)}>{t("调整步骤")}</button></p>
     {plan.rationale && <p className="gen steps-rationale"><Clamp text={plainEstimateWords(plan.rationale, locale)} /></p>}
     {plan.units.length > 0 && <p className="steps-units"><small>{t("依据材料的内容")}</small>{plan.units.map((unit) => <span key={unit.id} className="tag" title={unit.quote}>{unit.title}</span>)}</p>}
-    {plan.questions.length > 0 && <StepQuestions workOrderId={detail.id} questions={plan.questions} />}
     <ol className="steps-list">{plan.steps.map((step, index) => {
       const open = expanded.has(step.id);
       const kind = step.status !== "planned" ? "done" : step.executor === "agent" ? "agent" : step === current ? "current" : "open";
-      return <li key={step.id} id={stepAnchor(step.id)} className="step-row" data-kind={kind} data-open={open || undefined}>
+      const waits = !step.schedulable && step.executor !== "agent";
+      return <li key={step.id} id={stepAnchor(step.id)} className="step-row" data-kind={kind} data-wait={waits || undefined} data-open={open || undefined}>
         <span className="step-index mono" aria-hidden="true">{index + 1}</span>
         <StepRing detail={detail} step={step} />
         <div className="step-body">
@@ -106,15 +120,18 @@ function StepsPanel({ detail }: { detail: TaskDetail }) {
               {kind === "current" && <Tag tone="info">{t("当前")}</Tag>}
               {kind === "agent" && <Tag>{t("助手准备 · {{state}}", { state: t(agentState(detail, step)) })}</Tag>}
               {kind === "done" && <Tag tone="ok">{t(step.status === "done" ? "已完成" : "已跳过")}</Tag>}
-              {step.schedulable && kind !== "done" && <small className="mono">{t("约 {{duration}}", { duration: minutesText(locale, step.estimate.p50Minutes) })}</small>}
+              {kind !== "done" && kind !== "agent" && <span className="step-owner">{t(waits ? "等待" : step.executor === "human" ? "本人" : "本人 · 可交给助手")}</span>}
+              {kind !== "done" && step.executor !== "agent" && stepLeavesMachine(step.title) && <span className="step-owner" data-tone="external">{t("对外 · 本人操作")}</span>}
+              {step.schedulable && kind !== "done" && <small className="mono">{minutesText(locale, step.estimate.p50Minutes)}</small>}
               {(step.notBefore || step.dueBy) && kind !== "done" && <small className="mono">{step.notBefore ? dayText(locale, step.notBefore) : "…"} → {step.dueBy ? dayText(locale, step.dueBy) : "…"}</small>}
             </span>
           </button>
-          {kind === "current" && step.firstAction && <p className="step-first"><small>{t("先做")}</small><span className="gen">{step.firstAction}</span></p>}
+          {kind === "current" && step.firstAction && <p className="step-first"><small>{t("先做（5 分钟）")}</small><span className="gen">{step.firstAction}</span></p>}
           {open && <StepDetail detail={detail} step={step} kind={kind} onStatus={setStatus} />}
         </div>
       </li>;
     })}</ol>
+    {plan.questions.length > 0 && <StepQuestions workOrderId={detail.id} questions={plan.questions} />}
     {status && <small role="status">{status}</small>}
     {division}
   </div>;
@@ -143,19 +160,21 @@ function StepDetail({ detail, step, kind, onStatus }: { detail: TaskDetail; step
     {step.deliverable && kind === "agent" && <p className="step-line"><small>{t("产出")}</small><span className="gen">{step.deliverable}</span></p>}
     {covered.length > 0 && <p className="step-line"><small>{t("内容", { context: "covers" })}</small><span className="step-covers">{covered.map((title) => <span key={title} className="tag">{title}</span>)}</span></p>}
     {step.why && <p className="step-line"><small>{t("为什么")}</small><span className="gen">{step.why}</span></p>}
-    {step.aiAssist?.tool && <p className="step-line" title={t("计划按用这个工具估算时间")}><small>{t("工具")}</small><span><Tag tone="info">{step.aiAssist.tool}</Tag> <span className="gen">{step.aiAssist.how}</span>
+    {step.aiAssist?.tool && <p className="step-line" title={t("计划按用这个工具估算时间")}><small>{t("AI 辅助")}</small><span><Tag tone="info">{step.aiAssist.tool}</Tag> <span className="gen">{step.aiAssist.how}</span>
       {step.aiAssist.minutesSaved > 0 && <span className="muted">{t("（约省 {{count}} 分钟）", { count: step.aiAssist.minutesSaved })}</span>}</span></p>}
     {step.tickOutcome && <p className="step-line step-tick" title={t("里程碑刻度")}><small>{t("刻度")}</small><span>◆ {step.tickOutcome}</span></p>}
     <StepMaterials detail={detail} stepId={step.id} />
-    {/* Only the person's own steps have a tutorial section; the assistant's and shared steps do not. */}
-    {step.executor === "human" && kind !== "done" && detail.preparedMaterials.some((item) => /manual\.md$/.test(item.uri)) && <p className="step-line"><small>{t("教程")}</small>
-      <a href={`#${tutorialAnchor(step.id)}`}>{t("本步的教程与材料")}</a></p>}
     {kind !== "done" && kind !== "agent" && step.schedulable && <div className="step-line"><small>{t("时长")}</small><StepDuration workOrderId={detail.id} stepId={step.id} estimate={step.estimate} /></div>}
     {kind !== "done" && step.provides && <ProvideBox workOrderId={detail.id} step={step} onStatus={onStatus} />}
     {kind !== "done" && !step.provides && <OwnerSwitch workOrderId={detail.id} step={step} onStatus={onStatus} />}
-    {kind !== "done" && step.executor !== "human" && <p className="step-line"><span />
-      <button type="button" className="secondary-button step-agent" onClick={() => void post("/api/agent/dispatch", { workOrderId: detail.id, stepId: step.id })
-        .then((ok) => onStatus(ok ? t("已交给 Agent：{{title}}", { title: step.title }) : t("未能交给 Agent")))}>{t("由 Agent 完成该步骤")}</button></p>}
+    {kind !== "done" && <p className="step-actions">
+      {kind !== "agent" && <button type="button" className="secondary-button" onClick={() => void post(stepsApi(detail.id), { action: "progress", stepId: step.id, status: "done" })
+        .then((ok) => ok ? location.reload() : onStatus(t("未能保存，请重试")))}><Check {...ICON} />{t("这一步做完了")}</button>}
+      {step.executor === "human" && detail.preparedMaterials.some((item) => /manual\.md$/.test(item.uri)) &&
+        <a className="text-button" href={`#${tutorialAnchor(step.id)}`}><BookOpen {...ICON} />{t("本步教程")}</a>}
+      {step.executor !== "human" && <button type="button" className="text-button" onClick={() => void post("/api/agent/dispatch", { workOrderId: detail.id, stepId: step.id })
+        .then((ok) => onStatus(ok ? t("已交给助手：{{title}}，进度在小帮手里看", { title: step.title }) : t("未能交给助手")))}><Bot {...ICON} />{t("交给助手")}</button>}
+    </p>}
   </div>;
 }
 
@@ -256,16 +275,16 @@ function StepsEditor({ detail, onDone }: { detail: TaskDetail; onDone: () => voi
 }
 
 /**
- * Handing in: what the task is judged against (rings a click confirms, the deliverables it promised), a progress report in words for the
- * judge, then completion with its evidence and the time it took — the existing completion path (`ExecutionActions`).
+ * Handing in: how finishing is taken, what the task promised to deliver, what it is judged against (rings a click confirms), a progress
+ * report in words for the judge, then the one completion form (`TaskCompletion`, shared with Today's block panel), and the record folded
+ * at the foot. Before work starts the person can say how they feel; after, how heavy it was.
  */
 function FinishPanel({ detail }: { detail: TaskDetail }) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState("");
-  const t = useT();
+  const t = useT(), locale = useLocale();
   const by: Record<string, string> = { person: "本人确认", assessment: "进度判定", gate: "闸门判定", none: "未判定" };
-  // Before work starts there is nothing to complete: the primary action above starts it, and this section says what will be asked.
-  const notStarted = ["awaiting_plan_approval", "approved", "ready_for_human", "blocked"].includes(detail.state);
+  const started = ["active", "evidence_review", "accepted"].includes(detail.state);
   return <div className="finish-panel">
     <CompletionChoice detail={detail} />
     {detail.evidenceContract.length > 0 && <div><h4 className="task-subhead">{t("要交付的")}</h4>
@@ -277,17 +296,22 @@ function FinishPanel({ detail }: { detail: TaskDetail }) {
           {...(criterion.quarters < 4 ? { onConfirm: () => void post(stepsApi(detail.id), { action: "confirm_criterion", criterionId: criterion.id }).then((ok) => ok && location.reload()) } : {})} />
         <span>{criterion.statement}{criterion.note && <small className="gen">{criterion.note}</small>}</span>
         <Tag>{by[criterion.by] ? t(by[criterion.by]!) : ""}</Tag>
-      </li>)}</ul> : <p className="muted">{t("所属里程碑未设置达成标准。")}</p>}</div>
-    {!notStarted && <form className="progress-report" onSubmit={(event) => { event.preventDefault(); if (!text.trim()) return;
+      </li>)}</ul> : <p className="muted">{t("所属里程碑没有写达成标准：按「要交付的」交齐即算完成。")}{detail.milestone && <> <a href={`/milestones?open=${encodeURIComponent(detail.milestone.id)}`}>{t("去主线补标准")}</a></>}</p>}</div>
+    {detail.state === "active" && <form className="progress-report" onSubmit={(event) => { event.preventDefault(); if (!text.trim()) return;
       void post(stepsApi(detail.id), { action: "report", text }).then((ok) => { setStatus(t(ok ? "已提交，正在判定进度" : "未提交，请重试")); if (ok) setText(""); }); }}>
       <textarea value={text} maxLength={2000} rows={2} placeholder={t("描述当前进度，例如：第 1–3 题已完成，第 4 题卡在边界条件")} aria-label={t("进度描述")} onChange={(event) => setText(event.target.value)} />
       <button type="submit">{t("判定进度")}</button>
     </form>}
     {status && <small role="status">{status}</small>}
-    {notStarted ? <p className="muted" id="complete">{t("开始计时后，在此记录完成情况、提交成果。")}</p>
-      : <ExecutionActions workOrderId={detail.id} intent={detail.intent} state={detail.state} paused={detail.paused} ownerId={detail.ownerId}
-        workspaceId={detail.workspaceId} evidenceChecklist={detail.evidenceChecklist} estimateP50={detail.estimate.p50Minutes}
-        {...(detail.suggestedMinutes ? { suggestedMinutes: detail.suggestedMinutes } : {})} />}
+    {(detail.state === "approved" || detail.state === "ready_for_human") && <p className="finish-probe"><small>{t("开始前精力")}</small><EnergyProbe context="before_task" workOrderId={detail.id} /></p>}
+    {COMPLETABLE.includes(detail.state) && <TaskCompletion task={detail} />}
+    {(detail.state === "evidence_review" || detail.state === "accepted") && <p className="finish-probe">
+      <small>{t("顺手记一下（可跳过，用来校准估时与精力）")}</small><EnergyProbe context="after_task" workOrderId={detail.id} /></p>}
+    {!started && !COMPLETABLE.includes(detail.state) && <p className="muted">{t("批准并开始后，在此提交成果。")}</p>}
+    <details className="advanced task-record">
+      <summary><Clock {...ICON} />{t("已投入 {{duration}} · {{count}} 次计时", { duration: minutesText(locale, detail.workedMinutes), count: detail.executions.length })}</summary>
+      <RecordPanel detail={detail} />
+    </details>
   </div>;
 }
 
@@ -304,105 +328,170 @@ function RecordPanel({ detail }: { detail: TaskDetail }) {
   </div>;
 }
 
+/** Materials still being prepared by the system: start it over, or say they are ready (the old execution panel's two buttons). */
+function PreparingActions({ detail }: { detail: TaskDetail }) {
+  const t = useT();
+  const [status, setStatus] = useState("");
+  if (detail.state !== "preparing") return null;
+  const send = (action: string) => void post(`/api/work-orders/${encodeURIComponent(detail.id)}/execution`, { action })
+    .then((ok) => ok ? location.reload() : setStatus(t("操作未生效，请刷新查看真实状态。")));
+  return <p className="materials-preparing"><small>{t("材料准备中")}</small>
+    <button type="button" className="text-button" onClick={() => send("materials_retry")}>{t("重新准备材料")}</button>
+    <button type="button" className="text-button" onClick={() => send("materials_ready")}>{t("材料已备好")}</button>
+    {status && <small role="status">{status}</small>}</p>;
+}
+
 /**
  * The task opened from any card, in place: the same content as its own page, and a link to that page (which has the back button and
- * keeps the address).
+ * keeps the address). `slot` is the card's next block, which the detail's head shows.
  */
-export function TaskDialog({ detail, open, onOpenChange }: { detail: TaskDetail; open: boolean; onOpenChange: (open: boolean) => void }) {
+export function TaskDialog({ detail, slot, today, open, onOpenChange }: {
+  detail: TaskDetail; slot?: TaskSlotLike | undefined; today?: string | undefined; open: boolean; onOpenChange: (open: boolean) => void;
+}) {
   const t = useT();
   const full = useWholeDetail(detail, open);
   return <Sheet title={detail.title} size="wide" open={open} onOpenChange={onOpenChange}
     footer={<Link className="secondary" href={`/workbench/${encodeURIComponent(detail.id)}`} prefetch={false}>{t("完整页面")}</Link>}>
-    {full === "failed" ? <p role="alert">{t("读取失败")}</p> : full ? <TaskPanels detail={full} /> : <p role="status" className="muted">{t("正在读取…")}</p>}
+    {full === "failed" ? <p role="alert">{t("读取失败")}</p> : full ? <TaskPanels detail={full} slot={slot} today={today} /> : <p role="status" className="muted">{t("正在读取…")}</p>}
   </Sheet>;
 }
 
-/**
- * A card from a list page carries only what the card shows (`cardView`): the whole detail is read when its dialog opens, and again when
- * the page hands the card a newer copy (after an action refreshed the page). A whole detail is used as it is.
- */
-function useWholeDetail(detail: TaskDetail, open: boolean): TaskDetail | "failed" | undefined {
-  const [loaded, setLoaded] = useState<{ from: TaskDetail; value: TaskDetail | "failed" }>();
-  useEffect(() => {
-    if (!detail.partial || !open || loaded?.from === detail) return;
-    let live = true;
-    void fetch(`/api/work-orders/${encodeURIComponent(detail.id)}/detail`, { cache: "no-store" })
-      .then((response) => response.ok ? response.json() as Promise<{ detail: TaskDetail }> : Promise.reject(new Error(String(response.status))))
-      .then((body) => { if (live) setLoaded({ from: detail, value: body.detail }); })
-      .catch(() => { if (live) setLoaded({ from: detail, value: "failed" }); });
-    return () => { live = false; };
-  }, [detail, open, loaded]);
-  if (!detail.partial) return detail;
-  return loaded?.from === detail ? loaded.value : undefined;
+type Pane = "steps" | "materials" | "finish";
+
+/** A head figure: its name, the number large, a line under it, and — where it can be changed in place — a pencil. */
+function Figure({ label, value, sub, edit, children }: { label: string; value: ReactNode; sub?: ReactNode; edit?: ReactNode; children?: ReactNode }) {
+  return <div className="tk-figure">
+    <span className="tk-figure-label">{label}{edit}</span>
+    <b className="tk-figure-value">{value}</b>
+    {sub && <small className="tk-figure-sub">{sub}</small>}
+    {children}
+  </div>;
 }
 
-const SECTIONS = [["steps", "步骤"], ["materials", "材料与教程"], ["finish", "提交与完成"]] as const;
+/** 截止: the due day, changed through the date picker and previewed before it applies. */
+function DueFigure({ detail, editable }: { detail: TaskDetail; editable: boolean }) {
+  const t = useT(), locale = useLocale();
+  const impact = useImpact();
+  const due = detail.window.dueBy;
+  return <Figure label={t("截止")} value={due ? <span className="ds-serif">{shortDate(locale, due)}</span> : t("未定")}
+    sub={due ? weekdayShort(locale, new Date(`${due.slice(0, 10)}T12:00:00`).getDay()) : undefined}
+    edit={editable ? <DateChip label={t("改截止日期")} value={due} onChange={(date) => void impact.propose({ kind: "due", workOrderId: detail.id, date })} icon={<Pencil {...SMALL} />} /> : undefined}>
+    {impact.busy && !impact.pending && <small role="status">{t("计算影响…")}</small>}
+    {impact.error && <small role="status">{impact.error}</small>}
+    {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()} onCancel={impact.cancel} />}
+  </Figure>;
+}
+
+/** 剩余: the open steps' usual time and the cautious one; without steps the task's own estimate, dragged in place. */
+function RemainingFigure({ detail, editable }: { detail: TaskDetail; editable: boolean }) {
+  const t = useT(), locale = useLocale();
+  const [editing, setEditing] = useState(false);
+  const impact = useImpact();
+  const left = remainingMinutes(detail);
+  const byStep = Boolean(detail.stepPlan);
+  return <Figure label={t("剩余")} value={<span className="ds-serif">{hoursShort(left.p50, locale)}</span>} sub={t("保守 {{hours}}", { hours: hoursShort(left.p85, locale) })}
+    edit={editable ? <IconButton label={byStep ? t("改时长：在下面的步骤里逐步调整") : t("改时长")} icon={<Pencil {...SMALL} />} className="tk-figure-edit"
+      aria-expanded={editing} onClick={() => setEditing((value) => !value)} /> : undefined}>
+    {editing && (byStep ? <small className="tk-figure-note">{t("剩余是各未完成步骤之和；点开一步，拖它的时长条。")}</small>
+      : <DurationBar p25={detail.estimate.p25Minutes} p50={detail.estimate.p50Minutes} p85={detail.estimate.p85Minutes} samples={detail.estimate.observationCount} label={t("时长")}
+        onCommit={(p50Minutes) => void impact.propose({ kind: "estimate", workOrderId: detail.id, p50Minutes })} />)}
+    {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()} onCancel={impact.cancel} />}
+  </Figure>;
+}
 
 /**
- * Everything about one task, in the order the work goes (redesigned 2026-10-15): the head (line, state, progress, the due date and the
- * time left, edited in place), the primary action and the task's own input box, then 1 步骤 → 2 材料与教程 → 3 提交与完成, and the
- * record folded at the end. The dialog's content and the whole of the task's page (`/workbench/[id]`, where `anchors` gives the sections
- * ids that links such as 「#tutorial」 and 「#complete」 land on).
+ * Everything about one task (redesigned 2026-10-28 after the page draft). The head: line, state, risk, the milestone it serves and what it
+ * supports on other lines; four figures — progress, due (edited in place), what is left (edited in place without steps) and the next
+ * block (with the running timer or the time already spent) — and the actions (start, pause, 完成并提交, 交给助手, 推迟, more). Then two
+ * columns where there is room: 步骤 on the left; 材料与教程 and 提交与完成 on the right. Where there is not (a phone, a narrow sheet) a
+ * switch shows one of the three and the actions sit at the foot. The task's own input box closes it. The dialog's content and the whole
+ * of the task's page (`/workbench/[id]`, where `anchors` gives the sections the ids links such as 「#tutorial」 and 「#materials」 land on).
  */
-export function TaskPanels({ detail, anchors = false }: { detail: TaskDetail; anchors?: boolean }) {
+export function TaskPanels({ detail, slot, today, anchors = false }: {
+  detail: TaskDetail; slot?: TaskSlotLike | undefined; today?: string | undefined; anchors?: boolean;
+}) {
   const [postponing, setPostponing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [pane, setPane] = useState<Pane>("steps");
   const t = useT(), locale = useLocale();
-  const refs = useRef<Record<string, HTMLElement | null>>({});
+  const root = useRef<HTMLDivElement>(null);
   const live = !["accepted", "archived", "evidence_review"].includes(detail.state);
-  // With steps, the figure at the top is what is left (the open steps added up), edited step by step below; without, the task's own.
-  const open = detail.stepPlan?.steps.filter((step) => step.status === "planned" && step.schedulable) ?? [];
-  const remaining = open.length
-    ? { estimate: open.reduce((sum, step) => ({ p25Minutes: sum.p25Minutes + step.estimate.p25Minutes, p50Minutes: sum.p50Minutes + step.estimate.p50Minutes,
-        p85Minutes: sum.p85Minutes + step.estimate.p85Minutes }), { p25Minutes: 0, p50Minutes: 0, p85Minutes: 0 }), durationEditable: false, durationLabel: t("剩余合计") }
-    : { estimate: detail.estimate, durationLabel: t("时长") };
+  const editable = !["accepted", "archived"].includes(detail.state);
   const steps = detail.stepPlan?.steps ?? [];
   const done = steps.filter((step) => step.status !== "planned").length;
+  const percent = Math.round((detail.stepPlan?.progress ?? (detail.state === "accepted" ? 1 : 0)) * 100);
   const crossLine = detail.supports.length > 0 || (detail.artifactLinks?.length ?? 0) > 0;
-  return <div className="task-dialog" data-line={detail.identityId}>
-    <header className="task-detail-head">
-      <p className="task-card-line"><i className="task-card-dot" aria-hidden="true" />{detail.identityLabel}
-        {detail.projectName && <span className="task-card-project">{detail.projectName}</span>}
-        <Tag>{t(stateLabelFor(detail.state, detail.paused))}</Tag>
-        {detail.riskTier !== "routine" && <Tag tone={riskTone[detail.riskTier] ?? "neutral"}>{t(riskLabel[detail.riskTier] ?? detail.riskTier)}</Tag>}</p>
-      {detail.intent !== detail.title && <p className="task-dialog-description gen">{detail.intent}</p>}
-      {detail.milestone && <p className="task-dialog-milestone">→ <a href={`/milestones/${encodeURIComponent(detail.milestone.id)}`}>{detail.milestone.title}</a></p>}
-      {steps.length > 0 && <div className="task-detail-progress"><StepStrip detail={detail} size="page" /><small className="mono">{t("{{done}}/{{total}} 步", { done, total: steps.length })}</small></div>}
-      <TaskQuickEdit workOrderId={detail.id} dueBy={detail.window.dueBy} samples={detail.estimate.observationCount} line={detail.identityId}
-        editable={!["accepted", "archived"].includes(detail.state)} {...remaining} />
-      {crossLine && <p className="task-detail-cross">
-        {detail.supports.map((item) => <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}
-        {detail.artifactLinks?.map((item) => <ArtifactTag key={`${item.direction}:${item.line}:${item.title}`} {...item} />)}</p>}
-    </header>
-    <TaskActions workOrderId={detail.id} state={detail.state} approvable={!detail.preparing} paused={detail.paused} agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id}
+  const running = detail.agentOutputs.find((task) => task.status === "running");
+  const toComplete = () => {
+    setPane("finish");
+    requestAnimationFrame(() => root.current?.querySelector("#complete, .tk-complete")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+  const actions = (where: "head" | "dock") => <div className={where === "head" ? "tk-head-actions" : "tk-dock"}>
+    <TaskActions iconic labelPrimary workOrderId={detail.id} state={detail.state} approvable={!detail.preparing} paused={detail.paused}
+      agentReady={detail.agentSteps.length > 0} agentStepId={detail.agentSteps[0]?.id}
       offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }}>
-      {live && !postponing && <button type="button" onClick={() => setPostponing(true)}>{t("推迟")}</button>}
+      {COMPLETABLE.includes(detail.state) && <button type="button" className={detail.state === "active" ? "primary-button task-actions-main" : "secondary-button task-actions-main"}
+        onClick={toComplete}><Check {...ICON} /><span>{t("完成并提交")}</span></button>}
+      {live && <IconButton label={t("推迟")} icon={<CalendarClock {...ICON} />} aria-expanded={postponing} onClick={() => setPostponing((value) => !value)} />}
     </TaskActions>
-    {postponing && <PostponePanel workOrderId={detail.id} onClose={() => setPostponing(false)} />}
-    {live && <FirstHint id="task-detail" title={t("做一项任务")}>
-      <ul className="ui-first-hint-list">
-        <li>{t("从上往下读：步骤（当前一步标「当前」，「先做」是开头五分钟的动作）→ 材料与教程 → 提交与完成。")}</li>
-        <li>{t("开始计时后右下角倒计时当前一步；做完一步点它左边的圆环。")}</li>
-        <li>{t("整件做完在「提交与完成」里按完成（可附成果）：本人提交即视为验收，任务离开日历。")}</li>
-        <li>{t("下面的输入框可以改截止、记录卡在哪或请系统讲解某一步。")}</li>
-      </ul>
-    </FirstHint>}
+  </div>;
+  const section = (id: Pane, title: string, extra: ReactNode, body: ReactNode) => <section className="task-section tk-card" data-section={id}
+    data-shown={pane === id || undefined} aria-labelledby={`${detail.id}-${id}`} {...(anchors ? { id } : {})}>
+    <header className="tk-section-head"><h3 id={`${detail.id}-${id}`} className="task-section-title">{t(title)}</h3>{extra}</header>
+    {body}
+  </section>;
+  return <div className="task-dialog tk-detail" data-line={detail.identityId} ref={root}>
+    <header className="tk-head tk-card">
+      <p className="tk-tags">
+        <span className="tk-line"><i className="task-card-dot" aria-hidden="true" />{detail.identityLabel}</span>
+        {detail.projectName && <span className="tk-project">{detail.projectName}</span>}
+        <Tag>{t(stateLabelFor(detail.state, detail.paused))}</Tag>
+        {detail.riskTier !== "routine" && <Tag tone={riskTone[detail.riskTier] ?? "neutral"}>{t(riskLabel[detail.riskTier] ?? detail.riskTier)}</Tag>}
+        {detail.milestone && <a className="tk-milestone" href={`/milestones?open=${encodeURIComponent(detail.milestone.id)}`}>→ {detail.milestone.title}</a>}
+        {crossLine && <span className="tk-cross">
+          {detail.supports.map((item) => <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}
+          {detail.artifactLinks?.map((item) => <ArtifactTag key={`${item.direction}:${item.line}:${item.title}`} {...item} />)}</span>}
+      </p>
+      {detail.intent !== detail.title && <p className="task-dialog-description gen">{detail.intent}</p>}
+      <div className="tk-figures">
+        <Figure label={t("进度")} value={<><span className="ds-serif">{percent}</span><small>%</small></>} sub={steps.length ? t("{{done}}/{{total}} 步", { done, total: steps.length }) : undefined}>
+          {steps.length > 0 && <StepStrip detail={detail} size="page" />}
+        </Figure>
+        <DueFigure detail={detail} editable={editable} />
+        <RemainingFigure detail={detail} editable={editable && live} />
+        <Figure label={t("下一次时段")} value={slot ? slotWhen(locale, slot, t, today) : t("未排")}
+          sub={detail.state === "active" ? <RunningChip detail={detail} /> : detail.workedMinutes > 0 ? t("已计时 {{duration}}", { duration: minutesText(locale, detail.workedMinutes) }) : undefined} />
+      </div>
+      {actions("head")}
+      {postponing && <PostponePanel workOrderId={detail.id} onClose={() => setPostponing(false)} />}
+      {/* The assistant's run is watched and stopped in 小帮手 (scenarios.md 11): here only that it runs, and where. */}
+      {running && <p className="tk-agent-running" role="status"><Bot {...SMALL} />{t("助手正在做「{{title}}」", { title: running.title || detail.title })} <a href="/helper">{t("在小帮手查看进度")}</a></p>}
+    </header>
+    <div className="tk-switch" role="tablist" aria-label={t("任务内容")}>
+      {([["steps", t("步骤 {{count}}", { count: steps.length })], ["materials", t("材料")], ["finish", t("提交")]] as const).map(([id, label]) =>
+        <button key={id} type="button" role="tab" aria-selected={pane === id} onClick={() => setPane(id)}>{label}</button>)}
+    </div>
+    <div className="tk-cols">
+      {section("steps", "步骤", detail.stepPlan && !editing && <span className="tk-section-tools">
+        <small>{detail.stepPlan.archetypeLabel} · {detail.stepPlan.quantity.amount > 0 ? `${detail.stepPlan.quantity.amount} ${detail.stepPlan.quantity.unit}` : detail.stepPlan.quantity.basis}</small>
+        <button type="button" className="text-button" onClick={() => setEditing(true)}><SlidersHorizontal {...SMALL} />{t("调整步骤")}</button></span>,
+        <StepsPanel detail={detail} editing={editing} onEditing={setEditing} />)}
+      <div className="tk-side">
+        {section("materials", "材料与教程", <a className="tk-section-link" href={`/materials/${encodeURIComponent(detail.id)}`}><BookOpen {...SMALL} />{t("阅读页")}</a>,
+          <><PreparingActions detail={detail} /><TaskMaterials detail={detail} live={live} anchors={anchors} /></>)}
+        {section("finish", "提交与完成", null, <FinishPanel detail={detail} />)}
+      </div>
+    </div>
     {/* One way in for everything about this task: ask about it, change it, record what happened. Changes come back as a card to apply. */}
     <div className="task-entry">
       <Conversation variant="task" page={{ kind: "task", entityId: detail.id }}
-        placeholder={t("对该任务的指令、记录或问题：改截止、这一步做完了、用了多久、卡在哪、在等谁、讲解某一步…")} />
+        placeholder={t("对这个任务说一句：改到下周一、这一步做完了、卡在哪、讲解第 3 步……")} />
     </div>
-    <nav className="task-sections" aria-label={t("任务内容")}>{SECTIONS.map(([id, label], index) =>
-      <button key={id} type="button" onClick={() => refs.current[id]?.scrollIntoView({ behavior: "smooth", block: "start" })}><span className="mono">{index + 1}</span> {t(label)}</button>)}</nav>
-    {SECTIONS.map(([id, label], index) => <section key={id} className="task-section" data-section={id} aria-labelledby={`${detail.id}-${id}`} ref={(element) => { refs.current[id] = element; }}
-      {...(anchors ? { id } : {})}>
-      <h3 id={`${detail.id}-${id}`} className="task-section-title"><span className="mono">{index + 1}</span> {t(label)}</h3>
-      {id === "steps" && <StepsPanel detail={detail} />}
-      {id === "materials" && <TaskMaterials detail={detail} live={live} anchors={anchors} />}
-      {id === "finish" && <FinishPanel detail={detail} />}
-    </section>)}
-    <details className="advanced task-record" {...(anchors ? { id: "record" } : {})}>
-      <summary>{t("记录 · 已投入 {{duration}} · {{count}} 次计时", { duration: minutesText(locale, detail.workedMinutes), count: detail.executions.length })}</summary>
-      <RecordPanel detail={detail} />
-    </details>
+    {actions("dock")}
   </div>;
+}
+
+/** 「今天 14:00」 for today's block, else 「10/30 周五 14:00」. */
+function slotWhen(locale: Locale, slot: TaskSlotLike, t: Translate, today: string | undefined): ReactNode {
+  return <><small className="tk-figure-day">{slot.day === today ? t("今天") : dayText(locale, slot.day)}</small> <span className="ds-serif">{slot.start}</span></>;
 }

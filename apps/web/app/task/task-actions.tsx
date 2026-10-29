@@ -25,16 +25,18 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; code?: 
 
 /**
  * The card's own actions, one primary per state: 批准 (a proposal), 开始计时 (approved work; opens the task and starts the floating
- * countdown), 暂停 with a reason / 继续计时 (a running session), and 交给 Agent when the system can do the work or one of its steps.
- * Archiving sits in the overflow menu. Completion and evidence are in the task dialog, where the person can see what is being handed in.
+ * countdown), 暂停 with a reason / 继续计时 (a running session), and 交给助手 when the system can do the work or one of its steps.
+ * Archiving sits in the overflow menu. Completion and evidence are in `TaskCompletion` (the task's own page, or a sheet opened from here).
  */
-export function TaskActions({ workOrderId, state, approvable = true, paused, agentReady, agentStepId, onOpen, offline, beforeStart, iconic = false, children }: {
+export function TaskActions({ workOrderId, state, approvable = true, paused, agentReady, agentStepId, onOpen, offline, beforeStart, iconic = false, labelPrimary = false, children }: {
   /** Icons in place of the buttons' words (a row on Today); the words stay as each button's name and tip. */
   iconic?: boolean;
+  /** With `iconic`, the one primary press keeps its words beside the icon (the task cards, 2026-10-28). */
+  labelPrimary?: boolean;
   workOrderId: string; state: string; paused: boolean; agentReady: boolean; onOpen?: (() => void) | undefined;
   /** False for a proposal whose steps are still being planned: there is nothing to approve yet (W-31). */
   approvable?: boolean;
-  /** The step 「交给 Agent」 hands over (the first one the system can do); without it, the whole task. */
+  /** The step 「交给助手」 hands over (the first one the system can do); without it, the whole task. */
   agentStepId?: string | undefined;
   /** Who and which workspace a command queued offline belongs to, and the title the offline list shows. */
   offline?: { ownerId: string; workspaceId: string; intent: string };
@@ -88,12 +90,13 @@ export function TaskActions({ workOrderId, state, approvable = true, paused, age
     const result = await post("/api/agent/dispatch", { workOrderId, ...(agentStepId ? { stepId: agentStepId } : {}) });
     if (result.state === "started") return { ok: true };
     if (result.state === "needs_category_approval") return { ok: false, message: t("这类工作尚未允许 Agent 执行，已加入待决事项。") };
-    return { ok: false, message: result.message ?? t("未能交给 Agent。") };
-  }, () => setStatus(t("已交给 Agent，产出完成后进入待审阅。")));
+    return { ok: false, message: result.message ?? t("未能交给助手。") };
+  }, () => setStatus(t("已交给助手，进度在小帮手里看；产出完成后进入待审阅。")));
 
   // Iconic (a row on Today, 2026-10-28): the same buttons drawn as icons, their words kept as the name and the hover tip.
-  const action = (label: string, icon: ReactNode, onClick: () => void, primary = false) => iconic
-    ? <IconButton label={label} icon={icon} tone={primary ? "primary" : "plain"} disabled={busy} onClick={onClick} />
+  const action = (label: string, icon: ReactNode, onClick: () => void, primary = false) => iconic && primary && labelPrimary
+    ? <button type="button" className="primary-button task-actions-main" disabled={busy} onClick={onClick}>{icon}<span>{label}</span></button>
+    : iconic ? <IconButton label={label} icon={icon} tone={primary ? "primary" : "plain"} disabled={busy} onClick={onClick} />
     : <button type="button" className={primary ? "primary-button" : undefined} disabled={busy} onClick={onClick}>{label}</button>;
   const approve = () => void run(() => post(`/api/work-orders/${encodeURIComponent(workOrderId)}/approve`, {}));
 
@@ -108,9 +111,9 @@ export function TaskActions({ workOrderId, state, approvable = true, paused, age
       {PAUSE_REASONS.map((item) => <button key={item} type="button" disabled={busy} onClick={() => void run(() => execution({ action: "pause", reason: t(item) }))}>{t(item)}</button>)}
       <button type="button" onClick={() => setPausing(false)} aria-label={t("取消暂停")}>×</button>
     </span>}
-    {agentReady && !["accepted", "archived", "evidence_review"].includes(state) && action(t("交给 Agent"), <Bot {...ICON} />, delegate)}
+    {agentReady && !["accepted", "archived", "evidence_review"].includes(state) && action(t("交给助手"), <Bot {...ICON} />, delegate)}
     {children}
-    {onOpen && (iconic ? <IconButton label={t("打开")} icon={<Maximize2 {...ICON} />} onClick={onOpen} /> : <button type="button" onClick={onOpen}>{t("打开")}</button>)}
+    {onOpen && (iconic ? <IconButton label={t("打开")} icon={<Maximize2 {...ICON} />} onClick={onOpen} className="task-actions-open" /> : <button type="button" onClick={onOpen}>{t("打开")}</button>)}
     {!["accepted", "archived"].includes(state) && <MenuButton label={t("更多操作")} icon={iconic ? <MoreHorizontal {...ICON} /> : "⋯"} items={[{ label: t("归档"), hint: t("可在已归档中恢复"), onSelect: () => setArchiving(true) }]} />}
     {archiving && <span className="task-actions-choices">
       <input value={reason} maxLength={200} placeholder={t("归档原因（选填）")} aria-label={t("归档原因（选填）")} onChange={(event) => setReason(event.target.value)} />
