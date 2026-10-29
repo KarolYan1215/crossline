@@ -77,6 +77,11 @@ const { dedupePass } = await import("../apps/worker/src/dedupe");
 const { materializeDatePairs, releaseWaits } = await import("../apps/worker/src/date-pairs");
 const { autoApproveEligible } = await import("../apps/worker/src/auto-approval");
 const { requestFinerSplits } = await import("../apps/worker/src/step-planner");
+const { prepareMaterialsAhead } = await import("../apps/worker/src/manualbook");
+// Optional, so the same script also runs on the code from before these existed (the before/after comparison of closed-loop-1030).
+type Measured = typeof import("../apps/web/lib/measured-capacity");
+const { measuredView, dayCapacityOf, measuredCapacityOn } = await import("../apps/web/lib/measured-capacity").catch(() => ({})) as Partial<Measured>;
+const { AUTO_CLOSED_EVENT = "work_order.auto_closed" } = await import("../apps/web/lib/auto-close").catch(() => ({})) as { AUTO_CLOSED_EVENT?: string };
 const { taskTitleOf, onPersonsBoard, bulkDoneRows } = await import("../packages/core/src/index");
 const { openNeedsOf } = await import("../packages/db/src/index");
 
@@ -202,6 +207,8 @@ async function workerPasses(now: Date, today: string) {
   try { releaseWaits(store, ws); } catch (error) { note(today, now, "error", `releaseWaits ${String(error)}`); }
   try { const approved = autoApproveEligible(store, ws, undefined, now); if (approved.length) note(today, now, "auto_approved", approved.join(",")); } catch (error) { note(today, now, "error", `autoApprove ${String(error)}`); }
   try { requestFinerSplits(store, ws, now); } catch (error) { note(today, now, "error", `finerSplits ${String(error)}`); }
+  // Materials for work starting within a day (closed-loop-1030 §5): a rule pass, no model.
+  if (typeof prepareMaterialsAhead === "function") try { const moved = prepareMaterialsAhead(store, ws, now); if (moved.length) note(today, now, "materials_ahead", moved.join(",")); } catch (error) { note(today, now, "error", `materialsAhead ${String(error)}`); }
   if (!STAND_INS) return;
   // Stand-ins for what a model or another person does in the real system (no model runs here; rates assumed, report §3.4): the assistant's
   // preparation steps finish (0.8 a day once ready), someone else's reply arrives (a wait step, 0.2 a day), the person hands over material
@@ -223,6 +230,8 @@ async function workerPasses(now: Date, today: string) {
   } catch (error) { note(today, now, "error", `standIns ${String(error)}`); }
 }
 const STAND_INS = args.get("stand-ins") !== "off";
+/** The first day each deadline was warned about: `m:<milestone>` a risk card, `o:<order>` a 「来不及」 message (closed-loop-1030 §4). */
+const firstWarned = new Map<string, string>();
 const standIns = { agent: 0, wait: 0, provide: 0, materials: 0 };
 
 // ── one session of the person looking at the app ───────────────────────────────────────────────────────────────────────────────────
@@ -352,6 +361,16 @@ async function simulateDay(index: number, today: string) {
   row.scheduledMin = mine.reduce((sum, block) => sum + minutesOf(block.end) - minutesOf(block.start), 0);
   const capacity = web.netCapacity(ctx, 1).capacity.find((day) => day.day === today);
   row.availableMin = Math.round(capacity?.netMinutes ?? 0);
+  // The measured cap the plan is held to today (closed-loop-1030 §1), and its basis.
+  if (measuredView && dayCapacityOf && measuredCapacityOn) try { const view = measuredView(ctx, morning); row.capMin = measuredCapacityOn() ? dayCapacityOf(ctx, today, Number(row.availableMin), view) : null; row.capBasis = view.basis; }
+  catch (error) { note(today, morning, "error", `measured ${String(error)}`); }
+  // Deadline warnings (closed-loop-1030 §4): the first morning each milestone at risk is on a card.
+  try {
+    for (const ask of collectAsks(ctx, morning)) {
+      const ids = ask.kind === "milestone_risk" || ask.kind === "milestone_risk_review" ? [ask.entityId] : ask.kind === "risk_digest" ? (ask.items ?? []).map((item) => item.id.replace(/^risk(review)?:/, "")) : [];
+      for (const id of ids) if (!firstWarned.has(`m:${id}`)) firstWarned.set(`m:${id}`, today);
+    }
+  } catch (error) { note(today, morning, "error", `warned ${String(error)}`); }
   row.feasibility = row.availableMin ? Math.round((Number(row.scheduledMin) / Number(row.availableMin)) * 100) / 100 : null;
   const unplaced = unplacedTasks(plan0); row.unplacedNone = unplaced.none; row.unplacedPartial = unplaced.partial;
   row.blocksToday = mine.length;
@@ -424,6 +443,10 @@ async function simulateDay(index: number, today: string) {
     const planned = await nudgesFor(ctx, now).catch((error: unknown) => { note(today, now, "error", `nudges ${String(error)}`); return []; });
     nudges += planned.length; counted += planned.filter((item) => item.counted).length; urgent += planned.filter((item) => item.urgent).length;
     for (const item of planned) note(today, now, `nudge:${item.kind}`, item.text.slice(0, 120));
+    for (const item of planned.filter((entry) => entry.kind === "latest_start")) {
+      const orderId = item.fingerprint.split(":")[1] ?? "";
+      if (!firstWarned.has(`o:${orderId}`)) firstWarned.set(`o:${orderId}`, today);
+    }
     const plan = await web.loadCurrentPlan(ctx);
     const todays = plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day === today);
     const clock = clockOf(minute);
@@ -504,19 +527,28 @@ async function simulateDay(index: number, today: string) {
       if ((opens || rand() < 0.3) && rand() < PERSONA.wrapProb) {
         row.wrapped = true;
         const bulk = tired && rand() < PERSONA.bulkDoneWhenTired;
-        // The one-tap button covers only what the app offers it for (bulkDoneRows: timed blocks); the rest a tired person leaves open.
-        const bulkSet = new Set(bulk ? bulkDoneRows(view.rows, {}).map((item) => item.blockId) : []);
+        // The one-tap button covers only what the app offers it for (bulkDoneRows: blocks worked in, under 70% as 部分); the rest a tired
+        // person leaves open. Otherwise the rows come prefilled with the inference (closed-loop-1030 §2): the person changes the ones that
+        // are wrong, one tap each, and takes the rest with 「推断都对」.
+        const bulkRows = new Map(bulk ? bulkDoneRows(view.rows, {}).map((item) => [item.blockId, item.outcome]) : []);
+        let acceptedInferred = 0;
         for (const r of view.rows.filter((item) => !item.answered)) {
-          if (bulk && !bulkSet.has(r.blockId)) { row.wrapLeftOpen = Number(row.wrapLeftOpen ?? 0) + 1; continue; }
+          if (bulk && !bulkRows.has(r.blockId)) { row.wrapLeftOpen = Number(row.wrapLeftOpen ?? 0) + 1; continue; }
           const run = startedAll.find((item) => item.blockId === r.blockId);
           let outcome: "done" | "partial" | "not_done" = run?.outcome ?? (running.has(r.blockId) ? "partial" : "not_done");
-          if (bulk) { if (outcome !== "done") row.falseDone = Number(row.falseDone ?? 0) + 1; outcome = "done"; }
+          row.inferRows = Number(row.inferRows ?? 0) + 1;
+          if (r.inferred === outcome) row.inferAgree = Number(row.inferAgree ?? 0) + 1;
+          note(today, now, "wrap_row", `${r.inferred ?? "-"} truth=${outcome} work=${r.workMinutes ?? "-"} timed=${r.timedMinutes} ${r.start}-${r.end}`);
+          if (bulk) { const given = bulkRows.get(r.blockId) ?? "done"; if (given === "done" && outcome !== "done") row.falseDone = Number(row.falseDone ?? 0) + 1; outcome = given; }
           else if (outcome !== "done" && rand() > PERSONA.honest) { row.falseDone = Number(row.falseDone ?? 0) + 1; outcome = "done"; }
-          const result = answerWrapBlock(ctx, r.blockId, outcome, now);
+          const inferredTaken = !bulk && r.inferred === outcome;
+          const result = answerWrapBlock(ctx, r.blockId, outcome, now, undefined, inferredTaken ? { inferred: true } : {});
           if (!result.ok) note(today, now, "wrap_error", `${r.blockId} ${JSON.stringify(result)}`);
-          row.decisions = Number(row.decisions ?? 0) + (bulk ? 0 : 1); row.decisionS = Number(row.decisionS ?? 0) + (bulk ? 0 : 4);
+          if (inferredTaken) acceptedInferred += 1;
+          else if (!bulk) { row.decisions = Number(row.decisions ?? 0) + 1; row.decisionS = Number(row.decisionS ?? 0) + 4; row.wrapTaps = Number(row.wrapTaps ?? 0) + 1; }
         }
-        if (bulk) { row.decisions = Number(row.decisions ?? 0) + 1; row.decisionS = Number(row.decisionS ?? 0) + 3; row.bulkDone = true; }
+        if (acceptedInferred) { row.decisions = Number(row.decisions ?? 0) + 1; row.decisionS = Number(row.decisionS ?? 0) + 3; row.allRight = Number(row.allRight ?? 0) + 1; row.wrapTaps = Number(row.wrapTaps ?? 0) + 1; }
+        if (bulk) { row.decisions = Number(row.decisions ?? 0) + 1; row.decisionS = Number(row.decisionS ?? 0) + 3; row.bulkDone = true; row.wrapTaps = Number(row.wrapTaps ?? 0) + 1; }
         await finishWrap(ctx, now);
         // What the page showed as tomorrow's first three blocks (loadTimeline's next day, as `app/wrap/page.tsx` reads it).
         const later = await web.loadCurrentPlan(ctx);
@@ -560,14 +592,16 @@ const deadlines = [...dueAtStart].filter(([, due]) => due <= endDay).map(([id, d
   const order = store.getWorkOrder(ws, id);
   const doneAt = acceptedBefore.has(id) ? undefined : acceptedAt.get(id);
   const finalDue = order ? ((order.payload as { dueDate?: string }).dueDate || (order.milestoneId ? web.milestoneDeadline(ctx, order.milestoneId) : undefined)) : undefined;
-  return { id, title: order ? taskTitleOf(order) : id, line: order?.identityId, due, finalDue: finalDue ?? null, state: order?.state ?? "gone",
+  const warned = [firstWarned.get(`o:${id}`), order?.milestoneId ? firstWarned.get(`m:${order.milestoneId}`) : undefined].filter((day): day is string => Boolean(day)).sort()[0] ?? null;
+  return { id, title: order ? taskTitleOf(order) : id, line: order?.identityId, due, finalDue: finalDue ?? null, state: order?.state ?? "gone", warned,
     acceptedDay: doneAt ? new Date(doneAt).toLocaleDateString("sv-SE", { timeZone: zone }) : null,
     archivedBy: order?.state === "archived" ? (store.listEvents(ws, { type: "work_order.archived", entityId: id }).at(-1)?.payload as { reason?: string } | undefined)?.reason ?? "" : null };
 });
 const truthDone = [...truth.values()].filter((item) => item.progress >= item.required).length;
 const result = { strategy, seed: SEED, start: START, days: DAYS, workspace: ws.slice(0, 8), runtimeS: Math.round((wall() - t0) / 1000), refusedFetches,
   persona: PERSONA, daysOut, deadlines, truth: { steps: truth.size, done: truthDone },
-  started: startedAll.length, standIns: STAND_INS ? standIns : null, events };
+  started: startedAll.length, standIns: STAND_INS ? standIns : null, autoClosed: store.listEvents(ws, { type: AUTO_CLOSED_EVENT }).length,
+  overdueAsked: store.listEvents(ws, { type: "task.overdue_resolved" }).length, events };
 mkdirSync(path.dirname(out), { recursive: true });
 writeFileSync(out, JSON.stringify(result, null, 1));
 console.log(`[${strategy}] wrote ${out} in ${result.runtimeS}s; refused fetches ${refusedFetches}`);

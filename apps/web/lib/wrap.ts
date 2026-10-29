@@ -63,10 +63,23 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
   const day = requestedDay ? wrapDayOf(ctx, requestedDay, now) : today;
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const answered = new Map<string, string>();
+  // Minutes already recorded against each step (`order#step`), for whether a worked block could have finished it.
+  const recorded = new Map<string, number>();
   for (const event of store.listEvents(ctx.workspaceId, { type: "block.confirmed" })) {
-    const payload = event.payload as { blockId?: string; day?: string; outcome?: string };
+    const payload = event.payload as { blockId?: string; day?: string; outcome?: string; workOrderId?: string; stepId?: string; minutes?: number; blockMinutes?: number };
     if (payload.day === day && payload.blockId) answered.set(payload.blockId, String(payload.outcome ?? ""));
+    if (payload.workOrderId && payload.outcome !== "not_done") {
+      const key = `${payload.workOrderId}#${payload.stepId ?? ""}`;
+      recorded.set(key, (recorded.get(key) ?? 0) + Number(payload.minutes ?? payload.blockMinutes ?? 0));
+    }
   }
+  // A worked block is 「做了」 only when it could have finished its step: its minutes and those recorded before reach the step's usual
+  // estimate. Otherwise it is 部分 — the step stays open — since 完成 marks the step done (docs/plans/closed-loop-1030.md §2).
+  const finishes = (orderId: string, stepId: string, minutes: number) => {
+    const step = stepId ? store.getStepPlan(ctx.workspaceId, orderId)?.steps.find((item) => item.id === stepId) : undefined;
+    const usual = step?.estimate.p50Minutes ?? store.getWorkOrder(ctx.workspaceId, orderId)?.estimate.p50Minutes ?? 0;
+    return minutes + (recorded.get(`${orderId}#${stepId}`) ?? 0) >= usual * 0.9;
+  };
   const orders = store.listWorkOrders(ctx.workspaceId);
   const lineOf = new Map(orders.map((order) => [order.id, order.identityId]));
   // A session never ended on a task that is no longer under way (accepted, archived, moved back) is not a running timer: the floating
@@ -91,7 +104,8 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
       const line = lineOf.get(block.orderId);
       const workMinutes = Math.max(timed, blockWorkMinutes(ctx, block.orderId, new Date(from).toISOString(), new Date(to).toISOString(), now));
       return { blockId: block.id, orderId: block.orderId, title: block.title, step: block.step, start: block.start, end: block.end, timedMinutes: timed,
-        workMinutes, inferred: inferBlockOutcome(workMinutes, Math.round((to - from) / 60_000)),
+        workMinutes, inferred: ((outcome) => outcome === "done" && !finishes(block.orderId, block.stepId, workMinutes) ? "partial" : outcome)(
+          inferBlockOutcome(workMinutes, Math.round((to - from) / 60_000))),
         ...(line ? { line } : {}), ...(answered.has(block.id) ? { answered: answered.get(block.id)! } : {}) };
     });
   const weekday = Number(formatInTimeZone(now, zone, "i")) % 7;
