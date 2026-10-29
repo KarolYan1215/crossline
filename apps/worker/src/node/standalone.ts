@@ -10,6 +10,8 @@ import { startNodeAgent, type AppServerLines, type NodeAgentStatus } from "./age
 import { API_KEY_SHAPE, loginNodeWithApiKey, withControl } from "./control";
 import { TOKEN_GONE } from "./protocol";
 import { createNodeBrowsers } from "./browser";
+// The launcher's updater and its signature check, bundled in as they are (scripts/package-node.ts allows exactly these two files).
+import { checkForUpdate, downloadInstaller, type UpdateManifest } from "../../../launcher/src/update";
 
 /**
  * 「Crossline 节点」, the standalone compute node (docs/compute-node.md): what the installer ships beside `node.exe` and a release build of
@@ -31,6 +33,13 @@ const tokenFile = path.join(home, "token.bin");
 const lockFile = path.join(home, "node.lock");
 const logFile = path.join(home, "logs", "node.log");
 const PREFERRED_PORT = 47391;
+/** Run by the tray (`--tray`): events go to stdout as JSON lines, commands come from stdin. */
+const tray = flag("tray");
+const emit = (event: Record<string, unknown>) => { if (tray) process.stdout.write(`${JSON.stringify(event)}\n`); };
+/** What this build is and where it updates from: written by scripts/package-node.ts. */
+const release = (() => {
+  try { return JSON.parse(readFileSync(path.join(appDir, "release.json"), "utf8")) as { version?: string; updateFeed?: string }; } catch { return {}; }
+})();
 mkdirSync(path.dirname(logFile), { recursive: true });
 mkdirSync(codexHome, { recursive: true });
 
@@ -177,10 +186,16 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ── The relay, once paired and signed in ──────────────────────────────────────────────────────────────────────────────────────
 let agent: { stop: () => void; status: () => NodeAgentStatus } | undefined;
+/**
+ * 「暂停算力」 from the tray: the relay stops (the site's runs go back to the server, as when the computer is off) until 继续 or the next
+ * start. Pairing and the sign-in are kept.
+ */
+let paused = false;
 function reconcile(): void {
   const current = readToken();
   if (!current) { agent?.stop(); agent = undefined; void pair(); return; }
   if (!account) return;
+  if (paused) { if (agent) { agent.stop(); agent = undefined; log({ type: "node.paused" }); } return; }
   if (!agent) {
     agent = startNodeAgent({ url: state.site, token: current, dir: path.join(home, "relay"), spawn: appServer, host: hostname(), role: "standalone",
       browsers: createNodeBrowsers({ profilesDir: path.join(home, "browser-profiles") }),
@@ -205,7 +220,7 @@ function view() {
   return { site: state.site, host: hostname(), codex: codexVersion, paired: Boolean(readToken()), pairedAt: state.paired?.at ?? null,
     code: pairing?.code ?? null, codeExpires: pairing?.expiresAt ?? null, pairingError: pairingError ?? null,
     account: account ? { email: account.email ?? "", type: account.type ?? "" } : null, accountKnown: account !== undefined,
-    login: login ?? null, node: agent?.status() ?? null };
+    login: login ?? null, node: agent?.status() ?? null, paused };
 }
 
 const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -239,7 +254,7 @@ $("keyform").style.display=v.account||!v.accountKnown||(v.login&&v.login.state==
 $("login").innerHTML=v.account?'<p class="ok">已登录'+(v.account.type==="apiKey"?"（API key）":" "+esc(v.account.email))+'</p><button id="signout">退出登录 / 换账号</button>':!v.accountKnown?'<p class="muted">正在读取……</p>'
 :v.login&&v.login.state==="pending"?'<p>浏览器已打开 ChatGPT 登录页，登录后这里自动更新。</p>'+((v.login.authUrl||"").startsWith("https://")?'<p><a href="'+esc(v.login.authUrl)+'" target="_blank" rel="noreferrer">没打开就点这里</a></p>':'')
 :'<p>用本人的 ChatGPT 账号登录，模型工作花的是这个账号的额度。</p>'+(v.login&&v.login.message?'<p class="muted">上次没有完成：'+esc(v.login.message)+'</p>':'')+'<button class="primary" id="signin">登录 ChatGPT</button>';
-const n=v.node;$("node").innerHTML=!v.paired||!v.account?'<p class="muted">配对并登录后自动开始。</p>':'<p>'+(n?words[n.state]||n.state:"正在启动")+(n&&n.message?"（"+esc(n.message)+"）":"")+'</p><p class="muted">电脑关机或断网时，模型工作自动回到服务器。</p>';
+const n=v.node;$("node").innerHTML=!v.paired||!v.account?'<p class="muted">配对并登录后自动开始。</p>':v.paused?'<p>已暂停：模型工作暂时回到服务器。托盘菜单的「继续提供算力」可以恢复。</p>':'<p>'+(n?words[n.state]||n.state:"正在启动")+(n&&n.message?"（"+esc(n.message)+"）":"")+'</p><p class="muted">电脑关机或断网时，模型工作自动回到服务器。</p>';
 $("meta").textContent=v.host+" · "+(v.codex||"Codex 未找到")+" · "+v.site;
 const s=$("signin");if(s)s.onclick=()=>post("/login").then(load);const o=$("signout");if(o)o.onclick=()=>post("/logout").then(load);const u=$("unpair");if(u)u.onclick=()=>post("/unpair").then(load);}
 $("usekey").onclick=()=>{const k=$("apikey").value;$("keynote").textContent="正在验证……";
@@ -309,7 +324,70 @@ port = (server.address() as { port: number }).port;
 writeFileSync(lockFile, JSON.stringify({ pid: process.pid, port }));
 log({ type: "node.started", port, codex: codexVersion, site: state.site });
 
+// ── The tray (installer/node-tray/CrosslineNode.cs) ─────────────────────────────────────────────────────────────────────────────
+// Started by the tray with `--tray`: commands come in on stdin, one JSON event per line goes out on stdout — the launcher's protocol
+// (docs/local-installer.md). The tray closing stdin, or being killed, ends the program.
+if (tray) {
+  const pageUrl = `http://127.0.0.1:${port}/`;
+  emit({ type: "ready", page: pageUrl, site: state.site, helper: new URL("/helper?pet=1", state.site).toString(), version: release.version ?? "" });
+  let said = "";
+  const sayStatus = () => {
+    const status = agent?.status();
+    const now = { type: "status", paired: Boolean(readToken()), signedIn: Boolean(account), paused, state: status?.state ?? "off", site: state.site };
+    const text = JSON.stringify(now);
+    if (text !== said) { said = text; process.stdout.write(`${text}\n`); }
+  };
+  sayStatus();
+  setInterval(sayStatus, 3_000).unref();
+  setTimeout(() => void checkUpdate(false), 60_000).unref();
+  setInterval(() => void checkUpdate(false), 6 * 3600_000).unref();
+  const commands = createInterface({ input: process.stdin });
+  commands.on("line", (line) => {
+    const command = line.trim();
+    if (command === "open") openInBrowser(pageUrl);
+    else if (command === "pause") { paused = true; reconcile(); sayStatus(); }
+    else if (command === "resume") { paused = false; log({ type: "node.resumed" }); reconcile(); sayStatus(); }
+    else if (command === "check-update") void checkUpdate(true);
+    else if (command === "install-update") void installUpdate();
+    else if (command === "quit") shutdown();
+  });
+  commands.on("close", shutdown);
+}
+
+// Told to the tray first (above), so its menu and the 小帮手 window do not wait for Codex to answer.
 await readAccount();
 reconcile();
 // Started by the person (not at sign-in), or with something still to do: the page opens.
 if (!flag("autostart") || !readToken() || !account) openInBrowser(`http://127.0.0.1:${port}/`);
+
+// ── Updates: the same signed manifests as the launcher's (apps/launcher/src/update.ts, product `crossline-node`) ──────────────────
+// The node never runs an installer itself: once the download matches the signed manifest, the tray is told where it is, stops this
+// program and runs it silently.
+let offered: UpdateManifest | undefined;
+let updating = false;
+async function checkUpdate(asked: boolean): Promise<void> {
+  if (!release.updateFeed || !release.version) { if (asked) emit({ type: "update-failed", code: "UPDATE_FEED_NOT_CONFIGURED" }); return; }
+  try {
+    const found = await checkForUpdate(release.updateFeed, release.version, { product: "crossline-node" });
+    offered = found.kind === "update" ? found.manifest : undefined;
+    if (found.kind === "update") emit({ type: "update-available", version: found.manifest.version });
+    else if (found.kind === "discontinued") emit({ type: "update-discontinued", notice: found.notice, ...(found.link ? { link: found.link } : {}) });
+    else if (asked) emit({ type: "update-none" });
+  } catch (error) {
+    log({ type: "node.update_check_failed", code: error instanceof Error ? error.message : "UPDATE_FAILED" });
+    if (asked) emit({ type: "update-failed", code: error instanceof Error ? error.message : "UPDATE_FAILED" });
+  }
+}
+async function installUpdate(): Promise<void> {
+  if (updating) return;
+  if (!offered) { await checkUpdate(true); if (!offered) return; }
+  updating = true;
+  try {
+    const installer = await downloadInstaller(offered, home, { fileName: "Crossline-Node-Setup" });
+    log({ type: "node.update_ready", version: offered.version });
+    emit({ type: "update-ready", path: installer, version: offered.version });
+  } catch (error) {
+    updating = false;
+    emit({ type: "update-failed", code: error instanceof Error ? error.message : "UPDATE_FAILED" });
+  }
+}

@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import path from "node:path";
 import { CODEX_RELEASE_BINARY_SHA256 } from "../packages/codex/src/index";
 import { bundleInstalled, sourceMaps } from "./bundle-installed";
+import { signManifestFile } from "./release-sign";
 
 /**
  * Builds the Windows installer (docs/local-installer.md, work package 2):
@@ -22,9 +23,18 @@ import { bundleInstalled, sourceMaps } from "./bundle-installed";
  *
  * Workspace links (node_modules/@crossline/*) are left out on purpose; the launcher makes them as junctions on first start
  * (apps/launcher/src/links.ts).
+ *
+ * DISCONTINUED (the owner, 2026-10-28): only the device and node packages are published from now on, so the Skills' prompts and the
+ * core logic stay on the server. This script refuses to run without `--final-release`, which exists for one last build whose launcher
+ * understands the signed `discontinued` manifest (docs/local-installer.md 「停发」). It needs `CROSSLINE_RELEASE_KEY` to sign latest.json.
  */
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
+if (!args.includes("--final-release")) {
+  throw new Error("FULL_INSTALLER_DISCONTINUED: the full installed copy is no longer published (docs/local-installer.md 「停发」); "
+    + "build the node package (scripts/package-node.ts) instead, or pass --final-release for the one last build");
+}
+if (!process.env.CROSSLINE_RELEASE_KEY) throw new Error("RELEASE_KEY_NOT_SET: the final release's latest.json must be signed (scripts/release-sign.ts)");
 const option = (name: string) => { const index = args.indexOf(`--${name}`); return index >= 0 ? args[index + 1] : undefined; };
 const version = option("version") ?? (JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version: string }).version;
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`VERSION_INVALID ${version}`);
@@ -180,6 +190,7 @@ run(iscc, [`/DAppVersion=${version}`, `/DStage=${stage}`, `/DOutputDir=${out}`, 
 const setup = path.join(out, `Crossline-Setup-${version}.exe`);
 // The public releases repository serves the file as a release asset named after its tag (docs/local-installer.md, 更新).
 const base = option("release-base") ?? "https://github.com/KarolYan1215/crossline-releases/releases/download";
-const manifest = { version, url: `${base}/v${version}/${path.basename(setup)}`, sha256: sha256(setup), size: statSync(setup).size, publishedAt: new Date().toISOString() };
+const manifest = { product: "crossline", version, url: `${base}/v${version}/${path.basename(setup)}`, sha256: sha256(setup), size: statSync(setup).size,
+  publishedAt: new Date().toISOString() };
 writeFileSync(path.join(out, "latest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-console.log(JSON.stringify({ setup, ...manifest }));
+console.log(JSON.stringify({ setup, ...signManifestFile(path.join(out, "latest.json")) }));

@@ -53,12 +53,18 @@ const ready = waitForHealth(`${url}/api/health`).then((healthy) => {
 // Updates (update.ts): checked a minute after start and every six hours; the tray asks for the install only on the person's word.
 let offered: UpdateManifest | undefined;
 let updating = false;
+// The full installed copy is no longer published (2026-10-28): its feed's last, signed word is said once per start, never acted on.
+let toldDiscontinued = false;
 async function check(asked: boolean): Promise<void> {
   if (!release.updateFeed) { if (asked) emit({ type: "update-failed", code: "UPDATE_FEED_NOT_CONFIGURED" }); return; }
   try {
-    offered = await checkForUpdate(release.updateFeed, release.version);
-    if (offered) emit({ type: "update-available", version: offered.version });
-    else if (asked) emit({ type: "update-none" });
+    const found = await checkForUpdate(release.updateFeed, release.version, { product: "crossline" });
+    offered = found.kind === "update" ? found.manifest : undefined;
+    if (found.kind === "update") emit({ type: "update-available", version: found.manifest.version });
+    else if (found.kind === "discontinued") {
+      if (asked || !toldDiscontinued) emit({ type: "update-discontinued", notice: found.notice, ...(found.link ? { link: found.link } : {}) });
+      toldDiscontinued = true;
+    } else if (asked) emit({ type: "update-none" });
   } catch (error) { if (asked) emit({ type: "update-failed", code: error instanceof Error ? error.message : "UPDATE_FAILED" }); }
 }
 async function installUpdate(): Promise<void> {

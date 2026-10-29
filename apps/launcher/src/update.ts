@@ -2,14 +2,22 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Layout } from "./config";
+import { RELEASE_PUBLIC_KEYS, verifyRelease, type ReleaseProduct, type SignedRelease } from "./release-signature";
 
 /**
- * Updates (docs/local-installer.md, 更新). The public releases repository serves `latest.json` — version, installer URL, SHA-256 and
- * size — written by `scripts/package-installer.ts`. The launcher reads it, says when a newer version exists, and on the person's
- * word downloads the installer, checks it byte for byte against the manifest, stops the app and copies `data\` aside before handing
- * the installer to the tray. The ledger's own migrations back the database up again when the new version first opens it.
+ * Updates (docs/local-installer.md, 更新). The public releases repository serves a manifest — product, version, installer URL, SHA-256,
+ * size and an Ed25519 signature over all of them (release-signature.ts) — written by the packaging scripts and signed by
+ * `scripts/release-sign.ts`. The launcher (and the standalone node, which bundles this file) reads it, says when a newer version exists,
+ * and on the person's word downloads the installer and checks it byte for byte against the signed manifest before anything runs it.
+ * An unsigned or wrongly signed manifest is refused, never treated as "no update": the person is told the update could not be checked.
+ *
+ * A manifest may instead say the product is no longer published (`discontinued`, signed the same way): the full installed copy's
+ * last word (2026-10-28), shown once and never acted on.
  */
-export type UpdateManifest = { version: string; url: string; sha256: string; size: number };
+export type UpdateManifest = { product: ReleaseProduct; version: string; url: string; sha256: string; size: number; signature: string };
+export type UpdateCheck = { kind: "none" } | { kind: "update"; manifest: UpdateManifest }
+  | { kind: "discontinued"; version: string; notice: string; link?: string };
+export type UpdateOptions = { product: ReleaseProduct; publicKeys?: readonly string[]; fetcher?: typeof fetch };
 
 const VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
 /** Only GitHub release downloads: the installer is never fetched from an address the manifest could point anywhere. */
@@ -28,30 +36,63 @@ export function isNewer(candidate: string, current: string): boolean {
   return false;
 }
 
-export function readManifest(value: unknown): UpdateManifest | undefined {
-  const raw = value as Partial<UpdateManifest> | null;
-  if (!raw || typeof raw.version !== "string" || !VERSION.test(raw.version) || typeof raw.url !== "string" || typeof raw.sha256 !== "string"
-    || !/^[0-9a-f]{64}$/.test(raw.sha256) || typeof raw.size !== "number" || raw.size <= 0 || raw.size > INSTALLER_MAX_BYTES) return undefined;
-  let url: URL;
-  try { url = new URL(raw.url); } catch { return undefined; }
-  if (url.protocol !== "https:" || !ALLOWED_HOSTS.has(url.hostname)) return undefined;
-  return { version: raw.version, url: url.toString(), sha256: raw.sha256, size: raw.size };
-}
-
-/** The newer release, or undefined when this one is current; throws with a code when the feed cannot be read. */
-export async function checkForUpdate(feed: string, current: string, fetcher: typeof fetch = fetch): Promise<UpdateManifest | undefined> {
-  const response = await fetcher(feed, { signal: AbortSignal.timeout(20_000), headers: { "cache-control": "no-cache" } }).catch(() => undefined);
-  if (!response?.ok) throw new Error(response ? `UPDATE_FEED_HTTP_${response.status}` : "UPDATE_FEED_NETWORK");
-  const manifest = readManifest(await response.json().catch(() => undefined));
-  if (!manifest) throw new Error("UPDATE_FEED_INVALID");
-  return isNewer(manifest.version, current) ? manifest : undefined;
+function httpsOn(value: unknown, hosts?: Set<string>): string | undefined {
+  if (typeof value !== "string") return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && (!hosts || hosts.has(url.hostname)) ? url.toString() : undefined;
+  } catch { return undefined; }
 }
 
 /**
- * Downloads the installer into `<root>\updates` and keeps it only if its size and SHA-256 are the manifest's. Every redirect is
- * followed by hand so each hop is checked against the same hosts.
+ * What a feed says, once its signature checks out; throws with a code otherwise. The signature is checked over the fields as written
+ * in the manifest (before any normalising), so a manifest edited after signing — a different URL, hash, size or product — fails.
  */
-export async function downloadInstaller(manifest: UpdateManifest, root: string, fetcher: typeof fetch = fetch): Promise<string> {
+export function readManifest(value: unknown, options: { product: ReleaseProduct; publicKeys?: readonly string[] }):
+  UpdateManifest | Extract<UpdateCheck, { kind: "discontinued" }> {
+  const raw = value as Record<string, unknown> | null;
+  if (!raw || typeof raw !== "object" || typeof raw.version !== "string" || !VERSION.test(raw.version)) throw new Error("UPDATE_FEED_INVALID");
+  if (raw.product !== "crossline" && raw.product !== "crossline-node") throw new Error("UPDATE_FEED_INVALID");
+  if (raw.product !== options.product) throw new Error("UPDATE_PRODUCT_MISMATCH");
+  if (typeof raw.signature !== "string" || !raw.signature) throw new Error("UPDATE_SIGNATURE_MISSING");
+  const keys = options.publicKeys ?? RELEASE_PUBLIC_KEYS;
+  if (!keys.length) throw new Error("UPDATE_SIGNING_KEY_MISSING");
+  const fields: SignedRelease = { product: raw.product, version: raw.version,
+    ...(typeof raw.url === "string" ? { url: raw.url } : {}), ...(typeof raw.sha256 === "string" ? { sha256: raw.sha256 } : {}),
+    ...(typeof raw.size === "number" ? { size: raw.size } : {}), ...(raw.discontinued === true ? { discontinued: true } : {}),
+    ...(typeof raw.notice === "string" ? { notice: raw.notice } : {}), ...(typeof raw.link === "string" ? { link: raw.link } : {}) };
+  if (!verifyRelease(fields, raw.signature, keys)) throw new Error("UPDATE_SIGNATURE_INVALID");
+  if (fields.discontinued) {
+    if (!fields.notice?.trim()) throw new Error("UPDATE_FEED_INVALID");
+    const link = httpsOn(fields.link);
+    return { kind: "discontinued", version: fields.version, notice: fields.notice.trim().slice(0, 400), ...(link ? { link } : {}) };
+  }
+  const url = httpsOn(fields.url, ALLOWED_HOSTS);
+  if (!url || typeof fields.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(fields.sha256) || typeof fields.size !== "number" || fields.size <= 0
+    || fields.size > INSTALLER_MAX_BYTES) throw new Error("UPDATE_FEED_INVALID");
+  return { product: fields.product, version: fields.version, url, sha256: fields.sha256, size: fields.size, signature: raw.signature };
+}
+
+/** Whether there is a newer signed release, the product's last word, or nothing; throws with a code when the feed cannot be trusted. */
+export async function checkForUpdate(feed: string, current: string, options: UpdateOptions): Promise<UpdateCheck> {
+  const fetcher = options.fetcher ?? fetch;
+  const response = await fetcher(feed, { signal: AbortSignal.timeout(20_000), headers: { "cache-control": "no-cache" } }).catch(() => undefined);
+  if (!response?.ok) throw new Error(response ? `UPDATE_FEED_HTTP_${response.status}` : "UPDATE_FEED_NETWORK");
+  const read = readManifest(await response.json().catch(() => undefined), options);
+  if ("kind" in read) return read;
+  return isNewer(read.version, current) ? { kind: "update", manifest: read } : { kind: "none" };
+}
+
+/**
+ * Downloads the installer into `<root>\updates` and keeps it only if its size and SHA-256 are the signed manifest's. The signature is
+ * checked again first, so a manifest that did not come through `readManifest` is never downloaded. Every redirect is followed by hand
+ * so each hop is checked against the same hosts.
+ */
+export async function downloadInstaller(manifest: UpdateManifest, root: string,
+  options: { publicKeys?: readonly string[]; fetcher?: typeof fetch; fileName?: string } = {}): Promise<string> {
+  const fetcher = options.fetcher ?? fetch;
+  const signed: SignedRelease = { product: manifest.product, version: manifest.version, url: manifest.url, sha256: manifest.sha256, size: manifest.size };
+  if (!verifyRelease(signed, manifest.signature, options.publicKeys ?? RELEASE_PUBLIC_KEYS)) throw new Error("UPDATE_SIGNATURE_INVALID");
   let url = manifest.url;
   let response: Response | undefined;
   for (let hop = 0; hop < 5; hop += 1) {
@@ -81,7 +122,7 @@ export async function downloadInstaller(manifest: UpdateManifest, root: string, 
   const dir = path.join(root, "updates");
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `Crossline-Setup-${manifest.version}.exe`);
+  const file = path.join(dir, `${options.fileName ?? "Crossline-Setup"}-${manifest.version}.exe`);
   writeFileSync(`${file}.part`, Buffer.concat(chunks));
   renameSync(`${file}.part`, file);
   return file;

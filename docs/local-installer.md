@@ -1,5 +1,13 @@
 # 本机安装版与使用记录回传（设计，2026-10-13）
 
+## 停发（2026-10-28，本人决定）
+
+以后只发「设备 / 节点」包（docs/device-mode.md、docs/compute-node.md），Skill 提示词与核心逻辑只留在服务器：本机安装版里 Codex 要读明文 `SKILL.md`，打包无法隐藏（docs/review-2026-10-27.md §4）。
+
+- `scripts/package-installer.ts` 默认拒绝运行（`FULL_INSTALLER_DISCONTINUED`）。只留一次 `--final-release`：最后一版，用来把能读懂签名清单和「停发说明」的启动器送到已装的电脑上；它同样要求 `CROSSLINE_RELEASE_KEY`，因为写出的 `latest.json` 必须签名。
+- 已装的用户不会被删任何数据。发布顺序：① 用 `--final-release` 打最后一版并发布（旧启动器不验签，照常提示更新、安装）；② 再把公开仓库的 `latest.json` 换成签名的停发说明：`pnpm exec tsx scripts/release-sign.ts discontinued --product crossline --version <最后一版的版本号> --notice "……" --link https://app.crossline.lol/settings --out latest.json`。新启动器读到它，每次启动说一次（托盘气泡「Crossline 本机版已停止更新」，点击打开 `link`，只接受 https），菜单里的「检查更新」改为「已停止更新」，此后不再提示安装任何东西。
+- 本机版继续能用：账本、登录、设置都在原处；本人自己决定何时卸载（卸载时仍可选择保留数据）。
+
 ## 目标与约束
 
 内测要同时满足：测试者不 clone 代码；不占机主的电脑和 Codex 额度；用测试者**自己的** ChatGPT 额度；功能完整（shell 助手、生图、联网调研、Outlook 日历、屏幕活动、录音转写）；机主能集中看到使用记录。
@@ -39,7 +47,7 @@
 
 `state\` 存在的原因：机主电脑上常驻网页版的 Codex 登录、Outlook 缓存和访客运行时就在 `%LOCALAPPDATA%\Crossline\codex-home`、`auth\`、`runtimes\`。安装版若用同一位置，两者会共用一个 Codex 登录。`CROSSLINE_STATE_DIR` 让 `codexProcessEnvironment` 和 `graphCacheConfiguration` 改用 `state\`；卸载时选择删除数据，也只删 `data\`、`state\`、`backups\` 和 `launcher.json`。
 
-- **启动器**分两层。托盘 `installer/tray/Crossline.cs`（用系统自带的 .NET Framework `csc` 编译，单实例，托盘菜单「开机时启动」写 HKCU Run，把启动器放进 kill-on-close 作业对象，托盘一死，启动器、web、worker、Codex 全部随之结束）只管图标和菜单。启动器 `apps/launcher/src/main.ts` 跑在随附的 `node.exe` 上：建 `node_modules\@crossline\*` 目录联接（`links.ts`，安装包只复制文件，不复制链接）；在 47210–47299 中挑两个空闲端口，web 端口只要仍空闲就沿用（换端口等于换源，浏览器的 cookie、离线队列、PWA 都按源保存）。这一段整段被占时向系统要端口；机主电脑上 44000–47350 全部报 `EADDRINUSE` 却看不到监听者，就走了这条路。端口永远跳过 Fetch 标准的禁用端口表（`BLOCKED_PORTS`）：系统曾分到 4190（sieve），浏览器和 Node 的 fetch 都拒绝连接，页面打不开；首次运行生成 Better Auth 密钥、supervisor capability 密钥和回传盐，存 `data\launcher-secrets.json`；以退避重启守护 web 与 worker（`supervise.ts`）。托盘与启动器之间用行协议：托盘写 stdin（`open`、`check-update`、`install-update`、`quit`），启动器每行输出一个 JSON 事件（`starting`、`ready`、`open`、`update-available`、`update-none`、`update-ready`、`update-failed`、`error`）。stdin 关闭即退出。替代 `start-crossline.ps1` 与 `install-startup.ps1`。
+- **启动器**分两层。托盘 `installer/tray/Crossline.cs`（用系统自带的 .NET Framework `csc` 编译，单实例，托盘菜单「开机时启动」写 HKCU Run，把启动器放进 kill-on-close 作业对象，托盘一死，启动器、web、worker、Codex 全部随之结束）只管图标和菜单。启动器 `apps/launcher/src/main.ts` 跑在随附的 `node.exe` 上：建 `node_modules\@crossline\*` 目录联接（`links.ts`，安装包只复制文件，不复制链接）；在 47210–47299 中挑两个空闲端口，web 端口只要仍空闲就沿用（换端口等于换源，浏览器的 cookie、离线队列、PWA 都按源保存）。这一段整段被占时向系统要端口；机主电脑上 44000–47350 全部报 `EADDRINUSE` 却看不到监听者，就走了这条路。端口永远跳过 Fetch 标准的禁用端口表（`BLOCKED_PORTS`）：系统曾分到 4190（sieve），浏览器和 Node 的 fetch 都拒绝连接，页面打不开；首次运行生成 Better Auth 密钥、supervisor capability 密钥和回传盐，存 `data\launcher-secrets.json`；以退避重启守护 web 与 worker（`supervise.ts`）。托盘与启动器之间用行协议：托盘写 stdin（`open`、`check-update`、`install-update`、`quit`），启动器每行输出一个 JSON 事件（`starting`、`ready`、`open`、`update-available`、`update-none`、`update-ready`、`update-failed`、`update-discontinued`、`error`）。stdin 关闭即退出。替代 `start-crossline.ps1` 与 `install-startup.ps1`。
 - 启动器给子进程设 `CROSSLINE_INSTALL_MODE=local`，并删掉开发者 shell 里可能带进来的 SMTP、Google、SIWC、测试邮箱、`CROSSLINE_FIXED_NOW`、示例数据等变量：安装版只能用 Codex 登录。
 - **一台机器一个工作区**：测试者就是运行时的机主（`runtimeOwner`），所以 `AGENT_OWNER_ONLY` 的功能（shell 助手、记忆、联网、生图）都对他开放。
 - **Codex**：用 Release 构建 `vendor/codex`，固定在 `codex-baseline.json` 记录的提交。`codex-code-mode-host.exe` 也从源码构建（需要 V8 预构建包），**不能**分发从 Codex 桌面应用里复制来的那个。附上 Apache-2.0 的 `LICENSE` 和 `NOTICE`。
@@ -102,6 +110,13 @@
 启动器启动时读公开仓库的 `latest.json`（版本号、安装包 URL、SHA-256），发现新版就提示，确认后下载并静默安装。账本迁移本来就会先把旧库备份成 `<db>.v<N>.bak`（`#runMigrations`）；安装前启动器再多备份一份 `data\`。
 
 实现（`apps/launcher/src/update.ts`）：启动 1 分钟后检查一次，之后每 6 小时一次；托盘菜单「检查更新」随时检查。清单只接受 https 的 GitHub 下载地址（`github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`），每一跳重定向都手动跟随并检查主机；下载后大小和 SHA-256 都必须与清单一致，才写进 `updates\`。随后启动器停掉 web 和 worker，把 `data\`（不含 `logs\`）复制到 `backups\before-<时间>-v<旧版本>\`，只保留最近 3 份，再通知托盘；托盘退出后以 `/VERYSILENT` 运行安装包，安装包结束时启动新托盘。`release.json` 的 `updateFeed` 由打包脚本的 `--update-feed` 写入。
+
+**清单签名（2026-10-28）。** SHA-256 只证明下载的就是清单点名的那个文件；谁能改清单（公开发布仓库、能往里发布的账号、中间的网络），谁就能点名任何安装包。所以清单本身用 Ed25519 签名（`apps/launcher/src/release-signature.ts`，node:crypto）：
+- 签的是固定格式的几行文字（`crossline-release-v1`，然后 `product`、`version`、`url`、`sha256`、`size`、`discontinued`、`notice`、`link` 各一行，值里的换行换成空格），所以 JSON 的键顺序、空格改不了含义，改任何一个字段签名就不对。`product` 是 `crossline`（本机版）或 `crossline-node`（节点），一个产品的清单装不了另一个。
+- 启动器和节点程序内置公钥（`RELEASE_PUBLIC_KEYS`，32 字节原始公钥的 base64，可以放两把以便换钥）。没签名（`UPDATE_SIGNATURE_MISSING`）、签名不对或被改过（`UPDATE_SIGNATURE_INVALID`）、产品不对（`UPDATE_PRODUCT_MISMATCH`）一律拒绝，并当作「更新检查失败」告诉本人，不会当作「没有更新」；`downloadInstaller` 下载前再验一次，没验过的清单根本不会去下载。公钥表为空时一律拒绝（`UPDATE_SIGNING_KEY_MISSING`）：**仓库里现在就是空的**，在本人生成密钥之前任何更新都装不上。
+- 生成密钥：`pnpm exec tsx scripts/release-sign.ts keygen --out D:\keys\crossline-release.pem`（路径在仓库内或文件已存在都拒绝），私钥以 PKCS#8 PEM 写到那里，屏幕上打印公钥；把公钥填进 `RELEASE_PUBLIC_KEYS`，私钥离线备份。
+- 签名：`$env:CROSSLINE_RELEASE_KEY='D:\keys\crossline-release.pem'`，然后 `release-sign.ts sign <清单>`；`package-node.ts` 在这个变量存在时自己签 `node-latest.json`，不存在时写出未签名的清单并警告（节点会拒绝它）。私钥路径在仓库内同样拒绝；私钥对应的公钥不在内置表里时打印警告。
+- 测试：`apps/launcher/src/update.test.ts`（篡改 URL / 哈希 / 版本、换钥签名、换内置公钥、缺签名、产品不符、停发说明被改都拒绝；没验过签名的清单不发任何请求）。
 
 ## 已知限制（全功能下依然存在）
 

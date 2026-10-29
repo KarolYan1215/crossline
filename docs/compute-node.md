@@ -47,11 +47,11 @@
 
 **包里有什么（`scripts/package-node.ts` → `dist/node-installer/Crossline-Node-Setup-<版本>.exe`，`installer/crossline-node.iss`）：**
 
-- `main.mjs`：`apps/worker/src/node/standalone.ts` 连同中继（`agent.ts`、`protocol.ts`）和 `ws` 打包、压缩成一个 68 KB 的文件。打包脚本按 esbuild 的输入清单检查，Crossline 自己的文件只能是这三个，多一个就失败（`NODE_BUNDLE_TOO_WIDE`）。Skill、提示词、计划和校验都不在包里：节点连上后由服务器经镜像装插件。
+- `main.mjs`：`apps/worker/src/node/standalone.ts` 连同中继（`agent.ts`、`protocol.ts`）和 `ws` 打包、压缩成一个文件（2026-10-28 起 84 KB：多了启动器的更新与验签两个文件，见「托盘与桌宠」）。打包脚本按 esbuild 的输入清单检查，Crossline 自己的文件只能是这三个，多一个就失败（`NODE_BUNDLE_TOO_WIDE`）。Skill、提示词、计划和校验都不在包里：节点连上后由服务器经镜像装插件。
 - `node.exe`（打包时运行的那个 Node）。
 - `codex\codex.exe`、`codex\codex-code-mode-host.exe`：从 `vendor/codex`（rust-v0.163.0，带 Windows 迁移校验和补丁）编译的 release 版，打包时核对 `--version` 是 0.163.0。
-- 用到 VC++ 运行库的模块旁边放运行库（dumpbin 检查）；许可证；`start.vbs` 用 wscript 无窗口启动。
-- 每用户安装到 `%LOCALAPPDATA%\Crossline Node\app`，不要管理员权限；默认勾选「登录 Windows 时自动运行」（`HKCU\...\Run`，带 `--autostart`）。
+- 用到 VC++ 运行库的模块旁边放运行库（dumpbin 检查）；许可证；托盘 `CrosslineNode.exe` 与 WebView2 SDK 的三个 DLL（见下「托盘与桌宠」）；`start.vbs` 只为旧安装的开机项保留，现在启动托盘。
+- 每用户安装到 `%LOCALAPPDATA%\Crossline Node\app`，不要管理员权限；默认勾选「登录 Windows 时自动运行」（`HKCU\...\Run`，启动托盘并带 `--background`，托盘再以 `--autostart` 启动节点）。
 
 **程序做什么（`standalone.ts`）：**
 
@@ -62,6 +62,28 @@
 5. **本机页面。** `http://127.0.0.1:47391/`（被占用就换一个端口，写在 `node.lock` 里）：配对码、登录、运行状态、退出。只认 `127.0.0.1:<端口>` 这个主机名（防 DNS 重绑定），POST 必须带页面自己加的请求头（别的网站无法驱动它）。同时只运行一份：再点快捷方式只会打开已运行那份的页面。
 
 **实测（`scripts/node-standalone-check.ts`，本机 Codex 0.163.0、临时目录、替身网站，不调用模型）：** 源码版和打包压缩后的 `main.mjs` 都通过：配对码配对成功；全新 Codex 目录读作未登录，中继不启动；页面正常；不带请求头的 POST 和别的主机名被拒；ChatGPT 登录能发起（拿到 `auth.openai.com` 地址，不打开窗口、不真的登录）；重启后从 DPAPI 读回令牌，不再要新码；磁盘上的令牌不是明文。
+
+## 托盘与桌宠（2026-10-28，本人决定）
+
+节点安装包加了托盘程序 `CrosslineNode.exe`（`installer/node-tray/CrosslineNode.cs`），安装后的开始菜单、桌面快捷方式和开机启动都指向它；它再以 `--tray` 启动 `main.mjs`。完整本机版的托盘（`installer/tray/Crossline.cs`）不受影响。
+
+**托盘菜单：** 显示小帮手（全局热键 Ctrl+Alt+H，`RegisterHotKey`；热键被别的程序占用时弹一次气泡说明，只能从托盘唤出）、打开 Crossline 网页、节点状态（等待配对 / 等待登录 / 已接入 / 已暂停……）、暂停算力（中继停下，模型工作回到服务器，点「继续提供算力」或下次启动恢复；配对和登录保留）、节点设置与登录（打开本机页面）、检查更新、开机时启动（默认开，与安装包写的 Run 值 `Crossline Node` 是同一个）、退出。左键单击托盘图标也是显示 / 隐藏小帮手。
+
+**托盘与节点程序的通信**沿用启动器的行协议：托盘写 stdin（`open`、`pause`、`resume`、`check-update`、`install-update`、`quit`），节点每行输出一个 JSON（`ready`：本机页面、站点、`/helper?pet=1` 的地址；`status`：变化时发一次；`update-available`、`update-none`、`update-failed`、`update-ready`、`update-discontinued`）。节点放在 kill-on-close 作业对象里，托盘被结束时节点和 Codex 一起结束（实测）。
+
+**小帮手窗口**是 WebView2（Windows 11 自带运行时；没有时弹气泡并打开微软的下载页）：
+- 加载 `<站点>/helper?pet=1`，站点取自节点的 `node.json`（`--site` 可以覆盖，只接受 https，或本机地址上的 http）。用户数据目录是 `%LOCALAPPDATA%\Crossline Node\webview2`，首次要在这个窗口里登录一次网站。
+- 是小帮手页面时：无边框、置顶、不进任务栏和 Alt+Tab，按页面报告的矩形（`{type:"shape", rects}`，`shapeRects`）裁成窗口区域，其余部分不属于窗口，不画也不挡点击。先试过颜色键透明（TransparencyKey）：形状对，但 WebView2 经 DirectComposition 绘制，系统眼里整窗都是键色，点击全部穿透到后面的窗口，所以改成窗口区域。每块四周留 4 px 纸色边，呼吸和跳动不被裁掉；因此页面里的动作只沿坐标轴移动，不旋转。
+- 拖动：页面在按住形象移动超过 6 px 后发 `{type:"drag"}`，托盘跟随光标移动窗口直到松开。`WM_NCLBUTTONDOWN` 的做法实测不起作用（鼠标被 WebView2 另一个进程的窗口捕获）。位置和是否显示存在 `pet.json`，显示器拔掉后回到主屏右下角。
+- 其他页面（登录）显示为普通窗口；登录后网站落在今日页，托盘把登录后的第一个页面送回小帮手一次。离开站点的链接、新窗口在本人的浏览器里打开；小帮手模式下不在窗口里加载别的网站。
+- 托盘每 120 ms 把光标在屏幕上的位置（换算成窗口内 CSS 像素）、每 15 秒一档把整台电脑的无操作时长（`GetLastInputInfo`）发给页面。
+- 每显示器 DPI：窗口按 `GetDpiForWindow` 缩放（.NET Framework 的 `DeviceDpi` 不加 app.config 时一直是 96）。
+
+**桌宠页面**（`apps/web/app/helper-desk.tsx`）：形象是 `currentFigure` 的全身图（不生成新图），带墨色边框的卡片——图有自己的背景色，硬边才不会在窗口边缘留脏边。呼吸、眨眼、看向光标；想（思考气泡三点）、助手在做事（左右小幅忙碌）、有新消息（两下小跳 + 红点）、休眠（夜里或整台电脑 10 分钟无操作：下沉、慢呼吸、飘「z」）、后台停了（灰色、下沉、「!」）各不相同。气泡说每一条还没回答的系统消息（包括提醒：桌宠没有铃铛；下一块开始前、计时超时都是这类消息），说一次；关掉或点开即算看过。点形象展开今天的输入框（`Conversation variant="inline"`）；右键或长按出快捷动作：开始下一项计时（`GET /api/helper/next` 读今日面板同一个「下一项」，锁定时间块后走任务的开始计时）、记一下（打开输入框并提示）、打开今日（在浏览器里）、先藏起来。只在本人在电脑前时报告在场，所以本人离开后消息照常发到手机。不做积分、等级、成就。`prefers-reduced-motion` 时全部静止。
+
+**更新：** 节点程序打包了启动器的 `apps/launcher/src/update.ts` 与 `release-signature.ts`（打包白名单因此多这两个文件），清单的产品名是 `crossline-node`，地址写在 `release.json` 的 `updateFeed`（默认公开发布仓库的 `latest/download/node-latest.json`）。下载后大小、SHA-256 与签名清单一致，节点才告诉托盘安装包路径；托盘停掉节点，以 `/VERYSILENT` 运行安装包，安装包结束时带 `--background` 启动新托盘。签名见 docs/local-installer.md「更新」。
+
+**实测（2026-10-28，本机，临时节点目录，本机开发服务器 `localhost:3361` 上的测试账号）：** 托盘编译运行；小帮手窗口先显示登录窗口，填测试邮箱和验证码登录后切成桌宠，背后的窗口内容透过空白处可见；悬停形象出提示（点击不再穿透）；拖动后 `pet.json` 位置更新；右键出快捷菜单（含「先藏起来」）；点形象展开输入框；Ctrl+Alt+H 隐藏再显示；结束托盘后节点进程随之结束；`main.mjs --tray` 的 `ready`、`status`（含暂停）与 `update-failed` 行都按协议输出。没有实测：安装包从零安装与升级、WebView2 运行时缺失的提示、Windows 10、多显示器、与完整本机版托盘同时运行时的热键冲突提示。
 
 **方案 C 留在设计里：** 现在只有服务器运行时的主人账号能批配对。给其他账号开放前要做「别人的节点不受信任」那一节：网关自己数用量、中继只转发该工作区的路由。
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { clampDock, isHelperShortcut, isNight, lookAt, LOOK_MAX, LOOK_RADIUS, parseDock, petPose, POSE_LABEL } from "./helper-pet";
+import { awayFor, AWAY_MS, clampDock, deskBubbleKey, gazeAt, isHelperShortcut, isNight, lookAt, LOOK_MAX, LOOK_RADIUS, parseDock, petPose, POSE_LABEL, shapeRects }
+  from "./helper-pet";
 
 describe("小帮手 as a desktop pet", () => {
   test("night is 23:00 to 07:00 by the browser's clock", () => {
@@ -50,6 +51,34 @@ describe("小帮手 as a desktop pet", () => {
     expect(isHelperShortcut({ ...key, ctrlKey: true })).toBe(false);
     expect(isHelperShortcut({ ...key, shiftKey: false })).toBe(false);
     expect(isHelperShortcut({ ...key, code: "KeyJ" })).toBe(false);
+  });
+
+  test("the desktop pet leans toward the pointer anywhere on the screen, a little, and looks straight ahead when the pointer is on it", () => {
+    expect(gazeAt(5, 5)).toEqual({ x: 0, y: 0 });
+    expect(gazeAt(800, 0)).toEqual({ x: LOOK_MAX, y: 0 });
+    expect(gazeAt(-800, 0)).toEqual({ x: -LOOK_MAX, y: 0 });
+    // Nearer means a smaller lean; it never exceeds LOOK_MAX however far the pointer is.
+    expect(gazeAt(100, 0).x).toBeLessThan(LOOK_MAX);
+    expect(Math.abs(gazeAt(0, 5000).y)).toBeLessThanOrEqual(LOOK_MAX / 2);
+    expect(gazeAt(Number.NaN, 0)).toEqual({ x: 0, y: 0 });
+  });
+
+  test("away is the whole computer's idle time when the tray reports it, else this page's own", () => {
+    expect(awayFor(AWAY_MS, 0)).toBe(true);
+    expect(awayFor(1_000, AWAY_MS * 2)).toBe(false);
+    expect(awayFor(null, AWAY_MS)).toBe(true);
+    expect(awayFor(null, 1_000)).toBe(false);
+  });
+
+  test("the pet's bubble says its pose only when the figure alone does not", () => {
+    expect(deskBubbleKey("idle")).toBeNull();
+    expect(deskBubbleKey("sleep")).toBeNull();
+    for (const pose of ["down", "thinking", "working", "unread"] as const) expect(deskBubbleKey(pose)).toBe(POSE_LABEL[pose]);
+  });
+
+  test("the tray's window shape is every drawn piece in whole px, empty pieces left out", () => {
+    expect(shapeRects([{ x: 10.6, y: 20.2, width: 112.1, height: 168, radius: 14 }, { x: 0, y: 0, width: 0, height: 30, radius: 0 },
+      { x: Number.NaN, y: 0, width: 5, height: 5, radius: 0 }])).toEqual([[10, 20, 113, 168, 14]]);
   });
 
   test("labels are in the UI's third person and name every pose", () => {

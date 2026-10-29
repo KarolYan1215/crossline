@@ -64,6 +64,44 @@ export function isHelperShortcut(event: { altKey: boolean; shiftKey: boolean; ct
   return event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && event.code === "KeyH";
 }
 
+/**
+ * Where the desktop pet looks (helper-desk.tsx): toward the pointer anywhere on the screen (the node's tray reports it), by a few px —
+ * more the further the pointer is, never a turn (the tray cuts its window to the figure, so it only moves along the axes); straight
+ * ahead when the pointer is on the figure itself.
+ */
+export function gazeAt(dx: number, dy: number): { x: number; y: number } {
+  const distance = Math.hypot(dx, dy);
+  if (!Number.isFinite(distance) || distance < 24) return { x: 0, y: 0 };
+  const round = (value: number) => Math.round(value * 10) / 10 || 0;
+  const reach = Math.min(1, distance / 400);
+  return { x: round((dx / distance) * LOOK_MAX * reach), y: round((dy / distance) * (LOOK_MAX / 2) * reach) };
+}
+
+/** A press held this long without moving opens the quick actions (a long press is a phone's right click). */
+export const LONG_PRESS_MS = 550;
+
+/**
+ * Whether the person is away from the computer: the tray reports the whole computer's idle time (`GetLastInputInfo`); in an ordinary tab
+ * only this page's own input is known, which is what `localIdleMs` is.
+ */
+export function awayFor(hostIdleMs: number | null, localIdleMs: number): boolean {
+  return (hostIdleMs ?? localIdleMs) >= AWAY_MS;
+}
+
+/** What the desktop pet's bubble says when no message waits: its pose in words, and nothing when idle or asleep (the figure shows it). */
+export function deskBubbleKey(pose: PetPose): string | null {
+  return pose === "idle" || pose === "sleep" ? null : POSE_LABEL[pose];
+}
+
+/**
+ * The shape the node tray cuts its window to (installer/node-tray/CrosslineNode.cs): one `[x, y, width, height, radius]` per drawn
+ * piece in whole CSS px, nothing for a piece with no size. The tray pads each by a few px so the breathing and the hop are not clipped.
+ */
+export function shapeRects(boxes: Array<{ x: number; y: number; width: number; height: number; radius: number }>): number[][] {
+  return boxes.filter((box) => [box.x, box.y, box.width, box.height].every(Number.isFinite) && box.width >= 1 && box.height >= 1)
+    .map((box) => [Math.floor(box.x), Math.floor(box.y), Math.ceil(box.width), Math.ceil(box.height), Math.max(0, Math.round(box.radius || 0))]);
+}
+
 /** What the service worker tells an open window when a notification about the 小帮手 is tapped: open it there instead of a new window. */
 export const OPEN_HELPER_MESSAGE = "crossline:open-helper";
 
