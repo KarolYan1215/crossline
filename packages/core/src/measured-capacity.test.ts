@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  asPlannedOutcome, dayCapacityMinutes, inferBlockOutcome, measuredCapacity, measuredWeeklyHours, measuredWorkDays, mergeSpans, type MeasuredDay
+  asPlannedOutcome, dayCapacityMinutes, nextCapacityFactor, planRealization, inferBlockOutcome, measuredCapacity, measuredWeeklyHours, measuredWorkDays, mergeSpans, type MeasuredDay
 } from "./measured-capacity";
 
 const H = 3_600_000, M = 60_000;
@@ -48,9 +48,10 @@ describe("measured work minutes", () => {
 describe("capacity", () => {
   // 2026-11-02 is a Monday.
   const weekdays = ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"];
-  test("the median of five or more same-kind days with a signal, times 1.25; missing days are left out", () => {
+  test("the median of five or more same-kind days with a signal, times the factor in force; missing days are left out", () => {
     const days = [...weekdays.map((date, index) => day(date, [120, 180, 200, 240, 600][index]!)), day("2026-11-09", 0, true), day("2026-11-07", 30)];
-    const capacity = measuredCapacity(days, { hasScreen: false });
+    expect(measuredCapacity(days, { hasScreen: false }).weekday).toEqual({ basis: "measured", samples: 5, median: 200, minutes: 200 });
+    const capacity = measuredCapacity(days, { hasScreen: false, factor: 1.25 });
     expect(capacity.weekday).toEqual({ basis: "measured", samples: 5, median: 200, minutes: 250 });
     // One weekend day and no screen: still the stated hours at half.
     expect(capacity.weekend.basis).toBe("stated");
@@ -65,13 +66,31 @@ describe("capacity", () => {
 
   test("cold start: with the screen connected the first day counts; without it, five days are needed", () => {
     const two = [day("2026-11-02", 100), day("2026-11-03", 200)];
-    expect(measuredCapacity(two, { hasScreen: true }).weekday).toMatchObject({ basis: "screen", minutes: 188 });
+    expect(measuredCapacity(two, { hasScreen: true, factor: 1.25 }).weekday).toMatchObject({ basis: "screen", minutes: 188 });
     expect(measuredCapacity(two, { hasScreen: false }).weekday).toMatchObject({ basis: "stated", samples: 2 });
   });
 
   test("the typical measured week", () => {
     expect(measuredWeeklyHours([day("2026-11-02", 180), day("2026-11-03", 0, true), day("2026-11-04", 60)])).toBe(14);
     expect(measuredWeeklyHours([day("2026-11-02", 0, true)])).toBeUndefined();
+  });
+});
+
+describe("the adaptive factor (the owner, 2026-10-30: 「本问题自适应」)", () => {
+  test("one step up at 85% kept, one step down under 60%, never past 1.25 or under 1.0, unchanged without data", () => {
+    expect(nextCapacityFactor(1, 0.88)).toEqual({ factor: 1.1, reason: "up" });
+    expect(nextCapacityFactor(1.1, 0.9)).toEqual({ factor: 1.2, reason: "up" });
+    expect(nextCapacityFactor(1.2, 0.95)).toEqual({ factor: 1.25, reason: "up" });
+    expect(nextCapacityFactor(1.25, 0.99)).toEqual({ factor: 1.25, reason: "kept" });
+    expect(nextCapacityFactor(1.2, 0.59)).toEqual({ factor: 1.1, reason: "down" });
+    expect(nextCapacityFactor(1, 0.3)).toEqual({ factor: 1, reason: "kept" });
+    expect(nextCapacityFactor(1.1, 0.7)).toEqual({ factor: 1.1, reason: "kept" });
+    expect(nextCapacityFactor(1.1, undefined)).toEqual({ factor: 1.1, reason: "no_data" });
+  });
+  test("how much of the plan was kept: measured over scheduled on days with a signal and a plan, work beyond a day's plan not counted", () => {
+    expect(planRealization([{ minutes: 90, missing: false, scheduled: 100 }, { minutes: 300, missing: false, scheduled: 100 },
+      { minutes: 0, missing: true, scheduled: 200 }, { minutes: 50, missing: false, scheduled: 0 }])).toBeCloseTo(0.95);
+    expect(planRealization([{ minutes: 0, missing: true, scheduled: 100 }])).toBeUndefined();
   });
 });
 

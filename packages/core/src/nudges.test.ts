@@ -152,3 +152,12 @@ test("a partly done step with nothing said is asked 「做到哪了」 once, at 
   expect(planNudges(base({ blocks: [], progressChecks, night: true }))).toEqual([]);
   expect(planNudges(base({ blocks: [], progressChecks, sent: new Set(["progress:e9"]) }))).toEqual([]);
 });
+
+test("a block of deadline work past the measured cap says so when it comes up; no message of its own (the owner, 2026-10-30)", () => {
+  const block = { id: "scheduled:hw2:v1s1", orderId: "hw2", stepId: "v1s1", title: "完成 ECE 555 作业 2", step: "拆解题目", start: "15:00", end: "15:30", dueDay: "2026-10-12" };
+  const [over] = planNudges(base({ blocks: [{ ...block, overCapacity: true }], clock: "14:50" }));
+  expect(over).toMatchObject({ kind: "block_start" });
+  expect(over!.text).toContain("超出实测 · 可能来不及。");
+  const [plain] = planNudges(base({ blocks: [block], clock: "14:50" }));
+  expect(plain!.text).not.toContain("超出实测");
+});

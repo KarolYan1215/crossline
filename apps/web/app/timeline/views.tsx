@@ -5,6 +5,7 @@ import {
   MINUTES_PER_DAY, dayRange, itemsOn, layoutDay, monthGrid, overlapStates, packColumns, toMinutes, weekDays,
   type TimelineDeadline, type TimelineItem
 } from "./model";
+import { OVER_CAPACITY_TAG } from "@crossline/core";
 import { useLocale, useT } from "../locale-context";
 import { weekdayShort } from "../../lib/i18n";
 import "./day-panel.css";
@@ -101,7 +102,7 @@ export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, s
               return <button type="button" key={item.id} className="dv-block" {...common}
                 data-short={piece.height - piece.textTop < 40 || undefined} data-tight={piece.height - piece.textTop < 24 || undefined}
                 style={{ top: piece.top, height: piece.height, ...slot, ...(piece.textTop ? { paddingTop: piece.textTop + 1 } : {}) }}>
-                <span className="dv-block-head"><b>{item.title}</b>{item.tag && <em className="dv-tag">{t(item.tag)}</em>}
+                <span className="dv-block-head"><b>{item.title}</b>{item.tag && <em className="dv-tag" data-warn={item.tag === OVER_CAPACITY_TAG || undefined}>{t(item.tag)}</em>}
                   {item.agent && <em className="dv-tag" data-agent={item.agent}>{item.agent === "running" ? t("Agent 执行中") : t("Agent 将执行")}</em>}
                   {state && WORK.has(item.kind) && <em className="dv-tag" data-overlap={state}>{t(OVERLAP_TEXT[state])}</em>}</span>
                 <small>{item.step ? `${item.step} · ` : ""}<span className="mono">{timeText({ start: item.start, end })}</span>{minutes >= 60 ? ` · ${t("{{n}} 小时", { n: Math.round(minutes / 6) / 10 })}` : ` · ${t("{{n}} 分", { n: minutes })}`}</small>
@@ -168,9 +169,10 @@ export function WeekView({ anchor, today, items, deadlines, labels, selectedId, 
               const top = (toMinutes(item.start) / 60) * HOUR_PX;
               const height = Math.max(((toMinutes(item.end) - toMinutes(item.start)) / 60) * HOUR_PX, 14);
               return <button type="button" key={item.id} className="wk-block" data-line={lineOf(item.identityId)} data-kind={item.kind} data-missed={item.missed || undefined} data-work-order={item.workOrderId} aria-pressed={selectedId === item.id}
+                data-warn={item.tag === OVER_CAPACITY_TAG || undefined}
                 data-clash={overlapState.get(item.id) === "clash" || undefined} data-overlap-ok={overlapState.get(item.id) === "allowed" || undefined}
                 style={{ top, height, left: `${(column / columns) * 100}%`, width: `${100 / columns}%` }} onClick={() => onSelect?.(item)}
-                title={`${item.title} ${timeText(item)}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}${overlapState.get(item.id) ? ` · ${t(OVERLAP_TEXT[overlapState.get(item.id)!])}` : ""}`}>
+                title={`${item.title} ${timeText(item)}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}${overlapState.get(item.id) ? ` · ${t(OVERLAP_TEXT[overlapState.get(item.id)!])}` : ""}${item.tag === OVER_CAPACITY_TAG ? ` · ${t(item.tag)}` : ""}`}>
                 <b>{item.title}</b><small>{item.start}</small>
               </button>;
             })}

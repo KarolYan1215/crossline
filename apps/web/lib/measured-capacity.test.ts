@@ -1,9 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, OVER_CAPACITY_TAG } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 import { ACTIVITY_DETAIL_CONSENT, loadCurrentPlan, loadGoalForecast, toZonedInstant } from "./crossline";
-import { blockWorkMinutes, configureMeasuredCapacity, dayCapacityOf, measuredView } from "./measured-capacity";
+import { adjustCapacityFactor, blockWorkMinutes, capacityLine, configureMeasuredCapacity, dayCapacityOf, measuredView, readCapacityFactor } from "./measured-capacity";
 import { TEST_CTX } from "./test-support";
 
 /** Measured work time gathered from the ledger (docs/plans/closed-loop-1030.md §1): the four signals, joined in time, by local day. */
@@ -87,4 +87,38 @@ test("the plan and the forecast follow the measured cap: a day holds what the pe
   // Forecast: the usable minutes of a weekday are the cap, not the hours.
   const forecast = loadGoalForecast(TEST_CTX);
   expect(forecast.weeks[0]!.usableMinutes).toBeLessThan(7 * 75 * 1.2);
+});
+
+test("the factor moves once a week by how much of last week's plan was kept, and the page says so (the owner, 2026-10-30)", () => {
+  const store = seed();
+  // 11-02..11-08: an hour timed each day against 70 minutes scheduled (86%).
+  for (const day of ["02", "03", "04", "05", "06", "07", "08"]) {
+    store.recordConfirmedSession(ws, "hw", TEST_CTX.principalId, { startedAt: iso(`2026-11-${day}`, "10:00"), endedAt: iso(`2026-11-${day}`, "11:00"), minutes: 60, source: "one_tap", key: `w${day}` });
+    store.setSetting(ws, `schedule.minutes:2026-11-${day}`, JSON.stringify({ hw: 70 }));
+  }
+  const monday = new Date(iso("2026-11-09", "09:00"));
+  expect(readCapacityFactor(TEST_CTX).factor).toBe(1);
+  expect(adjustCapacityFactor(TEST_CTX, monday)).toMatchObject({ factor: 1.1, week: "2026-11-09", reason: "up", realization: 0.86 });
+  // Once a week: a later look the same week changes nothing.
+  expect(adjustCapacityFactor(TEST_CTX, new Date(iso("2026-11-12", "09:00")))).toMatchObject({ factor: 1.1, week: "2026-11-09" });
+  expect(measuredView(TEST_CTX, monday).capacity.weekday.minutes).toBe(66);
+  expect(capacityLine(TEST_CTX, 72, monday)).toMatchObject({ factor: 1.1, realization: 0.86 });
+  // The next week nothing is scheduled at all: no data, the factor stays.
+  expect(adjustCapacityFactor(TEST_CTX, new Date(iso("2026-11-16", "09:00")))).toMatchObject({ factor: 1.1, week: "2026-11-16", reason: "no_data" });
+});
+
+test("deadline work past the day's measured cap is placed first on its day and its blocks say 「超出实测 · 可能来不及」 (the owner, 2026-10-30)", async () => {
+  const store = seed();
+  for (const day of ["02", "03", "04", "05", "06"])
+    store.recordConfirmedSession(ws, "hw", TEST_CTX.principalId, { startedAt: iso(`2026-11-${day}`, "10:00"), endedAt: iso(`2026-11-${day}`, "11:00"), minutes: 60, source: "one_tap", key: `d${day}` });
+  store.saveWorkOrder({ id: "due", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "",
+    intent: "明天交的报告", state: "approved", riskTier: "routine", estimate: { ...estimate, p25Minutes: 240, p50Minutes: 240, p85Minutes: 240 },
+    payload: { materialContract: [], dueDate: "2026-11-11" } });
+  configureMeasuredCapacity(true);
+  const plan = await loadCurrentPlan(TEST_CTX);
+  const due = plan.blocks.filter((block) => block.id.startsWith("scheduled:due"));
+  expect(due.length).toBeGreaterThan(0);
+  expect(due.every((block) => block.tag === OVER_CAPACITY_TAG)).toBe(true);
+  const first = plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day === due[0]!.day).sort((a, b) => a.start.localeCompare(b.start))[0]!;
+  expect(first.id.startsWith("scheduled:due")).toBe(true);
 });

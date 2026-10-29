@@ -1,6 +1,7 @@
 import "server-only";
 import {
-  ACTIVITY_HOURLY, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, CAPACITY_LOOKBACK_DAYS, MEASURED_CAPACITY_SETTING, PRODUCTIVE, SOURCE_FOLDERS_SETTING,
+  ACTIVITY_HOURLY, AGENT_HISTORY_CONSENT, CAPACITY_FACTOR_SETTING, CAPACITY_FACTORS, nextCapacityFactor, parseCapacityFactor, planRealization, scheduledMinutesKey, weekStartOf,
+  type CapacityFactorRecord, AGENT_HISTORY_SUMMARY, CAPACITY_LOOKBACK_DAYS, MEASURED_CAPACITY_SETTING, PRODUCTIVE, SOURCE_FOLDERS_SETTING,
   dayCapacityMinutes, measuredCapacity, measuredWeeklyHours, measuredWorkDays, mergeSpans, minutesWithin, planBasisOf, readSourceFolders, sourceFolderIndexSetting, weeklyAvailableHours,
   type AccessContext, type ActivityCategory, type ActivityHour, type AgentHistorySummary, type PlanCapacityBasis, type FolderIndexEntry, type MeasuredCapacity,
   type MeasuredCapacityRecord, type MeasuredDay, type MeasuredSignals, type Span
@@ -88,7 +89,39 @@ export type MeasuredView = {
   hasScreen: boolean;
   /** The typical measured week (mean measured day × 7), undefined with no day measured. */
   weeklyHours?: number;
+  /** The factor in force and why (`adjustCapacityFactor`). */
+  factor: CapacityFactorRecord;
 };
+
+/** The factor in force: the record, else 1.0 from the start. */
+export function readCapacityFactor(ctx: AccessContext): CapacityFactorRecord {
+  return parseCapacityFactor(getStore().getSetting(ctx.workspaceId, CAPACITY_FACTOR_SETTING))
+    ?? { factor: CAPACITY_FACTORS[0], week: "", at: "", reason: "start" };
+}
+
+/**
+ * Once a week (the first look in a new week, on the attention timer): the factor moves one step by how much of the plan the last seven
+ * days kept (`planRealization` over the days' measured minutes and the minutes the plan scheduled, `scheduledMinutesKey`). The record says
+ * the factor, the week and the share; it is a reading, not an operation, so undo does not touch it.
+ */
+export function adjustCapacityFactor(ctx: AccessContext, now = appNow()): CapacityFactorRecord {
+  const current = readCapacityFactor(ctx);
+  const today = planToday(ctx, now);
+  const week = weekStartOf(today);
+  if (current.week === week) return current;
+  const store = getStore();
+  const lastWeek = new Set(Array.from({ length: 7 }, (_, index) => plusDays(today, index - 7)));
+  const days = measuredView(ctx, now).days.filter((day) => lastWeek.has(day.day)).map((day) => {
+    const scheduled = json<Record<string, number>>(store.getSetting(ctx.workspaceId, scheduledMinutesKey(day.day)), {});
+    return { minutes: day.minutes, missing: day.missing, scheduled: Object.values(scheduled).reduce((sum, minutes) => sum + Number(minutes || 0), 0) };
+  });
+  const realization = planRealization(days);
+  const next = nextCapacityFactor(current.factor, realization);
+  const record: CapacityFactorRecord = { factor: next.factor, week, at: now.toISOString(), reason: current.week ? next.reason : realization === undefined ? "start" : next.reason,
+    ...(realization !== undefined ? { realization: Math.round(realization * 100) / 100 } : {}) };
+  store.setSetting(ctx.workspaceId, CAPACITY_FACTOR_SETTING, JSON.stringify(record));
+  return record;
+}
 
 /** The measured days and the capacity they give, kept until the ledger changes (it is read on every schedule derivation). */
 export function measuredView(ctx: AccessContext, now = appNow()): MeasuredView {
@@ -105,9 +138,10 @@ export function measuredView(ctx: AccessContext, now = appNow()): MeasuredView {
       confirmedDays: confirmedDays(ctx, first), fileChanges: fileChanges(ctx, since) };
     const days = measuredWorkDays(signals, dayStarts);
     const hasScreen = screen.days.length > 0 || hourly.some((hour) => hour.active > 0);
-    const capacity = measuredCapacity(days, { hasScreen });
+    const factor = readCapacityFactor(ctx);
+    const capacity = measuredCapacity(days, { hasScreen, factor: factor.factor });
     const weeklyHours = measuredWeeklyHours(days);
-    return { days, capacity, basis: planBasisOf(capacity), hasScreen, ...(weeklyHours !== undefined ? { weeklyHours } : {}) };
+    return { days, capacity, basis: planBasisOf(capacity), hasScreen, factor, ...(weeklyHours !== undefined ? { weeklyHours } : {}) };
   });
 }
 
@@ -134,6 +168,7 @@ export function blockWorkMinutes(ctx: AccessContext, orderId: string, from: stri
 /** For the worker (`date-advance`, `schedule-window`): the minutes each kind of day may hold, written by the web's attention timer. */
 export function writeMeasuredCapacity(ctx: AccessContext, now = appNow()): void {
   if (!enabled) return;
+  adjustCapacityFactor(ctx, now);
   const view = measuredView(ctx, now);
   const { minutes: stated } = statedDaily(ctx);
   const record: MeasuredCapacityRecord = { at: now.toISOString(), basis: view.basis,
@@ -169,8 +204,11 @@ export function dailyCapsFor(ctx: AccessContext, today: string, statedByDay: Map
 }
 
 /** The plan's basis in numbers, for the pages: what the person said a week holds, what was measured, and which the plan follows. */
-export type CapacityLine = { statedWeekly: number | null; measuredWeekly: number | null; basis: PlanCapacityBasis | "off" };
+export type CapacityLine = { statedWeekly: number | null; measuredWeekly: number | null; basis: PlanCapacityBasis | "off";
+  /** The factor in force and the share of last week's plan kept that set it (absent before a week was judged). */
+  factor: number; realization?: number };
 export function capacityLine(ctx: AccessContext, statedWeekly: number | null, now = appNow()): CapacityLine {
   const view = measuredView(ctx, now);
-  return { statedWeekly, measuredWeekly: view.weeklyHours ?? null, basis: enabled ? view.basis : "off" };
+  return { statedWeekly, measuredWeekly: view.weeklyHours ?? null, basis: enabled ? view.basis : "off", factor: view.factor.factor,
+    ...(view.factor.realization !== undefined ? { realization: view.factor.realization } : {}) };
 }

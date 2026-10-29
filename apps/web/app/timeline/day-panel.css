@@ -63,6 +63,8 @@
 .dv-block[data-overlap-ok]{box-shadow:inset 0 0 0 2px var(--graphite);outline:1px dashed var(--ink);outline-offset:-4px}
 .dv-tag[data-overlap="clash"]{border-color:#C00000;border-width:2px}
 .dv-tag[data-overlap="allowed"]{border-style:dashed}
+.dv-tag[data-warn]{border-color:#C00000;border-width:2px;font-weight:600}
+.wk-block[data-warn]{box-shadow:inset 0 -3px 0 #C00000}
 .wk-block[data-clash]{box-shadow:inset 0 0 0 2px #C00000}
 .wk-block[data-overlap-ok]{outline:1px dashed var(--ink);outline-offset:-2px}
 

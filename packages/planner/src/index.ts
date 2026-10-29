@@ -123,6 +123,11 @@ export type PlanningInput = {
 
 export type ScheduleBlock = { taskId: string; start: string; end: string;
   frozen?: boolean; progressOnly?: boolean;
+  /**
+   * Work with a deadline placed past the day's measured cap (`dailyCapMinutes`): the person does not usually get this much done, so it
+   * may not be finished in time. Placed first on its day; the block says so (「超出实测 · 可能来不及」).
+   */
+  overCapacity?: boolean;
   /** Set when the slot is short of the energy the task needs: the share of an hour's work it yields, so the block runs that much longer. */
   efficiency?: number };
 

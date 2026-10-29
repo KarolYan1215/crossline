@@ -13,5 +13,8 @@ export function capacityBasisText(t: Translate, line: CapacityLine & { statedWee
   if (line.basis === "off") return measured === null ? t("所述 {{stated}} h/周 · 按所述排", { stated })
     : t("所述 {{stated}} h/周 · 实测近 28 天 {{measured}} h/周 · 按所述排", { stated, measured });
   if (line.basis === "stated") return t("所述 {{stated}} h/周 · 实测不足 5 天 · 按所述的一半排", { stated });
-  return t("所述 {{stated}} h/周 · 实测近 28 天 {{measured}} h/周 · 按实测排", { stated, measured: measured ?? 0 });
+  // The adaptive factor (the owner, 2026-10-30: 「本问题自适应」) and the week that set it.
+  const factor = line.realization === undefined ? t("系数 {{factor}}", { factor: line.factor })
+    : t("系数 {{factor}}（上周兑现 {{share}}%）", { factor: line.factor, share: Math.round(line.realization * 100) });
+  return t("所述 {{stated}} h/周 · 实测近 28 天 {{measured}} h/周 · 按实测排", { stated, measured: measured ?? 0 }) + " · " + factor;
 }

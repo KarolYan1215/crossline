@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import { dueProvenance, listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
-  availableSlots, calendarLineOf, inferBlockOutcome, type InferredOutcome, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
+  availableSlots, calendarLineOf, inferBlockOutcome, OVER_CAPACITY_TAG, type InferredOutcome, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
 } from "@crossline/core";
 import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability, toZonedInstant } from "./crossline";
@@ -108,7 +108,7 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     const prepared = readyFiles.get(order.id);
     const firstAction = stepId ? store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((step) => step.id === stepId)?.firstAction : undefined;
     return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", start: block.start, end: block.end, dueDay: due,
-      ...(prepared?.length ? { prepared } : {}), ...(firstAction ? { firstAction } : {}) }];
+      ...(prepared?.length ? { prepared } : {}), ...(firstAction ? { firstAction } : {}), ...(block.tag === OVER_CAPACITY_TAG ? { overCapacity: true } : {}) }];
   });
   // Every work block of today, deadline or not, for the completion check.
   const ending = rememberBlocks(ctx, today, clock, todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {

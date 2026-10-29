@@ -10,8 +10,8 @@
  * 4. file changes in authorized folders — evidence and a time mark only, never minutes of their own.
  *
  * The four are joined in time (a minute counts once). A day with no signal at all is missing, not zero. Capacity is the median of the
- * last 28 days of the same kind (weekday or weekend) times 1.25, at least 60 minutes. Everything here is pure; `apps/web/lib/measured-
- * capacity.ts` gathers the signals.
+ * last 28 days of the same kind (weekday or weekend) times a factor that adapts week by week (`nextCapacityFactor`: from 1.0, up to 1.25),
+ * at least 60 minutes. Everything here is pure; `apps/web/lib/measured-capacity.ts` gathers the signals.
  */
 
 /** A stretch of time in epoch milliseconds. */
@@ -41,8 +41,43 @@ export type MeasuredDay = {
   fileChanges: number;
 };
 
-/** Capacity is the usual day's measured work times this, so a good day still fits. */
-export const CAPACITY_FACTOR = 1.25;
+/**
+ * The factor the usual day's measured work is multiplied by (the owner, 2026-10-30: 「本问题自适应」). It starts at 1.0 and moves one step
+ * a week at most by how much of the plan was kept the week before (`nextCapacityFactor`): kept 85% or more, one step up; under 60%, one
+ * step down. A fixed 1.25 planned a quarter more than the usual day from the first day on.
+ */
+export const CAPACITY_FACTORS = [1, 1.1, 1.2, 1.25] as const;
+export const FACTOR_UP_AT = 0.85;
+export const FACTOR_DOWN_BELOW = 0.6;
+export const CAPACITY_FACTOR_SETTING = "capacity.factor";
+/** The factor in force, the week it was last judged (its Monday), and why it is what it is. Not an operation: undo does not touch it. */
+export type CapacityFactorRecord = { factor: number; week: string; at: string; reason: "start" | "up" | "down" | "kept" | "no_data"; realization?: number };
+
+/**
+ * How much of the plan was kept over some days, as the system can see it: measured work minutes (timer, confirmed and inferred blocks,
+ * the screen, Codex) over the minutes scheduled, on days with a signal and something scheduled. Undefined without such a day.
+ */
+export function planRealization(days: Array<{ minutes: number; missing: boolean; scheduled: number }>): number | undefined {
+  const counted = days.filter((day) => !day.missing && day.scheduled > 0);
+  const scheduled = counted.reduce((sum, day) => sum + day.scheduled, 0);
+  return scheduled > 0 ? counted.reduce((sum, day) => sum + Math.min(day.minutes, day.scheduled), 0) / scheduled : undefined;
+}
+
+/** The factor after a week kept at `realization`: one step up at 85% or more, one step down under 60%, else the same. */
+export function nextCapacityFactor(current: number, realization: number | undefined): { factor: number; reason: CapacityFactorRecord["reason"] } {
+  const index = Math.max(0, CAPACITY_FACTORS.findIndex((value) => Math.abs(value - current) < 1e-9));
+  if (realization === undefined) return { factor: CAPACITY_FACTORS[index]!, reason: "no_data" };
+  if (realization >= FACTOR_UP_AT && index < CAPACITY_FACTORS.length - 1) return { factor: CAPACITY_FACTORS[index + 1]!, reason: "up" };
+  if (realization < FACTOR_DOWN_BELOW && index > 0) return { factor: CAPACITY_FACTORS[index - 1]!, reason: "down" };
+  return { factor: CAPACITY_FACTORS[index]!, reason: "kept" };
+}
+
+export function parseCapacityFactor(raw: string | null | undefined): CapacityFactorRecord | undefined {
+  try {
+    const value = JSON.parse(raw ?? "") as Partial<CapacityFactorRecord>;
+    return typeof value.factor === "number" && typeof value.week === "string" ? value as CapacityFactorRecord : undefined;
+  } catch { return undefined; }
+}
 export const MIN_DAY_MINUTES = 60;
 export const CAPACITY_LOOKBACK_DAYS = 28;
 /** Days of the same kind with a signal before the median alone is trusted, without screen activity behind it. */
@@ -114,14 +149,15 @@ export function medianOf(values: number[]): number {
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }
 
-/** Capacity per kind of day from measured days (today should be left out by the caller: it is not over). */
-export function measuredCapacity(days: MeasuredDay[], options: { hasScreen: boolean }): MeasuredCapacity {
+/** Capacity per kind of day from measured days (today should be left out by the caller: it is not over), at the factor in force. */
+export function measuredCapacity(days: MeasuredDay[], options: { hasScreen: boolean; factor?: number }): MeasuredCapacity {
+  const factor = options.factor ?? CAPACITY_FACTORS[0];
   const of = (kind: DayKind): KindCapacity => {
     const samples = days.filter((day) => !day.missing && dayKindOf(day.day) === kind).map((day) => day.minutes);
     const value = medianOf(samples);
     if (samples.length >= COLD_START_DAYS || (options.hasScreen && samples.length > 0))
       return { basis: samples.length >= COLD_START_DAYS ? "measured" : "screen", samples: samples.length, median: Math.round(value),
-        minutes: Math.max(MIN_DAY_MINUTES, Math.round(value * CAPACITY_FACTOR)) };
+        minutes: Math.max(MIN_DAY_MINUTES, Math.round(value * factor)) };
     return { basis: "stated", samples: samples.length, median: Math.round(value) };
   };
   return { weekday: of("weekday"), weekend: of("weekend") };
@@ -133,6 +169,12 @@ export function dayCapacityMinutes(capacity: MeasuredCapacity, day: string, stat
   if (kind.minutes !== undefined) return kind.minutes;
   return Math.max(Math.min(MIN_DAY_MINUTES, statedMinutes), Math.round(statedMinutes * COLD_START_FACTOR));
 }
+
+/**
+ * The tag on a block of deadline work placed past the day's measured cap (planner `overCapacity`; the owner, 2026-10-30): shown on the
+ * day and week views, the day panel and the block's start message. No message of its own.
+ */
+export const OVER_CAPACITY_TAG = "超出实测 · 可能来不及";
 
 /* ── one block: done, partly done, or probably not done ── */
 

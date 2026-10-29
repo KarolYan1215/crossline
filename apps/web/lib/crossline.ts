@@ -78,7 +78,7 @@ import { milestonesBeingBackplanned } from "./backplan-status";
 import { nearestDueProposal } from "./urgent-proposal";
 import { completionRule, onPersonsBoard, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
-import { statedWeeklyHours, weeklyAvailableHours } from "@crossline/core";
+import { OVER_CAPACITY_TAG, statedWeeklyHours, weeklyAvailableHours } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
 import { memoByLedger, memoByLedgerAsync } from "./ledger-memo";
 import { localeFor, tOf } from "./locale";
@@ -1104,7 +1104,8 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     const needsRestCheck = currentEnergy === "low" && blockDay === today &&
       energyNeeds.get(block.taskId.split("#")[0]!) === "high" && Date.parse(block.start) > now.getTime();
     // 「精力偏低」: the slot has less energy than the work needs, so the block runs longer than the estimate (planner `efficiency`).
-    const tag = block.progressOnly ? "本周未排完" : needsRestCheck ? "休息后复评" : block.efficiency ? "精力偏低"
+    // 「超出实测 · 可能来不及」 comes first: deadline work past the day's measured cap (closed-loop-1030, the owner's decision).
+    const tag = block.overCapacity ? OVER_CAPACITY_TAG : block.progressOnly ? "本周未排完" : needsRestCheck ? "休息后复评" : block.efficiency ? "精力偏低"
       : library.has(block.taskId.split("#")[0]!) ? "按主线份额" : tentative(block.taskId) ? "暂定" : undefined;
     const slot = instants.find((item) => Date.parse(block.start) >= Date.parse(String(item.start)) && Date.parse(block.start) < Date.parse(String(item.end)));
     const need = itemById.get(block.taskId)?.task.energy;

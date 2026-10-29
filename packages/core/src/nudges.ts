@@ -56,6 +56,8 @@ export type NudgeBlock = {
   prepared?: string[];
   /** The step's first move, five minutes at most (docs/energy-and-ecosystem.md §6), said so the block is easy to begin. */
   firstAction?: string;
+  /** Deadline work placed past the day's measured cap: the start message says it may not be finished in time (closed-loop-1030). */
+  overCapacity?: boolean;
 };
 /**
  * Any of today's scheduled blocks, for the completion check (docs/loop-and-scout.md §3). `endedTimerAt`: when this order's timer was
@@ -148,6 +150,7 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
       const prepared = block.prepared?.length ? block.prepared.slice(0, 3).join(en ? ", " : "、") : "";
       const text = [
         t("{{start}} 做{{label}}（{{minutes}} 分），关系到 {{due}} 的截止。", { start: block.start, label, minutes: end - start, due: md(block.dueDay) }),
+        block.overCapacity ? t("超出实测 · 可能来不及。") : "",
         block.firstAction ? t("第一步：{{action}}。", { action: block.firstAction.replace(/[。．.！!；;\s]+$/u, "") }) : "",
         !prepared ? "" : block.prepared!.length > 3 ? t("已备好：{{items}} 等 {{count}} 份。", { items: prepared, count: block.prepared!.length })
           : t("已备好：{{items}}。", { items: prepared })

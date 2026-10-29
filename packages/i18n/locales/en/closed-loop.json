@@ -35,5 +35,9 @@
   "{{label}}截止推到 {{day}}": "{{label}} due day moved to {{day}}",
   "去本周承诺": "Go to this week's commitment",
   "情况已变化，这条不用处理了": "Things have changed; this one needs nothing now",
-  "日期要是今天或以后": "The date has to be today or later"
+  "日期要是今天或以后": "The date has to be today or later",
+  "超出实测 · 可能来不及": "Past the measured pace · may not finish in time",
+  "超出实测 · 可能来不及。": "Past the measured pace: it may not be finished in time.",
+  "系数 {{factor}}": "factor {{factor}}",
+  "系数 {{factor}}（上周兑现 {{share}}%）": "factor {{factor}} ({{share}}% of last week's plan kept)"
 }

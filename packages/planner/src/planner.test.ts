@@ -699,6 +699,11 @@ describe("schedule parameters and importance", () => {
       const pressed = await planSchedule({ now, horizonDays: 2, frozenBlocks: [], tasks: [...loose, due], params, availability,
         dailyCapMinutes: { "2026-10-06": 120, "2026-10-07": 120 } }, options);
       expect(minutes(on(pressed, "2026-10-06").filter((block) => block.taskId === "hw")), solver).toBe(180);
+      // Marked on the block, and first on its day (the owner, 2026-10-30: warned on the block, scheduled with priority).
+      const hw = on(pressed, "2026-10-06").filter((block) => block.taskId === "hw");
+      expect(hw.every((block) => block.overCapacity), solver).toBe(true);
+      expect(hw[0]!.start, solver).toBe("2026-10-06T14:00:00.000Z");
+      expect(on(pressed, "2026-10-07").some((block) => block.overCapacity), solver).toBe(false);
       expect(on(pressed, "2026-10-06").filter((block) => block.taskId !== "hw"), solver).toEqual([]);
       expect(minutes(on(pressed, "2026-10-07")), solver).toBe(120);
     }

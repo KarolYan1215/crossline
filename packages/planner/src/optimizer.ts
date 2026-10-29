@@ -731,22 +731,34 @@ async function schedule(input: PlanningInput, options: SolveOptions): Promise<Pl
     const pressed = await optimize({ ...eligible, tasks: eligible.tasks.filter((task) => urgent.has(task.id)) }, true, solverFits, options);
     let placedFirst = pressed.plan.blocks.filter((block) => !block.frozen);
     let pressedBlockers = pressed.blockers;
-    // Deadlines always come first: deadline work the measured cap cannot hold is placed past it, after what fits under it — and the
-    // forecast, which reads the same cap, says the milestone is at risk.
+    let solverUsed = pressed.solver;
+    // Deadline work the measured cap cannot hold (the owner, 2026-10-30: 「超出实测就是可能会来不及……优先排程」, warned on the block
+    // itself): placed anyway, and first — before what fits under the cap, so it takes each day's earliest free time — together with the
+    // urgent work it waits on, so the order of dependencies still holds. Its own blocks carry `overCapacity`; the rest of the urgent work is
+    // then placed under the cap in what is left, and everything else around both.
     const left = new Set(pressed.blockers.map((blocker) => blocker.taskId).filter((id) => urgent.has(id)));
     if (eligible.dailyCapMinutes && left.size) {
+      const overSet = new Set(left);
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const task of eligible.tasks) if (overSet.has(task.id)) for (const id of task.dependsOn ?? [])
+          if (urgent.has(id) && !overSet.has(id)) { overSet.add(id); grew = true; }
+      }
       const { dailyCapMinutes: _cap, ...uncapped } = eligible;
-      const over = await optimize({ ...uncapped, tasks: eligible.tasks.filter((task) => left.has(task.id)),
-        frozenBlocks: [...eligible.frozenBlocks, ...placedFirst.map(({ taskId, start, end }) => ({ taskId, start, end }))] }, true, solverFits, options);
-      placedFirst = [...placedFirst, ...over.plan.blocks.filter((block) => !block.frozen)];
-      pressedBlockers = [...pressed.blockers.filter((blocker) => !left.has(blocker.taskId)), ...over.blockers];
+      const over = await optimize({ ...uncapped, tasks: eligible.tasks.filter((task) => overSet.has(task.id)) }, true, solverFits, options);
+      const overBlocks = over.plan.blocks.filter((block) => !block.frozen).map((block) => left.has(block.taskId) ? { ...block, overCapacity: true } : block);
+      const rest = await optimize({ ...eligible, tasks: eligible.tasks.filter((task) => urgent.has(task.id) && !overSet.has(task.id)),
+        frozenBlocks: [...eligible.frozenBlocks, ...overBlocks.map(({ taskId, start, end }) => ({ taskId, start, end }))] }, true, solverFits, options);
+      placedFirst = [...overBlocks, ...rest.plan.blocks.filter((block) => !block.frozen)];
+      pressedBlockers = [...over.blockers, ...rest.blockers];
+      solverUsed = rest.solver;
     }
     const around = await optimize({ ...buffered, tasks: buffered.tasks.filter((task) => !urgent.has(task.id)),
       frozenBlocks: [...eligible.frozenBlocks, ...placedFirst.map(({ taskId, start, end }) => ({ taskId, start, end }))] }, false, solverFits, options);
     const blocks = [...eligible.frozenBlocks.map((block) => ({ ...block, frozen: true })), ...placedFirst,
       ...around.plan.blocks.filter((block) => !block.frozen)].sort((x, y) => Date.parse(x.start) - Date.parse(y.start));
     const blockers = [...pressedBlockers, ...around.blockers];
-    const relaxed: PlanResult = { status: statusFor(blocks, blockers, eligible.frozenBlocks.length), plan: { blocks }, blockers, solver: pressed.solver };
+    const relaxed: PlanResult = { status: statusFor(blocks, blockers, eligible.frozenBlocks.length), plan: { blocks }, blockers, solver: solverUsed };
     const hardPlaced = (value: PlanResult) => eligible.tasks.filter((task) => task.deadline &&
       value.plan.blocks.some((block) => block.taskId === task.id)).length;
     if (hardPlaced(relaxed) > hardPlaced(first)) result = { ...relaxed, bufferRelaxed: true };
