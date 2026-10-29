@@ -498,6 +498,8 @@ export function withGapQuestions<T extends OnboardingDialogue>(output: T, gaps: 
   const asked = new Set(messages.flatMap((message) => message.role === "assistant"
     ? ((message.content as { questions?: Array<{ id: string }> }).questions ?? []).map((question) => question.id) : []));
   const open = gaps.filter((gap) => {
+    // Whether the portrait fits is answered on the portrait page, where it is read (2026-10-28); the interview only links there.
+    if (gap.code === "PORTRAIT_UNCONFIRMED") return false;
     if (output.questions.some((question) => question.id === gap.question.id)) return false;
     // Already asked by the model in its own words: a line it asks anything about, a project question that is about the same thing.
     if (gapCoveredBy(gap, output.questions, gaps)) return false;

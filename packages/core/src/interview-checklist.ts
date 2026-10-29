@@ -107,7 +107,7 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   items.push({ id: "portrait_grounded", group: "画像", label: t("画像每部分都有本人原话或文件为据"), done: !unbacked.length,
     detail: unbacked.length ? t("尚无本人依据：{{items}}", { items: list(unbacked) }) : assumedParts.length ? t("以假设代替：{{items}}", { items: list(assumedParts) }) : "", owner: "interview" });
   items.push({ id: "portrait_confirmed", group: "画像", label: t("本人确认画像符合自己"), done: input.portraitConfirmed,
-    detail: input.portraitConfirmed ? "" : t("访谈问到「当前画像是否符合」时选「符合」，或说明哪里不对"), owner: "person" });
+    detail: input.portraitConfirmed ? "" : t("在画像页读完后选「符合」，或说明哪里不对"), owner: "person" });
 
   for (const line of input.lines) {
     const described = input.descriptions[line.id];

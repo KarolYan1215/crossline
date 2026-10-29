@@ -111,10 +111,11 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const pending = readPending(ctx, session.id, lastAssistant?.seq ?? 0);
   const inRound = new Set(round.map((question) => question.id));
   const allGaps = answered ? [] : interviewGapsFor(store, ctx.workspaceId, lines, today);
-  const gaps = allGaps.filter((gap) => gap.code !== "FILE_UNFILED" && !inRound.has(gap.question.id) && !gapCoveredBy(gap, round, allGaps))
+  // Whether the portrait fits is asked on the portrait page (2026-10-28): neither the app's own questions nor 待决事项 put it any more.
+  const gaps = allGaps.filter((gap) => gap.code !== "FILE_UNFILED" && gap.code !== "PORTRAIT_UNCONFIRMED" && !inRound.has(gap.question.id) && !gapCoveredBy(gap, round, allGaps))
     .map((gap) => gap.question as InterviewQuestion);
   const seen = new Set<string>();
-  const questions = [...round.filter((question) => !owned.has(question.id) && !question.id.startsWith("gap-file-")), ...gaps]
+  const questions = [...round.filter((question) => !owned.has(question.id) && !question.id.startsWith("gap-file-") && question.id !== "gap-portrait"), ...gaps]
     .filter((question) => !pending.answers[question.id] && !seen.has(question.id) && Boolean(seen.add(question.id)));
   return { started: true, complete, awaitingPerson: open.length > 0 && open.every((item) => item.owner === "person"), parked, readyToStart, startMissing,
     stage, stageIndex: Math.max(0, ONBOARDING_STAGES.indexOf(stage as (typeof ONBOARDING_STAGES)[number])) + 1, stageCount,

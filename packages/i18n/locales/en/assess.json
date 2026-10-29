@@ -968,8 +968,6 @@
   "正在画新的一版，通常需要一两分钟；之前的各版都保留": "Drawing a new version, which usually takes a minute or two. All earlier versions are kept",
   "未能开始重画，请稍后重试": "Couldn't start redrawing. Try again later",
   "小帮手形象": "Helper figure",
-  "（{{count}} 版）_one": " ({{count}} version)",
-  "（{{count}} 版）_other": " ({{count}} versions)",
   "小帮手和画像使用同一个形象。重新生成画像不会更换形象；只有本人改了外貌描述，或在这里要求重画，才会画新的一版。": "The Helper and the portrait use the same figure. Regenerating the portrait keeps the figure; a new version is drawn only when the appearance description changes or a redraw is requested here.",
   "最新": "Latest",
   "当前小帮手": "Current Helper",
@@ -978,10 +976,7 @@
   "重画中…": "Redrawing…",
   "重画一版": "Redraw",
   "上传一张": "Upload one",
-  "前半部分为超级个体类型、画像与图表，可以分享；后半部分为个人细节与建议，仅自己可见。": "The first half (super individual type, portrait and charts) can be shared; the second half holds personal details and advice, visible only to you.",
   "你是{{name}}。": "You are {{name}}.",
   "Crossline · AI 时代超级个体类型": "Crossline · AI-era super individual type",
-  "我的超级个体类型.png": "my-super-individual-type.png",
-  "此按钮同样只分享前半部分：超级个体类型卡、精力节律卡与画像长图，人名、机构、课程编号等已隐去。": "This button also shares only the first half: the super individual type card, the energy rhythm card and the portrait long image, with names, organizations, course codes and so on removed.",
-  "只分享前半部分：超级个体类型卡、精力节律卡与画像长图，人名、机构、课程编号等已隐去。": "Shares only the first half: the super individual type card, the energy rhythm card and the portrait long image, with names, organizations, course codes and so on removed."
+  "我的超级个体类型.png": "my-super-individual-type.png"
 }

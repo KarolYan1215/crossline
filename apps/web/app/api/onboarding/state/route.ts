@@ -10,6 +10,7 @@ import { loadDiligence } from "../../../../lib/diligence";
 import { identityLines, needsLineSetup } from "../../../../lib/lines";
 import { interviewStatus, pendingAnswerIds, questionsOwnedElsewhere } from "../../../../lib/interview-status";
 import { startConfirmed, startSummary } from "../../../../lib/start-confirm";
+import { portraitConfirmation } from "../../../../lib/portrait";
 
 /**
  * Everything the onboarding screen shows, in one read: the conversation so far, the projects and facts the
@@ -57,6 +58,8 @@ export async function GET(request: Request) {
     ...(ready ? { startSummary: startSummary(access.ctx) } : {}),
     startTotal: status.checklist.filter((item) => item.start).length,
     startMissing: status.startMissing.map(({ id, label, detail, owner }) => ({ id, label, detail, owner })),
+    startItems: status.checklist.filter((item) => item.start).map(({ id, label, done }) => ({ id, label, done })),
+    portraitState: (({ written, confirmed }) => ({ written, confirmed }))(portraitConfirmation(access.ctx)),
     extraQuestions: status.questions.filter((question) => !inRound.has(question.id))
   } : { readyToStart: true, startConfirmed: true, startTotal: 0, startMissing: [], extraQuestions: [] };
   const today = planToday(access.ctx);

@@ -1,6 +1,6 @@
 import { ACTIVITY_HOURLY, atComputerByHour, type ActivityHour, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, activityCategoryLabel, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
 import { assistantAvailable, categoryMode, isAutoHandoff, readCategories } from "@crossline/db";
-import { SubpageShell } from "../subpage-shell";
+import { AppShell } from "../app-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { AgentHistoryCard } from "./agent-history-card";
 import { RecordingCard } from "./recording-card";
@@ -30,7 +30,9 @@ import { EffectivenessCard } from "./effectiveness-card";
 import { AutomationModule, type RecentTask } from "./automation";
 import { BackgroundModule } from "./background-module";
 import { backgroundOverview } from "../../lib/background";
-import { SettingsNav, type SettingsSection } from "./settings-nav";
+import { SettingsBrowser, type SettingsSection } from "./settings-browser";
+import { SettingsStatus } from "./settings-status";
+import { connectionStatus } from "../../lib/settings-status";
 import { PersonalizationModule } from "./personalization";
 import { SkillLibraryLoader } from "./skill-library";
 import { loadPreferences } from "../../lib/preferences";
@@ -127,26 +129,30 @@ export default async function SettingsPage() {
   const recordings = recordingOverview(store, ctx.workspaceId, dataDirectory(), zone);
   const usualDay = (() => { try { return atComputerByHour(JSON.parse(setting(ACTIVITY_HOURLY) ?? "[]") as ActivityHour[], zone); } catch { return undefined; } })();
   const autostart = autostartAvailable() ? await readAutostart() : undefined;
-  // The index, with the parts of the long modules under their entry so every card is one click away (2026-10-21). Connections come
-  // second: they are what the person most often comes here for.
+  // The quota is read once, for the status overview and for 用量与体检.
+  const quota = await timed("settings.quota", () => memoForAsync(`quota:${ctx.workspaceId}`, 60_000, () => readQuota(ctx)));
+  const connections = connectionStatus(ctx, quota, { machine, phoneUrl: Boolean(phoneUrl) });
+  const alertsIn = (hrefs: string[]) => connections.filter((row) => row.state === "warn" && hrefs.includes(row.action.href)).length;
+  // The index, one module at a time (2026-10-28 redesign): each module with its icon, the cards of a long one under it, and how many of its
+  // connections need the person. Connections come second: they are what the person most often comes here for.
   const sections: SettingsSection[] = [
-    { id: "general", label: t("通用"), parts: [{ id: "phone", label: t("手机访问与推送") }, ...(hosted ? [{ id: "device", label: t("这台电脑") }] : [])] },
-    { id: "calendar", label: t("日历与连接"), parts: [{ id: "calendar-subscriptions", label: t("订阅日历") }, { id: "mail", label: t("邮箱") }, { id: "import", label: t("从其他工具导入") }, { id: "model", label: t("模型连接") }] },
+    { id: "general", label: t("通用"), alerts: alertsIn(["#phone"]), parts: [{ id: "phone", label: t("手机访问与推送") }, ...(hosted ? [{ id: "device", label: t("这台电脑") }] : [])] },
+    { id: "calendar", label: t("日历与连接"), alerts: alertsIn(["#calendar", "#calendar-subscriptions", "#mail", "#model"]),
+      parts: [{ id: "calendar-subscriptions", label: t("订阅日历") }, { id: "mail", label: t("邮箱") }, { id: "import", label: t("从其他工具导入") }, { id: "model", label: t("模型连接") }] },
     { id: "notify", label: t("时间与提醒"), parts: [{ id: "travel", label: t("出行") }] },
     { id: "automation", label: t("自动化与助手"), parts: [{ id: "automations", label: t("自动化") }, { id: "outputs", label: t("助手产出") }] },
     { id: "background", label: t("后台任务") },
     { id: "personal", label: t("个性化") },
     { id: "skills", label: t("Skill 库") },
-    { id: "privacy", label: t("隐私与屏幕活动"), parts: [{ id: "energy", label: t("精力与手机健康") },
-      ...(machine || recordings.server ? [{ id: "recordings", label: t("录音转写") }] : [])] },
+    { id: "privacy", label: t("隐私与屏幕活动") },
+    { id: "energy", label: t("精力与手机健康"), alerts: alertsIn(["#energy"]) },
+    ...(machine || recordings.server ? [{ id: "recordings", label: t("录音转写") }] : []),
     { id: "usage", label: t("用量与体检") }
   ];
 
   // `active` names the view in the frame's own table (i18n-ignore on the next line), not shown text.
-  return <SubpageShell active="设置" title={t("设置")}>
-    <div className="st-layout">
-      <SettingsNav sections={sections} />
-      <div className="st-sections">
+  return <AppShell active="设置" className="subpage settings-page"><div className="subpage-inner">
+    <SettingsBrowser title={t("设置")} sub={t("每项改动即时保存，保存失败会还原")} sections={sections} status={<SettingsStatus rows={connections} />}>
         <section id="general" className="st-section" aria-labelledby="st-general"><h2 id="st-general">{t("通用")}</h2>
           <div className="st-modules">
             <LanguageCard />
@@ -189,6 +195,9 @@ export default async function SettingsPage() {
               <NotifyLevel level={setting("notify.level") ?? "normal"} />
               <div className="st-row"><span className="st-row-label">{t("可用时段、排程参数与重要性")}<small>{t("在「计划」页设置，修改前预览影响")}</small></span>
                 <a className="secondary-button" href="/plan#why">{t("打开计划")}</a></div>
+              {/* The weekly grid is the plan page's; here only the consents that feed the energy reading (2026-10-28, scenarios.md §3-7). */}
+              <div className="st-row"><span className="st-row-label">{t("精力信号的同意")}<small>{t("摄像头、键鼠节律、作息记录与手机健康数据，各自单独开关")}</small></span>
+                <a className="secondary-button" href="#energy">{t("精力与手机健康")}</a></div>
             </section>
             <TravelCard initial={travelStateOf(ctx).settings} />
           </div>
@@ -230,7 +239,6 @@ export default async function SettingsPage() {
           {machine && <LocalActivityToggle consent={consent} detail={detail} pausedUntil={setting(ACTIVITY_PAUSED_UNTIL) || null} blacklist={blacklist}
             hours={hours} categories={[...byCategory].sort((a, b) => b[1] - a[1])
               .map(([category, minutes]) => ({ label: activityCategoryLabel(category, locale), minutes }))} />}
-          <div id="energy"><EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} privateNetwork={!hosted} /></div>
           {machine && <AgentHistoryCard on={setting(AGENT_HISTORY_CONSENT) === "on"} summary={(() => { try { return JSON.parse(setting(AGENT_HISTORY_SUMMARY) ?? "null") as AgentHistorySummary | null; } catch { return null; } })()} />}
           {(machine || deviceLinked) && usualDay && <section className="st-card" aria-label={t("电脑前的一天")}>
             <header><h3>{t("电脑前的一天")}</h3><small>{t("近 {{days}} 天按小时的平均活跃分钟；只记分钟，供访谈与画像了解作息，不用于排程", { days: usualDay.days })}</small></header>
@@ -238,12 +246,19 @@ export default async function SettingsPage() {
               <span key={hour} title={t("{{from}}:00–{{to}}:00 · 平均 {{minutes}} 分钟，{{pct}}% 的日子在电脑前", { from: hour, to: hour + 1, minutes, pct: Math.round(usualDay.present[hour]! * 100) })}><i style={{ height: `${(minutes / 60) * 100}%` }} /></span>)}</div>
             <div className="st-hours-axis" aria-hidden="true"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
           </section>}
-          {(machine || recordings.server) && <div id="recordings" className="st-section-cards">
-            {machine && <RecordingCard overview={recordings} />}
-            {recordings.server && <ServerRecordingCard server={recordings.server} done={recordings.done} />}
-          </div>}
           {isLocalInstall() && <TelemetryCard on={setting(TELEMETRY_ENABLED_SETTING) !== "0"} />}
         </section>
+
+        <section id="energy" className="st-section" aria-labelledby="st-energy"><h2 id="st-energy">{t("精力与手机健康")}</h2>
+          <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} privateNetwork={!hosted} />
+        </section>
+
+        {(machine || recordings.server) && <section id="recordings" className="st-section" aria-labelledby="st-recordings"><h2 id="st-recordings">{t("录音转写")}</h2>
+          <div className="st-section-cards">
+            {machine && <RecordingCard overview={recordings} />}
+            {recordings.server && <ServerRecordingCard server={recordings.server} done={recordings.done} />}
+          </div>
+        </section>}
 
         <section id="usage" className="st-section" aria-labelledby="st-usage"><h2 id="st-usage">{t("用量与体检")}</h2>
           <div className="st-modules">
@@ -251,14 +266,13 @@ export default async function SettingsPage() {
               <EffectivenessCard locale={locale} data={await timed("settings.effectiveness", () => memoForAsync(`effectiveness:${ctx.workspaceId}`, 5 * 60_000, () => loadEffectiveness(ctx)))} labels={lineLabels(ctx)} />
             </section>
             <section className="st-card" aria-label={t("模型额度")}><header><h3>{t("模型额度")}</h3><small>{t("账号的剩余额度与重置时间")}</small></header>
-              <QuotaCard locale={locale} signal={await timed("settings.quota", () => memoForAsync(`quota:${ctx.workspaceId}`, 60_000, () => readQuota(ctx)))} now={new Date()} timeZone={zone} />
+              <QuotaCard locale={locale} signal={quota} now={new Date()} timeZone={zone} />
             </section>
             <section className="st-card" aria-label={t("模型用量")}><header><h3>{t("模型用量")}</h3><small>{t("近 {{days}} 天，悬停查看次数与耗时", { days: USAGE_DAYS })}</small></header>
               <UsageCard locale={locale} summary={store.summarizeModelUsage(ctx.workspaceId, since)} daily={store.dailyModelUsage(ctx.workspaceId, since)} days={USAGE_DAYS} />
             </section>
           </div>
         </section>
-      </div>
-    </div>
-  </SubpageShell>;
+    </SettingsBrowser>
+  </div></AppShell>;
 }

@@ -51,9 +51,13 @@ for (const where of PAGES) {
         // Overlap is measured where layout is ours (an SVG chart is checked by its own tests), and on what is actually drawn: text clipped
         // by a box that hides its overflow (a clamped paragraph under its 「Show all」) is cut to that box first.
         if (element.closest("svg")) continue;
-        // Inside a closed <details> only the summary is drawn, though the browser still reports boxes for the rest.
-        const folded = element.closest("details:not([open])");
-        if (folded && !element.closest("summary")) continue;
+        // Inside a closed <details> only its own summary is drawn, though the browser still reports boxes for the rest — including the
+        // summary of a fold nested in it (the interview's import card holds its tutorial's fold: 2026-10-28, a phantom overlap).
+        let folded = false;
+        for (let fold = element.closest("details:not([open])"); fold; fold = fold.parentElement?.closest("details:not([open])") ?? null) {
+          if (element.closest("summary")?.parentElement !== fold) { folded = true; break; }
+        }
+        if (folded) continue;
         // A fixed or sticky layer (the phone's tab bar, the Helper button) floats over the page by design; content scrolls under it.
         let floating = false;
         for (let up: Element | null = element; up && up !== document.body; up = up.parentElement) {

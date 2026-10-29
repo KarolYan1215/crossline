@@ -1,9 +1,11 @@
 /* The installed copy's sign-in (docs/onboarding-v3.md): the portrait's editorial style — paper, ink rules, a serif for the few fixed
    headings — with the product drawn on the left and one way in on the right. Greys are #4F4A42 (7.9:1 on the paper). */
-.login-split{--paper:#F6F2EA;--ink:#1C1A17;--graphite:#4F4A42;--mist:#DDD5C7;--chalk:#ECE5D8;
-  min-height:100vh;background:var(--paper);color:var(--ink);display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,1fr);
-  grid-template-areas:"hero panel";border-top:6px solid var(--ink)}
-.login-hero{grid-area:hero;display:grid;align-content:center;gap:18px;padding:clamp(24px,6vw,72px);border-right:1.5px solid var(--ink)}
+/* 2026-10-28: the frame's warm layer (shell.css `--ds-*`, light and dark); the original names point at its tokens. */
+.login-split{--paper:var(--ds-bg);--ink:var(--ds-ink);--graphite:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);
+  min-height:100vh;background:var(--ds-bg);color:var(--ink);display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,1fr);
+  grid-template-areas:"hero panel"}
+html:has(.login-split) body{background:var(--ds-bg)}
+.login-hero{grid-area:hero;display:grid;align-content:center;gap:18px;padding:clamp(24px,6vw,72px);border-right:1px solid var(--ds-line)}
 .login-brand{font-size:22px;letter-spacing:.02em}
 .login-tagline{margin:0;font-size:clamp(28px,3.4vw,44px);line-height:1.2;max-width:15em}
 .login-lede{margin:0;font-size:15px;line-height:1.7;color:var(--graphite);max-width:34em}
@@ -19,8 +21,26 @@
 @keyframes login-land{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){.login-flow{animation:none;stroke-dashoffset:0}.login-block{animation:none;opacity:1}}
 
-.login-panel{grid-area:panel;display:grid;align-content:center;gap:20px;padding:clamp(24px,5vw,56px);max-width:480px}
+.login-panel{grid-area:panel;align-self:center;justify-self:center;display:grid;align-content:center;gap:18px;width:min(420px,calc(100% - 32px));box-sizing:border-box;
+  margin:24px 16px;padding:28px 30px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:16px;box-shadow:var(--ds-shadow)}
 .login-panel h2{margin:0;font-size:26px}
+/* The steps after signing in, three small cards under the drawing. */
+.login-step-cards{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;max-width:640px}
+.login-step-cards li{display:grid;gap:4px;align-content:start;padding:12px 14px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:var(--ds-radius);font-size:14px;line-height:1.5}
+.login-step-cards svg{color:var(--ink)}
+.login-step-cards b{font-weight:700}
+.login-step-cards small{font-size:13px;color:var(--graphite)}
+.login-foot{display:grid;gap:8px;padding-top:14px;border-top:1px solid var(--ds-line)}
+/* The ways in (邮箱验证码 / 密码) as a light segmented control, the send button in the accent. */
+.login-panel .auth-form .auth-modes{border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);overflow:hidden}
+.login-panel .auth-form .auth-modes button{border:0;color:var(--ink);background:var(--ds-card)}
+.login-panel .auth-form .auth-modes button+button{border-left:1px solid var(--ds-line)}
+.login-panel .auth-form .auth-modes button[aria-pressed="true"]{background:var(--ds-accent-soft);color:var(--ds-accent-ink);font-weight:600}
+.login-panel .auth-form input{border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-card)}
+.login-panel .auth-form .secondary-button{border-radius:var(--ds-radius-control);border-color:var(--ds-line)}
+.login-panel .auth-form form>button[type="submit"]{border-radius:var(--ds-radius-control);border-color:var(--ds-accent);background:var(--ds-accent);color:var(--ds-on-accent)}
+.login-panel .auth-form form>button[type="submit"]:hover{background:var(--ds-accent-ink);color:var(--ds-on-accent)}
+@media (max-width:820px){.login-step-cards{grid-template-columns:minmax(0,1fr)}}
 .login-cta{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:48px;padding:10px 16px;border:1.5px solid var(--ink);
   background:var(--ink);color:var(--paper);font-size:16px;cursor:pointer}
 .login-cta:hover{background:var(--paper);color:var(--ink)}
@@ -48,8 +68,8 @@
 
 @media (max-width:820px){
   .login-split{grid-template-columns:minmax(0,1fr);grid-template-areas:"hero" "panel"}
-  .login-hero{border-right:0;border-bottom:1.5px solid var(--ink);padding:24px 16px}
-  .login-panel{padding:24px 16px;max-width:none}
+  .login-hero{border-right:0;border-bottom:1px solid var(--ds-line);padding:24px 16px}
+  .login-panel{padding:22px 18px;width:auto;justify-self:stretch}
 }
 /* Scaled to a phone, the drawing's labels would fall under 12px; the installed copy is used on the desktop anyway. */
 @media (max-width:600px){.login-preview{display:none}}
@@ -59,3 +79,5 @@
 .login-split{position:relative}
 .auth-locale{position:absolute;top:12px;right:16px;z-index:1}
 .auth-locale .locale-switch{background:none;border:1px solid var(--mist);color:var(--graphite);padding:4px 10px;min-height:32px;cursor:pointer;font-size:13px}
+
+html:has(.login-split){background:var(--ds-bg)}

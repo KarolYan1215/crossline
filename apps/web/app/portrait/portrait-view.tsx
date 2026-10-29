@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, Download, Lock, PenLine, RefreshCw, Share2, UserRound } from "lucide-react";
+import { IconButton } from "../ui/icon-button";
 import { portraitLabels, portraitType, redactPortrait, type EnergyRhythm, type PortraitReport, type PortraitType, type SayDoReading } from "@crossline/core";
 import { LineNetwork, type NetworkEdge } from "../ui/line-network";
 import { FigurePicker } from "./figure-picker";
@@ -14,7 +16,87 @@ type State = {
   report: PortraitReport | null; version: number; at: string | null; writing: boolean; blocker: string | null; lines: Line[];
   images: Record<string, string>; sayDo: SayDoReading; rhythm: EnergyRhythm;
   next: { lines: Array<{ id: string; label: string; approved: string[]; drafts: string[] }>; hoursProposed: boolean; hoursSet: boolean };
+  confirmation: { written: boolean; confirmed: boolean; at: string | null };
+  appearance: { text: string; skipped: boolean };
 };
+const ICON = { size: 17, strokeWidth: 1.75, "aria-hidden": true } as const;
+
+/** The report's contents in two groups: what is shared, then what only the person sees (2026-10-28 redesign). */
+const SHARED_SECTIONS = [["type", "超级个体类型"], ["rhythm", "精力节律"], ["values", "价值与能量"], ["lines", "主线飞轮"]] as const;
+const PRIVATE_SECTIONS = [["problem", "真问题"], ["compass", "指南针、能量与主线"], ["gap", "言行落差与锚"], ["insights", "现况洞察与可行建议"], ["next", "Crossline 下一步"]] as const;
+
+/** The contents beside the report, the section in view marked. */
+function Contents() {
+  const t = useT();
+  const [current, setCurrent] = useState("type");
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (visible) setCurrent(visible.target.id.replace(/^pt-s-/, ""));
+    }, { rootMargin: "-15% 0px -70% 0px" });
+    for (const [id] of [...SHARED_SECTIONS, ...PRIVATE_SECTIONS]) { const element = document.getElementById(`pt-s-${id}`); if (element) observer.observe(element); }
+    return () => observer.disconnect();
+  }, []);
+  const link = ([id, label]: readonly [string, string]) => <a key={id} href={`#pt-s-${id}`} aria-current={current === id ? "true" : undefined}>{t(label)}</a>;
+  return <nav className="pt-toc" aria-label={t("画像目录")}>
+    <p className="pt-toc-group"><Share2 {...ICON} size={14} />{t("可分享")}</p>
+    {SHARED_SECTIONS.map(link)}
+    <small className="pt-toc-note">{t("分享只含这一组；人名、机构、课程编号已隐去")}</small>
+    <p className="pt-toc-group"><Lock {...ICON} size={14} />{t("仅自己可见")}</p>
+    {PRIVATE_SECTIONS.map(link)}
+  </nav>;
+}
+
+/**
+ * 「这份画像符合本人吗？」 (2026-10-28, scenarios.md §3-10): asked here, where the portrait is read, and no longer in the interview, which
+ * links here. 符合 confirms it as the interview's own question did; 大体符合 and 不符合 take a sentence and go to the interview, which
+ * rewrites the portrait from it.
+ */
+function ConfirmBar({ confirmation, onAnswered }: { confirmation: State["confirmation"]; onAnswered: (next: Partial<State>) => void }) {
+  const t = useT();
+  const [answer, setAnswer] = useState<"" | "mostly" | "no">("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState("");
+  const send = async (choice: "yes" | "mostly" | "no") => {
+    setBusy(true); setSaid("");
+    const response = await fetch("/api/portrait/confirm", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ answer: choice, note: choice === "yes" ? "" : note }) }).catch(() => null);
+    const body = await response?.json().catch(() => null) as { ok?: boolean; message?: string } | null;
+    setBusy(false);
+    if (!body?.ok) { setSaid(body?.message ?? t("没有保存，请重试")); return; }
+    setSaid(body.message ?? "");
+    if (choice === "yes") onAnswered({ confirmation: { ...confirmation, confirmed: true, at: new Date().toISOString() } });
+    else { setAnswer(""); setNote(""); onAnswered({ writing: true }); }
+  };
+  if (confirmation.confirmed) return <div className="pt-confirm" data-no-export="" data-state="done">
+    <Check {...ICON} /><span>{t("本人已确认这份画像符合自己")}</span>
+    <button type="button" className="text-button" onClick={() => setAnswer("mostly")}>{t("有地方要改")}</button>
+    {answer && <ConfirmNote answer={answer} note={note} busy={busy} onNote={setNote} onSend={() => void send(answer)} onCancel={() => setAnswer("")} />}
+    {said && <small role="status">{said}</small>}
+  </div>;
+  return <div className="pt-confirm" data-no-export="" role="group" aria-label={t("这份画像符合本人吗？")}>
+    <b>{t("这份画像符合本人吗？")}</b><small>{t("读完再选；确认后访谈不再问这一题")}</small>
+    <span className="pt-confirm-actions">
+      <button type="button" className="primary-button" disabled={busy} onClick={() => void send("yes")}><Check {...ICON} />{t("符合")}</button>
+      <button type="button" className="secondary-button" disabled={busy} aria-pressed={answer === "mostly"} onClick={() => setAnswer("mostly")}>{t("大体符合")}</button>
+      <button type="button" className="text-button" disabled={busy} aria-pressed={answer === "no"} onClick={() => setAnswer("no")}><PenLine {...ICON} />{t("不符合，说说哪里")}</button>
+    </span>
+    {answer && <ConfirmNote answer={answer} note={note} busy={busy} onNote={setNote} onSend={() => void send(answer)} onCancel={() => setAnswer("")} />}
+    {said && <small role="status">{said}</small>}
+  </div>;
+}
+
+function ConfirmNote({ answer, note, busy, onNote, onSend, onCancel }: { answer: "mostly" | "no"; note: string; busy: boolean;
+  onNote: (text: string) => void; onSend: () => void; onCancel: () => void }) {
+  const t = useT();
+  return <form className="pt-confirm-note" onSubmit={(event) => { event.preventDefault(); if (note.trim()) onSend(); }}>
+    <textarea value={note} rows={2} maxLength={1000} onChange={(event) => onNote(event.target.value)} aria-label={t("哪里要改")}
+      placeholder={answer === "mostly" ? t("例如：第二句里的“…”要改成…") : t("哪里不对，实际是怎样")} />
+    <span><button type="submit" className="primary-button" disabled={busy || !note.trim()}>{t("交给访谈修改")}</button>
+      <button type="button" className="text-button" onClick={onCancel}>{t("取消")}</button></span>
+  </form>;
+}
 
 const PRIORITY: Record<string, string> = { high: "优先", medium: "其次", low: "可缓" };
 /** On the share card and the long image (decided 2026-10-12): what the portrait is, against the Barnum effect. */
@@ -62,7 +144,12 @@ function summaryWithType(summary: string, type: PortraitType, t: Translate, loca
  * and the lines as a flywheel. The core conflict and the say–do comparison are private. Rendered twice — from the person's own report on
  * screen and from the redacted report off screen — and only the second is ever exported.
  */
-function SharePart({ report, state, ordered }: { report: PortraitReport; state: State; ordered: Line[] }) {
+function SharePart({ report, state, ordered, anchors = false, afterType = null }: { report: PortraitReport; state: State; ordered: Line[];
+  /** On screen only: the sections carry the ids the contents link to (the off-screen copy must not repeat them). */
+  anchors?: boolean;
+  /** Shown after the type page on screen (the confirmation), never exported. */
+  afterType?: ReactNode }) {
+  const id = (name: string) => anchors ? { id: `pt-s-${name}` } : {};
   const t = useT();
   const locale = useLocale();
   const type = portraitType(report);
@@ -74,7 +161,7 @@ function SharePart({ report, state, ordered }: { report: PortraitReport; state: 
     .flatMap((item) => item.targetShare === undefined ? [] : [{ lineId: item.lineId, label: name(item.lineId), target: item.targetShare, now: item.share ?? null }]);
   const values = radarValues(report.compass.values);
   return <>
-    <section className="pt-page pt-type" style={groupStyle(type)}>
+    <section className="pt-page pt-type" style={groupStyle(type)} {...id("type")}>
       <header className="pt-poster-head"><p className="pt-kicker">{t("Crossline · AI 时代超级个体类型")}</p><p className="pt-credibility">{t(CREDIBILITY)}</p></header>
       <div className="pt-type-head">
         <div className="pt-figure-disc"><Figure state={state} className="pt-figure-img" /></div>
@@ -100,8 +187,9 @@ function SharePart({ report, state, ordered }: { report: PortraitReport; state: 
         <p className="pt-keywords">{report.cover.keywords.map((word) => <span key={word} className="tag gen">{word}</span>)}</p>
       </div>
     </section>
+    {afterType}
 
-    <section className="pt-page" style={groupStyle(type)}>
+    <section className="pt-page" style={groupStyle(type)} {...id("rhythm")}>
       <Heading number="01">{t("精力节律")}</Heading>
       <figure className="pt-figure"><Fit initial={620} max={700}>{(width) => <RhythmChart rhythm={state.rhythm} width={width} />}</Fit>
         <figcaption>{t("一日精力曲线：灰底为通常的睡眠，色带为最佳时段，空心点为本人自评（高 / 中 / 低）")}</figcaption></figure>
@@ -109,7 +197,7 @@ function SharePart({ report, state, ordered }: { report: PortraitReport; state: 
       <p className="pt-credibility">{rhythmBasis(state.rhythm, t)} · {t(RHYTHM_CREDIBILITY)}</p>
     </section>
 
-    <section className="pt-page">
+    <section className="pt-page" {...id("values")}>
       <Heading number="02">{t("价值与能量")}</Heading>
       <div className="pt-figure-row">
         {values ? <figure><Fit initial={300} max={340}>{(width) => <ValuesRadar values={values} size={width} />}</Fit><figcaption>{t("价值取向：施瓦茨 10 项基本价值（0–100）")}</figcaption></figure> : null}
@@ -119,7 +207,7 @@ function SharePart({ report, state, ordered }: { report: PortraitReport; state: 
         <figcaption>{t("能量地图：实心为充电，空心为耗电；右上为擅长且热爱")}</figcaption></figure>
     </section>
 
-    <section className="pt-page">
+    <section className="pt-page" {...id("lines")}>
       <Heading number="03">{t("主线飞轮")}</Heading>
       <LineNetwork lines={ordered} edges={edges} title={t("主线之间如何互相供养")} />
       {allLines.length > 0 && <figure className="pt-figure"><IdentityBars rows={allLines} /><figcaption>{t("精力分配：实心为建议，空心标记为现在（%）")}</figcaption></figure>}
@@ -190,12 +278,32 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
   };
 
   const raw = state.report;
-  if (!raw) return <section className="pt-empty">
-    {state.writing ? <p role="status">{t("正在生成画像报告：读取访谈、画像与主线，通常需要几分钟…")}</p>
-      : <><p>{state.blocker ? t("上次未能生成：{{reason}}", { reason: state.blocker }) : t("访谈结束后生成画像报告：前半部分为可分享的画像与图表，后半部分为个人细节与建议。")}</p>
-        <button type="button" className="primary-button" onClick={() => void write()}>{t("生成画像报告")}</button></>}
-    {status && <small role="status">{status}</small>}
-  </section>;
+  const generated = state.at ? state.version > 1 ? t("{{date}} 生成 · 第 {{version}} 版", { date: state.at.slice(5, 10).replace("-", "/"), version: state.version })
+    : t("{{date}} 生成", { date: state.at.slice(5, 10).replace("-", "/") }) : "";
+  const head = (actions: boolean) => <header className="subpage-header pt-head" data-no-export="">
+    <div><h1>{t("画像")}</h1><p className="muted">{[t(CREDIBILITY), generated].filter(Boolean).join(" · ")}</p></div>
+    <div className="pt-actions">
+      {status && <small role="status">{status}</small>}
+      {drawing && <small role="status">{t("卡通形象生成中…")}</small>}
+      {actions && <>
+        <button type="button" className="primary-button pt-share" onClick={() => void share()}><Share2 {...ICON} /><span>{t("分享前半部分")}</span></button>
+        <IconButton label={t("下载 PDF")} icon={<Download {...ICON} />} onClick={() => window.print()} />
+        <IconButton label={t("小帮手形象")} icon={<UserRound {...ICON} />} onClick={() => document.getElementById("pt-figure-card")?.scrollIntoView({ block: "start", behavior: "smooth" })} />
+        <IconButton label={state.writing ? t("重新生成中…") : t("重新生成")} icon={<RefreshCw {...ICON} />} disabled={state.writing} onClick={() => void write()} />
+      </>}
+    </div>
+  </header>;
+  // Before a report exists: what it will hold, and the one button that writes it.
+  if (!raw) return <div className="pt-wrap">
+    {head(false)}
+    <section className="pt-empty">
+      {state.writing ? <p role="status">{t("正在生成画像报告：读取访谈、画像与主线，通常需要几分钟…")}</p>
+        : <><p>{state.blocker ? t("上次未能生成：{{reason}}", { reason: state.blocker }) : t("访谈结束后生成画像报告：前半部分为可分享的画像与图表，后半部分为个人细节与建议。")}</p>
+          <ul className="pt-empty-list"><li>{t("可分享：超级个体类型、精力节律、价值与能量、主线飞轮")}</li><li>{t("仅自己可见：真问题、指南针、言行落差与锚、建议、下一步")}</li></ul>
+          <button type="button" className="primary-button" onClick={() => void write()}>{t("生成画像报告")}</button></>}
+    </section>
+    <FigurePicker onCurrent={showFigure} appearance={state.appearance} />
+  </div>;
   const shared = redactPortrait(raw);
   const sharedType = portraitType(shared);
   const sharedLabels = portraitLabels(shared, { lineLabel: (id) => state.lines.find((line) => line.id === id)?.label ?? id, locale });
@@ -206,28 +314,19 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
     <span>{state.version > 1 ? t("Crossline · 个人画像报告 · {{date}} · 第 {{version}} 版", { date, version: state.version }) : t("Crossline · 个人画像报告 · {{date}}", { date })}</span>
     {qr && <span className="pt-qr"><img src={qr} alt={t("Crossline 主页二维码")} width={72} height={72} /><small>{publicUrl}</small></span>}
   </footer>;
-  const shareBar = (again: boolean) => <div className="pt-share-bar" data-no-export="">
-    <button type="button" className="primary-button" onClick={() => void share()}>{t("分享画像")}</button>
-    <small>{again ? t("此按钮同样只分享前半部分：超级个体类型卡、精力节律卡与画像长图，人名、机构、课程编号等已隐去。")
-      : t("只分享前半部分：超级个体类型卡、精力节律卡与画像长图，人名、机构、课程编号等已隐去。")}</small>
-    {status && <small role="status">{status}</small>}
-  </div>;
-
   return <div className="pt-wrap">
-    <div className="pt-toolbar" data-no-export="">
-      <small className="muted">{t("前半部分可分享；后半部分为个人细节与建议，仅自己可见")}</small>
-      <button type="button" onClick={() => window.print()}>{t("下载 PDF")}</button>
-      <button type="button" disabled={state.writing} onClick={() => void write()}>{state.writing ? t("重新生成中…") : t("重新生成")}</button>
-      {drawing && <small role="status">{t("卡通形象生成中…")}</small>}
-    </div>
-    <FigurePicker onCurrent={showFigure} />
-
+    {head(true)}
+    <div className="pt-layout">
+      <aside className="pt-side" data-no-export="">
+        <Contents />
+        <FigurePicker onCurrent={showFigure} appearance={state.appearance} />
+      </aside>
     <div className="pt-doc">
-      <SharePart report={raw} state={state} ordered={ordered} />
-      {shareBar(false)}
+      <SharePart report={raw} state={state} ordered={ordered} anchors
+        afterType={state.confirmation.written ? <ConfirmBar confirmation={state.confirmation} onAnswered={(next) => setState((current) => ({ ...current, ...next }))} /> : null} />
 
       <p className="pt-private" data-no-export="">{t("以下为个人细节与建议，不包含在分享内容中")}</p>
-      <section className="pt-page" data-private="">
+      <section className="pt-page" data-private="" id="pt-s-problem">
         <h2><small>04</small>{t("真问题")}</h2>
         <div className="pt-conflict"><small>{t("核心矛盾")}</small><p className="gen">{raw.cover.coreConflict}</p></div>
         <p className="gen pt-lead">{raw.problem.statement}</p>
@@ -241,7 +340,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
         {footer}
       </section>
 
-      <section className="pt-page" data-private="">
+      <section className="pt-page" data-private="" id="pt-s-compass">
         <h2><small>05</small>{t("指南针、能量与主线")}</h2>
         <div className="pt-compass">
           <div><small>{t("工作观")}</small><p className="gen">{raw.compass.workView}</p></div>
@@ -260,7 +359,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
         {footer}
       </section>
 
-      <section className="pt-page" data-private="">
+      <section className="pt-page" data-private="" id="pt-s-gap">
         <h2><small>06</small>{t("言行落差与锚")}</h2>
         <div className="pt-gap">
           <div><small>{t("所说想要的")}</small><p className="gen">{raw.gap.says}</p></div>
@@ -278,7 +377,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
         {footer}
       </section>
 
-      <section className="pt-page" data-private="">
+      <section className="pt-page" data-private="" id="pt-s-insights">
         <h2><small>07</small>{t("现况洞察与可行建议")}</h2>
         <div className="pt-figure-row">
           <AdviceMatrix insights={raw.insights} />
@@ -290,7 +389,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
         </div>
         {footer}
       </section>
-      <section className="pt-page" data-private="">
+      <section className="pt-page" data-private="" id="pt-s-next">
         <h2><small>08</small>{t("Crossline 下一步")}</h2>
         <ol className="pt-next">
           <li data-done={state.next.hoursSet || undefined}><b>{t("确认可用时段")}</b><span>{state.next.hoursSet ? t("已设定") : state.next.hoursProposed ? t("访谈已提议，在计划页预览后采用") : t("在计划页设定工作时段")}</span></li>
@@ -303,7 +402,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
         </ol>
         {footer}
       </section>
-      {shareBar(true)}
+    </div>
     </div>
 
     {/* What is shared, rendered from the redacted report and never shown: the two 3:4 cards and the first half as one image. */}

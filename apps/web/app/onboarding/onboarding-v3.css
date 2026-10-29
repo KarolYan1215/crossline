@@ -1,8 +1,11 @@
 /* Onboarding v3 (docs/onboarding-v3.md, 2026-10-14): three columns in the portrait's editorial style.
    Paper, ink rules, the line colours only on shapes; greys #4F4A42 (7.9:1 on the paper). Left: materials and decisions; middle: the
    conversation; right: what the answers are building. */
-.ob-page{--paper:#F6F2EA;--ink:#1C1A17;--graphite:#4F4A42;--mist:#DDD5C7;--chalk:#ECE5D8;--pt-accent:#0A5198;
-  background:var(--paper);color:var(--ink);min-height:calc(100vh - 40px);padding:12px clamp(12px,2vw,24px) 24px}
+/* Since 2026-10-28 the warm design layer of the frame (shell.css `--ds-*`, light and dark): the original names point at its tokens here. */
+.ob-page{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);--pt-accent:#0A5198;
+  background:var(--ds-bg);color:var(--ink);min-height:calc(100vh - 40px);padding:12px clamp(12px,2vw,24px) 24px}
+html:has(.ob-page) body{background:var(--ds-bg)}
+body:has(.ob-page) .running-head{background:var(--ds-bg)}
 .ob3{font-family:var(--f-sans);font-size:15px;line-height:1.5;display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr) minmax(280px,340px);
   gap:16px;align-items:start;max-width:1600px;margin:0 auto}
 .ob3[data-dragging="true"]{outline:2px dashed var(--ink);outline-offset:6px}
@@ -232,3 +235,66 @@
 .ob-line-name{flex-direction:column;align-items:stretch;margin-top:8px}
 .ob-line-name label{display:flex;gap:8px;align-items:center;white-space:nowrap}
 .ob-line-name label input{flex:1;min-width:0}
+
+/* ── 2026-10-28 redesign (docs/plans/page-drafts-1028/onboarding.html): soft cards instead of ink frames, chips as pills with the
+   accent for what is picked, the parts as a progress bar that cannot be pressed, and the right column led by the start standard. ── */
+.ob3 :is(.ob-card,.ob-design,.ob-diligence,.ob-dates,.ob-progress,.ob-capacity,.ob-portrait-now,.ob-assess,.ob-insight){border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card)}
+.ob3 .ob-card,.ob3 .ob-start,.ob3 .ob-portrait-progress,.ob3 .ob-stage-views{box-shadow:var(--ds-shadow)}
+.ob3 .ob-insight{border-left:4px solid var(--ds-accent);border-radius:0 10px 10px 0;background:var(--ds-accent-soft)}
+.ob3 .ob-drop{border:1.5px dashed var(--ds-line);border-radius:10px}
+.ob3 .ob-centre{border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow);overflow:hidden}
+.ob3 .ob-centre-head{border-bottom:1px solid var(--ds-line)}
+.ob3 .ob-composer{border-top:1px solid var(--ds-line);background:var(--ds-card)}
+.ob3 .ob-composer textarea{border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-bg)}
+.ob3 .ob-assistant{border-left-color:var(--ds-line)}
+.ob3 .ob-assistant>p:first-child{background:var(--ds-chalk);padding:10px 14px;border-radius:12px}
+.ob3 .ob-user{border-radius:12px;background:var(--ds-accent);color:var(--ds-on-accent)}
+.ob3 .ob-btn,.ob3 .ob-file-button{border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-card);font-weight:600}
+.ob3 .ob-btn.ob-primary,.ob-start .ob-primary{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
+.ob3 .ob-quiet{background:var(--ds-card) !important;color:var(--ink) !important}
+.ob3 .ob-chips button{border:1px solid var(--ds-line);border-radius:999px;background:var(--ds-card);padding:6px 14px}
+.ob3 .ob-chips button[data-picked="true"]{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
+.ob3 .ob-chips button[data-picked="true"] small{color:var(--ds-on-accent)}
+.ob3 .ob-other,.ob3 .ob-add input{border:1px solid var(--ds-line);border-radius:var(--ds-radius-control)}
+.ob3 .ob-quota{background:var(--ds-chalk)}
+.ob3 .ob-error{color:var(--ds-alarm-ink)}
+.ob3 .ob-batch-nav button{border-radius:6px}
+.ob3 .ob-batch-nav button[aria-current="true"]{border-color:var(--ds-accent);outline-color:var(--ds-accent)}
+/* The parts of the interview as a bar: segments filled to the current part, its name beside them. */
+.ob-stagebar{display:grid;gap:6px;flex:1 1 260px;min-width:0}
+.ob-stagebar-track{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px}
+.ob-stagebar-track i{height:6px;border-radius:999px;background:var(--ds-line)}
+.ob-stagebar-track i[data-state="done"],.ob-stagebar-track i[data-state="current"]{background:var(--ds-accent)}
+.ob-stagebar-caption{margin:0;font-size:13px;color:var(--graphite)}
+/* The opening: the owner's note folded, the plan and the time beside the questions. */
+.ob3 .ob-opening-note{padding:8px 12px;border:1px solid var(--ds-line);border-radius:10px;background:var(--ds-bg)}
+.ob3 .ob-opening-note summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
+.ob3 .ob-opening-note summary small{font-size:13px;color:var(--graphite)}
+.ob3 .ob-opening-note[open]{display:grid;gap:8px}
+.ob3 .ob-opening-plan{border-top:1px solid var(--ds-line);border-bottom:1px solid var(--ds-line)}
+/* Right: the start standard on top, then the pictures, then the portrait's own progress. */
+.ob3 .ob-stage{border:0;padding:0;background:transparent;gap:12px}
+.ob-start,.ob-portrait-progress,.ob-stage-views{display:grid;gap:8px;padding:14px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card)}
+.ob-stage-views{order:2}
+.ob-portrait-progress{order:3}
+.ob-start>header{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.ob-start>header b{font-size:16px}
+.ob-start>header small,.ob-start .ob-organizing,.ob-start .ob-ring-next{font-size:12px;line-height:1.6;color:var(--graphite)}
+.ob-start .ob-btn{justify-self:start;text-decoration:none}
+.ob-start-list{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:13.5px}
+.ob-start-list li{display:grid;grid-template-columns:18px minmax(0,1fr);gap:6px;align-items:start}
+.ob-start-list li svg{margin-top:2px;color:var(--graphite)}
+.ob-start-list li[data-done] svg{color:var(--ds-accent-ink)}
+.ob-start-list li span small{display:grid;gap:1px;margin-top:2px;font-size:12px;color:var(--graphite)}
+.ob-portrait-progress b{font-size:15px}
+.ob-portrait-progress small{font-size:13px;color:var(--graphite)}
+.ob-portrait-progress a{font-size:13px}
+.ob3 .ob-stage-tabs{border-bottom:1px solid var(--ds-line)}
+.ob3 .ob-stage-tabs button[aria-current="true"]{border-bottom-color:var(--ds-accent)}
+.ob3 .ob-stage-tabs button:disabled{color:var(--graphite);opacity:.7}
+
+/* Fields and tutorials in the left column's connection cards (shared with settings) in the warm layer. */
+.ob-page :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea){border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-card)}
+.ob-page .setup-guide{border-left-color:var(--ds-accent)}
+.ob-page .ui-first-hint{border-radius:10px}
+html:has(.ob-page){background:var(--ds-bg)}

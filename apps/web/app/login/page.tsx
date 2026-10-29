@@ -1,3 +1,4 @@
+import { Mail, MessageCircle, ShieldCheck, Sparkles, Target } from "lucide-react";
 import { LoginForm } from "./login-form";
 import { headers } from "next/headers";
 import { isChatgptSignInConfigured, isEmailAuthConfigured, isGoogleAuthConfigured } from "../../lib/auth";
@@ -21,26 +22,29 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const chatgpt = isChatgptSignInConfigured() && /^127\.0\.0\.1(:\d+)?$/.test(host);
   // The same picture as the installed copy, with the way in for a shared server (an invitee over the private network): the steps say what
   // comes after signing in, so nobody needs a separate guide to know that their own ChatGPT is connected once, inside, by a code.
-  return <AuthLayout title={LOGIN_SERIF.panel} locale={locale}>
+  // The three steps after signing in, as small cards under the drawing (2026-10-28 redesign); how to connect a model is explained on /connect.
+  const steps = <ol className="login-step-cards" aria-label={t("开始使用的步骤")}>{HOSTED_STEPS.map((step, index) => { const Icon = step.icon;
+    return <li key={step.title} data-state={index === 0 ? "current" : "next"}>
+      <Icon size={18} strokeWidth={1.75} aria-hidden="true" />
+      <b>{t(step.title)}</b><small>{t(step.detail)}</small>
+    </li>; })}</ol>;
+  return <AuthLayout title={LOGIN_SERIF.panel} locale={locale} hero={steps}>
       <LoginForm googleEnabled={isGoogleAuthConfigured()} emailEnabled={isEmailAuthConfigured()} chatgptEnabled={chatgpt} verified={verified === "1"} reset={reset === "1"} deleted={deleted === "1"}
         {...(error ? { errorCode: error.slice(0, 60) } : {})} />
-      <ol className="login-steps" aria-label={t("开始使用的步骤")}>{HOSTED_STEPS.map((step, index) =>
-        <li key={step.title} data-state={index === 0 ? "current" : "next"}>
-          <span className="login-step-mark" aria-hidden="true">{index + 1}</span>
-          <span><b>{t(step.title)}</b><small>{t(step.detail)}</small></span>
-        </li>)}</ol>
-      <p className="login-privacy">{process.env.CROSSLINE_PUBLIC_BETA === "1"
-        ? <span>{t("每个账号的资料、ChatGPT 登录和模型 API key 各自隔离，不与其他账号共享；模型用本人的 ChatGPT 额度或本人的 API。退出登录即删除这台服务器上的 ChatGPT 登录。")}{" "}<a href="/privacy">{t("隐私说明")}</a></span>
-        : t("资料和本人的 ChatGPT 登录都保存在运行这个 Crossline 的电脑上，只能通过私有网络访问；模型用本人的 ChatGPT 额度。")}</p>
-      {process.env.ASSESS_BASE_URL?.startsWith("https://") && <p className="login-note">{
-        // One sentence with its link marked, so the link sits where each language puts it.
-        t("还没做过测评？可以<a>先做约 5 分钟的 AI 时代超级个体测评 →</a>，不做也能直接开始；用同一个邮箱登录，测评结果会带进访谈。")
-          .split(/<a>(.*?)<\/a>/).map((part, index) => index % 2 ? <a key={index} href={process.env.ASSESS_BASE_URL}>{part}</a> : part)}</p>}
+      <div className="login-foot">
+        <p className="login-privacy"><ShieldCheck size={16} strokeWidth={1.75} aria-hidden="true" />{process.env.CROSSLINE_PUBLIC_BETA === "1"
+          ? <span>{t("每个账号的资料、ChatGPT 登录和模型 API key 各自隔离，不与其他账号共享；模型用本人的 ChatGPT 额度或本人的 API。退出登录即删除这台服务器上的 ChatGPT 登录。")}{" "}<a href="/privacy">{t("隐私说明")}</a></span>
+          : <span>{t("资料和本人的 ChatGPT 登录都保存在运行这个 Crossline 的电脑上，只能通过私有网络访问；模型用本人的 ChatGPT 额度。")}</span>}</p>
+        {process.env.ASSESS_BASE_URL?.startsWith("https://") && <p className="login-privacy login-note"><Target size={16} strokeWidth={1.75} aria-hidden="true" /><span>{
+          // One sentence with its link marked, so the link sits where each language puts it.
+          t("还没做过测评？可以<a>先做约 5 分钟的 AI 时代超级个体测评 →</a>，不做也能直接开始；用同一个邮箱登录，测评结果会带进访谈。")
+            .split(/<a>(.*?)<\/a>/).map((part, index) => index % 2 ? <a key={index} href={process.env.ASSESS_BASE_URL}>{part}</a> : part)}</span></p>}
+      </div>
   </AuthLayout>;
 }
 
 const HOSTED_STEPS = [
-  { title: "用邮箱验证码登录", detail: "验证码 10 分钟内有效；设了密码之后，验证码和密码两种方式都能登录" },
-  { title: "连接模型", detail: "二选一：用本人的 ChatGPT 账号（和 ChatGPT 网页版是同一个账号；先在网页版 设置 → 安全 开启「设备代码登录」，进入后输入一次性代码，约 1 分钟），或者填本人的模型 API key：DeepSeek、Kimi、通义千问、智谱、OpenAI API 等" },
-  { title: "和 AI 做一次深度访谈", detail: "约 30 分钟。得到一份本人的画像报告（几条主线各是什么、精力怎么分），以及把各条主线的事排进日历的计划" }
+  { icon: Mail, title: "用邮箱验证码登录", detail: "验证码 10 分钟内有效，之后也可以设密码" },
+  { icon: Sparkles, title: "连接模型", detail: "本人的 ChatGPT 账号，或模型 API key" },
+  { icon: MessageCircle, title: "和 AI 做一次深度访谈", detail: "约 30 分钟，得到画像报告与第一周计划" }
 ] as const;
