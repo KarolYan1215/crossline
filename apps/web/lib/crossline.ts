@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
-import { approveArtifactRelationsFor, assistantAvailable, CrosslineStore, openNeedsOf, type EvidenceClaimInput, type StoredMilestone } from "@crossline/db";
+import { approveArtifactRelationsFor, assistantAvailable, CrosslineStore, openNeedsOf, type EvidenceClaimInput, type StoredMilestone, type StoredWorkOrder } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
   type CalibrationReport, presetImportance, sittingStartOn, taskTitleOf, type ImportancePreset, restoreTargetOf,
@@ -1930,6 +1930,17 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
     return (eh! * 60 + em!) - (sh! * 60 + sm!);
   };
   const items = plannerItemsFor(ctx, orders);
+  const waits = store.listWaitingItems(ctx.workspaceId, { state: "open" });
+  /**
+   * Why a task with nothing to place sits out: its open steps all wait (a 「等待」 step, material only the person has, or a waiting item).
+   * The planner never saw it, so it has no blocker, and the page said 「可用时段内没有空位」 beside 「本周已排 16.3 / 53.1 h」 (W-152).
+   */
+  const waitingReason = (order: StoredWorkOrder): string => {
+    const item = waits.find((wait) => wait.blocks.includes(order.id));
+    const step = store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((one) => one.status === "planned" && (one.role === "wait" || (one as { provides?: unknown }).provides));
+    const what = item?.title || step?.title;
+    return what ? t("在等：{{what}}", { what }) : t("剩下的步骤在等前一步或材料，暂不排入");
+  };
   const ranked = orders.map((order): RankedTask => {
     const task = plannerTaskOf(ctx, order);
     const own = items.filter((item) => item.orderId === order.id);
@@ -1941,7 +1952,8 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
       weight: task.weight, deadline: local(task.deadline), notBefore: local(task.notBefore),
       firstDay: blocks[0]?.day ?? null, firstStart: blocks[0]?.start ?? null,
       weekMinutes: blocks.filter((block) => block.day! >= today && block.day! < weekEnd).reduce((sum, block) => sum + minutesOf(block), 0),
-      blocker: blocks.length || !blocker ? null : UNPLACED_REASON[blocker.code] ? t(UNPLACED_REASON[blocker.code]!) : blocker.message,
+      blocker: blocks.length ? null : blocker ? (UNPLACED_REASON[blocker.code] ? t(UNPLACED_REASON[blocker.code]!) : blocker.message)
+        : own.length ? null : waitingReason(order),
       libraryUntil: libraryUntil(ctx, order, today),
       p50Minutes: own.reduce((sum, item) => sum + item.task.estimate.p50Minutes, 0),
       p85Minutes: own.reduce((sum, item) => sum + item.task.estimate.p85Minutes, 0) };

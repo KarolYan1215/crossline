@@ -196,7 +196,7 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       + "verb first, with the day. date for a dated event the mail asks nothing about; reply with the wait's id when the sender is who an open wait "
       + "is on, or with an empty waitingId when a real person or office waits for the person's answer by mail (a draft is written, never sent); info "
       + "for news about the person's own things that needs nothing, and for notices a service sends to all customers or about its own systems (security "
-      + "advisories, incidents, CI or deploy results, terms changes) unless they name the person's own resource and a day to act; ignore for promotions, digests, cold pitches, spam and phishing. "
+      + "advisories, incidents, CI or deploy results, terms changes) unless they name the person's own resource and a day to act; ignore for promotions, digests, cold pitches, a company's survey or feedback invitation (only one from the person's own course, employer or collaborator is todo), spam and phishing. "
       + "transaction for a mail whose money already moved (a payment made or received, a receipt, a refund, a salary); an unusual or "
       + "unrecognised charge is todo. money for every mail about money, whatever its kind: event is charge (paid, card used), receipt (a shop's "
       + "order or receipt), refund, income (salary, money received), authorization (pending, hold), own_transfer (card bill paid, top-up, between "

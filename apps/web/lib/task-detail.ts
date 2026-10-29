@@ -6,6 +6,7 @@ import { doneKinds, listAgentTasks, needStatesOf, preparationOf, readStoredArtif
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
 import { effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
 import { linePacks } from "./lines";
+import { runFilesHere } from "./agent";
 import { localeFor } from "./locale";
 import { tFor, type Locale } from "./i18n";
 
@@ -118,7 +119,8 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
           : { id: criterion.id, statement: criterion.statement, quarters: 0, by: "none" as const };
       }),
       sources: relevantDocuments(documents, { projectId: order.projectId, projectName: projects.get(order.projectId) }).map((doc) => ({ id: doc.id, fileName: doc.fileName })),
-      agentOutputs: agentTasks.filter((task) => task.workOrderId === order.id).map((task) => ({ taskId: task.taskId, title: task.title, status: task.status, stepId: task.stepId,
+      // A run whose files did not come to this server (W-143) is not offered: its links would only answer FILE_NOT_FOUND.
+      agentOutputs: agentTasks.filter((task) => task.workOrderId === order.id && runFilesHere(task.directory)).map((task) => ({ taskId: task.taskId, title: task.title, status: task.status, stepId: task.stepId,
         files: task.artifacts.map((artifact) => ({ path: artifact.path, name: artifact.path.split(/[\\/]/).at(-1) ?? artifact.path })) })),
       // 「交给 Agent」 for every account: the owner's assistant has a shell, everyone else's works through Crossline's own functions.
       agentSteps: (plan?.steps ?? []).filter((step) => step.status === "planned" && step.schedulable && step.executor !== "human").map((step) => ({ id: step.id, title: step.title })),

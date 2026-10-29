@@ -29,6 +29,7 @@ import { useWholeDetail } from "./whole-detail";
 import { stepAnchor, tutorialAnchor } from "../materials/tutorial-model";
 import { useLocale, useT } from "../locale-context";
 import { dayText, minutesText, shortDate } from "./format";
+import { handOff } from "./handoff";
 
 const SMALL = { ...ICON, size: 14 } as const;
 const post = (path: string, body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
@@ -172,8 +173,11 @@ function StepDetail({ detail, step, kind, onStatus }: { detail: TaskDetail; step
         .then((ok) => ok ? location.reload() : onStatus(t("未能保存，请重试")))}><Check {...ICON} />{t("这一步做完了")}</button>}
       {step.executor === "human" && detail.preparedMaterials.some((item) => /manual\.md$/.test(item.uri)) &&
         <a className="text-button" href={`#${tutorialAnchor(step.id)}`}><BookOpen {...ICON} />{t("本步教程")}</a>}
-      {step.executor !== "human" && <button type="button" className="text-button" onClick={() => void post("/api/agent/dispatch", { workOrderId: detail.id, stepId: step.id })
-        .then((ok) => onStatus(ok ? t("已交给助手：{{title}}，进度在小帮手里看", { title: step.title }) : t("未能交给助手")))}><Bot {...ICON} />{t("交给助手")}</button>}
+      {/* A decision is the person's whatever the executor says (the dispatcher refuses it), so it offers no hand-over. */}
+      {step.executor !== "human" && step.role !== "decide" && <button type="button" className="text-button" onClick={() => void handOff(detail.id, step.id)
+        .then((outcome) => onStatus(outcome.kind === "started" ? t("已交给助手：{{title}}，进度在小帮手里看", { title: step.title })
+          : outcome.kind === "needs_category" ? t("这类工作尚未允许 Agent 执行，已加入待决事项。")
+          : outcome.message ? t("未能交给助手：{{reason}}", { reason: outcome.message }) : t("未能交给助手")))}><Bot {...ICON} />{t("交给助手")}</button>}
     </p>}
   </div>;
 }

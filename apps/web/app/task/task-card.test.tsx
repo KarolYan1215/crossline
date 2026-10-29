@@ -51,6 +51,14 @@ describe("task card", () => {
     expect(html).not.toContain("当前");
   });
 
+  test("a task whose open steps are all the assistant's says what the assistant is on, not 「步骤已完成」 (W-145)", () => {
+    const plan = (steps: Step[]) => base({ stepPlan: { archetypeLabel: "办理", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", progress: 0, units: [], questions: [], steps } });
+    const html = renderToStaticMarkup(<TaskCard detail={plan([step("a", { executor: "agent", title: "记录账户访问条件" }), step("b", { executor: "agent" })])} today="2026-10-15" />);
+    expect(html).toContain("助手在做：记录账户访问条件");
+    expect(html).not.toContain("步骤已完成");
+    expect(renderToStaticMarkup(<TaskCard detail={plan([step("a", { status: "done" })])} today="2026-10-15" />)).toContain("步骤已完成");
+  });
+
   test("a proposal shows its first step and when the tutorial comes; one without steps says it is being prepared", () => {
     const planned = base({ state: "awaiting_plan_approval", stepPlan: { archetypeLabel: "习题", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", progress: 0, units: [], questions: [],
       steps: [step("a", { title: "列出题目", firstAction: "打开作业 PDF" })] }, preparation: { level: "tutorial", reason: "要学新内容" } });

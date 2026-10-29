@@ -11,6 +11,7 @@ import { RunningHead } from "./running-head";
 import { SideNav } from "./side-nav";
 import { TimeZoneSync } from "./time-zone-sync";
 import { HelperCalls } from "./helper-calls";
+import { PlanRefresh } from "./plan-refresh";
 
 /**
  * The frame every signed-in page shares: the name, the four working views, the decisions waiting for you, the
@@ -29,6 +30,8 @@ export function AppShell({ active, children, className = "page", focus = false, 
     <ReturnPoint />
     {/* A pinned clock (tests, visual baselines) keeps the zone it was set up with. */}
     {!process.env.CROSSLINE_FIXED_NOW && <TimeZoneSync />}
+    {/* What the input box carried out shows on the page at once, not after a reload (W-142). */}
+    <PlanRefresh />
     {/* On a wide screen the side bar navigates and the running head keeps only its top-right cluster (shell.css). */}
     {!focus && <SideNav active={active} />}
     <RunningHead active={active} focus={focus} />

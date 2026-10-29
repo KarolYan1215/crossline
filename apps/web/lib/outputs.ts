@@ -2,7 +2,7 @@ import "server-only";
 import { AUTOMATIONS_SETTING, readAutomations, type AccessContext } from "@crossline/core";
 import { listAgentTasks, type AgentTaskRow } from "@crossline/db";
 import { groupOutputs } from "../app/approvals/assistant-outputs";
-import { readTaskFile } from "./agent";
+import { readTaskFile, runFilesHere } from "./agent";
 import { getStore } from "./crossline";
 import { identityLines } from "./lines";
 import { tOf } from "./locale";
@@ -17,7 +17,8 @@ import { zipStream, type ZipEntry } from "./zip";
 export type OutputFile = { path: string; name: string; bytes: number; href: string };
 export type OutputTask = { taskId: string; title: string; at: string; status: "accepted" | "needs_review"; partial: boolean; files: OutputFile[] };
 export type OutputLine = { id: string; label: string; tasks: OutputTask[] };
-export type OutputFolder = { lines: OutputLine[]; files: number; bytes: number };
+/** `elsewhere`: delivered runs whose files are not on this server (made on the resident copy before 2026-10-22), not listed (W-143). */
+export type OutputFolder = { lines: OutputLine[]; files: number; bytes: number; elsewhere: number };
 
 /** The most one zip carries: past it the person downloads by line or by task. */
 export const ZIP_MAX_FILES = 400;
@@ -37,8 +38,10 @@ export function outputFolder(ctx: AccessContext): OutputFolder {
   const lineOf = (row: AgentTaskRow) => orders.get(row.workOrderId)
     ?? automations.find((automation) => row.taskId.startsWith(`${automation.id}-`))?.lineId ?? OTHER;
   const byLine = new Map<string, OutputTask[]>();
-  let files = 0, bytes = 0;
+  let files = 0, bytes = 0, elsewhere = 0;
   for (const row of listAgentTasks(store, ctx.workspaceId).filter(delivered)) {
+    // A download link that answers FILE_NOT_FOUND is worse than no link: such a run is counted, not listed.
+    if (!runFilesHere(row.directory)) { elsewhere += 1; continue; }
     const sizes = new Map(row.artifacts.map((item) => [item.path.replace(/\\/g, "/"), item.bytes]));
     const shown = groupOutputs(row.artifacts.map((item) => ({ path: item.path, purpose: "" }))).groups.flatMap((group) => group.items);
     if (!shown.length) continue;
@@ -56,7 +59,7 @@ export function outputFolder(ctx: AccessContext): OutputFolder {
     // A line id the workspace no longer has is shown under 「其他」 rather than dropped.
     .map((line) => line.id === OTHER ? { ...line, tasks: [...line.tasks, ...[...byLine].filter(([id]) => id !== OTHER && !known.has(id)).flatMap(([, tasks]) => tasks)] } : line)
     .filter((line) => line.tasks.length);
-  return { lines: result, files, bytes };
+  return { lines: result, files, bytes, elsewhere };
 }
 
 /** A folder name a file system takes: no separators or control characters, not empty. */

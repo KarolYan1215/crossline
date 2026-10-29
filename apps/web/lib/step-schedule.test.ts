@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 vi.mock("server-only", () => ({}));
-import { loadCurrentPlan, plannerIdOfBlock, saveAvailability, saveSchedulePreferences, scheduledBlockId } from "./crossline";
+import { loadCurrentPlan, planRanking, plannerIdOfBlock, saveAvailability, saveSchedulePreferences, scheduledBlockId } from "./crossline";
 import { TEST_CTX } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
@@ -53,6 +53,22 @@ test("work after an unfinished wait takes no calendar time until the wait is don
   store.updateStepProgress(TEST_CTX.workspaceId, order.id, saved.steps[0]!.id, { status: "done" }, "o", "test");
   store.updateStepProgress(TEST_CTX.workspaceId, order.id, saved.steps[1]!.id, { status: "done" }, "o", "test");
   expect(await placed()).toEqual(new Set(["v1s3", "v1s4"]));
+});
+
+test("a task whose open steps all wait is listed as waiting, not as 「可用时段内没有空位」 (W-152)", async () => {
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T13:00:00.000Z");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "buffered", windows: ALWAYS, importance: {} });
+  await loadCurrentPlan(TEST_CTX);
+  const order = store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.identityId === "research")!;
+  store.saveWorkOrder({ ...order, state: "ready_for_human" });
+  const saved = store.saveStepPlan(TEST_CTX.workspaceId, order.id, { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 3, unit: "题" },
+    rationale: "", steps: [step("a", "contact", 15), { ...step("w", "wait", 0, ["a"], false), title: "等待作业题面发布" }, step("b", "solve", 90, ["w"])] }, "o", "t");
+  store.updateStepProgress(TEST_CTX.workspaceId, order.id, saved.steps[0]!.id, { status: "done" }, "o", "test");
+  const plan = await loadCurrentPlan(TEST_CTX);
+  const ranked = planRanking(TEST_CTX, plan).find((task) => task.id === order.id)!;
+  expect(ranked.firstDay).toBeNull();
+  expect(ranked.blocker).toBe("在等：等待作业题面发布");
 });
 
 test("a step whose own day has come is still placed before the task's deadline", async () => {

@@ -5,7 +5,7 @@ import { useT } from "../locale-context";
 type OutputFile = { path: string; name: string; bytes: number; href: string };
 type OutputTask = { taskId: string; title: string; at: string; status: "accepted" | "needs_review"; partial: boolean; files: OutputFile[] };
 type OutputLine = { id: string; label: string; tasks: OutputTask[] };
-type Folder = { lines: OutputLine[]; files: number; bytes: number };
+type Folder = { lines: OutputLine[]; files: number; bytes: number; elsewhere?: number };
 
 const size = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
 const day = (iso: string) => iso.slice(5, 10).replace("-", "/");
@@ -23,6 +23,7 @@ export function OutputsCard() {
   }, []);
   return <section className="st-card outputs-card" aria-label={t("助手产出")}>
     <header><h3>{t("助手产出")}</h3><small>{t("助手每次做完交出的文件都放在这里，按主线和任务分开；不改动本人上传的原文件")}</small></header>
+    {folder?.elsewhere ? <p className="muted">{t("另有 {{count}} 次较早的运行在本人电脑上完成，文件没有随账本搬到服务器，这里不列出。", { count: folder.elsewhere })}</p> : null}
     {!folder ? <p className="muted">{t("读取中…")}</p>
       : !folder.files ? <p className="muted">{t("还没有产出。交给助手的任务、准备步骤和自动化做完后，文件会出现在这里。")}</p>
       : <>

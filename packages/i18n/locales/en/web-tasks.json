@@ -123,6 +123,7 @@
   "准备中：步骤规划生成后再请本人确认。": "Being prepared: you will be asked to confirm once the steps are planned.",
   "步骤规划中 · 全程约": "Steps being planned · total about",
   "步骤已完成": "All steps done",
+  "助手在做：{{title}}": "The assistant is on: {{title}}",
   "第一步": "First step",
   "约 {{duration}}": "about {{duration}}",
   "先做": "Start with",

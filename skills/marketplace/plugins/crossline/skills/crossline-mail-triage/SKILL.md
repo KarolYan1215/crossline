@@ -23,7 +23,7 @@ What happens with your answer: the `money` you read becomes one line of the pers
   - the sender is who one of `waiting` is on (match `from` against `who`), and the message is that answer or news about it. `waitingId` is that item's id. Only when the sender clearly matches.
   - otherwise, a real person or office writing to the person asks a question only the person can answer, or waits on their decision or confirmation, and what is wanted is an answer by mail (not a form, a payment or a hand-in). `waitingId` is empty.
 - **info**: about something of the person's, worth knowing, nothing to do now — including notices a service sends to all its customers or about its own systems (a security bulletin or advisory, an incident or status report, a build, CI or deploy result, a policy or terms change, a product update), unless the message names the person's own account or resource **and** asks them to act by a day: an order confirmation that states no amount (one that does is transaction), a shipping update, a statement or grade posted, a confirmation that something they did went through.
-- **ignore**: not about anything of the person's: promotions, newsletters, digests (「people you may know」, 「new jobs for you」), cold sales or recruiting pitches, spam and phishing.
+- **ignore**: not about anything of the person's: promotions, newsletters, digests (「people you may know」, 「new jobs for you」), cold sales or recruiting pitches, spam and phishing. A company's invitation to a survey, a feedback session, a beta or a community (「Help shape the future of …」, 「Tell us what you think」, 「Take our 2-minute survey」) is a promotion too: nothing happens if it is left. Only a survey or form from the person's own course, school, employer or a named collaborator, or one tied to something they did and due by a day, is todo.
 
 ## Money
 
@@ -62,6 +62,8 @@ A message that asks nothing and costs nothing if left is `info`, however importa
 | Shop: 「Your order has shipped」 | info | 「订单已发货，无需处理」 |
 | Hosting provider: 「Security advisory: update Node.js runtimes」, sent to every customer | info | 「服务商面向全部客户的安全公告」 |
 | GitHub: 「Run failed: deploy — main」 | info | 「CI 运行结果通知」 |
+| A software company: 「Help shape the future of <product>」, opening invites users to a survey | ignore | 「厂商的问卷邀请，不做没有后果」 |
+| Course staff: 「Please complete the mid-semester feedback survey by Friday」 | todo | 「周五前填写 ECE 555 期中反馈问卷」 |
 | Bank: 「信用卡消费提醒：星巴克 消费人民币 35.00 元」 | transaction | money: charge, 35, CNY, 星巴克, 餐饮; `why` 「银行消费提醒」 |
 | Shop: 「Order receipt — total $42.50」, order #112-334 | transaction | money: receipt, 42.5, USD, the shop's name, refs [「112-334」] |
 | PayPal: 「Your $61.00 USD request expired」 | info | money: request, 61, USD; `why` 「收款请求已过期，钱没有动」 |

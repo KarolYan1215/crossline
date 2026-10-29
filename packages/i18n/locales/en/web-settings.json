@@ -832,6 +832,7 @@
   "助手产出": "Assistant output",
   "助手每次做完交出的文件都放在这里，按主线和任务分开；不改动本人上传的原文件": "Every file the assistant hands over is kept here, by track and task; your own uploads are never changed",
   "还没有产出。交给助手的任务、准备步骤和自动化做完后，文件会出现在这里。": "No output yet. Files appear here once tasks handed to the assistant, preparation steps and automations finish.",
+  "另有 {{count}} 次较早的运行在本人电脑上完成，文件没有随账本搬到服务器，这里不列出。": "{{count}} earlier runs finished on your own computer; their files did not move to the server with the ledger and are not listed here.",
   "{{count}} 个文件，共 {{size}}_one": "{{count}} file, {{size}} in all",
   "{{count}} 个文件，共 {{size}}_other": "{{count}} files, {{size}} in all",
   "全部打包下载": "Download all as zip",

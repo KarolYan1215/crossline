@@ -17,14 +17,14 @@ test("a record is kept only with a known kind, a real day not in the future, and
 
 test("this month's income, spending, savings rate and categories; this week's workouts; the latest weight", () => {
   const metrics = recordMetrics([
-    record({ kind: "income", value: 12000, at: "2026-10-05" }), record({ value: 3000, category: "房租", at: "2026-10-01" }),
+    record({ kind: "income", value: 12000, at: "2026-10-05" }), record({ value: 3000, category: "住房水电", at: "2026-10-01" }),
     record({ value: 600, category: "餐饮" }), record({ value: 9999, at: "2026-09-30" }),
     record({ domain: "wellness", kind: "workout", value: 40, at: "2026-10-18" }), record({ domain: "wellness", kind: "workout", value: 30, at: "2026-10-10" }),
     record({ domain: "wellness", kind: "weight", value: 72.4, at: "2026-10-12" }), record({ domain: "wellness", kind: "weight", value: 71.8, at: "2026-10-19" })
   ], "2026-10-20");
   expect(metrics).toMatchObject({ month: "2026-10", currency: "CNY", income: 12000, expense: 3600, savingsRate: 70, workouts: 1, workoutMinutes: 40,
     weight: { value: 71.8, at: "2026-10-19" } });
-  expect(metrics.categories).toEqual([{ category: "房租", amount: 3000 }, { category: "餐饮", amount: 600 }]);
+  expect(metrics.categories).toEqual([{ category: "住房水电", amount: 3000 }, { category: "餐饮", amount: 600 }]);
 });
 
 test("the trend is six months of money, oldest first, and eight Monday-first weeks of exercise with each week's last weight", () => {

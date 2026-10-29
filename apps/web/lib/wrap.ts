@@ -60,9 +60,13 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
     const payload = event.payload as { blockId?: string; day?: string; outcome?: string };
     if (payload.day === day && payload.blockId) answered.set(payload.blockId, String(payload.outcome ?? ""));
   }
-  const lineOf = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.identityId]));
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const lineOf = new Map(orders.map((order) => [order.id, order.identityId]));
+  // A session never ended on a task that is no longer under way (accepted, archived, moved back) is not a running timer: the floating
+  // timer does not show it, and counting it to now read 「今天计时 5h 49 分」 at 05:49 with nothing started (W-150).
+  const running = new Set(orders.filter((order) => order.state === "active").map((order) => order.id));
   // Every timer of the day as an interval (one still running ends now), for the day's total and each block's share of it.
-  const spans = store.listExecutions(ctx.workspaceId).map((execution) => ({ orderId: execution.workOrderId, from: Date.parse(execution.startedAt),
+  const spans = store.listExecutions(ctx.workspaceId).filter((execution) => execution.endedAt || running.has(execution.workOrderId)).map((execution) => ({ orderId: execution.workOrderId, from: Date.parse(execution.startedAt),
     to: Math.min(execution.endedAt ? Date.parse(execution.endedAt) : now.getTime(), now.getTime()), pause: execution.pauseMinutes }))
     .filter((span) => span.to > span.from);
   const dayFrom = Date.parse(toZonedInstant(day, "00:00", zone)), dayTo = dayFrom + 86_400_000;

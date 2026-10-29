@@ -1,5 +1,6 @@
 import { tFor, type Locale } from "./i18n";
 import type { SuccessCriterion } from "./index";
+import { ledgerCategory } from "./ledger";
 
 /**
  * Records (docs/domain-lines.md, decided 2026-10-19): the simple bookkeeping of a wealth line and the measurements of a wellness line, one
@@ -95,7 +96,11 @@ export function recordMetrics(records: MetricRecord[], today: string): RecordMet
   const income = round(inCurrency.filter((record) => record.kind === "income").reduce((total, record) => total + record.value, 0));
   const expense = round(spent(inCurrency));
   const byCategory = new Map<string, number>();
-  for (const record of inCurrency) if (record.kind !== "income") byCategory.set(record.category || "其他", (byCategory.get(record.category || "其他") ?? 0) + (record.kind === "refund" ? -record.value : record.value));
+  // The fixed lists, as the ledger reads them: a record written before them carries its merchant as its category (「Apple」, W-149).
+  for (const record of inCurrency) if (record.kind !== "income") {
+    const category = ledgerCategory({ kind: record.kind, category: record.category || "" });
+    byCategory.set(category, (byCategory.get(category) ?? 0) + (record.kind === "refund" ? -record.value : record.value));
+  }
   const weekStart = new Date(Date.parse(today) - 6 * 86_400_000).toISOString().slice(0, 10);
   const workouts = records.filter((record) => record.kind === "workout" && counts(record) && record.at.slice(0, 10) >= weekStart && record.at.slice(0, 10) <= today);
   const weights = records.filter((record) => record.kind === "weight" && counts(record)).sort((a, b) => a.at.localeCompare(b.at));

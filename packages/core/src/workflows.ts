@@ -29,7 +29,13 @@ export const GROW_AFTER_ACCEPTED = 2;
 export const WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 export type Weekday = (typeof WEEKDAYS)[number];
 /** The shape of Codex's own `ScheduledTaskSchedule` (app-server protocol v2), so a workflow could be handed to a runtime that schedules natively. */
-export type WorkflowSchedule = { type: "daily"; time: string } | { type: "weekdays"; time: string } | { type: "weekly"; days: Weekday[]; time: string };
+/**
+ * `monthly` (2026-10-29, W-146): on `day` of the month (the month's last day when it has fewer), every `months` months — 1 monthly, 3
+ * quarterly, as n8n's Schedule Trigger keeps 「Months Between Triggers」 and 「Trigger at Day of Month」. Before it a 「季度」 request was
+ * stored as every Monday and ran thirteen times a quarter.
+ */
+export type WorkflowSchedule = { type: "daily"; time: string } | { type: "weekdays"; time: string } | { type: "weekly"; days: Weekday[]; time: string }
+  | { type: "monthly"; day: number; months: number; time: string };
 
 export type WorkflowManifest = {
   name: string;
@@ -86,9 +92,10 @@ export function validateWorkflowManifest(value: unknown, lineIds: string[]): Wor
   if (manifest.trigger !== "on_request" && manifest.trigger !== "schedule") problems.push("trigger 须为 on_request 或 schedule");
   if (manifest.trigger === "schedule") {
     const schedule = manifest.schedule;
-    if (!schedule || !TIME.test(schedule.time ?? "") || !["daily", "weekdays", "weekly"].includes(schedule.type)
-      || (schedule.type === "weekly" && (!Array.isArray(schedule.days) || !schedule.days.length || schedule.days.some((day) => !WEEKDAYS.includes(day))))) {
-      problems.push("schedule 须为 daily / weekdays / weekly，时间 HH:MM，weekly 须列出 MO–SU");
+    if (!schedule || !TIME.test(schedule.time ?? "") || !["daily", "weekdays", "weekly", "monthly"].includes(schedule.type)
+      || (schedule.type === "weekly" && (!Array.isArray(schedule.days) || !schedule.days.length || schedule.days.some((day) => !WEEKDAYS.includes(day))))
+      || (schedule.type === "monthly" && !(monthDayValid(schedule.day) && Number.isInteger(schedule.months) && schedule.months >= 1 && schedule.months <= 12))) {
+      problems.push("schedule 须为 daily / weekdays / weekly / monthly，时间 HH:MM，weekly 须列出 MO–SU，monthly 须有 day（1–31）与 months（1–12）");
     }
   } else if (manifest.schedule !== null && manifest.schedule !== undefined) problems.push("trigger 为 on_request 时 schedule 为 null");
   if (manifest.action !== "run" && manifest.action !== "remind") problems.push("action 须为 run 或 remind");
@@ -134,8 +141,33 @@ function wallClock(at: Date, zone: string): { day: string; weekday: Weekday; tim
     hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at).map((part) => [part.type, part.value]));
   return { day: `${parts.year}-${parts.month}-${parts.day}`, weekday: WEEKDAY_OF[parts.weekday!] ?? "MO", time: `${parts.hour}:${parts.minute}` };
 }
-const runsOn = (schedule: WorkflowSchedule, weekday: Weekday) =>
-  schedule.type === "daily" || (schedule.type === "weekdays" ? !["SA", "SU"].includes(weekday) : schedule.days.includes(weekday));
+const monthDayValid = (day: unknown): boolean => Number.isInteger(day) && (day as number) >= 1 && (day as number) <= 31;
+const monthIndex = (day: string) => Number(day.slice(0, 4)) * 12 + Number(day.slice(5, 7)) - 1;
+/** A monthly schedule's day in this month: its own day, or the month's last when the month is shorter (31 → 30 in November). */
+const monthlyDay = (day: number, localDay: string) => Math.min(day, new Date(Date.UTC(Number(localDay.slice(0, 4)), Number(localDay.slice(5, 7)), 0)).getUTCDate());
+const runsOn = (schedule: WorkflowSchedule, clock: { day: string; weekday: Weekday }, lastDay: string | undefined) => {
+  if (schedule.type === "daily") return true;
+  if (schedule.type === "weekdays") return !["SA", "SU"].includes(clock.weekday);
+  if (schedule.type === "weekly") return schedule.days.includes(clock.weekday);
+  return Number(clock.day.slice(8, 10)) === monthlyDay(schedule.day, clock.day)
+    && (!lastDay || monthIndex(clock.day) - monthIndex(lastDay) >= schedule.months);
+};
+
+/**
+ * Reads a monthly schedule out of the designer's flat `days` (「MONTHLY:15」, 「QUARTERLY:1」, 「MONTHS:6:1」, or 每月 / 每季度 with a day).
+ * Undefined when the text names no months.
+ */
+export function monthlyFromDays(days: string, time: string): WorkflowSchedule | undefined {
+  const text = days.trim().toUpperCase();
+  const match = /^(?:(MONTHLY|每月|每个月)|(QUARTERLY|每季度?|每个季度)|MONTHS[:：]?(\d{1,2}))(?:[:：\s]*(\d{1,2}))?/.exec(text);
+  if (!match) return undefined;
+  const months = match[1] ? 1 : match[2] ? 3 : Math.min(12, Math.max(1, Number(match[3])));
+  const day = Math.min(31, Math.max(1, Number(match[4] ?? 1)));
+  return { type: "monthly", day, months, time };
+}
+/** The flat `days` a monthly schedule is written back as, for a request that changes another part of it. */
+export const monthlyDays = (schedule: Extract<WorkflowSchedule, { type: "monthly" }>) =>
+  schedule.months === 1 ? `MONTHLY:${schedule.day}` : schedule.months === 3 ? `QUARTERLY:${schedule.day}` : `MONTHS:${schedule.months}:${schedule.day}`;
 
 /**
  * Whether a scheduled workflow is due now: today (in the person's zone) is one of its days, its time has passed, it has not run today,
@@ -144,8 +176,9 @@ const runsOn = (schedule: WorkflowSchedule, weekday: Weekday) =>
  */
 export function workflowDue(schedule: WorkflowSchedule, lastRunAt: string | undefined, now: Date, zone: string, heldSince?: string): boolean {
   const clock = wallClock(now, zone);
-  if (!runsOn(schedule, clock.weekday) || clock.time < schedule.time) return false;
-  if (lastRunAt && wallClock(new Date(lastRunAt), zone).day === clock.day) return false;
+  const lastDay = lastRunAt ? wallClock(new Date(lastRunAt), zone).day : undefined;
+  if (lastDay === clock.day) return false;
+  if (!runsOn(schedule, clock, lastDay) || clock.time < schedule.time) return false;
   // Held at its time because the assistant was busy: still due today, however late.
   if (heldSince && wallClock(new Date(heldSince), zone).day === clock.day) return true;
   const [hour, minute] = schedule.time.split(":").map(Number);
@@ -160,6 +193,9 @@ export const scheduleLabel = (schedule: WorkflowSchedule | null, locale?: Locale
   if (!schedule) return t("按需");
   if (schedule.type === "daily") return t("每天 {{time}}", { time: schedule.time });
   if (schedule.type === "weekdays") return t("工作日 {{time}}", { time: schedule.time });
+  if (schedule.type === "monthly") return schedule.months === 1 ? t("每月 {{day}} 日 {{time}}", { day: schedule.day, time: schedule.time })
+    : schedule.months === 3 ? t("每季度 {{day}} 日 {{time}}", { day: schedule.day, time: schedule.time })
+    : t("每 {{months}} 个月 {{day}} 日 {{time}}", { months: schedule.months, day: schedule.day, time: schedule.time });
   const days = locale === "en" ? schedule.days.map((day) => weekdayShort(locale, DAY_NUMBER[day])).join(", ")
     : schedule.days.map((day) => weekdayShort(locale, DAY_NUMBER[day]).slice(1)).join("、");
   return t("每周{{days}} {{time}}", { days, time: schedule.time });

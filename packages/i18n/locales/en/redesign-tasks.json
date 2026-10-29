@@ -21,6 +21,7 @@
   "本步教程": "Tutorial for this step",
   "已交给助手：{{title}}，进度在小帮手里看": "Handed to the assistant: {{title}}. Follow it in Helper",
   "未能交给助手": "Could not hand this to the assistant",
+  "未能交给助手：{{reason}}": "Could not hand this to the assistant: {{reason}}",
   "所属里程碑没有写达成标准：按「要交付的」交齐即算完成。": "The milestone has no standard: handing in everything under \"To deliver\" counts as done.",
   "去主线补标准": "Add one on Tracks",
   "批准并开始后，在此提交成果。": "Once approved and started, hand in the work here.",
