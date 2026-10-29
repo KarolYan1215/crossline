@@ -7,6 +7,8 @@ import type { NoticesBody, NoticeView } from "./notice-kinds";
 import { useLocale, useT } from "./locale-context";
 import { intlLocale, tFor, type Locale } from "../lib/i18n";
 import "./notice-bell.css";
+import { Bell } from "lucide-react";
+import { ICON } from "./ui/icon-button";
 
 /** The last reminder that popped up, so one reminder pops once, not again on every page while it is unread. */
 const TOASTED_KEY = "crossline.notice.toasted";
@@ -93,8 +95,7 @@ export function NoticeBell() {
   return <div className="notice-bell" ref={root}>
     <button type="button" className="notice-bell-button" aria-expanded={open} aria-haspopup="dialog"
       aria-label={unread ? t("提醒，{{count}} 条未读", { count: unread }) : t("提醒")} title={t("提醒")} onClick={toggle} {...(unread ? { "data-unread": "" } : {})}>
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v4l-2 3h16l-2-3V9a6 6 0 0 0-6-6Zm-2 15a2 2 0 0 0 4 0"
-        fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>
+      <Bell {...ICON} />
       {unread > 0 && <span className="notice-dot">{unread > 9 ? "9+" : unread}</span>}
     </button>
     {open && <div className="notice-panel" role="dialog" aria-label={t("提醒")}>

@@ -1,4 +1,5 @@
 "use client";
+import type { ReactNode } from "react";
 import { authClient } from "./auth-client";
 import { clearOfflineData, currentWorkspaceId } from "./offline-queue";
 import { useT } from "./locale-context";
@@ -10,13 +11,15 @@ import { useT } from "./locale-context";
  * `signOut()` clears the session, since nothing server-side can tell this browser which workspace it
  * was using afterward.
  */
-export function SignOutButton() {
+export async function signOutHere(): Promise<void> {
+  const workspaceId = currentWorkspaceId();
+  if (workspaceId) await clearOfflineData(workspaceId).catch(() => undefined);
+  await authClient.signOut();
+  location.href = "/login";
+}
+
+/** `icon`: the side bar's form, the icon before the words. */
+export function SignOutButton({ icon }: { icon?: ReactNode }) {
   const t = useT();
-  const handleClick = async () => {
-    const workspaceId = currentWorkspaceId();
-    if (workspaceId) await clearOfflineData(workspaceId).catch(() => undefined);
-    await authClient.signOut();
-    location.href = "/login";
-  };
-  return <button type="button" className="sign-out-button" onClick={() => { void handleClick(); }}>{t("退出登录")}</button>;
+  return <button type="button" className="sign-out-button" onClick={() => { void signOutHere(); }}>{icon}{t("退出登录")}</button>;
 }

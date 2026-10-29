@@ -78,8 +78,8 @@ test("Today keeps capture semantic-only and health outside identity navigation",
   await expect(page.locator(".composer select")).toHaveCount(0);
   await expect(page.locator('.composer textarea[name="title"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "提交完成证据" })).toHaveCount(0);
-  // The next-step card carries its own primary action; the whole card opens the task dialog.
-  await expect(page.locator('.task-card[data-variant="hero"] .task-actions')).toBeVisible();
+  // The next step is a row in 「需要处理」 with its usual presses as icons (2026-10-28 redesign).
+  await expect(page.locator('.nd-row[data-kind="task"] .task-actions').first()).toBeVisible();
   // The pending count depends on what other tests have written by now, so it is hidden (not masked: hidden keeps its place).
   await page.addStyleTag({ content: STABLE_FOR_SCREENSHOT });
   if (testInfo.project.name === "desktop-chrome") await expect(page).toHaveScreenshot("today-paper-grid.png", { fullPage: true });
@@ -88,6 +88,8 @@ test("Today keeps capture semantic-only and health outside identity navigation",
 test("a task card opens its dialog in place, and the dialog's full-page link shows the same task", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
+  // The next step's row opens its full card in place (2026-10-28 redesign); the card opens the dialog as before.
+  await page.locator('.nd-row[data-kind="task"] .nd-title').first().click();
   const hero = page.locator('.task-card[data-variant="hero"]');
   const title = (await hero.locator(".task-card-title").textContent())!.trim();
   // Clicking the card (not one of its controls) opens the dialog without leaving Today.
@@ -185,8 +187,8 @@ test("energy check keeps self report only and rejects the removed camera path", 
   await page.goto("/");
   await expect(page.getByRole("button", { name: "运行十二秒本地摄像头代理采样" })).toHaveCount(0);
   const submitted = page.waitForResponse((response) => response.url().endsWith("/api/energy-observations") && response.request().method() === "POST");
-  // The level is chosen from the capsule on the Today head, which opens the three levels on a tap.
-  await page.getByTestId("energy-capsule").locator(".energy-capsule-button").click();
+  // The level is chosen from the energy card on Today, whose pencil opens the three levels.
+  await page.getByTestId("energy-capsule").getByRole("button", { name: "纠正精力读数" }).click();
   await page.getByRole("button", { name: "记录中精力" }).click();
   expect((await submitted).ok()).toBe(true);
   // The dashboard reloads itself after a successful submission to reflect the new energy reading —
@@ -269,7 +271,7 @@ test("mobile navigation and reduced motion remain usable", async ({ page }, test
   await expect(page.getByRole("link", { name: "今日" })).toBeVisible();
   // What is waiting and the settings sit behind the fifth tab.
   await expect(page.getByText("更多")).toBeVisible();
-  await expect(page.locator('.task-card[data-variant="hero"]')).toBeVisible();
+  await expect(page.locator('.nd-row[data-kind="task"]').first()).toBeVisible();
 });
 
 /**
@@ -401,9 +403,9 @@ test("a work order started on one device becomes a conflict when another device'
 });
 
 /**
- * The system's questions on Today, as a stack: something awaited that was due on top and a backplan that split nothing beneath it,
- * stepped through with ‹ › and the arrow keys, each answered in place from options already written out — one with a follow-up form —
- * the next coming up by itself, and the 待确认 count going down, without a page reload. (A backplan's missing inputs are no longer
+ * The system's questions on Today, as rows of 「需要处理」 (2026-10-28): something awaited that was due above a backplan that split nothing,
+ * each opened and answered in place from options already written out — one with a follow-up form — and the 待确认 count going down,
+ * without a page reload. (A backplan's missing inputs are no longer
  * asked about: the split makes getting each one a step, docs/review-2026-10-13.md §11.)
  */
 test("Today asks what only the person knows, with options and follow-ups, and moves to the next on answering", async ({ page }, testInfo) => {
@@ -421,32 +423,32 @@ test("Today asks what only the person knows, with options and follow-ups, and mo
       approximate: true, followUpAt: "2026-09-14", state: "open", blocks: [], source: "manual" });
   } finally { store.close(); }
   await page.goto("/");
-  const list = page.getByRole("region", { name: "待决事项" });
-  await expect(list.getByRole("heading", { name: /^待决事项/ })).toBeVisible();
-  // A stack: the most urgent (the awaited item, due today) on top, the backplan that split nothing as an edge beneath it.
+  const list = page.getByRole("region", { name: /件需要处理$/ });
+  await expect(list.getByRole("heading", { name: /件需要处理$/ })).toBeVisible();
+  // Rows, most urgent first: the awaited item (due today) above the backplan that split nothing; a row opens its full card in place.
+  const waitingRow = list.locator('.nd-row[data-kind="ask"]').filter({ hasText: "师兄的「实测数据」到了吗？" });
+  const backplanRow = list.locator('.nd-row[data-kind="ask"]').filter({ hasText: `「${milestoneTitle.slice(0, 10)}` });
   const waiting = list.locator(".ask-card").filter({ hasText: "师兄的「实测数据」到了吗？" });
   const backplan = list.locator(".ask-card").filter({ hasText: "未能自动拆分" });
-  await expect(waiting).toBeVisible();
-  await expect(list.locator(".ask-peek").filter({ hasText: `「${milestoneTitle.slice(0, 10)}` }).first()).toContainText("未能自动拆分");
-  // ‹ › and the arrow keys move through the stack without answering anything.
-  await list.locator(".ask-peek").filter({ hasText: "未能自动拆分" }).first().click();
+  await expect(waitingRow).toBeVisible();
+  await expect(backplanRow).toBeVisible();
+  await backplanRow.locator(".nd-title").click();
   await expect(backplan).toBeVisible();
   await expect(waiting).toHaveCount(0);
-  await list.getByRole("button", { name: "上一项" }).focus();
-  await page.keyboard.press("ArrowLeft");
+  // Opening another row closes the first, without answering anything.
+  await waitingRow.locator(".nd-title").click();
   await expect(waiting).toBeVisible();
-  await page.keyboard.press("ArrowRight");
-  await expect(backplan).toBeVisible();
-  await page.keyboard.press("ArrowLeft");
-  const badge = page.locator(".running-head .pending-badge");
+  await expect(backplan).toHaveCount(0);
+  const badge = page.locator(".side-nav .pending-badge");
   const badgeMinusTotal = async () => (await badge.count() ? Number(await badge.textContent()) : 0)
     - await page.evaluate(async () => ((await (await fetch("/api/pending", { cache: "no-store" })).json()) as { total: number }).total);
   // An option with a follow-up form: 「还没，推迟」 asks for the day.
   await waiting.getByRole("button", { name: /^还没，推迟/ }).click();
   await waiting.getByLabel("推迟到").fill("2026-09-16");
   await waiting.getByRole("button", { name: "确定：还没，推迟" }).click();
-  // Answering the top one brings up the next by itself, and the header's count follows without a reload.
-  await expect(list.locator(".ask-card").filter({ hasText: "实测数据」到了吗" })).toHaveCount(0);
+  // The answered row leaves, and the header's count follows without a reload.
+  await expect(list.locator(".nd-row").filter({ hasText: "实测数据」到了吗" })).toHaveCount(0);
+  await backplanRow.locator(".nd-title").click();
   await expect(backplan).toBeVisible();
   await expect.poll(badgeMinusTotal).toBe(0);
   await backplan.getByRole("button", { name: /^暂不拆分该里程碑/ }).click();
@@ -532,6 +534,8 @@ test("Today's flywheel graph draws each line around its goal and opens a milesto
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
   await expect(page.locator(".lines-strip")).toHaveCount(0);
+  // Folded at the foot of Today since 2026-10-28.
+  await page.locator(".td-fold > summary").click();
   const graph = page.getByRole("region", { name: "飞轮图谱" });
   await expect(graph.locator('.fw-node[data-kind="anchor"]').first()).toBeVisible();
   await expect(graph.locator(".fw-lines li").first()).toContainText("项进行中");
@@ -580,8 +584,9 @@ test("画像海报的视觉基线", async ({ page }, testInfo) => {
 test("signing out deletes this browser's offline database for the workspace it was using", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
   await page.goto("/");
+  // Written by an effect once the page has hydrated, so it is waited for rather than read at load.
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("crossline.offline.workspaceId"))).toBeTruthy();
   const workspaceId = await page.evaluate(() => localStorage.getItem("crossline.offline.workspaceId"));
-  expect(workspaceId).toBeTruthy();
   // Prove the database actually exists first, so "it's gone" afterward is not vacuously true.
   await page.evaluate((id) => new Promise<void>((resolve, reject) => {
     const request = indexedDB.open(`crossline-offline-${id}`);

@@ -17,3 +17,14 @@ export const SIDE_ITEMS = [
   { label: "待确认", href: "/approvals", badge: true },
   { label: "设置", href: "/settings", badge: false }
 ] as const;
+
+/**
+ * The side bar's second group (2026-10-28, the frame's redesign): what waits for a decision, bringing work in from other tools, the
+ * portrait and the settings. Wider than `SIDE_ITEMS`, which the narrow header keeps short; the phone's 「更多」 lists these too.
+ */
+export const SECONDARY_ITEMS = [
+  { label: "待确认", href: "/approvals", badge: true },
+  { label: "导入", href: "/settings#import", badge: false },
+  { label: "画像", href: "/portrait", badge: false },
+  { label: "设置", href: "/settings", badge: false }
+] as const;

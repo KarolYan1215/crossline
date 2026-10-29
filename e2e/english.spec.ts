@@ -103,7 +103,8 @@ for (const where of PAGES) {
 test("the frame is English: the navigation and the switch back to Chinese", async ({ page }, testInfo) => {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
-  const nav = testInfo.project.name.includes("mobile") ? page.locator(".bottom-nav") : page.locator("header");
+  // A wide window navigates from the side bar (2026-10-28), a phone from the tab bar.
+  const nav = testInfo.project.name.includes("mobile") ? page.locator(".bottom-nav") : page.locator(".side-nav");
   await expect(nav.getByText("Today", { exact: true }).first()).toBeVisible();
   // On a phone too the switch is in the header (2026-10-28).
   await expect(page.getByRole("button", { name: "切换到中文" }).first()).toBeVisible();

@@ -9,6 +9,9 @@ import { useReturnState } from "../ui/return-state";
 import type { TaskDetail } from "../../lib/task-detail";
 import { useLocale, useT } from "../locale-context";
 import { intlLocale, weekdayShort } from "../../lib/i18n";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ICON, IconButton } from "../ui/icon-button";
+import { CALENDAR_ANCHOR, CALENDAR_DAY } from "../today/calendar-events";
 
 export type CalendarView = "day" | "week" | "month";
 /** The tab names are keys, translated where shown. */
@@ -50,6 +53,17 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
     document.getElementById("calendar")?.scrollIntoView({ block: "start" });
   }, []);
 
+  // The week strip in Today's head band opens a day here, and is told which day this shows so it can outline it.
+  useEffect(() => {
+    const onDay = (event: Event) => {
+      const day = (event as CustomEvent<string>).detail;
+      if (typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day)) { setView("day"); setAnchor(day); setSelected(undefined); }
+    };
+    window.addEventListener(CALENDAR_DAY, onDay);
+    return () => window.removeEventListener(CALENDAR_DAY, onDay);
+  }, []);
+  useEffect(() => { window.dispatchEvent(new CustomEvent(CALENDAR_ANCHOR, { detail: anchor })); }, [anchor]);
+
   // The week opens at the start of the working day rather than at midnight.
   useEffect(() => {
     const body = document.querySelector<HTMLElement>("[data-scroll-to-morning]");
@@ -79,9 +93,9 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
         {VIEWS.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => { setView(id); setSelected(undefined); }}>{t(label)}</button>)}
       </div>
       <div className="cal-nav">
-        <button type="button" onClick={() => step(-1)} aria-label={t("上一个")}>←</button>
+        <IconButton label={t("上一个")} icon={<ChevronLeft {...ICON} />} onClick={() => step(-1)} />
         <button type="button" onClick={() => setAnchor(today)} disabled={anchor === today}>{t("今天")}</button>
-        <button type="button" onClick={() => step(1)} aria-label={t("下一个")}>→</button>
+        <IconButton label={t("下一个")} icon={<ChevronRight {...ICON} />} onClick={() => step(1)} />
         <b>{title}</b>
       </div>
       <div className="cal-legend" aria-label={t("图例")}>

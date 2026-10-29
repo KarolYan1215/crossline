@@ -79,18 +79,20 @@ describe("the shell in English", () => {
   });
 
   test("Today's head and empty state", () => {
-    const html = renderToStaticMarkup(<DashboardView data={{
+    const html = renderToStaticMarkup(<LocaleProvider locale="en"><DashboardView data={{
       locale: "en", principalId: "o", workspaceId: "w", nowLabel: "Mon · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true,
       dateLabel: "14", monthLabel: "SEP · 2026", awaitingApproval: 1,
       capacity: { level: "uncalibrated", observationCount: 0, basis: [], blockers: [] },
       progress: { streakDays: 0, weekCount: 3 }, care: [], identities: [], upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 120, committedMinutes: 30 },
       flywheel: [], flywheelStrip: { nodes: [], edges: [] }, taskDetailById: new Map(), milestoneDetailById: new Map()
-    } as DashboardData} />);
+    } as DashboardData} /></LocaleProvider>);
     expect(html).toContain("Energy not calibrated");
-    expect(html).toContain("120 / 30 min");
+    expect(html).toContain("2 h");
+    expect(html).toContain("30 min");
+    expect(html).toContain("At a glance");
     expect(html).toContain("3 tasks");
     expect(html).toContain("proposal awaits approval");
-    expect(html).toContain("Next step");
+    expect(html).toContain("0 things to handle");
   });
 });
 

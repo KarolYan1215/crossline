@@ -5,6 +5,8 @@ import { looksLikeImportList } from "@crossline/core";
 import { useAttachmentDrop } from "../attachment-drop";
 import { MenuButton } from "../ui/controls";
 import { useT } from "../locale-context";
+import { ArrowUp, AtSign, Plus } from "lucide-react";
+import { ICON, IconButton } from "../ui/icon-button";
 
 export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 export type ComposerInput = { text: string; files: File[]; mentions: Mention[]; batch: boolean };
@@ -160,7 +162,11 @@ export function Composer({ mode, placeholder, shortPlaceholder, onSubmit, busy =
   return <form className={`composer${dragOver ? " dragging" : ""}`} data-mode={mode} onSubmit={(event) => void submit(event)} onPaste={onPaste}
     onDragOver={(event) => { event.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
     <div className="composer-box">
-      <MenuButton label={t("添加")} icon="＋" items={menu} />
+      <span className="composer-tools">
+        <MenuButton label={t("添加")} icon={<Plus {...ICON} />} items={menu} />
+        <IconButton className="composer-at" label={t("引用任务、里程碑或资料（@）")} icon={<AtSign {...ICON} />}
+          onClick={() => setPicker({ query: "", fromAt: false })} />
+      </span>
       <div className="composer-main">
         {(mentions.length > 0 || fileNames.length > 0 || batch) && <div className="composer-chips">
           {batch && <span className="composer-chip" data-kind="batch">{t("批量 · AI 拆分")} <button type="button" aria-label={t("取消批量")} onClick={() => setBatch(false)}>×</button></span>}
@@ -173,7 +179,7 @@ export function Composer({ mode, placeholder, shortPlaceholder, onSubmit, busy =
           onChange={(event) => onChange(event.target.value)} onKeyDown={onKeyDown}
           onInput={(event) => fitTextarea(event.currentTarget)} />
       </div>
-      <button type="submit" className="composer-send" disabled={busy || (!text.trim() && !fileNames.length)} aria-label={t("发送")}>{busy ? "…" : "↑"}</button>
+      <button type="submit" className="composer-send" disabled={busy || (!text.trim() && !fileNames.length)} aria-label={t("发送")}>{busy ? "…" : <ArrowUp {...ICON} />}</button>
       <input ref={fileInputRef} type="file" multiple accept={ACCEPTED} hidden onChange={onInputChange} name="attachments" />
     </div>
     {mode === "capture" && !batch && looksLikeImportList(text) && <p className="composer-import">

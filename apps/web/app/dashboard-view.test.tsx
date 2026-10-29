@@ -80,8 +80,11 @@ describe("dashboard view", () => {
     expect(html).toContain("开始计时");
     expect(html).not.toContain("前往任务详情执行并提交证据");
     expect(html).not.toContain("开始前精力");
-    // The whole card opens the task dialog.
-    expect(html).toContain('aria-label="完成论文结果段，打开详情"');
+    // The row's title opens the full task card in place; the open icon opens the task dialog.
+    expect(html).toMatch(/class="nd-title" aria-expanded="false">完成论文结果段</);
+    expect(html).toContain('aria-label="打开"');
+    expect(html).toContain('aria-label="完成并提交材料"');
+    expect(html).toContain('aria-label="推迟"');
   });
 
   test("includes a usable quick capture form", () => {
@@ -96,13 +99,13 @@ describe("dashboard view", () => {
       upcoming: [], milestonePulse: [], todayCapacity: { availableMinutes: 0, committedMinutes: 0 }, flywheel: [], flywheelStrip: { nodes: [], edges: [] },
       ...noPreviews
     }} />);
-    expect(html).toContain("id=\"capture-title\">输入<");
+    expect(html).toContain('id="capture-title" class="ds-serif">输入<');
     expect(html).toContain('name="title"');
     expect(html).not.toContain('name="identityId"');
     expect(html).not.toContain('name="expectedMinutes"');
   });
 
-  test("uses a running head with the four working views, not a SaaS sidebar", () => {
+  test("uses a side bar with the four working views and the second group, and keeps the running head for narrow screens", () => {
     const html = renderToStaticMarkup(<DashboardView data={{
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
       capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
@@ -112,8 +115,8 @@ describe("dashboard view", () => {
       ...noPreviews
     }} />);
     expect(html).toContain("running-head");
-    expect(html).not.toContain("sidebar");
-    for (const label of ["今日", "主线", "计划", "任务", "待确认", "设置"]) expect(html).toContain(label);
+    expect(html).toContain('class="side-nav"');
+    for (const label of ["今日", "主线", "计划", "任务", "待确认", "导入", "画像", "设置", "小帮手"]) expect(html).toContain(label);
     expect(html).not.toContain("CARE / CAPACITY");
   });
 });
@@ -212,9 +215,10 @@ describe("dashboard view with nothing to recommend yet", () => {
     expect(empty({})).toContain("暂无可执行任务");
   });
 
-  test("quick capture comes before the next action, and its button says what it does", () => {
+  test("the input box and 「需要处理」 are both on Today, and the send button says what it does", () => {
     const html = empty({});
-    expect(html.indexOf("capture-title")).toBeLessThan(html.indexOf("下一步"));
+    expect(html).toContain("capture-title");
+    expect(html).toContain("0 件需要处理");
     expect(html).toContain('aria-label="发送"');
   });
 });

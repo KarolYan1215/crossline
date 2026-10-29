@@ -52,6 +52,24 @@ export function AnalogClock({ nowIso, timeZone, fixed }: { nowIso: string; timeZ
 }
 
 /**
+ * The same instant in digits, 「07:20:48」, beside the dial (2026-10-28 redesign): read in the same zone and, when pinned, held still at
+ * the minute so the snapshot stays reproducible.
+ */
+export function DigitalClock({ nowIso, timeZone, fixed, className }: { nowIso: string; timeZone: string; fixed: boolean; className?: string }) {
+  const [now, setNow] = useState(() => new Date(nowIso));
+  useEffect(() => {
+    if (fixed) return;
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, [fixed]);
+  const { hours, minutes, seconds } = readClock(now, timeZone);
+  const two = (value: number) => String(value).padStart(2, "0");
+  return <time className={className} dateTime={now.toISOString()} suppressHydrationWarning>
+    {two(hours)}:{two(minutes)}{fixed ? "" : `:${two(seconds)}`}
+  </time>;
+}
+
+/**
  * The hour, minute and second that `instant` shows in `timeZone`.
  *
  * `Date` only ever exposes UTC or the host's zone, and this board's whole notion of "today" is one

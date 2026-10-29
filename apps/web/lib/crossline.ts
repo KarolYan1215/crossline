@@ -2349,16 +2349,27 @@ const toAction = (ctx: AccessContext, order: ActionableOrder | undefined, reason
  * with its basis, the day's capacity when it is held below its share, and the person's own word when they gave it in the last four
  * hours (which then also stands for the current slot).
  */
-function energyEstimateFor(ctx: AccessContext, now: Date, today: string): NonNullable<DashboardData["energyEstimate"]> {
+function energyEstimateFor(ctx: AccessContext, now: Date, today: string, timeZone: string): NonNullable<DashboardData["energyEstimate"]> {
   const model = energyModel(ctx, readAvailability(ctx));
   const prediction = model.predict(now.toISOString());
+  // The day's curve for Today's energy card (2026-10-28): the same model read every half hour from 06:00 to midnight, with the person's
+  // own cut points between low, medium and high. Without a known last sleep the model reads nothing, and no curve is drawn.
+  const points = Array.from({ length: 36 }, (_, index) => 360 + index * 30).flatMap((minute) => {
+    let at: string;
+    try { at = toZonedInstant(today, `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`, timeZone); } catch { return []; }
+    const alertness = model.predict(at).alertness;
+    return alertness === undefined ? [] : [{ minute, alertness }];
+  });
+  const [hour = "0", minuteOfHour = "0"] = formatInTimeZone(now, timeZone, "HH:mm").split(":");
+  const curve = points.length >= 12 ? { points, low: model.calibration.low, high: model.calibration.high, nowMinute: Number(hour) * 60 + Number(minuteOfHour) } : undefined;
   const capacity = model.capacity(now.toISOString(), today);
   const report = getStore().listEnergyObservations(ctx.workspaceId)
     .filter((item) => item.source === "self_report" && item.level !== "uncalibrated" && now.getTime() - Date.parse(item.observedAt) < 4 * 3_600_000)
     .sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
   return { level: prediction.level, confidence: prediction.confidence, basis: prediction.basis,
     ...(capacity.multiplier < 1 ? { capacity } : {}),
-    ...(report ? { selfReport: report.level as "low" | "medium" | "high" } : {}) };
+    ...(report ? { selfReport: report.level as "low" | "medium" | "high" } : {}),
+    ...(curve ? { curve } : {}) };
 }
 
 export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardData, "taskDetailById" | "milestoneDetailById">> {
@@ -2541,7 +2552,7 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     // 「本机活动采集未开启」 points at a switch only this computer's owner has (2026-10-15 walkthrough): not said to a guest.
     capacity: assistantAvailable(store, ctx.workspaceId) ? capacity
       : { ...capacity, blockers: capacity.blockers.filter((blocker) => blocker.code !== "LOCAL_ACTIVITY_NOT_AUTHORISED") },
-    energyEstimate: energyEstimateFor(ctx, now, today),
+    energyEstimate: energyEstimateFor(ctx, now, today, timeZone),
     energyLearning: energyCalibration(outcomes),
     // Only proposals that are decisions already: one whose steps are still being planned is not counted (`proposalReady`, W-31).
     awaitingApproval: readyProposals.length,

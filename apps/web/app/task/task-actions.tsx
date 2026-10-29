@@ -4,6 +4,8 @@ import { useState, type ReactNode } from "react";
 import { MenuButton } from "../ui/controls";
 import { createCommand, enqueue, nextSequence, type OfflineCommandType } from "../offline-queue";
 import { useT } from "../locale-context";
+import { BadgeCheck, Bot, Maximize2, MoreHorizontal, Pause, Play, RotateCcw } from "lucide-react";
+import { ICON, IconButton } from "../ui/icon-button";
 
 const OFFLINE_TYPES: Record<string, OfflineCommandType> = { start: "work_order.start", pause: "work_order.pause", resume: "work_order.resume" };
 
@@ -26,7 +28,9 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; code?: 
  * countdown), 暂停 with a reason / 继续计时 (a running session), and 交给 Agent when the system can do the work or one of its steps.
  * Archiving sits in the overflow menu. Completion and evidence are in the task dialog, where the person can see what is being handed in.
  */
-export function TaskActions({ workOrderId, state, approvable = true, paused, agentReady, agentStepId, onOpen, offline, beforeStart, children }: {
+export function TaskActions({ workOrderId, state, approvable = true, paused, agentReady, agentStepId, onOpen, offline, beforeStart, iconic = false, children }: {
+  /** Icons in place of the buttons' words (a row on Today); the words stay as each button's name and tip. */
+  iconic?: boolean;
   workOrderId: string; state: string; paused: boolean; agentReady: boolean; onOpen?: (() => void) | undefined;
   /** False for a proposal whose steps are still being planned: there is nothing to approve yet (W-31). */
   approvable?: boolean;
@@ -87,23 +91,27 @@ export function TaskActions({ workOrderId, state, approvable = true, paused, age
     return { ok: false, message: result.message ?? t("未能交给 Agent。") };
   }, () => setStatus(t("已交给 Agent，产出完成后进入待审阅。")));
 
-  return <div className="task-actions">
-    {state === "awaiting_plan_approval" && approvable && <button type="button" className="primary-button" disabled={busy}
-      onClick={() => void run(() => post(`/api/work-orders/${encodeURIComponent(workOrderId)}/approve`, {}))}>{t("批准")}</button>}
-    {state === "blocked" && <button type="button" className="primary-button" disabled={busy}
-      onClick={() => void run(() => post(`/api/work-orders/${encodeURIComponent(workOrderId)}/approve`, {}))}>{t("恢复")}</button>}
-    {(state === "approved" || state === "ready_for_human") && <button type="button" className="primary-button" disabled={busy} onClick={start}>{t("开始计时")}</button>}
-    {state === "active" && !paused && !pausing && <button type="button" disabled={busy} onClick={() => setPausing(true)}>{t("暂停")}</button>}
-    {state === "active" && paused && <button type="button" className="primary-button" disabled={busy} onClick={() => void run(() => execution({ action: "resume" }))}>{t("继续计时")}</button>}
+  // Iconic (a row on Today, 2026-10-28): the same buttons drawn as icons, their words kept as the name and the hover tip.
+  const action = (label: string, icon: ReactNode, onClick: () => void, primary = false) => iconic
+    ? <IconButton label={label} icon={icon} tone={primary ? "primary" : "plain"} disabled={busy} onClick={onClick} />
+    : <button type="button" className={primary ? "primary-button" : undefined} disabled={busy} onClick={onClick}>{label}</button>;
+  const approve = () => void run(() => post(`/api/work-orders/${encodeURIComponent(workOrderId)}/approve`, {}));
+
+  return <div className="task-actions" data-iconic={iconic || undefined}>
+    {state === "awaiting_plan_approval" && approvable && action(t("批准"), <BadgeCheck {...ICON} />, approve, true)}
+    {state === "blocked" && action(t("恢复"), <RotateCcw {...ICON} />, approve, true)}
+    {(state === "approved" || state === "ready_for_human") && action(t("开始计时"), <Play {...ICON} />, start, true)}
+    {state === "active" && !paused && !pausing && action(t("暂停"), <Pause {...ICON} />, () => setPausing(true))}
+    {state === "active" && paused && action(t("继续计时"), <Play {...ICON} />, () => void run(() => execution({ action: "resume" })), true)}
     {pausing && <span className="task-actions-choices" role="group" aria-label={t("暂停原因")}>
       {/* The reason is kept in the person's language, like anything they say about their own work. */}
       {PAUSE_REASONS.map((item) => <button key={item} type="button" disabled={busy} onClick={() => void run(() => execution({ action: "pause", reason: t(item) }))}>{t(item)}</button>)}
       <button type="button" onClick={() => setPausing(false)} aria-label={t("取消暂停")}>×</button>
     </span>}
-    {agentReady && !["accepted", "archived", "evidence_review"].includes(state) && <button type="button" disabled={busy} onClick={delegate}>{t("交给 Agent")}</button>}
+    {agentReady && !["accepted", "archived", "evidence_review"].includes(state) && action(t("交给 Agent"), <Bot {...ICON} />, delegate)}
     {children}
-    {onOpen && <button type="button" onClick={onOpen}>{t("打开")}</button>}
-    {!["accepted", "archived"].includes(state) && <MenuButton label={t("更多操作")} icon="⋯" items={[{ label: t("归档"), hint: t("可在已归档中恢复"), onSelect: () => setArchiving(true) }]} />}
+    {onOpen && (iconic ? <IconButton label={t("打开")} icon={<Maximize2 {...ICON} />} onClick={onOpen} /> : <button type="button" onClick={onOpen}>{t("打开")}</button>)}
+    {!["accepted", "archived"].includes(state) && <MenuButton label={t("更多操作")} icon={iconic ? <MoreHorizontal {...ICON} /> : "⋯"} items={[{ label: t("归档"), hint: t("可在已归档中恢复"), onSelect: () => setArchiving(true) }]} />}
     {archiving && <span className="task-actions-choices">
       <input value={reason} maxLength={200} placeholder={t("归档原因（选填）")} aria-label={t("归档原因（选填）")} onChange={(event) => setReason(event.target.value)} />
       <button type="button" disabled={busy} onClick={() => void run(() => execution({ action: "archive", reason }))}>{t("归档")}</button>

@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect } from "react";
 import type { Ask } from "@crossline/core";
 import { AskCard } from "./asks/ask-card";
-import { AskDeck, DeckNav, useAskList, useDeck } from "./asks/ask-drawer";
+import { useAskList } from "./asks/ask-drawer";
 import type { AskPreviews } from "./asks/types";
 import { useT } from "./locale-context";
-import { PendingTotalLink } from "./pending-badge";
 
 /**
  * The system's questions, a few at a time: each says what is asked, why, what an answer does and what silence does, with its options
  * already written (the recommended one marked), a follow-up form when an option needs specifics (pick 「在等」 and it asks who and
- * roughly when), and 「明天再问」 / 「下周再问」. The card and the drawer are shared with 待确认 (`asks/`).
+ * roughly when), and 「明天再问」 / 「下周再问」. The card and the drawer are shared with 待确认 (`asks/`). Today lists them in its
+ * 「需要处理」 card (`today/needs-card.tsx`) since 2026-10-28; the stack that used to sit there is gone.
  */
 type Scope = "week" | "later";
 const inScope = (scope: Scope) => (ask: Ask) => scope === "later" ? Boolean(ask.entersOn) : !ask.entersOn;
@@ -25,38 +24,5 @@ export function AskList({ initial, scope = "week", heading = "待决事项", pre
   return <section className="ask-list" id={scope === "later" ? "later-asks" : "asks"} aria-label={t(heading)}>
     <header><h2>{t(heading)} · {asks.length}</h2></header>
     <ol className="ak-list">{asks.map((ask) => <AskCard key={ask.id} ask={ask} preview={previews?.[ask.id]} onDone={onDone} />)}</ol>
-  </section>;
-}
-
-/**
- * Today's asks as a stack (decided 2026-10-10): only the top one open, the next two as edges beneath it, most urgent first and, at
- * equal urgency, the more important milestone's first. Answering the top one brings up the next; ‹ › and the left and right arrow keys
- * (anywhere on the page, except while typing, on a slider or in a dialog) move through the stack without answering.
- */
-export function AskStack({ initial, moreHref, previews }: { initial: Ask[]; moreHref?: string; previews?: AskPreviews }) {
-  const t = useT();
-  const { asks, onDone } = useAskList(initial, inScope("week"));
-  const count = asks.length;
-  const { at, go, pick } = useDeck(count);
-  useEffect(() => {
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented) return;
-      const target = event.target as HTMLElement | null;
-      if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable || target.closest('[role="slider"],[role="dialog"],dialog'))) return;
-      if (document.querySelector("dialog[open]")) return;
-      event.preventDefault();
-      go(event.key === "ArrowRight" ? 1 : -1);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
-  if (!count) return null;
-  return <section className="ask-list ask-stack" id="asks" aria-label={t("待决事项")}>
-    <header><h2>{t("待决事项")} · {count}</h2>
-      {/* 「待决事项」 counts these questions only; the badge in the header counts all of 待确认, so the link says that larger number
-          beside it instead of a second unexplained one (2026-10-21 walkthrough). */}
-      <DeckNav at={at} count={count} go={go} label={t("切换待决事项")}>{moreHref && <PendingTotalLink href={moreHref} />}</DeckNav></header>
-    <AskDeck asks={asks} at={at} pick={pick} onDone={onDone} previews={previews} />
   </section>;
 }

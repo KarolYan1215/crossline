@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import { intlLocale, tFor, type Locale, type Translate } from "../lib/i18n";
 import { useLocale, useT } from "./locale-context";
+import { Undo2 } from "lucide-react";
+import { ICON } from "./ui/icon-button";
 
 /** `label` is stored as written at the time; one the app wrote in Chinese is a catalogue key and reads in today's language (`t`). */
 type Op = { id: string; label: string; at: string };
@@ -86,7 +88,8 @@ export function UndoCenter() {
 
   return <>
     {ops.length > 0 && <>
-      <button type="button" className="undo-trigger" popoverTarget={menu} title={t("最近 24 小时的操作，可撤销（Ctrl+Z 撤销最近一项）")}>{t("撤销")}</button>
+      <button type="button" className="undo-trigger" popoverTarget={menu} aria-label={t("撤销")} title={t("最近 24 小时的操作，可撤销（Ctrl+Z 撤销最近一项）")}>
+        <Undo2 {...ICON} /></button>
       <div id={menu} popover="auto" className="ui-menu undo-menu" role="menu" aria-label={t("最近操作")}>
         {ops.slice(0, 15).map((op) => <button key={op.id} type="button" role="menuitem" onClick={(event) => {
           (event.currentTarget.parentElement as HTMLElement & { hidePopover?: () => void }).hidePopover?.();

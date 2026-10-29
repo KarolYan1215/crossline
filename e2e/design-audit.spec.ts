@@ -59,13 +59,17 @@ async function audit(page: Page): Promise<{ fonts: Finding[]; small: Finding[]; 
       // Two faces: Arial (with DengXian) for the system's own text, Microsoft YaHei for text a model wrote (inside `.gen`). A third,
       // the poster's serif, is allowed only inside `.pt-serif` on the portrait, which is used only for strings written in code.
       const face = style.fontFamily.split(",")[0]!.replace(/["']/g, "").trim().toLowerCase();
-      const expected = element.closest(".gen") ? "microsoft yahei" : element.closest(".pt-serif") ? "crossline poster serif" : "arial";
+      // A fourth, the frame's display serif (`.ds-serif`, 2026-10-28), sets only fixed strings too: the wordmark, Today's date and clock
+      // and card titles; its stack starts with the Latin companion and falls back to the display subset for their Chinese.
+      const expected = element.closest(".gen") ? "microsoft yahei" : element.closest(".pt-serif") ? "crossline poster serif"
+        : element.closest(".ds-serif") ? "crossline poster serif latin" : "arial";
       // A formula typeset by KaTeX (`.katex`, app/ui/markdown.tsx) is drawn in KaTeX's own math fonts, bundled with the app: a formula in
       // Arial would no longer read as mathematics. Its sub- and superscripts are set at about 70% of the line by mathematical
       // convention, so the size rule does not apply inside it either; the formula's base size follows the text around it.
       const formula = Boolean(element.closest(".katex"));
       // English poster text uses the Latin companion of the poster serif (portrait.css).
       const same = face === expected || (expected === "crossline poster serif" && face === "crossline poster serif latin");
+      // The contrast rule below is not relaxed for either serif.
       if (!same && !formula) fonts.push(finding(style.fontFamily.slice(0, 60)));
       if (parseFloat(style.fontSize) < 12 && !formula) small.push(finding(style.fontSize));
       if (element.closest(":disabled, [aria-disabled='true']")) continue;

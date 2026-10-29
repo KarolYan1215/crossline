@@ -1,0 +1,199 @@
+/*
+ * Today (2026-10-28 redesign; tokens in shell.css). Inside `.today-page` the original names point at the new tokens, so every component
+ * Today reuses (the calendar, the day panel, the task and question cards, the input box) takes the warm palette without its own rules.
+ */
+html:has(.today-page) body{background:var(--ds-bg)}
+.today-page{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--shade:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);
+  --now:var(--ds-accent);--now-ink:var(--ds-accent-ink);color:var(--ink)}
+body:has(.today-page) .running-head{background:var(--ds-bg)}
+
+/* ── head band ── */
+.td-head{display:grid;grid-template-columns:auto auto minmax(0,1fr);align-items:center;gap:14px 28px;padding:18px 0 16px}
+.td-date{display:flex;align-items:center;gap:14px;margin:0;font-weight:400}
+.td-day{font-size:clamp(48px,5vw,64px);line-height:.9;font-weight:400;color:var(--ink)}
+.td-date-side{display:grid;gap:4px}
+.td-month{font-size:15px;letter-spacing:.06em;color:var(--ink)}
+.td-weekday{font-size:14px;color:var(--graphite)}
+.td-clock{display:flex;align-items:center;gap:14px;padding-left:28px;border-left:1px solid var(--ds-line)}
+.td-clock .analog-clock{width:58px}
+.today-page .analog-clock .ac-ring{stroke:var(--ds-line);stroke-width:2}
+.today-page .analog-clock .ac-nums{display:none}
+.today-page .analog-clock .ac-hand.hour{stroke-width:6;stroke-linecap:round}
+.today-page .analog-clock .ac-hand.minute{stroke-width:3.5;stroke-linecap:round}
+.td-clock-text{display:grid;gap:2px}
+.td-time{font-size:clamp(26px,2.6vw,34px);line-height:1.2;color:var(--ink)}
+.td-clock-text small{font-size:12px;color:var(--graphite)}
+.td-week{justify-self:end;display:flex;gap:4px}
+.td-week button{display:grid;justify-items:center;gap:3px;width:42px;padding:4px 0 2px;border-radius:10px;color:var(--ink)}
+.td-week button small{font-size:12px;color:var(--graphite)}
+.td-week button b{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;font-size:14px;font-weight:600}
+.td-week button[data-today] b{background:var(--ds-accent);color:var(--ds-on-accent)}
+.td-week button[aria-pressed="true"]:not([data-today]) b{box-shadow:inset 0 0 0 1.5px var(--ds-accent)}
+.td-week button:hover{background:var(--ds-chalk)}
+.td-week i{width:4px;height:4px;border-radius:50%}
+.td-week i[data-busy]{background:var(--ds-accent)}
+
+/* ── layout ── */
+.td-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,380px);gap:20px;align-items:start}
+.td-main,.td-side{display:grid;gap:20px;min-width:0}
+.td-card{position:relative;min-width:0;padding:16px 18px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:var(--ds-radius);box-shadow:var(--ds-shadow)}
+.td-card-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 12px;margin:0 0 12px}
+.td-card-head h2{margin:0;font-size:19px;font-weight:600;line-height:1.2;color:var(--ink)}
+.td-card-head>a,.td-card-head small{font-size:12px;color:var(--graphite)}
+.td-card-head>a:hover{color:var(--ink);text-decoration:underline}
+
+/* Controls in the warm style: 8px corners, the accent for the one primary press. */
+.today-page :is(.primary-button,.secondary-button,.text-button,.task-actions>button,.dq-defer button,.ask-option,.dq-link,.dq-links a,.conversation-options button,.cal-nav button,.ui-menu-trigger){border-radius:var(--ds-radius-control)}
+.today-page .primary-button{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
+.today-page .primary-button:hover{background:var(--ds-accent-ink);color:var(--ds-on-accent)}
+.today-page input:not([type="checkbox"]):not([type="radio"]),.today-page textarea,.today-page select{border-radius:var(--ds-radius-control)}
+/* A line is a small tag: its colour as a light ground, the words in ink. */
+.today-page .ui-line-tag{flex:none;border:0;border-radius:999px;padding:0 8px;background:color-mix(in srgb,var(--lc,var(--graphite)) 14%,var(--ds-card));color:var(--ink);font-weight:600}
+
+/* ── calendar card ── */
+.td-cal{container-type:inline-size}
+.td-cal .cal-head{gap:8px 12px}
+.today-page .cal-tabs{border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);overflow:hidden;background:var(--ds-bg)}
+.today-page .cal-tabs button{padding:5px 16px;font-weight:600;color:var(--graphite)}
+.today-page .cal-tabs button[aria-selected="true"]{background:var(--ds-accent-soft);color:var(--ds-accent-ink)}
+.today-page .cal-nav button{border-color:var(--ds-line);min-height:32px}
+.today-page .cal-nav .ds-icon{padding:0;border-color:var(--ds-line)}
+.today-page .cal-legend span::before{border-radius:3px}
+.today-page .dv-scroll{max-height:clamp(360px,calc(100vh - 430px),760px);border-radius:10px;border-color:var(--ds-line)}
+.today-page .dv-block{border-radius:6px;outline-color:var(--ds-card)}
+.today-page .dv-flag{border-radius:999px}
+.today-page .dv-now i{color:var(--ds-on-accent);border-radius:4px}
+.today-page .dq{border-radius:10px;border-color:var(--ds-line);background:var(--ds-bg)}
+.today-page .dq-meter{border-radius:3px;overflow:hidden}
+.today-page .dq-meter i{background:var(--ds-accent)}
+.today-page .schedule-change,.today-page .ss{border-radius:8px}
+@container (min-width:720px){
+  .today-page .dv[data-has-aside]{grid-template-columns:minmax(0,1fr) minmax(250px,300px)}
+  .today-page .dv-aside{order:2}
+}
+@container (max-width:719px){
+  .today-page .dv[data-has-aside]{grid-template-columns:minmax(0,1fr)}
+}
+
+/* ── input card ── */
+.today-page .td-input{display:grid;grid-template-columns:minmax(0,1fr);gap:0;align-items:stretch;padding:16px 18px 14px;border:1px solid var(--ds-line)}
+.today-page .td-input .td-card-head h2{font-size:19px;font-weight:600}
+.today-page .composer-box{gap:6px;padding:8px 8px 8px 10px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);align-items:center}
+.today-page .composer-box:focus-within{border-color:var(--ds-accent)}
+.today-page .composer-box .ui-menu-trigger{border-color:var(--ds-line);border-radius:50%}
+.today-page .composer-send{width:38px;height:38px;background:var(--ds-accent);color:var(--ds-on-accent)}
+.today-page .composer-send:disabled{background:var(--ds-line);color:var(--ds-muted)}
+.today-page .composer-picker,.today-page .conversation-card,.today-page .conversation-person p{border-radius:8px}
+
+/* ── energy card ── */
+.energy-reading{display:flex;align-items:baseline;gap:8px;margin:0 0 8px}
+.energy-reading small{font-size:12px;color:var(--graphite)}
+.energy-reading b{font-size:20px;font-weight:600}
+.energy-curve{position:relative;margin:0;display:grid;gap:4px}
+.energy-curve svg{display:block;width:100%;height:88px;overflow:visible}
+.energy-band-top{stop-color:var(--ds-accent);stop-opacity:.3}
+.energy-band-bottom{stop-color:var(--ds-accent);stop-opacity:0}
+.energy-line{fill:none;stroke:var(--ds-accent);stroke-width:2;vector-effect:non-scaling-stroke}
+.energy-cut{stroke:var(--ds-muted);stroke-opacity:.45;stroke-dasharray:3 4;vector-effect:non-scaling-stroke}
+.energy-now{stroke:var(--ink);stroke-width:1;vector-effect:non-scaling-stroke}
+.energy-now-dot{position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;background:var(--ds-card);border:2px solid var(--ds-accent)}
+.energy-axis{display:flex;justify-content:space-between;font-size:12px;color:var(--graphite)}
+.energy-legend,.energy-basis,.energy-empty{margin:6px 0 0;font-size:12px;line-height:1.5;color:var(--graphite)}
+.energy-correct{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 0;font-size:13px}
+.energy-card .capacity-blocker{margin:6px 0 0}
+.energy-card .rest-prompt{margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--ds-chalk);font-size:13px}
+.energy-card .rest-prompt p{margin:0 0 6px}
+.energy-card .care-band{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0;padding:0;border:0}
+.energy-card .care-band div{padding:4px 10px;border-radius:999px;background:var(--ds-chalk)}
+.energy-card .care-band dt{display:inline;font-size:12px;color:var(--graphite)}
+.energy-card .care-band dd{display:inline;margin:0 0 0 6px;font-size:12px}
+
+/* ── overview card ── */
+.ov{container-type:inline-size}
+.ov-grid{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.ov-grid li{min-width:0}
+.ov-grid li+li{border-left:1px solid var(--ds-line)}
+.ov-grid a{display:grid;gap:4px;align-content:start;height:100%;padding:2px 10px;border-radius:8px;color:var(--ink)}
+.ov-grid li:first-child a{padding-left:0}
+.ov-grid a:hover .ov-label{color:var(--ink);text-decoration:underline}
+.ov-label{font-size:12px;color:var(--graphite)}
+.ov-value{font-size:20px;font-weight:600;line-height:1.15;overflow-wrap:anywhere}
+.ov-grid a[data-alarm] .ov-value{color:var(--ds-alarm-ink)}
+.ov-grid .time-bar{min-width:0;height:4px;border-radius:2px;overflow:hidden;background:var(--ds-line)}
+.ov-grid .time-bar-fill{background:var(--ds-accent)}
+@container (max-width:400px){
+  .ov-grid{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:12px}
+  .ov-grid li:nth-child(3){border-left:0}
+  .ov-grid li:nth-child(3) a{padding-left:0}
+}
+
+/* ── 「需要处理」 ── */
+.nd-loop{position:absolute;right:14px;bottom:10px;color:var(--ds-line);opacity:.7;pointer-events:none}
+.nd{padding-bottom:44px}
+.nd-head-links .pending-total-link{font-size:12px;color:var(--graphite)}
+.nd .answer-all{margin:0 0 8px}
+.nd-note{margin:8px 0;font-size:13px;line-height:1.55;color:var(--graphite)}
+.nd .seed-notice{border-radius:8px}
+.nd-list{margin:0;padding:0;list-style:none;display:grid}
+.nd-row{display:grid;gap:4px;min-width:0;padding:10px 0;border-top:1px solid var(--ds-line)}
+.nd-line{display:flex;align-items:center;gap:8px;min-width:0}
+.nd-title{flex:1 1 auto;min-width:0;padding:2px 0;text-align:left;font-size:14px;line-height:1.4;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nd-title:hover{text-decoration:underline}
+.nd-row[data-open] .nd-title{white-space:normal}
+.nd-go{flex:none;color:var(--graphite)}
+.nd-flag{flex:none;display:inline-flex;color:var(--ink)}
+.nd-flag svg{color:var(--ds-alarm);fill:currentColor}
+/* Icon buttons in a row are bare icons: no box, the primary one filled with the accent. */
+.task-actions[data-iconic]>.ds-icon{min-height:0;padding:0;border-color:transparent;font-size:inherit}
+.task-actions[data-iconic]>.ds-icon:hover{border-color:transparent}
+.task-actions[data-iconic] .ui-menu-trigger{width:32px;height:32px;border-color:transparent;border-radius:var(--ds-radius-control)}
+.nd-sub{margin:0;font-size:12px;line-height:1.45;color:var(--graphite);overflow-wrap:anywhere}
+.nd-actions,.nd-row .task-actions{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.nd-row .task-actions .task-actions-choices{flex-basis:100%}
+.nd-quick{display:inline-flex;align-items:center;gap:4px;max-width:min(240px,100%);min-height:30px;padding:3px 10px 3px 8px;border:1px solid transparent;border-radius:999px;
+  background:var(--ds-accent-soft);color:var(--ds-accent-ink);font-size:12px;font-weight:600}
+.nd-quick span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nd-quick:hover{border-color:var(--ds-accent)}
+.nd-row small[role="status"]{font-size:12px;color:var(--graphite)}
+.nd-expand{margin:6px 0 0;padding:0;list-style:none}
+.nd-expand .ask-card,.nd-expand .task-card{border-radius:10px}
+
+/* ── flywheel fold ── */
+.td-fold{margin-top:20px}
+.td-fold>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;cursor:pointer}
+.td-fold>summary h2{display:inline;margin:0;font-size:19px;font-weight:600}
+.td-fold>summary small{font-size:12px;color:var(--graphite)}
+.td-fold-link{margin:8px 0;font-size:12px}
+
+/* ── wide screen: the top-right cluster sits on the head band's row ── */
+@media (min-width:1025px){
+  body:has(.today-page) .running-head{position:absolute;top:14px;right:28px;left:auto;margin:0;padding:0;border:0;background:transparent}
+  .today-page .td-head{padding-right:250px}
+  /* The red bar for a down worker sits on the cluster's row too. */
+  .today-page .runtime-banner{margin-right:250px}
+}
+@media (min-width:1025px) and (max-width:1280px){
+  .today-page .td-head{grid-template-columns:auto auto;padding-right:250px}
+  .today-page .td-week{grid-column:1 / -1;justify-self:start}
+}
+
+/* ── narrow: one column, in the order the person deals with it ── */
+@media (max-width:1024px){
+  .td-grid{grid-template-columns:minmax(0,1fr);gap:16px}
+  .td-main,.td-side{display:contents}
+  .td-side .nd{order:1}
+  .td-cal{order:2}
+  .energy-card{order:3}
+  .ov{order:4}
+  .td-input{order:5}
+  .td-head{grid-template-columns:auto minmax(0,1fr);padding:14px 0 12px}
+  .td-week{grid-column:1 / -1;justify-self:stretch;justify-content:space-between}
+}
+@media (max-width:680px){
+  .td-head{gap:10px 16px}
+  .td-clock{padding-left:16px}
+  .td-clock .analog-clock{display:none}
+  .td-week button{width:auto;flex:1 1 0;min-height:56px}
+  .td-card{padding:14px}
+  .nd-title{white-space:normal}
+}

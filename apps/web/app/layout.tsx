@@ -11,6 +11,7 @@ import "./plan/plan.css";
 import "./settings/settings.css";
 import "./onboarding/onboarding.css";
 import "./portrait/portrait.css";
+import "./shell.css";
 import "./mobile.css";
 import { isLocalInstall } from "../lib/install-mode";
 import { PageBeacon } from "./page-beacon";

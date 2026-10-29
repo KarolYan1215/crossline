@@ -8,6 +8,7 @@ import { LineColors } from "./line-colors";
 import { CameraSampler } from "./camera-sampler";
 import { ReturnPoint } from "./ui/back-link";
 import { RunningHead } from "./running-head";
+import { SideNav } from "./side-nav";
 import { TimeZoneSync } from "./time-zone-sync";
 import { HelperCalls } from "./helper-calls";
 
@@ -28,6 +29,8 @@ export function AppShell({ active, children, className = "page", focus = false, 
     <ReturnPoint />
     {/* A pinned clock (tests, visual baselines) keeps the zone it was set up with. */}
     {!process.env.CROSSLINE_FIXED_NOW && <TimeZoneSync />}
+    {/* On a wide screen the side bar navigates and the running head keeps only its top-right cluster (shell.css). */}
+    {!focus && <SideNav active={active} />}
     <RunningHead active={active} focus={focus} />
     {!focus && <BottomNav active={active} />}
     {/* One corner, stacked: the timer above the 小帮手 bubble, each as tall as it is, so neither covers the other's buttons. */}

@@ -1,0 +1,115 @@
+/*
+ * The frame's second design layer (2026-10-28, the owner's reference for Today): warm off-white ground, a side bar one step darker, cards
+ * with a 12px radius, a hairline and a soft shadow, one accent (deep sage) and a little red for what is due. Its tokens are `--ds-*` and
+ * live beside the original ink-on-paper ones; Today maps the original names onto them inside `.today-page` (today/today.css), the side
+ * bar and the top-right cluster use them on every page. Contrast, measured: body text 14:1 and secondary text ≥7.7:1 on every ground;
+ * accent and red as text use their `-ink` shades (≥7.2:1); white on the accent fill 7.6:1.
+ */
+:root{
+  --ds-bg:#F6F4EF; --ds-side:#EFECE6; --ds-card:#FCFBF8; --ds-line:#E6E1D8; --ds-chalk:#F1EEE7;
+  --ds-ink:#1F2420; --ds-muted:#45433E;
+  --ds-accent:#3E5A4C; --ds-accent-ink:#33493D; --ds-accent-soft:#DDE6E0; --ds-on-accent:#FFFFFF;
+  --ds-alarm:#A3402A; --ds-alarm-ink:#86301F; --ds-alarm-soft:#F6E4DE;
+  --ds-radius:12px; --ds-radius-control:8px;
+  --ds-shadow:0 1px 2px rgba(40,35,25,.04),0 6px 20px rgba(40,35,25,.05);
+  --ds-side-w:216px;
+  /* Latin and digits in Source Serif 4, the Chinese of fixed titles in the display subset (ui/serif-strings.ts). */
+  --f-serif-display:"Crossline Poster Serif Latin","Crossline Display Serif",Georgia,serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ds-bg:#141613; --ds-side:#1A1C19; --ds-card:#1E211D; --ds-line:#30342F; --ds-chalk:#262924;
+    --ds-ink:#ECEAE4; --ds-muted:#CBC7BE;
+    --ds-accent:#A9CDB9; --ds-accent-ink:#B4D6C3; --ds-accent-soft:#2B3A32; --ds-on-accent:#141613;
+    --ds-alarm:#F2A08A; --ds-alarm-ink:#F5B4A2; --ds-alarm-soft:#3A2420;
+    --ds-shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+  }
+}
+:root[data-theme="dark"]{
+  --ds-bg:#141613; --ds-side:#1A1C19; --ds-card:#1E211D; --ds-line:#30342F; --ds-chalk:#262924;
+  --ds-ink:#ECEAE4; --ds-muted:#CBC7BE;
+  --ds-accent:#A9CDB9; --ds-accent-ink:#B4D6C3; --ds-accent-soft:#2B3A32; --ds-on-accent:#141613;
+  --ds-alarm:#F2A08A; --ds-alarm-ink:#F5B4A2; --ds-alarm-soft:#3A2420;
+  --ds-shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+}
+
+@font-face{font-family:"Crossline Display Serif";src:url(/fonts/display-serif.woff2) format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"Crossline Poster Serif Latin";src:url(/fonts/poster-serif-latin-700.woff2) format("woff2");font-weight:700;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Crossline Poster Serif Latin";src:url(/fonts/poster-serif-latin-400.woff2) format("woff2");font-weight:400;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+/* The display serif: only on strings written in code (the wordmark, the day's date and clock, card titles). */
+.ds-serif{font-family:var(--f-serif-display);font-variant-numeric:lining-nums tabular-nums;letter-spacing:0}
+
+/* ── icon buttons (ui/icon-button.tsx) ── */
+.ds-icon{display:inline-grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:1px solid transparent;border-radius:var(--ds-radius-control);
+  background:transparent;color:var(--graphite);cursor:pointer}
+.ds-icon:hover,.ds-icon:focus-visible{background:var(--chalk);color:var(--ink)}
+.ds-icon[data-tone="primary"]{background:var(--ds-accent);color:var(--ds-on-accent)}
+.ds-icon[data-tone="primary"]:hover,.ds-icon[data-tone="primary"]:focus-visible{background:var(--ds-accent-ink);color:var(--ds-on-accent)}
+.ds-icon[data-tone="alarm"]{color:var(--ds-alarm)}
+.ds-icon[data-open] svg{transform:rotate(180deg)}
+.ds-icon svg{transition:transform .15s}
+@media (max-width:680px){.ds-icon{width:44px;height:44px}}
+
+/* ── the side bar (side-nav.tsx): only on a wide screen ── */
+.side-nav{display:none}
+@media (min-width:1025px){
+  .side-nav{position:fixed;inset:0 auto 0 0;z-index:45;width:var(--ds-side-w);display:flex;flex-direction:column;gap:18px;padding:22px 12px 16px;
+    background:var(--ds-side);border-right:1px solid var(--ds-line);color:var(--ds-ink);overflow-y:auto}
+  .side-nav-brand{padding:0 10px;font-size:24px;font-weight:600;color:var(--ds-ink)}
+  .side-nav nav{display:grid;gap:14px}
+  .side-nav-group{display:grid;gap:2px}
+  .side-nav-group+.side-nav-group{padding-top:14px;border-top:1px solid var(--ds-line)}
+  .side-nav a,.side-nav-foot>button{display:flex;align-items:center;gap:10px;min-height:38px;padding:7px 10px;border-radius:var(--ds-radius-control);
+    font-size:14px;color:var(--ds-muted);text-align:left;width:100%}
+  .side-nav a svg,.side-nav-foot svg{flex:none}
+  .side-nav a:hover,.side-nav-foot>button:hover{background:var(--ds-chalk);color:var(--ds-ink)}
+  .side-nav a.active{background:var(--ds-accent-soft);color:var(--ds-ink);font-weight:600}
+  .side-nav a.active svg{color:var(--ds-accent-ink)}
+  .side-nav .pending-badge{margin-left:auto;background:var(--ds-alarm-ink);color:var(--ds-bg)}
+  .side-nav-foot{margin-top:auto;display:grid;gap:2px;padding-top:14px;border-top:1px solid var(--ds-line)}
+  .side-nav-foot .locale-switch{justify-content:flex-start;padding-left:38px}
+
+  /* Beside the bar: every page's content and the top-right cluster. */
+  body:has(.side-nav) main{margin-left:var(--ds-side-w);margin-right:0;width:auto;max-width:none;padding-inline:28px}
+  body:has(.side-nav) .running-head{margin-left:var(--ds-side-w);padding:8px 28px;border-bottom:1px solid var(--mist);background:var(--paper)}
+  body:has(.side-nav) .running-head>.wordmark,body:has(.side-nav) .running-head>nav,body:has(.side-nav) .system-state>a,
+  body:has(.side-nav) .system-state>.sign-out-button{display:none}
+  body:has(.side-nav) .running-head::after{background:transparent}
+  body:has(.side-nav) .system-state{gap:6px}
+}
+/* The account menu is the wide screen's way to settings and signing out; under 1025px the header carries them as words. */
+.account-menu{display:none}
+@media (min-width:1025px){
+  body:has(.side-nav) .account-menu{display:inline-flex}
+  .account-menu .ui-menu-trigger{width:34px;height:34px;border-radius:50%;border-color:var(--ds-line);background:var(--ds-accent-soft);color:var(--ds-accent-ink)}
+  .account-menu .ui-menu{position-area:bottom span-left}
+}
+/* The bell's count: the deep red, 9.7:1 under its text (#C00000 was 6.5:1). */
+.running-head .notice-dot{background:var(--ds-alarm-ink);color:var(--ds-bg)}
+/* On a phone the header's controls wrap rather than push the page sideways (the search icon made the row 3px too wide). */
+.bottom-nav-more-panel .sign-out-button{display:none}
+@media (max-width:680px){
+  .system-state{flex-wrap:wrap;row-gap:0}
+  /* Signing out is under the tab bar's 「更多」 on a phone. */
+  .system-state>.sign-out-button{display:none}
+  .bottom-nav-more-panel .sign-out-button{display:block;width:100%;padding:10px 14px;text-align:left;font-size:12px;color:var(--graphite)}
+}
+/* The top-right cluster's controls as icons. */
+.undo-trigger{display:inline-grid;place-items:center;width:32px;height:32px;padding:0;border-radius:var(--ds-radius-control)}
+.running-head .notice-bell-button{border-radius:var(--ds-radius-control)}
+.running-head .locale-switch{border-radius:var(--ds-radius-control)}
+.running-head .locale-switch:hover{background:var(--chalk);color:var(--ink)}
+
+/* ── search (top-search.tsx) ── */
+.top-search{position:relative;display:inline-flex}
+.top-search-panel{position:absolute;top:calc(100% + 6px);right:0;z-index:120;width:min(420px,calc(100vw - 32px));display:grid;gap:6px;padding:10px;
+  background:var(--paper);color:var(--ink);border:1px solid var(--mist);border-radius:var(--ds-radius);box-shadow:var(--ds-shadow);white-space:normal}
+.top-search-panel input{width:100%;border-radius:var(--ds-radius-control)}
+.top-search-panel ul{margin:0;padding:0;list-style:none;display:grid;gap:2px;max-height:320px;overflow:auto}
+.top-search-panel a{display:flex;gap:8px;align-items:baseline;padding:6px 8px;border-radius:6px;font-size:13px}
+.top-search-panel a:hover,.top-search-panel a:focus-visible{background:var(--chalk)}
+.top-search-kind{flex:none;padding:0 6px;border:1px solid var(--mist);border-radius:999px;font-size:12px;color:var(--graphite)}
+
+/* ── the input box's icons (chat/composer.tsx) ── */
+.composer-tools{display:inline-flex;gap:2px;align-items:center}
+.composer-send{display:inline-grid;place-items:center}
