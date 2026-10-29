@@ -145,3 +145,32 @@ export function writeMeasuredCapacity(ctx: AccessContext, now = appNow()): void 
 function statedDaily(ctx: AccessContext): { minutes: number } {
   return { minutes: Math.round(weeklyAvailableHours(readAvailability(ctx)) * 60 / 7) };
 }
+
+/**
+ * The minutes of work each planned day may still hold (`PlanningInput.dailyCapMinutes`): the day's cap, and for today the cap less what
+ * was already worked today outside the blocks the plan keeps frozen (those count against the cap in the planner). `statedByDay` is what
+ * the person's own hours leave each day after the calendar. Undefined with measured capacity off.
+ */
+export function dailyCapsFor(ctx: AccessContext, today: string, statedByDay: Map<string, number>, frozen: Span[], now = appNow()): Record<string, number> | undefined {
+  if (!enabled) return undefined;
+  const view = measuredView(ctx, now);
+  const caps: Record<string, number> = {};
+  for (const [day, stated] of statedByDay) caps[day] = dayCapacityOf(ctx, day, stated, view);
+  if (caps[today] === undefined) return caps;
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  let from: number;
+  try { from = Date.parse(toZonedInstant(today, "00:00", zone)); } catch { return caps; }
+  const to = now.getTime();
+  const worked = mergeSpans([...timerSpans(ctx, now), ...screenSpans(ctx, new Date(from).toISOString(), zone).spans, ...agentSpans(ctx)]);
+  const inFrozen = mergeSpans(frozen).reduce((sum, span) => sum + minutesWithin(worked, Math.max(from, span.start), Math.min(to, span.end)), 0);
+  const outside = Math.max(0, minutesWithin(worked, from, to) - inFrozen);
+  caps[today] = Math.max(0, Math.round(caps[today]! - outside));
+  return caps;
+}
+
+/** The plan's basis in numbers, for the pages: what the person said a week holds, what was measured, and which the plan follows. */
+export type CapacityLine = { statedWeekly: number | null; measuredWeekly: number | null; basis: PlanCapacityBasis | "off" };
+export function capacityLine(ctx: AccessContext, statedWeekly: number | null, now = appNow()): CapacityLine {
+  const view = measuredView(ctx, now);
+  return { statedWeekly, measuredWeekly: view.weeklyHours ?? null, basis: enabled ? view.basis : "off" };
+}

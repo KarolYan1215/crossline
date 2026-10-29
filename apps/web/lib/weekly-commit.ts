@@ -6,6 +6,7 @@ import {
 import { formatInTimeZone } from "date-fns-tz";
 import { appNow, archiveWorkOrder, effectiveSchedulePreferences, effectiveWeight, firstAcceptedAt, getStore, milestoneDeadline, netCapacity, planToday, remainingMinutesOf } from "./crossline";
 import { UPCOMING_SETTING } from "./schedule-memory";
+import { capacityLine, dayCapacityOf, measuredView, type CapacityLine } from "./measured-capacity";
 import { previewOverrides, type Impact } from "./impact";
 import { tOf } from "./locale";
 
@@ -24,6 +25,8 @@ export type WeeklyCommitView = {
   week: string; weekEnd: string;
   /** Usable minutes left in that week (calendar, fixed events and travel taken out), and the week's work in the person's minutes. */
   capacityMinutes: number; demandMinutes: number;
+  /** What the person's own hours leave that week, and which the commitment follows (measured unless measured capacity is off). */
+  statedMinutes: number; capacityBasis: CapacityLine;
   rows: CommitRow[];
   /** Why it is asked now, or undefined when the page was opened by hand with nothing due. */
   due?: "weekly" | "overload";
@@ -66,8 +69,12 @@ export function loadWeeklyCommit(ctx: AccessContext, now = appNow()): WeeklyComm
   const week = commitWeekOf(today, clock);
   const weekEnd = plusDays(week, 6);
   const horizon = Math.max(1, Math.round((Date.parse(`${weekEnd}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / DAY) + 1);
-  const capacityMinutes = Math.round(netCapacity(ctx, horizon).capacity.filter((day) => day.day >= week && day.day <= weekEnd)
-    .reduce((sum, day) => sum + day.netMinutes, 0));
+  // The week's hours as the person works them (docs/plans/closed-loop-1030.md §1): each day's measured cap, at most what their own hours
+  // leave it. The stated side is kept beside it for the page.
+  const weekDays = netCapacity(ctx, horizon).capacity.filter((day) => day.day >= week && day.day <= weekEnd);
+  const view = measuredView(ctx, now);
+  const statedMinutes = Math.round(weekDays.reduce((sum, day) => sum + day.netMinutes, 0));
+  const capacityMinutes = Math.round(weekDays.reduce((sum, day) => sum + dayCapacityOf(ctx, day.day, day.netMinutes, view), 0));
   let upcoming = new Set<string>();
   try { upcoming = new Set(JSON.parse(store.getSetting(ctx.workspaceId, UPCOMING_SETTING) ?? "[]") as string[]); } catch { /* none recorded yet */ }
   const started = new Set(store.listExecutions(ctx.workspaceId).map((execution) => execution.workOrderId));
@@ -94,7 +101,7 @@ export function loadWeeklyCommit(ctx: AccessContext, now = appNow()): WeeklyComm
   const demandMinutes = tasks.reduce((sum, item) => sum + item.task.minutes, 0);
   const due = weeklyCommitDue({ today, clock, last, demandMinutes, capacityMinutes })?.reason;
   const lastWeek = lastWeekRecap(ctx, week);
-  return { week, weekEnd, capacityMinutes, demandMinutes, rows, ...(due ? { due } : {}), ...(last ? { last } : {}), ...(lastWeek ? { lastWeek } : {}) };
+  return { week, weekEnd, capacityMinutes, statedMinutes, capacityBasis: capacityLine(ctx, null, now), demandMinutes, rows, ...(due ? { due } : {}), ...(last ? { last } : {}), ...(lastWeek ? { lastWeek } : {}) };
 }
 
 /** The person's groups, every row present: what they did not touch keeps its suggestion. */

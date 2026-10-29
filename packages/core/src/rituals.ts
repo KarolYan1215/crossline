@@ -61,9 +61,11 @@ export type CommitSuggestion = { group: CommitGroup; reason: "started" | "due" |
  * The week the commitment is about: on a Sunday from `SUNDAY_EVENING` on, next week; otherwise this week. Returned as its Monday.
  */
 export function commitWeekOf(today: string, clock: string): string {
+  void clock;
   const monday = weekStartOf(today);
-  const sunday = new Date(`${today}T12:00:00Z`).getUTCDay() === 0;
-  return sunday && clock >= SUNDAY_EVENING ? plusDays(monday, 7) : monday;
+  // On a Sunday the week ahead (2026-10-30, docs/plans/closed-loop-1030.md §5): this week has only today left, and today's hours against
+  // the whole week's work read as a week pushed out of all proportion. The question still waits for the evening (`weeklyCommitDue`).
+  return new Date(`${today}T12:00:00Z`).getUTCDay() === 0 ? plusDays(monday, 7) : monday;
 }
 
 /** The order in which work earns the week's hours: started, then due this week (overdue first), then the heavier milestone, then the sooner day. */
@@ -137,6 +139,8 @@ export function parseWeeklyCommit(raw: string | null | undefined): WeeklyCommitR
 export function weeklyCommitDue(input: { today: string; clock: string; last: WeeklyCommitRecord | undefined; demandMinutes: number; capacityMinutes: number }):
   { week: string; reason: "weekly" | "overload" } | undefined {
   const week = commitWeekOf(input.today, input.clock);
+  const sunday = new Date(`${input.today}T12:00:00Z`).getUTCDay() === 0;
+  if (sunday && input.clock < SUNDAY_EVENING) return undefined;
   if (input.last?.week !== week) return week !== weekStartOf(input.today) || input.today === week ? { week, reason: "weekly" } : undefined;
   const wasOver = overloaded(input.last.demandMinutes, input.last.capacityMinutes);
   if (!wasOver && input.last.overloadAskedFor !== week && overloaded(input.demandMinutes, input.capacityMinutes)) return { week, reason: "overload" };

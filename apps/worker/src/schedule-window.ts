@@ -1,4 +1,4 @@
-import { AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, STEP_STARTS_SETTING, goalSettingKey, resolveAvailability, weeklyAvailableHours } from "@crossline/core";
+import { AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, MEASURED_CAPACITY_SETTING, STEP_STARTS_SETTING, type MeasuredCapacityRecord, goalSettingKey, resolveAvailability, weeklyAvailableHours } from "@crossline/core";
 import type { CrosslineStore, StoredStepPlan, StoredTaskStep, StoredWorkOrder } from "@crossline/db";
 
 /** Written by the web (`schedule-memory.ts`): each work order's earliest block start this week, as an instant. */
@@ -40,8 +40,16 @@ function readOrderStarts(store: CrosslineStore, workspaceId: string): Record<str
   } catch { return {}; }
 }
 
-/** The person's working minutes a day as the worker can know them: the weekly pattern's hours over seven days, at least an hour. */
-export function dailyAvailableMinutes(store: CrosslineStore, workspaceId: string): number {
+/**
+ * The person's working minutes a day as the worker can know them: the measured capacity the web last wrote (docs/plans/closed-loop-1030.md
+ * §1; five weekdays and two weekend days averaged), else the weekly pattern's hours over seven days, at least an hour.
+ */
+export function dailyAvailableMinutes(store: CrosslineStore, workspaceId: string, now = new Date()): number {
+  try {
+    const measured = JSON.parse(store.getSetting(workspaceId, MEASURED_CAPACITY_SETTING) ?? "null") as MeasuredCapacityRecord | null;
+    if (measured && now.getTime() - Date.parse(measured.at) <= 36 * 3_600_000 && measured.weekday > 0)
+      return Math.max(60, (measured.weekday * 5 + measured.weekend * 2) / 7);
+  } catch { /* the stated hours below */ }
   const { windows } = resolveAvailability({ saved: store.getSetting(workspaceId, AVAILABILITY_SETTING),
     proposed: store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING), facts: store.listProfileFacts(workspaceId) });
   return Math.max(60, weeklyAvailableHours(windows) * 60 / 7);
@@ -53,7 +61,7 @@ function estimatedStarts(store: CrosslineStore, workspaceId: string, now: Date, 
   const orders = store.listWorkOrders(workspaceId).filter((order) => COMMITTED.has(order.state) && !skip.has(order.id));
   if (!orders.length) return [];
   const dueOf = dueDays(store, workspaceId, now);
-  const dailyMinutes = dailyAvailableMinutes(store, workspaceId);
+  const dailyMinutes = dailyAvailableMinutes(store, workspaceId, now);
   return orders.filter((order) => {
     const due = dueOf(order);
     if (!due) return false;
@@ -122,7 +130,7 @@ export function prepWindow(store: CrosslineStore, workspaceId: string, now: Date
   } catch { /* unreadable: every step falls back */ }
   const scheduledOrders = new Set(Object.keys(stepStarts).map((key) => key.split("#")[0]!));
   const dueOf = dueDays(store, workspaceId, now);
-  const dailyMinutes = dailyAvailableMinutes(store, workspaceId);
+  const dailyMinutes = dailyAvailableMinutes(store, workspaceId, now);
   const orders = new Map(store.listWorkOrders(workspaceId).filter((order) => !order.tombstone && COMMITTED.has(order.state)).map((order) => [order.id, order]));
 
   /** Whether the person's `step` of `order` starts by `to`; undefined when nothing on record says when. */

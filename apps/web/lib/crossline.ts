@@ -11,6 +11,7 @@ import { availableSlots, deriveCapacity, requiredApproval, validateAvailability,
   type AccessContext, type AvailabilityWindow, type Estimate, type SuccessCriterion, type ChecklistAnswer, FIXED_EVENTS, fixedEventBlocks, type FixedEvent, readTravelState, travelBlocks,
   DELAY_SETTING, FROZEN_SETTING, SHIFT_MINUTES, parseFrozen, settleFrozen, shiftFrozen, withFrozen, withoutFrozen, type FrozenBlock, type RealityChange } from "@crossline/core";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
+import { capacityLine, dailyCapsFor, dayCapacityOf, measuredView } from "./measured-capacity";
 import { forecastGoals, normalizeParams, paramsFor, planHeadDiffers, planSchedule, recommendNextActions, scheduleInputHash, type ForecastResult, type PlanResult,
   type ScheduleParams, type PlanningInput } from "@crossline/planner";
 import { optimalFor, requestOptimal } from "./optimal-schedule";
@@ -77,6 +78,7 @@ import { milestonesBeingBackplanned } from "./backplan-status";
 import { nearestDueProposal } from "./urgent-proposal";
 import { completionRule, onPersonsBoard, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
+import { statedWeeklyHours, weeklyAvailableHours } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
 import { memoByLedger, memoByLedgerAsync } from "./ledger-memo";
 import { localeFor, tOf } from "./locale";
@@ -1032,6 +1034,13 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
     busyInstants, (blockId) => releaseAt.get(plannerIdOfBlock(blockId))).kept;
   const pinned = frozen.map((item) => ({ taskId: plannerIdOfBlock(item.blockId), start: item.start, end: item.end }));
   const efficiency = personalEfficiency(ctx, now);
+  const frozenBlocks = [...committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
+    .map((block) => ({ taskId: plannerIdOfBlock(block.id), start: iso(block.day!, block.start), end: iso(block.day!, block.end) })), ...pinned];
+  // The day's work held to what the person actually does (docs/plans/closed-loop-1030.md §1): what their hours leave each day after the
+  // calendar is the stated side, the measured cap the limit.
+  const statedByDay = new Map<string, number>();
+  for (const slot of instants) statedByDay.set(slot.day, (statedByDay.get(slot.day) ?? 0) + (Date.parse(String(slot.end)) - Date.parse(String(slot.start))) / 60_000);
+  const dailyCaps = dailyCapsFor(ctx, today, statedByDay, frozenBlocks.map((block) => ({ start: Date.parse(block.start), end: Date.parse(block.end) })), now);
   const input: PlanningInput = { locale: localeFor(ctx),
     now,
     horizonDays: days.length,
@@ -1041,12 +1050,11 @@ export function planningInputFor(ctx: AccessContext, today: string, committed: P
       ? (({ deadline: _d, ...task }) => ({ ...task, deadlineTier: 3 as const, floorOnly: true }))(item.task) : item.task),
     ...(shares ? { lineShares: shares } : {}),
     ...(dayCapacity.multiplier < 1 ? { capacityByDay: { [today]: dayCapacity.multiplier } } : {}),
+    ...(dailyCaps ? { dailyCapMinutes: dailyCaps } : {}),
     ...(efficiency ? { efficiency } : {}),
     availability: instants,
     ...(lookaheadAvailability ? { lookaheadAvailability } : {}),
-    frozenBlocks: [...committed.filter((block) => block.day && block.id.startsWith("scheduled:"))
-      .map((block) => ({ taskId: plannerIdOfBlock(block.id), start: iso(block.day!, block.start),
-        end: iso(block.day!, block.end) })), ...pinned]
+    frozenBlocks
   };
   return { input, days, busy, preferences, zone, iso, now, currentEnergy, dayCapacity, clockBlockers, instants, capacityIds, allOrders, orders,
     stateById, dependencyBlockers, library, expanded, frozen, pinned };
@@ -1195,7 +1203,11 @@ export function riskHorizonDays(ctx: AccessContext): number {
 export function loadGoalForecast(ctx: AccessContext, horizonDays = 56): ForecastResult & { inferredRegularBlocks: number } {
   ensureSeeded(ctx);
   const store = getStore();
-  const { capacity, inferred } = netCapacity(ctx, horizonDays);
+  const { capacity: stated, inferred } = netCapacity(ctx, horizonDays);
+  // Forecast at the measured pace (docs/plans/closed-loop-1030.md §1): a day's usable minutes are at most its measured cap, so work the
+  // person will not get to shows as a risk before its deadline instead of after it. The forecast keeps 85% of a day usable, hence the divide.
+  const view = measuredView(ctx);
+  const capacity = stated.map((day) => ({ ...day, netMinutes: Math.min(day.netMinutes, dayCapacityOf(ctx, day.day, day.netMinutes, view) / 0.85) }));
   // An approved milestone's own deadline is one the person confirmed by approving it; the goal setting only overrides it.
   // Without the fallback no milestone had a deadline here unless it was typed a second time, so nothing was ever at risk.
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
@@ -2612,7 +2624,8 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     ...(shortGap ? { shortGap } : {}),
     care: store.listCapacityCommitments(ctx.workspaceId).map((item) => ({ title: item.title, minimumMinutes: item.minimumMinutes })),
     progress,
-    todayCapacity: { availableMinutes, committedMinutes },
+    todayCapacity: { availableMinutes, committedMinutes,
+      basis: { ...capacityLine(ctx, null, now), statedWeekly: statedWeeklyHours(store.listProfileFacts(ctx.workspaceId)) ?? weeklyAvailableHours(readAvailability(ctx)) } },
     flywheel,
     flywheelStrip,
     identities: identityPacks.map((pack) => {

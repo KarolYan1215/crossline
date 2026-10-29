@@ -41,6 +41,24 @@ const softShare = (input: PlanningInput, task: PlannerTask, day: string, emergen
   const multiplier = emergency || task.deadline ? undefined : input.capacityByDay?.[day];
   return multiplier !== undefined && multiplier < 1 ? multiplier : undefined;
 };
+/**
+ * Minutes each day's measured cap (`dailyCapMinutes`) still has once the frozen blocks on that day are counted (by their overlap with
+ * that day's available windows). Infinity for a day without a cap.
+ */
+function capRoom(input: PlanningInput): (day: string) => number {
+  const caps = input.dailyCapMinutes;
+  if (!caps) return () => Infinity;
+  const frozen = new Map<string, number>();
+  for (const window of input.availability) {
+    const day = window.day ?? window.start.slice(0, 10);
+    const from = Date.parse(window.start), to = Date.parse(window.end);
+    for (const block of input.frozenBlocks) {
+      const overlap = Math.min(to, Date.parse(block.end)) - Math.max(from, Date.parse(block.start));
+      if (overlap > 0) frozen.set(day, (frozen.get(day) ?? 0) + overlap / 60_000);
+    }
+  }
+  return (day) => caps[day] === undefined ? Infinity : Math.max(0, Math.floor(caps[day]! - (frozen.get(day) ?? 0)));
+}
 const sessionCap = (task: PlannerTask, short: number) => task.interruptible === false ? Infinity : SESSION_CAP[short]!;
 /** `minutes` of work cut into the fewest sessions of at most `cap`, evenly (185 at 45 is five of 37, not four of 45 and a 5-minute tail). */
 const sessions = (minutes: number, cap: number): number[] => {
@@ -257,6 +275,9 @@ function greedyPass(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], e
   const dayUsed = new Map<string, number>();
   // Minutes of work without a deadline each day, held to the day's capacity (`capacityByDay`); deadline work is not.
   const softUsed = new Map<string, number>();
+  // Minutes placed each day against the measured cap (`dailyCapMinutes`), all work.
+  const room = capRoom(input);
+  const capUsed = new Map<string, number>();
   for (const slot of slots) dayCapacity.set(slot.day, (dayCapacity.get(slot.day) ?? 0) + (slot.end - slot.start) / 60_000);
   const params = paramsFor(input);
   const gap = emergency ? 0 : params.gapMinutes;
@@ -279,6 +300,7 @@ function greedyPass(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], e
     const candidate = [...cursors];
     const nextUsed = new Map(dayUsed);
     const nextSoft = new Map(softUsed);
+    const nextCap = new Map(capUsed);
     const staged: ScheduleBlock[] = [];
     let left = durationOf(task);
     for (let k = 0; k < slots.length && left > 1e-9; k += 1) {
@@ -301,7 +323,8 @@ function greedyPass(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], e
         : Math.floor((dayCapacity.get(slot.day) ?? 0) * share) - (nextUsed.get(slot.day) ?? 0);
       const softCap = softShare(input, task, slot.day, emergency);
       const remainingCap = Math.min(shareCap, softCap === undefined ? Infinity
-        : Math.floor((dayCapacity.get(slot.day) ?? 0) * Math.min(1, share) * softCap) - (nextSoft.get(slot.day) ?? 0));
+        : Math.floor((dayCapacity.get(slot.day) ?? 0) * Math.min(1, share) * softCap) - (nextSoft.get(slot.day) ?? 0),
+        room(slot.day) - (nextCap.get(slot.day) ?? 0));
       const need = wallMinutes(left, efficiency);
       const cap = sessionCap(task, short);
       const focusCap = task.interruptible !== false && params.focusCapMinutes ? params.focusCapMinutes : Infinity;
@@ -318,10 +341,11 @@ function greedyPass(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], e
       candidate[s] = at + gap * 60_000;
       nextUsed.set(slot.day, (nextUsed.get(slot.day) ?? 0) + minutes);
       if (!task.deadline) nextSoft.set(slot.day, (nextSoft.get(slot.day) ?? 0) + minutes);
+      nextCap.set(slot.day, (nextCap.get(slot.day) ?? 0) + minutes);
       left -= minutes * efficiency;
       if (task.interruptible === false) break;
     }
-    return left <= 1e-9 ? { staged, candidate, nextUsed, nextSoft } : undefined;
+    return left <= 1e-9 ? { staged, candidate, nextUsed, nextSoft, nextCap } : undefined;
   };
   for (const task of ordered) {
     if ((task.dependsOn ?? []).some((id) => tasks.some((item) => item.id === id) &&
@@ -332,6 +356,7 @@ function greedyPass(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], e
     cursors.splice(0, cursors.length, ...placed.candidate);
     dayUsed.clear(); for (const [day, minutes] of placed.nextUsed) dayUsed.set(day, minutes);
     softUsed.clear(); for (const [day, minutes] of placed.nextSoft) softUsed.set(day, minutes);
+    capUsed.clear(); for (const [day, minutes] of placed.nextCap) capUsed.set(day, minutes);
   }
   return makeResult(input, tasks, slots, blocks, "fallback");
 }
@@ -491,6 +516,14 @@ async function optimize(original: PlanningInput, emergency = false, trySolver = 
     const terms: Array<[number, string]> = choices.filter((choice) => slots[choice.slot]!.day === day && !tasks[choice.task]!.deadline)
       .map((choice) => [choice.minutes ? 1 : choice.duration, choice.minutes ?? choice.presence]);
     if (terms.length) rows.push(`capacity_${day.replaceAll("-", "")}: ${expression(terms)} <= ${Math.floor(capacity * Math.min(1, share) * multiplier)}`);
+  }
+  // The measured cap holds every minute of work that day (`dailyCapMinutes`); the frozen blocks already on it are counted first.
+  const room = capRoom(input);
+  for (const day of Object.keys(input.dailyCapMinutes ?? {})) {
+    if (!dayCapacity.has(day)) continue;
+    const terms: Array<[number, string]> = choices.filter((choice) => slots[choice.slot]!.day === day)
+      .map((choice) => [choice.minutes ? 1 : choice.duration, choice.minutes ?? choice.presence]);
+    if (terms.length) rows.push(`wcap_${day.replaceAll("-", "")}: ${expression(terms)} <= ${room(day)}`);
   }
   if (share < 1) {
     bounds.push("0 <= peak <= 1");
@@ -680,7 +713,7 @@ async function schedule(input: PlanningInput, options: SolveOptions): Promise<Pl
   }) } : eligible;
   const first = await optimize(buffered, false, options.solver !== "none", options);
   let result = first;
-  const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || anyBuffer;
+  const relaxable = params.gapMinutes > 0 || params.maxDailyShare < 1 || anyBuffer || Boolean(input.dailyCapMinutes);
   if (relaxable && first.blockers.some((blocker) => eligible.tasks.some((task) =>
     task.id === blocker.taskId && task.deadline))) {
     // The relaxation is for the work with a deadline only (and what it waits on): that is placed first without the gap and the daily
@@ -696,12 +729,23 @@ async function schedule(input: PlanningInput, options: SolveOptions): Promise<Pl
     }
     const solverFits = first.solver === "optimal";
     const pressed = await optimize({ ...eligible, tasks: eligible.tasks.filter((task) => urgent.has(task.id)) }, true, solverFits, options);
-    const placedFirst = pressed.plan.blocks.filter((block) => !block.frozen);
+    let placedFirst = pressed.plan.blocks.filter((block) => !block.frozen);
+    let pressedBlockers = pressed.blockers;
+    // Deadlines always come first: deadline work the measured cap cannot hold is placed past it, after what fits under it — and the
+    // forecast, which reads the same cap, says the milestone is at risk.
+    const left = new Set(pressed.blockers.map((blocker) => blocker.taskId).filter((id) => urgent.has(id)));
+    if (eligible.dailyCapMinutes && left.size) {
+      const { dailyCapMinutes: _cap, ...uncapped } = eligible;
+      const over = await optimize({ ...uncapped, tasks: eligible.tasks.filter((task) => left.has(task.id)),
+        frozenBlocks: [...eligible.frozenBlocks, ...placedFirst.map(({ taskId, start, end }) => ({ taskId, start, end }))] }, true, solverFits, options);
+      placedFirst = [...placedFirst, ...over.plan.blocks.filter((block) => !block.frozen)];
+      pressedBlockers = [...pressed.blockers.filter((blocker) => !left.has(blocker.taskId)), ...over.blockers];
+    }
     const around = await optimize({ ...buffered, tasks: buffered.tasks.filter((task) => !urgent.has(task.id)),
       frozenBlocks: [...eligible.frozenBlocks, ...placedFirst.map(({ taskId, start, end }) => ({ taskId, start, end }))] }, false, solverFits, options);
     const blocks = [...eligible.frozenBlocks.map((block) => ({ ...block, frozen: true })), ...placedFirst,
       ...around.plan.blocks.filter((block) => !block.frozen)].sort((x, y) => Date.parse(x.start) - Date.parse(y.start));
-    const blockers = [...pressed.blockers, ...around.blockers];
+    const blockers = [...pressedBlockers, ...around.blockers];
     const relaxed: PlanResult = { status: statusFor(blocks, blockers, eligible.frozenBlocks.length), plan: { blocks }, blockers, solver: pressed.solver };
     const hardPlaced = (value: PlanResult) => eligible.tasks.filter((task) => task.deadline &&
       value.plan.blocks.some((block) => block.taskId === task.id)).length;

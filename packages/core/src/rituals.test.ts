@@ -11,8 +11,8 @@ describe("weeks", () => {
     expect(weekStartOf("2026-10-26")).toBe("2026-10-26"); // Monday
     expect(weekStartOf("2026-11-01")).toBe("2026-10-26"); // Sunday
   });
-  test("Sunday evening commits next week, any other moment this week", () => {
-    expect(commitWeekOf("2026-11-01", "16:59")).toBe("2026-10-26");
+  test("a Sunday shows next week (only today is left of this one), any other day this week", () => {
+    expect(commitWeekOf("2026-11-01", "16:59")).toBe("2026-11-02");
     expect(commitWeekOf("2026-11-01", "17:00")).toBe("2026-11-02");
     expect(commitWeekOf("2026-11-02", "08:00")).toBe("2026-11-02");
   });

@@ -1,0 +1,6 @@
+{
+  "所述 {{stated}} h/周 · 按所述排": "Stated {{stated}} h/week · planned on what was stated",
+  "所述 {{stated}} h/周 · 实测近 28 天 {{measured}} h/周 · 按所述排": "Stated {{stated}} h/week · measured {{measured}} h/week over the last 28 days · planned on what was stated",
+  "所述 {{stated}} h/周 · 实测不足 5 天 · 按所述的一半排": "Stated {{stated}} h/week · fewer than 5 days measured · planned at half of what was stated",
+  "所述 {{stated}} h/周 · 实测近 28 天 {{measured}} h/周 · 按实测排": "Stated {{stated}} h/week · measured {{measured}} h/week over the last 28 days · planned on what was measured"
+}

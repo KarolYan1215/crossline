@@ -1,4 +1,5 @@
 import "server-only";
+import { writeMeasuredCapacity } from "./measured-capacity";
 import { getStore } from "./crossline";
 import { recordScheduledToday } from "./schedule-memory";
 import { countPending } from "./pending";
@@ -30,6 +31,8 @@ export async function attentionPass(now = new Date()): Promise<number> {
     try { await recordScheduledToday(ctx, now); } catch { /* the asks still go out */ }
     await yieldToRequests();
     try { writeAttentionSnapshot(ctx, countPending(ctx).total, now); written += 1; } catch { /* next interval */ }
+    // The measured pace, for the worker's date moves and preparation windows (docs/plans/closed-loop-1030.md §1).
+    try { writeMeasuredCapacity(ctx, now); } catch { /* next interval */ }
   }
   return written;
 }

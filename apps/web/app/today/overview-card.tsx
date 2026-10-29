@@ -4,6 +4,8 @@ import type { CSSProperties, ReactNode } from "react";
 import { usePendingView } from "../pending-badge";
 import { useLocale, useT } from "../locale-context";
 import { formatMinutes } from "../ui/controls";
+import { capacityBasisText } from "../ui/capacity-basis";
+import type { CapacityLine } from "../../lib/measured-capacity";
 
 function Cell({ href, label, value, title, alarm, children }: { href: string; label: string; value: ReactNode; title: string; alarm?: boolean; children?: ReactNode }) {
   return <li><a href={href} title={title} data-alarm={alarm || undefined}><span className="ov-label">{label}</span><b className="ov-value ds-serif">{value}</b>{children}</a></li>;
@@ -14,7 +16,9 @@ function Cell({ href, label, value, title, alarm, children }: { href: string; la
  * hours), the minutes of work due today (the calendar, with the load bar the head used to carry), what waits on 待确认 (the same shared
  * count as the badge, red while anything waits) and what was finished this week (the weekly review).
  */
-export function OverviewCard({ availableMinutes, committedMinutes, weekCount }: { availableMinutes: number; committedMinutes: number; weekCount: number }) {
+export function OverviewCard({ availableMinutes, committedMinutes, weekCount, basis }: { availableMinutes: number; committedMinutes: number; weekCount: number;
+  /** What the plan is built on (docs/plans/closed-loop-1030.md §1), said on hover over 可用. */
+  basis?: CapacityLine & { statedWeekly: number } }) {
   const t = useT();
   const locale = useLocale();
   const pending = usePendingView()?.total;
@@ -22,7 +26,8 @@ export function OverviewCard({ availableMinutes, committedMinutes, weekCount }: 
   return <section className="td-card ov" aria-labelledby="overview-title">
     <header className="td-card-head"><h2 id="overview-title" className="ds-serif">{t("今日概览")}</h2></header>
     <ul className="ov-grid">
-      <Cell href="/plan#time" label={t("可用", { context: "today" })} value={formatMinutes(availableMinutes, locale)} title={t("今天还可用的时间，按可用时段扣掉日历")} />
+      <Cell href="/plan#time" label={t("可用", { context: "today" })} value={formatMinutes(availableMinutes, locale)} title={basis ? `${t("今天还可用的时间，按可用时段扣掉日历")}
+${capacityBasisText(t, basis)}` : t("今天还可用的时间，按可用时段扣掉日历")} />
       <Cell href="#calendar" label={t("待办", { context: "today" })} value={formatMinutes(committedMinutes, locale)} title={t("今天待办的分钟数，条形为占可用时间的比例")}>
         <span className="time-bar" aria-hidden="true"><span className="time-bar-fill" style={{ "--pct": `${load}%` } as CSSProperties} /></span></Cell>
       <Cell href="/approvals" label={t("待确认")} value={pending ?? "—"} alarm={Boolean(pending)} title={t("待确认：待决事项、任务提案、助手成果等")} />

@@ -7,9 +7,10 @@ import { applyWeeklyCommit, loadWeeklyCommit } from "./weekly-commit";
 import { answerAsk, collectAsks } from "./asks";
 import { undoOp, withUndo } from "./undo";
 import { TEST_CTX } from "./test-support";
+import { configureMeasuredCapacity } from "./measured-capacity";
 
 /** The weekly commitment on a real store (docs/rituals.md): the week's work against its hours, 保 / 推 / 砍 suggested and applied as one undo. */
-afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
+afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); configureMeasuredCapacity(false); });
 
 const ws = TEST_CTX.workspaceId, owner = TEST_CTX.principalId;
 const MONDAY = new Date("2026-10-12T14:00:00.000Z");
@@ -39,6 +40,23 @@ test("the week's work is what is due by Sunday, started or placed this week; wha
   const ask = collectAsks(TEST_CTX, MONDAY).find((item) => item.kind === "weekly_commit")!;
   expect(ask.options.map((option) => option.id)).toEqual(["suggested", "review", "keep"]);
   expect(ask.why).toContain("推 1 项");
+});
+
+test("measured capacity: the week is judged against what the person actually worked, so a week the stated hours call light is overloaded (closed-loop-1030 §1)", () => {
+  const store = setup();
+  store.saveWorkOrder({ id: "past", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "", intent: "past", state: "accepted", riskTier: "routine",
+    estimate: { p25Minutes: 60, p50Minutes: 60, p85Minutes: 90, source: "llm_prior", observationCount: 0, confidence: "high" }, payload: {} });
+  // Five weekdays of an hour timed each, the week before: median 60 × 1.25 = 75 minutes a weekday.
+  for (const day of ["05", "06", "07", "08", "09"])
+    store.recordConfirmedSession(ws, "past", owner, { startedAt: `2026-10-${day}T15:00:00.000Z`, endedAt: `2026-10-${day}T16:00:00.000Z`, minutes: 60, source: "one_tap", key: `past-${day}` });
+  const stated = loadWeeklyCommit(TEST_CTX, MONDAY);
+  configureMeasuredCapacity(true);
+  const measured = loadWeeklyCommit(TEST_CTX, MONDAY);
+  expect(measured.statedMinutes).toBe(stated.capacityMinutes);
+  expect(measured.capacityBasis).toMatchObject({ basis: "measured", measuredWeekly: 7 });
+  // Monday to Friday at 75, the weekend at half of what its hours leave.
+  expect(measured.capacityMinutes).toBeLessThan(stated.capacityMinutes / 2);
+  expect(Object.fromEntries(measured.rows.map((row) => [row.id, row.suggestion.group]))).toMatchObject({ first: "defer", second: "defer" });
 });
 
 test("「确认本周」 pushes, cuts and records in one undo; the week is not asked about again until it overloads anew", async () => {

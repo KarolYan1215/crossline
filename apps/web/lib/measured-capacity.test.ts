@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY } from "@crossline/core";
 vi.mock("server-only", () => ({}));
-import { ACTIVITY_DETAIL_CONSENT, toZonedInstant } from "./crossline";
+import { ACTIVITY_DETAIL_CONSENT, loadCurrentPlan, loadGoalForecast, toZonedInstant } from "./crossline";
 import { blockWorkMinutes, configureMeasuredCapacity, dayCapacityOf, measuredView } from "./measured-capacity";
 import { TEST_CTX } from "./test-support";
 
@@ -67,4 +67,24 @@ test("a block's work minutes: its own task's timer and the screen, not another t
   store.setSetting(ws, ACTIVITY_DETAIL_CONSENT, "granted");
   store.replaceDeviceActivitySegments(ws, iso("2026-10-01", "00:00"), [{ start: iso("2026-11-09", "10:10"), end: iso("2026-11-09", "10:40"), app: "a", category: "coding", idle: false }]);
   expect(blockWorkMinutes(TEST_CTX, "hw", iso("2026-11-09", "10:00"), iso("2026-11-09", "11:00"))).toBe(40);
+});
+
+test("the plan and the forecast follow the measured cap: a day holds what the person works, deadlines still placed (closed-loop-1030 §1)", async () => {
+  const store = seed();
+  // Five weekdays the week before with an hour timed each: 75 minutes a weekday from now on.
+  for (const day of ["02", "03", "04", "05", "06"])
+    store.recordConfirmedSession(ws, "hw", TEST_CTX.principalId, { startedAt: iso(`2026-11-${day}`, "10:00"), endedAt: iso(`2026-11-${day}`, "11:00"), minutes: 60, source: "one_tap", key: `d${day}` });
+  store.saveWorkOrder({ id: "big", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", projectId: "p", milestoneId: "",
+    intent: "大块写作", state: "approved", riskTier: "routine", estimate: { ...estimate, p25Minutes: 300, p50Minutes: 300, p85Minutes: 300 }, payload: { materialContract: [] } });
+  const placed = (plan: Awaited<ReturnType<typeof loadCurrentPlan>>, day: string) => plan.blocks.filter((block) => block.id.startsWith("scheduled:") && block.day === day)
+    .reduce((sum, block) => sum + (Number(block.end.slice(0, 2)) * 60 + Number(block.end.slice(3))) - (Number(block.start.slice(0, 2)) * 60 + Number(block.start.slice(3))), 0);
+  const stated = await loadCurrentPlan(TEST_CTX);
+  configureMeasuredCapacity(true);
+  const measured = await loadCurrentPlan(TEST_CTX);
+  expect(placed(stated, "2026-11-10")).toBeGreaterThan(75);
+  for (const day of ["2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13"]) expect(placed(measured, day), day).toBeLessThanOrEqual(75);
+  expect(measured.blocks.filter((block) => block.id.startsWith("scheduled:big")).length).toBeGreaterThan(0);
+  // Forecast: the usable minutes of a weekday are the cap, not the hours.
+  const forecast = loadGoalForecast(TEST_CTX);
+  expect(forecast.weeks[0]!.usableMinutes).toBeLessThan(7 * 75 * 1.2);
 });

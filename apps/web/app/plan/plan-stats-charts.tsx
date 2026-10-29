@@ -1,5 +1,7 @@
 "use client";
 
+import { capacityBasisText } from "../ui/capacity-basis";
+import type { CapacityLine } from "../../lib/measured-capacity";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import type { CapacityWeek, EstimatePoint } from "../../lib/plan-stats";
 import { Ring } from "../ui/charts";
@@ -68,8 +70,10 @@ function overloadLabel(minutes: number, band: number, t: Translate): string | nu
   return [t("超载 {{n}} 小时", { n: hours(minutes) }), `+${hours(minutes)}`].find((text) => textWidth(text) * 1.1 <= band - 4) ?? null;
 }
 
-export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, usingDefault, source = "saved" }: { weeks: CapacityWeek[]; labels: Record<string, string>;
+export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, usingDefault, source = "saved", basis }: { weeks: CapacityWeek[]; labels: Record<string, string>;
   statedWeekly: number | null; configuredWeekly: number; usingDefault: boolean;
+  /** What the plan is built on (docs/plans/closed-loop-1030.md §1): the stated hours beside the last 28 days' measured ones. */
+  basis?: CapacityLine;
   /** Where the hours came from (`resolveAvailability`); anything but `saved` is said on the chart until the person paints their week. */
   source?: "saved" | "interview" | "stated_hours" | "default" }) {
   const t = useT();
@@ -91,7 +95,8 @@ export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, u
   const point = (week: CapacityWeek, index: number) => `${left + layout.centre(index)},${y(week.usableMinutes / 60)}`;
   const tip = active !== null ? shown[active] : undefined;
   return <Card title={t("容量与需求")} label={t("容量与需求")} data={{ "scheduled-minutes": scheduledFirst }}
-    note={<>{statedWeekly !== null && <span title={t("画像所述每周投入 {{n}} 小时", { n: statedWeekly })}>{t("所述每周 {{n}} h · ", { n: statedWeekly })}</span>}
+    note={<>{basis ? <span className="pl-basis" {...(statedWeekly !== null ? { title: t("画像所述每周投入 {{n}} 小时", { n: statedWeekly }) } : {})}>{capacityBasisText(t, { ...basis, statedWeekly: statedWeekly ?? configuredWeekly })}{" · "}</span>
+      : statedWeekly !== null && <span title={t("画像所述每周投入 {{n}} 小时", { n: statedWeekly })}>{t("所述每周 {{n}} h · ", { n: statedWeekly })}</span>}
       <span title={t("可用时段每周 {{n}} 小时（未扣除日历）", { n: configuredWeekly })}>{t("可用时段每周 {{n}} h", { n: configuredWeekly })}</span></>}
     tags={<>{source === "interview" ? <Tag tone="warn" title={t("可用时段来自访谈中所述的作息，尚未确认；在下方「可用时段」中刷涂实际作息")}>{t("推断时段（访谈）")}</Tag>
       : source === "stated_hours" ? <Tag tone="warn" title={t("可用时段按所述每周 {{n}} 小时平均分到每天，尚未确认；在下方「可用时段」中刷涂实际作息", { n: statedWeekly ?? "" })}>{t("推断时段（每周小时）")}</Tag>

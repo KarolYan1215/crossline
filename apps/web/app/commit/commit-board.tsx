@@ -11,6 +11,7 @@ import { useLocale, useT } from "../locale-context";
 import { monthDay } from "../../lib/i18n";
 import { PENDING_CHANGED } from "../pending-badge";
 import { Figure, RitualHead } from "../ritual-head";
+import { capacityBasisText } from "../ui/capacity-basis";
 
 type Preview = { keptMinutes: number; impact: { week: { unplacedBefore: number; unplacedAfter: number }; milestones: Array<{ id: string; title: string; shiftDays: number; atRiskAfter: boolean }> } };
 
@@ -99,6 +100,7 @@ export function CommitBoard({ view, labels }: { view: WeeklyCommitView; labels: 
         <div><span className="rd-label">{t("本周需求")}</span><Figure value={hours(view.demandMinutes)} unit="h" {...(view.demandMinutes > view.capacityMinutes ? { tone: "alarm" as const } : {})} /></div>
         <div><span className="rd-label">{t("保留后")}</span><Figure value={hours(kept)} unit="h" {...(over ? { tone: "alarm" as const } : {})} /></div>
       </div>
+      <p className="cm-basis muted">{capacityBasisText(t, { ...view.capacityBasis, statedWeekly: hours(view.statedMinutes) })}</p>
       <div className="cm-meter" role="img" aria-label={t("本周可用 {{usable}}，保留 {{kept}}，原有 {{demand}}", { usable: minutes(view.capacityMinutes), kept: minutes(kept), demand: minutes(view.demandMinutes) })}>
         <div className="cm-meter-labels">
           <span>{t("已保留 {{kept}}", { kept: minutes(kept) })}</span>

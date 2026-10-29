@@ -1,4 +1,5 @@
 import "server-only";
+import { capacityLine, type CapacityLine } from "./measured-capacity";
 import { ENERGY_ADVICE_DISMISSED, ENERGY_ADVICE_SETTING, onPersonsBoard, readEnergyAdvice, statedWeeklyHours, weeklyAvailableHours, type AccessContext, type AvailabilitySource,
   type AvailabilityWindow, type EnergyAdvice } from "@crossline/core";
 import { DEADLINE_MARGIN_DAYS, PARAMS_ASAP, PARAMS_BUFFERED, type ForecastResult, type ScheduleParams } from "@crossline/planner";
@@ -19,7 +20,7 @@ import { addDays, availabilityGrid, capacityWeeks, estimatePoints, goalRows, hor
 export type PlanBoard = {
   today: string; timeZone: string; labels: Record<string, string>; lineOrder: string[];
   horizon: Horizon;
-  capacity: { statedWeekly: number | null; configuredWeekly: number; usingDefault: boolean; source: AvailabilitySource };
+  capacity: { statedWeekly: number | null; configuredWeekly: number; usingDefault: boolean; source: AvailabilitySource; basis: CapacityLine };
   /** Each line's share of the week the scheduler keeps (percent), and whether the person set it or it is what they said. */
   shares: { effective: Record<string, number>; custom: boolean };
   /** What a previewed change moves (drawn with the current values as ghosts while a preview is open). */
@@ -152,7 +153,8 @@ export async function loadPlanBoard(ctx: AccessContext, plan: PersistedPlan, req
       statedWeekly: statedWeeklyHours(facts) ?? null,
       configuredWeekly: weeklyAvailableHours(readAvailability(ctx)),
       usingDefault: plan.usingDefaultPreferences,
-      source: resolvedAvailability(ctx).source
+      source: resolvedAvailability(ctx).source,
+      basis: capacityLine(ctx, statedWeeklyHours(facts) ?? null)
     },
     shares: { effective: readLineShares(ctx) ?? {}, custom: Boolean(getStore().getSetting(ctx.workspaceId, LINE_SHARES_SETTING)) },
     estimates, unplaced, kpis: planKpis({ capacity: charts.capacity, unplaced, estimates: estimates.points }),

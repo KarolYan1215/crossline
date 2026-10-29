@@ -153,7 +153,7 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   const fixed = (milestone: (typeof approved)[number]) => courses.has(milestone.projectId ?? "") || personSet.has(milestone.id);
   const forecast = json<Forecast>(store.getSetting(workspaceId, MILESTONE_FORECAST_SETTING), {});
   const fresh = forecast.at && now.getTime() - Date.parse(forecast.at) <= FORECAST_FRESH_MS ? forecast.goals ?? {} : {};
-  const daily = dailyAvailableMinutes(store, workspaceId);
+  const daily = dailyAvailableMinutes(store, workspaceId, now);
   const openMinutes = (milestoneId: string) => open.filter((order) => order.milestoneId === milestoneId).reduce((sum, order) => {
     const steps = store.getStepPlan(workspaceId, order.id)?.steps.filter((step) => step.status === "planned" && step.schedulable && step.executor !== "agent");
     return sum + (steps?.length ? steps.reduce((total, step) => total + step.estimate.p85Minutes, 0) : order.estimate.p85Minutes);

@@ -73,7 +73,7 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
         </div>
         <div className="pl-stats">
           <CapacityChart weeks={board.charts.capacity} labels={board.labels} statedWeekly={board.capacity.statedWeekly}
-            configuredWeekly={board.capacity.configuredWeekly} usingDefault={board.capacity.usingDefault} source={board.capacity.source} />
+            configuredWeekly={board.capacity.configuredWeekly} usingDefault={board.capacity.usingDefault} source={board.capacity.source} basis={board.capacity.basis} />
           <LineShareChart capacity={board.charts.capacity} shares={board.shares.effective} lineOrder={board.lineOrder} labels={board.labels} />
           <UnplacedCard items={board.unplaced} labels={board.labels} today={board.today} />
         </div>

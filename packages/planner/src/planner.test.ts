@@ -680,6 +680,30 @@ describe("schedule parameters and importance", () => {
     }
   });
 
+  test("the measured daily cap holds all work; deadline work beyond it is still placed, deadlines first (closed-loop-1030 §1)", async () => {
+    const loose = ["a", "b", "c", "d"].map((id) => ({ id, title: id, estimate: estimate(60), inputsReady: true, deadlineTier: 3 as const, interruptible: false }));
+    const params = { gapMinutes: 0, maxDailyShare: 1, focusCapMinutes: 0, deadlineBufferDays: 0 };
+    const availability = [day("2026-10-06", "14:00", "19:00"), day("2026-10-07", "14:00", "19:00")];
+    const minutes = (blocks: Array<{ start: string; end: string }>) => blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
+    for (const solver of ["solver", "greedy"] as const) {
+      const options = solver === "greedy" ? { solver: "none" as const } : {};
+      // Two hours a day measured: four hours of loose work take both days, two each.
+      const capped = await planSchedule({ now, horizonDays: 2, frozenBlocks: [], tasks: loose, params, availability,
+        dailyCapMinutes: { "2026-10-06": 120, "2026-10-07": 120 } }, options);
+      const on = (result: typeof capped, date: string) => result.plan.blocks.filter((block) => !block.frozen && block.start.startsWith(date));
+      expect(minutes(on(capped, "2026-10-06")), solver).toBe(120);
+      expect(minutes(on(capped, "2026-10-07")), solver).toBe(120);
+      // A three-hour task due the first evening does not fit under the cap: it is placed anyway, and loose work does not take that day.
+      const due = { id: "hw", title: "作业", estimate: estimate(180), inputsReady: true, deadlineTier: 1 as const, interruptible: false,
+        deadline: "2026-10-06T23:00:00.000Z" };
+      const pressed = await planSchedule({ now, horizonDays: 2, frozenBlocks: [], tasks: [...loose, due], params, availability,
+        dailyCapMinutes: { "2026-10-06": 120, "2026-10-07": 120 } }, options);
+      expect(minutes(on(pressed, "2026-10-06").filter((block) => block.taskId === "hw")), solver).toBe(180);
+      expect(on(pressed, "2026-10-06").filter((block) => block.taskId !== "hw"), solver).toEqual([]);
+      expect(minutes(on(pressed, "2026-10-07")), solver).toBe(120);
+    }
+  });
+
   test("a deadline buffer finishes work early when there is room, and never makes a deadline impossible", async () => {
     const task = { id: "hw", title: "作业", estimate: estimate(60), inputsReady: true, deadlineTier: 2 as const, interruptible: false,
       deadline: "2026-10-09T23:00:00.000Z" };

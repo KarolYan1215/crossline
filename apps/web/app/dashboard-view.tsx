@@ -15,6 +15,7 @@ import { FlywheelGraph } from "./flywheel/flywheel-graph";
 import type { Reminder } from "../lib/reminders";
 import { DayHead } from "./today/day-head";
 import { NeedsCard } from "./today/needs-card";
+import type { CapacityLine } from "../lib/measured-capacity";
 import { OverviewCard } from "./today/overview-card";
 import { weekLoad } from "./today/week-load";
 import type { Suggestion } from "./timeline/quick-actions";
@@ -72,7 +73,7 @@ export type DashboardData = {
   care: Array<{ title: string; minimumMinutes: number }>;
   /** Read straight off real acceptances, no grace period: today with nothing accepted yet is a real 0. */
   progress: { streakDays: number; weekCount: number };
-  todayCapacity: { availableMinutes: number; committedMinutes: number };
+  todayCapacity: { availableMinutes: number; committedMinutes: number; basis?: CapacityLine & { statedWeekly: number } };
   /** Things the person is waiting for whose expected day has come: each asks 「到了吗？」. Absent on old data. */
   /** The system's open questions, most urgent first (`lib/asks.ts`); 「…到了吗？」 is one of them. */
   asks?: Ask[];
@@ -201,7 +202,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
             {data.care.length > 0 && <dl className="care-band" aria-label={t("健康容量策略")}>{data.care.map((item) =>
               <div key={item.title}><dt>{item.title}</dt><dd>{t("最低 {{minutes}} 分钟", { minutes: item.minimumMinutes })}</dd></div>)}</dl>}
           </EnergyCard>
-          <OverviewCard availableMinutes={data.todayCapacity.availableMinutes} committedMinutes={data.todayCapacity.committedMinutes} weekCount={data.progress.weekCount} />
+          <OverviewCard availableMinutes={data.todayCapacity.availableMinutes} committedMinutes={data.todayCapacity.committedMinutes} weekCount={data.progress.weekCount} {...(data.todayCapacity.basis ? { basis: data.todayCapacity.basis } : {})} />
           <NeedsCard asks={data.asks ?? []} reminders={data.reminders ?? []} labels={data.calendar?.labels ?? {}} today={today} notes={notes} />
         </div>
       </div>

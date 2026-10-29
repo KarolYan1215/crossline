@@ -109,6 +109,12 @@ export type PlanningInput = {
    */
   capacityByDay?: Record<string, number>;
   /**
+   * The most minutes of work each day may hold, measured from what the person actually did (docs/plans/closed-loop-1030.md §1: the median
+   * of the last 28 same-kind days times 1.25). It holds all work, frozen blocks included; work with a deadline that cannot be placed under
+   * it is placed anyway in the relaxed run (deadlines always come first), and the forecast says it is at risk.
+   */
+  dailyCapMinutes?: Record<string, number>;
+  /**
    * How much of an hour's work a slot one and two energy levels short of the work yields, learned from the person's own confirmed
    * blocks (`packages/core/src/efficiency.ts`) and passed only once a backtest shows them better than the assumed 0.8 and 0.65.
    */
