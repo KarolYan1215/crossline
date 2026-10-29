@@ -1,5 +1,6 @@
 import type { SuccessCriterion } from "./index";
 import type { StoredDomainRecord } from "./records";
+import { builtInCategory, INCOME_CATEGORIES, merchantKey, SPEND_CATEGORIES } from "./money-events";
 
 /**
  * The monthly spending limit, when the wealth line has one: the lowest `lte` threshold in a currency (元, CNY, USD …) among its approved
@@ -28,6 +29,13 @@ const daysIn = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), N
 const isMoney = (record: LedgerRecord) => (record.kind === "income" || record.kind === "expense" || record.kind === "refund") && record.status !== "pending_review";
 /** What a record does to spending: + for an expense, − for a refund, 0 for income. */
 const outflow = (record: LedgerRecord) => record.kind === "expense" ? record.value : record.kind === "refund" ? -record.value : 0;
+/** A record's category in the fixed lists: records written before them carry free text (「Apple」), read as the merchant's plain category
+ * or 其他 / 其他收入, so the summary never shows a merchant as a category. */
+export function ledgerCategory(record: Pick<LedgerRecord, "kind" | "category">): string {
+  const fixed: readonly string[] = record.kind === "income" ? INCOME_CATEGORIES : SPEND_CATEGORIES;
+  if (fixed.includes(record.category)) return record.category;
+  return record.kind === "income" ? "其他收入" : builtInCategory(merchantKey(record.category ?? "")) || "其他";
+}
 /** A merchant's name for display: the record's own (its note's first part) or its key. */
 const merchantName = (record: LedgerRecord) => record.merchantKey || record.category || "其他";
 
@@ -86,7 +94,7 @@ export function ledgerSummary(all: LedgerRecord[], options: { today: string; mon
   const lastToDay = lastCumulative[Math.min(dayOfMonth, lastCumulative.length) - 1] ?? 0;
   const byCategory = (records: LedgerRecord[]) => {
     const map = new Map<string, number>();
-    for (const record of records) if (record.kind !== "income") map.set(record.category || "其他", (map.get(record.category || "其他") ?? 0) + outflow(record));
+    for (const record of records) if (record.kind !== "income") map.set(ledgerCategory(record), (map.get(ledgerCategory(record)) ?? 0) + outflow(record));
     return map;
   };
   const thisCats = byCategory(current), lastCats = byCategory(last);
@@ -164,7 +172,7 @@ export function recurringCharges(all: LedgerRecord[], today: string): RecurringC
       const lastGap = gaps.at(-1) ?? 0;
       const previous = similar.at(-2);
       out.push({ merchant: latest.merchantKey!, cycle, amount: latest.value, currency: latest.currency || "CNY", annual: round(latest.value * perYear), count: similar.length,
-        last: latest.at.slice(0, 10), next: addDays(latest.at, Math.round(days)), category: latest.category || "其他",
+        last: latest.at.slice(0, 10), next: addDays(latest.at, Math.round(days)), category: ledgerCategory(latest),
         priceUp: Boolean(previous && latest.value > previous.value * 1.03), resumed: lastGap > days * 2 + tolerance });
       break;
     }
@@ -211,7 +219,7 @@ export function weeklyMoneyReport(all: LedgerRecord[], start: string): WeeklyMon
   const weeks = [1, 2, 3, 4].map((back) => sum(within(addDays(start, -7 * back), addDays(end, -7 * back))));
   const average4 = round(weeks.reduce((a, b) => a + b, 0) / 4);
   const cats = new Map<string, number>();
-  for (const record of inCur(week)) if (record.kind !== "income") cats.set(record.category || "其他", (cats.get(record.category || "其他") ?? 0) + outflow(record));
+  for (const record of inCur(week)) if (record.kind !== "income") cats.set(ledgerCategory(record), (cats.get(ledgerCategory(record)) ?? 0) + outflow(record));
   const largest = inCur(week).filter((record) => record.kind === "expense").sort((a, b) => b.value - a.value)[0];
   const newRecurring = recurringCharges(all.filter((record) => record.at.slice(0, 10) <= end), end)
     .filter((item) => item.count === (item.cycle === "yearly" ? 2 : 3) && item.last >= start);
@@ -247,7 +255,7 @@ export type LedgerQuery = { month: string; category?: string; merchant?: string;
 export function queryLedger(all: LedgerRecord[], filter: LedgerQuery) {
   const merchant = (filter.merchant ?? "").trim().toLowerCase().replace(/\s+/g, "");
   const records = all.filter((record) => isMoney(record) && record.at.slice(0, 7) === filter.month
-    && (!filter.category || record.category === filter.category) && (!filter.account || (record.account ?? "").includes(filter.account))
+    && (!filter.category || ledgerCategory(record) === filter.category) && (!filter.account || (record.account ?? "").includes(filter.account))
     && (!merchant || (record.merchantKey ?? "").includes(merchant) || record.note.toLowerCase().replace(/\s+/g, "").includes(merchant))
     && (!filter.kind || (filter.kind === "expense" ? record.kind !== "income" : record.kind === filter.kind)));
   const totals = new Map<string, { spent: number; income: number; count: number }>();
@@ -259,5 +267,5 @@ export function queryLedger(all: LedgerRecord[], filter: LedgerQuery) {
   }
   return { month: filter.month, totals: [...totals].map(([currency, entry]) => ({ currency, spent: round(entry.spent), income: round(entry.income), count: entry.count })),
     items: [...records].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 30).map((record) => ({ at: record.at.slice(0, 10), kind: record.kind, value: record.value,
-      currency: record.currency || "CNY", category: record.category, merchant: record.merchantKey ?? "", account: record.account ?? "" })) };
+      currency: record.currency || "CNY", category: ledgerCategory(record), merchant: record.merchantKey ?? "", account: record.account ?? "" })) };
 }

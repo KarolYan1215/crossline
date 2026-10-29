@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ledgerSummary, monthlyMoneyReport, recurringCharges, spendingAnomalies, weeklyMoneyReport, type LedgerRecord } from "./ledger";
+import { ledgerCategory, ledgerSummary, monthlyMoneyReport, recurringCharges, spendingAnomalies, weeklyMoneyReport, type LedgerRecord } from "./ledger";
 import { recordMetrics } from "./records";
 
 let n = 0;
@@ -72,5 +72,15 @@ describe("anomalies and reports", () => {
     const report = monthlyMoneyReport([rec("2026-09-10", 300), rec("2026-10-10", 450)], "2026-10", 400)!;
     expect(report).toMatchObject({ spent: 450, lastMonthSpent: 300, changePct: 50, overLimit: 50 });
     expect(monthlyMoneyReport([rec("2026-09-10", 300)], "2026-10")).toBeNull();
+  });
+});
+
+describe("categories written before the fixed lists", () => {
+  it("reads free text as the merchant's plain category or 其他, never as a category of its own", () => {
+    expect(ledgerCategory({ kind: "expense", category: "Apple" })).toBe("其他");
+    expect(ledgerCategory({ kind: "expense", category: "Uber" })).toBe("交通");
+    expect(ledgerCategory({ kind: "expense", category: "订阅与软件" })).toBe("订阅与软件");
+    expect(ledgerCategory({ kind: "income", category: "bonus" })).toBe("其他收入");
+    expect(ledgerSummary([rec("2026-10-24", 11.99, { category: "Apple" })], { today: "2026-10-28" }).categories.map((item) => item.category)).toEqual(["其他"]);
   });
 });

@@ -8,7 +8,8 @@
 
 # Both stages use the same glibc image, so the native modules installed in the first (better-sqlite3's linux-x64 prebuild,
 # @resvg/resvg-js-linux-x64-gnu) are the ones that load in the second.
-FROM node:22-bookworm-slim AS build
+# Pinned by digest, as in deploy/app/Dockerfile, so an upstream tag move does not rebuild every layer.
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS build
 ENV CI=1 NEXT_TELEMETRY_DISABLED=1
 # better-sqlite3's install step runs node-gyp, which needs Python and make even when it only finds the bundled linux-x64 prebuild and
 # compiles nothing; g++ is there for an architecture without a prebuild.
@@ -28,7 +29,7 @@ RUN set -e; out=apps/assess/.next/standalone/apps/assess; \
     cp -r apps/assess/.next/static "$out/.next/static"; \
     for dir in public templates fonts assets; do if [ -d "apps/assess/$dir" ]; then rm -rf "$out/$dir"; cp -r "apps/assess/$dir" "$out/$dir"; fi; done
 
-FROM node:22-bookworm-slim AS run
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS run
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3340 ASSESS_DATA_DIR=/data
 WORKDIR /app
 # The code stays root-owned and read-only to the server; only /data (the SQLite file and the drawn figures) and Next's own cache

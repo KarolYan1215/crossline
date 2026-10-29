@@ -18,7 +18,9 @@
 # Layout and paths are the same as before (/repo, /repo/node_modules/.bin/tsx, apps/worker/dist/*.mjs), so run.sh, ledger-sync.sh,
 # backup.sh and the server.yml jobs that `docker run` this image with `tsx scripts/…` or `node -e` in packages/db work unchanged.
 
-FROM node:22-bookworm-slim AS base
+# The base is pinned by digest: when the tag moved upstream (2026-10-28) every layer missed the build cache and the host had to pull
+# the whole ~5 GB image again, which stalled. Move the digest on purpose, in its own change.
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS base
 ENV CI=1 NEXT_TELEMETRY_DISABLED=1
 # A server far from deb.debian.org (the hosted beta's Hong Kong host) builds with `--build-arg APT_MIRROR=mirrors.aliyun.com`.
 ARG APT_MIRROR=
