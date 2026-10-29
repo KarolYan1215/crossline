@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { notifyPass, planNotifications, type NotifyInput } from "./notify";
+import { notifyPass, planNotifications, unconfirmedLastNight, type NotifyInput } from "./notify";
 
 const windows = [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "12:00", energy: "high" as const }, { days: [1, 2, 3, 4, 5], start: "14:00", end: "18:00", energy: "medium" as const }];
 const base: NotifyInput = { today: "2026-10-08", clock: "09:05", weekday: 4, level: "normal", windows, sent: new Set(), urgentSentToday: 0,
@@ -142,6 +142,9 @@ test("the morning brief says how many of last night's blocks wait to be confirme
     "scheduled:d": { id: "scheduled:d", end: "23:40", began: false } }));
   store.appendEvent({ ownerId: "o", workspaceId: "w", idempotencyKey: "block-confirmed:x", type: "block.confirmed", entityId: "x",
     payload: { blockId: "scheduled:b", day: "2026-10-07", outcome: "as_planned" } });
+  expect(unconfirmedLastNight(store, "w", "2026-10-08")).toBe(2);
+  // The day was wrapped up (docs/rituals.md): only the blocks after the evening's questions stopped are left.
+  store.setSetting("w", "wrap.done:2026-10-07", "2026-10-08T03:00:00.000Z");
   const shown: string[] = [];
   await notifyPass(store, "w", new Date("2026-10-08T14:05:00.000Z"), async (_title, body) => { shown.push(body); return true; });
   expect(shown[0]).toContain("昨晚 1 块待确认");

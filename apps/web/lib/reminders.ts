@@ -1,8 +1,7 @@
 import "server-only";
-import {
-  currentRiskReview, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskCriteriaKeys, riskLevelOf, ruleMilestoneRisks,
-  taskTitleOf, timeOrderProblem, type AccessContext, type Ask, type MilestoneRisk
-} from "@crossline/core";
+import { taskTitleOf, timeOrderProblem, type AccessContext, type Ask } from "@crossline/core";
+import { riskOverview } from "./asks";
+import { countPending } from "./pending";
 import { getStore, milestonesRetiredBySystem, planToday, readGoalSettings, type PersistedPlan } from "./crossline";
 import { overlapStates, type TimelineItem } from "../app/timeline/model";
 import { localeFor } from "./locale";
@@ -81,28 +80,20 @@ export function loadReminders(ctx: AccessContext, plan: PersistedPlan, calendarI
   const retired = milestonesRetiredBySystem(ctx);
   const milestones = [...new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status !== "archived" && !retired.has(item.id))
     .map((item) => [item.id, item])).values()];
-  const stored = parseMilestoneRisks(store.getSetting(ctx.workspaceId, MILESTONE_RISKS_SETTING));
   const deadlines = new Map(milestones.map((item) => [item.id, deadlineOf(item.id)]));
-  const risky = milestones.filter((item) => item.status === "approved" && !asked.has(item.id)).flatMap((milestone) => {
-    const deadline = deadlines.get(milestone.id) ?? null;
-    const dependsOn = anchors.get(milestone.id)?.dependsOn ?? [];
-    const reviewed = currentRiskReview(stored[milestone.id],
-      milestoneRiskFingerprint({ title: milestone.title, deadline, criteria: riskCriteriaKeys(milestone.successCriteria ?? []), dependsOn }));
-    const risks: MilestoneRisk[] = reviewed ?? ruleMilestoneRisks({ today, deadline, criteria: milestone.successCriteria ?? [],
-      dependsOn: dependsOn.flatMap((id) => { const other = milestones.find((item) => item.id === id); return other ? [{ title: other.title, deadline: deadlines.get(id) ?? null }] : []; }),
-      otherDeadlines: milestones.filter((other) => other.id !== milestone.id && deadlines.get(other.id)).map((other) => deadlines.get(other.id)!), locale });
-    const high = risks.find((risk) => risk.level === "high");
-    return riskLevelOf(risks) === "high" && high ? [{ milestone, note: high.note }] : [];
-  });
-  if (risky.length === 1) out.push({ id: "risk", text: t("「{{title}}」风险高：{{note}}", { title: short(risky[0]!.milestone.title), note: risky[0]!.note }),
-    href: `/milestones?open=${encodeURIComponent(risky[0]!.milestone.id)}`, line: risky[0]!.milestone.identityId });
-  else if (risky.length > 1) out.push({ id: "risk", text: t("{{count}} 个里程碑风险高", { count: risky.length }), href: "/milestones" });
+  // Risks are counted once, from the set the weekly risk card and the urgent risk cards are built from (`riskOverview`, decided
+  // 2026-10-28): while a risk card is in the stack the stack says it, otherwise one line here between the weekly cards. The rule estimate
+  // the 主线 page draws is not counted, so there is never a second risk number beside the first.
+  const riskCard = asks.some((ask) => ask.kind === "risk_digest" || ask.kind === "milestone_risk" || ask.kind === "milestone_risk_review");
+  const risky = riskCard ? 0 : riskOverview(ctx).count;
+  if (risky) out.push({ id: "risk", text: t("{{count}} 个里程碑有风险，每周汇总一次", { count: risky }), href: "/plan" });
   const live = new Set(milestones.map((item) => item.id));
   const broken = store.listMilestoneRelations(ctx.workspaceId).filter((relation) => (relation.status === "approved" || relation.status === "candidate")
     && relation.artifactId && relation.transfer && live.has(relation.fromMilestoneId) && live.has(relation.toMilestoneId)
     && timeOrderProblem(deadlines.get(relation.fromMilestoneId), deadlines.get(relation.toMilestoneId), relation.transfer.lagDays, relation.kind === "recurring_feedback"));
   if (broken.length) out.push({ id: "relations", text: t("{{count}} 条跨主线关系的时间顺序不成立", { count: broken.length }), href: "/milestones" });
-  const drafts = milestones.filter((item) => item.status === "draft").length;
+  // This week's drafts, as 待确认 counts them (`countPending`): the badge and this line say the same number.
+  const drafts = countPending(ctx).milestoneDrafts;
   if (drafts) out.push({ id: "drafts", text: t("{{count}} 个里程碑草稿待批准", { count: drafts }), href: "/milestones" });
   return out;
 }

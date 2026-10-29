@@ -36,7 +36,11 @@ export type AskKind =
    */
   | "prep_question"
   /** How long getting to a place on the calendar takes, when nothing says (no word, no map, no default): 30 minutes are kept meanwhile. */
-  | "travel_minutes";
+  | "travel_minutes"
+  /** The week's risks, once a week (docs/rituals.md): every milestone at risk on one card; one due within two days stays its own card. */
+  | "risk_digest"
+  /** The weekly commitment (docs/rituals.md): the week's hours against its work, 保 / 推 / 砍 confirmed in one step. */
+  | "weekly_commit";
 
 export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date"; required: boolean;
   initial?: string; placeholder?: string };

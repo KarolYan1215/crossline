@@ -339,11 +339,13 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
  * mechanism for every route, so a new operation is undoable by being wrapped, not by writing its inverse by hand. Nothing is recorded
  * when the operation failed or changed nothing.
  */
-export async function withUndo<T extends { ok: boolean }>(ctx: AccessContext, label: string, run: () => T | Promise<T>): Promise<T & { op?: { id: string; label: string } }> {
+export async function withUndo<T extends { ok: boolean }>(ctx: AccessContext, label: string, run: () => T | Promise<T>,
+  /** Inverses the snapshot cannot see (an assistant result accepted: `agent.reopen`), added to the same operation. */
+  extra?: () => Inverse[]): Promise<T & { op?: { id: string; label: string } }> {
   const before = snapshot(ctx);
   const result = await run();
   if (!result.ok) return result;
-  const items = inverseOf(before, snapshot(ctx));
+  const items = [...inverseOf(before, snapshot(ctx)), ...(extra?.() ?? [])];
   if (!items.length) return result;
   const op = recordOp(ctx, label, items.length === 1 ? items[0]! : { kind: "batch", items });
   return { ...result, op: { id: op.id, label: op.label } };

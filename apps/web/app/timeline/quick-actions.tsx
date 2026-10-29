@@ -68,6 +68,8 @@ export function DayQuickActions({ day, today, items, proposals, nowMinute, selec
         }}>{t("全部批准")}</button>
       </span>}
       {asks !== null && asks > 0 && <a className="dq-link" href="/approvals#asks" title={t("本周的待决事项；待确认页还列有任务提案与助手成果")}>{t("待决事项")} · <b className="mono">{asks}</b></a>}
+      <a className="dq-link" href="/wrap">{t("收工")}</a>
+      <a className="dq-link" href="/commit">{t("本周承诺")}</a>
       <a className="dq-link" href="/plan#time">{t("调整可用时段")}</a>
     </nav>
     {status && <small role="status">{status}</small>}

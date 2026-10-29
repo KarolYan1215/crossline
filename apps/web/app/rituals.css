@@ -1,0 +1,20 @@
+/* The weekly commitment and the evening wrap-up (docs/rituals.md): one card, a row per task or block, the choices at the row's end. */
+.ritual-card { max-width: 880px; display: grid; gap: 14px; }
+.ritual-card p { margin: 0; }
+.ritual-lead { font-size: 14px; }
+.ritual-meter { display: grid; gap: 6px; }
+.ritual-meter-bar { height: 10px; border-radius: 5px; background: var(--chalk); overflow: hidden; }
+.ritual-meter-bar span { display: block; height: 100%; background: var(--ink); }
+.ritual-meter-bar span[data-over] { background: var(--graphite); }
+.ritual-warn { font-size: 13px; font-weight: 600; }
+.ritual-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ritual-rows li { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 8px 10px;
+  border-left: 3px solid var(--lc, var(--mist)); background: var(--paper); }
+.ritual-rows li[data-group="drop"] .ritual-row-main a { text-decoration: line-through; }
+.ritual-row-main { display: grid; gap: 2px; min-width: 0; flex: 1 1 240px; }
+.ritual-row-main a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ritual-row-main small { font-size: 13px; }
+.ritual-choices, .ritual-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ritual-answered { font-size: 13px; color: var(--graphite); }
+.ritual-preview { display: grid; gap: 4px; font-size: 13px; }
+.ritual-preview ul { margin: 0; padding-left: 18px; }

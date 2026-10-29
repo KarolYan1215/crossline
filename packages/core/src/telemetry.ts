@@ -41,9 +41,9 @@ export type TelemetryEvent = {
  * opened, which carries ids — and `apps/web/lib/telemetry-privacy.test.ts` checks this list against the `page.tsx` files, so a new
  * page is added here or never reported.
  */
-export const APP_PAGES = ["/", "/approvals", "/assistant", "/confirm/[id]", "/connect", "/device", "/helper", "/invite/decide", "/login", "/materials/[id]", "/materials/view", "/milestones", "/milestones/[id]", "/offline",
+export const APP_PAGES = ["/", "/approvals", "/assistant", "/commit", "/confirm/[id]", "/connect", "/device", "/helper", "/invite/decide", "/login", "/materials/[id]", "/materials/view", "/milestones", "/milestones/[id]", "/offline",
   "/ledger", "/onboarding", "/plan", "/portrait", "/privacy", "/reset-password", "/return", "/review", "/set-password", "/settings", "/signup", "/workbench", "/workbench/[id]",
-  "/workbench/[id]/material"] as const;
+  "/workbench/[id]/material", "/wrap"] as const;
 
 /** Ledger event types that are passed on (as themselves), and the ones made here from other tables. */
 export const LEDGER_EVENT_TYPES = [

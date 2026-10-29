@@ -5,8 +5,10 @@ import {
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
   isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner,
-  MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf
+  MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf,
+  parseRiskDigestSeen, RISK_DIGEST_SETTING, riskDigestShows, weekStartOf, type MilestoneRisk, type RiskDigestSeen
 } from "@crossline/core";
+import { applyWeeklyCommit, loadWeeklyCommit } from "./weekly-commit";
 import { acceptOwnCompletion, listAgentTasks, ownCompletion, resolvePossibleDuplicate, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
@@ -361,7 +363,11 @@ function riskAsks(source: Source): Ask[] {
       && Date.parse(`${today}T12:00:00Z`) - Date.parse(event.createdAt) < ACCEPT_RISK_DAYS * DAY
       && slack >= Number((event.payload as { slackDays?: number }).slackDays ?? -999));
     if (acceptedRecently) return [];
-    return [{ id: `risk:${goal.milestoneId}`, kind: "milestone_risk" as const, entityId: goal.milestoneId, line: milestone.identityId,
+    // The forecast's reading as a risk the weekly card can draw beside the reviewer's: high when the cautious finish misses the deadline.
+    const late = goal.p85Day === null || slack < 0;
+    const risks: MilestoneRisk[] = [{ level: late ? "high" : "medium", kind: "time",
+      note: goal.p85Day === null ? t("按已知工作，截止前排不完") : late ? t("保守估计晚 {{count}} 天", { count: -slack }) : t("余量不足 2 天") }];
+    return [{ id: `risk:${goal.milestoneId}`, kind: "milestone_risk" as const, entityId: goal.milestoneId, line: milestone.identityId, risks,
       preview: milestonePreview(t, goal.milestoneId),
       urgency: urgencyFor(deadline, today), dueDay: deadline, raisedAt: "", fingerprint: `${goal.p85Day}|${deadline}`,
       title: t("「{{title}}」可能赶不上 {{day}}", { title: short(milestone.title), day: format(deadline, locale) }),
@@ -466,49 +472,117 @@ function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
   });
 }
 
-/** Set by 「逐个决定」 on the folded card: while the same reviews wait, each is its own card again. */
-const RISK_REVIEW_SPLIT = "asks.riskReview.split";
-const riskBatchFingerprint = (members: Ask[]) => members.map((ask) => `${ask.entityId}:${ask.fingerprint}`).sort().join("|");
+const sourceOf = (ctx: AccessContext, now = appNow()): Source => ({ store: getStore(), ctx, today: planToday(ctx, now), now, t: tOf(ctx), locale: localeFor(ctx) });
 
 /**
- * Two or more reviewed risks waiting are one card, not one each (2026-10-17 walkthrough, W-29: approving twelve milestones put twelve
- * risk questions on the board, five this week). The card is as urgent as its nearest deadline and important when any risk is high or
- * any milestone weighs 60 or more; 「全部接受」 and 「全部不用管」 settle them together, 「逐个决定」 splits them back into one card each.
+ * Every milestone at risk now, from the forecast (`riskAsks`) and the reviewer (`riskReviewMembers`) — one per milestone, since the
+ * forecast's question waits while a review of the same milestone does. `urgent` are due within two days and stay a card each; the rest are
+ * the weekly card's `members`. The one set the weekly card, the urgent cards and Today's reminder count from, so a screen never shows two
+ * risk numbers (2026-10-28: 「10 个里程碑风险高」 in the reminders beside 「20 个有风险」 on 待确认).
  */
-function riskReviewAsks(source: Source): Ask[] {
-  const members = riskReviewMembers(source);
-  if (members.length < 2) return members;
-  const fingerprint = riskBatchFingerprint(members);
-  if (source.store.getSetting(source.ctx.workspaceId, RISK_REVIEW_SPLIT) === fingerprint) return members;
-  return [riskReviewBatch(source.ctx, members, source.today, fingerprint)];
+function riskSet(source: Source): { urgent: Ask[]; members: Ask[] } {
+  const all = [...riskAsks(source), ...riskReviewMembers(source)];
+  return { urgent: all.filter((ask) => ask.urgency === "now"), members: all.filter((ask) => ask.urgency !== "now") };
+}
+const memberLevel = (ask: Ask): "high" | "medium" => riskLevelOf(ask.risks ?? []) === "high" ? "high" : "medium";
+
+/**
+ * The weekly risk card (the owner's decision of 2026-10-28, docs/rituals.md; it replaced one card per milestone and the folded review
+ * card): every milestone at risk on one card, once a week, and mid-week again only when a risk turned high (`riskDigestShows`). A risk
+ * due within two days is still its own card. 「全部接受」 lets the scheduler aim each reviewed milestone's work early and quiets the
+ * forecast's warnings for the week; 「这周不用管」 changes no schedule. Either way what was seen is kept (`schedule.riskDigest`).
+ */
+function riskDigestAsks(source: Source): Ask[] {
+  const { urgent, members } = riskSet(source);
+  const week = weekStartOf(source.today);
+  const seen = parseRiskDigestSeen(source.store.getSetting(source.ctx.workspaceId, RISK_DIGEST_SETTING));
+  if (!riskDigestShows(members.map((ask) => ({ id: ask.entityId, level: memberLevel(ask) })), seen, week)) return urgent;
+  return [...urgent, riskDigest(source, members, week)];
 }
 
-export function riskReviewBatch(ctx: AccessContext, members: Ask[], today: string, fingerprint: string): Ask {
+function riskDigest({ ctx, today, t, locale }: Source, members: Ask[], week: string): Ask {
   const due = members.map((ask) => ask.dueDay).filter((day): day is string => Boolean(day)).sort()[0];
   const weight = Math.max(0, ...members.map((ask) => effectiveWeight(ctx, ask.entityId)));
-  const high = members.some((ask) => ask.important);
-  // The members as rows the card draws (name, deadline, level, kinds), highest level first, then nearest deadline: a folded card of
-  // 25 milestones used to say them all in one sentence (2026-10-21 walkthrough). The sentence keeps only the counts.
   const titles = new Map(getStore().listMilestones(ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]));
-  const rank = (ask: Ask) => { const level = riskLevelOf(ask.risks ?? []); return level === "high" ? 0 : level === "medium" ? 1 : 2; };
+  const rank = (ask: Ask) => memberLevel(ask) === "high" ? 0 : 1;
   const items: AskItem[] = [...members].sort((a, b) => rank(a) - rank(b) || (a.dueDay ?? "9999").localeCompare(b.dueDay ?? "9999"))
     .map((ask) => ({ id: ask.entityId, title: titles.get(ask.entityId) ?? quotedTitle(ask.title), ...(ask.dueDay ? { dueDay: ask.dueDay } : {}),
       ...(ask.line ? { line: ask.line } : {}), href: `/milestones?open=${encodeURIComponent(ask.entityId)}`, risks: ask.risks ?? [] }));
-  const levels = { high: items.filter((item) => riskLevelOf(item.risks ?? []) === "high").length };
-  const locale = localeFor(ctx);
-  const t = tFor(locale);
-  return { id: "riskreview:batch", kind: "milestone_risk_review", entityId: "batch", urgency: urgencyFor(due, today), ...(due ? { dueDay: due } : {}),
-    raisedAt: members.map((ask) => ask.raisedAt).sort().at(-1) ?? "", fingerprint, important: high || weight >= IMPORTANT_WEIGHT, importance: weight,
-    preview: { kind: "milestones", href: "/milestones", label: t("看里程碑") },
-    title: t("{{count}} 个里程碑有风险待过目", { count: members.length }), items,
-    why: (levels.high ? t("审查在 {{count}} 个里程碑上找出风险，其中 {{high}} 个为高风险，逐个列在下方。", { count: members.length, high: levels.high })
-      : t("审查在 {{count}} 个里程碑上找出风险，逐个列在下方。", { count: members.length }))
-      + (locale === "en" ? " " : "") + t("接受后，排程让各自的任务提前 1–2 天排完；不接受则排程不变。"),
+  const high = members.filter((ask) => memberLevel(ask) === "high").length;
+  // Never 「以后再定」: the card is this week's whatever its nearest deadline (`lib/horizon.ts` keeps `soon` and `now` in the week).
+  const urgency = urgencyFor(due, today) === "later" ? "soon" : urgencyFor(due, today);
+  return { id: "risk:weekly", kind: "risk_digest", entityId: "weekly", urgency, ...(due ? { dueDay: due } : {}),
+    raisedAt: members.map((ask) => ask.raisedAt).sort().at(-1) ?? "", important: high > 0 || weight >= IMPORTANT_WEIGHT, importance: weight,
+    fingerprint: `${week}|${members.map((ask) => `${ask.entityId}:${ask.fingerprint}`).sort().join("|")}`,
+    preview: { kind: "plan", href: "/plan", label: t("看计划") }, items,
+    title: t("本周 {{count}} 个里程碑有风险", { count: members.length }),
+    why: (high ? t("按预测和审查，{{count}} 个里程碑可能赶不上或有阻碍，其中 {{high}} 个为高风险，逐个列在下方。", { count: members.length, high })
+      : t("按预测和审查，{{count}} 个里程碑可能赶不上或有阻碍，逐个列在下方。", { count: members.length }))
+      + (locale === "en" ? " " : "") + t("每周汇总一次；风险变高时再提醒。截止在两天内的单独提醒。"),
     options: [
-      { id: "accept", label: t("全部接受，按风险提前安排"), recommended: true, detail: t("各自的任务提前 1–2 天排完") },
-      { id: "split", label: t("逐个决定"), detail: t("拆成每个里程碑一张卡，可分别调整截止或降低标准") },
-      { id: "ignore", label: t("全部不用管"), detail: t("排程不变，这次审查不再问") }
+      { id: "accept", label: t("全部接受，按风险提前安排"), recommended: true, detail: t("审查过的里程碑，任务提前 1–2 天排完；这周不再提醒") },
+      { id: "ignore", label: t("这周不用管"), detail: t("排程不变，下周汇总再看") },
+      { id: "plan", label: t("去计划页调整"), href: "/plan" }
     ] };
+}
+
+/** How many milestones are at risk now, from the same set as the weekly card and the urgent cards: Today's reminder says this number. */
+export function riskOverview(ctx: AccessContext, now = appNow()): { count: number } {
+  const { urgent, members } = riskSet(sourceOf(ctx, now));
+  return { count: new Set([...urgent, ...members].map((ask) => ask.entityId)).size };
+}
+
+function answerRiskDigest(ctx: AccessContext, optionId: string): AskResult {
+  if (optionId !== "accept" && optionId !== "ignore") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+  const source = sourceOf(ctx);
+  const store = getStore();
+  const { members } = riskSet(source);
+  const at = new Date().toISOString();
+  const decisions = { ...readRiskDecisions(ctx) };
+  const forecast = members.some((ask) => ask.kind === "milestone_risk") ? loadGoalForecast(ctx, riskHorizonDays(ctx)).goals : [];
+  for (const ask of members) {
+    if (ask.kind === "milestone_risk_review") { decisions[ask.entityId] = { fingerprint: ask.fingerprint, how: optionId, at } satisfies RiskDecision; continue; }
+    const goal = forecast.find((item) => item.milestoneId === ask.entityId);
+    record(ctx, "risk.accepted", ask.entityId, `risk:accepted:${ask.entityId}:weekly:${Date.now()}`, { slackDays: goal?.slackDays ?? -999, p85Day: goal?.p85Day ?? null, weekly: true });
+  }
+  // Both `schedule.` settings, so the answer is undone with the rest of the operation.
+  store.setSetting(ctx.workspaceId, RISK_DECISIONS_SETTING, JSON.stringify(decisions));
+  store.setSetting(ctx.workspaceId, RISK_DIGEST_SETTING, JSON.stringify({ week: weekStartOf(source.today),
+    levels: Object.fromEntries(members.map((ask) => [ask.entityId, memberLevel(ask)])) } satisfies RiskDigestSeen));
+  return { ok: true };
+}
+
+/**
+ * The weekly commitment as a question (docs/rituals.md): once a week from Sunday evening, or once mid-week when the week's work has grown
+ * more than 15% past its hours. 「按建议确认」 applies the suggested 保 / 推 / 砍 in one undoable step; the page (`/commit`) changes any row.
+ */
+function weeklyCommitAsks({ ctx, now, t, locale }: Source): Ask[] {
+  const view = loadWeeklyCommit(ctx, now);
+  if (!view.due || !view.rows.length) return [];
+  const count = (group: string) => view.rows.filter((row) => row.suggestion.group === group).length;
+  const keep = count("keep"), defer = count("defer"), drop = count("drop");
+  // A week where everything fits and nothing is stale has nothing to decide: no question (the friction rule, docs/energy-and-ecosystem.md
+  // §0). The page stays open by hand from Today's day panel.
+  if (!defer && !drop) return [];
+  const hours = (minutes: number) => Math.round(minutes / 6) / 10;
+  return [{ id: `commit:${view.week}:${view.due}`, kind: "weekly_commit", entityId: view.week, urgency: "soon", important: true, raisedAt: "",
+    fingerprint: `${view.week}|${view.due}|${keep}/${defer}/${drop}`, preview: { kind: "plan", href: "/commit", label: t("逐项看") },
+    title: view.due === "overload"
+      ? t("本周的工作已超出可用时间：可用 {{usable}} 小时，排了 {{demand}} 小时", { usable: hours(view.capacityMinutes), demand: hours(view.demandMinutes) })
+      : t("定下 {{day}} 起这一周：可用 {{usable}} 小时，排了 {{demand}} 小时", { day: format(view.week, locale), usable: hours(view.capacityMinutes), demand: hours(view.demandMinutes) }),
+    why: t("按截止、里程碑重要性、逾期天数和是否已开始，建议保 {{keep}} 项、推 {{defer}} 项到下周、砍 {{drop}} 项（归档，可恢复）。", { keep, defer, drop })
+      + (locale === "en" ? " " : "") + t("可在本周承诺页逐项改；确认后一次生效，可撤销。"),
+    options: [
+      { id: "suggested", label: t("按建议确认"), recommended: true, detail: t("推的从下周一起排，砍的进已归档") },
+      { id: "review", label: t("逐项看"), href: "/commit" },
+      { id: "keep", label: t("这周不调整"), detail: t("都留在本周，排程照旧") }
+    ] }];
+}
+
+function answerWeeklyCommitAsk(ctx: AccessContext, ask: Ask, optionId: string): AskResult {
+  if (optionId !== "suggested" && optionId !== "keep") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+  const result = applyWeeklyCommit(ctx, {}, { keepAll: optionId === "keep" });
+  return result.ok ? { ok: true } : result;
 }
 
 /**
@@ -910,7 +984,7 @@ function lockedConflictAsks({ store, ctx, today, now, t, locale }: Source): Ask[
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskAsks, riskReviewAsks, overdueAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, travelAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
@@ -1282,19 +1356,9 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     case "relation_check": return answerRelationCheck(ctx, ask, optionId, values);
     case "outcome_check": return answerOutcome(ctx, ask, optionId, values, choice.note);
     case "progress_check": return answerProgress(ctx, ask, optionId, choice.note);
+    case "risk_digest": return answerRiskDigest(ctx, optionId);
+    case "weekly_commit": return answerWeeklyCommitAsk(ctx, ask, optionId);
     case "milestone_risk_review": {
-      if (ask.entityId === "batch") {
-        const members = riskReviewMembers({ store, ctx, today: planToday(ctx), now: appNow(), t: tOf(ctx), locale: localeFor(ctx) });
-        if (optionId === "split") {
-          store.setSetting(ctx.workspaceId, RISK_REVIEW_SPLIT, ask.fingerprint);
-          return { ok: true };
-        }
-        if (optionId !== "accept" && optionId !== "ignore") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
-        const at = new Date().toISOString();
-        store.setSetting(ctx.workspaceId, RISK_DECISIONS_SETTING, JSON.stringify({ ...readRiskDecisions(ctx),
-          ...Object.fromEntries(members.map((member) => [member.entityId, { fingerprint: member.fingerprint, how: optionId, at } satisfies RiskDecision])) }));
-        return { ok: true };
-      }
       const how: RiskDecision["how"] | undefined = optionId === "accept" ? "accept" : optionId === "extend" ? "extend" : optionId === "ignore" ? "ignore" : undefined;
       if (!how) return { ok: false, code: "ASK_OPTION_UNKNOWN" };
       if (how === "extend") {
@@ -1338,9 +1402,11 @@ function withNoteInFields(ask: Ask, optionIds: string[], values: Record<string, 
  * takes them. Where nothing downstream reads the words they are kept on the `ask.answered` event.
  */
 export async function answerAsk(ctx: AccessContext, askId: string, choice: string | { optionIds?: string[]; note?: string; seconds?: number },
-  values: Record<string, unknown>, now = appNow()): Promise<AskResult> {
+  values: Record<string, unknown>, now = appNow(),
+  /** 「全部按推荐」 answers many asks under one undo of its own, from the list it already read (`lib/answer-all.ts`). */
+  options: { undo?: boolean; ask?: Ask } = {}): Promise<AskResult> {
   // An interview question further down the round is not listed (one card at a time) but is still the person's to answer.
-  const ask = collectAsks(ctx, now).find((item) => item.id === askId)
+  const ask = (options.ask?.id === askId ? options.ask : undefined) ?? collectAsks(ctx, now).find((item) => item.id === askId)
     ?? (askId.startsWith("iq:") && interviewStatus(ctx).parked ? interviewQuestionAsks(interviewStatus(ctx), tOf(ctx)).find((item) => item.id === askId) : undefined);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const optionIds = typeof choice === "string" ? [choice] : choice.optionIds ?? [];
@@ -1353,7 +1419,8 @@ export async function answerAsk(ctx: AccessContext, askId: string, choice: strin
   const locale = localeFor(ctx);
   const t = tFor(locale);
   const label = listOf(locale, checked.options.map((option) => option.label)) || t("自己回答");
-  const result = await withUndo(ctx, t("{{label}}：{{title}}", { label, title: ask.title }), () => answerOne(ctx, ask, { optionIds: ids, note: checked.note }, checked.values));
+  const run = () => answerOne(ctx, ask, { optionIds: ids, note: checked.note }, checked.values);
+  const result = options.undo === false ? await run() : await withUndo(ctx, t("{{label}}：{{title}}", { label, title: ask.title }), run);
   // The question ledger keeps the answer beside the question, numbered, for the models that read it.
   if (result.ok && ask.kind !== "interview_question") {
     const store = getStore();
@@ -1371,8 +1438,9 @@ export async function answerAsk(ctx: AccessContext, askId: string, choice: strin
 }
 
 /** 「明天再问」/「下周再问」: hidden until then, back sooner if what it is about changes. */
-export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = appNow(), seconds?: number): AskResult {
-  const ask = collectAsks(ctx, now).find((item) => item.id === askId);
+export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = appNow(), seconds?: number,
+  options: { undo?: boolean; ask?: Ask } = {}): AskResult {
+  const ask = (options.ask?.id === askId ? options.ask : undefined) ?? collectAsks(ctx, now).find((item) => item.id === askId);
   if (!ask) return { ok: false, code: "ASK_NOT_FOUND" };
   const until = snoozeUntil(choice, planToday(ctx, now));
   // Recorded as an operation, so 「明天再问」 pressed by mistake can be undone like any other answer.
@@ -1380,7 +1448,7 @@ export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" 
   record(ctx, "ask.snoozed", ask.entityId, `ask:snoozed:${ask.id}:${now.getTime()}`,
     { askId: ask.id, until, fingerprint: ask.fingerprint, ...(seconds === undefined ? {} : { seconds }) } satisfies AskSnooze & { seconds?: number });
   const added = getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).filter((event) => !before.has(event.eventId)).map((event) => event.eventId);
-  if (added.length) recordOp(ctx, tOf(ctx)(choice === "tomorrow" ? "明天再问：{{title}}" : "下周再问：{{title}}", { title: ask.title }), { kind: "event.retract", eventIds: added });
+  if (added.length && options.undo !== false) recordOp(ctx, tOf(ctx)(choice === "tomorrow" ? "明天再问：{{title}}" : "下周再问：{{title}}", { title: ask.title }), { kind: "event.retract", eventIds: added });
   return { ok: true };
 }
 

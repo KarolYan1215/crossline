@@ -208,8 +208,10 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
     // the phone's 「开始计时」 starts the timer in one tap.
     const start = confirm ? undefined : ((message.payload.card as { actions?: Array<{ action?: string; args?: { type?: string; workOrderId?: string } }> } | undefined)?.actions ?? [])
       .find((action) => action.action === "task.op" && action.args?.type === "start")?.args?.workOrderId;
-    const path = confirm ? `/confirm/${encodeURIComponent(message.id)}` : start ? `/workbench/${encodeURIComponent(start)}` : "/";
-    if (!await both("Crossline", body, `${baseUrl}${confirm ? path : "/"}`, { title: "Crossline", body, path, tag: nudge.fingerprint ?? message.id, ...(start ? { start } : {}) })) continue;
+    // The evening wrap-up opens its own page (a link that writes nothing, like the confirm page).
+    const wrap = nudge.kind === "day_wrap";
+    const path = confirm ? `/confirm/${encodeURIComponent(message.id)}` : wrap ? "/wrap" : start ? `/workbench/${encodeURIComponent(start)}` : "/";
+    if (!await both("Crossline", body, `${baseUrl}${confirm || wrap ? path : "/"}`, { title: "Crossline", body, path, tag: nudge.fingerprint ?? message.id, ...(start ? { start } : {}) })) continue;
     store.updateConversationPayload(workspaceId, message.id, { ...message.payload, nudge: { ...nudge, delivery: "pushed" } });
     delivered.push(`nudge:${nudge.fingerprint ?? message.id}`);
   }
@@ -229,7 +231,10 @@ export function unconfirmedLastNight(store: CrosslineStore, workspaceId: string,
   try { seen = JSON.parse(store.getSetting(workspaceId, `nudge.blocks:${yesterday}`) ?? "{}"); } catch { return 0; }
   const confirmed = new Set(store.listEvents(workspaceId, { type: "block.confirmed" })
     .filter((event) => (event.payload as { day?: string }).day === yesterday).map((event) => String((event.payload as { blockId?: string }).blockId)));
-  return Object.values(seen).filter((block) => block.began && block.end >= NIGHT_FROM && !confirmed.has(block.id)).length;
+  // The evening wrap-up (docs/rituals.md) holds every block whose task is not due by the next day; a day not wrapped up leaves all of them
+  // unconfirmed, so the brief counts all of them, not only the ones that ended in the quiet hours.
+  const wrapped = Boolean(store.getSetting(workspaceId, `wrap.done:${yesterday}`));
+  return Object.values(seen).filter((block) => block.began && (!wrapped || block.end >= NIGHT_FROM) && !confirmed.has(block.id)).length;
 }
 
 /** A page seen this recently is in front of the person; the web's `PRESENCE_FRESH_MS`, kept equal. */
