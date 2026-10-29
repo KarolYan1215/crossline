@@ -19,6 +19,16 @@ describe("the day panel", () => {
     expect(dayLoad(items, "2026-10-14")).toEqual({ planned: 60, pencilled: 0, fixed: 0, allDay: [] });
   });
 
+  test("rest is not fixed schedule: an evening 「休息」 and lunch keep work off but are not counted (W-156)", () => {
+    const day = [
+      item("event:rest", { kind: "calendar", title: "休息", day: "2026-10-29", start: "21:00", end: "23:59" }),
+      item("graph_calendar:lunch", { kind: "calendar", title: "Lunch", day: "2026-10-29", start: "12:00", end: "13:00" }),
+      item("graph_calendar:class", { kind: "calendar", title: "ECE 548", day: "2026-10-29", start: "13:00", end: "14:15" }),
+      item("graph_calendar:seminar", { kind: "calendar", title: "Lunch seminar", day: "2026-10-29", start: "14:15", end: "15:00" })
+    ];
+    expect(dayLoad(day, "2026-10-29")).toEqual({ planned: 0, pencilled: 0, fixed: 120, allDay: [] });
+  });
+
   test("an all-day item names the day instead of filling it, and overlapping fixed items count once (W-25)", () => {
     const sunday = [
       item("event:rest", { kind: "calendar", title: "周日休息", day: "2026-10-18", start: "00:00", end: "23:59" }),

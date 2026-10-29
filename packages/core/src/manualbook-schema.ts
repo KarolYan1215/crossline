@@ -45,6 +45,11 @@ export type ManualDesignContext = {
   person?: string[];
   /** What the assistant already prepared for this task (formula sheets, problem lists…), by step, to build on rather than redo. */
   prepared?: Array<{ step: string; files: string[] }>;
+  /**
+   * How close this work is to what the person knows (`familiarityOf`): near gets the key points only, far gets terms, why, an example
+   * and the common mistakes (`FAMILIARITY_INSTRUCTIONS`).
+   */
+  familiarity?: { level: "near" | "mid" | "far"; basis: string[] };
 };
 
 const text = (max: number, min = 1) => ({ type: "string", minLength: min, maxLength: max }) as const;
@@ -235,6 +240,8 @@ export type WriteContext = {
    */
   aiTools?: Array<{ name: string; kind: string; goodFor: string; by: "system" | "person" }>;
   aiAssist?: { tool: string; how: string; minutesSaved: number };
+  /** See `ManualDesignContext.familiarity`: how much this section explains. */
+  familiarity?: { level: "near" | "mid" | "far"; basis: string[] };
 };
 export type NodeWriteup = { analysis: string; tutorial: string; citations: string[];
   /** One note per material used: what in it matters for this step and how to use it (the material's own preview page shows these). */

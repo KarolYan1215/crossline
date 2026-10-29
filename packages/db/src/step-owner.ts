@@ -1,4 +1,4 @@
-import { PRODUCT_OWNER, STEP_PRODUCTS, STEP_ROLES, ownerPreferenceKey, productOf, stepLeavesMachine, tFor, type StepRole } from "@crossline/core";
+import { PRODUCT_OWNER, STEP_PRODUCTS, STEP_ROLES, isLinkNeed, mailLinksKey, ownerPreferenceKey, productOf, stepLeavesMachine, tFor, type StepRole } from "@crossline/core";
 import type { CrosslineStore, StoredStepPlan, StoredTaskStep } from "./index";
 import { readLocale } from "./locale";
 
@@ -104,6 +104,41 @@ export function provisionsOf(store: CrosslineStore, workspaceId: string, workOrd
     if (payload.needId && (payload.how === "file" || payload.how === "none" || payload.how === "public")) out.set(payload.needId, payload.how);
   }
   return out;
+}
+
+/** The links the mail a task came from carried (`linksFromMail`, kept at capture under `mail.links:<capture>`), else none. */
+export function mailLinksOf(store: CrosslineStore, workspaceId: string, workOrderId: string): string[] {
+  try {
+    const links = JSON.parse(store.getSetting(workspaceId, mailLinksKey(workOrderId)) ?? "[]") as unknown;
+    return Array.isArray(links) ? links.filter((link): link is string => typeof link === "string" && link.startsWith("https://")) : [];
+  } catch { return []; }
+}
+
+/** The event saying a need was met by the mail's own link: `{needId, links}`. */
+export const NEED_FROM_MAIL_EVENT = "task.need_from_mail";
+
+/**
+ * Needs for a link that the task's own mail already carries (W-158): each one's provide step is settled without asking, and the
+ * links are recorded with it. Rules only, no model; run before the need check and on every task pass. Returns the needs settled.
+ */
+export function settleLinkNeeds(store: CrosslineStore, workspaceId: string, ownerId: string, now = new Date()): Array<{ workOrderId: string; needId: string }> {
+  const settled: Array<{ workOrderId: string; needId: string }> = [];
+  for (const plan of store.listStepPlans(workspaceId)) {
+    const needs = (plan.needs ?? []).filter(isLinkNeed);
+    if (!needs.length) continue;
+    const links = mailLinksOf(store, workspaceId, plan.workOrderId);
+    if (!links.length) continue;
+    for (const need of needs) {
+      const step = plan.steps.find((item) => item.provides === need.id && item.status === "planned");
+      if (!step) continue;
+      const done = provideMaterial(store, workspaceId, plan.workOrderId, step.id, "public", [], ownerId, now);
+      if (!done.ok) continue;
+      store.appendEvent({ ownerId, workspaceId, idempotencyKey: `${NEED_FROM_MAIL_EVENT}:${plan.workOrderId}:${need.id}`, type: NEED_FROM_MAIL_EVENT,
+        entityId: plan.workOrderId, payload: { needId: need.id, links, at: now.toISOString() } });
+      settled.push({ workOrderId: plan.workOrderId, needId: need.id });
+    }
+  }
+  return settled;
 }
 
 /** The needs a step waits on: those it uses whose provide step is not done. */

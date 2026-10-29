@@ -59,6 +59,10 @@ The person schedules and tracks `plannedSteps`, and the manualbook follows them:
 - The sub-actions and research questions are about the step's `covers` (the content units, named as in the person's own material) at this person's level, for the reason in its `why`: the derivation, problem type or method the unit requires, never generic advice on organising material or making notes.
 - When the step has `aiAssist`, its time was planned with that tool: one sub-action says where the tool is used (「用 ChatGPT 按第 4 讲的题型出 5 道同难度练习，自己先做再核对」).
 
+## How much to explain: `familiarity`
+
+`familiarity.level` (`basis[]` says why) sets the depth. `near`: one short node per planned step with the few moves specific to this task; mark no node `needsResearch` unless the person's files lack a fact it needs, and never research general guides for work in their own field. `far`: each node says what a newcomer must know first (terms, why, one example, common mistakes) and research targets an introduction and the one or two sources that make the step doable, including where the person gets what they must supply. `mid`: as below.
+
 ## Concise and complete
 
 The tutorial is read as one page, a section per node, linked one-to-one with the task's steps. No two nodes overlap (each sub-action lives in exactly one node); together they cover every required contract item and every planned step; a node's `steps` are the few concrete actions it needs, with no restated goal, no generic advice and nothing repeated from another node.

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "vitest";
-import { normalizeStepPlan, type StepPlan } from "@crossline/core";
+import { mailLinksKey, normalizeStepPlan, type StepPlan } from "@crossline/core";
 import { CrosslineStore } from "./index";
-import { chooseStepOwner, openNeedsOf, ownerPreferencesFor, provideMaterial, provisionsOf } from "./step-owner";
+import { chooseStepOwner, mailLinksOf, needStatesOf, openNeedsOf, ownerPreferencesFor, provideMaterial, provisionsOf, settleLinkNeeds } from "./step-owner";
 
 /** The person's say over who does a step (4A) and their own material first (2026-10-22). */
 let store: CrosslineStore;
@@ -34,6 +34,21 @@ test("a step handed to the assistant is remembered for that kind on the line; ac
   // Back to what the table says: no preference left.
   chooseStepOwner(store, ws, "t", summary!.id, "assistant", "o");
   expect(ownerPreferencesFor(store, ws, "research").size).toBe(0);
+});
+
+test("a need for a link the task's own mail carries is met by it, without asking (W-158)", () => {
+  const raw = plan([step("a", "practice", "完成 GLACIER 身份验证", { product: "action", uses: ["n1", "n2"] })]);
+  raw.needs = [{ id: "n1", what: "GLACIER 身份验证链接", why: "打开验证页", basis: "邮件提到链接", kind: "personal" },
+    { id: "n2", what: "护照号码", why: "填表", basis: "本人持有", kind: "personal" }];
+  const saved = seed(raw);
+  expect(settleLinkNeeds(store, ws, "o")).toEqual([]);
+  store.setSetting(ws, mailLinksKey("t"), JSON.stringify(["https://www.glaciertax.com/verify?token=abc", "http://insecure.example/x"]));
+  expect(mailLinksOf(store, ws, "t")).toEqual(["https://www.glaciertax.com/verify?token=abc"]);
+  expect(settleLinkNeeds(store, ws, "o")).toEqual([{ workOrderId: "t", needId: "n1" }]);
+  expect(settleLinkNeeds(store, ws, "o")).toEqual([]);
+  expect([...provisionsOf(store, ws, "t")]).toEqual([["n1", "public"]]);
+  expect([...needStatesOf(store, ws, "t").keys()]).toEqual(["n2"]);
+  expect(openNeedsOf(store.getStepPlan(ws, "t")!, saved.steps.find((item) => item.title === "完成 GLACIER 身份验证")!)).toEqual(["n2"]);
 });
 
 test("material only the person has holds what uses it until it is uploaded or they say there is none", () => {

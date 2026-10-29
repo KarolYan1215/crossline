@@ -1,14 +1,17 @@
 import "server-only";
-import { archetypeById, completionRule, preparesOf, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type Preparation, type SuccessCriterion,
+import { archetypeById, completionRule, preparesOf, STEP_ANSWER_SLOT, stepAnswerSlot, finishedSteps, goalSettingKey, proposalReady, producedArtifacts, relevantDocuments, staleDateMentions, stepDatesFollowingDue, taskProgress, taskTitleOf, usedArtifacts, type AccessContext, type FamiliarityLevel, type Preparation, type SuccessCriterion,
   type EvidenceQuestionTemplate } from "@crossline/core";
-import { doneKinds, listAgentTasks, needStatesOf, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
+import { doneKinds, familiarityBook, familiarityFor, listAgentTasks, mailLinksOf, needStatesOf, preparationOf, readStoredArtifactPlan, type CrosslineStore, type StoredMilestone, type StoredWorkOrder, type StoredMaterial, type StoredExecution, type StoredMilestoneRelation,
   type StoredBackgroundFact, type StoredStepPlan, type StoredTaskStep } from "@crossline/db";
 import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-packs";
-import { effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
+import { appNow, effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
 import { linePacks } from "./lines";
 import { runFilesHere } from "./agent";
 import { localeFor } from "./locale";
 import { tFor, type Locale } from "./i18n";
+
+/** Today in the person's zone, for the step dates and the description (W-155). */
+const todayFor = (ctx: AccessContext) => new Intl.DateTimeFormat("en-CA", { timeZone: effectiveSchedulePreferences(ctx).preferences.timeZone }).format(appNow());
 
 const quartersOfVerdict: Record<string, number> = { met: 4, partial: 2, unmet: 0, unverifiable: 0 };
 
@@ -16,13 +19,14 @@ const quartersOfVerdict: Record<string, number> = { met: 4, partial: 2, unmet: 0
  * One read per table for a set of orders, then per-order extras. Both the single and the batch tier use it, so a card and the page it
  * opens always agree.
  */
-function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWorkOrder[], locale?: Locale): Map<string, TaskExtras> {
+function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWorkOrder[], locale?: Locale, today = new Date().toISOString().slice(0, 10)): Map<string, TaskExtras> {
   const t = tFor(locale);
   const ids = new Set(orders.map((order) => order.id));
   const projects = new Map(store.listProjects(workspaceId, { includeArchived: true }).map((project) => [project.id, project.name]));
   const allPlans = store.listStepPlans(workspaceId);
   const plans = new Map(allPlans.filter((plan) => ids.has(plan.workOrderId)).map((plan) => [plan.workOrderId, plan]));
   const done = doneKinds(store, workspaceId, allPlans);
+  const book = familiarityBook(store, workspaceId, allPlans);
   const milestones = new Map(store.listMilestones(workspaceId).map((milestone) => [milestone.id, milestone]));
   const anchors = new Map(store.listMilestoneAnchors(workspaceId).map((anchor) => [anchor.milestoneId, anchor.deadline]));
   const relations = store.listMilestoneRelations(workspaceId).filter((relation) => relation.status === "approved" || relation.status === "candidate");
@@ -102,13 +106,19 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       ...(projects.get(order.projectId) ? { projectName: projects.get(order.projectId)! } : {}),
       ...(!proposalReady(order, plan, { planBlocked: planBlocked.has(order.id), exempt: capacity.has(order.identityId) }) ? { preparing: true } : {}),
       window: { ...(payload.notBefore ? { notBefore: payload.notBefore } : {}), ...(dueBy ? { dueBy } : {}) },
+      // The description names a day that has passed while the task is due later: the page says the deadline moved (W-155).
+      ...(dueBy && staleDateMentions(order.intent, today, dueBy).length ? { dueMoved: dueBy } : {}),
+      ...((links) => links.length ? { mailLinks: links } : {})(mailLinksOf(store, workspaceId, order.id)),
       ...(plan ? { stepPlan: { archetypeLabel: ((label) => label ? t(label) : plan.archetypeId)(archetypeById(plan.archetypeId)?.label), quantity: plan.quantity, rationale: plan.rationale,
         progress: taskProgress(finishedSteps(order.state, plan.steps)), units: plan.units,
         // A provide step says whether the system is still looking (files, then the web) or the person is asked (need-check.ts).
         steps: (() => { const states = plan.needs?.length ? needStatesOf(store, workspaceId, order.id) : new Map<string, "checking" | "ask">();
-          return finishedSteps(order.state, plan.steps).map((step) => step.provides && states.get(step.provides) ? { ...step, needState: states.get(step.provides)! } : step); })(),
+          // Step dates move with a deadline that moved later (W-155): no 「10/22 → 10/23」 on a task now due 10/31.
+          return stepDatesFollowingDue(finishedSteps(order.state, plan.steps), dueBy, today)
+            .map((step) => step.provides && states.get(step.provides) ? { ...step, needState: states.get(step.provides)! } : step); })(),
         questions: plan.questions.map((question) => { const answer = answerOf(order.projectId, question.text); return { ...question, ...(answer ? { answer } : {}) }; }) } } : {}),
-      preparation: preparationOf(order, plan, done),
+      ...(() => { const familiarity = familiarityFor(book, order, plan?.archetypeId);
+        return { preparation: preparationOf(order, plan, done, familiarity), familiarity: { level: familiarity.level, by: familiarity.by } }; })(),
       supports, workedMinutes: worked, ...(artifactLinks.length ? { artifactLinks } : {}),
       criteria: (milestone?.successCriteria ?? []).map((criterion) => {
         if (personConfirmed.has(criterion.id)) return { id: criterion.id, statement: criterion.statement, quarters: 4, by: "person" as const };
@@ -218,10 +228,16 @@ export type TaskExtras = {
   preparing?: boolean;
   /** Earliest start and latest finish, as the scheduler uses them. */
   window: { notBefore?: string; dueBy?: string };
+  /** The deadline, when the description still names an earlier day that has passed (W-155): shown as 「截止已改为 …」 beside it. */
+  dueMoved?: string;
+  /** Links on the sender's own domain in the mail this task came from (W-158): what a step needing 「链接」 is met by. */
+  mailLinks?: string[];
   stepPlan?: { archetypeLabel: string; quantity: { basis: string; amount: number; unit: string }; rationale: string; progress: number;
     steps: Array<StoredTaskStep & { needState?: "checking" | "ask" }>; units: StoredStepPlan["units"]; questions: StepQuestionView[] };
   /** How the card is prepared before its work starts (docs/task-preparation.md): nothing, its steps, or a full tutorial, and why. */
   preparation?: Preparation;
+  /** How close the work is to what the person knows (`familiarityOf`, W-154), and whether the person set it; they can change it on the task. */
+  familiarity?: { level: FamiliarityLevel; by: "person" | "rules" };
   /** Other lines this work feeds: the milestone relations from this task's milestone, and its byproducts. */
   supports: Array<{ line: string; lineLabel: string; target: string; artifact?: string; pending: boolean }>;
   /** Cross-line artifacts at task level: what this task produces for another line's work, and whose output it uses (docs/flywheel-and-views.md §5.5). */
@@ -436,7 +452,7 @@ export function loadTaskDetail(ctx: AccessContext, workOrderId: string): TaskDet
       ? store.listEvents(ctx.workspaceId, { type: "work_order.archived", entityId: workOrderId }) : [],
     relatedFlywheel: flywheelTouching(relations, order.milestoneId, titleOf),
     background: store.getBackgroundFacts(ctx.workspaceId, order.identityId),
-    extras: taskExtras(store, ctx.workspaceId, [order], localeFor(ctx)).get(order.id)!
+    extras: taskExtras(store, ctx.workspaceId, [order], localeFor(ctx), todayFor(ctx)).get(order.id)!
   });
 }
 
@@ -526,7 +542,7 @@ export function loadTaskDetailsBatch(ctx: AccessContext, workOrderIds: string[])
     return facts;
   };
 
-  const extras = taskExtras(store, ctx.workspaceId, orders, localeFor(ctx));
+  const extras = taskExtras(store, ctx.workspaceId, orders, localeFor(ctx), todayFor(ctx));
   for (const order of orders) {
     const milestone = order.milestoneId ? milestoneById.get(order.milestoneId) : undefined;
     result.set(order.id, assembleTaskDetail(ctx, order, { extras: extras.get(order.id)!,

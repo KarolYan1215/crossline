@@ -12,6 +12,8 @@ import { TaskActions } from "../task/task-actions";
 import { TaskDialog } from "../task/task-dialog";
 import { Conversation } from "../chat/conversation";
 import { TaskQuickEdit } from "../task/quick-edit";
+import { minutesText } from "../task/format";
+import { reservedMinutes } from "../task/reserve";
 import { ImpactCard, useImpact } from "../task/impact";
 import { shiftDay, type TimelineItem } from "./model";
 import type { LineLabels } from "./views";
@@ -134,6 +136,9 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
     {(step || progress !== undefined) && <div className="dq-step">
       <small>{step ? (step.executor === "human" ? t("本步") : t("本步 · 系统可做")) : t("进度")}</small>
       {step && <span className="dq-step-title">{step.title}</span>}
+      {step && step.schedulable && reservedMinutes(step.estimate, detail?.estimate.confidence) !== undefined && <span className="dq-reserve">
+        {t("通常约 {{usual}}，日历按保守估计预留 {{reserved}}", { usual: minutesText(locale, step.estimate.p50Minutes),
+          reserved: minutesText(locale, reservedMinutes(step.estimate, detail?.estimate.confidence)!) })}</span>}
       {step?.firstAction && step.status === "planned" && <span className="dq-first"><small>{t("第一步")}</small> <span className="gen">{step.firstAction}</span></span>}
       {progress !== undefined && <span className="dq-progress"><span className="task-progress-bar" aria-hidden="true"><i style={{ width: `${progress}%` }} /></span>
         <b className="mono">{progress}%</b></span>}

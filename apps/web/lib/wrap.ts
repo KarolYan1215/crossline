@@ -1,8 +1,9 @@
 import "server-only";
-import { withFrozen, wrapTimeOf, type AccessContext, type NudgeEnding } from "@crossline/core";
+import { isRestEvent, withFrozen, wrapTimeOf, type AccessContext, type NudgeEnding } from "@crossline/core";
 import { formatInTimeZone } from "date-fns-tz";
 import { appNow, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant, writeFrozen } from "./crossline";
 import { blockAnswer, confirmBlockAt, type ConfirmOutcome } from "./confirm";
+import { eventBlocks } from "./fixed-events";
 
 /** The nudge pass's record of today's blocks (`seenBlocksKey` in `lib/nudges.ts`, which imports this file). */
 const seenBlocksKey = (day: string) => `nudge.blocks:${day}`;
@@ -86,7 +87,10 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
         ...(line ? { line } : {}), ...(answered.has(block.id) ? { answered: answered.get(block.id)! } : {}) };
     });
   const weekday = Number(formatInTimeZone(now, zone, "i")) % 7;
-  const at = day === today ? wrapTimeOf(readAvailability(ctx), weekday) : undefined;
+  // The day's rest events (「休息」 from 21:00) end the working day where they begin (W-156).
+  const rest = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: Array<{ day?: string; start: string; end: string; title: string }> } | undefined)?.blocks ?? [])
+    .concat(eventBlocks(ctx, [day])).filter((block) => block.day === day && isRestEvent(block));
+  const at = day === today ? wrapTimeOf(readAvailability(ctx), weekday, rest) : undefined;
   const open = rows.filter((row) => !row.answered).length;
   const doneBlocks = rows.filter((row) => row.answered && row.answered !== "not_done" && row.answered !== "partial").length;
   return { day, ...(at ? { at } : {}), rows, open, done: Boolean(store.getSetting(ctx.workspaceId, WRAP_DONE(day))), today: day === today, timedMinutes, doneBlocks };

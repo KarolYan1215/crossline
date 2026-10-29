@@ -9,7 +9,7 @@ import { containerMemory, containerPeak, createCollectMemory, heldMemory } from 
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, readLocale, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { closeInterruptedCollections, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
 import { workflowImprovePass } from "./workflow-improver";
@@ -649,6 +649,11 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
     try {
       const outdated = requestOutdatedReplans(analysisStore, workspaceId);
       if (outdated.length) console.info(JSON.stringify({ type: "steps.outdated_replan_requested", checkedAt, workspaceId, orders: outdated }));
+    } catch { /* next tick */ }
+    // A need for a link the task's own mail carries is met by it (W-158): no web search, no question to the person.
+    try {
+      const settled = settleLinkNeeds(analysisStore, workspaceId, ownerOf(analysisStore, workspaceId));
+      if (settled.length) console.info(JSON.stringify({ type: "steps.need_from_mail", checkedAt, workspaceId, settled }));
     } catch { /* next tick */ }
     if (!codexSupervisor || paused(workspaceId, "planning")) return;
     const ids = tasksAwaitingStepPlan(analysisStore, workspaceId);

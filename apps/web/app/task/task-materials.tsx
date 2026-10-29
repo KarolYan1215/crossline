@@ -7,6 +7,7 @@ import { cleanText } from "../materials/humanize";
 import { isTooling } from "../materials/kinds";
 import { TutorialView } from "../materials/tutorial-view";
 import { currentStep } from "./card-model";
+import { FamiliarityTag } from "./familiarity-tag";
 import { useT } from "../locale-context";
 
 /**
@@ -24,7 +25,8 @@ export function TaskMaterials({ detail, live, anchors }: { detail: TaskDetail; l
     <MaterialsList detail={detail} />
     <div className="task-tutorial" {...(anchors ? { id: "tutorial" } : {})}>
       <p className="task-tutorial-head"><span className="task-subhead">{t("教程")}</span>
-        <a href={`/materials/${encodeURIComponent(detail.id)}`}>{t("打开阅读页")}</a></p>
+        <a href={`/materials/${encodeURIComponent(detail.id)}`}>{t("打开阅读页")}</a>
+        {detail.familiarity ? <FamiliarityTag workOrderId={detail.id} level={detail.familiarity.level} by={detail.familiarity.by} /> : null}</p>
       <TutorialView workOrderId={detail.id} building={detail.state === "preparing"} auto={detail.preparation?.level === "tutorial"}
         {...(detail.preparation ? { reason: detail.preparation.reason } : {})} canBuild={live} layout="toc"
         {...(currentStep(detail) ? { currentStepId: currentStep(detail)!.id } : {})} />

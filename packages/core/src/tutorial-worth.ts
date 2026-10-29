@@ -1,4 +1,5 @@
 import { infoRequestTraits } from "./info-request";
+import type { FamiliarityLevel } from "./familiarity";
 import { tFor, type Locale, type Translate } from "./i18n";
 
 /**
@@ -22,7 +23,13 @@ import { tFor, type Locale, type Translate } from "./i18n";
  * A plan whose steps name their product (`STEP_TYPES`, from 2026-10-22) is judged by that alone: a tutorial teaches, so only the
  * person's `ability` steps count, and only they get a section (`tutorialSteps`). Checking a delivery package, approving and sending, or
  * finding the cause of a failure in the person's own system produce an output or an act — the owner saw both get generic tutorials.
+ *
+ * Familiarity comes before all of that (`familiarityOf`, walkthrough W-154, 2026-10-29): work close to what the person knows (`near`)
+ * never gets a tutorial however long it is, and work far from it (`far`) gets one once the person's own part reaches
+ * `TUTORIAL_FAR_MINUTES` — a short judgement step in an unfamiliar field (choosing a first round of content topics) needs a page on how
+ * to judge more than a long one in the person's own field. `mid` follows the rules above.
  */
+export const TUTORIAL_FAR_MINUTES = 15;
 export const TUTORIAL_MIN_MINUTES = 45;
 export const TUTORIAL_LEARNING_MINUTES = 60;
 export const TUTORIAL_CRAFT_MINUTES = 120;
@@ -40,7 +47,7 @@ type Task = { title: string; intent: string; p50Minutes: number; archetypeId?: s
 const minutesIn = (t: Translate) => (value: number) => value >= 60 ? t("{{hours}} 小时", { hours: Math.round(value / 6) / 10 }) : t("{{minutes}} 分钟", { minutes: Math.round(value) });
 
 /** `locale`: the reason is shown on the task (why it has a guide or not). */
-export function taskPreparation(task: Task, steps?: readonly Step[], history: { doneBefore?: string } = {}, locale?: Locale): Preparation {
+export function taskPreparation(task: Task, steps?: readonly Step[], history: { doneBefore?: string; familiarity?: FamiliarityLevel } = {}, locale?: Locale): Preparation {
   const t = tFor(locale);
   const minutes = minutesIn(t);
   if (infoRequestTraits({ title: task.title, intent: task.intent, p50Minutes: task.p50Minutes }).match)
@@ -50,6 +57,10 @@ export function taskPreparation(task: Task, steps?: readonly Step[], history: { 
   if (!steps?.length) return { level: "steps", reason: t("步骤规划好后再决定是否准备教程。") };
   const own = steps.filter((step) => step.executor !== "agent" && step.schedulable);
   const ownMinutes = own.reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
+  if (history.familiarity === "near")
+    return { level: "steps", reason: t("熟悉的领域，按步骤和「先做」即可，不备教程。") };
+  if (history.familiarity === "far" && ownMinutes >= TUTORIAL_FAR_MINUTES)
+    return { level: "tutorial", reason: t("对本人是新领域（本人约 {{time}}），开工前备好讲解：术语、为什么、一个例子和常见错误。", { time: minutes(ownMinutes) }) };
   if (own.some((step) => step.product)) {
     const learning = tutorialSteps(own).reduce((sum, step) => sum + step.estimate.p50Minutes, 0);
     return learning >= TUTORIAL_LEARNING_MINUTES
@@ -74,13 +85,18 @@ export function taskPreparation(task: Task, steps?: readonly Step[], history: { 
   return { level: "steps", reason: t("整理、确认、决定、沟通或办理类的任务，按步骤做即可，不备教程。") };
 }
 
-/** The person's steps a tutorial is written for: those whose product is the person's ability (all of them on a plan from before products). */
-export function tutorialSteps<T extends { executor: string; product?: string }>(steps: readonly T[]): T[] {
+/**
+ * The person's steps a tutorial is written for: those whose product is the person's ability (all of them on a plan from before products).
+ * Work far from what the person knows (`familiarity` `far`) gets a section for every step of theirs: in a new field, producing an output
+ * or acting needs explaining too (where to export a statement, how a content topic is judged).
+ */
+export function tutorialSteps<T extends { executor: string; product?: string }>(steps: readonly T[], familiarity?: FamiliarityLevel): T[] {
   const own = steps.filter((step) => step.executor !== "agent");
+  if (familiarity === "far") return own;
   return own.some((step) => step.product) ? own.filter((step) => step.product === "ability") : own;
 }
 
 /** Whether the system writes a tutorial by itself (`taskPreparation` says `tutorial`); the task page's button still makes one for any task. */
-export function tutorialWorthIt(task: Task, steps?: readonly Step[], history: { doneBefore?: string } = {}): boolean {
+export function tutorialWorthIt(task: Task, steps?: readonly Step[], history: { doneBefore?: string; familiarity?: FamiliarityLevel } = {}): boolean {
   return taskPreparation(task, steps, history).level === "tutorial";
 }

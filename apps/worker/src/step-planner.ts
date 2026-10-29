@@ -3,10 +3,10 @@ import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, stepTypesBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, readableFromMaterial, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
   PROGRESS_ASSESSMENT_SCHEMA, validateProgressAssessment, type ProgressAssessment, type StepPlan, type StepWarning, type ValidationReview,
-  FINER_SPLIT_FEEDBACK, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion
+  FINER_SPLIT_FEEDBACK, FAMILIARITY_INSTRUCTIONS, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { aiToolsFor, createRefBook, lessonsFor, listAgentTasks, ownerPreferencesFor, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
+import { aiToolsFor, createRefBook, familiarityBook, familiarityFor, lessonsFor, listAgentTasks, ownerPreferencesFor, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
@@ -290,6 +290,8 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         // Facts to get from someone before the work (folded in by the backplanner or the daily merge): each is a drafted email and a send.
         getFirst: payload.infoRequests ?? [] },
       milestone: milestone ? { title: milestone.title, criteria: milestone.successCriteria.map((item) => item.statement) } : null,
+      // How close the work is to what the person knows (W-154): near steps are short, far ones explain (FAMILIARITY_INSTRUCTIONS).
+      familiarity: (({ level, basis }) => ({ level, basis }))(familiarityFor(familiarityBook(store, workspaceId), order, previous?.archetypeId)),
       window,
       // The task's files and the passages chosen for it (docs/context-selection.md): the strongest in full, the rest by their opening line,
       // read further through search_material/read_chunk. On a route that cannot call them, the passages code picked, in full.
@@ -340,7 +342,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
         + "record says the person has (basis: the fact, file or task wording); the app looks for it on the web first and asks the person last. "
         + "No step only reviews the assistant's output, writes an acceptance checklist or defines scope. "
         + "The rationale is a few short sentences for the person: what the plan rests on, never the input's keys, ids or how units were counted. "
-        + "Ask only what neither the material nor person.facts settles, with the likeliest option first. "
+        + "Ask only what neither the material nor person.facts settles, with the likeliest option first. " + FAMILIARITY_INSTRUCTIONS + " "
         + "usedRefs lists the bracketed ids ([f3], [p1], [l2]) of the facts, preferences and lessons the plan really rests on, [] when none.",
       // The prompt cache (docs/token-economy.md §2.5): what every plan of this workspace shares first, then the line's and the project's,
       // then this task; what only this run is told comes after the input instead of in the developer instructions.

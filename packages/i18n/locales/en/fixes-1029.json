@@ -1,0 +1,17 @@
+{
+  "熟悉领域·从简": "Familiar field · brief",
+  "新领域·附讲解": "New field · explained",
+  "一般熟悉·按步骤": "Somewhat familiar · by the steps",
+  "熟悉的领域，按步骤和「先做」即可，不备教程。": "A familiar field: the steps and \"Start with\" are enough, no tutorial.",
+  "对本人是新领域（本人约 {{time}}），开工前备好讲解：术语、为什么、一个例子和常见错误。": "A new field for you (about {{time}} of yours): an explanation is prepared before you start, with the terms, the why, one example and the common mistakes.",
+  "改为熟悉": "Mark as familiar",
+  "改为一般": "Mark as somewhat familiar",
+  "改为新领域": "Mark as new",
+  "本人设定，同一主线的同类任务都按此准备": "Set by you: tasks of this kind on this line are prepared this way",
+  "按本人的背景和做过的同类任务判断": "Judged from your background and the tasks of this kind you have done",
+  "截止已改为 {{date}}": "Deadline moved to {{date}}",
+  "邮件里的链接": "Links in the mail",
+  "估计还不确定，日历按保守估计预留；通常用不了这么久": "The estimate is still uncertain, so the calendar holds the cautious figure; it usually takes less",
+  "预留 {{duration}}": "{{duration}} held",
+  "通常约 {{usual}}，日历按保守估计预留 {{reserved}}": "Usually about {{usual}}; the calendar holds {{reserved}} to be safe"
+}

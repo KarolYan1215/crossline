@@ -27,6 +27,7 @@
 .dq-step small,.dq-part small{font-size:12px;color:var(--graphite)}
 .dq-step-title{overflow-wrap:anywhere}
 .dq-first{overflow-wrap:anywhere}
+.dq-reserve{font-size:12px;color:var(--graphite)}
 .dq-progress{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
 .dq-progress b{font-size:12px}
 .dq-part{display:grid;gap:2px}

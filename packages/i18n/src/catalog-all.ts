@@ -17,6 +17,7 @@ import redesign_plan from "../locales/en/redesign-plan.json";
 import redesign_settings from "../locales/en/redesign-settings.json";
 import redesign_rituals from "../locales/en/redesign-rituals.json";
 import month_sim from "../locales/en/month-sim.json";
+import fixes_1029 from "../locales/en/fixes-1029.json";
 
 /** Every English catalogue, for the web app and the worker (server-side size does not matter; the web's client reads the same set). */
-export const ALL_CATALOGS = [common, core_a, core_b, assess, web_settings, web_onboarding, web_plan, web_shell, web_tasks, web_lib, worker, task_import, rituals, redesign_today, redesign_tasks, redesign_plan, redesign_settings, redesign_rituals, month_sim] as Array<Record<string, string>>;
+export const ALL_CATALOGS = [common, core_a, core_b, assess, web_settings, web_onboarding, web_plan, web_shell, web_tasks, web_lib, worker, task_import, rituals, redesign_today, redesign_tasks, redesign_plan, redesign_settings, redesign_rituals, month_sim, fixes_1029] as Array<Record<string, string>>;
