@@ -100,6 +100,9 @@ test("the wrap-up comes at the end of the day's last available window", () => {
   expect(wrapTimeOf(windows, 1)).toBe("21:30");
   expect(wrapTimeOf(windows, 2)).toBe("12:00");
   expect(wrapTimeOf(windows, 0)).toBeUndefined();
+  // A rest event over the end of the day ends it where the rest begins (W-156); one after the day's hours changes nothing.
+  expect(wrapTimeOf(windows, 1, [{ start: "21:00", end: "23:59" }])).toBe("21:00");
+  expect(wrapTimeOf(windows, 1, [{ start: "22:00", end: "23:00" }])).toBe("21:30");
 });
 
 describe("answerAllSteps", () => {

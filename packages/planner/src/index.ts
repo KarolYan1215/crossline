@@ -31,7 +31,25 @@ export type PlannerTask = {
    * a high one, one for a medium one). Added to the person's own deadline buffer and dropped with it in the relaxed run.
    */
   riskBufferDays?: number;
+  /**
+   * The milestone this work serves is at risk: its reviewed risk was accepted (`riskBufferDays`) or the forecast's cautious finish leaves
+   * under two days. With a weight of `PRIME_WEIGHT` or more such work is placed first, into the day's best hours (`isPrimeWork`).
+   */
+  atRisk?: boolean;
 };
+
+/** Weight from which at-risk work takes the day's best hours first (the same line the web calls important). */
+export const PRIME_WEIGHT = 60;
+/**
+ * Work that should have the best hours of the day (walkthrough W-153): at risk and important. On the owner's board the four morning
+ * blocks went to undated-risk creator work due a day earlier and the at-risk research decision was cut into two evening blocks, because
+ * the greedy pass places work earliest-deadline-first and each task takes the first free slots. Priority schedulers order the other
+ * way round: Reclaim schedules its Critical (P1) items before everything else and lets them take time from lower priorities; Motion
+ * puts deep work in the morning. Here that holds only while it costs no other work its place (`fallbackSchedule` keeps the plain order
+ * when it would).
+ */
+export const isPrimeWork = (task: Pick<PlannerTask, "atRisk" | "weight" | "floorOnly">) =>
+  Boolean(task.atRisk && !task.floorOnly && (task.weight ?? 50) >= PRIME_WEIGHT);
 
 /**
  * The four numbers the person sets for how a day is packed: the break between blocks, the share of a day's free time that may be

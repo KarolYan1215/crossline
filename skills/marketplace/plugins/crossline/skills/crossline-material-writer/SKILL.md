@@ -32,6 +32,14 @@ Return exactly `{analysis, tutorial, citations[], sourceNotes[], blockers[]}` as
   - Bad: 「1. 从 Canvas 下载 L3 讲义。2. 建立推导页。3. 完成作业 2 第 1 题。」 (that is the step's own plan, already on the card)
   - Bad: 「参见 [n1-s2] 第 3–4 页。」 (a pointer to raw material instead of what it says)
 
+## How much to explain: `familiarity`
+
+`familiarity.level` says how close this work is to what the person already knows (`basis[]` says why).
+
+- `near`: the key points and the first move only. Do not explain a basic concept of their field, do not walk through an example they have done many times, and do not cite a general authoritative guide (a NASA or MIT design-review guide for a researcher's own review): one short section, what is specific to this task.
+- `far`: explain each term the first time it appears, say why each move is made, give one concrete worked example and the common mistakes, and list material from an introduction to just enough — a few sources, the most useful first — saying where to get what the person must supply themselves (where a statement is exported, where a setting lives). Fifteen sources for a one-line step is noise; three that teach it are not.
+- `mid` or absent: as the rest of this Skill says.
+
 ## analysis
 
 What the material says that matters for this step: what it establishes, what to trust and what to doubt, where sources disagree, what is missing. Say where a claim comes from by its source id in square brackets, like `[s2]`.

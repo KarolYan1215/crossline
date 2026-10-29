@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   MAIL_ACCOUNTS_SETTING, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
-  isMailReminderTitle, mailMessageKey, moneyEventFromMail, senderName, MAIL_CHECK_NUDGE_KIND, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage,
+  isMailReminderTitle, linksFromMail, mailLinksKey, mailMessageKey, moneyEventFromMail, senderName, MAIL_CHECK_NUDGE_KIND, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage,
   type MoneyReading
 } from "@crossline/core";
 import {
@@ -270,7 +270,11 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       continue;
     }
     if ((kind === "todo" || kind === "date") && captured < MAIL_INBOX_PER_PASS) {
-      deps.store.capture({ id: `cap-mail-${randomUUID().slice(0, 12)}`, ownerId, workspaceId, title: item.title.trim().slice(0, 240),
+      const captureId = `cap-mail-${randomUUID().slice(0, 12)}`;
+      // The mail's own links on the sender's domain, read by code and kept for the task (W-158): a step needing 「验证链接」 is met by them.
+      const links = linksFromMail(message.body ?? message.snippet, message.fromAddress);
+      if (links.length) deps.store.setSetting(workspaceId, mailLinksKey(captureId), JSON.stringify(links));
+      deps.store.capture({ id: captureId, ownerId, workspaceId, title: item.title.trim().slice(0, 240),
         context: message.snippet
           ? tOfWorkspace(deps.store, workspaceId)("来自邮件：{{from}}「{{subject}}」（{{date}}）\n开头：{{snippet}}", { from: message.from, subject: message.subject, date: message.date.slice(0, 10), snippet: message.snippet.slice(0, 200) })
           : tOfWorkspace(deps.store, workspaceId)("来自邮件：{{from}}「{{subject}}」（{{date}}）", { from: message.from, subject: message.subject, date: message.date.slice(0, 10) }) },

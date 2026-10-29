@@ -9,8 +9,8 @@ import {
   type MaterialSearchContext, type NodeWriteup, type WriteContext
 } from "@crossline/core";
 import { continueSkillTurn, releaseThread, runCodexSkill, webResearchBlocker, type CodexRpcBoundary, type SkillRunResult } from "@crossline/codex";
-import { aiToolsFor, doneKinds, listAgentTasks, openNeedsOf, preparationOf, provisionsOf, type CrosslineStore } from "@crossline/db";
-import { aiToolBrief, onPersonsBoard, requiredApproval, taskTitleOf, tutorialSteps, tFor, type Locale } from "@crossline/core";
+import { aiToolsFor, doneKinds, familiarityBook, familiarityFor, listAgentTasks, openNeedsOf, preparationOf, provisionsOf, type CrosslineStore } from "@crossline/db";
+import { aiToolBrief, FAMILIARITY_INSTRUCTIONS, onPersonsBoard, requiredApproval, taskTitleOf, tutorialSteps, tFor, type Locale } from "@crossline/core";
 import { localeOf } from "./locale";
 import { claimedTitleMatches } from "./diligence";
 import { arxivPdfAddress, defaultSafeGetDeps, htmlToText, safeGet, type SafeGetDeps } from "./safe-fetch";
@@ -30,7 +30,8 @@ const DESIGN_INSTRUCTIONS = "Design the tutorial for one task as a short flow of
   + "by id (every required one is served). Mark needsResearch only for the one to three steps that need knowledge or a method the person's own "
   + "files do not hold, each with two to four research questions the open web can answer, fitted to the person's setting and to the step's "
   + "scale; every other step has needsResearch false and no questions. When the task has planned steps, make one node per planned step in their order, with the planned step's title copied "
-  + "exactly. No loops, no two steps overlapping. Do not do the work. Return only the requested JSON, every human-readable field in Chinese.";
+  + "exactly. No loops, no two steps overlapping. Do not do the work. " + FAMILIARITY_INSTRUCTIONS + " On near work mark no step needsResearch "
+  + "unless the person's files lack a fact the step needs. Return only the requested JSON, every human-readable field in Chinese.";
 const SEARCH_INSTRUCTIONS = "Find the best public material for ONE step of a task's tutorial: a writer will write the step from your sources alone. "
   + "Answer every research question; a source is a public https page you opened, with its real title, and its summary says faithfully what it "
   + "gives for this step. Prefer primary, open-access sources in the person's setting and language, at the step's scale. Say honestly whether you "
@@ -42,7 +43,8 @@ const WRITE_INSTRUCTIONS = "Write ONE section of the tutorial the person learns 
   + "how to get it (the link is the source id; for material behind a login, the path on that platform). Do not restate the step's own plan (title, "
   + "first move, hand-in, done criterion: it is on the task card), and process public sources the same way when the person has no file for it. "
   + "Cite sources only by their id and never write a web address yourself; where the "
-  + "sources do not support a detail, say so. Cover this step fully and nothing of another, saying each point once. Return only the requested JSON, in Chinese.";
+  + "sources do not support a detail, say so. Cover this step fully and nothing of another, saying each point once. " + FAMILIARITY_INSTRUCTIONS
+  + " Return only the requested JSON, in Chinese.";
 
 export type ManualProgress = { stage: "designing" | "researching" | "writing" | "assembling"; done: number; total: number };
 export type ManualOutcome =
@@ -102,7 +104,9 @@ export function buildManualContext(store: CrosslineStore, workspaceId: string, w
   const stepPlan = store.getStepPlan(workspaceId, order.id);
   // Only the steps the person learns from (`tutorialSteps`: product `ability`), and of those only the ones whose own material is in: a step
   // waiting on an upload (`openNeedsOf`) gets its section once the person gives it or says there is none.
-  const steps = tutorialSteps(stepPlan?.steps.filter((step) => step.status === "planned") ?? [])
+  // How close the work is to what the person knows (W-154): far work gets a section for every step of theirs and more explaining; near less.
+  const familiarity = familiarityFor(familiarityBook(store, workspaceId), order, stepPlan?.archetypeId);
+  const steps = tutorialSteps(stepPlan?.steps.filter((step) => step.status === "planned") ?? [], familiarity.level)
     .filter((step) => !openNeedsOf(stepPlan!, step).length);
   const unitTitle = new Map((stepPlan?.units ?? []).map((unit) => [unit.id, unit.title]));
   const prepared = listAgentTasks(store, workspaceId).filter((task) => task.workOrderId === order.id && task.artifacts.length)
@@ -134,6 +138,7 @@ export function buildManualContext(store: CrosslineStore, workspaceId: string, w
     person: planningContext(store, workspaceId, order).person,
     setting: personSetting(store.listProfileFacts(workspaceId)),
     ...(prepared.length ? { prepared } : {}),
+    familiarity: { level: familiarity.level, basis: familiarity.basis },
     ...(steps.length ? { plannedSteps: steps.map((step) => ({ id: step.id, title: step.title, role: step.role, doneCriterion: step.doneCriterion ?? "",
       covers: (step.covers ?? []).map((id) => unitTitle.get(id) ?? id), why: step.why ?? "", ...(step.aiAssist?.tool ? { aiAssist: step.aiAssist } : {}) })) } : {})
   };
@@ -277,7 +282,8 @@ export function createManualbookBuilder(store: CrosslineStore, workspaceId: stri
       const writeContext: WriteContext = { version: "crossline.manualbook.write.v1", today, task: { intent: context.workOrder.intent },
         inputs: context.inputs, profile: context.profile, person: context.person ?? [], aiTools,
         sources: [...uploads.map((source) => ({ id: source.id, title: source.title, url: source.url, kept: source.kept, text: source.text })), ...own],
-        node, covers: planned?.covers ?? [], ...(planned?.aiAssist ? { aiAssist: planned.aiAssist } : {}) };
+        node, covers: planned?.covers ?? [], ...(planned?.aiAssist ? { aiAssist: planned.aiAssist } : {}),
+        ...(context.familiarity ? { familiarity: context.familiarity } : {}) };
       const validate = (output: unknown) => validateNodeWriteup(output, writeContext);
       const fresh = () => runCodexSkill<NodeWriteup>(client, writeContext, {
         skillName: MATERIAL_WRITER_SKILL, cwd, developerInstructions: WRITE_INSTRUCTIONS,
@@ -626,6 +632,7 @@ export function pendingTutorials(store: CrosslineStore, workspaceId: string, now
   const plans = store.listStepPlans(workspaceId);
   const planOf = new Map(plans.map((plan) => [plan.workOrderId, plan]));
   const done = doneKinds(store, workspaceId, plans);
+  const book = familiarityBook(store, workspaceId, plans);
   const latest = (type: string) => {
     const out = new Map<string, { createdAt: string; payload: Record<string, unknown> }>();
     for (const event of store.listEvents(workspaceId, { type })) {
@@ -642,7 +649,7 @@ export function pendingTutorials(store: CrosslineStore, workspaceId: string, now
     // The assistant's own items and the questions to the person (docs/work-split.md) are not the person's to learn: no tutorial.
     if (!order || !["approved", "ready_for_human", "active"].includes(order.state) || !plan || !onPersonsBoard(order)) return false;
     // Only work that needs one gets a tutorial by itself; the person can still ask for one on the task page.
-    if (preparationOf(order, plan, done).level !== "tutorial") return false;
+    if (preparationOf(order, plan, done, familiarityFor(book, order, plan.archetypeId)).level !== "tutorial") return false;
     const build = built.get(id), failure = failed.get(id);
     if (failure && (!build || failure.createdAt > build.createdAt)) return false;
     if (!build) {

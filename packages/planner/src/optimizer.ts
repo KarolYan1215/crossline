@@ -1,5 +1,5 @@
 import { tFor } from "@crossline/i18n";
-import { compareTasks, paramsFor, type PlanBlocker, type PlanResult, type PlannerTask, type PlanningInput, type ScheduleBlock } from "./index";
+import { compareTasks, isPrimeWork, paramsFor, type PlanBlocker, type PlanResult, type PlannerTask, type PlanningInput, type ScheduleBlock } from "./index";
 import { createRequire } from "node:module";
 
 // Keep HiGHS outside the Next server bundle so its loader finds highs.wasm beside itself.
@@ -31,6 +31,7 @@ const efficiencyOf = (input: PlanningInput): readonly number[] => input.efficien
 const SESSION_CAP = [90, 60, 45] as const;
 const REST_MINUTES = 10;
 const SHORT_COST_PER_MINUTE = 0.002;
+const PRIME_PER_MINUTE = 0.001;
 const shortfall = (task: PlannerTask, slot: Slot): number => task.energy ? Math.max(0, energyRank[task.energy] - energyRank[slot.energy]) : 0;
 const usable = (task: PlannerTask, short: number): boolean => short <= 1 || (short === 2 && Boolean(task.deadline));
 /** Wall minutes needed in a slot to get `work` minutes done there. */
@@ -235,7 +236,21 @@ function makeResult(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], b
     plan: { blocks: blocks.sort((a, b) => Date.parse(a.start) - Date.parse(b.start)) }, blockers, solver };
 }
 
+/**
+ * The greedy pass, twice when there is prime work (`isPrimeWork`: at risk and important, walkthrough W-153): once in the plain order and
+ * once with prime work placed first into each day's best hours. The second is kept only when every task the plain order placed is
+ * still placed (each within its own deadline, which the pass never crosses): the best hours go to the risky work, never a place.
+ */
 function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], emergency = false): PlanResult {
+  const plain = greedyPass(input, tasks, slots, emergency, false);
+  if (!tasks.some(isPrimeWork)) return plain;
+  const primed = greedyPass(input, tasks, slots, emergency, true);
+  const placedIn = (result: PlanResult) => new Set(result.plan.blocks.filter((block) => !block.frozen && !block.progressOnly).map((block) => block.taskId));
+  const after = placedIn(primed);
+  return [...placedIn(plain)].every((id) => after.has(id)) ? primed : plain;
+}
+
+function greedyPass(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], emergency: boolean, primeFirst: boolean): PlanResult {
   const blocks: ScheduleBlock[] = input.frozenBlocks.map((block) => ({ ...block, frozen: true }));
   const cursors = slots.map((slot) => slot.start);
   const dayCapacity = new Map<string, number>();
@@ -247,7 +262,11 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
   const gap = emergency ? 0 : params.gapMinutes;
   const share = emergency ? 1 : params.maxDailyShare;
   // Library work goes in only to meet a line's floor, which this simple pass does not weigh; it waits for the solver.
-  const pending = tasks.filter((task) => !task.floorOnly).sort(compareTasks);
+  const pending = tasks.filter((task) => !task.floorOnly)
+    .sort((a, b) => (primeFirst ? Number(isPrimeWork(b)) - Number(isPrimeWork(a)) : 0) || compareTasks(a, b));
+  // Prime work looks at each day's slots best first (by energy, then time), so today's clearest hours come before today's evening.
+  const bestFirst = slots.map((_, index) => index).sort((a, b) => slots[a]!.day.localeCompare(slots[b]!.day)
+    || energyRank[slots[b]!.energy] - energyRank[slots[a]!.energy] || slots[a]!.start - slots[b]!.start);
   const ordered: PlannerTask[] = [];
   while (pending.length) {
     const index = pending.findIndex((task) => !(task.dependsOn ?? []).some((id) => pending.some((item) => item.id === id)));
@@ -255,16 +274,18 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
     ordered.push(pending.splice(index, 1)[0]!);
   }
   // One task at a time, in matching slots first; only when that cannot finish it are slots short of its energy used too.
-  const attempt = (task: PlannerTask, loose: boolean) => {
+  // `best`: prime work, in each day's best slots first, up to one level short of its energy (two short is an evening, which it avoids).
+  const attempt = (task: PlannerTask, loose: boolean, best = false) => {
     const candidate = [...cursors];
     const nextUsed = new Map(dayUsed);
     const nextSoft = new Map(softUsed);
     const staged: ScheduleBlock[] = [];
     let left = durationOf(task);
-    for (let s = 0; s < slots.length && left > 1e-9; s += 1) {
+    for (let k = 0; k < slots.length && left > 1e-9; k += 1) {
+      const s = best ? bestFirst[k]! : k;
       const slot = slots[s]!;
       const short = shortfall(task, slot);
-      if (loose ? !usable(task, short) : short > 0) continue;
+      if (best ? short > 1 : loose ? !usable(task, short) : short > 0) continue;
       const efficiency = efficiencyOf(input)[short]!;
       const dependencyEnd = Math.max(0, ...(task.dependsOn ?? []).flatMap((id) =>
         blocks.filter((block) => block.taskId === id).map((block) => Date.parse(block.end))));
@@ -305,7 +326,7 @@ function greedyFallback(input: PlanningInput, tasks: PlannerTask[], slots: Slot[
   for (const task of ordered) {
     if ((task.dependsOn ?? []).some((id) => tasks.some((item) => item.id === id) &&
       !blocks.some((block) => block.taskId === id))) continue;
-    const placed = attempt(task, false) ?? attempt(task, true);
+    const placed = (primeFirst && isPrimeWork(task) ? attempt(task, true, true) : undefined) ?? attempt(task, false) ?? attempt(task, true);
     if (!placed) continue;
     blocks.push(...placed.staged);
     cursors.splice(0, cursors.length, ...placed.candidate);
@@ -508,6 +529,10 @@ async function optimize(original: PlanningInput, emergency = false, trySolver = 
       - (choice.minutes ? 0 : SHORT_COST_PER_MINUTE * choice.short * choice.duration), choice.presence]);
     // A minute short of the energy needed costs a little, so a matching hour is taken first; never more than placing the work is worth.
     if (choice.minutes && choice.short) objective.push([-SHORT_COST_PER_MINUTE * choice.short, choice.minutes]);
+    // Prime work (at risk and important, W-153) earns a little per minute in a high-energy, early slot: the best hours go to it before
+    // other work, less than a minute short costs, so energy matching still comes first, and far less than any task's place is worth.
+    if (choice.minutes && isPrimeWork(tasks[choice.task]!)) objective.push([PRIME_PER_MINUTE * (energyRank[slots[choice.slot]!.energy] / 3)
+      * (1 - choice.slot / slots.length), choice.minutes]);
   }
   const model = ["Maximize", `score: ${expression(objective)}`, "Subject To", ...rows,
     "Bounds", ...bounds, "Binaries", ...binary, ...(general.length ? ["Generals", ...general] : []), "End"].join("\n");

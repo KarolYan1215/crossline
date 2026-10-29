@@ -147,8 +147,12 @@ export function weeklyCommitDue(input: { today: string; clock: string; last: Wee
 
 type Window = { days: number[]; start: string; end: string };
 /** The end of the person's last available hours on `weekday` (0 = Sunday), or undefined on a day with none. */
-export function wrapTimeOf(windows: Window[], weekday: number): string | undefined {
-  return windows.filter((window) => window.days.includes(weekday)).map((window) => window.end).sort().at(-1);
+export function wrapTimeOf(windows: Window[], weekday: number, rest: ReadonlyArray<{ start: string; end: string }> = []): string | undefined {
+  const end = windows.filter((window) => window.days.includes(weekday)).map((window) => window.end).sort().at(-1);
+  if (!end) return end;
+  // A rest event the person put at the end of the day (「今晚 9 点以后不排工作」, W-156) ends the working day where it begins.
+  const cut = rest.filter((span) => span.start < end && span.end >= end).map((span) => span.start).sort()[0];
+  return cut ?? end;
 }
 /** Quiet hours: nothing is pushed then; the morning brief says what was left. */
 export const QUIET_FROM = "23:00";

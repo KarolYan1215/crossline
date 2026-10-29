@@ -21,6 +21,7 @@ Return raw JSON only: `{archetypeId, quantity, rationale, importance, completion
 - `research` — true when the task is important by the app's rules (graded coursework, or a milestone weighed 60 or more) and the person does part of it. The web is open for this run.
 - `task` — `intent`, `line`, `project`, `riskTier`, `personsPart` (what the analysis left to the person), `systemMayPrepare`, `mustDeliver` (its evidence lines), `needs` (material it needs), `currentEstimate`, and `getFirst`: facts the task first has to get from someone, `{kind, what, who}`.
 - `milestone` — the result the task serves and its criteria (often a score line or an artefact), or null.
+- `familiarity` — `{level, basis[]}`: how close this work is to what the person already knows, worked out by the app from their background facts, accepted work of this kind on this line and what they set themselves (section 5a).
 - `window` — `notBefore` (earliest start), `dueBy` (latest finish, may be ""), `availableMinutes` (working time inside it, shared with other work).
 - `materials` — the person's material chosen for this task (syllabi, lecture plans, problem sets, briefs, data descriptions), cut into passages of about 800 characters: `files[]` `{doc: "doc-N", name, project, passages, own}` (`own`: the task's own file), `passages[]` `{id: "c123", doc, at: "3/12", text}` in full, and, when the functions below are offered, `candidates[]` `{id, doc, at, line}` with only their opening line.
 - The functions `search_material(query, scope)` (`task` | `line` | `all`) and `read_chunk(id)`, when offered: read the candidates the plan rests on and search for what the passages do not show (the lecture list up to an exam, the problem set, the rubric, the submission rule) before counting units. Read what you need, not everything; a passage you did not read is not evidence. Without the functions, `passages` is all there is.
@@ -86,6 +87,16 @@ The person's attention is for what moves the outcome: understanding, solving, de
 - One round of review after a check, no pre-planned loops. Near-term steps specific, later ones coarser. On a replan keep `doneSteps` and plan the rest.
 
 **A task whose deliverable is static** (「整理复习提纲」「列出文献清单」「做一张对照表」) is not planned as the person compiling it. The assistant produces the deliverable, and the person's steps serve what it is for, read from the milestone, the intent and the facts: an outline for an exam means the person's steps are the exam preparation (problems, derivations, timed self-tests on the units), working from the assistant's outline; their own part on the outline is at most a short check.
+
+## 5a. Detail follows familiarity: `familiarity.level`
+
+The further the work is from what the person already knows, the more each step explains; the closer, the shorter. Guidance an expert does not need costs them effort to reconcile with what they know (the expertise reversal effect), so the same detail is wrong at both ends.
+
+- `near` (their own field, done this kind of work before): each person's step is the key point and its first move. `why` is one short clause, `doneCriterion` one line; no step explains a basic concept of their field, and no step points to a general guide (a NASA or MIT design-review guide for a device researcher's own review).
+  - Good: 「列出评审的三个决策项与各自的否决条件」, firstAction 「打开 sleep-replay-评审材料清单.md，写下 episode 表示一行」.
+  - Bad: 「阅读 NASA 设计评审指南，了解 PDR 的目的」.
+- `far` (a field new to them): each person's step says why it is done in terms a newcomer follows, names the judgement it trains, and its `firstAction` names where to get what it needs (「在券商 App 的『账户 → 结单』导出上月持仓 CSV」); a judgement step (choosing topics, choosing what to hold) carries its criteria in `doneCriterion` (「每个选题标出受众、冲突点、证据来源三栏」). Keep the steps few; detail goes into the step, not into more steps.
+- `mid`: as the rest of this Skill says.
 
 ## 6. The assistant's steps: everything static, ready before the person needs it
 

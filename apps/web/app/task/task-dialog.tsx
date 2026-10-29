@@ -456,7 +456,10 @@ export function TaskPanels({ detail, slot, today, anchors = false }: {
           {detail.supports.map((item) => <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}
           {detail.artifactLinks?.map((item) => <ArtifactTag key={`${item.direction}:${item.line}:${item.title}`} {...item} />)}</span>}
       </p>
-      {detail.intent !== detail.title && <p className="task-dialog-description gen">{detail.intent}</p>}
+      {detail.intent !== detail.title && <p className="task-dialog-description gen">{detail.intent}
+        {detail.dueMoved && <small className="task-due-moved">{t("截止已改为 {{date}}", { date: dayText(locale, detail.dueMoved) })}</small>}</p>}
+      {detail.mailLinks?.length ? <p className="task-mail-links"><small>{t("邮件里的链接")}</small>
+        {detail.mailLinks.map((link) => <a key={link} href={link} target="_blank" rel="noreferrer noopener">{new URL(link).hostname}</a>)}</p> : null}
       <div className="tk-figures">
         <Figure label={t("进度")} value={<><span className="ds-serif">{percent}</span><small>%</small></>} sub={steps.length ? t("{{done}}/{{total}} 步", { done, total: steps.length }) : undefined}>
           {steps.length > 0 && <StepStrip detail={detail} size="page" />}

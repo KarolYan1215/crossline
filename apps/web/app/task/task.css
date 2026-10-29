@@ -253,6 +253,12 @@
 .task-tutorial{display:grid;gap:6px;scroll-margin-top:72px}
 .task-tutorial-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:0}
 .task-tutorial-head a{font-size:13px;text-decoration:underline;min-height:32px;display:inline-flex;align-items:center}
+.task-tutorial-head{flex-wrap:wrap}
+.task-due-moved,.gen .task-due-moved{display:inline-block;margin-left:6px;font-family:var(--f-sans);font-size:12px;color:var(--graphite)}
+.task-mail-links{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin:4px 0 0;font-size:13px}
+.task-mail-links a{text-decoration:underline;min-height:32px;display:inline-flex;align-items:center}
+.task-familiarity{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px}
+.task-familiarity .link-button{background:none;border:0;padding:0;min-height:32px;font:inherit;font-size:13px;color:var(--ink);text-decoration:underline;cursor:pointer}
 .task-record summary{font-size:13px}
 
 /* ── 任务 page: an index of the four groups, a line filter, then the groups ── */
@@ -282,7 +288,7 @@
 @media (max-width:760px){
   .task-card{padding:12px}
   .task-actions>button,.task-actions-choices button,.task-actions .ui-menu-trigger,.tasks-index a,.tasks-filter a,.back-link,
-  .steps-meta .text-button,.steps-actions button,.steps-fix button,.progress-report button,.step-tools button,.task-tutorial-head a{min-height:44px}
+  .steps-meta .text-button,.steps-actions button,.steps-fix button,.progress-report button,.step-tools button,.task-tutorial-head a,.task-familiarity .link-button{min-height:44px}
   .step-tools button{min-width:44px}
   .step-head{min-height:44px}
   .task-card-step-title{grid-template-columns:3em minmax(0,1fr)}

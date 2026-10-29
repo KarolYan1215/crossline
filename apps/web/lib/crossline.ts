@@ -2060,6 +2060,24 @@ const riskBufferOf = (ctx: AccessContext, milestoneId: string | undefined): numb
 };
 
 /**
+ * Milestones the forecast already finds short of time: the cautious (p85) finish the web records every six hours
+ * (`milestone.forecast`, `recordMilestoneForecast`) lands less than two days before the deadline. Read here by key, since the module
+ * that writes it imports this one. Their important work takes the day's best hours first (`PlannerTask.atRisk`, W-153).
+ */
+const FORECAST_SETTING = "milestone.forecast";
+const RISK_SLACK_DAYS = 2;
+function forecastShortOf(ctx: AccessContext, milestoneId: string | undefined, deadline: string | undefined): boolean {
+  if (!milestoneId || !deadline) return false;
+  const goals = memoByLedger(getStore(), `forecast-finish:${ctx.workspaceId}`, 60_000, () => {
+    try { return (JSON.parse(getStore().getSetting(ctx.workspaceId, FORECAST_SETTING) || "{}") as { goals?: Record<string, { p85Day?: string | null }> }).goals ?? {}; }
+    catch { return {} as Record<string, { p85Day?: string | null }>; }
+  });
+  const finish = goals[milestoneId]?.p85Day;
+  if (!finish || !/^\d{4}-\d{2}-\d{2}$/.test(finish)) return false;
+  return (Date.parse(`${deadline}T12:00:00Z`) - Date.parse(`${finish}T12:00:00Z`)) / 86_400_000 < RISK_SLACK_DAYS;
+}
+
+/**
  * A milestone's deadline for scheduling: the one set on the goal, else — for an approved milestone — the date it was approved with,
  * which lives on its anchor. Approving a draft writes no goal setting, so the scheduler read every backplanned task of a fresh account
  * as having no deadline at all, ordered it by importance alone and left work due in a week unplaced (2026-10-18 walkthrough).
@@ -2142,6 +2160,7 @@ const plannerTaskOf = (ctx: AccessContext, order: ActionableOrder) => {
     ...(release ? { notBefore: toZonedInstant(release, "00:00", zone) } : {}),
     ...(dependsOn?.length ? { dependsOn } : {}),
     ...(riskBuffer ? { riskBufferDays: riskBuffer } : {}),
+    ...(riskBuffer || forecastShortOf(ctx, order.milestoneId, milestoneDue) ? { atRisk: true } : {}),
     interruptible: core?.interruptible ?? true
   };
 };

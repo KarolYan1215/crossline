@@ -8,6 +8,7 @@ import { ICON, IconButton } from "../ui/icon-button";
 import { useLocale, useT } from "../locale-context";
 import type { Locale } from "../../lib/i18n";
 import { dayText, minutesText } from "./format";
+import { reservedMinutes } from "./reserve";
 import { currentStep, dueDistance, hoursShort, remainingMinutes, waitReason } from "./card-model";
 import { CompletionChoice } from "./completion-choice";
 import { preparedFiles } from "./prepared";
@@ -67,7 +68,8 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
       </span>}
     </header>
     <h3 className="task-card-title">{detail.title}</h3>
-    {variant === "hero" && detail.intent !== detail.title && <p className="task-card-description gen">{detail.intent}</p>}
+    {variant === "hero" && detail.intent !== detail.title && <p className="task-card-description gen">{detail.intent}
+      {detail.dueMoved && <small className="task-due-moved">{t("截止已改为 {{date}}", { date: dayText(locale, detail.dueMoved) })}</small>}</p>}
     {variant === "hero" && detail.milestone && <p className="task-card-milestone">→ {detail.milestone.title}</p>}
     {reason && <p className="task-card-reason">{reason}</p>}
     <StepStrip detail={detail} />
@@ -120,7 +122,9 @@ function CardStep({ detail, step, proposal, finished, waiting }: {
   if (waiting) return null;
   return <div className="task-card-step">
     <p className="task-card-step-title"><small>{t(proposal ? "第一步" : "当前")}</small><span>{step.title}</span>
-      {step.schedulable && <span className="mono task-card-minutes">{t("约 {{duration}}", { duration: minutesText(locale, step.estimate.p50Minutes) })}</span>}</p>
+      {step.schedulable && <span className="mono task-card-minutes">{t("约 {{duration}}", { duration: minutesText(locale, step.estimate.p50Minutes) })}</span>}
+      {step.schedulable && reservedMinutes(step.estimate, detail.estimate.confidence) !== undefined && <span className="mono task-card-minutes"
+        title={t("估计还不确定，日历按保守估计预留；通常用不了这么久")}>{t("预留 {{duration}}", { duration: minutesText(locale, reservedMinutes(step.estimate, detail.estimate.confidence)!) })}</span>}</p>
     {step.firstAction && <p className="task-card-first"><small>{t("先做")}</small><span className="gen">{step.firstAction}</span></p>}
     {proposal && detail.preparation?.level === "tutorial" && <p className="task-card-step-note">{t("开工前三天会备好教程。")}</p>}
   </div>;
