@@ -392,10 +392,12 @@ export function FocusStrip({ ref, layout, board, milestoneId: pointed, ticks, pi
             : milestone.daysLeft >= 0 ? t("截止 {{day}}，还有 {{count}} 天", { day: md(milestone.deadline), count: milestone.daysLeft })
             : t("截止 {{day}}，已过 {{count}} 天", { day: md(milestone.deadline), count: -milestone.daysLeft })}</span>
           : t("未定日期")}{milestone.ticks.length > 0 ? <> · <span className="mono">{t("刻度 {{done}}/{{total}}", { done: milestone.ticks.filter((item) => item.state === "done").length, total: milestone.ticks.length })}</span></> : null}</p>
-        {(joined.before.length > 0 || joined.after.length > 0 || joined.relations.length > 0) && <p className="mt-focus-meta">
-          {[joined.before.length ? t("前置 {{names}}", { names: names(joined.before) }) : "", joined.after.length ? t("后续 {{names}}", { names: names(joined.after) }) : "",
+        {(joined.before.length > 0 || joined.after.length > 0 || joined.relations.length > 0) && ((links: string) =>
+          // At most two lines, the whole list on hover and in the milestone's drawer: on a phone it ran to four (copy audit, 2026-10-29).
+          <p className="mt-focus-meta mt-focus-clamp" title={links}>{links}</p>)(
+          [joined.before.length ? t("前置 {{names}}", { names: names(joined.before) }) : "", joined.after.length ? t("后续 {{names}}", { names: names(joined.after) }) : "",
             ...joined.relations.map((relation) => `${relation.label ?? t("飞轮关系")}${relation.pending ? ` · ${t("候选")}` : ""} ${relation.direction === "out" ? "→" : "←"} ${t("「{{title}}」", { title: titleOf(relation.other) })}`)]
-            .filter(Boolean).join(t("；"))}</p>}
+            .filter(Boolean).join(t("；")))}
       </>;
     }
   } else if (ticks?.length) {
