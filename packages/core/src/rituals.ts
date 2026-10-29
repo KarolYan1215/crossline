@@ -150,6 +150,13 @@ type Window = { days: number[]; start: string; end: string };
 export function wrapTimeOf(windows: Window[], weekday: number): string | undefined {
   return windows.filter((window) => window.days.includes(weekday)).map((window) => window.end).sort().at(-1);
 }
+/**
+ * The rows the wrap-up's one-tap 「计时过的块全部按预估完成」 records as done: not yet answered, and the timer ran inside the block. A block
+ * nobody timed may not have been touched at all; recording it done drops its work from the plan, so it keeps its own three-part control.
+ */
+export function bulkDoneRows<T extends { blockId: string; timedMinutes: number }>(rows: T[], answered: Record<string, unknown>): T[] {
+  return rows.filter((row) => !answered[row.blockId] && row.timedMinutes > 0);
+}
 /** Quiet hours: nothing is pushed then; the morning brief says what was left. */
 export const QUIET_FROM = "23:00";
 export const QUIET_UNTIL = "08:00";

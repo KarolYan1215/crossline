@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  answerAllSteps, commitWeekOf, deferTarget, groupMinutes, overloaded, proposeWeeklyCommit, riskDigestShows, safeAssistantResult, staleProposal,
+  answerAllSteps, bulkDoneRows, commitWeekOf, deferTarget, groupMinutes, overloaded, proposeWeeklyCommit, riskDigestShows, safeAssistantResult, staleProposal,
   weeklyCommitDue, weekStartOf, wrapTimeOf, type CommitTask
 } from "./rituals";
 import type { Ask } from "./asks";
@@ -93,6 +93,12 @@ describe("weeklyCommitDue", () => {
     expect(overloaded(1150, 1000)).toBe(false);
     expect(overloaded(1151, 1000)).toBe(true);
   });
+});
+
+test("the wrap-up's one tap records as done only the timed blocks not yet answered", () => {
+  const rows = [{ blockId: "a", timedMinutes: 40 }, { blockId: "b", timedMinutes: 0 }, { blockId: "c", timedMinutes: 25 }];
+  expect(bulkDoneRows(rows, { c: "partial" }).map((row) => row.blockId)).toEqual(["a"]);
+  expect(bulkDoneRows(rows, {}).map((row) => row.blockId)).toEqual(["a", "c"]);
 });
 
 test("the wrap-up comes at the end of the day's last available window", () => {

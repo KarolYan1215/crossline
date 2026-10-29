@@ -441,7 +441,7 @@ function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
   for (const event of store.listEvents(ctx.workspaceId, { type: "milestone.overdue" })) latest.set(event.entityId, event);
   return [...latest].flatMap(([milestoneId, event]): Ask[] => {
     const milestone = milestones.get(milestoneId);
-    const { deadline, why } = event.payload as { deadline: string; why?: string };
+    const { deadline, why, shifts } = event.payload as { deadline: string; why?: string; shifts?: number };
     const current = readGoalSettings(ctx, milestoneId)?.confirmedDeadline || anchors.get(milestoneId);
     const left = open.filter((order) => order.milestoneId === milestoneId);
     if (!milestone || current !== deadline || deadline >= today || resolved.has(`${milestoneId}|${deadline}`)) return [];
@@ -462,8 +462,10 @@ function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
     return [{ id: `overdue:${milestoneId}:${deadline}`, kind: "milestone_overdue", entityId: milestoneId, line: milestone.identityId,
       preview: milestonePreview(t, milestoneId), urgency: "soon", dueDay: deadline, raisedAt: event.createdAt, fingerprint: deadline, important: true,
       title: t("「{{title}}」的截止 {{day}} 已过，还有 {{count}} 个任务没完成", { title: short(milestone.title), day: format(deadline, locale), count: left.length }),
-      why: t(why === "course" ? "这是课程给定的日期，系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。"
-        : "这个日期是本人定的，系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。"),
+      why: why === "stalled"
+        ? t("系统已经自动顺延过 {{times}} 次，这个里程碑的工作仍未完成，这次不再自动改。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。", { times: shifts ?? 2 })
+        : t(why === "course" ? "这是课程给定的日期，系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。"
+          : "这个日期是本人定的，系统不改动。可以照常补做（截止不变，剩下的工作继续排），改成新的日期，或放弃这个里程碑。"),
       options: [
         { id: "makeup", label: t("补做"), detail: t("截止不变，剩下的工作照常排"), recommended: true },
         { id: "extend", label: t("改为新日期"), fields: [{ id: "date", label: t("截止改到"), kind: "date" as const, required: true }] },

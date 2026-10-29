@@ -36,6 +36,11 @@ export const ADVANCE_DAY_SETTING = "advance.day";
 /** Written by the web's attention timer (`apps/web/lib/schedule-memory.ts`): `{ at, goals: { [milestoneId]: { p50Day, p85Day } } }`. */
 export const MILESTONE_FORECAST_SETTING = "milestone.forecast";
 const FORECAST_FRESH_MS = 36 * 3_600_000;
+/**
+ * How many times a milestone of the person's own is moved past its deadline without asking. Sunsama stops rolling a task over after a few
+ * consecutive days (its archive, default four) for the same reason: a date that keeps moving by itself stops meaning anything.
+ */
+export const SILENT_SHIFTS_MAX = 2;
 /** How long after a sitting the person is asked how it went; an older one is history. */
 const SITTING_ASK_DAYS = 14;
 const DAY = 86_400_000;
@@ -158,6 +163,10 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   const seeds: Array<{ id: string; to: string; days: number }> = [];
   const judged = new Set(store.listEvents(workspaceId, { type: "milestone_gate.judged" }).map((event) => (event.payload as { milestoneId?: string }).milestoneId));
   const sittingPrep: Array<{ order: StoredWorkOrder; why: string }> = [];
+  // How many times this pass already moved each milestone by itself.
+  const priorShifts = new Map<string, number>();
+  for (const event of store.listEvents(workspaceId, { type: "date.advanced" }))
+    for (const item of (event.payload as { shifted?: Array<{ id?: string }> }).shifted ?? []) if (item.id) priorShifts.set(item.id, (priorShifts.get(item.id) ?? 0) + 1);
   for (const milestone of approved) {
     const deadline = deadlineOf(milestone.id);
     // An exam or a defence on a date that does not move is over once its day has passed: preparing for it is put away (anything being
@@ -177,6 +186,15 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
     if (fixed(milestone)) {
       const asked = store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone-overdue:${milestone.id}:${deadline}`, type: "milestone.overdue",
         entityId: milestone.id, payload: { deadline, why: courses.has(milestone.projectId ?? "") ? "course" : "person" } });
+      if (asked.inserted) outcome.asked.push({ id: milestone.id, title: milestone.title, deadline });
+      continue;
+    }
+    // Moved by itself twice already and still not worked on: a third silent move would make the date mean nothing (the month simulation
+    // watched one slide 11/1 → 11/5 → 11/9 → … for four weeks). From here it waits for the person, asked once, as a course's date is.
+    const shifts = priorShifts.get(milestone.id) ?? 0;
+    if (shifts >= SILENT_SHIFTS_MAX) {
+      const asked = store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `milestone-overdue:stalled:${milestone.id}:${deadline}`, type: "milestone.overdue",
+        entityId: milestone.id, payload: { deadline, why: "stalled", shifts } });
       if (asked.inserted) outcome.asked.push({ id: milestone.id, title: milestone.title, deadline });
       continue;
     }

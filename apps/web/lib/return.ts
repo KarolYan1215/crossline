@@ -140,6 +140,10 @@ export function returnView(ctx: AccessContext, since: string, now: Date, until?:
     if (placed.length) return placed;
     // Its steps' blocks were seen and are all settled: nothing else of it had a time.
     if (all.some((step) => stepDays.has(`${order.id}#${step.id}`)) && !(dueDay && dueDay < today)) return [];
+    // The task stood for itself here (its current step): any answer to it settles the task for this absence. Without this, 没做顺延 on an
+    // overdue task's current step brought up its next step as a new item, and the page came back every day until each step had been
+    // answered one by one (found by the month simulation, docs/reports/2026-10-30-overnight/month-sim.md).
+    if (answers.some((answer) => answer.orderId === order.id)) return [];
     // Work that had a time while they were away (days before steps were recorded), or whose due day passed: its current step, or the
     // task when it has none of the person's.
     if (!plannedDays.length && !(dueDay && dueDay < today)) return [];

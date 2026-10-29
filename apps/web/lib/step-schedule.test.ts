@@ -37,6 +37,25 @@ test("a task with a step plan is placed step by step, in dependency order, skipp
   expect(blocks.every((block) => block.title.includes(" · 步骤"))).toBe(true);
 });
 
+test("a planned task with nothing of the person's left to place takes no time: not placed whole at the task's own estimate", async () => {
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T13:00:00.000Z");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "buffered", windows: ALWAYS, importance: {} });
+  await loadCurrentPlan(TEST_CTX);
+  const order = store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.identityId === "research")!;
+  store.saveWorkOrder({ ...order, state: "active" });
+  const saved = store.saveStepPlan(TEST_CTX.workspaceId, order.id, { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 2, unit: "题" },
+    rationale: "", steps: [step("a", "solve", 30), { ...step("p", "prepare", 20, ["a"], false), executor: "agent" as const }, step("w", "wait", 0, ["a"], false)] }, "o", "t");
+  const placed = async () => (await loadCurrentPlan(TEST_CTX)).blocks.filter((block) => block.id.startsWith(`scheduled:${order.id}`));
+  expect((await placed()).length).toBeGreaterThan(0);
+  // The person's step done; only the assistant's step and a wait are left: nothing for the person's calendar.
+  store.updateStepProgress(TEST_CTX.workspaceId, order.id, saved.steps[0]!.id, { status: "done" }, "o", "test");
+  expect(await placed()).toEqual([]);
+  // Every step done (the wait answered last): still nothing — the task waits to be handed in, not to be done again.
+  for (const item of saved.steps.slice(1)) store.updateStepProgress(TEST_CTX.workspaceId, order.id, item.id, { status: "done" }, "o", "test");
+  expect(await placed()).toEqual([]);
+});
+
 test("work after an unfinished wait takes no calendar time until the wait is done", async () => {
   vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T13:00:00.000Z");
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");

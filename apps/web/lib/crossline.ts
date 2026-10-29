@@ -892,7 +892,11 @@ function plannerItemsFor(ctx: AccessContext, orders: ActionableOrder[], { hold =
   return orders.flatMap((order) => {
     const base = plannerTaskOf(ctx, order);
     const steps = readySteps(order.id);
-    if (!steps.length) return allOpenSteps(order.id).length ? [] : [{ task: base, orderId: order.id, title: base.title, step: undefined as string | undefined }];
+    // Only a task with no step plan is placed whole. One whose plan has nothing of the person's left to place (every step done, or only the
+    // assistant's or a wait still open) takes no time: it was placed whole again, at the task's own estimate, every day — the month
+    // simulation saw a task with all eight steps done get a block a day for three weeks once its last step, a wait, was answered.
+    if (!steps.length) return allOpenSteps(order.id).length || stepPlans.get(order.id)?.steps.length ? []
+      : [{ task: base, orderId: order.id, title: base.title, step: undefined as string | undefined }];
     const open = new Set(steps.map((step) => step.id));
     const external = (base.dependsOn ?? []).flatMap((id) => plannerIdsOf(id));
     return steps.map((step) => {
@@ -1785,15 +1789,24 @@ export function startWorkOrderExecution(ctx: AccessContext, workOrderId: string,
 
 export function pauseWorkOrderExecution(ctx: AccessContext, workOrderId: string, reason: string, at?: string): ExecutionResult {
   if (!reason.trim()) return { ok: false, code: "INTERRUPTION_REASON_REQUIRED" };
-  if (findWorkOrder(ctx.workspaceId, workOrderId)?.state !== "active") return { ok: false, code: "NO_ACTIVE_EXECUTION" };
+  if (findWorkOrder(ctx.workspaceId, workOrderId)?.state !== "active" || !hasOpenSession(ctx.workspaceId, workOrderId)) return { ok: false, code: "NO_ACTIVE_EXECUTION" };
   getStore().pauseExecution(ctx.workspaceId, workOrderId, reason.trim(), at);
   return { ok: true };
 }
 
 export function resumeWorkOrderExecution(ctx: AccessContext, workOrderId: string, at?: string): ExecutionResult {
-  if (findWorkOrder(ctx.workspaceId, workOrderId)?.state !== "active") return { ok: false, code: "NO_ACTIVE_EXECUTION" };
+  if (findWorkOrder(ctx.workspaceId, workOrderId)?.state !== "active" || !hasOpenSession(ctx.workspaceId, workOrderId)) return { ok: false, code: "NO_ACTIVE_EXECUTION" };
   getStore().resumeExecution(ctx.workspaceId, workOrderId, at);
   return { ok: true };
+}
+
+/**
+ * An active order can have no open session: a confirmed block (the completion check, the wrap-up, the return page) closes the session it
+ * covers while the task stays active. Pausing or resuming it then is a refusal, not a store error: the floating timer's 结束 pressed after
+ * answering 「做得怎么样」 on the phone threw `NO_ACTIVE_EXECUTION` out of the route (found by the month simulation).
+ */
+function hasOpenSession(workspaceId: string, workOrderId: string): boolean {
+  return getStore().listExecutions(workspaceId, workOrderId).some((execution) => !execution.endedAt);
 }
 
 /** What a completion did: always accepted; `followUp` is the question the 小帮手 will ask later when the result is not known yet. */

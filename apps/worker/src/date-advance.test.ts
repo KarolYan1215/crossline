@@ -133,6 +133,30 @@ test("one day's pass: old results replaced, decided or put away; overdue milesto
   expect(next.shifted).toEqual([]);
 });
 
+test("a milestone of the person's own is moved by itself twice at most; the third time its deadline passes it is asked about, once", () => {
+  milestone("pack", "xhs", "2026-10-17");
+  order("t-pack", "pack", "approved");
+  // The person acts every day (the pass leaves a dormant account to the return tidy-up), but never on this work.
+  const day = (iso: string) => { at(iso); event("op.undone", "x", {}, `undo:${iso}`); return dateAdvancePass(store, ws)!; };
+  const dayAfter = (date: string) => `${new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)}T15:00:00Z`;
+  const first = day("2026-10-21T15:00:00Z");
+  expect(first.shifted.map((item) => item.id)).toEqual(["pack"]);
+  const movedTo = first.shifted[0]!.to;
+  // The next pass after that day: moved a second time.
+  const second = day(dayAfter(movedTo));
+  expect(second.shifted.map((item) => item.id)).toEqual(["pack"]);
+  const again = second.shifted[0]!.to;
+  // Third time past: not moved, asked — why "stalled", with how many times it moved.
+  const third = day(dayAfter(again));
+  expect(third.shifted).toEqual([]);
+  expect(third.asked.map((item) => item.id)).toEqual(["pack"]);
+  expect(store.listEvents(ws, { type: "milestone.overdue" }).map((item) => item.payload)).toEqual([{ deadline: again, why: "stalled", shifts: 2 }]);
+  // The next day it is neither moved nor asked again.
+  const fourth = day(dayAfter(dayAfter(again).slice(0, 10)));
+  expect(fourth.shifted).toEqual([]);
+  expect(fourth.asked).toEqual([]);
+});
+
 test("a whole task the assistant did is handed in when it left nothing for the person; one that left something stays the person's", () => {
   order("t-clean", "", "approved");
   order("t-left", "", "approved");

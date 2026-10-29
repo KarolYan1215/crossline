@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   const body = await request.json().catch(() => null) as { blockId?: unknown; outcome?: unknown; finish?: unknown; day?: unknown } | null;
-  if (body?.finish === true) return NextResponse.json(finishWrap(access.ctx));
+  if (body?.finish === true) return NextResponse.json(await finishWrap(access.ctx));
   if (typeof body?.blockId !== "string" || body.blockId.length > 300 || !OUTCOMES.has(body.outcome as WrapOutcome))
     return NextResponse.json({ ok: false, code: "INVALID_REQUEST" }, { status: 400 });
   if (body.day !== undefined && (typeof body.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.day)))

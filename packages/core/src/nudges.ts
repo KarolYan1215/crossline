@@ -80,7 +80,9 @@ export type NudgeInput = {
   /** Every scheduled block of today, asked about once it ends. */
   ending: NudgeEnding[];
   slack: NudgeSlack[];
-  timer?: { orderId: string; title: string; stepId: string; stepTitle: string; startedAt: string; usualMinutes: number };
+  timer?: { orderId: string; title: string; stepId: string; stepTitle: string; startedAt: string; usualMinutes: number;
+    /** Minutes the session was paused (its closed pauses): a timer resumed the next day has not been running since yesterday. */
+    pausedMinutes?: number };
   finished: Array<{ key: string; text: string; label: string; href: string }>;
   /**
    * Asked when the next hours' work depends on energy, the model is not sure of it, and the person last said how they are over three
@@ -176,7 +178,7 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
   }
   const timer = input.timer;
   if (timer && timer.usualMinutes >= 10) {
-    const elapsed = (Date.parse(input.now) - Date.parse(timer.startedAt)) / 60_000;
+    const elapsed = (Date.parse(input.now) - Date.parse(timer.startedAt)) / 60_000 - (timer.pausedMinutes ?? 0);
     if (elapsed >= timer.usualMinutes * OVERRUN_RATIO) {
       const what = quoted(t, timer.stepTitle || timer.title);
       out.push({ kind: "timer_overrun", fingerprint: `overrun:${timer.startedAt}`, urgent: true, counted: true,
