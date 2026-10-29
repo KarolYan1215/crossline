@@ -320,9 +320,9 @@ body:has(.tk-page) .running-head{background:var(--ds-bg)}
 .task-card{gap:10px;padding:14px 16px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
 .task-card:hover{border-color:var(--ds-muted)}
 .task-card[data-state="active"]{box-shadow:inset 4px 0 0 var(--ds-accent),var(--ds-shadow)}
-.task-card-head{align-items:center;flex-wrap:nowrap}
-/* On a phone a long due label (「已过 45 天」) goes under the line instead of pushing the page sideways (design audit, 2026-10-29). */
-@media (max-width:480px){.task-card-head{flex-wrap:wrap}}
+/* A due label that does not fit beside the line and project goes under them, at any width: a phone's 「已过 45 天」 pushed the page sideways,
+   and in English on Linux 「16 days left」 lay over the clipped 「Investor」 (design and English audits, 2026-10-29). */
+.task-card-head{align-items:center;flex-wrap:wrap}
 .task-card-line{flex:1 1 auto;min-width:0;flex-wrap:nowrap;overflow:hidden}
 .task-card-project{white-space:nowrap}
 .task-card-serves{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--graphite)}
