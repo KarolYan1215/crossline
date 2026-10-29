@@ -1,6 +1,6 @@
 import "server-only";
 import {
-  ledgerSummary, monthlyLimitFrom, recurringCharges, spendingAnomalies, INCOME_CATEGORIES, SPEND_CATEGORIES, type AccessContext, type LedgerSummary,
+  ledgerCategory, ledgerSummary, monthlyLimitFrom, recurringCharges, spendingAnomalies, INCOME_CATEGORIES, SPEND_CATEGORIES, type AccessContext, type LedgerSummary,
   type RecurringCharge, type SpendingAnomaly, type StoredDomainRecord
 } from "@crossline/core";
 import { merchantRules, mergeRecords, resolvePossibleDuplicate, setRecordCategory, splitRecordEvidence, MERCHANT_RULES_SETTING } from "@crossline/db";
@@ -37,7 +37,7 @@ function rowsOf(ctx: AccessContext, records: StoredDomainRecord[]): LedgerRow[] 
   const evidence = getStore().listRecordEvidence(ctx.workspaceId, records.map((record) => record.id));
   return records.map((record) => {
     const pieces = evidence.filter((item) => item.recordId === record.id);
-    return { id: record.id, kind: record.kind as LedgerRow["kind"], at: record.at.slice(0, 10), value: record.value, currency: record.currency || "CNY", category: record.category || "其他",
+    return { id: record.id, kind: record.kind as LedgerRow["kind"], at: record.at.slice(0, 10), value: record.value, currency: record.currency || "CNY", category: ledgerCategory(record),
       categoryBy: record.categoryBy, merchant: pieces.find((item) => item.merchant)?.merchant || record.merchantKey || "", merchantKey: record.merchantKey, account: record.account,
       source: record.source, status: record.status, possibleDupOf: record.possibleDupOf, refundOf: record.refundOf, note: record.note,
       evidence: pieces.map((item) => ({ id: item.id, source: item.source, role: item.role, at: item.occurredOn, amount: item.amount, merchant: item.merchant })) };
