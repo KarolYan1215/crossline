@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { hoursFromText } from "@crossline/core";
 import type { ForecastWeek } from "@crossline/planner";
-import { availabilityGrid, capacityWeeks, estimatePoints, goalRows, horizonFor, investment, milestoneMarks, rhythmGrid, statedShares, timelineMarks, timelineSpan, workedMinutes, type GoalRow } from "./plan-stats";
+import { availabilityGrid, capacityWeeks, estimatePoints, goalRows, horizonFor, investment, lineShareRows, milestoneMarks, milestoneSummary, planKpis, rhythmGrid, statedShares,
+  timelineMarks, unplacedItems, workedMinutes, type CapacityWeek, type GoalRow, type RankedLike } from "./plan-stats";
 
 describe("horizon", () => {
   test("eight weeks by default, four on request, and 「到最远截止」 rounded up to whole weeks and capped at six months", () => {
@@ -168,11 +169,43 @@ describe("milestone marks for the timeline", () => {
     ], "2026-10-10");
     expect(marks.map((mark) => [mark.id, mark.day, mark.states])).toEqual([
       ["a", "2026-11-01", ["risk", "library"]], ["b", null, ["unprepared"]], ["c", "2026-11-05", []], ["d", "2026-12-01", ["risk"]]]);
-    expect(timelineSpan(marks, "2026-10-10", 56)).toEqual({ start: "2026-10-07", end: "2026-12-05", days: 59 });
-    // An overdue milestone pulls the axis back to it (at most eight weeks).
-    expect(timelineSpan(milestoneMarks([row({ deadline: "2026-09-20" })], "2026-10-10"), "2026-10-10", 28).start).toBe("2026-09-17");
     const { shown, outside } = timelineMarks(marks, "2026-10-10", 28, new Set(["c"]));
     expect(shown.map((mark) => mark.id)).toEqual(["a"]);
     expect(outside).toBe(3);
+    // The plan page's one line: what falls in the horizon, and which of it is in trouble.
+    const summary = milestoneSummary([row({ id: "a", title: "投稿", deadline: "2026-11-01", atRisk: true }), row({ id: "b", deadline: "2026-10-20", status: "no_tasks" }),
+      row({ id: "c", deadline: "2027-03-01" })], "2026-10-10", 56, new Set());
+    expect([summary.shown, summary.outside, summary.risk.map((mark) => mark.title), summary.unprepared]).toEqual([2, 1, ["投稿"], 1]);
+  });
+});
+
+describe("the plan page's head", () => {
+  const ranked = (over: Partial<RankedLike>): RankedLike => ({ id: "t", title: "任务", line: "research", deadline: null, notBefore: null, firstDay: "2026-10-12",
+    blocker: null, libraryUntil: null, p50Minutes: 60, ...over });
+  const week = (lines: Array<[string, number, number]>, usable = 600): CapacityWeek => ({ week: 1, start: "2026-10-10", end: "2026-10-16", netMinutes: usable,
+    usableMinutes: usable, lines: lines.map(([line, scheduled, pending]) => ({ line, scheduled, pending, extra: 0 })), totalP50: 0, totalP85: 0,
+    overloadMinutes: 0, overloadP85Minutes: 0, overdueMinutes: 0, top: null });
+
+  test("unplaced: with no block, or with a step the planner could not place; never library work; soonest deadline first", () => {
+    const items = unplacedItems([ranked({ id: "placed" }), ranked({ id: "none", title: "整理关注清单", firstDay: null, deadline: "2026-11-03", blocker: "可用时段不足" }),
+      ranked({ id: "part", title: "可验证假设", deadline: "2026-11-02" }), ranked({ id: "lib", firstDay: null, libraryUntil: "2026-11-20" })], new Set(["part"]));
+    expect(items.map((item) => [item.id, item.partial, item.reason])).toEqual([["part", true, null], ["none", false, "可用时段不足"]]);
+  });
+
+  test("the four figures: this week's usable and scheduled minutes, the unplaced count with its earliest deadline, and the median estimate bias", () => {
+    const kpis = planKpis({ capacity: [week([["research", 120, 60], ["media", 30, 0]])],
+      unplaced: [{ id: "a", title: "", line: "research", deadline: "2026-11-03", notBefore: null, minutes: 90, partial: false, reason: null },
+        { id: "b", title: "", line: "media", deadline: null, notBefore: null, minutes: 30, partial: true, reason: null }],
+      estimates: [{ id: "1", line: "research", estimate: 60, p85: 90, actual: 60, covered: true }, { id: "2", line: "research", estimate: 60, p85: 90, actual: 90, covered: true },
+        { id: "3", line: "research", estimate: 30, p85: 45, actual: 60, covered: false }] });
+    expect(kpis).toEqual({ usableMinutes: 600, scheduledMinutes: 150, unplaced: { count: 2, minutes: 120, earliest: "2026-11-03" }, bias: { percent: 50, samples: 3 } });
+    expect(planKpis({ capacity: [], unplaced: [], estimates: [] }).bias).toBeNull();
+  });
+
+  test("lines against their share: the share of the coming weeks' usable hours beside the work planned, with the pre-preview figure", () => {
+    const rows = lineShareRows({ capacity: [week([["research", 300, 60]]), week([["research", 0, 240], ["media", 60, 0]])], shares: { research: 50, investment: 10 },
+      lineOrder: ["research", "media", "investment", "startup"], before: [week([["research", 300, 0]]), week([])] });
+    expect(rows.map((row) => [row.line, row.shareMinutes, row.plannedMinutes, row.scheduledMinutes, row.beforeMinutes])).toEqual([
+      ["research", 300, 300, 150, 150], ["media", 0, 30, 30, 0], ["investment", 60, 0, 0, 0]]);
   });
 });

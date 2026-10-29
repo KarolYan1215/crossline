@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { Check, Flag, MessageSquare, Plus, RefreshCw, Sparkles, TriangleAlert } from "lucide-react";
 import { Sheet } from "../ui/overlay";
+import { ICON, IconButton } from "../ui/icon-button";
+import type { LineHealth } from "./line-health";
 import { AttributePicker, type AttributeOption } from "../ui/attribute-picker";
 import { composeGoal } from "@crossline/core";
 import { DOMAIN_PACKS, LINE_DOMAINS, type LineDomain } from "@crossline/identity-packs";
@@ -21,7 +24,16 @@ export type LineCard = { id: string; label: string; color: string; goals: string
   attributes: AttributeOption[]; goalParts: string[]; description: string; pendingEdit: { parts: string[] } | null; redraftDue: boolean;
   interview: LineInterviewView;
   /** Of `milestones`, how many are drafts waiting for approval. */
-  drafts?: number };
+  drafts?: number;
+  /** The line's standing from the schedule and the risk reviews (`lineHealth`), an estimate; null with no approved milestone. */
+  health?: LineHealth | null;
+  /** The line's share of the week the scheduler keeps (percent); absent when none is set. */
+  share?: number };
+
+/** Asks the page's 「新建里程碑」 form to open with this line chosen (`MilestoneActions` listens). */
+export const NEW_MILESTONE_EVENT = "crossline:new-milestone";
+
+const HEALTH_LABEL = { ok: "按计划 · 估计", watch: "需关注 · 估计", risk: "有风险 · 估计" } as const;
 
 const post = async (body: unknown) => {
   const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
@@ -145,31 +157,60 @@ export function LinesBar({ lines, palette }: { lines: LineCard[]; palette: Recor
     void order([...rest.slice(0, at < 0 ? rest.length : at), dragging, ...rest.slice(at < 0 ? rest.length : at)]);
     setDragging(null);
   };
-  const goalLink = (line: LineCard) => line.goalParts.length ? t("调整定语 →")
-    : line.attributes.length ? t("{{count}} 个定语候选待选 →", { count: line.attributes.length }) : line.goals.length ? t("调整长期目标 →") : t("设定长期目标 →");
+  const goalLink = (line: LineCard) => line.goalParts.length ? t("调整定语")
+    : line.attributes.length ? t("{{count}} 个定语候选待选", { count: line.attributes.length }) : line.goals.length ? t("调整长期目标") : t("设定长期目标");
   const reorder = (line: LineCard) => () => void order(line.rank ? ranked.filter((item) => item.id !== line.id).map((item) => item.id)
     : [...ranked.map((item) => item.id), line.id]);
+  // 重算草稿 straight from the card's icon (2026-10-28): the line's untouched drafts are redesigned, approved milestones never move.
+  const [redraft, setRedraft] = useState<Record<string, string>>({});
+  const redoDrafts = async (line: LineCard) => {
+    setRedraft((current) => ({ ...current, [line.id]: "running" }));
+    const response = await fetch("/api/milestones/propose", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ request: "", only: [line.id] }) }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { state?: string; drafts?: unknown[]; message?: string; blocker?: { message?: string } } | undefined;
+    if (!response?.ok || body?.state === "blocked") {
+      setRedraft((current) => ({ ...current, [line.id]: t("{{reason}}，可以稍后重试", { reason: body?.message ?? body?.blocker?.message ?? t("未完成") }) }));
+      return;
+    }
+    location.reload();
+  };
   const card = (line: LineCard, index?: number) => {
-    const waiting = line.pendingEdit ? t("目标修改待定") : line.redraftDue ? t("可重算草稿") : line.interview.questions.length && !line.interview.waiting
+    const waiting = line.pendingEdit ? t("目标修改待定") : line.interview.questions.length && !line.interview.waiting
       ? t("{{count}} 个问题", { count: line.interview.questions.length }) : line.interview.waiting ? t("整理中") : "";
     const open = talking === line.id;
+    const health = line.health;
+    const progress = health && health.total ? Math.round(health.reached / health.total * 100) : 0;
+    const running = redraft[line.id] === "running";
     return <article key={line.id} className="lines-bar-card" data-line={line.id} data-open={open || undefined}
       onDragOver={(event) => event.preventDefault()} onDrop={() => dropOn(line.rank ? line.id : null)}>
       <header draggable={Boolean(line.rank)} onDragStart={() => setDragging(line.id)}>
         <button type="button" className="lines-bar-name" onClick={() => setEditing(line)}>{line.label}</button>
+        <span className="tag lb-rank">{index !== undefined ? (index === 0 ? t("底座") : t("第 {{n}}", { n: index + 1 })) : t("平行")}</span>
         {line.hard && <span className="tag">{t("硬约束")}</span>}
         {line.domain && <span className="tag">{t(DOMAIN_PACKS[line.domain].label)}</span>}
-        <small className="mono">{index !== undefined ? (index === 0 ? t("底座") : t("第 {{n}}", { n: index + 1 })) : t("平行")}</small>
+        {health && <span className="lb-health" data-level={health.level}
+          title={t("估计（按排程与风险审查，未经本人确认）：{{open}} 个进行中的里程碑，{{risky}} 个有风险，{{watch}} 个需关注", { open: health.open, risky: health.risky, watch: health.watch })}>
+          {health.level === "ok" ? <Check {...ICON} /> : <TriangleAlert {...ICON} />}{t(HEALTH_LABEL[health.level])}</span>}
       </header>
       <GoalChips line={line} />
       {line.goals.length > 1 && <small className="muted lb-more" title={line.goals.slice(1).join(t("；"))}>{t("另有 {{count}} 个长期目标", { count: line.goals.length - 1 })}</small>}
+      <p className="lb-progress"><Flag {...ICON} />
+        <span className="mono">{t("{{done}}/{{count}} 里程碑", { done: health?.reached ?? 0, count: line.milestones })}{line.drafts ? ` · ${t("{{n}} 待批准", { n: line.drafts })}` : ""}</span>
+        <span className="lb-progress-bar" aria-hidden="true"><i style={{ width: `${progress}%` }} /></span></p>
       {line.records && <DomainRecords card={line.records} />}
       <footer>
-        <small className="mono">{t("{{count}} 个里程碑", { count: line.milestones })}{line.drafts ? ` · ${t("{{n}} 待批准", { n: line.drafts })}` : ""}</small>
-        <button type="button" className="text-button lines-bar-goal-button" onClick={() => setEditing(line)}>{goalLink(line)}</button>
-        <button type="button" className="text-button lb-talk" aria-expanded={open} onClick={() => setTalking(open ? null : line.id)}>
-          {t("访谈")}{waiting ? <span className="lb-talk-flag">{waiting}</span> : null}</button>
+        <span className="lb-talk-wrap">
+          <IconButton label={waiting ? t("访谈：{{state}}", { state: waiting }) : t("访谈")} icon={<MessageSquare {...ICON} />} className="lb-talk" aria-expanded={open}
+            onClick={() => setTalking(open ? null : line.id)} />
+          {waiting ? <span className="lb-talk-flag">{waiting}</span> : null}</span>
+        <IconButton label={running ? t("正在重算该主线未动过的草稿…") : line.redraftDue ? t("目标已变，重算未动过的草稿") : t("重算这条线未动过的草稿")}
+          icon={<RefreshCw {...ICON} />} className="lb-redraft" data-due={line.redraftDue || undefined} disabled={running} onClick={() => void redoDrafts(line)} />
+        <IconButton label={t("给这条线新建里程碑")} icon={<Plus {...ICON} />}
+          onClick={() => window.dispatchEvent(new CustomEvent(NEW_MILESTONE_EVENT, { detail: { lineId: line.id } }))} />
+        <IconButton label={goalLink(line)} icon={<Sparkles {...ICON} />} className="lines-bar-goal-button" onClick={() => setEditing(line)} />
+        {line.share ? <small className="mono lb-share" title={t("每周至少得到的可用时间份额，在计划页调整")}>{t("{{n}}% 时间", { n: line.share })}</small> : null}
       </footer>
+      {redraft[line.id] && <small role="status" className="lb-redraft-status">{running ? t("正在重算该主线未动过的草稿…（通常 2–5 分钟，已批准的里程碑不变）") : redraft[line.id]}</small>}
       <div className="lb-interview" hidden={!open}>
         <LineCardInterview lineId={line.id} label={line.label} description={line.description} interview={line.interview}
           pendingEdit={line.pendingEdit} redraftDue={line.redraftDue} />

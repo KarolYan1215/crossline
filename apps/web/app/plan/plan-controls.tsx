@@ -3,13 +3,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { adviceChanges, applyAdvice, type AvailabilityWindow, type EnergyAdvice } from "@crossline/core";
 import type { ScheduleParams } from "@crossline/planner";
+import { Copy, Eye, ListOrdered, Undo2 } from "lucide-react";
 import { SegmentedControl, Slider } from "../ui/controls";
-import { Tip } from "../ui/overlay";
-import { Tag } from "../ui/tag";
+import { Sheet, Tip } from "../ui/overlay";
+import { LineTag, Tag } from "../ui/tag";
+import { ICON } from "../ui/icon-button";
 import { ImpactCard } from "../task/impact";
 import { usePlanImpact } from "./preview-context";
 import { RhythmMini } from "./plan-stats-charts";
-import { gridFromWindows, gridHours, windowsFromGrid, SLOTS, type WeekGrid } from "./week-grid";
+import { copyToWeekdays, gridFromWindows, gridHours, windowsFromGrid, SLOTS, type WeekGrid } from "./week-grid";
 import { useLocale, useT } from "../locale-context";
 import { tFor, weekdayShort, type Locale, type Translate } from "../../lib/i18n";
 
@@ -41,18 +43,21 @@ export function TimeEnergy({ windows, suggested, proposed, busy, statedWeekly, w
   const [brush, setBrush] = useState<(typeof BRUSH)[number]["value"]>("3");
   const [setAside, setSetAside] = useState(advice.dismissed);
   const painting = useRef(false);
+  // The day last painted, which 「复制到工作日」 copies (Monday until something is painted).
+  const [lastDay, setLastDay] = useState(1);
   const impact = usePlanImpact();
   useEffect(() => {
     const stop = () => { painting.current = false; };
     window.addEventListener("pointerup", stop);
     return () => window.removeEventListener("pointerup", stop);
   }, []);
-  const paint = (day: number, slot: number) => setGrid((current) => {
+  const paint = (day: number, slot: number) => { setLastDay(day); setGrid((current) => {
     if (current[day]![slot] === Number(brush)) return current;
     const next = current.map((row) => [...row]);
     next[day]![slot] = Number(brush);
     return next;
-  });
+  }); };
+  const copied = copyToWeekdays(grid, lastDay);
   const dirty = JSON.stringify(grid) !== initial.current;
   const hours = gridHours(grid);
   const empty = !grid.some((row) => row.some(Boolean));
@@ -69,17 +74,21 @@ export function TimeEnergy({ windows, suggested, proposed, busy, statedWeekly, w
   };
   const workedTotal = worked.flat().reduce((sum, value) => sum + value, 0);
   return <section className="pl-card pl-time" id="time" aria-label={t("时段与精力")}>
-    <header><h2>{t("时段与精力")}</h2>
-      <span className="pl-hours mono" title={t("刷涂的可用时段每周小时数，对比访谈中所述的每周投入")}>{t("每周 {{n}} h", { n: hours })}{statedWeekly !== null ? ` · ${t("所述 {{n}} h", { n: statedWeekly })}` : ""}</span></header>
+    <header><h2 className="ds-serif">{t("时段与精力")}</h2>
+      <span className="pl-hours mono" title={t("刷涂的可用时段每周小时数，对比访谈中所述的每周投入")}>{t("每周 {{n}} h", { n: hours })}{statedWeekly !== null ? ` · ${t("所述 {{n}} h", { n: statedWeekly })}` : ""}</span>
+      <small className="pl-time-hint">{t("按住拖动刷涂；改完先预览影响，点「应用」才生效")}</small></header>
     <div className="pl-time-body">
       <div className="pl-week-editor">
         <div className="pl-toolbar">
           <SegmentedControl label={t("画笔")} value={brush} onChange={setBrush} options={BRUSH.map((item) => ({ value: item.value, label: t(item.label) }))} />
-          {proposed && <button type="button" onClick={() => setGrid(gridFromWindows(proposed.windows))} title={proposed.why || t("访谈按硬约束主线的规则提议的可用时段")}>{t("采用访谈提议")}</button>}
-          {suggested.length > 0 && <button type="button" onClick={() => setGrid(gridFromWindows(suggested))} title={t("按近两周屏幕活动推断的在场时段")}>{t("采用活动建议")}</button>}
-          {dirty && <button type="button" onClick={() => setGrid(JSON.parse(initial.current) as WeekGrid)}>{t("还原")}</button>}
-          <button type="button" className="primary-button" disabled={!dirty || empty || impact.busy} onClick={() => propose(grid)}>
-            {impact.busy ? t("计算中…") : t("预览影响")}</button>
+          <button type="button" className="pl-tool" disabled={copied === grid} onClick={() => setGrid(copied)}
+            title={t("把{{day}}的时段复制到周一至周五（周末不变）", { day: weekdayShort(locale, lastDay) })}><Copy {...ICON} />{t("复制到工作日")}</button>
+          {proposed && <button type="button" className="pl-tool" onClick={() => setGrid(gridFromWindows(proposed.windows))} title={proposed.why || t("访谈按硬约束主线的规则提议的可用时段")}>
+            <Undo2 {...ICON} />{t("采用访谈提议")}</button>}
+          {suggested.length > 0 && <button type="button" className="pl-tool" onClick={() => setGrid(gridFromWindows(suggested))} title={t("按近两周屏幕活动推断的在场时段")}>{t("采用活动建议")}</button>}
+          {dirty && <button type="button" className="pl-tool" onClick={() => setGrid(JSON.parse(initial.current) as WeekGrid)}>{t("还原")}</button>}
+          <button type="button" className="primary-button pl-preview-button" disabled={!dirty || empty || impact.busy} onClick={() => propose(grid)}>
+            <Eye {...ICON} />{impact.busy ? t("计算中…") : t("预览影响")}</button>
         </div>
         <div className="pl-grid-scroll">
           <table className="pl-grid" aria-label={t("每周可用时段")} onPointerLeave={() => { painting.current = false; }}>
@@ -156,76 +165,56 @@ function Advice({ advice, changes, busy, onApprove, onDismiss }: { advice: Extra
 }
 
 /**
- * What the ordering rests on, as the page shows it (decided 2026-10-15): each line's long-term goal. A milestone's importance is the
- * agent's call, changed on that milestone's card; a task's due day on its task card.
+ * Each line's share of the week (decided 2026-10-10; out of the advanced fold on 2026-10-28): a soft floor the scheduler meets before
+ * ordering by deadline tier, so a line whose milestones are far off still gets its hours. Starts from what the person said in the
+ * interview; previewed like any change. Each line's long-term goal is the name's hover text (it is edited on 主线).
  */
-export function LongTermGoals({ goals, shares }: { goals: Array<{ line: string; label: string; goal: string | null }>; shares: Record<string, number> }) {
-  const t = useT();
-  return <section className="pl-card pl-goals" aria-label={t("排程依据")}>
-    <header><h2>{t("排程依据")}</h2><small>{t("各主线的长期目标；里程碑的重要性在里程碑卡上调整")}</small></header>
-    <ul>{goals.map((item) => <li key={item.line} data-line={item.line}>
-      <b>{item.label}</b>
-      <span data-user-text>{item.goal ?? t("尚未选定长期目标")}</span>
-      {shares[item.line] ? <small className="mono" title={t("每周至少得到的可用时间份额")}>{t("份额 {{n}}%", { n: shares[item.line] })}</small> : null}
-    </li>)}</ul>
-  </section>;
-}
-
-/**
- * The rarely used settings in one fold (decided 2026-10-15): how a day is packed, each line's share, and the scheduler's own ordering,
- * read-only. The schedule status links here (`#why`) when something was not placed, so following that link opens it.
- */
-export function AdvancedSettings({ params, presets, shares, labels, lineOrder, children }: { params: ScheduleParams; presets: { buffered: ScheduleParams; asap: ScheduleParams };
-  shares: { effective: Record<string, number>; custom: boolean }; labels: Record<string, string>; lineOrder: string[]; children: ReactNode }) {
-  const t = useT();
-  const fold = useRef<HTMLDetailsElement | null>(null);
-  useEffect(() => {
-    const follow = () => { if (window.location.hash === "#why" && fold.current) fold.current.open = true; };
-    follow();
-    window.addEventListener("hashchange", follow);
-    return () => window.removeEventListener("hashchange", follow);
-  }, []);
-  return <details className="fold advanced pl-advanced" id="why" ref={fold}>
-    <summary>{t("高级：排程参数、主线份额与排程顺序")}</summary>
-    <div className="pl-advanced-body">
-      <ParamsPanel params={params} presets={presets} />
-      <SharesPanel shares={shares} labels={labels} lineOrder={lineOrder} />
-      <div className="pl-why"><h3>{t("排程顺序")}</h3>
-        <small className="pl-chart-foot">{t("排序规则：优先档 → 重要性 → 截止日。只读；截止日在任务卡上修改。")}</small>
-        {children}
-      </div>
-    </div>
-  </details>;
-}
-
-/**
- * Each line's share of the week (decided 2026-10-10): a soft floor the scheduler meets before ordering by deadline tier, so a line
- * whose milestones are far off still gets its hours. Starts from what the person said in the interview; previewed like any change.
- */
-function SharesPanel({ shares, labels, lineOrder }: { shares: { effective: Record<string, number>; custom: boolean }; labels: Record<string, string>; lineOrder: string[] }) {
+export function SharesCard({ shares, labels, lineOrder, goals }: { shares: { effective: Record<string, number>; custom: boolean }; labels: Record<string, string>;
+  lineOrder: string[]; goals: Array<{ line: string; goal: string | null }> }) {
   const t = useT();
   const [draft, setDraft] = useState(shares.effective);
   const impact = usePlanImpact();
   const total = lineOrder.reduce((sum, line) => sum + (draft[line] ?? 0), 0);
   const changed = lineOrder.some((line) => (draft[line] ?? 0) !== (shares.effective[line] ?? 0));
-  return <div className="pl-params pl-shares">
-    <h3>{t("主线份额")}</h3>
+  const goalOf = new Map(goals.map((item) => [item.line, item.goal]));
+  return <section className="pl-card pl-params pl-shares" aria-labelledby="pl-shares-card">
+    <header><h2 id="pl-shares-card" className="ds-serif">{t("主线份额")}</h2><small>{t("截止优先，其余按份额分配")}</small>
+      <span className="pl-head-actions">
+        {changed && <button type="button" className="pl-tool" onClick={() => setDraft(shares.effective)}>{t("还原")}</button>}
+        <button type="button" className="pl-tool" disabled={!changed || total > 100 || impact.busy}
+          onClick={() => void impact.propose({ kind: "shares", shares: draft })}><Eye {...ICON} />{impact.busy ? t("计算中…") : t("预览影响")}</button>
+      </span></header>
     <small className="pl-chart-foot">{shares.custom ? t("本人设定。") : t("来自访谈中所述的投入比例。")}{t("每条主线一周至少得到这一份可用时间；有截止的工作仍然优先。")}</small>
     {lineOrder.map((line) => <div key={line} className="pl-param" data-line={line}>
-      <span>{labels[line] ?? line}</span>
+      <LineTag line={line} title={goalOf.get(line) ?? t("尚未选定长期目标")}>{labels[line] ?? line}</LineTag>
       <Slider label={t("{{line}}的份额", { line: labels[line] ?? line })} min={0} max={100} step={5} format={(value) => `${value}%`} value={draft[line] ?? 0}
         onChange={(value) => setDraft({ ...draft, [line]: value })} />
     </div>)}
     {total > 100 && <p role="status">{t("合计 {{n}}%，超过 100%。", { n: total })}</p>}
-    <div className="pl-toolbar">
-      {changed && <button type="button" onClick={() => setDraft(shares.effective)}>{t("还原")}</button>}
-      <button type="button" className="primary-button" disabled={!changed || total > 100 || impact.busy}
-        onClick={() => void impact.propose({ kind: "shares", shares: draft })}>{impact.busy ? t("计算中…") : t("预览影响")}</button>
-    </div>
     {impact.error && <p role="status">{impact.error}</p>}
     {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()}
       onCancel={() => { impact.cancel(); setDraft(shares.effective); }} />}
-  </div>;
+  </section>;
+}
+
+/**
+ * 「高级」 (2026-10-28: out of its fold, as the draft has it): how a day is packed, with the scheduler's own ordering a click away (the
+ * read-only ranking table in a sheet, `children`) and the written explanation below it (`explain`). 「排程依据说明」 in the head links here.
+ */
+export function AdvancedCard({ params, presets, children, explain }: { params: ScheduleParams; presets: { buffered: ScheduleParams; asap: ScheduleParams };
+  children: ReactNode; explain: ReactNode }) {
+  const t = useT();
+  return <section className="pl-card pl-advanced" id="advanced" aria-labelledby="pl-advanced-title">
+    <header><h2 id="pl-advanced-title" className="ds-serif">{t("高级")}</h2><small>{t("打包参数与排程顺序")}</small></header>
+    <ParamsPanel params={params} presets={presets} />
+    <div className="pl-toolbar">
+      <Sheet title={t("排程顺序")} side="right" trigger={<button type="button" className="pl-tool"><ListOrdered {...ICON} />{t("排程顺序表")}</button>}>
+        <small className="pl-chart-foot">{t("排序规则：优先档 → 重要性 → 截止日。只读；截止日在任务卡上修改。")}</small>
+        {children}
+      </Sheet>
+    </div>
+    {explain}
+  </section>;
 }
 
 /** The labels are keys; `format` writes the value in the page's language. */
@@ -246,19 +235,18 @@ function ParamsPanel({ params, presets }: { params: ScheduleParams; presets: { b
   const impact = usePlanImpact();
   const preset = same(draft, presets.buffered) ? "buffered" : same(draft, presets.asap) ? "asap" : "custom";
   return <div className="pl-params">
-    <h3>{t("排程参数")}</h3>
-    <SegmentedControl label={t("预设")} value={preset} onChange={(value) => value !== "custom" && setDraft(presets[value])}
-      options={[{ value: "buffered", label: t("留缓冲") }, { value: "asap", label: t("尽早完成") }, { value: "custom", label: t("自定义") }]} />
-    {PARAM_ROWS.map((row) => <div key={row.key} className="pl-param">
+    <div className="pl-toolbar">
+      <SegmentedControl label={t("预设")} value={preset} onChange={(value) => value !== "custom" && setDraft(presets[value])}
+        options={[{ value: "buffered", label: t("留缓冲") }, { value: "asap", label: t("尽早完成") }, { value: "custom", label: t("自定义") }]} />
+      {!same(draft, params) && <button type="button" className="pl-tool" onClick={() => setDraft(params)}>{t("还原")}</button>}
+      <button type="button" className="pl-tool" disabled={same(draft, params) || impact.busy}
+        onClick={() => void impact.propose({ kind: "params", params: draft })}><Eye {...ICON} />{impact.busy ? t("计算中…") : t("预览影响")}</button>
+    </div>
+    <div className="pl-param-grid">{PARAM_ROWS.map((row) => <div key={row.key} className="pl-param pl-param-box">
       <span>{t(row.label)}</span>
       <Slider label={t(row.label)} min={row.min} max={row.max} step={row.step} format={(value) => row.format(value, t)} value={toSlider(draft, row.key)}
         onChange={(value) => setDraft({ ...draft, [row.key]: fromSlider(row.key, value) })} />
-    </div>)}
-    <div className="pl-toolbar">
-      {!same(draft, params) && <button type="button" onClick={() => setDraft(params)}>{t("还原")}</button>}
-      <button type="button" className="primary-button" disabled={same(draft, params) || impact.busy}
-        onClick={() => void impact.propose({ kind: "params", params: draft })}>{impact.busy ? t("计算中…") : t("预览影响")}</button>
-    </div>
+    </div>)}</div>
     {impact.error && <p role="status">{impact.error}</p>}
     {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()}
       onCancel={() => { impact.cancel(); setDraft(params); }} />}

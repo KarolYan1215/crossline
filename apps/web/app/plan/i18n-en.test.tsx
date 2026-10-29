@@ -2,10 +2,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 import { LocaleProvider } from "../locale-context";
-import { minuteLabel, monthTicks, scatterMargins } from "./chart-geometry";
-import { PlanView, type PlanVersionData } from "./plan-view";
+import { minuteLabel, scatterMargins } from "./chart-geometry";
+import { PlanActions, ScheduleStatus, type PlanVersionData } from "./plan-view";
 import { RankingTable } from "./ranking-table";
-import { evidenceLine, LongTermGoals } from "./plan-controls";
+import { evidenceLine } from "./plan-controls";
+import { PlanKpiRow, UnplacedCard } from "./plan-head";
 import type { RankedTask } from "../../lib/crossline";
 
 const plan: PlanVersionData = { id: "plan-7", version: 7, blocks: [{ id: "scheduled:w1:v1s1", lane: "human", title: "Read", start: "09:00", end: "10:00", source: "排程", readOnly: false }] };
@@ -13,11 +14,9 @@ const task = (over: Partial<RankedTask>): RankedTask => ({ id: "w1", title: "Pro
   notBefore: null, firstDay: "2026-10-14", firstStart: "09:00", weekMinutes: 90, blocker: null, libraryUntil: null, p50Minutes: 60, p85Minutes: 90, ...over });
 
 describe("the plan page's geometry in both languages", () => {
-  test("minute ticks and month ticks: Chinese as before, English in English", () => {
+  test("minute ticks: Chinese as before, English in English", () => {
     expect([minuteLabel(30), minuteLabel(120)]).toEqual(["30 分", "2 时"]);
     expect([minuteLabel(30, "en"), minuteLabel(120, "en")]).toEqual(["30 min", "2 h"]);
-    expect(monthTicks("2026-10-01", "2027-01-15").map((tick) => tick.label)).toEqual(["2026年10月", "11月", "12月", "2027年1月"]);
-    expect(monthTicks("2026-10-01", "2027-01-15", "en").map((tick) => tick.label)).toEqual(["Oct 2026", "Nov", "Dec", "Jan 2027"]);
   });
 
   test("the scatter's margins are measured on the labels it draws in the page's language", () => {
@@ -33,13 +32,28 @@ describe("the plan page's geometry in both languages", () => {
 });
 
 describe("the plan page in English", () => {
-  test("the top row and the schedule's status", () => {
-    const html = renderToStaticMarkup(<LocaleProvider locale="en"><PlanView plan={{ ...plan,
-      schedule: { status: "partial", blockers: [{ taskId: "w2", code: "NO_CAPACITY", message: "" }], solver: "feasible_time_limit" } }} calendarWrite /></LocaleProvider>);
+  test("the head's actions and the schedule's status", () => {
+    const html = renderToStaticMarkup(<LocaleProvider locale="en"><PlanActions calendarWrite /><ScheduleStatus plan={{ ...plan,
+      schedule: { status: "partial", blockers: [{ taskId: "w2", code: "NO_CAPACITY", message: "" }], solver: "feasible_time_limit" } }} /></LocaleProvider>);
     expect(html).toContain("Sync calendar now");
     expect(html).toContain("Publish to the Crossline calendar");
     expect(html).toContain("Some tasks are not scheduled");
-    expect(html).toContain("1 task not scheduled; see &quot;Schedule order&quot; for why");
+    expect(html).toContain("1 task not scheduled; see &quot;Why it doesn&#x27;t fit&quot;");
+    expect(html).not.toMatch(/[一-鿿]/);
+  });
+
+  test("the four figures and the unplaced card in English", () => {
+    const html = renderToStaticMarkup(<LocaleProvider locale="en">
+      <PlanKpiRow configuredWeekly={39} labels={{ research: "Researcher" }} estimates={{ covered: 0, coverage: null, points: [] }}
+        kpis={{ usableMinutes: 2340, scheduledMinutes: 1860, unplaced: { count: 1, minutes: 150, earliest: "2026-11-03" }, bias: null }} />
+      <UnplacedCard labels={{ research: "Researcher" }} today="2026-10-28" items={[{ id: "w1", title: "Watchlist", line: "research", deadline: "2026-11-03",
+        notBefore: null, minutes: 150, partial: true, reason: null }]} />
+    </LocaleProvider>);
+    expect(html).toContain("Available this week");
+    expect(html).toContain("Not scheduled");
+    expect(html).toContain("Earliest due 11/3 · see why");
+    expect(html).toContain("Some steps not scheduled");
+    expect(html).toContain("Push or drop this week&#x27;s work in the weekly commitment →");
     expect(html).not.toMatch(/[一-鿿]/);
   });
 
@@ -53,10 +67,4 @@ describe("the plan page in English", () => {
     expect(html).not.toMatch(/[一-鿿]/);
   });
 
-  test("long-term goals: a missing goal and the share in English", () => {
-    const html = renderToStaticMarkup(<LocaleProvider locale="en"><LongTermGoals goals={[{ line: "research", label: "Researcher", goal: null }]} shares={{ research: 30 }} /></LocaleProvider>);
-    expect(html).toContain("Why this order");
-    expect(html).toContain("No long-term goal chosen yet");
-    expect(html).toContain("Share 30%");
-  });
 });

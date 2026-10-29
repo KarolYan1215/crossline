@@ -1,8 +1,5 @@
 /* ── 主线 timeline: one shared axis fitted to the page's width; fixed row heights so it stays inside one screen ── */
 .mt{display:grid;gap:6px;min-width:0}
-.mt-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;min-width:0}
-.mt-head-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-left:auto}
-.mt-head-actions .ms-actions{gap:6px}
 .mt-drafting{flex-basis:100%;margin:2px 0 0;padding:6px 10px;border-left:3px solid var(--graphite);font-size:13px;line-height:1.6}
 .mt-drafting p{margin:0}
 .mt-drafting p+p{margin-top:4px}
@@ -292,3 +289,101 @@
 .ba-lines-risks{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px}
 .ba-lines-risk{display:inline-flex;align-items:center;gap:3px}
 .ba-lines li .primary-button{margin-left:auto}
+
+/* ── 2026-10-28 redesign (docs/plans/page-drafts-1028/milestones.html): the frame's warm tokens inside the page, as Today does ── */
+html:has(.ms-page) body{background:var(--ds-bg)}
+.ms-page{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--shade:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);color:var(--ink)}
+body:has(.ms-page) .running-head{background:var(--ds-bg)}
+.ms-page .subpage-inner{gap:16px;padding-top:10px}
+.ms-page :is(.primary-button,.secondary-button,.ms-tool,.ui-segmented,.ui-segmented button,input,select,textarea){border-radius:var(--ds-radius-control)}
+.ms-page .primary-button{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
+.ms-page .primary-button:hover{background:var(--ds-accent-ink);color:var(--ds-on-accent)}
+.ms-page .ui-line-tag{border:0;border-radius:999px;padding:0 8px;background:color-mix(in srgb,var(--lc,var(--graphite)) 14%,var(--ds-card));color:var(--ink);font-weight:600}
+.ms-tool{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:4px 12px;border:1px solid var(--ds-line);background:var(--ds-card);color:var(--ink);
+  font:inherit;font-size:13px;cursor:pointer}
+.ms-tool:hover:not(:disabled){background:var(--ds-chalk)}
+.ms-tool-icon{padding:4px 8px}
+.ms-tool-icon small{font-size:12px;color:var(--graphite)}
+
+/* head: title, the week's figures in the serif, the actions */
+.ms-head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 24px;padding:14px 0 2px}
+.ms-head>div:first-child{margin-right:auto;min-width:0}
+.ms-head h1{margin:0;font-size:clamp(30px,3vw,38px);font-weight:600;line-height:1.05;color:var(--ink)}
+.ms-head p{margin:6px 0 0;font-size:13px;color:var(--graphite)}
+.ms-head .mt-stats{gap:6px 22px}
+.ms-head .mt-stat{display:grid;grid-template-columns:auto;gap:2px;align-items:end}
+.ms-head .mt-stat b{font-size:30px;line-height:1;font-weight:600}
+.ms-head .mt-stat b small{font-size:15px}
+.ms-head .mt-stat-bar{display:none}
+.ms-head .mt-stat-title{max-width:12em;font-size:12px}
+
+/* line cards */
+.ms-page .lines-bar-row{gap:14px}
+.ms-page .lines-bar-card{gap:10px;padding:14px 16px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
+.ms-page .lines-bar-card header{align-items:center}
+.ms-page .lines-bar-name{padding:1px 10px;border-radius:999px;background:color-mix(in srgb,var(--lc,var(--graphite)) 14%,var(--ds-card));color:var(--ink);font-size:13px;font-weight:600}
+.ms-page .lines-bar-card .tag{border-radius:999px}
+.lb-health{display:inline-flex;align-items:center;gap:4px;margin-left:auto;padding:1px 8px;border-radius:999px;font-size:12px;background:var(--ds-accent-soft);color:var(--ds-accent-ink)}
+.lb-health svg{width:13px;height:13px}
+.lb-health[data-level="risk"]{background:var(--ds-alarm-soft);color:var(--ds-alarm-ink)}
+.lb-health[data-level="watch"]{background:var(--ds-chalk);color:var(--ink);box-shadow:inset 0 0 0 1px var(--ds-line)}
+.ms-page .lb-goal{font-size:15px;line-height:1.5}
+.lb-progress{display:flex;align-items:center;gap:8px;margin:0;font-size:12px;color:var(--graphite)}
+.lb-progress svg{width:14px;height:14px;flex:none}
+.lb-progress-bar{flex:1;height:4px;min-width:40px;border-radius:2px;background:var(--ds-chalk);overflow:hidden}
+.lb-progress-bar i{display:block;height:100%;background:var(--lc,var(--ds-accent))}
+.ms-page .lines-bar-card footer{gap:4px}
+.ms-page .lines-bar-card footer .ds-icon{border-color:var(--ds-line)}
+.ms-page .lines-bar-card .lines-bar-goal-button{margin-left:0}
+.lb-talk-wrap{display:inline-flex;align-items:center;gap:4px}
+.ms-page .lb-talk-flag{border-radius:999px}
+.lb-redraft[data-due]{border-style:dashed !important;border-color:var(--lc,var(--ink)) !important}
+.lb-share{margin-left:auto}
+.lb-redraft-status{font-size:12px;color:var(--ink)}
+.ms-page .lines-bar-add{border-radius:var(--ds-radius)}
+
+/* drafts waiting: one dashed banner */
+.ms-drafts{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:12px 16px;border:1.5px dashed var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);font-size:13px}
+.ms-drafts>svg{flex:none}
+.ms-drafts-lines{color:var(--graphite)}
+.ms-drafts-risk{display:inline-flex;gap:8px}
+.ms-drafts-actions{display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+
+/* the timeline card, and the drawer docked beside it on a wide screen */
+.ms-main{display:grid;gap:16px;grid-template-columns:minmax(0,1fr);align-items:start}
+.ms-main[data-docked]{grid-template-columns:minmax(0,1fr) minmax(320px,360px)}
+.ms-card{display:grid;gap:10px;min-width:0;padding:16px 18px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
+.ms-card-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.ms-card-head h2{margin:0;font-size:19px;font-weight:600}
+.ms-card-head small{font-size:12px;color:var(--graphite)}
+.ms-page .mt-scroll{border-radius:10px;border-color:var(--ds-line)}
+/* 「当前焦点」: one line at rest, the full detail while a milestone or tick is in focus. */
+.ms-page .mt-focus{height:76px;border-radius:var(--ds-radius-control);border-color:var(--ds-line);background:var(--ds-bg)}
+.mt-focus-current{display:inline-flex;align-items:center;gap:4px;margin-right:8px;font-weight:600;color:var(--ink)}
+.mt-focus-current svg{width:15px;height:15px}
+.mt-focus .mt-focus-open{min-height:0;padding:0;border:0;background:none;color:var(--ink);text-align:left}
+.mt-focus .mt-focus-open:hover b,.mt-focus .mt-focus-open:focus-visible b{text-decoration:underline}
+.mt-marker[data-current] i{outline:2px solid var(--ds-card);box-shadow:0 0 0 4px color-mix(in srgb,var(--lc,var(--ink)) 30%,transparent)}
+/* The schedule's word as an outer ring (2026-10-28, from the plan page): red at risk, dashed not ready, grey in the task library. */
+.mt-marker[data-plan]::before{content:"";position:absolute;inset:0;border-radius:50%;border:2px solid var(--ds-alarm);pointer-events:none}
+.mt-marker[data-plan="unprepared"]::before{border-style:dashed;border-color:var(--ink)}
+.mt-marker[data-plan="library"]::before{border-color:var(--graphite);border-style:dotted}
+.mt-key[data-k^="plan-"]{width:12px;height:12px;border-color:var(--ds-alarm)}
+.mt-key[data-k="plan-unprepared"]{border-style:dashed;border-color:var(--ink)}
+.mt-key[data-k="plan-library"]{border-style:dotted;border-color:var(--graphite)}
+.ms-dock{position:sticky;top:12px;display:grid;gap:10px;max-height:calc(100vh - 24px);overflow-y:auto;padding:16px 18px;border:1px solid var(--ds-line);
+  border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
+.ms-dock-head{display:flex;align-items:flex-start;gap:8px}
+.ms-dock-title{flex:1;margin:0;font-size:17px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.ms-dock-foot{padding-top:10px;border-top:1px solid var(--ds-line)}
+.md-elsewhere{margin:0;font-size:13px}
+.md-elsewhere a{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.ms-page .md-risk{border-radius:var(--ds-radius-control)}
+/* The arrow on the warm chalk ground: ink, since a line colour there is under 7:1. */
+.ms-page .md-relation-dir{color:var(--ink)}
+
+@media (max-width:640px){
+  .ms-head{align-items:flex-start}
+  .ms-drafts-actions{margin-left:0}
+  .ms-page .mt-focus{height:96px}
+}

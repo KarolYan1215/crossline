@@ -3,8 +3,11 @@
 import { useState } from "react";
 import { Clamp } from "../ui/clamp";
 import { riskLevelOf, TARGET_GRADE_OPTIONS, type SuccessCriterion } from "@crossline/core";
+import { X } from "lucide-react";
 import type { BoardCourse, BoardCriterion, BoardMilestone } from "../../lib/milestone-board";
+import type { MilestoneState } from "../../lib/plan-stats";
 import { Sheet } from "../ui/overlay";
+import { ICON, IconButton } from "../ui/icon-button";
 import { DateChip, ProgressRing, Slider } from "../ui/controls";
 import { Bullet } from "../ui/charts";
 import { LineTag, Tag } from "../ui/tag";
@@ -46,7 +49,11 @@ function useAction(reopenId?: string) {
  * steps under it, the reasoning it was proposed with, and — once every criterion is met — its retrospective. A draft is approved or
  * withdrawn from the footer, next to its risks.
  */
-export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: BoardMilestone; labels: Record<string, string>; onClose: () => void }) {
+export function MilestoneDrawer({ milestone, labels, onClose, docked = false }: { milestone: BoardMilestone; labels: Record<string, string>;
+  /** Closes the sheet; docked, it goes back to the current focus (absent when the dock already shows it). */
+  onClose?: (() => void) | undefined;
+  /** On a wide screen the drawer stays beside the timeline (2026-10-28) instead of opening over it. */
+  docked?: boolean }) {
   const t = useT();
   const action = useAction(milestone.id);
   const [weight, setWeight] = useState(milestone.weight);
@@ -73,26 +80,30 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
   const removeFlow = (id: string) => action.run(t("去掉中…"), () => fetch(`/api/milestone-relations/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined),
     t("未完成，请刷新后重试。"));
 
-  return <Sheet side="right" title={milestone.title} open onOpenChange={(open) => !open && onClose()}
-    footer={<div className="md-actions">
-      {milestone.status === "draft" && <>
-        <span className="md-approve-risk">{level ? <><RiskGlyph level={level} />{t("批准即接受 {{count}} 项风险", { count: milestone.risks.length })}</> : t("未见明显风险")}</span>
-        <button type="button" className="primary-button" disabled={action.busy} onClick={() => void decideDraft("approved")}>{t("批准")}</button>
-        <button type="button" disabled={action.busy} onClick={() => void decideDraft("archived")}>{t("撤销草稿")}</button>
-      </>}
-      {approved && <button type="button" disabled={action.busy} onClick={() => void saveMilestone({ status: "archived" }, t("归档中…"))}>{t("归档")}</button>}
-    </div>}>
-    <div className="md" data-line={milestone.identityId}>
+  const footer = <div className="md-actions">
+    {milestone.status === "draft" && <>
+      <span className="md-approve-risk">{level ? <><RiskGlyph level={level} />{t("批准即接受 {{count}} 项风险", { count: milestone.risks.length })}</> : t("未见明显风险")}</span>
+      <button type="button" className="primary-button" disabled={action.busy} onClick={() => void decideDraft("approved")}>{t("批准")}</button>
+      <button type="button" disabled={action.busy} onClick={() => void decideDraft("archived")}>{t("撤销草稿")}</button>
+    </>}
+    {approved && <button type="button" disabled={action.busy} onClick={() => void saveMilestone({ status: "archived" }, t("归档中…"))}>{t("归档")}</button>}
+  </div>;
+  const plan = milestone.planStates;
+  const body = <div className="md" data-line={milestone.identityId}>
       <div className="md-tags">
         <LineTag line={milestone.identityId}>{labels[milestone.identityId] ?? milestone.identityId}</LineTag>
         {milestone.projectName && <Tag>{milestone.projectName}</Tag>}
         <Tag tone={approved ? "ok" : "info"}>{approved ? t("已批准") : t("待批准")}</Tag>
+        {plan && (plan.length ? plan.map((state) => <Tag key={state} tone={state === "risk" ? "risk" : "neutral"}>{t(PLAN_STATE_LABEL[state])}</Tag>)
+          : <Tag tone="ok">{t("按计划")}</Tag>)}
       </div>
 
       <section className="md-risk" aria-label={t("风险")}>
         <h3><RiskGlyph level={level} size={14} />{level ? t("风险 {{count}} 项", { count: milestone.risks.length }) : t("未见明显风险")}
           <small className="md-sub">{milestone.riskSource === "model" ? t("里程碑生成时审查") : t("按日期、依赖与标准估算")}</small></h3>
         <RiskList risks={milestone.risks} gen={milestone.riskSource === "model"} />
+        {/* Deciding a risk (accept and plan earlier, move the date, lower the bar) is 待确认's (scenarios.md, 2026-10-28); shown here, decided there. */}
+        {approved && (level === "medium" || level === "high") && <p className="md-elsewhere"><a href="/approvals">{t("接受风险、提前排或调整：在待确认决定 →")}</a></p>}
       </section>
 
       <form className="md-row md-title" onSubmit={(event) => { event.preventDefault(); if (title.trim() && title.trim() !== milestone.title) void saveMilestone({ title: title.trim() }); }}>
@@ -144,7 +155,6 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
       {milestone.relations.length > 0 && <section className="md-block" aria-label={t("与其他主线的关系")}>
         <h3>{t("与其他主线的关系")}</h3>
         {milestone.relations.map((relation) => <RelationRow key={relation.id} relation={relation} labels={labels} busy={action.busy}
-          onDecide={(decision) => void action.run(t("保存中…"), () => post("/api/milestone-relations/decide", { ids: [relation.id], decision }), t("未保存，请重试。"))}
           onRemove={relation.artifact && relation.pending ? () => void removeFlow(relation.id) : undefined} />)}
       </section>}
 
@@ -152,9 +162,19 @@ export function MilestoneDrawer({ milestone, labels, onClose }: { milestone: Boa
 
       {milestone.rationale && <section className="md-block" aria-label={t("依据与推导")}><h3>{t("依据与推导")}</h3><p className="gen md-rationale"><Clamp lines={3} text={readableRationale(milestone.rationale, t("（最低够线）"))} /></p></section>}
       {action.message && <p role="status" className="md-status">{action.message}</p>}
-    </div>
-  </Sheet>;
+    </div>;
+
+  if (docked) return <aside className="ms-dock" data-line={milestone.identityId} aria-label={t("里程碑：{{title}}", { title: milestone.title })}>
+    <header className="ms-dock-head"><h2 className="ms-dock-title">{milestone.title}</h2>
+      {onClose && <IconButton label={t("回到当前焦点")} icon={<X {...ICON} />} onClick={onClose} />}</header>
+    {body}
+    <div className="ms-dock-foot">{footer}</div>
+  </aside>;
+  return <Sheet side="right" title={milestone.title} open onOpenChange={(open) => !open && onClose?.()} footer={footer}>{body}</Sheet>;
 }
+
+/** The schedule's word on an approved milestone, as the drawer and the timeline say it (keys, translated where shown). */
+export const PLAN_STATE_LABEL: Record<MilestoneState, string> = { risk: "有完不成风险", unprepared: "待准备", library: "任务在任务库" };
 
 /** One more criterion: a thing that must exist (产出物), or a result judged against a stated way it fails (结果). */
 function AddCriterion({ busy, onAdd }: { busy: boolean; onAdd: (criterion: SuccessCriterion) => void }) {
@@ -241,8 +261,11 @@ function CriterionRow({ criterion, busy, onSave, onReword, onRemove }: { criteri
   </div>;
 }
 
-function RelationRow({ relation, labels, busy, onDecide, onRemove }: { relation: BoardMilestone["relations"][number]; labels: Record<string, string>; busy: boolean;
-  onDecide: (decision: "approved" | "archived") => void;
+/**
+ * One relation, shown and not decided here (2026-10-28, scenarios.md): a candidate is approved or turned down in the weekly review, so
+ * its row links there. A cross-line artifact on a draft can still be taken off the draft.
+ */
+function RelationRow({ relation, labels, busy, onRemove }: { relation: BoardMilestone["relations"][number]; labels: Record<string, string>; busy: boolean;
   /** A cross-line artifact on a draft: removed on its own (it is approved together with the downstream milestone otherwise). */
   onRemove?: (() => void) | undefined }) {
   const t = useT();
@@ -262,11 +285,9 @@ function RelationRow({ relation, labels, busy, onDecide, onRemove }: { relation:
       <span className="gen">{t("「{{title}}」", { title: relation.artifact.title })}</span>{relation.transfer && <small className="mono md-sub">{relation.transfer.expected} {relation.transfer.unit}{relation.transfer.metric}</small>}</p>}
     {relation.explanation && <p className="gen">{relation.explanation}</p>}
     {relation.refutedWhen && <p className="md-refuted"><span className="md-key">{t("证伪条件")}</span><span className="gen">{relation.refutedWhen}</span></p>}
-    {relation.pending && <div className="md-actions">
-      <button type="button" disabled={busy || !relation.explanation} title={relation.explanation ? undefined : t("缺少说明，无法批准")}
-        onClick={() => onDecide("approved")}>{t("批准")}</button>
-      <button type="button" disabled={busy} onClick={() => onDecide("archived")}>{t("撤销", { context: "reject" })}</button>
-    </div>}
+    {relation.pending && <p className="md-elsewhere">{relation.artifact
+      ? t("随下游里程碑「{{title}}」一起批准", { title: relation.direction === "out" ? relation.otherTitle : t("本里程碑") })
+      : <a href="/review">{t("候选关系在周复盘决定 →")}</a>}</p>}
   </div>;
 }
 
@@ -299,7 +320,7 @@ function Retrospective({ milestone }: { milestone: BoardMilestone }) {
  * A course's score line as the end of its chain: the target with the reason it was proposed, accepted as is or changed — a change
  * redoes the line's untouched drafts from the new target (approved milestones keep theirs; their score lines are edited on each node).
  */
-export function CourseDrawer({ course, milestones, onClose }: { course: BoardCourse; milestones: BoardMilestone[]; onClose: () => void }) {
+export function CourseDrawer({ course, milestones, onClose, docked = false }: { course: BoardCourse; milestones: BoardMilestone[]; onClose: () => void; docked?: boolean }) {
   const t = useT();
   const [pick, setPick] = useState("");
   const [other, setOther] = useState("");
@@ -318,8 +339,7 @@ export function CourseDrawer({ course, milestones, onClose }: { course: BoardCou
   };
   const thresholds = milestones.flatMap((milestone) => milestone.criteria.filter((criterion) => criterion.threshold)
     .map((criterion) => ({ milestone, criterion })));
-  return <Sheet side="right" title={course.name} open onOpenChange={(open) => !open && onClose()}>
-    <div className="md" data-line={course.identityId}>
+  const body = <div className="md" data-line={course.identityId}>
       <div className="md-tags"><Tag>{t("课程分数线")}</Tag><Tag tone={course.proposed ? "info" : "ok"}>{course.proposed ? t("待审阅") : t("已确认")}</Tag></div>
       <section className="md-block" aria-label={t("分数线")}>
         <p className="md-target"><b>{course.value}</b></p>
@@ -343,6 +363,10 @@ export function CourseDrawer({ course, milestones, onClose }: { course: BoardCou
           <small className="mono">{criterion.threshold!.value}{criterion.threshold!.unit}</small>
         </div>)}
       </section>}
-    </div>
-  </Sheet>;
+    </div>;
+  if (docked) return <aside className="ms-dock" data-line={course.identityId} aria-label={course.name}>
+    <header className="ms-dock-head"><h2 className="ms-dock-title">{course.name}</h2><IconButton label={t("回到当前焦点")} icon={<X {...ICON} />} onClick={onClose} /></header>
+    {body}
+  </aside>;
+  return <Sheet side="right" title={course.name} open onOpenChange={(open) => !open && onClose()}>{body}</Sheet>;
 }

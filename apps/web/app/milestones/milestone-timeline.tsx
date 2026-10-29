@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { Layers, Target } from "lucide-react";
 import { MILESTONE_RISK_KIND_LABEL, RELATION_KIND_LABEL, riskLevelOf, type MilestoneRisk, type MilestoneRiskLevel } from "@crossline/core";
 import { RiskGlyph } from "./risk-glyph";
+import { ICON } from "../ui/icon-button";
 import type { BoardMilestone, BoardRelation, MilestoneBoard } from "../../lib/milestone-board";
 import { Sheet } from "../ui/overlay";
 import { useReturnState } from "../ui/return-state";
@@ -14,7 +16,7 @@ import { TICK_HIT, TL, connectionsOf, edgeLabelSize, focusLabels, labelObstacles
 const KIND_OF_LABEL = new Map(Object.entries(RELATION_KIND_LABEL).map(([kind, label]) => [label, kind]));
 /** How long a hovered relation's labels stay after the pointer leaves, so it can reach a label (an artifact's chip) placed off the curve. */
 const LINGER_MS = 300;
-import { MilestoneDrawer, CourseDrawer } from "./milestone-drawer";
+import { MilestoneDrawer, CourseDrawer, PLAN_STATE_LABEL } from "./milestone-drawer";
 import { useLocale, useT } from "../locale-context";
 import type { Translate } from "../../lib/i18n";
 
@@ -37,9 +39,11 @@ const TICK_TAG = { done: "已达成刻度", postponed: "已顺延刻度", planne
  * never their text. Every tick dot and every postponed tick's dashed ghost is a target (`tickTargets`); a click pins its explanation in
  * the strip until closed (×, Esc).
  */
-export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; actions?: ReactNode }) {
+export function MilestoneTimeline({ board }: { board: MilestoneBoard }) {
   const t = useT();
   const locale = useLocale();
+  // ≥1360px the drawer stays beside the timeline, showing the current focus until a milestone is picked (2026-10-28 redesign).
+  const docked = useWide("(min-width: 1360px)");
   const [selected, setSelected] = useState<{ kind: "milestone"; id: string } | { kind: "course"; id: string } | null>(null);
   // Ticks under the pointer (or keyboard focus), and the ticks picked by a click, whose explanation stays in the strip until closed.
   const [tickHover, setTickHover] = useState<string[] | null>(null);
@@ -99,25 +103,33 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
         ...(KIND_OF_LABEL.has(relation.kindLabel) ? { kind: KIND_OF_LABEL.get(relation.kindLabel)! } : {}), broken: Boolean(relation.broken) }))),
     lineOrder: board.lineOrder, today: board.today, width, locale
   });
-  const head = <header className="mt-head">
-    <MilestoneStats board={board} />
-    <div className="mt-head-actions">
-      {drafts.length > 0 && <span className="ba-split">
-        <BatchApprove drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} />
+  // The drafts waiting, as one banner above the timeline (dashed, like a draft): how many on each line, their risks, and the approvals.
+  const draftTally = riskTally(drafts);
+  const banner = <>
+    {drafts.length > 0 && <section className="ms-drafts" aria-label={t("里程碑草稿")}>
+      <Layers {...ICON} />
+      <b>{t("{{count}} 份里程碑草稿待批准", { count: drafts.length })}</b>
+      <span className="ms-drafts-lines">{board.lineOrder.filter((line) => drafts.some((item) => item.identityId === line))
+        .map((line) => `${board.labels[line] ?? line} ${drafts.filter((item) => item.identityId === line).length}`).join(" · ")}</span>
+      <span className="ms-drafts-risk">{(["high", "medium", "low"] as const).filter((level) => draftTally.levels[level]).map((level) =>
+        <span key={level} className="ba-lines-risk"><RiskGlyph level={level} /><span className="mono">{draftTally.levels[level]}</span></span>)}</span>
+      <span className="ms-drafts-actions">
         <button type="button" className="secondary-button ba-toggle" aria-expanded={byLine} aria-controls="ba-by-line"
           onClick={() => setByLine(!byLine)}>{t("按主线")}<span aria-hidden="true">{byLine ? " ▴" : " ▾"}</span></button>
-      </span>}
-      {actions}
-    </div>
-    {drafts.length > 0 && byLine && <LineApprovals id="ba-by-line" drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} />}
+        <BatchApprove drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} />
+      </span>
+      {byLine && <LineApprovals id="ba-by-line" drafts={drafts} labels={board.labels} lineOrder={board.lineOrder} />}
+    </section>}
     <DraftingNotes board={board} />
-  </header>;
-  if (!layout.nodes.length) return <div className="mt">{head}<p className="flow-empty">{board.drafting?.pending.length ? t("里程碑草稿一条线一条线出来，好了会出现在这里等待批准。") : board.firstDrafts === "running"
+  </>;
+  if (!layout.nodes.length) return <div className="mt">{banner}<section className="ms-card"><p className="flow-empty">{board.drafting?.pending.length ? t("里程碑草稿一条线一条线出来，好了会出现在这里等待批准。") : board.firstDrafts === "running"
     ? t("系统正在按访谈为每条主线设计里程碑草稿（每条主线几分钟），好了会出现在这里等待批准。")
-    : board.firstDrafts === "stalled" ? t("里程碑草稿没有生成，点上方「让 AI 重新提议草稿」再试一次。") : t("尚无里程碑。访谈结束（或达到开始标准后停下 20 分钟）时系统自动设计草稿；也可以点上方「让 AI 重新提议草稿」。")}</p></div>;
+    : board.firstDrafts === "stalled" ? t("里程碑草稿没有生成，点上方「让 AI 重新提议草稿」再试一次。") : t("尚无里程碑。访谈结束（或达到开始标准后停下 20 分钟）时系统自动设计草稿；也可以点上方「让 AI 重新提议草稿」。")}</p></section></div>;
   const milestone = selected?.kind === "milestone" ? board.milestones.find((item) => item.id === selected.id) : undefined;
   const course = selected?.kind === "course" ? board.courses.find((item) => `course:${item.projectId}` === selected.id) : undefined;
   const byId = new Map(board.milestones.map((item) => [item.id, item]));
+  const current = currentFocus(board);
+  const docMilestone = milestone ?? (!course && current ? byId.get(current) : undefined);
   const ticksById = new Map(board.milestones.flatMap((item) => item.ticks.map((t) => [t.id, t] as const)));
   const outgoing = new Map<string, { relation: BoardRelation; from: BoardMilestone }>(board.milestones.flatMap((item) => item.relations.filter((relation) => relation.direction === "out")
     .map((relation) => [`relation:${relation.id}`, { relation, from: item }] as const)));
@@ -163,16 +175,20 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
     const data = kind === "milestone" ? byId.get(id) : undefined;
     const level = data ? riskLevelOf(data.risks) : null;
     return [title, data?.deadline ? t("截止 {{day}}", { day: md(data.deadline) }) : kind === "course" ? t("课程分数线") : t("未定日期"), data?.status === "draft" ? t("待批准") : "",
-      data?.retrospective ? t("已达成") : "", level ? t(RISK_NAME[level]) : ""].filter(Boolean).join(" · ");
+      data?.retrospective ? t("已达成") : "", level ? t(RISK_NAME[level]) : "", ...(data?.planStates ?? []).map((state) => t(PLAN_STATE_LABEL[state]))].filter(Boolean).join(" · ");
   };
   const todayLabelX = layout.years.some((year) => Math.abs(year.x - layout.todayX) < 40) ? layout.todayX + 40 : layout.todayX + 3;
 
   const undatedHeading = layout.datedEnd < layout.width - 30 && layout.nodes.some((node) => node.undated);
   return <div className="mt" role="group" aria-label={t("里程碑时间轴")} data-hover={hot ? "" : undefined}
     onKeyDown={(event) => { if (event.key === "Escape" && picked) setPicked(null); }}>
-    {head}
+    {banner}
+    <div className="ms-main" data-docked={docked || undefined}>
+    <section className="ms-card ms-timeline-card" aria-labelledby="ms-timeline-title">
+    <header className="ms-card-head"><h2 id="ms-timeline-title" className="ds-serif">{t("时间轴")}</h2>
+      <small>{t("实心为已批准 · 虚线为草稿 · 圆点为刻度 · 外圈为排程状态")}</small></header>
     <FocusStrip ref={strip} layout={layout} board={board} milestoneId={hover} ticks={tickSubject} pinned={Boolean(picked) && !hover && (!tickHover || tickHover.join() === picked!.join())}
-      onClose={() => setPicked(null)} onOpen={open} />
+      current={current} onClose={() => setPicked(null)} onOpen={open} />
     <div className="mt-scroll" ref={frame}>
       <div className="mt-canvas" style={{ width: layout.width, height: layout.height }}>
         <svg width={layout.width} height={layout.height} aria-hidden="true" className="mt-svg">
@@ -250,7 +266,8 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
           const name = nameOf(item.id, item.kind, item.title);
           return <div key={item.id}>
             <button type="button" className="mt-marker" data-line={item.line} data-kind={item.kind} data-status={item.status}
-              data-reached={data?.retrospective ? "" : undefined} data-hot={hot?.has(item.id) || undefined} {...focus(item.id)}
+              data-reached={data?.retrospective ? "" : undefined} data-plan={data?.planStates?.[0]} data-current={item.id === current || undefined}
+              data-hot={hot?.has(item.id) || undefined} {...focus(item.id)}
               style={{ left: item.x - 11, top: item.axisY - 11 }} aria-label={name} title={name} onClick={() => open(item.id, item.kind)}><i /></button>
             {level && risky.has(item.id) && <span className="mt-risk" style={{ left: riskBox(item).x, top: riskBox(item).y }} title={data!.risks.map((risk) => t(MILESTONE_RISK_KIND_LABEL[risk.kind])).join(t("、"))}>
               <RiskGlyph level={level} /></span>}
@@ -278,10 +295,45 @@ export function MilestoneTimeline({ board, actions }: { board: MilestoneBoard; a
       {layout.edges.some((edge) => edge.kind === "relation" && !edge.relationKind) && <span><span className="mt-key" data-k="relation" />{t("飞轮关系")}</span>}
       {layout.edges.some((edge) => edge.kind === "relation" && edge.pending) && <span><svg className="mt-kind-svg" width={26} height={6} aria-hidden="true">
         <line x1={1} x2={25} y1={3} y2={3} className="mt-kind-key" data-pending="" /></svg>{t("候选关系")}</span>}
-      {layout.edges.some((edge) => edge.broken) && <span><span className="mt-key" data-k="broken" />{t("时间顺序不成立")}</span>}</p>
-    {milestone && <MilestoneDrawer milestone={milestone} labels={board.labels} onClose={closeDrawer} />}
-    {course && <CourseDrawer course={course} milestones={board.milestones.filter((item) => item.projectId === course.projectId)} onClose={() => setSelected(null)} />}
+      {layout.edges.some((edge) => edge.broken) && <span><span className="mt-key" data-k="broken" />{t("时间顺序不成立")}</span>}
+      {/* The schedule's word on approved milestones, as the marker's outer ring (moved here from the plan page, 2026-10-28). */}
+      {(["risk", "unprepared", "library"] as const).filter((state) => board.milestones.some((item) => item.planStates?.includes(state))).map((state) =>
+        <span key={state}><span className="mt-key" data-k={`plan-${state}`} />{t(PLAN_STATE_LABEL[state])}</span>)}</p>
+    </section>
+    {docked && (course ? <CourseDrawer key={course.projectId} docked course={course} milestones={board.milestones.filter((item) => item.projectId === course.projectId)}
+        onClose={() => setSelected(null)} />
+      : docMilestone ? <MilestoneDrawer key={`${docMilestone.id}:${docMilestone.version}`} docked milestone={docMilestone} labels={board.labels}
+        onClose={milestone && milestone.id !== current ? closeDrawer : undefined} /> : null)}
+    </div>
+    {!docked && milestone && <MilestoneDrawer milestone={milestone} labels={board.labels} onClose={closeDrawer} />}
+    {!docked && course && <CourseDrawer course={course} milestones={board.milestones.filter((item) => item.projectId === course.projectId)} onClose={() => setSelected(null)} />}
   </div>;
+}
+
+/** Whether the window is at least as wide as `query` says; false until mounted, so the server and the first paint agree. */
+function useWide(query: string): boolean {
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const follow = () => setWide(media.matches);
+    follow();
+    media.addEventListener("change", follow);
+    return () => media.removeEventListener("change", follow);
+  }, [query]);
+  return wide;
+}
+
+/**
+ * 「当前焦点」 (Linear's next unfinished milestone as the focus): the nearest approved milestone not yet past and not reached, else the
+ * nearest draft, else any open milestone without a date (approved first). What the strip names and the dock shows while nothing else is
+ * pointed at or picked, so neither is ever an empty box while there is a milestone at all.
+ */
+export function currentFocus(board: Pick<MilestoneBoard, "milestones">): string | null {
+  const open = board.milestones.filter((item) => !item.retrospective);
+  const ahead = (status: "approved" | "draft") => open.filter((item) => item.status === status && item.daysLeft !== undefined && item.daysLeft >= 0)
+    .sort((a, b) => a.daysLeft! - b.daysLeft! || a.title.localeCompare(b.title))[0];
+  const undated = (status: "approved" | "draft") => open.find((item) => item.status === status && item.daysLeft === undefined);
+  return (ahead("approved") ?? ahead("draft") ?? undated("approved") ?? undated("draft"))?.id ?? null;
 }
 
 /** At most this many ticks are explained at once in the strip; the rest are counted. */
@@ -293,8 +345,11 @@ const STRIP_TICKS = 4;
  * the tick is, its state and day, for a postponed one the day it was due and why it moved, its step, task and milestone, and a link to the
  * task). A picked tick stays until closed.
  */
-export function FocusStrip({ ref, layout, board, milestoneId, ticks, pinned, onClose, onOpen }: { ref?: Ref<HTMLDivElement>; layout: TimelineLayout; board: MilestoneBoard;
-  milestoneId: string | null; ticks: string[] | null; pinned: boolean; onClose: () => void; onOpen: (id: string, kind: "milestone" | "course") => void }) {
+export function FocusStrip({ ref, layout, board, milestoneId: pointed, ticks, pinned, current = null, onClose, onOpen }: { ref?: Ref<HTMLDivElement>; layout: TimelineLayout; board: MilestoneBoard;
+  milestoneId: string | null; ticks: string[] | null; pinned: boolean;
+  /** 「当前焦点」 (`currentFocus`): named while nothing is pointed at or picked, so the strip is never an empty instruction box. */
+  current?: string | null;
+  onClose: () => void; onOpen: (id: string, kind: "milestone" | "course") => void }) {
   const t = useT();
   const locale = useLocale();
   // 「」 in Chinese; English quotes, set off by a space, in English.
@@ -302,6 +357,8 @@ export function FocusStrip({ ref, layout, board, milestoneId, ticks, pinned, onC
   const byId = new Map(board.milestones.map((item) => [item.id, item]));
   const titleOf = (id: string) => byId.get(id)?.title ?? layout.nodes.find((node) => node.id === id)?.title ?? id;
   const lineName = (line: string) => board.labels[line] ?? line;
+  const resting = !pointed && !ticks?.length && Boolean(current && byId.has(current));
+  const milestoneId = resting ? current : pointed;
   let body: ReactNode = <p className="mt-focus-hint">{t("指向或点选里程碑、刻度，这里显示全名、日期、状态与关联；点刻度后说明会保留到关闭。")}</p>;
   let line: string | undefined;
   if (milestoneId?.startsWith("course:")) {
@@ -322,9 +379,12 @@ export function FocusStrip({ ref, layout, board, milestoneId, ticks, pinned, onC
       const joined = connectionsOf(layout, milestone.id);
       const names = (ids: string[]) => ids.map((id) => t("「{{title}}」", { title: titleOf(id) })).join(t("、"));
       body = <>
-        <p className="mt-focus-title"><b>{milestone.title}</b>{" "}
+        <p className="mt-focus-title">{resting && <span className="mt-focus-current"><Target {...ICON} />{t("当前焦点")}</span>}
+          {resting ? <button type="button" className="text-button mt-focus-open" onClick={() => onOpen(milestone.id, "milestone")}><b>{milestone.title}</b></button>
+            : <b>{milestone.title}</b>}{" "}
           {milestone.status === "draft" ? <Tag tone="warn">{t("待批准")}</Tag> : <Tag>{t("已批准")}</Tag>}
           {milestone.retrospective && <Tag tone="ok">{t("已达成")}</Tag>}
+          {milestone.planStates?.map((state) => <Tag key={state} tone={state === "risk" ? "risk" : "neutral"}>{t(PLAN_STATE_LABEL[state])}</Tag>)}
           {level && <Tag tone={level === "high" ? "risk" : "warn"} title={milestone.risks.map((risk) => risk.note).join(t("；"))}>
             {t(RISK_NAME[level])} · {[...new Set(milestone.risks.map((risk) => t(MILESTONE_RISK_KIND_LABEL[risk.kind])))].join(t("、"))}</Tag>}</p>
         <p className="mt-focus-meta">{lineName(milestone.identityId)}{milestone.projectName ? ` · ${milestone.projectName}` : ""} · {milestone.deadline
@@ -358,7 +418,7 @@ export function FocusStrip({ ref, layout, board, milestoneId, ticks, pinned, onC
       {shown.length > STRIP_TICKS && <p className="mt-focus-meta">{t("同一处另有 {{count}} 个刻度，放大窗口或在里程碑详情里查看。", { count: shown.length - STRIP_TICKS })}</p>}
     </>;
   }
-  return <div ref={ref} className="mt-focus" data-line={line} data-pinned={pinned || undefined} aria-live="polite">{body}</div>;
+  return <div ref={ref} className="mt-focus" data-line={line} data-pinned={pinned || undefined} data-resting={resting || undefined} aria-live="polite">{body}</div>;
 }
 
 const mdOf = (day?: string) => day ? md(day) : "—";
@@ -476,10 +536,10 @@ export function MilestoneStats({ board }: { board: MilestoneBoard }) {
   const t = useT();
   const share = ticksPlanned ? Math.min(1, ticksDone / ticksPlanned) : 0;
   return <section className="mt-stats" aria-label={t("本周进展")}>
-    <span className="mt-stat"><b className="mono">{ticksDone}<small> / {ticksPlanned}</small></b><span>{t("本周刻度")}</span>
+    <span className="mt-stat"><b className="ds-serif">{ticksDone}<small> / {ticksPlanned}</small></b><span>{t("本周刻度")}</span>
       <span className="mt-stat-bar" aria-hidden="true"><i style={{ width: `${share * 100}%` }} /></span></span>
-    <span className="mt-stat"><b className="mono">{reuse}</b><span>{t("跨主线复用")}</span></span>
-    {nearest && <span className="mt-stat" data-line={nearest.line}><b className="mono hl-line">{t("{{count}} 天", { count: nearest.days })}</b><span className="mt-stat-title">{t("距 {{title}}", { title: nearest.title })}</span></span>}
+    <span className="mt-stat"><b className="ds-serif">{reuse}</b><span>{t("跨主线复用")}</span></span>
+    {nearest && <span className="mt-stat" data-line={nearest.line}><b className="ds-serif">{t("{{count}} 天", { count: nearest.days })}</b><span className="mt-stat-title" title={nearest.title}>{t("距 {{title}}", { title: nearest.title })}</span></span>}
   </section>;
 }
 

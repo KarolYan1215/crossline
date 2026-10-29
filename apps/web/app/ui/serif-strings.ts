@@ -14,8 +14,12 @@ export const INTERFACE_SERIF_STRINGS: readonly string[] = [...Object.values(LOGI
  * `display-serif.woff2`, cut by `scripts/poster-font-subset.ts --display` to exactly `displaySerifText()`. A title added here needs the
  * subset rebuilt (`display-serif.test.ts` fails until it is). Strings written in code only, like the poster's.
  */
-// i18n-ignore: the characters the font subset must hold, not text shown from here (the titles are translated where they are shown).
-export const DISPLAY_SERIF = { energy: "今日精力", overview: "今日概览", needs: "件需要处理", calendar: "日历", input: "输入", flywheel: "飞轮图谱" } as const;
+/* i18n-ignore-start: the characters the font subset must hold, not text shown from here (the titles are translated where they are shown).
+   The plan page and 主线 (2026-10-28 redesign) add their page and card titles, and the day count in 主线's head. */
+export const DISPLAY_SERIF = { energy: "今日精力", overview: "今日概览", needs: "件需要处理", calendar: "日历", input: "输入", flywheel: "飞轮图谱",
+  plan: "计划", capacity: "容量与需求", shares: "各线排程份额", unplaced: "排不下的原因", time: "时段与精力", lineShares: "主线份额", advanced: "高级",
+  estimates: "估时准确度", lines: "主线", timeline: "时间轴", days: "天" } as const;
+/* i18n-ignore-end */
 
 /** The Chinese characters the display subset must hold, sorted and unique. */
 export function displaySerifText(): string {

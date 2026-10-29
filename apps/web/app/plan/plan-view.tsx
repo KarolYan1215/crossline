@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { BookOpen, CalendarArrowUp, RefreshCw } from "lucide-react";
 import type { TimelineDeadline, TimelineItem } from "../timeline/model";
 import { useT } from "../locale-context";
+import { ICON, IconButton } from "../ui/icon-button";
 import type { Translate } from "../../lib/i18n";
 import { unplacedTaskIds } from "../../lib/unplaced";
 
@@ -48,15 +50,12 @@ function unplacedNote(plan: PlanVersionData, t: Translate): string {
 }
 
 /**
- * The plan page's top row (decided 2026-10-10: the calendar is on Today only): reading the calendar now, writing to the Crossline
- * calendar, the horizon (`aside`), and the schedule's status. The plan takes effect by default (docs/loop-and-scout.md §1): there is
- * no version to approve and no difference to settle.
- */
-/**
+ * The plan page's header actions (2026-10-28 redesign: icons beside the horizon): reading the calendar now and writing to the Crossline
+ * calendar. The plan takes effect by default (docs/loop-and-scout.md §1): there is no version to approve and no difference to settle.
  * `calendarWrite`: an account to write the Crossline calendar with is chosen. Without one (the hosted beta has no Microsoft calendar at
  * all) there is nothing to publish to, so the button is not offered (2026-10-17 walkthrough, W-20).
  */
-export function PlanView({ plan, aside, calendarWrite = false }: { plan: PlanVersionData; aside?: ReactNode; calendarWrite?: boolean }) {
+export function PlanActions({ calendarWrite = false, children }: { calendarWrite?: boolean; children?: ReactNode }) {
   const t = useT();
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done" | "error">("idle");
   const [syncNote, setSyncNote] = useState("");
@@ -94,33 +93,38 @@ export function PlanView({ plan, aside, calendarWrite = false }: { plan: PlanVer
     setPublishState("done");
   };
 
-  return <div className="plan-view" data-plan-version={plan.id}>
-    <div className="plan-bar">
-      {/* Reality moves between ticks, and fifteen minutes of not knowing whether the plan has caught up is
-          exactly when a person stops trusting it. This only reads the calendar. */}
-      <button type="button" className="plan-sync" disabled={syncState === "syncing"} onClick={syncNow}>
-        {syncState === "syncing" ? t("读取日历中…") : syncState === "error" ? t("同步失败，重试") : t("立即同步日历")}
-      </button>
-      {syncState === "done" && <span role="status" className="plan-sync-note">{syncNote}</span>}
-      {calendarWrite && <button type="button" className="plan-sync" disabled={publishState === "publishing"} onClick={publish}
-        title={t("立即写入 Crossline 日历（每 10 分钟自动写入；只写名为 Crossline 的日历）")}>
-        {publishState === "publishing" ? t("写入中…") : t("发布到 Crossline 日历")}
-      </button>}
-      {(publishState === "done" || publishState === "error") && <span role="status" className="plan-sync-note">{publishNote}</span>}
-      {aside && <span className="plan-bar-aside">{aside}</span>}
-    </div>
-
-    {plan.schedule && (plan.schedule.solver !== "empty" || plan.schedule.blockers.length > 0) && <section className="schedule-status" role="status">
-      <strong>{plan.schedule.status === "feasible" ? t("建议时段已排入")
-        : plan.schedule.status === "partial" ? t("部分任务未排入") : t("当前没有可行的建议时段")}</strong>
-      {plan.schedule.solver === "feasible_time_limit" && <p>{t("已显示验证过的可行安排；未证明最优。")}</p>}
-      {plan.schedule.solver === "fallback" && (plan.schedule.optimal
-        ? <p>{t("这次没算出最优排法，先用一份简单排法，每块都核对过不冲突。")}</p>
-        : <p>{t("最优排法正在后台计算，算好后自动替换当前的简单排法。")}</p>)}
-      {plan.schedule.solver === "no_capacity" && <p>{t("可用时间里已经没有空档，下面这些暂时排不进去。")}</p>}
-      {plan.schedule.bufferRelaxed && <p>{t("为守住已确认截止时间，已放宽当天的缓冲规则。")}</p>}
-      {unplacedNote(plan, t) && <p><a href="#why">{t("{{note}}，原因见「排程顺序」", { note: unplacedNote(plan, t) })}</a></p>}
-      {plan.schedule.notes?.map((note) => <p key={`note-${note.taskId}`}>{note.message}</p>)}
-    </section>}
+  const syncLabel = syncState === "syncing" ? t("读取日历中…") : syncState === "error" ? t("同步失败，重试") : t("立即同步日历");
+  return <div className="pl-actions">
+    {children}
+    {/* Reality moves between ticks, and fifteen minutes of not knowing whether the plan has caught up is
+        exactly when a person stops trusting it. This only reads the calendar. */}
+    <IconButton label={syncLabel} icon={<RefreshCw {...ICON} />} className="plan-sync" disabled={syncState === "syncing"} onClick={() => void syncNow()} />
+    {calendarWrite && <IconButton label={publishState === "publishing" ? t("写入中…") : t("发布到 Crossline 日历")} icon={<CalendarArrowUp {...ICON} />}
+      className="plan-sync" disabled={publishState === "publishing"} onClick={() => void publish()} />}
+    <a className="pl-why-link" href="#advanced"><BookOpen {...ICON} />{t("排程依据说明")}</a>
+    {(syncState === "done" || syncState === "error") && <span role="status" className="plan-sync-note">{syncNote || syncLabel}</span>}
+    {(publishState === "done" || publishState === "error") && <span role="status" className="plan-sync-note">{publishNote}</span>}
   </div>;
+}
+
+/**
+ * The schedule's state in one line under the figures: which engine placed it, and what could not be placed, linked to 「排不下的原因」.
+ * Nothing at all while the plan is empty.
+ */
+export function ScheduleStatus({ plan }: { plan: PlanVersionData }) {
+  const t = useT();
+  if (!plan.schedule || (plan.schedule.solver === "empty" && !plan.schedule.blockers.length)) return null;
+  const note = unplacedNote(plan, t);
+  return <section className="schedule-status" role="status" data-status={plan.schedule.status}>
+    <strong>{plan.schedule.status === "feasible" ? t("建议时段已排入")
+      : plan.schedule.status === "partial" ? t("部分任务未排入") : t("当前没有可行的建议时段")}</strong>
+    {plan.schedule.solver === "feasible_time_limit" && <span>{t("已显示验证过的可行安排；未证明最优。")}</span>}
+    {plan.schedule.solver === "fallback" && (plan.schedule.optimal
+      ? <span>{t("这次没算出最优排法，先用一份简单排法，每块都核对过不冲突。")}</span>
+      : <span>{t("最优排法正在后台计算，算好后自动替换当前的简单排法。")}</span>)}
+    {plan.schedule.solver === "no_capacity" && <span>{t("可用时间里已经没有空档，下面这些暂时排不进去。")}</span>}
+    {plan.schedule.bufferRelaxed && <span>{t("为守住已确认截止时间，已放宽当天的缓冲规则。")}</span>}
+    {note && <a href="#why">{t("{{note}}，原因见「排不下的原因」", { note })}</a>}
+    {plan.schedule.notes?.map((item) => <span key={`note-${item.taskId}`}>{item.message}</span>)}
+  </section>;
 }

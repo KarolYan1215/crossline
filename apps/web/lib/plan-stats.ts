@@ -147,15 +147,6 @@ export function timelineMarks(marks: MilestoneMark[], today: string, horizonDays
   return { shown, outside: marks.length - shown.length };
 }
 
-/** The axis: the horizon from a few days back, reaching back further for an overdue milestone (at most eight weeks). */
-export function timelineSpan(marks: MilestoneMark[], today: string, horizonDays: number): { start: string; end: string; days: number } {
-  const earliest = marks.flatMap((mark) => mark.day ? [mark.day] : []).sort()[0];
-  const floor = addDays(today, -56);
-  const start = [addDays(today, -3), earliest ? addDays(earliest < floor ? floor : earliest, -3) : addDays(today, -3)].sort()[0]!;
-  const end = addDays(today, horizonDays);
-  return { start, end, days: daysBetween(start, end) };
-}
-
 /* ── planned against timed hours ── */
 
 export type ExecutionLike = { workOrderId: string; startedAt: string; endedAt?: string | undefined; pauseMinutes: number;
@@ -280,6 +271,78 @@ export function availabilityGrid(windows: AvailabilityWindow[]): number[][] {
     }
   }
   return grid;
+}
+
+/* ── the plan page's head (2026-10-28 redesign) ── */
+
+/** What `planRanking` says of one task, as far as the page's head needs it (`RankedTask` in lib/crossline.ts, server-only). */
+export type RankedLike = { id: string; title: string; line: string; deadline: string | null; notBefore: string | null; firstDay: string | null;
+  blocker: string | null; libraryUntil: string | null; p50Minutes: number };
+/** A task the schedule did not place in full: wholly (`partial` false) or some of its steps (`partial` true), with the planner's reason. */
+export type UnplacedItem = { id: string; title: string; line: string; deadline: string | null; notBefore: string | null; minutes: number;
+  partial: boolean; reason: string | null };
+
+/**
+ * 「排不下的原因」 (Motion's 「Could not fit」, Todoist's Plan list): every task outside the task library that has no block at all, and
+ * every one the planner reported a step of as unplaced (`blocked`, from `unplacedTaskIds`), soonest deadline first.
+ */
+export function unplacedItems(ranking: RankedLike[], blocked: ReadonlySet<string>): UnplacedItem[] {
+  return ranking.filter((task) => !task.libraryUntil && (!task.firstDay || blocked.has(task.id)))
+    .map((task) => ({ id: task.id, title: task.title, line: task.line, deadline: task.deadline, notBefore: task.notBefore, minutes: task.p50Minutes,
+      partial: Boolean(task.firstDay), reason: task.blocker }))
+    .sort((a, b) => (a.deadline ?? "9999").localeCompare(b.deadline ?? "9999") || a.title.localeCompare(b.title));
+}
+
+/** The four figures over the plan page: this week's usable and scheduled minutes, what could not be placed, and the estimate bias. */
+export type PlanKpis = { usableMinutes: number; scheduledMinutes: number;
+  unplaced: { count: number; minutes: number; earliest: string | null };
+  /** The median of actual ÷ estimate, less one, in percent; null with no timed observation. */
+  bias: { percent: number; samples: number } | null };
+
+export function planKpis(input: { capacity: CapacityWeek[]; unplaced: UnplacedItem[]; estimates: EstimatePoint[] }): PlanKpis {
+  const week = input.capacity[0];
+  const ratios = input.estimates.map((point) => point.actual / point.estimate).sort((a, b) => a - b);
+  const half = Math.floor(ratios.length / 2);
+  const middle = !ratios.length ? null : ratios.length % 2 ? ratios[half]! : (ratios[half - 1]! + ratios[half]!) / 2;
+  const deadlines = input.unplaced.flatMap((item) => item.deadline ? [item.deadline] : []).sort();
+  return {
+    usableMinutes: week?.usableMinutes ?? 0,
+    scheduledMinutes: week?.lines.reduce((sum, line) => sum + line.scheduled, 0) ?? 0,
+    unplaced: { count: input.unplaced.length, minutes: input.unplaced.reduce((sum, item) => sum + item.minutes, 0), earliest: deadlines[0] ?? null },
+    bias: middle === null ? null : { percent: Math.round((middle - 1) * 100), samples: ratios.length }
+  };
+}
+
+/** One line in 「各线排程 vs 份额」: its share of the coming weeks' usable hours against the work planned for it, minutes a week. */
+export type LineShareRow = { line: string; share: number; shareMinutes: number; plannedMinutes: number; scheduledMinutes: number;
+  /** The planned minutes before a previewed change; null without a preview. */ beforeMinutes: number | null };
+
+/**
+ * The coming weeks only (decided 2026-10-28: looking back is the weekly review's): for each line with a share or with work, its share of
+ * the average usable minutes over the first `weeks` weeks, beside the minutes a week planned for it — scheduled plus still to place,
+ * usual estimate — so a line short of its share shows as a short bar under a long light one.
+ */
+export function lineShareRows(input: { capacity: CapacityWeek[]; shares: Record<string, number>; lineOrder: string[]; weeks?: number;
+  before?: CapacityWeek[] | null }): LineShareRow[] {
+  const span = input.capacity.slice(0, input.weeks ?? 4);
+  const count = Math.max(1, span.length);
+  const usable = span.reduce((sum, week) => sum + week.usableMinutes, 0) / count;
+  const sum = (weeks: CapacityWeek[], line: string, part: (item: LineLoad) => number) => weeks.slice(0, count)
+    .reduce((total, week) => total + week.lines.filter((item) => item.line === line).reduce((inner, item) => inner + part(item), 0), 0) / count;
+  const planned = (item: LineLoad) => item.scheduled + item.pending;
+  const lines = [...new Set([...input.lineOrder, ...span.flatMap((week) => week.lines.map((item) => item.line))])]
+    .filter((line) => line !== "none" && ((input.shares[line] ?? 0) > 0 || sum(span, line, planned) > 0));
+  return lines.map((line) => ({ line, share: input.shares[line] ?? 0, shareMinutes: Math.round((input.shares[line] ?? 0) / 100 * usable),
+    plannedMinutes: Math.round(sum(span, line, planned)), scheduledMinutes: Math.round(sum(span, line, (item) => item.scheduled)),
+    beforeMinutes: input.before ? Math.round(sum(input.before, line, planned)) : null }));
+}
+
+/** The plan page's one line about milestones (the timeline itself is on 主线): how many fall in the horizon and which are in trouble. */
+export function milestoneSummary(rows: GoalRow[], today: string, horizonDays: number, done: ReadonlySet<string>): { shown: number; outside: number;
+  risk: MilestoneMark[]; unprepared: number; library: number } {
+  const { shown, outside } = timelineMarks(milestoneMarks(rows, today), today, horizonDays, done);
+  return { shown: shown.length, outside, risk: shown.filter((mark) => mark.states.includes("risk")),
+    unprepared: shown.filter((mark) => mark.states.includes("unprepared")).length, library: shown.filter((mark) => mark.states.includes("library")).length };
 }
 
 /* ── what a preview changes ── */

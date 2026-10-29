@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Archive, Plus, Sparkles } from "lucide-react";
 import type { SuccessCriterion } from "@crossline/core";
 import { Sheet } from "../ui/overlay";
+import { ICON } from "../ui/icon-button";
 import { useT } from "../locale-context";
+import { NEW_MILESTONE_EVENT } from "./lines-bar";
 
 const post = (url: string, body: unknown) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .catch(() => undefined);
@@ -26,6 +29,16 @@ export function MilestoneActions({ lines, archived }: { lines: Array<{ id: strin
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const labels = new Map(lines.map((line) => [line.id, line.label]));
+  // A line card's 「+」 opens the same form with its line chosen.
+  useEffect(() => {
+    const openFor = (event: Event) => {
+      const lineId = (event as CustomEvent<{ lineId?: string }>).detail?.lineId;
+      setForm((current) => ({ ...current, lineId: lineId && labels.has(lineId) ? lineId : current.lineId }));
+      setOpen(true);
+    };
+    window.addEventListener(NEW_MILESTONE_EVENT, openFor);
+    return () => window.removeEventListener(NEW_MILESTONE_EVENT, openFor);
+  }, [lines]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = async () => {
     setBusy(true); setStatus("");
@@ -50,7 +63,7 @@ export function MilestoneActions({ lines, archived }: { lines: Array<{ id: strin
 
   return <div className="ms-actions">
     <Sheet title={t("新建里程碑")} open={open} onOpenChange={setOpen}
-      trigger={<button type="button" disabled={!lines.length}>{t("新建里程碑")}</button>}
+      trigger={<button type="button" className="ms-tool" disabled={!lines.length}><Plus {...ICON} />{t("新建里程碑")}</button>}
       footer={<div className="md-actions">
         <button type="button" className="primary-button" disabled={busy || !form.title.trim() || !form.lineId} onClick={() => void create()}>{t("保存为草稿")}</button>
         <button type="button" disabled={busy} onClick={() => setOpen(false)}>{t("取消")}</button>
@@ -70,10 +83,11 @@ export function MilestoneActions({ lines, archived }: { lines: Array<{ id: strin
         {status && <p role="status">{status}</p>}
       </form>
     </Sheet>
-    <button type="button" disabled={busy} onClick={() => void propose()}>{t("让 AI 重新提议草稿")}</button>
+    <button type="button" className="ms-tool" disabled={busy} onClick={() => void propose()}><Sparkles {...ICON} />{t("让 AI 重新提议草稿")}</button>
     {!open && status && <small role="status">{status}</small>}
     {archived.length > 0 && <Sheet title={t("已归档的里程碑（{{n}}）", { n: archived.length })} side="right"
-      trigger={<button type="button" className="text-button">{t("已归档 {{n}}", { n: archived.length })}</button>}>
+      trigger={<button type="button" className="ms-tool ms-tool-icon" aria-label={t("已归档 {{n}}", { n: archived.length })} title={t("已归档 {{n}}", { n: archived.length })}>
+        <Archive {...ICON} /><small className="mono">{archived.length}</small></button>}>
       <ul className="ms-archived">{archived.map((milestone) => <li key={milestone.id} data-line={milestone.identityId}>
         <span>{labels.get(milestone.identityId) ?? milestone.identityId} · {milestone.title}</span>
         <button type="button" className="text-button" disabled={busy} onClick={() => void restore(milestone)}>{t("恢复为草稿")}</button>

@@ -1,19 +1,19 @@
 "use client";
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { MILESTONE_STATE_ORDER, bottleneckText, milestoneMarks, timelineMarks, timelineSpan, type CapacityWeek, type EstimatePoint, type GoalRow, type Investment, type MilestoneMark, type MilestoneState } from "../../lib/plan-stats";
+import type { CapacityWeek, EstimatePoint } from "../../lib/plan-stats";
 import { Ring } from "../ui/charts";
-import { LineTag, Tag } from "../ui/tag";
-import { AXIS_LABEL, axisLabelBaseline, axisLabelLeader, bands, dayAt, fitText, heatLevel, hours, labelEvery, layoutAxisLabels, linear, linearTicks, logDomain, logScale, md, minuteLabel, monthTicks, scatterMargins, textWidth } from "./chart-geometry";
+import { Tag } from "../ui/tag";
+import { bands, heatLevel, hours, labelEvery, linear, linearTicks, logDomain, logScale, md, minuteLabel, scatterMargins, textWidth } from "./chart-geometry";
 import { usePlanPreview } from "./preview-context";
 import { useLocale, useT } from "../locale-context";
 import { weekdayShort, type Locale, type Translate } from "../../lib/i18n";
-import { clip } from "../timeline/format";
 
 /**
- * The plan page's charts (decided 2026-10-10, redrawn 2026-10-15): one milestone timeline per line, capacity against demand, planned
- * against timed hours per line as a histogram, estimate accuracy, and the timed rhythm under an energy pattern. Hand-drawn SVG like `app/ui/charts.tsx`; every mark has its exact value
- * on hover. While a change is previewed below, the charts it moves draw the after-state with the current values as dashed ghosts.
+ * The plan page's charts (decided 2026-10-10, redrawn 2026-10-15; 2026-10-28 the milestone axis left for 主线 and the look back for the
+ * weekly review): capacity against demand, estimate accuracy (opened from its figure), and the timed rhythm under an energy pattern.
+ * Hand-drawn SVG like `app/ui/charts.tsx`; every mark has its exact value on hover. While a change is previewed below, the charts it
+ * moves draw the after-state with the current values as dashed ghosts.
  */
 
 /**
@@ -38,14 +38,11 @@ const h1 = (minutes: number) => `${hours(minutes)} h`;
 
 /** A weekday in one character (「一」) or two letters ("Mo"), for the rhythm grid's narrow gutter. */
 const dayInitial = (locale: Locale, day: number) => locale === "en" ? weekdayShort(locale, day).slice(0, 2) : weekdayShort(locale, day).slice(1);
-/** A name cut to fit `px`: in Chinese it keeps `chars` characters as before; in English it is cut by its drawn width. */
-const fitName = (locale: Locale, name: string, px: number, size: number, chars: number) =>
-  locale === "en" ? clip(locale, name, Math.max(2, Math.floor(px / size))) : `${[...name].slice(0, chars).join("")}…`;
 
 function Card({ title, note, label, tags, children, data }: { title: string; note?: ReactNode; label: string; tags?: ReactNode; children: ReactNode;
   data?: Record<string, string | number> }) {
   return <section className="pl-card pl-stat" aria-label={label} {...Object.fromEntries(Object.entries(data ?? {}).map(([key, value]) => [`data-${key}`, value]))}>
-    <header><h2>{title}</h2>{tags}{note && <small>{note}</small>}</header>
+    <header><h2 className="ds-serif">{title}</h2>{tags}{note && <small>{note}</small>}</header>
     {children}
   </section>;
 }
@@ -167,244 +164,6 @@ export function CapacityChart({ weeks, labels, statedWeekly, configuredWeekly, u
     {overloaded.length > 0 ? <p className="pl-over-list">{overloaded.map((week) => <Tag key={week.week} tone="risk"
       {...(week.top ? { title: t("占用最多：{{title}}", { title: week.top.title }) } : {})}>{t("{{day}} 起超载 {{n}} 小时", { day: md(week.start), n: hours(week.overloadMinutes) })}</Tag>)}</p>
       : <p className="pl-chart-foot">{t("各周需求均在可用小时内。")}</p>}
-  </Card>;
-}
-
-/* ── 2. one timeline per line ── */
-
-/** Kept in Chinese (they are the keys); translated where shown. */
-const STATE_LABEL: Record<MilestoneState, string> = { risk: "有完不成风险", unprepared: "待准备", library: "任务在任务库" };
-const STATE_TITLE: Record<MilestoneState, string> = { risk: "保守完成日距截止不足 2 天，或在统计范围内排不完", unprepared: "尚无可排程的任务，或只有待批准的提案",
-  library: "任务仍在任务库，里程碑三周内到期时排入日程" };
-
-/** A milestone's mark: a dot in the line's colour when on track, a dot in its state's colour for one state, a split square for several. */
-function Marker({ states, cx, cy, size = 11 }: { states: MilestoneState[]; cx: number; cy: number; size?: number }) {
-  if (states.length < 2) return <circle cx={cx} cy={cy} r={size / 2} className="pl-ms-mark" data-state={states[0] ?? "on_track"} />;
-  const part = size / states.length;
-  return <g className="pl-ms-combo">
-    {states.map((state, index) => <rect key={state} x={cx - size / 2 + index * part} y={cy - size / 2} width={part} height={size} className="pl-ms-mark" data-state={state} />)}
-    <rect x={cx - size / 2} y={cy - size / 2} width={size} height={size} className="pl-ms-combo-frame" />
-  </g>;
-}
-
-function markDetail(mark: MilestoneMark, weeks: number, t: Translate): string {
-  const row = mark.row;
-  return [mark.title, row.deadline ? t("截止 {{day}}", { day: row.deadline }) : t("无截止日"),
-    row.p50Day ? (row.p85Day ? t("通常 {{usual}} 完成，保守 {{cautious}}", { usual: row.p50Day, cautious: row.p85Day })
-      : t("通常 {{usual}} 完成，保守情景在 {{count}} 周内未完成", { usual: row.p50Day, count: weeks })) : "",
-    row.remainingP50Minutes ? t("剩余 {{n}} 小时", { n: hours(row.remainingP50Minutes) }) : "", row.slackDays !== null ? t("余量 {{count}} 天", { count: row.slackDays }) : "",
-    row.status === "no_tasks" && row.proposals ? t("{{count}} 项提案待批准", { count: row.proposals }) : "",
-    row.libraryDay ? t("{{day}} 起排入日程", { day: row.libraryDay }) : "", row.bottleneck ? bottleneckText(row.bottleneck, t) : "",
-    mark.states.length ? t("状态：{{states}}", { states: mark.states.map((state) => t(STATE_LABEL[state])).join(t("、")) }) : t("状态：按计划")].filter(Boolean).join("\n");
-}
-
-/**
- * The plan page's head (decided 2026-10-15): one axis per line, a mark per approved milestone with its full name beside it, placed at
- * its deadline (else its cautious finish); state as colour — on track in the line's colour, at risk, not ready, waiting in the task
- * library — and a split square for a milestone in several states. Only unfinished milestones due inside the chosen horizon, and overdue
- * ones, are drawn, with at most three rows of names a line (a 「+N」 counts the marks left unnamed) so the charts below stay on the first
- * screen. The finish ranges are in each mark's hover text; the milestone page has the rest.
- */
-export function MilestoneTimeline({ rows, today, weeks, spanDays, done = [], labels, lineOrder, aside }: { rows: GoalRow[]; today: string; weeks: number;
-  /** The chosen horizon: only unfinished milestones due inside it (and overdue ones) are drawn. */ spanDays: number;
-  /** Milestones whose work is all accepted. */ done?: string[];
-  labels: Record<string, string>; lineOrder: string[]; aside?: ReactNode }) {
-  const t = useT();
-  const preview = usePlanPreview();
-  const shown = preview?.after.goals ?? rows;
-  const before = new Map(milestoneMarks(preview?.before.goals ?? [], today).map((mark) => [mark.id, mark]));
-  const { shown: marks, outside } = timelineMarks(milestoneMarks(shown, today), today, spanDays, new Set(done));
-  const [box, width] = useWidth(1100);
-  const count = (state: MilestoneState) => marks.filter((mark) => mark.states.includes(state)).length;
-  const rank = (line: string) => { const index = lineOrder.indexOf(line); return index < 0 ? lineOrder.length : index; };
-  const lines = [...new Set(marks.map((mark) => mark.line))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-  const moved = marks.some((mark) => { const ghost = before.get(mark.id); return ghost && ghost.day !== mark.day; });
-  // A mark sits at its deadline, so it stays put while the cautious finish moves: saying 「不移动任何里程碑」 then contradicted the
-  // impact list beside it, which named milestones finishing days earlier (2026-10-18 walkthrough).
-  const finishBefore = new Map((preview?.before.goals ?? []).map((goal) => [goal.id, goal.p85Day]));
-  const finishMoved = shown.some((goal) => finishBefore.has(goal.id) && finishBefore.get(goal.id) !== goal.p85Day);
-  const [focus, setFocus] = useState<string | null>(null);
-  const axis = marks.length > 0 && width >= 560;
-  return <section className="pl-card pl-stat pl-timeline" aria-label={t("里程碑时间轴")}>
-    <header><h2>{t("里程碑时间轴")}</h2>
-      <small>{t("范围内未完成 {{n}} 个", { n: marks.length })}{outside ? ` · ${t("范围外或已完成 {{n}} 个", { n: outside })}` : ""}{count("risk") ? ` · ${t("有完不成风险 {{n}}", { n: count("risk") })}` : ""}{count("unprepared") ? ` · ${t("待准备 {{n}}", { n: count("unprepared") })}` : ""}</small>
-      {aside}</header>
-    {preview && (moved ? <PreviewNote /> : <p className="pl-preview-note" role="status">{finishMoved
-      ? t("里程碑按截止日画，位置不变；预计完成日的变化见「改动影响」")
-      : t("预览中的改动不移动任何里程碑")}</p>)}
-    {axis && <AxisFocus mark={marks.find((mark) => mark.id === focus) ?? null} labels={labels} weeks={weeks} />}
-    <div ref={box} className="pl-chart-box">
-      {!marks.length ? <p className="pl-empty">{outside ? t("统计范围内没有未完成的里程碑。") : t("尚无已批准的里程碑。")}</p>
-        : !axis ? <TimelineList marks={marks} lines={lines} labels={labels} weeks={weeks} />
-        : <TimelineAxis marks={marks} before={before} lines={lines} labels={labels} today={today} width={width} weeks={weeks} spanDays={spanDays}
-          focus={focus} onFocus={setFocus} />}
-    </div>
-    <div className="pl-legend">
-      <span><span className="pl-key" data-k="ms-on" />{t("按计划（主线色）")}</span>
-      {MILESTONE_STATE_ORDER.map((state) => <span key={state} title={t(STATE_TITLE[state])}><span className="pl-key" data-k={`ms-${state}`} />{t(STATE_LABEL[state])}</span>)}
-      <span><span className="pl-key" data-k="ms-combo" />{t("同时有多种状态")}</span>
-      <span>{t("点位为截止日，无截止时为保守完成日；只画统计范围内未完成的和已过期的")}</span>
-    </div>
-  </section>;
-}
-
-const GUTTER = 96, RIGHT = 8, AXIS_TOP = 20;
-/** At most this many lanes of names per line; a milestone whose name does not fit is drawn as a mark alone, its name on hover and focus. */
-export const MAX_LABEL_ROWS = 3;
-
-/**
- * The strip above the axis, of fixed height so the axis never moves under the pointer: the milestone under the pointer or in focus, in
- * full — a name cut short or left out on the axis reads whole here — with its line, deadline, finish forecast and state.
- */
-function AxisFocus({ mark, labels, weeks }: { mark: MilestoneMark | null; labels: Record<string, string>; weeks: number }) {
-  const t = useT();
-  if (!mark) return <div className="pl-ms-focus" aria-live="polite"><p className="pl-ms-focus-hint">{t("指向或聚焦圆点，这里显示里程碑全名、截止日与状态；点击圆点打开里程碑。")}</p></div>;
-  // The detail without its first line (the name, drawn bold) and its last (the state, drawn as tags).
-  const detail = markDetail(mark, weeks, t).split("\n").slice(1, -1);
-  return <div className="pl-ms-focus" data-line={mark.line} aria-live="polite">
-    <p className="pl-ms-focus-title"><b>{mark.title}</b>{" "}
-      {mark.states.length ? mark.states.map((state) => <Tag key={state} tone={state === "risk" ? "risk" : "neutral"}>{t(STATE_LABEL[state])}</Tag>) : <Tag tone="ok">{t("按计划")}</Tag>}</p>
-    <p className="pl-ms-focus-meta">{[labels[mark.line] ?? mark.line, ...detail].join(" · ")}</p>
-  </div>;
-}
-
-function TimelineAxis({ marks, before, lines, labels, today, width, weeks, spanDays, focus, onFocus }: { marks: MilestoneMark[]; before: Map<string, MilestoneMark>; lines: string[];
-  labels: Record<string, string>; today: string; width: number; weeks: number; spanDays: number; focus: string | null; onFocus: (id: string | null) => void }) {
-  const t = useT();
-  const locale = useLocale();
-  const span = timelineSpan(marks, today, spanDays);
-  const plotW = Math.max(120, width - GUTTER - RIGHT);
-  const xOf = (day: string) => GUTTER + dayAt(day, span.start, span.days).at * plotW;
-  const ticks = monthTicks(span.start, span.end, locale);
-  const bands: ReactNode[] = [];
-  let y = AXIS_TOP;
-  for (const line of lines) {
-    const own = marks.filter((mark) => mark.line === line);
-    const xs = own.map((mark) => xOf(mark.day!));
-    const placed = layoutAxisLabels(own.map((mark, index) => ({ x: xs[index]!, text: mark.title })), { left: GUTTER, right: width - RIGHT }, { lanes: MAX_LABEL_ROWS });
-    const rows = Math.max(1, ...placed.map((label) => label ? label.lane + 1 : 0));
-    const unnamed = placed.filter((label) => !label).length;
-    const axisY = y + AXIS_LABEL.firstBaseline + (rows - 1) * AXIS_LABEL.laneH + AXIS_LABEL.ascent + 4;
-    const name = labels[line] ?? line;
-    bands.push(<g key={line} data-line={line} className="pl-ms-band">
-      <rect x={0} y={y + 4} width={3} height={axisY - y} className="pl-ms-bar" />
-      <text x={10} y={axisY} dy="0.32em" className="pl-ms-line">{textWidth(name, 13) > GUTTER - 16 ? fitName(locale, name, GUTTER - 16, 13, 5) : name}<title>{name}</title></text>
-      {unnamed > 0 && <text x={10} y={axisY - 17} className="pl-axis-text pl-ms-more">+{unnamed}<title>{t("另有 {{count}} 个里程碑未标名称，指向圆点可看全名", { count: unnamed })}</title></text>}
-      <line x1={GUTTER} x2={GUTTER + plotW} y1={axisY} y2={axisY} className="pl-ms-track" />
-      {own.map((mark, index) => {
-        const x = xs[index]!, label = placed[index];
-        const ghost = before.get(mark.id);
-        const leader = label ? axisLabelLeader(x, label, axisY) : null;
-        return <g key={mark.id}>
-          {ghost && ghost.day !== mark.day && ghost.day && <circle cx={xOf(ghost.day)} cy={axisY} r={5.5} className="pl-ms-ghost"><title>{t("改动前：{{day}}", { day: ghost.day })}</title></circle>}
-          <a href={`/milestones?open=${encodeURIComponent(mark.id)}`} className="pl-ms-point" data-deadline={mark.row.deadline ?? undefined}
-            data-states={mark.states.join(" ") || "on_track"} data-focus={focus === mark.id || undefined} aria-label={markDetail(mark, weeks, t).replace(/\n/g, t("，"))}
-            onMouseEnter={() => onFocus(mark.id)} onMouseLeave={() => onFocus(null)} onFocus={() => onFocus(mark.id)} onBlur={() => onFocus(null)}>
-            <title>{markDetail(mark, weeks, t)}</title>
-            {/* A hit area as wide as the marker, so the pointer need not land on the 11px dot itself. */}
-            <rect x={x - 9} y={axisY - 9} width={18} height={18} className="pl-hit" />
-            {leader && <line x1={leader.x} x2={leader.x} y1={leader.y1} y2={leader.y2} className="pl-ms-leader" />}
-            {label && <text x={label.left} y={axisLabelBaseline(axisY, label.lane)} className="pl-ms-label">{label.text}</text>}
-            <Marker states={mark.states} cx={x} cy={axisY} />
-          </a>
-        </g>;
-      })}
-    </g>);
-    y = axisY + 14;
-  }
-  const height = y + 2;
-  const todayX = xOf(today);
-  return <svg className="pl-svg" width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img"
-    aria-label={t("里程碑时间轴：{{lines}}", { lines: lines.map((line) => t("{{line}} {{n}} 个", { line: labels[line] ?? line, n: marks.filter((mark) => mark.line === line).length })).join(t("，")) })}>
-    {ticks.map((tick) => { const x = xOf(tick.day); return <g key={tick.day}>
-      <line x1={x} x2={x} y1={AXIS_TOP - 4} y2={height} className="pl-grid-line" />
-      <text x={x + 3} y={12} className="pl-axis-text">{tick.label}</text>
-    </g>; })}
-    <line x1={todayX} x2={todayX} y1={AXIS_TOP - 4} y2={height} className="pl-ms-today"><title>{t("今天")}</title></line>
-    {bands}
-  </svg>;
-}
-
-/** On a phone the axis would be a few pixels a week: the same marks as a dated list per line. */
-function TimelineList({ marks, lines, labels, weeks }: { marks: MilestoneMark[]; lines: string[]; labels: Record<string, string>; weeks: number }) {
-  const t = useT();
-  return <div className="pl-ms-list">{lines.map((line) => <section key={line} data-line={line}>
-    <LineTag line={line}>{labels[line] ?? line}</LineTag>
-    <ol>{marks.filter((mark) => mark.line === line).sort((a, b) => (a.day ?? "9999").localeCompare(b.day ?? "9999")).map((mark) =>
-      <li key={mark.id}><a href={`/milestones?open=${encodeURIComponent(mark.id)}`} className="pl-ms-point" data-deadline={mark.row.deadline ?? undefined} title={markDetail(mark, weeks, t)}>
-        <svg width={14} height={14} viewBox="0 0 14 14" aria-hidden="true"><Marker states={mark.states} cx={7} cy={7} /></svg>
-        <span className="mono">{mark.day ? md(mark.day) : t("未定")}</span>
-        <span className="pl-ms-name">{mark.title}</span>
-        {mark.states.map((state) => <Tag key={state} tone={state === "risk" ? "risk" : "neutral"}>{t(STATE_LABEL[state])}</Tag>)}
-      </a></li>)}</ol>
-  </section>)}</div>;
-}
-
-/* ── 3. planned against timed hours, as a histogram ── */
-
-/**
- * Hours a week per line (decided 2026-10-15): the plan's (light, outlined in the line's colour), the timer's (solid), and the next seven
- * days' plan (dashed), side by side so a line that is planned and not worked shows as a tall light bar beside a short dark one. Planned
- * is averaged over the days the plan was recorded, timed over the four weeks.
- */
-export function InvestmentChart({ data, labels }: { data: Investment; labels: Record<string, string> }) {
-  const t = useT();
-  const locale = useLocale();
-  const preview = usePlanPreview();
-  const next7 = preview?.after.next7 ?? data.next7;
-  const ghost = preview?.before.next7 ?? null;
-  const [box, width] = useWidth(420);
-  const lines = data.lines.filter((line) => line.stated || data.weeks.some((week) => week.planned[line.line] || week.actual[line.line]) || next7[line.line] || ghost?.[line.line]);
-  const recorded = data.weeks.reduce((sum, week) => sum + week.recordedDays, 0);
-  const weekly = (line: string) => ({
-    planned: recorded ? data.weeks.reduce((sum, week) => sum + (week.planned[line] ?? 0), 0) / recorded * 7 : null,
-    actual: data.hasActual ? data.weeks.reduce((sum, week) => sum + (week.actual[line] ?? 0), 0) / 4 : null,
-    next: next7[line] ?? 0, before: ghost ? ghost[line] ?? 0 : null });
-  const values = lines.map((line) => weekly(line.line));
-  const peak = Math.max(60, ...values.flatMap((value) => [value.planned ?? 0, value.actual ?? 0, value.next, value.before ?? 0])) / 60;
-  const ticks = linearTicks(peak, 3);
-  // `top` leaves the unit 「h/周」 its own line: at 14 the top tick's label, centred on the plot's top edge, ran into it.
-  const H = 196, top = 24, bottom = 40, left = 30;
-  const plotW = Math.max(160, width - left - 4), plotH = H - top - bottom;
-  const y = linear(ticks.at(-1)!, top + plotH, top);
-  const groups = bands(Math.max(1, lines.length), plotW, 0.82);
-  const bar = Math.max(4, groups.bar / 3 - 2);
-  const empty = !data.hasActual && !data.hasPlanned && !Object.values(next7).some(Boolean);
-  const next7Moved = Boolean(ghost && Object.keys({ ...ghost, ...next7 }).some((line) => (ghost[line] ?? 0) !== (next7[line] ?? 0)));
-  const say = (value: number | null, none: string) => value === null ? none : t("{{n}} 小时", { n: hours(value) });
-  return <Card title={t("主线投入：计划 vs 实际")} label={t("主线投入：计划与实际")} note={t("每周小时，近 4 周")}>
-    {next7Moved && <PreviewNote />}
-    {empty ? <p className="pl-empty">{t("尚无实测")}</p> : <div ref={box} className="pl-chart-box">
-      <svg className="pl-svg" width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="img"
-        aria-label={t("每周小时：{{lines}}", { lines: lines.map((line, index) => t("{{line}} 计划 {{planned}}，实际 {{actual}}，未来 7 天 {{next}} 小时", { line: labels[line.line] ?? line.line,
-          planned: say(values[index]!.planned, t("未记录")), actual: say(values[index]!.actual, t("尚无实测")), next: hours(values[index]!.next) })).join(t("；")) })}>
-        {ticks.map((tick) => <g key={tick}>
-          <line x1={left} x2={left + plotW} y1={y(tick)} y2={y(tick)} className="pl-grid-line" />
-          <text x={left - 4} y={y(tick)} dy="0.32em" textAnchor="end" className="pl-axis-text">{tick}</text>
-        </g>)}
-        {lines.map((line, index) => {
-          const value = values[index]!, name = labels[line.line] ?? line.line;
-          const x0 = left + groups.x(index);
-          const shares = [line.stated !== null ? t("所述 {{n}}%", { n: line.stated }) : "", line.actualShare !== null ? t("实际 {{n}}%", { n: line.actualShare }) : "",
-            line.plannedShare !== null ? t("计划 {{n}}%", { n: line.plannedShare }) : ""].filter(Boolean).join(" · ");
-          const rect = (slot: number, minutes: number, kind: string, title: string) => <rect key={kind} x={x0 + slot * (bar + 2)} width={bar} y={y(minutes / 60)}
-            height={Math.max(minutes > 0 ? 1.5 : 0, y(0) - y(minutes / 60))} className={`pl-bar pl-bar-${kind}`}><title>{title}</title></rect>;
-          return <g key={line.line} data-line={line.line}>
-            {value.planned !== null && rect(0, value.planned, "planned", `${name} · ${t("计划 {{hours}}/周（按有记录的 {{count}} 天折算）", { hours: h1(value.planned), count: recorded })}${shares ? ` · ${shares}` : ""}`)}
-            {value.actual !== null && rect(1, value.actual, "actual", `${name} · ${t("实际计时 {{hours}}/周（近 4 周平均）", { hours: h1(value.actual) })}${shares ? ` · ${shares}` : ""}`)}
-            {rect(2, value.next, "next", `${name} · ${t("未来 7 天计划 {{hours}}", { hours: h1(value.next) })}`)}
-            {value.before !== null && value.before !== value.next && <rect x={x0 + 2 * (bar + 2) - 1.5} width={bar + 3} y={y(value.before / 60)}
-              height={Math.max(0, y(0) - y(value.before / 60))} className="pl-ghost"><title>{t("改动前未来 7 天计划 {{hours}}", { hours: h1(value.before) })}</title></rect>}
-            <text x={left + groups.centre(index)} y={H - 24} textAnchor="middle" className="pl-axis-text pl-axis-strong">{fitText(name, (groups.band - 4) / 1.1)}<title>{name}</title></text>
-            {line.stated !== null && textWidth(t("所述 {{n}}%", { n: line.stated })) <= groups.band - 4 && <text x={left + groups.centre(index)} y={H - 8} textAnchor="middle" className="pl-axis-text">{t("所述 {{n}}%", { n: line.stated })}</text>}
-          </g>;
-        })}
-        <text x={2} y={10} className="pl-axis-text">{t("h/周")}</text>
-      </svg>
-      <p className="pl-legend"><span><span className="pl-key" data-k="bar-planned" />{t("计划", { context: "bar" })}</span><span><span className="pl-key" data-k="bar-actual" />{t("实际计时")}</span>
-        <span><span className="pl-key" data-k="bar-next" />{t("未来 7 天计划")}</span>
-        {!data.hasActual && <span>{t("尚无实测")}</span>}{!data.hasPlanned && <span>{t("计划时长尚未记录")}</span>}</p>
-    </div>}
   </Card>;
 }
 

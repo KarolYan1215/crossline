@@ -12,9 +12,21 @@ test("each card carries the line's own interview box, its description and the wa
   const html = renderToStaticMarkup(<LinesBar lines={[line()]} palette={{ research: "#0A5198" }} />);
   expect(html).toContain("aria-label=\"「研究者」的访谈\"");
   expect(html).toContain("从器件到算法的研究");
-  expect(html).toContain("调整定语 →");
+  expect(html).toContain('aria-label="调整定语"');
   expect(html).toContain("href=\"/onboarding?line=research\"");
   expect(html).not.toContain("目标已变");
+});
+
+test("the card's usual presses are icons with their words as names, and its health is an estimate said as one", () => {
+  const html = renderToStaticMarkup(<LinesBar palette={{}} lines={[line({ share: 48, drafts: 1, health: { level: "risk", risky: 1, watch: 0, open: 2, reached: 1, total: 3 } })]} />);
+  for (const label of ["访谈", "重算这条线未动过的草稿", "给这条线新建里程碑", "调整定语"]) expect(html).toContain(`aria-label="${label}"`);
+  expect(html).toContain('data-level="risk"');
+  expect(html).toContain("有风险 · 估计");
+  expect(html).toContain("1/3 里程碑 · 1 待批准");
+  expect(html).toContain("width:33%");
+  expect(html).toContain("48% 时间");
+  // No approved milestone yet: no health at all rather than a reassuring one.
+  expect(renderToStaticMarkup(<LinesBar palette={{}} lines={[line({ health: null })]} />)).not.toContain("lb-health");
 });
 
 test("a pending goal change is shown composed, to adopt or dismiss; a moved goal or fact offers the redraft; the round's questions are answerable", () => {
@@ -31,8 +43,8 @@ test("a pending goal change is shown composed, to adopt or dismiss; a moved goal
 });
 
 test("a line with candidates and no chosen attributes says how many wait; one with neither offers to set its goal", () => {
-  expect(renderToStaticMarkup(<LinesBar palette={{}} lines={[line({ goalParts: [], goals: [] })]} />)).toContain("2 个定语候选待选 →");
-  expect(renderToStaticMarkup(<LinesBar palette={{}} lines={[line({ goalParts: [], goals: [], attributes: [] })]} />)).toContain("设定长期目标 →");
+  expect(renderToStaticMarkup(<LinesBar palette={{}} lines={[line({ goalParts: [], goals: [] })]} />)).toContain('aria-label="2 个定语候选待选"');
+  expect(renderToStaticMarkup(<LinesBar palette={{}} lines={[line({ goalParts: [], goals: [], attributes: [] })]} />)).toContain('aria-label="设定长期目标"');
 });
 
 test("every line sits in one row: a hard constraint is a tag, not a row of its own, and each attribute is its own box", () => {

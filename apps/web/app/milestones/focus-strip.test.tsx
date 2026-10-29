@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 vi.mock("next/navigation", async (original) => ({ ...await original<typeof import("next/navigation")>(), useRouter: () => ({ refresh: () => {} }) }));
-import { FocusStrip } from "./milestone-timeline";
+import { currentFocus, FocusStrip } from "./milestone-timeline";
 import { layoutTimeline } from "./timeline-model";
 import type { BoardMilestone, BoardTick, MilestoneBoard } from "../../lib/milestone-board";
 
@@ -11,7 +11,7 @@ const milestone = (id: string, title: string, deadline: string, extra: Partial<B
   title, status: "approved", deadline, daysLeft: 6, dependsOn: [], risks: [], ticks: [], relations: [], ...extra }) as unknown as BoardMilestone;
 const board = {
   today: "2026-10-21", labels: { research: "研究者" }, lineOrder: ["research"], courses: [], stats: { ticksDone: 0, ticksPlanned: 0, reuse: 0 },
-  milestones: [milestone("mid1", "ECE 548 期中考试 1 达到 85 分", "2026-10-15"),
+  milestones: [milestone("mid1", "ECE 548 期中考试 1 达到 85 分", "2026-10-15", { daysLeft: -6 }),
     milestone("mid2", "ECE 548 期中考试 2 达到 85 分", "2026-10-27", { dependsOn: ["mid1"], ticks: [tick], risks: [{ level: "medium", kind: "time", note: "" }] })]
 } as unknown as MilestoneBoard;
 const layout = layoutTimeline({ nodes: board.milestones.map((item) => ({ id: item.id, line: item.identityId, title: item.title, status: item.status, kind: "milestone" as const,
@@ -44,6 +44,24 @@ test("a picked postponed tick explains itself at once: what it is, when it was d
   expect(strip({ ticks: [tick.id] })).not.toContain("关闭刻度说明");
 });
 
-test("with nothing in focus the strip says how to use it", () => {
+test("at rest the strip names the current focus — the nearest approved milestone ahead — and says how to use it only when there is none", () => {
+  const current = currentFocus(board);
+  expect(current).toBe("mid2");
+  const html = renderToStaticMarkup(<FocusStrip layout={layout} board={board} milestoneId={null} ticks={null} pinned={false} current={current}
+    onClose={() => {}} onOpen={() => {}} />);
+  expect(html).toContain("当前焦点");
+  expect(html).toContain("ECE 548 期中考试 2 达到 85 分");
+  expect(html).toContain("data-resting=\"true\"");
+  expect(html).not.toContain("指向或点选里程碑、刻度");
+  // Something pointed at takes the strip over.
+  expect(renderToStaticMarkup(<FocusStrip layout={layout} board={board} milestoneId="mid1" ticks={null} pinned={false} current={current}
+    onClose={() => {}} onOpen={() => {}} />)).not.toContain("当前焦点");
   expect(strip({})).toContain("指向或点选里程碑、刻度");
+});
+
+test("the schedule's word on an approved milestone is named in the strip", () => {
+  const withStates = { ...board, milestones: board.milestones.map((item) => item.id === "mid2" ? { ...item, planStates: ["risk", "library"] } : item) } as MilestoneBoard;
+  const html = renderToStaticMarkup(<FocusStrip layout={layout} board={withStates} milestoneId="mid2" ticks={null} pinned={false} onClose={() => {}} onOpen={() => {}} />);
+  expect(html).toContain("有完不成风险");
+  expect(html).toContain("任务在任务库");
 });

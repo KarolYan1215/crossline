@@ -45,5 +45,18 @@ export function windowsFromGrid(grid: WeekGrid): AvailabilityWindow[] {
   }).sort((a, b) => a.start.localeCompare(b.start) || a.days[0]! - b.days[0]!);
 }
 
+/** Monday to Friday (0 = Sunday). */
+export const WEEKDAYS = [1, 2, 3, 4, 5] as const;
+
+/**
+ * 「复制到工作日」 (Reclaim's 「Copy to all」): one day's row, as painted, onto every working day; the weekend is left as it was. Returns the
+ * grid unchanged (the same object) when there is nothing to change.
+ */
+export function copyToWeekdays(grid: WeekGrid, from: number): WeekGrid {
+  const row = grid[from];
+  if (!row || WEEKDAYS.every((day) => grid[day]!.every((value, slot) => value === row[slot]))) return grid;
+  return grid.map((current, day) => (WEEKDAYS as readonly number[]).includes(day) ? [...row] : [...current]);
+}
+
 /** Hours a week a grid offers. */
 export const gridHours = (grid: WeekGrid) => grid.reduce((sum, row) => sum + row.filter(Boolean).length, 0) / 2;

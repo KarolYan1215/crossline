@@ -52,7 +52,8 @@ describe("the milestone page in English", () => {
     expect(html).toContain(">Become<");
     expect(html).toContain("Become independent, well-published Researcher");
     expect(html).toContain(">Hard constraint<");
-    expect(html).toContain("1 milestone · 1 to approve");
+    expect(html).toContain("0/1 milestone · 1 to approve");
+    expect(html).toContain('aria-label="Redo this track&#x27;s untouched drafts"');
     expect(html).toContain("1 question");
     expect(html).not.toMatch(/[一-鿿]/);
   });
