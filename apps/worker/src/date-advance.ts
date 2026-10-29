@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
-  advanceResults, conservativeFinish, daysBetween, engagementTier, isSittingMilestone, monthDay, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
+  advanceResults, conservativeFinish, onPersonsBoard, taskTitleOf, daysBetween, engagementTier, isSittingMilestone, monthDay, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
 } from "@crossline/core";
 import { localeOf } from "./locale";
-import { listAgentTasks, reviewAgentTask, settleAgentResult, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
+import { DUE_ADVANCED_EVENT, listAgentTasks, overdueStartedTasks, SILENT_TASK_SHIFTS_MAX, reviewAgentTask, settleAgentResult, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { DEADLINE_MARGIN_DAYS } from "@crossline/planner";
 import { localToday } from "./analysis";
 import { ownerOf } from "./owner";
@@ -52,6 +52,8 @@ const json = <T>(raw: string | null | undefined, fallback: T): T => { try { retu
 export type AdvanceOutcome = {
   superseded: string[]; adopted: Array<{ taskId: string; title: string; left: number }>; expired: string[];
   shifted: TidyOutcome["shifted"]; asked: Array<{ id: string; title: string; deadline: string }>;
+  /** Started work whose own self-set due day passed, moved to the cautious finish at the measured pace plus two days (closed-loop-1030 §4). */
+  tasksShifted?: Array<{ id: string; title: string; from: string; to: string }>;
   archived: TidyOutcome["archived"]; drafts: Array<{ id: string; title: string }>; opId?: string;
 };
 
@@ -207,6 +209,23 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   outcome.shifted = written.shifted;
   const restore: UndoEntry[] = [...written.restore];
 
+  // 2b. Started work whose own due day passed (docs/plans/closed-loop-1030.md §4). An external date (a course's, or read from someone
+  // else's text) is asked about on the web (`overdue_task`); a self-set one moves to the cautious finish at the measured pace plus the
+  // forecast's margin, twice at most, then it is asked about like an external one.
+  const tasksShifted: NonNullable<AdvanceOutcome["tasksShifted"]> = [];
+  for (const item of overdueStartedTasks(store, workspaceId, today, onPersonsBoard)) {
+    if (item.external || item.shifts >= SILENT_TASK_SHIFTS_MAX) continue;
+    const steps = store.getStepPlan(workspaceId, item.order.id)?.steps.filter((step) => step.status === "planned" && step.schedulable && step.executor !== "agent");
+    const minutes = steps?.length ? steps.reduce((sum, step) => sum + step.estimate.p85Minutes, 0) : item.order.estimate.p85Minutes;
+    const to = overdueTarget({ today, finish: conservativeFinish(today, minutes, daily), marginDays: DEADLINE_MARGIN_DAYS });
+    store.saveWorkOrder({ ...item.order, payload: { ...(item.order.payload as object), dueDate: to } });
+    store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `${DUE_ADVANCED_EVENT}:${item.order.id}:${item.due}`, type: DUE_ADVANCED_EVENT,
+      entityId: item.order.id, payload: { from: item.due, to, by: "date_advance" } });
+    inverse.push({ kind: "work_order.field", id: item.order.id, field: "dueDate", value: item.due });
+    tasksShifted.push({ id: item.order.id, title: taskTitleOf(item.order), from: item.due, to });
+  }
+  if (tasksShifted.length) outcome.tasksShifted = tasksShifted;
+
   // 3. Old proposals, drafts and work.
   const sittingIds = new Set(sittingPrep.map((item) => item.order.id));
   outcome.archived = archiveBySystem(store, workspaceId, [...sittingPrep, ...staleOpenWork(store, workspaceId, now, today).filter((item) => !sittingIds.has(item.order.id))], "date");
@@ -272,6 +291,8 @@ export function advanceMessage(outcome: AdvanceOutcome, locale?: Locale): string
     outcome.expired.length ? t("{{count}} 个助手成果超过 {{days}} 天未审，且自检未过、改了原文件或涉及对外，不代为采纳，收起", { count: outcome.expired.length, days: RESULT_EXPIRE_DAYS }) : "",
     outcome.shifted.length ? t("{{count}} 个里程碑已过截止、还有没做完的工作，按保守完成日留 2 天余量顺延：{{items}}", { count: outcome.shifted.length,
       items: listed(outcome.shifted, (item) => `${quote(item.title)}${locale === "en" ? " " : ""}${md(item.from, locale)} → ${md(item.to, locale)}`, locale) }) : "",
+    outcome.tasksShifted?.length ? t("{{count}} 个已开始的任务过了本人定的截止，按实测进度的保守完成日留 2 天余量顺延：{{items}}", { count: outcome.tasksShifted.length,
+      items: listed(outcome.tasksShifted, (item) => `${quote(item.title)}${locale === "en" ? " " : ""}${md(item.from, locale)} → ${md(item.to, locale)}`, locale) }) : "",
     outcome.asked.length ? t("{{count}} 个课程或本人定的截止已过，日期不动，在待确认里问怎么处理：{{items}}", { count: outcome.asked.length,
       items: listed(outcome.asked, (item) => `${quote(item.title)}${locale === "en" ? " " : ""}${md(item.deadline, locale)}`, locale) }) : "",
     outcome.archived.length ? t("归档 {{count}} 个旧任务（{{reasons}}），可在任务页「已归档」恢复", { count: outcome.archived.length,

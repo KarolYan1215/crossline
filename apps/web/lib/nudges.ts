@@ -1,13 +1,13 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
-import { listAgentTasks, type StoredConversationMessage } from "@crossline/db";
+import { dueProvenance, listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
   availableSlots, calendarLineOf, inferBlockOutcome, type InferredOutcome, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
   type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
 } from "@crossline/core";
 import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability, toZonedInstant } from "./crossline";
-import { blockWorkMinutes } from "./measured-capacity";
+import { blockWorkMinutes, dayCapacityOf, measuredCapacityOn, measuredView } from "./measured-capacity";
 import { listed, openAsks, thisWeek } from "./asks";
 import { calendarFiling, currentWorkState, missedItems } from "./timeline";
 import { dayLabel, type OpenerView } from "./opener";
@@ -137,17 +137,27 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const windows = readAvailability(ctx);
   const fixed = plan.blocks.filter((block) => block.day && !block.id.startsWith("scheduled:") && !block.id.startsWith("proposed:") && !block.id.startsWith("optional:")
     && !(block.id.startsWith("graph_calendar:") && isCancelledEvent(block.title))).map((block) => ({ day: block.day!, start: block.start, end: block.end }));
+  // Each day's free minutes at most its measured cap (docs/plans/closed-loop-1030.md §1), and the day's worth of margin the measured one.
+  const measured = measuredCapacityOn() ? measuredView(ctx, now) : undefined;
+  const provenance = dueProvenance(store, ctx.workspaceId);
   const slack: NudgeSlack[] = orders.filter((order) => ["approved", "preparing", "ready_for_human", "active"].includes(order.state)).flatMap((order) => {
     const due = dueOf(order);
     if (!due || due <= today || due > addDays(today, 14)) return [];
     const days = Array.from({ length: Math.max(1, Math.round((Date.parse(`${due}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / DAY)) }, (_, index) => addDays(today, index));
     const span = (day: string, start: string, end: string) => Math.max(0, minutesOf(end) - Math.max(minutesOf(start), day === today ? nowMinute : 0));
-    const free = availableSlots(windows, days, fixed).reduce((sum, slot) => sum + span(slot.day, slot.start, slot.end), 0);
+    const fullDay = (day: string) => availableSlots(windows, [day], []).reduce((sum, slot) => sum + minutesOf(slot.end) - minutesOf(slot.start), 0);
+    const capOf = (day: string) => measured ? dayCapacityOf(ctx, day, fullDay(day), measured) : Infinity;
+    const free = days.reduce((sum, day) => sum + Math.min(capOf(day),
+      availableSlots(windows, [day], fixed).reduce((total, slot) => total + span(slot.day, slot.start, slot.end), 0)), 0);
     const others = scheduled.filter((block) => block.day! < due && block.id.split(":")[1] !== order.id).reduce((sum, block) => sum + span(block.day!, block.start, block.end), 0);
     const steps = store.getStepPlan(ctx.workspaceId, order.id)?.steps.filter((step) => step.status === "planned" && step.schedulable && step.executor !== "agent");
     const remaining = steps?.length ? steps.reduce((sum, step) => sum + step.estimate.p85Minutes, 0) : order.estimate.p85Minutes;
-    const daily = Math.max(120, Math.round(availableSlots(windows, days, []).reduce((sum, slot) => sum + minutesOf(slot.end) - minutesOf(slot.start), 0) / days.length));
-    return [{ orderId: order.id, title: taskTitleOf(order), dueDay: due, remainingMinutes: remaining, freeMinutes: Math.max(0, free - others), dailyMinutes: daily }];
+    const daily = measured ? Math.max(60, Math.round(days.reduce((sum, day) => sum + capOf(day), 0) / days.length))
+      : Math.max(120, Math.round(days.reduce((sum, day) => sum + fullDay(day), 0) / days.length));
+    const selfSet = !provenance(order).external && (order.payload as { dueDate?: string } | undefined)?.dueDate === due;
+    const deferDue = addDays(today, Math.max(1, Math.ceil(remaining / daily)) + 2);
+    return [{ orderId: order.id, title: taskTitleOf(order), dueDay: due, remainingMinutes: remaining, freeMinutes: Math.max(0, free - others), dailyMinutes: daily,
+      ...(selfSet ? { selfSet, deferDue: deferDue > due ? deferDue : addDays(due, 2) } : {}) }];
   });
 
   const timerOrder = running ? byId.get(running.workOrderId) : undefined;

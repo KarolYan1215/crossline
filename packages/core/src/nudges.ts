@@ -72,7 +72,12 @@ export type NudgeEnding = { id: string; orderId: string; stepId: string; title: 
    */
   inferred?: "done" | "partial" | "not_done" };
 /** How much time is left for one task with a due day: free minutes before it (after other work's blocks) against what remains of it. */
-export type NudgeSlack = { orderId: string; title: string; dueDay: string; remainingMinutes: number; freeMinutes: number; dailyMinutes: number };
+export type NudgeSlack = { orderId: string; title: string; dueDay: string; remainingMinutes: number; freeMinutes: number; dailyMinutes: number;
+  /**
+   * The due day is the person's own (or the system's), not a course's or someone else's: 「推迟截止」 is offered, to `deferDue` (the cautious
+   * finish at the measured pace plus two days). docs/plans/closed-loop-1030.md §4–5.
+   */
+  selfSet?: boolean; deferDue?: string };
 
 export type NudgeInput = {
   now: string; today: string; clock: string; tomorrow: string; level: NotifyLevelName;
@@ -127,7 +132,7 @@ const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10
 const hours = (t: Translate, minutes: number) => minutes >= 60 ? t("{{hours}} 小时", { hours: Math.round(minutes / 6) / 10 }) : t("{{minutes}} 分钟", { minutes: Math.max(0, Math.round(minutes)) });
 /** 「title · step」 in the language's quotes. */
 const quoted = (t: Translate, title: string, step?: string) => t("「{{text}}」", { text: `${title}${step ? ` · ${step}` : ""}` });
-const op = (orderId: string, type: "start" | "defer" | "step_done", summary: string, extra: { date?: string; stepId?: string } = {}): ProposedAction =>
+const op = (orderId: string, type: "start" | "defer" | "step_done" | "due", summary: string, extra: { date?: string; stepId?: string } = {}): ProposedAction =>
   ({ action: "task.op", summary, args: { workOrderId: orderId, type, date: extra.date ?? "", minutes: 0, stepId: extra.stepId ?? "", text: "", who: "", energy: "" } });
 /** What would be said now, before the person's quiet hours, mutes and the day's cap are applied. */
 export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
@@ -168,17 +173,22 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
     out.push({ kind: "day_wrap", fingerprint: `wrap:${input.today}`, urgent: false, counted: false,
       text: t("今天还有 {{count}} 块工作没确认。收工时一起过一遍：完成、部分或没做，没做的顺延。", { count: input.wrap.open }),
       buttons: [{ kind: "href", label: t("收工"), href: "/wrap" }, mute] });
+  // Free time before a due day is read at the measured pace (docs/plans/closed-loop-1030.md §4): under two days' worth to spare is said
+  // two days or more before the deadline, not on its eve.
   for (const item of input.slack) {
     const slack = item.freeMinutes - item.remainingMinutes;
-    if (slack >= item.dailyMinutes) continue;
+    if (slack >= 2 * item.dailyMinutes) continue;
     const late = slack < 0;
-    out.push({ kind: "latest_start", fingerprint: `latest:${item.orderId}:${item.dueDay}:${late ? "late" : "tight"}`, urgent: late, counted: true,
-      text: late
-        ? t("「{{title}}」按保守估时还需 {{remaining}}，{{due}} 截止前只剩 {{free}} 可用，来不及。",
-          { title: item.title, remaining: hours(t, item.remainingMinutes), due: md(item.dueDay), free: hours(t, item.freeMinutes) })
-        : t("「{{title}}」余量已不足一天：{{due}} 截止前可用 {{free}}，还需 {{remaining}}。最晚现在开始。",
-          { title: item.title, remaining: hours(t, item.remainingMinutes), due: md(item.dueDay), free: hours(t, item.freeMinutes) }),
+    const level = late ? "late" : slack < item.dailyMinutes ? "tight" : "margin";
+    const values = { title: item.title, remaining: hours(t, item.remainingMinutes), due: md(item.dueDay), free: hours(t, item.freeMinutes) };
+    out.push({ kind: "latest_start", fingerprint: `latest:${item.orderId}:${item.dueDay}:${level}`, urgent: late, counted: true,
+      text: level === "late" ? t("「{{title}}」按保守估时还需 {{remaining}}，{{due}} 截止前只剩 {{free}} 可用，来不及。", values)
+        : level === "tight" ? t("「{{title}}」余量已不足一天：{{due}} 截止前可用 {{free}}，还需 {{remaining}}。最晚现在开始。", values)
+        : t("「{{title}}」按实测进度余量已不足两天：{{due}} 截止前可用 {{free}}，还需 {{remaining}}。", values),
       buttons: [{ kind: "action", label: t("现在开始"), action: op(item.orderId, "start", t("开始{{label}}", { label: quoted(t, item.title) })) },
+        ...(item.selfSet && item.deferDue ? [{ kind: "action" as const, label: t("推迟截止"),
+          action: op(item.orderId, "due", t("{{label}}截止推到 {{day}}", { label: quoted(t, item.title), day: md(item.deferDue) }), { date: item.deferDue }) }] : []),
+        { kind: "href", label: t("去本周承诺"), href: "/commit" },
         { kind: "href", label: t("调整计划"), href: "/plan" }, mute] });
   }
   const timer = input.timer;

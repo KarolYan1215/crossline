@@ -65,7 +65,17 @@ test("too little time before a due day: tight below a day's worth of free time, 
   const late = planNudges(base({ blocks: [], slack: [{ orderId: "o", title: "ECE 548 复习", dueDay: "2026-10-27", remainingMinutes: 900, freeMinutes: 800, dailyMinutes: 420 }] }));
   expect(late[0]).toMatchObject({ urgent: true, fingerprint: "latest:o:2026-10-27:late" });
   expect(late[0]!.text).toContain("来不及");
-  expect(planNudges(base({ blocks: [], slack: [{ orderId: "o", title: "x", dueDay: "2026-10-27", remainingMinutes: 60, freeMinutes: 800, dailyMinutes: 420 }] }))).toEqual([]);
+  expect(planNudges(base({ blocks: [], slack: [{ orderId: "o", title: "x", dueDay: "2026-10-27", remainingMinutes: 60, freeMinutes: 1000, dailyMinutes: 420 }] }))).toEqual([]);
+});
+
+test("under two days' measured worth to spare is said early; a self-set due day offers 推迟截止, every one 去本周承诺 (closed-loop-1030 §4–5)", () => {
+  const item = { orderId: "o", title: "周报", dueDay: "2026-10-27", remainingMinutes: 60, freeMinutes: 800, dailyMinutes: 420 };
+  const [early] = planNudges(base({ blocks: [], slack: [item] }));
+  expect(early).toMatchObject({ kind: "latest_start", urgent: false, fingerprint: "latest:o:2026-10-27:margin" });
+  expect(early!.buttons.map((button) => button.label)).toEqual(["现在开始", "去本周承诺", "调整计划", "少问这类"]);
+  const [own] = planNudges(base({ blocks: [], slack: [{ ...item, selfSet: true, deferDue: "2026-10-29" }] }));
+  expect(own!.buttons.map((button) => button.label)).toEqual(["现在开始", "推迟截止", "去本周承诺", "调整计划", "少问这类"]);
+  expect(own!.buttons[1]).toMatchObject({ kind: "action", action: { action: "task.op", args: { workOrderId: "o", type: "due", date: "2026-10-29" } } });
 });
 
 test("a timer half again over the step's usual minutes asks whether the step is done", () => {

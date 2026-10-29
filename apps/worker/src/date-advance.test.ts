@@ -243,3 +243,20 @@ test("an exam whose day has passed puts its preparation away and asks how it wen
   // Not moved like the person's own milestones: an exam's date is the course's.
   expect(outcome.shifted).toEqual([]);
 });
+
+test("started work past its own self-set due day moves to the cautious finish at the measured pace plus two days; a course's date does not move (closed-loop-1030 §4)", () => {
+  at(NOW.toISOString());
+  store.setSetting(ws, "capacity.measured", JSON.stringify({ at: NOW.toISOString(), weekday: 60, weekend: 60, basis: "measured" }));
+  const save = (id: string, projectId: string, due: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "media", projectId, milestoneId: "",
+    intent: id, state: "active", riskTier: "routine", estimate: { ...estimate, p85Minutes: 150 }, payload: { dueDate: due } });
+  save("own", "xhs", "2026-10-19");
+  event("work_order.due_changed", "own", { before: null, after: "2026-10-19" });
+  save("course", "ece555", "2026-10-19");
+  event("dates.extracted", "batch", { dates: [{ project: "ece555", kind: "homework_due" }] });
+  const outcome = dateAdvancePass(store, ws, { now: NOW, force: true })!;
+  // 150 cautious minutes at 60 a day: three days, finishing 10-24, then two days of margin.
+  expect(outcome.tasksShifted).toEqual([expect.objectContaining({ id: "own", from: "2026-10-19", to: "2026-10-26" })]);
+  expect((store.getWorkOrder(ws, "own")!.payload as { dueDate: string }).dueDate).toBe("2026-10-26");
+  expect((store.getWorkOrder(ws, "course")!.payload as { dueDate: string }).dueDate).toBe("2026-10-19");
+  expect(advanceMessage(outcome)).toContain("已开始的任务过了本人定的截止");
+});

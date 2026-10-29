@@ -13,7 +13,7 @@ import { ICON, IconButton } from "../ui/icon-button";
 /** The kinds of decision, as the left column groups them (2026-10-29, approvals.html). Keys are Chinese and translated where shown. */
 export type AskGroup = "风险与逾期" | "等待到期" | "步骤与准备" | "助手" | "验收" | "日程与承诺" | "收集与文件" | "其他";
 const GROUP_OF: Partial<Record<AskKind, AskGroup>> = {
-  milestone_risk: "风险与逾期", milestone_risk_review: "风险与逾期", risk_digest: "风险与逾期", milestone_overdue: "风险与逾期",
+  milestone_risk: "风险与逾期", milestone_risk_review: "风险与逾期", risk_digest: "风险与逾期", milestone_overdue: "风险与逾期", overdue_task: "风险与逾期",
   waiting_due: "等待到期",
   step_question: "步骤与准备", prep_question: "步骤与准备", backplan_input: "步骤与准备",
   agent_blocked: "助手",

@@ -9,7 +9,7 @@ import {
   parseRiskDigestSeen, RISK_DIGEST_SETTING, riskDigestShows, weekStartOf, type MilestoneRisk, type RiskDigestSeen
 } from "@crossline/core";
 import { applyWeeklyCommit, loadWeeklyCommit } from "./weekly-commit";
-import { acceptOwnCompletion, listAgentTasks, ownCompletion, resolvePossibleDuplicate, type StoredWorkOrder } from "@crossline/db";
+import { acceptOwnCompletion, listAgentTasks, courseProjectIds, overdueStartedTasks, OVERDUE_TASK_RESOLVED, ownCompletion, SILENT_TASK_SHIFTS_MAX, resolvePossibleDuplicate, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import {
   acceptWorkOrderEvidence, answerWaiting, appNow, approveWorkOrderProposal, archiveWorkOrder, discardCapture, effectiveSchedulePreferences, effectiveWeight, getStore, IMPORTANT_WEIGHT, loadGoalForecast,
@@ -347,6 +347,8 @@ function riskAsks(source: Source): Ask[] {
   const milestones = new Map(store.listMilestones(ctx.workspaceId).filter((item) => item.status === "approved").map((item) => [item.id, item]));
   const rolling = new Set(store.listEvents(ctx.workspaceId, { type: "goal.backplan_proposed" })
     .filter((event) => (event.payload as { rolling?: boolean }).rolling).map((event) => event.entityId));
+  // A course's date is not the person's to move (docs/plans/closed-loop-1030.md §4): its card offers time and the standard, not 推迟截止.
+  const courses = courseProjectIds(store, ctx.workspaceId);
   return forecast.goals.flatMap((goal) => {
     const milestone = milestones.get(goal.milestoneId);
     const deadline = goal.confirmedDeadline;
@@ -376,7 +378,7 @@ function riskAsks(source: Source): Ask[] {
         moreToSplit: rolling.has(goal.milestoneId), horizonDays }, locale),
       options: [
         { id: "time", label: t("加可用时间"), href: "/plan#availability" },
-        { id: "extend", label: t("推迟截止"), fields: [{ id: "date", label: t("推迟到"), kind: "date" as const, required: true }] },
+        ...(courses.has(milestone.projectId ?? "") ? [] : [{ id: "extend", label: t("推迟截止"), fields: [{ id: "date", label: t("推迟到"), kind: "date" as const, required: true }] }]),
         { id: "lower", label: t("降低标准"), href: "/milestones" },
         { id: "accept", label: t("接受这个风险"), detail: t("{{count}} 天内不再问，除非变得更糟", { count: ACCEPT_RISK_DAYS }) }
       ] }];
@@ -470,6 +472,34 @@ function overdueAsks({ store, ctx, today, t, locale }: Source): Ask[] {
         { id: "makeup", label: t("补做"), detail: t("截止不变，剩下的工作照常排"), recommended: true },
         { id: "extend", label: t("改为新日期"), fields: [{ id: "date", label: t("截止改到"), kind: "date" as const, required: true }] },
         { id: "drop", label: t("放弃这个里程碑"), detail: t("里程碑和未开始的任务归档，可从已归档恢复") }
+      ] }];
+  });
+}
+
+/**
+ * Started work whose own due day passed (docs/plans/closed-loop-1030.md §4; the rows are `overdueStartedTasks` in packages/db). An external
+ * date is not the system's to decide: can it still be handed in, and what is the real last day — given, the work is placed by it; not,
+ * the task is archived (recoverable). A self-set date the daily pass already moved twice is asked the same way instead of a third move.
+ * Goes away when answered (for that due day), when the date changes, or when the task closes.
+ */
+function overdueTaskAsks({ store, ctx, today, t, locale }: Source): Ask[] {
+  const resolved = new Set(live(ctx, store.listEvents(ctx.workspaceId, { type: OVERDUE_TASK_RESOLVED }))
+    .map((event) => `${event.entityId}|${(event.payload as { due?: string }).due ?? ""}`));
+  return overdueStartedTasks(store, ctx.workspaceId, today, onPersonsBoard).flatMap((item): Ask[] => {
+    if (!(item.external || item.shifts >= SILENT_TASK_SHIFTS_MAX) || resolved.has(`${item.order.id}|${item.due}`)) return [];
+    const title = short(taskTitleOf(item.order));
+    const stalled = !item.external;
+    return [{ id: `overdue-task:${item.order.id}:${item.due}`, kind: "overdue_task", entityId: item.order.id, line: item.order.identityId,
+      urgency: "soon", dueDay: item.due, raisedAt: new Date(`${item.due}T23:59:00Z`).toISOString(), fingerprint: item.due, important: item.external,
+      title: stalled ? t("「{{title}}」已自动顺延 {{times}} 次，截止 {{day}} 又过了", { title, times: item.shifts, day: format(item.due, locale) })
+        : t("「{{title}}」{{day}} 截止已过，还能补交吗？", { title, day: format(item.due, locale) }),
+      why: stalled ? t("系统已经自动顺延过 {{times}} 次，这次不再自动改。改成新的日期就按它排；不做了就归档，可从已归档恢复。", { times: item.shifts })
+        : t(item.why === "course" ? "这是课程给的日期，系统不替本人决定。能补交就写下实际的最后期限，按它重新排；不能补交就归档，可从已归档恢复。"
+          : "这个日期来自别人或平台给的信息，系统不替本人决定。能补交就写下实际的最后期限，按它重新排；不能补交就归档，可从已归档恢复。"),
+      options: [
+        { id: "extend", label: stalled ? t("改为新日期") : t("能补交"), recommended: true,
+          fields: [{ id: "date", label: stalled ? t("截止改到") : t("实际最后期限"), kind: "date" as const, required: true }] },
+        { id: "drop", label: stalled ? t("不做了") : t("不能补交"), detail: t("任务归档，可从已归档恢复") }
       ] }];
   });
 }
@@ -992,7 +1022,7 @@ function lockedConflictAsks({ store, ctx, today, now, t, locale }: Source): Ask[
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, travelAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueAsks, overdueTaskAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
@@ -1267,6 +1297,24 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
             source: "person_outcome", criteriaVerdict: readings } });
       } else if (optionId !== "makeup" && optionId !== "pending") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
       resolve(optionId);
+      return { ok: true };
+    }
+    case "overdue_task": {
+      const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
+      if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+      const due = ask.fingerprint;
+      if (optionId === "extend") {
+        const date = values.date ?? "";
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < planToday(ctx)) return { ok: false, code: "ASK_DATE_INVALID" };
+        const payload = (order.payload ?? {}) as Record<string, unknown>;
+        store.saveWorkOrder({ ...order, payload: { ...payload, dueDate: date } });
+        // Confirmed, not typed as the person's own: an external date stays external, and is asked about again if it passes too.
+        record(ctx, "work_order.due_confirmed", order.id, `work_order.due_confirmed:${order.id}:${due}:${date}`, { before: due, after: date });
+      } else if (optionId === "drop") {
+        const archived = archiveWorkOrder(ctx, order.id, tOf(ctx)("截止 {{day}} 已过，本人选择不再补交", { day: due }));
+        if (!archived.ok) return archived;
+      } else return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+      record(ctx, OVERDUE_TASK_RESOLVED, order.id, `${OVERDUE_TASK_RESOLVED}:${order.id}:${due}:${Date.now()}`, { due, how: optionId });
       return { ok: true };
     }
     case "ledger_duplicate": {

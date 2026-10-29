@@ -17,5 +17,21 @@
   "自动交上 {{count}} 个任务": "Handed in {{count}} tasks by themselves",
   "{{names}}等 {{count}} 个任务本人的步骤都做完了，已按完成交上；剩下的助手或等待步骤不再占本人时间。24 小时内可撤销。": "{{names}} and others, {{count}} tasks in all, have every step of the person's done and were handed in as finished; the assistant's or waiting steps left take none of the person's time. Undo within 24 hours.",
   "{{names}}本人的步骤都做完了，已按完成交上；剩下的助手或等待步骤不再占本人时间。24 小时内可撤销。": "{{names}}: every step of the person's is done, so it was handed in as finished; the assistant's or waiting steps left take none of the person's time. Undo within 24 hours.",
-  "撤销自动交上": "Undo handing in by itself"
+  "撤销自动交上": "Undo handing in by itself",
+  "给了日期就按它重新排；不能补交则任务归档，可从已归档恢复。": "With a date given, the work is placed by it; if it cannot be handed in, the task is archived and can be restored from Archived.",
+  "截止停在已过的日期，这个任务不再排进日程。": "The due day stays in the past and the task is no longer scheduled.",
+  "「{{title}}」已自动顺延 {{times}} 次，截止 {{day}} 又过了": "“{{title}}” was moved {{times}} times by itself, and its due day {{day}} has passed again",
+  "「{{title}}」{{day}} 截止已过，还能补交吗？": "“{{title}}” was due {{day}}: can it still be handed in?",
+  "系统已经自动顺延过 {{times}} 次，这次不再自动改。改成新的日期就按它排；不做了就归档，可从已归档恢复。": "The system has already moved it {{times}} times, so it will not move it again. A new date is planned for; dropping it archives the task, which can be restored from Archived.",
+  "这是课程给的日期，系统不替本人决定。能补交就写下实际的最后期限，按它重新排；不能补交就归档，可从已归档恢复。": "This is the course's date, and the system does not decide for the person. If it can still be handed in, give the real last day and the work is placed by it; if not, it is archived and can be restored from Archived.",
+  "这个日期来自别人或平台给的信息，系统不替本人决定。能补交就写下实际的最后期限，按它重新排；不能补交就归档，可从已归档恢复。": "This date came from someone else or a platform, and the system does not decide for the person. If it can still be handed in, give the real last day and the work is placed by it; if not, it is archived and can be restored from Archived.",
+  "能补交": "Can still hand it in",
+  "实际最后期限": "Real last day",
+  "不能补交": "Cannot hand it in",
+  "任务归档，可从已归档恢复": "The task is archived and can be restored from Archived",
+  "截止 {{day}} 已过，本人选择不再补交": "Due {{day}} and past; the person chose not to hand it in",
+  "{{count}} 个已开始的任务过了本人定的截止，按实测进度的保守完成日留 2 天余量顺延：{{items}}": "{{count}} started tasks passed a due day the person set and were moved to the cautious finish at the measured pace with 2 days to spare: {{items}}",
+  "「{{title}}」按实测进度余量已不足两天：{{due}} 截止前可用 {{free}}，还需 {{remaining}}。": "“{{title}}” has under two days to spare at the measured pace: {{free}} free before {{due}}, {{remaining}} still needed.",
+  "{{label}}截止推到 {{day}}": "{{label}} due day moved to {{day}}",
+  "去本周承诺": "Go to this week's commitment"
 }

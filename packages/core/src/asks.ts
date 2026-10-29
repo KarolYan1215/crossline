@@ -28,6 +28,11 @@ export type AskKind =
   | "relation_check" | "background_paused" | "locked_conflict" | "outcome_check" | "progress_check" | "milestone_risk_review"
   /** A course's or the person's own deadline passed with work still open (the daily pass's `milestone.overdue`): 补做 / 新日期 / 放弃. */
   | "milestone_overdue"
+  /**
+   * Started work whose own due day passed (docs/plans/closed-loop-1030.md §4): an external date (a course's, or read from someone else's
+   * text) — can it still be handed in, and by when; or a self-set date the daily pass already moved twice. 新日期 or 归档.
+   */
+  | "overdue_task"
   /** Money records the ledger kept apart as possible duplicates (docs/mail-bookkeeping.md §4.3): one card for all of them. */
   | "ledger_duplicate"
   /**

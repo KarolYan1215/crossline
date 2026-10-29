@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { goalSettingKey, shiftWithChain, taskTitleOf, tFor } from "@crossline/core";
 import { localeOf } from "./locale";
-import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
+import { courseProjectIds, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { localToday } from "./analysis";
 import { ownerOf } from "./owner";
 import { sayToPerson } from "./workflow-smith";
@@ -27,7 +27,6 @@ export const STALE_DAYS = 14;
 export const SHIFT_MIN_DAYS = 3;
 const DAY = 86_400_000;
 const OPEN = new Set(["awaiting_plan_approval", "approved", "preparing", "ready_for_human", "active", "blocked"]);
-const GRADED = new Set(["quiz", "exam", "homework_due", "homework_out", "project_due"]);
 
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 const json = <T>(raw: string | null | undefined, fallback: T): T => { try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } };
@@ -46,16 +45,8 @@ export function absenceToTidy(store: CrosslineStore, workspaceId: string, now = 
   return undefined;
 }
 
-/** Projects that are courses: a grade breakdown on record, homework dated from the course's files, or graded items read from them. */
-export function courseProjects(store: CrosslineStore, workspaceId: string): Set<string> {
-  const out = new Set<string>();
-  for (const fact of store.listProfileFacts(workspaceId)) if (fact.slot === "grading" && fact.projectId) out.add(fact.projectId);
-  for (const order of store.listWorkOrders(workspaceId)) if (order.id.startsWith("datepair-") && order.projectId) out.add(order.projectId);
-  for (const event of store.listEvents(workspaceId, { type: "dates.extracted" }))
-    for (const item of (event.payload as { dates?: Array<{ project?: string; kind?: string }> }).dates ?? [])
-      if (item.project && item.kind && GRADED.has(item.kind)) out.add(item.project);
-  return out;
-}
+/** Projects that are courses (`courseProjectIds` in packages/db, shared with the web's overdue question). */
+export const courseProjects = courseProjectIds;
 
 type Settings = { confirmedDeadline?: string | null; [key: string]: unknown };
 export type TidyOutcome = { shifted: Array<{ id: string; title: string; from: string; to: string }>; archived: Array<{ id: string; title: string; why: string }>;
