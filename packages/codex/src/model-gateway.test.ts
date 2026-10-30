@@ -164,3 +164,19 @@ test("the limit on requests in flight to one model halves on a refusal and grows
   expect(most).toBeLessThanOrEqual(3);
   expect(most).toBeGreaterThanOrEqual(2);
 });
+
+test("a refused upstream is answered as an error without contacting it, and an upstream redirect is not followed with the key", async () => {
+  const target = await upstream((_seen, response) => { response.writeHead(200, { "content-type": "application/json" }); response.end("{}"); });
+  const redirecting = await upstream((_seen, response) => { response.writeHead(307, { location: `${target.base}/responses` }); response.end(); });
+  let refused: string | undefined = "provider host does not resolve to a public address";
+  const gw = await gateway(() => ({ kind: "responses", baseUrl: redirecting.base, key: "sk-secret-1234", ...(refused ? { refused } : {}) }));
+  const post = () => fetch(`${gw.urlFor("ws-a", "relay")}/responses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "m", input: "hi" }) });
+  const blocked = await post();
+  expect(blocked.status).toBe(502);
+  expect(await blocked.json()).toMatchObject({ error: { code: "upstream_refused" } });
+  expect(redirecting.seen).toHaveLength(0);
+  refused = undefined;
+  expect((await post()).status).toBe(307);
+  expect(redirecting.seen).toHaveLength(1);
+  expect(target.seen).toHaveLength(0);
+});

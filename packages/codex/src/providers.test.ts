@@ -3,7 +3,7 @@ import path from "node:path";
 import { SKILL_NEEDS } from "@crossline/core";
 import { expect, test } from "vitest";
 import { SKILL_TIERS, parseRoute } from "./model-policy";
-import { decideRoute, providerConfigProblem, type ProviderConfig, type ProviderRouting } from "./providers";
+import { decideRoute, normalizeProviderBaseUrl, providerConfigProblem, type ProviderConfig, type ProviderRouting } from "./providers";
 
 const provider: ProviderConfig = { id: "deepseek", kind: "chat", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat",
   keyLast4: "abcd", updatedAt: "2026-10-13T00:00:00.000Z" };
@@ -54,6 +54,37 @@ test("a provider address must be https, or http on this computer; no credentials
   expect(providerConfigProblem({ ...base, baseUrl: "https://api.example.com/v1?key=1" })).toBeDefined();
   expect(providerConfigProblem({ ...base, id: "Bad Id", baseUrl: "https://a.b" })).toBeDefined();
   expect(providerConfigProblem({ ...base, model: "two words", baseUrl: "https://a.b" })).toBeDefined();
+});
+
+test("a relay's base URL: a public domain over https, with or without a path; never an IP, an internal name or loopback on the server", () => {
+  const base = { id: "relay", kind: "chat" as const, label: "中转站", model: "gpt-4o-mini" };
+  const problem = (baseUrl: string, allowLoopback?: boolean) => providerConfigProblem({ ...base, baseUrl }, undefined, allowLoopback === undefined ? {} : { allowLoopback });
+  // Paths and a port of its own are fine: relays put the API under /v1, /openai/v1, /api/v1.
+  expect(problem("https://relay.example.com/v1")).toBeUndefined();
+  expect(problem("https://relay.example.com/openai/v1")).toBeUndefined();
+  expect(problem("https://api.relay-cn.com:8443/v1")).toBeUndefined();
+  // Plain http, IP literals of any kind, single labels and names kept for local networks.
+  expect(problem("http://relay.example.com/v1")).toContain("https");
+  for (const address of ["https://10.0.0.5/v1", "https://192.168.1.10/v1", "https://8.8.8.8/v1", "https://[fd00::1]/v1",
+    "https://intranet/v1", "https://gateway.internal/v1", "https://nas.local/v1", "https://router.lan/v1"]) {
+    expect(problem(address), address).toContain("公网域名");
+  }
+  expect(problem("https://user:pw@relay.example.com/v1")).toBeDefined();
+  expect(problem("https://relay.example.com/v1?key=sk-1")).toBeDefined();
+  expect(problem("")).toContain("接口地址");
+  // Loopback: a model on the person's own computer, but never on the hosted server.
+  expect(problem("http://127.0.0.1:11434/v1", true)).toBeUndefined();
+  expect(problem("http://127.0.0.1:11434/v1", false)).toContain("本机");
+  expect(problem("https://localhost:3211/v1", false)).toContain("本机");
+  // A hex IP is read as 127.0.0.1 by the URL parser, and so is loopback.
+  expect(problem("https://0x7f000001/v1", false)).toContain("本机");
+});
+
+test("a pasted endpoint is cut back to its base URL; spaces and trailing slashes go", () => {
+  expect(normalizeProviderBaseUrl(" https://relay.example.com/v1/ ")).toBe("https://relay.example.com/v1");
+  expect(normalizeProviderBaseUrl("https://relay.example.com/v1/chat/completions")).toBe("https://relay.example.com/v1");
+  expect(normalizeProviderBaseUrl("https://relay.example.com/v1/responses/")).toBe("https://relay.example.com/v1");
+  expect(normalizeProviderBaseUrl("https://relay.example.com/openai/v1/models")).toBe("https://relay.example.com/openai/v1");
 });
 
 test("every Skill — routed or in the plugin — says what it needs (a new Skill without an entry fails here)", () => {

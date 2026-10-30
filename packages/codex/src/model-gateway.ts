@@ -30,7 +30,12 @@ export type GatewayUpstream = BridgeUpstream & { kind: "chat" | "responses"; key
    * A route nobody waits on whatever its Skill (the developer's model while it is measured): a refusal for load is waited out like
    * background work, since a measurement that fails on the provider's rate limit says nothing about the model.
    */
-  patient?: boolean };
+  patient?: boolean;
+  /**
+   * Why this route may not be forwarded now (the provider's name no longer resolves to a public address, or a loopback address where
+   * the server does not allow one); answered as an error without contacting anything.
+   */
+  refused?: string };
 
 /**
  * Requests in flight per upstream model, adapted to what the upstream accepts (2026-10-19, docs/model-scheduling.md): every account on the
@@ -98,6 +103,7 @@ export async function startModelGateway(options: {
   initialConcurrency?: number;
   log?: (event: Record<string, unknown>) => void;
 }): Promise<ModelGateway> {
+  // Every request is sent with `redirect: "manual"`: a redirect would carry the key to an address nobody saved and nobody checked.
   const send = options.fetch ?? fetch;
   const backoff = options.backoffMs ?? [5_000, 15_000, 45_000, 90_000];
   const quickRetry = options.quickRetryMs ?? 2_000;
@@ -162,13 +168,14 @@ export async function startModelGateway(options: {
     const route = match ? routes.get(match[1]!) : undefined;
     const upstream = route ? await options.resolve(route.workspaceId, route.providerId) : undefined;
     if (!match || !route || !upstream) return json(response, 404, { error: { message: "unknown route" } });
+    if (upstream.refused) return json(response, 502, { error: { message: upstream.refused, code: "upstream_refused" } });
     const headers: Record<string, string> = { "content-type": "application/json", ...(upstream.key ? { authorization: `Bearer ${upstream.key}` } : {}) };
     const base = upstream.baseUrl.replace(/\/+$/, "");
 
     if (match[2] === "models") {
       // Codex asks for the model list on start; a provider without one is simply "no list".
       try {
-        const answer = await send(`${base}/models`, { headers });
+        const answer = await send(`${base}/models`, { headers, redirect: "manual" });
         return answer.ok ? json(response, 200, await answer.json()) : json(response, 404, { data: [] });
       } catch { return json(response, 404, { data: [] }); }
     }
@@ -203,7 +210,7 @@ export async function startModelGateway(options: {
       try { release = await acquire(`${base}|${model}`, interactive, abort.signal); }
       catch { return; }
       try {
-        answer = await send(`${base}/${forward ? "chat/completions" : "responses"}`, { method: "POST", signal: abort.signal,
+        answer = await send(`${base}/${forward ? "chat/completions" : "responses"}`, { method: "POST", signal: abort.signal, redirect: "manual",
           headers: forward ? headers : { ...headers, accept: "text/event-stream" }, body: forward ? JSON.stringify(forward.body) : asked === parsed ? raw! : JSON.stringify(asked) });
       } catch (error) {
         release("error");

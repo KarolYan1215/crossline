@@ -913,8 +913,6 @@
   "网页版连接不到本人电脑上的模型；本机模型只在本人电脑上安装的 Crossline 里可用。": "The web version cannot reach a model on the person's own computer; a local model works only in Crossline installed on that computer.",
   "检验结果「未通过」": "The check result is \"Not passed\"",
   "模型答不出要求的格式。勾选「这个接口只支持 JSON 模式」后重新检验，或换一个更大的模型。": "The model cannot answer in the required format. Tick \"This endpoint only supports JSON mode\" and check again, or use a larger model.",
-  "保存时提示密钥无效或余额不足": "Saving says the key is invalid or the balance is too low",
-  "密钥复制不全，或平台账户需要先充值。": "The key was not copied whole, or the platform account needs topping up first.",
   "接入教程：按链接添加公开 skill": "Setup guide: adding a public skill by link",
   "在 GitHub 上打开 skill 所在的仓库，找到含有 SKILL.md 的那个文件夹。": "On GitHub, open the repository holding the skill and find the folder that contains SKILL.md.",
   "打开这个文件夹，复制浏览器地址栏里的链接（形如 https://github.com/作者/仓库/tree/main/skills/名称），粘贴到「仓库链接」，「目录」可以不填。": "Open that folder, copy the link from the browser's address bar (like https://github.com/author/repo/tree/main/skills/name), and paste it under \"Repository link\"; \"Directory\" can stay empty.",

@@ -25,11 +25,12 @@ export function ConnectFlow({ next }: { next: string }) {
     <p>{t("访谈、画像报告和每周的排程都由本人连接的 AI 模型来做：本人的 ChatGPT 账号，或者本人的模型 API key。连接一次即可，之后不用再管。")}</p>
     <FirstHint id="connect" title={t("不确定选哪种？")}>
       {t("有 ChatGPT 账号就选上面的「用一次性代码连接」：按三步做完约 1 分钟，用的是这个 ChatGPT 账号自己的额度，不另收费。")}{" "}
-      {t("没有 ChatGPT 账号、但有 DeepSeek、Kimi 等的 API key，就用下面的「其他模型」；它要先自动检验 10–20 分钟，期间可以离开此页。")}
+      {t("没有 ChatGPT 账号、但有 DeepSeek、Kimi 等的 API key，就用下面的「其他模型」；它要先自动检验 10–20 分钟，期间可以离开此页。")}{" "}
+      {t("ChatGPT Plus 和官方 API 都没有，也可以用 OpenAI 兼容的中转站：在「其他模型」里点「用中转站接入」，填中转站给的 base URL 和 API key。")}
     </FirstHint>
     <CodexAccountControl onConnected={setChatgpt} />
     <h2 className="connect-or">{t("或者用其他模型的 API")}</h2>
-    <p className="muted">{t("DeepSeek、Kimi、通义千问、智谱 GLM、OpenAI API、OpenRouter 等。保存后自动检验回答格式，约 10–20 分钟；访谈一项通过就进入访谈，网页搜索和画形象这类功能仍要 ChatGPT 账号。")}</p>
+    <p className="muted">{t("DeepSeek、Kimi、通义千问、智谱 GLM、OpenAI API、OpenRouter，或 OpenAI 兼容的中转站。保存前先测一次连接，之后自动检验回答格式，约 10–20 分钟；访谈一项通过就进入访谈，网页搜索和画形象这类功能仍要 ChatGPT 账号。")}</p>
     <ModelProviderCard onReady={setApi} />
     <h2 className="connect-or">{t("没有 ChatGPT Plus，也没有 API key")}</h2>
     <InvitePanel onRedeemed={sponsored} onSponsored={sponsored}

@@ -1105,7 +1105,6 @@
   "有 ChatGPT 账号就选上面的「用一次性代码连接」：按三步做完约 1 分钟，用的是这个 ChatGPT 账号自己的额度，不另收费。": "With a ChatGPT account, choose Connect with a one-time code above: three steps, about 1 minute, using that ChatGPT account's own quota at no extra charge.",
   "没有 ChatGPT 账号、但有 DeepSeek、Kimi 等的 API key，就用下面的「其他模型」；它要先自动检验 10–20 分钟，期间可以离开此页。": "Without a ChatGPT account but with an API key for DeepSeek, Kimi or similar, use Other models below; it is checked automatically first for 10–20 minutes, and you can leave this page meanwhile.",
   "或者用其他模型的 API": "Or use another model's API",
-  "DeepSeek、Kimi、通义千问、智谱 GLM、OpenAI API、OpenRouter 等。保存后自动检验回答格式，约 10–20 分钟；访谈一项通过就进入访谈，网页搜索和画形象这类功能仍要 ChatGPT 账号。": "DeepSeek, Kimi, Qwen, Zhipu GLM, the OpenAI API, OpenRouter and others. After saving, its answer format is checked automatically for about 10–20 minutes; once the interview passes you go on to the interview. Web search and drawing the figure still need a ChatGPT account.",
   "没有 ChatGPT Plus，也没有 API key": "No ChatGPT Plus and no API key",
   "ChatGPT 免费账号的额度通常做不完访谈。可以申请用开发者提供的模型，通过后用邀请码完成访谈和日常使用。": "A free ChatGPT account's quota usually cannot finish the interview. You can apply to use the developer's model; once approved, an invite code covers the interview and daily use.",
   "已在用开发者提供的模型：本月已用 ¥{{spent}} / ¥{{cap}}。": "On the developer's model: ¥{{spent}} / ¥{{cap}} used this month.",

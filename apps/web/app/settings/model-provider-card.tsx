@@ -34,6 +34,8 @@ const shown = (blocker: { code: string; message: string }, t: Translate) => /SUP
  * Settings → 模型连接 → 其他模型 (R7, decided 2026-10-13). Any model can be added — DeepSeek, Kimi, 通义千问, 智谱 GLM, Claude, Gemini, the
  * OpenAI API, OpenRouter or a model on this computer — and every one runs through the same Codex path. It serves only what it has passed
  * the check for, and the card says plainly what it can never do here. The key is sent once and never shown again (only its last four).
+ * An OpenAI-compatible relay (中转站) is its own starting point (2026-10-30), for someone with neither ChatGPT Plus nor an official API:
+ * the worker tries one real request before saving, so a wrong address, key, model or balance is said at once.
  */
 export function ModelProviderCard({ initial, onReady, local = false }: { initial?: ProviderView; onReady?: (ready: boolean) => void;
   /** Crossline runs on the person's own computer, so a model there (Ollama) can be reached. */
@@ -77,6 +79,8 @@ export function ModelProviderCard({ initial, onReady, local = false }: { initial
   };
 
   const provider = view?.provider;
+  const relayPreset = view?.presets.find((preset) => preset.id === "relay");
+  const relay = draft?.id === "relay";
   const served = view?.features.filter((feature) => feature.served) ?? [];
   const withheld = view?.features.filter((feature) => !feature.served) ?? [];
   return <section className="st-card model-provider-card" aria-label={t("其他模型")}>
@@ -104,18 +108,26 @@ export function ModelProviderCard({ initial, onReady, local = false }: { initial
           {view.presets.map((preset) => <option key={preset.id} value={preset.id}>{t(preset.label)}</option>)}
         </select>
       </span></div>}
+    {!provider && !draft && relayPreset && <div className="st-row"><span className="st-row-label">{t("没有 ChatGPT Plus，也没有官方 API")}
+      <small>{t("用 OpenAI 兼容的中转站一样能用：填中转站给的 base URL、API key 和模型名，保存前先测一次连接。")}</small></span>
+      <span className="st-row-actions"><button type="button" className="secondary-button" onClick={() => setDraft(draftOf(relayPreset))}>{t("用中转站接入")}</button></span></div>}
     {draft && <form className="model-provider-form" onSubmit={(event) => void save(event)}>
+      {relay && <p className="model-provider-note">{t("中转站转发 OpenAI 兼容的接口。它能看到发给模型的全部内容（访谈回答、任务、上传文件的正文），请选可信的服务。")}</p>}
       <label>{t("显示名称")}<input value={draft.label} maxLength={40} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
       <label>{t("接口类型")}<select value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value === "chat" ? "chat" : "responses" })}>
-        <option value="chat">{t(KIND_LABEL.chat)}</option><option value="responses">{t(KIND_LABEL.responses)}</option></select></label>
-      <label>{t("接口地址")}<input value={draft.baseUrl} inputMode="url" onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label>
-      <label>{t("模型")}<input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} /></label>
+        <option value="chat">{t(KIND_LABEL.chat)}</option><option value="responses">{t(KIND_LABEL.responses)}</option></select>
+        {relay && <small>{t("不确定就选 Chat Completions，绝大多数中转站都支持。")}</small>}</label>
+      <label>{t("接口地址")}<input value={draft.baseUrl} inputMode="url" placeholder={relay ? "https://relay.example.com/v1" : undefined}
+        onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} />
+        {relay && <small>{t("即 base URL，通常以 /v1 结尾。")}</small>}</label>
+      <label>{t("模型")}<input value={draft.model} placeholder={relay ? "gpt-4o-mini" : undefined} onChange={(event) => setDraft({ ...draft, model: event.target.value })} />
+        {relay && <small>{t("照中转站后台模型列表里的名字填写。")}</small>}</label>
       {draft.kind === "chat" && <label className="model-provider-check"><input type="checkbox" checked={draft.json}
         onChange={(event) => setDraft({ ...draft, json: event.target.checked })} />{t("这个接口只支持 JSON 模式（格式要求写进说明里）")}</label>}
-      <label>API key<input type="password" autoComplete="off" value={draft.apiKey} placeholder={provider?.keyLast4 && provider.baseUrl === draft.baseUrl ? t("已保存 ···{{last4}}，留空则不变", { last4: provider.keyLast4 }) : t("本机模型可以留空")}
+      <label>API key<input type="password" autoComplete="off" value={draft.apiKey} placeholder={provider?.keyLast4 && provider.baseUrl === draft.baseUrl ? t("已保存 ···{{last4}}，留空则不变", { last4: provider.keyLast4 }) : relay ? t("从中转站后台复制的 API key") : t("本机模型可以留空")}
         onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} />
         <small>{t("只交给后台加密保存，不进账本、导出和备份，之后不再显示。")}</small></label>
-      <span className="st-row-actions"><button type="submit" className="primary-button" disabled={busy}>{t("保存")}</button>
+      <span className="st-row-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? t("正在测试连接…") : t("测试连接并保存")}</button>
         <button type="button" disabled={busy} onClick={() => setDraft(undefined)}>{t("取消")}</button></span>
     </form>}
     {view?.conformance && <div className="st-row"><span className="st-row-label">{view.conformance.current ? t("检验结果") : t("检验结果（已过期，需要重新检验）")}

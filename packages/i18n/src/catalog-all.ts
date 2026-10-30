@@ -20,6 +20,7 @@ import month_sim from "../locales/en/month-sim.json";
 import fixes_1029 from "../locales/en/fixes-1029.json";
 import closed_loop from "../locales/en/closed-loop.json";
 import concierge_settings from "../locales/en/concierge-settings.json";
+import relay_provider from "../locales/en/relay-provider.json";
 
 /** Every English catalogue, for the web app and the worker (server-side size does not matter; the web's client reads the same set). */
-export const ALL_CATALOGS = [common, core_a, core_b, assess, web_settings, web_onboarding, web_plan, web_shell, web_tasks, web_lib, worker, task_import, rituals, redesign_today, redesign_tasks, redesign_plan, redesign_settings, redesign_rituals, month_sim, fixes_1029, closed_loop, concierge_settings] as Array<Record<string, string>>;
+export const ALL_CATALOGS = [common, core_a, core_b, assess, web_settings, web_onboarding, web_plan, web_shell, web_tasks, web_lib, worker, task_import, rituals, redesign_today, redesign_tasks, redesign_plan, redesign_settings, redesign_rituals, month_sim, fixes_1029, closed_loop, concierge_settings, relay_provider] as Array<Record<string, string>>;

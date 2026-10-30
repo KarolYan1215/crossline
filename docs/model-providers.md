@@ -181,12 +181,12 @@ export interface RuntimeRegistry {
 | 部件 | 文件 | 做什么 |
 |---|---|---|
 | 转换 | `packages/codex/src/chat-bridge.ts` | 纯函数。Responses 请求 → 一次 Chat Completions：`instructions` 和所有 developer/system 文本合成一条开头的 system；`text.format` json_schema → `response_format`（只支持 JSON 模式的提供方改成 `json_object`，schema 写进 system）；function/custom/namespace 工具；之前的工具调用与输出回放成 assistant `tool_calls` + `tool` 消息；推理项不回传（无状态）。流：`reasoning_content`/`reasoning` 字段或行内 `<think>` → reasoning 项（也让慢模型的连接保持有事件），正文 → message 项，工具调用 → function_call 项，usage → `response.completed`；`finish_reason: length` → `response.incomplete`；上游错误映射到 Codex 认识的码（`context_length_exceeded`、`insufficient_quota`、`rate_limit_exceeded`、`server_is_overloaded`） |
-| 网关 | `packages/codex/src/model-gateway.ts` | worker 进程里一个只听 127.0.0.1 的监听。Codex 拿到的 `base_url` 是 `http://127.0.0.1:<port>/<route>`，route 是「工作区 + 提供方」在本次启动的随机密钥下的 HMAC（猜不到，进程重启即失效）；上游地址由 route 查出，从不取自请求。`chat` 走转换，`responses`（和 SIWC 套餐）原样透传。**密钥由网关逐请求加上**：Codex 的环境、config、线程设置、rollout 文件里都没有它；令牌更新（SIWC 刷新）下一次请求就生效，不用重启 sidecar |
+| 网关 | `packages/codex/src/model-gateway.ts` | worker 进程里一个只听 127.0.0.1 的监听。Codex 拿到的 `base_url` 是 `http://127.0.0.1:<port>/<route>`，route 是「工作区 + 提供方」在本次启动的随机密钥下的 HMAC（猜不到，进程重启即失效）；上游地址由 route 查出，从不取自请求。`chat` 走转换，`responses`（和 SIWC 套餐）原样透传。**密钥由网关逐请求加上**：Codex 的环境、config、线程设置、rollout 文件里都没有它；令牌更新（SIWC 刷新）下一次请求就生效，不用重启 sidecar。向上游的请求**不跟随重定向**（`redirect: "manual"`，3xx 原样交回，密钥不会被带到别的地址）；上游带 `refused` 时（托管版上的 loopback 地址、或域名此刻解析到内网）直接 502，不连接 |
 | 路由 | `packages/codex/src/providers.ts` | `ProviderConfig`（`model.provider` 设置，无密钥，只有 `keyLast4`）、`decideRoute`、`threadProvider`。`skill-runner` 的 `executeSkill` 先问 `decideRoute`：提供方能做这件事且检验准入 → 在这个线程上定义提供方（`modelProvider` + `model_providers.<id>`，`requires_openai_auth=false`、`supports_websockets=false`，不带 effort）；否则该工作区自己的 Codex 登录；都没有 → `MODEL_CAPABILITY_MISSING` / `MODEL_NOT_ADMITTED`，白话说明，**不启动线程、绝不借用主人的运行时** |
 | 需求与检验 | `packages/core/src/provider-conformance.ts` | `SKILL_NEEDS`（每个 Skill 的白话名、输出 schema、critical、tools/webSearch/image/shell）、`capabilityGap`、`conformanceCases`、`jsonSchemaProblems`、`admittedSkills`、`conformanceCurrent` |
-| 服务 | `apps/worker/src/model-provider.ts` | 设置行、DPAPI 密钥、网关上游解析、额度读数、检验运行、supervisor 路由 `/v1/model/provider`（GET/POST/DELETE）与 `/v1/model/provider/test` |
+| 服务 | `apps/worker/src/model-provider.ts` | 设置行、DPAPI 密钥、网关上游解析、额度读数、检验运行、supervisor 路由 `/v1/model/provider`（GET/POST/DELETE）与 `/v1/model/provider/test`。**保存前先测一次连接**（`apps/worker/src/provider-probe.ts`，2026-10-30）：地址先规范化（`normalizeProviderBaseUrl` 去掉粘贴进来的 `/chat/completions`、`/responses`、`/models`），域名所有解析结果都须是公网地址，然后 `GET /models`（401/403 → 密钥无效；顺便取模型列表），再发一个最小请求（chat：一句 `Reply with OK.`；responses：`max_output_tokens: 16`），30 秒为限、不跟随重定向。失败按原因说白话：`PROVIDER_KEY_INVALID`、`PROVIDER_PATH_WRONG`（404 或返回网页，地址里没有 `/vN` 时提示补 `/v1`）、`PROVIDER_MODEL_UNKNOWN`（列出模型列表里相近的名字）、`PROVIDER_BALANCE`、`PROVIDER_REDIRECT`、`PROVIDER_UNREACHABLE`、`PROVIDER_ADDRESS_PRIVATE`；对方原话里的密钥和形似密钥的串一律打码（`maskedSnippet`）。测不通就不保存，原配置和密钥不动；测通后写密钥和设置行并**立即开始一致性检验**。改地址或模型而不填新密钥时，沿用已存密钥去测（仍只在 worker 内）；托管版（`CROSSLINE_PUBLIC_BETA=1`）拒绝 loopback 地址，网关解析上游时每次请求再查一遍 DNS |
 | 密钥 | `packages/connectors/src/secret-file.ts` | `data/secrets/<ws>/provider-key.bin`，DPAPI（当前 Windows 用户），不进账本、导出和备份；非 Windows 拒绝保存，不写明文 |
-| 界面 | `apps/web/app/settings/model-provider-card.tsx`，`/api/model/provider[/test]` | 设置 → 日历与连接 → 「其他模型」：起点（DeepSeek、Kimi、通义千问、智谱 GLM、Claude、Gemini、OpenAI API、OpenRouter、本机 Ollama）、接口类型、地址、模型、密钥（只发一次给 worker，之后只显示末 4 位）、运行检验与进度、交给它的功能与其余功能各自的原因、做不到的能力一句话 |
+| 界面 | `apps/web/app/settings/model-provider-card.tsx`，`/api/model/provider[/test]` | 设置 → 模型连接 → 「其他模型」与连接页 `/connect`：起点（「中转站 / 自定义地址」、DeepSeek、Kimi、通义千问、智谱 GLM、Claude、Gemini、OpenAI API、OpenRouter、本机 Ollama；没有添加时另有一行「没有 ChatGPT Plus，也没有官方 API」+「用中转站接入」，中转站表单写明它能看到发给模型的全部内容，教程 `modelProviderGuide` 的「中转站」页讲 base URL 以 `/v1` 结尾和 401/404/模型名/余额四种常见错误；按钮是「测试连接并保存」）、接口类型、地址、模型、密钥（只发一次给 worker，之后只显示末 4 位）、运行检验与进度、交给它的功能与其余功能各自的原因、做不到的能力一句话 |
 
 运行时注册表加了 `hasProvider`：只配了提供方、没有 Codex 登录的访客也有自己的进程（`connected`），但 `signedIn` 为假，需要联网、生图的 Skill 对它直接报不可用。
 
@@ -257,7 +257,7 @@ export interface RuntimeRegistry {
 | Ollama / LM Studio | 无 | 不需要 |
 
 - **屏幕活动永不出门**：`apps/web/lib/activity-privacy.test.ts` 已禁止任何构建模型上下文的代码碰窗口段；把直连适配器所在目录加入它的扫描范围。录音继续本机转写。
-- **出站白名单**：网关只连 `model.provider` 里登记的地址，地址由 route 查出、不取自请求；`https` 必须，loopback 例外（`providerConfigProblem`）；地址里不许带账号、参数。
+- **出站白名单**：网关只连 `model.provider` 里登记的地址，地址由 route 查出、不取自请求；`https` 必须，而且必须是公网域名：IP 字面量（含 `0x7f000001` 这类写法）、单段主机名、`.local`/`.internal`/`.lan` 等内网后缀都拒绝；loopback 只在本机版例外，托管版也拒绝（`providerConfigProblem(…, { allowLoopback })`）；地址里不许带账号、参数。域名在保存时和网关每次请求时都查 DNS，任何一条解析到内网就不连；不跟随重定向。
 - **同意按 workspace、按提供方**，撤销后该提供方立即退出路由（`model.consent.<id>`）。
 - 密钥规则见 2.3；`model.connection` 的发现式测试断言导出快照和所有 API 响应里不出现 `sk-`、`AIza`、`sk-ant-` 前缀。
 

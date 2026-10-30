@@ -40,16 +40,43 @@ export const MODEL_PROVIDER_SETTING = "model.provider";
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 export const isLocalProvider = (baseUrl: string) => { try { return LOOPBACK.has(new URL(baseUrl).hostname); } catch { return false; } };
 
-/** Why a provider configuration cannot be saved, in words the person reads; undefined when it can. */
-export function providerConfigProblem(config: Pick<ProviderConfig, "id" | "kind" | "baseUrl" | "model" | "label">, locale?: Locale): string | undefined {
+/**
+ * The base URL as stored: spaces and trailing slashes gone, and an endpoint pasted whole (`…/v1/chat/completions`, a relay's dashboard
+ * often shows that) cut back to its base, since the gateway adds the endpoint itself.
+ */
+export function normalizeProviderBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "").replace(/\/(chat\/completions|responses|completions|models)$/i, "").replace(/\/+$/, "");
+}
+
+/** A host that is a name on the public internet: not an IP literal, not a single label, not a name kept for local networks. */
+const LOCAL_SUFFIX = /\.(local|localhost|internal|intranet|lan|home|corp|localdomain|home\.arpa)$/i;
+const publicDomainName = (host: string) => !host.startsWith("[") && !/^[\d.]+$/.test(host) && !/^0x/i.test(host) && host.includes(".")
+  && !LOCAL_SUFFIX.test(host) && /^[a-z0-9.-]+$/i.test(host);
+
+/**
+ * Why a provider configuration cannot be saved, in words the person reads; undefined when it can. The address must be https on a
+ * public domain name; a model on this computer (loopback, plain http allowed) only where Crossline itself runs on the person's computer
+ * (`allowLoopback`, off on the hosted server, where loopback is the server's own services). Whether the name resolves to a public address
+ * is the worker's check (`resolvesPublicly`), on saving and on every request.
+ */
+export function providerConfigProblem(config: Pick<ProviderConfig, "id" | "kind" | "baseUrl" | "model" | "label">, locale?: Locale,
+  options: { allowLoopback?: boolean } = {}): string | undefined {
   const t = tFor(locale);
   if (!/^[a-z0-9-]{1,32}$/.test(config.id)) return t("名称只能用小写字母、数字和连字符。");
   if (!["chat", "responses", "siwc-plan"].includes(config.kind)) return t("接口类型不认识。");
   if (!config.label.trim() || config.label.length > 40) return t("请填一个 40 字以内的显示名称。");
+  if (!config.baseUrl.trim()) return t("请填写接口地址（base URL）。");
   let url: URL;
   try { url = new URL(config.baseUrl); } catch { return t("接口地址不是一个网址。"); }
   if (url.username || url.password || url.search || url.hash) return t("接口地址里不能带账号、参数或 #。");
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK.has(url.hostname))) return t("接口地址必须是 https；只有本机模型（127.0.0.1）可以用 http。");
+  const loopback = LOOPBACK.has(url.hostname);
+  if (loopback) {
+    if (options.allowLoopback === false) return t("网页版连接不到本机地址；请填写模型服务的公网 https 地址。");
+    if (url.protocol !== "https:" && url.protocol !== "http:") return t("接口地址必须是 https；只有本机模型（127.0.0.1）可以用 http。");
+  } else {
+    if (url.protocol !== "https:") return t("接口地址必须是 https；只有本机模型（127.0.0.1）可以用 http。");
+    if (!publicDomainName(url.hostname)) return t("接口地址要用公网域名，不能是 IP 地址或内网地址。");
+  }
   if (!config.model || config.model.length > 120 || /\s/.test(config.model)) return t("请填写模型名（不含空格）。");
   return undefined;
 }
