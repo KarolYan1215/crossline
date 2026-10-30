@@ -80,9 +80,21 @@ export function sleepFromPhoneEvents(events: PhoneSleepEvent[]): SleepEpisode[] 
 
 /**
  * Several sources, one night each: what a phone's health record says wins over the phone's sleep-focus switch, which wins over the
- * screen's guess for the same night.
+ * screen's guess for the same night — and what the person said about that night (`self_report`, through the input box) wins over all.
  */
-const SOURCE_RANK: Record<string, number> = { screen: 0, "phone-focus": 1 };
+const SOURCE_RANK: Record<string, number> = { screen: 0, "phone-focus": 1, self_report: 3 };
+/**
+ * Nights the person reported in the input box (「昨晚一点睡、八点起」), the last 60. Read whatever the phone or screen consents say: it
+ * is the person's own word, not a device's reading.
+ */
+export const SELF_SLEEP_SETTING = "energy.sleepReports";
+export function readSelfSleep(raw: string | null | undefined): SleepEpisode[] {
+  try {
+    const value = JSON.parse(raw ?? "[]") as unknown;
+    return Array.isArray(value) ? value.filter((item): item is SleepEpisode => Boolean(item) && typeof item.sleepAt === "string" && typeof item.wakeAt === "string")
+      .map((item) => ({ sleepAt: item.sleepAt, wakeAt: item.wakeAt, source: "self_report" })) : [];
+  } catch { return []; }
+}
 export function mergeSleep(...sources: SleepEpisode[][]): SleepEpisode[] {
   const rank = (episode: SleepEpisode) => SOURCE_RANK[episode.source] ?? 2;
   const byWake = new Map<string, SleepEpisode>();

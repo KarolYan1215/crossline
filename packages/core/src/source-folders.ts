@@ -149,6 +149,21 @@ export function credentialText(text: string): string | undefined {
 }
 
 /**
+ * A key pasted into the input box, cut out before the line is kept or read by a model (the owner's rule of 2026-10-30: a secret is never
+ * echoed into the conversation). The same formats `credentialText` knows, plus a long key-like run after a word naming a key or a
+ * password; the place it stood says 「已移除」, so the reply can point to where the person sets it.
+ */
+export function redactSecrets(text: string): { text: string; redacted: boolean } {
+  let redacted = false;
+  const mark = () => { redacted = true; return "［已移除的密钥］"; };
+  const out = text
+    .replace(/(?<![A-Za-z0-9])(sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|xox[bp]-[A-Za-z0-9-]{10,})/g, mark)
+    .replace(/-----BEGIN [\s\S]*?(-----END[^-]*-----|$)/g, mark)
+    .replace(/((?:key|secret|token|password|passwd|密钥|令牌|密码|口令|授权码)\s*(?:是|为|:|：|=|is)\s*)([\x21-\x7e]{6,})/gi, (_, lead: string) => `${lead}${mark()}`);
+  return { text: out, redacted };
+}
+
+/**
  * Files that look like the person's private papers (decided 2026-10-15, after a real Downloads and Desktop held proof of funds, a Social
  * Security application, tax documents, immigration forms, receipts, an offer and reports carrying the person's name and student number):
  * not read unless the person ticks them back. Judged on the words of the name and its folders, in English and Chinese; a wrong guess

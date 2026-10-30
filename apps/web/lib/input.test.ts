@@ -11,7 +11,7 @@ import { recentOps, undoOp } from "./undo";
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; });
 
 const ws = TEST_CTX.workspaceId;
-const op = { workOrderId: "w1", date: "", minutes: 0, stepId: "", text: "", who: "", energy: "" as const };
+const op = { workOrderId: "w1", date: "", minutes: 0, stepId: "", text: "", who: "", energy: "" as const, outcome: "" as const };
 
 test("the box's actions write a goal, a milestone draft, a new line and a task note, and every write can be undone", async () => {
   const store = globalThis.crosslineStore = new CrosslineStore(":memory:");

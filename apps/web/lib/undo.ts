@@ -1,6 +1,6 @@
 import "server-only";
 import { reopenAgentResult, retractedEventIdsIn, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
-import { PORTRAIT_FIGURE_SETTING, taskTitleOf, type AccessContext, type StoredDomainRecord, type WorkOrderState } from "@crossline/core";
+import { PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING, taskTitleOf, type AccessContext, type StoredDomainRecord, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 import { tOf } from "./locale";
 
@@ -47,6 +47,9 @@ export type Inverse =
   | { kind: "step_plan.restore"; plans: Array<{ workOrderId: string; plan: StepPlanInput }> }
   /** Tasks handed in by themselves once the person's steps were done (`lib/auto-close.ts`): open again, approved, the rest of their steps as left. */
   | { kind: "work_order.reopen"; ids: string[] }
+  /** Sessions of minutes the person reported (`recordConfirmedSession`) and energy they reported, written by the operation: removed again. */
+  | { kind: "execution.remove"; ids: string[] }
+  | { kind: "energy.remove"; ids: string[] }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
@@ -190,6 +193,12 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
       case "agent.reopen":
         for (const id of inverse.taskIds) reopenAgentResult(store, ctx.workspaceId, id, ctx.principalId);
         return { ok: true };
+      case "execution.remove":
+        for (const id of inverse.ids) store.deleteConfirmedExecution(ctx.workspaceId, id);
+        return { ok: true };
+      case "energy.remove":
+        for (const id of inverse.ids) store.deleteSelfReportedEnergy(ctx.workspaceId, id);
+        return { ok: true };
       case "source.project":
         for (const entry of inverse.entries) store.assignSourceDocumentProject(ctx.workspaceId, entry.id, entry.projectId);
         return { ok: true };
@@ -253,7 +262,7 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
 }
 
 /** Settings an operation may change and an undo puts back. Device, account and calendar-write state are not operations. */
-const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines", "ledger.", PORTRAIT_FIGURE_SETTING] as const;
+const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines", "ledger.", PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING] as const;
 /** Ledger markers that hide or close something when written; undoing the operation that wrote them brings it back. */
 const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged", "source.project_cleared", "milestone.overdue_resolved", "task.overdue_resolved"];
 
@@ -273,7 +282,9 @@ function snapshot(ctx: AccessContext) {
     recordFields: new Map(store.listRecords(ctx.workspaceId, { includeDeleted: true }).map((record) => [record.id,
       { kind: record.kind, category: record.category, categoryBy: record.categoryBy, status: record.status, possibleDupOf: record.possibleDupOf, refundOf: record.refundOf, voidReason: record.voidReason }])),
     evidence: new Map(store.listRecordEvidence(ctx.workspaceId).map((item) => [item.id, item.recordId])),
-    eventIds: new Set(store.listEvents(ctx.workspaceId, { type: RETRACTABLE_EVENTS }).map((event) => event.eventId))
+    eventIds: new Set(store.listEvents(ctx.workspaceId, { type: RETRACTABLE_EVENTS }).map((event) => event.eventId)),
+    sessions: new Set(store.listExecutions(ctx.workspaceId).filter((execution) => String(execution.outcome) === "confirmed").map((execution) => execution.id)),
+    energy: new Set(store.listEnergyObservations(ctx.workspaceId).filter((item) => item.source === "self_report").map((item) => item.id))
   };
 }
 
@@ -346,6 +357,13 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
   if (entries.length) items.push({ kind: "settings.restore", entries });
   const added = [...after.eventIds].filter((id) => !before.eventIds.has(id));
   if (added.length) items.push({ kind: "event.retract", eventIds: added });
+  const sessions = [...after.sessions].filter((id) => !before.sessions.has(id));
+  if (sessions.length) items.push({ kind: "execution.remove", ids: sessions });
+  const energy = [...after.energy].filter((id) => !before.energy.has(id));
+  if (energy.length) items.push({ kind: "energy.remove", ids: energy });
+  // A task the operation finished (a reported completion) opens again; one that was already accepted is history.
+  const finished = [...after.orders].filter(([id, now]) => now.state === "accepted" && before.orders.has(id) && before.orders.get(id)!.state !== "accepted").map(([id]) => id);
+  if (finished.length) items.push({ kind: "work_order.reopen", ids: finished });
   return items;
 }
 

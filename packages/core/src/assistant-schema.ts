@@ -3,7 +3,7 @@
  * 下周二」). Carried out by `applyTaskOp` (apps/web/lib/task-ops.ts) after the person confirms the card, undoable like any other operation.
  * The site-wide assistant Skill that first returned these was replaced by `crossline-concierge` (docs/one-input.md).
  */
-export type TaskOpType = "due" | "defer" | "estimate" | "step_done" | "step_add" | "replan" | "waiting" | "energy" | "note" | "progress" | "archive" | "start" | "tutorial";
+export type TaskOpType = "due" | "defer" | "estimate" | "step_done" | "step_add" | "replan" | "waiting" | "energy" | "note" | "progress" | "archive" | "start" | "tutorial" | "complete";
 export type TaskOp = {
   type: TaskOpType;
   /** due/defer/waiting: YYYY-MM-DD. */ date: string;

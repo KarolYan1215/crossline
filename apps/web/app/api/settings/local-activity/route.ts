@@ -1,4 +1,4 @@
-import { assistantAvailable as machineOwner } from "@crossline/db";
+import { setActivityConsent } from "../../../../lib/consents";
 import { ACTIVITY_BLACKLIST, ACTIVITY_DETAIL_CONSENT, ACTIVITY_PAUSED_UNTIL, getStore, LOCAL_ACTIVITY_CONSENT } from "../../../../lib/crossline";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
@@ -23,24 +23,18 @@ export async function POST(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   const body = (await request.json().catch(() => ({}))) as { consent?: unknown; detail?: unknown; pauseMinutes?: unknown; blacklist?: unknown; clearTitles?: unknown };
-  // This computer's own readings belong to its owner's account only; a guest's device is elsewhere (2026-10-15 walkthrough).
-  if ((body.consent === "granted" || body.detail === "granted") && !machineOwner(getStore(), access.ctx.workspaceId)) return Response.json({ ok: false, code: "MACHINE_OWNER_ONLY" }, { status: 403 });
   const store = getStore(), workspaceId = access.ctx.workspaceId;
   let touched = false;
 
-  // Only the answers a person can actually give. Absent stays absent — never asked is a real state.
-  if (body.consent !== undefined) {
-    if (body.consent !== "granted" && body.consent !== "denied") return Response.json({ ok: false, code: "CONSENT_VALUE_INVALID" }, { status: 400 });
-    store.setSetting(workspaceId, LOCAL_ACTIVITY_CONSENT, body.consent);
-    // Turning the whole thing off turns the detailed level off too: one switch must not leave a quieter one running.
-    if (body.consent === "denied") store.setSetting(workspaceId, ACTIVITY_DETAIL_CONSENT, "denied");
-    touched = true;
-  }
-  if (body.detail !== undefined) {
-    if (body.detail !== "granted" && body.detail !== "denied") return Response.json({ ok: false, code: "CONSENT_VALUE_INVALID" }, { status: 400 });
-    store.setSetting(workspaceId, ACTIVITY_DETAIL_CONSENT, body.detail);
-    // The detailed level includes the minutes; asking for it grants both so nothing is half on.
-    if (body.detail === "granted") store.setSetting(workspaceId, LOCAL_ACTIVITY_CONSENT, "granted");
+  // Only the answers a person can actually give. Absent stays absent — never asked is a real state. Turning the whole thing off turns
+  // the detailed level off too, and asking for the detail grants the minutes too (`setActivityConsent`), so nothing is half on.
+  const valid = (value: unknown) => value === undefined || value === "granted" || value === "denied";
+  if (!valid(body.consent) || !valid(body.detail)) return Response.json({ ok: false, code: "CONSENT_VALUE_INVALID" }, { status: 400 });
+  if (body.consent !== undefined || body.detail !== undefined) {
+    // This computer's own readings belong to its owner's account only; a guest's device is elsewhere (2026-10-15 walkthrough).
+    const result = setActivityConsent(access.ctx, { ...(body.consent ? { consent: body.consent as "granted" | "denied" } : {}),
+      ...(body.detail ? { detail: body.detail as "granted" | "denied" } : {}) });
+    if (!result.ok) return Response.json(result, { status: 403 });
     touched = true;
   }
   if (body.pauseMinutes !== undefined) {

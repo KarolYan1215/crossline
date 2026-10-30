@@ -266,12 +266,17 @@ function ActionRow({ card, index, editing, onEdit, fields, changed }: { card: Ca
   return <li data-state={item.state} data-risk={ACTIONS[action.action].risk}>
     <b>{t(ACTIONS[action.action].label)}</b><span className="gen">{action.summary}</span>
     <small className="conversation-state">{undone || (changed && item.state === "pending" ? t("已修改，待执行") : STATE_WORD[item.state] ? t(STATE_WORD[item.state]!) : "")}</small>
+    {item.setting && <span className="conversation-setting">
+      <small>{t("{{label}}：当前「{{from}}」→ 改成「{{to}}」", { label: item.setting.label, from: item.setting.from, to: item.setting.to })}</small>
+      <small className="muted">{item.setting.consequence}</small>
+      {item.setting.explain?.map((line) => <small key={line} className="muted">{line}</small>)}
+    </span>}
     {onEdit && <button type="button" className="text-button" aria-expanded={editing} onClick={onEdit}>{editing ? t("收起") : t("修改")}</button>}
     {editing && fields}
     {/* A handler with nothing to add says 「已完成」, which only repeated 「已执行」 beside it (「已执行 已完成」, W-148). */}
     {item.message && !(item.state === "done" && item.message === t("已完成")) && <small className="muted">{item.message}</small>}
     {item.state === "done" && <span className="conversation-links">
-      {item.href && <a href={item.href}>{t("查看 →")}</a>}
+      {item.href && (action.action === "settings.open" ? <a className="secondary-button" href={item.href}>{t("去设置 →")}</a> : <a href={item.href}>{t("查看 →")}</a>)}
       {item.opId && !undone && <button type="button" className="text-button" onClick={async () => {
         const result = await undoOperation(item.opId!, t);
         setUndone(result.ok ? t("已撤销") : result.message);

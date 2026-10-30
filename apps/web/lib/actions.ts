@@ -3,10 +3,13 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createReminderWorkflow, requestAutomation, reviewAgentTask } from "@crossline/db";
-import { ACTIONS, describeEvent, scheduleLabel, templateCriterion, windowDays, type AccessContext, type ActionArgs, type ActionId, type ProposedAction } from "@crossline/core";
+import { ACTIONS, SELF_SLEEP_SETTING, SETTINGS_SECTIONS, describeEvent, readSelfSleep, scheduleLabel, sleepHours, templateCriterion, windowDays, type AccessContext, type ActionArgs,
+  type ActionId, type ProposedAction } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
-import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, getStore, saveMilestoneTemplate,
-  shiftToday, startWorkOrderExecution } from "./crossline";
+import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, effectiveSchedulePreferences, getStore, saveMilestoneTemplate,
+  shiftToday, startWorkOrderExecution, toZonedInstant } from "./crossline";
+import { applySettingChange } from "./setting-change";
+import { answerWrapBlock } from "./wrap";
 import { saveSourceFiles } from "./sources";
 import { requestStepReplan, requestTaskPass } from "./steps";
 import { approveMilestoneDrafts, rejectMilestoneDrafts } from "./approvals";
@@ -56,9 +59,42 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
   // The note is the conversation's own message, searchable from the box; nothing else is written.
   "note.add": (ctx) => ({ ok: true, message: tOf(ctx)("已记下，可在对话记录中搜索") }),
   "task.op": async (ctx, args) => {
+    const href = `/workbench/${encodeURIComponent(args.workOrderId)}`;
+    // The whole task done (「作业 3 写完了，用了两小时」): finished as 完成 finishes it, with the minutes and how it went when said.
+    if (args.type === "complete") {
+      const order = getStore().getWorkOrder(ctx.workspaceId, args.workOrderId);
+      if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
+      if (["approved", "preparing", "ready_for_human"].includes(order.state)) {
+        const started = startWorkOrderExecution(ctx, order.id);
+        if (!started.ok) return started;
+      }
+      const done = completeWorkOrderExecution(ctx, order.id, [], [], undefined, args.minutes > 0 ? { minutes: Math.round(args.minutes), source: "one_tap" } : undefined,
+        args.outcome ? { level: args.outcome, note: args.text.trim().slice(0, 300) } : undefined);
+      return done.ok ? { ok: true, message: tOf(ctx)("已记为完成"), href } : done;
+    }
+    // Minutes the person says they worked are a closed session, so measured capacity and the calibration see them (as the completion check does).
+    if ((args.type === "progress" || args.type === "step_done") && args.minutes > 0) recordReportedMinutes(ctx, args.workOrderId, args.minutes);
     const result = await applyTaskOp(ctx, args.workOrderId, { ...args, summary: "" });
-    return result.ok ? { ok: true, href: `/workbench/${encodeURIComponent(args.workOrderId)}` } : result;
+    return result.ok ? { ok: true, href } : result;
   },
+  "sleep.report": (ctx, args) => {
+    const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+    const before = args.sleepTime > args.wakeTime ? new Date(Date.parse(`${args.wakeDate}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10) : args.wakeDate;
+    const night = { sleepAt: toZonedInstant(before, args.sleepTime, zone), wakeAt: toZonedInstant(args.wakeDate, args.wakeTime, zone), source: "self_report" };
+    const store = getStore();
+    // One night per waking day: a second report of the same night replaces the first.
+    const kept = readSelfSleep(store.getSetting(ctx.workspaceId, SELF_SLEEP_SETTING)).filter((item) => item.wakeAt.slice(0, 10) !== night.wakeAt.slice(0, 10));
+    store.setSetting(ctx.workspaceId, SELF_SLEEP_SETTING, JSON.stringify([...kept, night].sort((a, b) => a.wakeAt.localeCompare(b.wakeAt)).slice(-60)));
+    return { ok: true, message: tOf(ctx)("已记下睡眠约 {{hours}} 小时，精力推算按此更新", { hours: sleepHours(args).toFixed(1) }) };
+  },
+  "block.outcome": (ctx, args) => {
+    const result = answerWrapBlock(ctx, args.blockId, args.outcome);
+    return result.ok ? { ok: true, href: "/wrap" } : { ok: false, code: result.code };
+  },
+  "setting.change": (ctx, args) => applySettingChange(ctx, args),
+  // Nothing is changed: a credential or a destructive change is the person's own, on its card.
+  "settings.open": (ctx, args) => ({ ok: true, href: `/settings#${args.section}`,
+    message: tOf(ctx)("在设置「{{section}}」由本人修改", { section: tOf(ctx)(SETTINGS_SECTIONS[args.section]) }) }),
   "ask.answer": async (ctx, args) => answerAsk(ctx, args.askId, args.optionId, Object.fromEntries(args.fields.map((field) => [field.id, field.value]))),
   "ask.snooze": (ctx, args) => snoozeAsk(ctx, args.askId, args.until),
   "undo": (ctx, args) => {
@@ -258,6 +294,13 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     return result.ok ? { ok: true, message: tOf(ctx)("模板已添加，新建里程碑时可选"), href: "/milestones" } : result;
   }
 };
+
+/** A closed session of the minutes the person reported, ending now (`recordConfirmedSession`, as the completion check writes one). */
+function recordReportedMinutes(ctx: AccessContext, workOrderId: string, minutes: number): void {
+  const end = new Date();
+  getStore().recordConfirmedSession(ctx.workspaceId, workOrderId, ctx.principalId, { startedAt: new Date(end.getTime() - Math.round(minutes) * 60_000).toISOString(),
+    endedAt: end.toISOString(), minutes: Math.round(minutes), source: "one_tap", key: `reported-session:${workOrderId}:${randomUUID()}` });
+}
 
 const findDoc = (ctx: AccessContext, id: string) => getStore().listSourceDocuments(ctx.workspaceId).find((doc) => doc.id === id);
 

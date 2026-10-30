@@ -157,6 +157,16 @@ P3 实现：文件经 `/api/conversation/files` 存为本人的资料并当场�
 
 **路上时间**：有实际地点的日程（本人加的、订阅或同步的日历里带地点的）前后各留一段「路上」（`travelBlocks`，在 `committedBlocks` 里作为占用时间，排程绕开，日视图显示）。线上（会议链接、线上、Zoom 等）不留。分钟数依次取：本人对这个地点说过的；设了住址且地图开启时的 OpenStreetMap 估算（Nominatim 地理编码 + 公共 OSRM 驾车路线，后台估算、每秒至多一次、结果缓存，住址与地点只在本人填了住址后才发出）；本人设的默认值；都没有时按 30 分钟留，并对这个地点问一次（`travel_minutes`：10/20/30/45/60 分钟/线上）。「公司」「学校」按工作或学习地点估算。设置在 设置 → 时间与提醒 →「出行」，也可在输入框说（`travel.set`）。
 
+### 3.7b 设置与事实（2026-10-30）
+
+本人决定：输入框能改本人能改的每一项设置，本人说出的每条有效信息都要落进账本或设置。
+
+- **一个通用动作 `setting.change {key, target, value}`**，键名来自 `packages/core/src/setting-catalog.ts` 的白名单（名称、针对的对象、值的类型与范围、是否隐私同意、后果一句话）；`apps/web/lib/setting-change.ts` 为每个键调用设置页或其路由所用的同一个函数（`lib/consents.ts` 是各隐私开关与路由共用的函数），排程类的键走 `lib/impact.ts` 的 `applyChange`，卡片上带预览。卡片写「当前 → 改成」和后果，本人确认后才改；页面能撤销的照样能撤销。模型用 `list_settings` 查键名、可选值与当前值。
+- **隐私同意可开可关**：卡片带设置卡上的原文说明（`explain`，测试逐字对照设置卡）；关闭时照设置页删除对应数据，录音类须先问保留还是删除已转写的文字（`off_keep` / `off_delete`）。文件夹授权不在其中（要选路径）。
+- **凭据与不可撤回的操作不经输入框**：密码、各类密钥与令牌、节点配对、日历写入登录、重置或删除账号、文件夹授权与清除——只给 `settings.open` 链接按钮。粘贴进来的密钥在保存和发给模型前被删去（`redactSecrets`）。
+- **已发生的事实立即写入、可撤销、不用确认**（`isImmediate`）：`sleep.report`（本人报的睡眠，`energy.sleepReports`，不受手机健康同意限制，优先于手机与屏幕推算）、`block.outcome`（同收工页）、`task.op` 的 `progress`/`step_done`（带分钟数时记一段已结束的计时，`recordConfirmedSession`）、`complete`（`completeWorkOrderExecution`）、`note`/`energy`，以及 `record.add`、`energy.report`、`profile.tell`、`note.add`。撤销：步骤、设置与记录照常；报的计时段、自评精力删除；报完成的任务重新打开。设置与计划的改动仍须确认。
+- **兜底**：没有动作合适的有效信息交给访谈（`profile.tell`）；只有提问与寒暄不需要动作。
+
 ### 3.8 退役
 
 - 前端 `looksLikeScheduleCommand` 分诊：删除，所有输入都进同一回合。

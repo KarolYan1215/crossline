@@ -139,7 +139,7 @@ const hours = (t: Translate, minutes: number) => minutes >= 60 ? t("{{hours}} �
 /** 「title · step」 in the language's quotes. */
 const quoted = (t: Translate, title: string, step?: string) => t("「{{text}}」", { text: `${title}${step ? ` · ${step}` : ""}` });
 const op = (orderId: string, type: "start" | "defer" | "step_done" | "due", summary: string, extra: { date?: string; stepId?: string } = {}): ProposedAction =>
-  ({ action: "task.op", summary, args: { workOrderId: orderId, type, date: extra.date ?? "", minutes: 0, stepId: extra.stepId ?? "", text: "", who: "", energy: "" } });
+  ({ action: "task.op", summary, args: { workOrderId: orderId, type, date: extra.date ?? "", minutes: 0, stepId: extra.stepId ?? "", text: "", who: "", energy: "", outcome: "" } });
 /** What would be said now, before the person's quiet hours, mutes and the day's cap are applied. */
 export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
   const t = tFor(input.locale);

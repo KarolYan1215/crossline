@@ -2,7 +2,7 @@ import "server-only";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import {
-  ACTIVITY_LONG_GAPS, CAMERA_ENERGY_CONSENT, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, PHONE_HEALTH_CONSENT, SLEEP_TRACKING_CONSENT, phoneHealthGranted, calibrate, covariateShift, inputRhythmAt, judgeCovariate, dayCapacity, mergeSleep, phaseShiftFromPeak, predictEnergy, sleepFromGaps, sleepFromPhoneEvents, alertnessAt,
+  ACTIVITY_LONG_GAPS, CAMERA_ENERGY_CONSENT, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, PHONE_HEALTH_CONSENT, SELF_SLEEP_SETTING, SLEEP_TRACKING_CONSENT, phoneHealthGranted, readSelfSleep, calibrate, covariateShift, inputRhythmAt, judgeCovariate, dayCapacity, mergeSleep, phaseShiftFromPeak, predictEnergy, sleepFromGaps, sleepFromPhoneEvents, alertnessAt,
   type AccessContext, type AdmittedActivity, type AvailabilityWindow, type DailyActivityId, type CovariateVerdict, type DailyPhysiology, type InputRhythmBucket, type DayCapacity, type EnergyCalibration, type EnergyLevel, type EnergyPrediction, type EnergySource, type PhoneSleepEvent, type SleepEpisode
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore } from "./crossline";
@@ -113,7 +113,7 @@ export function energyModel(ctx: AccessContext, windows: AvailabilityWindow[]): 
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const hourOf = (iso: string) => { const [h, m] = formatInTimeZone(new Date(iso), zone, "HH:mm").split(":").map(Number); return (h ?? 0) + (m ?? 0) / 60; };
   const phone = phoneSource(ctx);
-  const episodes = mergeSleep(screenSource(ctx, hourOf).sleep(), phone.sleep());
+  const episodes = mergeSleep(screenSource(ctx, hourOf).sleep(), phone.sleep(), readSelfSleep(store.getSetting(ctx.workspaceId, SELF_SLEEP_SETTING)));
   // The circadian peak sits where the person said their best hours are (the high-energy windows of the availability pattern).
   const peak = windows.find((window) => window.energy === "high");
   const toHour = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) + (m ?? 0) / 60; };

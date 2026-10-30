@@ -3731,6 +3731,16 @@ export class CrosslineStore {
     return this.#prepare("DELETE FROM energy_observations WHERE workspace_id = ? AND source = ?").run(workspaceId, source).changes;
   }
 
+  /** One self-reported observation taken back (an undo of the input box's 「记录精力」); other sources are never removed one by one. */
+  deleteSelfReportedEnergy(workspaceId: string, id: string): boolean {
+    return this.#prepare("DELETE FROM energy_observations WHERE workspace_id = ? AND id = ? AND source = 'self_report'").run(workspaceId, id).changes > 0;
+  }
+
+  /** A session written by `recordConfirmedSession` (minutes the person reported) taken back by an undo; a timed session is never removed. */
+  deleteConfirmedExecution(workspaceId: string, id: string): boolean {
+    return this.#prepare("DELETE FROM executions WHERE workspace_id = ? AND id = ? AND outcome = 'confirmed'").run(workspaceId, id).changes > 0;
+  }
+
   listEnergyObservations(workspaceId: string): StoredEnergyObservation[] {
     const rows = this.#prepare(
       "SELECT * FROM energy_observations WHERE workspace_id = ? ORDER BY observed_at DESC, id"

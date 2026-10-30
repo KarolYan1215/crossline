@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { formatInTimeZone } from "date-fns-tz";
 import { closeMailReply, resultsAwaitingReview, type StoredConversationMessage } from "@crossline/db";
 import {
-  ACTIONS, AUTOMATIONS_SETTING, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
+  ACTIONS, AUTOMATIONS_SETTING, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, isImmediate, redactSecrets, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
   type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
 import { DOMAIN_PACKS } from "@crossline/identity-packs";
@@ -20,6 +20,7 @@ import { readOpener, type OpenerView } from "./opener";
 import { returnPageLines } from "./return";
 import { tOf } from "./locale";
 import { captureProgress } from "./capture-progress";
+import { currentSettings, describeSettingChange, type SettingView } from "./setting-change";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
 /** `stepId`: on a task, the step its block is for (Today's day panel), so 「这一步」 names that step rather than the first open one. */
@@ -27,7 +28,8 @@ export type PageContext = { kind: string; entityId: string; stepId?: string };
 export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 
 /** One action on a card and what became of it. */
-export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; message?: string; opId?: string; href?: string; captureId?: string };
+/** `setting`: a `setting.change`'s 当前 → 改成, what follows and (a consent) its full explanation, read when the card was made. */
+export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; message?: string; opId?: string; href?: string; captureId?: string; setting?: SettingView };
 /** An assistant message's card: what the turn proposed, the question back, and the state of each. */
 /**
  * An option of a card's question. A turn's options carry candidate actions; a nudge's buttons may instead open a page (`href`),
@@ -119,11 +121,15 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
       options: ask.options.filter((option) => !option.href).map((option) => ({ id: option.id, label: option.label,
         fields: (option.fields ?? []).map((field) => ({ id: field.id, label: field.label, required: field.required })) })) })),
     plan: upcoming.map((block) => ({ day: block.day!, start: block.start, end: block.end, title: block.title,
-      kind: block.id.split(":")[0] === "graph_calendar" ? "calendar" : block.id.split(":")[0]! })),
+      kind: block.id.split(":")[0] === "graph_calendar" ? "calendar" : block.id.split(":")[0]!, ...(isWork(block.id) ? { id: block.id } : {}) })),
     capacity,
     weeklyPattern: weeklyPattern(readAvailability(ctx)),
-    automations: readAutomations(store.getSetting(ctx.workspaceId, AUTOMATIONS_SETTING)).map((item) => ({ name: item.name, trigger: triggerLabel(item.trigger), status: item.status, lineId: item.lineId })),
+    automations: readAutomations(store.getSetting(ctx.workspaceId, AUTOMATIONS_SETTING)).map((item) => ({ id: item.id, name: item.name, trigger: triggerLabel(item.trigger),
+      status: item.status, lineId: item.lineId })),
     mailboxes: readMailAccounts(store.getSetting(ctx.workspaceId, MAIL_ACCOUNTS_SETTING)).length,
+    mailAccounts: readMailAccounts(store.getSetting(ctx.workspaceId, MAIL_ACCOUNTS_SETTING)).map((item) => ({ id: item.id, address: item.address, triage: item.triage,
+      bookkeeping: item.bookkeeping !== false })),
+    settings: await currentSettings(ctx),
     // The model's snapshot, not the interface.
     /* i18n-ignore-start */
     life: (() => {
@@ -174,6 +180,7 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
     `自动化（改哪个就用 workflow.request 写明改法）：${pack.automations?.length ? pack.automations.map((item) => `${item.name}（${item.trigger}${item.status === "off" ? "，已暂停" : ""}${item.lineId ? `，主线 ${item.lineId}` : ""}）`).join("；") : "无"}；已接入邮箱 ${pack.mailboxes ?? 0} 个`,
     `出行：住址${pack.life?.home ? "已设（有地点的日程由地图估算路上时间）" : "未设"}；工作或学习地点${pack.life?.work ? "已设" : "未设"}；默认路上时间${pack.life?.defaultMinutes ? ` ${pack.life.defaultMinutes} 分钟` : "未设"}${pack.life?.places.length ? `；本人给过的：${pack.life.places.join("，")}` : ""}`,
     `待提醒：${pack.life?.reminders.length ? pack.life.reminders.join("；") : "无"}`,
+    "设置：任何设置与隐私同意都用 setting.change 修改（键名、可选值与当前值用 list_settings 查）；密码、密钥、令牌与删除账号一类只给 settings.open 链接",
     `当前页面：${pack.page.kind}${pack.page.title ? `「${pack.page.title}」(${pack.page.entityId})` : ""}`,
     `主线（id | 名称）：${pack.lines.map((line) => `${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""}${line.domain ? `（${line.domain}）` : ""}`).join("；") || "无"}`,
     `项目（id | 名称 | 主线）：${pack.projects.map((project) => `${project.id} | ${project.name} | ${project.line}`).join("；") || "无"}`,
@@ -265,7 +272,10 @@ const cardWords = (card: Card) => card.actions.map((item) => `${ACTIONS[item.act
  * snapshot and the pack, and its answer is kept with its card. When the model cannot be reached, the card offers the words as a new
  * task, so the person can still keep it as work with one click.
  */
-export async function conversationTurn(ctx: AccessContext, input: { text: string; mentions: Mention[]; page: PageContext; files?: string[] }, now = new Date()): Promise<MessageView[]> {
+export async function conversationTurn(ctx: AccessContext, raw: { text: string; mentions: Mention[]; page: PageContext; files?: string[] }, now = new Date()): Promise<MessageView[]> {
+  // A key or password pasted into the box is cut out before anything keeps or reads the line; the reply points to where it is set.
+  const secret = redactSecrets(raw.text);
+  const input = { ...raw, text: secret.text };
   const store = getStore();
   const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
   const earlier = store.listConversationMessages(ctx.workspaceId, conversation.id);
@@ -288,8 +298,10 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
   // person confirms (docs/domain-lines.md); at most three, stored files only.
   const images = docs.filter((doc) => /\.(png|jpe?g|webp|gif)$/i.test(doc.fileName) && doc.uri.startsWith("file:")).slice(0, 3)
     .map((doc) => fileURLToPath(doc.uri));
+  // i18n-ignore: model context
+  const removed = secret.redacted ? "\n本条消息里的密钥或密码已被系统移除：不要复述，用 settings.open 给出本人修改它的设置位置。" : "";
   const request = { conversationId: conversation.id, text: input.text || "（只附了文件）", mentions: input.mentions, // i18n-ignore: model context
-    snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${returning}${attached}`, pack, history, ...(images.length ? { images } : {}),
+    snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${returning}${attached}${removed}`, pack, history, ...(images.length ? { images } : {}),
     ...(corrected ? { corrected: true } : {}) };
   let reply: { text: string; card: Card };
   let warnings: string[] = [];
@@ -301,14 +313,38 @@ export async function conversationTurn(ctx: AccessContext, input: { text: string
     reply = fallback(ctx, input.text, t("模型服务暂时不可用"), error instanceof CodexSupervisorRequestError ? error.blocker.code : "CONVERSATION_TURN_FAILED");
   }
   if (reply.card.corrects) withdrawPrevious(ctx, earlier, text);
+  const settling = settleCard(ctx, reply.card);
+  if (settling) await settling;
   // 先快后准: a reading the quick model was unsure of, or one that changes several things, is shown at once and looked at again; it
-  // cannot be carried out until that second look is back. Already on the stronger model (after a correction), once is enough.
-  const review = !corrected && !reply.card.error && needsReview({ actions: reply.card.actions, confidence: reply.card.confidence } as ConciergeTurn, warnings);
+  // cannot be carried out until that second look is back. Already on the stronger model (after a correction), once is enough. What was
+  // reported and written at once is not part of that second look.
+  const waiting = reply.card.actions.filter((_, index) => reply.card.items[index]?.state === "pending");
+  const review = !corrected && !reply.card.error && needsReview({ actions: waiting, confidence: reply.card.confidence } as ConciergeTurn, warnings);
   if (review) reply.card.reviewing = true;
   const assistant = store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "assistant",
     text: reply.text, payload: { card: reply.card } });
   if (review) void reviewCard(ctx, assistant.id, { ...request, review: true });
   return [view(person), view(assistant)];
+}
+
+/**
+ * Before a card is shown: what reports a fact that happened (`isImmediate`: sleep, minutes worked, a task finished, a block's outcome, a
+ * record, energy, something about the person, a note) is written at once and shows 撤销 (the owner's decision of 2026-10-30); a setting
+ * change gets its 当前 → 改成. A clarify option's candidates wait for that option, whatever they are.
+ */
+export function settleCard(ctx: AccessContext, card: Card): Promise<void> | undefined {
+  const candidates = new Set(card.clarify.options.flatMap((option) => option.actions));
+  const due = card.actions.map((item, index) => ({ item, index }))
+    .filter(({ item, index }) => !candidates.has(index) && card.items[index]?.state === "pending" && (item.action === "setting.change" || isImmediate(item)));
+  // Nothing to settle: no await at all, so a card with none is stored in the same turn of the event loop as before.
+  return due.length ? settleItems(ctx, card, due) : undefined;
+}
+async function settleItems(ctx: AccessContext, card: Card, due: Array<{ item: ProposedAction; index: number }>): Promise<void> {
+  for (const { item, index } of due) {
+    if (item.action === "setting.change") {
+      try { card.items[index] = { ...card.items[index]!, setting: await describeSettingChange(ctx, item.args) }; } catch { /* shown without it */ }
+    } else if (isImmediate(item)) card.items[index] = outcomeItem(await executeAction(ctx, item));
+  }
 }
 
 /** The files that came with a line, as the snapshot names them: id, name, kind, whether the text could be read, project, opening. */
@@ -357,6 +393,16 @@ async function reviewCard(ctx: AccessContext, messageId: string, body: Record<st
   }
   const next = cardFrom(outcome.turn, card.heard ?? "");
   const revised = JSON.stringify(next.actions) !== JSON.stringify(card.actions) || JSON.stringify(next.clarify) !== JSON.stringify(card.clarify);
+  // What was already written at once stays written and keeps its 撤销: the same action in the new reading takes its outcome, and one the
+  // new reading leaves out stays at the end of the card (after the indexes the new options name).
+  const written = card.actions.map((item, index) => ({ item, state: card.items[index]! })).filter((entry) => entry.state.state !== "pending" && entry.state.state !== "dismissed");
+  next.actions.forEach((item, index) => {
+    const same = written.find((entry) => JSON.stringify(entry.item) === JSON.stringify(item));
+    if (same) { next.items[index] = same.state; written.splice(written.indexOf(same), 1); }
+  });
+  for (const entry of written) { next.actions.push(entry.item); next.items.push(entry.state); }
+  const settling = settleCard(ctx, next);
+  if (settling) await settling;
   getStore().updateConversationPayload(ctx.workspaceId, messageId, { ...message.payload, card: { ...next, ...(card.corrects ? { corrects: true } : {}), reviewed: true, revised } });
   if (revised && outcome.turn.reply) store.updateConversationText(ctx.workspaceId, messageId, outcome.turn.reply);
 }

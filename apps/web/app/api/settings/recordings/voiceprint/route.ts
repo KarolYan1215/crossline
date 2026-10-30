@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { dataDirectory, getStore } from "../../../../../lib/crossline";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
-import { serverTranscribeAvailable, setVoiceprintConsent } from "../../../../../lib/recordings";
+import { setVoiceprint } from "../../../../../lib/consents";
 import { isCrossSiteWrite } from "../../../../../lib/same-origin";
 
 /**
@@ -15,6 +14,6 @@ export async function POST(request: Request) {
   if ("response" in access) return access.response;
   const body = await request.json().catch(() => null) as { on?: unknown } | null;
   if (typeof body?.on !== "boolean") return NextResponse.json({ ok: false, code: "INVALID_VOICEPRINT_CONSENT" }, { status: 400 });
-  if (body.on && !serverTranscribeAvailable()) return NextResponse.json({ ok: false, code: "SERVER_TRANSCRIBE_UNAVAILABLE" }, { status: 409 });
-  return NextResponse.json({ ok: true, ...setVoiceprintConsent(getStore(), access.ctx.workspaceId, body.on, dataDirectory()) });
+  const result = setVoiceprint(access.ctx, body.on);
+  return NextResponse.json(result, { status: result.ok ? 200 : 409 });
 }

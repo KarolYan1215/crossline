@@ -48,6 +48,7 @@
 .conversation-card li[data-state="dismissed"] .gen{text-decoration:line-through}
 .conversation-state{margin-left:auto;font-size:12px;color:var(--graphite)}
 .conversation-links{display:inline-flex;gap:10px;font-size:12px}
+.conversation-setting{display:flex;flex-direction:column;gap:2px;flex-basis:100%}
 .conversation-actions{display:flex;gap:10px;align-items:center}
 .conversation-clarify{display:grid;gap:6px}
 .conversation-clarify p{margin:0;font-weight:700}

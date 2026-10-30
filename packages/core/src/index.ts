@@ -500,6 +500,7 @@ export * from "./asks";
 export * from "./archetypes";
 export * from "./steps";
 export * from "./concierge";
+export * from "./setting-catalog";
 export * from "./nudges";
 export * from "./rituals";
 export * from "./granularity";

@@ -1,6 +1,5 @@
-import { ENERGY_ADVICE_DISMISSED, ENERGY_ADVICE_SETTING, readEnergyAdvice } from "@crossline/core";
 import { resolveAccessContext } from "../../../../lib/access-guard";
-import { getStore } from "../../../../lib/crossline";
+import { dismissEnergyAdvice } from "../../../../lib/consents";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 /**
@@ -12,12 +11,7 @@ export async function POST(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   const body = (await request.json().catch(() => ({}))) as { action?: unknown; id?: unknown };
-  const store = getStore();
-  const advice = readEnergyAdvice(store.getSetting(access.ctx.workspaceId, ENERGY_ADVICE_SETTING));
-  if (body.action !== "dismiss" || !advice || !("id" in advice) || body.id !== advice.id)
-    return Response.json({ ok: false, code: "ENERGY_ADVICE_NOT_CURRENT" }, { status: 400 });
-  store.setSetting(access.ctx.workspaceId, ENERGY_ADVICE_DISMISSED, advice.id);
-  store.appendEvent({ ownerId: access.ctx.principalId, workspaceId: access.ctx.workspaceId, idempotencyKey: `energy.advice.dismissed:${advice.id}`,
-    type: "energy.advice.dismissed", entityId: access.ctx.workspaceId, payload: { id: advice.id } });
-  return Response.json({ ok: true });
+  if (body.action !== "dismiss" || typeof body.id !== "string") return Response.json({ ok: false, code: "ENERGY_ADVICE_NOT_CURRENT" }, { status: 400 });
+  const result = dismissEnergyAdvice(access.ctx, body.id);
+  return Response.json(result, { status: result.ok ? 200 : 400 });
 }

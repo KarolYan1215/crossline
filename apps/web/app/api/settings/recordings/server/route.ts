@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { dataDirectory, getStore } from "../../../../../lib/crossline";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
-import { serverTranscribeAvailable, setServerRecordingConsent } from "../../../../../lib/recordings";
+import { setServerRecordings } from "../../../../../lib/consents";
 import { isCrossSiteWrite } from "../../../../../lib/same-origin";
 
 /**
@@ -15,8 +14,6 @@ export async function POST(request: Request) {
   if ("response" in access) return access.response;
   const body = await request.json().catch(() => null) as { on?: unknown; keep?: unknown } | null;
   if (typeof body?.on !== "boolean" || (body.on === false && typeof body.keep !== "boolean")) return NextResponse.json({ ok: false, code: "INVALID_RECORDING_CONSENT" }, { status: 400 });
-  if (body.on && !serverTranscribeAvailable()) return NextResponse.json({ ok: false, code: "SERVER_TRANSCRIBE_UNAVAILABLE" }, { status: 409 });
-  const result = setServerRecordingConsent(getStore(), access.ctx.workspaceId, body.on,
-    { keep: body.keep !== false, dataDir: dataDirectory(), ownerId: access.ctx.principalId });
-  return NextResponse.json({ ok: true, ...result });
+  const result = setServerRecordings(access.ctx, body.on, body.keep !== false);
+  return NextResponse.json(result, { status: result.ok ? 200 : 409 });
 }

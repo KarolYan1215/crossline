@@ -11,6 +11,7 @@ import type { TaskOpType } from "./assistant-schema";
 import { SHIFT_MINUTES } from "./schedule-frozen";
 import { tFor, type Locale } from "./i18n";
 import { recordProblem } from "./records";
+import { SETTING_KEYS, SETTINGS_SECTION_IDS, settingCatalogLines, settingProblem, type SettingKey, type SettingsSection } from "./setting-catalog";
 
 export type ActionRisk = "internal" | "commitment";
 
@@ -20,7 +21,7 @@ const day: Field = { type: "string", minLength: 0, maxLength: 10 };
 const enumOf = (values: readonly string[]): Field => ({ type: "string", enum: [...values] });
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 
-export const TASK_OP_TYPES: readonly TaskOpType[] = ["due", "defer", "estimate", "step_done", "step_add", "replan", "waiting", "energy", "note", "progress", "archive", "start", "tutorial"];
+export const TASK_OP_TYPES: readonly TaskOpType[] = ["due", "defer", "estimate", "step_done", "step_add", "replan", "waiting", "energy", "note", "progress", "archive", "start", "tutorial", "complete"];
 
 /**
  * What the box can do. `label` is the verb on the card; `risk` decides how the card is drawn (a commitment — approving, deciding a
@@ -31,12 +32,23 @@ export const ACTIONS = {
   "note.add": { label: "记一笔", risk: "internal", args: { text: str(1000) } },
   "task.op": { label: "修改任务", risk: "internal", args: {
     workOrderId: str(128), type: enumOf(TASK_OP_TYPES), date: day, minutes: { type: "number" }, stepId: str(40), text: str(1000), who: str(60),
-    energy: enumOf(["", "low", "medium", "high"]) } },
+    energy: enumOf(["", "low", "medium", "high"]), outcome: enumOf(["", "smooth", "barely", "gaps"]) } },
   "ask.answer": { label: "回答待决事项", risk: "internal", args: { askId: str(200), optionId: str(64),
     fields: { type: "array", maxItems: 6, items: object({ id: str(64), value: str(500) }) } } },
   "ask.snooze": { label: "稍后再问", risk: "internal", args: { askId: str(200), until: enumOf(["tomorrow", "week"]) } },
   "undo": { label: "撤销", risk: "internal", args: { opId: str(64) } },
   "energy.report": { label: "记录精力", risk: "internal", args: { level: enumOf(["low", "medium", "high"]), note: str(300) } },
+  /** 「昨晚一点睡、八点起」: a night the energy model reads, whatever the phone or the screen says (the person's word wins). */
+  "sleep.report": { label: "记录睡眠", risk: "internal", args: { wakeDate: day, sleepTime: str(5), wakeTime: str(5) } },
+  /** How a block of today went, as the evening wrap-up asks it (完成 / 做了一部分 / 没做). */
+  "block.outcome": { label: "记录时间块结果", risk: "internal", args: { blockId: str(200), outcome: enumOf(["done", "partial", "not_done"]) } },
+  /**
+   * Any ordinary setting or privacy consent (docs/one-input.md 「设置」): a key of `SETTING_CATALOG`, the object it is about (`target`,
+   * "" when none) and the new value as text. The card shows 当前 → 改成 and what follows; nothing changes until the person confirms.
+   */
+  "setting.change": { label: "修改设置", risk: "internal", args: { key: enumOf(SETTING_KEYS), target: str(128), value: str(400) } },
+  /** A credential or a destructive change (a password, a key, deleting the account): a link to the settings card where the person does it. */
+  "settings.open": { label: "打开设置", risk: "internal", args: { section: enumOf(SETTINGS_SECTION_IDS), topic: str(60) } },
   // A record of money or health (docs/domain-lines.md): read from the person's line, a pasted text or an attached screenshot; the card
   // shows the numbers and nothing is written until the person confirms them.
   "record.add": { label: "记一笔", risk: "internal", args: { domain: enumOf(["wellness", "wealth"]),
@@ -97,11 +109,16 @@ export const isActionId = (value: unknown): value is ActionId => typeof value ==
 type ArgsOf = {
   "task.create": { title: string; context: string; lineId: string; dueDate: string; milestoneId: string };
   "note.add": { text: string };
-  "task.op": { workOrderId: string; type: TaskOpType; date: string; minutes: number; stepId: string; text: string; who: string; energy: "" | "low" | "medium" | "high" };
+  "task.op": { workOrderId: string; type: TaskOpType; date: string; minutes: number; stepId: string; text: string; who: string; energy: "" | "low" | "medium" | "high";
+    outcome: "" | "smooth" | "barely" | "gaps" };
   "ask.answer": { askId: string; optionId: string; fields: Array<{ id: string; value: string }> };
   "ask.snooze": { askId: string; until: "tomorrow" | "week" };
   "undo": { opId: string };
   "energy.report": { level: "low" | "medium" | "high"; note: string };
+  "sleep.report": { wakeDate: string; sleepTime: string; wakeTime: string };
+  "block.outcome": { blockId: string; outcome: "done" | "partial" | "not_done" };
+  "setting.change": { key: SettingKey; target: string; value: string };
+  "settings.open": { section: SettingsSection; topic: string };
   "record.add": { domain: "wellness" | "wealth"; kind: "income" | "expense" | "workout" | "weight" | "meal" | "metric"; value: number; unit: string;
     currency: string; category: string; note: string; at: string };
   "event.create": { title: string; date: string; weekdays: number[]; startTime: string; endTime: string; until: string; minutes: number; lineId: string; location: string };
@@ -168,6 +185,8 @@ export type ConciergeRefs = {
   today?: string;
   /** The person's files and projects, for the file actions. */
   documents?: Set<string>; projects?: Set<string>;
+  /** What a setting may be about: the person's automations, mailboxes, and the week's plan blocks. */
+  automations?: Set<string>; mailboxes?: Set<string>; blocks?: Set<string>;
 };
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -177,6 +196,27 @@ export function windowDays(text: string): number[] {
   const parts = text.split(/[,，\s]+/).filter(Boolean);
   if (!parts.length || parts.some((part) => !/^[0-6]$/.test(part))) return [];
   return [...new Set(parts.map(Number))].sort((a, b) => a - b);
+}
+
+/** Hours slept: a bedtime later on the clock than the waking time was the day before the waking day. */
+export function sleepHours(args: { sleepTime: string; wakeTime: string }): number {
+  const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+  const span = minutes(args.wakeTime) - minutes(args.sleepTime);
+  return (span > 0 ? span : span + 24 * 60) / 60;
+}
+
+/** The task changes that report what already happened (as opposed to changing the plan). */
+const REPORTED_TASK_OPS = new Set<TaskOpType>(["progress", "step_done", "complete", "note", "energy"]);
+/**
+ * Reports of facts that happened are written at once, undoable, with no confirmation (the owner's decision of 2026-10-30); only changes
+ * to settings and to the plan wait for the person to confirm. A link to a settings card has nothing to confirm either.
+ */
+export function isImmediate(item: ProposedAction): boolean {
+  switch (item.action) {
+    case "sleep.report": case "block.outcome": case "record.add": case "energy.report": case "profile.tell": case "note.add": case "settings.open": return true;
+    case "task.op": return REPORTED_TASK_OPS.has(item.args.type);
+    default: return false;
+  }
 }
 
 /* i18n-ignore-start: why an action cannot run, sent back to the model to repair against */
@@ -211,6 +251,7 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
         case "step_add": case "replan": case "note": case "progress": return args.text.trim() ? "" : "text 为空";
         case "waiting": return args.text.trim() && DAY.test(args.date) ? "" : "等待项需要 text 与日期";
         case "energy": return args.energy ? "" : "energy 须为 low/medium/high";
+        case "complete": return Number.isFinite(args.minutes) && args.minutes >= 0 && args.minutes <= 960 ? "" : "minutes 须为 0–960（0 为没说）";
         default: return "";
       }
     }
@@ -222,6 +263,16 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     case "ask.snooze": return refs.asks.has(item.args.askId) ? "" : `待决事项 id「${item.args.askId}」不存在`;
     case "undo": return refs.ops.has(item.args.opId) ? "" : `操作 id「${item.args.opId}」不在最近 24 小时的可撤销操作里`;
     case "energy.report": return "";
+    case "sleep.report": {
+      const args = item.args;
+      if (!DAY.test(args.wakeDate) || !TIME.test(args.sleepTime) || !TIME.test(args.wakeTime)) return "wakeDate 须为 YYYY-MM-DD，sleepTime 与 wakeTime 须为 HH:MM";
+      if (refs.today && args.wakeDate > refs.today) return `醒来日 ${args.wakeDate} 在今天（${refs.today}）之后`;
+      return sleepHours(args) >= 0.5 && sleepHours(args) <= 16 ? "" : "睡眠时长须在 0.5–16 小时（入睡晚于醒来时视为前一天入睡）";
+    }
+    case "block.outcome": return refs.blocks?.has(item.args.blockId) ? "" : `时间块 id「${item.args.blockId}」不在今天的日程里（用 get_plan 查）`;
+    case "setting.change": return settingProblem(item.args, { milestones: refs.milestones, tasks: new Set(refs.tasks.keys()), lines: refs.lines,
+      ...(refs.automations ? { automations: refs.automations } : {}), ...(refs.mailboxes ? { mailboxes: refs.mailboxes } : {}), ...(refs.blocks ? { blocks: refs.blocks } : {}) });
+    case "settings.open": return "";
     // The same checks the store applies; an empty day is today.
     case "record.add": return recordProblem({ ...item.args, at: item.args.at || new Date().toISOString().slice(0, 10) });
     case "schedule.shift": return Number.isInteger(item.args.minutes) && item.args.minutes >= SHIFT_MINUTES.min && item.args.minutes <= SHIFT_MINUTES.max
@@ -398,7 +449,8 @@ export type ConciergePack = {
   milestones: Array<{ id: string; title: string; line: string; status: string; deadline: string; weight: number }>;
   asks: Array<{ id: string; kind: string; title: string; why: string; urgency: string;
     options: Array<{ id: string; label: string; fields: Array<{ id: string; label: string; required: boolean }> }> }>;
-  plan: Array<{ day: string; start: string; end: string; title: string; kind: string }>;
+  /** `id`: the block's own id (`scheduled:…`), for `block.outcome` and the block settings. */
+  plan: Array<{ day: string; start: string; end: string; title: string; kind: string; id?: string }>;
   /** Per day of the next seven: the person's available hours minus fixed arrangements (what work can use), and what work already holds. */
   capacity: Array<{ day: string; availableMinutes: number; scheduledMinutes: number }>;
   /** The weekly pattern the plan uses, one band per item (「周一 周二 09:00–12:00 高」), so `availability.set` can change part of it. */
@@ -414,8 +466,12 @@ export type ConciergePack = {
   energy: { level: string; at: string } | null;
   forecast: Array<{ milestoneId: string; title: string; deadline: string; usualFinish: string; cautiousFinish: string; atRisk: boolean }>;
   /** The person's automations (what runs by itself) and how many mailboxes are connected (docs/personal-agent.md). */
-  automations?: Array<{ name: string; trigger: string; status: string; lineId?: string }>;
+  automations?: Array<{ name: string; trigger: string; status: string; lineId?: string; id?: string }>;
   mailboxes?: number;
+  /** The connected mailboxes by id, with their two switches. */
+  mailAccounts?: Array<{ id: string; address: string; triage: boolean; bookkeeping: boolean }>;
+  /** Every setting of the catalog that has one value per account, with its current value (`list_settings`). */
+  settings?: Array<{ key: string; current: string }>;
   /**
    * Getting around (docs/one-input.md 「生活与日程」): whether a home and a work or school address are set (a map then estimates travel),
    * the default travel minutes, the places whose minutes the person gave, and the reminders still to be said.
@@ -430,7 +486,9 @@ export function conciergeRefs(pack: ConciergePack): ConciergeRefs {
     ops: new Set(pack.ops.map((op) => op.id)), lines: new Set(pack.lines.map((line) => line.id)),
     milestones: new Set(pack.milestones.map((item) => item.id)), draftMilestones: new Set(pack.milestones.filter((item) => item.status === "draft").map((item) => item.id)),
     proposals: new Set(pack.proposals.map((item) => item.id)), agentResults: new Set(pack.agentResults.map((item) => item.taskId)), today: pack.today,
-    documents: new Set(pack.materials.map((item) => item.id)), projects: new Set(pack.projects.map((item) => item.id))
+    documents: new Set(pack.materials.map((item) => item.id)), projects: new Set(pack.projects.map((item) => item.id)),
+    automations: new Set((pack.automations ?? []).flatMap((item) => item.id ? [item.id] : [])), mailboxes: new Set((pack.mailAccounts ?? []).map((item) => item.id)),
+    blocks: new Set(pack.plan.flatMap((block) => block.id ? [block.id] : []))
   };
 }
 
@@ -455,6 +513,7 @@ export const CONCIERGE_TOOL_SPECS = [
   { name: "read_material", description: "读一个文件的文本（从 offset 起约 6000 字）", inputSchema: { type: "object",
     properties: { id: { type: "string" }, offset: { type: "integer" } }, required: ["id", "offset"], additionalProperties: false } },
   { name: "get_profile_facts", description: "本人确认过的情况（背景、课程评分、目标等），按关键词筛选", inputSchema: QUERY },
+  { name: "list_settings", description: "可用 setting.change 修改的全部设置：键名、名称、针对的对象、可选值、是否隐私同意，以及当前值；另列自动化与邮箱的 id", inputSchema: NONE },
   { name: "ledger_query", description: "查总账：某月（YYYY-MM，空为本月）按分类、商户、账户、种类（expense 支出含退款冲减 / income / refund）筛选的已记账合计（按币种）与最多 30 笔明细。回答花了多少钱只用它的数字",
     inputSchema: { type: "object", properties: { month: { type: "string" }, category: { type: "string" }, merchant: { type: "string" }, account: { type: "string" }, kind: { type: "string" } },
       required: ["month", "category", "merchant", "account", "kind"], additionalProperties: false } }
@@ -484,6 +543,8 @@ export function answerFromPack(pack: ConciergePack, name: string, args: Record<s
     case "find_materials": return json(pack.materials.filter((item) => matches(query, item.fileName, item.project)).slice(0, 30));
     case "list_projects": return json(pack.projects);
     case "get_profile_facts": return json(pack.facts.filter((fact) => matches(query, fact)).slice(0, 40));
+    case "list_settings": return json({ catalog: settingCatalogLines(), current: pack.settings ?? [], mailboxes: pack.mailAccounts ?? [],
+      automations: (pack.automations ?? []).map(({ id, name, status }) => ({ id, name, status })) });
     default: return `没有名为 ${name} 的查询`;
   }
 }
