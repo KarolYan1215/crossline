@@ -2436,7 +2436,8 @@ function energyEstimateFor(ctx: AccessContext, now: Date, today: string, timeZon
   const report = getStore().listEnergyObservations(ctx.workspaceId)
     .filter((item) => item.source === "self_report" && item.level !== "uncalibrated" && now.getTime() - Date.parse(item.observedAt) < 4 * 3_600_000)
     .sort((a, b) => b.observedAt.localeCompare(a.observedAt))[0];
-  return { level: prediction.level, confidence: prediction.confidence, basis: prediction.basis,
+  // 「不知道最近一次睡眠」 is not said on the card: the curve is drawn anyway (the owner, 2026-10-30).
+  return { level: prediction.level, confidence: prediction.confidence, basis: prediction.alertness === undefined ? [] : prediction.basis,
     ...(capacity.multiplier < 1 ? { capacity } : {}),
     ...(report ? { selfReport: report.level as "low" | "medium" | "high" } : {}),
     curve };

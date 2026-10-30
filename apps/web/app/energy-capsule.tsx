@@ -75,9 +75,9 @@ export function EnergyCard({ estimate, fallback, children }: { estimate?: Dashbo
       {shape.now && <span className="energy-now-dot" aria-hidden="true" style={{ left: `${(shape.now.x / W) * 100}%`, top: shape.now.y }} />}
       <figcaption className="energy-axis" aria-hidden="true"><span>06</span><span>12</span><span>18</span><span>24</span></figcaption>
       <small className="energy-legend">{t("虚线：低 / 中 / 高的分界；竖线：此刻")}</small>
-      {typical && <small className="energy-legend">{typical.nights
-        ? t("不知道昨晚的睡眠，按近四周 {{nights}} 晚的平常作息（{{from}} 睡、{{to}} 起）推算", { nights: typical.nights, from: hh(typical.from), to: hh(typical.to) })
-        : t("还没有睡眠记录，按普通成年人作息（23:30 睡、7:30 起）推算；有了作息记录和几次纠正后按本人校准")}</small>}
+      {/* With no sleep record at all the typical adult's day is drawn without a line about it (the owner, 2026-10-30). */}
+      {typical?.nights ? <small className="energy-legend">{t("不知道昨晚的睡眠，按近四周 {{nights}} 晚的平常作息（{{from}} 睡、{{to}} 起）推算",
+        { nights: typical.nights, from: hh(typical.from), to: hh(typical.to) })}</small> : null}
     </figure>
       : estimate && <p className="energy-empty muted">{t("还没有可靠的睡眠记录，今天的精力曲线暂不绘制（把握低）。")}</p>}
     {basis.length > 0 && <p className="energy-basis">{basis.join(" · ")}</p>}
