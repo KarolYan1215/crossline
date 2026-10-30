@@ -78,6 +78,7 @@ import { milestonesBeingBackplanned } from "./backplan-status";
 import { nearestDueProposal } from "./urgent-proposal";
 import { completionRule, onPersonsBoard, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
+import { energyRhythm } from "@crossline/core";
 import { OVER_CAPACITY_TAG, statedWeeklyHours, weeklyAvailableHours } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
 import { memoByLedger, memoByLedgerAsync } from "./ledger-memo";
@@ -2413,7 +2414,7 @@ function energyEstimateFor(ctx: AccessContext, now: Date, today: string, timeZon
   const model = energyModel(ctx, readAvailability(ctx));
   const prediction = model.predict(now.toISOString());
   // The day's curve for Today's energy card (2026-10-28): the same model read every half hour from 06:00 to midnight, with the person's
-  // own cut points between low, medium and high. Without a known last sleep the model reads nothing, and no curve is drawn.
+  // own cut points between low, medium and high. Without a known last sleep it is the usual day instead (below).
   const points = Array.from({ length: 36 }, (_, index) => 360 + index * 30).flatMap((minute) => {
     let at: string;
     try { at = toZonedInstant(today, `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`, timeZone); } catch { return []; }
@@ -2421,7 +2422,16 @@ function energyEstimateFor(ctx: AccessContext, now: Date, today: string, timeZon
     return alertness === undefined ? [] : [{ minute, alertness }];
   });
   const [hour = "0", minuteOfHour = "0"] = formatInTimeZone(now, timeZone, "HH:mm").split(":");
-  const curve = points.length >= 12 ? { points, low: model.calibration.low, high: model.calibration.high, nowMinute: Number(hour) * 60 + Number(minuteOfHour) } : undefined;
+  const nowMinute = Number(hour) * 60 + Number(minuteOfHour);
+  // Drawn whatever is known (2026-10-30, the owner): without last night's sleep, the model's steady day at the person's usual sleep —
+  // the medians of their recorded nights, else a typical adult's 23:30–7:30 (energyRhythm) — at the phase their best hours set, with
+  // their own cut points. It is marked as such and only drawn: a reading of now and the schedule still need a known last sleep.
+  const usual = points.length >= 12 ? undefined : energyRhythm({ episodes: model.episodes, hourOf: model.hourOf, weekdayOf: (iso) => Number(formatInTimeZone(new Date(iso), timeZone, "i")),
+    phaseShift: model.phaseShift, calibration: model.calibration, reports: [], now: now.toISOString() });
+  const curve = usual
+    ? { points: usual.curve.flatMap((point) => point.hour >= 6 && point.value !== null ? [{ minute: point.hour * 60, alertness: point.value }] : []),
+      low: model.calibration.low, high: model.calibration.high, nowMinute, typical: { nights: usual.nights, from: usual.sleep.from, to: usual.sleep.to } }
+    : { points, low: model.calibration.low, high: model.calibration.high, nowMinute };
   const capacity = model.capacity(now.toISOString(), today);
   const report = getStore().listEnergyObservations(ctx.workspaceId)
     .filter((item) => item.source === "self_report" && item.level !== "uncalibrated" && now.getTime() - Date.parse(item.observedAt) < 4 * 3_600_000)
@@ -2429,7 +2439,7 @@ function energyEstimateFor(ctx: AccessContext, now: Date, today: string, timeZon
   return { level: prediction.level, confidence: prediction.confidence, basis: prediction.basis,
     ...(capacity.multiplier < 1 ? { capacity } : {}),
     ...(report ? { selfReport: report.level as "low" | "medium" | "high" } : {}),
-    ...(curve ? { curve } : {}) };
+    curve };
 }
 
 export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardData, "taskDetailById" | "milestoneDetailById">> {

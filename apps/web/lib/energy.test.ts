@@ -200,3 +200,15 @@ test("the phone's steps lower the day's capacity only after the backtest on the 
   for (const observation of store.listEnergyObservations(ws)) store.deleteEnergyObservations(ws, observation.source);
   expect(energyModel(TEST_CTX, DEFAULT_AVAILABILITY).capacity(`${today}T15:00:00.000Z`, today).multiplier).toBe(1);
 });
+
+test("Today's energy curve is drawn with no sleep record: a typical adult's day, marked as such, with the person's own cut points", async () => {
+  setup();
+  const { loadDashboard } = await import("./crossline");
+  const curve = (await loadDashboard(TEST_CTX)).energyEstimate?.curve;
+  expect(curve?.typical).toEqual({ nights: 0, from: 23.5, to: 7.5 });
+  expect(curve!.points.length).toBeGreaterThan(20);
+  expect(curve!.points.every((point) => point.minute >= 7.5 * 60 && point.minute <= 23.5 * 60)).toBe(true);
+  // The usual afternoon lies above the hour after waking and the hour before sleep (inertia and the homeostat).
+  const at = (minute: number) => curve!.points.find((point) => point.minute === minute)!.alertness;
+  expect(at(16 * 60)).toBeGreaterThan(at(23 * 60));
+});

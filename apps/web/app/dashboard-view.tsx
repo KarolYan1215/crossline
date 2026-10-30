@@ -62,8 +62,12 @@ export type DashboardData = {
   /** The energy model's reading of now, with its basis; the person's own fresh word, when there is one, stands above it. */
   energyEstimate?: { level: "low" | "medium" | "high"; confidence: "low" | "medium" | "high"; basis: string[];
     capacity?: { multiplier: number; basis: string[] }; selfReport?: "low" | "medium" | "high";
-    /** The same model read every half hour of today (06:00–24:00, minutes after midnight) with its cut points; absent without a known last sleep. */
-    curve?: { points: Array<{ minute: number; alertness: number }>; low: number; high: number; nowMinute: number } };
+    /**
+     * The same model read every half hour of today (06:00–24:00, minutes after midnight) with its cut points. `typical` when last night's
+     * sleep is unknown: the steady day at the person's usual sleep (`nights` recorded nights behind it; 0 = a typical adult's 23:30–7:30).
+     */
+    curve?: { points: Array<{ minute: number; alertness: number }>; low: number; high: number; nowMinute: number;
+      typical?: { nights: number; from: number; to: number } } };
   energyLearning?: { status: "rule_only" | "personal_unvalidated" | "personal_calibrated";
     count: number; predictedCorrect: number; baselineCorrect: number };
   primary?: DashboardAction;

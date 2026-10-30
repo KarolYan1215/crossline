@@ -41,8 +41,8 @@ export function curveGeometry(curve: Curve): { line: string; area: string; low: 
  * 「今日精力」 (docs/energy-and-ecosystem.md §3.4; a card since 2026-10-28): the model's reading of now — the one the schedule uses — with
  * the first lines of its basis, or the person's own word from the last four hours; the day's curve from the same model with its cut
  * points (calibrated by the person's reports, the defaults until there are some) dashed across it; and what the day's capacity is held to. It asks nothing: the pencil opens the three levels, and the
- * answer is a self-report with `context: "correction"` that recalibrates the model. With no known last sleep there is no curve, and the
- * card says so instead of drawing one. `children` carries the rest of the day's energy facts (the screen record's reading, rest).
+ * answer is a self-report with `context: "correction"` that recalibrates the model. With no known last sleep the curve is the usual day
+ * (the person's recorded nights, else a typical adult's), drawn with a line saying so. `children` carries the rest of the day's energy facts.
  */
 export function EnergyCard({ estimate, fallback, children }: { estimate?: DashboardData["energyEstimate"]; fallback: string; children?: ReactNode }) {
   const t = useT();
@@ -52,6 +52,8 @@ export function EnergyCard({ estimate, fallback, children }: { estimate?: Dashbo
   const reading = !estimate ? fallback : own ? t("{{level}}（本人自评）", { level: t(LEVEL[own]) }) : `${t(LEVEL[estimate.level])} · ${t(SURE[estimate.confidence])}`;
   const basis = estimate && !own ? estimate.basis.slice(0, 2) : [];
   const shape = estimate?.curve ? curveGeometry(estimate.curve) : undefined;
+  const typical = estimate?.curve?.typical;
+  const hh = (hours: number) => { const m = Math.round((hours % 24) * 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`; };
   return <section className="td-card energy-card" data-testid="energy-capsule" aria-labelledby="energy-title">
     <header className="td-card-head">
       <h2 id="energy-title" className="ds-serif">{t("今日精力")}</h2>
@@ -60,7 +62,7 @@ export function EnergyCard({ estimate, fallback, children }: { estimate?: Dashbo
     <p className="energy-reading" title={estimate ? [...estimate.basis, ...(estimate.capacity?.basis ?? [])].join(locale === "en" ? "; " : "；") : undefined}>
       <small>{t("此刻")}</small><b>{reading}</b></p>
     {shape ? <figure className="energy-curve">
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={t("今天的精力曲线（模型推算）")}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={typical ? t("平常一天的精力曲线（模型推算）") : t("今天的精力曲线（模型推算）")}>
         <defs><linearGradient id="energy-band" x1="0" x2="0" y1="0" y2="1">
           <stop offset="0" className="energy-band-top" /><stop offset="1" className="energy-band-bottom" /></linearGradient></defs>
         <path d={shape.area} fill="url(#energy-band)" />
@@ -73,6 +75,9 @@ export function EnergyCard({ estimate, fallback, children }: { estimate?: Dashbo
       {shape.now && <span className="energy-now-dot" aria-hidden="true" style={{ left: `${(shape.now.x / W) * 100}%`, top: shape.now.y }} />}
       <figcaption className="energy-axis" aria-hidden="true"><span>06</span><span>12</span><span>18</span><span>24</span></figcaption>
       <small className="energy-legend">{t("虚线：低 / 中 / 高的分界；竖线：此刻")}</small>
+      {typical && <small className="energy-legend">{typical.nights
+        ? t("不知道昨晚的睡眠，按近四周 {{nights}} 晚的平常作息（{{from}} 睡、{{to}} 起）推算", { nights: typical.nights, from: hh(typical.from), to: hh(typical.to) })
+        : t("还没有睡眠记录，按普通成年人作息（23:30 睡、7:30 起）推算；有了作息记录和几次纠正后按本人校准")}</small>}
     </figure>
       : estimate && <p className="energy-empty muted">{t("还没有可靠的睡眠记录，今天的精力曲线暂不绘制（把握低）。")}</p>}
     {basis.length > 0 && <p className="energy-basis">{basis.join(" · ")}</p>}

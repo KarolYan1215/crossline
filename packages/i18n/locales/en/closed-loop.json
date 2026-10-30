@@ -41,5 +41,8 @@
   "系数 {{factor}}": "factor {{factor}}",
   "系数 {{factor}}（上周兑现 {{share}}%）": "factor {{factor}} ({{share}}% of last week's plan kept)",
   "没做完的话，下次从哪接（可不填）": "If not finished: where to pick it up next time (optional)",
-  "下次从哪接": "Where to pick it up next time"
+  "下次从哪接": "Where to pick it up next time",
+  "平常一天的精力曲线（模型推算）": "Energy over a usual day (model estimate)",
+  "不知道昨晚的睡眠，按近四周 {{nights}} 晚的平常作息（{{from}} 睡、{{to}} 起）推算": "Last night's sleep is unknown: estimated from the usual sleep of the last four weeks ({{nights}} nights, asleep {{from}}, up {{to}})",
+  "还没有睡眠记录，按普通成年人作息（23:30 睡、7:30 起）推算；有了作息记录和几次纠正后按本人校准": "No sleep record yet: estimated from a typical adult's sleep (asleep 23:30, up 7:30); it adjusts to the person once sleep is recorded and a few corrections are made"
 }
