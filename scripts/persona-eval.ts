@@ -26,7 +26,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, startCodexAppServer, startCodexSupervisor, startModelGateway,
-  withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
+  threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
 import {
   ONBOARDING_INSIGHTS, ONBOARDING_TONE_SETTING, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
   composeGoal, instrumentClaims, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
@@ -226,6 +226,8 @@ async function runPerson(name: string, opening: Opening) {
         files: [], cards: cards.map((card) => ({ id: card.id, title: card.title, items: card.items.map((item) => ({ id: item.id, text: item.text, anchors: item.anchors })) })),
         insight: turn.insight?.text ?? "", earlier: earlier.slice(-3) };
       const play = () => withUsageWorkspace(playerKey, () => runCodexSkill<Played>(client, context, { skillName: "crossline:crossline-eval-persona", cwd: repoRoot,
+        // A test-only Skill is never routed to a provider by the rules, so the player names its thread's provider itself.
+        provider: threadProvider(routing(playerKey, playerModel), playerModel, "crossline-eval-persona"),
         developerInstructions: "Play the person as the Skill describes. Return raw JSON only.", outputSchema: PLAYER_SCHEMA, prepareInput: () => context,
         validateOutput: (output) => output as Played, onAudit: () => {}, timeoutMs: 30 * 60_000 }));
       let played = await play();
