@@ -21,6 +21,12 @@ export type ChecklistItem = {
   detail: string;
   owner: "interview" | "person";
   /**
+   * The item as a question to the person, in the interview's own voice and with none of the checklist's words (硬约束, 定语): what a round
+   * says or asks when this item is what is left. The label stays the system's (2026-10-31: 「完成访谈前还缺：硬约束「上班」的固定日程已收集
+   * （上课、组会、值班等每周固定安排尚未收集）」 reached a warehouse manager word for word).
+   */
+  ask?: string;
+  /**
    * One of the five things that must stand before the person starts using the app (decided 2026-10-12, `docs/loop-and-scout.md` §7): a
    * description of every line, the weekly hours, a hard line's fixed schedule, a current project per line with its deadline (or 「没有截止」),
    * and a long-term goal the person adopted. These accept only the person's word or a file, never an assumption.
@@ -66,10 +72,10 @@ export const ASSUMPTION_PREFIX = /^(假设|assumption|assumed)[：:]/i;
 const assumedFact = (fact: { status: string; value?: string }) => fact.status === "inferred" && ASSUMPTION_PREFIX.test(fact.value ?? "");
 const settledFact = (fact: { status: string; sourceRef: string; value?: string }) => confirmedFact(fact) || assumedFact(fact);
 /** The three parts of the portrait the person's own words must stand behind, read from the slots the interview files facts under. */
-const PORTRAIT_PARTS: Array<{ label: string; slots: RegExp }> = [
-  { label: "现状与真问题", slots: /problem|situation|status|current|pressure|anxi|worry|constraint|gravity|stage/i },
-  { label: "工作观与人生观", slots: /work_view|life_view|true_north|value|meaning|compass|purpose/i },
-  { label: "能量与心流", slots: /flow|energy|drain|charge|anchor|behavio|habit/i }
+const PORTRAIT_PARTS: Array<{ label: string; slots: RegExp; ask: string }> = [
+  { label: "现状与真问题", slots: /problem|situation|status|current|pressure|anxi|worry|constraint|gravity|stage/i, ask: "眼下最让你放不下的是哪件事？" },
+  { label: "工作观与人生观", slots: /work_view|life_view|true_north|value|meaning|compass|purpose/i, ask: "做事的时候，你最看重的是什么？" },
+  { label: "能量与心流", slots: /flow|energy|drain|charge|anchor|behavio|habit/i, ask: "最近一次做得忘了时间，是在做什么？" }
 ];
 /** The portrait's written parts, each a field of the working profile. */
 const PORTRAIT_FIELDS: Array<[keyof ProfileModel, string]> = [["problem", "真问题"],
@@ -88,6 +94,17 @@ export const NO_DEADLINE = /没有截止|无截止|不设截止|no deadline/i;
 const PROJECT_SLOTS: Array<[RegExp, string]> = [[/^goal$|^target|_goal$/, "目标"], [/^deadline$|^date_|_deadline$/, "截止日期"],
   [/^evidence$|_evidence$|^progress/, "进展证据"]];
 const MEETING_SLOTS = /^(meeting|class)_?(times?|schedule)$|^no_meetings$|^fixed_class_time$/;
+/**
+ * A weekly arrangement the person stated in a reply, filed as a fact of the line rather than as a dated item (2026-10-31: 「周日上午
+ * 10:00–11:30 送娃去跳舞」 was `fixed_schedule`, and the fixed-schedule item stayed open, so the interview asked for it again and again).
+ */
+const SCHEDULE_SLOT = /schedule|routine|meeting|class|shift|timetable/i;
+const WEEKDAY = /周[一二三四五六日天末]|星期|礼拜|工作日|每天|每晚|每早|weekday|weekend|daily|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i;
+const CLOCK = /\d{1,2}\s*[:：点]|[上下]午|早上|晚上|凌晨|\b\d{1,2}\s?(am|pm)\b/i;
+const statesSchedule = (fact: { slot: string; value?: string }) =>
+  SCHEDULE_SLOT.test(fact.slot) ? Boolean(fact.value?.trim()) : WEEKDAY.test(fact.value ?? "") && CLOCK.test(fact.value ?? "");
+/** What a line is about, said by the person: enough to stand for its description while the extraction has not written one. */
+const DESCRIBES_LINE = /^(description|what)$/;
 /** A part of a course (its project, an exam): graded and timed through the course itself, not on its own. */
 const COURSE_PART = /项目|作业|考试|测验|报告|论文|展示|project|homework|assignment|exam|quiz|report|paper|presentation/i;
 
@@ -110,7 +127,8 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   const assumedParts = PORTRAIT_PARTS.filter((part) => !personFacts.some((fact) => confirmedFact(fact) && part.slots.test(fact.slot))).map((part) => part.label)
     .filter((label) => !unbacked.includes(label));
   items.push({ id: "portrait_grounded", group: "画像", label: t("画像每部分都有本人原话或文件为据"), done: !unbacked.length,
-    detail: unbacked.length ? t("尚无本人依据：{{items}}", { items: list(unbacked) }) : assumedParts.length ? t("以假设代替：{{items}}", { items: list(assumedParts) }) : "", owner: "interview" });
+    detail: unbacked.length ? t("尚无本人依据：{{items}}", { items: list(unbacked) }) : assumedParts.length ? t("以假设代替：{{items}}", { items: list(assumedParts) }) : "", owner: "interview",
+    ...(unbacked.length ? { ask: t(PORTRAIT_PARTS.find((part) => part.label === unbacked[0])!.ask) } : {}) });
   items.push({ id: "portrait_confirmed", group: "画像", label: t("本人确认画像符合自己"), done: input.portraitConfirmed,
     detail: input.portraitConfirmed ? "" : t("在画像页读完后选「符合」，或说明哪里不对"), owner: "person" });
   // The profile module comes first and is not skipped (decided 2026-10-31): its cards are a start item. Skipping one card counts as answering it.
@@ -122,9 +140,12 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     const described = input.descriptions[line.id];
     // A goal the person wrote themselves needs no candidates to choose it from.
     const candidates = (described?.candidates ?? 0) > 0 || line.goals.length > 0;
+    const describedNow = Boolean(described?.description.trim())
+      || input.facts.some((fact) => fact.identityId === line.id && !fact.projectId && confirmedFact(fact) && DESCRIBES_LINE.test(fact.slot) && Boolean(fact.value?.trim()));
     items.push({ id: `line_desc:${line.id}`, group: "主线", label: t("「{{line}}」有个性化描述与长期目标候选", { line: line.label }),
-      done: Boolean(described?.description.trim()) && candidates,
-      detail: !described?.description.trim() ? t("尚无描述") : !candidates ? t("尚无长期目标的定语候选") : "", owner: "interview", start: true });
+      done: describedNow && candidates,
+      detail: !describedNow ? t("尚无描述") : !candidates ? t("尚无长期目标的候选词") : "", owner: "interview", start: true,
+      ask: !describedNow ? t("「{{line}}」这条线眼下在做什么？", { line: line.label }) : t("在「{{line}}」这条线上，三五年后你希望成为什么样的人？", { line: line.label }) });
     items.push({ id: `line_goal:${line.id}`, group: "主线", label: t("「{{line}}」已选定至少一个长期目标", { line: line.label }), done: line.goals.length > 0,
       detail: line.goals.length ? "" : t("从候选中采用或自己写一个"), owner: "person", start: true });
   }
@@ -135,12 +156,17 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   for (const line of hardLines) {
     // A fixed weekly arrangement of this line: from its own projects, or — said in a reply under no project — when it is the only hard line.
     const fixed = input.dates.filter((entry) => entry.recurring && (projectLine(entry.project) === line.id || (!projectLine(entry.project) && hardLines.length === 1)));
+    const lineProjects = new Set(input.projects.filter((project) => project.identityId === line.id).map((project) => project.id));
+    const stated = input.facts.some((fact) => (fact.identityId === line.id || lineProjects.has(fact.projectId)) && confirmedFact(fact) && statesSchedule(fact));
     // A start item: an assumed schedule does not count (dates still waiting in a batch do — the person supplied the file that has them).
-    items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: t("硬约束「{{line}}」的固定日程已收集", { line: line.label }), done: fixed.length > 0,
-      detail: fixed.length ? "" : t("上课、组会、值班等每周固定安排尚未收集"), owner: "interview", start: true });
+    const done = fixed.length > 0 || stated;
+    items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: t("「{{line}}」的每周固定安排已收集", { line: line.label }), done,
+      detail: done ? "" : t("每周固定要占的时间尚未收集"), owner: "interview", start: true,
+      ask: t("「{{line}}」每周有哪些固定要占的时间？说个大概就行。", { line: line.label }) });
   }
   items.push({ id: "availability", group: "日程", label: t("已提出建议的可用时段"), done: input.availability,
-    detail: input.availability ? "" : t("固定日程之外，每周哪些时段可以安排工作"), owner: "interview", start: true });
+    detail: input.availability ? "" : t("固定日程之外，每周哪些时段可以安排工作"), owner: "interview", start: true,
+    ask: t("固定安排之外，每周大概哪些时段可以用来做自己的事？") });
   const pending = input.dates.filter((entry) => entry.pending).length;
   if (pending) items.push({ id: "dates_confirmed", group: "日程", label: t("文件与口述中的日期已确认"), done: false,
     detail: t("{{count}} 项日期等待确认", { count: pending }), owner: "person" });
@@ -159,7 +185,9 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
       detail: done ? "" : current.length
         ? t("缺截止（或说明没有截止）：{{projects}}", { projects: input.locale === "en" ? joinList(input.locale, current.map((project) => project.name)) : current.map((project) => project.name).join("、") })
         : t("尚无当前项目"),
-      owner: "interview", start: true });
+      owner: "interview", start: true,
+      ask: current.length ? t("「{{project}}」大概什么时候要完成？没有截止也可以直接说。", { project: current[0]!.name })
+        : t("「{{line}}」这条线眼下在做的一件事是什么？大概什么时候要完成，没有截止也可以说。", { line: line.label }) });
   }
 
   for (const project of input.projects.filter((item) => !isDefaultProject(item.id))) {

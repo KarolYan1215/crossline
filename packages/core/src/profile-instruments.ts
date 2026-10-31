@@ -120,20 +120,25 @@ export const CARD_TITLE: Record<InstrumentId, string> = {
 /** Items per card and cards per round (§三: at most two cards a round, counted in the round's questions). */
 export const ITEMS_PER_CARD = 3;
 export const CARDS_PER_ROUND = 2;
+/** Items in all of a round's cards (2026-10-31: two full cards put six ratings on the first screen, before a single question). */
+export const ITEMS_PER_ROUND = 3;
 
 export type ProfileCard = { id: string; instrument: InstrumentId; title: string; stage: ProfileStage; items: ScaleItem[] };
 
 /**
  * The next cards: items not yet answered or skipped, in bank order, grouped by instrument, at most `ITEMS_PER_CARD` each and
- * `CARDS_PER_ROUND` in all. `stages` is the current stage, or several in order — the stages the interview already left come first, so an
+ * `CARDS_PER_ROUND` and `ITEMS_PER_ROUND` in all. `stages` is the current stage, or several in order — the stages the interview already left come first, so an
  * item a stage never got to is still asked later (otherwise the profile module could never finish). A card's id is its first item's, so a
  * card asked again after a reload keeps its id.
  */
 export function cardsFor(stages: ProfileStage | readonly ProfileStage[], settled: ReadonlySet<string>, limit = CARDS_PER_ROUND): ProfileCard[] {
   const order = typeof stages === "string" ? [stages] : stages;
   const cards: ProfileCard[] = [];
+  let items = 0;
   for (const stage of order) for (const item of PROFILE_ITEMS) {
     if (item.stage !== stage || settled.has(item.id)) continue;
+    if (items >= ITEMS_PER_ROUND) return cards;
+    items += 1;
     const last = cards.at(-1);
     if (last && last.instrument === item.instrument && last.stage === stage && last.items.length < ITEMS_PER_CARD) { last.items.push(item); continue; }
     if (cards.length >= limit) return cards;
@@ -263,7 +268,9 @@ export function administrationNote(score: DimensionScore): string {
  * as an ordinary answer line under the card's title, which the extraction maps.
  */
 export function scaleAnswerLine(item: ScaleItem, score: number): string {
-  const label = score === 1 ? item.anchors[0] : score === 3 ? item.anchors[1] : score === 5 ? item.anchors[2] : "";
+  // 2 and 4 name the side they lean to: a bare 「2/5」 next to 「1/5（A）」 was read by the extraction as the other pole.
+  const label = score === 1 ? item.anchors[0] : score === 2 ? `偏向「${item.anchors[0]}」` : score === 3 ? item.anchors[1]
+    : score === 4 ? `偏向「${item.anchors[2]}」` : score === 5 ? item.anchors[2] : "";
   return `【${item.text}${item.instrument === "values" ? `（${item.anchors[0]} / ${item.anchors[2]}）` : ""}】点选：${score}/5${label ? `（${label}）` : ""}`;
 }
 

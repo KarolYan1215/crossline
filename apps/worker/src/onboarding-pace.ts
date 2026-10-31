@@ -53,7 +53,8 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   // what the person wants to become on a line only while it offers none (W-8: asking beside the picker asked the same thing twice).
   const goalPicker = input.lines.filter((line) => !line.goals.length).map((line) => {
     const count = lineAttributes(profiles[line.id], line.label).length;
-    return count ? `${line.label}：左栏已有 ${count} 个候选定语，由本人选定` : `${line.label}：还没有候选定语`;
+    // Worded so that echoing it to the person does no harm: 「定语」 was repeated to people word for word (2026-10-31).
+    return count ? `${line.label}：已给出 ${count} 个长期目标的候选词，由本人点选` : `${line.label}：还没有长期目标的候选词`;
   });
   return { abstract, ...(progress.length ? { progress } : {}), ...(ratings.length ? { observations: ratings } : {}),
     ...(goalPicker.length ? { goalPicker } : {}) };

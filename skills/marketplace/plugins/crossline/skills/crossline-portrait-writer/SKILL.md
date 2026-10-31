@@ -49,6 +49,10 @@ When the context carries `only: "gap"` and `previous` (the current report), answ
 
 A personality label the person reports about themselves (an MBTI such as ENTP) is their own word about how they think: weigh it as one more piece of evidence for the axes, never name it, quote it or put any outside type in the report.
 
+## Address
+
+- **Address and what is assumed.** Write to the person as 你; when a sentence must name them in the third person, use their name, never 他 or 她 unless their own words or facts give their gender. Never state their study stage, job or family status unless a confirmed fact says it.
+
 ## Privacy
 
 `sensitive[]` lists every span that identifies them or others if shared: names of people, institutions and companies, course codes, project names, places, amounts. Copy each span exactly as it appears in your text.

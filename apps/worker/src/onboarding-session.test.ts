@@ -305,8 +305,9 @@ test("with the completion list on, a 「ready」 before the portrait is written 
   expect(await run({ sessionId: "s", text: "都说完了" })).toEqual({ state: "asked", sessionId: "s" });
   expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("active");
   const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; questions: unknown[] };
-  // Start items are named first; the portrait's items are among what is still owed.
-  expect(last.reply).toContain("完成访谈前还缺：");
+  // What is still owed is asked as questions; the checklist's labels never reach the person.
+  expect(last.reply).toContain("开始之前还想再问几件事");
+  expect(last.reply).not.toMatch(/已收集|硬约束|定语|还缺/);
   expect(last.questions.length).toBeGreaterThan(0);
 });
 
@@ -359,42 +360,44 @@ test("先读材料：首轮把已读出的文件全部带上，清单标出可�
   expect(store.getOnboardingSession(workspaceId, "s")!.coverage).toMatchObject({ flow: "v2" });
 });
 
-test("the profile module's cards: added by the app, counted in the round's four, taps scored, words left for the extraction, the rest carried on", async () => {
-  const free = (id: string) => ({ id, text: `问题 ${id}`, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
+test("the profile module's cards: added by the app, three items a round counted in its three questions, taps scored, words left for the extraction", async () => {
+  const texts: Record<string, string> = { q1: "小时候最佩服谁？", q2: "常看哪些账号？", q3: "最喜欢哪个故事？", q4: "为什么工作？", q5: "什么让生活值得？" };
+  const free = (id: string) => ({ id, text: texts[id]!, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
   const { rpc } = fakeRuntime([turn({ stage: "narrative", questions: [free("q1"), free("q2"), free("q3")] }),
-    turn({ stage: "compass", questions: [free("q4")] })]);
+    turn({ stage: "compass", questions: [free("q4")] }), turn({ stage: "compass", questions: [free("q5")] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
   await run({ sessionId: "s", text: "先从经历说起吧" });
   const lastCards = () => ((store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content) as
     { cards?: ProfileCard[]; questions: Array<{ id: string }> });
   const first = lastCards();
-  expect(first.cards!.map((card) => [card.stage, card.items.length])).toEqual([["narrative", 3], ["narrative", 3]]);
+  expect(first.cards!.map((card) => [card.stage, card.items.length])).toEqual([["narrative", 3]]);
   expect(first.questions.map((question) => question.id)).toEqual(["q1", "q2"]);
-  const [tapped, worded] = first.cards!;
-  await run({ sessionId: "s", text: [...tapped!.items.map((item) => scaleAnswerLine(item, 4)), `${cardWordsHead(worded!)}：看人，熟了才放开`].join("\n") });
-  const answers = readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING));
-  expect(tapped!.items.map((item) => answers[item.id])).toEqual(tapped!.items.map((item) => expect.objectContaining({ by: "tapped", score: 4 })));
-  expect(worded!.items.map((item) => answers[item.id]!.by)).toEqual(["pending", "pending", "pending"]);
-  // The narrative items the first round had no room for come before the compass's own.
+  const [tapped] = first.cards!;
+  await run({ sessionId: "s", text: tapped!.items.map((item) => scaleAnswerLine(item, 4)).join("\n") });
+  const answers = () => readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING));
+  expect(tapped!.items.map((item) => answers()[item.id])).toEqual(tapped!.items.map(() => expect.objectContaining({ by: "tapped", score: 4 })));
+  // The narrative items the first round had no room for come before the compass's own, three items at most.
   const second = lastCards();
   expect(second.cards![0]!.stage).toBe("narrative");
-  expect(second.cards![1]!.stage).toBe("compass");
+  expect(second.cards!.flatMap((card) => card.items).length).toBeLessThanOrEqual(3);
+  const [worded] = second.cards!;
+  await run({ sessionId: "s", text: `${cardWordsHead(worded!)}：看人，熟了才放开` });
+  expect(worded!.items.map((item) => answers()[item.id]!.by)).toEqual(worded!.items.map(() => "pending"));
   // Past the module, what is left comes one card a round.
   expect(cardsForRound("lines", new Set())).toHaveLength(1);
   expect(cardsForRound("lines", new Set(PROFILE_ITEMS.map((item) => item.id)))).toEqual([]);
 });
-
-test("a deep-stage round keeps independent questions together, at most four, and a fact stage keeps its batch", () => {
+test("a round keeps independent questions together, at most three in any stage", () => {
   const two = JSON.parse(turn({ stage: "compass", questions: [
     { id: "q1", text: "工作对你意味着什么？", kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] },
     { id: "q2", text: "人生的意义？", kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] }] }));
   expect(paceDeepRound(two, false)).toMatchObject({ deep: true, output: { questions: [{ id: "q1" }, { id: "q2" }] } });
   const six = { ...two, questions: Array.from({ length: 6 }, (_, index) => ({ ...two.questions[0], id: `q${index + 1}` })) };
-  expect(paceDeepRound(six, false).output.questions.map((question: { id: string }) => question.id)).toEqual(["q1", "q2", "q3", "q4"]);
-  // A line's own interview is all details; a fact stage keeps every question.
-  expect(paceDeepRound(two, true).output.questions).toHaveLength(2);
-  expect(paceDeepRound({ ...two, stage: "lines" }, false)).toMatchObject({ deep: false });
-  expect(paceDeepRound({ ...two, stage: "lines" }, false).output.questions).toHaveLength(2);
+  expect(paceDeepRound(six, false).output.questions.map((question: { id: string }) => question.id)).toEqual(["q1", "q2", "q3"]);
+  // A fact stage is capped the same way (five a round read as a form nobody finished, 2026-10-31); a line's own interview is not.
+  expect(paceDeepRound({ ...six, stage: "lines" }, false)).toMatchObject({ deep: false });
+  expect(paceDeepRound({ ...six, stage: "lines" }, false).output.questions).toHaveLength(3);
+  expect(paceDeepRound(six, true).output.questions).toHaveLength(6);
 });
 
 test("the tone the person chose goes with the first turn and every later one", async () => {
@@ -567,8 +570,42 @@ test("the dialogue is told which lines still have no goal candidates, so it asks
   await createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" })({ sessionId: "s", text: "开始吧" });
   const first = dialogue(prompts)[0]!;
   expect(first).toContain("goalPicker");
-  expect(first).toMatch(/：左栏已有 2 个候选定语/);
-  expect(first).toMatch(/：还没有候选定语/);
+  expect(first).toMatch(/：已给出 2 个长期目标的候选词/);
+  expect(first).toMatch(/：还没有长期目标的候选词/);
+});
+
+test("a line's goal is chosen inside the conversation: its candidates come as a question, and the taps adopt the goal", async () => {
+  store.setSetting(workspaceId, "lines.v1", JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "", createdAt: "2026-10-30T00:00:00.000Z" }]));
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普",
+    attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }, { text: "值得信赖", kind: "state", sourceRef: "reply-0" }] } }));
+  const round = turn({ stage: "lines", questions: [{ id: "q1", text: "每周大概花几小时做内容？", kind: "single", allowOther: true, identityId: "media",
+    projectId: "", options: [{ id: "a", label: "5 小时以内", detail: "" }, { id: "b", label: "5 小时以上", detail: "" }] }] });
+  const { rpc } = fakeRuntime([round, round]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  await run({ sessionId: "s", text: "开始吧" });
+  const asked = (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string; options: Array<{ label: string }> }> })
+    .questions.find((question) => question.id === "gap-goal-media");
+  expect(asked?.options.map((option) => option.label)).toEqual(["有趣", "值得信赖"]);
+  await run({ sessionId: "s", text: `【${asked!.text}】选择：有趣；值得信赖` });
+  const lines = JSON.parse(store.getSetting(workspaceId, "lines.v1")!) as Array<{ id: string; goalParts?: string[] }>;
+  expect(lines.find((line) => line.id === "media")?.goalParts).toEqual(["有趣", "值得信赖"]);
+  expect(store.listEvents(workspaceId, { type: "line.updated" }).at(-1)?.payload).toMatchObject({ via: "interview" });
+});
+
+test("once the start items stand, a front-stage round with nothing left to ask ends the interview instead of asking forever", async () => {
+  const at = "2026-10-30T00:00:00.000Z";
+  store.setSetting(workspaceId, "lines.v1", JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "成为有趣的创作者", goals: ["成为有趣的创作者"], createdAt: at }]));
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普", attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }] } }));
+  store.setSetting(workspaceId, "schedule.availability.proposed", JSON.stringify([{ weekday: 1, start: "09:00", end: "12:00" }]));
+  store.saveProject({ id: "notes", ownerId: "o", workspaceId, identityId: "media", name: "秋季笔记系列", status: "active", summary: "", createdAt: at, updatedAt: at });
+  store.upsertProfileFact({ workspaceId, identityId: "media", projectId: "notes", slot: "no_deadline", value: "没有截止", status: "confirmed", sourceRef: "reply-0", sourceQuote: "", updatedAt: at });
+  // An interview that had rounds before the profile module: no cards stand between it and the end.
+  store.saveOnboardingSession({ id: "s", ownerId: "o", workspaceId, state: "active", coverage: { flow: "v1" }, createdAt: at, updatedAt: at });
+  // The model's one question is about a place only, which the screen drops: the round is left with nothing to ask.
+  const { rpc } = fakeRuntime([turn({ stage: "lines", reply: "可以开始使用了。", questions: [{ id: "q1", text: "笔记一般在哪拍？", kind: "single",
+    allowOther: true, identityId: "media", projectId: "", options: [{ id: "a", label: "家里", detail: "" }, { id: "b", label: "户外", detail: "" }] }] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  expect(await run({ sessionId: "s", text: "差不多就这些" })).toEqual({ state: "ready", sessionId: "s" });
 });
 
 test("the runners carry only the scenario: the Skill holds the rules, and the language comes from the shared style", () => {

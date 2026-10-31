@@ -30,12 +30,13 @@ describe("the item bank", () => {
 });
 
 describe("cards", () => {
-  test("a stage offers at most two cards of at most three items, one instrument each, and never an item already answered or skipped", () => {
+  test("a round offers at most three items, at most three a card, one instrument each, and never an item already answered or skipped", () => {
     const first = cardsFor("compass", new Set());
-    expect(first.map((card) => [card.instrument, card.items.length])).toEqual([["mini_ipip", 3], ["mini_ipip", 1]]);
+    expect(first.map((card) => [card.instrument, card.items.length])).toEqual([["mini_ipip", 3]]);
     const settled = new Set([...first.flatMap((card) => card.items.map((item) => item.id))]);
     const next = cardsFor("compass", settled);
-    expect(next.map((card) => card.instrument)).toEqual(["values", "values"]);
+    expect(next.map((card) => card.instrument)).toEqual(["mini_ipip", "values"]);
+    expect(next.flatMap((card) => card.items)).toHaveLength(3);
     expect(next.flatMap((card) => card.items).some((item) => settled.has(item.id))).toBe(false);
     const done = new Set(PROFILE_ITEMS.filter((item) => item.stage === "compass").map((item) => item.id));
     expect(cardsFor("compass", done)).toEqual([]);
@@ -60,12 +61,17 @@ describe("answers", () => {
     const pair = PROFILE_ITEMS.find((candidate) => candidate.id === "value-2")!;
     const reply = [scaleAnswerLine(item, 4), scaleAnswerLine(pair, 1), "【其他】选择：A", "【随便】点选：3/5"].join("\n");
     expect(scaleAnswerLine(pair, 1)).toContain("（去试新鲜、有挑战的事）");
+    // 2 and 4 say which pole they lean to, so a value is never read the wrong way round.
+    expect(scaleAnswerLine(pair, 2)).toMatch(new RegExp(`点选：2/5（偏向「${pair.anchors[0]}」）$`));
+    expect(scaleAnswerLine(pair, 4)).toMatch(new RegExp(`点选：4/5（偏向「${pair.anchors[2]}」）$`));
+    expect(readScaleAnswers(scaleAnswerLine(pair, 4), ["value-2"], at)).toEqual([tap("value-2", 4)]);
     expect(readScaleAnswers(reply, ["ipip-1", "value-2"], at)).toEqual([tap("ipip-1", 4), tap("value-2", 1)]);
     expect(readScaleAnswers(reply, ["value-2"], at)).toEqual([tap("value-2", 1)]);
   });
 
   test("a card's taps are scores, words in its box wait for the extraction, and a card passed over is skipped", () => {
-    const [first, second] = cardsFor("compass", new Set());
+    const [first] = cardsFor("compass", new Set());
+    const [second] = cardsFor("compass", new Set(first!.items.map((item) => item.id)));
     const [a, b, c] = first!.items;
     const reply = [scaleAnswerLine(a!, 2), `${cardWordsHead(first!)}：看场合，一般不太主动`, "其他回答"].join("\n");
     const answers = readCardAnswers(reply, [first!, second!], at);

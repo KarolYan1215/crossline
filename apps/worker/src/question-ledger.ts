@@ -9,6 +9,13 @@ const gapKey = (id: string) => `gap:${id}`;
 const roundKey = (sessionId: string, seq: number, id: string) => `iq:${sessionId}:${seq}:${id}`;
 /** A question the model writes this close to one already answered is that question again, whatever number it gave. */
 export const REPEAT_SIMILARITY = 0.85;
+/**
+ * About the same line a question is a repeat at a lower similarity: the model rewords what it asks each round, and the 2026-10-31
+ * walkthrough had one person's savings asked six times at about 0.5 bigram similarity, each worded a little differently.
+ */
+export const SAME_LINE_SIMILARITY = 0.6;
+/** However it is worded, one question is put to the person at most this many times; the rest is left to an assumption. */
+export const MAX_ASKINGS = 2;
 
 const interviewQuestions = (store: CrosslineStore, workspaceId: string, sessionId: string) => store.listQuestions(workspaceId, { kind: "interview" })
   .filter((question) => question.key.startsWith("gap:") || question.key.startsWith(`iq:${sessionId}:`));
@@ -72,15 +79,44 @@ export function resolveRepeats(store: CrosslineStore, workspaceId: string, sessi
   // An answer that settled nothing (「不确定」) may be asked about once more, never twice: the start items take only the person's word.
   const askedAgain = (id: number) => ledger.some((item) => item.repeats === id);
   const reopenable = (item: LedgerQuestion) => item.status === "answered" && unsureAnswer(item.answer) && !askedAgain(item.id);
-  const kept = questions.filter((question) => {
+  // Same line and same project (two projects' deadlines are worded alike and are two questions).
+  const alike = (a: { text: string; identityId: string; projectId: string }, b: { text: string; identityId: string; projectId: string }) => {
+    if (a.projectId && b.projectId && a.projectId !== b.projectId) return false;
+    const similarity = questionSimilarity(a.text, b.text);
+    return similarity >= REPEAT_SIMILARITY
+      || (Boolean(a.identityId) && a.identityId === b.identityId && a.projectId === b.projectId && similarity >= SAME_LINE_SIMILARITY);
+  };
+  // What the model asked before, answered or not: the model's own questions only (the app's are keyed by gap and asked by its own rules).
+  const askedBefore = ledger.filter((item) => item.status !== "dropped" && !item.key.startsWith("gap:"));
+  const kept: TurnQuestion[] = [];
+  for (const question of questions) {
     const named = question.repeats ? byId.get(question.repeats) : undefined;
-    if (named && (named.status === "answered" || named.status === "assumed") && !reopenable(named)) { dropped.push({ text: question.text, repeats: named.id, why: "answered" }); return false; }
+    if (named && (named.status === "answered" || named.status === "assumed") && !reopenable(named)) { dropped.push({ text: question.text, repeats: named.id, why: "answered" }); continue; }
     if (named?.key.startsWith("gap:")) coveredGaps.add(named.key.slice(4));
-    const twin = !named && answered.find((item) => questionSimilarity(item.text, question.text) >= REPEAT_SIMILARITY && !reopenable(item));
-    if (twin) { dropped.push({ text: question.text, repeats: twin.id, why: "similar" }); return false; }
+    const twin = !named && answered.find((item) => alike(item, question) && !reopenable(item));
+    if (twin) { dropped.push({ text: question.text, repeats: twin.id, why: "similar" }); continue; }
+    // The same thing asked twice already (answered in prose the cards could not read, or skipped) is not asked a third time.
+    // One hop further: each rewording is close to the last one, not always to the first.
+    const near = askedBefore.filter((item) => item.id === named?.id || alike(item, question));
+    const earlier = askedBefore.filter((item) => near.includes(item) || near.some((other) => alike(other, item)));
+    if (earlier.length >= MAX_ASKINGS) { dropped.push({ text: question.text, repeats: earlier.at(-1)!.id, why: "similar" }); continue; }
+    // Two questions of one round that ask the same thing: the first stays.
+    if (kept.some((other) => alike(other, question))) continue;
+    kept.push({ ...question, repeats: question.repeats && byId.has(question.repeats) ? question.repeats : 0 });
+  }
+  return { questions: kept.map(withDistinctOptions), coveredGaps, dropped };
+}
+
+/** A question's options with repeats left out (2026-10-31: one card offered the same choice twice). */
+export function withDistinctOptions(question: TurnQuestion): TurnQuestion {
+  const seen = new Set<string>();
+  const options = question.options.filter((option) => {
+    const key = option.label.replace(/[\s，,。.、；;：:（）()「」]/g, "").toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
     return true;
-  }).map((question) => ({ ...question, repeats: question.repeats && byId.has(question.repeats) ? question.repeats : 0 }));
-  return { questions: kept, coveredGaps, dropped };
+  });
+  return options.length === question.options.length ? question : { ...question, options };
 }
 
 /** Every question of a stored round, now shown and open; returns the ledger numbers in the round's order. */

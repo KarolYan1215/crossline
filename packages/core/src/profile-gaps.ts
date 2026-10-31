@@ -32,11 +32,13 @@ export type ProfileGapInput = {
   calendarRecurring?: string[];
   /** The working portrait, once all its fields are written, and whether the person said it fits them (`profile.confirmed`). */
   portrait?: { written: boolean; confirmed: boolean };
+  /** Lines with no long-term goal chosen yet and the interview's candidates for it, in order: the person picks them in the round. */
+  goalPickers?: Array<{ lineId: string; candidates: string[] }>;
   /** The language the questions and their options are written in (default Chinese). `detail` is for the model and stays as it is. */
   locale?: Locale | undefined;
 };
 export type ProfileGap = {
-  code: "LINE_UNCONFIRMED" | "PROJECT_DEADLINE" | "DATE_UNDATED" | "COURSE_MEETINGS" | "FILE_UNFILED" | "PORTRAIT_UNCONFIRMED" | "APPEARANCE";
+  code: "LINE_UNCONFIRMED" | "LINE_GOAL" | "PROJECT_DEADLINE" | "DATE_UNDATED" | "COURSE_MEETINGS" | "FILE_UNFILED" | "PORTRAIT_UNCONFIRMED" | "APPEARANCE";
   identityId: string; projectId: string;
   /** The file a `FILE_UNFILED` gap is about. */
   documentId?: string;
@@ -103,6 +105,25 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
           { id: "later", label: t("有，但现在不想规划"), detail: t("这条线先跳过，之后随时可以回来补") },
           { id: "none", label: t("目前没有在做的事"), detail: t("这条线暂时留空，不为它生成里程碑") }
         ]
+      }
+    });
+  }
+
+  // A line's long-term goal is the person's to choose (a start item). Its candidates are offered in the round itself as well as in the left
+  // column, which the person may never open: two of three people of the 2026-10-31 walkthrough reached the round limit with no goal chosen,
+  // because the interview's own goal questions are screened while the left column offers candidates (`goal_picker`).
+  for (const picker of input.goalPickers ?? []) {
+    const label = lineLabel.get(picker.lineId);
+    const candidates = [...new Set(picker.candidates.map((text) => text.trim()).filter(Boolean))].slice(0, 8);
+    if (!label || !candidates.length) continue;
+    gaps.push({
+      code: "LINE_GOAL", identityId: picker.lineId, projectId: "", blocking: true,
+      // i18n-ignore: for the model
+      detail: `「${label}」的长期目标还没有选定：本人从候选定语里选，或自己写。`,
+      question: {
+        id: `gap-goal-${picker.lineId}`, kind: "multi", allowOther: true, identityId: picker.lineId, projectId: "",
+        text: t("「{{label}}」的长期目标：想成为什么样的{{label}}？可多选，也可以自己写。", { label }),
+        options: candidates.map((text, index) => ({ id: `c${index + 1}`, label: text, detail: "" }))
       }
     });
   }
@@ -329,9 +350,11 @@ export function mergeFacts<T extends { identityId: string; projectId: string; sl
   return [...merged.values()];
 }
 
-/** A fact to write; or, with an empty `slot`, an action: filing a file (`file`), or the person's 「符合」 for the portrait. */
+/** A fact to write; or, with an empty `slot`, an action: filing a file (`file`), the person's 「符合」 for the portrait, or a chosen goal. */
 export type GapAnswer = { identityId: string; projectId: string; slot: string; value: string; quote: string;
-  file?: { documentId: string; projectId: string }; confirmPortrait?: boolean };
+  file?: { documentId: string; projectId: string }; confirmPortrait?: boolean;
+  /** A line's long-term goal chosen in the round: the parts in the order offered, then the person's own words. */
+  goal?: { lineId: string; parts: string[] } };
 
 const stable = (text: string) => [...text].reduce((hash, char) => (hash * 31 + char.codePointAt(0)!) >>> 0, 7).toString(36);
 
@@ -398,6 +421,9 @@ export function answeredGapFacts(replyText: string, gaps: ProfileGap[]): GapAnsw
       const declined = gap.question.options.filter((option) => option.id !== "doing").map((option) => pickedFor(option.id)).find(Boolean);
       if (other) out.push({ ...base, slot: "what", value: other, quote: other });
       else if (declined) out.push({ ...base, slot: "skipped", value: declined, quote: declined });
+    } else if (gap.code === "LINE_GOAL") {
+      const parts = [...gap.question.options.map((option) => pickedFor(option.id)).filter((label): label is string => Boolean(label)), ...(other ? [other] : [])];
+      if (parts.length) out.push({ identityId: "", projectId: "", slot: "", value: parts.join("；"), quote: parts[0]!, goal: { lineId: gap.identityId, parts } });
     } else if (gap.code === "PROJECT_DEADLINE") {
       const none = pickedFor("none");
       const guess = picked.find((label) => label.startsWith(DEADLINE_GUESS_PREFIX) || label.startsWith(DEADLINE_GUESS_PREFIX_EN));

@@ -377,7 +377,7 @@ export function createMilestoneProposer(store: CrosslineStore, workspaceId: stri
       assumptions.push(...result.output.assumptions);
       for (const proposal of result.output.targetProposals ?? []) {
         const name = context.profile?.projects.find((project) => project.id === proposal.projectId)?.name ?? proposal.projectId;
-        assumptions.push(t("「{{name}}」分数线暂定为 {{value}}（{{why}}）；各里程碑的分数线均由此倒推，可在「主线」页修改并重算。", { name, value: proposal.value, why: proposal.why }));
+        assumptions.push(t("「{{name}}」的目标暂定为 {{value}}（{{why}}）；各里程碑的要求都由它倒推，可在「主线」页修改并重算。", { name, value: proposal.value, why: proposal.why }));
       }
     }
     drafting.finishedAt = clockNow(now).toISOString();

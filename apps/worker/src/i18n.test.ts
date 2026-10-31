@@ -69,11 +69,11 @@ test("a page that refuses to open says so in the reader's language, and gives it
 
 test("the interview's own closing line follows the interview's language", () => {
   const turn = { nextAction: "ready_for_milestones", reply: "OK.", questions: [] } as unknown as Parameters<typeof withChecklist>[0];
-  const open = [{ label: "Weekly hours", detail: "", owner: "interview" as const }];
-  expect(withChecklist(turn, open).reply).toBe("OK.\n\n完成访谈前还缺：Weekly hours。");
+  const open = [{ label: "Weekly hours", detail: "", owner: "interview" as const, ask: "Which hours of the week are yours?" }];
+  expect(withChecklist(turn, open).reply).toBe("OK.\n\n开始之前还想再问几件事。");
   const english = withChecklist(turn, open, "en");
-  expect(english.reply).toBe("OK.\n\nStill missing before the interview is complete: Weekly hours.");
-  expect(english.questions[0]!.text).toBe("Still missing before the interview is complete: Weekly hours. Please add it.");
+  expect(english.reply).toBe("OK.\n\nA few more things before we start.");
+  expect(english.questions[0]!.text).toBe("Which hours of the week are yours?");
 });
 
 test("what the run reports back is recognised in either language (heuristics read what the model wrote)", () => {

@@ -76,6 +76,9 @@ export function StageView({ state, stage, complete, onChanged }: {
   const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
   const progress = state.progress;
   const organizing = organizingNote(state.organizing, locale);
+  // While the last replies are still being written into the record, what is open may already be answered: the names wait for it rather
+  // than show the list from before (the 2026-10-31 walkthrough read a stale 「还缺」 for several rounds).
+  const settling = Boolean(state.organizing?.replies && !state.organizing.failing);
   // The start items by kind (they are per line): one row each, done when every line's is, the open ones named under it.
   const groups = START_GROUPS.map((group) => {
     const items = (state.startItems ?? []).filter((item) => item.id.split(":")[0] === group.prefix);
@@ -94,11 +97,11 @@ export function StageView({ state, stage, complete, onChanged }: {
       {groups.length > 0 && <ul className="ob-start-list">{groups.map((group) => { const open = group.items.some((item) => !item.done);
         return <li key={group.prefix} data-done={!open || undefined}>
           {open ? <Circle size={15} strokeWidth={1.75} aria-hidden="true" /> : <Check size={15} strokeWidth={2} aria-hidden="true" />}
-          <span>{t(group.label)}{open && group.open.length > 0 && <small>{group.open.slice(0, 3).map(({ label, href }) =>
+          <span>{t(group.label)}{open && settling && <small><span>{t("整理中")}</span></small>}{open && !settling && group.open.length > 0 && <small>{group.open.slice(0, 3).map(({ label, href }) =>
             href ? <a key={label} href={href}>{t("{{label}}（在左栏采用）", { label: t(label) })}</a> : <span key={label}>{t(label)}</span>)}
             {group.open.length > 3 && <span>{t("等 {{count}} 项", { count: group.open.length - 3 })}</span>}</small>}</span>
         </li>; })}</ul>}
-      {!state.readyToStart && loose.length > 0 && <ul className="ob-ring-missing">{loose.slice(0, 3).map(({ label, href }) => <li key={label}>{href ? <a href={href}>{t("{{label}}（在左栏采用）", { label: t(label) })}</a> : t(label)}</li>)}
+      {!state.readyToStart && !settling && loose.length > 0 && <ul className="ob-ring-missing">{loose.slice(0, 3).map(({ label, href }) => <li key={label}>{href ? <a href={href}>{t("{{label}}（在左栏采用）", { label: t(label) })}</a> : t(label)}</li>)}
         {loose.length > 3 && <li>{t("等 {{count}} 项", { count: loose.length - 3 })}</li>}</ul>}
       {/* The first time, the person looks over what the plan will rest on before every page opens; after that it is a plain link. */}
       {state.readyToStart && (state.startConfirmed === false && state.startSummary ? <StartConfirm summary={state.startSummary} />

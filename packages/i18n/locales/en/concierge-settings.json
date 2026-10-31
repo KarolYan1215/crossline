@@ -80,5 +80,5 @@
   "每天的简报从这个时间起发出（留空则从当天第一个可用时段起）": "The daily brief goes out from this time (empty: from the day's first available hour)",
   "{{label}}：{{value}}（「{{quote}}」）": "{{label}}: {{value}} (“{{quote}}”)",
   "：{{value}}": ": {{value}}",
-  "开始使用前还差：{{item}}。请补充；实在不知道，可以说一个暂定的答案。": "Still needed before starting: {{item}}. Please add it; if unsure, a provisional answer is fine."
+  "{{ask}}实在说不准，可以先说一个暂定的答案。": "{{ask}} If you are not sure, a provisional answer is fine."
 }

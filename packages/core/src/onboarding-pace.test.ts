@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capacityConflict, checkInsight, interviewAbstract, lineWeights, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft } from "./onboarding-pace";
+import { capacityConflict, checkInsight, interviewAbstract, lineWeights, plainTerms, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft, withPlainTerms } from "./onboarding-pace";
 import { DEADLINE_GUESS_PREFIX, answeredGapFacts, profileGaps } from "./profile-gaps";
 import { interviewChecklist, interviewComplete, interviewOwnedOpen } from "./interview-checklist";
 
@@ -96,5 +96,15 @@ describe("项目细节不再拖住访谈", () => {
     expect(project.deferred).toBe(true);
     expect(interviewOwnedOpen(items).some((item) => item.id === "project:p1")).toBe(false);
     expect(interviewComplete(items.filter((item) => !item.id.startsWith("portrait")))).toBe(true);
+  });
+});
+
+describe("the app's own terms", () => {
+  it("are put into everyday words wherever the interview speaks to the person", () => {
+    expect(plainTerms("「上班」是硬约束；左栏已有 3 个候选定语。")).toBe("「上班」是固定安排；左栏已有 3 个候选词。");
+    const round = withPlainTerms({ reply: "定语选好了吗？", questions: [{ id: "q", text: "哪些定语合适？", kind: "multi" as const, allowOther: true,
+      identityId: "", projectId: "", options: [{ id: "a", label: "硬约束", detail: "定语" }] }] });
+    expect(round.reply).toBe("形容词选好了吗？");
+    expect(round.questions[0]!.options[0]).toEqual({ id: "a", label: "固定安排", detail: "形容词" });
   });
 });

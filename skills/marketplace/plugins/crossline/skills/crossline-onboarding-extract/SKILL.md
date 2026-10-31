@@ -36,6 +36,8 @@ Return JSON matching `OnboardingExtraction` (`packages/core/src/onboarding-turn-
 - A reply often answers more than its cards asked (hours, a deadline or a collaborator mentioned in passing, a 「补充」 under another question): record each, under its own slot. What is not recorded here is asked again, and the person has to repeat it. A reply that is only a request about the app (「请把文件里的日期重新读一遍」) states no fact about the person.
 - The portrait is finished only when each of 现状与真问题, 工作观与人生观, 能量与心流 rests on at least one confirmed `person` fact: record what the person says about these as such facts, not only in `profile`.
 
+- **Only what the person said about themselves.** Never record or write their gender, age, study stage (本科 / 读研 / 博士), job or family status from a guess: a name, a course, a field or a line's label is not evidence of any of them (2026-10-31: one person was written up as 读研 and called 他 with nothing they said behind either). Record such a fact only from their own words or a file about them.
+
 ## Dates (`fileDates`)
 
 Every date the new files state, and every fixed weekly arrangement a reply states (classes, meetings, shifts, and a habit kept at a set time each week such as 「周二、周四晚上 8:30 跑步」 or a weekly lesson, under its line — never meals, sleep or a commute: those are what `availability` leaves out):

@@ -1,7 +1,7 @@
 import type { AvailabilityWindow } from "./availability";
 import { joinList, monthDay, tFor, type Locale } from "./i18n";
 import { locateQuote } from "./sentences";
-import { DEEP_STAGES, INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, type InterviewFlow, type OnboardingStage, type TurnInsight, type TurnProgress } from "./onboarding-turn-schema";
+import { DEEP_STAGES, INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, type InterviewFlow, type OnboardingStage, type TurnInsight, type TurnProgress, type TurnQuestion } from "./onboarding-turn-schema";
 
 /**
  * What keeps the interview moving and gives something back at every part (2026-10-19, the owner's decisions after testers lost patience):
@@ -230,4 +230,44 @@ export function skeletonDraft(windows: AvailabilityWindow[], busy: BusySpan[], l
 export function lineWeights(lines: Array<{ id: string; rank: number | null }>, shares: Record<string, number> | null): Array<{ id: string; weight: number }> {
   if (shares && lines.some((line) => (shares[line.id] ?? 0) > 0)) return lines.map((line) => ({ id: line.id, weight: shares[line.id] ?? 0 }));
   return lines.map((line) => ({ id: line.id, weight: line.rank === 1 ? 2 : 1 }));
+}
+
+/** What a round that still asks but holds no question asks, by stage: open, in the interview's own voice. */
+export const OPEN_QUESTION: Record<OnboardingStage, string> = {
+  narrative: "说一件你这几年做过、现在想起来还挺得意的事？小事也行。",
+  orientation: "还有哪条主线、哪份材料没提到？",
+  lines: "哪条主线你最想先说清楚：现在在做什么、想做成什么样？",
+  situation: "说说你现在的处境：这几周最占你精力、最让你担心的是什么？",
+  compass: "做这些事，你最终想得到什么？",
+  energy: "一天里什么时候状态最好，什么事最耗你？",
+  details: "还有哪个项目的截止日、交付物或验收方式没说清楚？"
+};
+
+/**
+ * The open question for a round that still asks and holds nothing to answer: the worker adds it when a round is stored, the interview page
+ * when its own screen (files the app asks about, facts recorded since) left a stored round empty.
+ */
+export function openStageQuestion(stage: string | undefined, locale?: Locale): TurnQuestion {
+  const at = (stage && stage in OPEN_QUESTION ? stage : "situation") as OnboardingStage;
+  return { id: `open-${at}`, text: tFor(locale)(OPEN_QUESTION[at]), kind: "free", allowOther: true, identityId: "", projectId: "", options: [] };
+}
+
+/**
+ * The app's own terms, put back into everyday words wherever the interview says them to the person (2026-10-31: 「硬约束」 and 「定语候选」
+ * reached people word for word). Only exact terms with one meaning: the dialogue is told not to use them, and this is the backstop.
+ */
+const INTERNAL_TERMS: Array<[RegExp, string]> = [
+  [/候选定语|定语候选/g, "候选词"], [/定语/g, "形容词"], [/硬约束/g, "固定安排"], [/开始标准/g, "开始前要定的几件事"], [/检查清单/g, "要问的事"]
+];
+export const plainTerms = (text: string) => INTERNAL_TERMS.reduce((out, [pattern, word]) => out.replace(pattern, word), text);
+
+/** A round with the app's own terms put into everyday words: the reply, every question and option, and what the progress says next. */
+export function withPlainTerms<T extends { reply: string; questions: TurnQuestion[]; progress?: TurnProgress }>(round: T): T {
+  return {
+    ...round,
+    reply: plainTerms(round.reply),
+    questions: round.questions.map((question) => ({ ...question, text: plainTerms(question.text),
+      options: question.options.map((option) => ({ ...option, label: plainTerms(option.label), detail: plainTerms(option.detail) })) })),
+    ...(round.progress ? { progress: { ...round.progress, next: plainTerms(round.progress.next) } } : {})
+  };
 }

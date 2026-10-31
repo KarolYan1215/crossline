@@ -89,7 +89,11 @@ export function interviewGapsFor(store: CrosslineStore, workspaceId: string, lin
   // The app's own interview questions are in the interview's language, whatever the page is switched to.
   const language = locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId);
   const items = interviewChecklistFor(store, workspaceId, lines, { unfiledFiles: unfiled.length, today, locale: language });
+  let profiles: Record<string, StoredLineProfile> = {};
+  try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* none */ }
   return profileGaps({
+    goalPickers: lines.filter((line) => !line.goals.length)
+      .map((line) => ({ lineId: line.id, candidates: lineAttributes(profiles[line.id], line.label).map((item) => item.text) })),
     locale: language,
     identities: lines.map(({ id, label }) => ({ id, label })),
     projects: store.listProjects(workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),

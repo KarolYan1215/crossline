@@ -237,3 +237,15 @@ test("a round question asking a line's long-term goal is screened once the left 
   // No candidates yet: the question is how the interview learns the goal, so it stays.
   expect(screenQuestions(round, { projects: [], meetings: [] }).keep).toHaveLength(4);
 });
+
+test("a line with no goal chosen gets its candidates as a question of the round, and the taps choose it", () => {
+  const gaps = profileGaps({ ...base, goalPickers: [{ lineId: "research", candidates: ["严谨", "器件物理", "严谨", " "] }, { lineId: "startup", candidates: [] }] });
+  const goal = gaps.filter((gap) => gap.code === "LINE_GOAL");
+  expect(goal.map((gap) => gap.identityId)).toEqual(["research"]);
+  expect(goal[0]).toMatchObject({ blocking: true, question: { id: "gap-goal-research", kind: "multi", allowOther: true } });
+  expect(goal[0]!.question.options.map((option) => option.label)).toEqual(["严谨", "器件物理"]);
+  expect(goal[0]!.question.text).toContain("长期目标");
+  const reply = `【${goal[0]!.question.text}】选择：器件物理；严谨。补充：能独立立项`;
+  expect(answeredGapFacts(reply, gaps)).toEqual([expect.objectContaining({ slot: "", goal: { lineId: "research", parts: ["严谨", "器件物理", "能独立立项"] } })]);
+  expect(answeredGapFacts(`【${goal[0]!.question.text}】选择：`, gaps)).toEqual([]);
+});

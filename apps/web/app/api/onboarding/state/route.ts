@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
+import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, firstDraftsState, openStageQuestion, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
 import { INTERVIEW_LOCALE_SETTING, extractBacklog, interviewLocale, questionScreenFor } from "@crossline/db";
 import { isLocale } from "@crossline/i18n";
 import { resolveAccessContext } from "../../../../lib/access-guard";
@@ -37,14 +37,21 @@ export async function GET(request: Request) {
   // A round stored before the screen existed is screened here as on 待决事项 (`lib/interview-status.ts`): a room, class times on record, a
   // calendar's recurrence are not the person's to answer. A question asking for several things is shown as multiple choice.
   for (const item of screenQuestions(lastQuestions, questionScreenFor(store, workspaceId)).screened) moved.add(item.question.id);
-  const messages = lastQuestions.length ? raw.map((message, index) => index === lastIndex
-    ? { ...message, content: { ...(message.content as object), questions: lastQuestions.filter((question) => !moved.has(question.id))
-      .map((question) => ({ ...question, kind: questionKind(question) })) } } : message) : raw;
   const identities = identityLines(access.ctx).map((pack) => ({ id: pack.id, label: pack.label }));
   // The start standard (main interview only): what is still missing, and the app's own questions not in the open round — so an account
   // whose interview already ended can answer 「没有截止」 here without waiting for a new round.
   const status = focus ? null : interviewStatus(access.ctx);
   const inRound = new Set(lastQuestions.map((question) => question.id));
+  const kept = lastQuestions.filter((question) => !moved.has(question.id)).map((question) => ({ ...question, kind: questionKind(question) }));
+  // A round that still asks never shows an empty box: when this screen took out everything it held (the files the app asks about, facts
+  // recorded since it was stored) and nothing of the app's own waits beside it, it asks the stage's open question (2026-10-31 walkthrough).
+  const lastContent = (raw[lastIndex]?.content ?? {}) as { nextAction?: string; stage?: string; cards?: unknown[] };
+  const extra = status ? status.questions.filter((question) => !inRound.has(question.id)) : [];
+  const empty = raw[lastIndex]?.role === "assistant" && lastContent.nextAction === "ask" && lastQuestions.length > 0 && !kept.length
+    && !(lastContent.cards ?? []).length && !extra.length;
+  const shown = empty ? [openStageQuestion(lastContent.stage, interviewLocale(store, workspaceId))] : kept;
+  const messages = lastQuestions.length ? raw.map((message, index) => index === lastIndex
+    ? { ...message, content: { ...(message.content as object), questions: shown } } : message) : raw;
   // What the background extraction still owes this conversation (2026-10-19): while it reads the last replies the facts behind the start
   // standard may not be on record yet, so 「开始使用」 waits for it — unless it is failing, which must not hold the person forever.
   const organizing = session ? extractBacklog(store, workspaceId, session.id) : { replies: 0, frontReplies: 0, files: 0 };
@@ -60,7 +67,7 @@ export async function GET(request: Request) {
     startMissing: status.startMissing.map(({ id, label, detail, owner }) => ({ id, label, detail, owner })),
     startItems: status.checklist.filter((item) => item.start).map(({ id, label, done }) => ({ id, label, done })),
     portraitState: (({ written, confirmed }) => ({ written, confirmed }))(portraitConfirmation(access.ctx)),
-    extraQuestions: status.questions.filter((question) => !inRound.has(question.id))
+    extraQuestions: extra
   } : { readyToStart: true, startConfirmed: true, startTotal: 0, startMissing: [], extraQuestions: [] };
   const today = planToday(access.ctx);
   const week = weekSkeleton(access.ctx, today), timeline = projectTimeline(access.ctx, today);
