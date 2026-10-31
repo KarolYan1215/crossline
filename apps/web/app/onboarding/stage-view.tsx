@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Circle } from "lucide-react";
-import { interviewParts, SCHWARTZ_VALUES, type InterviewFlow } from "@crossline/core";
+import { depthPace, interviewParts, SCHWARTZ_VALUES, type InterviewFlow, type OnboardingDepth } from "@crossline/core";
 import { ValuesRadar } from "../portrait/portrait-charts";
 import { FlywheelPreview, type Link } from "./flywheel-preview";
 import { StartConfirm } from "./start-confirm";
@@ -36,15 +36,18 @@ export function viewForStage(stage: string, complete: boolean, ready = false): S
 const MODULE_PARTS = 4;
 
 /** Rough minutes to the start standard and to the end, from what is still open: honest enough to plan a sitting, never a promise. */
-export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "startMissing">, stage: string, flow: InterviewFlow = "v1"): { label: string; minutes: number } {
-  const order: string[] = interviewParts(flow);
+export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "startMissing">, stage: string, flow: InterviewFlow = "v1",
+  depth?: OnboardingDepth): { label: string; minutes: number } {
+  const order: string[] = interviewParts(flow, depth);
+  // The rates below are the quick tier's (about 50 minutes in all); a deeper tier asks more of every part, so each estimate scales with it.
+  const scale = depthPace(depth).minutes / depthPace("quick").minutes;
   // A start item is per line and most are settled by one answer, several to a round: about 2.5 minutes each, never more than half an hour.
   const facts = Math.min(30, Math.ceil(state.startMissing.filter((item) => item.id !== "profile_cards").length * 2.5));
   // The profile module (flow v2) comes before the start: about ten minutes a part still ahead of it.
   const module = flow === "v2" ? Math.max(0, MODULE_PARTS - Math.max(0, order.indexOf(stage))) * 10 : 0;
-  if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, module + facts) };
+  if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, Math.round((module + facts) * scale)) };
   const left = Math.max(1, order.length - Math.max(0, order.indexOf(stage)));
-  return { label: "画像访谈还剩约", minutes: left * 5 };
+  return { label: "画像访谈还剩约", minutes: Math.round(left * 5 * scale) };
 }
 
 /** Codes that mean no model can run for this account yet: the conversation already says so in the same words, under the reply. */
@@ -71,7 +74,7 @@ export function StageView({ state, stage, complete, onChanged }: {
   useEffect(() => setShown(current), [current]);
   const reached = VIEWS.findIndex((view) => view.key === current);
   const total = state.startTotal;
-  const left = minutesLeft(state, stage, state.flow);
+  const left = minutesLeft(state, stage, state.flow, state.depth);
   // A long-term goal is adopted in the left column, not answered in the conversation: its missing item links there (W-8).
   const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
   const progress = state.progress;

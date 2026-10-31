@@ -1,6 +1,7 @@
 import type { AvailabilityWindow } from "./availability";
 import { joinList, monthDay, tFor, type Locale } from "./i18n";
 import { locateQuote } from "./sentences";
+import { depthPace, type OnboardingDepth } from "./onboarding-depth";
 import { DEEP_STAGES, INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, type InterviewFlow, type OnboardingStage, type TurnInsight, type TurnProgress, type TurnQuestion } from "./onboarding-turn-schema";
 
 /**
@@ -9,11 +10,16 @@ import { DEEP_STAGES, INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, type InterviewFl
  * week looks like — the capacity a person has against what is fixed and due, and a draft of the week once the start standard stands.
  */
 
-/** The parts of the main interview, in order. `details` is gone from it (line interviews still use it). */
+/** The parts of the main interview, in order. `details` is gone from it except in the thorough tier (line interviews still use it). */
 export const INTERVIEW_PARTS: OnboardingStage[] = ["orientation", "lines", "situation", "compass", "energy"];
-/** The parts of a flow's main interview, in order (`v2` puts the profile module first, docs/profile-and-agent-kit.md §四). */
-export const interviewParts = (flow: InterviewFlow = "v1"): OnboardingStage[] =>
-  flow === "v1" ? INTERVIEW_PARTS : INTERVIEW_FLOW_STAGES[flow].filter((stage) => stage !== "details");
+/**
+ * The parts of a flow's main interview, in order (`v2` puts the profile module first, docs/profile-and-agent-kit.md §四); the thorough
+ * tier ends with the details part (onboarding-depth.ts).
+ */
+export const interviewParts = (flow: InterviewFlow = "v1", depth?: OnboardingDepth): OnboardingStage[] => {
+  const parts = flow === "v1" ? INTERVIEW_PARTS : INTERVIEW_FLOW_STAGES[flow].filter((stage) => stage !== "details");
+  return depthPace(depth).detailsPart ? [...parts, "details"] : parts;
+};
 export const PART_LABEL: Record<OnboardingStage, string> = {
   narrative: "经历", orientation: "开场", lines: "主线", situation: "处境", compass: "指南针", energy: "能量", details: "细节"
 };
@@ -58,9 +64,9 @@ export function readTurnProgress(raw: unknown): TurnProgress | undefined {
     next: typeof value.next === "string" ? value.next.slice(0, 160) : "" };
 }
 
-/** How far the main interview is, for the screen: the part (1-based of five), its label, and how much of it is clear. */
-export function progressView(progress: TurnProgress | undefined, stage: string, flow: InterviewFlow = "v1"): { index: number; total: number; label: string; clear: number; of: number; next: string } {
-  const parts = interviewParts(flow);
+/** How far the main interview is, for the screen: the part (1-based of five, six in the thorough tier), its label, and how much of it is clear. */
+export function progressView(progress: TurnProgress | undefined, stage: string, flow: InterviewFlow = "v1", depth?: OnboardingDepth): { index: number; total: number; label: string; clear: number; of: number; next: string } {
+  const parts = interviewParts(flow, depth);
   const part = progress?.part ?? (stage as OnboardingStage);
   const at = parts.indexOf(part);
   const index = at < 0 ? (part === "details" ? parts.length : 1) : at + 1;
@@ -71,9 +77,9 @@ export function progressView(progress: TurnProgress | undefined, stage: string, 
 
 /** The progress record as the lines the next round starts from (for the dialogue model, not shown). */
 /* i18n-ignore-start */
-export function progressLines(progress: TurnProgress | undefined, flow: InterviewFlow = "v1"): string[] {
+export function progressLines(progress: TurnProgress | undefined, flow: InterviewFlow = "v1", depth?: OnboardingDepth): string[] {
   if (!progress) return [];
-  const parts = interviewParts(flow);
+  const parts = interviewParts(flow, depth);
   return [`上轮判断：第 ${Math.max(1, parts.indexOf(progress.part) + 1)}/${parts.length} 部分「${PART_LABEL[progress.part]}」${progress.partDone ? "已完成" : "未完成"}`,
     ...(progress.covered.length ? [`已谈清：${progress.covered.join("；")}`] : []),
     ...(progress.open.length ? [`未谈：${progress.open.join("；")}`] : []),
@@ -259,7 +265,9 @@ export function openStageQuestion(stage: string | undefined, locale?: Locale): T
 const INTERNAL_TERMS: Array<[RegExp, string]> = [
   [/候选定语|定语候选/g, "候选词"], [/定语/g, "形容词"], [/硬约束/g, "固定安排"], [/开始标准/g, "开始前要定的几件事"], [/检查清单/g, "要问的事"]
 ];
-export const plainTerms = (text: string) => INTERNAL_TERMS.reduce((out, [pattern, word]) => out.replace(pattern, word), text);
+/** Text a round left out (an option with no detail, 2026-10-31 walkthrough C) passes through as it is. */
+export const plainTerms = <T extends string | undefined>(text: T): T =>
+  typeof text === "string" ? INTERNAL_TERMS.reduce((out, [pattern, word]) => out.replace(pattern, word), text as string) as T : text;
 
 /** A round with the app's own terms put into everyday words: the reply, every question and option, and what the progress says next. */
 export function withPlainTerms<T extends { reply: string; questions: TurnQuestion[]; progress?: TurnProgress }>(round: T): T {

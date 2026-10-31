@@ -127,17 +127,17 @@ export type ProfileCard = { id: string; instrument: InstrumentId; title: string;
 
 /**
  * The next cards: items not yet answered or skipped, in bank order, grouped by instrument, at most `ITEMS_PER_CARD` each and
- * `CARDS_PER_ROUND` and `ITEMS_PER_ROUND` in all. `stages` is the current stage, or several in order — the stages the interview already left come first, so an
+ * `CARDS_PER_ROUND` and `ITEMS_PER_ROUND` (or the tier's, onboarding-depth.ts) in all. `stages` is the current stage, or several in order — the stages the interview already left come first, so an
  * item a stage never got to is still asked later (otherwise the profile module could never finish). A card's id is its first item's, so a
  * card asked again after a reload keeps its id.
  */
-export function cardsFor(stages: ProfileStage | readonly ProfileStage[], settled: ReadonlySet<string>, limit = CARDS_PER_ROUND): ProfileCard[] {
+export function cardsFor(stages: ProfileStage | readonly ProfileStage[], settled: ReadonlySet<string>, limit = CARDS_PER_ROUND, itemLimit = ITEMS_PER_ROUND): ProfileCard[] {
   const order = typeof stages === "string" ? [stages] : stages;
   const cards: ProfileCard[] = [];
   let items = 0;
   for (const stage of order) for (const item of PROFILE_ITEMS) {
     if (item.stage !== stage || settled.has(item.id)) continue;
-    if (items >= ITEMS_PER_ROUND) return cards;
+    if (items >= itemLimit) return cards;
     items += 1;
     const last = cards.at(-1);
     if (last && last.instrument === item.instrument && last.stage === stage && last.items.length < ITEMS_PER_CARD) { last.items.push(item); continue; }

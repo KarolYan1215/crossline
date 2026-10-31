@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingTone } from "@crossline/core";
+import { DEPTH_PACE, ONBOARDING_DEPTH_LABEL, ONBOARDING_DEPTHS, ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingDepth, type OnboardingTone } from "@crossline/core";
 import { DOMAIN_PACKS, LINE_DOMAINS, lineNounFor, type LineDomain } from "@crossline/identity-packs";
 import { tFor, type Locale } from "../../lib/i18n";
 import { useLocale } from "../locale-context";
@@ -25,7 +25,7 @@ const NO_FIXED = "都没有";
 const FIXED_ACTIVITIES = ["上班", "上学", "自由职业"];
 
 export type Edition = "lite" | "full";
-export type OpeningAnswer = { tone: OnboardingTone; edition: Edition; lines: string[]; domains: Record<string, LineDomain>; base: string; fixed: string[];
+export type OpeningAnswer = { tone: OnboardingTone; depth?: OnboardingDepth; edition: Edition; lines: string[]; domains: Record<string, LineDomain>; base: string; fixed: string[];
   /** The lite edition: what the person typed for the fixed-schedule line, by the line it named (上班 for 职场人), so the interview can quote it. */
   said?: Record<string, string> };
 
@@ -51,7 +51,9 @@ const shown = (label: string, locale?: Locale) => {
 export function openingReply(answer: OpeningAnswer, withMaterials: boolean, locale?: Locale): string {
   const t = tFor(locale);
   const list = (items: string[]) => items.join(locale === "en" ? ", " : "、");
-  return [t("【语气】{{tone}}", { tone: t(ONBOARDING_TONE_LABEL[answer.tone].label) }), t("【版本】{{edition}}", { edition: t(EDITION_LABEL[answer.edition].label) }),
+  return [t("【语气】{{tone}}", { tone: t(ONBOARDING_TONE_LABEL[answer.tone].label) }),
+    ...(answer.depth ? [t("【详细程度】{{depth}}（约 {{minutes}} 分钟）", { depth: t(ONBOARDING_DEPTH_LABEL[answer.depth].label), minutes: DEPTH_PACE[answer.depth].minutes })] : []),
+    t("【版本】{{edition}}", { edition: t(EDITION_LABEL[answer.edition].label) }),
     t("【我的主线】{{lines}}", { lines: list(answer.lines.map((label) => shown(label, locale))) }),
     t("【未来 12–24 个月的底座】{{base}}", { base: answer.base || t(ALL_EQUAL) }),
     t("【有固定日程的主线】{{fixed}}", { fixed: answer.fixed.length ? list(answer.fixed) : t(NO_FIXED) }),
@@ -59,9 +61,9 @@ export function openingReply(answer: OpeningAnswer, withMaterials: boolean, loca
     t(withMaterials ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY)].join("\n");
 }
 
-export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMaterials, needsConnection = false, onStart }: {
+export function OpeningCard({ linesKnown, knownLines, initialTone, initialDepth = "quick", busy, hasMaterials, needsConnection = false, onStart }: {
   /** The lines are already set (an account from before this card): only the tone is asked. */
-  linesKnown: boolean; knownLines: string[]; initialTone: OnboardingTone; busy: boolean; hasMaterials: boolean;
+  linesKnown: boolean; knownLines: string[]; initialTone: OnboardingTone; initialDepth?: OnboardingDepth; busy: boolean; hasMaterials: boolean;
   /** No model connection yet: the card can be filled in, but the first round cannot run until the step above it is done. */
   needsConnection?: boolean;
   onStart: (answer: OpeningAnswer) => void;
@@ -74,6 +76,7 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
   const domainNouns = DOMAIN_NOUNS.map((label) => t(label));
   const activities = FIXED_ACTIVITIES.map((label) => t(label));
   const [tone, setTone] = useState<OnboardingTone>(initialTone);
+  const [depth, setDepth] = useState<OnboardingDepth>(initialDepth);
   const [edition, setEdition] = useState<Edition>("full");
   const [lines, setLines] = useState<string[]>(linesKnown ? knownLines : []);
   const [liteDomains, setLiteDomains] = useState<string[]>(() => DOMAIN_NOUNS.map((label) => tFor(locale)(label)));
@@ -121,7 +124,7 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
         <li><b>{t("再排进日历")}</b><span>{t("你有哪些想成为的身份，各自正在做什么、大概什么时候截止；时间说个大概就行，材料里有的不再问。")}</span></li>
         <li><b>{t("拿到结果")}</b><span>{t("画像报告和一周的骨架草稿。具体项目的细节，到拆任务时再补。")}</span></li>
       </ol>
-      <p className="ob-opening-time">{t("大约 50 分钟：前 40 分钟左右是画像，后面十来分钟把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。")}</p>
+      <p className="ob-opening-time">{t("按下面选的详细程度，大约 {{minutes}} 分钟：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。", { minutes: DEPTH_PACE[depth].minutes })}</p>
     </div>
 
     <fieldset className="ob-question">
@@ -129,6 +132,15 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
       <div className="ob-chips" role="radiogroup">
         {ONBOARDING_TONES.map((id) => <button key={id} type="button" role="radio" aria-checked={tone === id} data-picked={tone === id}
           onClick={() => setTone(id)}>{t(ONBOARDING_TONE_LABEL[id].label)}<small>{t(ONBOARDING_TONE_LABEL[id].detail)}</small></button>)}
+      </div>
+    </fieldset>
+
+    {/* The tier (onboarding-depth.ts, 2026-10-31): how much the interview asks; it can be changed above the conversation later. */}
+    <fieldset className="ob-question">
+      <legend>{t("访谈问多细？")}<small>{t("开始后也可以在对话上方随时改")}</small></legend>
+      <div className="ob-chips" role="radiogroup">
+        {ONBOARDING_DEPTHS.map((id) => <button key={id} type="button" role="radio" aria-checked={depth === id} data-picked={depth === id}
+          onClick={() => setDepth(id)}>{t(ONBOARDING_DEPTH_LABEL[id].label)}<small>{t(ONBOARDING_DEPTH_LABEL[id].detail)}</small></button>)}
       </div>
     </fieldset>
 
@@ -196,7 +208,7 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
 
     <div className="ob-opening-go">
       <button type="button" className="ob-btn ob-primary" disabled={busy || !chosen.length || needsConnection}
-        onClick={() => onStart({ tone, edition: linesKnown ? "full" : edition, lines: chosen, domains: domainsOf(chosen, locale), base: chosenBase, fixed: chosenFixed,
+        onClick={() => onStart({ tone, depth, edition: linesKnown ? "full" : edition, lines: chosen, domains: domainsOf(chosen, locale), base: chosenBase, fixed: chosenFixed,
           ...(edition === "lite" && hard && said ? { said: { [hard]: said } } : {}) })}>
         {hasMaterials ? t("读完材料，开始访谈") : t("开始访谈")}</button>
       {!chosen.length ? <small className="ob-muted">{t("先选至少一个身份")}</small>

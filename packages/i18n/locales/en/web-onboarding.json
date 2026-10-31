@@ -881,7 +881,6 @@
   "一路走来的经历、在意什么、精力怎么起落、现在的处境。中间穿插几张点选卡片，点一下就行，也可以写一句话代替。每一轮都会给你一条关于你自己的观察。": "The story so far, what you care about, how your energy rises and falls, and where you stand now. A few cards come in between: one tap each, or a sentence instead. Every round gives you one observation about yourself.",
   "再排进日历": "Then onto the calendar",
   "画像报告和一周的骨架草稿。具体项目的细节，到拆任务时再补。": "Your portrait report and a draft of your week. The details of each project come later, when its tasks are planned.",
-  "大约 50 分钟：前 40 分钟左右是画像，后面十来分钟把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。": "About 50 minutes: roughly the first 40 are your portrait, the last ten or so put the work of every track on one calendar. The portrait part cannot be skipped, since everything planned later rests on it. You can drop your resume, timetable and syllabi on the left first: the interview reads your materials before it asks anything, and asks only what they leave out.",
   "画像卡片": "Profile cards",
   "用一句话代替点选（可选）": "Say it in a sentence instead of tapping (optional)",
   "不想点选，也可以用一句话说说": "Rather not tap? Say it in a sentence",
@@ -906,5 +905,11 @@
   "把握 {{percent}}%": "{{percent}}% sure",
   "卡片作答（{{count}} 题）": "Card answers ({{count}} items)",
   "由文字折算的题，点选一格即改为本人点选；「跳过」后这道题不计分。": "Tapping a dot on an item read from words makes it a tapped answer; a skipped item is not scored.",
-  "{{by}} {{score}}/5": "{{by}} {{score}}/5"
+  "{{by}} {{score}}/5": "{{by}} {{score}}/5",
+  "详细程度": "Detail",
+  "访谈详细程度": "How thorough the interview is",
+  "【详细程度】{{depth}}（约 {{minutes}} 分钟）": "[Detail] {{depth}} (about {{minutes}} minutes)",
+  "按下面选的详细程度，大约 {{minutes}} 分钟：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。": "At the level of detail chosen below, about {{minutes}} minutes: most of it is the portrait, the rest puts every line's work on one calendar. The portrait cannot be skipped; everything after it is arranged by it. A CV, timetable or syllabus can go in on the left first; the interview reads them and asks only what they leave out.",
+  "访谈问多细？": "How detailed should the interview be?",
+  "开始后也可以在对话上方随时改": "It can be changed above the conversation at any time"
 }

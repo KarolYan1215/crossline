@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore, writeExtractState } from "@crossline/db";
 import { cardWordsHead, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
-  type OnboardingProgress, type ProfileCard } from "@crossline/core";
-import { cardsForRound, createOnboardingSessionRunner as createRunner, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound } from "./onboarding-session";
+  DEPTH_PACE, type OnboardingProgress, type ProfileCard } from "@crossline/core";
+import { cardsForRound, createOnboardingSessionRunner as createRunner, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, stageOrderFor, stagePace } from "./onboarding-session";
 import { INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
 import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
 import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
@@ -387,6 +387,19 @@ test("the profile module's cards: added by the app, three items a round counted 
   expect(cardsForRound("lines", new Set())).toHaveLength(1);
   expect(cardsForRound("lines", new Set(PROFILE_ITEMS.map((item) => item.id)))).toEqual([]);
 });
+// 2026-10-31 rerun: once only interest cards were left, every fact round kept them out and the start item never closed.
+test("interest cards left alone go with one fact question rather than waiting for a round with none", async () => {
+  const at = "2026-10-31T00:00:00.000Z";
+  store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(PROFILE_ITEMS.filter((item) => item.instrument !== "rest18")
+    .map((item) => [item.id, { itemId: item.id, score: 3, by: "tapped", at }]))));
+  const fact = (id: string) => ({ id, text: `事实题 ${id}`, kind: "free", allowOther: true, identityId: "research", projectId: "", options: [] });
+  const { rpc } = fakeRuntime([turn({ stage: "lines", questions: [fact("f1"), fact("f2"), fact("f3")] })]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false })({ sessionId: "s", text: "继续" });
+  const last = store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content as
+    { cards?: ProfileCard[]; questions: Array<{ id: string }> };
+  expect(last.cards?.map((card) => card.instrument)).toEqual(["rest18"]);
+  expect(last.questions.map((question) => question.id)).toEqual(["f1"]);
+});
 test("a round keeps independent questions together, at most three in any stage", () => {
   const two = JSON.parse(turn({ stage: "compass", questions: [
     { id: "q1", text: "工作对你意味着什么？", kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] },
@@ -398,6 +411,23 @@ test("a round keeps independent questions together, at most three in any stage",
   expect(paceDeepRound({ ...six, stage: "lines" }, false)).toMatchObject({ deep: false });
   expect(paceDeepRound({ ...six, stage: "lines" }, false).output.questions).toHaveLength(3);
   expect(paceDeepRound(six, true).output.questions).toHaveLength(6);
+  // A deeper tier keeps more of them (onboarding-depth.ts).
+  expect(paceDeepRound(six, false, DEPTH_PACE.thorough.roundQuestions).output.questions).toHaveLength(5);
+});
+
+test("the tier the person chose sets the round's size, how long a part runs and whether the details part comes", async () => {
+  expect(stageOrderFor("v1", DEPTH_PACE.quick)).not.toContain("details");
+  expect(stageOrderFor("v1", DEPTH_PACE.thorough).at(-1)).toBe("details");
+  expect(cardsForRound("compass", new Set(), DEPTH_PACE.standard.cardItems).flatMap((card) => card.items).length)
+    .toBeGreaterThan(cardsForRound("compass", new Set(), DEPTH_PACE.quick.cardItems).flatMap((card) => card.items).length);
+  const rounds = Array.from({ length: 3 }, () => ({ role: "assistant", content: { stage: "compass" } }));
+  expect(stagePace(rounds, { startOpen: false }).moveOn).toBeTruthy();
+  expect(stagePace(rounds, { startOpen: false, after: DEPTH_PACE.thorough.moveOnAfter }).moveOn).toBeUndefined();
+  store.setSetting(workspaceId, "onboarding.depth", "thorough");
+  const { rpc, prompts } = fakeRuntime([firstAnswer]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc)({ sessionId: "s1", text: "开始" });
+  expect(dialogue(prompts)[0]).toContain('"depth":"thorough"');
+  expect(dialogue(prompts)[0]).toMatch(/"stageOrder":\[[^\]]*"details"\]/);
 });
 
 test("the tone the person chose goes with the first turn and every later one", async () => {

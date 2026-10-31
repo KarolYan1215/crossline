@@ -206,3 +206,23 @@ const label = score === 1 ? item.anchors[0] : score === 3 ? item.anchors[1] : sc
 - 三人访谈记录与完整结果（含内核，**不在仓库**）：`C:\Users\karol\AppData\Local\Temp\claude\C--Users-karol-Documents-ChatGPT-Multi-ID\21bea19d-4ab3-44a5-bd0c-b7e7e2c3a030\scratchpad\persona-run\{a,b,c}\transcript.md` 与 `result.json`
 - 内核与生活设定：`C:\Users\karol\AppData\Local\Temp\claude\C--Users-karol-Documents-ChatGPT-Multi-ID\21bea19d-4ab3-44a5-bd0c-b7e7e2c3a030\scratchpad\personas\`
 - 重跑：`server.yml` 的 `persona` 动作（后台容器），完成后 `persona-report` 取结果。
+
+---
+
+## 9. 修完 P0–P2 后的重跑（同日晚，提交 3cc06bb14d）
+
+| | 轮数 | 达到开始标准 | 画像 | 事实 | 结果 |
+|---|---|---|---|---|---|
+| A 插画师 | 26（上限） | 否 | 已写 | 61 | 「主线」部分跑了 16 轮 |
+| B 仓库主管 | 26（上限） | 否 | 已写 | 78 | 只剩卡片题拦着开始 |
+| C 社会学学生 | 2 | 否 | 未写 | 5 | 第 2 轮崩溃 |
+
+改好的：画像在三人里都写出来了；内部用语、性别猜测、同一题被模型换着说法问很多遍，这些在转录里都没再出现。
+
+新发现的三个问题，都是上一轮修复本身带出来的，已修：
+
+- **C 崩溃**：`Cannot read properties of undefined (reading 'replace')`。原因是 `withPlainTerms` 遇到没有 `detail` 的选项。现在缺的字段原样放过（`plainTerms` 收 `undefined`），选项去重也一样处理。
+- **A 的同一句问了 9 遍**：「「小红书博主」这条线眼下在做什么？」。这句不是模型写的，是清单缺项自带的问法（`ask`），不经过「同一件事最多问两次」的检查。本人每次都当场答了，可整理层落后：7 次整理 28 分钟，对话 26 轮才 6 分钟。描述一直没记下来，这一项就一直开着。现在清单的问法也查问题账本（`checklistAskable`）：答过一次（「不确定」除外）或问满两次就不再发，等整理层记下。
+- **A、B 卡在卡片题**：剩下没答的都是兴趣卡（想不想做）。上一轮定的「兴趣卡不和事实题同轮」，让它们在事实阶段一轮也发不出去；卡片又是开始项，所以开始标准永远达不到。现在只剩兴趣卡时照常发，那一轮的事实题只留 1 道。
+
+走查本身的偏差：模拟用户几秒答一轮，真人通常一两分钟，所以整理层落后的程度比真人使用时严重得多。但上面两处死锁，换成真人也会发生。

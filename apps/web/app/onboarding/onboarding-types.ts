@@ -96,6 +96,8 @@ export type OnboardingState = {
   /** How the interview talks (`ONBOARDING_TONE_SETTING`), and whether the person has chosen yet. */
   tone: import("@crossline/core").OnboardingTone;
   toneChosen: boolean;
+  /** How thorough the interview is (`ONBOARDING_DEPTH_SETTING`): questions a round, which parts run, the time it takes. */
+  depth: import("@crossline/core").OnboardingDepth;
   /** The right column's week and project axis. */
   week: import("../../lib/onboarding-board").WeekSkeleton;
   timeline: import("../../lib/onboarding-board").ProjectTimeline;

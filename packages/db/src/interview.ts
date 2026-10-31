@@ -1,4 +1,4 @@
-import { cardsSettled, flowOf, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
+import { cardsSettled, flowOf, ONBOARDING_DEPTH_SETTING, readDepth, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
 import { interviewLocale, readLocale } from "./locale";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
@@ -59,6 +59,8 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     unfiledFiles: extras.unfiledFiles,
     // 「准」 on an observation in each deep stage confirms the portrait piece by piece (2026-10-19), as the one 「符合」 at the end does.
     profileCards,
+    // The person's tier decides whether a project's details are asked in the interview or when its task is planned.
+    depth: readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING)),
     portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile) || portraitConfirmedByInsights(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))),
     // Labels in the interview's language (docs/i18n.md): the list is about the interview.
     locale: extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)

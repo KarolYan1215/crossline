@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { ledgerForModel, resolveRepeats, withDistinctOptions } from "./question-ledger";
+import { checklistAskable, ledgerForModel, resolveRepeats, withDistinctOptions } from "./question-ledger";
 
 const ws = "w";
 let store: CrosslineStore | undefined;
@@ -62,4 +62,21 @@ test("a question's options never repeat", () => {
   const question = { id: "q", text: "?", kind: "single" as const, allowOther: true, identityId: "", projectId: "",
     options: [{ id: "a", label: "周末", detail: "" }, { id: "b", label: "周末。", detail: "" }, { id: "c", label: "晚上", detail: "" }] };
   expect(withDistinctOptions(question).options.map((option) => option.label)).toEqual(["周末", "晚上"]);
+});
+// 2026-10-31 rerun: 「「小红书博主」这条线眼下在做什么？」 went out nine times while the extraction had not yet written the answer down.
+test("a checklist question once answered, or asked twice, waits for the extraction instead of going out again", () => {
+  store = new CrosslineStore(":memory:");
+  const at = "2026-10-31T21:00:00Z";
+  const text = "「小红书博主」这条线眼下在做什么？";
+  expect(checklistAskable(store, ws, "s1")(text)).toBe(true);
+  const first = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:15:checklist-open-1", text, status: "open", at });
+  expect(checklistAskable(store, ws, "s1")(text)).toBe(true);
+  store.answerQuestion(ws, first, { text: "补充：更新「打工人的猫」那类", at });
+  expect(checklistAskable(store, ws, "s1")(text)).toBe(false);
+  // Unanswered twice (the 「实在说不准」 wording of a start item counts as the same question): not a third time.
+  const other = "「铲屎官」这条线眼下在做什么？";
+  store.recordQuestion(ws, { kind: "interview", key: "iq:s1:15:checklist-open-2", text: other, status: "open", at });
+  store.recordQuestion(ws, { kind: "interview", key: "iq:s1:16:start-open", text: `${other}实在说不准，可以先说一个暂定的答案。`, status: "open", at });
+  expect(checklistAskable(store, ws, "s1")(other)).toBe(false);
+  expect(checklistAskable(store, ws, "s2")(other)).toBe(true);
 });

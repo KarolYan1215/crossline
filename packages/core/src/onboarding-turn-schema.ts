@@ -2,6 +2,7 @@ import { RELATION_KINDS } from "./flywheel-schema";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
 import { SCHWARTZ_VALUES } from "./portrait";
 import type { ProfileCard } from "./profile-instruments";
+import type { OnboardingDepth } from "./onboarding-depth";
 import { INTERVIEW_SETTING_KEYS } from "./interview-settings";
 import {
   ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, attributeProblem, cleanAttribute, duplicateAttributes,
@@ -223,6 +224,8 @@ export type OnboardingTurnContext = {
   stageOrder?: OnboardingStage[];
   /** How the person asked to be spoken to (`ONBOARDING_TONE_SETTING`); also sent with every later turn, since it can change. */
   tone?: OnboardingTone;
+  /** How thorough the person asked the interview to be (`ONBOARDING_DEPTH_SETTING`, onboarding-depth.ts); sent with every turn, since it can change. */
+  depth?: OnboardingDepth;
   /** The completion list's items still open (`interviewChecklist`): what the interview owes before it may say it is ready, and what waits on the person. */
   checklist?: Array<{ label: string; detail: string; owner: "interview" | "person"; start?: boolean }>;
   /** Hours spent in Codex and Claude Code per folder and when in the day (`agentHistoryLines`), when the person allowed it: habits, not a plan. */

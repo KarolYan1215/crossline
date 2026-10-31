@@ -334,7 +334,6 @@
   "尚无当前项目": "No current project yet",
   "评分占比": "Grade weights",
   "上课时间": "Class times",
-  "「{{project}}」目标、截止、进展证据、评分占比与上课时间": "\"{{project}}\": goal, deadline, evidence of progress, grade weights and class times",
   "「{{project}}」目标、截止与进展证据": "\"{{project}}\": goal, deadline and evidence of progress",
   "上传的文件都已归属项目": "Every uploaded file is filed under a project",
   "{{count}} 份文件待说明归属（见待决事项）_one": "{{count}} file still needs a project (see Decisions)",
@@ -753,5 +752,13 @@
   "候选词": "candidate words",
   "形容词": "adjectives",
   "开始前要定的几件事": "what is settled before starting",
-  "要问的事": "what is left to ask"
+  "要问的事": "what is left to ask",
+  "「{{project}}」要做成什么样，做到哪一步了？": "What should \"{{project}}\" come to, and how far along is it?",
+  "「{{project}}」评分占比与上课时间": "\"{{project}}\" grading shares and class times",
+  "「{{project}}」的成绩是怎么算的？各部分各占多少？": "How is \"{{project}}\" graded? How much does each part count?",
+  "快速": "Quick",
+  "约 50 分钟，只问排日程必需的，项目细节到拆任务时再补": "About 50 minutes. Only what the schedule needs; project details are asked when their tasks are planned",
+  "约 80 分钟，画像多问几层，每个项目的目标和进展当场问清": "About 80 minutes. The portrait goes a few layers deeper, and each project's goal and progress are asked now",
+  "事无巨细": "Thorough",
+  "约 2 小时，每个项目的评分、上课时间、协作者、工具和所有截止都问到": "About 2 hours. Every project's grading, class times, collaborators, tools and deadlines are asked"
 }

@@ -23,7 +23,7 @@ test("a complete record ticks every item, the portrait included", () => {
   const items = interviewChecklist(full);
   expect(items.filter((item) => !item.done)).toEqual([]);
   expect(items.map((item) => item.id)).toEqual(["portrait_fields", "portrait_synthesis", "portrait_grounded", "portrait_confirmed", "line_desc:research", "line_goal:research",
-    "hard_schedule:research", "availability", "line_project:research", "project:ece555", "files_filed"]);
+    "hard_schedule:research", "availability", "line_project:research", "project:ece555", "project_course:ece555", "files_filed"]);
 });
 
 test("a portrait written only from inferences is not finished, and what is missing is named", () => {
@@ -43,7 +43,7 @@ test("what only the person can settle is theirs, and does not count as the inter
 
 test("a course needs its grading and its class times, a hard line its fixed schedule; a confirmation lasts only while the portrait is the same", () => {
   const items = interviewChecklist({ ...full, facts: full.facts.filter((fact) => fact.slot !== "grading"), dates: full.dates.filter((entry) => !entry.recurring) });
-  expect(items.find((item) => item.id === "project:ece555")?.detail).toBe("缺：评分占比、上课时间");
+  expect(items.find((item) => item.id === "project_course:ece555")?.detail).toBe("缺：评分占比、上课时间");
   expect(items.find((item) => item.id === "hard_schedule:research")?.done).toBe(false);
   expect(portraitFingerprint({ portrait: "a b", coreConflict: "c" })).toBe(portraitFingerprint({ portrait: "ab", coreConflict: "c" }));
   expect(portraitFingerprint({ portrait: "a" })).not.toBe(portraitFingerprint({ portrait: "b" }));
@@ -124,10 +124,24 @@ test("project items read slots by meaning, and a course's part needs no grading 
     { identityId: "research", projectId: "ece555-final", slot: "evaluation_evidence", status: "confirmed", sourceRef: "reply-2" }];
   const items = interviewChecklist({ ...full, facts, projects: [...full.projects, { id: "ece555-final", identityId: "research", name: "ECE 555 期末项目" }],
     dates: [{ project: "ECE 555", kind: "exam", recurring: false, pending: false, sourceRef: "src-1" }] });
-  const course = items.find((item) => item.id === "project:ece555")!;
+  const course = items.find((item) => item.id === "project_course:ece555")!;
   expect(course.detail).toBe("缺：上课时间");
+  expect(items.some((item) => item.id === "project_course:ece555-final")).toBe(false);
   const withSchedule = interviewChecklist({ ...full, facts: [...facts, { identityId: "research", projectId: "ece555", slot: "class_schedule", status: "confirmed", sourceRef: "src-1" }],
     projects: [...full.projects, { id: "ece555-final", identityId: "research", name: "ECE 555 期末项目" }],
     dates: [{ project: "ECE 555", kind: "exam", recurring: false, pending: false, sourceRef: "src-1" }] });
   expect(withSchedule.filter((item) => item.id.startsWith("project:")).map((item) => [item.id, item.done])).toEqual([["project:ece555", true], ["project:ece555-final", true]]);
+});
+
+// 2026-10-31: the person picks how thorough the interview is; a project's details are asked in it only in the deeper tiers.
+test("the tier decides which project items the interview asks and which wait for planning", () => {
+  const sparse = { ...full, facts: full.facts.filter((fact) => fact.projectId !== "ece555"), dates: [] };
+  const deferredOf = (depth: ChecklistInput["depth"]) => Object.fromEntries(interviewChecklist({ ...sparse, depth })
+    .filter((item) => item.id.endsWith(":ece555") && item.id.startsWith("project")).map((item) => [item.id, Boolean(item.deferred)]));
+  expect(deferredOf(undefined)).toEqual({ "project:ece555": true, "project_course:ece555": true });
+  expect(deferredOf("quick")).toEqual({ "project:ece555": true, "project_course:ece555": true });
+  expect(deferredOf("standard")).toEqual({ "project:ece555": false, "project_course:ece555": true });
+  expect(deferredOf("thorough")).toEqual({ "project:ece555": false, "project_course:ece555": false });
+  const course = interviewChecklist({ ...sparse, depth: "thorough" }).find((item) => item.id === "project_course:ece555")!;
+  expect(course.ask).toBe("「ECE 555」的成绩是怎么算的？各部分各占多少？");
 });

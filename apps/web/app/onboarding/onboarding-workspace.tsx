@@ -6,7 +6,7 @@ import { FileReadList } from "./file-read-list";
 import { InsightCard } from "./insight-card";
 import { DiligencePanel } from "./diligence-panel";
 import { TranscriptionCard, type TranscriptionStatus } from "./transcription-card";
-import { DEEP_STAGES, ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingStage, type OnboardingTone } from "@crossline/core";
+import { DEEP_STAGES, ONBOARDING_DEPTH_LABEL, ONBOARDING_DEPTHS, ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingDepth, type OnboardingStage, type OnboardingTone } from "@crossline/core";
 import { QuestionCard } from "./question-card";
 import { cardReplyLines, NO_CARD_ANSWERS, ProfileCards, type CardAnswers } from "./profile-cards";
 import { StageBar } from "./portrait-panel";
@@ -297,8 +297,10 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const start = async (answer: OpeningAnswer) => {
     setBusy("turn"); setError("");
     await fetch("/api/onboarding/tone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tone: answer.tone }) }).catch(() => undefined);
-    // The tone switch above the thread shows the chosen tone at once, not the default until the first round ends.
-    setState((previous) => previous && { ...previous, tone: answer.tone });
+    const depth = answer.depth ?? state.depth;
+    await fetch("/api/onboarding/depth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ depth }) }).catch(() => undefined);
+    // The switches above the thread show the chosen tone and tier at once, not the defaults until the first round ends.
+    setState((previous) => previous && { ...previous, tone: answer.tone, depth });
     if (state.setupLines) {
       const ordered = answer.base ? [answer.base, ...answer.lines.filter((label) => label !== answer.base)] : answer.lines;
       const response = await fetch("/api/lines", { method: "POST", headers: { "content-type": "application/json" },
@@ -313,6 +315,10 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     const response = await fetch("/api/onboarding/tone", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tone }) }).catch(() => undefined);
     if (response?.ok) await load();
   };
+  const changeDepth = async (depth: OnboardingDepth) => {
+    const response = await fetch("/api/onboarding/depth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ depth }) }).catch(() => undefined);
+    if (response?.ok) await load();
+  };
 
   return <div className="ob3" onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} data-dragging={over}>
     <LeftColumn state={state} busy={busy !== "" && busy !== "turn"} accept={ACCEPT} onUpload={(files) => void upload(files)} onChanged={() => void load()}
@@ -324,6 +330,10 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {!opening && !state.focusLine && <div className="ob-tone"><span>{t("语气")}</span>
           <SegmentedControl label={t("访谈语气")} value={state.tone} onChange={(next) => void changeTone(next)}
             options={ONBOARDING_TONES.map((id) => ({ value: id, label: t(ONBOARDING_TONE_LABEL[id].label) }))} /></div>}
+        {/* The tier can be changed between rounds; the next round asks at the new depth (onboarding-depth.ts). */}
+        {!opening && !state.focusLine && <div className="ob-tone"><span>{t("详细程度")}</span>
+          <SegmentedControl label={t("访谈详细程度")} value={state.depth} onChange={(next) => void changeDepth(next)}
+            options={ONBOARDING_DEPTHS.map((id) => ({ value: id, label: t(ONBOARDING_DEPTH_LABEL[id].label) }))} /></div>}
         {/* Inside the header: the column is a fixed grid of rows, and a note that comes and goes must not shift the thread's row. */}
         {!state.focusLine && <FirstHint id="onboarding-columns" title={t("这一页怎么用")}>
           {t("中间是访谈：每轮一组问题，答不上来可以选「不确定」或跳过，系统先按假设记下，之后随时可改。")}
@@ -335,7 +345,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {t("访谈以开始时的语言继续（{{language}}）。界面切换不影响访谈。", { language: state.interviewLocale === "en" ? "English" : t("中文") })}</p>}
       <div className="ob-thread ob-voice" aria-live="polite">
         {!state.focusLine && <AssessCard />}
-        {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)} initialTone={state.tone}
+        {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)} initialTone={state.tone} initialDepth={state.depth}
           busy={busy !== ""} hasMaterials={filesRead} needsConnection={!state.focusLine && connected === false} onStart={(answer) => void start(answer)} />}
         {messages.length === 0 && state.focusLine && <div className="ob-turn ob-assistant"><p>{t("「{{line}}」的访谈：现状、长期目标、项目、截止日与已有文件。", { line: state.focusLine.label })}</p></div>}
         {messages.map((message) => {

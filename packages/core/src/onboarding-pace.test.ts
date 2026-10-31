@@ -107,4 +107,10 @@ describe("the app's own terms", () => {
     expect(round.reply).toBe("形容词选好了吗？");
     expect(round.questions[0]!.options[0]).toEqual({ id: "a", label: "固定安排", detail: "形容词" });
   });
+  // 2026-10-31 walkthrough C: an option with no detail ended the interview with 「Cannot read properties of undefined (reading 'replace')」.
+  it("leave out what a round left out", () => {
+    const options = [{ id: "a", label: "硬约束" }] as unknown as Array<{ id: string; label: string; detail: string }>;
+    const round = withPlainTerms({ reply: "好", questions: [{ id: "q", text: "选一个", kind: "single" as const, allowOther: true, identityId: "", projectId: "", options }] });
+    expect(round.questions[0]!.options[0]).toEqual({ id: "a", label: "固定安排", detail: undefined });
+  });
 });
