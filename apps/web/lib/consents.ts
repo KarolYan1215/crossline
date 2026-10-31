@@ -1,7 +1,8 @@
 import "server-only";
 import { assistantAvailable as machineOwner } from "@crossline/db";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, CAMERA_ENERGY_CONSENT, ENERGY_ADVICE_DISMISSED, ENERGY_ADVICE_SETTING,
-  INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, readEnergyAdvice, type AccessContext } from "@crossline/core";
+  INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, readEnergyAdvice, type AccessContext,
+  BRIEF_TIME_SETTING, QUIET_HOURS_SETTING, isClock, parseQuiet } from "@crossline/core";
 import { ACTIVITY_DETAIL_CONSENT, dataDirectory, getStore, LOCAL_ACTIVITY_CONSENT } from "./crossline";
 import { setPhoneHealth } from "./energy";
 import { serverTranscribeAvailable, setRecordingConsent, setServerRecordingConsent, setVoiceprintConsent } from "./recordings";
@@ -95,6 +96,21 @@ export const NOTIFY_LEVELS = ["off", "less", "normal", "more"] as const;
 export function setNotifyLevel(ctx: AccessContext, level: string): SwitchResult {
   if (!(NOTIFY_LEVELS as readonly string[]).includes(level)) return { ok: false, code: "INVALID_NOTIFY_LEVEL" };
   getStore().setSetting(ctx.workspaceId, "notify.level", level);
+  return { ok: true };
+}
+
+/** The quiet hours (`HH:MM-HH:MM`, may run past midnight) and the morning brief's time (`HH:MM`, empty for the first available hour). */
+export function setQuietHours(ctx: AccessContext, value: string): SwitchResult {
+  const quiet = parseQuiet(value);
+  if (!quiet) return { ok: false, code: "INVALID_QUIET_HOURS" };
+  getStore().setSetting(ctx.workspaceId, QUIET_HOURS_SETTING, `${quiet.from}-${quiet.to}`);
+  return { ok: true };
+}
+export function setBriefTime(ctx: AccessContext, value: string): SwitchResult {
+  const clock = value.trim();
+  if (clock && !isClock(clock)) return { ok: false, code: "INVALID_BRIEF_TIME" };
+  if (clock) getStore().setSetting(ctx.workspaceId, BRIEF_TIME_SETTING, clock);
+  else getStore().deleteSetting(ctx.workspaceId, BRIEF_TIME_SETTING);
   return { ok: true };
 }
 

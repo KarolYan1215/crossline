@@ -3,8 +3,8 @@ import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from
 import { join } from "node:path";
 import { cleanAnswerStrings, tFor, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
-import { routeForSkill, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
-import { createUsageCollector, currentSpendMode, currentUsageWorkspace, reportUsage, type UsageCollector } from "./usage";
+import { routeForSkill, shiftEffort, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
+import { createUsageCollector, currentEffortPreference, currentSpendMode, currentUsageWorkspace, reportUsage, type UsageCollector } from "./usage";
 import { currentProviderRouting, decideRoute, noteChatgptUsageLimit, type ThreadProvider } from "./providers";
 import { markClientBusy, priorityForSkill, withModelSlot, type ModelPriority } from "./model-gate";
 import { bindForRun } from "./runtime-pool";
@@ -493,7 +493,12 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
     : options.tier && spendMode === "normal" && process.env.CROSSLINE_MODEL_ROUTING?.trim().toLowerCase() !== "off"
     ? { ...tierRoutes()[options.tier] } : routeForSkill(options.skillName, process.env, spendMode);
   // Fitted to the models this account is offered (a ChatGPT Free account has no `gpt-5.6-sol`); a provider's model is its own.
-  const route = provider ? wanted : fitRoute(wanted, options.tier ?? tierForSkill(options.skillName), await accountModels(client));
+  const models = provider ? null : await accountModels(client);
+  const fitted = provider ? wanted : fitRoute(wanted, options.tier ?? tierForSkill(options.skillName), models);
+  // The person's 模型强度 moves only their own Codex; 更强 is not taken while the quota is tight, so it cannot undo economy's step down.
+  const preference = provider ? "default" : currentEffortPreference();
+  const route = preference === "default" || (preference === "higher" && spendMode !== "normal") ? fitted
+    : shiftEffort(fitted, preference, models?.find((model) => model.model === fitted?.model)?.efforts);
   const webTools = provider ? options.webTools ?? routing?.webTools : undefined;
   // The conformance check (`options.provider`) measures a provider and offers whatever its case needs.
   const functionCalls = !provider || Boolean(options.provider) || routing?.functionCalls === true;

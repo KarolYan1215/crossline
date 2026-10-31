@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { ledgerForModel } from "./question-ledger";
+import { ledgerForModel, resolveRepeats } from "./question-ledger";
 
 const ws = "w";
 let store: CrosslineStore | undefined;
@@ -22,4 +22,19 @@ test("the app's own waiting questions take at most a third of what the dialogue 
   // Another session's questions are not this conversation's.
   store.recordQuestion(ws, { kind: "interview", key: "iq:s2:1:q", text: "别的会话", status: "open", at });
   expect(ledgerForModel(store, ws, "s1", 15).some((line) => line.includes("别的会话"))).toBe(false);
+});
+
+test("a question answered 「不确定」 may be asked once more, not twice; one answered properly is not asked again", () => {
+  store = new CrosslineStore(":memory:");
+  const at = "2026-10-30T05:00:00Z";
+  const unsure = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:2:q2", text: "创作者主线当前推进的内容或项目名称？", status: "open", at });
+  store.answerQuestion(ws, unsure, { text: "补充：不确定", at });
+  const known = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:2:q1", text: "创业者主线当前推进的项目名称？", status: "open", at });
+  store.answerQuestion(ws, known, { text: "补充：Crossline", at });
+  const ask = (text: string, repeats: number) => ({ id: "q", text, kind: "free" as const, options: [], allowOther: true, identityId: "", projectId: "", repeats });
+  const first = resolveRepeats(store, ws, "s1", [ask("创作者主线目前有正在推进的项目吗？", unsure), ask("创业者主线的项目名称？", known)]);
+  expect(first.questions.map((question) => question.text)).toEqual(["创作者主线目前有正在推进的项目吗？"]);
+  // Asked again once (recorded as repeating it): a third time is dropped.
+  store.recordQuestion(ws, { kind: "interview", key: "iq:s1:3:q1", text: "创作者主线目前有正在推进的项目吗？", status: "open", repeats: unsure, at });
+  expect(resolveRepeats(store, ws, "s1", [ask("创作者主线是否暂按没有当前项目？", unsure)]).questions).toEqual([]);
 });

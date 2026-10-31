@@ -400,7 +400,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const stillWriting = ending && extractMode === "background" && extractBacklog(store, workspaceId, sessionId).replies > 0;
     const owed = focusLine || options.checklist === false ? [] : openChecklist(Infinity, (item) => stillWriting && item.group === "画像");
     const output = withSomethingToAnswer(withChecklist(paced.deep ? paced.output
-      : withGapQuestions(paced.output, gapsNow, messages, { freshDocuments: sent.map(([, doc]) => doc.id), touched, locale }), owed, locale), gapsNow, messages, locale);
+      : withGapQuestions(paced.output, gapsNow, messages, { freshDocuments: sent.map(([, doc]) => doc.id), touched, locale }), owed, locale), gapsNow, messages, locale,
+      focusLine ? [] : checklistNow().filter((item) => item.start && !item.done));
     // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
     const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
       .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
@@ -456,10 +457,15 @@ const OPEN_QUESTION: Record<OnboardingStage, string> = {
  * a round with a reply and an empty box the moment the start standard stood. Then the app's waiting questions join, else one open question
  * for the stage.
  */
-export function withSomethingToAnswer<T extends OnboardingDialogue>(output: T, gaps: ProfileGap[], messages: StoredOnboardingMessage[], locale?: Locale): T {
+export function withSomethingToAnswer<T extends OnboardingDialogue>(output: T, gaps: ProfileGap[], messages: StoredOnboardingMessage[], locale?: Locale,
+  /** Open start items: the one thing the round can usefully ask when nothing else is left (2026-10-30, before the stage's open question). */
+  startOwed: Array<{ label: string; detail: string }> = []): T {
   if (output.nextAction !== "ask" || output.questions.length) return output;
   const withGaps = withGapQuestions(output, gaps, messages, { ...(locale ? { locale } : {}) });
   if (withGaps.questions.length) return withGaps;
+  const start = startOwed[0];
+  if (start) return { ...output, questions: [{ id: "start-open", text: tFor(locale)("开始使用前还差：{{item}}。请补充；实在不知道，可以说一个暂定的答案。",
+    { item: start.detail ? tFor(locale)("{{label}}（{{detail}}）", { label: start.label, detail: start.detail }) : start.label }), kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
   const stage = (output.stage && output.stage in OPEN_QUESTION ? output.stage : "situation") as OnboardingStage;
   return { ...output, questions: [{ id: `open-${stage}`, text: tFor(locale)(OPEN_QUESTION[stage]), kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
 }

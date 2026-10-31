@@ -78,7 +78,7 @@ import { milestonesBeingBackplanned } from "./backplan-status";
 import { nearestDueProposal } from "./urgent-proposal";
 import { completionRule, onPersonsBoard, proposalReady, type CompletionMode, type CompletionOutcome } from "@crossline/core";
 import { MILESTONE_RISKS_SETTING, parseMilestoneRisks, riskBufferDays } from "@crossline/core";
-import { energyRhythm } from "@crossline/core";
+import { energyRhythm, statedSleep } from "@crossline/core";
 import { OVER_CAPACITY_TAG, statedWeeklyHours, weeklyAvailableHours } from "@crossline/core";
 import { identityLines, linePacks } from "./lines";
 import { memoByLedger, memoByLedgerAsync } from "./ledger-memo";
@@ -2424,10 +2424,10 @@ function energyEstimateFor(ctx: AccessContext, now: Date, today: string, timeZon
   const [hour = "0", minuteOfHour = "0"] = formatInTimeZone(now, timeZone, "HH:mm").split(":");
   const nowMinute = Number(hour) * 60 + Number(minuteOfHour);
   // Drawn whatever is known (2026-10-30, the owner): without last night's sleep, the model's steady day at the person's usual sleep —
-  // the medians of their recorded nights, else a typical adult's 23:30–7:30 (energyRhythm) — at the phase their best hours set, with
+  // the medians of their recorded nights, else the night they stated in the interview, else a typical adult's 23:30–7:30 (energyRhythm) — at the phase their best hours set, with
   // their own cut points. It is marked as such and only drawn: a reading of now and the schedule still need a known last sleep.
   const usual = points.length >= 12 ? undefined : energyRhythm({ episodes: model.episodes, hourOf: model.hourOf, weekdayOf: (iso) => Number(formatInTimeZone(new Date(iso), timeZone, "i")),
-    phaseShift: model.phaseShift, calibration: model.calibration, reports: [], now: now.toISOString() });
+    phaseShift: model.phaseShift, calibration: model.calibration, reports: [], now: now.toISOString(), stated: statedSleep(getStore().listProfileFacts(ctx.workspaceId)) });
   const curve = usual
     ? { points: usual.curve.flatMap((point) => point.hour >= 6 && point.value !== null ? [{ minute: point.hour * 60, alertness: point.value }] : []),
       low: model.calibration.low, high: model.calibration.high, nowMinute, typical: { nights: usual.nights, from: usual.sleep.from, to: usual.sleep.to } }

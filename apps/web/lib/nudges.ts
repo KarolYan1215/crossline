@@ -4,7 +4,8 @@ import { formatInTimeZone } from "date-fns-tz";
 import { dueProvenance, listAgentTasks, type StoredConversationMessage } from "@crossline/db";
 import {
   availableSlots, calendarLineOf, inferBlockOutcome, OVER_CAPACITY_TAG, type InferredOutcome, isCancelledEvent, onPersonsBoard, planNudges, preparesOf, taskTitleOf,
-  type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction
+  type AccessContext, type NotifyLevelName, type NudgeBlock, type NudgeEnding, type NudgeButton, type NudgeKind, type NudgeSlack, type PlannedNudge, type ProposedAction,
+  QUIET_HOURS_SETTING, inQuiet, quietHoursOf
 } from "@crossline/core";
 import { commitSoon, effectiveSchedulePreferences, energyAnswerMatters, getStore, loadCurrentPlan, planToday, readAvailability, toZonedInstant } from "./crossline";
 import { blockWorkMinutes, dayCapacityOf, measuredCapacityOn, measuredView } from "./measured-capacity";
@@ -181,7 +182,8 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     quiet: { timerRunning: Boolean(running), inMeeting: meeting, answeredRecently: Boolean(answeredAt) && now.getTime() - Date.parse(answeredAt!) < ANSWERED_QUIET_MS,
       // Focused by the screen record (its detail consent only): only the urgent interrupts. Away is the worker's to act on (phone only).
       focused: currentWorkState(ctx, plan)?.state === "focused" },
-    night: clock < "08:00" || clock >= "23:00",
+    // The person's quiet hours (23:00–08:00 until they set their own, in Settings, the box or the interview).
+    night: inQuiet(clock, quietHoursOf(store.getSetting(ctx.workspaceId, QUIET_HOURS_SETTING))),
     sent: new Set(recent.flatMap((message) => [payloadOf(message)?.fingerprint ?? "", ...(payloadOf(message)?.covers ?? [])])),
     countedToday: recent.filter((message) => payloadOf(message)?.counted && message.createdAt.slice(0, 10) >= addDays(today, -1)
       && local(message.createdAt).slice(0, 10) === today).length,

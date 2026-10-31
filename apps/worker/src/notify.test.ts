@@ -176,3 +176,12 @@ test("away from the computer by the screen record, a nudge goes to the phone onl
   expect(desktop.length).toBe(2);
   store.close();
 });
+
+test("the person's quiet hours hold back single messages, and the brief goes at the time they chose", () => {
+  // Quiet from 10:00 to 13:00: nothing urgent at 11:00, though it is inside the working hours.
+  expect(planNotifications({ ...base, clock: "11:00", sent: new Set(["brief:2026-10-08"]), quiet: { from: "10:00", to: "13:00" } })).toEqual([]);
+  expect(planNotifications({ ...base, clock: "11:00", sent: new Set(["brief:2026-10-08"]) }).length).toBeGreaterThan(0);
+  // Brief at 09:40, not at the 09:00 window start.
+  expect(planNotifications({ ...base, briefAt: "09:40" }).filter((item) => item.kind === "brief")).toEqual([]);
+  expect(planNotifications({ ...base, clock: "09:41", briefAt: "09:40" }).filter((item) => item.kind === "brief")).toHaveLength(1);
+});

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { runCodexSkill, setSpendModeProvider, setUsageSink, enterUsageWorkspace, type SkillUsage } from "@crossline/codex";
+import { runCodexSkill, setEffortPreferenceProvider, setSpendModeProvider, setUsageSink, enterUsageWorkspace, type SkillUsage } from "@crossline/codex";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const TOP = "crossline:crossline-onboarding";
@@ -13,7 +13,7 @@ const options = (skillName: string) => ({
 
 let usage: SkillUsage[] = [];
 beforeEach(() => { usage = []; setUsageSink((record) => usage.push(record)); });
-afterEach(() => { setUsageSink(undefined); setSpendModeProvider(undefined); });
+afterEach(() => { setUsageSink(undefined); setSpendModeProvider(undefined); setEffortPreferenceProvider(undefined); });
 
 test("a quick low-tier run is not held behind a slow top-tier one", async () => {
   const slow = fakeRuntime(["{}"], TOP, { delayMs: 300 });
@@ -67,6 +67,18 @@ test("when the budget is tight the run steps down a tier, and the report says wh
   const { rpc } = fakeRuntime(["{}"], TOP, { usage: { input: 10, output: 5 } });
   await runCodexSkill(rpc, {}, options(TOP));
   expect(usage[0]).toMatchObject({ spendMode: "economy", tier: "top", model: "gpt-5.6-terra", effort: "medium" });
+});
+
+test("the person's 模型强度 moves the effort on their own Codex, and 更强 is not taken while the budget is tight", async () => {
+  setEffortPreferenceProvider(() => "lower");
+  const first = fakeRuntime(["{}"], TOP);
+  await runCodexSkill(first.rpc, {}, options(TOP));
+  expect(usage[0]).toMatchObject({ tier: "top", effort: "medium" });
+  setEffortPreferenceProvider(() => "higher");
+  setSpendModeProvider(async () => "economy");
+  const second = fakeRuntime(["{}"], TOP);
+  await runCodexSkill(second.rpc, {}, options(TOP));
+  expect(usage[1]).toMatchObject({ spendMode: "economy", effort: "medium" });
 });
 
 test("the milestone gate never steps down, however tight the budget", async () => {

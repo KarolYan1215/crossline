@@ -19,6 +19,16 @@ export type LedgerQuestion = {
   status: QuestionStatus; answer: string; answerSentences: number[]; repeats?: number; askedAt: string; answeredAt?: string;
 };
 
+/**
+ * An answer that settles nothing: 「不确定」, 「不知道」, 「还不知道」, a skip. A question answered so may be asked once more (2026-10-30: the
+ * creator line's current project was answered 「不确定」, a start item takes only the person's word, and the ledger dropped every
+ * re-ask as answered — the round fell back to one generic question thirteen rounds running).
+ */
+export function unsureAnswer(answer: string): boolean {
+  const text = answer.replace(/(选择|补充)[:：]/g, "").replace(/[\s。.!！；;，,]+/g, "");
+  return !text || /^(还?不(确定|知道|清楚|好说|记得)|暂(时)?不确定|暂不清楚|尚未确定|还没(想好|定)|没想好|说不好|跳过|暂无|unsure|notsure|don'?tknow|skip)$/iu.test(text);
+}
+
 /** Letters and digits only, lower case: what a question says, not how it is punctuated. */
 const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 const bigrams = (text: string) => {

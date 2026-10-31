@@ -1,6 +1,6 @@
 import "server-only";
 import { formatInTimeZone } from "date-fns-tz";
-import { answerLine, energyRhythm, ONBOARDING_INSIGHTS, portraitConfirmedByInsights, portraitFingerprint, portraitStillConfirmed, PROFILE_CONFIRMED, readInsightRatings,
+import { answerLine, energyRhythm, statedSleep, ONBOARDING_INSIGHTS, portraitConfirmedByInsights, portraitFingerprint, portraitStillConfirmed, PROFILE_CONFIRMED, readInsightRatings,
   type AccessContext, type EnergyLevel, type EnergyRhythm, type PortraitReport, type ProfileModel } from "@crossline/core";
 import { interviewLocale, readLocale, sayDoFor } from "@crossline/db";
 import { tFor } from "./i18n";
@@ -90,7 +90,7 @@ function portraitRhythm(ctx: AccessContext, now: Date): EnergyRhythm {
   const reports = getStore().listEnergyObservations(ctx.workspaceId).filter((item) => item.source === "self_report" && item.level !== "uncalibrated")
     .map((item) => ({ at: item.observedAt, level: item.level as EnergyLevel }));
   return energyRhythm({ episodes: model.episodes, hourOf: model.hourOf, weekdayOf: (iso) => Number(formatInTimeZone(new Date(iso), zone, "i")),
-    phaseShift: model.phaseShift, calibration: model.calibration, reports, now: now.toISOString() });
+    phaseShift: model.phaseShift, calibration: model.calibration, reports, now: now.toISOString(), stated: statedSleep(getStore().listProfileFacts(ctx.workspaceId)) });
 }
 
 /** The interview's own question about the portrait (`PORTRAIT_UNCONFIRMED`): its wording and options, so an answer here reads as one there. */

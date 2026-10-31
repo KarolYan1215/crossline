@@ -234,3 +234,11 @@ test("an interview the dialogue ended owes a run until the synthesis is written,
   markFinishing(store, workspaceId, "s", FINISH_RUNS_MAX);
   expect(extractor.nextSession()).toBeUndefined();
 });
+
+test("the extraction is shown the hours on record, so sending them again keeps what the new reply does not change", async () => {
+  store.setSetting(workspaceId, "schedule.availability.proposed", JSON.stringify({ windows: [{ days: [0, 6], start: "10:00", end: "18:00", energy: "medium" }], why: "" }));
+  const { rpc, prompts } = runtime([round], [facts()]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "await" })({ sessionId: "s", text: "工作日 0 点睡 7 点半起。" });
+  const extraction = prompts().find((prompt) => prompt.includes(EXTRACT))!;
+  expect(extraction).toContain('"hours":[{"days":[0,6],"startMinute":600,"endMinute":1080,"energy":"medium"}]');
+});

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, DEEP_SECTIONS, EMPTY_PROFILE_MODEL, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, mergeProfileSections,
+  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, INTERVIEW_SETTINGS, mergeInterviewSettings, readInterviewSettings, DEEP_SECTIONS, EMPTY_PROFILE_MODEL, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, mergeProfileSections,
   type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, mergeDateExtractions,
   resolveAvailability, sanitizeDateExtraction, withContentIds, withoutDecidedDates, withoutOffHours,
   type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile
@@ -101,6 +101,10 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
   // Available hours worked out from what the person said: a proposal, confirmed (or not) on the plan page.
   if (extraction.availability?.windows.length) store.setSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING,
     JSON.stringify({ ...extraction.availability, at: now }));
+  // Settings the person stated: kept for them to apply in the start confirmation (or 待决事项), never applied here.
+  if (extraction.settings?.length) store.setSetting(workspaceId, INTERVIEW_SETTINGS, JSON.stringify(mergeInterviewSettings(
+    readInterviewSettings(store.getSetting(workspaceId, INTERVIEW_SETTINGS)), extraction.settings.map((item) => ({ ...item, quote: item.sourceQuote })), now,
+    { milestones: new Set(), tasks: new Set(), lines: new Set() })));
   for (const project of extraction.projectsDetected) {
     const existing = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === project.id);
     store.saveProject({ id: project.id, ownerId, workspaceId, identityId: project.identityId, name: project.name,

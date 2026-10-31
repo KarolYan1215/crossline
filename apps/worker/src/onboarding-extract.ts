@@ -1,6 +1,6 @@
 // i18n-exempt: the interview's extraction runs unseen by the person: its instructions, lookups and repair messages go to the model, its failures to the log
 import {
-  DEEP_SECTIONS, ONBOARDING_KEEP_EARLY_MAX, ONBOARDING_STAGES, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, lineAttributes, numberedText, onboardingExtractSchema,
+  AVAILABILITY_PROPOSED_SETTING, DEEP_SECTIONS, ONBOARDING_KEEP_EARLY_MAX, ONBOARDING_STAGES, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
   ONBOARDING_INSIGHTS, readInsightRatings
@@ -11,6 +11,15 @@ import {
   type CrosslineStore, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument
 } from "@crossline/db";
 import { identityLines } from "./lines";
+
+/** The last proposed hours, as the extraction writes them (minutes after midnight). */
+function hoursOnRecord(store: CrosslineStore, workspaceId: string): NonNullable<OnboardingExtractContext["hours"]> {
+  try {
+    const proposal = JSON.parse(store.getSetting(workspaceId, AVAILABILITY_PROPOSED_SETTING) ?? "null") as { windows?: Array<{ days: number[]; start: string; end: string; energy: "low" | "medium" | "high" }> } | null;
+    const minute = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3, 5));
+    return (proposal?.windows ?? []).map((window) => ({ days: window.days, startMinute: minute(window.start), endMinute: minute(window.end), energy: window.energy }));
+  } catch { return []; }
+}
 import { persistExtraction, personTimeZone, readProfileModel, readSectionRecords } from "./onboarding-persist";
 import { sourceIds } from "./source-ids";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
@@ -191,6 +200,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       ...(() => { const guides = domainGuides(lines); return guides.length ? { domainGuides: guides } : {}; })(),
       projects: store.listProjects(workspaceId).map(({ id, identityId, name, summary }) => ({ id, identityId, name, summary })),
       facts: factIndex(store, workspaceId),
+      ...(() => { const hours = hoursOnRecord(store, workspaceId); return hours.length ? { hours } : {}; })(),
       lineProfiles: lines.map((line) => ({ lineId: line.id, description: profiles[line.id]?.description ?? "",
         attributes: lineAttributes(profiles[line.id], line.label).map((item) => item.text) })),
       candidatesWanted: lines.filter((line) => !(line.goals ?? []).length && profiles[line.id]?.description

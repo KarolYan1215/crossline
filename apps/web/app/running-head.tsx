@@ -11,6 +11,7 @@ import { useT } from "./locale-context";
 import { NavLink } from "./ui/nav-link";
 import { MenuButton } from "./ui/controls";
 import { ICON } from "./ui/icon-button";
+import { HelperFace, useHelper } from "./helper-state";
 
 /**
  * The header every signed-in page shares (from `AppShell`); a client component so its labels follow the page's language (docs/i18n.md).
@@ -20,6 +21,8 @@ import { ICON } from "./ui/icon-button";
 export function RunningHead({ active, focus }: { active?: string | undefined; focus: boolean }) {
   const t = useT();
   const go = (href: string) => () => { location.href = href; };
+  // The account's face is the 小帮手's figure (2026-10-31, the owner), the plain icon until one is drawn or picked.
+  const { avatar } = useHelper();
   return <header className="running-head" data-focus={focus || undefined}>
     <NavLink className="wordmark" href="/">Crossline</NavLink>
     <nav aria-label={t("主导航")}>{(focus ? [] : NAV_ITEMS).map((item) =>
@@ -32,7 +35,7 @@ export function RunningHead({ active, focus }: { active?: string | undefined; fo
       {!focus && <NoticeBell />}
       <LocaleSwitch sync />
       <SignOutButton />
-      {!focus && <span className="account-menu"><MenuButton label={t("账号")} icon={<UserRound {...ICON} />} items={[
+      {!focus && <span className="account-menu"><MenuButton label={t("账号")} icon={avatar ? <HelperFace src={avatar} size="reply" /> : <UserRound {...ICON} />} items={[
         { label: t("设置"), onSelect: go("/settings") },
         { label: t("画像"), onSelect: go("/portrait") },
         { label: t("退出登录"), onSelect: () => { void signOutHere(); } }

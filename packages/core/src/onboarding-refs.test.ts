@@ -87,3 +87,12 @@ test("an extraction that leaves out lists it had nothing for, or names a slot af
   expect(extracted.slotUpdates?.[0]?.slot).toBe("flywheel_line_x_3_informs");
   expect(extracted.projectsDetected).toEqual([]);
 });
+
+test("a setting the extraction names rests on the person's reply, with its words as the quote; one citing only a file has no source", () => {
+  const extraction = validateOnboardingExtraction({ ...turn(), settings: [
+    { key: "notify.quietHours", target: "", value: "22:30-09:30", refs: [1] },
+    { key: "notify.briefTime", target: "", value: "09:40", refs: [4] }] }, known());
+  expect(extraction.settings).toEqual([
+    { key: "notify.quietHours", target: "", value: "22:30-09:30", sourceRef: "reply-1", sourceQuote: "我9.00上课，周三下午3点组会。" },
+    { key: "notify.briefTime", target: "", value: "09:40", sourceRef: "", sourceQuote: "" }]);
+});

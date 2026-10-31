@@ -40,6 +40,8 @@ export type AskKind =
    * a task card. Answered, the assistant takes the work; 「不需要」 archives it.
    */
   | "prep_question"
+  /** Settings the person stated in the interview after the start confirmation (`INTERVIEW_SETTINGS`): apply them, or leave things as they are. */
+  | "interview_settings"
   /** How long getting to a place on the calendar takes, when nothing says (no word, no map, no default): 30 minutes are kept meanwhile. */
   | "travel_minutes"
   /** The week's risks, once a week (docs/rituals.md): every milestone at risk on one card; one due within two days stays its own card. */
