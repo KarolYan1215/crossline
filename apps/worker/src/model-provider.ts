@@ -4,7 +4,7 @@ import {
   capabilityGap, CHATGPT_EXHAUSTED_SETTING, chatgptExhausted, chatgptQuotaSpent, tFor, THIRD_PARTY_CAPABILITIES, type ChatgptExhausted, type ConformanceCase, type ConformanceRecord, type ConformanceRun, type CostSignal
 } from "@crossline/core";
 import {
-  CODEX_FORK_BINARY_SHA256, isLocalProvider, MODEL_PROVIDER_SETTING, providerConfigProblem, runCodexSkill, threadProvider,
+  CODEX_FORK_BINARY_SHA256, isLocalProvider, MODEL_PROVIDER_SETTING, normalizeProviderBaseUrl, providerConfigProblem, runCodexSkill, threadProvider,
   type CodexRpcBoundary, type GatewayUpstream, type ModelGateway, type ProviderConfig, type ProviderRouting
 } from "@crossline/codex";
 import { imageBackendFromEnv, webSearchFromEnv, type ImageBackend, type SecretStore, type WebSearchBackend } from "@crossline/connectors";
@@ -13,6 +13,7 @@ import { ownerOf } from "./owner";
 import { localeOf } from "./locale";
 import type { SponsorService } from "./sponsor";
 import { createWebTools } from "./web-tools";
+import { defaultProbeDeps, probeProvider, type ProbeDeps } from "./provider-probe";
 
 /**
  * A workspace's own model provider, as the worker keeps it (R7, decided 2026-10-13): the `model.provider` setting (no key), the key
@@ -25,8 +26,12 @@ const SECRET_NAME = "provider-key";
 export const RUNTIME_VERSION = CODEX_FORK_BINARY_SHA256.slice(0, 12);
 const CONFORMANCE_SKILL = "crossline:crossline-conformance";
 
-/** Starting points for the form; the person can change any field. */
+/**
+ * Starting points for the form; the person can change any field. The first is an OpenAI-compatible relay (中转站) or any other address,
+ * for someone with neither ChatGPT Plus nor an official API key (2026-10-30): address and model are theirs to fill.
+ */
 export const PROVIDER_PRESETS: Array<{ id: string; label: string; kind: ProviderConfig["kind"]; baseUrl: string; model: string; responseFormat?: "json_object" }> = [
+  { id: "relay", label: "中转站 / 自定义地址", kind: "chat", baseUrl: "", model: "" },
   { id: "deepseek", label: "DeepSeek", kind: "chat", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", responseFormat: "json_object" },
   { id: "kimi", label: "Kimi", kind: "chat", baseUrl: "https://api.moonshot.cn/v1", model: "kimi-k2-turbo-preview", responseFormat: "json_object" },
   { id: "qwen", label: "通义千问", kind: "chat", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", responseFormat: "json_object" },
@@ -59,8 +64,19 @@ export function createModelProviderService(options: {
   onConformance?: (workspaceId: string) => void;
   /** The developer's model for accounts that redeemed an invite code (`sponsor.ts`); a workspace's own provider comes first. */
   sponsor?: () => SponsorService | undefined;
+  /** The connection tried before saving and the DNS check before every request (`provider-probe.ts`); the real network unless given. */
+  probe?: ProbeDeps;
+  /**
+   * Whether a model on this computer (loopback) may be saved: only where Crossline runs on the person's own computer. On the hosted
+   * server loopback is the server's own services, so it is refused there (`CROSSLINE_PUBLIC_BETA=1`).
+   */
+  allowLoopback?: boolean;
+  /** Start the conformance run as soon as a configuration is saved, as the card says; tests turn it off. */
+  testOnSave?: boolean;
 }) {
   const now = options.now ?? (() => new Date());
+  const probe = options.probe ?? defaultProbeDeps();
+  const allowLoopback = options.allowLoopback ?? process.env.CROSSLINE_PUBLIC_BETA !== "1";
   const search = options.search === undefined ? webSearchFromEnv() : options.search ?? undefined;
   const image = options.image === undefined ? imageBackendFromEnv() : options.image ?? undefined;
   // The shell assistant on another model only inside Codex's Linux sandbox, where the server allows it (sandbox-probe.ts).
@@ -150,8 +166,12 @@ export function createModelProviderService(options: {
     const provider = config(workspaceId);
     if (!provider || provider.id !== providerId) return undefined;
     const secret = await key(workspaceId);
+    // Checked on every request, not only on saving: a name can be pointed at another address after it was saved.
+    const refused = isLocalProvider(provider.baseUrl)
+      ? (allowLoopback ? undefined : "loopback provider refused on this server")
+      : (await probe.isPublicHost(new URL(provider.baseUrl).hostname) ? undefined : "provider host does not resolve to a public address");
     return { kind: provider.kind === "chat" ? "chat" : "responses", baseUrl: provider.baseUrl,
-      ...(provider.responseFormat ? { responseFormat: provider.responseFormat } : {}), ...(secret ? { key: secret } : {}) };
+      ...(provider.responseFormat ? { responseFormat: provider.responseFormat } : {}), ...(secret ? { key: secret } : {}), ...(refused ? { refused } : {}) };
   };
 
   /**
@@ -264,13 +284,18 @@ export function createModelProviderService(options: {
     const t = tFor(localeOf(options.store, workspaceId));
     const previous = config(workspaceId);
     const kind: ProviderConfig["kind"] | undefined = body.kind === "chat" || body.kind === "responses" ? body.kind : undefined;
-    const next = { id: text(body.id), kind: kind ?? "responses" as const, label: text(body.label), baseUrl: text(body.baseUrl).replace(/\/+$/, ""), model: text(body.model) };
-    const problem = !kind ? t("接口类型不认识。") : providerConfigProblem(next, localeOf(options.store, workspaceId));
+    const next = { id: text(body.id), kind: kind ?? "responses" as const, label: text(body.label), baseUrl: normalizeProviderBaseUrl(text(body.baseUrl)), model: text(body.model) };
+    const problem = !kind ? t("接口类型不认识。") : providerConfigProblem(next, localeOf(options.store, workspaceId), { allowLoopback });
     if (problem) return { status: 400, body: { blocker: { code: "PROVIDER_CONFIG_INVALID", message: problem } } };
     const apiKey = text(body.apiKey);
     if (apiKey.length > 400) return { status: 400, body: { blocker: { code: "PROVIDER_CONFIG_INVALID", message: t("API key 太长。") } } };
     // A key is kept only for the same provider and address it was given for; changing either asks for it again.
     const sameTarget = previous && previous.id === next.id && previous.baseUrl === next.baseUrl;
+    const keyToUse = apiKey || (sameTarget && previous.keyLast4 ? await key(workspaceId) : undefined);
+    if (!keyToUse && !isLocalProvider(next.baseUrl)) return { status: 400, body: { blocker: { code: "PROVIDER_KEY_MISSING", message: t("这个接口需要 API key。") } } };
+    // One real request before anything is kept: a wrong key, path, model or an empty balance is said now, in words.
+    const reached = await probeProvider(next, keyToUse, probe, localeOf(options.store, workspaceId));
+    if (!reached.ok) return { status: 400, body: { blocker: { code: reached.code, message: reached.message } } };
     let keyLast4 = sameTarget ? previous.keyLast4 : null;
     if (apiKey) {
       try { await options.secrets.write(workspaceId, SECRET_NAME, apiKey); }
@@ -284,7 +309,15 @@ export function createModelProviderService(options: {
     options.store.setSetting(workspaceId, MODEL_PROVIDER_SETTING, JSON.stringify(saved));
     options.store.appendEvent({ ownerId: ownerOf(options.store, workspaceId), workspaceId, idempotencyKey: `${PROVIDER_CHANGED_EVENT}:${saved.updatedAt}`,
       type: PROVIDER_CHANGED_EVENT, entityId: saved.id, payload: { id: saved.id, kind: saved.kind, label: saved.label, baseUrl: saved.baseUrl, model: saved.model } });
+    if (options.testOnSave !== false) startConformance(workspaceId);
     return { status: 200, body: view(workspaceId) };
+  }
+
+  /** Answered at once; the run takes minutes per case and writes its record to the ledger, which the card polls. */
+  function startConformance(workspaceId: string) {
+    if (testing.has(workspaceId)) return;
+    void runConformance(workspaceId).catch((error: unknown) => console.warn(JSON.stringify({ type: "model.provider.conformance_failed",
+      message: error instanceof Error ? error.message : "" })));
   }
 
   async function handle(method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined): Promise<{ status: number; body: unknown } | undefined> {
@@ -301,10 +334,7 @@ export function createModelProviderService(options: {
     }
     if (pathname === "/v1/model/provider/test" && method === "POST") {
       if (!config(workspaceId)) return { status: 409, body: { blocker: { code: "PROVIDER_NOT_CONFIGURED", message: tFor(localeOf(options.store, workspaceId))("还没有添加模型连接。") } } };
-      if (testing.has(workspaceId)) return { status: 202, body: view(workspaceId) };
-      // Answered at once; the run takes minutes per case and writes its record to the ledger, which the card polls.
-      void runConformance(workspaceId).catch((error: unknown) => console.warn(JSON.stringify({ type: "model.provider.conformance_failed",
-        message: error instanceof Error ? error.message : "" })));
+      startConformance(workspaceId);
       return { status: 202, body: view(workspaceId) };
     }
     return undefined;

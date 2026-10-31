@@ -5,6 +5,7 @@ import { createMemorySecretStore, type SecretStore } from "@crossline/connectors
 import { CrosslineStore } from "@crossline/db";
 import { CONFORMANCE_EVENT, createModelProviderService, RUNTIME_VERSION } from "./model-provider";
 import { fakeRuntime } from "./testing/fake-runtime";
+import type { ProbeDeps } from "./provider-probe";
 
 let store: CrosslineStore;
 let secrets: SecretStore;
@@ -12,7 +13,11 @@ let gateway: ModelGateway;
 let workspaceId: string;
 let signedIn = false;
 let clock = new Date("2026-10-13T10:00:00.000Z");
-const service = () => createModelProviderService({ store, secrets, gateway, signedIn: () => signedIn, client: async () => undefined, cwd: "C:\\repo", now: () => clock });
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+/** Every address public and every request answered: what a working provider looks like to the connection tried before saving. */
+const reachable: ProbeDeps = { isPublicHost: async () => true, fetchImpl: (async () => json({ data: [] })) as typeof fetch };
+const service = (probe: ProbeDeps = reachable, allowLoopback = true) => createModelProviderService({ store, secrets, gateway, signedIn: () => signedIn,
+  client: async () => undefined, cwd: "C:\\repo", now: () => clock, probe, allowLoopback, testOnSave: false });
 
 beforeEach(async () => {
   store = new CrosslineStore(":memory:");
@@ -47,9 +52,10 @@ test("a paid address needs a key, a bad address is refused in words, and a key d
   // Same address, no key typed: the saved one stays.
   expect(await providers.handle("POST", "/v1/model/provider", workspaceId, { ...deepseek, apiKey: "", model: "deepseek-reasoner" })).toMatchObject({ status: 200 });
   expect(await secrets.read(workspaceId, "provider-key")).toBe("sk-live-secret-9xyz");
-  // Another address: the key is dropped and asked for again.
-  expect(await providers.handle("POST", "/v1/model/provider", workspaceId, { ...deepseek, apiKey: "", baseUrl: "https://elsewhere.example/v1" })).toMatchObject({ status: 400 });
-  expect(await secrets.read(workspaceId, "provider-key")).toBeUndefined();
+  // Another address: the key does not follow it and is asked for again; the saved provider stays as it was.
+  expect(await providers.handle("POST", "/v1/model/provider", workspaceId, { ...deepseek, apiKey: "", baseUrl: "https://elsewhere.example/v1" }))
+    .toMatchObject({ status: 400, body: { blocker: { code: "PROVIDER_KEY_MISSING" } } });
+  expect(JSON.parse(store.getSetting(workspaceId, "model.provider")!)).toMatchObject({ baseUrl: "https://api.deepseek.com/v1" });
   // A local model takes no key.
   expect(await providers.handle("POST", "/v1/model/provider", workspaceId, { id: "ollama", kind: "responses", label: "本机", baseUrl: "http://127.0.0.1:11434/v1", model: "qwen3:8b" }))
     .toMatchObject({ status: 200 });
@@ -150,7 +156,8 @@ test("conformance: each case runs on the provider through the repair loop, and t
     JSON.stringify({ titles: [{ id: "t1", title: "整理笔记" }] }),
     JSON.stringify({ items: [{ kind: "note", text: "a" }, { kind: "task", title: "b", minutes: 30 }, { kind: "note", text: "c" }], note: null })
   ], "crossline:crossline-conformance");
-  const providers = createModelProviderService({ store, secrets, gateway, signedIn: () => false, client: async () => runtime.rpc, cwd: "C:\\repo", now: () => clock });
+  const providers = createModelProviderService({ store, secrets, gateway, signedIn: () => false, client: async () => runtime.rpc, cwd: "C:\\repo", now: () => clock,
+    probe: reachable, testOnSave: false });
   await providers.handle("POST", "/v1/model/provider", workspaceId, deepseek);
   clock = new Date("2026-10-13T10:05:00.000Z");
   const cases = conformanceCases().filter((item) => item.id === "TASK_TITLES_SCHEMA" || item.id === "ADVERSARIAL_UNION");
@@ -160,4 +167,55 @@ test("conformance: each case runs on the provider through the repair loop, and t
   expect(runtime.threadStarts().every((start) => start.modelProvider === "crossline-deepseek")).toBe(true);
   expect(runtime.prompts()[1]).toContain("characters, at most 60");
   expect(store.listEvents(workspaceId, { type: CONFORMANCE_EVENT })).toHaveLength(1);
+});
+
+test("a relay (中转站): the pasted endpoint is cut to its base, one real request goes out with the key, and the check starts after saving", async () => {
+  const sent: Array<{ url: string; auth: string | undefined }> = [];
+  const probe: ProbeDeps = { isPublicHost: async () => true, fetchImpl: (async (url: string, init?: RequestInit) => {
+    sent.push({ url, auth: (init?.headers as Record<string, string>).authorization });
+    return url.endsWith("/models") ? json({ data: [{ id: "gpt-4o-mini" }] }) : json({ choices: [{ message: { content: "OK" } }] });
+  }) as typeof fetch };
+  const started: string[] = [];
+  const providers = createModelProviderService({ store, secrets, gateway, signedIn: () => false, cwd: "C:\\repo", now: () => clock, probe,
+    client: async (id) => { started.push(id); return undefined; } });
+  const relay = { id: "relay", kind: "chat", label: "中转站", baseUrl: "https://relay.example.com/v1/chat/completions", model: "gpt-4o-mini", apiKey: "sk-relay-secret-ab12" };
+  const saved = await providers.handle("POST", "/v1/model/provider", workspaceId, relay);
+  expect(saved).toMatchObject({ status: 200, body: { provider: { baseUrl: "https://relay.example.com/v1", keyLast4: "ab12" } } });
+  expect(sent.map((item) => item.url)).toEqual(["https://relay.example.com/v1/models", "https://relay.example.com/v1/chat/completions"]);
+  expect(sent.every((item) => item.auth === "Bearer sk-relay-secret-ab12")).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(started).toEqual([workspaceId]);
+  expect(JSON.stringify([saved, store.exportSnapshot(workspaceId)])).not.toContain("sk-relay-secret");
+});
+
+test("a connection that fails is not saved, and its message never repeats the key even when the relay echoes it", async () => {
+  const echo: ProbeDeps = { isPublicHost: async () => true,
+    fetchImpl: (async () => json({ error: { message: "Invalid token: sk-relay-secret-ab12 (request id 9)" } }, 401)) as typeof fetch };
+  const relay = { id: "relay", kind: "chat", label: "中转站", baseUrl: "https://relay.example.com/v1", model: "gpt-4o-mini", apiKey: "sk-relay-secret-ab12" };
+  const answer = await service(echo).handle("POST", "/v1/model/provider", workspaceId, relay);
+  expect(answer).toMatchObject({ status: 400, body: { blocker: { code: "PROVIDER_KEY_INVALID" } } });
+  expect(JSON.stringify(answer)).not.toContain("sk-relay-secret");
+  expect(store.getSetting(workspaceId, "model.provider")).toBeFalsy();
+  expect(await secrets.read(workspaceId, "provider-key")).toBeUndefined();
+  // A name that resolves to a private address is refused before anything is sent to it.
+  let contacted = false;
+  const privateName: ProbeDeps = { isPublicHost: async () => false, fetchImpl: (async () => { contacted = true; return json({}); }) as typeof fetch };
+  expect(await service(privateName).handle("POST", "/v1/model/provider", workspaceId, relay))
+    .toMatchObject({ status: 400, body: { blocker: { code: "PROVIDER_ADDRESS_PRIVATE" } } });
+  expect(contacted).toBe(false);
+});
+
+test("the gateway's upstream is refused when the saved name stops resolving publicly, and loopback is refused on the hosted server", async () => {
+  let isPublic = true;
+  const providers = service({ ...reachable, isPublicHost: async () => isPublic });
+  await providers.handle("POST", "/v1/model/provider", workspaceId, deepseek);
+  expect((await providers.upstream(workspaceId, "deepseek"))?.refused).toBeUndefined();
+  isPublic = false;
+  expect((await providers.upstream(workspaceId, "deepseek"))?.refused).toContain("public");
+  const hosted = service(reachable, false);
+  const local = { id: "ollama", kind: "responses", label: "本机", baseUrl: "http://127.0.0.1:3211/v1", model: "x" };
+  expect(await hosted.handle("POST", "/v1/model/provider", workspaceId, local)).toMatchObject({ status: 400, body: { blocker: { code: "PROVIDER_CONFIG_INVALID" } } });
+  // A loopback provider saved before (or by hand) is not forwarded on the server.
+  store.setSetting(workspaceId, "model.provider", JSON.stringify({ ...local, keyLast4: null, updatedAt: clock.toISOString() }));
+  expect((await hosted.upstream(workspaceId, "ollama"))?.refused).toContain("loopback");
 });

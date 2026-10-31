@@ -407,6 +407,16 @@ export function modelProviderGuide(local: boolean): SetupGuideSpec {
     title: "接入教程：各家模型的 API key",
     intro: "模型只承担检验通过的功能；联网搜索、画图和能执行命令的助手仍由 ChatGPT 登录承担。",
     providers: [
+      // No ChatGPT Plus and no official API (2026-10-30): an OpenAI-compatible relay works the same way.
+      { id: "relay", label: "中转站", steps: [
+        "中转站是转发 OpenAI 兼容接口的第三方服务：没有 ChatGPT Plus、也没有各家官方 API 时，用中转站的 API key 一样能用。",
+        "登录所用中转站的网站，进入控制台的「令牌」「API 密钥」或「Key 管理」页。",
+        "新建一个令牌，名称填 Crossline，可以给它设一个额度上限；复制生成的 key（多以 sk- 开头）。",
+        "在同一后台找到 API 地址（常写作「Base URL」「接口地址」或「API 地址」）。只给了域名时，在末尾加上 /v1。",
+        "在本卡点「用中转站接入」，接口类型保持 Chat Completions，填入接口地址、API key 和模型名（照后台模型列表里的名字填写）。",
+        "点「测试连接并保存」。测通后自动检验每项功能的回答格式，约 10–20 分钟，访谈一项通过就可以开始访谈。"],
+      facts: [{ label: "接口地址格式", value: "https://中转站域名/v1" }, { label: "接口类型", value: "Chat Completions（绝大多数中转站）" }],
+      note: "中转站能看到发给模型的全部内容（访谈回答、任务、上传文件的正文）。请选运营时间长、口碑可靠的服务，不要把同一个 key 用在来路不明的站点；价格和稳定性由中转站自己负责。" },
       ...KEY_PAGES.map((page) => ({ id: page.id, label: page.label, steps: [
         "打开下方链接里的 API key 页面，登录或注册。",
         "新建一个 API key，名称填 Crossline，复制显示的密钥（多数平台只显示一次）。",
@@ -423,7 +433,10 @@ export function modelProviderGuide(local: boolean): SetupGuideSpec {
     ],
     problems: [
       { symptom: "检验结果「未通过」", fix: "模型答不出要求的格式。勾选「这个接口只支持 JSON 模式」后重新检验，或换一个更大的模型。" },
-      { symptom: "保存时提示密钥无效或余额不足", fix: "密钥复制不全，或平台账户需要先充值。" }
+      { symptom: "提示 API key 无效（401）", fix: "key 复制不全、已在后台删除，或不属于填写的这个地址。重新复制完整的 key 再保存。" },
+      { symptom: "提示没有找到接口（404）或返回的是网页", fix: "接口地址少了 /v1，或填成了中转站的首页、控制台地址。改成后台给出的 API 地址，末尾通常是 /v1。" },
+      { symptom: "提示没有这个模型", fix: "模型名要和后台模型列表里的完全一致；提示里会列出相近的名字，也可能是这个令牌没有勾选该模型。" },
+      { symptom: "提示余额或额度不足", fix: "到平台或中转站后台充值，或调高这个令牌的额度上限。" }
     ]
   };
 }
