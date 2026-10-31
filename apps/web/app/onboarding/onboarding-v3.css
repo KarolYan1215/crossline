@@ -297,4 +297,17 @@ body:has(.ob-page) .running-head{background:var(--ds-bg)}
 .ob-page :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea){border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-card)}
 .ob-page .setup-guide{border-left-color:var(--ds-accent)}
 .ob-page .ui-first-hint{border-radius:10px}
-html:has(.ob-page){background:var(--ds-bg)}
+html:has(.ob-page){background:var(--ds-bg)}/* The profile module's cards (flow v2): five dots per item, larger at the ends, labelled at both ends and the middle only. */
+.ob-cards{display:grid;gap:10px;margin-top:8px}
+.ob3 .ob-scale-card{display:grid;gap:12px;margin:0;padding:12px 14px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card)}
+.ob3 .ob-scale-card legend{padding:0 4px;font-weight:700;font-size:14px}
+.ob-scale-item{display:grid;gap:6px}
+.ob-scale-item p{margin:0;font-size:14px;line-height:1.5}
+.ob-scale-dots{display:flex;align-items:center;justify-content:space-between;max-width:360px;min-height:44px}
+.ob3 .ob-scale-dots button{flex:none;padding:0;border:1.5px solid var(--ds-line);border-radius:50%;background:var(--ds-card);cursor:pointer}
+.ob3 .ob-scale-dots button[aria-checked="true"]{background:var(--ds-accent);border-color:var(--ds-accent)}
+.ob3 .ob-scale-dots button:focus-visible{outline:2px solid var(--ds-accent);outline-offset:3px}
+.ob-scale-anchors{display:grid;grid-template-columns:1fr 1fr 1fr;max-width:360px;font-size:12px;color:var(--graphite)}
+.ob-scale-anchors span:nth-child(2){text-align:center}
+.ob-scale-anchors span:nth-child(3){text-align:right}
+.ob3 .ob-scale-card textarea{width:100%;font:inherit;font-size:14px;padding:6px 10px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-bg);resize:vertical}

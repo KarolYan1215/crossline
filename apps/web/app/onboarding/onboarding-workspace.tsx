@@ -8,6 +8,7 @@ import { DiligencePanel } from "./diligence-panel";
 import { TranscriptionCard, type TranscriptionStatus } from "./transcription-card";
 import { DEEP_STAGES, ONBOARDING_TONE_LABEL, ONBOARDING_TONES, type OnboardingStage, type OnboardingTone } from "@crossline/core";
 import { QuestionCard } from "./question-card";
+import { cardReplyLines, NO_CARD_ANSWERS, ProfileCards, type CardAnswers } from "./profile-cards";
 import { StageBar } from "./portrait-panel";
 import { LeftColumn } from "./left-column";
 import { StageView } from "./stage-view";
@@ -55,6 +56,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   // What was just sent, shown at once: the saved copy only arrives with the next read, after the turn ends.
   const [pendingText, setPendingText] = useState("");
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
+  const [cardAnswers, setCardAnswers] = useState<CardAnswers>(NO_CARD_ANSWERS);
   const [over, setOver] = useState(false);
   const [transcription, setTranscription] = useState<TranscriptionStatus | undefined>();
   const [designed, setDesigned] = useState<Array<{ id: string; identityId: string; title: string }> | undefined>();
@@ -170,10 +172,11 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     }
   };
 
-  const runTurn = async (message: string, reread = false) => {
+  /** `aside`: a turn the app sends for the person (files added, dates re-read); the cards' taps are kept for the round they belong to. */
+  const runTurn = async (message: string, reread = false, aside = false) => {
     setBusy("turn"); setError("");
     if (message) await adoptGoalsFromRound();
-    if (message) { setPendingText(message); setText(""); setAnswers({}); }
+    if (message) { setPendingText(message); setText(""); setAnswers({}); if (!aside) setCardAnswers(NO_CARD_ANSWERS); }
     // A line's own interview lives in its own session; the full interview mints its id once.
     const id = line ? `line-${line}` : sessionId || crypto.randomUUID();
     setSessionId(id);
@@ -214,7 +217,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     // materials step (no conversation yet) the person adds everything first and starts the interview themselves.
     const readable = list.filter((file) => next?.documents.some((doc) => doc.fileName === file.name && doc.extractionStatus === "done"));
     setBusy("");
-    if (response?.ok && !body?.deferred && readable.length && (next?.messages.length ?? 0) > 0) await runTurn(t("我添加了这些文件：{{files}}。请读一下，整理里面的日期和我的情况。", { files: readable.map((file) => file.name).join(t("、")) }));
+    if (response?.ok && !body?.deferred && readable.length && (next?.messages.length ?? 0) > 0) await runTurn(t("我添加了这些文件：{{files}}。请读一下，整理里面的日期和我的情况。", { files: readable.map((file) => file.name).join(t("、")) }), false, true);
   };
 
   // Dates may be confirmed while a turn runs (docs/onboarding-v3.md 「等待」): that must not end the turn's own wait.
@@ -270,7 +273,10 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const inRound = new Set(roundQuestions.map((question) => question.id));
   const extra = waiting ? [] : (state?.extraQuestions ?? []).filter((question) => !inRound.has(question.id) && !answeredElsewhere.has(question.id));
   const batchQuestions = [...roundQuestions, ...extra];
-  const composed = composeAnswers(batchQuestions, answers, text, state?.interviewLocale ?? locale);
+  // The profile module's cards of this round (flow v2): their taps and words go in the same reply, read back without the model.
+  const cards = open?.cards ?? [];
+  const composed = [composeAnswers(batchQuestions, answers, text, state?.interviewLocale ?? locale), ...cardReplyLines(cards, cardAnswers)]
+    .filter((part) => part.trim()).join("\n");
   const canSend = busy === "" && !background && (Boolean(composed.trim()) || waiting);
 
 
@@ -314,7 +320,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
 
     <section className="ob-centre" aria-label={t("访谈对话")}>
       <header className="ob-centre-head">
-        <StageBar stage={stage} line={state.focusLine?.label} />
+        <StageBar stage={stage} line={state.focusLine?.label} flow={state.flow} />
         {!opening && !state.focusLine && <div className="ob-tone"><span>{t("语气")}</span>
           <SegmentedControl label={t("访谈语气")} value={state.tone} onChange={(next) => void changeTone(next)}
             options={ONBOARDING_TONES.map((id) => ({ value: id, label: t(ONBOARDING_TONE_LABEL[id].label) }))} /></div>}
@@ -366,8 +372,9 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
             <small className="ob-muted">{t("{{count}} 题一起作答，答完一并发送；不确定的可以跳过。", { count: centre.length })}</small>
           </div>
         </div>}
+        {cards.length > 0 && !waiting && busy !== "turn" && <ProfileCards cards={cards} answers={cardAnswers} disabled={busy !== ""} onChange={setCardAnswers} />}
         {state.adoptedDates && !state.focusLine && <FileReadList data={state.adoptedDates} open={stage === "orientation" || stage === "lines"} onChanged={() => void load()} />}
-        {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== "" && busy !== "turn"} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn(t("请把我已添加的文件里的日期重新读一遍，只整理日期。"), true)} />}
+        {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== "" && busy !== "turn"} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn(t("请把我已添加的文件里的日期重新读一遍，只整理日期。"), true, true)} />}
         {!state.focusLine && complete && <section className="ob-design" aria-label={t("画像报告")}>
           <b>{t("画像报告")}</b>
           <span className="ob-muted">{t("个人画像与洞察（可导出分享版），以及现况洞察与可行建议；可下载 PDF 或图片。")}</span>

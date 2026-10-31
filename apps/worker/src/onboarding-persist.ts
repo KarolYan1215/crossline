@@ -3,7 +3,8 @@ import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, DEEP_SECTIONS, EMPTY_PROFILE_MODEL, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, mergeProfileSections,
   type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, mergeDateExtractions,
   resolveAvailability, sanitizeDateExtraction, withContentIds, withoutDecidedDates, withoutOffHours,
-  type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile
+  type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile,
+  PROFILE_INSTRUMENTS_SETTING, mergeInstrumentAnswers, readInstrumentAnswers
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -73,6 +74,13 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
       records[section] = { sentences: written ? sections[section]!.sentences ?? [] : previous?.sentences ?? [], final, at: now, ...(emptyRuns ? { emptyRuns } : {}) };
     }
     store.setSetting(workspaceId, PROFILE_SECTIONS_SETTING, JSON.stringify(records));
+  }
+  // Card items the person answered in words: scored as `mapped` only for items still waiting to be read (a tap is never replaced).
+  if (!sessionId.startsWith("line-") && extraction.itemScores?.length) {
+    const kept = readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING));
+    const mapped = extraction.itemScores.filter((item) => kept[item.itemId]?.by === "pending").map((item) => ({ itemId: item.itemId, score: item.score,
+      by: "mapped" as const, confidence: Math.max(0, Math.min(1, item.confidence)), refs: item.sentences ?? [], at: now }));
+    if (mapped.length) store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(mergeInstrumentAnswers(kept, mapped)));
   }
   // Each line's personal description and attribute candidates, kept by line so a later run or a line's own interview refines one line
   // only. An empty candidate list keeps those on record; new ones replace them, except the attributes split from the adopted goal.

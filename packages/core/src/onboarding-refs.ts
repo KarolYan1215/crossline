@@ -102,7 +102,15 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     return [section, { ...Object.fromEntries(SECTION_FIELDS[section].filter((field) => fields[field] !== undefined).map((field) => [field, fields[field]])),
       sentences: cited.ids }];
   })) : undefined;
+  // A card item read off the person's words rests on the sentences that say it; no citation is no reading (the item is left unanswered).
+  const itemScores = list(turn.itemScores).flatMap(({ refs, ...item }) => {
+    /* i18n-ignore-start */
+    const cited = span(refs, `卡片题「${String(item.itemId)}」的折算`, false);
+    /* i18n-ignore-end */
+    return cited.ids.length ? [{ ...item, sentences: cited.ids }] : [];
+  });
   return { ...turn, slotUpdates, flywheelCandidates, lineProfiles, goalEdits, availability, ...(sections ? { profileSections: sections } : {}),
+    ...(Array.isArray(turn.itemScores) ? { itemScores } : {}),
     ...(turn.fileDates && typeof turn.fileDates === "object" ? { fileDates: resolveDateRefs(turn.fileDates, index, texts) } : {}) };
 }
 

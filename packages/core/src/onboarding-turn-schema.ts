@@ -1,6 +1,7 @@
 import { RELATION_KINDS } from "./flywheel-schema";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
 import { SCHWARTZ_VALUES } from "./portrait";
+import type { ProfileCard } from "./profile-instruments";
 import {
   ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, attributeProblem, cleanAttribute, duplicateAttributes,
   guessKind, notAtomic, type AttributeCandidate, type AttributeKind
@@ -58,13 +59,29 @@ export type TurnCoverage = { identityId: string; filled: string[]; missing: stri
  * (`readyToStart`); the back part — where they stand, their compass, their energy, and each line's specifics — writes the portrait, in the
  * same interview. A line's own interview (`focusLine`) runs only `details` for that line. The portrait report is written afterwards by its own Skill.
  */
-export const ONBOARDING_STAGES = ["orientation", "lines", "situation", "compass", "energy", "details"] as const;
+export const ONBOARDING_STAGES = ["narrative", "orientation", "lines", "situation", "compass", "energy", "details"] as const;
 export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
+/**
+ * The order the stages run in (docs/profile-and-agent-kit.md §四, decided 2026-10-31). `v2` puts the profile module first — the life
+ * story (`narrative`), values (`compass`), energy and the day, work and where they stand (`situation`), with the short instruments as
+ * cards between them — and then fits Crossline to it (`orientation`, `lines`). A session started before keeps `v1`, so a section whose
+ * stage it never ran is not closed as over. The flow is kept in the session's coverage (`coverage.flow`).
+ */
+export type InterviewFlow = "v1" | "v2";
+export const INTERVIEW_FLOW_STAGES: Record<InterviewFlow, readonly OnboardingStage[]> = {
+  v1: ["orientation", "lines", "situation", "compass", "energy", "details"],
+  v2: ["narrative", "compass", "energy", "situation", "orientation", "lines", "details"]
+};
+export const flowOf = (coverage: unknown): InterviewFlow => (coverage as { flow?: unknown } | null | undefined)?.flow === "v2" ? "v2" : "v1";
+/** The stages of the profile module in `v2`: the app's own fact questions wait until they are over. */
+export const PROFILE_MODULE_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["narrative", "compass", "energy", "situation"]);
+/** Whether a stage comes before another in a flow (an unknown stage counts as the flow's first). */
+export const stageIndexIn = (flow: InterviewFlow, stage: string): number => Math.max(0, INTERVIEW_FLOW_STAGES[flow].indexOf(stage as OnboardingStage));
 /**
  * The stages asked one deep question at a time (docs/onboarding-v3.md, decided 2026-10-14): what weighs most, why they work, what life is
  * for, what absorbs and drains them. The others gather facts in a batch of option cards.
  */
-export const DEEP_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["situation", "compass", "energy"]);
+export const DEEP_STAGES: ReadonlySet<OnboardingStage> = new Set<OnboardingStage>(["narrative", "situation", "compass", "energy"]);
 /** How the interview talks, chosen by the person at the start (default neutral); a setting, so it can change mid-interview. */
 // Two voices since 2026-10-18 (the owner's decision): 「直接犀利」 asked for exactly the 点破/反转 writing that reads as machine-made, so it
 // is gone, and an account that chose it reads as neutral (`readTone`).
@@ -102,9 +119,16 @@ export type ProfileModel = {
   allocation: string;
   /** Schwartz's ten values scored 0–100 from what was said (any subset so far), drawn as a radar while the compass stage runs. */
   values: Array<{ value: string; score: number }>;
+  /**
+   * The life story (`narrative`, flow v2; Savickas's Career Construction Interview and McAdams's life story): the theme their story keeps
+   * returning to, who they admired growing up and for what, a saying they live by, the turns that changed their direction, and the next
+   * chapter as they tell it. Empty on a portrait written before.
+   */
+  careerTheme: string; roleModels: string[]; motto: string; turningPoints: string[]; futureScript: string;
 };
 export const EMPTY_PROFILE_MODEL: ProfileModel = { portrait: "", coreConflict: "", problem: "", gravity: [], designable: [], reframes: [], workView: "",
-  lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "", values: [] };
+  lifeView: "", consistency: "", trueNorth: "", energyMap: [], flow: [], says: "", does: "", anchor: "", realWant: "", allocation: "", values: [],
+  careerTheme: "", roleModels: [], motto: "", turningPoints: [], futureScript: "" };
 /**
  * For each line: a personal description from what was said, and 3–12 mutually independent attributes (`attributeCandidates`) the person
  * builds a long-term goal 「成为 A 的、B 的<身份>」 from — each cited to the reply or file it came from, labelled with its kind, and an
@@ -145,7 +169,16 @@ export type OnboardingTurn = {
   insight?: TurnInsight;
   /** The dialogue's own record of where the interview stands, handed back next round. */
   progress?: TurnProgress;
+  /**
+   * The instrument cards the app put beside the round's questions (`cardsFor`; flow v2, profile stages): never written by the model, so
+   * their wording and keys stay the published items'.
+   */
+  cards?: ProfileCard[];
+  /** The extraction's reading of card items the person answered in words instead of a tap (`ItemScore`). */
+  itemScores?: ItemScore[];
 };
+/** One card item the extraction read off the person's words: 1–5 on the item's own scale (before reverse keying), how sure, and why. */
+export type ItemScore = { itemId: string; score: number; confidence: number; sentences?: number[] };
 
 /**
  * An observation (观察卡): two things the person said in different replies, connected, with the pattern named and no advice. `refs` name
@@ -183,6 +216,8 @@ export type OnboardingTurnContext = {
   domainGuides?: DomainGuideContext[];
   /** The portrait so far and the stage reached, so a rebuilt thread carries on rather than starting over. */
   profile?: ProfileModel; stage?: OnboardingStage;
+  /** The order this interview's stages run in (`INTERVIEW_FLOW_STAGES`); absent in a line's own interview, which runs `details` only. */
+  stageOrder?: OnboardingStage[];
   /** How the person asked to be spoken to (`ONBOARDING_TONE_SETTING`); also sent with every later turn, since it can change. */
   tone?: OnboardingTone;
   /** The completion list's items still open (`interviewChecklist`): what the interview owes before it may say it is ready, and what waits on the person. */
@@ -213,6 +248,13 @@ export type OnboardingTurnContext = {
    * waiting ones (待问) and answered ones. A question that asks one of these again names its number in `repeats`.
    */
   questionLedger?: string[];
+  /**
+   * How the app changed the dialogue's previous round before the person saw it: the questions it took out and why, and the ones it put
+   * beside them. The person answered what was shown, not what the thread holds.
+   */
+  lastRound?: { removed: Array<{ text: string; why: string }>; added: string[] };
+  /** Earlier replies the background extraction has not recorded yet: `abstract` does not hold what they said; the thread does. */
+  unrecorded?: string[];
   /** The person's reply, as they wrote it. */
   reply: { id: string; text: string };
   /**
@@ -274,6 +316,11 @@ export type OnboardingExtractContext = {
   reread: boolean;
   /** The person's ratings of the interview's observations (「准：…」/「不准：…」): what they said fits them, and what they said does not. */
   observations?: string[];
+  /**
+   * Card items the person answered in words instead of a tap: what each says and what its five points mean. The run scores each from the
+   * replies (`itemScores`), or leaves it out when the words do not say.
+   */
+  scaleItems?: Array<{ id: string; text: string; anchors: readonly [string, string, string]; card: string }>;
 };
 
 /** What the validator may check a citation against. Never sent to the model. */
@@ -314,7 +361,9 @@ const PROFILE_FIELD_SCHEMAS: Record<string, unknown> = {
     charge: { type: "string", enum: ["charge", "drain"] } }) },
   flow: { type: "array", maxItems: 8, items: text(200) }, says: { type: "string", maxLength: 400 }, does: { type: "string", maxLength: 400 },
   anchor: { type: "string", maxLength: 400 }, realWant: { type: "string", maxLength: 400 }, allocation: { type: "string", maxLength: 600 },
-  values: { type: "array", maxItems: 10, items: object({ value: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: { type: "integer", minimum: 0, maximum: 100 } }) }
+  values: { type: "array", maxItems: 10, items: object({ value: { type: "string", enum: SCHWARTZ_VALUES.map((value) => value.name) }, score: { type: "integer", minimum: 0, maximum: 100 } }) },
+  careerTheme: { type: "string", maxLength: 300 }, roleModels: { type: "array", maxItems: 4, items: text(200) }, motto: { type: "string", maxLength: 120 },
+  turningPoints: { type: "array", maxItems: 6, items: text(200) }, futureScript: { type: "string", maxLength: 400 }
 };
 
 /**
@@ -323,10 +372,14 @@ const PROFILE_FIELD_SCHEMAS: Record<string, unknown> = {
  * when new material bears on it, rewrites a deep stage's section whole once that stage is over (`finalize`), and writes the synthesis only
  * once all three deep stages are over — it sums up what they found, so it waits for them.
  */
-export const PROFILE_SECTIONS = ["situation", "compass", "energy", "synthesis"] as const;
+export const PROFILE_SECTIONS = ["narrative", "situation", "compass", "energy", "synthesis"] as const;
 export type ProfileSection = (typeof PROFILE_SECTIONS)[number];
-export const DEEP_SECTIONS = ["situation", "compass", "energy"] as const;
+export const DEEP_SECTIONS = ["narrative", "situation", "compass", "energy"] as const;
+/** The deep sections a flow writes: `v1` never ran `narrative`, so its synthesis does not wait for it. */
+export const deepSectionsOf = (flow: InterviewFlow): Array<(typeof DEEP_SECTIONS)[number]> =>
+  flow === "v2" ? [...DEEP_SECTIONS] : DEEP_SECTIONS.filter((section) => section !== "narrative");
 export const SECTION_FIELDS: Record<ProfileSection, Array<keyof ProfileModel>> = {
+  narrative: ["careerTheme", "roleModels", "motto", "turningPoints", "futureScript"],
   situation: ["problem", "gravity", "designable", "reframes"],
   compass: ["workView", "lifeView", "consistency", "trueNorth", "values"],
   energy: ["energyMap", "flow", "says", "does", "anchor", "realWant"],
@@ -437,6 +490,9 @@ function turnFields(ids?: TurnIds) {
     availability: object({ windows: { type: "array", maxItems: 14, items: object({ days: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
       startMinute: { type: "integer", minimum: 0, maximum: 1440 }, endMinute: { type: "integer", minimum: 0, maximum: 1440 },
       energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
+    // Card items answered in words (`scaleItems`): 1–5 on the item's own scale, confidence 0–1, the sentences it rests on.
+    itemScores: { type: "array", maxItems: 20, items: object({ itemId: slug, score: { type: "integer", minimum: 1, maximum: 5 },
+      confidence: { type: "number", minimum: 0, maximum: 1 }, refs: REFS }) },
     profile: object(PROFILE_FIELD_SCHEMAS),
     // The portrait by section (2026-10-19, P3): null leaves a section as it is; a section written is written whole, with the sentences it rests on.
     profileSections: object(Object.fromEntries(PROFILE_SECTIONS.map((section) => [section,
@@ -450,7 +506,7 @@ function turnFields(ids?: TurnIds) {
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
 export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress"] as const;
-export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "profileSections"] as const;
+export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "profileSections", "itemScores"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
 export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
 export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
@@ -459,7 +515,7 @@ export const ONBOARDING_EXTRACT_SCHEMA = onboardingExtractSchema();
 export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
-  | "availability"> & { fileDates?: DateExtraction; profileSections?: ProfileSections };
+  | "availability"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;

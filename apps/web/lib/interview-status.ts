@@ -1,5 +1,5 @@
 import "server-only";
-import { ONBOARDING_STAGES, answerLine, gapCoveredBy, questionKind, readyToStart as startReady, screenQuestions, screenedNote, startMissing as startOpen, type AccessContext, type ChecklistItem,
+import { INTERVIEW_FLOW_STAGES, flowOf, answerLine, gapCoveredBy, questionKind, readyToStart as startReady, screenQuestions, screenedNote, startMissing as startOpen, type AccessContext, type ChecklistItem,
   type ScreenReason } from "@crossline/core";
 import { interviewChecklistFor, interviewGapsFor, questionScreenFor } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -87,7 +87,8 @@ function readPending(ctx: AccessContext, sessionId: string, afterSeq: number): P
 export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const store = getStore();
   const session = store.getLatestOnboardingSession(ctx.workspaceId);
-  const stageCount = ONBOARDING_STAGES.length;
+  const stages = INTERVIEW_FLOW_STAGES[flowOf(session?.coverage)];
+  const stageCount = stages.length;
   const today = planToday(ctx);
   const lines = identityLines(ctx).map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [] }));
   const checklist = interviewChecklistFor(store, ctx.workspaceId, lines, { unfiledFiles: unfiledFiles(ctx, today).length, today });
@@ -118,7 +119,7 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const questions = [...round.filter((question) => !owned.has(question.id) && !question.id.startsWith("gap-file-") && question.id !== "gap-portrait"), ...gaps]
     .filter((question) => !pending.answers[question.id] && !seen.has(question.id) && Boolean(seen.add(question.id)));
   return { started: true, complete, awaitingPerson: open.length > 0 && open.every((item) => item.owner === "person"), parked, readyToStart, startMissing,
-    stage, stageIndex: Math.max(0, ONBOARDING_STAGES.indexOf(stage as (typeof ONBOARDING_STAGES)[number])) + 1, stageCount,
+    stage, stageIndex: Math.max(0, stages.indexOf(stage as (typeof stages)[number])) + 1, stageCount,
     questions, screened, openQuestions: questions.length, checklist, sessionId: session.id };
 }
 

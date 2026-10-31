@@ -30,3 +30,12 @@ test("an English answer gets room: string limits widen, everything else is the s
     items: { type: "array", maxItems: 3, items: { type: "string", maxLength: 200 } } } });
   expect(schema.properties.title.maxLength).toBe(24);
 });
+
+test("fields a Skill writes to the person are named in the style, so its 你 and the shared third-person rule never contradict", () => {
+  const plain = styleInstructions("zh");
+  expect(plain).toContain("Do not address the reader as 你/您");
+  const interview = styleInstructions("zh", ["reply", "questions"]);
+  expect(interview).toContain("`reply`, `questions` speak to the person as 你 (never 您)");
+  expect(interview).not.toContain("Do not address the reader as 你/您");
+  expect(styleInstructions("en", ["reply"])).toContain("`reply` speak to the person as \"you\"");
+});

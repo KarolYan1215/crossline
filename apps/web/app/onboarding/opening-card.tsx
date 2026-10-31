@@ -116,11 +116,12 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, busy, hasMate
         <p className="ob-opening-sign">——Y.K.</p>
       </details>
       <ol className="ob-opening-plan">
-        <li><b>{t("认识你")}</b><span>{t("你有哪些想成为的身份，各自正在做什么、大概什么时候截止；时间说个大概就行，材料里有的不再问。")}</span></li>
-        <li><b>{t("聊深一点")}</b><span>{t("你现在的处境、为什么做这些、日常的精力情况。每一轮都会给你一条关于你自己的观察。")}</span></li>
-        <li><b>{t("拿到结果")}</b><span>{t("一周的骨架草稿和画像报告。具体项目的细节，到拆任务时再补。")}</span></li>
+        {/* The profile module comes first and is not skipped (decided 2026-10-31, docs/profile-and-agent-kit.md §四). */}
+        <li><b>{t("先认识你这个人")}</b><span>{t("一路走来的经历、在意什么、精力怎么起落、现在的处境。中间穿插几张点选卡片，点一下就行，也可以写一句话代替。每一轮都会给你一条关于你自己的观察。")}</span></li>
+        <li><b>{t("再排进日历")}</b><span>{t("你有哪些想成为的身份，各自正在做什么、大概什么时候截止；时间说个大概就行，材料里有的不再问。")}</span></li>
+        <li><b>{t("拿到结果")}</b><span>{t("画像报告和一周的骨架草稿。具体项目的细节，到拆任务时再补。")}</span></li>
       </ol>
-      <p className="ob-opening-time">{t("大约 30 分钟后拿到一份你的画像报告（几条主线各是什么、精力怎么分），以及把各条主线的事排进同一张日历的计划。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。")}</p>
+      <p className="ob-opening-time">{t("大约 50 分钟：前 40 分钟左右是画像，后面十来分钟把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。")}</p>
     </div>
 
     <fieldset className="ob-question">

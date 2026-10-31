@@ -24,6 +24,8 @@ export type AssistantTurn = {
   coverage: Array<{ identityId: string; filled: string[]; missing: string[] }>;
   /** The deep stages' observation, kept only when its quotes are in the replies it names (`checkInsight`). */
   insight?: { text: string; refs: Array<{ replyId: string; quote: string }> };
+  /** The profile module's cards the app put in this round (flow v2): answered by tapping one of five dots, or in words in the card's box. */
+  cards?: import("@crossline/core").ProfileCard[];
 };
 export type Message = { seq: number; role: "assistant" | "user"; content: unknown; createdAt: string };
 export type DateBatchItem = {
@@ -38,6 +40,8 @@ export type DiligenceReport = {
   sources: Array<{ id: string; title: string; publisher: string; finalUrl: string; accessedOn: string }>;
 };
 export type OnboardingState = {
+  /** The order of the interview's parts (`v2`: the profile module first); absent before the state route said. */
+  flow?: import("@crossline/core").InterviewFlow;
   /** The language the interview runs in (locked when it started); null before it has started, when it follows the page. */
   interviewLocale?: Locale | null;
   /** The five start items stand (main interview; always true in a line's own interview): every page opens. */

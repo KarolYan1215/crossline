@@ -1,5 +1,6 @@
 import { folderDocuments } from "./source-folders";
-import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, tFor, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour } from "@crossline/core";
+import { PORTRAIT_GAP_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_SCHEMA_VERSION, typeSummaryProblem, validatePortrait, type PortraitReport, AGENT_HISTORY_SUMMARY, agentHistoryLines, tFor, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour,
+  PROFILE_CLAIMS_SETTING, PROFILE_CLAIM_STATUS_SETTING, PROFILE_INSTRUMENTS_SETTING, instrumentReadings, readClaimStatus, readInstrumentAnswers, resolveWrittenClaims } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { interviewLocale, sayDoFor, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -87,7 +88,7 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
       if (!previous) return { state: "blocked", code: "PORTRAIT_NONE", message: t("还没有画像报告。") };
       const merged = (output: unknown) => ({ ...previous.report, gap: (output as { gap: PortraitReport["gap"] }).gap });
       const context = { version: "crossline.portrait.v1", only: "gap", previous: previous.report, lines, doing };
-      const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, tier: "mid", ...languageOf(),
+      const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, secondPerson: ["type.summary"], tier: "mid", ...languageOf(),
         developerInstructions: "Rewrite only the say–do part of the portrait report as the Skill describes. Return raw JSON only.",
         outputSchema: PORTRAIT_GAP_SCHEMA, prepareInput: () => context, validateOutput: (output) => validatePortrait(merged(output), lineIds),
         softAccept: (rejection, output) => keepIncomplete(rejection, () => validatePortrait(merged(output), lineIds, { lenient: true })),
@@ -103,8 +104,9 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
 
     const session = store.getLatestOnboardingSession(workspaceId);
     let budget = 12_000;
-    const replies = (session ? store.listOnboardingMessages(workspaceId, session.id) : []).filter((message) => message.role === "user")
-      .map((message) => String((message.content as { text?: string }).text ?? "")).reverse()
+    const userMessages = (session ? store.listOnboardingMessages(workspaceId, session.id) : []).filter((message) => message.role === "user");
+    const allReplies = userMessages.map((message) => String((message.content as { text?: string }).text ?? ""));
+    const replies = [...allReplies].reverse()
       .filter((text) => { budget -= text.length; return budget > 0; }).reverse();
     const facts = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed" || fact.slot.startsWith("flywheel_")).slice(0, 120)
       .map(({ identityId, projectId, slot, value, status }) => ({ identityId, projectId, slot, value, status }));
@@ -119,9 +121,15 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
     // How the person actually spends their working hours with coding agents (time only, when they allowed it): evidence of habit, not a plan.
     const workHistory = [...agentHistoryLines(json<AgentHistorySummary | null>(AGENT_HISTORY_SUMMARY, null)),
       ...atComputerLines(json<ActivityHour[]>(ACTIVITY_HOURLY, []), process.env.CROSSLINE_TIME_ZONE ?? "America/Chicago")];
+    // The profile cards in words (levels, never numbers: the numbers are the cards' own claims) and the claims the person said do not fit,
+    // which are not written again (docs/profile-and-agent-kit.md §五–§六).
+    const status = readClaimStatus(store.getSetting(workspaceId, PROFILE_CLAIM_STATUS_SETTING));
+    const rejected = Object.entries(status).filter(([, entry]) => entry.status === "rejected");
+    const cards = instrumentReadings(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)));
     const context = { version: "crossline.portrait.v1", lines, profile: json<Record<string, unknown>>("profile.model", {}), facts, replies, documents, doing,
-      ...(workHistory.length ? { workHistory } : {}) };
-    const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, ...languageOf(),
+      ...(workHistory.length ? { workHistory } : {}), ...(cards.length ? { cards } : {}),
+      ...(rejected.length ? { rejectedClaims: rejected.map(([, entry]) => entry.statement).filter(Boolean).slice(0, 30) } : {}) };
+    const result = await runCodexSkill<PortraitReport>(client, context, { skillName: PORTRAIT_WRITER, cwd, secondPerson: ["type.summary"], ...languageOf(),
       developerInstructions: "Write the person's portrait report as the Skill describes, from the supplied material only: the report they get "
         + "right after the interview, a shareable first half and a private second half. Every sentence specific to this person, in their own concrete "
         + "terms; long-term goals are the ones they chose, never an achievement dressed as one. Use a document only where it is about the person; "
@@ -133,6 +141,12 @@ export function createPortraitWriter(store: CrosslineStore, workspaceId: string,
     const version = store.listEvents(workspaceId, { type: "portrait.written" }).length + 1;
     const at = new Date().toISOString();
     store.setSetting(workspaceId, "portrait.report", JSON.stringify({ version, at, schema: PORTRAIT_SCHEMA_VERSION, report: result.output }));
+    // The report's claims, each kept only with a quote really in the person's replies, pointing at the numbered sentence it sits in.
+    const sentences = session ? userMessages.flatMap((message) => store.sentencesOf(workspaceId, "reply", `${session.id}#${message.seq}`)) : [];
+    const squash = (text: string) => text.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
+    const claims = resolveWrittenClaims(result.output.claims, allReplies, { at, rejected: new Set(rejected.map(([id]) => id)),
+      sentenceOf: (quote) => sentences.find((sentence) => squash(sentence.text).includes(squash(quote)))?.id });
+    store.setSetting(workspaceId, PROFILE_CLAIMS_SETTING, JSON.stringify({ version, at, claims }));
     // Written against a record long enough to draw: the say–do part is current, and the monthly rewrite counts from now.
     if (doing.sufficient) store.setSetting(workspaceId, PORTRAIT_GAP_AT, at);
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `portrait.written:${version}:${at}`, type: "portrait.written",

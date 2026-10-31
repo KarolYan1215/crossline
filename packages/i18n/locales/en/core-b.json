@@ -724,5 +724,20 @@
   "路上": "Travel",
   "通勤": "Travel",
   "约 {{count}} 分钟_one": "About {{count}} min",
-  "约 {{count}} 分钟_other": "About {{count}} min"
+  "约 {{count}} 分钟_other": "About {{count}} min",
+  "画像模块的卡片题已答完": "Every card of the profile module is answered",
+  "还有 {{count}} 题未答": "{{count}} items still unanswered",
+  "和此人协作的说明": "How to work with this person",
+  "总览": "Overview",
+  "人格": "Personality",
+  "价值与取舍": "Values and tradeoffs",
+  "动机": "Motivation",
+  "生涯叙事": "Career story",
+  "职业兴趣": "Vocational interests",
+  "工作方式": "Work style",
+  "生活方式": "Lifestyle",
+  "张力与成长": "Tensions and growth",
+  "Crossline 适配": "Fit with Crossline",
+  "系统接轨": "Connecting systems",
+  "里程碑附录": "Milestone appendix"
 }

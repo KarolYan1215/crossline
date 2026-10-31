@@ -3,6 +3,8 @@ import { expect, test } from "vitest";
 import { OpeningCard, openingReply } from "./opening-card";
 import { minutesLeft, viewForStage, WeekView } from "./stage-view";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
+import { cardReplyLines, ProfileCards } from "./profile-cards";
+import { cardsFor, readCardAnswers } from "@crossline/core";
 
 /** The interview v3 (docs/onboarding-v3.md): the opening card, the stage pictures and the time left. */
 test("the opening states the premise, the three parts and the time, then asks tone and lines — no six-level lecture", () => {
@@ -10,7 +12,8 @@ test("the opening states the premise, the three parts and the time, then asks to
   expect(html).toContain("开发者的话");
   expect(html).toContain("在AI时代夺回属于人类的部分");
   expect(html).toContain("——Y.K.");
-  expect(html).toContain("大约 30 分钟");
+  expect(html).toContain("大约 50 分钟");
+  expect(html).toContain("画像这一部分不能跳过");
   expect(html).toContain("你希望我怎么跟你说话");
   expect(html).toContain("冷静客观");
   expect(html).toContain("温柔体贴");
@@ -61,6 +64,27 @@ test("each stage brings its own picture, and the time left is said before and af
   expect(minutesLeft({ readyToStart: false, startMissing: [{ id: "a", label: "", detail: "", owner: "interview" }, { id: "b", label: "", detail: "", owner: "person" }] }, "lines"))
     .toEqual({ label: "开始使用前约", minutes: 5 });
   expect(minutesLeft({ readyToStart: true, startMissing: [] }, "compass")).toEqual({ label: "画像访谈还剩约", minutes: 10 });
+  // The profile-first flow: the module's parts come before the start, about ten minutes each, on top of the fact items.
+  expect(viewForStage("narrative", false)).toBe("lines");
+  expect(minutesLeft({ readyToStart: false, startMissing: [{ id: "profile_cards", label: "", detail: "", owner: "interview" }] }, "narrative", "v2"))
+    .toEqual({ label: "开始使用前约", minutes: 40 });
+  expect(minutesLeft({ readyToStart: false, startMissing: [{ id: "a", label: "", detail: "", owner: "interview" }] }, "lines", "v2"))
+    .toEqual({ label: "开始使用前约", minutes: 3 });
+});
+
+test("a card is five dots labelled at both ends and the middle, and what is tapped or written is the line the worker reads back", () => {
+  const [card] = cardsFor("compass", new Set());
+  const html = renderToStaticMarkup(<ProfileCards cards={[card!]} answers={{ taps: {}, words: {} }} disabled={false} onChange={() => {}} />);
+  expect(html.match(/role="radio"/g)).toHaveLength(card!.items.length * 5);
+  expect(html).toContain(card!.items[0]!.anchors[0]);
+  expect(html).toContain(card!.items[0]!.anchors[2]);
+  const [a, b] = card!.items;
+  const lines = cardReplyLines([card!], { taps: { [a!.id]: 5, [b!.id]: 0 }, words: { [card!.id]: "  看场合\n大多不主动 " } });
+  const answers = readCardAnswers(lines.join("\n"), [card!], "2026-10-31T00:00:00.000Z");
+  expect(answers.find((answer) => answer.itemId === a!.id)).toMatchObject({ by: "tapped", score: 5 });
+  expect(answers.find((answer) => answer.itemId === b!.id)).toMatchObject({ by: "pending" });
+  expect(lines.at(-1)).toMatch(/补充：看场合 大多不主动$/);
+  expect(cardReplyLines([card!], { taps: {}, words: {} })).toEqual([]);
 });
 
 test("the week draws working hours and fixed arrangements, waiting ones dashed, and says where the hours came from", () => {

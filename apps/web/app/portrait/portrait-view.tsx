@@ -6,6 +6,7 @@ import { IconButton } from "../ui/icon-button";
 import { portraitLabels, portraitType, redactPortrait, type EnergyRhythm, type PortraitReport, type PortraitType, type SayDoReading } from "@crossline/core";
 import { LineNetwork, type NetworkEdge } from "../ui/line-network";
 import { FigurePicker } from "./figure-picker";
+import { ProfileSections } from "./profile-sections";
 import { AdviceMatrix, DivergingAxes, EnergyScatter, Fit, GapChart, IdentityBars, RhythmChart, ValuesRadar } from "./portrait-charts";
 import { radarValues, rhythmStats } from "./poster-geometry";
 import { joinList, type Locale, type Translate } from "../../lib/i18n";
@@ -23,7 +24,7 @@ const ICON = { size: 17, strokeWidth: 1.75, "aria-hidden": true } as const;
 
 /** The report's contents in two groups: what is shared, then what only the person sees (2026-10-28 redesign). */
 const SHARED_SECTIONS = [["type", "超级个体类型"], ["rhythm", "精力节律"], ["values", "价值与能量"], ["lines", "主线飞轮"]] as const;
-const PRIVATE_SECTIONS = [["problem", "真问题"], ["compass", "指南针、能量与主线"], ["gap", "言行落差与锚"], ["insights", "现况洞察与可行建议"], ["next", "Crossline 下一步"]] as const;
+const PRIVATE_SECTIONS = [["claims", "逐条核对"], ["problem", "真问题"], ["compass", "指南针、能量与主线"], ["gap", "言行落差与锚"], ["insights", "现况洞察与可行建议"], ["next", "Crossline 下一步"]] as const;
 
 /** The contents beside the report, the section in view marked. */
 function Contents() {
@@ -326,8 +327,9 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
         afterType={state.confirmation.written ? <ConfirmBar confirmation={state.confirmation} onAnswered={(next) => setState((current) => ({ ...current, ...next }))} /> : null} />
 
       <p className="pt-private" data-no-export="">{t("以下为个人细节与建议，不包含在分享内容中")}</p>
+      <ProfileSections />
       <section className="pt-page" data-private="" id="pt-s-problem">
-        <h2><small>04</small>{t("真问题")}</h2>
+        <h2><small>05</small>{t("真问题")}</h2>
         <div className="pt-conflict"><small>{t("核心矛盾")}</small><p className="gen">{raw.cover.coreConflict}</p></div>
         <p className="gen pt-lead">{raw.problem.statement}</p>
         <div className="pt-cols">
@@ -341,7 +343,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
       </section>
 
       <section className="pt-page" data-private="" id="pt-s-compass">
-        <h2><small>05</small>{t("指南针、能量与主线")}</h2>
+        <h2><small>06</small>{t("指南针、能量与主线")}</h2>
         <div className="pt-compass">
           <div><small>{t("工作观")}</small><p className="gen">{raw.compass.workView}</p></div>
           <div><small>{t("人生观")}</small><p className="gen">{raw.compass.lifeView}</p></div>
@@ -360,7 +362,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
       </section>
 
       <section className="pt-page" data-private="" id="pt-s-gap">
-        <h2><small>06</small>{t("言行落差与锚")}</h2>
+        <h2><small>07</small>{t("言行落差与锚")}</h2>
         <div className="pt-gap">
           <div><small>{t("所说想要的")}</small><p className="gen">{raw.gap.says}</p></div>
           <span aria-hidden="true" className="pt-gap-sign">≠</span>
@@ -378,7 +380,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
       </section>
 
       <section className="pt-page" data-private="" id="pt-s-insights">
-        <h2><small>07</small>{t("现况洞察与可行建议")}</h2>
+        <h2><small>08</small>{t("现况洞察与可行建议")}</h2>
         <div className="pt-figure-row">
           <AdviceMatrix insights={raw.insights} />
           <ol className="pt-insights">{raw.insights.map((item, index) => <li key={index} data-priority={item.priority}>
@@ -390,7 +392,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
         {footer}
       </section>
       <section className="pt-page" data-private="" id="pt-s-next">
-        <h2><small>08</small>{t("Crossline 下一步")}</h2>
+        <h2><small>09</small>{t("Crossline 下一步")}</h2>
         <ol className="pt-next">
           <li data-done={state.next.hoursSet || undefined}><b>{t("确认可用时段")}</b><span>{state.next.hoursSet ? t("已设定") : state.next.hoursProposed ? t("访谈已提议，在计划页预览后采用") : t("在计划页设定工作时段")}</span></li>
           {state.next.lines.map((line) => <li key={line.id} data-line={line.id} data-done={line.approved.length > 0 || undefined}>

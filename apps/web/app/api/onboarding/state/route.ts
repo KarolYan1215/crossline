@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
+import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, firstDraftsState, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
 import { INTERVIEW_LOCALE_SETTING, extractBacklog, interviewLocale, questionScreenFor } from "@crossline/db";
 import { isLocale } from "@crossline/i18n";
 import { resolveAccessContext } from "../../../../lib/access-guard";
@@ -65,13 +65,16 @@ export async function GET(request: Request) {
   const today = planToday(access.ctx);
   const week = weekSkeleton(access.ctx, today), timeline = projectTimeline(access.ctx, today);
   const { capacity, draft } = weekCapacity(access.ctx, today, week, timeline);
-  const stageNow = String((session?.coverage as { stage?: string } | undefined)?.stage ?? "orientation");
+  // The order of the parts: a new interview starts with the profile module (flow v2), an earlier one keeps its own order.
+  const flow = flowOf(session?.coverage);
+  const stageNow = String((session?.coverage as { stage?: string } | undefined)?.stage ?? INTERVIEW_FLOW_STAGES[flow][0]);
   const ratings = Object.fromEntries(Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
     .filter(([key]) => session && key.startsWith(`${session.id}#`)).map(([key, rating]) => [key.slice(key.indexOf("#") + 1), rating.verdict]));
   return NextResponse.json({
     ...start,
     // Where the interview is, by its own record (`progress` of the last round), for the right column.
-    progress: progressView(readTurnProgress((session?.coverage as { progress?: unknown } | undefined)?.progress), stageNow),
+    progress: progressView(readTurnProgress((session?.coverage as { progress?: unknown } | undefined)?.progress), stageNow, flow),
+    flow,
     capacity, skeleton: start.readyToStart ? draft : [],
     insightRatings: ratings,
     adoptedDates: loadAdoptedDates(access.ctx),

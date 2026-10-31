@@ -212,6 +212,11 @@ export type SkillRunOptions<T> = {
    */
   locale?: Locale;
   /**
+   * The fields that speak to the person as 你 (the interview's `reply` and questions); the shared style says so instead of its
+   * third-person rule. Unset, every field is third person.
+   */
+  secondPerson?: string[];
+  /**
    * Go on in this thread instead of starting one (an automation that wakes up where its last run left off, 2026-10-20). The thread is
    * resumed with the same settings a new one would be started with (`thread/resume` applies them to a thread it loads from disk, and
    * since 0.163 restores its saved permissions too); a runtime that no longer has it (`thread not found`, `no rollout found`) gets a
@@ -875,7 +880,7 @@ async function startIsolatedThread<T>(scope: Scope, options: SkillRunOptions<T>,
     environments: [], runtimeWorkspaceRoots: [], sandbox: "read-only", approvalPolicy: "untrusted", approvalsReviewer: "user",
     dynamicTools: (options.tools?.specs ?? []).map((spec) => ({ type: "function", name: spec.name, description: spec.description, inputSchema: spec.inputSchema })),
     ephemeral: false, experimentalRawEvents: false,
-    developerInstructions: `${options.developerInstructions}\n\n${styleInstructions(runLocale(options.locale, currentUsageWorkspace()))}`,
+    developerInstructions: `${options.developerInstructions}\n\n${styleInstructions(runLocale(options.locale, currentUsageWorkspace()), options.secondPerson)}`,
     // Left unset for a Skill with no route, so an unlisted job still runs on the runtime's default.
     ...(context.route ? { model: context.route.model } : {}),
     ...(context.provider ? { modelProvider: context.provider.id } : {})

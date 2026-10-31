@@ -66,6 +66,14 @@ test("可开始标准：五条打标，全满足才算；画像不要求", () =>
   expect(items.find((item) => item.id === "portrait_fields")?.done).toBe(false);
 });
 
+test("画像优先的访谈（v2）：卡片题答完（跳过也算）才可开始；早先的访谈没有这一项", () => {
+  const open = interviewChecklist({ ...full, profileCards: { settled: 40, total: 43 } });
+  expect(open.find((item) => item.id === "profile_cards")).toMatchObject({ start: true, done: false, owner: "interview", detail: "还有 3 题未答" });
+  expect(readyToStart(open)).toBe(false);
+  expect(readyToStart(interviewChecklist({ ...full, profileCards: { settled: 43, total: 43 } }))).toBe(true);
+  expect(interviewChecklist(full).some((item) => item.id === "profile_cards")).toBe(false);
+});
+
 test("可开始标准不认「假设：」：硬约束日程与截止只认本人确认或文件", () => {
   const assumed = { ...full, dates: full.dates.filter((entry) => !entry.recurring),
     facts: [...full.facts, { identityId: "research", projectId: "", slot: "fixed_schedule", status: "inferred", sourceRef: "", value: "假设：周二四上课" }] };

@@ -1,4 +1,4 @@
-import { ONBOARDING_STAGES } from "../../../packages/core/src/onboarding-turn-schema";
+import { INTERVIEW_FLOW_STAGES } from "../../../packages/core/src/onboarding-turn-schema";
 import type { D1 } from "./index";
 
 /**
@@ -19,7 +19,7 @@ export type DashboardData = {
 /** Steps after the interview, each counted when an install has at least one such event. */
 const LATER_STEPS: Array<[string, string]> = [["capture.created", "首次收集"], ["milestone.proposed", "首个里程碑"], ["human.started", "首次计时"],
   ["portrait.written", "画像"], ["agent.task.completed", "首次助手任务"], ["evidence.accepted", "首次验收"]];
-const STAGE_LABEL: Record<string, string> = { orientation: "访谈·开场", lines: "访谈·主线", situation: "访谈·现状", compass: "访谈·指南针",
+const STAGE_LABEL: Record<string, string> = { narrative: "访谈·叙事", orientation: "访谈·开场", lines: "访谈·主线", situation: "访谈·现状", compass: "访谈·指南针",
   energy: "访谈·精力", details: "访谈·细节" };
 const TERMINAL = new Set(["accepted", "archived"]);
 
@@ -29,16 +29,15 @@ export async function dashboardData(db: D1): Promise<DashboardData> {
     FROM installs i ORDER BY i.last_seen DESC LIMIT 200`).all<{ install: string; account: string | null; version: string; first_seen: string; last_seen: string; events: number }>()).results;
 
   const rounds = (await db.prepare("SELECT install, stage FROM events WHERE type = 'onboarding.round' AND stage IS NOT NULL").all<{ install: string; stage: string }>()).results;
-  const furthest = new Map<string, number>();
-  for (const round of rounds) {
-    const index = (ONBOARDING_STAGES as readonly string[]).indexOf(round.stage);
-    if (index >= 0) furthest.set(round.install, Math.max(furthest.get(round.install) ?? -1, index));
-  }
+  // Installs with a round in each stage. Not "reached this stage or a later one": the two interview flows run the stages in different
+  // orders (flow v2 puts the profile module first, 2026-10-31), so a later stage says nothing about an earlier one.
+  const seen = new Map<string, Set<string>>();
+  for (const round of rounds) seen.set(round.stage, (seen.get(round.stage) ?? new Set()).add(round.install));
   const reached = (await db.prepare(`SELECT type, COUNT(DISTINCT install) AS installs FROM events WHERE type IN (${LATER_STEPS.map(() => "?").join(", ")}) GROUP BY type`)
     .bind(...LATER_STEPS.map(([type]) => type)).all<{ type: string; installs: number }>()).results;
   const started = (await db.prepare("SELECT COUNT(*) AS n FROM installs").first<{ n: number }>())?.n ?? 0;
   const funnel = [{ step: "安装", installs: Number(started) },
-    ...ONBOARDING_STAGES.map((stage, index) => ({ step: STAGE_LABEL[stage] ?? stage, installs: [...furthest.values()].filter((value) => value >= index).length })),
+    ...INTERVIEW_FLOW_STAGES.v2.map((stage) => ({ step: STAGE_LABEL[stage] ?? stage, installs: seen.get(stage)?.size ?? 0 })),
     ...LATER_STEPS.map(([type, step]) => ({ step, installs: Number(reached.find((row) => row.type === type)?.installs ?? 0) }))];
 
   // Where work orders are sitting now: each one's latest transition, grouped by the state it moved into.

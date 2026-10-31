@@ -7,7 +7,7 @@ description: Read what a Crossline interview just heard — the person's new rep
 
 The interview (`crossline-onboarding`) talks with the person; this Skill records what they said. It runs after every reply on a fresh thread, so everything it needs is in its input or behind its two lookups. Nothing here is shown to the person as conversation; what you write becomes the ledger every later plan rests on, so be careful before being complete.
 
-Accept `crossline.onboarding.extract.v1`: `{today, timeZone, lines[], projects[], facts[], lineProfiles[], candidatesWanted, profile, profileTask, stage, focusLine, replies[], sources[], sourcesWaiting?, reread, observations?}`.
+Accept `crossline.onboarding.extract.v1`: `{today, timeZone, lines[], projects[], facts[], lineProfiles[], candidatesWanted, profile, profileTask, stage, focusLine, replies[], sources[], sourcesWaiting?, reread, observations?, scaleItems?}`.
 
 - `replies[]` are the person's new replies, oldest first: `{id: "reply-N", asked: [the questions this reply answers], sentences}`. A reply is often in the answer cards' own form, one line per question: 「【question】选择：A；B。补充：text」 — the bracket names the question, so 「选择：周三」 under 「【组会是哪天？】」 means the meeting is on Wednesday.
 - `sources[]` are files not yet read: `{id: "src-N", fileName, kind, projectId, sentences}`. `projectId` is set when the file is already filed under a project; use it. `sourcesWaiting` files come in the next run: do not conclude something is missing while files still wait.
@@ -17,7 +17,7 @@ Accept `crossline.onboarding.extract.v1`: `{today, timeZone, lines[], projects[]
 - `observations` (when present) are the interview's observations the person rated: 「准」 ones are the person's own agreement and may inform the portrait; a 「不准」 one is wrong about them, and nothing in the portrait may rest on it.
 - `lines[]` are the person's lines (identity nouns, hard constraints, adopted goals, and `domain` for a 健康 / 财富 line); `projects[]` the projects on record.
 
-Return JSON matching `OnboardingExtraction` (`packages/core/src/onboarding-turn-schema.ts`): `{slotUpdates[], projectsDetected[], flywheelCandidates[], fileDates, lineProfiles[], goalEdits[], availability, profileSections}`. Leave a list empty when the new material says nothing for it.
+Return JSON matching `OnboardingExtraction` (`packages/core/src/onboarding-turn-schema.ts`): `{slotUpdates[], projectsDetected[], flywheelCandidates[], fileDates, lineProfiles[], goalEdits[], availability, profileSections, itemScores[]}`. Leave a list empty when the new material says nothing for it.
 
 ## Lookups
 
@@ -89,8 +89,9 @@ As soon as the person has said when they can work, propose their weekly availabl
 
 ## Portrait (`profileSections`)
 
-The working portrait is kept in four sections, each written whole or left as it is (`null`), each with `refs` naming the sentences it rests on (empty when it is your own reading):
+The working portrait is kept in five sections (four in an interview that never ran the life-story part), each written whole or left as it is (`null`), each with `refs` naming the sentences it rests on (empty when it is your own reading):
 
+- `narrative` — the life story, from the questions of the first part: `careerTheme` (the thread their story keeps returning to, in their own terms: 「想把乱的东西理出秩序」), `roleModels[]` (who they admired growing up and for what, one line each: 「外婆：一个人撑起小卖部，从不抱怨」), `motto` (a saying they live by, verbatim when they gave one), `turningPoints[]` (the moments that changed their direction, each as what happened and what it changed), `futureScript` (the next chapter as they tell it);
 - `situation` — `problem` (the problem as it really is), `gravity[]` (circumstances to accept), `designable[]` (problems worth designing), `reframes[]` (`{fallacy, reframe}`: a false premise and the problem reframed);
 - `compass` — `workView`, `lifeView`, `consistency` (how the two fit), `trueNorth`, `values[]` (Schwartz's ten — 自主, 刺激, 享乐, 成就, 权力, 安全, 遵从, 传统, 仁慈, 普世 — each `{value, score 0–100}`, only those what was said bears on);
 - `energy` — `energyMap[]` (`{activity, skill: high|low, love: high|low, charge: charge|drain}`), `flow[]`, `says` / `does` (what they say they want vs what their behaviour protects), `anchor` / `realWant`;
@@ -98,9 +99,9 @@ The working portrait is kept in four sections, each written whole or left as it 
 
 Rules:
 
-- Write a deep section (situation, compass, energy) only when the new replies or files bear on it, starting from what `profile` already holds and keeping what the new material does not change. Otherwise `null`.
+- Write a deep section (narrative, situation, compass, energy) only when the new replies or files bear on it, starting from what `profile` already holds and keeping what the new material does not change. Otherwise `null`.
 - `profileTask.finalize` lists the deep sections whose stage is over: rewrite each of them whole from everything the person said about it, looking the earlier replies up (`search_evidence` with the stage's words; `read_sentences` around what you find), so the section reads as one finished account rather than a pile of updates.
-- Write `synthesis` only when `profileTask.synthesize` is true (all three deep stages are over); it sums up the three sections, so it is never written before them. Otherwise `null`; the app ignores a synthesis written early.
+- Write `synthesis` only when `profileTask.synthesize` is true (every deep stage is over); it sums up the deep sections, so it is never written before them. Otherwise `null`; the app ignores a synthesis written early.
 - Write in the person's concrete terms, as plain statements. `problem`: 「论文 12 月中投稿，同期两门课期末，研究每周只剩约 10 小时」, not 「真正的问题不是时间，而是……」. A reframe states the new premise as a sentence of its own: `{fallacy: "三条线每周都要推进", reframe: "底座主线每周固定 20 小时，另外两条线按截止轮流"}`. `energyMap` activities are short and the person's own (「改论文图」「回复投资人邮件」), not categories (「深度工作」).
 - `problem` names the problem in the person's facts; it is never set against another problem (no 「并非……而是」「而非」「不等于」, no 「真问题不是……」). A `fallacy` is a premise the person said or acted on, cited in `refs`; never one you attribute to them to have something to correct. Leave `reframes` empty rather than invent one.
 - `does` is what the person said they did or a file records (「遇到批评后减少追问，转向新想法」); a motive behind it (「保护的是……」) only when they named it themselves.
@@ -110,6 +111,14 @@ Rules:
 - Leave a field empty until there is something to say; never pad. A line's own interview leaves every section `null`.
 
 Allowed tools: `search_evidence`, `read_sentences`. Budget: standard. Risk: routine. Evidence: sentence numbers in `refs` for every confirmed fact, date and attribute.
+
+## Card items answered in words (`itemScores`)
+
+The app shows short rating cards beside the deep parts' questions (personality, interests, satisfaction with life, and value tradeoffs), each item a row of five points. A tap is recorded by the app itself. When the person wrote a sentence in a card's box instead, `scaleItems` lists the items of that card, each with its `id`, `text`, its three anchors (the left end, the middle, the right end) and the `card`; the reply holds their words under the card's head 「【card title（item／item）】补充：…」.
+
+- For each listed item the words actually answer, return `{itemId, score, confidence, refs}`: `score` 1–5 on the item's own scale as printed (1 = the left anchor, 3 = the middle, 5 = the right anchor; never reverse it yourself), `confidence` 0–1 (0.8 or more only when the words name the point outright, 「完全不会」; 0.4–0.6 for a lean, 「大多不主动」), `refs` the sentences it rests on.
+- An item the words do not speak to is left out: it stays unanswered and is never guessed from the rest of the interview. One sentence may answer several items of its card.
+- The item texts are fixed and published: do not rewrite them, and never put a score into the portrait's text.
 
 ## Language
 

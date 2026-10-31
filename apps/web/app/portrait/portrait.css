@@ -300,3 +300,21 @@ body:has(.portrait-page) .running-head{background:var(--ds-bg)}
 @media (max-width:820px){:lang(en) .pt-axes li{grid-template-columns:80px minmax(0,1fr) 80px}:lang(en) .pt-axes .pt-axis-en{font-size:13px}}
 
 html:has(.portrait-page){background:var(--ds-bg)}
+
+/* 逐条核对: the report by section (docs/profile-and-agent-kit.md §五–§七). */
+.pt-claims-section{border-top:1px solid var(--ink);padding:14px 0 6px}
+.pt-claims-section>header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px}
+.pt-claims-section>header h3{margin:0}
+.pt-claims-section ul,.pt-claims-items ol{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:10px}
+.pt-claims-section li{display:grid;gap:4px}
+.pt-claims-section li p,.pt-claims-items li p{margin:0}
+.pt-claims-section li[data-status="rejected"] p{text-decoration:line-through;opacity:.7}
+.pt-claim-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.pt-claim-basis{min-width:0;overflow-wrap:anywhere}
+.pt-claim-judge,.pt-claim-scale{display:inline-flex;gap:6px;margin-left:auto}
+.pt-claim-judge button,.pt-claim-scale button{min-height:30px;min-width:36px;padding:2px 10px;border:1px solid var(--mist);font-size:13px}
+.pt-claim-judge button[aria-pressed="true"],.pt-claim-scale button[aria-checked="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.pt-claims-items li{display:grid;gap:4px;padding:6px 0;border-bottom:1px solid var(--mist)}
+.pt-claims-items .pt-claim-scale{margin-left:0;flex-wrap:wrap}
+.pt-claims-error{color:var(--risk, #9b1c1c)}
+@media print{.pt-claims{display:none}}

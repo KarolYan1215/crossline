@@ -1,6 +1,6 @@
 "use client";
 
-import { INTERVIEW_PARTS, PART_LABEL } from "@crossline/core";
+import { interviewParts, PART_LABEL, type InterviewFlow } from "@crossline/core";
 import { useT } from "../locale-context";
 
 export type ProfileModelView = {
@@ -13,15 +13,19 @@ export type ProfileModelView = {
 };
 export type LineView = { id: string; label: string; rank: number | null; hard: boolean; goals: string[]; goalParts: string[] };
 
-/** The five parts of the main interview (2026-10-19: the details stage is gone; a session stored at `details` reads as past the last part). */
-export const STAGES: Array<[string, string]> = INTERVIEW_PARTS.map((id) => [id, PART_LABEL[id]]);
+/**
+ * The parts of the main interview in its flow's order (2026-10-19: the details stage is gone; a session stored at `details` reads as past
+ * the last part). A new interview runs the profile module first (`v2`, 2026-10-31): its six parts begin with the life story.
+ */
+export const stagesOf = (flow: InterviewFlow = "v1"): Array<[string, string]> => interviewParts(flow).map((id) => [id, PART_LABEL[id]]);
 
 /**
  * Where the interview is, as a progress bar (2026-10-28 redesign): one segment per part, filled up to the current one, and the part's name
  * in words. Nothing in it can be pressed — the parts used to look like tabs and were not — so it is drawn as a bar, not as buttons.
  */
-export function StageBar({ stage, line }: { stage: string; line?: string | undefined }) {
+export function StageBar({ stage, line, flow }: { stage: string; line?: string | undefined; flow?: InterviewFlow | undefined }) {
   const t = useT();
+  const STAGES = stagesOf(flow);
   if (line) return <p className="ob-stagebar-caption">{t("{{line}} · 细节", { line })}</p>;
   const at = stage === "details" ? STAGES.length : Math.max(0, STAGES.findIndex(([id]) => id === stage));
   const current = STAGES[Math.min(at, STAGES.length - 1)]!;

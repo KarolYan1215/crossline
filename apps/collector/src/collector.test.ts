@@ -114,7 +114,9 @@ test("the dashboard counts the funnel, where work sits and how Skills run, and e
     { type: "skill.run", at: AT, version: "0.2.0", skill: "crossline-onboarding", ok: false, ms: 4000, repairs: 0, code: "SKILL_STALLED" }];
   await receiveEvents(post("/v1/events", JSON.stringify({ install: INSTALL, version: "0.2.0", sentAt: AT, events })), env, new Date(AT));
   const data = await dashboardData(env.DB);
-  expect(data.funnel.slice(0, 4)).toEqual([{ step: "安装", installs: 1 }, { step: "访谈·开场", installs: 1 }, { step: "访谈·主线", installs: 1 }, { step: "访谈·现状", installs: 0 }]);
+  expect(data.funnel[0]).toEqual({ step: "安装", installs: 1 });
+  // A round in a stage counts for that stage only: the flows order the stages differently.
+  expect(["访谈·叙事", "访谈·开场", "访谈·主线", "访谈·现状"].map((step) => data.funnel.find((item) => item.step === step)?.installs)).toEqual([0, 0, 1, 0]);
   expect(data.funnel.find((step) => step.step === "首次收集")).toEqual({ step: "首次收集", installs: 1 });
   expect(data.stuck).toEqual([{ stage: "active", open: 1, oldest: "2026-10-12T09:00:00.000Z" }]);
   expect(data.skills[0]).toMatchObject({ skill: "crossline-onboarding", runs: 2, failed: 1, repaired: 1, averageMs: 3000, longestMs: 4000 });

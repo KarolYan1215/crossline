@@ -25,11 +25,11 @@ export const PLAIN_VOICE = [
   "- Prefer the person's concrete facts (dates, hours, counts, names they used) over adjectives. Short sentences; ordinary words."
 ];
 
-const STYLE_ZH = [
+const styleZh = (address: string) => [
   "Writing style for every human-readable field:",
   "- Output language: Simplified Chinese.",
   "- Simplified Chinese, concise, in standard academic or workplace register; prefer noun phrases with figures over sentences.",
-  "- Objective third person. Do not address the reader as 你/您 and do not speak as 我; no greetings, apologies, encouragement or filler.",
+  address,
   "- Fixed vocabulary: 主线 (line), 里程碑 (milestone), 任务 (task), 步骤 (step), 长期目标 (long-term goal), 分数线 (score line); verbs 批准, 验收, 撤销.",
   "- The hierarchy, named the same way everywhere: a 主线 is an identity noun (研究者, 创作者, 投资者); a 长期目标 is 「成为 ___ 的 <身份>」 (who the person is becoming; never dated, never \"done\"), its blank short adjectives in the person's own words (「严谨、高产的研究者」), never an achievement or an action (「发表三篇论文的」「能独立立项的」 are milestones or 「独立的」); a 里程碑 states an achieved, checkable state (「ECE 555 总评达到 A−」「首条小红书笔记获得 50 次收藏」); a 任务's name is a short action starting with its verb (「完成 ECE 555 作业 2」「起草 MVP 访谈提纲」, at most 24 characters) while its description is free; a 步骤 is a concrete, schedulable action.",
   "- Questions, where the output asks any, are neutral and short (「每周可投入时长？」), never chatty.",
@@ -50,11 +50,11 @@ const PLAIN_VOICE_EN = [
   "- Prefer the person's concrete facts (dates, hours, counts, names they used) over adjectives. Short sentences; ordinary words."
 ];
 
-const STYLE_EN = [
+const styleEn = (address: string) => [
   "Writing style for every human-readable field:",
   "- Output language: English (US spelling). This overrides any instruction elsewhere to write in Chinese: every human-readable field is written in English, and wherever the Skill describes Chinese wording, apply its English equivalent. Text quoted verbatim from the person, a file or a source stays as written, in whatever language it is; ids, codes and enum values stay exactly as the schema defines them.",
   "- Concise, plain product and workplace register; prefer noun phrases with figures over long sentences.",
-  "- Objective third person in stored text; no greetings, apologies, encouragement or filler.",
+  address,
   "- Fixed vocabulary: Track (主线), Milestone (里程碑), Task (任务), Step (步骤), Long-term goal (长期目标), Target score (分数线); verbs Approve, Accept, Undo.",
   "- The hierarchy, named the same way everywhere: a Track is an identity noun (Researcher, Creator, Investor); a Long-term goal is \"Become a ___ <identity>\" (who the person is becoming; never dated, never \"done\"), its blank short adjectives in the person's own words (\"rigorous, prolific researcher\"), never an achievement or an action (\"who has published three papers\", \"able to start projects independently\" are milestones or \"independent\"); a Milestone states an achieved, checkable state (\"ECE 555 final grade at A−\", \"First Xiaohongshu note reaches 50 saves\"); a Task's name is a short action starting with its verb (\"Finish ECE 555 Homework 2\", \"Draft MVP interview guide\", at most 60 characters) while its description is free; a Step is a concrete, schedulable action.",
   "- Questions, where the output asks any, are neutral and short (\"Hours available per week?\"), never chatty.",
@@ -65,10 +65,28 @@ const STYLE_EN = [
   ...PLAIN_VOICE_EN
 ].join("\n");
 
-/** The style block for a run in this language. */
-export const styleInstructions = (locale: Locale | undefined): string => locale === "en" ? STYLE_EN : STYLE_ZH;
+const THIRD_PERSON_ZH = "- Objective third person. Do not address the reader as 你/您 and do not speak as 我; no greetings, apologies, encouragement or filler.";
+const THIRD_PERSON_EN = "- Objective third person in stored text; no greetings, apologies, encouragement or filler.";
+
+/**
+ * The address line for a run whose Skill speaks to the person in some fields (the interview's `reply` and questions, the portrait's
+ * `type.summary`). Named here, in the one place the third-person rule lives, so the model is not handed two rules that contradict each
+ * other and left to decide which one a Skill's 「this overrides」 sentence beats (found 2026-10-31).
+ */
+const addressZh = (fields: string[]) => `- Fields ${fields.map((field) => `\`${field}\``).join(", ")} speak to the person as 你 (never 您), as the Skill describes; `
+  + "every other field, and everything stored about the person, is objective third person. Never speak as 我; no greetings, apologies, praise or filler.";
+const addressEn = (fields: string[]) => `- Fields ${fields.map((field) => `\`${field}\``).join(", ")} speak to the person as "you", as the Skill describes; `
+  + "every other field, and everything stored about the person, is objective third person. Never speak as \"I\"; no greetings, apologies, praise or filler.";
+
+/**
+ * The style block for a run in this language. `secondPerson` names the fields that address the person directly; without it every field
+ * is third person, as for every Skill but the interview and the portrait.
+ */
+export const styleInstructions = (locale: Locale | undefined, secondPerson: string[] = []): string => locale === "en"
+  ? styleEn(secondPerson.length ? addressEn(secondPerson) : THIRD_PERSON_EN)
+  : styleZh(secondPerson.length ? addressZh(secondPerson) : THIRD_PERSON_ZH);
 /** The Chinese block, as every run had it before the language could change. */
-export const STYLE_INSTRUCTIONS = STYLE_ZH;
+export const STYLE_INSTRUCTIONS = styleInstructions("zh");
 
 /** One line for the assistant's shell thread, which carries no style block: the files it writes for the person follow the language. */
 export const agentLanguageLine = (locale: Locale | undefined): string => locale === "en"

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Circle } from "lucide-react";
-import { SCHWARTZ_VALUES } from "@crossline/core";
+import { interviewParts, SCHWARTZ_VALUES, type InterviewFlow } from "@crossline/core";
 import { ValuesRadar } from "../portrait/portrait-charts";
 import { FlywheelPreview, type Link } from "./flywheel-preview";
 import { StartConfirm } from "./start-confirm";
@@ -28,14 +28,21 @@ export function viewForStage(stage: string, complete: boolean, ready = false): S
   if (complete) return "structure";
   // Once the start standard stands the week's draft is the payoff: it comes forward until the deep parts begin.
   if (ready && (stage === "orientation" || stage === "lines")) return "week";
-  return ({ orientation: "lines", lines: "lines", situation: "week", compass: "compass", energy: "energy", details: "projects" } as Record<string, StageKey>)[stage] ?? "lines";
+  // The life story has no picture of its own: the lines the opening card named stay in view.
+  return ({ narrative: "lines", orientation: "lines", lines: "lines", situation: "week", compass: "compass", energy: "energy", details: "projects" } as Record<string, StageKey>)[stage] ?? "lines";
 }
 
+/** The profile module's parts in flow v2 (narrative, compass, energy, situation). */
+const MODULE_PARTS = 4;
+
 /** Rough minutes to the start standard and to the end, from what is still open: honest enough to plan a sitting, never a promise. */
-export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "startMissing">, stage: string): { label: string; minutes: number } {
+export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "startMissing">, stage: string, flow: InterviewFlow = "v1"): { label: string; minutes: number } {
+  const order: string[] = interviewParts(flow);
   // A start item is per line and most are settled by one answer, several to a round: about 2.5 minutes each, never more than half an hour.
-  if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, Math.min(30, Math.ceil(state.startMissing.length * 2.5))) };
-  const order = ["orientation", "lines", "situation", "compass", "energy"];
+  const facts = Math.min(30, Math.ceil(state.startMissing.filter((item) => item.id !== "profile_cards").length * 2.5));
+  // The profile module (flow v2) comes before the start: about ten minutes a part still ahead of it.
+  const module = flow === "v2" ? Math.max(0, MODULE_PARTS - Math.max(0, order.indexOf(stage))) * 10 : 0;
+  if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, module + facts) };
   const left = Math.max(1, order.length - Math.max(0, order.indexOf(stage)));
   return { label: "画像访谈还剩约", minutes: left * 5 };
 }
@@ -64,7 +71,7 @@ export function StageView({ state, stage, complete, onChanged }: {
   useEffect(() => setShown(current), [current]);
   const reached = VIEWS.findIndex((view) => view.key === current);
   const total = state.startTotal;
-  const left = minutesLeft(state, stage);
+  const left = minutesLeft(state, stage, state.flow);
   // A long-term goal is adopted in the left column, not answered in the conversation: its missing item links there (W-8).
   const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
   const progress = state.progress;

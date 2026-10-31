@@ -1,4 +1,4 @@
-import { ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
+import { cardsSettled, flowOf, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
 import { interviewLocale, readLocale } from "./locale";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
@@ -41,6 +41,13 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
   const profile = json<Partial<ProfileModel>>("profile.model", {});
   const dates = datedItems(store, workspaceId, today);
   const confirmed = json<{ fingerprint?: string } | null>(PROFILE_CONFIRMED, null);
+  // The main interview (a line's own interview is `line-…`) on the profile-first flow has cards to answer before the app opens.
+  const main = store.listOnboardingSessions(workspaceId).filter((session) => !session.id.startsWith("line-"))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  // The cards exist in Chinese only so far, so an English interview is never held for them.
+  const profileCards = main && flowOf(main.coverage) === "v2"
+    && (extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)) !== "en"
+    ? cardsSettled(settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)))) : undefined;
   return interviewChecklist({
     lines,
     descriptions: Object.fromEntries(Object.entries(profiles).map(([id, value]) => [id, { description: value.description ?? "", candidates: (value.attributes ?? []).length || (value.goalCandidates ?? []).length }])),
@@ -51,6 +58,7 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
     availability: Boolean(store.getSetting(workspaceId, "schedule.availability.proposed") || store.getSetting(workspaceId, "schedule.availability")),
     unfiledFiles: extras.unfiledFiles,
     // 「准」 on an observation in each deep stage confirms the portrait piece by piece (2026-10-19), as the one 「符合」 at the end does.
+    profileCards,
     portraitConfirmed: portraitStillConfirmed(confirmed?.fingerprint, profile) || portraitConfirmedByInsights(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))),
     // Labels in the interview's language (docs/i18n.md): the list is about the interview.
     locale: extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)

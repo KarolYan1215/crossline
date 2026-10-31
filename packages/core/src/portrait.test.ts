@@ -77,7 +77,7 @@ test("the fixed dimensions: Schwartz's ten values in circle order, six energy ca
   expect([...ENERGY_CATEGORIES]).toEqual(["深度工作", "学习输入", "创造产出", "沟通协作", "行政事务", "休息恢复"]);
   expect(SAY_DO_DIMENSIONS.map((dimension) => dimension.label)).toEqual(SAY_DO);
   expect(SAY_DO_DIMENSIONS.map((dimension) => dimension.id)).toEqual(["plan", "on_time", "follow_through", "acceptance", "waiting"]);
-  expect(PORTRAIT_SCHEMA_VERSION).toBe(5);
+  expect(PORTRAIT_SCHEMA_VERSION).toBe(6);
 });
 
 test("the schema asks for exactly those dimensions, a short core word, and no 'does' score", () => {

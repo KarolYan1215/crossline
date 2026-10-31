@@ -129,10 +129,14 @@ test("the portrait is kept by section: a deep section while its stage runs, fina
     .toEqual({ finalize: [], synthesize: false });
   // A finished interview finalizes whatever is left, even a stage it skipped.
   expect(portraitTask("energy", true, {})).toEqual({ finalize: ["situation", "compass", "energy"], synthesize: true });
+  // The profile-first flow: the life story comes first and is a section of its own; the synthesis waits for it too.
+  expect(portraitTask("compass", false, {}, "v2")).toEqual({ finalize: ["narrative"], synthesize: false });
+  expect(portraitTask("orientation", false, { narrative: done, compass: done }, "v2")).toEqual({ finalize: ["situation", "energy"], synthesize: true });
+  expect(portraitTask("details", false, { situation: done, compass: done, energy: done })).toEqual({ finalize: [], synthesize: true });
 
   const now = "2026-10-19T00:00:00.000Z";
   const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
-  store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation" }, createdAt: now, updatedAt: now });
+  store.saveOnboardingSession({ id: "s", ownerId, workspaceId, state: "active", coverage: { stage: "situation", flow: "v1" }, createdAt: now, updatedAt: now });
   store.setSetting(workspaceId, "profile.model", JSON.stringify({ portrait: "旧的一句话", workView: "旧工作观" }));
   const sections = (over: object) => facts({ profileSections: { situation: null, compass: null, energy: null, synthesis: null, ...over } });
   const { rpc, prompts } = runtime([round], [

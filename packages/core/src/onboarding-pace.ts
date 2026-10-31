@@ -1,7 +1,7 @@
 import type { AvailabilityWindow } from "./availability";
 import { joinList, monthDay, tFor, type Locale } from "./i18n";
 import { locateQuote } from "./sentences";
-import { DEEP_STAGES, ONBOARDING_STAGES, type OnboardingStage, type TurnInsight, type TurnProgress } from "./onboarding-turn-schema";
+import { DEEP_STAGES, INTERVIEW_FLOW_STAGES, ONBOARDING_STAGES, type InterviewFlow, type OnboardingStage, type TurnInsight, type TurnProgress } from "./onboarding-turn-schema";
 
 /**
  * What keeps the interview moving and gives something back at every part (2026-10-19, the owner's decisions after testers lost patience):
@@ -11,9 +11,14 @@ import { DEEP_STAGES, ONBOARDING_STAGES, type OnboardingStage, type TurnInsight,
 
 /** The parts of the main interview, in order. `details` is gone from it (line interviews still use it). */
 export const INTERVIEW_PARTS: OnboardingStage[] = ["orientation", "lines", "situation", "compass", "energy"];
+/** The parts of a flow's main interview, in order (`v2` puts the profile module first, docs/profile-and-agent-kit.md §四). */
+export const interviewParts = (flow: InterviewFlow = "v1"): OnboardingStage[] =>
+  flow === "v1" ? INTERVIEW_PARTS : INTERVIEW_FLOW_STAGES[flow].filter((stage) => stage !== "details");
 export const PART_LABEL: Record<OnboardingStage, string> = {
-  orientation: "开场", lines: "主线", situation: "处境", compass: "指南针", energy: "能量", details: "细节"
+  narrative: "经历", orientation: "开场", lines: "主线", situation: "处境", compass: "指南针", energy: "能量", details: "细节"
 };
+/** The three deep stages every flow has: 「准」 in each confirms the portrait (the life story's observation is welcome, not required). */
+const CONFIRMING_STAGES: OnboardingStage[] = ["situation", "compass", "energy"];
 
 /** Where the person's ratings of observations are kept: `{ "<session>#<round seq>": { verdict, stage, at, text } }`. */
 export const ONBOARDING_INSIGHTS = "onboarding.insights";
@@ -28,7 +33,7 @@ export function readInsightRatings(raw: string | null | undefined): InsightRatin
 /** Whether the person said 「准」 to an observation in each of the three deep stages: it stands for confirming the portrait piece by piece. */
 export function portraitConfirmedByInsights(ratings: InsightRatings): boolean {
   const fits = new Set(Object.values(ratings).filter((rating) => rating.verdict === "fits").map((rating) => rating.stage));
-  return [...DEEP_STAGES].every((stage) => fits.has(stage));
+  return CONFIRMING_STAGES.every((stage) => fits.has(stage));
 }
 
 /**
@@ -54,20 +59,22 @@ export function readTurnProgress(raw: unknown): TurnProgress | undefined {
 }
 
 /** How far the main interview is, for the screen: the part (1-based of five), its label, and how much of it is clear. */
-export function progressView(progress: TurnProgress | undefined, stage: string): { index: number; total: number; label: string; clear: number; of: number; next: string } {
+export function progressView(progress: TurnProgress | undefined, stage: string, flow: InterviewFlow = "v1"): { index: number; total: number; label: string; clear: number; of: number; next: string } {
+  const parts = interviewParts(flow);
   const part = progress?.part ?? (stage as OnboardingStage);
-  const at = INTERVIEW_PARTS.indexOf(part);
-  const index = at < 0 ? (part === "details" ? INTERVIEW_PARTS.length : 1) : at + 1;
+  const at = parts.indexOf(part);
+  const index = at < 0 ? (part === "details" ? parts.length : 1) : at + 1;
   const clear = progress?.covered.length ?? 0, of = clear + (progress?.open.length ?? 0);
-  return { index, total: INTERVIEW_PARTS.length, label: PART_LABEL[part] ?? "定向", clear: progress?.partDone ? Math.max(clear, of) : clear,
+  return { index, total: parts.length, label: PART_LABEL[part] ?? "定向", clear: progress?.partDone ? Math.max(clear, of) : clear,
     of: progress?.partDone ? Math.max(clear, of) : of, next: progress?.next ?? "" };
 }
 
 /** The progress record as the lines the next round starts from (for the dialogue model, not shown). */
 /* i18n-ignore-start */
-export function progressLines(progress: TurnProgress | undefined): string[] {
+export function progressLines(progress: TurnProgress | undefined, flow: InterviewFlow = "v1"): string[] {
   if (!progress) return [];
-  return [`上轮判断：第 ${Math.max(1, INTERVIEW_PARTS.indexOf(progress.part) + 1)}/${INTERVIEW_PARTS.length} 部分「${PART_LABEL[progress.part]}」${progress.partDone ? "已完成" : "未完成"}`,
+  const parts = interviewParts(flow);
+  return [`上轮判断：第 ${Math.max(1, parts.indexOf(progress.part) + 1)}/${parts.length} 部分「${PART_LABEL[progress.part]}」${progress.partDone ? "已完成" : "未完成"}`,
     ...(progress.covered.length ? [`已谈清：${progress.covered.join("；")}`] : []),
     ...(progress.open.length ? [`未谈：${progress.open.join("；")}`] : []),
     ...(progress.next ? [`下一步：${progress.next}`] : [])];

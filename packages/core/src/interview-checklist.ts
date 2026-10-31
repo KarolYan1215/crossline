@@ -48,6 +48,11 @@ export type ChecklistInput = {
   /** Files only the person can place; null where this is not known (the worker). */
   unfiledFiles: number | null;
   portraitConfirmed: boolean;
+  /**
+   * The profile module's cards (flow v2, docs/profile-and-agent-kit.md): how many of the bank's items are answered or skipped. Absent for
+   * an interview that started on the earlier flow, which has no cards.
+   */
+  profileCards?: { settled: number; total: number } | undefined;
   /** The language of each item's label and detail (default Chinese). */
   locale?: Locale | undefined;
 };
@@ -108,6 +113,10 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     detail: unbacked.length ? t("尚无本人依据：{{items}}", { items: list(unbacked) }) : assumedParts.length ? t("以假设代替：{{items}}", { items: list(assumedParts) }) : "", owner: "interview" });
   items.push({ id: "portrait_confirmed", group: "画像", label: t("本人确认画像符合自己"), done: input.portraitConfirmed,
     detail: input.portraitConfirmed ? "" : t("在画像页读完后选「符合」，或说明哪里不对"), owner: "person" });
+  // The profile module comes first and is not skipped (decided 2026-10-31): its cards are a start item. Skipping one card counts as answering it.
+  const cards = input.profileCards;
+  if (cards) items.push({ id: "profile_cards", group: "画像", label: t("画像模块的卡片题已答完"), done: cards.settled >= cards.total,
+    detail: cards.settled >= cards.total ? "" : t("还有 {{count}} 题未答", { count: cards.total - cards.settled }), owner: "interview", start: true });
 
   for (const line of input.lines) {
     const described = input.descriptions[line.id];

@@ -1,7 +1,7 @@
 // i18n-exempt: the short ledger handed to the interview model each round (model-facing)
 import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, interviewAbstract, lineAttributes, progressLines, readInsightRatings, readTurnProgress,
-  resolveAvailability, type StoredLineProfile, type TurnProgress
+  resolveAvailability, type InterviewFlow, type StoredLineProfile, type TurnProgress
 } from "@crossline/core";
 import { datedItems, type CrosslineStore } from "@crossline/db";
 import { readProfileModel } from "./onboarding-persist";
@@ -15,6 +15,8 @@ const SOURCE_LABEL: Record<string, string> = { saved: "本人设定", interview:
  */
 export function paceContext(store: CrosslineStore, workspaceId: string, sessionId: string, input: {
   today: string; lines: Array<{ id: string; label: string; goals: string[] }>; recent: string[]; progress: TurnProgress | undefined;
+  /** The interview's flow: the order of the parts the progress lines name. */
+  flow?: InterviewFlow;
 }): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[] } {
   const profiles = (() => { try { return JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   const facts = store.listProfileFacts(workspaceId);
@@ -46,7 +48,7 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   const ratings = Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
     .filter(([key]) => key.startsWith(`${sessionId}#`)).sort((a, b) => a[1].at.localeCompare(b[1].at)).slice(-4)
     .map(([, rating]) => `观察「${(rating.text ?? "").slice(0, 60)}」：本人说${rating.verdict === "fits" ? "准" : "不准"}`);
-  const progress = progressLines(input.progress);
+  const progress = progressLines(input.progress, input.flow);
   // Lines with no long-term goal yet, and whether the picker beside the conversation already offers candidates for one: the dialogue asks
   // what the person wants to become on a line only while it offers none (W-8: asking beside the picker asked the same thing twice).
   const goalPicker = input.lines.filter((line) => !line.goals.length).map((line) => {

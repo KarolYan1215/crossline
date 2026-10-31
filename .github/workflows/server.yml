@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: diagnose, deploy, backup, compare-list, compare or compare-report
+        description: diagnose, deploy, backup, compare-list, compare, compare-report, persona or persona-report
         default: diagnose
       args:
         description: "compare only: e.g. --email someone@example.com --steps 6 --backplans 3"
@@ -263,6 +263,52 @@ jobs:
             run --ledger /compare/in/crossline.db --out /compare/out --dialogues /evals $ARGS
           sleep 30; docker logs crossline-compare 2>&1 | tail -10
           REMOTE
+      - name: Walk the interview as made-up people
+        if: github.event_name == 'workflow_dispatch' && startsWith(inputs.action, 'persona')
+        env:
+          ACTION: ${{ inputs.action }}
+          ARGS: ${{ inputs.args }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          # scripts/persona-eval.ts in a one-off container of the newest app image: `persona` starts the walkthrough detached (hours, on the
+          # developer's key, throwaway ledgers only — nothing reads or writes the live one), `persona-report` prints its progress and packs
+          # the newest run's folder for the artifact below. Everything it writes is about the fictional people of scripts/personas/.
+          case "$ARGS" in *[!A-Za-z0-9._,/\ -]*) echo "args may hold only letters, digits and ._,/- and spaces"; exit 1;; esac
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" "ACTION='$ACTION' ARGS='$ARGS' TOKEN='$TOKEN' ACTOR='$ACTOR' sudo -E sh -s" <<'REMOTE'
+          set -e
+          dir=/srv/crossline/persona
+          install -d -m 750 -o 1000 -g 1000 $dir $dir/out
+          if [ "$ACTION" = persona-report ]; then
+            docker ps -a --filter name=crossline-persona --format "{{.Names}} {{.Status}}"
+            docker logs --tail 30 crossline-persona 2>&1 | tail -30 || true
+            latest=$(ls -1d $dir/out/*/ 2>/dev/null | sort | tail -1)
+            [ -n "$latest" ] || exit 0
+            tar -C "$latest" -czf /tmp/crossline-persona.tgz . && chmod 644 /tmp/crossline-persona.tgz
+            echo "== $latest"; ls -la "$latest"
+            exit 0
+          fi
+          registry=ghcr.io/karolyan1215/crossline-app:beta
+          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null && timeout 600 docker pull -q "$registry" || true
+          docker logout ghcr.io >/dev/null
+          image=$registry
+          docker image inspect "$image" >/dev/null 2>&1 || image=$(docker inspect -f '{{.Config.Image}}' crossline-worker)
+          free -m
+          docker rm -f crossline-persona >/dev/null 2>&1 || true
+          # Its own ceiling, beside the app's: one Codex runtime, the people side by side.
+          docker run -d --name crossline-persona --memory 1000m --memory-swap 1000m -e NODE_OPTIONS=--max-old-space-size=512 --network host \
+            --env-file /srv/crossline/app.env -e CROSSLINE_DATA_DIR=/tmp/data -v $dir:/persona -v /srv/crossline/codex:/opt/codex:ro -w /repo "$image" \
+            /repo/node_modules/.bin/tsx scripts/persona-eval.ts --set scripts/personas/eval-2026-10-31 --out /persona/out $ARGS
+          sleep 45; docker logs crossline-persona 2>&1 | tail -10
+          REMOTE
+          if [ "$ACTION" = persona-report ]; then scp -i ~/.ssh/id admin@"$HOST":/tmp/crossline-persona.tgz persona.tgz || true; fi
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'persona-report'
+        with:
+          name: crossline-persona-${{ github.run_id }}
+          path: persona.tgz
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Deploy
         if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
         env:

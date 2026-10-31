@@ -846,5 +846,6 @@
   "周期扣费合计每年约 {{amount}}。": "Recurring charges come to about {{amount}} a year. ",
   "超出月度上限 {{amount}}。": "Over the monthly limit by {{amount}}. ",
   "在月度上限内，还剩 {{amount}}。": "Within the monthly limit, {{amount}} to spare. ",
-  "考试 {{day}} 已过，备考不再安排": "Exam on {{day}} has passed; preparation is no longer scheduled"
+  "考试 {{day}} 已过，备考不再安排": "Exam on {{day}} has passed; preparation is no longer scheduled",
+  "回头看一路走来，哪几个时刻改变了你的方向？": "Looking back over the way you came, which moments changed your direction?"
 }

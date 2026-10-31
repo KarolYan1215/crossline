@@ -1,4 +1,5 @@
 import { CHARACTER_EXPRESSIONS, CHARACTER_POSES } from "./portrait-character";
+import { WRITTEN_CLAIMS_SCHEMA, type WrittenClaim } from "./profile-report";
 
 /**
  * Fixed dimensions (decided 2026-10-12) so two people's portraits can be compared: Schwartz's ten basic values in their circular order
@@ -29,9 +30,10 @@ export const SAY_DO_DIMENSIONS = [
 /**
  * Stored beside each report; a report below this is rewritten once. 3 → 4 (2026-10-17): the type moved from the first version's four axes
  * (scope/basis/output/rhythm) to the four research dimensions in `TYPE_AXES`. 4 → 5 (2026-10-24): the AI-era dimensions
- * (collab/purpose/build/lines) replaced the multi-line ones (concentration/orientation/boundary/pacing).
+ * (collab/purpose/build/lines) replaced the multi-line ones (concentration/orientation/boundary/pacing). 5 → 6 (2026-10-31): `claims`, the
+ * report by section (docs/profile-and-agent-kit.md §五).
  */
-export const PORTRAIT_SCHEMA_VERSION = 5;
+export const PORTRAIT_SCHEMA_VERSION = 6;
 /**
  * The portrait report written when the interview ends (decided 2026-10-08), by Skill `crossline-portrait-writer`, as structured data so the
  * page can draw it: the first half is the person's portrait and insight, meant to be shared (cover, the real problem, compass and energy,
@@ -69,6 +71,8 @@ export type PortraitReport = {
    * they said nothing. Older reports have no `appearance`.
    */
   character?: { outfit: string; props: string[]; pose: string; expression: string; appearance?: string };
+  /** Schema 6 (2026-10-31): what the report says, by section, each with its own words to rest on (`resolveWrittenClaims` keeps the traceable). */
+  claims?: WrittenClaim[];
   sensitive: string[];
 };
 
@@ -97,6 +101,7 @@ export const PORTRAIT_SCHEMA = object({
     evidence: object({ collab: text(80), purpose: text(80), build: text(80), lines: text(80) }), summary: text(160) }),
   character: object({ outfit: text(80), props: list(3, 40), pose: { type: "string", enum: [...CHARACTER_POSES] }, expression: { type: "string", enum: [...CHARACTER_EXPRESSIONS] },
     appearance: text(160) }),
+  claims: WRITTEN_CLAIMS_SCHEMA,
   sensitive: list(30, 60)
 });
 
