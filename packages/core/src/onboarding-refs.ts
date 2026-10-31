@@ -87,6 +87,13 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     const { refs: _refs, ...rest } = edit;
     return { ...rest, sourceRef: reply };
   });
+  // A setting rests on the person's own reply, never a file: a syllabus does not say how its reader wants to be notified.
+  const settings = list(turn.settings).map((item) => {
+    const cited = span(item.refs, `设置「${String(item.key ?? "")}」`, true);
+    const reply = cited.refs.find((ref) => ref in known.replies) ?? "";
+    const { refs: _refs, ...rest } = item;
+    return { ...rest, sourceRef: reply, sourceQuote: reply ? cited.quote : "" };
+  });
   const availability = turn.availability && typeof turn.availability === "object" ? (() => {
     const proposal = turn.availability as Wire;
     return { ...proposal, windows: list(proposal.windows).map(({ startMinute, endMinute, ...window }) =>
@@ -109,7 +116,7 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
     /* i18n-ignore-end */
     return cited.ids.length ? [{ ...item, sentences: cited.ids }] : [];
   });
-  return { ...turn, slotUpdates, flywheelCandidates, lineProfiles, goalEdits, availability, ...(sections ? { profileSections: sections } : {}),
+  return { ...turn, slotUpdates, flywheelCandidates, lineProfiles, goalEdits, settings, availability, ...(sections ? { profileSections: sections } : {}),
     ...(Array.isArray(turn.itemScores) ? { itemScores } : {}),
     ...(turn.fileDates && typeof turn.fileDates === "object" ? { fileDates: resolveDateRefs(turn.fileDates, index, texts) } : {}) };
 }
@@ -165,13 +172,13 @@ const EMPTY_DIALOGUE = { reply: "", questions: [], coverage: [], nextAction: "re
 const only = <K extends string>(turn: Record<string, unknown>, keys: readonly K[]) =>
   Object.fromEntries(keys.filter((key) => turn[key] !== undefined).map((key) => [key, turn[key]]));
 // The other layer's fields are overwritten, never checked: a strict schema keeps a live answer from carrying them, and a stray one is not this layer's to judge.
-const asDialogue = (value: unknown) => value && typeof value === "object" ? { ...(value as Wire), ...EMPTY_EXTRACTION, fileDates: undefined, availability: undefined, profile: undefined } : value;
+const asDialogue = (value: unknown) => value && typeof value === "object" ? { ...(value as Wire), ...EMPTY_EXTRACTION, fileDates: undefined, availability: undefined, settings: undefined, profile: undefined } : value;
 /**
  * A list the extraction left out (or sent as null) is an empty list: a model whose schema is only described to it, not enforced (a
  * Chat Completions provider in JSON mode), drops keys it had nothing for, and the whole answer used to be refused for it as
  * 「输出结构不符合要求」 — repeatedly, so nothing from the interview's deep stages was recorded (2026-10-19 walkthrough, the developer's model).
  */
-const EXTRACT_LISTS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "lineProfiles", "goalEdits"] as const;
+const EXTRACT_LISTS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "lineProfiles", "goalEdits", "settings"] as const;
 // A slot built from a line id that has a hyphen in it (「flywheel_line-x-3_informs」) was refused and the whole answer with it: slots are
 // normalised to their own alphabet instead.
 const slotName = (slot: unknown) => typeof slot === "string" ? slot.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) : slot;

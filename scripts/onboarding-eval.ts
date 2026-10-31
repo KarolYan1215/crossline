@@ -32,7 +32,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { enterUsageWorkspace, runCodexSkill, setUsageSink, startCodexSupervisor } from "../packages/codex/src/index";
-import { EVAL_HOLD_FILE, PROFILE_CONFIRMED, composeGoal, interviewComplete, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
+import { AVAILABILITY_PROPOSED_SETTING, EVAL_HOLD_FILE, INTERVIEW_SETTINGS, ONBOARDING_TONE_SETTING, PROFILE_CONFIRMED, readInterviewSettings, composeGoal, interviewComplete, portraitFingerprint, readyToStart, type ProfileModel, type StoredLineProfile } from "../packages/core/src/index";
 import { CrosslineStore, interviewChecklistFor } from "../packages/db/src/index";
 import { domainGuides } from "../packages/identity-packs/src/index";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY, composeAnswers, type Question } from "../apps/web/app/onboarding/onboarding-types";
@@ -72,6 +72,8 @@ if (holding) {
 }
 console.info(JSON.stringify({ residentHold: holding ? holdFile : "none (no resident ledger found)" }));
 const lite = args.includes("--lite");
+/** `--opening <file.json>`: another person's opening card (lines, base, fixed, tone, edition "full"), set through `setupLines` like `--lite`. */
+const openingFile = args.includes("--opening") ? args[args.indexOf("--opening") + 1] : undefined;
 const turnLimit = Number(args[args.indexOf("--turns") + 1]) || 20;
 const personaFile = args.find((arg) => arg.endsWith(".md"))
   ?? (lite ? path.join(repoRoot, "scripts", "personas", "office-worker-lite.md") : path.join(repoRoot, "data", "profile", "karolyan1215.profile.md"));
@@ -83,11 +85,14 @@ const store = new CrosslineStore(path.join(dataDir, "crossline.db"));
 const { workspace, principal } = store.createPrincipalWithWorkspace("onboarding-eval", "eval");
 const workspaceId = workspace.id;
 /** The opening card's lite answer: 职场人 (the person's 上班) as the base and the one fixed schedule, 健康 and 财富 as domain lines. */
-const LITE_OPENING = { tone: "neutral" as const, edition: "lite" as const, lines: ["职场人", "健康管理者", "理财者"],
-  domains: { 健康管理者: "wellness" as const, 理财者: "wealth" as const }, base: "职场人", fixed: ["职场人"],
+const LITE_OPENING: { tone: "neutral" | "warm"; edition: "lite" | "full"; lines: string[]; domains: Record<string, "wellness" | "wealth">; base: string; fixed: string[]; said: Record<string, string> } =
+  openingFile ? { domains: {}, said: {}, ...JSON.parse(readFileSync(openingFile, "utf8")) } : { tone: "neutral", edition: "lite", lines: ["职场人", "健康管理者", "理财者"],
+  domains: { 健康管理者: "wellness", 理财者: "wealth" }, base: "职场人", fixed: ["职场人"],
   // The person says 上班; the line is named for a person (2026-10-20), as the card names it.
   said: { 职场人: "上班" } };
-if (lite) {
+const carded = lite || Boolean(openingFile);
+console.info(JSON.stringify({ dataDir }));
+if (carded) {
   // The web library's store is this one (`getStore` reads the global first), so `setupLines` writes the same ledger the interview reads.
   process.env.CROSSLINE_DATA_DIR = dataDir;
   (globalThis as { crosslineStore?: unknown }).crosslineStore = store;
@@ -95,8 +100,9 @@ if (lite) {
   const ctx = { principalId: principal.id, workspaceId, role: "owner", identity: { provider: "credential", issuer: "onboarding-eval", subject: principal.id },
     authMethod: "session", requestId: "onboarding-eval" } as import("../packages/core/src/index").AccessContext;
   const set = setupLines(ctx, LITE_OPENING.lines.map((label) => ({ label, ranked: label === LITE_OPENING.base, hard: LITE_OPENING.fixed.includes(label),
-    ...(LITE_OPENING.domains[label as keyof typeof LITE_OPENING.domains] ? { domain: LITE_OPENING.domains[label as keyof typeof LITE_OPENING.domains] } : {}) })));
+    ...(LITE_OPENING.domains[label] ? { domain: LITE_OPENING.domains[label] } : {}) })));
   if (!set.ok) throw new Error(`setupLines refused: ${set.code}`);
+  store.setSetting(workspaceId, ONBOARDING_TONE_SETTING, LITE_OPENING.tone);
 } else {
   // What the person set on the opening screen before the interview: the identity nouns, the base line and the hard constraint — no goals.
   store.setSetting(workspaceId, "lines.v1", JSON.stringify([
@@ -128,7 +134,7 @@ function tokenReport(): string[] {
 // Files the person has on their machine and would upload when asked (not the organised profile: that is the hidden truth). The lite
 // persona has none.
 const downloads = path.join(homedir(), "Downloads");
-const available = new Map(lite ? [] : [
+const available = new Map(carded ? [] : [
   ["F26-ECE555-Syllabus.pdf", path.join(downloads, "course_files_export", "F26-ECE555-Syllabus.pdf")],
   ["F26-ECE555-Course Schedule.pdf", path.join(downloads, "course_files_export", "F26-ECE555-Course Schedule.pdf")],
   ["Course Overview.docx", path.join(downloads, "Course Overview.docx")],
@@ -265,7 +271,7 @@ const asked: Question[] = [];
 const uploaded = [...available.keys()];
 for (const name of uploaded) await upload(name);
 // The lite opening is the card's own words (tone, edition, lines, base, fixed schedule), as the real first reply is.
-let text = lite ? openingReply(LITE_OPENING, uploaded.length > 0) : uploaded.length ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY;
+let text = carded ? openingReply(LITE_OPENING, uploaded.length > 0) : uploaded.length ? MATERIALS_FIRST_REPLY : NO_MATERIALS_REPLY;
 let turns = 0, questionsAsked = 0, state = "", attentionSeconds = 0;
 const modelSeconds: number[] = [];
 let readyAt: { rounds: number; minutes: number } | undefined, completeAt: { rounds: number; minutes: number } | undefined;
@@ -359,7 +365,12 @@ try {
     "| 清单项 | 结果 | 缺 |", "|---|---|---|",
     ...own.map((item) => `| ${item.label} | ${item.done ? "✓" : "✗"} | ${item.done ? "" : item.detail} |`), "",
     `项目：${store.listProjects(workspaceId).map((project) => project.name).join("、") || "无"}`,
-    `已确认事实：${store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed").length} 条`, "",
+    `已确认事实：${store.listProfileFacts(workspaceId).filter((fact) => fact.status === "confirmed").length} 条`,
+    // What reaches the system's own behaviour (2026-10-30): the hours with their energy, the stated night, and the settings to apply.
+    `可用时段：${(json<{ windows?: Array<{ days: number[]; start: string; end: string; energy: string }> }>(AVAILABILITY_PROPOSED_SETTING, {}).windows ?? [])
+      .map((window) => `周${window.days.join("")} ${window.start}–${window.end} ${window.energy}`).join("；") || "无"}`,
+    `作息：${store.listProfileFacts(workspaceId).find((fact) => fact.identityId === "person" && fact.slot === "sleep_window")?.value ?? "未记录"}`,
+    `访谈提出的设置：${readInterviewSettings(store.getSetting(workspaceId, INTERVIEW_SETTINGS)).map((item) => `${item.key}${item.target ? `(${item.target})` : ""}=${item.value}`).join("、") || "无"}`, "",
     ...tokenReport(),
     ...(lite ? domainReport() : []),
     "## 对话", "", ...transcript

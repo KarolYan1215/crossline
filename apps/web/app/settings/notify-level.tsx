@@ -30,3 +30,41 @@ export function NotifyLevel({ level }: { level: string }) {
     {status && <small role="status" className={status === "saved" ? "st-ok" : "st-fail"}>{status === "saved" ? t("已保存") : t("未保存")}</small>}
   </div>;
 }
+
+/**
+ * The quiet hours and the morning brief's time (2026-10-30): set here, by the input box, or from what the person said in the interview.
+ * Native time inputs; each saves on change and goes back if the save fails.
+ */
+export function NotifyTimes({ quiet, brief }: { quiet: string; brief: string }) {
+  const t = useT();
+  const [from0 = "23:00", to0 = "08:00"] = quiet.split("-");
+  const [range, setRange] = useState({ from: from0, to: to0 });
+  const [briefAt, setBriefAt] = useState(brief);
+  const [status, setStatus] = useState<"" | "saved" | "failed">("");
+  const save = async (body: Record<string, string>, undo: () => void) => {
+    const response = await fetch("/api/settings/notify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
+    if (!response?.ok) undo();
+    setStatus(response?.ok ? "saved" : "failed");
+  };
+  const changeRange = (next: { from: string; to: string }) => {
+    const previous = range;
+    setRange(next);
+    if (next.from && next.to) void save({ quietHours: `${next.from}-${next.to}` }, () => setRange(previous));
+  };
+  const changeBrief = (next: string) => {
+    const previous = briefAt;
+    setBriefAt(next);
+    void save({ briefTime: next }, () => setBriefAt(previous));
+  };
+  return <>
+    <div className="st-row"><span className="st-row-label">{t("免打扰时段")}<small>{t("这段时间不发提醒，只有本人刚开始的事例外；可跨零点")}</small></span>
+      <span className="st-time-range">
+        <input type="time" aria-label={t("免打扰开始")} value={range.from} onChange={(event) => changeRange({ ...range, from: event.target.value })} />
+        <span aria-hidden>–</span>
+        <input type="time" aria-label={t("免打扰结束")} value={range.to} onChange={(event) => changeRange({ ...range, to: event.target.value })} />
+      </span></div>
+    <div className="st-row"><span className="st-row-label">{t("晨间简报时间")}<small>{t("留空则从当天第一个可用时段起")}</small></span>
+      <input type="time" aria-label={t("晨间简报时间")} value={briefAt} onChange={(event) => changeBrief(event.target.value)} />
+      {status && <small role="status" className={status === "saved" ? "st-ok" : "st-fail"}>{status === "saved" ? t("已保存") : t("未保存")}</small>}</div>
+  </>;
+}

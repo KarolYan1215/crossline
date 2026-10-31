@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { DEFAULT_TIERS, SKILL_TIERS, routeForSkill, tierRoutes } from "./model-policy";
+import { DEFAULT_TIERS, SKILL_TIERS, routeForSkill, tierRoutes, shiftEffort } from "./model-policy";
 
 test("each Skill routes to its tier, with or without the plugin prefix", () => {
   expect(routeForSkill("crossline:crossline-onboarding", {})).toEqual(DEFAULT_TIERS.top);
@@ -56,4 +56,16 @@ test("one Skill can be pinned by environment, and a pin wins over the tier and t
   expect(routeForSkill("crossline:crossline-onboarding", env)).toEqual({ model: "local-llama", effort: "low" });
   expect(routeForSkill("crossline-onboarding", env, "economy")).toEqual({ model: "local-llama", effort: "low" });
   expect(routeForSkill("crossline-milestone-architect", env)).toEqual(DEFAULT_TIERS.top);
+});
+
+test("模型强度 moves each Skill's effort one step, to an effort the model takes", () => {
+  const route = { model: "gpt-5.6-terra", effort: "medium" };
+  expect(shiftEffort(route, "default")).toEqual(route);
+  expect(shiftEffort(route, "higher")?.effort).toBe("high");
+  expect(shiftEffort(route, "lower")?.effort).toBe("low");
+  // Without a catalogue only low/medium/high are tried; with one, xhigh is reached and a gap is skipped.
+  expect(shiftEffort({ ...route, effort: "high" }, "higher")?.effort).toBe("high");
+  expect(shiftEffort({ ...route, effort: "high" }, "higher", ["low", "medium", "high", "xhigh"])?.effort).toBe("xhigh");
+  expect(shiftEffort({ ...route, effort: "high" }, "lower", ["low", "high"])?.effort).toBe("low");
+  expect(shiftEffort({ model: "m" }, "higher")).toEqual({ model: "m" });
 });

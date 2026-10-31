@@ -33,16 +33,30 @@ const median = (values: number[]) => { const s = [...values].sort((a, b) => a - 
 const onsetHour = (hour: number) => (hour < 12 ? hour + 24 : hour);
 const clock = (hours: number) => { const h = ((Math.round(hours * 60) % 1440) + 1440) % 1440; return `${Math.floor(h / 60)}:${String(h % 60).padStart(2, "0")}`; };
 
+/**
+ * The usual night the person stated in the interview (person fact `sleep_window`, `HH:MM-HH:MM`, confirmed): the energy curve's night
+ * until real nights are recorded (2026-10-30: a person who sleeps 1:00–9:00 was drawn on 23:30–7:30, peaking 90 minutes early).
+ */
+export function statedSleep(facts: Array<{ identityId: string; slot: string; status: string; value: string }>): { from: number; to: number } | undefined {
+  const fact = facts.find((item) => item.identityId === "person" && item.slot === "sleep_window" && item.status === "confirmed");
+  const match = /^([01]\d|2[0-3]):([0-5]\d)\s*[-–]\s*([01]\d|2[0-3]):([0-5]\d)$/.exec(fact?.value.trim() ?? "");
+  if (!match) return undefined;
+  const from = Number(match[1]) + Number(match[2]) / 60, to = Number(match[3]) + Number(match[4]) / 60;
+  return { from: onsetHour(from), to };
+}
+
 export function energyRhythm(input: {
   episodes: SleepEpisode[]; hourOf: (iso: string) => number;
   /** ISO weekday of a moment in the person's zone, 1 = Monday … 7 = Sunday. */
   weekdayOf: (iso: string) => number;
   phaseShift: number; calibration: EnergyCalibration; reports: Array<{ at: string; level: EnergyLevel }>; now: string;
+  /** The usual night the person told the interview (`statedSleep`), used while no night is recorded; hours, onset past midnight as 25. */
+  stated?: { from: number; to: number } | undefined;
 }): EnergyRhythm {
   const since = Date.parse(input.now) - 28 * 24 * HOUR;
   const nights = input.episodes.filter((episode) => Date.parse(episode.wakeAt) >= since && Date.parse(episode.wakeAt) <= Date.parse(input.now))
     .map((episode) => ({ onset: onsetHour(input.hourOf(episode.sleepAt)), wake: input.hourOf(episode.wakeAt), free: input.weekdayOf(episode.wakeAt) >= 6 }));
-  const usual = nights.length ? { from: median(nights.map((night) => night.onset)), to: median(nights.map((night) => night.wake)) } : { from: 23.5, to: 7.5 };
+  const usual = nights.length ? { from: median(nights.map((night) => night.onset)), to: median(nights.map((night) => night.wake)) } : input.stated ?? { from: 23.5, to: 7.5 };
 
   // Two weeks of the usual night on a synthetic UTC calendar, read with the UTC hour, then one day after the last waking.
   const day0 = Date.parse("2000-01-01T00:00:00Z");

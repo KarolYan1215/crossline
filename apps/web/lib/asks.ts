@@ -35,6 +35,8 @@ import { answerProgress, progressAsks } from "./progress-check";
 import { memoByLedger } from "./ledger-memo";
 import { localeFor, tOf } from "./locale";
 import { intlLocale, monthDay, tFor, type Locale, type Translate } from "./i18n";
+import { pendingInterviewSettings, settleInterviewSettings, startConfirmed } from "./start-confirm";
+import { settingWords } from "./setting-change";
 
 /** Markers an undo has taken back are as if never written. */
 const live = <T extends { eventId: string }>(ctx: AccessContext, events: T[]): T[] => {
@@ -954,6 +956,22 @@ function eventAsks({ ctx, today, t, locale }: Source): Ask[] {
 }
 
 /**
+ * Settings the person stated in the interview once the app was open (before that they are in the start confirmation): one card, applied
+ * together through the settings page's own functions, or declined (2026-10-30).
+ */
+function interviewSettingAsks({ ctx, t }: Source): Ask[] {
+  if (!startConfirmed(ctx)) return [];
+  const pending = pendingInterviewSettings(ctx);
+  if (!pending.length) return [];
+  const lines = pending.map((item) => { const words = settingWords(ctx, item); return t("{{label}}：{{value}}（「{{quote}}」）", { ...words, value: words.to, quote: short(item.quote, 40) }); });
+  return [{ id: "interview:settings", kind: "interview_settings", entityId: "interview", urgency: "later", raisedAt: "",
+    fingerprint: pending.map((item) => `${item.key}|${item.target}|${item.value}`).join(","),
+    title: t("访谈中说到 {{count}} 项设置，要应用吗？", { count: pending.length }),
+    why: lines.join(t("；")),
+    options: [{ id: "apply", label: t("全部应用"), recommended: true }, { id: "skip", label: t("保持现状"), detail: t("之后可在设置页改") }] }];
+}
+
+/**
  * How long it takes to get to a place on the calendar, asked once per place when nothing says (docs/one-input.md 「生活与日程」): no
  * minutes the person gave, no map estimate (no home address, or the map off), no default. 30 minutes are kept meanwhile.
  */
@@ -1022,7 +1040,7 @@ function lockedConflictAsks({ store, ctx, today, now, t, locale }: Source): Ask[
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueAsks, overdueTaskAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, eventAsks, travelAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueAsks, overdueTaskAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, eventAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
@@ -1398,6 +1416,11 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     case "travel_minutes":
       setPlaceMinutes(ctx, ask.entityId, optionId === "online" ? "online" : Number(optionId.slice(1)) || 30);
       return { ok: true };
+    case "interview_settings": {
+      const pending = pendingInterviewSettings(ctx);
+      const settled = await settleInterviewSettings(ctx, optionId === "apply" ? new Set() : new Set(pending.map((item) => `${item.key}|${item.target}`)));
+      return settled.failed ? { ok: false, code: "SETTING_FAILED" } : { ok: true };
+    }
     case "event_propose": {
       decideEvent(ctx, ask.entityId, optionId === "create" ? "create" : optionId === "exists" ? "exists" : "skip");
       // Written now rather than at the next ten-minute pass, so the person sees it on their calendar while they are here.

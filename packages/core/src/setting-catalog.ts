@@ -23,7 +23,11 @@ export type SettingValueSpec =
   /** Each line's share of the week in whole percents: `lineId=40,lineId=30` (together at most 100; empty goes back to what was said). */
   | { type: "shares" }
   /** A block's new time: `YYYY-MM-DD HH:MM-HH:MM` in the person's zone. */
-  | { type: "slot" };
+  | { type: "slot" }
+  /** A clock time `HH:MM`, or empty for the default. */
+  | { type: "clock" }
+  /** Two clock times `HH:MM-HH:MM` (may run past midnight; equal ends turn it off). */
+  | { type: "hours" };
 /** Settings page anchors (`/settings#…`) a card or a link points at. */
 export const SETTINGS_SECTIONS = { general: "通用", phone: "手机访问与推送", device: "这台电脑", calendar: "日历与连接", mail: "邮箱", model: "模型连接",
   notify: "时间与提醒", travel: "出行", automation: "自动化与助手", automations: "自动化", background: "后台任务", personal: "个性化", skills: "Skill 库",
@@ -52,6 +56,8 @@ export const SETTING_CATALOG = {
   "schedule.maxDailyShare": { label: "每日最高占用", target: "", value: percent(50, 100, "%"), consequence: "每天可用时间最多排满的比例，重排日程", section: "plan" },
   "schedule.focusCapMinutes": { label: "单段专注上限", target: "", value: percent(0, 180, "分钟"), consequence: "一个任务连续占用的最长时间（0 为不限），超出部分换到别的时段", section: "plan" },
   "schedule.deadlineBufferDays": { label: "截止前缓冲", target: "", value: percent(0, 5, "天"), consequence: "工作按提前这些天完成来排；排不下时自动放宽", section: "plan" },
+  "notify.quietHours": { label: "免打扰时段", target: "", value: { type: "hours" }, consequence: "这段时间不发提醒，只有本人刚开始的事例外；可跨零点", section: "notify" },
+  "notify.briefTime": { label: "晨间简报时间", target: "", value: { type: "clock" }, consequence: "每天的简报从这个时间起发出（留空则从当天第一个可用时段起）", section: "notify" },
   "notify.level": { label: "推送档位", target: "", value: { type: "enum", values: { off: "关闭", less: "少", normal: "标准", more: "多" } }, consequence: "桌面与手机通知的多少", section: "notify" },
   "language": { label: "语言", target: "", value: { type: "enum", values: { zh: "中文", en: "English" } }, consequence: "界面、通知和之后新生成的内容改用该语言", section: "general" },
   "background.paused": { label: "后台任务暂停", target: "background", value: { type: "enum", values: { paused: "暂停", running: "运行" } }, consequence: "这类后台工作暂停或恢复；正在进行的会做完", section: "background" },
@@ -113,6 +119,15 @@ export type SettingTargets = { milestones: Set<string>; tasks: Set<string>; auto
 const CREDENTIAL = /password|passwd|api.?key|secret|token|credential|pair|login|sign.?in|密码|密钥|令牌|口令|授权码|配对|登录|删除|清空|重置|reset|delete|purge/i;
 export const isCredentialKey = (key: string): boolean => CREDENTIAL.test(key);
 
+const CLOCK = /^([01]\d|2[0-3]):([0-5]\d)$/;
+export const isClock = (value: string): boolean => CLOCK.test(value.trim());
+
+/** `HH:MM-HH:MM` as its two ends, or undefined. The ends may wrap midnight; equal ends mean no quiet hours. */
+export function parseQuiet(value: string | null | undefined): { from: string; to: string } | undefined {
+  const [from, to, extra] = (value ?? "").trim().split(/\s*[-–~至到]\s*/);
+  return from && to && extra === undefined && isClock(from) && isClock(to) ? { from, to } : undefined;
+}
+
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const SLOT = /^(\d{4}-\d{2}-\d{2}) ([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/;
 
@@ -161,6 +176,8 @@ export function settingProblem(args: { key: string; target: string; value: strin
       return Object.values(shares).reduce((sum, share) => sum + share, 0) <= 100 ? "" : "各主线份额合计不能超过 100";
     }
     case "slot": return parseSlot(value) ? "" : "value 须为 YYYY-MM-DD HH:MM-HH:MM，且结束晚于开始";
+    case "clock": return !value || isClock(value) ? "" : "value 须为 HH:MM，或留空恢复默认";
+    case "hours": return parseQuiet(value) ? "" : "value 须为 HH:MM-HH:MM（可跨零点，如 22:30-09:30）";
   }
 }
 /* i18n-ignore-end */
@@ -173,7 +190,8 @@ export function settingCatalogLines(): string[] {
     const spec: SettingValueSpec = entry.value;
     const values = spec.type === "enum" ? Object.entries(spec.values).map(([value, label]) => `${value}=${label}`).join(" / ")
       : spec.type === "number" ? `${spec.min}–${spec.max} ${spec.unit}` : spec.type === "date" ? "YYYY-MM-DD" : spec.type === "text" ? `文字 ≤${spec.max}`
-      : spec.type === "shares" ? "lineId=百分数,…（合计 ≤100；空为按访谈所说）" : "YYYY-MM-DD HH:MM-HH:MM";
+      : spec.type === "shares" ? "lineId=百分数,…（合计 ≤100；空为按访谈所说）" : spec.type === "clock" ? "HH:MM（空为默认）"
+      : spec.type === "hours" ? "HH:MM-HH:MM（可跨零点）" : "YYYY-MM-DD HH:MM-HH:MM";
     return `${key} | ${entry.label} | target：${entry.target || "无"} | ${values}${entry.consent ? " | 隐私同意" : ""}`;
   });
   // i18n-ignore-end

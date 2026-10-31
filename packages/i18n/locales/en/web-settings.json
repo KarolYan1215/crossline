@@ -1231,5 +1231,12 @@
   "关闭后不向任何服务发送地址": "When off, no address is sent to any service",
   "默认路上时间": "Default travel time",
   "没有住址或地图估算不到时使用；不设则逐个地点询问，期间按 30 分钟留": "Used when there is no address or the map cannot estimate; if unset, each place is asked about once, with 30 minutes kept meanwhile",
-  "逐个询问": "Ask per place"
+  "逐个询问": "Ask per place",
+  "省额度": "Save quota",
+  "更强": "Stronger",
+  "模型强度": "Model strength",
+  "只对 ChatGPT 登录生效。": "Applies to a ChatGPT sign-in only.",
+  "每项工作少想一档，额度用得慢，复杂的规划可能粗一些": "Each job thinks one step less: quota lasts longer, complex plans may be rougher",
+  "按每项工作的难度分配：访谈与规划想得多，读日期、归类想得少": "Matched to each job: the interview and planning think more, reading dates and filing think less",
+  "每项工作多想一档，结果更细，额度用得快、回答更慢；额度紧张时自动按标准": "Each job thinks one step more: finer results, quota goes faster and answers come slower; back to normal while quota is tight"
 }

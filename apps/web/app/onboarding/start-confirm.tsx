@@ -18,9 +18,13 @@ export function StartConfirm({ summary }: { summary: StartSummary }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The settings stated in the interview, all ticked: unticking one leaves that setting as it is.
+  const [skip, setSkip] = useState<Set<string>>(new Set());
+  const toggle = (id: string) => setSkip((current) => { const next = new Set(current); if (!next.delete(id)) next.add(id); return next; });
   const confirm = async () => {
     setBusy(true); setError("");
-    const response = await fetch("/api/onboarding/start-confirm", { method: "POST" }).catch(() => undefined);
+    const response = await fetch("/api/onboarding/start-confirm", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ skip: [...skip] }) }).catch(() => undefined);
     const body = await response?.json().catch(() => undefined) as { ok?: boolean; code?: string } | undefined;
     setBusy(false);
     if (body?.ok) { location.assign("/"); return; }
@@ -51,6 +55,14 @@ export function StartConfirm({ summary }: { summary: StartSummary }) {
           <p className="ob-muted">{t(SOURCE[summary.hours.source])}</p>
           <ul>{summary.hours.windows.map((window) => <li key={window}>{window}</li>)}</ul>
         </section>
+        {summary.settings.length > 0 && <section aria-label={t("访谈中说到的设置")}>
+          <h3>{t("访谈中说到的设置")}</h3>
+          <p className="ob-muted">{t("勾选的在开始使用时生效，之后可在设置页改。")}</p>
+          <ul className="ob-start-settings">{summary.settings.map((item) => <li key={item.id}><label>
+            <input type="checkbox" checked={!skip.has(item.id)} onChange={() => toggle(item.id)} />
+            <span><b>{item.label}</b>{t("：{{value}}", { value: item.to })}{item.quote && <small className="gen">{t("依据：「{{quote}}」", { quote: item.quote })}</small>}</span>
+          </label></li>)}</ul>
+        </section>}
         <section aria-label={t("固定日程")}>
           <h3>{t("固定日程：{{count}} 项", { count: summary.fixed.count })}</h3>
           {summary.fixed.count > 0 ? <ul>{summary.fixed.items.map((item) => <li key={item}>{item}</li>)}

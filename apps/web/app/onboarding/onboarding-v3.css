@@ -201,6 +201,9 @@ body:has(.ob-page) .running-head{background:var(--ds-bg)}
 .ob-start-confirm{display:grid;gap:14px;font-size:14px;line-height:1.6}
 .ob-start-confirm h3{margin:0 0 4px;font-size:15px}
 .ob-start-confirm ul{margin:4px 0 0;padding-left:18px}
+.ob-start-settings{list-style:none;padding-left:0!important;display:grid;gap:6px}
+.ob-start-settings label{display:flex;gap:8px;align-items:flex-start}
+.ob-start-settings small{display:block;color:var(--graphite);font-size:12px}
 .ob-start-confirm p{margin:2px 0}
 .ob-start-line{border-left:3px solid var(--lc, var(--rule));padding:4px 0 6px 10px;margin-bottom:8px}
 .ob-start-error{margin:0 auto 0 0;color:#5E1212;font-size:13px}

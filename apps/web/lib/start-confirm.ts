@@ -1,10 +1,11 @@
 import "server-only";
 import {
-  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, START_CONFIRMED_SETTING, resolveAvailability,
+  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, INTERVIEW_SETTINGS, START_CONFIRMED_SETTING, readInterviewSettings, resolveAvailability,
   type AccessContext, type AvailabilityWindow, type DateExtraction, type StoredLineProfile
 } from "@crossline/core";
 import { extractBacklog, startConfirmedFor } from "@crossline/db";
 import { getStore } from "./crossline";
+import { applySettingChange, settingWords } from "./setting-change";
 import { identityLines } from "./lines";
 import { localeFor } from "./locale";
 import { tFor, weekdayShort, type Locale } from "./i18n";
@@ -19,6 +20,8 @@ export type StartSummary = {
     projects: Array<{ name: string; deadline: string }> }>;
   hours: { weekly: number; source: "saved" | "interview" | "stated_hours" | "default"; windows: string[] };
   fixed: { count: number; items: string[] };
+  /** Settings the person stated in the interview, still to apply (`id` is `key|target`). */
+  settings: Array<{ id: string; label: string; to: string; quote: string }>;
 };
 
 const ENERGY: Record<AvailabilityWindow["energy"], string> = { high: "精力高", medium: "精力中", low: "精力低" };
@@ -65,11 +68,35 @@ export function startSummary(ctx: AccessContext): StartSummary {
     hours: { weekly: Math.round(weekly * 10) / 10, source: availability.source,
       windows: availability.windows.map((window) => t("{{days}} {{start}}–{{end}}（{{energy}}）", { days: daysText(window.days, locale), start: window.start, end: window.end, energy: t(ENERGY[window.energy]) })) },
     fixed: { count: recurring.length, items: recurring.slice(0, 8).map((item) => t("{{title}}：{{when}}", { title: item.title,
-      when: `${daysText(item.weekdays, locale)}${item.startTime ? ` ${item.startTime}${item.endTime ? `–${item.endTime}` : ""}` : ""}` })) }
+      when: `${daysText(item.weekdays, locale)}${item.startTime ? ` ${item.startTime}${item.endTime ? `–${item.endTime}` : ""}` : ""}` })) },
+    settings: pendingInterviewSettings(ctx).map((item) => ({ id: `${item.key}|${item.target}`, ...settingWords(ctx, item), quote: item.quote }))
   };
 }
 
 export const startConfirmed = (ctx: AccessContext): boolean => startConfirmedFor(getStore(), ctx.workspaceId);
+
+export const pendingInterviewSettings = (ctx: AccessContext) =>
+  readInterviewSettings(getStore().getSetting(ctx.workspaceId, INTERVIEW_SETTINGS)).filter((item) => item.state === "pending");
+
+/**
+ * Applies the interview's pending settings through the same functions the settings page uses, except the ones the person unticked
+ * (declined). Each is marked, so it is neither offered again nor applied twice; a later statement of the same setting comes back pending.
+ */
+export async function settleInterviewSettings(ctx: AccessContext, skip: ReadonlySet<string>): Promise<{ applied: number; failed: number }> {
+  const store = getStore();
+  const all = readInterviewSettings(store.getSetting(ctx.workspaceId, INTERVIEW_SETTINGS));
+  let applied = 0, failed = 0;
+  for (const item of all) {
+    if (item.state !== "pending") continue;
+    if (skip.has(`${item.key}|${item.target}`)) { item.state = "declined"; continue; }
+    const result = await applySettingChange(ctx, item).catch(() => ({ ok: false as const, code: "SETTING_FAILED" }));
+    if (result.ok) { item.state = "applied"; applied += 1; } else failed += 1;
+  }
+  store.setSetting(ctx.workspaceId, INTERVIEW_SETTINGS, JSON.stringify(all));
+  if (applied) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `onboarding:settings-applied:${new Date().toISOString()}`,
+    type: "onboarding.settings_applied", entityId: ctx.workspaceId, payload: { applied, declined: skip.size } });
+  return { applied, failed };
+}
 
 /** Records the confirmation. Refused while the extraction still owes a reply that can change the summary (the opening or a front-stage answer) or a file. */
 export function confirmStart(ctx: AccessContext): { ok: true } | { ok: false; code: string } {

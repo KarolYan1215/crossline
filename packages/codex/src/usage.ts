@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { EffortPreference } from "@crossline/core";
 import type { SpendMode } from "./model-policy";
 
 /**
@@ -97,4 +98,12 @@ export async function currentSpendMode(now: number = Date.now()): Promise<SpendM
   try { mode = await spendProvider(workspaceId); } catch { /* unreadable: stay normal */ }
   spendCache.set(workspaceId ?? "", { mode, at: now });
   return mode;
+}
+
+let effortProvider: ((workspaceId: string | undefined) => EffortPreference) | undefined;
+/** Where a run reads the person's 模型强度 (the worker reads the ledger's `model.effort`). Read per run, so a change applies to the next. */
+export function setEffortPreferenceProvider(provider: ((workspaceId: string | undefined) => EffortPreference) | undefined): void { effortProvider = provider; }
+/** Unreadable is `default`. */
+export function currentEffortPreference(): EffortPreference {
+  try { return effortProvider?.(workspaceContext.getStore()?.workspaceId) ?? "default"; } catch { return "default"; }
 }

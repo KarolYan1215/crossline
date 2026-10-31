@@ -4,7 +4,7 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, codexProcessEnvironment, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, codexProcessEnvironment, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -38,7 +38,7 @@ import { mailRecordsRepair } from "./mail-records-repair";
 import { moneyReportPass } from "./money-report";
 import { dateAdvancePass } from "./date-advance";
 import { createWriteLogin } from "./calendar-write-login";
-import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE_TOKEN_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, NODE_TOKEN_SETTING, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, htmlLang, tFor, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput } from "@crossline/core";
+import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE_TOKEN_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, NODE_TOKEN_SETTING, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, htmlLang, tFor, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput, MODEL_EFFORT_SETTING, effortPreferenceOf } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
 import { createManualbookBuilder, pendingMaterialWorkOrders, pendingTutorials, prepareMaterialsAhead } from "./manualbook";
 import { startingWithin } from "./schedule-window";
@@ -1013,6 +1013,8 @@ setUsageSink((usage) => {
 setSpendModeProvider(async (workspaceId) => backgroundSpend(await readCost(workspaceId)).mode);
 // New model output is written in the workspace's language (docs/i18n.md); read per run, so a switch applies to the next run.
 setLocaleProvider((workspaceId) => workspaceId ? readLocale(analysisStore, workspaceId) : undefined);
+// The person's 模型强度 (Settings → 模型连接), read per run; only runs on the account's own Codex take it (skill-runner).
+setEffortPreferenceProvider((workspaceId) => effortPreferenceOf(workspaceId ? analysisStore.getSetting(workspaceId, MODEL_EFFORT_SETTING) : null));
 // The one quota gate for every background pass (core: keeps the person's own work moving; discretionary: nobody is waiting on it).
 const readSpend = createBackgroundSpend(analysisStore, (workspaceId) => readCost(workspaceId));
 const spendFor = async (workspaceId: string) => {

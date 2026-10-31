@@ -1,4 +1,4 @@
-import { answersInReply, freeTextAnswers, ledgerLines, questionSimilarity, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
+import { answersInReply, freeTextAnswers, ledgerLines, questionSimilarity, unsureAnswer, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
 import type { CrosslineStore, StoredSentence } from "@crossline/db";
 
 /**
@@ -69,11 +69,14 @@ export function resolveRepeats(store: CrosslineStore, workspaceId: string, sessi
   const answered = ledger.filter((question) => question.status === "answered" || question.status === "assumed");
   const coveredGaps = new Set<string>();
   const dropped: RepeatOutcome["dropped"] = [];
+  // An answer that settled nothing (「不确定」) may be asked about once more, never twice: the start items take only the person's word.
+  const askedAgain = (id: number) => ledger.some((item) => item.repeats === id);
+  const reopenable = (item: LedgerQuestion) => item.status === "answered" && unsureAnswer(item.answer) && !askedAgain(item.id);
   const kept = questions.filter((question) => {
     const named = question.repeats ? byId.get(question.repeats) : undefined;
-    if (named && (named.status === "answered" || named.status === "assumed")) { dropped.push({ text: question.text, repeats: named.id, why: "answered" }); return false; }
+    if (named && (named.status === "answered" || named.status === "assumed") && !reopenable(named)) { dropped.push({ text: question.text, repeats: named.id, why: "answered" }); return false; }
     if (named?.key.startsWith("gap:")) coveredGaps.add(named.key.slice(4));
-    const twin = !named && answered.find((item) => questionSimilarity(item.text, question.text) >= REPEAT_SIMILARITY);
+    const twin = !named && answered.find((item) => questionSimilarity(item.text, question.text) >= REPEAT_SIMILARITY && !reopenable(item));
     if (twin) { dropped.push({ text: question.text, repeats: twin.id, why: "similar" }); return false; }
     return true;
   }).map((question) => ({ ...question, repeats: question.repeats && byId.has(question.repeats) ? question.repeats : 0 }));

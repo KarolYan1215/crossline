@@ -276,3 +276,13 @@ describe("numbers come from a target on the record, proposed from the person's g
     expect(code(exam(["research/ece555/grading", "research/ece555/target_grade"]), parts)).toBe("MILESTONE_COURSE_PARTS_MISSING");
   });
 });
+
+test("a score line earlier in a chain may not stand above the chain's final one (a 7.0 mock before a 6.5 exam)", () => {
+  const score = (value: number) => ({ successCriteria: [{ statement: `总分达到 ${value}`, evidenceOf: "outcome",
+    measure: { kind: "threshold", unit: "分", comparator: "gte", value, bareLine: value - 0.5 } }] });
+  const scored = (mock: number, exam: number) => [chain()[0]!,
+    item("雅思全科模拟总分达标", plan({ key: "b", stage: 2, deadline: "2026-10-31", dependsOn: ["a"] }), score(mock)),
+    item("雅思考试总分达标", plan({ key: "c", stage: 3, deadline: "2026-12-20", dependsOn: ["b"] }), score(exam))];
+  refused(scored(7, 6.5), "MILESTONE_THRESHOLD_REGRESSES");
+  expect(() => validateMilestonePlans(scored(6.5, 7), profile, new Set())).not.toThrow();
+});

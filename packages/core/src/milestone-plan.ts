@@ -269,6 +269,19 @@ export function validateMilestonePlans(milestones: Proposed[], profile: ProfileF
         refuse("MILESTONE_ORDER_INCONSISTENT", `主线「${identityId}」里「${later.title}」（阶段 ${later.plan.stage}）的截止日期早于它前面的「${earlier.title}」。`);
       }
     }
+    // The chain's last score line under an earlier one of the same kind (2026-10-30: a 7.0 mock exam before a 6.5 real one). A course's
+    // parts are scored on their own scales (a quiz average and a midterm), so only a chain outside a course is checked.
+    const last = ordered.at(-1);
+    const projectId = last?.projectId ?? "";
+    const facts = projectId ? profile.facts.filter((fact) => fact.projectId === projectId) : [];
+    if (last && !(projectId && isCourse(projectId, facts, profile.dates, profile.undated))) {
+      const lines = (item: Planned) => item.successCriteria.flatMap((criterion) => criterion.measure?.kind === "threshold" && criterion.measure.comparator === "gte"
+        ? [{ unit: criterion.measure.unit, value: criterion.measure.value ?? 0 }] : []);
+      for (const earlier of ordered.slice(0, -1)) for (const before of lines(earlier)) for (const final of lines(last)) {
+        if (before.unit === final.unit && before.value > final.value) refuse("MILESTONE_THRESHOLD_REGRESSES",
+          `「${earlier.title}」要求 ≥ ${before.value}${before.unit}，比这条链最后的「${last.title}」（≥ ${final.value}${final.unit}）还高：中间的线应不高于最终目标，或把最终目标提到本人说的数。`);
+      }
+    }
   }
 
   for (const item of keys.values()) {

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { answersInReply, freeTextAnswers, ledgerLines, questionSimilarity } from "./question-ledger";
+import { answersInReply, freeTextAnswers, ledgerLines, questionSimilarity, unsureAnswer } from "./question-ledger";
 
 test("similarity reads what a question says, not its punctuation", () => {
   expect(questionSimilarity("ECE 555 期末考试是哪一天？", "ECE555期末考试是哪一天")).toBe(1);
@@ -30,4 +30,9 @@ test("a reply in the person's own words answers the questions its sentences spea
   expect(answers.map((answer) => answer.id)).toEqual([1, 2]);
   expect(answers[1]!.answer).toBe("生活里我想保住每天的睡眠，和朋友吃顿饭。");
   expect(reply.slice(answers[0]!.start, answers[0]!.end)).toBe("工作对我来说主要是把一个问题做成别人能用的东西。");
+});
+
+test("an answer that settles nothing is told apart from one that does", () => {
+  expect(["补充：不确定", "选择：还不知道", "补充：不确定。", "暂不确定", "", "选择：暂无"].map(unsureAnswer)).toEqual([true, true, true, true, true, true]);
+  expect(["补充：Crossline", "选择：没有截止", "补充：每周二，具体时间不确定。"].map(unsureAnswer)).toEqual([false, false, false]);
 });

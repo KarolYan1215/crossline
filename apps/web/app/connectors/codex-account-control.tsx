@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Tag } from "../ui/tag";
+import { SegmentedControl } from "../ui/controls";
 import { useT } from "../locale-context";
 import { tFor, type Translate } from "../../lib/i18n";
 
@@ -117,6 +118,7 @@ export function CodexAccountControl({ onConnected }: {
         {account && guest && <button type="button" disabled={busy} onClick={() => void post({ action: "logout" })}>{t("退出登录")}</button>}
         <button type="button" onClick={refresh} title={t("重新读取登录状态")}>{t("↻ 刷新状态")}</button>
       </span></div>
+    {account && account.type !== "apiKey" && <ModelEffort />}
     {state && !account && deviceCode && <ol className="codex-steps">
       {/* OpenAI refuses every code until this switch is on, and a code entered before it is spent (owner's run, 2026-10-15). */}
       <li>{t("先在 ChatGPT 网页版打开 设置 → 安全，开启「为 Codex、Excel、PowerPoint 和 Word 启用设备代码登录」（只需一次）")}</li>
@@ -138,4 +140,35 @@ export function CodexAccountControl({ onConnected }: {
       <span className="st-row-actions"><button type="submit" disabled={busy || !apiKey.trim()}>{t("保存")}</button></span>
     </form>}
   </section>;
+}
+
+const EFFORTS = [
+  { value: "lower", label: "省额度", title: "每项工作少想一档，额度用得慢，复杂的规划可能粗一些" },
+  { value: "default", label: "标准", title: "按每项工作的难度分配：访谈与规划想得多，读日期、归类想得少" },
+  { value: "higher", label: "更强", title: "每项工作多想一档，结果更细，额度用得快、回答更慢；额度紧张时自动按标准" }
+] as const;
+type Effort = (typeof EFFORTS)[number]["value"];
+
+/** 模型强度 (2026-10-31): only for a ChatGPT sign-in, since a provider's or the developer's model is never moved by it. */
+function ModelEffort() {
+  const t = useT();
+  const [value, setValue] = useState<Effort>();
+  const [status, setStatus] = useState<"" | "saved" | "failed">("");
+  useEffect(() => {
+    void fetch("/api/settings/model-effort", { cache: "no-store" }).then((response) => response.json() as Promise<{ effort?: Effort }>)
+      .then((answer) => setValue(answer.effort ?? "default")).catch(() => setValue("default"));
+  }, []);
+  const change = async (next: Effort) => {
+    const previous = value;
+    setValue(next);
+    const response = await fetch("/api/settings/model-effort", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ effort: next }) }).catch(() => null);
+    if (!response?.ok) setValue(previous);
+    setStatus(response?.ok ? "saved" : "failed");
+  };
+  const title = EFFORTS.find((option) => option.value === value)?.title;
+  return <div className="st-row"><span className="st-row-label">{t("模型强度")}<small>{title ? t(title) : t("正在读取…")}{" "}{t("只对 ChatGPT 登录生效。")}</small></span>
+    {value && <SegmentedControl label={t("模型强度")} value={value} onChange={(next) => void change(next)}
+      options={EFFORTS.map(({ value: v, label, title: tip }) => ({ value: v, label: t(label), title: t(tip) }))} />}
+    {status && <small role="status" className={status === "saved" ? "st-ok" : "st-fail"}>{status === "saved" ? t("已保存") : t("未保存")}</small>}
+  </div>;
 }

@@ -1,4 +1,4 @@
-import { ACTIVITY_HOURLY, atComputerByHour, type ActivityHour, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, activityCategoryLabel, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
+import { ACTIVITY_HOURLY, BRIEF_TIME_SETTING, DEFAULT_QUIET, QUIET_HOURS_SETTING, atComputerByHour, type ActivityHour, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, activityCategoryLabel, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
 import { assistantAvailable, categoryMode, isAutoHandoff, readCategories } from "@crossline/db";
 import { AppShell } from "../app-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
@@ -23,7 +23,7 @@ import { HEALTH_TOKEN_SETTING, energyModel, phoneDailyLatest, phoneHealthOn } fr
 import { UsageCard } from "./usage-card";
 import { QuotaCard } from "./quota-card";
 import { readQuota } from "../../lib/quota";
-import { NotifyLevel } from "./notify-level";
+import { NotifyLevel, NotifyTimes } from "./notify-level";
 import { TravelCard } from "./travel-card";
 import { PhonePush } from "./phone-push";
 import { EffectivenessCard } from "./effectiveness-card";
@@ -193,6 +193,7 @@ export default async function SettingsPage() {
                 ? t("工作块开始前 10 分钟、等待项到期日和截止前 2 天的提醒写在 Crossline 日历上")
                 : t("工作块开始、等待项到期和临近截止时提醒到桌面与手机")}</small></header>
               <NotifyLevel level={setting("notify.level") ?? "normal"} />
+              <NotifyTimes quiet={setting(QUIET_HOURS_SETTING) ?? `${DEFAULT_QUIET.from}-${DEFAULT_QUIET.to}`} brief={setting(BRIEF_TIME_SETTING) ?? ""} />
               <div className="st-row"><span className="st-row-label">{t("可用时段、排程参数与重要性")}<small>{t("在「计划」页设置，修改前预览影响")}</small></span>
                 <a className="secondary-button" href="/plan#why">{t("打开计划")}</a></div>
               {/* The weekly grid is the plan page's; here only the consents that feed the energy reading (2026-10-28, scenarios.md §3-7). */}

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { ATTENTION_SNAPSHOT, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, inferWorkState, monthDay, resolveAvailability, tFor, type ActivitySegment, type AvailabilityWindow, type Locale } from "@crossline/core";
+import { ATTENTION_SNAPSHOT, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BRIEF_TIME_SETTING, QUIET_HOURS_SETTING, inQuiet, inferWorkState, isClock, quietHoursOf, monthDay, resolveAvailability, tFor, type ActivitySegment, type AvailabilityWindow, type Locale } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { ownerOf } from "./owner";
 import { ACTIVITY_DETAIL_CONSENT } from "./activity-recorder";
@@ -24,6 +24,10 @@ export type NotifyInput = {
   today: string; clock: string; weekday: number;
   level: NotifyLevel;
   windows: AvailabilityWindow[];
+  /** The person's quiet hours (`notify.quietHours`): nothing urgent is sent inside them. Omitted = none. */
+  quiet?: { from: string; to: string };
+  /** When the morning brief goes out (`notify.briefTime`); omitted = the day's first available hour. */
+  briefAt?: string;
   /** Keys already sent (each key carries its own day where it should repeat daily). */
   sent: Set<string>;
   /** Single (non-brief) messages already sent today: the daily cap counts them. */
@@ -55,7 +59,7 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
   const t = tFor(input.locale);
   const sep = input.locale === "en" ? "; " : "；";
   const out: PlannedNotification[] = [];
-  const start = firstStart(input);
+  const start = input.briefAt ?? firstStart(input);
   const briefKey = `brief:${input.today}`;
   // A morning brief belongs to the morning: from the first available hour for four hours. Turned on at 20:00 for the
   // first time (the day this was deployed), it used to send "today's" brief in the evening.
@@ -72,7 +76,7 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
       body: [...lines, input.unconfirmedLastNight ? t("昨晚 {{count}} 块待确认", { count: input.unconfirmedLastNight }) : "",
         input.pending ? t("{{count}} 项待决定", { count: input.pending }) : ""].filter(Boolean).join(sep) || t("今日无到期事项。") });
   }
-  if (!inWindow(input)) return out;
+  if (!inWindow(input) || (input.quiet && inQuiet(input.clock, input.quiet))) return out;
   const due = input.dueSoon.filter((item) => item.daysLeft <= 1).map((item) => ({ key: `due:${item.id}:${input.today}`, kind: "urgent" as const, path: "/milestones",
     title: item.daysLeft === 0 ? t("今天到期：{{title}}", { title: item.title }) : t("明天到期：{{title}}", { title: item.title }),
     body: t("截止 {{deadline}}。", { deadline: input.locale === "en" ? monthDay("en", item.deadline) : item.deadline }) }));
@@ -171,7 +175,9 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   try { attention = JSON.parse(store.getSetting(workspaceId, ATTENTION_SNAPSHOT) || "null") ?? undefined; } catch { attention = undefined; }
   if (attention && now.getTime() - Date.parse(attention.at) > ATTENTION_FRESH_MS) attention = undefined;
   const locale = localeOf(store, workspaceId);
+  const briefAt = store.getSetting(workspaceId, BRIEF_TIME_SETTING) ?? "";
   const planned = planNotifications({ today, clock, weekday, level, windows, sent, urgentSentToday, locale,
+    quiet: quietHoursOf(store.getSetting(workspaceId, QUIET_HOURS_SETTING)), ...(isClock(briefAt) ? { briefAt } : {}),
     ...(attention ? { asks: attention.asks } : {}),
     pending: attention?.pending ?? store.listWorkOrders(workspaceId).filter((order) => order.state === "awaiting_plan_approval").length
       + store.listMilestones(workspaceId).filter((milestone) => milestone.status === "draft").length,

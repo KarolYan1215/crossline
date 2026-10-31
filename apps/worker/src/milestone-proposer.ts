@@ -132,6 +132,14 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
     && !(options.replaceUntouchedDrafts && isUntouchedDraft(milestone)));
   const facts = store.listProfileFacts(workspaceId);
   const identities = identityLines(store, workspaceId);
+  // A fixed-schedule line that is only the work itself (「上班日常工作」, no deadline, 2026-10-30): its hours are already kept free by the
+  // fixed schedule, and a chain for it was busywork the person never asked for (「工作安排表已确认」「工资到账记录已提交」).
+  const projectsNow = store.listProjects(workspaceId);
+  const onlyDailyWork = (lineId: string) => {
+    const own = projectsNow.filter((project) => project.identityId === lineId && !project.id.endsWith("-default"));
+    return Boolean(identities.find((line) => line.id === lineId)?.hard) && own.length > 0 && own.every((project) =>
+      facts.some((fact) => fact.projectId === project.id && fact.slot === "no_deadline" && fact.status === "confirmed"));
+  };
   // A domain line's templates are added the first time its milestones are designed (INSERT OR IGNORE: a person's own edits stay).
   for (const pack of identities) if (pack.domain) store.seedMilestoneTemplates(workspaceId, domainMilestoneTemplates(pack.id, pack.domain));
   const now = options.now?.() ?? (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date());
@@ -168,7 +176,7 @@ export function buildProposalContext(store: CrosslineStore, workspaceId: string,
         // only guesses cannot be asked for — the model, rightly, answered that it could not, and the line was lost with a blocker.
         ? identities.map((pack) => pack.id).filter((id) => {
             const own = facts.filter((fact) => fact.identityId === id);
-            return own.length >= FACTS_PER_REQUIRED_LINE && own.some((fact) => fact.status === "confirmed");
+            return own.length >= FACTS_PER_REQUIRED_LINE && own.some((fact) => fact.status === "confirmed") && !onlyDailyWork(id);
           })
         : [],
       projects: store.listProjects(workspaceId).map(({ id, identityId, name }) => ({ id, identityId, name })),

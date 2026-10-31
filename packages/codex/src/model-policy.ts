@@ -10,6 +10,8 @@
  * through an OpenAI-compatible Responses endpoint — is a change to `DEFAULT_TIERS` or an environment
  * override, never a change to a runner.
  */
+import type { EffortPreference } from "@crossline/core";
+
 export type ModelRoute = {
   model: string; effort?: string;
   /** How many times a rejected answer may be sent back. A weaker model needs more; the default is two. */
@@ -148,4 +150,23 @@ export function routeForSkill(skillName: string, env: NodeJS.ProcessEnv = proces
   const effective = mode === "economy" && !NEVER_DOWNGRADED.has(key) ? stepDown(tier) : tier;
   // An override describes the Skill's own tier; once the Skill has stepped down it takes the lower tier as it is.
   return effective === tier ? { ...routes[effective], ...SKILL_OVERRIDES[key] } : { ...routes[effective] };
+}
+
+const EFFORT_LADDER = ["minimal", "low", "medium", "high", "xhigh"];
+/** With no catalogue to say what the model takes, the middle three: every model this app routes to takes them. */
+const SAFE_EFFORTS = ["low", "medium", "high"];
+/**
+ * The person's 模型强度 applied to a route: its effort one step lower or higher, to the nearest effort the model takes (`supported`, from
+ * the account's catalogue). A route without an effort, or with none further that way, stays as it is.
+ */
+export function shiftEffort(route: ModelRoute | undefined, preference: EffortPreference, supported?: string[]): ModelRoute | undefined {
+  if (!route?.effort || preference === "default") return route;
+  const from = EFFORT_LADDER.indexOf(route.effort);
+  if (from < 0) return route;
+  const takes = supported?.length ? supported : SAFE_EFFORTS;
+  const step = preference === "higher" ? 1 : -1;
+  for (let at = from + step; at >= 0 && at < EFFORT_LADDER.length; at += step) {
+    if (takes.includes(EFFORT_LADDER[at]!)) return { ...route, effort: EFFORT_LADDER[at]! };
+  }
+  return route;
 }

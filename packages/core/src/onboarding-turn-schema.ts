@@ -2,6 +2,7 @@ import { RELATION_KINDS } from "./flywheel-schema";
 import { DATE_EXTRACTION_SCHEMA, type DateExtraction } from "./date-schema";
 import { SCHWARTZ_VALUES } from "./portrait";
 import type { ProfileCard } from "./profile-instruments";
+import { INTERVIEW_SETTING_KEYS } from "./interview-settings";
 import {
   ATTRIBUTE_CANDIDATES_MAX, ATTRIBUTE_CANDIDATES_MIN, ATTRIBUTE_KIND_FIELD, ATTRIBUTE_KINDS, ATTRIBUTE_MAX_LENGTH, attributeProblem, cleanAttribute, duplicateAttributes,
   guessKind, notAtomic, type AttributeCandidate, type AttributeKind
@@ -164,6 +165,8 @@ export type OnboardingTurn = {
   goalEdits?: GoalEdit[];
   /** Filled once a hard-constraint line's rules are known (empty `windows` otherwise). */
   availability?: AvailabilityProposal;
+  /** How the person said the system should work (`INTERVIEW_SETTING_KEYS`), each resting on one of their replies (`interview-settings.ts`). */
+  settings?: Array<{ key: string; target: string; value: string; sourceRef: string; sourceQuote: string }>;
   profile?: ProfileModel;
   /** The dialogue's observation of the round (deep stages only; dropped in code when its quotes do not check out). */
   insight?: TurnInsight;
@@ -284,6 +287,11 @@ export type OnboardingTurnContext = {
 export type OnboardingExtractContext = {
   version: "crossline.onboarding.extract.v1";
   today: string; timeZone: string;
+  /**
+   * The weekly hours on record (the last proposal), in minutes, so a run that sends `availability` again keeps what the new replies do
+   * not change (2026-10-30: a run reading only the sleep-and-running reply rebuilt the hours from it and lost the weekend).
+   */
+  hours?: Array<{ days: number[]; startMinute: number; endMinute: number; energy: "low" | "medium" | "high" }>;
   lines: Array<{ id: string; label: string; hard: boolean; goals: string[]; domain?: string }>;
   /** The domain lines' fixed slots and goal adjectives, so their facts are recorded under the same names every time. */
   domainGuides?: DomainGuideContext[];
@@ -490,6 +498,9 @@ function turnFields(ids?: TurnIds) {
     availability: object({ windows: { type: "array", maxItems: 14, items: object({ days: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } },
       startMinute: { type: "integer", minimum: 0, maximum: 1440 }, endMinute: { type: "integer", minimum: 0, maximum: 1440 },
       energy: { type: "string", enum: ["low", "medium", "high"] } }) }, why: { type: "string", maxLength: 400 } }),
+    // Settings the person stated (2026-10-30): a catalog key, its target (an assistant category, else ""), the value as the catalog writes it.
+    settings: { type: "array", maxItems: 12, items: object({ key: { type: "string", enum: [...INTERVIEW_SETTING_KEYS] }, target: { type: "string", maxLength: 40 },
+      value: { type: "string", maxLength: 40 }, refs: REFS }) },
     // Card items answered in words (`scaleItems`): 1–5 on the item's own scale, confidence 0–1, the sentences it rests on.
     itemScores: { type: "array", maxItems: 20, items: object({ itemId: slug, score: { type: "integer", minimum: 1, maximum: 5 },
       confidence: { type: "number", minimum: 0, maximum: 1 }, refs: REFS }) },
@@ -506,7 +517,7 @@ function turnFields(ids?: TurnIds) {
  * portrait — is written by its own run in the background, so its repairs never hold the conversation up.
  */
 export const DIALOGUE_KEYS = ["reply", "questions", "coverage", "nextAction", "stage", "insight", "progress"] as const;
-export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "profileSections", "itemScores"] as const;
+export const EXTRACT_KEYS = ["slotUpdates", "projectsDetected", "flywheelCandidates", "fileDates", "lineProfiles", "goalEdits", "availability", "settings", "profileSections", "itemScores"] as const;
 export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnFields(ids), DIALOGUE_KEYS));
 export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
 export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
@@ -515,7 +526,7 @@ export const ONBOARDING_EXTRACT_SCHEMA = onboardingExtractSchema();
 export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress">;
 /** What the background run writes to the ledger. */
 export type OnboardingExtraction = Pick<OnboardingTurn, "slotUpdates" | "projectsDetected" | "flywheelCandidates" | "lineProfiles" | "goalEdits"
-  | "availability"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
+  | "availability" | "settings"> & { fileDates?: DateExtraction; profileSections?: ProfileSections; itemScores?: ItemScore[] };
 
 const SLOT = /^[a-z][a-z0-9_]{1,39}$/;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;

@@ -4,13 +4,13 @@ import {
   AGENT_CATEGORIES, AGENT_HISTORY_CONSENT, BACKGROUND_KINDS, BACKGROUND_PAUSED, CAMERA_ENERGY_CONSENT, FAMILIARITY_SETTING, INPUT_RHYTHM_CONSENT, MAIL_ACCOUNTS_SETTING,
   MAIL_REPLY_DRAFTS_SETTING, QUOTA_SAVER_SETTING, RECORDING_CONSENT, RECORDING_SERVER_CONSENT, RECORDING_VOICEPRINT_CONSENT, SETTING_CATALOG, SLEEP_TRACKING_CONSENT,
   TELEMETRY_ENABLED_SETTING, AUTOMATIONS_SETTING, completionRule, familiarityKey, parseShares, parseSlot, pausedKinds, quotaSaverOn, readAutomations, readMailAccounts,
-  replyDraftsOn, type AccessContext, type AgentCategory, type BackgroundKind, type SettingEntry, type SettingKey, type SettingValueSpec
+  replyDraftsOn, BRIEF_TIME_SETTING, QUIET_HOURS_SETTING, quietHoursOf, type AccessContext, type AgentCategory, type BackgroundKind, type SettingEntry, type SettingKey, type SettingValueSpec
 } from "@crossline/core";
 import { normalizeParams, paramsFor, PARAMS_ASAP, PARAMS_BUFFERED, type ScheduleParams } from "@crossline/planner";
 import { setAutostart, autostartAvailable } from "./autostart";
 import { setBackgroundPaused, setQuotaSaver } from "./background";
 import { requestCodexSupervisor } from "./codex-runtime";
-import { SCREEN_LEVEL_CHANGE, dismissEnergyAdvice, screenLevel, setActivityConsent, setAgentHistory, setEnergySignal, setNotifyLevel, setRecordings, setServerRecordings,
+import { SCREEN_LEVEL_CHANGE, dismissEnergyAdvice, screenLevel, setActivityConsent, setAgentHistory, setBriefTime, setEnergySignal, setNotifyLevel, setQuietHours, setRecordings, setServerRecordings,
   setSleepTracking, setTelemetry, setVoiceprint, type ScreenLevel } from "./consents";
 import { appNow, effectiveSchedulePreferences, getStore, loadCurrentPlan, lockBlock, milestoneDeadline, readFrozen, readLineShares, saveGoalSettings, saveMilestoneEdit,
   setCompletionMode, unlockBlock } from "./crossline";
@@ -83,6 +83,9 @@ export const SETTING_HANDLERS: Record<SettingKey, Handler> = {
   "schedule.maxDailyShare": withParam("maxDailyShare"),
   "schedule.focusCapMinutes": withParam("focusCapMinutes"),
   "schedule.deadlineBufferDays": withParam("deadlineBufferDays"),
+  "notify.quietHours": { current: (ctx) => { const quiet = quietHoursOf(setting(ctx, QUIET_HOURS_SETTING)); return `${quiet.from}-${quiet.to}`; },
+    apply: (ctx, _target, value) => setQuietHours(ctx, value) },
+  "notify.briefTime": { current: (ctx) => setting(ctx, BRIEF_TIME_SETTING) ?? "", apply: (ctx, _target, value) => setBriefTime(ctx, value) },
   "notify.level": { current: (ctx) => setting(ctx, "notify.level") ?? "normal", apply: (ctx, _target, value) => setNotifyLevel(ctx, value) },
   "language": {
     current: (ctx) => chosenLocale(store(), ctx.workspaceId) ?? localeFor(ctx),
@@ -194,7 +197,7 @@ export type SettingView = { label: string; from: string; to: string; consequence
 
 const readable = (ctx: AccessContext, spec: SettingValueSpec, raw: string | undefined): string => {
   const t = tOf(ctx);
-  if (raw === undefined || raw === "") return t("未设置");
+  if (raw === undefined || raw === "") return spec.type === "clock" ? t("从第一个可用时段起") : t("未设置");
   if (spec.type === "enum") return spec.values[raw] ? t(spec.values[raw]!) : raw;
   if (spec.type === "number") return `${raw} ${t(spec.unit)}`;
   if (spec.type === "shares") {
@@ -236,6 +239,14 @@ export async function describeSettingChange(ctx: AccessContext, args: { key: Set
   }
   return { label: name ? t("{{label}}：{{name}}", { label: t(entry.label), name }) : t(entry.label), from: readable(ctx, entry.value, current),
     to: readable(ctx, entry.value, args.value.trim()), consequence, ...(entry.explain ? { explain: entry.explain.map((line) => t(line)) } : {}) };
+}
+
+/** A setting and the value it would take, in words, without reading its current value (the start confirmation lists several at once). */
+export function settingWords(ctx: AccessContext, args: { key: SettingKey; target: string; value: string }): { label: string; to: string } {
+  const t = tOf(ctx);
+  const entry: SettingEntry = SETTING_CATALOG[args.key];
+  const name = entry.target ? targetName(ctx, entry, args.target) : "";
+  return { label: name ? t("{{label}}：{{name}}", { label: t(entry.label), name }) : t(entry.label), to: readable(ctx, entry.value, args.value.trim()) };
 }
 
 export async function applySettingChange(ctx: AccessContext, args: { key: SettingKey; target: string; value: string }): Promise<Result> {
