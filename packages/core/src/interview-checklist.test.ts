@@ -152,4 +152,7 @@ test("the portrait's parts are read by meaning: the slot names the extraction wr
   expect(interviewChecklist({ ...full, facts }).find((item) => item.id === "portrait_grounded")).toMatchObject({ done: true, detail: "" });
   const other = [...full.facts.filter((fact) => fact.identityId !== "person"), person("one_year_priority"), person("motto"), person("drain_activity")];
   expect(interviewChecklist({ ...full, facts: other }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
+  // 2026-11-01: 「过得好」 and 「做事看重」 were written as good_life and work_standards.
+  const third = [...full.facts.filter((fact) => fact.identityId !== "person"), person("worry"), person("good_life"), person("habits")];
+  expect(interviewChecklist({ ...full, facts: third }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
 });

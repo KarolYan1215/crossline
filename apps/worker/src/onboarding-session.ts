@@ -665,13 +665,17 @@ export function withGapQuestions<T extends OnboardingDialogue>(output: T, gaps: 
   const blockingGaps = open.filter((gap) => gap.blocking);
   const near = open.filter((gap) => !gap.blocking && relevant(gap));
   const rest = open.filter((gap) => !gap.blocking && !relevant(gap));
-  const room = Math.max(0, (round.roundMax ?? ROUND_QUESTIONS_MAX) - output.questions.length - blockingGaps.length);
+  // The questions that block (goals, appearance) always come; the model's give way to them down to one, so the round stays within its
+  // limit (the 2026-11-01 rerun showed three of the model's, two goal pickers and the appearance question in one batch).
+  const max = round.roundMax ?? ROUND_QUESTIONS_MAX;
+  const own = blockingGaps.length ? output.questions.slice(0, Math.max(1, max - blockingGaps.length)) : output.questions;
+  const room = Math.max(0, max - own.length - blockingGaps.length);
   const added = [...blockingGaps, ...(near.length ? near : rest.slice(0, 1)).slice(0, Math.min(GAPS_PER_ROUND, room))];
   const blocking = gaps.some((gap) => gap.blocking);
   if (!added.length && !(blocking && output.nextAction === "ready_for_milestones")) return output;
   return {
     ...output,
-    questions: [...output.questions, ...added.map((gap) => gap.question)],
+    questions: [...own, ...added.map((gap) => gap.question)],
     nextAction: blocking ? "ask" : output.nextAction,
     ...(blocking && output.nextAction === "ready_for_milestones"
       ? { reply: `${output.reply}\n\n${tFor(round.locale)("开始使用前，还需要本人回答下面几项。")}` } : {})

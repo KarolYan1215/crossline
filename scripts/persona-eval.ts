@@ -217,7 +217,9 @@ async function runPerson(name: string, opening: Opening) {
         ...(cards.length ? ["", `卡片：${cards.map((card) => `${card.title}（${card.items.length} 题）`).join("、")}`] : []),
         ...(turn.insight?.text ? ["", `洞察：${turn.insight.text}`] : []), "");
       rounds.push({ turn: turns, stage: turn.stage, questions: batch.length, held: shown.extra.length, cards: cards.reduce((sum, card) => sum + card.items.length, 0),
-        insight: Boolean(turn.insight?.text), next: turn.nextAction, modelSeconds: Math.round((Date.now() - turnStarted) / 1000) });
+        insight: Boolean(turn.insight?.text), next: turn.nextAction, modelSeconds: Math.round((Date.now() - turnStarted) / 1000),
+        startOpen: items.filter((item) => item.start && !item.done).map((item) => item.id),
+        open: items.filter((item) => !item.done && !item.deferred && item.owner === "interview").map((item) => item.id) });
       log({ turn: turns, stage: turn.stage, questions: batch.length, cards: cards.length, next: turn.nextAction, ready: Boolean(readyAt) });
       if (outcome.state === "ready") break;
 
@@ -284,7 +286,7 @@ async function runPerson(name: string, opening: Opening) {
         text: question.text, answer: question.answer ?? "", repeats: question.repeats ?? 0 })),
       facts: store.listProfileFacts(workspaceId).map((fact) => ({ line: fact.identityId, project: fact.projectId, slot: fact.slot, value: fact.value, status: fact.status })),
       projects: store.listProjects(workspaceId).map((project) => ({ line: project.identityId, name: project.name })),
-      checklist: checklist.map(({ id, label, done, owner, detail }) => ({ id, label, done, owner, detail })),
+      checklist: checklist.map(({ id, label, done, owner, detail, start, deferred }) => ({ id, label, done, owner, detail, ...(start ? { start } : {}), ...(deferred ? { deferred } : {}) })),
       cost: { interview: cost(interviewKey), player: cost(playerKey) }
     };
     writeFileSync(path.join(dir, "result.json"), JSON.stringify(result, null, 2), "utf8");

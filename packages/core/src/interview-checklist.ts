@@ -82,7 +82,7 @@ const settledFact = (fact: { status: string; sourceRef: string; value?: string }
  */
 const PORTRAIT_PARTS: Array<{ label: string; slots: RegExp; ask: string }> = [
   { label: "现状与真问题", slots: /problem|situation|status|current|pressure|anxi|worry|constraint|gravity|stage|risk|priorit|change|lever|stuck|block|struggle|concern|fear/i, ask: "眼下最让你放不下的是哪件事？" },
-  { label: "工作观与人生观", slots: /work_view|life_view|true_north|value|meaning|compass|purpose|motive|motivation|motto|worth|good_day|ideal|belief|career|tradeoff|work_choice|work_feeling/i, ask: "做事的时候，你最看重的是什么？" },
+  { label: "工作观与人生观", slots: /work_view|life_view|true_north|value|meaning|compass|purpose|motive|motivation|motto|worth|good_day|ideal|belief|career|tradeoff|work_choice|work_feeling|good_life|standard|principle|dream|life_goal/i, ask: "做事的时候，你最看重的是什么？" },
   { label: "能量与心流", slots: /flow|energy|drain|charge|anchor|behavio|habit/i, ask: "最近一次做得忘了时间，是在做什么？" }
 ];
 /** The portrait's written parts, each a field of the working profile. */

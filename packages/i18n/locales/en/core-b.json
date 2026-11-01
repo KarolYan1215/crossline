@@ -244,7 +244,7 @@
   "这门课只求不挂": "Just aiming not to fail this course",
   "还没想好，先按 A−（≥ 90）规划": "Not decided yet; plan for A− (≥ 90) for now",
   "之后随时可以改，里程碑的分数线会跟着重算": "You can change it any time, and the milestones' target scores are recalculated to match",
-  "「{{label}}」的长期目标：想成为什么样的{{label}}？可多选，也可以自己写。": "The \"{{label}}\" long-term goal: what kind of {{label}} do you want to become? Pick any, or write your own.",
+  "「{{label}}」的长期目标：下面是从你说过的话里整理出的词，勾选想成为的样子，也可以自己写。": "The \"{{label}}\" long-term goal: these words come from what you said. Tick the ones you want to become, or write your own.",
   "「{{label}}」主线当前在推进的具体事项？（目前仅有推断）": "What exactly are you working on in the \"{{label}}\" track? (So far this is only inferred)",
   "有，我来写下具体在做什么": "Something, and I'll write down what",
   "在下面的“其他”里写项目名、截止日期、卡在哪": "Write the project, its deadline and where it is stuck under \"Other\" below",

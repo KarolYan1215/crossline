@@ -192,6 +192,8 @@ test("goal part problems are written in the person's language", async () => {
 test("an attribute that only repeats the line's name is refused; one that adds to it is not", () => {
   expect(attributeProblem("贝斯", "弹贝斯的")).toMatch(/主线名/);
   expect(attributeProblem("社会学研究", "社会学研究者")).toMatch(/主线名/);
+  expect(attributeProblem("社会学方向", "社会学学生")).toMatch(/主线名/);
+  expect(attributeProblem("器件物理方向", "研究者")).toBeUndefined();
   expect(attributeProblem("律动稳", "弹贝斯的")).toBeUndefined();
   expect(attributeProblem("贝斯")).toBeUndefined();
 });
