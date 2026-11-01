@@ -1,7 +1,7 @@
 import { transcriptDocumentIds } from "./recording-digest";
 import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour,
-  PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
+  PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, answeredGoalQuestions, type TurnQuestion, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
   validateOnboardingDialogue, locateQuote,
   gapCoveredBy, screenQuestions, screenAssumption, type QuestionScreenInput,
   type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, TYPE_TABLE, readTone,
@@ -252,6 +252,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
           status: "confirmed", sourceRef: replyId, sourceQuote: answer.quote, sourceSentences: sentencesFor(answer.quote), updatedAt: now });
       }
     }
+    // A long-term goal the person chose answering the interview's own question about a line is theirs as well: adopted now, so the app's goal
+    // picker does not ask them to tick the same words again (a line that has a goal is left as it is).
+    const asked = ([...messages].reverse().find((message) => message.role === "assistant")?.content as { questions?: TurnQuestion[] } | undefined)?.questions ?? [];
+    for (const chosen of answeredGoalQuestions(replyText, asked)) adoptLineGoal(store, workspaceId, ownerId, chosen.lineId, chosen.parts, locale);
     // The question ledger: the answers this reply gives, then the app's own questions as of now (answered ones stay answered).
     recordReplyAnswers(store, workspaceId, sessionId, replyText, replySentences, now);
     syncGapQuestions(store, workspaceId, currentGaps(), now);

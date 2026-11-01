@@ -393,6 +393,26 @@ const sameOption = (label: string, picked: string) => {
 };
 
 /**
+ * The long-term goals the person chose answering the interview's own question about a line (「三五年后，你希望自己是个什么样的管钱的人？」):
+ * the options they picked, and their own words when short enough to be a trait. B of the 2026-11-01 walkthrough picked 稳当、看得懂、看长期
+ * there and was then asked to tick the same words again on the app's goal picker.
+ */
+export function answeredGoalQuestions(replyText: string, questions: ReadonlyArray<Pick<TurnQuestion, "text" | "identityId" | "options">>): Array<{ lineId: string; parts: string[] }> {
+  const out: Array<{ lineId: string; parts: string[] }> = [];
+  for (const question of questions) {
+    if (!question.identityId || question.identityId === "person" || !LONG_TERM_GOAL.test(question.text)) continue;
+    const marker = [`【${question.text}】`, `[${question.text}]`].find((candidate) => replyText.includes(candidate));
+    if (!marker) continue;
+    const { picked, other } = readAnswerLine(replyText.slice(replyText.indexOf(marker) + marker.length).split("\n")[0] ?? "");
+    const parts = picked.filter((label) => (question.options ?? []).some((option) => sameOption(option.label, label)));
+    const own = other.length <= 12 && !/[，。,.；;！？!?]/u.test(other) ? other : "";
+    const all = [...new Set([...parts, ...(own ? [own] : [])])];
+    if (all.length) out.push({ lineId: question.identityId, parts: all.slice(0, 4) });
+  }
+  return out;
+}
+
+/**
  * What the person's answers to the code-built questions say, as facts. The message the screen sends is `【question】选择：label。补充：text`
  * (`composeAnswers`; in English `[question] Chose: label. Added: text`, see `answerLine`), so the answer is read straight out of it and
  * written without asking the model to remember to: the label or the typed text is a verbatim span of the reply, which is all a confirmed
@@ -484,7 +504,7 @@ const CLASS = /上课|课程?时间|课时|lecture|class/i;
 const CALENDAR = /日历|calendar/i;
 const RECURRENCE = /持续|重复|周期|每周都|每月|一次性|固定安排|长期安排|循环|recurr|one-?off|repeat|ongoing|every week|every month|monthly|regular/i;
 // 「希望长期保持哪些特质」「想成为什么样的研究者」「长期目标是什么」: the question the left column's goal picker already asks.
-const LONG_TERM_GOAL = /长期目标|长远目标|长期.{0,6}(特质|身份|样子|状态|方向)|成为(什么样|怎样|哪种|哪类)|(想|希望|要).{0,6}成为.{0,12}(的人|者|家|人)|long-?term goal|\bwhat kind of [a-z ]{0,20}\b(become|be)\b|\bbecome (what|which) kind\b/i;
+const LONG_TERM_GOAL = /长期目标|长远目标|长期.{0,6}(特质|身份|样子|状态|方向)|成为(什么样|怎样|哪种|哪类)|(希望|想)(自己)?是个?(什么样|怎样|哪种)|(想|希望|要).{0,6}成为.{0,12}(的人|者|家|人)|long-?term goal|\bwhat kind of [a-z ]{0,20}\b(become|be)\b|\bbecome (what|which) kind\b/i;
 
 /**
  * The interview's questions that are not the person's to answer, taken out before a round is stored or listed: one that asks only where

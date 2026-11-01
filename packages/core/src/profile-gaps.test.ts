@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { answeredGapFacts, gapCoveredBy, isCourse, mergeFacts, profileGaps, screenAssumption, screenedNote, screenQuestions, undatedKey, type ProfileGapInput } from "./profile-gaps";
+import { answeredGapFacts, answeredGoalQuestions, gapCoveredBy, isCourse, mergeFacts, profileGaps, screenAssumption, screenedNote, screenQuestions, undatedKey, type ProfileGapInput } from "./profile-gaps";
 import { questionKind } from "./onboarding-turn-schema";
 
 const identities = [{ id: "research", label: "科研" }, { id: "startup", label: "创业" }];
@@ -258,4 +258,14 @@ test("a project whose deadline is asked gets no second question about the same d
   // Once the deadline is known (or said to be none), the undecided date of one of its parts is asked on its own.
   const facts = [...base.facts, { identityId: "research", projectId: "apply", slot: "deadline", value: "12 月中旬前", status: "confirmed" }];
   expect(profileGaps({ ...base, projects, undated, facts }).filter((gap) => gap.projectId === "apply").map((gap) => gap.code)).toEqual(["DATE_UNDATED"]);
+});
+
+test("a long-term goal picked on the interview's own question is the person's choice, a sentence of their own is not a trait", () => {
+  const question = { text: "三五年后，你希望自己是个什么样的管钱的人？可以用你自己的说法。", identityId: "line-fund",
+    options: [{ id: "a", label: "稳当", detail: "" }, { id: "b", label: "看长期", detail: "" }, { id: "c", label: "收益高", detail: "" }] };
+  const reply = `【${question.text}】选择：稳当；看长期。补充：不图快，钱是自己的，看几年的事。\n其他`;
+  expect(answeredGoalQuestions(reply, [question])).toEqual([{ lineId: "line-fund", parts: ["稳当", "看长期"] }]);
+  expect(answeredGoalQuestions(`【${question.text}】补充：心里有数`, [question])).toEqual([{ lineId: "line-fund", parts: ["心里有数"] }]);
+  expect(answeredGoalQuestions(reply, [{ ...question, text: "基金这条线眼下在做什么？" }])).toEqual([]);
+  expect(answeredGoalQuestions(reply, [{ ...question, identityId: "person" }])).toEqual([]);
 });

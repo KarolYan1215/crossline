@@ -236,14 +236,14 @@ async function runPerson(name: string, opening: Opening) {
       for (let attempt = 1; attempt <= 4 && !played.ok && rateLimited(played.blocker.message); attempt += 1) { await wait(attempt * 60_000); played = await play(); }
       if (!played.ok) { transcript.push(`模拟用户未能作答：${played.blocker.code} ${played.blocker.message}`); log({ turn: turns, playerBlocked: played.blocker.code }); break; }
       const answer = played.output;
-      const answers = Object.fromEntries(answer.answers.map((item) => {
+      const answers = Object.fromEntries((answer.answers ?? []).map((item) => {
         const question = batch.find((candidate) => candidate.id === item.questionId);
-        const picked = (question?.options ?? []).filter((option) => item.picked.includes(option.label)).map((option) => option.id);
+        const picked = (question?.options ?? []).filter((option) => (item.picked ?? []).includes(option.label)).map((option) => option.id);
         return [item.questionId, { picked, other: item.other }];
       }));
       const itemIds = new Set(cards.flatMap((card) => card.items.map((item) => item.id)));
-      const taps = Object.fromEntries(answer.cardTaps.filter((tap) => itemIds.has(tap.itemId) && tap.score >= 1 && tap.score <= 5).map((tap) => [tap.itemId, tap.score]));
-      const words = Object.fromEntries(answer.cardWords.filter((said) => cards.some((card) => card.id === said.cardId) && said.words.trim()).map((said) => [said.cardId, said.words]));
+      const taps = Object.fromEntries((answer.cardTaps ?? []).filter((tap) => itemIds.has(tap.itemId) && tap.score >= 1 && tap.score <= 5).map((tap) => [tap.itemId, tap.score]));
+      const words = Object.fromEntries((answer.cardWords ?? []).filter((said) => cards.some((card) => card.id === said.cardId) && said.words.trim()).map((said) => [said.cardId, said.words]));
       if (answer.insight && turn.insight?.text) {
         const ratings = readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS));
         ratings[`eval#${last.seq}`] = { verdict: answer.insight, stage: turn.stage ?? "", at: new Date().toISOString(), text: turn.insight.text.slice(0, 300) };
