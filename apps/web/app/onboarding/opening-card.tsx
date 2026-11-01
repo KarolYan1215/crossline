@@ -52,7 +52,8 @@ export function openingReply(answer: OpeningAnswer, withMaterials: boolean, loca
   const t = tFor(locale);
   const list = (items: string[]) => items.join(locale === "en" ? ", " : "、");
   return [t("【语气】{{tone}}", { tone: t(ONBOARDING_TONE_LABEL[answer.tone].label) }),
-    ...(answer.depth ? [t("【详细程度】{{depth}}（约 {{minutes}} 分钟）", { depth: t(ONBOARDING_DEPTH_LABEL[answer.depth].label), minutes: DEPTH_PACE[answer.depth].minutes })] : []),
+    ...(answer.depth ? [DEPTH_PACE[answer.depth].unlimited ? t("【详细程度】{{depth}}（不限时长和轮数）", { depth: t(ONBOARDING_DEPTH_LABEL[answer.depth].label) })
+      : t("【详细程度】{{depth}}（约 {{minutes}} 分钟）", { depth: t(ONBOARDING_DEPTH_LABEL[answer.depth].label), minutes: DEPTH_PACE[answer.depth].minutes })] : []),
     t("【版本】{{edition}}", { edition: t(EDITION_LABEL[answer.edition].label) }),
     t("【我的主线】{{lines}}", { lines: list(answer.lines.map((label) => shown(label, locale))) }),
     t("【未来 12–24 个月的底座】{{base}}", { base: answer.base || t(ALL_EQUAL) }),
@@ -124,7 +125,9 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, initialDepth 
         <li><b>{t("再排进日历")}</b><span>{t("你有哪些想成为的身份，各自正在做什么、大概什么时候截止；时间说个大概就行，材料里有的不再问。")}</span></li>
         <li><b>{t("拿到结果")}</b><span>{t("画像报告和一周的骨架草稿。具体项目的细节，到拆任务时再补。")}</span></li>
       </ol>
-      <p className="ob-opening-time">{t("按下面选的详细程度，大约 {{minutes}} 分钟：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。", { minutes: DEPTH_PACE[depth].minutes })}</p>
+      <p className="ob-opening-time">{DEPTH_PACE[depth].unlimited
+        ? t("按下面选的详细程度，不限时长和轮数：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。")
+        : t("按下面选的详细程度，大约 {{minutes}} 分钟：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。", { minutes: DEPTH_PACE[depth].minutes })}</p>
     </div>
 
     <fieldset className="ob-question">

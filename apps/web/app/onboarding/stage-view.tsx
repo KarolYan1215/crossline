@@ -119,7 +119,8 @@ export function StageView({ state, stage, complete, onChanged }: {
         ? t("第 {{index}}/{{total}} 部分 · {{label}} · 已谈清 {{clear}}/{{of}}", { index: progress.index, total: progress.total, label: t(progress.label), clear: progress.clear, of: progress.of })
         : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: progress.index, total: progress.total, label: t(progress.label) })}</small>}
       {!complete && progress?.next && <small>{t("接下来：")}<span className="gen">{progress.next}</span></small>}
-      {state.readyToStart && !complete && <small>{t("{{label}} {{minutes}} 分钟", { label: t(left.label), minutes: left.minutes })}</small>}
+      {state.readyToStart && !complete && <small>{depthPace(state.depth).unlimited ? t("不限时，随时可以按「开始使用」结束访谈")
+        : t("{{label}} {{minutes}} 分钟", { label: t(left.label), minutes: left.minutes })}</small>}
       {state.portraitState?.written
         ? state.portraitState.confirmed ? <a href="/portrait">{t("画像已确认符合本人 · 查看画像 →")}</a>
           : <a href="/portrait#pt-s-type">{t("画像已写好，去画像页确认是否符合 →")}</a>

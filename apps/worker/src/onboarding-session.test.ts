@@ -435,6 +435,10 @@ test("the tier the person chose sets the round's size, how long a part runs and 
   const rounds = Array.from({ length: 3 }, () => ({ role: "assistant", content: { stage: "compass" } }));
   expect(stagePace(rounds, { startOpen: false }).moveOn).toBeTruthy();
   expect(stagePace(rounds, { startOpen: false, after: DEPTH_PACE.thorough.moveOnAfter }).moveOn).toBeUndefined();
+  // The open tier never tells a part to move on, however long it runs.
+  const long = Array.from({ length: 40 }, () => ({ role: "assistant", content: { stage: "compass" } }));
+  expect(stagePace(long, { startOpen: false, after: DEPTH_PACE.open.moveOnAfter }).moveOn).toBeUndefined();
+  expect(stageOrderFor("v1", DEPTH_PACE.open).at(-1)).toBe("details");
   store.setSetting(workspaceId, "onboarding.depth", "thorough");
   const { rpc, prompts } = fakeRuntime([firstAnswer]);
   await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc)({ sessionId: "s1", text: "开始" });

@@ -911,5 +911,8 @@
   "【详细程度】{{depth}}（约 {{minutes}} 分钟）": "[Detail] {{depth}} (about {{minutes}} minutes)",
   "按下面选的详细程度，大约 {{minutes}} 分钟：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。": "At the level of detail chosen below, about {{minutes}} minutes: most of it is the portrait, the rest puts every line's work on one calendar. The portrait cannot be skipped; everything after it is arranged by it. A CV, timetable or syllabus can go in on the left first; the interview reads them and asks only what they leave out.",
   "访谈问多细？": "How detailed should the interview be?",
-  "开始后也可以在对话上方随时改": "It can be changed above the conversation at any time"
+  "开始后也可以在对话上方随时改": "It can be changed above the conversation at any time",
+  "【详细程度】{{depth}}（不限时长和轮数）": "[Detail] {{depth}} (no time or round limit)",
+  "按下面选的详细程度，不限时长和轮数：大部分时间是画像，其余把各条主线的事排进同一张日历。画像这一部分不能跳过，后面怎么安排都以它为准。左侧可以先放入简历、课表、课程大纲，访谈会先读材料，只问材料里没有的。": "At the level of detail chosen below, with no time or round limit: most of it is the portrait, the rest puts every line's work on one calendar. The portrait cannot be skipped; everything after it is arranged by it. A CV, timetable or syllabus can go in on the left first; the interview reads them and asks only what they leave out.",
+  "不限时，随时可以按「开始使用」结束访谈": "No time limit. Press Start any time to end the interview"
 }
