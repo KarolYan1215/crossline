@@ -449,9 +449,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const paced = paceDeepRound({ ...result.output, questions: repeated.questions }, Boolean(focusLine), tier.roundQuestions);
     // The profile module's cards for this stage (flow v2): they count in the round's questions, so the model's give way to them.
     // The item texts exist in Chinese only so far (our own translation, docs/profile-and-agent-kit.md §二): an English interview gets none.
-    let cards = !focusLine && flow === "v2" && locale !== "en" && paced.output.nextAction === "ask"
+    const cardsLeft = !focusLine && flow === "v2" && locale !== "en"
       ? cardsForRound(paced.output.stage, settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING))), tier.cardItems)
       : [];
+    let cards = paced.output.nextAction === "ask" ? cardsLeft : [];
     // Rating cards count in the round's questions; an interest card (想不想做) does not share a round with several fact questions, which
     // read as a form beside it (2026-10-31). When interest cards are all that is left, they go with one fact question: the cards are a
     // start item, and keeping them out of every fact round never let the 2026-10-31 rerun start.
@@ -468,8 +469,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // The standard and thorough tiers keep the portrait's grounding owed (questions settle it); the fields the extraction writes never hold it.
     const owed = focusLine || options.checklist === false ? [] : openChecklist(Infinity, (item) => item.group === "画像"
       && (stillWriting || (startStands && !(tier.portraitHolds && item.id === "portrait_grounded"))), sessionId);
-    const checked = withChecklist(paced.deep ? paced.output
+    let checked = withChecklist(paced.deep ? paced.output
       : withGapQuestions(paced.output, gapsNow, messages, { freshDocuments: sent.map(([, doc]) => doc.id), touched, locale, roundMax: tier.roundMax }), owed, locale);
+    // A round the checklist turned back from the end carries what is left of the cards in place of the stage's open question: the cards
+    // are a start item no question settles, and the 2026-10-31 rerun asked one open question eight rounds running while three cards waited.
+    if (!cards.length && cardsLeft.length && paced.output.nextAction === "ready_for_milestones" && checked.nextAction === "ask") {
+      cards = cardsLeft;
+      checked = { ...checked, questions: checked.questions.filter((question) => !question.id.startsWith("open-")) };
+    }
     // A round with cards has something to answer even when every question of the model was screened out.
     // While the profile module runs (flow v2) the app's own fact questions wait for the Crossline part.
     const holdGaps = flow === "v2" && PROFILE_MODULE_STAGES.has(checked.stage as OnboardingStage);

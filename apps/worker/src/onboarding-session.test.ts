@@ -400,6 +400,18 @@ test("interest cards left alone go with one fact question rather than waiting fo
   expect(last.cards?.map((card) => card.instrument)).toEqual(["rest18"]);
   expect(last.questions.map((question) => question.id)).toEqual(["f1"]);
 });
+test("a round the checklist turns back from the end carries the cards still unanswered, not an open question in their place", async () => {
+  const at = "2026-10-31T00:00:00.000Z";
+  store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(PROFILE_ITEMS.filter((item) => item.instrument !== "rest18")
+    .map((item) => [item.id, { itemId: item.id, score: 3, by: "tapped", at }]))));
+  const { rpc } = fakeRuntime([turn({ stage: "lines", questions: [], nextAction: "ready_for_milestones" })]);
+  await createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc)({ sessionId: "s", text: "都说完了" });
+  const last = store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content as
+    { cards?: ProfileCard[]; questions: Array<{ id: string }>; nextAction: string };
+  expect(last.nextAction).toBe("ask");
+  expect(last.cards?.map((card) => card.instrument)).toEqual(["rest18"]);
+  expect(last.questions.some((question) => question.id.startsWith("open-"))).toBe(false);
+});
 test("a round keeps independent questions together, at most three in any stage", () => {
   const two = JSON.parse(turn({ stage: "compass", questions: [
     { id: "q1", text: "工作对你意味着什么？", kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] },
