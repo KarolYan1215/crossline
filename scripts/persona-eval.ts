@@ -259,6 +259,8 @@ async function runPerson(name: string, opening: Opening) {
       for (let run = 0; run < 3 && !json<{ portrait?: string }>("profile.model", {}).portrait; run += 1)
         await requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), "eval");
     });
+    // Chips the finishing runs wrote are adopted too: the person can tap them on the left column at any time.
+    goalsAdopted += adoptGoals();
     const written = await withUsageWorkspace(interviewKey, () => createPortraitWriter(store, workspaceId, repoRoot, () => client)());
     log({ portrait: written.state, ...(written.state === "blocked" ? { code: written.code } : {}) });
     transcript.push(`画像：${written.state}${written.state === "blocked" ? ` ${written.code} ${written.message}` : ""}`);

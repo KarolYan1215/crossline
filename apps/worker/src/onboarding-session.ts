@@ -36,6 +36,8 @@ const SOURCE_TEXT_TOTAL = 60_000;
 const SOURCES_PER_TURN = 12;
 /** How long the round that ends the interview waits for the extraction before the portrait's items stop holding it. */
 const FINISH_WAIT_MS = 90_000;
+/** How much longer it waits when, after that, the checklist would turn the end back with questions (one extraction run is about four minutes). */
+const CHECKLIST_WAIT_MS = 300_000;
 /** How long a round with a blocking app question waits for the extraction of the reply it may answer. */
 const BLOCKING_WAIT_MS = 30_000;
 /** Facts the extraction recorded since the last turn, at most this many lines in `recorded`. */
@@ -433,6 +435,12 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // little for the extraction, so it is not asked again right under the answer.
     // A chosen goal is read from the taps themselves, so its question waits for nothing.
     else if (currentGaps().some((gap) => gap.blocking && gap.code !== "LINE_GOAL")) await caughtUp(BLOCKING_WAIT_MS);
+    // Still behind after that, a round that would end is not turned back by an item the person may have just settled: it waits for the
+    // extraction once more. The 2026-11-01 rerun asked one father's weekly hours and his daughter's line again, rounds after he answered,
+    // because the checklist was read while the extraction was still on earlier replies.
+    if (ending && extractMode === "background" && !focusLine && extractBacklog(store, workspaceId, sessionId).replies > 0
+      && openChecklist(Infinity, (item) => item.group === "画像").some((item) => item.owner === "interview" && item.ask))
+      await caughtUp(CHECKLIST_WAIT_MS);
     // Questions that are not the person's to answer (a room, class times already on record, whether a calendar event repeats) are taken
     // out before the round is stored; what something rests on is written as an assumption the person can correct.
     const screen = screenQuestions(result.output.questions, questionScreenFor(store, workspaceId));
