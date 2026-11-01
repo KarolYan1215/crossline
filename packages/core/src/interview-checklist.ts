@@ -75,10 +75,14 @@ const confirmedFact = (fact: { status: string; sourceRef: string }) => fact.stat
 export const ASSUMPTION_PREFIX = /^(假设|assumption|assumed)[：:]/i;
 const assumedFact = (fact: { status: string; value?: string }) => fact.status === "inferred" && ASSUMPTION_PREFIX.test(fact.value ?? "");
 const settledFact = (fact: { status: string; sourceRef: string; value?: string }) => confirmedFact(fact) || assumedFact(fact);
-/** The three parts of the portrait the person's own words must stand behind, read from the slots the interview files facts under. */
+/**
+ * The three parts of the portrait the person's own words must stand behind, read from the slots the interview files facts under. Read by
+ * meaning: the 2026-11-01 rerun's extraction filed the person's answers as `near_risk`, `one_year_priority`, `work_motive`, `motto` and
+ * `worth_day`, and all three people kept this item open to the round limit with every part answered.
+ */
 const PORTRAIT_PARTS: Array<{ label: string; slots: RegExp; ask: string }> = [
-  { label: "现状与真问题", slots: /problem|situation|status|current|pressure|anxi|worry|constraint|gravity|stage/i, ask: "眼下最让你放不下的是哪件事？" },
-  { label: "工作观与人生观", slots: /work_view|life_view|true_north|value|meaning|compass|purpose/i, ask: "做事的时候，你最看重的是什么？" },
+  { label: "现状与真问题", slots: /problem|situation|status|current|pressure|anxi|worry|constraint|gravity|stage|risk|priorit|change|lever|stuck|block|struggle|concern|fear/i, ask: "眼下最让你放不下的是哪件事？" },
+  { label: "工作观与人生观", slots: /work_view|life_view|true_north|value|meaning|compass|purpose|motive|motivation|motto|worth|good_day|ideal|belief|career|tradeoff|work_choice|work_feeling/i, ask: "做事的时候，你最看重的是什么？" },
   { label: "能量与心流", slots: /flow|energy|drain|charge|anchor|behavio|habit/i, ask: "最近一次做得忘了时间，是在做什么？" }
 ];
 /** The portrait's written parts, each a field of the working profile. */

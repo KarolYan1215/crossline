@@ -167,6 +167,9 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     if (/每周|每星期|weekly|every week/i.test(item.title)) continue;
     const project = input.projects.find((entry) => entry.id === item.project);
     if (!project) continue;
+    // The project's own deadline question asks the same thing: the 2026-11-01 rerun put 「「申请材料」有截止日期吗？」 and 「「申请材料」的
+    // 「申请材料提交截止」在文件中标为待定，大致日期？」 side by side in one round, with no file at all.
+    if (gaps.some((gap) => gap.code === "PROJECT_DEADLINE" && gap.projectId === project.id)) continue;
     const key = undatedKey(item.title);
     if (!key || undatedSeen.has(`${project.id}|${key}`)) continue;
     undatedSeen.add(`${project.id}|${key}`);

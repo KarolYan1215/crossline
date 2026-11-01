@@ -513,7 +513,10 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     if (edits.removed.length || edits.added.length) store.appendEvent({ ownerId, workspaceId,
       idempotencyKey: `onboarding:round-edited:${sessionId}:${replyId}:${heardAt}`, type: "onboarding.round_edited", entityId: sessionId,
       payload: { replyId, ...edits } });
-    const insight = checkInsight(result.output.insight, replies, output.stage);
+    // One observation a part: the 2026-11-01 rerun drew one nearly every deep round, and two in one part named the same pattern twice.
+    const insightShown = messages.some((message) => message.role === "assistant"
+      && Boolean((message.content as { insight?: unknown }).insight) && (message.content as { stage?: string }).stage === output.stage);
+    const insight = insightShown ? undefined : checkInsight(result.output.insight, replies, output.stage);
     const progress = readTurnProgress(result.output.progress);
     const { insight: _raw, progress: _rawProgress, ...rest } = output;
     const stored = { ...rest, ...(insight ? { insight } : {}), ...(progress ? { progress } : {}) };

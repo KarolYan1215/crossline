@@ -279,6 +279,9 @@ async function runPerson(name: string, opening: Opening) {
       claims: { cards: instrumentClaims(answers, new Date().toISOString()), written: json<{ claims?: unknown[] }>(PROFILE_CLAIMS_SETTING, {}).claims ?? [] },
       cardReadings: instrumentReadings(answers), cardAnswers: answers,
       insights: readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)),
+      // The question ledger as the interview left it: whether every question put to the person was recorded and answered.
+      ledger: store.listQuestions(workspaceId, { kind: "interview" }).map((question) => ({ id: question.id, key: question.key, status: question.status,
+        text: question.text, answer: question.answer ?? "", repeats: question.repeats ?? 0 })),
       facts: store.listProfileFacts(workspaceId).map((fact) => ({ line: fact.identityId, project: fact.projectId, slot: fact.slot, value: fact.value, status: fact.status })),
       projects: store.listProjects(workspaceId).map((project) => ({ line: project.identityId, name: project.name })),
       checklist: checklist.map(({ id, label, done, owner, detail }) => ({ id, label, done, owner, detail })),

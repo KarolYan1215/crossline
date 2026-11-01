@@ -249,3 +249,13 @@ test("a line with no goal chosen gets its candidates as a question of the round,
   expect(answeredGapFacts(reply, gaps)).toEqual([expect.objectContaining({ slot: "", goal: { lineId: "research", parts: ["严谨", "器件物理", "能独立立项"] } })]);
   expect(answeredGapFacts(`【${goal[0]!.question.text}】选择：`, gaps)).toEqual([]);
 });
+
+test("a project whose deadline is asked gets no second question about the same date being undecided", () => {
+  const projects = [{ id: "apply", identityId: "research", name: "申请材料" }];
+  const undated = [{ project: "apply", kind: "deadline", title: "申请材料提交截止" }];
+  const codes = profileGaps({ ...base, projects, undated }).filter((gap) => gap.projectId === "apply").map((gap) => gap.code);
+  expect(codes).toEqual(["PROJECT_DEADLINE"]);
+  // Once the deadline is known (or said to be none), the undecided date of one of its parts is asked on its own.
+  const facts = [...base.facts, { identityId: "research", projectId: "apply", slot: "deadline", value: "12 月中旬前", status: "confirmed" }];
+  expect(profileGaps({ ...base, projects, undated, facts }).filter((gap) => gap.projectId === "apply").map((gap) => gap.code)).toEqual(["DATE_UNDATED"]);
+});

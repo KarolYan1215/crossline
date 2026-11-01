@@ -145,3 +145,11 @@ test("the tier decides which project items the interview asks and which wait for
   const course = interviewChecklist({ ...sparse, depth: "thorough" }).find((item) => item.id === "project_course:ece555")!;
   expect(course.ask).toBe("「ECE 555」的成绩是怎么算的？各部分各占多少？");
 });
+
+test("the portrait's parts are read by meaning: the slot names the extraction writes for risks, priorities and motives count", () => {
+  const person = (slot: string) => ({ identityId: "person", projectId: "", slot, status: "confirmed", sourceRef: "reply-3", value: "本人原话" });
+  const facts = [...full.facts.filter((fact) => fact.identityId !== "person"), person("near_risk"), person("work_motive"), person("flow_scene")];
+  expect(interviewChecklist({ ...full, facts }).find((item) => item.id === "portrait_grounded")).toMatchObject({ done: true, detail: "" });
+  const other = [...full.facts.filter((fact) => fact.identityId !== "person"), person("one_year_priority"), person("motto"), person("drain_activity")];
+  expect(interviewChecklist({ ...full, facts: other }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
+});

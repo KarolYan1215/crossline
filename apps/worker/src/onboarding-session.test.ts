@@ -595,6 +595,22 @@ test("the progress record goes back to the model next round, and an observation 
   expect((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: unknown }).insight).toBeUndefined();
 });
 
+test("one observation a part: a second one in the same part is left out, the next part may have its own", async () => {
+  const insight = { text: "你说投入的两次都是和人一起赶东西；底座主线是一个人做的研究。",
+    refs: [{ replyId: "reply-1", quote: "和同学一起赶比赛" }, { replyId: "reply-3", quote: "一个人做研究" }] };
+  const { rpc } = fakeRuntime([turn({ stage: "energy", insight: { text: "", refs: [] } }), turn({ stage: "energy", insight }),
+    turn({ stage: "energy", insight }), turn({ stage: "compass", insight })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { checklist: false, extract: "off" });
+  const kept = async (text: string) => {
+    await run({ sessionId: "s", text });
+    return Boolean((store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { insight?: unknown }).insight);
+  };
+  expect(await kept("最投入的是和同学一起赶比赛的时候。")).toBe(false);
+  expect(await kept("底座是我一个人做研究。")).toBe(true);
+  expect(await kept("还有别的吗")).toBe(false);
+  expect(await kept("看重的是把事做完。")).toBe(true);
+});
+
 test("the round that ends the interview marks it finishing, and the synthesis left to write does not turn the end into a question", async () => {
   const { readFinishing } = await import("@crossline/db");
   const { rpc } = fakeRuntime([turn({ stage: "energy", questions: [], nextAction: "ready_for_milestones" })]);
