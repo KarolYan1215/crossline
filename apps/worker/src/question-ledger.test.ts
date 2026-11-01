@@ -56,6 +56,12 @@ test("about the same line a reworded question is a repeat at a lower similarity,
   expect(deadlines.questions).toHaveLength(2);
   // Two questions of one round that ask the same thing: the first stays.
   expect(resolveRepeats(store, ws, "s1", [ask("每周几点开始上班？", "work"), ask("每周几点开始上班呢？", "work")]).questions).toHaveLength(1);
+  // The same wording asked of each line is a question per line, answered for one line or not.
+  const done = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:4:q1", text: "「上班」这条线眼下在做的一件事是什么？", identityId: "work", status: "open", at });
+  store.answerQuestion(ws, done, { text: "补充：控制台改版", at });
+  const lines = resolveRepeats(store, ws, "s1", [ask("「画画」这条线眼下在做的一件事是什么？", "draw"), ask("「小红书」这条线眼下在做的一件事是什么？", "media"),
+    ask("「上班」这条线眼下在做的一件事是什么呢？", "work")]);
+  expect(lines.questions.map((question) => question.identityId)).toEqual(["draw", "media"]);
 });
 
 test("a question's options never repeat", () => {

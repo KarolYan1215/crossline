@@ -79,9 +79,11 @@ export function resolveRepeats(store: CrosslineStore, workspaceId: string, sessi
   // An answer that settled nothing (「不确定」) may be asked about once more, never twice: the start items take only the person's word.
   const askedAgain = (id: number) => ledger.some((item) => item.repeats === id);
   const reopenable = (item: LedgerQuestion) => item.status === "answered" && unsureAnswer(item.answer) && !askedAgain(item.id);
-  // Same line and same project (two projects' deadlines are worded alike and are two questions).
+  // Same line and same project: two projects' deadlines, or 「X 这条线眼下在做的一件事」 asked of each line, are worded alike and are
+  // different questions (2026-11-01: three lines' current work was asked in one round, all three dropped, and the round showed none).
   const alike = (a: { text: string; identityId: string; projectId: string }, b: { text: string; identityId: string; projectId: string }) => {
     if (a.projectId && b.projectId && a.projectId !== b.projectId) return false;
+    if (a.identityId && b.identityId && a.identityId !== b.identityId) return false;
     const similarity = questionSimilarity(a.text, b.text);
     return similarity >= REPEAT_SIMILARITY
       || (Boolean(a.identityId) && a.identityId === b.identityId && a.projectId === b.projectId && similarity >= SAME_LINE_SIMILARITY);
