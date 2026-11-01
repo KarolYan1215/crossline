@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { checklistAskable, ledgerForModel, linesAnsweredUnread, resolveRepeats, withDistinctOptions } from "./question-ledger";
+import { checklistAnswered, checklistAskable, ledgerForModel, linesAnsweredUnread, resolveRepeats, withDistinctOptions } from "./question-ledger";
 
 const ws = "w";
 let store: CrosslineStore | undefined;
@@ -96,4 +96,18 @@ test("a line answered about in a reply the extraction has not read is named, unt
   expect([...linesAnsweredUnread(store, ws, "s1", "2026-11-01T09:05:00Z")]).toEqual(["line-dad"]);
   expect(linesAnsweredUnread(store, ws, "s1", "2026-11-01T09:06:00Z").size).toBe(0);
   expect(linesAnsweredUnread(store, ws, "s1", undefined).size).toBe(0);
+});
+
+// 2026-11-01 run 10: an app question answered with something real is only waiting to be written down; 「说不上来」 is not an answer.
+test("a checklist question answered with something that settles it counts as answered, an unsure answer does not", () => {
+  store = new CrosslineStore(":memory:");
+  const at = "2026-11-01T15:00:00Z";
+  const text = "「铲屎官」这条线眼下在做什么？";
+  const first = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:11:checklist-open-1", text, status: "open", at });
+  expect(checklistAnswered(store, ws, "s1")(text)).toBe(false);
+  store.answerQuestion(ws, first, { text: "选择：说不上来", at });
+  expect(checklistAnswered(store, ws, "s1")(text)).toBe(false);
+  const second = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:12:checklist-open-1", text, status: "open", at });
+  store.answerQuestion(ws, second, { text: "选择：馒头的日常照顾，没有截止", at });
+  expect(checklistAnswered(store, ws, "s1")(text)).toBe(true);
 });

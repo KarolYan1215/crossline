@@ -504,7 +504,7 @@ const CLASS = /上课|课程?时间|课时|lecture|class/i;
 const CALENDAR = /日历|calendar/i;
 const RECURRENCE = /持续|重复|周期|每周都|每月|一次性|固定安排|长期安排|循环|recurr|one-?off|repeat|ongoing|every week|every month|monthly|regular/i;
 // 「希望长期保持哪些特质」「想成为什么样的研究者」「长期目标是什么」: the question the left column's goal picker already asks.
-const LONG_TERM_GOAL = /长期目标|长远目标|长期.{0,6}(特质|身份|样子|状态|方向)|成为(什么样|怎样|哪种|哪类)|(希望|想)(自己)?是个?(什么样|怎样|哪种)|(想|希望|要).{0,6}成为.{0,12}(的人|者|家|人)|long-?term goal|\bwhat kind of [a-z ]{0,20}\b(become|be)\b|\bbecome (what|which) kind\b/i;
+const LONG_TERM_GOAL = /长期目标|长远目标|长期.{0,6}(特质|身份|样子|状态|方向)|成为(什么样|怎样|哪种|哪类)|(希望|想)(自己)?是.{0,8}?(什么样|怎样|哪种)|用哪些词形容|(想|希望|要).{0,6}成为.{0,12}(的人|者|家|人)|long-?term goal|\bwhat kind of [a-z ]{0,20}\b(become|be)\b|\bbecome (what|which) kind\b/i;
 
 /**
  * The interview's questions that are not the person's to answer, taken out before a round is stored or listed: one that asks only where

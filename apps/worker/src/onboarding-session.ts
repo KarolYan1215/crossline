@@ -19,7 +19,7 @@ import {
 import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
-import { checklistAskable, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
+import { checklistAnswered, checklistAskable, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
 import { createOnboardingExtractor, extractionReached, requestExtraction } from "./onboarding-extract";
 import { personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
@@ -115,6 +115,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   // An item's own question goes to the person only while `checklistAskable` allows it: once answered, the item waits for the extraction.
   const openChecklist = (limit = 8, skip: (item: { id: string; group: string; start?: boolean }) => boolean = () => false, sessionId?: string) => {
     const askable = sessionId ? checklistAskable(store, workspaceId, sessionId) : () => true;
+    const answered = sessionId ? checklistAnswered(store, workspaceId, sessionId) : () => false;
     // A line answered about in a reply the extraction has not read yet: its items' questions wait (`linesAnsweredUnread`).
     const upTo = sessionId ? readExtractState(store, workspaceId, sessionId).upTo : 0;
     const unread = sessionId ? linesAnsweredUnread(store, workspaceId, sessionId, store.listOnboardingMessages(workspaceId, sessionId)
@@ -123,7 +124,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     return checklistNow()
       .filter((item) => !item.done && !item.deferred && !skip(item)).sort((a, b) => Number(Boolean(b.start)) - Number(Boolean(a.start)))
       .slice(0, limit).map(({ id, label, detail, owner, start, ask }) => ({ label, detail, owner, ...(start ? { start } : {}),
-        ...(ask && askable(ask) && !waits(id) ? { ask } : {}) }));
+        ...(ask && askable(ask) && !waits(id) ? { ask } : {}),
+        // Answered, or spoken to, in a reply the extraction has not written down yet: the dialogue must not ask it again in its own words.
+        ...(waits(id) || (ask && answered(ask)) ? { recording: true } : {}) }));
   };
   /** The person's tier (`ONBOARDING_DEPTH_SETTING`), read every round: it can change mid-interview. */
   const depthNow = () => readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING));
@@ -355,7 +358,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         today, timeZone, sources: clipDocuments(documents), ...(waiting > 0 ? { sourcesWaiting: waiting } : {}), ...(history ? { history } : {}), reply: { id: replyId, text: replyText },
         focusLine, profile: readProfile(), stage: ((session!.coverage as { stage?: OnboardingStage }).stage ?? (focusLine ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!)),
         ...(focusLine ? {} : { stageOrder: stageOrderFor(flow, tier) }),
-        checklist: openChecklist(), ...stagePace(messages, { startOpen: startOpen(), after: tier.moveOnAfter }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
+        checklist: openChecklist(8, undefined, sessionId), ...stagePace(messages, { startOpen: startOpen(), after: tier.moveOnAfter }), tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)),
         ...(focusLine ? {} : { depth: depthNow() }),
         questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
         ...(workHistory().length ? { workHistory: workHistory() } : {}), ...(week.length ? { calendar: week } : {}),
@@ -409,7 +412,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
         // The completion list goes with every turn, so the model knows what it still owes without being told twice in prose.
         const rounds = stagePace(messages, { startOpen: startOpen(), after: tier.moveOnAfter });
         // The tier and the order of parts go with every turn: the person may change the tier between rounds.
-        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(), ...rounds,
+        const message = JSON.stringify({ reply: { id: replyId, text: replyText }, ...(newSources.length ? { newSources } : {}), checklist: openChecklist(8, undefined, sessionId), ...rounds,
           ...(focusLine ? {} : { depth: depthNow(), stageOrder: stageOrderFor(flow, tier) }),
           questionLedger: ledgerForModel(store, workspaceId, sessionId, LEDGER_SHOWN), ...pace(), ...roundNotes(),
           tone: readTone(store.getSetting(workspaceId, ONBOARDING_TONE_SETTING)), ...(calendarChanged ? { calendar: week } : {}),

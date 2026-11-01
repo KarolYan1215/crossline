@@ -26,7 +26,7 @@ export type LedgerQuestion = {
  */
 export function unsureAnswer(answer: string): boolean {
   const text = answer.replace(/(选择|补充)[:：]/g, "").replace(/[\s。.!！；;，,]+/g, "");
-  return !text || /^(还?不(确定|知道|清楚|好说|记得)|暂(时)?不确定|暂不清楚|尚未确定|还没(想好|定)|没想好|说不好|跳过|暂无|unsure|notsure|don'?tknow|skip)$/iu.test(text);
+  return !text || /^(还?不(确定|知道|清楚|好说|记得)|暂(时)?不确定|暂不清楚|尚未确定|还没(想好|定)|没想好|说不(好|上来|准|清楚?)|跳过|暂无|unsure|notsure|don'?tknow|skip)$/iu.test(text);
 }
 
 /** Letters and digits only, lower case: what a question says, not how it is punctuated. */

@@ -268,4 +268,9 @@ test("a long-term goal picked on the interview's own question is the person's ch
   expect(answeredGoalQuestions(`【${question.text}】补充：心里有数`, [question])).toEqual([{ lineId: "line-fund", parts: ["心里有数"] }]);
   expect(answeredGoalQuestions(reply, [{ ...question, text: "基金这条线眼下在做什么？" }])).toEqual([]);
   expect(answeredGoalQuestions(reply, [{ ...question, identityId: "person" }])).toEqual([]);
+  // 2026-11-01 run 10: the goal asked with the line's object between 是 and 什么样, then asked again on the picker.
+  const cat = { ...question, identityId: "line-cat", text: "几年下来，你希望自己是馒头的什么样的铲屎官？别人会用哪些词形容你？",
+    options: [{ id: "a", label: "细心", detail: "" }, { id: "b", label: "有耐心", detail: "" }] };
+  expect(answeredGoalQuestions(`【${cat.text}】选择：细心；有耐心。补充：希望它别觉得我老不在家。`, [cat])).toEqual([{ lineId: "line-cat", parts: ["细心", "有耐心"] }]);
+  expect(answeredGoalQuestions(reply, [{ ...question, text: "铲屎官这条线对你来说主要是件什么事？" }])).toEqual([]);
 });

@@ -123,6 +123,17 @@ export function checklistAskable(store: CrosslineStore, workspaceId: string, ses
 }
 
 /**
+ * Whether one of the app's checklist questions has an answer on record that settles it: the item is then only waiting for the extraction
+ * to write it down, and the dialogue is told so (2026-11-01 run 10: 「铲屎官这条线眼下在做的一件事」 answered at round 11 was asked again
+ * by the model in its own words at round 15, the item still open).
+ */
+export function checklistAnswered(store: CrosslineStore, workspaceId: string, sessionId: string): (text: string) => boolean {
+  const answered = interviewQuestions(store, workspaceId, sessionId)
+    .filter((question) => (question.status === "answered" && !unsureAnswer(question.answer)) || question.status === "assumed");
+  return (text) => answered.some((question) => question.text === text || question.text.startsWith(text));
+}
+
+/**
  * The lines the person answered a question about in replies the extraction has not read yet (`since`: when the first such reply came).
  * A line's start item stays open until the extraction writes the answer down, and on a slow model that is rounds later: the 2026-11-01
  * run 8 asked one father what his daughter's line was working on at round 19, eight rounds after he said it, because three extraction
