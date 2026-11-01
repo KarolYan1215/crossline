@@ -350,6 +350,8 @@ export type KnownSources = {
    * that had nothing and never shrinks one that had more (`keepCandidates`).
    */
   attributesOnRecord?: Record<string, number>;
+  /** Each line's name, so a candidate that only repeats it is refused (`attributeProblem`). */
+  lineLabels?: Record<string, string>;
 };
 /** One citable sentence: the reply (`reply-N`) or file (`src-N`) it is in, and its offsets in that text. */
 export type EvidenceSentence = { ref: string; start: number; end: number; text: string };
@@ -616,7 +618,7 @@ function checkTurn(value: unknown, known: KnownSources, minimumCandidates: numbe
   if (turn.nextAction === "ask" && !turn.questions.length) reject("ONBOARDING_QUESTION_REQUIRED", "还没问完，这一轮必须至少提出一个问题。");
   for (const line of turn.lineProfiles ?? []) {
     if (!identities.has(line.lineId) || line.lineId === PERSON_LINE) reject("ONBOARDING_IDENTITY_UNKNOWN", `主线描述里的主线「${line.lineId}」不存在。`);
-    const problem = candidatesProblem(line.attributeCandidates ?? [], citable, minimumCandidates);
+    const problem = candidatesProblem(line.attributeCandidates ?? [], citable, minimumCandidates, known.lineLabels?.[line.lineId]);
     if (problem) reject(problem.code, `主线「${line.lineId}」的定语候选：${problem.detail}`);
   }
   for (const edit of turn.goalEdits ?? []) {
@@ -678,14 +680,14 @@ const ATTRIBUTE_HOW = "定语说的是本人想在这条线上成为什么样的
  * the offending attributes, all of them at once for wording, so one repair can fix them together.
  */
 /* i18n-ignore-start: repair messages to the model */
-function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) => boolean, minimum = ATTRIBUTE_CANDIDATES_MIN): { code: string; detail: string } | undefined {
+function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) => boolean, minimum = ATTRIBUTE_CANDIDATES_MIN, label?: string): { code: string; detail: string } | undefined {
   if (!list.length) return undefined;
   for (const item of list) {
     if (!citable(item.sourceRef)) return { code: "ONBOARDING_UNKNOWN_SOURCE_REF", detail: `「${item.text}」没有引用本轮给出的句子；每个定语在 refs 里写出它来自的句子编号。` };
     if (!cleanAttribute(item.text)) return { code: "ONBOARDING_ATTRIBUTE_EMPTY", detail: "有一个定语是空的。" };
     if (notAtomic(item.text)) return { code: "ONBOARDING_ATTRIBUTE_NOT_ATOMIC", detail: `「${item.text}」含有并列，一个定语只写一件事，拆成两个。` };
   }
-  const wording = list.map((item) => attributeProblem(item.text)).filter((problem): problem is string => Boolean(problem));
+  const wording = list.map((item) => attributeProblem(item.text, label)).filter((problem): problem is string => Boolean(problem));
   if (wording.length) return { code: "ONBOARDING_ATTRIBUTE_NOT_DESCRIPTIVE", detail: `${wording.slice(0, 3).join("；")}。${ATTRIBUTE_HOW}` };
   const duplicate = duplicateAttributes(list.map((item) => cleanAttribute(item.text)))[0];
   if (duplicate) return { code: "ONBOARDING_ATTRIBUTE_DUPLICATE", detail: `「${duplicate[0]}」与「${duplicate[1]}」重复：去掉「的」和标点后一个包含另一个，只保留一个或改成互不重叠的两个。` };
@@ -705,11 +707,11 @@ function candidatesProblem(list: AttributeCandidate[], citable: (ref: string) =>
  * real attributes rather than none — an empty list there is what kept the start standard from standing (2026-10-19, W-71) — while a
  * line that already has a fuller list keeps it.
  */
-function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => boolean, onRecord = 0): AttributeCandidate[] {
+function keepCandidates(list: AttributeCandidate[], citable: (ref: string) => boolean, onRecord = 0, label?: string): AttributeCandidate[] {
   const kept: AttributeCandidate[] = [];
   for (const item of list) {
     const text = cleanAttribute(item.text);
-    if (!text || !citable(item.sourceRef) || notAtomic(text) || attributeProblem(text) || duplicateAttributes([...kept.map((other) => other.text), text]).length) continue;
+    if (!text || !citable(item.sourceRef) || notAtomic(text) || attributeProblem(text, label) || duplicateAttributes([...kept.map((other) => other.text), text]).length) continue;
     kept.push({ text, kind: kindOf(item), sourceRef: item.sourceRef });
   }
   return kept.length >= ATTRIBUTE_CANDIDATES_MIN || (kept.length > 0 && kept.length >= onRecord) ? kept.slice(0, ATTRIBUTE_CANDIDATES_MAX) : [];
@@ -758,7 +760,7 @@ export function keepOnboardingTurn(value: unknown, known: KnownSources): Onboard
       && candidate.fromIdentityId !== candidate.toIdentityId && candidate.evidenceRefs.every((ref) => ref === "inference" || sourceText(ref) !== undefined)),
     lineProfiles: (turn.lineProfiles ?? []).filter((line) => identities.has(line.lineId) && line.lineId !== PERSON_LINE)
       .map((line) => ({ ...line, attributeCandidates: keepCandidates(line.attributeCandidates ?? [], (ref) => sourceText(ref) !== undefined,
-        known.attributesOnRecord?.[line.lineId] ?? 0) })),
+        known.attributesOnRecord?.[line.lineId] ?? 0, known.lineLabels?.[line.lineId]) })),
     goalEdits: (turn.goalEdits ?? []).filter((edit) => identities.has(edit.lineId) && edit.lineId !== PERSON_LINE && edit.sourceRef in known.replies
       && edit.parts.some((part) => cleanAttribute(part.text)) && !duplicateAttributes(edit.parts.map((part) => cleanAttribute(part.text)).filter(Boolean)).length),
     ...(turn.availability ? { availability: { ...turn.availability, windows: turn.availability.windows.filter((window) => /^\d{2}:\d{2}$/.test(window.start)

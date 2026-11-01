@@ -121,9 +121,13 @@ const ACHIEVEMENT_END = /(毕业|上市|获奖|发表|出版|上线|中稿|夺�
  */
 // Repair messages to the model that proposed the candidates, not interface text.
 /* i18n-ignore-start */
-export function attributeProblem(raw: string): string | undefined {
+export function attributeProblem(raw: string, lineLabel?: string): string | undefined {
   const text = cleanAttribute(raw);
   if (!text) return undefined;
+  // 「贝斯」 for 「弹贝斯的」, 「社会学研究」 for 「社会学研究者」: the line's own name read back, which composes 「成为贝斯的弹贝斯的」 (2026-11-01).
+  const bare = (value: string) => value.replace(/[的\s\p{P}]/gu, "").toLowerCase();
+  if (lineLabel && bare(text).length >= 2 && bare(lineLabel).includes(bare(text)))
+    return `「${text}」重复了主线名「${lineLabel}」：写本人想在这条线上成为什么样，不是这条线是什么`;
   const abilityEn = text.match(ABILITY_VERB_EN);
   if (abilityEn) return `"${text}" is "${abilityEn[1]}" plus an action: write the quality it shows ("able to lead projects" → "independent")`;
   const leadEn = text.match(ACTION_LEAD_EN);

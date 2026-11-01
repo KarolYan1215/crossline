@@ -3,7 +3,7 @@ import {
   AGENT_HISTORY_SUMMARY, agentHistoryLines, type AgentHistorySummary, ACTIVITY_HOURLY, atComputerLines, type ActivityHour,
   PROFILE_CONFIRMED, portraitFingerprint, answeredGapFacts, keepOnboardingDialogue, droppedOnboardingItems, ONBOARDING_KEEP_EARLY_MAX, onboardingDialogueSchema,
   validateOnboardingDialogue, locateQuote,
-  gapCoveredBy, screenQuestions, screenAssumption,
+  gapCoveredBy, screenQuestions, screenAssumption, type QuestionScreenInput,
   type ProfileGap, type ProfileModel, type OnboardingStage, DEEP_STAGES, ONBOARDING_TONE_SETTING, ASSESS_RESULT_SETTING, TYPE_TABLE, readTone,
   checkInsight, readTurnProgress, openStageQuestion, withPlainTerms,
   type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
@@ -492,9 +492,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // sake: what is left goes to 待决事项 once the person uses the app (`interviewStatus.parked`).
     const endsHere = startStands && !holdGaps && !paced.deep && !cards.length && checked.nextAction === "ask" && !checked.questions.length;
     if (endsHere && extractMode !== "off") markFinishing(store, workspaceId, sessionId);
-    const output = withPlainTerms(endsHere ? { ...checked, nextAction: "ready_for_milestones" as const }
+    const assembled = endsHere ? { ...checked, nextAction: "ready_for_milestones" as const }
       : cards.length && checked.nextAction === "ask" ? { ...checked, cards }
-      : withSomethingToAnswer(checked, holdGaps ? [] : gapsNow, messages, locale, focusLine || holdGaps ? [] : openChecklist(Infinity, (item) => !item.start, sessionId)));
+      : withSomethingToAnswer(checked, holdGaps ? [] : gapsNow, messages, locale, focusLine || holdGaps ? [] : openChecklist(Infinity, (item) => !item.start, sessionId));
+    // What the app added (the checklist's and the start items' own questions) goes through the screen the page applies when it lists the
+    // round: a goal question the left column's picker already asks was listed as nothing, and the 2026-11-01 rerun showed 「开始之前还想再问
+    // 几件事。」 over an empty batch twice.
+    const output = withPlainTerms(shownOrOpen(assembled, questionScreenFor(store, workspaceId), locale));
     // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
     const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
       .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
@@ -542,14 +546,15 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
  * (`interviewChecklist`): a premature 「ready」 goes back to asking, says what is missing, and — when the model asked nothing — asks for it.
  * Items only the person can settle (confirming the portrait, adopting a goal) do not hold the interview; they show on the screen.
  */
-export function withChecklist<T extends OnboardingDialogue>(output: T, open: Array<{ label: string; detail: string; owner: "interview" | "person"; ask?: string }>, locale?: Locale): T {
+export function withChecklist<T extends OnboardingDialogue>(output: T, open: Array<{ id?: string; label: string; detail: string; owner: "interview" | "person"; ask?: string }>, locale?: Locale): T {
   const owed = open.filter((item) => item.owner === "interview");
   if (output.nextAction !== "ready_for_milestones" || !owed.length) return output;
   // The person is asked the item's own question, never shown the checklist's label (2026-10-31: 「完成访谈前还缺：硬约束「上班」的固定日程已
   // 收集（上课、组会、值班…）」). An item no question settles (a portrait field the extraction writes) holds the end without words of its own.
-  const asks = [...new Set(owed.map((item) => item.ask).filter((ask): ask is string => Boolean(ask)))].slice(0, 2);
+  // A line's item carries its line, so the screen judges the question about that line (`line_desc:<line>`), not about every line.
+  const asks = [...new Map(owed.filter((item) => item.ask).map((item) => [item.ask!, /^line_[a-z_]+:(.+)$/u.exec(item.id ?? "")?.[1] ?? ""])).entries()].slice(0, 2);
   const questions = output.questions.length ? output.questions
-    : asks.length ? asks.map((text, index) => ({ id: `checklist-open-${index + 1}`, text, kind: "free" as const, allowOther: true, identityId: "", projectId: "", options: [] }))
+    : asks.length ? asks.map(([text, identityId], index) => ({ id: `checklist-open-${index + 1}`, text, kind: "free" as const, allowOther: true, identityId, projectId: "", options: [] }))
     : [openStageQuestion(output.stage, locale)];
   return { ...output, nextAction: "ask", reply: `${output.reply}\n\n${tFor(locale)("开始之前还想再问几件事。")}`, questions };
 }
@@ -570,6 +575,17 @@ export function withSomethingToAnswer<T extends OnboardingDialogue>(output: T, g
   if (start) return { ...output, questions: [{ id: "start-open", text: tFor(locale)("{{ask}}实在说不准，可以先说一个暂定的答案。", { ask: start.ask! }),
     kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
   return { ...output, questions: [openStageQuestion(output.stage, locale)] };
+}
+
+/**
+ * The round as the page will list it: questions the screen takes out (`screenQuestions`) are dropped here, and a round that still asks
+ * but is left with nothing to answer, and no cards, gets the stage's open question.
+ */
+export function shownOrOpen<T extends OnboardingDialogue & { cards?: unknown[] }>(output: T, screen: QuestionScreenInput, locale?: Locale): T {
+  if (output.nextAction !== "ask" || !output.questions.length) return output;
+  const { keep } = screenQuestions(output.questions, screen);
+  if (keep.length === output.questions.length) return output;
+  return { ...output, questions: keep.length || output.cards?.length ? keep : [openStageQuestion(output.stage, locale)] };
 }
 
 /** Besides those that block, at most this many of the app's own questions join one round, so a batch stays answerable. */

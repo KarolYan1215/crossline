@@ -67,6 +67,7 @@ For each line the new material says something about, write a `description` (what
 | 长文方向 / 科普 | 写公众号长文 / 即刻内容创作 | 一项活动；写它所在的领域 |
 | 值得信赖 | 做出有人付费的产品 | 一项成就，是里程碑 |
 | 器件物理方向 | 外推人类知识边界 | 动词短语，读不出是什么样的人 |
+| 律动稳 / 有乐感 (on 「弹贝斯的」) | 贝斯 / 弹贝斯 | 重复了主线名本身，组成「成为贝斯的弹贝斯的」；写本人想成为什么样的弹贝斯的 |
 
 **Never turn an action into an attribute.** When the person only said what they do or want to achieve on a line (发论文、做产品、写长文), those are facts (`goal`, `evidence`) and later milestones, not attributes. Use the adjectives they used elsewhere about that line (look them up with `search_evidence`), or give fewer candidates: one or two real ones are better than three made up. The app drops a candidate that is an action, a count or an achievement, and asks again when that leaves a line with too few.
 

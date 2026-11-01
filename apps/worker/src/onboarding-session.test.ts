@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore, writeExtractState } from "@crossline/db";
 import { cardWordsHead, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   DEPTH_PACE, type OnboardingProgress, type ProfileCard } from "@crossline/core";
-import { cardsForRound, createOnboardingSessionRunner as createRunner, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, stageOrderFor, stagePace } from "./onboarding-session";
+import { cardsForRound, createOnboardingSessionRunner as createRunner, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, stagePace, withChecklist } from "./onboarding-session";
 import { INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
 import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
 import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
@@ -698,4 +698,17 @@ test("replies the extraction has not recorded yet are named to the dialogue, so 
   const second = dialogue(prompts)[1]!;
   expect(second).toContain("unrecorded");
   expect(second).toContain("reply-1");
+});
+
+test("a round the page would list as empty gets the stage's open question; a checklist ask carries its line", () => {
+  const base = { reply: "记下了。", nextAction: "ready_for_milestones" as const, stage: "lines", coverage: [], questions: [] } as unknown as Parameters<typeof withChecklist>[0];
+  const turned = withChecklist(base, [{ id: "line_desc:line-a", label: "", detail: "", owner: "interview", ask: "在「设计」这条线上，三五年后你希望成为什么样的人？" }]);
+  expect(turned.nextAction).toBe("ask");
+  expect(turned.questions[0]?.identityId).toBe("line-a");
+  const screen = { projects: [], meetings: [], goalPickerLines: ["line-a"] };
+  const shown = shownOrOpen(turned, screen);
+  expect(shown.questions).toHaveLength(1);
+  expect(shown.questions[0]?.text).not.toContain("三五年后");
+  // A line without a picker keeps its own question.
+  expect(shownOrOpen(turned, { ...screen, goalPickerLines: ["line-b"] }).questions[0]?.text).toContain("三五年后");
 });

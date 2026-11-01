@@ -183,6 +183,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     // What a new list would replace (the parts split from an adopted goal stay beside it): a pruned list never shrinks a fuller one.
     known.attributesOnRecord = Object.fromEntries(lines.map((line) => [line.id,
       lineAttributes(profiles[line.id], line.label).filter((item) => item.sourceRef !== "goal").length]));
+    known.lineLabels = Object.fromEntries(lines.map((line) => [line.id, line.label]));
     const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString().slice(0, 10);
     const flow = flowOf(session?.coverage);
     const stage = ((session?.coverage as { stage?: OnboardingStage } | undefined)?.stage ?? (focus ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!));
