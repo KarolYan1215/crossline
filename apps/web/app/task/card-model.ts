@@ -58,7 +58,7 @@ export function stepSegments(detail: Pick<CardDetail, "stepPlan">): Segment[] {
  */
 const awaited = (title: string) => title.replace(/^(?:等待\s*|wait(?:ing)?\s+(?:for|on)\s+)/iu, ""); // i18n-ignore
 
-export type WaitKind = "approval" | "preparing" | "returned" | "material" | "gate" | "input" | "release";
+export type WaitKind = "approval" | "preparing" | "returned" | "material" | "gate" | "input" | "provide" | "release";
 
 /**
  * Why a task was sent back, in words: the ledger keeps a code (the gate's `MILESTONE_GATE_INSUFFICIENT`, an analysis blocker), which the
@@ -86,6 +86,8 @@ export function waitReason(detail: CardDetail, today: string, locale?: Locale): 
   if (detail.state === "active") return undefined;
   const step = currentStep(detail);
   if (step && !step.schedulable) {
+    // Material only the person has: settled on the task itself (upload, or 「没有」), never on 待确认 (W-170).
+    if (step.provides) return { kind: "provide", label: t("等本人 · {{what}}", { what: step.title }) };
     const what = awaited(step.title);
     return { kind: "input", label: step.notBefore && step.notBefore > today ? t("等待 · {{what}}（{{day}} 起）", { what, day: shortDate(locale, step.notBefore) }) : t("等待 · {{what}}", { what }) };
   }
@@ -106,7 +108,7 @@ export function groupOf(detail: CardDetail, { today, slot, library }: { today: s
 }
 
 /** The order inside a group: what runs first, then what comes up soonest, then the nearest deadline; the waiting by what is asked of the person first. */
-const WAIT_ORDER: Record<WaitKind, number> = { returned: 0, approval: 1, input: 2, release: 3, preparing: 4, material: 4, gate: 5 };
+const WAIT_ORDER: Record<WaitKind, number> = { returned: 0, approval: 1, provide: 1, input: 2, release: 3, preparing: 4, material: 4, gate: 5 };
 export function compareInGroup(group: TaskGroup, today: string) {
   return (a: { detail: CardDetail; slot?: TaskSlotLike | undefined; library?: string | undefined; id: string },
     b: { detail: CardDetail; slot?: TaskSlotLike | undefined; library?: string | undefined; id: string }): number => {

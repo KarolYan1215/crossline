@@ -73,7 +73,7 @@ export function TaskCard({ detail, slot, reason, today, variant = "compact" }: {
     {variant === "hero" && detail.milestone && <p className="task-card-milestone">→ {detail.milestone.title}</p>}
     {reason && <p className="task-card-reason">{reason}</p>}
     <StepStrip detail={detail} />
-    <CardStep detail={detail} step={step} proposal={proposal} finished={finished} waiting={wait?.kind === "input"} />
+    <CardStep detail={detail} step={step} proposal={proposal} finished={finished} waiting={wait?.kind === "input" || wait?.kind === "provide"} />
     {wait && <p className="task-card-wait" data-kind={wait.kind}>{wait.label}</p>}
     {proposal && <CompletionChoice detail={detail} />}
     {!finished && <p className="task-card-chips">

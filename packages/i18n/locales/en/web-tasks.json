@@ -625,5 +625,6 @@
   "系统正在从已批准的 {{count}} 个里程碑倒推任务（每个几分钟），出来的任务会出现在这里。_one": "Working back tasks from {{count}} approved milestone (a few minutes each); they will appear here.",
   "系统正在从已批准的 {{count}} 个里程碑倒推任务（每个几分钟），出来的任务会出现在这里。_other": "Working back tasks from {{count}} approved milestones (a few minutes each); they will appear here.",
   "日程前后按这个时间留出路上时间，同一地点不再问。": "Travel time of this length is kept before and after events there; the same place is not asked again.",
-  "按 30 分钟留出路上时间。": "30 minutes of travel time are kept."
+  "按 30 分钟留出路上时间。": "30 minutes of travel time are kept.",
+  "等本人 · {{what}}": "Waiting on you · {{what}}"
 }

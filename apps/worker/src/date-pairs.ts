@@ -1,4 +1,4 @@
-import type { CrosslineStore, StoredWorkOrder } from "@crossline/db";
+import { provideMaterial, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { courseCodeOf } from "@crossline/core";
 import { autoApproveEligible } from "./auto-approval";
 import { ownerOf } from "./owner";
@@ -134,4 +134,39 @@ export function releaseWaits(store: CrosslineStore, workspaceId: string): { open
       followUpAt: pair.releaseDay, state: "open", blocks: [order.id], source: "datepair" }).inserted) opened.push(id);
   }
   return { opened, arrived };
+}
+
+/** A provide step that asks for the homework itself (its problems, its sheet), not for some other material of the task. */
+const ASKS_FOR_HOMEWORK = /题面|题目|作业\s*\d*\s*(?:文件|原文)|problem\s*set|homework\s*\d*\s*(?:sheet|file|pdf|handout)/i;
+/** Done orders keep their history; anything not yet done can still be unblocked by its file. */
+const SETTLED = new Set(["accepted", "archived"]);
+
+/**
+ * The homework's own file arriving also settles a step that asks the person for it (W-169). On 2026-11-01 「完成 ECE 555 作业 3」 was due
+ * the next day with no time on the calendar: its plan had asked on 10/22 for 「ECE 555 作业3题面或 Canvas 公告」, the file
+ * 「F26-Homework3-ECE555.docx」 had since come in from the person's Downloads, and nothing but an upload on the task page could settle the
+ * step, so every step that used it waited. The file is matched as `releaseWaits` matches it, filed under the course when it has no project,
+ * and the step is settled as an upload. Returns the steps settled.
+ */
+export function settleHomeworkNeeds(store: CrosslineStore, workspaceId: string, now = new Date()): Array<{ workOrderId: string; stepId: string; documentId: string }> {
+  const owner = ownerOf(store, workspaceId);
+  const projects = store.listProjects(workspaceId, { includeArchived: true });
+  const documents = store.listSourceDocuments(workspaceId);
+  const settled: Array<{ workOrderId: string; stepId: string; documentId: string }> = [];
+  for (const order of store.listWorkOrders(workspaceId)) {
+    const number = (order.payload as { datePair?: { number?: string } } | undefined)?.datePair?.number;
+    if (!number || SETTLED.has(order.state)) continue;
+    const plan = store.getStepPlan(workspaceId, order.id);
+    const asks = (plan?.steps ?? []).filter((step) => step.provides && step.status === "planned" && ASKS_FOR_HOMEWORK.test(`${step.title} ${step.deliverable}`));
+    if (!asks.length) continue;
+    const project = projects.find((item) => item.id === order.projectId);
+    const course = courseKey(project?.name ?? "") ?? courseKey(order.projectId);
+    const file = documents.find((doc) => fileHomework(doc.fileName) === number
+      && (doc.projectId === order.projectId || (course !== undefined && courseKey(doc.fileName) === course)));
+    if (!file) continue;
+    if (!file.projectId) store.assignSourceDocumentProject(workspaceId, file.id, order.projectId);
+    for (const step of asks) if (provideMaterial(store, workspaceId, order.id, step.id, "file", [file.id], owner, now).ok)
+      settled.push({ workOrderId: order.id, stepId: step.id, documentId: file.id });
+  }
+  return settled;
 }

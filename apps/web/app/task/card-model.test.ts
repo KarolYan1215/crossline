@@ -24,6 +24,9 @@ describe("the card's reading of a task", () => {
     expect(waitReason(d, TODAY)).toEqual({ kind: "input", label: "等待 · 作业发布（10/20 起）" });
     expect(stepSegments(d)[0]!.kind).toBe("waiting");
     expect(groupOf(d, { today: TODAY })).toBe("waiting");
+    // Material only the person has is given on the task, not on 待确认 (W-170).
+    const ask = detail({ stepPlan: plan([step("p", { title: "提供作业 3 题面", schedulable: false, provides: "n1" })]) });
+    expect(waitReason(ask, TODAY)).toEqual({ kind: "provide", label: "等本人 · 提供作业 3 题面" });
   });
 
   test("each state that is not the person's to work on is a wait, with its reason", () => {

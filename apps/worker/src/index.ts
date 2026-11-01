@@ -61,7 +61,7 @@ import { createMilestoneRiskReviewer, milestonesAwaitingRiskReview } from "./mil
 import { fileSourceDocuments } from "./source-filing";
 import { createPortraitWriter, PORTRAIT_GAP_AT, PORTRAIT_REWRITE_MARKER, portraitRewriteDue } from "./portrait-writer";
 import { createPortraitIllustrator } from "./portrait-illustrator";
-import { materializeDatePairs, releaseWaits } from "./date-pairs";
+import { materializeDatePairs, releaseWaits, settleHomeworkNeeds } from "./date-pairs";
 import { createConcierge, type ConciergeRequest } from "./concierge";
 import { createMilestoneGate, pendingMilestoneGates } from "./milestone-gate-runner";
 import { createMilestoneConversation, createMilestoneProposer, createRelationReviser } from "./milestone-proposer";
@@ -634,6 +634,8 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       if (created.length) console.info(JSON.stringify({ type: "datepair.created", checkedAt, workspaceId, created }));
       const release = releaseWaits(analysisStore, workspaceId);
       if (release.opened.length || release.arrived.length) console.info(JSON.stringify({ type: "datepair.release_waits", checkedAt, workspaceId, ...release }));
+      const homework = settleHomeworkNeeds(analysisStore, workspaceId);
+      if (homework.length) console.info(JSON.stringify({ type: "datepair.homework_provided", checkedAt, workspaceId, settled: homework }));
     } catch (error) { console.info(JSON.stringify({ type: "datepair.failed", checkedAt, workspaceId, message: error instanceof Error ? error.message : "" })); }
     // Questions of plans made before importance was judged: filtered by rule, no model call (docs/review-2026-10-13.md §11).
     try {
