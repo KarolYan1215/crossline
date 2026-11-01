@@ -742,7 +742,7 @@
   "里程碑附录": "Milestone appendix",
   "「{{line}}」这条线眼下在做什么？": "What are you working on in \"{{line}}\" right now?",
   "在「{{line}}」这条线上，三五年后你希望成为什么样的人？": "In \"{{line}}\", what kind of person do you want to be in three to five years?",
-  "「{{line}}」每周有哪些固定要占的时间？说个大概就行。": "What fixed commitments does \"{{line}}\" take each week? A rough answer is fine.",
+  "「{{line}}」每周哪几天、几点到几点是固定占着的？比如工作日 10:00–19:30、周一上午 10:30–11:30 例会。": "Which days and hours does \"{{line}}\" take every week? For example weekdays 10:00–19:30, a Monday meeting 10:30–11:30.",
   "固定安排之外，每周大概哪些时段可以用来做自己的事？": "Outside your fixed commitments, which hours of the week can you use for your own work?",
   "「{{project}}」大概什么时候要完成？没有截止也可以直接说。": "Roughly when does \"{{project}}\" need to be done? \"No deadline\" is an answer too.",
   "「{{line}}」这条线眼下在做的一件事是什么？大概什么时候要完成，没有截止也可以说。": "What is one thing you are doing in \"{{line}}\" right now, and roughly when is it due? \"No deadline\" is an answer too.",

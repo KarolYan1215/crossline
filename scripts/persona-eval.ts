@@ -28,7 +28,7 @@ import path from "node:path";
 import { configureModelGate, runCodexSkill, setProviderResolver, setUsageSink, startCodexAppServer, startCodexSupervisor, startModelGateway,
   threadProvider, withUsageWorkspace, type ProviderRouting, type SkillUsage } from "../packages/codex/src/index";
 import {
-  ONBOARDING_INSIGHTS, ONBOARDING_TONE_SETTING, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, THIRD_PARTY_CAPABILITIES, cardWordsHead,
+  ONBOARDING_INSIGHTS, ONBOARDING_TONE_SETTING, PROFILE_CLAIMS_SETTING, PROFILE_INSTRUMENTS_SETTING, SPONSOR_THINKING_CAPS, THIRD_PARTY_CAPABILITIES, cardWordsHead,
   composeGoal, instrumentClaims, instrumentReadings, interviewComplete, parseSponsorModels, readInsightRatings, readInstrumentAnswers, readyToStart,
   scaleAnswerLine, screenQuestions, sponsorSpend, type AccessContext, type OnboardingTone, type ProfileCard, type StoredLineProfile
 } from "../packages/core/src/index";
@@ -84,7 +84,9 @@ const routing = (key: string, pinned: string): ProviderRouting => {
   const contextK = sponsor.models.find((item) => item.model === pinned)?.contextK;
   return { provider: { id: SPONSOR_PROVIDER_ID, kind: "chat", label: "开发者提供的模型", baseUrl: sponsor.baseUrl, model: pinned, responseFormat: "json_object",
     keyLast4: null, updatedAt: "1970-01-01T00:00:00.000Z", ...(contextK ? { contextK } : {}) },
-    gatewayUrl: gateway.urlFor(key, SPONSOR_PROVIDER_ID), admitted: new Set(SKILLS), codexSignedIn: false, capabilities: { ...THIRD_PARTY_CAPABILITIES, webSearch: false } };
+    gatewayUrl: gateway.urlFor(key, SPONSOR_PROVIDER_ID), admitted: new Set(SKILLS), codexSignedIn: false, capabilities: { ...THIRD_PARTY_CAPABILITIES, webSearch: false },
+    // A Skill's thinking cap, as the worker gives it (`SPONSOR_THINKING_CAPS`): the walkthrough measures what an invited account gets.
+    modelFor: (skill) => SPONSOR_THINKING_CAPS[skill] && !pinned.includes("@think:") ? `${pinned}${SPONSOR_THINKING_CAPS[skill]}` : undefined };
 };
 setProviderResolver((key) => key?.startsWith("persona-eval:") ? routing(key, key.endsWith(":player") ? playerModel : model) : undefined);
 const supervisor = await startCodexSupervisor({ port: Number(process.env.CROSSLINE_CODEX_SUPERVISOR_PORT ?? 3392),
@@ -98,10 +100,11 @@ function cost(key: string) {
   const pinned = key.endsWith(":player") ? playerModel : model;
   const tokens = usage.reduce((sum, row) => ({ input: sum.input + row.inputTokens, cached: sum.cached + row.cachedInputTokens, output: sum.output + row.outputTokens,
     reasoning: sum.reasoning + row.reasoningOutputTokens }), { input: 0, cached: 0, output: 0, reasoning: 0 });
-  const bySkill: Record<string, { runs: number; repairs: number; seconds: number }> = {};
+  const bySkill: Record<string, { runs: number; repairs: number; seconds: number; output: number; reasoning: number }> = {};
   for (const row of usage) {
-    const entry = bySkill[row.skillName.replace(/^crossline:/, "")] ??= { runs: 0, repairs: 0, seconds: 0 };
+    const entry = bySkill[row.skillName.replace(/^crossline:/, "")] ??= { runs: 0, repairs: 0, seconds: 0, output: 0, reasoning: 0 };
     entry.runs += 1; entry.repairs += row.repairs; entry.seconds += Math.round(row.durationMs / 1000);
+    entry.output += row.outputTokens; entry.reasoning += row.reasoningOutputTokens;
   }
   const yuan = sponsorSpend(usage.map((row) => ({ model: pinned, inputTokens: row.inputTokens, cachedInputTokens: row.cachedInputTokens, outputTokens: row.outputTokens })), priced);
   return { model: pinned, tokens, bySkill, yuan: Math.round(yuan * 10_000) / 10_000 };

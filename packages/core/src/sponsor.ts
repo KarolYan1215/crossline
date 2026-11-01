@@ -163,16 +163,25 @@ function admittedFor(skill: string, models: SponsorModel[], evaluations: Sponsor
 export const SPONSOR_PLANNING_SKILLS: readonly string[] = ["crossline-step-planner", "crossline-goal-backplanner"];
 
 /**
+ * Skills whose thinking is capped on the developer's model (2026-11-01). The interview's extraction runs beside the conversation and the
+ * person waits for it to reach the start: on DeepSeek-V4.1-Flash a real run spent 16.5k of 18.5k output tokens reasoning (236 s), and
+ * the effort trial (`SPONSOR_EFFORT_CASES`) answered its case with 2048 tokens of thinking in 39 s instead of 62 s, no repair, the
+ * answer itself as long as with thinking unbounded; with thinking off it wrote a fifth as much.
+ */
+export const SPONSOR_THINKING_CAPS: Readonly<Record<string, string>> = { "crossline-onboarding-extract": "@think:2048" };
+
+/**
  * The model one Skill runs on: the cheapest candidate that passed it for a simple background Skill, the planning model for a planning
- * Skill when that model passed it, the chosen model for the rest.
+ * Skill when that model passed it, the chosen model for the rest; with the Skill's thinking cap when it has one.
  */
 export function sponsorModelForSkill(skill: string, chosen: string, models: SponsorModel[], evaluations: SponsorEvaluation[],
   capabilities: ProviderCapabilities = THIRD_PARTY_CAPABILITIES, planningModel?: string): string {
+  const capped = (model: string) => SPONSOR_THINKING_CAPS[skill] && !thinkingVariant(model).thinking ? `${model}${SPONSOR_THINKING_CAPS[skill]}` : model;
   if (SPONSOR_PLANNING_SKILLS.includes(skill)) {
-    return planningModel && admittedFor(skill, models, evaluations, capabilities).some((item) => item.model === planningModel) ? planningModel : chosen;
+    return capped(planningModel && admittedFor(skill, models, evaluations, capabilities).some((item) => item.model === planningModel) ? planningModel : chosen);
   }
-  if (!SPONSOR_SIMPLE_SKILLS.includes(skill)) return chosen;
-  return admittedFor(skill, models, evaluations, capabilities)[0]?.model ?? chosen;
+  if (!SPONSOR_SIMPLE_SKILLS.includes(skill)) return capped(chosen);
+  return capped(admittedFor(skill, models, evaluations, capabilities)[0]?.model ?? chosen);
 }
 
 /** Where a person's turn refused for load goes next: other candidates that passed this Skill, cheapest first. */

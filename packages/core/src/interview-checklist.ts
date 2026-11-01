@@ -175,7 +175,7 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
     const done = fixed.length > 0 || stated;
     items.push({ id: `hard_schedule:${line.id}`, group: "日程", label: t("「{{line}}」的每周固定安排已收集", { line: line.label }), done,
       detail: done ? "" : t("每周固定要占的时间尚未收集"), owner: "interview", start: true,
-      ask: t("「{{line}}」每周有哪些固定要占的时间？说个大概就行。", { line: line.label }) });
+      ask: t("「{{line}}」每周哪几天、几点到几点是固定占着的？比如工作日 10:00–19:30、周一上午 10:30–11:30 例会。", { line: line.label }) });
   }
   items.push({ id: "availability", group: "日程", label: t("已提出建议的可用时段"), done: input.availability,
     detail: input.availability ? "" : t("固定日程之外，每周哪些时段可以安排工作"), owner: "interview", start: true,
