@@ -16,6 +16,10 @@ test("a premature 「ready」 goes back to asking for what the interview still o
   // An item with no question of its own still holds the end, with the stage's open question.
   expect(withChecklist(turn({ stage: "energy" }), [{ label: "画像字段", detail: "", owner: "interview" }]).questions).toHaveLength(1);
   expect(withChecklist(turn({}), [{ label: "本人确认画像符合自己", detail: "", owner: "person" }]).nextAction).toBe("ready_for_milestones");
+  // Answered and waiting for the extraction to write it down: no open question in its place, the end stands.
+  const waiting = withChecklist(turn({ stage: "lines" }), [{ label: "每条主线有当前项目", detail: "", owner: "interview", recording: true }]);
+  expect(waiting.nextAction).toBe("ready_for_milestones");
+  expect(waiting.questions).toHaveLength(0);
 });
 
 test("each round gets the app's questions about what it is talking about; with nothing relevant, one other", () => {

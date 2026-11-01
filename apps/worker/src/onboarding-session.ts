@@ -565,8 +565,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
  * (`interviewChecklist`): a premature 「ready」 goes back to asking, says what is missing, and — when the model asked nothing — asks for it.
  * Items only the person can settle (confirming the portrait, adopting a goal) do not hold the interview; they show on the screen.
  */
-export function withChecklist<T extends OnboardingDialogue>(output: T, open: Array<{ id?: string; label: string; detail: string; owner: "interview" | "person"; ask?: string }>, locale?: Locale): T {
-  const owed = open.filter((item) => item.owner === "interview");
+export function withChecklist<T extends OnboardingDialogue>(output: T, open: Array<{ id?: string; label: string; detail: string; owner: "interview" | "person"; ask?: string; recording?: boolean }>, locale?: Locale): T {
+  // An item the person already answered, which the extraction has not written down yet, holds nothing: no question settles it, and the
+  // 2026-11-01 run 12 asked one father 「哪条主线你最想先说清楚」 four rounds running while his answers waited to be written. What the
+  // extraction then leaves open is asked on the interview page before the app opens (`startMissing`).
+  const owed = open.filter((item) => item.owner === "interview" && !item.recording);
   if (output.nextAction !== "ready_for_milestones" || !owed.length) return output;
   // The person is asked the item's own question, never shown the checklist's label (2026-10-31: 「完成访谈前还缺：硬约束「上班」的固定日程已
   // 收集（上课、组会、值班…）」). An item no question settles (a portrait field the extraction writes) holds the end without words of its own.
