@@ -453,7 +453,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     if (repeated.dropped.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:questions-repeated:${sessionId}:${replyId}:${heardAt}`,
       type: "onboarding.questions_repeated", entityId: sessionId, payload: { replyId, dropped: repeated.dropped } });
     // A line's own interview leaves its goal to the line card's picker (`goalEdits` wait there for the person).
-    const gapsNow = currentGaps().filter((gap) => !repeated.coveredGaps.has(gap.question.id) && !(focusLine && gap.code === "LINE_GOAL"));
+    const gapsFresh = () => currentGaps().filter((gap) => !repeated.coveredGaps.has(gap.question.id) && !(focusLine && gap.code === "LINE_GOAL"));
+    let gapsNow = gapsFresh();
     const paced = paceDeepRound({ ...result.output, questions: repeated.questions }, Boolean(focusLine), tier.roundQuestions);
     // The profile module's cards for this stage (flow v2): they count in the round's questions, so the model's give way to them.
     // The item texts exist in Chinese only so far (our own translation, docs/profile-and-agent-kit.md §二): an English interview gets none.
@@ -468,6 +469,11 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     if (cards.length && !paced.deep && paced.output.questions.length && !interestOnly) cards = cards.filter((card) => card.instrument !== "rest18");
     if (cards.length) paced.output = { ...paced.output, questions: paced.output.questions
       .slice(0, interestOnly && !paced.deep ? 1 : Math.max(1, tier.roundQuestions - cards.length)) };
+    // Every question the model wrote was taken out (already answered, screened) and none of its cards are left: what the round asks now is
+    // the app's own, read off the checklist. That checklist waits for the extraction once more, or it asks what this reply just said (the
+    // 2026-11-01 rerun asked the illustrator line's current project right under the answer naming it).
+    if (!paced.output.questions.length && !cards.length && paced.output.nextAction === "ask" && extractMode === "background" && !focusLine
+      && extractBacklog(store, workspaceId, sessionId).replies > 0) { await caughtUp(CHECKLIST_WAIT_MS); gapsNow = gapsFresh(); }
     const touched = { lines: recorded.identities, projects: recorded.projects, portrait: Boolean(readProfile().portrait) };
     const stillWriting = ending && extractMode === "background" && extractBacklog(store, workspaceId, sessionId).replies > 0;
     // Once the start standard stands the portrait's items no longer hold the end: the extraction's finishing run writes the portrait from
