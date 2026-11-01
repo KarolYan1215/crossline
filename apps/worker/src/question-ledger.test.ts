@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { checklistAskable, ledgerForModel, resolveRepeats, withDistinctOptions } from "./question-ledger";
+import { checklistAskable, ledgerForModel, linesAnsweredUnread, resolveRepeats, withDistinctOptions } from "./question-ledger";
 
 const ws = "w";
 let store: CrosslineStore | undefined;
@@ -85,4 +85,15 @@ test("a checklist question once answered, or asked twice, waits for the extracti
   store.recordQuestion(ws, { kind: "interview", key: "iq:s1:16:start-open", text: `${other}实在说不准，可以先说一个暂定的答案。`, status: "open", at });
   expect(checklistAskable(store, ws, "s1")(other)).toBe(false);
   expect(checklistAskable(store, ws, "s2")(other)).toBe(true);
+});
+// 2026-11-01 run 8: a line answered about at round 11 was asked again at round 19, the extraction still three runs behind.
+test("a line answered about in a reply the extraction has not read is named, until the extraction passes that reply", () => {
+  store = new CrosslineStore(":memory:");
+  const asked = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:9:p1", text: "「当爸的」这条线眼下在忙的一件事是什么？", identityId: "line-dad", status: "open", at: "2026-11-01T09:00:00Z" });
+  store.answerQuestion(ws, asked, { text: "明年上小学在看学校", at: "2026-11-01T09:05:00Z" });
+  const person = store.recordQuestion(ws, { kind: "interview", key: "iq:s1:9:p2", text: "平时几点睡？", identityId: "person", status: "open", at: "2026-11-01T09:00:00Z" });
+  store.answerQuestion(ws, person, { text: "十一点", at: "2026-11-01T09:05:00Z" });
+  expect([...linesAnsweredUnread(store, ws, "s1", "2026-11-01T09:05:00Z")]).toEqual(["line-dad"]);
+  expect(linesAnsweredUnread(store, ws, "s1", "2026-11-01T09:06:00Z").size).toBe(0);
+  expect(linesAnsweredUnread(store, ws, "s1", undefined).size).toBe(0);
 });

@@ -19,7 +19,7 @@ import {
 import { sourceIds } from "./source-ids";
 import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
-import { checklistAskable, ledgerForModel, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
+import { checklistAskable, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
 import { createOnboardingExtractor, extractionReached, requestExtraction } from "./onboarding-extract";
 import { personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
@@ -115,9 +115,15 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
   // An item's own question goes to the person only while `checklistAskable` allows it: once answered, the item waits for the extraction.
   const openChecklist = (limit = 8, skip: (item: { id: string; group: string; start?: boolean }) => boolean = () => false, sessionId?: string) => {
     const askable = sessionId ? checklistAskable(store, workspaceId, sessionId) : () => true;
+    // A line answered about in a reply the extraction has not read yet: its items' questions wait (`linesAnsweredUnread`).
+    const upTo = sessionId ? readExtractState(store, workspaceId, sessionId).upTo : 0;
+    const unread = sessionId ? linesAnsweredUnread(store, workspaceId, sessionId, store.listOnboardingMessages(workspaceId, sessionId)
+      .find((message) => message.role === "user" && message.seq > upTo)?.createdAt) : new Set<string>();
+    const waits = (id: string) => unread.has(/^line_[a-z_]+:(.+)$/u.exec(id)?.[1] ?? "");
     return checklistNow()
       .filter((item) => !item.done && !item.deferred && !skip(item)).sort((a, b) => Number(Boolean(b.start)) - Number(Boolean(a.start)))
-      .slice(0, limit).map(({ label, detail, owner, start, ask }) => ({ label, detail, owner, ...(start ? { start } : {}), ...(ask && askable(ask) ? { ask } : {}) }));
+      .slice(0, limit).map(({ id, label, detail, owner, start, ask }) => ({ label, detail, owner, ...(start ? { start } : {}),
+        ...(ask && askable(ask) && !waits(id) ? { ask } : {}) }));
   };
   /** The person's tier (`ONBOARDING_DEPTH_SETTING`), read every round: it can change mid-interview. */
   const depthNow = () => readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING));

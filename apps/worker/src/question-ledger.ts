@@ -122,6 +122,20 @@ export function checklistAskable(store: CrosslineStore, workspaceId: string, ses
   };
 }
 
+/**
+ * The lines the person answered a question about in replies the extraction has not read yet (`since`: when the first such reply came).
+ * A line's start item stays open until the extraction writes the answer down, and on a slow model that is rounds later: the 2026-11-01
+ * run 8 asked one father what his daughter's line was working on at round 19, eight rounds after he said it, because three extraction
+ * runs were still behind. While a line has such an answer, its checklist questions wait.
+ */
+export function linesAnsweredUnread(store: CrosslineStore, workspaceId: string, sessionId: string, since: string | undefined): Set<string> {
+  if (!since) return new Set();
+  return new Set(interviewQuestions(store, workspaceId, sessionId)
+    .filter((question) => question.status === "answered" && question.identityId && question.identityId !== "person"
+      && (question.answeredAt ?? "") >= since)
+    .map((question) => question.identityId));
+}
+
 /** A question's options with repeats left out (2026-10-31: one card offered the same choice twice). */
 export function withDistinctOptions(question: TurnQuestion): TurnQuestion {
   const seen = new Set<string>();
