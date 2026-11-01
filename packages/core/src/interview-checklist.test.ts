@@ -155,4 +155,8 @@ test("the portrait's parts are read by meaning: the slot names the extraction wr
   // 2026-11-01: 「过得好」 and 「做事看重」 were written as good_life and work_standards.
   const third = [...full.facts.filter((fact) => fact.identityId !== "person"), person("worry"), person("good_life"), person("habits")];
   expect(interviewChecklist({ ...full, facts: third }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
+  // A section the extraction wrote from numbered sentences grounds its part whatever the slot names were.
+  const odd = [...full.facts.filter((fact) => fact.identityId !== "person"), person("hard_day"), person("misc")];
+  expect(interviewChecklist({ ...full, facts: odd }).find((item) => item.id === "portrait_grounded")?.done).toBe(false);
+  expect(interviewChecklist({ ...full, facts: odd, groundedSections: ["compass", "energy"] }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
 });

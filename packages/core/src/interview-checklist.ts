@@ -63,6 +63,8 @@ export type ChecklistInput = {
   profileCards?: { settled: number; total: number } | undefined;
   /** How thorough the interview is (`ONBOARDING_DEPTH_SETTING`): whether a project's details are asked now or when its task is planned. */
   depth?: OnboardingDepth | undefined;
+  /** The portrait's sections (`situation`, `compass`, `energy`) the extraction wrote from at least one numbered sentence. */
+  groundedSections?: string[] | undefined;
   /** The language of each item's label and detail (default Chinese). */
   locale?: Locale | undefined;
 };
@@ -80,10 +82,10 @@ const settledFact = (fact: { status: string; sourceRef: string; value?: string }
  * meaning: the 2026-11-01 rerun's extraction filed the person's answers as `near_risk`, `one_year_priority`, `work_motive`, `motto` and
  * `worth_day`, and all three people kept this item open to the round limit with every part answered.
  */
-const PORTRAIT_PARTS: Array<{ label: string; slots: RegExp; ask: string }> = [
-  { label: "现状与真问题", slots: /problem|situation|status|current|pressure|anxi|worry|constraint|gravity|stage|risk|priorit|change|lever|stuck|block|struggle|concern|fear/i, ask: "眼下最让你放不下的是哪件事？" },
-  { label: "工作观与人生观", slots: /work_view|life_view|true_north|value|meaning|compass|purpose|motive|motivation|motto|worth|good_day|ideal|belief|career|tradeoff|work_choice|work_feeling|good_life|standard|principle|dream|life_goal/i, ask: "做事的时候，你最看重的是什么？" },
-  { label: "能量与心流", slots: /flow|energy|drain|charge|anchor|behavio|habit/i, ask: "最近一次做得忘了时间，是在做什么？" }
+const PORTRAIT_PARTS: Array<{ label: string; section: string; slots: RegExp; ask: string }> = [
+  { label: "现状与真问题", section: "situation", slots: /problem|situation|status|current|pressure|anxi|worry|constraint|gravity|stage|risk|priorit|change|lever|stuck|block|struggle|concern|fear|conflict|tension|dilemma|trouble|difficult|hard_day|regret|undone|stall/i, ask: "眼下最让你放不下的是哪件事？" },
+  { label: "工作观与人生观", section: "compass", slots: /work_view|life_view|true_north|value|meaning|compass|purpose|motive|motivation|motto|worth|good_day|ideal|belief|career|tradeoff|work_choice|work_feeling|good_life|standard|principle|dream|life_goal/i, ask: "做事的时候，你最看重的是什么？" },
+  { label: "能量与心流", section: "energy", slots: /flow|energy|drain|charge|anchor|behavio|habit/i, ask: "最近一次做得忘了时间，是在做什么？" }
 ];
 /** The portrait's written parts, each a field of the working profile. */
 const PORTRAIT_FIELDS: Array<[keyof ProfileModel, string]> = [["problem", "真问题"],
@@ -131,8 +133,11 @@ export function interviewChecklist(input: ChecklistInput): ChecklistItem[] {
   items.push({ id: "portrait_synthesis", group: "画像", label: t("画像综合段已写出"), done: !missingSynthesis.length,
     detail: missingSynthesis.length ? t("整理中：{{items}}", { items: list(missingSynthesis) }) : "", owner: "interview", deferred: true });
   const personFacts = input.facts.filter((fact) => fact.identityId === "person" && settledFact(fact));
-  const unbacked = PORTRAIT_PARTS.filter((part) => !personFacts.some((fact) => part.slots.test(fact.slot))).map((part) => part.label);
-  const assumedParts = PORTRAIT_PARTS.filter((part) => !personFacts.some((fact) => confirmedFact(fact) && part.slots.test(fact.slot))).map((part) => part.label)
+  // A part rests on the person's words when a fact of it is on record, or when the extraction wrote its section from numbered sentences
+  // (each one a span of a reply or a file): slot names vary run to run, and the 2026-11-01 reruns had 「hard_day」 and 「good_life」.
+  const sectioned = new Set(input.groundedSections ?? []);
+  const unbacked = PORTRAIT_PARTS.filter((part) => !sectioned.has(part.section) && !personFacts.some((fact) => part.slots.test(fact.slot))).map((part) => part.label);
+  const assumedParts = PORTRAIT_PARTS.filter((part) => !sectioned.has(part.section) && !personFacts.some((fact) => confirmedFact(fact) && part.slots.test(fact.slot))).map((part) => part.label)
     .filter((label) => !unbacked.includes(label));
   items.push({ id: "portrait_grounded", group: "画像", label: t("画像每部分都有本人原话或文件为据"), done: !unbacked.length,
     detail: unbacked.length ? t("尚无本人依据：{{items}}", { items: list(unbacked) }) : assumedParts.length ? t("以假设代替：{{items}}", { items: list(assumedParts) }) : "", owner: "interview",
