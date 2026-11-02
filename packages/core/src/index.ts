@@ -570,3 +570,4 @@ export * from "./automations";
 export * from "./device";
 export * from "./opportunity";
 export * from "./form-fill";
+export * from "./form-observe";

@@ -67,6 +67,7 @@
   "规则不允许": "Not allowed by the rules",
   "填写中断": "Filling interrupted",
   "报名代填": "Registration filling",
+  "报名代填补位": "Registration filling fallback",
   "报名提交前总核": "Pre-submit registration check",
   "本人没有在询问卡上点「报名」": "You did not press Register on the offer card",
   "不是活动报名": "Not an event registration",

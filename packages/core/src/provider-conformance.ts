@@ -11,6 +11,7 @@ import { RECORDING_DIGEST_SCHEMA } from "./recording-digest";
 import { MEDIA_DESCRIPTION_SCHEMA } from "./xhs-notes";
 import { FAVOURITE_TOPICS_SCHEMA } from "./favourite-topics";
 import { FORM_CHECK_SCHEMA, FORM_FILL_SCHEMA } from "./form-fill";
+import { FORM_OBSERVE_SCHEMA } from "./form-observe";
 import { CONCIERGE_SCHEMA } from "./concierge";
 import { MAIL_REPLY_DRAFT_SCHEMA, MAIL_TRIAGE_SCHEMA } from "./mail";
 import { IMPORT_TRIAGE_SCHEMA } from "./task-import";
@@ -94,6 +95,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-conformance": { label: "模型检验", schemas: [], testOnly: true },
   "crossline-form-filler": { label: "报名代填", schemas: ["FORM_FILL_SCHEMA"] },
   "crossline-form-checker": { label: "报名提交前总核", schemas: ["FORM_CHECK_SCHEMA"], critical: true },
+  "crossline-form-observer": { label: "报名代填补位", schemas: ["FORM_OBSERVE_SCHEMA"] },
   "crossline-milestone-gate": { label: "验收判定", schemas: ["MILESTONE_GATE_OUTPUT_SCHEMA"], critical: true },
   "crossline-weekly-insight": { label: "每周洞察", schemas: ["WEEKLY_INSIGHT_OUTPUT_SCHEMA"] },
   "crossline-due-diligence": { label: "网上查证", schemas: ["DILIGENCE_OUTPUT_SCHEMA"], webSearch: true },
@@ -181,7 +183,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MILESTONE_RISK_SCHEMA, MINE_SKILL_SCHEMA,
   ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA,
-  FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA
+  FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */
@@ -280,7 +282,9 @@ export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CAL
   // A form page's actions (2026-11-01): a list of small objects with enums, short strings and an anyOf value with a null, like the input box's answer.
   FORM_FILL_SCHEMA: "CONCIERGE_SCHEMA",
   // The pre-submission check: a boolean and a short list of two-string objects, like a review.
-  FORM_CHECK_SCHEMA: "VALIDATION_REVIEW_SCHEMA" };
+  FORM_CHECK_SCHEMA: "VALIDATION_REVIEW_SCHEMA",
+  // The fallback's candidates: a list of small objects with an enum, short strings and a short list of strings, like calendar filing.
+  FORM_OBSERVE_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA" };
 const caseRuns = (record: ConformanceRecord) => {
   const runs = record.runs.flatMap((run) => LEGACY_CASES[run.caseId] ? LEGACY_CASES[run.caseId]!.split("|").map((caseId) => ({ ...run, caseId })) : [run]);
   const proxied = Object.entries(SCHEMA_PROXIES).filter(([schema]) => !runs.some((run) => run.caseId === schema))

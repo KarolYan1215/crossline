@@ -69,6 +69,7 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   // submitted. Mid: a wrong mapping costs the person a correction, and the rules catch what may not be done either way.
   "crossline-form-filler": "mid",
   "crossline-form-checker": "mid",
+  "crossline-form-observer": "mid",
   "crossline-weekly-insight": "mid",
   "crossline-due-diligence": "mid",
   // The weekly energy-advice review: reads research and argues with a rule, once a week.
