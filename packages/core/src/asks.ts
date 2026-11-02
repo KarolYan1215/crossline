@@ -28,6 +28,10 @@ export type AskKind =
   | "relation_check" | "background_paused" | "locked_conflict" | "outcome_check" | "progress_check" | "milestone_risk_review"
   /** A course's or the person's own deadline passed with work still open (the daily pass's `milestone.overdue`): 补做 / 新日期 / 放弃. */
   | "milestone_overdue"
+  /** A need the opportunity agent worked out for a line (docs/opportunity-agent.md §5): 跟踪 / 不要. */
+  | "opportunity_need"
+  /** An opportunity the person qualifies for, or might (its eligibility questions with it): 报名 / 申请 / 加入计划 / 不要 / 以后再说. */
+  | "opportunity_offer"
   /**
    * Started work whose own due day passed (docs/plans/closed-loop-1030.md §4): an external date (a course's, or read from someone else's
    * text) — can it still be handed in, and by when; or a self-set date the daily pass already moved twice. 新日期 or 归档.

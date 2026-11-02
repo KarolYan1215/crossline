@@ -13,6 +13,7 @@ export const DILIGENCE_SKILL = "crossline:crossline-due-diligence";
 import { ownerOf } from "./owner";
 import { localeOf } from "./locale";
 import { identityLines } from "./lines";
+import { opportunityAgentOn } from "./opportunities";
 /** A weekly refresh, not a loop: a line is researched again only once its last report is this old. */
 export const DILIGENCE_REFRESH_DAYS = 7;
 
@@ -261,10 +262,16 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
   };
 }
 
-/** Lines that have enough profile to research and no recent report: what the weekly pass should run. */
-export function linesDueForDiligence(store: CrosslineStore, workspaceId: string, now: Date): string[] {
+/**
+ * Lines that have enough profile to research and no recent report: what the weekly pass should run. Where the opportunity agent runs (the
+ * machine owner's workspace, docs/opportunity-agent.md §6) a line whose topic is external opportunities is left to it: its needs, sources
+ * and eligibility check replace the weekly list of competitions and grants.
+ */
+export function linesDueForDiligence(store: CrosslineStore, workspaceId: string, now: Date, env: NodeJS.ProcessEnv = process.env): string[] {
   const reports = store.listDiligenceReports(workspaceId);
-  return identityLines(store, workspaceId).map((pack) => pack.id).filter((id) => {
+  // Where the opportunity agent runs it watches a line's openings itself (docs/opportunity-agent.md §6), so that topic is not researched twice.
+  const agent = opportunityAgentOn(store, workspaceId, env);
+  return identityLines(store, workspaceId).filter((pack) => !agent || topicFor(pack) !== "opportunities").map((pack) => pack.id).filter((id) => {
     if (store.listProfileFacts(workspaceId).filter((fact) => fact.identityId === id).length < 2) return false;
     const latest = reports.find((report) => report.scope === id && (report.status === "done" || report.status === "running"));
     if (latest && now.getTime() - Date.parse(latest.runAt) < DILIGENCE_REFRESH_DAYS * 86_400_000) return false;

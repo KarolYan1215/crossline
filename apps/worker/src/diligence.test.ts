@@ -114,8 +114,11 @@ test("a line is researched once a week, and not at all without a profile or with
   expect((await run("startup")).state).toBe("done");
   expect(await run("startup")).toEqual({ state: "skipped", reason: "recent_report" });
   expect(turns()).toBe(1);
-  expect(linesDueForDiligence(store, workspaceId, NOW())).toEqual([]);
-  expect(linesDueForDiligence(store, workspaceId, new Date("2026-10-10T12:00:00.000Z"))).toEqual(["startup"]);
+  expect(linesDueForDiligence(store, workspaceId, NOW(), { CROSSLINE_PUBLIC_BETA: "1" })).toEqual([]);
+  const beta = { CROSSLINE_PUBLIC_BETA: "1" };
+  expect(linesDueForDiligence(store, workspaceId, new Date("2026-10-10T12:00:00.000Z"), beta)).toEqual(["startup"]);
+  // On the machine owner's own workspace the opportunity agent watches the startup line's openings instead.
+  expect(linesDueForDiligence(store, workspaceId, new Date("2026-10-10T12:00:00.000Z"), {})).toEqual([]);
 
   const broke = createDiligenceRunner(store, workspaceId, "C:\\repo", () => rpc, { fetchImpl, isPublicHost: publicHost, now: NOW, webBlocker: () => undefined,
     readCost: async () => ({ available: true, short: { usedPercent: 99 }, long: { usedPercent: 99 } }) as never });

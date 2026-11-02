@@ -23,6 +23,7 @@ import { cardView, loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../..
 import { linePacks } from "../../lib/lines";
 
 import { loadDiligence } from "../../lib/diligence";
+import { loadOpportunityWeek } from "../../lib/opportunities";
 import type { DiligenceReport } from "../onboarding/onboarding-types";
 import { DiligenceReview } from "./diligence-review";
 import { localeFor, tOf } from "../../lib/locale";
@@ -53,6 +54,7 @@ export default async function ReviewPage() {
   const workOrders = getStore().listWorkOrders(ctx.workspaceId);
   const accepted = workOrders.filter((workOrder) => workOrder.state === "accepted").length;
   const review = loadWeeklyReview(ctx);
+  const opportunities = loadOpportunityWeek(ctx);
   // The same numbers as the monthly report and the ledger page (docs/mail-bookkeeping.md §5.3); only their summary is here.
   const money = loadLedger(ctx);
   const taskDetails = loadTaskDetailsBatch(ctx, review.autoAccepted.map((item) => item.workOrderId));
@@ -120,6 +122,15 @@ export default async function ReviewPage() {
       <header className="rd-card-head"><h2 id="rv-diligence" className="ds-serif">{t("本周调研结论")}</h2><small>{t("{{count}} 条待定", { count: pendingProposals })}</small></header>
       <p className="review-note">{t("网上调研得出的提议在这里一周批一次；采纳「任务」类提议会收进待分析、变成任务；其余类型采纳后作为下次设计里程碑的参考。")}</p>
       <DiligenceReview reports={diligence} identities={identities} />
+    </section>}
+
+    {(opportunities.found > 0 || opportunities.waitingForm.length > 0) && <section className="rd-card review-block" aria-labelledby="rv-opportunities">
+      <header className="rd-card-head"><h2 id="rv-opportunities" className="ds-serif">{t("本周机会")}</h2></header>
+      <p className="review-note">{t("新发现 {{found}} 条：符合 {{eligible}}，待确认资格 {{unknown}}，不符合 {{ineligible}}；本周报名 {{registered}}，申请 {{applied}}。", opportunities)}</p>
+      {opportunities.waitingForm.length > 0 && <p className="review-note">{t("待代填：{{titles}}", { titles: opportunities.waitingForm.map((item) => item.title).join(locale === "en" ? ", " : "、") })}</p>}
+      {opportunities.ruledOut.length > 0 && <details><summary>{t("筛掉的 {{count}} 条与理由", { count: opportunities.ruledOut.length })}</summary>
+        <ul className="review-list">{opportunities.ruledOut.map((item) => <li key={item.id}><b>{item.title}</b><small>{item.why}</small></li>)}</ul>
+      </details>}
     </section>}
 
     <section className="rd-card review-block" aria-labelledby="rv-findings">

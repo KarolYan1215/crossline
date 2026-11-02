@@ -51,6 +51,7 @@ import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, scoutDue } from "./public-skills";
+import { deriveNeeds, needsDue, needsToPoll, opportunityAgentOn, pollNeed, rejudge } from "./opportunities";
 import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, loginBrowser, markWorkflowRun,
   openWorkflowLogin, resumeByPerson, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { loginMode } from "./browser-launch";
@@ -489,6 +490,34 @@ async function publicSkillPass(workspaceId: string, checkedAt: string, offPeakWa
 }
 
 /**
+ * The opportunity agent's discovery (docs/opportunity-agent.md §5–7), on the machine owner's workspace only: one line's needs worked out
+ * per tick when due (its setup, a changed goal or milestones, monthly), then up to two tracked needs polled. Planning work: it stops with
+ * the 规划 pause and runs while core work may. Detached, so an hour-long run never holds the tick; one at a time per workspace.
+ */
+const discovering = new Set<string>();
+async function opportunityPass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (!opportunityAgentOn(analysisStore, workspaceId) || paused(workspaceId, "planning") || !codexSupervisor || discovering.has(workspaceId)) return;
+  const lines = needsDue(analysisStore, workspaceId);
+  const polls = needsToPoll(analysisStore, workspaceId);
+  if (!lines.length && !polls.length) return;
+  if (!spendAllows(await spendFor(workspaceId), "core")) return;
+  discovering.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const deps = { client: () => accountClient(workspaceId), cwd: repoRoot };
+    for (const lineId of lines.slice(0, 1)) {
+      const outcome = await deriveNeeds(analysisStore, workspaceId, lineId, deps).catch((error: unknown) => ({ blocked: error instanceof Error ? error.message : "FAILED" }));
+      console.info(JSON.stringify({ type: "opportunity.needs", checkedAt, workspaceId, lineId, ...outcome }));
+    }
+    for (const need of polls.slice(0, 2)) {
+      const outcome = await pollNeed(analysisStore, workspaceId, need, deps).catch((error: unknown) => ({ blocked: error instanceof Error ? error.message : "FAILED" }));
+      console.info(JSON.stringify({ type: "opportunity.polled", checkedAt, workspaceId, needId: need.id, ...outcome }));
+    }
+    rejudge(analysisStore, workspaceId);
+  } finally { discovering.delete(workspaceId); }
+}
+
+/**
  * Grown workflows (docs/skills-library.md §6): reminders and scheduled runs whose time has come, the daily clean-up, and — when the
  * assistant is free, not paused and the quota allows — one errand grown into a workflow. Growing and scheduled runs go through the same
  * assistant machinery as any task (owner only, approved kinds only); reminders go out whatever the assistant is doing.
@@ -834,6 +863,7 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   if (!offPeakWait) await withUsagePurpose(NON_CORE_PURPOSE, () => energyAdvicePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace })).catch(() => undefined);
   if (!offPeakWait) await minePass(workspace.id, checkedAt);
   await publicSkillPass(workspace.id, checkedAt, offPeakWait);
+  void opportunityPass(workspace.id, checkedAt).catch(() => undefined);
   await portraitPass(workspace.id, checkedAt, offPeakWait);
   // The automations (docs/personal-agent.md): each one's trigger looked at, new mail's included (the intake pass recorded it).
   await automationTick(workspace.id).catch(() => undefined);

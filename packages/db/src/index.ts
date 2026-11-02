@@ -5,9 +5,14 @@ import { tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, se
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
-  type ChecklistAnswer, type DomainRecordInput, type StoredDomainRecord } from "@crossline/core";
+  type ChecklistAnswer, type DomainRecordInput, type StoredDomainRecord,
+  type EligibilityTerm, type EligibilityVerdict, type Opportunity, type OpportunityDecision } from "@crossline/core";
 import { handOffArtifacts } from "./artifacts";
 import { readLocale } from "./locale";
+
+/** A found opportunity as kept: the contract's record, the read terms (what each accepts), the verdict and the person's answer. */
+export type StoredOpportunity = Opportunity & { terms: EligibilityTerm[]; verdict: EligibilityVerdict; decision?: OpportunityDecision | undefined;
+  decidedAt?: string | undefined; laterUntil?: string | undefined; confirmedBy?: string | undefined; updatedAt: string };
 
 type LedgerEventInput = {
   ownerId: string;
@@ -249,7 +254,7 @@ export type StoredWaitingItem = {
   /** Work orders that cannot start until it arrives. */
   blocks: string[];
   /** `recording`: what someone else promised the person in a recording (the digest, docs/phone-recording.md). */
-  source: "analysis" | "manual" | "assistant" | "backplan" | "datepair" | "recording";
+  source: "analysis" | "manual" | "assistant" | "backplan" | "datepair" | "recording" | "opportunity";
   createdAt: string; updatedAt: string;
 };
 
@@ -290,7 +295,9 @@ export type ModelUsageSummary = {
 
 export type StoredPreference = {
   workspaceId: string; id: string;
-  source: "correction" | "retrospective" | "estimate" | "importance" | "standard_confirmed" | "relation_rejected" | "postpone";
+  source: "correction" | "retrospective" | "estimate" | "importance" | "standard_confirmed" | "relation_rejected" | "postpone"
+    /** The person turned down an opportunity agent's need or offer: what not to propose again (docs/opportunity-agent.md §8). */
+    | "opportunity_declined";
   /** A line id, `task:<id>`, `archetype:<id>` or `all`. */
   scope: string; text: string;
   /** How much it counts: a stated correction 1, a measured pattern more, a single manual edit less. */
@@ -315,7 +322,7 @@ export type StoredLesson = {
 /** Something a model was given and cited (`usedRefs`), counted when its answer takes effect. */
 export type UsedRef = { kind: "fact"; identityId: string; projectId: string; slot: string } | { kind: "pref"; id: string } | { kind: "lesson"; id: string };
 /** Preferences the person stated (not read off an edit): they come first in a context. */
-export const STATED_PREFERENCE_SOURCES: ReadonlySet<string> = new Set(["correction", "retrospective", "standard_confirmed", "relation_rejected"]);
+export const STATED_PREFERENCE_SOURCES: ReadonlySet<string> = new Set(["correction", "retrospective", "standard_confirmed", "relation_rejected", "opportunity_declined"]);
 /** Preferences read off an edit, which lapse after `PREFERENCE_LAPSE_DAYS` unused (decided 2026-10-21). */
 export const LAPSING_PREFERENCE_SOURCES: ReadonlySet<string> = new Set(["estimate", "importance", "postpone"]);
 export const PREFERENCE_LAPSE_DAYS = 30;
@@ -1299,6 +1306,20 @@ export class CrosslineStore {
             occurred_on TEXT NOT NULL, sender_key TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
             PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, source_key));
           CREATE INDEX IF NOT EXISTS record_evidence_by_record ON record_evidence(workspace_id, record_id);`);
+      } },
+      // Opportunities the agent found (docs/opportunity-agent.md §6, 2026-11-01): one row per opening across every source, keyed by
+      // host + normalized title + first deadline so a posting seen on its job board, in a mail and on a search page is one row. The
+      // record itself (`Opportunity` plus the read terms) is JSON; beside it the verdict, the person's decision and the mail that
+      // confirmed a sign-up. Not derived: exported.
+      { version: 23, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS opportunities (
+            workspace_id TEXT NOT NULL, id TEXT NOT NULL, key TEXT NOT NULL, line_id TEXT NOT NULL, need_id TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL, title TEXT NOT NULL, deadline TEXT NOT NULL DEFAULT '', data_json TEXT NOT NULL, verdict TEXT NOT NULL,
+            verdict_json TEXT NOT NULL, decision TEXT NOT NULL DEFAULT '', decided_at TEXT NOT NULL DEFAULT '', later_until TEXT NOT NULL DEFAULT '',
+            confirmed_by TEXT NOT NULL DEFAULT '', found_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, key));
+          CREATE INDEX IF NOT EXISTS opportunities_by_line ON opportunities(workspace_id, line_id, deadline);`);
       } }
     ];
 
@@ -3158,6 +3179,59 @@ export class CrosslineStore {
       .run(...entries.map(([, value]) => value as string | number), workspaceId, id).changes > 0;
   }
 
+  /**
+   * Keeps one found opportunity, one row per `key`. Seen again, its record and verdict follow the newer reading while the person's
+   * decision, the 「以后再说」 day and the confirming mail stay; `inserted` says whether it is new (only a new one is offered).
+   */
+  saveOpportunity(workspaceId: string, input: { opportunity: Opportunity; terms: EligibilityTerm[]; verdict: EligibilityVerdict }, now = new Date().toISOString()): { inserted: boolean; row: StoredOpportunity } {
+    const { opportunity, terms, verdict } = input;
+    const deadline = [...opportunity.deadlines].map((item) => item.day).sort()[0] ?? "";
+    const data = JSON.stringify({ ...opportunity, terms });
+    const inserted = this.#prepare(`INSERT OR IGNORE INTO opportunities (workspace_id, id, key, line_id, need_id, kind, title, deadline, data_json, verdict, verdict_json,
+      found_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(workspaceId, opportunity.id, opportunity.key, opportunity.lineId, opportunity.needId ?? "", opportunity.kind, opportunity.title, deadline, data,
+        verdict.state, JSON.stringify(verdict), opportunity.foundAt, now).changes > 0;
+    if (!inserted) {
+      this.#prepare(`UPDATE opportunities SET line_id = ?, need_id = CASE WHEN ? = '' THEN need_id ELSE ? END, kind = ?, title = ?, deadline = ?, data_json = ?,
+        verdict = ?, verdict_json = ?, updated_at = ? WHERE workspace_id = ? AND key = ?`)
+        .run(opportunity.lineId, opportunity.needId ?? "", opportunity.needId ?? "", opportunity.kind, opportunity.title, deadline, data, verdict.state,
+          JSON.stringify(verdict), now, workspaceId, opportunity.key);
+    }
+    return { inserted, row: this.listOpportunities(workspaceId, { key: opportunity.key })[0]! };
+  }
+
+  listOpportunities(workspaceId: string, filter: { key?: string; id?: string; lineId?: string } = {}): StoredOpportunity[] {
+    const where = [["key", filter.key], ["id", filter.id], ["line_id", filter.lineId]].filter(([, value]) => value !== undefined) as Array<[string, string]>;
+    const rows = this.#prepare(`SELECT * FROM opportunities WHERE workspace_id = ? ${where.map(([column]) => `AND ${column} = ?`).join(" ")} ORDER BY deadline = '', deadline, found_at`)
+      .all(workspaceId, ...where.map(([, value]) => value)) as Array<Record<string, string>>;
+    return rows.map((row) => {
+      const data = JSON.parse(row.data_json!) as Opportunity & { terms?: EligibilityTerm[] };
+      const { terms, ...opportunity } = data;
+      // The row's id is the one first given; a re-read from another source may have computed another.
+      return { ...opportunity, id: row.id!, terms: terms ?? [], verdict: JSON.parse(row.verdict_json!) as EligibilityVerdict,
+        decision: (row.decision || undefined) as OpportunityDecision | undefined, decidedAt: row.decided_at || undefined,
+        laterUntil: row.later_until || undefined, confirmedBy: row.confirmed_by || undefined, updatedAt: row.updated_at! };
+    });
+  }
+
+  /** The person's answer on the offer card; `later` keeps it quiet until `laterUntil`, and a later answer replaces it. */
+  decideOpportunity(workspaceId: string, id: string, decision: OpportunityDecision, now = new Date().toISOString(), laterUntil = ""): boolean {
+    return this.#prepare("UPDATE opportunities SET decision = ?, decided_at = ?, later_until = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
+      .run(decision, now, decision === "later" ? laterUntil : "", now, workspaceId, id).changes > 0;
+  }
+
+  /** A verdict judged again (the person answered a question, a fact changed), with the decision left as it was. */
+  setOpportunityVerdict(workspaceId: string, id: string, verdict: EligibilityVerdict, now = new Date().toISOString()): boolean {
+    return this.#prepare("UPDATE opportunities SET verdict = ?, verdict_json = ?, updated_at = ? WHERE workspace_id = ? AND id = ?")
+      .run(verdict.state, JSON.stringify(verdict), now, workspaceId, id).changes > 0;
+  }
+
+  /** The mail (`mailKey`) that confirmed the person's sign-up or application. */
+  confirmOpportunity(workspaceId: string, id: string, mailKey: string, now = new Date().toISOString()): boolean {
+    return this.#prepare("UPDATE opportunities SET confirmed_by = ?, updated_at = ? WHERE workspace_id = ? AND id = ? AND confirmed_by = ''")
+      .run(mailKey, now, workspaceId, id).changes > 0;
+  }
+
   /** Keeps one piece of evidence of a record; a source item already kept is not kept again (`inserted: false`). */
   addRecordEvidence(workspaceId: string, evidence: RecordEvidenceRow, now = new Date().toISOString()): { inserted: boolean; id: string } {
     const id = randomUUID();
@@ -3871,7 +3945,7 @@ export class CrosslineStore {
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
       "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences", "question_ledger", "workspace_counters", "domain_records",
-      "run_lessons", "record_evidence",
+      "run_lessons", "record_evidence", "opportunities",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by
@@ -4452,3 +4526,4 @@ export * from "./own-completion";
 export * from "./preparation";
 export * from "./step-owner";
 export * from "./lessons";
+export * from "./opportunities";
