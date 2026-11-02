@@ -14,6 +14,7 @@ import { LineTag, Tag } from "../ui/tag";
 import { RiskGlyph, RiskList } from "./risk-glyph";
 import { useLocale, useT } from "../locale-context";
 import { minutesText } from "../timeline/format";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const post = (url: string, body: unknown) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .catch(() => undefined);
@@ -108,7 +109,7 @@ export function MilestoneDrawer({ milestone, labels, onClose, docked = false }: 
 
       <form className="md-row md-title" onSubmit={(event) => { event.preventDefault(); if (title.trim() && title.trim() !== milestone.title) void saveMilestone({ title: title.trim() }); }}>
         <label className="md-key" htmlFor={`md-title-${milestone.id}`}>{t("标题")}</label>
-        <input id={`md-title-${milestone.id}`} value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} />
+        <VoiceField kind="form"><input id={`md-title-${milestone.id}`} value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} /></VoiceField>
         {title.trim() && title.trim() !== milestone.title && <button type="submit" disabled={action.busy}>{t("保存")}</button>}
       </form>
 
@@ -196,8 +197,8 @@ function AddCriterion({ busy, onAdd }: { busy: boolean; onAdd: (criterion: Succe
     <select value={kind} onChange={(event) => setKind(event.target.value as "outcome" | "output")} aria-label={t("标准类型")}>
       <option value="outcome">{t("结果")}</option><option value="output">{t("产出物")}</option>
     </select>
-    <input value={statement} maxLength={400} placeholder={kind === "output" ? t("必须存在的产出，例如：投稿确认邮件") : t("达成的结果，例如：审稿意见为小修")} onChange={(event) => setStatement(event.target.value)} />
-    {kind === "outcome" && <input value={failsWhen} maxLength={400} placeholder={t("什么情况算未达成")} onChange={(event) => setFailsWhen(event.target.value)} />}
+    <VoiceField kind="form"><input value={statement} maxLength={400} placeholder={kind === "output" ? t("必须存在的产出，例如：投稿确认邮件") : t("达成的结果，例如：审稿意见为小修")} onChange={(event) => setStatement(event.target.value)} /></VoiceField>
+    {kind === "outcome" && <VoiceField kind="form"><input value={failsWhen} maxLength={400} placeholder={t("什么情况算未达成")} onChange={(event) => setFailsWhen(event.target.value)} /></VoiceField>}
     <button type="submit" disabled={busy || !ready}>{t("添加")}</button>
     <button type="button" className="text-button" onClick={() => setOpen(false)}>{t("取消")}</button>
   </form>;
@@ -243,7 +244,7 @@ function CriterionRow({ criterion, busy, onSave, onReword, onRemove }: { criteri
           {onRemove && <button type="button" className="text-button" disabled={busy} onClick={onRemove}>{t("去掉")}</button>}</p>
         : <form className="md-reword" onSubmit={(event) => { event.preventDefault(); const next = wording.trim();
             if (next && next !== criterion.statement) onReword(next); else setWording(null); }}>
-          <input value={wording} maxLength={300} aria-label={t("验收标准")} autoFocus onChange={(event) => setWording(event.target.value)} />
+          <VoiceField kind="form"><input value={wording} maxLength={300} aria-label={t("验收标准")} autoFocus onChange={(event) => setWording(event.target.value)} /></VoiceField>
           <button type="submit" disabled={busy || !wording.trim()}>{t("保存")}</button>
           <button type="button" className="text-button" onClick={() => setWording(null)}>{t("取消")}</button>
         </form>}
@@ -306,8 +307,8 @@ function Retrospective({ milestone }: { milestone: BoardMilestone }) {
     </div>
     {retro.readings.filter((reading) => reading.observed).map((reading) => <p key={reading.statement} className="md-reading">
       <span>{reading.statement}</span><span className="gen">{reading.observed}</span></p>)}
-    <textarea value={note} maxLength={2000} rows={3} placeholder={t("有效做法、偏差与下次调整")} aria-label={t("回顾记录")} data-user-text
-      onChange={(event) => setNote(event.target.value)} />
+    <VoiceField kind="note"><textarea value={note} maxLength={2000} rows={3} placeholder={t("有效做法、偏差与下次调整")} aria-label={t("回顾记录")} data-user-text
+      onChange={(event) => setNote(event.target.value)} /></VoiceField>
     <div className="md-actions">
       <button type="button" disabled={action.busy || !note.trim() || note === retro.note}
         onClick={() => void action.run(t("保存中…"), () => post(`/api/milestones/${encodeURIComponent(milestone.id)}/retrospective`, { note }), t("未保存，请重试。"))}>{t("保存回顾")}</button>

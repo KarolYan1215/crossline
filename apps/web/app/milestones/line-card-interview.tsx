@@ -7,6 +7,7 @@ import { composeAnswers, type Answer, type Question } from "../onboarding/onboar
 import { useLocale, useT } from "../locale-context";
 import type { Locale } from "../../lib/i18n";
 import "./line-card.css";
+import { VoiceField } from "../ui/voice/voice-input";
 
 /** What the card knows of the line's own interview, from the server (refreshed in place after every turn). */
 export type LineInterviewView = { reply: string; questions: Array<Pick<Question, "id" | "text" | "kind" | "options">>; waiting: boolean; turns: number; locale?: Locale };
@@ -147,10 +148,10 @@ export function LineCardInterview({ lineId, label, description, interview, pendi
       </fieldset>)}
     </div>}
     <form className="lc-composer" onSubmit={(event) => { event.preventDefault(); send(); }}>
-      <textarea value={text} rows={2} maxLength={4000} aria-label={t("「{{label}}」的访谈", { label })} onFocus={markPage}
+      <VoiceField kind="interview"><textarea value={text} rows={2} maxLength={4000} aria-label={t("「{{label}}」的访谈", { label })} onFocus={markPage}
         placeholder={interview.turns ? t("补充这条主线的情况，或回答上面的问题") : t("这条主线的现状、进展、想法；也可以说「把长期目标改成…」")}
         onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} />
+        onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} /></VoiceField>
       <span className="lc-row">
         <button type="submit" className="text-button" disabled={!composeAnswers(asQuestions(interview.questions), answers, text).trim()}>{busy ? t("排队发送") : t("发送")}</button>
         {busy && <small role="status">{t("正在整理（已 {{n}} 秒，每轮约一两分钟）", { n: seconds })}</small>}

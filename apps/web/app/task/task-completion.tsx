@@ -6,6 +6,7 @@ import { Sheet } from "../ui/overlay";
 import { createCommand, enqueue, nextSequence } from "../offline-queue";
 import { useT } from "../locale-context";
 import { useWholeDetail } from "./whole-detail";
+import { VoiceField } from "../ui/voice/voice-input";
 
 /** What finishing reads off a task. A card's copy (`cardView`) is enough to start; the sheet reads the whole detail for the checklist. */
 export type CompletionTask = Pick<TaskDetail, "id" | "title" | "intent" | "state" | "viewerId" | "workspaceId" | "evidenceChecklist" | "estimate" | "stepPlan">
@@ -129,7 +130,7 @@ export function TaskCompletion({ task, stepId, onDone }: {
   return <div className="tk-complete" id="complete">
     <p className="tk-complete-task"><b>{task.title}</b>{step ? <small> · {step.title}</small> : null}</p>
     <label className="tk-complete-field"><span>{t("完成说明")}</span>
-      <input value={note} maxLength={500} placeholder={t("例如：完成第 3 章习题 12 道，附手写解答")} onChange={(event) => setNote(event.target.value)} disabled={busy} /></label>
+      <VoiceField kind="note"><input value={note} maxLength={500} placeholder={t("例如：完成第 3 章习题 12 道，附手写解答")} onChange={(event) => setNote(event.target.value)} disabled={busy} /></VoiceField></label>
     <label className="tk-complete-field"><span>{t("链接（选填）")}</span>
       <input value={link} maxLength={500} inputMode="url" placeholder={t("成果所在的地址，例如文档或仓库链接")} onChange={(event) => setLink(event.target.value)} disabled={busy} /></label>
     <div className="tk-drop" data-over={over || undefined} onDragOver={(event) => { event.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}>
@@ -154,8 +155,8 @@ export function TaskCompletion({ task, stepId, onDone }: {
                 onChange={() => setAnswers((current) => ({ ...current, [question.id]: option }))} />
               <span>{option}</span>
             </label>)}</div>
-          : <input value={answers[question.id] ?? ""} maxLength={2000} placeholder={t("输入具体情况")} aria-label={question.prompt}
-              onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} />}
+          : <VoiceField kind="note"><input value={answers[question.id] ?? ""} maxLength={2000} placeholder={t("输入具体情况")} aria-label={question.prompt}
+              onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} /></VoiceField>}
       </div>)}
     </fieldset>}
     {/* 「实际花了多久」 in one tap: the only number for work done away from the timer, and what the estimate calibration learns from. */}

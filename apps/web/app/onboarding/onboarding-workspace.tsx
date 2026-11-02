@@ -21,6 +21,7 @@ import { QuotaNotice } from "./quota-notice";
 import { withLink } from "./rich-text";
 import { tFor } from "../../lib/i18n";
 import { useLocale } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 import { asksLongTermGoal, composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
@@ -409,8 +410,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
       {error && <div className="ob-error" role="alert"><p>{error}{waiting && busy === "" && <button type="button" className="ob-btn" onClick={() => void runTurn("")}>{t("重试")}</button>}</p>
           {waiting && state.lastFailure && <FailureDetail failure={state.lastFailure} />}</div>}
       {!opening && <form className="ob-composer ob-voice" onSubmit={(event) => { event.preventDefault(); if (canSend) void runTurn(composed || ""); }}>
-        <textarea value={text} rows={deep ? 4 : open ? 2 : 3} onChange={(event) => setText(event.target.value)} disabled={busy !== ""}
-          placeholder={deep ? t("写下你的回答…") : open ? t("补充说明（可选）") : t("想说的都可以写在这里…")} aria-label={t("回答")} />
+        <VoiceField kind="interview"><textarea value={text} rows={deep ? 4 : open ? 2 : 3} onChange={(event) => setText(event.target.value)} disabled={busy !== ""}
+          placeholder={deep ? t("写下你的回答…") : open ? t("补充说明（可选）") : t("想说的都可以写在这里…")} aria-label={t("回答")} /></VoiceField>
         <div className="ob-composer-row">
           <label className="ob-file-button">
             <input type="file" multiple accept={ACCEPT} hidden onChange={(event) => { void upload(event.target.files ?? []); event.target.value = ""; }} />

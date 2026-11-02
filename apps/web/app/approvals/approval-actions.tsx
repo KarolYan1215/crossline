@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 /** A button's words kept as the Chinese key (and its values), translated when drawn, so a language switch never strands a stored label. */
 type Label = { key: string; values?: Record<string, unknown> };
@@ -24,7 +25,7 @@ export function AcceptEvidenceButton({ workOrderId }: { workOrderId: string }) {
   return <div className="execution-actions">
     <button className="primary-button" type="button" onClick={() => void decide({ decision: "accept" })}>{t(state)}</button>
     <label><span className="sr-only">{t("退回原因")}</span>
-      <input value={reason} maxLength={200} placeholder={t("退回原因（必填）")} onChange={(event) => setReason(event.target.value)} /></label>
+      <VoiceField kind="note"><input value={reason} maxLength={200} placeholder={t("退回原因（必填）")} onChange={(event) => setReason(event.target.value)} /></VoiceField></label>
     <button type="button" onClick={() => void decide({ decision: "block", reason })}>{t("退回并阻塞")}</button>
   </div>;
 }

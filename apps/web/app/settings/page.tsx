@@ -58,6 +58,8 @@ import { memoForAsync } from "../../lib/ledger-memo";
 import { localeFor } from "../../lib/locale";
 import { tFor } from "../../lib/i18n";
 import { LanguageCard } from "./language-card";
+import { VoiceCard } from "./voice-card";
+import { voicePreferences } from "../../lib/voice";
 
 export const dynamic = "force-dynamic";
 const USAGE_DAYS = 7;
@@ -161,6 +163,7 @@ export default async function SettingsPage() {
         <section id="general" className="st-section" aria-labelledby="st-general"><h2 id="st-general" className="ds-serif">{t("通用")}</h2>
           <div className="st-modules">
             <LanguageCard />
+            <VoiceCard initial={voicePreferences(ctx)} />
             {!isLocalInstall() && isEmailAuthConfigured() && <PasswordCard />}
             <section className="st-card" aria-label={t("个人情况")}>
               <header><h3>{t("个人情况")}</h3><small>{t("主线、项目、日期与长期目标的来源")}</small></header>

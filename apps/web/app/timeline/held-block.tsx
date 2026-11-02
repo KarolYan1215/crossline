@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ImpactCard, useImpact } from "../task/impact";
 import { overlapping, toClock, toMinutes, type TimelineItem } from "./model";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 /** Kept in Chinese (they are the keys); translated where shown. */
 const HELD_TEXT = { pinned: "本人开始后锁定", locked: "本人锁定" } as const;
@@ -84,7 +85,7 @@ export function HeldBlock({ item, items, title }: { item: TimelineItem; items: T
     {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()} onCancel={impact.cancel} />}
     {impact.error && <small role="status">{impact.error}</small>}
     {mode === "note" && <div className="dq-held-row" role="group" aria-label={t("留言")}>
-      <textarea value={note} maxLength={500} placeholder={t("对这段时间的意见，例如：这段时间要开会，挪到下午")} onChange={(event) => setNote(event.target.value)} />
+      <VoiceField kind="note"><textarea value={note} maxLength={500} placeholder={t("对这段时间的意见，例如：这段时间要开会，挪到下午")} onChange={(event) => setNote(event.target.value)} /></VoiceField>
       <button type="button" disabled={busy || !note.trim()} onClick={() => void leaveNote()}>{t("送出")}</button>
     </div>}
     {reply && <p className="dq-held-reply gen" role="status">{reply}</p>}

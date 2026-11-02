@@ -34,7 +34,7 @@ export type ModelPriority = "interactive" | "intake" | "planning" | "background"
 export type MemoryReading = { used: number; limit: number };
 
 /** Skills a person is looking at a spinner for. Everything else is background and waits behind them. */
-export const INTERACTIVE_SKILLS: readonly string[] = ["crossline-onboarding", "crossline-concierge"];
+export const INTERACTIVE_SKILLS: readonly string[] = ["crossline-onboarding", "crossline-concierge", "crossline-dictation-corrector"];
 /**
  * Background Skills that take in what arrived — new mail, a capture, calendar events, an authorized folder, a recording's transcript, the
  * interview's replies — and record it. Information first, then planning, then preparation (the owner, 2026-10-21: 「整个系统的逻辑是先获取

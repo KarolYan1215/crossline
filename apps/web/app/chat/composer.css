@@ -6,6 +6,8 @@
 .composer-main{display:grid;gap:4px;min-width:0}
 .composer-main textarea{width:100%;min-height:34px;max-height:220px;padding:7px 4px;border:0;resize:none;line-height:1.4;background:transparent;field-sizing:content;overflow-y:auto}
 .composer-main textarea:focus-visible{outline:none}
+.composer-end{display:flex;align-items:center;gap:4px}
+.composer-end .voice-button{width:34px;height:34px;border-radius:50%}
 .composer-send{width:34px;height:34px;border-radius:50%;background:var(--ink);color:var(--paper);font-size:16px;font-weight:700}
 .composer-send:disabled{background:var(--mist);color:var(--paper);cursor:default}
 .composer-chips{display:flex;flex-wrap:wrap;gap:4px}

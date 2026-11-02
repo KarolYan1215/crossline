@@ -5,6 +5,7 @@ import { PenLine, RefreshCw, Upload } from "lucide-react";
 import { refreshHelper } from "../helper-state";
 import { intlLocale, type Locale, type Translate } from "../../lib/i18n";
 import { useLocale, useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 type Figure = { file: string; at: string; kind: "drawn" | "uploaded"; version: number; latest: boolean; current: boolean; url: string };
 
@@ -84,8 +85,8 @@ export function FigurePicker({ onCurrent, appearance }: { onCurrent: (url: strin
     <div className="pt-look">
       <small>{t("外形描述（只用来画形象）")}</small>
       {editing ? <form onSubmit={(event) => { event.preventDefault(); if (look.trim()) void saveLook(false); }}>
-        <textarea value={look} rows={2} maxLength={200} onChange={(event) => setLook(event.target.value)} aria-label={t("外形描述")}
-          placeholder={t("例如：男，狼尾长发，常穿全黑")} />
+        <VoiceField kind="form"><textarea value={look} rows={2} maxLength={200} onChange={(event) => setLook(event.target.value)} aria-label={t("外形描述")}
+          placeholder={t("例如：男，狼尾长发，常穿全黑")} /></VoiceField>
         <span><button type="submit" className="primary-button" disabled={!look.trim()}>{t("保存")}</button>
           {!saved && <button type="button" className="text-button" onClick={() => void saveLook(true)}>{t("不描述，用中性形象")}</button>}
           {saved && <button type="button" className="text-button" onClick={() => { setLook(saved); setEditing(false); }}>{t("取消")}</button>}</span>

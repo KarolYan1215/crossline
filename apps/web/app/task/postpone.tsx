@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { SegmentedControl } from "../ui/controls";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 type Reason = "waiting" | "energy" | "conflict" | "time" | "other";
 const REASONS: Array<{ value: Reason; label: string; hint: string }> = [
@@ -42,12 +43,12 @@ export function PostponePanel({ workOrderId, onClose }: { workOrderId: string; o
     <small className="muted">{t(REASONS.find((item) => item.value === reason)!.hint)}</small>
     <div className="postpone-fields">
       {reason === "waiting" && <>
-        <label>{t("提供方")} <input value={who} maxLength={60} placeholder={t("例如：师兄")} onChange={(event) => setWho(event.target.value)} /></label>
-        <label>{t("内容", { context: "waiting" })} <input value={what} maxLength={200} placeholder={t("例如：真实测量数据")} onChange={(event) => setWhat(event.target.value)} /></label>
+        <label>{t("提供方")} <VoiceField kind="form"><input value={who} maxLength={60} placeholder={t("例如：师兄")} onChange={(event) => setWho(event.target.value)} /></VoiceField></label>
+        <label>{t("内容", { context: "waiting" })} <VoiceField kind="form"><input value={what} maxLength={200} placeholder={t("例如：真实测量数据")} onChange={(event) => setWhat(event.target.value)} /></VoiceField></label>
       </>}
       <label>{t(reason === "waiting" ? "预计到达" : "推迟到")} <input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-      {reason !== "waiting" && <label className="postpone-text">{t(reason === "other" ? "说明" : "说明（选填）")} <input value={text} maxLength={500}
-        placeholder={t(reason === "energy" ? "例如：熬夜后注意力差" : reason === "conflict" ? "例如：临时组会" : "原因")} onChange={(event) => setText(event.target.value)} /></label>}
+      {reason !== "waiting" && <label className="postpone-text">{t(reason === "other" ? "说明" : "说明（选填）")} <VoiceField kind="note"><input value={text} maxLength={500}
+        placeholder={t(reason === "energy" ? "例如：熬夜后注意力差" : reason === "conflict" ? "例如：临时组会" : "原因")} onChange={(event) => setText(event.target.value)} /></VoiceField></label>}
     </div>
     <div className="postpone-actions">
       <button type="button" className="primary-button" disabled={busy || (reason === "other" && !text.trim())} onClick={() => void submit()}>{t("推迟")}</button>

@@ -30,6 +30,7 @@
 | [walkthrough-ledger.md](walkthrough-ledger.md) | 内测走查账本：以内测用户身份走查线上站点时已走过哪些路径、还有哪些没走、每次的发现与修复状态（走查前先读，只走没走过或改过的） |
 | [onboarding-v3.md](onboarding-v3.md) | 登录页与访谈页 v3：安装版走查的审查发现，三栏访谈、引导开场、语气选择、混合节奏、iCal 订阅与授权文件夹，各阶段进展（2026-10-14） |
 | [profile-and-agent-kit.md](profile-and-agent-kit.md) | 用户画像模块与 agent 工具包（设计，2026-10-31，待审）：调研后的采用与不采用、对话卡片与文字折算、报告结构与结论条目、隐私三级、下载包、远程 MCP 与外部 agent 写入的三档门槛、公开仓库与分期 |
+| [voice-input.md](voice-input.md) | 所有文字框的语音输入：浏览器识别优先、SenseVoice 兜底（托管走转写容器，本机按需下载）、先原文后纠错、个人用词、设置与隐私边界，调研与本人的决定（2026-11-02） |
 | [phone-recording.md](phone-recording.md) | 手机全天录音自动进 Crossline：iPhone（Just Press Record → iCloud Drive）与安卓（录音 App → Syncthing-Fork）的一次性设置、本机转写与语音活动检测、去重与降速、电量与隐私提醒 |
 | [calendar-write-setup.md](calendar-write-setup.md) | Crossline 日历的写入授权（只写名为 Crossline 的日历），以及分享到 Google 日历 |
 | [setup-google-oauth.md](setup-google-oauth.md) | 开启「用 Google 账号登录」的一次性配置 |

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 // Named after the blocker codes `apps/web/app/api/captures/[id]/analyze/route.ts` actually returns —
 // an unknown code falls back to a generic message rather than showing raw text a model or RPC produced.
@@ -51,8 +52,8 @@ export function AnalyzeButton({ captureId, analyzing, retry }: { captureId: stri
     {!pending && (discarding
       ? <>
           <label><span className="sr-only">{t("丢弃原因")}</span>
-            <input value={reason} maxLength={200} placeholder={t("丢弃原因（选填）")}
-              onChange={(event) => setReason(event.target.value)} /></label>
+            <VoiceField kind="note"><input value={reason} maxLength={200} placeholder={t("丢弃原因（选填）")}
+              onChange={(event) => setReason(event.target.value)} /></VoiceField></label>
           <button type="button" onClick={() => void discard()}>{t("确认丢弃")}</button>
           <button type="button" onClick={() => setDiscarding(false)}>{t("取消")}</button>
         </>

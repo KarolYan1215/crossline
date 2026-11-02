@@ -9,7 +9,7 @@ export const ARCHETYPE_CURATION_PERIOD = "archetypes.curation.period";
 export type CurationPeriod = "off" | "biweekly" | "monthly";
 
 const SOURCE_LABEL: Record<string, string> = { correction: "纠正", retrospective: "回顾", estimate: "估时修改", importance: "重要性",
-  standard_confirmed: "本人确认", relation_rejected: "驳回关系", postpone: "推迟与精力" };
+  standard_confirmed: "本人确认", relation_rejected: "驳回关系", postpone: "推迟与精力", dictation: "语音输入用词" };
 
 /** `lapsed`: went 30 days unused and is no longer given to a model; the person can restore it. */
 export type PreferenceRow = { id: string; source: string; sourceLabel: string; scopeLabel: string; line?: string; text: string; day: string; lapsed?: boolean };
@@ -20,7 +20,7 @@ export function loadPreferences(ctx: AccessContext): { rows: PreferenceRow[]; pe
   const t = tOf(ctx);
   const labels = new Map(Object.entries(lineLabels(ctx)));
   const rows = store.listPreferences(ctx.workspaceId, { includeInvalidated: true }).map((entry) => ({ id: entry.id, source: entry.source, sourceLabel: SOURCE_LABEL[entry.source] ? t(SOURCE_LABEL[entry.source]!) : entry.source,
-    scopeLabel: entry.scope === "all" ? t("全部") : entry.scope.startsWith("task:") ? t("单个任务") : entry.scope.startsWith("archetype:") ? t("任务原型")
+    scopeLabel: entry.scope === "all" ? t("全部") : entry.scope.startsWith("task:") ? t("单个任务") : entry.scope.startsWith("archetype:") ? t("任务原型") : entry.scope === "dictation" ? t("语音输入")
       : labels.has(entry.scope) ? t(labels.get(entry.scope)!) : entry.scope,
     ...(labels.has(entry.scope) ? { line: entry.scope } : {}), text: entry.text, day: entry.createdAt.slice(5, 10).replace("-", "/"),
     ...(entry.invalidatedAt ? { lapsed: true } : {}) }));

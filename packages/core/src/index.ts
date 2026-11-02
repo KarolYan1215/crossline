@@ -515,6 +515,7 @@ export * from "./energy-covariates";
 export * from "./camera-signals";
 export * from "./relevance";
 export * from "./task-title";
+export * from "./dictation";
 export * from "./calendar-lines";
 export * from "./belonging";
 export * from "./sentences";

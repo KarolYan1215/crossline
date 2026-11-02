@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const errorText: Record<string, string> = {
   IDENTITY_UNKNOWN: "身份不在已安装的身份包里。",
@@ -58,7 +59,7 @@ export function PromoteForm({ captureId, identities, milestones }: {
   return <form className="promote-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
     <p>{t("跳过 AI 分类，直接人工创建作业。创建后会标注「人工创建，未经 AI 分析」，不会假装经过了分析。")}</p>
     <label><span>{t("这件事要做什么")}</span>
-      <input value={intent} maxLength={400} required onChange={(event) => setIntent(event.target.value)} /></label>
+      <VoiceField kind="form"><input value={intent} maxLength={400} required onChange={(event) => setIntent(event.target.value)} /></VoiceField></label>
     <label><span>{t("属于哪条主线")}</span>
       {/* Changing the identity resets the milestone choice — a milestone belongs to exactly one
           identity, so a stale cross-identity selection would only be caught server-side otherwise. */}
@@ -84,8 +85,8 @@ export function PromoteForm({ captureId, identities, milestones }: {
       <label><span>{t("p85 分钟")}</span><input type="number" min={1} value={p85} onChange={(event) => setP85(event.target.value)} /></label>
     </div>
     <label><span>{t("完成时要交出的证据（每行一条，至少一条）")}</span>
-      <textarea value={evidence} maxLength={2000} required rows={3}
-        onChange={(event) => setEvidence(event.target.value)} /></label>
+      <VoiceField kind="note"><textarea value={evidence} maxLength={2000} required rows={3}
+        onChange={(event) => setEvidence(event.target.value)} /></VoiceField></label>
     <div className="promote-form-actions">
       <button type="submit" disabled={busy}>{t(busy ? "创建中…" : "创建作业")}</button>
       <button type="button" className="secondary-button" onClick={() => setOpen(false)} disabled={busy}>{t("取消")}</button>

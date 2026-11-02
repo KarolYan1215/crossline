@@ -6,6 +6,7 @@ import { DOMAIN_PACKS, LINE_DOMAINS, lineNounFor, type LineDomain } from "@cross
 import { tFor, type Locale } from "../../lib/i18n";
 import { useLocale } from "../locale-context";
 import { withLink } from "./rich-text";
+import { VoiceField } from "../ui/voice/voice-input";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
 
 /**
@@ -170,7 +171,7 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, initialDepth 
               onClick={() => pickActivity(said === label ? "" : label)}>{label}</button>)}
           </div>
           <div className="ob-add">
-            <input value={hardName} maxLength={20} onChange={(event) => pickActivity(event.target.value)} placeholder={t("其他，例如：带娃、轮班")} aria-label={t("有固定日程的事")} />
+            <VoiceField kind="form"><input value={hardName} maxLength={20} onChange={(event) => pickActivity(event.target.value)} placeholder={t("其他，例如：带娃、轮班")} aria-label={t("有固定日程的事")} /></VoiceField>
           </div>
           {said && <div className="ob-add ob-line-name">
             <label>{t("这条线叫")}
@@ -188,7 +189,7 @@ export function OpeningCard({ linesKnown, knownLines, initialTone, initialDepth 
             onClick={() => toggle(label)}>{shown(label, locale)}</button>)}
         </div>
         <form className="ob-add" onSubmit={(event) => { event.preventDefault(); addCustom(); }}>
-          <input value={custom} maxLength={20} onChange={(event) => setCustom(event.target.value)} placeholder={t("其他身份，例如：播客主")} aria-label={t("其他身份")} />
+          <VoiceField kind="form"><input value={custom} maxLength={20} onChange={(event) => setCustom(event.target.value)} placeholder={t("其他身份，例如：播客主")} aria-label={t("其他身份")} /></VoiceField>
           <button type="submit" className="ob-btn ob-quiet" disabled={!custom.trim()}>{t("添加")}</button>
         </form>
       </fieldset>}

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { SegmentedControl } from "../ui/controls";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 type Preview = { id: string; summary: { tables: Array<{ name: string; rows: number }>; bytes: number; gzipBytes: number }; json: string };
 
@@ -61,7 +62,7 @@ export function TelemetryCard({ on }: { on: boolean }) {
         <pre className="st-snapshot-json">{preview.json}</pre>
       </details>
       <label className="st-row-label st-snapshot-note">{t("附一段说明（可选，会原样上传）")}
-        <textarea value={feedback} maxLength={4000} rows={3} onChange={(event) => setFeedback(event.target.value)} placeholder={t("例如：在哪个页面、做了什么之后出现了问题")} /></label>
+        <VoiceField kind="note"><textarea value={feedback} maxLength={4000} rows={3} onChange={(event) => setFeedback(event.target.value)} placeholder={t("例如：在哪个页面、做了什么之后出现了问题")} /></VoiceField></label>
       <div className="st-row">
         <button type="button" className="primary-button" disabled={busy} onClick={() => void upload()}>{busy ? t("正在上传…") : t("确认上传")}</button>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => setPreview(null)}>{t("取消")}</button>

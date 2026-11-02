@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useT } from "../locale-context";
 import type { Fact } from "./onboarding-types";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const SLOT_LABEL: Record<string, string> = {
   what: "在做什么", for_whom: "为谁", stage: "阶段", goal: "目标", deadline: "截止", blockers: "卡点",
@@ -49,7 +50,7 @@ export function FactList({ facts, onChange }: { facts: Fact[]; onChange: (body: 
               event.preventDefault();
               void onChange({ action: "confirm_fact", identityId: fact.identityId, projectId: fact.projectId, slot: fact.slot, value: draft });
               setEditing(undefined);
-            }}><input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} /><button type="submit" className="ob-btn">{t("保存")}</button></form>
+            }}><VoiceField kind="form"><input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} /></VoiceField><button type="submit" className="ob-btn">{t("保存")}</button></form>
           : <>
               <button type="button" className="ob-text" title={t("点击修改")} onClick={() => { setEditing(key(fact)); setDraft(fact.value); }}>{fact.value}</button>
               {fact.status === "inferred" && <span className="ob-actions">

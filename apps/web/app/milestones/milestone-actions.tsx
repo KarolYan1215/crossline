@@ -7,6 +7,7 @@ import { Sheet } from "../ui/overlay";
 import { ICON } from "../ui/icon-button";
 import { useT } from "../locale-context";
 import { NEW_MILESTONE_EVENT } from "./lines-bar";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const post = (url: string, body: unknown) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .catch(() => undefined);
@@ -74,11 +75,11 @@ export function MilestoneActions({ lines, archived }: { lines: Array<{ id: strin
             {lines.map((line) => <option key={line.id} value={line.id}>{line.label}</option>)}
           </select></label>
         <label><span>{t("里程碑")}</span>
-          <input value={form.title} maxLength={200} required placeholder={t("达成的状态，例如：投出第一篇期刊论文")} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+          <VoiceField kind="form"><input value={form.title} maxLength={200} required placeholder={t("达成的状态，例如：投出第一篇期刊论文")} onChange={(event) => setForm({ ...form, title: event.target.value })} /></VoiceField></label>
         <label><span>{t("截止日（可选）")}</span>
           <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
         <label><span>{t("目标说明（可选）")}</span>
-          <textarea value={form.target} maxLength={500} rows={3} placeholder={t("做到什么程度，如何判断达成")} onChange={(event) => setForm({ ...form, target: event.target.value })} /></label>
+          <VoiceField kind="form"><textarea value={form.target} maxLength={500} rows={3} placeholder={t("做到什么程度，如何判断达成")} onChange={(event) => setForm({ ...form, target: event.target.value })} /></VoiceField></label>
         <p className="muted">{t("保存后为草稿，在本页批准；也可在任意页面的输入框中直接写「研究者里程碑：…」。")}</p>
         {status && <p role="status">{status}</p>}
       </form>

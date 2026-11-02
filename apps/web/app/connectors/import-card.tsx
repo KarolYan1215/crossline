@@ -6,6 +6,7 @@ import { SegmentedControl } from "../ui/controls";
 import { SetupGuide } from "../ui/setup-guide";
 import { IMPORT_GUIDE } from "../../lib/setup-guides";
 import { ImportReview } from "./import-review";
+import { VoiceField } from "../ui/voice/voice-input";
 
 type View = { sources: ImportSource[]; batches: ImportBatch[]; lines: Array<{ id: string; label: string }> };
 type Answer = { ok?: boolean; batchId?: string; items?: number; databases?: Array<{ id: string; title: string }>; blocker?: { message?: string } };
@@ -103,8 +104,8 @@ export function ImportCard({ compact, onChanged }: { compact?: boolean; onChange
     </div>}
     <SetupGuide guide={IMPORT_GUIDE} selected={kind} />
     <div className="import-paste">
-      <textarea value={pasted} onChange={(event) => setPasted(event.target.value)} rows={4} disabled={busy} aria-label={t("粘贴清单")}
-        placeholder={t("把原来的清单粘贴到这里，一行一条；带 [x] 的视为已做完")} />
+      <VoiceField kind="note"><textarea value={pasted} onChange={(event) => setPasted(event.target.value)} rows={4} disabled={busy} aria-label={t("粘贴清单")}
+        placeholder={t("把原来的清单粘贴到这里，一行一条；带 [x] 的视为已做完")} /></VoiceField>
       <div className="import-paste-actions">
         <button type="button" className="secondary-button" disabled={busy || !pasted.trim()} onClick={() => { const form = new FormData(); form.set("text", pasted); void upload(form); }}>{t("导入粘贴的清单")}</button>
         <label className="secondary-button import-file">

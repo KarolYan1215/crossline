@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { ConfirmView } from "../../lib/confirm";
 import { useT } from "../locale-context";
 import type { Translate } from "../../lib/i18n";
+import { VoiceField } from "../ui/voice/voice-input";
 
 type Kind = "as_planned" | "over" | "under" | "not_done";
 type Result = { ok: boolean; done?: "step" | "task" | "not_done"; minutes?: number; needsEvidence?: boolean; code?: string; message?: string };
@@ -87,7 +88,7 @@ export function ConfirmForm({ view }: { view: ConfirmView }) {
     </div>}
     {evidenceAllowed && <div className="confirm-evidence">
       <p>{t("这项任务挂在里程碑上，附上成果才能通过验收（可以之后再补）。")}</p>
-      <label><span>{t("成果说明")}</span><input value={note} maxLength={500} placeholder={t("例如：作业 3 第 1–4 题解答")} onChange={(event) => setNote(event.target.value)} disabled={busy} /></label>
+      <label><span>{t("成果说明")}</span><VoiceField kind="note"><input value={note} maxLength={500} placeholder={t("例如：作业 3 第 1–4 题解答")} onChange={(event) => setNote(event.target.value)} disabled={busy} /></VoiceField></label>
       <label><span>{t("文件")}</span><input type="file" multiple accept="image/*,application/pdf,text/plain" disabled={busy}
         onChange={(event) => setFiles([...(event.target.files ?? [])].slice(0, 5))} /></label>
     </div>}

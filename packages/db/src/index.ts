@@ -290,7 +290,9 @@ export type ModelUsageSummary = {
 
 export type StoredPreference = {
   workspaceId: string; id: string;
-  source: "correction" | "retrospective" | "estimate" | "importance" | "standard_confirmed" | "relation_rejected" | "postpone";
+  source: "correction" | "retrospective" | "estimate" | "importance" | "standard_confirmed" | "relation_rejected" | "postpone"
+    /** A wording the person taught by editing dictated text (docs/voice-input.md); scope `dictation`, read only by the dictation corrector. */
+    | "dictation";
   /** A line id, `task:<id>`, `archetype:<id>` or `all`. */
   scope: string; text: string;
   /** How much it counts: a stated correction 1, a measured pattern more, a single manual edit less. */

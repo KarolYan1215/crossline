@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 /** Revoking needs a written reason for the same purpose blocking does: the ledger records why. */
 export function RevokeAcceptance({ workOrderId }: { workOrderId: string }) {
@@ -23,7 +24,7 @@ export function RevokeAcceptance({ workOrderId }: { workOrderId: string }) {
 
   return <span className="revoke-acceptance">
     <label><span className="sr-only">{t("撤销原因")}</span>
-      <input value={reason} maxLength={200} placeholder={t("撤销原因（必填）")} onChange={(event) => setReason(event.target.value)} /></label>
+      <VoiceField kind="note"><input value={reason} maxLength={200} placeholder={t("撤销原因（必填）")} onChange={(event) => setReason(event.target.value)} /></VoiceField></label>
     <button type="button" disabled={busy} onClick={() => void revoke()}>{t("撤销验收")}</button>
     {status && <em role="alert">{status}</em>}
   </span>;

@@ -11,6 +11,7 @@ import { AdviceMatrix, DivergingAxes, EnergyScatter, Fit, GapChart, IdentityBars
 import { radarValues, rhythmStats } from "./poster-geometry";
 import { joinList, type Locale, type Translate } from "../../lib/i18n";
 import { useLocale, useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 type Line = { id: string; label: string; rank: number | null; hard: boolean };
 type State = {
@@ -92,8 +93,8 @@ function ConfirmNote({ answer, note, busy, onNote, onSend, onCancel }: { answer:
   onNote: (text: string) => void; onSend: () => void; onCancel: () => void }) {
   const t = useT();
   return <form className="pt-confirm-note" onSubmit={(event) => { event.preventDefault(); if (note.trim()) onSend(); }}>
-    <textarea value={note} rows={2} maxLength={1000} onChange={(event) => onNote(event.target.value)} aria-label={t("哪里要改")}
-      placeholder={answer === "mostly" ? t("例如：第二句里的“…”要改成…") : t("哪里不对，实际是怎样")} />
+    <VoiceField kind="note"><textarea value={note} rows={2} maxLength={1000} onChange={(event) => onNote(event.target.value)} aria-label={t("哪里要改")}
+      placeholder={answer === "mostly" ? t("例如：第二句里的“…”要改成…") : t("哪里不对，实际是怎样")} /></VoiceField>
     <span><button type="submit" className="primary-button" disabled={busy || !note.trim()}>{t("交给访谈修改")}</button>
       <button type="button" className="text-button" onClick={onCancel}>{t("取消")}</button></span>
   </form>;
