@@ -9,7 +9,8 @@ import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { SecretStore } from "@crossline/connectors";
 import { formRunOf, queueFormRun, readFormRuns, saveFormRun, type CrosslineStore } from "@crossline/db";
 import { fillForm, watchForPersonSubmit, type FormDriver, type FormFallback } from "./form-engine";
-import { openFormBrowser, runHosts, type FormBrowserOptions } from "./form-browser";
+import { openFormBrowser, openNodeFormBrowser, runHosts, type FormBrowserOptions } from "./form-browser";
+import type { NodeBrowserLink } from "./node/hub";
 import { hashForm, profileValues, removeSlot, saveSlot } from "./form-profile";
 import { tOfWorkspace } from "./locale";
 import { findBrowser } from "./node/browser";
@@ -22,9 +23,10 @@ import { browserProfilesRoot, loginBrowser, sayToPerson } from "./workflow-smith
  * `queueFormRun`, one visible window at a time in Crossline's own browser profile for that site, stops brought to the front and said
  * once, and the receipt — the confirmation page, then the same-domain confirmation mail — turned into a calendar event.
  *
- * Only the machine owner's workspace fills forms (§0: 只对 runtimeOwner 开放), and only on a computer with a screen: the window is the
- * person's to watch, to log in to, to pass a check in and to submit in. A hosted server without a screen refuses (`FORM_NEEDS_SCREEN`)
- * until the compute node's browser can carry the form operations.
+ * Only the machine owner's workspace fills forms (§0: 只对 runtimeOwner 开放), and only in a window the person can see: the window is
+ * theirs to watch, to log in to, to pass a check in and to submit in. On a computer with a screen it is this worker's own; a hosted
+ * server has none and hands the run to a connected compute node whose computer offers a browser (§10.1, `openNodeFormBrowser`), and
+ * refuses (`FORM_NEEDS_SCREEN`) only when no such node is connected.
  */
 export const FORM_FILLER = "crossline:crossline-form-filler";
 export const FORM_CHECKER = "crossline:crossline-form-checker";
@@ -41,6 +43,8 @@ export type FormServiceDeps = {
   owner: () => string | undefined;
   /** Whether this computer can show the person a window (false on the hosted server). */
   screen: boolean;
+  /** Without a screen: the owner's connected compute node that offers a browser (node/hub.ts `browserFor`), or undefined. */
+  nodeBrowser?: (workspaceId: string) => NodeBrowserLink | undefined;
   /** Tests open their own browser (headless, local pages allowed); the default opens Crossline's profile for the site. */
   open?: (options: FormBrowserOptions) => Promise<FormDriver>;
   executable?: () => string | undefined;
@@ -64,6 +68,12 @@ export function createFormService(deps: FormServiceDeps) {
   const log = deps.log ?? (() => undefined);
   const allowed = (workspaceId: string) => workspaceId === deps.owner();
   const profilesRoot = deps.profilesRoot ?? browserProfilesRoot;
+  /** Where this workspace's forms can be shown: this computer's screen, else a connected node's browser, else nowhere. */
+  const windowFor = (workspaceId: string): { kind: "screen" } | { kind: "node"; link: NodeBrowserLink } | undefined => {
+    if (deps.screen) return { kind: "screen" };
+    const link = deps.nodeBrowser?.(workspaceId);
+    return link ? { kind: "node", link } : undefined;
+  };
   const profileDirOf = (workspaceId: string, host: string) => path.join(profilesRoot(workspaceId), "forms", host.replace(/[^a-z0-9.-]/gi, "_"));
 
   const propose = (workspaceId: string) => async (context: FormFillContext): Promise<FormFillAnswer | undefined> => {
@@ -102,7 +112,7 @@ export function createFormService(deps: FormServiceDeps) {
     const session = sessions.get(runId);
     if (!session) return;
     sessions.delete(runId);
-    releaseProfile(session.profileDir, "fill");
+    if (session.profileDir) releaseProfile(session.profileDir, "fill");
     await session.driver.close().catch(() => undefined);
   };
 
@@ -145,19 +155,28 @@ export function createFormService(deps: FormServiceDeps) {
       const url = start.opportunity.url;
       const onHost = (() => { try { const host = new URL(url).hostname.toLowerCase().replace(/^www\./, ""); return hosts.some((item) => host === item || host.endsWith(`.${item}`)); } catch { return false; } })();
       if (!onHost) return saveFormRun(store, workspaceId, { ...start, state: "stopped", stoppedFor: "not_allowed", stopDetail: t("报名页不在报名网站 {{host}} 上", { host: start.host }) }, { type: "opportunity.form.stopped", payload: { stop: "not_allowed" } });
-      const profileDir = profileDirOf(workspaceId, start.host);
-      if (!holdProfile(profileDir, "fill")) return start; // the site's profile is in use (a login window, a reader): the next pass tries again
-      const executable = deps.executable?.() ?? loginBrowser() ?? findBrowser();
-      if (!executable && !deps.open) { releaseProfile(profileDir, "fill"); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("这台电脑上找不到浏览器") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); }
-      const options: FormBrowserOptions = { profileDir, executablePath: executable ?? "", hosts,
-        onBlocked: (blocked, why) => {
-          let host = "";
-          try { host = new URL(blocked).hostname; } catch { /* not a URL */ }
-          store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, type: "opportunity.form.blocked", entityId: start.id,
-            idempotencyKey: `opportunity.form.blocked:${start.id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, payload: { host, why } });
-        } };
-      try { session = { driver: await (deps.open ?? openFormBrowser)(options), profileDir, busy: false }; }
-      catch (error) { releaseProfile(profileDir, "fill"); log({ event: "form.open_failed", runId: start.id, message: String(error).slice(0, 200) }); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("浏览器没能打开") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); }
+      const where = windowFor(workspaceId);
+      if (!where) return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("没有能显示窗口的电脑：本人电脑上的节点未连接") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } });
+      const onBlocked = (blocked: string, why: string) => {
+        let host = "";
+        try { host = new URL(blocked).hostname; } catch { /* not a URL */ }
+        store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, type: "opportunity.form.blocked", entityId: start.id,
+          idempotencyKey: `opportunity.form.blocked:${start.id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`, payload: { host, why } });
+      };
+      if (where.kind === "node") {
+        // The node keeps its own per-site profile on the person's computer; nothing here holds a profile of this worker's.
+        try { session = { driver: await openNodeFormBrowser(where.link, { host: hosts[0] ?? start.host, hosts, onBlocked }), profileDir: "", busy: false }; }
+        catch (error) { log({ event: "form.open_failed", runId: start.id, node: where.link.host, message: String(error).slice(0, 200) }); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("本人电脑上的浏览器没能打开") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); }
+        log({ event: "form.on_node", runId: start.id, node: where.link.host });
+      } else {
+        const profileDir = profileDirOf(workspaceId, start.host);
+        if (!holdProfile(profileDir, "fill")) return start; // the site's profile is in use (a login window, a reader): the next pass tries again
+        const executable = deps.executable?.() ?? loginBrowser() ?? findBrowser();
+        if (!executable && !deps.open) { releaseProfile(profileDir, "fill"); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("这台电脑上找不到浏览器") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); }
+        const options: FormBrowserOptions = { profileDir, executablePath: executable ?? "", hosts, onBlocked };
+        try { session = { driver: await (deps.open ?? openFormBrowser)(options), profileDir, busy: false }; }
+        catch (error) { releaseProfile(profileDir, "fill"); log({ event: "form.open_failed", runId: start.id, message: String(error).slice(0, 200) }); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("浏览器没能打开") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); }
+      }
       sessions.set(start.id, session);
       try { await session.driver.open(url); }
       catch { await closeSession(start.id); return saveFormRun(store, workspaceId, { ...start, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: t("报名页没能打开") }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); }
@@ -200,7 +219,7 @@ export function createFormService(deps: FormServiceDeps) {
    * not come within 48 hours.
    */
   const pass = async (workspaceId: string, now = new Date()) => {
-    if (!allowed(workspaceId) || !deps.screen) return;
+    if (!allowed(workspaceId)) return;
     const runs = readFormRuns(store, workspaceId);
     for (const run of runs) {
       const session = sessions.get(run.id);
@@ -223,8 +242,9 @@ export function createFormService(deps: FormServiceDeps) {
       sayToPerson(store, workspaceId, t("报名「{{title}}」提交两天了还没收到确认邮件，请在邮箱里找一下，收到了就在资料卡页确认。", { title: asked.opportunity.title }),
         "opportunity_form", `${asked.id}:receipt`, [{ label: t("查看报名"), href: "/settings#apply" }], now);
     }
+    // A queued run waits while no window can be shown (a hosted server whose owner's node is not connected).
     const queued = readFormRuns(store, workspaceId).filter((run) => run.state === "queued").sort((a, b) => a.queuedAt.localeCompare(b.queuedAt))[0];
-    if (queued && !active.has(workspaceId)) void guarded(workspaceId, queued, false);
+    if (queued && !active.has(workspaceId) && windowFor(workspaceId)) void guarded(workspaceId, queued, false);
   };
 
   /** A new mail from the registration host's own domain confirms the run waiting for it. */
@@ -260,9 +280,12 @@ export function createFormService(deps: FormServiceDeps) {
     }
     if (!pathname.startsWith("/v1/forms")) return undefined;
     if (!allowed(workspaceId)) return { status: 403, body: { code: "FORMS_OWNER_ONLY" } };
-    if (method === "GET" && pathname === "/v1/forms") return { status: 200, body: { runs: readFormRuns(store, workspaceId), screen: deps.screen, open: [...sessions.keys()] } };
+    if (method === "GET" && pathname === "/v1/forms") {
+      const where = windowFor(workspaceId);
+      return { status: 200, body: { runs: readFormRuns(store, workspaceId), screen: Boolean(where), ...(where?.kind === "node" ? { node: where.link.host } : {}), open: [...sessions.keys()] } };
+    }
     if (method === "POST" && pathname === "/v1/forms/queue") {
-      if (!deps.screen) return { status: 409, body: { code: "FORM_NEEDS_SCREEN" } };
+      if (!windowFor(workspaceId)) return { status: 409, body: { code: "FORM_NEEDS_SCREEN" } };
       const opportunity = input.opportunity as Opportunity | undefined;
       const choice = input.choice === "apply" ? "apply" : input.choice === "register" ? "register" : undefined;
       if (!opportunity || typeof opportunity.id !== "string" || typeof opportunity.registrationHost !== "string" || !choice) return { status: 400, body: { code: "FORM_QUEUE_INVALID" } };
@@ -279,7 +302,7 @@ export function createFormService(deps: FormServiceDeps) {
     const action = match[2];
     if (action === "continue") {
       if (run.state !== "waiting_person" && run.state !== "ready_to_submit") return { status: 409, body: { code: "FORM_RUN_NOT_WAITING" } };
-      if (!deps.screen) return { status: 409, body: { code: "FORM_NEEDS_SCREEN" } };
+      if (!windowFor(workspaceId)) return { status: 409, body: { code: "FORM_NEEDS_SCREEN" } };
       // The person handled the check: the site is open again for every reader and filler (§10.5).
       if (run.stoppedFor === "captcha" || run.stoppedFor === "site_hold") releaseSite(store, workspaceId, run.host);
       if (active.has(workspaceId)) return { status: 409, body: { code: "FORM_BUSY" } };

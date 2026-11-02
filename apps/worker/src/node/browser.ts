@@ -1,6 +1,7 @@
 // i18n-exempt: page text matched on the site (「我」 is Xiaohongshu's own link), never shown
 import { lookup } from "node:dns/promises";
-import { existsSync, mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import path from "node:path";
 
@@ -100,6 +101,126 @@ export async function driveContext(context: Context, options: { capture: (url: s
   };
 }
 
+/** A target of the registration-form driver: the snapshot's ref first, role + name as the second way to find it (form-engine.ts). */
+export type FormTarget = { ref?: string | undefined; role: string; name: string };
+/** The form driver over one page, the same on the person's own worker and on a compute node (docs/opportunity-agent.md §10.1). */
+export type FormPage = {
+  open: (url: string) => Promise<void>;
+  url: () => string;
+  snapshot: () => Promise<string>;
+  signals: () => Promise<{ passwordFields: number; frameUrls: string[] }>;
+  multiline: () => Promise<string[]>;
+  inputValue: (target: FormTarget, attempt: number) => Promise<string | undefined>;
+  fill: (target: FormTarget, value: string, attempt: number) => Promise<void>;
+  select: (target: FormTarget, option: string, attempt: number) => Promise<void>;
+  check: (target: FormTarget, on: boolean, attempt: number) => Promise<void>;
+  upload: (target: FormTarget, file: string, attempt: number) => Promise<void>;
+  click: (target: FormTarget) => Promise<void>;
+  settle: () => Promise<void>;
+  /** A full-page picture with the named fields masked. */
+  picture: (mask: FormTarget[]) => Promise<Buffer>;
+  front: () => Promise<void>;
+  closed: () => boolean;
+  close: () => Promise<void>;
+  /**
+   * While a fallback engine that acts on its own works on the page (docs/opportunity-agent.md §10.7, browser-use), every navigation and
+   * every non-GET document request is refused, so turning a page or submitting stays ours; requests the page makes itself still pass.
+   */
+  confine: (on: boolean) => void;
+};
+
+/** The name of the first node in an element's own accessibility snapshot (`- textbox "Name"`). */
+const snapshotName = (yaml: string) => /^- [\w-]+ "((?:[^"\\]|\\.)*)"/m.exec(yaml)?.[1]?.replace(/\\(.)/g, "$1");
+/** Luma moved from lu.ma to luma.com; an event link on one redirects to the other. */
+const HOST_ALIASES: Record<string, string[]> = { "lu.ma": ["luma.com"], "luma.com": ["lu.ma"] };
+/** The hosts one run may navigate to: the registration host and its known aliases, nothing else (§10.2). */
+export const runHosts = (registrationHost: string): string[] => {
+  const host = registrationHost.toLowerCase().replace(/^www\./, "");
+  return host ? [host, ...(HOST_ALIASES[host] ?? [])] : [];
+};
+export const onHosts = (url: string, hosts: string[]) => {
+  try { const host = new URL(url).hostname.toLowerCase().replace(/^www\./, ""); return hosts.some((item) => host === item || host.endsWith(`.${item}`)); }
+  catch { return false; }
+};
+
+/**
+ * The registration-form driver over a context (docs/opportunity-agent.md §10.1–§10.2). Everything is read through the accessibility
+ * snapshot and Playwright's locators, which run in Playwright's own isolated world: no script of ours runs in the page. A top-level
+ * navigation may go only to `hosts`; requests `allow` refuses and popups are refused; each refusal goes to `onBlocked`.
+ */
+export async function driveFormContext(context: Context, options: { hosts: string[]; allow: (url: string) => Promise<boolean>; onBlocked: (url: string, why: string) => void }): Promise<FormPage> {
+  type Page = import("playwright-core").Page;
+  type Locator = import("playwright-core").Locator;
+  const current: Page = context.pages()[0] ?? await context.newPage();
+  let confined = false;
+  // No second tab: a page that opens one gets it closed at once (§10.2: 不跨标签页).
+  context.on("page", (page) => { if (page !== current) { options.onBlocked(page.url(), "popup"); void page.close().catch(() => undefined); } });
+  await context.route("**/*", async (route) => {
+    const request = route.request();
+    const url = request.url();
+    const top = request.isNavigationRequest() && request.frame() === current.mainFrame();
+    if (!(await options.allow(url))) { options.onBlocked(url, "address"); return route.abort("blockedbyclient"); }
+    if (top && !onHosts(url, options.hosts)) { options.onBlocked(url, "host"); return route.abort("blockedbyclient"); }
+    if (confined && (request.isNavigationRequest() || (request.resourceType() === "document" && request.method() !== "GET"))) {
+      options.onBlocked(url, "fallback");
+      return route.abort("blockedbyclient");
+    }
+    return route.continue();
+  });
+  const locate = (target: FormTarget, attempt: number): Locator => {
+    if (attempt === 0 && target.ref) return current.locator(`aria-ref=${target.ref}`);
+    if (attempt <= 1) return current.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name, exact: true }).first();
+    return current.getByLabel(target.name, { exact: true }).first();
+  };
+  return {
+    open: async (url) => { await current.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }); },
+    url: () => current.url(),
+    snapshot: () => current.ariaSnapshot({ mode: "ai" }),
+    signals: async () => ({ passwordFields: await current.locator("input[type=password]:visible").count().catch(() => 0), frameUrls: current.frames().map((frame) => frame.url()) }),
+    multiline: async () => {
+      const names: string[] = [];
+      for (const area of await current.locator("textarea").all().catch(() => [] as Locator[])) {
+        const name = snapshotName(await area.ariaSnapshot().catch(() => ""));
+        if (name) names.push(name);
+      }
+      return names;
+    },
+    inputValue: async (target, attempt) => locate(target, attempt).inputValue({ timeout: 3_000 }).catch(() => undefined),
+    fill: async (target, value, attempt) => { await locate(target, attempt).fill(value, { timeout: 8_000 }); },
+    select: async (target, option, attempt) => {
+      const field = locate(target, attempt);
+      try { await field.selectOption({ label: option }, { timeout: 4_000 }); }
+      catch {
+        // A combobox that is not a <select>: open it and pick the option by its name.
+        await field.click({ timeout: 4_000 });
+        await current.getByRole("option", { name: option, exact: true }).first().click({ timeout: 4_000 });
+      }
+    },
+    check: async (target, on, attempt) => { await locate(target, attempt).setChecked(on, { timeout: 6_000 }); },
+    upload: async (target, file, attempt) => {
+      const field = locate(target, attempt);
+      try { await field.setInputFiles(file, { timeout: 4_000 }); }
+      catch {
+        const chooser = current.waitForEvent("filechooser", { timeout: 6_000 });
+        await field.click({ timeout: 4_000 });
+        await (await chooser).setFiles(file);
+      }
+    },
+    click: async (target) => { await locate(target, 0).click({ timeout: 8_000 }).catch(async () => locate(target, 1).click({ timeout: 8_000 })); },
+    settle: async () => {
+      await current.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => undefined);
+      await current.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
+      await current.waitForTimeout(800);
+    },
+    picture: (mask) => current.screenshot({ fullPage: true, timeout: 15_000,
+      mask: mask.map((target) => current.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name, exact: true })) }),
+    front: async () => { await current.bringToFront(); },
+    closed: () => current.isClosed(),
+    close: async () => { await context.close().catch(() => undefined); },
+    confine: (on) => { confined = on; }
+  };
+}
+
 const PRIVATE_V4 = [/^10\./, /^127\./, /^169\.254\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, /^0\./, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./];
 const privateAddress = (address: string) => isIP(address) === 6 ? /^(::1|fc|fd|fe80)/i.test(address) : PRIVATE_V4.some((pattern) => pattern.test(address));
 /**
@@ -134,22 +255,72 @@ export type BrowserOp =
   | { op: "open"; site: string; capture: string[]; listOnly?: boolean }
   | { op: "goto"; url: string } | { op: "pause"; ms: number } | { op: "wheel" } | { op: "snapshot" } | { op: "responses" }
   | { op: "noteState" } | { op: "selfProfile" } | { op: "metrics" } | { op: "front" } | { op: "showMedia"; on: boolean }
-  | { op: "fetchMedia"; url: string; referer: string; maxBytes: number } | { op: "close" };
+  | { op: "fetchMedia"; url: string; referer: string; maxBytes: number } | { op: "close" }
+  // The registration-form driver (docs/opportunity-agent.md §10.1): a page of its own beside the reader's, answered with what it blocked.
+  | { op: "formOpen"; host: string; hosts: string[] } | { op: "form"; method: FormMethod; args: unknown[] } | { op: "formPicture"; mask: FormTarget[] }
+  | { op: "formClose" };
+/** The form driver's methods a server may call on a node; `picture`, `close` and `confine` go through their own ops or not at all. */
+export const FORM_METHODS = ["open", "snapshot", "signals", "multiline", "inputValue", "fill", "select", "check", "upload", "click", "settle", "front"] as const;
+export type FormMethod = typeof FORM_METHODS[number];
+/** What every form answer from a node carries besides the method's value: the page's address, whether it was closed, what was refused. */
+export type FormAnswer = { value: unknown; url: string; closed: boolean; blocked: Array<{ url: string; why: string }>; error?: string };
+const HOST_NAME = /^(?=.{1,253}$)[a-z0-9-]+(\.[a-z0-9-]+)+$/;
 
 /**
  * The computer's browsers, one per site (its own profile under `profilesDir`), driven by the server's operations. A site is opened in a
  * visible window of the person's own Chrome or Edge, as they logged in to it there; a second `open` of the same site reuses the window.
  */
-export function createNodeBrowsers(options: { profilesDir: string; executable?: string; launch?: (profileDir: string, executable: string) => Promise<Context> }) {
+export function createNodeBrowsers(options: { profilesDir: string; executable?: string; launch?: (profileDir: string, executable: string) => Promise<Context>;
+  /** Where the browsers may go; a test serves its pages on loopback. */ allow?: (url: string) => Promise<boolean> }) {
   const executable = options.executable ?? findBrowser();
-  const allow = publicHttpsOnly();
+  const allow = options.allow ?? publicHttpsOnly();
   let current: { site: string; driver: ReaderDriver & { showMedia: (on: boolean) => void } } | undefined;
+  let form: { page: FormPage; blocked: Array<{ url: string; why: string }>; uploads: string } | undefined;
   const launch = options.launch ?? (async (profileDir: string, exe: string) => {
     const { chromium } = await import("playwright-core");
     return chromium.launchPersistentContext(profileDir, { executablePath: exe, headless: false, viewport: null,
       args: ["--no-first-run", "--no-default-browser-check", "--disable-sync", "--disable-background-mode"] });
   });
+  const closeForm = async () => { const closing = form; form = undefined; await closing?.page.close(); if (closing) rmSync(closing.uploads, { recursive: true, force: true }); };
+  const formOp = async (request: Extract<BrowserOp, { op: "formOpen" | "form" | "formPicture" | "formClose" }>): Promise<unknown> => {
+    if (request.op === "formOpen") {
+      if (!executable) throw new Error("NODE_BROWSER_MISSING");
+      const hosts = request.hosts.map((host) => String(host).toLowerCase()).filter((host) => HOST_NAME.test(host)).slice(0, 4);
+      const host = String(request.host).toLowerCase();
+      if (!HOST_NAME.test(host) || !hosts.includes(host)) throw new Error("NODE_FORM_HOST_INVALID");
+      await closeForm();
+      const profileDir = path.join(options.profilesDir, "forms", host);
+      mkdirSync(profileDir, { recursive: true });
+      const blocked: Array<{ url: string; why: string }> = [];
+      const page = await driveFormContext(await launch(profileDir, executable), { hosts, allow, onBlocked: (url, why) => { if (blocked.length < 50) blocked.push({ url: url.slice(0, 300), why }); } });
+      form = { page, blocked, uploads: path.join(options.profilesDir, "form-uploads", randomUUID()) };
+      return { ok: true };
+    }
+    if (request.op === "formClose") { await closeForm(); return undefined; }
+    const open = form;
+    if (!open) throw new Error("NODE_FORM_NOT_OPEN");
+    if (request.op === "formPicture") return { state: "ok", bytes: await open.page.picture(request.mask.slice(0, 40)), contentType: "image/png" };
+    if (!(FORM_METHODS as readonly string[]).includes(request.method)) throw new Error("NODE_FORM_METHOD_REFUSED");
+    const args = [...request.args];
+    if (request.method === "upload") {
+      // The file comes from the server as its bytes; it is kept in a folder of this run only, removed when the form closes.
+      const file = args[1] as { name?: string; data?: string };
+      const name = path.basename(String(file?.name ?? "upload")).replace(/[^\w.\- ]/g, "_").slice(0, 120) || "upload";
+      mkdirSync(open.uploads, { recursive: true });
+      const local = path.join(open.uploads, name);
+      writeFileSync(local, Buffer.from(String(file?.data ?? ""), "base64"));
+      args[1] = local;
+    }
+    const method = open.page[request.method] as (...values: unknown[]) => Promise<unknown>;
+    // A failed method still answers with what was refused meanwhile: a navigation the guard aborted is why `open` failed.
+    let value: unknown = null;
+    let error: string | undefined;
+    try { value = await method(...args); } catch (failure) { error = failure instanceof Error ? failure.message.slice(0, 300) : "NODE_FORM_FAILED"; }
+    const answer: FormAnswer = { value: value ?? null, url: open.page.url(), closed: open.page.closed(), blocked: open.blocked.splice(0, open.blocked.length), ...(error ? { error } : {}) };
+    return answer;
+  };
   const handle = async (request: BrowserOp): Promise<unknown> => {
+    if (request.op === "formOpen" || request.op === "form" || request.op === "formPicture" || request.op === "formClose") return formOp(request);
     if (request.op === "open") {
       if (!executable) throw new Error("NODE_BROWSER_MISSING");
       const site = new URL(request.site);
@@ -181,6 +352,6 @@ export function createNodeBrowsers(options: { profilesDir: string; executable?: 
     }
     return undefined;
   };
-  return { available: Boolean(executable), handle, closeAll: async () => { await current?.driver.close(); current = undefined; } };
+  return { available: Boolean(executable), handle, closeAll: async () => { await current?.driver.close(); current = undefined; await closeForm(); } };
 }
 export type NodeBrowsers = ReturnType<typeof createNodeBrowsers>;

@@ -1171,9 +1171,14 @@ const accountClient = (workspaceId: string) => {
   return machineOwner(workspaceId) || !hostedBeta ? codexSupervisor?.clientFor(workspaceId) : undefined;
 };
 // Filling registration forms for the machine owner (docs/opportunity-agent.md §10): a visible window of Crossline's own profile per
-// site, only where this computer has a screen; the hosted server refuses until a compute node's browser carries the form operations.
+// site where this computer has a screen; on the hosted server, in the browser of the owner's connected compute node (§10.1).
 const formService = createFormService({ store: analysisStore, secrets, cwd: repoRoot, dataDir, client: accountClient,
   owner: () => runtimeOwner(analysisStore), screen: loginMode() === "local",
+  // nodeHub is created further down; read before that (a pass at start-up) it is not there yet.
+  nodeBrowser: (workspaceId) => {
+    if (workspaceId !== runtimeOwner(analysisStore)) return undefined;
+    try { return nodeHub?.browserFor(workspaceId); } catch { return undefined; }
+  },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
 // The person's mailbox, read-only (docs/personal-agent.md): new mail read every quarter hour and sorted into the inbox; the assistant
 // searches and reads it; matching mail fires the person's automations. Sorting is intake work (it runs while the person is around or

@@ -5,7 +5,6 @@
   "等本人提交": "Waiting for your submission",
   "已提交，等确认": "Submitted, awaiting confirmation",
   "已停止": "Stopped",
-  "这台服务器没有屏幕，代填要在本人电脑上运行": "This server has no screen; form filling runs on your own computer",
   "格式不对，没有保存": "The format is wrong; not saved",
   "没有完成，请重试": "Not done; please try again",
   "报名资料卡": "Registration profile",
@@ -82,5 +81,9 @@
   "不是最后一页": "Not the last page",
   "页面有错误提示": "The page shows an error",
   "提交前总核没有运行": "The pre-submit check did not run",
-  "提交前总核没有通过": "The pre-submit check did not pass"
+  "提交前总核没有通过": "The pre-submit check did not pass",
+  "没有连上带浏览器的电脑节点，代填要在本人电脑上运行": "No computer node with a browser is connected; form filling runs on your own computer",
+  "托管版在本人电脑的 Crossline 节点浏览器里代填；节点未连接时报名会等它连上": "On the hosted site, forms are filled in the browser of the Crossline node on your own computer; while it is not connected, registrations wait for it",
+  "没有能显示窗口的电脑：本人电脑上的节点未连接": "No computer can show the window: the node on your own computer is not connected",
+  "本人电脑上的浏览器没能打开": "The browser on your own computer did not open"
 }

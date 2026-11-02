@@ -1,19 +1,21 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { BrowserContext, Locator, Page } from "playwright-core";
-import { parseAriaSnapshot } from "@crossline/core";
+import type { BrowserContext } from "playwright-core";
 import { readerLaunch, restoreSessionCookies } from "./browser-launch";
 import type { DriverTarget, FormDriver } from "./form-engine";
-import { publicHttpsOnly } from "./node/browser";
+import type { NodeBrowserLink } from "./node/hub";
+import { driveFormContext, publicHttpsOnly, type FormAnswer, type FormMethod } from "./node/browser";
+
+export { onHosts, runHosts } from "./node/browser";
 
 /**
  * The form engine's browser (docs/opportunity-agent.md §10.1–§10.2): a visible window of Crossline's own profile for this site, never the
- * person's everyday browser. Everything is read through the accessibility snapshot and Playwright's locators, which run in Playwright's
- * own isolated world: no script of ours runs in the page, and no debugging port is opened.
+ * person's everyday browser. The driver itself (`driveFormContext` in node/browser.ts) is shared with the compute node, so a hosted
+ * owner's form is filled the same way in their own computer's browser (`openNodeFormBrowser`). No script of ours runs in the page.
  *
  * The network guard is ours, not the model's: a top-level navigation may go only to the run's own hosts; requests to private
  * addresses, popups and downloads are refused. Every refusal is reported to `onBlocked`. A fallback engine (§10.7) only proposes
- * actions, which the engine judges and does through this same driver, so it never drives the page itself.
+ * actions, which the engine judges and does through this same driver.
  */
 export type FormBrowserOptions = {
   profileDir: string;
@@ -26,19 +28,7 @@ export type FormBrowserOptions = {
   /** A test opens a headless window. */
   headless?: boolean;
 };
-export type FormBrowser = FormDriver & { context: BrowserContext; page: () => Page };
-
-/** Luma moved from lu.ma to luma.com; an event link on one redirects to the other. */
-const HOST_ALIASES: Record<string, string[]> = { "lu.ma": ["luma.com"], "luma.com": ["lu.ma"] };
-/** The hosts one run may navigate to: the registration host and its known aliases, nothing else (§10.2). */
-export const runHosts = (registrationHost: string): string[] => {
-  const host = registrationHost.toLowerCase().replace(/^www\./, "");
-  return host ? [host, ...(HOST_ALIASES[host] ?? [])] : [];
-};
-export const onHosts = (url: string, hosts: string[]) => {
-  try { const host = new URL(url).hostname.toLowerCase().replace(/^www\./, ""); return hosts.some((item) => host === item || host.endsWith(`.${item}`)); }
-  catch { return false; }
-};
+export type FormBrowser = FormDriver & { context?: BrowserContext; confine?: (on: boolean) => void };
 
 export async function openFormBrowser(options: FormBrowserOptions): Promise<FormBrowser> {
   const { chromium } = await import("playwright-core");
@@ -46,73 +36,58 @@ export async function openFormBrowser(options: FormBrowserOptions): Promise<Form
   const launch = await readerLaunch(options.executablePath);
   const context = await chromium.launchPersistentContext(options.profileDir, { ...launch, acceptDownloads: false, ...(options.headless ? { headless: true } : {}) });
   await restoreSessionCookies(context, options.profileDir);
-  const allow = options.allow ?? publicHttpsOnly();
-  let current = context.pages()[0] ?? await context.newPage();
-  // No second tab: a page that opens one gets it closed at once (§10.2: 不跨标签页).
-  context.on("page", (page) => { if (page !== current) { options.onBlocked(page.url(), "popup"); void page.close().catch(() => undefined); } });
-  await context.route("**/*", async (route) => {
-    const request = route.request();
-    const url = request.url();
-    const top = request.isNavigationRequest() && request.frame() === current.mainFrame();
-    if (!(await allow(url))) { options.onBlocked(url, "address"); return route.abort("blockedbyclient"); }
-    if (top && !onHosts(url, options.hosts)) { options.onBlocked(url, "host"); return route.abort("blockedbyclient"); }
-    return route.continue();
-  });
-
-  const locate = (target: DriverTarget, attempt: number): Locator => {
-    if (attempt === 0 && target.ref) return current.locator(`aria-ref=${target.ref}`);
-    if (attempt <= 1) return current.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name, exact: true }).first();
-    return current.getByLabel(target.name, { exact: true }).first();
-  };
-
+  const { picture, ...page } = await driveFormContext(context, { hosts: options.hosts, allow: options.allow ?? publicHttpsOnly(), onBlocked: options.onBlocked });
   return {
-    context, page: () => current,
-    open: async (url) => { await current.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }); },
-    url: () => current.url(),
-    snapshot: () => current.ariaSnapshot({ mode: "ai" }),
-    signals: async () => ({ passwordFields: await current.locator("input[type=password]:visible").count().catch(() => 0), frameUrls: current.frames().map((frame) => frame.url()) }),
-    multiline: async () => {
-      const names: string[] = [];
-      for (const area of await current.locator("textarea").all().catch(() => [] as Locator[])) {
-        const node = parseAriaSnapshot(await area.ariaSnapshot().catch(() => ""))[0];
-        if (node?.name) names.push(node.name);
-      }
-      return names;
-    },
-    inputValue: async (target, attempt) => { return locate(target, attempt).inputValue({ timeout: 3_000 }).catch(() => undefined); },
-    fill: async (target, value, attempt) => { await locate(target, attempt).fill(value, { timeout: 8_000 }); },
-    select: async (target, option, attempt) => {
-      const field = locate(target, attempt);
-      try { await field.selectOption({ label: option }, { timeout: 4_000 }); }
-      catch {
-        // A combobox that is not a <select>: open it and pick the option by its name.
-        await field.click({ timeout: 4_000 });
-        await current.getByRole("option", { name: option, exact: true }).first().click({ timeout: 4_000 });
-      }
-    },
-    check: async (target, on, attempt) => { await locate(target, attempt).setChecked(on, { timeout: 6_000 }); },
-    upload: async (target, file, attempt) => {
-      const field = locate(target, attempt);
-      try { await field.setInputFiles(file, { timeout: 4_000 }); }
-      catch {
-        const chooser = current.waitForEvent("filechooser", { timeout: 6_000 });
-        await field.click({ timeout: 4_000 });
-        await (await chooser).setFiles(file);
-      }
-    },
-    click: async (target) => { await locate(target, 0).click({ timeout: 8_000 }).catch(async () => locate(target, 1).click({ timeout: 8_000 })); },
-    settle: async () => {
-      await current.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => undefined);
-      await current.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
-      await current.waitForTimeout(800);
-    },
+    ...page, context,
+    screenshot: async (file, mask) => { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, await picture(mask)); }
+  };
+}
+
+/**
+ * The same driver in a browser on the owner's own computer, through a connected compute node (docs/opportunity-agent.md §10.1: a hosted
+ * worker has no screen). The node keeps its own per-site profile and its own address rules (public https only); every answer carries the
+ * page's address, whether it was closed and what the node refused, which go to `onBlocked` here. An upload is sent as the file's bytes.
+ */
+export async function openNodeFormBrowser(link: NodeBrowserLink, options: { host: string; hosts: string[]; onBlocked: (url: string, why: string) => void }): Promise<FormBrowser & { node: string }> {
+  let url = "";
+  let closed = false;
+  const call = async (method: FormMethod, args: unknown[] = [], timeoutMs = 120_000): Promise<unknown> => {
+    let answer: FormAnswer;
+    try { answer = await link.call({ op: "form", method, args }, timeoutMs) as FormAnswer; }
+    catch (error) {
+      if (error instanceof Error && /NODE_DISCONNECTED|NODE_FORM_NOT_OPEN/.test(error.message)) closed = true;
+      throw error;
+    }
+    url = answer.url;
+    closed = answer.closed;
+    for (const item of answer.blocked ?? []) options.onBlocked(item.url, item.why);
+    if (answer.error) throw new Error(answer.error);
+    return answer.value;
+  };
+  await link.call({ op: "formOpen", host: options.host, hosts: options.hosts }, 120_000);
+  const target = (item: DriverTarget) => ({ ...(item.ref ? { ref: item.ref } : {}), role: item.role, name: item.name });
+  return {
+    node: link.host,
+    open: async (address) => { await call("open", [address], 90_000); },
+    url: () => url,
+    snapshot: async () => String(await call("snapshot") ?? ""),
+    signals: async () => (await call("signals")) as { passwordFields: number; frameUrls: string[] },
+    multiline: async () => ((await call("multiline")) as string[] | null) ?? [],
+    inputValue: async (item, attempt) => { const value = await call("inputValue", [target(item), attempt]); return typeof value === "string" ? value : undefined; },
+    fill: async (item, value, attempt) => { await call("fill", [target(item), value, attempt]); },
+    select: async (item, option, attempt) => { await call("select", [target(item), option, attempt]); },
+    check: async (item, on, attempt) => { await call("check", [target(item), on, attempt]); },
+    upload: async (item, file, attempt) => { await call("upload", [target(item), { name: path.basename(file), data: readFileSync(file).toString("base64") }, attempt], 300_000); },
+    click: async (item) => { await call("click", [target(item)]); },
+    settle: async () => { await call("settle", [], 90_000); },
     screenshot: async (file, mask) => {
+      const media = await link.call({ op: "formPicture", mask: mask.map(target) }, 120_000) as { bytes?: Buffer } | null;
+      if (!media?.bytes) return;
       mkdirSync(path.dirname(file), { recursive: true });
-      const masked = mask.map((target) => current.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name, exact: true }));
-      await current.screenshot({ path: file, fullPage: true, mask: masked, timeout: 15_000 });
+      writeFileSync(file, media.bytes);
     },
-    front: async () => { await current.bringToFront(); },
-    closed: () => current.isClosed(),
-    close: async () => { await context.close().catch(() => undefined); }
+    front: async () => { await call("front"); },
+    closed: () => closed,
+    close: async () => { closed = true; await link.call({ op: "formClose" }, 60_000).catch(() => undefined); }
   };
 }

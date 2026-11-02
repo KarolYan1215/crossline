@@ -9,7 +9,8 @@ import type { SecretStore } from "@crossline/connectors";
 import { CrosslineStore, applicationProfile, formRunOf, readFormRuns } from "@crossline/db";
 import { openFormBrowser } from "./form-browser";
 import { createFormService } from "./form-service";
-import { findBrowser } from "./node/browser";
+import { createNodeBrowsers, findBrowser } from "./node/browser";
+import type { NodeBrowserLink } from "./node/hub";
 
 const chrome = findBrowser();
 let server: Server;
@@ -54,6 +55,14 @@ const service = (owner = () => ws as string | undefined) => createFormService({ 
       { op: "submit", target: { role: "button", name: "Register" }, value: null, why: "" }] }),
     check: async () => ({ ok: true, problems: [] })
   }) });
+/** The owner's compute node, its browser driven the way the hub would: the operations straight into the node's own handler. */
+const nodeLink = (): NodeBrowserLink & { closeAll: () => Promise<void>; calls: string[] } => {
+  const browsers = createNodeBrowsers({ profilesDir: path.join(dir, "node-profiles"), ...(chrome ? { executable: chrome } : {}), allow: async () => true,
+    launch: async (profileDir, executable) => (await import("playwright-core")).chromium.launchPersistentContext(profileDir, { executablePath: executable, headless: true }) });
+  const calls: string[] = [];
+  return { host: "kai-pc", calls, closeAll: browsers.closeAll,
+    call: async (request) => { calls.push(String(request.op) + (request.method ? `:${String(request.method)}` : "")); return browsers.handle(request as never); } };
+};
 const waitFor = async (done: () => boolean, ms = 60_000) => { const end = Date.now() + ms; while (!done() && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 200)); };
 
 describe("form service", () => {
@@ -107,6 +116,50 @@ describe("form service", () => {
     expect(formRunOf(store, ws, id)).toMatchObject({ state: "confirmed", confirmation: { mail: { from: "events@127.0.0.1" } } });
     await forms.closeAll();
   }, 120_000);
+
+  it("without a screen and without a node, refuses to queue (FORM_NEEDS_SCREEN)", async () => {
+    const forms = createFormService({ store, secrets: secretStore, cwd: dir, dataDir: dir, client: () => undefined, owner: () => ws, screen: false, nodeBrowser: () => undefined });
+    expect(await forms.handle("POST", "/v1/forms/queue", ws, { opportunity: opportunity(), choice: "register" })).toMatchObject({ status: 409, body: { code: "FORM_NEEDS_SCREEN" } });
+    expect(await forms.handle("GET", "/v1/forms", ws, undefined)).toMatchObject({ status: 200, body: { screen: false } });
+  });
+
+  it.skipIf(!chrome)("without a screen, fills the form in the browser of the owner's connected node", async () => {
+    const link = nodeLink();
+    const forms = createFormService({ store, secrets: secretStore, cwd: dir, dataDir: dir, client: () => undefined, owner: () => ws, screen: false,
+      nodeBrowser: () => link, profilesRoot: () => path.join(dir, "profiles"),
+      models: () => ({
+        propose: async (): Promise<FormFillAnswer> => ({ pageKind: "form", note: "", actions: [
+          { op: "fill", target: { role: "textbox", name: "Email" }, value: { slot: "email" }, why: "" },
+          { op: "submit", target: { role: "button", name: "Register" }, value: null, why: "" }] }),
+        check: async () => ({ ok: true, problems: [] })
+      }) });
+    await forms.handle("POST", "/v1/apply-profile/email", ws, { value: "kai@example.edu" });
+    expect(await forms.handle("GET", "/v1/forms", ws, undefined)).toMatchObject({ body: { screen: true, node: "kai-pc" } });
+    expect(await forms.handle("POST", "/v1/forms/queue", ws, { opportunity: opportunity(), choice: "register" })).toMatchObject({ status: 200 });
+    await waitFor(() => readFormRuns(store, ws)[0]?.state === "confirmed");
+    expect(readFormRuns(store, ws)[0]?.state).toBe("confirmed");
+    expect(submitted).toBe(1);
+    expect(link.calls).toContain("formOpen");
+    expect(link.calls).toContain("form:fill");
+    expect(link.calls).toContain("formPicture");
+    expect(link.calls.at(-1)).toBe("formClose");
+    await forms.closeAll();
+    await link.closeAll();
+  }, 120_000);
+
+  it.skipIf(!chrome)("the node's form driver refuses a navigation off the run's hosts and a method outside its list", async () => {
+    const link = nodeLink();
+    const blocked: string[] = [];
+    const { openNodeFormBrowser } = await import("./form-browser");
+    const driver = await openNodeFormBrowser(link, { host: "127.0.0.1", hosts: ["127.0.0.1"], onBlocked: (_url, why) => blocked.push(why) });
+    await driver.open(`${base}/event`);
+    await expect(driver.open("http://localhost:1/elsewhere")).rejects.toThrow();
+    expect(blocked).toContain("host");
+    await expect(link.call({ op: "form", method: "close", args: [] })).rejects.toThrow("NODE_FORM_METHOD_REFUSED");
+    await expect(link.call({ op: "formOpen", host: "evil.example", hosts: ["127.0.0.1"] })).rejects.toThrow("NODE_FORM_HOST_INVALID");
+    await driver.close();
+    await link.closeAll();
+  }, 60_000);
 
   it("refuses an opportunity page that is not on its registration host", async () => {
     const forms = service();

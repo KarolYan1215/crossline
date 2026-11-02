@@ -28,7 +28,7 @@ export function ApplyCard({ items, runs, screen }: { items: ApplyItem[]; runs: A
     const response = await fetch(url, { method, headers: { "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) }).catch(() => undefined);
     if (!response?.ok) {
       const code = await response?.json().then((json: { code?: string }) => json.code ?? "").catch(() => "") ?? "";
-      setNote(code === "FORM_NEEDS_SCREEN" ? t("这台服务器没有屏幕，代填要在本人电脑上运行") : code.startsWith("PROFILE_") ? t("格式不对，没有保存") : t("没有完成，请重试"));
+      setNote(code === "FORM_NEEDS_SCREEN" ? t("没有连上带浏览器的电脑节点，代填要在本人电脑上运行") : code.startsWith("PROFILE_") ? t("格式不对，没有保存") : t("没有完成，请重试"));
       return false;
     }
     setNote("");
@@ -56,7 +56,7 @@ export function ApplyCard({ items, runs, screen }: { items: ApplyItem[]; runs: A
     </div>)}
 
     <h4>{t("代填的报名")}</h4>
-    {!screen && <p className="muted">{t("这台服务器没有屏幕，代填要在本人电脑上运行")}</p>}
+    {!screen && <p className="muted">{t("托管版在本人电脑的 Crossline 节点浏览器里代填；节点未连接时报名会等它连上")}</p>}
     {runs.length === 0 ? <p className="muted">{t("还没有报名。在机会卡上点「报名」后会出现在这里。")}</p> : runs.map((run) => <article key={run.id} className="st-run">
       <p className="st-run-head"><b>{run.title}</b> · {t(STATE_LABEL[run.state])}
         {run.state === "waiting_person" && run.stoppedFor && <> · {run.stoppedFor === "missing_slot" && run.missingSlot ? t("缺「{{slot}}」", { slot: t(SLOT_LABEL[run.missingSlot]) }) : t(STOP_LABEL[run.stoppedFor])}</>}</p>
