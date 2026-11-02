@@ -332,3 +332,11 @@ body:has(.settings-page) .running-head{background:var(--ds-bg)}
 .settings-page .setup-guide-tabs button{border-radius:999px}
 .settings-page .setup-guide-tabs button[aria-pressed="true"]{border-color:var(--ds-accent);background:var(--ds-accent-soft);color:var(--ds-accent-ink)}
 html:has(.settings-page){background:var(--ds-bg)}
+
+/* 报名资料卡 (apply-card.tsx): inline edit row, one block per registration, the checklist about to be submitted. */
+.st-inline-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.st-inline-form input{min-width:0;max-width:240px}
+.st-run{border-top:1px solid var(--mist);padding:8px 0}
+.st-run-head{margin:0 0 4px}
+.st-run p{overflow-wrap:anywhere}
+.st-checklist{margin:4px 0 8px;padding-left:18px;font-size:13px;overflow-wrap:anywhere}

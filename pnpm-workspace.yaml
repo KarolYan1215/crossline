@@ -7,7 +7,9 @@ onlyBuiltDependencies:
   - esbuild
 allowBuilds:
   '@azure/msal-node-extensions': true
+  '@google/genai': false
   better-sqlite3: true
+  bufferutil: false
   esbuild: true
   keytar: true
   onnxruntime-node: false

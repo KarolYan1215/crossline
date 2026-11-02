@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { SCOUT_NEEDS_SETTING, judgeEligibility, applicantFrom, type EligibilityTerm, type Opportunity, type StoredNeed } from "@crossline/core";
-import { CrosslineStore, decideNeed, queuedFormRuns, opportunityWeek, queueOpportunityForm, recordEligibilityAnswer, scoutNeeds, waitingIdForNeed } from "./index";
+import { CrosslineStore, decideNeed, opportunityWeek, queueFormRun, readFormRuns, recordEligibilityAnswer, scoutNeeds, waitingIdForNeed } from "./index";
 
 let store: CrosslineStore;
 let ws: string;
@@ -61,9 +61,9 @@ test("tracking a cycle need writes its 「预计开放」 waiting item; declinin
 
 test("报名 queues one form run, however often it is pressed", () => {
   const { row } = store.saveOpportunity(ws, { opportunity: opportunity({ kind: "event" }), terms: [], verdict: { state: "eligible", basis: [] } });
-  queueOpportunityForm(store, ws, owner, row);
-  queueOpportunityForm(store, ws, owner, row);
-  expect(queuedFormRuns(store, ws)).toEqual([expect.objectContaining({ id: "form-opp-1", state: "queued", host: "jobs.example.org" })]);
+  queueFormRun(store, ws, { opportunity: row, choice: "register" });
+  queueFormRun(store, ws, { opportunity: row, choice: "register" });
+  expect(readFormRuns(store, ws)).toEqual([expect.objectContaining({ opportunityId: "opp-1", state: "queued", host: "jobs.example.org" })]);
 });
 
 test("the week counts the ineligible apart", () => {

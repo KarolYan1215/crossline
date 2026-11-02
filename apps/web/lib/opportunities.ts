@@ -1,6 +1,6 @@
 import "server-only";
 import { eligibilityAnswer, nextDeadline, prepStartFor, type AccessContext, type Ask, type AskField, type AskOption } from "@crossline/core";
-import { decideNeed, queuedFormRuns, queueOpportunityForm, recordEligibilityAnswer, scoutNeeds, type StoredOpportunity } from "@crossline/db";
+import { decideNeed, queueFormRun, readFormRuns, recordEligibilityAnswer, scoutNeeds, type StoredOpportunity } from "@crossline/db";
 import { getStore, planToday, saveGoalSettings, saveMilestoneEdit } from "./crossline";
 import { requestAutoBackplan } from "./approvals";
 import { localeFor } from "./locale";
@@ -142,7 +142,9 @@ export function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: s
     }
     case "register": {
       if (!store.decideOpportunity(ctx.workspaceId, row.id, "register", now.toISOString())) return { ok: false, code: "OPPORTUNITY_NOT_FOUND" };
-      queueOpportunityForm(store, ctx.workspaceId, ctx.principalId, { ...row, decision: "register" });
+      // The form-filling track's queue: one run for this opportunity's registration host, started by the worker's form pass.
+      const { terms: _terms, verdict: _verdict, decision: _decision, decidedAt: _decidedAt, laterUntil: _laterUntil, confirmedBy: _confirmedBy, updatedAt: _updatedAt, ...opportunity } = row;
+      queueFormRun(store, ctx.workspaceId, { opportunity, choice: "register", at: now.toISOString() });
       record("register");
       return { ok: true };
     }
@@ -185,7 +187,7 @@ export function loadOpportunityWeek(ctx: AccessContext, now = new Date()): Oppor
   const rows = store.listOpportunities(ctx.workspaceId);
   const week = rows.filter((row) => row.foundAt >= since);
   const decidedThisWeek = rows.filter((row) => (row.decidedAt ?? "") >= since);
-  const runs = new Map(queuedFormRuns(store, ctx.workspaceId).map((run) => [run.opportunityId, run]));
+  const runs = new Map(readFormRuns(store, ctx.workspaceId).map((run) => [run.opportunityId, run]));
   return {
     found: week.length, eligible: week.filter((row) => row.verdict.state === "eligible").length, unknown: week.filter((row) => row.verdict.state === "unknown").length,
     ineligible: week.filter((row) => row.verdict.state === "ineligible").length,

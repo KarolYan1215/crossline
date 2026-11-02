@@ -1,13 +1,13 @@
 import {
   SCOUT_NEEDS_SETTING, applicantFrom, judgeEligibility, mergeNeeds, readNeeds, tFor,
-  type EligibilityVerdict, type FormRun, type StoredNeed
+  type EligibilityVerdict, type StoredNeed
 } from "@crossline/core";
 import type { CrosslineStore, StoredOpportunity } from "./index";
 import { readLocale } from "./locale";
 
 /**
  * The opportunity agent's ledger helpers shared by the worker and the web (docs/opportunity-agent.md §5–8): the needs kept per workspace,
- * the person's answer to a need, eligibility answers as profile facts, and the queue of forms waiting for the form-filling track.
+ * the person's answer to a need and eligibility answers as profile facts. 报名 goes to the form-filling track's `queueFormRun` (form-runs.ts).
  */
 
 export const scoutNeeds = (store: CrosslineStore, workspaceId: string): StoredNeed[] => readNeeds(store.getSetting(workspaceId, SCOUT_NEEDS_SETTING));
@@ -80,30 +80,6 @@ export function rejudgeOpportunities(store: CrosslineStore, workspaceId: string,
     changed += 1;
   }
   return changed;
-}
-
-/**
- * The form-filling queue (§16), shared with track B: the setting `opportunity.formRuns`, an array of `FormRun` replaced by id. Track B's
- * runner reads it (`readFormRuns`) and owns every state after `queued`; until it is merged, a run stays 「待代填」.
- */
-const FORM_RUNS_SETTING = "opportunity.formRuns";
-export function queuedFormRuns(store: CrosslineStore, workspaceId: string): FormRun[] {
-  try { const runs = JSON.parse(store.getSetting(workspaceId, FORM_RUNS_SETTING) ?? "[]") as FormRun[]; return Array.isArray(runs) ? runs : []; } catch { return []; }
-}
-
-/**
- * The person pressed 报名: one `FormRun` in state `queued`, with the event `opportunity.form.queued`. Pressing again, or a run track B already
- * holds for this opportunity, queues nothing new. (Named apart from track B's own `queueFormRun`, which takes over once both are merged.)
- */
-export function queueOpportunityForm(store: CrosslineStore, workspaceId: string, ownerId: string, opportunity: StoredOpportunity): FormRun {
-  const runs = queuedFormRuns(store, workspaceId);
-  const existing = runs.find((item) => item.opportunityId === opportunity.id);
-  if (existing) return existing;
-  const run: FormRun = { id: `form-${opportunity.id}`, opportunityId: opportunity.id, host: opportunity.registrationHost, state: "queued", pageNo: 0,
-    filled: [], screenshots: [], engines: [] };
-  store.setSetting(workspaceId, FORM_RUNS_SETTING, JSON.stringify([...runs, run]));
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.form.queued:${opportunity.id}`, type: "opportunity.form.queued", entityId: run.id, payload: run });
-  return run;
 }
 
 /** The week's discovery in numbers, for the weekly review (§7: an ineligible opportunity is counted there and nowhere else). */

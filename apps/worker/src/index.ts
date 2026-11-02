@@ -55,6 +55,7 @@ import { deriveNeeds, needsDue, needsToPoll, opportunityAgentOn, pollNeed, rejud
 import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, loginBrowser, markWorkflowRun,
   openWorkflowLogin, resumeByPerson, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { loginMode } from "./browser-launch";
+import { createFormService } from "./form-service";
 import { createRemoteBrowsers } from "./remote-browser";
 import { localeOf, tOfWorkspace } from "./locale";
 import { createGoalSplitter, linesAwaitingCandidateSplit, linesAwaitingSplit } from "./goal-splitter";
@@ -900,6 +901,8 @@ async function tick(options: { waitForWorkspaces?: boolean } = {}): Promise<void
   // used to be structurally invisible to all three of these jobs no matter how long the worker ran.
   const workspaces = analysisStore.listWorkspaces();
   for (const workspace of workspaces) {
+    // Registration forms: queued runs started, windows waiting for the person watched, late receipts asked about (owner only).
+    void formService.pass(workspace.id).catch(() => undefined);
     try {
       const retired = retireShadowedDemos(analysisStore, workspace.id);
       if (retired.length) console.info(JSON.stringify({ type: "demo_orders.retired", checkedAt, workspaceId: workspace.id, retired }));
@@ -1197,12 +1200,22 @@ const accountClient = (workspaceId: string) => {
   if (handle) return handle.ok ? handle.client : undefined;
   return machineOwner(workspaceId) || !hostedBeta ? codexSupervisor?.clientFor(workspaceId) : undefined;
 };
+// Filling registration forms for the machine owner (docs/opportunity-agent.md §10): a visible window of Crossline's own profile per
+// site where this computer has a screen; on the hosted server, in the browser of the owner's connected compute node (§10.1).
+const formService = createFormService({ store: analysisStore, secrets, cwd: repoRoot, dataDir, client: accountClient,
+  owner: () => runtimeOwner(analysisStore), screen: loginMode() === "local",
+  // nodeHub is created further down; read before that (a pass at start-up) it is not there yet.
+  nodeBrowser: (workspaceId) => {
+    if (workspaceId !== runtimeOwner(analysisStore)) return undefined;
+    try { return nodeHub?.browserFor(workspaceId); } catch { return undefined; }
+  },
+  log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
 // The person's mailbox, read-only (docs/personal-agent.md): new mail read every quarter hour and sorted into the inbox; the assistant
 // searches and reads it; matching mail fires the person's automations. Sorting is intake work (it runs while the person is around or
 // cooling off); reading never needs the model.
 const mailService = createMailService({ store: analysisStore, secrets, cwd: repoRoot, client: accountClient, dataDir,
   sortAllowed: async (workspaceId) => !paused(workspaceId, "intake") && spendAllows(await spendFor(workspaceId), "intake"),
-  onNewMail: (workspaceId, messages) => { onNewMail(analysisStore, workspaceId, messages); },
+  onNewMail: (workspaceId, messages) => { onNewMail(analysisStore, workspaceId, messages); formService.onNewMail(workspaceId, messages); },
   // Sorting's to-dos are captures: analysed at once, not at the next tick's intake.
   onCaptured: (workspaceId) => { void autoAnalyzePass(workspaceId).catch(() => undefined); },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
@@ -1254,6 +1267,8 @@ const remoteBrowsers = loginMode() === "remote" ? createRemoteBrowsers({
 }) : undefined;
 configureRemoteLogin(remoteBrowsers);
 if (remoteBrowsers) setInterval(() => { void remoteBrowsers.sweep().catch(() => undefined); }, 30_000).unref();
+// A form window waiting for the person is watched every half minute (their own submission, a closed window), not at the 15-minute tick.
+setInterval(() => { const owner = runtimeOwner(analysisStore); if (owner) void formService.pass(owner).catch(() => undefined); }, 30_000).unref();
 const agentService = createAgentService({
   // The owner's assistant (tools mode on the hosted site) runs through the pool too: its nodes add room for more at once.
   concurrency: (workspaceId) => workspaceConcurrency(workspaceId),
@@ -1667,6 +1682,7 @@ if (!capabilitySecret) {
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId), afterChatgptCost: (workspaceId, signal) => modelProviders.afterChatgptCost(workspaceId, signal) },
     services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
+      { prefix: "/v1/forms", handle: formService.handle }, { prefix: "/v1/apply-profile", handle: formService.handle },
       { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle },
       // The login browser on the server, shown in a dialog on the page (remote-browser.ts); only where there is no screen of our own.
       ...(remoteBrowsers ? [{ prefix: "/v1/remote-browser", handle: remoteBrowsers.handle }] : []),

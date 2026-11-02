@@ -34,6 +34,8 @@ import { SettingsBrowser, type SettingsSection } from "./settings-browser";
 import { SettingsStatus } from "./settings-status";
 import { connectionStatus } from "../../lib/settings-status";
 import { PersonalizationModule } from "./personalization";
+import { ApplyCard } from "./apply-card";
+import { loadApplyCard } from "../../lib/apply-profile";
 import { SkillLibraryLoader } from "./skill-library";
 import { loadPreferences } from "../../lib/preferences";
 import { CalendarModule, ConnectionsSection } from "../connectors/connections";
@@ -125,6 +127,8 @@ export default async function SettingsPage() {
 
   // This computer's own readings (folders, screen, idle stretches, coding agents' logs) are the machine owner's only.
   const machine = assistantAvailable(store, ctx.workspaceId);
+  // 报名资料卡 and the registrations filled from it: the machine owner's only (docs/opportunity-agent.md §0).
+  const apply = loadApplyCard(ctx.workspaceId);
   // When the person is at the computer, hour by hour (activity.hourly, under the activity consent).
   const recordings = recordingOverview(store, ctx.workspaceId, dataDirectory(), zone);
   const usualDay = (() => { try { return atComputerByHour(JSON.parse(setting(ACTIVITY_HOURLY) ?? "[]") as ActivityHour[], zone); } catch { return undefined; } })();
@@ -143,6 +147,7 @@ export default async function SettingsPage() {
     { id: "automation", label: t("自动化与助手"), parts: [{ id: "automations", label: t("自动化") }, { id: "outputs", label: t("助手产出") }] },
     { id: "background", label: t("后台任务") },
     { id: "personal", label: t("个性化") },
+    ...(apply ? [{ id: "apply", label: t("报名资料卡") }] : []),
     { id: "skills", label: t("Skill 库") },
     { id: "privacy", label: t("隐私与屏幕活动") },
     { id: "energy", label: t("精力与手机健康"), alerts: alertsIn(["#energy"]) },
@@ -222,6 +227,10 @@ export default async function SettingsPage() {
         <section id="background" className="st-section" aria-labelledby="st-background"><h2 id="st-background" className="ds-serif">{t("后台任务")}</h2>
           <BackgroundModule overview={backgroundOverview(ctx)} />
         </section>
+
+        {apply && <section id="apply" className="st-section" aria-labelledby="st-apply"><h2 id="st-apply" className="ds-serif">{t("报名资料卡")}</h2>
+          <div className="st-modules"><ApplyCard items={apply.items} runs={apply.runs} screen={apply.screen} /></div>
+        </section>}
 
         <section id="personal" className="st-section" aria-labelledby="st-personal"><h2 id="st-personal" className="ds-serif">{t("个性化")}</h2>
           <PersonalizationModule {...loadPreferences(ctx)} />

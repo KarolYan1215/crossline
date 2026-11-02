@@ -65,6 +65,12 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   // Test-only: measures a model connection (provider-conformance.ts); always given the provider under test explicitly.
   "crossline-conformance": "low",
   "crossline-milestone-gate": "mid",
+  // Filling a registration form (docs/opportunity-agent.md §10): one page's actions, and an independent read of what is about to be
+  // submitted. Mid: a wrong mapping costs the person a correction, and the rules catch what may not be done either way.
+  "crossline-form-filler": "mid",
+  "crossline-form-checker": "mid",
+  "crossline-form-observer": "mid",
+  "crossline-form-browser-agent": "mid",
   "crossline-weekly-insight": "mid",
   "crossline-due-diligence": "mid",
   // The weekly energy-advice review: reads research and argues with a rule, once a week.
