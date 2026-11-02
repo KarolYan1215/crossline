@@ -21,6 +21,7 @@
 | [skills-library.md](skills-library.md) | Skill 库（已实现）：本人每条主线一个由本人的话整理的 skill，验收闸门按它判「是否符合打法」；助手用 Codex 自带的 skill-creator 把重复的琐事长成工作流（可定时执行或提醒，发出与发布始终由本人完成）；公开 skills 的检索、扫描、AI 审查与 30 天清理 |
 | [skills-picks-2026-10-20.md](skills-picks-2026-10-20.md) | 2026-10-20 的公开 skill 选单：本人常做的 12 类事各选 1–3 个（含星标、安装数、许可证、本机预检结果），以及看过但不选的和原因；清单在 `scripts/skills-picks.json` |
 | [loop-and-scout.md](loop-and-scout.md) | 闭环与机会侦察：排期自动生效与锁定、后台最优排程、完成确认、日历整理（工作 + 生活邮箱）、上手提速、画像海报与定制形象、名人库、机会侦察（已定稿 2026-10-12）；实施计划在 [plans/](plans/)（P-A 闭环、P-B 上手、P-C 海报、P-D 形象、P-E 名人库、P-F 侦察） |
+| [opportunity-agent.md](opportunity-agent.md) | 机会代理：从长期目标推出信息差、核实资格、问是否报名、在本人电脑的可见浏览器里代填到报名（定稿 2026-11-01；取代 loop-and-scout §6 与 P-F） |
 | [beta-launch.md](beta-launch.md) | 公开测评（32 题 + 漫画形象海报 + 关系与双人卡）和托管内测（香港 / 东京服务器、邀请码、国产模型与 ¥30 上限、本人迁移）的定稿方案与文案草稿（五轮问答，2026-10-14，待审） |
 | [energy-and-ecosystem.md](energy-and-ecosystem.md) | 竞品尽调（Tiimo、Pikko、RISE、Visible、Muse、Manus 等）后的精力模型 v2（睡眠债、睡眠惯性、当日容量）、效率系数学习、手机接入与 Siri 收集、拆分提速、测评传播与分期（已定稿 2026-10-14） |
 | [assess-deploy.md](assess-deploy.md) | 公开速测 `apps/assess`（32 题类型、类型海报、双人卡）：接口与规则、数据与保留期、邮件、Docker 构建、部署到香港/东京 VPS（未部署） |
