@@ -317,7 +317,7 @@ impl SqliteConfig {
         })?;
         let started = Instant::now();
         let migrate_result = async {
-            repair_windows_migration_checksums(&pool, migrator).await?;
+            repair_windows_migration_checksums(&pool, migrator, path.as_path()).await?;
             if matches!(spec.kind, DbKind::State) {
                 repair_legacy_recency_migration_version(&pool, migrator).await?;
             }

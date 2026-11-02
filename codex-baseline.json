@@ -12,8 +12,8 @@
   "patches": [
     {
       "path": "patches/codex-windows-migrations.patch",
-      "sha256": "625f469d4ff1fc71b0a564c3ca339cb2f89ada19364d1684c3e1733a426cf588",
-      "purpose": "Safely repair verified CRLF migration checksums used by existing Windows Codex homes. Regenerated against rust-v0.163.0, which still lacks an equivalent repair; the change itself is the same."
+      "sha256": "76d9188367fb6772c45f1dad4e953c43aa95b13ebe162a2a5f6c2d961a2abf63",
+      "purpose": "Safely repair verified CRLF migration checksums used by existing Windows Codex homes. Regenerated against rust-v0.163.0, which still lacks an equivalent repair. Since 2026-10-22 it also keeps the fork out of the official Codex app's ~/.codex: with CODEX_HOME unset the Windows default home is Crossline's own (utils/home-dir crossline_default_home), and the repair skips databases directly in %USERPROFILE%/.codex (state is_official_codex_home_db)."
     }
   ],
   "build": {
@@ -21,8 +21,9 @@
     "lockfileSha256": "cae541406f7ec43a418e126be2bcd5de00b243e7bbf6382570028727d99c1069",
     "lockfileNote": "The release tag recorded 160 workspace packages as 0.0.0; Cargo synchronized only those entries to 0.163.0 before the locked rebuild (git diff shows 160 version lines changed and nothing else).",
     "binary": "vendor/codex/codex-rs/target/debug/codex.exe",
-    "binarySha256": "e6300d7fd03c53a11a746e49f12706c313a04eaedb4541f1857799d9551617ac",
-    "binaryNote": "rust-v0.163.0 built at the repo root on 2026-10-20 (the worker resolves the binary from here). Rust debug builds embed the absolute source path, so the worktree build below has another hash; lockfileSha256 is the provenance proof.",
+    "binarySha256": "e4c4529140304f07d74e262a2dee7eae1cacefe875b640b4cc19c0819fa97df0",
+    "binaryNote": "rust-v0.163.0 plus the fork's ~/.codex isolation (crossline_default_home, is_official_codex_home_db), built 2026-11-01 with cargo build --locked (17 min, rustc 1.95.0) in the worktree modest-nightingale-ea278c (branch fix/fork-codex-home-isolation-main; the 2026-10-22 build 43b258b2… of the same source on fix/fork-codex-home-isolation was never merged) and copied to this path, where the worker resolves it. Rust debug builds embed the absolute source path, so a build elsewhere has another hash; lockfileSha256 is the provenance proof. The root build before the isolation (e6300d7f…, 2026-10-20) stays accepted in CODEX_PREVIOUS_BINARY_SHA256 until the root's copy is replaced.",
+    "isolationCheck": "2026-11-01, on e4c45291…: with CODEX_HOME unset and LOCALAPPDATA pointed at a temp folder the binary opened <LOCALAPPDATA>/Crossline/codex-home; with USERPROFILE and CODEX_HOME pointing at copies of the official ~/.codex databases it refused to start and every _sqlx_migrations checksum stayed byte-identical; cargo test --locked -p codex-state -p codex-utils-home-dir passed (231 + 5 + 1).",
     "worktreeBuild": {
       "builtOn": "2026-10-20, in the worktree agent-abcaf4eff22c451b2 (21 min 34 s, rustc 1.95.0 from rust-toolchain.toml)",
       "binarySha256": "09e01f2540a33bc5cc46142305c1d152d2d2e198372dcb79bb5138fc751d8693",
