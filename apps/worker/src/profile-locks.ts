@@ -5,7 +5,7 @@ import path from "node:path";
  * `site_read` (`site-reader.ts`) or the favourites job (`favourites-reader.ts`). Chromium allows one process per profile folder, so a
  * second opener would only fail to start; each checks here first and says why it waits instead.
  */
-export type ProfileHolder = "login" | "reader" | "collect";
+export type ProfileHolder = "login" | "reader" | "collect" | "fill";
 const held = new Map<string, ProfileHolder>();
 const key = (dir: string) => path.resolve(dir).toLowerCase();
 
@@ -21,4 +21,4 @@ export function releaseProfile(dir: string, holder: ProfileHolder): void {
   if (held.get(key(dir)) === holder) held.delete(key(dir));
 }
 
-export const HOLDER_WORDS: Record<ProfileHolder, string> = { login: "登录窗口还开着", reader: "助手正在读取这个网站", collect: "正在读取收藏" };
+export const HOLDER_WORDS: Record<ProfileHolder, string> = { login: "登录窗口还开着", reader: "助手正在读取这个网站", collect: "正在读取收藏", fill: "正在代填报名表" };

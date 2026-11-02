@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { BarChart3, Bell, BookOpen, Bot, CalendarDays, Layers, Mic, Search, Settings2, ShieldCheck, UserRound, Zap, type LucideIcon } from "lucide-react";
+import { BarChart3, Bell, BookOpen, Bot, CalendarDays, ClipboardList, Layers, Mic, Search, Settings2, ShieldCheck, UserRound, Zap, type LucideIcon } from "lucide-react";
 import { useT } from "../locale-context";
 
 export type SettingsSection = { id: string; label: string; alerts?: number; parts?: Array<{ id: string; label: string }> };
 
 /** Each module's icon, by its id. */
 const ICONS: Record<string, LucideIcon> = { general: Settings2, calendar: CalendarDays, notify: Bell, automation: Bot, background: Layers,
-  personal: UserRound, skills: BookOpen, privacy: ShieldCheck, energy: Zap, recordings: Mic, usage: BarChart3 };
+  personal: UserRound, apply: ClipboardList, skills: BookOpen, privacy: ShieldCheck, energy: Zap, recordings: Mic, usage: BarChart3 };
 const ICON = { size: 16, strokeWidth: 1.75, "aria-hidden": true } as const;
 
 /** What a search reads in each card: its names and the lines that say what each setting does, not every word inside it. */

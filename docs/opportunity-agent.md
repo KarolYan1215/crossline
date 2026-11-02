@@ -296,6 +296,13 @@
 
 两条线只经 `FormRun` 队列与 `Opportunity` 记录相接；B 线开发时用手写的 `Opportunity` 夹具，不等 A 线。
 
+**B 线进度（2026-11-01）**
+- 已做：资料卡（`assembleProfile`、`apply.*` 事实、敏感项进密钥库 `apply-<slot>` 且账本只记「已保存」、设置页「报名资料卡」）；主引擎（`apps/worker/src/form-engine.ts` + `form-browser.ts`，规则在 `packages/core/src/form-fill.ts`）；复检、提交前清单与 `crossline-form-checker`、10.4 自动提交规则；回执（确认页；有邮箱时同域确认邮件，48 小时未到问本人）→ `schedule.events` 固定事件；队列与路由在 `apps/worker/src/form-service.ts`（`POST /v1/forms/queue` 是 A 线的入口，web 为 `POST /api/forms`）。
+- 补位接口已改成「只提议」：补位引擎与主引擎一样只交出动作，由主引擎判定、执行、复检，所以补位不翻页、不提交、拿不到敏感值；`next`/`submit` 一律丢弃。Stagehand（MIT，已核实，现为 v4.3）与 browser-use（MIT）的适配器**还没写**：前者要开 CDP 端口并给它一个走 Codex 的 LLM 客户端，后者要嵌入式 Python 与下载按钮，均待本人定是否值得。
+- 托管服务器上的机主：服务器没有屏幕时拒绝（`FORM_NEEDS_SCREEN`）；走计算节点浏览器要给 `node/browser.ts` 加表单操作并改节点打包白名单，未做。
+- 红队（标准 5）：`apps/worker/src/form-engine.test.ts` 用本机 Chrome 打本地假报名页（两页、错误提示、隐藏注入），脚本化的模型照注入去改邮箱、勾订阅、点关注、开 Gmail，全部被规则拦下并记录，表单仍正常提交，手机号不出现在任何模型输入、清单、运行记录与事件里。
+- 标准 3（真实 Luma 免费活动）未跑：对真实站点提交前要本人选定活动并确认。
+
 ## 附：来源
 
 - Meta Muse：见第 1 节。
