@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseEngine, clock, insertDictation, isIosStandalone, isSafari, mixDown, spanNow, toPcm16 } from "./voice-model";
+import { afterEmptyBrowser, chooseEngine, clock, insertDictation, isIosStandalone, isSafari, mixDown, spanNow, toPcm16 } from "./voice-model";
 
 const facts = { hasSpeechRecognition: true, iosStandalone: false, online: true, browserBroken: false, server: "ready" as const, mode: "server" as const };
 
@@ -11,6 +11,12 @@ describe("voice engine", () => {
     expect(chooseEngine({ ...facts, hasSpeechRecognition: false, server: "unavailable" })).toBe("none");
     expect(chooseEngine({ ...facts, hasSpeechRecognition: false, server: "model_missing", mode: "local" })).toBe("model_needed");
     expect(chooseEngine({ ...facts, hasSpeechRecognition: false, server: "model_missing", mode: "server" })).toBe("none");
+  });
+  it("tells silence from a recogniser that heard nothing the microphone heard", () => {
+    expect(afterEmptyBrowser(false, facts)).toBe("silent");
+    expect(afterEmptyBrowser(true, facts)).toBe("server");
+    expect(afterEmptyBrowser(true, { ...facts, server: "model_missing", mode: "local" })).toBe("model_needed");
+    expect(afterEmptyBrowser(true, { ...facts, server: "unavailable" })).toBe("none");
   });
   it("knows the iPhone home-screen app and Safari", () => {
     expect(isIosStandalone({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", standalone: true }, false)).toBe(true);

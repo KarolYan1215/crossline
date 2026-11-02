@@ -40,5 +40,9 @@
   "恢复原文": "Restore what was heard",
   "结束语音输入": "Finish voice input",
   "语音输入用词": "Voice input wording",
-  "语音输入纠错": "Voice input correction"
+  "语音输入纠错": "Voice input correction",
+  "麦克风没有收到声音：检查电脑和浏览器选用的麦克风。": "The microphone picked up no sound: check which microphone the computer and the browser use.",
+  "这个浏览器的语音识别没有反应，这里暂时不能语音输入。": "This browser's speech recognition did not respond, so voice input is not available here for now.",
+  "浏览器自带的语音识别没有听到内容，这段录音改由 Crossline 转成文字。": "The browser's own speech recognition heard nothing, so Crossline turns this recording into text instead.",
+  "浏览器自带的语音识别没有听到内容。": "The browser's own speech recognition heard nothing."
 }

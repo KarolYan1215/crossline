@@ -33,6 +33,23 @@ export function isIosStandalone(nav: { userAgent: string; standalone?: boolean; 
 
 export const isSafari = (userAgent: string) => /^((?!chrome|chromium|crios|edg|android).)*safari/i.test(userAgent);
 
+/**
+ * A microphone frame counts as sound when its peak is this far from silence (of 128, about −20 dBFS), and a recording heard sound when
+ * at least this many frames (about 170 ms at 60 frames a second) did. Room noise under automatic gain stays well below it.
+ */
+export const SOUND_PEAK = 12;
+export const SOUND_FRAMES = 10;
+
+/**
+ * The browser's recogniser ended with nothing. The microphone's own level tells the two cases apart: nothing was said (`silent`), or the
+ * recogniser heard nothing although the microphone did — Chrome 156 on the owner's machine only ever answered `no-speech`, real voice or
+ * not (2026-11-02) — in which case it is not offered again in this tab and the recording goes to Crossline's engine where there is one.
+ */
+export function afterEmptyBrowser(heardSound: boolean, facts: EngineFacts): "silent" | Exclude<VoiceEngine, "browser"> {
+  if (!heardSound) return "silent";
+  return chooseEngine({ ...facts, browserBroken: true }) as Exclude<VoiceEngine, "browser">;
+}
+
 /** Errors after which the browser's recogniser is not worth trying again in this tab. */
 export const BROWSER_BROKEN_ERRORS = new Set(["network", "service-not-allowed", "language-not-supported", "audio-capture-unsupported"]);
 

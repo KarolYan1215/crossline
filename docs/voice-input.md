@@ -21,6 +21,12 @@
    - 本机安装版：worker 进程里直接跑 SenseVoice。模型（约 240 MB，Hugging Face，按 sha256 校验）只在本人点「下载模型」后下载（`POST /v1/voice/model {consent:true}`）。
 3. 两者都不可用时，面板说明这个浏览器不能语音输入。
 
+**浏览器识别听不到声音时**（2026-11-02 实测：本人机器上的 Chrome 156，真人说话和合成语音都只回 `no-speech`，同时 getUserMedia 拿得到声音）：除 Safari 外，浏览器识别时页面同时打开麦克风，画音量条，并在内存里录一份（`openMic`）。一次识别结束时没有文字，就看麦克风有没有录到声音（峰值 ≥ `SOUND_PEAK` 的帧至少 `SOUND_FRAMES` 个，`afterEmptyBrowser`）：
+- 没录到声音：提示「麦克风没有收到声音」，让本人检查电脑和浏览器选用的麦克风；
+- 录到了：这个标签页不再用浏览器识别，这段录音交给 Crossline 的引擎（首次先出它的说明，确认后再发），本机没有模型时提示下载，都没有时说明浏览器识别没有反应。
+
+Safari 不同时开麦克风：在 iOS 上它的识别和第二路麦克风采集会互相打断。
+
 录音不保存：浏览器引擎的音频由浏览器交给它的厂商，Crossline 收不到；自家引擎的片段读完即删，每分钟清掉 2 分钟以上的残留（`sweep`），`dictation/` 不进备份（`deploy/server/backup.sh`）。
 
 ## 纠错（Skill `crossline-dictation-corrector`，低档，`INTERACTIVE_SKILLS` 优先级）
