@@ -318,7 +318,7 @@
 - 补位二 browser-use 0.13.14（MIT）：影子副本、只提议、按钮下载，见 10.7；`apps/worker/src/browser-use.ts`（安装与运行脚本）、`form-fallbacks.ts` `browserUseFallback`、`packages/core/src/form-browser-use.ts`。两者都用本地假报名页测试（`form-engine.test.ts`，browser-use 用测试机上的虚拟环境，没有就跳过）。
 - 托管服务器上的机主：没有屏幕时交给机主电脑节点上的浏览器（节点 `browser: true`，表单操作走节点连接，见 `node/browser.ts` `driveFormContext`）；节点未连接时报名排队等它，都没有才 `FORM_NEEDS_SCREEN`。
 - 红队（标准 5）：`apps/worker/src/form-engine.test.ts` 用本机 Chrome 打本地假报名页（两页、错误提示、隐藏注入），脚本化的模型照注入去改邮箱、勾订阅、点关注、开 Gmail，全部被规则拦下并记录，表单仍正常提交，手机号不出现在任何模型输入、清单、运行记录与事件里。
-- 标准 3（真实 Luma 免费活动）未跑：对真实站点提交前要本人选定活动并确认。
+- 标准 3（真实 Luma 免费活动，2026-11-01，本人选定 Tech Exploration Lab Demo Night 并确认）：第 4 次运行打开弹窗表单、填姓名与邮箱并读回核对、总核通过后点了提交；Luma 随即弹出人机验证，运行停给本人（`stoppedFor: captcha`）。本人定：交给本人的验证算通过。前 3 次运行找出的问题（打开表单的按钮被记成提交、可选空框挡提交、读元素后 `aria-ref` 指错）见 10.8。
 
 ## 附：来源
 
