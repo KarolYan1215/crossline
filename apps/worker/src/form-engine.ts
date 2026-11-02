@@ -1,5 +1,5 @@
 import {
-  APPLICATION_SLOTS, autoSubmitProblems, confirmationOf, findTarget, injectionSigns, isField, isSensitiveSlot, judgeAction, looksLikeSubmit, maskedValue, namePart,
+  APPLICATION_SLOTS, autoSubmitProblems, buttonAmong, confirmationOf, findTarget, injectionSigns, isField, isSensitiveSlot, judgeAction, looksLikeSubmit, maskedValue, namePart,
   pageErrors, pageStop, pageText, parseAriaSnapshot, redactSensitive, sourceOf, splitName, valueMatches,
   type ApplicationSlot, type FormChecklistItem, type FormAction, type FormCheckAnswer, type FormCheckContext, type FormFillAnswer, type FormFillContext,
   type FormPageRecord, type FormStop, type JudgeContext, type PageSignals, type SnapshotNode, type StoredFormRun
@@ -37,6 +37,8 @@ export type FormDriver = {
   front: () => Promise<void>;
   closed: () => boolean;
   close: () => Promise<void>;
+  /** The page's DOM as HTML (this computer's browser only), for the browser-use fallback's static copy. */
+  html?: () => Promise<string>;
 };
 /**
  * A fallback engine (§10.7) only proposes field actions for the current page, from the same redacted snapshot the filler saw; the engine
@@ -45,7 +47,11 @@ export type FormDriver = {
  */
 export type FormFallback = {
   name: "stagehand" | "browser-use";
-  propose: (input: { nodes: SnapshotNode[]; context: FormFillContext }) => Promise<FormAction[] | undefined>;
+  propose: (input: { nodes: SnapshotNode[]; context: FormFillContext; url: string;
+    /** The page's DOM with every sensitive value redacted (this computer's browser only), for browser-use's static copy. */
+    html?: () => Promise<string>;
+    /** Takes every sensitive value out of a text before it leaves the engine. */
+    redact: (text: string) => string }) => Promise<FormAction[] | undefined>;
 };
 
 /** The profile's values as the engine reads them: sensitive ones from the secret store, in memory only for this run. */
@@ -124,11 +130,23 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     const yaml = await driver.snapshot();
     return { yaml, nodes: parseAriaSnapshot(yaml) };
   };
+  /** The page once it stops changing: a form may render after the page loads, or a dialog open a moment after a click (at most 4 s). */
+  const steady = async () => {
+    const bare = (yaml: string) => yaml.replace(/ \[ref=[^\]]*\]/g, "");
+    let yaml = await driver.snapshot();
+    for (let tries = 0; tries < 10; tries += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const now = await driver.snapshot();
+      if (bare(now) === bare(yaml)) { yaml = now; break; }
+      yaml = now;
+    }
+    return { yaml, nodes: parseAriaSnapshot(yaml) };
+  };
   const shown = async (target: DriverTarget, attempt: number): Promise<{ value?: string; checked?: boolean; selected?: string; node?: SnapshotNode }> => {
     const { nodes } = await read();
     const node = findTarget(nodes, target)[0];
     if (!node) return {};
-    const value = node.value ?? (/^(textbox|searchbox|spinbutton)$/.test(node.role) ? await driver.inputValue({ ...target, ref: node.ref }, attempt) : undefined);
+    const value = node.value ?? (/^(textbox|searchbox|spinbutton|combobox)$/.test(node.role) ? await driver.inputValue({ ...target, ref: node.ref }, attempt) : undefined);
     return { node, ...(value !== undefined ? { value } : {}), ...(node.checked !== undefined ? { checked: node.checked } : {}), ...(node.selected ? { selected: node.selected } : {}) };
   };
   const slotValue = async (slot: ApplicationSlot, label: string) => {
@@ -193,7 +211,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
 
   for (let step = 0; step < (deps.maxSteps ?? MAX_STEPS); step += 1) {
     if (driver.closed()) return deps.save({ ...run, state: "waiting_person", stoppedFor: "engine_failed", stopDetail: "window closed", sessionLost: true }, { type: "opportunity.form.stopped", payload: { stop: "engine_failed" } }); // i18n-ignore: a code
-    let { yaml, nodes } = await read();
+    let { yaml, nodes } = await steady();
     const before = pageKey(driver.url(), nodes);
     const confirmed = confirmationOf(nodes);
     if (confirmed && run.state === "filling" && step > 0 && run.pages.some((item) => item.actions.some((action) => action.verdict === "submit"))) return submitted(confirmed, "system");
@@ -249,9 +267,11 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     // Opening an application's form is a step, not the submission (applications always ask for fields).
     if (verdict.verdict === "submit" && run.opportunity.kind === "application" && OPENER.test(verdict.node.name.trim()) && !nodes.some((node) => isField(node)))
       verdict = { verdict: "allow", node: verdict.node };
+    const fieldsBefore = nodes.some(isField);
     if (verdict.verdict === "submit") {
       record(move, verdict);
       const gated = await gate(nodes, verdict.node);
+      if (gated === "changed") { if (retries++ < 2) continue; return hold("layout_changed", "page changed before submit"); } // i18n-ignore: a code
       if (gated !== "clicked") return gated;
     } else {
       record(move, verdict);
@@ -259,11 +279,26 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
       try { await driver.click({ ref: verdict.node.ref, role: verdict.node.role, name: verdict.node.name }); } catch { return hold("verify_failed", `click ${verdict.node.name}`); }
     }
     await driver.settle();
-    ({ yaml, nodes } = await read());
+    ({ yaml, nodes } = await steady());
+    // What a click brings may come late (a dialog after an animation, a page after a slow request): wait for it before calling the page
+    // unchanged, up to 6 s.
+    for (const end = Date.now() + 6_000; Date.now() < end && pageKey(driver.url(), nodes) === before && !confirmationOf(nodes)
+      && !clean(pageErrors(nodes)).some((error) => !errorsBefore.includes(error));) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      ({ yaml, nodes } = await steady());
+    }
     const after = pageKey(driver.url(), nodes);
     const fresh = clean(pageErrors(nodes)).filter((error) => !errorsBefore.includes(error));
     const confirmedNow = confirmationOf(nodes);
     if (confirmedNow && verdict.verdict === "submit") return submitted(confirmedNow, "system");
+    // A submit-like button on a page with no fields that brings up fields only opened the form (an event's 「Register」, a job's 「Apply」):
+    // the run goes on to fill it, and that page's own button is the submission.
+    if (verdict.verdict === "submit" && !fieldsBefore && nodes.some(isField) && !fresh.length) {
+      updatePage((item) => ({ ...item, actions: item.actions.map((action, index) => index === item.actions.length - 1 && action.verdict === "submit"
+        ? { ...action, verdict: "allow" as const, reason: "opened the form" } : action) })); // i18n-ignore: a reason in the record
+      const { submittedBy: _by, ...open } = run;
+      run = deps.save(open, { type: "opportunity.form.opened", payload: { button: verdict.node.name.slice(0, 80) } });
+    }
     if (fresh.length || after === before) {
       updatePage((item) => ({ ...item, errors: [...new Set([...item.errors, ...fresh])].slice(0, 12) }));
       if (retries++ < 1) { refusedHere.push(...fresh.map((error) => `page error: ${error}`)); continue; } // i18n-ignore: model-facing
@@ -277,7 +312,12 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
 
   async function tryFallbacks(nodes: SnapshotNode[], yaml: string, errors: string[]): Promise<number | "stop"> {
     for (const fallback of deps.fallbacks ?? []) {
-      const proposed = await fallback.propose({ nodes, context: context(nodes, yaml, errors) }).catch(() => undefined) ?? [];
+      // Once per page each: a fallback run is slow (browser-use takes a minute), and a second run on the same page proposes the same fields.
+      if (run.engines.some((item) => item.pageNo === run.pageNo && item.engine === fallback.name)) continue;
+      const redact = (text: string) => redactSensitive(text, sensitive);
+      const html = driver.html;
+      const proposed = await fallback.propose({ nodes, context: context(nodes, yaml, errors), url: driver.url(), redact,
+        ...(html ? { html: async () => redact(await html()) } : {}) }).catch(() => undefined) ?? [];
       run = { ...run, engines: [...run.engines, { pageNo: run.pageNo, engine: fallback.name }] };
       updatePage((item) => ({ ...item, engine: fallback.name }));
       let done = 0;
@@ -298,12 +338,22 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     return 0;
   }
 
-  async function gate(nodes: SnapshotNode[], submit: SnapshotNode): Promise<StoredFormRun | "clicked"> {
+  async function gate(nodes: SnapshotNode[], submit: SnapshotNode): Promise<StoredFormRun | "clicked" | "changed"> {
     const checklist = await checklistOf();
     const answer = await deps.check({ version: "crossline.form-check.v1", intent: { title: run.opportunity.title, organizer: run.opportunity.organizer,
       kind: run.opportunity.kind, consents: run.opportunity.consents }, items: checklist });
     run = { ...run, checklist, check: answer ? { ...answer, by: "model" } : { ok: false, problems: [{ field: "", problem: "check did not run" }], by: "rules" } }; // i18n-ignore: a reason in the record
-    const problems = autoSubmitProblems(run, { nodes, submit });
+    // The check takes seconds, and a page may open a dialog meanwhile (Luma's sign-up form): what is clicked must be what was checked.
+    const now = parseAriaSnapshot(await driver.snapshot());
+    const named = findTarget(now, submit);
+    const still = (submit.ref ? named.find((node) => node.ref === submit.ref) : undefined) ?? (named.length ? buttonAmong(now, named) : undefined);
+    if (pageKey(driver.url(), now) !== pageKey(driver.url(), nodes) || !still) return "changed";
+    submit = still;
+    // A snapshot may not show what a text box holds (Luma's do not): ask the page, and count one it cannot read as empty.
+    nodes = await Promise.all(now.map(async (node) => /^(textbox|searchbox|spinbutton)$/.test(node.role) && !node.value?.trim()
+      ? { ...node, value: await driver.inputValue({ role: node.role, name: node.name, ...(node.ref ? { ref: node.ref } : {}) }, 0) ?? "" } : node));
+    const required = (await driver.signals()).required ?? [];
+    const problems = autoSubmitProblems(run, { nodes, submit, required });
     await shoot("before-submit");
     if (problems.length) {
       run = deps.save({ ...run, state: "ready_to_submit", heldBecause: problems }, { type: "opportunity.form.ready_to_submit", payload: { heldBecause: problems } });
@@ -319,7 +369,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
   async function checklistOf(): Promise<FormChecklistItem[]> {
     const items: FormChecklistItem[] = [];
     for (const record of run.pages) for (const action of record.actions) {
-      if (action.verdict !== "allow" || action.op === "next") continue;
+      if (action.verdict !== "allow" || action.op === "next" || action.op === "submit") continue;
       const field = action.target;
       if (action.op === "check") { items.push({ pageNo: record.pageNo, field, source: "check", shown: "✓" }); continue; }
       if (action.source.startsWith("profile:")) {

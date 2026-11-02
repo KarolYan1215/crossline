@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  assembleProfile, autoSubmitProblems, confirmationOf, eventSlotOf, injectionSigns, judgeAction, pageErrors, pageStop, parseAriaSnapshot, receiptMatches,
+  assembleProfile, autoSubmitProblems, confirmationOf, eventSlotOf, fieldSlot, labelCore, looksLikeNext, namePart, requiredMark, injectionSigns, judgeAction, pageErrors, pageStop, parseAriaSnapshot, receiptMatches,
   redactSensitive, registrableDomain, splitName, startTimeOf, validateFormFill, valueMatches,
   type JudgeContext, type StoredFormRun
 } from "./form-fill";
@@ -58,6 +58,13 @@ describe("judgeAction (§10.3)", () => {
   it("refuses social writes and outside links as moves", () => {
     expect(judgeAction(act("next", "button", "Follow organizer"), ctx()).verdict).toBe("refuse");
     expect(judgeAction(act("next", "link", "Open Gmail"), ctx()).verdict).toBe("refuse");
+  });
+  it("takes the button after the last field when a dialog repeats the page's own button", () => {
+    const nodes = parseAriaSnapshot(`- button "报名" [ref=e1]
+- textbox "姓名 *" [ref=e2]: Kai
+- button "报名" [ref=e3]`);
+    const verdict = judgeAction(act("submit", "button", "报名"), ctx({ nodes }));
+    expect(verdict.verdict === "submit" && verdict.node.ref).toBe("e3");
   });
   it("treats anything not plainly next as the submission", () => {
     expect(judgeAction(act("next", "button", "Register"), ctx()).verdict).toBe("submit");
@@ -143,6 +150,24 @@ describe("autoSubmitProblems (§10.4)", () => {
     const more = parseAriaSnapshot(`- button "Next" [ref=e1]\n- button "Register" [ref=e2]`);
     expect(autoSubmitProblems(baseRun(), { nodes: more, submit: more[1]! })).toContain("不是最后一页");
   });
+  it("holds a page with an empty text box or a disabled submit button", () => {
+    const empty = parseAriaSnapshot(`- textbox "Name" [ref=e1]
+- textbox "Email" [ref=e2]: a@b.c
+- button "Register" [ref=e3]`);
+    expect(autoSubmitProblems(baseRun(), { nodes: empty, submit: empty[2]! })).toContain("有空着的必填框");
+    const off = parseAriaSnapshot(`- textbox "Email" [ref=e1]: a@b.c
+- button "Register" [disabled] [ref=e2]`);
+    expect(autoSubmitProblems(baseRun(), { nodes: off, submit: off[1]! })).toContain("提交按钮不可用");
+  });
+
+  it("lets an optional box go in empty, but not one the page marks required", () => {
+    const page = parseAriaSnapshot(`- textbox "Email *" [ref=e1]: a@b.c
+- textbox "Company (optional)" [ref=e2]
+- textbox "Referral" [ref=e3]
+- button "Register" [ref=e4]`);
+    expect(autoSubmitProblems(baseRun(), { nodes: page, submit: page[3]! })).not.toContain("有空着的必填框");
+    expect(autoSubmitProblems(baseRun(), { nodes: page, submit: page[3]!, required: ["Referral"] })).toContain("有空着的必填框");
+  });
 });
 
 describe("the receipt", () => {
@@ -167,5 +192,39 @@ describe("the filler's answer shape", () => {
   it("allows one move, last", () => {
     expect(validateFormFill({ pageKind: "form", note: "", actions: [{ op: "next", target: { role: "button", name: "Next" }, value: null, why: "" }, { op: "fill", target: { role: "textbox", name: "x" }, value: { text: "a" }, why: "" }] })).toBeDefined();
     expect(validateFormFill({ pageKind: "form", note: "", actions: [{ op: "fill", target: { role: "textbox", name: "x" }, value: { text: "{{profile.phone}}" }, why: "" }] })).toBeDefined();
+  });
+});
+
+describe("form shapes beyond one site", () => {
+  it("reads a label without the marks sites put on it", () => {
+    expect(labelCore("Email address (required)")).toBe("Email address");
+    expect(labelCore("姓名 *")).toBe("姓名");
+    expect(labelCore("Phone（选填）")).toBe("Phone");
+    expect(fieldSlot("Name *")).toBe("full_name");
+    expect(fieldSlot("Email*")).toBe("email");
+    expect(namePart("First name *")).toBe("given");
+    expect(requiredMark("Email *")).toBe(true);
+    expect(requiredMark("Company (optional)")).toBe(false);
+    expect(looksLikeNext("Save and continue")).toBe(true);
+  });
+
+  it("takes a field's own label for its label, not for an error", () => {
+    const page = parseAriaSnapshot(`- text: Email address (required)
+- textbox "Email address (required)" [ref=e1]
+- text: Email is required`);
+    expect(pageErrors(page)).toEqual(["Email is required"]);
+  });
+
+  it("picks the field and the button inside the open dialog when the page behind repeats them", () => {
+    const page = parseAriaSnapshot(`- main [ref=e1]:
+  - textbox "Email" [ref=e2]
+  - button "Subscribe" [ref=e3]
+- dialog "Register" [ref=e4]:
+  - textbox "Email" [ref=e5]
+  - button "Register" [ref=e6]`);
+    expect(page.find((node) => node.ref === "e5")?.dialog).toBe(true);
+    expect(page.find((node) => node.ref === "e2")?.dialog).toBeUndefined();
+    const verdict = judgeAction({ op: "fill", target: { role: "textbox", name: "Email" }, value: { slot: "email" }, why: "" } as FormAction, ctx({ nodes: page }));
+    expect(verdict).toMatchObject({ verdict: "allow", node: { ref: "e5" } });
   });
 });

@@ -96,6 +96,8 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-form-filler": { label: "报名代填", schemas: ["FORM_FILL_SCHEMA"] },
   "crossline-form-checker": { label: "报名提交前总核", schemas: ["FORM_CHECK_SCHEMA"], critical: true },
   "crossline-form-observer": { label: "报名代填补位", schemas: ["FORM_OBSERVE_SCHEMA"] },
+  // browser-use asks for its own schema each step, so no fixed case measures it: it runs on the account's own Codex only.
+  "crossline-form-browser-agent": { label: "报名代填补位二", schemas: [] },
   "crossline-milestone-gate": { label: "验收判定", schemas: ["MILESTONE_GATE_OUTPUT_SCHEMA"], critical: true },
   "crossline-weekly-insight": { label: "每周洞察", schemas: ["WEEKLY_INSIGHT_OUTPUT_SCHEMA"] },
   "crossline-due-diligence": { label: "网上查证", schemas: ["DILIGENCE_OUTPUT_SCHEMA"], webSearch: true },

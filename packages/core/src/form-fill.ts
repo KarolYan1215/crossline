@@ -28,6 +28,8 @@ export type SnapshotNode = {
   selected?: string;
   url?: string;
   depth: number;
+  /** Inside a dialog: a sign-up form that opens over the page (Luma, most event and job sites). */
+  dialog?: boolean;
 };
 
 const LINE = /^(\s*)- (?:"((?:[^"\\]|\\.)*)"|([a-zA-Z/]+))(?: "((?:[^"\\]|\\.)*)")?((?: \[[^\]]+\])*)(?::\s?(.*))?$/;
@@ -51,6 +53,7 @@ export function parseAriaSnapshot(yaml: string): SnapshotNode[] {
     const rest = match[6];
     while (stack.length && stack[stack.length - 1]!.depth >= depth) stack.pop();
     const parent = stack[stack.length - 1];
+    const inDialog = stack.some((item) => item.role === "dialog" || item.role === "alertdialog");
     if (role === "/url" && parent) { parent.url = valueOf(rest); continue; }
     if (role === "option" && parent && /combobox|listbox/.test(parent.role)) {
       const label = name || valueOf(rest);
@@ -58,7 +61,7 @@ export function parseAriaSnapshot(yaml: string): SnapshotNode[] {
       if (attrs.includes("selected")) parent.selected = label;
       continue;
     }
-    const node: SnapshotNode = { role, name, depth };
+    const node: SnapshotNode = { role, name, depth, ...(inDialog ? { dialog: true } : {}) };
     for (const attr of attrs) {
       if (attr.startsWith("ref=")) node.ref = attr.slice(4);
       else if (attr === "checked" || attr === "checked=true") node.checked = true;
@@ -76,6 +79,7 @@ export function parseAriaSnapshot(yaml: string): SnapshotNode[] {
 
 const FIELD_ROLES = new Set(["textbox", "searchbox", "spinbutton", "combobox", "listbox", "checkbox", "radio", "switch"]);
 export const isField = (node: SnapshotNode) => FIELD_ROLES.has(node.role);
+const TEXT_FIELD = new Set(["textbox", "searchbox", "spinbutton"]);
 /** Everything the page says, for the page-level checks (fees, a check, a login, a confirmation). */
 export const pageText = (nodes: SnapshotNode[]) => nodes.map((node) => [node.name, node.value].filter(Boolean).join(" ")).filter(Boolean).join("\n");
 /** The elements an action may name: role + accessible name, exactly. */
@@ -83,6 +87,18 @@ export function findTarget(nodes: SnapshotNode[], target: { role: string; name: 
   const name = target.name.replace(/\s+/g, " ").trim();
   return nodes.filter((node) => node.role === target.role && node.name.replace(/\s+/g, " ").trim() === name);
 }
+/**
+ * Of several buttons with one name, the one that belongs to the form: inside the open dialog first (a sign-up dialog repeats the page's
+ * own 「报名」, as Luma's does), else the one after the form's last field.
+ */
+export function buttonAmong(nodes: SnapshotNode[], found: SnapshotNode[]): SnapshotNode {
+  const inDialog = found.filter((node) => node.dialog);
+  if (inDialog.length) return inDialog[inDialog.length - 1]!;
+  const lastField = nodes.reduce((last, node, index) => isField(node) ? index : last, -1);
+  return found.find((node) => nodes.indexOf(node) > lastField) ?? found[0]!;
+}
+/** Of several fields with one name, the one in the open dialog when exactly one is there: the page behind it is not the form. */
+const fieldAmong = (found: SnapshotNode[]) => { const inDialog = found.filter((node) => node.dialog); return inDialog.length === 1 ? inDialog[0] : undefined; };
 
 // ———————————————————————————————————————— words on the page
 // i18n-ignore-start: patterns matched against what a site shows
@@ -96,7 +112,7 @@ const CAPTCHA = /captcha|recaptcha|hcaptcha|turnstile|i'?m not a robot|verify yo
 const LOGIN = /\b(sign in|log in|login|password|one-time code|verification code|magic link|check your (email|inbox))\b|登录|密码|验证码已发送|请查收/i;
 const SOCIAL_WRITE = /\b(follow|unfollow|like|share|invite|post|tweet|publish|comment|message|add friends?|connect|subscribe to|import contacts|refer)\b|关注|点赞|分享|邀请|发布|评论|私信|加好友|转发|导入通讯录/i;
 const SUBMIT = /\b(submit|register|registration|rsvp|request to join|join (event|waitlist)|apply|send application|complete (registration|order)|confirm|sign up|book|reserve|get tickets?|place order|pay)\b|提交|报名|注册|确认|申请|预约|预订|购买|下单/i;
-const NEXT = /^(next|continue|next step|proceed|go on|下一步|继续|下一页|继续填写)\b/i;
+const NEXT = /^(next|continue|next step|proceed|go on|save (and|&) (continue|next)|下一步|继续|下一页|继续填写|保存并继续)\b/i;
 const CONFIRMED = /you'?re (registered|in|going|all set|on the list)|you are (registered|going|in)|registration (confirmed|complete|successful)|thank(s| you) for (registering|signing up|your registration|applying|your application|rsvp)|rsvp (confirmed|received)|see you there|application (submitted|received)|已报名|报名成功|注册成功|提交成功|已提交|申请已收到|期待与你相见/i;
 const WAITLIST = /waitlist|wait list|候补|排队中/i;
 const PENDING_APPROVAL = /pending approval|awaiting approval|request (sent|received)|host will review|待审核|等待主办方审核/i;
@@ -104,6 +120,13 @@ const ERROR_TEXT = /\b(required|is invalid|not valid|please (enter|select|fill|c
 const INJECTION = /ignore (all |any )?(previous|prior|above) (instructions|directions)|disregard (the )?(previous|above)|(system|assistant|ai|agent|model)\s*[:：]|you are (now )?(an?|the) (assistant|agent|ai)|change (the |your )?(e-?mail|phone|address)|instead (fill|enter|type)|忽略(之前|以上|上面)的?(指令|要求|说明)|把邮箱改成|改成以下邮箱|你现在是|请(立刻|马上)?打开/i;
 // i18n-ignore-end
 
+/** A label without the marks sites put on it: 「Email *」, 「Full name (required)」, 「姓名（必填）」 ask for the same thing as the bare words. */
+// i18n-ignore-start: patterns matched against what a site shows
+export const labelCore = (label: string) => label.replace(/\s+/g, " ")
+  .replace(/[*＊]+|[(（\[]\s*(required|optional|必填|选填|可选)\s*[)）\]]|[:：]\s*$/gi, "").trim();
+/** A label that says the field must be filled. */
+export const requiredMark = (label: string) => /[*＊]|\brequired\b|必填/i.test(label) && !/\boptional\b|选填|可选/i.test(label);
+// i18n-ignore-end
 /** Which slot a field's label asks for, when it plainly asks for one; a literal value in such a field is refused. */
 // i18n-ignore-start: patterns matched against what a site shows
 const FIELD_SLOTS: Array<[RegExp, ApplicationSlot]> = [
@@ -130,14 +153,15 @@ const FIELD_SLOTS: Array<[RegExp, ApplicationSlot]> = [
 ];
 // i18n-ignore-end
 export function fieldSlot(label: string): ApplicationSlot | undefined {
-  const text = label.replace(/\s+/g, " ").trim();
+  const text = labelCore(label);
   return FIELD_SLOTS.find(([pattern]) => pattern.test(text))?.[1];
 }
 /** Which part of the full name a split name field wants. */
 export function namePart(label: string): "given" | "family" | undefined {
+  const text = labelCore(label);
   // i18n-ignore-start: patterns matched against what a site shows
-  if (/first name|given name|^名$/i.test(label.trim())) return "given";
-  if (/last name|family name|surname|^姓$/i.test(label.trim())) return "family";
+  if (/first name|given name|^名$/i.test(text)) return "given";
+  if (/last name|family name|surname|^姓$/i.test(text)) return "family";
   // i18n-ignore-end
   return undefined;
 }
@@ -161,7 +185,9 @@ export const injectionSigns = (text: string): string[] =>
   text.split(/\n+/).map((line) => line.trim()).filter((line) => INJECTION.test(line)).slice(0, 10).map((line) => line.slice(0, 200));
 
 /** Facts the page itself shows beyond the snapshot, read by locators (never by running a script in the page). */
-export type PageSignals = { passwordFields: number; frameUrls: string[]; url: string };
+export type PageSignals = { passwordFields: number; frameUrls: string[]; url: string;
+  /** Accessible names of the visible fields the page itself marks required (`required`, `aria-required`). */
+  required?: string[] };
 
 /** A page the engine must not touch, handed to the person instead (§10.3 last row, §10.5). */
 export function pageStop(nodes: SnapshotNode[], signals: PageSignals): { stop: FormStop; detail: string } | undefined {
@@ -183,9 +209,15 @@ export function pageErrors(nodes: SnapshotNode[]): string[] {
     if (node.role === "alert" && (node.value || node.name)) errors.push(String(node.value || node.name));
     else if (isField(node) && node.invalid) errors.push(`${node.name || node.role}: invalid`); // i18n-ignore: a page's state, read by the model and the log
   }
-  // Error sentences printed beside a field without an alert role (red text under the box).
-  for (const node of nodes) if ((node.role === "text" || node.role === "paragraph" || node.role === "generic") && node.value && node.value.length < 160 && ERROR_TEXT.test(node.value)
-    && /\b(required|invalid|please (enter|select|fill|provide))\b|必填|不能为空|格式不正确|请输入|请填写/i.test(node.value)) errors.push(node.value); // i18n-ignore: matched against a site
+  // Error sentences printed beside a field without an alert role (red text under the box). A field's own label is not one, though it
+  // says 「(required)」 or carries a 「*」.
+  const labels = new Set(nodes.filter(isField).map((node) => labelCore(node.name)));
+  for (const node of nodes) {
+    if (!(node.role === "text" || node.role === "paragraph" || node.role === "generic") || !node.value || node.value.length >= 160) continue;
+    const said = labelCore(node.value);
+    if (!said || labels.has(said)) continue;
+    if (ERROR_TEXT.test(said) && /\b(required|invalid|please (enter|select|fill|provide))\b|必填|不能为空|格式不正确|请输入|请填写/i.test(said)) errors.push(node.value); // i18n-ignore: matched against a site
+  }
   return [...new Set(errors.map((item) => item.slice(0, 200)))].slice(0, 12);
 }
 
@@ -247,8 +279,9 @@ export function judgeAction(action: FormAction, context: JudgeContext): Verdict 
   const found = findTarget(context.nodes, action.target);
   /* i18n-ignore-start: reasons recorded in the ledger and read back by the model */
   if (!found.length) return { verdict: "refuse", reason: `本页没有「${action.target.role} ${action.target.name}」` };
-  if (found.length > 1 && action.op !== "next" && action.op !== "submit") return { verdict: "refuse", reason: `本页有 ${found.length} 个「${action.target.name}」，无法确定是哪一个` };
-  const node = found[0]!;
+  const single = found.length > 1 && action.op !== "next" && action.op !== "submit" ? fieldAmong(found) : found[0];
+  if (found.length > 1 && action.op !== "next" && action.op !== "submit" && !single) return { verdict: "refuse", reason: `本页有 ${found.length} 个「${action.target.name}」，无法确定是哪一个` };
+  const node = found.length > 1 && (action.op === "next" || action.op === "submit") ? buttonAmong(context.nodes, found) : single!;
   if (node.disabled) return { verdict: "refuse", reason: "元素不可用" };
   const label = node.name;
   const value = action.value;
@@ -417,7 +450,7 @@ export const secretNameOf = (slot: ApplicationSlot) => `apply-${slot}`;
 // ———————————————————————————————————————— the automatic submission (§10.4)
 
 /** Every condition of submitting without the person; an empty list means the run may press the button itself. */
-export function autoSubmitProblems(run: StoredFormRun, page: { nodes: SnapshotNode[]; submit: SnapshotNode }): string[] {
+export function autoSubmitProblems(run: StoredFormRun, page: { nodes: SnapshotNode[]; submit: SnapshotNode; required?: readonly string[] }): string[] {
   const problems: string[] = [];
   const opp = run.opportunity;
   /* i18n-ignore-start: reasons kept on the run and translated where shown */
@@ -429,6 +462,11 @@ export function autoSubmitProblems(run: StoredFormRun, page: { nodes: SnapshotNo
   if (allActions.some((action) => action.source.startsWith("draft") )) problems.push("有文书字段");
   if (allActions.some((action) => action.op === "fill" && action.source.startsWith("text"))) problems.push("有不是来自资料卡的回答");
   if (allActions.some((action) => action.verified === false)) problems.push("有读回不一致的字段");
+  // An empty box the page or its label marks required, or one that asks for a profile item, would go in empty; an optional one may.
+  const required = new Set(page.required ?? []);
+  if (page.nodes.some((node) => TEXT_FIELD.has(node.role) && !node.disabled && !node.value?.trim()
+    && (requiredMark(node.name) || required.has(node.name) || fieldSlot(node.name) !== undefined))) problems.push("有空着的必填框");
+  if (page.submit.disabled) problems.push("提交按钮不可用");
   if (run.pages.some((item) => item.actions.some((action) => action.verdict === "stop"))) problems.push("有需要本人处理的字段");
   if (page.nodes.some((node) => isField(node) && PAYMENT.test(node.name)) || /\$\s?\d|¥\s?\d|￥\s?\d|€\s?\d|£\s?\d|USD|CNY|RMB/.test(pageText(page.nodes))) problems.push("页面出现价格或付款字段");
   if (page.submit.role !== "button" || !looksLikeSubmit(page.submit.name)) problems.push("提交按钮无法明确识别");

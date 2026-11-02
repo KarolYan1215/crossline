@@ -89,7 +89,7 @@ export function observeRules(context: Pick<FormFillContext, "consents">): string
 
 const PLACEHOLDER = /^%([a-z_]+)%$/;
 /** A value an argument gives: a profile slot by its placeholder, else the literal; a placeholder for anything else is not a value. */
-function valueOf(argument: string | undefined): FormAction["value"] | null {
+export function observedValue(argument: string | undefined): FormAction["value"] | null {
   const text = (argument ?? "").trim();
   if (!text) return null;
   const slot = PLACEHOLDER.exec(text)?.[1];
@@ -110,10 +110,10 @@ export function observedActions(found: readonly ObservedElement[], elements: Rea
     const target = { role: node.role, name: node.name };
     const why = `stagehand: ${element.description.slice(0, 120)}`; // i18n-ignore: a record
     if ((element.method === "fill" || element.method === "type") && /^(textbox|searchbox|spinbutton|combobox)$/.test(node.role)) {
-      const value = valueOf(element.arguments[0]);
+      const value = observedValue(element.arguments[0]);
       if (value) actions.push({ op: "fill", target, value, why });
     } else if (element.method === "selectOptionFromDropdown" && /^(combobox|listbox)$/.test(node.role)) {
-      const value = valueOf(element.arguments[0]);
+      const value = observedValue(element.arguments[0]);
       if (value) actions.push({ op: "select", target, value, why });
     } else if (element.method === "click" && /^(checkbox|radio|switch)$/.test(node.role) && !node.checked) {
       actions.push({ op: "check", target, why });

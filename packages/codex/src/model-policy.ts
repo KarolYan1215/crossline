@@ -70,6 +70,7 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-form-filler": "mid",
   "crossline-form-checker": "mid",
   "crossline-form-observer": "mid",
+  "crossline-form-browser-agent": "mid",
   "crossline-weekly-insight": "mid",
   "crossline-due-diligence": "mid",
   // The weekly energy-advice review: reads research and argues with a rule, once a week.

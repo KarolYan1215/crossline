@@ -108,7 +108,7 @@ export type FormPage = {
   open: (url: string) => Promise<void>;
   url: () => string;
   snapshot: () => Promise<string>;
-  signals: () => Promise<{ passwordFields: number; frameUrls: string[] }>;
+  signals: () => Promise<{ passwordFields: number; frameUrls: string[]; required?: string[] }>;
   multiline: () => Promise<string[]>;
   inputValue: (target: FormTarget, attempt: number) => Promise<string | undefined>;
   fill: (target: FormTarget, value: string, attempt: number) => Promise<void>;
@@ -123,10 +123,10 @@ export type FormPage = {
   closed: () => boolean;
   close: () => Promise<void>;
   /**
-   * While a fallback engine that acts on its own works on the page (docs/opportunity-agent.md §10.7, browser-use), every navigation and
-   * every non-GET document request is refused, so turning a page or submitting stays ours; requests the page makes itself still pass.
+   * The page's DOM as HTML, for the browser-use fallback's static copy (form-fallbacks.ts); read through Playwright, not a script in
+   * the page. A node never sends it, so a node's form has no browser-use fallback.
    */
-  confine: (on: boolean) => void;
+  html?: () => Promise<string>;
 };
 
 /** The name of the first node in an element's own accessibility snapshot (`- textbox "Name"`). */
@@ -152,7 +152,6 @@ export async function driveFormContext(context: Context, options: { hosts: strin
   type Page = import("playwright-core").Page;
   type Locator = import("playwright-core").Locator;
   const current: Page = context.pages()[0] ?? await context.newPage();
-  let confined = false;
   // No second tab: a page that opens one gets it closed at once (§10.2: 不跨标签页).
   context.on("page", (page) => { if (page !== current) { options.onBlocked(page.url(), "popup"); void page.close().catch(() => undefined); } });
   await context.route("**/*", async (route) => {
@@ -161,12 +160,11 @@ export async function driveFormContext(context: Context, options: { hosts: strin
     const top = request.isNavigationRequest() && request.frame() === current.mainFrame();
     if (!(await options.allow(url))) { options.onBlocked(url, "address"); return route.abort("blockedbyclient"); }
     if (top && !onHosts(url, options.hosts)) { options.onBlocked(url, "host"); return route.abort("blockedbyclient"); }
-    if (confined && (request.isNavigationRequest() || (request.resourceType() === "document" && request.method() !== "GET"))) {
-      options.onBlocked(url, "fallback");
-      return route.abort("blockedbyclient");
-    }
     return route.continue();
   });
+  // An element's own ariaSnapshot replaces the snapshot `aria-ref=` resolves against: after reading one, take the page's again, or a ref
+  // from the engine's snapshot would find another element (a click meant for the dialog's button went nowhere).
+  const keepRefs = async () => { await current.ariaSnapshot({ mode: "ai" }).catch(() => undefined); };
   const locate = (target: FormTarget, attempt: number): Locator => {
     if (attempt === 0 && target.ref) return current.locator(`aria-ref=${target.ref}`);
     if (attempt <= 1) return current.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name, exact: true }).first();
@@ -176,13 +174,25 @@ export async function driveFormContext(context: Context, options: { hosts: strin
     open: async (url) => { await current.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }); },
     url: () => current.url(),
     snapshot: () => current.ariaSnapshot({ mode: "ai" }),
-    signals: async () => ({ passwordFields: await current.locator("input[type=password]:visible").count().catch(() => 0), frameUrls: current.frames().map((frame) => frame.url()) }),
+    signals: async () => {
+      // Fields the page itself marks required, by their accessible names (read through locators, never a script in the page).
+      const required: string[] = [];
+      const marked = await current.locator("input:required:visible, textarea:required:visible, select:required:visible, [aria-required=true]:visible").all().catch(() => [] as Locator[]);
+      for (const field of marked.slice(0, 40)) {
+        const name = snapshotName(await field.ariaSnapshot().catch(() => ""));
+        if (name) required.push(name);
+      }
+      if (marked.length) await keepRefs();
+      return { passwordFields: await current.locator("input[type=password]:visible").count().catch(() => 0), frameUrls: current.frames().map((frame) => frame.url()), required };
+    },
     multiline: async () => {
       const names: string[] = [];
-      for (const area of await current.locator("textarea").all().catch(() => [] as Locator[])) {
+      const areas = await current.locator("textarea").all().catch(() => [] as Locator[]);
+      for (const area of areas) {
         const name = snapshotName(await area.ariaSnapshot().catch(() => ""));
         if (name) names.push(name);
       }
+      if (areas.length) await keepRefs();
       return names;
     },
     inputValue: async (target, attempt) => locate(target, attempt).inputValue({ timeout: 3_000 }).catch(() => undefined),
@@ -217,7 +227,7 @@ export async function driveFormContext(context: Context, options: { hosts: strin
     front: async () => { await current.bringToFront(); },
     closed: () => current.isClosed(),
     close: async () => { await context.close().catch(() => undefined); },
-    confine: (on) => { confined = on; }
+    html: () => current.content()
   };
 }
 
@@ -259,7 +269,7 @@ export type BrowserOp =
   // The registration-form driver (docs/opportunity-agent.md §10.1): a page of its own beside the reader's, answered with what it blocked.
   | { op: "formOpen"; host: string; hosts: string[] } | { op: "form"; method: FormMethod; args: unknown[] } | { op: "formPicture"; mask: FormTarget[] }
   | { op: "formClose" };
-/** The form driver's methods a server may call on a node; `picture`, `close` and `confine` go through their own ops or not at all. */
+/** The form driver's methods a server may call on a node; `picture` and `close` go through their own ops; `html` does not go at all. */
 export const FORM_METHODS = ["open", "snapshot", "signals", "multiline", "inputValue", "fill", "select", "check", "upload", "click", "settle", "front"] as const;
 export type FormMethod = typeof FORM_METHODS[number];
 /** What every form answer from a node carries besides the method's value: the page's address, whether it was closed, what was refused. */

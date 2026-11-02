@@ -230,14 +230,29 @@
 - **补位引擎一：Stagehand v3**（`@browserbasehq/stagehand`，TypeScript，本地 Chrome 走 CDP，第三方资料称 MIT 许可——实现前到仓库核实）。选它而不是 browser-use / Skyvern 的理由：
   - 安装包只带 Node；browser-use 与 Skyvern 是 Python，要多打包一套解释器与依赖；Skyvern 还是 AGPL。
   - Stagehand 的 `observe()` **只返回候选动作（选择器、方法、参数）不执行**，`act(observeResult)` 才执行。所以补位时仍是「它提议 → 我们的规则层判定 → 再执行 → 复检」，判定层不被绕过。browser-use 自己执行动作，只能靠它内部的 `allowed_domains` 与 `sensitive_data`（占位符、模型看不到真值，官方要求关掉截图视觉），我们卡不住每一步。
-- **补位引擎二：browser-use**（Python，本人决定两个都接）：Stagehand 仍失败时用。它自己执行动作，所以由我们在外面卡：
-  - 连到同一个浏览器，限定在**当前这一页**：我们这一侧的 `page.route` 对整个浏览器上下文生效，补位期间拦下一切文档级导航与非 GET 的文档请求（翻页、提交只能由主引擎做），同源的 XHR 放行（自动补全、草稿保存）；
-  - 只给它非敏感字段的任务说明，开 `allowed_domains` = 本次报名域名，关截图视觉（官方建议用 `sensitive_data` 时 `use_vision=False`）；
-  - 它结束后由主引擎对整页做 10.6 复检，结果不对就停给本人。
-  - 打包：安装包要带一个嵌入式 Python 与 browser-use 依赖，只在本人第一次用到补位二时、点了写明来源和大小的按钮后下载（照转写模型的做法）；体积待实测。
+- **补位引擎二：browser-use**（Python，本人决定两个都接）：Stagehand 仍失败时用。原设想是连到同一个浏览器再用 `page.route` 卡住翻页与提交；实现时（2026-11-01）改得更严，**它不碰本人的窗口，也不执行任何动作**：
+  - 主引擎把当前页的 DOM（敏感值已抹掉）交给它；这份副本装进一个**一次性的无头浏览器**（临时空白配置、无 cookie），副本上 CSP 禁一切脚本、表单提交、连接与子框架，除副本本身和报名域名上的样式表外所有请求都拦下；它通过这个影子浏览器的 DevTools 端口（只开在 127.0.0.1、只活一轮）连上。本人的浏览器不开调试端口，真实页面里也不跑它的任何脚本。
+  - 它自己的动作只留 `done`、`scroll`、`find_text`、`dropdown_options`，另加一个 `propose_field`（只记下元素的无障碍角色、名称、操作和值，不改页面）；`allowed_domains` = 本次报名域名，关截图视觉、关 judge、关高亮与验证码求解。
+  - 它的模型是 Crossline 的 Skill `crossline-form-browser-agent`（走本人的 Codex），经本机一次性令牌的 loopback 端点转发，消息只留文字、再抹一遍敏感值。提议由 `browserUseActions` 按角色与名称对到真实页面的快照，由主引擎判定、执行、复检，和 Stagehand 一样。
+  - 不随安装包附带：本人在 设置 → 报名资料卡 点写明来源（PyPI）、大小（约 350 MB）和要求（本机 Python 3.11+）的按钮后，装进数据目录下自己的虚拟环境（`tools/bu`，固定 0.13.14）。托管版没有屏幕，不装；节点代填拿不到 DOM，也不用它。
 - **何时切到补位**：主引擎在一页上找不到字段映射、或同一页复检连续失败两次时，这一页先交 Stagehand 的 `observe`，仍失败再交 browser-use；补位引擎**永远不做翻页与提交**，也拿不到敏感值（敏感字段由主引擎在补位之后代入并复检）。每次补位记下站点与原因，同一站点反复要补位的，作为主引擎下一步要支持的表单类型。
 - 补位只在本人电脑上跑，模型走本人的 Codex 或已接入的服务商；它的每次 `observe` 结果与执行记录同样写账本。
 - 不用 Codex Computer Use：Windows 上占用前台鼠标键盘（2026-10-12 已否决）。
+
+### 10.8 泛化到任意表单（本人要求，2026-11-01）
+
+本人要求优化不只针对 Luma 这一单，而是任何报名表都能完成。对照 Muse 的做法（第 1 节）：它读无障碍树、页面里不跑自己的脚本、凭据在代理暂停时代入、表单提交与个人信息外发由分类器盯、结账前由本人批准、本人随时可接管。我们的对应是 10.2–10.6；这一轮补上的是「页面长什么样」的泛化，全部在 `packages/core/src/form-fill.ts` 与 `apps/worker/src/form-engine.ts`，规则由程序判定，不靠针对某个站点的写法：
+
+- **晚出现的表单与弹窗表单**：每页先等快照稳定（去掉 `ref` 后连续两次相同，最多约 4 秒），点击后同样等，并在页面未变、没出现确认、没出现新错误时再等最多 6 秒。快照节点记下是否在 `dialog`/`alertdialog` 里。
+- **「打开表单」的按钮不是提交**：一页没有任何字段、点了按钮后出现了字段且没有错误，这次点击改记为「打开表单」（`opportunity.form.opened`），不算提交，`submittedBy` 不留痕；适用于「报名 / Register / Get tickets / Apply / RSVP」等任何先点开再填的入口。
+- **页面与弹窗重名**：同名字段或按钮在弹窗里恰有一个时取弹窗里的；提交与下一步按钮取弹窗里最后一个，否则取最后一个字段之后的第一个按钮。
+- **必填标记**：`labelCore` 去掉 `*`、`(required)`、`（必填）`、结尾冒号后再认资料卡键（`fieldSlot`、`namePart`）；`requiredMark` 认标签里的必填标记，页面的 `required`/`aria-required` 由浏览器侧读出（`signals().required`）。自动提交只拦空着的**必填**框与资料卡认得的框，可选的空框不再挡提交（「有空着的必填框」）。
+- **标签不是错误**：错误提示的识别跳过与某个字段标签相同的文字（「Email address (required)」不再被当成错误）。
+- **自定义下拉与单选组**：`combobox` 的读回也取 `inputValue`；单选与自定义列表由判定层按角色与名称处理。
+- **多步表单**：「Save and continue」「保存并继续」认作下一步。
+- **定位稳定**：浏览器侧读元素的无障碍节点会替换 `aria-ref` 依据的那份快照，之后的点击会落到别的元素上；读完后重拍整页快照（`keepRefs`）。真实 Luma 第 3 次运行里就是这个问题。
+- 测试：`form-engine.test.ts` 的 `/shapes` 假页（按钮 2.5 秒后才弹出的对话框表单、带 `*`/`(required)`/`(optional)` 的标签、只读的自定义下拉、单选组、空着的可选框），以及 `form-fill.test.ts` 里 `labelCore`/`requiredMark`/`fieldAmong`/`pageErrors` 的单测。
+- 还没覆盖：同域 `iframe` 里的表单、要从联想列表里选一项才算填好的地址框、确认页只靠文字识别（没有确认文字的站点会停给本人问）。
 
 ## 11. ⑦ 回执与跟进
 
@@ -269,8 +284,8 @@
 ## 15. 仍开放的点
 
 - Devpost、Luma 公开页的取数方式未核实（Devpost 用的是未文档化 JSON）；实现时逐个确认，取不到的退回网页检索。
-- browser-use 嵌入式 Python 的体积与在安装版上的启动时间，需实测后决定是否默认下载。
-- Stagehand 的许可证以 GitHub 仓库为准（第三方资料称 MIT）。
+- browser-use 现在要求本机已有 Python 3.11+；没有的人看到「先装 Python」。是否改为附带嵌入式 Python，看实际有多少人需要补位二。
+- Stagehand 与 browser-use 的许可证已在 GitHub 核实，均为 MIT（2026-11-01）。
 
 ## 16. 实施：两条并行（本人决定）
 
@@ -298,8 +313,10 @@
 
 **B 线进度（2026-11-01）**
 - 已做：资料卡（`assembleProfile`、`apply.*` 事实、敏感项进密钥库 `apply-<slot>` 且账本只记「已保存」、设置页「报名资料卡」）；主引擎（`apps/worker/src/form-engine.ts` + `form-browser.ts`，规则在 `packages/core/src/form-fill.ts`）；复检、提交前清单与 `crossline-form-checker`、10.4 自动提交规则；回执（确认页；有邮箱时同域确认邮件，48 小时未到问本人）→ `schedule.events` 固定事件；队列与路由在 `apps/worker/src/form-service.ts`（`POST /v1/forms/queue` 是 A 线的入口，web 为 `POST /api/forms`）。
-- 补位接口已改成「只提议」：补位引擎与主引擎一样只交出动作，由主引擎判定、执行、复检，所以补位不翻页、不提交、拿不到敏感值；`next`/`submit` 一律丢弃。Stagehand（MIT，已核实，现为 v4.3）与 browser-use（MIT）的适配器**还没写**：前者要开 CDP 端口并给它一个走 Codex 的 LLM 客户端，后者要嵌入式 Python 与下载按钮，均待本人定是否值得。
-- 托管服务器上的机主：服务器没有屏幕时拒绝（`FORM_NEEDS_SCREEN`）；走计算节点浏览器要给 `node/browser.ts` 加表单操作并改节点打包白名单，未做。
+- 补位接口「只提议」：补位引擎与主引擎一样只交出动作，由主引擎判定、执行、复检，所以补位不翻页、不提交、拿不到敏感值；`next`/`submit` 一律丢弃；每页每个补位只跑一次。
+- 补位一 Stagehand v3（`@browserbasehq/stagehand` 3.7.3，MIT）：只用 `observe()` 的候选，不调用 `act()`、不连本人浏览器；`apps/worker/src/form-fallbacks.ts` `stagehandFallback`，模型是 Skill `crossline-form-observer`。
+- 补位二 browser-use 0.13.14（MIT）：影子副本、只提议、按钮下载，见 10.7；`apps/worker/src/browser-use.ts`（安装与运行脚本）、`form-fallbacks.ts` `browserUseFallback`、`packages/core/src/form-browser-use.ts`。两者都用本地假报名页测试（`form-engine.test.ts`，browser-use 用测试机上的虚拟环境，没有就跳过）。
+- 托管服务器上的机主：没有屏幕时交给机主电脑节点上的浏览器（节点 `browser: true`，表单操作走节点连接，见 `node/browser.ts` `driveFormContext`）；节点未连接时报名排队等它，都没有才 `FORM_NEEDS_SCREEN`。
 - 红队（标准 5）：`apps/worker/src/form-engine.test.ts` 用本机 Chrome 打本地假报名页（两页、错误提示、隐藏注入），脚本化的模型照注入去改邮箱、勾订阅、点关注、开 Gmail，全部被规则拦下并记录，表单仍正常提交，手机号不出现在任何模型输入、清单、运行记录与事件里。
 - 标准 3（真实 Luma 免费活动）未跑：对真实站点提交前要本人选定活动并确认。
 

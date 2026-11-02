@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { SLOT_LABEL, STOP_LABEL, type ApplicationSlot, type FormRunState, type FormStop } from "@crossline/core";
+import { useEffect, useState } from "react";
+import { BROWSER_USE_DOWNLOAD_MB, BROWSER_USE_VERSION, SLOT_LABEL, STOP_LABEL, type ApplicationSlot, type FormRunState, type FormStop } from "@crossline/core";
 import { useT } from "../locale-context";
 
 export type ApplyItem = { slot: ApplicationSlot; sensitive: boolean; present: boolean; value?: string; usedBy: Array<{ title: string; at: string }> };
@@ -55,6 +55,8 @@ export function ApplyCard({ items, runs, screen }: { items: ApplyItem[]; runs: A
           </span>}
     </div>)}
 
+    {screen && <BrowserUseTool />}
+
     <h4>{t("代填的报名")}</h4>
     {!screen && <p className="muted">{t("托管版在本人电脑的 Crossline 节点浏览器里代填；节点未连接时报名会等它连上")}</p>}
     {runs.length === 0 ? <p className="muted">{t("还没有报名。在机会卡上点「报名」后会出现在这里。")}</p> : runs.map((run) => <article key={run.id} className="st-run">
@@ -80,4 +82,41 @@ export function ApplyCard({ items, runs, screen }: { items: ApplyItem[]; runs: A
     </article>)}
     {note && <p role="status" className="st-note">{note}</p>}
   </section>;
+}
+
+type ToolStatus = { state: "absent" | "installing" | "installed" | "failed"; error?: string };
+
+/**
+ * browser-use, the second fallback when a page is too unusual for the filler and Stagehand: not shipped, fetched only on this press,
+ * which says where it comes from, how large it is and the Python it needs. It reads a static copy of the page and only proposes fields.
+ */
+function BrowserUseTool() {
+  const t = useT();
+  const [status, setStatus] = useState<ToolStatus | undefined>();
+  const [note, setNote] = useState("");
+  const read = () => fetch("/api/forms/browser-use").then((response) => response.ok ? response.json() as Promise<ToolStatus> : undefined).then(setStatus).catch(() => undefined);
+  useEffect(() => { void read(); }, []);
+  useEffect(() => {
+    if (status?.state !== "installing") return;
+    const timer = setInterval(() => void read(), 10_000);
+    return () => clearInterval(timer);
+  }, [status?.state]);
+  const install = async () => {
+    const response = await fetch("/api/forms/browser-use", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ consent: true }) }).catch(() => undefined);
+    if (!response?.ok) { setNote(t("没有开始下载，请重试")); return; }
+    setNote("");
+    setStatus({ state: "installing" });
+  };
+  if (!status) return null;
+  return <div className="st-row">
+    <span className="st-row-label">{t("备用填表引擎 browser-use")}
+      <small>{status.state === "installed" ? t("已安装（{{version}}），页面版式特殊时只读页面副本、提出要填的字段", { version: BROWSER_USE_VERSION })
+        : status.state === "installing" ? t("正在下载安装，约需几分钟到半小时")
+        : status.state === "failed" ? (status.error === "PYTHON_MISSING" ? t("这台电脑没有 Python 3.11 或更新版本，装好后再下载") : t("下载没有完成，可以再试一次"))
+        : t("来自 PyPI，约 {{mb}} MB，需要本机有 Python 3.11 或更新版本；下载后才会使用", { mb: BROWSER_USE_DOWNLOAD_MB })}
+        {note && <> · {note}</>}</small></span>
+    {(status.state === "absent" || status.state === "failed") && <span className="st-inline-form">
+      <button type="button" className="secondary-button" onClick={() => void install()}>{t("下载 browser-use")}</button>
+    </span>}
+  </div>;
 }

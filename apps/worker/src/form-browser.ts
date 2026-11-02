@@ -28,7 +28,7 @@ export type FormBrowserOptions = {
   /** A test opens a headless window. */
   headless?: boolean;
 };
-export type FormBrowser = FormDriver & { context?: BrowserContext; confine?: (on: boolean) => void };
+export type FormBrowser = FormDriver & { context?: BrowserContext };
 
 export async function openFormBrowser(options: FormBrowserOptions): Promise<FormBrowser> {
   const { chromium } = await import("playwright-core");
@@ -71,7 +71,7 @@ export async function openNodeFormBrowser(link: NodeBrowserLink, options: { host
     open: async (address) => { await call("open", [address], 90_000); },
     url: () => url,
     snapshot: async () => String(await call("snapshot") ?? ""),
-    signals: async () => (await call("signals")) as { passwordFields: number; frameUrls: string[] },
+    signals: async () => (await call("signals")) as { passwordFields: number; frameUrls: string[]; required?: string[] },
     multiline: async () => ((await call("multiline")) as string[] | null) ?? [],
     inputValue: async (item, attempt) => { const value = await call("inputValue", [target(item), attempt]); return typeof value === "string" ? value : undefined; },
     fill: async (item, value, attempt) => { await call("fill", [target(item), value, attempt]); },
