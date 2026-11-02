@@ -20,7 +20,8 @@ register("data:text/javascript,export async function resolve(s,c,n){if(s==='serv
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const dataDir = mkdtempSync(path.join(tmpdir(), "crossline-concierge-replay-"));
 const Database = (await import("../packages/db/node_modules/better-sqlite3/lib/index.js")).default as unknown as new (file: string, options?: object) => { backup: (to: string) => Promise<unknown>; close: () => void };
-const live = new Database(path.join(repoRoot, "data", "crossline.db"), { readonly: true });
+// From a worktree, CROSSLINE_REPLAY_DB names the main checkout's ledger (a worktree has no data/ of its own).
+const live = new Database(process.env.CROSSLINE_REPLAY_DB ?? path.join(repoRoot, "data", "crossline.db"), { readonly: true });
 await live.backup(path.join(dataDir, "crossline.db"));
 live.close();
 process.env.CROSSLINE_DATA_DIR = dataDir;
@@ -72,6 +73,7 @@ const both = (...checks: Check[]): Check => (turn, pack) => checks.map((check) =
 const arg = (name: string, test: (value: unknown, pack: Pack) => boolean, what: string): Check => (turn, pack) =>
   turn.actions.some((item) => test((item.args as Record<string, unknown>)[name], pack)) ? "" : `${name} 不对（应为${what}）`;
 const either = (...checks: Check[]): Check => (turn, pack) => checks.some((check) => !check(turn, pack)) ? "" : checks.map((check) => check(turn, pack)).join(" / ");
+const explains: Check = (turn) => turn.reply.trim().length >= 8 ? "" : "应说明原因";
 const asksOrClarifies: Check = (turn) => turn.clarify.question || (!turn.actions.length && turn.reply) ? "" : "应追问或说明，不应直接提出写入";
 const taskId = (pattern: RegExp) => (value: unknown, pack: Pack) => pack.tasks.some((task) => task.id === value && pattern.test(task.title));
 
@@ -94,7 +96,8 @@ const cases: Array<[string, Check]> = [
   // The account already has a paper milestone due 10/31: asking whether this is the same one is the right reading too.
   ["研究者里程碑：12 月前投出第一篇论文", either(only("milestone.draft"), asksOrClarifies)],
   ["加一条主线：跑者", both(only("line.add"), arg("label", (value) => value === "跑者", "跑者"))],
-  ["我其实晚上效率更高", only("profile.tell")],
+  // Proposing the evening hours as high energy beside it is a fair reading too: that card still waits for the person.
+  ["我其实晚上效率更高", either(only("profile.tell"), only("profile.tell", "availability.set"))],
   ["这周还有多少空闲时间？", only()],
   ["为什么先排作业 2", only()],
   ["ECE 548 期中复习进度怎么样？", only()],
@@ -108,7 +111,17 @@ const cases: Array<[string, Check]> = [
   ["那个", asksOrClarifies],
   ["撤销", only("undo")],
   ["作业3等师兄发题目，大概下周二", both(only("task.op"), arg("type", (value) => value === "waiting", "waiting"), arg("workOrderId", taskId(/作业\s*3/), "作业 3"))],
-  ["选定首轮选题那个提案不要了，方向变了", both(only("proposal.decide"), arg("decision", (value) => value === "reject", "reject"))]
+  ["选定首轮选题那个提案不要了，方向变了", both(only("proposal.decide"), arg("decision", (value) => value === "reject", "reject"))],
+  // 2026-11-01 walk: what an outside agent fixed by hand, said to the box. A why-question is answered from the task's own reason, with
+  // the fix proposed when one exists; several tasks are several actions; a quiet evening is an event, not a setting.
+  ["作业3为什么今天没排时间", either(both(explains, only()), only("material.attach"), only("task.op"), asksOrClarifies)],
+  ["逾期的那几个都推到下周三截止", (turn) => turn.actions.length && turn.actions.every((item) => item.action === "task.op" && (item.args as { type?: string }).type === "due")
+    ? "" : asksOrClarifies(turn, pack0) && `期望若干 task.op due，得到 ${turn.actions.map((item) => item.action).join("+") || "无动作"}`],
+  ["今晚别排工作了", either(only("event.create"), only("availability.set"))],
+  // Routing: each kind of line lands on the action whose Skill does that work.
+  ["以后每周五晚上把这周的课堂笔记整理成一页摘要", only("workflow.request")],
+  ["帮我把 ECE 548 讲义里的公式整理成一页速查表", either(only("errand.prepare"), only("task.create"), asksOrClarifies)],
+  ["明早八点提醒我交作业", only("reminder.add")]
 ];
 
 // P2: three lines said on a task's page (「这一步」 is its current step), and a correction across two turns.

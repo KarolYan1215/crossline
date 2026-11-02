@@ -11,7 +11,7 @@ import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, comp
 import { applySettingChange } from "./setting-change";
 import { answerWrapBlock } from "./wrap";
 import { saveSourceFiles } from "./sources";
-import { requestStepReplan, requestTaskPass } from "./steps";
+import { requestStepReplan, requestTaskPass, settleProvideStep } from "./steps";
 import { approveMilestoneDrafts, rejectMilestoneDrafts } from "./approvals";
 import { answerAsk, snoozeAsk } from "./asks";
 import { analyzeNewCapturesInBackground } from "./capture-followups";
@@ -247,8 +247,13 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     if (order.projectId && doc.projectId !== order.projectId) fileUnder(ctx, doc.id, order.projectId);
     store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.note:${order.id}:${randomUUID()}`, type: "task.note",
       entityId: order.id, payload: { text: tOf(ctx)("添加材料《{{name}}》", { name: doc.fileName }), kind: "material", documentId: doc.id } });
+    const plan = store.getStepPlan(ctx.workspaceId, order.id);
+    // The one step that asks the person for material is answered by this file, as an upload on the task page would answer it (W-169).
+    const asking = plan?.steps.filter((step) => step.provides && step.status === "planned") ?? [];
+    if (asking.length === 1 && settleProvideStep(ctx, order.id, asking[0]!.id, "file", [doc.id]).ok)
+      return { ok: true, message: tOf(ctx)("已挂到任务，在等这份材料的步骤可以开始了"), href: `/workbench/${encodeURIComponent(order.id)}` };
     // i18n-ignore: feedback for the step planner (model context)
-    if (store.getStepPlan(ctx.workspaceId, order.id)) requestStepReplan(ctx, order.id, `新增材料《${doc.fileName}》，按其内容核对并调整步骤`);
+    if (plan) requestStepReplan(ctx, order.id, `新增材料《${doc.fileName}》，按其内容核对并调整步骤`);
     return { ok: true, message: tOf(ctx)("已挂到任务，步骤将按新材料重新安排"), href: `/workbench/${encodeURIComponent(order.id)}` };
   },
   // A finished piece handed in: the task is started if it was not, and completed with the files as its evidence. A PDF or Word file is

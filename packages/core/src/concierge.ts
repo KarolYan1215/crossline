@@ -444,7 +444,11 @@ export type ConciergePack = {
   /** `description` is the interview's reading of the line (`lines.profiles`), "" before one exists. */
   lines: Array<{ id: string; label: string; goals: string[]; hard: boolean; description: string; domain?: string }>;
   tasks: Array<{ id: string; title: string; line: string; project: string; state: string; dueDate: string; notBefore: string; usualMinutes: number;
-    nextBlock: string; steps: Array<{ id: string; title: string; status: string; minutes: number; executor: string }> }>;
+    nextBlock: string;
+    /** Why it has no time on the calendar this week, in the plan page's words (「在等：…」「已过截止日…」); absent when it has. */
+    unplaced?: string;
+    /** `asksPersonForMaterial`: a step that waits for material only the person has (a file to upload, or 「没有」). */
+    steps: Array<{ id: string; title: string; status: string; minutes: number; executor: string; asksPersonForMaterial?: boolean }> }>;
   proposals: Array<{ id: string; title: string; line: string }>;
   milestones: Array<{ id: string; title: string; line: string; status: string; deadline: string; weight: number }>;
   asks: Array<{ id: string; kind: string; title: string; why: string; urgency: string;
@@ -499,8 +503,8 @@ const NONE = { type: "object", properties: {}, additionalProperties: false };
 
 /** The lookups (read-only). `read_material` is answered by the worker from the stored file text; the rest from the pack. */
 export const CONCIERGE_TOOL_SPECS = [
-  { name: "find_tasks", description: "按关键词查打开的任务（含待批准提案）：id、标题、主线、项目、状态、截止、下一个时段", inputSchema: QUERY },
-  { name: "get_task", description: "一个任务的详情：步骤（id、标题、状态、时长、执行者）、截止、最早开始", inputSchema: ID },
+  { name: "find_tasks", description: "按关键词查打开的任务（含待批准提案）：id、标题、主线、项目、状态、截止、下一个时段；没排进日历的写明原因（unplaced）", inputSchema: QUERY },
+  { name: "get_task", description: "一个任务的详情：步骤（id、标题、状态、时长、执行者；asksPersonForMaterial 为在等本人提供的材料）、截止、最早开始、没排进日历的原因（unplaced）", inputSchema: ID },
   { name: "find_milestones", description: "按关键词查里程碑：id、标题、主线、状态（draft 为草稿）、截止、重要性", inputSchema: QUERY },
   { name: "list_asks", description: "所有待决事项：id、标题、原因、紧急程度、选项 id 与需要填写的字段", inputSchema: NONE },
   { name: "get_plan", description: "未来 7 天的日程与排程块（日期、起止、标题、类型），以及每天的可用分钟（可用时段扣除固定安排）与已排任务分钟", inputSchema: { type: "object",

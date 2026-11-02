@@ -1982,7 +1982,10 @@ export function planRanking(ctx: AccessContext, plan: PersistedPlan): RankedTask
       weight: task.weight, deadline: local(task.deadline), notBefore: local(task.notBefore),
       firstDay: blocks[0]?.day ?? null, firstStart: blocks[0]?.start ?? null,
       weekMinutes: blocks.filter((block) => block.day! >= today && block.day! < weekEnd).reduce((sum, block) => sum + minutesOf(block), 0),
-      blocker: blocks.length ? null : blocker ? (UNPLACED_REASON[blocker.code] ? t(UNPLACED_REASON[blocker.code]!) : blocker.message)
+      blocker: blocks.length ? null : blocker
+        // Past its own deadline the planner cannot place it at all, which read as 「截止日前的可用时段不足」 (W-174).
+        ? (local(task.deadline) && local(task.deadline)! < today ? t("已过截止日；改截止日或标为不做后才会重新排入")
+          : UNPLACED_REASON[blocker.code] ? t(UNPLACED_REASON[blocker.code]!) : blocker.message)
         : own.length ? null : waitingReason(order),
       libraryUntil: libraryUntil(ctx, order, today),
       p50Minutes: own.reduce((sum, item) => sum + item.task.estimate.p50Minutes, 0),

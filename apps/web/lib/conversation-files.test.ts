@@ -58,6 +58,21 @@ test("a homework file becomes the task's material: filed under its project, note
   expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "hw2" })).toHaveLength(1);
 });
 
+// W-169 by the box: 「作业 2 题面就是这个文件」 answers the one step that waits for it, instead of only asking for a replan.
+test("a file attached to a task that waits for one piece of the person's material answers that step", async () => {
+  const { normalizeStepPlan } = await import("@crossline/core");
+  const { provisionsOf } = await import("@crossline/db");
+  doc("d1", "ECE_548_Homework-2.pdf", "pdf", "ECE 548 Homework 2");
+  const raw = { archetypeId: "problem_set", quantity: { basis: "", amount: 0, unit: "" }, rationale: "", units: [], questions: [],
+    steps: [{ id: "a", role: "practice" as const, title: "完成第 1 题", deliverable: "", doneCriterion: "x", share: 1, estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 45 },
+      dependsOn: [], notBefore: "", dueBy: "", schedulable: true, executor: "human" as const, tickOutcome: "", covers: [], why: "", product: "ability" as const, uses: ["n1"] }],
+    needs: [{ id: "n1", what: "ECE 548 作业 2 题面", why: "确定题目", basis: "课程表", kind: "personal" as const }] };
+  store.saveStepPlan(ws, "hw2", normalizeStepPlan(raw).plan, owner, "planned");
+  expect(await executeAction(TEST_CTX, { action: "material.attach", summary: "作业 2 题目", args: { documentId: "d1", workOrderId: "hw2" } })).toMatchObject({ ok: true });
+  expect([...provisionsOf(store, ws, "hw2")]).toEqual([["n1", "file"]]);
+  expect(store.getStepPlan(ws, "hw2")!.steps.find((step) => step.provides)?.status).not.toBe("planned");
+});
+
 test("finished work handed in starts the task if needed, completes it, and puts a PDF's text beside it so the gate can quote it", async () => {
   doc("d2", "HW2-solution.pdf", "pdf", "Problem 1: W = 0.42 um");
   const result = await executeAction(TEST_CTX, { action: "evidence.submit", summary: "提交作业 2", args: { workOrderId: "hw2", documentIds: ["d2"], note: "三题都做了" } });

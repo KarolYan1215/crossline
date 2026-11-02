@@ -8,7 +8,7 @@ import {
   type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
 import { DOMAIN_PACKS } from "@crossline/identity-packs";
-import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planToday, readAvailability, travelStateOf } from "./crossline";
+import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planRanking, planToday, readAvailability, travelStateOf } from "./crossline";
 import { readReminders } from "./life";
 import { openAsks } from "./asks";
 import { executeAction } from "./actions";
@@ -94,6 +94,8 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     const id = block.id.split(":")[1]!;
     if (!nextBlock.has(id)) nextBlock.set(id, `${block.day} ${block.start}–${block.end}`);
   }
+  // Why a task has no time on the calendar, in the plan page's own words: what the person asks when something looks wrong.
+  const unplaced = new Map((() => { try { return planRanking(ctx, plan); } catch { return []; } })().flatMap((item) => item.blocker ? [[item.id, item.blocker] as const] : []));
   const anchors = new Map(store.listMilestoneAnchors(ctx.workspaceId).map((anchor) => [anchor.milestoneId, anchor]));
   const milestones = store.listMilestones(ctx.workspaceId).filter((item) => item.status !== "archived");
   const docs = store.listSourceDocuments(ctx.workspaceId);
@@ -111,8 +113,9 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
       const payload = (order.payload ?? {}) as { dueDate?: string; notBefore?: string };
       return { id: order.id, title: taskTitleOf(order), line: label(order.identityId), project: projects.get(order.projectId) ?? "", state: order.state,
         dueDate: payload.dueDate ?? "", notBefore: payload.notBefore ?? "", usualMinutes: order.estimate.p50Minutes, nextBlock: nextBlock.get(order.id) ?? "",
+        ...(unplaced.has(order.id) ? { unplaced: unplaced.get(order.id)! } : {}),
         steps: (store.getStepPlan(ctx.workspaceId, order.id)?.steps ?? []).map((step) => ({ id: step.id, title: step.title, status: step.status,
-          minutes: step.estimate.p50Minutes, executor: step.executor })) };
+          minutes: step.estimate.p50Minutes, executor: step.executor, ...(step.provides && step.status === "planned" ? { asksPersonForMaterial: true } : {}) })) };
     }),
     proposals: orders.filter((order) => order.state === "awaiting_plan_approval").map((order) => ({ id: order.id, title: taskTitleOf(order), line: label(order.identityId) })),
     milestones: milestones.map((item) => ({ id: item.id, title: item.title, line: label(item.identityId), status: item.status,

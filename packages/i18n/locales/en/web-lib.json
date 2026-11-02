@@ -1076,5 +1076,7 @@
   "考试改期了": "The exam was moved",
   "新的考试日期": "New exam date",
   "没有参加": "Did not take it",
-  "里程碑归档，可从已归档恢复": "The milestone is archived; it can be restored from Archived"
+  "里程碑归档，可从已归档恢复": "The milestone is archived; it can be restored from Archived",
+  "已过截止日；改截止日或标为不做后才会重新排入": "Past its deadline; it is scheduled again once the deadline is changed or it is dropped",
+  "已挂到任务，在等这份材料的步骤可以开始了": "Attached; the steps waiting for this material can start"
 }

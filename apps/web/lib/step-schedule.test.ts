@@ -90,6 +90,20 @@ test("a task whose open steps all wait is listed as waiting, not as 「可用时
   expect(ranked.blocker).toBe("在等：等待作业题面发布");
 });
 
+test("work past its own deadline says so, not that the hours before it ran out (W-174)", async () => {
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T13:00:00.000Z");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  saveSchedulePreferences(TEST_CTX, { timeZone: "America/Chicago", mode: "buffered", windows: ALWAYS, importance: {} });
+  await loadCurrentPlan(TEST_CTX);
+  const order = store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.identityId === "research")!;
+  store.saveWorkOrder({ ...order, state: "ready_for_human", payload: { ...(order.payload as object), dueDate: "2026-09-15" } });
+  store.saveStepPlan(TEST_CTX.workspaceId, order.id, { archetypeId: "problem_set", quantity: { basis: "题目数", amount: 1, unit: "题" },
+    rationale: "", steps: [step("a", "solve", 60)] }, "o", "t");
+  const ranked = planRanking(TEST_CTX, await loadCurrentPlan(TEST_CTX)).find((task) => task.id === order.id)!;
+  expect(ranked.firstDay).toBeNull();
+  expect(ranked.blocker).toBe("已过截止日；改截止日或标为不做后才会重新排入");
+});
+
 test("a step whose own day has come is still placed before the task's deadline", async () => {
   // Thursday 9/17, 21:00 in Chicago: today's hours are over.
   vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T02:00:00.000Z");

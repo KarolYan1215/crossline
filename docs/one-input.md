@@ -167,6 +167,15 @@ P3 实现：文件经 `/api/conversation/files` 存为本人的资料并当场�
 - **已发生的事实立即写入、可撤销、不用确认**（`isImmediate`）：`sleep.report`（本人报的睡眠，`energy.sleepReports`，不受手机健康同意限制，优先于手机与屏幕推算）、`block.outcome`（同收工页）、`task.op` 的 `progress`/`step_done`（带分钟数时记一段已结束的计时，`recordConfirmedSession`）、`complete`（`completeWorkOrderExecution`）、`note`/`energy`，以及 `record.add`、`energy.report`、`profile.tell`、`note.add`。撤销：步骤、设置与记录照常；报的计时段、自评精力删除；报完成的任务重新打开。设置与计划的改动仍须确认。
 - **兜底**：没有动作合适的有效信息交给访谈（`profile.tell`）；只有提问与寒暄不需要动作。
 
+### 3.7c 诊断与自修（2026-11-01）
+
+本人决定：外部代理（开发会话）在账号上修过的状态问题，小帮手也要能修；只有代码缺陷要开发者。
+
+- **原因进上下文包**：`find_tasks`/`get_task` 带 `unplaced`（`planRanking` 给的本周没排进日历的原因，逾期写「已过截止日」而非「时段不足」）和步骤上的 `asksPersonForMaterial`（在等本人提供的材料）。
+- **问「为什么没排」时回答原因并提出修法**（SKILL.md 「When something is not where it should be」）：缺材料 → `find_materials` 后 `material.attach`；逾期 → `task.op` `due` 或 `archive`；在等 → `ask.answer`；时段不够 → `defer` 别的事或加时段。改不了的明说是应用缺陷。
+- **`material.attach` 结清唯一在等材料的步骤**（`settleProvideStep`，同任务页上传），不再只请求重排。
+- **路由**：每类输入落到其下游 Skill：`task.create` → 收集分析，`task.op replan`/`material.attach` → 步骤规划，`errand.prepare` → 助手，`workflow.request` → 自动化设计，`profile.tell` → 访谈抽取，`dates.read` → 访谈读日期。`scripts/concierge-replay.ts` 第 31–36 例是 11-01 走查的句子。
+
 ### 3.8 退役
 
 - 前端 `looksLikeScheduleCommand` 分诊：删除，所有输入都进同一回合。
