@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { startNodeAgent, type AppServerLines, type NodeAgentStatus } from "./agent";
 import { API_KEY_SHAPE, loginNodeWithApiKey, withControl } from "./control";
-import { TOKEN_GONE } from "./protocol";
+import { NODE_RUNTIME_FLAGS, TOKEN_GONE } from "./protocol";
 import { createNodeBrowsers } from "./browser";
 // The launcher's updater and its signature check, bundled in as they are (scripts/package-node.ts allows exactly these two files).
 import { checkForUpdate, downloadInstaller, type UpdateManifest } from "../../../launcher/src/update";
@@ -74,7 +74,9 @@ const forgetToken = () => { rmSync(tokenFile, { force: true }); token = undefine
 
 // ── Codex, in this program's own home ───────────────────────────────────────────────────────────────────────────────────────────
 function appServer(): AppServerLines {
-  const child = spawn(codexExe, ["app-server", "--listen", "stdio://", "--strict-config"], {
+  // Its sign-in is kept in Windows' credential store (an encrypted file whose key is there), not a plain auth.json a command could print.
+  const store = process.platform === "win32" ? ["-c", 'cli_auth_credentials_store="keyring"'] : [];
+  const child = spawn(codexExe, [...NODE_RUNTIME_FLAGS, ...store, "app-server", "--listen", "stdio://", "--strict-config"], {
     stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: { ...process.env, CODEX_HOME: codexHome } });
   const lines = createInterface({ input: child.stdout });
   child.stderr.resume();

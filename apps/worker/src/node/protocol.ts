@@ -119,6 +119,27 @@ const CONFIG_ALLOWED: Array<[RegExp, (value: unknown) => boolean]> = [
 ];
 const configAllowed = (key: string, value: unknown) => CONFIG_ALLOWED.some(([pattern, check]) => pattern.test(key) && check(value));
 
+/**
+ * Flags for the `codex app-server` a node starts (`-c` is a global override): the commands a model runs there see neither the runtime's
+ * own home (`CODEX_HOME`) nor Crossline's variables nor anything named like a key, secret or token (Codex's own default excludes are off
+ * unless asked for). The server cannot change this: `shell_environment_policy.*` is not on `CONFIG_ALLOWED`.
+ */
+export const NODE_RUNTIME_FLAGS = ["-c", 'shell_environment_policy.exclude=["CODEX_HOME","CROSSLINE_*","*KEY*","*SECRET*","*TOKEN*","*PASSWORD*"]'];
+
+/**
+ * Whether a command the runtime asks to run names this node's own home (its Codex sign-in, its token) or the variable that points there.
+ * The node declines such a command itself, before the server's guard is asked (the review of 2026-11-03). A text check, like the guard:
+ * a script written to hide the path gets past it, which is why the standalone node also keeps its sign-in out of a plain file.
+ */
+export function namesNodeSecret(command: string, protect: string[]): boolean {
+  const text = command.replace(/\\/g, "/").toLowerCase();
+  if (/codex_home|codex-home|crossline_node_home/.test(text)) return true;
+  return protect.some((dir) => {
+    const plain = dir.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    return plain.length > 3 && text.includes(plain);
+  });
+}
+
 /** Whether a path names `..` anywhere: refused in every path field, so no resolving can walk out of where it seems to point. */
 const climbs = (value: string) => value.split(/[\\/]+/).includes("..");
 /** The path fields of a request, at any depth (`cwd`, `cwds`, a marketplace path, workspace roots). */

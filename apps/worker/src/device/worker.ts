@@ -129,7 +129,8 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
   // sends it the account's model runs; it starts none of its own.
   const node = nodeEnabled(dataDir) && link.token && !options.runOnce
     ? startNodeAgent({ url: link.url, token: link.token, dir: path.join(deviceDir, "node"), host: label, log, spawn: localAppServer, role: "device",
-      shell: nodeShell(dataDir), browsers: createNodeBrowsers({ profilesDir: path.join(deviceDir, "node", "browser-profiles") }) }) : undefined;
+      shell: nodeShell(dataDir), browsers: createNodeBrowsers({ profilesDir: path.join(deviceDir, "node", "browser-profiles") }),
+      protect: [deviceDir] }) : undefined;
   if (node) process.on("exit", () => node.stop());
   // Who this computer's Codex is signed in as, for the device page (read once; an API-key sign-in there updates it).
   let nodeAccount: NodeAccount | undefined;
