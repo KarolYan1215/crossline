@@ -43,6 +43,8 @@ function reject(code: string, detail: string): never {
   throw error;
 }
 
+/** A card answer the app wrote into the reply (`scaleAnswerLine`). */
+const TAP_LINE = /^【.+】点选：[1-5]\/5/;
 const numbers = (ids: number[]) => ids.map((id) => `[${id}]`).join("");
 type Wire = Record<string, unknown>;
 const list = (value: unknown): Wire[] => Array.isArray(value) ? value.filter((item): item is Wire => Boolean(item) && typeof item === "object") : [];
@@ -77,7 +79,12 @@ export function resolveOnboardingRefs(value: unknown, known: { replies: Record<s
   const lineProfiles = list(turn.lineProfiles).map((line) => ({ ...line, attributeCandidates: list(line.attributeCandidates).map((item) => {
     const cited = span(item.refs, `定语「${String(item.text ?? "")}」`, true);
     const { refs: _refs, ...rest } = item;
-    return { ...rest, sourceRef: cited.sourceRef };
+    // A card's tap line (「【话不多】点选：4/5」) is the app's wording the person rated, not their own words, so it is no source for an
+    // attribute: a real run made 「话不多」 the long-term goal of both lines (2026-11-03).
+    const ownWords = cited.ids.some((id) => !TAP_LINE.test(index.get(id)?.text.trim() ?? ""));
+    if (options.strict && cited.ids.length && !ownWords) reject("ONBOARDING_ATTRIBUTE_FROM_CARD",
+      `定语「${String(item.text ?? "")}」引用的是卡片题的题面（【…】点选），不是本人的原话；只用本人自己写的句子，没有就不写这个定语。`);
+    return { ...rest, sourceRef: ownWords ? cited.sourceRef : "" };
   }) }));
   const goalEdits = list(turn.goalEdits).map((edit) => {
     const cited = span(edit.refs, "长期目标修改", true);

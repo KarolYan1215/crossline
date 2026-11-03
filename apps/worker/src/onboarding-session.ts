@@ -634,7 +634,10 @@ export const ROUND_QUESTIONS_MAX = 4;
 export function cardsForRound(stage: string | undefined, settled: ReadonlySet<string>, items?: number): ProfileCard[] {
   const module = INTERVIEW_FLOW_STAGES.v2.filter((name) => PROFILE_MODULE_STAGES.has(name)) as ProfileStage[];
   const at = module.indexOf(stage as ProfileStage);
-  return at >= 0 ? cardsFor(module.slice(0, at + 1), settled, undefined, items) : cardsFor(module, settled, 1, items);
+  // A stage the model went back to (compass after energy) leaves the later stages' cards behind: with none left up to it, the rest come
+  // one card a round as past the module, or the start item never closes (2026-11-03 walk: 9 cards left and none offered).
+  const upTo = at >= 0 ? cardsFor(module.slice(0, at + 1), settled, undefined, items) : [];
+  return upTo.length ? upTo : cardsFor(module, settled, 1, items);
 }
 
 export function paceDeepRound<T extends OnboardingDialogue>(output: T, focus: boolean, limit = DEEP_QUESTIONS_PER_ROUND): { output: T; deep: boolean } {

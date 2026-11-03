@@ -386,6 +386,10 @@ test("the profile module's cards: added by the app, three items a round counted 
   // Past the module, what is left comes one card a round.
   expect(cardsForRound("lines", new Set())).toHaveLength(1);
   expect(cardsForRound("lines", new Set(PROFILE_ITEMS.map((item) => item.id)))).toEqual([]);
+  // Back at an earlier module stage with only later stages' items left: those still come.
+  const later = new Set(PROFILE_ITEMS.filter((item) => item.stage !== "energy").map((item) => item.id));
+  expect(cardsForRound("compass", later).flatMap((card) => card.items).every((item) => item.stage === "energy")).toBe(true);
+  expect(cardsForRound("compass", later)).toHaveLength(1);
 });
 // 2026-10-31 rerun: once only interest cards were left, every fact round kept them out and the start item never closed.
 test("interest cards left alone go with one fact question rather than waiting for a round with none", async () => {

@@ -93,7 +93,7 @@ export function weekCapacity(ctx: AccessContext, today: string, week: WeekSkelet
     ...week.calendar.map((event) => ({ weekday: event.weekday % 7, start: event.start, end: event.end }))
   ];
   const deadlines = [
-    ...timeline.flatMap((project) => project.items.map((item) => ({ date: item.date, title: `${project.name} ${item.title}`.slice(0, 40) }))),
+    ...timeline.flatMap((project) => project.items.map((item) => ({ date: item.date, title: (item.title.includes(project.name) ? item.title : `${project.name} ${item.title}`).slice(0, 40) }))),
     ...timeline.filter((project) => /^\d{4}-\d{2}-\d{2}/.test(project.deadline)).map((project) => ({ date: project.deadline.slice(0, 10), title: project.name }))
   ];
   const lines = identityLines(ctx);

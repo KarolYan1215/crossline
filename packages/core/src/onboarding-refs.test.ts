@@ -96,3 +96,18 @@ test("a setting the extraction names rests on the person's reply, with its words
     { key: "notify.quietHours", target: "", value: "22:30-09:30", sourceRef: "reply-1", sourceQuote: "我9.00上课，周三下午3点组会。" },
     { key: "notify.briefTime", target: "", value: "09:40", sourceRef: "", sourceQuote: "" }]);
 });
+
+test("a card's tap line is never the source of a long-term goal attribute (2026-11-03: 「话不多」 on both lines)", () => {
+  const cardReplies = { "reply-1": "我喜欢在街上走，看街道的细节。\n【话不多】点选：4/5（偏向「非常像我」）" };
+  const sentences = new Map<number, EvidenceSentence>();
+  let id = 1;
+  for (const segment of segmentText(cardReplies["reply-1"])) sentences.set(id++, { ref: "reply-1", ...segment });
+  const cardKnown: KnownSources = { identities: ["research"], projectIds: [], replies: cardReplies, sources: {}, sentences };
+  const tap = [...sentences].find(([, entry]) => entry.text.startsWith("【"))![0];
+  const own = [...sentences].find(([, entry]) => entry.text.startsWith("我"))![0];
+  const profile = (items: object[]) => turn({ lineProfiles: [{ lineId: "research", description: "做研究", attributeCandidates: items }] });
+  const card = { text: "话不多", kind: "ability", refs: [tap] };
+  expect(() => validateOnboardingAnswer(profile([card]), cardKnown)).toThrow("ONBOARDING_ATTRIBUTE_FROM_CARD");
+  const kept = keepOnboardingAnswer(profile([card, { text: "看街道细节", kind: "ability", refs: [own] }]), cardKnown);
+  expect(kept?.lineProfiles?.[0]?.attributeCandidates.map((item) => item.text)).toEqual(["看街道细节"]);
+});
