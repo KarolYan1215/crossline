@@ -22,18 +22,14 @@
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CrosslineStore } from "../packages/db/src/index";
+import { CrosslineStore, MACHINE_SETTINGS } from "../packages/db/src/index";
 
 const arg = (name: string) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : undefined; };
 const need = (name: string) => arg(name) ?? (() => { throw new Error(`missing --${name}`); })();
 const fromDb = need("from-db"), fromData = need("from-data"), workspaceId = need("workspace"), toDb = need("to-db"), toData = need("to-data");
 const apply = process.argv.includes("--apply"), replace = process.argv.includes("--replace");
 // Settings that belong to the machine, not the person: these keep the target's own values (docs/ledger-sync.md). Each entry is a
-// prefix. `--keep-settings none` turns it off, `--keep-settings a,b` replaces the list.
-const MACHINE_SETTINGS = ["deployment.runtimeOwner", "calendar.graph.owner", "calendar.write.account", "calendar.sources", "calendar.sources.seeded",
-  "calendar.subscriptions", "calendar.sync_zone:", "calendar.published", "calendar.autopublish.hash", "calendar.fixed.hash", "calendar.publish.failure",
-  "calendar.sync.failure", "push.subscriptions", "sources.folders", "sources.folder.index:", "localActivity.", "activity.", "energy.camera",
-  "health.token.sha256", "model.provider", "model.provider.conformance", "model.sponsor", "model.chatgptExhausted", "model.budget.monthly", "mail.", "agent.sandbox", "background.blocker"];
+// prefix (`MACHINE_SETTINGS`, shared with the device mirror). `--keep-settings none` turns it off, `--keep-settings a,b` replaces the list.
 const keepSettings = arg("keep-settings") === "none" ? [] : arg("keep-settings")?.split(",").map((key) => key.trim()).filter(Boolean) ?? MACHINE_SETTINGS;
 const keptKey = (key: string) => keepSettings.some((rule) => key.startsWith(rule));
 const filesRoot = arg("files") ?? fromData;

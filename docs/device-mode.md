@@ -9,7 +9,7 @@
 ## 决定
 
 - **托管站是唯一的主账本。** 计划、任务、访谈、邮箱、日历、助手、所有模型工作只在托管站做。
-- **本机降为这个账号的一台「设备」。** 只做必须在这台电脑上做的事，结果立即发给托管站；不再整本复制账本。
+- **本机降为这个账号的一台「设备」。** 只做必须在这台电脑上做的事，结果立即发给托管站；不再两向整本复制账本（2026-11-03 起托管站的账本单向镜像到本机，见「本机账本的镜像」）。
 - 定时的整本同步停止：「Crossline Ledger Sync」计划任务已于 2026-10-22 停用。`scripts/ledger-sync.ts`、`pack-for-server.ts`、`migrate-workspace.ts` 保留，只用于一次性搬迁。
 
 ## 连接
@@ -70,12 +70,37 @@
 - 失败按 30 秒、1 分、2 分……最多 1 小时退避；401/403（令牌被撤销）停止发送并在 `/device` 页面说明；400/413 之类的永久错误移到 `outbox/dead/`，不再重试。
 - 活动每 2 分钟看一次有没有变化；文件夹和录音在本机读完、转写完立即发。
 
+## 本机账本的镜像：服务器 → 本机，单向
+
+2026-11-03，本人要求「本机账本和服务器账本始终同步，不管是谁的账号」。此前设备的本机账本停在连接那天，越来越旧；断开设备模式后回到完整模式，看到的也是那天的账本。
+
+- **方向只有一个：服务器到本机。** 设备不经这条路往上写任何东西（往上只有发件箱），所以没有冲突要合并，模型工作也不会跑两遍。任何账号连上的设备都这样，不只本人的。
+- **多久一次：** 设备 worker 启动时一次，之后每 10 分钟一次（`apps/worker/src/device/mirror.ts` `mirrorPass`，`MIRROR_INTERVAL_MS`）。
+- **托管站：** `GET /api/device/snapshot`，设备令牌（与其他 `/api/device/*` 同一个 `deviceAccess`），返回该账号工作区的 `mirrorSnapshot`（`packages/db/src/mirror.ts`）gzip 压缩，`content-type: application/gzip`。
+  - 不发：身份表（principals、workspaces、成员、设备租约、Tailscale 绑定、审计）；机器专属设置 `MACHINE_SETTINGS`（与 `migrate-workspace.ts --keep-settings` 同一份，现在从 `@crossline/db` 导出）；所有 `*.token.sha256`；托管站自己的 `device.*`、`node.*` 记账。
+  - ETag 是返回内容的哈希，带 `If-None-Match` 且没变时回 304。没用 `changeToken()`：它随整个文件的任何一次写入都变，连这次请求自己写的 `device.recent` 也算，永远对不上。
+  - 每个工作区每分钟最多发一次完整内容，多了回 429；304 不受限。
+- **本机：** 拿到 200 就在一个事务里清掉本机这个工作区（`runtimeOwner` 指的那个，也就是 `/device` 页面所属的工作区）的行，再导入镜像（`replaceWorkspaceFrom`）。工作区 id 和本人 id 换成本机的；由 SQLite 编号的 id 重新编号。同一个文件里的其他工作区不动。
+- **本机保留自己的：**
+  - 设置：`MACHINE_SETTINGS` 那份（屏幕活动与作息的同意和数据、文件夹授权与索引、运行时机主标记……），加上 Codex/Claude Code 使用记录、录音自动转写的同意和模型提示时间（`mirrorLocalSetting`）；
+  - 屏幕活动片段（`activity_segments` 整张不动：窗口标题只在本机，导出会抹掉标题，所以不能导出再导回）；
+  - 每天的活动合计（`local-activity:*`）；
+  - 本机文件夹读进来的文件和本机转写的录音文字，以及它们的事件（`recording.transcribed/silent`、`sources.folder_*`）。
+  - 镜像里与保留的行在主键或唯一索引上冲突的行让位。托管站那份「来自电脑」的同一文件（同一 sha256）让位给本机的，本机的文件接过它的 `src-N` 编号，镜像里其他地方对它 id 的引用改成本机 id；还没发上去的本机文件排在托管站最大编号之后。
+  - 托管站自己转写的录音（手机上传）进本机账本后记为「已发送」，设备不会把它当成本机的再发上去。
+  - 发件箱、设备状态文件、令牌本来就在账本之外，不受影响。
+- **不复制文件。** 镜像的是账本；托管站的 `materials`、`sources`、画像文件不下载，账本里指向服务器路径的 `uri` 在本机打不开。设备模式下页面都去托管站，不影响使用。
+- **备份：** 每天第一次替换前，用 SQLite 在线备份把整个账本复制成 `crossline.db.mirror-<日期>.bak`，留最近 3 份。
+- **状态：** 记在设备状态文件（`data/device/state.json` 的 `mirror`：上次同步、上次检查、ETag、错误），不在账本里，因为账本会被替换。`/device` 页面「本机账本」一行显示「本机账本已与服务器同步：<时间>」，失败时显示错误代码，十分钟后自动再试；失败后下一次不带 ETag，重新取整份。
+- **两边代码版本要接近。** 托管站比本机多出的表或列，导入会拒绝（`RESTORE_UNKNOWN_TABLE` / `RESTORE_UNKNOWN_COLUMN`），页面上显示这个错误；更新本机的 Crossline 即可。本机更新、服务器旧没有问题。
+
 ## 接口
 
 托管站（全部先过 `isCrossSiteWrite`，CSRF 发现式测试覆盖）：
 
 - `GET/POST/DELETE /api/device/token`：会话登录，查看、生成、撤销设备令牌。
 - `GET /api/device/hello`：设备令牌，确认连接。
+- `GET /api/device/snapshot`：设备令牌，本账号账本的镜像（见上一节）。GET，不在 CSRF 发现式测试的范围里。
 - `POST /api/device/activity`、`/api/device/sources`、`/api/device/recordings`：设备令牌，只接受上面说的形状，未知字段一律忽略；每小时最多 600 次。
 
 本机：

@@ -1238,5 +1238,9 @@
   "只对 ChatGPT 登录生效。": "Applies to a ChatGPT sign-in only.",
   "每项工作少想一档，额度用得慢，复杂的规划可能粗一些": "Each job thinks one step less: quota lasts longer, complex plans may be rougher",
   "按每项工作的难度分配：访谈与规划想得多，读日期、归类想得少": "Matched to each job: the interview and planning think more, reading dates and filing think less",
-  "每项工作多想一档，结果更细，额度用得快、回答更慢；额度紧张时自动按标准": "Each job thinks one step more: finer results, quota goes faster and answers come slower; back to normal while quota is tight"
+  "每项工作多想一档，结果更细，额度用得快、回答更慢；额度紧张时自动按标准": "Each job thinks one step more: finer results, quota goes faster and answers come slower; back to normal while quota is tight",
+  "本机账本": "Local ledger",
+  "同步没有成功（{{error}}），十分钟后再试；上次同步 {{when}}": "The sync did not work ({{error}}); tried again in ten minutes. Last synced {{when}}",
+  "每十分钟从网页版取一份，只进不出；本机读到的东西照常保留": "A copy is taken from the web version every ten minutes, one way only; what this computer reads itself is kept",
+  "本机账本已与服务器同步：{{when}}": "Local ledger in sync with the server: {{when}}"
 }

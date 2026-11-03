@@ -10,6 +10,7 @@ import {
 import type { CrosslineStore } from "@crossline/db";
 import { ACTIVITY_DETAIL_CONSENT, LOCAL_ACTIVITY_CONSENT } from "../activity-recorder";
 import { folderDocuments } from "../source-folders";
+import type { MirrorState } from "./mirror";
 
 /**
  * What a linked computer sends (docs/device-mode.md), built from its own staging ledger — the local install's ledger and workspace, where
@@ -31,6 +32,8 @@ export type DeviceState = {
   /** Recordings waiting for the speech model, as the transcriber last said. */
   modelNeeded?: number;
   lastPassAt?: string;
+  /** The last mirror of the hosted ledger onto this computer (`mirror.ts`). */
+  mirror?: MirrorState;
 };
 
 export type QueuedItem = { id: string; route: string; body: unknown; supersedes?: string };

@@ -7,7 +7,8 @@ import { DEVICE_LINK_GUIDE } from "../../lib/setup-guides";
 import { useLocale, useT } from "../locale-context";
 import { intlLocale, type Locale, type Translate } from "../../lib/i18n";
 
-type DeviceView = { pending?: number; dead?: number; blocked?: { code: string; at: string }; lastSentAt?: string; lastError?: string; modelNeeded?: number; lastPassAt?: string | null };
+type DeviceView = { pending?: number; dead?: number; blocked?: { code: string; at: string }; lastSentAt?: string; lastError?: string; modelNeeded?: number; lastPassAt?: string | null;
+  mirror?: { at?: string; checkedAt?: string; error?: string } | null };
 type NodeAgentView = { enabled: boolean; status?: { state: string; message?: string; since?: string; account?: { type?: string; email?: string } | null } };
 type LinkView = { ok?: boolean; linked?: boolean; url?: string; label?: string; linkedAt?: string; tokenReadable?: boolean; device?: DeviceView; node?: NodeAgentView; code?: string; message?: string };
 
@@ -101,6 +102,10 @@ export function DeviceLinkCard() {
       <div className="st-row"><span className="st-row-label">{t("发送")}<small>{device?.dead ? t("待发送 {{count}} 件，{{dead}} 件被拒收（不再重试）", { count: device?.pending ?? 0, dead: device.dead }) : t("待发送 {{count}} 件", { count: device?.pending ?? 0 })}</small></span>
         <span className="muted">{t("上次送达 {{when}}", { when: time(device?.lastSentAt, locale) })}</span></div>
       {device?.lastError && !device.blocked && <p className="st-note">{t("上次发送没有成功（{{error}}），会自动重试。", { error: device.lastError })}</p>}
+      <div className="st-row"><span className="st-row-label">{t("本机账本")}<small>{device?.mirror?.error
+        ? t("同步没有成功（{{error}}），十分钟后再试；上次同步 {{when}}", { error: device.mirror.error, when: time(device.mirror.at, locale) })
+        : t("每十分钟从网页版取一份，只进不出；本机读到的东西照常保留")}</small></span>
+        <span className="muted">{t("本机账本已与服务器同步：{{when}}", { when: time(device?.mirror?.checkedAt, locale) })}</span></div>
       {Boolean(device?.modelNeeded) && <p className="st-note">{t("有 {{count}} 个录音等着转写：先在下方「录音自动转写」同意下载语音识别模型。", { count: device?.modelNeeded })}</p>}
       <div className="st-row"><span className="st-row-label">{t("作为算力节点")}<small>{t("{{state}}。网页版「这台电脑」也要开启；开机期间这台电脑用本机的 Codex 替网页版跑本账号的模型工作，关机时自动回到服务器", { state: nodeWords(view.node, t) })}</small></span>
         <SegmentedControl label={t("作为算力节点")} value={view.node?.enabled ? "on" : "off"} options={[{ value: "off", label: t("关闭", { context: "state" }) }, { value: "on", label: t("开启", { context: "state" }) }]}
