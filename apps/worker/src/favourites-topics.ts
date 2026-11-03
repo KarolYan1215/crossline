@@ -3,7 +3,7 @@ import path from "node:path";
 import { copyFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import {
   FAVOURITE_TOPICS_SCHEMA, NOTE_GAP_MS, parseTopicPlan, topicPlanKey, grownSkillFilesKey, grownSkillId, grownSkillName, TITLES_PER_RUN, dayBatch, emptyTopicPlan, mergeTopics, nightBatch, nightOf, topicOfNote, topicProgress, validateFavouriteTopics,
-  tFor, type FavouriteTopic, type FavouriteTopicPlan, type FavouriteTopicsAnswer, type FavouriteTopicsContext, type GrownSkillRecord
+  REPORT_ITEMS_FILE, tFor, type FavouriteTopic, type FavouriteTopicPlan, type FavouriteTopicsAnswer, type FavouriteTopicsContext, type GrownSkillRecord
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { grownHomeLine, readGrownSkills, writeGrownSkills, type CrosslineStore } from "@crossline/db";
@@ -13,7 +13,7 @@ import { collectFolder, collectHold, favouritesAccess, markOrganised, readCollec
 import { linePacks } from "./lines";
 import { ownerOf } from "./owner";
 import { localeOf } from "./locale";
-import { claimOrganising, currentFavouritesCollector, rememberRead, sayToPerson, startFavouritesRun } from "./workflow-smith";
+import { claimOrganising, currentFavouritesCollector, rememberRead, reportItemsBrief, resultHref, sayToPerson, startFavouritesRun } from "./workflow-smith";
 
 /**
  * The favourites organised by topic (packages/core/src/favourite-topics.ts has the rules and the owner's words). This is the worker's side:
@@ -197,7 +197,7 @@ function organiseTopics(store: CrosslineStore, workspaceId: string, record: Grow
       "本次只整理这些：", ...lines,
       "话题文件和「话题总览.md」都写在任务目录顶层。",
       ...(last ? [`上次的整理结果（${path.basename(last)}，只读）：已有的话题文件在其中。只写本次涉及的话题：把本次新读的并入上次同名的话题文件后整份写出，已写过的笔记不重写；再写更新后的「话题总览.md」。未涉及的话题文件不要输出，Crossline 会从上次结果原样带上。`] : []),
-      "不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。"].join("\n") },
+      "不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。", reportItemsBrief(store, workspaceId, last)].join("\n") },
   /* i18n-ignore-end */
   (outcome) => {
     claim.release();
@@ -217,7 +217,7 @@ function organiseTopics(store: CrosslineStore, workspaceId: string, record: Grow
     const done = finished.length ? t("收藏按话题整理好了：本次 {{count}} 条，涉及 {{topics}}；{{finished}}已整理完。", values)
       : t("收藏按话题整理好了：本次 {{count}} 条，涉及 {{topics}}。", values);
     sayToPerson(store, workspaceId, result.state === "check" ? `${done}${locale === "en" ? " " : ""}${t("读取时遇到了安全验证，已停下。")}` : done,
-      "workflow_done", `topics:${record.id}:${outcome.taskId}`, [{ label: t("去看结果"), href: "/approvals#assistant" }], now);
+      "workflow_done", `topics:${record.id}:${outcome.taskId}`, [{ label: t("去看报告"), href: resultHref(outcome) }], now);
   });
   if (started.state !== "started") claim.release();
   if (started.state === "blocked" && started.code !== "AGENT_BUSY")
@@ -248,7 +248,8 @@ export function carryTopicFiles(from: string | undefined, to: string): string[] 
   const target = topicDir(to) ?? to;
   const carried: string[] = [];
   for (const name of readdirSync(source)) {
-    if (!TOPIC_FILE.test(name) || existsSync(path.join(target, name))) continue;
+    // The report's actions (`落地.json`) come over too when the run wrote none, so the report keeps what it said to put into practice.
+    if (!(TOPIC_FILE.test(name) || name === REPORT_ITEMS_FILE) || existsSync(path.join(target, name))) continue;
     copyFileSync(path.join(source, name), path.join(target, name));
     carried.push(name);
   }
@@ -328,6 +329,23 @@ export function installFavouritesTopicsWorkflow(store: CrosslineStore, workspace
     payload: { id, name: record.name, lines: record.lines, category: record.category, trigger: "on_request", final: "usable", origin: "asked" } });
   enableTopicMode(store, workspaceId, id);
   return record;
+}
+
+/**
+ * The way in to the workflow above (Settings → Skill 库 「添加：按话题整理小红书收藏」): `POST /v1/workflows/favourites-topics/install`
+ * `{lineId}`, one of the person's lines. It installs as `needs_consent`; the person still accepts its risks and logs in on its card.
+ */
+export function createFavouritesTopicsService(store: CrosslineStore, now = () => new Date()) {
+  return {
+    handle: async (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => {
+      if (method !== "POST" || pathname !== "/v1/workflows/favourites-topics/install") return undefined;
+      const lineId = typeof body?.lineId === "string" ? body.lineId : "";
+      if (!linePacks(store, workspaceId).some((pack) => pack.kind === "identity" && pack.id === lineId))
+        return { status: 400, body: { ok: false, code: "LINE_UNKNOWN" } };
+      const record = installFavouritesTopicsWorkflow(store, workspaceId, lineId, now());
+      return { status: 200, body: { ok: true, id: record.id, status: record.status } };
+    }
+  };
 }
 
 /**

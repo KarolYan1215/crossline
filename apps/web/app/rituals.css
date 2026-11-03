@@ -53,6 +53,10 @@ body:has(.rd-page) .running-head{background:var(--ds-bg)}
 /* ── KPI row (收工) ── */
 .rd-kpis{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}
 .rd-kpis li{display:grid;gap:6px;align-content:start}
+.report-items{margin:0;padding:0;list-style:none;display:grid;gap:14px}
+.report-items li{display:grid;gap:4px;padding-top:12px;border-top:1px solid var(--mist)}
+.report-items li:first-child{padding-top:0;border-top:0}
+.report-items p{margin:0}
 
 /* ── 本周承诺: the capacity card ── */
 .cm-capacity{display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px 32px;align-items:end}

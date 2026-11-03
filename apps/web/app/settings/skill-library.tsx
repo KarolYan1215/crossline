@@ -132,6 +132,8 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
     {listed("grown") && (!searching || grownShown.length > 0) && <section className="st-card st-card-wide" aria-label={t("生长的工作流")}>
       <header><h3>{t("生长的工作流 · {{n}}", { n: grown.length })}</h3><small>{t("同类的事采纳过两次，或在输入框里说「以后都这样做」「每周五提醒」，助手会把它写成工作流，建好后通知；发出、发布一类的步骤始终由本人完成")}</small></header>
       {library.growing > 0 && <p className="st-note">{t("{{count}} 个工作流正在生成，建好后会通知。", { count: library.growing })}</p>}
+      {library.favouritesInstall && !searching && <FavouritesInstall suggested={library.favouritesInstall.lineId}
+        lines={library.mine.map((line) => ({ id: line.lineId, label: line.lineLabel }))} />}
       {grown.length > 1 && <MergeCheck id={grown[0]!.id} />}
       {grown.length === 0 ? <p className="muted">{t("尚无。")}</p>
         : <ul className="sk-publics">{grownShown.map((flow) => <GrownFlow key={`${flow.id}:${kind}`} flow={flow} shell={library.shell} open={all || focus === flow.id} autoLogin={autoLogin === flow.id}
@@ -405,6 +407,32 @@ function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSki
 type InstallStatus = { state: "running" | "installed" | "already" | "rejected" | "blocked"; jobId?: string; id?: string; final?: string; reason?: string; message?: string };
 const INSTALL_POLL_MS = 4000;
 const INSTALL_WAIT_MS = 40 * 60_000;
+
+/**
+ * 「添加：按话题整理小红书收藏」, while no workflow reads the favourites: installed for the media-like line, or the line picked here. It
+ * comes in waiting for 「接受风险并启用」 and the login, like any workflow that reads an account; the page reloads to show its card.
+ */
+function FavouritesInstall({ suggested, lines }: { suggested: string; lines: Array<{ id: string; label: string }> }) {
+  const t = useT();
+  const [lineId, setLineId] = useState(suggested);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  return <form className="sk-tool-form" aria-label={t("添加：按话题整理小红书收藏")} onSubmit={async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    const ok = await fetch("/api/skills/grown/favourites-topics", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ lineId }) })
+      .then((response) => response.ok).catch(() => false);
+    setBusy(false);
+    if (ok) window.location.reload(); else setNote(t("未添加，请稍后再试"));
+  }}>
+    {!suggested && <label><span>{t("主线")}</span><select value={lineId} onChange={(event) => setLineId(event.target.value)}>
+      <option value="">{t("选择主线")}</option>
+      {lines.map((line) => <option key={line.id} value={line.id}>{line.label}</option>)}
+    </select></label>}
+    <button type="submit" className="secondary-button" disabled={busy || !lineId}>{t("添加：按话题整理小红书收藏")}</button>
+    {note && <p role="status" className="st-note">{note}</p>}
+  </form>;
+}
 
 /** One more search of a line's public skills, at the person's word; the worker runs it at its next tick. */
 function SearchAgain({ lines }: { lines: Array<{ id: string; label: string }> }) {

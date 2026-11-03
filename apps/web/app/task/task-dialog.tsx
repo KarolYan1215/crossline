@@ -453,6 +453,7 @@ export function TaskPanels({ detail, slot, today, anchors = false }: {
         <Tag>{t(stateLabelFor(detail.state, detail.paused))}</Tag>
         {detail.riskTier !== "routine" && <Tag tone={riskTone[detail.riskTier] ?? "neutral"}>{t(riskLabel[detail.riskTier] ?? detail.riskTier)}</Tag>}
         {detail.milestone && <a className="tk-milestone" href={`/milestones?open=${encodeURIComponent(detail.milestone.id)}`}>→ {detail.milestone.title}</a>}
+        {detail.fromReport && <a className="tk-milestone" href={`/reports/${encodeURIComponent(detail.fromReport.id)}`}>{t("来自报告「{{title}}」", { title: detail.fromReport.title })}</a>}
         {crossLine && <span className="tk-cross">
           {detail.supports.map((item) => <SupportsTag key={`${item.line}:${item.target}`} line={item.line} lineLabel={item.lineLabel} target={item.target} {...(item.artifact ? { artifact: item.artifact } : {})} />)}
           {detail.artifactLinks?.map((item) => <ArtifactTag key={`${item.direction}:${item.line}:${item.title}`} {...item} />)}</span>}

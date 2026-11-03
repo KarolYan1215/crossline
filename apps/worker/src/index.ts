@@ -11,7 +11,7 @@ import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
 import { CrosslineStore, aiToolsFor, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
-import { closeInterruptedCollections, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
+import { closeInterruptedCollections, createFavouritesTopicsService, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
 import { workflowImprovePass } from "./workflow-improver";
 import { workflowMergeDue, workflowMergePass } from "./workflow-merge";
 import { NEEDS_PER_PASS, createNeedChecker, needsAwaitingCheck } from "./need-check";
@@ -1729,6 +1729,7 @@ if (!capabilitySecret) {
     services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/voice", handle: dictationService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
       { prefix: "/v1/forms", handle: formService.handle }, { prefix: "/v1/apply-profile", handle: formService.handle },
       { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle },
+      { prefix: "/v1/workflows/favourites-topics", handle: createFavouritesTopicsService(analysisStore).handle },
       // The login browser on the server, shown in a dialog on the page (remote-browser.ts); only where there is no screen of our own.
       ...(remoteBrowsers ? [{ prefix: "/v1/remote-browser", handle: remoteBrowsers.handle }] : []),
       // Linking this computer as a device of the hosted account (docs/device-mode.md); the worker restarts into device mode.

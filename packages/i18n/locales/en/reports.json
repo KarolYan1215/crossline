@@ -1,0 +1,20 @@
+{
+  "报告": "Reports",
+  "工作流整理出的结果，每个工作流一份最新的报告；报告里的可落地项可以加入任务。": "What workflows have organised, one latest report per workflow; the actions a report proposes can be added to the tasks.",
+  "{{files}} 份文档 · 涵盖 {{notes}} 条笔记": "Documents: {{files}} · notes covered: {{notes}}",
+  "{{files}} 份文档": "Documents: {{files}}",
+  "还没有报告。工作流整理好结果后会出现在这里。": "No reports yet. They appear here once a workflow has organised its results.",
+  "涵盖 {{notes}} 条笔记": "Notes covered: {{notes}}",
+  "全部报告": "All reports",
+  "报告目录": "Contents",
+  "较早的版本": "Earlier versions",
+  "可落地": "To put into practice",
+  "加入后由系统整理成任务": "Once added, the system turns it into a task",
+  "已加入": "Added",
+  "加入任务": "Add to tasks",
+  "来自报告「{{title}}」": "From the report \"{{title}}\"",
+  "去看报告": "Open the report",
+  "添加：按话题整理小红书收藏": "Add: organise Xiaohongshu favourites by topic",
+  "选择主线": "Choose a track",
+  "未添加，请稍后再试": "Not added; try again later"
+}

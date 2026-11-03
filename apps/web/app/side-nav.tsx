@@ -1,5 +1,5 @@
 "use client";
-import { Activity, CalendarRange, ClipboardCheck, FileInput, Inbox, ListTodo, LogOut, MessageCircle, Moon, Route, ScanFace, Settings, Sun, type LucideIcon } from "lucide-react";
+import { Activity, CalendarRange, ClipboardCheck, FileInput, FileText, Inbox, ListTodo, LogOut, MessageCircle, Moon, Route, ScanFace, Settings, Sun, type LucideIcon } from "lucide-react";
 import { DECIDE_ITEM, FOOT_ITEMS, NAV_ITEMS, RHYTHM_ITEMS } from "./nav-items";
 import { PendingBadge } from "./pending-badge";
 import { LocaleSwitch } from "./locale-switch";
@@ -11,7 +11,7 @@ import { ICON } from "./ui/icon-button";
 
 /** Each view's icon, by its label (the id pages pass as `active`). */
 const ICONS: Record<string, LucideIcon> = { 今日: Sun, 主线: Route, 计划: CalendarRange, 任务: ListTodo, 待确认: Inbox, 导入: FileInput, 画像: ScanFace, 设置: Settings,
-  本周承诺: ClipboardCheck, 收工: Moon, 周复盘: Activity };
+  本周承诺: ClipboardCheck, 收工: Moon, 周复盘: Activity, 报告: FileText };
 
 /**
  * The side bar on a wide screen (2026-10-28, the owner's reference design): the wordmark, the four working views and 待确认; under

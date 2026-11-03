@@ -33,10 +33,15 @@ function Formula({ tex, display, source }: { tex: string; display: boolean; sour
 
 /**
  * Inline marks: `**bold**`, `` `code` ``, `$$display$$`, `$inline$` (a `$` not followed by a space, closed by one not preceded by a space
- * or a backslash and not followed by a digit — so 「$5 和 $10」 stays text), and `[^n]` footnotes when `cite` is given.
+ * or a backslash and not followed by a digit — so 「$5 和 $10」 stays text), and `[^n]` footnotes when `cite` is given. Links:
+ * `[text](https://…)` and a bare `https://…` are drawn as links opened in a new tab — only http and https; `[text](javascript:…)` or any
+ * other address stays text.
  */
-const INLINE = /(\*\*[^*]+\*\*|`[^`]+`|\$\$[^$]+?\$\$|\$(?![\s$])[^$\n]+?(?<![\s\\])\$(?!\d))/;
-const INLINE_CITE = /(\*\*[^*]+\*\*|`[^`]+`|\$\$[^$]+?\$\$|\$(?![\s$])[^$\n]+?(?<![\s\\])\$(?!\d)|\[\^\d{1,3}\])/;
+const LINK = String.raw`\[[^\]\n]+\]\(https?:\/\/[^\s()]+\)|https?:\/\/[^\s<>()（）「」『』，。、；！？"'` + "`]+";
+const MARKS = String.raw`\*\*[^*]+\*\*|` + "`[^`]+`" + String.raw`|\$\$[^$]+?\$\$|\$(?![\s$])[^$\n]+?(?<![\s\\])\$(?!\d)`;
+const INLINE = new RegExp(`(${LINK}|${MARKS})`);
+const INLINE_CITE = new RegExp(String.raw`(${LINK}|${MARKS}|\[\^\d{1,3}\])`);
+const NAMED_LINK = /^\[([^\]]+)\]\((https?:\/\/.+)\)$/;
 
 /** One line's marks; everything that is not a mark stays text (nothing is parsed as HTML). */
 function inline(text: string, key: string, cite?: CiteRenderer): ReactNode[] {
@@ -45,6 +50,13 @@ function inline(text: string, key: string, cite?: CiteRenderer): ReactNode[] {
     const at = `${key}-${index}`;
     if (!part) return [];
     if (index % 2 === 0) return [part];
+    const named = NAMED_LINK.exec(part);
+    if (named) return [<a key={at} href={named[2]} target="_blank" rel="noopener noreferrer">{named[1]}</a>];
+    if (/^https?:\/\//.test(part)) {
+      // A sentence's closing mark after a bare address is the sentence's, not the address's.
+      const url = part.replace(/[.,;:!?]+$/, "");
+      return [<a key={at} href={url} target="_blank" rel="noopener noreferrer">{url}</a>, part.slice(url.length)];
+    }
     if (part.startsWith("**")) return [<b key={at}>{inline(part.slice(2, -2), at, cite)}</b>];
     if (part.startsWith("`")) return [<code key={at}>{part.slice(1, -1)}</code>];
     if (part.startsWith("$$")) return [<Formula key={at} tex={part.slice(2, -2)} display source={part} />];

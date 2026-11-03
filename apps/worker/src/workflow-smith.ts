@@ -6,7 +6,7 @@ import {
   AGENT_CATEGORIES, GROW_AFTER_ACCEPTED, GROWN_SKILL_IDLE_DAYS, PUBLIC_SKILL_REVIEW_SCHEMA, accessProfileSlug, categoryFromWording, finalVerdict, grownSkillFilesKey, grownSkillId,
   grownSkillName, scanForDeclaredAccess, scanSkillFiles, scheduleLabel, skillFrontmatter, textTerms, reassignedSteps, validatePublicSkillReview, validateWorkflowManifest,
   workflowAccess, workflowDue, agentChainKey, retryDue, type AgentCategory, type AgentChain, type GrownSkillRecord, type PublicSkillReview, type WorkflowAccess,
-  VERIFY_PENDING_SETTING, XHS_HOME, type WorkflowManifest, type WorkflowOrigin, type SkillScan
+  REPORT_ITEMS_FILE, REPORT_ITEMS_MAX, REPORT_ITEM_TITLE_MAX, VERIFY_PENDING_SETTING, XHS_HOME, type WorkflowManifest, type WorkflowOrigin, type SkillScan
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { agentChainsFor, grownHomeLine, listAgentTasks, readGrownSkills, recordGrownLogin, removeGrownSkill, writeGrownSkills, type CrosslineStore } from "@crossline/db";
@@ -495,7 +495,7 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
     const check = outcome.state === "done" ? outcome.summary.needsHuman.find((item) => isCheckNeeded(item.what))?.what : undefined;
     if (check) {
       sayToPerson(store, workspaceId, t("「{{summary}}」读到一半遇到了网站的安全验证，已停下，不会重试。已读到的内容照常整理好了。请本人在手机或常用浏览器里正常使用一段时间后再运行；频繁触发验证可能让账号受限。", { summary }),
-        "workflow_done", `check:${record.id}:${day}`, [{ label: t("去看结果"), href: "/approvals#assistant" }]);
+        "workflow_done", `check:${record.id}:${day}`, [{ label: t("去看结果"), href: resultHref(outcome) }]);
       return;
     }
     // A run that read its sites and found nothing on them is not done (2026-10-16: 「done」 with 0 favourites, the page saying 「你还没有
@@ -522,7 +522,7 @@ export function startWorkflowRun(store: CrosslineStore, workspaceId: string, rec
       ? (personSteps.length ? t("本期「{{summary}}」已做好，留给本人：{{steps}}。", { summary, steps: personSteps.join(locale === "en" ? "; " : "；") })
         : t("本期「{{summary}}」已做好。", { summary }))
       : t("本期「{{summary}}」没有做成：{{reason}}。", { summary, reason: outcome.state === "blocked" || outcome.state === "failed" ? outcome.message : t("助手未获准做这类工作") }),
-      "workflow_done", `ran:${record.id}:${outcome.state === "done" ? outcome.taskId : day}`, [{ label: t("去看结果"), href: "/approvals#assistant" }]);
+      "workflow_done", `ran:${record.id}:${outcome.state === "done" ? outcome.taskId : day}`, [{ label: t("去看结果"), href: resultHref(outcome) }]);
   });
 }
 
@@ -732,13 +732,13 @@ function organiseFromShared(store: CrosslineStore, workspaceId: string, record: 
     /* i18n-ignore-start: the run's instructions (model-facing) */
     what: [`按工作流 $${grownSkillName(record.id)} 做本期的这件事：${record.manifest.summary.replace(/[。.\s]+$/, "")}。在由本人完成的步骤之前停下。`,
       `收藏笔记已由 Crossline 的「${reader.manifest.summary}」在本人登录的浏览器里读好（共 ${read} 条），放在只读输入 ${path.basename(folder)}：index.md 是目录，每条笔记一个 note-<id>.md。只用这些笔记，不访问小红书，不在账号里做任何改动。`,
-      ...(last ? [`上期的结果（${path.basename(last)}，只读）：只处理上期之后新读到的笔记，上期已做的不重复。`] : [])].join("\n") },
+      ...(last ? [`上期的结果（${path.basename(last)}，只读）：只处理上期之后新读到的笔记，上期已做的不重复。`] : []), reportItemsBrief(store, workspaceId, last)].join("\n") },
     /* i18n-ignore-end */
   (outcome) => {
     if (outcome.state === "done") rememberRead(store, workspaceId, record.id, { at: new Date().toISOString(), taskId: outcome.taskId, directory: outcome.directory, items: read, pages: [] });
     sayToPerson(store, workspaceId, outcome.state === "done" ? t("本期「{{summary}}」已做好（用已读的 {{count}} 条收藏笔记，没有再访问小红书）。", { summary: record.manifest.summary, count: read })
       : t("本期「{{summary}}」没有做成：{{reason}}。", { summary: record.manifest.summary, reason: outcome.state === "blocked" || outcome.state === "failed" ? outcome.message : t("助手未获准做这类工作") }),
-      "workflow_done", `ran:${record.id}:${outcome.state === "done" ? outcome.taskId : now.toISOString().slice(0, 10)}`, [{ label: t("去看结果"), href: "/approvals#assistant" }]);
+      "workflow_done", `ran:${record.id}:${outcome.state === "done" ? outcome.taskId : now.toISOString().slice(0, 10)}`, [{ label: t("去看结果"), href: resultHref(outcome) }]);
   });
 }
 
@@ -823,7 +823,7 @@ function organiseFavourites(store: CrosslineStore, workspaceId: string, record: 
       `本期的收藏笔记已由 Crossline 在本人登录的浏览器里读好，放在只读输入 ${path.basename(folder)}：index.md 是目录，每条笔记一个 note-<id>.md（标题、正文、标签、作者、发布时间、互动数、每张图片的描述与图中文字、视频转写与关键帧描述、原链接），原图和视频在 notes/<id>/。不要再访问小红书。`,
       `本期新读到 ${ids.length} 条，只整理这些：${shown}${ids.length > 60 ? ` 等（完整列表见 index.md 中最近读取的 ${ids.length} 条）` : ""}。${laterBrief}`,
       ...(lastFolder ? [`上期的整理结果（${path.basename(lastFolder)}，只读）：先读它，把本期新增的并入完整结果，上期已整理的不再重复整理。`] : []),
-      "不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。", ...(before.text ? [before.text] : [])].join("\n") },
+      "不在账号里做任何改动（移动、删除、取消收藏、点赞、评论、发布）。", reportItemsBrief(store, workspaceId, lastFolder), ...(before.text ? [before.text] : [])].join("\n") },
     /* i18n-ignore-end */
   (outcome) => {
     claim.release();
@@ -836,7 +836,7 @@ function organiseFavourites(store: CrosslineStore, workspaceId: string, record: 
     sayToPerson(store, workspaceId, outcome.state === "done"
       ? t("本期「{{summary}}」已做好：新读 {{count}} 条（共 {{total}} 条）。{{later}}{{left}}", { summary, count: ids.length, total, later, left })
       : t("本期「{{summary}}」读好了 {{count}} 条，但整理没有做成：{{reason}}。笔记文件已在本机，下次运行一起整理。", { summary, count: ids.length, reason: outcome.state === "blocked" || outcome.state === "failed" ? outcome.message : t("助手未获准做这类工作") }),
-      "workflow_done", `ran:${record.id}:${outcome.state === "done" ? outcome.taskId : now.toISOString().slice(0, 10)}`, [{ label: t("去看结果"), href: "/approvals#assistant" }]);
+      "workflow_done", `ran:${record.id}:${outcome.state === "done" ? outcome.taskId : now.toISOString().slice(0, 10)}`, [{ label: t("去看结果"), href: resultHref(outcome) }]);
   });
   if (started.state !== "started") claim.release();
   if (started.state === "blocked" && HOLD_CODES.has(started.code)) holdWorkflowRun(store, workspaceId, record.id, now);
@@ -904,6 +904,39 @@ const unheld = (record: GrownSkillRecord): GrownSkillRecord => { const copy = { 
 /** Its time came while the assistant was busy: kept due for the rest of the day (`workflowDue`), not marked as run. */
 export function holdWorkflowRun(store: CrosslineStore, workspaceId: string, id: string, now = new Date()): void {
   writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === id ? { ...item, heldSince: now.toISOString() } : item));
+}
+
+/**
+ * The organising brief's last line (docs/skills-library.md 「报告」): beside its documents the run writes `落地.json`, what the report says
+ * to put into practice, which the report page offers one by one as 「加入任务」. Read through `readReportItems`, so a malformed one costs
+ * only itself.
+ */
+export function reportItemsBrief(store: CrosslineStore, workspaceId: string, last?: string): string {
+  const lines = identityLines(store, workspaceId).map((line) => `${line.id}（${line.label}）`).join("、");
+  /* i18n-ignore-start: the run's instructions (model-facing) */
+  return [`另在任务目录顶层写「${REPORT_ITEMS_FILE}」：本人照着做的具体动作，最多 ${REPORT_ITEMS_MAX} 条，JSON 数组，每条 {"title": 不超过 ${REPORT_ITEM_TITLE_MAX} 字的一个具体动作, "why": 一句话依据，点名出自哪个话题或哪几条笔记, "topic": 话题名或 "", "lineId": 所属主线 id 或 ""}。`,
+    `主线：${lines || "无"}。只写笔记里确有依据、可以动手做的事，不写读后感或总结；没有就写 []。`,
+    ...(last ? [`上次结果里如有「${REPORT_ITEMS_FILE}」，在它的基础上更新后整份写出。`] : [])].join("\n");
+  /* i18n-ignore-end */
+}
+
+/**
+ * Where 「去看结果」 goes: a run that left Markdown is a report, read whole on /reports/<task> (docs/skills-library.md 「报告」); anything
+ * else is on 待确认's assistant section. A clean run is accepted at once and 待确认 lists only what still waits, so a report sent there
+ * showed nothing.
+ */
+export function resultHref(outcome: AgentOutcome | { state: "failed"; message: string }): string {
+  if (outcome.state !== "done") return "/approvals#assistant";
+  const hasMarkdown = (dir: string, depth: number): boolean => {
+    let names: string[];
+    try { names = readdirSync(dir); } catch { return false; }
+    return names.some((name) => {
+      if (/\.md$/i.test(name)) return true;
+      if (depth > 0 || name === "input" || name.startsWith(".")) return false;
+      try { return statSync(path.join(dir, name)).isDirectory() && hasMarkdown(path.join(dir, name), depth + 1); } catch { return false; }
+    });
+  };
+  return hasMarkdown(outcome.directory, 0) ? `/reports/${encodeURIComponent(outcome.taskId)}` : "/approvals#assistant";
 }
 
 /** A run that read items: its folder and the pages that showed them are kept for the next run (`startWorkflowRun`). */

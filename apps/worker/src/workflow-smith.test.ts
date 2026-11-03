@@ -15,7 +15,7 @@ import { holdAfterFailure, readCollectLedger, writeCollectLedger, type CollectDr
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
 import type { NodeBrowserLink } from "./node/hub";
-import { closeInterruptedCollections, createTopicClassifier, favouritesTopicStep, installFavouritesTopicsWorkflow, readTopicPlan, writeTopicPlan } from "./favourites-topics";
+import { closeInterruptedCollections, createFavouritesTopicsService, createTopicClassifier, favouritesTopicStep, installFavouritesTopicsWorkflow, readTopicPlan, writeTopicPlan } from "./favourites-topics";
 
 const REVIEWER = "crossline:crossline-validation-reviewer";
 const estimate = { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
@@ -575,6 +575,16 @@ test("favourites by topic: what was listed before a check is sorted while the si
     expect(sorted).toBe(1);
     expect(opened).toBe(0);
   } finally { configureFavouritesCollector(undefined); }
+});
+
+test("favourites by topic is installed from Skill 库 through the worker for one of the person's lines, waiting for consent", async () => {
+  const service = createFavouritesTopicsService(store, () => new Date("2026-10-22T11:00:00Z"));
+  expect(await service.handle("POST", "/v1/workflows/other", ws, {})).toBeUndefined();
+  expect(await service.handle("POST", "/v1/workflows/favourites-topics/install", ws, { lineId: "nope" })).toEqual({ status: 400, body: { ok: false, code: "LINE_UNKNOWN" } });
+  expect(readGrownSkills(store, ws)).toEqual([]);
+  const answer = await service.handle("POST", "/v1/workflows/favourites-topics/install", ws, { lineId: "media" });
+  expect(answer).toMatchObject({ status: 200, body: { ok: true, status: "needs_consent" } });
+  expect(readGrownSkills(store, ws).map((record) => [record.name, record.lines, record.status])).toEqual([["xiaohongshu-favourites-topics", ["media"], "needs_consent"]]);
 });
 
 test("favourites by topic: the list read for its titles, sorted into topics, the day's share of one topic by day and everything in order by night", async () => {

@@ -30,6 +30,7 @@ export const RHYTHM_ITEMS = [
   { label: "本周承诺", href: "/commit", badge: false },
   { label: "收工", href: "/wrap", badge: false },
   { label: "周复盘", href: "/review", badge: false },
+  { label: "报告", href: "/reports", badge: false },
   { label: "画像", href: "/portrait", badge: false }
 ] as const;
 

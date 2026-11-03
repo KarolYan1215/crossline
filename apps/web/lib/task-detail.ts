@@ -7,6 +7,7 @@ import { defaultIdentityPacks, identityPacksFor } from "@crossline/identity-pack
 import { appNow, effectiveSchedulePreferences, getStore, resolvedEstimate, relationKindLabel, accents, suggestedSessionMinutes } from "./crossline";
 import { linePacks } from "./lines";
 import { runFilesHere } from "./agent";
+import { reportOfTask } from "./reports";
 import { localeFor } from "./locale";
 import { tFor, type Locale } from "./i18n";
 
@@ -109,6 +110,7 @@ function taskExtras(store: CrosslineStore, workspaceId: string, orders: StoredWo
       // The description names a day that has passed while the task is due later: the page says the deadline moved (W-155).
       ...(dueBy && staleDateMentions(order.intent, today, dueBy).length ? { dueMoved: dueBy } : {}),
       ...((links) => links.length ? { mailLinks: links } : {})(mailLinksOf(store, workspaceId, order.id)),
+      ...((report) => report ? { fromReport: report } : {})(reportOfTask(store, workspaceId, order.id)),
       ...(plan ? { stepPlan: { archetypeLabel: ((label) => label ? t(label) : plan.archetypeId)(archetypeById(plan.archetypeId)?.label), quantity: plan.quantity, rationale: plan.rationale,
         progress: taskProgress(finishedSteps(order.state, plan.steps)), units: plan.units,
         // A provide step says whether the system is still looking (files, then the web) or the person is asked (need-check.ts).
@@ -232,6 +234,8 @@ export type TaskExtras = {
   dueMoved?: string;
   /** Links on the sender's own domain in the mail this task came from (W-158): what a step needing 「链接」 is met by. */
   mailLinks?: string[];
+  /** The report this task was put into practice from (「加入任务」 on a report, docs/skills-library.md 「报告」). */
+  fromReport?: { id: string; title: string };
   stepPlan?: { archetypeLabel: string; quantity: { basis: string; amount: number; unit: string }; rationale: string; progress: number;
     steps: Array<StoredTaskStep & { needState?: "checking" | "ask" }>; units: StoredStepPlan["units"]; questions: StepQuestionView[] };
   /** How the card is prepared before its work starts (docs/task-preparation.md): nothing, its steps, or a full tutorial, and why. */
