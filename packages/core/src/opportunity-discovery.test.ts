@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   OPPORTUNITY_READING_SCHEMA, aiDeadlines, applicantFrom, ccfddlDeadlines, checkReadItem, degreeStageOf, devpostHackathons,
-  eligibilityAnswer, judgeEligibility, mergeNeeds, needFromProposal, nextMonthDay, opportunityFromRead, opportunityKey,
+  eligibilityAnswer, judgeEligibility, mergeNeeds, needFromProposal, nextMonthDay, opportunityFromListed, opportunityFromRead, opportunityKey, placeFromLocation,
   carriesPersonData, parsePostings, phishingSigns, prepStartFor, quoteYearAgrees, readItemUnusable, termSlot, validateOpportunityReading,
   type EligibilityTerm, type ProposedNeed, type ReadItem, type StoredNeed
 } from "./opportunity-discovery";
@@ -108,6 +108,52 @@ describe("reading a page", () => {
     expect(opportunityKey("https://hack.devpost.com/", "Lakeshore Hack '26", [])).toBe(opportunityKey("https://hack.devpost.com/?utm_source=x", "Lakeshore Hack 2026", []));
     const opportunity = opportunityFromRead(item(), { lineId: "research", needId: "need:research:x", foundVia: "web", foundAt: "2026-11-01T00:00:00Z", idOf: (key) => `opp-${key.length}` });
     expect(opportunity).toMatchObject({ registrationHost: "jobs.example.org", cost: { amount: 0 }, eligibility: [{ dim: "degree_stage", quote: "Open to current graduate students" }] });
+  });
+});
+
+describe("where an opening is held (D11)", () => {
+  const venue = "Pacific Systems Student Conference 2026. November 28–29, 2026, Vancouver, BC, Canada. In person only. Register by November 20, 2026.";
+  const meta = { lineId: "research", foundVia: "web" as const, foundAt: "2026-11-01T00:00:00Z", idOf: (key: string) => `opp-${key.length}` };
+  const at = (over: Partial<ReadItem>) => item({ eligibility: [], cost: { known: false, amount: 0, currency: "", quote: "" },
+    deadlines: [{ day: "2026-11-20", quote: "Register by November 20, 2026." }], ...over });
+  const read = (over: Partial<ReadItem>) => opportunityFromRead(checkReadItem(at(over), venue).item, meta);
+
+  it("keeps the reader's place as far as the page says it", () => {
+    const quote = "November 28–29, 2026, Vancouver, BC, Canada. In person only.";
+    expect(read({ place: { mode: "in_person", city: "Vancouver", country: "Canada", quote } }).place).toEqual({ mode: "in_person", city: "Vancouver", country: "Canada", quote });
+    // A country the quote does not name is left to the geocoder, never written in.
+    expect(read({ place: { mode: "in_person", city: "Vancouver", country: "加拿大", quote } }).place).toEqual({ mode: "in_person", city: "Vancouver", quote });
+    // A quote not on the page is no place, and is sent back to the reader.
+    const invented = checkReadItem(at({ place: { mode: "in_person", city: "Seattle", country: "", quote: "Held in Seattle, WA." } }), venue);
+    expect(invented.problems).toContain("place_unquoted");
+    expect(invented.item.place).toMatchObject({ mode: "unknown" });
+    expect(readItemUnusable(invented.problems)).toBe(false);
+    expect(detailOf(() => validateOpportunityReading({ items: [at({ place: { mode: "in_person", city: "Seattle", country: "", quote: "Held in Seattle, WA." } })], blocked: "" },
+      new Map([["p1", venue]])))).toMatch(/place\.quote/);
+  });
+
+  it("derives a place from a location line on the page when the reader gave none, and guesses none otherwise", () => {
+    expect(read({ location: "Vancouver, BC, Canada" }).place).toEqual({ mode: "in_person", city: "Vancouver, BC, Canada", quote: "Vancouver, BC, Canada" });
+    expect(read({ location: "Vancouver, BC, Canada", place: { mode: "unknown", city: "", country: "", quote: "" } }).place).toMatchObject({ city: "Vancouver, BC, Canada" });
+    // A location the page does not name is not where it is held.
+    const elsewhere = read({ location: "Chicago, IL" });
+    expect(elsewhere.place).toBeUndefined();
+    expect(elsewhere.location).toBeUndefined();
+    expect(read({ location: "" }).place).toBeUndefined();
+  });
+
+  it("reads a location line's mode and city", () => {
+    expect(placeFromLocation("Engineering Hall 1800, Madison, WI")).toEqual({ mode: "in_person", city: "Madison, WI", quote: "Engineering Hall 1800, Madison, WI" });
+    expect(placeFromLocation("Online")).toEqual({ mode: "online", quote: "Online" });
+    expect(placeFromLocation("Boston, MA (hybrid)")).toEqual({ mode: "hybrid", city: "Boston, MA", quote: "Boston, MA (hybrid)" });
+    expect(placeFromLocation("  ")).toBeUndefined();
+    expect(placeFromLocation("Room 1800")).toBeUndefined();
+  });
+
+  it("gives a listed conference its place", () => {
+    const listed = opportunityFromListed({ title: "SYNTHSYS 2027", url: "https://synthsys.example/2027", deadline: { day: "2026-12-01", quote: "deadline: '2026-12-01'" },
+      place: "Vancouver, Canada", note: "" }, meta);
+    expect(listed.place).toEqual({ mode: "in_person", city: "Vancouver, Canada", quote: "Vancouver, Canada" });
   });
 });
 

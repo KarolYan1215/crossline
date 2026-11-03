@@ -3,6 +3,7 @@ import { countryKey } from "./feasibility";
 import { tFor, type Locale } from "./i18n";
 import { ELIGIBILITY_DIMS, type ApplicationSlot, type DatedQuote, type EligibilityDim, type EligibilityRule, type EligibilityVerdict, type NeedSource, type Opportunity,
   type OpportunityNeed } from "./opportunity";
+import type { EventPlace } from "./opportunity-watch";
 
 /**
  * The discovery half of the opportunity agent (docs/opportunity-agent.md §5–8, track A): what a line needs from outside, where to look,
@@ -107,7 +108,7 @@ export function mergeNeeds(kept: StoredNeed[], lineId: string, fresh: StoredNeed
 export const OPPORTUNITY_READING_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items", "blocked"], properties: {
     items: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false,
-      required: ["pageId", "url", "title", "organizer", "kind", "deadlines", "startsAt", "cost", "location", "eligibility", "needsAccount", "materials", "consents", "registrationUrl"],
+      required: ["pageId", "url", "title", "organizer", "kind", "deadlines", "startsAt", "cost", "location", "place", "eligibility", "needsAccount", "materials", "consents", "registrationUrl"],
       properties: {
         pageId: { type: "string", maxLength: 40 },
         url: { type: "string", maxLength: 500 },
@@ -121,6 +122,9 @@ export const OPPORTUNITY_READING_SCHEMA = {
         cost: { type: "object", additionalProperties: false, required: ["known", "amount", "currency", "quote"], properties: {
           known: { type: "boolean" }, amount: { type: "number", minimum: 0 }, currency: { type: "string", maxLength: 8 }, quote: { type: "string", maxLength: 300 } } },
         location: { type: "string", maxLength: 120 },
+        place: { type: "object", additionalProperties: false, required: ["mode", "city", "country", "quote"], properties: {
+          mode: { type: "string", enum: ["online", "in_person", "hybrid", "unknown"] }, city: { type: "string", maxLength: 80 },
+          country: { type: "string", maxLength: 60 }, quote: { type: "string", maxLength: 300 } } },
         eligibility: { type: "array", maxItems: 12, items: TERM_SCHEMA },
         needsAccount: { type: "boolean" },
         materials: { type: "array", maxItems: 10, items: { type: "string", maxLength: 80 } },
@@ -128,10 +132,14 @@ export const OPPORTUNITY_READING_SCHEMA = {
         registrationUrl: { type: "string", maxLength: 500 } } } },
     blocked: { type: "string", maxLength: 200 } } } as const;
 
+/** Where an opening is held as the reader gives it: city and country as the page writes them, the sentence that says so as `quote`. */
+export type ReadPlace = { mode: EventPlace["mode"]; city: string; country: string; quote: string };
 export type ReadItem = {
   pageId: string; url: string; title: string; organizer: string; kind: Opportunity["kind"]; deadlines: DatedQuote[]; startsAt: DatedQuote;
-  cost: { known: boolean; amount: number; currency: string; quote: string }; location: string; eligibility: EligibilityTerm[]; needsAccount: boolean;
-  materials: string[]; consents: string[]; registrationUrl: string;
+  cost: { known: boolean; amount: number; currency: string; quote: string }; location: string;
+  /** Optional in the type for answers and fixtures written before it; the schema requires it. */
+  place?: ReadPlace | undefined;
+  eligibility: EligibilityTerm[]; needsAccount: boolean; materials: string[]; consents: string[]; registrationUrl: string;
 };
 export type ReadingAnswer = { items: ReadItem[]; blocked: string };
 
@@ -167,6 +175,45 @@ function movedDeadline(item: DatedQuote, pageText: string): DatedQuote {
   return item;
 }
 
+const NO_PLACE: ReadPlace = { mode: "unknown", city: "", country: "", quote: "" };
+/**
+ * The reader's place, kept only as far as the page says it (D11): the quote must be on the page, and a city or country the quote does not
+ * name is dropped (the geocoder finds a city's country; a place nobody wrote is never guessed). Anything else is unknown.
+ */
+function verifiedPlace(place: ReadPlace | undefined, pageText: string): ReadPlace {
+  if (!place || place.mode === "unknown" || !quotedIn(place.quote, pageText)) return NO_PLACE;
+  const named = (value: string) => (value.trim() && quotedIn(value, place.quote) ? value.trim() : "");
+  return { mode: place.mode, city: named(place.city), country: named(place.country), quote: place.quote };
+}
+// i18n-ignore-start: words read from pages
+const ONLINE_PLACE = /^(online|virtual|remote|zoom|线上|在线|网络)/i;
+const HYBRID_PLACE = /\(?\s*(hybrid|混合)\s*\)?/i;
+// i18n-ignore-end
+/** A location line's city: its parts without a number (a room, a street address), so 「Engineering Hall 1800, Madison, WI」 is 「Madison, WI」. */
+const cityPart = (text: string) => text.split(/[,，]/).map((part) => part.trim()).filter((part) => part && !/\d/.test(part)).join(", ");
+/**
+ * A place from a `location` line, for an item whose reader gave none (D11): online and hybrid by their words, else an in-person city.
+ * An empty line, or one with no city left, is no place (unknown stays unknown).
+ */
+export function placeFromLocation(location: string | undefined): EventPlace | undefined {
+  const text = location?.trim();
+  if (!text) return undefined;
+  if (HYBRID_PLACE.test(text)) {
+    const city = cityPart(text.replace(HYBRID_PLACE, " "));
+    return { mode: "hybrid", ...(city ? { city } : {}), quote: text };
+  }
+  if (ONLINE_PLACE.test(text)) return { mode: "online", quote: text };
+  const city = cityPart(text);
+  return city ? { mode: "in_person", city, quote: text } : undefined;
+}
+/** A location line kept only when its city (or its online word) is on the page: the reader's own words are not where the opening is. */
+function locationOnPage(location: string, pageText: string): string {
+  const text = location.trim();
+  if (!text) return "";
+  const city = ONLINE_PLACE.test(text) ? text.split(/[,，(（]/)[0]!.trim() : cityPart(text.replace(HYBRID_PLACE, " "));
+  return city && quotedIn(city, pageText) ? text : "";
+}
+
 /**
  * Checks one read item against the text it was read from, as code: every deadline quote is in the page and names its day (and its year,
  * when it names one), the cost's quote is in the page, and every eligibility term quotes the page. A term that does not quote the page
@@ -190,7 +237,10 @@ export function checkReadItem(item: ReadItem, pageText: string): { item: ReadIte
   const cost = item.cost.known && !quotedIn(item.cost.quote, pageText) ? { known: false, amount: 0, currency: "", quote: "" } : item.cost;
   if (item.cost.known && !cost.known) problems.push("cost_unquoted");
   if (item.eligibility.some((term) => !quotedIn(term.quote, pageText))) problems.push("eligibility_unquoted");
-  return { item: { ...item, deadlines, startsAt, cost }, problems };
+  const place = verifiedPlace(item.place, pageText);
+  if (item.place && item.place.mode !== "unknown" && place.mode === "unknown") problems.push("place_unquoted");
+  const location = locationOnPage(item.location ?? "", pageText);
+  return { item: { ...item, deadlines, startsAt, cost, location, place }, problems };
 }
 
 /** Problems that make a read item unusable: it is not what its page says (a misquoted term, a quote from elsewhere, a past round). */
@@ -241,6 +291,7 @@ export function readingProblems(answer: ReadingAnswer, pages: Map<string, string
     const checked = checkReadItem(item, text);
     if (checked.problems.includes("eligibility_unquoted")) problems.push(`「${item.title}」有资格条款的 quote 不是页面原文，请逐字摘抄原句`);
     if (checked.problems.includes("deadline_unquoted")) problems.push(`「${item.title}」有截止日期的 quote 不是页面原文或没写出该日期`);
+    if (checked.problems.includes("place_unquoted")) problems.push(`「${item.title}」的 place.quote 不是页面原文，请逐字摘抄写明举办地点的句子；页面没写地点时 mode 填 unknown`);
   }
   return problems;
 }
@@ -261,15 +312,23 @@ const normalTitle = (title: string) => squashText(title.replace(/['’]\d{2}(?!\
 export const opportunityKey = (url: string, title: string, deadlines: DatedQuote[]) =>
   `${hostOf(url)}|${normalTitle(title)}|${[...deadlines].map((item) => item.day).sort()[0] ?? ""}`;
 
+/** The record's place: the reader's (checked by `checkReadItem`), else one derived from its `location` line, else none. */
+function placeOf(item: ReadItem): EventPlace | undefined {
+  const read = item.place;
+  if (read && read.mode !== "unknown") return { mode: read.mode, ...(read.city ? { city: read.city } : {}), ...(read.country ? { country: read.country } : {}), quote: read.quote };
+  return placeFromLocation(item.location);
+}
+
 /** A read item as the contract's `Opportunity` (id from its key, so a re-read lands on the same row). */
 export function opportunityFromRead(item: ReadItem, input: { lineId: string; needId?: string; foundVia: NeedSource["kind"]; foundAt: string; idOf: (key: string) => string }): Opportunity {
   const url = item.url;
   const registrationHost = hostOf(item.registrationUrl) || hostOf(url);
   const key = opportunityKey(url, item.title, item.deadlines);
+  const place = placeOf(item);
   return { id: input.idOf(key), key, ...(input.needId ? { needId: input.needId } : {}), lineId: input.lineId, kind: item.kind, title: item.title, organizer: item.organizer,
     url, registrationHost, deadlines: item.deadlines, ...(item.startsAt.day ? { startsAt: item.startsAt } : {}),
     cost: item.cost.known ? { amount: item.cost.amount, currency: item.cost.currency, quote: item.cost.quote } : null,
-    ...(item.location ? { location: item.location } : {}), eligibility: item.eligibility.map(({ dim, rule, quote }) => ({ dim, rule, quote })),
+    ...(item.location ? { location: item.location } : {}), ...(place ? { place } : {}), eligibility: item.eligibility.map(({ dim, rule, quote }) => ({ dim, rule, quote })),
     needsAccount: item.needsAccount, materials: item.materials, consents: item.consents, foundVia: input.foundVia, foundAt: input.foundAt };
 }
 
@@ -605,9 +664,10 @@ export function aiDeadlines(parsed: unknown, today: string): ListedDeadline[] {
 /** A listed deadline as the contract's `Opportunity`: a call for papers is open to anyone who submits, so it carries no terms. */
 export function opportunityFromListed(item: ListedDeadline, input: { lineId: string; needId?: string; foundAt: string; idOf: (key: string) => string }): Opportunity {
   const key = opportunityKey(item.url, item.title, [item.deadline]);
+  const place = placeFromLocation(item.place);
   return { id: input.idOf(key), key, ...(input.needId ? { needId: input.needId } : {}), lineId: input.lineId, kind: "application", title: item.title,
     organizer: item.note.slice(0, 100), url: item.url, registrationHost: hostOf(item.url), deadlines: [item.deadline], ...(item.startsAt ? { startsAt: item.startsAt } : {}),
-    cost: null, ...(item.place ? { location: item.place } : {}), eligibility: [], needsAccount: true, materials: [], consents: [], foundVia: "deadline_list", foundAt: input.foundAt };
+    cost: null, ...(item.place ? { location: item.place } : {}), ...(place ? { place } : {}), eligibility: [], needsAccount: true, materials: [], consents: [], foundVia: "deadline_list", foundAt: input.foundAt };
 }
 
 /** Devpost's public listing (`/api/hackathons?search=…`, undocumented, read at most daily): hackathons open or upcoming. */
