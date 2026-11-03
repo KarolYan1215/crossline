@@ -1,6 +1,6 @@
 import { CheckCheck, Clock, GitPullRequestArrow, ShieldCheck } from "lucide-react";
 import { effectiveSchedulePreferences, firstAcceptedAt, getStore, lastNight } from "../../lib/crossline";
-import { localStamp } from "@crossline/core";
+import { FORM_STATE_LABEL, STOP_LABEL, localStamp } from "@crossline/core";
 import { loadWeekInvestment, loadWeeklyReview } from "../../lib/review";
 import { loadLedger } from "../../lib/ledger";
 import { BarChart } from "../ui/charts";
@@ -124,10 +124,11 @@ export default async function ReviewPage() {
       <DiligenceReview reports={diligence} identities={identities} />
     </section>}
 
-    {(opportunities.found > 0 || opportunities.waitingForm.length > 0) && <section className="rd-card review-block" aria-labelledby="rv-opportunities">
+    {(opportunities.found > 0 || opportunities.forms.length > 0) && <section className="rd-card review-block" aria-labelledby="rv-opportunities">
       <header className="rd-card-head"><h2 id="rv-opportunities" className="ds-serif">{t("本周机会")}</h2></header>
       <p className="review-note">{t("新发现 {{found}} 条：符合 {{eligible}}，待确认资格 {{unknown}}，不符合 {{ineligible}}；本周报名 {{registered}}，申请 {{applied}}。", opportunities)}</p>
-      {opportunities.waitingForm.length > 0 && <p className="review-note">{t("待代填：{{titles}}", { titles: opportunities.waitingForm.map((item) => item.title).join(locale === "en" ? ", " : "、") })}</p>}
+      {opportunities.forms.length > 0 && <ul className="review-list">{opportunities.forms.map((item) => <li key={item.id}><b>{item.title}</b>
+        <small>{item.stoppedFor ? t("{{state}}：{{why}}", { state: t(FORM_STATE_LABEL[item.state]), why: t(STOP_LABEL[item.stoppedFor]) }) : t(FORM_STATE_LABEL[item.state])}{item.state === "waiting_person" || item.state === "ready_to_submit" ? <> · <a href="/settings#apply">{t("查看报名")}</a></> : null}</small></li>)}</ul>}
       {opportunities.ruledOut.length > 0 && <details><summary>{t("筛掉的 {{count}} 条与理由", { count: opportunities.ruledOut.length })}</summary>
         <ul className="review-list">{opportunities.ruledOut.map((item) => <li key={item.id}><b>{item.title}</b><small>{item.why}</small></li>)}</ul>
       </details>}

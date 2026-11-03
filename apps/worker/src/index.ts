@@ -1215,7 +1215,7 @@ const formService = createFormService({ store: analysisStore, secrets, cwd: repo
 // cooling off); reading never needs the model.
 const mailService = createMailService({ store: analysisStore, secrets, cwd: repoRoot, client: accountClient, dataDir,
   sortAllowed: async (workspaceId) => !paused(workspaceId, "intake") && spendAllows(await spendFor(workspaceId), "intake"),
-  onNewMail: (workspaceId, messages) => { onNewMail(analysisStore, workspaceId, messages); formService.onNewMail(workspaceId, messages); },
+  onNewMail: (workspaceId, messages) => { onNewMail(analysisStore, workspaceId, messages); void formService.onNewMail(workspaceId, messages).catch(() => undefined); },
   // Sorting's to-dos are captures: analysed at once, not at the next tick's intake.
   onCaptured: (workspaceId) => { void autoAnalyzePass(workspaceId).catch(() => undefined); },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });

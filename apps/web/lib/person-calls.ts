@@ -1,6 +1,6 @@
 import "server-only";
-import { MAIL_ACCOUNTS_SETTING, VERIFY_PENDING_SETTING, readMailAccounts, workflowAccess, type AccessContext } from "@crossline/core";
-import { listPushSubscriptions, readGrownSkills } from "@crossline/db";
+import { MAIL_ACCOUNTS_SETTING, SLOT_LABEL, STOP_LABEL, VERIFY_PENDING_SETTING, readMailAccounts, workflowAccess, type AccessContext } from "@crossline/core";
+import { listPushSubscriptions, readFormRuns, readGrownSkills } from "@crossline/db";
 import { getStore } from "./crossline";
 import { localeFor } from "./locale";
 import { tFor } from "./i18n";
@@ -48,6 +48,17 @@ export function personCalls(ctx: AccessContext, now = new Date(), hosted = proce
       calls.push({ id: `login:${record.id}:${item.service}`, urgent: false, text: t("工作流「{{name}}」要读取{{service}}，需要本人先登录一次。", { name: record.manifest.summary.slice(0, 40), service: item.service }),
         action: hosted ? { kind: "remote", workflowId: record.id, service: item.service, label: item.service, purpose: "login" }
           : { kind: "href", href: `/settings?login=${encodeURIComponent(record.id)}#skills`, label: t("登录{{service}}", { service: item.service }) } });
+  }
+  // A registration the form service handed back (docs/opportunity-agent.md §10): a check is urgent, since its window is open and waiting.
+  for (const run of readFormRuns(store, ctx.workspaceId)) {
+    if (run.state !== "waiting_person" && run.state !== "ready_to_submit") continue;
+    const title = run.opportunity.title;
+    const act = run.decision.choice === "apply" ? t("申请", { context: "form" }) : t("报名", { context: "form" });
+    const text = run.state === "ready_to_submit" ? t("{{act}}「{{title}}」已填好，等本人在窗口里核对后提交。", { act, title })
+      : run.stoppedFor === "missing_slot" && run.missingSlot ? t("{{act}}「{{title}}」需要「{{slot}}」，资料卡里还没有。填上后会接着填。", { act, title, slot: t(SLOT_LABEL[run.missingSlot]) })
+      : t("{{act}}「{{title}}」停在第 {{page}} 页：{{why}}。处理好后按「继续」。", { act, title, page: run.pageNo, why: t(STOP_LABEL[run.stoppedFor ?? "engine_failed"]) });
+    calls.push({ id: `form:${run.id}:${run.state}:${run.stoppedFor ?? ""}:${run.pageNo}`, urgent: !run.sessionLost && (run.stoppedFor === "captcha" || run.stoppedFor === "login"), text,
+      action: { kind: "href", href: "/settings#apply", label: t("查看报名") } });
   }
   for (const account of readMailAccounts(store.getSetting(ctx.workspaceId, MAIL_ACCOUNTS_SETTING)))
     if (account.lastError && /AUTH|PASSWORD|LOGIN/i.test(account.lastError.code))
