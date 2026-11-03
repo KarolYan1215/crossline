@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { ATTENTION_SNAPSHOT, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BRIEF_TIME_SETTING, QUIET_HOURS_SETTING, inQuiet, inferWorkState, isClock, quietHoursOf, monthDay, resolveAvailability, tFor, type ActivitySegment, type AvailabilityWindow, type Locale } from "@crossline/core";
-import type { CrosslineStore } from "@crossline/db";
+import { scoutNeeds, type CrosslineStore } from "@crossline/db";
+import { opportunityAgentOn } from "./opportunities";
 import { ownerOf } from "./owner";
 import { ACTIVITY_DETAIL_CONSENT } from "./activity-recorder";
 import { localeOf } from "./locale";
@@ -46,6 +47,12 @@ export type NotifyInput = {
   asks?: Array<{ id: string; title: string; urgency: "now" | "soon" | "later"; path: string }>;
   /** The workspace's language: every message is written in it (omitted = Chinese). */
   locale?: Locale;
+  /**
+   * The opportunity agent (docs/opportunity-agent.md §7): offers found since yesterday that wait on the person, needs whose preparation
+   * starts today, and offers that close today — before the next brief, so they go out at once (inside the quiet hours and the daily cap).
+   */
+  opportunities?: { fresh: Array<{ id: string; title: string; deadline?: string | undefined }>; prepToday: Array<{ id: string; title: string }>;
+    closingToday: Array<{ id: string; title: string }> };
 };
 
 const inWindow = (input: NotifyInput) => input.windows.some((window) => window.days.includes(input.weekday)
@@ -72,22 +79,28 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
         : t("{{count}} 天后到期：{{title}}", { count: item.daysLeft, title: item.title })),
       ...(input.asks ?? []).filter((ask) => ask.urgency === "now" && !ask.id.startsWith("wait:")).map((ask) => t("待决：{{title}}", { title: ask.title }))
     ].slice(0, 3);
+    const found = input.opportunities?.fresh ?? [];
+    const offers = found.length === 1 ? [t("新机会：{{title}}", { title: found[0]!.title })]
+      : found.length ? [t("{{count}} 个新机会：{{titles}}", { count: found.length, titles: found.slice(0, 2).map((item) => item.title).join(input.locale === "en" ? ", " : "、") })] : [];
+    const prep = (input.opportunities?.prepToday ?? []).slice(0, 1).map((item) => t("今天该开始准备：{{title}}", { title: item.title }));
     out.push({ key: briefKey, kind: "brief", path: "/", title: t("今天的 Crossline"),
-      body: [...lines, input.unconfirmedLastNight ? t("昨晚 {{count}} 块待确认", { count: input.unconfirmedLastNight }) : "",
+      body: [...lines, ...offers, ...prep, input.unconfirmedLastNight ? t("昨晚 {{count}} 块待确认", { count: input.unconfirmedLastNight }) : "",
         input.pending ? t("{{count}} 项待决定", { count: input.pending }) : ""].filter(Boolean).join(sep) || t("今日无到期事项。") });
   }
   if (!inWindow(input) || (input.quiet && inQuiet(input.clock, input.quiet))) return out;
   const due = input.dueSoon.filter((item) => item.daysLeft <= 1).map((item) => ({ key: `due:${item.id}:${input.today}`, kind: "urgent" as const, path: "/milestones",
     title: item.daysLeft === 0 ? t("今天到期：{{title}}", { title: item.title }) : t("明天到期：{{title}}", { title: item.title }),
     body: t("截止 {{deadline}}。", { deadline: input.locale === "en" ? monthDay("en", item.deadline) : item.deadline }) }));
+  const closing = (input.opportunities?.closingToday ?? []).map((item) => ({ key: `opportunity:${item.id}`, kind: "urgent" as const, path: "/approvals",
+    title: t("今天截止的机会：{{title}}", { title: item.title }), body: t("报名或申请今天截止，等不到明天的早报。打开 Crossline 决定要不要。") }));
   const urgent: PlannedNotification[] = (input.asks
     ? [...input.asks.filter((ask) => ask.urgency === "now").map((ask) => ({ key: `ask:${ask.id}:${input.today}`, kind: "urgent" as const, path: ask.path,
-      title: ask.title, body: t("关系到两天内的截止。打开 Crossline 选一个答案，或者让它明天再问。") })), ...due]
+      title: ask.title, body: t("关系到两天内的截止。打开 Crossline 选一个答案，或者让它明天再问。") })), ...due, ...closing]
     : [
       ...input.waitingDue.map((item) => ({ key: `waiting:${item.id}:${input.today}`, kind: "urgent" as const, path: "/",
         title: item.who ? t("{{who}}的{{title}}到了吗？", { who: item.who, title: item.title }) : t("{{title}}到了吗？", { title: item.title }),
         body: t("到了就点「到了」，依赖它的工作才会排进日历。") })),
-      ...due,
+      ...due, ...closing,
       // A gate *run* that did not happen (logged out, quota): not a verdict on the work, and no longer titled as one.
       ...input.gateRefusals.map((item) => ({ key: `gate:${item.id}`, kind: "urgent" as const, path: "/approvals",
         title: t("验收没跑成：{{title}}", { title: item.title }), body: item.message.slice(0, 120) }))
@@ -188,7 +201,8 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
       .filter((item) => item.daysLeft >= 0 && item.daysLeft <= 3).sort((a, b) => a.daysLeft - b.daysLeft),
     gateRefusals: store.listEvents(workspaceId, { type: "milestone_gate.blocked" }).filter((event) => event.createdAt >= since)
       .map((event) => ({ id: event.eventId, title: orders.get(event.entityId) ?? tFor(locale)("一项作业"), message: String((event.payload as { message?: string }).message ?? "") })),
-    unconfirmedLastNight: unconfirmedLastNight(store, workspaceId, today)
+    unconfirmedLastNight: unconfirmedLastNight(store, workspaceId, today),
+    ...(opportunityAgentOn(store, workspaceId) ? { opportunities: opportunityNotices(store, workspaceId, today, now) } : {})
   });
   const delivered: string[] = [];
   for (const item of planned) {
@@ -247,3 +261,16 @@ export function unconfirmedLastNight(store: CrosslineStore, workspaceId: string,
 
 /** A page seen this recently is in front of the person; the web's `PRESENCE_FRESH_MS`, kept equal. */
 const PRESENCE_FRESH_MS = 10 * 60_000;
+
+/** What the brief and the single messages say about opportunities: offers waiting on the person, preparation starting, closing today. */
+export function opportunityNotices(store: CrosslineStore, workspaceId: string, today: string, now: Date): NonNullable<NotifyInput["opportunities"]> {
+  const since = new Date(now.getTime() - 24 * 3_600_000).toISOString();
+  const open = store.listOpportunities(workspaceId).filter((row) => row.verdict.state !== "ineligible"
+    && (!row.decision || (row.decision === "later" && (row.laterUntil ?? "") <= today)));
+  const deadlineOf = (row: (typeof open)[number]) => row.deadlines.map((item) => item.day).filter((day) => day >= today).sort()[0];
+  return {
+    fresh: open.filter((row) => row.foundAt >= since && (deadlineOf(row) || !row.deadlines.length)).map((row) => ({ id: row.id, title: row.title, deadline: deadlineOf(row) })),
+    prepToday: scoutNeeds(store, workspaceId).filter((need) => need.state === "tracking" && need.prepStartsOn === today).map((need) => ({ id: need.id, title: need.title })),
+    closingToday: open.filter((row) => deadlineOf(row) === today).map((row) => ({ id: row.id, title: row.title }))
+  };
+}

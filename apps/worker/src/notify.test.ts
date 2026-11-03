@@ -185,3 +185,14 @@ test("the person's quiet hours hold back single messages, and the brief goes at 
   expect(planNotifications({ ...base, briefAt: "09:40" }).filter((item) => item.kind === "brief")).toEqual([]);
   expect(planNotifications({ ...base, clock: "09:41", briefAt: "09:40" }).filter((item) => item.kind === "brief")).toHaveLength(1);
 });
+
+test("new opportunities ride in the brief; one closing today is a single message under the same cap", () => {
+  const opportunities = { fresh: [{ id: "o1", title: "暑期研究实习", deadline: "2026-12-01" }, { id: "o2", title: "黑客松", deadline: "2026-10-08" }],
+    prepToday: [{ id: "need:x", title: "研究实习" }], closingToday: [{ id: "o2", title: "黑客松" }] };
+  const planned = planNotifications({ ...base, waitingDue: [], dueSoon: [], opportunities });
+  expect(planned[0]!.body).toContain("2 个新机会：暑期研究实习、黑客松");
+  expect(planned[0]!.body).toContain("今天该开始准备：研究实习");
+  expect(planned.some((item) => item.key === "opportunity:o2" && item.title === "今天截止的机会：黑客松")).toBe(true);
+  expect(planNotifications({ ...base, opportunities, urgentSentToday: 2 }).some((item) => item.key === "opportunity:o2")).toBe(false);
+  expect(planNotifications({ ...base, waitingDue: [], dueSoon: [], opportunities, clock: "10:30", quiet: { from: "10:00", to: "11:00" }, sent: new Set(["brief:2026-10-08"]) })).toEqual([]);
+});

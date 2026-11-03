@@ -12,6 +12,7 @@ import { mailRepliesView, recordMoneyEvidence, voidByEvidence, type CrosslineSto
 import type { MailLookup } from "./agent-tools";
 import { draftReplies, followUpReplies, type ReplyCandidate } from "./mail-replies";
 import { identityLines } from "./lines";
+import { addMailCandidate, mailCandidateLine, matchConfirmation, opportunityAgentOn } from "./opportunities";
 import { ownerOf } from "./owner";
 import { tOfWorkspace } from "./locale";
 import { sayToPerson } from "./workflow-smith";
@@ -197,6 +198,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       + "is on, or with an empty waitingId when a real person or office waits for the person's answer by mail (a draft is written, never sent); info "
       + "for news about the person's own things that needs nothing, and for notices a service sends to all customers or about its own systems (security "
       + "advisories, incidents, CI or deploy results, terms changes) unless they name the person's own resource and a day to act; ignore for promotions, digests, cold pitches, a company's survey or feedback invitation (only one from the person's own course, employer or collaborator is todo), spam and phishing. "
+      + "opportunity for an event, competition, programme, fellowship or opening the person could sign up or apply for (not one they already "
+      + "signed up for, and not a newsletter that lists many); its title is the opportunity's name. "
       + "transaction for a mail whose money already moved (a payment made or received, a receipt, a refund, a salary); an unusual or "
       + "unrecognised charge is todo. money for every mail about money, whatever its kind: event is charge (paid, card used), receipt (a shop's "
       + "order or receipt), refund, income (salary, money received), authorization (pending, hold), own_transfer (card bill paid, top-up, between "
@@ -283,6 +286,19 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
     } else if (kind === "todo" || kind === "date") kind = "info";
     // A payment mail is a record only when code finds what the model read in the mail itself (`book`): the model sorts, it never supplies a number.
     if (kind === "transaction" && !money.counted) kind = "info";
+    // An opportunity in the mail (docs/opportunity-agent.md §6) is read with the next poll of a tracked need, on the machine owner's
+    // workspace only; elsewhere, and for a confirmation of something the person signed up for, it is information.
+    if (kind === "opportunity") {
+      if (opportunityAgentOn(deps.store, workspaceId)) {
+        addMailCandidate(deps.store, workspaceId, { key, lineId: mailCandidateLine(deps.store, workspaceId, message), subject: message.subject, from: message.from,
+          text: (message.body ?? message.snippet).slice(0, 12_000), url: linksFromMail(message.body ?? message.snippet, message.fromAddress)[0] ?? "", at });
+      } else kind = "info";
+    }
+    if (opportunityAgentOn(deps.store, workspaceId) && kind !== "ignore") {
+      const confirmed = matchConfirmation(deps.store, workspaceId, { fromAddress: message.fromAddress, subject: message.subject, key: mailKey(message) });
+      if (confirmed) deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.confirmed:${confirmed}`, type: "opportunity.confirmed",
+        entityId: confirmed, payload: { mail: mailKey(message), subject: message.subject, at } });
+    }
     if (kind === "reply") {
       deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${mailKey(message)}`, type: "waiting.mail_seen",
         entityId: item.waitingId, payload: { from: message.from, subject: message.subject, date: message.date, at } });

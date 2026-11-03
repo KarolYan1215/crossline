@@ -14,6 +14,7 @@ import { FORM_CHECK_SCHEMA, FORM_FILL_SCHEMA } from "./form-fill";
 import { FORM_OBSERVE_SCHEMA } from "./form-observe";
 import { CONCIERGE_SCHEMA } from "./concierge";
 import { MAIL_REPLY_DRAFT_SCHEMA, MAIL_TRIAGE_SCHEMA } from "./mail";
+import { OPPORTUNITY_NEEDS_SCHEMA, OPPORTUNITY_READING_SCHEMA } from "./opportunity-discovery";
 import { IMPORT_TRIAGE_SCHEMA } from "./task-import";
 import { AUTOMATION_PLAN_SCHEMA } from "./automations";
 import { DATE_EXTRACTION_SCHEMA } from "./date-schema";
@@ -112,7 +113,9 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-mail-triage": { label: "邮件整理", schemas: ["MAIL_TRIAGE_SCHEMA"] },
   "crossline-mail-reply-drafter": { label: "邮件回复草稿", schemas: ["MAIL_REPLY_DRAFT_SCHEMA"] },
   "crossline-import-triage": { label: "导入清单整理", schemas: ["IMPORT_TRIAGE_SCHEMA"] },
-  "crossline-automation-designer": { label: "自动化设计", schemas: ["AUTOMATION_PLAN_SCHEMA"] }
+  "crossline-automation-designer": { label: "自动化设计", schemas: ["AUTOMATION_PLAN_SCHEMA"] },
+  "crossline-opportunity-needs": { label: "机会需求推导", schemas: ["OPPORTUNITY_NEEDS_SCHEMA"], webSearch: true },
+  "crossline-opportunity-reader": { label: "机会页面解读", schemas: ["OPPORTUNITY_READING_SCHEMA"] }
 };
 
 export const skillKey = (skill: string) => skill.replace(/^crossline:/, "");
@@ -187,6 +190,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MILESTONE_RISK_SCHEMA, MINE_SKILL_SCHEMA,
   ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA,
+  OPPORTUNITY_NEEDS_SCHEMA, OPPORTUNITY_READING_SCHEMA,
   FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
@@ -283,6 +287,9 @@ export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CAL
   FAVOURITE_TOPICS_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA",
   // Sorting an imported list (2026-10-28): a list of small objects with an enum and short strings, like mail sorting and calendar filing.
   IMPORT_TRIAGE_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA",
+  // The opportunity agent (2026-11-01): needs with a nested window, terms and an anyOf of sources, like the artifact plan's lists of
+  // nested objects; a page read into items with quoted dates and terms, like extracted dates with their quotes.
+  OPPORTUNITY_NEEDS_SCHEMA: "ARTIFACT_PLAN_SCHEMA", OPPORTUNITY_READING_SCHEMA: "DATE_EXTRACTION_SCHEMA",
   // A form page's actions (2026-11-01): a list of small objects with enums, short strings and an anyOf value with a null, like the input box's answer.
   FORM_FILL_SCHEMA: "CONCIERGE_SCHEMA",
   // The pre-submission check: a boolean and a short list of two-string objects, like a review.

@@ -79,9 +79,10 @@ export function appPasswordPage(address: string, locale?: Locale): AppPasswordPa
     hint: t("Gmail 不收 Google 登录密码。在打开的页面里起个名字（如 Crossline）并创建，把显示的 16 位密码粘贴到上面，空格可以带着。") };
 }
 
-export type MailTriageKind = "todo" | "date" | "reply" | "transaction" | "info" | "ignore";
+/** `opportunity`: an event, competition, programme or opening the person could sign up or apply for (docs/opportunity-agent.md §6). */
+export type MailTriageKind = "todo" | "date" | "reply" | "transaction" | "opportunity" | "info" | "ignore";
 export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply", string> = { todo: "待办", date: "日期", reply: "回复了等待项", transaction: "记账",
-  info: "知悉", ignore: "略过", needs_reply: "需要回复" };
+  opportunity: "机会", info: "知悉", ignore: "略过", needs_reply: "需要回复" };
 /**
  * `money` is filled for any mail about money (docs/mail-bookkeeping.md §4.1): which event it is, and the amount, currency, merchant, day,
  * order numbers and card digits exactly as the mail shows them. Code books only the events where money moved, and checks every field
@@ -94,7 +95,7 @@ export const MAIL_TRIAGE_SCHEMA = {
     items: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false,
       required: ["uid", "kind", "title", "waitingId", "why", "money"], properties: {
       uid: { type: "integer", minimum: 1 },
-      kind: { type: "string", enum: ["todo", "date", "reply", "transaction", "info", "ignore"] },
+      kind: { type: "string", enum: ["todo", "date", "reply", "transaction", "opportunity", "info", "ignore"] },
       title: { type: "string", maxLength: 140 },
       waitingId: { type: "string", maxLength: 128 },
       why: { type: "string", maxLength: 200 },

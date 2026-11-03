@@ -75,6 +75,10 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-due-diligence": "mid",
   // The weekly energy-advice review: reads research and argues with a rule, once a week.
   "crossline-energy-advisor": "mid",
+  // The opportunity agent (docs/opportunity-agent.md §5): working out what outside gates a line's goal must pass reads the field and the
+  // person's whole line, so the top tier; reading one found page into terms and dates is a careful extraction, the middle one.
+  "crossline-opportunity-needs": "top",
+  "crossline-opportunity-reader": "mid",
   "crossline-background-facts": "low",
   "crossline-plan-explainer": "low",
   // The assistant that works on the person's machine: coding and multi-step work, so the strongest tier, and never stepped down.

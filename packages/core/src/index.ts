@@ -570,6 +570,7 @@ export * from "./task-import";
 export * from "./automations";
 export * from "./device";
 export * from "./opportunity";
+export * from "./opportunity-discovery";
 export * from "./form-fill";
 export * from "./form-observe";
 export * from "./form-browser-use";
