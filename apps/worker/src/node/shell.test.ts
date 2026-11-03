@@ -8,6 +8,7 @@ import { NODE_COMPUTE_SETTING, NODE_STATUS_SETTING } from "@crossline/core/devic
 import { inTaskDir, refusal } from "./protocol";
 import { handleTaskOp, type TaskFileOp } from "./task-files";
 import { changedInputs, pullResults, sendInputs, type NodeShellLink } from "./task-sync";
+import { fakeNode } from "../testing/fake-node";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(path.join(tmpdir(), "crossline-shell-")); });
@@ -68,14 +69,9 @@ test("task files never leave their directory and never follow a link", () => {
   }
 });
 
-/** A link to a node whose task directories are a temp folder of this machine. */
-function fakeLink(root: string): NodeShellLink {
-  return { key: "k", host: "PC-A", client: {} as NodeShellLink["client"], tasksRoot: root, home: dir, windows: process.platform === "win32",
-    task: async (request) => handleTaskOp(root, request), connected: () => true };
-}
 
 test("inputs go to the node as copies, results come back, and a changed copy is reported against its original", async () => {
-  const link = fakeLink(path.join(dir, "node-tasks"));
+  const link = fakeNode(path.join(dir, "node-tasks"), {} as NodeShellLink["client"]);
   const original = path.join(dir, "syllabus.txt");
   writeFileSync(original, "原文");
   mkdirSync(path.join(dir, "folder", "sub"), { recursive: true });

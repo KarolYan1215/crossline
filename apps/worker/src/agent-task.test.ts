@@ -8,6 +8,7 @@ import {
   type AuditRecord
 } from "./agent-task";
 import { fakeRuntime as sharedRuntime, type AgentScript } from "./testing/fake-runtime";
+import { fakeNode } from "./testing/fake-node";
 
 let store: CrosslineStore;
 let workspaceId: string;
@@ -153,7 +154,6 @@ test("a command the guard asks about goes to the person when there is a way to r
 
 test("on the account's node, the shell runs in the node's task directory, its inputs are copies and its results come back to the server", async () => {
   approveCategory(store, workspaceId, "read_research_organize");
-  const { handleTaskOp } = await import("./node/task-files");
   const tasksRoot = path.join(root, "node-tasks");
   const original = path.join(root, "syllabus.txt");
   writeFileSync(original, "原文");
@@ -161,9 +161,7 @@ test("on the account's node, the shell runs in the node's task directory, its in
     writeFileSync(path.join(tasksRoot, "t-node", "notes.md"), "笔记");
     writeFileSync(path.join(tasksRoot, "t-node.inputs", "0", "syllabus.txt"), "被改过");
   } });
-  let up = true;
-  const link = { key: "k", host: "PC-A", client: rpc, tasksRoot, home: path.join(root, "node-home"), windows: process.platform === "win32",
-    task: async (request: Parameters<typeof handleTaskOp>[1]) => handleTaskOp(tasksRoot, request), connected: () => up };
+  const link = fakeNode(tasksRoot, rpc, { home: path.join(root, "node-home") });
   const nodeRunner = createAgentRunner(store, workspaceId, "C:\\repo", () => undefined, { outputRoot: path.join(root, "ai"), homeDir: "C:\\Users\\karol", mode: "node", node: link });
   const outcome = await nodeRunner({ ...input, taskId: "t-node", inputs: [original] });
   if (outcome.state !== "done") throw new Error(JSON.stringify(outcome));
@@ -173,6 +171,6 @@ test("on the account's node, the shell runs in the node's task directory, its in
   expect(outcome.inputsModified).toEqual([original]);
   expect(store.listEvents(workspaceId, { type: "agent.task.requested" }).at(-1)!.payload).toMatchObject({ mode: "node", node: "PC-A" });
   // A node gone before the run starts: the run is lost, and retried like any lost run.
-  up = false;
+  link.disconnect();
   expect(await nodeRunner({ ...input, taskId: "t-node-2" })).toMatchObject({ state: "blocked", code: "AGENT_RUN_LOST" });
 });
