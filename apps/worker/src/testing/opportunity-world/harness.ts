@@ -211,7 +211,7 @@ async function worldVisa(world: World, citizenship: string, destination: string,
 /**
  * Track ②'s check as `Clients.feasibility`: the verdict on each find before it is kept, so an infeasible one is held back by `holdBack`
  * and a conflicting one carries its clash (§17.6–17.7). The record goes in as discovery stored it, as `discoveryFeasibility` passes it:
- * where the event is comes only from its `place` (D11: nothing fills it yet). An event one turns up to needs no preparation; an
+ * where the event is comes only from its `place` (the reader's, or one `opportunityFromRead` derives from its `location`). An event one turns up to needs no preparation; an
  * application takes its watch's lead; a watch's radius (「少来·太远」 tightens it) is the local limit, as the worker passes it.
  */
 export function worldFeasibility(ctx: EngineContext, check: FeasibilityOf): FeasibilityFn {

@@ -273,7 +273,9 @@ const SEARCH: World["search"] = [
     eligibility: [term("region", "居住在欧盟成员国", "Open to students residing in an EU member state.", { values: ["European Union", "EU member state"] })] }) },
   { query: "systems student conference vancouver", reading: reading({ url: "https://pss-conf.example/2026", title: "Pacific Systems Student Conference 2026",
     organizer: "PSS", kind: "event", deadlines: [at("2026-11-20", "Register by November 20, 2026.")], startsAt: at("2026-11-28", "November 28–29, 2026, Vancouver, BC, Canada."),
-    cost: free("Free for students."), location: "Vancouver, BC, Canada" }) },
+    cost: free("Free for students."), location: "Vancouver, BC, Canada",
+    // The reader's own place (D11); the other readings give only `location`, which production derives a place from.
+    place: { mode: "in_person", city: "Vancouver", country: "Canada", quote: "November 28–29, 2026, Vancouver, BC, Canada. In person only." } }) },
   { query: "systems seminar madison", reading: reading({ url: "https://lakeshore.example/ece/seminars/dataflow", title: "Lakeshore Systems Seminar: Dataflow Accelerators",
     organizer: "Lakeshore ECE", kind: "event", deadlines: [at("2026-11-04", "Registration closes November 4, 2026.")],
     startsAt: at("2026-11-05", "Thursday, November 5, 2026, 2:30 PM–3:30 PM CST, Engineering Hall 1800, Madison, WI."), cost: free("Free and open to the public."),

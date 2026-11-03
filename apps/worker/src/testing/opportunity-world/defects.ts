@@ -10,21 +10,14 @@ import type { Persona } from "./model";
  * year is not that day; a past round is `earlier_cycle`), D5 (`phishingSigns`), D6 (hidden elements dropped by `htmlToText`, a hit
  * quoting text not on the page read again from the page, no request to an address carrying the person's name or email) and D7 (a moved
  * deadline read as its new day); and D10 (a TBD date read as a deadline of today, so never pushed), by track ②'s `dateUnconfirmed`
- * (`packages/core/src/feasibility.ts`).
+ * (`packages/core/src/feasibility.ts`); and D11 (nothing filled `Opportunity.place`), by track ①: the reader gives `place` with a quote
+ * checked against the page, and `opportunityFromRead` derives one from a `location` line whose city is on the page.
  */
 export type Defect = { id: string; owner: string; where: string; what: string };
 
-export const DEFECTS: Defect[] = [
-  // Found in the final acceptance (2026-11-02), once the harness stopped reading a place out of `location` for the engine.
-  { id: "D11", owner: "①（A 线读取，§17.6 「活动在哪里由读取器抽取」）", where: "OPPORTUNITY_READING_SCHEMA 只有 `location` 字符串；opportunityFromRead 不写 `Opportunity.place`",
-    what: "生产里没有任何代码填 `place`，`feasibilityNow` 读不到就当地点未知：不查签证、不算路程，签证来不及（温哥华会议）和超出半径（芝加哥活动）照推，"
-      + "卡片也不显示路程与签证；翻转对住处、行程、签证三对不翻。测试台此前从 `location` 自己推地点，把它盖住了。" }
-];
+export const DEFECTS: Defect[] = [];
 
 /** Scenario id → the defects that make it fail, for which personas; `unless` drops the entry once that capability is there. */
-export const KNOWN_DEFECTS: Record<string, Array<{ id: string; personas: Persona[]; unless?: Capability }>> = {
-  "visa-too-late": [{ id: "D11", personas: ["faithful", "adversarial"] }],
-  "beyond-radius": [{ id: "D11", personas: ["faithful", "adversarial"] }]
-};
+export const KNOWN_DEFECTS: Record<string, Array<{ id: string; personas: Persona[]; unless?: Capability }>> = {};
 
-export const PAIR_DEFECTS: Record<string, string> = { "cf-home": "D11", "cf-trip": "D11", "cf-visa": "D11" };
+export const PAIR_DEFECTS: Record<string, string> = {};
