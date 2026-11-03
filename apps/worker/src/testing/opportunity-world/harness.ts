@@ -208,27 +208,18 @@ async function worldVisa(world: World, citizenship: string, destination: string,
   return { needed: page.needed, leadDays: page.leadDays, sourceUrl: page.url, quote: page.quote, checkedAt: now.toISOString(), verified: true };
 }
 
-/** The record's `location` line as a place: online and hybrid by their words, anything else an in-person city (until the reader fills `place`). */
-function placeFromLocation(location: string | undefined): { mode: "online" | "in_person" | "hybrid" | "unknown"; city?: string; quote: string } {
-  if (!location?.trim()) return { mode: "unknown", quote: "" };
-  if (/hybrid|混合/i.test(location)) return { mode: "hybrid", city: location.replace(/\(?\s*hybrid\s*\)?/i, "").trim(), quote: location };
-  if (/^(online|virtual|remote|线上|在线)/i.test(location.trim())) return { mode: "online", quote: location };
-  return { mode: "in_person", city: location, quote: location };
-}
-
 /**
  * Track ②'s check as `Clients.feasibility`: the verdict on each find before it is kept, so an infeasible one is held back by `holdBack`
- * and a conflicting one carries its clash (§17.6–17.7). Where the event is comes from the record's `place` when the reader filled it, else
- * from its `location` line. An event one turns up to needs no preparation; an application takes its watch's lead; a watch's radius
- * (「少来·太远」 tightens it) is the local limit, as the worker passes it.
+ * and a conflicting one carries its clash (§17.6–17.7). The record goes in as discovery stored it, as `discoveryFeasibility` passes it:
+ * where the event is comes only from its `place` (D11: nothing fills it yet). An event one turns up to needs no preparation; an
+ * application takes its watch's lead; a watch's radius (「少来·太远」 tightens it) is the local limit, as the worker passes it.
  */
 export function worldFeasibility(ctx: EngineContext, check: FeasibilityOf): FeasibilityFn {
   return async (opportunity, { now, watch }) => {
     let availability: AvailabilityWindow[] = [];
     try { availability = JSON.parse(ctx.store.getSetting(ctx.workspaceId, AVAILABILITY_SETTING) ?? "[]") as AvailabilityWindow[]; } catch { /* unknown */ }
     const citizenship = ctx.store.listProfileFacts(ctx.workspaceId).find((fact) => fact.slot === "apply.citizenship")?.value;
-    const place = (opportunity as { place?: unknown }).place ?? placeFromLocation(opportunity.location);
-    const verdict = await check({ ...opportunity, place } as Opportunity, {
+    const verdict = await check(opportunity, {
       now, timeZone: PERSON_ZONE, prepDays: opportunity.kind === "event" ? 0 : watch?.leadDays ?? 0, places: worldPlaces(ctx),
       geocode: (query: { city: string; country?: string }) => worldGeocode(ctx.world, query), citizenship,
       visa: (from: string, to: string) => worldVisa(ctx.world, from, to, now), blocks: feasibilityBlocks(ctx.world), availability, locale: "zh",

@@ -75,9 +75,9 @@ describe("safety invariants (§17.5)", () => {
 
 describe("§17.0 thresholds", () => {
   const anyPending = SCENARIOS.some((scenario) => pendingFor(scenario.requires).length) || COUNTERFACTUALS.some((pair) => pendingFor(pair.requires).length);
-  // Defects that still hold the thresholds down (a scenario's own defect fails its own test; the thresholds may hold without it). D10
-  // alone leaves recall at 12/13, above the bar, so nothing is listed; a defect that pulls a metric under its threshold goes here.
-  const THRESHOLD_DEFECTS: Partial<Record<Persona, string[]>> = {};
+  // Defects that still hold the thresholds down (a scenario's own defect fails its own test; the thresholds may hold without it). D11
+  // pushes two infeasible finds and leaves flip consistency at 5/8 for both personas.
+  const THRESHOLD_DEFECTS: Partial<Record<Persona, string[]>> = { faithful: ["D11"], adversarial: ["D11"] };
   const blocking = (persona: Persona) => [...(THRESHOLD_DEFECTS[persona] ?? [])].sort();
   for (const persona of PERSONAS) {
     const defects = blocking(persona);

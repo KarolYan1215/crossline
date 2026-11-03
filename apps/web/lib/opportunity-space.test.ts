@@ -42,6 +42,14 @@ test("a local event too far away is not offered; one in town is, with where it i
   expect(asks[0]!.why).toMatch(/路上：约 0 公里，步行单程约 \d+ 分钟/);
 });
 
+test("an opportunity whose date is not out yet is offered as 「日期待定」, not hidden as too late", () => {
+  setup([opportunity({ id: "tbd", key: "tbd", kind: "application", title: "Visiting Student Program 2027", startsAt: { day: "2027", quote: "Summer 2027 (dates TBD)" },
+    place: { mode: "in_person", city: "Madison", country: "United States", quote: "Madison" } })]);
+  const [card] = opportunityOfferAsks(TEST_CTX, NOW);
+  expect(card?.entityId).toBe("tbd");
+  expect(card!.why).toContain("日期待定：截止和举办日期都还没公布");
+});
+
 test("a clash with a fixed arrangement is explained; agreeing to move it asks how, and the answer is kept and undoable", async () => {
   setup([opportunity({ place: { mode: "in_person", city: "Madison", country: "United States", quote: "Madison" } })],
     [{ id: "event:ev-1", title: "Lab meeting", day: "2026-11-20", start: "10:30", end: "11:30" },

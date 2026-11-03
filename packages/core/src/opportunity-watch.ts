@@ -148,11 +148,12 @@ export type CalendarClash = { blockId: string; title: string; start: string; end
 /**
  * Computed in code before anything reaches the person. `infeasible` is never shown (expired, can no longer be prepared in time, too far
  * for a local event, a visa that cannot arrive). `conflict` is shown at once with the clash explained; the person may agree to move a
- * fixed arrangement, and how to move it is then asked (§17.7).
+ * fixed arrangement, and how to move it is then asked (§17.7). `dateUnconfirmed` (additive): neither a deadline nor a start day is known
+ * yet, so `latestStart` is today and only place and journey were judged; shown as 「日期待定」 and judged again when a date appears.
  */
 export type Feasibility =
   | { state: "feasible"; place?: PersonPlace | undefined; travel?: TravelEstimate | undefined; visa?: VisaCheck | undefined;
-    latestStart: string }
+    latestStart: string; dateUnconfirmed?: true | undefined }
   | { state: "conflict"; clashes: CalendarClash[]; place?: PersonPlace | undefined; travel?: TravelEstimate | undefined;
     visa?: VisaCheck | undefined; latestStart: string }
   | { state: "infeasible"; reasons: Array<{ code: InfeasibleCode; detail: string }> };
