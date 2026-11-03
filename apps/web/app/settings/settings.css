@@ -311,6 +311,8 @@ body:has(.settings-page) .running-head{background:var(--ds-bg)}
 .sk-item>summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:13px;min-width:0}
 .sk-item>summary small{font-size:12px;color:var(--graphite)}
 .sk-item>summary strong{overflow-wrap:anywhere}
+/* A grown workflow's summary is a whole sentence: one line while folded, in full once opened. */
+.sk-item:not([open])>summary .sk-title{flex:1 1 12em;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sk-item>summary::before{content:"▸";color:var(--graphite)}
 .sk-item[open]>summary::before{content:"▾"}
 

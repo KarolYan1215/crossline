@@ -327,7 +327,7 @@ function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSki
   const onRequest = flow.scheduleKind === "on_request";
   const accessLogin = (item: GrownSkillView["access"][number]) => item.login ? item.loggedInAt ? t("{{day}} 登录", { day: day(item.loggedInAt) }) : t("需本人登录") : t("公开页面");
   return <li className="sk-public"><details className="advanced sk-item" open={open}>
-    <summary>{flow.lines[0] && <LineTag line={flow.lines[0]}>{flow.lineLabel || flow.lines[0]}</LineTag>}<strong className="gen">{flow.summary}</strong><Tag>{t(flow.category)}</Tag>
+    <summary>{flow.lines[0] && <LineTag line={flow.lines[0]}>{flow.lineLabel || flow.lines[0]}</LineTag>}<strong className="gen sk-title" title={flow.summary}>{flow.summary}</strong><Tag>{t(flow.category)}</Tag>
       <Tag tone={flow.status === "active" ? "ok" : waiting ? "warn" : "neutral"}>{flow.status === "active" ? t("启用", { context: "state" }) : waiting ? t("待本人确认风险") : t("已关闭")}</Tag>
       {flow.verdict === "text_only" && <Tag tone={verdict.tone}>{t(verdict.label)}</Tag>}</summary>
     <div className="sk-line-head">

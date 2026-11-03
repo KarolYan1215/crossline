@@ -46,3 +46,25 @@ for (const row of db.prepare("SELECT id, workspace_id, title, state, audit_json 
   const order = db.prepare("SELECT id, state FROM work_orders WHERE workspace_id = ? AND (id = ? OR payload_json LIKE ?)").get(row.workspace_id, row.id, `%${row.id}%`);
   console.log(["mail capture", row.workspace_id.slice(0, 8), row.id, row.state, row.title.slice(0, 80), audit.blocker?.code ?? "", order ? `order ${order.id} ${order.state}` : "no order"].join("  "));
 }
+
+// A week of what reaches the person without their asking (2026-11-03 walkthrough): mailboxes and what sorting decided, grown
+// workflows and their runs, the favourites collection. Counts, states and codes only, never a sender, subject or note.
+const week = new Date(Date.now() - 7 * 86400000).toISOString();
+const parse = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
+for (const row of db.prepare("SELECT workspace_id, key, value FROM settings WHERE key IN ('mail.accounts', 'mail.log', 'skills.grown')").all()) {
+  const value = parse(row.value);
+  if (row.key === "mail.accounts") for (const account of value ?? []) console.log(["mailbox", row.workspace_id.slice(0, 8), account.host ?? "", account.sorting ?? account.triage ?? "", account.lastReadAt ?? account.lastRead ?? "", account.failure?.code ?? account.lastError ?? "", account.bookkeeping === false ? "no-books" : ""].join("  "));
+  if (row.key === "mail.log") {
+    const counts = {};
+    for (const entry of value ?? []) if ((entry.at ?? "") >= week) counts[entry.decision ?? entry.kind ?? "?"] = (counts[entry.decision ?? entry.kind ?? "?"] ?? 0) + 1;
+    console.log(["mail decisions 7d", row.workspace_id.slice(0, 8), JSON.stringify(counts)].join("  "));
+  }
+  if (row.key === "skills.grown") for (const skill of value ?? []) console.log(["grown", row.workspace_id.slice(0, 8), skill.id, skill.state ?? "", skill.enabled === false ? "off" : "on",
+    skill.trigger?.kind ?? skill.manifest?.trigger?.kind ?? "", skill.lastRunAt ?? "", skill.lastRead ? `lastRead ${skill.lastRead.at} items ${skill.lastRead.items}` : ""].join("  "));
+}
+for (const row of db.prepare("SELECT workspace_id, type, created_at, payload_json FROM events WHERE (type LIKE 'collect.%' OR type LIKE 'skill.grown.%' OR type LIKE 'automation.%' OR type LIKE 'mail.reply%') AND created_at >= ? ORDER BY created_at").all(week)) {
+  const p = parse(row.payload_json) ?? {};
+  console.log([row.created_at.slice(5, 19), row.workspace_id.slice(0, 8), row.type, p.workflowId ?? p.id ?? p.automationId ?? "", p.state ?? p.outcome ?? p.code ?? "", p.items ?? p.read ?? ""].join("  "));
+}
+for (const row of db.prepare("SELECT workspace_id, type, COUNT(*) AS n, MAX(created_at) AS last FROM events WHERE type LIKE 'capture.%' AND created_at >= ? GROUP BY workspace_id, type").all(week))
+  console.log(["captures 7d", row.workspace_id.slice(0, 8), row.type, row.n, row.last].join("  "));
