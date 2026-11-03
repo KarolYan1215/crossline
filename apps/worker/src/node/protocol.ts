@@ -83,6 +83,51 @@ export const ALLOWED_METHODS = new Set([
 const TURN_FIXED = ["cwd", "approvalPolicy", "approvalsReviewer", "sandboxPolicy", "permissions", "runtimeWorkspaceRoots"];
 /** Configuration keys that would set the sandbox or approval policy through the back door. */
 const CONFIG_FIXED = ["sandbox_mode", "approval_policy", "sandbox_workspace_write", "approvals_reviewer"];
+const bool = (value: unknown) => typeof value === "boolean";
+const off = (value: unknown) => value === false;
+const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+/** A provider defined for one thread, as `threadProvider` writes it: no command, no key, never the node's own OpenAI sign-in. */
+const PROVIDER_KEYS: Record<string, (value: unknown) => boolean> = {
+  name: (value) => typeof value === "string", base_url: (value) => typeof value === "string", wire_api: (value) => value === "responses" || value === "chat",
+  requires_openai_auth: off, supports_websockets: bool, stream_idle_timeout_ms: count, request_max_retries: count, stream_max_retries: count,
+  http_headers: (value) => !!value && typeof value === "object" && !Array.isArray(value) && Object.values(value).every((item) => typeof item === "string")
+};
+const providerDefinition = (value: unknown) => !!value && typeof value === "object" && !Array.isArray(value)
+  && Object.entries(value).every(([key, item]) => PROVIDER_KEYS[key]?.(item) === true);
+/**
+ * The configuration keys the server's runners send (skill-runner.ts: `startIsolatedThread`, `startAgentThread`, a provider's thread,
+ * `contextWindowConfig`, `onlyOwnPlugins`, connectors, code mode), each with the values they send; any other key is refused (the review of
+ * 2026-11-03: a denylist missed `sandbox_workspace_write.*`, `permissions.*`, `mcp_servers.*`, `features.unified_exec`, `shell_environment_policy.*`).
+ * What turns a capability on that the node must never give is allowed only off.
+ */
+const CONFIG_ALLOWED: Array<[RegExp, (value: unknown) => boolean]> = [
+  [/^web_search$/, (value) => value === "live" || value === "cached" || value === "disabled"],
+  [/^project_doc_max_bytes$/, (value) => value === 0],
+  [/^include_environment_context$/, bool],
+  [/^memories\.(use_memories|generate_memories)$/, off],
+  [/^tools\.(update_plan|experimental_request_user_input)\.enabled$/, bool],
+  [/^features\.(shell_tool|multi_agent|multi_agent_v2|apps|web_search|standalone_web_search|image_generation|view_image|tool_suggest|token_budget|current_time_reminder|sleep_tool|send_message_to_user_async|code_mode|deferred_executor|goals|plugins|memories|default_mode_request_user_input)$/, bool],
+  [/^features\.(hooks|codex_hooks|plugin_hooks|js_repl|request_permissions_tool)$/, off],
+  [/^apps\._default\.default_tools_approval_mode$/, (value) => value === "writes"],
+  [/^apps\._default\.destructive_enabled$/, off],
+  [/^mcp_servers\.[^.]+\.enabled$/, off],
+  [/^plugins\._default\.enabled$/, bool],
+  [/^plugins\.[A-Za-z0-9_-]+@[A-Za-z0-9_-]+\.enabled$/, bool],
+  [/^model_providers\.[A-Za-z0-9_-]+$/, providerDefinition],
+  [/^(model_context_window|model_auto_compact_token_limit)$/, count],
+  [/^skills\.include_instructions$/, bool]
+];
+const configAllowed = (key: string, value: unknown) => CONFIG_ALLOWED.some(([pattern, check]) => pattern.test(key) && check(value));
+
+/** Whether a path names `..` anywhere: refused in every path field, so no resolving can walk out of where it seems to point. */
+const climbs = (value: string) => value.split(/[\\/]+/).includes("..");
+/** The path fields of a request, at any depth (`cwd`, `cwds`, a marketplace path, workspace roots). */
+function pathValues(value: unknown, key = ""): string[] {
+  if (typeof value === "string") return PATH_KEYS.has(key) ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap((item) => pathValues(item, key));
+  if (value && typeof value === "object") return Object.entries(value).flatMap(([name, item]) => pathValues(item, name));
+  return [];
+}
 
 /** Whether `cwd` is one of this computer's task directories: a direct child of `tasksRoot` with a plain name. */
 export function inTaskDir(cwd: unknown, tasksRoot: string): boolean {
@@ -98,6 +143,7 @@ export function inTaskDir(cwd: unknown, tasksRoot: string): boolean {
  */
 export function refusal(method: string, params: unknown, shell?: { tasksRoot: string }): string | undefined {
   if (!ALLOWED_METHODS.has(method)) return `NODE_METHOD_REFUSED: ${method}`;
+  if (pathValues(params).some(climbs)) return "NODE_PATH_REFUSED: ..";
   const value = (params ?? {}) as { sandbox?: unknown; config?: Record<string, unknown>; cwd?: unknown; approvalPolicy?: unknown; approvalsReviewer?: unknown;
     environments?: unknown } & Record<string, unknown>;
   if (method === "turn/start") {
@@ -110,6 +156,8 @@ export function refusal(method: string, params: unknown, shell?: { tasksRoot: st
   const features = (config.features ?? {}) as Record<string, unknown>;
   if (CONFIG_FIXED.some((key) => config[key] !== undefined)) return "NODE_SHELL_REFUSED: config";
   if (value.sandbox === "workspace-write" || config.default_permissions !== undefined || config.permissions !== undefined) return "NODE_SHELL_REFUSED: sandbox";
+  const unknown = Object.entries(config).find(([key, item]) => !configAllowed(key, item));
+  if (unknown) return `NODE_CONFIG_REFUSED: ${unknown[0]}`;
   const wantsShell = value.sandbox === "danger-full-access" || config["features.shell_tool"] === true || features.shell_tool === true;
   if (!wantsShell) return undefined;
   if (!shell) return "NODE_SHELL_REFUSED: shell";
@@ -172,9 +220,15 @@ export function rewriteParams(params: unknown, map: { roots: string[]; mirror: s
   const walk = (value: unknown, key: string): unknown => {
     if (typeof value === "string") {
       if (key === "base_url" && map.gateway && map.relay && value.startsWith(map.gateway)) return map.relay + value.slice(map.gateway.length);
-      // A path already on this computer (a shell run's task directory, checked by `refusal`) stays as it is.
-      if (map.keep && (value === map.keep || value.startsWith(map.keep + path.sep) || value.startsWith(`${map.keep}/`))) return value;
-      return PATH_KEYS.has(key) && value.startsWith("/") ? nodePath(value, map.roots, map.mirror, map.work) : value;
+      // A path already on this computer (a shell run's task directory, checked by `refusal`) stays as it is — judged on the resolved path,
+      // the way `refusal` judged it, and never with `..` in it.
+      if (map.keep && PATH_KEYS.has(key) && !climbs(value) && path.isAbsolute(value)) {
+        const resolved = path.resolve(value);
+        const root = path.resolve(map.keep);
+        if (resolved === root || resolved.startsWith(root.endsWith(path.sep) ? root : root + path.sep)) return resolved;
+      }
+      // Any other absolute path (a server path, or one naming this computer's own folders) goes to the mirror or the empty work directory.
+      return PATH_KEYS.has(key) && (value.startsWith("/") || path.isAbsolute(value)) ? nodePath(value, map.roots, map.mirror, map.work) : value;
     }
     if (Array.isArray(value)) return value.map((item) => walk(item, key));
     if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, walk(item, name)]));
