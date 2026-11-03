@@ -82,6 +82,11 @@ beforeAll(async () => {
           for (const option of list.querySelectorAll("[role=option]")) option.onclick = () => { box.value = option.textContent; list.hidden = true; box.setAttribute("aria-expanded", "false"); };
         </script>`));
       if (request.url === "/captcha") return send(page("Check", `<h1>Verify you are human</h1>`));
+      // A one-click application: 「Apply」 with no fields sends it at once.
+      if (request.url === "/one-click") return send(page("Job", `<h1>Research intern</h1><form method="post" action="/done"><input type="hidden" name="profile" value="saved"><button type="submit">Apply</button></form>`));
+      // A page that reaches its confirmation without the engine's click (the person clicked in the window meanwhile).
+      if (request.url === "/self") return send(page("RSVP", `<h1>AI Night</h1><button type="button">Register</button>
+        <script>setTimeout(() => { document.body.innerHTML = "<h1>You're registered!</h1><p>See you there.</p>"; }, 1200);</script>`));
       response.writeHead(404); response.end();
     });
   });
@@ -244,6 +249,24 @@ describe.skipIf(!chrome)("form engine on fake registration pages", () => {
     expect(saved.filter((item) => item.event?.type === "opportunity.form.opened")).toHaveLength(1);
     expect(result.pages[0]!.actions.at(-1)).toMatchObject({ op: "submit", verdict: "allow", reason: "opened the form" });
     expect(saved.filter((item) => item.event?.type === "opportunity.form.submit_clicked")).toHaveLength(2);
+  }, 120_000);
+
+  it("for another account's run, an 「Apply」 that may send the application at once is held for the person like any submission", async () => {
+    submissions.length = 0;
+    const propose = async (): Promise<FormFillAnswer> => ({ pageKind: "form", note: "", actions: [move("next", "button", "Apply")] as FormFillAnswer["actions"] });
+    const { result, saved } = await run(opportunity({ kind: "application" }), `${base}/one-click`, { propose, personSubmits: true });
+    expect(submissions).toHaveLength(0);
+    expect(result).toMatchObject({ state: "ready_to_submit" });
+    expect(result.heldBecause).toContain("最后一步由本人点击");
+    expect(saved.some((item) => item.event?.type === "opportunity.form.submit_clicked")).toBe(false);
+  }, 120_000);
+
+  it("records the system as submitter only after its own submit click", async () => {
+    const propose = async (): Promise<FormFillAnswer> => ({ pageKind: "form", note: "", actions: [move("submit", "button", "Register")] as FormFillAnswer["actions"] });
+    const slowCheck = async () => { await new Promise((resolve) => setTimeout(resolve, 2500)); return { ok: true, problems: [] }; };
+    const { result, saved } = await run(opportunity(), `${base}/self`, { propose, check: slowCheck });
+    expect(saved.some((item) => item.event?.type === "opportunity.form.submit_clicked")).toBe(false);
+    expect(result).toMatchObject({ state: "submitted", submittedBy: "person" });
   }, 120_000);
 
   it("never lets a fallback turn the page or submit", async () => {
