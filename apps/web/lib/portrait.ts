@@ -1,6 +1,7 @@
 import "server-only";
 import { formatInTimeZone } from "date-fns-tz";
 import { answerLine, energyRhythm, statedSleep, ONBOARDING_INSIGHTS, portraitConfirmedByInsights, portraitFingerprint, portraitStillConfirmed, PROFILE_CONFIRMED, readInsightRatings,
+  PROFILE_CLAIM_STATUS_SETTING, REPORT_PRIVACY_SETTING, currentMineVersion, exportableClaims, mineSkillSettingKey, readClaimStatus, readMineSkill, readPrivacyChoices, redactPortrait,
   type AccessContext, type EnergyLevel, type EnergyRhythm, type PortraitReport, type ProfileModel } from "@crossline/core";
 import { interviewLocale, readLocale, sayDoFor } from "@crossline/db";
 import { tFor } from "./i18n";
@@ -9,7 +10,10 @@ import { effectiveSchedulePreferences, getStore, readAvailability } from "./cros
 import { energyModel } from "./energy";
 import { currentFigure, figureUrl } from "./figures";
 import { identityLines } from "./lines";
-import { tOf } from "./locale";
+import { localeFor, tOf } from "./locale";
+import type { AgentKitInput } from "./agent-kit";
+import { allClaims } from "./profile-report";
+import { startSummary } from "./start-confirm";
 
 export type PortraitState = {
   report: PortraitReport | null; version: number; at: string | null;
@@ -80,6 +84,28 @@ export function loadPortrait(ctx: AccessContext): PortraitState {
     },
     confirmation: portraitConfirmation(ctx),
     appearance: appearanceOf(ctx)
+  };
+}
+
+/**
+ * What the agent export is built from (`buildAgentKit`): the start summary, the shareable report, the claims the person lets agents see,
+ * their live preferences (task-scoped ones and dictation left out) and each line's own rules (the current line-skill version).
+ */
+export function loadAgentKitInput(ctx: AccessContext): AgentKitInput {
+  const store = getStore();
+  const now = process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date();
+  const portrait = loadPortrait(ctx);
+  const status = readClaimStatus(store.getSetting(ctx.workspaceId, PROFILE_CLAIM_STATUS_SETTING));
+  const claims = exportableClaims(allClaims(ctx), readPrivacyChoices(store.getSetting(ctx.workspaceId, REPORT_PRIVACY_SETTING)), status)
+    .map((claim) => ({ ...claim, confirmed: status[claim.id]?.status === "confirmed" }));
+  const { lines, hours, fixed } = startSummary(ctx);
+  return {
+    at: now.toISOString(), locale: localeFor(ctx), summary: { lines, hours, fixed },
+    report: portrait.report ? redactPortrait(portrait.report) : null, rhythm: portrait.rhythm, claims,
+    preferences: store.listPreferences(ctx.workspaceId).filter((entry) => entry.source !== "dictation" && !entry.scope.startsWith("task:"))
+      .slice(0, 30).map((entry) => entry.text),
+    lineRules: identityLines(ctx).map((line) => ({ line: line.label,
+      rules: currentMineVersion(readMineSkill(store.getSetting(ctx.workspaceId, mineSkillSettingKey(line.id)) ?? undefined))?.rules ?? [] }))
   };
 }
 
