@@ -9,6 +9,9 @@
  * - `CrosslineNode.exe`, the tray (installer/node-tray/CrosslineNode.cs: icon, menu, Ctrl+Alt+H and the 小帮手's desktop window), compiled
  *   here with the .NET Framework C# compiler against the WebView2 SDK's managed DLLs, which ship beside it (`WEBVIEW2` below: version and
  *   SHA-256 pinned, Microsoft's Authenticode signature checked);
+ * - `ffmpeg\ffmpeg.exe` + `ffprobe.exe` + LICENSE: a pinned static build (`FFMPEG` below), downloaded once into `%LOCALAPPDATA%\crossline-build-cache`
+ *   (or `CROSSLINE_BUILD_CACHE`) and checked against its SHA-256; the node puts the folder first on PATH for the Codex it starts;
+ * - `Crossline-Node-Setup.exe`, the installer again under a name without the version (the stable download link);
  * - `node-latest.json`, the update manifest, signed with `CROSSLINE_RELEASE_KEY` (scripts/release-sign.ts) when that is set.
  *
  *   pnpm exec tsx scripts/package-node.ts [--version 1.0.0] [--site https://app.crossline.lol] [--codex-dir <folder with the release binaries>]
@@ -85,6 +88,35 @@ if (!/\b0\.163\.0\b/.test(codexVersion)) throw new Error(`CODEX_VERSION_UNEXPECT
 // The pinned release build only (codex-baseline.json `release`): a binary from elsewhere is never shipped by accident.
 if (sha256(path.join(stage, "codex", "codex.exe")) !== CODEX_RELEASE_BINARY_SHA256) throw new Error("CODEX_RELEASE_HASH_MISMATCH");
 
+// 2b. ffmpeg, for the shell assistant's video editing on this computer: Gyan's static essentials build, from its GitHub release (the zip's
+// SHA-256 pinned below, checked before anything is taken out of it). The download is kept outside the repository and reused.
+const FFMPEG = {
+  version: "9.0.2",
+  url: "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip",
+  sha256: "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba"
+};
+const buildCache = process.env.CROSSLINE_BUILD_CACHE ?? path.join(process.env.LOCALAPPDATA ?? path.join(repoRoot, ".."), "crossline-build-cache");
+const ffmpegZip = path.join(buildCache, path.basename(new URL(FFMPEG.url).pathname));
+if (!existsSync(ffmpegZip) || sha256(ffmpegZip) !== FFMPEG.sha256) {
+  console.log(`downloading ${FFMPEG.url}`);
+  const response = await fetch(FFMPEG.url);
+  if (!response.ok) throw new Error(`FFMPEG_DOWNLOAD_FAILED ${response.status}`);
+  mkdirSync(buildCache, { recursive: true });
+  writeFileSync(ffmpegZip, Buffer.from(await response.arrayBuffer()));
+}
+if (sha256(ffmpegZip) !== FFMPEG.sha256) throw new Error(`FFMPEG_HASH_MISMATCH ${ffmpegZip}`);
+const ffmpegTop = `ffmpeg-${FFMPEG.version}-essentials_build`;
+const ffmpegOut = path.join(buildCache, ffmpegTop);
+rmSync(ffmpegOut, { recursive: true, force: true });
+// Windows' own bsdtar reads zip; named by path so Git's tar (no zip support) is never the one found first.
+run(path.join(process.env.WINDIR ?? "C:\\Windows", "System32", "tar.exe"), ["-xf", ffmpegZip, "-C", buildCache,
+  `${ffmpegTop}/bin/ffmpeg.exe`, `${ffmpegTop}/bin/ffprobe.exe`, `${ffmpegTop}/LICENSE`]);
+mkdirSync(path.join(stage, "ffmpeg"), { recursive: true });
+for (const binary of ["ffmpeg.exe", "ffprobe.exe"]) cpSync(path.join(ffmpegOut, "bin", binary), path.join(stage, "ffmpeg", binary));
+cpSync(path.join(ffmpegOut, "LICENSE"), path.join(stage, "ffmpeg", "LICENSE.txt"));
+const ffmpegVersion = run(path.join(stage, "ffmpeg", "ffmpeg.exe"), ["-hide_banner", "-version"]).split("\n")[0]!.trim();
+if (!ffmpegVersion.includes(FFMPEG.version)) throw new Error(`FFMPEG_VERSION_UNEXPECTED ${ffmpegVersion}`);
+
 // 3. The Visual C++ runtime, app-local, beside each binary that imports it (a fresh Windows may not have it).
 const vswhere = path.join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Microsoft Visual Studio", "Installer", "vswhere.exe");
 const vsRoot = existsSync(vswhere) ? run(vswhere, ["-latest", "-products", "*", "-property", "installationPath"]).trim() : "";
@@ -94,7 +126,8 @@ const redist = path.join(vsRoot, "VC", "Redist", "MSVC", newest(path.join(vsRoot
 const crtDir = path.join(redist, readdirSync(redist).find((name) => /^Microsoft\.VC\d+\.CRT$/.test(name))!);
 const dumpbin = path.join(vsRoot, "VC", "Tools", "MSVC", newest(path.join(vsRoot, "VC", "Tools", "MSVC")), "bin", "Hostx64", "x64", "dumpbin.exe");
 const VC_RUNTIME = /^(msvcp140[a-z0-9_]*|vcruntime140[a-z0-9_]*|concrt140|vccorlib140)\.dll$/i;
-for (const binary of [path.join(stage, "node.exe"), path.join(stage, "codex", "codex.exe"), path.join(stage, "codex", "codex-code-mode-host.exe")]) {
+for (const binary of [path.join(stage, "node.exe"), path.join(stage, "codex", "codex.exe"), path.join(stage, "codex", "codex-code-mode-host.exe"),
+  path.join(stage, "ffmpeg", "ffmpeg.exe"), path.join(stage, "ffmpeg", "ffprobe.exe")]) {
   const imports = (run(dumpbin, ["/nologo", "/dependents", binary]).match(/^\s+(\S+\.dll)\s*$/gim) ?? []).map((line) => line.trim());
   for (const dll of imports.filter((name) => VC_RUNTIME.test(name))) {
     const source = path.join(crtDir, dll.toLowerCase());
@@ -127,6 +160,8 @@ writeFileSync(path.join(notices, "README.txt"), [
   `- OpenAI Codex（codex\\codex.exe、codex\\codex-code-mode-host.exe，${codexVersion}），Apache-2.0，见 codex-LICENSE.txt 与 codex-NOTICE.txt；`,
   "  源码固定在 https://github.com/openai/codex 的 rust-v0.163.0（83086188ae0614bd882818ff1aa23f3194962012），附一处 Windows 迁移校验和补丁",
   "- ws（打包在 main.mjs 内），MIT，见 ws-LICENSE.txt",
+  `- FFmpeg ${FFMPEG.version}（ffmpeg\\ffmpeg.exe、ffmpeg\\ffprobe.exe，Gyan Doshi 的 essentials 静态构建，${FFMPEG.url}），`,
+  "  GPLv3，见 ffmpeg\\LICENSE.txt；FFmpeg 源码见 https://ffmpeg.org/releases/ ，该构建所含各库的源码与配置见 https://www.gyan.dev/ffmpeg/builds/",
   "- playwright-core（node_modules\playwright-core，用来驱动本机的 Chrome 或 Edge 读取本人登录的网站），Apache-2.0，见其目录内的 LICENSE",
   "- Microsoft Visual C++ 运行库（msvcp140*.dll、vcruntime140*.dll，放在用到它们的模块旁边），按 Visual Studio 许可条款中的可分发代码条款随附",
   "- Microsoft Edge WebView2 SDK 1.0.2365.46（Microsoft.Web.WebView2.Core.dll、Microsoft.Web.WebView2.WinForms.dll、WebView2Loader.dll，",
@@ -149,9 +184,11 @@ writeFileSync(path.join(stage, "start.vbs"), [
 const WEBVIEW2 = {
   version: "1.0.2365.46",
   files: {
-    "Microsoft.Web.WebView2.Core.dll": "98fe2f435d4a3aaac4b96f4ef11915f12aaac5ba702214eca2154f575e3d9d10",
-    "Microsoft.Web.WebView2.WinForms.dll": "449579558f62144f0e884324bde96ca188c6ff2fbdbdc5aff5b82be0850d79f9",
-    "WebView2Loader.dll": "95a001a77b41c642b63d2d5a583cd868c9782c806f9cc03ff55ee95e46601a23"
+    // From nuget.org's package (its SHA-512 checked against NuGet's catalog, 2026-11-03): lib/net45 and runtimes/win-x64/native. The
+    // values pinned before matched no file of that package.
+    "Microsoft.Web.WebView2.Core.dll": "a7baa548c354ef9223f4fd19d2bae33c3eb8cb987bf7b577828897388110740f",
+    "Microsoft.Web.WebView2.WinForms.dll": "3bf5b0990756e5b8e6502d51bc228962d9d3e59a358eaca9ba8dc87bea86c1de",
+    "WebView2Loader.dll": "5ebda0b70e04873607ff0e8ceea8fb29074b14717c2a67c2086f4ee42404ec7a"
   } as Record<string, string>
 };
 const webview2Root = option("webview2-dir")
@@ -177,6 +214,7 @@ run(csc, ["-nologo", "-target:winexe", "-optimize", "-platform:x64", `-win32icon
 const base = option("release-base") ?? "https://github.com/KarolYan1215/crossline-releases/releases/download";
 const updateFeed = option("update-feed") ?? `${base.replace(/\/download$/, "")}/latest/download/node-latest.json`;
 const release = { version, site, updateFeed, codex: codexVersion, codexSha256: sha256(path.join(stage, "codex", "codex.exe")), node: process.version,
+  ffmpeg: { version: FFMPEG.version, zipSha256: FFMPEG.sha256 },
   webview2: { version: WEBVIEW2.version, sha256: WEBVIEW2.files }, builtAt: new Date().toISOString() };
 writeFileSync(path.join(stage, "release.json"), `${JSON.stringify(release, null, 2)}\n`);
 
@@ -190,6 +228,8 @@ const chinese = [path.join(languages, "ChineseSimplified.isl"), path.join(langua
 run(iscc, [`/DAppVersion=${version}`, `/DStage=${stage}`, `/DOutputDir=${out}`, `/DIconFile=${icon}`, `/DLanguageFile=${chinese}`, "/Q",
   path.join(repoRoot, "installer", "crossline-node.iss")]);
 const setup = path.join(out, `Crossline-Node-Setup-${version}.exe`);
+// The same installer under a name without the version, so `releases/latest/download/Crossline-Node-Setup.exe` always works as a link.
+cpSync(setup, path.join(out, "Crossline-Node-Setup.exe"));
 console.log(JSON.stringify({ setup, megabytes: Math.round(statSync(setup).size / 1_048_576), sha256: sha256(setup), ...release }));
 
 // 7. The update manifest, as the public releases repository serves it (asset `node-latest.json`), signed when the key is at hand.
