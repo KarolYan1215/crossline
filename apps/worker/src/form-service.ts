@@ -1,13 +1,13 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import {
-  APPLICATION_SLOTS, FIXED_EVENTS, FORM_CHECK_SCHEMA, FORM_FILL_SCHEMA, FORM_OBSERVE_SCHEMA, type FormBrowserInput, MAIL_ACCOUNTS_SETTING, SLOT_LABEL, STOP_LABEL, eventSlotOf, readMailAccounts, receiptMatches,
+  APPLICATION_SLOTS, FIXED_EVENTS, FORM_CHECK_SCHEMA, FORM_FILL_SCHEMA, FORM_OBSERVE_SCHEMA, type FormBrowserInput, MAIL_ACCOUNTS_SETTING, SLOT_LABEL, STOP_LABEL, eventSlotOf, readMailAccounts, receiptRun,
   validFixedEvent, validateFormCheck, validateFormFill, validateFormObserve,
   type ApplicationSlot, type FixedEvent, type FormCheckAnswer, type FormCheckContext, type FormFillAnswer, type FormFillContext, type FormObserveAnswer, type FormObserveInput, type Opportunity, type StoredFormRun
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { SecretStore } from "@crossline/connectors";
-import { confirmOpportunityFromRun, formRunOf, queueFormRun, readFormRuns, saveFormRun, type CrosslineStore } from "@crossline/db";
+import { formRunOf, queueFormRun, readFormRuns, saveFormRun, type CrosslineStore } from "@crossline/db";
 import { fillForm, watchForPersonSubmit, type FormDriver, type FormFallback } from "./form-engine";
 import { createBrowserUseTool } from "./browser-use";
 import { browserUseFallback, stagehandFallback } from "./form-fallbacks";
@@ -127,14 +127,15 @@ export function createFormService(deps: FormServiceDeps) {
   const notify = (workspaceId: string, run: StoredFormRun) => {
     const t = tOfWorkspace(store, workspaceId);
     const title = run.opportunity.title;
+    const act = run.decision.choice === "apply" ? t("申请", { context: "form" }) : t("报名", { context: "form" });
     const text = run.state === "waiting_person"
       ? run.stoppedFor === "missing_slot" && run.missingSlot
-        ? t("报名「{{title}}」需要「{{slot}}」，资料卡里还没有。填上后会接着填。", { title, slot: t(SLOT_LABEL[run.missingSlot]) })
-        : t("报名「{{title}}」停在第 {{page}} 页：{{why}}。处理好后按「继续」。", { title, page: run.pageNo, why: t(STOP_LABEL[run.stoppedFor ?? "engine_failed"]) })
-      : run.state === "ready_to_submit" ? t("报名「{{title}}」已填好，等本人在窗口里核对后提交。", { title })
-      : run.state === "submitted" ? t("报名「{{title}}」已提交，等确认。", { title })
-      : run.state === "confirmed" ? t("报名「{{title}}」已确认。", { title })
-      : t("报名「{{title}}」已停止。", { title });
+        ? t("{{act}}「{{title}}」需要「{{slot}}」，资料卡里还没有。填上后会接着填。", { act, title, slot: t(SLOT_LABEL[run.missingSlot]) })
+        : t("{{act}}「{{title}}」停在第 {{page}} 页：{{why}}。处理好后按「继续」。", { act, title, page: run.pageNo, why: t(STOP_LABEL[run.stoppedFor ?? "engine_failed"]) })
+      : run.state === "ready_to_submit" ? t("{{act}}「{{title}}」已填好，等本人在窗口里核对后提交。", { act, title })
+      : run.state === "submitted" ? t("{{act}}「{{title}}」已提交，等确认。", { act, title })
+      : run.state === "confirmed" ? t("{{act}}「{{title}}」已确认。", { act, title })
+      : t("{{act}}「{{title}}」已停止。", { act, title });
     sayToPerson(store, workspaceId, text, "opportunity_form", `${run.id}:${run.state}:${run.stoppedFor ?? ""}:${run.pageNo}`, [{ label: t("查看报名"), href: "/settings#apply" }]);
   };
 
@@ -162,8 +163,10 @@ export function createFormService(deps: FormServiceDeps) {
       }
     } else next = { ...next, calendarSkipped: "no start time" }; // i18n-ignore: a code kept on the run
     next = saveFormRun(store, workspaceId, next, { type: "opportunity.form.confirmed", payload: { ...(mail ? { mailFrom: mail.from } : {}), ...(next.calendarEventId ? { calendarEventId: next.calendarEventId } : {}) } });
-    // The opportunity's own confirmed mark is written here, where the sign-up is known to have gone through (§17.8).
-    confirmOpportunityFromRun(store, workspaceId, next);
+    // The one receipt path: the run's confirmation is also the opportunity's (the weekly review and the offer's history read `confirmedBy`).
+    if (store.confirmOpportunity(workspaceId, run.opportunityId, mail ? `mail:${mail.from}:${mail.at}` : `form:${run.id}`))
+      store.appendEvent({ ownerId: store.getWorkspaceOwnerId(workspaceId) ?? "system", workspaceId, idempotencyKey: `opportunity.confirmed:${run.opportunityId}`, type: "opportunity.confirmed",
+        entityId: run.opportunityId, payload: { runId: run.id, ...(mail ? { mailFrom: mail.from, subject: mail.subject } : {}) } });
     notify(workspaceId, next);
     return next;
   };
@@ -271,7 +274,7 @@ export function createFormService(deps: FormServiceDeps) {
       if (now.getTime() - Date.parse(run.confirmation.at) < RECEIPT_WAIT_MS) continue;
       const asked = saveFormRun(store, workspaceId, { ...run, receiptAskedAt: now.toISOString() }, { type: "opportunity.form.receipt_asked" });
       const t = tOfWorkspace(store, workspaceId);
-      sayToPerson(store, workspaceId, t("报名「{{title}}」提交两天了还没收到确认邮件，请在邮箱里找一下，收到了就在资料卡页确认。", { title: asked.opportunity.title }),
+      sayToPerson(store, workspaceId, t("{{act}}「{{title}}」提交两天了还没收到确认邮件，请在邮箱里找一下，收到了就在资料卡页确认。", { act: asked.decision.choice === "apply" ? t("申请", { context: "form" }) : t("报名", { context: "form" }), title: asked.opportunity.title }),
         "opportunity_form", `${asked.id}:receipt`, [{ label: t("查看报名"), href: "/settings#apply" }], now);
     }
     // A queued run waits while no window can be shown (a hosted server whose owner's node is not connected).
@@ -279,13 +282,22 @@ export function createFormService(deps: FormServiceDeps) {
     if (queued && !active.has(workspaceId) && windowFor(workspaceId)) void guarded(workspaceId, queued, false);
   };
 
-  /** A new mail from the registration host's own domain confirms the run waiting for it. */
-  const onNewMail = (workspaceId: string, messages: Array<{ from: string; fromAddress: string; subject: string; snippet: string; date: string }>) => {
+  /**
+   * A new mail from the registration host's own domain confirms the one run it names (`receiptRun`). A run still waiting for the person
+   * counts too: they submitted in the window, or on the site themselves, and the mail is the receipt.
+   */
+  const onNewMail = async (workspaceId: string, messages: Array<{ from: string; fromAddress: string; subject: string; snippet: string; date: string }>) => {
     if (!allowed(workspaceId)) return;
-    for (const run of readFormRuns(store, workspaceId)) {
-      if (run.state !== "submitted" || run.confirmation?.kind === "waitlist") continue;
-      const mail = messages.find((message) => receiptMatches(run, message));
-      if (mail) confirm(workspaceId, run, { from: mail.fromAddress, subject: mail.subject.slice(0, 200), at: mail.date });
+    for (const message of messages) {
+      const open = readFormRuns(store, workspaceId).filter((run) => (run.state === "submitted" && run.confirmation?.kind !== "waitlist") || run.state === "ready_to_submit" || run.state === "waiting_person");
+      const run = receiptRun(open, message);
+      if (!run) continue;
+      const mail = { from: message.fromAddress, subject: message.subject.slice(0, 200), at: message.date };
+      if (run.state === "submitted") { confirm(workspaceId, run, mail); continue; }
+      await closeSession(run.id);
+      const submitted = saveFormRun(store, workspaceId, { ...run, state: "submitted", submittedBy: "person", stoppedFor: undefined, confirmation: run.confirmation ?? { quote: "", kind: "pending", at: mail.at || new Date().toISOString() } },
+        { type: "opportunity.form.submitted", payload: { by: "person", seenInMail: true } });
+      confirm(workspaceId, submitted, mail);
     }
   };
 

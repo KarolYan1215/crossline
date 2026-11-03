@@ -14,7 +14,6 @@
   "下午": "afternoon",
   "不合适的时间：{{items}}": "Times that do not suit: {{items}}",
   "与「{{title}}」同样的资格要求": "The same eligibility rules as “{{title}}”",
-  "交给代填，提交前停下给本人看": "Hand to form filling; it stops for you before submitting",
   "代填停在第 {{page}} 页，要本人看一下。": "Form filling stopped on page {{page}} and needs you to look.",
   "代填在第 {{page}} 页。": "Form filling is on page {{page}}.",
   "会看：{{where}}。盯住后每 {{days}} 天看一次，找到符合资格的会出现在早报和这里。": "Will check: {{where}}. Once watched, it is checked every {{days}} days; openings you qualify for appear in the morning brief and here.",

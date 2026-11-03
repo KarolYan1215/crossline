@@ -1,7 +1,10 @@
 import "server-only";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   DAY_PART_LABEL, LESS_REASONS, LESS_REASON_LABEL, SCOUT_STATS_SETTING, WEEKDAY_LABEL, eligibilityAnswer, exploreAccount,
-  nextDeadline, prepStartFor, readScoutStats, watchYield, type AccessContext, type Ask, type AskField, type AskOption, type FormRunState,
+  nextDeadline, prepStartFor, readScoutStats, stepLeavesMachine, taskTitleOf, watchYield, type AccessContext, type Ask, type AskField, type AskOption, type FormRunState, type FormStop,
   type LessEntry, type LessReason, type OpportunityOutcome, type StoredWatch, type WatchTarget
 } from "@crossline/core";
 import {
@@ -110,8 +113,8 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
     const options: AskOption[] = [
       ...(answerFields.length ? [{ id: "answer", label: t("回答资格问题"), recommended: true, fields: answerFields }] : []),
       row.kind === "event"
-        ? { id: "register", label: t("报名"), detail: t("交给代填，提交前停下给本人看"), recommended: !answerFields.length }
-        : { id: "apply", label: t("申请"), detail: t("写一个已批准的里程碑「提交申请」，按截止倒推准备"), recommended: !answerFields.length },
+        ? { id: "register", label: t("报名"), detail: t("交给代填：免费活动填完自动提交，其余停在提交前等本人"), recommended: !answerFields.length }
+        : { id: "apply", label: t("申请"), detail: t("写一个已批准的里程碑「提交申请」，按截止倒推准备；准备做完后问要不要代填"), recommended: !answerFields.length },
       { id: "plan", label: t("加入计划"), detail: t("只写截止与准备，不代填") },
       { id: "less_kind", label: t("少来这类"), detail: t("这类机会隔久一点再看") },
       { id: "less", label: t("少来，说原因"), detail: t("按原因调整，周报里可撤销"), fields: [lessReasonField(t), { id: "note", label: t("一句话"), kind: "text", required: false }] },
@@ -286,10 +289,90 @@ export function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: s
   }
 }
 
-export type OpportunityWeek = { found: number; eligible: number; unknown: number; ineligible: number; registered: number; applied: number;
-  waitingForm: Array<{ id: string; title: string }>; ruledOut: Array<{ id: string; title: string; why: string }> };
+const DRAFTS_MAX = 6;
+const DRAFT_CHARS = 8_000;
+type ApplyReady = { row: StoredOpportunity; milestoneId: string; deadline?: string | undefined; prepared: string[]; drafts: Record<string, { text: string; version: string }> };
 
-/** The week's discovery for the weekly review (§8): found, signed up, applied, ruled out with the reasons, and sign-ups 「待代填」. */
+/**
+ * Applications whose preparation is done (§9 「材料齐了，⑥ 才开始」): the opportunity the person chose to apply for, its milestone's work
+ * all accepted but a submission step (the person's, `stepLeavesMachine`), no form run yet, its deadline not passed, not handed in by the
+ * person themselves. Filling then starts only on the person's press: no tracker or agent studied starts filling an application when
+ * materials are ready, and a tailored résumé or essay going out unseen is what Simplify's own help warns against.
+ */
+function applicationsReady(ctx: AccessContext, today: string): ApplyReady[] {
+  const store = getStore();
+  const runs = new Set(readFormRuns(store, ctx.workspaceId).map((run) => run.opportunityId));
+  const orders = store.listWorkOrders(ctx.workspaceId);
+  const claims = store.listEvidenceClaims(ctx.workspaceId);
+  return store.listOpportunities(ctx.workspaceId).flatMap((row): ApplyReady[] => {
+    if (row.decision !== "apply" || row.confirmedBy || runs.has(row.id)) return [];
+    if (row.deadlines.length && !nextDeadline(row, today)) return [];
+    if (store.listEvents(ctx.workspaceId, { type: "opportunity.apply_self", entityId: row.id }).length) return [];
+    const written = store.listEvents(ctx.workspaceId, { type: "opportunity.milestone_written", entityId: row.id })[0];
+    const milestoneId = (written?.payload as { milestoneId?: string } | undefined)?.milestoneId;
+    if (!milestoneId) return [];
+    const work = orders.filter((order) => order.milestoneId === milestoneId && order.state !== "archived");
+    const preparation = work.filter((order) => !stepLeavesMachine(taskTitleOf(order)));
+    if (!preparation.length || preparation.some((order) => order.state !== "accepted")) return [];
+    // Approved drafts for long answers: the accepted preparation's own text files (the person's or the assistant's), never anything else.
+    const drafts: ApplyReady["drafts"] = {};
+    for (const order of preparation) for (const claim of claims) {
+      if (Object.keys(drafts).length >= DRAFTS_MAX) break;
+      if (claim.workOrderId !== order.id || claim.reviewStatus !== "accepted" || claim.kind !== "file" || !claim.uri.startsWith("file://") || !/\.(txt|md|markdown)$/i.test(claim.uri)) continue;
+      try {
+        const text = readFileSync(fileURLToPath(claim.uri), "utf8").trim().slice(0, DRAFT_CHARS);
+        if (text) drafts[`d${Object.keys(drafts).length + 1}`] = { text, version: `${path.basename(fileURLToPath(claim.uri))} · ${taskTitleOf(order).slice(0, 40)}` };
+      } catch { /* a file removed from disk is no draft */ }
+    }
+    return [{ row, milestoneId, deadline: nextDeadline(row, today), prepared: preparation.map((order) => taskTitleOf(order)), drafts }];
+  });
+}
+
+export function opportunityApplyReadyAsks(ctx: AccessContext, now = new Date()): Ask[] {
+  const locale = localeFor(ctx);
+  const t = tFor(locale);
+  const sep = locale === "en" ? " " : "";
+  const today = planToday(ctx, now);
+  return applicationsReady(ctx, today).map(({ row, deadline, prepared, drafts }): Ask => {
+    const left = deadline ? daysUntil(today, deadline) : undefined;
+    const count = Object.keys(drafts).length;
+    return {
+      id: `oppready:${row.id}`, kind: "opportunity_apply_ready", entityId: row.id, line: row.lineId, important: true,
+      urgency: left !== undefined && left <= 2 ? "now" : left !== undefined && left <= 7 ? "soon" : "later",
+      ...(deadline ? { dueDay: deadline } : {}), raisedAt: row.decidedAt ?? row.updatedAt, fingerprint: `${prepared.length}|${count}`,
+      preview: { kind: "file", href: row.url, label: row.organizer || new URL(row.url).hostname },
+      title: t("「{{title}}」的申请准备做完了，要代填吗？", { title: short(row.title, 60) }),
+      why: [t("已完成：{{items}}。", { items: prepared.slice(0, 4).join(locale === "en" ? ", " : "、") }),
+        deadline ? t("截止 {{day}}。", { day: deadline }) : t("滚动录取，越早越好。"),
+        count ? t("{{count}} 份文稿会作为长回答的草稿交给代填。", { count }) : t("没有可用的文稿，长回答处会停下由本人填写。")].join(sep),
+      options: [
+        { id: "fill", label: t("代填申请"), recommended: true, detail: t("打开报名网站的窗口填好，停在提交前，由本人核对后提交") },
+        { id: "self", label: t("我自己去交"), detail: t("不代填，这条不再问") }
+      ]
+    };
+  });
+}
+
+export function answerOpportunityApplyReady(ctx: AccessContext, ask: Ask, optionId: string, now = new Date()): { ok: true } | { ok: false; code: string } {
+  const store = getStore();
+  const ready = applicationsReady(ctx, planToday(ctx, now)).find((item) => item.row.id === ask.entityId);
+  if (!ready) return { ok: false, code: "OPPORTUNITY_NOT_READY" };
+  if (optionId === "self") {
+    store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `opportunity.apply_self:${ready.row.id}`, type: "opportunity.apply_self",
+      entityId: ready.row.id, payload: { milestoneId: ready.milestoneId } });
+    return { ok: true };
+  }
+  if (optionId !== "fill") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+  const { terms: _terms, verdict: _verdict, decision: _decision, decidedAt: _decidedAt, laterUntil: _laterUntil, confirmedBy: _confirmedBy, updatedAt: _updatedAt, ...opportunity } = ready.row;
+  queueFormRun(store, ctx.workspaceId, { opportunity, choice: "apply", at: now.toISOString(), ...(Object.keys(ready.drafts).length ? { drafts: ready.drafts } : {}) });
+  return { ok: true };
+}
+
+export type OpportunityWeek = { found: number; eligible: number; unknown: number; ineligible: number; registered: number; applied: number;
+  /** Each registration or application handed to the form filler that is still under way, or ended this week, with its state. */
+  forms: Array<{ id: string; title: string; state: FormRunState; stoppedFor?: FormStop | undefined }>; ruledOut: Array<{ id: string; title: string; why: string }> };
+
+/** The week's discovery for the weekly review (§8): found, signed up, applied, ruled out with the reasons, and where each form run stands. */
 export function loadOpportunityWeek(ctx: AccessContext, now = new Date()): OpportunityWeek {
   const store = getStore();
   const since = new Date(now.getTime() - 7 * DAY).toISOString();
@@ -301,7 +384,8 @@ export function loadOpportunityWeek(ctx: AccessContext, now = new Date()): Oppor
     found: week.length, eligible: week.filter((row) => row.verdict.state === "eligible").length, unknown: week.filter((row) => row.verdict.state === "unknown").length,
     ineligible: week.filter((row) => row.verdict.state === "ineligible").length,
     registered: decidedThisWeek.filter((row) => row.decision === "register").length, applied: decidedThisWeek.filter((row) => row.decision === "apply").length,
-    waitingForm: rows.filter((row) => runs.get(row.id)?.state === "queued").map((row) => ({ id: row.id, title: row.title })),
+    forms: [...runs.values()].filter((run) => (run.state !== "confirmed" && run.state !== "stopped") || run.updatedAt >= since)
+      .map((run) => ({ id: run.id, title: run.opportunity.title, state: run.state, ...(run.state === "waiting_person" ? { stoppedFor: run.stoppedFor } : {}) })),
     ruledOut: week.flatMap((row) => row.verdict.state === "ineligible"
       ? [{ id: row.id, title: row.title, why: row.verdict.failed.map((item) => `${item.rule}（${item.why}）`).join("；") }] : []) // i18n-ignore: the page's own words joined
   };

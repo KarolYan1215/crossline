@@ -29,7 +29,7 @@ import { placesToAsk, setPlaceMinutes } from "./travel";
 import { identityLines } from "./lines";
 import { decisionHorizon } from "./horizon";
 import { answerRelationCheck, relationCheckAsks } from "./artifact-relations";
-import { answerApplicationResult, answerOpportunityNeed, answerOpportunityOffer, opportunityNeedAsks, opportunityOfferAsks } from "./opportunities";
+import { answerApplicationResult, answerOpportunityApplyReady, answerOpportunityNeed, answerOpportunityOffer, opportunityApplyReadyAsks, opportunityNeedAsks, opportunityOfferAsks } from "./opportunities";
 import { agentBlockedAsks, answerAgentAsk } from "./agent-ask";
 import { answerOutcome, outcomeAsks } from "./outcome-check";
 import { answerProgress, progressAsks } from "./progress-check";
@@ -1044,7 +1044,7 @@ export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueAsks, overdueTaskAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, eventAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at), ({ ctx: context }: Source) => opportunityNeedAsks(context),
-    ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at)]
+    ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
     // One card per id: two with one id are the same question twice, and answering finds only the first.
     .filter((ask, index, all) => all.findIndex((other) => other.id === ask.id) === index);
@@ -1441,6 +1441,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     case "opportunity_need": return answerOpportunityNeed(ctx, ask, optionId, values);
     case "opportunity_offer": return answerOpportunityOffer(ctx, ask, optionId, values);
     case "opportunity_result": return answerApplicationResult(ctx, ask, optionId);
+    case "opportunity_apply_ready": return answerOpportunityApplyReady(ctx, ask, optionId);
     case "outcome_check": return answerOutcome(ctx, ask, optionId, values, choice.note);
     case "progress_check": return answerProgress(ctx, ask, optionId, choice.note);
     case "risk_digest": return answerRiskDigest(ctx, optionId);

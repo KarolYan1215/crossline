@@ -287,7 +287,7 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
     // A payment mail is a record only when code finds what the model read in the mail itself (`book`): the model sorts, it never supplies a number.
     if (kind === "transaction" && !money.counted) kind = "info";
     // An opportunity in the mail (docs/opportunity-agent.md §6) is read with the next run of an active watch, on the machine owner's
-    // workspace only; elsewhere it is information. A sign-up's confirmation is marked by the form filling itself (§17.8).
+    // workspace only; elsewhere it is information. A confirmation of a sign-up is the form service's (`onNewMail`, every new mail).
     if (kind === "opportunity") {
       if (opportunityAgentOn(deps.store, workspaceId)) {
         addMailCandidate(deps.store, workspaceId, { key, lineId: mailCandidateLine(deps.store, workspaceId, message), subject: message.subject, from: message.from,
