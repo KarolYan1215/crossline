@@ -42,7 +42,8 @@ test("an account that redeemed a code runs on the chosen model through the gatew
   expect(routing.provider).toMatchObject({ id: "sponsor", model: MODEL, kind: "chat" });
   expect(decideRoute("crossline:crossline-onboarding", routing)).toMatchObject({ via: "provider", provider: { model: MODEL } });
   expect(providers.hasProvider("ws")).toBe(true);
-  expect(await providers.upstream("ws", "sponsor")).toMatchObject({ key: "sk-test", baseUrl: "https://api.siliconflow.cn/v1" });
+  // Only the listed models may be named on the server's key (sponsorSpend prices only those).
+  expect(await providers.upstream("ws", "sponsor")).toMatchObject({ key: "sk-test", baseUrl: "https://api.siliconflow.cn/v1", models: [MODEL] });
   // An account that did not redeem gets nothing through the sponsor route.
   expect(await providers.upstream("other", "sponsor")).toBeUndefined();
   expect(providers.view("ws").features.find((feature) => feature.skill === "crossline-onboarding")?.served).toBe(true);

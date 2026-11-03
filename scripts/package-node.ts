@@ -65,8 +65,9 @@ const inputs = Object.keys(built.metafile.inputs);
 // Nothing of the server's logic may end up here: only the relay, its protocol, the program and ws.
 const ours = inputs.filter((file) => !file.includes("node_modules")).map((file) => file.replaceAll("\\", "/"));
 // The launcher's updater and its Ed25519 check come along (2026-10-28): the node verifies its own updates with the same code.
+// task-files.ts (2026-11-03) moves a shell run's input copies and results; it imports only node builtins.
 const allowed = ["apps/worker/src/node/standalone.ts", "apps/worker/src/node/agent.ts", "apps/worker/src/node/protocol.ts", "apps/worker/src/node/control.ts",
-  "apps/worker/src/node/browser.ts", "apps/launcher/src/update.ts", "apps/launcher/src/release-signature.ts"];
+  "apps/worker/src/node/browser.ts", "apps/worker/src/node/task-files.ts", "apps/launcher/src/update.ts", "apps/launcher/src/release-signature.ts"];
 const unexpected = ours.filter((file) => !allowed.some((name) => file.endsWith(name)));
 if (unexpected.length) throw new Error(`NODE_BUNDLE_TOO_WIDE ${unexpected.join(", ")}`);
 console.log(JSON.stringify({ bundle: "main.mjs", kilobytes: Math.round(statSync(path.join(stage, "main.mjs")).size / 1024), sources: ours }));

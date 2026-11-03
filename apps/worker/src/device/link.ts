@@ -90,6 +90,19 @@ export function setNodeShell(dataDir: string, shell: boolean): void {
   writeFileSync(nodeFile(dataDir), JSON.stringify({ ...kept, shell }, null, 2));
 }
 
+type DeviceHandle = (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => Promise<{ status: number; body: unknown } | undefined>;
+
+/**
+ * `/v1/device` as a standard-mode worker serves it: never on the hosted beta, only the link (a standard worker is not a linked device, so
+ * it has no compute node switch), and only for the machine owner. On the hosted server any account could otherwise have linked the
+ * server itself to a site of its choosing, or written its one `device/node.json` (the review of 2026-11-03).
+ */
+export function standardDeviceService(handle: DeviceHandle, options: { hostedBeta: boolean; machineOwner: (workspaceId: string) => boolean }): Array<{ prefix: string; handle: DeviceHandle }> {
+  if (options.hostedBeta) return [];
+  return [{ prefix: "/v1/device", handle: (method, pathname, workspaceId, body) =>
+    pathname === "/v1/device/link" && options.machineOwner(workspaceId) ? handle(method, pathname, workspaceId, body) : Promise.resolve(undefined) }];
+}
+
 /**
  * `/v1/device/link` on the worker's loopback port, in both modes: GET the link and what waits to be sent, POST `{url, token}` (checked
  * against the site, then kept), DELETE to unlink. Linking or unlinking calls `onChanged`, which restarts the worker into the other mode.

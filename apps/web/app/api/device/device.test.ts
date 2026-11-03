@@ -14,7 +14,8 @@ import { issueDeviceToken } from "../../../lib/energy";
 import { TEST_CTX } from "../../../lib/test-support";
 import { POST as activity } from "./activity/route";
 import { GET as computeStatus, POST as compute } from "./compute/route";
-import { GET as linkStatus } from "./link/route";
+import { GET as linkStatus, POST as link } from "./link/route";
+import { POST as nodeSwitch } from "./node/route";
 import { GET as hello } from "./hello/route";
 import { POST as recordings } from "./recordings/route";
 import { POST as sources } from "./sources/route";
@@ -132,6 +133,16 @@ test("「作为算力节点」: any account may switch it on for itself (方案 
   expect(await (await post(false)).json()).toMatchObject({ enabled: false });
   // A forged origin never switches it.
   expect((await compute(new Request("https://app.crossline.lol/api/device/compute", { method: "POST", headers: { origin: "https://evil.example" }, body: "{}" }))).status).toBe(403);
+});
+
+test("on the hosted site, and on an install that is not a linked device, there is no device link or node switch to reach", async () => {
+  const json = (body: unknown) => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  vi.stubEnv("CROSSLINE_PUBLIC_BETA", "1");
+  expect((await linkStatus(new Request("https://app.crossline.lol/api/device/link"))).status).toBe(404);
+  expect((await link(new Request("https://app.crossline.lol/api/device/link", json({ url: "https://evil.example", token: "t".repeat(32) })))).status).toBe(404);
+  expect((await nodeSwitch(new Request("https://app.crossline.lol/api/device/node", json({ enabled: true })))).status).toBe(404);
+  vi.stubEnv("CROSSLINE_PUBLIC_BETA", "");
+  expect((await nodeSwitch(new Request("http://127.0.0.1:3210/api/device/node", json({ enabled: true })))).status).toBe(404);
 });
 
 test("while the background service restarts into the other mode, the device page is told so in plain words, not an error code", async () => {

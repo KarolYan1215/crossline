@@ -20,7 +20,7 @@ import { retireShadowedDemos } from "./demo-cleanup";
 import { notifyPass } from "./notify";
 import { createActivityTracker } from "./activity-recorder";
 import { agentHistoryPass } from "./agent-history";
-import { createDeviceLinkService, readDeviceLink } from "./device/link";
+import { createDeviceLinkService, readDeviceLink, standardDeviceService } from "./device/link";
 import { workerMode } from "./device/mode";
 import { runDeviceWorker } from "./device/worker";
 import { createWindowsActivitySource } from "./activity-source";
@@ -1339,6 +1339,7 @@ const agentService = createAgentService({
   // What a sandboxed run may never read: the server's data and state (every account's ledger, files and runtime homes) — its own task
   // folder and inputs, which live under them, stay reachable because the more specific entry wins.
   sandbox: { readable: [path.dirname(process.env.CROSSLINE_CODEX_PATH ?? "/opt/codex/codex")], deny: [dataDir, process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state")] },
+  confine: { dataDir, stateDir: process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state") },
   clientFor: accountClient,
   mailFor: (workspaceId) => mailService.lookup(workspaceId),
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))
@@ -1756,7 +1757,9 @@ if (!capabilitySecret) {
       // The login browser on the server, shown in a dialog on the page (remote-browser.ts); only where there is no screen of our own.
       ...(remoteBrowsers ? [{ prefix: "/v1/remote-browser", handle: remoteBrowsers.handle }] : []),
       // Linking this computer as a device of the hosted account (docs/device-mode.md); the worker restarts into device mode.
-      { prefix: "/v1/device", handle: createDeviceLinkService({ dataDir, secrets, onChanged: restartForMode, localeFor: (workspaceId) => localeOf(analysisStore, workspaceId) }).handle }],
+      // Only the machine owner, and never on the hosted beta (`standardDeviceService`).
+      ...standardDeviceService(createDeviceLinkService({ dataDir, secrets, onChanged: restartForMode, localeFor: (workspaceId) => localeOf(analysisStore, workspaceId) }).handle,
+        { hostedBeta, machineOwner })],
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
     // Each account's runs spread over this server's runtime and every compute node connected for that account (runtime-pool.ts).
     ...(nodeHub ? { nodes: (workspaceId: string) => nodeHub.members(workspaceId) } : {}),

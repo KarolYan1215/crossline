@@ -6,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
-import { BROWSER_CHUNK_BYTES, CLOSE_WORDS, NODE_CAPACITY_MAX, marketplaceRoot, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteParams, turnImages, underRoots, withLocalImages, type NodeFrame } from "./protocol";
+import { BROWSER_CHUNK_BYTES, CLOSE_WORDS, NODE_CAPACITY_MAX, marketplaceRoot, namesNodeSecret, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteParams, turnImages, underRoots, withLocalImages, type NodeFrame } from "./protocol";
 import type { BrowserOp, NodeBrowsers } from "./browser";
 import { handleTaskOp, type TaskFileOp } from "./task-files";
 
@@ -48,6 +48,8 @@ export type NodeAgentOptions = {
   browsers?: NodeBrowsers;
   /** 「允许在这台电脑上执行命令（shell 助手）」: the person's switch on this computer, off unless set. */
   shell?: boolean;
+  /** This node's own folders (its Codex home, its token): a command naming one is declined here, never asked of the server. */
+  protect?: string[];
 };
 
 /**
@@ -161,6 +163,15 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
         let message: { id?: unknown; result?: { userAgent?: unknown } } | undefined;
         try { message = JSON.parse(line) as typeof message; } catch { return; }
         if (message?.id === "node-init") { initialized?.(String(message.result?.userAgent ?? "")); return; }
+        const asked = message as { id?: unknown; method?: unknown; params?: { command?: unknown } };
+        if (asked.id !== undefined && asked.method === "item/commandExecution/requestApproval") {
+          const command = typeof asked.params?.command === "string" ? asked.params.command : JSON.stringify(asked.params?.command ?? "");
+          if (namesNodeSecret(command, options.protect ?? [])) {
+            runtime?.write(JSON.stringify({ id: asked.id, result: { decision: "decline" } }));
+            log({ type: "node.secret_command_declined" });
+            return;
+          }
+        }
         toServer(line);
       });
       runtime.onExit(() => { if (socket.readyState === WebSocket.OPEN) socket.close(4011, "NODE_RUNTIME_EXITED"); });

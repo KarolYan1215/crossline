@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore, nodeShellHost } from "@crossline/db";
 import { decideCommand } from "@crossline/core";
 import { NODE_COMPUTE_SETTING, NODE_STATUS_SETTING } from "@crossline/core/device";
-import { inTaskDir, refusal } from "./protocol";
+import { inTaskDir, refusal, rewriteParams } from "./protocol";
 import { handleTaskOp, type TaskFileOp } from "./task-files";
 import { changedInputs, pullResults, sendInputs, type NodeShellLink } from "./task-sync";
 import { fakeNode } from "../testing/fake-node";
@@ -37,6 +37,49 @@ test("a shell thread is let through only when the person switched the shell on, 
   expect(refusal("turn/start", { threadId: "t", environments: [{ id: "x" }] }, on)).toMatch(/environments/);
   expect(refusal("turn/start", { threadId: "t", environments: [] }, on)).toBeUndefined();
   expect(refusal("command/exec", {}, on)).toMatch(/NODE_METHOD_REFUSED/);
+});
+
+test("a thread's configuration may hold only the keys the server's runners send, with the values they send", () => {
+  // What startIsolatedThread, startAgentThread, a provider's thread, contextWindowConfig, onlyOwnPlugins, connectors and code mode send.
+  const sent = {
+    web_search: "live", project_doc_max_bytes: 0, include_environment_context: false, "memories.use_memories": false, "memories.generate_memories": false,
+    "tools.update_plan.enabled": true, "tools.experimental_request_user_input.enabled": true, "features.default_mode_request_user_input": true,
+    "features.plugins": true, "features.memories": false, "features.shell_tool": false, "features.multi_agent": false, "features.apps": true,
+    "features.hooks": false, "features.codex_hooks": false, "features.plugin_hooks": false, "features.js_repl": false, "features.code_mode": true,
+    "features.request_permissions_tool": false, "features.goals": false, "features.view_image": true, "features.image_generation": false,
+    "apps._default.default_tools_approval_mode": "writes", "apps._default.destructive_enabled": false, "mcp_servers.codex-security.enabled": false,
+    "plugins._default.enabled": false, "plugins.crossline@crossline-local.enabled": true,
+    "model_providers.crossline-sponsor": { name: "开发者模型", base_url: "http://127.0.0.1:3215/abc", wire_api: "responses", requires_openai_auth: false,
+      supports_websockets: false, stream_idle_timeout_ms: 600_000, request_max_retries: 2, stream_max_retries: 2, http_headers: { "x-crossline-skill": "crossline-step-planner" } },
+    model_context_window: 128_000, model_auto_compact_token_limit: 102_400, "skills.include_instructions": false
+  };
+  expect(refusal("thread/start", { sandbox: "read-only", config: sent })).toBeUndefined();
+  expect(refusal("thread/resume", { threadId: "t", config: sent })).toBeUndefined();
+  // Every family that would reach past the read-only thread is refused, dotted or not.
+  for (const [key, value] of [
+    ["sandbox_workspace_write.network_access", true], ["sandbox_workspace_write", { writable_roots: ["/"] }], ["permissions.crossline-task", {}],
+    ["mcp_servers.evil.command", "powershell"], ["mcp_servers.evil", { command: "powershell" }], ["mcp_servers.codex-security.enabled", true],
+    ["features.unified_exec", true], ["features.js_repl", true], ["features.hooks", true], ["features", { shell_tool: true }],
+    ["shell_environment_policy.inherit", "all"], ["shell_environment_policy", { inherit: "all" }], ["hooks.pre_tool_use", []], ["notify", ["calc.exe"]],
+    ["apps._default.destructive_enabled", true], ["apps._default.default_tools_approval_mode", "never"], ["model_providers.x", { base_url: "https://evil.example", auth: { command: "calc.exe" } }],
+    ["model_providers.x", { base_url: "https://evil.example", requires_openai_auth: true }], ["model_providers.x", { env_key: "OPENAI_API_KEY" }],
+    ["profile", "danger"], ["approval_policy", "never"], ["sandbox_mode", "danger-full-access"], ["default_permissions", ":workspace"]
+  ] as Array<[string, unknown]>) {
+    expect(refusal("thread/start", { sandbox: "read-only", config: { [key]: value } }), key).toMatch(/NODE_(CONFIG|SHELL)_REFUSED/);
+  }
+});
+
+test("a path with .. is refused anywhere, and only a resolved path inside the task root is kept as it is", () => {
+  expect(refusal("thread/start", shellThread({ cwd: `${path.join(TASKS, "agent-1")}${path.sep}..${path.sep}agent-1` }), { tasksRoot: TASKS })).toMatch(/NODE_PATH_REFUSED/);
+  expect(refusal("thread/start", { sandbox: "read-only", cwd: "/srv/repo/../etc" })).toMatch(/NODE_PATH_REFUSED/);
+  expect(refusal("thread/start", { sandbox: "read-only", runtimeWorkspaceRoots: [`${TASKS}${path.sep}a${path.sep}..${path.sep}..`] })).toMatch(/NODE_PATH_REFUSED/);
+  const map = { roots: ["/srv/skills"], mirror: path.join(TASKS, "..", "mirror"), work: path.join(TASKS, "..", "work"), keep: TASKS };
+  const escape = [TASKS, "a", "..", "..", "x"].join(path.sep);
+  const mapped = rewriteParams({ cwd: path.join(TASKS, "agent-1"), cwds: [escape, `${TASKS}-other${path.sep}x`] }, map) as { cwd: string; cwds: string[] };
+  expect(mapped.cwd).toBe(path.join(TASKS, "agent-1"));
+  // Raw text that only begins with the task root is not kept: neither a climb out of it nor a sibling whose name begins the same.
+  expect(mapped.cwds).not.toContain(escape);
+  expect(mapped.cwds).not.toContain(`${TASKS}-other${path.sep}x`);
 });
 
 test("a task directory is one plain name directly under the task root", () => {

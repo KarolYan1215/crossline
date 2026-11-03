@@ -219,7 +219,9 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     let { yaml, nodes } = await steady();
     const before = pageKey(driver.url(), nodes);
     const confirmed = confirmationOf(nodes);
-    if (confirmed && run.state === "filling" && step > 0 && run.pages.some((item) => item.actions.some((action) => action.verdict === "submit"))) return submitted(confirmed, "system");
+    // The system is the submitter only after its own submit click (`gate` sets `submittedBy`); a confirmation that came otherwise is the person's.
+    if (confirmed && run.state === "filling" && step > 0 && run.pages.some((item) => item.actions.some((action) => action.verdict === "submit")))
+      return submitted(confirmed, run.submittedBy === "system" ? "system" : "person");
     const stop = pageStop(nodes, { ...(await driver.signals()), url: driver.url() });
     if (stop) return hold(stop.stop, stop.detail);
     const errorsBefore = clean(pageErrors(nodes));
@@ -269,9 +271,12 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
       if (retries++ < 2) continue;
       return hold("not_allowed", verdict.reason);
     }
-    // Opening an application's form is a step, not the submission (applications always ask for fields).
-    if (verdict.verdict === "submit" && run.opportunity.kind === "application" && OPENER.test(verdict.node.name.trim()) && !nodes.some((node) => isField(node)))
+    // Opening an application's form is a step, not the submission (applications always ask for fields) — except where the person makes
+    // the last click: there a one-click 「Apply」 that sends at once is held like any submission (the review of 2026-11-03).
+    if (verdict.verdict === "submit" && !deps.personSubmits && run.opportunity.kind === "application" && OPENER.test(verdict.node.name.trim()) && !nodes.some((node) => isField(node)))
       verdict = { verdict: "allow", node: verdict.node };
+    // And there any button whose words confirm, pay, register or submit goes through the hold, whatever the judgement called it.
+    if (verdict.verdict === "allow" && deps.personSubmits && looksLikeSubmit(verdict.node.name)) verdict = { verdict: "submit", node: verdict.node };
     const fieldsBefore = nodes.some(isField);
     if (verdict.verdict === "submit") {
       record(move, verdict);
@@ -295,7 +300,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     const after = pageKey(driver.url(), nodes);
     const fresh = clean(pageErrors(nodes)).filter((error) => !errorsBefore.includes(error));
     const confirmedNow = confirmationOf(nodes);
-    if (confirmedNow && verdict.verdict === "submit") return submitted(confirmedNow, "system");
+    if (confirmedNow && verdict.verdict === "submit") return submitted(confirmedNow, run.submittedBy === "system" ? "system" : "person");
     // A submit-like button on a page with no fields that brings up fields only opened the form (an event's 「Register」, a job's 「Apply」):
     // the run goes on to fill it, and that page's own button is the submission.
     if (verdict.verdict === "submit" && !fieldsBefore && nodes.some(isField) && !fresh.length) {

@@ -53,6 +53,21 @@ test("chat: the key is added by the gateway, the request translated, and the str
   expect(text).toMatch(/event: response.completed\ndata: .*"total_tokens":12/);
 });
 
+test("a route that names its models refuses any other before it reaches the upstream (the server's key on the developer's model)", async () => {
+  const provider = await upstream((_seen, response) => {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(sse([{ choices: [{ delta: { content: "{}" }, finish_reason: "stop" }] }]));
+  });
+  const gw = await gateway(() => ({ kind: "chat", baseUrl: provider.base, key: "server-key", thinkingControl: true, models: ["deepseek-ai/DeepSeek-V4.1-Flash"] }));
+  const post = (model: unknown) => fetch(`${gw.urlFor("ws", "sponsor")}/responses`, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, stream: true, input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }] }) });
+  // A compute node relays its own requests: one naming a model the route does not list never reaches the provider on the server's key.
+  for (const model of ["Pro/deepseek-ai/DeepSeek-R1", "", undefined]) expect((await post(model)).status).toBe(400);
+  expect(provider.seen).toHaveLength(0);
+  expect((await post("deepseek-ai/DeepSeek-V4.1-Flash@think:off")).status).toBe(200);
+  expect(provider.seen).toHaveLength(1);
+});
+
 test("responses: passed through unchanged to /responses, with the key", async () => {
   const provider = await upstream((_seen, response) => {
     response.writeHead(200, { "content-type": "text/event-stream" });

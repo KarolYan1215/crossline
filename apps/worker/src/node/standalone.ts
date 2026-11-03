@@ -2,13 +2,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { hostname } from "node:os";
+import { hostname, release as osRelease, type as osType } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { startNodeAgent, type AppServerLines, type NodeAgentStatus } from "./agent";
 import { API_KEY_SHAPE, loginNodeWithApiKey, withControl } from "./control";
-import { TOKEN_GONE } from "./protocol";
+import { NODE_RUNTIME_FLAGS, TOKEN_GONE } from "./protocol";
 import { createNodeBrowsers } from "./browser";
 // The launcher's updater and its signature check, bundled in as they are (scripts/package-node.ts allows exactly these two files).
 import { checkForUpdate, downloadInstaller, type UpdateManifest } from "../../../launcher/src/update";
@@ -77,7 +77,9 @@ const forgetToken = () => { rmSync(tokenFile, { force: true }); token = undefine
 
 // ── Codex, in this program's own home ───────────────────────────────────────────────────────────────────────────────────────────
 function appServer(): AppServerLines {
-  const child = spawn(codexExe, ["app-server", "--listen", "stdio://", "--strict-config"], {
+  // Its sign-in is kept in Windows' credential store (an encrypted file whose key is there), not a plain auth.json a command could print.
+  const store = process.platform === "win32" ? ["-c", 'cli_auth_credentials_store="keyring"'] : [];
+  const child = spawn(codexExe, [...NODE_RUNTIME_FLAGS, ...store, "app-server", "--listen", "stdio://", "--strict-config"], {
     stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: { ...process.env, CODEX_HOME: codexHome } });
   const lines = createInterface({ input: child.stdout });
   child.stderr.resume();
@@ -162,7 +164,8 @@ async function pair(): Promise<void> {
   try {
     while (!readToken()) {
       const started = await fetch(new URL("/api/node/pair", state.site), { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ host: hostname() }), signal: AbortSignal.timeout(20_000) }).then((response) => response.json() as Promise<{ ok?: boolean; id?: string; code?: string; expiresAt?: string }>)
+        // What the person sees before binding this computer: its name, system, this program's version and whether the shell is on.
+        body: JSON.stringify({ host: hostname(), os: `${osType()} ${osRelease()}`, version: release.version ?? "", shell: state.shell === true }), signal: AbortSignal.timeout(20_000) }).then((response) => response.json() as Promise<{ ok?: boolean; id?: string; code?: string; expiresAt?: string }>)
         .catch(() => undefined);
       if (!started?.ok || !started.id || !started.code) { pairingError = "连不上网页版，稍后自动重试"; pairing = undefined; await sleep(30_000); continue; }
       pairingError = undefined;

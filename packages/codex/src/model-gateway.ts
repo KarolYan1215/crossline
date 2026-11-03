@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { createChatStreamTranslator, responsesToChat, sseEvent, upstreamFailure, type BridgeUpstream } from "./chat-bridge";
 import { priorityForSkill } from "./model-gate";
+import { thinkingVariant } from "@crossline/core";
 
 /**
  * The one local listener every third-party provider is reached through (R7, decided 2026-10-13). Codex is given
@@ -31,6 +32,12 @@ export type GatewayUpstream = BridgeUpstream & { kind: "chat" | "responses"; key
    * background work, since a measurement that fails on the provider's rate limit says nothing about the model.
    */
   patient?: boolean;
+  /**
+   * The only model names a request on this route may name (the developer's listed models, on the server's key); any other is refused
+   * here before it is forwarded. A compute node relays its own requests (node/hub.ts), and `sponsorSpend` prices only listed names, so
+   * an unlisted one would have run on the server's key at no counted cost (the review of 2026-11-03). A thinking suffix is allowed.
+   */
+  models?: string[];
   /**
    * Why this route may not be forwarded now (the provider's name no longer resolves to a public address, or a loopback address where
    * the server does not allow one); answered as an error without contacting anything.
@@ -199,6 +206,8 @@ export async function startModelGateway(options: {
     const skill = String(request.headers["x-crossline-skill"] ?? "");
     const interactive = !upstream.patient && Boolean(skill) && priorityForSkill(skill) === "interactive";
     let model = typeof parsed.model === "string" ? parsed.model : "";
+    if (upstream.models && !upstream.models.includes(thinkingVariant(model).base))
+      return json(response, 400, { error: { message: `model not offered on this route: ${model.slice(0, 80)}`, code: "model_not_found" } });
     const tried = new Set([model]);
     let forward: ReturnType<typeof responsesToChat> | undefined;
     let answer: Response;

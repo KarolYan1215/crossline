@@ -299,7 +299,7 @@ export function createSponsorService(options: {
     const config = settings();
     if (!config) return undefined;
     const measuring = workspaceId.startsWith(SPONSOR_EVAL_PREFIX);
-    return { kind: "chat", baseUrl: config.baseUrl, responseFormat: "json_object", key: config.key, thinkingControl: true,
+    return { kind: "chat", baseUrl: config.baseUrl, responseFormat: "json_object", key: config.key, thinkingControl: true, models: config.models.map((item) => item.model),
       ...(measuring ? { patient: true } : { fallback: (skill: string, model: string) => sponsorFallbacks(skillKey(skill), model, config.models, pool(), options.capabilities) }) };
   };
 

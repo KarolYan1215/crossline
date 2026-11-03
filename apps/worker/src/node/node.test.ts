@@ -7,7 +7,7 @@ import type { CodexRpcBoundary } from "@crossline/codex";
 import { NODE_LIVENESS_MS, nodeCapacity, reconnectDelayMs, silentTooLong, startNodeAgent, type AppServerLines } from "./agent";
 import { loginNodeWithApiKey } from "./control";
 import { createNodeHub, type NodeHub, type NodeStatus } from "./hub";
-import { codexVersionOf, nodePath, refusal, rewriteParams, underRoots } from "./protocol";
+import { codexVersionOf, NODE_RUNTIME_FLAGS, nodePath, namesNodeSecret, refusal, rewriteParams, underRoots } from "./protocol";
 import { publicHttpsOnly, type NodeBrowsers } from "./browser";
 
 // Real sockets and a real relay between two ends in one process: under the full suite's load a test can take longer than vitest's 5 s.
@@ -60,7 +60,7 @@ async function until<T>(read: () => T | undefined, ms = 20_000): Promise<T> {
   }
 }
 
-async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number; tokenValid?: () => boolean; role?: "device" | "standalone"; browsers?: NodeBrowsers; shell?: boolean } = {}) {
+async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number; tokenValid?: () => boolean; role?: "device" | "standalone"; browsers?: NodeBrowsers; shell?: boolean; protect?: string[] } = {}) {
   gatewayServer = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
@@ -98,7 +98,8 @@ async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; dea
   });
   const runtime = fakeRuntime(options.nodeCodex ?? "0.163.0");
   const agent = startNodeAgent({ url: `http://127.0.0.1:${hub.port}`, token: "good-token-0123456789abcdef", dir, spawn: runtime.spawn, backoffMs: [60_000], refusedWaitMs: 60_000,
-    role: options.role ?? "device", capacity: 3, host: "PC-A", ...(options.browsers ? { browsers: options.browsers } : {}), ...(options.shell ? { shell: true } : {}) });
+    role: options.role ?? "device", capacity: 3, host: "PC-A", ...(options.browsers ? { browsers: options.browsers } : {}), ...(options.shell ? { shell: true } : {}),
+    ...(options.protect ? { protect: options.protect } : {}) });
   stopAgent = agent.stop;
   return { runtime, agent, statuses, gateway, metered };
 }
@@ -183,6 +184,20 @@ test("with the shell switched on, the node offers its task directories, runs a s
   await expect(client.request("thread/start", { cwd: dir, sandbox: "danger-full-access", approvalPolicy: "untrusted" })).rejects.toThrow(/NODE_SHELL_REFUSED: cwd/);
   await expect(client.request("thread/start", { cwd, sandbox: "danger-full-access", approvalPolicy: "never" })).rejects.toThrow(/NODE_SHELL_REFUSED: approval/);
   await expect(client.request("turn/start", { threadId: "t", sandboxPolicy: { type: "dangerFullAccess" } })).rejects.toThrow(/NODE_TURN_REFUSED/);
+});
+
+test("a command naming the node's own home, sign-in or token is declined on the node itself, whatever the server's guard answers", async () => {
+  const home = path.join(dir, "Crossline Node");
+  const { runtime } = await setUp({ shell: true, protect: [home] });
+  await until(() => hub!.clientFor("ws-owner"));
+  for (const [id, command] of [[901, `Get-Content "${path.join(home, "codex-home", "auth.json")}"`], [902, "type %CODEX_HOME%\\auth.json"],
+    [903, `cat "${home.replace(/\\/g, "/").toUpperCase()}/token.bin"`]] as Array<[number, string]>) {
+    runtime.emitLine(JSON.stringify({ id, method: "item/commandExecution/requestApproval", params: { threadId: "t", itemId: "i", command } }));
+    expect(await until(() => runtime.answers.find((answer) => answer.id === id))).toMatchObject({ result: { decision: "decline" } });
+  }
+  expect(namesNodeSecret("Get-ChildItem C:\\Users\\me\\tasks\\agent-1", [home])).toBe(false);
+  // The runtime the node starts hides its own home and anything named like a key from the commands it runs.
+  expect(NODE_RUNTIME_FLAGS.join(" ")).toMatch(/shell_environment_policy\.exclude=.*CODEX_HOME.*\*KEY\*.*\*TOKEN\*/);
 });
 
 test("a node whose person did not switch the shell on offers no task directories and answers none", async () => {

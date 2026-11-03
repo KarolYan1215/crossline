@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "../../../../lib/codex-runtime";
+import { devicePrimaryUrl } from "../../../../lib/device-mode";
+import { isHostedBeta } from "../../../../lib/hosting";
 import { tOf } from "../../../../lib/locale";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
@@ -10,6 +12,8 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
  */
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  // Only a linked device has this switch; the hosted site and an unlinked install answer as if the route did not exist.
+  if (isHostedBeta() || !devicePrimaryUrl()) return NextResponse.json({ ok: false, code: "NOT_FOUND" }, { status: 404 });
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   const body = await request.json().catch(() => ({})) as { enabled?: unknown; apiKey?: unknown; shell?: unknown };

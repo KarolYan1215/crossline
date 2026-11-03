@@ -214,12 +214,12 @@ export function webResearchBlocker(
  * The app-server as raw JSON lines, for a compute node (apps/worker/src/node/agent.ts), which relays most lines to the hosted worker
  * unread instead of answering them itself. Same binary, same environment as `startCodexAppServer`.
  */
-export function spawnAppServerLines(codexHome?: string): { write: (line: string) => void; onLine: (handler: (line: string) => void) => void;
+export function spawnAppServerLines(codexHome?: string, flags: string[] = []): { write: (line: string) => void; onLine: (handler: (line: string) => void) => void;
   onExit: (handler: () => void) => void; stop: () => void } {
   const env = { ...codexProcessEnvironment(), ...(codexHome ? { CODEX_HOME: codexHome, CROSSLINE_CODEX_HOME: codexHome } : {}) };
   mkdirSync(env.CODEX_HOME!, { recursive: true });
   const codex = resolveCodexCommand(env);
-  const child = spawn(codex.command, [...codex.args, "app-server", "--listen", "stdio://", "--strict-config"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env });
+  const child = spawn(codex.command, [...codex.args, ...flags, "app-server", "--listen", "stdio://", "--strict-config"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env });
   const lines = createInterface({ input: child.stdout });
   child.stderr.resume();
   const exits = new Set<() => void>();
