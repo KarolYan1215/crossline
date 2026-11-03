@@ -162,7 +162,7 @@ writeFileSync(path.join(notices, "README.txt"), [
   "- ws（打包在 main.mjs 内），MIT，见 ws-LICENSE.txt",
   `- FFmpeg ${FFMPEG.version}（ffmpeg\\ffmpeg.exe、ffmpeg\\ffprobe.exe，Gyan Doshi 的 essentials 静态构建，${FFMPEG.url}），`,
   "  GPLv3，见 ffmpeg\\LICENSE.txt；FFmpeg 源码见 https://ffmpeg.org/releases/ ，该构建所含各库的源码与配置见 https://www.gyan.dev/ffmpeg/builds/",
-  "- playwright-core（node_modules\playwright-core，用来驱动本机的 Chrome 或 Edge 读取本人登录的网站），Apache-2.0，见其目录内的 LICENSE",
+  "- playwright-core（node_modules\\playwright-core，用来驱动本机的 Chrome 或 Edge 读取本人登录的网站），Apache-2.0，见其目录内的 LICENSE",
   "- Microsoft Visual C++ 运行库（msvcp140*.dll、vcruntime140*.dll，放在用到它们的模块旁边），按 Visual Studio 许可条款中的可分发代码条款随附",
   "- Microsoft Edge WebView2 SDK 1.0.2365.46（Microsoft.Web.WebView2.Core.dll、Microsoft.Web.WebView2.WinForms.dll、WebView2Loader.dll，",
   "  来自 NuGet 包 Microsoft.Web.WebView2），托盘程序 CrosslineNode.exe 用它显示小帮手窗口；BSD 式许可，见",
