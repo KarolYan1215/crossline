@@ -1242,5 +1242,10 @@
   "本机账本": "Local ledger",
   "同步没有成功（{{error}}），十分钟后再试；上次同步 {{when}}": "The sync did not work ({{error}}); tried again in ten minutes. Last synced {{when}}",
   "每十分钟从网页版取一份，只进不出；本机读到的东西照常保留": "A copy is taken from the web version every ten minutes, one way only; what this computer reads itself is kept",
-  "本机账本已与服务器同步：{{when}}": "Local ledger in sync with the server: {{when}}"
+  "本机账本已与服务器同步：{{when}}": "Local ledger in sync with the server: {{when}}",
+  "确认配对": "Confirm pairing",
+  "要配对的电脑": "Computer to pair",
+  "未报名称": "No name given",
+  "节点 {{version}}": "Node {{version}}",
+  "以上是那台电脑自己报的信息。只配对自己的电脑：别人发来的配对码不要填。配对后：": "This is what that computer says about itself. Pair only your own computer; never enter a code someone sent you. Once paired:"
 }

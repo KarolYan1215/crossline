@@ -92,14 +92,19 @@ function ComputeNodeRow() {
   const [view, setView] = useState<NodeView | undefined>();
   const [note, setNote] = useState("");
   const [code, setCode] = useState("");
+  const [preview, setPreview] = useState<{ computer: { host: string; os: string; version: string; shell: boolean }; receives: string[] } | undefined>();
   const load = async () => {
     const response = await fetch("/api/device/compute", { cache: "no-store" }).catch(() => undefined);
     if (response?.ok) setView(await response.json() as NodeView);
   };
-  const pair = async () => {
-    const response = await fetch("/api/node/pair/approve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) }).catch(() => undefined);
-    const body = await response?.json().catch(() => undefined) as { ok?: boolean; host?: string; message?: string } | undefined;
-    if (!body?.ok) { setNote(body?.message ?? t("没有配对，请重试")); return; }
+  // First the computer behind the code and what it would receive; only 「确认配对」 binds it.
+  const pair = async (confirm: boolean) => {
+    const response = await fetch("/api/node/pair/approve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, confirm }) }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { ok?: boolean; paired?: boolean; host?: string; message?: string;
+      computer?: { host: string; os: string; version: string; shell: boolean }; receives?: string[] } | undefined;
+    if (!body?.ok) { setPreview(undefined); setNote(body?.message ?? t("没有配对，请重试")); return; }
+    if (!body.paired && body.computer) { setNote(""); setPreview({ computer: body.computer, receives: body.receives ?? [] }); return; }
+    setPreview(undefined);
     setCode("");
     setNote(body.host ? t("已配对 {{host}}：那台电脑几秒内连上，这里会显示。", { host: body.host }) : t("已配对：那台电脑几秒内连上，这里会显示。"));
     void load();
@@ -131,7 +136,13 @@ function ComputeNodeRow() {
       : <label className="st-row"><span className="st-row-label">{t("独立节点")}<small>{t("在那台电脑上安装「Crossline 节点」，把它显示的配对码填在这里")}{" "}
           <a href={NODE_INSTALLER_URL} target="_blank" rel="noreferrer">{t("下载安装包")}</a></small></span>
         <span><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="XXXX-XXXX" autoComplete="off" spellCheck={false} maxLength={12} style={{ width: "9em" }} />{" "}
-          <button type="button" className="primary-button" disabled={code.replace(/[^A-Za-z0-9]/g, "").length !== 8} onClick={() => void pair()}>{t("配对")}</button></span></label>}
+          <button type="button" className="primary-button" disabled={code.replace(/[^A-Za-z0-9]/g, "").length !== 8} onClick={() => void pair(false)}>{t("配对")}</button></span></label>}
+    {preview && !view.paired && <div className="st-row" role="group" aria-label={t("确认配对")}>
+      <span className="st-row-label">{t("要配对的电脑")}<small>{[preview.computer.host || t("未报名称"), preview.computer.os, preview.computer.version && t("节点 {{version}}", { version: preview.computer.version })].filter(Boolean).join(" · ")}</small>
+        <small>{t("以上是那台电脑自己报的信息。只配对自己的电脑：别人发来的配对码不要填。配对后：")}</small>
+        <ul className="st-note">{preview.receives.map((line) => <li key={line}>{line}</li>)}</ul></span>
+      <span><button type="button" className="primary-button" onClick={() => void pair(true)}>{t("确认配对")}</button>{" "}
+        <button type="button" className="secondary-button" onClick={() => setPreview(undefined)}>{t("取消")}</button></span></div>}
     {note && <p role="status" className="st-note">{note}</p>}
   </>;
 }

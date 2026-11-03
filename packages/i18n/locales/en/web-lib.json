@@ -1076,5 +1076,10 @@
   "没有参加": "Did not take it",
   "里程碑归档，可从已归档恢复": "The milestone is archived; it can be restored from Archived",
   "已过截止日；改截止日或标为不做后才会重新排入": "Past its deadline; it is scheduled again once the deadline is changed or it is dropped",
-  "已挂到任务，在等这份材料的步骤可以开始了": "Attached; the steps waiting for this material can start"
+  "已挂到任务，在等这份材料的步骤可以开始了": "Attached; the steps waiting for this material can start",
+  "配对码输错太多次，一小时后再试。": "Too many wrong pairing codes. Try again in an hour.",
+  "这个账号的全部模型运行（访谈、规划、整理、助手）都可能在那台电脑上进行，它能看到运行用到的资料": "Any of this account's model runs (interview, planning, organising, the assistant) may run on that computer, and it sees the material those runs use",
+  "助手每次运行的输入文件会复制一份到那台电脑": "Each assistant run copies its input files to that computer",
+  "那台电脑已开启「允许在这台电脑上执行命令」：助手会在那台电脑上执行命令": "That computer has “Allow running commands on this computer” on: the assistant will run commands there",
+  "那台电脑目前没有开启执行命令；之后在那台电脑上开启，助手就会在那里执行命令": "That computer does not allow commands now; if it is turned on there later, the assistant will run commands there"
 }

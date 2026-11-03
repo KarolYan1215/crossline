@@ -2,7 +2,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { hostname } from "node:os";
+import { hostname, release as osRelease, type as osType } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -159,7 +159,8 @@ async function pair(): Promise<void> {
   try {
     while (!readToken()) {
       const started = await fetch(new URL("/api/node/pair", state.site), { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ host: hostname() }), signal: AbortSignal.timeout(20_000) }).then((response) => response.json() as Promise<{ ok?: boolean; id?: string; code?: string; expiresAt?: string }>)
+        // What the person sees before binding this computer: its name, system, this program's version and whether the shell is on.
+        body: JSON.stringify({ host: hostname(), os: `${osType()} ${osRelease()}`, version: release.version ?? "", shell: state.shell === true }), signal: AbortSignal.timeout(20_000) }).then((response) => response.json() as Promise<{ ok?: boolean; id?: string; code?: string; expiresAt?: string }>)
         .catch(() => undefined);
       if (!started?.ok || !started.id || !started.code) { pairingError = "连不上网页版，稍后自动重试"; pairing = undefined; await sleep(30_000); continue; }
       pairingError = undefined;
