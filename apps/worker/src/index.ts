@@ -1339,6 +1339,7 @@ const agentService = createAgentService({
   // What a sandboxed run may never read: the server's data and state (every account's ledger, files and runtime homes) — its own task
   // folder and inputs, which live under them, stay reachable because the more specific entry wins.
   sandbox: { readable: [path.dirname(process.env.CROSSLINE_CODEX_PATH ?? "/opt/codex/codex")], deny: [dataDir, process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state")] },
+  confine: { dataDir, stateDir: process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state") },
   clientFor: accountClient,
   mailFor: (workspaceId) => mailService.lookup(workspaceId),
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() }))

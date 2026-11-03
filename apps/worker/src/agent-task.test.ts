@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import {
-  AGENT_SKILL, approveCategory, changedFiles, CLEAN_RUNS_TO_TRUST, createAgentAnswerer, createAgentRunner, fingerprint, readCategories, recordReview,
+  AGENT_SKILL, approveCategory, changedFiles, CLEAN_RUNS_TO_TRUST, createAgentAnswerer, createAgentRunner, fingerprint, ownedInputs, readCategories, recordReview,
   type AuditRecord
 } from "./agent-task";
 import { fakeRuntime as sharedRuntime, type AgentScript } from "./testing/fake-runtime";
@@ -24,6 +25,9 @@ const summary = (over: object = {}) => JSON.stringify({
   summary: "整理了练习清单和笔记。", artifacts: [{ path: "notes.md", purpose: "笔记" }],
   verification: [{ check: "笔记里的链接", result: "pass", evidence: "逐个请求，全部 200" }], needsHuman: [], notDone: [], assumptions: [], ...over
 });
+/** Files this workspace owns, as an upload or a folder's copy is stored. */
+const own = (file: string, id = path.basename(file)) => store.saveSourceDocument({ id, ownerId: "user-1", workspaceId, kind: "text", fileName: path.basename(file),
+  mediaType: "text/plain", sha256: id, uri: pathToFileURL(file).href, extractedText: "", extractionStatus: "done", createdAt: "2026-11-03T00:00:00.000Z" });
 const fake = (answers: string[], options: { script?: AgentScript } = {}) => sharedRuntime(answers, AGENT_SKILL, options);
 const input = { title: "整理 ECE 555 的 Cadence 材料", what: "读课程文件，整理成练习清单和笔记", category: "read_research_organize" as const, humanPart: "做作业和提交" };
 const runner = (rpc: ReturnType<typeof fake>["rpc"], extra: { ask?: (r: { kind: string; subject: string; rule: string; reason: string }) => Promise<boolean> } = {}) =>
@@ -157,6 +161,7 @@ test("on the account's node, the shell runs in the node's task directory, its in
   const tasksRoot = path.join(root, "node-tasks");
   const original = path.join(root, "syllabus.txt");
   writeFileSync(original, "原文");
+  own(original);
   const { rpc, threadStarts } = fake([summary()], { script: async () => {
     writeFileSync(path.join(tasksRoot, "t-node", "notes.md"), "笔记");
     writeFileSync(path.join(tasksRoot, "t-node.inputs", "0", "syllabus.txt"), "被改过");
@@ -173,4 +178,39 @@ test("on the account's node, the shell runs in the node's task directory, its in
   // A node gone before the run starts: the run is lost, and retried like any lost run.
   link.disconnect();
   expect(await nodeRunner({ ...input, taskId: "t-node-2" })).toMatchObject({ state: "blocked", code: "AGENT_RUN_LOST" });
+});
+
+test("outside the owner's own shell a run takes only inputs this workspace owns, never the server's ledger or another account's run", async () => {
+  approveCategory(store, workspaceId, "read_research_organize");
+  const data = path.join(root, "data");
+  const state = path.join(root, "state");
+  const ai = path.join(data, "ai-output");
+  for (const dir of [path.join(data, "sources"), path.join(data, "materials", "wo-x"), state, path.join(ai, "agent-other"), path.join(ai, "agent-mine")]) mkdirSync(dir, { recursive: true });
+  const db = path.join(data, "crossline.db");
+  const auth = path.join(state, "auth.json");
+  const mine = path.join(data, "sources", "syllabus.txt");
+  for (const file of [db, auth, mine, path.join(ai, "agent-other", "notes.md"), path.join(ai, "agent-mine", "notes.md")]) writeFileSync(file, "x");
+  own(mine);
+  store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: "req-mine", type: "agent.task.requested", entityId: "agent-mine", payload: { taskId: "agent-mine", title: "前一次" } });
+  // The other account's run is in the same output root but in its own workspace's ledger.
+  const other = store.createPrincipalWithWorkspace("user-2", "别人").workspace.id;
+  store.appendEvent({ ownerId: "user-2", workspaceId: other, idempotencyKey: "req-other", type: "agent.task.requested", entityId: "agent-other", payload: { taskId: "agent-other", title: "别人的" } });
+  // A folder the person authorized that happens to hold the data folder is refused too.
+  store.setSetting(workspaceId, "sources.folders", JSON.stringify([{ id: "f1", path: root, label: "全部", addedAt: "2026-11-03T00:00:00.000Z", lines: [] }]));
+  const asked = [db, auth, data, path.join(ai, "agent-other"), mine, path.join(ai, "agent-mine"), path.join(data, "materials", "wo-x")];
+  expect(ownedInputs(store, workspaceId, asked, { outputRoot: ai, dataDir: data, stateDir: state }).kept).toEqual([mine, path.join(ai, "agent-mine")]);
+
+  // Every mode but the owner's shell goes through it: what the tools run is handed is what it records.
+  const { rpc } = sharedRuntime([summary()], "crossline:crossline-agent-tools");
+  const tools = createAgentRunner(store, workspaceId, "C:\\repo", () => rpc, { outputRoot: ai, mode: "tools", confine: { dataDir: data, stateDir: state } });
+  await tools({ ...input, taskId: "t-confined", inputs: asked });
+  expect(store.listEvents(workspaceId, { type: "agent.task.requested", entityId: "t-confined" })[0]!.payload).toMatchObject({ inputs: [mine, path.join(ai, "agent-mine")] });
+  // And a node is sent copies of those only.
+  const tasksRoot = path.join(root, "node-tasks");
+  const { rpc: nodeRpc } = fake([summary()]);
+  const link = fakeNode(tasksRoot, nodeRpc, { home: path.join(root, "node-home") });
+  const nodeRunner = createAgentRunner(store, workspaceId, "C:\\repo", () => undefined, { outputRoot: ai, homeDir: "C:\\Users\\karol", mode: "node", node: link, confine: { dataDir: data, stateDir: state } });
+  await nodeRunner({ ...input, taskId: "t-node-confined", inputs: [db, mine] });
+  expect(readFileSync(path.join(tasksRoot, "t-node-confined.inputs", "0", "syllabus.txt"), "utf8")).toBe("x");
+  expect(existsSync(path.join(tasksRoot, "t-node-confined.inputs", "1"))).toBe(false);
 });

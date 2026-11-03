@@ -37,6 +37,8 @@ export function createAgentService(deps: {
   /** Assistant runs a workspace may have at once; `ASSISTANT_CONCURRENCY` unless its compute nodes add room (docs/compute-node.md). */
   concurrency?: (workspaceId: string) => number;
   outputRoot?: string; log?: (event: Record<string, unknown>) => void;
+  /** The server's data and state folders: a run outside the owner's shell takes inputs inside them only from its own workspace. */
+  confine?: { dataDir: string; stateDir: string };
   /** The machine owner's workspace; the assistant (a shell on this machine) works for no one else. Absent: everyone (tests). */
   isOwner?: (workspaceId: string) => boolean;
   /**
@@ -84,7 +86,7 @@ export function createAgentService(deps: {
     const node = mode === "node" ? deps.nodeShell?.(workspaceId) : undefined;
     // Tools and sandbox modes run on the account's own runtime only: never the owner's (a guest's task must not spend the owner's account).
     return createAgentRunner(deps.store, workspaceId, deps.repoRoot, mode === "shell" ? deps.getClient : () => deps.clientFor?.(workspaceId), {
-      ...(node ? { node } : {}), outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
+      ...(node ? { node } : {}), ...(deps.confine ? { confine: deps.confine } : {}), outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
       // A question asked mid-run waits on 待确认 and reaches the phone as well: nobody is watching a background run.
       questionFor: (id, title) => ledgerQuestion(deps.store, workspaceId, id, title, { onAsked: (questionId, questions) =>
         sayToPerson(deps.store, workspaceId, tOfWorkspace(deps.store, workspaceId)("助手在做「{{title}}」时需要本人回答：{{question}}（10 分钟内未回答就按最稳妥的做法继续）",

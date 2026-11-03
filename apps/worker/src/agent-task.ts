@@ -1,14 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import {
-  AGENT_CATEGORIES, AGENT_SUMMARY_SCHEMA, GROWN_PLUGIN, decideCommand, decideFileChange, decideMcpTool, resultNeedsPerson, validateAgentSummary,
+  AGENT_CATEGORIES, AGENT_SUMMARY_SCHEMA, GROWN_LIBRARY_SETTING, GROWN_PLUGIN, SOURCE_FOLDERS_SETTING, decideCommand, readGrownLibrary, readSourceFolders, decideFileChange, decideMcpTool, resultNeedsPerson, validateAgentSummary,
   type AgentCategory, type AgentProgressRecord, type AgentSummary, type GuardContext, type GuardDecision, tFor, type Locale
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type AgentItem, type CodexRpcBoundary, type PersonQuestion, type SkillTools } from "@crossline/codex";
-import { agentChainsFor, approveCategory, CLEAN_RUNS_TO_TRUST, readCategories, recordReview, type CategoryState, type CrosslineStore } from "@crossline/db";
+import { agentChainsFor, approveCategory, CLEAN_RUNS_TO_TRUST, listAgentTasks, readCategories, recordReview, type CategoryState, type CrosslineStore } from "@crossline/db";
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
 import { localeOf, tOfWorkspace } from "./locale";
 import { applyToolboxActions, createAgentToolbox, type MailLookup } from "./agent-tools";
@@ -279,6 +280,52 @@ export function prepareWorktree(projectRepo: string, taskDir: string, taskId: st
   } catch { return undefined; }
 }
 
+/** Where Crossline keeps everyone's ledgers, files and runtime homes on this machine (the hosted server's /data and /state). */
+export type InputConfinement = { dataDir: string; stateDir: string };
+
+const within = (child: string, parent: string): boolean => {
+  const rel = path.relative(parent, child);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+};
+const realOf = (entry: string): string => { try { return realpathSync.native(entry); } catch { return path.resolve(entry); } };
+const plainId = (id: string): boolean => !!id && id !== "." && id !== ".." && path.basename(id) === id;
+
+/**
+ * The inputs a run that is not the machine owner's own shell may take (the red-team finding of 2026-11-03: a workflow manifest's
+ * `inputs` could name any absolute path on the server, and a hosted account's run copied crossline.db into its downloadable outputs).
+ * Only what this workspace owns: its files (`source_documents`), its own assistant runs' and favourites' folders under the output root,
+ * its work orders' material folders, its workflow revisions and the folders its person authorized. Nothing that holds the data or state
+ * folder, and nothing inside them that is not one of those.
+ */
+export function ownedInputs(store: CrosslineStore, workspaceId: string, inputs: string[], roots: { outputRoot: string } & Partial<InputConfinement>): { kept: string[]; refused: string[] } {
+  const files = new Set(store.listSourceDocuments(workspaceId).filter((doc) => doc.uri.startsWith("file:"))
+    .flatMap((doc) => { try { return [realOf(fileURLToPath(doc.uri))]; } catch { return []; } }));
+  const output = realOf(roots.outputRoot);
+  // The favourites folder is favourites-reader.ts's `collectFolder`, spelled out here so this module does not load the browser reader.
+  const dirs = [
+    ...listAgentTasks(store, workspaceId).map((task) => task.taskId),
+    ...readGrownLibrary(store.getSetting(workspaceId, GROWN_LIBRARY_SETTING)).map((record) => `collect-${record.id.replace(/^flow-/, "")}`)
+  ].filter(plainId).map((id) => path.join(output, id));
+  if (roots.dataDir) {
+    const data = realOf(roots.dataDir);
+    dirs.push(...store.listWorkOrders(workspaceId).map((order) => order.id).filter(plainId).map((id) => path.join(data, "materials", id)));
+    if (plainId(workspaceId)) dirs.push(path.join(data, "workflow-improve", workspaceId));
+  }
+  const folders = readSourceFolders(store.getSetting(workspaceId, SOURCE_FOLDERS_SETTING)).map((folder) => realOf(folder.path));
+  const closed = [roots.dataDir, roots.stateDir].filter((dir): dir is string => !!dir).map(realOf);
+  const kept: string[] = [];
+  const refused: string[] = [];
+  for (const entry of inputs) {
+    const real = realOf(entry);
+    const ownSubtree = files.has(real) || dirs.some((dir) => within(real, dir));
+    const allowed = (ownSubtree || folders.some((folder) => within(real, folder)))
+      // A folder that holds the data or state folder is refused whatever it is; inside them only the workspace's own subtrees count.
+      && !closed.some((dir) => within(dir, real)) && (ownSubtree || !closed.some((dir) => within(real, dir)));
+    (allowed ? kept : refused).push(entry);
+  }
+  return { kept, refused };
+}
+
 export function createAgentRunner(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined, options: {
   outputRoot: string; homeDir?: string; ask?: (request: { kind: string; subject: string; rule: string; reason: string }) => Promise<boolean>;
   /** A question-asker made for one task, when the way to reach the person depends on which task is asking. */
@@ -307,8 +354,13 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
   sandbox?: { readable: string[]; deny: string[] };
   /** The person's mailbox, read-only, for a tools-mode run. */
   mail?: MailLookup;
+  /** The server's data and state folders, which a run's inputs may reach only through this workspace's own subtrees (`ownedInputs`). */
+  confine?: InputConfinement;
 }) {
-  return async function run(input: AgentTaskInput): Promise<AgentOutcome> {
+  return async function run(given: AgentTaskInput): Promise<AgentOutcome> {
+    // Every mode but the machine owner's own shell goes through here: tools, the sandbox and a node all read or copy what `inputs` names.
+    const input = (options.mode ?? "shell") === "shell" || !given.inputs?.length ? given
+      : { ...given, inputs: ownedInputs(store, workspaceId, given.inputs, { outputRoot: options.outputRoot, ...options.confine }).kept };
     if (options.mode === "tools") return runWithTools(store, workspaceId, cwd, getClient, options, input);
     const taskId = input.taskId ?? `agent-${randomUUID().slice(0, 8)}`;
     const directory = path.join(options.outputRoot, taskId);
