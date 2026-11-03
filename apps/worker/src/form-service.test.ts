@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { FIXED_EVENTS, MAIL_ACCOUNTS_SETTING, type FixedEvent, type FormFillAnswer, type Opportunity } from "@crossline/core";
 import type { SecretStore } from "@crossline/connectors";
-import { CrosslineStore, applicationProfile, formRunOf, readFormRuns } from "@crossline/db";
+import { CrosslineStore, applicationProfile, formRunOf, queueFormRun, readFormRuns, saveFormRun } from "@crossline/db";
 import { openFormBrowser } from "./form-browser";
 import { createFormService } from "./form-service";
 import { createNodeBrowsers, findBrowser } from "./node/browser";
@@ -110,12 +110,30 @@ describe("form service", () => {
     await waitFor(() => readFormRuns(store, ws)[0]?.state === "submitted");
     const id = readFormRuns(store, ws)[0]!.id;
     expect(formRunOf(store, ws, id)?.state).toBe("submitted");
-    forms.onNewMail(ws, [{ from: "x", fromAddress: "noreply@evil.example", subject: "Registration confirmed: AI Night", snippet: "", date: "" }]);
+    await forms.onNewMail(ws, [{ from: "x", fromAddress: "noreply@evil.example", subject: "Registration confirmed: AI Night", snippet: "", date: "" }]);
     expect(formRunOf(store, ws, id)?.state).toBe("submitted");
-    forms.onNewMail(ws, [{ from: "x", fromAddress: "events@127.0.0.1", subject: "You're registered for AI Night", snippet: "", date: "2026-11-01" }]);
+    await forms.onNewMail(ws, [{ from: "x", fromAddress: "events@127.0.0.1", subject: "You're registered for AI Night", snippet: "", date: "2026-11-01" }]);
     expect(formRunOf(store, ws, id)).toMatchObject({ state: "confirmed", confirmation: { mail: { from: "events@127.0.0.1" } } });
     await forms.closeAll();
   }, 120_000);
+
+  it("a confirmation mail closes a run still waiting for the person, and marks the opportunity confirmed; an ambiguous one closes none", async () => {
+    const forms = service();
+    const one = { ...opportunity(), url: "https://lu.ma/ai-night", registrationHost: "lu.ma" };
+    const two = { ...one, id: "opp-10", key: "k2", title: "Robotics Demo Day", url: "https://lu.ma/robotics" };
+    store.saveOpportunity(ws, { opportunity: one, terms: [], verdict: { state: "eligible", basis: [] } });
+    const first = queueFormRun(store, ws, { opportunity: one, choice: "register" });
+    const second = queueFormRun(store, ws, { opportunity: two, choice: "register" });
+    saveFormRun(store, ws, { ...first, state: "ready_to_submit" });
+    saveFormRun(store, ws, { ...second, state: "waiting_person", stoppedFor: "captcha" });
+    await forms.onNewMail(ws, [{ from: "Luma", fromAddress: "calendar@luma-mail.com", subject: "You're registered", snippet: "", date: "2026-11-02" }]);
+    expect(formRunOf(store, ws, first.id)?.state).toBe("ready_to_submit");
+    await forms.onNewMail(ws, [{ from: "Luma", fromAddress: "calendar@luma-mail.com", subject: "You're registered for AI Night", snippet: "", date: "2026-11-02" }]);
+    expect(formRunOf(store, ws, first.id)).toMatchObject({ state: "confirmed", submittedBy: "person" });
+    expect(formRunOf(store, ws, second.id)?.state).toBe("waiting_person");
+    expect(store.listOpportunities(ws, { id: one.id })[0]?.confirmedBy).toBe("mail:calendar@luma-mail.com:2026-11-02");
+    expect(store.listEvents(ws, { type: "opportunity.confirmed" })).toHaveLength(1);
+  });
 
   it("without a screen and without a node, refuses to queue (FORM_NEEDS_SCREEN)", async () => {
     const forms = createFormService({ store, secrets: secretStore, cwd: dir, dataDir: dir, client: () => undefined, owner: () => ws, screen: false, nodeBrowser: () => undefined });

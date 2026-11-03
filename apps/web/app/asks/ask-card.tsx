@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { DECISION_SECONDS_MAX, type Ask, type AskField, type AskOption, type AskProgress } from "@crossline/core";
 import { Tag } from "../ui/tag";
+import { SegmentedControl } from "../ui/controls";
 import { Clamp } from "../ui/clamp";
 import { RiskList } from "../milestones/risk-glyph";
 import { AskItems } from "./ask-items";
@@ -218,7 +219,10 @@ function OptionLink({ option }: { option: AskOption }) {
 
 function FieldInput({ field, value, onChange }: { field: AskField; value: string; onChange: (value: string) => void }) {
   const t = useT();
-  return <label>{field.required ? field.label : t("{{label}}（可选）", { label: field.label })}
+  const label = field.required ? field.label : t("{{label}}（可选）", { label: field.label });
+  if (field.kind === "choice") return <div className="ask-choice-field"><span>{label}</span>
+    <SegmentedControl label={field.label} value={value} options={(field.choices ?? []).map((choice) => ({ value: choice.id, label: choice.label }))} onChange={onChange} /></div>;
+  return <label>{label}
     {field.kind === "longtext"
       ? <textarea rows={2} required={field.required} value={value} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} />
       : <input type={field.kind === "date" ? "date" : "text"} required={field.required} value={value} placeholder={field.placeholder}

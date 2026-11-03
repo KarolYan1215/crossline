@@ -33,15 +33,15 @@ const { DEFECTS } = await import("../apps/worker/src/testing/opportunity-world/d
 const { SCENARIOS, buildWorld } = await import("../apps/worker/src/testing/opportunity-world/scenarios");
 const { searchWorld } = await import("../apps/worker/src/testing/opportunity-world/world");
 const { htmlToText } = await import("../apps/worker/src/safe-fetch");
-const { addMailCandidate, pollNeed, OPPORTUNITY_NEEDS, OPPORTUNITY_READER } = await import("../apps/worker/src/opportunities");
-const { scoutNeeds } = await import("../packages/db/src/index");
+const { addMailCandidate, runWatch, OPPORTUNITY_NEEDS, OPPORTUNITY_READER } = await import("../apps/worker/src/opportunities");
+const { readWatchList } = await import("../packages/db/src/index");
 
 const lines: string[] = [];
 const say = (text = "") => { lines.push(text); log(text); };
 const pct = (n: number) => `${Math.round(n * 1000) / 10}%`;
 const T = harness.THRESHOLDS;
 
-const engines = [harness.baselineEngine(), ...(harness.feasibilityOf ? [harness.withFeasibility(harness.baselineEngine(), harness.feasibilityOf)] : [])];
+const engines = [harness.watchEngine(), ...(harness.feasibilityOf ? [harness.watchEngine(harness.feasibilityOf)] : [])];
 say(`# 合成世界报告（${new Date().toISOString().slice(0, 10)}）`);
 say();
 say(`引擎：${engines.map((engine) => engine.name).join("；")}${harness.feasibilityOf ? "" : "（② 未合入：时空场景挂起）"}`);
@@ -98,7 +98,7 @@ if (rounds) await live(rounds);
 if (outFile) writeFileSync(outFile, `${lines.join("\n")}\n`);
 
 /**
- * The real reader on the world's pages: each scenario page as a mail candidate of the need whose search leads to it, one poll of that need,
+ * The real reader on the world's pages: each scenario page as a mail candidate of the watch whose search leads to it, one run of that watch,
  * then the same pushes and judgement as the deterministic run. pass^k: a scenario counts only when every round got it right.
  */
 async function live(k: number) {
@@ -109,25 +109,25 @@ async function live(k: number) {
   const world = buildWorld((await import("../apps/worker/src/testing/opportunity-world/person")).BASE_PERSON);
   const subset = SCENARIOS.filter((scenario) => (scenario.scope ?? "main") === "main" && !scenario.requires?.some((need) => need !== "feasibility")
     && scenario.urls.every((url) => world.pages.has(new URL(url).toString())) && (harness.feasibilityOf || !scenario.requires?.length));
-  const base = harness.baselineEngine();
+  const base = harness.watchEngine(harness.feasibilityOf);
   const liveEngine = (): typeof base => ({
     ...base,
     name: "真读取器",
     tick: async (ctx, now) => {
       if (ctx.world.day > 0) return;
-      // Each page goes to the need whose web search leads to it: the reader drops a page that holds nothing of its need's kind.
+      // Each page goes to the watch whose web search leads to it: the reader drops a page that holds nothing of its watch's kind.
       const wanted = new Set(subset.flatMap((scenario) => scenario.urls.map((url) => new URL(url).toString())));
-      for (const need of scoutNeeds(ctx.store, ctx.workspaceId).filter((item) => item.state === "tracking")) {
-        const urls = new Set(need.sources.flatMap((source) => source.kind === "web" ? searchWorld(ctx.world, source.query) : [])
+      for (const watch of readWatchList(ctx.store, ctx.workspaceId).filter((item) => item.state === "active")) {
+        const urls = new Set((watch.targets ?? []).flatMap((target) => target.tool === "web_search" ? searchWorld(ctx.world, target.query) : [])
           .flatMap((hit) => [hit.reading, ...(hit.adversarial ?? [])]).flatMap((item) => item ? [new URL(item.url).toString()] : []).filter((url) => wanted.has(url)));
         if (!urls.size) continue;
-        for (const url of urls) addMailCandidate(ctx.store, ctx.workspaceId, { key: `live:${url}`, lineId: need.lineId, subject: "", from: "",
+        for (const url of urls) addMailCandidate(ctx.store, ctx.workspaceId, { key: `live:${url}`, lineId: watch.lineId, subject: "", from: "",
           text: htmlToText(ctx.world.pages.get(url)!.body), url, at: now.toISOString() });
-        await pollNeed(ctx.store, ctx.workspaceId, { ...need, sources: [] }, { client: () => supervisor.client as never, cwd: repoRoot, now: () => now });
+        await runWatch(ctx.store, ctx.workspaceId, { ...watch, targets: [] }, { client: () => supervisor.client as never, cwd: repoRoot, now: () => now });
       }
     }
   });
-  const engine = harness.feasibilityOf ? harness.withFeasibility(liveEngine(), harness.feasibilityOf) : liveEngine();
+  const engine = liveEngine();
   const passes = new Map(subset.map((scenario) => [scenario.id, 0]));
   const notes = new Map<string, string[]>();
   try {

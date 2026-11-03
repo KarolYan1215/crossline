@@ -6,13 +6,15 @@ import { tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, se
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
   type ChecklistAnswer, type DomainRecordInput, type StoredDomainRecord,
-  type EligibilityTerm, type EligibilityVerdict, type Opportunity, type OpportunityDecision } from "@crossline/core";
+  type EligibilityTerm, type EligibilityVerdict, type Feasibility, type Opportunity, type OpportunityDecision } from "@crossline/core";
 import { handOffArtifacts } from "./artifacts";
 import { readLocale } from "./locale";
 
 /** A found opportunity as kept: the contract's record, the read terms (what each accepts), the verdict and the person's answer. */
 export type StoredOpportunity = Opportunity & { terms: EligibilityTerm[]; verdict: EligibilityVerdict; decision?: OpportunityDecision | undefined;
-  decidedAt?: string | undefined; laterUntil?: string | undefined; confirmedBy?: string | undefined; updatedAt: string };
+  decidedAt?: string | undefined; laterUntil?: string | undefined; confirmedBy?: string | undefined; updatedAt: string;
+  /** The time–space verdict when it was found (§17.6); an infeasible one is kept for dedupe and never shown. */
+  feasibility?: Feasibility | undefined };
 
 type LedgerEventInput = {
   ownerId: string;
@@ -297,7 +299,9 @@ export type StoredPreference = {
   workspaceId: string; id: string;
   source: "correction" | "retrospective" | "estimate" | "importance" | "standard_confirmed" | "relation_rejected" | "postpone"
     /** The person turned down an opportunity agent's need or offer: what not to propose again (docs/opportunity-agent.md §8). */
-    | "opportunity_declined";
+    | "opportunity_declined"
+    /** A sentence the person added to 「少来」 on an opportunity (docs/opportunity-agent.md §17.4), read by the next derivation. */
+    | "opportunity_less";
   /** A line id, `task:<id>`, `archetype:<id>` or `all`. */
   scope: string; text: string;
   /** How much it counts: a stated correction 1, a measured pattern more, a single manual edit less. */
@@ -322,7 +326,7 @@ export type StoredLesson = {
 /** Something a model was given and cited (`usedRefs`), counted when its answer takes effect. */
 export type UsedRef = { kind: "fact"; identityId: string; projectId: string; slot: string } | { kind: "pref"; id: string } | { kind: "lesson"; id: string };
 /** Preferences the person stated (not read off an edit): they come first in a context. */
-export const STATED_PREFERENCE_SOURCES: ReadonlySet<string> = new Set(["correction", "retrospective", "standard_confirmed", "relation_rejected", "opportunity_declined"]);
+export const STATED_PREFERENCE_SOURCES: ReadonlySet<string> = new Set(["correction", "retrospective", "standard_confirmed", "relation_rejected", "opportunity_declined", "opportunity_less"]);
 /** Preferences read off an edit, which lapse after `PREFERENCE_LAPSE_DAYS` unused (decided 2026-10-21). */
 export const LAPSING_PREFERENCE_SOURCES: ReadonlySet<string> = new Set(["estimate", "importance", "postpone"]);
 export const PREFERENCE_LAPSE_DAYS = 30;
@@ -3183,10 +3187,11 @@ export class CrosslineStore {
    * Keeps one found opportunity, one row per `key`. Seen again, its record and verdict follow the newer reading while the person's
    * decision, the 「以后再说」 day and the confirming mail stay; `inserted` says whether it is new (only a new one is offered).
    */
-  saveOpportunity(workspaceId: string, input: { opportunity: Opportunity; terms: EligibilityTerm[]; verdict: EligibilityVerdict }, now = new Date().toISOString()): { inserted: boolean; row: StoredOpportunity } {
+  saveOpportunity(workspaceId: string, input: { opportunity: Opportunity; terms: EligibilityTerm[]; verdict: EligibilityVerdict; feasibility?: Feasibility | undefined },
+    now = new Date().toISOString()): { inserted: boolean; row: StoredOpportunity } {
     const { opportunity, terms, verdict } = input;
     const deadline = [...opportunity.deadlines].map((item) => item.day).sort()[0] ?? "";
-    const data = JSON.stringify({ ...opportunity, terms });
+    const data = JSON.stringify({ ...opportunity, terms, ...(input.feasibility ? { feasibility: input.feasibility } : {}) });
     const inserted = this.#prepare(`INSERT OR IGNORE INTO opportunities (workspace_id, id, key, line_id, need_id, kind, title, deadline, data_json, verdict, verdict_json,
       found_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(workspaceId, opportunity.id, opportunity.key, opportunity.lineId, opportunity.needId ?? "", opportunity.kind, opportunity.title, deadline, data,
@@ -3205,12 +3210,12 @@ export class CrosslineStore {
     const rows = this.#prepare(`SELECT * FROM opportunities WHERE workspace_id = ? ${where.map(([column]) => `AND ${column} = ?`).join(" ")} ORDER BY deadline = '', deadline, found_at`)
       .all(workspaceId, ...where.map(([, value]) => value)) as Array<Record<string, string>>;
     return rows.map((row) => {
-      const data = JSON.parse(row.data_json!) as Opportunity & { terms?: EligibilityTerm[] };
-      const { terms, ...opportunity } = data;
+      const data = JSON.parse(row.data_json!) as Opportunity & { terms?: EligibilityTerm[]; feasibility?: Feasibility };
+      const { terms, feasibility, ...opportunity } = data;
       // The row's id is the one first given; a re-read from another source may have computed another.
       return { ...opportunity, id: row.id!, terms: terms ?? [], verdict: JSON.parse(row.verdict_json!) as EligibilityVerdict,
         decision: (row.decision || undefined) as OpportunityDecision | undefined, decidedAt: row.decided_at || undefined,
-        laterUntil: row.later_until || undefined, confirmedBy: row.confirmed_by || undefined, updatedAt: row.updated_at! };
+        laterUntil: row.later_until || undefined, confirmedBy: row.confirmed_by || undefined, updatedAt: row.updated_at!, ...(feasibility ? { feasibility } : {}) };
     });
   }
 
@@ -3226,7 +3231,7 @@ export class CrosslineStore {
       .run(verdict.state, JSON.stringify(verdict), now, workspaceId, id).changes > 0;
   }
 
-  /** The mail (`mailKey`) that confirmed the person's sign-up or application. */
+  /** What confirmed the person's sign-up (`form:<runId>`, written when the form filling confirms it, §17.8). */
   confirmOpportunity(workspaceId: string, id: string, mailKey: string, now = new Date().toISOString()): boolean {
     return this.#prepare("UPDATE opportunities SET confirmed_by = ?, updated_at = ? WHERE workspace_id = ? AND id = ? AND confirmed_by = ''")
       .run(mailKey, now, workspaceId, id).changes > 0;
@@ -4528,3 +4533,4 @@ export * from "./step-owner";
 export * from "./lessons";
 export * from "./opportunities";
 export * from "./form-runs";
+export * from "./opportunity-watches";

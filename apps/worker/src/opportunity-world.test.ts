@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from "vitest";
 import {
-  LONGRUN_NODE, THRESHOLDS, baselineEngine, feasibilityOf, judgeRun, localDay, metricsOf, runLong, runPairs, runWorld, withFeasibility,
+  LONGRUN_NODE, THRESHOLDS, feasibilityOf, judgeRun, localDay, metricsOf, runLong, runPairs, runWorld, watchEngine,
   type PairResult, type RunResult
 } from "./testing/opportunity-world/harness";
 import { KNOWN_DEFECTS, PAIR_DEFECTS } from "./testing/opportunity-world/defects";
@@ -14,7 +14,7 @@ import { DAY_MS, WORLD_START } from "./testing/opportunity-world/world";
  * (watches, the scout, the time–space engine) is skipped; a known defect is `test.fails` with its id from `defects.ts`, so fixing it turns
  * the test red until the entry is removed. The §17.0 thresholds are asserted once nothing is pending.
  */
-const ENGINE = feasibilityOf ? withFeasibility(baselineEngine(), feasibilityOf) : baselineEngine();
+const ENGINE = watchEngine(feasibilityOf);
 const PERSONAS: Persona[] = ["faithful", "adversarial"];
 const runs = new Map<Persona, RunResult>();
 let pairs: PairResult[] = [];

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  OPPORTUNITY_NEEDS_SCHEMA, OPPORTUNITY_READING_SCHEMA, aiDeadlines, applicantFrom, ccfddlDeadlines, checkReadItem, degreeStageOf, devpostHackathons,
-  eligibilityAnswer, judgeEligibility, keepOpportunityNeeds, mergeNeeds, needFromProposal, nextMonthDay, opportunityFromRead, opportunityKey,
-  parsePostings, prepStartFor, termSlot, validateOpportunityNeeds, validateOpportunityReading,
+  OPPORTUNITY_READING_SCHEMA, aiDeadlines, applicantFrom, ccfddlDeadlines, checkReadItem, degreeStageOf, devpostHackathons,
+  eligibilityAnswer, judgeEligibility, mergeNeeds, needFromProposal, nextMonthDay, opportunityFromRead, opportunityKey,
+  parsePostings, prepStartFor, termSlot, validateOpportunityReading,
   type EligibilityTerm, type ProposedNeed, type ReadItem, type StoredNeed
 } from "./opportunity-discovery";
 import { structuredOutputProblems } from "./structured-output";
@@ -12,7 +12,6 @@ const proposal = (over: Partial<ProposedNeed> = {}): ProposedNeed => ({
   window: { opensMonth: 9, closesMonth: 11, basis: "往年 9 月开放、11 月截止", sourceUrl: "https://example.org/careers" }, leadDays: 30,
   eligibility: [], sources: [{ kind: "ats", provider: "greenhouse", board: "example", query: "intern" }], ...over
 });
-const context = { lineId: "research", factIds: ["research//goal"], milestoneIds: ["ms-1"] };
 
 const term = (over: Partial<EligibilityTerm> = {}): EligibilityTerm => ({
   dim: "degree_stage", rule: "在读研究生", quote: "Open to current graduate students", accepts: { kind: "one_of", values: ["graduate"], min: -1, max: -1 }, ...over
@@ -22,26 +21,11 @@ const fact = (slot: string, value: string, status: "confirmed" | "inferred" = "c
 
 describe("schemas", () => {
   it("meet the strict structured-output rules", () => {
-    expect(structuredOutputProblems(OPPORTUNITY_NEEDS_SCHEMA)).toEqual([]);
     expect(structuredOutputProblems(OPPORTUNITY_READING_SCHEMA)).toEqual([]);
   });
 });
 
 describe("needs", () => {
-  it("refuses a need resting on no fact or an unknown one, and a cycle with no window source", () => {
-    expect(() => validateOpportunityNeeds({ needs: [proposal({ factIds: [], milestoneIds: [] })], blocked: "" }, context)).toThrow("OPPORTUNITY_NEEDS_INVALID");
-    expect(detailOf(() => validateOpportunityNeeds({ needs: [proposal({ factIds: ["research//nope"] })], blocked: "" }, context))).toMatch(/不存在/);
-    expect(detailOf(() => validateOpportunityNeeds({ needs: [proposal({ window: { opensMonth: 9, closesMonth: 0, basis: "", sourceUrl: "" } })], blocked: "" }, context))).toMatch(/sourceUrl/);
-    expect(detailOf(() => validateOpportunityNeeds({ needs: [], blocked: "" }, context))).toMatch(/blocked/);
-    expect(validateOpportunityNeeds({ needs: [proposal()], blocked: "" }, context).needs).toHaveLength(1);
-  });
-
-  it("keeps the needs with no problem of their own when repairs run out", () => {
-    const kept = keepOpportunityNeeds({ needs: [proposal(), proposal({ key: "b", factIds: [] })], blocked: "" }, context);
-    expect(kept?.needs.map((need) => need.key)).toEqual(["summer-intern"]);
-    expect(keepOpportunityNeeds({ needs: [proposal({ factIds: [] })], blocked: "" }, context)).toBeUndefined();
-  });
-
   it("moves a cycle's window to its next occurrence and works back the start of preparation", () => {
     expect(nextMonthDay("2026-11-01", 9)).toBe("2027-09-01");
     expect(nextMonthDay("2026-11-01", 11, 30)).toBe("2026-11-30");

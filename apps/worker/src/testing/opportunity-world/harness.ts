@@ -1,12 +1,18 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import * as core from "@crossline/core";
-import { AVAILABILITY_SETTING, type AvailabilityWindow, type Feasibility, type Opportunity, type PersonPlace, type VisaCheck } from "@crossline/core";
-import { CrosslineStore, decideNeed, rejudgeOpportunities, scoutNeeds, type StoredOpportunity } from "@crossline/db";
-import { addMailCandidate, deriveNeeds, needsDue, needsToPoll, pollNeed } from "../../opportunities";
+import { AVAILABILITY_SETTING, SCOUT_PURPOSE, type AvailabilityWindow, type Feasibility, type Opportunity, type PersonPlace, type VisaCheck } from "@crossline/core";
+import { setUsageSink, withUsageWorkspace } from "@crossline/codex";
+import { CrosslineStore, decideWatch, opportunityCosts, readWatchList, retireQuietWatches, settleOpportunityOutcomes, surfacedOpportunities,
+  type StoredOpportunity } from "@crossline/db";
+import { addMailCandidate, deriveWatches, rejudge, runWatch, todayFor, watchesDeriveDue, watchesToRun, type Clients, type FeasibilityFn } from "../../opportunities";
+import { afterScout, opportunityScoutDue, SCOUT_FILE, startScout } from "../../opportunity-scout";
 import { opportunityNotices } from "../../notify";
 import { worldRuntime, type Persona } from "./model";
 import { BASE_PERSON, seedPerson, type PersonFacts } from "./person";
-import { buildWorld, COUNTERFACTUALS, SCENARIOS, type Capability, type Expect, type Scenario } from "./scenarios";
-import { DAY_MS, PERSON_ZONE, WORLD_START, worldHttp, type World } from "./world";
+import { buildWorld, COUNTERFACTUALS, SCENARIOS, SCOUT_LEADS, type Capability, type Expect, type Scenario } from "./scenarios";
+import { DAY_MS, PERSON_ZONE, WORLD_START, searchWorld, worldHttp, type World } from "./world";
 
 /**
  * Runs the opportunity agent in the synthetic world and measures it against §17.0 (docs/opportunity-agent.md §17.9 ③).
@@ -21,7 +27,9 @@ export type EngineContext = { store: CrosslineStore; workspaceId: string; ownerI
   /** Track ②'s verdict per opportunity id, when an engine has one. */
   feasibility: Map<string, Feasibility> };
 
-export type Push = { id: string; url: string; title: string; label: Exclude<Expect, "no_push">; deadlines: string[]; day: number; urgent: boolean; lineId: string };
+/** `brief`: the morning brief or a single message; `review`: the weekly review's 视野外, where a scout find with no near preparation waits (§17.3). */
+export type Push = { id: string; url: string; title: string; label: Exclude<Expect, "no_push">; deadlines: string[]; day: number; urgent: boolean; lineId: string;
+  channel: "brief" | "review" };
 
 export type Engine = {
   name: string;
@@ -44,7 +52,7 @@ export const localDay = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZo
 const canonical = (url: string) => { try { return new URL(url).toString(); } catch { return url; } };
 const labelOf = (row: StoredOpportunity): Push["label"] => row.verdict.state === "unknown" ? "ask" : "push";
 
-// ── The baseline: main's discovery chain ─────────────────────────────────────────────────────────────────────────
+// ── The engine: track ①'s watches, scout and flywheel, as `opportunityPass` runs them ─────────────────────────────
 
 /** Mail the triage would have marked as an opportunity by now (`addMailCandidate`, as mailbox.ts does), once each. */
 function deliverMail(ctx: EngineContext, now: Date) {
@@ -52,41 +60,97 @@ function deliverMail(ctx: EngineContext, now: Date) {
     addMailCandidate(ctx.store, ctx.workspaceId, { key: mail.key, lineId: mail.lineId, subject: mail.subject, from: mail.from, text: mail.text, url: mail.url, at: mail.at });
 }
 
-/** The person tracks every need proposed to them (the most a person could ask of discovery). */
-function trackProposed(ctx: EngineContext, now: Date) {
-  for (const need of scoutNeeds(ctx.store, ctx.workspaceId)) if (need.state === "proposed") decideNeed(ctx.store, ctx.workspaceId, ctx.ownerId, need.id, "tracking", now);
+/** The person keeps every watch proposed to them (盯住 on the line card and in the review's 视野外): the most a person could ask of discovery. */
+function keepProposed(ctx: EngineContext, now: Date) {
+  for (const watch of readWatchList(ctx.store, ctx.workspaceId)) if (watch.state === "proposed") decideWatch(ctx.store, ctx.workspaceId, ctx.ownerId, watch.id, "active", now);
 }
 
-export function baselineEngine(): Engine {
-  const deps = (ctx: EngineContext, now: Date) => ({ client: () => ctx.runtime.rpc, cwd: ".", http: worldHttp(ctx.world), now: () => now, webBlocker: () => undefined });
+/** What one tools run of the scout is booked at (the harness has no assistant to measure): a long research run of the mid tier. */
+const SCOUT_RUN_TOKENS = { input: 60_000, output: 8_000 };
+
+/**
+ * The weekly scout without the assistant: `startScout` gets a `runFree` that writes the `scout.json` a scout following the world's leads
+ * would write (each lead searched, every find as the persona reads it), books the run's cost under `opportunity:scout`, and `afterScout`
+ * then checks the file the way production does — every page opened, every quote looked for on it.
+ */
+async function runScout(ctx: EngineContext, now: Date, deps: Clients) {
+  const directory = mkdtempSync(path.join(tmpdir(), "opp-world-scout-"));
+  try {
+    let taskId = "";
+    const started = startScout(ctx.store, ctx.workspaceId, (input) => {
+      taskId = input.taskId;
+      const finds = SCOUT_LEADS.flatMap((lead) => searchWorld(ctx.world, lead.query).flatMap((hit) =>
+        (ctx.persona === "adversarial" && hit.adversarial ? hit.adversarial : hit.reading ? [hit.reading] : [])
+          .map((item) => ({ ...item, lineId: lead.lineId, why: lead.why }))));
+      writeFileSync(path.join(directory, SCOUT_FILE), JSON.stringify({ opportunities: finds, watches: SCOUT_LEADS.map((lead) => lead.watch), notes: [] }));
+      ctx.store.saveModelUsage({ workspaceId: ctx.workspaceId, skill: "crossline:crossline-agent-tools", tier: "mid", model: "world", effort: "", spendMode: "normal",
+        threadId: "", ok: true, errorCode: "", repairs: 0, turns: 6, inputTokens: SCOUT_RUN_TOKENS.input, cachedInputTokens: 0, outputTokens: SCOUT_RUN_TOKENS.output,
+        reasoningTokens: 0, totalTokens: SCOUT_RUN_TOKENS.input + SCOUT_RUN_TOKENS.output, durationMs: 0, at: now.toISOString(), purpose: SCOUT_PURPOSE });
+      return { state: "started", taskId: input.taskId } as ReturnType<Parameters<typeof startScout>[2]>;
+    }, deps);
+    if (started.state !== "started") return;
+    await afterScout(ctx.store, ctx.workspaceId, { state: "done", taskId, directory } as never, now, deps);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}
+
+const ledgerCost = (store: CrosslineStore, workspaceId: string, purpose: string, sinceIso: string) =>
+  opportunityCosts(store, workspaceId, sinceIso).filter((row) => row.purpose === purpose).reduce((sum, row) => sum + row.weighted, 0);
+
+/**
+ * Track ① as the worker runs it (`opportunityPass` in apps/worker/src/index.ts): outcomes settled and quiet watches retired, lines due
+ * derived (the person keeps what is proposed), due watches run, the weekly scout, verdicts judged again. The worker takes one line and two
+ * watches a tick every few minutes; the world ticks once a day, so it takes all that are due. With `check` (track ②'s `feasibilityOf`)
+ * every find gets its time–space verdict through `Clients.feasibility`, the way the worker passes it.
+ */
+export function watchEngine(check?: FeasibilityOf): Engine {
+  const deps = (ctx: EngineContext, now: Date): Clients => ({ client: () => ctx.runtime.rpc, cwd: ".", http: worldHttp(ctx.world), now: () => now,
+    webBlocker: () => undefined, costSince: ledgerCost, ...(check ? { feasibility: worldFeasibility(ctx, check) } : {}) });
   const derive = async (ctx: EngineContext, now: Date) => {
-    for (const lineId of needsDue(ctx.store, ctx.workspaceId, now)) await deriveNeeds(ctx.store, ctx.workspaceId, lineId, deps(ctx, now));
-    trackProposed(ctx, now);
+    for (const lineId of watchesDeriveDue(ctx.store, ctx.workspaceId, now)) await deriveWatches(ctx.store, ctx.workspaceId, lineId, deps(ctx, now));
+    keepProposed(ctx, now);
   };
   return {
-    name: "baseline（main 现有发现链）",
-    capabilities: new Set(),
+    name: check ? "① 监视项与侦察 + ② 时空引擎" : "① 监视项与侦察",
+    capabilities: new Set<Capability>(["watches", "scout", "local_today", ...(check ? ["feasibility" as const] : [])]),
     setup: derive,
     tick: async (ctx, now) => {
+      settleOpportunityOutcomes(ctx.store, ctx.workspaceId, todayFor(ctx.store, ctx.workspaceId, now), now);
+      retireQuietWatches(ctx.store, ctx.workspaceId, now);
       await derive(ctx, now);
       deliverMail(ctx, now);
-      for (const need of needsToPoll(ctx.store, ctx.workspaceId, now)) await pollNeed(ctx.store, ctx.workspaceId, need, deps(ctx, now));
-      rejudgeOpportunities(ctx.store, ctx.workspaceId, now);
+      for (const watch of watchesToRun(ctx.store, ctx.workspaceId, now)) await runWatch(ctx.store, ctx.workspaceId, watch, deps(ctx, now));
+      if (opportunityScoutDue(ctx.store, ctx.workspaceId, now)) {
+        await runScout(ctx, now, deps(ctx, now));
+        keepProposed(ctx, now);
+      }
+      rejudge(ctx.store, ctx.workspaceId, now);
     },
     pushes: (ctx, now) => {
-      const today = localDay(now);
+      const today = todayFor(ctx.store, ctx.workspaceId, now);
       const notices = opportunityNotices(ctx.store, ctx.workspaceId, today, now);
       const rows = new Map(ctx.store.listOpportunities(ctx.workspaceId).map((row) => [row.id, row]));
       const urgent = new Set(notices.closingToday.map((item) => item.id));
-      const ids = [...new Set([...notices.fresh.map((item) => item.id), ...urgent])];
-      return ids.map((id) => rows.get(id)!).filter(Boolean).map((row) => ({ id: row.id, url: canonical(row.url), title: row.title, label: labelOf(row),
-        deadlines: row.deadlines.map((item) => item.day), urgent: urgent.has(row.id), lineId: row.lineId }));
+      const brief = [...new Set([...notices.fresh.map((item) => item.id), ...urgent])];
+      // A scout find whose preparation is not near waits for the weekly review's 视野外 (§17.3): it reaches the person there, not in the brief.
+      const since = new Date(now.getTime() - DAY_MS).toISOString();
+      const review = surfacedOpportunities(ctx.store, ctx.workspaceId, today).filter((row) => !row.inbox && row.foundAt >= since).map((row) => row.id);
+      const push = (id: string, channel: Push["channel"]): Array<Omit<Push, "day">> => {
+        const row = rows.get(id);
+        return row ? [{ id: row.id, url: canonical(row.url), title: row.title, label: labelOf(row), deadlines: row.deadlines.map((item) => item.day),
+          urgent: urgent.has(row.id), lineId: row.lineId, channel }] : [];
+      };
+      return [...brief.flatMap((id) => push(id, "brief")), ...review.filter((id) => !brief.includes(id)).flatMap((id) => push(id, "review"))];
     },
-    watches: (ctx) => scoutNeeds(ctx.store, ctx.workspaceId).filter((need) => need.state === "tracking").map((need) => need.id).sort()
+    watches: (ctx) => readWatchList(ctx.store, ctx.workspaceId).filter((watch) => watch.state === "active").map((watch) => watch.id).sort(),
+    spend: (ctx) => {
+      const rows = opportunityCosts(ctx.store, ctx.workspaceId, "");
+      const explore = rows.filter((row) => row.purpose === SCOUT_PURPOSE || row.purpose.startsWith("opportunity:explore")).reduce((sum, row) => sum + row.weighted, 0);
+      return { explore, total: rows.reduce((sum, row) => sum + row.weighted, 0) };
+    }
   };
 }
 
-// ── Track ②: the time–space engine on what the baseline would push ──────────────────────────────────────────────
+// ── Track ②: the time–space engine its check, fed from the world ──────────────────────────────────────────────
 
 type FeasibilityOf = (opportunity: Opportunity, ctx: Record<string, unknown>) => Promise<Feasibility>;
 /** `feasibilityOf` once track ② is merged (packages/core/src/feasibility.ts); undefined before, and the scenarios that need it wait. */
@@ -144,11 +208,6 @@ async function worldVisa(world: World, citizenship: string, destination: string,
   return { needed: page.needed, leadDays: page.leadDays, sourceUrl: page.url, quote: page.quote, checkedAt: now.toISOString(), verified: true };
 }
 
-/**
- * The baseline with track ②'s check between what it finds and what reaches the person: an infeasible one is held back, a conflicting one
- * is pushed with its clash (§17.6–17.7). Where the event is comes from the record's `place` when the reader filled it (①/② add that),
- * else from its `location` line, read as an in-person city. An event one turns up to needs no preparation; an application takes its need's lead.
- */
 /** The record's `location` line as a place: online and hybrid by their words, anything else an in-person city (until the reader fills `place`). */
 function placeFromLocation(location: string | undefined): { mode: "online" | "in_person" | "hybrid" | "unknown"; city?: string; quote: string } {
   if (!location?.trim()) return { mode: "unknown", quote: "" };
@@ -157,34 +216,26 @@ function placeFromLocation(location: string | undefined): { mode: "online" | "in
   return { mode: "in_person", city: location, quote: location };
 }
 
-export function withFeasibility(base: Engine, check: FeasibilityOf): Engine {
-  return {
-    ...base,
-    name: `${base.name} + ② 时空引擎`,
-    capabilities: new Set([...base.capabilities, "feasibility"]),
-    pushes: async (ctx, now) => {
-      const rows = new Map(ctx.store.listOpportunities(ctx.workspaceId).map((row) => [row.id, row]));
-      const needs = new Map(scoutNeeds(ctx.store, ctx.workspaceId).map((need) => [need.id, need]));
-      let availability: AvailabilityWindow[] = [];
-      try { availability = JSON.parse(ctx.store.getSetting(ctx.workspaceId, AVAILABILITY_SETTING) ?? "[]") as AvailabilityWindow[]; } catch { /* unknown */ }
-      const citizenship = ctx.store.listProfileFacts(ctx.workspaceId).find((fact) => fact.slot === "apply.citizenship")?.value;
-      const out: Array<Omit<Push, "day">> = [];
-      for (const push of await base.pushes(ctx, now)) {
-        const row = rows.get(push.id);
-        if (!row) continue;
-        const own = (row as { place?: unknown }).place;
-        const place = own ?? placeFromLocation(row.location);
-        const verdict = await check({ ...row, place } as Opportunity, {
-          now, timeZone: PERSON_ZONE, prepDays: row.kind === "event" ? 0 : needs.get(row.needId ?? "")?.leadDays ?? 0, places: worldPlaces(ctx),
-          geocode: (query: { city: string; country?: string }) => worldGeocode(ctx.world, query), citizenship,
-          visa: (from: string, to: string) => worldVisa(ctx.world, from, to, now), blocks: feasibilityBlocks(ctx.world), availability, locale: "zh"
-        });
-        ctx.feasibility.set(row.id, verdict);
-        if (verdict.state === "infeasible") continue;
-        out.push(verdict.state === "conflict" && push.label === "push" ? { ...push, label: "push_conflict" } : push);
-      }
-      return out;
-    }
+/**
+ * Track ②'s check as `Clients.feasibility`: the verdict on each find before it is kept, so an infeasible one is held back by `holdBack`
+ * and a conflicting one carries its clash (§17.6–17.7). Where the event is comes from the record's `place` when the reader filled it, else
+ * from its `location` line. An event one turns up to needs no preparation; an application takes its watch's lead; a watch's radius
+ * (「少来·太远」 tightens it) is the local limit, as the worker passes it.
+ */
+function worldFeasibility(ctx: EngineContext, check: FeasibilityOf): FeasibilityFn {
+  return async (opportunity, { now, watch }) => {
+    let availability: AvailabilityWindow[] = [];
+    try { availability = JSON.parse(ctx.store.getSetting(ctx.workspaceId, AVAILABILITY_SETTING) ?? "[]") as AvailabilityWindow[]; } catch { /* unknown */ }
+    const citizenship = ctx.store.listProfileFacts(ctx.workspaceId).find((fact) => fact.slot === "apply.citizenship")?.value;
+    const place = (opportunity as { place?: unknown }).place ?? placeFromLocation(opportunity.location);
+    const verdict = await check({ ...opportunity, place } as Opportunity, {
+      now, timeZone: PERSON_ZONE, prepDays: opportunity.kind === "event" ? 0 : watch?.leadDays ?? 0, places: worldPlaces(ctx),
+      geocode: (query: { city: string; country?: string }) => worldGeocode(ctx.world, query), citizenship,
+      visa: (from: string, to: string) => worldVisa(ctx.world, from, to, now), blocks: feasibilityBlocks(ctx.world), availability, locale: "zh",
+      ...(watch?.radiusMinutes ? { localMinutesMax: watch.radiusMinutes } : {})
+    });
+    ctx.feasibility.set(opportunity.id, verdict);
+    return verdict;
   };
 }
 
@@ -216,6 +267,23 @@ export type RunResult = {
   feasibility: Map<string, Feasibility>;
 };
 
+/**
+ * The world's clock as the process's: `new Date()` and `Date.now()` read the simulated instant while a run is on, so what the code stamps
+ * by itself (an event's `createdAt`, a model run's `at`) agrees with what it is told is now, as both do in production. Without it a node
+ * written on day 18 carried the real date and the watches never saw it.
+ */
+const RealDate = Date;
+function useWorldClock(): { set: (now: Date) => void; restore: () => void } {
+  let at = WORLD_START.getTime();
+  class WorldDate extends RealDate {
+    constructor(...args: unknown[]) { if (args.length) super(...(args as [string])); else super(at); }
+    static override now() { return at; }
+    static [Symbol.hasInstance](value: unknown) { return value instanceof RealDate; }
+  }
+  globalThis.Date = WorldDate as unknown as DateConstructor;
+  return { set: (now) => { at = now.getTime(); }, restore: () => { globalThis.Date = RealDate; } };
+}
+
 export async function runWorld(options: { engine: Engine; persona?: Persona; facts?: PersonFacts; days?: number;
   milestone?: { day: number; id: string } }): Promise<RunResult> {
   const persona = options.persona ?? "faithful";
@@ -223,10 +291,27 @@ export async function runWorld(options: { engine: Engine; persona?: Persona; fac
   const days = options.days ?? 7;
   const world = buildWorld(facts);
   const store = new CrosslineStore(":memory:");
+  const clock = useWorldClock();
+  // Every model run's cost into this run's ledger, as the worker's sink writes it (what the watches' costs and the 20% share read).
+  setUsageSink((usage) => {
+    if (!usage.workspaceId) return;
+    store.saveModelUsage({ workspaceId: usage.workspaceId, skill: usage.skillName, tier: usage.tier ?? "", model: usage.model ?? "", effort: usage.effort ?? "",
+      spendMode: usage.spendMode, threadId: usage.threadId ?? "", ok: usage.ok, errorCode: usage.errorCode ?? "", repairs: usage.repairs, turns: usage.turns,
+      inputTokens: usage.inputTokens, cachedInputTokens: usage.cachedInputTokens, outputTokens: usage.outputTokens, reasoningTokens: usage.reasoningOutputTokens,
+      totalTokens: usage.totalTokens, durationMs: usage.durationMs, at: usage.at, ...(usage.purpose ? { purpose: usage.purpose } : {}) });
+  });
   try {
     const workspaceId = store.createPrincipalWithWorkspace("qiao", "Qiao Lin").workspace.id;
     const ownerId = seedPerson(store, workspaceId, facts, WORLD_START);
     const ctx: EngineContext = { store, workspaceId, ownerId, world, persona, facts, runtime: worldRuntime(world, persona), feasibility: new Map() };
+    return await withUsageWorkspace(workspaceId, () => simulate(options, ctx, days, clock));
+  } finally { setUsageSink(undefined); clock.restore(); store.close(); }
+}
+
+async function simulate(options: { engine: Engine; milestone?: { day: number; id: string } | undefined }, ctx: EngineContext, days: number,
+  clock: { set: (now: Date) => void }): Promise<RunResult> {
+  const { store, workspaceId, world, persona, facts } = ctx;
+  {
     await options.engine.setup(ctx, WORLD_START);
     const pushes: Push[] = [];
     const seen = new Set<string>();
@@ -236,6 +321,7 @@ export async function runWorld(options: { engine: Engine; persona?: Persona; fac
     for (let day = 0; day < days; day += 1) {
       world.day = day;
       const now = new Date(WORLD_START.getTime() + day * DAY_MS);
+      clock.set(now);
       if (options.milestone?.day === day) {
         await (options.engine.milestoneReached ?? milestoneReached)(ctx, options.milestone.id, now);
       }
@@ -256,12 +342,19 @@ export async function runWorld(options: { engine: Engine; persona?: Persona; fac
     return { engine: options.engine.name, persona, facts, days, pushes, watchesByDay, interruptionsByDay, ledgerWrites,
       injectedRequests: world.log.filter((record) => world.injectedHosts.has(record.host)).map((record) => record.url),
       spend: options.engine.spend?.(ctx), opportunities: store.listOpportunities(workspaceId), feasibility: ctx.feasibility };
-  } finally { store.close(); }
+  }
 }
 
-/** The node of §17.4 as the ledger records it: the gate's judgement that the milestone is met, and the order's acceptance. */
+/**
+ * The node of §17.4 as the ledger records it: the order that served the milestone handed in and accepted, the gate's judgement that the
+ * milestone is met, and the acceptance (the order is what files the node under its line, as in production).
+ */
 async function milestoneReached(ctx: EngineContext, milestoneId: string, now: Date) {
   const workOrderId = `wo-${milestoneId}`;
+  const milestone = ctx.store.listMilestones(ctx.workspaceId).find((item) => item.id === milestoneId);
+  if (milestone) ctx.store.saveWorkOrder({ id: workOrderId, ownerId: ctx.ownerId, workspaceId: ctx.workspaceId, identityId: milestone.identityId, projectId: "",
+    milestoneId, intent: milestone.title, state: "accepted", riskTier: "milestone",
+    estimate: { p25Minutes: 60, p50Minutes: 90, p85Minutes: 150, confidence: "medium", basis: "world" }, payload: {} } as never);
   ctx.store.appendEvent({ ownerId: ctx.ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `world:gate:${milestoneId}`, type: "milestone_gate.judged", entityId: workOrderId,
     payload: { milestoneId, milestoneVersion: 1, verdict: "pass", criteriaVerdict: [], at: now.toISOString() } });
   ctx.store.appendEvent({ ownerId: ctx.ownerId, workspaceId: ctx.workspaceId, idempotencyKey: `world:accepted:${milestoneId}`, type: "evidence.accepted", entityId: workOrderId,

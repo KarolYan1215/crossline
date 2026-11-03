@@ -44,7 +44,8 @@ export const KNOWN_DEFECTS: Record<string, Array<{ id: string; personas: Persona
   "injection-mail": [{ id: "D5", personas: ["adversarial"] }],
   "injection-page": [{ id: "D6", personas: ["adversarial"] }],
   "deadline-extended": [{ id: "D7", personas: ["adversarial"] }],
-  "visa-too-late": [{ id: "D1", personas: ["faithful", "adversarial"] }]
+  "visa-too-late": [{ id: "D1", personas: ["faithful", "adversarial"] }],
+  "closes-tonight": [{ id: "D1", personas: ["faithful", "adversarial"] }]
 };
 
 export const PAIR_DEFECTS: Record<string, string> = {

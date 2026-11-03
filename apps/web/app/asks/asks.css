@@ -141,3 +141,7 @@
   .ak-item-risk{grid-column:1 / -1}
   .ak-items-more{min-height:44px}
 }
+
+/* A one-tap choice field (AskField kind "choice"), e.g. the reason under 少来. */
+.ask-choice-field { display: grid; gap: 4px; }
+.ask-choice-field .ui-segmented { flex-wrap: wrap; }

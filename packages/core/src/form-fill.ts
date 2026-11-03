@@ -1,4 +1,4 @@
-import { APPLICATION_SLOTS, isSensitiveSlot, profilePlaceholder, type ApplicationSlot, type FormAction, type FormRun, type FormStop,
+import { APPLICATION_SLOTS, isSensitiveSlot, profilePlaceholder, type ApplicationSlot, type FormAction, type FormRun, type FormRunState, type FormStop,
   type Opportunity } from "./opportunity";
 
 /**
@@ -439,6 +439,9 @@ export const SLOT_LABEL: Record<ApplicationSlot, string> = {
   student_id: "学号", address: "通讯地址", id_number: "身份证号", passport_number: "护照号"
 };
 /** Why a run stopped, as the person reads it (translated where shown). */
+/** Each run state as the person reads it (translated where shown). */
+export const FORM_STATE_LABEL: Record<FormRunState, string> = { queued: "排队中", filling: "正在填写", waiting_person: "等本人处理", ready_to_submit: "等本人提交",
+  submitted: "已提交，等确认", confirmed: "已确认", stopped: "已停止" };
 export const STOP_LABEL: Record<FormStop, string> = {
   login: "需要登录", captcha: "需要人工验证", payment: "需要付款", missing_slot: "缺少资料", essay: "需要长回答", verify_failed: "填写后核对不一致",
   layout_changed: "页面看不懂", site_hold: "网站暂停访问", not_allowed: "规则不允许", engine_failed: "填写中断"
@@ -637,6 +640,19 @@ export function receiptMatches(run: Pick<StoredFormRun, "host" | "opportunity">,
   const words = titleWords(run.opportunity.title);
   const said = new Set(titleWords(text));
   return words.length > 0 && words.filter((word) => said.has(word)).length / words.length >= 0.6;
+}
+
+/**
+ * The one run a mail confirms. Two runs on one site (two Luma events) both match a bare 「You're registered」, so the mail must then name
+ * one of them by its title; when it names none or several, nothing is confirmed and the 48-hour question asks the person instead
+ * (Simplify warns its mail matching errs exactly here: several roles at one company).
+ */
+export function receiptRun<T extends Pick<StoredFormRun, "host" | "opportunity">>(runs: T[], mail: { fromAddress: string; subject: string; snippet: string }): T | undefined {
+  const matched = runs.filter((run) => receiptMatches(run, mail));
+  if (matched.length <= 1) return matched[0];
+  const said = new Set(titleWords(`${mail.subject}\n${mail.snippet}`));
+  const named = matched.filter((run) => { const words = titleWords(run.opportunity.title); return words.length > 0 && words.filter((word) => said.has(word)).length / words.length >= 0.6; });
+  return named.length === 1 ? named[0] : undefined;
 }
 
 /** The start time an opportunity's quote names ("6:00 PM", "18:30", "下午 2:00"), as HH:MM, or undefined when it names none. */

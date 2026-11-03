@@ -1,6 +1,6 @@
 import { OPPORTUNITY_NEEDS_SKILL, OPPORTUNITY_READER_SKILL } from "@crossline/core";
 import { scriptedRuntime } from "../fake-runtime";
-import { needsFor, PAGE_READINGS } from "./scenarios";
+import { PAGE_READINGS, watchesFor } from "./scenarios";
 import { searchWorld, type Reading, type World } from "./world";
 
 /**
@@ -16,10 +16,16 @@ import { searchWorld, type Reading, type World } from "./world";
  */
 export type Persona = "faithful" | "adversarial";
 
-/** Milestones the input marks as reached, however a track names it (status, a flag, or full progress). */
-function reached(milestones: unknown): Set<string> {
+/**
+ * Milestones the input marks as reached, however a track names it (status, a flag, full progress), or whose work the line's `progress`
+ * says was accepted or judged (§17.4's node: the work order is named after the milestone it serves).
+ */
+function reached(milestones: unknown, progress: unknown): Set<string> {
   const out = new Set<string>();
+  const nodes = (Array.isArray(progress) ? progress as Array<Record<string, unknown>> : [])
+    .filter((item) => item.type === "evidence.accepted" || item.type === "milestone_gate.judged").map((item) => String(item.title ?? ""));
   for (const item of Array.isArray(milestones) ? milestones as Array<Record<string, unknown>> : []) {
+    if (nodes.some((title) => title && title === String(item.title ?? ""))) out.add(String(item.id));
     const status = String(item.status ?? "");
     if (["done", "met", "accepted", "achieved", "reached", "completed"].includes(status) || item.done === true || item.met === true || Number(item.progress) >= 1)
       out.add(String(item.id));
@@ -32,9 +38,9 @@ const readingsFor = (choices: { faithful: Reading[]; adversarial?: Reading[] | u
 
 /** The answer a turn's input gets; exported for tracks that drive the Skills through a runtime of their own. */
 export function answerFor(world: World, persona: Persona, input: Record<string, unknown>): string {
-  if (typeof input.version === "string" && input.version.startsWith("crossline.opportunity-needs")) {
+  if (typeof input.version === "string" && input.version.startsWith("crossline.opportunity-watches")) {
     const line = input.line as { id: string };
-    return JSON.stringify({ needs: needsFor(line.id, reached(input.milestones)), blocked: "" });
+    return JSON.stringify({ watches: watchesFor(line.id, reached(input.milestones, input.progress)), blocked: "" });
   }
   const pages = (input.pages as Array<{ pageId: string; url: string }> | undefined) ?? [];
   if (pages.length) {

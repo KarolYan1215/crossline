@@ -1,15 +1,13 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { SCOUT_NEEDS_SETTING, judgeEligibility, applicantFrom, type EligibilityTerm, type Opportunity, type StoredNeed } from "@crossline/core";
-import { CrosslineStore, decideNeed, opportunityWeek, queueFormRun, readFormRuns, recordEligibilityAnswer, scoutNeeds, waitingIdForNeed } from "./index";
+import { judgeEligibility, applicantFrom, type EligibilityTerm, type Opportunity } from "@crossline/core";
+import { CrosslineStore, opportunityWeek, queueFormRun, readFormRuns, recordEligibilityAnswer } from "./index";
 
 let store: CrosslineStore;
 let ws: string;
-let owner: string;
 beforeEach(() => {
   store = new CrosslineStore(":memory:");
   const created = store.createPrincipalWithWorkspace("owner", "o");
   ws = created.workspace.id;
-  owner = created.principal.id;
 });
 afterEach(() => store.close());
 
@@ -39,24 +37,6 @@ test("an eligibility answer is a confirmed fact of the person line and judges th
   expect(recordEligibilityAnswer(store, ws, "apply.degree_stage", "硕士在读", "opp-1")).toBe(1);
   expect(store.listOpportunities(ws, { id: "opp-1" })[0]?.verdict.state).toBe("eligible");
   expect(store.listProfileFacts(ws).find((fact) => fact.slot === "apply.degree_stage")).toMatchObject({ identityId: "person", status: "confirmed" });
-});
-
-const need = (over: Partial<StoredNeed> = {}): StoredNeed => ({
-  id: "need:research:intern", lineId: "research", kind: "cycle", title: "暑期研究实习", why: "需要工业界研究经历", factIds: [], milestoneIds: [],
-  window: { opens: "2027-09", closes: "2027-11", basis: "往年" }, leadDays: 30, eligibility: [], sources: [], state: "proposed", ...over
-});
-
-test("tracking a cycle need writes its 「预计开放」 waiting item; declining it is remembered and cancels the wait", () => {
-  store.setSetting(ws, SCOUT_NEEDS_SETTING, JSON.stringify([need()]));
-  decideNeed(store, ws, owner, "need:research:intern", "tracking");
-  expect(scoutNeeds(store, ws)[0]?.state).toBe("tracking");
-  const waiting = store.listWaitingItems(ws, { state: "open" }).find((item) => item.id === waitingIdForNeed("need:research:intern"));
-  expect(waiting).toMatchObject({ expectedAt: "2027-09-01", approximate: true, source: "opportunity" });
-  decideNeed(store, ws, owner, "need:research:intern", "declined", new Date(), "不想去大公司");
-  expect(store.listWaitingItems(ws, { state: "open" }).some((item) => item.id === waiting!.id)).toBe(false);
-  expect(store.listPreferences(ws).find((pref) => pref.source === "opportunity_declined")).toMatchObject({ scope: "research", refId: "need:research:intern" });
-  decideNeed(store, ws, owner, "need:research:intern", "tracking");
-  expect(store.listWaitingItems(ws, { state: "open" }).some((item) => item.id === waiting!.id)).toBe(true);
 });
 
 test("报名 queues one form run, however often it is pressed", () => {

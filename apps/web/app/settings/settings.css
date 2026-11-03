@@ -340,3 +340,14 @@ html:has(.settings-page){background:var(--ds-bg)}
 .st-run-head{margin:0 0 4px}
 .st-run p{overflow-wrap:anywhere}
 .st-checklist{margin:4px 0 8px;padding-left:18px;font-size:13px;overflow-wrap:anywhere}
+
+/* 机会代理 (docs/opportunity-agent.md §17.9): the watches as a table that scrolls inside its card on a phone, never the page. */
+.op-table-wrap{overflow-x:auto;max-width:100%}
+.op-table{border-collapse:collapse;width:100%;min-width:560px}
+.op-table th,.op-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line-soft,#e2e2e2);vertical-align:top}
+.op-table td small{display:block}
+.op-less,.op-retired{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.op-less li{display:grid;gap:2px}
+.op-less li[data-undone]{opacity:.7}
+.op-less p{margin:0}
+.op-less button,.op-retired button{justify-self:start}

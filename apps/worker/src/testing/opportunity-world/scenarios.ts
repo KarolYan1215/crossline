@@ -1,4 +1,5 @@
-import { CCFDDL_URL, aiDeadlinesUrl, boardUrl, type EligibilityTerm, type InfeasibleCode, type ProposedNeed } from "@crossline/core";
+import { CCFDDL_URL, aiDeadlinesUrl, boardUrl, describeTarget, targetOfSource, type EligibilityTerm, type InfeasibleCode, type NeedSource,
+  type ProposedWatch } from "@crossline/core";
 import { BASE_PERSON, personCalendar, travelMail, type PersonFacts } from "./person";
 import { emptyWorld, html, type Reading, type World } from "./world";
 
@@ -359,14 +360,17 @@ export const COUNTERFACTUALS: Counterfactual[] = [
 ];
 
 /**
- * The needs a model would work out for each line from its goal and milestones (§5), as the needs Skill's answer. Written once here so
- * the scripted model and the ground truth agree; each source points at the world. Once the research paper is submitted (the 60-day
- * run's node) the venues need gives way to one for talks about it.
+ * The watches a model would work out for each line from its goal, milestones and progress (§17.2), as the needs Skill's answer. Written
+ * once here so the scripted model and the ground truth agree; each target points at the world. Once the research paper is handed in (the
+ * 60-day run's node) the venues watch gives way to one for talks about it.
  */
-export function needsFor(lineId: string, done: Set<string>): ProposedNeed[] {
-  const need = (key: string, kind: ProposedNeed["kind"], title: string, milestoneIds: string[], leadDays: number, sources: ProposedNeed["sources"],
-    window: ProposedNeed["window"] = { opensMonth: 0, closesMonth: 0, basis: "", sourceUrl: "" }): ProposedNeed =>
-    ({ key, kind, title, why: `${title}：服务于这条线的里程碑`, factIds: [], milestoneIds, window, leadDays, eligibility: [], sources });
+export function watchesFor(lineId: string, done: Set<string>): ProposedWatch[] {
+  const need = (key: string, kind: "cycle" | "stream", title: string, milestoneIds: string[], leadDays: number, sources: NeedSource[],
+    cycle: ProposedWatch["cycle"] = { opensMonth: 0, closesMonth: 0, basis: "", sourceUrl: "" }): ProposedWatch => {
+    const targets = sources.map(targetOfSource) as ProposedWatch["targets"];
+    return { key, title, why: `${title}：服务于这条线的里程碑`, factIds: [], milestoneIds, query: targets.map(describeTarget).join("；"), judge: `${title}，本人够得着`,
+      tools: [...new Set(targets.map((target) => target.tool))], targets, everyDays: 1, horizonDays: kind === "cycle" ? 365 : 120, leadDays, cycle, prescreen: [] };
+  };
   if (lineId === "research") return [
     need("summer-research-internship", "cycle", "暑期研究实习", ["ms-research-intern"], 30, [
       { kind: "ats", provider: "greenhouse", board: "synthsilicon", query: "intern" }, { kind: "ats", provider: "lever", board: "nationalaccel", query: "intern" },
@@ -394,3 +398,15 @@ export function needsFor(lineId: string, done: Set<string>): ProposedNeed[] {
   ];
   return [];
 }
+
+/**
+ * What a scout following the person's lines would search for this week (§17.3): where research and startup cross, a competition for
+ * academic founders, and a place worth watching for it. The harness's scout writes the finds these queries lead to into `scout.json`.
+ */
+export const SCOUT_LEADS: Array<{ lineId: string; query: string; why: string; watch: ProposedWatch & { lineId: string } }> = [
+  { lineId: "startup", query: "academic startup competition graduate research", why: "研究线的成果可以拿去参加面向在读研究生的创业比赛",
+    watch: { lineId: "startup", key: "academic-founder-competitions", title: "面向学术创业者的比赛", why: "研究与创业两条线交叉处",
+      factIds: [], milestoneIds: ["ms-startup-interviews"], query: "academic startup competition graduate research", judge: "团队含在读研究生即可参加",
+      tools: ["web_search"], targets: [{ tool: "web_search", query: "academic startup competition graduate research" }], everyDays: 7, horizonDays: 180,
+      leadDays: 14, cycle: { opensMonth: 0, closesMonth: 0, basis: "", sourceUrl: "" }, prescreen: [] } }
+];

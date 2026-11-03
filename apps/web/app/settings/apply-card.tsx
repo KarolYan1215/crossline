@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BROWSER_USE_DOWNLOAD_MB, BROWSER_USE_VERSION, SLOT_LABEL, STOP_LABEL, type ApplicationSlot, type FormRunState, type FormStop } from "@crossline/core";
+import { BROWSER_USE_DOWNLOAD_MB, BROWSER_USE_VERSION, FORM_STATE_LABEL, SLOT_LABEL, STOP_LABEL, type ApplicationSlot, type FormRunState, type FormStop } from "@crossline/core";
 import { useT } from "../locale-context";
 
 export type ApplyItem = { slot: ApplicationSlot; sensitive: boolean; present: boolean; value?: string; usedBy: Array<{ title: string; at: string }> };
@@ -10,9 +10,6 @@ export type ApplyRun = {
   heldBecause: string[]; checklist: Array<{ field: string; shown: string }>; problems: string[]; injections: number; refused: number;
   shots: number; confirmation?: string; submittedBy?: "system" | "person"; calendar: boolean; updatedAt: string;
 };
-
-const STATE_LABEL: Record<FormRunState, string> = { queued: "排队中", filling: "正在填写", waiting_person: "等本人处理", ready_to_submit: "等本人提交",
-  submitted: "已提交，等确认", confirmed: "已确认", stopped: "已停止" };
 
 /**
  * 报名资料卡 (docs/opportunity-agent.md §12–§13): each item the form filler may use, where it came from, which registrations used it,
@@ -60,7 +57,7 @@ export function ApplyCard({ items, runs, screen }: { items: ApplyItem[]; runs: A
     <h4>{t("代填的报名")}</h4>
     {!screen && <p className="muted">{t("托管版在本人电脑的 Crossline 节点浏览器里代填；节点未连接时报名会等它连上")}</p>}
     {runs.length === 0 ? <p className="muted">{t("还没有报名。在机会卡上点「报名」后会出现在这里。")}</p> : runs.map((run) => <article key={run.id} className="st-run">
-      <p className="st-run-head"><b>{run.title}</b> · {t(STATE_LABEL[run.state])}
+      <p className="st-run-head"><b>{run.title}</b> · {t(FORM_STATE_LABEL[run.state])}
         {run.state === "waiting_person" && run.stoppedFor && <> · {run.stoppedFor === "missing_slot" && run.missingSlot ? t("缺「{{slot}}」", { slot: t(SLOT_LABEL[run.missingSlot]) }) : t(STOP_LABEL[run.stoppedFor])}</>}</p>
       <p className="muted">{run.host} · {t("第 {{page}} 页", { page: run.pageNo })}{run.stopDetail ? ` · ${run.stopDetail}` : ""}
         {run.injections > 0 && <> · {t("页面里有 {{count}} 处试图指挥代填的文字，已忽略", { count: run.injections })}</>}

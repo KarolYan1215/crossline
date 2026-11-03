@@ -388,3 +388,16 @@ body:has(.ms-page) .running-head{background:var(--ds-bg)}
   .ms-drafts-actions{margin-left:0}
   .ms-page .mt-focus{height:96px}
 }
+
+/* A line's watches inside its card (docs/opportunity-agent.md §17.9). */
+.lb-watch-panel{min-width:0;border-top:1px solid var(--line-soft,#e2e2e2);padding-top:8px}
+.lw{display:grid;gap:8px;min-width:0}
+.lw-list{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.lw-list li{display:grid;gap:2px;min-width:0}
+.lw-list li[data-state="paused"],.lw-list li[data-state="proposed"]{opacity:.85}
+.lw-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0}
+.lw-where{overflow-wrap:anywhere}
+.lw-actions{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 0}
+.lw-edit{display:grid;gap:6px}
+.lw-edit label{display:grid;gap:2px}
+.lw-add{justify-self:start}

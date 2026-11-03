@@ -2,8 +2,8 @@
  * The opportunity agent's acceptance run for track A (docs/opportunity-agent.md §14, criteria 1 and 2), on a **copy** of the real ledger (the
  * live database is only read, through SQLite's online backup; nothing is written to it):
  *
- *   1  the research line's needs worked out from the person's own facts and milestones; the summer research internship need tracked on the
- *      copy shows its 「预计 X 月开放」 waiting item and the day preparation starts;
+ *   1  the research line's watches worked out from the person's own facts and milestones (§17.2); the summer research internship watch
+ *      kept on the copy shows its 「预计 X 月开放」 waiting item and the day preparation starts;
  *   2  real postings fetched from public job boards (Greenhouse/Lever/Ashby), each term judged by code against the person's confirmed facts,
  *      and the eligible or still-open ones shown as the `opportunity_offer` cards the web would put up.
  *
@@ -38,8 +38,8 @@ live.close();
 process.env.CROSSLINE_DATA_DIR = dataDir;
 
 const core = await import("../packages/core/src/index");
-const { CrosslineStore, decideNeed, scoutNeeds, waitingIdForNeed } = await import("../packages/db/src/index");
-const { deriveNeeds, pollNeed, OPPORTUNITY_NEEDS, OPPORTUNITY_READER } = await import("../apps/worker/src/opportunities");
+const { CrosslineStore, decideWatch, readWatchList, waitingIdForNeed } = await import("../packages/db/src/index");
+const { deriveWatches, runWatch, OPPORTUNITY_NEEDS, OPPORTUNITY_READER } = await import("../apps/worker/src/opportunities");
 const { fakeRuntime } = await import("../apps/worker/src/testing/fake-runtime");
 
 const store = new CrosslineStore(path.join(dataDir, "crossline.db"));
@@ -110,48 +110,51 @@ try {
     const facts = store.listProfileFacts(ws).filter((fact) => fact.status === "confirmed" && (fact.identityId === line || fact.identityId === "person"));
     const factIds = (slots: string[]) => facts.filter((fact) => !fact.projectId && slots.includes(fact.slot)).map((fact) => `${fact.identityId}/${fact.projectId}/${fact.slot}`);
     const withBoards = boards.filter((item) => item.postings.length).slice(0, 3);
-    const standInNeeds = JSON.stringify({ blocked: "", needs: [{
-      key: "summer-research-internship", kind: "cycle", title: "明年暑期研究实习",
+    const standInWatches = JSON.stringify({ blocked: "", watches: [{
+      key: "summer-research-internship", title: "明年暑期研究实习",
       why: "博士阶段刚开始、方向为神经形态计算的软硬件协同设计；一段工业界研究实习检验架构想法并积累合作。",
-      factIds: factIds(["what", "stage", "positioning"]), milestoneIds: [],
-      window: { opensMonth: 9, closesMonth: 12, basis: "往年硬件与 AI 公司的暑期研究实习多在 9–12 月开放", sourceUrl: "https://www.anthropic.com/careers" },
-      leadDays: 30, eligibility: [],
-      sources: [...withBoards.map((item) => ({ kind: "ats", provider: item.provider, board: item.board, query: "" })),
-        { kind: "deadline_list", list: "ccfddl", query: "ISCA" }]
+      factIds: factIds(["what", "stage", "positioning"]), milestoneIds: [], query: "硬件与 AI 公司的暑期研究实习（体系结构、加速器、神经形态）",
+      judge: "研究型实习，面向在读博士，方向与体系结构或加速器相关", tools: ["ats_board", "deadline_list"],
+      targets: [...withBoards.map((item) => ({ tool: "ats_board", provider: item.provider, board: item.board, query: "" })),
+        { tool: "deadline_list", list: "ccfddl", query: "ISCA" }],
+      everyDays: 3, horizonDays: 300, leadDays: 30, prescreen: [],
+      cycle: { opensMonth: 9, closesMonth: 12, basis: "往年硬件与 AI 公司的暑期研究实习多在 9–12 月开放", sourceUrl: "https://www.anthropic.com/careers" }
     }] });
-    const client = runtime === "stand-in" ? fakeRuntime([standInNeeds], OPPORTUNITY_NEEDS).rpc : await realClient();
-    heading(`标准 1：推导「${line}」线的需求${runtime === "stand-in" ? "（替身回答：本脚本按账本真实事实写的，不是模型）" : "（真模型）"}`);
+    const client = runtime === "stand-in" ? fakeRuntime([standInWatches], OPPORTUNITY_NEEDS).rpc : await realClient();
+    heading(`标准 1：推导「${line}」线的监视项${runtime === "stand-in" ? "（替身回答：本脚本按账本真实事实写的，不是模型）" : "（真模型）"}`);
     const started = Date.now();
-    const derived = await deriveNeeds(store, ws, line, { client: () => client as never, cwd: repoRoot,
+    const derived = await deriveWatches(store, ws, line, { client: () => client as never, cwd: repoRoot,
       ...(runtime === "stand-in" ? { webBlocker: () => undefined } : {}) });
     console.info(`推导结果（${Math.round((Date.now() - started) / 1000)} 秒）：${JSON.stringify(derived)}`);
-    for (const need of scoutNeeds(store, ws).filter((item) => item.lineId === line)) {
-      console.info(JSON.stringify({ id: need.id, kind: need.kind, title: need.title, factIds: need.factIds, window: need.window, prepStartsOn: need.prepStartsOn,
-        sources: need.sources.map((source) => source.kind) }));
+    const lineWatches = () => readWatchList(store, ws).filter((item) => item.lineId === line);
+    for (const watch of lineWatches()) {
+      console.info(JSON.stringify({ id: watch.id, title: watch.title, state: watch.state, factIds: watch.basis.factIds, cycle: watch.cycle, prepStartsOn: watch.prepStartsOn,
+        targets: (watch.targets ?? []).map((target) => target.tool) }));
     }
-    const summer = scoutNeeds(store, ws).find((item) => item.lineId === line && item.kind === "cycle" && /实习|intern/i.test(item.title))
-      ?? scoutNeeds(store, ws).find((item) => item.lineId === line && item.kind === "cycle");
-    if (!summer) console.info("没有推出周期性的实习需求。");
+    const summer = lineWatches().find((item) => item.cycle && /实习|intern/i.test(item.title)) ?? lineWatches().find((item) => item.cycle);
+    if (!summer) console.info("没有推出周期性的实习监视项。");
     else {
-      decideNeed(store, ws, owner, summer.id, "tracking", NOW);
+      decideWatch(store, ws, owner, summer.id, "active", NOW);
       const waiting = store.listWaitingItems(ws).find((item) => item.id === waitingIdForNeed(summer.id));
-      heading("副本上按「跟踪」后");
-      console.info(JSON.stringify({ need: summer.title, state: scoutNeeds(store, ws).find((item) => item.id === summer.id)?.state, prepStartsOn: summer.prepStartsOn,
+      heading("副本上按「盯住」后");
+      console.info(JSON.stringify({ watch: summer.title, state: lineWatches().find((item) => item.id === summer.id)?.state, prepStartsOn: summer.prepStartsOn,
         waiting: waiting && { title: waiting.title, expectedAt: waiting.expectedAt, approximate: waiting.approximate, state: waiting.state } }, null, 1));
     }
   }
 
   if (step === "postings" || step === "all") {
-    const tracked = scoutNeeds(store, ws).find((item) => item.lineId === line && item.state === "tracking" && item.sources.some((source) => source.kind === "ats"));
-    const fallback: core.StoredNeed = { id: "need:research:check", lineId: line, kind: "stream", title: "暑期研究实习", why: "核对用", factIds: [], milestoneIds: [],
-      leadDays: 30, eligibility: [], state: "tracking",
-      sources: boards.filter((item) => item.postings.length).slice(0, 3).map((item) => ({ kind: "ats" as const, provider: item.provider, board: item.board, query: "" })) };
-    const need = tracked ?? fallback;
+    const kept = readWatchList(store, ws).find((item) => item.lineId === line && item.state === "active" && (item.targets ?? []).some((target) => target.tool === "ats_board"));
+    const fallback: core.StoredWatch = { id: "need:research:check", lineId: line, title: "暑期研究实习", why: "核对用", origin: "person",
+      basis: { factIds: [], milestoneIds: [], opportunityIds: [] }, query: "暑期研究实习", judge: "研究型实习", tools: ["ats_board"], explore: false,
+      targets: boards.filter((item) => item.postings.length).slice(0, 3).map((item) => ({ tool: "ats_board" as const, provider: item.provider, board: item.board, query: "" })),
+      everyDays: 3, horizonDays: 300, state: "active", stats: core.emptyStats(), createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+      leadDays: 30, prescreen: [], weight: 1, strictness: 0 };
+    const watch = kept ?? fallback;
     const client = runtime === "stand-in" ? fakeRuntime([(prompts) => standInReading(prompts.at(-1)!)], OPPORTUNITY_READER).rpc : await realClient();
     heading(`标准 2：读真实岗位并逐条判定资格${runtime === "stand-in" ? "（读页替身：按岗位原文机械摘句，不是模型）" : "（真模型读页）"}`);
     const started = Date.now();
-    const result = await pollNeed(store, ws, need, { client: () => client as never, cwd: repoRoot, now: () => NOW });
-    console.info(`轮询结果（${Math.round((Date.now() - started) / 1000)} 秒）：${JSON.stringify(result)}`);
+    const result = await runWatch(store, ws, watch, { client: () => client as never, cwd: repoRoot, now: () => NOW });
+    console.info(`运行结果（${Math.round((Date.now() - started) / 1000)} 秒）：${JSON.stringify(result)}`);
     for (const row of store.listOpportunities(ws)) {
       console.info(JSON.stringify({ title: row.title, url: row.url, via: row.foundVia, deadline: core.nextDeadline(row, today) ?? "",
         terms: row.terms.map((term) => ({ dim: term.dim, quote: term.quote.slice(0, 120), accepts: term.accepts.values })), verdict: row.verdict }));

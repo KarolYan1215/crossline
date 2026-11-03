@@ -15,6 +15,7 @@ import { timed } from "../../lib/sections";
 import { memoByLedgerAsync } from "../../lib/ledger-memo";
 import { localeFor, tOf } from "../../lib/locale";
 import { monthDay } from "../../lib/i18n";
+import { loadLineWatches, opportunityOwner } from "../../lib/opportunities";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,9 @@ export default async function MilestonesPage() {
   const identities = identityLines(ctx);
   const details = lineCardDetails(ctx);
   const shares = readLineShares(ctx) ?? {};
+  // The opportunity agent's watches, on the machine owner's line cards only (docs/opportunity-agent.md §17.9).
+  const watchOwner = opportunityOwner(ctx);
+  const watches = watchOwner ? loadLineWatches(ctx) : {};
   const records = Object.fromEntries(domainRecordViews(ctx).filter((view) => view.lineId).map((view) => [view.lineId!, { domain: view.domain, ...view.metrics, trends: view.trends,
     recent: view.recent.map(({ id, kind, at, value, unit, currency, category, source }) => ({ id, kind, at, value, unit, currency, category, source })) }]));
   const nearest = board.milestones.filter((milestone) => milestone.daysLeft !== undefined && milestone.daysLeft >= 0 && !milestone.retrospective)
@@ -66,7 +70,8 @@ export default async function MilestonesPage() {
         interview: details[pack.id]?.interview ?? { reply: "", questions: [], waiting: false, turns: 0 },
         milestones: board.milestones.filter((milestone) => milestone.identityId === pack.id).length,
         drafts: board.milestones.filter((milestone) => milestone.identityId === pack.id && milestone.status === "draft").length,
-        health: lineHealth(board.milestones, pack.id), ...(shares[pack.id] ? { share: shares[pack.id]! } : {}) }))}
+        health: lineHealth(board.milestones, pack.id), ...(shares[pack.id] ? { share: shares[pack.id]! } : {}),
+        ...(watchOwner ? { watches: watches[pack.id] ?? [] } : {}) }))}
         palette={Object.fromEntries(Object.entries(LINE_PALETTE).map(([key, value]) => [key, value.light]))} />
       <MilestoneTimeline board={board} />
       <p className="muted ms-foot"><a href="/review">{t("本周复盘 →")}</a></p>
