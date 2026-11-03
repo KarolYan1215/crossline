@@ -1,5 +1,5 @@
 import { ACTIVITY_HOURLY, BRIEF_TIME_SETTING, DEFAULT_QUIET, QUIET_HOURS_SETTING, atComputerByHour, type ActivityHour, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, activityCategoryLabel, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
-import { assistantAvailable, categoryMode, isAutoHandoff, readCategories } from "@crossline/db";
+import { assistantAvailable, categoryMode, isAutoHandoff, nodeShellHost, readCategories } from "@crossline/db";
 import { AppShell } from "../app-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
 import { AgentHistoryCard } from "./agent-history-card";
@@ -133,6 +133,8 @@ export default async function SettingsPage() {
 
   // This computer's own readings (folders, screen, idle stretches, coding agents' logs) are the machine owner's only.
   const machine = assistantAvailable(store, ctx.workspaceId);
+  // The account's own compute node with the shell allowed on it: the assistant runs commands there (docs/compute-node.md P3).
+  const shellNode = machine ? undefined : nodeShellHost(store, ctx.workspaceId);
   // 报名资料卡 and the registrations filled from it: the machine owner's only (docs/opportunity-agent.md §0).
   const apply = loadApplyCard(ctx.workspaceId);
   // 机会代理: the watches, their cost and the 少来 adjustments, the machine owner's only (docs/opportunity-agent.md §17.9).
@@ -222,10 +224,11 @@ export default async function SettingsPage() {
 
         <section id="automation" className="st-section" aria-labelledby="st-automation"><h2 id="st-automation" className="ds-serif">{t("自动化与助手")}</h2>
           {/* The shell assistant runs as this machine's user (decided 2026-10-10); every other account's works through Crossline's functions. */}
-          {!machine && <p className="muted">{hosted
+          {shellNode && <p className="muted">{t("助手在本账号的节点电脑「{{host}}」上执行命令：每条命令先经过同一套检查，发送、报名和付款的最后一步留给本人。", { host: shellNode })}</p>}
+          {!machine && !shellNode && <p className="muted">{hosted
             ? t("网页版的助手通过 Crossline 自己的功能工作：读写和整理文件、查网页、读已接入的邮箱、把待办放进收件箱、按时或按条件跑自动化；不在电脑上执行命令。")
             : t("这个账号的助手通过 Crossline 自己的功能工作（读写整理文件、查网页、读邮箱、跑自动化）；能在电脑上执行命令的助手只为电脑主人工作。")}</p>}
-          <AutomationModule toolsMode={!machine} paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} autoHandoff={isAutoHandoff(store, ctx.workspaceId)}
+          <AutomationModule toolsMode={!machine && !shellNode} paused={assistant.paused} permissionMode={permissionModeEnabled(ctx)} autoHandoff={isAutoHandoff(store, ctx.workspaceId)}
             categories={assistant.categories.map((item) => ({ category: item.category, label: item.label, explained: item.explained,
               mode: categoryMode(states[item.category]), cleanRuns: item.cleanRuns, runsToTrust: item.runsToTrust }))}
             recent={assistant.tasks.slice(0, 8).map((task) => ({ taskId: task.taskId, title: task.title, kind: assistant.categories.find((item) => item.category === task.category)?.label ?? "",

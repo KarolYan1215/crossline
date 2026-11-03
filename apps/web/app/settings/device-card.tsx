@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { NODE_INSTALLER_URL } from "@crossline/core";
 import { SegmentedControl } from "../ui/controls";
 import { SetupGuide } from "../ui/setup-guide";
 import { DEVICE_LINK_GUIDE } from "../../lib/setup-guides";
@@ -82,7 +83,8 @@ function nodeWords(view: NodeView, t: Translate, locale: Locale): string {
 
 /**
  * 「作为算力节点」: the person's linked computer may also run this account's model work with its own Codex, while it is on (docs/compute-node.md).
- * Only the account that owns this server's runtime sees it. Off, or whenever the computer is away, everything runs on the server as before.
+ * Every account sees it (scheme C): a node serves only the account it was paired with. Off, or whenever the computer is away, everything
+ * runs on the server as before.
  */
 function ComputeNodeRow() {
   const t = useT();
@@ -108,7 +110,7 @@ function ComputeNodeRow() {
     void load();
   };
   useEffect(() => { void load(); const timer = setInterval(() => void load(), 20_000); return () => clearInterval(timer); }, []);
-  if (!view?.available) return null;
+  if (!view) return null;
   const change = async (enabled: boolean) => {
     setView({ ...view, enabled });
     const response = await fetch("/api/device/compute", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }) }).catch(() => undefined);
@@ -126,7 +128,8 @@ function ComputeNodeRow() {
     {view.paired
       ? <div className="st-row"><span className="st-row-label">{t("独立节点")}<small>{t("已配对 {{host}}（{{when}}）", { host: view.paired.host || t("一台电脑"), when: time(view.paired.at, locale) })}</small></span>
         <button type="button" className="secondary-button" onClick={() => void unpair()}>{t("解除配对")}</button></div>
-      : <label className="st-row"><span className="st-row-label">{t("独立节点")}<small>{t("在那台电脑上安装「Crossline 节点」，把它显示的配对码填在这里")}</small></span>
+      : <label className="st-row"><span className="st-row-label">{t("独立节点")}<small>{t("在那台电脑上安装「Crossline 节点」，把它显示的配对码填在这里")}{" "}
+          <a href={NODE_INSTALLER_URL} target="_blank" rel="noreferrer">{t("下载安装包")}</a></small></span>
         <span><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="XXXX-XXXX" autoComplete="off" spellCheck={false} maxLength={12} style={{ width: "9em" }} />{" "}
           <button type="button" className="primary-button" disabled={code.replace(/[^A-Za-z0-9]/g, "").length !== 8} onClick={() => void pair()}>{t("配对")}</button></span></label>}
     {note && <p role="status" className="st-note">{note}</p>}

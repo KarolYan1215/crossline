@@ -74,7 +74,20 @@ export function nodeEnabled(dataDir: string): boolean {
 export function setNodeEnabled(dataDir: string, enabled: boolean, now = new Date()): void {
   if (!enabled) { rmSync(nodeFile(dataDir), { force: true }); return; }
   mkdirSync(path.dirname(nodeFile(dataDir)), { recursive: true });
-  writeFileSync(nodeFile(dataDir), JSON.stringify({ enabled: true, at: now.toISOString() }, null, 2));
+  writeFileSync(nodeFile(dataDir), JSON.stringify({ enabled: true, at: now.toISOString(), ...(nodeShell(dataDir) ? { shell: true } : {}) }, null, 2));
+}
+/**
+ * 「允许在这台电脑上执行命令（shell 助手）」 (docs/compute-node.md P3): off unless the person switched it on here, and only while the node is
+ * on. Turning the node off forgets it.
+ */
+export function nodeShell(dataDir: string): boolean {
+  try { const kept = JSON.parse(readFileSync(nodeFile(dataDir), "utf8")) as { enabled?: unknown; shell?: unknown }; return kept.enabled === true && kept.shell === true; }
+  catch { return false; }
+}
+export function setNodeShell(dataDir: string, shell: boolean): void {
+  if (!nodeEnabled(dataDir)) return;
+  const kept = JSON.parse(readFileSync(nodeFile(dataDir), "utf8")) as Record<string, unknown>;
+  writeFileSync(nodeFile(dataDir), JSON.stringify({ ...kept, shell }, null, 2));
 }
 
 /**
@@ -100,6 +113,11 @@ export function createDeviceLinkService(deps: { dataDir: string; secrets: Secret
           const signed = await deps.nodeLogin(body.apiKey.trim());
           return signed.ok ? { status: 200, body: { ok: true, account: signed.account } } : { status: 400, body: { ok: false, code: "NODE_API_KEY_REFUSED", message: signed.message } };
         }
+        if (typeof body?.shell === "boolean") {
+          if (!nodeEnabled(deps.dataDir)) return { status: 400, body: { ok: false, code: "NODE_NOT_ENABLED", message: t("先开启算力节点。") } };
+          if (body.shell !== nodeShell(deps.dataDir)) { setNodeShell(deps.dataDir, body.shell); deps.onChanged(); }
+          return { status: 200, body: { ok: true, enabled: true, shell: body.shell } };
+        }
         const enabled = body?.enabled === true;
         if (enabled !== nodeEnabled(deps.dataDir)) { setNodeEnabled(deps.dataDir, enabled); deps.onChanged(); }
         return { status: 200, body: { ok: true, enabled } };
@@ -109,7 +127,7 @@ export function createDeviceLinkService(deps: { dataDir: string; secrets: Secret
         const link = await readDeviceLink(deps.dataDir, deps.secrets);
         return { status: 200, body: { ok: true, linked: Boolean(link), ...(link ? { url: link.url, label: link.label, linkedAt: link.linkedAt, tokenReadable: Boolean(link.token) } : {}),
           ...(deps.status ? { device: deps.status() } : {}),
-          node: { enabled: nodeEnabled(deps.dataDir), ...(deps.nodeStatus ? { status: deps.nodeStatus() } : {}) } } };
+          node: { enabled: nodeEnabled(deps.dataDir), shell: nodeShell(deps.dataDir), ...(deps.nodeStatus ? { status: deps.nodeStatus() } : {}) } } };
       }
       if (method === "POST") {
         const url = typeof body?.url === "string" ? primaryOrigin(body.url) : undefined;

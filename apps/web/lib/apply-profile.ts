@@ -1,15 +1,16 @@
 import { RUNTIME_OWNER_SETTING } from "@crossline/core";
-import { applicationProfile, assistantAvailable, profileUsage, readFormRuns } from "@crossline/db";
+import { applicationProfile, assistantAvailable, nodeComputeOn, profileUsage, readFormRuns } from "@crossline/db";
 import type { ApplyItem, ApplyRun } from "../app/settings/apply-card";
 import { getStore } from "./crossline";
 
 /**
  * The settings page's 报名资料卡 (docs/opportunity-agent.md §12): the profile as the form filler reads it — a sensitive item only as
- * held — and every registration run, shortened to what the card shows. Undefined for any workspace but the machine owner's.
+ * held — and every registration run, shortened to what the card shows. Undefined for any workspace but the machine owner's and an
+ * account that paired its own computer as a compute node (its forms are filled in that computer's browser, docs/compute-node.md).
  */
 export function loadApplyCard(workspaceId: string): { items: ApplyItem[]; runs: ApplyRun[]; screen: boolean } | undefined {
   const store = getStore();
-  const owner = store.getSetting(workspaceId, RUNTIME_OWNER_SETTING) === "1" || assistantAvailable(store, workspaceId);
+  const owner = store.getSetting(workspaceId, RUNTIME_OWNER_SETTING) === "1" || assistantAvailable(store, workspaceId) || nodeComputeOn(store, workspaceId);
   if (!owner) return undefined;
   const usage = profileUsage(store, workspaceId);
   const items: ApplyItem[] = applicationProfile(store, workspaceId).map((item) => ({ slot: item.slot, sensitive: item.sensitive, present: item.present,

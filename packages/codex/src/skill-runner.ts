@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { cleanAnswerStrings, tFor, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, shiftEffort, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
-import { createUsageCollector, currentEffortPreference, currentSpendMode, currentUsageWorkspace, reportUsage, type UsageCollector } from "./usage";
+import { createUsageCollector, currentEffortPreference, currentSpendMode, currentUsageWorkspace, reportUsage, takeMeteredUsage, type UsageCollector } from "./usage";
 import { currentProviderRouting, decideRoute, noteChatgptUsageLimit, type ThreadProvider } from "./providers";
 import { markClientBusy, priorityForSkill, withModelSlot, type ModelPriority } from "./model-gate";
 import { bindForRun } from "./runtime-pool";
@@ -536,16 +536,19 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
     try { await underConfigLock(client, () => releaseSkill(client, path)); }
     catch { result = skillBlocker<T>("SKILL_CONFIG_FAILED", result.audit); }
   }
+  // A provider run on a compute node is billed by what this server's gateway counted for its thread, never by what the node reports
+  // (方案 C: the node is someone's computer). A run on this server's runtime, or on the account's own ChatGPT, reports as before.
+  const onNode = Boolean(timing.runtime && timing.runtime !== "server");
+  const tokens = provider && onNode ? takeMeteredUsage(result.audit.threadId) : context.usage.total();
   reportUsage({
     skillName: options.skillName, ...(tierForSkill(options.skillName) ? { tier: tierForSkill(options.skillName)! } : {}),
     ...(context.route ? { model: context.route.model, ...(context.route.effort ? { effort: context.route.effort } : {}) } : {}),
     spendMode, ...(result.audit.threadId ? { threadId: result.audit.threadId } : {}), ok: result.ok,
     ...(result.ok ? {} : { errorCode: result.blocker.code }), repairs: result.audit.repairs ?? 0, turns: context.usage.turns(),
-    durationMs: Date.now() - startedAt, at: new Date(startedAt).toISOString(), turnSeconds: context.usage.turnSeconds(), ...context.usage.total()
+    durationMs: Date.now() - startedAt, at: new Date(startedAt).toISOString(), turnSeconds: context.usage.turnSeconds(), ...tokens
   });
   // Where the time went (docs/model-scheduling.md): waiting before the gate (the assistant's line, a thread's earlier turn), at the gate,
   // and the run itself, with how much of the input the provider served from its cache. Summed per Skill by the diagnose job.
-  const tokens = context.usage.total();
   console.info(JSON.stringify({ type: "skill.run", skill: options.skillName, ok: result.ok, provider: provider ? "provider" : "codex",
     ...(context.route?.model ? { model: context.route.model } : {}), ...(context.plugins ? { plugins: context.plugins } : {}),
     ...(timing.runtime && timing.runtime !== "server" ? { runtime: timing.runtime } : {}),
@@ -1083,6 +1086,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       let parsed: unknown;
       try {
         parsed = parse(answer);
+        await run.agent?.beforeValidate?.();
         return run.validate(parsed);
       } catch (error) {
         rejection = error instanceof Error ? error : new Error(String(error));

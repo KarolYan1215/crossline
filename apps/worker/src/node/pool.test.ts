@@ -99,3 +99,22 @@ test("the gate counts the owner's node capacity on top of its share, and a node 
   expect(started).toContain("g1");
   expect(started).toContain("o5");
 });
+
+test("方案 C: an account whose only model is its own computer is served by it alone; a full node takes one more instead of the server", async () => {
+  const asked: string[] = [];
+  const local: CodexRpcBoundary = { request: async (method) => { asked.push(`server:${method}`); return {}; }, onNotification: () => () => {} };
+  const node: CodexRpcBoundary = { request: async (method) => { asked.push(`node:${method}`); return {}; }, onNotification: () => () => {} };
+  const members: PoolMember[] = [{ id: "standalone:pc", client: node, capacity: 1, priority: 1 }];
+  const pool = createRuntimePool(local, () => members, { localUsable: () => false });
+  // The quota and sign-in reads go to the node, not to a runtime here with no sign-in.
+  await pool.request("account/rateLimits/read", {});
+  expect(asked).toEqual(["node:account/rateLimits/read"]);
+  expect(pool.bindRun().member).toBe("standalone:pc");
+  expect(pool.bindRun().member).toBe("standalone:pc");
+  expect(pool.load()).toEqual({ "standalone:pc": 2 });
+  // A thread this pool never saw (one started before the node) is not sent to the server either.
+  expect(pool.bindRun({ threadId: "unknown" }).member).toBe("standalone:pc");
+  // With its node gone there is only the server's runtime, which then answers the missing sign-in itself.
+  members.length = 0;
+  expect(pool.bindRun().member).toBe("server");
+});

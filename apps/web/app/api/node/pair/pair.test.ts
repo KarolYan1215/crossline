@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { NODE_COMPUTE_SETTING, NODE_TOKEN_SETTING, RUNTIME_OWNER_SETTING, type AccessContext } from "@crossline/core";
+import { NODE_COMPUTE_SETTING, NODE_TOKEN_SETTING, type AccessContext } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 const session: { ctx?: AccessContext | undefined } = {};
 vi.mock("../../../../lib/access-guard", () => ({
@@ -35,13 +35,11 @@ const begin = async (address = "203.0.113.7") => (await start(new Request("https
 const ask = async (id: string) => (await poll(new Request(`https://app.crossline.lol/api/node/pair?id=${id}`))).json() as Promise<{ state: string; token?: string }>;
 const type = (code: string) => approve(new Request("https://app.crossline.lol/api/node/pair/approve", { method: "POST", body: JSON.stringify({ code }) }));
 
-test("a node asks for a code with no account, the owner types it, and the node takes its own token once", async () => {
+test("a node asks for a code with no account, any account types it for itself, and the node takes its own token once", async () => {
   const started = await begin();
   expect(started.code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
   expect(await ask(started.id)).toMatchObject({ state: "pending" });
-  // Not the runtime owner's account: refused, and the code stays usable.
-  expect((await type(started.code)).status).toBe(403);
-  store.setSetting(ctx.workspaceId, RUNTIME_OWNER_SETTING, "1");
+  // Scheme C: an account that is not the runtime owner pairs its own computer; the token is this workspace's alone.
   // Typed in lower case without the dash is the same code.
   const typed = await type(started.code.replace("-", "").toLowerCase());
   expect(await typed.json()).toMatchObject({ ok: true, host: "KAROL-PC" });
@@ -59,7 +57,6 @@ test("a node asks for a code with no account, the owner types it, and the node t
 });
 
 test("a code nobody asked for is refused, codes expire, and one address cannot ask for codes without end", async () => {
-  store.setSetting(ctx.workspaceId, RUNTIME_OWNER_SETTING, "1");
   expect((await type("ABCD-EFGH")).status).toBe(404);
   for (let i = 0; i < 12; i += 1) expect((await begin("198.51.100.9")).ok).toBe(true);
   const limited = await start(new Request("https://app.crossline.lol/api/node/pair", { method: "POST", headers: { "x-forwarded-for": "198.51.100.9" }, body: "{}" }));

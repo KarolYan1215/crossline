@@ -43,8 +43,13 @@ export type FormServiceDeps = {
   cwd: string;
   dataDir: string;
   client: (workspaceId: string) => CodexRpcBoundary | undefined;
-  /** The machine owner's workspace; every other workspace is refused. */
+  /** The machine owner's workspace: its forms may also open on this computer's own screen. */
   owner: () => string | undefined;
+  /**
+   * Another account that paired its own computer as a compute node (docs/compute-node.md 方案 C): its forms open only in that computer's
+   * browser, never on this machine's screen. Every other workspace is refused.
+   */
+  nodeAccount?: (workspaceId: string) => boolean;
   /** Whether this computer can show the person a window (false on the hosted server). */
   screen: boolean;
   /** Without a screen: the owner's connected compute node that offers a browser (node/hub.ts `browserFor`), or undefined. */
@@ -75,11 +80,11 @@ export function createFormService(deps: FormServiceDeps) {
   const sessions = new Map<string, Session>();
   const active = new Set<string>();
   const log = deps.log ?? (() => undefined);
-  const allowed = (workspaceId: string) => workspaceId === deps.owner();
+  const allowed = (workspaceId: string) => workspaceId === deps.owner() || deps.nodeAccount?.(workspaceId) === true;
   const profilesRoot = deps.profilesRoot ?? browserProfilesRoot;
   /** Where this workspace's forms can be shown: this computer's screen, else a connected node's browser, else nowhere. */
   const windowFor = (workspaceId: string): { kind: "screen" } | { kind: "node"; link: NodeBrowserLink } | undefined => {
-    if (deps.screen) return { kind: "screen" };
+    if (deps.screen && workspaceId === deps.owner()) return { kind: "screen" };
     const link = deps.nodeBrowser?.(workspaceId);
     return link ? { kind: "node", link } : undefined;
   };
@@ -227,7 +232,7 @@ export function createFormService(deps: FormServiceDeps) {
         save: (next, event) => saveFormRun(store, workspaceId, next, event), notify: (next) => notify(workspaceId, next),
         holdSite: (detail) => holdSite(store, workspaceId, start.host, { at: new Date().toISOString(), where: start.opportunity.title, why: detail.slice(0, 120) }),
         shotFile: (_run, pageNo, label) => path.join(shots, `${String(pageNo).padStart(2, "0")}-${label}-${Date.now()}.png`),
-        hash: hashForm, fallbacks: fallbacksFor(workspaceId)
+        hash: hashForm, fallbacks: fallbacksFor(workspaceId), ...(workspaceId === deps.owner() ? {} : { personSubmits: true })
       }, { resume });
     } finally { session.busy = false; }
     if (run.state === "submitted") { run = afterSubmit(workspaceId, run); await closeSession(start.id); }

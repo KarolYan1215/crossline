@@ -22,7 +22,7 @@ export const DEVICE_FOLDERS_SETTING = "device.folders";
 
 /**
  * The compute node (docs/compute-node.md): the hosted switch 「作为算力节点」 ("on" while the site accepts this account's computer as the
- * runtime for its model runs; only the runtime owner may) and the last thing the hosted worker saw of the node (`NodeStatus` JSON).
+ * runtime for its model runs; any account may, for its own computer — scheme C) and the last thing the hosted worker saw of the node (`NodeStatus` JSON).
  */
 export const NODE_COMPUTE_SETTING = "node.compute";
 export const NODE_STATUS_SETTING = "node.status";
@@ -34,6 +34,8 @@ export const DEVICE_TOKEN_SETTING = "device.token.sha256";
  */
 export const NODE_TOKEN_SETTING = "node.token.sha256";
 export const NODE_PAIRED_SETTING = "node.paired";
+/** Where the 「Crossline 节点」 installer is published (the one place the address is written; docs/compute-node.md 「独立安装包」). */
+export const NODE_INSTALLER_URL = "https://github.com/KarolYan1215/crossline-releases/releases/latest/download/Crossline-Node-Setup.exe";
 /** A pairing code: eight letters and digits a person can read aloud (no 0/O, 1/I/L), shown as XXXX-XXXX; valid ten minutes. */
 export const PAIR_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export const PAIR_TTL_MS = 10 * 60_000;

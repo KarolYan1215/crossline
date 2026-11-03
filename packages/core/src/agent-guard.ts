@@ -52,7 +52,10 @@ const SECRET_PATH = [
   /(^|[\\/])\.env(\.[a-z0-9_-]+)?$/i,
   /[\\/]data[\\/]auth\.db/i, /[\\/]auth\.db(-wal|-shm)?$/i, /[\\/]crossline\.db(-wal|-shm)?$/i,
   // The browser profiles the person logged in with for a workflow: read only by Crossline's site reader, never by the assistant.
-  /crossline[\\/]browser-profiles/i
+  /crossline[\\/]browser-profiles/i,
+  // On a compute node with the shell allowed (docs/compute-node.md P3): the node's token, its own Codex sign-in and its browser profiles,
+  // a linked device's node profiles, and the DPAPI secret files (the device link token among them).
+  /crossline node[\\/](token\.bin|codex-home|browser-profiles)/i, /[\\/]device[\\/]node[\\/]browser-profiles/i, /[\\/]secrets[\\/][^\\/]+\.bin$/i
 ];
 const EXAMPLE_ENV = /\.env\.(example|sample|template)$/i;
 

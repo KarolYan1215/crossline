@@ -3,6 +3,7 @@ import { forgetAccountModels } from "./model-catalog";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { CodexRpcBoundary } from "./index";
+import { createRuntimePool, type PoolMember, type RuntimePool } from "./runtime-pool";
 import { tFor } from "@crossline/core";
 import { runLocale } from "./style";
 
@@ -74,6 +75,8 @@ export type RuntimeRegistry = {
   /** Signs a guest out and deletes its home (login and memories); the owner's runtime is not touched here. */
   logout(workspaceId: string): Promise<void>;
   stopIdle(): void;
+  /** Runs in flight per runtime for a guest whose own computer serves it (`nodes`): `server` for its runtime here, else the node's key. */
+  poolLoad(workspaceId: string): Record<string, number>;
   /** Under memory pressure: stops every guest runtime with no run in flight that has been quiet for a minute. */
   reclaim(): void;
   stopAll(): void;
@@ -90,6 +93,11 @@ export function createRuntimeRegistry(options: {
   /** The client the owner's model runs take (the compute node's runtime while connected); `owner.client` when not given. */
   ownerClient?: () => CodexRpcBoundary;
   ownerWorkspaceId: () => string | undefined;
+  /**
+   * A guest's own compute nodes (docs/compute-node.md, 方案 C): its runs are spread over them and its runtime here, a node with room
+   * first; a guest with no sign-in here runs on its nodes alone. Never another account's nodes.
+   */
+  nodes?: (workspaceId: string) => PoolMember[];
   /** Where guest homes live: `<baseDir>/<workspaceId>/codex-home`. */
   baseDir: string;
   start: (codexHome: string) => Promise<RuntimeSidecar>;
@@ -122,7 +130,21 @@ export function createRuntimeRegistry(options: {
   const ownerClient = () => options.ownerClient?.() ?? options.owner.client;
   const homeOf = (workspaceId: string) => path.join(options.baseDir, workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"), "codex-home");
   const signedIn = (workspaceId: string) => isOwner(workspaceId) || existsSync(path.join(homeOf(workspaceId), "auth.json"));
-  const connected = (workspaceId: string) => signedIn(workspaceId) || Boolean(options.hasProvider?.(workspaceId));
+  const hasNodes = (workspaceId: string) => { try { return (options.nodes?.(workspaceId).length ?? 0) > 0; } catch { return false; } };
+  const servesHere = (workspaceId: string) => signedIn(workspaceId) || Boolean(options.hasProvider?.(workspaceId));
+  const connected = (workspaceId: string) => servesHere(workspaceId) || hasNodes(workspaceId);
+  const pools = new Map<string, RuntimePool>();
+  /** What a guest's runs take: a pool over its handle and its own nodes when it can have any, else the handle. */
+  const clientOf = (workspaceId: string): CodexRpcBoundary => {
+    if (!options.nodes) return handleFor(workspaceId);
+    let pool = pools.get(workspaceId);
+    if (!pool) {
+      const nodes = options.nodes;
+      pool = createRuntimePool(handleFor(workspaceId), () => nodes(workspaceId), { localUsable: () => servesHere(workspaceId) });
+      pools.set(workspaceId, pool);
+    }
+    return pool;
+  };
   const savedAccount = (workspaceId: string) => isOwner(workspaceId) ? null : accountFromAuthFile(path.join(homeOf(workspaceId), "auth.json"));
 
   const stop = (workspaceId: string) => {
@@ -225,16 +247,19 @@ export function createRuntimeRegistry(options: {
   const clientFor = async (workspaceId: string, forLogin = false): Promise<{ ok: true; client: CodexRpcBoundary } | { ok: false; blocker: RuntimeBlocker }> => {
     if (isOwner(workspaceId)) return { ok: true, client: forLogin ? options.owner.client : ownerClient() };
     if (!forLogin && !connected(workspaceId)) return { ok: false, blocker: blocker("RUNTIME_UNCONNECTED", workspaceId) };
+    if (!forLogin && !servesHere(workspaceId)) return { ok: true, client: clientOf(workspaceId) };
     const started = await ensure(workspaceId);
-    return "code" in started ? { ok: false, blocker: started } : { ok: true, client: handleFor(workspaceId) };
+    return "code" in started ? { ok: false, blocker: started } : { ok: true, client: forLogin ? handleFor(workspaceId) : clientOf(workspaceId) };
   };
 
   return {
     isOwner, connected, signedIn, savedAccount,
     client: (workspaceId) => clientFor(workspaceId),
     handle: (workspaceId) => isOwner(workspaceId) ? { ok: true, client: ownerClient() }
-      : connected(workspaceId) ? { ok: true, client: handleFor(workspaceId) } : { ok: false, blocker: blocker("RUNTIME_UNCONNECTED", workspaceId) },
-    current: (workspaceId) => isOwner(workspaceId) ? ownerClient() : (touch(workspaceId), running.has(workspaceId) ? handleFor(workspaceId) : undefined),
+      : connected(workspaceId) ? { ok: true, client: clientOf(workspaceId) } : { ok: false, blocker: blocker("RUNTIME_UNCONNECTED", workspaceId) },
+    current: (workspaceId) => isOwner(workspaceId) ? ownerClient()
+      : (touch(workspaceId), running.has(workspaceId) || hasNodes(workspaceId) ? clientOf(workspaceId) : undefined),
+    poolLoad: (workspaceId) => pools.get(workspaceId)?.load() ?? {},
     async login(workspaceId, method) {
       // Not through the handle: an account that is not connected yet is exactly the one that logs in.
       const started = isOwner(workspaceId) ? options.owner : await ensure(workspaceId);

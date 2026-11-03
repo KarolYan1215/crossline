@@ -16,7 +16,7 @@ import { startNodeAgent } from "../node/agent";
 import { createNodeBrowsers } from "../node/browser";
 import { localAppServer } from "../node/local-runtime";
 import { loginNodeWithApiKey, readNodeAccount, type NodeAccount } from "../node/control";
-import { createDeviceLinkService, nodeEnabled, type DeviceLink } from "./link";
+import { createDeviceLinkService, nodeEnabled, nodeShell, type DeviceLink } from "./link";
 import { MIRROR_INTERVAL_MS, mirrorPass } from "./mirror";
 import { DEVICE_PASSES } from "./mode";
 import { createOutbox, type OutboxItem, type SendResult } from "./outbox";
@@ -129,7 +129,7 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
   // sends it the account's model runs; it starts none of its own.
   const node = nodeEnabled(dataDir) && link.token && !options.runOnce
     ? startNodeAgent({ url: link.url, token: link.token, dir: path.join(deviceDir, "node"), host: label, log, spawn: localAppServer, role: "device",
-      browsers: createNodeBrowsers({ profilesDir: path.join(deviceDir, "node", "browser-profiles") }) }) : undefined;
+      shell: nodeShell(dataDir), browsers: createNodeBrowsers({ profilesDir: path.join(deviceDir, "node", "browser-profiles") }) }) : undefined;
   if (node) process.on("exit", () => node.stop());
   // Who this computer's Codex is signed in as, for the device page (read once; an API-key sign-in there updates it).
   let nodeAccount: NodeAccount | undefined;

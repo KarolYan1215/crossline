@@ -79,6 +79,11 @@ export type EngineDeps = {
   fallbacks?: FormFallback[];
   /** Pages before the run gives up and hands over, as a guard against a loop. */
   maxSteps?: number;
+  /**
+   * The last click is always the person's, even for a free event (an account whose forms run on its own compute node: the owner's rule
+   * of 2026-11-03, 「执行外部任务（不包括发送，报名和支付的最后一步）」). The form is filled and checked, then held for them.
+   */
+  personSubmits?: boolean;
 };
 
 const MAX_STEPS = 24;
@@ -353,7 +358,7 @@ export async function fillForm(start: StoredFormRun, deps: EngineDeps, options: 
     nodes = await Promise.all(now.map(async (node) => /^(textbox|searchbox|spinbutton)$/.test(node.role) && !node.value?.trim()
       ? { ...node, value: await driver.inputValue({ role: node.role, name: node.name, ...(node.ref ? { ref: node.ref } : {}) }, 0) ?? "" } : node));
     const required = (await driver.signals()).required ?? [];
-    const problems = autoSubmitProblems(run, { nodes, submit, required });
+    const problems = [...autoSubmitProblems(run, { nodes, submit, required }), ...(deps.personSubmits ? ["最后一步由本人点击"] : [])]; // i18n-ignore: a reason kept on the run, translated where shown
     await shoot("before-submit");
     if (problems.length) {
       run = deps.save({ ...run, state: "ready_to_submit", heldBecause: problems }, { type: "opportunity.form.ready_to_submit", payload: { heldBecause: problems } });

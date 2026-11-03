@@ -351,8 +351,10 @@ export type CodexSupervisor = {
   runtimes?: RuntimeRegistry;
   /** The owner runtime's `userAgent` ("crossline/0.163.0 (…)"): a compute node must run the same Codex. */
   runtimeVersion: string;
-  /** The owner's runs spread over this runtime and the compute nodes, when `ownerNodes` was given: its `load` says what runs where. */
+  /** The owner's runs spread over this runtime and the compute nodes, when `nodes` was given: its `load` says what runs where. */
   ownerPool?: RuntimePool;
+  /** Runs in flight per runtime for any account's pool (`server` for this process's runtime, else the node's key). */
+  loadFor: (workspaceId: string) => Record<string, number>;
   stop: () => Promise<void>;
 };
 
@@ -615,11 +617,11 @@ export async function startCodexSupervisor(options: {
    */
   services?: Array<{ prefix: string; handle: (method: string, pathname: string, workspaceId: string, body: Record<string, unknown> | undefined) => Promise<{ status: number; body: unknown } | undefined> }>;
   /**
-   * The compute nodes connected for the owner's account (docs/compute-node.md): with them the owner's model runs are spread over this
-   * process's runtime and theirs (`createRuntimePool`, a node with room first). Sign-in, the quota read and the shell assistant stay on
-   * this process's runtime.
+   * The compute nodes connected for an account (docs/compute-node.md; 方案 C: each account's own computers, and only them): with them
+   * its model runs are spread over this process's runtime and theirs (`createRuntimePool`, a node with room first). The owner's sign-in
+   * and quota read stay on this process's runtime; a guest with no sign-in here is served by its nodes alone.
    */
-  ownerNodes?: () => PoolMember[];
+  nodes?: (workspaceId: string) => PoolMember[];
 } = {}): Promise<CodexSupervisor> {
   const host = options.host ?? "127.0.0.1";
   // Regenerated every boot: a token signed before a crash or restart must not still be honoured after
@@ -646,13 +648,15 @@ export async function startCodexSupervisor(options: {
     }
   }
   /** The client the owner's model runs take: a pool over this process's runtime and the connected compute nodes, when there can be any. */
-  const ownerPool = options.ownerNodes ? createRuntimePool(sidecar.client, options.ownerNodes) : undefined;
+  const nodesFor = options.nodes;
+  const ownerPool = nodesFor ? createRuntimePool(sidecar.client, () => { const owner = options.runtimes?.ownerWorkspaceId(); return owner ? nodesFor(owner) : []; }) : undefined;
   const ownerClient = (): CodexRpcBoundary => ownerPool ?? sidecar.client;
   const runtimes = options.runtimes ? createRuntimeRegistry({ owner: sidecar, ownerClient, ownerWorkspaceId: options.runtimes.ownerWorkspaceId,
     baseDir: options.runtimes.baseDir, ...(options.runtimes.maxRunning ? { maxRunning: options.runtimes.maxRunning } : {}),
     ...(options.runtimes.idleMs ? { idleMs: options.runtimes.idleMs } : {}),
     ...(options.runtimes.hasProvider ? { hasProvider: options.runtimes.hasProvider } : {}),
     ...(options.runtimes.onConnected ? { onConnected: options.runtimes.onConnected } : {}),
+    ...(nodesFor ? { nodes: nodesFor } : {}),
     // A guest's runtime gets the same Crossline plugin the owner's has.
     start: options.runtimes.start ?? (async (home) => {
       const started = await startCodexAppServer(home);
@@ -1425,6 +1429,7 @@ export async function startCodexSupervisor(options: {
     clientFor: (workspaceId: string) => isOwner(workspaceId) ? ownerClient() : runtimes!.current(workspaceId),
     runtimeVersion: runtimeVersion(sidecar.initializeResult),
     ...(ownerPool ? { ownerPool } : {}),
+    loadFor: (workspaceId: string) => isOwner(workspaceId) ? ownerPool?.load() ?? {} : runtimes?.poolLoad(workspaceId) ?? {},
     readCostSignal: async (workspaceId = "") => !isOwner(workspaceId) ? guestCost(workspaceId) : runtimeBlocker
       ? { available: false, reason: runtimeBlocker.code }
       : costFor(sidecar.client, workspaceId),

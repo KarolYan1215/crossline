@@ -1,0 +1,7 @@
+{
+  "下载安装包": "Download the installer",
+  "助手在本账号的节点电脑「{{host}}」上执行命令：每条命令先经过同一套检查，发送、报名和付款的最后一步留给本人。": "The assistant runs commands on this account's node computer \"{{host}}\": every command passes the same checks first, and the last step of sending, signing up or paying is left to the person.",
+  "先开启算力节点。": "Switch on the compute node first.",
+  "允许在这台电脑上执行命令（shell 助手）": "Allow running commands on this computer (shell assistant)",
+  "开启后网页版的助手可以在这台电脑上执行命令（剪辑、转码、跑脚本、生长工作流），只在节点自己的任务文件夹里工作，每条命令先经过同一套检查；发送、报名和付款的最后一步留给本人": "When on, the web app's assistant can run commands on this computer (editing, transcoding, running scripts, growing workflows), working only in the node's own task folders; every command passes the same checks first, and the last step of sending, signing up or paying is left to the person"
+}

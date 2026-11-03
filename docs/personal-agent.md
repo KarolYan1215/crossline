@@ -4,7 +4,7 @@
 
 ## 1. 现状与问题（改之前）
 
-- 助手（`crossline-agent`）是 Codex 的 shell 模式：`danger-full-access` + 守卫。只给电脑主人自己的 Codex 用；托管内测（`CROSSLINE_PUBLIC_BETA=1`）上**所有人**都没有助手（`machineOwner` 恒为 false）。
+- 助手（`crossline-agent`）是 Codex 的 shell 模式：`danger-full-access` + 守卫。只给电脑主人自己的 Codex 用；托管内测（`CROSSLINE_PUBLIC_BETA=1`）上**所有人**都没有助手（`machineOwner` 恒为 false）。（2026-11-03 起，配对了自己电脑作为算力节点、并在节点上允许执行命令的账号，在那台电脑上有 shell 助手，见 docs/compute-node.md「方案 C 与 P3」。）
 - 第三方模型（赞助模型、自己的 API）按 `capabilityGap` 永远拿不到 shell，所以换模型之后助手整块消失；「交给 Agent」按钮也对客人隐藏。
 - 「可生长的工作流」靠 shell 助手调用 runtime 自带的 `skill-creator` 写脚本，同样只有电脑主人能用；客人用输入框说「以后每周五……」会被记下，但永远不会建成。
 - 没有邮箱接入。
@@ -14,6 +14,7 @@
 **决定**：除电脑主人自己的 Codex 外，所有账号的助手改用「工具模式」：没有 shell，能做的事是一组 Crossline 自己回答的函数（Codex dynamic tools），所以在任何能调用函数的模型上都能跑。
 
 - 代码：`apps/worker/src/agent-tools.ts`（`createAgentToolbox`）、`agent-task.ts` 的 `runWithTools`、`agent-service.ts` 的 `modeFor`/`clientFor`/`mailFor`；Skill `crossline-agent-tools`；`assistantMode()`（`packages/db/src/skills.ts`）决定 `shell` 还是 `tools`。
+- 账号自己的节点电脑（2026-11-03）：有就绪、允许执行命令的节点时 `modeFor` 选 `node`，助手在那台电脑上跑 shell 模式；输入以副本送过去，产出拷回服务器，每条命令仍由服务器的守卫审批，工作流生长和 `media_edit` 随之可用（docs/compute-node.md「方案 C 与 P3」）。
 - 函数：
   - 文件：`list_files`、`read_file`（文本/PDF/Word）、`write_file`（只限 .md .txt .csv .tsv .json .html .ics .yaml .xml，单个 ≤2 MB，一次运行 ≤200 个、≤20 MB）、`copy_file`、`move_file`、`delete_file`（只能删本次自己写的）。只写任务目录；输入以 `input/<n>/…` 只读出现，运行前后做哈希比对。
   - 本人的东西：`list_documents`/`read_document`（上传与授权文件夹）、`list_tasks`/`read_task`、`list_facts`、`calendar`。

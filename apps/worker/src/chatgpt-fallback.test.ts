@@ -38,7 +38,7 @@ function setup(options: { signedIn?: boolean; sponsored?: boolean } = {}) {
   const store = new CrosslineStore(":memory:");
   const workspaceId = store.createPrincipalWithWorkspace("owner", "个人").workspace.id;
   if (options.sponsored ?? true) store.setSetting(workspaceId, SPONSOR_SETTING, JSON.stringify({ inviteId: "inv", since: clock.now.toISOString() }));
-  const gateway = { urlFor: (ws: string, providerId: string) => `http://127.0.0.1:1/${ws}/${providerId}`, port: 1, close: async () => {} };
+  const gateway = { urlFor: (ws: string, providerId: string) => `http://127.0.0.1:1/${ws}/${providerId}`, port: 1, close: async () => {}, workspaceOfPath: () => undefined };
   const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: `${MODEL}=4:16:1024` } as NodeJS.ProcessEnv;
   let sponsor: ReturnType<typeof createSponsorService> | undefined;
   const providers = createModelProviderService({ store, cwd: dataDir, gateway, signedIn: () => options.signedIn ?? true, client: async () => undefined,

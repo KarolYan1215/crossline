@@ -4,12 +4,12 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, codexProcessEnvironment, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes, nodeComputeOn } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { closeInterruptedCollections, createFavouritesTopicsService, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
 import { workflowImprovePass } from "./workflow-improver";
@@ -288,6 +288,11 @@ async function extractDocument(documentId: string, workspaceId: string) {
 // On the hosted beta the machine is a shared server: nobody's account reads its folders, screen or logs, and nobody gets its shell.
 const hostedBeta = process.env.CROSSLINE_PUBLIC_BETA === "1";
 const machineOwner = (workspaceId: string) => !hostedBeta && runtimeOwner(analysisStore) === workspaceId;
+// A compute node of the account's own whose person allowed the shell assistant on it (docs/compute-node.md P3). The hub is created
+// further down; read before that (a pass at start-up) it is not there yet.
+const nodeShell = (workspaceId: string) => { try { return nodeHub?.shellFor(workspaceId); } catch { return undefined; } };
+/** Whether this account's assistant has a shell: the machine owner's own computer, or one of its own nodes with the shell allowed. */
+const shellAssistant = (workspaceId: string) => machineOwner(workspaceId) || Boolean(nodeShell(workspaceId));
 const pidAlive = (pid: number): boolean => {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 };
@@ -494,7 +499,7 @@ async function publicSkillPass(workspaceId: string, checkedAt: string, offPeakWa
 }
 
 /**
- * The opportunity agent (docs/opportunity-agent.md §17), on the machine owner's workspace only. Every tick, without a model: outcomes the
+ * The opportunity agent (docs/opportunity-agent.md §17), on the machine owner's workspace and accounts that paired their own computer as a node. Every tick, without a model: outcomes the
  * ledger shows by itself are written and quiet watches retired. Then, while core work may: one line's watches derived when due (its
  * setup, a changed goal or milestones, a node it reached, monthly), and up to two due watches run. The weekly scout starts through the
  * assistant when discretionary work may and exploration has not had its share. Planning work: it stops with the 规划 pause. Detached, so
@@ -597,8 +602,9 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
       if (improving) console.info(JSON.stringify({ type: "skill.grown.improve_started", checkedAt, workspaceId, id: improving }));
     } catch { /* next tick */ }
   }
-  // Growing a workflow writes and tests scripts with the runtime's `skill-creator`: only the shell assistant can (the owner's own Codex).
-  if (assistantOff || !machineOwner(workspaceId) || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
+  // Growing a workflow writes and tests scripts with the runtime's `skill-creator`: only the shell assistant can (the owner's own Codex,
+  // or a node of the account's own with the shell allowed).
+  if (assistantOff || !shellAssistant(workspaceId) || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
   const candidate = growCandidates(analysisStore, workspaceId)[0];
   // What the person asked for in words is their own work, like a capture: it runs while the quota lasts. An errand the system noticed
   // repeating is its own idea, and waits for a normal quota.
@@ -1243,9 +1249,10 @@ const accountClient = (workspaceId: string) => {
 // site where this computer has a screen; on the hosted server, in the browser of the owner's connected compute node (§10.1).
 const formService = createFormService({ store: analysisStore, secrets, cwd: repoRoot, dataDir, client: accountClient,
   owner: () => runtimeOwner(analysisStore), screen: loginMode() === "local",
+  // Any account that paired its own computer fills forms in that computer's browser (docs/compute-node.md 方案 C).
+  nodeAccount: (workspaceId) => nodeComputeOn(analysisStore, workspaceId),
   // nodeHub is created further down; read before that (a pass at start-up) it is not there yet.
   nodeBrowser: (workspaceId) => {
-    if (workspaceId !== runtimeOwner(analysisStore)) return undefined;
     try { return nodeHub?.browserFor(workspaceId); } catch { return undefined; }
   },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
@@ -1277,8 +1284,8 @@ setInterval(() => dictationService.sweep(), 60_000).unref();
 const classifyTopics = createTopicClassifier(analysisStore, repoRoot, (workspaceId) => accountClient(workspaceId));
 configureFavouritesCollector({
   outputRoot: defaultOutputRoot(),
-  // The owner's computer reads the favourites when a node of theirs offers a browser (node/browser.ts); the hub is set up further down.
-  nodeBrowser: (workspaceId) => workspaceId === runtimeOwner(analysisStore) ? nodeHub?.browserFor(workspaceId) : undefined,
+  // The account's own computer reads the favourites when a node of theirs offers a browser (node/browser.ts); the hub is set up further down.
+  nodeBrowser: (workspaceId) => { try { return nodeHub?.browserFor(workspaceId); } catch { return undefined; } },
   reclaim: () => codexSupervisor?.runtimes?.reclaim(),
   memory: createCollectMemory({ reclaim: () => codexSupervisor?.runtimes?.reclaim() }),
   // Sorting the titles is the person's own request at work: it runs while the quota allows core work.
@@ -1313,7 +1320,12 @@ const remoteBrowsers = loginMode() === "remote" ? createRemoteBrowsers({
 configureRemoteLogin(remoteBrowsers);
 if (remoteBrowsers) setInterval(() => { void remoteBrowsers.sweep().catch(() => undefined); }, 30_000).unref();
 // A form window waiting for the person is watched every half minute (their own submission, a closed window), not at the 15-minute tick.
-setInterval(() => { const owner = runtimeOwner(analysisStore); if (owner) void formService.pass(owner).catch(() => undefined); }, 30_000).unref();
+setInterval(() => {
+  const owner = runtimeOwner(analysisStore);
+  for (const workspace of analysisStore.listWorkspaces()) {
+    if (workspace.id === owner || nodeComputeOn(analysisStore, workspace.id)) void formService.pass(workspace.id).catch(() => undefined);
+  }
+}, 30_000).unref();
 const agentService = createAgentService({
   // The owner's assistant (tools mode on the hosted site) runs through the pool too: its nodes add room for more at once.
   concurrency: (workspaceId) => workspaceConcurrency(workspaceId),
@@ -1321,7 +1333,9 @@ const agentService = createAgentService({
   // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).
   store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(), isOwner: machineOwner,
   // Everyone else's assistant works through Crossline's own functions on the account's own model (docs/personal-agent.md, 2026-10-19).
-  modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : sandboxShell.ok ? "sandbox" : "tools",
+  // An account whose own computer runs a node with the shell allowed gets the shell assistant there (docs/compute-node.md P3).
+  modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : nodeShell(workspaceId) ? "node" : sandboxShell.ok ? "sandbox" : "tools",
+  nodeShell,
   // What a sandboxed run may never read: the server's data and state (every account's ledger, files and runtime homes) — its own task
   // folder and inputs, which live under them, stay reachable because the more specific entry wins.
   sandbox: { readable: [path.dirname(process.env.CROSSLINE_CODEX_PATH ?? "/opt/codex/codex")], deny: [dataDir, process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state")] },
@@ -1349,7 +1363,7 @@ async function automationDesignPass(workspaceId: string): Promise<void> {
 async function automationTick(workspaceId: string): Promise<void> {
   await automationDesignPass(workspaceId);
   // The machine owner's repeated errands are grown into workflows (workflowPass); everyone else is offered an automation for them.
-  if (!machineOwner(workspaceId)) { try { suggestFromRepeats(analysisStore, workspaceId, growCandidates(analysisStore, workspaceId)); } catch { /* a courtesy */ } }
+  if (!shellAssistant(workspaceId)) { try { suggestFromRepeats(analysisStore, workspaceId, growCandidates(analysisStore, workspaceId)); } catch { /* a courtesy */ } }
   if (!codexSupervisor || paused(workspaceId, "assistant") || !spendAllows(await spendFor(workspaceId), "intake")) return;
   enterUsageWorkspace(workspaceId);
   await automationPass(automationDeps, workspaceId);
@@ -1655,15 +1669,15 @@ const syncCalendarFor = async (workspaceId: string): Promise<SyncOutcome | null>
 
 /**
  * How many runs of one workspace a pass starts at once: the account's share of the model gate, plus the runs its compute nodes take
- * (docs/compute-node.md, 协同: a node is far stronger than this server, so the owner's planning and assistant work fan out across it).
+ * (docs/compute-node.md, 协同: a node is far stronger than this server, so the account's planning and assistant work fan out across it).
  */
 function workspaceConcurrency(workspaceId: string): number {
-  try { return accountConcurrency() + (nodeHub && workspaceId === runtimeOwner(analysisStore) ? nodeHub.capacity(workspaceId) : 0); }
+  try { return accountConcurrency() + (nodeHub ? nodeHub.capacity(workspaceId) : 0); }
   catch { return accountConcurrency(); }
 }
 
-// The compute node (docs/compute-node.md): on the hosted site the owner's own computer may connect out to `wss://<site>/node` (Caddy
-// hands it to this port) and serve the owner's model runs with its Codex; with no node connected, or the switch off, nothing changes.
+// The compute node (docs/compute-node.md): on the hosted site any account's own computer may connect out to `wss://<site>/node` (Caddy
+// hands it to this port) and serve that account's model runs with its Codex (方案 C); with no node connected, or the switch off, nothing changes.
 const nodePort = Number(process.env.CROSSLINE_NODE_PORT ?? (hostedBeta ? 3213 : 0));
 const crosslineMarketplace = path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json");
 const nodeHub: NodeHub | undefined = nodePort > 0 ? await createNodeHub({
@@ -1676,14 +1690,23 @@ const nodeHub: NodeHub | undefined = nodePort > 0 ? await createNodeHub({
       return stored?.length === 64 && timingSafeEqual(Buffer.from(stored, "hex"), hash);
     }))?.id;
   },
-  // Only the runtime owner's account, and only once it switched the node on (the plan's A; other accounts are P4).
-  allowed: (workspaceId) => workspaceId === runtimeOwner(analysisStore) && analysisStore.getSetting(workspaceId, NODE_COMPUTE_SETTING) === "on",
+  // The account the token belongs to, once it switched the node on (方案 C: every account, each its own computers only).
+  allowed: (workspaceId) => analysisStore.getSetting(workspaceId, NODE_COMPUTE_SETTING) === "on",
   roots: (workspaceId) => [path.dirname(path.dirname(path.dirname(crosslineMarketplace))), skillLibraryDir(workspaceId)],
   // The input box's typed copies of uploads (concierge.ts `asTypedImage`) and everything under the data directory (favourites' pictures).
   imageRoots: () => [path.join(tmpdir(), "crossline-images"), dataDir],
   gateway: () => `http://127.0.0.1:${modelGateway.port}`,
+  // A node's model requests go only to its own account's route, and are billed from the gateway's count, not the node's (方案 C).
+  gatewayWorkspace: (requestPath) => modelGateway.workspaceOfPath(requestPath),
+  meter: (workspaceId, named, usage) => {
+    const tokens = breakdownOfResponsesUsage(usage);
+    if (tokens) recordMeteredUsage({ workspaceId, ...named }, tokens);
+  },
   serverCodex: () => codexSupervisor?.runtimeVersion ?? "",
-  prepare: async (client) => {
+  prepare: async (client, workspaceId) => {
+    // A node with no sign-in of its own serves only an account whose model is a provider (the gateway's key); else every run would fail.
+    const account = await client.request("account/read", { refreshToken: false }).catch(() => undefined) as { account?: unknown } | undefined;
+    if (!account?.account && !modelProviders.hasProvider(workspaceId)) throw new Error("NODE_NOT_SIGNED_IN");
     const skills = await installLocalPlugin(client, { name: "crossline", marketplacePath: crosslineMarketplace, cwd: repoRoot, requiredSkills: REQUIRED_SKILLS });
     const missing = REQUIRED_SKILLS.filter((name) => !skills.includes(name));
     if (missing.length) throw new Error(`CODEX_PLUGIN_SKILLS_MISSING ${missing.slice(0, 3).join(",")}`);
@@ -1735,8 +1758,8 @@ if (!capabilitySecret) {
       // Linking this computer as a device of the hosted account (docs/device-mode.md); the worker restarts into device mode.
       { prefix: "/v1/device", handle: createDeviceLinkService({ dataDir, secrets, onChanged: restartForMode, localeFor: (workspaceId) => localeOf(analysisStore, workspaceId) }).handle }],
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
-    // The owner's runs spread over this server's runtime and every compute node connected for the account (runtime-pool.ts).
-    ...(nodeHub ? { ownerNodes: () => { const owner = runtimeOwner(analysisStore); return owner ? nodeHub.members(owner) : []; } } : {}),
+    // Each account's runs spread over this server's runtime and every compute node connected for that account (runtime-pool.ts).
+    ...(nodeHub ? { nodes: (workspaceId: string) => nodeHub.members(workspaceId) } : {}),
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),
     runTaskPass: (workspaceId) => stepPlanPass(workspaceId),
@@ -1868,16 +1891,17 @@ if (!capabilitySecret) {
   }
   // Other accounts' runtimes stop after a quiet spell (above), so an idle account holds no process.
   setInterval(() => codexSupervisor?.runtimes?.stopIdle(), 60_000).unref();
+  // Gateway-counted tokens of node runs that no run took within half an hour are billed as rows of their own (usage.ts).
+  setInterval(() => flushMeteredUsage(30 * 60_000), 5 * 60_000).unref();
   // One model run at a time on the hosted beta, and none started above the memory high-water mark (model-gate.ts).
   // The candidates' measurement is no person's account (one tenant, `sponsor-eval`): it may use every background slot nobody else wants.
   configureModelGate({ probe: () => containerMemory(), reserved: heldMemory,
-    // The owner's compute nodes add their capacity to the owner's share, and while one has room the owner's next run is not held by this
-    // process's memory (docs/compute-node.md, 协同).
+    // An account's compute nodes add their capacity to its share, and while one has room its next run is not held by this process's
+    // memory (docs/compute-node.md, 协同; every account's own nodes since 方案 C).
     ...(nodeHub ? {
-      extraCapacity: (tenant: string) => tenant === runtimeOwner(analysisStore) ? nodeHub.capacity(tenant) : 0,
+      extraCapacity: (tenant: string) => nodeHub.capacity(tenant),
       nodeRoom: (tenant: string) => {
-        if (tenant !== runtimeOwner(analysisStore)) return false;
-        const load = codexSupervisor?.ownerPool?.load() ?? {};
+        const load = codexSupervisor?.loadFor(tenant) ?? {};
         return nodeHub.members(tenant).some((member) => (load[member.id] ?? 0) < member.capacity);
       }
     } : {}),

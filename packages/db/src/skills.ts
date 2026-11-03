@@ -1,5 +1,5 @@
 import {
-  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey, scriptsAllowable, scriptsDigest, scriptsRunnable,
+  AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey, scriptsAllowable, scriptsDigest, scriptsRunnable,
   readGrownLibrary, readMineSkill, readSkillLibrary, tFor, GROWN_VERSIONS_KEPT, WORKFLOW_FEEDBACK_EVENT, grownVersionsKey, revisionWidens,
   type AiTool, type GrownSkillRecord, type GrownSkillVersion, type WorkflowManifest, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
@@ -221,7 +221,8 @@ export const TOOLS_ASSISTANT_GOOD_FOR = "整份做琐事：汇集与整理材料
  */
 export function assistantMode(store: CrosslineStore, workspaceId: string, env: NodeJS.ProcessEnv = process.env): "shell" | "sandbox" | "tools" {
   // `sandbox` as the server configured it; the worker falls back to tools by itself when a sandbox does not start (sandbox-probe.ts).
-  return assistantAvailable(store, workspaceId, env) ? "shell" : env.CROSSLINE_SANDBOX_SHELL?.trim() === "on" && process.platform === "linux" ? "sandbox" : "tools";
+  // A node of the account's own with the shell allowed gives it the shell assistant there (docs/compute-node.md P3).
+  return assistantAvailable(store, workspaceId, env) || nodeShellHost(store, workspaceId) ? "shell" : env.CROSSLINE_SANDBOX_SHELL?.trim() === "on" && process.platform === "linux" ? "sandbox" : "tools";
 }
 
 /**
@@ -233,6 +234,28 @@ export function assistantAvailable(store: CrosslineStore, workspaceId: string, e
   if (env.CROSSLINE_PUBLIC_BETA === "1") return false;
   if (store.getSetting(workspaceId, RUNTIME_OWNER_SETTING) === "1") return true;
   return !store.listWorkspaces().some((workspace) => store.getSetting(workspace.id, RUNTIME_OWNER_SETTING) === "1");
+}
+
+/**
+ * The host of a ready compute node of this account whose person allowed the shell assistant on it (docs/compute-node.md P3), as the
+ * hosted worker last recorded it, or undefined. Only while 「作为算力节点」 is on.
+ */
+export function nodeShellHost(store: CrosslineStore, workspaceId: string): string | undefined {
+  if (store.getSetting(workspaceId, NODE_COMPUTE_SETTING) !== "on") return undefined;
+  try {
+    const status = JSON.parse(store.getSetting(workspaceId, NODE_STATUS_SETTING) ?? "null") as { nodes?: Array<{ state?: string; shell?: boolean; host?: string }> } | null;
+    const node = status?.nodes?.find((entry) => entry.state === "ready" && entry.shell === true);
+    return node ? node.host || "?" : undefined;
+  } catch { return undefined; }
+}
+
+/**
+ * Whether this account paired its own computer as a compute node and switched it on (docs/compute-node.md 方案 C): then its external
+ * errands — the opportunity agent and its registration forms, the favourites reader — run in that computer's browser, connected or
+ * waiting for it. The last click of a submission, a payment or a send stays the person's in that window.
+ */
+export function nodeComputeOn(store: CrosslineStore, workspaceId: string): boolean {
+  return store.getSetting(workspaceId, NODE_COMPUTE_SETTING) === "on";
 }
 
 /** The person names a tool they use (「剪映：自动字幕、粗剪」); returns it, or undefined for an empty name. */

@@ -165,6 +165,40 @@ describe("form service", () => {
     await link.closeAll();
   }, 120_000);
 
+  it("another account fills forms only once it paired its own computer, and never on this machine's screen", async () => {
+    const other = store.createPrincipalWithWorkspace("u2", "w2").workspace.id;
+    let paired = false;
+    const forms = createFormService({ store, secrets: secretStore, cwd: dir, dataDir: dir, client: () => undefined, owner: () => ws, screen: true,
+      nodeAccount: (workspaceId) => workspaceId === other && paired, nodeBrowser: () => undefined });
+    expect(await forms.handle("GET", "/v1/forms", other, undefined)).toMatchObject({ status: 403 });
+    paired = true;
+    expect(await forms.handle("GET", "/v1/forms", other, undefined)).toMatchObject({ status: 200, body: { screen: false } });
+    expect(await forms.handle("POST", "/v1/forms/queue", other, { opportunity: opportunity(), choice: "register" })).toMatchObject({ status: 409, body: { code: "FORM_NEEDS_SCREEN" } });
+    // The owner still has this computer's screen.
+    expect(await forms.handle("GET", "/v1/forms", ws, undefined)).toMatchObject({ status: 200, body: { screen: true } });
+  });
+
+  it.skipIf(!chrome)("on another account's own node, even a free event is filled and checked, then held for the person's own click", async () => {
+    const other = store.createPrincipalWithWorkspace("u2", "w2").workspace.id;
+    const link = nodeLink();
+    const forms = createFormService({ store, secrets: secretStore, cwd: dir, dataDir: dir, client: () => undefined, owner: () => ws, screen: true,
+      nodeAccount: (workspaceId) => workspaceId === other, nodeBrowser: (workspaceId) => workspaceId === other ? link : undefined, profilesRoot: () => path.join(dir, "profiles"),
+      models: () => ({
+        propose: async (): Promise<FormFillAnswer> => ({ pageKind: "form", note: "", actions: [
+          { op: "fill", target: { role: "textbox", name: "Email" }, value: { slot: "email" }, why: "" },
+          { op: "submit", target: { role: "button", name: "Register" }, value: null, why: "" }] }),
+        check: async () => ({ ok: true, problems: [] })
+      }) });
+    await forms.handle("POST", "/v1/apply-profile/email", other, { value: "kai@example.edu" });
+    expect(await forms.handle("POST", "/v1/forms/queue", other, { opportunity: opportunity(), choice: "register" })).toMatchObject({ status: 200 });
+    await waitFor(() => readFormRuns(store, other)[0]?.state === "ready_to_submit");
+    expect(readFormRuns(store, other)[0]).toMatchObject({ state: "ready_to_submit", heldBecause: expect.arrayContaining(["最后一步由本人点击"]) });
+    expect(submitted).toBe(0);
+    expect(link.calls).toContain("formOpen");
+    await forms.closeAll();
+    await link.closeAll();
+  }, 120_000);
+
   it.skipIf(!chrome)("the node's form driver refuses a navigation off the run's hosts and a method outside its list", async () => {
     const link = nodeLink();
     const blocked: string[] = [];

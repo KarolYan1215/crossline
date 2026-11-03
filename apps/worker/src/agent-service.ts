@@ -5,6 +5,7 @@ import { agentChainsFor, deliverAgentResult, isPaused, listAgentTasks, readCateg
 import { AGENT_CATEGORIES, backgroundSpend, deliverableKey, tFor, isAgentCategory, retryDue, type AgentCategory, type CostSignal } from "@crossline/core";
 import { createAgentRunner, salvageStoppedRun, type AgentOutcome, type AgentTaskInput } from "./agent-task";
 import type { MailLookup } from "./agent-tools";
+import type { NodeShellLink } from "./node/task-sync";
 import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, ledgerQuestion, retryCandidates, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 import { browserProfilesRoot, sayToPerson, startWorkflowRun } from "./workflow-smith";
 import { localeOf, tOfWorkspace } from "./locale";
@@ -43,7 +44,9 @@ export function createAgentService(deps: {
    * Crossline's own functions on whatever model serves the account — for everyone else. With this set, `isOwner` no longer turns
    * other accounts away; it only decides the mode.
    */
-  modeFor?: (workspaceId: string) => "shell" | "sandbox" | "tools";
+  modeFor?: (workspaceId: string) => "shell" | "sandbox" | "tools" | "node";
+  /** For `node`: the account's own compute node whose person allowed the shell on it (docs/compute-node.md P3). */
+  nodeShell?: (workspaceId: string) => NodeShellLink | undefined;
   /** For `sandbox`: beside its inputs what it may read, and what it may never read (the server's data and state). */
   sandbox?: { readable: string[]; deny: string[] };
   /** The workspace's own runtime, for a tools-mode run (the shell runs on the owner's `getClient`). */
@@ -78,9 +81,10 @@ export function createAgentService(deps: {
   const runnerFor = (workspaceId: string, control: AbortController, onLive: Parameters<typeof createAgentRunner>[4]["onLive"]) => {
     const mode = deps.modeFor?.(workspaceId) ?? "shell";
     const mail = mode !== "shell" ? deps.mailFor?.(workspaceId) : undefined;
+    const node = mode === "node" ? deps.nodeShell?.(workspaceId) : undefined;
     // Tools and sandbox modes run on the account's own runtime only: never the owner's (a guest's task must not spend the owner's account).
     return createAgentRunner(deps.store, workspaceId, deps.repoRoot, mode === "shell" ? deps.getClient : () => deps.clientFor?.(workspaceId), {
-      outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
+      ...(node ? { node } : {}), outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
       // A question asked mid-run waits on 待确认 and reaches the phone as well: nobody is watching a background run.
       questionFor: (id, title) => ledgerQuestion(deps.store, workspaceId, id, title, { onAsked: (questionId, questions) =>
         sayToPerson(deps.store, workspaceId, tOfWorkspace(deps.store, workspaceId)("助手在做「{{title}}」时需要本人回答：{{question}}（10 分钟内未回答就按最稳妥的做法继续）",

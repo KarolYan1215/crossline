@@ -53,7 +53,8 @@ function log(event: Record<string, unknown>): void {
   } catch { /* a log that cannot be written is no reason to stop */ }
 }
 
-type State = { site: string; paired?: { at: string; host: string } };
+/** `shell`: 「允许在这台电脑上执行命令（shell 助手）」, the person's own switch here, off unless turned on (docs/compute-node.md P3). */
+type State = { site: string; paired?: { at: string; host: string }; shell?: boolean };
 const readState = (): State => { try { return JSON.parse(readFileSync(stateFile, "utf8")) as State; } catch { return { site: "https://app.crossline.lol" }; } };
 const writeState = (state: State) => writeFileSync(stateFile, JSON.stringify(state, null, 2));
 let state = readState();
@@ -200,7 +201,7 @@ function reconcile(): void {
   if (!account) return;
   if (paused) { if (agent) { agent.stop(); agent = undefined; log({ type: "node.paused" }); } return; }
   if (!agent) {
-    agent = startNodeAgent({ url: state.site, token: current, dir: path.join(home, "relay"), spawn: appServer, host: hostname(), role: "standalone",
+    agent = startNodeAgent({ url: state.site, token: current, dir: path.join(home, "relay"), spawn: appServer, host: hostname(), role: "standalone", shell: state.shell === true,
       browsers: createNodeBrowsers({ profilesDir: path.join(home, "browser-profiles") }),
       log: (event) => log(event) });
     log({ type: "node.relay_started" });
@@ -223,7 +224,7 @@ function view() {
   return { site: state.site, host: hostname(), codex: codexVersion, paired: Boolean(readToken()), pairedAt: state.paired?.at ?? null,
     code: pairing?.code ?? null, codeExpires: pairing?.expiresAt ?? null, pairingError: pairingError ?? null,
     account: account ? { email: account.email ?? "", type: account.type ?? "" } : null, accountKnown: account !== undefined,
-    login: login ?? null, node: agent?.status() ?? null, paused };
+    login: login ?? null, node: agent?.status() ?? null, paused, shell: state.shell === true };
 }
 
 const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -243,6 +244,8 @@ button.primary{background:var(--accent);border-color:var(--accent);color:var(--p
 <p><input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" style="font:inherit;padding:5px 8px;width:22em;max-width:100%">
 <button id="usekey">用 API key 登录</button></p><p class="muted" id="keynote"></p></div></section>
 <section><h2>3. 运行状态</h2><div id="node"></div></section>
+<section><h2>4. 执行命令（可选）</h2><p class="muted">打开后，网页版的助手可以在这台电脑上执行命令（剪辑、转码、跑脚本、生长工作流），只在节点自己的任务文件夹里工作，每条命令先经过网页版同一套检查；发送、报名和付款的最后一步始终留给本人。命令以这台电脑当前用户的身份运行。</p>
+<p><label><input type="checkbox" id="shell"> 允许在这台电脑上执行命令（shell 助手）</label></p></section>
 <p><small id="meta"></small></p><p><button id="quit">退出节点</button></p></main>
 <script>
 const post=(p)=>fetch(p,{method:"POST",headers:{"x-crossline-node":"1"}}).then(r=>r.json());
@@ -258,8 +261,10 @@ $("login").innerHTML=v.account?'<p class="ok">已登录'+(v.account.type==="apiK
 :v.login&&v.login.state==="pending"?'<p>浏览器已打开 ChatGPT 登录页，登录后这里自动更新。</p>'+((v.login.authUrl||"").startsWith("https://")?'<p><a href="'+esc(v.login.authUrl)+'" target="_blank" rel="noreferrer">没打开就点这里</a></p>':'')
 :'<p>用本人的 ChatGPT 账号登录，模型工作花的是这个账号的额度。</p>'+(v.login&&v.login.message?'<p class="muted">上次没有完成：'+esc(v.login.message)+'</p>':'')+'<button class="primary" id="signin">登录 ChatGPT</button>';
 const n=v.node;$("node").innerHTML=!v.paired||!v.account?'<p class="muted">配对并登录后自动开始。</p>':v.paused?'<p>已暂停：模型工作暂时回到服务器。托盘菜单的「继续提供算力」可以恢复。</p>':'<p>'+(n?words[n.state]||n.state:"正在启动")+(n&&n.message?"（"+esc(n.message)+"）":"")+'</p><p class="muted">电脑关机或断网时，模型工作自动回到服务器。</p>';
+$("shell").checked=Boolean(v.shell);
 $("meta").textContent=v.host+" · "+(v.codex||"Codex 未找到")+" · "+v.site;
 const s=$("signin");if(s)s.onclick=()=>post("/login").then(load);const o=$("signout");if(o)o.onclick=()=>post("/logout").then(load);const u=$("unpair");if(u)u.onclick=()=>post("/unpair").then(load);}
+$("shell").onchange=(e)=>fetch("/shell",{method:"POST",headers:{"x-crossline-node":"1","content-type":"application/json"},body:JSON.stringify({on:e.target.checked})}).then(load);
 $("usekey").onclick=()=>{const k=$("apikey").value;$("keynote").textContent="正在验证……";
 fetch("/login-key",{method:"POST",headers:{"x-crossline-node":"1","content-type":"application/json"},body:JSON.stringify({apiKey:k})}).then(r=>r.json())
 .then(a=>{$("apikey").value="";$("keynote").textContent=a.ok?"":a.message||"没有登录";load();});};
@@ -285,6 +290,16 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return;
   }
   if (url.pathname === "/logout") { await logout(); json(200, view()); return; }
+  if (url.pathname === "/shell") {
+    const on = (await readBody(request)).on === true;
+    if (on !== (state.shell === true)) {
+      state = { ...state, shell: on }; writeState(state);
+      // The hub hears the switch in the next `hello`: the relay starts again with it.
+      agent?.stop(); agent = undefined; reconcile();
+      log({ type: on ? "node.shell_on" : "node.shell_off" });
+    }
+    json(200, view()); return;
+  }
   if (url.pathname === "/refresh") { await readAccount(); reconcile(); json(200, view()); return; }
   if (url.pathname === "/unpair") {
     agent?.stop(); agent = undefined; forgetToken(); state = { site: state.site }; writeState(state); reconcile();

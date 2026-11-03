@@ -13,16 +13,21 @@ import path from "node:path";
  *   picture), copied to the node first;
  * - `gw*`: an HTTP request a provider thread made to the model gateway, relayed to the server's gateway, which adds the key;
  * - `browser` (server asks, node answers with `browser-answer`, a large picture or video first in `browser-chunk`s): one operation of a
- *   reader's browser on the person's computer (browser.ts), offered only by a node whose `hello` says `browser`.
+ *   reader's browser on the person's computer (browser.ts), offered only by a node whose `hello` says `browser`;
+ * - `task` (server asks, node answers with `task-answer`): one operation on the shell assistant's task directories (task-files.ts), offered
+ *   only by a node whose `hello` says `shell` (the person's own switch on this computer, off by default).
  *
  * The node does not trust the server blindly: only the methods the runners use pass (`ALLOWED_METHODS`), and a thread may not ask for a
- * shell, full access or a permission profile (`refusal`). The hosted worker's own shell assistant never comes here; it uses the server's
- * runtime directly.
+ * shell, full access or a permission profile (`refusal`), nor change them on a turn. The one exception is the person's own: with 「允许在这台
+ * 电脑上执行命令」 on, the server's assistant may start a thread with the shell and full access in one of this computer's task directories,
+ * under the `untrusted` approval policy, so every command not on the runtime's own short harmless list comes back to the server's guard.
  */
 export const NODE_PROTOCOL = 1;
 
 export type NodeFrame =
-  | { t: "hello"; protocol: number; codex: string; platform: string; host: string; role?: "device" | "standalone"; capacity?: number; browser?: boolean }
+  | { t: "hello"; protocol: number; codex: string; platform: string; host: string; role?: "device" | "standalone"; capacity?: number; browser?: boolean;
+      /** The shell assistant may run here (the person's switch), in task directories under `tasks`; `home` is this computer's user folder (for the guard). */
+      shell?: boolean; tasks?: string; home?: string }
   | { t: "welcome"; workspaceId: string; roots: string[]; gateway?: string }
   | { t: "rpc"; line: string }
   | { t: "files"; id: number; dir: string }
@@ -35,7 +40,9 @@ export type NodeFrame =
   | { t: "gw-end"; id: number; error?: string }
   | { t: "browser"; id: number; request: Record<string, unknown> }
   | { t: "browser-chunk"; id: number; data: string }
-  | { t: "browser-answer"; id: number; result?: unknown; error?: string };
+  | { t: "browser-answer"; id: number; result?: unknown; error?: string }
+  | { t: "task"; id: number; request: Record<string, unknown> }
+  | { t: "task-answer"; id: number; result?: unknown; error?: string };
 /** A picture or video goes back in pieces of this size (each frame stays under the socket's limit). */
 export const BROWSER_CHUNK_BYTES = 8 * 1_048_576;
 
@@ -72,14 +79,42 @@ export const ALLOWED_METHODS = new Set([
   "model/list", "account/read", "account/rateLimits/read", "app/installed", "app/read", "mcpServer/tool/call"
 ]);
 
-/** Why the node refuses a request, or undefined when it may run. */
-export function refusal(method: string, params: unknown): string | undefined {
+/** What a turn may not change about its thread: the thread's settings were checked when it started, and stay as they were. */
+const TURN_FIXED = ["cwd", "approvalPolicy", "approvalsReviewer", "sandboxPolicy", "permissions", "runtimeWorkspaceRoots"];
+/** Configuration keys that would set the sandbox or approval policy through the back door. */
+const CONFIG_FIXED = ["sandbox_mode", "approval_policy", "sandbox_workspace_write", "approvals_reviewer"];
+
+/** Whether `cwd` is one of this computer's task directories: a direct child of `tasksRoot` with a plain name. */
+export function inTaskDir(cwd: unknown, tasksRoot: string): boolean {
+  if (typeof cwd !== "string" || !tasksRoot) return false;
+  const local = path.isAbsolute(tasksRoot) ? path : path.posix;
+  const resolved = local.resolve(cwd);
+  return local.dirname(resolved) === local.resolve(tasksRoot) && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(local.basename(resolved)) && !local.basename(resolved).includes("..");
+}
+
+/**
+ * Why the node refuses a request, or undefined when it may run. `shell` is given only when the person switched the shell on here: then
+ * (and only then) a thread may have the shell and full access, in a task directory, with the `untrusted` approval policy answered by the user.
+ */
+export function refusal(method: string, params: unknown, shell?: { tasksRoot: string }): string | undefined {
   if (!ALLOWED_METHODS.has(method)) return `NODE_METHOD_REFUSED: ${method}`;
+  const value = (params ?? {}) as { sandbox?: unknown; config?: Record<string, unknown>; cwd?: unknown; approvalPolicy?: unknown; approvalsReviewer?: unknown;
+    environments?: unknown } & Record<string, unknown>;
+  if (method === "turn/start") {
+    if (TURN_FIXED.some((key) => value[key] !== undefined)) return "NODE_TURN_REFUSED: settings";
+    if (value.environments !== undefined && !(Array.isArray(value.environments) && value.environments.length === 0)) return "NODE_TURN_REFUSED: environments";
+    return undefined;
+  }
   if (method !== "thread/start" && method !== "thread/resume") return undefined;
-  const value = (params ?? {}) as { sandbox?: unknown; config?: Record<string, unknown> };
-  if (value.sandbox === "danger-full-access" || value.sandbox === "workspace-write") return "NODE_SHELL_REFUSED: sandbox";
   const config = value.config ?? {};
-  if (config["features.shell_tool"] === true || config.default_permissions !== undefined || config.permissions !== undefined) return "NODE_SHELL_REFUSED: shell";
+  const features = (config.features ?? {}) as Record<string, unknown>;
+  if (CONFIG_FIXED.some((key) => config[key] !== undefined)) return "NODE_SHELL_REFUSED: config";
+  if (value.sandbox === "workspace-write" || config.default_permissions !== undefined || config.permissions !== undefined) return "NODE_SHELL_REFUSED: sandbox";
+  const wantsShell = value.sandbox === "danger-full-access" || config["features.shell_tool"] === true || features.shell_tool === true;
+  if (!wantsShell) return undefined;
+  if (!shell) return "NODE_SHELL_REFUSED: shell";
+  if (value.approvalPolicy !== "untrusted" || (value.approvalsReviewer !== undefined && value.approvalsReviewer !== "user")) return "NODE_SHELL_REFUSED: approval";
+  if (!inTaskDir(value.cwd, shell.tasksRoot)) return "NODE_SHELL_REFUSED: cwd";
   return undefined;
 }
 
@@ -133,10 +168,12 @@ const PATH_KEYS = new Set(["cwd", "cwds", "marketplacePath", "runtimeWorkspaceRo
  * A request as the node's runtime gets it: server paths mapped (`cwd`, `cwds`, a marketplace path, workspace roots), and a provider's
  * `base_url` pointed at the node's relay instead of the server's loopback gateway.
  */
-export function rewriteParams(params: unknown, map: { roots: string[]; mirror: string; work: string; gateway?: string; relay?: string }): unknown {
+export function rewriteParams(params: unknown, map: { roots: string[]; mirror: string; work: string; gateway?: string; relay?: string; keep?: string }): unknown {
   const walk = (value: unknown, key: string): unknown => {
     if (typeof value === "string") {
       if (key === "base_url" && map.gateway && map.relay && value.startsWith(map.gateway)) return map.relay + value.slice(map.gateway.length);
+      // A path already on this computer (a shell run's task directory, checked by `refusal`) stays as it is.
+      if (map.keep && (value === map.keep || value.startsWith(map.keep + path.sep) || value.startsWith(`${map.keep}/`))) return value;
       return PATH_KEYS.has(key) && value.startsWith("/") ? nodePath(value, map.roots, map.mirror, map.work) : value;
     }
     if (Array.isArray(value)) return value.map((item) => walk(item, key));

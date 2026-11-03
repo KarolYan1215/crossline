@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, expect, test } from "vitest";
 import { startModelGateway, type GatewayUpstream } from "./model-gateway";
+import { breakdownOfResponsesUsage, flushMeteredUsage, recordMeteredUsage, setUsageSink, takeMeteredUsage, type SkillUsage } from "./usage";
 
 /**
  * Real sockets on both sides: an upstream on 127.0.0.1 that answers like a provider, and the gateway in front of it. What is checked is
@@ -179,4 +180,31 @@ test("a refused upstream is answered as an error without contacting it, and an u
   expect((await post()).status).toBe(307);
   expect(redirecting.seen).toHaveLength(1);
   expect(target.seen).toHaveLength(0);
+});
+
+test("方案 C: a route says whose it is, and tokens a node run spent are taken by the run or billed on their own", async () => {
+  const started = await gateway(() => undefined);
+  const route = new URL(started.urlFor("ws-a", "sponsor")).pathname;
+  expect(started.workspaceOfPath(`${route}/responses`)).toBe("ws-a");
+  expect(started.workspaceOfPath(`${route}/models?x=1`)).toBe("ws-a");
+  expect(started.workspaceOfPath(`${route}/chat/completions`)).toBeUndefined();
+  expect(started.workspaceOfPath(`/${"f".repeat(32)}/responses`)).toBeUndefined();
+
+  const rows: SkillUsage[] = [];
+  setUsageSink((usage) => rows.push(usage));
+  try {
+    const tokens = breakdownOfResponsesUsage({ input_tokens: 100, input_tokens_details: { cached_tokens: 40 }, output_tokens: 20,
+      output_tokens_details: { reasoning_tokens: 5 }, total_tokens: 120 })!;
+    expect(tokens).toEqual({ inputTokens: 100, cachedInputTokens: 40, outputTokens: 20, reasoningOutputTokens: 5, totalTokens: 120 });
+    recordMeteredUsage({ threadId: "t1", workspaceId: "ws-a" }, tokens, 0);
+    recordMeteredUsage({ threadId: "t1", workspaceId: "ws-a" }, tokens, 10);
+    expect(takeMeteredUsage("t1").totalTokens).toBe(240);
+    expect(takeMeteredUsage("t1").totalTokens).toBe(0);
+    // A request that named no thread (or one no run takes) is still billed, once it has been quiet half an hour.
+    recordMeteredUsage({ workspaceId: "ws-a", skill: "crossline-step-planner", model: "m1" }, tokens, 0);
+    flushMeteredUsage(30 * 60_000, 10 * 60_000);
+    expect(rows).toHaveLength(0);
+    flushMeteredUsage(30 * 60_000, 31 * 60_000);
+    expect(rows).toEqual([expect.objectContaining({ workspaceId: "ws-a", skillName: "crossline-step-planner", model: "m1", totalTokens: 120, purpose: "node_unclaimed" })]);
+  } finally { setUsageSink(undefined); }
 });

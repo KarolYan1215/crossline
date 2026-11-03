@@ -1,6 +1,6 @@
 // i18n-exempt: the compute node's own words, shown by the standalone node program (bundled alone, without the catalogues; Chinese only)
 import { createHash } from "node:crypto";
-import { cpus, totalmem } from "node:os";
+import { cpus, homedir, totalmem } from "node:os";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { hostname } from "node:os";
@@ -8,6 +8,7 @@ import path from "node:path";
 import WebSocket from "ws";
 import { BROWSER_CHUNK_BYTES, CLOSE_WORDS, NODE_CAPACITY_MAX, marketplaceRoot, nodePath, NODE_PROTOCOL, parseFrame, refusal, rewriteParams, turnImages, underRoots, withLocalImages, type NodeFrame } from "./protocol";
 import type { BrowserOp, NodeBrowsers } from "./browser";
+import { handleTaskOp, type TaskFileOp } from "./task-files";
 
 /**
  * The computer's end of the compute node (docs/compute-node.md). On the person's switch (the local `/device` page) a linked device also
@@ -17,7 +18,8 @@ import type { BrowserOp, NodeBrowsers } from "./browser";
  *
  * What it does not take on trust: methods outside the runners' set and any shell or full access are refused (`refusal`), server paths are
  * mapped into this computer's mirror and work directories (`rewriteParams`), and a plugin's files are fetched from the server's skill roots
- * only, before it is installed.
+ * only, before it is installed. With the person's own switch (`shell`, off by default) the server's assistant may also run commands here, in
+ * task directories under `<dir>/tasks` (task-files.ts), every command not on the runtime's short harmless list answered by the server's guard.
  */
 /** `codex app-server` as raw JSON lines: the linked device's (`local-runtime.ts`) or the standalone node's own (`standalone.ts`). */
 export type AppServerLines = { write: (line: string) => void; onLine: (handler: (line: string) => void) => void; onExit: (handler: () => void) => void; stop: () => void };
@@ -44,6 +46,8 @@ export type NodeAgentOptions = {
   livenessMs?: number;
   /** The readers' browsers on this computer (browser.ts): offered to the server when a Chrome or Edge is here. */
   browsers?: NodeBrowsers;
+  /** 「允许在这台电脑上执行命令（shell 助手）」: the person's switch on this computer, off unless set. */
+  shell?: boolean;
 };
 
 /**
@@ -82,7 +86,9 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
   const backoff = options.backoffMs ?? [5_000, 15_000, 60_000, 300_000];
   const mirror = path.join(options.dir, "mirror");
   const work = path.join(options.dir, "work");
+  const tasksRoot = path.join(options.dir, "tasks");
   mkdirSync(work, { recursive: true });
+  const shell = options.shell === true ? { tasksRoot } : undefined;
   let status: NodeAgentStatus = { state: "connecting", since: new Date().toISOString() };
   const setStatus = (state: NodeAgentStatus["state"], message?: string, code?: string) => {
     status = { state, since: new Date().toISOString(), ...(code ? { code } : {}), ...(message ? { message } : {}) };
@@ -165,7 +171,8 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
         .then((agent) => {
           runtime?.write(JSON.stringify({ method: "initialized" }));
           send({ t: "hello", protocol: NODE_PROTOCOL, codex: agent, platform: process.platform, host: (options.host ?? hostname()).slice(0, 60),
-            role: options.role, capacity: options.capacity ?? nodeCapacity(), ...(options.browsers?.available ? { browser: true } : {}) });
+            role: options.role, capacity: options.capacity ?? nodeCapacity(), ...(options.browsers?.available ? { browser: true } : {}),
+            ...(shell ? { shell: true, tasks: tasksRoot, home: homedir() } : {}) });
         });
     });
     socket.on("message", (raw) => {
@@ -182,6 +189,12 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
       }
       if (frame.t === "rpc") { chain = chain.then(() => fromServer(frame.line)).catch(() => undefined); return; }
       if (frame.t === "browser") { browsing = browsing.then(() => browse(frame.id, frame.request)).catch(() => undefined); return; }
+      if (frame.t === "task") {
+        if (!shell) { send({ t: "task-answer", id: frame.id, error: "NODE_SHELL_OFF" }); return; }
+        try { send({ t: "task-answer", id: frame.id, result: handleTaskOp(tasksRoot, frame.request as TaskFileOp) }); }
+        catch (error) { send({ t: "task-answer", id: frame.id, error: error instanceof Error ? error.message.slice(0, 200) : "NODE_TASK_FAILED" }); }
+        return;
+      }
       if (frame.t === "files-answer") { files.get(frame.id)?.(frame); files.delete(frame.id); return; }
       if (frame.t === "image-answer") { images.get(frame.id)?.(frame); images.delete(frame.id); return; }
       if (frame.t === "gw-head") { const pending = gw.get(frame.id); pending?.response.writeHead(frame.status, frame.headers); return; }
@@ -215,7 +228,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
       if (typeof message.method !== "string") { runtime.write(line); return; }
       // Notifications from the server have nothing to say to this runtime (it was initialized here).
       if (message.id === undefined) return;
-      const why = refusal(message.method, message.params);
+      const why = refusal(message.method, message.params, shell);
       if (why) { toServer(JSON.stringify({ id: message.id, error: { code: -32601, message: why } })); log({ type: "node.refused_request", method: message.method, why }); return; }
       const params = (message.params ?? {}) as { marketplacePath?: unknown };
       if (message.method === "plugin/install" && typeof params.marketplacePath === "string" && underRoots(params.marketplacePath, roots)) {
@@ -236,7 +249,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
       await relayReady;
       if (!runtime) return;
       runtime.write(JSON.stringify({ id: message.id, method: message.method,
-        params: rewriteParams(turnParams, { roots, mirror, work, ...(gateway ? { gateway } : {}), ...(relayOrigin ? { relay: relayOrigin } : {}) }) }));
+        params: rewriteParams(turnParams, { roots, mirror, work, ...(gateway ? { gateway } : {}), ...(relayOrigin ? { relay: relayOrigin } : {}), ...(shell ? { keep: tasksRoot } : {}) }) }));
     }
 
     /** One operation of the reader's browser here, answered; a picture or video goes first in pieces. */

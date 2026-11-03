@@ -51,6 +51,59 @@ export function createUsageCollector() {
 }
 export type UsageCollector = ReturnType<typeof createUsageCollector>;
 
+/**
+ * Tokens this server's gateway counted for a thread run on someone's compute node (docs/compute-node.md, 方案 C): a node's own
+ * `thread/tokenUsage/updated` is the person's computer speaking and may be wrong, so a provider run on a node is billed by what the
+ * gateway saw it spend (keyed by the request's `prompt_cache_key`, which Codex sets to the thread id). Taken once by the run that ends.
+ */
+type Metered = { tokens: TokenBreakdown; workspaceId: string; skill?: string; model?: string; updatedAt: number };
+const metered = new Map<string, Metered>();
+const METERED_MAX = 2_000;
+export function recordMeteredUsage(key: { threadId?: string; workspaceId: string; skill?: string; model?: string }, tokens: TokenBreakdown, now = Date.now()): void {
+  // No thread named: kept under the account, so it is still billed (by `flushMeteredUsage`), only not beside a run.
+  const id = key.threadId || `?${key.workspaceId}`;
+  const entry = metered.get(id) ?? { tokens: emptyBreakdown(), workspaceId: key.workspaceId, updatedAt: now,
+    ...(key.skill ? { skill: key.skill } : {}), ...(key.model ? { model: key.model } : {}) };
+  for (const name of Object.keys(entry.tokens) as Array<keyof TokenBreakdown>) entry.tokens[name] += tokens[name];
+  entry.updatedAt = now;
+  metered.delete(id);
+  metered.set(id, entry);
+  if (metered.size > METERED_MAX) flushOne(metered.keys().next().value!, now);
+}
+export function takeMeteredUsage(threadId: string | undefined): TokenBreakdown {
+  if (!threadId) return emptyBreakdown();
+  const entry = metered.get(threadId);
+  metered.delete(threadId);
+  return entry?.tokens ?? emptyBreakdown();
+}
+function flushOne(id: string, now: number): void {
+  const entry = metered.get(id);
+  metered.delete(id);
+  if (!entry) return;
+  try {
+    usageSink?.({ workspaceId: entry.workspaceId, skillName: entry.skill || "node-relay", ...(entry.model ? { model: entry.model } : {}), spendMode: "normal",
+      ok: true, repairs: 0, turns: 0, durationMs: 0, at: new Date(now).toISOString(), purpose: "node_unclaimed", ...entry.tokens });
+  } catch { /* accounting never fails the work */ }
+}
+/**
+ * Metered tokens no run took (a thread quiet this long, or a request that named no thread or a made-up one) are billed as rows of their
+ * own, so a node cannot spend unbilled by changing what its requests say. A long run's thread keeps being updated and is not touched.
+ */
+export function flushMeteredUsage(maxIdleMs: number, now = Date.now()): void {
+  for (const [id, entry] of [...metered]) if (now - entry.updatedAt >= maxIdleMs) flushOne(id, now);
+}
+/** A Responses `usage` object (as `response.completed` carries it) as a breakdown. */
+export function breakdownOfResponsesUsage(usage: unknown): TokenBreakdown | undefined {
+  if (!usage || typeof usage !== "object") return undefined;
+  const value = usage as Record<string, unknown>;
+  const n = (raw: unknown) => typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? raw : 0;
+  const detail = (key: string, sub: string) => n((value[key] as Record<string, unknown> | undefined)?.[sub]);
+  const inputTokens = n(value.input_tokens);
+  const outputTokens = n(value.output_tokens);
+  return { inputTokens, cachedInputTokens: detail("input_tokens_details", "cached_tokens"), outputTokens,
+    reasoningOutputTokens: detail("output_tokens_details", "reasoning_tokens"), totalTokens: n(value.total_tokens) || inputTokens + outputTokens };
+}
+
 let usageSink: ((usage: SkillUsage) => void) | undefined;
 /** Where finished runs are reported. A sink that throws never fails a run. */
 export function setUsageSink(sink: ((usage: SkillUsage) => void) | undefined): void { usageSink = sink; }

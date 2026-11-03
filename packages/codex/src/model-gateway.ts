@@ -62,7 +62,14 @@ const retryAfterMs = (answer: Response): number | undefined => {
   const at = Date.parse(value);
   return Number.isFinite(at) ? Math.max(0, at - Date.now()) : undefined;
 };
-export type ModelGateway = { urlFor: (workspaceId: string, providerId: string) => string; port: number; close: () => Promise<void> };
+export type ModelGateway = { urlFor: (workspaceId: string, providerId: string) => string; port: number; close: () => Promise<void>;
+  /**
+   * The workspace a request path (`/<route>/responses|models`) was made for, or undefined: what the compute node hub checks before it
+   * relays a node's request, so one account's computer cannot spend through another account's route (docs/compute-node.md, 方案 C).
+   */
+  workspaceOfPath: (path: string) => string | undefined };
+/** A gateway request path: the HMAC route, then one of the two endpoints Codex calls. */
+export const GATEWAY_PATH = /^\/([a-f0-9]{32})\/(responses|models)$/;
 
 async function readBody(request: IncomingMessage, maxBytes: number): Promise<string | undefined> {
   const chunks: Buffer[] = [];
@@ -164,7 +171,7 @@ export async function startModelGateway(options: {
   let counter = 0;
 
   const server = createServer(async (request, response) => {
-    const match = /^\/([a-f0-9]{32})\/(responses|models)$/.exec((request.url ?? "").split("?")[0] ?? "");
+    const match = GATEWAY_PATH.exec((request.url ?? "").split("?")[0] ?? "");
     const route = match ? routes.get(match[1]!) : undefined;
     const upstream = route ? await options.resolve(route.workspaceId, route.providerId) : undefined;
     if (!match || !route || !upstream) return json(response, 404, { error: { message: "unknown route" } });
@@ -293,6 +300,7 @@ export async function startModelGateway(options: {
   return {
     port,
     urlFor: (workspaceId, providerId) => `http://127.0.0.1:${port}/${routeOf(workspaceId, providerId)}`,
+    workspaceOfPath: (path) => { const match = GATEWAY_PATH.exec(path.split("?")[0] ?? ""); return match ? routes.get(match[1]!)?.workspaceId : undefined; },
     close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); })
   };
 }

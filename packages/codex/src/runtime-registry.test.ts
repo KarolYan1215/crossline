@@ -175,3 +175,27 @@ test("a saved login is read from auth.json without starting anything: an API key
   expect(registry.savedAccount("ws-owner")).toBeNull();
   expect(started).toHaveLength(0);
 });
+
+test("方案 C: a guest with no sign-in here is connected through its own computer, never another account's", async () => {
+  const nodeAsked: string[] = [];
+  const node = { id: "standalone:pc", capacity: 2, priority: 1,
+    client: { request: async (method: string) => { nodeAsked.push(method); return {}; }, onNotification: () => () => {} } };
+  const owner = fakeSidecar("owner");
+  const started: ReturnType<typeof fakeSidecar>[] = [];
+  const registry = createRuntimeRegistry({ owner, ownerWorkspaceId: () => "ws-owner", baseDir: dir,
+    nodes: (workspaceId) => workspaceId === "ws-guest" ? [node] : [],
+    start: async (home) => { const sidecar = fakeSidecar(home); started.push(sidecar); return sidecar; } });
+  expect(registry.connected("ws-guest")).toBe(true);
+  expect(registry.connected("ws-stranger")).toBe(false);
+  expect(registry.handle("ws-guest").ok).toBe(true);
+  const result = await registry.client("ws-guest");
+  if (!result.ok) throw new Error("not connected");
+  const pool = result.client as typeof result.client & { bindRun: () => { member: string } };
+  // No runtime of its own was started: the node answers, and runs are bound to it.
+  await pool.request("account/read", {});
+  expect(nodeAsked).toEqual(["account/read"]);
+  expect(pool.bindRun().member).toBe("standalone:pc");
+  expect(registry.poolLoad("ws-guest")).toEqual({ "standalone:pc": 1 });
+  expect(started).toHaveLength(0);
+  expect(registry.current("ws-guest")).toBe(pool);
+});
