@@ -9,7 +9,8 @@
 .voice-button[data-voice="recording"] svg{animation:voice-pulse 1.2s ease-in-out infinite}
 @keyframes voice-pulse{50%{opacity:.45}}
 
-.voice-panel{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:80;
+/* Above every other fixed layer — the notice toast (130) and the full-screen helper (200) covered its buttons on a phone (2026-11-02). */
+.voice-panel{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:210;
   display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;width:min(560px,calc(100vw - 32px));box-sizing:border-box;padding:10px 12px;
   border:1px solid var(--ds-line,var(--line));border-radius:12px;background:var(--ds-card,var(--paper));color:var(--ink);
   box-shadow:0 8px 28px rgb(0 0 0 / .16);font-size:14px;line-height:1.5}

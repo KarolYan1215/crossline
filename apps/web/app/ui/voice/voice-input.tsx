@@ -377,9 +377,10 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
 
   useEffect(() => {
     if (phase !== "recording" && phase !== "notice" && phase !== "model") return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); cancel(); } };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    // On the window while capturing, ahead of a dialog's own Escape (Radix listens on the document), so Esc stops the dictation only.
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancel(); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [cancel, phase]);
   useEffect(() => () => { cancelRef.current(); lexicon.current?.(); window.clearTimeout(hideTimer.current); }, []);
 
@@ -440,7 +441,8 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
     <IconButton className={`voice-button ${className}`.trim()} label={recording ? t("结束语音输入") : t("语音输入")} icon={<Mic {...ICON} />}
       tone={recording ? "alarm" : "plain"} aria-pressed={recording} data-voice={phase} onPointerDown={onPointerDown} onPointerUp={onPointerUp}
       onPointerLeave={onPointerUp} onClick={onClick} />
-    {panel && createPortal(panel, document.body)}
+    {/* Inside the dialog the box is in: a modal dialog makes everything outside it unclickable and closes on a click there. */}
+    {panel && createPortal(panel, target()?.closest<HTMLElement>("[role='dialog']") ?? document.body)}
   </>;
 }
 
