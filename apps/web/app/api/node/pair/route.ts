@@ -1,5 +1,5 @@
 import { resolveAccessContext } from "../../../../lib/access-guard";
-import { pollPairing, startPairing, unpairNode } from "../../../../lib/node-pairing";
+import { clientAddress, pollPairing, startPairing, unpairNode } from "../../../../lib/node-pairing";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
 /**
@@ -10,8 +10,7 @@ import { isCrossSiteWrite } from "../../../../lib/same-origin";
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return Response.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
   const body = await request.json().catch(() => ({})) as { host?: unknown; os?: unknown; version?: unknown; shell?: unknown };
-  const address = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
-  const started = startPairing(address, body);
+  const started = startPairing(clientAddress(request), body);
   return Response.json(started, { status: started.ok ? 200 : 429 });
 }
 

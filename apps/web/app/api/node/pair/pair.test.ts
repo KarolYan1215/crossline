@@ -96,6 +96,12 @@ test("a code nobody asked for is refused, codes expire, and one address cannot a
   try { expect(await ask(later.id)).toEqual({ state: "expired" }); expect((await type(later.code)).status).toBe(404); } finally { vi.useRealTimers(); }
 });
 
+test("the address counted is the hop Caddy appended, not whatever the client put first", async () => {
+  for (let i = 0; i < 12; i += 1) expect((await begin(`10.0.0.${i}, 198.51.100.30`)).ok).toBe(true);
+  expect((await begin("10.0.0.99, 198.51.100.30")).ok).toBe(false);
+  expect((await begin("198.51.100.30, 198.51.100.31")).ok).toBe(true);
+});
+
 test("an IPv6 /64 counts as one address, and addresses quiet for an hour are forgotten", async () => {
   expect(addressKey("2001:db8:1:2:aaaa::1")).toBe("2001:db8:1:2::/64");
   expect(addressKey("2001:0db8:0001:0002:ffff:ffff:ffff:ffff")).toBe("2001:db8:1:2::/64");

@@ -43,6 +43,15 @@ export function addressKey(address: string): string {
   return `${groups.slice(0, 4).map((group) => (group || "0").replace(/^0+(?=.)/, "")).join(":")}::/64`;
 }
 
+/**
+ * The address that connected, as the hosted beta's Caddy saw it: Caddy appends the peer to `X-Forwarded-For` and Next fills the header
+ * from the socket only when it is absent, so the right-most entry is the real one and anything before it is the client's own words
+ * (the same rule as the public test's `clientIp`, apps/assess/server/security.ts).
+ */
+export function clientAddress(request: Request): string {
+  return request.headers.get("x-forwarded-for")?.split(",").map((part) => part.trim()).filter(Boolean).pop() || "local";
+}
+
 /** Expired pairings go, and so does every address whose last code is over an hour old: the count map no longer grows forever. */
 const sweep = (now: number) => {
   for (const [id, pairing] of pairings) if (pairing.expiresAt <= now) pairings.delete(id);
