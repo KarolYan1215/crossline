@@ -10,7 +10,7 @@ import {
 import { runCodexSkill, webResearchBlocker, withUsagePurpose, type CodexRpcBoundary } from "@crossline/codex";
 import {
   doneTitles, exploreThisWeek, noteWatchRun, opportunityCosts, readWatchList, readWatchTuning, recordOpportunityOutcome, rejudgeOpportunities,
-  saveLineWatches, startConfirmedFor, type CrosslineStore
+  nodeComputeOn, saveLineWatches, startConfirmedFor, type CrosslineStore
 } from "@crossline/db";
 import { readLineSpecs } from "@crossline/identity-packs";
 import { parse as parseYaml } from "yaml";
@@ -461,7 +461,7 @@ export function addMailCandidate(store: CrosslineStore, workspaceId: string, can
  * beta's owner since 2026-11-03), never a guest.
  */
 export function opportunityAgentOn(store: CrosslineStore, workspaceId: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  return runtimeOwner(store, env) === workspaceId;
+  return runtimeOwner(store, env) === workspaceId || nodeComputeOn(store, workspaceId);
 }
 
 /**

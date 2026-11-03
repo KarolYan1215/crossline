@@ -8,7 +8,7 @@ import {
   type LessEntry, type LessReason, type OpportunityOutcome, type StoredWatch, type WatchTarget
 } from "@crossline/core";
 import {
-  addPersonWatch, assistantAvailable, decideWatch, editWatch, isScoutFind, lessLog, lessOpportunity, opportunityCosts, outcomesOf, queueFormRun,
+  addPersonWatch, assistantAvailable, decideWatch, nodeComputeOn, editWatch, isScoutFind, lessLog, lessOpportunity, opportunityCosts, outcomesOf, queueFormRun,
   readFormRuns, readWatchList, readWatchTuning, recordApplicationResult, recordEligibilityAnswer, recordOpportunityOutcome, setWatchState,
   surfacedOpportunities, undoLessEntry, watchOf, type StoredOpportunity, type WatchEdit
 } from "@crossline/db";
@@ -23,7 +23,7 @@ import { answerClash, clashOptions, holdEventTime, judgeOpportunity, spaceLines 
  * The web side of the opportunity agent (docs/opportunity-agent.md §5, §8, §17): the cards for proposed watches (盯住 / 不要), for each
  * opportunity the person qualifies for or might (报名 / 申请 / 加入计划 / 少来 / 不要 / 以后再说), a registration's progress while the form
  * filler works on it, the result of an application once its deadline passed — and what each answer writes. Then the watches on the line
- * card, the settings table and the weekly review's 视野外. Everything exists only in the machine owner's workspace (the worker runs
+ * card, the settings table and the weekly review's 视野外. Everything exists only in the machine owner's workspace and accounts that paired their own computer (the worker runs
  * watches only there), so no card appears anywhere else.
  */
 
@@ -32,9 +32,12 @@ const daysUntil = (today: string, day: string) => Math.round((Date.parse(`${day}
 const short = (text: string, length = 40) => text.length > length ? `${text.slice(0, length)}…` : text;
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 
-/** The machine owner's workspace, the hosted beta's included: where the worker runs watches and the form filler works (§0). */
+/**
+ * The machine owner's workspace, the hosted beta's included, and any account that paired its own computer as a compute node
+ * (docs/compute-node.md 方案 C): where the worker runs watches and the form filler works (§0).
+ */
 export const opportunityOwner = (ctx: AccessContext): boolean =>
-  getStore().getSetting(ctx.workspaceId, RUNTIME_OWNER_SETTING) === "1" || assistantAvailable(getStore(), ctx.workspaceId);
+  getStore().getSetting(ctx.workspaceId, RUNTIME_OWNER_SETTING) === "1" || assistantAvailable(getStore(), ctx.workspaceId) || nodeComputeOn(getStore(), ctx.workspaceId);
 
 /** Where a watch looks, in the person's words. */
 export function targetLabel(target: WatchTarget, t: ReturnType<typeof tFor>): string {

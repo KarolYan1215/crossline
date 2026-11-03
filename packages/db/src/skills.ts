@@ -249,6 +249,15 @@ export function nodeShellHost(store: CrosslineStore, workspaceId: string): strin
   } catch { return undefined; }
 }
 
+/**
+ * Whether this account paired its own computer as a compute node and switched it on (docs/compute-node.md 方案 C): then its external
+ * errands — the opportunity agent and its registration forms, the favourites reader — run in that computer's browser, connected or
+ * waiting for it. The last click of a submission, a payment or a send stays the person's in that window.
+ */
+export function nodeComputeOn(store: CrosslineStore, workspaceId: string): boolean {
+  return store.getSetting(workspaceId, NODE_COMPUTE_SETTING) === "on";
+}
+
 /** The person names a tool they use (「剪映：自动字幕、粗剪」); returns it, or undefined for an empty name. */
 export function addAiTool(store: CrosslineStore, workspaceId: string, input: { name: string; kind: string; goodFor: string }): AiTool | undefined {
   const current = readPersonAiTools(store.getSetting(workspaceId, AI_TOOLS_SETTING));

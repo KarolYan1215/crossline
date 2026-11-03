@@ -9,7 +9,7 @@ import { containerMemory, containerPeak, createCollectMemory, heldMemory } from 
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes, nodeComputeOn } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { closeInterruptedCollections, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
 import { workflowImprovePass } from "./workflow-improver";
@@ -499,7 +499,7 @@ async function publicSkillPass(workspaceId: string, checkedAt: string, offPeakWa
 }
 
 /**
- * The opportunity agent (docs/opportunity-agent.md §17), on the machine owner's workspace only. Every tick, without a model: outcomes the
+ * The opportunity agent (docs/opportunity-agent.md §17), on the machine owner's workspace and accounts that paired their own computer as a node. Every tick, without a model: outcomes the
  * ledger shows by itself are written and quiet watches retired. Then, while core work may: one line's watches derived when due (its
  * setup, a changed goal or milestones, a node it reached, monthly), and up to two due watches run. The weekly scout starts through the
  * assistant when discretionary work may and exploration has not had its share. Planning work: it stops with the 规划 pause. Detached, so
@@ -1249,9 +1249,10 @@ const accountClient = (workspaceId: string) => {
 // site where this computer has a screen; on the hosted server, in the browser of the owner's connected compute node (§10.1).
 const formService = createFormService({ store: analysisStore, secrets, cwd: repoRoot, dataDir, client: accountClient,
   owner: () => runtimeOwner(analysisStore), screen: loginMode() === "local",
+  // Any account that paired its own computer fills forms in that computer's browser (docs/compute-node.md 方案 C).
+  nodeAccount: (workspaceId) => nodeComputeOn(analysisStore, workspaceId),
   // nodeHub is created further down; read before that (a pass at start-up) it is not there yet.
   nodeBrowser: (workspaceId) => {
-    if (workspaceId !== runtimeOwner(analysisStore)) return undefined;
     try { return nodeHub?.browserFor(workspaceId); } catch { return undefined; }
   },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
@@ -1283,8 +1284,8 @@ setInterval(() => dictationService.sweep(), 60_000).unref();
 const classifyTopics = createTopicClassifier(analysisStore, repoRoot, (workspaceId) => accountClient(workspaceId));
 configureFavouritesCollector({
   outputRoot: defaultOutputRoot(),
-  // The owner's computer reads the favourites when a node of theirs offers a browser (node/browser.ts); the hub is set up further down.
-  nodeBrowser: (workspaceId) => workspaceId === runtimeOwner(analysisStore) ? nodeHub?.browserFor(workspaceId) : undefined,
+  // The account's own computer reads the favourites when a node of theirs offers a browser (node/browser.ts); the hub is set up further down.
+  nodeBrowser: (workspaceId) => { try { return nodeHub?.browserFor(workspaceId); } catch { return undefined; } },
   reclaim: () => codexSupervisor?.runtimes?.reclaim(),
   memory: createCollectMemory({ reclaim: () => codexSupervisor?.runtimes?.reclaim() }),
   // Sorting the titles is the person's own request at work: it runs while the quota allows core work.
@@ -1319,7 +1320,12 @@ const remoteBrowsers = loginMode() === "remote" ? createRemoteBrowsers({
 configureRemoteLogin(remoteBrowsers);
 if (remoteBrowsers) setInterval(() => { void remoteBrowsers.sweep().catch(() => undefined); }, 30_000).unref();
 // A form window waiting for the person is watched every half minute (their own submission, a closed window), not at the 15-minute tick.
-setInterval(() => { const owner = runtimeOwner(analysisStore); if (owner) void formService.pass(owner).catch(() => undefined); }, 30_000).unref();
+setInterval(() => {
+  const owner = runtimeOwner(analysisStore);
+  for (const workspace of analysisStore.listWorkspaces()) {
+    if (workspace.id === owner || nodeComputeOn(analysisStore, workspace.id)) void formService.pass(workspace.id).catch(() => undefined);
+  }
+}, 30_000).unref();
 const agentService = createAgentService({
   // The owner's assistant (tools mode on the hosted site) runs through the pool too: its nodes add room for more at once.
   concurrency: (workspaceId) => workspaceConcurrency(workspaceId),
