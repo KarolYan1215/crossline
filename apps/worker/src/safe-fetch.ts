@@ -84,9 +84,36 @@ export function arxivPdfAddress(address: string): string {
   return match ? `https://arxiv.org/pdf/${match[1]}` : address;
 }
 
-/** The readable text of a downloaded page, without markup, scripts or styles. */
+const HIDDEN = /(?:^|\s)hidden(?=\s|=|\/|$)|aria-hidden\s*=\s*["']?true|style\s*=\s*["'][^"']*(display\s*:\s*none|visibility\s*:\s*hidden)/i;
+const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+/**
+ * The page without the elements a person cannot see (`hidden`, `aria-hidden="true"`, inline `display:none`/`visibility:hidden`): text there
+ * is written for a machine, the place a page's injected instructions sit (D6 of docs/opportunity-agent.md §17.9).
+ */
+export function withoutHidden(html: string): string {
+  const tag = /<(\/?)([a-zA-Z][\w-]*)([^>]*)>/g;
+  let out = "", from = 0, skip: { name: string; depth: number } | undefined;
+  for (let match = tag.exec(html); match; match = tag.exec(html)) {
+    const [whole, close, rawName, attrs] = match;
+    const name = rawName!.toLowerCase();
+    const selfClosing = VOID.has(name) || /\/\s*$/.test(attrs!);
+    if (skip) {
+      if (name === skip.name && !selfClosing) skip.depth += close ? -1 : 1;
+      if (skip.depth === 0) { skip = undefined; from = match.index + whole.length; }
+      continue;
+    }
+    if (!close && HIDDEN.test(attrs!)) {
+      out += html.slice(from, match.index);
+      from = match.index + whole.length;
+      if (!selfClosing) skip = { name, depth: 1 };
+    }
+  }
+  return skip ? out : out + html.slice(from);
+}
+
+/** The readable text of a downloaded page, without markup, scripts, styles or hidden elements. */
 export function htmlToText(html: string): string {
-  return html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<noscript[\s\S]*?<\/noscript>/gi, " ")
+  return withoutHidden(html).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<noscript[\s\S]*?<\/noscript>/gi, " ")
     .replace(/<\/(p|div|li|h\d|tr|br)>/gi, "\n").replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
     .replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();

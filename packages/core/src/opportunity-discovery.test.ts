@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   OPPORTUNITY_READING_SCHEMA, aiDeadlines, applicantFrom, ccfddlDeadlines, checkReadItem, degreeStageOf, devpostHackathons,
   eligibilityAnswer, judgeEligibility, mergeNeeds, needFromProposal, nextMonthDay, opportunityFromRead, opportunityKey,
-  parsePostings, prepStartFor, termSlot, validateOpportunityReading,
+  carriesPersonData, parsePostings, phishingSigns, prepStartFor, quoteYearAgrees, readItemUnusable, termSlot, validateOpportunityReading,
   type EligibilityTerm, type ProposedNeed, type ReadItem, type StoredNeed
 } from "./opportunity-discovery";
 import { structuredOutputProblems } from "./structured-output";
@@ -83,6 +83,16 @@ describe("reading a page", () => {
     expect(fee.item.cost.known).toBe(false);
   });
 
+  it("keeps an earlier cycle's date out and takes a moved deadline's current day (D4, D7)", () => {
+    const lastYear = "The 2025 cohort closed on December 1, 2025. Dates for 2026 will be announced.";
+    const old = checkReadItem(item({ deadlines: [{ day: "2026-12-01", quote: "The 2025 cohort closed on December 1, 2025" }] }), lastYear);
+    expect(old.item.deadlines).toEqual([]);
+    expect(quoteYearAgrees("2026-12-01", "December 1")).toBe(true);
+    const extended = "The application deadline has been extended: originally October 30, 2026, now November 14, 2026.";
+    const moved = checkReadItem(item({ deadlines: [{ day: "2026-10-30", quote: "originally October 30, 2026" }] }), extended);
+    expect(moved.item.deadlines.map((deadline) => deadline.day)).toEqual(["2026-11-14"]);
+  });
+
   it("sends a misquote back to the reader, naming the opening", () => {
     const pages = new Map([["p1", page]]);
     expect(validateOpportunityReading({ items: [item()], blocked: "" }, pages).items).toHaveLength(1);
@@ -94,6 +104,8 @@ describe("reading a page", () => {
     const a = opportunityKey("https://jobs.example.org/a", "Summer Internship 2027", [{ day: "2026-12-01", quote: "" }, { day: "2026-11-01", quote: "" }]);
     const b = opportunityKey("https://JOBS.example.org/b", "summer internship", [{ day: "2026-11-01", quote: "" }]);
     expect(a).toBe(b);
+    // One event announced as 「'26」 on Devpost and 「2026」 in a mail is one key (D3).
+    expect(opportunityKey("https://hack.devpost.com/", "Lakeshore Hack '26", [])).toBe(opportunityKey("https://hack.devpost.com/?utm_source=x", "Lakeshore Hack 2026", []));
     const opportunity = opportunityFromRead(item(), { lineId: "research", needId: "need:research:x", foundVia: "web", foundAt: "2026-11-01T00:00:00Z", idOf: (key) => `opp-${key.length}` });
     expect(opportunity).toMatchObject({ registrationHost: "jobs.example.org", cost: { amount: 0 }, eligibility: [{ dim: "degree_stage", quote: "Open to current graduate students" }] });
   });
@@ -123,10 +135,35 @@ describe("eligibility, judged by code", () => {
     expect(judgeEligibility([term()], undergrad)).toMatchObject({ state: "ineligible", failed: [{ dim: "degree_stage" }] });
     expect(judgeEligibility([term()], applicantFrom([])).state).toBe("unknown");
     const country = term({ dim: "citizenship", rule: "美国公民", accepts: { kind: "one_of", values: ["United States"], min: -1, max: -1 } });
-    expect(judgeEligibility([country], applicantFrom([fact("apply.citizenship", "中国")])).state).toBe("unknown");
+    expect(judgeEligibility([country], applicantFrom([fact("apply.citizenship", "中国")])).state).toBe("ineligible");
+    expect(judgeEligibility([country], applicantFrom([fact("apply.citizenship", "Kazakhstan")])).state).toBe("unknown");
     const age = term({ dim: "age", rule: "18–25 岁", accepts: { kind: "range", values: [], min: 18, max: 25 } });
     expect(judgeEligibility([age], applicantFrom([fact("apply.age", "30")])).state).toBe("ineligible");
     expect(judgeEligibility([age], applicantFrom([fact("apply.age", "24")])).state).toBe("eligible");
+  });
+
+  it("compares citizenship and region by country, however each side spells it (D2)", () => {
+    const us = term({ dim: "citizenship", rule: "U.S. citizens only", accepts: { kind: "one_of", values: ["United States", "U.S. citizen", "US citizen"], min: -1, max: -1 } });
+    expect(judgeEligibility([us], applicantFrom([fact("apply.citizenship", "China")]))).toMatchObject({ state: "ineligible", failed: [{ dim: "citizenship" }] });
+    expect(judgeEligibility([us], applicantFrom([fact("apply.citizenship", "美国")])).state).toBe("eligible");
+    expect(judgeEligibility([us], applicantFrom([fact("apply.citizenship", "USA")])).state).toBe("eligible");
+    const orResident = term({ dim: "citizenship", rule: "U.S. citizens or permanent residents", accepts: { kind: "one_of", values: ["U.S. citizen", "U.S. permanent resident"], min: -1, max: -1 } });
+    expect(judgeEligibility([orResident], applicantFrom([fact("apply.citizenship", "China")])).state).toBe("unknown");
+    const eu = term({ dim: "region", rule: "Applicants must reside in an EU member state", accepts: { kind: "one_of", values: ["European Union", "EU member state"], min: -1, max: -1 } });
+    expect(judgeEligibility([eu], applicantFrom([fact("apply.country", "United States")])).state).toBe("ineligible");
+    expect(judgeEligibility([eu], applicantFrom([fact("apply.country", "Germany")])).state).toBe("eligible");
+    const euText = term({ dim: "region", rule: "居住于欧盟成员国", accepts: { kind: "text", values: [], min: -1, max: -1 } });
+    expect(judgeEligibility([euText], applicantFrom([fact("apply.country", "德国")])).state).toBe("eligible");
+    expect(judgeEligibility([euText], applicantFrom([fact("apply.country", "Madison, Wisconsin, United States")])).state).toBe("ineligible");
+  });
+
+  it("does not ask about a clause that restricts nothing, and reads any STEM field from the record (D9)", () => {
+    const open = term({ dim: "other", rule: "Open to the public", accepts: { kind: "text", values: [], min: -1, max: -1 } });
+    expect(judgeEligibility([open], applicantFrom([])).state).toBe("eligible");
+    const stem = term({ dim: "field", rule: "Students in any STEM discipline", accepts: { kind: "text", values: [], min: -1, max: -1 } });
+    expect(judgeEligibility([stem], applicantFrom([fact("apply.major", "Computer Engineering")])).state).toBe("eligible");
+    expect(judgeEligibility([stem], applicantFrom([fact("apply.major", "Art History")])).state).toBe("unknown");
+    expect(judgeEligibility([stem], applicantFrom([])).state).toBe("unknown");
   });
 
   it("settles a free-text term by the person's own yes or no", () => {
@@ -183,5 +220,28 @@ describe("sources read without a model", () => {
   it("works back the start of preparation from a deadline", () => {
     expect(prepStartFor("2026-12-01", 30)).toBe("2026-11-01");
     expect(prepStartFor(undefined, 30)).toBeUndefined();
+  });
+});
+
+describe("what is never read or requested", () => {
+  it("screens phishing-shaped mail and keeps ordinary announcements (D5)", () => {
+    expect(phishingSigns("You have been selected for the Global Research Award. To claim, reply with your passport number and phone number.")).toEqual(["asks_for_identifiers", "prize_claim"]);
+    expect(phishingSigns("Lakeshore Hack '26 is now open! Submissions due November 22, 2026. Free to enter.")).toEqual([]);
+    expect(phishingSigns("You have been selected for an interview. Please pick a time on the scheduling page.")).toEqual([]);
+  });
+
+  it("refuses an address carrying the person's name or email (D6)", () => {
+    const ids = ["Qiao Lin", "qiao.lin@lakeshore.example"];
+    expect(carriesPersonData("https://collect.evil.example/beacon?u=qiao", ids)).toBe(true);
+    expect(carriesPersonData("https://x.example/?e=qiao.lin%40lakeshore.example", ids)).toBe(true);
+    expect(carriesPersonData("https://quickhire.example/winter-intern", ids)).toBe(false);
+    expect(carriesPersonData("https://lab.example/linear-algebra", ids)).toBe(false);
+  });
+
+  it("marks an opening of a past round and a quote from nowhere on the page as unusable (D4, D6)", () => {
+    const lastYear = "The 2025 cohort closed applications on December 1, 2025.";
+    expect(checkReadItem(item({ deadlines: [{ day: "2026-12-01", quote: lastYear }] }), lastYear).problems).toContain("earlier_cycle");
+    expect(checkReadItem(item({ deadlines: [{ day: "2027-12-31", quote: "The deadline is December 31, 2027." }] }), page).problems).toContain("quote_absent");
+    expect(readItemUnusable(checkReadItem(item(), page).problems)).toBe(false);
   });
 });
