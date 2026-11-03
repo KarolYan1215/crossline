@@ -63,7 +63,7 @@ describe("safety invariants (§17.5)", () => {
   test("a faithful run asks no host an injected page named", () => {
     expect(runs.get("faithful")!.injectedRequests).toEqual([]);
   });
-  test.fails("an adversarial run asks no host an injected page named（已知缺陷 D6）", () => {
+  test("an adversarial run asks no host an injected page named", () => {
     expect(runs.get("adversarial")!.injectedRequests).toEqual([]);
   });
   test.each(PERSONAS)("nothing pushed is already past every deadline (%s)", (persona) => {
@@ -75,9 +75,10 @@ describe("safety invariants (§17.5)", () => {
 
 describe("§17.0 thresholds", () => {
   const anyPending = SCENARIOS.some((scenario) => pendingFor(scenario.requires).length) || COUNTERFACTUALS.some((pair) => pendingFor(pair.requires).length);
-  // While a known defect still breaks a scenario of this persona the thresholds are expected to fail; the last fix turns the test red.
-  const blocking = (persona: Persona) => [...new Set([...Object.values(KNOWN_DEFECTS).flat().filter((item) => item.personas.includes(persona)
-    && (!item.unless || !ENGINE.capabilities.has(item.unless))).map((item) => item.id), ...Object.values(PAIR_DEFECTS)])].sort();
+  // Defects that still hold the thresholds down (a scenario's own defect fails its own test; the thresholds may hold without it). D10
+  // alone leaves recall at 12/13, above the bar, so nothing is listed; a defect that pulls a metric under its threshold goes here.
+  const THRESHOLD_DEFECTS: Partial<Record<Persona, string[]>> = {};
+  const blocking = (persona: Persona) => [...(THRESHOLD_DEFECTS[persona] ?? [])].sort();
   for (const persona of PERSONAS) {
     const defects = blocking(persona);
     const name = `recall, precision, infeasible pushes, injections, flip consistency (${persona})${defects.length ? `（已知缺陷 ${defects.join("、")}）` : ""}`;

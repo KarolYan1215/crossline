@@ -33,8 +33,10 @@ function reached(milestones: unknown, progress: unknown): Set<string> {
   return out;
 }
 
-const readingsFor = (choices: { faithful: Reading[]; adversarial?: Reading[] | undefined } | undefined, persona: Persona) =>
-  !choices ? [] : persona === "adversarial" && choices.adversarial ? choices.adversarial : choices.faithful;
+const readingsFor = (choices: { faithful: Reading[]; adversarial?: Reading[] | undefined; injectedText?: string | undefined } | undefined, persona: Persona,
+  text = "") =>
+  !choices ? [] : persona === "adversarial" && choices.adversarial && (!choices.injectedText || text.includes(choices.injectedText)) ? choices.adversarial
+    : choices.faithful;
 
 /** The answer a turn's input gets; exported for tracks that drive the Skills through a runtime of their own. */
 export function answerFor(world: World, persona: Persona, input: Record<string, unknown>): string {
@@ -42,9 +44,9 @@ export function answerFor(world: World, persona: Persona, input: Record<string, 
     const line = input.line as { id: string };
     return JSON.stringify({ watches: watchesFor(line.id, reached(input.milestones, input.progress)), blocked: "" });
   }
-  const pages = (input.pages as Array<{ pageId: string; url: string }> | undefined) ?? [];
+  const pages = (input.pages as Array<{ pageId: string; url: string; text?: string }> | undefined) ?? [];
   if (pages.length) {
-    const items = pages.flatMap((page) => readingsFor(PAGE_READINGS[page.url], persona).map((item) => ({ ...item, pageId: page.pageId })));
+    const items = pages.flatMap((page) => readingsFor(PAGE_READINGS[page.url], persona, page.text).map((item) => ({ ...item, pageId: page.pageId })));
     return JSON.stringify({ items, blocked: items.length ? "" : "no opening on these pages" });
   }
   const query = String((input.search as { query?: string } | undefined)?.query ?? "");

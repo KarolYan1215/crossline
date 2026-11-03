@@ -1,4 +1,5 @@
 import { quoteSupportsDate } from "./date-schema";
+import { countryKey } from "./feasibility";
 import { tFor, type Locale } from "./i18n";
 import { ELIGIBILITY_DIMS, type ApplicationSlot, type DatedQuote, type EligibilityDim, type EligibilityRule, type EligibilityVerdict, type NeedSource, type Opportunity,
   type OpportunityNeed } from "./opportunity";
@@ -138,22 +139,95 @@ export type ReadingAnswer = { items: ReadItem[]; blocked: string };
 export const squashText = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 const quotedIn = (quote: string, text: string) => Boolean(quote.trim()) && squashText(text).includes(squashText(quote));
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * The day's year agrees with the quote: a quote that names years names this one (「the 2025 cohort closed on December 1, 2025」 is not
+ * 2026-12-01, D4). A quote naming no year leaves the year to the reader, as before.
+ */
+export function quoteYearAgrees(day: string, quote: string): boolean {
+  const years = quote.match(/(?<!\d)(19|20)\d{2}(?!\d)/g);
+  return !years || years.includes(day.slice(0, 4));
+}
+const datedQuote = (item: DatedQuote, pageText: string) =>
+  DAY.test(item.day) && quotedIn(item.quote, pageText) && quoteSupportsDate(item.day, item.quote) && quoteYearAgrees(item.day, item.quote);
+
+// i18n-ignore: words read from pages
+const MOVED = /extend|postpone|originally|moved|now due|push(ed)? back|延长|延期|推迟|改为|延至|顺延/i;
+const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+/**
+ * A deadline the page says was moved (「originally October 30, 2026, now November 14, 2026」), read as the later day its own sentence names
+ * after the quoted one (D7): a reader that copied only the old day no longer makes a live opening look closed.
+ */
+function movedDeadline(item: DatedQuote, pageText: string): DatedQuote {
+  const sentence = pageText.split(/(?<=[.!?。！？])\s+|\n+/).find((part) => squashText(part).includes(squashText(item.quote)));
+  if (!sentence || !MOVED.test(sentence)) return item;
+  for (let n = 1; n <= 366; n += 1) {
+    const day = addDays(item.day, n);
+    if (quoteSupportsDate(day, sentence) && quoteYearAgrees(day, sentence)) return { day, quote: sentence.trim().slice(0, 300) };
+  }
+  return item;
+}
 
 /**
- * Checks one read item against the text it was read from, as code: every deadline quote is in the page and names its day, the cost's quote
- * is in the page, and every eligibility term quotes the page. A term that does not quote the page makes the item unusable (dropping the
- * term would make the opportunity look open to the person when it may not be); a deadline that does not is dropped on its own.
+ * Checks one read item against the text it was read from, as code: every deadline quote is in the page and names its day (and its year,
+ * when it names one), the cost's quote is in the page, and every eligibility term quotes the page. A term that does not quote the page
+ * makes the item unusable (dropping the term would make the opportunity look open to the person when it may not be); a deadline that does
+ * not is dropped on its own; a deadline the page says was moved is read as its new day. Two problems make the item unusable as well:
+ * `quote_absent`, a deadline or fee quoting text that is nowhere on the page (the reader read something else, or text hidden from a person:
+ * D6), and `earlier_cycle`, every deadline it gave dated by the page in an earlier year than claimed and none left (an opening of a past
+ * round: D4).
  */
 export function checkReadItem(item: ReadItem, pageText: string): { item: ReadItem; problems: string[] } {
   const problems: string[] = [];
-  const deadlines = item.deadlines.filter((deadline) => DAY.test(deadline.day) && quotedIn(deadline.quote, pageText) && quoteSupportsDate(deadline.day, deadline.quote));
+  const deadlines = item.deadlines.filter((deadline) => datedQuote(deadline, pageText)).map((deadline) => movedDeadline(deadline, pageText));
   if (deadlines.length < item.deadlines.length) problems.push("deadline_unquoted");
-  const startsAt = DAY.test(item.startsAt.day) && quotedIn(item.startsAt.quote, pageText) && quoteSupportsDate(item.startsAt.day, item.startsAt.quote)
-    ? item.startsAt : { day: "", quote: "" };
+  const absent = [...item.deadlines, item.startsAt].some((dated) => dated.quote.trim() && !quotedIn(dated.quote, pageText))
+    || (item.cost.known && !quotedIn(item.cost.quote, pageText));
+  if (absent) problems.push("quote_absent");
+  const earlier = item.deadlines.filter((deadline) => DAY.test(deadline.day) && quotedIn(deadline.quote, pageText) && !quoteYearAgrees(deadline.day, deadline.quote)
+    && (deadline.quote.match(/(?<!\d)(19|20)\d{2}(?!\d)/g) ?? []).every((year) => year < deadline.day.slice(0, 4)));
+  if (earlier.length && !deadlines.length) problems.push("earlier_cycle");
+  const startsAt = datedQuote(item.startsAt, pageText) ? item.startsAt : { day: "", quote: "" };
   const cost = item.cost.known && !quotedIn(item.cost.quote, pageText) ? { known: false, amount: 0, currency: "", quote: "" } : item.cost;
   if (item.cost.known && !cost.known) problems.push("cost_unquoted");
   if (item.eligibility.some((term) => !quotedIn(term.quote, pageText))) problems.push("eligibility_unquoted");
   return { item: { ...item, deadlines, startsAt, cost }, problems };
+}
+
+/** Problems that make a read item unusable: it is not what its page says (a misquoted term, a quote from elsewhere, a past round). */
+export const UNUSABLE_READ = ["eligibility_unquoted", "quote_absent", "earlier_cycle"] as const;
+export const readItemUnusable = (problems: string[]) => UNUSABLE_READ.some((problem) => problems.includes(problem));
+
+/* i18n-ignore-start */
+const ASKS_FOR_SECRET = /\b(passport|social security|ssn|bank account|card number|credit card|password|pin|phone number|id number|verification code)\b|护照|身份证|银行卡|密码|手机号|验证码/i;
+const HANDS_OVER = /\b(reply with|send (us )?your|provide your|confirm your|verify your|enter your|submit your)\b|回复|提供|发送|填写/i;
+const PRIZE_CLAIM = /\b(to claim|claim (your|the) (prize|award|reward|winnings))\b|领取(奖|奖金|奖品)/i;
+const PRIZE = /\b(you have been selected for|you('ve| have) won|you are a winner)\b|恭喜(您|你)(获得|中奖|入选)|中奖/i;
+/* i18n-ignore-end */
+/**
+ * Why a mail filed as an opportunity looks like phishing (D5), by rule: it asks for a secret identifier to be handed over by mail, or it
+ * announces a prize to be claimed. A real programme collects identifiers in its own form, never by reply; such a mail is never read,
+ * kept or followed (its link is not opened either).
+ */
+export function phishingSigns(text: string): string[] {
+  const signs: string[] = [];
+  if (ASKS_FOR_SECRET.test(text) && HANDS_OVER.test(text)) signs.push("asks_for_identifiers");
+  if (PRIZE.test(text) && PRIZE_CLAIM.test(text)) signs.push("prize_claim");
+  return signs;
+}
+
+/**
+ * Whether an address a model named carries the person's identifiers in its path or query (「beacon?u=qiao」, D6). Crossline never requests
+ * such an address: that request is the person's data leaving for wherever the text the model read pointed.
+ */
+export function carriesPersonData(url: string, identifiers: string[]): boolean {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return false; }
+  let rest = `${parsed.pathname} ${parsed.search} ${parsed.hash}`;
+  try { rest = decodeURIComponent(rest); } catch { /* keep as is */ }
+  const lower = rest.toLowerCase();
+  const words = new Set(lower.split(/[^\p{L}\p{N}@._+-]+/u).flatMap((word) => [word, ...word.split(/[._+-]/)]).filter(Boolean));
+  return identifiers.map((value) => value.trim().toLowerCase()).filter((value) => value.length >= 3)
+    .some((value) => (value.includes("@") ? lower.includes(value) || words.has(value.split("@")[0]!) : value.split(/\s+/).some((part) => part.length >= 3 && words.has(part))));
 }
 
 /** Repair messages to the reader (model-facing). Only what a second turn can fix: a misquote of a page the run was given. */
@@ -181,7 +255,8 @@ export function validateOpportunityReading(value: unknown, pages: Map<string, st
 }
 
 export const hostOf = (url: string) => { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } };
-const normalTitle = (title: string) => squashText(title).replace(/\b(20\d\d|19\d\d)\b/g, "").replace(/\s+/g, " ").trim();
+/** A title without its year, however written (「2026」, 「'26」): one event announced two ways is one key (D3). */
+const normalTitle = (title: string) => squashText(title.replace(/['’]\d{2}(?!\d)/g, " ")).replace(/\b(20\d\d|19\d\d)\b/g, "").replace(/\s+/g, " ").trim();
 /** One opportunity across sources: host + normalized title + first deadline (contract's `Opportunity.key`). */
 export const opportunityKey = (url: string, title: string, deadlines: DatedQuote[]) =>
   `${hostOf(url)}|${normalTitle(title)}|${[...deadlines].map((item) => item.day).sort()[0] ?? ""}`;
@@ -275,6 +350,70 @@ const NUMERIC: EligibilityDim[] = ["year", "graduation_year", "age", "team_size"
 const numberIn = (text: string) => { const match = /\d+(\.\d+)?/.exec(text); return match ? Number(match[0]) : undefined; };
 const same = (a: string, b: string) => { const x = squashText(a), y = squashText(b); return Boolean(x && y) && (x === y || x.includes(y) || y.includes(x)); };
 
+// i18n-ignore-start: words read from pages and facts, never shown
+const EU = ["at", "be", "bg", "hr", "cy", "cz", "dk", "ee", "fi", "fr", "de", "gr", "hu", "ie", "it", "lv", "lt", "lu", "mt", "nl", "pl", "pt", "ro", "sk", "si", "es", "se"];
+const EEA = [...EU, "is", "li", "no"];
+const COUNTRY_GROUPS: Record<string, string[]> = { eu: EU, "european union": EU, 欧盟: EU, eea: EEA, "european economic area": EEA, 欧洲经济区: EEA };
+/** Words around a country name in a clause or a fact ("U.S. citizens", 「居住于欧盟成员国」), dropped before the name is keyed. */
+const COUNTRY_NOISE = /\b(citizens?|citizenship|nationals?|nationality|passport holders?|residing|reside|residents?|living|based|located|in|of|from|an?|the|any|member states?|countries|country|only)\b|公民|国籍|居住于|居住在|居民|成员国|国家|地区|仅限|籍/gi;
+/** Residency is not citizenship: a citizenship clause that also admits residents cannot be settled by the person's citizenship alone. */
+const RESIDENCY = /permanent resident|green card|lawful|asylee|refugee|daca|永久居民|绿卡|难民/i;
+const STEM_FIELD = /engineer|comput|electrical|science|math|physic|chemi|biolog|statist|data|robot|工程|计算机|电子|电气|数学|物理|化学|生物|统计|数据|理工/i;
+const OPEN_TO_ALL = /open to (the )?(general )?(public|everyone|all|anyone)|anyone (may|can)|no (eligibility )?restrictions?|向公众开放|面向公众|对所有人开放|任何人都?可/i;
+const ANY_FIELD = /\bany (field|discipline|major|background|subject)s?\b|\ball (fields|disciplines|majors|backgrounds)\b|不限专业|任意专业|任何专业/i;
+const ANY_STEM = /\b(any|all)\s+stem\b|stem (field|discipline|major)s?|任意 ?stem|任何 ?stem/i;
+// i18n-ignore-end
+
+/**
+ * The countries a clause or a fact names, as keys ("U.S. citizen" → us; 「欧盟成员国」 → the 27). Every piece must name a known country or
+ * group, or there is no answer: an unrecognised word is a question, never a refusal.
+ */
+export function countriesIn(text: string): Set<string> | undefined {
+  const pieces = text.toLowerCase().split(/,|;|\/|\bor\b|\band\b|、|，|或|和|及/)
+    .map((piece) => piece.replace(COUNTRY_NOISE, " ").replace(/[()（）]/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (!pieces.length) return undefined;
+  const out = new Set<string>();
+  for (const piece of pieces) {
+    const group = COUNTRY_GROUPS[piece];
+    if (group) { for (const code of group) out.add(code); continue; }
+    const code = countryKey(piece);
+    if (!/^[a-z]{2}$/.test(code)) return undefined;
+    out.add(code);
+  }
+  return out;
+}
+/** The one country a person's fact names: the last piece that keys as one ("Madison, Wisconsin, United States" → us). */
+function personCountry(value: string): string | undefined {
+  for (const piece of value.split(/,|，/).reverse()) {
+    const found = countriesIn(piece);
+    if (found?.size === 1) return [...found][0];
+  }
+  return undefined;
+}
+/**
+ * Citizenship and region compared by country, from what the clause accepts or, for a clause the reader gave as text, from its own words:
+ * the person's country outside every accepted one is a clear no (D2), spellings of one country are one key.
+ */
+function countryMeets(term: EligibilityTerm, value: string): boolean | undefined {
+  const sources = term.accepts.kind === "text" || !term.accepts.values.length ? [term.rule] : term.accepts.values;
+  if (term.dim === "citizenship" && [term.rule, ...sources].some((item) => RESIDENCY.test(item))) return undefined;
+  const accepted = new Set<string>();
+  for (const item of sources) {
+    const found = countriesIn(item);
+    if (!found) return undefined;
+    for (const code of found) accepted.add(code);
+  }
+  const mine = personCountry(value);
+  if (!mine || !accepted.size) return undefined;
+  return accepted.has(mine);
+}
+/** A clause that restricts nothing ("open to the public", 「不限专业」) is met by anyone; "any STEM discipline" by a STEM field on record. */
+function broadMeets(term: EligibilityTerm, applicant: Applicant): boolean {
+  if (OPEN_TO_ALL.test(term.rule) || ANY_FIELD.test(term.rule)) return true;
+  return ANY_STEM.test(term.rule) && STEM_FIELD.test(applicant.field?.value ?? "");
+}
+const COUNTRY_DIMS: EligibilityDim[] = ["citizenship", "region"];
+
 /** The question put to the person for a term the ledger cannot settle, in their language. */
 export function eligibilityQuestion(term: EligibilityTerm, locale?: Locale): string {
   const t = tFor(locale);
@@ -288,7 +427,7 @@ export const ELIGIBILITY_DIM_LABEL: Record<EligibilityDim, string> = {
 
 /**
  * The verdict on an opportunity's terms (§7), by code: every term met → eligible; one no fact can settle → unknown, with its question; one
- * clearly not met → ineligible. A free-text dimension (country, school, field) that does not match is a question, never a refusal: two
+ * clearly not met → ineligible. Citizenship and region are compared by country key; a school or field that does not match is a question, never a refusal: two
  * spellings of one country must not turn the person away.
  */
 export function judgeEligibility(terms: EligibilityTerm[], applicant: Applicant, locale?: Locale): EligibilityVerdict {
@@ -303,9 +442,11 @@ export function judgeEligibility(terms: EligibilityTerm[], applicant: Applicant,
       else failed.push({ dim: term.dim, rule: term.rule, why: t("本人确认不满足") });
       continue;
     }
+    if (broadMeets(term, applicant)) { basis.push({ dim: term.dim, ...(term.dim === "field" && applicant.field ? { factId: applicant.field.factId } : {}) }); continue; }
     const known = term.dim === "other" ? undefined : applicant[term.dim];
-    if (!known || term.accepts.kind === "text" || term.dim === "other") { questions.push({ dim: term.dim, question: eligibilityQuestion(term, locale) }); continue; }
-    const met = meets(term, known.value);
+    const byCountry = COUNTRY_DIMS.includes(term.dim);
+    if (!known || (term.accepts.kind === "text" && !byCountry) || term.dim === "other") { questions.push({ dim: term.dim, question: eligibilityQuestion(term, locale) }); continue; }
+    const met = byCountry ? countryMeets(term, known.value) : meets(term, known.value);
     if (met === true) basis.push({ dim: term.dim, factId: known.factId, ...(known.slot ? { slot: known.slot } : {}) });
     else if (met === false) failed.push({ dim: term.dim, rule: term.rule, why: t("记录为「{{value}}」", { value: known.value.slice(0, 60) }) });
     else questions.push({ dim: term.dim, question: eligibilityQuestion(term, locale) });
