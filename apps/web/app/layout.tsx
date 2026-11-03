@@ -16,6 +16,7 @@ import "./shell.css";
 import "./mobile.css";
 import { isLocalInstall } from "../lib/install-mode";
 import { PageBeacon } from "./page-beacon";
+import { LinkTargets } from "./link-targets";
 import { htmlLang, tFor } from "../lib/i18n";
 import { getLocale } from "../lib/locale";
 import { LocaleProvider } from "./locale-context";
@@ -58,7 +59,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // The page's nonce (proxy.ts): without it the rules would be inline script the policy refuses. None in `local` mode, where no policy is sent.
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   return <html lang={htmlLang(locale)}>
-    <body><LocaleProvider locale={locale}>{children}{isLocalInstall() && <PageBeacon />}</LocaleProvider>
+    <body><LocaleProvider locale={locale}>{children}<LinkTargets />{isLocalInstall() && <PageBeacon />}</LocaleProvider>
       <script type="speculationrules" nonce={nonce} dangerouslySetInnerHTML={{ __html: SPECULATION_RULES }} />
     </body>
   </html>;

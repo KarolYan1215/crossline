@@ -35,7 +35,8 @@ test("an ask that takes the person's own words has the input in place, its place
   const html = card({ ...base, freeText: { placeholder: "例如：今年投出一篇 ISCA 论文" } });
   expect(html).toContain('<textarea rows="1" maxLength="4000" placeholder="例如：今年投出一篇 ISCA 论文" data-user-text="true"');
   expect(html).not.toContain("<dialog");
-  expect(card(base)).not.toContain("<textarea");
+  // Every card has the box (2026-11-03); without freeText its words go to the input box about this ask.
+  expect(card(base)).toContain('placeholder="直接写答案或想法"');
 });
 
 test("an option with required follow-up fields opens them in the card, not in a dialog, and links stay links", () => {

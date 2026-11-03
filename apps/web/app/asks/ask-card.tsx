@@ -13,6 +13,9 @@ import { useLocale, useT } from "../locale-context";
 import { entryDay } from "../task/format";
 import "./asks.css";
 import { VoiceField } from "../ui/voice/voice-input";
+import { Markdown } from "../ui/markdown";
+import { CardView } from "../chat/conversation";
+import type { MessageView } from "../../lib/conversation";
 
 const URGENCY: Record<Ask["urgency"], string> = { now: "今天要答", soon: "这周", later: "不急" };
 
@@ -86,7 +89,22 @@ export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask
     if (result?.ok) { onDone(ask.id); return; }
     setStatus(answerProblem(result?.code, locale));
   };
-  const submit = (optionIds: string[]) => void send("/api/asks/answer", answerBody(ask.id, optionIds, values, note, seconds()));
+  const [reply, setReply] = useState<MessageView>();
+  // Words with no option on an ask that takes none (2026-11-03): they go to the input box's conversation about this ask,
+  // whose answer — and any card of actions, `ask.answer` included — shows under the card.
+  const say = async () => {
+    setBusy(true); setStatus(t("处理中…"));
+    const response = await fetch("/api/conversation/turn", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: note.trim(), mentions: [], page: { kind: "ask", entityId: ask.id }, files: [] }) }).catch(() => undefined);
+    const body = await response?.json().catch(() => undefined) as { messages?: MessageView[] } | undefined;
+    setBusy(false);
+    const answer = response?.ok ? body?.messages?.find((message) => message.role !== "person") : undefined;
+    if (!answer) { setStatus(t("没有发出去，稍后再试")); return; }
+    setStatus(""); setNote(""); setReply(answer);
+  };
+  const submit = (optionIds: string[]) => !optionIds.length && !ask.freeText
+    ? void say()
+    : void send("/api/asks/answer", answerBody(ask.id, optionIds, values, note, seconds()));
   const initials = (options: AskOption[]) => Object.fromEntries(options.flatMap((option) => option.fields ?? [])
     .filter((field) => field.initial).map((field) => [field.id, field.initial!]));
 
@@ -173,13 +191,17 @@ export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask
         onChange={(value) => setValues((current) => ({ ...current, [field.id]: value }))} />)}
     </div>}
 
-    {ask.freeText && <label className="ak-free"><span className="sr-only">{t("用自己的话回答")}</span>
-      <VoiceField kind="note"><textarea ref={noteRef} rows={1} value={note} maxLength={4000} placeholder={ask.freeText.placeholder} data-user-text
+    <label className="ak-free"><span className="sr-only">{t("用自己的话回答")}</span>
+      <VoiceField kind="note"><textarea ref={noteRef} rows={1} value={note} maxLength={4000} placeholder={ask.freeText?.placeholder ?? t("直接写答案或想法")} data-user-text
         onChange={(event) => setNote(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && note.trim()) { event.preventDefault(); submit(picked); }
         }} /></VoiceField>
-    </label>}
+    </label>
+    {reply && <div className="return-say-reply">
+      {reply.text && <div className="gen"><Markdown text={reply.text} /></div>}
+      {reply.card && <CardView messageId={reply.id} card={reply.card} choices={null} onUpdate={setReply} />}
+    </div>}
 
     {(many || fields.length > 0 || waitsForNote || note.trim() || (keyed && picked.length > 0)) && <div className="execution-actions ak-submit">
       <button type="button" className="primary-button" disabled={busy || (!picked.length && !note.trim()) || (waitsForNote && !note.trim())} onClick={confirm}>

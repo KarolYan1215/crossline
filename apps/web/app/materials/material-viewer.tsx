@@ -75,7 +75,7 @@ export function MaterialViewer({ src, name, aside, generated = false, size = "pa
           <button type="button" aria-pressed={original} onClick={() => setOriginal(true)}>{t("原版式")}</button>
         </span>}
         <span className="mv-actions">
-          {(pdf || kind === "image") && <a href={src} target="_blank" rel="noreferrer">{t("新窗口打开")}</a>}
+          {(pdf || kind === "image") && <a href={src} target="_blank" rel="noreferrer" data-new-tab>{t("新窗口打开")}</a>}
           <a href={withQuery(src, "download", "1")} download={name}>{t("下载原文件")}</a>
         </span>
       </header>

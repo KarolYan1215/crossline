@@ -103,7 +103,8 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
   const forecast = (() => { try { return loadGoalForecast(ctx).goals; } catch { return []; } })();
   const titles = new Map(milestones.map((item) => [item.id, item.title]));
   const pageOrder = page.kind === "task" ? orders.find((order) => order.id === page.entityId) : undefined;
-  const pageTitle = pageOrder ? taskTitleOf(pageOrder) : page.kind === "milestone" ? titles.get(page.entityId) ?? "" : page.kind === "line" ? labels[page.entityId] ?? "" : page.entityId;
+  const pageTitle = pageOrder ? taskTitleOf(pageOrder) : page.kind === "milestone" ? titles.get(page.entityId) ?? "" : page.kind === "line" ? labels[page.entityId] ?? ""
+    : page.kind === "ask" ? openAsks(ctx, now).find((ask) => ask.id === page.entityId)?.title ?? page.entityId : page.entityId;
   const profiles = (() => { try { return JSON.parse(store.getSetting(ctx.workspaceId, LINE_PROFILES_SETTING) ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   return {
     now: now.toISOString(), today, timeZone, page: { ...page, title: pageTitle },
