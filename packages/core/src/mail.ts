@@ -79,23 +79,30 @@ export function appPasswordPage(address: string, locale?: Locale): AppPasswordPa
     hint: t("Gmail 不收 Google 登录密码。在打开的页面里起个名字（如 Crossline）并创建，把显示的 16 位密码粘贴到上面，空格可以带着。") };
 }
 
-/** `opportunity`: an event, competition, programme or opening the person could sign up or apply for (docs/opportunity-agent.md §6). */
-export type MailTriageKind = "todo" | "date" | "reply" | "transaction" | "opportunity" | "info" | "ignore";
+/**
+ * `opportunity`: an event, competition, programme or opening the person could sign up or apply for (docs/opportunity-agent.md §6).
+ * `travel`: a booking confirmation (flight, train, hotel) of a future trip, read into `trip` with the mail's own sentence (§17.6 c).
+ */
+export type MailTriageKind = "todo" | "date" | "reply" | "transaction" | "opportunity" | "travel" | "info" | "ignore";
 export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply", string> = { todo: "待办", date: "日期", reply: "回复了等待项", transaction: "记账",
-  opportunity: "机会", info: "知悉", ignore: "略过", needs_reply: "需要回复" };
+  opportunity: "机会", travel: "行程", info: "知悉", ignore: "略过", needs_reply: "需要回复" };
+/** Where a booking takes the person: city and country, the first and last day there, and the sentence of the mail that says so. */
+export type MailTrip = { city: string; country: string; from: string; to: string; quote: string };
 /**
  * `money` is filled for any mail about money (docs/mail-bookkeeping.md §4.1): which event it is, and the amount, currency, merchant, day,
  * order numbers and card digits exactly as the mail shows them. Code books only the events where money moved, and checks every field
  * against the mail's own text (`moneyEventFromMail`); `event` "" and the rest empty when the mail is not about money.
  */
-export type MailTriage = { items: Array<{ uid: number; kind: MailTriageKind; title: string; waitingId: string; why: string; money: MoneyReading }> };
+export type MailTriage = { items: Array<{ uid: number; kind: MailTriageKind; title: string; waitingId: string; why: string; money: MoneyReading;
+  /** Filled for `travel`, empty strings otherwise; optional here only for answers recorded before it existed. */
+  trip?: MailTrip }> };
 
 export const MAIL_TRIAGE_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items"], properties: {
     items: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false,
-      required: ["uid", "kind", "title", "waitingId", "why", "money"], properties: {
+      required: ["uid", "kind", "title", "waitingId", "why", "money", "trip"], properties: {
       uid: { type: "integer", minimum: 1 },
-      kind: { type: "string", enum: ["todo", "date", "reply", "transaction", "opportunity", "info", "ignore"] },
+      kind: { type: "string", enum: ["todo", "date", "reply", "transaction", "opportunity", "travel", "info", "ignore"] },
       title: { type: "string", maxLength: 140 },
       waitingId: { type: "string", maxLength: 128 },
       why: { type: "string", maxLength: 200 },
@@ -110,7 +117,10 @@ export const MAIL_TRIAGE_SCHEMA = {
         occurredOn: { type: "string", maxLength: 10 },
         refs: { type: "array", maxItems: 4, items: { type: "string", maxLength: 60 } },
         last4: { type: "string", maxLength: 4 },
-        instrument: { type: "string", enum: [...MONEY_INSTRUMENTS] } } } } } } }
+        instrument: { type: "string", enum: [...MONEY_INSTRUMENTS] } } },
+      trip: { type: "object", additionalProperties: false, required: ["city", "country", "from", "to", "quote"], properties: {
+        city: { type: "string", maxLength: 80 }, country: { type: "string", maxLength: 60 },
+        from: { type: "string", maxLength: 10 }, to: { type: "string", maxLength: 10 }, quote: { type: "string", maxLength: 300 } } } } } } }
 } as const;
 
 /**
@@ -133,6 +143,12 @@ export function validateMailTriage(value: unknown, uids: number[], waitingIds: s
       problems.push(`uid ${item.uid} 的 waitingId「${item.waitingId}」不是正在等的事项（需要本人回复、不是在等的回信时 waitingId 留空）`);
     }
     if (item.money && BOOKABLE_EVENTS.includes(item.money.event) && !(item.money.amount > 0)) problems.push(`uid ${item.uid} 的 money.event 是 ${item.money.event} 却没有 amount`);
+    if (item.kind === "travel") {
+      const trip = item.trip;
+      if (!trip?.city.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(trip.from) || !/^\d{4}-\d{2}-\d{2}$/.test(trip.to) || trip.to < trip.from || !trip.quote.trim()) {
+        problems.push(`uid ${item.uid} 是行程却缺 trip：city、from 与 to（YYYY-MM-DD，to 不早于 from）和邮件原文 quote 都要有`);
+      }
+    }
   }
   if (problems.length) throw Object.assign(new Error("MAIL_TRIAGE_INVALID"), { detail: problems.slice(0, 6).join("；") });
   return answer;

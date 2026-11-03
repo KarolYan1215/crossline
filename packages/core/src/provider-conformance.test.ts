@@ -72,7 +72,8 @@ test("admission: one repair on a critical schema keeps that Skill out; a failure
 });
 
 test("admission: under 90% overall, only critical Skills that passed every run remain", () => {
-  const runs = allPassing().map((item, index) => index % 5 === 0 && !["MILESTONE_GATE_OUTPUT_SCHEMA", "ANALYSIS_OUTPUT_SCHEMA"].includes(item.caseId) ? { ...item, ok: false } : item);
+  // Every fifth run fails, and every other critical schema too, so the result does not hang on where a schema sits in the list.
+  const runs = allPassing().map((item, index) => (index % 5 === 0 || item.caseId === "FORM_CHECK_SCHEMA") && !["MILESTONE_GATE_OUTPUT_SCHEMA", "ANALYSIS_OUTPUT_SCHEMA"].includes(item.caseId) ? { ...item, ok: false } : item);
   const record = summarizeConformance(base, runs);
   expect(record.passRate).toBeLessThan(0.9);
   expect(admittedSkills(record).sort()).toEqual(["crossline-automation-stripper", "crossline-milestone-gate"]);

@@ -123,7 +123,8 @@ async function live(k: number) {
         if (!urls.size) continue;
         for (const url of urls) addMailCandidate(ctx.store, ctx.workspaceId, { key: `live:${url}`, lineId: watch.lineId, subject: "", from: "",
           text: htmlToText(ctx.world.pages.get(url)!.body), url, at: now.toISOString() });
-        await runWatch(ctx.store, ctx.workspaceId, { ...watch, targets: [] }, { client: () => supervisor.client as never, cwd: repoRoot, now: () => now });
+        await runWatch(ctx.store, ctx.workspaceId, { ...watch, targets: [] }, { client: () => supervisor.client as never, cwd: repoRoot, now: () => now,
+          ...(harness.feasibilityOf ? { feasibility: harness.worldFeasibility(ctx, harness.feasibilityOf) } : {}) });
       }
     }
   });

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  MAIL_ACCOUNTS_SETTING, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
+  MAIL_ACCOUNTS_SETTING, MAIL_TRIPS_SETTING, mailTripPlace, readMailTrips, withMailTrip, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
   isMailReminderTitle, linksFromMail, mailLinksKey, mailMessageKey, moneyEventFromMail, senderName, MAIL_CHECK_NUDGE_KIND, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage,
   type MoneyReading
 } from "@crossline/core";
@@ -200,6 +200,9 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       + "advisories, incidents, CI or deploy results, terms changes) unless they name the person's own resource and a day to act; ignore for promotions, digests, cold pitches, a company's survey or feedback invitation (only one from the person's own course, employer or collaborator is todo), spam and phishing. "
       + "opportunity for an event, competition, programme, fellowship or opening the person could sign up or apply for (not one they already "
       + "signed up for, and not a newsletter that lists many); its title is the opportunity's name. "
+      + "travel for a booking confirmation of the person's own future trip (flight, train, hotel): trip.city and trip.country where they will be, "
+      + "trip.from and trip.to the first and last day there (YYYY-MM-DD; a flight alone is from = to = its arrival day), trip.quote one sentence "
+      + "copied exactly from the mail that names the place and a day. Any other kind has every trip field empty. "
       + "transaction for a mail whose money already moved (a payment made or received, a receipt, a refund, a salary); an unusual or "
       + "unrecognised charge is todo. money for every mail about money, whatever its kind: event is charge (paid, card used), receipt (a shop's "
       + "order or receipt), refund, income (salary, money received), authorization (pending, hold), own_transfer (card bill paid, top-up, between "
@@ -293,6 +296,14 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
         addMailCandidate(deps.store, workspaceId, { key, lineId: mailCandidateLine(deps.store, workspaceId, message), subject: message.subject, from: message.from,
           text: (message.body ?? message.snippet).slice(0, 12_000), url: linksFromMail(message.body ?? message.snippet, message.fromAddress)[0] ?? "", at });
       } else kind = "info";
+    }
+    // A booking confirmation places the person somewhere on future days (docs/opportunity-agent.md §17.6 c), kept only when its quote is
+    // found in the mail; otherwise it is information.
+    if (kind === "travel") {
+      const place = mailTripPlace(item.trip, `${message.subject}\n${message.body ?? message.snippet}`, today.toISOString().slice(0, 10), `mail:${key}`);
+      if (place) deps.store.setSetting(workspaceId, MAIL_TRIPS_SETTING,
+        JSON.stringify(withMailTrip(readMailTrips(deps.store.getSetting(workspaceId, MAIL_TRIPS_SETTING)), place, today.toISOString().slice(0, 10))));
+      else kind = "info";
     }
     if (kind === "reply") {
       deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${mailKey(message)}`, type: "waiting.mail_seen",

@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { MAIL_ACCOUNTS_SETTING, MAIL_LOG_SETTING } from "@crossline/core";
+import { MAIL_ACCOUNTS_SETTING, MAIL_LOG_SETTING, MAIL_TRIPS_SETTING } from "@crossline/core";
 import type { ImapFactory, SecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
 import { addMailAccount, createMailService, MAIL_TRIAGE_SKILL, mailLookupFor, readNewMail, removeMailAccount, setMailBookkeeping, triageMail } from "./mailbox";
@@ -94,6 +94,30 @@ test("a payment mail becomes one wealth record only when its own text states the
   expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh)).toMatchObject({ state: "done", recorded: 1 });
   expect(store.listRecords(workspaceId).map((item) => [item.kind, item.value, item.currency, item.category, item.source, item.account])).toEqual([["expense", 35, "CNY", "餐饮", "mail", "card ••1234"]]);
   expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["transaction", "info"]);
+});
+
+test("a booking confirmation places the person on future days only when its quote is in the mail (§17.6 c)", async () => {
+  const { store, workspaceId, secrets, resolve } = setup();
+  const box = mailbox();
+  let now = new Date("2026-10-19T09:00:00Z");
+  const deps = { store, secrets, resolve, factory: box.factory, now: () => now };
+  await addMailAccount(deps, workspaceId, { address: "me@qq.com", password: "app-pass" });
+  await readNewMail(deps, workspaceId);
+  box.messages.push({ uid: 1, subject: "Booking confirmed", body: "Your stay is confirmed. Check-in: 20 Nov 2026, Hotel Lisboa, Lisbon. Check-out: 23 Nov 2026." },
+    { uid: 2, subject: "Your flight", body: "Thanks for flying with us." });
+  now = new Date("2026-10-19T09:20:00Z");
+  const fresh = await readNewMail(deps, workspaceId);
+  const none = { event: "", amount: 0, amountLabel: "", currency: "", merchant: "", category: "", occurredOn: "", refs: [], last4: "", instrument: "" };
+  const answer = JSON.stringify({ items: [
+    { uid: 1, kind: "travel", title: "里斯本", waitingId: "", why: "酒店预订", money: none,
+      trip: { city: "Lisbon", country: "Portugal", from: "2026-11-20", to: "2026-11-23", quote: "Check-in: 20 Nov 2026, Hotel Lisboa, Lisbon." } },
+    // Its quote is not in the mail: nothing is placed, and the mail is only noted.
+    { uid: 2, kind: "travel", title: "柏林", waitingId: "", why: "航班", money: none,
+      trip: { city: "Berlin", country: "Germany", from: "2026-11-25", to: "2026-11-25", quote: "Flight LH 431 to Berlin on 25 Nov" } }] });
+  const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
+  expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh)).toMatchObject({ state: "done" });
+  expect(JSON.parse(store.getSetting(workspaceId, MAIL_TRIPS_SETTING)!)).toEqual([expect.objectContaining({ city: "Lisbon", from: "2026-11-20", to: "2026-11-23", source: "mail" })]);
+  expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["travel", "info"]);
 });
 
 test("an expired payment request is never booked; the same mail in a second mailbox is sorted once", async () => {

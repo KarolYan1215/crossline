@@ -45,7 +45,9 @@ async function readCapped(response: Response, maxBytes: number): Promise<Uint8Ar
 
 export async function safeGet(address: string, deps: SafeGetDeps, options: { maxBytes: number; timeoutMs?: number;
   /** Content types accepted instead of the page types (a calendar subscription reads `text/calendar`). */
-  types?: string[]; locale?: Locale | undefined }): Promise<SafeGetResult> {
+  types?: string[]; locale?: Locale | undefined;
+  /** A service's own usage policy may ask for an identifying User-Agent (Nominatim, §17.6). */
+  userAgent?: string | undefined }): Promise<SafeGetResult> {
   const t = tFor(options.locale);
   const allowed = options.types ?? ALLOWED_TYPES;
   let url = publicHttpsUrl(address);
@@ -56,7 +58,7 @@ export async function safeGet(address: string, deps: SafeGetDeps, options: { max
     try {
       response = await deps.fetchImpl(url.toString(), {
         redirect: "manual", signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
-        headers: { "user-agent": "Crossline/1.0 (personal research; local)", accept: allowed.join(",") }
+        headers: { "user-agent": options.userAgent ?? "Crossline/1.0 (personal research; local)", accept: allowed.join(",") }
       });
     } catch { return { ok: false, reason: t("打不开") }; }
     if (response.status >= 300 && response.status < 400) {

@@ -17,6 +17,7 @@ import { requestAutoBackplan } from "./approvals";
 import { identityLines } from "./lines";
 import { localeFor } from "./locale";
 import { tFor } from "./i18n";
+import { answerClash, clashOptions, holdEventTime, judgeOpportunity, spaceLines } from "./opportunity-space";
 
 /**
  * The web side of the opportunity agent (docs/opportunity-agent.md §5, §8, §17): the cards for proposed watches (盯住 / 不要), for each
@@ -90,7 +91,10 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
   const sep = locale === "en" ? " " : "";
   const store = getStore();
   const today = planToday(ctx, now);
-  const offers = surfacedOpportunities(store, ctx.workspaceId, today).filter((row) => row.inbox).map((row): Ask => {
+  // Judged on read from the worker's caches (§17.6): what can no longer be reached is not shown at all.
+  const offers = surfacedOpportunities(store, ctx.workspaceId, today).filter((row) => row.inbox)
+    .flatMap((row) => { const verdict = judgeOpportunity(ctx, row, now, locale); return verdict.state === "infeasible" ? [] : [{ row, verdict }]; })
+    .map(({ row, verdict }): Ask => {
     const deadline = nextDeadline(row, today);
     const watch = row.watch;
     const left = deadline ? daysUntil(today, deadline) : undefined;
@@ -103,7 +107,8 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
       deadline ? t("截止 {{day}}（原文：{{quote}}）。", { day: deadline, quote: short(quote ?? "", 80) }) : t("页面没写截止。"),
       start && start > today ? t("最晚 {{day}} 开始准备。", { day: start }) : "",
       row.cost ? t("费用：{{amount}} {{currency}}。", { amount: row.cost.amount, currency: row.cost.currency }) : "",
-      row.location ? t("地点：{{place}}。", { place: row.location }) : "",
+      row.location && !row.place ? t("地点：{{place}}。", { place: row.location }) : "",
+      ...spaceLines(row, verdict, locale),
       facts,
       questions.length ? t("还差 {{count}} 条资格要本人确认，答案会记进资料，下次不再问。", { count: questions.length }) : "",
       row.materials.length ? t("需要：{{items}}。", { items: row.materials.slice(0, 4).join(locale === "en" ? ", " : "、") }) : "",
@@ -116,6 +121,7 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
         ? { id: "register", label: t("报名"), detail: t("交给代填：免费活动填完自动提交，其余停在提交前等本人"), recommended: !answerFields.length }
         : { id: "apply", label: t("申请"), detail: t("写一个已批准的里程碑「提交申请」，按截止倒推准备；准备做完后问要不要代填"), recommended: !answerFields.length },
       { id: "plan", label: t("加入计划"), detail: t("只写截止与准备，不代填") },
+      ...clashOptions(ctx, row, verdict, locale),
       { id: "less_kind", label: t("少来这类"), detail: t("这类机会隔久一点再看") },
       { id: "less", label: t("少来，说原因"), detail: t("按原因调整，周报里可撤销"), fields: [lessReasonField(t), { id: "note", label: t("一句话"), kind: "text", required: false }] },
       { id: "decline", label: t("不要"), detail: t("记成偏好，同类降权"), fields: [{ id: "note", label: t("原因"), kind: "text", required: false }] },
@@ -124,7 +130,8 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
     return {
       id: `opp:${row.id}`, kind: "opportunity_offer", entityId: row.id, line: row.lineId,
       urgency: left !== undefined && left <= 2 ? "now" : left !== undefined && left <= 7 ? "soon" : "later",
-      ...(deadline ? { dueDay: deadline } : {}), raisedAt: row.foundAt, fingerprint: `${row.updatedAt}|${row.verdict.state}`,
+      ...(deadline ? { dueDay: deadline } : {}), raisedAt: row.foundAt,
+      fingerprint: `${row.updatedAt}|${row.verdict.state}|${verdict.state}|${verdict.state === "conflict" ? verdict.clashes.map((clash) => clash.blockId).join(",") : ""}`,
       important: Boolean(watch?.basis.milestoneIds.length),
       preview: { kind: "file", href: row.url, label: row.organizer || new URL(row.url).hostname },
       title: row.organizer ? t("{{title}}（{{organizer}}）", { title: row.title, organizer: short(row.organizer, 30) }) : row.title,
@@ -214,7 +221,7 @@ function writeApplicationMilestone(ctx: AccessContext, row: StoredOpportunity, t
 
 const isLessReason = (value: string | undefined): value is LessReason => (LESS_REASONS as readonly string[]).includes(value ?? "");
 
-export function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>, now = new Date()): { ok: true } | { ok: false; code: string } {
+export async function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>, now = new Date()): Promise<{ ok: true } | { ok: false; code: string }> {
   const store = getStore();
   const row = store.listOpportunities(ctx.workspaceId, { id: ask.entityId })[0];
   if (!row) return { ok: false, code: "OPPORTUNITY_NOT_FOUND" };
@@ -243,6 +250,7 @@ export function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: s
         feasibility: _feasibility, ...opportunity } = row;
       queueFormRun(store, ctx.workspaceId, { opportunity, choice: "register", at });
       outcome("planned");
+      await holdEventTime(ctx, row, now);
       record("register");
       return { ok: true };
     }
@@ -252,6 +260,7 @@ export function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: s
       if (!written.ok) return written;
       store.decideOpportunity(ctx.workspaceId, row.id, optionId, at);
       outcome("planned");
+      await holdEventTime(ctx, row, now);
       record(optionId);
       return { ok: true };
     }
@@ -285,6 +294,8 @@ export function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: s
       record("later");
       return { ok: true };
     }
+    case "adjust": case "adjust_move": case "adjust_skip": case "adjust_self": case "adjust_note":
+      return answerClash(ctx, row, judgeOpportunity(ctx, row, now, localeFor(ctx)), optionId, values, now);
     default: return { ok: false, code: "ASK_OPTION_UNKNOWN" };
   }
 }

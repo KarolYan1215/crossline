@@ -17,9 +17,8 @@ import { DAY_MS, PERSON_ZONE, WORLD_START, searchWorld, worldHttp, type World } 
 /**
  * Runs the opportunity agent in the synthetic world and measures it against §17.0 (docs/opportunity-agent.md §17.9 ③).
  *
- * An `Engine` is one way of running the agent: the baseline is the discovery chain on main today (needs → `pollNeed` → the morning brief),
- * and tracks ① (watches, the scout, the flywheel) and ② (time–space feasibility) plug in as engines of their own that declare what they
- * can do. The harness looks only at what reached the person — the brief's new offers and the single messages for what closes today
+ * An `Engine` is one way of running the agent and declares what it can do: `watchEngine` runs track ①'s watches, scout and flywheel,
+ * and with track ②'s `feasibilityOf` also judges each find in time and space. The harness looks only at what reached the person — the brief's new offers and the single messages for what closes today
  * (`opportunityNotices`, what `notifyPass` sends) — and at what the agent asked the network for and wrote to the ledger.
  */
 export type EngineContext = { store: CrosslineStore; workspaceId: string; ownerId: string; world: World; persona: Persona; facts: PersonFacts;
@@ -50,7 +49,8 @@ export type Engine = {
 
 export const localDay = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: PERSON_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 const canonical = (url: string) => { try { return new URL(url).toString(); } catch { return url; } };
-const labelOf = (row: StoredOpportunity): Push["label"] => row.verdict.state === "unknown" ? "ask" : "push";
+/** What the card asks of the person: an eligibility question, a clash to settle (the verdict kept on the row, §17.7), or a plain offer. */
+const labelOf = (row: StoredOpportunity): Push["label"] => row.verdict.state === "unknown" ? "ask" : row.feasibility?.state === "conflict" ? "push_conflict" : "push";
 
 // ── The engine: track ①'s watches, scout and flywheel, as `opportunityPass` runs them ─────────────────────────────
 
@@ -222,7 +222,7 @@ function placeFromLocation(location: string | undefined): { mode: "online" | "in
  * from its `location` line. An event one turns up to needs no preparation; an application takes its watch's lead; a watch's radius
  * (「少来·太远」 tightens it) is the local limit, as the worker passes it.
  */
-function worldFeasibility(ctx: EngineContext, check: FeasibilityOf): FeasibilityFn {
+export function worldFeasibility(ctx: EngineContext, check: FeasibilityOf): FeasibilityFn {
   return async (opportunity, { now, watch }) => {
     let availability: AvailabilityWindow[] = [];
     try { availability = JSON.parse(ctx.store.getSetting(ctx.workspaceId, AVAILABILITY_SETTING) ?? "[]") as AvailabilityWindow[]; } catch { /* unknown */ }

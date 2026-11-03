@@ -1,4 +1,5 @@
 import "server-only";
+import { WORK_BLOCKS_SETTING } from "@crossline/db";
 import { addChurn, PLAN_SNAPSHOT_SETTING, planChanges, planChurnKey, STEP_STARTS_SETTING, scheduledMinutesKey, type AccessContext, type PlanChurnDay, type PlanSnapshot } from "@crossline/core";
 import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, plannerIdOfBlock, planToday, toZonedInstant } from "./crossline";
 
@@ -75,6 +76,11 @@ export async function recordScheduledToday(ctx: AccessContext, now = new Date())
     if (at && (!orderStarts[orderId] || at < orderStarts[orderId]!)) orderStarts[orderId] = at;
   }
   getStore().setSetting(ctx.workspaceId, ORDER_STARTS_SETTING, JSON.stringify(orderStarts));
+  // The plan's own blocks of the coming weeks (work, events the person added), for the opportunity check's clash test (§17.7): the
+  // worker cannot derive them, and a page judging a card must not wait for a solve.
+  getStore().setSetting(ctx.workspaceId, WORK_BLOCKS_SETTING, JSON.stringify(plan.blocks
+    .filter((block) => block.day && block.day >= today && block.start && block.end && /^(scheduled|proposed|optional|event):/.test(block.id))
+    .slice(0, 400).map((block) => ({ id: block.id, title: block.title ?? "", day: block.day, start: block.start, end: block.end }))));
   recordPlanChurn(ctx, plan.blocks, now, today, instant);
   // Each approved milestone's importance as the scheduler weighs it (the slider, else the presets): the worker cannot compute the
   // presets, and the step planner asks the person only about important work (docs/review-2026-10-13.md §11).

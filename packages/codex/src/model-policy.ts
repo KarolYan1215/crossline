@@ -79,6 +79,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   // person's whole line, so the top tier; reading one found page into terms and dates is a careful extraction, the middle one.
   "crossline-opportunity-needs": "top",
   "crossline-opportunity-reader": "mid",
+  // Finding the official visa page and copying its sentences: a lookup; code checks every quote and reads the days itself.
+  "crossline-visa-finder": "low",
   "crossline-background-facts": "low",
   "crossline-plan-explainer": "low",
   // The assistant that works on the person's machine: coding and multi-step work, so the strongest tier, and never stepped down.

@@ -15,6 +15,6 @@ export async function POST(request: Request) {
   const { id, option } = guard.body;
   if (typeof id !== "string" || !/^[\w-]{1,80}$/.test(id) || typeof option !== "string" || !OPTIONS.has(option))
     return NextResponse.json({ ok: false, code: "OPPORTUNITY_DECIDE_INVALID" }, { status: 400 });
-  const result = answerOpportunityOffer(guard.ctx, { entityId: id } as Ask, option, {});
+  const result = await answerOpportunityOffer(guard.ctx, { entityId: id } as Ask, option, {});
   return NextResponse.json(result, { status: result.ok ? 200 : 400 });
 }
