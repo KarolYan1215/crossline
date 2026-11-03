@@ -19,6 +19,11 @@ export type AgentMode = {
    * (the machine owner's own computer, behind the guard).
    */
   sandbox?: { writable: string; readable: string[]; deny: string[]; env?: Record<string, string> };
+  /**
+   * Run before each answer is validated: a run on a compute node copies the files it wrote back to the server here, so the validator's
+   * artifact check reads them (docs/compute-node.md P3).
+   */
+  beforeValidate?: () => Promise<void>;
 };
 
 /** The permission profile a sandboxed assistant thread runs under (Codex `[permissions.<id>]`). */

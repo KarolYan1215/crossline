@@ -9,7 +9,7 @@ import { intlLocale, type Locale, type Translate } from "../../lib/i18n";
 
 type DeviceView = { pending?: number; dead?: number; blocked?: { code: string; at: string }; lastSentAt?: string; lastError?: string; modelNeeded?: number; lastPassAt?: string | null;
   mirror?: { at?: string; checkedAt?: string; error?: string } | null };
-type NodeAgentView = { enabled: boolean; status?: { state: string; message?: string; since?: string; account?: { type?: string; email?: string } | null } };
+type NodeAgentView = { enabled: boolean; shell?: boolean; status?: { state: string; message?: string; since?: string; account?: { type?: string; email?: string } | null } };
 type LinkView = { ok?: boolean; linked?: boolean; url?: string; label?: string; linkedAt?: string; tokenReadable?: boolean; device?: DeviceView; node?: NodeAgentView; code?: string; message?: string };
 
 /** What the node agent's state means here (docs/compute-node.md). */
@@ -92,6 +92,13 @@ export function DeviceLinkCard() {
     setNote(response?.ok ? (enabled ? t("已开启。") : t("已关闭。")) : t("没有保存，请重试。"));
     if (response?.ok) void untilRestarted((next) => next.node?.enabled === enabled);
   };
+  const switchShell = async (shell: boolean) => {
+    setBusy(true);
+    const response = await fetch("/api/device/node", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ shell }) }).catch(() => undefined);
+    setBusy(false);
+    setNote(response?.ok ? (shell ? t("已开启。") : t("已关闭。")) : t("没有保存，请重试。"));
+    if (response?.ok) void untilRestarted((next) => next.node?.shell === shell);
+  };
   const device = view?.device;
   return <section className="st-card" aria-label={t("设备连接")}>
     <header><h3>{t("设备连接")}</h3><small>{t("连接后，这台电脑只读本机的屏幕活动、文件夹和录音，结果立即发到网页版；计划、任务和所有模型工作只在网页版进行")}</small></header>
@@ -116,6 +123,9 @@ export function DeviceLinkCard() {
         <span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" autoComplete="off" spellCheck={false}
           style={{ width: "14em" }} />{" "}
           <button type="button" className="secondary-button" disabled={busy || !apiKey.trim()} onClick={() => void signInWithKey()}>{t("用 API key 登录")}</button></span></div>}
+      {view.node?.enabled && <div className="st-row"><span className="st-row-label">{t("允许在这台电脑上执行命令（shell 助手）")}<small>{t("开启后网页版的助手可以在这台电脑上执行命令（剪辑、转码、跑脚本、生长工作流），只在节点自己的任务文件夹里工作，每条命令先经过同一套检查；发送、报名和付款的最后一步留给本人")}</small></span>
+        <SegmentedControl label={t("允许在这台电脑上执行命令（shell 助手）")} value={view.node.shell ? "on" : "off"} options={[{ value: "off", label: t("关闭", { context: "state" }) }, { value: "on", label: t("开启", { context: "state" }) }]}
+          onChange={(next) => void switchShell(next === "on")} /></div>}
       <div className="st-row"><span className="st-row-label">{t("断开")}<small>{t("回到完整模式：本机重新自己做计划和模型工作")}</small></span>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void unlink()}>{t("断开")}</button></div>
     </> : <>

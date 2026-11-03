@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import { JsonLineRpcClient, type CodexRpcBoundary, type PoolMember } from "@crossline/codex";
+import type { NodeShellLink } from "./task-sync";
 import { codexVersionOf, IMAGE_FILE, IMAGE_MAX_BYTES, NODE_CAPACITY_MAX, NODE_PROTOCOL, parseFrame, underRoots, type NodeFrame } from "./protocol";
 
 /**
@@ -28,7 +29,7 @@ import { codexVersionOf, IMAGE_FILE, IMAGE_MAX_BYTES, NODE_CAPACITY_MAX, NODE_PR
  */
 export type NodeRole = "device" | "standalone";
 export type NodeEntry = { key: string; host: string; role: NodeRole; codex: string; capacity: number; state: "connected" | "ready" | "refused" | "offline";
-  at: string; message?: string };
+  at: string; message?: string; shell?: boolean };
 /** The account's nodes as the card shows them: the best state among them, the strongest ready one's host and Codex, and each node. */
 export type NodeStatus = { state: "connected" | "ready" | "refused" | "offline"; host?: string; codex?: string; at: string; message?: string; nodes?: NodeEntry[] };
 
@@ -75,6 +76,8 @@ export type NodeHub = {
   members: (workspaceId: string) => PoolMember[];
   /** How many runs the account's ready nodes take at once, together (the model gate adds them to the account's share). */
   capacity: (workspaceId: string) => number;
+  /** A ready node of the account whose person allowed the shell assistant on it (strongest kind first), or undefined. */
+  shellFor: (workspaceId: string) => NodeShellLink | undefined;
   /** The strongest ready node's runtime, or undefined. */
   clientFor: (workspaceId: string) => CodexRpcBoundary | undefined;
   status: (workspaceId: string) => NodeStatus | undefined;
@@ -92,8 +95,14 @@ const GONE_SHOWN_MS = 24 * 3_600_000;
 
 type Connection = { socket: WebSocket; workspaceId: string; token: string; client?: JsonLineRpcClient; ready: boolean; heardAt: number;
   host: string; codex: string; role: NodeRole; capacity: number; key: string; browser: boolean;
+  shell?: { tasks: string; home: string; windows: boolean };
+  tasking: Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>;
   browsing: Map<number, { chunks: Buffer[]; resolve: (value: unknown) => void; reject: (error: Error) => void }> };
 let browserIds = 0;
+let taskIds = 0;
+/** A path a node names for its task directories or home: absolute on its own platform, short, no control characters. */
+const nodeDir = (value: unknown, windows: boolean): string | undefined =>
+  typeof value === "string" && value.length < 300 && !/[\0\r\n]/.test(value) && (windows ? path.win32 : path.posix).isAbsolute(value) ? value : undefined;
 
 export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   const log = options.log ?? (() => {});
@@ -130,7 +139,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     try { options.onStatus?.(workspaceId, status); } catch { /* the record is a courtesy */ }
   };
   const entryOf = (connection: Connection, state: NodeEntry["state"], message?: string): Omit<NodeEntry, "at"> => ({ key: connection.key, host: connection.host,
-    role: connection.role, codex: connection.codex, capacity: connection.capacity, state, ...(message ? { message } : {}) });
+    role: connection.role, codex: connection.codex, capacity: connection.capacity, state, ...(message ? { message } : {}), ...(connection.shell ? { shell: true } : {}) });
   const send = (socket: WebSocket, frame: NodeFrame) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame)); };
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1_048_576 });
@@ -151,7 +160,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
 
   function accept(socket: WebSocket, workspaceId: string, token: string): void {
     const connection: Connection = { socket, workspaceId, token, ready: false, heardAt: Date.now(), host: "", codex: "", role: "device", capacity: 2, key: "",
-      browser: false, browsing: new Map() };
+      browser: false, tasking: new Map(), browsing: new Map() };
     const hello = setTimeout(() => socket.close(4001, "NODE_HELLO_MISSING"), 15_000);
     const pendingGw = new Map<number, AbortController>();
     socket.on("pong", () => { connection.heardAt = Date.now(); });
@@ -167,6 +176,12 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
       if (frame.t === "files") { answerFiles(socket, workspaceId, frame.id, frame.dir); return; }
       if (frame.t === "image") { answerImage(socket, workspaceId, frame.id, frame.path); return; }
       if (frame.t === "gw") { void relay(socket, workspaceId, frame, pendingGw); return; }
+      if (frame.t === "task-answer") {
+        const pending = connection.tasking.get(frame.id);
+        connection.tasking.delete(frame.id);
+        if (frame.error) pending?.reject(new Error(frame.error)); else pending?.resolve(frame.result);
+        return;
+      }
       if (frame.t === "browser-chunk") { connection.browsing.get(frame.id)?.chunks.push(Buffer.from(frame.data, "base64")); return; }
       if (frame.t === "browser-answer") {
         const pending = connection.browsing.get(frame.id);
@@ -183,6 +198,8 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
       for (const controller of pendingGw.values()) controller.abort();
       for (const pending of connection.browsing.values()) pending.reject(new Error("NODE_DISCONNECTED"));
       connection.browsing.clear();
+      for (const pending of connection.tasking.values()) pending.reject(new Error("NODE_DISCONNECTED"));
+      connection.tasking.clear();
       if (!isCurrent(connection)) return;
       connections.get(workspaceId)?.delete(connection.key);
       connection.client?.disconnect(new Error("CROSSLINE_NODE_DISCONNECTED"));
@@ -200,6 +217,10 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     connection.capacity = Math.max(1, Math.min(NODE_CAPACITY_MAX, Math.floor(Number(hello.capacity) || 4)));
     connection.key = `${connection.role}:${connection.host}`;
     connection.browser = hello.browser === true;
+    const windows = hello.platform === "win32";
+    const tasks = hello.shell === true ? nodeDir(hello.tasks, windows) : undefined;
+    const home = hello.shell === true ? nodeDir(hello.home, windows) : undefined;
+    if (tasks && home) connection.shell = { tasks, home, windows };
     const server = codexVersionOf({ userAgent: options.serverCodex() });
     // The server's own runtime is not up yet (the worker just restarted and a node was quicker): come back in a moment, not in ten minutes.
     if (!server) { log({ type: "node.server_starting", workspaceId, host: connection.host }); socket.close(4006, "NODE_SERVER_STARTING"); return; }
@@ -335,6 +356,20 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     members: (workspaceId) => ready(workspaceId).map((connection) => ({ id: connection.key, client: connection.client!, capacity: connection.capacity,
       priority: ROLE_PRIORITY[connection.role] })),
     capacity: (workspaceId) => ready(workspaceId).reduce((sum, connection) => sum + connection.capacity, 0),
+    shellFor: (workspaceId) => {
+      const connection = ready(workspaceId).find((item) => item.shell);
+      if (!connection?.shell) return undefined;
+      const { tasks, home, windows } = connection.shell;
+      return { key: connection.key, host: connection.host, client: connection.client!, tasksRoot: tasks, home, windows,
+        connected: () => isCurrent(connection) && connection.socket.readyState === connection.socket.OPEN,
+        task: (request, timeoutMs = 5 * 60_000) => new Promise<unknown>((resolve, reject) => {
+          if (!isCurrent(connection)) { reject(new Error("NODE_DISCONNECTED")); return; }
+          const id = ++taskIds;
+          const timer = setTimeout(() => { connection.tasking.delete(id); reject(new Error("NODE_TASK_TIMEOUT")); }, timeoutMs);
+          connection.tasking.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
+          send(connection.socket, { t: "task", id, request: request as Record<string, unknown> });
+        }) };
+    },
     clientFor: (workspaceId) => ready(workspaceId)[0]?.client,
     status: (workspaceId) => statuses.get(workspaceId),
     close: async () => {

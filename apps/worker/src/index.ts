@@ -288,6 +288,11 @@ async function extractDocument(documentId: string, workspaceId: string) {
 // On the hosted beta the machine is a shared server: nobody's account reads its folders, screen or logs, and nobody gets its shell.
 const hostedBeta = process.env.CROSSLINE_PUBLIC_BETA === "1";
 const machineOwner = (workspaceId: string) => !hostedBeta && runtimeOwner(analysisStore) === workspaceId;
+// A compute node of the account's own whose person allowed the shell assistant on it (docs/compute-node.md P3). The hub is created
+// further down; read before that (a pass at start-up) it is not there yet.
+const nodeShell = (workspaceId: string) => { try { return nodeHub?.shellFor(workspaceId); } catch { return undefined; } };
+/** Whether this account's assistant has a shell: the machine owner's own computer, or one of its own nodes with the shell allowed. */
+const shellAssistant = (workspaceId: string) => machineOwner(workspaceId) || Boolean(nodeShell(workspaceId));
 const pidAlive = (pid: number): boolean => {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 };
@@ -597,8 +602,9 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
       if (improving) console.info(JSON.stringify({ type: "skill.grown.improve_started", checkedAt, workspaceId, id: improving }));
     } catch { /* next tick */ }
   }
-  // Growing a workflow writes and tests scripts with the runtime's `skill-creator`: only the shell assistant can (the owner's own Codex).
-  if (assistantOff || !machineOwner(workspaceId) || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
+  // Growing a workflow writes and tests scripts with the runtime's `skill-creator`: only the shell assistant can (the owner's own Codex,
+  // or a node of the account's own with the shell allowed).
+  if (assistantOff || !shellAssistant(workspaceId) || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
   const candidate = growCandidates(analysisStore, workspaceId)[0];
   // What the person asked for in words is their own work, like a capture: it runs while the quota lasts. An errand the system noticed
   // repeating is its own idea, and waits for a normal quota.
@@ -1321,7 +1327,9 @@ const agentService = createAgentService({
   // tripwire, not a sandbox, so it is not offered to other accounts on this machine (docs/model-providers.md).
   store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(), isOwner: machineOwner,
   // Everyone else's assistant works through Crossline's own functions on the account's own model (docs/personal-agent.md, 2026-10-19).
-  modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : sandboxShell.ok ? "sandbox" : "tools",
+  // An account whose own computer runs a node with the shell allowed gets the shell assistant there (docs/compute-node.md P3).
+  modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : nodeShell(workspaceId) ? "node" : sandboxShell.ok ? "sandbox" : "tools",
+  nodeShell,
   // What a sandboxed run may never read: the server's data and state (every account's ledger, files and runtime homes) — its own task
   // folder and inputs, which live under them, stay reachable because the more specific entry wins.
   sandbox: { readable: [path.dirname(process.env.CROSSLINE_CODEX_PATH ?? "/opt/codex/codex")], deny: [dataDir, process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state")] },
@@ -1349,7 +1357,7 @@ async function automationDesignPass(workspaceId: string): Promise<void> {
 async function automationTick(workspaceId: string): Promise<void> {
   await automationDesignPass(workspaceId);
   // The machine owner's repeated errands are grown into workflows (workflowPass); everyone else is offered an automation for them.
-  if (!machineOwner(workspaceId)) { try { suggestFromRepeats(analysisStore, workspaceId, growCandidates(analysisStore, workspaceId)); } catch { /* a courtesy */ } }
+  if (!shellAssistant(workspaceId)) { try { suggestFromRepeats(analysisStore, workspaceId, growCandidates(analysisStore, workspaceId)); } catch { /* a courtesy */ } }
   if (!codexSupervisor || paused(workspaceId, "assistant") || !spendAllows(await spendFor(workspaceId), "intake")) return;
   enterUsageWorkspace(workspaceId);
   await automationPass(automationDeps, workspaceId);

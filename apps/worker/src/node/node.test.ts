@@ -60,7 +60,7 @@ async function until<T>(read: () => T | undefined, ms = 20_000): Promise<T> {
   }
 }
 
-async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number; tokenValid?: () => boolean; role?: "device" | "standalone"; browsers?: NodeBrowsers } = {}) {
+async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; deadAfterMs?: number; tokenValid?: () => boolean; role?: "device" | "standalone"; browsers?: NodeBrowsers; shell?: boolean } = {}) {
   gatewayServer = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
@@ -98,7 +98,7 @@ async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; dea
   });
   const runtime = fakeRuntime(options.nodeCodex ?? "0.163.0");
   const agent = startNodeAgent({ url: `http://127.0.0.1:${hub.port}`, token: "good-token-0123456789abcdef", dir, spawn: runtime.spawn, backoffMs: [60_000], refusedWaitMs: 60_000,
-    role: options.role ?? "device", capacity: 3, host: "PC-A", ...(options.browsers ? { browsers: options.browsers } : {}) });
+    role: options.role ?? "device", capacity: 3, host: "PC-A", ...(options.browsers ? { browsers: options.browsers } : {}), ...(options.shell ? { shell: true } : {}) });
   stopAgent = agent.stop;
   return { runtime, agent, statuses, gateway, metered };
 }
@@ -164,6 +164,31 @@ test("the node refuses a shell, full access and any method the runners do not us
   await expect(client.request("thread/start", { sandbox: "read-only", config: { "features.shell_tool": true } })).rejects.toThrow(/NODE_SHELL_REFUSED/);
   await expect(client.request("command/exec", { command: ["whoami"] })).rejects.toThrow(/NODE_METHOD_REFUSED/);
   await expect(client.request("account/logout", {})).rejects.toThrow(/NODE_METHOD_REFUSED/);
+});
+
+test("with the shell switched on, the node offers its task directories, runs a shell thread only there, and the server reads and writes them", async () => {
+  const { runtime, statuses } = await setUp({ shell: true });
+  const client = await until(() => hub!.clientFor("ws-owner"));
+  expect(statuses.at(-1)!.nodes).toEqual([expect.objectContaining({ state: "ready", shell: true })]);
+  const link = hub!.shellFor("ws-owner")!;
+  expect(link).toMatchObject({ host: "PC-A", tasksRoot: path.join(dir, "tasks") });
+  expect(link.connected()).toBe(true);
+  const cwd = path.join(link.tasksRoot, "agent-1");
+  await link.task({ op: "write", name: "agent-1", rel: "in.txt", data: Buffer.from("x").toString("base64") });
+  expect(readFileSync(path.join(cwd, "in.txt"), "utf8")).toBe("x");
+  await expect(link.task({ op: "write", name: "..", rel: "x", data: "" })).rejects.toThrow(/NODE_TASK_NAME_REFUSED/);
+  // The task directory is kept as given (not mapped into the node's work directory); anything else is refused.
+  await client.request("thread/start", { cwd, sandbox: "danger-full-access", approvalPolicy: "untrusted", config: { "features.shell_tool": true } });
+  expect(runtime.requests.find((request) => request.method === "thread/start")!.params.cwd).toBe(cwd);
+  await expect(client.request("thread/start", { cwd: dir, sandbox: "danger-full-access", approvalPolicy: "untrusted" })).rejects.toThrow(/NODE_SHELL_REFUSED: cwd/);
+  await expect(client.request("thread/start", { cwd, sandbox: "danger-full-access", approvalPolicy: "never" })).rejects.toThrow(/NODE_SHELL_REFUSED: approval/);
+  await expect(client.request("turn/start", { threadId: "t", sandboxPolicy: { type: "dangerFullAccess" } })).rejects.toThrow(/NODE_TURN_REFUSED/);
+});
+
+test("a node whose person did not switch the shell on offers no task directories and answers none", async () => {
+  await setUp();
+  await until(() => hub!.clientFor("ws-owner"));
+  expect(hub!.shellFor("ws-owner")).toBeUndefined();
 });
 
 test("another Codex version, or a site that has not switched the node on, is refused and nothing is routed to it", async () => {

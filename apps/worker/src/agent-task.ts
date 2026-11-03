@@ -12,6 +12,7 @@ import { agentChainsFor, approveCategory, CLEAN_RUNS_TO_TRUST, readCategories, r
 import { libraryInstruction, librarySkillsFor } from "./skill-library";
 import { localeOf, tOfWorkspace } from "./locale";
 import { applyToolboxActions, createAgentToolbox, type MailLookup } from "./agent-tools";
+import { changedInputs, nodeTaskDir, pullResults, sendInputs, type NodeShellLink, type SentInputs } from "./node/task-sync";
 
 export const AGENT_SKILL = "crossline:crossline-agent";
 /** The assistant without a shell (agent-tools.ts): the same task, done through Crossline's own functions, on any model. */
@@ -293,7 +294,12 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
    * `tools`: no shell — Crossline's own functions (agent-tools.ts), on whatever model serves the workspace. The machine owner's own
    * Codex keeps the shell (`shell`, the default); every other account, and everyone on the hosted server, gets this.
    */
-  mode?: "shell" | "sandbox" | "tools";
+  mode?: "shell" | "sandbox" | "tools" | "node";
+  /**
+   * `node`: the shell on the account's own compute node (docs/compute-node.md P3), where its person allowed it. The task directory and the
+   * copies of the inputs are on that computer; what the run writes is copied back to `outputRoot` before the answer is checked and after.
+   */
+  node?: NodeShellLink;
   /**
    * `sandbox`: the shell inside Codex's Linux sandbox — what it may read beside its inputs (the Codex binary's folder) and what it may
    * never read (the server's data and state folders, holding every other account).
@@ -309,7 +315,9 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const blocked = (code: string, message: string): AgentOutcome => ({ state: "blocked", taskId, directory, code, message });
     const locale = localeOf(store, workspaceId);
     const t = tFor(locale);
-    const client = getClient();
+    const link = options.mode === "node" ? options.node : undefined;
+    if (options.mode === "node" && !link?.connected()) return blocked("AGENT_RUN_LOST", t("后台进程重启，这次运行中断"));
+    const client = link ? link.client : getClient();
     if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", t("Codex 运行时不可用。"));
     const categories = readCategories(store, workspaceId);
     if (!categories[input.category]) return { state: "needs_category_approval", category: input.category, label: AGENT_CATEGORIES[input.category] };
@@ -319,20 +327,30 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     mkdirSync(directory, { recursive: true });
     const inputs = (input.inputs ?? []).map((entry) => path.resolve(entry)).filter((entry) => existsSync(entry));
     const before = fingerprint(inputs);
-    const worktree = input.projectRepo ? prepareWorktree(path.resolve(input.projectRepo), directory, taskId) : undefined;
-    const guard: GuardContext = { taskDir: directory, homeDir: options.homeDir ?? homedir(), ...(worktree ? { writableRoots: [worktree] } : {}), locale };
+    // On a node the run works in that computer's task directory, on copies of its inputs (the originals never leave the server).
+    const nodeDir = link ? nodeTaskDir(link, taskId) : undefined;
+    let sent: SentInputs | undefined;
+    if (link) {
+      try { sent = await sendInputs(link, taskId, inputs); }
+      catch (error) { return blocked(link.connected() ? "NODE_TASK_FAILED" : "AGENT_RUN_LOST", error instanceof Error ? error.message.slice(0, 200) : t("后台进程重启，这次运行中断")); }
+    }
+    const pull = link ? async () => { await pullResults(link, taskId, directory).catch(() => undefined); } : undefined;
+    const workDir = nodeDir ?? directory;
+    const worktree = input.projectRepo && !link ? prepareWorktree(path.resolve(input.projectRepo), directory, taskId) : undefined;
+    const guard: GuardContext = { taskDir: workDir, homeDir: link?.home ?? options.homeDir ?? homedir(), ...(worktree ? { writableRoots: [worktree] } : {}), locale };
     const audit: AuditRecord = { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } };
     options.onLive?.({ startedAt: new Date().toISOString(), audit });
     const pendingChanges = new Map<string, string[]>();
     const startedAt = Date.now();
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:requested:${taskId}`, type: "agent.task.requested", entityId: taskId,
       payload: { taskId, title: input.title, category: input.category, workOrderId: input.workOrderId ?? "", inputs, humanPart: input.humanPart, ...(worktree ? { worktree } : {}),
-        ...(options.mode === "sandbox" ? { mode: "sandbox" } : {}),
+        ...(options.mode === "sandbox" || link ? { mode: link ? "node" : "sandbox" } : {}), ...(link ? { node: link.host } : {}),
         ...(input.delegated ? { delegated: true } : {}), ...(input.stepId ? { stepId: input.stepId } : {}), ...(input.by === "person" ? { by: "person" } : {}),
         // Taken up because the order took effect by itself (nobody clicked approve): the review card says so.
         ...(input.workOrderId && store.listEvents(workspaceId, { type: "work_order.auto_approved", entityId: input.workOrderId }).length ? { autoApproved: true } : {}) } });
 
-    const task = { taskId, title: input.title, what: input.what, category: input.category, directory, inputs, humanPart: input.humanPart,
+    const task = { taskId, title: input.title, what: input.what, category: input.category, directory: workDir, inputs: sent?.paths ?? inputs, humanPart: input.humanPart,
+      ...(sent?.truncated ? { inputsNote: "Some input files were too many or too large to copy to this computer and were left out." } : {}),
       ...(worktree ? { worktree: { path: worktree, branch: `ai/${taskId}` } } : {}), ...(input.deadline ? { deadline: input.deadline } : {}), ...(input.notes ? { notes: input.notes } : {}),
       ...(input.lessons?.length ? { lessons: input.lessons } : {}) };
     const probe = (relative: string) => {
@@ -358,7 +376,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     let progressAt = 0;
     // Sandboxed (no network in its commands): the board, the mailbox and the inbox through Crossline's own functions beside the shell.
     const sandboxed = options.mode === "sandbox";
-    const board = sandboxed ? createAgentToolbox({ store, workspaceId, directory, inputs, ...(options.mail ? { mail: options.mail } : {}) }) : undefined;
+    const board = sandboxed || link ? createAgentToolbox({ store, workspaceId, directory, inputs, ...(options.mail ? { mail: options.mail } : {}) }) : undefined;
     const boardSpecs = board?.specs.filter((spec) => !/_file$|^list_files$/.test(spec.name)) ?? [];
     const readerSpecs = input.reader?.tools.specs ?? [];
     const tools = boardSpecs.length || readerSpecs.length ? { specs: [...readerSpecs, ...boardSpecs],
@@ -374,7 +392,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       connectors: true, onPlan: (plan) => { audit.plan = plan; writeProgress(directory, audit); },
       ...askOption(personAsker(options.questionFor?.(taskId, input.title), audit, () => writeProgress(directory, audit))),
       agent: {
-        cwd: directory,
+        cwd: workDir, ...(pull ? { beforeValidate: pull } : {}),
         ...(sandboxed ? { sandbox: { writable: directory, readable: [...inputs, ...(options.sandbox?.readable ?? [])], deny: options.sandbox?.deny ?? [] } } : {}),
         onItem: (item, phase) => {
           noteItem(audit, pendingChanges, item, phase);
@@ -387,11 +405,13 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     });
 
     await input.reader?.close().catch(() => undefined);
+    await pull?.();
     const after = fingerprint(inputs);
-    const inputsModified = changedFiles(before, after);
+    const inputsModified = link && sent ? await changedInputs(link, taskId, sent).catch(() => [] as string[]) : changedFiles(before, after);
     if (!result.ok) {
-      // Stopped by the person (「中止」): a code of its own, so it is never taken for a run the runtime lost and tried again.
-      const code = loopStop ? "AGENT_LOOP_STOPPED" : options.signal?.aborted ? "AGENT_CANCELLED" : result.blocker.code;
+      // Stopped by the person (「中止」): a code of its own, so it is never taken for a run the runtime lost and tried again. A node gone
+      // part way is a run lost: tried again like one a restart cut off.
+      const code = loopStop ? "AGENT_LOOP_STOPPED" : options.signal?.aborted ? "AGENT_CANCELLED" : link && !link.connected() ? "AGENT_RUN_LOST" : result.blocker.code;
       const message = loopStop ? t("{{reason}}，已自动停下；已写出的文件照常交本人查看。", { reason: loopStop }) : options.signal?.aborted ? t("本人中止了这次运行。") : result.blocker.message;
       writeProgress(directory, audit);
       // What the card about it needs to say where it stopped and whether trying again could act outside the machine: the guard's refusals
@@ -417,7 +437,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
     const reviewRequired = reviewReasons.length > 0;
     const applied = board ? applyToolboxActions(store, workspaceId, ownerId, taskId, board.actions) : { captures: [], told: [] };
     const record = { taskId, title: input.title, category: input.category, directory, durationMs: Date.now() - startedAt, summary: result.output.summary,
-      ...(sandboxed ? { mode: "sandbox" } : {}),
+      ...(sandboxed ? { mode: "sandbox" } : link ? { mode: "node", node: link.host } : {}),
       artifacts, verification: result.output.verification, needsHuman: result.output.needsHuman, notDone: result.output.notDone, assumptions: result.output.assumptions,
       audit, inputsModified, checksPassed, reviewRequired, reviewReasons };
     writeFileSync(path.join(directory, "audit.json"), JSON.stringify(record, null, 2), "utf8");

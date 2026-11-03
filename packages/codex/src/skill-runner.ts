@@ -1086,6 +1086,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       let parsed: unknown;
       try {
         parsed = parse(answer);
+        await run.agent?.beforeValidate?.();
         return run.validate(parsed);
       } catch (error) {
         rejection = error instanceof Error ? error : new Error(String(error));
