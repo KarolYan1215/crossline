@@ -35,6 +35,7 @@ import { PROGRESS_ASSESSMENT_SCHEMA, STEP_PLAN_SCHEMA, VALIDATION_REVIEW_SCHEMA 
 import { TASK_TITLES_SCHEMA } from "./task-title";
 import { TASK_MERGE_REVIEW_SCHEMA } from "./task-merge";
 import { WEEKLY_INSIGHT_OUTPUT_SCHEMA } from "./weekly-insight-schema";
+import { VISA_READING_SCHEMA } from "./visa";
 import { tFor, type Locale } from "./i18n";
 
 /**
@@ -113,7 +114,8 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-import-triage": { label: "导入清单整理", schemas: ["IMPORT_TRIAGE_SCHEMA"] },
   "crossline-automation-designer": { label: "自动化设计", schemas: ["AUTOMATION_PLAN_SCHEMA"] },
   "crossline-opportunity-needs": { label: "机会需求推导", schemas: ["OPPORTUNITY_NEEDS_SCHEMA"], webSearch: true },
-  "crossline-opportunity-reader": { label: "机会页面解读", schemas: ["OPPORTUNITY_READING_SCHEMA"] }
+  "crossline-opportunity-reader": { label: "机会页面解读", schemas: ["OPPORTUNITY_READING_SCHEMA"] },
+  "crossline-visa-finder": { label: "签证核实", schemas: ["VISA_READING_SCHEMA"], webSearch: true }
 };
 
 export const skillKey = (skill: string) => skill.replace(/^crossline:/, "");
@@ -188,7 +190,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   MANUAL_DESIGN_SCHEMA, MATERIAL_SEARCH_SCHEMA, NODE_WRITEUP_SCHEMA, MILESTONE_GATE_OUTPUT_SCHEMA, MILESTONE_PROPOSAL_SCHEMA, MILESTONE_PLAN_SCHEMA, MILESTONE_RISK_SCHEMA, MINE_SKILL_SCHEMA,
   ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA,
-  OPPORTUNITY_NEEDS_SCHEMA, OPPORTUNITY_READING_SCHEMA,
+  OPPORTUNITY_NEEDS_SCHEMA, OPPORTUNITY_READING_SCHEMA, VISA_READING_SCHEMA,
   FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
@@ -293,7 +295,9 @@ export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CAL
   // The pre-submission check: a boolean and a short list of two-string objects, like a review.
   FORM_CHECK_SCHEMA: "VALIDATION_REVIEW_SCHEMA",
   // The fallback's candidates: a list of small objects with an enum, short strings and a short list of strings, like calendar filing.
-  FORM_OBSERVE_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA" };
+  FORM_OBSERVE_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA",
+  // A visa page (2026-11-02): a short list of objects with an enum and quoted strings, like calendar filing.
+  VISA_READING_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA" };
 const caseRuns = (record: ConformanceRecord) => {
   const runs = record.runs.flatMap((run) => LEGACY_CASES[run.caseId] ? LEGACY_CASES[run.caseId]!.split("|").map((caseId) => ({ ...run, caseId })) : [run]);
   const proxied = Object.entries(SCHEMA_PROXIES).filter(([schema]) => !runs.some((run) => run.caseId === schema))

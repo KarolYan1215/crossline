@@ -525,12 +525,16 @@
   };
   ```
 
-  契约只做了加法：`Opportunity.place?: EventPlace`、`Opportunity.category?: OpportunityCategory`（`OPPORTUNITY_CATEGORIES`，缺省时 `opportunityCategory` 按类型与标题读）、`TravelEstimate.travelDays?` 与 `costTier?`。
-- Nominatim 客户端：限速、缓存、User-Agent。
-- 规则化交通估算、签证官方页核实与缓存。
-- 本人所在地的四个来源：设备定位要做同意开关与约 1 公里的取舍；邮件 `travel` 类。
-- 冲突检测与「调整固定安排」的提问流程。
-- 询问卡上的空间与冲突信息。
+  契约只做了加法：`Opportunity.place?: EventPlace`、`Opportunity.category?: OpportunityCategory`（`OPPORTUNITY_CATEGORIES`，缺省时 `opportunityCategory` 按类型与标题读）、`TravelEstimate.travelDays?` 与 `costTier?`。另加同步版 `feasibilityNow(opportunity, SyncFeasibilityContext)`（查询当场给出答案，网页渲染时用缓存）；`feasibilityOf` 就是它加上「等待未命中的查询、再算一次」，两者结论相同（测试保证）。
+
+  **已实现（2026-11-02）**：
+  - **算法**（`packages/core/src/feasibility.ts`）：截止与开始按引用里的时区缩写换算（AoE、PST/EST、CET……；CST 只在中文或「中国」引用里当 +8）；最晚开始日在本人时区按天算；截止早于活动时，签证与路程从活动日往回算（与申请并行）。反事实对测试：时区缩写、跨年、闰年、太远、签证来不及、固定与可移动冲突。
+  - **查询都在缓存里**：`geo.cache`（Nominatim 结果，找不到的也记 30 天）、`visa.cache`（核实的 90 天，未核实的 7 天后重查）、`travel.trips`（邮件行程）、`location.device`。`packages/db/src/time-space.ts` 的 `cachedFeasibilityContext` / `feasibilityContextFor` 从账本拼出上下文；阻塞项包括日历块和 `schedule.workBlocks`（网页的注意力计时器每十分钟写下计划自己的工作块与插入的日程，worker 自己推不出排程）。
+  - **Nominatim**（`apps/worker/src/geo.ts`）：全进程每 1.1 秒最多一次请求，可识别的 User-Agent，只按城市或场馆查（街道地址、链接、长数字一律不查），反查只到城市级（zoom 10，坐标先取两位小数），服务无响应不记缓存。**这是 worker 新增的一条对外只读路径**（网页的「出行」地图估算原本已用同一主机）。`geocoderFor` 的 http、sleep、now 均可注入，③ 用假 Nominatim。
+  - **签证**：Skill `crossline-visa-finder`（low 档，可联网）只给官方页面地址和原文句子；worker 逐页打开（`safeGet`），`officialVisaHost` 只认政府域名，`visaCheckFrom` 在页面正文里找到引用才算数，天数由 `processingDays` 从办理时长那句话里读（工作日 ×7/5，取上限），再加 `VISA_MARGIN_DAYS`（14）天预约与取护照。模型从不给天数。读不到则按 60 天、`verified: false`；运行时不可用时不记缓存，一天后再试。
+  - **本人所在地**（`packages/core/src/person-places.ts`）：设备定位（单独同意 `location.device.consent`，默认关；设置 → 时间与提醒 「设备位置」，按一下按钮才取一次位置，两位小数、只留最近一次，关闭即删；worker 反查一次城市名）；日历上「Flight to X / 飞往 / 出差」推出的行程（到下一班航班前一天，没有则 3 天），以及地点离家 100 公里以上的单日事件；邮件 `travel` 类（`trip` 字段，引用必须在邮件正文里，行程未结束才保留，最多 40 条）；已确认的居住城市事实（「假设：」不算）。
+  - **worker 时空 pass**（`apps/worker/src/time-space.ts`，与发现同一工作区、同一「规划」暂停；签证查询要 core 额度，地理编码不要）：每次最多 12 次新的地理编码、2 次签证查询；对每个仍待定的机会算一遍。**只和固定安排冲突才单独发消息**（`sayToPerson`，夜间 23:00–8:00 不发、每天最多 3 条、同一冲突只说一次）；只和工作块冲突不发消息，卡片上写「报名或加入计划后会重排」。
+  - **询问卡**（`apps/web/lib/opportunity-space.ts`）：渲染时用缓存 `feasibilityNow` 判一次，`infeasible` 不显示；显示线上/现场与城市、本人那天在哪、距离与方式与单程时长与花费等级、签证（已核实/未核实）、每个冲突一句话。固定冲突时多一个「我同意调整固定安排」，选了以后卡片换成怎么调：改到另一天（填日期）、这次跳过、本人去调换或请假、用一句话说；答复存进 `schedule.fixedAdjustments`，随回答一起可撤销，不改动任何人的日历。点「报名」或「加入计划」时，页面写明时间段的活动作为插入日程放进计划（`scheduleEvent`），排程器把它压到的工作块挪走。
 
 **③ 合成世界测试套件**
 - 本地假网站、假招聘接口、假截止列表、假邮箱、假日历、假 Nominatim。

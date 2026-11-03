@@ -252,12 +252,45 @@ export const daysFrom = (from: string, to: string) => Math.round((Date.parse(`${
 
 type Reason = { code: InfeasibleCode; detail: string };
 
-async function pointOf(place: { city?: string | undefined; country?: string | undefined; lat?: number | undefined; lon?: number | undefined },
-  geocode: FeasibilityContext["geocode"]): Promise<GeoPoint | undefined> {
+/** The same context with lookups answered at once (the web's cached ones): `feasibilityNow` reads only this. */
+export type SyncFeasibilityContext = Omit<FeasibilityContext, "geocode" | "visa"> & {
+  geocode: (query: GeoQuery) => GeoPoint | undefined;
+  visa: (citizenship: string, destination: string) => VisaCheck | undefined;
+};
+
+function pointOf(place: { city?: string | undefined; country?: string | undefined; lat?: number | undefined; lon?: number | undefined },
+  geocode: SyncFeasibilityContext["geocode"]): GeoPoint | undefined {
   if (typeof place.lat === "number" && typeof place.lon === "number") return { lat: place.lat, lon: place.lon, city: place.city, country: place.country };
   if (!place.city?.trim()) return undefined;
-  const point = await geocode({ city: place.city.trim(), ...(place.country ? { country: place.country } : {}) });
+  const point = geocode({ city: place.city.trim(), ...(place.country ? { country: place.country } : {}) });
   return point ? { ...point, city: point.city ?? place.city, country: point.country ?? place.country } : undefined;
+}
+
+/**
+ * The verdict with lookups that may take time (the worker asks Nominatim and the visa pages): `feasibilityNow` is run, every lookup it
+ * asked for and did not have is awaited, and it is run again with the answers, until nothing new is asked (at most four rounds). The
+ * result is exactly `feasibilityNow`'s with every lookup answered.
+ */
+export async function feasibilityOf(opportunity: Opportunity, ctx: FeasibilityContext): Promise<Feasibility> {
+  const places = new Map<string, GeoPoint | undefined>(), visas = new Map<string, VisaCheck | undefined>();
+  let verdict: Feasibility | undefined;
+  for (let round = 0; round < 4; round += 1) {
+    const pending: Array<Promise<void>> = [];
+    verdict = feasibilityNow(opportunity, { ...ctx,
+      geocode: (query) => {
+        const key = JSON.stringify([query.city, query.country ?? "", query.venue ?? ""]);
+        if (!places.has(key)) { places.set(key, undefined); pending.push(Promise.resolve(ctx.geocode(query)).then((point) => { places.set(key, point); })); }
+        return places.get(key);
+      },
+      visa: (citizenship, destination) => {
+        const key = JSON.stringify([citizenship, destination]);
+        if (!visas.has(key)) { visas.set(key, undefined); pending.push(Promise.resolve(ctx.visa(citizenship, destination)).then((check) => { visas.set(key, check); })); }
+        return visas.get(key);
+      } });
+    if (!pending.length) return verdict;
+    await Promise.all(pending);
+  }
+  return verdict!;
 }
 
 /**
@@ -271,7 +304,7 @@ async function pointOf(place: { city?: string | undefined; country?: string | un
  * - no availability window on the event's weekday: `no_free_time`;
  * - otherwise feasible, or `conflict` with each clashing block marked fixed or movable (§17.7).
  */
-export async function feasibilityOf(opportunity: Opportunity, ctx: FeasibilityContext): Promise<Feasibility> {
+export function feasibilityNow(opportunity: Opportunity, ctx: SyncFeasibilityContext): Feasibility {
   const zone = ctx.timeZone;
   const now = ctx.now.getTime();
   const today = zonedParts(now, zone).day;
@@ -300,7 +333,7 @@ export async function feasibilityOf(opportunity: Opportunity, ctx: FeasibilityCo
   let travel: TravelEstimate | undefined;
   let visa: VisaCheck | undefined;
   if (inPerson) {
-    const [here, there] = await Promise.all([person ? pointOf(person, ctx.geocode) : undefined, pointOf(place, ctx.geocode)]);
+    const here = person ? pointOf(person, ctx.geocode) : undefined, there = pointOf(place, ctx.geocode);
     if (here && there) {
       travel = travelEstimate(haversineKm(here, there));
       const limit = ctx.localMinutesMax ?? LOCAL_MINUTES_MAX;
@@ -314,7 +347,7 @@ export async function feasibilityOf(opportunity: Opportunity, ctx: FeasibilityCo
     const destination = countryKey(there?.country ?? place.country);
     const from = countryKey(here?.country ?? person?.country);
     if (place.mode === "in_person" && destination && destination !== from && destination !== countryKey(ctx.citizenship)) {
-      const read = ctx.citizenship ? await ctx.visa(ctx.citizenship, there?.country ?? place.country ?? destination) : undefined;
+      const read = ctx.citizenship ? ctx.visa(ctx.citizenship, there?.country ?? place.country ?? destination) : undefined;
       visa = read ?? { needed: "unknown", leadDays: VISA_LEAD_FALLBACK_DAYS, checkedAt: ctx.now.toISOString(), verified: false };
     }
   }

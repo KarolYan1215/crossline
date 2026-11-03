@@ -572,6 +572,8 @@ export * from "./opportunity";
 export * from "./opportunity-discovery";
 export * from "./opportunity-watch";
 export * from "./feasibility";
+export * from "./person-places";
+export * from "./visa";
 export * from "./form-fill";
 export * from "./form-observe";
 export * from "./form-browser-use";

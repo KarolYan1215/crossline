@@ -52,6 +52,7 @@ import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-clas
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, scoutDue } from "./public-skills";
 import { deriveNeeds, needsDue, needsToPoll, opportunityAgentOn, pollNeed, rejudge } from "./opportunities";
+import { timeSpacePass } from "./time-space";
 import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, loginBrowser, markWorkflowRun,
   openWorkflowLogin, resumeByPerson, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { loginMode } from "./browser-launch";
@@ -519,6 +520,23 @@ async function opportunityPass(workspaceId: string, checkedAt: string): Promise<
 }
 
 /**
+ * The time–space engine (docs/opportunity-agent.md §17.6–17.7): places geocoded, visas looked up, and a clash with a fixed arrangement told
+ * at once, for the opportunities still open. Same workspace and pause as discovery; the visa lookup is a model run, so it needs core spend
+ * (geocoding does not). Detached and one at a time per workspace: pacing Nominatim and a visa run can take minutes.
+ */
+const placing = new Set<string>();
+async function placePass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (!opportunityAgentOn(analysisStore, workspaceId) || paused(workspaceId, "planning") || placing.has(workspaceId)) return;
+  placing.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const models = codexSupervisor && spendAllows(await spendFor(workspaceId), "core");
+    const outcome = await timeSpacePass(analysisStore, workspaceId, { client: () => models ? accountClient(workspaceId) : undefined, cwd: repoRoot });
+    if (outcome.judged) console.info(JSON.stringify({ type: "opportunity.placed", checkedAt, workspaceId, ...outcome }));
+  } finally { placing.delete(workspaceId); }
+}
+
+/**
  * Grown workflows (docs/skills-library.md §6): reminders and scheduled runs whose time has come, the daily clean-up, and — when the
  * assistant is free, not paused and the quota allows — one errand grown into a workflow. Growing and scheduled runs go through the same
  * assistant machinery as any task (owner only, approved kinds only); reminders go out whatever the assistant is doing.
@@ -865,6 +883,7 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   if (!offPeakWait) await minePass(workspace.id, checkedAt);
   await publicSkillPass(workspace.id, checkedAt, offPeakWait);
   void opportunityPass(workspace.id, checkedAt).catch(() => undefined);
+  void placePass(workspace.id, checkedAt).catch(() => undefined);
   await portraitPass(workspace.id, checkedAt, offPeakWait);
   // The automations (docs/personal-agent.md): each one's trigger looked at, new mail's included (the intake pass recorded it).
   await automationTick(workspace.id).catch(() => undefined);

@@ -5,6 +5,7 @@ import { getStore, planToday, saveGoalSettings, saveMilestoneEdit } from "./cros
 import { requestAutoBackplan } from "./approvals";
 import { localeFor } from "./locale";
 import { tFor } from "./i18n";
+import { answerClash, clashOptions, holdEventTime, judgeOpportunity, spaceLines } from "./opportunity-space";
 
 /**
  * The web side of the opportunity agent's discovery (docs/opportunity-agent.md §5, §8): the cards for proposed needs (跟踪 / 不要) and
@@ -56,7 +57,9 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
   const sep = locale === "en" ? " " : "";
   const today = planToday(ctx, now);
   const needs = new Map(scoutNeeds(getStore(), ctx.workspaceId).map((need) => [need.id, need]));
-  return openOpportunities(ctx, today).map((row): Ask => {
+  // Judged on read from the worker's caches (§17.6): what can no longer be reached is not shown at all.
+  return openOpportunities(ctx, today).flatMap((row) => { const verdict = judgeOpportunity(ctx, row, now, locale); return verdict.state === "infeasible" ? [] : [{ row, verdict }]; })
+    .map(({ row, verdict }): Ask => {
     const deadline = nextDeadline(row, today);
     const need = row.needId ? needs.get(row.needId) : undefined;
     const left = deadline ? daysUntil(today, deadline) : undefined;
@@ -69,7 +72,8 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
       deadline ? t("截止 {{day}}（原文：{{quote}}）。", { day: deadline, quote: short(quote ?? "", 80) }) : t("页面没写截止。"),
       start && start > today ? t("最晚 {{day}} 开始准备。", { day: start }) : "",
       row.cost ? t("费用：{{amount}} {{currency}}。", { amount: row.cost.amount, currency: row.cost.currency }) : "",
-      row.location ? t("地点：{{place}}。", { place: row.location }) : "",
+      row.location && !row.place ? t("地点：{{place}}。", { place: row.location }) : "",
+      ...spaceLines(row, verdict, locale),
       facts,
       questions.length ? t("还差 {{count}} 条资格要本人确认，答案会记进资料，下次不再问。", { count: questions.length }) : "",
       row.materials.length ? t("需要：{{items}}。", { items: row.materials.slice(0, 4).join(locale === "en" ? ", " : "、") }) : "",
@@ -82,13 +86,15 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
         ? { id: "register", label: t("报名"), detail: t("交给代填；代填接上之前停在「待代填」"), recommended: !answerFields.length }
         : { id: "apply", label: t("申请"), detail: t("写一个已批准的里程碑「提交申请」，按截止倒推准备"), recommended: !answerFields.length },
       { id: "plan", label: t("加入计划"), detail: t("只写截止与准备，不代填") },
+      ...clashOptions(ctx, row, verdict, locale),
       { id: "decline", label: t("不要"), detail: t("记成偏好，同类降权"), fields: [{ id: "note", label: t("原因（可选）"), kind: "text", required: false }] },
       { id: "later", label: t("以后再说"), detail: start ? t("最晚开始日前一周再问") : t("一周后再问") }
     ];
     return {
       id: `opp:${row.id}`, kind: "opportunity_offer", entityId: row.id, line: row.lineId,
       urgency: left !== undefined && left <= 2 ? "now" : left !== undefined && left <= 7 ? "soon" : "later",
-      ...(deadline ? { dueDay: deadline } : {}), raisedAt: row.foundAt, fingerprint: `${row.updatedAt}|${row.verdict.state}`,
+      ...(deadline ? { dueDay: deadline } : {}), raisedAt: row.foundAt,
+      fingerprint: `${row.updatedAt}|${row.verdict.state}|${verdict.state}|${verdict.state === "conflict" ? verdict.clashes.map((clash) => clash.blockId).join(",") : ""}`,
       important: Boolean(need?.milestoneIds.length),
       preview: { kind: "file", href: row.url, label: row.organizer || new URL(row.url).hostname },
       title: row.organizer ? t("{{title}}（{{organizer}}）", { title: row.title, organizer: short(row.organizer, 30) }) : row.title,
@@ -120,7 +126,7 @@ function writeApplicationMilestone(ctx: AccessContext, row: StoredOpportunity, t
   return { ok: true };
 }
 
-export function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>, now = new Date()): { ok: true } | { ok: false; code: string } {
+export async function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>, now = new Date()): Promise<{ ok: true } | { ok: false; code: string }> {
   const store = getStore();
   const row = store.listOpportunities(ctx.workspaceId, { id: ask.entityId })[0];
   if (!row) return { ok: false, code: "OPPORTUNITY_NOT_FOUND" };
@@ -145,6 +151,7 @@ export function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: s
       // The form-filling track's queue: one run for this opportunity's registration host, started by the worker's form pass.
       const { terms: _terms, verdict: _verdict, decision: _decision, decidedAt: _decidedAt, laterUntil: _laterUntil, confirmedBy: _confirmedBy, updatedAt: _updatedAt, ...opportunity } = row;
       queueFormRun(store, ctx.workspaceId, { opportunity, choice: "register", at: now.toISOString() });
+      await holdEventTime(ctx, row, now);
       record("register");
       return { ok: true };
     }
@@ -153,6 +160,7 @@ export function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: s
       const written = writeApplicationMilestone(ctx, row, today);
       if (!written.ok) return written;
       store.decideOpportunity(ctx.workspaceId, row.id, optionId, now.toISOString());
+      await holdEventTime(ctx, row, now);
       record(optionId);
       return { ok: true };
     }
@@ -173,6 +181,8 @@ export function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optionId: s
       record("later");
       return { ok: true };
     }
+    case "adjust": case "adjust_move": case "adjust_skip": case "adjust_self": case "adjust_note":
+      return answerClash(ctx, row, judgeOpportunity(ctx, row, now, localeFor(ctx)), optionId, values, now);
     default: return { ok: false, code: "ASK_OPTION_UNKNOWN" };
   }
 }

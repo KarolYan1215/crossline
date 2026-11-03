@@ -25,6 +25,8 @@ import { QuotaCard } from "./quota-card";
 import { readQuota } from "../../lib/quota";
 import { NotifyLevel, NotifyTimes } from "./notify-level";
 import { TravelCard } from "./travel-card";
+import { DeviceLocationCard } from "./device-location-card";
+import { deviceLocationState } from "../../lib/device-location";
 import { PhonePush } from "./phone-push";
 import { EffectivenessCard } from "./effectiveness-card";
 import { AutomationModule, type RecentTask } from "./automation";
@@ -206,6 +208,7 @@ export default async function SettingsPage() {
                 <a className="secondary-button" href="#energy">{t("精力与手机健康")}</a></div>
             </section>
             <TravelCard initial={travelStateOf(ctx).settings} />
+            <DeviceLocationCard initial={deviceLocationState(ctx)} />
           </div>
         </section>
 
