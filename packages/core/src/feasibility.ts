@@ -301,6 +301,7 @@ export async function feasibilityOf(opportunity: Opportunity, ctx: FeasibilityCo
  *   when preparation alone no longer fits, `visa_too_late` when the visa does not;
  * - a local event more than `localMinutesMax` minutes away one way: `too_far` (conferences, competitions, internships carry their travel
  *   and cost instead); an in-person place that cannot be located for a local event: `place_unknown`;
+ * - no deadline and no start day: feasible with `dateUnconfirmed`, never `no_time_to_prepare` (a TBD date is not a deadline of today);
  * - no availability window on the event's weekday: `no_free_time`;
  * - otherwise feasible, or `conflict` with each clashing block marked fixed or movable (§17.7).
  */
@@ -355,10 +356,13 @@ export function feasibilityNow(opportunity: Opportunity, ctx: SyncFeasibilityCon
   // Latest start, in the person's local days.
   const visaLead = visa && visa.needed !== false ? visa.leadDays : 0;
   const travelDays = travel?.travelDays ?? 0;
+  // No deadline and no day it starts (「TBD」, 「2027」): the date is not known yet, so nothing can be counted back from it. It is not a
+  // deadline of today (§17.6); the opportunity stays feasible with its date unconfirmed and is judged again once a date appears.
+  const dateUnconfirmed = deadlineDay === undefined && eventDay === undefined;
   const anchor = deadlineDay ?? eventDay ?? today;
-  const prepStart = addDay(anchor, -Math.max(0, ctx.prepDays));
+  const prepStart = dateUnconfirmed ? today : addDay(anchor, -Math.max(0, ctx.prepDays));
   const separate = deadlineDay !== undefined && eventDay !== undefined && deadlineDay < eventDay;
-  const visaStart = separate ? addDay(eventDay!, -(visaLead + travelDays)) : addDay(prepStart, -(visaLead + travelDays));
+  const visaStart = dateUnconfirmed ? today : separate ? addDay(eventDay!, -(visaLead + travelDays)) : addDay(prepStart, -(visaLead + travelDays));
   const latestStart = visaStart < prepStart ? visaStart : prepStart;
   if (prepStart < today) reasons.push({ code: "no_time_to_prepare", detail: t("需提前 {{days}} 天准备，最晚 {{day}} 开始", { days: ctx.prepDays, day: prepStart }) });
   else if (visaStart < today) {
@@ -372,7 +376,8 @@ export function feasibilityNow(opportunity: Opportunity, ctx: SyncFeasibilityCon
 
   const clashes = eventDay ? eventClashes({ day: eventDay, range, travelMinutes: place.mode === "in_person" ? travel?.minutesOneWay ?? 0 : 0,
     travelDays: place.mode === "in_person" ? travelDays : 0 }, ctx.blocks) : [];
-  const shared = { ...(person ? { place: person } : {}), ...(travel ? { travel } : {}), ...(visa ? { visa } : {}), latestStart };
+  const shared = { ...(person ? { place: person } : {}), ...(travel ? { travel } : {}), ...(visa ? { visa } : {}), latestStart,
+    ...(dateUnconfirmed ? { dateUnconfirmed: true as const } : {}) };
   return clashes.length ? { state: "conflict", clashes, ...shared } : { state: "feasible", ...shared };
 }
 

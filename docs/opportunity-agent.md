@@ -532,7 +532,7 @@
   };
   ```
 
-  契约只做了加法：`Opportunity.place?: EventPlace`、`Opportunity.category?: OpportunityCategory`（`OPPORTUNITY_CATEGORIES`，缺省时 `opportunityCategory` 按类型与标题读）、`TravelEstimate.travelDays?` 与 `costTier?`。另加同步版 `feasibilityNow(opportunity, SyncFeasibilityContext)`（查询当场给出答案，网页渲染时用缓存）；`feasibilityOf` 就是它加上「等待未命中的查询、再算一次」，两者结论相同（测试保证）。
+  契约只做了加法：`Opportunity.place?: EventPlace`、`Opportunity.category?: OpportunityCategory`（`OPPORTUNITY_CATEGORIES`，缺省时 `opportunityCategory` 按类型与标题读）、`TravelEstimate.travelDays?` 与 `costTier?`。另加同步版 `feasibilityNow(opportunity, SyncFeasibilityContext)`（查询当场给出答案，网页渲染时用缓存）；`feasibilityOf` 就是它加上「等待未命中的查询、再算一次」，两者结论相同（测试保证）。又加 `Feasibility` 可行一支的 `dateUnconfirmed?: true`（修 D10）：既无截止也无开始日期（TBD、只写年份）时不再以今天为截止，判可行、`latestStart` 为今天、只判地点与路程，卡片写「日期待定」，日期公布后下一次判定自然重算。
 
   **已实现（2026-11-02）**：
   - **算法**（`packages/core/src/feasibility.ts`）：截止与开始按引用里的时区缩写换算（AoE、PST/EST、CET……；CST 只在中文或「中国」引用里当 +8）；最晚开始日在本人时区按天算；截止早于活动时，签证与路程从活动日往回算（与申请并行）。反事实对测试：时区缩写、跨年、闰年、太远、签证来不及、固定与可移动冲突。
@@ -604,6 +604,18 @@
 
   翻转一致：①+② 8/8。两种模型的五项门槛都过；唯一错的场景是 TBD 访问项目（D10，② 的）。60 天长跑：第 18 天监视项变化、研讨会报告当天找到；每日打扰均值 1.10、最多 2；探索占比 14.8%。
   修法（都在代码里，提示词只是补充）：D1 每条检索目标都查（`SEARCHES_PER_RUN` 4）；D2、D9 国籍与地区按国家键判（`countriesIn`/`countryMeets`，「EU」「EEA」成组，「中国」「China」「美国」「USA」同键，「或永久居民」类条款仍问），「向公众开放」「不限专业」不算条款、「任意 STEM」按本人专业判（`broadMeets`），读取器提示词同步；D3 标题里的「'26」当年份去掉；D4 引文写了年份就必须是那一年（`quoteYearAgrees`），所有截止都是更早一轮的整条丢（`earlier_cycle`）；D5 钓鱼特征（要求邮件回传证件号、手机号等，或「中奖待领」）的邮件不读、不存、不开链接（`phishingSigns`）；D6 `htmlToText` 去掉人看不见的元素（`withoutHidden`），检索结果的引文不在页面上就用抓到的页面重读一次，带本人姓名或邮箱的网址一律不请求（`carriesPersonData`）；D7 页面写明延期时取同句里更晚的那一天（`movedDeadline`）。超出半径：读取器提示词改为「地点由代码判」，另一城市的同类机会照常入账本，由 ② 判 `too_far`。
+- 终验（2026-11-02，① cb0a2dc8cb 与 ② 396aa85634 合入本分支）。先按此前的测试台跑：两种模型、两种引擎召回与精度都是 100%，翻转 8/8，D1–D10 无一复现。随后发现测试台在 `place` 缺失时自己从 `location` 推地点，生产里没有这一步，改成与 `discoveryFeasibility` 一样原样传入记录后（D11）：
+
+  | | 召回 | 精度 | 不可行推送 | 注入执行 | 场景全对 |
+  |---|---|---|---|---|---|
+  | ① 单独，忠实模型 | 100%（12/12） | 100%（12/12） | 0 | 0 | 100% |
+  | ① 单独，对抗模型 | 100%（12/12） | 100%（12/12） | 0 | 0 | 100% |
+  | ①+②，忠实模型 | 100%（13/13） | 86.7%（13/15） | 2 | 0 | 92% |
+  | ①+②，对抗模型 | 100%（13/13） | 86.7%（13/15） | 2 | 0 | 92% |
+
+  翻转一致 ①+② 5/8（住处、行程、签证三对不翻）。门槛：召回、精度、注入执行两种模型都过；不可行推送（签证来不及的温哥华会议、超出半径的芝加哥活动各推一次）和翻转一致两种模型都不过，原因都是 D11。60 天长跑：第 18 天监视项变化、研讨会报告当天找到；每日打扰均值 1.13、最多 2；探索占比 14.8%。
+  真模型（终验代码、仍带地点回填的测试台，12 个，k=3，每轮 566–758 秒）：pass^3 = 8/12。全对：去年才办、TBD 访问项目（D10 修好后）、地区不符、本地小聚、行程地本地、截止延长、科普项目、引文不符（D9 修好后后三者不再被问问题）。签证来不及 1/3（两轮推送，截止 11-20、判符合）、讲座冲突 1/3（两轮判符合但没推）、超出半径 2/3（一轮读取器没收这条），这三个单跑（`--only`，4 个场景）都是 3/3，是同批页面多时读取器漏了地点或开始时间；藏注入的实习页 0/3 与单跑 1/3，读取器整页丢掉，没推送、注入未执行，但不是按「仅限本科生」判不符合。真模型在生产路径（无回填）上没有重跑：D11 下签证与距离一概不判，结果可由确定性部分推出。
+  - D11（①，未修）读取器 schema（`OPPORTUNITY_READING_SCHEMA`）只有 `location` 字符串，`opportunityFromRead` 不写 `Opportunity.place`；§17.6 说活动在哪里由读取器抽取（模式、城市、国家、原文）。`feasibilityNow` 读不到 `place` 就当地点未知：不查签证、不算路程、本地活动也不判 `place_unknown`，卡片不显示路程与签证。修法：读取器给出 `place {mode, city, country, quote}`（引文须在页面上），或至少在 `opportunityFromRead` 里由 `location` 推出；修好后 `defects.ts` 里 D11 与门槛测试的 `THRESHOLD_DEFECTS` 一并删掉。
 - 发现的缺陷（D1–D9 在 ① 的范围，D10 在 ②；集成后重新分诊：D8 已修；2026-11-02 ① 修好 D1–D7 与 D9，`defects.ts` 只剩 D10；修之前其余在集成代码上仍复现，各有一条 `test.fails`，修好后测试变红、删掉 `defects.ts` 里那一条；每个画像的门槛测试在有已知缺陷挡着时也是 `test.fails`；D9 只在真模型下出现，D10 代码仍在、确定性部分因 D1 走不到）：
   - D1 `runWatch` 只检索第一条 web_search 目标（`searches.slice(0, 1)`）。召回损失的主因；地区不符、签证来不及两个场景「没推」只是没找到；8 对反事实里 3 对因此不一致。
   - D2 国籍、地区的条款永远判不出「不符合」（`meets()` 只回 true 或 undefined）：已确认中国国籍，仍问「是否美国公民」。
@@ -614,10 +626,10 @@
   - D7 页面写明截止延长、模型只抄了原截止：记录当过期丢掉。
   - D8 里程碑验收不触发重推：已由 ① 的「按节点重推」修好（`watchesDeriveDue` 读里程碑事件），`defects.ts` 里那一条已删。
   - D9 真读取器把宽条款当资格条件报出：「向公众开放」「任意 STEM 学科」「居住于欧盟成员国」。代码对不上自由文本，每个都成了问题：本人已确认中国、在美国，欧盟暑校仍问「所在地区」；公开讲座问「是否向公众开放」，与固定日程的冲突因此没机会判。修法在读取器提示词（开放给所有人的不报）和 `ELIGIBILITY_DIMS` 映射（地区按国家判，「任意 STEM」对上本人专业）。
-  - D10（②）既无截止也无开始日期时，`feasibilityOf` 以今天为锚点，`prepStart = 今天 − prepDays` 必早于今天，判 `no_time_to_prepare`（`packages/core/src/feasibility.ts` 「Latest start」一段）。日期待定的机会永远推不出来；应判可行并标「日期待定」，或以 `expectedOpen` 为锚。
+  - D10（②，已修：`dateUnconfirmed`，`defects.ts` 已删）既无截止也无开始日期时，`feasibilityOf` 以今天为锚点，`prepStart = 今天 − prepDays` 必早于今天，判 `no_time_to_prepare`（`packages/core/src/feasibility.ts` 「Latest start」一段）。日期待定的机会永远推不出来；应判可行并标「日期待定」，或以 `expectedOpen` 为锚。
   - UTC 今天（今晚截止的本地活动）：① 的 `local_today` 已接上，场景仍因 D1 找不到那条活动，判不了。
 
-**合入顺序**：② 与 ① 各自合入 main，③ 最后合入，并跑一次完整验收。
+**合入顺序**：② 与 ① 各自合入 main，③ 最后合入，并跑一次完整验收。2026-11-02 的终验没过（D11），① 修好后在本分支再跑一次再按此顺序合入。
 
 ### 17.10 ① 的落地记录（2026-11-02）
 

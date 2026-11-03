@@ -5,6 +5,7 @@
  *   pnpm exec tsx scripts/opportunity-world.ts                 the deterministic report (what CI runs, as numbers)
  *   pnpm exec tsx scripts/opportunity-world.ts --live[=3]      plus a real model reading the world's tricky pages k times, reported as pass^k
  *   … --out=<file.md>                                          also write the report to a file
+ *   … --only=<id>,<id>                                         the live run reads only these scenarios
  *
  * `--live` runs the real reader Skill (`crossline-opportunity-reader`) on a Codex home of its own: `CROSSLINE_STATE_DIR` (default
  * `C:\Users\karol\codex-home-opp`, which holds `codex-home`, signed in beforehand). The resident app's Codex home is never used. The model
@@ -22,6 +23,7 @@ const args = process.argv.slice(2);
 const liveArg = args.find((arg) => arg.startsWith("--live"));
 const rounds = liveArg ? Number(liveArg.split("=")[1] ?? 3) || 3 : 0;
 const outFile = args.find((arg) => arg.startsWith("--out="))?.slice("--out=".length);
+const only = args.find((arg) => arg.startsWith("--only="))?.slice("--only=".length).split(",").filter(Boolean);
 if (rounds) process.env.CROSSLINE_STATE_DIR ??= "C:\\Users\\karol\\codex-home-opp";
 
 // The runner's per-run usage lines are not part of the report.
@@ -108,7 +110,8 @@ async function live(k: number) {
       requiredSkills: [OPPORTUNITY_NEEDS, OPPORTUNITY_READER] } }) as unknown as { client: unknown; stop: () => Promise<void> };
   const world = buildWorld((await import("../apps/worker/src/testing/opportunity-world/person")).BASE_PERSON);
   const subset = SCENARIOS.filter((scenario) => (scenario.scope ?? "main") === "main" && !scenario.requires?.some((need) => need !== "feasibility")
-    && scenario.urls.every((url) => world.pages.has(new URL(url).toString())) && (harness.feasibilityOf || !scenario.requires?.length));
+    && scenario.urls.every((url) => world.pages.has(new URL(url).toString())) && (harness.feasibilityOf || !scenario.requires?.length)
+    && (!only || only.includes(scenario.id)));
   const base = harness.watchEngine(harness.feasibilityOf);
   const liveEngine = (): typeof base => ({
     ...base,
@@ -142,7 +145,10 @@ async function live(k: number) {
           // What the record says, so a miss can be told apart: the model's reading or the code's judgement.
           const rows = run.opportunities.filter((row) => verdict.scenario.urls.some((url) => new URL(url).toString() === new URL(row.url).toString()));
           const said = rows.map((row) => `${row.verdict.state}${row.verdict.state === "unknown" ? `（${row.verdict.questions.map((item) => item.question).join("；")}）` : ""}`
-            + ` 截止 ${row.deadlines.map((item) => item.day).join("、") || "无"}`).join("；") || "账本里没有";
+            + ` 截止 ${row.deadlines.map((item) => item.day).join("、") || "无"}`
+            + ` · ${row.kind}${row.startsAt ? ` 开始 ${row.startsAt.day}` : ""}${row.location ? ` @${row.location}` : " 无地点"}`
+            + ` · 时空 ${!row.feasibility ? "未判" : row.feasibility.state === "infeasible" ? row.feasibility.reasons.map((item) => item.code).join("、")
+              : `${row.feasibility.state}${row.feasibility.visa ? "（签证已判）" : ""}`}`).join("；") || "账本里没有";
           notes.set(verdict.scenario.id, [...(notes.get(verdict.scenario.id) ?? []),
             `第 ${round} 轮 ${verdict.got}${verdict.problems.length ? `：${verdict.problems.join("；")}` : ""}（${said}）`]);
         }

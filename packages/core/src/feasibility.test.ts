@@ -100,6 +100,19 @@ describe("feasibilityOf: counterfactual pairs", () => {
     const ok = await feasibilityOf(item, context({ now, prepDays: 5 }));
     expect(ok.state === "feasible" && ok.latestStart).toBe("2026-12-30");
   });
+  it("date to be announced: no deadline and no start day is feasible with the date unconfirmed; the same with a near deadline is not", async () => {
+    // D10: the TBD visiting program used to be anchored on today and always came back no_time_to_prepare.
+    const item = (over: Partial<Opportunity> = {}) => opportunity({ kind: "application", title: "Visiting Student Program 2027",
+      startsAt: { day: "2027", quote: "Summer 2027 (dates TBD)" }, place: { mode: "in_person", city: "Berlin", country: "Germany", quote: "Berlin" }, ...over });
+    const tbd = await feasibilityOf(item(), context({ prepDays: 14, citizenship: "China", visa: () => visaOf(35) }));
+    expect(tbd).toMatchObject({ state: "feasible", dateUnconfirmed: true, latestStart: "2026-11-02", visa: { leadDays: 35 } });
+    const dated = await feasibilityOf(item({ deadlines: [{ day: "2026-11-10", quote: "Apply by November 10, 2026" }] }), context({ prepDays: 14 }));
+    expect(dated.state === "infeasible" && dated.reasons[0]?.code).toBe("no_time_to_prepare");
+    const datedLater = await feasibilityOf(item({ deadlines: [{ day: "2027-01-10", quote: "Apply by January 10, 2027" }] }),
+      context({ prepDays: 14, citizenship: "China", visa: () => visaOf(35) }));
+    expect(datedLater.state).toBe("feasible");
+    expect(datedLater.state === "feasible" && datedLater.dateUnconfirmed).toBeUndefined();
+  });
   it("leap year: counting back over February 29", async () => {
     const now = new Date("2028-02-20T15:00:00Z");
     const item = opportunity({ kind: "application", title: "Spring program", deadlines: [{ day: "2028-03-01", quote: "Due March 1, 2028" }] });
