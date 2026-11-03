@@ -532,7 +532,7 @@
   };
   ```
 
-  契约只做了加法：`Opportunity.place?: EventPlace`、`Opportunity.category?: OpportunityCategory`（`OPPORTUNITY_CATEGORIES`，缺省时 `opportunityCategory` 按类型与标题读）、`TravelEstimate.travelDays?` 与 `costTier?`。另加同步版 `feasibilityNow(opportunity, SyncFeasibilityContext)`（查询当场给出答案，网页渲染时用缓存）；`feasibilityOf` 就是它加上「等待未命中的查询、再算一次」，两者结论相同（测试保证）。
+  契约只做了加法：`Opportunity.place?: EventPlace`、`Opportunity.category?: OpportunityCategory`（`OPPORTUNITY_CATEGORIES`，缺省时 `opportunityCategory` 按类型与标题读）、`TravelEstimate.travelDays?` 与 `costTier?`。另加同步版 `feasibilityNow(opportunity, SyncFeasibilityContext)`（查询当场给出答案，网页渲染时用缓存）；`feasibilityOf` 就是它加上「等待未命中的查询、再算一次」，两者结论相同（测试保证）。又加 `Feasibility` 可行一支的 `dateUnconfirmed?: true`（修 D10）：既无截止也无开始日期（TBD、只写年份）时不再以今天为截止，判可行、`latestStart` 为今天、只判地点与路程，卡片写「日期待定」，日期公布后下一次判定自然重算。
 
   **已实现（2026-11-02）**：
   - **算法**（`packages/core/src/feasibility.ts`）：截止与开始按引用里的时区缩写换算（AoE、PST/EST、CET……；CST 只在中文或「中国」引用里当 +8）；最晚开始日在本人时区按天算；截止早于活动时，签证与路程从活动日往回算（与申请并行）。反事实对测试：时区缩写、跨年、闰年、太远、签证来不及、固定与可移动冲突。
@@ -603,7 +603,7 @@
   - D7 页面写明截止延长、模型只抄了原截止：记录当过期丢掉。
   - D8 里程碑验收不触发重推：已由 ① 的「按节点重推」修好（`watchesDeriveDue` 读里程碑事件），`defects.ts` 里那一条已删。
   - D9 真读取器把宽条款当资格条件报出：「向公众开放」「任意 STEM 学科」「居住于欧盟成员国」。代码对不上自由文本，每个都成了问题：本人已确认中国、在美国，欧盟暑校仍问「所在地区」；公开讲座问「是否向公众开放」，与固定日程的冲突因此没机会判。修法在读取器提示词（开放给所有人的不报）和 `ELIGIBILITY_DIMS` 映射（地区按国家判，「任意 STEM」对上本人专业）。
-  - D10（②）既无截止也无开始日期时，`feasibilityOf` 以今天为锚点，`prepStart = 今天 − prepDays` 必早于今天，判 `no_time_to_prepare`（`packages/core/src/feasibility.ts` 「Latest start」一段）。日期待定的机会永远推不出来；应判可行并标「日期待定」，或以 `expectedOpen` 为锚。
+  - D10（②，已修：`dateUnconfirmed`，`defects.ts` 已删）既无截止也无开始日期时，`feasibilityOf` 以今天为锚点，`prepStart = 今天 − prepDays` 必早于今天，判 `no_time_to_prepare`（`packages/core/src/feasibility.ts` 「Latest start」一段）。日期待定的机会永远推不出来；应判可行并标「日期待定」，或以 `expectedOpen` 为锚。
   - UTC 今天（今晚截止的本地活动）：① 的 `local_today` 已接上，场景仍因 D1 找不到那条活动，判不了。
 
 **合入顺序**：② 与 ① 各自合入 main，③ 最后合入，并跑一次完整验收。

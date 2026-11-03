@@ -52,6 +52,7 @@ export function spaceLines(row: StoredOpportunity, verdict: Feasibility, locale:
       : visa.verified ? t("签证：需要，约 {{days}} 天（已按官方页面核实）。", { days: visa.leadDays })
       : t("签证：可能需要，按 {{days}} 天预留（未核实）。", { days: visa.leadDays }));
   }
+  if (verdict.state === "feasible" && verdict.dateUnconfirmed) out.push(t("日期待定：截止和举办日期都还没公布，公布后再核对时间、签证和日程。"));
   if (verdict.state === "conflict") for (const clash of verdict.clashes) out.push(`${clashSentence(clash, locale)}${locale === "en" ? "." : "。"}`);
   return out;
 }

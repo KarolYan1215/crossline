@@ -4,7 +4,8 @@ import type { Persona } from "./model";
 /**
  * Real defects the synthetic world found in the code it runs (§17.9 ③), each with the scenario that shows it and the track that owns
  * the fix. The suite marks the affected tests `test.fails`; a fix makes them pass, the test turns red, and the entry here is removed. Fixed
- * so far: D8 (a reached milestone did not re-derive the watches), by track ①'s 「按节点重推」 (`watchesDeriveDue` reads milestone events).
+ * so far: D8 (a reached milestone did not re-derive the watches), by track ①'s 「按节点重推」 (`watchesDeriveDue` reads milestone events); D10 (a TBD date read as a deadline of today, so never pushed), by
+ * track ②'s `dateUnconfirmed` (`packages/core/src/feasibility.ts`).
  */
 export type Defect = { id: string; owner: string; where: string; what: string };
 
@@ -27,9 +28,7 @@ export const DEFECTS: Defect[] = [
     what: "截止延长的比赛，模型只抄了原截止 10-30：记录被当过期丢掉，页面上写着的新截止 11-14 没人看。" },
   // Seen only with the real reader (scripts/opportunity-world.ts --live): the deterministic run never reaches these pages because of D1.
   { id: "D9", owner: "①（A 线读取与资格判定）", where: "crossline-opportunity-reader 的条款提取；ELIGIBILITY_DIMS 映射",
-    what: "真读取器把「向公众开放」「任意 STEM 学科」「居住于欧盟成员国」报成资格条款，代码对不上自由文本，三轮都成了问题：欧盟暑校问所在地区，公开讲座问是否向公众开放（与固定日程的冲突因此没判）。" },
-  { id: "D10", owner: "②（时空可行性）", where: "packages/core/src/feasibility.ts feasibilityOf 「Latest start」",
-    what: "既无截止也无开始日期时以今天为锚点，prepStart = 今天 − prepDays 必早于今天，判 no_time_to_prepare：日期待定的访问项目找到、判符合，却永远推不出来。" }
+    what: "真读取器把「向公众开放」「任意 STEM 学科」「居住于欧盟成员国」报成资格条款，代码对不上自由文本，三轮都成了问题：欧盟暑校问所在地区，公开讲座问是否向公众开放（与固定日程的冲突因此没判）。" }
 ];
 
 /** Scenario id → the defects that make it fail, for which personas; `unless` drops the entry once that capability is there. */
