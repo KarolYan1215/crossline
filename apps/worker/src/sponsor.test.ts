@@ -24,7 +24,7 @@ function setup(withEvaluation = true) {
     writeFileSync(path.join(dataDir, "sponsor.json"), JSON.stringify({ evaluations: [{ model: MODEL, record, yuanPerRun: 0.02, tokens: { input: 100_000, cached: 0, output: 10_000, runs: 10 }, version: SPONSOR_EVAL_VERSION }] }));
   }
   const store = new CrosslineStore(":memory:");
-  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {}, workspaceOfPath: () => undefined };
   const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: `${MODEL}=4:16:1024` } as NodeJS.ProcessEnv;
   let sponsor: ReturnType<typeof createSponsorService> | undefined;
   const providers = createModelProviderService({ store, cwd: dataDir, gateway, signedIn: () => false, client: async () => undefined,
@@ -88,7 +88,7 @@ test("an evaluation logs every run with what the validator sent back, and a mode
   const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-eval-"));
   dirs.push(dataDir);
   const store = new CrosslineStore(":memory:");
-  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {}, workspaceOfPath: () => undefined };
   const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: "org/Broken=1:2:1024" } as NodeJS.ProcessEnv;
   // Every answer is an empty object: valid JSON that no case's schema accepts, so each run is sent back for repair and still fails.
   const { rpc } = scriptedRuntime(["crossline:crossline-conformance", "crossline:crossline-onboarding"], () => "{}", { usage: { input: 1000, output: 100 } });
@@ -127,7 +127,7 @@ test("a spent key stops the measurement without a record, so the candidate is me
   const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-spent-"));
   dirs.push(dataDir);
   const store = new CrosslineStore(":memory:");
-  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {}, workspaceOfPath: () => undefined };
   const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: `${MODEL}=4:16:1024,org/Other=1:2:1024` } as NodeJS.ProcessEnv;
   const record = summarizeConformance({ providerId: "sponsor", model: MODEL, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
     conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms: 900 }))));
@@ -160,7 +160,7 @@ test("a measurement the runtime cut short is not a record: it stops there, and a
   const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-down-"));
   dirs.push(dataDir);
   const store = new CrosslineStore(":memory:");
-  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {}, workspaceOfPath: () => undefined };
   const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: `${MODEL}=2:8:1024,org/Glm=0.8:2.8:1024`,
     CROSSLINE_SPONSOR_PLANNING_MODEL: "org/Glm" } as NodeJS.ProcessEnv;
   const cases = conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => item.id));
@@ -201,7 +201,7 @@ test("a candidate off the frontier is neither measured again nor used, for the c
   const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-frontier-"));
   dirs.push(dataDir);
   const store = new CrosslineStore(":memory:");
-  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {}, workspaceOfPath: () => undefined };
   // "org/Dear" costs more per run and is slower at the same pass rate; "org/New" has no record yet.
   const env = { CROSSLINE_SPONSOR_API_KEY: "sk-test", CROSSLINE_SPONSOR_MODELS: `org/Dear=8:28:1024,${MODEL}=2:8:1024,org/New=0.4:3.2:262` } as NodeJS.ProcessEnv;
   const record = (model: string, ms: number) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
@@ -237,7 +237,7 @@ test("the owner's main and planning models are held whatever the automatic choic
   const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-pinned-"));
   dirs.push(dataDir);
   const store = new CrosslineStore(":memory:");
-  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {}, workspaceOfPath: () => undefined };
   // As on 2026-10-21: "org/Cheap" is cheaper and faster than both, but needed repairs where they did not.
   const models = `${MODEL}=2:8:1024,org/Glm=0.8:2.8:1024,org/Cheap=0.4:3.2:1024`;
   const record = (model: string, ms: number, repaired: boolean) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
@@ -277,7 +277,7 @@ test("a model the owner named for a use is never pruned, even by a candidate tha
   const dataDir = mkdtempSync(path.join(tmpdir(), "sponsor-pinned-prune-"));
   dirs.push(dataDir);
   const store = new CrosslineStore(":memory:");
-  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {} };
+  const gateway = { urlFor: (workspaceId: string, providerId: string) => `http://127.0.0.1:1/${workspaceId}/${providerId}`, port: 1, close: async () => {}, workspaceOfPath: () => undefined };
   const record = (model: string, ms: number) => summarizeConformance({ providerId: "sponsor", model, runtimeVersion: RUNTIME_VERSION, ranAt: NOW.toISOString() },
     conformanceCases().flatMap((item) => Array.from({ length: item.runs }, () => ({ caseId: item.id, ok: true, repairs: 0, ms }))));
   const tokens = { input: 100_000, cached: 0, output: 10_000, runs: 10 };

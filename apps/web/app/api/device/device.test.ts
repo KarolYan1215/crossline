@@ -123,11 +123,9 @@ test("the 这台电脑 card makes, shows and revokes the token; a revoked token 
   expect((await send(activity, "/api/device/activity", made.token, "activity:after000", { consents })).status).toBe(401);
 });
 
-test("「作为算力节点」: only the runtime owner's account may switch it on; the card shows what the hosted worker last saw of the node", async () => {
+test("「作为算力节点」: any account may switch it on for itself (方案 C); the card shows what the hosted worker last saw of the node", async () => {
   const post = (enabled: boolean) => compute(new Request("https://app.crossline.lol/api/device/compute", { method: "POST", body: JSON.stringify({ enabled }) }));
-  expect(await (await computeStatus(new Request("https://app.crossline.lol/api/device/compute"))).json()).toMatchObject({ available: false, enabled: false });
-  expect((await post(true)).status).toBe(403);
-  store.setSetting(ctx.workspaceId, RUNTIME_OWNER_SETTING, "1");
+  expect(await (await computeStatus(new Request("https://app.crossline.lol/api/device/compute"))).json()).toMatchObject({ available: true, enabled: false });
   expect(await (await post(true)).json()).toMatchObject({ ok: true, available: true, enabled: true });
   store.setSetting(ctx.workspaceId, NODE_STATUS_SETTING, JSON.stringify({ state: "ready", host: "KAROL-PC", codex: "0.163.0", at: "2026-10-23T18:00:00.000Z" }));
   expect(await (await computeStatus(new Request("https://app.crossline.lol/api/device/compute"))).json()).toMatchObject({ enabled: true, status: { state: "ready", host: "KAROL-PC" } });

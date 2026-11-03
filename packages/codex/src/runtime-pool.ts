@@ -8,7 +8,9 @@ import type { CodexRpcBoundary } from "./index";
  * A conversation's later turn goes back to the runtime its thread was started on; if that one is gone the turn lands elsewhere and is
  * answered `SKILL_THREAD_LOST`, which every conversation already rebuilds from.
  *
- * Anything asked of the pool outside a run (the quota, sign-in, a status read) is this server's runtime's to answer.
+ * Anything asked of the pool outside a run (the quota, sign-in, a status read) is this server's runtime's to answer, unless this server's
+ * runtime cannot serve the account (`localUsable` false: another account's computer is its only model, 方案 C): then the strongest node
+ * answers, and a run waits on a full node rather than landing on a runtime that has no sign-in.
  */
 export type PoolMember = { id: string; client: CodexRpcBoundary; capacity: number; priority: number };
 export type BoundRun = { client: CodexRpcBoundary; member: string; release: () => void };
@@ -21,7 +23,7 @@ export type RuntimePool = CodexRpcBoundary & {
 export const LOCAL_MEMBER = "server";
 const THREADS_MAX = 2_000;
 
-export function createRuntimePool(local: CodexRpcBoundary, members: () => PoolMember[]): RuntimePool {
+export function createRuntimePool(local: CodexRpcBoundary, members: () => PoolMember[], options: { localUsable?: () => boolean } = {}): RuntimePool {
   const inFlight = new Map<string, number>();
   /** Which member each thread a node started lives on; a thread not here is this server's. */
   const threads = new Map<string, string>();
@@ -52,23 +54,33 @@ export function createRuntimePool(local: CodexRpcBoundary, members: () => PoolMe
     return wrapped;
   };
   const count = (id: string) => inFlight.get(id) ?? 0;
+  const localUsable = () => { try { return options.localUsable?.() ?? true; } catch { return true; } };
+  /** Who answers what is asked outside a run. */
+  const answerer = (): CodexRpcBoundary => {
+    if (localUsable()) return local;
+    const first = [...members()].sort((a, b) => b.priority - a.priority)[0];
+    return first ? wrap(first) : local;
+  };
 
   function choose(hint?: { threadId?: string }): { id: string; client: CodexRpcBoundary } {
     const present = members();
     const owner = hint?.threadId ? threads.get(hint.threadId) : undefined;
     if (hint?.threadId) {
-      if (!owner) return { id: LOCAL_MEMBER, client: local };
-      const member = present.find((item) => item.id === owner);
+      if (!owner && localUsable()) return { id: LOCAL_MEMBER, client: local };
+      const member = owner ? present.find((item) => item.id === owner) : undefined;
       if (member) return { id: member.id, client: wrap(member) };
       // Its node is gone: the turn goes where a new run would, and is told its thread is lost there.
     }
-    const open = present.filter((member) => count(member.id) < member.capacity)
-      .sort((a, b) => b.priority - a.priority || count(a.id) / a.capacity - count(b.id) / b.capacity);
-    return open[0] ? { id: open[0].id, client: wrap(open[0]) } : { id: LOCAL_MEMBER, client: local };
+    const byLoad = (a: PoolMember, b: PoolMember) => b.priority - a.priority || count(a.id) / a.capacity - count(b.id) / b.capacity;
+    const open = present.filter((member) => count(member.id) < member.capacity).sort(byLoad);
+    if (open[0]) return { id: open[0].id, client: wrap(open[0]) };
+    // Every node full: this server's runtime, unless it has no model for the account, when the least loaded node takes one more.
+    const fallback = localUsable() ? undefined : [...present].sort(byLoad)[0];
+    return fallback ? { id: fallback.id, client: wrap(fallback) } : { id: LOCAL_MEMBER, client: local };
   }
 
   return {
-    request: (method, params) => local.request(method, params),
+    request: (method, params) => answerer().request(method, params),
     onNotification: (handler) => local.onNotification(handler),
     ...(local.onServerRequest ? { onServerRequest: (handler: Parameters<NonNullable<CodexRpcBoundary["onServerRequest"]>>[0]) => local.onServerRequest!(handler) } : {}),
     bindRun(hint) {

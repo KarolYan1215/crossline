@@ -1,10 +1,9 @@
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { computeNodeStatus, setComputeNode } from "../../../../lib/device";
 import { pairedNode } from "../../../../lib/node-pairing";
-import { tOf } from "../../../../lib/locale";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
 
-/** 「作为算力节点」 on the hosted 「这台电脑」 card (docs/compute-node.md): whether this account may, whether it is on, what the node did last. */
+/** 「作为算力节点」 on the hosted 「这台电脑」 card (docs/compute-node.md): whether it is on, what the node did last. */
 export async function GET(request: Request) {
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
@@ -18,6 +17,5 @@ export async function POST(request: Request) {
   if ("response" in access) return access.response;
   const body = await request.json().catch(() => ({})) as { enabled?: unknown };
   const view = setComputeNode(access.ctx.workspaceId, body.enabled === true);
-  if (!view.available) return Response.json({ ok: false, code: "NODE_OWNER_ONLY", message: tOf(access.ctx)("只有这台服务器运行时的主人账号可以开启。") }, { status: 403 });
   return Response.json({ ok: true, ...view });
 }

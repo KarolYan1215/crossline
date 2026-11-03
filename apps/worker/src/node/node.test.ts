@@ -64,11 +64,19 @@ async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; dea
   gatewayServer = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
-    request.on("end", () => { response.writeHead(200, { "content-type": "text/plain" }); response.write(`gateway ${request.method} ${request.url} `); response.end(body); });
+    request.on("end", () => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.write(`gateway ${request.method} ${request.url} ${body}\n`);
+      // What the chat bridge ends a stream with: the usage the hub bills from, split across two writes.
+      const completed = JSON.stringify({ type: "response.completed", response: { usage: { input_tokens: 120, output_tokens: 30, total_tokens: 150 } } });
+      response.write(`data: ${completed.slice(0, 20)}`);
+      response.end(`${completed.slice(20)}\n\n`);
+    });
   });
   await new Promise<void>((resolve) => gatewayServer!.listen(0, "127.0.0.1", resolve));
   const gateway = `http://127.0.0.1:${(gatewayServer.address() as { port: number }).port}`;
   const statuses: NodeStatus[] = [];
+  const metered: Array<{ workspaceId: string; request: Record<string, unknown>; usage: Record<string, unknown> }> = [];
   hub = await createNodeHub({
     port: 0,
     authenticate: (token) => token === "good-token-0123456789abcdef" && (options.tokenValid?.() ?? true) ? "ws-owner" : undefined,
@@ -79,6 +87,9 @@ async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; dea
     imageRoots: () => ["/srv/data"],
     readFile: (file) => { if (file === "/srv/data/shot.png") return Buffer.from("PNG-BYTES"); throw new Error("ENOENT"); },
     gateway: () => gateway,
+    // Two routes: this account's, and another account's a node must never reach.
+    gatewayWorkspace: (requestPath) => requestPath.startsWith(`/${OWN_ROUTE}/`) ? "ws-owner" : requestPath.startsWith(`/${OTHER_ROUTE}/`) ? "ws-other" : undefined,
+    meter: (workspaceId, request, usage) => metered.push({ workspaceId, request, usage }),
     serverCodex: () => "crossline/0.163.0 (Linux)",
     prepare: async (client) => { await client.request("plugin/install", { marketplacePath: MARKET, pluginName: "crossline" }); },
     onStatus: (_ws, status) => statuses.push(status),
@@ -89,11 +100,13 @@ async function setUp(options: { nodeCodex?: string; allowed?: () => boolean; dea
   const agent = startNodeAgent({ url: `http://127.0.0.1:${hub.port}`, token: "good-token-0123456789abcdef", dir, spawn: runtime.spawn, backoffMs: [60_000], refusedWaitMs: 60_000,
     role: options.role ?? "device", capacity: 3, host: "PC-A", ...(options.browsers ? { browsers: options.browsers } : {}) });
   stopAgent = agent.stop;
-  return { runtime, agent, statuses, gateway };
+  return { runtime, agent, statuses, gateway, metered };
 }
+const OWN_ROUTE = "a".repeat(32);
+const OTHER_ROUTE = "b".repeat(32);
 
 test("a connected node is prepared through its own runtime, gets the server's plugin files mirrored, and then serves the owner's runs", async () => {
-  const { runtime, statuses, gateway } = await setUp();
+  const { runtime, statuses, gateway, metered } = await setUp();
   const client = await until(() => hub!.clientFor("ws-owner"));
   expect(statuses.at(-1)).toMatchObject({ state: "ready", codex: "0.163.0" });
   // The plugin's directory was mirrored on the node, and the install pointed at the mirror.
@@ -104,16 +117,26 @@ test("a connected node is prepared through its own runtime, gets the server's pl
   expect(existsSync(path.join(dir, "mirror", "srv", "repo", "skills", "marketplace", "plugins", "crossline", "skills", "a", "SKILL.md"))).toBe(true);
 
   // A structured run: its working directory becomes the node's own, a provider's base_url the node's relay to the server's gateway.
-  await client.request("thread/start", { cwd: "/srv/repo", sandbox: "read-only", config: { "model_providers.sponsor": { base_url: `${gateway}/route-1/v1` } } });
+  await client.request("thread/start", { cwd: "/srv/repo", sandbox: "read-only", config: { "model_providers.sponsor": { base_url: `${gateway}/${OWN_ROUTE}` } } });
   const start = runtime.requests.find((request) => request.method === "thread/start")!;
   expect(start.params.cwd).toBe(path.join(dir, "work"));
   const baseUrl = (start.params.config as Record<string, { base_url: string }>)["model_providers.sponsor"]!.base_url;
-  expect(baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/route-1\/v1$/);
+  expect(baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/a{32}$/);
   expect(baseUrl.startsWith(gateway)).toBe(false);
   // The relay carries a request over the connection to the server's gateway and streams the answer back.
-  const relayed = await fetch(`${baseUrl}/chat/completions`, { method: "POST", body: "hello" });
+  const relayed = await fetch(`${baseUrl}/responses`, { method: "POST", headers: { "x-crossline-skill": "crossline-step-planner" },
+    body: JSON.stringify({ model: "m1", prompt_cache_key: "thread-9" }) });
   expect(relayed.status).toBe(200);
-  expect(await relayed.text()).toBe("gateway POST /route-1/v1/chat/completions hello");
+  expect(await relayed.text()).toContain(`gateway POST /${OWN_ROUTE}/responses`);
+  // Billed from the gateway's answer, with the thread, Skill and model the request named.
+  expect(metered).toEqual([{ workspaceId: "ws-owner", request: { threadId: "thread-9", model: "m1", skill: "crossline-step-planner" },
+    usage: { input_tokens: 120, output_tokens: 30, total_tokens: 150 } }]);
+  // Another account's route, an endpoint Codex does not call, or a GET to responses never reach the gateway.
+  const relayRoot = baseUrl.slice(0, -OWN_ROUTE.length);
+  expect((await fetch(`${relayRoot}${OTHER_ROUTE}/responses`, { method: "POST", body: "{}" })).status).toBe(502);
+  expect((await fetch(`${baseUrl}/chat/completions`, { method: "POST", body: "{}" })).status).toBe(502);
+  expect((await fetch(`${baseUrl}/responses`)).status).toBe(502);
+  expect(metered).toHaveLength(1);
 
   // The runtime's own requests (a dynamic tool call) reach the server's handler and its answer goes back to the runtime.
   (client as CodexRpcBoundary & { onServerRequest: NonNullable<CodexRpcBoundary["onServerRequest"]> }).onServerRequest(async (method) => ({ answered: method }));

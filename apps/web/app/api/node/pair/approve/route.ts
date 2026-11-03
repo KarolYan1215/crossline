@@ -9,5 +9,5 @@ export async function POST(request: Request) {
   if ("response" in access) return access.response;
   const body = await request.json().catch(() => ({})) as { code?: unknown };
   const approved = approvePairing(access.ctx.workspaceId, typeof body.code === "string" ? body.code : "");
-  return Response.json(approved, { status: approved.ok ? 200 : approved.code === "NODE_OWNER_ONLY" ? 403 : 404 });
+  return Response.json(approved, { status: approved.ok ? 200 : 404 });
 }

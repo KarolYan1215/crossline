@@ -26,6 +26,7 @@ import opportunity_form from "../locales/en/opportunity-form.json";
 import opportunity_watch from "../locales/en/opportunity-watch.json";
 import opportunity_space from "../locales/en/opportunity-space.json";
 import voice_input from "../locales/en/voice-input.json";
+import node_everyone from "../locales/en/node-everyone.json";
 
 /** Every English catalogue, for the web app and the worker (server-side size does not matter; the web's client reads the same set). */
-export const ALL_CATALOGS = [common, core_a, core_b, assess, web_settings, web_onboarding, web_plan, web_shell, web_tasks, web_lib, worker, task_import, rituals, redesign_today, redesign_tasks, redesign_plan, redesign_settings, redesign_rituals, month_sim, fixes_1029, closed_loop, concierge_settings, relay_provider, opportunity_discovery, opportunity_form, opportunity_watch, opportunity_space, voice_input] as Array<Record<string, string>>;
+export const ALL_CATALOGS = [common, core_a, core_b, assess, web_settings, web_onboarding, web_plan, web_shell, web_tasks, web_lib, worker, task_import, rituals, redesign_today, redesign_tasks, redesign_plan, redesign_settings, redesign_rituals, month_sim, fixes_1029, closed_loop, concierge_settings, relay_provider, opportunity_discovery, opportunity_form, opportunity_watch, opportunity_space, voice_input, node_everyone] as Array<Record<string, string>>;

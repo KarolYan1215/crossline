@@ -4,7 +4,7 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, codexProcessEnvironment, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
@@ -1655,15 +1655,15 @@ const syncCalendarFor = async (workspaceId: string): Promise<SyncOutcome | null>
 
 /**
  * How many runs of one workspace a pass starts at once: the account's share of the model gate, plus the runs its compute nodes take
- * (docs/compute-node.md, 协同: a node is far stronger than this server, so the owner's planning and assistant work fan out across it).
+ * (docs/compute-node.md, 协同: a node is far stronger than this server, so the account's planning and assistant work fan out across it).
  */
 function workspaceConcurrency(workspaceId: string): number {
-  try { return accountConcurrency() + (nodeHub && workspaceId === runtimeOwner(analysisStore) ? nodeHub.capacity(workspaceId) : 0); }
+  try { return accountConcurrency() + (nodeHub ? nodeHub.capacity(workspaceId) : 0); }
   catch { return accountConcurrency(); }
 }
 
-// The compute node (docs/compute-node.md): on the hosted site the owner's own computer may connect out to `wss://<site>/node` (Caddy
-// hands it to this port) and serve the owner's model runs with its Codex; with no node connected, or the switch off, nothing changes.
+// The compute node (docs/compute-node.md): on the hosted site any account's own computer may connect out to `wss://<site>/node` (Caddy
+// hands it to this port) and serve that account's model runs with its Codex (方案 C); with no node connected, or the switch off, nothing changes.
 const nodePort = Number(process.env.CROSSLINE_NODE_PORT ?? (hostedBeta ? 3213 : 0));
 const crosslineMarketplace = path.join(repoRoot, "skills", "marketplace", ".agents", "plugins", "marketplace.json");
 const nodeHub: NodeHub | undefined = nodePort > 0 ? await createNodeHub({
@@ -1676,14 +1676,23 @@ const nodeHub: NodeHub | undefined = nodePort > 0 ? await createNodeHub({
       return stored?.length === 64 && timingSafeEqual(Buffer.from(stored, "hex"), hash);
     }))?.id;
   },
-  // Only the runtime owner's account, and only once it switched the node on (the plan's A; other accounts are P4).
-  allowed: (workspaceId) => workspaceId === runtimeOwner(analysisStore) && analysisStore.getSetting(workspaceId, NODE_COMPUTE_SETTING) === "on",
+  // The account the token belongs to, once it switched the node on (方案 C: every account, each its own computers only).
+  allowed: (workspaceId) => analysisStore.getSetting(workspaceId, NODE_COMPUTE_SETTING) === "on",
   roots: (workspaceId) => [path.dirname(path.dirname(path.dirname(crosslineMarketplace))), skillLibraryDir(workspaceId)],
   // The input box's typed copies of uploads (concierge.ts `asTypedImage`) and everything under the data directory (favourites' pictures).
   imageRoots: () => [path.join(tmpdir(), "crossline-images"), dataDir],
   gateway: () => `http://127.0.0.1:${modelGateway.port}`,
+  // A node's model requests go only to its own account's route, and are billed from the gateway's count, not the node's (方案 C).
+  gatewayWorkspace: (requestPath) => modelGateway.workspaceOfPath(requestPath),
+  meter: (workspaceId, named, usage) => {
+    const tokens = breakdownOfResponsesUsage(usage);
+    if (tokens) recordMeteredUsage({ workspaceId, ...named }, tokens);
+  },
   serverCodex: () => codexSupervisor?.runtimeVersion ?? "",
-  prepare: async (client) => {
+  prepare: async (client, workspaceId) => {
+    // A node with no sign-in of its own serves only an account whose model is a provider (the gateway's key); else every run would fail.
+    const account = await client.request("account/read", { refreshToken: false }).catch(() => undefined) as { account?: unknown } | undefined;
+    if (!account?.account && !modelProviders.hasProvider(workspaceId)) throw new Error("NODE_NOT_SIGNED_IN");
     const skills = await installLocalPlugin(client, { name: "crossline", marketplacePath: crosslineMarketplace, cwd: repoRoot, requiredSkills: REQUIRED_SKILLS });
     const missing = REQUIRED_SKILLS.filter((name) => !skills.includes(name));
     if (missing.length) throw new Error(`CODEX_PLUGIN_SKILLS_MISSING ${missing.slice(0, 3).join(",")}`);
@@ -1734,8 +1743,8 @@ if (!capabilitySecret) {
       // Linking this computer as a device of the hosted account (docs/device-mode.md); the worker restarts into device mode.
       { prefix: "/v1/device", handle: createDeviceLinkService({ dataDir, secrets, onChanged: restartForMode, localeFor: (workspaceId) => localeOf(analysisStore, workspaceId) }).handle }],
     monthSpend: (workspaceId) => monthSpend(analysisStore, workspaceId),
-    // The owner's runs spread over this server's runtime and every compute node connected for the account (runtime-pool.ts).
-    ...(nodeHub ? { ownerNodes: () => { const owner = runtimeOwner(analysisStore); return owner ? nodeHub.members(owner) : []; } } : {}),
+    // Each account's runs spread over this server's runtime and every compute node connected for that account (runtime-pool.ts).
+    ...(nodeHub ? { nodes: (workspaceId: string) => nodeHub.members(workspaceId) } : {}),
     autoAnalyzeCaptures: (workspaceId) => autoAnalyzePass(workspaceId),
     autoBackplanGoals: (workspaceId) => autoBackplanPass(workspaceId),
     runTaskPass: (workspaceId) => stepPlanPass(workspaceId),
@@ -1867,16 +1876,17 @@ if (!capabilitySecret) {
   }
   // Other accounts' runtimes stop after a quiet spell (above), so an idle account holds no process.
   setInterval(() => codexSupervisor?.runtimes?.stopIdle(), 60_000).unref();
+  // Gateway-counted tokens of node runs that no run took within half an hour are billed as rows of their own (usage.ts).
+  setInterval(() => flushMeteredUsage(30 * 60_000), 5 * 60_000).unref();
   // One model run at a time on the hosted beta, and none started above the memory high-water mark (model-gate.ts).
   // The candidates' measurement is no person's account (one tenant, `sponsor-eval`): it may use every background slot nobody else wants.
   configureModelGate({ probe: () => containerMemory(), reserved: heldMemory,
-    // The owner's compute nodes add their capacity to the owner's share, and while one has room the owner's next run is not held by this
-    // process's memory (docs/compute-node.md, 协同).
+    // An account's compute nodes add their capacity to its share, and while one has room its next run is not held by this process's
+    // memory (docs/compute-node.md, 协同; every account's own nodes since 方案 C).
     ...(nodeHub ? {
-      extraCapacity: (tenant: string) => tenant === runtimeOwner(analysisStore) ? nodeHub.capacity(tenant) : 0,
+      extraCapacity: (tenant: string) => nodeHub.capacity(tenant),
       nodeRoom: (tenant: string) => {
-        if (tenant !== runtimeOwner(analysisStore)) return false;
-        const load = codexSupervisor?.ownerPool?.load() ?? {};
+        const load = codexSupervisor?.loadFor(tenant) ?? {};
         return nodeHub.members(tenant).some((member) => (load[member.id] ?? 0) < member.capacity);
       }
     } : {}),

@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import { NODE_COMPUTE_SETTING, NODE_PAIRED_SETTING, NODE_TOKEN_SETTING, normalizePairCode, PAIR_CODE_ALPHABET, PAIR_TTL_MS, RUNTIME_OWNER_SETTING } from "@crossline/core";
+import { NODE_COMPUTE_SETTING, NODE_PAIRED_SETTING, NODE_TOKEN_SETTING, normalizePairCode, PAIR_CODE_ALPHABET, PAIR_TTL_MS } from "@crossline/core";
 import { readLocale } from "@crossline/db";
 import { getStore } from "./crossline";
 import { tFor } from "./i18n";
@@ -11,8 +11,8 @@ import { tFor } from "./i18n";
  * 「这台电脑」 card (`approvePairing`), which makes the node its own token and switches 「作为算力节点」 on; the program fetches that token
  * once. Pending pairings live only in this process for ten minutes: a restart loses them and the program asks for a new code.
  *
- * Only the runtime owner's account may approve one (scheme A); other accounts' computers are scheme C and wait for the gateway metering
- * that design asks for.
+ * Any signed-in account may approve one for its own workspace (scheme C, 2026-11-03): the token is bound to that workspace and the hub
+ * serves that node only that workspace's runs. The node never chooses its workspace; the token does.
  */
 type Pairing = { id: string; code: string; host: string; expiresAt: number; workspaceId?: string; token?: string };
 const pairings = ((globalThis as { crosslineNodePairings?: Map<string, Pairing> }).crosslineNodePairings ??= new Map());
@@ -74,14 +74,11 @@ export function pollPairing(id: string, now = Date.now()): PairPoll {
   return { state: "approved", token: pairing.token };
 }
 
-export type PairApproval = { ok: true; host: string } | { ok: false; code: "NODE_PAIR_UNKNOWN" | "NODE_OWNER_ONLY"; message: string };
+export type PairApproval = { ok: true; host: string } | { ok: false; code: "NODE_PAIR_UNKNOWN"; message: string };
 export function approvePairing(workspaceId: string, typed: string, now = Date.now()): PairApproval {
   sweep(now);
   const store = getStore();
   const t = tFor(readLocale(store, workspaceId));
-  if (store.getSetting(workspaceId, RUNTIME_OWNER_SETTING) !== "1") {
-    return { ok: false, code: "NODE_OWNER_ONLY", message: t("目前只有这台服务器运行时的主人账号可以配对算力节点。") };
-  }
   const code = normalizePairCode(typed);
   const pairing = [...pairings.values()].find((item) => item.code === code && !item.token);
   if (!pairing) return { ok: false, code: "NODE_PAIR_UNKNOWN", message: t("没有这个配对码，或已过期：在那台电脑上重新生成一个。") };

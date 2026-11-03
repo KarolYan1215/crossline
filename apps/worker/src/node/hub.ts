@@ -9,9 +9,14 @@ import { codexVersionOf, IMAGE_FILE, IMAGE_MAX_BYTES, NODE_CAPACITY_MAX, NODE_PR
 
 /**
  * The hosted worker's end of the compute node (docs/compute-node.md): the person's computers connect out to `wss://<site>/node` (Caddy
- * hands it to this port on loopback) with a device or node token, and while they are connected and ready the owner's model runs are
+ * hands it to this port on loopback) with a device or node token, and while they are connected and ready that account's model runs are
  * spread over them and this server's own runtime (`members`, runtime-pool.ts). Nothing here starts on its own: a node is accepted only for
- * a workspace whose owner switched it on (`allowed`), and with no node connected every run stays on the server exactly as before.
+ * the workspace its token belongs to, once that account switched it on (`allowed`), and with no node connected every run stays on the
+ * server exactly as before. Any account may pair its own computer (方案 C); a node is never given another account's work.
+ *
+ * A node is someone's computer, so nothing it says is believed where it matters: its model requests reach the gateway only on its own
+ * workspace's route and only the two endpoints Codex calls (`gatewayWorkspace`), and their tokens are counted here from the gateway's
+ * answer (`meter`), not from what the node's runtime reports. What a run answers is checked by the same validators as anywhere.
  *
  * Several nodes of one account work at once: a linked device and the standalone node, or two computers. Each is known by its kind and host
  * (`key`); the same computer reconnecting (after sleep) replaces its own earlier connection, never another's. A linked device ranks above
@@ -40,6 +45,10 @@ export type NodeHubOptions = {
   imageRoots?: (workspaceId: string) => string[];
   /** The server's model gateway origin (`http://127.0.0.1:<port>`), which a provider thread's `base_url` starts with. */
   gateway: () => string | undefined;
+  /** The workspace a gateway path's route was made for (model-gateway.ts `workspaceOfPath`); a node may use only its own. */
+  gatewayWorkspace?: (path: string) => string | undefined;
+  /** Tokens the gateway's answer to a node's request spent, with the thread (the request's `prompt_cache_key`), Skill and model it named. */
+  meter?: (workspaceId: string, request: { threadId?: string; skill?: string; model?: string }, usage: Record<string, unknown>) => void;
   /** The server runtime's Codex version: a node must run the same one. */
   serverCodex: () => string;
   /** Run once a node is connected, before any run is given to it (installs the Crossline plugin through the node's runtime). */
@@ -157,7 +166,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
       }
       if (frame.t === "files") { answerFiles(socket, workspaceId, frame.id, frame.dir); return; }
       if (frame.t === "image") { answerImage(socket, workspaceId, frame.id, frame.path); return; }
-      if (frame.t === "gw") { void relay(socket, frame, pendingGw); return; }
+      if (frame.t === "gw") { void relay(socket, workspaceId, frame, pendingGw); return; }
       if (frame.t === "browser-chunk") { connection.browsing.get(frame.id)?.chunks.push(Buffer.from(frame.data, "base64")); return; }
       if (frame.t === "browser-answer") {
         const pending = connection.browsing.get(frame.id);
@@ -255,22 +264,42 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
   }
 
   /** A provider thread's request from the node, to this server's gateway (which adds the key); the answer streamed back. */
-  async function relay(socket: WebSocket, frame: Extract<NodeFrame, { t: "gw" }>, pending: Map<number, AbortController>): Promise<void> {
+  async function relay(socket: WebSocket, workspaceId: string, frame: Extract<NodeFrame, { t: "gw" }>, pending: Map<number, AbortController>): Promise<void> {
     const gateway = options.gateway();
-    if (!gateway || typeof frame.path !== "string" || !frame.path.startsWith("/") || frame.path.startsWith("//")) {
-      send(socket, { t: "gw-end", id: frame.id, error: "NODE_GATEWAY_UNAVAILABLE" });
+    if (!gateway || typeof frame.path !== "string") { send(socket, { t: "gw-end", id: frame.id, error: "NODE_GATEWAY_UNAVAILABLE" }); return; }
+    // Only `/<route>/responses` (POST) and `/<route>/models` (GET) of this connection's own workspace: anything else is refused here.
+    const endpoint = /^\/[a-f0-9]{32}\/(responses|models)$/.exec(frame.path)?.[1];
+    const method = String(frame.method ?? "GET").toUpperCase();
+    if (!endpoint || (endpoint === "responses" ? method !== "POST" : method !== "GET")
+      || !options.gatewayWorkspace || options.gatewayWorkspace(frame.path) !== workspaceId) {
+      log({ type: "node.gateway_refused", workspaceId, path: String(frame.path).slice(0, 80), method });
+      send(socket, { t: "gw-end", id: frame.id, error: "NODE_GATEWAY_REFUSED" });
       return;
     }
+    const body = frame.body ? Buffer.from(frame.body, "base64") : undefined;
+    const named: { threadId?: string; skill?: string; model?: string } = {};
+    if (endpoint === "responses" && body) {
+      try {
+        const parsed = JSON.parse(body.toString("utf8")) as { prompt_cache_key?: unknown; model?: unknown };
+        if (typeof parsed.prompt_cache_key === "string") named.threadId = parsed.prompt_cache_key.slice(0, 80);
+        if (typeof parsed.model === "string") named.model = parsed.model.slice(0, 80);
+      } catch { /* the gateway answers a request that is not JSON */ }
+      const skill = Object.entries(frame.headers ?? {}).find(([name]) => name.toLowerCase() === "x-crossline-skill")?.[1];
+      if (typeof skill === "string") named.skill = skill.slice(0, 80);
+    }
+    const tap = endpoint === "responses" && options.meter ? usageTap((usage) => options.meter!(workspaceId, named, usage)) : undefined;
     const controller = new AbortController();
     pending.set(frame.id, controller);
     try {
       const headers = Object.fromEntries(Object.entries(frame.headers ?? {}).filter(([name]) => !/^(host|content-length|connection|transfer-encoding)$/i.test(name)));
-      const response = await fetchImpl(gateway + frame.path, { method: frame.method, headers, signal: controller.signal,
-        ...(frame.body ? { body: Buffer.from(frame.body, "base64") } : {}) });
+      const response = await fetchImpl(gateway + frame.path, { method, headers, signal: controller.signal, ...(body ? { body } : {}) });
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, name) => { if (!/^(content-length|connection|transfer-encoding|content-encoding)$/i.test(name)) responseHeaders[name] = value; });
       send(socket, { t: "gw-head", id: frame.id, status: response.status, headers: responseHeaders });
-      if (response.body) for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) send(socket, { t: "gw-data", id: frame.id, data: Buffer.from(chunk).toString("base64") });
+      if (response.body) for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+        tap?.(chunk);
+        send(socket, { t: "gw-data", id: frame.id, data: Buffer.from(chunk).toString("base64") });
+      }
       send(socket, { t: "gw-end", id: frame.id });
     } catch (error) {
       send(socket, { t: "gw-end", id: frame.id, error: error instanceof Error ? error.message.slice(0, 200) : "NODE_GATEWAY_FAILED" });
@@ -314,6 +343,30 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
       wss.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  };
+}
+
+/**
+ * Reads a Responses event stream as it passes and hands over each `response.completed` event's `usage` (the gateway's own count, after
+ * the chat bridge translated it). A line split across chunks is joined; nothing is changed in the bytes relayed.
+ */
+export function usageTap(onUsage: (usage: Record<string, unknown>) => void): (chunk: Uint8Array) => void {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  return (chunk) => {
+    buffer += decoder.decode(chunk, { stream: true });
+    let newline: number;
+    while ((newline = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line.startsWith("data:") || !line.includes("response.completed")) continue;
+      try {
+        const event = JSON.parse(line.slice(5).trim()) as { type?: unknown; response?: { usage?: unknown } };
+        if (event.type === "response.completed" && event.response?.usage && typeof event.response.usage === "object") onUsage(event.response.usage as Record<string, unknown>);
+      } catch { /* not an event this reads */ }
+    }
+    // A single line this long is no event of ours: dropped rather than held.
+    if (buffer.length > 4_000_000) buffer = "";
   };
 }
 
