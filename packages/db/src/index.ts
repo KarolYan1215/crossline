@@ -4400,20 +4400,23 @@ export class CrosslineStore {
    * device leases, Tailscale bindings and audit trail, the model spend it has run up, and the settings and events whose key or type starts
    * with one of `keep`'s prefixes (the machine-owner mark, the model connection and its conformance record). The workspace itself stays, so
    * the next page lands on an empty board and the interview, signed in as before. Returns the work orders and the stored files only this
-   * workspace pointed at, for the caller to remove.
+   * workspace pointed at, for the caller to remove. `tables.spare` leaves more tables as they are and `tables.clear` empties the model spend
+   * and invites too (the device mirror: docs/device-mode.md); the identity tables are never cleared.
    */
-  resetWorkspace(workspaceId: string, keep: { settingPrefixes: string[]; eventTypePrefixes: string[] }): { rows: number; workOrderIds: string[]; fileUris: string[] } {
-    const untouched = new Set(["workspace_members", "device_leases", "tailscale_bindings", "audit_events", "model_usage", "settings", "events", "beta_invites"]);
+  resetWorkspace(workspaceId: string, keep: { settingPrefixes: string[]; eventTypePrefixes: string[] },
+    tables: { spare?: string[]; clear?: Array<"model_usage" | "beta_invites"> } = {}): { rows: number; workOrderIds: string[]; fileUris: string[] } {
+    const untouched = new Set(["workspace_members", "device_leases", "tailscale_bindings", "audit_events", "model_usage", "settings", "events", "beta_invites", ...(tables.spare ?? [])]);
+    for (const name of tables.clear ?? []) untouched.delete(name);
     const kept = (value: string, prefixes: string[]) => prefixes.some((prefix) => value.startsWith(prefix));
     return this.#db.transaction(() => {
       const workOrderIds = this.#prepare("SELECT DISTINCT id FROM work_orders WHERE workspace_id = ?").pluck().all(workspaceId) as string[];
       const fileUris = this.#prepare(`SELECT DISTINCT uri FROM source_documents WHERE workspace_id = ?
         AND uri NOT IN (SELECT uri FROM source_documents WHERE workspace_id <> ?)`).pluck().all(workspaceId, workspaceId) as string[];
-      const tables = (this.#prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").pluck().all() as string[])
+      const cleared = (this.#prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").pluck().all() as string[])
         .filter((name) => !untouched.has(name)
           && (this.#prepare(`PRAGMA table_info("${name}")`).all() as Array<{ name: string }>).some((column) => column.name === "workspace_id"));
       let rows = 0;
-      for (const name of tables) rows += this.#prepare(`DELETE FROM "${name}" WHERE workspace_id = ?`).run(workspaceId).changes;
+      for (const name of cleared) rows += this.#prepare(`DELETE FROM "${name}" WHERE workspace_id = ?`).run(workspaceId).changes;
       const deleteSetting = this.#prepare("DELETE FROM settings WHERE workspace_id = ? AND key = ?");
       for (const key of this.#prepare("SELECT key FROM settings WHERE workspace_id = ?").pluck().all(workspaceId) as string[]) {
         if (!kept(key, keep.settingPrefixes)) rows += deleteSetting.run(workspaceId, key).changes;
@@ -4471,6 +4474,25 @@ export class CrosslineStore {
   }
 
   /**
+   * What makes a row of `tableName` unique — its primary key and each unique index, as column lists — and whether its id is numbered by
+   * SQLite (AUTOINCREMENT, global to the file). The device mirror uses it to drop a mirrored row that would clash with one the device keeps.
+   */
+  tableKeys(tableName: string): { unique: string[][]; autoNumbered: boolean } {
+    if (!this.tableNames().includes(tableName)) throw new Error("UNKNOWN_TABLE");
+    const columns = this.#prepare(`PRAGMA table_info("${tableName}")`).all() as Array<{ name: string; pk: number }>;
+    const primary = columns.filter((column) => column.pk > 0).sort((a, b) => a.pk - b.pk).map((column) => column.name);
+    const indexes = (this.#prepare(`PRAGMA index_list("${tableName}")`).all() as Array<{ name: string; unique: number }>).filter((index) => index.unique)
+      .map((index) => (this.#prepare(`PRAGMA index_info("${index.name}")`).all() as Array<{ name: string | null }>).map((column) => column.name ?? ""));
+    const sql = String(this.#prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").pluck().get(tableName) ?? "");
+    return { unique: [...(primary.length ? [primary] : []), ...indexes.filter((key) => key.every(Boolean))], autoNumbered: /AUTOINCREMENT/i.test(sql) };
+  }
+
+  /** A consistent copy of the whole file while it is in use (SQLite's online backup). */
+  async backupTo(file: string): Promise<void> {
+    await this.#db.backup(file);
+  }
+
+  /**
    * Changes whenever anything is written to the ledger, by this connection (`total_changes()`) or any other (`data_version`, e.g. the
    * worker): two reads, for caching what is derived from the ledger until it changes.
    */
@@ -4515,6 +4537,7 @@ export function latestFileDates(store: CrosslineStore, workspaceId: string): {
   return { dates, undated };
 }
 export * from "./agent";
+export * from "./mirror";
 export * from "./interview";
 export * from "./file-belonging";
 export * from "./push";

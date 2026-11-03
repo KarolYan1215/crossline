@@ -5,8 +5,8 @@
  */
 export type WorkerMode = "full" | "device";
 
-/** What a device does: read this machine, then send. */
-export const DEVICE_PASSES = ["screen_activity", "folders", "recordings_local", "agent_history", "uplink"] as const;
+/** What a device does: read this machine, send, and take the hosted ledger back as a read-only mirror. */
+export const DEVICE_PASSES = ["screen_activity", "folders", "recordings_local", "agent_history", "uplink", "mirror"] as const;
 
 /** Passes that run a model, by the name the full worker gives them: never on a device. */
 export const MODEL_PASSES = [
@@ -24,5 +24,5 @@ export const workerMode = (link: { url: string } | undefined): WorkerMode => lin
 
 export function passesFor(mode: WorkerMode): readonly WorkerPass[] {
   if (mode === "device") return DEVICE_PASSES;
-  return [...DEVICE_PASSES.filter((pass) => pass !== "uplink"), ...MODEL_PASSES, ...PRIMARY_ONLY_PASSES];
+  return [...DEVICE_PASSES.filter((pass) => pass !== "uplink" && pass !== "mirror"), ...MODEL_PASSES, ...PRIMARY_ONLY_PASSES];
 }

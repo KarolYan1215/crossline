@@ -17,6 +17,7 @@ import { createNodeBrowsers } from "../node/browser";
 import { localAppServer } from "../node/local-runtime";
 import { loginNodeWithApiKey, readNodeAccount, type NodeAccount } from "../node/control";
 import { createDeviceLinkService, nodeEnabled, type DeviceLink } from "./link";
+import { MIRROR_INTERVAL_MS, mirrorPass } from "./mirror";
 import { DEVICE_PASSES } from "./mode";
 import { createOutbox, type OutboxItem, type SendResult } from "./outbox";
 import { activityItem, readDeviceState, recordingItems, sourceItems, writeDeviceState, type QueuedItem } from "./payloads";
@@ -170,7 +171,7 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
         if (signed.ok) { nodeAccount = signed.account; log({ type: "device.node_signed_in", with: "api_key" }); }
         return signed;
       },
-      status: () => ({ ...outbox.stats(), modelNeeded: state.modelNeeded ?? 0, lastPassAt: state.lastPassAt ?? null, workspaceId: owner ?? null }) }),
+      status: () => ({ ...outbox.stats(), modelNeeded: state.modelNeeded ?? 0, lastPassAt: state.lastPassAt ?? null, workspaceId: owner ?? null, mirror: state.mirror ?? null }) }),
     transcription: {
       status: () => transcriber.status(),
       download: async () => {
@@ -198,8 +199,23 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
     await flush();
   };
 
+  // The hosted ledger, mirrored onto this computer's workspace (server to device only), at start and every ten minutes.
+  let mirroring = false;
+  const mirror = async () => {
+    if (mirroring) return;
+    mirroring = true;
+    try {
+      const outcome = await mirrorPass({ store, ledger: path.join(dataDir, "crossline.db"), workspaceId: owner, link, state, fetch: fetchImpl });
+      writeDeviceState(deviceDir, state);
+      if (outcome.error) log({ type: "device.mirror_failed", error: outcome.error });
+      else if (outcome.at === outcome.checkedAt) log({ type: "device.mirrored", at: outcome.at });
+    } finally { mirroring = false; }
+  };
+
+  await step("mirror", mirror);
   await pass();
   if (options.runOnce) { await server?.stop(); return; }
+  setInterval(() => { void step("mirror", mirror); }, MIRROR_INTERVAL_MS);
   // Activity changes by the minute: looked at every two minutes and sent when it changed; the full pass on the worker's own interval.
   setInterval(() => { void step("activity", activity).then(flush); }, 2 * 60_000);
   let passing = false;

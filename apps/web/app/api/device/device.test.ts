@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -17,6 +18,7 @@ import { GET as linkStatus } from "./link/route";
 import { GET as hello } from "./hello/route";
 import { POST as recordings } from "./recordings/route";
 import { POST as sources } from "./sources/route";
+import { GET as snapshot } from "./snapshot/route";
 import { DELETE as revoke, GET as status, POST as issue } from "./token/route";
 
 let data: string;
@@ -140,4 +142,28 @@ test("while the background service restarts into the other mode, the device page
   const response = await linkStatus(new Request("http://127.0.0.1:3210/api/device/link"));
   expect(response.status).toBe(503);
   expect(await response.json()).toMatchObject({ ok: false, code: "CODEX_SUPERVISOR_UNAVAILABLE", message: expect.stringContaining("可能正在重启") });
+});
+
+test("the mirror goes to the device token only, without the machine's settings or token hashes, and answers 304 when nothing changed", async () => {
+  const get = (token: string, etag?: string) => snapshot(new Request("https://app.crossline.lol/api/device/snapshot",
+    { headers: { authorization: `Bearer ${token}`, ...(etag ? { "if-none-match": etag } : {}) } }));
+  expect((await snapshot(new Request("https://app.crossline.lol/api/device/snapshot"))).status).toBe(401);
+  expect((await get(issueDeviceToken(ctx, "capture"))).status).toBe(401);
+  const device = issueDeviceToken(ctx, "device");
+  store.setSetting(ctx.workspaceId, "schedule.lineShares", "{}");
+  store.setSetting(ctx.workspaceId, RUNTIME_OWNER_SETTING, "1");
+  const first = await get(device);
+  expect(first.status).toBe(200);
+  expect(first.headers.get("content-type")).toBe("application/gzip");
+  const body = JSON.parse(gunzipSync(Buffer.from(await first.arrayBuffer())).toString("utf8")) as { workspaceId: string; tables: Record<string, Array<{ key?: string }>> };
+  expect(body.workspaceId).toBe(ctx.workspaceId);
+  const keys = body.tables.settings!.map((row) => row.key);
+  expect(keys).toContain("schedule.lineShares");
+  expect(keys.filter((key) => key!.endsWith(".token.sha256") || key!.startsWith("device.") || key === RUNTIME_OWNER_SETTING)).toEqual([]);
+  expect(body.tables.principals).toBeUndefined();
+  // The same ledger is a 304, though this very request wrote the device's own bookkeeping; a change is a new body (not before a minute).
+  const etag = first.headers.get("etag")!;
+  expect((await get(device, etag)).status).toBe(304);
+  store.setSetting(ctx.workspaceId, "schedule.lineShares", "{\"research\":50}");
+  expect((await get(device, etag)).status).toBe(429);
 });
