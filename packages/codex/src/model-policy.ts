@@ -92,6 +92,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-import-triage": "low",
   // One short answer to one message the person must reply to, structured and without tools: the cheap tier (docs/personal-agent.md §3.1).
   "crossline-mail-reply-drafter": "low",
+  // Dictated text checked against the person's own names while they wait, a few seconds per clip: the cheap tier.
+  "crossline-dictation-corrector": "low",
   // One request in words into a trigger and steps, once per automation.
   "crossline-automation-designer": "mid"
 };

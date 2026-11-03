@@ -5,6 +5,7 @@ import { SegmentedControl } from "../ui/controls";
 import { BarChart } from "../ui/charts";
 import { useLocale, useT } from "../locale-context";
 import { intlLocale } from "../../lib/i18n";
+import { VoiceField } from "../ui/voice/voice-input";
 
 type Level = "granted" | "denied" | "unasked";
 type Entry = { start: string; end: string; app: string; title: string; category: string; idle: boolean };
@@ -66,8 +67,8 @@ export function LocalActivityToggle({ consent, detail, pausedUntil, blacklist, h
       <div className="st-row st-row-wrap"><span className="st-row-label">{t("不记录的词")}<small>{t("窗口标题或应用名包含即整条跳过")}</small></span>
         <span className="st-chips">{words.map((word) => <button key={word} type="button" className="st-chip" aria-label={t("移除「{{word}}」", { word })}
           onClick={() => void saveWords(words.filter((item) => item !== word))}>{word} ×</button>)}
-          <input value={draft} placeholder={t("添加…")} aria-label={t("添加不记录的词")} onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Enter" && draft.trim()) { event.preventDefault(); void saveWords([...new Set([...words, draft.trim()])]); setDraft(""); } }} /></span></div>
+          <VoiceField kind="form"><input value={draft} placeholder={t("添加…")} aria-label={t("添加不记录的词")} onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter" && draft.trim()) { event.preventDefault(); void saveWords([...new Set([...words, draft.trim()])]); setDraft(""); } }} /></VoiceField></span></div>
       {note && <p role="status" className="st-note">{note}</p>}
     </section>
     {level === "detail" && hours.some(Boolean) && <section className="st-card" aria-label={t("今日活动")}>

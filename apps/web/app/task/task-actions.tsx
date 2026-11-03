@@ -6,6 +6,7 @@ import { createCommand, enqueue, nextSequence, type OfflineCommandType } from ".
 import { useT } from "../locale-context";
 import { BadgeCheck, Bot, Maximize2, MoreHorizontal, Pause, Play, RotateCcw } from "lucide-react";
 import { ICON, IconButton } from "../ui/icon-button";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const OFFLINE_TYPES: Record<string, OfflineCommandType> = { start: "work_order.start", pause: "work_order.pause", resume: "work_order.resume" };
 
@@ -116,7 +117,7 @@ export function TaskActions({ workOrderId, state, approvable = true, paused, age
     {onOpen && (iconic ? <IconButton label={t("打开")} icon={<Maximize2 {...ICON} />} onClick={onOpen} className="task-actions-open" /> : <button type="button" onClick={onOpen}>{t("打开")}</button>)}
     {!["accepted", "archived"].includes(state) && <MenuButton label={t("更多操作")} icon={iconic ? <MoreHorizontal {...ICON} /> : "⋯"} items={[{ label: t("归档"), hint: t("可在已归档中恢复"), onSelect: () => setArchiving(true) }]} />}
     {archiving && <span className="task-actions-choices">
-      <input value={reason} maxLength={200} placeholder={t("归档原因（选填）")} aria-label={t("归档原因（选填）")} onChange={(event) => setReason(event.target.value)} />
+      <VoiceField kind="note"><input value={reason} maxLength={200} placeholder={t("归档原因（选填）")} aria-label={t("归档原因（选填）")} onChange={(event) => setReason(event.target.value)} /></VoiceField>
       <button type="button" disabled={busy} onClick={() => void run(() => execution({ action: "archive", reason }))}>{t("归档")}</button>
       <button type="button" onClick={() => setArchiving(false)} aria-label={t("取消归档")}>×</button>
     </span>}

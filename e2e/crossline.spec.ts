@@ -382,6 +382,9 @@ test("a work order started on one device becomes a conflict when another device'
     page.waitForURL(new RegExp(`/workbench/${id}$`)),
     page.locator(`#work-order-${id}`).getByRole("button", { name: "开始计时" }).click()
   ]);
+  // The form's microphone renders only once the form has hydrated: on Linux CI the click below otherwise landed on the server-rendered
+  // button before React had given it a handler, and nothing was posted (2026-11-02).
+  await expect(page.locator("#complete .voice-button").first()).toBeVisible();
   await Promise.all([
     page.waitForNavigation({ waitUntil: "load" }),
     page.getByRole("button", { name: "完成（记为无证据）" }).click()
@@ -407,7 +410,8 @@ test("a work order started on one device becomes a conflict when another device'
   // (`apps/web/app/sw.ts`) and intermittently aborted — `OfflineReplay`'s banner already renders the same
   // conflict count and title inline.
   await deviceB.setOffline(false);
-  await pageB.goto("/");
+  // Coming back online, the service worker can still abort this navigation once (Linux CI, 2026-11-02); the second goto is the real test.
+  await pageB.goto("/").catch(async (error: unknown) => { if (!String(error).includes("ERR_ABORTED")) throw error; await pageB.goto("/"); });
   await expect(pageB.getByText("1 条与其他设备冲突")).toBeVisible();
   await expect(pageB.getByText("两台设备冲突测试")).toBeVisible();
 

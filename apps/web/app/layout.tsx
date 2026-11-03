@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 import "./ui.css";
 import "./ui/primitives.css";
+import "./ui/voice/voice.css";
 import "./task/task.css";
 import "./chat/composer.css";
 import "./milestones/milestones.css";

@@ -88,6 +88,7 @@ import { defaultSafeGetDeps } from "./safe-fetch";
 import { REQUIRED_SKILLS } from "./required-skills";
 import { createMailService } from "./mailbox";
 import { createImportService } from "./importer";
+import { createDictationService } from "./dictation";
 import { probeSandboxShell } from "./sandbox-probe";
 import { automationPass, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
@@ -1265,6 +1266,12 @@ const importService = createImportService({ store: analysisStore, secrets, dataD
   timeZone: (workspaceId) => calendarZone(workspaceId),
   onCaptured: (workspaceId) => { void autoAnalyzePass(workspaceId).catch(() => undefined); },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
+// Voice input's own engine and its correction (dictation.ts): the server transcriber on the hosted beta, SenseVoice in this process on an
+// installed copy once its model is downloaded; clips are deleted as they are read and any left behind are swept within two minutes.
+const dictationService = createDictationService({ store: analysisStore, dataDir, cwd: repoRoot, client: accountClient,
+  mode: hostedBeta || process.env.CROSSLINE_SERVER_TRANSCRIBE === "1" ? "server" : "local",
+  log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
+setInterval(() => dictationService.sweep(), 60_000).unref();
 // The person's Xiaohongshu favourites, read whole by a worker job in their own visible browser (favourites-reader.ts): pictures described
 // on the account's own Codex, videos heard by the recordings' transcriber (ffmpeg on the PATH, or CROSSLINE_FFMPEG).
 const classifyTopics = createTopicClassifier(analysisStore, repoRoot, (workspaceId) => accountClient(workspaceId));
@@ -1719,7 +1726,7 @@ if (!capabilitySecret) {
       ...(hostedBeta ? { maxRunning: guestRuntimeLimit() ?? 2, idleMs: 10 * 60_000 } : {}) },
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId), afterChatgptCost: (workspaceId, signal) => modelProviders.afterChatgptCost(workspaceId, signal) },
-    services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
+    services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/voice", handle: dictationService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
       { prefix: "/v1/forms", handle: formService.handle }, { prefix: "/v1/apply-profile", handle: formService.handle },
       { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle },
       // The login browser on the server, shown in a dialog on the page (remote-browser.ts); only where there is no screen of our own.

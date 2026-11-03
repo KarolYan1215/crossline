@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const post = (path: string, body: Record<string, unknown>) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
@@ -37,7 +38,7 @@ export function ReviewButtons({ taskId }: { taskId: string }) {
   const [note, setNote] = useState("");
   return <div className="assistant-actions">
     <button type="button" className="primary-button" disabled={busy} onClick={() => void act(`/api/agent/tasks/${encodeURIComponent(taskId)}/review`, { decision: "accepted", note })}>{t("批准")}</button>
-    <label><span className="sr-only">{t("退回原因")}</span><input value={note} maxLength={300} placeholder={t("备注或退回原因（可选）")} onChange={(event) => setNote(event.target.value)} /></label>
+    <label><span className="sr-only">{t("退回原因")}</span><VoiceField kind="note"><input value={note} maxLength={300} placeholder={t("备注或退回原因（可选）")} onChange={(event) => setNote(event.target.value)} /></VoiceField></label>
     <button type="button" className="secondary-button" disabled={busy} onClick={() => void act(`/api/agent/tasks/${encodeURIComponent(taskId)}/review`, { decision: "rejected", note })}>{t("退回")}</button>
     {message && <small role="status">{message}</small>}
   </div>;
@@ -59,8 +60,8 @@ export function QuestionAnswer({ id, questions }: { id: string; questions: Array
       {question.options.length > 0 && <span className="assistant-actions">{question.options.map((option) =>
         <button key={option.label} type="button" className="secondary-button" aria-pressed={chosen[question.id] === option.label} title={option.description || undefined}
           onClick={() => setChosen((all) => ({ ...all, [question.id]: option.label }))}>{option.label}</button>)}</span>}
-      <label><span className="sr-only">{t("自己的回答")}</span><input value={own[question.id] ?? ""} maxLength={1000} placeholder={t(question.options.length ? "或者自己写" : "回答")}
-        onChange={(event) => setOwn((all) => ({ ...all, [question.id]: event.target.value }))} /></label>
+      <label><span className="sr-only">{t("自己的回答")}</span><VoiceField kind="note"><input value={own[question.id] ?? ""} maxLength={1000} placeholder={t(question.options.length ? "或者自己写" : "回答")}
+        onChange={(event) => setOwn((all) => ({ ...all, [question.id]: event.target.value }))} /></VoiceField></label>
     </fieldset>)}
     <span className="assistant-actions">
       <button type="button" className="primary-button" disabled={busy || !ready} onClick={() => void act(`/api/agent/questions/${encodeURIComponent(id)}`, { answers })}>{t("回答")}</button>
@@ -119,7 +120,7 @@ export function SendBackItem({ taskId, what }: { taskId: string; what: string })
   const sent = note.trim() ? t("补上：{{what}}。{{note}}", { what, note: note.trim() }) : t("补上：{{what}}", { what });
   return <span className="assistant-actions ar-sendback-form">
     <label><span className="sr-only">{t("补充说明")}</span>
-      <input value={note} maxLength={300} placeholder={t("补充说明（可选）")} autoFocus onChange={(event) => setNote(event.target.value)} /></label>
+      <VoiceField kind="note"><input value={note} maxLength={300} placeholder={t("补充说明（可选）")} autoFocus onChange={(event) => setNote(event.target.value)} /></VoiceField></label>
     <button type="button" className="primary-button" disabled={busy} onClick={() => void act(`/api/agent/tasks/${encodeURIComponent(taskId)}/review`,
       { decision: "rejected", note: sent.slice(0, 300) })}>{t("退回")}</button>
     <button type="button" className="text-button" disabled={busy} onClick={() => setOpen(false)}>{t("取消")}</button>

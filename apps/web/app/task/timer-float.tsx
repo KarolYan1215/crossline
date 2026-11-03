@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ActiveTimer } from "../../lib/timer";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const clock = (seconds: number) => {
   const sign = seconds < 0 ? "+" : "";
@@ -96,8 +97,8 @@ export function TimerFloat() {
     {closing && <div className="timer-alert" role="alertdialog" aria-label={t("本次计时已结束")}>
       <p><b>{t("本次计时已结束")}</b>{closing.stepTitle ? ` · ${closing.stepTitle}` : ""}</p>
       {closing.stepId ? <><small>{t("该步骤是否已完成？")}</small>
-        <input type="text" className="timer-resume" maxLength={80} value={resume} onChange={(event) => setResume(event.target.value)}
-          placeholder={t("没做完的话，下次从哪接（可不填）")} aria-label={t("下次从哪接")} />
+        <VoiceField kind="note"><input type="text" className="timer-resume" maxLength={80} value={resume} onChange={(event) => setResume(event.target.value)}
+          placeholder={t("没做完的话，下次从哪接（可不填）")} aria-label={t("下次从哪接")} /></VoiceField>
         <span><button type="button" className="primary-button" onClick={() => void answer(true)}>{t("已完成")}</button>
           <button type="button" onClick={() => void answer(false)}>{t("未完成")}</button></span></>
         : <button type="button" onClick={() => void answer(false)}>{t("关闭")}</button>}

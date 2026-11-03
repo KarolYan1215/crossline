@@ -12,6 +12,7 @@ import type { AskPreviewData } from "./types";
 import { useLocale, useT } from "../locale-context";
 import { entryDay } from "../task/format";
 import "./asks.css";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const URGENCY: Record<Ask["urgency"], string> = { now: "今天要答", soon: "这周", later: "不急" };
 
@@ -173,11 +174,11 @@ export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask
     </div>}
 
     {ask.freeText && <label className="ak-free"><span className="sr-only">{t("用自己的话回答")}</span>
-      <textarea ref={noteRef} rows={1} value={note} maxLength={4000} placeholder={ask.freeText.placeholder} data-user-text
+      <VoiceField kind="note"><textarea ref={noteRef} rows={1} value={note} maxLength={4000} placeholder={ask.freeText.placeholder} data-user-text
         onChange={(event) => setNote(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && note.trim()) { event.preventDefault(); submit(picked); }
-        }} />
+        }} /></VoiceField>
     </label>}
 
     {(many || fields.length > 0 || waitsForNote || note.trim() || (keyed && picked.length > 0)) && <div className="execution-actions ak-submit">
@@ -224,7 +225,7 @@ function FieldInput({ field, value, onChange }: { field: AskField; value: string
     <SegmentedControl label={field.label} value={value} options={(field.choices ?? []).map((choice) => ({ value: choice.id, label: choice.label }))} onChange={onChange} /></div>;
   return <label>{label}
     {field.kind === "longtext"
-      ? <textarea rows={2} required={field.required} value={value} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} />
+      ? <VoiceField kind="note"><textarea rows={2} required={field.required} value={value} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} /></VoiceField>
       : <input type={field.kind === "date" ? "date" : "text"} required={field.required} value={value} placeholder={field.placeholder}
         onChange={(event) => onChange(event.target.value)} />}
   </label>;

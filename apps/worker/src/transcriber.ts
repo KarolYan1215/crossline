@@ -1,10 +1,11 @@
-import { readdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { CrosslineStore } from "@crossline/db";
 import { RECORDING_VOICEPRINT_CONSENT, TRANSCRIBE_WINDOW, inTranscribeWindow } from "@crossline/core";
 import { SpeakerBook, checkDiarization, createDiarizer, enrolVoiceprint, readVoiceprint, voiceprintDir, type Diarizer } from "./diarize";
 import { inboxFiles, processInbox, serverRecordingsOn } from "./recording-inbox";
 import { checkSenseVoice, createSenseVoice, ffmpegBlocks, transcribeBlocks, type WindowRecogniser } from "./sensevoice";
+import { aliveFile, dictateSamples, inboxDir, outboxDir, pcmToSamples } from "./dictate";
 
 /**
  * The transcriber container's process (docs/phone-recording.md 「服务器转写」; started by `deploy/server/run.sh` when
@@ -59,7 +60,59 @@ async function enrolments(): Promise<void> {
 }
 
 let recogniser: WindowRecogniser | undefined;
-const recognise = () => (recogniser ??= createSenseVoice(modelDir, threads));
+const model = () => (recogniser ??= createSenseVoice(modelDir, threads));
+/**
+ * One recognition at a time on the container's one CPU, a dictation always first: a person is waiting on it, while a recording's next
+ * window can wait the second or two a clip takes (docs/voice-input.md).
+ */
+const waiting: Array<{ urgent: boolean; start: () => void }> = [];
+let busy = false;
+function turn(urgent: boolean): Promise<() => void> {
+  return new Promise((resolve) => {
+    const start = () => { busy = true; resolve(() => { busy = false; const next = waiting.findIndex((item) => item.urgent); const [item] = waiting.splice(next >= 0 ? next : 0, 1); item?.start(); }); };
+    if (!busy) start(); else waiting.push({ urgent, start });
+  });
+}
+const queued = (urgent: boolean): WindowRecogniser => async (samples) => { const done = await turn(urgent); try { return await model()(samples); } finally { done(); } };
+const recognise = () => queued(false);
+
+/**
+ * Voice input's server engine: the worker drops a clip (16 kHz PCM the page decoded) into `dictation/inbox`, this answers in `outbox` and
+ * deletes the clip at once. A heartbeat every 30 s tells the worker the engine is up; a dictation in the last ten minutes keeps the model
+ * loaded, so the next one does not wait for it.
+ */
+let lastDictation = 0;
+mkdirSync(inboxDir(dataDir), { recursive: true });
+mkdirSync(outboxDir(dataDir), { recursive: true });
+const beat = () => { const file = aliveFile(dataDir); try { utimesSync(file, new Date(), new Date()); } catch { writeFileSync(file, ""); } };
+beat();
+setInterval(beat, 30_000).unref();
+async function dictations(): Promise<void> {
+  for (const name of readdirSync(inboxDir(dataDir)).filter((entry) => /^[0-9a-f-]{36}\.pcm$/.test(entry))) {
+    const file = path.join(inboxDir(dataDir), name), answer = path.join(outboxDir(dataDir), name.replace(/\.pcm$/, ".json"));
+    let result: Record<string, unknown>;
+    try {
+      const bytes = readFileSync(file);
+      rmSync(file, { force: true });
+      const started = Date.now();
+      const heard = await dictateSamples(pcmToSamples(bytes), queued(true));
+      result = { text: heard.text, ...(heard.language ? { language: heard.language } : {}) };
+      log("transcriber.dictation", { seconds: Math.round(bytes.length / 32_000), workMs: Date.now() - started });
+    } catch (error) {
+      rmSync(file, { force: true });
+      result = { error: error instanceof Error ? error.message.slice(0, 120) : "failed" };
+    }
+    lastDictation = Date.now();
+    writeFileSync(`${answer}.part`, JSON.stringify(result));
+    renameSync(`${answer}.part`, answer);
+  }
+}
+void (async () => {
+  for (;;) {
+    await dictations().catch((error: unknown) => log("transcriber.dictation_failed", { message: error instanceof Error ? error.message.slice(0, 200) : "" }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+})();
 async function pass(): Promise<void> {
   await enrolments();
   let waitingTonight = 0;
@@ -73,7 +126,7 @@ async function pass(): Promise<void> {
     if (outcomes.length) log("transcriber.pass", { workspaceId: workspace.id, outcomes });
     if (inboxFiles(dataDir, workspace.id).length && inTranscribeWindow(new Date(), timeZone, window)) waitingTonight += 1;
   }
-  if (recogniser && !waitingTonight) { log("transcriber.release"); store.close(); process.exit(0); }
+  if (recogniser && !waitingTonight && Date.now() - lastDictation > 10 * 60_000) { log("transcriber.release"); store.close(); process.exit(0); }
 }
 
 log("transcriber.started", { modelDir, threads, window });

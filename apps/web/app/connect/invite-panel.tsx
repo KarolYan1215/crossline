@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import "./connect.css";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 type InviteState = {
   available: boolean;
@@ -67,7 +68,7 @@ export function InvitePanel({ plan, onRedeemed, onSponsored, lead }: { plan?: st
         <summary>{t("申请用开发者的模型（邮件审批）")}</summary>
         <p className="muted">{t("用自己的 ChatGPT 或 API 不需要申请。这里是申请用开发者提供的模型（硅基流动）：开发者通过后，邀请码会发到账号邮箱，之后访谈和日常使用都走这个模型，每月有用量上限。")}</p>
         <label>{t("想用 Crossline 做什么（可不填）")}
-          <textarea rows={2} maxLength={300} value={reason} onChange={(event) => setReason(event.target.value)} />
+          <VoiceField kind="note"><textarea rows={2} maxLength={300} value={reason} onChange={(event) => setReason(event.target.value)} /></VoiceField>
         </label>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void apply()}>{t("提交申请")}</button>
       </details>}

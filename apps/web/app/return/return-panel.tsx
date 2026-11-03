@@ -9,6 +9,7 @@ import { Markdown } from "../ui/markdown";
 import { Clamp } from "../ui/clamp";
 import { tFor, type Locale, type Translate } from "../../lib/i18n";
 import { useLocale, useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 type Cleaned = { orders: Array<{ id: string; title: string }>; milestones: Array<{ id: string; title: string }>; opId?: string | undefined };
 const md = (day: string) => `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
@@ -68,8 +69,8 @@ function ItemSay({ item, onChanged }: { item: ReturnItem; onChanged: () => void 
   };
   return <div className="return-say">
     <form className="return-say-form" onSubmit={(event) => void submit(event)}>
-      <input value={text} maxLength={1000} disabled={busy} placeholder={t("说说这一步做到哪了")} aria-label={t("说说「{{step}}」做到哪了", { step: item.step || item.title })}
-        onChange={(event) => setText(event.target.value)} />
+      <VoiceField kind="note"><input value={text} maxLength={1000} disabled={busy} placeholder={t("说说这一步做到哪了")} aria-label={t("说说「{{step}}」做到哪了", { step: item.step || item.title })}
+        onChange={(event) => setText(event.target.value)} /></VoiceField>
       <button type="submit" className="secondary-button" disabled={busy || !text.trim()}>{busy ? t("正在理解…") : t("发送")}</button>
     </form>
     {status && <small role="status">{status}</small>}
@@ -118,7 +119,7 @@ export function PartialForm({ item, busy, onSend }: { item: ReturnItem; busy: bo
         disabled={busy} onClick={() => setLevel(level === option.id ? undefined : option.id)}><Quarters quarter={option.quarter} />{t(option.label)}</button>)}
     </div>
     <label className="return-where"><span>{t("做到哪了")}</span>
-      <input value={where} maxLength={1000} disabled={busy} placeholder={t("例如：推完了第 1 题，第 2 题写了一半")} onChange={(event) => setWhere(event.target.value)} /></label>
+      <VoiceField kind="note"><input value={where} maxLength={1000} disabled={busy} placeholder={t("例如：推完了第 1 题，第 2 题写了一半")} onChange={(event) => setWhere(event.target.value)} /></VoiceField></label>
     {others.some((step) => !step.done) && <details className="return-steps">
       <summary>{t("其他已做完的步骤")}</summary>
       {others.map((step) => <label key={step.id}>

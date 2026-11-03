@@ -12,6 +12,7 @@ import { LineCardInterview, type LineInterviewView } from "./line-card-interview
 import { useLocale, useT } from "../locale-context";
 import { DomainRecords, type DomainRecordsCard } from "./domain-records";
 import { LineWatches, type WatchView } from "./line-watches";
+import { VoiceField } from "../ui/voice/voice-input";
 
 /**
  * One line as its card shows it. `attributes`: the interview's candidates for the long-term goal (§4.1); `goalParts`: the ones the goal
@@ -85,15 +86,15 @@ function LineEditor({ line, palette, onDone, onOrder, names = {} }: { line?: Lin
   };
   const noun = label.trim() || t("身份");
   return <div className="line-editor">
-    <label>{t("主线（身份名词）")} <input value={label} maxLength={20} placeholder={t("例如：研究者、创作者、工程师")} onChange={(event) => setLabel(event.target.value)} /></label>
+    <label>{t("主线（身份名词）")} <VoiceField kind="form"><input value={label} maxLength={20} placeholder={t("例如：研究者、创作者、工程师")} onChange={(event) => setLabel(event.target.value)} /></VoiceField></label>
     {line && <fieldset className="line-attr-section" data-line={line.id}><legend>{t("长期目标：选定语组成，可多选、拖动排序、点击改字")}</legend>
       {line.goals[0] && <small className="muted">{t("当前：")}<span className="gen">{line.goals[0]}</span></small>}
       <AttributePicker noun={line.label} candidates={line.attributes} initial={line.goalParts} onAdopt={adopt} />
     </fieldset>}
     <fieldset className="line-goals"><legend>{line ? t("其他长期目标（可选）") : t("长期目标（可多个）")}</legend>
       {goals.map((goal, index) => <div key={index} className="line-goal-row">
-        <input value={goal} maxLength={120} placeholder={t("成为 ___ 的{{noun}}", { noun })} aria-label={t("长期目标 {{n}}", { n: index + (line ? 2 : 1) })}
-          onChange={(event) => setGoals((list) => list.map((item, i) => i === index ? event.target.value : item))} />
+        <VoiceField kind="form"><input value={goal} maxLength={120} placeholder={t("成为 ___ 的{{noun}}", { noun })} aria-label={t("长期目标 {{n}}", { n: index + (line ? 2 : 1) })}
+          onChange={(event) => setGoals((list) => list.map((item, i) => i === index ? event.target.value : item))} /></VoiceField>
         {(line || goals.length > 1) && <button type="button" aria-label={t("删除该目标")} onClick={() => setGoals((list) => list.filter((_, i) => i !== index))}>×</button>}
       </div>)}
       <button type="button" className="text-button" onClick={() => setGoals((list) => [...list, ""])}>{t("＋ 添加长期目标")}</button>

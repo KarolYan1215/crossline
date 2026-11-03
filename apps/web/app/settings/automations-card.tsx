@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useLocale, useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 type AutomationView = { id: string; name: string; summary: string; status: "active" | "off"; triggerLabel: string; runs: number; lastFiredAt?: string;
   steps: Array<{ title: string; by: "assistant" | "person" }>; action: { kind: "run" | "remind" } };
@@ -58,8 +59,8 @@ export function AutomationsCard({ lines }: { lines: Array<{ id: string; label: s
   return <section className="st-card" aria-label={t("自动化")}>
     <header><h3>{t("自动化")}</h3><small>{t("说一句想让它做什么、什么时候做，助手照着按时或按条件去做；发送、回复、发布始终由本人完成")}</small></header>
     <form className="st-automation-new" onSubmit={(event) => { event.preventDefault(); if (text.trim()) void create(); }}>
-      <textarea value={text} onChange={(event) => setText(event.target.value)} rows={2} maxLength={1000} aria-label={t("新的自动化")}
-        placeholder={t("例如：每天早上 8 点把邮箱里和课程有关的邮件整理成待办；课程网页一更新就告诉我改了什么；每周五把这周新上传的材料归档")} />
+      <VoiceField kind="note"><textarea value={text} onChange={(event) => setText(event.target.value)} rows={2} maxLength={1000} aria-label={t("新的自动化")}
+        placeholder={t("例如：每天早上 8 点把邮箱里和课程有关的邮件整理成待办；课程网页一更新就告诉我改了什么；每周五把这周新上传的材料归档")} /></VoiceField>
       <div className="st-row">
         <label className="st-row-label">{t("服务哪条主线")}
           <select value={lineId} onChange={(event) => setLineId(event.target.value)}>{lines.map((line) => <option key={line.id} value={line.id}>{line.label}</option>)}</select>

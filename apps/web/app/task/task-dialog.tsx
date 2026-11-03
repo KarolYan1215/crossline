@@ -30,6 +30,7 @@ import { stepAnchor, tutorialAnchor } from "../materials/tutorial-model";
 import { useLocale, useT } from "../locale-context";
 import { dayText, minutesText, shortDate } from "./format";
 import { handOff } from "./handoff";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const SMALL = { ...ICON, size: 14 } as const;
 const post = (path: string, body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
@@ -79,7 +80,7 @@ function StepQuestions({ workOrderId, questions }: { workOrderId: string; questi
       {!question.answer ? null : editing === question.id
         ? <span className="steps-answer-edit">
           {question.options.map((option) => <button key={option} type="button" className="text-button" onClick={() => void save(question, option)}>{option}</button>)}
-          <input type="text" value={draft} maxLength={300} placeholder={t("或自己写")} onChange={(event) => setDraft(event.target.value)} />
+          <VoiceField kind="note"><input type="text" value={draft} maxLength={300} placeholder={t("或自己写")} onChange={(event) => setDraft(event.target.value)} /></VoiceField>
           <button type="button" className="secondary-button" onClick={() => void save(question, draft)}>{t("保存")}</button>
           <button type="button" className="text-button" onClick={() => setEditing(null)}>{t("取消")}</button>
         </span>
@@ -257,7 +258,7 @@ function StepsEditor({ detail, onDone }: { detail: TaskDetail; onDone: () => voi
     <ol className="steps-list steps-editing">{draft.map((item, index) => <li key={item.id ?? `new-${index}`} draggable onDragStart={() => setDragging(index)} onDragOver={(event) => event.preventDefault()}
       onDrop={() => { if (dragging !== null && dragging !== index) move(dragging, index); setDragging(null); }}>
       <span className="step-grip" aria-hidden="true">⋮⋮</span>
-      <input value={item.title} aria-label={t("步骤名称")} onChange={(event) => { const title = event.target.value; setDraft((list) => list.map((row, i) => i === index ? { ...row, title } : row)); setDirty(true); }} />
+      <VoiceField kind="form"><input value={item.title} aria-label={t("步骤名称")} onChange={(event) => { const title = event.target.value; setDraft((list) => list.map((row, i) => i === index ? { ...row, title } : row)); setDirty(true); }} /></VoiceField>
       <span className="step-tools">
         {index > 0 && <button type="button" aria-label={t("上移")} onClick={() => move(index, index - 1)}>↑</button>}
         {index < draft.length - 1 && <button type="button" aria-label={t("下移")} onClick={() => move(index, index + 1)}>↓</button>}
@@ -271,7 +272,7 @@ function StepsEditor({ detail, onDone }: { detail: TaskDetail; onDone: () => voi
     </div>
     <form className="steps-fix" onSubmit={(event) => { event.preventDefault(); if (!fix.trim()) return;
       void post(stepsApi(detail.id), { action: "replan", feedback: fix }).then((ok) => { setStatus(t(ok ? "已提交，正在重新规划" : "未提交，请重试")); if (ok) setFix(""); }); }}>
-      <input value={fix} maxLength={1000} placeholder={t("用一句话调整步骤，例如：先做第 3 题，检查合并到最后")} aria-label={t("用自然语言调整步骤")} onChange={(event) => setFix(event.target.value)} />
+      <VoiceField kind="note"><input value={fix} maxLength={1000} placeholder={t("用一句话调整步骤，例如：先做第 3 题，检查合并到最后")} aria-label={t("用自然语言调整步骤")} onChange={(event) => setFix(event.target.value)} /></VoiceField>
       <button type="submit">{t("重新规划")}</button>
     </form>
     {status && <small role="status">{status}</small>}
@@ -303,7 +304,7 @@ function FinishPanel({ detail }: { detail: TaskDetail }) {
       </li>)}</ul> : <p className="muted">{t("所属里程碑没有写达成标准：按「要交付的」交齐即算完成。")}{detail.milestone && <> <a href={`/milestones?open=${encodeURIComponent(detail.milestone.id)}`}>{t("去主线补标准")}</a></>}</p>}</div>
     {detail.state === "active" && <form className="progress-report" onSubmit={(event) => { event.preventDefault(); if (!text.trim()) return;
       void post(stepsApi(detail.id), { action: "report", text }).then((ok) => { setStatus(t(ok ? "已提交，正在判定进度" : "未提交，请重试")); if (ok) setText(""); }); }}>
-      <textarea value={text} maxLength={2000} rows={2} placeholder={t("描述当前进度，例如：第 1–3 题已完成，第 4 题卡在边界条件")} aria-label={t("进度描述")} onChange={(event) => setText(event.target.value)} />
+      <VoiceField kind="note"><textarea value={text} maxLength={2000} rows={2} placeholder={t("描述当前进度，例如：第 1–3 题已完成，第 4 题卡在边界条件")} aria-label={t("进度描述")} onChange={(event) => setText(event.target.value)} /></VoiceField>
       <button type="submit">{t("判定进度")}</button>
     </form>}
     {status && <small role="status">{status}</small>}

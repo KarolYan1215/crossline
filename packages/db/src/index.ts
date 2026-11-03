@@ -301,7 +301,9 @@ export type StoredPreference = {
     /** The person turned down an opportunity agent's need or offer: what not to propose again (docs/opportunity-agent.md §8). */
     | "opportunity_declined"
     /** A sentence the person added to 「少来」 on an opportunity (docs/opportunity-agent.md §17.4), read by the next derivation. */
-    | "opportunity_less";
+    | "opportunity_less"
+    /** A wording the person taught by editing dictated text (docs/voice-input.md); scope `dictation`, read only by the dictation corrector. */
+    | "dictation";
   /** A line id, `task:<id>`, `archetype:<id>` or `all`. */
   scope: string; text: string;
   /** How much it counts: a stated correction 1, a measured pattern more, a single manual edit less. */

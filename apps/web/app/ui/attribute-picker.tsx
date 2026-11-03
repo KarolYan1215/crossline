@@ -6,6 +6,7 @@ import {
 } from "@crossline/core";
 import "./attribute-picker.css";
 import { useLocale, useT } from "../locale-context";
+import { VoiceField } from "./voice/voice-input";
 
 /** One attribute offered to choose from: its words and its kind (field, ability or lasting state). */
 export type AttributeOption = { text: string; kind: AttributeKind };
@@ -81,8 +82,8 @@ export function AttributePicker({ noun, candidates, initial, onAdopt, label = "�
         onClick={() => toggle(item.text)}><small>{t(ATTRIBUTE_KIND_LABEL[item.kind])}</small><span className="gen">{item.text}</span></button>)}
     </div>}
     <div className="attr-add">
-      <input value={custom} maxLength={40} placeholder={t("补充一个定语")} aria-label={t("补充一个定语")} onChange={(event) => setCustom(event.target.value)}
-        onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustom(); } }} />
+      <VoiceField kind="form"><input value={custom} maxLength={40} placeholder={t("补充一个定语")} aria-label={t("补充一个定语")} onChange={(event) => setCustom(event.target.value)}
+        onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustom(); } }} /></VoiceField>
       <button type="button" className="text-button" disabled={!cleanAttribute(custom)} onClick={addCustom}>{t("添加")}</button>
     </div>
     {duplicate && <p className="attr-warning" role="alert">{t("「{{a}}」与「{{b}}」重复，保留一个", { a: duplicate[0], b: duplicate[1] })}</p>}

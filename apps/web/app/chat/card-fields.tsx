@@ -3,6 +3,7 @@
 import type { ProposedAction } from "@crossline/core";
 import type { CardChoices } from "../../lib/conversation";
 import { useT } from "../locale-context";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const LABEL: Record<string, string> = {
   title: "标题", context: "补充", lineId: "主线", dueDate: "截止", milestoneId: "里程碑", workOrderId: "任务", date: "日期", minutes: "分钟",
@@ -82,7 +83,7 @@ export function CardFields({ item, value, choices, onChange }: {
             <option value="">{t("（不关联）")}</option>
             {(choices?.milestones ?? []).map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.title}</option>)}</select>;
         default:
-          return <input id={id} type="text" value={String(current ?? "")} onChange={(event) => onChange(field, event.target.value)} />;
+          return <VoiceField kind="form"><input id={id} type="text" value={String(current ?? "")} onChange={(event) => onChange(field, event.target.value)} /></VoiceField>;
       }
     })();
     // Field names are read with the `field` context: 「任务」 here is one task, not the Tasks page.

@@ -11,6 +11,7 @@ import { SKILL_LINK_GUIDE } from "../../lib/setup-guides";
 import type { GrownSkillView, MineSkillView, PublicSkillView, ScriptsView, SkillLibraryView } from "../../lib/skill-library";
 import { useLocale, useT } from "../locale-context";
 import { intlLocale, joinList } from "../../lib/i18n";
+import { VoiceField } from "../ui/voice/voice-input";
 
 const day = (iso: string) => iso ? `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}` : "—";
 const KIND = { play: "打法", preference: "偏好", redline: "红线" } as const;
@@ -181,7 +182,7 @@ function MineLine({ line, open, onSaved }: { line: MineSkillView; open: boolean;
       </span>
     </div>
     {editing ? <div className="sk-edit">
-      <textarea aria-label={t("「{{line}}」主线 skill 全文", { line: line.lineLabel })} value={draft} rows={14} onChange={(event) => setDraft(event.target.value)} />
+      <VoiceField kind="note"><textarea aria-label={t("「{{line}}」主线 skill 全文", { line: line.lineLabel })} value={draft} rows={14} onChange={(event) => setDraft(event.target.value)} /></VoiceField>
       <button type="button" className="secondary-button" onClick={() => save({ markdown: draft })} disabled={!draft.trim()}>{t("保存为新版本")}</button>
     </div> : current && <>
       {current.rules.length > 0 && <ol className="sk-rules">{current.rules.map((rule, index) => <li key={index}>
@@ -467,7 +468,7 @@ function LinkInstall({ lines }: { lines: Array<{ id: string; label: string }> })
     <label><span>{t("主线")}</span><select value={lineId} onChange={(event) => setLineId(event.target.value)}>
       {lines.map((line) => <option key={line.id} value={line.id}>{line.label}</option>)}
     </select></label>
-    <label className="sk-tool-good"><span>{t("用来做什么")}</span><input value={why} maxLength={300} placeholder={t("可不填")} onChange={(event) => setWhy(event.target.value)} /></label>
+    <label className="sk-tool-good"><span>{t("用来做什么")}</span><VoiceField kind="form"><input value={why} maxLength={300} placeholder={t("可不填")} onChange={(event) => setWhy(event.target.value)} /></VoiceField></label>
     <button type="submit" className="secondary-button" disabled={busy || !repo.trim() || !lineId}>{t("按链接添加")}</button>
     {note && <p role="status" className="st-note">{note}</p>}
   </form>;
@@ -528,11 +529,11 @@ function AiToolsCard({ initial }: { initial: AiTool[] }) {
       setTools((all) => [...all.filter((item) => item.name.toLowerCase() !== result.tool!.name.toLowerCase()), result.tool!]);
       setName(""); setGoodFor(""); setNote(t("已添加「{{name}}」，之后的规划会用到它", { name: result.tool.name }));
     }}>
-      <label><span>{t("工具")}</span><input value={name} maxLength={40} placeholder={t("例如 剪映、NotebookLM")} onChange={(event) => setName(event.target.value)} /></label>
+      <label><span>{t("工具")}</span><VoiceField kind="form"><input value={name} maxLength={40} placeholder={t("例如 剪映、NotebookLM")} onChange={(event) => setName(event.target.value)} /></VoiceField></label>
       <label><span>{t("类别")}</span><select value={kind} onChange={(event) => setKind(event.target.value as AiToolKind)}>
         {(Object.keys(AI_TOOL_KIND_LABEL) as AiToolKind[]).filter((item) => item !== "assistant").map((item) => <option key={item} value={item}>{t(AI_TOOL_KIND_LABEL[item])}</option>)}
       </select></label>
-      <label className="sk-tool-good"><span>{t("用来做什么")}</span><input value={goodFor} maxLength={120} placeholder={t("例如 自动字幕、粗剪")} onChange={(event) => setGoodFor(event.target.value)} /></label>
+      <label className="sk-tool-good"><span>{t("用来做什么")}</span><VoiceField kind="form"><input value={goodFor} maxLength={120} placeholder={t("例如 自动字幕、粗剪")} onChange={(event) => setGoodFor(event.target.value)} /></VoiceField></label>
       <button type="submit" className="secondary-button" disabled={!name.trim()}>{t("添加")}</button>
     </form>
     {note && <p role="status" className="st-note">{note}</p>}
@@ -566,7 +567,7 @@ function ImproveFlow({ flow, send, onChanged, setNote }: { flow: GrownSkillView;
       {improvement.lastChange && <span className="gen">{improvement.lastChange.changes.replace(/\s*\n+\s*/g, sep)}</span>}
       {improvement.improving ? t(" 正在按意见修订。") : improvement.pending.length ? t(" 已收到 {{count}} 条意见，下一轮后台修订。", { count: improvement.pending.length }) : ""}</p>
     <label className="sk-improve-box"><span>{t("哪里要改（写给 Crossline，它会自己改这个工作流）")}</span>
-      <textarea rows={2} value={text} maxLength={2000} placeholder={t("例如：话题文件太长，每篇只留三行要点")} onChange={(event) => setText(event.target.value)} /></label>
+      <VoiceField kind="note"><textarea rows={2} value={text} maxLength={2000} placeholder={t("例如：话题文件太长，每篇只留三行要点")} onChange={(event) => setText(event.target.value)} /></VoiceField></label>
     <span className="sk-actions">
       <button type="button" className="secondary-button" disabled={!text.trim()} onClick={async () => {
         if (await send("POST", { action: "improve", text })) {

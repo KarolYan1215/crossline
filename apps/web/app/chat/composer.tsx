@@ -7,6 +7,7 @@ import { MenuButton } from "../ui/controls";
 import { useT } from "../locale-context";
 import { ArrowUp, AtSign, Plus } from "lucide-react";
 import { ICON, IconButton } from "../ui/icon-button";
+import { VoiceButton } from "../ui/voice/voice-input";
 
 export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: string; title: string };
 export type ComposerInput = { text: string; files: File[]; mentions: Mention[]; batch: boolean };
@@ -179,7 +180,10 @@ export function Composer({ mode, placeholder, shortPlaceholder, onSubmit, busy =
           onChange={(event) => onChange(event.target.value)} onKeyDown={onKeyDown}
           onInput={(event) => fitTextarea(event.currentTarget)} />
       </div>
-      <button type="submit" className="composer-send" disabled={busy || (!text.trim() && !fileNames.length)} aria-label={t("发送")}>{busy ? "…" : <ArrowUp {...ICON} />}</button>
+      <span className="composer-end">
+        <VoiceButton target={() => textRef.current} kind="conversation" />
+        <button type="submit" className="composer-send" disabled={busy || (!text.trim() && !fileNames.length)} aria-label={t("发送")}>{busy ? "…" : <ArrowUp {...ICON} />}</button>
+      </span>
       <input ref={fileInputRef} type="file" multiple accept={ACCEPTED} hidden onChange={onInputChange} name="attachments" />
     </div>
     {mode === "capture" && !batch && looksLikeImportList(text) && <p className="composer-import">

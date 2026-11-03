@@ -1,0 +1,33 @@
+/* Voice input (docs/voice-input.md): the microphone in a box's corner and the one panel a dictation shows while it runs. */
+.voice-field{position:relative;display:flex;min-width:0;flex:1 1 auto}
+.voice-field>textarea,.voice-field>input{flex:1 1 auto;min-width:0;width:100%}
+.voice-field:has(>.voice-button)>textarea,.voice-field:has(>.voice-button)>input{padding-right:40px}
+.voice-field>.voice-button{position:absolute;right:4px;bottom:4px;z-index:1}
+.voice-field>input+.voice-button{top:50%;bottom:auto;transform:translateY(-50%)}
+.voice-button{color:var(--muted);touch-action:none;user-select:none;-webkit-user-select:none}
+.voice-button[data-voice="recording"]{background:var(--ds-alarm-soft,var(--chalk));color:var(--ds-alarm-ink,var(--ink));border-color:currentColor}
+.voice-button[data-voice="recording"] svg{animation:voice-pulse 1.2s ease-in-out infinite}
+@keyframes voice-pulse{50%{opacity:.45}}
+
+/* Above every other fixed layer — the notice toast (130) and the full-screen helper (200) covered its buttons on a phone (2026-11-02). */
+.voice-panel{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:210;
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;width:min(560px,calc(100vw - 32px));box-sizing:border-box;padding:10px 12px;
+  border:1px solid var(--ds-line,var(--line));border-radius:12px;background:var(--ds-card,var(--paper));color:var(--ink);
+  box-shadow:0 8px 28px rgb(0 0 0 / .16);font-size:14px;line-height:1.5}
+.voice-panel p{margin:0;flex:1 1 100%}
+.voice-panel .voice-hint{color:var(--muted);font-size:13px}
+.voice-actions{display:flex;flex-wrap:wrap;gap:8px;flex:1 1 100%;justify-content:flex-end}
+.voice-caption{flex:1 1 200px;min-width:0;max-height:4.5em;overflow:auto;overflow-wrap:anywhere}
+.voice-panel[data-phase="recording"] .voice-caption{color:var(--ink)}
+.voice-panel[data-phase="recording"] .voice-caption[data-warn]{font-weight:600}
+.voice-clock{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.voice-meter{display:inline-flex;align-items:center;gap:3px;height:24px;flex:none}
+.voice-meter i{display:block;width:4px;height:22px;border-radius:2px;background:var(--ds-alarm-ink,var(--ink));transform-origin:center;transition:transform 80ms linear}
+.voice-meter[data-engine="browser"] i{width:10px;height:10px;border-radius:50%;animation:voice-pulse 1.2s ease-in-out infinite}
+@media (max-width:640px){
+  .voice-panel{bottom:calc(76px + env(safe-area-inset-bottom,0px))}
+  .voice-field>.voice-button{width:36px;height:36px}
+}
+@media (prefers-reduced-motion:reduce){
+  .voice-button[data-voice="recording"] svg,.voice-meter i{animation:none;transition:none}
+}
