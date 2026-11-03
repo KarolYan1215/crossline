@@ -247,3 +247,19 @@ version
 **评测**
 
 `scripts/persona-eval.ts`：设计虚构人物的内核，写成第一人称的生活与感受（`scripts/personas/eval-2026-10-31/`），由 `crossline-eval-persona`（v2：作答卡片、对洞察说准/不准）只凭生活与感受作答。访谈、抽取、画像撰写和模拟用户都走开发者模型，各人用各自的一次性账本。内核文件不进仓库，只交给评判。服务器上是 `server.yml` 的 `persona` / `persona-report` 动作。
+
+## 十二、P2 的最小形式：导出给 agent（2026-11-03）
+
+P2 的下载包和 MCP 还没做。先做了能用的最小一步：画像页「导出给 Agent（Markdown）」，一份文件可直接贴进 ChatGPT、Claude、Codex 的 AGENTS.md、CLAUDE.md 或自定义指令。
+
+- **接口**：`GET /api/portrait/agent-kit`（需登录，`resolveAccessContext`），返回 Markdown 附件（`filename*` UTF-8）；`?format=json` 返回同样内容的结构（`AgentKit`）。
+- **内容**（`apps/web/lib/agent-kit.ts`，纯函数 `buildAgentKit` + `agentKitMarkdown`；数据由 `loadAgentKitInput` 在 `lib/portrait.ts` 汇集）：
+  - 开头注明「基于访谈和使用记录的推断，不是标准化心理测验」、不得用于招聘录取与教育评估、生成日期。
+  - 和此人协作：`collaboration` 节的条目、每条主线的本人规则（当前主线 skill 版本的打法、偏好、红线）、仍有效的个人偏好（`preference_entries`，任务级与听写的除外，至多 30 条）。
+  - 主线与当前项目：开始前核对用的 `startSummary`：主线描述、本人采纳的长期目标、项目与已确认的截止；每周时间与来源（非本人设定的标「假设」）、固定安排。
+  - 思维模式类型与四轴得分（标为趣味层）、施瓦茨十项价值排序、精力节律（最佳时段、通常睡眠，没有睡眠记录时标「假设」、时型）、画像正文、工作观、生活观与真北。
+  - 其余可导出的条目（`exportableClaims`：`agent` 级及以上、未被本人否定），每条注明来源（卡片作答、本人所说、推断）或「本人已确认」。
+- **不导出**：张力与成长（真问题、核心矛盾、言行落差）、建议、`private` 条目、屏幕活动。画像先经 `redactPortrait` 遮去撰写人标出的敏感片段；所有字符串最后经 `scrub` 去掉邮箱、网址、文件路径、令牌、UUID、内部 id（`pref-…`、`doc-6` 等）和代码（`MILESTONE_NO_MARGIN` 等）。
+- 测试：`apps/web/lib/agent-kit.test.ts`（各节齐全、假设有标注、私密内容与内部标识不出现、英文账号出英文）。
+
+仍未做：`manifest.json` / `profile.json` 等多文件下载包、`CHANGELOG.md`、`agent` 作用域令牌与 MCP 端点。

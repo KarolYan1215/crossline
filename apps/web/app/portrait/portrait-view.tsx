@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, Download, Lock, PenLine, RefreshCw, Share2, UserRound } from "lucide-react";
+import { Bot, Check, Download, Lock, PenLine, RefreshCw, Share2, UserRound } from "lucide-react";
 import { IconButton } from "../ui/icon-button";
 import { portraitLabels, portraitType, redactPortrait, type EnergyRhythm, type PortraitReport, type PortraitType, type SayDoReading } from "@crossline/core";
 import { LineNetwork, type NetworkEdge } from "../ui/line-network";
@@ -289,6 +289,8 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
       {drawing && <small role="status">{t("卡通形象生成中…")}</small>}
       {actions && <>
         <button type="button" className="primary-button pt-share" onClick={() => void share()}><Share2 {...ICON} /><span>{t("分享前半部分")}</span></button>
+        <a className="secondary-button pt-share" href="/api/portrait/agent-kit" download>
+          <Bot {...ICON} /><span>{t("导出给 Agent（Markdown）")}</span></a>
         <IconButton label={t("下载 PDF")} icon={<Download {...ICON} />} onClick={() => window.print()} />
         <IconButton label={t("小帮手形象")} icon={<UserRound {...ICON} />} onClick={() => document.getElementById("pt-figure-card")?.scrollIntoView({ block: "start", behavior: "smooth" })} />
         <IconButton label={state.writing ? t("重新生成中…") : t("重新生成")} icon={<RefreshCw {...ICON} />} disabled={state.writing} onClick={() => void write()} />
@@ -318,6 +320,7 @@ export function PortraitView({ initial, publicUrl, name }: { initial: State; pub
   </footer>;
   return <div className="pt-wrap">
     {head(true)}
+    <p className="muted pt-agent-hint" data-no-export="">{t("「导出给 Agent」得到一份 Markdown，可贴进 ChatGPT、Claude 或 Codex，作为 AGENTS.md 或自定义指令，让它们按本人的方式协作。")}</p>
     <div className="pt-layout">
       <aside className="pt-side" data-no-export="">
         <Contents />

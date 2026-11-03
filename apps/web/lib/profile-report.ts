@@ -16,7 +16,7 @@ export type ProfileReportState = { sections: ReportSectionView[]; items: Profile
 const readJson = <T,>(raw: string | null | undefined, fallback: T): T => { try { return (JSON.parse(raw ?? "null") as T) ?? fallback; } catch { return fallback; } };
 
 /** Every claim the report holds: the cards' (computed now, so an edited answer shows at once) and the writer's (kept at its last run). */
-function allClaims(ctx: AccessContext): ProfileClaim[] {
+export function allClaims(ctx: AccessContext): ProfileClaim[] {
   const store = getStore();
   const answers = readInstrumentAnswers(store.getSetting(ctx.workspaceId, PROFILE_INSTRUMENTS_SETTING));
   const written = readJson<{ at?: string; claims?: ProfileClaim[] }>(store.getSetting(ctx.workspaceId, PROFILE_CLAIMS_SETTING), {});
