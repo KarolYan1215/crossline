@@ -28,6 +28,9 @@ const option = (name: string) => { const at = args.indexOf(`--${name}`); return 
 const home = process.env.CROSSLINE_NODE_HOME ?? path.join(process.env.LOCALAPPDATA ?? appDir, "Crossline Node");
 const codexExe = process.env.CROSSLINE_NODE_CODEX ?? path.join(appDir, "codex", process.platform === "win32" ? "codex.exe" : "codex");
 const codexHome = path.join(home, "codex-home");
+// The installer's ffmpeg (scripts/package-node.ts) first on PATH: the Codex this program starts, and every command it runs, find it there.
+const ffmpegDir = path.join(appDir, "ffmpeg");
+if (existsSync(ffmpegDir)) process.env.PATH = `${ffmpegDir}${path.delimiter}${process.env.PATH ?? ""}`;
 const stateFile = path.join(home, "node.json");
 const tokenFile = path.join(home, "token.bin");
 const lockFile = path.join(home, "node.lock");

@@ -50,6 +50,7 @@
 - `main.mjs`：`apps/worker/src/node/standalone.ts` 连同中继（`agent.ts`、`protocol.ts`）和 `ws` 打包、压缩成一个文件（2026-10-28 起 84 KB：多了启动器的更新与验签两个文件，见「托盘与桌宠」）。打包脚本按 esbuild 的输入清单检查，Crossline 自己的文件只能是这三个，多一个就失败（`NODE_BUNDLE_TOO_WIDE`）。Skill、提示词、计划和校验都不在包里：节点连上后由服务器经镜像装插件。
 - `node.exe`（打包时运行的那个 Node）。
 - `codex\codex.exe`、`codex\codex-code-mode-host.exe`：从 `vendor/codex`（rust-v0.163.0，带 Windows 迁移校验和补丁）编译的 release 版，打包时核对 `--version` 是 0.163.0。
+- `ffmpeg\ffmpeg.exe`、`ffmpeg\ffprobe.exe` 与 GPLv3 许可（2026-11-03，shell 助手在本人电脑上剪辑视频用）：Gyan 的 essentials 静态构建 9.0.2，取自 GitHub `GyanD/codexffmpeg` 的 release，打包脚本里固定版本和 zip 的 SHA-256（`FFMPEG`），先核对再解压；下载缓存在仓库外的 `%LOCALAPPDATA%\crossline-build-cache`（`CROSSLINE_BUILD_CACHE` 可改）。节点程序启动时把 `app\ffmpeg` 放到 `PATH` 最前，它启动的 Codex 和 Codex 执行的命令都直接找得到 `ffmpeg`。
 - 用到 VC++ 运行库的模块旁边放运行库（dumpbin 检查）；许可证；托盘 `CrosslineNode.exe` 与 WebView2 SDK 的三个 DLL（见下「托盘与桌宠」）；`start.vbs` 只为旧安装的开机项保留，现在启动托盘。
 - 每用户安装到 `%LOCALAPPDATA%\Crossline Node\app`，不要管理员权限；默认勾选「登录 Windows 时自动运行」（`HKCU\...\Run`，启动托盘并带 `--background`，托盘再以 `--autostart` 启动节点）。
 
@@ -86,6 +87,45 @@
 **实测（2026-10-28，本机，临时节点目录，本机开发服务器 `localhost:3361` 上的测试账号）：** 托盘编译运行；小帮手窗口先显示登录窗口，填测试邮箱和验证码登录后切成桌宠，背后的窗口内容透过空白处可见；悬停形象出提示（点击不再穿透）；拖动后 `pet.json` 位置更新；右键出快捷菜单（含「先藏起来」）；点形象展开输入框；Ctrl+Alt+H 隐藏再显示；结束托盘后节点进程随之结束；`main.mjs --tray` 的 `ready`、`status`（含暂停）与 `update-failed` 行都按协议输出。没有实测：安装包从零安装与升级、WebView2 运行时缺失的提示、Windows 10、多显示器、与完整本机版托盘同时运行时的热键冲突提示。
 
 **方案 C 留在设计里：** 现在只有服务器运行时的主人账号能批配对。给其他账号开放前要做「别人的节点不受信任」那一节：网关自己数用量、中继只转发该工作区的路由。
+
+## 发布（公开仓库 `KarolYan1215/crossline-releases`）
+
+安装包公开放在 GitHub release 上。打包脚本写出四个文件到 `dist\node-installer\`：`Crossline-Node-Setup-<版本>.exe`、同一个文件的固定名副本 `Crossline-Node-Setup.exe`（`releases/latest/download/Crossline-Node-Setup.exe` 因此总指向最新版）、`node-latest.json`（更新清单，`url` 指向 tag `node-v<版本>` 下的带版本号文件）；`scripts/node-guide-pdf.ts` 把给本人看的安装教程 `docs/node-install-guide.md` 印成 `Crossline-节点安装教程.pdf` 和 ASCII 名副本 `Crossline-Node-Guide.pdf`（GitHub 会改掉资产名里的中文）。`dist\` 不进仓库。
+
+第一次发布前（只做一次）：
+
+```powershell
+# 1. 生成签名密钥。私钥路径必须在仓库外，脚本在仓库内或文件已存在时拒绝；屏幕上打印公钥。私钥离线备份。
+pnpm exec tsx scripts/release-sign.ts keygen --out D:\keys\crossline-release.pem
+# 2. 把打印的公钥填进 apps/launcher/src/release-signature.ts 的 RELEASE_PUBLIC_KEYS，提交。
+#    在此之前装的节点内置空公钥表，拒绝任何更新：它们要手动下载安装一次新版。
+# 3. 建公开仓库（带一个 README 提交，空仓库建不了 release）。
+gh repo create KarolYan1215/crossline-releases --public --add-readme --description "Crossline 节点安装包"
+```
+
+每次发布（`<版本>` 形如 `1.2.0`，大于已发布的版本）：
+
+```powershell
+$env:CROSSLINE_RELEASE_KEY = 'D:\keys\crossline-release.pem'
+# WebView2 SDK：nuget install Microsoft.Web.WebView2 -Version 1.0.2365.46，或把 nuget.org 的 .nupkg（zip）解压到任一目录
+pnpm exec tsx scripts/package-node.ts --version <版本> `
+  --codex-dir C:\Users\karol\Documents\ChatGPT\Multi-ID\vendor\codex\codex-rs\target\release `
+  --webview2-dir <解压后的 Microsoft.Web.WebView2 目录>
+pnpm exec tsx scripts/node-guide-pdf.ts
+gh release create node-v<版本> -R KarolYan1215/crossline-releases --latest --title "Crossline 节点 <版本>" `
+  --notes "安装教程见 Crossline-Node-Guide.pdf。" `
+  dist\node-installer\Crossline-Node-Setup-<版本>.exe dist\node-installer\Crossline-Node-Setup.exe `
+  dist\node-installer\node-latest.json dist\node-installer\Crossline-Node-Guide.pdf
+# 核对：固定链接跳到新版本，清单带签名
+curl.exe -sI https://github.com/KarolYan1215/crossline-releases/releases/latest/download/Crossline-Node-Setup.exe
+curl.exe -sL https://github.com/KarolYan1215/crossline-releases/releases/latest/download/node-latest.json
+```
+
+- 打包脚本在 `CROSSLINE_RELEASE_KEY` 存在时自己签 `node-latest.json`；没设时写出未签名的清单并警告，节点会拒绝它，不能发布。
+- tag 必须是 `node-v<版本>`：清单里的 `url` 按它写，签名覆盖 `url`。
+- 节点的更新地址是 `releases/latest/download/node-latest.json`，所以节点的 release 必须是仓库的 latest（`--latest`）。如果完整本机版的最后一版或它的停发清单 `latest.json` 也放在这个仓库（docs/local-installer.md「停发」），旧启动器读的是 `latest/download/latest.json`：每个节点 release 都要附上同一份签名的 `latest.json`，否则旧启动器会读不到。
+- 安装包没有 Authenticode 签名，SmartScreen 会拦，教程里写了「更多信息 → 仍要运行」。买代码签名证书后再在打包脚本里加签名。
+- 随包的 FFmpeg 是 GPLv3 构建：许可文件随包，`licenses\README.txt` 写了源码地址。公开分发前由本人确认这样是否满足 GPLv3 的源码提供义务（更稳妥的做法是把对应版本的源码包也放进同一个 release）。
 
 ## 浏览器读取放到节点（2026-10-24，P2 的第一块）
 
