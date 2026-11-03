@@ -11,6 +11,7 @@
   "纠正错字": "Fix misheard words",
   "按主线、项目和任务的名称纠正听错的字词，只改错字和标点，不改写原话；使用模型额度。": "Fixes misheard words against your lines, projects and tasks, and the punctuation; never rewrites what was said. Uses model quota.",
   "没有听清，再说一次试试。": "Nothing was heard clearly; try again.",
+  "这台电脑的麦克风处于静音：按键盘上的麦克风键，或在系统的声音设置里取消静音，再说一次。": "This computer's microphone is muted: press the microphone key on the keyboard or unmute it in the system's sound settings, then speak again.",
   "语音识别服务暂时不可用，稍后再试。": "Speech recognition is unavailable right now; try again later.",
   "识别用时过长，没有完成，请再说一次。": "Recognition took too long and did not finish; please say it again.",
   "录音太短，没有听到内容。": "The recording was too short; nothing was heard.",
@@ -40,9 +41,5 @@
   "恢复原文": "Restore what was heard",
   "结束语音输入": "Finish voice input",
   "语音输入用词": "Voice input wording",
-  "语音输入纠错": "Voice input correction",
-  "麦克风没有收到声音：检查电脑和浏览器选用的麦克风。": "The microphone picked up no sound: check which microphone the computer and the browser use.",
-  "这个浏览器的语音识别没有反应，这里暂时不能语音输入。": "This browser's speech recognition did not respond, so voice input is not available here for now.",
-  "浏览器自带的语音识别没有听到内容，这段录音改由 Crossline 转成文字。": "The browser's own speech recognition heard nothing, so Crossline turns this recording into text instead.",
-  "浏览器自带的语音识别没有听到内容。": "The browser's own speech recognition heard nothing."
+  "语音输入纠错": "Voice input correction"
 }

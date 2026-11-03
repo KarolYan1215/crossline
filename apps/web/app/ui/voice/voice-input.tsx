@@ -7,7 +7,7 @@ import { DICTATION_MAX_SECONDS, speechLang, type VoicePreferences } from "@cross
 import { useLocale, useT } from "../../locale-context";
 import { ICON, IconButton } from "../icon-button";
 import {
-  BROWSER_BROKEN_ERRORS, SOUND_FRAMES, SOUND_PEAK, afterEmptyBrowser, chooseEngine, clock, insertDictation, isIosStandalone, isSafari, mixDown, spanNow, toPcm16,
+  BROWSER_BROKEN_ERRORS, chooseEngine, clock, insertDictation, isIosStandalone, isSafari, microphoneMuted, mixDown, spanNow, toPcm16,
   type DictatedSpan, type VoiceEngine, type VoiceServerState
 } from "./voice-model";
 
@@ -71,13 +71,6 @@ function setValue(element: Target, value: string, caret: number): void {
   try { element.setSelectionRange(caret, caret); } catch { /* some input types have no selection */ }
 }
 
-/** One recording. `loudFrames` counts the microphone's frames with sound; `recorded` is the whole recording once the recorder stops. */
-type Session = {
-  engine: VoiceEngine; caret: [number, number]; startedAt: number; stopping: boolean; cancelled: boolean; finals: string; interim: string;
-  recognition?: Recognition; recorder?: MediaRecorder; recorded?: Promise<Blob>; stream?: MediaStream; audio?: AudioContext; chunks: Blob[];
-  loudFrames: number; tick?: number; raf?: number;
-};
-
 type Phase = "idle" | "notice" | "model" | "recording" | "transcribing" | "correcting" | "done" | "error";
 
 export function VoiceButton({ target, kind, label, page, className = "" }: {
@@ -85,6 +78,7 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
 }) {
   const t = useT();
   const locale = useLocale();
+  const mutedText = t("这台电脑的麦克风处于静音：按键盘上的麦克风键，或在系统的声音设置里取消静音，再说一次。");
   const status = useVoiceStatus();
   const [mounted, setMounted] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -94,11 +88,12 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
   const [level, setLevel] = useState(0);
   const [message, setMessage] = useState("");
   const [corrected, setCorrected] = useState(0);
-  const [metered, setMetered] = useState(false);
-  const [browserFailed, setBrowserFailed] = useState(false);
-  const session = useRef<Session | undefined>(undefined);
-  /** A recording the browser's recogniser heard nothing in, kept until the person accepts the notice of Crossline's own engine. */
-  const pendingClip = useRef<Blob | undefined>(undefined);
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
+  const session = useRef<{
+    engine: VoiceEngine; caret: [number, number]; startedAt: number; stopping: boolean; cancelled: boolean; finals: string; interim: string;
+    recognition?: Recognition; recorder?: MediaRecorder; stream?: MediaStream; audio?: AudioContext; chunks: Blob[]; tick?: number; raf?: number;
+  } | undefined>(undefined);
   const restore = useRef<{ element: Target; raw: string; span: DictatedSpan } | undefined>(undefined);
   const pressAt = useRef(0);
   const hideTimer = useRef<number | undefined>(undefined);
@@ -136,7 +131,6 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
       try { current.recognition?.abort(); } catch { /* already ended */ }
       try { if (current.recorder?.state !== "inactive") current.recorder?.stop(); } catch { /* already stopped */ }
     }
-    pendingClip.current = undefined;
     teardown();
     setPhase("idle"); setCaption("");
   }, [teardown]);
@@ -146,7 +140,11 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
   const deliver = useCallback(async (raw: string) => {
     const element = target();
     const text = raw.trim();
-    if (!element || !text) { flash("error", t("没有听清，再说一次试试。"), 4000); return; }
+    if (!element || !text) {
+      teardown();
+      flash("error", mutedRef.current ? mutedText : t("没有听清，再说一次试试。"), mutedRef.current ? 10_000 : 4000);
+      return;
+    }
     const caret = session.current?.caret ?? [element.value.length, element.value.length];
     teardown();
     const placed = insertDictation(element.value, Math.min(caret[0], element.value.length), Math.min(caret[1], element.value.length), text,
@@ -211,9 +209,9 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
     if (!current || current.stopping) return;
     current.stopping = true;
     window.clearInterval(current.tick);
-    if (current.engine === "browser") { try { current.recognition?.stop(); } catch { void settleRef.current(current); } }
+    if (current.engine === "browser") { try { current.recognition?.stop(); } catch { void deliver(`${current.finals}${current.interim}`); } }
     else { setPhase("transcribing"); try { current.recorder?.stop(); } catch { cancel(); } }
-  }, [cancel]);
+  }, [cancel, deliver]);
 
   const failText = useCallback((code: string) => ({
     VOICE_ENGINE_UNAVAILABLE: t("语音识别服务暂时不可用，稍后再试。"), VOICE_TRANSCRIBER_TIMEOUT: t("识别用时过长，没有完成，请再说一次。"),
@@ -233,60 +231,34 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
     } catch { teardown(); flash("error", failText("")); }
   }, [deliver, failText, flash, teardown]);
 
-  /** The microphone for the level meter and a recording: Crossline's engine transcribes it, and the browser's recogniser falls back on it. */
-  const openMic = useCallback(async (current: Session): Promise<boolean> => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
-    if (current.cancelled || session.current !== current) { stream.getTracks().forEach((track) => track.stop()); return false; }
-    current.stream = stream;
-    const audio = new AudioContext();
-    current.audio = audio;
-    const analyser = audio.createAnalyser();
-    analyser.fftSize = 512;
-    audio.createMediaStreamSource(stream).connect(analyser);
-    const data = new Uint8Array(analyser.fftSize);
-    const draw = () => {
-      analyser.getByteTimeDomainData(data);
+  /**
+   * A second, unprocessed capture of the microphone read for a moment beside the recording: a muted system microphone gives a muted
+   * track or exact zeros, which no recogniser can say. Not on Safari, whose recogniser and a second capture stop each other on iOS.
+   */
+  const checkMuted = useCallback(async (current: NonNullable<typeof session.current>) => {
+    if (isSafari(navigator.userAgent)) return;
+    let stream: MediaStream | undefined, audio: AudioContext | undefined;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      audio = new AudioContext();
+      const analyser = audio.createAnalyser();
+      analyser.fftSize = 2048;
+      audio.createMediaStreamSource(stream).connect(analyser);
+      const data = new Float32Array(analyser.fftSize);
       let peak = 0;
-      for (const value of data) peak = Math.max(peak, Math.abs(value - 128));
-      if (peak >= SOUND_PEAK) current.loudFrames += 1;
-      setLevel(Math.min(1, peak / 64));
-      current.raf = requestAnimationFrame(draw);
-    };
-    draw();
-    setMetered(true);
-    const recorder = new MediaRecorder(stream);
-    recorder.ondataavailable = (event) => { if (event.data.size) current.chunks.push(event.data); };
-    current.recorded = new Promise((resolve) => { recorder.onstop = () => resolve(new Blob(current.chunks, { type: recorder.mimeType })); });
-    current.recorder = recorder;
-    recorder.start(1000);
-    return true;
-  }, []);
-
-  /** The browser's recogniser has ended: what it heard goes in; heard nothing, the microphone's own recording decides what happens. */
-  const settleBrowser = useCallback(async (current: Session) => {
-    const text = `${current.finals}${current.interim}`.trim();
-    try { if (current.recorder && current.recorder.state !== "inactive") current.recorder.stop(); } catch { /* already stopped */ }
-    if (text || !current.recorder || !status) { await deliver(text); return; }
-    const outcome = afterEmptyBrowser(current.loudFrames >= SOUND_FRAMES, facts(status.server, status.mode));
-    if (outcome === "silent") { teardown(); flash("error", t("麦克风没有收到声音：检查电脑和浏览器选用的麦克风。"), 8000); return; }
-    try { sessionStorage.setItem(BROKEN_KEY, "1"); } catch { /* not remembered: the next tap tries the browser again */ }
-    if (outcome === "server") {
-      const clip = await current.recorded!;
-      if (current.cancelled || session.current !== current) return;
-      current.stream?.getTracks().forEach((track) => track.stop());
-      setEngine("server"); setBrowserFailed(true); setMetered(false);
-      if (stored(noticeKey("server")) !== "1") { pendingClip.current = clip; setPhase("notice"); return; }
-      setPhase("transcribing");
-      void sendClip(clip);
-      return;
+      for (let index = 0; index < 12; index += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 100));
+        analyser.getFloatTimeDomainData(data);
+        for (const value of data) peak = Math.max(peak, Math.abs(value));
+      }
+      const track = stream.getAudioTracks()[0];
+      if (session.current === current && !current.cancelled && track && microphoneMuted(track.muted, peak)) { mutedRef.current = true; setMuted(true); }
+    } catch { /* the recording itself reports a missing microphone or permission */ }
+    finally {
+      stream?.getTracks().forEach((track) => track.stop());
+      void audio?.close().catch(() => undefined);
     }
-    teardown();
-    setBrowserFailed(true);
-    if (outcome === "model_needed") { setEngine("model_needed"); setMessage(""); setPhase("model"); return; }
-    flash("error", t("这个浏览器的语音识别没有反应，这里暂时不能语音输入。"), 8000);
-  }, [deliver, facts, flash, sendClip, status, t, teardown]);
-  const settleRef = useRef(settleBrowser);
-  settleRef.current = settleBrowser;
+  }, []);
 
   const begin = useCallback(async (chosen: VoiceEngine) => {
     const element = target();
@@ -295,8 +267,9 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
     stopOther = cancelRef.current;
     const active = document.activeElement === element;
     const caret: [number, number] = active ? [element.selectionStart ?? element.value.length, element.selectionEnd ?? element.value.length] : [element.value.length, element.value.length];
-    session.current = { engine: chosen, caret, startedAt: Date.now(), stopping: false, cancelled: false, finals: "", interim: "", chunks: [], loudFrames: 0 };
-    setEngine(chosen); setCaption(""); setSeconds(0); setLevel(0); setMetered(false); setBrowserFailed(false); setPhase("recording");
+    session.current = { engine: chosen, caret, startedAt: Date.now(), stopping: false, cancelled: false, finals: "", interim: "", chunks: [] };
+    setEngine(chosen); setCaption(""); setSeconds(0); setLevel(0); setPhase("recording");
+    mutedRef.current = false; setMuted(false);
     const current = session.current;
     current.tick = window.setInterval(() => {
       const elapsed = (Date.now() - current.startedAt) / 1000;
@@ -335,24 +308,46 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
         if (current.cancelled || session.current !== current) return;
         // Chrome ends a continuous session by itself after a pause: it goes on until the person finishes.
         if (!current.stopping) { try { recognition.start(); return; } catch { /* could not restart: what was heard is delivered */ } }
-        void settleBrowser(current);
+        void deliver(`${current.finals}${current.interim}`);
       };
       current.recognition = recognition;
       try { recognition.start(); } catch { teardown(); flash("error", failText("")); return; }
-      // Beside the recogniser, the microphone's level and a recording kept in memory: the only way to tell silence from a recogniser that
-      // hears nothing. Not on Safari, whose recogniser and a second capture of the microphone stop each other on iOS.
-      if (!isSafari(navigator.userAgent)) void openMic(current).catch(() => undefined);
+      void checkMuted(current);
       return;
     }
     try {
-      if (!(await openMic(current))) return;
-      void current.recorded!.then((clip) => { if (!current.cancelled && session.current === current) void sendClip(clip); });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+      if (current.cancelled) { stream.getTracks().forEach((track) => track.stop()); return; }
+      current.stream = stream;
+      const audio = new AudioContext();
+      current.audio = audio;
+      const analyser = audio.createAnalyser();
+      analyser.fftSize = 512;
+      audio.createMediaStreamSource(stream).connect(analyser);
+      const data = new Uint8Array(analyser.fftSize);
+      const draw = () => {
+        analyser.getByteTimeDomainData(data);
+        let peak = 0;
+        for (const value of data) peak = Math.max(peak, Math.abs(value - 128));
+        setLevel(Math.min(1, peak / 64));
+        current.raf = requestAnimationFrame(draw);
+      };
+      draw();
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (event) => { if (event.data.size) current.chunks.push(event.data); };
+      recorder.onstop = () => {
+        if (current.cancelled) return;
+        void sendClip(new Blob(current.chunks, { type: recorder.mimeType }));
+      };
+      current.recorder = recorder;
+      recorder.start(1000);
+      void checkMuted(current);
     } catch (error) {
       teardown();
       const denied = error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError");
       flash("error", denied ? t("没有麦克风权限：在浏览器的网站设置里允许麦克风后再试。") : t("没有找到可用的麦克风。"), 8000);
     }
-  }, [failText, finish, flash, locale, openMic, sendClip, settleBrowser, status, t, target, teardown]);
+  }, [checkMuted, failText, finish, flash, locale, sendClip, status, t, target, teardown]);
 
   const start = useCallback(() => {
     if (!status) return;
@@ -365,9 +360,6 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
 
   const acceptNotice = () => {
     try { localStorage.setItem(noticeKey(engine), "1"); } catch { /* shown again next time */ }
-    const clip = pendingClip.current;
-    pendingClip.current = undefined;
-    if (clip && engine === "server") { setPhase("transcribing"); void sendClip(clip); return; }
     void begin(engine);
   };
 
@@ -408,7 +400,6 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
   const correctNote = status.preferences.correct ? t("转出的文字会按主线、项目和任务的名称纠正错字（使用模型额度），可在设置 → 通用里关闭。") : "";
   const panel = phase === "idle" ? null : <div className="voice-panel" role={phase === "error" ? "alert" : "status"} aria-live="polite" data-phase={phase}>
     {phase === "notice" && <>
-      {browserFailed && <p>{t("浏览器自带的语音识别没有听到内容，这段录音改由 Crossline 转成文字。")}</p>}
       <p>{engine === "browser" ? t("语音由浏览器自带的识别服务转成文字：Chrome 交给 Google，Edge 交给 Microsoft，Safari 交给 Apple。Crossline 不保存录音。")
         : status.mode === "local" ? t("录音在这台电脑上转成文字，不离开本机，转完立即删除。")
           : t("录音发到 Crossline 的服务器转成文字，转完立即删除，不保存。")}</p>
@@ -418,7 +409,6 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
         <button type="button" className="secondary-button" onClick={cancel}>{t("取消")}</button></div>
     </>}
     {phase === "model" && <>
-      {browserFailed && <p>{t("浏览器自带的语音识别没有听到内容。")}</p>}
       <p>{message || t("这台电脑上的浏览器没有自带语音识别。下载 SenseVoice 语音识别模型（约 {{mb}} MB，来自 Hugging Face）后，语音在本机转成文字，不离开这台电脑。",
         { mb: String(Math.round(status.modelBytes / 1_000_000)) })}</p>
       <div className="voice-actions">{!message && <button type="button" className="primary-button" onClick={() => void download()}>{t("下载模型")}</button>}
@@ -426,9 +416,9 @@ export function VoiceButton({ target, kind, label, page, className = "" }: {
     </>}
     {recording && <>
       <span className="voice-meter" data-engine={engine} aria-hidden="true">
-        {engine === "server" || metered ? [0.5, 0.8, 1, 0.8, 0.5].map((weight, index) => <i key={index} style={{ transform: `scaleY(${Math.max(0.15, level * weight)})` }} />) : <i />}
+        {engine === "server" ? [0.5, 0.8, 1, 0.8, 0.5].map((weight, index) => <i key={index} style={{ transform: `scaleY(${Math.max(0.15, level * weight)})` }} />) : <i />}
       </span>
-      <span className="voice-caption">{caption || (engine === "browser" ? t("正在听…") : t("正在录音…"))}</span>
+      <span className="voice-caption" data-warn={muted && !caption ? "" : undefined}>{caption || (muted ? mutedText : engine === "browser" ? t("正在听…") : t("正在录音…"))}</span>
       <span className="voice-clock">{clock(seconds)} / {clock(DICTATION_MAX_SECONDS)}</span>
       <IconButton label={t("取消（Esc）")} icon={<X {...ICON} />} onClick={cancel} tip={false} />
       <IconButton label={t("完成")} tone="primary" icon={<Check {...ICON} />} onClick={finish} tip={false} />

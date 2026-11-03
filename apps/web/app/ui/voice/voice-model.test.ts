@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { afterEmptyBrowser, chooseEngine, clock, insertDictation, isIosStandalone, isSafari, mixDown, spanNow, toPcm16 } from "./voice-model";
+import { chooseEngine, clock, insertDictation, isIosStandalone, isSafari, microphoneMuted, mixDown, spanNow, toPcm16 } from "./voice-model";
 
 const facts = { hasSpeechRecognition: true, iosStandalone: false, online: true, browserBroken: false, server: "ready" as const, mode: "server" as const };
 
@@ -12,18 +12,20 @@ describe("voice engine", () => {
     expect(chooseEngine({ ...facts, hasSpeechRecognition: false, server: "model_missing", mode: "local" })).toBe("model_needed");
     expect(chooseEngine({ ...facts, hasSpeechRecognition: false, server: "model_missing", mode: "server" })).toBe("none");
   });
-  it("tells silence from a recogniser that heard nothing the microphone heard", () => {
-    expect(afterEmptyBrowser(false, facts)).toBe("silent");
-    expect(afterEmptyBrowser(true, facts)).toBe("server");
-    expect(afterEmptyBrowser(true, { ...facts, server: "model_missing", mode: "local" })).toBe("model_needed");
-    expect(afterEmptyBrowser(true, { ...facts, server: "unavailable" })).toBe("none");
-  });
   it("knows the iPhone home-screen app and Safari", () => {
     expect(isIosStandalone({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", standalone: true }, false)).toBe(true);
     expect(isIosStandalone({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", standalone: false }, false)).toBe(false);
     expect(isIosStandalone({ userAgent: "Mozilla/5.0 (Windows NT 10.0)" }, true)).toBe(false);
     expect(isSafari("Mozilla/5.0 (Macintosh) AppleWebKit/605 Version/18.0 Safari/605")).toBe(true);
     expect(isSafari("Mozilla/5.0 (Windows) Chrome/140 Safari/537")).toBe(false);
+  });
+});
+
+describe("a muted microphone", () => {
+  it("tells a muted microphone from a quiet room", () => {
+    expect(microphoneMuted(true, 0.01)).toBe(true);
+    expect(microphoneMuted(false, 0)).toBe(true);
+    expect(microphoneMuted(false, 0.0004)).toBe(false);
   });
 });
 
