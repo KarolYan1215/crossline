@@ -1,0 +1,14 @@
+{
+  "截止 {{day}} 已过": "Deadline {{day}} has passed",
+  "{{day}} 已开始": "Started on {{day}}",
+  "单程约 {{minutes}} 分钟，超过本地活动的 {{limit}} 分钟": "About {{minutes}} minutes each way, over the {{limit}} minutes allowed for a local event",
+  "活动地点无法定位": "The event's place could not be located",
+  "不知道本人那天在哪里": "Where you will be that day is not known",
+  "需提前 {{days}} 天准备，最晚 {{day}} 开始": "Needs {{days}} days of preparation; start by {{day}} at the latest",
+  "签证需约 {{days}} 天，最晚 {{day}} 开始办理": "The visa takes about {{days}} days; apply by {{day}} at the latest",
+  "签证需约 {{days}} 天（未核实），最晚 {{day}} 开始办理": "The visa takes about {{days}} days (unverified); apply by {{day}} at the latest",
+  "路上需 {{days}} 天，最晚 {{day}} 出发": "The journey takes {{days}} days; leave by {{day}} at the latest",
+  "{{day}} 没有可用时段": "No available time on {{day}}",
+  "与「{{title}}」（{{day}} {{start}}–{{end}}，固定安排）冲突；移动它需要本人同意": "Clashes with “{{title}}” ({{day}} {{start}}–{{end}}, a fixed arrangement); moving it needs your agreement",
+  "与「{{title}}」（{{day}} {{start}}–{{end}}，工作块）冲突；报名或加入计划后会重排": "Clashes with “{{title}}” ({{day}} {{start}}–{{end}}, a work block); it is rescheduled once you register or add it to the plan"
+}

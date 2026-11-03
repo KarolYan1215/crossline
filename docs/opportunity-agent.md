@@ -511,7 +511,21 @@
 - 修 A 线的 UTC 今天；补 A/B 交接的两个缺口。
 
 **② 时空引擎**
-- `feasibilityOf`：core 纯函数。
+- `feasibilityOf`：core 纯函数（`packages/core/src/feasibility.ts`）。稳定签名，① 在推送任何机会前调用：
+
+  ```ts
+  feasibilityOf(opportunity: Opportunity, ctx: FeasibilityContext): Promise<Feasibility>
+  type FeasibilityContext = {
+    now: Date; timeZone: string; prepDays: number; places: readonly PersonPlace[];
+    geocode(query: GeoQuery): GeoPoint | undefined | Promise<GeoPoint | undefined>;
+    citizenship?: string;
+    visa(citizenship: string, destination: string): VisaCheck | undefined | Promise<VisaCheck | undefined>;
+    blocks: readonly FeasibilityBlock[]; availability: readonly AvailabilityWindow[];
+    localMinutesMax?: number; locale?: Locale;
+  };
+  ```
+
+  契约只做了加法：`Opportunity.place?: EventPlace`、`Opportunity.category?: OpportunityCategory`（`OPPORTUNITY_CATEGORIES`，缺省时 `opportunityCategory` 按类型与标题读）、`TravelEstimate.travelDays?` 与 `costTier?`。
 - Nominatim 客户端：限速、缓存、User-Agent。
 - 规则化交通估算、签证官方页核实与缓存。
 - 本人所在地的四个来源：设备定位要做同意开关与约 1 公里的取舍；邮件 `travel` 类。
