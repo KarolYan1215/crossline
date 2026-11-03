@@ -117,3 +117,12 @@ test("the line card's hand on watches: add, edit, pause, restore — and none of
   expect(loadLineWatches(TEST_CTX)).toEqual({});
   expect(loadOpportunitySettings(TEST_CTX, NOW)).toBeUndefined();
 });
+
+test("the hosted beta's machine owner has the agent; a guest there does not", async () => {
+  const { opportunityOwner } = await import("./opportunities");
+  const store = setup();
+  vi.stubEnv("CROSSLINE_PUBLIC_BETA", "1");
+  expect(opportunityOwner(TEST_CTX)).toBe(true);
+  const guest = store.createPrincipalWithWorkspace("g", "g").workspace.id;
+  expect(opportunityOwner({ ...TEST_CTX, workspaceId: guest })).toBe(false);
+});

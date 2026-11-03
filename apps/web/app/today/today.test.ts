@@ -9,9 +9,9 @@ test("the energy curve: a smooth path across the card, the cut points inside it,
   expect(shape.line.startsWith("M0.0,")).toBe(true);
   expect(shape.line.match(/ C/g)).toHaveLength(points.length - 1);
   expect(shape.area.endsWith("Z")).toBe(true);
-  // Higher alertness is higher on the card (smaller y); both cut points sit inside the 88px drawing.
+  // Higher alertness is higher on the card (smaller y); both cut points sit inside the 52px drawing.
   expect(shape.high).toBeLessThan(shape.low);
-  for (const y of [shape.low, shape.high]) { expect(y).toBeGreaterThan(0); expect(y).toBeLessThan(88); }
+  for (const y of [shape.low, shape.high]) { expect(y).toBeGreaterThan(0); expect(y).toBeLessThan(52); }
   expect(shape.now!.x).toBeCloseTo(((550 - 360) / 1080) * 320, 5);
   // Before 06:00 there is no "now" mark on the day's curve.
   expect(curveGeometry({ points, low: 9.5, high: 12.5, nowMinute: 300 }).now).toBeUndefined();

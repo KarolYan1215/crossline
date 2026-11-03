@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DAY_PART_LABEL, LESS_REASONS, LESS_REASON_LABEL, SCOUT_STATS_SETTING, WEEKDAY_LABEL, eligibilityAnswer, exploreAccount,
+  DAY_PART_LABEL, LESS_REASONS, LESS_REASON_LABEL, RUNTIME_OWNER_SETTING, SCOUT_STATS_SETTING, WEEKDAY_LABEL, eligibilityAnswer, exploreAccount,
   nextDeadline, prepStartFor, readScoutStats, stepLeavesMachine, taskTitleOf, watchYield, type AccessContext, type Ask, type AskField, type AskOption, type FormRunState, type FormStop,
   type LessEntry, type LessReason, type OpportunityOutcome, type StoredWatch, type WatchTarget
 } from "@crossline/core";
@@ -32,8 +32,9 @@ const daysUntil = (today: string, day: string) => Math.round((Date.parse(`${day}
 const short = (text: string, length = 40) => text.length > length ? `${text.slice(0, length)}…` : text;
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 
-/** The machine owner's workspace, never on the hosted beta: where the worker runs watches and the form filler works (§0). */
-export const opportunityOwner = (ctx: AccessContext): boolean => assistantAvailable(getStore(), ctx.workspaceId);
+/** The machine owner's workspace, the hosted beta's included: where the worker runs watches and the form filler works (§0). */
+export const opportunityOwner = (ctx: AccessContext): boolean =>
+  getStore().getSetting(ctx.workspaceId, RUNTIME_OWNER_SETTING) === "1" || assistantAvailable(getStore(), ctx.workspaceId);
 
 /** Where a watch looks, in the person's words. */
 export function targetLabel(target: WatchTarget, t: ReturnType<typeof tFor>): string {

@@ -42,12 +42,13 @@ const usage = (purpose: string, inputTokens: number, at = NOW.toISOString()) => 
   spendMode: "normal", threadId: "t", ok: true, errorCode: "", repairs: 0, turns: 1, inputTokens, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0,
   totalTokens: inputTokens, durationMs: 1, at, purpose } as Parameters<CrosslineStore["saveModelUsage"]>[0]);
 
-test("only the machine owner's workspace runs the agent, and never on the hosted beta", () => {
+test("only the machine owner's workspace runs the agent, on the hosted beta too", () => {
   const guest = store.createPrincipalWithWorkspace("g", "g").workspace.id;
   store.setSetting(ws, RUNTIME_OWNER_SETTING, "1");
   expect(opportunityAgentOn(store, ws, {})).toBe(true);
   expect(opportunityAgentOn(store, guest, {})).toBe(false);
-  expect(opportunityAgentOn(store, ws, { CROSSLINE_PUBLIC_BETA: "1" })).toBe(false);
+  expect(opportunityAgentOn(store, ws, { CROSSLINE_PUBLIC_BETA: "1" })).toBe(true);
+  expect(opportunityAgentOn(store, guest, { CROSSLINE_PUBLIC_BETA: "1" })).toBe(false);
 });
 
 test("watches are not derived before the account is set up; a result, a gate or a confirmed sign-up is a node of its line", () => {

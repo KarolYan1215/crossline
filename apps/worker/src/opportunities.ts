@@ -456,9 +456,12 @@ export function addMailCandidate(store: CrosslineStore, workspaceId: string, can
   store.setSetting(workspaceId, MAIL_CANDIDATES_SETTING, JSON.stringify([...list, candidate].slice(-40)));
 }
 
-/** Whether the opportunity agent runs for this workspace: the machine owner's (the installed copy's one account included), never a hosted guest. */
+/**
+ * Whether the opportunity agent runs for this workspace: the machine owner's only (the installed copy's one account, and the hosted
+ * beta's owner since 2026-11-03), never a guest.
+ */
 export function opportunityAgentOn(store: CrosslineStore, workspaceId: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CROSSLINE_PUBLIC_BETA !== "1" && runtimeOwner(store, env) === workspaceId;
+  return runtimeOwner(store, env) === workspaceId;
 }
 
 /**

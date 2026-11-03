@@ -11,7 +11,7 @@ const LEVEL = { low: "低", medium: "中", high: "高" } as const;
 const SURE = { low: "把握低", medium: "把握中", high: "把握高" } as const;
 type Curve = NonNullable<NonNullable<DashboardData["energyEstimate"]>["curve"]>;
 
-const FROM = 360, TO = 1440, W = 320, H = 88;
+const FROM = 360, TO = 1440, W = 320, H = 52;
 
 /**
  * The day's curve as an SVG path and where now sits on it (the energy card's drawing). Alertness is mapped onto the height between a

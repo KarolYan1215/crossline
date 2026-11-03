@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
+import { RUNTIME_OWNER_SETTING } from "@crossline/core";
 import { DILIGENCE_SKILL, createDiligenceRunner, isPrivateAddress, linesDueForDiligence, pageSupports, verifySource } from "./diligence";
 import { fakeRuntime as sharedRuntime } from "./testing/fake-runtime";
 
@@ -115,10 +116,15 @@ test("a line is researched once a week, and not at all without a profile or with
   expect(await run("startup")).toEqual({ state: "skipped", reason: "recent_report" });
   expect(turns()).toBe(1);
   expect(linesDueForDiligence(store, workspaceId, NOW(), { CROSSLINE_PUBLIC_BETA: "1" })).toEqual([]);
-  const beta = { CROSSLINE_PUBLIC_BETA: "1" };
-  expect(linesDueForDiligence(store, workspaceId, new Date("2026-10-10T12:00:00.000Z"), beta)).toEqual(["startup"]);
-  // On the machine owner's own workspace the opportunity agent watches the startup line's openings instead.
-  expect(linesDueForDiligence(store, workspaceId, new Date("2026-10-10T12:00:00.000Z"), {})).toEqual([]);
+  // A guest's line is due again a week on; on the machine owner's own workspace (hosted too) the opportunity agent watches the
+  // startup line's openings instead.
+  const owner = store.createPrincipalWithWorkspace("o2", "o2").workspace.id;
+  store.deleteSetting(workspaceId, RUNTIME_OWNER_SETTING);
+  store.setSetting(owner, RUNTIME_OWNER_SETTING, "1");
+  expect(linesDueForDiligence(store, workspaceId, new Date("2026-10-10T12:00:00.000Z"), { CROSSLINE_PUBLIC_BETA: "1" })).toEqual(["startup"]);
+  store.deleteSetting(owner, RUNTIME_OWNER_SETTING);
+  store.setSetting(workspaceId, RUNTIME_OWNER_SETTING, "1");
+  expect(linesDueForDiligence(store, workspaceId, new Date("2026-10-10T12:00:00.000Z"), { CROSSLINE_PUBLIC_BETA: "1" })).toEqual([]);
 
   const broke = createDiligenceRunner(store, workspaceId, "C:\\repo", () => rpc, { fetchImpl, isPublicHost: publicHost, now: NOW, webBlocker: () => undefined,
     readCost: async () => ({ available: true, short: { usedPercent: 99 }, long: { usedPercent: 99 } }) as never });
