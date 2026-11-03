@@ -113,7 +113,7 @@
 
 **清单签名（2026-10-28）。** SHA-256 只证明下载的就是清单点名的那个文件；谁能改清单（公开发布仓库、能往里发布的账号、中间的网络），谁就能点名任何安装包。所以清单本身用 Ed25519 签名（`apps/launcher/src/release-signature.ts`，node:crypto）：
 - 签的是固定格式的几行文字（`crossline-release-v1`，然后 `product`、`version`、`url`、`sha256`、`size`、`discontinued`、`notice`、`link` 各一行，值里的换行换成空格），所以 JSON 的键顺序、空格改不了含义，改任何一个字段签名就不对。`product` 是 `crossline`（本机版）或 `crossline-node`（节点），一个产品的清单装不了另一个。
-- 启动器和节点程序内置公钥（`RELEASE_PUBLIC_KEYS`，32 字节原始公钥的 base64，可以放两把以便换钥）。没签名（`UPDATE_SIGNATURE_MISSING`）、签名不对或被改过（`UPDATE_SIGNATURE_INVALID`）、产品不对（`UPDATE_PRODUCT_MISMATCH`）一律拒绝，并当作「更新检查失败」告诉本人，不会当作「没有更新」；`downloadInstaller` 下载前再验一次，没验过的清单根本不会去下载。公钥表为空时一律拒绝（`UPDATE_SIGNING_KEY_MISSING`）：**仓库里现在就是空的**，在本人生成密钥之前任何更新都装不上。
+- 启动器和节点程序内置公钥（`RELEASE_PUBLIC_KEYS`，32 字节原始公钥的 base64，可以放两把以便换钥）。没签名（`UPDATE_SIGNATURE_MISSING`）、签名不对或被改过（`UPDATE_SIGNATURE_INVALID`）、产品不对（`UPDATE_PRODUCT_MISMATCH`）一律拒绝，并当作「更新检查失败」告诉本人，不会当作「没有更新」；`downloadInstaller` 下载前再验一次，没验过的清单根本不会去下载。公钥表为空时一律拒绝（`UPDATE_SIGNING_KEY_MISSING`）。2026-11-03 生成了第一把：私钥在本人电脑的 `C:\Users\karol\.crossline-keys\crossline-release.pem`，不进仓库，要离线另备一份；公钥已写进表里。
 - 生成密钥：`pnpm exec tsx scripts/release-sign.ts keygen --out D:\keys\crossline-release.pem`（路径在仓库内或文件已存在都拒绝），私钥以 PKCS#8 PEM 写到那里，屏幕上打印公钥；把公钥填进 `RELEASE_PUBLIC_KEYS`，私钥离线备份。
 - 签名：`$env:CROSSLINE_RELEASE_KEY='D:\keys\crossline-release.pem'`，然后 `release-sign.ts sign <清单>`；`package-node.ts` 在这个变量存在时自己签 `node-latest.json`，不存在时写出未签名的清单并警告（节点会拒绝它）。私钥路径在仓库内同样拒绝；私钥对应的公钥不在内置表里时打印警告。
 - 测试：`apps/launcher/src/update.test.ts`（篡改 URL / 哈希 / 版本、换钥签名、换内置公钥、缺签名、产品不符、停发说明被改都拒绝；没验过签名的清单不发任何请求）。

@@ -16,7 +16,7 @@ import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify, t
  * Empty until the owner makes the key pair; with none, every update is refused (`UPDATE_SIGNING_KEY_MISSING`), never accepted unsigned.
  * More than one only while a key is being replaced.
  */
-export const RELEASE_PUBLIC_KEYS: readonly string[] = [];
+export const RELEASE_PUBLIC_KEYS: readonly string[] = ["Tho6Q0yFmPJCiYeQPQjjZlFwtRPvuCrCxHa7eNtKWU4="];
 
 /** Which program a manifest is for: a node manifest can never install the full app, nor the other way round. */
 export type ReleaseProduct = "crossline" | "crossline-node";
