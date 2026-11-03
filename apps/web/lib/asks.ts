@@ -29,7 +29,7 @@ import { placesToAsk, setPlaceMinutes } from "./travel";
 import { identityLines } from "./lines";
 import { decisionHorizon } from "./horizon";
 import { answerRelationCheck, relationCheckAsks } from "./artifact-relations";
-import { answerOpportunityNeed, answerOpportunityOffer, opportunityNeedAsks, opportunityOfferAsks } from "./opportunities";
+import { answerApplicationResult, answerOpportunityNeed, answerOpportunityOffer, opportunityNeedAsks, opportunityOfferAsks } from "./opportunities";
 import { agentBlockedAsks, answerAgentAsk } from "./agent-ask";
 import { answerOutcome, outcomeAsks } from "./outcome-check";
 import { answerProgress, progressAsks } from "./progress-check";
@@ -1440,6 +1440,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     case "relation_check": return answerRelationCheck(ctx, ask, optionId, values);
     case "opportunity_need": return answerOpportunityNeed(ctx, ask, optionId, values);
     case "opportunity_offer": return answerOpportunityOffer(ctx, ask, optionId, values);
+    case "opportunity_result": return answerApplicationResult(ctx, ask, optionId);
     case "outcome_check": return answerOutcome(ctx, ask, optionId, values, choice.note);
     case "progress_check": return answerProgress(ctx, ask, optionId, choice.note);
     case "risk_digest": return answerRiskDigest(ctx, optionId);

@@ -543,6 +543,25 @@
 
 **合入顺序**：② 与 ① 各自合入 main，③ 最后合入，并跑一次完整验收。
 
+### 17.10 ① 的落地记录（2026-11-02）
+
+**契约的增补（只加不改）**
+- `Watch.targets?: WatchTarget[]`：代码不靠模型就能看的具体位置（岗位接口、截止列表、Devpost、活动站、网页、邮件、检索）。没有它的监视项按 `query` 每期检索一次。
+- `AskField.kind` 加 `"choice"` 与 `choices`：「少来」的原因一键选择；`validateAskAnswer` 只认列出的值（`ASK_FIELD_CHOICE_UNKNOWN`）。
+- 新询问种类 `opportunity_result`：申请截止后问「通过了 / 没过」，结果记到找到它的监视项上。
+
+**实现时定下的**
+- 「按节点重推」= 下一次 tick（约 15 分钟）：读上次推导之后该线的 `evidence.accepted`、`milestone_gate.judged`、`opportunity.result`、`opportunity.form.confirmed`、`opportunity.confirmed`。
+- 20% 按近 7 天的加权 token 算，按用途记账：`opportunity:watch:<id>`、`opportunity:explore:<id>`、`opportunity:scout`、`opportunity:derive:<line>`。本周还没探索过时，第一次探索总能开始。
+- 侦察提出的监视项 id 为 `explore:<line>:<key>`，发现的机会挂在 `scout:<日期>` 下。准备开始日在 14 天内的才进收件箱，其余在周回顾「视野外」。
+- `site_read` 目标不由监视项运行（只由助手的读站工具读）。
+- 本人改过的监视项归本人（`origin: person`），系统不再自动关闭。改动里写了网址，就加一个按网页变化来看的目标。
+- 「今天」按本人时区算（`todayFor`），不再用 UTC。
+- ② 的 `feasibilityOf` 经 `Clients.feasibility` 注入，结果存在机会行上。② 合入前不注入，什么都不会因时空被挡下。
+- A/B 交接：报名后询问卡显示代填进度（填写中 / 等本人 / 已提交 / 已确认），确认后再留一天。确认标记在 B 确认运行时写（`confirmOpportunityFromRun`）。A 线自己的确认邮件匹配已删。
+
+**证据**：`scripts/opportunity-check.ts needs` 已改用监视项，在真实账本副本上用替身回答跑通：推导出一个监视项，「盯住」后变为运行中。测试见 `packages/core/src/opportunity-watches.test.ts`、`packages/db/src/opportunity-watches.test.ts`、`apps/worker/src/opportunities.test.ts`、`apps/web/lib/opportunities.test.ts`。
+
 ## 附：来源
 
 - Meta Muse：见第 1 节。

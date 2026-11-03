@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { ATTENTION_SNAPSHOT, AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, BRIEF_TIME_SETTING, QUIET_HOURS_SETTING, inQuiet, inferWorkState, isClock, quietHoursOf, monthDay, resolveAvailability, tFor, type ActivitySegment, type AvailabilityWindow, type Locale } from "@crossline/core";
-import { scoutNeeds, type CrosslineStore } from "@crossline/db";
+import { readWatchList, surfacedOpportunities, type CrosslineStore } from "@crossline/db";
 import { opportunityAgentOn } from "./opportunities";
 import { ownerOf } from "./owner";
 import { ACTIVITY_DETAIL_CONSENT } from "./activity-recorder";
@@ -262,15 +262,18 @@ export function unconfirmedLastNight(store: CrosslineStore, workspaceId: string,
 /** A page seen this recently is in front of the person; the web's `PRESENCE_FRESH_MS`, kept equal. */
 const PRESENCE_FRESH_MS = 10 * 60_000;
 
-/** What the brief and the single messages say about opportunities: offers waiting on the person, preparation starting, closing today. */
+/**
+ * What the brief and the single messages say about opportunities: offers waiting on the person, preparation starting, closing today.
+ * Only what may reach the person (`surfacedOpportunities`: not ruled out, not infeasible, not held back by a 「少来」); a scout find comes
+ * to the brief only when it must be prepared soon, the rest waits for the weekly review's 视野外 (§17.3).
+ */
 export function opportunityNotices(store: CrosslineStore, workspaceId: string, today: string, now: Date): NonNullable<NotifyInput["opportunities"]> {
   const since = new Date(now.getTime() - 24 * 3_600_000).toISOString();
-  const open = store.listOpportunities(workspaceId).filter((row) => row.verdict.state !== "ineligible"
-    && (!row.decision || (row.decision === "later" && (row.laterUntil ?? "") <= today)));
+  const open = surfacedOpportunities(store, workspaceId, today).filter((row) => row.inbox);
   const deadlineOf = (row: (typeof open)[number]) => row.deadlines.map((item) => item.day).filter((day) => day >= today).sort()[0];
   return {
-    fresh: open.filter((row) => row.foundAt >= since && (deadlineOf(row) || !row.deadlines.length)).map((row) => ({ id: row.id, title: row.title, deadline: deadlineOf(row) })),
-    prepToday: scoutNeeds(store, workspaceId).filter((need) => need.state === "tracking" && need.prepStartsOn === today).map((need) => ({ id: need.id, title: need.title })),
+    fresh: open.filter((row) => row.foundAt >= since).map((row) => ({ id: row.id, title: row.title, deadline: deadlineOf(row) })),
+    prepToday: readWatchList(store, workspaceId).filter((watch) => watch.state === "active" && watch.prepStartsOn === today).map((watch) => ({ id: watch.id, title: watch.title })),
     closingToday: open.filter((row) => deadlineOf(row) === today).map((row) => ({ id: row.id, title: row.title }))
   };
 }

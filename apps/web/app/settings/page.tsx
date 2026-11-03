@@ -36,6 +36,8 @@ import { connectionStatus } from "../../lib/settings-status";
 import { PersonalizationModule } from "./personalization";
 import { ApplyCard } from "./apply-card";
 import { loadApplyCard } from "../../lib/apply-profile";
+import { OpportunityCard } from "./opportunity-card";
+import { loadOpportunitySettings } from "../../lib/opportunities";
 import { SkillLibraryLoader } from "./skill-library";
 import { loadPreferences } from "../../lib/preferences";
 import { CalendarModule, ConnectionsSection } from "../connectors/connections";
@@ -129,6 +131,8 @@ export default async function SettingsPage() {
   const machine = assistantAvailable(store, ctx.workspaceId);
   // 报名资料卡 and the registrations filled from it: the machine owner's only (docs/opportunity-agent.md §0).
   const apply = loadApplyCard(ctx.workspaceId);
+  // 机会代理: the watches, their cost and the 少来 adjustments, the machine owner's only (docs/opportunity-agent.md §17.9).
+  const opportunity = loadOpportunitySettings(ctx);
   // When the person is at the computer, hour by hour (activity.hourly, under the activity consent).
   const recordings = recordingOverview(store, ctx.workspaceId, dataDirectory(), zone);
   const usualDay = (() => { try { return atComputerByHour(JSON.parse(setting(ACTIVITY_HOURLY) ?? "[]") as ActivityHour[], zone); } catch { return undefined; } })();
@@ -148,6 +152,7 @@ export default async function SettingsPage() {
     { id: "background", label: t("后台任务") },
     { id: "personal", label: t("个性化") },
     ...(apply ? [{ id: "apply", label: t("报名资料卡") }] : []),
+    ...(opportunity ? [{ id: "opportunity", label: t("机会代理") }] : []),
     { id: "skills", label: t("Skill 库") },
     { id: "privacy", label: t("隐私与屏幕活动") },
     { id: "energy", label: t("精力与手机健康"), alerts: alertsIn(["#energy"]) },
@@ -230,6 +235,10 @@ export default async function SettingsPage() {
 
         {apply && <section id="apply" className="st-section" aria-labelledby="st-apply"><h2 id="st-apply" className="ds-serif">{t("报名资料卡")}</h2>
           <div className="st-modules"><ApplyCard items={apply.items} runs={apply.runs} screen={apply.screen} /></div>
+        </section>}
+
+        {opportunity && <section id="opportunity" className="st-section" aria-labelledby="st-opportunity"><h2 id="st-opportunity" className="ds-serif">{t("机会代理")}</h2>
+          <div className="st-modules"><OpportunityCard view={opportunity} /></div>
         </section>}
 
         <section id="personal" className="st-section" aria-labelledby="st-personal"><h2 id="st-personal" className="ds-serif">{t("个性化")}</h2>

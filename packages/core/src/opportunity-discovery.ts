@@ -22,21 +22,7 @@ export const PAGES_PER_READING = 6;
 export const OPPORTUNITY_NEEDS_SKILL = "crossline:crossline-opportunity-needs";
 export const OPPORTUNITY_READER_SKILL = "crossline:crossline-opportunity-reader";
 
-// ── ① Needs ────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-const SOURCE_VARIANTS = [
-  { type: "object", additionalProperties: false, required: ["kind", "provider", "board", "query"], properties: {
-    kind: { type: "string", enum: ["ats"] }, provider: { type: "string", enum: ["greenhouse", "lever", "ashby"] },
-    board: { type: "string", minLength: 1, maxLength: 60 }, query: { type: "string", maxLength: 60 } } },
-  { type: "object", additionalProperties: false, required: ["kind", "list", "query"], properties: {
-    kind: { type: "string", enum: ["deadline_list"] }, list: { type: "string", enum: ["ccfddl", "ai-deadlines"] }, query: { type: "string", minLength: 1, maxLength: 60 } } },
-  { type: "object", additionalProperties: false, required: ["kind", "site", "query"], properties: {
-    kind: { type: "string", enum: ["events"] }, site: { type: "string", enum: ["devpost", "luma"] }, query: { type: "string", minLength: 1, maxLength: 80 } } },
-  { type: "object", additionalProperties: false, required: ["kind", "from", "query"], properties: {
-    kind: { type: "string", enum: ["mail"] }, from: { type: "string", maxLength: 80 }, query: { type: "string", minLength: 1, maxLength: 80 } } },
-  { type: "object", additionalProperties: false, required: ["kind", "query"], properties: {
-    kind: { type: "string", enum: ["web"] }, query: { type: "string", minLength: 1, maxLength: 120 } } }
-] as const;
+// ── ① Needs (read by the watch migration and `watchFromProposal`; the Skill proposes watches since §17.2) ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const TERM_SCHEMA = { type: "object", additionalProperties: false, required: ["dim", "rule", "quote", "accepts"], properties: {
   dim: { type: "string", enum: [...ELIGIBILITY_DIMS] },
@@ -47,24 +33,6 @@ const TERM_SCHEMA = { type: "object", additionalProperties: false, required: ["d
     values: { type: "array", maxItems: 12, items: { type: "string", maxLength: 60 } },
     min: { type: "number" }, max: { type: "number" } } } } } as const;
 
-export const OPPORTUNITY_NEEDS_SCHEMA = {
-  type: "object", additionalProperties: false, required: ["needs", "blocked"], properties: {
-    needs: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false,
-      required: ["key", "kind", "title", "why", "factIds", "milestoneIds", "window", "leadDays", "eligibility", "sources"], properties: {
-      key: { type: "string", minLength: 2, maxLength: 60 },
-      kind: { type: "string", enum: ["cycle", "stream"] },
-      title: { type: "string", minLength: 2, maxLength: 80 },
-      why: { type: "string", minLength: 4, maxLength: 300 },
-      factIds: { type: "array", maxItems: 8, items: { type: "string", maxLength: 160 } },
-      milestoneIds: { type: "array", maxItems: 6, items: { type: "string", maxLength: 120 } },
-      window: { type: "object", additionalProperties: false, required: ["opensMonth", "closesMonth", "basis", "sourceUrl"], properties: {
-        opensMonth: { type: "integer", minimum: 0, maximum: 12 }, closesMonth: { type: "integer", minimum: 0, maximum: 12 },
-        basis: { type: "string", maxLength: 200 }, sourceUrl: { type: "string", maxLength: 400 } } },
-      leadDays: { type: "integer", minimum: 0, maximum: 365 },
-      eligibility: { type: "array", maxItems: 8, items: TERM_SCHEMA },
-      sources: { type: "array", minItems: 1, maxItems: 12, items: { anyOf: SOURCE_VARIANTS } } } } },
-    blocked: { type: "string", maxLength: 200 } } } as const;
-
 export type EligibilityAccepts = { kind: "one_of" | "range" | "text"; values: string[]; min: number; max: number };
 /** A term as the reader returns it: the contract's rule plus what it accepts, so code (not a model) can compare it with the person. */
 export type EligibilityTerm = EligibilityRule & { accepts: EligibilityAccepts };
@@ -74,51 +42,6 @@ export type ProposedNeed = {
   leadDays: number; eligibility: EligibilityTerm[];
   sources: Array<Exclude<NeedSource, { kind: "site_read" }>>;
 };
-export type NeedsAnswer = { needs: ProposedNeed[]; blocked: string };
-export type NeedsContext = { lineId: string; factIds: string[]; milestoneIds: string[] };
-
-const BOARD = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/;
-
-/** Repair messages to the needs Skill (model-facing, not interface text). */
-/* i18n-ignore-start */
-export function opportunityNeedsProblems(answer: NeedsAnswer, context: NeedsContext): string[] {
-  const problems: string[] = [];
-  const facts = new Set(context.factIds), milestones = new Set(context.milestoneIds);
-  const keys = new Set<string>();
-  for (const need of answer.needs ?? []) {
-    const label = `「${need.title}」`;
-    if (keys.has(need.key)) problems.push(`${label} 的 key 重复`);
-    keys.add(need.key);
-    const unknownFacts = need.factIds.filter((id) => !facts.has(id));
-    if (unknownFacts.length) problems.push(`${label} 引用了不存在或未确认的事实：${unknownFacts.slice(0, 3).join("、")}`);
-    const unknownMilestones = need.milestoneIds.filter((id) => !milestones.has(id));
-    if (unknownMilestones.length) problems.push(`${label} 引用了不存在的里程碑：${unknownMilestones.slice(0, 3).join("、")}`);
-    if (!need.factIds.length && !need.milestoneIds.length) problems.push(`${label} 没有依据（factIds 与 milestoneIds 都为空），无依据的需求不收`);
-    if (need.kind === "cycle" && !need.window.opensMonth && !need.window.closesMonth) problems.push(`${label} 是 cycle，必须给出往年开放或截止的月份`);
-    if (need.kind === "cycle" && !/^https:\/\//.test(need.window.sourceUrl)) problems.push(`${label} 是 cycle，window.sourceUrl 必须是写明往年窗口的 https 页面`);
-    for (const source of need.sources) {
-      if (source.kind === "ats" && !BOARD.test(source.board)) problems.push(`${label} 的 ATS board「${source.board}」不是公开岗位接口的 board 名（只含字母、数字、-、_、.）`);
-    }
-  }
-  if (!(answer.needs ?? []).length && !answer.blocked.trim()) problems.push("needs 为空时 blocked 必须说明原因");
-  return problems;
-}
-/* i18n-ignore-end */
-
-export function validateOpportunityNeeds(value: unknown, context: NeedsContext): NeedsAnswer {
-  const answer = value as NeedsAnswer;
-  if (!answer || !Array.isArray(answer.needs)) throw Object.assign(new Error("OPPORTUNITY_NEEDS_INVALID"), { detail: "needs must be an array" });
-  const problems = opportunityNeedsProblems(answer, context);
-  if (problems.length) throw Object.assign(new Error("OPPORTUNITY_NEEDS_INVALID"), { detail: problems.slice(0, 6).join("；") }); // i18n-ignore
-  return answer;
-}
-
-/** What can be kept of an answer the repairs could not make whole: the needs with no problem of their own. */
-export function keepOpportunityNeeds(answer: NeedsAnswer, context: NeedsContext): NeedsAnswer | undefined {
-  const needs = answer.needs.filter((need) => !opportunityNeedsProblems({ needs: [need], blocked: "-" }, context).length);
-  return needs.length ? { needs, blocked: answer.blocked } : undefined;
-}
-
 /** The first `YYYY-MM-DD` on or after `today` that falls in `month` (1–12), at `day` of it. */
 export function nextMonthDay(today: string, month: number, day = 1): string {
   const [y, m] = today.split("-").map(Number) as [number, number];

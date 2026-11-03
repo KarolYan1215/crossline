@@ -7,7 +7,7 @@ import {
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { SecretStore } from "@crossline/connectors";
-import { formRunOf, queueFormRun, readFormRuns, saveFormRun, type CrosslineStore } from "@crossline/db";
+import { confirmOpportunityFromRun, formRunOf, queueFormRun, readFormRuns, saveFormRun, type CrosslineStore } from "@crossline/db";
 import { fillForm, watchForPersonSubmit, type FormDriver, type FormFallback } from "./form-engine";
 import { createBrowserUseTool } from "./browser-use";
 import { browserUseFallback, stagehandFallback } from "./form-fallbacks";
@@ -162,6 +162,8 @@ export function createFormService(deps: FormServiceDeps) {
       }
     } else next = { ...next, calendarSkipped: "no start time" }; // i18n-ignore: a code kept on the run
     next = saveFormRun(store, workspaceId, next, { type: "opportunity.form.confirmed", payload: { ...(mail ? { mailFrom: mail.from } : {}), ...(next.calendarEventId ? { calendarEventId: next.calendarEventId } : {}) } });
+    // The opportunity's own confirmed mark is written here, where the sign-up is known to have gone through (§17.8).
+    confirmOpportunityFromRun(store, workspaceId, next);
     notify(workspaceId, next);
     return next;
   };

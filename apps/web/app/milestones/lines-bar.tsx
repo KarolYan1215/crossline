@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Flag, MessageSquare, Plus, RefreshCw, Sparkles, TriangleAlert } from "lucide-react";
+import { Check, Eye, Flag, MessageSquare, Plus, RefreshCw, Sparkles, TriangleAlert } from "lucide-react";
 import { Sheet } from "../ui/overlay";
 import { ICON, IconButton } from "../ui/icon-button";
 import type { LineHealth } from "./line-health";
@@ -11,6 +11,7 @@ import { DOMAIN_PACKS, LINE_DOMAINS, type LineDomain } from "@crossline/identity
 import { LineCardInterview, type LineInterviewView } from "./line-card-interview";
 import { useLocale, useT } from "../locale-context";
 import { DomainRecords, type DomainRecordsCard } from "./domain-records";
+import { LineWatches, type WatchView } from "./line-watches";
 
 /**
  * One line as its card shows it. `attributes`: the interview's candidates for the long-term goal (§4.1); `goalParts`: the ones the goal
@@ -28,7 +29,9 @@ export type LineCard = { id: string; label: string; color: string; goals: string
   /** The line's standing from the schedule and the risk reviews (`lineHealth`), an estimate; null with no approved milestone. */
   health?: LineHealth | null;
   /** The line's share of the week the scheduler keeps (percent); absent when none is set. */
-  share?: number };
+  share?: number;
+  /** The opportunity agent's watches for this line (docs/opportunity-agent.md §17.9); absent outside the machine owner's workspace. */
+  watches?: WatchView[] };
 
 /** Asks the page's 「新建里程碑」 form to open with this line chosen (`MilestoneActions` listens). */
 export const NEW_MILESTONE_EVENT = "crossline:new-milestone";
@@ -147,6 +150,7 @@ export function LinesBar({ lines, palette }: { lines: LineCard[]; palette: Recor
   const [editing, setEditing] = useState<LineCard | "new" | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [talking, setTalking] = useState<string | null>(null);
+  const [watching, setWatching] = useState<string | null>(null);
   const ranked = lines.filter((line) => line.rank).sort((a, b) => a.rank! - b.rank!);
   const parallel = lines.filter((line) => !line.rank);
   const order = async (ids: string[]) => { if ((await post({ order: ids })).ok) location.reload(); };
@@ -208,9 +212,12 @@ export function LinesBar({ lines, palette }: { lines: LineCard[]; palette: Recor
         <IconButton label={t("给这条线新建里程碑")} icon={<Plus {...ICON} />}
           onClick={() => window.dispatchEvent(new CustomEvent(NEW_MILESTONE_EVENT, { detail: { lineId: line.id } }))} />
         <IconButton label={goalLink(line)} icon={<Sparkles {...ICON} />} className="lines-bar-goal-button" onClick={() => setEditing(line)} />
+        {line.watches && <IconButton label={t("监视项：{{n}} 个在运行", { n: line.watches.filter((watch) => watch.state === "active").length })} icon={<Eye {...ICON} />}
+          className="lb-watches" aria-expanded={watching === line.id} onClick={() => setWatching(watching === line.id ? null : line.id)} />}
         {line.share ? <small className="mono lb-share" title={t("每周至少得到的可用时间份额，在计划页调整")}>{t("{{n}}% 时间", { n: line.share })}</small> : null}
       </footer>
       {redraft[line.id] && <small role="status" className="lb-redraft-status">{running ? t("正在重算该主线未动过的草稿…（通常 2–5 分钟，已批准的里程碑不变）") : redraft[line.id]}</small>}
+      {line.watches && watching === line.id && <div className="lb-watch-panel"><LineWatches lineId={line.id} watches={line.watches} /></div>}
       <div className="lb-interview" hidden={!open}>
         <LineCardInterview lineId={line.id} label={line.label} description={line.description} interview={line.interview}
           pendingEdit={line.pendingEdit} redraftDue={line.redraftDue} />

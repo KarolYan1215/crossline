@@ -12,7 +12,7 @@ import { mailRepliesView, recordMoneyEvidence, voidByEvidence, type CrosslineSto
 import type { MailLookup } from "./agent-tools";
 import { draftReplies, followUpReplies, type ReplyCandidate } from "./mail-replies";
 import { identityLines } from "./lines";
-import { addMailCandidate, mailCandidateLine, matchConfirmation, opportunityAgentOn } from "./opportunities";
+import { addMailCandidate, mailCandidateLine, opportunityAgentOn } from "./opportunities";
 import { ownerOf } from "./owner";
 import { tOfWorkspace } from "./locale";
 import { sayToPerson } from "./workflow-smith";
@@ -286,18 +286,13 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
     } else if (kind === "todo" || kind === "date") kind = "info";
     // A payment mail is a record only when code finds what the model read in the mail itself (`book`): the model sorts, it never supplies a number.
     if (kind === "transaction" && !money.counted) kind = "info";
-    // An opportunity in the mail (docs/opportunity-agent.md §6) is read with the next poll of a tracked need, on the machine owner's
-    // workspace only; elsewhere, and for a confirmation of something the person signed up for, it is information.
+    // An opportunity in the mail (docs/opportunity-agent.md §6) is read with the next run of an active watch, on the machine owner's
+    // workspace only; elsewhere it is information. A sign-up's confirmation is marked by the form filling itself (§17.8).
     if (kind === "opportunity") {
       if (opportunityAgentOn(deps.store, workspaceId)) {
         addMailCandidate(deps.store, workspaceId, { key, lineId: mailCandidateLine(deps.store, workspaceId, message), subject: message.subject, from: message.from,
           text: (message.body ?? message.snippet).slice(0, 12_000), url: linksFromMail(message.body ?? message.snippet, message.fromAddress)[0] ?? "", at });
       } else kind = "info";
-    }
-    if (opportunityAgentOn(deps.store, workspaceId) && kind !== "ignore") {
-      const confirmed = matchConfirmation(deps.store, workspaceId, { fromAddress: message.fromAddress, subject: message.subject, key: mailKey(message) });
-      if (confirmed) deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `opportunity.confirmed:${confirmed}`, type: "opportunity.confirmed",
-        entityId: confirmed, payload: { mail: mailKey(message), subject: message.subject, at } });
     }
     if (kind === "reply") {
       deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${mailKey(message)}`, type: "waiting.mail_seen",

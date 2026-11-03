@@ -9,7 +9,7 @@ import { containerMemory, containerPeak, createCollectMemory, heldMemory } from 
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { closeInterruptedCollections, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
 import { workflowImprovePass } from "./workflow-improver";
@@ -51,7 +51,8 @@ import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, scoutDue } from "./public-skills";
-import { deriveNeeds, needsDue, needsToPoll, opportunityAgentOn, pollNeed, rejudge } from "./opportunities";
+import { deriveWatches, opportunityAgentOn, rejudge, runWatch, todayFor, watchesDeriveDue, watchesToRun } from "./opportunities";
+import { opportunityScoutDue, startScout } from "./opportunity-scout";
 import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, loginBrowser, markWorkflowRun,
   openWorkflowLogin, resumeByPerson, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { loginMode } from "./browser-launch";
@@ -491,28 +492,44 @@ async function publicSkillPass(workspaceId: string, checkedAt: string, offPeakWa
 }
 
 /**
- * The opportunity agent's discovery (docs/opportunity-agent.md §5–7), on the machine owner's workspace only: one line's needs worked out
- * per tick when due (its setup, a changed goal or milestones, monthly), then up to two tracked needs polled. Planning work: it stops with
- * the 规划 pause and runs while core work may. Detached, so an hour-long run never holds the tick; one at a time per workspace.
+ * The opportunity agent (docs/opportunity-agent.md §17), on the machine owner's workspace only. Every tick, without a model: outcomes the
+ * ledger shows by itself are written and quiet watches retired. Then, while core work may: one line's watches derived when due (its
+ * setup, a changed goal or milestones, a node it reached, monthly), and up to two due watches run. The weekly scout starts through the
+ * assistant when discretionary work may and exploration has not had its share. Planning work: it stops with the 规划 pause. Detached, so
+ * an hour-long run never holds the tick; one at a time per workspace.
  */
 const discovering = new Set<string>();
 async function opportunityPass(workspaceId: string, checkedAt: string): Promise<void> {
   if (!opportunityAgentOn(analysisStore, workspaceId) || paused(workspaceId, "planning") || !codexSupervisor || discovering.has(workspaceId)) return;
-  const lines = needsDue(analysisStore, workspaceId);
-  const polls = needsToPoll(analysisStore, workspaceId);
-  if (!lines.length && !polls.length) return;
-  if (!spendAllows(await spendFor(workspaceId), "core")) return;
+  const now = new Date();
+  try {
+    settleOpportunityOutcomes(analysisStore, workspaceId, todayFor(analysisStore, workspaceId, now), now);
+    const retired = retireQuietWatches(analysisStore, workspaceId, now);
+    if (retired.length) console.info(JSON.stringify({ type: "opportunity.watches_retired", checkedAt, workspaceId, ids: retired.map((watch) => watch.id) }));
+  } catch { /* housekeeping */ }
+  const lines = watchesDeriveDue(analysisStore, workspaceId, now);
+  const runs = watchesToRun(analysisStore, workspaceId, now);
+  const scout = opportunityScoutDue(analysisStore, workspaceId, now) && !isPaused(analysisStore, workspaceId);
+  if (!lines.length && !runs.length && !scout) return;
+  const spend = await spendFor(workspaceId);
   discovering.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
     const deps = { client: () => accountClient(workspaceId), cwd: repoRoot };
-    for (const lineId of lines.slice(0, 1)) {
-      const outcome = await deriveNeeds(analysisStore, workspaceId, lineId, deps).catch((error: unknown) => ({ blocked: error instanceof Error ? error.message : "FAILED" }));
-      console.info(JSON.stringify({ type: "opportunity.needs", checkedAt, workspaceId, lineId, ...outcome }));
+    if (spendAllows(spend, "core")) {
+      for (const lineId of lines.slice(0, 1)) {
+        const outcome = await deriveWatches(analysisStore, workspaceId, lineId, deps).catch((error: unknown) => ({ blocked: error instanceof Error ? error.message : "FAILED" }));
+        console.info(JSON.stringify({ type: "opportunity.watches_derived", checkedAt, workspaceId, lineId, ...outcome }));
+      }
+      for (const watch of runs.slice(0, 2)) {
+        const outcome = await runWatch(analysisStore, workspaceId, watch, deps).catch((error: unknown) => ({ blocked: error instanceof Error ? error.message : "FAILED" }));
+        console.info(JSON.stringify({ type: "opportunity.watch_run", checkedAt, workspaceId, watchId: watch.id, ...outcome }));
+      }
     }
-    for (const need of polls.slice(0, 2)) {
-      const outcome = await pollNeed(analysisStore, workspaceId, need, deps).catch((error: unknown) => ({ blocked: error instanceof Error ? error.message : "FAILED" }));
-      console.info(JSON.stringify({ type: "opportunity.polled", checkedAt, workspaceId, needId: need.id, ...outcome }));
+    if (scout && spendAllows(spend, "discretionary")) {
+      const started = startScout(analysisStore, workspaceId, (input, after) => agentService.runFree(workspaceId, input, after),
+        { costSince: (store, ws, purpose, since) => opportunityCosts(store, ws, since).filter((row) => row.purpose === purpose).reduce((sum, row) => sum + row.weighted, 0) });
+      console.info(JSON.stringify({ type: "opportunity.scout", checkedAt, workspaceId, state: started.state }));
     }
     rejudge(analysisStore, workspaceId);
   } finally { discovering.delete(workspaceId); }

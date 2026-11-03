@@ -32,6 +32,8 @@ export type AskKind =
   | "opportunity_need"
   /** An opportunity the person qualifies for, or might (its eligibility questions with it): 报名 / 申请 / 加入计划 / 不要 / 以后再说. */
   | "opportunity_offer"
+  /** What came of an application after its deadline (docs/opportunity-agent.md §17.4): 通过了 / 没过, the outcome that most moves a watch's yield. */
+  | "opportunity_result"
   /**
    * Started work whose own due day passed (docs/plans/closed-loop-1030.md §4): an external date (a course's, or read from someone else's
    * text) — can it still be handed in, and by when; or a self-set date the daily pass already moved twice. 新日期 or 归档.
@@ -53,8 +55,10 @@ export type AskKind =
   /** The weekly commitment (docs/rituals.md): the week's hours against its work, 保 / 推 / 砍 confirmed in one step. */
   | "weekly_commit";
 
-export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date"; required: boolean;
-  initial?: string; placeholder?: string };
+export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date" | "choice"; required: boolean;
+  initial?: string; placeholder?: string;
+  /** For `kind: "choice"`: the values the field takes, picked with one tap; the answer is the chosen `id`. */
+  choices?: Array<{ id: string; label: string }> };
 export type AskOption = { id: string; label: string; detail?: string; recommended?: boolean; fields?: AskField[];
   /** A link instead of an answer: the option opens a page and records nothing. */
   href?: string;
@@ -197,6 +201,7 @@ export function validateAskAnswer(ask: Ask, optionId: string, values: Record<str
     if (value.length > (field.kind === "longtext" ? 4000 : 200)) return { ok: false, code: "ASK_FIELD_TOO_LONG" };
     if (field.kind === "date" && (!/^\d{4}-\d{2}-\d{2}$/.test(value)
       || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value)) return { ok: false, code: "ASK_FIELD_DATE_INVALID" };
+    if (field.kind === "choice" && !(field.choices ?? []).some((choice) => choice.id === value)) return { ok: false, code: "ASK_FIELD_CHOICE_UNKNOWN" };
     clean[field.id] = value;
   }
   return { ok: true, option, values: clean };

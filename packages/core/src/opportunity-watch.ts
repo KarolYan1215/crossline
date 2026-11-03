@@ -27,6 +27,11 @@ export type Watch = {
   /** What to look for and where, in words. Free: a page, a list, a person's lab page, a city's events this month. */
   query: string;
   tools: WatchTool[];
+  /**
+   * Added by track ① (2026-11-02): concrete things code can look at without a model — a job board, a list, a page — so a run detects
+   * change first (§17.2) and calls the reader only for what is new. Optional: a watch with none is searched in words each period.
+   */
+  targets?: WatchTarget[] | undefined;
   /** How to tell a find worth the person's attention from noise, in words; the code-checked gates of §7 and §17.5 come on top. */
   judge: string;
   /** Exploration outside the person's attention domain (§17.3); counted against the 20% share. */
@@ -44,6 +49,16 @@ export type Watch = {
 export const WATCH_TOOLS = ["web_search", "web_fetch", "ats_board", "deadline_list", "devpost", "events_site", "mail_search", "site_read",
   "calendar", "geo"] as const;
 export type WatchTool = (typeof WATCH_TOOLS)[number];
+/** One tool call a watch makes each run (added by track ①); `calendar` and `geo` serve the scout and feasibility, not targets. */
+export type WatchTarget =
+  | { tool: "ats_board"; provider: "greenhouse" | "lever" | "ashby"; board: string; query: string }
+  | { tool: "deadline_list"; list: "ccfddl" | "ai-deadlines"; query: string }
+  | { tool: "devpost"; query: string }
+  | { tool: "events_site"; site: string; query: string }
+  | { tool: "web_fetch"; url: string }
+  | { tool: "mail_search"; from: string; query: string }
+  | { tool: "web_search"; query: string }
+  | { tool: "site_read"; host: string; path: string };
 
 /** What became of something surfaced. Outcomes, not ratings, drive the flywheel (§17.4). */
 export const OPPORTUNITY_OUTCOMES = ["surfaced", "ignored", "less", "declined", "later", "planned", "task", "submitted", "accepted",
