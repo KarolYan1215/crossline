@@ -6,7 +6,7 @@ import { RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, SOURCE_FOLDERS_SET
 import { createMemorySecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
 import { ACTIVITY_DETAIL_CONSENT, LOCAL_ACTIVITY_CONSENT } from "../activity-recorder";
-import { createDeviceLinkService, DEVICE_SECRET_NAME, DEVICE_SECRET_SLOT, linkFile, nodeEnabled, readDeviceLink } from "./link";
+import { createDeviceLinkService, DEVICE_SECRET_NAME, DEVICE_SECRET_SLOT, linkFile, nodeEnabled, readDeviceLink, standardDeviceService } from "./link";
 import { DEVICE_PASSES, MODEL_PASSES, PRIMARY_ONLY_PASSES, passesFor, workerMode } from "./mode";
 import { activityItem, appToken, buildActivityPayload, readDeviceState, recordingItems, sourceItems } from "./payloads";
 
@@ -57,6 +57,20 @@ test("the compute node is the one way a device runs Codex: only the raw app-serv
   expect(agent).not.toMatch(/runCodexSkill|startCodexSupervisor|startCodexAppServer|method: "(?:thread|turn)\/start"/);
   // The device worker starts it only when the switch file says so.
   expect(readFileSync(path.join(import.meta.dirname, "worker.ts"), "utf8")).toMatch(/nodeEnabled\(dataDir\) && link\.token/);
+});
+
+test("a standard-mode worker serves only the link, only off the hosted beta and only to the machine owner", async () => {
+  const handled: string[] = [];
+  const handle = async (method: string, pathname: string, workspaceId: string) => { handled.push(`${method} ${pathname} ${workspaceId}`); return { status: 200, body: {} }; };
+  // The hosted server is never a device: no account there may relink it or write its one node.json.
+  expect(standardDeviceService(handle, { hostedBeta: true, machineOwner: () => true })).toEqual([]);
+  const [service] = standardDeviceService(handle, { hostedBeta: false, machineOwner: (workspaceId) => workspaceId === "owner" });
+  expect(service!.prefix).toBe("/v1/device");
+  expect(await service!.handle("POST", "/v1/device/link", "guest", { url: "https://evil.example", token: "t".repeat(32) })).toBeUndefined();
+  // A standard worker is not linked, so it has no compute node switch to set.
+  expect(await service!.handle("POST", "/v1/device/node", "owner", { enabled: true })).toBeUndefined();
+  expect(await service!.handle("GET", "/v1/device/link", "owner", undefined)).toMatchObject({ status: 200 });
+  expect(handled).toEqual(["GET /v1/device/link owner"]);
 });
 
 test("the node switch is kept beside the link, needs a link first, restarts the worker when it changes, and goes with the link", async () => {

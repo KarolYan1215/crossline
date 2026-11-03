@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { resolveAccessContext } from "../../../../lib/access-guard";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "../../../../lib/codex-runtime";
 import { forgetDeviceLink } from "../../../../lib/device-mode";
+import { isHostedBeta } from "../../../../lib/hosting";
 import type { Translate } from "../../../../lib/i18n";
 import { tOf } from "../../../../lib/locale";
 import { isCrossSiteWrite } from "../../../../lib/same-origin";
@@ -17,7 +18,11 @@ const failed = (error: unknown, t: Translate) => error instanceof CodexSuperviso
     ? t("后台服务没有响应：可能正在重启，稍等几秒。") : error.blocker.message }, { status: error.status })
   : NextResponse.json({ ok: false, code: "DEVICE_LINK_FAILED", message: t("后台服务没有响应。") }, { status: 503 });
 
+// The hosted site is never a device of another site: no account there may link or unlink the server (the review of 2026-11-03).
+const notHere = () => NextResponse.json({ ok: false, code: "NOT_FOUND" }, { status: 404 });
+
 export async function GET(request: Request) {
+  if (isHostedBeta()) return notHere();
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   try { return NextResponse.json(await requestCodexSupervisor<unknown>(access.ctx, "/v1/device/link")); }
@@ -26,6 +31,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  if (isHostedBeta()) return notHere();
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   const body = await request.json().catch(() => ({})) as { url?: unknown; token?: unknown };
@@ -40,6 +46,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   if (isCrossSiteWrite(request)) return NextResponse.json({ ok: false, code: "REQUEST_FORBIDDEN" }, { status: 403 });
+  if (isHostedBeta()) return notHere();
   const access = await resolveAccessContext(request);
   if ("response" in access) return access.response;
   try {
