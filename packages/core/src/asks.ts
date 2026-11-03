@@ -32,6 +32,8 @@ export type AskKind =
   | "opportunity_need"
   /** An opportunity the person qualifies for, or might (its eligibility questions with it): 报名 / 申请 / 加入计划 / 不要 / 以后再说. */
   | "opportunity_offer"
+  /** An application whose preparation is accepted (docs/opportunity-agent.md §9): 代填申请 (stops before submit) / 我自己去交. */
+  | "opportunity_apply_ready"
   /**
    * Started work whose own due day passed (docs/plans/closed-loop-1030.md §4): an external date (a course's, or read from someone else's
    * text) — can it still be handed in, and by when; or a self-set date the daily pass already moved twice. 新日期 or 归档.

@@ -44,7 +44,8 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
   risk_digest: { answered: "审查过的里程碑，任务提前 1–2 天排完；这周不再提醒，风险变高时再说。", unanswered: "排程不变；下周汇总再列一次。" },
   weekly_commit: { answered: "推的从下周一起排，砍的归档（可恢复），一次撤销可全部恢复。", unanswered: "排程照旧，本周的工作可能排不完。" },
   opportunity_need: { answered: "跟踪后每天看一次这条需求的来源，符合资格的机会进早报和这里；不要则记成偏好，不再推同类。", unanswered: "这条需求不跟踪，也不会再提醒。" },
-  opportunity_offer: { answered: "报名进代填队列；申请或加入计划写一个已批准的里程碑并倒推准备；不要记成偏好。", unanswered: "截止前留在这里，过了截止自动消失。" }
+  opportunity_offer: { answered: "报名进代填队列；申请或加入计划写一个已批准的里程碑并倒推准备；不要记成偏好。", unanswered: "截止前留在这里，过了截止自动消失。" },
+  opportunity_apply_ready: { answered: "代填打开报名网站填好，停在提交前等本人提交；自己去交则不再问。", unanswered: "不代填，截止前留在这里。" }
 };
 
 /** What an answer does and what silence does. An option's own detail is preferred over the kind's sentence when it is the recommended one. */

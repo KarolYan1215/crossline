@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   CANDIDATES_PER_NEED, CCFDDL_URL, NEEDS_PERIOD_DAYS, OPPORTUNITY_NEEDS_SCHEMA, OPPORTUNITY_READING_SCHEMA, PAGES_PER_READING, POLL_PERIOD_HOURS,
-  aiDeadlines, aiDeadlinesUrl, applicantFrom, boardUrl, ccfddlDeadlines, checkReadItem, devpostHackathons, hostOf, judgeEligibility, keepOpportunityNeeds,
+  aiDeadlines, aiDeadlinesUrl, applicantFrom, boardUrl, ccfddlDeadlines, checkReadItem, devpostHackathons, judgeEligibility, keepOpportunityNeeds,
   needFromProposal, opportunityFromListed, opportunityFromRead, parsePostings, tFor, validateOpportunityNeeds, validateOpportunityReading,
   type NeedSource, type NeedsAnswer, type NeedsContext, type ReadItem, type ReadingAnswer, type StoredNeed
 } from "@crossline/core";
@@ -315,19 +315,6 @@ export function addMailCandidate(store: CrosslineStore, workspaceId: string, can
   const list = readJson<MailCandidate[]>(store, workspaceId, MAIL_CANDIDATES_SETTING, []);
   if (list.some((item) => item.key === candidate.key)) return;
   store.setSetting(workspaceId, MAIL_CANDIDATES_SETTING, JSON.stringify([...list, candidate].slice(-40)));
-}
-
-/** A confirmation mail from the host of an opportunity the person signed up or applied for (same registrable domain, words of its title). */
-export function matchConfirmation(store: CrosslineStore, workspaceId: string, mail: { fromAddress: string; subject: string; key: string }): string | undefined {
-  const domain = (mail.fromAddress.split("@")[1] ?? "").toLowerCase();
-  const base = (host: string) => host.split(".").slice(-2).join(".");
-  if (!domain) return undefined;
-  const subject = mail.subject.toLowerCase();
-  const hit = store.listOpportunities(workspaceId).find((row) => (row.decision === "register" || row.decision === "apply") && !row.confirmedBy
-    && [hostOf(row.url), row.registrationHost].some((host) => host && base(host) === base(domain))
-    && row.title.toLowerCase().split(/\W+/).filter((word) => word.length > 3).some((word) => subject.includes(word)));
-  if (hit) store.confirmOpportunity(workspaceId, hit.id, mail.key);
-  return hit?.id;
 }
 
 /** Whether the opportunity agent runs for this workspace: the machine owner's (the installed copy's one account included), never a hosted guest. */
