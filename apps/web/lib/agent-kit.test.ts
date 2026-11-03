@@ -1,10 +1,14 @@
 import { expect, test } from "vitest";
 import { redactPortrait, type EnergyRhythm, type PortraitReport } from "@crossline/core";
-import fixture from "../../../e2e/fixtures/portrait-report.json";
 import { agentKitMarkdown, buildAgentKit, scrub, type AgentKitInput } from "./agent-kit";
 import { tFor } from "./i18n";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
-const report = { ...(fixture as unknown as PortraitReport) };
+// Read at run time: the image build type-checks without e2e/ in its context.
+const fixture = JSON.parse(readFileSync(path.resolve(import.meta.dirname, "../../../e2e/fixtures/portrait-report.json"), "utf8")) as PortraitReport;
+
+const report = { ...fixture };
 report.type = { ...report.type!, lines: 80 };
 
 const rhythm: EnergyRhythm = { curve: [], sleep: { from: 23.5, to: 7.5 }, peak: { start: 9, end: 12 }, thresholds: { low: 0, high: 1 }, reports: [],
