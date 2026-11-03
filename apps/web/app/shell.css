@@ -81,6 +81,19 @@
   body:has(.side-nav) .running-head::after{background:transparent}
   body:has(.side-nav) .system-state{gap:6px}
 }
+/* A window that is not maximized (1025–1279px, 2026-11-03, the owner): the bar is icons only, so the page keeps about 150px more.
+   Each name is the link's title and stays in the accessible name (font-size 0, not hidden). Below 1280px wide or 860px tall the corner
+   (小帮手, timer, 「需要你处理」) sits at the bottom right again: at the bar's foot it covered 设置, the language and 退出登录. */
+@media (min-width:1025px) and (max-width:1279px){
+  :root{--ds-side-w:64px}
+  .side-nav{padding-inline:8px;gap:14px;scrollbar-width:none}
+  .side-nav-foot>.side-nav-helper{display:none}
+  .side-nav-brand{display:none}
+  .side-nav-heading{display:none}
+  .side-nav a,.side-nav-foot>button{position:relative;justify-content:center;padding:7px 0;font-size:0;gap:0}
+  .side-nav .pending-badge{position:absolute;top:2px;right:2px;margin:0;min-width:16px;padding:0 4px;font-size:11px;line-height:16px}
+  .side-nav-foot .locale-switch{justify-content:center;padding-left:0;font-size:13px}
+}
 /* The account menu is the wide screen's way to settings and signing out; under 1025px the header carries them as words. */
 .account-menu{display:none}
 @media (min-width:1025px){
@@ -124,7 +137,7 @@
    at the right edge it covered the right column's buttons on every page (2026-10-29, the live check after the redesign). The bar's own
    foot keeps room as tall as the corner reaches (`--corner-clearance`, measured by CornerStack), the conversation opens beside the bar,
    and pages no longer reserve room at their foot for it. */
-@media (min-width:1025px){
+@media (min-width:1280px) and (min-height:860px){
   .corner-stack{left:12px;right:auto;bottom:14px;align-items:flex-start}
   .corner-stack .assistant-bubble-wrap{flex-direction:row-reverse}
   .corner-stack[data-tucked] .assistant-bubble-wrap:not([data-popped]):not(:hover):not(:focus-within){transform:none;opacity:1}

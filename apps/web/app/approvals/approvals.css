@@ -102,6 +102,23 @@
   .ap-grid{grid-template-columns:minmax(200px,230px) minmax(0,1fr)}
   .ap-right{grid-column:2}
 }
+/* A window that is not maximized (2026-11-03, the owner): the quadrants and the kinds are one bar above the card, which takes the whole
+   width; at 230px beside it 「为何问 / 答后 / 不答」 were three columns under 130px each. The batch column, 以后再定 and the rest follow. */
+@media (min-width:901px) and (max-width:1279px){
+  .ap-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ap-left{display:contents}
+  .ap-quads{grid-column:1;grid-row:1}
+  .ap-kinds{grid-column:2;grid-row:1}
+  .ap-left:not(:has(.ap-kinds)) .ap-quads{grid-column:1 / -1}
+  .ap-center{grid-column:1 / -1;grid-row:2}
+  .ap-right{grid-column:1 / -1;grid-row:3}
+  .ap-later,.ap-elsewhere{grid-column:1 / -1}
+  .ap-quad-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .ap-quad-grid button{justify-items:center;text-align:center}
+  .ap-kinds ul{display:flex;flex-wrap:wrap;gap:6px}
+  .ap-kinds li+li{border-top:0}
+  .ap-kinds button{width:auto;min-height:32px;padding:4px 12px;border:1px solid var(--ds-line);border-radius:999px}
+}
 @media (max-width:900px){
   .ap-grid{grid-template-columns:minmax(0,1fr)}
   .ap-right{grid-column:auto}

@@ -189,11 +189,13 @@ body:has(.today-page) .running-head{background:var(--ds-bg)}
 @media (max-width:1024px){
   .td-grid{grid-template-columns:minmax(0,1fr);gap:16px}
   .td-main,.td-side{display:contents}
-  .td-side .nd{order:1}
+  /* The input box, the calendar with its 下一项, then one decision at a time: answered, the next comes up (2026-11-03, the owner). */
+  .td-input{order:1}
   .td-cal{order:2}
-  .energy-card{order:3}
-  .ov{order:4}
-  .td-input{order:5}
+  .td-side .nd{order:3}
+  .energy-card{order:4}
+  .ov{order:5}
+  .nd-list>.nd-row:not(:first-child){display:none}
   .td-head{grid-template-columns:auto minmax(0,1fr);padding:14px 0 12px}
   .td-week{grid-column:1 / -1;justify-self:stretch;justify-content:space-between}
 }

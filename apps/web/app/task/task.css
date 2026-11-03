@@ -5,7 +5,7 @@
 /* ── card (redesigned 2026-10-15): line and due on one row, the title, the step picture, the current step and its first move, what it
    waits for, the next block, what is ready, the actions. Text stays ink or graphite (≥7:1); the line colour is only the edge, dot and bars. ── */
 .task-card{position:relative;display:grid;gap:8px;padding:12px 14px;border:1px solid var(--mist);border-left:4px solid var(--lc,var(--graphite));
-  background:var(--paper);cursor:pointer;min-width:0;align-content:start}
+  background:var(--paper);cursor:pointer;min-width:0;align-content:start;grid-template-columns:minmax(0,1fr)}
 .task-card:hover{border-color:var(--ink);border-left-color:var(--lc,var(--ink))}
 .task-card:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 .task-card[data-state="active"]{box-shadow:inset 0 0 0 1px var(--lc,var(--ink))}

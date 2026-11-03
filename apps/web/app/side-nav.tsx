@@ -24,7 +24,7 @@ export function SideNav({ active }: { active?: string | undefined }) {
   const item = (entry: { label: string; href: string; badge: boolean }) => {
     const Icon = ICONS[entry.label] ?? Sun;
     const current = entry.label === active;
-    return <NavLink key={entry.label} href={entry.href} className={current ? "active" : ""} aria-current={current ? "page" : undefined}>
+    return <NavLink key={entry.label} href={entry.href} title={t(entry.label)} className={current ? "active" : ""} aria-current={current ? "page" : undefined}>
       <Icon {...ICON} /><span>{t(entry.label)}</span>{entry.badge && <PendingBadge />}
     </NavLink>;
   };
