@@ -117,7 +117,20 @@ export type EventPlace = {
 
 /** Local events are kept to one hour each way; conferences, competitions and internships have no limit but carry their cost (§17.6). */
 export const LOCAL_MINUTES_MAX = 60;
-export type TravelEstimate = { km: number; mode: "walk" | "transit" | "drive" | "rail" | "flight"; minutesOneWay: number; nights: number };
+/**
+ * `travelDays` (days spent getting there before the event, counted back from it) and `costTier` were added by track ② (additive): the card
+ * shows them for conferences, competitions and internships, which have no distance limit but carry their cost (§17.6).
+ */
+export type TravelEstimate = { km: number; mode: "walk" | "transit" | "drive" | "rail" | "flight"; minutesOneWay: number; nights: number;
+  travelDays?: number | undefined; costTier?: TravelCostTier | undefined };
+export type TravelCostTier = "low" | "medium" | "high";
+
+/**
+ * What kind of thing an opportunity is, for the radius rule (§17.6; added by track ②, additive). Only `local_event` is held to
+ * `LOCAL_MINUTES_MAX`; the reader sets it, and an opportunity without one is classified by `opportunityCategory`.
+ */
+export const OPPORTUNITY_CATEGORIES = ["local_event", "conference", "competition", "internship", "program", "other"] as const;
+export type OpportunityCategory = (typeof OPPORTUNITY_CATEGORIES)[number];
 export type VisaCheck = {
   needed: boolean | "unknown";
   leadDays: number;

@@ -4,6 +4,7 @@
  * the page engine, checks and submission). They meet only through `Opportunity` records and the `FormRun` queue, so this file holds
  * types and fixed vocabularies, nothing either track decides on its own.
  */
+import type { EventPlace, OpportunityCategory } from "./opportunity-watch";
 
 /** A need worked out from a line's long-term goal: an outside gate the goal has to pass that the person has not planned for (§5). */
 export type OpportunityNeedKind = "cycle" | "stream";
@@ -66,6 +67,10 @@ export type Opportunity = {
   consents: string[];
   foundVia: NeedSource["kind"];
   foundAt: string;
+  /** Where it happens, read with a quote (§17.6; added by track ②, additive). Absent on records read before. */
+  place?: EventPlace | undefined;
+  /** Local event, conference, competition, internship… (§17.6); absent: `opportunityCategory` reads it from kind and title. */
+  category?: OpportunityCategory | undefined;
 };
 
 export type EligibilityVerdict =

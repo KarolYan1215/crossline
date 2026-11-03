@@ -48,7 +48,7 @@ test("a proposed watch is a 盯住 / 不要 card; the scout's proposals wait for
   expect(loadLineWatches(TEST_CTX).research?.map((item) => item.id)).toEqual(["need:research:intern"]);
 });
 
-test("少来 takes a one-tap reason from a choice field, leaves the inbox, is listed for the review, and undo puts it back", () => {
+test("少来 takes a one-tap reason from a choice field, leaves the inbox, is listed for the review, and undo puts it back", async () => {
   const store = setup();
   saveWatchList(store, ws, [watch({ state: "active" })]);
   save(store);
@@ -58,7 +58,7 @@ test("少来 takes a one-tap reason from a choice field, leaves the inbox, is li
   expect(validateAskAnswer(card, "less", { reason: "nonsense" })).toEqual({ ok: false, code: "ASK_FIELD_CHOICE_UNKNOWN" });
   const checked = validateAskAnswer(card, "less", { reason: "already_known" });
   expect(checked.ok).toBe(true);
-  expect(answerOpportunityOffer(TEST_CTX, card, "less", checked.ok ? checked.values : {}, NOW)).toEqual({ ok: true });
+  expect(await answerOpportunityOffer(TEST_CTX, card, "less", checked.ok ? checked.values : {}, NOW)).toEqual({ ok: true });
   expect(readWatchTuning(store, ws).knownHosts).toEqual(["lab.example.org"]);
   expect(opportunityOfferAsks(TEST_CTX, NOW).some((ask) => ask.id === "opp:opp-1")).toBe(false);
   const entries = loadOutOfView(TEST_CTX, NOW).less;
@@ -68,12 +68,12 @@ test("少来 takes a one-tap reason from a choice field, leaves the inbox, is li
   expect(loadOpportunitySettings(TEST_CTX, NOW)?.less[0]?.undone).toBe(true);
 });
 
-test("after 报名 the card shows the form filler's progress until a day after it is confirmed", () => {
+test("after 报名 the card shows the form filler's progress until a day after it is confirmed", async () => {
   const store = setup();
   saveWatchList(store, ws, [watch({ state: "active" })]);
   const row = save(store);
   const card = offer(opportunityOfferAsks(TEST_CTX, NOW), "opp:opp-1");
-  expect(answerOpportunityOffer(TEST_CTX, card, "register", {}, NOW)).toEqual({ ok: true });
+  expect(await answerOpportunityOffer(TEST_CTX, card, "register", {}, NOW)).toEqual({ ok: true });
   const progress = () => opportunityOfferAsks(TEST_CTX, NOW).find((ask) => ask.id.startsWith("oppform:"));
   expect(progress()?.title).toContain("填写中");
   expect(progress()?.options).toEqual([expect.objectContaining({ href: "/settings#apply" })]);

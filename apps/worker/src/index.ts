@@ -53,6 +53,7 @@ import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compile
 import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, scoutDue } from "./public-skills";
 import { deriveWatches, opportunityAgentOn, rejudge, runWatch, todayFor, watchesDeriveDue, watchesToRun } from "./opportunities";
 import { opportunityScoutDue, startScout } from "./opportunity-scout";
+import { discoveryFeasibility, timeSpacePass } from "./time-space";
 import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, loginBrowser, markWorkflowRun,
   openWorkflowLogin, resumeByPerson, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { loginMode } from "./browser-launch";
@@ -515,7 +516,9 @@ async function opportunityPass(workspaceId: string, checkedAt: string): Promise<
   discovering.add(workspaceId);
   try {
     enterUsageWorkspace(workspaceId);
-    const deps = { client: () => accountClient(workspaceId), cwd: repoRoot };
+    // Each find is judged in time and space before it is kept (§17.6): what cannot be reached never reaches the person.
+    const feasibility = discoveryFeasibility({ client: () => spendAllows(spend, "core") ? accountClient(workspaceId) : undefined, cwd: repoRoot });
+    const deps = { client: () => accountClient(workspaceId), cwd: repoRoot, feasibility };
     if (spendAllows(spend, "core")) {
       for (const lineId of lines.slice(0, 1)) {
         const outcome = await deriveWatches(analysisStore, workspaceId, lineId, deps).catch((error: unknown) => ({ blocked: error instanceof Error ? error.message : "FAILED" }));
@@ -528,11 +531,28 @@ async function opportunityPass(workspaceId: string, checkedAt: string): Promise<
     }
     if (scout && spendAllows(spend, "discretionary")) {
       const started = startScout(analysisStore, workspaceId, (input, after) => agentService.runFree(workspaceId, input, after),
-        { costSince: (store, ws, purpose, since) => opportunityCosts(store, ws, since).filter((row) => row.purpose === purpose).reduce((sum, row) => sum + row.weighted, 0) });
+        { feasibility, costSince: (store, ws, purpose, since) => opportunityCosts(store, ws, since).filter((row) => row.purpose === purpose).reduce((sum, row) => sum + row.weighted, 0) });
       console.info(JSON.stringify({ type: "opportunity.scout", checkedAt, workspaceId, state: started.state }));
     }
     rejudge(analysisStore, workspaceId);
   } finally { discovering.delete(workspaceId); }
+}
+
+/**
+ * The time–space engine (docs/opportunity-agent.md §17.6–17.7): places geocoded, visas looked up, and a clash with a fixed arrangement told
+ * at once, for the opportunities still open. Same workspace and pause as discovery; the visa lookup is a model run, so it needs core spend
+ * (geocoding does not). Detached and one at a time per workspace: pacing Nominatim and a visa run can take minutes.
+ */
+const placing = new Set<string>();
+async function placePass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (!opportunityAgentOn(analysisStore, workspaceId) || paused(workspaceId, "planning") || placing.has(workspaceId)) return;
+  placing.add(workspaceId);
+  try {
+    enterUsageWorkspace(workspaceId);
+    const models = codexSupervisor && spendAllows(await spendFor(workspaceId), "core");
+    const outcome = await timeSpacePass(analysisStore, workspaceId, { client: () => models ? accountClient(workspaceId) : undefined, cwd: repoRoot });
+    if (outcome.judged) console.info(JSON.stringify({ type: "opportunity.placed", checkedAt, workspaceId, ...outcome }));
+  } finally { placing.delete(workspaceId); }
 }
 
 /**
@@ -882,6 +902,7 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
   if (!offPeakWait) await minePass(workspace.id, checkedAt);
   await publicSkillPass(workspace.id, checkedAt, offPeakWait);
   void opportunityPass(workspace.id, checkedAt).catch(() => undefined);
+  void placePass(workspace.id, checkedAt).catch(() => undefined);
   await portraitPass(workspace.id, checkedAt, offPeakWait);
   // The automations (docs/personal-agent.md): each one's trigger looked at, new mail's included (the intake pass recorded it).
   await automationTick(workspace.id).catch(() => undefined);
