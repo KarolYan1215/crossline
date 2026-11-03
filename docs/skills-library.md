@@ -404,3 +404,12 @@
 
 `app/helper-calls.tsx` 在小帮手上方显示「N 件需要你处理」。点开后每件都能就地处理；不紧急的可以「明天再说」，一天内不再出现。
 
+## 报告与可落地（2026-11-03，本人：「收藏整理的核心产出是报告，任务卡只是展示报告、把报告落地的方式」）
+
+- **报告页**：`/reports` 列出每个工作流最新的一份报告，`/reports/<运行 id>` 显示其中的 Markdown 文档。顺序是先「话题总览」，再「话题-*」，再其余。页面还写明生成时间、涵盖多少条笔记（`lastRead.items`，同一次运行时才写）、来自哪个工作流，并列出较早的版本。数据来自 `apps/web/lib/reports.ts`。报告是生长工作流的一次运行（`flow-<工作流>-…`），只要留下了 `.md`。文件直接从任务目录里列，因为 `carryTopicFiles` 带过来的话题文件不在 `artifacts` 里；`input/` 和隐藏文件不算，读文件仍走 `readTaskFile` 的路径与密钥检查。侧栏「报告」在「周复盘」之后。
+- **`落地.json`**：整理收藏的三条路径（`organiseTopics`、`organiseFavourites`、`organiseFromShared`）都会让助手在任务目录顶层写一份，最多 8 项 `{title ≤40, why, topic, lineId}`，有上一版时在上一版基础上改（`reportItemsBrief`）。`carryTopicFiles` 也带上它。读取一律经过 `readReportItems`（`packages/core/src/report-items.ts`）：坏项丢掉；不认识的 `lineId` 记成空，动作本身保留。
+- **加入任务 / 不需要**：每项的 key 是「工作流 + 标题」的哈希，所以同一工作流的新版报告沿用已做的决定。「加入任务」写一条收集，id 为 `report-<key>`，并记 `report.item_added`（entityId 是这条收集的 id）。同一项再点不会再写，按钮变成「已加入」。分析把收集提升为作业时 id 不变，任务详情据此显示「来自报告「…」」，链到报告（`reportOfTask`）。「不需要」记 `report.item_dismissed`，这一项就此隐藏。路由是 `POST /api/reports/[id]`。
+- **结果链接**：整理收藏的提醒按钮写「去看报告」。其他生长工作流的「去看结果」在运行留下 Markdown 时也链到 `/reports/<运行 id>`（`resultHref`），没有 Markdown 时仍去 `/approvals#assistant`。
+- **Markdown 链接**：`[文字](https://…)` 和裸的 http/https 网址画成新标签页打开的链接（`rel="noopener noreferrer"`）。其他协议保持原文，网址末尾的句读不算进链接。
+- **安装入口**：Skill 库的「生长的工作流」里，还没有任何读小红书收藏的工作流时，显示「添加：按话题整理小红书收藏」（`favouritesOffer`）。按钮默认用像自媒体的主线（id 为 `media`，或名称含媒体、内容、创作、博主、小红书），没有这样的主线就让本人选。按下后走 `POST /api/skills/grown/favourites-topics` 到 worker 的 `POST /v1/workflows/favourites-topics/install`（`createFavouritesTopicsService`；不是本人主线的 id 会被拒绝，返回 `LINE_UNKNOWN`），装成 `needs_consent`。之后本人仍要按「接受风险并启用」并登录小红书。
+

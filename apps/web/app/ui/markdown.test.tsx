@@ -67,3 +67,16 @@ test("a long paragraph is cut into paragraphs of whole sentences, losing nothing
   expect(parts.every((part) => part.length <= 120)).toBe(true);
   expect(splitParagraph("短句。")).toEqual(["短句。"]);
 });
+
+test("http and https links are drawn as links opened in a new tab, anything else stays text", () => {
+  const html = renderToStaticMarkup(<Markdown text={"见 [原笔记](https://www.xiaohongshu.com/explore/abc?x=1) 和 https://example.com/a。另有 [坏链接](javascript:alert(1)) 与 `https://code.example`。"} />);
+  expect(html).toContain('<a href="https://www.xiaohongshu.com/explore/abc?x=1" target="_blank" rel="noopener noreferrer">原笔记</a>');
+  expect(html).toContain('<a href="https://example.com/a" target="_blank" rel="noopener noreferrer">https://example.com/a</a>。');
+  expect(html).not.toMatch(/href="javascript/);
+  expect(html).toContain("[坏链接](javascript:alert(1))");
+  expect(html).toContain("<code>https://code.example</code>");
+  expect(renderToStaticMarkup(<Markdown text={"地址 https://a.example/x. 结束"} />)).toContain('href="https://a.example/x"');
+  expect(renderToStaticMarkup(<Markdown text={"**[加粗](https://b.example)**"} />)).toContain('<b><a href="https://b.example"');
+  // The footnote marks still work beside a link.
+  expect(renderToStaticMarkup(<Markdown text={"见 https://c.example [^1]"} cite={(n) => <sup key={n}>{n}</sup>} />)).toContain("<sup>1</sup>");
+});

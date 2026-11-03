@@ -52,7 +52,9 @@ export type GrownSkillView = { id: string; summary: string; name: string; catego
   mergedInto?: { id: string; summary: string; at: string; why: string } } & ScriptsView;
 /** `shell`: this account's assistant has a command line (the copy on the person's own computer) and can run an allowed script. */
 export type SkillLibraryView = { mine: MineSkillView[]; grown: GrownSkillView[]; publics: PublicSkillView[]; aiTools: AiTool[];
-  removed: Array<{ name: string; reason: string; at: string; by: string }>; growing: number; shell: boolean };
+  removed: Array<{ name: string; reason: string; at: string; by: string }>; growing: number; shell: boolean;
+  /** No workflow reads the Xiaohongshu favourites yet: Skill 库 offers to add the topic one, for this line (a media-like line), or "" (asked). */
+  favouritesInstall?: { lineId: string } };
 
 const scriptsView = (record: Parameters<typeof scriptsRunnable>[0]): ScriptsView => ({
   scripts: scriptCount(record), scriptsAllowable: scriptsAllowable(record),
@@ -113,7 +115,25 @@ export function loadSkillLibrary(ctx: AccessContext): SkillLibraryView {
   // Requests made in words that no growing run has picked up yet: the page says they are on their way.
   const tried = new Set(store.listEvents(ctx.workspaceId, { type: "skill.grown.attempted" }).map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
   const growing = store.listEvents(ctx.workspaceId, { type: "workflow.requested" }).filter((event) => !tried.has(event.entityId)).length;
-  return { mine, grown, publics, removed, growing, aiTools: aiToolsFor(store, ctx.workspaceId), shell: assistantMode(store, ctx.workspaceId) === "shell" };
+  const favouritesInstall = favouritesOffer(readGrownSkills(store, ctx.workspaceId), identityLines(ctx));
+  return { mine, grown, publics, removed, growing, aiTools: aiToolsFor(store, ctx.workspaceId), shell: assistantMode(store, ctx.workspaceId) === "shell",
+    ...(favouritesInstall ? { favouritesInstall } : {}) };
+}
+
+/* i18n-ignore-start: matched against workflows' own words and the lines' names */
+const MEDIA_LINE = /媒体|内容|创作|博主|小红书|media|creator|content/i;
+const FAVOURITES = /收藏|favou?rite/i;
+/* i18n-ignore-end */
+/**
+ * Whether Skill 库 offers 「添加：按话题整理小红书收藏」: only while no workflow reads the person's Xiaohongshu favourites (the topic one, or
+ * one grown for favourites on that site), for the media-like line when the account has one, else for a line the person picks ("").
+ */
+export function favouritesOffer(records: Array<{ name: string; manifest: { summary: string; access?: Array<{ site: string }> } }>,
+  lines: Array<{ id: string; label: string }>): { lineId: string } | undefined {
+  const reads = records.some((record) => record.name === "xiaohongshu-favourites-topics"
+    || (FAVOURITES.test(record.manifest.summary) && (record.manifest.access ?? []).some((item) => /xiaohongshu\.com/.test(item.site))));
+  if (reads || !lines.length) return undefined;
+  return { lineId: lines.find((line) => line.id === "media" || MEDIA_LINE.test(line.label))?.id ?? "" };
 }
 
 const MAX_SKILL_CHARS = 20_000;
