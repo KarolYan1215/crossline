@@ -149,8 +149,12 @@ export async function readNewMail(deps: MailDeps, workspaceId: string, force = f
       fresh.push(...result.messages.map((message) => ({ ...message, accountId: account.id, uidValidity: result.uidValidity })));
       update = { uidValidity: result.uidValidity, lastUid: result.lastUid, lastCheckedAt: now.toISOString() };
     } catch (error) {
-      update = { lastCheckedAt: now.toISOString(), lastError: { code: (error as { code?: string }).code ?? "MAIL_READ_FAILED",
-        message: error instanceof Error ? tOfWorkspace(deps.store, workspaceId)(error.message).slice(0, 200) : tOfWorkspace(deps.store, workspaceId)("读取邮件失败"), at: now.toISOString() } };
+      const code = (error as { code?: string }).code ?? "MAIL_READ_FAILED";
+      const t = tOfWorkspace(deps.store, workspaceId);
+      // imapflow's own transport codes say nothing to a person (「ClosedAfterConnectTLS」 reached the 小帮手 as it was, 2026-11-04).
+      const plain = MAIL_TRANSPORT_WORDS[code];
+      update = { lastCheckedAt: now.toISOString(), lastError: { code,
+        message: plain ? t(plain) : error instanceof Error ? t(error.message).slice(0, 200) : t("读取邮件失败"), at: now.toISOString() } };
     }
     // Written back over the list as it is now: the person may have removed or changed an account while the server answered.
     saveAccounts(deps.store, workspaceId, accounts(deps.store, workspaceId).map((item) => {
@@ -333,6 +337,17 @@ export type QueuedReply = ReplyCandidate & { failures?: number };
 export const replyQueueOf = (store: CrosslineStore, workspaceId: string): QueuedReply[] => { try { return JSON.parse(store.getSetting(workspaceId, REPLY_QUEUE_SETTING) ?? "[]") as QueuedReply[]; } catch { return []; } };
 /** Reasons a draft is not written that will not pass by themselves and need no retry: such messages are not queued again. */
 const FINAL_SKIPS = new Set(["already", "off", "muted"]);
+
+/** imapflow's connection failures in words; the next read tries again by itself. */
+const CLOSED_AT_ONCE = "邮箱服务器一连上就断开了，常见于服务商拒绝了服务器所在地区或短时间内登录太多次；会自动再试，一直这样请在邮箱网页版确认已开启 IMAP";
+const MAIL_TRANSPORT_WORDS: Record<string, string> = {
+  ClosedAfterConnectTLS: CLOSED_AT_ONCE, ClosedAfterConnectText: CLOSED_AT_ONCE,
+  NoConnection: "连不上邮箱服务器，会自动再试",
+  ETIMEDOUT: "连接邮箱服务器超时，会自动再试",
+  ECONNRESET: "邮箱服务器中途断开了连接，会自动再试",
+  ECONNREFUSED: "邮箱服务器拒绝连接，请检查服务器地址和端口",
+  ENOTFOUND: "找不到邮箱服务器地址，请检查服务器地址"
+};
 /** Reasons that pass by themselves: kept queued however often they come back. `daily_limit` carries the message over to the next day. */
 export const TRANSIENT_REPLY_SKIP = /^(quota|no_client|daily_limit|SKILL_USAGE_LIMIT|SKILL_TIMEOUT|SKILL_STALLED|SKILL_THREAD_LOST|SKILL_RUNTIME_FAILED|SKILL_CANCELED|SKILL_LIST_FAILED|RUNTIME_|CODEX_|MODEL_SPONSOR_|RATE_LIMIT|BUDGET_)/;
 /** Refusals that are not passing before a message is given up: the first refusal, then one retry. */

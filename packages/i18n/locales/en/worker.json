@@ -873,5 +873,12 @@
   "自动化「{{name}}」已经超过 {{count}} 小时没有读要看的网页_other": "Automation \"{{name}}\" has not read the page it watches for over {{count}} hours",
   "{{count}} 次等待超过两小时的自动化运行已取消_one": "{{count}} automation run that had waited over two hours was cancelled",
   "{{count}} 次等待超过两小时的自动化运行已取消_other": "{{count}} automation runs that had waited over two hours were cancelled",
-  "「{{text}}」交给助手设计已超过一小时，还没有建成": "\"{{text}}\" was handed to the assistant to design over an hour ago and is not built yet"
+  "「{{text}}」交给助手设计已超过一小时，还没有建成": "\"{{text}}\" was handed to the assistant to design over an hour ago and is not built yet",
+  "本人要求建好后先跑一次": "Asked to run once as soon as it was made",
+  "邮箱服务器一连上就断开了，常见于服务商拒绝了服务器所在地区或短时间内登录太多次；会自动再试，一直这样请在邮箱网页版确认已开启 IMAP": "The mail server closed the connection as soon as it opened, usually because the provider refuses the server’s region or saw too many sign-ins; it will try again by itself, and if it keeps happening check that IMAP is on in the mailbox’s web settings",
+  "连不上邮箱服务器，会自动再试": "Could not reach the mail server; it will try again by itself",
+  "连接邮箱服务器超时，会自动再试": "The mail server did not answer in time; it will try again by itself",
+  "邮箱服务器中途断开了连接，会自动再试": "The mail server dropped the connection; it will try again by itself",
+  "邮箱服务器拒绝连接，请检查服务器地址和端口": "The mail server refused the connection; check the server address and port",
+  "找不到邮箱服务器地址，请检查服务器地址": "The mail server address could not be found; check it"
 }
