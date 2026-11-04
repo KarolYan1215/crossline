@@ -148,13 +148,14 @@ export function capabilityGap(skill: string, capabilities: ProviderCapabilities 
  * Calendars come in by subscription link on any model, and what the person said is kept in the ledger whichever model runs; only the
  * shell assistant stays with the machine owner's own Codex.
  */
-export function unavailableOnThirdParty(capabilities: Pick<ProviderCapabilities, "webSearch" | "image">, locale?: Locale): string {
+export function unavailableOnThirdParty(capabilities: Pick<ProviderCapabilities, "webSearch" | "image"> & { shell?: boolean }, locale?: Locale): string {
   const t = tFor(locale);
   const missing = [capabilities.webSearch ? "" : t("联网查证"), capabilities.image ? "" : t("画像插图")].filter(Boolean);
   const parts = [missing.length ? t("{{features}}在这台服务器上只在 ChatGPT 登录（或 OpenAI API key）下可用", { features: missing.join(t("和", { context: "join" })) })
       : t("联网查证和画像插图由 Crossline 自己完成，用哪个模型都可以"),
     t("日历用订阅链接接入，主线、事实和偏好记在 Crossline 自己的账本里，都和模型无关"),
-    t("助手在这里通过 Crossline 自己的功能读写文件、查网页和邮箱、跑自动化（不运行脚本；能运行脚本的助手只在电脑主人自己的 Codex 上）"),
+    capabilities.shell ? t("助手在隔离的沙箱里运行命令和脚本（没有网络，只能写自己的任务文件夹），也通过 Crossline 自己的功能查网页和邮箱、跑自动化")
+      : t("助手在这里通过 Crossline 自己的功能读写文件、查网页和邮箱、跑自动化（不运行脚本；能运行脚本的助手只在电脑主人自己的 Codex 上）"),
     t("其余功能按检验结果开放。")];
   // English reads as sentences; Chinese keeps its one sentence joined by semicolons.
   return locale === "en" ? parts.map((part) => part.endsWith(".") ? part : `${part}.`).join(" ") : parts.join("；"); // i18n-ignore

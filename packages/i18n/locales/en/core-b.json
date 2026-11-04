@@ -472,6 +472,7 @@
   "邮件回复草稿": "Mail reply drafts",
   "自动化设计": "Automation design",
   "{{label}}要看图片，这个模型连接还没有检验过看图；需要 ChatGPT 登录。": "{{label}} needs to read pictures, and this model connection has not been checked for that; it needs a ChatGPT sign-in.",
+  "助手在隔离的沙箱里运行命令和脚本（没有网络，只能写自己的任务文件夹），也通过 Crossline 自己的功能查网页和邮箱、跑自动化": "The assistant runs commands and scripts in an isolated sandbox (no network, writing only its own task folder), and looks up web pages and mail and runs automations through Crossline's own functions",
   "助手在这里通过 Crossline 自己的功能读写文件、查网页和邮箱、跑自动化（不运行脚本；能运行脚本的助手只在电脑主人自己的 Codex 上）": "Here the assistant reads and writes files, looks up web pages and mail, and runs automations through Crossline's own functions (it runs no scripts; the assistant that runs scripts is only on the computer owner's own Codex)",
   "录音超过 500 MB，没有转写": "Recording over 500 MB, not transcribed",
   "提供{{what}}": "Provide {{what}}",

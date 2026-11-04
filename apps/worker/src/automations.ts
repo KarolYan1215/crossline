@@ -34,6 +34,8 @@ export type AutomationDeps = {
   client: (workspaceId: string) => CodexRpcBoundary | undefined;
   runFree: (workspaceId: string, input: AgentTaskInput & { taskId: string }, after?: (outcome: AgentOutcome | { state: "failed"; message: string }) => void) => DispatchResult;
   zone: (workspaceId: string) => string;
+  /** Whether this account's assistant has a command line (the owner's shell, a node, the sandbox): the designer then gives it running scripts. */
+  shell?: (workspaceId: string) => boolean;
   fetch?: SafeGetDeps; now?: () => Date; log?: (event: Record<string, unknown>) => void;
 };
 
@@ -86,6 +88,8 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
   const input = { request: text, lineHint, lines, today: now.toISOString().slice(0, 10), timeZone: deps.zone(workspaceId),
     categories: Object.entries(AGENT_CATEGORIES).map(([id, label]) => ({ id, label })),
     connected: { mail: Boolean(deps.store.getSetting(workspaceId, "mail.accounts")?.includes("\"id\"")) },
+    // 2026-11-04: without this the designer gave "run three commands" to the person on an account whose assistant has a sandboxed shell.
+    assistant: { commandLine: Boolean(deps.shell?.(workspaceId)) },
     // What exists already: a request that changes one of these replaces it (the automation grows by being told what to change). Each is
     // given whole, in the answer's own shape, because a change answers with the whole automation and keeps every part it does not change.
     existing: existing.map((item) => ({ id: item.id, name: item.name, summary: item.summary, lineId: item.lineId, status: item.status,
@@ -132,7 +136,9 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
 const DESIGN_INSTRUCTIONS = "Turn the person's one request into one automation Crossline runs by itself: a trigger it can watch for free, and what "
   + "the assistant does each time it fires. The instructions are read by the assistant on every firing: concrete steps naming what to read and "
   + "which files to write, never a plan. The person gets every run's result as a message, so the inbox is only for new things they must do and "
-  + "a person step is only an act the assistant may not take (sending, replying, posting, paying). A request that changes one in `existing` "
+  + "a person step is only an act the assistant may not take (sending, replying, posting, paying). When `assistant.commandLine` is true "
+  + "the assistant writes and runs scripts and commands itself (no network inside them; the web through its own tools), so running code is "
+  + "the assistant's step. A request that changes one in `existing` "
   + "answers with that whole automation, `replaces` set to its id and every part the request does not change copied from it. Answer in the "
   + "schema only.";
 
@@ -200,6 +206,10 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
   };
   const started = deps.runFree(workspaceId, input, (outcome) => {
     const at = deps.now?.() ?? new Date();
+    // The run log said 「已开始」 for every run forever (2026-11-04): its entry now carries how the run ended.
+    const ended = outcome.state === "done" ? "done" as const : outcome.state === "blocked" || outcome.state === "failed" ? "failed" as const : undefined;
+    if (ended) deps.store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify(runs(deps.store, workspaceId).map((run) => run.taskId === taskId
+      ? { ...run, state: ended, ...(ended === "failed" ? { detail: ("message" in outcome ? outcome.message ?? "" : "").slice(0, 120) } : {}) } : run)));
     if (outcome.state === "done") {
       // The conversation and what this run made, for the next firing to go on from.
       update(deps.store, workspaceId, automation.id, (item) => ({ ...item, ...(outcome.threadId ? { threadId: outcome.threadId } : {}),

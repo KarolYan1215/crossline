@@ -53,7 +53,7 @@ export function previousRunNote(lastRun: Automation["lastRun"]): string {
     + "\n这次接着上次做：已经做过、没有变化的不要重做，只处理新的部分；需要上次的内容时读上次的产出。";
 }
 /* i18n-ignore-end */
-export type AutomationRun = { automationId: string; taskId: string; firedAt: string; reason: string; state: "started" | "reminded" | "queued" | "skipped"; detail?: string };
+export type AutomationRun = { automationId: string; taskId: string; firedAt: string; reason: string; state: "started" | "done" | "failed" | "reminded" | "queued" | "skipped"; detail?: string };
 
 export function readAutomations(raw: string | null | undefined): Automation[] {
   try { const parsed = JSON.parse(raw ?? "[]") as Automation[]; return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item.id === "string") : []; }

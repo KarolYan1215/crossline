@@ -821,6 +821,8 @@ async function intakeTick(workspace: { id: string }, checkedAt: string): Promise
   }
   // The mailbox (docs/personal-agent.md): new mail read and sorted; to-dos and dates it finds become captures, analysed just below.
   await mailService.pass(workspace.id).catch(() => undefined);
+  // The automations' triggers, new mail's included: firing only starts the assistant, so this does not hold the intake up.
+  await automationFire(workspace.id).catch(() => undefined);
   // Lists kept in other tools (docs/personal-agent.md §9): each connected one read once a day, its new items sorted into captures; Todoist
   // write-back for accounts that switched it on.
   await importService.pass(workspace.id).catch(() => undefined);
@@ -1280,7 +1282,9 @@ const formService = createFormService({ store: analysisStore, secrets, cwd: repo
 // cooling off); reading never needs the model.
 const mailService = createMailService({ store: analysisStore, secrets, cwd: repoRoot, client: accountClient, dataDir,
   sortAllowed: async (workspaceId) => !paused(workspaceId, "intake") && spendAllows(await spendFor(workspaceId), "intake"),
-  onNewMail: (workspaceId, messages) => { onNewMail(analysisStore, workspaceId, messages); void formService.onNewMail(workspaceId, messages).catch(() => undefined); },
+  onNewMail: (workspaceId, messages) => {
+    const queued = onNewMail(analysisStore, workspaceId, messages);
+    console.info(JSON.stringify({ type: "automation.mail", workspaceId, messages: messages.length, queued, checkedAt: new Date().toISOString() })); void formService.onNewMail(workspaceId, messages).catch(() => undefined); },
   // Sorting's to-dos are captures: analysed at once, not at the next tick's intake.
   onCaptured: (workspaceId) => { void autoAnalyzePass(workspaceId).catch(() => undefined); },
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
@@ -1369,6 +1373,7 @@ const agentService = createAgentService({
 const automationDeps: AutomationDeps = { store: analysisStore, cwd: repoRoot, client: accountClient,
   runFree: (workspaceId, input, after) => agentService.runFree(workspaceId, input, after),
   zone: (workspaceId) => calendarZone(workspaceId) ?? process.env.CROSSLINE_TIME_ZONE?.trim() ?? "America/Chicago",
+  shell: (workspaceId) => shellAssistant(workspaceId) || sandboxNow().ok,
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) };
 const designingAutomations = new Set<string>();
 async function automationDesignPass(workspaceId: string): Promise<void> {
@@ -1384,9 +1389,20 @@ async function automationTick(workspaceId: string): Promise<void> {
   await automationDesignPass(workspaceId);
   // The machine owner's repeated errands are grown into workflows (workflowPass); everyone else is offered an automation for them.
   if (!shellAssistant(workspaceId)) { try { suggestFromRepeats(analysisStore, workspaceId, growCandidates(analysisStore, workspaceId)); } catch { /* a courtesy */ } }
-  if (!codexSupervisor || paused(workspaceId, "assistant") || !spendAllows(await spendFor(workspaceId), "intake")) return;
-  enterUsageWorkspace(workspaceId);
-  await automationPass(automationDeps, workspaceId);
+  await automationFire(workspaceId);
+}
+// Triggers are looked at from the intake tick too (2026-11-04): at the end of the workspace tick a mail-triggered automation waited
+// behind gates, materials and tutorials, which can take hours, and the test mail had not fired it after ten minutes.
+const firingAutomations = new Set<string>();
+async function automationFire(workspaceId: string): Promise<void> {
+  if (firingAutomations.has(workspaceId)) return;
+  firingAutomations.add(workspaceId);
+  try {
+    if (!codexSupervisor || paused(workspaceId, "assistant") || !spendAllows(await spendFor(workspaceId), "intake")) return;
+    enterUsageWorkspace(workspaceId);
+    const runs = await automationPass(automationDeps, workspaceId);
+    if (runs.length) console.info(JSON.stringify({ type: "automation.pass", workspaceId, runs: runs.map((run) => `${run.automationId}:${run.state}`), checkedAt: new Date().toISOString() }));
+  } finally { firingAutomations.delete(workspaceId); }
 }
 // 「按链接添加」 a public skill (docs/skills-library.md §2): the person's link goes through the scout's own fetch, scan and review.
 const publicSkillInstaller = createPublicSkillInstaller({ store: analysisStore, cwd: repoRoot, client: accountClient,

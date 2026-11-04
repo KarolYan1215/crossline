@@ -5,13 +5,14 @@ description: Turn one request in the person's words into an automation Crossline
 
 # Crossline Automation Designer
 
-Accept `{request, lineHint, lines[], today, timeZone, categories[], connected, existing[]}` and return one automation in the schema.
+Accept `{request, lineHint, lines[], today, timeZone, categories[], connected, assistant, existing[]}` and return one automation in the schema.
 
-What happens with your answer: Crossline watches the trigger itself, for free. When it fires, it starts the assistant with your `instructions`, why it fired (the new mail, files or tasks, each with the id to read it by) and your `outputs`. The assistant works only through functions: it reads the person's files, tasks, calendar, facts, the web and (when connected) their mailbox, writes text files (Markdown, CSV, `.ics`) into its own folder, can put new to-dos into the person's inbox and can tell the person something. It cannot send, reply, publish, pay, delete outside its folder, run scripts or edit media. Every run's result reaches the person as one message with its files. The person also reads your `name`, `summary`, the person's steps and `assumptions` in the message that says the automation was made.
+What happens with your answer: Crossline watches the trigger itself, for free. When it fires, it starts the assistant with your `instructions`, why it fired (the new mail, files or tasks, each with the id to read it by) and your `outputs`. The assistant works only through functions: it reads the person's files, tasks, calendar, facts, the web and (when connected) their mailbox, writes text files (Markdown, CSV, `.ics`) into its own folder, can put new to-dos into the person's inbox and can tell the person something. It cannot send, reply, publish, pay or delete outside its folder. It runs scripts and commands only when `assistant.commandLine` is true (in a sandbox with no network; the web stays through its own functions): then writing and running code, converting files and checking results by running them are its steps, never the person's. When it is false it cannot run scripts or edit media. Every run's result reaches the person as one message with its files. The person also reads your `name`, `summary`, the person's steps and `assumptions` in the message that says the automation was made.
 
 - `lines`: the person's 主线, `{id, label}`. `lineHint`: the line the request was made from ("" when none).
 - `categories`: the kinds of work the assistant may be allowed, `{id, label}`.
 - `connected.mail`: whether a mailbox is connected.
+- `assistant.commandLine`: whether this person's assistant has a command line.
 - `existing`: the person's automations, each whole in this answer's own shape (`trigger`, `action`, `steps`, `lineId`), plus `when` (the trigger in words) and `status`.
 
 ## Trigger

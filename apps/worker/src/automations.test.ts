@@ -173,6 +173,8 @@ test("each firing goes on in the automation's own conversation: the next run res
     artifacts: [{ path: "index.md", purpose: "索引", sha256: "x", bytes: 10 }], audit: { commands: [], filesChanged: [], mcpCalls: [], searches: [], decisions: [], requests: { total: 0, allowed: 0 } },
     inputsModified: [], checksPassed: true, reviewRequired: false, reviewReasons: [] } as never);
   expect(current()).toMatchObject({ threadId: "thread-9", lastRun: { directory: "/out/auto-resume-1", files: ["index.md"], summary: "整理了 3 个新文件，写了 index.md" } });
+  // The run log says how it ended, not 「已开始」 forever.
+  expect(JSON.parse(store.getSetting(workspaceId, "automations.runs") ?? "[]")).toEqual([expect.objectContaining({ taskId: started[0]!.taskId, state: "done" })]);
   fire(resuming, workspaceId, current(), { reason: "到点", context: "" });
   expect(started[1]).toMatchObject({ resumeThreadId: "thread-9" });
   expect(started[1]!.what).toContain("上次运行");

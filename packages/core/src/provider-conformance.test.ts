@@ -94,6 +94,8 @@ test("the third-party note says what this install actually adds: search and the 
   expect(unavailableOnThirdParty({ webSearch: false, image: true })).toContain("联网查证在这台服务器上只在");
   expect(unavailableOnThirdParty({ webSearch: true, image: true })).toContain("由 Crossline 自己完成");
   expect(unavailableOnThirdParty({ webSearch: true, image: true })).toContain("日历用订阅链接接入");
+  expect(unavailableOnThirdParty({ webSearch: true, image: true })).toContain("不运行脚本");
+  expect(unavailableOnThirdParty({ webSearch: true, image: true, shell: true })).toContain("沙箱里运行命令和脚本");
 });
 
 test("a record made before the interview was split into two schemas still admits both layers", async () => {
