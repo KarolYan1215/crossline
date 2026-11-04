@@ -718,6 +718,7 @@
   "已运行 {{count}} 次，上次 {{when}}_other": "Ran {{count}} times, last {{when}}",
   "已运行 {{count}} 次_one": "Ran {{count}} time",
   "已运行 {{count}} 次_other": "Ran {{count}} times",
+  "上次看页面没看成（{{when}}）：{{error}}。网站一直拦着服务器的访问时，这个自动化不会触发": "The last look at the page failed ({{when}}): {{error}}. While the site keeps blocking the server, this automation will not fire",
   "删除自动化「{{name}}」？": "Delete the automation \"{{name}}\"?",
   "最近运行": "Recent runs",
   "待做": "To do",

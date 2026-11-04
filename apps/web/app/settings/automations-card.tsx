@@ -4,7 +4,7 @@ import { useLocale, useT } from "../locale-context";
 import { VoiceField } from "../ui/voice/voice-input";
 
 type AutomationView = { id: string; name: string; summary: string; status: "active" | "off"; triggerLabel: string; runs: number; lastFiredAt?: string;
-  steps: Array<{ title: string; by: "assistant" | "person" }>; action: { kind: "run" | "remind" } };
+  steps: Array<{ title: string; by: "assistant" | "person" }>; action: { kind: "run" | "remind" }; watch?: { checkedAt: string; lastError?: string } };
 type RunView = { automationId: string; taskId: string; firedAt: string; reason: string; state: string; detail?: string };
 type View = { automations: AutomationView[]; runs: RunView[]; pending: Array<{ id: string; text: string }> };
 
@@ -75,7 +75,9 @@ export function AutomationsCard({ lines }: { lines: Array<{ id: string; label: s
       <span className="st-row-label"><b>{item.name}</b>{item.status === "off" ? t("（已暂停）") : ""}
         <small>{item.triggerLabel} · {item.summary}</small>
         <small>{item.steps.map((step) => step.by === "person" ? t("本人：{{step}}", { step: step.title }) : t("助手：{{step}}", { step: step.title })).join(sep)}</small>
-        <small>{item.lastFiredAt ? t("已运行 {{count}} 次，上次 {{when}}", { count: item.runs, when: day(item.lastFiredAt) }) : t("已运行 {{count}} 次", { count: item.runs })}</small></span>
+        <small>{item.lastFiredAt ? t("已运行 {{count}} 次，上次 {{when}}", { count: item.runs, when: day(item.lastFiredAt) }) : t("已运行 {{count}} 次", { count: item.runs })}</small>
+        {/* A watched page that refuses the server (timeanddate.com answered 403, 2026-11-04) never fires; say so instead of staying silent. */}
+        {item.watch?.lastError && <small className="st-fail">{t("上次看页面没看成（{{when}}）：{{error}}。网站一直拦着服务器的访问时，这个自动化不会触发", { when: day(item.watch.checkedAt), error: item.watch.lastError })}</small>}</span>
       <span className="st-automation-actions">
         <button type="button" className="secondary-button" disabled={busy === item.id} onClick={() => void act(item.id, "run")}>{t("立即运行")}</button>
         <button type="button" className="secondary-button" disabled={busy === item.id} onClick={() => void act(item.id, item.status === "off" ? "resume" : "pause")}>{item.status === "off" ? t("恢复") : t("暂停")}</button>
