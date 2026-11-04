@@ -1,4 +1,5 @@
 import "server-only";
+import { improveGrownSkill } from "./skill-library";
 import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -108,6 +109,12 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
   },
   "setting.change": (ctx, args) => applySettingChange(ctx, args),
   "design.change": (ctx, args) => applyDesignChange(ctx, args),
+  // A grown workflow that went wrong: the assistant revises its files on the worker's next pass (workflow-improver.ts) and says what changed.
+  "workflow.fix": async (ctx, args) => {
+    const result = await improveGrownSkill(ctx, args.workflowId, args.text);
+    return result.ok ? { ok: true, message: tOf(ctx)("已交给助手修这个工作流：它改说明和脚本并试跑，查过后才换上新版，改好会告诉本人；不合适可在设置里回到上一版"), href: "/settings#skills" }
+      : { ok: false, code: result.code ?? "SKILL_NOT_FOUND" };
+  },
   // Nothing is changed: a credential or a destructive change is the person's own, on its card.
   "settings.open": (ctx, args) => ({ ok: true, href: `/settings#${args.section}`,
     message: tOf(ctx)("在设置「{{section}}」由本人修改", { section: tOf(ctx)(SETTINGS_SECTIONS[args.section]) }) }),

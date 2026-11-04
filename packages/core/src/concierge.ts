@@ -90,6 +90,9 @@ export const ACTIONS = {
   "profile.tell": { label: "交给访谈", risk: "internal", args: { text: str(2000), lineId: str(64) } },
   "workflow.request": { label: "建成自动化", risk: "internal", args: { text: str(1000), lineId: str(64), reminder: str(200), time: str(5),
     weekdays: { type: "array", maxItems: 7, items: { type: "integer", minimum: 0, maximum: 6 } } } },
+  // A grown workflow that went wrong or should work differently: the assistant revises its own files (SKILL.md, scripts, manifest), runs
+  // them where it has a shell, and the checked revision replaces the version in force (apps/worker/src/workflow-improver.ts).
+  "workflow.fix": { label: "修工作流", risk: "internal", args: { workflowId: str(128), text: str(2000) } },
   "proposal.decide": { label: "处理任务提案", risk: "commitment", args: { workOrderId: str(128), decision: enumOf(["approve", "reject"]), reason: str(300) } },
   "milestones.decide": { label: "处理里程碑草稿", risk: "commitment", args: { milestoneIds: { type: "array", maxItems: 20, items: str(128) },
     decision: enumOf(["approve", "reject"]) } },
@@ -141,6 +144,7 @@ type ArgsOf = {
   /** `lineId`: that line's own interview (the person is on its card or page); "" = the whole interview. */
   "profile.tell": { text: string; lineId: string };
   "workflow.request": { text: string; lineId: string; reminder: string; time: string; weekdays: number[] };
+  "workflow.fix": { workflowId: string; text: string };
   "proposal.decide": { workOrderId: string; decision: "approve" | "reject"; reason: string };
   "milestones.decide": { milestoneIds: string[]; decision: "approve" | "reject" };
   "agent_result.review": { taskId: string; decision: "accepted" | "rejected"; note: string };
@@ -195,6 +199,8 @@ export type ConciergeRefs = {
   documents?: Set<string>; projects?: Set<string>;
   /** What a setting may be about: the person's automations, mailboxes, and the week's plan blocks. */
   automations?: Set<string>; mailboxes?: Set<string>; blocks?: Set<string>;
+  /** The person's grown workflows (Skill 库 → 自建工作流), for 修工作流. */
+  workflows?: Set<string>;
   /** The Skills a 「我的设计」 note may be written for. */
   designSkills?: Set<string>;
 };
@@ -248,6 +254,8 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       : String(a.reminder ?? "").trim() && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(a.time ?? "")) ? "提醒须有 HH:MM 的时间" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在`
       // A workflow is written in one line's way and used on that line only; with none named it used to land on the first line.
       : !String(a.reminder ?? "").trim() && !item.args.lineId ? "自动化须写明服务哪条主线（lineId）；看不出是哪条时用 clarify 列出主线让本人选" : "";
+    case "workflow.fix": return !String(a.text ?? "").trim() ? "内容为空"
+      : refs.workflows?.has(item.args.workflowId) ? "" : `工作流 id「${item.args.workflowId}」不存在（快照列出本人的工作流及其 id）`;
     case "profile.tell": return !String(a.text ?? "").trim() ? "内容为空" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在` : "";
     case "task.op": {
       const args = item.args;
@@ -483,6 +491,8 @@ export type ConciergePack = {
   /** The person's automations (what runs by itself) and how many mailboxes are connected (docs/personal-agent.md). */
   automations?: Array<{ name: string; trigger: string; status: string; lineId?: string; id?: string }>;
   mailboxes?: number;
+  /** The person's grown workflows by id, with how their last run ended. */
+  workflows?: Array<{ id: string; summary: string; status: string; lastRun: string }>;
   /** The connected mailboxes by id, with their two switches. */
   mailAccounts?: Array<{ id: string; address: string; triage: boolean; bookkeeping: boolean }>;
   /** Every setting of the catalog that has one value per account, with its current value (`list_settings`). */
@@ -505,6 +515,7 @@ export function conciergeRefs(pack: ConciergePack): ConciergeRefs {
     proposals: new Set(pack.proposals.map((item) => item.id)), agentResults: new Set(pack.agentResults.map((item) => item.taskId)), today: pack.today,
     documents: new Set(pack.materials.map((item) => item.id)), projects: new Set(pack.projects.map((item) => item.id)),
     automations: new Set((pack.automations ?? []).flatMap((item) => item.id ? [item.id] : [])), mailboxes: new Set((pack.mailAccounts ?? []).map((item) => item.id)),
+    workflows: new Set((pack.workflows ?? []).map((item) => item.id)),
     blocks: new Set(pack.plan.flatMap((block) => block.id ? [block.id] : [])), designSkills: new Set(pack.designSkills ?? [])
   };
 }

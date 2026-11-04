@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { formatInTimeZone } from "date-fns-tz";
-import { closeMailReply, resultsAwaitingReview, type StoredConversationMessage } from "@crossline/db";
+import { closeMailReply, listAgentTasks, readGrownSkills, resultsAwaitingReview, type StoredConversationMessage } from "@crossline/db";
 import {
   ACTIONS, AUTOMATIONS_SETTING, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, isImmediate, redactSecrets, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
   type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
@@ -133,6 +133,7 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     automations: readAutomations(store.getSetting(ctx.workspaceId, AUTOMATIONS_SETTING)).map((item) => ({ id: item.id, name: item.name, trigger: triggerLabel(item.trigger),
       status: item.status, lineId: item.lineId })),
     mailboxes: readMailAccounts(store.getSetting(ctx.workspaceId, MAIL_ACCOUNTS_SETTING)).length,
+    workflows: workflowsOf(ctx.workspaceId),
     mailAccounts: readMailAccounts(store.getSetting(ctx.workspaceId, MAIL_ACCOUNTS_SETTING)).map((item) => ({ id: item.id, address: item.address, triage: item.triage,
       bookkeeping: item.bookkeeping !== false })),
     settings: await currentSettings(ctx),
@@ -185,6 +186,8 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
     `待批准的任务提案 ${pack.proposals.length} 项；里程碑草稿 ${pack.milestones.filter((item) => item.status === "draft").length} 个；待审阅的助手成果 ${pack.agentResults.length} 项`,
     `最近一次精力记录：${pack.energy ? `${pack.energy.level}（${formatInTimeZone(new Date(pack.energy.at), pack.timeZone, "MM-dd HH:mm")}）` : "无"}`,
     `自动化（改哪个就用 workflow.request 写明改法）：${pack.automations?.length ? pack.automations.map((item) => `${item.name}（${item.trigger}${item.status === "off" ? "，已暂停" : ""}${item.lineId ? `，主线 ${item.lineId}` : ""}）`).join("；") : "无"}；已接入邮箱 ${pack.mailboxes ?? 0} 个`,
+    // i18n-ignore: model-facing
+    `自建工作流（出了问题或要换做法用 workflow.fix 交给助手修）：${pack.workflows?.length ? pack.workflows.map((item) => `${item.id} ${item.summary}（${item.status}；最近一次运行 ${item.lastRun}）`).join("；") : "无"}`,
     `出行：住址${pack.life?.home ? "已设（有地点的日程由地图估算路上时间）" : "未设"}；工作或学习地点${pack.life?.work ? "已设" : "未设"}；默认路上时间${pack.life?.defaultMinutes ? ` ${pack.life.defaultMinutes} 分钟` : "未设"}${pack.life?.places.length ? `；本人给过的：${pack.life.places.join("，")}` : ""}`,
     `待提醒：${pack.life?.reminders.length ? pack.life.reminders.join("；") : "无"}`,
     ...(pack.design ? [pack.design] : []),
@@ -523,4 +526,17 @@ const ENERGY_LABEL = { high: "高", medium: "中", low: "低" } as const;
 export function weeklyPattern(windows: AvailabilityWindow[]): string[] {
   const order = (day: number) => (day + 6) % 7;
   return windows.map((window) => `${[...window.days].sort((a, b) => order(a) - order(b)).map((day) => WEEKDAY_LABEL[day]).join(" ")} ${window.start}–${window.end} ${ENERGY_LABEL[window.energy]}`);
+}
+
+/** The person's grown workflows for the input box: id, what it does, whether it is on, and how its last run ended (for 修工作流). */
+function workflowsOf(workspaceId: string): Array<{ id: string; summary: string; status: string; lastRun: string }> {
+  const store = getStore();
+  const runs = listAgentTasks(store, workspaceId);
+  return readGrownSkills(store, workspaceId).slice(0, 20).map((record) => {
+    const prefix = `flow-${record.id.replace(/^flow-/, "")}-`;
+    const last = runs.filter((run) => run.taskId.startsWith(prefix)).at(-1);
+    // i18n-ignore: model-facing
+    const lastRun = !last ? "无" : last.status === "blocked" ? `失败：${(last.blockerMessage || last.blockerCode).slice(0, 120)}` : last.status;
+    return { id: record.id, summary: record.manifest.summary.slice(0, 80), status: record.status, lastRun };
+  });
 }

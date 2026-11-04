@@ -607,9 +607,9 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
       if (improving) console.info(JSON.stringify({ type: "skill.grown.improve_started", checkedAt, workspaceId, id: improving }));
     } catch { /* next tick */ }
   }
-  // Growing a workflow writes and tests scripts with the runtime's `skill-creator`: only the shell assistant can (the owner's own Codex,
-  // or a node of the account's own with the shell allowed).
-  if (assistantOff || !shellAssistant(workspaceId) || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
+  // Growing a workflow writes and tests scripts with the runtime's `skill-creator`: only an assistant with a shell can (the owner's own
+  // Codex, a node of the account's own with the shell allowed, or the server's bubblewrap sandbox when it is on and starts).
+  if (assistantOff || !(shellAssistant(workspaceId) || sandboxNow().ok) || growingWorkflows.has(workspaceId) || agentService.runningTasks(workspaceId).length) return;
   const candidate = growCandidates(analysisStore, workspaceId)[0];
   // What the person asked for in words is their own work, like a capture: it runs while the quota lasts. An errand the system noticed
   // repeating is its own idea, and waits for a normal quota.

@@ -32,8 +32,9 @@ const fromPerson = (signal: ImprovementSignal) => signal.kind === "feedback" || 
 
 /** A revision is tried again after this long when the signals it answered are still there (it failed, or found nothing to change). */
 export const IMPROVE_COOLDOWN_MS = 6 * 3_600_000;
-/** Runs of its own that failed since the last revision before failures alone are a reason to revise. */
-export const FAILURES_TO_IMPROVE = 2;
+/** Runs of its own that failed since the last revision before failures alone are a reason to revise: one (the owner, 2026-11-04: a
+ *  workflow that goes wrong is repaired by Crossline, not left to the person); the cooldown and the tries per set still bound it. */
+export const FAILURES_TO_IMPROVE = 1;
 /** Tries per set of signals: past this, only something new the person says starts another. */
 const ATTEMPTS_PER_SIGNALS = 3;
 

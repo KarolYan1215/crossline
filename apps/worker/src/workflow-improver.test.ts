@@ -187,3 +187,18 @@ test("a revision that finishes after the person turned the workflow off or rever
   expect(readGrownSkills(store, ws)[0]!.version).toBeUndefined();
   expect(store.listEvents(ws, { type: "skill.grown.revision_skipped" })).toHaveLength(1);
 });
+
+test("one run of its own that failed is enough for Crossline to repair the workflow; a restart is not", () => {
+  const record = favouritesFlow();
+  const later = (ms: number) => new Date(Date.now() + ms).toISOString();
+  const blocked = (taskId: string, code: string, message: string, at: string) => {
+    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `r:${taskId}`, type: "agent.task.requested", entityId: taskId,
+      payload: { taskId, title: "整理收藏", category: "read_research_organize", workOrderId: "" }, createdAt: at } as never);
+    store.appendEvent({ ownerId: "o", workspaceId: ws, idempotencyKey: `b:${taskId}`, type: "agent.task.blocked", entityId: taskId, payload: { taskId, code, message }, createdAt: at } as never);
+  };
+  blocked(`flow-${record.id.replace(/^flow-/, "")}-1`, "SKILL_STALLED", "", later(1_000));
+  expect(improvementDue(store, ws, record, new Date(Date.now() + 5_000))).toBeUndefined();
+  blocked(`flow-${record.id.replace(/^flow-/, "")}-2`, "AGENT_ARTIFACT_EMPTY", "脚本报错：KeyError 'note_card'", later(2_000));
+  const signals = improvementDue(store, ws, record, new Date(Date.now() + 5_000));
+  expect(signals?.map((signal) => signal.kind)).toEqual(["failure"]);
+});

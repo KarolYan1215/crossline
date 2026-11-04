@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ACTIONS, ACTION_IDS, CONCIERGE_SCHEMA, cardActionIndexes, keepUsable, structuredOutputProblems, validateConciergeTurn, type ConciergeRefs } from "./index";
+import { ACTIONS, ACTION_IDS, actionProblem, CONCIERGE_SCHEMA, cardActionIndexes, keepUsable, structuredOutputProblems, validateConciergeTurn, type ConciergeRefs } from "./index";
 
 const refs = (): ConciergeRefs => ({
   tasks: new Map([["wo-1", new Set(["v1s1", "v1s2"])]]), asks: new Map([["wait:w1", new Set(["arrived", "cancelled"])]]),
@@ -48,4 +48,12 @@ test("an event on a day already past is sent back: 「周四」 on a Friday mean
     until: "", minutes: 60, lineId: "", location: "" } };
   expect(() => validateConciergeTurn(turn([event]), { ...refs(), today: "2026-10-09" })).toThrow("CONCIERGE_ACTION_INVALID");
   expect(validateConciergeTurn(turn([{ ...event, args: { ...event.args, date: "2026-10-15" } }]), { ...refs(), today: "2026-10-09" }).actions).toHaveLength(1);
+});
+
+test("修工作流 names one of the person's grown workflows and says what is wrong", () => {
+  const fix = (workflowId: string, text: string) => ({ action: "workflow.fix", summary: "修", args: { workflowId, text } }) as never;
+  const known = { ...refs(), workflows: new Set(["flow-media-xhs"]) };
+  expect(actionProblem(fix("flow-media-xhs", "整理收藏又失败了"), known)).toBe("");
+  expect(actionProblem(fix("flow-nope", "整理收藏又失败了"), known)).toContain("不存在");
+  expect(actionProblem(fix("flow-media-xhs", " "), known)).toBe("内容为空");
 });

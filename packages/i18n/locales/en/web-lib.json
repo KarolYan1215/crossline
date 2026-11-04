@@ -1102,5 +1102,6 @@
   "两个都留": "Keep both",
   "都显示，标为时间冲突，不再问": "Show both as a time conflict, don't ask again",
   "不是同一件事": "Not the same thing",
-  "都显示，不再问": "Show both, don't ask again"
+  "都显示，不再问": "Show both, don't ask again",
+  "已交给助手修这个工作流：它改说明和脚本并试跑，查过后才换上新版，改好会告诉本人；不合适可在设置里回到上一版": "Handed to the assistant to fix this workflow: it revises the instructions and scripts and tries them, the new version replaces the old only after checks, and the person is told when it is done; the previous version can be restored in settings"
 }

@@ -122,6 +122,62 @@ if [ "$want" = all ] || [ "$want" = web ]; then
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/web "$app_image" $web_cmd
 fi
+# The sandboxed shell assistant (docs/personal-agent.md §8, the owner's decision of 2026-11-04): Codex runs a guest's commands inside
+# bubblewrap, which needs a user namespace, mounts and pivot_root in it. Docker's defaults refuse all three, and on Ubuntu the host also
+# refuses unprivileged user namespaces to anything whose AppArmor profile does not grant them (kernel.apparmor_restrict_unprivileged_userns).
+# That host setting is left as it is, so no other user or process on the host gains anything: only the worker container gets
+#   seccomp  deploy/server/seccomp-sandbox.json, Docker's default (moby/profiles 6fe7deb1, 2026-09-17) with the namespace and mount
+#            calls allowed without CAP_SYS_ADMIN; everything else it refuses stays refused
+#   AppArmor crossline-sandbox, Docker's docker-default with `userns`, `mount` and `pivot_root` allowed; the /proc and /sys write denials stay.
+# The container still has no CAP_SYS_ADMIN, so a mount outside a namespace it made itself is refused by the kernel. Off unless app.env says
+# CROSSLINE_SANDBOX_SHELL=on; if the profile cannot be loaded the worker starts under Docker's defaults and its probe keeps tools mode.
+sandbox_opts=""
+if [ "$want" = all ] || [ "$want" = worker ]; then
+  if grep -q "^CROSSLINE_SANDBOX_SHELL=on" /srv/crossline/app.env 2>/dev/null && [ -f /srv/crossline/seccomp-sandbox.json ]; then
+    sandbox_opts="--security-opt seccomp=/srv/crossline/seccomp-sandbox.json"
+    if [ -d /sys/kernel/security/apparmor ] && command -v apparmor_parser >/dev/null 2>&1; then
+      abi=""; userns=""
+      if [ -e /etc/apparmor.d/abi/4.0 ]; then abi="abi <abi/4.0>,"; userns="userns,"; fi
+      cat > /etc/apparmor.d/crossline-sandbox <<EOF
+$abi
+#include <tunables/global>
+profile crossline-sandbox flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  network,
+  capability,
+  file,
+  umount,
+  mount,
+  pivot_root,
+  $userns
+  signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
+  signal (receive) peer=dockerd,
+  signal (send,receive) peer=crossline-sandbox,
+  deny @{PROC}/* w,
+  deny @{PROC}/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+  ptrace (trace,read,tracedby,readby) peer=crossline-sandbox,
+}
+EOF
+      if apparmor_parser -r -W /etc/apparmor.d/crossline-sandbox; then sandbox_opts="$sandbox_opts --security-opt apparmor=crossline-sandbox"
+      else echo "AppArmor profile crossline-sandbox did not load; the worker keeps Docker's defaults"; sandbox_opts=""; fi
+    fi
+    echo "worker sandbox: ${sandbox_opts:-off}"
+  fi
+fi
 if [ "$want" = all ] || [ "$want" = worker ]; then
   # The worker's heartbeat lock outlives a removed container and reads as fresh for 45 minutes, so the new worker would exit
   # (worker.already_running) and restart in a loop. The old container is removed first, so no other worker holds it.
@@ -131,7 +187,7 @@ if [ "$want" = all ] || [ "$want" = worker ]; then
   # live outside the Node heap, so the heap gets well under half the container.
   worker_cmd="/repo/node_modules/.bin/tsx src/index.ts"
   if docker run --rm --init --entrypoint test "$app_image" -f /repo/apps/worker/dist/index.mjs; then worker_cmd="node dist/index.mjs"; fi
-  start crossline-worker --network host --env-file /srv/crossline/app.env --memory $worker_mem --memory-swap $worker_mem -e NODE_OPTIONS=--max-old-space-size=$worker_heap \
+  start crossline-worker $sandbox_opts --network host --env-file /srv/crossline/app.env --memory $worker_mem --memory-swap $worker_mem -e NODE_OPTIONS=--max-old-space-size=$worker_heap \
     $(default_env /srv/crossline/app.env CROSSLINE_MODEL_CONCURRENCY $model_runs) $(default_env /srv/crossline/app.env CROSSLINE_GUEST_RUNTIMES $guest_runtimes) \
     -v /srv/crossline/data:/data -v /srv/crossline/state:/state -v /srv/crossline/codex:/opt/codex:ro \
     -w /repo/apps/worker "$app_image" $worker_cmd

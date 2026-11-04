@@ -106,7 +106,12 @@ Codex 是 vendor 进来的（`vendor/codex`，写这段时是 rust-v0.155.0，20
 - 走模型闸门（共享服务器上与其他后台运行一起排队），跑在账号自己的运行时上；第三方模型也能驱动（`capabilities.shell` 随探测结果打开）。
 - 何时启用：服务器环境 `CROSSLINE_SANDBOX_SHELL=on`，且启动时探测（`apps/worker/src/sandbox-probe.ts`）能找到 bubblewrap 并真正起一个沙箱；否则自动回到工具模式，日志 `worker.sandbox_shell` 写明原因。电脑主人自己的电脑仍是原来的完全权限 shell。
 
-**要在托管服务器上打开，需要本人决定并改部署**：镜像里已装 `bubblewrap` 与 `python3`（2026-11-04）；还没改的是：worker 容器允许创建用户命名空间（自定义 seccomp 配置或 `seccomp=unconfined`，以及 `apparmor=unconfined`；Ubuntu 23.10+ 还要关 `kernel.apparmor_restrict_unprivileged_userns`）。代价：在共享服务器上运行其他账号的命令，用户命名空间扩大了内核攻击面；CPU 与内存仍受容器上限约束，命令没有网络。
+**托管服务器上已打开（2026-11-04，本人决定）**：镜像装 `bubblewrap` 与 `python3`；`ensure-env.sh` 写 `CROSSLINE_SANDBOX_SHELL=on`；`run.sh` 只给 worker 容器两份配置，宿主的 `kernel.apparmor_restrict_unprivileged_userns` **不改**，宿主上其他用户和进程照旧不能建用户命名空间：
+- seccomp：`deploy/server/seccomp-sandbox.json`，即 Docker 默认配置（moby/profiles 6fe7deb1）只多放行 `clone/clone3/unshare/setns/mount/umount2/pivot_root` 与新挂载接口，其余拒绝项不变（`sandbox-probe.test.ts` 核对）。
+- AppArmor：`crossline-sandbox`，即 docker-default 加 `userns`、`mount`、`pivot_root`，对 /proc、/sys 的写拒绝原样保留；加载失败时 worker 按 Docker 默认启动，探测失败，助手留在工具模式。
+- 容器仍没有 CAP_SYS_ADMIN，挂载只在它自己建的命名空间里生效；Codex 挂不上 /proc 时自己退回 `--no-proc`。代价：在共享服务器上运行其他账号的命令，worker 容器里内核攻击面变大；CPU 与内存受容器上限约束，命令没有网络。
+
+**工作流出问题由助手修**（2026-11-04，本人：「某个工作流出问题，crossline要有修改相关代码并修复的能力」）：一次自身原因的失败（`FAILURES_TO_IMPROVE` 1）、本人在卡片上说的、或在输入框说「那个工作流坏了，修一下」（`workflow.fix`，快照列出每个自建工作流的 id 和最近一次运行），都让 `workflowImprovePass` 交给助手按 `skill-creator` 改它自己的 SKILL.md、脚本和 workflow.json；沙箱打开后助手有 shell，能用离线样例真正跑脚本；改好的版本照新工作流的检查（清单、扫描、审查）才换上，可回到上一版。新长工作流（`workflowPass` 的 growing）也不再只限电脑主人：沙箱起得来就能长。Crossline 自己的程序不在可改范围内。
 
 ## 8.1 自检与本人的设计（2026-11-04）
 

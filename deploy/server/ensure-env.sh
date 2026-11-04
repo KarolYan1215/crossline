@@ -106,3 +106,6 @@ fi
 # Where the assistant's files go, shared by the web and the worker through the data volume (unset, the worker wrote under its own
 # container's home, which the web never saw and a redeploy deleted: 61 of 105 outputs answered FILE_NOT_FOUND).
 ensure /srv/crossline/app.env CROSSLINE_AI_OUTPUT_DIR /data/ai-output
+# The sandboxed shell assistant for every account (docs/personal-agent.md §8; the owner's decision of 2026-11-04). run.sh gives only the
+# worker container the seccomp and AppArmor profiles bubblewrap needs; the host's user-namespace restriction stays on.
+ensure /srv/crossline/app.env CROSSLINE_SANDBOX_SHELL on
