@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { AUTOMATION_RUNS_SETTING, AUTOMATIONS_SETTING, readAutomations, validateAutomationPlan, type Automation, type AutomationPlan } from "@crossline/core";
 import { CrosslineStore, readCategories, requestAutomation } from "@crossline/db";
 import type { AgentTaskInput } from "./agent-task";
-import { AUTOMATION_DESIGNER_SKILL, automationPass, createAutomationService, designPending, fire, onNewMail, type AutomationDeps } from "./automations";
+import { AUTOMATION_DESIGNER_SKILL, automationPass, closeLostAutomationRuns, createAutomationService, designPending, fire, onNewMail, type AutomationDeps } from "./automations";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const plan = (over: Partial<AutomationPlan> = {}, trigger: Partial<AutomationPlan["trigger"]> = {}): AutomationPlan => ({
@@ -187,6 +187,20 @@ test("each firing goes on in the automation's own conversation: the next run res
   expect(started[1]!.what).toContain("上次运行");
   expect(started[1]!.what).toContain("整理了 3 个新文件");
   expect(started[1]!.inputs?.some((file) => file.replace(/\\/g, "/").endsWith("/out/auto-resume-1/index.md"))).toBe(true);
+});
+
+test("a run the last worker lost at a restart is marked 没跑完 and said once, not left 已开始", () => {
+  const { store, workspaceId, deps, started } = setup();
+  install(store, workspaceId, { id: "auto-lost", name: "连接器测试" });
+  fire(deps(), workspaceId, readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING))[0]!, { reason: "到点", context: "" });
+  const taskId = started[0]!.taskId;
+  // What the agent service writes: the request, then recoverLost at the next start.
+  for (const [type, payload] of [["agent.task.requested", { taskId, title: "x" }], ["agent.task.blocked", { taskId, code: "AGENT_RUN_LOST", message: "后台进程重启，这次运行中断" }]] as const) {
+    store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: `${type}:${taskId}`, type, entityId: taskId, payload });
+  }
+  expect(closeLostAutomationRuns(store, workspaceId)).toEqual([taskId]);
+  expect(JSON.parse(store.getSetting(workspaceId, AUTOMATION_RUNS_SETTING) ?? "[]")).toEqual([expect.objectContaining({ taskId, state: "failed", detail: expect.stringContaining("重启") })]);
+  expect(closeLostAutomationRuns(store, workspaceId)).toEqual([]);
 });
 
 test("a kind of work switched off or an owner-only assistant drops the firing, says why once, and does not hold up the other automations", async () => {

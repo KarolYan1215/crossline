@@ -48,7 +48,29 @@ function noteRun(store: CrosslineStore, workspaceId: string, run: AutomationRun)
   store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify([...runs(store, workspaceId), run].slice(-100)));
 }
 
-export const pendingRequests = (store: CrosslineStore, workspaceId: string) => {
+/**
+ * Runs the last worker was running when it stopped: their end was a callback in that process, so the log said 「已开始」 for good and
+ * the person was never told (2026-11-04, two runs lost to deploys). Read from the ledger (every run recoverLost marked lost, this start
+ * or an earlier one), after recoverLost; marked 「没跑完」 with the reason, and said once.
+ */
+export function closeLostAutomationRuns(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
+  const lost = new Set(listAgentTasks(store, workspaceId).filter((task) => task.blockerCode === "AGENT_RUN_LOST").map((task) => task.taskId));
+  const hit = runs(store, workspaceId).filter((run) => run.state === "started" && lost.has(run.taskId));
+  if (!hit.length) return [];
+  const t = tFor(localeOf(store, workspaceId));
+  const detail = t("后台进程重启，这次运行中断");
+  const ids = new Set(hit.map((run) => run.taskId));
+  store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify(runs(store, workspaceId).map((run) => ids.has(run.taskId) ? { ...run, state: "failed" as const, detail } : run)));
+  // Older ones are only marked: a message about a run from days ago is noise.
+  for (const run of hit.filter((item) => now.getTime() - Date.parse(item.firedAt) < 86_400_000)) {
+    const name = read(store, workspaceId).find((item) => item.id === run.automationId)?.name ?? run.automationId;
+    sayToPerson(store, workspaceId, t("自动化「{{name}}」这次没跑完：{{reason}}", { name, reason: detail }), "automation_failed", `automation-failed:${run.taskId}`,
+      [{ label: t("查看", { context: "view" }), href: "/settings#automation" }], now);
+  }
+  return [...ids];
+}
+
+export const pendingRequests =(store: CrosslineStore, workspaceId: string) => {
   const settled = new Set([...store.listEvents(workspaceId, { type: "automation.created" }), ...store.listEvents(workspaceId, { type: "automation.design_failed" })]
     .map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
   return store.listEvents(workspaceId, { type: "automation.requested" }).filter((event) => !settled.has(event.entityId));
