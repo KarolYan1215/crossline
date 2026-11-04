@@ -8,7 +8,7 @@ import {
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
-  EXTRACT_BACKOFF_MINUTES, EXTRACT_REREAD_SETTING, FINISH_RUNS_MAX, markFinishing, readFinishing, firstSentenceOf, pendingExtractDocs, readExtractDocs, readExtractState, writeExtractDocs, writeExtractState,
+  EXTRACT_BACKOFF_MINUTES, EXTRACT_REREAD_SETTING, FINISH_RUNS_MAX, NOTES_SESSION, markFinishing, readFinishing, firstSentenceOf, pendingExtractDocs, readExtractDocs, readExtractState, writeExtractDocs, writeExtractState,
   type CrosslineStore, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument
 } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -63,7 +63,9 @@ const textOf = (message: StoredOnboardingMessage) => String((message.content as 
 
 export function createOnboardingExtractor(store: CrosslineStore, workspaceId: string, cwd: string, getClient: () => CodexRpcBoundary | undefined) {
   /** The conversation files are extracted with: the main interview, or the one asking when there is no main one yet. */
-  const docsSession = (asking?: string) => [...store.listOnboardingSessions(workspaceId)].reverse().find((session) => !session.id.startsWith("line-"))?.id ?? asking;
+  // Not the notes either (`NOTES_SESSION`): they are words said elsewhere, read for facts only.
+  const docsSession = (asking?: string) => [...store.listOnboardingSessions(workspaceId)].reverse()
+    .find((session) => !session.id.startsWith("line-") && session.id !== NOTES_SESSION)?.id ?? (asking === NOTES_SESSION ? undefined : asking);
   /**
    * The conversation to extract next: one the person just replied in (`preferred`, whatever its backoff), else the one whose replies
    * wait and are due, else the files' conversation when only files wait and it is due.
@@ -152,9 +154,13 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       return sentences;
     };
     const replySentences = (message: StoredOnboardingMessage) => store.ensureEvidence(workspaceId, "reply", `${sessionId}#${message.seq}`, textOf(message));
+    // A note says what it was about (the ask it answered, the task it reports on) in place of the round's questions.
+    const notes = sessionId === NOTES_SESSION;
     const replies = pendingReplies.map((message) => {
+      const about = notes ? String((message.content as { about?: string }).about ?? "") : "";
       const asked = messages.filter((other) => other.role === "assistant" && other.seq < message.seq).at(-1);
-      const questions = ((asked?.content as { questions?: Array<{ text?: string }> } | undefined)?.questions ?? []).map((question) => String(question.text ?? "")).filter(Boolean);
+      const questions = notes ? (about ? [about] : [])
+        : ((asked?.content as { questions?: Array<{ text?: string }> } | undefined)?.questions ?? []).map((question) => String(question.text ?? "")).filter(Boolean);
       return { id: `reply-${message.seq}`, asked: questions, sentences: numberedText(cite(`reply-${message.seq}`, replySentences(message))) };
     });
     let left = TEXT_TOTAL;
@@ -186,10 +192,11 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     known.lineLabels = Object.fromEntries(lines.map((line) => [line.id, line.label]));
     const today = (process.env.CROSSLINE_FIXED_NOW ? new Date(process.env.CROSSLINE_FIXED_NOW) : new Date()).toISOString().slice(0, 10);
     const flow = flowOf(session?.coverage);
-    const stage = ((session?.coverage as { stage?: OnboardingStage } | undefined)?.stage ?? (focus ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!));
-    const profileTask = focus ? undefined : portraitTask(stage, session?.state === "complete" || Boolean(finishing), readSectionRecords(store, workspaceId), flow);
+    const stage = ((session?.coverage as { stage?: OnboardingStage } | undefined)?.stage ?? (focus || notes ? "details" : INTERVIEW_FLOW_STAGES[flow][0]!));
+    // Notes add facts; the portrait is the interview's to write, so they owe it nothing.
+    const profileTask = focus || notes ? undefined : portraitTask(stage, session?.state === "complete" || Boolean(finishing), readSectionRecords(store, workspaceId), flow);
     // Card items the person answered in words: the run reads them off the replies (`itemScores`).
-    const cardItems = focus ? [] : pendingItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)));
+    const cardItems = focus || notes ? [] : pendingItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)));
     const context: OnboardingExtractContext = {
       version: "crossline.onboarding.extract.v1", today, timeZone: personTimeZone(store, workspaceId),
       lines: lines.map((line) => ({ id: line.id, label: line.label, hard: Boolean(line.hard), goals: line.goals ?? [],
@@ -202,7 +209,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
         attributes: lineAttributes(profiles[line.id], line.label).map((item) => item.text) })),
       candidatesWanted: lines.filter((line) => !(line.goals ?? []).length && profiles[line.id]?.description
         && !lineAttributes(profiles[line.id], line.label).length).map((line) => line.id),
-      profile: focus ? null : readProfileModel(store, workspaceId), profileTask: profileTask ?? null, stage,
+      profile: focus || notes ? null : readProfileModel(store, workspaceId), profileTask: profileTask ?? null, stage,
       focusLine: focus ? { id: focus.id, label: focus.label } : null,
       replies, sources, ...(waitingDocs.length > taken.length ? { sourcesWaiting: waitingDocs.length - taken.length } : {}), reread,
       ...(cardItems.length ? { scaleItems: cardItems.map((item) => ({ id: item.id, text: item.text, anchors: item.anchors,
@@ -210,7 +217,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // The person's ratings of the interview's observations: one they called 不准 is wrong about them and does not go into the portrait.
       ...(() => { const rated = Object.values(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS))).filter((rating) => rating.text)
         .slice(-8).map((rating) => `${rating.verdict === "fits" ? "准" : "不准"}：${rating.text!.slice(0, 120)}`);
-        return rated.length && !focus ? { observations: rated } : {}; })()
+        return rated.length && !focus && !notes ? { observations: rated } : {}; })()
     };
     const ids = { lines: lines.map((line) => line.id) };
     const result = await runCodexSkill<OnboardingExtraction>(client, context, {
@@ -248,7 +255,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // The 「符合」 was said in the last reply this run read, and the portrait was rewritten with it in hand: the confirmation holds for the
       // portrait it wrote (before, the person was asked to confirm again every round, 2026-10-16). Not when a correction followed it.
       const lastSeq = pendingReplies.at(-1)?.seq;
-      const confirmedHere = !focus && lastSeq !== undefined && store.listEvents(workspaceId, { type: "profile.confirmed" })
+      const confirmedHere = !focus && !notes && lastSeq !== undefined && store.listEvents(workspaceId, { type: "profile.confirmed" })
         .some((event) => (event.payload as { sessionId?: string; replySeq?: number }).sessionId === sessionId && Number((event.payload as { replySeq?: number }).replySeq) === lastSeq);
       if (confirmedHere) store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(readProfileModel(store, workspaceId)), at: new Date().toISOString() }));
       // Read again here, inside the transaction: the dialogue may have queued files while the model ran.

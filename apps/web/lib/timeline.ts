@@ -1,7 +1,7 @@
 import "server-only";
 import { formatInTimeZone } from "date-fns-tz";
 import type { AccessContext, AvailabilityWindow, FrozenBlock } from "@crossline/core";
-import { CALENDAR_LINES, activityCategoryLabel, calendarLineOf, currentFiling, onPersonsBoard, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
+import { applyMerges, CALENDAR_LINES, activityCategoryLabel, calendarLineOf, currentFiling, onPersonsBoard, importedProjects, importedTitle, itemProjectResolver, inferWorkState, stepCategory, suggestAvailability, type ActivitySegment, type CalendarLines, type WorkState } from "@crossline/core";
 import { isAutoHandoff, isPaused, listAgentTasks, readCategories } from "@crossline/db";
 import {
   ACTIVITY_DETAIL_CONSENT, COMMIT_GRACE_MINUTES, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant
@@ -12,6 +12,7 @@ import { inputEvents } from "./fixed-events";
 import { localeFor, tOf } from "./locale";
 import { tFor } from "./i18n";
 import { preparedForEvents } from "./errands";
+import { readMerges, timedItemOf } from "./event-merges";
 
 export type TimelineData = {
   today: string; nowIso: string; timeZone: string;
@@ -167,7 +168,11 @@ export async function loadTimeline(ctx: AccessContext, loaded?: Awaited<ReturnTy
   const imported = importedProjects(store.listEvents(ctx.workspaceId, { type: "dates.extracted" }), projectOfItem);
   const held = new Map(readFrozen(ctx, instantNow()).map((entry) => [entry.blockId, entry]));
   const preparedFor = preparedForEvents(ctx);
-  const planned = withAgentMarks(itemsFromPlan(plan.blocks, today, meta), agentMarks(ctx)).map((item) => {
+  const { items: drawn, mergedInto } = mergedView(ctx, plan.blocks, withAgentMarks(itemsFromPlan(plan.blocks, today, meta), agentMarks(ctx)));
+  const planned = drawn.map((item) => {
+    const merged = mergedInto.get(item.id);
+    return merged ? { ...item, merged, ...(item.tag ? {} : { tag: "已合并" }) } : item;
+  }).map((item) => {
     if (item.kind !== "calendar" && item.kind !== "import") return item;
     const named = item.kind === "import" ? { ...item, title: importedTitle(item.id, item.title, imported) } : item;
     if (named.identityId) return named;
@@ -232,6 +237,21 @@ function agentMarks(ctx: AccessContext): { running: Set<string>; planned: Set<st
     }
   }
   return { running, planned };
+}
+
+/**
+ * The items with the pairs the person (or the system, for a time they named) merged drawn as one (`schedule.merges`, `event-merge.ts`):
+ * the dropped item leaves the day it overlaps the kept one, which lists what was merged into it. Matched on the stored titles, before a
+ * file date is given its course, since that is what the series keys were made from.
+ */
+function mergedView(ctx: AccessContext, blocks: Array<{ id: string; sourceKey?: string }>, items: TimelineItem[]): { items: TimelineItem[]; mergedInto: Map<string, string[]> } {
+  const book = readMerges(ctx);
+  if (!Object.keys(book).length) return { items, mergedInto: new Map() };
+  const sources = new Map(blocks.map((block) => [block.id, block.sourceKey]));
+  const timed = items.flatMap((item) => { const timedItem = timedItemOf(item, sources.get(item.id)); return timedItem ? [{ ...timedItem, item }] : []; });
+  const { items: kept, mergedInto } = applyMerges(timed, book);
+  const gone = new Set(timed.map((entry) => entry.id).filter((id) => !kept.some((entry) => entry.id === id)));
+  return { items: items.filter((item) => !gone.has(item.id)), mergedInto };
 }
 
 /** The calendar filing against the current lines (`currentFiling`: a changed set of lines keeps only the person's own answers). */

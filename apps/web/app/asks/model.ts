@@ -28,6 +28,7 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
   calendar_line_unclear: { answered: "该日程按所选主线着色，同名日程相同。", unanswered: "该日程保持无色。" },
   interview_open: { answered: "回到访谈继续下一轮。", unanswered: "长期目标与里程碑草稿按现有信息设计。" },
   interview_question: { answered: "本轮问题答完后一并交给访谈，进入下一轮。", unanswered: "访谈停在本轮，下一轮不会开始。" },
+  event_merge: { answered: "合并后只显示一个，以后每次同样重叠都按合并处理；选不合并则不再问。", unanswered: "两个都留在日历上，显示为时间冲突。" },
   event_propose: { answered: "写入 Crossline 日历，提前 10 分钟提醒。", unanswered: "日历中不出现该日程；排程照样避开这段时间。" },
   step_question: { answered: "任务的步骤按回答重新安排。", unanswered: "步骤保持现有安排。" },
   relation_check: { answered: "记录这条飞轮关系是否兑现，计入兑现率。", unanswered: "这条关系的兑现情况不计入。" },

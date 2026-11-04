@@ -35,6 +35,8 @@ export type TimelineItem = {
   frozen?: "pinned" | "locked" | "keep" | "commit";
   overlapOk?: boolean;
   lockedVia?: "calendar";
+  /** Titles of overlapping items the person said are this same thing (`schedule.merges`), no longer drawn on their own. */
+  merged?: string[];
   source: string;
   readOnly: boolean;
   /** What the assistant prepared for an event the person added (an errand's itinerary or list), shown as 「已备好」. */

@@ -73,6 +73,11 @@ test("new mail is read once per check; sorting turns a to-do into an inbox line 
   expect(store.listCaptures(workspaceId)[0]!.context).toContain("HW1 extended to Oct 30");
   expect(store.listEvents(workspaceId, { type: "waiting.mail_seen", entityId: "wait-data" })).toHaveLength(1);
   expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["todo", "reply", "ignore"]);
+  // The person is asked at once whether it arrived, with a button that answers the waiting ask.
+  const said = store.listConversationMessages(workspaceId, store.conversationFor(workspaceId, "2026-10-19").id).filter((m) => m.role === "nudge");
+  expect(said).toHaveLength(1);
+  expect((said[0]!.payload.card as { actions: Array<{ args: { askId: string; optionId: string } }>; clarify: { question: string } }))
+    .toMatchObject({ actions: [{ args: { askId: "wait:wait-data", optionId: "arrived" } }], clarify: { question: expect.stringContaining("测量数据") } });
 });
 
 test("a payment mail becomes one wealth record only when its own text states the amount the model read", async () => {

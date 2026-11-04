@@ -1,8 +1,8 @@
 import "server-only";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createReminderWorkflow, requestAutomation, reviewAgentTask } from "@crossline/db";
+import { createReminderWorkflow, queueExtractDocs, requestAutomation, reviewAgentTask } from "@crossline/db";
 import { ACTIONS, SELF_SLEEP_SETTING, SETTINGS_SECTIONS, describeEvent, readSelfSleep, scheduleLabel, sleepHours, templateCriterion, windowDays, type AccessContext, type ActionArgs,
   type ActionId, type ProposedAction } from "@crossline/core";
 import type { EvidenceClaimInput } from "@crossline/db";
@@ -27,6 +27,7 @@ import { applyTaskOp, recordEnergy } from "./task-ops";
 import { undoOp, withUndo } from "./undo";
 import { localeFor, tOf } from "./locale";
 import { monthDay } from "./i18n";
+import { keepNote } from "./person-notes";
 
 /** What carrying out one action did: `message` is shown on the card; `opId` is what the card's 撤销 takes back. */
 export type ActionOutcome = { ok: true; message: string; opId?: string; href?: string; captureId?: string } | { ok: false; message: string };
@@ -34,6 +35,16 @@ export type ActionOutcome = { ok: true; message: string; opId?: string; href?: s
 /** `captureId`: the capture a task.create wrote, so its card can say later what became of it (`captureProgress`). */
 type Done = { ok: true; message?: string; href?: string; captureId?: string } | { ok: false; code: string; message?: string };
 type Handler<K extends ActionId> = (ctx: AccessContext, args: ActionArgs<K>) => Done | Promise<Done>;
+
+/**
+ * A 「告诉系统」 the worker did not take (down, restarting, refused): unless the interview already holds the words, they are kept for the
+ * extraction instead, which reads them on its next tick. They used to be lost but for the day's message (2026-11-03).
+ */
+function keptUnlessHeard(ctx: AccessContext, sessionId: string, text: string, sentAt: Date, about: string): void {
+  const heard = getStore().listOnboardingMessages(ctx.workspaceId, sessionId)
+    .some((message) => message.role === "user" && message.createdAt >= sentAt.toISOString() && String((message.content as { text?: string }).text ?? "").includes(text.trim()));
+  if (!heard) keepNote(ctx, text, { kind: "profile", id: createHash("sha256").update(`${sessionId}:${text.trim()}`).digest("hex").slice(0, 16) }, about);
+}
 
 /**
  * Every action of the registry (`packages/core/src/concierge.ts`), carried out through the same function its page uses. The input box,
@@ -56,8 +67,11 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     // analysed and scheduled on its first day.
     return { ok: true, message: tOf(ctx)("已收集，正在分析估时与步骤"), href: "/workbench", captureId: id };
   },
-  // The note is the conversation's own message, searchable from the box; nothing else is written.
-  "note.add": (ctx) => ({ ok: true, message: tOf(ctx)("已记下，可在对话记录中搜索") }),
+  // The note is the conversation's own message, searchable from the box; what it says about the person is also read for facts.
+  "note.add": (ctx, args) => {
+    keepNote(ctx, args.text, { kind: "note", id: createHash("sha256").update(args.text.trim()).digest("hex").slice(0, 16) }, "记一笔"); // i18n-ignore
+    return { ok: true, message: tOf(ctx)("已记下，可在对话记录中搜索") };
+  },
   "task.op": async (ctx, args) => {
     const href = `/workbench/${encodeURIComponent(args.workOrderId)}`;
     // The whole task done (「作业 3 写完了，用了两小时」): finished as 完成 finishes it, with the minutes and how it went when said.
@@ -95,7 +109,9 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
   // Nothing is changed: a credential or a destructive change is the person's own, on its card.
   "settings.open": (ctx, args) => ({ ok: true, href: `/settings#${args.section}`,
     message: tOf(ctx)("在设置「{{section}}」由本人修改", { section: tOf(ctx)(SETTINGS_SECTIONS[args.section]) }) }),
-  "ask.answer": async (ctx, args) => answerAsk(ctx, args.askId, args.optionId, Object.fromEntries(args.fields.map((field) => [field.id, field.value]))),
+  // The person's words beside the choice go with it, as the card's own note would (they were dropped before 2026-11-03).
+  "ask.answer": async (ctx, args) => answerAsk(ctx, args.askId, { optionIds: [args.optionId], note: args.note?.trim() ?? "" },
+    Object.fromEntries(args.fields.map((field) => [field.id, field.value]))),
   "ask.snooze": (ctx, args) => snoozeAsk(ctx, args.askId, args.until),
   "undo": (ctx, args) => {
     const result = undoOp(ctx, args.opId);
@@ -125,7 +141,11 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
       endTime: args.endTime, until: args.until, minutes: args.minutes > 0 ? args.minutes : 60, location: args.location });
     if (!result.ok) return { ok: false, code: result.code, message: result.message };
     const t = tOf(ctx);
-    return { ok: true, href: `/?day=${result.event.repeat?.from ?? result.event.date}#calendar`, message: describeEvent(result.event, localeFor(ctx)) + (result.placedBySystem ? t("（系统选定的空档）") : "")
+    // A time already on the calendar is merged into, not made twice (2026-11-03).
+    const already = result.merged.map((item) => `「${item.title}」`).join("、");
+    if (!result.created) return { ok: true, href: "/", message: t("日历里已有{{items}}，按同一件事合并，没有另建", { items: already }) };
+    return { ok: true, href: `/?day=${result.event.repeat?.from ?? result.event.date}#calendar`, message: (already ? t("{{items}}已在日历里，那几天不另建；", { items: already }) : "")
+      + describeEvent(result.event, localeFor(ctx)) + (result.placedBySystem ? t("（系统选定的空档）") : "")
       + (result.moved ? t(" · 重排了 {{count}} 个冲突的任务块", { count: result.moved }) : "") };
   },
   "reminder.add": (ctx, args) => {
@@ -175,8 +195,10 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     const session = line ? { id: `line-${line.id}` } : getStore().getLatestOnboardingSession(ctx.workspaceId);
     if (!session) return { ok: false, code: "INTERVIEW_NOT_STARTED", message: tOf(ctx)("还没有访谈，先在画像页开始访谈") };
     // The interview takes it as the person's reply, with its own instructions and everything it knows of them.
+    const sentAt = new Date();
     void requestCodexSupervisor(ctx, "/v1/onboarding/turn", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId: session.id, text: args.text }), signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
+      body: JSON.stringify({ sessionId: session.id, text: args.text }), signal: AbortSignal.timeout(3 * 60 * 60_000) })
+      .catch(() => keptUnlessHeard(ctx, session.id, args.text, sentAt, line ? `告诉系统，关于「${line.label}」` : "告诉系统")); // i18n-ignore
     return line ? { ok: true, message: tOf(ctx)("已交给「{{line}}」的访谈，主线卡片随后更新", { line: line.label }), href: `/milestones?line=${encodeURIComponent(line.id)}` }
       : { ok: true, message: tOf(ctx)("已交给访谈，画像随后更新"), href: "/onboarding" };
   },
@@ -229,7 +251,8 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     void requestCodexSupervisor(ctx, "/v1/onboarding/turn", { method: "POST", headers: { "content-type": "application/json" },
       // i18n-ignore: a reply to the interview model
       body: JSON.stringify({ sessionId: session.id, text: `我在输入框添加了文件《${doc.fileName}》。请只整理其中的日期（上课、作业、测验、考试、项目）。` }),
-      signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => undefined);
+      // The worker did not take it: the file waits for the extraction instead, which reads its dates into the same batch on the next tick.
+      signal: AbortSignal.timeout(3 * 60 * 60_000) }).catch(() => queueExtractDocs(getStore(), ctx.workspaceId, [doc.id]));
     return { ok: true, message: tOf(ctx)("已交给访谈读取日期，几分钟后在「待确认 · 文件中的日期」确认"), href: "/approvals" };
   },
   "material.file": (ctx, args) => {

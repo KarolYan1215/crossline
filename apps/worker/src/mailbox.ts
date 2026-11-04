@@ -306,9 +306,13 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       else kind = "info";
     }
     if (kind === "reply") {
-      deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${mailKey(message)}`, type: "waiting.mail_seen",
+      const seen = deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `waiting.mail_seen:${item.waitingId}:${mailKey(message)}`, type: "waiting.mail_seen",
         entityId: item.waitingId, payload: { from: message.from, subject: message.subject, date: message.date, at } });
       replies += 1;
+      // The wait stays open until the person says it arrived, so they are asked now (desktop and phone when no page is open), not only
+      // when they next open 待决事项 (2026-11-03).
+      const waiting = deps.store.listWaitingItems(workspaceId, { state: "open" }).find((entry) => entry.id === item.waitingId);
+      if (seen.inserted && waiting) askArrived(deps.store, workspaceId, waiting, message, deps.now?.() ?? new Date());
     }
     log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind, title: item.title.slice(0, 140), at, key });
   }
@@ -427,4 +431,20 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
     return undefined;
   }
   return { pass, handle, lookup: (workspaceId: string) => mailLookupFor(deps, workspaceId) };
+}
+
+export const MAIL_ARRIVED_NUDGE_KIND = "waiting_mail";
+/**
+ * 「X 的邮件到了，是在等的「Y」吗？」: one message per mail that may be what a wait is for. 「到了」 answers the waiting ask on the spot
+ * (`wait:<id>`, the same answer 待决事项 takes); anything else is decided there.
+ */
+function askArrived(store: CrosslineStore, workspaceId: string, waiting: { id: string; title: string; who: string },
+  message: { from: string; subject: string; accountId: string; uid: number }, now: Date): void {
+  const t = tOfWorkspace(store, workspaceId);
+  const values = { from: message.from.slice(0, 40), subject: message.subject.slice(0, 60), who: waiting.who, title: waiting.title.slice(0, 50) };
+  const text = waiting.who ? t("邮箱里收到 {{from}} 的邮件「{{subject}}」，可能就是在等的{{who}}的「{{title}}」。到了吗？", values)
+    : t("邮箱里收到 {{from}} 的邮件「{{subject}}」，可能就是在等的「{{title}}」。到了吗？", values);
+  sayToPerson(store, workspaceId, text, MAIL_ARRIVED_NUDGE_KIND, `waiting-mail:${waiting.id}:${message.accountId}:${message.uid}`, [
+    { label: t("到了"), action: { action: "ask.answer", summary: t("「{{title}}」到了", { title: waiting.title.slice(0, 40) }), args: { askId: `wait:${waiting.id}`, optionId: "arrived", fields: [], note: "" } } },
+    { label: t("去待决事项"), href: "/approvals" }], now);
 }

@@ -55,7 +55,12 @@ export type AskKind =
   /** The week's risks, once a week (docs/rituals.md): every milestone at risk on one card; one due within two days stays its own card. */
   | "risk_digest"
   /** The weekly commitment (docs/rituals.md): the week's hours against its work, 保 / 推 / 砍 confirmed in one step. */
-  | "weekly_commit";
+  | "weekly_commit"
+  /**
+   * Two items overlap on the person's calendar and look like the same thing (`event-merge.ts`): 合并 / 两个都留 / 不是同一件事, kept by
+   * series so a weekly class is asked once.
+   */
+  | "event_merge";
 
 export type AskField = { id: string; label: string; kind: "text" | "longtext" | "date" | "choice"; required: boolean;
   initial?: string; placeholder?: string;

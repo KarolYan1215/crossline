@@ -109,7 +109,7 @@ Every field is present; unused text is `""`, numbers `0`, lists `[]`. Dates are 
   `energy` (`energy`, `text`), `note` (`text`, what happened), `progress` (`text`, what is done; `minutes` the time worked when said, else 0), `archive` (`text` = why), `start` (begin the timer now), `tutorial` (rebuild the tutorial),
   `complete` (the whole task is finished: `minutes` how long it took when said, else 0; `outcome` `smooth`/`barely`/`gaps` when the person said how it went, else `""`, with their words in `text`).
   `step_done` also takes `minutes`. Unused `outcome` is `""`. 「刚才做了 40 分钟，第一步做完了」 is `progress` with `minutes` 40 plus `step_done`; 「作业 3 写完了，用了两小时」 is `complete` with `minutes` 120.
-- `ask.answer` — an answer to something waiting (`list_asks`): `askId`, `optionId` one of that ask's option ids, `fields` `[{id, value}]` for the option's fields (required ones filled from what the person said).
+- `ask.answer` — an answer to something waiting (`list_asks`): `askId`, `optionId` one of that ask's option ids, `fields` `[{id, value}]` for the option's fields (required ones filled from what the person said), `note` anything else the person said about it that no field takes, in their words ("" when nothing).
 - `ask.snooze` — ask again later: `until` `tomorrow` or `week`.
 - `undo` — take back a recent operation (`list_recent_ops`): `opId` of the one the person means (match the label: 不等了/到了/批准/归档/修改时长…; 「刚才/上一步」 = the newest). If none matches, no action; say so in `reply`.
 - `energy.report` — how the person feels right now: `level` `low`/`medium`/`high`, `note` their words.

@@ -845,5 +845,10 @@
   "超出月度上限 {{amount}}。": "Over the monthly limit by {{amount}}. ",
   "在月度上限内，还剩 {{amount}}。": "Within the monthly limit, {{amount}} to spare. ",
   "考试 {{day}} 已过，备考不再安排": "Exam on {{day}} has passed; preparation is no longer scheduled",
-  "说一件你这几年做过、现在想起来还挺得意的事？小事也行。": "Tell one thing you did in the last few years that you are still a little proud of. A small thing is fine."
+  "说一件你这几年做过、现在想起来还挺得意的事？小事也行。": "Tell one thing you did in the last few years that you are still a little proud of. A small thing is fine.",
+  "邮箱里收到 {{from}} 的邮件「{{subject}}」，可能就是在等的{{who}}的「{{title}}」。到了吗？": "A mail from {{from}}, \"{{subject}}\", may be {{who}}'s \"{{title}}\" you are waiting for. Has it arrived?",
+  "邮箱里收到 {{from}} 的邮件「{{subject}}」，可能就是在等的「{{title}}」。到了吗？": "A mail from {{from}}, \"{{subject}}\", may be the \"{{title}}\" you are waiting for. Has it arrived?",
+  "到了": "It has arrived",
+  "「{{title}}」到了": "\"{{title}}\" arrived",
+  "去待决事项": "Go to open decisions"
 }

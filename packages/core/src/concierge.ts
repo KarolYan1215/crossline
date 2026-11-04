@@ -34,7 +34,7 @@ export const ACTIONS = {
     workOrderId: str(128), type: enumOf(TASK_OP_TYPES), date: day, minutes: { type: "number" }, stepId: str(40), text: str(1000), who: str(60),
     energy: enumOf(["", "low", "medium", "high"]), outcome: enumOf(["", "smooth", "barely", "gaps"]) } },
   "ask.answer": { label: "回答待决事项", risk: "internal", args: { askId: str(200), optionId: str(64),
-    fields: { type: "array", maxItems: 6, items: object({ id: str(64), value: str(500) }) } } },
+    fields: { type: "array", maxItems: 6, items: object({ id: str(64), value: str(500) }) }, note: str(500) } },
   "ask.snooze": { label: "稍后再问", risk: "internal", args: { askId: str(200), until: enumOf(["tomorrow", "week"]) } },
   "undo": { label: "撤销", risk: "internal", args: { opId: str(64) } },
   "energy.report": { label: "记录精力", risk: "internal", args: { level: enumOf(["low", "medium", "high"]), note: str(300) } },
@@ -111,7 +111,8 @@ type ArgsOf = {
   "note.add": { text: string };
   "task.op": { workOrderId: string; type: TaskOpType; date: string; minutes: number; stepId: string; text: string; who: string; energy: "" | "low" | "medium" | "high";
     outcome: "" | "smooth" | "barely" | "gaps" };
-  "ask.answer": { askId: string; optionId: string; fields: Array<{ id: string; value: string }> };
+  /** `note`: what the person said beside the choice that no field takes ("" when nothing); kept as the ask card's own note. */
+  "ask.answer": { askId: string; optionId: string; fields: Array<{ id: string; value: string }>; note?: string };
   "ask.snooze": { askId: string; until: "tomorrow" | "week" };
   "undo": { opId: string };
   "energy.report": { level: "low" | "medium" | "high"; note: string };

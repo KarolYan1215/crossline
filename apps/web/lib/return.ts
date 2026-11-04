@@ -9,6 +9,7 @@ import { seenBlocksKey } from "./nudges";
 import { applyProgressLevel } from "./progress-check";
 import type { PageContext } from "./conversation";
 import { tOf } from "./locale";
+import { keepNote } from "./person-notes";
 
 /**
  * Coming back (docs/review-2026-10-13.md §6.3, the person's decision): after days away the first thing shown is what happened meanwhile
@@ -223,6 +224,10 @@ export function answerReturn(ctx: AccessContext, orderId: string, verdict: Retur
     entityId: orderId, payload: { verdict, ...(stepId ? { stepId } : {}), ...(detail.minutes ? { minutes: detail.minutes } : {}),
       ...(detail.stepIds?.length ? { stepIds: detail.stepIds } : {}), ...(verdict === "partial" && detail.level ? { level: detail.level } : {}),
       ...(verdict === "partial" && detail.note?.trim() ? { note: detail.note.trim().slice(0, 300) } : {}), ...(unclear ? { unclear: true } : {}) } });
+  if (verdict === "partial" && detail.note?.trim()) {
+    const order = store.getWorkOrder(ctx.workspaceId, orderId);
+    keepNote(ctx, detail.note, { kind: "return", id: `${orderId}:${attempt}` }, `离开期间「${order ? taskTitleOf(order) : orderId}」做了一部分`); // i18n-ignore: context for the extraction model
+  }
   return { ok: true };
 }
 

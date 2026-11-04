@@ -1,9 +1,10 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { expandRecurring, requiredApproval, type AccessContext, type DateCandidate, type RecurringMeeting } from "@crossline/core";
+import { expandRecurring, matchesItem, mergeDecision, requiredApproval, type AccessContext, type DateCandidate, type RecurringMeeting } from "@crossline/core";
 import { ensureSeeded, getStore, type PersistedScheduleBlock } from "./crossline";
 import { localeFor } from "./locale";
 import { tFor, weekdayShort, type Locale } from "./i18n";
+import { decidePair, fixedTimedItems, readMerges, timedItemOf } from "./event-merges";
 import { identityLines } from "./lines";
 
 /**
@@ -123,11 +124,34 @@ function writeItems(ctx: AccessContext, batchId: string, payload: ExtractedPaylo
       taken.add(slot(block));
       return true;
     });
+    mergeIntoExisting(ctx, fresh);
     store.savePlanVersion({ ...plan, payload: { ...(plan.payload as object), blocks: [...existing, ...fresh] } });
   }
   return { blocks: blocks.length, facts };
 }
 const dateSlot = (item: DateCandidate) => `date_${item.date.replaceAll("-", "")}_${item.kind}`;
+
+/**
+ * A file's dated item that the person's calendar or an event they added already holds (same day, starts within 15 minutes, titles alike)
+ * is that item (2026-11-03): the pair is merged by the system, by series, so the class shows once every week. Answers already on record
+ * (the person's 「两个都留」 or 「不是同一件事」) are left as they are.
+ */
+function mergeIntoExisting(ctx: AccessContext, fresh: PersistedScheduleBlock[]): void {
+  const days = [...new Set(fresh.map((block) => block.day).filter((day): day is string => Boolean(day)))];
+  if (!days.length) return;
+  const existing = fixedTimedItems(ctx, new Date(), days).filter((item) => item.kind === "calendar" || item.kind === "event");
+  const book = readMerges(ctx);
+  const done = new Set<string>();
+  for (const block of fresh) {
+    const item = timedItemOf(block);
+    const match = item && existing.find((other) => matchesItem(item, other));
+    if (!item || !match) continue;
+    const { key } = mergeDecision(item, match, "merge", "system", "");
+    if (book[key] || done.has(key)) continue;
+    done.add(key);
+    decidePair(ctx, item, match, "merge", "system");
+  }
+}
 
 /**
  * Dates read from files are adopted without a click (2026-10-19, the owner's decision: what the files and the calendar say is taken, not

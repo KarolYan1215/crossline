@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, writeExtractState } from "@crossline/db";
 import { cardWordsHead, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   DEPTH_PACE, type OnboardingProgress, type ProfileCard } from "@crossline/core";
@@ -28,7 +28,7 @@ beforeEach(() => {
   store = new CrosslineStore(":memory:");
   workspaceId = store.createPrincipalWithWorkspace("user-1", "个人 workspace").workspace.id;
 });
-afterEach(() => store.close());
+afterEach(() => { store.close(); vi.unstubAllEnvs(); });
 
 const turn = (over: object = {}) => JSON.stringify({
   reply: "收到，我先确认几件事。",
@@ -191,6 +191,8 @@ test("a thread the runtime has forgotten is replaced, and the new one is told wh
   expect(store.listOnboardingMessages(workspaceId, "s1").map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
 });
 
+/** The day these date tests were written on: the files' 27 October must still lie ahead, or it is dropped as past. */
+const pinBeforeExam = () => vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-10-19T12:00:00.000Z");
 const withDates = (fileDates: object) => turn({ fileDates, questions: [], nextAction: "ready_for_milestones" });
 /** The portrait's sections closed, so a test about dates is not also asked for the sections a finished interview owes (P3). */
 const sectionsClosed = () => store.setSetting(workspaceId, "profile.sections", JSON.stringify(Object.fromEntries(["narrative", "situation", "compass", "energy", "synthesis"]
@@ -199,6 +201,7 @@ const dateItem = (over: object = {}) => ({ id: "d1", date: "2027-10-27", startMi
   refs: [2, 3], confidence: "high", note: "", ...over });
 
 test("dates the model read out of a file become one verified batch, and what cannot be verified is dropped and counted", async () => {
+  pinBeforeExam();
   store.saveSourceDocument({ id: "doc-1", ownerId: "o", workspaceId, kind: "docx", fileName: "Lecture Plan.docx", mediaType: "x", sha256: "1", uri: "file:///1",
     extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1\nExam: 17th December Wednesday", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
   const { rpc } = fakeRuntime([withDates({
@@ -219,6 +222,7 @@ test("dates the model read out of a file become one verified batch, and what can
 });
 
 test("a turn with no dates writes no batch, and a newer batch retires one nobody answered", async () => {
+  pinBeforeExam();
   sectionsClosed();
   // Each extraction runs on a fresh thread and may cite only what it is shown: here, the reply of its own turn ([1], [2], [3]).
   const empty = { dates: [], recurring: [], questions: [] };
@@ -238,6 +242,7 @@ test("a turn with no dates writes no batch, and a newer batch retires one nobody
 });
 
 test("a re-read of the files replaces the unanswered batch; meals outside the stated hours never become a batch", async () => {
+  pinBeforeExam();
   sectionsClosed();
   store.saveSourceDocument({ id: "doc-1", ownerId: "o", workspaceId, kind: "docx", fileName: "Lecture Plan.docx", mediaType: "x", sha256: "1", uri: "file:///1",
     extractedText: "Week-8: 27th Oct.\nL15: Mid-term-1", extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });

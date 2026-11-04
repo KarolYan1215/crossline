@@ -246,3 +246,32 @@ test("the extraction is shown the hours on record, so sending them again keeps w
   const extraction = prompts().find((prompt) => prompt.includes(EXTRACT))!;
   expect(extraction).toContain('"hours":[{"days":[0,6],"startMinute":600,"endMinute":1080,"energy":"medium"}]');
 });
+
+test("words the person wrote elsewhere are read as notes: facts with their sentence, never the portrait, never the files, nor the latest interview", async () => {
+  const { NOTES_SESSION, recordPersonNote, backfillExtractWatermarks } = await import("@crossline/db");
+  const ownerId = store.getWorkspaceOwnerId(workspaceId)!;
+  const now = "2026-11-03T00:00:00.000Z";
+  store.saveOnboardingSession({ id: "main", ownerId, workspaceId, state: "complete", coverage: {}, createdAt: now, updatedAt: now });
+  writeExtractState(store, workspaceId, "main", { upTo: 0, failures: 0 });
+  store.setSetting(workspaceId, "profile.model", JSON.stringify({ portrait: "原画像" }));
+  const note = { text: "每周二上午十点和 Prof Lin 开组会。", source: { kind: "ask" as const, id: "wait:w1:1" }, about: "待决：「测量数据」到了吗？" };
+  expect(recordPersonNote(store, workspaceId, ownerId, { ...note, text: "好的" }, now)).toBe(false);
+  expect(recordPersonNote(store, workspaceId, ownerId, { ...note, text: "这个什么时候到？" }, now)).toBe(false);
+  expect(recordPersonNote(store, workspaceId, ownerId, note, now)).toBe(true);
+  expect(recordPersonNote(store, workspaceId, ownerId, note, now)).toBe(false);
+  // Not the interview the app shows, and a restart's backfill never skips a note still waiting.
+  expect(store.getLatestOnboardingSession(workspaceId)?.id).toBe("main");
+  expect(backfillExtractWatermarks(store, workspaceId)).toBe(0);
+  const extractor = createOnboardingExtractor(store, workspaceId, "C:\repo", () => rpc);
+  const answer = facts({ slotUpdates: [{ identityId: "research", projectId: "", slot: "group_meeting", value: "每周二 10:00，与 Prof Lin", status: "confirmed", refs: [1] }],
+    profile: { portrait: "不应写入" } });
+  const { rpc, prompts } = runtime([], [answer]);
+  expect(extractor.nextSession()).toBe(NOTES_SESSION);
+  expect(await extractor.runOnce()).toMatchObject({ state: "done", sessionId: NOTES_SESSION, replies: 1 });
+  const prompt = prompts().find((item) => item.includes(EXTRACT))!;
+  expect(prompt).toContain("待决：「测量数据」到了吗？");
+  expect(prompt).toContain('"profile":null');
+  expect(store.listProfileFacts(workspaceId).find((fact) => fact.slot === "group_meeting")).toMatchObject({ status: "confirmed", sourceQuote: note.text });
+  expect(JSON.parse(store.getSetting(workspaceId, "profile.model")!)).toMatchObject({ portrait: "原画像" });
+  expect(extractor.nextSession()).toBeUndefined();
+});

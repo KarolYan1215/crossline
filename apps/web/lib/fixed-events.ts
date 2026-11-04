@@ -1,13 +1,14 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import {
-  EVENT_DECISIONS, FIXED_EVENTS, fixedEventBlocks, graphWeekdays, heardEventFromFact, importedTitle, inCalendar, itemProjectResolver, occurrences, validFixedEvent,
+  EVENT_DECISIONS, FIXED_EVENTS, fixedEventBlocks, graphWeekdays, heardEventFromFact, importedTitle, inCalendar, itemProjectResolver, occurrences, seriesKey, validFixedEvent,
   type AccessContext, type FixedEvent
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore, planToday, toZonedInstant, type PersistedScheduleBlock } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { interviewStatus } from "./interview-status";
 import { localeFor } from "./locale";
+import { readMerges } from "./event-merges";
 
 type Decision = "create" | "exists" | "skip";
 const DAY_MS = 86_400_000;
@@ -65,16 +66,19 @@ export function heardEvents(ctx: AccessContext): FixedEvent[] {
 /** Every arrangement that may be offered or, once chosen, written: confirmed file and interview dates, and timed days heard in recordings. */
 const offerableEvents = (ctx: AccessContext): FixedEvent[] => [...confirmedEvents(ctx), ...heardEvents(ctx)];
 
-/** The person's synced calendars as they stand on the plan: what a proposal is checked against before it is made. */
-function calendarBlocks(ctx: AccessContext): Array<{ title: string; day: string; start: string; end: string }> {
+type Slot = { title: string; day: string; start: string; end: string };
+/** The plan's stored blocks of one kind (`graph_calendar:` synced calendars, `import:` file dates) as plain slots. */
+function storedSlots(ctx: AccessContext, prefix: "graph_calendar:" | "import:"): Slot[] {
   const plan = getStore().listPlanVersions(ctx.workspaceId)[0];
   return (((plan?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)?.blocks) ?? [])
-    .filter((block) => block.id.startsWith("graph_calendar:") && block.day).map((block) => ({ title: block.title, day: block.day!, start: block.start, end: block.end }));
+    .filter((block) => block.id.startsWith(prefix) && block.day).map((block) => ({ title: block.title, day: block.day!, start: block.start, end: block.end }));
 }
 
 /**
  * Fixed arrangements to offer for the calendar (decided 2026-10-08): once the interview is done or its portrait report exists, every
- * confirmed one that still happens, that the person has not answered about, and that their own calendar does not already hold.
+ * confirmed one that still happens, that the person has not answered about, and that is not already there (2026-11-03: checked against
+ * every timed item, not only the synced calendars) — their own calendar, an event they added, or, for a day heard in a recording, a
+ * file's dated item. A confirmed file date is not checked against file blocks: its own block is one of them.
  */
 export function eventProposals(ctx: AccessContext): FixedEvent[] {
   const store = getStore();
@@ -82,8 +86,10 @@ export function eventProposals(ctx: AccessContext): FixedEvent[] {
   const today = planToday(ctx);
   const ahead = span(today, 60), check = span(today, 28);
   const decided = eventDecisions(ctx);
-  const calendar = calendarBlocks(ctx);
-  return offerableEvents(ctx).filter((event) => !decided[event.id] && occurrences(event, ahead).length > 0 && !inCalendar(event, calendar, check));
+  const present = [...storedSlots(ctx, "graph_calendar:"), ...fixedEventBlocks(inputEvents(ctx), check)];
+  const imported = storedSlots(ctx, "import:");
+  return offerableEvents(ctx).filter((event) => !decided[event.id] && occurrences(event, ahead).length > 0
+    && !inCalendar(event, event.source === "recording" ? [...present, ...imported] : present, check));
 }
 
 export function decideEvent(ctx: AccessContext, id: string, decision: Decision): { ok: true } {
@@ -110,7 +116,11 @@ export function fixedEventsToPublish(ctx: AccessContext, now = new Date()): Arra
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const today = planToday(ctx, now);
   const decided = eventDecisions(ctx);
-  const chosen = [...inputEvents(ctx), ...offerableEvents(ctx).filter((event) => decided[event.id] === "create")];
+  // An event the person added that they merged into an event of their own calendar is already there: it is not written a second time.
+  const merges = readMerges(ctx);
+  const onCalendar = (event: FixedEvent) => Object.values(merges).some((entry) => entry.how === "merge" && entry.keep.startsWith("calendar")
+    && entry.drop === seriesKey({ id: event.id, kind: "event", title: event.title, day: event.date, start: event.start, end: event.end }));
+  const chosen = [...inputEvents(ctx).filter((event) => !onCalendar(event)), ...offerableEvents(ctx).filter((event) => decided[event.id] === "create")];
   return chosen.flatMap((event) => {
     try {
       if (!event.repeat) {

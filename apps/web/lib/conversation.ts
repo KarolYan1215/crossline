@@ -21,6 +21,7 @@ import { returnPageLines } from "./return";
 import { tOf } from "./locale";
 import { captureProgress } from "./capture-progress";
 import { currentSettings, describeSettingChange, type SettingView } from "./setting-change";
+import { keepNote } from "./person-notes";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
 /** `stepId`: on a task, the step its block is for (Today's day panel), so 「这一步」 names that step rather than the first open one. */
@@ -319,6 +320,11 @@ export async function conversationTurn(ctx: AccessContext, raw: { text: string; 
   if (reply.card.corrects) withdrawPrevious(ctx, earlier, text);
   const settling = settleCard(ctx, reply.card);
   if (settling) await settling;
+  // A line that became no action — a fact said in passing, 「周二十点有课」 answered with a reply — is read for facts in the background, so
+  // it is not left only in the day's messages (2026-11-03). One with actions is recorded when the person confirms them.
+  const proposes = reply.card.actions.length > 0 || (reply.card.clarify?.options ?? []).some((option) => option.actions.length > 0);
+  if (!proposes && !reply.card.error && !reply.card.corrects && input.text.trim())
+    keepNote(ctx, input.text, { kind: "conversation", id: person.id }, "在输入框里说的", now); // i18n-ignore: context for the extraction model
   // 先快后准: a reading the quick model was unsure of, or one that changes several things, is shown at once and looked at again; it
   // cannot be carried out until that second look is back. Already on the stronger model (after a correction), once is enough. What was
   // reported and written at once is not part of that second look.

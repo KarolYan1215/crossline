@@ -119,6 +119,7 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
     {line && <p className="dq-where"><LineTag line={item.identityId}>{line}</LineTag></p>}
     <h4 className="dq-title">{item.title}</h4>
     <p className="dq-meta"><span className="mono">{slotText(item, locale)}</span> · {item.id.startsWith("travel:") ? (item.tag ? t("预留的路上时间（{{tag}}）", { tag: item.tag }) : t("预留的路上时间")) : t(KIND_TEXT[item.kind])}</p>
+    {item.merged?.length ? <p className="dq-meta">{t("已合并：{{titles}}", { titles: item.merged.map((title) => `「${title}」`).join("、") })}</p> : null}
     {item.prepared?.length ? <p className="task-prepared"><small>{t("已备好")}</small>
       {item.prepared.slice(0, 3).map((file) => <a key={file.href} href={file.href} target="_blank" rel="noreferrer">{file.name}</a>)}</p> : null}
   </div>;
@@ -132,6 +133,7 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
     <h4 className="dq-title">{detail?.title ?? item.title}</h4>
     <p className="dq-meta"><span className="mono">{slotText(item, locale)}</span>{item.tag ? ` · ${t(item.tag)}` : ""}
       {detail && <> · {t(stateLabelFor(detail.state, detail.paused))}</>}</p>
+    {item.merged?.length ? <p className="dq-meta">{t("已合并：{{titles}}", { titles: item.merged.map((title) => `「${title}」`).join("、") })}</p> : null}
     {item.agent && <p className="dq-agent"><Tag tone="info">{t(AGENT_TEXT[item.agent])}</Tag></p>}
     {(step || progress !== undefined) && <div className="dq-step">
       <small>{step ? (step.executor === "human" ? t("本步") : t("本步 · 系统可做")) : t("进度")}</small>

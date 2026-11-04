@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
-import { approveArtifactRelationsFor, assistantAvailable, CrosslineStore, openNeedsOf, type EvidenceClaimInput, type StoredMilestone, type StoredWorkOrder } from "@crossline/db";
+import { approveArtifactRelationsFor, assistantAvailable, CrosslineStore, openNeedsOf, recordPersonNote, type EvidenceClaimInput, type StoredMilestone, type StoredWorkOrder } from "@crossline/db";
 import { availableSlots, deriveCapacity, requiredApproval, validateAvailability, DEFAULT_AVAILABILITY,
   defaultMilestoneTemplates, computeMilestoneConfidence, PRODUCTIVE, type ActivityCategory, validateSuccessCriteria, goalSettingKey, ANALYSIS_CONTEXT_VERSION, calibrationReport, calibratedEstimate,
   type CalibrationReport, presetImportance, sittingStartOn, taskTitleOf, type ImportancePreset, restoreTargetOf,
@@ -787,7 +787,7 @@ export function lockBlock(ctx: AccessContext, blockId: string, at: { day: string
  * class meeting, an event the person added, or another held block. One entry per held block, with what it overlaps, for the
  * `locked_conflict` ask.
  */
-export function heldConflicts(ctx: AccessContext, now = appNow()): Array<{ entry: FrozenBlock; title: string }> {
+export function heldConflicts(ctx: AccessContext, now = appNow()): Array<{ entry: FrozenBlock; title: string; block?: PersistedScheduleBlock }> {
   const store = getStore();
   const stored = store.listPlanVersions(ctx.workspaceId)[0];
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
@@ -795,7 +795,7 @@ export function heldConflicts(ctx: AccessContext, now = appNow()): Array<{ entry
   const busy = blocks.flatMap((block) => { try {
     return [{ id: block.id, start: Date.parse(toZonedInstant(block.day!, block.start, zone)), end: Date.parse(toZonedInstant(block.day!, block.end === "24:00" ? "23:59" : block.end, zone)) }];
   } catch { return []; } });
-  const titles = new Map(blocks.map((block) => [block.id, block.title]));
+  const byId = new Map(blocks.map((block) => [block.id, block]));
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
   const frozen = readFrozen(ctx, now);
   const seen = new Set<string>();
@@ -804,7 +804,8 @@ export function heldConflicts(ctx: AccessContext, now = appNow()): Array<{ entry
     if (!entry || seen.has(conflict.blockId)) return [];
     seen.add(conflict.blockId);
     const other = conflict.kind === "frozen" ? orders.get(plannerIdOfBlock(conflict.with).split("#")[0]!) : undefined;
-    return [{ entry, title: conflict.kind === "busy" ? titles.get(conflict.with) ?? "" : other ? taskTitleOf(other) : "" }];
+    const block = conflict.kind === "busy" ? byId.get(conflict.with) : undefined;
+    return [{ entry, title: conflict.kind === "busy" ? block?.title ?? "" : other ? taskTitleOf(other) : "", ...(block ? { block } : {}) }];
   });
 }
 export function unlockBlock(ctx: AccessContext, blockId: string): { ok: true } {
@@ -1861,6 +1862,10 @@ export function completeWorkOrderExecution(ctx: AccessContext, workOrderId: stri
   const doneAt = at ?? new Date().toISOString();
   if (outcome) store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `work_order.outcome:${workOrderId}:${run}`,
     type: "work_order.outcome_reported", entityId: workOrderId, payload: { level: outcome.level, note: outcome.note, at: doneAt, source: "completion" } });
+  // The 「完成情况」 words were kept on the event and read by nothing: they are read for facts now (a score, a date, who said what).
+  if (outcome?.note?.trim()) recordPersonNote(store, ctx.workspaceId, ctx.principalId,
+    // i18n-ignore
+    { text: outcome.note, source: { kind: "outcome", id: `${workOrderId}:${run}` }, about: `完成「${taskTitleOf(workOrder)}」后写的完成情况` }, doneAt);
   // The follow-up question is written now, in the language of this moment.
   const rule = completionRule(workOrder, localeFor(ctx));
   const followUp = rule.mode === "needs_assessment" && (rule.reason === "result_pending" || !outcome);

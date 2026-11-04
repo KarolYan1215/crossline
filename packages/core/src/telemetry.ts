@@ -62,7 +62,7 @@ const WORK_ORDER_STATES = ["captured", "analyzing", "awaiting_plan_approval", "a
 const ASK_KINDS = ["backplan_input", "waiting_due", "capture_blocked", "materials_blocked", "gate_insufficient", "gate_failed", "evidence_manual",
   "milestone_risk", "agent_blocked", "calendar_publish_failed", "calendar_sync_failed", "codex_signed_out", "missed_block", "source_project",
   "calendar_line_unclear", "interview_open", "interview_question", "event_propose", "step_question", "relation_check", "background_paused",
-  "locked_conflict"];
+  "locked_conflict", "event_merge"];
 const GATE_VERDICTS = ["pass", "insufficient", "fail", "met", "partial", "unmet", "unverifiable"];
 export const TELEMETRY_STAGES = new Set<string>([...ONBOARDING_STAGES, "complete", ...WORK_ORDER_STATES, ...ASK_KINDS, ...GATE_VERDICTS]);
 

@@ -1,10 +1,11 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { clipWidth, FIRST_ACTION_MAX, stepAnswerSlot, taskProgress, type AccessContext } from "@crossline/core";
+import { clipWidth, FIRST_ACTION_MAX, stepAnswerSlot, taskProgress, taskTitleOf, type AccessContext } from "@crossline/core";
 import { chooseStepOwner, provideMaterial, type StoredStepPlan, type StoredWorkOrder } from "@crossline/db";
 import { getStore } from "./crossline";
 import { requestCodexSupervisor } from "./codex-runtime";
 import { tOf } from "./locale";
+import { keepNote } from "./person-notes";
 
 /** Each task's next block on the calendar (today or later), for the card's 「下一次」 line. */
 export function nextSlots(blocks: Array<{ id: string; day?: string | undefined; start: string; end: string }>, today: string): Map<string, { day: string; start: string; end: string }> {
@@ -51,6 +52,9 @@ export function reportProgress(ctx: AccessContext, workOrderId: string, text: st
   const reportId = randomUUID();
   store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `task.progress_reported:${reportId}`,
     type: "task.progress_reported", entityId: workOrderId, payload: { reportId, text: text.trim().slice(0, 2000) } });
+  // The judge takes only how far the steps are; a date, a person or a fact said in the report is read for the ledger as well.
+  const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === workOrderId)!;
+  keepNote(ctx, text, { kind: "progress", id: reportId }, `任务「${taskTitleOf(order)}」的进度`); // i18n-ignore: context for the extraction model
   requestTaskPass(ctx);
   return { ok: true, reportId };
 }

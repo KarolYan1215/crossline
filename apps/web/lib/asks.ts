@@ -4,7 +4,7 @@ import {
   ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
-  isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner,
+  isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf,
   parseRiskDigestSeen, RISK_DIGEST_SETTING, riskDigestShows, weekStartOf, type MilestoneRisk, type RiskDigestSeen
 } from "@crossline/core";
@@ -26,6 +26,7 @@ import { recordStepAnswer, requestStepReplan } from "./steps";
 import { unfiledFiles } from "./file-belonging";
 import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
 import { placesToAsk, setPlaceMinutes } from "./travel";
+import { decidePair, mergePairs, readMerges, timedItemOf } from "./event-merges";
 import { identityLines } from "./lines";
 import { decisionHorizon } from "./horizon";
 import { answerRelationCheck, relationCheckAsks } from "./artifact-relations";
@@ -38,6 +39,7 @@ import { localeFor, tOf } from "./locale";
 import { intlLocale, monthDay, tFor, type Locale, type Translate } from "./i18n";
 import { pendingInterviewSettings, settleInterviewSettings, startConfirmed } from "./start-confirm";
 import { settingWords } from "./setting-change";
+import { keepNote } from "./person-notes";
 
 /** Markers an undo has taken back are as if never written. */
 const live = <T extends { eventId: string }>(ctx: AccessContext, events: T[]): T[] => {
@@ -1018,12 +1020,19 @@ function lockedConflictAsks({ store, ctx, today, now, t, locale }: Source): Ask[
   if (!conflicts.length) return [];
   const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
   const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
-  return conflicts.flatMap(({ entry: item, title }) => {
+  const merges = readMerges(ctx);
+  return conflicts.flatMap(({ entry: item, title, block }) => {
     const hit = { title };
     const order = orders.get(plannerIdOfBlock(item.blockId).split("#")[0]!);
     if (!order) return [];
     const clock = (iso: string) => new Date(iso).toLocaleTimeString(intlLocale(locale), { timeZone: zone, hour: "2-digit", minute: "2-digit", hour12: false });
     const day = new Date(item.start).toLocaleDateString("sv-SE", { timeZone: zone });
+    // A calendar event the person said is this very work (「合并」 on an earlier occurrence) is not asked about again.
+    const work = lockedWorkItem(item.blockId, taskTitleOf(order), day, clock(item.start), clock(item.end));
+    const other = block ? timedItemOf(block) : undefined;
+    const decided = other ? decisionFor(merges, work, other) : undefined;
+    if (decided && decided.how === "merge") return [];
+    const alike = Boolean(other) && !decided && similarTitles(taskTitleOf(order), hit.title);
     return [{ id: `locked:${item.blockId}`, kind: "locked_conflict" as const, entityId: order.id, line: order.identityId,
       preview: { kind: "plan" as const, href: "/", label: t("看当天日程") },
       urgency: urgencyFor(day, today), dueDay: day, raisedAt: now.toISOString(), fingerprint: `${item.start}|${hit.title}`,
@@ -1031,17 +1040,48 @@ function lockedConflictAsks({ store, ctx, today, now, t, locale }: Source): Ask[
       why: t("{{day}} {{start}}–{{end}} 这段是本人锁定的，「{{event}}」占了同一时间。锁定的块不会被自动挪走，请选一个处理方式。", {
         day: format(day, locale), start: clock(item.start), end: clock(item.end), event: hit.title }),
       options: [
-        { id: "move", label: t("挪到下一个空档"), detail: t("解除锁定，由排程重新放"), recommended: true },
+        ...(alike ? [{ id: "merge", label: t("是同一件事，合并"), detail: t("锁定块留在原时间，日程不再单独显示；以后同样重叠也合并"), recommended: true }] : []),
+        { id: "move", label: t("挪到下一个空档"), detail: t("解除锁定，由排程重新放"), ...(alike ? {} : { recommended: true }) },
         { id: "tomorrow", label: t("换到明天"), detail: t("解除锁定，明天起再排") },
         { id: "keep", label: t("保留重叠"), detail: t("两件事都留在原时间") }
       ] }];
   });
 }
 
+/** A locked work block as a timed item, for the merge rules (its series is its order). */
+const lockedWorkItem = (blockId: string, title: string, day: string, start: string, end: string): TimedItem =>
+  timedItemOf({ id: blockId, title, day, start, end }) ?? { id: blockId, kind: "work", title, day, start, end, orderId: plannerIdOfBlock(blockId).split("#")[0]! };
+
+const SOURCE_NAME: Record<TimedItem["kind"], string> = { calendar: "已同步的日历", file: "上传文件读出的日程", event: "本人添加的日程", heard: "录音里听到的日程", work: "排程" };
+/** At most this many merge questions open at once, soonest first. */
+const MERGE_ASKS_OPEN = 3;
+
+/**
+ * Two items on the person's calendar that overlap and look like the same thing (`event-merge.ts`): a class on the synced calendar and the
+ * same class read from the syllabus, or an event the person added that their calendar already had. Asked once per pair of series.
+ */
+function mergeAsks({ ctx, today, now, t, locale }: Source): Ask[] {
+  return mergePairs(ctx, now).slice(0, MERGE_ASKS_OPEN).map((pair) => {
+    const describe = (item: TimedItem) => t("「{{title}}」（{{source}}，{{start}}–{{end}}）", { title: short(item.title, 24), source: t(SOURCE_NAME[item.kind]), start: item.start, end: item.end });
+    const weekly = pair.days > 1;
+    const day = format(pair.firstDay, locale);
+    return { id: `merge:${pair.key}`, kind: "event_merge" as const, entityId: pair.key, urgency: urgencyFor(pair.firstDay, today), dueDay: pair.firstDay,
+      raisedAt: "", fingerprint: pair.key, preview: { kind: "plan" as const, href: "/", label: t("看当天日程") },
+      title: t("「{{a}}」与「{{b}}」是同一件事吗？", { a: short(pair.a.title, 18), b: short(pair.b.title, 18) }),
+      why: weekly
+        ? t("{{day}} 起两周内有 {{count}} 天，{{a}}与{{b}}时间重叠，名称相近。合并后只显示一个；之后每次同样重叠都按合并处理，排程照样避开这段时间。",
+          { day, count: pair.days, a: describe(pair.a), b: describe(pair.b) })
+        : t("{{day}}，{{a}}与{{b}}时间重叠，名称相近。合并后只显示一个，排程照样避开这段时间。", { day, a: describe(pair.a), b: describe(pair.b) }),
+      options: [{ id: "merge", label: t("合并"), detail: t("只显示一个，以后同样重叠也合并"), recommended: true },
+        { id: "both", label: t("两个都留"), detail: t("都显示，标为时间冲突，不再问") },
+        { id: "different", label: t("不是同一件事"), detail: t("都显示，不再问") }] };
+  });
+}
+
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueAsks, overdueTaskAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, eventAsks, travelAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueAsks, overdueTaskAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at), ({ ctx: context }: Source) => opportunityNeedAsks(context),
     ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at)]
@@ -1365,6 +1405,16 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
     }
     case "locked_conflict": {
       const blockId = ask.id.slice("locked:".length);
+      if (optionId === "merge") {
+        const conflict = heldConflicts(ctx, appNow()).find((item) => item.entry.blockId === blockId);
+        const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
+        const other = conflict?.block ? timedItemOf(conflict.block) : undefined;
+        if (!conflict || !order || !other) return { ok: false, code: "MERGE_PAIR_GONE" };
+        const frozen = readFrozen(ctx, appNow());
+        writeFrozen(ctx, withFrozen(frozen, { ...conflict.entry, overlapOk: true }));
+        decidePair(ctx, lockedWorkItem(blockId, taskTitleOf(order), other.day, other.start, other.end), other, "merge");
+        return { ok: true };
+      }
       if (optionId === "keep") {
         const frozen = readFrozen(ctx, appNow());
         const entry = frozen.find((item) => item.blockId === blockId);
@@ -1422,6 +1472,13 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       const pending = pendingInterviewSettings(ctx);
       const settled = await settleInterviewSettings(ctx, optionId === "apply" ? new Set() : new Set(pending.map((item) => `${item.key}|${item.target}`)));
       return settled.failed ? { ok: false, code: "SETTING_FAILED" } : { ok: true };
+    }
+    case "event_merge": {
+      const pair = mergePairs(ctx, appNow()).find((item) => item.key === ask.entityId);
+      if (!pair) return { ok: false, code: "MERGE_PAIR_GONE" };
+      if (optionId !== "merge" && optionId !== "both" && optionId !== "different") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+      decidePair(ctx, pair.a, pair.b, optionId);
+      return { ok: true };
     }
     case "event_propose": {
       decideEvent(ctx, ask.entityId, optionId === "create" ? "create" : optionId === "exists" ? "exists" : "skip");
@@ -1522,8 +1579,14 @@ export async function answerAsk(ctx: AccessContext, askId: string, choice: strin
     { askId: ask.id, kind: ask.kind, optionId: ids[0] ?? "", ...(ids.length > 1 ? { optionIds: ids } : {}), ...(checked.note ? { note: checked.note } : {}),
       // Seconds the card was on screen before the answer, when the page measured it: the decision's cost on 系统体检.
       ...(typeof choice !== "string" && choice.seconds !== undefined ? { seconds: choice.seconds } : {}) });
+  // Words beside an answer that nothing downstream takes are read for facts in the background (a note that went into a field was taken).
+  if (result.ok && checked.note && !NOTE_TAKEN_BY.has(ask.kind) && !Object.values(checked.values).includes(checked.note))
+    keepNote(ctx, checked.note, { kind: "ask", id: `${ask.id}:${now.getTime()}` }, `待决：${ask.title}（选了「${label}」）`, now); // i18n-ignore: context for the extraction model
   return result;
 }
+
+/** Asks whose answer itself carries the person's words somewhere they are read again (a capture's context, a step's answer, a report). */
+const NOTE_TAKEN_BY = new Set<string>(["capture_blocked", "prep_question", "agent_blocked", "step_question", "interview_question", "outcome_check", "progress_check"]);
 
 /** 「明天再问」/「下周再问」: hidden until then, back sooner if what it is about changes. */
 export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" | "week", now = appNow(), seconds?: number,

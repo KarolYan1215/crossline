@@ -109,11 +109,53 @@ export function backfillExtractWatermarks(store: CrosslineStore, workspaceId: st
   if (store.getSetting(workspaceId, EXTRACT_BACKFILL_SETTING)) return 0;
   let set = 0;
   for (const session of store.listOnboardingSessions(workspaceId)) {
-    if (store.getSetting(workspaceId, stateKey(session.id))) continue;
+    // The notes conversation was never the old single turn's: every note in it still waits to be read.
+    if (session.id === NOTES_SESSION || store.getSetting(workspaceId, stateKey(session.id))) continue;
     const last = store.listOnboardingMessages(workspaceId, session.id).filter((message) => message.role === "user").at(-1)?.seq ?? 0;
     store.setSetting(workspaceId, stateKey(session.id), JSON.stringify({ upTo: last, failures: 0 } satisfies ExtractState));
     set += 1;
   }
   store.setSetting(workspaceId, EXTRACT_BACKFILL_SETTING, new Date().toISOString());
   return set;
+}
+
+/**
+ * Everything else the person writes, read for facts (2026-11-03, the owner: 「检查目前系统是否能从任意用户输入中提取信息并记录进账本」).
+ * Words that land nowhere else — a line in the input box that became no action, 「记一下」, the note beside an answer no option takes, a
+ * progress report, the 「完成情况」 note, the words on a waiting answer or on the return page, and a 「告诉系统」 the worker could not take —
+ * are kept as replies of one more conversation, `notes`, that no dialogue ever answers. The interview's extraction reads it like any
+ * conversation (numbered sentences, citations, facts, projects and dates into the date batch, where a time the calendar already holds is
+ * merged), so a fact said anywhere ends up where every later plan reads it, with the words it rests on.
+ */
+export const NOTES_SESSION = "notes";
+export type PersonNoteSource = { kind: "conversation" | "note" | "ask" | "progress" | "outcome" | "waiting" | "return" | "profile"; id: string };
+export type PersonNote = { text: string; source: PersonNoteSource;
+  /** What the words were said about (the ask's question, the task's name): the extraction reads it as the question they answer. */
+  about: string };
+/** Shorter than this (letters and digits) says nothing to record; longer is cut. */
+export const NOTE_MIN_CHARS = 6;
+export const NOTE_MAX_CHARS = 2000;
+
+/** Whether words may hold something to record: enough of them, and not one bare question (a question asks; it states nothing). */
+export function noteWorthReading(text: string): boolean {
+  const trimmed = text.trim();
+  if ((trimmed.match(/[\p{L}\p{N}]/gu) ?? []).length < NOTE_MIN_CHARS) return false;
+  return !(/[?？]$/.test(trimmed) && !/[。.!！;；\n]/.test(trimmed.slice(0, -1)));
+}
+
+/** Keeps one note for the extraction, once per source; false when it is too short to say anything or the source was already kept. */
+export function recordPersonNote(store: CrosslineStore, workspaceId: string, ownerId: string, note: PersonNote, at = new Date().toISOString()): boolean {
+  const text = note.text.trim().slice(0, NOTE_MAX_CHARS);
+  if (!noteWorthReading(text)) return false;
+  const kept = store.listOnboardingMessages(workspaceId, NOTES_SESSION);
+  const same = (content: unknown) => { const source = (content as { source?: PersonNoteSource }).source; return source?.kind === note.source.kind && source.id === note.source.id; };
+  if (kept.some((message) => same(message.content))) return false;
+  if (!store.getOnboardingSession(workspaceId, NOTES_SESSION)) {
+    store.saveOnboardingSession({ id: NOTES_SESSION, ownerId, workspaceId, state: "active", coverage: {}, createdAt: at, updatedAt: at });
+    // Its own watermark from the start, written directly: `writeExtractState` would mark the workspace's backfill as done.
+    if (!store.getSetting(workspaceId, stateKey(NOTES_SESSION))) store.setSetting(workspaceId, stateKey(NOTES_SESSION), JSON.stringify({ upTo: 0, failures: 0 } satisfies ExtractState));
+  }
+  store.appendOnboardingMessage({ sessionId: NOTES_SESSION, workspaceId, role: "user", createdAt: at,
+    content: { text, about: note.about.trim().slice(0, 200), source: note.source } satisfies PersonNote });
+  return true;
 }

@@ -1,3 +1,4 @@
+import { similarTitles } from "./event-merge";
 import { monthDay, tFor, weekdayShort, type Locale } from "./i18n";
 
 /**
@@ -79,27 +80,15 @@ export function validFixedEvent(event: FixedEvent): boolean {
     && DAY.test(event.repeat.from) && DAY.test(event.repeat.until) && event.repeat.from <= event.repeat.until;
 }
 
-const squash = (text: string) => text.replace(/[\s·:：,，。（）()\-_]+/g, "").toLowerCase();
 const minutes = (time: string) => { const [h, m] = time.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
-/** Two titles name the same thing: one contains the other, or they share a course code or four characters in a row. */
-function sameTitle(a: string, b: string): boolean {
-  const x = squash(a), y = squash(b);
-  if (!x || !y) return false;
-  if (x.includes(y) || y.includes(x)) return true;
-  const code = /[a-z]{2,5}\d{3,4}/;
-  const cx = x.match(code)?.[0], cy = y.match(code)?.[0];
-  if (cx && cx === cy) return true;
-  for (let i = 0; i + 4 <= x.length; i += 1) if (y.includes(x.slice(i, i + 4))) return true;
-  return false;
-}
 
 /**
  * Whether the person's own calendar already has this event: some occurrence in `days` meets a calendar block that starts within fifteen
- * minutes of it and names the same thing. A calendar that already holds a class is not offered a second copy of it.
+ * minutes of it and names the same thing (`similarTitles`, `event-merge.ts`). A calendar that already holds a class is not offered a second copy of it.
  */
 export function inCalendar(event: FixedEvent, calendar: Array<{ title: string; day: string; start: string; end: string }>, days: string[]): boolean {
   return occurrences(event, days).some((day) => calendar.some((block) => block.day === day
-    && Math.abs(minutes(block.start) - minutes(event.start)) <= 15 && sameTitle(block.title, event.title)));
+    && Math.abs(minutes(block.start) - minutes(event.start)) <= 15 && similarTitles(block.title, event.title)));
 }
 
 const GRAPH_DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
