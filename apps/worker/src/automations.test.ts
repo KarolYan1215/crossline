@@ -9,7 +9,7 @@ const plan = (over: Partial<AutomationPlan> = {}, trigger: Partial<AutomationPla
   name: "课程邮件整理", summary: "每天早上把课程邮件整理成清单", lineId: "research",
   trigger: { type: "schedule", time: "08:00", days: "DAILY", hours: 0, from: "", keywords: "", url: "", event: "", ...trigger },
   action: { kind: "run", instructions: "读最近一天和课程有关的邮件，整理成待办清单写进 digest.md，把要做的事放进收件箱", reminder: "", category: "read_research_organize", outputs: "digest.md" },
-  steps: [{ title: "读邮件并整理", by: "assistant" }, { title: "回复老师的邮件", by: "assistant" }], assumptions: "", replaces: "", enabled: true, ...over
+  steps: [{ title: "读邮件并整理", by: "assistant" }, { title: "回复老师的邮件", by: "assistant" }], assumptions: "", replaces: "", enabled: true, runNow: false, ...over
 });
 
 function setup(now = new Date("2026-10-19T14:00:00Z")) {
@@ -49,7 +49,7 @@ test("a plan is checked: a step that sends is the person's, a watch needs a publ
 });
 
 test("a request in words becomes an active automation, its kind of work is allowed by the request, and the person is told how it was read", async () => {
-  const { store, workspaceId, deps } = setup();
+  const { store, workspaceId, deps, started } = setup();
   requestAutomation(store, workspaceId, "每天早上八点把邮箱里和课程有关的整理成清单", "research", "user-1");
   const { rpc } = fakeRuntime([JSON.stringify(plan({ assumptions: "按每天 08:00 理解" }))], AUTOMATION_DESIGNER_SKILL);
   const designed = await designPending(deps(() => rpc), workspaceId);
@@ -57,6 +57,8 @@ test("a request in words becomes an active automation, its kind of work is allow
   const [automation] = readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING));
   expect(automation).toMatchObject({ status: "active", name: "课程邮件整理", origin: { kind: "asked" } });
   expect(readCategories(store, workspaceId).read_research_organize).toBeTruthy();
+  // Its first run is the trigger, unless the request asked for one at once.
+  expect(started).toEqual([]);
   // Designed once: a second pass finds nothing waiting.
   expect(await designPending(deps(() => rpc), workspaceId)).toEqual([]);
   // Told what to change, it grows in place: same id, its runs kept, a new trigger.
@@ -76,6 +78,11 @@ test("a request in words becomes an active automation, its kind of work is allow
   const { rpc: third } = fakeRuntime([JSON.stringify(plan({ replaces: automation!.id, enabled: false }))], AUTOMATION_DESIGNER_SKILL);
   await designPending(deps(() => third), workspaceId);
   expect(readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING))[0]).toMatchObject({ id: automation!.id, status: "off" });
+  // 「改一下，现在先跑一次」: changed and run at once.
+  requestAutomation(store, workspaceId, "课程邮件整理恢复，现在先跑一次", "research", "user-1");
+  const { rpc: fourth } = fakeRuntime([JSON.stringify(plan({ replaces: automation!.id, runNow: true }))], AUTOMATION_DESIGNER_SKILL);
+  await designPending(deps(() => fourth), workspaceId);
+  expect(started).toHaveLength(1);
 });
 
 test("a schedule fires once at its time; an interval after its hours; a busy assistant queues the firing for the next tick", async () => {

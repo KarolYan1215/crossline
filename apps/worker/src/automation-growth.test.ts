@@ -65,7 +65,7 @@ test("accepted errands of one kind on one line for three pieces of work are offe
   const plan: AutomationPlan = { name: "课程邮件待办", summary: "每周一把课程邮件整理成待办清单", lineId: "research",
     trigger: { type: "schedule", time: "08:00", days: "MO", hours: 0, from: "", keywords: "", url: "", event: "" },
     action: { kind: "run", instructions: "读上周和课程有关的邮件，整理成待办清单写进 待办.md", reminder: "", category: "read_research_organize", outputs: "待办.md" },
-    steps: [{ title: "整理成清单", by: "assistant" }], assumptions: "按每周一 08:00 理解", replaces: "", enabled: true };
+    steps: [{ title: "整理成清单", by: "assistant" }], assumptions: "按每周一 08:00 理解", replaces: "", enabled: true, runNow: false };
   const { rpc } = fakeRuntime([JSON.stringify(plan)], AUTOMATION_DESIGNER_SKILL);
   const deps: AutomationDeps = { store, cwd: "/repo", client: () => rpc, zone: () => "America/Chicago", now: () => NOW,
     runFree: () => ({ state: "started", taskId: "x" }), fetch: { isPublicHost: async () => true, fetchImpl: fetch } };

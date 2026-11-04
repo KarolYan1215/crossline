@@ -130,6 +130,8 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
     allowed && automation.action.kind === "run" ? t("已按这个请求为助手开启「{{category}}」。", { category: t(AGENT_CATEGORIES[automation.action.category]) }) : "",
     plan.assumptions ? t("按以下理解建立：{{assumptions}}", { assumptions: plan.assumptions }) : ""].filter(Boolean).join("\n"), "automation_created", `automation:${requestId}`,
   [{ label: t("查看与修改"), href: "/settings#automation" }], now);
+  // 「现在先跑一次」: the first run now instead of at the trigger (2026-11-04: the request said it and nothing ran).
+  if (plan.runNow && automation.status === "active") fireOrQueue(deps, workspaceId, automation, { reason: t("本人要求建好后先跑一次"), context: "" });
   return { state: "created", id };
 }
 
@@ -138,7 +140,9 @@ const DESIGN_INSTRUCTIONS = "Turn the person's one request into one automation C
   + "which files to write, never a plan. The person gets every run's result as a message, so the inbox is only for new things they must do and "
   + "a person step is only an act the assistant may not take (sending, replying, posting, paying). When `assistant.commandLine` is true "
   + "the assistant writes and runs scripts and commands itself (no network inside them; the web through its own tools), so running code is "
-  + "the assistant's step. A request that changes one in `existing` "
+  + "the assistant's step. Every firing starts in an empty folder (the previous run's files are readable, and there are none before the first "
+  + "run): instructions that use a file the automation makes itself also say to write it when it is not there. `runNow` is true only when the "
+  + "request asks for a run at once. A request that changes one in `existing` "
   + "answers with that whole automation, `replaces` set to its id and every part the request does not change copied from it. Answer in the "
   + "schema only.";
 

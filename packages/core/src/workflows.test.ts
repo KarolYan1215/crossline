@@ -42,7 +42,7 @@ test("a monthly or quarterly schedule runs on its day of the month, every n mont
   expect(workflowDue({ type: "monthly", day: 31, months: 1, time: "09:00" }, undefined, new Date("2026-11-30T15:30:00Z"), zone)).toBe(true);
   expect(scheduleLabel(quarterly)).toBe("每季度 1 日 09:00");
   expect(scheduleLabel({ type: "monthly", day: 15, months: 1, time: "08:00" })).toBe("每月 15 日 08:00");
-  const plan = { name: "季度投资资料包", summary: "", lineId: "investment", assumptions: "", replaces: "", enabled: true,
+  const plan = { name: "季度投资资料包", summary: "", lineId: "investment", assumptions: "", replaces: "", enabled: true, runNow: false,
     trigger: { type: "schedule" as const, time: "09:00", days: "QUARTERLY:1", hours: 0, from: "", keywords: "", url: "", event: "" },
     action: { kind: "run" as const, instructions: "读取本季度材料并写入季度资料包", reminder: "", category: "read_research_organize", outputs: "" },
     steps: [{ title: "写入季度资料包", by: "assistant" as const }] };

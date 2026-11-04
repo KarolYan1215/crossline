@@ -31,7 +31,7 @@ Unused fields: `""`, or `0` for `hours`.
 ## Action
 
 - `remind`: the request is only to be reminded. `reminder` is the sentence to send (「交 ECE 555 周报：今晚 23:59 截止」); `instructions`, `category` and `outputs` are `""`.
-- `run`: `instructions` are what the assistant does on each firing, read by the assistant itself: concrete steps naming what to read and which file to write, as if to a capable colleague. The result is the file; the instructions never ask for a plan, and never ask to put a digest, a notice or 「已生成」 into the inbox (each inbox line becomes a task the person has to deal with).
+- `run`: `instructions` are what the assistant does on each firing, read by the assistant itself: concrete steps naming what to read and which file to write, as if to a capable colleague. The result is the file; the instructions never ask for a plan, and never ask to put a digest, a notice or 「已生成」 into the inbox (each inbox line becomes a task the person has to deal with). Every firing starts in an empty folder; the previous run’s files are readable, and before the first run there are none. Instructions that use a file the automation makes itself (a script, a template) also say to write it when it is not there.
   - Good: 「用 list_tasks 读未完成的任务，挑出 7 天内到期的；按截止日期排序写进「本周到期清单.md」，每项写任务名、截止日期、还差的步骤。只有清单里没有、但邮件或文件里出现的新待办才放进收件箱。」
   - Bad: 「整理今天的任务，生成清单后把「清单已生成」放进收件箱提醒本人查看。」
 - `outputs`: the files each run hands over, separated by commas; each item is one short name. Good: 「本周到期清单（Markdown）」. Bad: 「任务目录中一份当日日期的 Markdown 清单文件」 (one file described as a sentence).
@@ -46,6 +46,8 @@ List the steps in order with who does each. A step that sends, replies, posts, u
 When the request changes one of `existing` (「把邮件整理改成每天两次」「那个网页监控别再提醒了，改成只记下来」), answer with that whole automation, `replaces` set to its id, the requested part changed and **every other part copied from it as given**, its `lineId` included. It keeps its history. A new automation has `replaces` `""`.
 
 `enabled` is false only when the request is to stop or pause one (「先停掉那个网页监控」): then `replaces` is its id and everything else is copied unchanged. Otherwise true.
+
+`runNow` is true only when the request also asks for a run at once (「现在先跑一次」「建好马上跑一遍」); Crossline then runs it as soon as it is made. Otherwise false: the trigger is the first run.
 
 ## Line
 

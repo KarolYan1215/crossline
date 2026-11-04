@@ -74,10 +74,12 @@ export type AutomationPlan = {
   replaces: string;
   /** False when the request is to stop one for now (「先停掉那个网页监控」); it is kept, paused. */
   enabled: boolean;
+  /** True when the request also asks for one run at once (「现在先跑一次」); otherwise the trigger is the first run. */
+  runNow: boolean;
 };
 const str = (max: number) => ({ type: "string", maxLength: max }) as const;
 export const AUTOMATION_PLAN_SCHEMA = {
-  type: "object", additionalProperties: false, required: ["name", "summary", "lineId", "trigger", "action", "steps", "assumptions", "replaces", "enabled"], properties: {
+  type: "object", additionalProperties: false, required: ["name", "summary", "lineId", "trigger", "action", "steps", "assumptions", "replaces", "enabled", "runNow"], properties: {
     name: str(40), summary: str(200), lineId: str(64),
     trigger: { type: "object", additionalProperties: false, required: ["type", "time", "days", "hours", "from", "keywords", "url", "event"], properties: {
       type: { type: "string", enum: ["schedule", "interval", "mail", "watch", "file", "task"] }, time: str(5), days: str(40),
@@ -86,7 +88,7 @@ export const AUTOMATION_PLAN_SCHEMA = {
       kind: { type: "string", enum: ["run", "remind"] }, instructions: str(2000), reminder: str(200), category: str(40), outputs: str(300) } },
     steps: { type: "array", minItems: 1, maxItems: 12, items: { type: "object", additionalProperties: false, required: ["title", "by"], properties: {
       title: str(120), by: { type: "string", enum: ["assistant", "person"] } } } },
-    assumptions: str(400), replaces: str(40), enabled: { type: "boolean" } }
+    assumptions: str(400), replaces: str(40), enabled: { type: "boolean" }, runNow: { type: "boolean" } }
 } as const;
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -120,7 +122,7 @@ export const automationStepLeaves = (title: string) => {
 /** Turns the designer's answer into a stored automation's parts, or says what is wrong so the designer can fix it (repair messages). */
 /* i18n-ignore-start */
 export function validateAutomationPlan(value: unknown, lineIds: string[], existingIds: string[] = []):
-  Pick<Automation, "name" | "summary" | "lineId" | "trigger" | "action" | "steps"> & { assumptions: string; replaces: string; enabled: boolean } {
+  Pick<Automation, "name" | "summary" | "lineId" | "trigger" | "action" | "steps"> & { assumptions: string; replaces: string; enabled: boolean; runNow: boolean } {
   const plan = value as AutomationPlan | undefined;
   if (!plan || typeof plan !== "object" || !plan.trigger || !plan.action) return problem("回答缺少 trigger 或 action");
   const replaces = typeof plan.replaces === "string" ? plan.replaces.trim() : "";
@@ -164,7 +166,7 @@ export function validateAutomationPlan(value: unknown, lineIds: string[], existi
   // Anything that sends, uploads, publishes or pays is the person's, whatever the plan says.
   const steps = plan.steps.map((step) => ({ title: step.title.trim(), by: automationStepLeaves(step.title) ? "person" as const : step.by }));
   return { name: plan.name.trim(), summary: plan.summary.trim(), lineId: plan.lineId, trigger, action, steps, assumptions: plan.assumptions.trim(), replaces,
-    enabled: plan.enabled !== false };
+    enabled: plan.enabled !== false, runNow: plan.runNow === true };
 }
 /* i18n-ignore-end */
 
