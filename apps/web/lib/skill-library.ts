@@ -204,7 +204,9 @@ function runningView(store: CrosslineStore, workspaceId: string, id: string, age
 }
 
 function improvementView(store: CrosslineStore, workspaceId: string, record: ReturnType<typeof readGrownSkills>[number], agentRuns: ReturnType<typeof listAgentTasks>): GrownSkillView["improvement"] {
-  const revised = store.listEvents(workspaceId, { type: "skill.grown.revised", entityId: record.id }).at(-1);
+  // The revision that made the version in force: after 回到上一版 the newest revision is no longer it.
+  const revised = store.listEvents(workspaceId, { type: "skill.grown.revised", entityId: record.id })
+    .filter((event) => Number((event.payload as { version?: number }).version) === (record.version ?? 1)).at(-1);
   const since = record.improvedAt ?? record.createdAt;
   const pending = store.listEvents(workspaceId, { type: "skill.grown.feedback", entityId: record.id }).filter((event) => event.createdAt > since)
     .map((event) => String((event.payload as { text?: string }).text ?? "")).filter(Boolean);

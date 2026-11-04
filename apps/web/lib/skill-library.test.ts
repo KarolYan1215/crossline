@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { CrosslineStore, addAiTool, removeAiTool, requestWorkflow, saveMineVersion, writeGrownSkills, writePublicSkills } from "@crossline/db";
+import { CrosslineStore, addAiTool, readGrownSkills, removeAiTool, requestWorkflow, saveMineVersion, writeGrownSkills, writePublicSkills } from "@crossline/db";
 import { currentMineVersion, mineSkillSettingKey, readMineSkill, type PublicSkillRecord } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 import { changeFavouriteTopics, changeGrownSkill, deletePublicSkill, editMineSkill, grownSkillStatus, loadSkillLibrary, restoreMineSkill } from "./skill-library";
@@ -62,6 +62,12 @@ test("a grown workflow shows when it runs, which steps are the person's and what
   expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", { status: "off" })).toEqual({ ok: true });
   expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", { pinned: true })).toEqual({ ok: true });
   expect(loadSkillLibrary(TEST_CTX).grown[0]).toMatchObject({ status: "off", pinned: true });
+  // A revision's changes describe the version it made; after 回到上一版 (version 1 in force) they are not shown as that version's.
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "rev2", type: "skill.grown.revised", entityId: "flow-weekly-vlog-cut",
+    payload: { id: "flow-weekly-vlog-cut", version: 2, changes: "- 首行写结论" } });
+  expect(loadSkillLibrary(TEST_CTX).grown[0]!.improvement).not.toHaveProperty("lastChange");
+  writeGrownSkills(store, ws, readGrownSkills(store, ws).map((item) => ({ ...item, version: 2 })));
+  expect(loadSkillLibrary(TEST_CTX).grown[0]!.improvement).toMatchObject({ version: 2, lastChange: { changes: "- 首行写结论" } });
   expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", "remove")).toEqual({ ok: true });
   expect(changeGrownSkill(TEST_CTX, "flow-weekly-vlog-cut", "remove")).toEqual({ ok: false, code: "SKILL_NOT_FOUND" });
 });
