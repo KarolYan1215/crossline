@@ -2,7 +2,8 @@ import { expect, test, vi } from "vitest";
 import { MAIL_ACCOUNTS_SETTING, MAIL_LOG_SETTING, MAIL_TRIPS_SETTING } from "@crossline/core";
 import type { ImapFactory, SecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
-import { addMailAccount, createMailService, MAIL_TRIAGE_SKILL, mailLookupFor, readNewMail, removeMailAccount, setMailBookkeeping, triageMail } from "./mailbox";
+import { addMailAccount, createMailService, MAIL_TRIAGE_SKILL, mailLookupFor, readNewMail, removeMailAccount, requeueReplies, setMailBookkeeping, triageMail } from "./mailbox";
+import { replyKey } from "./mail-replies";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const memorySecrets = (): SecretStore & { values: Map<string, string> } => {
@@ -219,4 +220,21 @@ test("a company's survey invitation is a promotion, not a todo: the Skill and th
   expect(skill).toMatch(/Course staff.*feedback survey.*\| todo \|/);
   const source = readFileSync(path.resolve(import.meta.dirname, "mailbox.ts"), "utf8");
   expect(source).toContain("a company's survey or feedback invitation");
+});
+
+test("the reply queue: a refusal is tried once more then dropped, a passing trouble and the day's limit stay queued, keyed per mailbox", () => {
+  const item = (uid: number, accountId = "a1", failures?: number) => ({ uid, accountId, uidValidity: "7", from: "x", fromAddress: "x@y.z", to: "", subject: "s", date: "2026-10-19T08:00:00Z",
+    snippet: "", why: "", ...(failures ? { failures } : {}) });
+  const skip = (candidate: Parameters<typeof replyKey>[0], reason: string) => ({ key: replyKey(candidate), reason });
+  const refused = item(1);
+  const once = requeueReplies([refused], [skip(refused, "MAIL_REPLY_DRAFT_INVALID")]);
+  expect(once).toEqual([{ ...refused, failures: 1 }]);
+  expect(requeueReplies(once, [skip(once[0]!, "SKILL_SCHEMA_INVALID")])).toEqual([]);
+  // Passing troubles and the sixth mail of a day are carried over without counting.
+  for (const reason of ["quota", "SKILL_USAGE_LIMIT", "SKILL_STALLED", "CODEX_RUNTIME_EXITED", "daily_limit"]) {
+    expect(requeueReplies([item(2, "a1", 1)], [skip(item(2), reason)])).toEqual([item(2, "a1", 1)]);
+  }
+  expect(requeueReplies([item(3)], [skip(item(3), "already")])).toEqual([]);
+  // The same uid in another mailbox is another message: a skip for one says nothing about the other.
+  expect(requeueReplies([item(4, "a1"), item(4, "a2")], [skip(item(4, "a2"), "quota")])).toEqual([item(4, "a2")]);
 });

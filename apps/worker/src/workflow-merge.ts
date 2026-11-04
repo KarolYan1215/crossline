@@ -49,7 +49,12 @@ export async function workflowMergePass(store: CrosslineStore, workspaceId: stri
   store.deleteSetting(workspaceId, WORKFLOW_MERGE_REQUESTED);
   const records = readGrownSkills(store, workspaceId);
   const byId = new Map(records.map((record) => [record.id, record]));
-  const pairs = workflowMergeCandidates(records, (record) => grownHomeLine(store, workspaceId, record));
+  // A pair the person took apart (撤销合并) stays apart, at any later version: the reviewer's answer for those versions was the
+  // reason it was merged, and asking again would merge it again the next day.
+  const refused = new Set(store.listEvents(workspaceId, { type: "skill.grown.unmerged" })
+    .map((event) => { const payload = event.payload as { keep?: string; absorbed?: string }; return [payload.keep ?? "", payload.absorbed ?? ""].sort().join("|"); }));
+  const pairs = workflowMergeCandidates(records, (record) => grownHomeLine(store, workspaceId, record))
+    .filter((pair) => !refused.has([pair.a, pair.b].sort().join("|")));
   let judged: Record<string, { same: boolean; why: string }> = {};
   try { judged = JSON.parse(store.getSetting(workspaceId, WORKFLOW_MERGE_JUDGED) ?? "{}") as typeof judged; } catch { judged = {}; }
   const open = pairs.filter((pair) => judged[judgedKey(byId.get(pair.a)!, byId.get(pair.b)!)] === undefined).slice(0, MAX_PAIRS);

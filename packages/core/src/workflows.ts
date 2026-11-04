@@ -241,6 +241,11 @@ export type GrownSkillRecord = {
   improvedAt?: string;
   /** Merged into another workflow that does the same job (workflow-merge.ts): switched off, with the status it had, until 撤销合并. */
   mergedInto?: { id: string; at: string; why: string; status: "active" | "off" | "needs_consent" };
+  /**
+   * What the person last agreed it may reach (`agreedScopeOf`): written when they accept its risks, or — for one they never had to — the
+   * version in force when a revision first reached further. Reverting to a version within it switches it back on without asking again.
+   */
+  agreed?: AgreedScope;
 };
 
 /**
@@ -267,12 +272,25 @@ export type GrownSkillVersion = {
  * did not state, or a step leaving the machine that was not there. Such a revision waits for the person's consent again.
  */
 export function revisionWidens(before: WorkflowManifest, after: WorkflowManifest): boolean {
-  const sites = new Set((before.access ?? []).map((item) => `${item.site}|${item.login}`));
-  const risks = new Set(before.risks ?? []);
-  const external = new Set(before.steps.filter((step) => step.external).map((step) => step.title));
+  return widensAgreed(agreedScopeOf(before), after);
+}
+
+/**
+ * What the person agreed a workflow may reach: the sites and logins it reads, the risks it stated and its steps that leave the machine.
+ * `external` is undefined for an agreement recorded before steps were kept with it (an older `skill.grown.consented`): steps are then not compared.
+ */
+export type AgreedScope = { access: WorkflowAccess[]; risks: string[]; external?: string[] };
+export const agreedScopeOf = (manifest: WorkflowManifest): AgreedScope => ({ access: manifest.access ?? [], risks: manifest.risks ?? [],
+  external: manifest.steps.filter((step) => step.external).map((step) => step.title) });
+
+/** Whether a manifest reaches further than what the person agreed to (`revisionWidens` against a recorded agreement). */
+export function widensAgreed(agreed: AgreedScope, after: WorkflowManifest): boolean {
+  const sites = new Set(agreed.access.map((item) => `${item.site}|${item.login}`));
+  const risks = new Set(agreed.risks);
+  const external = agreed.external ? new Set(agreed.external) : undefined;
   return (after.access ?? []).some((item) => !sites.has(`${item.site}|${item.login}`))
     || (after.risks ?? []).some((risk) => !risks.has(risk))
-    || after.steps.some((step) => step.external && !external.has(step.title));
+    || Boolean(external && after.steps.some((step) => step.external && !external.has(step.title)));
 }
 
 export function readGrownLibrary(raw: string | undefined): GrownSkillRecord[] {

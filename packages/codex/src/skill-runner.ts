@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
-import { cleanAnswerStrings, tFor, type Locale } from "@crossline/core";
+import { cleanAnswerStrings, designNoteText, tFor, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, shiftEffort, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
 import { createUsageCollector, currentEffortPreference, currentSpendMode, currentUsageWorkspace, reportUsage, takeMeteredUsage, type UsageCollector } from "./usage";
@@ -252,10 +252,19 @@ function withPersonQuestions(ask: SkillRunOptions<unknown>["askPerson"], fallbac
       });
       return [{ id: item.id, header: typeof item.header === "string" ? item.header : "", question: item.question, options }];
     });
-    const answers = questions.length ? await ask(questions) : {};
-    return { answers: Object.fromEntries(questions.map((question) => [question.id, { answers: answers[question.id] ?? [] }])) };
+    // The runtime asks its own MCP tool approvals through this same request; those are never put to the person. Each is answered
+    // with its cancel option (vendor/codex core/src/mcp_tool_call.rs: anything but an "Allow…" label is Abort).
+    const approvals = questions.filter(isToolApproval);
+    const forPerson = questions.filter((question) => !isToolApproval(question));
+    const answers = forPerson.length ? await ask(forPerson) : {};
+    return { answers: Object.fromEntries([
+      ...forPerson.map((question) => [question.id, { answers: answers[question.id] ?? [] }]),
+      ...approvals.map((question) => [question.id, { answers: [question.options.find((option) => !/^allow\b/i.test(option.label))?.label ?? "Cancel"] }])
+    ]) };
   };
 }
+const isToolApproval = (question: PersonQuestion) =>
+  question.id.startsWith("mcp_tool_call_approval") || question.options.some((option) => /^allow\b/i.test(option.label.trim()));
 const refuseAll = async (): Promise<never> => { throw new Error("nothing on this thread is answered here"); };
 
 function toolAnswerer(tools: SkillTools) {
@@ -1296,6 +1305,18 @@ export function cacheOrderedInput(prepared: unknown, stableKeys: readonly string
 }
 
 /** How the run note is introduced, so the model reads it as part of its instructions for this run. */
+let designNoteProvider: ((workspaceId: string | undefined, skillName: string) => string | undefined) | undefined;
+/** The person's own standing note for a Skill (packages/core/src/personal-design.ts), set by the worker; appended to the run note. */
+export function setDesignNoteProvider(provider: typeof designNoteProvider): void { designNoteProvider = provider; }
+function withDesignNote(runNote: string | undefined, skillName: string): string | undefined {
+  const note = designNoteProvider?.(currentUsageWorkspace(), skillName)?.trim();
+  if (!note) return runNote;
+  const framed = designNoteText(note);
+  return runNote?.trim() ? `${runNote.trim()}
+
+${framed}` : framed;
+}
+
 export const RUN_NOTE_LEAD = "Instructions for this run only (they extend the developer instructions):";
 
 /**
@@ -1346,7 +1367,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted:
       skillName: options.skillName, threadId, outputSchema: schemaForLocale(options.outputSchema, runLocale(options.locale, currentUsageWorkspace())), allowedItemTypes, ...(options.onImage ? { onImage: options.onImage } : {}),
       ...(options.onPlan ? { onPlan: options.onPlan } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
-      firstPrompt: firstPromptTexts(options.skillName, context.extraSkills, prepared, options),
+      firstPrompt: firstPromptTexts(options.skillName, context.extraSkills, prepared, { ...options, runNote: withDesignNote(options.runNote, options.skillName) }),
       ...(options.images?.length ? { images: options.images } : {}),
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),

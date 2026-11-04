@@ -9,7 +9,7 @@ import type { NodeShellLink } from "./node/task-sync";
 import { autoHandoffCandidates, dispatchCandidates, ledgerAsk, ledgerQuestion, retryCandidates, stepDispatchCandidates, taskFromWorkOrder } from "./agent-dispatch";
 import { browserProfilesRoot, sayToPerson, startWorkflowRun } from "./workflow-smith";
 import { localeOf, tOfWorkspace } from "./locale";
-import { ASSISTANT_PREP_HOURS, prepWindow } from "./schedule-window";
+import { prepWindow } from "./schedule-window";
 import { ownerOf } from "./owner";
 
 /**
@@ -88,7 +88,7 @@ export function createAgentService(deps: {
     return createAgentRunner(deps.store, workspaceId, deps.repoRoot, mode === "shell" ? deps.getClient : () => deps.clientFor?.(workspaceId), {
       ...(node ? { node } : {}), ...(deps.confine ? { confine: deps.confine } : {}), outputRoot: deps.outputRoot ?? defaultOutputRoot(), askFor: (id) => ledgerAsk(deps.store, workspaceId, id),
       // A question asked mid-run waits on 待确认 and reaches the phone as well: nobody is watching a background run.
-      questionFor: (id, title) => ledgerQuestion(deps.store, workspaceId, id, title, { onAsked: (questionId, questions) =>
+      questionFor: (id, title) => ledgerQuestion(deps.store, workspaceId, id, title, { signal: control.signal, onAsked: (questionId, questions) =>
         sayToPerson(deps.store, workspaceId, tOfWorkspace(deps.store, workspaceId)("助手在做「{{title}}」时需要本人回答：{{question}}（10 分钟内未回答就按最稳妥的做法继续）",
           { title: title.slice(0, 40), question: questions[0]!.question.slice(0, 160) }),
           "agent_question", questionId, [{ label: tOfWorkspace(deps.store, workspaceId)("去回答"), href: "/approvals#assistant" }]) }),
@@ -265,7 +265,7 @@ export function createAgentService(deps: {
         // next session is waiting for); whole orders; and, with nothing else waiting, a handed-over step whose block is later this week.
         // Preparation and whole errands only within two days of the person's step they serve (docs/work-split.md §4, `prepWindow`):
         // results for later work went unread and were stale by the time it came up.
-        const soon = prepWindow(deps.store, workspaceId, now, ASSISTANT_PREP_HOURS);
+        const soon = prepWindow(deps.store, workspaceId, now);
         // Work that was interrupted (or that the person asked to redo) goes first: it was already under way.
         const retry = retryCandidates(deps.store, workspaceId, now, soon).find(open);
         const flow = retry || flowTried || isPaused(deps.store, workspaceId) ? undefined : flowRetry(workspaceId, now);

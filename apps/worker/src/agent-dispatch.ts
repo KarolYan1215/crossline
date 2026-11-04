@@ -329,24 +329,35 @@ export const QUESTION_UNANSWERED = "本人暂未回答。按最稳妥的做法�
 /**
  * A question the assistant asks mid-run (Codex's `request_user_input`), put to the person the way guard questions are: written to the
  * ledger, shown on 待确认, answered there. Unanswered within ten minutes it expires and the run is told to go on the safest way.
+ * It stops waiting at once when the run is cancelled (`signal`) or has ended (its `agent.task.completed|blocked` is in the ledger), and
+ * expires the question then, so nothing is left open on 待确认 for a run that is gone.
  */
 export function ledgerQuestion(store: CrosslineStore, workspaceId: string, taskId: string, title: string,
-  options: { timeoutMs?: number; pollMs?: number; sleep?: (ms: number) => Promise<void>; onAsked?: (id: string, questions: AgentQuestion[]) => void } = {}) {
+  options: { timeoutMs?: number; pollMs?: number; sleep?: (ms: number) => Promise<void>; onAsked?: (id: string, questions: AgentQuestion[]) => void; signal?: AbortSignal } = {}) {
   const timeoutMs = options.timeoutMs ?? 10 * 60_000;
   const pollMs = options.pollMs ?? 3_000;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() { clearTimeout(timer); options.signal?.removeEventListener("abort", done); resolve(); }
+    options.signal?.addEventListener("abort", done, { once: true });
+  }));
+  const ended = () => Boolean(options.signal?.aborted) || store.listEvents(workspaceId, { type: ["agent.task.completed", "agent.task.blocked"], entityId: taskId }).length > 0;
   return async (questions: AgentQuestion[]): Promise<Record<string, string[]>> => {
     const unanswered = Object.fromEntries(questions.map((question) => [question.id, [QUESTION_UNANSWERED]]));
+    const withAnswers = (answers: Record<string, string[]>) => ({ ...unanswered, ...Object.fromEntries(Object.entries(answers).filter(([, value]) => value.length)) });
+    if (ended()) return unanswered;
     const id = requestAgentQuestion(store, workspaceId, taskId, title, questions);
     if (!id) return unanswered;
     options.onAsked?.(id, questions);
-    for (let waited = 0; waited <= timeoutMs; waited += pollMs) {
+    for (let waited = 0; waited <= timeoutMs && !ended(); waited += pollMs) {
       const answers = agentQuestionAnswers(store, workspaceId, id);
-      if (answers) return { ...unanswered, ...Object.fromEntries(Object.entries(answers).filter(([, value]) => value.length)) };
+      if (answers) return withAnswers(answers);
       await sleep(pollMs);
     }
-    expireAgentQuestion(store, workspaceId, id);
-    return unanswered;
+    // An answer that landed after the last poll wins: expiring refuses it only when none is recorded (one transaction with the answer's).
+    if (expireAgentQuestion(store, workspaceId, id)) return unanswered;
+    const late = agentQuestionAnswers(store, workspaceId, id);
+    return late ? withAnswers(late) : unanswered;
   };
 }
 

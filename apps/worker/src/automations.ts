@@ -46,7 +46,7 @@ function noteRun(store: CrosslineStore, workspaceId: string, run: AutomationRun)
   store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify([...runs(store, workspaceId), run].slice(-100)));
 }
 
-const pendingRequests = (store: CrosslineStore, workspaceId: string) => {
+export const pendingRequests = (store: CrosslineStore, workspaceId: string) => {
   const settled = new Set([...store.listEvents(workspaceId, { type: "automation.created" }), ...store.listEvents(workspaceId, { type: "automation.design_failed" })]
     .map((event) => String((event.payload as { requestId?: string }).requestId ?? "")));
   return store.listEvents(workspaceId, { type: "automation.requested" }).filter((event) => !settled.has(event.entityId));
@@ -215,19 +215,45 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
         [{ label: t("查看", { context: "view" }), href: "/settings#automation" }], at);
     }
   });
-  const state = started.state === "started" ? "started" as const : "queued" as const;
-  if (state === "started") update(deps.store, workspaceId, automation.id, (item) => ({ ...item, lastFiredAt: now.toISOString(), runs: item.runs + 1 }));
-  const run = { ...base, taskId: state === "started" ? taskId : "", state, ...(state === "queued" ? { detail: started.state === "blocked" ? started.message : t("等待批准这类工作") } : {}) };
+  if (started.state === "started") {
+    update(deps.store, workspaceId, automation.id, (item) => ({ ...item, lastFiredAt: now.toISOString(), runs: item.runs + 1 }));
+    const run = { ...base, taskId, state: "started" as const };
+    noteRun(deps.store, workspaceId, run);
+    return run;
+  }
+  // The kind of work switched off, or an assistant that works only for the machine's owner: waiting will not change that, so the firing
+  // is dropped (its time counts as taken, so a schedule does not refire every tick) and the person is told once why.
+  if (started.state === "needs_category_approval" || started.code === "AGENT_OWNER_ONLY") {
+    const code = started.state === "needs_category_approval" ? `category:${started.category}` : started.code;
+    const detail = started.state === "needs_category_approval"
+      ? t("助手的「{{category}}」已关闭，在设置里打开后才会运行", { category: t(started.label) }) : started.message;
+    update(deps.store, workspaceId, automation.id, (item) => ({ ...item, lastFiredAt: now.toISOString() }));
+    const run = { ...base, taskId: "", state: "skipped" as const, detail };
+    noteRun(deps.store, workspaceId, run);
+    const told = deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `automation.refused:${automation.id}:${code}`,
+      type: "automation.refused", entityId: automation.id, payload: { code } });
+    if (told.inserted) sayToPerson(deps.store, workspaceId, t("自动化「{{name}}」没有运行：{{detail}}。", { name: automation.name, detail }), "automation_failed",
+      `automation-refused:${automation.id}:${code}`, [{ label: t("去设置"), href: "/settings#automation" }], now);
+    return run;
+  }
+  const run = { ...base, taskId: "", state: "queued" as const, detail: started.message };
   // A queued firing is noted once, when it first waits; its retries are noted only when one starts.
-  if (!(retry && state === "queued")) noteRun(deps.store, workspaceId, run);
+  if (!retry) noteRun(deps.store, workspaceId, run);
+  return run;
+}
+
+/** A firing that has to wait (the assistant busy) is queued: a watched page's change, a new file or a task event is seen once, and would otherwise be lost. */
+export function fireOrQueue(deps: AutomationDeps, workspaceId: string, automation: Automation, why: Fire): AutomationRun {
+  const run = fire(deps, workspaceId, automation, why);
+  if (run.state === "queued") saveQueue(deps.store, workspaceId, [...queue(deps.store, workspaceId), { ...why, automationId: automation.id, at: (deps.now?.() ?? new Date()).toISOString() }]);
   return run;
 }
 
 /** Firings that could not start (the assistant busy): retried on the next ticks, oldest first, for a day. */
-const QUEUE_SETTING = "automations.queue";
-type Queued = Fire & { automationId: string; at: string };
-const queue = (store: CrosslineStore, workspaceId: string): Queued[] => { try { return JSON.parse(store.getSetting(workspaceId, QUEUE_SETTING) ?? "[]") as Queued[]; } catch { return []; } };
-const saveQueue = (store: CrosslineStore, workspaceId: string, items: Queued[]) => store.setSetting(workspaceId, QUEUE_SETTING, JSON.stringify(items.slice(-30)));
+export const QUEUE_SETTING = "automations.queue";
+export type Queued = Fire & { automationId: string; at: string };
+export const queue = (store: CrosslineStore, workspaceId: string): Queued[] => { try { return JSON.parse(store.getSetting(workspaceId, QUEUE_SETTING) ?? "[]") as Queued[]; } catch { return []; } };
+export const saveQueue = (store: CrosslineStore, workspaceId: string, items: Queued[]) => store.setSetting(workspaceId, QUEUE_SETTING, JSON.stringify(items.slice(-30)));
 
 /** New mail fired at the engine (from the mailbox pass): each matching automation is queued once per batch. */
 export function onNewMail(store: CrosslineStore, workspaceId: string, messages: NewMail[], now = new Date()): number {
@@ -267,22 +293,19 @@ export async function automationPass(deps: AutomationDeps, workspaceId: string):
   }
   saveQueue(deps.store, workspaceId, left);
   const busy = () => fired.some((run) => run.state === "queued");
-  // A firing that has to wait (the assistant busy) is queued like a mail firing: a watched page's change, a new file or a task event
-  // is seen once, and would otherwise be lost.
-  const fireOrQueue = (automation: Automation, why: Fire): AutomationRun => {
-    const run = fire(deps, workspaceId, automation, why);
-    if (run.state === "queued") saveQueue(deps.store, workspaceId, [...queue(deps.store, workspaceId), { ...why, automationId: automation.id, at: now.toISOString() }]);
-    return run;
-  };
   for (const automation of active()) {
     if (busy()) break;
     const { trigger } = automation;
     if (trigger.type === "schedule" || trigger.type === "interval") {
-      if (timeTriggerDue(automation, now, deps.zone(workspaceId))) fired.push(fireOrQueue(automation, { reason: trigger.type === "schedule" ? t("到了设定时间（{{when}}）", { when: triggerLabel(trigger, locale) }) : triggerLabel(trigger, locale), context: "" }));
+      if (timeTriggerDue(automation, now, deps.zone(workspaceId))) fired.push(fireOrQueue(deps, workspaceId, automation, { reason: trigger.type === "schedule" ? t("到了设定时间（{{when}}）", { when: triggerLabel(trigger, locale) }) : triggerLabel(trigger, locale), context: "" }));
     } else if (trigger.type === "watch") {
       if (!timeTriggerDue(automation, now, deps.zone(workspaceId))) continue;
       const page = await safeGet(trigger.url, deps.fetch ?? defaultSafeGetDeps(), { maxBytes: 3_000_000, timeoutMs: 20_000 }).catch(() => undefined);
-      if (!page?.ok) { update(deps.store, workspaceId, automation.id, (item) => ({ ...item, watch: { ...(item.watch ?? { hash: "", excerpt: "" }), checkedAt: now.toISOString() } })); continue; }
+      if (!page?.ok) {
+        const lastError = page ? page.reason : t("打不开");
+        update(deps.store, workspaceId, automation.id, (item) => ({ ...item, watch: { ...(item.watch ?? { hash: "", excerpt: "" }), checkedAt: now.toISOString(), lastError } }));
+        continue;
+      }
       const text = page.contentType.includes("html") ? htmlToText(new TextDecoder().decode(page.bytes)) : new TextDecoder().decode(page.bytes);
       const hash = createHash("sha256").update(text.replace(/\s+/g, " ").trim()).digest("hex");
       const before = automation.watch;
@@ -290,7 +313,7 @@ export async function automationPass(deps: AutomationDeps, workspaceId: string):
       // The first read is the baseline; a change after it fires, with the lines that are new.
       if (before?.hash && before.hash !== hash) {
         const added = addedLines(before.excerpt, text.slice(0, 6000));
-        fired.push(fireOrQueue(automation, { reason: t("{{url}} 的内容变了", { url: trigger.url }),
+        fired.push(fireOrQueue(deps, workspaceId, automation, { reason: t("{{url}} 的内容变了", { url: trigger.url }),
           // i18n-ignore: what the run is told (model-facing)
           context: `页面 ${trigger.url} 新出现的内容：\n${added.length ? added.map((line) => `- ${line}`).join("\n") : "（文字有改动，但没有整行新增；用 web_fetch 打开页面看）"}` }));
       }
@@ -298,7 +321,7 @@ export async function automationPass(deps: AutomationDeps, workspaceId: string):
       const since = automation.lastFiredAt ?? automation.createdAt;
       const docs = deps.store.listSourceDocuments(workspaceId).filter((doc) => doc.createdAt > since && doc.extractionStatus !== "pending"
         && fileMatches(trigger, { fileName: doc.fileName, text: doc.extractedText }));
-      if (docs.length) fired.push(fireOrQueue(automation, { reason: t("新添加了 {{count}} 个文件", { count: docs.length }),
+      if (docs.length) fired.push(fireOrQueue(deps, workspaceId, automation, { reason: t("新添加了 {{count}} 个文件", { count: docs.length }),
         // i18n-ignore: what the run is told (model-facing)
         context: `新文件（用 read_document 按 id 读）：\n${docs.slice(0, 20).map((doc) => `- id ${doc.id} · ${doc.fileName}`).join("\n")}`,
         inputs: docs.slice(0, 20).map((doc) => doc.uri.replace(/^file:\/\//, "")) }));
@@ -310,7 +333,7 @@ export async function automationPass(deps: AutomationDeps, workspaceId: string):
       if (trigger.event === "accepted") {
         const done = deps.store.listEvents(workspaceId, { type: "work_order.transitioned" })
           .filter((event) => event.createdAt > since && (event.payload as { to?: string }).to === "accepted" && ofLine(event.entityId)).map((event) => event.entityId);
-        if (done.length) fired.push(fireOrQueue(automation, { reason: t("{{count}} 个任务完成验收", { count: done.length }),
+        if (done.length) fired.push(fireOrQueue(deps, workspaceId, automation, { reason: t("{{count}} 个任务完成验收", { count: done.length }),
           // i18n-ignore: what the run is told (model-facing)
           context: `完成的任务（用 read_task 按 id 读）：\n${[...new Set(done)].slice(0, 10).map((id) => `- id ${id} · ${title(id)}`).join("\n")}` }));
       } else {
@@ -318,7 +341,7 @@ export async function automationPass(deps: AutomationDeps, workspaceId: string):
         const lastDay = automation.lastFiredAt ? new Intl.DateTimeFormat("en-CA", { timeZone: deps.zone(workspaceId), year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(automation.lastFiredAt)) : "";
         const today = new Intl.DateTimeFormat("en-CA", { timeZone: deps.zone(workspaceId), year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
         const due = [...orders.values()].filter((order) => !["accepted", "archived"].includes(order.state) && (order.payload as { dueDate?: string }).dueDate === tomorrow && ofLine(order.id));
-        if (due.length && lastDay !== today) fired.push(fireOrQueue(automation, { reason: t("{{count}} 个任务明天到期", { count: due.length }),
+        if (due.length && lastDay !== today) fired.push(fireOrQueue(deps, workspaceId, automation, { reason: t("{{count}} 个任务明天到期", { count: due.length }),
           // i18n-ignore: what the run is told (model-facing)
           context: `明天到期的任务（用 read_task 按 id 读）：\n${due.slice(0, 10).map((order) => `- id ${order.id} · ${title(order.id)}`).join("\n")}` }));
       }
@@ -351,7 +374,8 @@ export function createAutomationService(deps: AutomationDeps & { afterRequest?: 
         const automation = read(deps.store, workspaceId).find((item) => item.id === id);
         const t = tFor(localeOf(deps.store, workspaceId));
         if (!automation) return { status: 404, body: { ok: false, blocker: { code: "AUTOMATION_NOT_FOUND", message: t("找不到这个自动化。") } } };
-        const run = fire(deps, workspaceId, automation, { reason: t("本人点了立即运行"),
+        // The assistant busy: the firing waits in the queue like any other instead of being lost.
+        const run = fireOrQueue(deps, workspaceId, automation, { reason: t("本人点了立即运行"),
           context: automation.trigger.type === "watch" ? `要看的页面：${automation.trigger.url}` : "" }); // i18n-ignore: model-facing
         return { status: 200, body: { ok: run.state !== "skipped", run } };
       }

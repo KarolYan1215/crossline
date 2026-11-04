@@ -2,13 +2,13 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
+import { DEVICE_LIMITS, RECORDING_TRANSCRIBED_EVENT, SLEEP_TRACKING_CONSENT, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
 import { createMemorySecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
 import { ACTIVITY_DETAIL_CONSENT, LOCAL_ACTIVITY_CONSENT } from "../activity-recorder";
 import { createDeviceLinkService, DEVICE_SECRET_NAME, DEVICE_SECRET_SLOT, linkFile, nodeEnabled, readDeviceLink, standardDeviceService } from "./link";
 import { DEVICE_PASSES, MODEL_PASSES, PRIMARY_ONLY_PASSES, passesFor, workerMode } from "./mode";
-import { activityItem, appToken, buildActivityPayload, readDeviceState, recordingItems, sourceItems } from "./payloads";
+import { activityItem, appToken, buildActivityPayload, readDeviceState, recordingItems, reviveDocuments, sourceItems, tooLargeForSite } from "./payloads";
 
 let dir: string;
 let store: CrosslineStore;
@@ -146,6 +146,30 @@ test("folder files are queued once each by sha256, transcripts go as recordings,
   store.deleteSourceDocument(ws, "d1");
   store.setSetting(ws, sourceFolderIndexSetting("f1"), JSON.stringify({ "录音.m4a": { size: 1, mtimeMs: 1, documentId: "d2", audio: "done" } }));
   expect(sourceItems(store, ws, state).map((item) => item.body)).toEqual([{ remove: ["a".repeat(64)] }]);
+});
+
+test("folder batches are counted in bytes, so Chinese files fit the site's limit; a batch refused for size is sent again", () => {
+  store.setSetting(ws, SOURCE_FOLDERS_SETTING, JSON.stringify([{ id: "f1", path: "C:/notes", label: "notes", addedAt: "" }]));
+  const owner = store.getWorkspaceOwnerId(ws)!;
+  const index: Record<string, unknown> = {};
+  // Three files of 1.2M Chinese characters: 3.6 MB each, under the old 3M-character batch twice over and over 8 MB together.
+  for (const n of [1, 2, 3]) {
+    store.saveSourceDocument({ id: `d${n}`, ownerId: owner, workspaceId: ws, kind: "text", fileName: `notes/${n}.txt`, mediaType: "text/plain", sha256: String(n).repeat(64),
+      uri: "file:///x", extractedText: "讲".repeat(1_200_000), extractionStatus: "done", createdAt: "2026-11-01T00:00:00.000Z" });
+    index[`${n}.txt`] = { size: 1, mtimeMs: 1, documentId: `d${n}`, created: true };
+  }
+  store.setSetting(ws, sourceFolderIndexSetting("f1"), JSON.stringify(index));
+  const state = readDeviceState(dir);
+  const batches = sourceItems(store, ws, state).filter((item) => item.id.startsWith("sources:"));
+  expect(batches.length).toBeGreaterThan(1);
+  for (const batch of batches) expect(Buffer.byteLength(JSON.stringify(batch.body))).toBeLessThanOrEqual(DEVICE_LIMITS.bodyBytes);
+  expect(batches.some(tooLargeForSite)).toBe(false);
+
+  // A batch made before (all three at once) went to dead/ with 413: its documents are unmarked and queued again.
+  const old = { route: "/api/device/sources", body: { documents: [1, 2, 3].map((n) => ({ sha256: String(n).repeat(64), text: "讲".repeat(1_200_000) })) } };
+  expect(tooLargeForSite(old)).toBe(true);
+  expect(reviveDocuments(state, [old])).toBe(3);
+  expect(sourceItems(store, ws, state).filter((item) => item.id.startsWith("sources:")).length).toBe(batches.length);
 });
 
 test("linking checks the token against the site before keeping it, keeps the token only in the secret store, and restarts the worker", async () => {

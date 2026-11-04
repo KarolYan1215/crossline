@@ -10,7 +10,7 @@ import {
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { mailRepliesView, recordMoneyEvidence, voidByEvidence, type CrosslineStore } from "@crossline/db";
 import type { MailLookup } from "./agent-tools";
-import { draftReplies, followUpReplies, type ReplyCandidate } from "./mail-replies";
+import { draftReplies, followUpReplies, replyKey, type ReplyCandidate } from "./mail-replies";
 import { identityLines } from "./lines";
 import { addMailCandidate, mailCandidateLine, opportunityAgentOn } from "./opportunities";
 import { ownerOf } from "./owner";
@@ -323,11 +323,31 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   return { state: "done", captured, replies, sorted: log.length, needsReply, recorded };
 }
 
-/** Messages that need a reply whose draft failed for a passing reason (the model, the quota): drafted with a later pass, for three days. */
-const REPLY_QUEUE_SETTING = "mail.replyQueue";
-const replyQueueOf = (store: CrosslineStore, workspaceId: string): ReplyCandidate[] => { try { return JSON.parse(store.getSetting(workspaceId, REPLY_QUEUE_SETTING) ?? "[]") as ReplyCandidate[]; } catch { return []; } };
-/** Reasons a draft is not written that will not pass by themselves: such messages are not queued again. */
-const FINAL_SKIPS = new Set(["already", "daily_limit", "off", "muted"]);
+/**
+ * Messages that need a reply whose draft was not written yet: drafted with a later pass, for three days. A passing reason (the quota, the
+ * runtime, a stall, the day's five drafts already written) keeps one queued; any other refusal (an answer the validator would not take)
+ * is tried once more and then given up (`failures`).
+ */
+export const REPLY_QUEUE_SETTING = "mail.replyQueue";
+export type QueuedReply = ReplyCandidate & { failures?: number };
+export const replyQueueOf = (store: CrosslineStore, workspaceId: string): QueuedReply[] => { try { return JSON.parse(store.getSetting(workspaceId, REPLY_QUEUE_SETTING) ?? "[]") as QueuedReply[]; } catch { return []; } };
+/** Reasons a draft is not written that will not pass by themselves and need no retry: such messages are not queued again. */
+const FINAL_SKIPS = new Set(["already", "off", "muted"]);
+/** Reasons that pass by themselves: kept queued however often they come back. `daily_limit` carries the message over to the next day. */
+export const TRANSIENT_REPLY_SKIP = /^(quota|no_client|daily_limit|SKILL_USAGE_LIMIT|SKILL_TIMEOUT|SKILL_STALLED|SKILL_THREAD_LOST|SKILL_RUNTIME_FAILED|SKILL_CANCELED|SKILL_LIST_FAILED|RUNTIME_|CODEX_|MODEL_SPONSOR_|RATE_LIMIT|BUDGET_)/;
+/** Refusals that are not passing before a message is given up: the first refusal, then one retry. */
+export const REPLY_FAILURES_MAX = 2;
+/** What goes back in the queue after a drafting pass: passing reasons as they were, other refusals counted, final ones and spent ones dropped. */
+export function requeueReplies(candidates: QueuedReply[], skipped: Array<{ key: string; reason: string }>): QueuedReply[] {
+  const reasons = new Map(skipped.map((item) => [item.key, item.reason]));
+  return candidates.flatMap((item) => {
+    const reason = reasons.get(replyKey(item));
+    if (!reason || FINAL_SKIPS.has(reason)) return [];
+    if (TRANSIENT_REPLY_SKIP.test(reason)) return [item];
+    const failures = (item.failures ?? 0) + 1;
+    return failures >= REPLY_FAILURES_MAX ? [] : [{ ...item, failures }];
+  }).slice(-20);
+}
 
 /**
  * The tick's pass and the supervisor's `/v1/mail*` routes. `sortAllowed` is the quota and pause check for sorting (it is intake work);
@@ -388,9 +408,8 @@ export function createMailService(deps: MailDeps & { cwd: string; client: (works
       const candidates = [...queued, ...(sorted?.state === "done" ? sorted.needsReply : [])];
       if (deps.dataDir && candidates.length) {
         drafts = allowed ? await draftReplies(replyDeps(workspaceId), workspaceId, candidates)
-          : { drafted: 0, notNeeded: 0, skipped: candidates.map((item) => ({ uid: item.uid, reason: "quota" })) };
-        const retry = new Set(drafts.skipped.filter((item) => !FINAL_SKIPS.has(item.reason)).map((item) => item.uid));
-        deps.store.setSetting(workspaceId, REPLY_QUEUE_SETTING, JSON.stringify(candidates.filter((item) => retry.has(item.uid)).slice(-20)));
+          : { drafted: 0, notNeeded: 0, skipped: candidates.map((item) => ({ uid: item.uid, key: replyKey(item), reason: "quota" })) };
+        deps.store.setSetting(workspaceId, REPLY_QUEUE_SETTING, JSON.stringify(requeueReplies(candidates, drafts.skipped)));
       }
       // The follow-up needs no model: answers found in the sent folders close drafts, quiet moments let held messages out.
       let followUp: Awaited<ReturnType<typeof followUpReplies>> | undefined;

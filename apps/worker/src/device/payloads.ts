@@ -143,15 +143,35 @@ export function sourceItems(store: CrosslineStore, workspaceId: string, state: D
   for (const doc of docs) {
     if (state.documents[doc.id] === doc.sha256 || doc.extractionStatus === "pending") continue;
     const folder = byDocument.get(doc.id)!;
-    const text = doc.extractedText.slice(0, DEVICE_LIMITS.text);
-    if (batch.length >= 5 || bytes + text.length > 3_000_000) flush();
+    // Counted in bytes as sent (JSON, UTF-8): the site refuses a body over `bodyBytes`, and Chinese text is three bytes a character.
+    let text = doc.extractedText.slice(0, DEVICE_LIMITS.text);
+    while (jsonBytes(text) > DOCUMENT_BYTES) text = text.slice(0, Math.floor(text.length * 0.8));
+    const size = jsonBytes(text);
+    if (batch.length >= 5 || bytes + size > BATCH_BYTES) flush();
     batch.push({ sha256: doc.sha256, fileName: doc.fileName, folderId: folder.id, status: doc.extractionStatus, ...(doc.extractionNote ? { note: doc.extractionNote } : {}),
       text, createdAt: doc.createdAt });
-    bytes += text.length;
+    bytes += size;
     state.documents[doc.id] = doc.sha256;
   }
   flush();
   return items;
+}
+/** A batch's room in bytes: the site's body limit less a megabyte for names, notes and the JSON around them. */
+const BATCH_BYTES = DEVICE_LIMITS.bodyBytes - 1_000_000;
+const DOCUMENT_BYTES = BATCH_BYTES;
+const jsonBytes = (text: string) => Buffer.byteLength(JSON.stringify(text));
+
+/**
+ * A folder batch the site refused for its size (counted in characters before 2026-11-04, so Chinese files went over the byte limit):
+ * its documents were marked queued, so they are unmarked here and the next pass sends them again in batches that fit.
+ */
+export const tooLargeForSite = (item: { route: string; body: unknown }) =>
+  item.route === "/api/device/sources" && Array.isArray((item.body as { documents?: unknown }).documents) && Buffer.byteLength(JSON.stringify(item.body)) > DEVICE_LIMITS.bodyBytes;
+export function reviveDocuments(state: DeviceState, items: Array<{ body: unknown }>): number {
+  const shas = new Set(items.flatMap((item) => ((item.body as { documents?: Array<{ sha256?: unknown }> }).documents ?? []).map((doc) => String(doc.sha256 ?? ""))));
+  let revived = 0;
+  for (const [id, sha] of Object.entries(state.documents)) if (shas.has(sha)) { delete state.documents[id]; revived += 1; }
+  return revived;
 }
 
 /** Transcripts and silent recordings not yet queued, a few to an item. Marks what it queued in `state`. */

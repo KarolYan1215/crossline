@@ -10,7 +10,7 @@ type View = { automations: AutomationView[]; runs: RunView[]; pending: Array<{ i
 
 const post = (url: string, body: unknown, method = "POST") => fetch(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   .then(async (response) => ({ ok: response.ok, body: await response.json().catch(() => ({})) as Record<string, unknown> })).catch(() => ({ ok: false, body: {} as Record<string, unknown> }));
-const RUN_STATE: Record<string, string> = { started: "已开始", reminded: "已提醒", queued: "等助手空出来", skipped: "今天次数已满" };
+const RUN_STATE: Record<string, string> = { started: "已开始", reminded: "已提醒", queued: "等助手空出来", skipped: "未运行" };
 const day = (iso: string) => iso ? `${iso.slice(5, 10).replace("-", "/")} ${iso.slice(11, 16)}` : "";
 
 /**

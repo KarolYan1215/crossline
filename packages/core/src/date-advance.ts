@@ -80,13 +80,13 @@ export type ResultMove =
   | { taskId: string; action: "expire" };
 
 /** What the daily pass does with each result still waiting for the person. Results already settled or for finished work are left alone. */
-export function advanceResults(rows: AdvanceResultRow[], now: Date): ResultMove[] {
+export function advanceResults(rows: AdvanceResultRow[], now: Date, reviewDays = RESULT_REVIEW_DAYS): ResultMove[] {
   const replaced = supersededResults(rows.filter((row) => !row.settled));
   return rows.filter((row) => row.status === "needs_review" && !row.settled && !row.orderGone).flatMap((row): ResultMove[] => {
     const by = replaced.get(row.taskId);
     if (by) return [{ taskId: row.taskId, action: "supersede", by }];
     const ageDays = (now.getTime() - Date.parse(row.completedAt ?? row.requestedAt)) / DAY;
-    if (adoptable(row)) return ageDays >= RESULT_REVIEW_DAYS ? [{ taskId: row.taskId, action: "adopt" }] : [];
+    if (adoptable(row)) return ageDays >= reviewDays ? [{ taskId: row.taskId, action: "adopt" }] : [];
     return ageDays > RESULT_EXPIRE_DAYS ? [{ taskId: row.taskId, action: "expire" }] : [];
   });
 }

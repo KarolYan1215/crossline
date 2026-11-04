@@ -1,7 +1,7 @@
 import {
   AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, AI_TOOLS_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, RUNTIME_OWNER_SETTING, GROWN_LIBRARY_SETTING, SKILL_LIBRARY_SETTING, allAiTools, detectedAiTools, personAiTool, readPersonAiTools, categoryFromWording, grownSkillFilesKey, grownSkillId, isScriptFile, mineSkillSettingKey, publicSkillFilesKey, scriptsAllowable, scriptsDigest, scriptsRunnable,
-  readGrownLibrary, readMineSkill, readSkillLibrary, tFor, GROWN_VERSIONS_KEPT, WORKFLOW_FEEDBACK_EVENT, grownVersionsKey, revisionWidens,
-  type AiTool, type GrownSkillRecord, type GrownSkillVersion, type WorkflowManifest, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
+  readGrownLibrary, readMineSkill, readSkillLibrary, tFor, GROWN_VERSIONS_KEPT, WORKFLOW_FEEDBACK_EVENT, grownVersionsKey, agreedScopeOf, widensAgreed,
+  type AgreedScope, type AiTool, type GrownSkillRecord, type WorkflowAccess, type GrownSkillVersion, type WorkflowManifest, type PublicSkillRecord, type StoredMineSkill, type Weekday, type WorkflowSchedule
 } from "@crossline/core";
 import { createHash, randomUUID } from "node:crypto";
 import type { CrosslineStore } from "./index";
@@ -117,10 +117,29 @@ export function consentToGrownSkill(store: CrosslineStore, workspaceId: string, 
   const record = records.find((item) => item.id === id);
   if (!record || record.status !== "needs_consent") return false;
   const at = now.toISOString();
-  writeGrownSkills(store, workspaceId, records.map((item) => item.id === id ? { ...item, status: "active" as const, consentedAt: at, updatedAt: at } : item));
+  const agreed = agreedScopeOf(record.manifest);
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id === id ? { ...item, status: "active" as const, consentedAt: at, agreed, updatedAt: at } : item));
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.consented:${id}:${at}`, type: "skill.grown.consented",
-    entityId: id, payload: { id, access: record.manifest.access ?? [], risks: record.manifest.risks ?? [] } });
+    entityId: id, payload: { id, access: agreed.access, risks: agreed.risks, external: agreed.external ?? [], version: record.version ?? 1 } });
   return true;
+}
+
+/**
+ * What the person last agreed a workflow may reach: kept on the record since 2026-11-04, else read from their latest acceptance of its
+ * risks (older ones recorded sites and risks, not steps). Undefined when they never agreed to anything about it.
+ */
+export function agreedScope(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord): AgreedScope | undefined {
+  if (record.agreed) return record.agreed;
+  const event = store.listEvents(workspaceId, { type: "skill.grown.consented", entityId: record.id }).at(-1);
+  if (!event) return undefined;
+  const payload = event.payload as { access?: WorkflowAccess[]; risks?: string[]; external?: string[] };
+  return { access: payload.access ?? [], risks: payload.risks ?? [], ...(payload.external ? { external: payload.external } : {}) };
+}
+
+/** The number a new version of a workflow gets: past every number it ever had, a reverted one included, so no two versions share one. */
+export function nextGrownVersion(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord): number {
+  const revised = store.listEvents(workspaceId, { type: "skill.grown.revised", entityId: record.id }).map((event) => Number((event.payload as { version?: number }).version) || 0);
+  return Math.max(record.version ?? 1, ...readGrownVersions(store, workspaceId, record.id).map((version) => version.version), ...revised) + 1;
 }
 
 /** Records that the person finished logging in to a service a workflow reads (the browser window they logged in with was closed). */
@@ -219,10 +238,13 @@ export const TOOLS_ASSISTANT_GOOD_FOR = "整份做琐事：汇集与整理材料
  * How the assistant works for this workspace: `shell` on the machine owner's own Codex (everything the computer can do, behind the
  * guard), `tools` for everyone else — Crossline's own functions (agent-tools.ts), on whatever model serves the account.
  */
+/** The worker's own sandbox probe result for this account (`ok`, else why not); written by its self-check (self-check-host.ts). */
+export const SANDBOX_SHELL_SETTING = "assistant.sandboxShell";
+
 export function assistantMode(store: CrosslineStore, workspaceId: string, env: NodeJS.ProcessEnv = process.env): "shell" | "sandbox" | "tools" {
   // `sandbox` as the server configured it; the worker falls back to tools by itself when a sandbox does not start (sandbox-probe.ts).
   // A node of the account's own with the shell allowed gives it the shell assistant there (docs/compute-node.md P3).
-  return assistantAvailable(store, workspaceId, env) || nodeShellHost(store, workspaceId) ? "shell" : env.CROSSLINE_SANDBOX_SHELL?.trim() === "on" && process.platform === "linux" ? "sandbox" : "tools";
+  return assistantAvailable(store, workspaceId, env) || nodeShellHost(store, workspaceId) ? "shell" : env.CROSSLINE_SANDBOX_SHELL?.trim() === "on" && process.platform === "linux" && store.getSetting(workspaceId, SANDBOX_SHELL_SETTING) === "ok" ? "sandbox" : "tools";
 }
 
 /**
@@ -314,7 +336,7 @@ export function unmergeGrownSkill(store: CrosslineStore, workspaceId: string, ab
   const at = now.toISOString();
   writeGrownSkills(store, workspaceId, records.map((item) => item.id !== absorbId ? item : { ...rest, status: mergedInto.status, updatedAt: at }));
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.unmerged:${absorbId}:${at}`, type: "skill.grown.unmerged",
-    entityId: mergedInto.id, payload: { keep: mergedInto.id, absorbed: absorbId } });
+    entityId: mergedInto.id, payload: { keep: mergedInto.id, absorbed: absorbId, by: "person" } });
   return true;
 }
 
@@ -339,15 +361,19 @@ export function reviseGrownSkill(store: CrosslineStore, workspaceId: string, id:
   const record = records.find((item) => item.id === id);
   if (!record) return undefined;
   const at = now.toISOString();
-  const version = (record.version ?? 1) + 1;
+  const version = nextGrownVersion(store, workspaceId, record);
   const kept: GrownSkillVersion = { version: record.version ?? 1, at: record.improvedAt ?? record.createdAt, replacedBecause: next.changes.slice(0, 600),
     manifest: record.manifest, files: grownFilesOf(store, workspaceId, id), scan: record.scan, review: record.review };
   store.setSetting(workspaceId, grownVersionsKey(id), JSON.stringify([...readGrownVersions(store, workspaceId, id), kept].slice(-GROWN_VERSIONS_KEPT)));
   const manifest = { ...next.manifest, lines: record.manifest.lines };
-  const needsConsent = Boolean(record.manifest.access?.length || manifest.access?.length) && revisionWidens(record.manifest, manifest);
+  // Against what the person agreed to, else the version in force (which they had on): a new site, login, risk or step leaving the
+  // machine waits for them, whether or not the workflow read anything before (one that read nothing used to take a new risk unasked).
+  const agreed = agreedScope(store, workspaceId, record);
+  const baseline: AgreedScope = agreed ? { ...agreed, external: agreed.external ?? agreedScopeOf(record.manifest).external ?? [] } : agreedScopeOf(record.manifest);
+  const needsConsent = record.status === "active" && widensAgreed(baseline, manifest);
   store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: next.files }));
   writeGrownSkills(store, workspaceId, records.map((item) => item.id !== id ? item : { ...item, manifest, files: fileHashes(next.files), scan: next.scan, review: next.review,
-    version, improvedAt: at, updatedAt: at, ...(needsConsent && item.status === "active" ? { status: "needs_consent" as const } : {}) }));
+    version, improvedAt: at, updatedAt: at, ...(needsConsent ? { status: "needs_consent" as const, agreed: baseline } : {}) }));
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.revised:${id}:${version}:${at}`, type: "skill.grown.revised",
     entityId: id, payload: { id, version, changes: next.changes.slice(0, 600), taskId: next.taskId, needsConsent, final: next.review.final } });
   return { version, needsConsent };
@@ -364,11 +390,14 @@ export function revertGrownSkill(store: CrosslineStore, workspaceId: string, id:
   const previous = versions.at(-1);
   if (!record || !previous) return undefined;
   const at = now.toISOString();
+  // Waiting for consent only because the revision reached further: back within what the person agreed to, it is on again.
+  const agreed = record.status === "needs_consent" ? agreedScope(store, workspaceId, record) : undefined;
+  const reactivate = Boolean(agreed && !widensAgreed(agreed, previous.manifest));
   store.setSetting(workspaceId, grownVersionsKey(id), JSON.stringify(versions.slice(0, -1)));
   store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: previous.files }));
   writeGrownSkills(store, workspaceId, records.map((item) => item.id !== id ? item : { ...item, manifest: previous.manifest, files: fileHashes(previous.files),
-    scan: previous.scan, review: previous.review, version: previous.version, improvedAt: at, updatedAt: at }));
+    scan: previous.scan, review: previous.review, version: previous.version, improvedAt: at, updatedAt: at, ...(reactivate ? { status: "active" as const } : {}) }));
   store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.reverted:${id}:${at}`, type: "skill.grown.reverted",
-    entityId: id, payload: { id, from: record.version ?? 1, to: previous.version } });
+    entityId: id, payload: { id, from: record.version ?? 1, to: previous.version, ...(reactivate ? { status: "active" } : {}) } });
   return previous.version;
 }

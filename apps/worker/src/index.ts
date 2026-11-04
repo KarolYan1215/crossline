@@ -4,12 +4,12 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setDesignNoteProvider, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes, nodeComputeOn } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, designSkillNote, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes, nodeComputeOn } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { closeInterruptedCollections, createFavouritesTopicsService, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
 import { workflowImprovePass } from "./workflow-improver";
@@ -37,6 +37,11 @@ import { mailReminderRepair, moneyAskRepair } from "./mail-reminder-repair";
 import { mailRecordsRepair } from "./mail-records-repair";
 import { moneyReportPass } from "./money-report";
 import { dateAdvancePass } from "./date-advance";
+import { outputsProbe, selfCheckPass, type Probe } from "./self-check";
+import { agentQuestionsProbe } from "./self-check-agent";
+import { workflowsProbe } from "./self-check-workflows";
+import { automationsProbe, mailProbe } from "./self-check-mail";
+import { hourly, nodeProbe, remoteBrowserProbe, sandboxProbe } from "./self-check-host";
 import { createWriteLogin } from "./calendar-write-login";
 import { AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, BACKGROUND_PAUSED, DEVICE_TOKEN_SETTING, NODE_COMPUTE_SETTING, NODE_STATUS_SETTING, NODE_TOKEN_SETTING, EVAL_HOLD_FILE, evalHoldActive, backgroundSpend, hoursToOffPeakEnd, sponsorOffPeak, CALENDAR_SYNC_FAILURE, htmlLang, tFor, FIRST_DRAFTS_SETTING, grownSkillName, publicSkillName, pausedKinds, readyToStart, spendAllows, NON_CORE_PURPOSE, type BackgroundKind, type PlanRankingInput, MODEL_EFFORT_SETTING, effortPreferenceOf } from "@crossline/core";
 import { createFlywheelExpander } from "./flywheel";
@@ -827,6 +832,15 @@ async function intakeTick(workspace: { id: string }, checkedAt: string): Promise
   await onboardingExtractPass(workspace.id).catch(() => undefined);
 }
 
+const selfCheckProbes = (): Probe[] => [outputsProbe(analysisStore, defaultOutputRoot()), agentQuestionsProbe(analysisStore), workflowsProbe(analysisStore),
+  sandboxProbe(analysisStore, sandboxNow), nodeProbe(analysisStore, nodeShell), remoteBrowserProbe(analysisStore), mailProbe(analysisStore, dataDir), automationsProbe(analysisStore)];
+async function runSelfCheck(workspaceId: string, force = false) {
+  const results = await selfCheckPass(analysisStore, workspaceId, selfCheckProbes(), { force });
+  const notOk = results?.filter((result) => result.status === "repaired" || result.status === "failing");
+  if (notOk?.length) console.info(JSON.stringify({ type: "selfcheck.ran", workspaceId, results: notOk.map((result) => `${result.id}:${result.status}:${result.code}`) }));
+  return results;
+}
+
 /** Planning, then preparation, for one account; started each tick once that tick's intake for the account has finished (`tick`). */
 async function workspaceTick(workspace: { id: string }, checkedAt: string): Promise<void> {
   // Planning: what was taken in becomes work on the board.
@@ -872,6 +886,8 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
     const learned = lessonsPass(analysisStore, workspace.id);
     if (learned) console.info(JSON.stringify({ type: "lessons.pass", workspaceId: workspace.id, ...learned, checkedAt }));
   } catch (error) { console.warn(JSON.stringify({ type: "lessons.pass_failed", workspaceId: workspace.id, message: error instanceof Error ? error.message : String(error) })); }
+  // Once a day: every feature checks itself; what it can put right it does, what it cannot is said once (self-check.ts).
+  await runSelfCheck(workspace.id).catch((error) => console.warn(JSON.stringify({ type: "selfcheck.failed", workspaceId: workspace.id, message: String(error) })));
   await dedupePass({ store: analysisStore, workspaceId: workspace.id, cwd: repoRoot, client: () => accountClient(workspace.id), spend: () => spendFor(workspace.id), paused: (kind) => paused(workspace.id, kind), enterUsage: enterUsageWorkspace }).catch(() => undefined);
   await titlePass(workspace.id, checkedAt);
   await goalSplitPass(workspace.id, checkedAt);
@@ -1044,7 +1060,8 @@ const modelGateway = await startModelGateway({ resolve: (workspaceId, providerId
 // The developer's model for accounts that redeemed an invite code (sponsor.ts): only when the server has a key and candidates.
 let sponsorService: SponsorService | undefined;
 // The shell assistant for every account inside Codex's Linux sandbox, when the server turned it on and a sandbox really starts here.
-const sandboxShell = probeSandboxShell();
+const sandboxNow = hourly(() => probeSandboxShell());
+const sandboxShell = sandboxNow();
 console.info(JSON.stringify({ type: "worker.sandbox_shell", ...sandboxShell }));
 const modelProviders = createModelProviderService({
   store: analysisStore, secrets, cwd: repoRoot, sponsor: () => sponsorService, sandboxShell: sandboxShell.ok,
@@ -1093,6 +1110,8 @@ setUsageSink((usage) => {
 setSpendModeProvider(async (workspaceId) => backgroundSpend(await readCost(workspaceId)).mode);
 // New model output is written in the workspace's language (docs/i18n.md); read per run, so a switch applies to the next run.
 setLocaleProvider((workspaceId) => workspaceId ? readLocale(analysisStore, workspaceId) : undefined);
+// The person's own note for a Skill (「我的设计」, packages/core/src/personal-design.ts), read per run.
+setDesignNoteProvider((workspaceId, skill) => workspaceId ? designSkillNote(analysisStore, workspaceId, skill) : undefined);
 // The person's 模型强度 (Settings → 模型连接), read per run; only runs on the account's own Codex take it (skill-runner).
 setEffortPreferenceProvider((workspaceId) => effortPreferenceOf(workspaceId ? analysisStore.getSetting(workspaceId, MODEL_EFFORT_SETTING) : null));
 // The one quota gate for every background pass (core: keeps the person's own work moving; discretionary: nobody is waiting on it).
@@ -1334,7 +1353,7 @@ const agentService = createAgentService({
   store: analysisStore, repoRoot, getClient: () => codexSupervisor?.client, readCost: () => readCost(), isOwner: machineOwner,
   // Everyone else's assistant works through Crossline's own functions on the account's own model (docs/personal-agent.md, 2026-10-19).
   // An account whose own computer runs a node with the shell allowed gets the shell assistant there (docs/compute-node.md P3).
-  modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : nodeShell(workspaceId) ? "node" : sandboxShell.ok ? "sandbox" : "tools",
+  modeFor: (workspaceId) => machineOwner(workspaceId) ? "shell" : nodeShell(workspaceId) ? "node" : sandboxNow().ok ? "sandbox" : "tools",
   nodeShell,
   // What a sandboxed run may never read: the server's data and state (every account's ledger, files and runtime homes) — its own task
   // folder and inputs, which live under them, stay reachable because the more specific entry wins.
@@ -1750,7 +1769,10 @@ if (!capabilitySecret) {
       ...(hostedBeta ? { maxRunning: guestRuntimeLimit() ?? 2, idleMs: 10 * 60_000 } : {}) },
     modelProviders: { handle: (method, pathname, workspaceId, body) => modelProviders.handle(method, pathname, workspaceId, body),
       cost: (workspaceId) => modelProviders.cost(workspaceId), afterChatgptCost: (workspaceId, signal) => modelProviders.afterChatgptCost(workspaceId, signal) },
-    services: [{ prefix: "/v1/mail", handle: mailService.handle }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/voice", handle: dictationService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
+    services: [{ prefix: "/v1/mail", handle: mailService.handle },
+      // 系统体检's 「立即自检」.
+      { prefix: "/v1/selfcheck", handle: async (method, pathname, workspaceId) => method === "POST" && pathname === "/v1/selfcheck/run"
+        ? { status: 200, body: { results: await runSelfCheck(workspaceId, true) } } : undefined }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/voice", handle: dictationService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
       { prefix: "/v1/forms", handle: formService.handle }, { prefix: "/v1/apply-profile", handle: formService.handle },
       { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle },
       { prefix: "/v1/workflows/favourites-topics", handle: createFavouritesTopicsService(analysisStore).handle },

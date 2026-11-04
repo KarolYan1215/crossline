@@ -222,14 +222,15 @@ export function createImapMail(server: MailServer, user: string, rawPassword: st
     /**
      * Which of `threads` the person has answered: the sent folder (its special-use flag, else a usual name) is opened read-only and its
      * messages since the oldest thread are matched by In-Reply-To, or by recipient and subject without its 「Re:」. Returns the matched
-     * threads' Message-IDs (or `fromAddress|subject` when a thread has none). No sent folder: nothing matched.
+     * threads' Message-IDs (or `fromAddress|subject` when a thread has none). No sent folder: nothing matched, and `sentFolder: false`
+     * says so (the self-check reports it; answers there can never close a draft).
      */
-    async sentReplies(threads: ReplyThread[]): Promise<string[]> {
-      if (!threads.length) return [];
+    async sentReplies(threads: ReplyThread[]): Promise<{ matched: string[]; sentFolder: boolean }> {
+      if (!threads.length) return { matched: [], sentFolder: true };
       const since = new Date(Math.min(...threads.map((thread) => Date.parse(thread.date) || Date.now())) - 86_400_000);
-      return withBox(sentFolder, async (client) => {
+      return withBox<{ matched: string[]; sentFolder: boolean }>(sentFolder, async (client) => {
         const uids = ((await client.search({ since }, { uid: true })) || []).sort((a, b) => b - a).slice(0, 200);
-        if (!uids.length) return [];
+        if (!uids.length) return { matched: [], sentFolder: true };
         const sent = await client.fetchAll(uids, { uid: true, envelope: true }, { uid: true });
         const matched: string[] = [];
         for (const thread of threads) {
@@ -240,8 +241,8 @@ export function createImapMail(server: MailServer, user: string, rawPassword: st
             matched.push(key);
           }
         }
-        return matched;
-      }, () => []);
+        return { matched, sentFolder: true };
+      }, () => ({ matched: [], sentFolder: false }));
     },
 
     /** One message's text (up to 2 MB of source read), without marking it read. */

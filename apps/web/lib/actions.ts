@@ -9,6 +9,7 @@ import type { EvidenceClaimInput } from "@crossline/db";
 import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, effectiveSchedulePreferences, getStore, saveMilestoneTemplate,
   shiftToday, startWorkOrderExecution, toZonedInstant } from "./crossline";
 import { applySettingChange } from "./setting-change";
+import { applyDesignChange } from "./personal-design";
 import { answerWrapBlock } from "./wrap";
 import { saveSourceFiles } from "./sources";
 import { requestStepReplan, requestTaskPass, settleProvideStep } from "./steps";
@@ -106,6 +107,7 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     return result.ok ? { ok: true, href: "/wrap" } : { ok: false, code: result.code };
   },
   "setting.change": (ctx, args) => applySettingChange(ctx, args),
+  "design.change": (ctx, args) => applyDesignChange(ctx, args),
   // Nothing is changed: a credential or a destructive change is the person's own, on its card.
   "settings.open": (ctx, args) => ({ ok: true, href: `/settings#${args.section}`,
     message: tOf(ctx)("在设置「{{section}}」由本人修改", { section: tOf(ctx)(SETTINGS_SECTIONS[args.section]) }) }),

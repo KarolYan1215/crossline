@@ -106,7 +106,25 @@ Codex 是 vendor 进来的（`vendor/codex`，写这段时是 rust-v0.155.0，20
 - 走模型闸门（共享服务器上与其他后台运行一起排队），跑在账号自己的运行时上；第三方模型也能驱动（`capabilities.shell` 随探测结果打开）。
 - 何时启用：服务器环境 `CROSSLINE_SANDBOX_SHELL=on`，且启动时探测（`apps/worker/src/sandbox-probe.ts`）能找到 bubblewrap 并真正起一个沙箱；否则自动回到工具模式，日志 `worker.sandbox_shell` 写明原因。电脑主人自己的电脑仍是原来的完全权限 shell。
 
-**要在托管服务器上打开，需要本人决定并改部署**（没有改）：镜像里装 `bubblewrap`；worker 容器允许创建用户命名空间（自定义 seccomp 配置或 `seccomp=unconfined`，以及 `apparmor=unconfined`；Ubuntu 23.10+ 还要关 `kernel.apparmor_restrict_unprivileged_userns`）。代价：在共享服务器上运行其他账号的命令，用户命名空间扩大了内核攻击面；CPU 与内存仍受容器上限约束，命令没有网络。
+**要在托管服务器上打开，需要本人决定并改部署**：镜像里已装 `bubblewrap` 与 `python3`（2026-11-04）；还没改的是：worker 容器允许创建用户命名空间（自定义 seccomp 配置或 `seccomp=unconfined`，以及 `apparmor=unconfined`；Ubuntu 23.10+ 还要关 `kernel.apparmor_restrict_unprivileged_userns`）。代价：在共享服务器上运行其他账号的命令，用户命名空间扩大了内核攻击面；CPU 与内存仍受容器上限约束，命令没有网络。
+
+## 8.1 自检与本人的设计（2026-11-04）
+
+本人要求：「不仅要修复功能，还要让 crossline 系统本身具有调试和修复的能力」。分三层：
+
+- **自检**（`apps/worker/src/self-check.ts` `selfCheckPass`，每个账号每天一次，或 设置 → 用量与体检 「立即自检」 → `POST /api/selfcheck` → supervisor `/v1/selfcheck/run`）：每项功能一个探针，结果为 ok / repaired / failing / skipped，存在 `selfcheck.last` 与 `selfcheck.ran` 事件里；修好的只记录，修不好的每周按功能与代码告诉本人一次（`sayToPerson` kind `self_check`）。一个探针抛错算它自己失败（`PROBE_FAILED`），其余照跑。探针：
+  - `outputs`：助手产出的文件夹记在另一台机器上的，按最后一段在本机产出目录下找回；哪里都没有的文件从产出、日程、提醒、打包下载和「已做过」里去掉（`agent.task.files_checked`），不再出现 FILE_NOT_FOUND；托管版没设共享产出目录是失败（`OUTPUT_ROOT_UNSET`，部署脚本现在写 `CROSSLINE_AI_OUTPUT_DIR=/data/ai-output`）。
+  - `assistant`：过期没关的中途提问关掉，运行已结束的问题不再等（`self-check-agent.ts`）。
+  - `workflows`：自建工作流的合并、撤销合并、修订版本与同意范围对得上（`self-check-workflows.ts`）。
+  - `mail` / `automations`：起草失败的回信重排（两次后放弃并说一次），没有已发送文件夹的邮箱说明为何不能自动关草稿；被拒或网页读不到的自动化写明原因（`self-check-mail.ts`）。
+  - `sandbox`：worker 自己的沙箱探测（每小时最多一次）写进账号设置 `assistant.sandboxShell`，网页按它说助手是哪种模式，不再按环境变量许诺一个 worker 已退回的 shell（`self-check-host.ts`）。
+  - `node`：算力节点的 hello 带 `ffmpeg`；没有 FFmpeg 的节点说明做不了音视频（`NODE_FFMPEG_MISSING`）。
+  - `remoteBrowser`：托管登录浏览器的资料夹里被杀掉的 Chromium 留下的 `Singleton*` 锁删掉（没有活的浏览器持有时），虚拟屏幕起不来重启一次。
+- **我的设计**（`packages/core/src/personal-design.ts`，设置 `design.personal`）：本人可改的两层，都先预览、确认才生效、可撤销（`design.` 在 `UNDOABLE_SETTINGS` 里）、可暂停（暂停即回到系统默认）。
+  - 规则阈值（`DESIGN_KNOBS` 白名单，越界拒绝不截断）：教程提前天数、助手提前准备小时、助手成果代为采纳天数、每个重要任务问本人的问题数。
+  - 给各 Skill 的本人指令（≤600 字）：作为该次运行的 run note 附在输入后，写明「安全规则与输出格式优先」，只是偏好，不是授权。
+  - 入口：输入框 `design.change`（卡片上显示 当前 → 改成 与后果）和 设置 → 我的设计（`/api/design`，`preview: true` 只预览）。
+- **改 Crossline 代码本身**不在其中：系统只能改上面白名单里的东西。
 
 ## 7. 没做的
 

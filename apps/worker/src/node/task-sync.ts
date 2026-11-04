@@ -10,6 +10,8 @@ import { TASK_CHUNK_BYTES, type TaskFileEntry, type TaskFileOp } from "./task-fi
  */
 export type NodeShellLink = {
   key: string; host: string; client: CodexRpcBoundary; tasksRoot: string; home: string; windows: boolean;
+  /** False when the node said `ffmpeg` does not run there (older nodes say nothing: undefined). */
+  ffmpeg?: boolean;
   task: (request: TaskFileOp) => Promise<unknown>;
   connected: () => boolean;
 };

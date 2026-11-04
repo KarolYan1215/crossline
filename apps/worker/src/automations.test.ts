@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { AUTOMATION_RUNS_SETTING, AUTOMATIONS_SETTING, readAutomations, validateAutomationPlan, type Automation, type AutomationPlan } from "@crossline/core";
 import { CrosslineStore, readCategories, requestAutomation } from "@crossline/db";
 import type { AgentTaskInput } from "./agent-task";
-import { AUTOMATION_DESIGNER_SKILL, automationPass, designPending, fire, onNewMail, type AutomationDeps } from "./automations";
+import { AUTOMATION_DESIGNER_SKILL, automationPass, createAutomationService, designPending, fire, onNewMail, type AutomationDeps } from "./automations";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const plan = (over: Partial<AutomationPlan> = {}, trigger: Partial<AutomationPlan["trigger"]> = {}): AutomationPlan => ({
@@ -178,4 +178,55 @@ test("each firing goes on in the automation's own conversation: the next run res
   expect(started[1]!.what).toContain("上次运行");
   expect(started[1]!.what).toContain("整理了 3 个新文件");
   expect(started[1]!.inputs?.some((file) => file.replace(/\\/g, "/").endsWith("/out/auto-resume-1/index.md"))).toBe(true);
+});
+
+test("a kind of work switched off or an owner-only assistant drops the firing, says why once, and does not hold up the other automations", async () => {
+  const { store, workspaceId, deps, started } = setup(new Date("2026-10-19T13:05:00Z"));
+  install(store, workspaceId, { id: "auto-off", trigger: { type: "schedule", schedule: { type: "daily", time: "08:00" } } });
+  install(store, workspaceId, { id: "auto-next", trigger: { type: "interval", hours: 4 } });
+  let answer: "category" | "owner" = "category";
+  const refusing: AutomationDeps = { ...deps(), runFree: (_w, input) => {
+    if (input.taskId.startsWith("auto-off")) return answer === "category" ? { state: "needs_category_approval", category: "read_research_organize", label: "读资料、调研、整理" }
+      : { state: "blocked", code: "AGENT_OWNER_ONLY", message: "这台电脑上的助手只为电脑主人工作。" };
+    started.push(input); return { state: "started", taskId: input.taskId }; } };
+  const runs = await automationPass(refusing, workspaceId);
+  expect(runs.map((run) => `${run.automationId}:${run.state}`)).toEqual(["auto-off:skipped", "auto-next:started"]);
+  expect(store.getSetting(workspaceId, "automations.queue")).toBe("[]");
+  // Its time counts as taken: the schedule does not refire on the next tick.
+  expect((await automationPass(refusing, workspaceId)).filter((run) => run.automationId === "auto-off")).toEqual([]);
+  const told = () => store.listRecentNudges(workspaceId, "2026-01-01T00:00:00Z").filter((message) => (message.payload.nudge as { fingerprint: string }).fingerprint.startsWith("automation-refused:"));
+  expect(told()).toHaveLength(1);
+  const automation = readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING)).find((item) => item.id === "auto-off")!;
+  fire(refusing, workspaceId, automation, { reason: "test", context: "" });
+  expect(told()).toHaveLength(1);
+  answer = "owner";
+  expect(fire(refusing, workspaceId, automation, { reason: "test", context: "" }).state).toBe("skipped");
+  expect(told()).toHaveLength(2);
+});
+
+test("立即运行 while the assistant is busy queues the firing, and it starts once the assistant is free", async () => {
+  const { store, workspaceId, deps, started, setBusy } = setup();
+  install(store, workspaceId, { id: "auto-now", trigger: { type: "file", keywords: [] } });
+  const service = createAutomationService(deps());
+  setBusy(true);
+  const answer = await service.handle("POST", "/v1/automations/auto-now/run", workspaceId, {});
+  expect((answer!.body as { run: { state: string } }).run.state).toBe("queued");
+  expect(JSON.parse(store.getSetting(workspaceId, "automations.queue")!)).toHaveLength(1);
+  setBusy(false);
+  await automationPass(deps(), workspaceId);
+  expect(started).toHaveLength(1);
+  expect(started[0]!.what).toContain("本人点了立即运行");
+});
+
+test("a watched page that does not open keeps the reason on the automation, and a read that works clears it", async () => {
+  const { store, workspaceId, deps, setNow } = setup(new Date("2026-10-19T08:00:00Z"));
+  install(store, workspaceId, { id: "auto-watch", trigger: { type: "watch", url: "https://course.example.edu/x", hours: 1 } });
+  const failing: AutomationDeps = { ...deps(), fetch: { isPublicHost: async () => true, fetchImpl: (async () => new Response("no", { status: 503 })) as typeof fetch } };
+  await automationPass(failing, workspaceId);
+  const watch = () => readAutomations(store.getSetting(workspaceId, AUTOMATIONS_SETTING))[0]!.watch;
+  expect(watch()).toMatchObject({ checkedAt: "2026-10-19T08:00:00.000Z", lastError: expect.stringContaining("503") });
+  setNow(new Date("2026-10-19T09:30:00Z"));
+  await automationPass(deps(undefined, ["<html><body>a</body></html>"]), workspaceId);
+  expect(watch()?.lastError).toBeUndefined();
+  expect(watch()?.hash).toBeTruthy();
 });

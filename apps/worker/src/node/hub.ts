@@ -95,7 +95,7 @@ const GONE_SHOWN_MS = 24 * 3_600_000;
 
 type Connection = { socket: WebSocket; workspaceId: string; token: string; client?: JsonLineRpcClient; ready: boolean; heardAt: number;
   host: string; codex: string; role: NodeRole; capacity: number; key: string; browser: boolean;
-  shell?: { tasks: string; home: string; windows: boolean };
+  shell?: { tasks: string; home: string; windows: boolean; ffmpeg?: boolean };
   tasking: Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>;
   browsing: Map<number, { chunks: Buffer[]; resolve: (value: unknown) => void; reject: (error: Error) => void }> };
 let browserIds = 0;
@@ -220,7 +220,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     const windows = hello.platform === "win32";
     const tasks = hello.shell === true ? nodeDir(hello.tasks, windows) : undefined;
     const home = hello.shell === true ? nodeDir(hello.home, windows) : undefined;
-    if (tasks && home) connection.shell = { tasks, home, windows };
+    if (tasks && home) connection.shell = { tasks, home, windows, ...(typeof hello.ffmpeg === "boolean" ? { ffmpeg: hello.ffmpeg } : {}) };
     const server = codexVersionOf({ userAgent: options.serverCodex() });
     // The server's own runtime is not up yet (the worker just restarted and a node was quicker): come back in a moment, not in ten minutes.
     if (!server) { log({ type: "node.server_starting", workspaceId, host: connection.host }); socket.close(4006, "NODE_SERVER_STARTING"); return; }
@@ -359,8 +359,8 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     shellFor: (workspaceId) => {
       const connection = ready(workspaceId).find((item) => item.shell);
       if (!connection?.shell) return undefined;
-      const { tasks, home, windows } = connection.shell;
-      return { key: connection.key, host: connection.host, client: connection.client!, tasksRoot: tasks, home, windows,
+      const { tasks, home, windows, ffmpeg } = connection.shell;
+      return { key: connection.key, host: connection.host, client: connection.client!, tasksRoot: tasks, home, windows, ...(ffmpeg !== undefined ? { ffmpeg } : {}),
         connected: () => isCurrent(connection) && connection.socket.readyState === connection.socket.OPEN,
         task: (request, timeoutMs = 5 * 60_000) => new Promise<unknown>((resolve, reject) => {
           if (!isCurrent(connection)) { reject(new Error("NODE_DISCONNECTED")); return; }

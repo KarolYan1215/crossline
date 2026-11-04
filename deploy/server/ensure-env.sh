@@ -103,3 +103,6 @@ if [ -f /srv/crossline/app.env ] && ! grep -q "^CROSSLINE_SPONSOR_API_KEY=." /sr
   fi
   unset key
 fi
+# Where the assistant's files go, shared by the web and the worker through the data volume (unset, the worker wrote under its own
+# container's home, which the web never saw and a redeploy deleted: 61 of 105 outputs answered FILE_NOT_FOUND).
+ensure /srv/crossline/app.env CROSSLINE_AI_OUTPUT_DIR /data/ai-output

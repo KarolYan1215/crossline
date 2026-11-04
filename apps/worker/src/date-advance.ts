@@ -5,7 +5,7 @@ import {
   advanceResults, conservativeFinish, onPersonsBoard, taskTitleOf, daysBetween, engagementTier, isSittingMilestone, monthDay, overdueTarget, RESULT_EXPIRE_DAYS, RESULT_REVIEW_DAYS, shiftWithChain, tFor, type Locale
 } from "@crossline/core";
 import { localeOf } from "./locale";
-import { DUE_ADVANCED_EVENT, listAgentTasks, overdueStartedTasks, SILENT_TASK_SHIFTS_MAX, reviewAgentTask, settleAgentResult, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
+import { designKnob, DUE_ADVANCED_EVENT, listAgentTasks, overdueStartedTasks, SILENT_TASK_SHIFTS_MAX, reviewAgentTask, settleAgentResult, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
 import { DEADLINE_MARGIN_DAYS } from "@crossline/planner";
 import { localToday } from "./analysis";
 import { ownerOf } from "./owner";
@@ -108,6 +108,7 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   const owner = ownerOf(store, workspaceId);
   const locale = localeOf(store, workspaceId);
   const t = tFor(locale);
+  const reviewDays = designKnob(store, workspaceId, "results.reviewDays");
   const orders = store.listWorkOrders(workspaceId);
   const gone = new Set(orders.filter((order) => order.state === "accepted" || order.state === "archived").map((order) => order.id));
   const outcome: AdvanceOutcome = { superseded: [], adopted: [], expired: [], shifted: [], asked: [], archived: [], drafts: [] };
@@ -116,7 +117,7 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   // 1. Assistant results.
   const rows = listAgentTasks(store, workspaceId, now);
   const byId = new Map(rows.map((row) => [row.taskId, row]));
-  const moves = advanceResults(rows.map((row) => ({ ...row, orderGone: Boolean(row.workOrderId && gone.has(row.workOrderId)) })), now);
+  const moves = advanceResults(rows.map((row) => ({ ...row, orderGone: Boolean(row.workOrderId && gone.has(row.workOrderId)) })), now, reviewDays);
   const reopened: string[] = [];
   for (const move of moves) {
     const row = byId.get(move.taskId)!;
@@ -131,7 +132,7 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
     // A whole-task result that left nothing for the person is handed in as the task's evidence, as the person's 采纳 would; one that left
     // something is accepted as the assistant's part only — the task stays the person's, with what is left written on it.
     const left = row.workOrderId ? leftForPerson(row.directory) : [];
-    const reviewed = reviewAgentTask(store, workspaceId, row.taskId, "accepted", t("交付超过 {{days}} 天无人审阅，自检都通过，系统代为采纳", { days: RESULT_REVIEW_DAYS }),
+    const reviewed = reviewAgentTask(store, workspaceId, row.taskId, "accepted", t("交付超过 {{days}} 天无人审阅，自检都通过，系统代为采纳", { days: reviewDays }),
       { by: "system", deliver: !left.length && !row.needsHuman });
     if (!reviewed.ok) continue;
     reopened.push(row.taskId);
@@ -253,7 +254,7 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
     payload: { day: today, superseded: outcome.superseded, adopted: outcome.adopted.map((item) => item.taskId), expired: outcome.expired,
       shifted: outcome.shifted, asked: outcome.asked.map((item) => item.id), archived: outcome.archived.map((item) => item.id), drafts: outcome.drafts.map((item) => item.id),
       ...(outcome.opId ? { opId: outcome.opId } : {}) } });
-  const text = advanceMessage(outcome, locale);
+  const text = advanceMessage(outcome, locale, reviewDays);
   if (text) sayToPerson(store, workspaceId, text, "date_advance", `date-advance:${today}`, [
     ...(outcome.opId ? [{ label: t("撤销"), action: { action: "undo", summary: t("撤销到期整理"), args: { opId: outcome.opId } } }] : []),
     ...(outcome.asked.length ? [{ label: t("去待确认"), href: "/approvals" }] : [])
@@ -279,11 +280,11 @@ const listed = <T>(items: T[], show: (item: T) => string, locale?: Locale, max =
 };
 
 /** The one message of a pass, in the app's own terms: what moved, why, and where it can be taken back. Empty when nothing happened. */
-export function advanceMessage(outcome: AdvanceOutcome, locale?: Locale): string {
+export function advanceMessage(outcome: AdvanceOutcome, locale?: Locale, reviewDays = RESULT_REVIEW_DAYS): string {
   const t = tFor(locale);
   const quote = (title: string) => locale === "en" ? `"${title.slice(0, 18)}"` : `「${title.slice(0, 18)}」`;
   const left = outcome.adopted.reduce((sum, item) => sum + item.left, 0);
-  const adopted = { count: outcome.adopted.length, days: RESULT_REVIEW_DAYS, left };
+  const adopted = { count: outcome.adopted.length, days: reviewDays, left };
   const parts = [
     outcome.adopted.length ? (left ? t("{{count}} 个助手成果交付超过 {{days}} 天无人审阅、自检都通过，已代为采纳，留给本人的 {{left}} 件事写在各自任务的记录里", adopted)
       : t("{{count}} 个助手成果交付超过 {{days}} 天无人审阅、自检都通过，已代为采纳", adopted)) : "",

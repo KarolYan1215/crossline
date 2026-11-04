@@ -1,4 +1,4 @@
-import { ACTIVITY_HOURLY, BRIEF_TIME_SETTING, DEFAULT_QUIET, QUIET_HOURS_SETTING, atComputerByHour, type ActivityHour, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, activityCategoryLabel, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
+import { readSelfCheck, SELF_CHECK_SETTING, ACTIVITY_HOURLY, BRIEF_TIME_SETTING, DEFAULT_QUIET, QUIET_HOURS_SETTING, atComputerByHour, type ActivityHour, AGENT_HISTORY_CONSENT, AGENT_HISTORY_SUMMARY, activityCategoryLabel, SLEEP_TRACKING_CONSENT, TELEMETRY_ENABLED_SETTING, type ActivityCategory, type AgentHistorySummary } from "@crossline/core";
 import { assistantAvailable, categoryMode, isAutoHandoff, nodeShellHost, readCategories } from "@crossline/db";
 import { AppShell } from "../app-shell";
 import { LocalActivityToggle } from "./local-activity-toggle";
@@ -29,6 +29,9 @@ import { DeviceLocationCard } from "./device-location-card";
 import { deviceLocationState } from "../../lib/device-location";
 import { PhonePush } from "./phone-push";
 import { EffectivenessCard } from "./effectiveness-card";
+import { SelfCheckCard } from "./self-check-card";
+import { DesignCard } from "./design-card";
+import { designView } from "../../lib/personal-design";
 import { AutomationModule, type RecentTask } from "./automation";
 import { BackgroundModule } from "./background-module";
 import { backgroundOverview } from "../../lib/background";
@@ -157,6 +160,7 @@ export default async function SettingsPage() {
     { id: "automation", label: t("自动化与助手"), parts: [{ id: "automations", label: t("自动化") }, { id: "outputs", label: t("助手产出") }] },
     { id: "background", label: t("后台任务") },
     { id: "personal", label: t("个性化") },
+    { id: "design", label: t("我的设计") },
     ...(apply ? [{ id: "apply", label: t("报名资料卡") }] : []),
     ...(opportunity ? [{ id: "opportunity", label: t("机会代理") }] : []),
     { id: "skills", label: t("Skill 库") },
@@ -254,6 +258,10 @@ export default async function SettingsPage() {
           <PersonalizationModule {...loadPreferences(ctx)} />
         </section>
 
+        <section id="design" className="st-section" aria-labelledby="st-design"><h2 id="st-design" className="ds-serif">{t("我的设计")}</h2>
+          <DesignCard {...designView(ctx)} />
+        </section>
+
         <section id="skills" className="st-section" aria-labelledby="st-skills"><h2 id="st-skills" className="ds-serif">{t("Skill 库")}</h2>
           <SkillLibraryLoader />
         </section>
@@ -292,6 +300,7 @@ export default async function SettingsPage() {
           <div className="st-modules">
             <section className="st-card" aria-label={t("系统体检")}><header><h3>{t("系统体检")}</h3><small>{t("每日从账本计算")}</small></header>
               <EffectivenessCard locale={locale} data={await timed("settings.effectiveness", () => memoForAsync(`effectiveness:${ctx.workspaceId}`, 5 * 60_000, () => loadEffectiveness(ctx)))} labels={lineLabels(ctx)} />
+              <SelfCheckCard record={readSelfCheck(store.getSetting(ctx.workspaceId, SELF_CHECK_SETTING))} />
             </section>
             <section className="st-card" aria-label={t("模型额度")}><header><h3>{t("模型额度")}</h3><small>{t("账号的剩余额度与重置时间")}</small></header>
               <QuotaCard locale={locale} signal={quota} now={new Date()} timeZone={zone} />

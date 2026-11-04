@@ -114,6 +114,8 @@ export type AgentTaskRow = {
   settled?: "superseded" | "expired";
   /** Who accepted or rejected it: the person, or the daily pass accepting it in their place (`reviewAgentTask(…, { by: "system" })`). */
   reviewedBy?: "person" | "system";
+  /** The self-check found none of its files on this machine (`agent.task.files_checked`); missing files are already left out of `artifacts`. */
+  filesGone?: boolean;
 };
 export { deliverableKey };
 
@@ -125,15 +127,17 @@ export function projectAgentOutputs(store: CrosslineStore, workspaceId: string, 
   statuses: AgentTaskStatus[] = ["accepted", "needs_review", "running"]): AgentTaskRow[] {
   if (!projectId) return [];
   const orders = new Set(store.listWorkOrders(workspaceId).filter((order) => order.projectId === projectId).map((order) => order.id));
-  return listAgentTasks(store, workspaceId).filter((task) => orders.has(task.workOrderId) && statuses.includes(task.status));
+  // A run whose files are gone is not something that exists: the deliverable may be made again.
+  return listAgentTasks(store, workspaceId).filter((task) => orders.has(task.workOrderId) && statuses.includes(task.status) && !task.filesGone);
 }
 /** A run with no outcome after this long was lost with the process that held it, not still going. */
 const STALE_AFTER_MS = 8 * 3_600_000;
+export const AGENT_FILES_CHECKED = "agent.task.files_checked";
 
 export function listAgentTasks(store: CrosslineStore, workspaceId: string, now = new Date()): AgentTaskRow[] {
   const rows = new Map<string, AgentTaskRow>();
   const events = store.listEvents(workspaceId, { type: ["agent.task.requested", "agent.task.completed", "agent.task.blocked", "agent.task.reviewed",
-    "agent.task.settled", "agent.task.reopened"] });
+    "agent.task.settled", "agent.task.reopened", AGENT_FILES_CHECKED] });
   for (const event of events) {
     const p = event.payload as Record<string, unknown>;
     const taskId = event.entityId;
@@ -155,6 +159,12 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
         partial: p.partial === true, completedAt: event.createdAt,
         external: Array.isArray(p.reviewReasons) && p.reviewReasons.some((reason) => /涉及对外/.test(String(reason))) });
       delete row.settled;
+    } else if (event.type === AGENT_FILES_CHECKED) {
+      // The self-check's finding (apps/worker/src/self-check.ts): the run's folder found under the current root, or the files that are gone.
+      if (typeof p.directory === "string" && p.directory) row.directory = p.directory;
+      const missing = new Set(Array.isArray(p.missing) ? p.missing.map(String) : []);
+      if (missing.size) row.artifacts = row.artifacts.filter((artifact) => !missing.has(artifact.path));
+      if (p.gone === true) row.filesGone = true; else delete row.filesGone;
     } else if (event.type === "agent.task.blocked") {
       Object.assign(row, { status: "blocked", blockerCode: String(p.code ?? ""), blockerMessage: String(p.message ?? ""), durationMs: Number(p.durationMs ?? 0), commands: Number(p.commands ?? 0), denied: Number(p.decisions ?? 0),
         endedAt: event.createdAt, deniedRules: Array.isArray(p.deniedRules) ? p.deniedRules.map(String) : [], siteRefusals: Number(p.siteRefusals ?? 0),
@@ -338,21 +348,25 @@ export function requestAgentQuestion(store: CrosslineStore, workspaceId: string,
 export function answerAgentQuestion(store: CrosslineStore, workspaceId: string, id: string, answers: Record<string, string[]>): boolean {
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   const asked = store.listEvents(workspaceId, { type: "agent.question.requested", entityId: id })[0];
-  if (!ownerId || !asked || agentQuestionClosed(store, workspaceId, id)) return false;
+  if (!ownerId || !asked) return false;
   const ids = new Set(((asked.payload as { questions?: AgentQuestion[] }).questions ?? []).map((question) => question.id));
   const kept = Object.fromEntries(Object.entries(answers).filter(([key, value]) => ids.has(key) && Array.isArray(value))
     .map(([key, value]) => [key, value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim().slice(0, 1000)).slice(0, 6)]));
   if (!Object.values(kept).some((value) => value.length)) return false;
-  return store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:answered:${id}`, type: "agent.question.answered", entityId: id, payload: { id, answers: kept } }).inserted;
+  // Checked and written in one immediate transaction: the web answers and the worker expires from two processes.
+  return store.atomically(() => !agentQuestionClosed(store, workspaceId, id) &&
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:answered:${id}`, type: "agent.question.answered", entityId: id, payload: { id, answers: kept } }).inserted);
 }
 export function agentQuestionAnswers(store: CrosslineStore, workspaceId: string, id: string): Record<string, string[]> | undefined {
   const answered = store.listEvents(workspaceId, { type: "agent.question.answered", entityId: id })[0];
   return answered ? (answered.payload as { answers: Record<string, string[]> }).answers : undefined;
 }
-export function expireAgentQuestion(store: CrosslineStore, workspaceId: string, id: string): void {
+/** Expires an open question; false when it was already answered or expired (never both written: one transaction with the answer's). */
+export function expireAgentQuestion(store: CrosslineStore, workspaceId: string, id: string): boolean {
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
-  if (!ownerId || agentQuestionClosed(store, workspaceId, id)) return;
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:expired:${id}`, type: "agent.question.expired", entityId: id, payload: { id } });
+  if (!ownerId) return false;
+  return store.atomically(() => !agentQuestionClosed(store, workspaceId, id) &&
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:question:expired:${id}`, type: "agent.question.expired", entityId: id, payload: { id } }).inserted);
 }
 const agentQuestionClosed = (store: CrosslineStore, workspaceId: string, id: string) =>
   store.listEvents(workspaceId, { type: "agent.question.answered", entityId: id }).length > 0 || store.listEvents(workspaceId, { type: "agent.question.expired", entityId: id }).length > 0;

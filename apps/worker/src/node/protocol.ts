@@ -27,7 +27,9 @@ export const NODE_PROTOCOL = 1;
 export type NodeFrame =
   | { t: "hello"; protocol: number; codex: string; platform: string; host: string; role?: "device" | "standalone"; capacity?: number; browser?: boolean;
       /** The shell assistant may run here (the person's switch), in task directories under `tasks`; `home` is this computer's user folder (for the guard). */
-      shell?: boolean; tasks?: string; home?: string }
+      shell?: boolean; tasks?: string; home?: string;
+      /** Whether `ffmpeg` runs on this computer: the assistant's audio and video errands need it. */
+      ffmpeg?: boolean }
   | { t: "welcome"; workspaceId: string; roots: string[]; gateway?: string }
   | { t: "rpc"; line: string }
   | { t: "files"; id: number; dir: string }

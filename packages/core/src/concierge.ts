@@ -11,6 +11,7 @@ import type { TaskOpType } from "./assistant-schema";
 import { SHIFT_MINUTES } from "./schedule-frozen";
 import { tFor, type Locale } from "./i18n";
 import { recordProblem } from "./records";
+import { DESIGN_NOTE_MAX, designProblem } from "./personal-design";
 import { SETTING_KEYS, SETTINGS_SECTION_IDS, settingCatalogLines, settingProblem, type SettingKey, type SettingsSection } from "./setting-catalog";
 
 export type ActionRisk = "internal" | "commitment";
@@ -47,6 +48,11 @@ export const ACTIONS = {
    * "" when none) and the new value as text. The card shows 当前 → 改成 and what follows; nothing changes until the person confirms.
    */
   "setting.change": { label: "修改设置", risk: "internal", args: { key: enumOf(SETTING_KEYS), target: str(128), value: str(400) } },
+  /**
+   * The person's own design of Crossline (personal-design.ts): `kind: "knob"` sets one of the whitelisted thresholds, `kind: "skill"` gives
+   * one Skill the person's standing words; an empty `value` resets the knob or removes the note. Previewed, confirmed, undoable.
+   */
+  "design.change": { label: "修改我的设计", risk: "internal", args: { kind: enumOf(["knob", "skill"]), id: str(64), value: str(DESIGN_NOTE_MAX) } },
   /** A credential or a destructive change (a password, a key, deleting the account): a link to the settings card where the person does it. */
   "settings.open": { label: "打开设置", risk: "internal", args: { section: enumOf(SETTINGS_SECTION_IDS), topic: str(60) } },
   // A record of money or health (docs/domain-lines.md): read from the person's line, a pasted text or an attached screenshot; the card
@@ -119,6 +125,7 @@ type ArgsOf = {
   "sleep.report": { wakeDate: string; sleepTime: string; wakeTime: string };
   "block.outcome": { blockId: string; outcome: "done" | "partial" | "not_done" };
   "setting.change": { key: SettingKey; target: string; value: string };
+  "design.change": { kind: "knob" | "skill"; id: string; value: string };
   "settings.open": { section: SettingsSection; topic: string };
   "record.add": { domain: "wellness" | "wealth"; kind: "income" | "expense" | "workout" | "weight" | "meal" | "metric"; value: number; unit: string;
     currency: string; category: string; note: string; at: string };
@@ -188,6 +195,8 @@ export type ConciergeRefs = {
   documents?: Set<string>; projects?: Set<string>;
   /** What a setting may be about: the person's automations, mailboxes, and the week's plan blocks. */
   automations?: Set<string>; mailboxes?: Set<string>; blocks?: Set<string>;
+  /** The Skills a 「我的设计」 note may be written for. */
+  designSkills?: Set<string>;
 };
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -274,6 +283,7 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     case "setting.change": return settingProblem(item.args, { milestones: refs.milestones, tasks: new Set(refs.tasks.keys()), lines: refs.lines,
       ...(refs.automations ? { automations: refs.automations } : {}), ...(refs.mailboxes ? { mailboxes: refs.mailboxes } : {}), ...(refs.blocks ? { blocks: refs.blocks } : {}) });
     case "settings.open": return "";
+    case "design.change": return designProblem(item.args, refs.designSkills ?? new Set());
     // The same checks the store applies; an empty day is today.
     case "record.add": return recordProblem({ ...item.args, at: item.args.at || new Date().toISOString().slice(0, 10) });
     case "schedule.shift": return Number.isInteger(item.args.minutes) && item.args.minutes >= SHIFT_MINUTES.min && item.args.minutes <= SHIFT_MINUTES.max
@@ -482,6 +492,8 @@ export type ConciergePack = {
    * the default travel minutes, the places whose minutes the person gave, and the reminders still to be said.
    */
   life?: { home: boolean; work: boolean; defaultMinutes: number; places: string[]; reminders: string[] };
+  /** 「我的设计」: what may be changed and what is set now (one line), and the Skills a note may be written for. */
+  design?: string; designSkills?: string[];
 };
 
 export function conciergeRefs(pack: ConciergePack): ConciergeRefs {
@@ -493,7 +505,7 @@ export function conciergeRefs(pack: ConciergePack): ConciergeRefs {
     proposals: new Set(pack.proposals.map((item) => item.id)), agentResults: new Set(pack.agentResults.map((item) => item.taskId)), today: pack.today,
     documents: new Set(pack.materials.map((item) => item.id)), projects: new Set(pack.projects.map((item) => item.id)),
     automations: new Set((pack.automations ?? []).flatMap((item) => item.id ? [item.id] : [])), mailboxes: new Set((pack.mailAccounts ?? []).map((item) => item.id)),
-    blocks: new Set(pack.plan.flatMap((block) => block.id ? [block.id] : []))
+    blocks: new Set(pack.plan.flatMap((block) => block.id ? [block.id] : [])), designSkills: new Set(pack.designSkills ?? [])
   };
 }
 

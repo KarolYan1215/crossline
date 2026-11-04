@@ -3,6 +3,7 @@ import path from "node:path";
 import { gunzipSync } from "node:zlib";
 import { RECORDING_SILENT_EVENT, RECORDING_TRANSCRIBED_EVENT } from "@crossline/core";
 import { isWorkspaceMirror, replaceWorkspaceFrom, type CrosslineStore } from "@crossline/db";
+import { tOfWorkspace } from "../locale";
 import { folderDocuments } from "../source-folders";
 import type { DeviceState } from "./payloads";
 
@@ -15,7 +16,15 @@ import type { DeviceState } from "./payloads";
 export const MIRROR_INTERVAL_MS = 10 * 60_000;
 export const MIRROR_BACKUPS_KEPT = 3;
 
-export type MirrorState = { at?: string; etag?: string; checkedAt?: string; error?: string; errorAt?: string };
+/**
+ * `error` is what the device page shows; `code` names it. `outdated` is the install (`installVersion`) on which the site's ledger was
+ * found newer than this computer's schema: no further fetch is made until the installed version changes.
+ */
+export type MirrorState = { at?: string; etag?: string; checkedAt?: string; error?: string; errorAt?: string; code?: string; outdated?: string };
+
+export const DEVICE_INSTALL_OUTDATED = "DEVICE_INSTALL_OUTDATED";
+/** What changes when this computer's Crossline is updated: the launcher's release and the ledger schema the code migrated to. */
+export const installVersion = (store: CrosslineStore) => `${process.env.CROSSLINE_APP_VERSION ?? "dev"}:${store.schemaVersion()}`;
 
 const LOCAL_EVENTS = /^(?:recording\.(?:transcribed|silent)|sources\.folder_)/;
 
@@ -51,9 +60,13 @@ export async function mirrorPass(input: { store: CrosslineStore; ledger: string;
   const { store, workspaceId, link, state } = input;
   const now = input.now ?? new Date();
   const previous = state.mirror ?? {};
-  const failed = (error: string) => (state.mirror = { ...previous, error, errorAt: now.toISOString() });
+  const { code: _code, outdated: _outdated, ...kept } = previous;
+  const failed = (error: string) => (state.mirror = { ...kept, error, errorAt: now.toISOString() });
   if (!workspaceId) return failed("DEVICE_NO_LOCAL_WORKSPACE");
   if (!link.token) return failed("DEVICE_TOKEN_UNREADABLE");
+  const installed = installVersion(store);
+  // The site's ledger has tables or columns this install does not know: fetching again changes nothing until it is updated.
+  if (previous.code === DEVICE_INSTALL_OUTDATED && previous.outdated === installed) return previous;
   try {
     const response = await (input.fetch ?? fetch)(new URL("/api/device/snapshot", link.url), { signal: AbortSignal.timeout(5 * 60_000),
       headers: { authorization: `Bearer ${link.token}`, ...(previous.etag && !previous.error ? { "if-none-match": previous.etag } : {}) } });
@@ -69,6 +82,10 @@ export async function mirrorPass(input: { store: CrosslineStore; ledger: string;
     state.recordings = [...new Set([...state.recordings, ...recordingShas().filter((sha) => !ours.has(sha))])];
     return (state.mirror = { at: now.toISOString(), checkedAt: now.toISOString(), etag: response.headers.get("etag") ?? "" });
   } catch (error) {
-    return failed(error instanceof Error ? error.message.slice(0, 200) : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    if (/^RESTORE_UNKNOWN_(?:TABLE|COLUMN)/.test(message))
+      return (state.mirror = { ...kept, error: tOfWorkspace(store, workspaceId)("需要更新这台电脑上的 Crossline"), errorAt: now.toISOString(),
+        code: DEVICE_INSTALL_OUTDATED, outdated: installed });
+    return failed(message.slice(0, 200));
   }
 }

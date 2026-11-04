@@ -25,6 +25,8 @@ export type MailAccount = {
   bookkeeping?: boolean;
   addedAt: string; uidValidity?: string; lastUid?: number; lastCheckedAt?: string;
   lastError?: { code: string; message: string; at: string };
+  /** When the sent folder was last looked for and not found (no special-use flag, no usual name): answers there cannot close drafts. */
+  noSentFolder?: string;
 };
 /** `needs_reply`: sorted as `reply` with no wait behind it — the sender expects an answer from the person (a draft may follow). */
 export type MailLogEntry = { accountId: string; uid: number; from: string; subject: string; date: string; kind: MailTriageKind | "needs_reply"; title: string; at: string;

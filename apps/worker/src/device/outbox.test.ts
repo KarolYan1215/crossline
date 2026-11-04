@@ -64,3 +64,12 @@ test("a revoked token stops sending and keeps everything; a permanent refusal go
   const dup = createOutbox(dir, { send: recorder([{ status: 409 }]).send, now });
   expect(await dup.flush()).toMatchObject({ pending: 0 });
 });
+
+test("dead items can be taken back by the caller; the rest stay dead", async () => {
+  const outbox = createOutbox(dir, { send: recorder([{ status: 413 }, { status: 400 }]).send, now });
+  outbox.enqueue({ id: "sources:big", route: "/api/device/sources", body: { documents: [{ sha256: "a" }] } });
+  outbox.enqueue({ id: "sources:bad", route: "/api/device/sources", body: { documents: [] } });
+  expect(await outbox.flush()).toMatchObject({ pending: 0, dead: 2 });
+  expect(outbox.takeDead((item) => item.id === "sources:big").map((item) => item.id)).toEqual(["sources:big"]);
+  expect(outbox.stats()).toMatchObject({ dead: 1 });
+});

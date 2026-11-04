@@ -1,5 +1,5 @@
 import { AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, MEASURED_CAPACITY_SETTING, STEP_STARTS_SETTING, type MeasuredCapacityRecord, goalSettingKey, resolveAvailability, weeklyAvailableHours } from "@crossline/core";
-import type { CrosslineStore, StoredStepPlan, StoredTaskStep, StoredWorkOrder } from "@crossline/db";
+import { designKnob, type CrosslineStore, type StoredStepPlan, type StoredTaskStep, type StoredWorkOrder } from "@crossline/db";
 
 /** Written by the web (`schedule-memory.ts`): each work order's earliest block start this week, as an instant. */
 export const ORDER_STARTS_SETTING = "schedule.orderStarts";
@@ -24,7 +24,7 @@ const DAY_MS = 86_400_000;
  * neither a block nor a due day is not in the window — preparing for work nobody has a time for is what spent half a week's tokens on
  * manuals never opened.
  */
-export function startingWithin(store: CrosslineStore, workspaceId: string, now: Date, hours = TUTORIAL_LEAD_DAYS * 24): Set<string> {
+export function startingWithin(store: CrosslineStore, workspaceId: string, now: Date, hours = designKnob(store, workspaceId, "tutorial.leadDays") * 24): Set<string> {
   let starts: Record<string, string> = {};
   try { starts = JSON.parse(store.getSetting(workspaceId, ORDER_STARTS_SETTING) ?? "{}") as Record<string, string>; } catch { return new Set(); }
   const from = now.getTime() - 3_600_000, to = now.getTime() + hours * 3_600_000;
@@ -120,7 +120,7 @@ export function servedPersonStep(plan: StoredStepPlan, step: StoredTaskStep): St
  *   order's first open person step, the same way; with no such step, by the core order's start, then by its own.
  * - Any other order goes by its own start, as before.
  */
-export function prepWindow(store: CrosslineStore, workspaceId: string, now: Date, hours = ASSISTANT_PREP_HOURS): PrepWindow {
+export function prepWindow(store: CrosslineStore, workspaceId: string, now: Date, hours = designKnob(store, workspaceId, "assistant.prepHours")): PrepWindow {
   const ordersWithin = startingWithin(store, workspaceId, now, hours);
   const to = now.getTime() + hours * 3_600_000;
   let stepStarts: Record<string, string> = {};

@@ -82,11 +82,13 @@ RUN node scripts/build-worker.mjs
 FROM base AS runtime
 # libsecret is loaded by keytar at import, or every connector fails to load. ffmpeg decodes the recordings the server transcriber reads
 # (apps/worker/src/sensevoice.ts), in blocks, so a long one never sits in memory whole, and the videos of saved notes (note-media.ts).
-# No git or python3: the shell assistant that could use them never runs on the hosted beta (assistantAvailable), and every python3 in
-# deploy/server and server.yml runs on the host.
-RUN apt-get update && apt-get install -y --no-install-recommends libsecret-1-0 ca-certificates ffmpeg \
+# bubblewrap and python3 for the sandboxed shell assistant (docs/personal-agent.md §8): Codex runs each command of a guest's assistant inside
+# bubblewrap, and python3 is what most of those scripts are. Without the container options and host setting it also needs, the worker's own
+# probe (sandbox-probe.ts) finds no working sandbox and the assistant stays in tools mode. The owner's unsandboxed shell never runs here.
+RUN apt-get update && apt-get install -y --no-install-recommends libsecret-1-0 ca-certificates ffmpeg bubblewrap python3 \
   && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /data /state && chown node:node /data /state
+# /tmp/.X11-unix world-writable and sticky: Xvfb runs as the node user and makes its socket there (server-display.ts).
+RUN mkdir -p /data /state /tmp/.X11-unix && chown node:node /data /state && chmod 1777 /tmp/.X11-unix
 WORKDIR /repo
 COPY --from=deps /repo/ /repo/
 # The server's own browser (2026-10-22, docs/skills-library.md 「托管版登录」): Playwright's full Chromium, the build matching the

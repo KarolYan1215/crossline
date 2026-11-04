@@ -33,8 +33,8 @@ export type Automation = {
   origin: { kind: "asked"; text: string; requestId: string };
   createdAt: string; updatedAt: string;
   lastFiredAt?: string; runs: number;
-  /** A watched page's text fingerprint and when it was last read. */
-  watch?: { hash: string; checkedAt: string; excerpt: string };
+  /** A watched page's text fingerprint and when it was last read; `lastError` says why the last read failed (cleared by a read that works). */
+  watch?: { hash: string; checkedAt: string; excerpt: string; lastError?: string };
   /**
    * The assistant's conversation this automation goes on in (2026-10-20): each firing is a new turn on it, so a run knows what the last
    * ones did. Replaced when the runtime no longer has it.

@@ -13,7 +13,7 @@ type Message = { uid: number; subject: string; body: string; from?: string; to?:
 const BODY_SENTINEL = "数据我会在周五前整理好发给您";
 
 /** A read-only mailbox stand-in with an inbox and a sent folder; it has no way to write, and records how each folder was opened. */
-function mailbox() {
+function mailbox(sentFolder = true) {
   const folders: Record<string, Message[]> = { INBOX: [], Sent: [] };
   const opened: Array<{ path: string; readOnly: boolean | undefined }> = [];
   let current = "INBOX";
@@ -23,7 +23,7 @@ function mailbox() {
   const factory: ImapFactory = (options) => ({
     connect: async () => { if (options.auth?.pass !== "app-pass") throw new Error("AUTHENTICATIONFAILED"); },
     logout: async () => undefined,
-    list: async () => [{ path: "INBOX" }, { path: "Sent", specialUse: "\\Sent" }],
+    list: async () => sentFolder ? [{ path: "INBOX" }, { path: "Sent", specialUse: "\\Sent" }] : [{ path: "INBOX" }],
     mailboxOpen: async (folder: string | string[], open?: { readOnly?: boolean }) => {
       current = String(folder); opened.push({ path: current, readOnly: open?.readOnly });
       return { uidValidity: 1n, uidNext: (folders[current]!.at(-1)?.uid ?? 0) + 1 } as never;
@@ -100,17 +100,17 @@ test("at most five drafts a day for each mailbox; none while switched off or mut
   const deps = { store, dataDir, cwd: "/repo", client: rpc, now: () => now, open: async () => undefined };
   const result = await draftReplies(deps, workspaceId, [1, 2, 3, 4, 5, 6].map((uid) => candidate(uid)));
   expect(result.drafted).toBe(5);
-  expect(result.skipped).toEqual([{ uid: 6, reason: "daily_limit" }]);
+  expect(result.skipped).toEqual([{ uid: 6, key: "acc-1:1:6", reason: "daily_limit" }]);
   expect(readdirSync(mailDraftsDir(dataDir, workspaceId))).toHaveLength(5);
-  expect((await draftReplies(deps, workspaceId, [candidate(1)])).skipped).toEqual([{ uid: 1, reason: "already" }]);
+  expect((await draftReplies(deps, workspaceId, [candidate(1)])).skipped).toMatchObject([{ uid: 1, reason: "already" }]);
   // Another mailbox has its own five.
   expect((await draftReplies(deps, workspaceId, [candidate(7, "acc-2")])).drafted).toBe(1);
   const before = turns();
   store.setSetting(workspaceId, MAIL_REPLY_DRAFTS_SETTING, "off");
-  expect((await draftReplies(deps, workspaceId, [candidate(8, "acc-3")])).skipped).toEqual([{ uid: 8, reason: "off" }]);
+  expect((await draftReplies(deps, workspaceId, [candidate(8, "acc-3")])).skipped).toMatchObject([{ uid: 8, reason: "off" }]);
   store.setSetting(workspaceId, MAIL_REPLY_DRAFTS_SETTING, "on");
   store.setSetting(workspaceId, `nudge.mute.${MAIL_REPLY_NUDGE_KIND}`, "2026-10-26");
-  expect((await draftReplies(deps, workspaceId, [candidate(9, "acc-3")])).skipped).toEqual([{ uid: 9, reason: "muted" }]);
+  expect((await draftReplies(deps, workspaceId, [candidate(9, "acc-3")])).skipped).toMatchObject([{ uid: 9, reason: "muted" }]);
   expect(turns()).toBe(before);
 });
 
@@ -166,4 +166,21 @@ test("the person's answer in the sent folder closes the draft and its message; �
   expect((reminder.payload.card as { clarify: { question: string } }).clarify.question).toContain("还没有回复");
   expect((reminder.payload.card as { mailReplyId: string }).mailReplyId).toBe(third!.id);
   expect(readReplyDrafts(store, workspaceId).find((draft) => draft.id === third!.id)!.messageIds).toHaveLength(2);
+});
+
+test("a mailbox with no sent folder is recorded on the account (for the self-check), and cleared once one is found", async () => {
+  const { store, workspaceId, secrets, dataDir, resolve } = setup();
+  const now = new Date("2026-10-19T15:00:00Z");
+  let box = mailbox(false);
+  const added = await addMailAccount({ store, secrets, resolve, factory: box.factory, now: () => now }, workspaceId, { address: "me@qq.com", password: "app-pass" });
+  const accountId = added.ok ? added.account.id : "";
+  const { rpc } = fakeRuntime([draftAnswer()], MAIL_REPLY_DRAFTER_SKILL);
+  const service = () => createMailService({ store, secrets, resolve, factory: box.factory, now: () => now, cwd: "/repo", client: () => rpc, sortAllowed: async () => true, dataDir });
+  await draftReplies({ store, dataDir, cwd: "/repo", client: rpc, now: () => now, open: async () => undefined }, workspaceId, [candidate(1, accountId)]);
+  await service().pass(workspaceId, true);
+  const account = () => JSON.parse(store.getSetting(workspaceId, "mail.accounts")!)[0] as { noSentFolder?: string };
+  expect(account().noSentFolder).toBe(now.toISOString());
+  box = mailbox(true);
+  await service().pass(workspaceId, true);
+  expect(account().noSentFolder).toBeUndefined();
 });

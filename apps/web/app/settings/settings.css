@@ -353,3 +353,19 @@ html:has(.settings-page){background:var(--ds-bg)}
 .op-less li[data-undone]{opacity:.7}
 .op-less p{margin:0}
 .op-less button,.op-retired button{justify-self:start}
+
+/* 系统体检 → 功能自检 (self-check-card.tsx) */
+.st-selfcheck { margin-top: 16px; border-top: 1px solid var(--ds-line); padding-top: 12px; }
+.st-selfcheck-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.st-selfcheck-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.st-selfcheck-list small { flex-basis: 100%; color: var(--graphite); }
+
+/* 我的设计 */
+.st-design { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.st-design > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; border-top: 1px solid var(--ds-line); padding-top: 12px; }
+.st-design textarea, .st-design-add textarea { width: 100%; min-height: 64px; font: inherit; grid-column: 1 / -1; }
+.st-design-value input { width: 72px; font: inherit; }
+.st-design-value small { display: block; color: var(--graphite); }
+.st-design-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.st-design-add { display: grid; gap: 8px; margin-top: 12px; }
+.st-design-preview { border: 1px solid var(--ds-line); }

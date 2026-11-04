@@ -8,7 +8,8 @@ import path from "node:path";
  *
  * Items are sent oldest first. A failed send waits 30 s, 1 min, 2 min … up to an hour before its next try. 401/403 (the token was revoked
  * or replaced) stops sending until the link is made again; a permanent refusal (400, 413, 415, 422) moves the item to `dead/`, where it
- * stays for the person to see and is never retried.
+ * stays for the person to see and is never retried as it is (the worker takes back an oversized folder batch with `takeDead` and
+ * queues its documents again in smaller batches).
  */
 export type OutboxItem = {
   /** The idempotency key, also the item's identity: a second item with the same id is not added. */
@@ -124,6 +125,19 @@ export function createOutbox(dir: string, deps: { send: (item: OutboxItem) => Pr
     },
 
     stats,
+
+    /** Removes the dead items `match` picks and returns them, for a caller that will queue their content again in another form. */
+    takeDead(match: (item: OutboxItem) => boolean): OutboxItem[] {
+      const taken: OutboxItem[] = [];
+      for (const name of readdirSync(deadDir).filter((file) => file.endsWith(".json"))) {
+        let item: OutboxItem | undefined;
+        try { item = JSON.parse(readFileSync(path.join(deadDir, name), "utf8")) as OutboxItem; } catch { continue; }
+        if (!match(item)) continue;
+        rmSync(path.join(deadDir, name), { force: true });
+        taken.push(item);
+      }
+      return taken;
+    },
 
     /** A new link: the stop for a revoked token is lifted and everything waiting is tried at once. */
     unblock(): void {

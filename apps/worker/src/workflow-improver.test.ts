@@ -9,7 +9,7 @@ import type { AgentOutcome, AgentTaskInput } from "./agent-task";
 import { claimOrganising, collectionDone, configureFavouritesCollector, startWorkflowRun } from "./workflow-smith";
 import { collectFolder, readCollectLedger, writeCollectLedger } from "./favourites-reader";
 import { carryTopicFiles, installFavouritesTopicsWorkflow } from "./favourites-topics";
-import { improvementDue, installRevision, workflowImprovePass } from "./workflow-improver";
+import { improvementDue, improvementSignals, installRevision, workflowImprovePass } from "./workflow-improver";
 import { scriptedRuntime } from "./testing/fake-runtime";
 
 const REVIEWER = "crossline:crossline-validation-reviewer";
@@ -166,4 +166,24 @@ test("two workflows that do the same job are merged, judged by what they do and 
   expect(unmergeGrownSkill(store, ws, weekly.id)).toBe(true);
   expect(readGrownSkills(store, ws).find((item) => item.id === weekly.id)).toMatchObject({ status: "active" });
   expect(readGrownSkills(store, ws).find((item) => item.id === weekly.id)!.mergedInto).toBeUndefined();
+  // Undone, the kept one is no longer revised to take the other over.
+  expect(improvementSignals(store, ws, readGrownSkills(store, ws).find((item) => item.id === topics.id)!).filter((signal) => signal.kind === "merge")).toEqual([]);
+  // And the pair stays apart: the next pass neither asks about it nor merges it again on the answer it had.
+  expect(await workflowMergePass(store, ws, rpc, ".", "2026-10-26")).toEqual([]);
+  expect(asked).toEqual([]);
+  expect(readGrownSkills(store, ws).find((item) => item.id === weekly.id)!.mergedInto).toBeUndefined();
+});
+
+test("a revision that finishes after the person turned the workflow off or reverted it is not put in force", async () => {
+  const record = favouritesFlow();
+  const dir = path.join(root, "late");
+  mkdirSync(path.join(dir, "skill"), { recursive: true });
+  writeFileSync(path.join(dir, "skill", "SKILL.md"), "---\nname: xiaohongshu-favourites-topics\ndescription: 按话题整理收藏\n---\n# 新\n");
+  writeFileSync(path.join(dir, "skill", "workflow.json"), JSON.stringify(record.manifest));
+  const { updateGrownSkill } = await import("@crossline/db");
+  updateGrownSkill(store, ws, record.id, { status: "off" });
+  expect(await installRevision(store, ws, record, done("improve-x", dir), { client: reviewer().rpc, cwd: "." })).toEqual({ state: "skipped", reason: "status_changed" });
+  expect(readGrownSkills(store, ws)[0]).toMatchObject({ status: "off" });
+  expect(readGrownSkills(store, ws)[0]!.version).toBeUndefined();
+  expect(store.listEvents(ws, { type: "skill.grown.revision_skipped" })).toHaveLength(1);
 });

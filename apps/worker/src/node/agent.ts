@@ -1,4 +1,5 @@
 // i18n-exempt: the compute node's own words, shown by the standalone node program (bundled alone, without the catalogues; Chinese only)
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpus, homedir, totalmem } from "node:os";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -183,7 +184,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
           runtime?.write(JSON.stringify({ method: "initialized" }));
           send({ t: "hello", protocol: NODE_PROTOCOL, codex: agent, platform: process.platform, host: (options.host ?? hostname()).slice(0, 60),
             role: options.role, capacity: options.capacity ?? nodeCapacity(), ...(options.browsers?.available ? { browser: true } : {}),
-            ...(shell ? { shell: true, tasks: tasksRoot, home: homedir() } : {}) });
+            ...(shell ? { shell: true, tasks: tasksRoot, home: homedir(), ffmpeg: hasFfmpeg() } : {}) });
         });
     });
     socket.on("message", (raw) => {
@@ -345,4 +346,9 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
     stop: () => { stopped = true; if (timer) clearTimeout(timer); current?.end(); current?.socket.close(1000, "NODE_STOPPED"); setStatus("off"); },
     status: () => status
   };
+}
+
+/** Whether `ffmpeg` answers on this computer (PATH lookup by the OS; a missing one fails to spawn). */
+export function hasFfmpeg(run: typeof spawnSync = spawnSync): boolean {
+  return run("ffmpeg", ["-version"], { stdio: "ignore", timeout: 10_000 }).status === 0;
 }

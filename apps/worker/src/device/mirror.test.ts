@@ -6,7 +6,7 @@ import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { RECORDING_TRANSCRIBED_EVENT, SOURCE_FOLDERS_SETTING, sourceFolderIndexSetting } from "@crossline/core";
 import { CrosslineStore, mirrorSnapshot } from "@crossline/db";
-import { mirrorPass } from "./mirror";
+import { installVersion, mirrorPass } from "./mirror";
 import { readDeviceState } from "./payloads";
 
 let dir: string;
@@ -87,4 +87,26 @@ test("a failure is recorded and the next pass asks again without the ETag; backu
   await mirrorPass({ store: local, ledger: ledger(), workspaceId: lw, link, state, fetch: up.fetchImpl });
   expect(up.calls.at(-1)).toBeNull();
   expect(state.mirror?.error).toBeUndefined();
+});
+
+test("a site ledger newer than this install says to update, and is not fetched again until the install changes", async () => {
+  // A table the install does not know: the site moved on to a migration this computer has not got yet.
+  const calls: number[] = [];
+  const fetchImpl = (async () => {
+    calls.push(1);
+    const mirror = mirrorSnapshot(server, sw) as unknown as { tables: Record<string, unknown[]> };
+    mirror.tables.future_table = [{ workspace_id: sw, id: "x" }];
+    return new Response(new Uint8Array(gzipSync(JSON.stringify(mirror))), { headers: { etag: "\"e\"" } });
+  }) as unknown as typeof fetch;
+  const state = readDeviceState(path.join(dir, "device"));
+  const first = await mirrorPass({ store: local, ledger: ledger(), workspaceId: lw, link, state, fetch: fetchImpl });
+  expect(first).toMatchObject({ code: "DEVICE_INSTALL_OUTDATED", error: "需要更新这台电脑上的 Crossline", outdated: installVersion(local) });
+  await mirrorPass({ store: local, ledger: ledger(), workspaceId: lw, link, state, fetch: fetchImpl });
+  expect(calls).toHaveLength(1);
+  // Updated: the next pass asks again.
+  const previous = process.env.CROSSLINE_APP_VERSION;
+  process.env.CROSSLINE_APP_VERSION = "9.9.9";
+  try { await mirrorPass({ store: local, ledger: ledger(), workspaceId: lw, link, state, fetch: fetchImpl }); }
+  finally { if (previous === undefined) delete process.env.CROSSLINE_APP_VERSION; else process.env.CROSSLINE_APP_VERSION = previous; }
+  expect(calls).toHaveLength(2);
 });

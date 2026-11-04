@@ -121,12 +121,13 @@ test("the person's answers are found in the sent folder, opened read-only, by In
   ];
   const mail = createImapMail({ host: "imap.gmail.com", port: 993, secure: true }, "me@gmail.com", "pw",
     factory([{ path: "INBOX" }, { path: "[Gmail]/Sent Mail", specialUse: "\\Sent" }]));
-  expect(await mail.sentReplies(threads)).toEqual(["<m1@uni.edu>", "office@uni.edu|Seminar time"]);
+  expect(await mail.sentReplies(threads)).toEqual({ matched: ["<m1@uni.edu>", "office@uni.edu|Seminar time"], sentFolder: true });
   expect(opened).toEqual([{ path: "[Gmail]/Sent Mail", readOnly: true }]);
   // By name when the server sets no special-use flag; with no sent folder at all nothing matches and nothing is opened.
   expect(await createImapMail({ host: "imap.qq.com", port: 993, secure: true }, "me@qq.com", "pw", factory([{ path: "INBOX" }, { path: "Sent Messages" }]))
-    .sentReplies(threads)).toHaveLength(2);
+    .sentReplies(threads)).toMatchObject({ matched: { length: 2 }, sentFolder: true });
   opened.length = 0;
-  expect(await createImapMail({ host: "imap.qq.com", port: 993, secure: true }, "me@qq.com", "pw", factory([{ path: "INBOX" }])).sentReplies(threads)).toEqual([]);
+  expect(await createImapMail({ host: "imap.qq.com", port: 993, secure: true }, "me@qq.com", "pw", factory([{ path: "INBOX" }])).sentReplies(threads))
+    .toEqual({ matched: [], sentFolder: false });
   expect(opened).toEqual([]);
 });

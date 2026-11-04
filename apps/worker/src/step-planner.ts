@@ -6,7 +6,7 @@ import {
   FINER_SPLIT_FEEDBACK, FAMILIARITY_INSTRUCTIONS, stepsNeedingFinerSplit, readModelCompletion, onPersonsBoard, preparesOf, type FinerSplit, type StepTrouble, type SuccessCriterion
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { aiToolsFor, createRefBook, familiarityBook, familiarityFor, lessonsFor, listAgentTasks, ownerPreferencesFor, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
+import { aiToolsFor, createRefBook, designKnob, familiarityBook, familiarityFor, lessonsFor, listAgentTasks, ownerPreferencesFor, projectAgentOutputs, withRef, type CrosslineStore, type RefBook, type StoredWorkOrder } from "@crossline/db";
 import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { learnedArchetypes } from "./archetype-curator";
 import { ownerOf } from "./owner";
@@ -406,7 +406,7 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
       // What the task's own files settle (the problem set, how it is handed in, the AI rule) is read from them, not asked.
       const readable = materialQuestions(store, workspaceId, order, normalized.questions);
       assumeAnswers(store, workspaceId, order, readable, true);
-      assumeAnswers(store, workspaceId, order, beyondPersonShare(normalized.questions.filter((question) => !readable.includes(question))));
+      assumeAnswers(store, workspaceId, order, beyondPersonShare(normalized.questions.filter((question) => !readable.includes(question)), designKnob(store, workspaceId, "stepQuestions.perTask")));
     }
     if (warnings.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
       idempotencyKey: `validation.warned:task_steps:${workOrderId}:${saved.version}`, type: "validation.warned", entityId: workOrderId,
@@ -429,7 +429,7 @@ export function settleOldQuestions(store: CrosslineStore, workspaceId: string): 
     const readable = materialQuestions(store, workspaceId, order, plan.questions);
     if (readable.length) assumeAnswers(store, workspaceId, order, readable, true);
     const rest = plan.questions.filter((question) => !readable.includes(question));
-    const assumed = importantByRule(store, workspaceId, order) ? beyondPersonShare(rest) : rest;
+    const assumed = importantByRule(store, workspaceId, order) ? beyondPersonShare(rest, designKnob(store, workspaceId, "stepQuestions.perTask")) : rest;
     if (assumed.length) assumeAnswers(store, workspaceId, order, assumed);
     if (readable.length || assumed.length) settled.push(plan.workOrderId);
   }
@@ -439,8 +439,8 @@ export function settleOldQuestions(store: CrosslineStore, workspaceId: string): 
 /** How many of an important task's questions go to the person; the planner lists the ones that change the plan most first. */
 export const PERSON_QUESTIONS_PER_TASK = 2;
 // Questions of the kind the task's files answer do not count: they leave as soon as a file arrives.
-const beyondPersonShare = (questions: StepPlan["questions"]) =>
-  questions.filter((question) => !readableFromMaterial(question.text)).slice(PERSON_QUESTIONS_PER_TASK);
+const beyondPersonShare = (questions: StepPlan["questions"], share = PERSON_QUESTIONS_PER_TASK) =>
+  questions.filter((question) => !readableFromMaterial(question.text)).slice(share);
 
 /** The questions the task's own files answer (`readableFromMaterial`), when the task's project has files at all. */
 function materialQuestions(store: CrosslineStore, workspaceId: string, order: { projectId: string }, questions: StepPlan["questions"]): StepPlan["questions"] {

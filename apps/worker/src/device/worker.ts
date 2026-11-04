@@ -20,7 +20,7 @@ import { createDeviceLinkService, nodeEnabled, nodeShell, type DeviceLink } from
 import { MIRROR_INTERVAL_MS, mirrorPass } from "./mirror";
 import { DEVICE_PASSES } from "./mode";
 import { createOutbox, type OutboxItem, type SendResult } from "./outbox";
-import { activityItem, readDeviceState, recordingItems, sourceItems, writeDeviceState, type QueuedItem } from "./payloads";
+import { activityItem, readDeviceState, recordingItems, reviveDocuments, sourceItems, tooLargeForSite, writeDeviceState, type QueuedItem } from "./payloads";
 import { startDeviceServer } from "./server";
 
 /**
@@ -68,7 +68,13 @@ export async function runDeviceWorker(options: DeviceWorkerOptions): Promise<voi
     for (const item of items) outbox.enqueue(item);
     writeDeviceState(deviceDir, state);
   };
-  const flush = () => outbox.flush().then((stats) => { if (stats.blocked || stats.lastError) log({ type: "device.outbox", ...stats }); return stats; })
+  // A folder batch the site refused for its size gives its documents back to the next pass, which sends them in batches that fit.
+  const revive = () => {
+    const revived = reviveDocuments(state, outbox.takeDead(tooLargeForSite));
+    if (revived) { writeDeviceState(deviceDir, state); log({ type: "device.documents_revived", revived }); }
+  };
+  revive();
+  const flush = () => outbox.flush().then((stats) => { revive(); if (stats.blocked || stats.lastError) log({ type: "device.outbox", ...stats }); return stats; })
     .catch((error: unknown) => log({ type: "device.outbox_failed", message: error instanceof Error ? error.message : String(error) }));
 
   // Screen activity: the same reader and tracker the full worker uses, for this machine's own workspace only.

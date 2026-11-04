@@ -22,6 +22,7 @@ import { tOf } from "./locale";
 import { captureProgress } from "./capture-progress";
 import { currentSettings, describeSettingChange, type SettingView } from "./setting-change";
 import { keepNote } from "./person-notes";
+import { describeDesignChange, designSnapshotLine, noteSkills } from "./personal-design";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
 /** `stepId`: on a task, the step its block is for (Today's day panel), so 「这一步」 names that step rather than the first open one. */
@@ -135,6 +136,7 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     mailAccounts: readMailAccounts(store.getSetting(ctx.workspaceId, MAIL_ACCOUNTS_SETTING)).map((item) => ({ id: item.id, address: item.address, triage: item.triage,
       bookkeeping: item.bookkeeping !== false })),
     settings: await currentSettings(ctx),
+    design: designSnapshotLine(ctx), designSkills: noteSkills().map((skill) => skill.id),
     // The model's snapshot, not the interface.
     /* i18n-ignore-start */
     life: (() => {
@@ -185,6 +187,7 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
     `自动化（改哪个就用 workflow.request 写明改法）：${pack.automations?.length ? pack.automations.map((item) => `${item.name}（${item.trigger}${item.status === "off" ? "，已暂停" : ""}${item.lineId ? `，主线 ${item.lineId}` : ""}）`).join("；") : "无"}；已接入邮箱 ${pack.mailboxes ?? 0} 个`,
     `出行：住址${pack.life?.home ? "已设（有地点的日程由地图估算路上时间）" : "未设"}；工作或学习地点${pack.life?.work ? "已设" : "未设"}；默认路上时间${pack.life?.defaultMinutes ? ` ${pack.life.defaultMinutes} 分钟` : "未设"}${pack.life?.places.length ? `；本人给过的：${pack.life.places.join("，")}` : ""}`,
     `待提醒：${pack.life?.reminders.length ? pack.life.reminders.join("；") : "无"}`,
+    ...(pack.design ? [pack.design] : []),
     "设置：任何设置与隐私同意都用 setting.change 修改（键名、可选值与当前值用 list_settings 查）；密码、密钥、令牌与删除账号一类只给 settings.open 链接",
     `当前页面：${pack.page.kind}${pack.page.title ? `「${pack.page.title}」(${pack.page.entityId})` : ""}`,
     `主线（id | 名称）：${pack.lines.map((line) => `${line.id} | ${line.label}${line.hard ? "（硬约束）" : ""}${line.domain ? `（${line.domain}）` : ""}`).join("；") || "无"}`,
@@ -345,7 +348,7 @@ export async function conversationTurn(ctx: AccessContext, raw: { text: string; 
 export function settleCard(ctx: AccessContext, card: Card): Promise<void> | undefined {
   const candidates = new Set(card.clarify.options.flatMap((option) => option.actions));
   const due = card.actions.map((item, index) => ({ item, index }))
-    .filter(({ item, index }) => !candidates.has(index) && card.items[index]?.state === "pending" && (item.action === "setting.change" || isImmediate(item)));
+    .filter(({ item, index }) => !candidates.has(index) && card.items[index]?.state === "pending" && (item.action === "setting.change" || item.action === "design.change" || isImmediate(item)));
   // Nothing to settle: no await at all, so a card with none is stored in the same turn of the event loop as before.
   return due.length ? settleItems(ctx, card, due) : undefined;
 }
@@ -353,6 +356,8 @@ async function settleItems(ctx: AccessContext, card: Card, due: Array<{ item: Pr
   for (const { item, index } of due) {
     if (item.action === "setting.change") {
       try { card.items[index] = { ...card.items[index]!, setting: await describeSettingChange(ctx, item.args) }; } catch { /* shown without it */ }
+    } else if (item.action === "design.change") {
+      try { card.items[index] = { ...card.items[index]!, setting: describeDesignChange(ctx, item.args) }; } catch { /* shown without it */ }
     } else if (isImmediate(item)) card.items[index] = outcomeItem(await executeAction(ctx, item));
   }
 }

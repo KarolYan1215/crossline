@@ -581,3 +581,5 @@ export * from "./visa";
 export * from "./form-fill";
 export * from "./form-observe";
 export * from "./form-browser-use";
+export * from "./personal-design";
+export * from "./self-check";

@@ -47,9 +47,12 @@ export function improvementSignals(store: CrosslineStore, workspaceId: string, r
   const prefix = workflowRunPrefix(record.id);
   const after = (at: string) => at > since;
   const signals: ImprovementSignal[] = [];
+  // A merge is a reason only while the absorbed workflow is still merged into this one: once undone (or the absorbed one removed), it is not taken over.
+  const stillAbsorbed = new Set(readGrownSkills(store, workspaceId).filter((item) => item.mergedInto?.id === record.id).map((item) => item.id));
   for (const event of store.listEvents(workspaceId, { type: WORKFLOW_FEEDBACK_EVENT, entityId: record.id })) {
     if (!after(event.createdAt)) continue;
     const payload = event.payload as { text?: string; absorbed?: string };
+    if (payload.absorbed && !stillAbsorbed.has(payload.absorbed)) continue;
     signals.push({ at: event.createdAt, kind: payload.absorbed ? "merge" : "feedback", text: String(payload.text ?? ""), ...(payload.absorbed ? { absorbed: payload.absorbed } : {}) });
   }
   for (const event of store.listEvents(workspaceId, { type: "agent.task.reviewed" })) {
@@ -117,7 +120,7 @@ export function improveTask(record: GrownSkillRecord, current: string, signals: 
  * way. A run that judged no change was needed says why and counts as answering the signals.
  */
 export async function installRevision(store: CrosslineStore, workspaceId: string, record: GrownSkillRecord, outcome: AgentOutcome | { state: "failed"; message: string },
-  deps: { client: CodexRpcBoundary | undefined; cwd: string; now?: () => Date }): Promise<{ state: "revised"; version: number } | { state: "unchanged" | "rejected"; reason: string }> {
+  deps: { client: CodexRpcBoundary | undefined; cwd: string; now?: () => Date }): Promise<{ state: "revised"; version: number } | { state: "unchanged" | "rejected" | "skipped"; reason: string }> {
   const now = deps.now?.() ?? new Date();
   const ownerId = ownerOf(store, workspaceId);
   const locale = localeOf(store, workspaceId);
@@ -128,6 +131,20 @@ export async function installRevision(store: CrosslineStore, workspaceId: string
       entityId: record.id, payload: { id: record.id, reason: reason.slice(0, 300) } });
     return { state: "rejected" as const, reason };
   };
+  // The person turned it off, reverted it or accepted new risks while the run worked: the revision was made for a state that is gone.
+  const moved = (): string | undefined => {
+    const current = readGrownSkills(store, workspaceId).find((item) => item.id === record.id);
+    if (!current) return "removed";
+    if (current.status !== record.status) return "status_changed";
+    return (current.version ?? 1) !== (record.version ?? 1) ? "version_changed" : undefined;
+  };
+  const skip = (reason: string) => {
+    store.appendEvent({ ownerId, workspaceId, idempotencyKey: `skill.grown.revision_skipped:${record.id}:${now.getTime()}`, type: "skill.grown.revision_skipped",
+      entityId: record.id, payload: { id: record.id, reason, version: record.version ?? 1 } });
+    return { state: "skipped" as const, reason };
+  };
+  const early = moved();
+  if (early) return skip(early);
   if (outcome.state !== "done") return reject(outcome.state === "failed" || outcome.state === "blocked" ? outcome.message || t("运行失败") : t("助手未获准做这类工作"));
   const read = readSkillDir(path.join(outcome.directory, "skill"), t);
   if (read.problem) {
@@ -162,6 +179,9 @@ export async function installRevision(store: CrosslineStore, workspaceId: string
   const final = finalVerdict(scan, reviewed.output);
   if (final === "reject") return reject(scan.injection ? t("SKILL.md 含有要求模型越权或外传的语句") : reviewed.output.reasons.join(locale === "en" ? "; " : "；").slice(0, 300));
   const files = read.files.filter((file) => file.path !== "CHANGES.md");
+  // The review took a while: checked again right before it is put in force.
+  const late = moved();
+  if (late) return skip(late);
   const revised = reviseGrownSkill(store, workspaceId, record.id, { manifest, files, scan, review: { ...reviewed.output, final }, changes, taskId: outcome.taskId }, now);
   if (!revised) return reject(t("工作流已被删除"));
   const values = { summary, version: revised.version, changes: changes.replace(/\s*\n+\s*/g, locale === "en" ? "; " : "；").slice(0, 300) };
