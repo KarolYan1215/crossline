@@ -8,6 +8,8 @@ const SCROLL_STEP = 6;
 const DOCK_KEY = "crossline.helper.dock";
 /** A corner further than this above the viewport's foot is not at the foot: no room is kept for it there. */
 const FOOT_BAND = 120;
+/** Off a phone the corner comes back this long after scrolling stops (2026-11-03, the owner): tucked, only the figure shows. */
+const SETTLE_MS = 900;
 
 /**
  * Whether the 小帮手 bubble steps aside while the page scrolls. Room at the page's foot keeps the last thing clear of the corner, but
@@ -56,7 +58,10 @@ export function CornerStack({ children }: { children: ReactNode }) {
     observer.observe(el);
     let previousY = window.scrollY;
     let tucked = false;
+    let settle: ReturnType<typeof setTimeout> | undefined;
     const onScroll = () => {
+      clearTimeout(settle);
+      if (window.innerWidth > 680) settle = setTimeout(() => { tucked = false; delete el.dataset.tucked; }, SETTLE_MS);
       const y = window.scrollY;
       // A corner the person placed stays where they put it.
       const next = el.dataset.docked === undefined && nextTucked({ tucked, previousY, y, viewport: window.innerHeight, documentHeight: document.documentElement.scrollHeight });
@@ -99,6 +104,7 @@ export function CornerStack({ children }: { children: ReactNode }) {
     window.addEventListener("resize", onResize);
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => {
+      clearTimeout(settle);
       observer.disconnect();
       el.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);

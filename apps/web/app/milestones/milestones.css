@@ -280,7 +280,9 @@
 .md-approve-risk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);margin-right:auto}
 .md-artifact{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin:0;font-size:13px}
 .md-relation-remove{margin-left:auto}
-@media (min-width:768px) and (max-width:1100px){.lines-bar-row{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}}
+/* Narrow: cards two or three a row and ＋ a thin bar under them. From 900px every line stays on one row with ＋ as the small button
+   at its end (2026-11-03, the owner: the fourth card had wrapped beside a half-row ＋ and pushed the timeline off the first screen). */
+@media (min-width:768px) and (max-width:899px){.lines-bar-row{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.lines-bar-add{grid-column:1 / -1;min-height:32px}}
 
 /* 按主线: one row per line with drafts, approved line by line. */
 .ba-split{display:inline-flex;align-items:center;gap:4px}

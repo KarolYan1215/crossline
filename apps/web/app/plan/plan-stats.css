@@ -119,7 +119,10 @@ body:has(.plan-page) .running-head{background:var(--ds-bg)}
 
 /* four figures */
 .pl-kpis{display:grid;gap:14px;grid-template-columns:repeat(4,minmax(0,1fr))}
-@media (max-width:1100px){.pl-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* The four stay one row down to 800px, a little tighter when the window is not maximized (2026-11-03, the owner): 2×2 pushed the
+   charts to the foot of the first screen. */
+@media (max-width:1279px){.pl-kpis{gap:10px}.pl-kpi{padding:12px 14px}.pl-kpi-value>span{font-size:28px}}
+@media (max-width:800px){.pl-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:480px){.pl-kpis{gap:10px}.pl-kpi{padding:12px}.pl-kpi-value>span{font-size:26px}}
 .pl-kpi{display:grid;gap:4px;align-content:start;min-width:0;padding:14px 16px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);box-shadow:var(--ds-shadow)}
 .pl-kpi[data-alarm]{border-color:color-mix(in srgb,var(--ds-alarm) 45%,var(--ds-line))}

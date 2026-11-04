@@ -84,7 +84,12 @@
    hovering or focusing it bring it back (CornerStack `nextTucked`). A message being shown keeps it out. The timer never tucks. */
 .corner-stack .assistant-bubble-wrap{transition:transform .2s ease-out,opacity .2s ease-out}
 .corner-stack[data-tucked] .assistant-bubble-wrap:not([data-popped]):not(:hover):not(:focus-within){transform:translateX(calc(100% + 2px));opacity:.7}
-@media (prefers-reduced-motion:reduce){.corner-stack .assistant-bubble-wrap{transition:none}}
+/* Off a phone (2026-11-03, the owner) only 「N 件需要你处理」 steps aside while scrolling and the figure stays; both come back once
+   scrolling stops (CornerStack `SETTLE_MS`). On a phone the figure tucks too, as above. */
+.corner-stack .helper-calls-badge{transition:transform .2s ease-out,opacity .2s ease-out}
+.corner-stack[data-tucked] .helper-calls-badge:not(:hover):not(:focus-visible){transform:translateX(calc(100% + 24px));opacity:0;pointer-events:none}
+@media (min-width:681px){.corner-stack[data-tucked] .assistant-bubble-wrap:not([data-popped]):not(:hover):not(:focus-within){transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.corner-stack .assistant-bubble-wrap,.corner-stack .helper-calls-badge{transition:none}}
 /* On a wide screen there is no bottom bar to clear, so the corner sits low, inside the page's own foot room, not 76px up over the cards. */
 @media (min-width:681px){.corner-stack{bottom:20px}}
 /* On a phone the corner must stay small: with the timer, its alert and the nudge preview stacked it covered the input box. The bubble
