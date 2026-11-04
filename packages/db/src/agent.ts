@@ -233,7 +233,7 @@ export function reviewAgentTask(store: CrosslineStore, workspaceId: string, task
   if (task.status !== "needs_review" && task.status !== "accepted") return { ok: false, code: "TASK_NOT_REVIEWABLE" };
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!ownerId) return { ok: false, code: "TASK_NOT_FOUND" };
-  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:reviewed:${taskId}:${Date.now()}`, type: "agent.task.reviewed", entityId: taskId,
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:reviewed:${taskId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`, type: "agent.task.reviewed", entityId: taskId,
     payload: { taskId, decision, note: note.slice(0, 500), category: task.category, ...(options.by ? { by: options.by } : {}) } });
   // A result that failed its own checks, or left originals changed, does not count towards trust even if the person is kind.
   const clean = decision === "accepted" && task.checksPassed && task.inputsModified.length === 0;

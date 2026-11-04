@@ -50,12 +50,6 @@ jobs:
         run: |
           ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" '
             uptime; printf "cpus: "; nproc; free -m; df -h / | tail -1
-            # The env files (2026-11-04: both read as missing after a deploy): where they are, any copies, who was on the host, what sudo ran.
-            echo "== env files"; sudo ls -la /srv/crossline /srv/assess 2>&1 | grep -vE " (data|state|codex|compare|models)$" | head -40
-            sudo find /srv /root /home /tmp -maxdepth 3 -name "*.env*" -printf "%TY-%Tm-%Td %TH:%TM %u %s %p\n" 2>/dev/null | head -20 || true
-            last -n 8 2>/dev/null || true
-            printf "probe1 "; sudo grep -c . /srv/assess/assess.env; printf "probe1 shell: "; readlink /proc/$$/ns/mnt; id -u
-            sudo journalctl --since "2026-11-04 10:45:00 UTC" --until "2026-11-04 10:52:00 UTC" --no-pager 2>/dev/null | grep -viE "key|token|secret|pass" | tail -60 | cut -c1-220 || true
             sudo docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
             sudo docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | head
             # Where the disk goes: a new app image needs its whole size free while the old one still runs (2026-10-21).
@@ -82,13 +76,12 @@ jobs:
             sudo docker exec crossline-worker sh -c "grep -H -E \"^(VmRSS|PPid)\" /proc/[0-9]*/status; grep -H . /proc/[0-9]*/comm" 2>/dev/null | head -90 || true
             sudo docker exec crossline-worker sh -c "for f in /proc/[0-9]*/cmdline; do echo \"\$f \$(tr \\\\0 \\  < \$f | cut -c1-160)\"; done" 2>/dev/null | head -30 || true
             sudo docker logs --since 24h crossline-worker 2>&1 | grep -E "worker.memory|model.gate|already_running" | tail -20 || true
-            # The sandboxed shell (docs/personal-agent.md §8): the worker's own probe, the profiles it runs under and the latest self-check.
+            # The sandboxed shell (docs/personal-agent.md §8): the worker own probe, the profiles it runs under and the latest self-check.
             sudo docker logs crossline-worker 2>&1 | grep -E "worker.sandbox_shell|selfcheck" | tail -5 || true
             sudo docker inspect crossline-worker --format "{{.AppArmorProfile}} {{json .HostConfig.SecurityOpt}}" 2>/dev/null | cut -c1-200 || true
             sudo sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true
             sudo docker logs --since 2h crossline-web 2>&1 | grep -E "web.timing|web.sections|web.queue" | tail -6 || true
             sudo dmesg 2>/dev/null | grep -iE "out of memory|oom-kill" | tail -5 || true
-            printf "probe2 "; sudo grep -c . /srv/assess/assess.env; printf "probe2 shell: "; readlink /proc/$$/ns/mnt; id -u; sudo ls -l /srv/assess/assess.env
             echo "== assess figures"
             # The app logs its image settings (provider, model, size; never the key) and every skipped, failed or drawn figure.
             sudo docker logs assess 2>&1 | grep -E "avatar\.|assess\.avatar|wants\." | tail -30 || true
