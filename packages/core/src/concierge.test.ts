@@ -50,6 +50,15 @@ test("an event on a day already past is sent back: 「周四」 on a Friday mean
   expect(validateConciergeTurn(turn([{ ...event, args: { ...event.args, date: "2026-10-15" } }]), { ...refs(), today: "2026-10-09" }).actions).toHaveLength(1);
 });
 
+test("a reminder every few hours is an automation, not a reminder once at a time of day", () => {
+  const ask = (text: string, reminder: string, time: string) =>
+    ({ action: "workflow.request", summary: "提醒", args: { text, lineId: "research", reminder, time, weekdays: [] } }) as never;
+  expect(actionProblem(ask("每隔 1 小时提醒我喝一杯水", "喝水", "16:00"), refs())).toContain("每隔几小时");
+  expect(actionProblem(ask("每两个小时提醒我起来走走", "走走", "09:00"), refs())).toContain("每隔几小时");
+  expect(actionProblem(ask("每隔 1 小时提醒我喝一杯水", "", ""), refs())).toBe("");
+  expect(actionProblem(ask("每天早上九点提醒我发笔记", "发笔记", "09:00"), refs())).toBe("");
+});
+
 test("修工作流 names one of the person's grown workflows and says what is wrong", () => {
   const fix = (workflowId: string, text: string) => ({ action: "workflow.fix", summary: "修", args: { workflowId, text } }) as never;
   const known = { ...refs(), workflows: new Set(["flow-media-xhs"]) };

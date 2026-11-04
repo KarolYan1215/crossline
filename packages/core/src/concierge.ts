@@ -207,6 +207,8 @@ export type ConciergeRefs = {
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** 「每隔 1 小时」「每两个小时」「每半小时」「every 2 hours」: more often than once a day. */
+export const EVERY_FEW_HOURS = /每隔?\s*[0-9一二两三四五六七八九十半]*\s*个?\s*(小时|钟头|分钟)|every\s*\d*\s*(hours?|minutes?)\b|\bhourly\b/i;
 /** `availability.set`'s days ("1,2,3"; 0 = Sunday): the distinct weekdays in order, or [] when any part is not one. */
 export function windowDays(text: string): number[] {
   const parts = text.split(/[,，\s]+/).filter(Boolean);
@@ -251,7 +253,9 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     }
     case "note.add": return String(a.text ?? "").trim() ? "" : "内容为空";
     case "workflow.request": return !String(a.text ?? "").trim() ? "内容为空"
-      : String(a.reminder ?? "").trim() && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(a.time ?? "")) ? "提醒须有 HH:MM 的时间" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在`
+      : String(a.reminder ?? "").trim() && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(a.time ?? "")) ? "提醒须有 HH:MM 的时间"
+      // A plain reminder is once at a time of day; 「每隔 1 小时提醒」 set that way lost the hours (2026-11-04).
+      : String(a.reminder ?? "").trim() && EVERY_FEW_HOURS.test(String(a.text ?? "")) ? "每隔几小时的提醒不是定时提醒：reminder 和 time 留空、weekdays 为 []，填 lineId，交给自动化设计" : item.args.lineId && !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在`
       // A workflow is written in one line's way and used on that line only; with none named it used to land on the first line.
       : !String(a.reminder ?? "").trim() && !item.args.lineId ? "自动化须写明服务哪条主线（lineId）；看不出是哪条时用 clarify 列出主线让本人选" : "";
     case "workflow.fix": return !String(a.text ?? "").trim() ? "内容为空"
