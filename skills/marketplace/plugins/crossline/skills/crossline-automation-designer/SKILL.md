@@ -54,7 +54,7 @@ When the request changes one of `existing` (「把邮件整理改成每天两次
 ## Name, summary, assumptions
 
 - `name`: a short label, at most 12 characters (「课程邮件整理」「每周到期清单」).
-- `summary`: one sentence saying what it does each time (「每个工作日早上把 7 天内到期的任务列成清单」).
+- `summary`: one sentence saying what it does each time, without the trigger: the person's message already puts the trigger in words in front of it (「把 7 天内到期的任务列成清单」, not 「每个工作日早上把…」 or 「收到…的邮件时…」).
 - `assumptions`: how you read what the request left open (the time, the day, what to make), in one or two short sentences the person can correct: 「没说时间，按每天 08:00；清单只列 7 天内到期的」. Empty when nothing was open.
 
 ## Language
