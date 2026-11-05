@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { AGENT_CATEGORIES, type AgentCategory } from "@crossline/core";
 import { MenuButton } from "../ui/controls";
 import { createCommand, enqueue, nextSequence, type OfflineCommandType } from "../offline-queue";
 import { useT } from "../locale-context";
@@ -54,6 +55,8 @@ export function TaskActions({ workOrderId, state, approvable = true, paused, age
   const [pausing, setPausing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [reason, setReason] = useState("");
+  // The worker could not tell what kind of work this is: the person picks one here (it used to say 「请选一类」 with nowhere to pick).
+  const [choosingKind, setChoosingKind] = useState(false);
   const t = useT();
   // Start, pause and resume survive a dead connection: queued on the device and replayed when it is back, as the offline workbench
   // promises. Everything else here (approve, archive, hand over) needs the server.
@@ -87,9 +90,11 @@ export function TaskActions({ workOrderId, state, approvable = true, paused, age
       return refused ? { ok: false, message: refused } : execution({ action: "start" });
     }, () => { location.href = `/workbench/${encodeURIComponent(workOrderId)}`; });
   };
-  const delegate = () => void run(async () => {
-    const result = await post("/api/agent/dispatch", { workOrderId, ...(agentStepId ? { stepId: agentStepId } : {}) });
+  const delegate = (category?: AgentCategory) => void run(async () => {
+    setChoosingKind(false);
+    const result = await post("/api/agent/dispatch", { workOrderId, ...(agentStepId ? { stepId: agentStepId } : {}), ...(category ? { category } : {}) });
     if (result.state === "started") return { ok: true };
+    if (result.code === "CATEGORY_REQUIRED") { setChoosingKind(true); return { ok: false, message: t("选一类工作，再交给助手：") }; }
     if (result.state === "needs_category_approval") return { ok: false, message: t("这类工作尚未允许 Agent 执行，已加入待决事项。") };
     return { ok: false, message: result.message ?? t("未能交给助手。") };
   }, () => setStatus(t("已交给助手，进度在小帮手里看；产出完成后进入待审阅。")));
@@ -112,7 +117,12 @@ export function TaskActions({ workOrderId, state, approvable = true, paused, age
       {PAUSE_REASONS.map((item) => <button key={item} type="button" disabled={busy} onClick={() => void run(() => execution({ action: "pause", reason: t(item) }))}>{t(item)}</button>)}
       <button type="button" onClick={() => setPausing(false)} aria-label={t("取消暂停")}>×</button>
     </span>}
-    {agentReady && !["accepted", "archived", "evidence_review"].includes(state) && action(t("交给助手"), <Bot {...ICON} />, delegate)}
+    {agentReady && !["accepted", "archived", "evidence_review"].includes(state) && action(t("交给助手"), <Bot {...ICON} />, () => delegate())}
+    {choosingKind && <span className="task-actions-choices" role="group" aria-label={t("工作类别")}>
+      {(Object.entries(AGENT_CATEGORIES) as Array<[AgentCategory, string]>).map(([kind, label]) =>
+        <button key={kind} type="button" disabled={busy} onClick={() => delegate(kind)}>{t(label)}</button>)}
+      <button type="button" onClick={() => { setChoosingKind(false); setStatus(""); }} aria-label={t("取消")}>×</button>
+    </span>}
     {children}
     {onOpen && (iconic ? <IconButton label={t("打开")} icon={<Maximize2 {...ICON} />} onClick={onOpen} className="task-actions-open" /> : <button type="button" onClick={onOpen}>{t("打开")}</button>)}
     {!["accepted", "archived"].includes(state) && <MenuButton label={t("更多操作")} icon={iconic ? <MoreHorizontal {...ICON} /> : "⋯"} items={[{ label: t("归档"), hint: t("可在已归档中恢复"), onSelect: () => setArchiving(true) }]} />}

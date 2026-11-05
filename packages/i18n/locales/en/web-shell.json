@@ -603,5 +603,7 @@
   "本周已完成的任务": "Tasks finished this week",
   "可用_today": "Free",
   "待办_today": "Planned",
-  "已发送验证邮件，请查收（包括垃圾邮件夹）。点击邮件里的链接即完成验证并登录。": "A verification email is on its way. Check your inbox (including spam), click the link to verify, then sign in."
+  "已发送验证邮件，请查收（包括垃圾邮件夹）。点击邮件里的链接即完成验证并登录。": "A verification email is on its way. Check your inbox (including spam), click the link to verify, then sign in.",
+  "选一类工作，再交给助手：": "Pick a kind of work, then hand it to the assistant:",
+  "工作类别": "Kind of work"
 }

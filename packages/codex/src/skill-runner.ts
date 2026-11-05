@@ -562,7 +562,8 @@ async function runRouted<T>(client: CodexRpcBoundary, options: { skillName: stri
     ...(context.route?.model ? { model: context.route.model } : {}), ...(context.plugins ? { plugins: context.plugins } : {}),
     ...(timing.runtime && timing.runtime !== "server" ? { runtime: timing.runtime } : {}),
     laneMs: timing.laneMs, gateMs: timing.gateMs, serviceMs: Date.now() - startedAt,
-    input: tokens.inputTokens, cached: tokens.cachedInputTokens, output: tokens.outputTokens }));
+    input: tokens.inputTokens, cached: tokens.cachedInputTokens, output: tokens.outputTokens,
+    ...(result.ok ? {} : { code: result.blocker.code, ...(result.blocker.detail ? { detail: result.blocker.detail.slice(0, 300) } : {}) }) }));
   return result;
 }
 
@@ -1146,7 +1147,11 @@ function failureResult<T>(client: CodexRpcBoundary, error: unknown, audit: Analy
   };
   // A caller's validator may attach `detail` when the Skill itself explained the refusal; that text is the only thing the
   // person can act on, so it beats the generic fallback.
+  // A runtime error with no code of its own keeps the runtime's words (an RPC error is the app-server's text, never model output):
+  // a bare SKILL_RUNTIME_FAILED gave nothing to read (2026-11-05, a guest's sandboxed assistant failing in one second).
   const detail = (error as Detailed | undefined)?.detail;
+  if (code === "SKILL_RUNTIME_FAILED" && !detail && error instanceof Error && error.message !== code)
+    return { ok: false, blocker: { code, message: t("这一轮没有完成；可以重试。"), detail: error.message.slice(0, 400) }, audit };
   if (code === "SKILL_TURN_FAILED") return { ok: false, blocker: { code, message: turnFailureAdvice(detail, runLocale(locale, currentUsageWorkspace())), ...(detail ? { detail: shownDetail(detail) } : {}) }, audit };
   if (code === "SKILL_TOOL_FORBIDDEN") return { ok: false, blocker: { code, message: t("模型这一轮用了此处不允许的功能，已拦下；可以重试。"), ...(detail ? { detail } : {}) }, audit };
   return { ok: false, blocker: { code, message: advice[code] ? t(advice[code]) : detail ?? t("这一轮没有完成；可以重试。"), ...(detail && advice[code] ? { detail: shownDetail(detail) } : {}) }, audit };

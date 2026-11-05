@@ -343,3 +343,5 @@
 
 - **W-214 (2026-11-04) 注册后回到原页、验证链接直接登录。** 注册与登录都带 `next`（`lib/safe-next.ts`，只认本站路径）：需要登录的页面把当前路径交给 `/login?next=`（`proxy.ts` 写 `x-crossline-path`，`requireSessionContext` 读它），登录、验证码、Google、注册链接与重发验证邮件都回到它（默认 /connect）；`emailVerification.autoSignInAfterVerification` 让邮件里的链接直接登录进那个账号，不再落到 `/login?verified=1` 再输一遍。
 - **W-215 (2026-11-04) 连接 ChatGPT：设备代码一出现就消失。** 线上点「用一次性代码连接」后 `GET /api/codex/account` 一直 503 `CODEX_APP_SERVER_REQUEST_FAILED`：登录启动了这个账号的 runtime，`runtimes.current()` 便交出它的客户端，而未连接账号的客户端对每个请求都抛 `RUNTIME_UNCONNECTED`，账号读取失败，页面拿不到 `login`，代码不显示。`current()` 只给已连接的账号；supervisor 读取失败时退回到 home 里的 auth.json，登录状态照常返回（`runtime-registry.test.ts`）。
+- **W-216 (2026-11-05) 「交给助手」说要选类别，却没有地方选。** 推断不出工作类别时 dispatch 回 `CATEGORY_REQUIRED`，按钮旁只显示一句提示。现在 `task-actions.tsx` 在提示旁列出五类工作，点一类就带 `category` 重新交出去。
+- **W-217 (2026-11-05) 访客的沙箱助手一秒失败，日志只有 `SKILL_RUNTIME_FAILED`。** 运行时的报错文字被丢掉了。`failureResult` 把它留在 blocker 的 `detail` 里（给人看的仍是「这一轮没有完成；可以重试。」），失败的 `skill.run` 日志带 `code` 与 `detail`。原因待下一次运行的日志确认。
