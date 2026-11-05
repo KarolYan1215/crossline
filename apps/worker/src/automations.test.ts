@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { AUTOMATION_RUNS_SETTING, AUTOMATIONS_SETTING, readAutomations, validateAutomationPlan, type Automation, type AutomationPlan } from "@crossline/core";
 import { CrosslineStore, readCategories, requestAutomation } from "@crossline/db";
 import type { AgentTaskInput } from "./agent-task";
-import { AUTOMATION_DESIGNER_SKILL, automationPass, closeLostAutomationRuns, createAutomationService, designPending, fire, onNewMail, type AutomationDeps } from "./automations";
+import { AUTOMATION_DESIGNER_SKILL, automationPass, reconcileAutomationRuns, createAutomationService, designPending, fire, onNewMail, type AutomationDeps } from "./automations";
 import { fakeRuntime } from "./testing/fake-runtime";
 
 const plan = (over: Partial<AutomationPlan> = {}, trigger: Partial<AutomationPlan["trigger"]> = {}): AutomationPlan => ({
@@ -198,9 +198,22 @@ test("a run the last worker lost at a restart is marked 没跑完 and said once,
   for (const [type, payload] of [["agent.task.requested", { taskId, title: "x" }], ["agent.task.blocked", { taskId, code: "AGENT_RUN_LOST", message: "后台进程重启，这次运行中断" }]] as const) {
     store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: `${type}:${taskId}`, type, entityId: taskId, payload });
   }
-  expect(closeLostAutomationRuns(store, workspaceId)).toEqual([taskId]);
+  expect(reconcileAutomationRuns(store, workspaceId)).toEqual([taskId]);
   expect(JSON.parse(store.getSetting(workspaceId, AUTOMATION_RUNS_SETTING) ?? "[]")).toEqual([expect.objectContaining({ taskId, state: "failed", detail: expect.stringContaining("重启") })]);
-  expect(closeLostAutomationRuns(store, workspaceId)).toEqual([]);
+  expect(reconcileAutomationRuns(store, workspaceId)).toEqual([]);
+});
+
+test("a run left 已开始 takes its end from the assistant's ledger; one with no task on record is closed after a day", () => {
+  const { store, workspaceId } = setup();
+  const runsNow = () => JSON.parse(store.getSetting(workspaceId, AUTOMATION_RUNS_SETTING) ?? "[]") as Array<{ taskId: string; state: string }>;
+  const old = (taskId: string, firedAt: string) => ({ automationId: "auto-x", taskId, firedAt, reason: "到点", state: "started" });
+  store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify([old("t-done", "2026-11-02T15:07:00.000Z"), old("t-none", "2026-11-02T15:07:00.000Z"),
+    old("t-running", "2026-11-04T18:00:00.000Z"), old("t-fresh", "2026-11-04T18:00:00.000Z")]));
+  for (const [type, id] of [["agent.task.requested", "t-done"], ["agent.task.completed", "t-done"], ["agent.task.requested", "t-running"]] as const) {
+    store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: `${type}:${id}`, type, entityId: id, payload: { taskId: id, title: "x", reviewRequired: false } });
+  }
+  expect(reconcileAutomationRuns(store, workspaceId, new Date("2026-11-04T20:00:00Z")).sort()).toEqual(["t-done", "t-none"]);
+  expect(runsNow().map((run) => `${run.taskId}:${run.state}`)).toEqual(["t-done:done", "t-none:failed", "t-running:started", "t-fresh:started"]);
 });
 
 test("a kind of work switched off or an owner-only assistant drops the firing, says why once, and does not hold up the other automations", async () => {

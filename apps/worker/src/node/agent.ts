@@ -184,7 +184,7 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
           runtime?.write(JSON.stringify({ method: "initialized" }));
           send({ t: "hello", protocol: NODE_PROTOCOL, codex: agent, platform: process.platform, host: (options.host ?? hostname()).slice(0, 60),
             role: options.role, capacity: options.capacity ?? nodeCapacity(), ...(options.browsers?.available ? { browser: true } : {}),
-            ...(shell ? { shell: true, tasks: tasksRoot, home: homedir(), ffmpeg: hasFfmpeg() } : {}) });
+            ...(shell ? { shell: true, tasks: tasksRoot, home: homedir(), ffmpeg: hasFfmpeg(), ...shellEnvironment() } : {}) });
         });
     });
     socket.on("message", (raw) => {
@@ -351,4 +351,13 @@ export function startNodeAgent(options: NodeAgentOptions): { stop: () => void; s
 /** Whether `ffmpeg` answers on this computer (PATH lookup by the OS; a missing one fails to spawn). */
 export function hasFfmpeg(run: typeof spawnSync = spawnSync): boolean {
   return run("ffmpeg", ["-version"], { stdio: "ignore", timeout: 10_000 }).status === 0;
+}
+
+/** Python (Windows' store stub exits non-zero), this program's own node, and on Windows the PowerShell version: told to the assistant's runs. */
+export function shellEnvironment(run: typeof spawnSync = spawnSync): { python: boolean; node: string; ps?: string } {
+  const python = ["python", "python3"].some((name) => run(name, ["--version"], { stdio: "ignore", timeout: 10_000 }).status === 0);
+  const ps = process.platform === "win32"
+    ? run("powershell.exe", ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"], { encoding: "utf8", timeout: 15_000 }).stdout?.toString().trim().slice(0, 20)
+    : undefined;
+  return { python, node: process.execPath, ...(ps ? { ps } : {}) };
 }

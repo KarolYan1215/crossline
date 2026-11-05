@@ -880,5 +880,6 @@
   "连接邮箱服务器超时，会自动再试": "The mail server did not answer in time; it will try again by itself",
   "邮箱服务器中途断开了连接，会自动再试": "The mail server dropped the connection; it will try again by itself",
   "邮箱服务器拒绝连接，请检查服务器地址和端口": "The mail server refused the connection; check the server address and port",
-  "找不到邮箱服务器地址，请检查服务器地址": "The mail server address could not be found; check it"
+  "找不到邮箱服务器地址，请检查服务器地址": "The mail server address could not be found; check it",
+  "没有找到这次运行的记录": "No record of this run was found"
 }

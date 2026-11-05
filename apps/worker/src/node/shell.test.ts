@@ -163,3 +163,19 @@ test("the guard refuses the node's own token, Codex home and browser profiles to
     expect(decideCommand(command, context).decision, command).toBe("deny");
   }
 });
+
+test("a shell thread on a Windows node is told PowerShell, curl.exe, no Linux paths and what to script in; structured threads are left as they are", async () => {
+  const { nodeEnvironmentNote, withNote } = await import("./hub");
+  const note = nodeEnvironmentNote({ platform: "win32", python: false, node: "C:\\Program Files\\Crossline Node\\node.exe", ps: "5.1.26100.1" })!;
+  for (const words of ["Windows PowerShell 5.1.26100.1", "`&&`", "curl.exe", "/data", "Python is not installed", "& \"C:\\Program Files\\Crossline Node\\node.exe\" script.mjs"]) expect(note).toContain(words);
+  expect(nodeEnvironmentNote({ platform: "win32", ps: "7.4.1" })).not.toContain("`&&`");
+  expect(nodeEnvironmentNote({ platform: "win32" })).toContain("Python may be missing");
+  expect(nodeEnvironmentNote({ platform: "win32", node: "C:\\x\"; rm -rf /" })).not.toContain("rm -rf");
+  expect(nodeEnvironmentNote({ platform: "linux" })).toBeUndefined();
+  const shell = withNote("thread/start", { sandbox: "danger-full-access", developerInstructions: "own" }, note) as { developerInstructions: string };
+  expect(shell.developerInstructions).toBe(`own\n\n${note}`);
+  expect(withNote("thread/resume", shell, note)).toEqual(shell);
+  const structured = { sandbox: "read-only", developerInstructions: "own" };
+  expect(withNote("thread/start", structured, note)).toBe(structured);
+  expect(withNote("turn/start", { sandbox: "danger-full-access" }, note)).toEqual({ sandbox: "danger-full-access" });
+});

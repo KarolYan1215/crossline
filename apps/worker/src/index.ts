@@ -95,7 +95,7 @@ import { createMailService } from "./mailbox";
 import { createImportService } from "./importer";
 import { createDictationService } from "./dictation";
 import { probeSandboxShell } from "./sandbox-probe";
-import { automationPass, closeLostAutomationRuns, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
+import { automationPass, reconcileAutomationRuns, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { createNodeHub, type NodeHub } from "./node/hub";
 import { skillLibraryDir } from "./skill-library";
@@ -1400,6 +1400,7 @@ async function automationFire(workspaceId: string): Promise<void> {
   try {
     if (!codexSupervisor || paused(workspaceId, "assistant") || !spendAllows(await spendFor(workspaceId), "intake")) return;
     enterUsageWorkspace(workspaceId);
+    reconcileAutomationRuns(analysisStore, workspaceId);
     const runs = await automationPass(automationDeps, workspaceId);
     if (runs.length) console.info(JSON.stringify({ type: "automation.pass", workspaceId, runs: runs.map((run) => `${run.automationId}:${run.state}`), checkedAt: new Date().toISOString() }));
   } finally { firingAutomations.delete(workspaceId); }
@@ -1412,7 +1413,7 @@ const automationService = createAutomationService({ ...automationDeps, afterRequ
 for (const workspace of analysisStore.listWorkspaces()) {
   const lost = agentService.recoverLost(workspace.id);
   if (lost.length) console.info(JSON.stringify({ type: "agent.recovered_lost", workspaceId: workspace.id, lost, checkedAt: new Date().toISOString() }));
-  closeLostAutomationRuns(analysisStore, workspace.id);
+  reconcileAutomationRuns(analysisStore, workspace.id);
   // A collection the last worker was running when it stopped never wrote its end: closed, so the page does not show it running.
   const interrupted = closeInterruptedCollections(analysisStore, workspace.id);
   if (interrupted.length) console.info(JSON.stringify({ type: "collect.interrupted", workspaceId: workspace.id, interrupted, checkedAt: new Date().toISOString() }));

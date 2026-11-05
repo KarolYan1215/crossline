@@ -85,6 +85,35 @@ export type NodeHub = {
   close: () => Promise<void>;
 };
 
+/**
+ * What a shell run on this node must know about the computer it lands on (2026-11-04): Codex's own environment block names only the
+ * shell (`powershell` for both 5.1 and 7), and a run on the owner's Windows laptop wrote `python3`, curl flags and `/data`. Concrete
+ * substitutes, not just the platform's name: naming Windows alone is known not to stop bash (anthropics/claude-code#20118).
+ */
+export function nodeEnvironmentNote(hello: Pick<Extract<NodeFrame, { t: "hello" }>, "platform" | "python" | "node" | "ps">): string | undefined {
+  if (hello.platform !== "win32") return undefined;
+  const ps = typeof hello.ps === "string" && /^\d+(\.\d+)*$/.test(hello.ps) ? hello.ps : "";
+  const legacy = !ps || ps.startsWith("5.");
+  const node = typeof hello.node === "string" && /^[A-Za-z]:\\[^\n"`$]{1,200}$/.test(hello.node) ? hello.node : "";
+  return [
+    `This run executes on the person's Windows computer. Your commands run in ${legacy ? `Windows PowerShell ${ps || "5.1"}` : `PowerShell ${ps}`}, not bash.`,
+    legacy ? "Chain commands with `;` (or `if ($?) { … }`); `&&` and `||` are parse errors here." : "",
+    "`curl` and `wget` are aliases of Invoke-WebRequest: call `curl.exe` with curl flags, or use Invoke-WebRequest / Invoke-RestMethod; prefer your web_search and web_fetch tools for the web.",
+    "There is no /data, /tmp or any Linux path: use your working directory and paths like C:\\…; `ls`, `cat` and `rm` are PowerShell aliases with different flags (use Get-ChildItem, Get-Content, Remove-Item).",
+    hello.python === true ? "Python is installed (`python`, not `python3`)."
+      : `${hello.python === false ? "Python is not installed: do not call python or python3" : "Python may be missing: check with `Get-Command python` before using it"}; install nothing, and write scripts in PowerShell${node ? ` or as JavaScript run with \`& "${node}" script.mjs\`` : ""}.`
+  ].filter(Boolean).join(" ");
+}
+
+/** A shell thread (the assistant's: full access) started or resumed here gets the note after its own instructions; structured runs are untouched. */
+export function withNote(method: string, params: unknown, note: string | undefined): unknown {
+  if (!note || (method !== "thread/start" && method !== "thread/resume") || !params || typeof params !== "object") return params;
+  const value = params as { sandbox?: unknown; developerInstructions?: unknown };
+  if (value.sandbox !== "danger-full-access") return params;
+  const own = typeof value.developerInstructions === "string" ? value.developerInstructions : "";
+  return own.includes(note) ? params : { ...value, developerInstructions: own ? `${own}\n\n${note}` : note };
+}
+
 /** A node may mirror no more than this of one directory. */
 export const MIRROR_MAX_FILES = 800;
 export const MIRROR_MAX_BYTES = 40 * 1_048_576;
@@ -96,6 +125,8 @@ const GONE_SHOWN_MS = 24 * 3_600_000;
 type Connection = { socket: WebSocket; workspaceId: string; token: string; client?: JsonLineRpcClient; ready: boolean; heardAt: number;
   host: string; codex: string; role: NodeRole; capacity: number; key: string; browser: boolean;
   shell?: { tasks: string; home: string; windows: boolean; ffmpeg?: boolean };
+  /** Said to every shell run bound to this node (`nodeEnvironmentNote`). */
+  note?: string | undefined;
   tasking: Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>;
   browsing: Map<number, { chunks: Buffer[]; resolve: (value: unknown) => void; reject: (error: Error) => void }> };
 let browserIds = 0;
@@ -221,6 +252,7 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     const tasks = hello.shell === true ? nodeDir(hello.tasks, windows) : undefined;
     const home = hello.shell === true ? nodeDir(hello.home, windows) : undefined;
     if (tasks && home) connection.shell = { tasks, home, windows, ...(typeof hello.ffmpeg === "boolean" ? { ffmpeg: hello.ffmpeg } : {}) };
+    connection.note = nodeEnvironmentNote(hello);
     const server = codexVersionOf({ userAgent: options.serverCodex() });
     // The server's own runtime is not up yet (the worker just restarted and a node was quicker): come back in a moment, not in ten minutes.
     if (!server) { log({ type: "node.server_starting", workspaceId, host: connection.host }); socket.close(4006, "NODE_SERVER_STARTING"); return; }
@@ -236,6 +268,9 @@ export async function createNodeHub(options: NodeHubOptions): Promise<NodeHub> {
     if (previous) previous.socket.close(4000, "NODE_REPLACED");
     send(socket, { t: "welcome", workspaceId, roots: options.roots(workspaceId), ...(options.gateway() ? { gateway: options.gateway()! } : {}) });
     connection.client = new JsonLineRpcClient((line) => send(socket, { t: "rpc", line: line.replace(/\n$/, "") }));
+    // Every shell thread on this computer is told what it runs on: the owner's pool and a guest's node mode both start threads through here.
+    const raw = connection.client.request.bind(connection.client);
+    connection.client.request = (method, params) => raw(method, withNote(method, params, connection.note));
     setStatus(workspaceId, entryOf(connection, "connected"));
     log({ type: "node.connected", workspaceId, host: connection.host, role: connection.role, capacity: connection.capacity, codex: connection.codex });
     try {

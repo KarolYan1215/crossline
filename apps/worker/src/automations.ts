@@ -49,25 +49,38 @@ function noteRun(store: CrosslineStore, workspaceId: string, run: AutomationRun)
 }
 
 /**
- * Runs the last worker was running when it stopped: their end was a callback in that process, so the log said 「已开始」 for good and
- * the person was never told (2026-11-04, two runs lost to deploys). Read from the ledger (every run recoverLost marked lost, this start
- * or an earlier one), after recoverLost; marked 「没跑完」 with the reason, and said once.
+ * The run log is reconciled against the assistant's own ledger, the source of truth, at start and on every tick. A run's end used to be
+ * only a callback in the process that started it, so a restart (2026-11-04, two runs lost to deploys) or a run from before the log
+ * recorded ends (two on the owner's account, 11-02 and 11-04) said 「已开始」 for good. Now: an ended task gives the run its end; a run
+ * the last worker lost (recoverLost) is 「没跑完」 and said once; a run with no task on record after a day is closed as never started.
  */
-export function closeLostAutomationRuns(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
-  const lost = new Set(listAgentTasks(store, workspaceId).filter((task) => task.blockerCode === "AGENT_RUN_LOST").map((task) => task.taskId));
-  const hit = runs(store, workspaceId).filter((run) => run.state === "started" && lost.has(run.taskId));
-  if (!hit.length) return [];
+export function reconcileAutomationRuns(store: CrosslineStore, workspaceId: string, now = new Date()): string[] {
+  const open = runs(store, workspaceId).filter((run) => run.state === "started");
+  if (!open.length) return [];
+  const tasks = new Map(listAgentTasks(store, workspaceId).map((task) => [task.taskId, task]));
   const t = tFor(localeOf(store, workspaceId));
-  const detail = t("后台进程重启，这次运行中断");
-  const ids = new Set(hit.map((run) => run.taskId));
-  store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify(runs(store, workspaceId).map((run) => ids.has(run.taskId) ? { ...run, state: "failed" as const, detail } : run)));
-  // Older ones are only marked: a message about a run from days ago is noise.
-  for (const run of hit.filter((item) => now.getTime() - Date.parse(item.firedAt) < 86_400_000)) {
+  const lostDetail = t("后台进程重启，这次运行中断");
+  const ends = new Map<string, Pick<AutomationRun, "state" | "detail">>();
+  for (const run of open) {
+    const task = tasks.get(run.taskId);
+    if (!task) { if (now.getTime() - Date.parse(run.firedAt) > 86_400_000) ends.set(run.taskId, { state: "failed", detail: t("没有找到这次运行的记录") }); continue; }
+    if (task.status === "running") continue;
+    ends.set(run.taskId, task.status === "blocked"
+      ? { state: "failed", detail: task.blockerCode === "AGENT_RUN_LOST" ? lostDetail : task.blockerMessage.slice(0, 120) }
+      : { state: "done" });
+  }
+  if (!ends.size) return [];
+  store.setSetting(workspaceId, AUTOMATION_RUNS_SETTING, JSON.stringify(runs(store, workspaceId).map((run) => {
+    const end = ends.get(run.taskId);
+    return end && run.state === "started" ? { ...run, state: end.state, ...(end.detail ? { detail: end.detail } : {}) } : run;
+  })));
+  // Only a lost run is said here (a run that ended any other way was said by its own callback); older ones are only marked.
+  for (const run of open.filter((item) => tasks.get(item.taskId)?.blockerCode === "AGENT_RUN_LOST" && now.getTime() - Date.parse(item.firedAt) < 86_400_000)) {
     const name = read(store, workspaceId).find((item) => item.id === run.automationId)?.name ?? run.automationId;
-    sayToPerson(store, workspaceId, t("自动化「{{name}}」这次没跑完：{{reason}}", { name, reason: detail }), "automation_failed", `automation-failed:${run.taskId}`,
+    sayToPerson(store, workspaceId, t("自动化「{{name}}」这次没跑完：{{reason}}", { name, reason: lostDetail }), "automation_failed", `automation-failed:${run.taskId}`,
       [{ label: t("查看", { context: "view" }), href: "/settings#automation" }], now);
   }
-  return [...ids];
+  return [...ends.keys()];
 }
 
 export const pendingRequests =(store: CrosslineStore, workspaceId: string) => {

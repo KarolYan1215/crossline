@@ -29,7 +29,9 @@ export type NodeFrame =
       /** The shell assistant may run here (the person's switch), in task directories under `tasks`; `home` is this computer's user folder (for the guard). */
       shell?: boolean; tasks?: string; home?: string;
       /** Whether `ffmpeg` runs on this computer: the assistant's audio and video errands need it. */
-      ffmpeg?: boolean }
+      ffmpeg?: boolean;
+      /** What the assistant's commands can lean on here (2026-11-04: a run on Windows wrote `python3`, curl flags and `/data`). */
+      python?: boolean; node?: string; ps?: string }
   | { t: "welcome"; workspaceId: string; roots: string[]; gateway?: string }
   | { t: "rpc"; line: string }
   | { t: "files"; id: number; dir: string }
