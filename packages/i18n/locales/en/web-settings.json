@@ -772,6 +772,7 @@
   "被拒绝": "refused",
   "离线（{{at}}起）：模型工作暂在服务器上": "Offline (since {{at}}): model work is on the server for now",
   "已开启，等那台电脑在设备页也开启「作为算力节点」": "On; waiting for that computer to turn on Compute node on its device page too",
+  "已开启，等 {{host}} 连上": "On; waiting for {{host}} to connect",
   "没有配对，请重试": "Not paired. Try again",
   "已配对 {{host}}：那台电脑几秒内连上，这里会显示。": "Paired with {{host}}: that computer connects within seconds and shows up here.",
   "已配对：那台电脑几秒内连上，这里会显示。": "Paired: that computer connects within seconds and shows up here.",

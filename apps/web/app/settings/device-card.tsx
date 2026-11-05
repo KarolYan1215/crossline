@@ -77,7 +77,8 @@ function nodeWords(view: NodeView, t: Translate, locale: Locale): string {
     case "connected": return t("已连上，正在准备");
     case "refused": return t("没有接入（{{at}}）：{{why}}", { at, why: view.status.message ?? t("被拒绝") });
     case "offline": return t("离线（{{at}}起）：模型工作暂在服务器上", { at });
-    default: return t("已开启，等那台电脑在设备页也开启「作为算力节点」");
+    default: return view.paired ? t("已开启，等 {{host}} 连上", { host: view.paired.host || t("一台电脑") })
+      : t("已开启，等那台电脑在设备页也开启「作为算力节点」");
   }
 }
 
