@@ -1361,7 +1361,12 @@ const agentService = createAgentService({
   nodeShell,
   // What a sandboxed run may never read: the server's data and state (every account's ledger, files and runtime homes) — its own task
   // folder and inputs, which live under them, stay reachable because the more specific entry wins.
-  sandbox: { readable: [path.dirname(process.env.CROSSLINE_CODEX_PATH ?? "/opt/codex/codex")], deny: [dataDir, process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state")] },
+  // The account's own runtime keeps its sandbox helper (`codex-linux-sandbox`, linked at start) in its home under the denied state
+  // folder; without reading it bwrap cannot start the helper and no thread opens (2026-11-05, W-217).
+  sandbox: (workspaceId) => ({
+    readable: [path.dirname(process.env.CROSSLINE_CODEX_PATH ?? "/opt/codex/codex"),
+      path.join(runtimesDir(), workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_"), "codex-home", "tmp", "arg0-linux")],
+    deny: [dataDir, process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state")] }),
   confine: { dataDir, stateDir: process.env.CROSSLINE_STATE_DIR ?? path.join(dataDir, "..", "state") },
   clientFor: accountClient,
   mailFor: (workspaceId) => mailService.lookup(workspaceId),

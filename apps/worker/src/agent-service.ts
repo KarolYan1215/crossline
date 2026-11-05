@@ -50,7 +50,7 @@ export function createAgentService(deps: {
   /** For `node`: the account's own compute node whose person allowed the shell on it (docs/compute-node.md P3). */
   nodeShell?: (workspaceId: string) => NodeShellLink | undefined;
   /** For `sandbox`: beside its inputs what it may read, and what it may never read (the server's data and state). */
-  sandbox?: { readable: string[]; deny: string[] };
+  sandbox?: (workspaceId: string) => { readable: string[]; deny: string[] };
   /** The workspace's own runtime, for a tools-mode run (the shell runs on the owner's `getClient`). */
   clientFor?: (workspaceId: string) => CodexRpcBoundary | undefined;
   /** The person's mailbox, read-only, when connected. */
@@ -92,7 +92,7 @@ export function createAgentService(deps: {
         sayToPerson(deps.store, workspaceId, tOfWorkspace(deps.store, workspaceId)("助手在做「{{title}}」时需要本人回答：{{question}}（10 分钟内未回答就按最稳妥的做法继续）",
           { title: title.slice(0, 40), question: questions[0]!.question.slice(0, 160) }),
           "agent_question", questionId, [{ label: tOfWorkspace(deps.store, workspaceId)("去回答"), href: "/approvals#assistant" }]) }),
-      signal: control.signal, ...(onLive ? { onLive } : {}), mode, ...(mail ? { mail } : {}), ...(mode === "sandbox" && deps.sandbox ? { sandbox: deps.sandbox } : {})
+      signal: control.signal, ...(onLive ? { onLive } : {}), mode, ...(mail ? { mail } : {}), ...(mode === "sandbox" && deps.sandbox ? { sandbox: deps.sandbox(workspaceId) } : {})
     });
   };
 
