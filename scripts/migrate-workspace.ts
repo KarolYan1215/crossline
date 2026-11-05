@@ -18,20 +18,28 @@
  * keeps working. Identity tables (principals, workspaces, members, device leases, Tailscale bindings) are never copied. Paths under the
  * source data directory are rewritten to the target's, and the files they name — prepared materials, uploaded sources, the portrait —
  * are copied. Stop the target app before `--apply`; back its data directory up first.
+ *
+ * `--copy` makes a copy into a second account of the same ledger (deploy/server/ledger-sync.sh clone, 2026-11-04: a test account with
+ * the owner's data). Rows of the few tables keyed by a ledger-wide id (`globalIdTables`: events, captures, materials, conversations…)
+ * would clash with the source's own, so each such id gets a new one — a UUID a new UUID, a conversation's day id the target's, anything
+ * else `~c` — and every string of every row has it replaced, which keeps every reference between rows. Materials folders named by a
+ * renamed id are copied under the new name. The device mirror's settings keep the target's own (`mirrorLocalSetting`: device and node
+ * tokens too), and calendar cursors and invite codes are not copied, so the copy never answers to the first account's phone, node or code.
  */
+import { randomUUID } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CrosslineStore, MACHINE_SETTINGS } from "../packages/db/src/index";
+import { CrosslineStore, MACHINE_SETTINGS, mirrorLocalSetting } from "../packages/db/src/index";
 
 const arg = (name: string) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : undefined; };
 const need = (name: string) => arg(name) ?? (() => { throw new Error(`missing --${name}`); })();
 const fromDb = need("from-db"), fromData = need("from-data"), workspaceId = need("workspace"), toDb = need("to-db"), toData = need("to-data");
-const apply = process.argv.includes("--apply"), replace = process.argv.includes("--replace");
+const apply = process.argv.includes("--apply"), replace = process.argv.includes("--replace"), copy = process.argv.includes("--copy");
 // Settings that belong to the machine, not the person: these keep the target's own values (docs/ledger-sync.md). Each entry is a
 // prefix (`MACHINE_SETTINGS`, shared with the device mirror). `--keep-settings none` turns it off, `--keep-settings a,b` replaces the list.
 const keepSettings = arg("keep-settings") === "none" ? [] : arg("keep-settings")?.split(",").map((key) => key.trim()).filter(Boolean) ?? MACHINE_SETTINGS;
-const keptKey = (key: string) => keepSettings.some((rule) => key.startsWith(rule));
+const keptKey = (key: string) => copy ? mirrorLocalSetting(key) : keepSettings.some((rule) => key.startsWith(rule));
 const filesRoot = arg("files") ?? fromData;
 // A Windows path is resolved with Windows rules even on the Linux server, and the other way round.
 const pathFor = (dir: string) => (/^[A-Za-z]:[\\/]/.test(dir) ? path.win32 : path.posix);
@@ -114,10 +122,40 @@ const rewrite = (value: string) => {
   }
   return next;
 };
+// --copy: new ids for the rows keyed by a ledger-wide id (see the header).
+const notCopied = new Set(copy ? ["external_bindings", "beta_invites"] : []);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const idMap = new Map<string, string>();
+if (copy) {
+  const fromConv = `conv-${workspaceId.slice(0, 8)}-`, toConv = `conv-${toWorkspace.slice(0, 8)}-`;
+  for (const [table, key] of globalIdTables()) {
+    for (const row of (snapshot.tables as Record<string, Array<Record<string, unknown>>>)[table] ?? []) {
+      const id = row[key];
+      if (typeof id !== "string" || idMap.has(id)) continue;
+      idMap.set(id, UUID.test(id) ? randomUUID() : id.startsWith(fromConv) ? toConv + id.slice(fromConv.length) : `${id}~c`);
+    }
+  }
+}
+const others = [...idMap.keys()].filter((id) => !UUID.test(id)).sort((a, b) => b.length - a.length);
+const othersPattern = others.length ? new RegExp(`(?<![\\w-])(?:${others.map(escape).join("|")})(?![\\w-])`, "g") : undefined;
+const remap = (value: string) => {
+  if (!idMap.size) return value;
+  const next = value.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, (id) => idMap.get(id) ?? id);
+  return othersPattern ? next.replace(othersPattern, (id) => idMap.get(id) ?? id) : next;
+};
+// Tables of a workspace keyed by one text id alone (not with the workspace): their ids are unique across the whole ledger.
+function globalIdTables(): Array<[string, string]> {
+  const names = (raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((row) => row.name);
+  return names.filter((name) => !IDENTITY.has(name) && !notCopied.has(name)).flatMap((name) => {
+    const columns = raw.prepare(`SELECT name, type, pk FROM pragma_table_info('${name}')`).all() as Array<{ name: string; type: string; pk: number }>;
+    const key = columns.filter((column) => column.pk > 0);
+    return columns.some((column) => column.name === "workspace_id") && key.length === 1 && /TEXT/i.test(key[0]!.type) ? [[name, key[0]!.name] as [string, string]] : [];
+  });
+}
 const tables: Record<string, Array<Record<string, unknown>>> = {};
 for (const [table, rows] of Object.entries(snapshot.tables as Record<string, Array<Record<string, unknown>>>)) {
-  if (IDENTITY.has(table)) continue;
-  tables[table] = rows.map((row) => Object.fromEntries(Object.entries(row).map(([column, value]) => [column, typeof value === "string" ? rewrite(value) : value])));
+  if (IDENTITY.has(table) || notCopied.has(table)) continue;
+  tables[table] = rows.map((row) => Object.fromEntries(Object.entries(row).map(([column, value]) => [column, typeof value === "string" ? rewrite(remap(value)) : value])));
 }
 const keptSettings = (raw.prepare("SELECT key FROM settings WHERE workspace_id = ?").all(toWorkspace) as Array<{ key: string }>).map((row) => row.key).filter(keptKey);
 if (tables.settings) tables.settings = tables.settings.filter((row) => !keptKey(String(row.key)));
@@ -135,7 +173,7 @@ const portraitTo = path.join(toData, "portrait", toWorkspace.replace(/[^a-zA-Z0-
 const folders = [["materials", "materials"], ["sources", "sources"]].map(([from, to]) => [path.join(filesRoot, from!), path.join(toData, to!)] as const)
   .filter(([from]) => existsSync(from));
 console.log(JSON.stringify({ apply, from: { workspaceId, owner: fromOwner }, to: { workspace: toWorkspace, owner: toOwner },
-  rows: counts, pathsRewritten: paths, replace, targetRowsCleared: Object.fromEntries(seeded), settingsKept: keptSettings,
+  rows: counts, pathsRewritten: paths, idsRenewed: idMap.size, replace, targetRowsCleared: Object.fromEntries(seeded), settingsKept: keptSettings,
   copies: [...folders, ...(existsSync(portraitFrom) ? [[portraitFrom, portraitTo] as const] : [])].map(([from, to]) => `${from} -> ${to}`) }, null, 1));
 
 if (apply) {
@@ -155,6 +193,11 @@ if (apply) {
   });
   target.close();
   for (const [from, to] of folders) cpSync(from, to, { recursive: true, force: false, errorOnExist: false });
+  // A materials folder named by an id the copy renewed is copied under the new name, where the copy's rows now point.
+  for (const [from, to] of idMap) {
+    const folder = path.join(toData, "materials", from);
+    if (existsSync(folder) && !existsSync(path.join(toData, "materials", to))) cpSync(folder, path.join(toData, "materials", to), { recursive: true });
+  }
   if (existsSync(portraitFrom)) { rmSync(portraitTo, { recursive: true, force: true }); cpSync(portraitFrom, portraitTo, { recursive: true }); }
   console.log(JSON.stringify({ imported: Object.fromEntries(Object.entries(result).filter(([, n]) => n)) }));
 } else {

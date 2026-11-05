@@ -14,10 +14,10 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: diagnose, deploy, backup, compare-list, compare, compare-report, persona or persona-report
+        description: diagnose, deploy, backup, compare-list, compare, compare-report, persona, persona-report, clone, clone-apply, sponsor or sponsor-apply
         default: diagnose
       args:
-        description: "compare only: e.g. --email someone@example.com --steps 6 --backplans 3"
+        description: "compare: e.g. --email someone@example.com --steps 6; clone: <from-email> <to-email>; sponsor: <email>"
         default: ""
 
 permissions:
@@ -206,6 +206,22 @@ jobs:
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" mkdir -p /tmp/crossline-sync
           scp -i ~/.ssh/id deploy/server/ledger-sync.sh scripts/ledger-stamp.ts scripts/migrate-workspace.ts scripts/pack-for-server.ts admin@"$HOST":/tmp/crossline-sync/
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" "sudo sh /tmp/crossline-sync/ledger-sync.sh $ACTION"
+      - name: Copy one account's ledger into a test account, or put an account on the developer's model
+        if: github.event_name == 'workflow_dispatch' && (startsWith(inputs.action, 'clone') || startsWith(inputs.action, 'sponsor'))
+        env:
+          ACTION: ${{ inputs.action }}
+          ARGS: ${{ inputs.args }}
+        run: |
+          # clone / clone-apply: args "<from-email> <to-email>"; sponsor / sponsor-apply: args "<email>" (deploy/server/ledger-sync.sh).
+          set -- $ARGS
+          for a in "$@"; do case "$a" in *[!A-Za-z0-9@._+-]*) echo "not an address: $a"; exit 2;; esac; done
+          mode=preview; case "$ACTION" in *-apply) mode=apply;; esac
+          ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" mkdir -p /tmp/crossline-sync
+          scp -i ~/.ssh/id deploy/server/ledger-sync.sh scripts/ledger-stamp.ts scripts/migrate-workspace.ts scripts/pack-for-server.ts admin@"$HOST":/tmp/crossline-sync/
+          case "$ACTION" in
+            clone*) ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" "sudo sh /tmp/crossline-sync/ledger-sync.sh clone $1 $2 $mode" ;;
+            sponsor*) ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" "sudo sh /tmp/crossline-sync/ledger-sync.sh sponsor $1 $mode" ;;
+          esac
       - name: Compare the developer's models on real work
         if: github.event_name == 'workflow_dispatch' && startsWith(inputs.action, 'compare')
         env:
