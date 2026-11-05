@@ -325,6 +325,25 @@ test("a safe decision left 48 hours takes its recommendation by itself, said onc
   expect(readRiskDecisions(TEST_CTX).mos2).toBeUndefined();
 });
 
+test("an ask with no time of its own is settled 48 hours after it was first seen", async () => {
+  const store = setup();
+  const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
+  const { autoAnswerDue } = await import("./answer-all");
+  const { readRiskDecisions } = await import("./crossline");
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mos2", stage: 1, deadline: "2026-11-30", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint: milestoneRiskFingerprint({ title: "实测 MoS₂ 参数已可直接驱动 NeuroSim",
+    deadline: "2026-11-30", criteria: [], dependsOn: [] }), at: "", source: "model", risks: [{ level: "medium", kind: "capacity", note: "同月还有三个截止" }] } }));
+  expect(await autoAnswerDue(TEST_CTX, NOW)).toEqual({ done: 0 });
+  const almost = new Date(NOW.getTime() + 47 * 3_600_000);
+  vi.stubEnv("CROSSLINE_FIXED_NOW", almost.toISOString());
+  expect(await autoAnswerDue(TEST_CTX, almost)).toEqual({ done: 0 });
+  const later = new Date(NOW.getTime() + 49 * 3_600_000);
+  vi.stubEnv("CROSSLINE_FIXED_NOW", later.toISOString());
+  expect((await autoAnswerDue(TEST_CTX, later)).done).toBe(1);
+  expect(readRiskDecisions(TEST_CTX).mos2).toMatchObject({ how: "accept" });
+});
+
 test("work given a time yesterday and never started is asked about when it bears on a deadline this week; the rest just rolls", async () => {
   const store = setup();
   const save = (id: string, dueDate: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",

@@ -58,6 +58,11 @@ export async function runAnswerAll(ctx: AccessContext, now = appNow()): Promise<
 export const AUTO_ANSWER_AFTER_MS = 48 * 3_600_000;
 /** The asks (id and fingerprint) and proposals once settled by `autoAnswerDue`; the last 500. */
 export const AUTO_ANSWERED_SETTING = "asks.autoAnswered";
+/** When each open ask with a safe default was first seen by `autoAnswerDue`, for asks that carry no time of their own. */
+export const AUTO_ANSWER_SEEN_SETTING = "asks.autoAnswerSeen";
+const readSeen = (raw: string | undefined): Record<string, string> => {
+  try { const value: unknown = JSON.parse(raw ?? "{}"); return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, string> : {}; } catch { return {}; }
+};
 const readKeys = (raw: string | undefined): string[] => { try { const value: unknown = JSON.parse(raw ?? "[]"); return Array.isArray(value) ? value.filter((key): key is string => typeof key === "string") : []; } catch { return []; } };
 
 /**
@@ -65,7 +70,7 @@ const readKeys = (raw: string | undefined): string[] => { try { const value: unk
  * settled by that default, the way 「全部按推荐」 would, under one undo kept 24 hours and said once in the day's conversation. Before, a
  * person away for a week came back to dozens of open items, each of which had only one sensible answer. Only what the button settles is
  * touched (`ANSWER_ALL_KINDS`: risk digests, missed blocks, relation checks) and proposals already past their day; the assistant's results
- * are the worker's (date-advance adopts the safe ones after a day). An ask without a time it was raised is never auto-answered.
+ * are the worker's (date-advance adopts the safe ones after a day). An ask without a time it was raised counts from the first pass that saw it.
  */
 export async function autoAnswerDue(ctx: AccessContext, now = appNow()): Promise<{ done: number; op?: { id: string; label: string } }> {
   const store = getStore();
@@ -74,7 +79,16 @@ export async function autoAnswerDue(ctx: AccessContext, now = appNow()): Promise
   // What was settled this way once is never settled again by itself: an undo is the person saying no, and the ask comes back with its old time.
   const before = new Set<string>(readKeys(store.getSetting(ctx.workspaceId, AUTO_ANSWERED_SETTING)));
   const keyOf = (id: string) => `${id}|${open.get(id)?.fingerprint ?? ""}`;
-  const due = (id: string) => { const at = Date.parse(open.get(id)?.raisedAt ?? ""); return Number.isFinite(at) && now.getTime() - at >= AUTO_ANSWER_AFTER_MS && !before.has(keyOf(id)); };
+  // An ask without a time it was raised (the weekly risk digest is one) counts from the first pass that saw it; kept only while it is open.
+  const seenBefore = readSeen(store.getSetting(ctx.workspaceId, AUTO_ANSWER_SEEN_SETTING));
+  const seen: Record<string, string> = {};
+  for (const step of plan.asks) seen[keyOf(step.askId)] = seenBefore[keyOf(step.askId)] ?? now.toISOString();
+  store.setSetting(ctx.workspaceId, AUTO_ANSWER_SEEN_SETTING, JSON.stringify(seen));
+  const due = (id: string) => {
+    const raised = Date.parse(open.get(id)?.raisedAt ?? "");
+    const at = Number.isFinite(raised) ? raised : Date.parse(seen[keyOf(id)] ?? "");
+    return Number.isFinite(at) && now.getTime() - at >= AUTO_ANSWER_AFTER_MS && !before.has(keyOf(id));
+  };
   const asks = plan.asks.filter((step) => due(step.askId));
   const proposals = plan.proposals.filter((item) => !before.has(`proposal:${item.id}`));
   const total = asks.length + proposals.length;
