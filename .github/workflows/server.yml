@@ -78,6 +78,8 @@ jobs:
             sudo docker logs --since 24h crossline-worker 2>&1 | grep -E "worker.memory|model.gate|already_running" | tail -20 || true
             # The sandboxed shell (docs/personal-agent.md §8): the worker own probe, the profiles it runs under and the latest self-check.
             sudo docker logs crossline-worker 2>&1 | grep -E "worker.sandbox_shell|selfcheck" | tail -5 || true
+            # Reading sites on the person's login (docs/claude/skill-library.md): the favourites job, site holds and the remote login browser.
+            sudo docker logs --since 24h crossline-worker 2>&1 | grep -E "\"(collect|site|remote_browser|favourites)[._]" | cut -c1-400 | tail -40 || true
             sudo docker inspect crossline-worker --format "{{.AppArmorProfile}} {{json .HostConfig.SecurityOpt}}" 2>/dev/null | cut -c1-200 || true
             sudo sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true
             sudo docker logs --since 2h crossline-web 2>&1 | grep -E "web.timing|web.sections|web.queue" | tail -6 || true
