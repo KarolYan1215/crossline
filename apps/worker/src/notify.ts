@@ -18,7 +18,9 @@ const URGENT_PER_DAY: Record<NotifyLevel, number> = { off: 0, less: 0, normal: 2
 /** The web writes its snapshot every ten minutes; one older than half an hour means the web is not running. */
 const ATTENTION_FRESH_MS = 30 * 60_000;
 
-export type PlannedNotification = { key: string; title: string; body: string; path: string; kind: "brief" | "urgent" };
+export type PlannedNotification = { key: string; title: string; body: string; path: string; kind: "brief" | "urgent";
+  /** The urgent items one batched notification stands for: each is recorded as sent with it (kind `covered`, not counted again). */
+  covers?: string[] };
 
 export type NotifyInput = {
   /** Local date and clock (`YYYY-MM-DD`, `HH:MM`) and weekday (0 = Sunday) in the person's zone. */
@@ -105,7 +107,15 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
       ...input.gateRefusals.map((item) => ({ key: `gate:${item.id}`, kind: "urgent" as const, path: "/approvals",
         title: t("验收没跑成：{{title}}", { title: item.title }), body: item.message.slice(0, 120) }))
     ]).filter((item) => !input.sent.has(item.key));
-  return [...out, ...urgent.slice(0, Math.max(0, URGENT_PER_DAY[input.level] - input.urgentSentToday))];
+  const left = Math.max(0, URGENT_PER_DAY[input.level] - input.urgentSentToday);
+  if (urgent.length < 2 || !left) return [...out, ...urgent.slice(0, left)];
+  // Several at once go out as one (2026-11-05, docs/hosted-hardening.md §5): two pushes a minute apart each said one thing and used the
+  // day's whole allowance, and the third waited for the next morning. One message lists the first three and opens 待确认, where all are.
+  const covers = urgent.map((item) => item.key);
+  const shown = urgent.slice(0, 3).map((item) => item.title);
+  return [...out, { key: `urgent:${input.today}:${covers.length}:${covers[0]}`, kind: "urgent", path: "/approvals", covers,
+    title: t("{{count}} 件事等着决定", { count: urgent.length }),
+    body: [...shown, ...(urgent.length > 3 ? [t("还有 {{count}} 件", { count: urgent.length - 3 })] : [])].join(sep) }];
 }
 
 const xml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -209,6 +219,9 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
     if (!await both(item.title, item.body, `${baseUrl}${item.path}`, { title: item.title, body: item.body, path: item.path, tag: item.key })) continue;
     store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `notify:${item.key}`, type: "notification.sent", entityId: workspaceId,
       payload: { key: item.key, kind: item.kind, day: today, title: item.title } });
+    for (const key of item.covers ?? [])
+      store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `notify:${key}`, type: "notification.sent", entityId: workspaceId,
+        payload: { key, kind: "covered", day: today, by: item.key } });
     delivered.push(item.key);
   }
   // The system's own messages (docs/one-input.md §4) go to the desktop and phone only while no page is in front of the person; a page

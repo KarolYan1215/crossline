@@ -1,3 +1,5 @@
+import type { CardSet } from "./profile-instruments";
+
 /**
  * How thorough the interview is (2026-10-31, the owner's decision): the person picks a tier on the opening card and can change it at any
  * time. `quick` is the interview as cut down on 2026-10-19 and 2026-10-31 for time; `standard` and `thorough` bring back, step by step,
@@ -35,6 +37,8 @@ export type DepthPace = {
   roundMax: number;
   /** Rating-card items in one round. */
   cardItems: number;
+  /** Which rating cards the profile module asks before the start (`cardBank`): the quick tier a short set of whole dimensions (W-186). */
+  cards: CardSet;
   /** From this many rounds in one part, the model is told to move on. */
   moveOnAfter: number;
   /**
@@ -49,10 +53,10 @@ export type DepthPace = {
 };
 
 export const DEPTH_PACE: Record<OnboardingDepth, DepthPace> = {
-  quick: { minutes: 50, unlimited: false, roundQuestions: 3, roundMax: 4, cardItems: 3, moveOnAfter: 2, projects: "deferred", portraitHolds: false, detailsPart: false },
-  standard: { minutes: 80, unlimited: false, roundQuestions: 4, roundMax: 6, cardItems: 6, moveOnAfter: 3, projects: "core", portraitHolds: true, detailsPart: false },
-  thorough: { minutes: 120, unlimited: false, roundQuestions: 5, roundMax: 8, cardItems: 6, moveOnAfter: 4, projects: "all", portraitHolds: true, detailsPart: true },
-  open: { minutes: 120, unlimited: true, roundQuestions: 5, roundMax: 8, cardItems: 6, moveOnAfter: Number.POSITIVE_INFINITY, projects: "all", portraitHolds: true, detailsPart: true }
+  quick: { minutes: 50, unlimited: false, roundQuestions: 3, roundMax: 4, cardItems: 3, cards: "short", moveOnAfter: 2, projects: "deferred", portraitHolds: false, detailsPart: false },
+  standard: { minutes: 80, unlimited: false, roundQuestions: 4, roundMax: 6, cardItems: 6, cards: "all", moveOnAfter: 3, projects: "core", portraitHolds: true, detailsPart: false },
+  thorough: { minutes: 120, unlimited: false, roundQuestions: 5, roundMax: 8, cardItems: 6, cards: "all", moveOnAfter: 4, projects: "all", portraitHolds: true, detailsPart: true },
+  open: { minutes: 120, unlimited: true, roundQuestions: 5, roundMax: 8, cardItems: 6, cards: "all", moveOnAfter: Number.POSITIVE_INFINITY, projects: "all", portraitHolds: true, detailsPart: true }
 };
 
 export const depthPace = (depth: OnboardingDepth | undefined): DepthPace => DEPTH_PACE[depth ?? "quick"];

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, firstDraftsState, openStageQuestion, questionKind, readTone, screenQuestions, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
+import { INTERVIEW_FLOW_STAGES, flowOf, ONBOARDING_INSIGHTS, progressView, readInsightRatings, readTurnProgress, FIRST_DRAFTS_SETTING, ONBOARDING_LAST_FAILURE, readOnboardingFailure, ONBOARDING_TONE_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, firstDraftsState, openStageQuestion, questionKind, readTone, sameQuestion, screenQuestions, unsureAnswer, type StoredLineProfile, type TurnQuestion } from "@crossline/core";
 import { INTERVIEW_LOCALE_SETTING, extractBacklog, interviewLocale, questionScreenFor } from "@crossline/db";
 import { isLocale } from "@crossline/i18n";
 import { resolveAccessContext } from "../../../../lib/access-guard";
@@ -49,7 +49,11 @@ export async function GET(request: Request) {
   const extra = status ? status.questions.filter((question) => !inRound.has(question.id)) : [];
   const empty = raw[lastIndex]?.role === "assistant" && lastContent.nextAction === "ask" && lastQuestions.length > 0 && !kept.length
     && !(lastContent.cards ?? []).length && !extra.length;
-  const shown = empty ? [openStageQuestion(lastContent.stage, interviewLocale(store, workspaceId))] : kept;
+  // Not one the person already answered, as the worker judges it (W-184): the next stage's open question then.
+  const settled = empty && session ? store.listQuestions(workspaceId, { kind: "interview", keyPrefix: `iq:${session.id}:`, statuses: ["answered", "assumed"] })
+    .filter((question) => question.status === "assumed" || !unsureAnswer(question.answer)) : [];
+  const shown = empty ? [openStageQuestion(lastContent.stage, interviewLocale(store, workspaceId),
+    (text) => !settled.some((question) => sameQuestion(question.text, text)))] : kept;
   const messages = lastQuestions.length ? raw.map((message, index) => index === lastIndex
     ? { ...message, content: { ...(message.content as object), questions: shown } } : message) : raw;
   // What the background extraction still owes this conversation (2026-10-19): while it reads the last replies the facts behind the start
@@ -72,8 +76,10 @@ export async function GET(request: Request) {
   const today = planToday(access.ctx);
   const week = weekSkeleton(access.ctx, today), timeline = projectTimeline(access.ctx, today);
   const { capacity, draft } = weekCapacity(access.ctx, today, week, timeline);
-  // The order of the parts: a new interview starts with the profile module (flow v2), an earlier one keeps its own order.
-  const flow = flowOf(session?.coverage);
+  // The order of the parts: a new interview starts with the profile module (flow v2), an earlier one keeps its own order. A main interview
+  // with no round yet is a new one, as the worker will start it: the opening card said 「第 1/5 部分」 and the first round 「第 1/6」 (W-186).
+  const unstarted = !focus && !(session?.coverage as { flow?: unknown } | undefined)?.flow && !raw.some((message) => message.role === "assistant");
+  const flow = unstarted ? "v2" : flowOf(session?.coverage);
   const stageNow = String((session?.coverage as { stage?: string } | undefined)?.stage ?? INTERVIEW_FLOW_STAGES[flow][0]);
   const ratings = Object.fromEntries(Object.entries(readInsightRatings(store.getSetting(workspaceId, ONBOARDING_INSIGHTS)))
     .filter(([key]) => session && key.startsWith(`${session.id}#`)).map(([key, rating]) => [key.slice(key.indexOf("#") + 1), rating.verdict]));

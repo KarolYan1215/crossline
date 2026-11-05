@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capacityConflict, checkInsight, interviewAbstract, lineWeights, plainTerms, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft, withPlainTerms } from "./onboarding-pace";
+import { capacityConflict, checkInsight, fixedScheduleLines, interviewAbstract, lineWeights, plainTerms, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft, withPlainTerms } from "./onboarding-pace";
 import { DEADLINE_GUESS_PREFIX, answeredGapFacts, profileGaps } from "./profile-gaps";
 import { interviewChecklist, interviewComplete, interviewOwnedOpen } from "./interview-checklist";
 
@@ -37,12 +37,33 @@ describe("进度账", () => {
     expect(readTurnProgress({ part: "nope" })).toBeUndefined();
     expect(progressView(undefined, "details").index).toBe(5);
   });
+  it("部分编号只有一个来源：按本轮的阶段数，模型进度记录说的是别的部分时不算（W-186）", () => {
+    // The round is in the compass part; the model's own record still names the lines part, the sixth of six in the newer order.
+    const stale = readTurnProgress({ part: "lines", covered: ["a", "b", "c", "d", "e", "f"], open: [], partDone: true, next: "" });
+    expect(progressView(stale, "compass", "v2")).toMatchObject({ index: 2, total: 6, label: "指南针", clear: 0, of: 0 });
+    // The same part: its record counts.
+    const own = readTurnProgress({ part: "compass", covered: ["工作观"], open: ["人生观"], partDone: false, next: "" });
+    expect(progressView(own, "compass", "v2")).toMatchObject({ index: 2, total: 6, clear: 1, of: 2 });
+    // The thorough tier's details part makes seven, wherever the count is shown.
+    expect(progressView(undefined, "narrative", "v2", "thorough")).toMatchObject({ index: 1, total: 7 });
+  });
   it("摘要不超过十五行", () => {
     const lines = Array.from({ length: 6 }, (_, index) => ({ id: `l${index}`, label: `线${index}`, description: "描述", goal: "" }));
     const abstract = interviewAbstract({ lines, projects: [], weeklyHours: { hours: 40, source: "访谈提议" }, fixedCount: 3,
       profile: { problem: "论文和创业抢时间" }, filesRead: 2, recent: Array.from({ length: 10 }, (_, index) => `事实 ${index}`) });
     expect(abstract.length).toBeLessThanOrEqual(15);
     expect(abstract.join("\n")).toContain("每周可用约 40 小时");
+  });
+  it("固定日程每次见面各占一行，带自己的星期和时间（W-183）", () => {
+    // Tuesday afternoon and Thursday morning of one course, and a course meeting Monday and Wednesday at the same time.
+    const lines = fixedScheduleLines([
+      { title: "ECE 548", weekdays: [4], startTime: "09:00", endTime: "11:30" },
+      { title: "ECE 548", weekdays: [2], startTime: "14:00", endTime: "16:30" },
+      { title: "组会", weekdays: [3, 1], startTime: "10:00", endTime: "11:00" },
+      { title: "周日练琴", weekdays: [0], startTime: "19:00", endTime: "20:00" }
+    ]);
+    expect(lines).toEqual(["周一 10:00–11:00 组会", "周二 14:00–16:30 ECE 548", "周三 10:00–11:00 组会", "周四 09:00–11:30 ECE 548", "周日 19:00–20:00 周日练琴"]);
+    expect(fixedScheduleLines([])).toEqual([]);
   });
 });
 

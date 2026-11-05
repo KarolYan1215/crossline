@@ -295,6 +295,36 @@ test("「全部按推荐」 settles only kinds with a safe default, under one un
   expect(readRiskDecisions(TEST_CTX).mos2).toBeUndefined();
 });
 
+test("a safe decision left 48 hours takes its recommendation by itself, said once and undoable", async () => {
+  const store = setup();
+  const { MILESTONE_RISKS_SETTING, milestoneRiskFingerprint } = await import("@crossline/core");
+  const { autoAnswerDue } = await import("./answer-all");
+  const { planToday, readRiskDecisions } = await import("./crossline");
+  const { undoOp } = await import("./undo");
+  store.saveMilestoneAnchor({ workspaceId: ws, milestoneId: "mos2", stage: 1, deadline: "2026-11-30", baseline: "", target: "", stakeholders: [],
+    sourceFactIds: [], dependsOn: [], updatedAt: "2026-10-01T00:00:00Z" });
+  // Raised 39 hours before NOW.
+  store.setSetting(ws, MILESTONE_RISKS_SETTING, JSON.stringify({ mos2: { fingerprint: milestoneRiskFingerprint({ title: "实测 MoS₂ 参数已可直接驱动 NeuroSim",
+    deadline: "2026-11-30", criteria: [], dependsOn: [] }), at: "2026-10-06T00:00:00Z", source: "model", risks: [{ level: "medium", kind: "capacity", note: "同月还有三个截止" }] } }));
+  expect(await autoAnswerDue(TEST_CTX, NOW)).toEqual({ done: 0 });
+  expect(readRiskDecisions(TEST_CTX).mos2).toBeUndefined();
+  const later = new Date("2026-10-08T01:00:00.000Z");
+  vi.stubEnv("CROSSLINE_FIXED_NOW", later.toISOString());
+  const result = await autoAnswerDue(TEST_CTX, later);
+  expect(result.done).toBe(1);
+  expect(readRiskDecisions(TEST_CTX).mos2).toMatchObject({ how: "accept" });
+  const said = store.listConversationMessages(ws, store.conversationFor(ws, planToday(TEST_CTX, later)).id).filter((message) => message.role === "nudge");
+  expect(said).toHaveLength(1);
+  expect(JSON.stringify(said[0]!.payload)).toContain("48 小时");
+  // Nothing left to settle: the next pass says nothing more.
+  expect(await autoAnswerDue(TEST_CTX, later)).toEqual({ done: 0 });
+  expect(undoOp(TEST_CTX, result.op!.id)).toMatchObject({ ok: true });
+  expect(readRiskDecisions(TEST_CTX).mos2).toBeUndefined();
+  // Undone is the person's no: the ask stays theirs.
+  expect(await autoAnswerDue(TEST_CTX, later)).toEqual({ done: 0 });
+  expect(readRiskDecisions(TEST_CTX).mos2).toBeUndefined();
+});
+
 test("work given a time yesterday and never started is asked about when it bears on a deadline this week; the rest just rolls", async () => {
   const store = setup();
   const save = (id: string, dueDate: string) => store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "p",

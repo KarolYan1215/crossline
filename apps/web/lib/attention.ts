@@ -8,6 +8,7 @@ import { writeAttentionSnapshot } from "./asks";
 import { systemContext } from "./auto-publish";
 import { adoptPendingDates } from "./imported-dates";
 import { yieldToRequests } from "./yield";
+import { autoAnswerDue } from "./answer-all";
 
 /** How often the web refreshes what the worker's notifications read. */
 export const ATTENTION_INTERVAL_MS = 10 * 60_000;
@@ -30,6 +31,9 @@ export async function attentionPass(now = new Date()): Promise<number> {
     try { adoptPendingDates(ctx); } catch { /* left for the interview page */ }
     await yieldToRequests();
     try { await recordScheduledToday(ctx, now); } catch { /* the asks still go out */ }
+    await yieldToRequests();
+    // Safe decisions left 48 hours take their recommendation, undoable for a day (lib/answer-all.ts `autoAnswerDue`).
+    try { await autoAnswerDue(ctx, now); } catch { /* asked again next interval */ }
     await yieldToRequests();
     try { writeAttentionSnapshot(ctx, countPending(ctx).total, now); written += 1; } catch { /* next interval */ }
     // Tasks whose person's part is done hand themselves in (docs/plans/closed-loop-1030.md §3).

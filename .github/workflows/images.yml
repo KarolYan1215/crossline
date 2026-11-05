@@ -4,15 +4,13 @@ name: Hosted beta images
 # `next build` on that server paged it to a standstill twice.
 # Only `main` builds them (decided 2026-10-17): a push to any other branch used to overwrite `:beta`, so an unfinished branch was one
 # `[deploy]` away from the live site.
+# Since 2026-11-05 only after CI passed on that commit (docs/hosted-hardening.md §2): a commit that fails typecheck or the tests is never
+# built, so `[deploy]` pulls the last good image instead. A dispatch builds the branch it is run on, for an emergency.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - "deploy/server/**"
-      - ".github/workflows/server.yml"
-      - ".github/workflows/verify.yml"
   workflow_dispatch:
 
 permissions:
@@ -25,6 +23,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -35,7 +34,10 @@ jobs:
           - name: crossline-app
             file: deploy/app/Dockerfile
     steps:
+      # The commit CI passed, not whatever `main` is by now.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -54,6 +56,6 @@ jobs:
           push: true
           tags: |
             ${{ steps.tags.outputs.image }}:beta
-            ${{ steps.tags.outputs.image }}:${{ github.sha }}
+            ${{ steps.tags.outputs.image }}:${{ github.event.workflow_run.head_sha || github.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}

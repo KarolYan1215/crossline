@@ -15,3 +15,13 @@ test("the connect page offers another model's API beside ChatGPT", () => {
   expect(html).toContain("或者用其他模型的 API");
   expect(html).toContain('aria-label="其他模型"');
 });
+
+// The hosted site signs no guest's ChatGPT in on the server (2026-11-05): installing and pairing a node is walked through right here.
+test("on the hosted site the connect page walks through installing and pairing the person's own computer; elsewhere it does not", () => {
+  const hosted = renderToStaticMarkup(<ConnectFlow next="/onboarding" hosted />);
+  expect(hosted).toContain('aria-label="用自己的电脑连接 ChatGPT"');
+  expect(hosted).toContain("Crossline-Node-Setup.exe");
+  expect(hosted).toContain("Crossline-Node-Guide.pdf");
+  expect(hosted).toContain("仍要运行");
+  expect(renderToStaticMarkup(<ConnectFlow next="/onboarding" />)).not.toContain("用自己的电脑连接 ChatGPT");
+});

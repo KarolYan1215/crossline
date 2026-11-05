@@ -25,9 +25,12 @@ test("the morning brief and the urgent messages are written in the workspace's l
   const english = planNotifications({ ...base, locale: "en" });
   expect(english[0]).toMatchObject({ kind: "brief", title: "Crossline today" });
   expect(english[0]!.body).toBe("Due to arrive today: the measured data from Alex; Due in 1 day: Paper draft; 4 decisions waiting");
+  // Two at once go out as one message listing both.
   expect(english.filter((item) => item.kind === "urgent").map((item) => [item.title, item.body])).toEqual([
-    ["Has the measured data from Alex arrived?", "Once it arrives, press \"It has arrived\" so the work that depends on it can go on the calendar."],
-    ["Due tomorrow: Paper draft", "Due Oct 9."]]);
+    ["2 things waiting for a decision", "Has the measured data from Alex arrived?; Due tomorrow: Paper draft"]]);
+  // One alone is sent as itself, in English.
+  expect(planNotifications({ ...base, locale: "en", dueSoon: [] }).filter((item) => item.kind === "urgent").map((item) => [item.title, item.body])).toEqual([
+    ["Has the measured data from Alex arrived?", "Once it arrives, press \"It has arrived\" so the work that depends on it can go on the calendar."]]);
 });
 
 test("a pass for an English workspace sends English to the desktop and the phone", async () => {

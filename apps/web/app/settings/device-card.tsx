@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { NODE_INSTALLER_URL } from "@crossline/core";
+import { NODE_GUIDE_URL, NODE_INSTALLER_URL } from "@crossline/core";
 import { SegmentedControl } from "../ui/controls";
 import { SetupGuide } from "../ui/setup-guide";
 import { DEVICE_LINK_GUIDE } from "../../lib/setup-guides";
@@ -87,7 +87,11 @@ function nodeWords(view: NodeView, t: Translate, locale: Locale): string {
  * Every account sees it (scheme C): a node serves only the account it was paired with. Off, or whenever the computer is away, everything
  * runs on the server as before.
  */
-function ComputeNodeRow() {
+export function ComputeNodeRow({ onReady, everyMs = 20_000 }: {
+  /** How often the node's state is read again (the connect page asks more often: someone is waiting on it). */
+  everyMs?: number;
+  /** Told whenever the account has a node online, which means its Codex is signed in there (the connect page moves on, 2026-11-05). */
+  onReady?: (ready: boolean) => void } = {}) {
   const t = useT();
   const locale = useLocale();
   const [view, setView] = useState<NodeView | undefined>();
@@ -96,7 +100,10 @@ function ComputeNodeRow() {
   const [preview, setPreview] = useState<{ computer: { host: string; os: string; version: string; shell: boolean }; receives: string[] } | undefined>();
   const load = async () => {
     const response = await fetch("/api/device/compute", { cache: "no-store" }).catch(() => undefined);
-    if (response?.ok) setView(await response.json() as NodeView);
+    if (!response?.ok) return;
+    const next = await response.json() as NodeView;
+    setView(next);
+    onReady?.(next.enabled && next.status?.state === "ready");
   };
   // First the computer behind the code and what it would receive; only 「确认配对」 binds it.
   const pair = async (confirm: boolean) => {
@@ -115,7 +122,7 @@ function ComputeNodeRow() {
     setNote(response?.ok ? t("已解除配对：那台电脑 15 秒内断开。") : t("没有解除，请重试"));
     void load();
   };
-  useEffect(() => { void load(); const timer = setInterval(() => void load(), 20_000); return () => clearInterval(timer); }, []);
+  useEffect(() => { void load(); const timer = setInterval(() => void load(), everyMs); return () => clearInterval(timer); }, [everyMs]);
   if (!view) return null;
   const change = async (enabled: boolean) => {
     setView({ ...view, enabled });
@@ -135,7 +142,8 @@ function ComputeNodeRow() {
       ? <div className="st-row"><span className="st-row-label">{t("独立节点")}<small>{t("已配对 {{host}}（{{when}}）", { host: view.paired.host || t("一台电脑"), when: time(view.paired.at, locale) })}</small></span>
         <button type="button" className="secondary-button" onClick={() => void unpair()}>{t("解除配对")}</button></div>
       : <label className="st-row"><span className="st-row-label">{t("独立节点")}<small>{t("在那台电脑上安装「Crossline 节点」，把它显示的配对码填在这里")}{" "}
-          <a href={NODE_INSTALLER_URL} target="_blank" rel="noreferrer">{t("下载安装包")}</a></small></span>
+          <a href={NODE_INSTALLER_URL} target="_blank" rel="noreferrer">{t("下载安装包")}</a>{" · "}
+          <a href={NODE_GUIDE_URL} target="_blank" rel="noreferrer">{t("图文教程（PDF）")}</a></small></span>
         <span><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="XXXX-XXXX" autoComplete="off" spellCheck={false} maxLength={12} style={{ width: "9em" }} />{" "}
           <button type="button" className="primary-button" disabled={code.replace(/[^A-Za-z0-9]/g, "").length !== 8} onClick={() => void pair(false)}>{t("配对")}</button></span></label>}
     {preview && !view.paired && <div className="st-row" role="group" aria-label={t("确认配对")}>

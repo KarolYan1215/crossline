@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { CrosslineStore, consentToGrownSkill, createReminderWorkflow, grownHomeLine, readGrownSkills, recordGrownLogin, requestWorkflow, updateGrownSkill } from "@crossline/db";
+import { CrosslineStore, consentToGrownSkill, createReminderWorkflow, grownHomeLine, readGrownSkills, recordGrownLogin, requestWorkflow, updateGrownSkill, writeGrownSkills } from "@crossline/db";
 import { LINE_SETTING } from "@crossline/identity-packs";
 import { validateWorkflowManifest } from "@crossline/core";
 import { librarySelection, type AgentOutcome, type AgentTaskInput } from "./agent-task";
@@ -15,7 +15,7 @@ import { holdAfterFailure, readCollectLedger, writeCollectLedger, type CollectDr
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
 import { librarySkillsFor } from "./skill-library";
 import type { NodeBrowserLink } from "./node/hub";
-import { closeInterruptedCollections, createFavouritesTopicsService, createTopicClassifier, favouritesTopicStep, installFavouritesTopicsWorkflow, readTopicPlan, writeTopicPlan } from "./favourites-topics";
+import { closeInterruptedCollections, createFavouritesTopicsService, createTopicClassifier, favouritesTopicStep, installFavouritesTopicsWorkflow, readTopicPlan, refreshFavouritesTopicsText, writeTopicPlan } from "./favourites-topics";
 
 const REVIEWER = "crossline:crossline-validation-reviewer";
 const estimate = { p25Minutes: 10, p50Minutes: 20, p85Minutes: 40, source: "llm_prior" as const, observationCount: 0, confidence: "low" as const };
@@ -558,6 +558,18 @@ test("with no room for the browser the collection opens nothing, holds nothing, 
     expect(siteHold(store, ws, "xiaohongshu.com")).toBeUndefined();
     expect(said().at(-1)).toContain("服务器内存不够打开浏览器（1100 / 1350 MB）");
   } finally { configureFavouritesCollector(undefined); }
+});
+
+test("favourites by topic: a record installed before the reading moved to the person's computer gets the current text, consent kept", () => {
+  const record = installFavouritesTopicsWorkflow(store, ws, "media", new Date("2026-10-22T11:00:00Z"));
+  consentToGrownSkill(store, ws, record.id);
+  const old = readGrownSkills(store, ws)[0]!;
+  writeGrownSkills(store, ws, [{ ...old, manifest: { ...old.manifest, risks: ["读取从服务器（香港数据中心）发出"] } }]);
+  expect(refreshFavouritesTopicsText(store, ws)).toBe(true);
+  const now = readGrownSkills(store, ws)[0]!;
+  expect(now.manifest.risks[0]).toContain("本人自己的电脑上");
+  expect(now.status).toBe(old.status);
+  expect(refreshFavouritesTopicsText(store, ws)).toBe(false);
 });
 
 test("favourites by topic: what was listed before a check is sorted while the site is held, and nothing opens the site", async () => {

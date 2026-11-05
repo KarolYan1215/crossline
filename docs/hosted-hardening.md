@@ -7,12 +7,12 @@
 | § | 问题 | 决定 | 状态 |
 |---|---|---|---|
 | 1 | 公开仓库：Actions 日志与制品人人可读 | 删除全部历史运行；开密钥扫描与推送保护；之后的运维输出只以本机公钥加密 | 已做 |
-| 2 | 没有 CI 闸门 | 公开仓库的标准 runner 免费，`verify.yml` 重新会跑；先看它是否全绿，再决定让镜像构建等它 | 观察中 |
+| 2 | 没有 CI 闸门 | 新建 `ci.yml`（Linux，typecheck + test）；`main` 上的镜像构建等它通过再跑 | 已做 |
 | 3 | 托管版在服务器上登录访客的 ChatGPT 订阅 | 访客不再在服务器上登录 ChatGPT：本人电脑当算力节点，或 API key；已登录的保留 | 已做 |
 | 4 | 小红书从机房 IP 用程序操作的浏览器读取 | 托管版只在本人节点的浏览器里登录和读取 | 已做 |
-| 5 | 待确认太多（走查时 37 条） | 可撤销的默认通过，其余按断点批量 | 设计，未做 |
+| 5 | 待确认太多（走查时 37 条） | 可撤销的默认通过，其余按断点批量 | 已做（见 §5） |
 | 6 | 访谈缺陷 W-183–W-186 | 逐条修 | 未做 |
-| 7 | 节点：一台电脑一个账号、改配后 shell 开关复位、换运行时后 `SKILL_THREAD_LOST`、额度共享 | 逐条修 | 部分（见 §7） |
+| 7 | 节点：一台电脑一个账号、改配后 shell 开关复位、换运行时后 `SKILL_THREAD_LOST`、额度共享 | 逐条看 | 都是设计或已自动恢复（见 §7） |
 | 8 | 服务器内存（worker 75%） | 每个子进程单独 cgroup，Chromium 限堆 | 设计，未做；§4 之后服务器不再开读取浏览器，压力已下降 |
 
 ## 1. 公开仓库
@@ -46,8 +46,11 @@
 ## 2. CI 闸门
 
 - `verify.yml`（Windows，`pnpm verify`）自 2026-10-16 起因 Actions 计费失败没有跑过。
-- 公开仓库的标准 runner 不计费，所以下一次推送它就会跑。
-- 先看它全绿。全绿之后再考虑让 `images.yml` 等 verify 通过再构建（`workflow_run`）。这样每次部署会多等 verify 的时长，约 30–40 分钟，要本人权衡。
+- 公开仓库的标准 runner 不计费，但 GitHub 把 `verify.yml` 的登记留在了 `deleted` 状态：`gh workflow enable` 回 403，删除回 404，只有 GitHub 支持能清。
+- **做了（2026-11-05，本人的决定）**
+  - 新建 `.github/workflows/ci.yml`：Linux，`pnpm typecheck` + `pnpm test`，和 pre-commit 钩子跑的一样。每次推送都跑，只改文档的推送不跑。
+  - 删掉 `verify.yml`。它的 Codex 分支来源检查改为手动跑 `scripts/verify-codex-fork.ts`。完整的 `pnpm verify`（含 e2e）仍是提交前的本机检查。
+  - `images.yml` 改由 `workflow_run` 触发：`main` 上的 CI 通过后才构建镜像，并且构建的是 CI 测过的那个提交（`workflow_run.head_sha`）。手动触发（`workflow_dispatch`）照旧可用。每次部署因此多等 CI 的时长。
 
 ## 3. 托管版不再在服务器上登录访客的 ChatGPT
 
@@ -75,7 +78,8 @@
   - 模型连接卡：托管版的访客看不到设备码按钮和步骤，看到的是原因和「去开启算力节点」（跳到 `/settings#device`）；API key 表单照旧。
   - 连接页：提示文字改成先开节点。
   - 访谈页：把 `connected` 当作已连接。
-- 测试：`codex.test.ts`「on the hosted server a guest's ChatGPT is never signed in there」。
+  - 连接页上一步一步装节点（`apps/web/app/connect/node-setup.tsx`）：托管版的连接页直接列出五步——下载安装包和图文教程、SmartScreen 的「更多信息 → 仍要运行」、在这一页填配对码、在节点页登录 ChatGPT、连上后自动进入访谈。配对码就在这一页填（`ComputeNodeRow`，每 5 秒查一次）；以前只在 设置 → 通用 里，新用户第一天找不到。
+- 测试：`codex.test.ts`「on the hosted server a guest's ChatGPT is never signed in there」；`connect-flow.test.tsx` 的托管版用例。
 
 ## 4. 小红书只在本人节点的浏览器里读
 
@@ -102,7 +106,7 @@
 - 新建的「按话题整理小红书收藏」工作流，风险说明改了：
   - 旧文「从服务器（香港数据中心）发出……7 天内不再读取」是错的。实际行为是停下，等本人点「立即运行」（W-218）。
   - 新文说明读取在本人电脑上进行，遇到验证或限流就停，等本人。
-  - 已经建好的工作流还显示旧文，没有迁移。
+  - 已经建好的工作流：worker 每次启动时改写成新文（`refreshFavouritesTopicsText`，访问和风险两段是代码的文字，不是本人的）。本人的同意保留：变化只降低了当初同意的风险。测试在 `workflow-smith.test.ts`。
 - 判断规则已经覆盖 461、471、429 和 300011–300019（`packages/core/src/xhs-notes.ts` `judgeXhsApi`），遇到就停下并暂停这个站点，等本人点「立即运行」。这比按等级冷却更保守，所以不另加冷却。461/471 的测试在 `favourites-reader.test.ts` 和 `workflow-smith.test.ts` 里。
 - 测试：`workflow-smith.test.ts`「on the hosted server the favourites are never logged in to or read there」。
 
@@ -110,7 +114,7 @@
 - 本人的账号在托管版上也一样：节点要开着才读。
 - 本人的节点目前配对在测试账号上，要改配回主账号。
 
-## 5. 待确认太多（设计）
+## 5. 待确认太多
 
 - 走查时待确认里有 37 条，每条都要本人点。
 - 依据：
@@ -123,7 +127,14 @@
   - 可以撤销、只影响本人日程和任务的项（合并、改截止、排程差异）：默认通过，在「已归档」里能撤销。待确认只显示一条摘要「今天自动处理了 N 项，可撤销」。
   - 不可撤销或对外的项（发信、报名、外部写入）：照旧要本人确认，按断点批量推送，一天最多 3 批。
   - 衡量：待确认的中位条数，以及撤销率。撤销率高的类别退回到要确认。
-- 未做，要另开一轮。
+- **做了（2026-11-05）**
+  - 默认通过（`apps/web/lib/answer-all.ts` 的 `autoAnswerDue`，由 `attentionPass` 每 10 分钟调用）：
+    - 范围就是「全部按推荐」能安全处理的那些——风险汇总、错过的时段、关系核对（`ANSWER_ALL_KINDS`），加上已过期的提议。助手的结果不在这里：worker 的 date-advance 一天后已自动采纳安全的结果。
+    - 一项等了 48 小时（`raisedAt` 起算；没有提出时间的项从不自动处理）就按推荐处理，整批放进一次撤销，24 小时内可撤，并在当天的对话里说一次「…等了 48 小时没有回应，已按推荐处理」，带「撤销」。
+    - 处理过的项记在 `asks.autoAnswered`（问题的 id 加指纹）。本人撤销后，那一项留给本人，不会再被自动处理。
+    - 机会（opportunity_need）不在其中：撤销的快照不包括机会的关注记录。逾期任务要本人填日期，也不在其中。
+  - 批量推送（`apps/worker/src/notify.ts` 的 `planNotifications`）：同一时刻有两项以上要打扰，就合成一条「N 件事等着决定」，列前三项，打开待确认。这一条只占当天额度的一次；它代表的每一项都记为已发送（kind `covered`），不会再单独推。
+  - 测试：`asks.test.ts`「a safe decision left 48 hours takes its recommendation by itself」；`notify.test.ts` 的批量用例。
 
 ## 6. 访谈（W-183–W-186）
 
@@ -139,7 +150,7 @@
 
 - **一台电脑一个账号**：设计如此（方案 C：每个账号只用自己的电脑）。测试账号要用，就得改配。不改。
 - **改配后 shell 开关复位**：`apps/worker/src/node/standalone.ts` 解除配对时整个重置成 `{site}`。改配的人要重新打开 shell 开关。这是有意的：换了账号，不沿用上一个账号的授权。不改，写进教程。
-- **换运行时后第一次运行 `SKILL_THREAD_LOST`**（W-220）：线程建在服务器的运行时上，下一轮去了节点，节点上没有这个线程。未修。应该在换运行时的时候新开线程，不报错。
+- **换运行时后第一次运行 `SKILL_THREAD_LOST`**（W-220）：线程建在服务器的运行时上，下一轮去了节点，节点上没有这个线程。复查（11-05）：保留线程的几处（小帮手 `concierge.ts`、访谈 `onboarding-session.ts`、说明书 `manualbook.ts`）都在同一次请求里接住这个错，用对话记录新开线程再答，本人看不到报错，只多一次往返。W-220 那次 25 秒的回答就是重建后的。不改。
 - **额度共享**：节点用本人的 ChatGPT 登录，额度就是本人的。有意的。
 
 ## 8. 服务器内存（设计）

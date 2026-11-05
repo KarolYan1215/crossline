@@ -135,6 +135,8 @@
   "{{count}} 天后到期：{{title}}_other": "Due in {{count}} days: {{title}}",
   "待决：{{title}}": "Decision: {{title}}",
   "今天的 Crossline": "Crossline today",
+  "{{count}} 件事等着决定": "{{count}} things waiting for a decision",
+  "还有 {{count}} 件": "{{count}} more",
   "昨晚 {{count}} 块待确认_one": "{{count}} block from last night to confirm",
   "昨晚 {{count}} 块待确认_other": "{{count}} blocks from last night to confirm",
   "{{count}} 项待决定_one": "{{count}} decision waiting",

@@ -1,6 +1,6 @@
 // i18n-exempt: the short ledger handed to the interview model each round (model-facing)
 import {
-  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, interviewAbstract, lineAttributes, progressLines, readInsightRatings, readTurnProgress,
+  AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, ONBOARDING_INSIGHTS, fixedScheduleLines, interviewAbstract, lineAttributes, progressLines, readInsightRatings, readTurnProgress,
   resolveAvailability, type InterviewFlow, type OnboardingDepth, type StoredLineProfile, type TurnProgress
 } from "@crossline/core";
 import { datedItems, type CrosslineStore } from "@crossline/db";
@@ -19,7 +19,7 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
   flow?: InterviewFlow;
   /** The tier the person chose: the thorough one has a sixth part. */
   depth?: OnboardingDepth;
-}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[] } {
+}): { progress?: string[]; abstract: string[]; observations?: string[]; goalPicker?: string[]; fixedSchedule?: string[] } {
   const profiles = (() => { try { return JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { return {}; } })();
   const facts = store.listProfileFacts(workspaceId);
   const deadlineOf = (projectId: string) => {
@@ -37,12 +37,13 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
     return sum + window.days.length * Math.max(0, (eh! * 60 + em!) - (sh! * 60 + sm!));
   }, 0) / 60;
   const profile = readProfileModel(store, workspaceId);
+  const weekly = datedItems(store, workspaceId, input.today).filter((item) => item.recurring);
   const abstract = interviewAbstract({
     lines: input.lines.map((line) => ({ id: line.id, label: line.label, description: profiles[line.id]?.description ?? "", goal: line.goals[0] ?? "" })),
     projects: store.listProjects(workspaceId).filter((project) => !/-default$/.test(project.id))
       .map((project) => ({ id: project.id, identityId: project.identityId, name: project.name, deadline: deadlineOf(project.id) })),
     weeklyHours: resolved.source === "default" ? null : { hours, source: SOURCE_LABEL[resolved.source] ?? resolved.source },
-    fixedCount: datedItems(store, workspaceId, input.today).filter((item) => item.recurring).length,
+    fixedCount: weekly.length,
     profile: { problem: profile.problem, workView: profile.workView, trueNorth: profile.trueNorth, flow: profile.flow, anchor: profile.anchor },
     filesRead: store.listSourceDocuments(workspaceId).filter((doc) => doc.extractionStatus === "done").length,
     recent: input.recent.slice(-5)
@@ -58,8 +59,10 @@ export function paceContext(store: CrosslineStore, workspaceId: string, sessionI
     // Worded so that echoing it to the person does no harm: 「定语」 was repeated to people word for word (2026-10-31).
     return count ? `${line.label}：已给出 ${count} 个长期目标的候选词，由本人点选` : `${line.label}：还没有长期目标的候选词`;
   });
+  // Each weekly arrangement with its own weekday and time, every round: the abstract has only their number (W-183).
+  const fixedSchedule = fixedScheduleLines(weekly);
   return { abstract, ...(progress.length ? { progress } : {}), ...(ratings.length ? { observations: ratings } : {}),
-    ...(goalPicker.length ? { goalPicker } : {}) };
+    ...(goalPicker.length ? { goalPicker } : {}), ...(fixedSchedule.length ? { fixedSchedule } : {}) };
 }
 
 /** The progress record the last round left in the session. */

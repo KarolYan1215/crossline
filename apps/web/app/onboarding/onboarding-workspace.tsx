@@ -328,7 +328,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
 
     <section className="ob-centre" aria-label={t("访谈对话")}>
       <header className="ob-centre-head">
-        <StageBar stage={stage} line={state.focusLine?.label} flow={state.flow} />
+        <StageBar stage={stage} line={state.focusLine?.label} flow={state.flow} depth={state.depth} progress={state.progress} />
         {!opening && !state.focusLine && <div className="ob-tone"><span>{t("语气")}</span>
           <SegmentedControl label={t("访谈语气")} value={state.tone} onChange={(next) => void changeTone(next)}
             options={ONBOARDING_TONES.map((id) => ({ value: id, label: t(ONBOARDING_TONE_LABEL[id].label) }))} /></div>}

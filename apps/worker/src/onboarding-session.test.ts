@@ -368,22 +368,23 @@ test("先读材料：首轮把已读出的文件全部带上，清单标出可�
 test("the profile module's cards: added by the app, three items a round counted in its three questions, taps scored, words left for the extraction", async () => {
   const texts: Record<string, string> = { q1: "小时候最佩服谁？", q2: "常看哪些账号？", q3: "最喜欢哪个故事？", q4: "为什么工作？", q5: "什么让生活值得？" };
   const free = (id: string) => ({ id, text: texts[id]!, kind: "free", allowOther: true, identityId: "person", projectId: "", options: [] });
-  const { rpc } = fakeRuntime([turn({ stage: "narrative", questions: [free("q1"), free("q2"), free("q3")] }),
-    turn({ stage: "compass", questions: [free("q4")] }), turn({ stage: "compass", questions: [free("q5")] })]);
+  // The quick tier (the default) asks its short set (W-186): no life-story items, so this starts at the compass part's value tradeoffs.
+  const { rpc } = fakeRuntime([turn({ stage: "compass", questions: [free("q1"), free("q2"), free("q3")] }),
+    turn({ stage: "energy", questions: [free("q4")] }), turn({ stage: "energy", questions: [free("q5")] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false });
   await run({ sessionId: "s", text: "先从经历说起吧" });
   const lastCards = () => ((store.listOnboardingMessages(workspaceId, "s").filter((message) => message.role === "assistant").at(-1)!.content) as
     { cards?: ProfileCard[]; questions: Array<{ id: string }> });
   const first = lastCards();
-  expect(first.cards!.map((card) => [card.stage, card.items.length])).toEqual([["narrative", 3]]);
+  expect(first.cards!.map((card) => [card.instrument, card.stage, card.items.length])).toEqual([["values", "compass", 3]]);
   expect(first.questions.map((question) => question.id)).toEqual(["q1", "q2"]);
   const [tapped] = first.cards!;
   await run({ sessionId: "s", text: tapped!.items.map((item) => scaleAnswerLine(item, 4)).join("\n") });
   const answers = () => readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING));
   expect(tapped!.items.map((item) => answers()[item.id])).toEqual(tapped!.items.map(() => expect.objectContaining({ by: "tapped", score: 4 })));
-  // The narrative items the first round had no room for come before the compass's own, three items at most.
+  // The compass items the first round had no room for come before the energy part's own, three items at most.
   const second = lastCards();
-  expect(second.cards![0]!.stage).toBe("narrative");
+  expect(second.cards![0]!.stage).toBe("compass");
   expect(second.cards!.flatMap((card) => card.items).length).toBeLessThanOrEqual(3);
   const [worded] = second.cards!;
   await run({ sessionId: "s", text: `${cardWordsHead(worded!)}：看人，熟了才放开` });
@@ -399,6 +400,8 @@ test("the profile module's cards: added by the app, three items a round counted 
 // 2026-10-31 rerun: once only interest cards were left, every fact round kept them out and the start item never closed.
 test("interest cards left alone go with one fact question rather than waiting for a round with none", async () => {
   const at = "2026-10-31T00:00:00.000Z";
+  // Interest cards are in the full set only (the quick tier's short one has none, W-186).
+  store.setSetting(workspaceId, "onboarding.depth", "standard");
   store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(PROFILE_ITEMS.filter((item) => item.instrument !== "rest18")
     .map((item) => [item.id, { itemId: item.id, score: 3, by: "tapped", at }]))));
   const fact = (id: string) => ({ id, text: `事实题 ${id}`, kind: "free", allowOther: true, identityId: "research", projectId: "", options: [] });
@@ -411,6 +414,7 @@ test("interest cards left alone go with one fact question rather than waiting fo
 });
 test("a round the checklist turns back from the end carries the cards still unanswered, not an open question in their place", async () => {
   const at = "2026-10-31T00:00:00.000Z";
+  store.setSetting(workspaceId, "onboarding.depth", "standard");
   store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(PROFILE_ITEMS.filter((item) => item.instrument !== "rest18")
     .map((item) => [item.id, { itemId: item.id, score: 3, by: "tapped", at }]))));
   const { rpc } = fakeRuntime([turn({ stage: "lines", questions: [], nextAction: "ready_for_milestones" })]);
@@ -724,4 +728,51 @@ test("a round the page would list as empty gets the stage's open question; a che
   expect(shown.questions[0]?.text).not.toContain("三五年后");
   // A line without a picker keeps its own question.
   expect(shownOrOpen(turned, { ...screen, goalPickerLines: ["line-b"] }).questions[0]?.text).toContain("三五年后");
+});
+
+test("every weekly arrangement reaches the dialogue each round as its own weekday and time, not as a count (W-183)", async () => {
+  const meeting = (id: string, weekday: number, startTime: string, endTime: string) =>
+    ({ id, title: "ECE 548", project: "", kind: "class", weekdays: [weekday], startTime, endTime, from: "2026-09-01", to: "2099-12-31", sourceRef: "reply-1" });
+  store.appendEvent({ ownerId: "o", workspaceId, idempotencyKey: "dates:extracted:b1", type: "dates.extracted", entityId: "b1",
+    payload: { dates: [], recurring: [meeting("w-1", 4, "09:00", "11:30"), meeting("w-2", 2, "14:00", "16:30")] } });
+  const { rpc, prompts } = fakeRuntime([turn(), turn()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
+  await run({ sessionId: "s", text: "周二 14:00–16:30 和周四 09:00–11:30 上课。" });
+  await run({ sessionId: "s", text: "继续" });
+  for (const prompt of dialogue(prompts)) {
+    expect(prompt).toContain("fixedSchedule");
+    expect(prompt).toContain("周二 14:00–16:30 ECE 548");
+    expect(prompt).toContain("周四 09:00–11:30 ECE 548");
+  }
+});
+
+test("the cards' start item counts the tier's set: the quick tier's 14 items hold the start, the standard tier's 43 (W-186)", async () => {
+  const { interviewChecklistFor } = await import("@crossline/db");
+  const { cardBank } = await import("@crossline/core");
+  const at = "2026-11-03T00:00:00.000Z";
+  store.saveOnboardingSession({ id: "s", ownerId: "o", workspaceId, state: "active", coverage: { flow: "v2" }, createdAt: at, updatedAt: at });
+  store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(cardBank("short").map((item) => [item.id, { itemId: item.id, score: 3, by: "tapped", at }]))));
+  const cardsItem = () => interviewChecklistFor(store, workspaceId, [], { unfiledFiles: 0 }).find((item) => item.id === "profile_cards");
+  expect(cardsItem()).toMatchObject({ done: true });
+  store.setSetting(workspaceId, "onboarding.depth", "standard");
+  expect(cardsItem()).toMatchObject({ done: false, detail: "还有 29 题未答" });
+});
+
+test("the stage's open question is not asked again once answered: the next part's open question takes its place (W-184)", async () => {
+  const at = "2026-10-30T00:00:00.000Z";
+  // The profile module's compass part, as in the walkthrough, with every card already answered: the app's own fact questions wait.
+  store.saveOnboardingSession({ id: "s", ownerId: "o", workspaceId, state: "active", coverage: { flow: "v2" }, createdAt: at, updatedAt: at });
+  store.setSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING, JSON.stringify(Object.fromEntries(PROFILE_ITEMS.map((item) => [item.id, { itemId: item.id, by: "skipped", at }]))));
+  // Twice running, the model's only question in the compass part is not the person's to answer (a room): the app adds its open question.
+  const empty = turn({ stage: "compass", questions: [{ id: "q-room", text: "组会在哪个房间？", kind: "free", allowOther: true, identityId: "research", projectId: "", options: [] }] });
+  const { rpc } = fakeRuntime([empty, empty]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { checklist: false, extract: "off" });
+  const shown = () => (store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> }).questions;
+  await run({ sessionId: "s", text: "继续" });
+  const [asked] = shown();
+  expect(asked).toMatchObject({ id: "open-compass", text: "做这些事，你最终想得到什么？" });
+  await run({ sessionId: "s", text: `【${asked!.text}】补充：想要能自己安排时间的自由` });
+  expect(store.questionByKey(workspaceId, "iq:s:2:open-compass")).toMatchObject({ status: "answered" });
+  expect(shown().map((question) => question.text)).not.toContain(asked!.text);
+  expect(shown().map((question) => question.id)).toEqual(["open-energy"]);
 });

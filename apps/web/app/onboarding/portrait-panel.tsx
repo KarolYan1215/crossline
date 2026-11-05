@@ -1,6 +1,6 @@
 "use client";
 
-import { interviewParts, PART_LABEL, type InterviewFlow } from "@crossline/core";
+import { interviewParts, PART_LABEL, type InterviewFlow, type OnboardingDepth } from "@crossline/core";
 import { useT } from "../locale-context";
 
 export type ProfileModelView = {
@@ -15,19 +15,24 @@ export type LineView = { id: string; label: string; rank: number | null; hard: b
 
 /**
  * The parts of the main interview in its flow's order (2026-10-19: the details stage is gone; a session stored at `details` reads as past
- * the last part). A new interview runs the profile module first (`v2`, 2026-10-31): its six parts begin with the life story.
+ * the last part). A new interview runs the profile module first (`v2`, 2026-10-31): its six parts begin with the life story. The tier
+ * counts too (the thorough ones end with the details part), as in `progressView`.
  */
-export const stagesOf = (flow: InterviewFlow = "v1"): Array<[string, string]> => interviewParts(flow).map((id) => [id, PART_LABEL[id]]);
+export const stagesOf = (flow: InterviewFlow = "v1", depth?: OnboardingDepth): Array<[string, string]> => interviewParts(flow, depth).map((id) => [id, PART_LABEL[id]]);
 
 /**
  * Where the interview is, as a progress bar (2026-10-28 redesign): one segment per part, filled up to the current one, and the part's name
  * in words. Nothing in it can be pressed — the parts used to look like tabs and were not — so it is drawn as a bar, not as buttons.
+ * `progress` is the state route's `progressView`, the count the right column shows too: given, the bar shows that part (W-186: the bar and
+ * the right column counted from two different records and disagreed).
  */
-export function StageBar({ stage, line, flow }: { stage: string; line?: string | undefined; flow?: InterviewFlow | undefined }) {
+export function StageBar({ stage, line, flow, depth, progress }: { stage: string; line?: string | undefined; flow?: InterviewFlow | undefined;
+  depth?: OnboardingDepth | undefined; progress?: { index: number; total: number; label: string } | undefined }) {
   const t = useT();
-  const STAGES = stagesOf(flow);
+  const STAGES = stagesOf(flow, depth);
   if (line) return <p className="ob-stagebar-caption">{t("{{line}} · 细节", { line })}</p>;
-  const at = stage === "details" ? STAGES.length : Math.max(0, STAGES.findIndex(([id]) => id === stage));
+  const past = stage === "details" && !STAGES.some(([id]) => id === "details");
+  const at = past ? STAGES.length : progress ? Math.max(0, Math.min(progress.index, STAGES.length) - 1) : Math.max(0, STAGES.findIndex(([id]) => id === stage));
   const current = STAGES[Math.min(at, STAGES.length - 1)]!;
   const label = at >= STAGES.length ? t("访谈已完成") : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: at + 1, total: STAGES.length, label: t(current[1]) });
   return <div className="ob-stagebar">

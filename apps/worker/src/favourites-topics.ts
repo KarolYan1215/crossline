@@ -292,6 +292,35 @@ Crossline 已经在本人登录的浏览器里读好笔记（只读输入里的 
 `;
 /* i18n-ignore-end */
 
+/** Where and how the workflow reads, as the person consents to it; one text for new records and old ones (`refreshFavouritesTopicsText`). */
+function accessAndRisks(t: ReturnType<typeof tFor>): Pick<GrownSkillRecord["manifest"], "access" | "risks"> {
+  return {
+    // i18n-ignore: the service's name is how the workflow's access is looked up
+    access: [{ service: "小红书", site: "https://www.xiaohongshu.com", login: true, how: t("本人在自己电脑上弹出的浏览器窗口里登录后，只读收藏列表和收藏的笔记（文字、图片、视频）") }],
+    risks: [t("读取在本人自己的电脑上进行（托管版要先开启算力节点），网站看到的是本人的网络；浏览器由程序操作，小红书仍可能识别为自动化访问并限流或要求验证。遇到验证或限流会立刻停下、关闭浏览器，等本人点「立即运行」才继续。"),
+      t("白天每天最多读一个话题的 50 篇，2–8 点按每篇 1–3 分钟的速度持续读，访问量比本人平时刷得多。"),
+      t("不点赞、不评论、不取消收藏、不发布，不改动账号。")]
+  };
+}
+
+/**
+ * A record installed before 2026-11-05 still says the reading runs on the server (Hong Kong data centre); since then it runs only on the
+ * person's own computer (docs/hosted-hardening.md §4). The text is the code's, not the person's, so it is rewritten at start; the consent
+ * stays, as what changed lowered the risk it was given for. Returns whether anything was rewritten.
+ */
+export function refreshFavouritesTopicsText(store: CrosslineStore, workspaceId: string): boolean {
+  const records = readGrownSkills(store, workspaceId);
+  const index = records.findIndex((record) => record.name === "xiaohongshu-favourites-topics");
+  if (index < 0) return false;
+  const record = records[index]!;
+  const current = accessAndRisks(tFor(localeOf(store, workspaceId)));
+  if (JSON.stringify({ access: record.manifest.access, risks: record.manifest.risks }) === JSON.stringify(current)) return false;
+  const next = [...records];
+  next[index] = { ...record, manifest: { ...record.manifest, ...current } };
+  writeGrownSkills(store, workspaceId, next);
+  return true;
+}
+
 /**
  * Installs the favourites-by-topic workflow for a workspace (the owner's request of 2026-10-22, on the hosted site): a grown workflow that
  * reads Xiaohongshu behind the person's own login, so it waits for their consent and their login (Skill 库 「接受风险并启用」, 「登录小红书」),
@@ -314,11 +343,7 @@ export function installFavouritesTopicsWorkflow(store: CrosslineStore, workspace
         { title: t("查看话题整理"), by: "person", external: false }],
       // i18n-ignore: the file names the topic files are found by (TOPIC_FILE)
       inputs: [], outputs: ["话题-<话题名>.md", "话题总览.md"],
-      // i18n-ignore: the service's name is how the workflow's access is looked up
-      access: [{ service: "小红书", site: "https://www.xiaohongshu.com", login: true, how: t("本人在自己电脑上弹出的浏览器窗口里登录后，只读收藏列表和收藏的笔记（文字、图片、视频）") }],
-      risks: [t("读取在本人自己的电脑上进行（托管版要先开启算力节点），网站看到的是本人的网络；浏览器由程序操作，小红书仍可能识别为自动化访问并限流或要求验证。遇到验证或限流会立刻停下、关闭浏览器，等本人点「立即运行」才继续。"),
-        t("白天每天最多读一个话题的 50 篇，2–8 点按每篇 1–3 分钟的速度持续读，访问量比本人平时刷得多。"),
-        t("不点赞、不评论、不取消收藏、不发布，不改动账号。")] },
+      ...accessAndRisks(t) },
     origin: { kind: "asked", text: t("按话题整理小红书收藏，每天一个话题最多 50 篇，2–8 点持续整理"), requestId: `favourites-topics-${id}` }, taskId: "",
     files: [{ path: "SKILL.md", sha256: createHash("sha256").update(text).digest("hex"), bytes: Buffer.byteLength(text) }],
     scan: { risk: "low", injection: false, findings: [] }, review: { verdict: "usable", reasons: [t("Crossline 自带的整理说明，没有脚本")], final: "usable" },

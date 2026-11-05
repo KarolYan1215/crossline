@@ -11,7 +11,7 @@ import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
 import { CrosslineStore, aiToolsFor, designSkillNote, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes, nodeComputeOn } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
-import { closeInterruptedCollections, createFavouritesTopicsService, createTopicClassifier, favouritesTopicPass } from "./favourites-topics";
+import { closeInterruptedCollections, createFavouritesTopicsService, createTopicClassifier, favouritesTopicPass, refreshFavouritesTopicsText } from "./favourites-topics";
 import { workflowImprovePass } from "./workflow-improver";
 import { workflowMergeDue, workflowMergePass } from "./workflow-merge";
 import { NEEDS_PER_PASS, createNeedChecker, needsAwaitingCheck } from "./need-check";
@@ -1424,6 +1424,7 @@ for (const workspace of analysisStore.listWorkspaces()) {
   // A collection the last worker was running when it stopped never wrote its end: closed, so the page does not show it running.
   const interrupted = closeInterruptedCollections(analysisStore, workspace.id);
   if (interrupted.length) console.info(JSON.stringify({ type: "collect.interrupted", workspaceId: workspace.id, interrupted, checkedAt: new Date().toISOString() }));
+  try { refreshFavouritesTopicsText(analysisStore, workspace.id); } catch { /* the old text stays until the next start */ }
   const salvaged = agentService.salvageStopped(workspace.id);
   if (salvaged.length) console.info(JSON.stringify({ type: "agent.salvaged", workspaceId: workspace.id, salvaged, checkedAt: new Date().toISOString() }));
   // Once: the locks and 「deleted by the person」 marks that overlapping calendar publishes left behind (before the supervisor serves a publish).

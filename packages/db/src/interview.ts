@@ -1,14 +1,16 @@
-import { cardsSettled, flowOf, PROFILE_SECTIONS_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
+import { cardsSettled, depthPace, flowOf, PROFILE_SECTIONS_SETTING, ONBOARDING_DEPTH_SETTING, readDepth, PROFILE_INSTRUMENTS_SETTING, readInstrumentAnswers, settledItems, ATTENTION_SETTING, START_CONFIRMED_SETTING, START_CONFIRM_SINCE, interviewChecklist, lineAttributes, profileGaps, PROFILE_CONFIRMED, portraitStillConfirmed, portraitConfirmedByInsights, readInsightRatings, ONBOARDING_INSIGHTS, type ChecklistItem, type ProfileGap, type ProfileModel, type QuestionScreenInput, type StoredLineProfile, type Locale } from "@crossline/core";
 import { interviewLocale, readLocale } from "./locale";
 import { unfiledFilesIn } from "./file-belonging";
 import { latestFileDates } from "./index";
 import type { CrosslineStore } from "./index";
 
-type DateRow = { id: string; project?: string; kind?: string; sourceRef?: string; date?: string; to?: string };
+type DateRow = { id: string; project?: string; kind?: string; sourceRef?: string; date?: string; to?: string;
+  title?: string; weekdays?: number[]; startTime?: string; endTime?: string };
 
 /**
  * Every dated item read from files or replies, pending or confirmed (an excluded one does not count; a pending one already over is
- * history, never offered, so it waits for nobody), with its project, kind and whether it repeats weekly.
+ * history, never offered, so it waits for nobody), with its project, kind, whether it repeats weekly, and a weekly one's title, weekdays
+ * (Sunday = 0) and times.
  */
 export function datedItems(store: CrosslineStore, workspaceId: string, today: string) {
   const decided = new Map(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => [event.entityId,
@@ -19,7 +21,8 @@ export function datedItems(store: CrosslineStore, workspaceId: string, today: st
     const payload = event.payload as { dates?: DateRow[]; recurring?: DateRow[] };
     const keep = (row: DateRow) => decision ? (decision.included ?? []).includes(row.id) : (row.date ?? row.to ?? today) >= today;
     return [...(payload.dates ?? []).filter(keep).map((row) => ({ row, recurring: false })), ...(payload.recurring ?? []).filter(keep).map((row) => ({ row, recurring: true }))]
-      .map(({ row, recurring }) => ({ project: row.project ?? "", kind: row.kind ?? (recurring ? "class" : "other"), recurring, pending: !decision, sourceRef: row.sourceRef ?? "" }));
+      .map(({ row, recurring }) => ({ project: row.project ?? "", kind: row.kind ?? (recurring ? "class" : "other"), recurring, pending: !decision, sourceRef: row.sourceRef ?? "",
+        title: row.title ?? "", weekdays: recurring ? row.weekdays ?? [] : [], startTime: row.startTime ?? "", endTime: row.endTime ?? "" }));
   });
 }
 
@@ -44,10 +47,12 @@ export function interviewChecklistFor(store: CrosslineStore, workspaceId: string
   // The main interview (a line's own interview is `line-…`) on the profile-first flow has cards to answer before the app opens.
   const main = store.listOnboardingSessions(workspaceId).filter((session) => !session.id.startsWith("line-"))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-  // The cards exist in Chinese only so far, so an English interview is never held for them.
+  // The cards exist in Chinese only so far, so an English interview is never held for them. The tier's set is what holds the start: the
+  // quick tier's short one (W-186).
   const profileCards = main && flowOf(main.coverage) === "v2"
     && (extras.locale ?? interviewLocale(store, workspaceId) ?? readLocale(store, workspaceId)) !== "en"
-    ? cardsSettled(settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING)))) : undefined;
+    ? cardsSettled(settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING))),
+      depthPace(readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING))).cards) : undefined;
   return interviewChecklist({
     lines,
     descriptions: Object.fromEntries(Object.entries(profiles).map(([id, value]) => [id, { description: value.description ?? "", candidates: (value.attributes ?? []).length || (value.goalCandidates ?? []).length }])),

@@ -6,6 +6,7 @@ import { useT } from "../locale-context";
 import { ModelProviderCard } from "../settings/model-provider-card";
 import { FirstHint } from "../ui/first-hint";
 import { InvitePanel } from "./invite-panel";
+import { NodeSetupSteps } from "./node-setup";
 
 /**
  * Connects a model, then moves on by itself; an account already connected never sees this page for more than a moment. Either path
@@ -20,7 +21,8 @@ export function ConnectFlow({ next, hosted = false }: { next: string;
   const [chatgpt, setChatgpt] = useState<boolean>();
   const [api, setApi] = useState<boolean>();
   const [invited, setInvited] = useState(false);
-  const connected = Boolean(chatgpt || api || invited);
+  const [node, setNode] = useState(false);
+  const connected = Boolean(chatgpt || api || invited || node);
   const sponsored = useCallback(() => setInvited(true), []);
   useEffect(() => { if (connected) location.replace(next); }, [connected, next]);
   return <div className="connect-flow">
@@ -32,6 +34,7 @@ export function ConnectFlow({ next, hosted = false }: { next: string;
       {t("ChatGPT Plus 和官方 API 都没有，也可以用 OpenAI 兼容的中转站：在「其他模型」里点「用中转站接入」，填中转站给的 base URL 和 API key。")}
     </FirstHint>
     <CodexAccountControl onConnected={setChatgpt} />
+    {hosted && <NodeSetupSteps onReady={setNode} />}
     <h2 className="connect-or">{t("或者用其他模型的 API")}</h2>
     <p className="muted">{t("DeepSeek、Kimi、通义千问、智谱 GLM、OpenAI API、OpenRouter，或 OpenAI 兼容的中转站。保存前先测一次连接，之后自动检验回答格式，约 10–20 分钟；访谈一项通过就进入访谈，网页搜索和画形象这类功能仍要 ChatGPT 账号。")}</p>
     <ModelProviderCard onReady={setApi} />

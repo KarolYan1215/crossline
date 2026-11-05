@@ -31,7 +31,7 @@ export const NICKNAME_MAX = 12;
 
 /** POST /api/results */
 export type SubmitRequest = {
-  /** Every one of the 32 questions answered 1–5. */
+  /** Every one of the 36 questions answered 1–5. */
   answers: Record<string, number>;
   appearance: Appearance;
   email: string;

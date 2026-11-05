@@ -1,5 +1,6 @@
 import "server-only";
-import { answerAllSteps, onPersonsBoard, safeAssistantResult, staleProposal, taskTitleOf, type AccessContext, type AnswerAllStep, type AskKind } from "@crossline/core";
+import { randomUUID } from "node:crypto";
+import { answerAllSteps, onPersonsBoard, safeAssistantResult, staleProposal, taskTitleOf, tidySentenceEnds, type AccessContext, type AnswerAllStep, type AskKind } from "@crossline/core";
 import { resultsAwaitingReview, reviewAgentTask } from "@crossline/db";
 import { appNow, archiveWorkOrder, getStore, milestoneDeadline, planToday } from "./crossline";
 import { answerAsk, listed, openAsks, snoozeAsk, thisWeek } from "./asks";
@@ -50,11 +51,53 @@ export function answerAllPlan(ctx: AccessContext, now = appNow()): AnswerAllPlan
 /** Carries the plan out under one undo. What failed (a thing that changed in the meantime) is counted and left as it was. */
 export async function runAnswerAll(ctx: AccessContext, now = appNow()): Promise<{ ok: true; done: number; failed: number; op?: { id: string; label: string } }> {
   const plan = answerAllPlan(ctx, now);
+  return carryOut(ctx, plan, tOf(ctx)("全部按推荐处理 {{count}} 项", { count: plan.total }), now);
+}
+
+/** How long a safe decision waits for the person before its recommendation is taken (2026-11-05, docs/hosted-hardening.md §5). */
+export const AUTO_ANSWER_AFTER_MS = 48 * 3_600_000;
+/** The asks (id and fingerprint) and proposals once settled by `autoAnswerDue`; the last 500. */
+export const AUTO_ANSWERED_SETTING = "asks.autoAnswered";
+const readKeys = (raw: string | undefined): string[] => { try { const value: unknown = JSON.parse(raw ?? "[]"); return Array.isArray(value) ? value.filter((key): key is string => typeof key === "string") : []; } catch { return []; } };
+
+/**
+ * The default effect of 待确认 (the owner's decision of 2026-11-05): a decision with a safe, undoable default that has waited 48 hours is
+ * settled by that default, the way 「全部按推荐」 would, under one undo kept 24 hours and said once in the day's conversation. Before, a
+ * person away for a week came back to dozens of open items, each of which had only one sensible answer. Only what the button settles is
+ * touched (`ANSWER_ALL_KINDS`: risk digests, missed blocks, relation checks) and proposals already past their day; the assistant's results
+ * are the worker's (date-advance adopts the safe ones after a day). An ask without a time it was raised is never auto-answered.
+ */
+export async function autoAnswerDue(ctx: AccessContext, now = appNow()): Promise<{ done: number; op?: { id: string; label: string } }> {
+  const store = getStore();
+  const plan = answerAllPlan(ctx, now);
+  const open = new Map(thisWeek(listed(openAsks(ctx, now))).map((ask) => [ask.id, ask]));
+  // What was settled this way once is never settled again by itself: an undo is the person saying no, and the ask comes back with its old time.
+  const before = new Set<string>(readKeys(store.getSetting(ctx.workspaceId, AUTO_ANSWERED_SETTING)));
+  const keyOf = (id: string) => `${id}|${open.get(id)?.fingerprint ?? ""}`;
+  const due = (id: string) => { const at = Date.parse(open.get(id)?.raisedAt ?? ""); return Number.isFinite(at) && now.getTime() - at >= AUTO_ANSWER_AFTER_MS && !before.has(keyOf(id)); };
+  const asks = plan.asks.filter((step) => due(step.askId));
+  const proposals = plan.proposals.filter((item) => !before.has(`proposal:${item.id}`));
+  const total = asks.length + proposals.length;
+  if (!total) return { done: 0 };
+  const keys = [...before, ...asks.map((step) => keyOf(step.askId)), ...proposals.map((item) => `proposal:${item.id}`)];
+  store.setSetting(ctx.workspaceId, AUTO_ANSWERED_SETTING, JSON.stringify(keys.slice(-500)));
+  const t = tOf(ctx);
+  const result = await carryOut(ctx, { ...plan, asks, results: [], proposals, total }, t("没有回应 48 小时，已按推荐处理 {{count}} 项", { count: total }), now);
+  if (result.done && result.op) {
+    const names = [...asks.map((step) => step.title), ...proposals.map((item) => item.title)].slice(0, 3).map((title) => t("「{{title}}」", { title })).join(t("、"));
+    say(ctx, result.done > 3
+      ? t("{{names}}等 {{count}} 项等了 48 小时没有回应，已按推荐处理。24 小时内可撤销。", { names, count: result.done })
+      : t("{{names}}等了 48 小时没有回应，已按推荐处理。24 小时内可撤销。", { names }), result.op.id, now);
+  }
+  return { done: result.done, ...(result.op ? { op: result.op } : {}) };
+}
+
+async function carryOut(ctx: AccessContext, plan: AnswerAllPlan, label: string, now: Date): Promise<{ ok: true; done: number; failed: number; op?: { id: string; label: string } }> {
   const t = tOf(ctx);
   const accepted: string[] = [];
   let done = 0, failed = 0;
   const asks = new Map(thisWeek(listed(openAsks(ctx, now))).map((ask) => [ask.id, ask]));
-  const result = await withUndo(ctx, t("全部按推荐处理 {{count}} 项", { count: plan.total }), async () => {
+  const result = await withUndo(ctx, label, async () => {
     for (const step of plan.asks) {
       const ask = asks.get(step.askId);
       const outcome = !ask ? { ok: false } : "snooze" in step ? snoozeAsk(ctx, step.askId, step.snooze, now, undefined, { undo: false, ask })
@@ -70,4 +113,15 @@ export async function runAnswerAll(ctx: AccessContext, now = appNow()): Promise<
     return { ok: true as const, done, failed };
   }, () => accepted.length ? [{ kind: "agent.reopen", taskIds: accepted }] : []);
   return { ...result, done, failed };
+}
+
+/** One message in the day's conversation with 撤销, left pending so the worker's notification pass sends it when no page is open. */
+function say(ctx: AccessContext, text: string, opId: string, now: Date): void {
+  const store = getStore();
+  const t = tOf(ctx);
+  const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
+  store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "nudge", text: "", createdAt: now.toISOString(),
+    payload: { nudge: { kind: "auto_answered", fingerprint: `auto_answered:${opId}`, urgent: false, counted: false, delivery: "pending" },
+      card: { actions: [{ action: "undo", summary: t("撤销自动处理"), args: { opId } }], items: [{ state: "pending" }], confidence: "high", nudgeKind: "auto_answered",
+        clarify: { question: tidySentenceEnds(text), options: [{ label: t("撤销"), actions: [0], kind: "action" }, { label: t("知道了"), actions: [], kind: "ack" }] } } } });
 }

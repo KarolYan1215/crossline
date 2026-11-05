@@ -8,7 +8,7 @@ import {
   checkInsight, readTurnProgress, openStageQuestion, withPlainTerms,
   type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, type Locale, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
-  settledItems, PROFILE_INSTRUMENTS_SETTING, type InterviewFlow, type ProfileCard, type ProfileStage,
+  settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage,
   ONBOARDING_DEPTH_SETTING, readDepth, depthPace, type DepthPace
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
@@ -472,7 +472,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // The profile module's cards for this stage (flow v2): they count in the round's questions, so the model's give way to them.
     // The item texts exist in Chinese only so far (our own translation, docs/profile-and-agent-kit.md §二): an English interview gets none.
     const cardsLeft = !focusLine && flow === "v2" && locale !== "en"
-      ? cardsForRound(paced.output.stage, settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING))), tier.cardItems)
+      ? cardsForRound(paced.output.stage, settledItems(readInstrumentAnswers(store.getSetting(workspaceId, PROFILE_INSTRUMENTS_SETTING))), tier.cardItems, tier.cards)
       : [];
     let cards = paced.output.nextAction === "ask" ? cardsLeft : [];
     // Rating cards count in the round's questions; an interest card (想不想做) does not share a round with several fact questions, which
@@ -517,7 +517,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // What the app added (the checklist's and the start items' own questions) goes through the screen the page applies when it lists the
     // round: a goal question the left column's picker already asks was listed as nothing, and the 2026-11-01 rerun showed 「开始之前还想再问
     // 几件事。」 over an empty batch twice.
-    const output = withPlainTerms(shownOrOpen(assembled, questionScreenFor(store, workspaceId), locale));
+    const output = withPlainTerms(withFreshOpenQuestion(shownOrOpen(assembled, questionScreenFor(store, workspaceId), locale),
+      checklistAskable(store, workspaceId, sessionId), locale));
     // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
     const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
       .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
@@ -610,6 +611,19 @@ export function shownOrOpen<T extends OnboardingDialogue & { cards?: unknown[] }
   return { ...output, questions: keep.length || output.cards?.length ? keep : [openStageQuestion(output.stage, locale)] };
 }
 
+/**
+ * The stage's open question is the app's own, added after the ledger's repeat check (`resolveRepeats`) has read the model's questions, so
+ * nothing stopped it coming back: W-184 asked 「做这些事，你最终想得到什么？」 again, word for word, the round after the person answered it.
+ * One the ledger says may not be asked again (`checklistAskable`: answered with something that settles it, or asked twice) gives way to
+ * the next stage's open question that may.
+ */
+export function withFreshOpenQuestion<T extends OnboardingDialogue>(output: T, askable: (text: string) => boolean, locale?: Locale): T {
+  const stale = (question: TurnQuestion) => question.id.startsWith("open-") && !askable(question.text);
+  if (!output.questions.some(stale)) return output;
+  const fresh = openStageQuestion(output.stage, locale, askable);
+  return { ...output, questions: output.questions.map((question) => stale(question) ? fresh : question) };
+}
+
 /** Besides those that block, at most this many of the app's own questions join one round, so a batch stays answerable. */
 export const GAPS_PER_ROUND = 3;
 
@@ -630,14 +644,15 @@ export const ROUND_QUESTIONS_MAX = 4;
 /**
  * The cards a round of the profile-first flow carries: in a profile stage, what is left of the stages already passed and then this one's,
  * two at most; past the module (the Crossline part), whatever is still unanswered one card at a time, so the start item can close.
+ * `set` is the tier's card set (`DepthPace.cards`: the quick tier asks a short one).
  */
-export function cardsForRound(stage: string | undefined, settled: ReadonlySet<string>, items?: number): ProfileCard[] {
+export function cardsForRound(stage: string | undefined, settled: ReadonlySet<string>, items?: number, set: CardSet = "all"): ProfileCard[] {
   const module = INTERVIEW_FLOW_STAGES.v2.filter((name) => PROFILE_MODULE_STAGES.has(name)) as ProfileStage[];
   const at = module.indexOf(stage as ProfileStage);
   // A stage the model went back to (compass after energy) leaves the later stages' cards behind: with none left up to it, the rest come
   // one card a round as past the module, or the start item never closes (2026-11-03 walk: 9 cards left and none offered).
-  const upTo = at >= 0 ? cardsFor(module.slice(0, at + 1), settled, undefined, items) : [];
-  return upTo.length ? upTo : cardsFor(module, settled, 1, items);
+  const upTo = at >= 0 ? cardsFor(module.slice(0, at + 1), settled, undefined, items, set) : [];
+  return upTo.length ? upTo : cardsFor(module, settled, 1, items, set);
 }
 
 export function paceDeepRound<T extends OnboardingDialogue>(output: T, focus: boolean, limit = DEEP_QUESTIONS_PER_ROUND): { output: T; deep: boolean } {

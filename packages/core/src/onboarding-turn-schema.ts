@@ -280,6 +280,11 @@ export type OnboardingTurnContext = {
    * 候选定语」): the dialogue asks what the person wants to become on a line only while it offers none.
    */
   goalPicker?: string[];
+  /**
+   * Every weekly fixed arrangement on record, one line per weekday with its own time (`fixedScheduleLines`: 「周二 14:00–16:30 ECE 548」).
+   * W-183: the abstract carried only how many there were, and the dialogue twice told the person their Tuesday 14:00 class was a morning one.
+   */
+  fixedSchedule?: string[];
 };
 
 /**

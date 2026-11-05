@@ -64,15 +64,21 @@ export function readTurnProgress(raw: unknown): TurnProgress | undefined {
     next: typeof value.next === "string" ? value.next.slice(0, 160) : "" };
 }
 
-/** How far the main interview is, for the screen: the part (1-based of five, six in the thorough tier), its label, and how much of it is clear. */
+/**
+ * How far the main interview is, for the screen: the part (1-based of `interviewParts(flow, depth)`), its label, and how much of it is
+ * clear. The one count every part indicator shows (the bar above the conversation and the right column, W-186). The part is the round's
+ * `stage` — what the app paces and offers cards by — and the model's own progress record counts only while it is about that part: the
+ * 2026-11-03 walkthrough had the bar at 「第 2/6 部分 · 指南针」 and the right column at the progress record's 「主线」, part 6 of 6.
+ */
 export function progressView(progress: TurnProgress | undefined, stage: string, flow: InterviewFlow = "v1", depth?: OnboardingDepth): { index: number; total: number; label: string; clear: number; of: number; next: string } {
   const parts = interviewParts(flow, depth);
-  const part = progress?.part ?? (stage as OnboardingStage);
+  const part = (ONBOARDING_STAGES as readonly string[]).includes(stage) ? stage as OnboardingStage : progress?.part ?? (stage as OnboardingStage);
   const at = parts.indexOf(part);
   const index = at < 0 ? (part === "details" ? parts.length : 1) : at + 1;
-  const clear = progress?.covered.length ?? 0, of = clear + (progress?.open.length ?? 0);
-  return { index, total: parts.length, label: PART_LABEL[part] ?? "定向", clear: progress?.partDone ? Math.max(clear, of) : clear,
-    of: progress?.partDone ? Math.max(clear, of) : of, next: progress?.next ?? "" };
+  const own = progress?.part === part ? progress : undefined;
+  const clear = own?.covered.length ?? 0, of = clear + (own?.open.length ?? 0);
+  return { index, total: parts.length, label: PART_LABEL[part] ?? "定向", clear: own?.partDone ? Math.max(clear, of) : clear,
+    of: own?.partDone ? Math.max(clear, of) : of, next: progress?.next ?? "" };
 }
 
 /** The progress record as the lines the next round starts from (for the dialogue model, not shown). */
@@ -116,6 +122,24 @@ export function interviewAbstract(input: AbstractInput): string[] {
   if (profile.flow?.length || profile.anchor) out.push(`能量：${cut([...(profile.flow ?? []).slice(0, 2), profile.anchor ?? ""].filter(Boolean).join("；"), 60)}`);
   for (const line of input.recent) { if (out.length >= ABSTRACT_MAX) break; out.push(`刚记下：${cut(line, 70)}`); }
   return out.slice(0, ABSTRACT_MAX);
+}
+
+/** Lines of the fixed schedule handed to the dialogue at most. */
+export const FIXED_SCHEDULE_MAX = 24;
+const WEEKDAY_NAME = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+/**
+ * The weekly fixed arrangements as the dialogue reads them each round: one line per weekday a meeting falls on, with that meeting's own
+ * time (「周二 14:00–16:30 ECE 548」), Monday first. A class meeting twice a week is two lines, so no sentence of the model's has to
+ * merge two meetings into one day-and-time (W-183: 「周二 14:00–16:30」 and 「周四 09:00」 were told back as 「周二、周四上午的课」).
+ * `weekdays` count from Sunday = 0, as the date batch writes them.
+ */
+export function fixedScheduleLines(items: Array<{ title: string; weekdays: number[]; startTime: string; endTime: string }>): string[] {
+  const rows = items.flatMap((item) => [...new Set(item.weekdays)].filter((day) => day >= 0 && day <= 6)
+    .map((day) => ({ day, start: item.startTime, end: item.endTime, title: item.title.trim() })));
+  const seen = new Set<string>();
+  return rows.sort((a, b) => (a.day + 6) % 7 - (b.day + 6) % 7 || a.start.localeCompare(b.start) || a.title.localeCompare(b.title))
+    .map((row) => `${WEEKDAY_NAME[row.day]} ${row.start}–${row.end} ${row.title || "固定安排"}`)
+    .filter((line) => !seen.has(line) && Boolean(seen.add(line))).slice(0, FIXED_SCHEDULE_MAX);
 }
 /* i18n-ignore-end */
 
@@ -252,10 +276,19 @@ export const OPEN_QUESTION: Record<OnboardingStage, string> = {
 /**
  * The open question for a round that still asks and holds nothing to answer: the worker adds it when a round is stored, the interview page
  * when its own screen (files the app asks about, facts recorded since) left a stored round empty.
+ *
+ * `askable` says whether a question may still be put to the person (the question ledger's word: not once answered, not a third time).
+ * The stage's own question comes first; one that may not be asked gives way to the next stage's, in `OPEN_QUESTION`'s order and round
+ * again (W-184: 「做这些事，你最终想得到什么？」 was answered and asked again word for word the next round, because this question is the app's
+ * own and the ledger's repeat check only reads the model's). When every one has been used, the stage's own stands.
  */
-export function openStageQuestion(stage: string | undefined, locale?: Locale): TurnQuestion {
+export function openStageQuestion(stage: string | undefined, locale?: Locale, askable: (text: string) => boolean = () => true): TurnQuestion {
   const at = (stage && stage in OPEN_QUESTION ? stage : "situation") as OnboardingStage;
-  return { id: `open-${at}`, text: tFor(locale)(OPEN_QUESTION[at]), kind: "free", allowOther: true, identityId: "", projectId: "", options: [] };
+  const t = tFor(locale);
+  const stages = Object.keys(OPEN_QUESTION) as OnboardingStage[];
+  const from = stages.indexOf(at);
+  const pick = [...stages.slice(from), ...stages.slice(0, from)].find((name) => askable(t(OPEN_QUESTION[name]))) ?? at;
+  return { id: `open-${pick}`, text: t(OPEN_QUESTION[pick]), kind: "free", allowOther: true, identityId: "", projectId: "", options: [] };
 }
 
 /**

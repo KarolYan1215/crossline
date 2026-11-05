@@ -31,6 +31,8 @@ export function unsureAnswer(answer: string): boolean {
 
 /** Letters and digits only, lower case: what a question says, not how it is punctuated. */
 const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+/** The same question in the same words, punctuation, spacing and case set aside. */
+export const sameQuestion = (a: string, b: string): boolean => { const left = normalize(a); return Boolean(left) && left === normalize(b); };
 const bigrams = (text: string) => {
   const chars = [...normalize(text)];
   const out = new Map<string, number>();

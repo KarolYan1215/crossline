@@ -36,6 +36,8 @@ export const NODE_TOKEN_SETTING = "node.token.sha256";
 export const NODE_PAIRED_SETTING = "node.paired";
 /** Where the 「Crossline 节点」 installer is published (the one place the address is written; docs/compute-node.md 「独立安装包」). */
 export const NODE_INSTALLER_URL = "https://github.com/KarolYan1215/crossline-releases/releases/latest/download/Crossline-Node-Setup.exe";
+/** The printed install guide published beside it (docs/node-install-guide.md, docs/compute-node.md 「发布」). */
+export const NODE_GUIDE_URL = "https://github.com/KarolYan1215/crossline-releases/releases/latest/download/Crossline-Node-Guide.pdf";
 /** A pairing code: eight letters and digits a person can read aloud (no 0/O, 1/I/L), shown as XXXX-XXXX; valid ten minutes. */
 export const PAIR_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export const PAIR_TTL_MS = 10 * 60_000;

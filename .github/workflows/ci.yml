@@ -1,0 +1,39 @@
+name: CI
+
+# The gate on every push (docs/hosted-hardening.md §2, 2026-11-05): typecheck and the unit tests, the same two the pre-commit hook runs.
+# On `main` the hosted beta's images are built only after this passes (images.yml, `workflow_run`), so a broken commit never reaches a
+# deploy. Linux, like the server the images run on; standard runners cost nothing on a public repository.
+# It replaces verify.yml, whose registration GitHub left in a `deleted` state that can be neither enabled nor removed (403 / 404 from the
+# API, a known backend fault); the full `pnpm verify` with e2e stays the local check before a commit (CLAUDE.md).
+on:
+  push:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      # The version comes from package.json's packageManager; naming one here too fails with ERR_PNPM_BAD_PM_VERSION.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # keytar loads libsecret at import: without it every connector test fails to load (.claude/hooks/session-start.sh).
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libsecret-1-0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test

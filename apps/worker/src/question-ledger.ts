@@ -1,4 +1,4 @@
-import { answersInReply, freeTextAnswers, ledgerLines, questionSimilarity, unsureAnswer, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
+import { answersInReply, freeTextAnswers, ledgerLines, questionSimilarity, sameQuestion, unsureAnswer, type LedgerQuestion, type ProfileGap, type TurnQuestion } from "@crossline/core";
 import type { CrosslineStore, StoredSentence } from "@crossline/db";
 
 /**
@@ -113,11 +113,12 @@ export function resolveRepeats(store: CrosslineStore, workspaceId: string, sessi
  * Whether the app may put one of its own checklist questions (an item's `ask`) to the person again: not once an asking of it was answered
  * with something that settles it, and not more than `MAX_ASKINGS` times in all. The 2026-10-31 rerun asked 「「X」这条线眼下在做什么？」
  * nine times: the person answered at once, the extraction had not written the description down yet, and the item stayed open.
+ * The stage's open question (`openStageQuestion`) is judged the same way (W-184).
  */
 export function checklistAskable(store: CrosslineStore, workspaceId: string, sessionId: string): (text: string) => boolean {
   const asked = interviewQuestions(store, workspaceId, sessionId).filter((question) => question.status !== "dropped");
   return (text) => {
-    const same = asked.filter((question) => question.text === text || question.text.startsWith(text));
+    const same = asked.filter((question) => sameQuestion(question.text, text) || question.text.startsWith(text));
     return same.length < MAX_ASKINGS && !same.some((question) => (question.status === "answered" && !unsureAnswer(question.answer)) || question.status === "assumed");
   };
 }
