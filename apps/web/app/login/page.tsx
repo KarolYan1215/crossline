@@ -8,9 +8,10 @@ import { AuthLayout } from "./auth-layout";
 import { LOGIN_SERIF } from "../ui/serif-strings";
 import { tFor } from "../../lib/i18n";
 import { getLocale } from "../../lib/locale";
+import { safeNext } from "../../lib/safe-next";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ verified?: string; reset?: string; deleted?: string; error?: string }> }) {
-  const { verified, reset, deleted, error } = await searchParams;
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ verified?: string; reset?: string; deleted?: string; error?: string; next?: string }> }) {
+  const { verified, reset, deleted, error, next } = await searchParams;
   // Nobody is signed in yet: the language is the browser's cookie (docs/i18n.md).
   const locale = await getLocale();
   const t = tFor(locale);
@@ -29,7 +30,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <b>{t(step.title)}</b><small>{t(step.detail)}</small>
     </li>; })}</ol>;
   return <AuthLayout title={LOGIN_SERIF.panel} locale={locale} hero={steps}>
-      <LoginForm googleEnabled={isGoogleAuthConfigured()} emailEnabled={isEmailAuthConfigured()} chatgptEnabled={chatgpt} verified={verified === "1"} reset={reset === "1"} deleted={deleted === "1"}
+      <LoginForm googleEnabled={isGoogleAuthConfigured()} emailEnabled={isEmailAuthConfigured()} chatgptEnabled={chatgpt} verified={verified === "1"} reset={reset === "1"} deleted={deleted === "1"} next={safeNext(next)}
         {...(error ? { errorCode: error.slice(0, 60) } : {})} />
       <div className="login-foot">
         <p className="login-privacy"><ShieldCheck size={16} strokeWidth={1.75} aria-hidden="true" />{process.env.CROSSLINE_PUBLIC_BETA === "1"

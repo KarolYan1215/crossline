@@ -197,6 +197,9 @@ function crosslineAuthConfig(options: CrosslineAuthOptions): BetterAuthOptions {
       },
       emailVerification: {
         sendOnSignUp: true,
+        // The link in the mail signs the person in and goes on to where they signed up from; it used to land on the sign-in page with
+        // only 「?verified=1」 added, and they had to type the address and password again (2026-11-04).
+        autoSignInAfterVerification: true,
         sendVerificationEmail: async ({ user, url }, request) => {
           const t = tFor(mailLocale(user.email, request?.headers));
           await deliver(user.email, t("验证你的 Crossline 邮箱"),

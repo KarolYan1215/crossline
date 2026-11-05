@@ -257,8 +257,10 @@ export function createRuntimeRegistry(options: {
     client: (workspaceId) => clientFor(workspaceId),
     handle: (workspaceId) => isOwner(workspaceId) ? { ok: true, client: ownerClient() }
       : connected(workspaceId) ? { ok: true, client: clientOf(workspaceId) } : { ok: false, blocker: blocker("RUNTIME_UNCONNECTED", workspaceId) },
+    // Only a connected account's: one mid-login has a runtime up (the login started it), but its client refuses every request with
+    // RUNTIME_UNCONNECTED, and the account read through it failed, so the connect page lost the device code it had just shown (2026-11-04).
     current: (workspaceId) => isOwner(workspaceId) ? ownerClient()
-      : (touch(workspaceId), running.has(workspaceId) || hasNodes(workspaceId) ? clientOf(workspaceId) : undefined),
+      : (touch(workspaceId), connected(workspaceId) && (running.has(workspaceId) || hasNodes(workspaceId)) ? clientOf(workspaceId) : undefined),
     poolLoad: (workspaceId) => pools.get(workspaceId)?.load() ?? {},
     async login(workspaceId, method) {
       // Not through the handle: an account that is not connected yet is exactly the one that logs in.

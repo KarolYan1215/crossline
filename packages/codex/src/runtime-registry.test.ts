@@ -199,3 +199,14 @@ test("方案 C: a guest with no sign-in here is connected through its own comput
   expect(started).toHaveLength(0);
   expect(registry.current("ws-guest")).toBe(pool);
 });
+
+test("an account mid-login has no current client, so reading who is signed in falls back to its home and the login stays shown", async () => {
+  const { registry, homeOf } = setup({ answers: { "account/login/start": { loginId: "l1", userCode: "ABCD-1234", verificationUrl: "https://auth.openai.com/codex/device" } } });
+  const login = await registry.login("ws-guest", { type: "chatgptDeviceCode" });
+  expect(login).toMatchObject({ state: "pending", userCode: "ABCD-1234" });
+  expect(registry.current("ws-guest")).toBeUndefined();
+  expect(registry.savedAccount("ws-guest")).toBeNull();
+  expect(registry.loginStatus("ws-guest")).toMatchObject({ state: "pending", userCode: "ABCD-1234" });
+  connect(homeOf("ws-guest"));
+  expect(registry.current("ws-guest")).toBeDefined();
+});

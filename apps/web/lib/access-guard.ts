@@ -7,6 +7,7 @@ import { getAuth } from "./auth";
 import { getStore } from "./crossline";
 import { currentLocalAccount, isLocalInstall } from "./local-install";
 import { timed } from "./sections";
+import { loginFor } from "./safe-next";
 
 /** On an installed copy every session is checked against the account the machine's Codex still holds. */
 const localAccount = () => isLocalInstall() ? currentLocalAccount : undefined;
@@ -32,8 +33,9 @@ export async function resolveAccessContext(request: Request): Promise<ResolvedRo
  * throws internally, so nothing after the call runs unauthenticated, the same way `notFound()` works.
  */
 export async function requireSessionContext(): Promise<AccessContext> {
-  const request = new Request("http://internal.invalid/", { headers: await headers() });
+  const incoming = await headers();
+  const request = new Request("http://internal.invalid/", { headers: incoming });
   const result = await timed("session", () => requireAccessContext(getAuth(), getStore(), request, localAccount()));
   if ("ctx" in result) return result.ctx;
-  redirect("/login");
+  redirect(loginFor(incoming.get("x-crossline-path")));
 }

@@ -3,6 +3,7 @@ import { AuthLayout } from "../login/auth-layout";
 import { LOGIN_SERIF } from "../ui/serif-strings";
 import { SetPasswordForm } from "./set-password-form";
 import { localeFor } from "../../lib/locale";
+import { safeNext } from "../../lib/safe-next";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,6 @@ export const dynamic = "force-dynamic";
 export default async function SetPasswordPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const ctx = await requireSessionContext();
   const { next } = await searchParams;
-  // Only a path on this site, never another origin.
-  const target = next && /^\/(?!\/)[\w\-/?=&.%]*$/.test(next) ? next : "/connect";
+  const target = safeNext(next);
   return <AuthLayout title={LOGIN_SERIF.setPassword} locale={localeFor(ctx)}><SetPasswordForm next={target} /></AuthLayout>;
 }

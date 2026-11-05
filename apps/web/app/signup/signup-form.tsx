@@ -5,7 +5,8 @@ import { authClient } from "../auth-client";
 import { authErrorMessage } from "../auth-errors";
 import { useT } from "../locale-context";
 
-export function SignupForm() {
+/** `next`: where the verification link goes once it has signed the person in (the page they signed up from, else /connect). */
+export function SignupForm({ next = "/connect" }: { next?: string }) {
   const t = useT();
   const [status, setStatus] = useState("");
   const [error, setError] = useState(false);
@@ -20,9 +21,9 @@ export function SignupForm() {
     setBusy(true);
     setStatus(t("正在创建账号…"));
     setError(false);
-    const { error: signUpError } = await authClient.signUp.email({ email, password, name, callbackURL: "/login?verified=1" });
+    const { error: signUpError } = await authClient.signUp.email({ email, password, name, callbackURL: next });
     if (signUpError) { setStatus(authErrorMessage(signUpError, t("注册失败，请重试。"), t)); setError(true); setBusy(false); return; }
-    setStatus(t("已发送验证邮件，请查收（包括垃圾邮件夹）并点击链接完成验证后再登录。"));
+    setStatus(t("已发送验证邮件，请查收（包括垃圾邮件夹）。点击邮件里的链接即完成验证并登录。"));
     setBusy(false);
   };
 
@@ -34,6 +35,6 @@ export function SignupForm() {
       <button className="secondary-button" type="submit" disabled={busy}>{busy ? t("处理中…") : t("注册")}</button>
     </form>
     {status && <small role={error ? "alert" : "status"}>{status}</small>}
-    <p><a href="/login">{t("已有账号？登录")}</a></p>
+    <p><a href={next === "/connect" ? "/login" : `/login?next=${encodeURIComponent(next)}`}>{t("已有账号？登录")}</a></p>
   </div>;
 }

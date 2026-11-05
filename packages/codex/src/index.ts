@@ -1346,7 +1346,9 @@ export async function startCodexSupervisor(options: {
           // outlasted the red bar's 2.5 s and showed 「后台服务没有运行」 on every page while the worker was fine (2026-10-21).
           const live = runtimes!.current(workspace);
           const saved = live ? undefined : runtimes!.savedAccount(workspace);
-          const account = live ? await live.request("account/read", { refreshToken: false }) : { account: saved, requiresOpenaiAuth: !saved };
+          // A failed read still answers with the login in progress: a 503 here hid the device code the person was about to type.
+          const fromHome = () => { const known = runtimes!.savedAccount(workspace); return { account: known, requiresOpenaiAuth: !known }; };
+          const account = live ? await live.request("account/read", { refreshToken: false }).catch(fromHome) : { account: saved, requiresOpenaiAuth: !saved };
           // `guest`: this account runs on its own Codex, which it can sign out of here (the owner's is the machine's own).
           sendJson(response, 200, { ...(record(account) ?? {}), login: runtimes!.loginStatus(workspace), guest: true });
           return;

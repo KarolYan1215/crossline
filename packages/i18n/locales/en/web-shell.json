@@ -275,7 +275,6 @@
   "以后再说": "Not now",
   "正在创建账号…": "Creating your account…",
   "注册失败，请重试。": "Sign-up failed. Try again.",
-  "已发送验证邮件，请查收（包括垃圾邮件夹）并点击链接完成验证后再登录。": "A verification email is on its way. Check your inbox (including spam), click the link to verify, then sign in.",
   "名字": "Name",
   "已有账号？登录": "Have an account? Sign in",
   "长期目标的定语": "Attributes of the long-term goal",
@@ -603,5 +602,6 @@
   "待确认：待决事项、任务提案、助手成果等": "Decisions: questions, task proposals, the assistant's results and more",
   "本周已完成的任务": "Tasks finished this week",
   "可用_today": "Free",
-  "待办_today": "Planned"
+  "待办_today": "Planned",
+  "已发送验证邮件，请查收（包括垃圾邮件夹）。点击邮件里的链接即完成验证并登录。": "A verification email is on its way. Check your inbox (including spam), click the link to verify, then sign in."
 }

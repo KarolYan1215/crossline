@@ -5,14 +5,16 @@ import { authClient, emailCode } from "../auth-client";
 import { authErrorMessage } from "../auth-errors";
 import { useT } from "../locale-context";
 
-export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled = false, verified = false, reset = false, deleted = false, errorCode }: { googleEnabled: boolean;
+export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled = false, verified = false, reset = false, deleted = false, errorCode, next = "/connect" }: { googleEnabled: boolean;
   emailEnabled?: boolean; chatgptEnabled?: boolean; verified?: boolean;
   /** Back from 「设置新密码」 (`/login?reset=1`): say it worked and open the password tab, which it used to leave the person to guess. */
   reset?: boolean;
   /** Back from 删除账号 (`/login?deleted=1`): the page used to look as if nothing had happened. */
   deleted?: boolean;
   /** A redirect back from a sign-in that failed elsewhere (ChatGPT, Google), as `/login?error=CODE`. */
-  errorCode?: string }) {
+  errorCode?: string;
+  /** The page the person was on before being asked to sign in (`/login?next=`, checked by `safeNext`); signing in goes back there. */
+  next?: string }) {
   const t = useT();
   const [status, setStatus] = useState(errorCode ? authErrorMessage({ code: errorCode }, t("登录没有完成，请重试。"), t) : verified ? t("邮箱已验证，请登录。") : reset ? t("密码已更新，用新密码登录。")
     : deleted ? t("账号已删除，资料已从服务器上清除。用同一个邮箱再登录会建一个新的空账号。") : "");
@@ -44,12 +46,12 @@ export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled =
       fail(signInError, "登录失败，请检查邮箱和密码");
       return;
     }
-    location.href = "/connect";
+    location.href = next;
   };
 
   const resend = async () => {
     setBusy(true);
-    const { error: sendError } = await authClient.sendVerificationEmail({ email: unverified, callbackURL: "/login?verified=1" });
+    const { error: sendError } = await authClient.sendVerificationEmail({ email: unverified, callbackURL: next });
     if (sendError) { fail(sendError, "验证邮件没有发出，请稍后再试。"); return; }
     setStatus(t("已重新发送验证邮件到 {{email}}，请查收（包括垃圾邮件夹）。", { email: unverified })); setError(false); setBusy(false);
   };
@@ -72,12 +74,12 @@ export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled =
     // A code makes the account with no password; offer one now, while the sign-in is fresh enough to set it.
     const password = await fetch("/api/auth/password", { cache: "no-store" }).then((response) => response.json() as Promise<{ hasPassword?: boolean }>)
       .catch(() => ({ hasPassword: true }));
-    location.href = password.hasPassword ? "/connect" : "/set-password?next=/connect";
+    location.href = password.hasPassword ? next : `/set-password?next=${encodeURIComponent(next)}`;
   };
 
   const signInWithGoogle = async () => {
     setBusy(true);
-    await authClient.signIn.social({ provider: "google", callbackURL: "/connect" });
+    await authClient.signIn.social({ provider: "google", callbackURL: next });
   };
 
   return <div className="auth-form">
@@ -102,6 +104,6 @@ export function LoginForm({ googleEnabled, emailEnabled = true, chatgptEnabled =
     {status && <small role={error ? "alert" : "status"}>{status}</small>}
     {unverified && emailEnabled && <button type="button" disabled={busy} onClick={() => void resend()}>{t("重发验证邮件")}</button>}
     {/* A code signs up on first use, so the separate sign-up and reset pages belong to the password way in only. */}
-    {emailEnabled && mode === "password" && <p><a href="/signup">{t("还没有账号？注册")}</a> · <a href="/reset-password">{t("忘记密码")}</a></p>}
+    {emailEnabled && mode === "password" && <p><a href={next === "/connect" ? "/signup" : `/signup?next=${encodeURIComponent(next)}`}>{t("还没有账号？注册")}</a> · <a href="/reset-password">{t("忘记密码")}</a></p>}
   </div>;
 }

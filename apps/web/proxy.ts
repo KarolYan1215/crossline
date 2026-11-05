@@ -15,10 +15,12 @@ export function proxy(request: NextRequest) {
   if (primary && !staysLocal(request.nextUrl.pathname)) {
     return NextResponse.redirect(new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, primary), 307);
   }
-  if (!sendsSecurityHeaders()) return NextResponse.next();
+  const headers = new Headers(request.headers);
+  // The page asked for, so a page that needs a session sends the person to sign in and back here (lib/access-guard.ts).
+  headers.set("x-crossline-path", `${request.nextUrl.pathname}${request.nextUrl.search}`);
+  if (!sendsSecurityHeaders()) return NextResponse.next({ request: { headers } });
   const nonce = newNonce();
   const policy = contentSecurityPolicy(nonce);
-  const headers = new Headers(request.headers);
   headers.set("x-nonce", nonce);
   headers.set("content-security-policy", policy);
   const response = NextResponse.next({ request: { headers } });
