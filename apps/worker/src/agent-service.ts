@@ -50,7 +50,7 @@ export function createAgentService(deps: {
   /** For `node`: the account's own compute node whose person allowed the shell on it (docs/compute-node.md P3). */
   nodeShell?: (workspaceId: string) => NodeShellLink | undefined;
   /** For `sandbox`: beside its inputs what it may read, and what it may never read (the server's data and state). */
-  sandbox?: (workspaceId: string) => { readable: string[]; deny: string[] };
+  sandbox?: (workspaceId: string) => { readable: string[]; deny: string[]; runtimeTmp?: string };
   /** The workspace's own runtime, for a tools-mode run (the shell runs on the owner's `getClient`). */
   clientFor?: (workspaceId: string) => CodexRpcBoundary | undefined;
   /** The person's mailbox, read-only, when connected. */

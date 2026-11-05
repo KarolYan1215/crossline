@@ -18,7 +18,14 @@ export type AgentMode = {
    * `writable`, reads only the system's own folders and `readable`, `deny` unreadable whatever else says, no network. Absent: full access
    * (the machine owner's own computer, behind the guard).
    */
-  sandbox?: { writable: string; readable: string[]; deny: string[]; env?: Record<string, string> };
+  sandbox?: { writable: string; readable: string[]; deny: string[]; env?: Record<string, string>;
+    /**
+     * The account's runtime home's `tmp`, where Codex links its own sandbox helper (`tmp/arg0-linux/codex-arg0…/codex-linux-sandbox`).
+     * The home lies under a denied folder, and bubblewrap reopens a denied folder only for writable children (a readable one stays
+     * behind `--perms 000`), so `tmp` is writable and the helper folders inside it are read-only on top: a command can never replace
+     * the helper the runtime starts outside the sandbox (2026-11-05, W-217).
+     */
+    runtimeTmp?: string };
   /**
    * Run before each answer is validated: a run on a compute node copies the files it wrote back to the server here, so the validator's
    * artifact check reads them (docs/compute-node.md P3).
@@ -33,6 +40,10 @@ export function sandboxProfile(sandbox: NonNullable<AgentMode["sandbox"]>): Reco
   for (const path of sandbox.deny) filesystem[path] = "deny";
   for (const path of sandbox.readable) filesystem[path] = "read";
   filesystem[sandbox.writable] = "write";
+  if (sandbox.runtimeTmp) {
+    filesystem[sandbox.runtimeTmp] = "write";
+    for (const helper of ["arg0-linux", "arg0"]) filesystem[`${sandbox.runtimeTmp.replace(/\/+$/, "")}/${helper}`] = "read";
+  }
   return { [SANDBOX_PROFILE]: { description: "Crossline assistant task", filesystem, network: { enabled: false } } };
 }
 

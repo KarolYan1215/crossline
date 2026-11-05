@@ -351,7 +351,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
    * `sandbox`: the shell inside Codex's Linux sandbox — what it may read beside its inputs (the Codex binary's folder) and what it may
    * never read (the server's data and state folders, holding every other account).
    */
-  sandbox?: { readable: string[]; deny: string[] };
+  sandbox?: { readable: string[]; deny: string[]; runtimeTmp?: string };
   /** The person's mailbox, read-only, for a tools-mode run. */
   mail?: MailLookup;
   /** The server's data and state folders, which a run's inputs may reach only through this workspace's own subtrees (`ownedInputs`). */
@@ -445,7 +445,7 @@ export function createAgentRunner(store: CrosslineStore, workspaceId: string, cw
       ...askOption(personAsker(options.questionFor?.(taskId, input.title), audit, () => writeProgress(directory, audit))),
       agent: {
         cwd: workDir, ...(pull ? { beforeValidate: pull } : {}),
-        ...(sandboxed ? { sandbox: { writable: directory, readable: [...inputs, ...(options.sandbox?.readable ?? [])], deny: options.sandbox?.deny ?? [] } } : {}),
+        ...(sandboxed ? { sandbox: { writable: directory, readable: [...inputs, ...(options.sandbox?.readable ?? [])], deny: options.sandbox?.deny ?? [], ...(options.sandbox?.runtimeTmp ? { runtimeTmp: options.sandbox.runtimeTmp } : {}) } } : {}),
         onItem: (item, phase) => {
           noteItem(audit, pendingChanges, item, phase);
           if (phase !== "completed") return;
