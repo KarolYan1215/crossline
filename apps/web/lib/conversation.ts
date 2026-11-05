@@ -168,6 +168,20 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
  * model round, a few seconds each).
  */
 // i18n-ignore-start: the snapshot and page lines are the concierge model's context, not interface
+const WEEKDAY_ZH = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+/** The next 14 days as 「周二 11-03（今天）」…, so a weekday the person names is never counted by the model (W-192: 「周四前」 read as Wednesday). */
+export function weekdayTable(now: Date, timeZone: string): string {
+  const today = formatInTimeZone(now, timeZone, "yyyy-MM-dd");
+  return Array.from({ length: 14 }, (_, index) => {
+    const day = new Date(Date.parse(`${today}T12:00:00Z`) + index * 86_400_000);
+    // Weeks start on Monday, as 「下周一」 does in Chinese: Tuesday's 「下周一」 is six days away, not seven.
+    const week = Math.floor((index + (new Date(Date.parse(`${today}T12:00:00Z`)).getUTCDay() + 6) % 7) / 7);
+    const label = `${["本", "下", "下下"][week] ?? ""}${WEEKDAY_ZH[day.getUTCDay()]} ${day.toISOString().slice(5, 10)}`;
+    return index === 0 ? `${label}（今天）` : label;
+  }).join("、");
+}
+
 export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options: { lists?: boolean } = {}): string {
   const today = pack.plan.filter((block) => block.day === pack.today);
   const lists = options.lists ? [
@@ -179,6 +193,7 @@ export function conciergeSnapshot(pack: ConciergePack, now = new Date(), options
   ] : [];
   return [
     `现在：${formatInTimeZone(now, pack.timeZone, "yyyy-MM-dd EEE HH:mm")}（${pack.timeZone}）`,
+    `日期对照（说到星期几时按此换算；「周四前」「周四之前」指截止在周四当天）：${weekdayTable(now, pack.timeZone)}`,
     `今天：${today.length ? today.map((block) => `${block.start}–${block.end} ${block.title}`).join("；") : "无安排"}`,
     `每周可用时段（改动用 availability.set，给出改后的完整时段）：${pack.weeklyPattern?.join("；") || "未设置"}`,
     `未来 7 天可用于工作的时间（可用时段扣除固定安排；已排任务）：${pack.capacity.map((day) => `${day.day.slice(5)} ${(day.availableMinutes / 60).toFixed(1)}h；已排 ${(day.scheduledMinutes / 60).toFixed(1)}h`).join(" · ")}`,

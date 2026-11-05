@@ -3,7 +3,7 @@ import { courseCodeOf } from "@crossline/core";
 import { autoApproveEligible } from "./auto-approval";
 import { ownerOf } from "./owner";
 import { tOfWorkspace } from "./locale";
-import { decideFold, openTasks, recordFold } from "./duplicate-guard";
+import { absorbParts, decideFold, openTasks, recordFold } from "./duplicate-guard";
 
 /** How far ahead a confirmed due date turns into a task (the step planner then places its steps between release and due). */
 export const DATE_PAIR_HORIZON_DAYS = 56;
@@ -88,6 +88,7 @@ export function materializeDatePairs(store: CrosslineStore, workspaceId: string,
     if (store.saveBackplanDrafts(workspaceId, [order], { ownerId: order.ownerId, workspaceId, idempotencyKey: `datepair.created:${id}`,
       type: "datepair.created", entityId: id, payload: { projectId: project.id, releaseDay: out?.day ?? "", dueDay: due.day } })) created.push(id);
   }
+  for (const id of created) absorbParts(store, workspaceId, id);
   if (created.length) autoApproveEligible(store, workspaceId, created);
   return created;
 }

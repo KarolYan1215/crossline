@@ -1,4 +1,4 @@
-import { EXISTING_TASKS_LIMIT, comparePair, doneDuplicateOf, duplicateOf, tFor, type ExistingTask, type Locale, type MergeTask } from "@crossline/core";
+import { EXISTING_TASKS_LIMIT, comparePair, doneDuplicateOf, duplicateOf, partOf, tFor, type ExistingTask, type Locale, type MergeTask } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { applyMerge, mergeTasks } from "./dedupe";
 import { ownerOf } from "./owner";
@@ -53,6 +53,9 @@ export function decideFold(open: readonly MergeTask[], candidate: MergeTask, ext
   const others = open.filter((task) => task.id !== candidate.id);
   const target = extendsTaskId ? others.find((task) => task.id === extendsTaskId) : undefined;
   if (target) return { kind: "extends", keep: target.id, keepTitle: target.title, why: t("「{{title}}」是「{{target}}」的补充", { title: candidate.title, target: target.title }) };
+  // A piece of an open task (「作业 3 第 1、2 题」 beside 「作业 3」, W-194) goes into it as an addition, its own due day kept as pacing.
+  const whole = others.find((task) => partOf(candidate, task));
+  if (whole) return { kind: "extends", keep: whole.id, keepTitle: whole.title, why: t("「{{title}}」是「{{target}}」的一部分", { title: candidate.title, target: whole.title }) };
   const same = duplicateOf(candidate, others);
   // The rule's own reason, in this language (`duplicateOf` and `doneDuplicateOf` give it in Chinese).
   const reason = (keep: MergeTask, why: string) => locale ? comparePair(candidate, keep, locale).why : why;
@@ -66,6 +69,30 @@ export function decideFold(open: readonly MergeTask[], candidate: MergeTask, ext
  * Records a prevented duplicate on the kept task. An addition reaches the kept task's steps through a replan whose feedback names it
  * (the step planner reads every earlier request, so this holds even when the task has no plan yet).
  */
+/**
+ * The other direction of W-194: a task just written (planned from a milestone, a confirmed homework date, an analysed capture) is the whole
+ * of open tasks that each name only a part of it. Those parts go into it as additions, the same undoable merge as a fold, and the kept
+ * task's next plan is told each part and its own due day. Returns the parts absorbed.
+ */
+export function absorbParts(store: CrosslineStore, workspaceId: string, wholeId: string, now = new Date()): string[] {
+  const open = openTasks(store, workspaceId);
+  const whole = open.find((task) => task.id === wholeId);
+  if (!whole) return [];
+  const parts = open.filter((task) => task.id !== wholeId && partOf(task, whole));
+  if (!parts.length) return [];
+  const t = tOfWorkspace(store, workspaceId);
+  const why = t("「{{title}}」的一部分", { title: whole.title });
+  if (!applyMerge(store, workspaceId, { kind: "duplicate", keep: whole.id, absorb: parts.map((part) => part.id), reason: why, requests: {} }, now)) return [];
+  for (const part of parts) {
+    recordFold(store, workspaceId, { kind: "extends", keep: whole.id, keepTitle: whole.title, why },
+      // i18n-ignore: the part's own due day, for the next plan's brief (model-facing)
+      { id: part.id, title: part.dueDate ? `${part.title}（${part.dueDate} 前）` : part.title, intent: part.intent, source: "analysis" });
+  }
+  sayToPerson(store, workspaceId, t("「{{parts}}」是「{{keep}}」的一部分，已并入它的步骤。可在任务页「已归档」里撤销。", { parts: parts.map((part) => part.title).join("、"), keep: whole.title }),
+    "task_duplicate_prevented", `absorbed:${wholeId}`, [{ label: t("查看", { context: "view" }), href: `/workbench/${encodeURIComponent(whole.id)}` }], now);
+  return parts.map((part) => part.id);
+}
+
 export function recordFold(store: CrosslineStore, workspaceId: string, fold: Fold,
   added: { id: string; title: string; intent: string; source: "analysis" | "backplan" | "datepair" | "import" }): void {
   const ownerId = ownerOf(store, workspaceId);

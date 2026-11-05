@@ -7,7 +7,7 @@ import { ANALYSIS_CONTEXT_VERSION, APPROVED_MILESTONES_LIMIT, TASK_INDEX_SEPARAT
 import { CrosslineStore, createRefBook, withRef, type RefBook, type StoredCapture } from "@crossline/db";
 import { identityLines } from "./lines";
 import { tOfWorkspace } from "./locale";
-import { existingTasksFor, foldNewTask } from "./duplicate-guard";
+import { absorbParts, existingTasksFor, foldNewTask } from "./duplicate-guard";
 import { importedDueDate } from "./importer";
 import { analysisMaterialInputs } from "./material-context";
 import { ledgerLookup, ledgerSummary, READ_LEDGER_INSTRUCTIONS, type LedgerEntry } from "./ledger-index";
@@ -207,7 +207,7 @@ export function createCaptureAnalyzer(store: CrosslineStore, workspaceId: string
         if (promoted) store.saveWorkOrder({ ...promoted, payload: { ...(promoted.payload as object), usedRefKeys } });
         recordWaitingAndDates(store, workspaceId, id);
         // Work the board already has is folded into that task instead of standing beside it (after the dates, so the earlier due day carries).
-        if (!foldNewTask(store, workspaceId, id, result.proposal.extendsTaskId ?? "")) autoApproveEligible(store, workspaceId, [id]);
+        if (!foldNewTask(store, workspaceId, id, result.proposal.extendsTaskId ?? "")) { absorbParts(store, workspaceId, id); autoApproveEligible(store, workspaceId, [id]); }
         // A quality problem the repairs did not fix was corrected in the smallest way and kept; the reviewer looks at it next.
         if (result.audit.warnings?.length) store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId,
           idempotencyKey: `validation.warned:analysis:${id}:${attempt}`, type: "validation.warned", entityId: `analysis:${id}`,

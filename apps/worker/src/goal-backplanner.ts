@@ -9,7 +9,7 @@ import { ownerOf } from "./owner";
 import { localToday } from "./analysis";
 import { autoApproveEligible } from "./auto-approval";
 import { identityLines } from "./lines";
-import { decideFold, existingTasksFor, openTasks, recentlyDoneTasks, recordFold, type Fold } from "./duplicate-guard";
+import { absorbParts, decideFold, existingTasksFor, openTasks, recentlyDoneTasks, recordFold, type Fold } from "./duplicate-guard";
 import { materialExcerpts, relevantFacts } from "./material-context";
 import { localeOf, tOfWorkspace } from "./locale";
 const SKILL = "crossline:crossline-goal-backplanner";
@@ -263,6 +263,7 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
         ...(dropped.length ? { reviewDropped: dropped } : {}), ...(noCore ? { noCore: true } : {}),
         dateCandidates: result.output.dateCandidates, source: SKILL } });
     if (inserted) {
+      for (const draft of drafts) absorbParts(store, workspaceId, draft.id);
       for (const [stepId, fold] of folds) {
         const step = planned.find((item) => item.id === stepId)!;
         recordFold(store, workspaceId, fold, { id: `backplan:${key}:${stepId}`, title: withCourse(step.title, milestone.projectId), intent: step.intent, source: "backplan" });

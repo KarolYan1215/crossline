@@ -101,7 +101,7 @@ One file may warrant two actions (a homework file: attach it, and set the task's
 
 Every field is present; unused text is `""`, numbers `0`, lists `[]`. Dates are `YYYY-MM-DD`, resolved against `today` in `timeZone` (「周五」 = the coming Friday; 「下周一」 = Monday of next week; a weekday already past this week means the next one). Never propose a date or time that has passed; offer only future ones as options. Times are 24-hour `HH:MM`.
 
-- `task.create` — new work to do. `title` in the person's words (with the course code when it is about a course), `context` any detail, `lineId`/`milestoneId` only when clear from a lookup, `dueDate` only when said. The analysis runs after the person confirms; do not estimate or split it yourself.
+- `task.create` — new work to do. `title` in the person's words (with the course code when it is about a course), `context` any detail, `lineId`/`milestoneId` only when clear from a lookup, `dueDate` only when said. A weekday the person names is turned into a date with the snapshot's 「日期对照」 line, never counted by hand; 「周四前」/「周四之前」 means due on that Thursday. The analysis runs after the person confirms; do not estimate or split it yourself.
 - `note.add` — something to keep that is not work and needs no moment (an idea, a fact to look up later). `text` verbatim. Something to be told at a time is `reminder.add`.
 - `task.op` — a change to one open task (`workOrderId` from `find_tasks`): `type` one of
   `due` (new latest day, `date`), `defer` (not before a day, `date`), `estimate` (usual `minutes` 5–480; `stepId` for one step),

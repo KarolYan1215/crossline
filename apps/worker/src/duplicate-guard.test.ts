@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { createGoalBackplanner } from "./goal-backplanner";
-import { existingTasksFor, foldNewTask } from "./duplicate-guard";
+import { absorbParts, existingTasksFor, foldNewTask } from "./duplicate-guard";
 import { materializeDatePairs } from "./date-pairs";
 import { fakeRuntime } from "./testing/fake-runtime";
 
@@ -99,4 +99,21 @@ test("the backplanner does not write again what the person just finished (W-30)"
   expect(created.map((item) => (item.payload as { title: string }).title)).toEqual(["ECE 548 给试用门店发上线通知"]);
   expect(created[0]!.payload).toMatchObject({ dependsOn: ["done"] });
   expect(store.listEvents(ws, { type: "task.duplicate_prevented" })[0]?.payload).toMatchObject({ kind: "done", keep: "done" });
+});
+
+test("a part of a task goes into the whole, in either order (W-194)", () => {
+  store = new CrosslineStore(":memory:");
+  // The person's piece first, then the whole planned from the milestone: the whole absorbs it and its plan hears the piece's own day.
+  order("part", "ECE 548 作业 3 第 1、2 题", { state: "awaiting_plan_approval", payload: { dueDate: "2026-11-05" } });
+  order("whole", "完成 ECE 548 作业 3", { state: "awaiting_plan_approval" });
+  expect(absorbParts(store, ws, "whole")).toEqual(["part"]);
+  expect(store.getWorkOrder(ws, "part")!.state).toBe("archived");
+  expect(store.listEvents(ws, { type: "task.steps_replan_requested", entityId: "whole" })[0]?.payload)
+    .toMatchObject({ feedback: expect.stringContaining("2026-11-05") });
+  // The whole first, then the piece: the piece is folded in as an addition.
+  order("part2", "作业 3 的前两题", { state: "awaiting_plan_approval" });
+  expect(foldNewTask(store, ws, "part2")).toMatchObject({ kind: "extends", keep: "whole" });
+  // Another homework is never taken.
+  order("hw4", "作业 4 第 1 题", { state: "awaiting_plan_approval" });
+  expect(foldNewTask(store, ws, "hw4")).toBeUndefined();
 });

@@ -78,6 +78,29 @@ export function textSimilarity(a: string, b: string): number {
   return Math.round((2 * shared / total) * 100) / 100;
 }
 const numbersOf = (title: string) => (title.replace(COURSE, "").match(/\d+/g) ?? []).sort().join(",");
+/* i18n-ignore-start: words compared with titles the person or a model wrote, never shown */
+/** A part of a piece of work named in its title: 「第 1、2 题」, 「的前两题」, 「Q1-2」, 「Part 3」. */
+const PART = /的?\s*(?:第\s*[\d一二三四五六七八九十、,，和及至到\-–~\s]+\s*(?:道)?(?:小题|题|问|部分|节|章)|前\s*[\d两一二三四五六七八九十]+\s*(?:道)?(?:题|问))|\b(?:q|problems?|parts?|questions?|exercises?)\s*\d[\d,&\s\-–]*/gi;
+const DO = /^(?:完成|写完|做完|做|写|finish|complete|do)/i;
+/* i18n-ignore-end */
+/** The title with any part it names taken out (「作业 3 第 1、2 题」 → 「作业 3」); the title itself when it names none. */
+export function wholeTitleOf(title: string): string {
+  return title.replace(PART, " ").replace(/\s+/g, " ").trim();
+}
+/**
+ * Whether `part` is a piece of `whole` (walkthrough W-194, 2026-11-03: the person's 「作业 3 第 1、2 题」 and the planned 「作业 3」 stood side by
+ * side, because the rules never merge titles whose numbers differ). Same line, project and side, the part's title names a part, and with
+ * it taken out the two titles are the same work: one contains the other, ignoring a leading 完成/写完.
+ */
+export function partOf(part: MergeTask, whole: MergeTask): boolean {
+  if (part.identityId !== whole.identityId || part.projectId !== whole.projectId || sideOf(part) !== sideOf(whole)) return false;
+  const bare = wholeTitleOf(part.title);
+  if (bare === part.title.trim() || wholeTitleOf(whole.title) !== whole.title.trim()) return false;
+  if (numbersOf(bare) !== numbersOf(whole.title)) return false;
+  const a = normalizeTaskTitle(bare).replace(DO, ""), b = normalizeTaskTitle(whole.title).replace(DO, "");
+  return a.length >= 2 && b.length >= 2 && (a.includes(b) || b.includes(a));
+}
+
 const days = (a: string, b: string) => Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
 
 /** What the rules say about two tasks: the same work, not, or the model's to decide. */
