@@ -1,0 +1,32 @@
+# Walkthrough fixes (moved from CLAUDE.md Notes)
+
+- **What the 2026-10-18 walkthrough fixes changed** (W-1–W-42 in the ledger):
+  - Pages whose controls do not explain themselves carry a `FirstHint` (`app/ui/first-hint.tsx`): dismissed once per browser in `localStorage`, rendered only after mount; e2e screenshots hide `.ui-first-hint`.
+  - Interview questions:
+    - Once the person can use the app, the interview's questions are one ask showing one question at a time.
+    - `pending.questions` counts only while the start standard is open.
+    - A round question asking a line's long-term goal is screened (`goal_picker`) once the left column offers that line's candidates.
+  - Uploaded files are removed with `DELETE /api/source-documents/[id]` (`source.removed`).
+  - Accepting a task:
+    - It closes the task's open steps.
+    - Automatic tutorials skip short tasks and requests for a fact (`tutorialWorthIt`).
+    - The backplanner sees `recentlyDone` and drops an item matching recently accepted work as a `done` fold.
+  - Milestone drafts and risk asks:
+    - The architect records its progress per line in `milestones.drafting` (`packages/core/src/milestone-drafting.ts`), which the 主线 page reads.
+    - Two or more `milestone_risk_review` asks fold into `riskreview:batch` (replaced on 2026-10-28 by the weekly risk card, `docs/rituals.md`).
+    - A forecast `milestone_risk` waits while the reviewer's ask on the same milestone does.
+  - `composeGoal` writes for reading; `plainComposeGoal` is the exact join splits are checked against.
+  - Planner task titles are `taskTitleOf` (the short name), never the whole `intent`.
+  - Unplaced work is counted per task by `unplacedTaskIds` on the plan page and in previews.
+  - Accepting a diligence 「任务」 writes it down as a capture.
+  - Tutorial research gets the person's confirmed `setting` (city, country, language).
+  - The scheduler reads a milestone's deadline through `milestoneDeadline` (goal setting, else the approved milestone's anchor): approving a draft writes no goal setting, and every backplanned task had read as deadline-free.
+  - Work marked one-sitting but longer than `MAX_SITTING_MINUTES` (180) is placed in sessions (`SITTING_SPLIT` note); pencilled-in overflow never goes onto a day with no available hours.
+  - Settings → 通用 「清空数据重新开始」 (`resetAccountData`, `CrosslineStore.resetWorkspace`) empties a workspace but keeps the account, its membership, the model connection and the machine-owner mark.
+- **Old accounts brought up to the current rules (2026-10-21; W-97–W-101 in `docs/walkthrough-ledger.md`).** On the owner's hosted ledger 待确认 counted 97; these took it to 33:
+  - Files from a folder (a file name with a path: an authorized folder, a folder picked in the interview, a recording's transcript) are not asked about one by one (`fromFolder` in `packages/db/src/file-belonging.ts`); only one dates were read from under an unclear course is. That was 60 of the 97.
+  - A date batch still waiting is adopted by the web's ten-minute attention pass (`adoptPendingDates` in `lib/attention.ts`), not only when the interview page opens.
+  - 待确认, its count, the assistant count, 以后再定 and the input box's snapshot read `resultsAwaitingReview` (`packages/db/src/agent.ts`): a result for a task since accepted or archived, or one a later run of the same work replaced (same order and `deliverableKey`, or the same workflow), keeps its status and files but is no longer a decision.
+  - A step plan from before `firstAction`/`aiAssist` were required (no first action and no AI assist anywhere) is replanned once when its work starts within a week (`requestOutdatedReplans`, `OUTDATED_PLAN_FEEDBACK` in `step-planner.ts`), so library work spends no quota early.
+  - Model-proposed goal chips that fail `attributeProblem` were removed once at worker start (`apps/worker/src/attribute-repair.ts`, marker `repair.line-attributes.v1`, event `repair.line_attributes`, undoable); the person's adopted parts and splits of their own goal are kept and no line is left empty.
+- **Live-walk fixes of 2026-10-29** (W-155, W-156, W-158): a task whose deadline moved later shows its open steps' dates moved with it (`stepDatesFollowingDue` in `packages/core/src/step-dates.ts`, display only; the scheduler already treats a past step date as pacing) and 「截止已改为 …」 beside a description naming a day that has passed (`staleDateMentions`); rest events (`isRestEvent` in `packages/core/src/rest-events.ts`: 休息, meals, sleep, not a lunch seminar; `showAs: free`) still keep work off but are not counted in the day's 「固定日程」 (`dayLoad`), and one over the end of the day ends the wrap-up's last working hour where it begins (`wrapTimeOf(…, rest)`); a mail to-do keeps the https links on the sender's own domain (`linksFromMail`, code only, never given to a model, ≤3, setting `mail.links:<capture>`), shown on the task as 「邮件里的链接」, and a step-plan need for a link is settled by them without asking (`settleLinkNeeds` in `packages/db/src/step-owner.ts`, on the worker's task pass, event `task.need_from_mail`).
