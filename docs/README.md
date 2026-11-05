@@ -23,6 +23,7 @@
 | [loop-and-scout.md](loop-and-scout.md) | 闭环与机会侦察：排期自动生效与锁定、后台最优排程、完成确认、日历整理（工作 + 生活邮箱）、上手提速、画像海报与定制形象、名人库、机会侦察（已定稿 2026-10-12）；实施计划在 [plans/](plans/)（P-A 闭环、P-B 上手、P-C 海报、P-D 形象、P-E 名人库、P-F 侦察） |
 | [opportunity-agent.md](opportunity-agent.md) | 机会代理：从长期目标推出信息差、核实资格、问是否报名、在本人电脑的可见浏览器里代填到报名（定稿 2026-11-01；取代 loop-and-scout §6 与 P-F） |
 | [beta-launch.md](beta-launch.md) | 公开测评（32 题 + 漫画形象海报 + 关系与双人卡）和托管内测（香港 / 东京服务器、邀请码、国产模型与 ¥30 上限、本人迁移）的定稿方案与文案草稿（五轮问答，2026-10-14，待审） |
+| [hosted-hardening.md](hosted-hardening.md) | 托管版加固（2026-11-05）：仓库公开后的日志加密与历史清理、访客不在服务器上登录 ChatGPT、小红书只在本人节点读取，以及待确认过载、访谈、节点、内存的待办设计 |
 | [energy-and-ecosystem.md](energy-and-ecosystem.md) | 竞品尽调（Tiimo、Pikko、RISE、Visible、Muse、Manus 等）后的精力模型 v2（睡眠债、睡眠惯性、当日容量）、效率系数学习、手机接入与 Siri 收集、拆分提速、测评传播与分期（已定稿 2026-10-14） |
 | [assess-deploy.md](assess-deploy.md) | 公开速测 `apps/assess`（32 题类型、类型海报、双人卡）：接口与规则、数据与保留期、邮件、Docker 构建、部署到香港/东京 VPS（未部署） |
 | [assess-redesign.md](assess-redesign.md) | 公开速测重设计提案（2026-10-17，待拍板）：四条对立轴的问题、调研来源、方案 A/B/C 对比、推荐方案 B（八个倾向单极测量、双极呈现）的新题草稿与迁移清单 |

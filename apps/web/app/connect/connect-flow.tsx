@@ -13,7 +13,9 @@ import { InvitePanel } from "./invite-panel";
  * interview. Both controls are always mounted: they are what read the connection, so rendering them only once the answer is known left
  * the page waiting forever.
  */
-export function ConnectFlow({ next }: { next: string }) {
+export function ConnectFlow({ next, hosted = false }: { next: string;
+  /** The hosted server signs no guest's ChatGPT in (2026-11-05): the person's own computer as a node, another model's API, or an invite. */
+  hosted?: boolean }) {
   const t = useT();
   const [chatgpt, setChatgpt] = useState<boolean>();
   const [api, setApi] = useState<boolean>();
@@ -24,7 +26,8 @@ export function ConnectFlow({ next }: { next: string }) {
   return <div className="connect-flow">
     <p>{t("访谈、画像报告和每周的排程都由本人连接的 AI 模型来做：本人的 ChatGPT 账号，或者本人的模型 API key。连接一次即可，之后不用再管。")}</p>
     <FirstHint id="connect" title={t("不确定选哪种？")}>
-      {t("有 ChatGPT 账号就选上面的「用一次性代码连接」：按三步做完约 1 分钟，用的是这个 ChatGPT 账号自己的额度，不另收费。")}{" "}
+      {hosted ? t("有 ChatGPT 账号就在自己电脑上开启算力节点：在那台电脑上登录 ChatGPT，模型就在那台电脑上用这个账号自己的额度运行，不另收费。")
+        : t("有 ChatGPT 账号就选上面的「用一次性代码连接」：按三步做完约 1 分钟，用的是这个 ChatGPT 账号自己的额度，不另收费。")}{" "}
       {t("没有 ChatGPT 账号、但有 DeepSeek、Kimi 等的 API key，就用下面的「其他模型」；它要先自动检验 10–20 分钟，期间可以离开此页。")}{" "}
       {t("ChatGPT Plus 和官方 API 都没有，也可以用 OpenAI 兼容的中转站：在「其他模型」里点「用中转站接入」，填中转站给的 base URL 和 API key。")}
     </FirstHint>

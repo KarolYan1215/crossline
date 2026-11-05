@@ -1309,6 +1309,8 @@ configureFavouritesCollector({
   outputRoot: defaultOutputRoot(),
   // The account's own computer reads the favourites when a node of theirs offers a browser (node/browser.ts); the hub is set up further down.
   nodeBrowser: (workspaceId) => { try { return nodeHub?.browserFor(workspaceId); } catch { return undefined; } },
+  // The hosted server never logs in to or reads the site itself (docs/hosted-hardening.md §4): only a node of the person's does.
+  onServer: !hostedBeta,
   reclaim: () => codexSupervisor?.runtimes?.reclaim(),
   memory: createCollectMemory({ reclaim: () => codexSupervisor?.runtimes?.reclaim() }),
   // Sorting the titles is the person's own request at work: it runs while the quota allows core work.

@@ -18,6 +18,10 @@ type AccountState = {
   blocker?: { code: string; message: string };
   /** This account runs on its own Codex (not the machine owner's): its login is its own, and it can sign out of it here. */
   guest?: boolean;
+  /** The hosted server signs no guest's ChatGPT subscription in (2026-11-05): a node on the person's own computer, or an API key. */
+  subscriptionLogin?: "off";
+  /** Whether this account has any model at all: a sign-in, another model's API, or its own computer as a node. */
+  connected?: boolean;
   /** A guest's login in progress (the owner's is under `supervisor`). */
   login?: Login | null;
   supervisor?: {
@@ -65,7 +69,7 @@ export function CodexAccountControl({ onConnected }: {
     const nextState = await response.json() as AccountState;
     setState(nextState);
     setLoginUrl((current) => reconcileCodexLoginUrl(current, nextState));
-    onConnected?.(Boolean(nextState.account));
+    onConnected?.(Boolean(nextState.account) || nextState.connected === true);
   };
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
@@ -91,30 +95,34 @@ export function CodexAccountControl({ onConnected }: {
     setBusy(false);
   };
   const account = state?.account;
+  // Served by the person's own computer alone: nothing to sign in to here.
+  const viaNode = !account && state?.connected === true && state.guest === true;
   const login = loginOf(state);
   const blocker = visibleCodexBlocker(state, t);
   const guest = state?.guest === true;
   // Away from this computer only the device code works, for the owner as for a guest; on it, the browser sign-in is the main button.
   const codeFirst = !local;
-  const deviceCode = guest || !local;
+  const subscriptionOff = guest && state?.subscriptionLogin === "off";
+  const deviceCode = (guest || !local) && !subscriptionOff;
   // One click copies the code and opens OpenAI's page, so the code is ready to paste where it is asked for.
   const copyAndOpen = (code: string | undefined, url: string) => {
     if (code) void navigator.clipboard?.writeText(code).catch(() => undefined);
     window.open(url, "_blank", "noopener");
   };
   return <section className="st-card codex-account-card" aria-label={t("模型连接")} id="model">
-    <header><h3>{t("模型连接")}</h3><Tag tone={account ? "ok" : "warn"}>{account ? t("已连接") : state ? t("未连接") : t("检查中")}</Tag></header>
+    <header><h3>{t("模型连接")}</h3><Tag tone={account || viaNode ? "ok" : "warn"}>{account || viaNode ? t("已连接") : state ? t("未连接") : t("检查中")}</Tag></header>
     <div className="st-row"><span className="st-row-label">{account
       ? account.type === "apiKey" ? t("API key（按用量计费，每月上限见「模型额度」）") : account.email ?? t("ChatGPT 账号")
-      : !state ? t("正在读取登录状态…") : guest ? t("用本人的 ChatGPT 账号连接：访谈、分析与规划都用这个账号的额度，和其他人的账号互不相通。") : t("分析、拆分与助手功能需要登录 ChatGPT 账号")}
+      : !state ? t("正在读取登录状态…") : viaNode ? t("模型在本人的电脑（算力节点）或本人接入的其他模型上运行，服务器上不登录 ChatGPT。") : subscriptionOff ? t("托管版不在服务器上登录 ChatGPT（OpenAI 只允许本机运行的应用这样用订阅）。两种连接方式：在自己电脑上开启「作为算力节点」，模型在那台电脑上用本人的 ChatGPT 登录运行；或在下面填写 API key。") : guest ? t("用本人的 ChatGPT 账号连接：访谈、分析与规划都用这个账号的额度，和其他人的账号互不相通。") : t("分析、拆分与助手功能需要登录 ChatGPT 账号")}
       {blocker && <small role="status">{blocker.message}</small>}</span>
       <span className="st-row-actions">
-        {state && !account && !loginUrl && local && <button type="button" className="primary-button" disabled={busy}
+        {state && !account && !loginUrl && local && !subscriptionOff && <button type="button" className="primary-button" disabled={busy}
           onClick={() => void post({ type: "chatgpt" })}>{busy ? t("启动中…") : t("用 ChatGPT 登录")}</button>}
         {state && !account && !loginUrl && deviceCode && <button type="button" className={codeFirst ? "primary-button" : "secondary-button"} disabled={busy}
           onClick={() => void post({ type: "chatgptDeviceCode" })}>{busy && codeFirst ? t("正在取代码…") : t("用一次性代码连接")}</button>}
         {loginUrl && !login?.userCode && <a href={loginUrl} target="_blank" rel="noreferrer">{t("打开登录页 →")}</a>}
         {loginUrl && <button type="button" disabled={busy} onClick={cancelLogin}>{t("取消")}</button>}
+        {subscriptionOff && !account && !viaNode && <a className="primary-button" href="/settings#device">{t("去开启算力节点")}</a>}
         {account && guest && <button type="button" disabled={busy} onClick={() => void post({ action: "logout" })}>{t("退出登录")}</button>}
         <button type="button" onClick={refresh} title={t("重新读取登录状态")}>{t("↻ 刷新状态")}</button>
       </span></div>

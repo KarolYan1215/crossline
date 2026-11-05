@@ -7,6 +7,8 @@ name: Hosted beta server
 # Every day, and on `[backup]` or the `backup` dispatch, the newest server backup (deploy/server/backup.sh) is copied off the host,
 # encrypted with the repository secret BACKUP_PASSPHRASE (AES-256, PBKDF2) and kept as a workflow artifact for 30 days.
 #   Restore: openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in crossline-backup.tgz.enc -out backup.tgz -pass pass:<passphrase>
+# The repository is public (2026-11-05): no step prints to the job log. Each writes to one log that is encrypted to the owner's key and
+# kept as the artifact ops-log-<run id>; read it with `sh scripts/ops-log.sh <run id>` on the owner's machine.
 on:
   push:
   schedule:
@@ -48,6 +50,7 @@ jobs:
           ssh-keyscan -T 15 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
       - name: Diagnose
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           ssh -i ~/.ssh/id -o ConnectTimeout=30 -o ServerAliveInterval=15 admin@"$HOST" '
             uptime; printf "cpus: "; nproc; free -m; df -h / | tail -1
             sudo docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
@@ -146,6 +149,7 @@ jobs:
             for u in https://auth.openai.com/ https://api.openai.com/v1/models https://chatgpt.com/; do printf "%s " $u; curl -s -m 10 -o /tmp/oa -w "%{http_code} " $u; grep -o "unsupported_country[a-z_]*" /tmp/oa | head -1; echo; done'
       - name: Recordings
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # 录音在服务器转写 from a copy of the ledger: recording events of the last three days and, per transcript, lines and speaker
           # labels (counts only, no text or file names), then what waits for a voiceprint (names only). Read-only.
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker run --rm -i -v /srv/crossline/data:/live:ro -w /repo/packages/db \
@@ -155,12 +159,14 @@ jobs:
             echo "-- speaker models"; sudo ls -la /srv/crossline/models/sensevoice 2>/dev/null | awk "{print \$5, \$9}"; sudo docker logs crossline-transcriber 2>&1 | grep -E "no_diarization|voiceprint|pass" | tail -10 || true'
       - name: Model time per Skill
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # Per Skill over the last day: waits before and at the model gate, run time and cache hits (deploy/server/skill-runs.py).
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker logs --since 24h crossline-worker 2>&1 | grep -E "skill[.](run|redo_on_main_model)" > /tmp/skill-runs.jsonl || true'
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'python3 -' < deploy/server/skill-runs.py || true
       - name: Codex device-code probe
         if: contains(github.event.head_commit.message, '[codex-probe]')
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # Starts a device-code login in a throwaway CODEX_HOME, waits for the one-time code, then kills it and deletes the home.
           # Only whether a code arrived is printed (the code itself is masked), so nothing in the log can be used to sign in.
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" '
@@ -172,6 +178,7 @@ jobs:
       - name: Start readiness and web errors
         if: contains(github.event.head_commit.message, '[readiness]')
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # What each account still misses for the start standard, read from a copy of the ledger (the script refuses the live one),
           # and the web app's recent errors. Nothing is changed.
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker run --rm -v /srv/crossline/data:/live:ro -w /repo \
@@ -181,6 +188,7 @@ jobs:
       - name: Model usage and repairs
         if: contains(github.event.head_commit.message, '[usage]')
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # Every model run of the last two days from a copy of the ledger (time, repairs, error, tokens), and the worker's log lines
           # about rejected or repaired answers. Read-only.
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo docker run --rm -v /srv/crossline/data:/live:ro -w /repo \
@@ -202,6 +210,7 @@ jobs:
         env:
           ACTION: ${{ contains(github.event.head_commit.message, '[migrate-apply]') && 'apply' || 'preview' }}
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # Reads /tmp/crossline-transfer.tgz (scripts/pack-for-server.ts) through deploy/server/ledger-sync.sh, the same script
           # scripts/ledger-sync.ts runs over SSH from the owner's machine: [migrate] previews, [migrate-apply] stops the app, copies
           # the server ledger aside, writes, and starts the app again — also when the write fails, so the site is never left down.
@@ -214,6 +223,7 @@ jobs:
           ACTION: ${{ inputs.action }}
           ARGS: ${{ inputs.args }}
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # clone / clone-apply: args "<from-email> <to-email>"; sponsor / sponsor-apply: args "<email>" (deploy/server/ledger-sync.sh).
           set -- $ARGS
           for a in "$@"; do case "$a" in *[!A-Za-z0-9@._+-]*) echo "not an address: $a"; exit 2;; esac; done
@@ -232,6 +242,7 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # scripts/sponsor-compare.ts in a one-off container of the newest app image (pulled with the job's token and logged out again; the
           # running app is not restarted): `compare-list` counts what each account could be compared on, `compare` starts the comparison
           # detached (it takes about an hour and spends the developer's key), `compare-report` prints its progress and the newest report.
@@ -293,6 +304,7 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # scripts/persona-eval.ts in a one-off container of the newest app image: `persona` starts the walkthrough detached (hours, on the
           # developer's key, throwaway ledgers only — nothing reads or writes the live one), `persona-report` prints its progress and packs
           # the newest run's folder for the artifact below. Everything it writes is about the fictional people of scripts/personas/.
@@ -324,19 +336,13 @@ jobs:
           sleep 45; docker logs crossline-persona 2>&1 | tail -10
           REMOTE
           if [ "$ACTION" = persona-report ]; then scp -i ~/.ssh/id admin@"$HOST":/tmp/crossline-persona.tgz persona.tgz || true; fi
-      - uses: actions/upload-artifact@v4
-        if: github.event_name == 'workflow_dispatch' && inputs.action == 'persona-report'
-        with:
-          name: crossline-persona-${{ github.run_id }}
-          path: persona.tgz
-          if-no-files-found: ignore
-          retention-days: 7
       - name: Deploy
         if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # run.sh on the host is replaced by this commit's, which pulls from ghcr.io.
           scp -i ~/.ssh/id deploy/server/run.sh deploy/server/ensure-env.sh deploy/server/ensure-swap.sh deploy/server/set-secrets.sh deploy/server/backup.sh deploy/server/watchdog.sh deploy/server/seccomp-sandbox.json admin@"$HOST":/tmp/
           ssh -i ~/.ssh/id admin@"$HOST" 'sudo install -m 755 /tmp/run.sh /tmp/ensure-env.sh /tmp/ensure-swap.sh /tmp/set-secrets.sh /tmp/backup.sh /tmp/watchdog.sh /srv/crossline/ && sudo install -m 644 /tmp/seccomp-sandbox.json /srv/crossline/ && sudo sh /srv/crossline/ensure-swap.sh && sudo sh /srv/crossline/ensure-env.sh'
@@ -347,6 +353,7 @@ jobs:
       - name: Daily backup, the watchdog and their cron entries
         if: (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy') || contains(github.event.head_commit.message, '[deploy]')
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           # After the containers are up again: installs the daily backup and makes the first one, so a deploy is never left without one.
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo sh /srv/crossline/backup.sh --install'
           # The watchdog that restarts a stopped or unanswering service (deploy/server/watchdog.sh), every minute.
@@ -356,6 +363,7 @@ jobs:
         env:
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
+          exec >>"$RUNNER_TEMP/ops.log" 2>&1; echo "== $GITHUB_ACTION $(date -u +%FT%TZ)"
           test -n "$BACKUP_PASSPHRASE" || { echo "BACKUP_PASSPHRASE is not set: nothing leaves the host unencrypted"; exit 1; }
           scp -i ~/.ssh/id deploy/server/backup.sh admin@"$HOST":/tmp/
           ssh -i ~/.ssh/id -o ConnectTimeout=30 admin@"$HOST" 'sudo install -m 755 /tmp/backup.sh /srv/crossline/ && sudo sh /srv/crossline/backup.sh'
@@ -371,3 +379,27 @@ jobs:
           name: crossline-backup-${{ github.run_id }}
           path: crossline-backup.tgz.enc
           retention-days: 30
+      # Every step above writes to $RUNNER_TEMP/ops.log, never to the job log: the repository is public, so the job log is readable by
+      # anyone (decided 2026-11-05). The log leaves the runner only encrypted to the owner's key (.github/ops-log-key.asc); the private key
+      # is on the owner's machine alone. Read it with scripts/ops-log.sh <run id>.
+      - name: Encrypt the log
+        if: always()
+        run: |
+          touch "$RUNNER_TEMP/ops.log"
+          gpg --batch --quiet --import .github/ops-log-key.asc
+          gpg --batch --yes --trust-model always --recipient DADCC038ED848A9BDE023BA2E7E937A58B1A6897 --output ops.log.gpg --encrypt "$RUNNER_TEMP/ops.log"
+          if [ -f persona.tgz ]; then gpg --batch --yes --trust-model always --recipient DADCC038ED848A9BDE023BA2E7E937A58B1A6897 --output persona.tgz.gpg --encrypt persona.tgz && rm persona.tgz; fi
+          echo "log: $(wc -c < "$RUNNER_TEMP/ops.log") bytes, encrypted"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ops-log-${{ github.run_id }}
+          path: ops.log.gpg
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'persona-report'
+        with:
+          name: crossline-persona-${{ github.run_id }}
+          path: persona.tgz.gpg
+          if-no-files-found: ignore
+          retention-days: 7

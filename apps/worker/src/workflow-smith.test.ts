@@ -727,3 +727,21 @@ test("a favourites reading that started on the server moves to the person's comp
     for (let n = 1; n <= 6; n += 1) expect(runs.at(-1)!.what).toContain(`note-${id(n)}.md`);
   } finally { configureFavouritesCollector(undefined); }
 });
+
+test("on the hosted server the favourites are never logged in to or read there: without the person's computer nothing opens (2026-11-05)", () => {
+  store.setSetting(ws, "schedule.preferences", JSON.stringify({ timeZone: "UTC" }));
+  const record = installFavouritesTopicsWorkflow(store, ws, "media", new Date("2026-10-22T11:00:00Z"));
+  consentToGrownSkill(store, ws, record.id);
+  const root = mkdtempSync(path.join(tmpdir(), "crossline-hosted-xhs-"));
+  let opened = 0;
+  configureFavouritesCollector({ outputRoot: root, onServer: false, open: async () => { opened += 1; throw new Error("no server browser"); }, media: () => ({}),
+    nodeBrowser: () => undefined });
+  try {
+    const run = (input: AgentTaskInput & { taskId: string }) => ({ state: "started" as const, taskId: input.taskId });
+    expect(favouritesTopicStep(store, ws, readGrownSkills(store, ws)[0]!, run, path.join(root, "p"), new Date("2026-10-22T12:00:00Z"), { manual: true }))
+      .toMatchObject({ state: "blocked", code: "NEEDS_OWN_COMPUTER" });
+    expect(openWorkflowLogin(store, ws, record.id, "小红书", path.join(root, "p"))).toMatchObject({ ok: false, code: "NEEDS_OWN_COMPUTER" });
+    expect(opened).toBe(0);
+    expect(store.listEvents(ws, { type: "collect.started" })).toEqual([]);
+  } finally { configureFavouritesCollector(undefined); rmSync(root, { recursive: true, force: true }); }
+});

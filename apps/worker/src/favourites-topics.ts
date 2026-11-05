@@ -315,8 +315,8 @@ export function installFavouritesTopicsWorkflow(store: CrosslineStore, workspace
       // i18n-ignore: the file names the topic files are found by (TOPIC_FILE)
       inputs: [], outputs: ["话题-<话题名>.md", "话题总览.md"],
       // i18n-ignore: the service's name is how the workflow's access is looked up
-      access: [{ service: "小红书", site: "https://www.xiaohongshu.com", login: true, how: t("本人在 Crossline 的登录窗口里登录后，只读收藏列表和收藏的笔记（文字、图片、视频）") }],
-      risks: [t("读取从服务器（香港数据中心）发出，浏览器带有自动化标记，小红书可能识别为自动化访问并限流或要求验证；遇到验证会立刻停下，7 天内不再读取。"),
+      access: [{ service: "小红书", site: "https://www.xiaohongshu.com", login: true, how: t("本人在自己电脑上弹出的浏览器窗口里登录后，只读收藏列表和收藏的笔记（文字、图片、视频）") }],
+      risks: [t("读取在本人自己的电脑上进行（托管版要先开启算力节点），网站看到的是本人的网络；浏览器由程序操作，小红书仍可能识别为自动化访问并限流或要求验证。遇到验证或限流会立刻停下、关闭浏览器，等本人点「立即运行」才继续。"),
         t("白天每天最多读一个话题的 50 篇，2–8 点按每篇 1–3 分钟的速度持续读，访问量比本人平时刷得多。"),
         t("不点赞、不评论、不取消收藏、不发布，不改动账号。")] },
     origin: { kind: "asked", text: t("按话题整理小红书收藏，每天一个话题最多 50 篇，2–8 点持续整理"), requestId: `favourites-topics-${id}` }, taskId: "",

@@ -363,6 +363,9 @@ export function openWorkflowLogin(store: CrosslineStore, workspaceId: string, id
   const record = readGrownSkills(store, workspaceId).find((item) => item.id === id);
   const access = record ? workflowAccess(record).access.find((item) => item.service === service && item.login) : undefined;
   if (!record || !access) return { ok: false, code: "WORKFLOW_ACCESS_NOT_FOUND", message: t("这个工作流不需要登录这个网站。") };
+  // On the hosted server the site is logged in to on the person's own computer, at the first read there (`loginOnNode`).
+  if (favouritesCollector?.onServer === false && favouritesAccess(record)) return { ok: false, code: "NEEDS_OWN_COMPUTER",
+    message: t("托管版不在服务器上登录小红书：在自己电脑上开启算力节点，第一次读取时在那台电脑弹出的窗口里登录。") };
   // No screen here: the login browser runs on the server and the page shows it in a dialog.
   const remote = remoteLogin();
   if (remote) return remote.start(workspaceId, { workflowId: id, service, ...viewport })
@@ -543,6 +546,12 @@ export type FavouritesCollector = {
   memory?: CollectMemory;
   /** A ready node of the account that runs a browser (node/hub.ts `browserFor`): the favourites are read there instead. */
   nodeBrowser?: (workspaceId: string) => NodeBrowserLink | undefined;
+  /**
+   * `false` on the hosted server (decided 2026-11-05, docs/hosted-hardening.md §4): the server never opens a browser to log in to the
+   * site or read it, so the favourites are read only on the person's own computer (a node). A data-centre address and a browser driven by
+   * a program are what the site's risk control acts on, and the account it would act on is the person's.
+   */
+  onServer?: boolean;
   /** Sorts the listed favourites not yet under a topic (a model run, favourites-topics.ts); the number sorted. */
   classify?: (workspaceId: string, workflowId: string) => Promise<number>;
 };
@@ -569,6 +578,8 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
   const held = collectHold(store, workspaceId, now);
   if (held) return { state: "blocked", code: "SITE_PAUSED", message: held.where ? t("小红书读取已停下（{{why}}），等本人点「立即运行」再继续。", { why: holdWords(held) })
     : t("小红书读取已停下，等本人点「立即运行」再继续。") };
+  if (collector.onServer === false && !collector.nodeBrowser?.(workspaceId)) return { state: "blocked", code: "NEEDS_OWN_COMPUTER",
+    message: t("托管版不在服务器上读小红书：机房的网络加上程序操作的浏览器，容易让小红书限制本人的账号。请在自己电脑上开启算力节点并保持开机，读取会在那台电脑的浏览器里进行。") };
   const browser = readerBrowser(record, access.service, fallbackBrowser);
   // A login to the site open (the server's popup browser holds the profile), or a run reading it: the collection waits, like for the assistant.
   const profileDir = accessProfileDir(profilesRoot, access);

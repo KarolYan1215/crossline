@@ -2,6 +2,7 @@ import { AppShell } from "../app-shell";
 import { requireSessionContext } from "../../lib/access-guard";
 import { ConnectFlow } from "./connect-flow";
 import { tOf } from "../../lib/locale";
+import { isHostedBeta } from "../../lib/hosting";
 import "./connect.css";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,6 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
   const target = next && /^\/(?!\/)[\w\-/?=&.%]*$/.test(next) ? next : "/";
   return <AppShell active={"设置"} focus corner={false} banner={false}>
     <h1>{t("开始之前：连接模型")}</h1>
-    <ConnectFlow next={target} />
+    <ConnectFlow next={target} hosted={isHostedBeta()} />
   </AppShell>;
 }

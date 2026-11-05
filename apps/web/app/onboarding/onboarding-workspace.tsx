@@ -68,14 +68,15 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   useEffect(() => {
     const read = (url: string) => fetch(url, { cache: "no-store" }).then((response) => response.json()).catch(() => undefined);
     void Promise.all([read("/api/codex/account"), read("/api/model/provider")]).then(([account, provider]: [
-      { account?: unknown; blocker?: unknown } | undefined,
+      { account?: unknown; connected?: boolean; blocker?: unknown } | undefined,
       { features?: Array<{ skill: string; served: boolean }>; sponsor?: { active?: boolean } | null } | undefined
     ]) => {
       // Another model's API that has passed the check for the interview is a connection too (decided 2026-10-17), and so is an invite
       // code: a round on the developer's model while it is still being tested says so itself, instead of sending the person away.
       if (provider?.sponsor?.active || provider?.features?.some((feature) => feature.skill.endsWith("crossline-onboarding") && feature.served)) { setConnected(true); return; }
       // Only a definite "not signed in" sends the person there: with the background service unreachable /connect could not help either.
-      if (account) setConnected(account.account ? true : account.blocker ? undefined : false);
+      // A guest served by its own computer alone (a compute node) has no sign-in here and is connected all the same.
+      if (account) setConnected(account.account || account.connected ? true : account.blocker ? undefined : false);
     });
   }, []);
   useEffect(() => { if (connected === false && !line) location.replace("/connect?next=/onboarding"); }, [connected, line]);

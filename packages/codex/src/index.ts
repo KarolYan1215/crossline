@@ -484,6 +484,11 @@ function deviceLoginStartResult(value: unknown): { type: "chatgptDeviceCode"; lo
   return { type: "chatgptDeviceCode", loginId: result.loginId, verificationUrl: result.verificationUrl, userCode: result.userCode };
 }
 
+/** The hosted beta (`CROSSLINE_PUBLIC_BETA=1`) signs no guest's ChatGPT subscription in on the server (docs/hosted-hardening.md §3). */
+export function guestSubscriptionLoginOff(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CROSSLINE_PUBLIC_BETA === "1";
+}
+
 export async function startCodexSupervisor(options: {
   host?: "127.0.0.1";
   port?: number;
@@ -1350,13 +1355,22 @@ export async function startCodexSupervisor(options: {
           const fromHome = () => { const known = runtimes!.savedAccount(workspace); return { account: known, requiresOpenaiAuth: !known }; };
           const account = live ? await live.request("account/read", { refreshToken: false }).catch(fromHome) : { account: saved, requiresOpenaiAuth: !saved };
           // `guest`: this account runs on its own Codex, which it can sign out of here (the owner's is the machine's own).
-          sendJson(response, 200, { ...(record(account) ?? {}), login: runtimes!.loginStatus(workspace), guest: true });
+          sendJson(response, 200, { ...(record(account) ?? {}), login: runtimes!.loginStatus(workspace), guest: true,
+            // A guest served by its own computer alone (a node, no sign-in here) is connected too: its runs go there.
+            connected: runtimes!.connected(workspace),
+            ...(guestSubscriptionLoginOff() ? { subscriptionLogin: "off" } : {}) });
           return;
         }
         if (request.method === "POST" && pathname === "/v1/codex/login") {
           const body = record(await readJsonBody(request));
           const method = body?.type === "apiKey" && typeof body.apiKey === "string" && body.apiKey.trim() ? { type: "apiKey" as const, apiKey: body.apiKey.trim() }
             : body?.type === "chatgpt" ? { type: "chatgpt" as const } : { type: "chatgptDeviceCode" as const };
+          // A guest's ChatGPT subscription is never signed in on the hosted server (decided 2026-11-05, docs/hosted-hardening.md §3):
+          // OpenAI offers that self-serve only to open-source or locally hosted apps. The person's own computer (a node) or an API key.
+          if (method.type !== "apiKey" && guestSubscriptionLoginOff()) {
+            sendJson(response, 403, { blocker: { code: "HOSTED_SUBSCRIPTION_LOGIN_OFF", message: say("托管版不在服务器上登录 ChatGPT：在自己电脑上开启算力节点后在那里登录，或填写 API key。") } });
+            return;
+          }
           try { sendJson(response, 200, await runtimes!.login(workspace, method)); }
           catch (error) { sendJson(response, 503, { blocker: { code: error instanceof Error && /^RUNTIME_/.test(error.message) ? error.message : "RUNTIME_LOGIN_FAILED", message: say("登录没有开始") } }); }
           return;

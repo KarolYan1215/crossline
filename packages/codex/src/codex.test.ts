@@ -640,6 +640,47 @@ describe("each account's own Codex", () => {
       expect(started).toBe(0);
     } finally { await supervisor.stop(); rmSync(dir, { recursive: true, force: true }); }
   });
+
+  test("on the hosted server a guest's ChatGPT is never signed in there; an API key still is, and its own computer counts as connected", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(path.join(tmpdir(), "crossline-guest-"));
+    const owner = fakeSidecar();
+    const logins: unknown[] = [];
+    let nodes: Array<{ id: string; client: unknown; capacity: number; priority: number }> = [];
+    const previous = process.env.CROSSLINE_PUBLIC_BETA;
+    process.env.CROSSLINE_PUBLIC_BETA = "1";
+    const supervisor = await codexModule.startCodexSupervisor({ port: 0, sidecarFactory: async () => owner.handle, capabilitySecret: SECRET,
+      nodes: (workspaceId) => (workspaceId === "ws-guest" ? nodes : []) as never,
+      runtimes: { baseDir: dir, ownerWorkspaceId: () => "ws-owner",
+        start: async () => { const guest = fakeSidecar(); const request = guest.handle.client.request.bind(guest.handle.client);
+          (guest.handle.client as { request: (method: string, params: unknown) => Promise<unknown> }).request = async (method, params) => {
+            if (method === "account/login/start") { logins.push(params); return { type: "apiKey" }; }
+            return request(method as never, params as never);
+          };
+          return guest.handle as never; } },
+      autoAnalyzeCaptures: async () => undefined });
+    try {
+      const { supervisorBootId } = await (await fetch(`${supervisor.url}/v1/codex/status`)).json() as { supervisorBootId: string };
+      const call = (method: string, pathname: string, body?: unknown) => fetch(`${supervisor.url}${pathname}`, { method,
+        headers: { "content-type": "application/json", "x-crossline-capability": sign("ws-guest", `${method} ${pathname}`, supervisorBootId) },
+        ...(body ? { body: JSON.stringify(body) } : {}) });
+      for (const type of ["chatgptDeviceCode", "chatgpt"]) {
+        const refused = await call("POST", "/v1/codex/login", { type });
+        expect(refused.status).toBe(403);
+        expect(await refused.json()).toMatchObject({ blocker: { code: "HOSTED_SUBSCRIPTION_LOGIN_OFF" } });
+      }
+      expect(logins).toEqual([]);
+      expect(await (await call("GET", "/v1/codex/account")).json()).toMatchObject({ account: null, subscriptionLogin: "off", connected: false });
+      nodes = [{ id: "node-1", client: fakeSidecar().handle.client, capacity: 1, priority: 1 }];
+      expect(await (await call("GET", "/v1/codex/account")).json()).toMatchObject({ connected: true });
+      // An API key is the one way to connect on the server itself.
+      expect((await call("POST", "/v1/codex/login", { type: "apiKey", apiKey: "sk-test" })).status).not.toBe(403);
+    } finally {
+      if (previous === undefined) delete process.env.CROSSLINE_PUBLIC_BETA; else process.env.CROSSLINE_PUBLIC_BETA = previous;
+      await supervisor.stop(); rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 test("an API-key login has no quota windows; its month's spend against the cap is the reading", async () => {
