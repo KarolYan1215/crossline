@@ -49,6 +49,8 @@ case "$1" in
     # The pack names the first account as its target; the copy goes to the second.
     tmp=/tmp/crossline-clone/x; mkdir -p $tmp; tar -xzf /tmp/crossline-clone/crossline-transfer.tgz -C $tmp
     python3 -c "import json,sys;p=sys.argv[1];m=json.load(open(p));m['toEmail']=sys.argv[2];json.dump(m,open(p,'w'))" "$tmp/manifest.json" "$3"
+    # A pack left in /tmp by an earlier move belongs to another user, and /tmp's protection keeps even root from writing over it.
+    rm -f /tmp/crossline-transfer.tgz
     tar -czf /tmp/crossline-transfer.tgz -C $tmp . && rm -rf /tmp/crossline-clone
     COPY=--copy sh "$0" "${4:-preview}"
     ;;
