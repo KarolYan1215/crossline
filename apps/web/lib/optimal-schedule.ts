@@ -41,6 +41,9 @@ let solver: ModelSolver | undefined;
 let enabled = process.env.CROSSLINE_BACKGROUND_SOLVE ? process.env.CROSSLINE_BACKGROUND_SOLVE !== "off"
   : !process.env.VITEST && !process.env.CROSSLINE_E2E_DATA_DIR && process.env.CROSSLINE_PUBLIC_BETA !== "1";
 
+/** Whether a background solve can ever replace the greedy plan here (off on the hosted beta, W-248). */
+export const optimalSolveEnabled = (): boolean => enabled;
+
 /** Tests: switch the background solve on with a solver of their own (or off). */
 export function configureOptimal(options: { enabled: boolean; solver?: ModelSolver }): void {
   enabled = options.enabled;

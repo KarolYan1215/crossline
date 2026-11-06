@@ -26,7 +26,7 @@ export type PlanVersionData = {
   blocks: ScheduleBlockData[];
   schedule?: { status: "feasible" | "partial" | "infeasible";
     blockers: Array<{ taskId: string; code: string; message: string }>;
-    solver: "optimal" | "feasible_time_limit" | "fallback" | "empty" | "no_capacity"; bufferRelaxed?: boolean; optimal?: boolean;
+    solver: "optimal" | "feasible_time_limit" | "fallback" | "empty" | "no_capacity"; bufferRelaxed?: boolean; optimal?: boolean; simpleOnly?: boolean;
     notes?: Array<{ taskId: string; code: string; message: string }> };
 };
 
@@ -119,7 +119,7 @@ export function ScheduleStatus({ plan }: { plan: PlanVersionData }) {
     <strong>{plan.schedule.status === "feasible" ? t("建议时段已排入")
       : plan.schedule.status === "partial" ? t("部分任务未排入") : t("当前没有可行的建议时段")}</strong>
     {plan.schedule.solver === "feasible_time_limit" && <span>{t("已显示验证过的可行安排；未证明最优。")}</span>}
-    {plan.schedule.solver === "fallback" && (plan.schedule.optimal
+    {plan.schedule.solver === "fallback" && !plan.schedule.simpleOnly && (plan.schedule.optimal
       ? <span>{t("这次没算出最优排法，先用一份简单排法，每块都核对过不冲突。")}</span>
       : <span>{t("最优排法正在后台计算，算好后自动替换当前的简单排法。")}</span>)}
     {plan.schedule.solver === "no_capacity" && <span>{t("可用时间里已经没有空档，下面这些暂时排不进去。")}</span>}

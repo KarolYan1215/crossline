@@ -14,7 +14,7 @@ import { defaultIdentityPacks } from "@crossline/identity-packs";
 import { capacityLine, dailyCapsFor, dayCapacityOf, measuredView } from "./measured-capacity";
 import { forecastGoals, normalizeParams, paramsFor, planHeadDiffers, planSchedule, recommendNextActions, scheduleInputHash, type ForecastResult, type PlanResult,
   type ScheduleParams, type PlanningInput } from "@crossline/planner";
-import { optimalFor, requestOptimal } from "./optimal-schedule";
+import { optimalFor, optimalSolveEnabled, requestOptimal } from "./optimal-schedule";
 import { seedExampleReadiness } from "./example-readiness";
 import { energyCalibration, predictEnergyTransition, readTransitionOutcomes } from "./energy-learning";
 import { energyModel, slotEnergy } from "./energy";
@@ -379,7 +379,9 @@ export type PersistedPlan = {
   blocks: PersistedScheduleBlock[];
   schedule: Pick<PlanResult, "status" | "blockers" | "solver" | "bufferRelaxed" | "notes"> & {
     /** The planner input's cache key and whether the blocks are the cached optimal plan (docs/loop-and-scout.md §2); absent in a preview. */
-    inputHash?: string; optimal?: boolean };
+    inputHash?: string; optimal?: boolean;
+    /** No background solve runs here (the hosted beta): the greedy plan is the plan, and nothing will replace it (W-248). */
+    simpleOnly?: boolean };
   /** True when nobody has saved a real time zone/availability/mode yet and this is computed off
    * defaults — a real, honestly-labelled preview rather than an empty page. */
   usingDefaultPreferences: boolean;
@@ -1185,7 +1187,7 @@ async function scheduledBlocks(ctx: AccessContext, today: string, committed: Per
     ? blocks.length ? "partial" : "infeasible" : result.status,
     blockers: [...result.blockers, ...clockBlockers, ...dependencyBlockers],
     solver: result.solver, ...(result.bufferRelaxed ? { bufferRelaxed: true } : {}),
-    ...(result.notes?.length ? { notes: result.notes } : {}), ...(inPreview() ? {} : { inputHash: hash, optimal: Boolean(cached) }) } };
+    ...(result.notes?.length ? { notes: result.notes } : {}), ...(inPreview() ? {} : { inputHash: hash, optimal: Boolean(cached), ...(optimalSolveEnabled() ? {} : { simpleOnly: true }) }) } };
 }
 
 /**

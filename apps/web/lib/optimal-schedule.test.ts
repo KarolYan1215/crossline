@@ -63,6 +63,16 @@ test("a miss shows the greedy plan, asks once, and the next read of the same inp
   expect(solver.calls.length).toBe(calls);
 });
 
+test("W-248: where no background solve runs (the hosted beta) the plan says nothing will replace it", async () => {
+  setup();
+  configureOptimal({ enabled: false });
+  expect((await loadCurrentPlan(TEST_CTX)).schedule).toMatchObject({ simpleOnly: true, optimal: false });
+  configureOptimal({ enabled: true, solver: countingSolver().solve });
+  vi.spyOn(console, "info").mockImplementation(() => {});
+  expect((await loadCurrentPlan(TEST_CTX)).schedule.simpleOnly).toBeUndefined();
+  await optimalIdle();
+});
+
 test("while one solve runs, three newer requests leave only the last to be solved next", async () => {
   setup();
   let release!: () => void;
