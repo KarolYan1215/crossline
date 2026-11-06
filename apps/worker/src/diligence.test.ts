@@ -100,6 +100,17 @@ test("the opportunities question assumes no student status and carries who the p
   expect(sent).not.toContain("假设：在读");
 });
 
+test("the line's own description goes to the research as a fact, so schooling written only there is known (W-234)", async () => {
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ startup: { description: "UW-Madison ECE 博士一年级，本学期修读 ECE 548 与 ECE 555。" } }));
+  const { rpc, prompts } = fakeRuntime([answer()]);
+  const fetchImpl = fetchByUrl({ "https://example.edu/accelerator": () => page("Student Accelerator Program — apply by Nov 15") });
+  const run = createDiligenceRunner(store, workspaceId, "C:\\repo", () => rpc, { fetchImpl, isPublicHost: publicHost, readCost: cost, now: NOW, webBlocker: () => undefined });
+  await run("startup");
+  const sent = prompts().join("\n");
+  expect(sent).toContain("line-description-startup");
+  expect(sent).toContain("UW-Madison ECE 博士一年级");
+});
+
 test("a report in which no source can be opened is a failure, and writes no conclusions", async () => {
   const { rpc } = fakeRuntime([answer()]);
   const run = createDiligenceRunner(store, workspaceId, "C:\\repo", () => rpc, { fetchImpl: fetchByUrl({}), isPublicHost: publicHost, readCost: cost, now: NOW, webBlocker: () => undefined });

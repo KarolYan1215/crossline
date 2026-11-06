@@ -14,6 +14,19 @@ import { ownerOf } from "./owner";
 import { localeOf } from "./locale";
 import { identityLines } from "./lines";
 import { opportunityAgentOn } from "./opportunities";
+/**
+ * The line's own description (`lines.profiles`, what the interview wrote of who the person is on this line) as one more fact. The
+ * person's schooling is often only there: the 2026-11-06 walkthrough's student line read 「UW-Madison ECE 博士一年级」 on its card while
+ * its research reported 「未记录在读本科生或研究生身份」 (W-234).
+ */
+export function lineDescriptionFact(store: CrosslineStore, workspaceId: string, identityId: string): DiligenceContext["facts"] {
+  let profiles: Record<string, { description?: unknown }> = {};
+  try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") ?? {}; } catch { /* none yet */ }
+  const description = profiles[identityId]?.description;
+  return typeof description === "string" && description.trim()
+    ? [{ id: `line-description-${identityId}`, projectId: "", slot: "line_description", value: description.trim().slice(0, 400), status: "inferred" }] : [];
+}
+
 /** A weekly refresh, not a loop: a line is researched again only once its last report is this old. */
 export const DILIGENCE_REFRESH_DAYS = 7;
 
@@ -206,7 +219,8 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
       identity: { id: pack.id, label: pack.label, ...(pack.noTradeCalls ? { noTradeCalls: true } : {}) }, topic: { kind: topic, question: t(QUESTIONS[topic]) },
       projects: store.listProjects(workspaceId).filter((project) => project.identityId === identityId)
         .map(({ id, name, summary }) => ({ id, name, summary })),
-      facts: [...facts, ...personFacts].map((fact) => ({ id: profileFactId(fact), projectId: fact.projectId, slot: fact.slot, value: fact.value, status: fact.status })),
+      facts: [...facts, ...personFacts].map((fact) => ({ id: profileFactId(fact), projectId: fact.projectId, slot: fact.slot, value: fact.value, status: fact.status }))
+        .concat(lineDescriptionFact(store, workspaceId, identityId)),
       // Whatever the person said limits the answer: stated constraints are facts in the slots that name them.
       constraints: statedConstraints(facts),
       alreadyDecided: decidedProposals(reports, identityId)
