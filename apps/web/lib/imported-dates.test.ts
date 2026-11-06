@@ -127,3 +127,17 @@ test("a date that passed while its batch waited is not offered, and the list say
   expect(batch.items.map((item) => item.id)).toEqual(["exam"]);
   expect(batch.dropped).toEqual(expect.arrayContaining(["ECE 555 quiz（等确认期间日期已过，没有再列出）", "ECE 555 上课（等确认期间日期已过，没有再列出）"]));
 });
+
+test("a date that names its project by name is filed under that project and its line, and taken off from there (W-242)", () => {
+  const at = "2026-10-01T00:00:00Z";
+  store.saveProject({ id: "mos2", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, identityId: "lab-line", name: "MoS₂ 存内计算研究",
+    status: "active", summary: "", createdAt: at, updatedAt: at });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, idempotencyKey: "dates:extracted:b9", type: "dates.extracted", entityId: "b9",
+    payload: { documentIds: [], recurring: [], questions: [], dropped: [], dates: [{ id: "sim", date: "2026-12-01", startTime: "", endTime: "", kind: "project_due",
+      title: "第一阶段器件仿真提交导师", project: "MoS₂ 存内计算研究", sourceRef: "reply-9", quote: "12 月 1 日前给导师看", confidence: "high", note: "" }] } });
+  decideDateBatch(TEST_CTX, "b9", ["sim"]);
+  const fact = () => store.listProfileFacts(TEST_CTX.workspaceId).find((item) => item.slot === "date_20261201_project_due");
+  expect(fact()).toMatchObject({ identityId: "lab-line", projectId: "mos2" });
+  expect(changeAdoptedDate(TEST_CTX, "b9", "sim", false)).toEqual({ ok: true });
+  expect(fact()).toBeUndefined();
+});

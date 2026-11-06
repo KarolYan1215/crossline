@@ -696,13 +696,16 @@ test("a quick interview whose rounds are used up ends once the start items stand
     store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: `回答 ${round}` }, createdAt: at });
     store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "assistant", content: { reply: "好。", questions: [], stage: "compass", nextAction: "ask" }, createdAt: at });
   }
-  const { rpc } = fakeRuntime([turn({ stage: "compass", reply: "你更看重自主。", questions: [{ id: "q-why", text: "哪段经历让你开始在意自主？", kind: "free",
+  const { rpc } = fakeRuntime([turn({ stage: "compass", reply: "你更看重自主。接下来了解研究在你生活中的意义。", questions: [{ id: "q-why", text: "哪段经历让你开始在意自主？", kind: "free",
     allowOther: true, identityId: "person", projectId: "", options: [] }] })]);
   const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
   expect(await run({ sessionId: "s", text: "自主更重要" })).toEqual({ state: "ready", sessionId: "s" });
   const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; questions: unknown[]; nextAction: string };
   expect(last).toMatchObject({ nextAction: "ready_for_milestones", questions: [] });
   expect(last.reply).toContain("轮数已用完");
+  // The model's announcement of the next part goes: no part comes (W-241).
+  expect(last.reply).toContain("你更看重自主。");
+  expect(last.reply).not.toContain("接下来");
 });
 
 test("the runners carry only the scenario: the Skill holds the rules, and the language comes from the shared style", () => {

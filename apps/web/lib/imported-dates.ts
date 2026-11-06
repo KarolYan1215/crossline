@@ -112,7 +112,7 @@ export function decideDateBatch(ctx: AccessContext, batchId: string, includedIds
 function writeItems(ctx: AccessContext, batchId: string, payload: ExtractedPayload, included: Set<string>): { blocks: number; facts: number } {
   const store = getStore();
   const blocks: PersistedScheduleBlock[] = [];
-  const projectIdentity = new Map(store.listProjects(ctx.workspaceId, { includeArchived: true }).map((project) => [project.id, project.identityId]));
+  const projects = store.listProjects(ctx.workspaceId, { includeArchived: true });
   let facts = 0;
   const now = new Date().toISOString();
 
@@ -123,7 +123,8 @@ function writeItems(ctx: AccessContext, batchId: string, payload: ExtractedPaylo
     }
     // Untimed dates are deadlines and exam days, not blocks of time. They are kept as profile facts so the
     // milestone design can start from them instead of from nothing.
-    store.upsertProfileFact({ workspaceId: ctx.workspaceId, identityId: projectIdentity.get(item.project) ?? fallbackLine(ctx), projectId: item.project,
+    const project = projectNamed(projects, item.project);
+    store.upsertProfileFact({ workspaceId: ctx.workspaceId, identityId: project?.identityId ?? fallbackLine(ctx), projectId: project?.id ?? item.project,
       slot: dateSlot(item), value: `${item.date} ${item.title}`, status: "confirmed",
       sourceRef: item.sourceRef, sourceQuote: item.quote, updatedAt: now });
     facts += 1;
@@ -161,6 +162,14 @@ function writeItems(ctx: AccessContext, batchId: string, payload: ExtractedPaylo
   }
   // What reached the calendar, not what was read: the count said a block was written that the slot rule had left out.
   return { blocks: written, facts };
+}
+/**
+ * The project a date names: by its id, or by its name, which the model writes as often as the id when it reads a reply. Matched by id only,
+ * 「MoS₂ 存内计算研究」 was filed under the workspace's first line with the name as its project (2026-11-06 walkthrough, W-242).
+ */
+function projectNamed<T extends { id: string; name: string }>(projects: T[], ref: string): T | undefined {
+  const key = ref.trim().toLowerCase();
+  return key ? projects.find((project) => project.id === ref) ?? projects.find((project) => project.name.trim().toLowerCase() === key) : undefined;
 }
 const dateSlot = (item: DateCandidate) => `date_${item.date.replaceAll("-", "")}_${item.kind}`;
 
@@ -280,10 +289,12 @@ export function changeAdoptedDate(ctx: AccessContext, batchId: string, itemId: s
     }
     const date = (payload.dates ?? []).find((item) => item.id === itemId);
     if (date) {
-      const known = store.listProjects(ctx.workspaceId, { includeArchived: true }).find((project) => project.id === date.project)?.identityId;
-      // A date filed before the fallback followed the workspace's lines sits under `research`.
-      for (const identityId of new Set([known ?? fallbackLine(ctx), ...(known ? [] : ["research"])])) {
-        store.deleteProfileFact(ctx.workspaceId, identityId, date.project, dateSlot(date));
+      const project = projectNamed(store.listProjects(ctx.workspaceId, { includeArchived: true }), date.project);
+      const known = project?.identityId;
+      // A date filed before the fallback followed the workspace's lines sits under `research`; one filed before W-242 under the
+      // first line with the project's name as its project.
+      for (const identityId of new Set([known ?? fallbackLine(ctx), fallbackLine(ctx), ...(known ? [] : ["research"])])) {
+        for (const projectId of new Set([project?.id ?? date.project, date.project])) store.deleteProfileFact(ctx.workspaceId, identityId, projectId, dateSlot(date));
       }
     }
     included.delete(itemId);

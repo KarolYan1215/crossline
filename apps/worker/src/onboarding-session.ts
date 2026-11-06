@@ -535,7 +535,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const endsHere = spent || (startStands && !holdGaps && !paced.deep && !cards.length && checked.nextAction === "ask" && !checked.questions.length);
     if (endsHere && extractMode !== "off") markFinishing(store, workspaceId, sessionId);
     const assembled = spent ? { ...checked, questions: [], cards: [], nextAction: "ready_for_milestones" as const,
-        reply: `${checked.reply}\n\n${tFor(locale)("这一档的访谈轮数已用完：可以开始使用，剩下的问题会放进待确认，随时回来接着答。")}` }
+        reply: `${withoutNextStep(checked.reply)}\n\n${tFor(locale)("这一档的访谈轮数已用完：可以开始使用，剩下的问题会放进待确认，随时回来接着答。")}` }
       : endsHere ? { ...checked, nextAction: "ready_for_milestones" as const }
       : cards.length && checked.nextAction === "ask" ? { ...checked, cards }
       : withSomethingToAnswer(checked, holdGaps ? [] : gapsNow, messages, locale, focusLine || holdGaps ? [] : openChecklist(Infinity, (item) => !item.start, sessionId));
@@ -743,6 +743,14 @@ export function withGapQuestions<T extends OnboardingDialogue>(output: T, gaps: 
 
 /** The stages that gather the start standard: while a start item is open they never move on (those items take only the person's word). */
 const FRONT_STAGES = new Set(["orientation", "lines"]);
+
+/**
+ * A reply without its closing announcement of what comes next (「接下来了解…」, "Next, …"): read right above the note that the rounds are
+ * used up, it promised a part that never came (2026-11-06 walkthrough, W-241).
+ */
+export function withoutNextStep(reply: string): string {
+  return reply.replace(/\s*(接下来|下面|下一步|本轮转向|还需|Next\b)[^。！？.!?]*[。！？.!?]?\s*$/u, "").trim() || reply; // i18n-ignore: the reply's own words
+}
 
 /**
  * Rounds spent in the latest stage, counted back from the newest answer; from the second on, the instruction to move on. Writing what the
