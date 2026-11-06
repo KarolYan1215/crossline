@@ -3,7 +3,7 @@ import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, INTERVIEW_SETTINGS, START_CONFIRMED_SETTING, readInterviewSettings, resolveAvailability,
   type AccessContext, type AvailabilityWindow, type DateExtraction, type StoredLineProfile
 } from "@crossline/core";
-import { extractBacklog, startConfirmedFor } from "@crossline/db";
+import { extractBacklog, latestFileDates, startConfirmedFor } from "@crossline/db";
 import { getStore } from "./crossline";
 import { applySettingChange, settingWords } from "./setting-change";
 import { identityLines } from "./lines";
@@ -43,10 +43,14 @@ export function startSummary(ctx: AccessContext): StartSummary {
   try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") as Record<string, StoredLineProfile>; } catch { /* none */ }
   const facts = store.listProfileFacts(workspaceId);
   const projects = store.listProjects(workspaceId).filter((project) => !project.id.endsWith("-default"));
+  // With no deadline fact, the project's last date read from the files or replies stands for it (W-231: 「ECE 548：截止未记录」 sat
+  // above its midterm and final, both on the calendar already).
+  const fileDates = latestFileDates(store, workspaceId).dates;
   const deadlineOf = (projectId: string) => {
     const of = facts.filter((fact) => fact.projectId === projectId && fact.status === "confirmed");
+    const last = fileDates.filter((item) => item.project === projectId).at(-1);
     return of.find((fact) => fact.slot === "deadline")?.value ?? (of.some((fact) => fact.slot === "no_deadline") ? t("没有截止")
-      : of.find((fact) => fact.slot.startsWith("date_"))?.value ?? "");
+      : of.find((fact) => fact.slot.startsWith("date_"))?.value ?? (last ? t("{{date}}（{{title}}）", { date: last.date, title: last.title }) : ""));
   };
   const lines = identityLines(ctx).map((line) => ({
     id: line.id, label: line.label, hard: Boolean(line.hard), description: profiles[line.id]?.description ?? "", goal: line.goals?.[0] ?? "",

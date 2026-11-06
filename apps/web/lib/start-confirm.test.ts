@@ -45,3 +45,14 @@ test("after the start, settings stated later are one decision in 待决事项", 
   expect(ask?.title).toBe("访谈中说到 5 项设置，要应用吗？");
   expect(ask?.why).toContain("免打扰时段：22:30-09:30");
 });
+
+test("a project with no deadline fact shows its last date read from the files, not 「截止未记录」 (W-231)", () => {
+  const store = seed();
+  const now = "2026-11-05T00:00:00.000Z";
+  store.saveProject({ id: "ece548", ownerId: TEST_CTX.principalId, workspaceId: ws, identityId: "research", name: "ECE 548", status: "active", summary: "", createdAt: now, updatedAt: now });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "x:b", type: "dates.extracted", entityId: "b", payload: { undated: [], dates: [
+    { id: "m", project: "ECE 548", kind: "exam", date: "2026-11-20", title: "ECE 548 期中考试" },
+    { id: "f", project: "ECE 548", kind: "exam", date: "2026-12-15", title: "ECE 548 期末考试" }] } });
+  const projects = startSummary(TEST_CTX).lines.flatMap((line) => line.projects);
+  expect(projects.find((project) => project.name === "ECE 548")?.deadline).toBe("2026-12-15（ECE 548 期末考试）");
+});
