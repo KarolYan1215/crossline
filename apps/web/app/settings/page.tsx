@@ -160,7 +160,7 @@ export default async function SettingsPage() {
     { id: "automation", label: t("自动化与助手"), parts: [{ id: "automations", label: t("自动化") }, { id: "outputs", label: t("助手产出") }] },
     { id: "background", label: t("后台任务") },
     { id: "personal", label: t("个性化") },
-    { id: "design", label: t("我的设计") },
+    { id: "design", label: t("规则与指令") },
     ...(apply ? [{ id: "apply", label: t("报名资料卡") }] : []),
     ...(opportunity ? [{ id: "opportunity", label: t("机会代理") }] : []),
     { id: "skills", label: t("Skill 库") },
@@ -258,7 +258,7 @@ export default async function SettingsPage() {
           <PersonalizationModule {...loadPreferences(ctx)} />
         </section>
 
-        <section id="design" className="st-section" aria-labelledby="st-design"><h2 id="st-design" className="ds-serif">{t("我的设计")}</h2>
+        <section id="design" className="st-section" aria-labelledby="st-design"><h2 id="st-design" className="ds-serif">{t("规则与指令")}</h2>
           <DesignCard {...designView(ctx)} />
         </section>
 

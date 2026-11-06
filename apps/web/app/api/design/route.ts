@@ -19,13 +19,13 @@ export async function POST(request: Request) {
   const t = tOf(access.ctx);
   if (typeof body.pause === "boolean") {
     const pause = body.pause;
-    const result = await withUndo(access.ctx, t(pause ? "暂停我的设计中的一项" : "恢复我的设计中的一项"), () => pauseDesignEntry(access.ctx, kind, String(body.id), pause));
+    const result = await withUndo(access.ctx, t(pause ? "暂停规则与指令中的一项" : "恢复规则与指令中的一项"), () => pauseDesignEntry(access.ctx, kind, String(body.id), pause));
     return NextResponse.json(result, { status: result.ok ? 200 : 404 });
   }
   const args = { kind, id: body.id, value: typeof body.value === "string" ? body.value : "" } as const;
   const problem = designProblem(args, noteSkillIds());
   if (problem) return NextResponse.json({ ok: false, code: problem.split("：")[0], message: problem }, { status: 400 });
   if (body.preview === true) return NextResponse.json({ ok: true, view: describeDesignChange(access.ctx, args) });
-  const result = await withUndo(access.ctx, t("修改我的设计"), () => applyDesignChange(access.ctx, args));
+  const result = await withUndo(access.ctx, t("修改规则与指令"), () => applyDesignChange(access.ctx, args));
   return NextResponse.json(result, { status: result.ok ? 200 : 400 });
 }

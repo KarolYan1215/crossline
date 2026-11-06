@@ -52,7 +52,7 @@ export const ACTIONS = {
    * The person's own design of Crossline (personal-design.ts): `kind: "knob"` sets one of the whitelisted thresholds, `kind: "skill"` gives
    * one Skill the person's standing words; an empty `value` resets the knob or removes the note. Previewed, confirmed, undoable.
    */
-  "design.change": { label: "修改我的设计", risk: "internal", args: { kind: enumOf(["knob", "skill"]), id: str(64), value: str(DESIGN_NOTE_MAX) } },
+  "design.change": { label: "修改规则与指令", risk: "internal", args: { kind: enumOf(["knob", "skill"]), id: str(64), value: str(DESIGN_NOTE_MAX) } },
   /** A credential or a destructive change (a password, a key, deleting the account): a link to the settings card where the person does it. */
   "settings.open": { label: "打开设置", risk: "internal", args: { section: enumOf(SETTINGS_SECTION_IDS), topic: str(60) } },
   // A record of money or health (docs/domain-lines.md): read from the person's line, a pasted text or an attached screenshot; the card

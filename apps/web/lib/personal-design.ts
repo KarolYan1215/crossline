@@ -32,11 +32,11 @@ export function describeDesignChange(ctx: AccessContext, args: DesignArgs): Sett
   if (args.kind === "knob" && isDesignKnob(args.id)) {
     const knob = DESIGN_KNOBS[args.id];
     const to = args.value.trim() ? Number(args.value) : knob.default;
-    return { label: t("我的设计：{{label}}", { label: t(knob.label) }), from: `${knobValue(design, args.id)} ${t(knob.unit)}`, to: `${to} ${t(knob.unit)}`, consequence: t(knob.consequence) };
+    return { label: t("规则与指令：{{label}}", { label: t(knob.label) }), from: `${knobValue(design, args.id)} ${t(knob.unit)}`, to: `${to} ${t(knob.unit)}`, consequence: t(knob.consequence) };
   }
   const skill = noteSkills().find((item) => item.id === args.id.replace(/^crossline:/, ""));
   const current = design.entries.find((entry) => entry.kind === "skill" && entry.id === skill?.id);
-  return { label: t("我的设计：给「{{skill}}」的本人指令", { skill: t(skill?.label ?? args.id) }), from: current?.kind === "skill" ? current.text : t("未设置"),
+  return { label: t("规则与指令：给「{{skill}}」的本人指令", { skill: t(skill?.label ?? args.id) }), from: current?.kind === "skill" ? current.text : t("未设置"),
     to: args.value.trim() || t("删除"), consequence: t("之后这一环节的每次运行都会读到这段话；安全规则和输出格式不受它影响") };
 }
 
@@ -49,7 +49,7 @@ export function applyDesignChange(ctx: AccessContext, args: DesignArgs): { ok: t
   const value = args.value.trim();
   const entry = !value ? undefined : args.kind === "knob" ? { kind: "knob" as const, id: id as DesignKnobId, value: Number(value), at } : { kind: "skill" as const, id, text: value, at };
   save(ctx, withEntry(designOf(ctx), args.kind, id, entry));
-  return { ok: true, message: value ? t("已保存到我的设计") : t("已恢复为系统默认"), href: "/settings#design" };
+  return { ok: true, message: value ? t("已保存到规则与指令") : t("已恢复为系统默认"), href: "/settings#design" };
 }
 
 /** Pausing keeps the entry; the rule goes back to its default until it is resumed. */
