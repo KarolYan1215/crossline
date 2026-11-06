@@ -1,5 +1,5 @@
 import "server-only";
-import { INTERVIEW_FLOW_STAGES, flowOf, answerLine, gapCoveredBy, questionKind, readyToStart as startReady, screenQuestions, screenedNote, startMissing as startOpen, type AccessContext, type ChecklistItem,
+import { INTERVIEW_FLOW_STAGES, ONBOARDING_DEPTH_SETTING, flowOf, progressView, readDepth, readTurnProgress, answerLine, gapCoveredBy, questionKind, readyToStart as startReady, screenQuestions, screenedNote, startMissing as startOpen, type AccessContext, type ChecklistItem,
   type ScreenReason } from "@crossline/core";
 import { interviewChecklistFor, interviewGapsFor, questionScreenFor } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -59,7 +59,13 @@ export type InterviewStatus = {
   readyToStart: boolean;
   /** The start items still open, in checklist order. */
   startMissing: ChecklistItem[];
+  /**
+   * `stageIndex`: the furthest part any round reached, of `stageCount` parts — the count the interview's own progress shows (W-247:
+   * Settings read 「第 2/7 阶段」 from the last round's part, a question asked again in part 2, and counted the details step as a part).
+   */
   stage: string; stageIndex: number; stageCount: number;
+  /** The conversation itself ended (the session is complete: rounds used up, or the model closed it), whatever is still open. */
+  ended: boolean;
   /** Questions still waiting for the person: the open round's (questions about a file left out) and the app's own not yet in a round. */
   questions: InterviewQuestion[];
   /** The open round's questions the app keeps from the person (`screenQuestions`), named to the interview when the round is sent. */
@@ -94,7 +100,7 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const checklist = interviewChecklistFor(store, ctx.workspaceId, lines, { unfiledFiles: unfiledFiles(ctx, today).length, today });
   const open = checklist.filter((item) => !item.done && !item.deferred);
   const readyToStart = startReady(checklist), startMissing = startOpen(checklist);
-  if (!session) return { started: false, complete: false, awaitingPerson: false, parked: false, readyToStart, startMissing, stage: "", stageIndex: 0, stageCount,
+  if (!session) return { started: false, complete: false, awaitingPerson: false, parked: false, readyToStart, startMissing, stage: "", stageIndex: 0, stageCount, ended: false,
     questions: [], screened: [], openQuestions: 0, checklist, sessionId: "" };
   const messages = store.listOnboardingMessages(ctx.workspaceId, session.id);
   const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
@@ -119,7 +125,11 @@ export function interviewStatus(ctx: AccessContext): InterviewStatus {
   const questions = [...round.filter((question) => !owned.has(question.id) && !question.id.startsWith("gap-file-") && question.id !== "gap-portrait"), ...gaps]
     .filter((question) => !pending.answers[question.id] && !seen.has(question.id) && Boolean(seen.add(question.id)));
   return { started: true, complete, awaitingPerson: open.length > 0 && open.every((item) => item.owner === "person"), parked, readyToStart, startMissing,
-    stage, stageIndex: Math.max(0, stages.indexOf(stage as (typeof stages)[number])) + 1, stageCount,
+    stage, ...(({ reached, total }) => ({ stageIndex: Math.min(reached, total), stageCount: total }))(progressView(
+      readTurnProgress((session.coverage as { progress?: unknown }).progress), stage, flowOf(session.coverage),
+      readDepth(store.getSetting(ctx.workspaceId, ONBOARDING_DEPTH_SETTING)),
+      messages.filter((message) => message.role === "assistant").map((message) => String((message.content as AssistantContent).stage ?? "")))),
+    ended: session.state === "complete",
     questions, screened, openQuestions: questions.length, checklist, sessionId: session.id };
 }
 

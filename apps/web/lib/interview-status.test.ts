@@ -39,10 +39,23 @@ test("a model question about which project a file belongs to gives way to the ap
   expect([...questionsOwnedElsewhere(TEST_CTX, questions)]).toEqual(["q-course-map"]);
 });
 
+test("W-247: the stage is the furthest part reached, of the interview's own parts, and an ended interview says so", () => {
+  const { store } = setup();
+  // A later round reached 「能量」 (5/5), then the last one went back to 「主线」 for one question: Settings read 「第 2/6 阶段」.
+  store.appendOnboardingMessage({ workspaceId: ws, sessionId: "s1", role: "assistant", createdAt: "2026-10-08T00:30:00Z",
+    content: { reply: "…", questions: [], nextAction: "ask", stage: "energy" } });
+  store.appendOnboardingMessage({ workspaceId: ws, sessionId: "s1", role: "assistant", createdAt: "2026-10-08T01:00:00Z",
+    content: { reply: "…", questions: [], nextAction: "ask", stage: "lines" } });
+  expect(interviewStatus(TEST_CTX)).toMatchObject({ stage: "lines", stageIndex: 5, stageCount: 5, ended: false });
+  const session = store.getLatestOnboardingSession(ws)!;
+  store.saveOnboardingSession({ ...session, state: "complete" });
+  expect(interviewStatus(TEST_CTX).ended).toBe(true);
+});
+
 test("while the interview runs its questions stay in it; nothing about it is on 待决事项", () => {
   setup();
   const status = interviewStatus(TEST_CTX);
-  expect(status).toMatchObject({ started: true, complete: false, parked: false, readyToStart: false, stage: "lines", stageIndex: 2, stageCount: 6 });
+  expect(status).toMatchObject({ started: true, complete: false, parked: false, readyToStart: false, stage: "lines", stageIndex: 2, stageCount: 5, ended: false });
   // The model's round (its file question left out) and the app's own questions: both courses' class times.
   expect(status.questions.map((question) => question.id)).toEqual(["q-meetings", "gap-meetings-ece555", "gap-meetings-ece548"]);
   const asks = collectAsks(TEST_CTX, SOON);

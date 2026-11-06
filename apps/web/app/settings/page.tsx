@@ -182,7 +182,8 @@ export default async function SettingsPage() {
               <header><h3>{t("个人情况")}</h3><small>{t("主线、项目、日期与长期目标的来源")}</small></header>
               <div className="st-row"><span className="st-row-label">{t("访谈")}<small>{!interview.started ? t("尚未开始")
                 : interview.complete ? t("已完成；补充或修改后，里程碑草稿按新情况重新设计")
-                  : [t("未完成"), t("第 {{stage}}/{{stages}} 阶段", { stage: interview.stageIndex, stages: interview.stageCount }),
+                  : [interview.ended ? t("访谈已结束") : t("未完成"),
+                    ...(interview.ended ? [] : [t("第 {{stage}}/{{stages}} 阶段", { stage: interview.stageIndex, stages: interview.stageCount })]),
                     ...(interview.openQuestions ? [t("待答 {{count}} 题", { count: interview.openQuestions })] : []),
                     ...(interview.parked ? [t("问题已列在待决事项")] : [])].join(" · ")}</small></span>
                 <a className="secondary-button" href="/onboarding">{interview.started && !interview.complete ? t("继续访谈") : t("打开访谈")}</a></div>
