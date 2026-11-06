@@ -6,6 +6,12 @@ const since = new Date(Date.now() - 6 * 3600000).toISOString();
 const types = ["onboarding.extracted", "onboarding.extract_failed", "onboarding.citation_warned", "onboarding.questions_repeated"];
 const rows = db.prepare(`SELECT workspace_id, type, created_at, payload_json FROM events WHERE type IN (${types.map(() => "?").join(",")}) AND created_at >= ? ORDER BY created_at`).all(...types, since);
 for (const row of rows) console.log([row.created_at.slice(5, 19), row.workspace_id.slice(0, 8), row.type, String(row.payload_json).slice(0, 600)].join("  "));
+// What each file's dates came to: the undated items (a relative day keeps the file's words as `relative:`, W-230) and what was dropped.
+for (const row of db.prepare("SELECT workspace_id, type, created_at, payload_json FROM events WHERE type IN ('dates.extracted', 'dates.unrecorded') AND created_at >= ? ORDER BY created_at").all(since)) {
+  const payload = JSON.parse(row.payload_json);
+  console.log([row.created_at.slice(5, 19), row.workspace_id.slice(0, 8), row.type,
+    JSON.stringify({ dates: (payload.dates ?? []).length, undated: payload.undated, dropped: payload.dropped }).slice(0, 900)].join("  "));
+}
 for (const row of db.prepare("SELECT workspace_id, key, value FROM settings WHERE key LIKE 'onboarding.extract%' OR key = 'profile.sections'").all())
   console.log(["setting", row.workspace_id.slice(0, 8), row.key, String(row.value).slice(0, 800)].join("  "));
 
