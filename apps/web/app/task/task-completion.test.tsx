@@ -48,6 +48,9 @@ describe("task completion", () => {
     expect(html).toContain("写第一段");
     expect(html).toContain("只完成本步");
     expect(html).toContain("本任务还有 1 个未完成步骤");
+    // Pressing 完成 is the acceptance (2026-10-15); 「进入验收」 promised a review that never comes (W-249).
+    expect(html).toContain("提交即整个任务完成并记为已验收");
+    expect(html).not.toContain("进入验收");
   });
 
   test("in English", () => {

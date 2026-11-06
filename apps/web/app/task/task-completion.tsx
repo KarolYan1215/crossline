@@ -176,7 +176,7 @@ export function TaskCompletion({ task, stepId, onDone }: {
           setReported(Number.isInteger(minutes) && minutes > 0 && minutes <= 1440 ? { minutes, source: "one_tap" } : null);
         }} /></label>
     </fieldset>}
-    {otherSteps > 0 && stepId && <p className="tk-complete-hint">{t("提交即整个任务完成，进入验收；本任务还有 {{count}} 个未完成步骤。", { count: otherSteps })}</p>}
+    {otherSteps > 0 && stepId && <p className="tk-complete-hint">{t("提交即整个任务完成并记为已验收；本任务还有 {{count}} 个未完成步骤。", { count: otherSteps })}</p>}
     <div className="tk-complete-actions">
       <button type="button" className="primary-button" disabled={busy || !hasEvidence} onClick={() => void submit(true)}>{t("提交")}</button>
       <button type="button" disabled={busy} onClick={() => void submit(false)}>{t("完成（记为无证据）")}</button>
