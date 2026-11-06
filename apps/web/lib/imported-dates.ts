@@ -160,8 +160,47 @@ function writeItems(ctx: AccessContext, batchId: string, payload: ExtractedPaylo
     store.savePlanVersion({ ...plan, payload: { ...(plan.payload as object), blocks: [...existing.filter((block) => !replaced.has(block.id)), ...fresh] } });
     written = fresh.length;
   }
+  endClassesAtFinal(ctx);
   // What reached the calendar, not what was read: the count said a block was written that the slot rule had left out.
   return { blocks: written, facts };
+}
+
+/** A final exam's title, in the file's or the reply's words: the course ends with it. */
+const FINAL_EXAM = /期末|final/iu; // i18n-ignore: matched in the source's own words
+
+/**
+ * A course's weekly classes end with its final exam. A weekly pattern with no end in its source runs half a year (`OPEN_ENDED_DAYS`), so
+ * 「这学期两门课」 stood on the calendar into May: 132 fixed items for a term whose final is on 12-15 (2026-11-06 walkthrough, W-243).
+ * Run whenever dates are written, so it holds in either order — the classes adopted first and the final later, or the other way round.
+ */
+function endClassesAtFinal(ctx: AccessContext): void {
+  const store = getStore();
+  const projects = store.listProjects(ctx.workspaceId, { includeArchived: true });
+  const finals = new Map<string, string>();
+  for (const fact of store.listProfileFacts(ctx.workspaceId)) {
+    const day = fact.slot.match(/^date_(\d{4})(\d{2})(\d{2})_exam$/u);
+    if (!day || !FINAL_EXAM.test(fact.value)) continue;
+    const id = projectNamed(projects, fact.projectId)?.id ?? fact.projectId;
+    const date = `${day[1]}-${day[2]}-${day[3]}`;
+    if ((finals.get(id) ?? "") < date) finals.set(id, date);
+  }
+  if (!finals.size) return;
+  const endOf = new Map<string, string>();
+  for (const event of store.listEvents(ctx.workspaceId, { type: ["dates.extracted"] })) {
+    for (const meeting of (event.payload as ExtractedPayload).recurring ?? []) {
+      const final = finals.get(projectNamed(projects, meeting.project)?.id ?? meeting.project);
+      if (final) endOf.set(`${event.entityId}:${meeting.id}`, final);
+    }
+  }
+  const plan = store.listPlanVersions(ctx.workspaceId)[0];
+  const blocks = (plan?.payload as { blocks?: PersistedScheduleBlock[] } | undefined)?.blocks ?? [];
+  const kept = blocks.filter((block) => {
+    const [kind, batch, meeting, day] = block.id.split(":");
+    if (kind !== "import" || !day) return true;
+    const final = endOf.get(`${batch}:${meeting}`);
+    return !final || !block.day || block.day <= final;
+  });
+  if (plan && kept.length < blocks.length) store.savePlanVersion({ ...plan, payload: { ...(plan.payload as object), blocks: kept } });
 }
 /**
  * The project a date names: by its id, or by its name, which the model writes as often as the id when it reads a reply. Matched by id only,

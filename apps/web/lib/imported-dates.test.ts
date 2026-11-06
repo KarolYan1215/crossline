@@ -141,3 +141,25 @@ test("a date that names its project by name is filed under that project and its 
   expect(changeAdoptedDate(TEST_CTX, "b9", "sim", false)).toEqual({ ok: true });
   expect(fact()).toBeUndefined();
 });
+
+test("a course's weekly classes end with its final exam, whichever was adopted first (W-243)", () => {
+  const at = "2026-10-01T00:00:00Z";
+  store.saveProject({ id: "ece548", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, identityId: "research", name: "ECE 548",
+    status: "active", summary: "", createdAt: at, updatedAt: at });
+  const batch = (id: string, payload: object) => store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId,
+    idempotencyKey: `dates:extracted:${id}`, type: "dates.extracted", entityId: id, payload: { documentIds: [], dates: [], recurring: [], questions: [], dropped: [], ...payload } });
+  batch("classes", { recurring: [{ id: "c", title: "ECE 548 课程", project: "ECE 548", weekdays: [2], startTime: "14:30", endTime: "15:45", from: "2026-10-05",
+    to: "2027-03-30", exceptions: [], location: "", sourceRef: "reply-3", quote: "ECE 548 每周二 14:30–15:45", confidence: "high" }] });
+  decideDateBatch(TEST_CTX, "classes", ["c"]);
+  const last = () => planBlocks().filter((block) => block.id.startsWith("import:classes:c:")).map((block) => block.day!).sort().at(-1);
+  expect(last()! > "2027-01-01").toBe(true);
+  batch("final", { dates: [{ id: "f", date: "2026-12-15", startTime: "", endTime: "", kind: "exam", title: "ECE 548 期末考试", project: "ECE 548",
+    sourceRef: "reply-9", quote: "期末 12 月 15 日", confidence: "high", note: "" }] });
+  decideDateBatch(TEST_CTX, "final", ["f"]);
+  expect(last()).toBe("2026-12-15");
+  // Classes adopted after the final, named by the project's id, end with it too.
+  batch("more", { recurring: [{ id: "c2", title: "ECE 548 课程", project: "ece548", weekdays: [4], startTime: "09:30", endTime: "10:45", from: "2026-10-05",
+    to: "2027-03-30", exceptions: [], location: "", sourceRef: "reply-3", quote: "每周四 09:30–10:45", confidence: "high" }] });
+  decideDateBatch(TEST_CTX, "more", ["c2"]);
+  expect(planBlocks().filter((block) => block.id.startsWith("import:more:c2:")).map((block) => block.day!).sort().at(-1)).toBe("2026-12-10");
+});
