@@ -56,11 +56,14 @@ export const itemKey = (workflowOrReport: string, title: string) => createHash("
 function reportRows(store: CrosslineStore, workspaceId: string) {
   const workflows = readGrownSkills(store, workspaceId);
   const ownerOf = (taskId: string) => workflows.filter((record) => taskId.startsWith(runPrefix(record.id))).sort((a, b) => b.id.length - a.id.length)[0];
-  // Newest first; the tasks come oldest first, so reversed before the (stable) sort two runs finished in the same millisecond keep the later on top.
-  return listAgentTasks(store, workspaceId).filter(isReportRun).reverse()
-    .map((row) => ({ row, workflow: ownerOf(row.taskId), files: reportFiles(row.directory) }))
+  // Newest first. Two runs finished in the same millisecond: the later request on top. The tasks come newest request first, and those
+  // requested in the same millisecond in ledger order, so the higher index is the later one (reversing the list once put the older run
+  // first whenever the requests were a millisecond apart — the flaky CI failure of 2026-11-06).
+  return listAgentTasks(store, workspaceId).filter(isReportRun)
+    .map((row, index) => ({ row, index, workflow: ownerOf(row.taskId), files: reportFiles(row.directory) }))
     .filter((entry) => entry.files.length)
-    .sort((a, b) => (b.row.completedAt ?? b.row.requestedAt).localeCompare(a.row.completedAt ?? a.row.requestedAt));
+    .sort((a, b) => (b.row.completedAt ?? b.row.requestedAt).localeCompare(a.row.completedAt ?? a.row.requestedAt)
+      || b.row.requestedAt.localeCompare(a.row.requestedAt) || b.index - a.index);
 }
 
 function summaryOf(entry: ReturnType<typeof reportRows>[number]): ReportSummary {

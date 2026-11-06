@@ -193,6 +193,20 @@ describe("energy-aware planning", () => {
       ], availability: [{ start: at("16:00"), end: at("19:00"), energy: "medium" }, { start: at("14:00"), end: at("15:00"), energy: "high" }], frozenBlocks: [] });
       expect(roomy.plan.blocks.map((block) => block.efficiency)).toEqual([undefined]);
     });
+
+    test("W-245: work too long for the matching hours keeps them and puts only the rest in the weaker, earlier ones", () => {
+      // A low morning and a high evening; 3 h of high work due at the end of the day. In time order the morning took all of it.
+      const result = fallbackSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
+        { id: "hw", title: "解答作业", estimate: exact(180), inputsReady: true, deadlineTier: 1, energy: "high", deadline: at("23:59") }
+      ], availability: [{ start: at("14:00"), end: at("19:00"), energy: "low" }, { start: at("20:00"), end: at("22:00"), energy: "high" }],
+      frozenBlocks: [] });
+      const blocks = result.plan.blocks;
+      const evening = blocks.filter((block) => block.start >= at("20:00"));
+      expect(evening.reduce((sum, block) => sum + minutesOf(block), 0)).toBeGreaterThanOrEqual(100);
+      expect(evening.every((block) => block.efficiency === undefined)).toBe(true);
+      expect(workOf(blocks)).toBeGreaterThanOrEqual(180);
+      expect(workOf(blocks.filter((block) => block.start < at("20:00")))).toBeLessThan(90);
+    });
   });
 
   test("only the work with a deadline is relaxed; undated work around it keeps the gap", async () => {

@@ -303,8 +303,12 @@ function greedyPass(input: PlanningInput, tasks: PlannerTask[], slots: Slot[], e
     const nextCap = new Map(capUsed);
     const staged: ScheduleBlock[] = [];
     let left = durationOf(task);
+    // Loose: the matching hours before the deadline still go first, weaker ones only for what is left (W-245: a two-hour homework
+    // that did not fit the evening went whole into the morning's low hours, in time order, and left the evening's high ones empty).
+    const looseOrder = loose && !best ? slots.map((_, index) => index)
+      .sort((a, b) => shortfall(task, slots[a]!) - shortfall(task, slots[b]!) || a - b) : undefined;
     for (let k = 0; k < slots.length && left > 1e-9; k += 1) {
-      const s = best ? bestFirst[k]! : k;
+      const s = best ? bestFirst[k]! : looseOrder ? looseOrder[k]! : k;
       const slot = slots[s]!;
       const short = shortfall(task, slot);
       if (best ? short > 1 : loose ? !usable(task, short) : short > 0) continue;

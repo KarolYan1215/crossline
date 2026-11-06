@@ -62,6 +62,24 @@ test("a workflow's run with Markdown is a report: overview first, its actions va
   expect(decideReportItem(TEST_CTX, "flow-xhs-b", "000000000000", "add")).toEqual({ ok: false, code: "REPORT_ITEM_NOT_FOUND" });
 });
 
+test("two runs finished in the same millisecond: the later request is the latest report (the flaky CI order)", () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+    store.setSetting(ws, GROWN_LIBRARY_SETTING, JSON.stringify([{ id: "flow-xhs", kind: "grown", name: "xiaohongshu-favourites-topics",
+      manifest: { summary: "按话题整理小红书收藏" } }]));
+    const tick = (ms: number) => vi.setSystemTime(new Date(Date.parse("2026-11-06T10:00:00.000Z") + ms));
+    const directory = (taskId: string) => { const dir = mkdtempSync(path.join(tmpdir(), `report-${taskId}-`)); dirs.push(dir); writeFileSync(path.join(dir, "总览.md"), "# x"); writeFileSync(path.join(dir, "audit.json"), "{}"); return dir; };
+    const request = (taskId: string) => store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `req-${taskId}`, type: "agent.task.requested",
+      entityId: taskId, payload: { taskId, title: "整理", category: "read_research_organize", workOrderId: "" } });
+    const complete = (taskId: string) => store.appendEvent({ ownerId: owner, workspaceId: ws, idempotencyKey: `done-${taskId}`, type: "agent.task.completed",
+      entityId: taskId, payload: { taskId, directory: directory(taskId), reviewRequired: false, artifacts: [] } });
+    tick(0); request("flow-xhs-a");
+    tick(1); complete("flow-xhs-a"); request("flow-xhs-b"); complete("flow-xhs-b");
+    expect(listReports(TEST_CTX).map((report) => report.id)).toEqual(["flow-xhs-b"]);
+  } finally { vi.useRealTimers(); }
+});
+
 test("Skill 库 offers the favourites topic workflow only while nothing reads the favourites, for the media-like line when there is one", () => {
   const lines = [{ id: "research", label: "研究者" }, { id: "line-x", label: "自媒体创作者" }];
   expect(favouritesOffer([], lines)).toEqual({ lineId: "line-x" });
