@@ -341,8 +341,9 @@ export function sanitizeDateExtraction(value: unknown, known: Known, options: { 
     quote: item.quote, note: `${RELATIVE_NOTE}${item.quote.slice(0, 120)}` }));
   const recurring = attempt(out.recurring.flatMap((meeting) => acrossMidnight(openEnded(meeting, known.today))), (meeting) => checkMeeting(meeting, known));
   // The same for one the model already put in `undated[]` (as the Skill asks): its relative words are kept, so it is asked whatever its
-  // kind — a class 「下周五补课」 is not a graded part, and was skipped without a word (W-230).
-  const relativeNote = (item: UndatedItem): UndatedItem => !item.note && !item.sourceRef.startsWith("reply-") && RELATIVE_DAY_WORDS.test(item.quote)
+  // kind — a class 「下周五补课」 is not a graded part, and was skipped without a word (W-230). The model's own note gives way: on the
+  // 2026-11-06 rerun it wrote 「下周五 14:30 至 15:45，Engineering Hall B201。」 there, and the item was again never asked (W-232).
+  const relativeNote = (item: UndatedItem): UndatedItem => !item.note?.startsWith(RELATIVE_NOTE) && !item.sourceRef.startsWith("reply-") && RELATIVE_DAY_WORDS.test(item.quote)
     ? { ...item, note: `${RELATIVE_NOTE}${item.quote.slice(0, 120)}` } : item;
   const undated = [...attempt(out.undated ?? [], (item) => checkSource(known, item.sourceRef, item.quote, item.title)).map(relativeNote), ...askedUndated];
   // A caller that records what was dropped (the interview's) keeps an empty answer; the default refuses it, so a repair can follow.

@@ -233,6 +233,12 @@ describe("what a person says the way people say it is recorded, and what is not 
       quote: "下周五下午 2:30–3:45 补一次课", note: "" }] }), { today: known.today, sources }, { allowEmpty: true });
     expect(extraction.undated).toEqual([expect.objectContaining({ kind: "class", note: "relative:下周五下午 2:30–3:45 补一次课" })]);
   });
+  test("the model's own note on a relative undated item gives way to the file's words (W-232)", () => {
+    const sources = { ...known.sources, "src-9": "因教室冲突，下周五下午 2:30–3:45 补一次课，地点 Engineering Hall B201。" };
+    const { extraction } = sanitizeDateExtraction(out({ dates: [], undated: [{ id: "u", kind: "class", title: "ECE 555 补课", project: "ece555", sourceRef: "src-9",
+      quote: "下周五下午 2:30–3:45 补一次课", note: "下周五 14:30 至 15:45，Engineering Hall B201。" }] }), { today: known.today, sources }, { allowEmpty: true });
+    expect(extraction.undated).toEqual([expect.objectContaining({ note: "relative:下周五下午 2:30–3:45 补一次课" })]);
+  });
   test("a deadline written as a span that ends where it starts is kept as the moment (W-230)", () => {
     const sources = { ...known.sources, "src-9": "Homework 5 截止时间：2026-11-21 23:59，在 Canvas 提交。" };
     const due = (id: string, endTime: string) => item({ id, date: "2026-11-21", startTime: "23:59", endTime, sourceRef: "src-9",
