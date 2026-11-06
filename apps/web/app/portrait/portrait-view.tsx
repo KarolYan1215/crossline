@@ -107,10 +107,16 @@ const CREDIBILITY = "基于访谈的推断，不是标准化心理测验";
 const RHYTHM_CREDIBILITY = "按睡眠记录与自评校准的模型估计，非医学诊断";
 const groupStyle = (type: PortraitType | null) => type ? { ["--group" as string]: type.group.colour, ["--group-tint" as string]: type.group.tint } : undefined;
 /** What the curve rests on, in one line. */
-const rhythmBasis = (rhythm: EnergyRhythm, t: Translate) => rhythm.nights
+export const rhythmBasis = (rhythm: EnergyRhythm, t: Translate) => rhythm.nights
   ? rhythm.reports.length ? t("依据近四周 {{nights}} 晚睡眠记录与 {{reports}} 次自评；三过程模型（Åkerstedt 等，2004）", { nights: rhythm.nights, reports: rhythm.reports.length })
     : t("依据近四周 {{nights}} 晚睡眠记录；三过程模型（Åkerstedt 等，2004）", { nights: rhythm.nights })
-  : t("尚无睡眠记录：按 23:30–7:30 的通用作息画出；三过程模型（Åkerstedt 等，2004）");
+  // The night the person told the interview (`sleep_window`) is what the curve is drawn on when it is on record: the line used to name the
+  // typical 23:30–7:30 night under a curve drawn on 1:00–8:30 (2026-11-06 walkthrough, W-244).
+  : rhythm.sleep.from !== 23.5 || rhythm.sleep.to !== 7.5
+    ? t("尚无睡眠记录：按访谈里说的 {{from}}–{{to}} 作息画出；三过程模型（Åkerstedt 等，2004）", { from: hourClock(rhythm.sleep.from), to: hourClock(rhythm.sleep.to) })
+    : t("尚无睡眠记录：按 23:30–7:30 的通用作息画出；三过程模型（Åkerstedt 等，2004）");
+/** 25.5 → 「1:30」: an hour of the night as a clock. */
+const hourClock = (hours: number) => { const minutes = Math.round((((hours % 24) + 24) % 24) * 60); return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`; };
 /** The paper colour of style A, also the background of the exported images. */
 const PAPER = "#F6F2EA";
 const roleOf = (line: Line, t: Translate) => line.hard ? t("硬约束") : line.rank === 1 ? t("底座") : line.rank ? t("第 {{rank}}", { rank: line.rank }) : t("平行");

@@ -4,6 +4,8 @@ import { typeFromScores } from "@crossline/core";
 import { LocaleProvider } from "../locale-context";
 import { DivergingAxes, ValuesRadar } from "./portrait-charts";
 import { rhythmStats } from "./poster-geometry";
+import { rhythmBasis } from "./portrait-view";
+import { tFor } from "@crossline/core";
 
 /** The portrait's code-written words in English (docs/i18n.md); the report's own text is shown as written. */
 const en = (node: React.ReactNode) => renderToStaticMarkup(<LocaleProvider locale="en">{node}</LocaleProvider>);
@@ -28,4 +30,11 @@ test("the axes name each pole by its English word alone, and the radar names Sch
   expect(radar).toContain("Self-direction");
   expect(radar).toContain("Achievement");
   expect(radar).not.toContain("自主");
+});
+
+test("with no night recorded, the curve's line names the night told in the interview when there is one (W-244)", () => {
+  const base = { curve: [], peak: { start: 20, end: 23 }, thresholds: { low: 9.5, high: 12.5 }, reports: [], nights: 0, chronotype: null, debt: { perNight: 0, nights: 0 } };
+  expect(rhythmBasis({ ...base, sleep: { from: 25, to: 8.5 } }, tFor("zh"))).toContain("按访谈里说的 1:00–8:30 作息画出");
+  expect(rhythmBasis({ ...base, sleep: { from: 23.5, to: 7.5 } }, tFor("zh"))).toContain("23:30–7:30 的通用作息");
+  expect(rhythmBasis({ ...base, sleep: { from: 25, to: 8.5 } }, tFor("en"))).toContain("the 1:00–8:30 night told in the interview");
 });

@@ -386,6 +386,7 @@
   "依据近四周 {{nights}} 晚睡眠记录与 {{reports}} 次自评；三过程模型（Åkerstedt 等，2004）": "Based on {{nights}} nights of sleep records and {{reports}} self-reports over four weeks; three-process model (Åkerstedt et al., 2004)",
   "依据近四周 {{nights}} 晚睡眠记录；三过程模型（Åkerstedt 等，2004）": "Based on {{nights}} nights of sleep records over four weeks; three-process model (Åkerstedt et al., 2004)",
   "尚无睡眠记录：按 23:30–7:30 的通用作息画出；三过程模型（Åkerstedt 等，2004）": "No sleep records yet: drawn for a typical 23:30–7:30 night; three-process model (Åkerstedt et al., 2004)",
+  "尚无睡眠记录：按访谈里说的 {{from}}–{{to}} 作息画出；三过程模型（Åkerstedt 等，2004）": "No sleep records yet: drawn for the {{from}}–{{to}} night told in the interview; three-process model (Åkerstedt et al., 2004)",
   "硬约束": "Hard constraint",
   "平行": "In parallel",
   "代表这一类型的卡通形象": "Cartoon figure for this type",

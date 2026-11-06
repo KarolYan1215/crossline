@@ -16,7 +16,7 @@ const PERSON_LABEL: Record<string, string> = {
   name: "称呼", nickname: "称呼", city: "所在城市", location: "所在地", timezone: "时区", age: "年龄", gender: "性别", hairstyle: "发型",
   clothing_preference: "穿着", appearance: "外形", appearance_skipped: "外形", school: "学校", major: "专业", degree: "学历", education: "教育",
   occupation: "职业", job: "工作", role: "角色", company: "公司", advisor: "导师", language: "语言", mbti: "自评类型", strengths: "长处",
-  weaknesses: "短板", hobbies: "爱好", family: "家庭", health: "健康", sleep: "睡眠", character: "形象"
+  weaknesses: "短板", hobbies: "爱好", family: "家庭", health: "健康", sleep: "睡眠", sleep_window: "睡眠", character: "形象"
 };
 const SLOT_PREFIX: Array<[string, string]> = [["flywheel_", "线间关系"], ["date_", "日期"], ["step_answer_", "回答"], ["deadline_", "截止"],
   ["undated_", "待定日期"], ["gap_", "补充回答"]];
