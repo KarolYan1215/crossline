@@ -40,12 +40,27 @@ const offer = (asks: Ask[], id: string) => asks.find((ask) => ask.id === id)!;
 test("a proposed watch is a 盯住 / 不要 card; the scout's proposals wait for 视野外 instead", () => {
   const store = setup();
   saveWatchList(store, ws, [watch(), watch({ id: "explore:research:labs", origin: "scout", explore: true, title: "城市实验室开放日" })]);
-  const asks = opportunityNeedAsks(TEST_CTX);
+  const asks = opportunityNeedAsks(TEST_CTX, NOW);
   expect(asks.map((ask) => ask.entityId)).toEqual(["need:research:intern"]);
   expect(answerOpportunityNeed(TEST_CTX, asks[0]!, "track", {})).toEqual({ ok: true });
   expect(readWatchList(store, ws)[0]?.state).toBe("active");
   expect(loadOutOfView(TEST_CTX, NOW).watches.map((item) => item.id)).toEqual(["explore:research:labs"]);
   expect(loadLineWatches(TEST_CTX).research?.map((item) => item.id)).toEqual(["need:research:intern"]);
+});
+
+test("two or more proposed watches are one card: 都盯住 tracks them all, 逐个看 splits it; one unanswered for 14 days stops asking but stays proposed (W-228)", () => {
+  const store = setup();
+  saveWatchList(store, ws, [watch(), watch({ id: "need:research:conf", title: "学术会议投稿" }),
+    watch({ id: "need:research:old", title: "旧的提议", createdAt: "2026-10-10T00:00:00.000Z" })]);
+  const [card] = opportunityNeedAsks(TEST_CTX, NOW);
+  expect(opportunityNeedAsks(TEST_CTX, NOW)).toHaveLength(1);
+  expect(card).toMatchObject({ entityId: "batch", title: "2 个机会来源等本人决定要不要盯" });
+  expect(card!.items!.map((item) => item.title)).toEqual(["暑期研究实习", "学术会议投稿"]);
+  expect(answerOpportunityNeed(TEST_CTX, card!, "split", {})).toEqual({ ok: true });
+  expect(opportunityNeedAsks(TEST_CTX, NOW).map((ask) => ask.entityId)).toEqual(["need:research:intern", "need:research:conf"]);
+  expect(answerOpportunityNeed(TEST_CTX, card!, "track_all", {})).toEqual({ ok: true });
+  expect(readWatchList(store, ws).map((item) => [item.id, item.state])).toEqual([["need:research:intern", "active"], ["need:research:conf", "active"], ["need:research:old", "proposed"]]);
+  expect(opportunityNeedAsks(TEST_CTX, NOW)).toEqual([]);
 });
 
 test("少来 takes a one-tap reason from a choice field, leaves the inbox, is listed for the review, and undo puts it back", async () => {

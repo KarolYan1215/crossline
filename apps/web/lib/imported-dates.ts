@@ -27,7 +27,28 @@ export type PendingItem = {
 };
 export type PendingBatch = { id: string; documentCount: number; items: PendingItem[]; questions: string[]; dropped: string[] };
 
-type ExtractedPayload = { documentIds?: string[]; dates?: DateCandidate[]; recurring?: RecurringMeeting[]; questions?: string[]; dropped?: Array<{ title?: string }> };
+type Dropped = { title?: string; code?: string };
+type ExtractedPayload = { documentIds?: string[]; dates?: DateCandidate[]; recurring?: RecurringMeeting[]; questions?: string[]; dropped?: Dropped[] };
+
+/** Why a reading left an item out, in the person's words (W-228): every drop used to be called 「no sentence states this day」. */
+const DROP_WHY: Record<string, string> = {
+  DATE_QUOTE_DOES_NOT_SUPPORT_DATE: "原文里找不到写着这一天的句子", DATE_TIME_INVALID: "时间不完整：没有结束时间，或结束不晚于开始",
+  DATE_INVALID: "起止日期不完整", DATE_OUT_OF_RANGE: "日期离今天太远，可能年份读错了", DATE_UNKNOWN_SOURCE: "引用对不上原文",
+  DATE_QUOTE_NOT_VERBATIM: "引用对不上原文", DATE_NOTHING_VERIFIABLE: "一条都没能在原文里核实", OFF_HOURS: "在本人说的可用时间之外，当作作息没有写入",
+  NOT_KEPT: "没通过检查"
+};
+/** The drops as list lines, newest first, one per title; a duplicate is the same item twice and is not listed. */
+function droppedLines(lists: Dropped[][], locale: Locale, recorded: Set<string> = new Set()): string[] {
+  const t = tFor(locale);
+  const seen = new Set<string>();
+  return lists.flat().flatMap((item) => {
+    const title = typeof item?.title === "string" && item.title.trim() ? item.title.trim() : t("（未命名的一项）");
+    if (item?.code === "DATE_DUPLICATE_ID" || seen.has(title) || recorded.has(title)) return [];
+    seen.add(title);
+    const why = item?.code ? DROP_WHY[item.code] : undefined;
+    return [why ? t("{{title}}（{{why}}）", { title, why: t(why) }) : title];
+  });
+}
 
 
 /** A class that already met is history, not a plan: only today and later reach the calendar. */
@@ -58,8 +79,8 @@ export function loadPendingDateBatch(ctx: AccessContext): PendingBatch | null {
       quote: item.quote, sourceRef: item.sourceRef, note: item.location, checked: item.confidence !== "low", blocks: days.length };
   });
   return { id: batch.entityId, documentCount: payload.documentIds?.length ?? 0, items: [...recurring, ...dates], questions: payload.questions ?? [],
-    // The titles, not just a count: 「另有 6 项…已丢弃」 left the person no way to tell what to add by hand (W-10).
-    dropped: (payload.dropped ?? []).map((item) => (typeof item?.title === "string" && item.title.trim() ? item.title.trim() : tFor(locale)("（未命名的一项）"))) };
+    // The titles, not just a count: 「另有 6 项…已丢弃」 left the person no way to tell what to add by hand (W-10). Each with why (W-228).
+    dropped: droppedLines([payload.dropped ?? []], locale) };
 }
 
 /** Writes the confirmed items and records the decision. Returns how many calendar blocks were added. */
@@ -112,22 +133,31 @@ function writeItems(ctx: AccessContext, batchId: string, payload: ExtractedPaylo
   }
 
   const plan = store.listPlanVersions(ctx.workspaceId)[0];
+  let written = 0;
   if (plan && blocks.length) {
     const existing = ((plan.payload as { blocks?: PersistedScheduleBlock[] }).blocks ?? []);
     const known = new Set(existing.map((block) => block.id));
     // A syllabus lists the class both as a weekly pattern and as each dated lecture: one slot, one block — the dated one, which says
-    // what that lecture covers. Twice, the day panel counted 2.5 fixed hours for one 75-minute class (2026-10-15 walkthrough).
+    // what that lecture covers. Twice, the day panel counted 2.5 fixed hours for one 75-minute class (2026-10-15 walkthrough). The dated
+    // one wins whichever batch came first (W-228: a midterm adopted after its class's weekly pattern was dropped for the class's block).
     const slot = (block: PersistedScheduleBlock) => `${block.day}|${block.start}|${block.end}`;
-    const taken = new Set(existing.filter((block) => block.id.startsWith("import:")).map(slot));
-    const fresh = blocks.filter((block) => !known.has(block.id)).filter((block) => {
-      if (taken.has(slot(block))) return false;
-      taken.add(slot(block));
+    const weekly = (block: PersistedScheduleBlock) => block.id.split(":").length === 4; // import:<batch>:<meeting>:<day>
+    const holder = new Map(existing.filter((block) => block.id.startsWith("import:")).map((block) => [slot(block), block]));
+    const replaced = new Set<string>();
+    const ordered = [...blocks.filter((block) => !weekly(block)), ...blocks.filter(weekly)];
+    const fresh = ordered.filter((block) => !known.has(block.id)).filter((block) => {
+      const held = holder.get(slot(block));
+      if (held && !(weekly(held) && !weekly(block))) return false;
+      if (held) replaced.add(held.id);
+      holder.set(slot(block), block);
       return true;
     });
     mergeIntoExisting(ctx, fresh);
-    store.savePlanVersion({ ...plan, payload: { ...(plan.payload as object), blocks: [...existing, ...fresh] } });
+    store.savePlanVersion({ ...plan, payload: { ...(plan.payload as object), blocks: [...existing.filter((block) => !replaced.has(block.id)), ...fresh] } });
+    written = fresh.length;
   }
-  return { blocks: blocks.length, facts };
+  // What reached the calendar, not what was read: the count said a block was written that the slot rule had left out.
+  return { blocks: written, facts };
 }
 const dateSlot = (item: DateCandidate) => `date_${item.date.replaceAll("-", "")}_${item.kind}`;
 
@@ -181,13 +211,13 @@ export function loadAdoptedDates(ctx: AccessContext): { items: AdoptedItem[]; dr
   const today = todayIso();
   const seen = new Set<string>();
   const items: AdoptedItem[] = [];
-  let dropped: string[] = [];
+  const drops: Dropped[][] = [];
   for (const event of [...store.listEvents(ctx.workspaceId, { type: "dates.extracted" })].reverse()) {
     const decision = decisions.get(event.entityId);
     if (!decision || decision.superseded) continue;
     const included = new Set(decision.included ?? []);
     const payload = event.payload as ExtractedPayload;
-    if (!dropped.length) dropped = (payload.dropped ?? []).map((item) => (typeof item?.title === "string" && item.title.trim() ? item.title.trim() : tFor(locale)("（未命名的一项）")));
+    drops.push(payload.dropped ?? []);
     const rows: AdoptedItem[] = [
       ...(payload.recurring ?? []).filter((item) => item.to >= today).map((item) => ({ ...pendingOf(item, "recurring", locale), batchId: event.entityId, adopted: included.has(item.id) })),
       ...(payload.dates ?? []).filter((item) => item.date >= today).map((item) => ({ ...pendingOf(item, "date", locale), batchId: event.entityId, adopted: included.has(item.id) }))
@@ -199,6 +229,9 @@ export function loadAdoptedDates(ctx: AccessContext): { items: AdoptedItem[]; dr
       items.push(row);
     }
   }
+  // A reading with nothing left to offer writes no batch, only its drops (W-228); an item recorded since is no longer listed as dropped.
+  const unrecorded = [...store.listEvents(ctx.workspaceId, { type: "dates.unrecorded" })].reverse().map((event) => (event.payload as { dropped?: Dropped[] }).dropped ?? []);
+  const dropped = droppedLines([...unrecorded, ...drops], locale, new Set(items.map((item) => item.title)));
   return { items: items.sort((a, b) => Number(b.adopted) - Number(a.adopted)), dropped };
 }
 

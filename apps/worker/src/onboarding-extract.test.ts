@@ -82,6 +82,24 @@ test("files over one run's budget wait for the next run, which follows at once",
   expect((second.match(/"fileName"/g) ?? []).length).toBe(2);
 });
 
+test("a file longer than one run reads is read on in the next runs, never marked done after its first part (W-228)", async () => {
+  const body = Array.from({ length: 700 }, (_, index) => `Week ${index}: reading and practice for the course.`).join("\n");
+  store.saveSourceDocument({ id: "d1", ownerId: "o", workspaceId, kind: "text", fileName: "syllabus.txt", mediaType: "text/plain", sha256: "s", uri: "file:///s",
+    extractedText: `${body}\nFINAL EXAM 12/10 in class`, extractionStatus: "done", createdAt: "2026-10-02T00:00:00.000Z" });
+  const { rpc, prompts } = runtime([round, round], [facts(), facts(), facts(), facts()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "await" });
+  await run({ sessionId: "s", text: "课程大纲传了" });
+  await extractionSettled(workspaceId);
+  const extractions = () => prompts().filter((prompt) => prompt.includes(EXTRACT));
+  expect(extractions()[0]).not.toContain("FINAL EXAM");
+  for (let guard = 0; guard < 4 && !extractions().some((prompt) => prompt.includes("FINAL EXAM")); guard += 1) {
+    await requestExtraction(workspaceId, (preferred) => createOnboardingExtractor(store, workspaceId, "C:\\repo", () => rpc).runOnce(preferred), "s");
+    await extractionSettled(workspaceId);
+  }
+  expect(extractions().some((prompt) => prompt.includes("FINAL EXAM"))).toBe(true);
+  expect(extractBacklog(store, workspaceId, "s").files).toBe(0);
+});
+
 test("the lookups find an earlier sentence by its words or its number, and whatever they return may be cited", () => {
   expect(searchTerms("组会 Tuesday 9.00")).toEqual(expect.arrayContaining(["组会", "tuesday", "9", "00"]));
   const corpus = [

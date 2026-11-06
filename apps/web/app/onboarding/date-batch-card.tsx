@@ -37,9 +37,9 @@ export function DateBatchCard({ batch, onDecide, onRedo, busy }: {
       </li>)}
     </ul>
     {batch.dropped.length > 0 && <details className="ob-dates-dropped">
-      <summary className="ob-muted">{t("另有 {{count}} 项在原文里找不到写着这一天的句子，没有写入", { count: batch.dropped.length })}</summary>
+      <summary className="ob-muted">{t("另有 {{count}} 项没有写入", { count: batch.dropped.length })}</summary>
       <ul>{batch.dropped.map((title, index) => <li key={`${index}:${title}`}>{title}</li>)}</ul>
-      <small className="ob-muted">{t("需要的话，在回答里写出日期即可补上。")}</small>
+      <small className="ob-muted">{t("需要的话，在回答里补上缺的部分即可。")}</small>
     </details>}
     {batch.questions.length > 0 && <div className="ob-date-questions"><b>{t("待确认：")}</b><ul>{batch.questions.map((question) => <li key={question}>{question}</li>)}</ul></div>}
     <footer>

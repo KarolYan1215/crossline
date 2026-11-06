@@ -746,6 +746,13 @@ test("a course's or the person's own deadline that passed with work open is aske
       payload: { deadline: "2026-10-05", why: id === "exam" ? "course" : "person" } });
   }
   const overdue = () => collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "milestone_overdue");
+  // Two passed deadlines are one card listing both (W-228); 「逐个处理」 gives each its own card with its choices.
+  const folded = collectAsks(TEST_CTX, NOW).find((ask) => ask.id.startsWith("fold:overdue:"))!;
+  expect(folded).toMatchObject({ kind: "overdue_task", entityId: "batch", title: "2 项截止已过，等本人决定", dueDay: "2026-10-05" });
+  expect(folded.items!.map((item) => [item.title, item.href])).toEqual([["ECE 555 期中", "/milestones?open=exam"], ["组会报告", "/milestones?open=talk"]]);
+  expect(overdue()).toEqual([]);
+  expect(await answerAsk(TEST_CTX, folded.id, "split", {}, NOW)).toMatchObject({ ok: true });
+  expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.id.startsWith("fold:overdue:"))).toBe(false);
   expect(overdue().map((ask) => [ask.id, ask.title])).toEqual([["overdue:exam:2026-10-05", "「ECE 555 期中」的截止 10/5 已过，还有 1 个任务没完成"],
     ["overdue:talk:2026-10-05", "「组会报告」的截止 10/5 已过，还有 1 个任务没完成"]]);
   expect(overdue()[0]!.why).toContain("课程给定的日期");

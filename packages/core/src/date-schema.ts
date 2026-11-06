@@ -123,7 +123,7 @@ function validDate(value: string): boolean {
 export function quoteSupportsDate(date: string, quote: string): boolean {
   const [, mm, dd] = date.split("-");
   const month = Number(mm), day = Number(dd);
-  const q = quote.toLowerCase();
+  const q = arabicDayNumbers(quote.toLowerCase());
   if (new RegExp(`(^|[^0-9])0?${month}\\s*[/\\-.]\\s*0?${day}(?![0-9])`).test(q)) return true;
   if (new RegExp(`0?${month}\\s*月\\s*0?${day}`).test(q)) return true; // i18n-ignore
   for (const name of [MONTHS[month - 1]!, MONTH_NAMES[month - 1]!]) {
@@ -132,6 +132,71 @@ export function quoteSupportsDate(date: string, quote: string): boolean {
   }
   return false;
 }
+
+const CN_DIGITS: Record<string, number> = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }; // i18n-ignore
+/** 「十一」 is 11, 「二十八」 28, 「三十一」 31: the numbers a month or a day is written with. */
+function cnNumber(text: string): number | undefined {
+  const ten = text.indexOf("十"); // i18n-ignore
+  if (ten < 0) return text.length === 1 ? CN_DIGITS[text] : undefined;
+  const tens = ten === 0 ? 1 : CN_DIGITS[text.slice(0, ten)];
+  const rest = text.slice(ten + 1);
+  const ones = rest ? CN_DIGITS[rest] : 0;
+  return tens === undefined || ones === undefined ? undefined : tens * 10 + ones;
+}
+/**
+ * Months and days written in Chinese numerals as digits, and 「号」 as 「日」 (W-228, 2026-11-05): a person types 「十一月十三号」 as often
+ * as 「11月13日」, and the check refused the one they wrote.
+ */
+function arabicDayNumbers(text: string): string {
+  return text.replace(/[零〇一二两三四五六七八九十]{1,3}(?=\s*(月|号|日|號))/gu, (match) => { const value = cnNumber(match); return value === undefined ? match : String(value); }) // i18n-ignore
+    .replace(/(\d{1,2})\s*[号號]/gu, "$1日"); // i18n-ignore
+}
+
+const DAY_MS = 86_400_000;
+const isoPlus = (today: string, days: number) => new Date(Date.parse(`${today}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+const CN_WEEKDAY: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 0, 天: 0 }; // i18n-ignore
+const EN_WEEKDAY = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+/**
+ * The days a sentence the person said names relative to the day they said it (W-228, 2026-11-05): 「明天」「后天」「下周五」「这周三」
+ * 「13号」「next Friday」. A reply is dated by when it was written, so these are as exact as a printed date; the check used to refuse them
+ * and the date was lost though the reply had been told it was noted. Files are not read this way: a file's 「next week」 has no known day.
+ */
+export function relativeDays(quote: string, today: string): Set<string> {
+  const q = arabicDayNumbers(quote.toLowerCase());
+  const days = new Set<string>();
+  if (!ISO.test(today)) return days;
+  const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
+  const monday = -((dow + 6) % 7);
+  const weekday = (target: number, weeksAhead: number) => isoPlus(today, monday + ((target + 6) % 7) + 7 * weeksAhead);
+  if (/今天|今晚|今早|今日|today|tonight/u.test(q)) days.add(today); // i18n-ignore
+  if (/明天|明早|明晚|明日|tomorrow/u.test(q)) days.add(isoPlus(today, 1)); // i18n-ignore
+  if (/(^|[^大])后天/u.test(q)) days.add(isoPlus(today, 2)); // i18n-ignore
+  if (/大后天/u.test(q)) days.add(isoPlus(today, 3)); // i18n-ignore
+  for (const match of q.matchAll(/(下下|下个?|这个?|本|今)?\s*(周|星期|礼拜|禮拜)([一二三四五六日天])/gu)) { // i18n-ignore
+    const target = CN_WEEKDAY[match[3]!]!;
+    const prefix = match[1] ?? "";
+    const ahead = prefix.startsWith("下下") ? [2] : prefix.startsWith("下") ? [1] : prefix ? [0] : [0, 1]; // i18n-ignore
+    for (const weeks of ahead) days.add(weekday(target, weeks));
+  }
+  for (const match of q.matchAll(/\b(next|this|coming)?\s*(sun|mon|tue|wed|thu|fri|sat)(day|nesday|urday|sday|rsday)?\b/g)) {
+    const target = EN_WEEKDAY.indexOf(match[2]!);
+    for (const weeks of match[1] === "next" ? [1] : match[1] ? [0] : [0, 1]) days.add(weekday(target, weeks));
+  }
+  // A bare day of the month (「13日」, 「13号」 folded into it above), not one after a month: the next such day from today.
+  for (const match of q.matchAll(/(^|[^0-9月/\-.])(\d{1,2})\s*日/gu)) { // i18n-ignore
+    const day = Number(match[2]);
+    for (let ahead = 0; ahead <= 62; ahead += 1) {
+      const candidate = isoPlus(today, ahead);
+      if (Number(candidate.slice(8, 10)) === day) { days.add(candidate); break; }
+    }
+  }
+  return days;
+}
+
+/** The person's words support a date when they print it, or, in a reply, name it relative to the day the reply was written. */
+const supportsDate = (date: string, quote: string, sourceRef: string, today: string) =>
+  quoteSupportsDate(date, quote) || (sourceRef.startsWith("reply-") && relativeDays(quote, today).has(date));
 
 type Known = { sources: Record<string, string>; today: string };
 
@@ -162,7 +227,7 @@ function checkDate(item: DateCandidate, known: Known): void {
   if (item.endTime && !item.startTime) reject("DATE_TIME_INVALID", `「${item.title}」有结束时间却没有开始时间。`); // i18n-ignore
   if (item.startTime && item.endTime && item.endTime <= item.startTime) reject("DATE_TIME_INVALID", `「${item.title}」的结束时间不晚于开始时间。`); // i18n-ignore
   checkSource(known, item.sourceRef, item.quote, item.title);
-  if (!quoteSupportsDate(item.date, item.quote)) {
+  if (!supportsDate(item.date, item.quote, item.sourceRef, known.today)) {
     reject("DATE_QUOTE_DOES_NOT_SUPPORT_DATE", `「${item.title}」的引用「${item.quote.slice(0, 60)}」里找不到 ${item.date} 这一天。`); // i18n-ignore
   }
 }
@@ -206,11 +271,30 @@ const OPEN_ENDED_DAYS = 182;
  * A weekly arrangement whose start is a date and whose end is not one is ongoing: a job has no end date, and the lite run of 2026-10-20
  * wrote 「持续进行中，结束时间」 (exactly the field's ten characters), which dropped the hard line's whole schedule as 「not a valid range」.
  */
-function openEnded(meeting: RecurringMeeting): RecurringMeeting {
-  if (!validDate(meeting.from) || validDate(meeting.to)) return meeting;
-  const [y, m, d] = meeting.from.split("-").map(Number) as [number, number, number];
-  return { ...meeting, to: new Date(Date.UTC(y, m - 1, d + OPEN_ENDED_DAYS)).toISOString().slice(0, 10) };
+function openEnded(meeting: RecurringMeeting, today: string): RecurringMeeting {
+  // A start in words (「即日起」, 「from now on」) or one long past (a standing meeting that began last year) starts today: only what is
+  // ahead is ever placed, and more than 120 days back is refused as a misread year (W-228).
+  const from = !validDate(meeting.from) || (validDate(meeting.to) && meeting.to >= today && meeting.from < isoPlus(today, -120)) ? today : meeting.from;
+  if (validDate(meeting.to)) return { ...meeting, from };
+  return { ...meeting, from, to: isoPlus(from, OPEN_ENDED_DAYS) };
 }
+
+/**
+ * An arrangement across midnight (a night shift 22:00–06:00, W-228) is two: the evening on its own weekdays and the early hours on the
+ * next. Both ends are times of one day everywhere downstream, so the check used to refuse it and the hard line's fixed schedule was lost.
+ */
+function acrossMidnight(meeting: RecurringMeeting): RecurringMeeting[] {
+  if (!TIME.test(meeting.startTime) || !TIME.test(meeting.endTime) || meeting.endTime >= meeting.startTime) return [meeting];
+  const evening = { ...meeting, endTime: "23:59" };
+  if (meeting.endTime === "00:00") return [evening];
+  return [evening, { ...meeting, id: `${meeting.id}-next`, weekdays: meeting.weekdays.map((day) => (day + 1) % 7), startTime: "00:00" }];
+}
+/** A dated item across midnight keeps its evening: the day it is on is the day it starts. */
+const dateAcrossMidnight = (item: DateCandidate): DateCandidate =>
+  TIME.test(item.startTime) && TIME.test(item.endTime) && item.endTime < item.startTime ? { ...item, endTime: "23:59" } : item;
+
+/** Why an item was not recorded: `reason` is the detail the model is shown, `code` what the person's screens word for themselves. */
+export type DateDrop = { id: string; title: string; reason: string; code: string };
 
 /**
  * Per-item: every date stands on its own quote, so one that cannot be verified is dropped and the rest are
@@ -218,11 +302,11 @@ function openEnded(meeting: RecurringMeeting): RecurringMeeting {
  * the file) threw away a hundred good rows and a four-minute run. What was dropped is reported, never hidden.
  * An answer in which nothing survives is still an error, because that is a model that misread the file.
  */
-export function sanitizeDateExtraction(value: unknown, known: Known):
-  { extraction: DateExtraction; dropped: Array<{ id: string; title: string; reason: string }> } {
+export function sanitizeDateExtraction(value: unknown, known: Known, options: { allowEmpty?: boolean } = {}):
+  { extraction: DateExtraction; dropped: DateDrop[] } {
   const out = shape(value);
   const ids = new Set<string>();
-  const dropped: Array<{ id: string; title: string; reason: string }> = [];
+  const dropped: DateDrop[] = [];
   const attempt = <T extends { id: string; title: string }>(items: T[], check: (item: T) => void): T[] => items.filter((item) => {
     try {
       if (ids.has(item.id)) reject("DATE_DUPLICATE_ID", `id「${item.id}」重复。`); // i18n-ignore
@@ -230,14 +314,15 @@ export function sanitizeDateExtraction(value: unknown, known: Known):
       ids.add(item.id);
       return true;
     } catch (error) {
-      dropped.push({ id: item.id, title: item.title, reason: (error as Error & { detail?: string }).detail ?? (error as Error).message });
+      dropped.push({ id: item.id, title: item.title, reason: (error as Error & { detail?: string }).detail ?? (error as Error).message, code: (error as Error).message });
       return false;
     }
   });
-  const dates = attempt(out.dates, (item) => checkDate(item, known));
-  const recurring = attempt(out.recurring.map(openEnded), (meeting) => checkMeeting(meeting, known));
+  const dates = attempt(out.dates.map(dateAcrossMidnight), (item) => checkDate(item, known));
+  const recurring = attempt(out.recurring.flatMap((meeting) => acrossMidnight(openEnded(meeting, known.today))), (meeting) => checkMeeting(meeting, known));
   const undated = attempt(out.undated ?? [], (item) => checkSource(known, item.sourceRef, item.quote, item.title));
-  if (out.dates.length + out.recurring.length > 0 && dates.length + recurring.length === 0) {
+  // A caller that records what was dropped (the interview's) keeps an empty answer; the default refuses it, so a repair can follow.
+  if (!options.allowEmpty && out.dates.length + out.recurring.length > 0 && dates.length + recurring.length === 0) {
     reject("DATE_NOTHING_VERIFIABLE", `一条都没能在原文里核实：${dropped.slice(0, 3).map((item) => item.reason).join("；")}`); // i18n-ignore
   }
   // A date names its course (「ECE 555 课堂期末考试」, not 「课堂期末考试」): two courses each have a final, and the calendar shows the title alone.
@@ -323,7 +408,9 @@ export function withoutDecidedDates(next: DateExtraction, decided: Array<DateCan
  * schedule the start standard asks for.
  */
 export function withoutOffHours(recurring: RecurringMeeting[], windows: Array<{ days: number[]; start: string; end: string }>,
-  projects: Array<{ id: string; name: string }>, hardLines: Array<{ id: string; label: string }> = []): RecurringMeeting[] {
+  projects: Array<{ id: string; name: string }>,
+  /** The lines whose own arrangements are kept: the interview passes every line (W-228), so a habit filed under 健康 is kept too. */
+  hardLines: Array<{ id: string; label: string }> = []): RecurringMeeting[] {
   const ofHardLine = (item: RecurringMeeting) => hardLines.some((line) =>
     item.project === line.id || item.project === line.label || (line.label.length >= 2 && item.title.includes(line.label)));
   const belongs = (item: RecurringMeeting) => ofHardLine(item) || Boolean(item.project) && projects.some((project) =>

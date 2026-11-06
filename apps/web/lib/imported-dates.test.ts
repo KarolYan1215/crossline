@@ -95,3 +95,27 @@ test("dates from files are adopted without a click; an item can be taken off the
   expect(planBlocks().map((block) => block.id)).toEqual(["import:b1:quiz"]);
   expect(loadAdoptedDates(TEST_CTX).items.filter((item) => item.adopted).map((item) => item.id)).toEqual(["quiz"]);
 });
+
+test("a quiz in the class's slot replaces the class's block even when the class was adopted first; the count is what reached the calendar (W-228)", () => {
+  extract();
+  expect(decideDateBatch(TEST_CTX, "b1", ["class"])).toEqual({ ok: true, blocks: 4, facts: 0 });
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, idempotencyKey: "dates:extracted:b2", type: "dates.extracted", entityId: "b2",
+    payload: { documentIds: [], recurring: [], questions: [], dates: [{ id: "q9", date: "2026-10-09", startTime: "14:30", endTime: "15:45", kind: "quiz",
+      title: "ECE 555 quiz 2", project: "", sourceRef: "src-2", quote: "10/9", confidence: "high", note: "" }] } });
+  expect(decideDateBatch(TEST_CTX, "b2", ["q9"])).toEqual({ ok: true, blocks: 1, facts: 1 });
+  const on9 = planBlocks().filter((block) => block.day === "2026-10-09");
+  expect(on9.map((block) => block.id)).toEqual(["import:b2:q9"]);
+  // The same quiz offered again writes nothing more, and says so.
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, idempotencyKey: "dates:extracted:b3", type: "dates.extracted", entityId: "b3",
+    payload: { documentIds: [], recurring: [], questions: [], dates: [{ id: "q9b", date: "2026-10-09", startTime: "14:30", endTime: "15:45", kind: "quiz",
+      title: "ECE 555 quiz 2 again", project: "", sourceRef: "src-2", quote: "10/9", confidence: "high", note: "" }] } });
+  expect(decideDateBatch(TEST_CTX, "b3", ["q9b"])).toMatchObject({ ok: true, blocks: 0 });
+});
+
+test("what readings could not record is listed with why, from every reading, and no longer once it was recorded (W-228)", () => {
+  extract();
+  decideDateBatch(TEST_CTX, "b1", ["exam", "class"]);
+  store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, idempotencyKey: "u1", type: "dates.unrecorded", entityId: "s1",
+    payload: { dropped: [{ title: "周四组会", code: "DATE_TIME_INVALID" }, { title: "ECE 555 上课", code: "DATE_INVALID" }, { title: "重复", code: "DATE_DUPLICATE_ID" }] } });
+  expect(loadAdoptedDates(TEST_CTX).dropped).toEqual(["周四组会（时间不完整：没有结束时间，或结束不晚于开始）", "（未命名的一项）", "Quiz 4"]);
+});

@@ -3,7 +3,7 @@ import {
   AVAILABILITY_PROPOSED_SETTING, AVAILABILITY_SETTING, INTERVIEW_SETTINGS, mergeInterviewSettings, readInterviewSettings, DEEP_SECTIONS, EMPTY_PROFILE_MODEL, PROFILE_SECTIONS, PROFILE_SECTIONS_SETTING, mergeProfileSections,
   type ProfileSection, type SectionRecord, GOAL_EDITS_SETTING, SECTION_EMPTY_RUNS_MAX, sectionClosed, citationWarnings, duplicateAttributes, mergeDateExtractions,
   resolveAvailability, sanitizeDateExtraction, withContentIds, withoutDecidedDates, withoutOffHours,
-  type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile,
+  type DateDrop, type DateExtraction, type OnboardingExtraction, type PendingGoalEdit, type ProfileModel, type StoredLineProfile,
   PROFILE_INSTRUMENTS_SETTING, mergeInstrumentAnswers, readInstrumentAnswers
 } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
@@ -143,13 +143,19 @@ export function persistExtraction(store: CrosslineStore, workspaceId: string, ex
  * answered, so re-reading the files never leaves two batches asking about the same dates.
  */
 export function persistFileDates(store: CrosslineStore, workspaceId: string, extraction: Pick<OnboardingExtraction, "fileDates" | "availability">,
-  context: Pick<PersistContext, "ownerId" | "documentIds" | "sources" | "today" | "reread">): void {
+  context: Pick<PersistContext, "ownerId" | "documentIds" | "sources" | "today" | "reread"> & { sessionId?: string }): void {
   const { ownerId, documentIds, sources, today, reread } = context;
   const read = extraction.fileDates;
   if (!read || (!read.dates.length && !read.recurring.length && !read.questions.length && !(read.undated ?? []).length)) return;
   let checked;
-  try { checked = sanitizeDateExtraction({ dates: read.dates, recurring: read.recurring, questions: read.questions, undated: read.undated ?? [] }, { sources, today }); }
-  catch { return; /* nothing it read could be verified: no batch, and the interview itself is not failed over it */ }
+  // Nothing verified is still recorded (W-228): the drops are what the person and the next round of the interview are told, where a
+  // `catch { return }` here once lost a whole reply's dates without a word.
+  try { checked = sanitizeDateExtraction({ dates: read.dates, recurring: read.recurring, questions: read.questions, undated: read.undated ?? [] }, { sources, today }, { allowEmpty: true }); }
+  catch (error) {
+    recordDateDrops(store, workspaceId, ownerId, context.sessionId, [...read.dates, ...read.recurring].map((item) =>
+      ({ id: item.id, title: item.title, reason: (error as Error).message, code: (error as Error).message })));
+    return;
+  }
   // Meals and sleep are what the available hours already leave out: only filtered against hours the person stated (this run's, the
   // interview's earlier proposal, or what they painted), never against the generic default.
   const stated = extraction.availability?.windows.length ? extraction.availability.windows : (() => {
@@ -169,14 +175,19 @@ export function persistFileDates(store: CrosslineStore, workspaceId: string, ext
   });
   // Ids from what each item is: a fresh run numbers from d1 again, and its d1 must not replace an earlier run's.
   const unseen = withoutDecidedDates(withContentIds(checked.extraction), decided);
+  // Every line's own arrangements are kept, not only a hard line's (W-228: 健康's weekly run was dropped as if it were a meal).
   const fresh = { ...unseen, recurring: stated ? withoutOffHours(unseen.recurring, stated,
     store.listProjects(workspaceId, { includeArchived: true }),
-    identityLines(store, workspaceId).filter((line) => line.hard).map((line) => ({ id: line.id, label: line.label }))) : unseen.recurring };
+    identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label }))) : unseen.recurring };
+  const offHours = unseen.recurring.filter((item) => !fresh.recurring.includes(item))
+    .map((item): DateDrop => ({ id: item.id, title: item.title, reason: "OFF_HOURS", code: "OFF_HOURS" }));
+  const dropped = [...checked.dropped, ...offHours];
+  recordDateDrops(store, workspaceId, ownerId, context.sessionId, dropped);
   if (!fresh.dates.length && !fresh.recurring.length && !fresh.questions.length && !(fresh.undated ?? []).length) return;
   const answered = new Set(store.listEvents(workspaceId, { type: "dates.decided" }).map((event) => event.entityId));
   const open = store.listEvents(workspaceId, { type: "dates.extracted" }).filter((event) => !answered.has(event.entityId));
   // A re-read replaces what nobody answered; any other run adds to it, so an earlier batch's dates are never lost to a later run.
-  const carried = reread ? [] : open.map((event) => event.payload as unknown as DateExtraction & { documentIds?: string[] });
+  const carried = reread ? [] : open.map((event) => event.payload as unknown as DateExtraction & { documentIds?: string[]; dropped?: DateDrop[] });
   const merged = mergeDateExtractions(carried, fresh);
   const batchId = randomUUID();
   for (const old of open.map((event) => event.entityId)) {
@@ -185,5 +196,22 @@ export function persistFileDates(store: CrosslineStore, workspaceId: string, ext
   }
   store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:extracted:${batchId}`, type: "dates.extracted", entityId: batchId,
     payload: { documentIds: [...new Set([...carried.flatMap((batch) => batch.documentIds ?? []), ...documentIds])], dates: merged.dates,
-      recurring: merged.recurring, questions: merged.questions, undated: merged.undated ?? [], past: merged.past ?? [], dropped: checked.dropped } });
+      recurring: merged.recurring, questions: merged.questions, undated: merged.undated ?? [], past: merged.past ?? [],
+      // What the batches it replaces could not record stays listed with it (only the newest list used to be kept).
+      dropped: [...new Map([...carried.flatMap((batch) => batch.dropped ?? []), ...dropped].map((item) => [item.title, item])).values()] } });
+}
+
+/** The event the drops of one reading are kept in: the date list shows them with their reasons, and the interview asks about them again. */
+export const DATES_UNRECORDED_EVENT = "dates.unrecorded";
+/** The same for facts, projects and hours keeping an extraction's answer left out (`prunedOnboardingItems`). */
+export const ONBOARDING_UNRECORDED_EVENT = "onboarding.unrecorded";
+
+/**
+ * What a reading could not record, said (W-228). A duplicate is the same item twice, and an off-hours arrangement a meal or a commute the
+ * hours already leave out; both are listed for the person but not asked about again.
+ */
+function recordDateDrops(store: CrosslineStore, workspaceId: string, ownerId: string, sessionId: string | undefined, dropped: DateDrop[]): void {
+  if (!dropped.length) return;
+  store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:unrecorded:${randomUUID()}`, type: DATES_UNRECORDED_EVENT, entityId: sessionId ?? "",
+    payload: { dropped: dropped.map(({ title, code }) => ({ title, code })) } });
 }

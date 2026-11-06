@@ -189,12 +189,17 @@ export async function flushPendingAnswers(ctx: AccessContext, send: (sessionId: 
 }
 
 /** Answers given on 待决事项 and not yet sent: they go in front of the person's next reply in the interview itself. */
-export function takePendingAnswers(ctx: AccessContext, sessionId: string): string {
+export function takePendingAnswers(ctx: AccessContext, sessionId: string,
+  /** False leaves them in place until the reply carrying them was taken (`clearPendingAnswers`): a round that never started lost them. */
+  options: { clear?: boolean } = {}): string {
   const store = getStore();
   const pending = readPending(ctx, sessionId, lastAssistantSeq(store.listOnboardingMessages(ctx.workspaceId, sessionId)));
   if (!Object.keys(pending.answers).length) return "";
-  store.setSetting(ctx.workspaceId, PENDING_ANSWERS, "null");
+  if (options.clear !== false) clearPendingAnswers(ctx);
   return validAnswers(pending.answers, interviewStatus(ctx)).join("\n");
+}
+export function clearPendingAnswers(ctx: AccessContext): void {
+  getStore().setSetting(ctx.workspaceId, PENDING_ANSWERS, "null");
 }
 
 /** Question ids already answered on 待决事项, so the interview screen does not show them again. */

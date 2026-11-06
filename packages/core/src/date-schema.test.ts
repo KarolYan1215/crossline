@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { DATE_EXTRACTION_SCHEMA, expandRecurring, mergeDateExtractions, withoutOffHours, quoteSupportsDate, sanitizeDateExtraction, validateDateExtraction, type DateExtraction } from "./date-schema";
+import { DATE_EXTRACTION_SCHEMA, expandRecurring, mergeDateExtractions, withoutOffHours, quoteSupportsDate, relativeDays, sanitizeDateExtraction, validateDateExtraction, type DateExtraction } from "./date-schema";
 
 const known = {
   today: "2026-10-02",
@@ -202,4 +202,38 @@ test("dates the person already decided are not offered again, even reworded", as
   const left = withoutDecidedDates(next, decided);
   expect(left.dates.map((item) => item.id)).toEqual(["c"]);
   expect(left.recurring).toEqual([]);
+});
+
+describe("what a person says the way people say it is recorded, and what is not is said (W-228)", () => {
+  // 2026-10-02 is a Friday.
+  test("a reply's relative day is its date; Chinese numerals and 号 count", () => {
+    expect([...relativeDays("下周五交报告", "2026-10-02")]).toEqual(["2026-10-09"]);
+    expect(relativeDays("明天考试", "2026-10-02").has("2026-10-03")).toBe(true);
+    expect(relativeDays("后天", "2026-10-02").has("2026-10-04")).toBe(true);
+    expect([...relativeDays("周三组会", "2026-10-02")].sort()).toEqual(["2026-09-30", "2026-10-07"]);
+    expect([...relativeDays("这周日休息", "2026-10-02")]).toEqual(["2026-10-04"]);
+    expect([...relativeDays("13号截止", "2026-10-02")]).toEqual(["2026-10-13"]);
+    expect([...relativeDays("due next Friday", "2026-10-02")]).toEqual(["2026-10-09"]);
+    expect(relativeDays("我在做 monitor 和 wedding 相册", "2026-10-02").size).toBe(0);
+    expect(quoteSupportsDate("2026-11-13", "十一月十三号考试")).toBe(true);
+    expect(quoteSupportsDate("2026-12-25", "十二月二十五日交")).toBe(true);
+    expect(quoteSupportsDate("2026-11-13", "十一月十四号考试")).toBe(false);
+  });
+  test("a relative day is checked against today only in a reply, never in a file", () => {
+    const sources = { ...known.sources, "reply-3": "下周五交报告。", "src-9": "下周五交报告。" };
+    const date = (sourceRef: string) => item({ id: sourceRef, date: "2026-10-09", sourceRef, quote: "下周五交报告。", title: "报告" });
+    const { extraction, dropped } = sanitizeDateExtraction(out({ dates: [date("reply-3"), date("src-9")] }), { today: known.today, sources });
+    expect(extraction.dates.map((entry) => entry.id)).toEqual(["reply-3"]);
+    expect(dropped).toEqual([expect.objectContaining({ id: "src-9", code: "DATE_QUOTE_DOES_NOT_SUPPORT_DATE" })]);
+  });
+  test("a night shift is split at midnight, a start in words starts today, and nothing verified is reported, not thrown, when asked", () => {
+    const shift = { id: "w", title: "夜班", project: "", weekdays: [1, 3], startTime: "22:00", endTime: "06:00", from: "即日起", to: "", exceptions: [],
+      location: "", sourceRef: "src-3", quote: "Mon and Fri 2:30PM - 3:45PM", confidence: "high" as const };
+    const { extraction } = sanitizeDateExtraction(out({ dates: [], recurring: [shift] }), known);
+    expect(extraction.recurring.map((entry) => [entry.weekdays, entry.startTime, entry.endTime, entry.from])).toEqual([
+      [[1, 3], "22:00", "23:59", "2026-10-02"], [[2, 4], "00:00", "06:00", "2026-10-02"]]);
+    const bad = out({ dates: [item({ quote: "Week-8: 27th Oct.", date: "2026-10-28" })] });
+    expect(() => sanitizeDateExtraction(bad, known)).toThrow("DATE_NOTHING_VERIFIABLE");
+    expect(sanitizeDateExtraction(bad, known, { allowEmpty: true }).dropped).toEqual([expect.objectContaining({ code: "DATE_QUOTE_DOES_NOT_SUPPORT_DATE" })]);
+  });
 });

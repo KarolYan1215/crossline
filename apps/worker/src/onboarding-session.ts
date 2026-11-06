@@ -21,7 +21,7 @@ import { localeOf } from "./locale";
 import { adoptLineGoal, identityLines } from "./lines";
 import { checklistAnswered, checklistAskable, ledgerForModel, linesAnsweredUnread, recordReplyAnswers, recordRound, resolveRepeats, syncGapQuestions } from "./question-ledger";
 import { createOnboardingExtractor, extractionReached, requestExtraction } from "./onboarding-extract";
-import { personTimeZone, readProfileModel } from "./onboarding-persist";
+import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, personTimeZone, readProfileModel } from "./onboarding-persist";
 import { paceContext, storedProgress } from "./onboarding-pace";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -80,6 +80,13 @@ const SCREEN_WHY: Record<string, string> = {
 
 /** Earlier replies the extraction has not recorded yet, newest last, at most this many named. */
 const UNRECORDED_SHOWN = 8;
+/** Why an item was not recorded, as the dialogue is told it (model context, never shown to the person). */
+const UNRECORDED_WHY: Record<string, string> = {
+  DATE_QUOTE_DOES_NOT_SUPPORT_DATE: "no day could be read from the words cited", DATE_TIME_INVALID: "its time is incomplete (no end, or end before start)",
+  DATE_INVALID: "its dates are not a valid range", DATE_OUT_OF_RANGE: "the date is too far from today (wrong year?)",
+  DATE_UNKNOWN_SOURCE: "cited a sentence that does not exist", DATE_QUOTE_NOT_VERBATIM: "the cited words are not in the reply",
+  DATE_NOTHING_VERIFIABLE: "none of the dates could be verified", NOT_KEPT: "it failed a check and was left out"
+};
 
 export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId: string, cwd: string,
   getClient: () => CodexRpcBoundary | undefined, options: {
@@ -174,6 +181,16 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       identities: [...new Set(facts.map((fact) => fact.identityId))], projects: [...new Set(facts.map((fact) => fact.projectId).filter(Boolean))] };
   };
 
+  /**
+   * What the extraction could not record since `since`, one line each with why (W-228): the dialogue is told so it neither says 「已记下」
+   * about it nor lets it go, and asks the person once for what is missing. A duplicate and a meal outside the stated hours are not asked.
+   */
+  const unrecordedSince = (sessionId: string, since: string | undefined) => store.listEvents(workspaceId, { type: [DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT] })
+    .filter((event) => event.entityId === sessionId && (!since || event.createdAt > since))
+    .flatMap((event) => ((event.payload as { dropped?: Array<{ title?: string; code?: string }> }).dropped ?? []))
+    .filter((item) => item.title && item.code !== "OFF_HOURS" && item.code !== "DATE_DUPLICATE_ID")
+    .map((item) => `${String(item.title).slice(0, 100)} — ${UNRECORDED_WHY[item.code ?? ""] ?? item.code}`).slice(-UNRECORDED_SHOWN);
+
   const readProfile = (): ProfileModel => readProfileModel(store, workspaceId);
   const extractor = createOnboardingExtractor(store, workspaceId, cwd, getClient);
 
@@ -190,7 +207,8 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // Errors before the round starts are said in the interview's language, else the workspace's.
     const said = tFor(interviewLocale(store, workspaceId) ?? localeOf(store, workspaceId));
     if (!client) return blocked("CODEX_SUPERVISOR_UNAVAILABLE", said("Codex 运行时不可用。"));
-    const text = input.text.trim().slice(0, 4000);
+    // The web refuses a reply over 12,000 characters instead of cutting it; this bound only keeps a runaway caller in check.
+    const text = input.text.trim().slice(0, 16_000);
     const ownerId = store.getWorkspaceOwnerId(workspaceId);
     if (!ownerId) return blocked("WORKSPACE_OWNER_MISSING", said("找不到这个工作区的所有者。"));
 
@@ -302,7 +320,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // turn that failed shows its files once more), except on a re-read.
     if (input.reread) store.setSetting(workspaceId, EXTRACT_REREAD_SETTING, "1");
     queueExtractDocs(store, workspaceId, fresh.map(([, doc]) => doc.id)
-      .filter((id) => input.reread || !(extracted[id]! > 0 && firstSentenceOf(store, workspaceId, id) === extracted[id])));
+      .filter((id) => input.reread || !(extracted[id]! > 0 && firstSentenceOf(store, workspaceId, id) === extracted[id])), { fromStart: Boolean(input.reread) });
     const ask = () => requestExtraction(workspaceId, (preferred) => extractor.runOnce(preferred), sessionId);
     const extraction = extractMode === "off" ? Promise.resolve() : ask();
     const caughtUp = (timeoutMs?: number) => extractMode === "off" ? Promise.resolve(false)
@@ -323,8 +341,9 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
       lines: identityLines(store, workspaceId).map((line) => ({ id: line.id, label: line.label, goals: line.goals ?? [] })) });
     // What the app did to the last round and which replies the ledger lags behind: sent with every turn, only when there is something.
     const lastRound = coverage.lastRound;
+    const notRecorded = unrecordedSince(sessionId, coverage.heardAt);
     const roundNotes = () => ({ ...(lastRound && (lastRound.removed.length || lastRound.added.length) ? { lastRound } : {}),
-      ...(unrecorded.length ? { unrecorded } : {}) });
+      ...(unrecorded.length ? { unrecorded } : {}), ...(notRecorded.length ? { notRecorded } : {}) });
     const ids = { lines: identities().map((item) => item.id), projects: store.listProjects(workspaceId).map((project) => project.id) };
     const outputSchema = onboardingDialogueSchema(ids);
     const validateOutput = (output: unknown) => validateOnboardingDialogue(output, known);

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, onboardingDialogueSchema, onboardingExtractSchema, droppedOnboardingItems, keepOnboardingTurn, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
+import { ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, onboardingDialogueSchema, onboardingExtractSchema, droppedOnboardingItems, keepOnboardingTurn, prunedOnboardingItems, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
 
 const known = {
   identities: ["research", "startup", "media", "investment"],
@@ -206,4 +206,12 @@ test("droppedOnboardingItems counts what pruning left out across facts, question
     lineProfiles: [{ attributeCandidates: [1, 2] }], availability: { windows: [1, 2] } };
   expect(droppedOnboardingItems(original, kept as never)).toBe(3);
   expect(droppedOnboardingItems(original, original as never)).toBe(0);
+});
+
+test("what keeping a turn left out is named, one line each, so it can be recorded and asked again (W-228)", () => {
+  const original = { slotUpdates: [{ identityId: "research", projectId: "", slot: "deadline", value: "12 月中", status: "confirmed" },
+    { identityId: "research", projectId: "p.bad", slot: "goal", value: "投稿", status: "confirmed" }, { identityId: "research", projectId: "", slot: "x", value: "猜的", status: "inferred" }],
+    projectsDetected: [{ id: "p.bad", name: "西湖论文" }], availability: { windows: [{}, {}] } };
+  const kept = { slotUpdates: [original.slotUpdates[0]!], projectsDetected: [], availability: { windows: [{}] } } as never;
+  expect(prunedOnboardingItems(original, kept)).toEqual(["西湖论文", "goal：投稿", "availability × 1"]);
 });

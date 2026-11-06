@@ -12,7 +12,8 @@ import {
   readFormRuns, readWatchList, readWatchTuning, recordApplicationResult, recordEligibilityAnswer, recordOpportunityOutcome, setWatchState,
   surfacedOpportunities, undoLessEntry, watchOf, type StoredOpportunity, type WatchEdit
 } from "@crossline/db";
-import { getStore, planToday, saveGoalSettings, saveMilestoneEdit } from "./crossline";
+import { appNow, getStore, planToday, saveGoalSettings, saveMilestoneEdit } from "./crossline";
+import { foldAsks, foldFingerprint, foldId, isFolded, splitFold } from "./ask-fold";
 import { requestAutoBackplan } from "./approvals";
 import { identityLines } from "./lines";
 import { localeFor } from "./locale";
@@ -55,11 +56,22 @@ export function targetLabel(target: WatchTarget, t: ReturnType<typeof tFor>): st
 const whereOf = (watch: StoredWatch, t: ReturnType<typeof tFor>) =>
   (watch.targets ?? []).map((target) => targetLabel(target, t)).slice(0, 4).join(", ") || t("网页检索：{{query}}", { query: short(watch.query, 60) });
 
-/** Proposed watches the line's derivation wrote; the scout's and exploration's wait for 视野外 in the weekly review instead. */
-export function opportunityNeedAsks(ctx: AccessContext): Ask[] {
+/**
+ * How long a proposed watch is asked about (W-228, 2026-11-05). Left unanswered that long it stops asking and stays a proposal on the
+ * opportunities page — never declined for the person, since 「不要」 is remembered as a preference.
+ */
+export const WATCH_ASK_DAYS = 14;
+
+/**
+ * Proposed watches the line's derivation wrote; the scout's and exploration's wait for 视野外 in the weekly review instead. Two or more come
+ * as one card (`foldAsks`): 「都盯住」, or 「逐个看」 to answer each.
+ */
+export function opportunityNeedAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const t = tFor(localeFor(ctx));
   const sep = localeFor(ctx) === "en" ? " " : "";
-  return readWatchList(getStore(), ctx.workspaceId).filter((watch) => watch.state === "proposed" && (watch.origin === "derived" || watch.origin === "migrated") && !watch.explore).map((watch): Ask => ({
+  const since = new Date(now.getTime() - WATCH_ASK_DAYS * DAY).toISOString();
+  const members = readWatchList(getStore(), ctx.workspaceId).filter((watch) => watch.state === "proposed" && (watch.origin === "derived" || watch.origin === "migrated")
+    && !watch.explore && watch.createdAt >= since).map((watch): Ask => ({
     id: `oppneed:${watch.id}`, kind: "opportunity_need", entityId: watch.id, line: watch.lineId, urgency: "soon",
     raisedAt: watch.createdAt, fingerprint: `${watch.title}|${watch.query}|${watch.cycle?.opens ?? ""}`,
     important: watch.basis.milestoneIds.length > 0,
@@ -70,9 +82,29 @@ export function opportunityNeedAsks(ctx: AccessContext): Ask[] {
       { id: "decline", label: t("不要"), detail: t("记成偏好，不再推同类"), fields: [{ id: "note", label: t("原因"), kind: "text", required: false }] }
     ]
   }));
+  return foldAsks(ctx, "oppneed", members, (rest): Ask => ({
+    id: foldId("oppneed", rest), kind: "opportunity_need", entityId: "batch", urgency: "soon", raisedAt: rest.map((ask) => ask.raisedAt).sort().at(-1) ?? "",
+    fingerprint: foldFingerprint(rest), important: rest.some((ask) => ask.important),
+    items: rest.map((ask) => ({ id: ask.entityId, title: quotedOf(ask.title), ...(ask.line ? { line: ask.line } : {}), href: "/opportunities" })),
+    title: t("{{count}} 个机会来源等本人决定要不要盯", { count: rest.length }),
+    why: t("按各条主线的目标找到的来源，逐个列在下方。盯住后按周期去看，找到符合资格的会出现在早报和这里；{{days}} 天没回应就不再问，留在机会页。", { days: WATCH_ASK_DAYS }),
+    options: [
+      { id: "split", label: t("逐个看"), recommended: true, detail: t("拆成每条一张卡，盯住或不要") },
+      { id: "track_all", label: t("都盯住"), detail: t("每条按它的周期看") }
+    ]
+  }));
 }
 
+/** The title inside 「」 of a member's question, for the folded card's list. */
+const quotedOf = (title: string) => /「(.+)」/u.exec(title)?.[1] ?? title;
+
 export function answerOpportunityNeed(ctx: AccessContext, ask: Ask, optionId: string, values: Record<string, string>): { ok: true } | { ok: false; code: string } {
+  if (isFolded(ask)) {
+    if (optionId === "split") return splitFold(ctx, ask);
+    if (optionId !== "track_all") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+    for (const id of ask.fingerprint.split("|")) decideWatch(getStore(), ctx.workspaceId, ctx.principalId, id.replace(/^oppneed:/, ""), "active", new Date(), "");
+    return { ok: true };
+  }
   if (optionId !== "track" && optionId !== "decline") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
   const decided = decideWatch(getStore(), ctx.workspaceId, ctx.principalId, ask.entityId, optionId === "track" ? "active" : "retired", new Date(), values.note ?? "");
   return decided ? { ok: true } : { ok: false, code: "OPPORTUNITY_NEED_NOT_FOUND" };

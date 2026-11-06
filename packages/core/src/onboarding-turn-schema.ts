@@ -261,6 +261,8 @@ export type OnboardingTurnContext = {
   lastRound?: { removed: Array<{ text: string; why: string }>; added: string[] };
   /** Earlier replies the background extraction has not recorded yet: `abstract` does not hold what they said; the thread does. */
   unrecorded?: string[];
+  /** What the extraction read in earlier replies and could not record, each with why (「组会（周四）— no end time」): ask for it again. */
+  notRecorded?: string[];
   /** The person's reply, as they wrote it. */
   reply: { id: string; text: string };
   /**
@@ -742,6 +744,22 @@ export function droppedOnboardingItems(original: unknown, kept: Partial<Onboardi
   return lost("slotUpdates") + lost("questions") + lost("projectsDetected") + lost("flywheelCandidates") + lost("goalEdits")
     + Math.max(0, candidates(turn?.lineProfiles) - candidates(kept.lineProfiles))
     + Math.max(0, count(turn?.availability?.windows) - count(kept.availability?.windows));
+}
+/**
+ * What keeping a turn left out, one line each, for the record and for the interview's next round (W-228): a fact as 「slot：value」, a
+ * project by its name, an availability window by its times. Only the ones a person said something for; questions are the dialogue's own.
+ */
+export function prunedOnboardingItems(original: unknown, kept: Partial<OnboardingTurn>): string[] {
+  const turn = original as Partial<OnboardingTurn> | undefined;
+  const list = <T>(value: T[] | undefined): T[] => Array.isArray(value) ? value : [];
+  const factKey = (fact: { identityId?: string; slot?: string; value?: string }) => `${fact.identityId}|${fact.slot}|${fact.value}`;
+  const keptFacts = new Set(list(kept.slotUpdates).map(factKey));
+  const keptProjects = new Set(list(kept.projectsDetected).map((project) => project.id));
+  const facts = list(turn?.slotUpdates).filter((fact) => fact?.status === "confirmed" && !keptFacts.has(factKey(fact)))
+    .map((fact) => `${String(fact.slot)}：${String(fact.value).slice(0, 80)}`);
+  const projects = list(turn?.projectsDetected).filter((project) => project && !keptProjects.has(project.id)).map((project) => String(project.name || project.id));
+  const windows = Math.max(0, list(turn?.availability?.windows).length - list(kept.availability?.windows).length);
+  return [...projects, ...facts, ...(windows ? [`availability × ${windows}`] : [])];
 }
 /** At most this many items are dropped from a turn to keep it without a repair. */
 export const ONBOARDING_KEEP_EARLY_MAX = 2;

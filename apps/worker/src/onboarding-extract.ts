@@ -1,14 +1,15 @@
 // i18n-exempt: the interview's extraction runs unseen by the person: its instructions, lookups and repair messages go to the model, its failures to the log
+import { randomUUID } from "node:crypto";
 import {
   INTERVIEW_FLOW_STAGES, deepSectionsOf, flowOf, type InterviewFlow, CARD_TITLE, pendingItems, readInstrumentAnswers, PROFILE_INSTRUMENTS_SETTING,
-  AVAILABILITY_PROPOSED_SETTING, ONBOARDING_KEEP_EARLY_MAX, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, lineAttributes, numberedText, onboardingExtractSchema,
+  AVAILABILITY_PROPOSED_SETTING, ONBOARDING_KEEP_EARLY_MAX, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, prunedOnboardingItems, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
   ONBOARDING_INSIGHTS, readInsightRatings
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
 import {
-  EXTRACT_BACKOFF_MINUTES, EXTRACT_REREAD_SETTING, FINISH_RUNS_MAX, NOTES_SESSION, markFinishing, readFinishing, firstSentenceOf, pendingExtractDocs, readExtractDocs, readExtractState, writeExtractDocs, writeExtractState,
+  EXTRACT_BACKOFF_MINUTES, EXTRACT_REREAD_SETTING, FINISH_RUNS_MAX, NOTES_SESSION, markFinishing, readFinishing, firstSentenceOf, pendingExtractDocs, readExtractDocs, readExtractOffsets, readExtractState, writeExtractDocs, writeExtractOffsets, writeExtractState,
   type CrosslineStore, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument
 } from "@crossline/db";
 import { identityLines } from "./lines";
@@ -21,7 +22,7 @@ function hoursOnRecord(store: CrosslineStore, workspaceId: string): NonNullable<
     return (proposal?.windows ?? []).map((window) => ({ days: window.days, startMinute: minute(window.start), endMinute: minute(window.end), energy: window.energy }));
   } catch { return []; }
 }
-import { persistExtraction, personTimeZone, readProfileModel, readSectionRecords } from "./onboarding-persist";
+import { ONBOARDING_UNRECORDED_EVENT, persistExtraction, personTimeZone, readProfileModel, readSectionRecords } from "./onboarding-persist";
 import { sourceIds } from "./source-ids";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -36,7 +37,7 @@ import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
  */
 export const ONBOARDING_EXTRACT_SKILL = "crossline:crossline-onboarding-extract";
 
-/** Each file is cut to this much text per run, and a run reads at most this much in all; the rest waits for the next run. */
+/** A run reads at most this much of each file, and this much in all; the rest of a file waits for the next run (`EXTRACT_OFFSETS_SETTING`). */
 const TEXT_PER_DOCUMENT = 14_000;
 const TEXT_TOTAL = 60_000;
 const DOCUMENTS_PER_RUN = 12;
@@ -132,12 +133,13 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     const waitingDocs = !withFiles ? [] : pendingExtractDocs(store, workspaceId)
       .map((id) => [refOf.get(id), [...docsByRef.values()].find((doc) => doc.id === id)] as const)
       .filter((entry): entry is readonly [string, StoredSourceDocument] => Boolean(entry[0] && entry[1]));
+    const offsets = readExtractOffsets(store, workspaceId);
     let budget = TEXT_TOTAL;
     const taken: Array<readonly [string, StoredSourceDocument]> = [];
     for (const entry of waitingDocs) {
       if (taken.length && (budget <= 0 || taken.length >= DOCUMENTS_PER_RUN)) break;
       taken.push(entry);
-      budget -= Math.min(TEXT_PER_DOCUMENT, entry[1].extractedText.length);
+      budget -= Math.min(TEXT_PER_DOCUMENT, Math.max(0, entry[1].extractedText.length - (offsets[entry[1].id] ?? 0)));
     }
     // What each file's entry said when this run took it: a file queued again meanwhile (a re-read) is not marked done by this run.
     const takenAt = readExtractDocs(store, workspaceId);
@@ -164,10 +166,16 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       return { id: `reply-${message.seq}`, asked: questions, sentences: numberedText(cite(`reply-${message.seq}`, replySentences(message))) };
     });
     let left = TEXT_TOTAL;
+    /** Where each file taken continues next run, when this run does not reach its end. */
+    const continuesAt: Record<string, number> = {};
     const sources = taken.map(([ref, doc]) => {
-      const limit = Math.min(TEXT_PER_DOCUMENT, left);
-      left -= Math.min(limit, doc.extractedText.length);
-      const sentences = cite(ref, store.ensureEvidence(workspaceId, "document", doc.id, doc.extractedText).filter((sentence) => sentence.start < limit));
+      const from = offsets[doc.id] ?? 0;
+      const limit = Math.max(1, Math.min(TEXT_PER_DOCUMENT, left));
+      left -= Math.min(limit, Math.max(0, doc.extractedText.length - from));
+      const all = store.ensureEvidence(workspaceId, "document", doc.id, doc.extractedText);
+      const sentences = cite(ref, all.filter((sentence) => sentence.start >= from && sentence.start < from + limit));
+      const rest = all.find((sentence) => sentence.start >= from + limit);
+      if (rest) continuesAt[doc.id] = rest.start;
       return { id: ref, fileName: doc.fileName, kind: doc.kind, projectId: doc.projectId ?? "", sentences: numberedText(sentences) };
     });
     // A run owed to an ended interview (`markFinishing`) reads nothing new: it finalizes the portrait from what is on record.
@@ -220,6 +228,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
         return rated.length && !focus && !notes ? { observations: rated } : {}; })()
     };
     const ids = { lines: lines.map((line) => line.id) };
+    let pruned: string[] = [];
     const result = await runCodexSkill<OnboardingExtraction>(client, context, {
       skillName: ONBOARDING_EXTRACT_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: onboardingExtractSchema(ids),
       prepareInput: () => context, tools,
@@ -235,12 +244,15 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
           + "用 search_evidence 找本人在这些阶段说过的话，按引用写完整一节；本人确实没谈过的字段留空字符串或空数组，但这一节不能是 null。" });
         return valid;
       },
-      softAccept: (_rejection, output) => keepOnboardingExtraction(output, known),
+      // What keeping the answer left out is remembered (W-228): it is recorded below and the interview's next round asks it again.
+      softAccept: (_rejection, output) => { const kept = keepOnboardingExtraction(output, known); pruned = kept ? prunedOnboardingItems(output, kept) : []; return kept; },
       keepEarly: (rejection, output) => {
         // An owed section is worth the repair: keeping the answer early would skip the one chance to have it written.
         if (rejection.message === "ONBOARDING_SECTION_MISSING") return undefined;
         const kept = keepOnboardingExtraction(output, known);
-        return kept && droppedOnboardingItems(output, kept) <= ONBOARDING_KEEP_EARLY_MAX ? kept : undefined;
+        if (!kept || droppedOnboardingItems(output, kept) > ONBOARDING_KEEP_EARLY_MAX) return undefined;
+        pruned = prunedOnboardingItems(output, kept);
+        return kept;
       },
       onAudit: () => {}, timeoutMs: 60 * 60_000
     });
@@ -260,14 +272,24 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       if (confirmedHere) store.setSetting(workspaceId, PROFILE_CONFIRMED, JSON.stringify({ fingerprint: portraitFingerprint(readProfileModel(store, workspaceId)), at: new Date().toISOString() }));
       // Read again here, inside the transaction: the dialogue may have queued files while the model ran.
       const docs = readExtractDocs(store, workspaceId);
-      for (const [, doc] of taken) if (docs[doc.id] === takenAt[doc.id]) docs[doc.id] = firstSentenceOf(store, workspaceId, doc.id) ?? -1;
+      const nextOffsets = readExtractOffsets(store, workspaceId);
+      for (const [, doc] of taken) {
+        if (docs[doc.id] !== takenAt[doc.id]) continue;
+        // A file with more to read stays queued, and the next run starts where this one stopped.
+        if (continuesAt[doc.id] !== undefined) { docs[doc.id] = 0; nextOffsets[doc.id] = continuesAt[doc.id]!; continue; }
+        docs[doc.id] = firstSentenceOf(store, workspaceId, doc.id) ?? -1;
+        delete nextOffsets[doc.id];
+      }
       writeExtractDocs(store, workspaceId, docs);
+      writeExtractOffsets(store, workspaceId, nextOffsets);
       writeExtractState(store, workspaceId, sessionId, { upTo, failures: 0, ranAt: new Date().toISOString() });
       if (finishing) markFinishing(store, workspaceId, sessionId, finishing.runs + 1);
     });
     store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:extracted:${sessionId}:${upTo}:${new Date().toISOString()}`, type: "onboarding.extracted",
       entityId: sessionId, payload: { replies: pendingReplies.length, files: taken.length, facts: result.output.slotUpdates.length,
-        repairs: result.audit.repairs ?? 0, warnings: result.audit.warnings ?? [] } });
+        repairs: result.audit.repairs ?? 0, warnings: result.audit.warnings ?? [], pruned } });
+    if (pruned.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:unrecorded:${sessionId}:${upTo}:${randomUUID()}`, type: ONBOARDING_UNRECORDED_EVENT,
+      entityId: sessionId, payload: { dropped: pruned.map((title) => ({ title, code: "NOT_KEPT" })) } });
     const more = Boolean(nextSession());
     return { state: "done", sessionId, replies: pendingReplies.length, files: taken.length, facts: result.output.slotUpdates.length, more };
   }

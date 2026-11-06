@@ -38,6 +38,6 @@ export function FileReadList({ data, open, onChanged }: { data: NonNullable<Onbo
     <ul>{(all ? adopted : adopted.slice(0, SHOWN)).map(row)}</ul>
     {adopted.length > SHOWN && !all && <button type="button" className="ob-text" onClick={() => setAll(true)}>{t("展开全部 {{count}} 项", { count: adopted.length })}</button>}
     {left.length > 0 && <><p className="ob-muted">{t("读到了，但不确定，没有加入：")}</p><ul>{left.map(row)}</ul></>}
-    {data.dropped.length > 0 && <p className="ob-muted">{t("另有 {{count}} 项在原文里找不到写着这一天的句子，没有写入：{{titles}}。需要的话在回答里写出日期即可。", { count: data.dropped.length, titles: joinList(locale, data.dropped.slice(0, 5)) })}</p>}
+    {data.dropped.length > 0 && <p className="ob-muted">{t("另有 {{count}} 项没有写入：{{titles}}。需要的话在回答里补上缺的部分即可。", { count: data.dropped.length, titles: joinList(locale, data.dropped.slice(0, 5)) })}</p>}
   </details>;
 }

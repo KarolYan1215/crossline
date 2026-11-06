@@ -11,6 +11,12 @@ import type { CrosslineStore } from "./index";
  */
 export const EXTRACT_STATE_SETTING = "onboarding.extract";
 export const EXTRACT_DOCS_SETTING = "onboarding.extract.docs";
+/**
+ * Where the next run starts reading a file longer than one run reads (W-228): the character offset of its first sentence not read yet. A
+ * file is done only once its last part was read; it used to be marked done after its first 14,000 characters, and a syllabus's schedule
+ * table at the end was never read.
+ */
+export const EXTRACT_OFFSETS_SETTING = "onboarding.extract.offsets";
 /** Set by a turn that re-reads every file; the next run takes it, and its dates replace the batch nobody answered. */
 export const EXTRACT_REREAD_SETTING = "onboarding.extract.reread";
 /**
@@ -60,11 +66,20 @@ export function writeExtractDocs(store: CrosslineStore, workspaceId: string, doc
   store.setSetting(workspaceId, EXTRACT_DOCS_SETTING, JSON.stringify(docs));
 }
 /** Files a dialogue turn just showed (or all of them, on a re-read): they wait for the extraction. Synchronous, so no write is lost. */
-export function queueExtractDocs(store: CrosslineStore, workspaceId: string, documentIds: string[]): void {
+export function queueExtractDocs(store: CrosslineStore, workspaceId: string, documentIds: string[], options: { fromStart?: boolean } = {}): void {
   if (!documentIds.length) return;
   const docs = readExtractDocs(store, workspaceId);
   for (const id of documentIds) docs[id] = 0;
   writeExtractDocs(store, workspaceId, docs);
+  // A re-read starts each file over; a file shown again while its later parts wait keeps its place.
+  const offsets = readExtractOffsets(store, workspaceId);
+  if (options.fromStart && documentIds.some((id) => id in offsets)) { for (const id of documentIds) delete offsets[id]; writeExtractOffsets(store, workspaceId, offsets); }
+}
+export function readExtractOffsets(store: CrosslineStore, workspaceId: string): Record<string, number> {
+  return parse<Record<string, number>>(store.getSetting(workspaceId, EXTRACT_OFFSETS_SETTING), {});
+}
+export function writeExtractOffsets(store: CrosslineStore, workspaceId: string, offsets: Record<string, number>): void {
+  store.setSetting(workspaceId, EXTRACT_OFFSETS_SETTING, JSON.stringify(offsets));
 }
 
 /** The first current sentence id of a file, or undefined when it has none (removed, or never read). */

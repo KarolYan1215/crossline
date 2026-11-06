@@ -751,25 +751,38 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       if (assessment) console.info(JSON.stringify({ type: "progress.judged", checkedAt, workspaceId, workOrderId: report.workOrderId }));
     }
     const planner = createStepPlanner(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId));
-    // Two tasks at a time, each planned on its own thread (the account's share of the model gate), batch after batch until none waits:
-    // two a tick left thirty new tasks of approved milestones unplanned for hours (2026-10-19).
+    // The account's share of the model gate, each task on its own thread, until none waits (read past the ones already tried this pass,
+    // so tasks that failed do not hide the rest): two a tick left thirty new tasks of approved
+    // milestones unplanned for hours (2026-10-19). One pool, not batches (W-195, 2026-11-05): a slot that frees takes the next task at
+    // once — a batch waited for its slowest plan, and the other slot sat idle for minutes while tasks the back-planner had just made waited.
     const tried = new Set<string>();
-    let batch = ids;
-    while (batch.length) {
-      await eachLimited(batch, workspaceConcurrency(workspaceId), async (id) => {
-        tried.add(id);
+    const queue = [...ids];
+    const nextTask = async (): Promise<string | undefined> => {
+      for (;;) {
+        const id = queue.shift();
+        if (id !== undefined) { if (tried.has(id)) continue; tried.add(id); return id; }
+        if (paused(workspaceId, "planning") || !spendAllows(await spendFor(workspaceId), "core")) return undefined;
+        const more = tasksAwaitingStepPlan(analysisStore, workspaceId, tried.size + accountConcurrency() * 2).filter((other) => !tried.has(other));
+        if (!more.length) return undefined;
+        queue.push(...more);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, workspaceConcurrency(workspaceId)) }, async () => {
+      for (let id = await nextTask(); id !== undefined; id = await nextTask()) {
         // A replan the person (or the assistant) asked for carries what to change.
         const request = analysisStore.listEvents(workspaceId, { type: "task.steps_replan_requested", entityId: id }).at(-1)?.payload as { feedback?: string } | undefined;
         const outcome = await planner(id, request?.feedback ?? "").catch(() => undefined);
         if (outcome) console.info(JSON.stringify({ type: `steps.${outcome.state}`, checkedAt, workspaceId, workOrderId: id,
           ...(outcome.state === "planned" ? { warnings: outcome.warnings.length } : { code: outcome.code }) }));
-      });
-      if (paused(workspaceId, "planning") || !spendAllows(await spendFor(workspaceId), "core")) break;
-      batch = tasksAwaitingStepPlan(analysisStore, workspaceId, accountConcurrency() * 2).filter((id) => !tried.has(id));
-    }
+      }
+    }));
+    // New tasks never wait behind the checks below (W-195): when some arrived meanwhile the pass runs again first, and the checks wait.
+    const newTasksWaiting = () => tasksAwaitingStepPlan(analysisStore, workspaceId, tried.size + accountConcurrency() * 2).some((id) => !tried.has(id));
+    if (newTasksWaiting()) { stepPlanAgain.add(workspaceId); return; }
     // Material a plan would ask the person for is looked for on the web first (need-check.ts); only what is not found is asked.
     const checker = createNeedChecker(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId), { readCost: () => readCost(workspaceId) });
     for (const item of needsAwaitingCheck(analysisStore, workspaceId).slice(0, NEEDS_PER_PASS)) {
+      if (newTasksWaiting()) { stepPlanAgain.add(workspaceId); return; }
       const outcome = await checker(item).catch(() => "skipped" as const);
       console.info(JSON.stringify({ type: "steps.need_checked", checkedAt, workspaceId, workOrderId: item.workOrderId, needId: item.needId, outcome }));
     }
@@ -779,6 +792,7 @@ async function stepPlanPass(workspaceId: string, checkedAt = new Date().toISOStr
       createRelationReviser(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId)),
       (line, notes) => createMilestoneProposer(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))(`复核意见：${notes}`, undefined /* i18n-ignore: the architect's brief */, [line], { revised: true }));
     for (const item of reviews) {
+      if (newTasksWaiting()) { stepPlanAgain.add(workspaceId); return; }
       const verdict = await reviewer(item).catch(() => undefined);
       if (verdict) console.info(JSON.stringify({ type: `validation.${verdict.verdict}`, checkedAt, workspaceId, subject: item.subject, entityId: item.entityId }));
     }

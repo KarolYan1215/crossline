@@ -32,6 +32,7 @@ import { decisionHorizon } from "./horizon";
 import { answerRelationCheck, relationCheckAsks } from "./artifact-relations";
 import { answerApplicationResult, answerOpportunityApplyReady, answerOpportunityNeed, answerOpportunityOffer, opportunityApplyReadyAsks, opportunityNeedAsks, opportunityOfferAsks } from "./opportunities";
 import { agentBlockedAsks, answerAgentAsk } from "./agent-ask";
+import { foldAsks, foldFingerprint, foldId, isFolded, splitFold } from "./ask-fold";
 import { answerOutcome, outcomeAsks } from "./outcome-check";
 import { answerProgress, progressAsks } from "./progress-check";
 import { memoByLedger } from "./ledger-memo";
@@ -506,6 +507,32 @@ function overdueTaskAsks({ store, ctx, today, t, locale }: Source): Ask[] {
           fields: [{ id: "date", label: stalled ? t("截止改到") : t("实际最后期限"), kind: "date" as const, required: true }] },
         { id: "drop", label: stalled ? t("不做了") : t("不能补交"), detail: t("任务归档，可从已归档恢复") }
       ] }];
+  });
+}
+
+/**
+ * Every passed deadline that waits for the person — a milestone's (`overdueAsks`) and a started task's (`overdueTaskAsks`) — two or more on
+ * one card (W-228, 2026-11-05: a week away left a card per date, and nothing about them is decided by default — the owner's decision of
+ * 2026-11-05). The card lists them; 「逐个处理」 splits it into the cards that hold each one's choices, and 稍后再问 is there as on every card.
+ */
+function overdueFoldAsks(source: Source): Ask[] {
+  const { t, today, locale } = source;
+  const members = [...overdueAsks(source), ...overdueTaskAsks(source)];
+  return foldAsks(source.ctx, "overdue", members, (rest): Ask => {
+    const sorted = [...rest].sort((a, b) => (a.dueDay ?? "").localeCompare(b.dueDay ?? ""));
+    const due = sorted[0]?.dueDay;
+    const tasks = new Map(source.store.listWorkOrders(source.ctx.workspaceId).map((order) => [order.id, order]));
+    const milestones = new Map(source.store.listMilestones(source.ctx.workspaceId).map((milestone) => [milestone.id, milestone.title]));
+    const items: AskItem[] = sorted.map((ask) => ({ id: ask.entityId,
+      title: ask.kind === "milestone_overdue" ? milestones.get(ask.entityId) ?? quotedTitle(ask.title) : taskTitleOf(tasks.get(ask.entityId) ?? { intent: quotedTitle(ask.title) }),
+      ...(ask.dueDay ? { dueDay: ask.dueDay } : {}), ...(ask.line ? { line: ask.line } : {}),
+      href: ask.kind === "milestone_overdue" ? `/milestones?open=${encodeURIComponent(ask.entityId)}` : `/workbench/${encodeURIComponent(ask.entityId)}` }));
+    return { id: foldId("overdue", rest), kind: "overdue_task", entityId: "batch", urgency: urgencyFor(due, today) === "later" ? "soon" : urgencyFor(due, today),
+      ...(due ? { dueDay: due } : {}), raisedAt: rest.map((ask) => ask.raisedAt).sort().at(-1) ?? "", fingerprint: foldFingerprint(rest), items,
+      important: rest.some((ask) => ask.important),
+      title: t("{{count}} 项截止已过，等本人决定", { count: rest.length }),
+      why: t("这些日期是课程、别人或本人定的，系统不替本人改，逐个列在下方；最早的是 {{day}}。每项可以补做、改成新的日期或放弃。", { day: due ? format(due, locale) : "—" }),
+      options: [{ id: "split", label: t("逐个处理"), recommended: true, detail: t("拆成每项一张卡") }] };
   });
 }
 
@@ -1081,9 +1108,9 @@ function mergeAsks({ ctx, today, now, t, locale }: Source): Ask[] {
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueAsks, overdueTaskAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, travelAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
-    ({ ctx: context, now: at }: Source) => progressAsks(context, at), ({ ctx: context }: Source) => opportunityNeedAsks(context),
+    ({ ctx: context, now: at }: Source) => progressAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityNeedAsks(context, at),
     ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at)]
     .flatMap((collect) => { try { return collect(source); } catch { return []; } })
     // One card per id: two with one id are the same question twice, and answering finds only the first.
@@ -1360,6 +1387,7 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       return { ok: true };
     }
     case "overdue_task": {
+      if (isFolded(ask)) return optionId === "split" ? splitFold(ctx, ask) : { ok: false, code: "ASK_OPTION_UNKNOWN" };
       const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
       if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
       const due = ask.fingerprint;

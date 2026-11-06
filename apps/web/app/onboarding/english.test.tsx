@@ -60,6 +60,7 @@ test("the date batch counts in English, with plurals", () => {
   const html = en(<DateBatchCard batch={{ id: "b", documentCount: 1, items: [item], questions: [], dropped: ["Quiz 1", "Quiz 2"] }} busy={false} onDecide={() => {}} onRedo={() => {}} />);
   expect(html).toContain("1 item found in 1 file");
   expect(html).toContain("Add to calendar (1 item)");
-  expect(html).toContain("2 more items had no sentence in the source stating their date, so they weren&#x27;t saved");
+  // Each drop now carries its own reason (W-228), so the summary no longer claims one for all.
+  expect(html).toContain("2 more items were not recorded");
   expect(html).toContain("High confidence");
 });

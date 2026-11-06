@@ -717,6 +717,19 @@ test("replies the extraction has not recorded yet are named to the dialogue, so 
   expect(second).toContain("reply-1");
 });
 
+test("what the extraction could not record is named to the next round with why, so it is asked again, never called noted (W-228)", async () => {
+  const { rpc, prompts } = fakeRuntime([firstAnswer, turn()]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc);
+  await run({ sessionId: "s1", text: "每周四 16:00 组会。" });
+  store.appendEvent({ ownerId: "user-1", workspaceId, idempotencyKey: "u1", type: "dates.unrecorded", entityId: "s1",
+    payload: { dropped: [{ title: "周四组会", code: "DATE_TIME_INVALID" }, { title: "午饭", code: "OFF_HOURS" }] } });
+  await run({ sessionId: "s1", text: "好的" });
+  const second = dialogue(prompts)[1]!;
+  expect(second).toContain("notRecorded");
+  expect(second).toContain("周四组会 — its time is incomplete");
+  expect(second).not.toContain("午饭 —");
+});
+
 test("a round the page would list as empty gets the stage's open question; a checklist ask carries its line", () => {
   const base = { reply: "记下了。", nextAction: "ready_for_milestones" as const, stage: "lines", coverage: [], questions: [] } as unknown as Parameters<typeof withChecklist>[0];
   const turned = withChecklist(base, [{ id: "line_desc:line-a", label: "", detail: "", owner: "interview", ask: "在「设计」这条线上，三五年后你希望成为什么样的人？" }]);
