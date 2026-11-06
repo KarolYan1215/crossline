@@ -24,6 +24,22 @@ test("the app's own waiting questions take at most a third of what the dialogue 
   expect(ledgerForModel(store, ws, "s1", 15).some((line) => line.includes("别的会话"))).toBe(false);
 });
 
+test("older answered questions stay in view by their text alone, so a rewording of round 1's question is not asked in round 27 (W-239)", () => {
+  store = new CrosslineStore(":memory:");
+  const at = "2026-11-06T09:00:00Z";
+  for (let i = 1; i <= 30; i += 1) {
+    const id = store.recordQuestion(ws, { kind: "interview", key: `iq:s1:${i}:q`, text: `本人的问题 ${i}`, status: "open", at });
+    store.answerQuestion(ws, id, { text: `回答 ${i}`, at });
+  }
+  store.answerQuestion(ws, store.recordQuestion(ws, { kind: "interview", key: "gap:old", text: "旧的应用问题", status: "pending", at }), { text: "", at });
+  const shown = ledgerForModel(store, ws, "s1", 15);
+  expect(shown.find((line) => line.endsWith("本人的问题 1"))).toMatch(/^#\d+ \[已答\] 本人的问题 1$/);
+  expect(shown.some((line) => line.includes("本人的问题 30 → 回答 30"))).toBe(true);
+  // The latest fifteen with their answers (the app's answered question among them), the sixteen before by text alone.
+  expect(shown.filter((line) => line.includes("→")).length).toBe(14);
+  expect(shown.length).toBe(31);
+});
+
 test("a question answered 「不确定」 may be asked once more, not twice; one answered properly is not asked again", () => {
   store = new CrosslineStore(":memory:");
   const at = "2026-10-30T05:00:00Z";

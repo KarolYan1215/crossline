@@ -176,6 +176,26 @@ export function freeSpans(windows: AvailabilityWindow[], busy: BusySpan[]): Map<
  * The capacity conflict (容量冲突提示), shown once the lines are known: the hours the person has, what the fixed schedule takes of them,
  * what is left, and deadlines that fall close together in the next four weeks. Plain sentences, computed; nothing here is a model's guess.
  */
+/**
+ * The deadlines the week counts, from the projects' timelines: each dated item named with its project unless its title already says it,
+ * and the project's own deadline unless one of its items falls on that day. Before, a research project's 12-01 deadline was counted twice
+ * (as its item and as the project's deadline, 「MoS₂ 存内计算研究 MoS₂ 存内计算第一阶段器件仿真提交导师、MoS₂ 存内计算研究」), and a
+ * course's 「2026-11-21 23:59（作业 5）」 read as just 「ECE 555」 (2026-11-06 walkthrough, W-240).
+ */
+export function timelineDeadlines(timeline: Array<{ name: string; deadline: string; items: Array<{ date: string; title: string }> }>): Array<{ date: string; title: string }> {
+  const named = (name: string, title: string) => {
+    const core = name.replace(/\s*(研究|项目|课程)$/u, ""); // i18n-ignore: the project's own name, matched in the title's words
+    return (title.includes(name) || (core.length >= 2 && title.includes(core)) ? title : `${name} ${title}`).slice(0, 40);
+  };
+  return timeline.flatMap((project) => {
+    const items = project.items.map((item) => ({ date: item.date, title: named(project.name, item.title) }));
+    const due = /^\d{4}-\d{2}-\d{2}/.test(project.deadline) ? project.deadline.slice(0, 10) : "";
+    if (!due || items.some((item) => item.date.slice(0, 10) === due)) return items;
+    const what = project.deadline.match(/[（(]([^）)]+)[）)]/u)?.[1]?.trim();
+    return [...items, { date: due, title: what ? named(project.name, what) : project.name.slice(0, 40) }];
+  });
+}
+
 export type WeekCapacity = {
   available: number; fixed: number; free: number; deadlines: number;
   crunches: Array<{ from: string; to: string; titles: string[] }>;

@@ -14,6 +14,8 @@ export const REPEAT_SIMILARITY = 0.85;
  * walkthrough had one person's savings asked six times at about 0.5 bigram similarity, each worded a little differently.
  */
 export const SAME_LINE_SIMILARITY = 0.6;
+/** The dialogue's own answered questions shown by text alone beyond the latest ones (`ledgerForModel`). */
+export const EARLIER_SHOWN = 80;
 /** However it is worded, one question is put to the person at most this many times; the rest is left to an assumption. */
 export const MAX_ASKINGS = 2;
 
@@ -59,8 +61,14 @@ export function ledgerForModel(store: CrosslineStore, workspaceId: string, sessi
   const appWaiting = all.filter((question) => isWaiting(question) && question.key.startsWith("gap:")).slice(-Math.ceil(limit / 3));
   const ownWaiting = all.filter((question) => isWaiting(question) && !question.key.startsWith("gap:")).slice(-Math.max(0, limit - appWaiting.length));
   const room = Math.max(0, limit - appWaiting.length - ownWaiting.length);
-  const settled = room ? all.filter((question) => question.status === "answered" || question.status === "assumed").slice(-room) : [];
-  return ledgerLines([...settled, ...ownWaiting, ...appWaiting].sort((a, b) => a.id - b.id));
+  const settledAll = all.filter((question) => question.status === "answered" || question.status === "assumed");
+  const settled = room ? settledAll.slice(-room) : [];
+  // The dialogue's older answered questions, without their answers: it rewords what it asks, and a rewording is below any bigram
+  // similarity the code could treat as a repeat. Shown only the latest fifteen, a quick interview's 27th round asked round 1's
+  // 「成长过程中，你欣赏过谁？」 again as 「成长过程中，你最欣赏谁？」 (0.50; 2026-11-06 walkthrough, W-239).
+  const older = settledAll.slice(0, settledAll.length - settled.length).filter((question) => !question.key.startsWith("gap:"))
+    .slice(-EARLIER_SHOWN).map((question) => ({ ...question, answer: "" }));
+  return ledgerLines([...older, ...settled, ...ownWaiting, ...appWaiting].sort((a, b) => a.id - b.id));
 }
 
 export type RepeatOutcome = { questions: TurnQuestion[]; coveredGaps: Set<string>; dropped: Array<{ text: string; repeats: number; why: "answered" | "similar" }> };

@@ -1,5 +1,5 @@
 import "server-only";
-import { SOURCE_FOLDERS_SETTING, readSourceFolders, sourceFolderIndexSetting, calendarWeek, capacityConflict, lineWeights, skeletonDraft,
+import { SOURCE_FOLDERS_SETTING, readSourceFolders, sourceFolderIndexSetting, calendarWeek, capacityConflict, timelineDeadlines, lineWeights, skeletonDraft,
   type AccessContext, type AvailabilityWindow, type BusySpan, type DateCandidate, type RecurringMeeting, type SkeletonBlock, type WeekCalendarEvent, type WeekCapacity } from "@crossline/core";
 import { getStore, readLineShares, resolvedAvailability } from "./crossline";
 import { identityLines } from "./lines";
@@ -92,10 +92,7 @@ export function weekCapacity(ctx: AccessContext, today: string, week: WeekSkelet
     ...week.fixed.flatMap((item) => item.weekdays.map((weekday) => ({ weekday, start: item.start, end: item.end }))),
     ...week.calendar.map((event) => ({ weekday: event.weekday % 7, start: event.start, end: event.end }))
   ];
-  const deadlines = [
-    ...timeline.flatMap((project) => project.items.map((item) => ({ date: item.date, title: (item.title.includes(project.name) ? item.title : `${project.name} ${item.title}`).slice(0, 40) }))),
-    ...timeline.filter((project) => /^\d{4}-\d{2}-\d{2}/.test(project.deadline)).map((project) => ({ date: project.deadline.slice(0, 10), title: project.name }))
-  ];
+  const deadlines = timelineDeadlines(timeline);
   const lines = identityLines(ctx);
   const weights = lineWeights(lines.map((line) => ({ id: line.id, rank: line.rank ?? null })), readLineShares(ctx));
   const weightOf = new Map(weights.map((line) => [line.id, line.weight]));

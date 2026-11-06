@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capacityConflict, checkInsight, fixedScheduleLines, interviewAbstract, lineWeights, plainTerms, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft, withPlainTerms } from "./onboarding-pace";
+import { capacityConflict, timelineDeadlines, checkInsight, fixedScheduleLines, interviewAbstract, lineWeights, plainTerms, portraitConfirmedByInsights, progressLines, progressView, readTurnProgress, skeletonDraft, withPlainTerms } from "./onboarding-pace";
 import { DEADLINE_GUESS_PREFIX, answeredGapFacts, profileGaps } from "./profile-gaps";
 import { interviewChecklist, interviewComplete, interviewOwnedOpen } from "./interview-checklist";
 
@@ -138,4 +138,17 @@ describe("the app's own terms", () => {
     const round = withPlainTerms({ reply: "好", questions: [{ id: "q", text: "选一个", kind: "single" as const, allowOther: true, identityId: "", projectId: "", options }] });
     expect(round.questions[0]!.options[0]).toEqual({ id: "a", label: "固定安排", detail: undefined });
   });
+});
+it("counts a project's deadline once when one of its items falls on it, and names what a course's deadline is (W-240)", () => {
+  const deadlines = timelineDeadlines([
+    { name: "MoS₂ 存内计算研究", deadline: "2026-12-01（第一阶段器件仿真交导师查看）", items: [{ date: "2026-12-01", title: "MoS₂ 存内计算第一阶段器件仿真提交导师" }] },
+    { name: "ECE 555", deadline: "2026-11-21 23:59（作业 5）", items: [{ date: "2026-12-05", title: "作业 6 截止" }] },
+    { name: "ECE 548", deadline: "待定", items: [{ date: "2026-11-20", title: "ECE 548 期中考试" }] }
+  ]);
+  expect(deadlines).toEqual([
+    { date: "2026-12-01", title: "MoS₂ 存内计算第一阶段器件仿真提交导师" },
+    { date: "2026-12-05", title: "ECE 555 作业 6 截止" },
+    { date: "2026-11-21", title: "ECE 555 作业 5" },
+    { date: "2026-11-20", title: "ECE 548 期中考试" }
+  ]);
 });
