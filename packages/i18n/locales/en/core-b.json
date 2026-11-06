@@ -255,7 +255,7 @@
   "「{{project}}」有截止日期吗？": "Does \"{{project}}\" have a deadline?",
   "我来写日期": "I'll write the date",
   "没有截止": "No deadline",
-  "「{{project}}」的「{{item}}」在文件中标为待定，大致日期？": "The file marks \"{{item}}\" in \"{{project}}\" as TBD. Roughly when is it?",
+  "「{{project}}」的「{{item}}」还没有具体日期，大致什么时候？": "\"{{item}}\" in \"{{project}}\" has no date yet. Roughly when is it?",
   "知道具体日期，我来写": "I know the date and will write it",
   "在“其他”里写日期，里程碑会按它排": "Write the date under \"Other\" and the milestones follow it",
   "学期最后一周前后": "Around the last week of term",

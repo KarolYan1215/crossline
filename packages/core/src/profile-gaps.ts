@@ -178,12 +178,13 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
     if ((input.datedItems ?? []).some((dated) => (dated.project === project.id || dated.project === project.name) && undatedKey(dated.title) === key)) continue;
     gaps.push({
       code: "DATE_UNDATED", identityId: project.identityId, projectId: project.id, blocking: false,
+      // Not 「文件里」: the item may come from the person's own words, with no file at all (W-224).
       // i18n-ignore: for the model (and the start of the stored answer)
-      detail: `「${project.name}」的「${item.title}」文件里写的是待定，不是日期。`,
+      detail: `「${project.name}」的「${item.title}」还没有具体日期。`,
       question: {
         id: `gap-undated-${project.id}-${key.slice(0, 30)}`, kind: "single", allowOther: true,
         identityId: project.identityId, projectId: project.id,
-        text: t("「{{project}}」的「{{item}}」在文件中标为待定，大致日期？", { project: project.name, item: item.title }),
+        text: t("「{{project}}」的「{{item}}」还没有具体日期，大致什么时候？", { project: project.name, item: item.title }),
         options: [
           { id: "known", label: t("知道具体日期，我来写"), detail: t("在“其他”里写日期，里程碑会按它排") },
           { id: "last-week", label: t("学期最后一周前后"), detail: t("里程碑按学期最后一周之前暂定，通知下来再改") },
