@@ -4,7 +4,7 @@ import { resultsAwaitingReview } from "@crossline/db";
 import { appNow, getStore } from "./crossline";
 import { countProposedTargets } from "./targets";
 import { countAssistantPending } from "./agent";
-import { loadDiligence } from "./diligence";
+import { loadDiligence, pendingProposalCount } from "./diligence";
 import { loadPendingDateBatch } from "./imported-dates";
 import { listed, openAsks } from "./asks";
 import { decisionHorizon } from "./horizon";
@@ -78,8 +78,7 @@ function computePending(ctx: AccessContext): PendingCounts {
     workOrders: proposals.now,
     milestoneDrafts: drafts.now,
     relations: store.listMilestoneRelations(ctx.workspaceId).filter((relation) => relation.status === "candidate").length,
-    research: loadDiligence(ctx).filter((report) => report.status === "done")
-      .reduce((sum, report) => sum + report.proposals.filter((proposal) => proposal.status === "pending").length, 0),
+    research: pendingProposalCount(loadDiligence(ctx)),
     dates: loadPendingDateBatch(ctx) ? 1 : 0,
     targets: countProposedTargets(ctx),
     assistantKinds: assistant.categories,

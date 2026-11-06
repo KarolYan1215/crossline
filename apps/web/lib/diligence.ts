@@ -33,6 +33,18 @@ export function loadDiligence(ctx: AccessContext): DiligenceView[] {
 }
 
 /**
+ * Proposals still waiting for an answer, as the screen shows them: only each line's latest report (the list comes newest first) and
+ * only once it is done. Counting every report's read 「本周调研结论 4 条待定」 under two proposals after a 「重新查证」 (W-246): the
+ * superseded run's proposals are shown nowhere and cannot be answered. `identityIds`: only these lines (the review lists active ones).
+ */
+export function pendingProposalCount(reports: DiligenceView[], identityIds?: string[]): number {
+  const latest = new Map<string, DiligenceView>();
+  for (const report of reports) if (!latest.has(report.identityId)) latest.set(report.identityId, report);
+  return [...latest.values()].filter((report) => report.status === "done" && (!identityIds || identityIds.includes(report.identityId)))
+    .reduce((sum, report) => sum + report.proposals.filter((proposal) => proposal.status === "pending").length, 0);
+}
+
+/**
  * Records the person's answer to one proposal. An answer can be changed, and `pending` takes it back. Accepting a 「任务」 also writes it
  * down as a capture, which the analysis turns into a task like anything typed into the box: before, 「采纳」 only fed the next milestone
  * design and the person saw nothing happen (2026-10-18 walkthrough). Milestone and watch proposals stay inputs to the milestone design.

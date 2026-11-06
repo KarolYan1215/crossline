@@ -22,7 +22,7 @@ import { ICON } from "../ui/icon-button";
 import { cardView, loadTaskDetailsBatch, loadMilestoneDetailsBatch } from "../../lib/task-detail";
 import { linePacks } from "../../lib/lines";
 
-import { loadDiligence } from "../../lib/diligence";
+import { loadDiligence, pendingProposalCount } from "../../lib/diligence";
 import { loadOpportunityWeek, loadOutOfView } from "../../lib/opportunities";
 import { OutOfView } from "./out-of-view";
 import type { DiligenceReport } from "../onboarding/onboarding-types";
@@ -76,7 +76,7 @@ export default async function ReviewPage() {
   const since = Date.now() - 7 * 86_400_000;
   const finished = [...firstAcceptedAt(ctx.workspaceId).values()].filter((iso) => Date.parse(iso) >= since).length;
   const timedHours = hoursOf(week.lines.reduce((sum, line) => sum + line.actual, 0));
-  const pendingProposals = diligence.reduce((sum, report) => sum + report.proposals.filter((proposal) => proposal.status === "pending").length, 0);
+  const pendingProposals = pendingProposalCount(diligence, identities.map((identity) => identity.id));
   const candidateFindings = review.findings.filter((finding) => finding.status === "candidate").length;
   const toDecide = review.candidates.kept.length + pendingProposals + candidateFindings;
   const range = t("{{start}}–{{end}}", { start: monthDay(locale, week.start), end: monthDay(locale, week.end) });

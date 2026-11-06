@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 
 vi.mock("server-only", () => ({}));
-const { decideDiligenceProposal, loadDiligence } = await import("./diligence");
+const { decideDiligenceProposal, loadDiligence, pendingProposalCount } = await import("./diligence");
 const { TEST_CTX } = await import("./test-support");
 
 beforeEach(() => {
@@ -55,4 +55,17 @@ test("a proposal the researcher named in Chinese can be decided, and its capture
   expect(decideDiligenceProposal(TEST_CTX, "r2", "建议一", "accepted")).toEqual({ ok: true, captured: true });
   const capture = store.listCaptures(TEST_CTX.workspaceId).find((item) => item.title === "核验资格")!;
   expect(capture.id).toMatch(/^diligence-r2-[a-f0-9]{12}$/);
+});
+
+test("W-246: pending proposals count only each line's latest finished report, as the screen shows them", () => {
+  const store = globalThis.crosslineStore!;
+  const proposal = (id: string) => ({ id, title: id, why: "", kind: "task", dueDate: "", findingIds: [], status: "pending" as const });
+  store.saveDiligenceReport({ id: "r2", ownerId: "o", workspaceId: TEST_CTX.workspaceId, scope: "startup", question: "q", status: "done",
+    runAt: "2026-10-09T00:00:00.000Z", findings: [], sources: [], proposals: [proposal("p2")] });
+  store.saveDiligenceReport({ id: "r3", ownerId: "o", workspaceId: TEST_CTX.workspaceId, scope: "research", question: "q", status: "running",
+    runAt: "2026-10-09T00:00:00.000Z", findings: [], sources: [], proposals: [proposal("p3")] });
+  const reports = loadDiligence(TEST_CTX);
+  // r1 (startup, older) is superseded by r2; r3 is still running. Before: 3.
+  expect(pendingProposalCount(reports)).toBe(1);
+  expect(pendingProposalCount(reports, ["research"])).toBe(0);
 });
