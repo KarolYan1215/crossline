@@ -67,10 +67,14 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   // Connecting the model has its own page (/connect, the first stop after signing in); arriving here without it goes back there.
   useEffect(() => {
     const read = (url: string) => fetch(url, { cache: "no-store" }).then((response) => response.json()).catch(() => undefined);
-    void Promise.all([read("/api/codex/account"), read("/api/model/provider")]).then(([account, provider]: [
+    void Promise.all([read("/api/codex/account"), read("/api/model/provider"), read("/api/invites")]).then(([account, provider, invite]: [
       { account?: unknown; connected?: boolean; blocker?: unknown } | undefined,
-      { features?: Array<{ skill: string; served: boolean }>; sponsor?: { active?: boolean } | null } | undefined
+      { features?: Array<{ skill: string; served: boolean }>; sponsor?: { active?: boolean } | null } | undefined,
+      { available?: boolean; sponsored?: boolean } | undefined
     ]) => {
+      // A redeemed code is read here too, as /connect reads it: with only the worker's view, a slow or failed read sent an invitee back
+      // to /connect, which sent them straight here again (W-233).
+      if (invite?.available && invite.sponsored) { setConnected(true); return; }
       // Another model's API that has passed the check for the interview is a connection too (decided 2026-10-17), and so is an invite
       // code: a round on the developer's model while it is still being tested says so itself, instead of sending the person away.
       if (provider?.sponsor?.active || provider?.features?.some((feature) => feature.skill.endsWith("crossline-onboarding") && feature.served)) { setConnected(true); return; }

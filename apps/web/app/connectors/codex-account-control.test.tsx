@@ -51,3 +51,16 @@ describe("Codex account login observation", () => {
       .toEqual({ code: "CAPABILITY_SECRET_MISSING", message: "后台服务没有连上，稍后点「↻ 刷新状态」。" });
   });
 });
+
+// W-233: a completed sign-in whose account the runtime does not yet report kept 「未连接」 on the page until something else read again.
+test("after a sign-in completes, reads go on until the account is readable, for at most CONFIRM_LOGIN_MS", () => {
+  const signedInUnread = { login: { state: "completed" as const }, account: null };
+  expect(accountControl.awaitingCodexAccount(signedInUnread)).toBe(true);
+  expect(accountControl.shouldPollCodexLogin(undefined, signedInUnread, 10_000, 5_000)).toBe(true);
+  expect(accountControl.shouldPollCodexLogin(undefined, signedInUnread, 10_000, 10_001)).toBe(false);
+  // Without a sign-in that just completed (an old one left from before a sign-out), nothing is read on a timer.
+  expect(accountControl.shouldPollCodexLogin(undefined, signedInUnread)).toBe(false);
+  const read = { login: { state: "completed" as const }, account: { type: "chatgpt", email: "a@example.com" } };
+  expect(accountControl.awaitingCodexAccount(read)).toBe(false);
+  expect(accountControl.shouldPollCodexLogin(undefined, read, 10_000, 5_000)).toBe(false);
+});

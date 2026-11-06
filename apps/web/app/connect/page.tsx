@@ -3,6 +3,9 @@ import { requireSessionContext } from "../../lib/access-guard";
 import { ConnectFlow } from "./connect-flow";
 import { tOf } from "../../lib/locale";
 import { isHostedBeta } from "../../lib/hosting";
+import { redirect } from "next/navigation";
+import { sponsoredHere } from "../../lib/invites";
+import { startReadiness } from "../../lib/start-gate";
 import "./connect.css";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +19,11 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
   const t = tOf(ctx);
   const { next } = await searchParams;
   // Only a path on this site, never another origin (`//host` or a full URL).
-  const target = next && /^\/(?!\/)[\w\-/?=&.%]*$/.test(next) ? next : "/";
+  const asked = next && /^\/(?!\/)[\w\-/?=&.%]*$/.test(next) ? next : "/";
+  // Straight to the interview while the account is not ready: Today would only send it there, one more queued page render on the
+  // hosted server, and that wait looked like the page had stopped (W-233).
+  const target = asked === "/" && !startReadiness(ctx).ready ? "/onboarding" : asked;
+  if (sponsoredHere(ctx)) redirect(target);
   return <AppShell active={"设置"} focus corner={false} banner={false}>
     <h1>{t("开始之前：连接模型")}</h1>
     <ConnectFlow next={target} hosted={isHostedBeta()} />

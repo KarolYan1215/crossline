@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Tag } from "../ui/tag";
 import { SegmentedControl } from "../ui/controls";
 import { useT } from "../locale-context";
@@ -32,8 +32,16 @@ type AccountState = {
 
 const loginOf = (state: AccountState | undefined) => state?.login ?? state?.supervisor?.login ?? undefined;
 
-export function shouldPollCodexLogin(loginUrl: string | undefined, state: AccountState | undefined): boolean {
-  return Boolean(loginUrl) || loginOf(state)?.state === "pending";
+/** How long reads continue after a sign-in completes while the account is not yet readable (W-233). */
+export const CONFIRM_LOGIN_MS = 30_000;
+
+/** Signed in, but the runtime does not yet say who: the page keeps reading and says so, instead of stopping on 「未连接」. */
+export function awaitingCodexAccount(state: AccountState | undefined): boolean {
+  return loginOf(state)?.state === "completed" && !state?.account && state?.connected !== true;
+}
+
+export function shouldPollCodexLogin(loginUrl: string | undefined, state: AccountState | undefined, confirmUntil = 0, now = Date.now()): boolean {
+  return Boolean(loginUrl) || loginOf(state)?.state === "pending" || (awaitingCodexAccount(state) && now < confirmUntil);
 }
 
 export function reconcileCodexLoginUrl(loginUrl: string | undefined, state: AccountState | undefined): string | undefined {
@@ -63,6 +71,9 @@ export function CodexAccountControl({ onConnected }: {
   const [busy, setBusy] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [local, setLocal] = useState(false);
+  // Set when a sign-in in progress completes: reads go on until the account is readable, at most CONFIRM_LOGIN_MS.
+  const [confirmUntil, setConfirmUntil] = useState(0);
+  const lastLogin = useRef<string | undefined>(undefined);
   useEffect(() => { setLocal(["127.0.0.1", "localhost"].includes(location.hostname)); }, []);
   const refresh = async () => {
     const response = await fetch("/api/codex/account", { cache: "no-store" });
@@ -72,12 +83,18 @@ export function CodexAccountControl({ onConnected }: {
     onConnected?.(Boolean(nextState.account) || nextState.connected === true);
   };
   useEffect(() => { void refresh(); }, []);
+  const loginState = loginOf(state)?.state;
   useEffect(() => {
-    if (!shouldPollCodexLogin(loginUrl, state)) return;
+    if (lastLogin.current === "pending" && loginState === "completed") setConfirmUntil(Date.now() + CONFIRM_LOGIN_MS);
+    lastLogin.current = loginState;
+  }, [loginState]);
+  const confirming = awaitingCodexAccount(state) && Date.now() < confirmUntil;
+  useEffect(() => {
+    if (!shouldPollCodexLogin(loginUrl, state, confirmUntil)) return;
     void refresh();
     const interval = setInterval(() => { void refresh(); }, 1_000);
     return () => clearInterval(interval);
-  }, [loginUrl, loginOf(state)?.state]);
+  }, [loginUrl, loginState, confirming]);
   const post = async (body: Record<string, string>) => {
     setBusy(true);
     const response = await fetch("/api/codex/account", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -114,6 +131,7 @@ export function CodexAccountControl({ onConnected }: {
     <div className="st-row"><span className="st-row-label">{account
       ? account.type === "apiKey" ? t("API key（按用量计费，每月上限见「模型额度」）") : account.email ?? t("ChatGPT 账号")
       : !state ? t("正在读取登录状态…") : viaNode ? t("模型在本人的电脑（算力节点）或本人接入的其他模型上运行，服务器上不登录 ChatGPT。") : subscriptionOff ? t("托管版不在服务器上登录 ChatGPT（OpenAI 只允许本机运行的应用这样用订阅）。两种连接方式：在自己电脑上开启「作为算力节点」，模型在那台电脑上用本人的 ChatGPT 登录运行；或在下面填写 API key。") : guest ? t("用本人的 ChatGPT 账号连接：访谈、分析与规划都用这个账号的额度，和其他人的账号互不相通。") : t("分析、拆分与助手功能需要登录 ChatGPT 账号")}
+      {confirming && <small role="status">{t("已登录，正在确认连接…")}</small>}
       {blocker && <small role="status">{blocker.message}</small>}</span>
       <span className="st-row-actions">
         {state && !account && !loginUrl && local && !subscriptionOff && <button type="button" className="primary-button" disabled={busy}

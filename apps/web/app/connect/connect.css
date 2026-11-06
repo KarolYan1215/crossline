@@ -1,5 +1,13 @@
 .connect-flow{display:grid;gap:16px;max-width:760px}
-.connect-flow>p{margin:0}
+.connect-flow>p,.connect-options>p{margin:0}
+/* `hidden` must win: the options stay mounted (they read the connection) while the page waits. */
+.connect-options:not([hidden]){display:grid;gap:16px}
+.connect-wait{display:flex;gap:12px;align-items:center;padding:16px;background:var(--chalk)}
+.connect-wait p{margin:0}
+.connect-wait p+p{margin-top:4px}
+.connect-spinner{flex:none;width:20px;height:20px;border:2px solid var(--mist);border-top-color:currentColor;border-radius:50%;animation:connect-spin .9s linear infinite}
+@keyframes connect-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.connect-spinner{animation:none;border-top-color:var(--mist)}}
 .connect-or{font-size:16px;margin:12px 0 0;padding-top:16px;border-top:1px solid var(--mist)}
 .invite-panel{display:grid;gap:8px;padding:10px 12px;background:var(--chalk);font-size:14px}
 .invite-panel p{margin:0}

@@ -493,6 +493,7 @@
   "正在记录": "Recording",
   "正在读取…": "Reading…",
   "正在读取登录状态…": "Reading the sign-in state…",
+  "已登录，正在确认连接…": "Signed in. Confirming the connection…",
   "正在运行的助手任务": "Assistant tasks running now",
   "步骤": "Steps",
   "步骤拆分": "Step planning",

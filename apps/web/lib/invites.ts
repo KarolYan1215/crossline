@@ -26,6 +26,14 @@ export function invitesAvailable(): boolean {
   return approvers().length > 0 && Boolean(appMailSender()) && Boolean(process.env.CROSSLINE_SPONSOR_API_KEY?.trim()) && Boolean(secret());
 }
 
+/**
+ * Whether this account already runs on the developer's model: it redeemed a code here and the server can serve one. The connect page
+ * sends such an account straight on (W-233): it used to show every way to connect again until a client read caught up.
+ */
+export function sponsoredHere(ctx: AccessContext): boolean {
+  return invitesAvailable() && Boolean(sponsorshipOf(getStore(), ctx.workspaceId));
+}
+
 export function signDecisionToken(inviteId: string, now = Date.now()): string {
   const key = secret();
   if (!key) throw new Error("INVITE_SECRET_MISSING");
