@@ -49,7 +49,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [sessionId, setSessionId] = useState("");
   // A turn still running in the background after a reload: its reply is on the way, so nothing else may be sent meanwhile.
   const [background, setBackground] = useState(false);
-  const [busy, setBusy] = useState<"" | "turn" | "upload" | "dates" | "milestones" | "diligence">("");
+  const [busy, setBusy] = useState<"" | "turn" | "upload" | "dates" | "milestones">("");
+  const [researching, setResearching] = useState<string[]>([]);
   const [error, setError] = useState("");
   // The last round stopped because the ChatGPT quota was spent: the quota notice then says what to do next (Plus or an invite code).
   const [usageLimitHit, setUsageLimitHit] = useState(false);
@@ -245,14 +246,18 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     setBusy("");
   };
 
-  /** Researches one line on the web now. It can take minutes, so the card shows it as running until it lands. */
+  /**
+   * Researches one line on the web now. The request is answered only when the run ends, which takes minutes, so the line shows as
+   * running from the press and the rest of the page stays usable: it used to hold the whole page busy, the interview's send button
+   * included, with nothing on the line itself until the answer came (2026-11-06 walkthrough, W-237).
+   */
   const runDiligence = async (identityId: string) => {
-    setBusy("diligence"); setError("");
+    setError(""); setResearching((ids) => [...ids, identityId]);
     const response = await fetch("/api/diligence", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "run", identityId, force: true }) }).catch(() => undefined);
     const body = await response?.json().catch(() => undefined) as { state?: string; message?: string; blocker?: { message?: string } } | undefined;
     if (!response?.ok || body?.state === "blocked") setError(body?.message ?? body?.blocker?.message ?? t("查证没有完成，可以稍后重试。"));
     await load();
-    setBusy("");
+    setResearching((ids) => ids.filter((id) => id !== identityId));
   };
 
   const decideDiligence = async (reportId: string, proposalId: string, decision: "accepted" | "rejected" | "pending") => {
@@ -407,7 +412,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
                 {busy === "milestones" ? t("正在设计…（通常 2–5 分钟）") : t("设计里程碑草稿")}</button>}
         </section>}
         {(state.diligence.length > 0 || state.readyToStart) && !opening && <DiligencePanel reports={state.diligence}
-          identities={state.identities} busy={busy !== ""} onRun={(id) => void runDiligence(id)} onDecide={(report, proposal, decision) => void decideDiligence(report, proposal, decision)} />}
+          identities={state.identities} busy={busy !== ""} researching={researching} onRun={(id) => void runDiligence(id)} onDecide={(report, proposal, decision) => void decideDiligence(report, proposal, decision)} />}
         {transcription && waitingForAudio && <TranscriptionCard status={transcription} busy={busy !== ""} onDownload={() => void downloadModel()} />}
         <div ref={bottom} />
       </div>

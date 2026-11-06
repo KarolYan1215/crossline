@@ -108,6 +108,9 @@ const ACTION_LEAD = new RegExp("^(发表|做出|做成|做到|完成(?!度)|写�
  */
 const ABILITY_VERB_EN = /^(able to|can|capable of|good at|skilled at)\s+(\S+)/i;
 const ACTION_LEAD_EN = /^(publish|publishing|launch|launching|win|winning|earn|earning|get|getting|land|landing|ship|shipping|found|founding|reach|reaching|achieve|achieving|complete|completing)\s+\S/i;
+// A quality named as a noun (好奇心, 责任心, 创新精神), and the leads that make it an attributive (有好奇心, 富有创新精神, 不忘初心).
+const QUALITY_NOUN = /(心|精神|意识|勇气|毅力|热情|情怀)$/u;
+const HAS_LEAD = /^(有|富有|富于|具有|充满|满怀|不)/u;
 // Ends in an achievement: 毕业, 上市, 获奖, 立项 … — a milestone, not who the person becomes.
 const ACHIEVEMENT_END = /(毕业|上市|获奖|发表|出版|上线|中稿|夺冠|晋升|升职|立项|拿奖|变现|转正|录用|入选|过审)$/u;
 
@@ -140,6 +143,8 @@ export function attributeProblem(raw: string, lineLabel?: string): string | unde
   if (lead) return `「${text}」以「${lead[1]}」开头，是活动或成就`;
   const end = text.match(ACHIEVEMENT_END);
   if (end) return `「${text}」以「${end[1]}」结尾，是成就，属于里程碑`;
+  // 「好奇心」, 「责任心」, 「创新精神」: a quality named as a noun, which composes 「成为好奇心的学生」 (2026-11-06 walkthrough, W-238).
+  if (QUALITY_NOUN.test(text) && !HAS_LEAD.test(text) && attributeLength(text) >= 3) return `「${text}」是名词，接不上「的」：写成「有${text}」`;
   const length = attributeLength(text);
   if (length > ATTRIBUTE_LONGEST) return `「${text}」有 ${length} 个字，是一句话：缩到 ${ATTRIBUTE_SHORT} 个字以内`;
   return undefined;

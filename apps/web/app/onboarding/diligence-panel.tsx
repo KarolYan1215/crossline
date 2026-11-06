@@ -19,8 +19,10 @@ const ACCEPTED_NOTE: Record<string, string> = {
  * accepting a task writes it down to be analysed into a task; accepting anything else makes it an input to the milestone design. The sources shown are the ones the
  * worker actually opened and checked; the ones that could not be checked were dropped before this was stored.
  */
-export function DiligencePanel({ reports, identities, busy, onRun, onDecide }: {
+export function DiligencePanel({ reports, identities, busy, researching = [], onRun, onDecide }: {
   reports: DiligenceReport[]; identities: Identity[]; busy: boolean;
+  /** Lines whose run this page started and is still waiting on: shown as running before the stored report says so. */
+  researching?: string[];
   onRun: (identityId: string) => void; onDecide: (reportId: string, proposalId: string, decision: "accepted" | "rejected" | "pending") => void;
 }) {
   const t = useT();
@@ -31,13 +33,14 @@ export function DiligencePanel({ reports, identities, busy, onRun, onDecide }: {
     <header><b>{t("网上查证")}</b><span className="ob-muted">{t("每条主线先查清事实、给出来源，再提建议；每周自动更新一次。")}</span></header>
     {identities.map((identity) => {
       const report = latest.get(identity.id);
+      const running = report?.status === "running" || researching.includes(identity.id);
       return <div className="ob-dd-line" key={identity.id}>
         <div className="ob-dd-head">
           <b>{identity.label}</b>
-          {report?.status === "running" && <span className="ob-tag" data-kind="pending">{t("查证中…")}</span>}
-          {report?.status === "failed" && <span className="ob-tag" data-kind="unsupported">{t("没有成功")}</span>}
+          {running && <span className="ob-tag" data-kind="pending">{t("查证中…")}</span>}
+          {!running && report?.status === "failed" && <span className="ob-tag" data-kind="unsupported">{t("没有成功")}</span>}
           <span className="ob-muted">{report ? t("更新于 {{day}}", { day: report.runAt.slice(0, 10) }) : t("还没有查证")}</span>
-          <button type="button" className="ob-btn ob-quiet" disabled={busy || report?.status === "running"} onClick={() => onRun(identity.id)}>
+          <button type="button" className="ob-btn ob-quiet" disabled={busy || running} onClick={() => onRun(identity.id)}>
             {report?.status === "done" ? t("重新查证") : t("现在查证")}
           </button>
         </div>

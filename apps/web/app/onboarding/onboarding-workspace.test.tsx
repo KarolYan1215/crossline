@@ -4,6 +4,7 @@ import { OpeningCard, openingReply } from "./opening-card";
 import { minutesLeft, viewForStage, WeekView } from "./stage-view";
 import { MATERIALS_FIRST_REPLY, NO_MATERIALS_REPLY } from "./onboarding-types";
 import { cardReplyLines, ProfileCards } from "./profile-cards";
+import { DiligencePanel } from "./diligence-panel";
 import { cardsFor, readCardAnswers } from "@crossline/core";
 
 /** The interview v3 (docs/onboarding-v3.md): the opening card, the stage pictures and the time left. */
@@ -104,4 +105,15 @@ test("the week draws working hours and fixed arrangements, waiting ones dashed, 
   expect(html).toContain("访谈提议");
   // A connected calendar's events are drawn under it, and named.
   expect(html).toContain("Dentist · 周三 10:00–11:00（家里的日历）");
+});
+
+test("a line whose research was just started shows as running before its report says so, and only its button waits (W-237)", () => {
+  const done = { id: "dd-1", identityId: "student", question: "", status: "done" as const, runAt: "2026-11-05T10:00:00Z", findings: [], proposals: [], sources: [] };
+  const identities = [{ id: "student", label: "学生" }, { id: "research", label: "研究者" }];
+  const html = renderToStaticMarkup(<DiligencePanel reports={[done]} identities={identities} busy={false} researching={["student"]} onRun={() => {}} onDecide={() => {}} />);
+  const [student, research] = html.split("研究者</b>");
+  expect(student).toContain("查证中…");
+  expect(student).toMatch(/<button[^>]*disabled[^>]*>重新查证/);
+  expect(research).not.toContain("查证中…");
+  expect(research).not.toMatch(/<button[^>]*disabled/);
 });

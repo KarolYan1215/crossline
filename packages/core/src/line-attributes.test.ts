@@ -68,12 +68,13 @@ test("an attribute describes who the person becomes: adjectives and short fields
     "表达清晰", "科普", "长文方向", "AI 教育方向", "被同行认可", "持续产出", "稳定更新", "有产品设计能力", "成为严谨的"]) expect(attributeProblem(text), text).toBeUndefined();
   // Nouns and idioms that begin like a verb or hold a numeral are not caught: 能源, 会计, 写作, 完成度, 开发能力, Web3, 5G, 百家号.
   for (const text of ["能源方向", "能量充沛", "能动性强", "会计方向", "写作扎实", "完成度高", "获得感强", "开发能力强", "出版行业", "Web3 方向",
-    "5G 通信方向", "3D 打印方向", "一流", "十项全能", "百家号方向", "以人为本", "把关严格"]) expect(attributeProblem(text), text).toBeUndefined();
+    "5G 通信方向", "3D 打印方向", "一流", "十项全能", "百家号方向", "以人为本", "把关严格", "耐心", "细心", "有好奇心", "富有创新精神", "好奇"]) expect(attributeProblem(text), text).toBeUndefined();
   const caught: Array<[string, string]> = [["能独立立项", "「能」加动作"], ["可以独立带学生", "「可以」加动作"], ["擅长叙事", "「擅长」加动作"],
     ["会讲故事", "「会」加动作"], ["发表三篇顶会论文", "带数量"], ["10w+ 粉丝", "带数量"], ["Top 3 期刊", "带数量"], ["年入百万", "带数量"],
     ["写公众号长文", "以「写」开头"], ["做出有人付费的产品", "以「做出」开头"], ["外推人类知识边界", "以「外推」开头"], ["实现财务自由", "以「实现」开头"],
     ["坚持写作", "以「坚持」开头"], ["以长期研究", "以「以」开头"], ["把脑机制转化为硬件结构", "以「把」开头"], ["博士毕业", "以「毕业」结尾"],
-    ["独立立项", "以「立项」结尾"], ["公司上市", "以「上市」结尾"]];
+    ["独立立项", "以「立项」结尾"], ["公司上市", "以「上市」结尾"],
+    ["好奇心", "写成「有好奇心」"], ["责任心", "是名词"], ["创新精神", "写成「有创新精神」"]];
   for (const [text, why] of caught) expect(attributeProblem(text), text).toContain(why);
   // A sentence is not an attribute, however it starts.
   expect(attributeLength("AI 教育方向")).toBe(5);
