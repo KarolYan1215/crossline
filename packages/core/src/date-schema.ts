@@ -297,9 +297,15 @@ function acrossMidnight(meeting: RecurringMeeting): RecurringMeeting[] {
   if (meeting.endTime === "00:00") return [evening];
   return [evening, { ...meeting, id: `${meeting.id}-next`, weekdays: meeting.weekdays.map((day) => (day + 1) % 7), startTime: "00:00" }];
 }
-/** A dated item across midnight keeps its evening: the day it is on is the day it starts. */
-const dateAcrossMidnight = (item: DateCandidate): DateCandidate =>
-  TIME.test(item.startTime) && TIME.test(item.endTime) && item.endTime < item.startTime ? { ...item, endTime: "23:59" } : item;
+/**
+ * A dated item across midnight keeps its evening: the day it is on is the day it starts. A moment written as a span — a deadline 「23:59」
+ * given as 23:59–23:59 or 23:59–00:00 — is the moment alone (W-230: Homework 5 due 23:59 was dropped as 「时间不完整」 once the clip made
+ * its end equal its start).
+ */
+const dateAcrossMidnight = (item: DateCandidate): DateCandidate => {
+  if (!TIME.test(item.startTime) || !TIME.test(item.endTime) || item.endTime > item.startTime) return item;
+  return item.endTime === item.startTime || item.startTime === "23:59" ? { ...item, endTime: "" } : { ...item, endTime: "23:59" };
+};
 
 /** Why an item was not recorded: `reason` is the detail the model is shown, `code` what the person's screens word for themselves. */
 export type DateDrop = { id: string; title: string; reason: string; code: string };
@@ -334,7 +340,11 @@ export function sanitizeDateExtraction(value: unknown, known: Known, options: { 
   const askedUndated: UndatedItem[] = relative.map((item) => ({ id: item.id, kind: item.kind, title: item.title, project: item.project, sourceRef: item.sourceRef,
     quote: item.quote, note: `${RELATIVE_NOTE}${item.quote.slice(0, 120)}` }));
   const recurring = attempt(out.recurring.flatMap((meeting) => acrossMidnight(openEnded(meeting, known.today))), (meeting) => checkMeeting(meeting, known));
-  const undated = [...attempt(out.undated ?? [], (item) => checkSource(known, item.sourceRef, item.quote, item.title)), ...askedUndated];
+  // The same for one the model already put in `undated[]` (as the Skill asks): its relative words are kept, so it is asked whatever its
+  // kind — a class 「下周五补课」 is not a graded part, and was skipped without a word (W-230).
+  const relativeNote = (item: UndatedItem): UndatedItem => !item.note && !item.sourceRef.startsWith("reply-") && RELATIVE_DAY_WORDS.test(item.quote)
+    ? { ...item, note: `${RELATIVE_NOTE}${item.quote.slice(0, 120)}` } : item;
+  const undated = [...attempt(out.undated ?? [], (item) => checkSource(known, item.sourceRef, item.quote, item.title)).map(relativeNote), ...askedUndated];
   // A caller that records what was dropped (the interview's) keeps an empty answer; the default refuses it, so a repair can follow.
   if (!options.allowEmpty && out.dates.length + out.recurring.length > 0 && dates.length + recurring.length === 0) {
     reject("DATE_NOTHING_VERIFIABLE", `一条都没能在原文里核实：${dropped.slice(0, 3).map((item) => item.reason).join("；")}`); // i18n-ignore
