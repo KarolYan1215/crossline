@@ -70,15 +70,19 @@ export function readTurnProgress(raw: unknown): TurnProgress | undefined {
  * `stage` — what the app paces and offers cards by — and the model's own progress record counts only while it is about that part: the
  * 2026-11-03 walkthrough had the bar at 「第 2/6 部分 · 指南针」 and the right column at the progress record's 「主线」, part 6 of 6.
  */
-export function progressView(progress: TurnProgress | undefined, stage: string, flow: InterviewFlow = "v1", depth?: OnboardingDepth): { index: number; total: number; label: string; clear: number; of: number; next: string } {
+export function progressView(progress: TurnProgress | undefined, stage: string, flow: InterviewFlow = "v1", depth?: OnboardingDepth,
+  earlier: string[] = []): { index: number; total: number; label: string; clear: number; of: number; next: string; reached: number } {
   const parts = interviewParts(flow, depth);
   const part = (ONBOARDING_STAGES as readonly string[]).includes(stage) ? stage as OnboardingStage : progress?.part ?? (stage as OnboardingStage);
   const at = parts.indexOf(part);
   const index = at < 0 ? (part === "details" ? parts.length : 1) : at + 1;
   const own = progress?.part === part ? progress : undefined;
   const clear = own?.covered.length ?? 0, of = clear + (own?.open.length ?? 0);
+  // The furthest part any round got to: a round that goes back to an earlier part for one open item is a question asked again, not the
+  // interview starting over (W-235: 「第 6/6 部分 · 还剩约 5 分钟」 became 「第 2/6 部分 · 还剩约 25 分钟」 one round later).
+  const reached = Math.max(index, ...earlier.map((one) => parts.indexOf(one as OnboardingStage) + 1));
   return { index, total: parts.length, label: PART_LABEL[part] ?? "定向", clear: own?.partDone ? Math.max(clear, of) : clear,
-    of: own?.partDone ? Math.max(clear, of) : of, next: progress?.next ?? "" };
+    of: own?.partDone ? Math.max(clear, of) : of, next: progress?.next ?? "", reached };
 }
 
 /** The progress record as the lines the next round starts from (for the dialogue model, not shown). */

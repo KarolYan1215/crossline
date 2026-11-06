@@ -27,18 +27,22 @@ export const stagesOf = (flow: InterviewFlow = "v1", depth?: OnboardingDepth): A
  * the right column counted from two different records and disagreed).
  */
 export function StageBar({ stage, line, flow, depth, progress }: { stage: string; line?: string | undefined; flow?: InterviewFlow | undefined;
-  depth?: OnboardingDepth | undefined; progress?: { index: number; total: number; label: string } | undefined }) {
+  depth?: OnboardingDepth | undefined; progress?: { index: number; total: number; label: string; reached?: number } | undefined }) {
   const t = useT();
   const STAGES = stagesOf(flow, depth);
   if (line) return <p className="ob-stagebar-caption">{t("{{line}} · 细节", { line })}</p>;
   const past = stage === "details" && !STAGES.some(([id]) => id === "details");
   const at = past ? STAGES.length : progress ? Math.max(0, Math.min(progress.index, STAGES.length) - 1) : Math.max(0, STAGES.findIndex(([id]) => id === stage));
   const current = STAGES[Math.min(at, STAGES.length - 1)]!;
-  const label = at >= STAGES.length ? t("访谈已完成") : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: at + 1, total: STAGES.length, label: t(current[1]) });
+  // The furthest part reached stays filled when a round goes back to an earlier one for a question (W-235).
+  const reached = Math.min(Math.max(at, (progress?.reached ?? 0) - 1), STAGES.length);
+  const label = at >= STAGES.length ? t("访谈已完成") : reached > at
+    ? t("回到第 {{index}} 部分「{{label}}」补问（已到第 {{reached}}/{{total}} 部分）", { index: at + 1, label: t(current[1]), reached: reached + 1, total: STAGES.length })
+    : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: at + 1, total: STAGES.length, label: t(current[1]) });
   return <div className="ob-stagebar">
     <div className="ob-stagebar-track" role="progressbar" aria-label={t("访谈阶段")} aria-valuemin={0} aria-valuemax={STAGES.length}
-      aria-valuenow={Math.min(at + 1, STAGES.length)} aria-valuetext={label}>
-      {STAGES.map(([id, name], index) => <i key={id} title={t(name)} data-state={index < at ? "done" : index === at ? "current" : "next"} />)}
+      aria-valuenow={Math.min(reached + 1, STAGES.length)} aria-valuetext={label}>
+      {STAGES.map(([id, name], index) => <i key={id} title={t(name)} data-state={index === at ? "current" : index <= reached ? "done" : "next"} />)}
     </div>
     <p className="ob-stagebar-caption">{label}</p>
   </div>;

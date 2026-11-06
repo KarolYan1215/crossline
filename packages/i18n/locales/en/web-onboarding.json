@@ -834,6 +834,7 @@
   "长期目标：未采用": "Long-term goal: not adopted yet",
   "现在就能排日程；接着答完剩下几轮会拿到画像报告。先去用的话，剩下的问题会出现在待确认里，随时回来接着答。": "Scheduling can start now; answering the remaining rounds gets you the portrait report. If you go ahead first, the remaining questions appear in Decisions, and you can come back to answer them any time.",
   "第 {{index}}/{{total}} 部分 · {{label}}": "Part {{index}}/{{total}} · {{label}}",
+  "回到第 {{index}} 部分「{{label}}」补问（已到第 {{reached}}/{{total}} 部分）": "Back to part {{index}} ({{label}}) for one more question (reached part {{reached}}/{{total}})",
   "第 {{index}}/{{total}} 部分 · {{label}} · 已谈清 {{clear}}/{{of}}": "Part {{index}}/{{total}} · {{label}} · {{clear}}/{{of}} covered",
   "接下来：": "Next: ",
   "开场": "Opening",

@@ -37,16 +37,18 @@ const MODULE_PARTS = 4;
 
 /** Rough minutes to the start standard and to the end, from what is still open: honest enough to plan a sitting, never a promise. */
 export function minutesLeft(state: Pick<OnboardingState, "readyToStart" | "startMissing">, stage: string, flow: InterviewFlow = "v1",
-  depth?: OnboardingDepth): { label: string; minutes: number } {
+  depth?: OnboardingDepth, reached = 0): { label: string; minutes: number } {
   const order: string[] = interviewParts(flow, depth);
+  // Counted from the furthest part reached: going back to an earlier part for one question does not add its parts' time again (W-235).
+  const here = Math.max(order.indexOf(stage), reached - 1);
   // The rates below are the quick tier's (about 50 minutes in all); a deeper tier asks more of every part, so each estimate scales with it.
   const scale = depthPace(depth).minutes / depthPace("quick").minutes;
   // A start item is per line and most are settled by one answer, several to a round: about 2.5 minutes each, never more than half an hour.
   const facts = Math.min(30, Math.ceil(state.startMissing.filter((item) => item.id !== "profile_cards").length * 2.5));
   // The profile module (flow v2) comes before the start: about ten minutes a part still ahead of it.
-  const module = flow === "v2" ? Math.max(0, MODULE_PARTS - Math.max(0, order.indexOf(stage))) * 10 : 0;
+  const module = flow === "v2" ? Math.max(0, MODULE_PARTS - Math.max(0, here)) * 10 : 0;
   if (!state.readyToStart) return { label: "开始使用前约", minutes: Math.max(3, Math.round((module + facts) * scale)) };
-  const left = Math.max(1, order.length - Math.max(0, order.indexOf(stage)));
+  const left = Math.max(1, order.length - Math.max(0, here));
   return { label: "画像访谈还剩约", minutes: Math.round(left * 5 * scale) };
 }
 
@@ -74,7 +76,7 @@ export function StageView({ state, stage, complete, onChanged }: {
   useEffect(() => setShown(current), [current]);
   const reached = VIEWS.findIndex((view) => view.key === current);
   const total = state.startTotal;
-  const left = minutesLeft(state, stage, state.flow, state.depth);
+  const left = minutesLeft(state, stage, state.flow, state.depth, state.progress?.reached);
   // A long-term goal is adopted in the left column, not answered in the conversation: its missing item links there (W-8).
   const missing = state.startMissing.map((item) => ({ label: item.label, href: item.id.startsWith("line_goal:") ? "#ob-goals" : "" }));
   const progress = state.progress;
@@ -115,7 +117,9 @@ export function StageView({ state, stage, complete, onChanged }: {
     {/* The portrait's own progress, apart from the start standard; confirming the portrait is done on the portrait page (scenarios.md §3-10). */}
     {!state.focusLine && <section className="ob-portrait-progress" aria-label={t("画像进度")}>
       <b>{t("画像进度")}</b>
-      {progress && <small>{complete ? t("访谈已完成") : progress.of
+      {progress && <small>{complete ? t("访谈已完成") : (progress.reached ?? 0) > progress.index
+        ? t("回到第 {{index}} 部分「{{label}}」补问（已到第 {{reached}}/{{total}} 部分）", { index: progress.index, label: t(progress.label), reached: progress.reached, total: progress.total })
+        : progress.of
         ? t("第 {{index}}/{{total}} 部分 · {{label}} · 已谈清 {{clear}}/{{of}}", { index: progress.index, total: progress.total, label: t(progress.label), clear: progress.clear, of: progress.of })
         : t("第 {{index}}/{{total}} 部分 · {{label}}", { index: progress.index, total: progress.total, label: t(progress.label) })}</small>}
       {!complete && progress?.next && <small>{t("接下来：")}<span className="gen">{progress.next}</span></small>}

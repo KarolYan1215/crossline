@@ -37,6 +37,10 @@ describe("进度账", () => {
     expect(readTurnProgress({ part: "nope" })).toBeUndefined();
     expect(progressView(undefined, "details").index).toBe(5);
   });
+  it("最远到过的部分记下来：回到前面的部分补问一题，不算重新开始（W-235）", () => {
+    expect(progressView(undefined, "compass", "v2", "quick", ["narrative", "compass", "lines", "compass"])).toMatchObject({ index: 2, total: 6, reached: 6 });
+    expect(progressView(undefined, "compass", "v2", "quick", ["narrative", "", "nope"])).toMatchObject({ index: 2, reached: 2 });
+  });
   it("部分编号只有一个来源：按本轮的阶段数，模型进度记录说的是别的部分时不算（W-186）", () => {
     // The round is in the compass part; the model's own record still names the lines part, the sixth of six in the newer order.
     const stale = readTurnProgress({ part: "lines", covered: ["a", "b", "c", "d", "e", "f"], open: [], partDone: true, next: "" });

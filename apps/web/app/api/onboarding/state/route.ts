@@ -87,7 +87,8 @@ export async function GET(request: Request) {
     ...start,
     // Where the interview is, by its own record (`progress` of the last round), for the right column.
     progress: progressView(readTurnProgress((session?.coverage as { progress?: unknown } | undefined)?.progress), stageNow, flow,
-      readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING))),
+      readDepth(store.getSetting(workspaceId, ONBOARDING_DEPTH_SETTING)),
+      raw.filter((message) => message.role === "assistant").map((message) => String((message.content as { stage?: unknown }).stage ?? ""))),
     flow,
     capacity, skeleton: start.readyToStart ? draft : [],
     insightRatings: ratings,
