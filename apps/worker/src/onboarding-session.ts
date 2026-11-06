@@ -9,7 +9,7 @@ import {
   type KnownSources, type OnboardingDialogue, type OnboardingTurnContext, ONBOARDING_PROGRESS_SETTING, ONBOARDING_LAST_FAILURE, readPartialTurn, type OnboardingProgress, calendarWeek,
   tFor, type Locale, flowOf, INTERVIEW_FLOW_STAGES, PROFILE_MODULE_STAGES, cardsFor, readCardAnswers, mergeInstrumentAnswers, readInstrumentAnswers,
   settledItems, PROFILE_INSTRUMENTS_SETTING, type CardSet, type InterviewFlow, type ProfileCard, type ProfileStage,
-  ONBOARDING_DEPTH_SETTING, readDepth, depthPace, type DepthPace
+  ONBOARDING_DEPTH_SETTING, readDepth, depthPace, roundsSpent, type DepthPace
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillProgress } from "@crossline/codex";
 import {
@@ -529,9 +529,14 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     const holdGaps = flow === "v2" && PROFILE_MODULE_STAGES.has(checked.stage as OnboardingStage);
     // Past the deep stages, a round left with nothing to ask while the start standard stands is the end, not an open question for its own
     // sake: what is left goes to 待决事项 once the person uses the app (`interviewStatus.parked`).
-    const endsHere = startStands && !holdGaps && !paced.deep && !cards.length && checked.nextAction === "ask" && !checked.questions.length;
+    // A tier with a time limit also ends when its rounds are used up and the start standard stands, whatever the model still asks (W-236).
+    const spent = startStands && checked.nextAction === "ask"
+      && roundsSpent(depthNow(), messages.filter((message) => message.role === "assistant").length);
+    const endsHere = spent || (startStands && !holdGaps && !paced.deep && !cards.length && checked.nextAction === "ask" && !checked.questions.length);
     if (endsHere && extractMode !== "off") markFinishing(store, workspaceId, sessionId);
-    const assembled = endsHere ? { ...checked, nextAction: "ready_for_milestones" as const }
+    const assembled = spent ? { ...checked, questions: [], cards: [], nextAction: "ready_for_milestones" as const,
+        reply: `${checked.reply}\n\n${tFor(locale)("这一档的访谈轮数已用完：可以开始使用，剩下的问题会放进待确认，随时回来接着答。")}` }
+      : endsHere ? { ...checked, nextAction: "ready_for_milestones" as const }
       : cards.length && checked.nextAction === "ask" ? { ...checked, cards }
       : withSomethingToAnswer(checked, holdGaps ? [] : gapsNow, messages, locale, focusLine || holdGaps ? [] : openChecklist(Infinity, (item) => !item.start, sessionId));
     // What the app added (the checklist's and the start items' own questions) goes through the screen the page applies when it lists the

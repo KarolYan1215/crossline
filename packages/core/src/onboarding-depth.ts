@@ -50,13 +50,24 @@ export type DepthPace = {
   portraitHolds: boolean;
   /** Whether the main interview ends with the details part, project by project. */
   detailsPart: boolean;
+  /**
+   * The main interview's rounds, about two minutes each: once this many are done and the start standard stands, the interview ends and
+   * what is left waits in 待确认. Without it the move-on instruction sent the model back to parts already asked, one question a round, and
+   * the 2026-11-06 walkthrough's quick interview was at round 26 after nine hours, cycling 指南针 → 能量 → 经历 (W-236).
+   */
+  rounds: number;
 };
 
 export const DEPTH_PACE: Record<OnboardingDepth, DepthPace> = {
-  quick: { minutes: 50, unlimited: false, roundQuestions: 3, roundMax: 4, cardItems: 3, cards: "short", moveOnAfter: 2, projects: "deferred", portraitHolds: false, detailsPart: false },
-  standard: { minutes: 80, unlimited: false, roundQuestions: 4, roundMax: 6, cardItems: 6, cards: "all", moveOnAfter: 3, projects: "core", portraitHolds: true, detailsPart: false },
-  thorough: { minutes: 120, unlimited: false, roundQuestions: 5, roundMax: 8, cardItems: 6, cards: "all", moveOnAfter: 4, projects: "all", portraitHolds: true, detailsPart: true },
-  open: { minutes: 120, unlimited: true, roundQuestions: 5, roundMax: 8, cardItems: 6, cards: "all", moveOnAfter: Number.POSITIVE_INFINITY, projects: "all", portraitHolds: true, detailsPart: true }
+  quick: { minutes: 50, unlimited: false, roundQuestions: 3, roundMax: 4, cardItems: 3, cards: "short", moveOnAfter: 2, projects: "deferred", portraitHolds: false, detailsPart: false, rounds: 25 },
+  standard: { minutes: 80, unlimited: false, roundQuestions: 4, roundMax: 6, cardItems: 6, cards: "all", moveOnAfter: 3, projects: "core", portraitHolds: true, detailsPart: false, rounds: 40 },
+  thorough: { minutes: 120, unlimited: false, roundQuestions: 5, roundMax: 8, cardItems: 6, cards: "all", moveOnAfter: 4, projects: "all", portraitHolds: true, detailsPart: true, rounds: 60 },
+  open: { minutes: 120, unlimited: true, roundQuestions: 5, roundMax: 8, cardItems: 6, cards: "all", moveOnAfter: Number.POSITIVE_INFINITY, projects: "all", portraitHolds: true, detailsPart: true, rounds: Number.POSITIVE_INFINITY }
 };
+
+/** Whether the main interview has used its rounds (`assistantRounds` already written, this one not counted). */
+export function roundsSpent(depth: OnboardingDepth | undefined, assistantRounds: number): boolean {
+  return assistantRounds + 1 >= depthPace(depth).rounds;
+}
 
 export const depthPace = (depth: OnboardingDepth | undefined): DepthPace => DEPTH_PACE[depth ?? "quick"];

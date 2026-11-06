@@ -683,6 +683,28 @@ test("once the start items stand, a front-stage round with nothing left to ask e
   expect(await run({ sessionId: "s", text: "差不多就这些" })).toEqual({ state: "ready", sessionId: "s" });
 });
 
+test("a quick interview whose rounds are used up ends once the start items stand, whatever the model still asks (W-236)", async () => {
+  const at = "2026-10-30T00:00:00.000Z";
+  store.setSetting(workspaceId, "lines.v1", JSON.stringify([{ id: "media", label: "创作者", color: "media", goal: "成为有趣的创作者", goals: ["成为有趣的创作者"], createdAt: at }]));
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({ media: { description: "小红书科普", attributes: [{ text: "有趣", kind: "ability", sourceRef: "reply-0" }] } }));
+  store.setSetting(workspaceId, "schedule.availability.proposed", JSON.stringify([{ weekday: 1, start: "09:00", end: "12:00" }]));
+  store.saveProject({ id: "notes", ownerId: "o", workspaceId, identityId: "media", name: "秋季笔记系列", status: "active", summary: "", createdAt: at, updatedAt: at });
+  store.upsertProfileFact({ workspaceId, identityId: "media", projectId: "notes", slot: "no_deadline", value: "没有截止", status: "confirmed", sourceRef: "reply-0", sourceQuote: "", updatedAt: at });
+  store.saveOnboardingSession({ id: "s", ownerId: "o", workspaceId, state: "active", coverage: { flow: "v1" }, createdAt: at, updatedAt: at });
+  // Twenty-four rounds already, the last ones going back to the compass part.
+  for (let round = 0; round < 24; round += 1) {
+    store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "user", content: { text: `回答 ${round}` }, createdAt: at });
+    store.appendOnboardingMessage({ sessionId: "s", workspaceId, role: "assistant", content: { reply: "好。", questions: [], stage: "compass", nextAction: "ask" }, createdAt: at });
+  }
+  const { rpc } = fakeRuntime([turn({ stage: "compass", reply: "你更看重自主。", questions: [{ id: "q-why", text: "哪段经历让你开始在意自主？", kind: "free",
+    allowOther: true, identityId: "person", projectId: "", options: [] }] })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\\repo", () => rpc, { extract: "off" });
+  expect(await run({ sessionId: "s", text: "自主更重要" })).toEqual({ state: "ready", sessionId: "s" });
+  const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { reply: string; questions: unknown[]; nextAction: string };
+  expect(last).toMatchObject({ nextAction: "ready_for_milestones", questions: [] });
+  expect(last.reply).toContain("轮数已用完");
+});
+
 test("the runners carry only the scenario: the Skill holds the rules, and the language comes from the shared style", () => {
   for (const text of [INSTRUCTIONS, EXTRACT_INSTRUCTIONS]) {
     expect(text.length).toBeLessThan(900);
