@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, onboardingDialogueSchema, onboardingExtractSchema, droppedOnboardingItems, keepOnboardingTurn, prunedOnboardingItems, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
+import { ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, onboardingDialogueSchema, onboardingExtractSchema, droppedOnboardingItems, keepOnboardingTurn, listsAtLimit, prunedOnboardingItems, validateOnboardingTurn, type OnboardingTurn } from "./onboarding-turn-schema";
 
 const known = {
   identities: ["research", "startup", "media", "investment"],
@@ -214,4 +214,13 @@ test("what keeping a turn left out is named, one line each, so it can be recorde
     projectsDetected: [{ id: "p.bad", name: "西湖论文" }], availability: { windows: [{}, {}] } };
   const kept = { slotUpdates: [original.slotUpdates[0]!], projectsDetected: [], availability: { windows: [{}] } } as never;
   expect(prunedOnboardingItems(original, kept)).toEqual(["西湖论文", "goal：投稿", "availability × 1"]);
+});
+
+test("a list filled to its schema's cap is reported, so what may have come after is said, not cut off silently (W-228)", () => {
+  const many = (count: number) => Array.from({ length: count }, (_, index) => ({ index }));
+  expect(listsAtLimit({ slotUpdates: many(40), projectsDetected: many(2), fileDates: { dates: many(60), recurring: many(3), questions: [], undated: [] },
+    availability: { windows: many(14), why: "" }, coverage: many(8) })).toEqual([
+    { path: "slotUpdates", max: 40 }, { path: "fileDates.dates", max: 60 }, { path: "availability.windows", max: 14 }]);
+  expect(listsAtLimit({ slotUpdates: many(39) })).toEqual([]);
+  expect(listsAtLimit(undefined)).toEqual([]);
 });

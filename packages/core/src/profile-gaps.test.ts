@@ -30,6 +30,18 @@ describe("what the profile still has to ask before milestones are designed from 
     expect(gap.blocking).toBe(false);
     expect(gap.question.text).toContain("Final Project Report");
   });
+
+  test("a file's relative day (「下周五」) is put to the person as a question, with the file's words, even with no project (W-228)", () => {
+    const gaps = profileGaps({ ...base, undated: [{ project: "", kind: "class", title: "补课", note: "relative:下周五补课" }] });
+    const gap = gaps.find((item) => item.code === "DATE_UNDATED" && item.question.text.includes("补课"))!;
+    expect(gap.blocking).toBe(false);
+    expect(gap.question.text).toBe("文件里写的「下周五补课」（补课）是哪一天？");
+    expect(gap.question.options.map((option) => option.id)).toEqual(["known", "unknown"]);
+    // Already answered: not asked again.
+    const answered = profileGaps({ ...base, facts: [...base.facts, { identityId: "", projectId: "", slot: "undated_buke", value: "补课 11-14", status: "confirmed" }],
+      undated: [{ project: "", kind: "class", title: "补课", note: "relative:下周五补课" }] });
+    expect(answered.some((item) => item.question.text.includes("下周五补课"))).toBe(false);
+  });
 });
 
 describe("answers to the app's own questions become facts without the model", () => {

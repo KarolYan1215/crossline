@@ -169,3 +169,20 @@ test("字段点改: a field changed on the card is what runs, and the change is 
   expect((store.listWorkOrders(ws).find((order) => order.id === "sim")!.payload as { dueDate?: string }).dueDate).toBe("2026-10-17");
   expect(store.preferenceLines(ws, ["all"]).join("\n")).toContain("date「2026-10-15」改为「2026-10-17」");
 });
+
+test("what one reading cannot take is said, and closing a card that did nothing keeps the line for the facts (W-228)", async () => {
+  const store = setup();
+  const note = (index: number) => ({ action: "note.add", summary: `记 ${index}`, args: { text: `第 ${index} 件` } });
+  const due = { action: "task.op", summary: "截止改为 10/16", args: { workOrderId: "sim", type: "due", date: "2026-10-16", minutes: 0, stepId: "", text: "", who: "", energy: "" } };
+  worker.mockResolvedValueOnce({ state: "replied", turn: { reply: "列了八件。", confidence: "high", actions: Array.from({ length: 8 }, (_, index) => note(index)),
+    clarify: { question: "", options: [] } } });
+  const [, full] = await conversationTurn(TEST_CTX, { text: "记下十件事：一二三四五六七八九十", mentions: [], page: { kind: "today", entityId: "" } }, NOW);
+  expect(full!.text).toContain("一张卡最多列 8 项");
+  // A wrong reading the person closes: the fact said beside it reaches the notes the extraction reads.
+  worker.mockResolvedValueOnce({ state: "replied", turn: { reply: "下方卡片改截止。", confidence: "high", actions: [due], clarify: { question: "", options: [] } } });
+  const [, card] = await conversationTurn(TEST_CTX, { text: "我每周二上午十点有组会，数据那件事改到周五", mentions: [], page: { kind: "today", entityId: "" } }, NOW);
+  expect(card!.text).not.toContain("最多列");
+  expect(await decideCard(TEST_CTX, card!.id, { dismiss: true }, NOW)).toMatchObject({ ok: true });
+  expect(store.listOnboardingMessages(ws, "notes").map((message) => (message.content as { text: string }).text))
+    .toContain("我每周二上午十点有组会，数据那件事改到周五");
+});

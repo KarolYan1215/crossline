@@ -219,12 +219,13 @@ describe("what a person says the way people say it is recorded, and what is not 
     expect(quoteSupportsDate("2026-12-25", "十二月二十五日交")).toBe(true);
     expect(quoteSupportsDate("2026-11-13", "十一月十四号考试")).toBe(false);
   });
-  test("a relative day is checked against today only in a reply, never in a file", () => {
+  test("a relative day is checked against today only in a reply; in a file it becomes a question with the file's words", () => {
     const sources = { ...known.sources, "reply-3": "下周五交报告。", "src-9": "下周五交报告。" };
     const date = (sourceRef: string) => item({ id: sourceRef, date: "2026-10-09", sourceRef, quote: "下周五交报告。", title: "报告" });
     const { extraction, dropped } = sanitizeDateExtraction(out({ dates: [date("reply-3"), date("src-9")] }), { today: known.today, sources });
     expect(extraction.dates.map((entry) => entry.id)).toEqual(["reply-3"]);
-    expect(dropped).toEqual([expect.objectContaining({ id: "src-9", code: "DATE_QUOTE_DOES_NOT_SUPPORT_DATE" })]);
+    expect(dropped).toEqual([]);
+    expect(extraction.undated).toEqual([expect.objectContaining({ id: "src-9", title: "ECE 548 报告", note: "relative:下周五交报告。" })]);
   });
   test("a night shift is split at midnight, a start in words starts today, and nothing verified is reported, not thrown, when asked", () => {
     const shift = { id: "w", title: "夜班", project: "", weekdays: [1, 3], startTime: "22:00", endTime: "06:00", from: "即日起", to: "", exceptions: [],

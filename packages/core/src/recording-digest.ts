@@ -37,6 +37,8 @@ export type DigestDate = { title: string; date: string; time: string; quote: str
 export type RecordingDigestItem = {
   id: string; kind: RecordingKind; title: string; summary: string; lineIds: string[]; projectId: string;
   commitments: DigestCommitment[]; facts: DigestFact[]; dates: DigestDate[];
+  /** Items of the answer the check dropped (a quote not in the transcript, a malformed day or slot): counted, so the digest says so (W-228). */
+  unverified?: number;
 };
 export type RecordingDigestAnswer = { recordings: RecordingDigestItem[] };
 
@@ -62,11 +64,18 @@ export const RECORDING_DIGEST_SCHEMA = { type: "object", additionalProperties: f
 export function spokenText(transcript: string): string {
   return transcript.split(/\r?\n/).filter((line) => !/^\[(录音|语言)：/.test(line)).map((line) => line.replace(/^\[\d{1,2}(:\d{2}){1,2}\]\s*/, "")).join("\n").trim();
 }
-/** What a run is shown: the spoken text, cut in the middle when long, so the opening (who and what) and the close (what was agreed) stay. */
+/**
+ * What a run is shown: the spoken text, cut in the middle when long, so the opening (who and what) and the close (what was agreed) stay.
+ * The cut is said, never silent (W-228): `digestOmitted` gives how much was left out, and the digest document names it.
+ */
 export function digestText(transcript: string, limit = DIGEST_TEXT_LIMIT): string {
   if (transcript.length <= limit) return transcript;
   const half = Math.floor((limit - 20) / 2);
   return `${transcript.slice(0, half)}\n[……中间省略……]\n${transcript.slice(-half)}`; // i18n-ignore: the model's input
+}
+/** How many characters of a transcript `digestText` leaves out (0 when it fits). */
+export function digestOmitted(transcript: string, limit = DIGEST_TEXT_LIMIT): number {
+  return transcript.length <= limit ? 0 : transcript.length - 2 * Math.floor((limit - 20) / 2);
 }
 
 /** Letters and digits only, so a quote copied with other punctuation or spacing still matches. */
@@ -97,7 +106,7 @@ const SLOT = /^[a-z][a-z0-9_]{1,59}$/;
 /**
  * Keeps an answer for each recording asked about; drops what cannot be checked. A recording missing from the answer, or an unknown id,
  * is refused (the run is repaired); an item whose quote is not in that transcript, an unknown line or project, a malformed day or slot
- * is dropped silently — one bad line must not cost the rest.
+ * is dropped — one bad line must not cost the rest — and counted in `unverified`, so the digest says how many were not kept.
  */
 export function validateRecordingDigest(value: unknown, input: { transcripts: Map<string, string>; lineIds: string[]; projectIds: string[] }): RecordingDigestAnswer {
   const answer = value as RecordingDigestAnswer | undefined;
@@ -120,6 +129,7 @@ export function validateRecordingDigest(value: unknown, input: { transcripts: Ma
       if (speaker === "本人") return "person";
       return c.by === "person" ? "unclear" : c.by;
     };
+    const asked = discarded ? 0 : (item.commitments ?? []).length + (item.facts ?? []).length + (item.dates ?? []).length;
     out.push({ id: item.id, kind: RECORDING_KINDS.includes(item.kind) ? item.kind : "noise",
       title: String(item.title ?? "").trim().slice(0, 40), summary: discarded ? "" : String(item.summary ?? "").trim().slice(0, 1200),
       lineIds: [...new Set((item.lineIds ?? []).filter((id) => lines.has(id)))], projectId: projects.has(item.projectId) ? item.projectId : "",
@@ -129,6 +139,9 @@ export function validateRecordingDigest(value: unknown, input: { transcripts: Ma
         .map((f) => ({ identityId: f.identityId, projectId: projects.has(f.projectId) ? f.projectId : "", slot: f.slot, value: f.value.trim().slice(0, 200), quote: f.quote })),
       dates: discarded ? [] : (item.dates ?? []).filter((d) => d && quoted(d.quote) && DAY.test(d.date))
         .map((d) => ({ title: d.title.trim().slice(0, 80), date: d.date, time: TIME.test(d.time) ? d.time : "", quote: d.quote })) });
+    const kept = out[out.length - 1]!;
+    const unverified = asked - kept.commitments.length - kept.facts.length - kept.dates.length;
+    if (unverified > 0) kept.unverified = unverified;
   }
   const missing = [...input.transcripts.keys()].filter((id) => !seen.has(id));
   if (missing.length) throw new Error(`RECORDING_DIGEST_MISSING: 少了这些录音的整理：${missing.join("、")}`); // i18n-ignore: a repair message
@@ -136,19 +149,27 @@ export function validateRecordingDigest(value: unknown, input: { transcripts: Ma
 }
 
 /** The digest as a document: what the interview and the planners read instead of the whole transcript. In the workspace's language. */
-export function digestDocument(item: RecordingDigestItem, source: { fileName: string; startedAt: string; minutes: number }, locale?: Locale): string {
+export function digestDocument(item: RecordingDigestItem, source: { fileName: string; startedAt: string; minutes: number; omittedMinutes?: number }, locale?: Locale): string {
   const t = tFor(locale);
   const quoted = (quote: string) => locale === "en" ? `"${quote}"` : `「${quote}」`; // i18n-ignore: the quotation marks of each language
   const lines = [`# ${item.title || source.fileName}`, "", t("录音：{{file}}，约 {{start}} 开始，{{minutes}} 分钟；类型：{{kind}}",
     { file: source.fileName, start: source.startedAt, minutes: source.minutes, kind: t(RECORDING_KIND_LABEL[item.kind]) }), "", item.summary];
   const mine = item.commitments.filter((c) => c.by === "person"), others = item.commitments.filter((c) => c.by !== "person");
-  if (mine.length) lines.push("", t("## 本人答应做的"), ...mine.map((c) => t("- {{text}}{{due}}：{{quote}}",
-    { text: c.text, due: c.due ? t("（{{day}} 前）", { day: c.due }) : "", quote: quoted(c.quote) })));
+  // Past the cap a commitment is only listed here, and says so: the person sees which ones did not become a capture (W-228).
+  const onlyHere = (index: number, cap: number) => index >= cap ? t("（只记在这里，没有建成收集）") : "";
+  if (mine.length) lines.push("", t("## 本人答应做的"), ...mine.map((c, index) => t("- {{text}}{{due}}：{{quote}}",
+    { text: c.text, due: c.due ? t("（{{day}} 前）", { day: c.due }) : "", quote: quoted(c.quote) }) + onlyHere(index, DIGEST_CAPTURES_PER_RECORDING)));
+  let promised = 0;
   if (others.length) lines.push("", t("## 别人答应的或说不清是谁"), ...others.map((c) => t("- {{who}}{{text}}{{due}}{{unclear}}：{{quote}}", {
     who: c.who ? t("{{who}}：", { who: c.who }) : "", text: c.text, due: c.due ? t("（{{day}}）", { day: c.due }) : "",
-    unclear: c.by === "unclear" ? t("（说话人不确定）") : "", quote: quoted(c.quote) })));
+    unclear: c.by === "unclear" ? t("（说话人不确定，只记在这里）") : "", quote: quoted(c.quote) })
+    + (c.by === "other" && promised++ >= DIGEST_WAITS_PER_RECORDING ? t("（只记在这里，没有建成「在等」）") : "")));
   if (item.dates.length) lines.push("", t("## 提到的日期"), ...item.dates.map((d) => t("- {{day}} {{title}}：{{quote}}",
     { day: `${d.date}${d.time ? ` ${d.time}` : ""}`, title: d.title, quote: quoted(d.quote) })));
   if (item.facts.length) lines.push("", t("## 关于本人与工作的信息"), ...item.facts.map((f) => t("- {{text}}：{{quote}}", { text: f.value, quote: quoted(f.quote) })));
+  const unread: string[] = [];
+  if (source.omittedMinutes) unread.push(t("录音太长，中间约 {{minutes}} 分钟没有读；那一段里的承诺、日期和信息都不在这份摘要里。", { minutes: source.omittedMinutes }));
+  if (item.unverified) unread.push(t("另有 {{count}} 条在转写里找不到原话（或日期格式不对），没有记下。", { count: item.unverified }));
+  if (unread.length) lines.push("", t("## 没有整理到的"), ...unread.map((line) => `- ${line}`));
   return lines.join("\n");
 }

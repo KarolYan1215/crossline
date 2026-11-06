@@ -178,11 +178,16 @@ export type ConciergeTurn = {
   corrects: boolean;
 };
 
+/** Actions one card holds at most; a message asking for more is answered with these and told to send the rest (W-228). */
+export const CONCIERGE_MAX_ACTIONS = 8;
+/** Screenshots of one message the model is shown at most; the rest are named as not read (W-228). */
+export const CONCIERGE_MAX_IMAGES = 3;
+
 export const CONCIERGE_SCHEMA = object({
   reply: str(1500),
   confidence: enumOf(["high", "low"]),
   corrects: { type: "boolean" },
-  actions: { type: "array", maxItems: 8, items: { anyOf: ACTION_IDS.map((id) => object({
+  actions: { type: "array", maxItems: CONCIERGE_MAX_ACTIONS, items: { anyOf: ACTION_IDS.map((id) => object({
     action: enumOf([id]), summary: str(200), args: object(ACTIONS[id].args as Record<string, unknown>) })) } },
   clarify: object({ question: str(300), options: { type: "array", maxItems: 4, items: object({ label: str(60),
     actions: { type: "array", maxItems: 8, items: { type: "integer", minimum: 0, maximum: 7 } } }) } })
@@ -407,7 +412,7 @@ function normalizeTurn(raw: unknown): ConciergeTurn {
   const value = raw as Partial<ConciergeTurn> | undefined;
   if (!value || typeof value !== "object" || !Array.isArray(value.actions)) throw new Error("CONCIERGE_SHAPE_INVALID");
   const actions = value.actions.filter((item): item is ProposedAction => Boolean(item) && isActionId((item as { action?: unknown }).action)
-    && typeof (item as { args?: unknown }).args === "object").slice(0, 8)
+    && typeof (item as { args?: unknown }).args === "object").slice(0, CONCIERGE_MAX_ACTIONS)
     .map((item) => ({ ...item, summary: String(item.summary ?? "").trim().slice(0, 200) }) as ProposedAction);
   const clarify = value.clarify && typeof value.clarify.question === "string" && value.clarify.question.trim()
     ? { question: value.clarify.question.trim().slice(0, 300), options: (Array.isArray(value.clarify.options) ? value.clarify.options : []).slice(0, 4)

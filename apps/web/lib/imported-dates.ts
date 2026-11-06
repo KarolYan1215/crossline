@@ -35,7 +35,7 @@ const DROP_WHY: Record<string, string> = {
   DATE_QUOTE_DOES_NOT_SUPPORT_DATE: "原文里找不到写着这一天的句子", DATE_TIME_INVALID: "时间不完整：没有结束时间，或结束不晚于开始",
   DATE_INVALID: "起止日期不完整", DATE_OUT_OF_RANGE: "日期离今天太远，可能年份读错了", DATE_UNKNOWN_SOURCE: "引用对不上原文",
   DATE_QUOTE_NOT_VERBATIM: "引用对不上原文", DATE_NOTHING_VERIFIABLE: "一条都没能在原文里核实", OFF_HOURS: "在本人说的可用时间之外，当作作息没有写入",
-  NOT_KEPT: "没通过检查"
+  NOT_KEPT: "没通过检查", DATE_PASSED: "等确认期间日期已过，没有再列出", LIMIT_REACHED: "一次读取只能记这么多，后面的可能没有读到；需要的话在回答里补上"
 };
 /** The drops as list lines, newest first, one per title; a duplicate is the same item twice and is not listed. */
 function droppedLines(lists: Dropped[][], locale: Locale, recorded: Set<string> = new Set()): string[] {
@@ -78,9 +78,12 @@ export function loadPendingDateBatch(ctx: AccessContext): PendingBatch | null {
         start: item.startTime, end: item.endTime, from: item.from, to: item.to, count: days.length }),
       quote: item.quote, sourceRef: item.sourceRef, note: item.location, checked: item.confidence !== "low", blocks: days.length };
   });
+  // What passed while the batch waited is not offered, and is said (W-228): it used to vanish from the list without a word.
+  const passed = [...(payload.dates ?? []).filter((item) => item.date < today), ...(payload.recurring ?? []).filter((item) => item.to < today)]
+    .map((item) => ({ title: item.title, code: "DATE_PASSED" }));
   return { id: batch.entityId, documentCount: payload.documentIds?.length ?? 0, items: [...recurring, ...dates], questions: payload.questions ?? [],
     // The titles, not just a count: 「另有 6 项…已丢弃」 left the person no way to tell what to add by hand (W-10). Each with why (W-228).
-    dropped: droppedLines([payload.dropped ?? []], locale) };
+    dropped: droppedLines([payload.dropped ?? [], passed], locale) };
 }
 
 /** Writes the confirmed items and records the decision. Returns how many calendar blocks were added. */

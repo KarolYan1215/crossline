@@ -18,7 +18,7 @@ const INSTRUCTIONS = "You run silently after the person captured one line, as th
 // i18n-ignore-end
 
 export type BackgroundFactsOutcome =
-  | { state: "extracted"; factCount: number }
+  | { state: "extracted"; factCount: number; droppedCount?: number }
   | { state: "blocked"; code: string; message: string };
 
 export function buildBackgroundFactsContext(store: CrosslineStore, workspaceId: string,
@@ -67,6 +67,7 @@ export function createBackgroundFactsExtractor(store: CrosslineStore, workspaceI
       byIdentity.set(fact.identityId, list);
     }
     for (const [identityId, facts] of byIdentity) store.mergeBackgroundFacts(workspaceId, identityId, facts);
-    return { state: "extracted", factCount: result.output.facts.length };
+    const droppedCount = result.output.dropped?.length ?? 0;
+    return { state: "extracted", factCount: result.output.facts.length, ...(droppedCount ? { droppedCount } : {}) };
   };
 }

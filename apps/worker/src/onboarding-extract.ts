@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import {
   INTERVIEW_FLOW_STAGES, deepSectionsOf, flowOf, type InterviewFlow, CARD_TITLE, pendingItems, readInstrumentAnswers, PROFILE_INSTRUMENTS_SETTING,
-  AVAILABILITY_PROPOSED_SETTING, ONBOARDING_KEEP_EARLY_MAX, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, prunedOnboardingItems, lineAttributes, numberedText, onboardingExtractSchema,
+  AVAILABILITY_PROPOSED_SETTING, ONBOARDING_KEEP_EARLY_MAX, type ProfileSection, PROFILE_CONFIRMED, droppedOnboardingItems, keepOnboardingExtraction, LIMITED_LISTS, listsAtLimit, prunedOnboardingItems, lineAttributes, numberedText, onboardingExtractSchema,
   portraitFingerprint, sectionClosed, validateOnboardingExtraction, type SectionRecord,
   type EvidenceSentence, type KnownSources, type OnboardingExtractContext, type OnboardingExtraction, type OnboardingStage, type StoredLineProfile,
   ONBOARDING_INSIGHTS, readInsightRatings
@@ -13,6 +13,7 @@ import {
   type CrosslineStore, type StoredOnboardingMessage, type StoredSentence, type StoredSourceDocument
 } from "@crossline/db";
 import { identityLines } from "./lines";
+import { tOfWorkspace } from "./locale";
 
 /** The last proposed hours, as the extraction writes them (minutes after midnight). */
 function hoursOnRecord(store: CrosslineStore, workspaceId: string): NonNullable<OnboardingExtractContext["hours"]> {
@@ -22,7 +23,7 @@ function hoursOnRecord(store: CrosslineStore, workspaceId: string): NonNullable<
     return (proposal?.windows ?? []).map((window) => ({ days: window.days, startMinute: minute(window.start), endMinute: minute(window.end), energy: window.energy }));
   } catch { return []; }
 }
-import { ONBOARDING_UNRECORDED_EVENT, persistExtraction, personTimeZone, readProfileModel, readSectionRecords } from "./onboarding-persist";
+import { DATES_UNRECORDED_EVENT, ONBOARDING_UNRECORDED_EVENT, persistExtraction, personTimeZone, readProfileModel, readSectionRecords } from "./onboarding-persist";
 import { sourceIds } from "./source-ids";
 import { DOMAIN_PACKS, domainGuides } from "@crossline/identity-packs";
 
@@ -229,6 +230,8 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
     };
     const ids = { lines: lines.map((line) => line.id) };
     let pruned: string[] = [];
+    // Read from the answer as the model gave it, before any check prunes it: a list at its cap may have stopped short (W-228).
+    let full: Array<{ path: string; max: number }> = [];
     const result = await runCodexSkill<OnboardingExtraction>(client, context, {
       skillName: ONBOARDING_EXTRACT_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: onboardingExtractSchema(ids),
       prepareInput: () => context, tools,
@@ -236,6 +239,7 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
       // them, and this run's replies, files, task and date last.
       stableKeys: ["version", "timeZone", "lines", "domainGuides", "lineProfiles", "projects", "focusLine", "profile", "facts"],
       validateOutput: (output) => {
+        full = listsAtLimit(output);
         const valid = validateOnboardingExtraction(output, known);
         // A section this run owes comes back written: an empty answer here used to close it with nothing in it. After the repairs the
         // answer is kept as it is (softAccept) and the section is asked for again by a later run.
@@ -290,6 +294,16 @@ export function createOnboardingExtractor(store: CrosslineStore, workspaceId: st
         repairs: result.audit.repairs ?? 0, warnings: result.audit.warnings ?? [], pruned } });
     if (pruned.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:unrecorded:${sessionId}:${upTo}:${randomUUID()}`, type: ONBOARDING_UNRECORDED_EVENT,
       entityId: sessionId, payload: { dropped: pruned.map((title) => ({ title, code: "NOT_KEPT" })) } });
+    if (full.length) {
+      const t = tOfWorkspace(store, workspaceId);
+      const limit = (items: typeof full) => items.map(({ path, max }) => ({ title: t("{{what}}（这次读到上限 {{max}} 条）", { what: t(LIMITED_LISTS[path]!), max }), code: "LIMIT_REACHED" }));
+      const dates = full.filter((item) => item.path.startsWith("fileDates.")), rest = full.filter((item) => !item.path.startsWith("fileDates."));
+      // The dates' limit is listed with the date list (its drops), the others with what the interview was not able to keep.
+      if (dates.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `dates:unrecorded:limit:${sessionId}:${upTo}:${randomUUID()}`, type: DATES_UNRECORDED_EVENT,
+        entityId: sessionId, payload: { dropped: limit(dates) } });
+      if (rest.length) store.appendEvent({ ownerId, workspaceId, idempotencyKey: `onboarding:unrecorded:limit:${sessionId}:${upTo}:${randomUUID()}`, type: ONBOARDING_UNRECORDED_EVENT,
+        entityId: sessionId, payload: { dropped: limit(rest) } });
+    }
     const more = Boolean(nextSession());
     return { state: "done", sessionId, replies: pendingReplies.length, files: taken.length, facts: result.output.slotUpdates.length, more };
   }

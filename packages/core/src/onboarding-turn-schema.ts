@@ -534,6 +534,30 @@ export const onboardingDialogueSchema = (ids?: TurnIds) => object(pick(turnField
 export const onboardingExtractSchema = (ids?: TurnIds) => object(pick(turnFields(ids), EXTRACT_KEYS));
 export const ONBOARDING_DIALOGUE_SCHEMA = onboardingDialogueSchema();
 export const ONBOARDING_EXTRACT_SCHEMA = onboardingExtractSchema();
+
+/**
+ * The lists of an extraction whose length is a real limit on what one reading records (the others are bounded by the lines or the
+ * question): a model at the cap stops without a word, so what came after may be missing.
+ */
+export const LIMITED_LISTS: Record<string, string> = {
+  slotUpdates: "事实", projectsDetected: "项目", flywheelCandidates: "主线之间的关系", settings: "设置", itemScores: "量表回答", // i18n-ignore: labels, translated where shown
+  "availability.windows": "可用时段", "fileDates.dates": "日期", "fileDates.recurring": "每周安排", "fileDates.undated": "没写日期的项", // i18n-ignore
+  "fileDates.questions": "关于日期的问题" // i18n-ignore
+};
+/**
+ * Which `LIMITED_LISTS` an answer filled to the cap of its schema (W-228, 2026-11-05), with the cap: recorded as not recorded, so the
+ * person and the next round are told that more may have been said than was kept, instead of the cap cutting it off silently.
+ */
+export function listsAtLimit(output: unknown, schema: unknown = ONBOARDING_EXTRACT_SCHEMA, prefix = ""): Array<{ path: string; max: number }> {
+  const value = output as Record<string, unknown> | null | undefined;
+  const properties = (schema as { properties?: Record<string, { type?: string; maxItems?: number }> }).properties;
+  if (!value || typeof value !== "object" || !properties) return [];
+  return Object.entries(properties).flatMap(([key, spec]) => {
+    const path = `${prefix}${key}`, item = value[key];
+    if (spec.type === "array") return LIMITED_LISTS[path] && Array.isArray(item) && spec.maxItems && item.length >= spec.maxItems ? [{ path, max: spec.maxItems }] : [];
+    return spec.type === "object" ? listsAtLimit(item, spec, `${path}.`) : [];
+  });
+}
 /** What the person waits for, and what is stored as the round. */
 export type OnboardingDialogue = Pick<OnboardingTurn, "reply" | "questions" | "coverage" | "nextAction" | "stage" | "insight" | "progress">;
 /** What the background run writes to the ledger. */

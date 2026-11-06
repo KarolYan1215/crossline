@@ -60,6 +60,20 @@ test("two facts with the same (identityId, key) in one turn are refused, but the
   expect(result.facts).toHaveLength(2);
 });
 
+test("one bad fact is dropped and named, the others are kept (W-228)", () => {
+  const result = validateBackgroundFactsProposal(output({
+    facts: [
+      { identityId: "research", key: "paper_title", value: "XX", why: "x", sourceQuote: "论文标题暂定" },
+      { identityId: "research", key: "data_dir", value: "~/x", why: "x", sourceQuote: "这句不在原文里" },
+      { identityId: "media", key: "channel", value: "x", why: "x", sourceQuote: "论文标题暂定" }
+    ]
+  }), context);
+  expect(result.facts.map((fact) => fact.key)).toEqual(["paper_title"]);
+  expect(result.dropped).toEqual([
+    { identityId: "research", key: "data_dir", code: "BACKGROUND_FACTS_EVIDENCE_INVALID" },
+    { identityId: "media", key: "channel", code: "BACKGROUND_FACTS_IDENTITY_UNKNOWN" }]);
+});
+
 test("a blocker stops the proposal and carries its own message as detail", () => {
   try {
     validateBackgroundFactsProposal(output({ facts: [], blockers: [{ code: "NOTHING_NEW", message: "这条捕获没有新信息" }] }), context);

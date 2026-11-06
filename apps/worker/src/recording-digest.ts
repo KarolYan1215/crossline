@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   DIGEST_CAPTURES_PER_RECORDING, DIGEST_MIN_CHARS, DIGEST_WAIT_DEFAULT_DAYS, DIGEST_WAITS_PER_RECORDING, DISCARDED_KINDS, RECORDING_CAPTURE_PREFIX,
-  RECORDING_DIGESTED_EVENT, RECORDING_DIGEST_SCHEMA, RECORDING_TRANSCRIBED_EVENT, digestDocument, digestText, spokenText, validateRecordingDigest,
+  RECORDING_DIGESTED_EVENT, RECORDING_DIGEST_SCHEMA, RECORDING_TRANSCRIBED_EVENT, digestDocument, digestOmitted, digestText, spokenText, validateRecordingDigest,
   type RecordingDigestAnswer, type RecordingTranscribed
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
@@ -106,7 +106,10 @@ export function createRecordingDigester(store: CrosslineStore, workspaceId: stri
           continue;
         }
         // The summary as a document beside the transcript, filed under the same project.
-        const body = digestDocument(item, { fileName: source.recording.fileName, startedAt: startedAtOf(source.doc), minutes: Math.max(1, Math.round(source.recording.seconds / 60)) });
+        const minutes = Math.max(1, Math.round(source.recording.seconds / 60));
+        const omitted = digestOmitted(source.doc.extractedText);
+        const omittedMinutes = omitted ? Math.max(1, Math.round(minutes * omitted / source.doc.extractedText.length)) : 0;
+        const body = digestDocument(item, { fileName: source.recording.fileName, startedAt: startedAtOf(source.doc), minutes, omittedMinutes });
         const bytes = Buffer.from(body, "utf8");
         const sha256 = createHash("sha256").update(bytes).digest("hex");
         const root = path.resolve(options.dataDir, "sources");
@@ -153,8 +156,12 @@ export function createRecordingDigester(store: CrosslineStore, workspaceId: stri
             followUpAt: expectedAt, state: "open", blocks: [], source: "recording", createdAt: at }).inserted) waits.push(id);
         }
         madeWaits.push(...waits);
+        // What did not become a capture, a wait or a fact, counted, so the card can say it (W-228); the digest document lists each one.
+        const mine = item.commitments.filter((c) => c.by === "person").length, theirs = item.commitments.filter((c) => c.by === "other").length;
+        const notRecorded = { commitments: Math.max(0, mine - DIGEST_CAPTURES_PER_RECORDING) + Math.max(0, theirs - DIGEST_WAITS_PER_RECORDING),
+          unclear: item.commitments.filter((c) => c.by === "unclear").length, unverified: item.unverified ?? 0, omittedMinutes };
         record(item.id, { kind: item.kind, title: item.title, fileName: source.recording.fileName, lineIds: item.lineIds, projectId: item.projectId,
-          digestDocumentId: digestDoc.id, captures, waits, facts: item.facts.length + item.dates.length });
+          digestDocumentId: digestDoc.id, captures, waits, facts: item.facts.length + item.dates.length, notRecorded });
         outcome.digested += 1; outcome.kept += 1; outcome.captures += captures.length; outcome.waits += waits.length;
       }
     }

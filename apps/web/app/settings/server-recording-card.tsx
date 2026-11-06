@@ -29,7 +29,8 @@ export function ServerRecordingStatus({ server }: { server: ServerRecordings }) 
     {server.recent.length > 0 && <ul className="st-list" aria-label={t("最近转写的录音")}>{server.recent.map((item) =>
       <li key={item.documentId}><a href={`/api/source-documents/${encodeURIComponent(item.documentId)}/file`}>{item.file}</a>
         <small>{t("{{when}} 转写，{{minutes}} 分钟；{{digest}}", { when: day(item.at, opens.timeZone, locale), minutes: item.minutes,
-          digest: item.digested ? t("摘要已整理进材料") : t("摘要待整理（需要模型额度）") })}</small></li>)}</ul>}
+          digest: !item.digested ? t("摘要待整理（需要模型额度）")
+            : item.notRecorded !== undefined ? t("摘要已整理进材料；有些内容没有建成收集或没读到，摘要末尾写了是哪些") : t("摘要已整理进材料") })}</small></li>)}</ul>}
     {server.failed.length > 0 && <ul className="st-list" aria-label={t("没有转写成的上传")}>{server.failed.map((item, index) =>
       <li key={`${item.file}-${index}`}><span>{item.file}</span><small>{t("没有转写成：{{note}}", { note: item.note })}</small></li>)}</ul>}
   </>;

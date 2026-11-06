@@ -32,7 +32,7 @@ export type ServerRecordings = {
   opens: { inMinutes: number; at: string; timeZone: string };
   failed: Array<{ file: string; note: string }>;
   /** The last few transcripts, with whether their digest exists yet (it waits for the model quota). */
-  recent: Array<{ file: string; at: string; documentId: string; minutes: number; digested: boolean }>;
+  recent: Array<{ file: string; at: string; documentId: string; minutes: number; digested: boolean; notRecorded?: number }>;
   voiceprint: VoiceprintState;
 };
 /** 识别本人声音: the consent, and whether a voiceprint exists, waits to be made from an uploaded recording, or could not be made. */
@@ -60,12 +60,14 @@ export function recordingOverview(store: CrosslineStore, workspaceId: string, da
 }
 
 const fromServer = (event: { payload: unknown }) => (event.payload as { where?: unknown }).where === "server";
+/** What a digest did not turn into a capture, a wait or a fact (`apps/worker/src/recording-digest.ts`, W-228). */
+type DigestPayload = { notRecorded?: { commitments: number; unclear: number; unverified: number; omittedMinutes: number } };
 
 /** What the server path did for this workspace: transcribed, silent, waiting in the inbox (and when the night window opens), failed. */
 export function serverRecordings(store: CrosslineStore, workspaceId: string, dataDir: string, timeZone: string, now = new Date()): ServerRecordings {
   const transcribed = store.listEvents(workspaceId, { type: RECORDING_TRANSCRIBED_EVENT }).filter(fromServer);
   const failed = store.listEvents(workspaceId, { type: RECORDING_FAILED_EVENT });
-  const digested = new Set(store.listEvents(workspaceId, { type: RECORDING_DIGESTED_EVENT }).map((event) => event.entityId));
+  const digests = new Map(store.listEvents(workspaceId, { type: RECORDING_DIGESTED_EVENT }).map((event) => [event.entityId, event.payload as DigestPayload]));
   return { on: store.getSetting(workspaceId, RECORDING_SERVER_CONSENT) === "granted",
     transcribed: transcribed.length,
     silent: store.listEvents(workspaceId, { type: RECORDING_SILENT_EVENT }).filter(fromServer).length,
@@ -76,7 +78,10 @@ export function serverRecordings(store: CrosslineStore, workspaceId: string, dat
       .map((event) => ({ file: String((event.payload as { fileName?: unknown }).fileName ?? ""), note: String((event.payload as { message?: unknown }).message ?? "") })),
     recent: transcribed.slice(-5).reverse().map((event) => {
       const payload = event.payload as RecordingTranscribed;
-      return { file: payload.fileName, at: event.createdAt, documentId: payload.documentId, minutes: Math.round(payload.seconds / 60), digested: digested.has(payload.documentId) };
+      const digest = digests.get(payload.documentId);
+      const missed = digest?.notRecorded ? digest.notRecorded.commitments + digest.notRecorded.unclear + digest.notRecorded.unverified : 0;
+      return { file: payload.fileName, at: event.createdAt, documentId: payload.documentId, minutes: Math.round(payload.seconds / 60), digested: Boolean(digest),
+        ...(missed || digest?.notRecorded?.omittedMinutes ? { notRecorded: missed } : {}) };
     }),
     voiceprint: voiceprintState(store, workspaceId, dataDir) };
 }

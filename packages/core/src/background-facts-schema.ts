@@ -22,6 +22,8 @@ export type BackgroundFactsContext = {
 export type BackgroundFactsProposal = {
   facts: Array<{ identityId: string; key: string; value: string; why: string; sourceQuote: string }>;
   blockers: Array<{ code: string; message: string }>;
+  /** Facts the check left out while keeping the rest (W-228): one bad fact no longer costs the whole capture's facts. */
+  dropped?: Array<{ identityId: string; key: string; code: string }>;
 };
 
 const str = { type: "string", minLength: 1, maxLength: 2000 } as const;
@@ -52,27 +54,32 @@ export function validateBackgroundFactsProposal(value: unknown, context: Backgro
     throw error;
   }
   const knownIdentities = new Set(context.identities.map((identity) => identity.id));
-  if (raw.facts.some((fact) => !knownIdentities.has(fact.identityId))) {
-    throw new Error("BACKGROUND_FACTS_IDENTITY_UNKNOWN");
-  }
+  // Each fact is checked on its own (W-228, 2026-11-05): a bad one is dropped and named in `dropped`, the rest are kept. Only when no
+  // fact survives is the answer sent back for repair, with the first reason, since then nothing of it would be kept.
+  const dropped: NonNullable<BackgroundFactsProposal["dropped"]> = [];
+  const drop = (fact: BackgroundFactsProposal["facts"][number], code: string) => dropped.push({ identityId: fact.identityId, key: fact.key, code });
   // Only the capture's own text counts as evidence — same reasoning `analysis.ts`'s `evidenced` already
   // applies: quoting something the app itself authored (an existing fact's own value, an identity label)
   // proves nothing about what this capture actually said.
   const fragments = [context.captureTitle, context.captureContext].map((text) => text.trim()).filter(Boolean);
   const evidenced = (quote: string) => fragments.some((text) => text.includes(quote) && quote.length >= Math.min(4, text.length));
-  const fabricated = raw.facts.filter((fact) => !evidenced(fact.sourceQuote));
-  if (fabricated.length) {
-    const error = new Error("BACKGROUND_FACTS_EVIDENCE_INVALID");
-    (error as Error & { detail?: string }).detail =
+  const fabricated = raw.facts.filter((fact) => knownIdentities.has(fact.identityId) && !evidenced(fact.sourceQuote));
+  // Two values for one key in one answer: which is meant cannot be told, so neither is kept.
+  const keyOf = (fact: BackgroundFactsProposal["facts"][number]) => `${fact.identityId}:${fact.key}`;
+  const counts = new Map<string, number>();
+  for (const fact of raw.facts) counts.set(keyOf(fact), (counts.get(keyOf(fact)) ?? 0) + 1);
+  const kept = raw.facts.filter((fact) => {
+    if (!knownIdentities.has(fact.identityId)) { drop(fact, "BACKGROUND_FACTS_IDENTITY_UNKNOWN"); return false; }
+    if (fabricated.includes(fact)) { drop(fact, "BACKGROUND_FACTS_EVIDENCE_INVALID"); return false; }
+    if ((counts.get(keyOf(fact)) ?? 0) > 1) { drop(fact, "BACKGROUND_FACTS_DUPLICATE_KEY"); return false; }
+    return true;
+  });
+  if (raw.facts.length && !kept.length) {
+    const error = new Error(dropped[0]!.code);
+    if (fabricated.length) (error as Error & { detail?: string }).detail =
       // i18n-ignore: a repair message sent back to the model
       `以下引用不是原文逐字内容，无法核对 —— ${fabricated.map((fact) => `「${fact.sourceQuote}」`).join("、")}`.slice(0, 400);
     throw error;
   }
-  const seenKeys = new Set<string>();
-  for (const fact of raw.facts) {
-    const key = `${fact.identityId}:${fact.key}`;
-    if (seenKeys.has(key)) throw new Error("BACKGROUND_FACTS_DUPLICATE_KEY");
-    seenKeys.add(key);
-  }
-  return { facts: raw.facts, blockers: [] };
+  return { facts: kept, blockers: [], ...(dropped.length ? { dropped } : {}) };
 }

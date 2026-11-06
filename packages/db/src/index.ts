@@ -4521,12 +4521,12 @@ export class CrosslineStore {
  */
 export function latestFileDates(store: CrosslineStore, workspaceId: string): {
   dates: Array<{ project: string; kind: string; date: string; title: string }>;
-  undated: Array<{ project: string; kind: string; title: string }>;
+  undated: Array<{ project: string; kind: string; title: string; note?: string }>;
 } {
   type Decision = { superseded?: boolean; excluded?: string[]; by?: string };
   const decisions = new Map<string, Decision[]>();
   for (const event of store.listEvents(workspaceId, { type: "dates.decided" })) decisions.set(event.entityId, [...(decisions.get(event.entityId) ?? []), event.payload as Decision]);
-  type Item = { id?: string; project?: string; kind?: string; date?: string; title?: string };
+  type Item = { id?: string; project?: string; kind?: string; date?: string; title?: string; note?: string };
   const batches = [...store.listEvents(workspaceId, { type: "dates.extracted" })].reverse()
     .filter((event) => !(decisions.get(event.entityId) ?? []).some((decision) => decision.superseded))
     .map((event) => {
@@ -4548,9 +4548,12 @@ export function latestFileDates(store: CrosslineStore, workspaceId: string): {
     const project = entry.project ? resolve(entry.project) : undefined;
     return project && entry.kind && entry.date && entry.title ? [{ project, kind: entry.kind, date: entry.date, title: entry.title }] : [];
   }).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 80);
+  // An item whose file named its day only relatively (`relative:` note) is asked about even with no project: its day is lost otherwise.
   const undated = (payload?.undated ?? []).flatMap((entry) => {
     const project = entry.project ? resolve(entry.project) : undefined;
-    return project && entry.kind && entry.title ? [{ project, kind: entry.kind, title: entry.title }] : [];
+    const relative = typeof entry.note === "string" && entry.note.startsWith("relative:");
+    if (!entry.kind || !entry.title || (!project && !relative)) return [];
+    return [{ project: project ?? "", kind: entry.kind, title: entry.title, ...(relative ? { note: entry.note } : {}) }];
   }).slice(0, 20);
   return { dates, undated };
 }

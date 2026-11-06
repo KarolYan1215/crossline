@@ -1112,5 +1112,9 @@
   "逐个看": "One by one",
   "拆成每条一张卡，盯住或不要": "One card for each, watch it or not",
   "都盯住": "Watch them all",
-  "每条按它的周期看": "Each is checked on its own cycle"
+  "每条按它的周期看": "Each is checked on its own cycle",
+  "一次只看前 {{max}} 张截图，没有看：{{files}}。需要的话再单独发一次。": "Only the first {{max}} screenshots are read at once; not read: {{files}}. Send them again on their own if needed.",
+  "一张卡最多列 {{max}} 项；如果还有没列出的，请把剩下的再说一次。": "A card lists at most {{max}} items; if anything is missing, say the rest again.",
+  "一次读取只能记这么多，后面的可能没有读到；需要的话在回答里补上": "one reading records only this many, so later ones may not have been read; add them in a reply if needed",
+  "等确认期间日期已过，没有再列出": "its date passed while waiting to be confirmed, so it is no longer listed"
 }

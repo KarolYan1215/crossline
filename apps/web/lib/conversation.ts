@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { formatInTimeZone } from "date-fns-tz";
 import { closeMailReply, listAgentTasks, readGrownSkills, resultsAwaitingReview, type StoredConversationMessage } from "@crossline/db";
 import {
-  ACTIONS, AUTOMATIONS_SETTING, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, isImmediate, redactSecrets, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
+  ACTIONS, AUTOMATIONS_SETTING, CONCIERGE_MAX_ACTIONS, CONCIERGE_MAX_IMAGES, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, isImmediate, redactSecrets, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
   type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
 } from "@crossline/core";
 import { DOMAIN_PACKS } from "@crossline/identity-packs";
@@ -286,6 +286,15 @@ function cardFrom(turn: ConciergeTurn, heard: string): Card {
 
 type TurnOutcome = { state: "replied"; turn: ConciergeTurn; warnings?: string[] } | { state: "blocked"; code: string; message: string };
 
+/** The reply, with what one reading could not take said rather than left out (W-228): screenshots past three, actions past the card's cap. */
+function withLimits(ctx: AccessContext, turn: ConciergeTurn, unseen: string[]): string {
+  const t = tOf(ctx);
+  return [turn.reply,
+    unseen.length ? t("一次只看前 {{max}} 张截图，没有看：{{files}}。需要的话再单独发一次。", { max: CONCIERGE_MAX_IMAGES, files: unseen.join("、") }) : "",
+    turn.actions.length >= CONCIERGE_MAX_ACTIONS ? t("一张卡最多列 {{max}} 项；如果还有没列出的，请把剩下的再说一次。", { max: CONCIERGE_MAX_ACTIONS }) : ""]
+    .filter(Boolean).join("\n");
+}
+
 /** A correction of how the box read the person, kept for every later reading (Settings → 个性化 lists and deletes it). */
 function rememberCorrection(ctx: AccessContext, refId: string, text: string): void {
   getStore().addPreference({ workspaceId: ctx.workspaceId, source: "correction", scope: "all", weight: 1, refId: `conv:${refId}`, text: text.slice(0, 300) });
@@ -321,9 +330,10 @@ export async function conversationTurn(ctx: AccessContext, raw: { text: string; 
   // From the return page: what the absence left to settle, and which task and step a line typed beside one is about.
   const returning = input.page.kind === "return" ? ["", ...returnPageLines(ctx, input.page, now)].join("\n") : "";
   // A screenshot dropped with the line (a payment, a meal) is shown to the model itself, so it can read the numbers into a record card the
-  // person confirms (docs/domain-lines.md); at most three, stored files only.
-  const images = docs.filter((doc) => /\.(png|jpe?g|webp|gif)$/i.test(doc.fileName) && doc.uri.startsWith("file:")).slice(0, 3)
-    .map((doc) => fileURLToPath(doc.uri));
+  // person confirms (docs/domain-lines.md); at most three, stored files only. The ones past three are named in the reply (W-228).
+  const pictures = docs.filter((doc) => /\.(png|jpe?g|webp|gif)$/i.test(doc.fileName) && doc.uri.startsWith("file:"));
+  const images = pictures.slice(0, CONCIERGE_MAX_IMAGES).map((doc) => fileURLToPath(doc.uri));
+  const unseen = pictures.slice(CONCIERGE_MAX_IMAGES).map((doc) => doc.fileName);
   // i18n-ignore: model context
   const removed = secret.redacted ? "\n本条消息里的密钥或密码已被系统移除：不要复述，用 settings.open 给出本人修改它的设置位置。" : "";
   const request = { conversationId: conversation.id, text: input.text || "（只附了文件）", mentions: input.mentions, // i18n-ignore: model context
@@ -333,7 +343,7 @@ export async function conversationTurn(ctx: AccessContext, raw: { text: string; 
   let warnings: string[] = [];
   try {
     const outcome = await askWorker(ctx, request);
-    if (outcome.state === "replied") { reply = { text: outcome.turn.reply, card: cardFrom(outcome.turn, text) }; warnings = outcome.warnings ?? []; }
+    if (outcome.state === "replied") { reply = { text: withLimits(ctx, outcome.turn, unseen), card: cardFrom(outcome.turn, text) }; warnings = outcome.warnings ?? []; }
     else reply = fallback(ctx, input.text, outcome.message, outcome.code);
   } catch (error) {
     reply = fallback(ctx, input.text, t("模型服务暂时不可用"), error instanceof CodexSupervisorRequestError ? error.blocker.code : "CONVERSATION_TURN_FAILED");
@@ -479,6 +489,10 @@ export async function decideCard(ctx: AccessContext, messageId: string,
   }
   if (decision.dismiss) {
     for (const index of chosen) if (card.items[index]?.state === "pending") card.items[index] = { state: "dismissed" };
+    // Closing a card that did nothing does not lose what the line said (W-228): a fact said in passing beside a wrong reading
+    // (「我周二十点有课，帮我把作业挪到周三」) is read for facts in the background, as a line with no action is.
+    if (card.heard && !card.items.some((item) => item.state === "done"))
+      keepNote(ctx, card.heard, { kind: "conversation", id: messageId }, "在输入框里说的（本人关掉了这张卡）", now); // i18n-ignore: context for the extraction model
   } else if (chosen.some((index) => card.items[index]?.state === "pending")) {
     const refs = conciergeRefs(await contextPack(ctx, { kind: "", entityId: "" }, now));
     for (const index of chosen) {

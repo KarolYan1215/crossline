@@ -85,7 +85,8 @@ const UNRECORDED_WHY: Record<string, string> = {
   DATE_QUOTE_DOES_NOT_SUPPORT_DATE: "no day could be read from the words cited", DATE_TIME_INVALID: "its time is incomplete (no end, or end before start)",
   DATE_INVALID: "its dates are not a valid range", DATE_OUT_OF_RANGE: "the date is too far from today (wrong year?)",
   DATE_UNKNOWN_SOURCE: "cited a sentence that does not exist", DATE_QUOTE_NOT_VERBATIM: "the cited words are not in the reply",
-  DATE_NOTHING_VERIFIABLE: "none of the dates could be verified", NOT_KEPT: "it failed a check and was left out"
+  DATE_NOTHING_VERIFIABLE: "none of the dates could be verified", NOT_KEPT: "it failed a check and was left out",
+  LIMIT_REACHED: "one reading records at most this many; more may have been said, so ask what else there is"
 };
 
 export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId: string, cwd: string,

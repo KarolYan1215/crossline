@@ -1264,5 +1264,6 @@
   "要配对的电脑": "Computer to pair",
   "未报名称": "No name given",
   "节点 {{version}}": "Node {{version}}",
-  "以上是那台电脑自己报的信息。只配对自己的电脑：别人发来的配对码不要填。配对后：": "This is what that computer says about itself. Pair only your own computer; never enter a code someone sent you. Once paired:"
+  "以上是那台电脑自己报的信息。只配对自己的电脑：别人发来的配对码不要填。配对后：": "This is what that computer says about itself. Pair only your own computer; never enter a code someone sent you. Once paired:",
+  "摘要已整理进材料；有些内容没有建成收集或没读到，摘要末尾写了是哪些": "Summary added to materials; some of it was not made a capture or not read, listed at the summary's end"
 }

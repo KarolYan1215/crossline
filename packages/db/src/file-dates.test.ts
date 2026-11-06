@@ -19,3 +19,12 @@ test("the file dates read are every batch still in force, not just the newest (W
   expect(latestFileDates(store, WS).dates.map((item) => item.title)).toEqual(["期中 1", "期中 2", "期末"]);
   store.close();
 });
+
+test("an item whose file named its day only relatively is kept for the question even with no project (W-228)", () => {
+  const store = new CrosslineStore(":memory:");
+  store.appendEvent({ ownerId: "o", workspaceId: WS, idempotencyKey: "x:r", type: "dates.extracted", entityId: "r", payload: { dates: [], undated: [
+    { id: "u1", project: "", kind: "class", title: "补课", note: "relative:下周五补课" },
+    { id: "u2", project: "", kind: "class", title: "没有项目也没有说法" }] } });
+  expect(latestFileDates(store, WS).undated).toEqual([{ project: "", kind: "class", title: "补课", note: "relative:下周五补课" }]);
+  store.close();
+});

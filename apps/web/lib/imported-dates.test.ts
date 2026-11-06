@@ -119,3 +119,11 @@ test("what readings could not record is listed with why, from every reading, and
     payload: { dropped: [{ title: "周四组会", code: "DATE_TIME_INVALID" }, { title: "ECE 555 上课", code: "DATE_INVALID" }, { title: "重复", code: "DATE_DUPLICATE_ID" }] } });
   expect(loadAdoptedDates(TEST_CTX).dropped).toEqual(["周四组会（时间不完整：没有结束时间，或结束不晚于开始）", "（未命名的一项）", "Quiz 4"]);
 });
+
+test("a date that passed while its batch waited is not offered, and the list says so (W-228)", () => {
+  extract();
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-10-20T12:00:00Z");
+  const batch = loadPendingDateBatch(TEST_CTX)!;
+  expect(batch.items.map((item) => item.id)).toEqual(["exam"]);
+  expect(batch.dropped).toEqual(expect.arrayContaining(["ECE 555 quiz（等确认期间日期已过，没有再列出）", "ECE 555 上课（等确认期间日期已过，没有再列出）"]));
+});

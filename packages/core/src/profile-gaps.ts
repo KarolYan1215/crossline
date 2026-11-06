@@ -1,6 +1,7 @@
 import type { TurnQuestion } from "./onboarding-turn-schema";
 import { APPEARANCE_FACT_SLOT as APPEARANCE_SLOT } from "./portrait-figure";
 import { courseCodeOf } from "./task-title";
+import { RELATIVE_NOTE } from "./date-schema";
 import { tFor, type Locale } from "./i18n";
 
 /**
@@ -19,7 +20,7 @@ export type ProfileGapInput = {
   projects: Array<{ id: string; identityId: string; name: string }>;
   facts: Array<{ identityId: string; projectId: string; slot: string; value: string; status: string }>;
   /** Things a file lists with no day ('TBD'), from the newest date batch. */
-  undated?: Array<{ project: string; kind: string; title: string }>;
+  undated?: Array<{ project: string; kind: string; title: string; note?: string }>;
   /** The projects a weekly meeting is on record for (by id or name), from every date batch not turned down. */
   meetings?: string[];
   /** Uploaded files only the person can file (`unfiledFilesIn`), with the project the interview leaned to. */
@@ -162,6 +163,32 @@ export function profileGaps(input: ProfileGapInput): ProfileGap[] {
   // never read back — so the real account carried two to four identical cards of it that no answer could clear (2026-10-15).
   const undatedSeen = new Set<string>();
   for (const item of input.undated ?? []) {
+    // A file that named the day only relatively (「下周五交」): whatever its kind or project, which day it is only the person knows (W-228).
+    if (item.note?.startsWith(RELATIVE_NOTE)) {
+      const project = input.projects.find((entry) => entry.id === item.project);
+      const key = undatedKey(item.title);
+      const seen = `${project?.id ?? ""}|${key}`;
+      if (!key || undatedSeen.has(seen)) continue;
+      undatedSeen.add(seen);
+      if (input.facts.some((fact) => fact.slot.startsWith("undated_") && undatedKey(fact.value).includes(key))) continue;
+      if ((input.datedItems ?? []).some((dated) => undatedKey(dated.title) === key)) continue;
+      const words = item.note.slice(RELATIVE_NOTE.length);
+      gaps.push({
+        code: "DATE_UNDATED", identityId: project?.identityId ?? "", projectId: project?.id ?? "", blocking: false,
+        // i18n-ignore: for the model (and the start of the stored answer)
+        detail: `「${item.title}」：文件写的是「${words}」，没有具体日期。`,
+        question: {
+          id: `gap-undated-${project?.id ?? "file"}-${key.slice(0, 30)}`, kind: "single", allowOther: true,
+          identityId: project?.identityId ?? "", projectId: project?.id ?? "",
+          text: t("文件里写的「{{words}}」（{{item}}）是哪一天？", { words, item: item.title }),
+          options: [
+            { id: "known", label: t("知道具体日期，我来写"), detail: t("在“其他”里写日期，里程碑会按它排") },
+            { id: "unknown", label: t("还不知道"), detail: t("先不排日期，知道了在回答里写") }
+          ]
+        }
+      });
+      continue;
+    }
     if (!GRADED_KINDS.has(item.kind) && item.kind !== "deadline") continue;
     // 「每周作业截止」 recurs on a weekday; asking for 「大致日期」 of it made no sense (2026-10-15 walkthrough).
     if (/每周|每星期|weekly|every week/i.test(item.title)) continue;

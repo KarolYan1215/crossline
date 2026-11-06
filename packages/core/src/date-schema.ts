@@ -194,6 +194,14 @@ export function relativeDays(quote: string, today: string): Set<string> {
   return days;
 }
 
+/** Words that name a day relative to when they were written, whose day a file alone cannot give (「下周」「明天」「next week」). */
+export const RELATIVE_DAY_WORDS = /今天|今晚|明天|明早|明晚|后天|下下?个?(周|星期|礼拜|月)|这个?(周|星期|礼拜)|本(周|月)|下学期|tomorrow|today|tonight|next (week|month|mon|tue|wed|thu|fri|sat|sun)|this (week|mon|tue|wed|thu|fri|sat|sun)/iu; // i18n-ignore
+/**
+ * The note an undated item carries when a file named its day only relative to when it was written (W-228, 2026-11-05): the day is not
+ * guessed, and the person is asked which day it is (`profileGaps`, `DATE_RELATIVE`), with the file's own words.
+ */
+export const RELATIVE_NOTE = "relative:";
+
 /** The person's words support a date when they print it, or, in a reply, name it relative to the day the reply was written. */
 const supportsDate = (date: string, quote: string, sourceRef: string, today: string) =>
   quoteSupportsDate(date, quote) || (sourceRef.startsWith("reply-") && relativeDays(quote, today).has(date));
@@ -319,8 +327,14 @@ export function sanitizeDateExtraction(value: unknown, known: Known, options: { 
     }
   });
   const dates = attempt(out.dates.map(dateAcrossMidnight), (item) => checkDate(item, known));
+  // A file's 「下周五」 has no day the app can check: kept as an undated item carrying the file's words, and the person is asked which day.
+  const relative = out.dates.filter((item) => !item.sourceRef.startsWith("reply-") && RELATIVE_DAY_WORDS.test(item.quote)
+    && dropped.some((drop) => drop.id === item.id && drop.code === "DATE_QUOTE_DOES_NOT_SUPPORT_DATE"));
+  for (const item of relative) dropped.splice(dropped.findIndex((drop) => drop.id === item.id), 1);
+  const askedUndated: UndatedItem[] = relative.map((item) => ({ id: item.id, kind: item.kind, title: item.title, project: item.project, sourceRef: item.sourceRef,
+    quote: item.quote, note: `${RELATIVE_NOTE}${item.quote.slice(0, 120)}` }));
   const recurring = attempt(out.recurring.flatMap((meeting) => acrossMidnight(openEnded(meeting, known.today))), (meeting) => checkMeeting(meeting, known));
-  const undated = attempt(out.undated ?? [], (item) => checkSource(known, item.sourceRef, item.quote, item.title));
+  const undated = [...attempt(out.undated ?? [], (item) => checkSource(known, item.sourceRef, item.quote, item.title)), ...askedUndated];
   // A caller that records what was dropped (the interview's) keeps an empty answer; the default refuses it, so a repair can follow.
   if (!options.allowEmpty && out.dates.length + out.recurring.length > 0 && dates.length + recurring.length === 0) {
     reject("DATE_NOTHING_VERIFIABLE", `一条都没能在原文里核实：${dropped.slice(0, 3).map((item) => item.reason).join("；")}`); // i18n-ignore

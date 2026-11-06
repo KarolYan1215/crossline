@@ -688,7 +688,6 @@
   "- {{who}}{{text}}{{due}}{{unclear}}：{{quote}}": "- {{who}}{{text}}{{due}}{{unclear}}: {{quote}}",
   "{{who}}：": "{{who}}: ",
   "（{{day}}）": " ({{day}})",
-  "（说话人不确定）": " (speaker unclear)",
   "## 提到的日期": "## Dates mentioned",
   "- {{day}} {{title}}：{{quote}}": "- {{day}} {{title}}: {{quote}}",
   "## 关于本人与工作的信息": "## About you and your work",
@@ -764,5 +763,14 @@
   "约 2 小时，每个项目的评分、上课时间、协作者、工具和所有截止都问到": "About 2 hours. Every project's grading, class times, collaborators, tools and deadlines are asked",
   "不限时": "Open-ended",
   "不限时长和轮数，每个话题问到你自己的例子为止，什么时候结束由你决定": "No time or round limit. Each topic is followed until it rests on your own examples; you decide when it ends",
-  "修工作流": "Fix a workflow"
+  "修工作流": "Fix a workflow",
+  "文件里写的「{{words}}」（{{item}}）是哪一天？": "The file says \"{{words}}\" ({{item}}). Which day is that?",
+  "先不排日期，知道了在回答里写": "No date for now; write it in a reply once known",
+  "（说话人不确定，只记在这里）": " (speaker unclear; listed here only)",
+  "（只记在这里，没有建成收集）": " (listed here only; not made a capture)",
+  "（只记在这里，没有建成「在等」）": " (listed here only; not made a waiting item)",
+  "录音太长，中间约 {{minutes}} 分钟没有读；那一段里的承诺、日期和信息都不在这份摘要里。": "The recording is too long: about {{minutes}} minutes in the middle were not read, and nothing said there is in this summary.",
+  "## 没有整理到的": "## Not covered",
+  "另有 {{count}} 条在转写里找不到原话（或日期格式不对），没有记下。_one": "{{count}} more item had no matching words in the transcript (or a malformed date) and was not recorded.",
+  "另有 {{count}} 条在转写里找不到原话（或日期格式不对），没有记下。_other": "{{count}} more items had no matching words in the transcript (or a malformed date) and were not recorded."
 }
