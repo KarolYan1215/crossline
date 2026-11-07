@@ -86,6 +86,37 @@ export function publicHttpsUrl(value: string): URL | undefined {
   return url;
 }
 
+/* i18n-ignore-start: matched against the model's and the person's own words */
+const UNKNOWN_WORDS = /未记录|未提供|未说明|未写明|未知|无法(核实|确认|判断)|不清楚|没有记录|查不到|\b(unknown|unclear)\b|not (recorded|stated|given|known)/iu;
+/** What the person's facts can settle: their schooling or work status, and where they are. */
+const FACT_TOPICS = [
+  { topic: "status", label: "在读/职业身份", said: /在读|学生|学籍|研究生|博士|硕士|本科|学历|身份|student|enrol/iu,
+    slot: /^(school|degree|education|occupation|job|role|major|line_description)$/u,
+    value: /博士|硕士|本科|研究生|在读|学生|PhD|Ph\.D|master'?s|undergrad|student|工程师|engineer/iu },
+  { topic: "place", label: "所在地", said: /所在地|所在城市|居住地|所在地区|location/iu, slot: /^(city|location)$/u, value: /\S/u }
+] as const;
+/* i18n-ignore-end */
+
+/**
+ * Lines of the answer that call something about the person unknown while a fact in its own context states it (W-250: the research
+ * line's report said 「未记录是否为在读学生」 of a PhD student). Checked by code, so the repair names the fact instead of hoping.
+ */
+export function factsIgnored(texts: string[], facts: DiligenceContext["facts"]): Array<{ text: string; factId: string; value: string; label: string }> {
+  return texts.flatMap((text) => {
+    if (!UNKNOWN_WORDS.test(text)) return [];
+    const hit = FACT_TOPICS.flatMap((topic) => topic.said.test(text)
+      ? facts.filter((fact) => topic.slot.test(fact.slot) && topic.value.test(fact.value)).slice(0, 1).map((fact) => ({ fact, topic })) : [])[0];
+    return hit ? [{ text, factId: hit.fact.id, value: hit.fact.value.slice(0, 80), label: hit.topic.label }] : [];
+  });
+}
+
+/** An answer with the lines that ignore a stated fact taken out: the gaps go, a proposal resting on such a line goes. */
+export function withoutIgnoredFacts(out: DiligenceOutput, context: DiligenceContext): DiligenceOutput {
+  const bad = new Set(factsIgnored([...out.gaps, ...out.proposals.flatMap((proposal) => [proposal.title, proposal.why])], context.facts).map((item) => item.text));
+  return { ...out, gaps: out.gaps.filter((gap) => !bad.has(gap)),
+    proposals: out.proposals.filter((proposal) => !bad.has(proposal.title) && !bad.has(proposal.why)) };
+}
+
 /** Checks one answer against the context it was produced for. Its refusals are repair messages to the model, not interface text. */
 /* i18n-ignore-start */
 export function validateDiligence(value: unknown, context: DiligenceContext): DiligenceOutput {
@@ -134,6 +165,13 @@ export function validateDiligence(value: unknown, context: DiligenceContext): Di
       refuse("DILIGENCE_PROPOSAL_REPEATED", `建议「${proposal.title}」你已经回答过了，不要再提。`);
     }
   }
+  // Last, so a broken shape is repaired first. A proposal that judges eligibility on a fact it calls unknown is redone (its judgement may
+  // change with the fact); a gap alone is only dropped (`withoutIgnoredFacts` via the caller's keepEarly), which costs no second run.
+  const inProposals = factsIgnored(out.proposals.flatMap((proposal) => [proposal.title, proposal.why]), context.facts);
+  const inGaps = factsIgnored(out.gaps, context.facts);
+  const first = inProposals[0] ?? inGaps[0];
+  if (first) refuse(inProposals.length ? "DILIGENCE_FACT_IGNORED" : "DILIGENCE_GAP_FACT_IGNORED",
+    `「${first.text.slice(0, 60)}」说本人的${first.label}未知，但 facts 里 ${first.factId} 写着「${first.value}」：按这条事实重新判断，不要再说未记录。`);
   return out;
 }
 /* i18n-ignore-end */

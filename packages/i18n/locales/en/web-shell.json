@@ -109,6 +109,7 @@
   "输入具体情况": "Describe what happened",
   "上传中…": "Uploading…",
   "实际用时（用于校准估时）": "Time actually spent (calibrates estimates)",
+  "整个任务实际用时（随「提交」记录，用于校准估时）": "Time the whole task took (recorded with Hand in; calibrates estimates)",
   "屏幕记录约 {{minutes}} 分": "Screen record: about {{minutes}} min",
   "{{label}} {{minutes}} 分": "{{label}} · {{minutes}} min",
   "≈估时": "≈ estimate",

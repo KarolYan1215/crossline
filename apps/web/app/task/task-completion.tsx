@@ -151,7 +151,7 @@ export function TaskCompletion({ task, stepId, onDone }: {
         <span>{question.prompt}</span>
         {question.kind === "checkbox"
           ? <div className="evidence-question-options">{question.options.map((option) => <label key={option}>
-              <input type="radio" name={`checklist-${task.id}-${question.id}`} checked={answers[question.id] === option}
+              <input type="radio" name={`checklist-${task.id}-${question.id}`} value={option} aria-label={option} checked={answers[question.id] === option}
                 onChange={() => setAnswers((current) => ({ ...current, [question.id]: option }))} />
               <span>{option}</span>
             </label>)}</div>
@@ -161,7 +161,8 @@ export function TaskCompletion({ task, stepId, onDone }: {
     </fieldset>}
     {/* 「实际花了多久」 in one tap: the only number for work done away from the timer, and what the estimate calibration learns from. */}
     {estimateP50 > 0 && <fieldset className="reported-minutes">
-      <legend>{t("实际用时（用于校准估时）")}</legend>
+      {/* With a step on the title the one-tap figures are still the whole task's (提交 finishes it), so the legend says so (W-250). */}
+      <legend>{stepId && otherSteps > 0 ? t("整个任务实际用时（随「提交」记录，用于校准估时）") : t("实际用时（用于校准估时）")}</legend>
       {task.suggestedMinutes ? <button type="button" aria-pressed={reported?.source === "activity"} onClick={() => setReported({ minutes: task.suggestedMinutes!, source: "activity" })}>
         {t("屏幕记录约 {{minutes}} 分", { minutes: task.suggestedMinutes })}</button> : null}
       {([["≈估时", 1], ["一半", 0.5], ["多一半", 1.5], ["两倍", 2]] as const).map(([label, factor]) => {

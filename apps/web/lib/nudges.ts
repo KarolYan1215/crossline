@@ -331,7 +331,10 @@ export async function ensureOpener(ctx: AccessContext, now = new Date(), force =
   if (existing && !force) {
     const read = Date.parse(String(existing.payload.openerReadAt ?? existing.createdAt));
     const acted = ((existing.payload.card as Card | undefined)?.items ?? []).some((item) => item.state !== "pending");
-    if (acted || now.getTime() - read < OPENER_REFRESH_MS) return false;
+    // Something that moves today's work since it was read (a task handed in, a step done, a postponement, new hours) rewrites it at the
+    // next poll instead of up to five minutes later: it said 「工作 3 段 · 共 3.2 小时」 beside a calendar holding 0.3 hours (W-250).
+    const changed = Date.parse(store.latestEventAt(ctx.workspaceId, OPENER_PLAN_EVENTS) ?? "") > read;
+    if (acted || (!changed && now.getTime() - read < OPENER_REFRESH_MS)) return false;
   }
   const plan = await loadCurrentPlan(ctx);
   const todays = plan.blocks.filter((block) => (block.day ?? today) === today).sort((a, b) => a.start.localeCompare(b.start));
@@ -396,6 +399,11 @@ export async function ensureOpener(ctx: AccessContext, now = new Date(), force =
   say(ctx, lines.join("\n"), buttons, { kind: "opener", fingerprint: `opener:${today}`, counted: false, urgent: false }, now, { opener });
   return true;
 }
+
+/** Events that change today's placed work: the opener is read again at once after one of them. */
+const OPENER_PLAN_EVENTS = ["work_order.transitioned", "work_order.archived", "work_order.deferred", "work_order.reopened", "work_order.due_changed",
+  "work_order.created", "task.step_progress", "task.steps_planned", "task.postponed", "block.confirmed", "plan.approved", "plan.reality_changed",
+  "schedule.preferences_saved", "schedule.params_saved"];
 
 /** How often the day's opener is read again to keep it current. */
 const OPENER_REFRESH_MS = 5 * 60_000;

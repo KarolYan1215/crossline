@@ -30,6 +30,8 @@ describe("task completion", () => {
       { id: "q2", prompt: "具体情况是什么？", kind: "text", required: true }
     ] })} />);
     expect(html).toContain("初稿是否存在？");
+    // Each option names itself to a screen reader (W-250: the tree read every radio as 「on」).
+    expect(html).toContain('aria-label="是"');
     expect(html).toContain("是");
     expect(html).toContain("输入具体情况");
   });
@@ -51,6 +53,8 @@ describe("task completion", () => {
     // Pressing 完成 is the acceptance (2026-10-15); 「进入验收」 promised a review that never comes (W-249).
     expect(html).toContain("提交即整个任务完成并记为已验收");
     expect(html).not.toContain("进入验收");
+    // The one-tap figures are the whole task's, the title shows a step: the legend says whose time it is (W-250).
+    expect(html).toContain("整个任务实际用时");
   });
 
   test("in English", () => {

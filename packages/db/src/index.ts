@@ -3312,6 +3312,14 @@ export class CrosslineStore {
    * `type` and `entityId` narrow it further. Passing them matters: the worker's timer paths were
    * walking the entire ledger every tick to build a two-entry map.
    */
+  /** When the latest event of these types was written, or undefined: a cheap "did anything change since" without reading the events. */
+  latestEventAt(workspaceId: string, types: string[]): string | undefined {
+    if (!types.length) return undefined;
+    const row = this.#prepare(`SELECT MAX(created_at) AS at FROM events WHERE workspace_id = ? AND type IN (${types.map(() => "?").join(", ")})`)
+      .get(workspaceId, ...types) as { at?: string | null } | undefined;
+    return row?.at ?? undefined;
+  }
+
   listEvents(workspaceId: string, options: { type?: string | string[]; entityId?: string } = {}): LedgerEvent[] {
     const types = options.type === undefined ? [] : Array.isArray(options.type) ? options.type : [options.type];
     const where = ["workspace_id = ?"];

@@ -78,6 +78,28 @@ test("the opener is kept current: read again after five minutes and rewritten in
   expect(nudges()[0]!.card!.clarify.question).not.toContain("三天内截止");
 });
 
+test("W-250: a task handed in rewrites the opener at the next poll, not five minutes later", async () => {
+  const store = setup();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(NOW);
+    await ensureOpener(TEST_CTX, NOW);
+    expect(nudges()[0]!.card!.clarify.question).toContain("三天内截止：完成 ECE 555 作业 2");
+    const later = new Date(NOW.getTime() + 60_000);
+    vi.setSystemTime(later);
+    store.saveWorkOrder({ ...store.getWorkOrder(ws, "hw2")!, state: "accepted" });
+    store.appendEvent({ ownerId: TEST_CTX.principalId, workspaceId: ws, idempotencyKey: "hw2:accepted", type: "work_order.transitioned", entityId: "hw2",
+      payload: { from: "active", to: "accepted" } });
+    expect(await ensureOpener(TEST_CTX, new Date(later.getTime() + 1_000))).toBe(false);
+    expect(nudges()).toHaveLength(1);
+    expect(nudges()[0]!.card!.clarify.question).not.toContain("三天内截止");
+    // Read once more right after: nothing new happened, so it waits the five minutes again.
+    const before = nudges()[0]!.card!.clarify.question;
+    expect(await ensureOpener(TEST_CTX, new Date(later.getTime() + 2_000))).toBe(false);
+    expect(nudges()[0]!.card!.clarify.question).toBe(before);
+  } finally { vi.useRealTimers(); }
+});
+
 test("the opener also stores the day as data, which the conversation hands to the card; its text stays for the phone", async () => {
   setup();
   await ensureOpener(TEST_CTX, NOW);

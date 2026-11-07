@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { RUNTIME_OWNER_SETTING } from "@crossline/core";
-import { DILIGENCE_SKILL, createDiligenceRunner, isPrivateAddress, linesDueForDiligence, pageSupports, verifySource } from "./diligence";
+import { DILIGENCE_SKILL, createDiligenceRunner, lineDescriptionFact, isPrivateAddress, linesDueForDiligence, pageSupports, verifySource } from "./diligence";
 import { fakeRuntime as sharedRuntime } from "./testing/fake-runtime";
 
 const fakeRuntime = (answers: string[]) => sharedRuntime(answers, DILIGENCE_SKILL);
@@ -109,6 +109,16 @@ test("the line's own description goes to the research as a fact, so schooling wr
   const sent = prompts().join("\n");
   expect(sent).toContain("line-description-startup");
   expect(sent).toContain("UW-Madison ECE 博士一年级");
+});
+
+test("every line's description goes to the research, the line's own first, so schooling written on another line is known (W-250)", () => {
+  store.setSetting(workspaceId, "lines.profiles", JSON.stringify({
+    student: { description: "UW-Madison ECE 博士一年级，本学期修读 ECE 548 与 ECE 555。" },
+    research: { description: "做控制方向的研究" }
+  }));
+  const facts = lineDescriptionFact(store, workspaceId, "research");
+  expect(facts.map((fact) => fact.id)).toEqual(["line-description-research", "line-description-student"]);
+  expect(facts[1]?.value).toContain("博士一年级");
 });
 
 test("a report in which no source can be opened is a failure, and writes no conclusions", async () => {

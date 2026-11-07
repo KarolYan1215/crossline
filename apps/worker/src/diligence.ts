@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import {
-  DILIGENCE_OUTPUT_SCHEMA, publicHttpsUrl, profileFactId, validateDiligence, backgroundSpend,
+  DILIGENCE_OUTPUT_SCHEMA, publicHttpsUrl, profileFactId, validateDiligence, withoutIgnoredFacts, backgroundSpend,
   type CostSignal, type DiligenceContext, type DiligenceOutput, type DiligenceSource, type DiligenceTopic, tFor
 } from "@crossline/core";
 import { runCodexSkill, webResearchBlocker, type CodexRpcBoundary } from "@crossline/codex";
@@ -22,9 +22,19 @@ import { opportunityAgentOn } from "./opportunities";
 export function lineDescriptionFact(store: CrosslineStore, workspaceId: string, identityId: string): DiligenceContext["facts"] {
   let profiles: Record<string, { description?: unknown }> = {};
   try { profiles = JSON.parse(store.getSetting(workspaceId, "lines.profiles") ?? "{}") ?? {}; } catch { /* none yet */ }
-  const description = profiles[identityId]?.description;
-  return typeof description === "string" && description.trim()
-    ? [{ id: `line-description-${identityId}`, projectId: "", slot: "line_description", value: description.trim().slice(0, 400), status: "inferred" }] : [];
+  // Every line's description, this line's first: they describe one person. The research line's report said 「未记录是否为在读学生」
+  // because the schooling was written only on the student line's card (W-250).
+  const ids = [identityId, ...Object.keys(profiles).filter((id) => id !== identityId)].slice(0, 6);
+  return ids.flatMap((id) => {
+    const description = profiles[id]?.description;
+    return typeof description === "string" && description.trim()
+      ? [{ id: `line-description-${id}`, projectId: "", slot: "line_description", value: description.trim().slice(0, 400), status: "inferred" as const }] : [];
+  });
+}
+
+/** The answer without the lines that ignore a stated fact, if what is left passes every check; otherwise nothing. */
+function keptWithoutIgnored(output: unknown, context: DiligenceContext): DiligenceOutput | undefined {
+  try { return validateDiligence(withoutIgnoredFacts(output as DiligenceOutput, context), context); } catch { return undefined; }
 }
 
 /** A weekly refresh, not a loop: a line is researched again only once its last report is this old. */
@@ -231,6 +241,10 @@ export function createDiligenceRunner(store: CrosslineStore, workspaceId: string
     const result = await runCodexSkill<DiligenceOutput>(client, context, {
       skillName: DILIGENCE_SKILL, cwd, developerInstructions: INSTRUCTIONS, outputSchema: DILIGENCE_OUTPUT_SCHEMA,
       allowWebSearch: true, prepareInput: () => context, validateOutput: (output) => validateDiligence(output, context),
+      // A gap that calls a stated fact unknown is dropped at once (no second web-research run); a proposal that judged eligibility on it
+      // is redone, and once the repairs are spent the proposals still ignoring a fact are dropped and the rest kept (W-250).
+      keepEarly: (rejection, output) => rejection.message === "DILIGENCE_GAP_FACT_IGNORED" ? keptWithoutIgnored(output, context) : undefined,
+      softAccept: (rejection, output) => rejection.message === "DILIGENCE_FACT_IGNORED" ? keptWithoutIgnored(output, context) : undefined,
       onAudit: () => {}, timeoutMs: 60 * 60_000
     });
     if (!result.ok) {

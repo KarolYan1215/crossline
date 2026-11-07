@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { publicHttpsUrl, validateDiligence, type DiligenceContext, type DiligenceOutput } from "./diligence-schema";
+import { factsIgnored, publicHttpsUrl, validateDiligence, withoutIgnoredFacts, type DiligenceContext, type DiligenceOutput } from "./diligence-schema";
 
 const context = (identityId = "startup"): DiligenceContext => ({
   version: "crossline.diligence.v1", today: "2026-10-02", timeZone: "America/Chicago",
@@ -70,4 +70,19 @@ test("a wealth line made in the lite edition carries the same red line as the in
   refused(advice, "DILIGENCE_ADVICE_FORBIDDEN", wealth);
   // Any other line may name a trade in a finding (a startup's market notes are not advice to the person).
   expect(() => validateDiligence(advice, context("startup"))).not.toThrow();
+});
+
+test("W-250: calling a stated fact unknown is caught by code; a gap alone is dropped, a proposal is redone", () => {
+  const phd = { ...context("research"), facts: [...context().facts,
+    { id: "line-description-student", projectId: "", slot: "line_description", value: "UW-Madison ECE 博士一年级", status: "inferred" as const }] };
+  const gap = "未记录是否为在读学生，无法判断 CSW Best Student Paper Award 资格。";
+  expect(factsIgnored([gap, "未记录所在地，无法核实签证条件。"], phd.facts)).toEqual([{ text: gap, factId: "line-description-student",
+    value: "UW-Madison ECE 博士一年级", label: "在读/职业身份" }]);
+  // Without the fact the same line is honest, and nothing is said about it.
+  expect(factsIgnored([gap], context().facts)).toEqual([]);
+  refused(output({ gaps: [gap] }), "DILIGENCE_GAP_FACT_IGNORED", phd);
+  refused(output({ proposals: [{ ...output().proposals[0]!, why: "本人是否在读学生不清楚，先核对资格" }] }), "DILIGENCE_FACT_IGNORED", phd);
+  const kept = withoutIgnoredFacts(output({ gaps: [gap, "截止日期未公布"] }), phd);
+  expect(kept.gaps).toEqual(["截止日期未公布"]);
+  expect(validateDiligence(kept, phd).proposals).toHaveLength(1);
 });
