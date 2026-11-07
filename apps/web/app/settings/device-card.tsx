@@ -87,7 +87,9 @@ function nodeWords(view: NodeView, t: Translate, locale: Locale): string {
  * Every account sees it (scheme C): a node serves only the account it was paired with. Off, or whenever the computer is away, everything
  * runs on the server as before.
  */
-export function ComputeNodeRow({ onReady, everyMs = 20_000 }: {
+export function ComputeNodeRow({ onReady, everyMs = 20_000, download = true }: {
+  /** The installer's row; the connect page has it in its own steps already. */
+  download?: boolean;
   /** How often the node's state is read again (the connect page asks more often: someone is waiting on it). */
   everyMs?: number;
   /** Told whenever the account has a node online, which means its Codex is signed in there (the connect page moves on, 2026-11-05). */
@@ -141,11 +143,11 @@ export function ComputeNodeRow({ onReady, everyMs = 20_000 }: {
     {view.paired
       ? <div className="st-row"><span className="st-row-label">{t("独立节点")}<small>{t("已配对 {{host}}（{{when}}）", { host: view.paired.host || t("一台电脑"), when: time(view.paired.at, locale) })}</small></span>
         <button type="button" className="secondary-button" onClick={() => void unpair()}>{t("解除配对")}</button></div>
-      : <label className="st-row"><span className="st-row-label">{t("独立节点")}<small>{t("在那台电脑上安装「Crossline 节点」，把它显示的配对码填在这里")}{" "}
-          <a href={NODE_INSTALLER_URL} target="_blank" rel="noreferrer">{t("下载安装包")}</a>{" · "}
-          <a href={NODE_GUIDE_URL} target="_blank" rel="noreferrer">{t("图文教程（PDF）")}</a></small></span>
+      : <>{download && <div className="st-row"><span className="st-row-label">{t("安装「Crossline 节点」")}<small>{t("在要当节点的 Windows 10 / 11 电脑上下载并安装；装好后它会显示一个配对码")}</small></span>
+        <NodeDownload /></div>}
+      <label className="st-row"><span className="st-row-label">{t("独立节点")}<small>{t("把节点显示的配对码填在这里")}</small></span>
         <span><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="XXXX-XXXX" autoComplete="off" spellCheck={false} maxLength={12} style={{ width: "9em" }} />{" "}
-          <button type="button" className="primary-button" disabled={code.replace(/[^A-Za-z0-9]/g, "").length !== 8} onClick={() => void pair(false)}>{t("配对")}</button></span></label>}
+          <button type="button" className="primary-button" disabled={code.replace(/[^A-Za-z0-9]/g, "").length !== 8} onClick={() => void pair(false)}>{t("配对")}</button></span></label></>}
     {preview && !view.paired && <div className="st-row" role="group" aria-label={t("确认配对")}>
       <span className="st-row-label">{t("要配对的电脑")}<small>{[preview.computer.host || t("未报名称"), preview.computer.os, preview.computer.version && t("节点 {{version}}", { version: preview.computer.version })].filter(Boolean).join(" · ")}</small>
         <small>{t("以上是那台电脑自己报的信息。只配对自己的电脑：别人发来的配对码不要填。配对后：")}</small>
@@ -154,4 +156,13 @@ export function ComputeNodeRow({ onReady, everyMs = 20_000 }: {
         <button type="button" className="secondary-button" onClick={() => setPreview(undefined)}>{t("取消")}</button></span></div>}
     {note && <p role="status" className="st-note">{note}</p>}
   </>;
+}
+
+/** The node's installer and its illustrated guide as buttons (2026-11-06): as links inside a small grey line nobody found them. */
+export function NodeDownload() {
+  const t = useT();
+  return <span className="st-row-actions">
+    <a className="primary-button" href={NODE_INSTALLER_URL} target="_blank" rel="noreferrer">{t("下载 Crossline 节点")}</a>
+    <a className="secondary-button" href={NODE_GUIDE_URL} target="_blank" rel="noreferrer">{t("图文教程（PDF）↗")}</a>
+  </span>;
 }

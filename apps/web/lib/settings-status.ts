@@ -98,3 +98,35 @@ export function connectionStatus(ctx: AccessContext, quota: CostSignal, options:
     action: { label: t("管理"), href: "#calendar" } });
   return rows;
 }
+
+/** How much a setup step matters: the app does not work without a `required` one; `recommended` ones make the plan right. */
+export type SetupWeight = "required" | "recommended" | "optional";
+export type SetupStep = { id: string; label: string; detail: string; done: boolean; weight: SetupWeight;
+  /** The settings module the step is done in (its progress strip), or none for a step done on another page. */
+  module?: string;
+  /** A card on this page (`#mail`) or another page (`/onboarding`). */
+  href: string };
+
+/**
+ * 设置向导 (2026-11-06, the owner's walkthrough: setting up was too many places with no order): the steps of a complete setup in the order
+ * worth doing them, each done or not, read from the same connection rows the status overview shows plus the interview and the person's
+ * computer. Pure, so the order and what counts as done are tested without a page.
+ */
+export function setupSteps(t: (key: string) => string, input: { rows: ConnectionRow[]; modelConnected: boolean; interviewDone: boolean; hosted: boolean; computerLinked: boolean }): SetupStep[] {
+  const { rows } = input;
+  const has = (kind: ConnectionKind) => rows.some((row) => row.kind === kind && row.state !== "off");
+  const steps: SetupStep[] = [
+    { id: "model", label: t("连接模型"), detail: t("ChatGPT 账号、其他模型的 API key 或本人电脑，访谈与排程都靠它"), done: input.modelConnected,
+      weight: "required", module: "calendar", href: "#model" },
+    { id: "interview", label: t("完成访谈"), detail: t("约 30 分钟，得到主线、画像与第一版计划"), done: input.interviewDone, weight: "required", href: "/onboarding" },
+    { id: "calendar", label: t("接入日历"), detail: t("把已有日程读进来，排程避开它们"), done: has("subscription") || has("calendar"),
+      weight: "recommended", module: "calendar", href: "#calendar-subscriptions" },
+    ...(rows.some((row) => row.kind === "push") ? [{ id: "push", label: t("手机推送"), detail: t("在手机上收工作块开始和截止提醒"), done: has("push"),
+      weight: "recommended" as const, module: "general", href: "#phone" }] : []),
+    { id: "mail", label: t("接入邮箱"), detail: t("只读，从邮件里找出待办和日期"), done: has("mail"), weight: "optional", module: "calendar", href: "#mail" },
+    ...(input.hosted ? [{ id: "computer", label: t("连接本人电脑"), detail: t("装「Crossline 节点」：读本人电脑的活动，或替网页版跑模型"), done: input.computerLinked,
+      weight: "optional" as const, module: "general", href: "#device" }] : []),
+    { id: "health", label: t("手机健康数据"), detail: t("睡眠与心率，校准每天的精力"), done: has("health"), weight: "optional", module: "energy", href: "#energy" }
+  ];
+  return steps;
+}

@@ -1,8 +1,9 @@
 import "server-only";
-import { taskTitleOf, timeOrderProblem, type AccessContext, type Ask } from "@crossline/core";
+import { CALENDAR_SUBSCRIPTIONS_SETTING, PUSH_SUBSCRIPTIONS, taskTitleOf, timeOrderProblem, type AccessContext, type Ask } from "@crossline/core";
 import { riskOverview } from "./asks";
 import { countPending } from "./pending";
-import { getStore, milestonesRetiredBySystem, planToday, readGoalSettings, type PersistedPlan } from "./crossline";
+import { getStore, loadCalendarConnectorState, milestonesRetiredBySystem, planToday, readGoalSettings, type PersistedPlan } from "./crossline";
+import { isHostedBeta } from "./hosting";
 import { overlapStates, type TimelineItem } from "../app/timeline/model";
 import { localeFor } from "./locale";
 import { monthDay, tFor } from "./i18n";
@@ -95,5 +96,12 @@ export function loadReminders(ctx: AccessContext, plan: PersistedPlan, calendarI
   // This week's drafts, as 待确认 counts them (`countPending`): the badge and this line say the same number.
   const drafts = countPending(ctx).milestoneDrafts;
   if (drafts) out.push({ id: "drafts", text: t("{{count}} 个里程碑草稿待批准", { count: drafts }), href: "/milestones" });
+  // 设置向导 (2026-11-06): the recommended setup steps still undone, so a person who went straight from the interview to Today learns the
+  // calendar and the phone are not connected yet. The link opens the guide itself.
+  const listed = (key: string) => { try { const value = JSON.parse(store.getSetting(ctx.workspaceId, key) ?? "[]") as unknown; return Array.isArray(value) && value.length > 0; } catch { return false; } };
+  const phone = isHostedBeta() || (process.env.CROSSLINE_DEPLOYMENT_MODE === "private" && Boolean(process.env.CROSSLINE_TAILSCALE_HOSTNAME?.trim()));
+  const setup = [...(listed(CALENDAR_SUBSCRIPTIONS_SETTING) || loadCalendarConnectorState(ctx).synced ? [] : [t("接入日历")]),
+    ...(phone && !listed(PUSH_SUBSCRIPTIONS) ? [t("手机推送")] : [])];
+  if (setup.length) out.push({ id: "setup", text: t("设置还差 {{count}} 步推荐项：{{items}}", { count: setup.length, items: setup.join(t("、")) }), href: "/settings?guide=1" });
   return out;
 }

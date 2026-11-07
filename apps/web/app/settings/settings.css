@@ -369,3 +369,62 @@ html:has(.settings-page){background:var(--ds-bg)}
 .st-design-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .st-design-add { display: grid; gap: 8px; margin-top: 12px; }
 .st-design-preview { border: 1px solid var(--ds-line); }
+
+/* Tutorials that read as tutorials (2026-11-06, walkthrough: the links and the fold looked like the text around them). The fold is a
+   tinted bar with a book and 「查看教程」/「收起」; steps are numbered circles on a rail; official pages are buttons. */
+.setup-guide{border-left:0;padding:0;border:1px solid var(--mist);background:var(--paper)}
+.setup-guide>summary{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--chalk);list-style:none;font-weight:700;color:var(--link)}
+.setup-guide>summary::-webkit-details-marker{display:none}
+.setup-guide>summary:hover{background:color-mix(in srgb,var(--link) 8%,var(--chalk))}
+.setup-guide-toggle{margin-left:auto;font-size:12px;font-weight:700;white-space:nowrap}
+.setup-guide-toggle::after{content:"查看教程 ▾"}
+.setup-guide[open]>summary .setup-guide-toggle::after{content:"收起 ▴"}
+:lang(en) .setup-guide-toggle::after{content:"Open guide ▾"}
+:lang(en) .setup-guide[open]>summary .setup-guide-toggle::after{content:"Close ▴"}
+.setup-guide[open]{gap:10px;padding-bottom:12px}
+.setup-guide[open]>:not(summary){margin:0 12px}
+.setup-guide-steps{list-style:none;padding:0;counter-reset:guide;gap:0}
+.setup-guide-steps>li{counter-increment:guide;position:relative;padding:0 0 10px 34px;min-height:24px}
+.setup-guide-steps>li::before{content:counter(guide);position:absolute;left:0;top:0;width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--ink);color:var(--paper);font-size:12px;font-weight:700}
+.setup-guide-steps>li:not(:last-child)::after{content:"";position:absolute;left:11px;top:26px;bottom:2px;width:2px;background:var(--mist)}
+.setup-guide-steps>li:last-child{padding-bottom:0}
+.setup-guide-links{gap:8px}
+.setup-guide-link{display:inline-flex;align-items:center;min-height:30px;padding:4px 12px;border:1px solid var(--link);color:var(--link);font-weight:700;font-size:13px}
+.setup-guide-link:hover{background:var(--link);color:var(--paper)}
+.settings-page .setup-guide{border-radius:8px;overflow:hidden;border-left-color:var(--mist)}
+.settings-page .setup-guide-link{border-radius:999px}
+
+/* 设置向导 (setup-wizard.tsx, 2026-11-06): the button beside the search with a progress ring, the dialog's steps, each module's strip. */
+.st-head{flex-wrap:wrap;gap:10px}
+.st-wizard-button{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:0 12px;border:1px solid var(--ds-accent,var(--ink));border-radius:var(--ds-radius-control,2px);background:var(--ds-accent-soft,var(--chalk));color:var(--ds-accent-ink,var(--ink));font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.st-wizard-button:hover{background:var(--ds-accent,var(--ink));color:var(--ds-on-accent,var(--paper))}
+.st-wizard-progress{display:inline-flex;align-items:center;gap:4px}
+.st-wizard-progress b{font-size:12px}
+.st-wizard{display:grid;gap:14px;min-width:min(560px,100%)}
+.st-wizard-lead{margin:0;font-size:14px;line-height:1.6;color:var(--graphite)}
+.st-wizard-meter{display:flex;gap:4px}
+.st-wizard-meter i{flex:1;height:6px;border-radius:3px;background:var(--mist)}
+.st-wizard-meter i[data-done]{background:var(--now-ink)}
+.st-wizard-steps{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.st-wizard-steps>li{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--mist);border-radius:8px}
+.st-wizard-steps>li[data-next]{border:2px solid var(--ds-accent,var(--ink));padding:9px 11px;background:var(--ds-accent-soft,var(--chalk))}
+.st-wizard-steps>li[data-done]{background:var(--chalk)}
+.st-wizard-mark{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;border:2px solid var(--mist);font-size:13px;font-weight:700;color:var(--graphite)}
+.st-wizard-steps>li[data-next] .st-wizard-mark{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+.st-wizard-steps>li[data-done] .st-wizard-mark{border-color:var(--now-ink);background:var(--now-ink);color:var(--paper)}
+.st-wizard-text{display:grid;gap:2px;min-width:0}
+.st-wizard-text b{font-size:14px}
+.st-wizard-text small{color:var(--graphite);line-height:1.5}
+.st-wizard-text em{font-style:normal;font-size:11px;font-weight:700;padding:0 6px;margin-left:4px;border:1px solid var(--mist);border-radius:999px;color:var(--graphite);vertical-align:1px}
+.st-wizard-text em[data-weight="required"]{border-color:#8A5A00;color:#6B4400}
+.st-wizard-text em[data-weight="recommended"]{border-color:var(--now-ink);color:var(--now)}
+@media (max-width:560px){.st-wizard-steps>li{grid-template-columns:28px minmax(0,1fr)}.st-wizard-steps>li>button{grid-column:2;justify-self:start}}
+.st-module-steps{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:-4px 0 12px}
+.st-module-steps-count{font-size:12px;font-weight:700;color:var(--graphite);margin-right:4px}
+.st-module-step{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border:1px dashed var(--graphite);border-radius:999px;font-size:12px;color:var(--ink)}
+.st-module-step:hover{border-style:solid}
+.st-module-step[data-done]{border:1px solid var(--now-ink);color:var(--now);background:color-mix(in srgb,var(--now-ink) 8%,transparent)}
+/* The card a link landed on, lit for a moment (settings-browser.tsx `open`). */
+.st-spotlight{animation:st-spotlight 2.4s ease-out}
+@keyframes st-spotlight{0%,30%{box-shadow:0 0 0 3px var(--link)}100%{box-shadow:0 0 0 3px transparent}}
+@media (prefers-reduced-motion:reduce){.st-spotlight{animation:none;outline:3px solid var(--link)}}

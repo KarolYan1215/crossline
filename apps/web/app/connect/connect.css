@@ -17,3 +17,15 @@
 .invite-redeem label{flex:1 1 180px}
 .invite-apply summary{cursor:pointer}
 .invite-apply[open]{display:grid;gap:8px}
+/* The ways to connect as a choice (2026-11-06): one card per way, the chosen one filled; only its steps are shown below. */
+.connect-ways{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.connect-way{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;align-items:start;text-align:left;padding:14px;border:1px solid var(--mist);background:var(--paper);color:var(--ink);cursor:pointer;font:inherit}
+.connect-way:hover{border-color:var(--ink)}
+.connect-way[aria-checked="true"]{border:2px solid var(--ink);padding:13px;background:var(--chalk)}
+.connect-way-mark{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;border:2px solid var(--mist);font-size:13px;font-weight:700;color:var(--graphite)}
+.connect-way[aria-checked="true"] .connect-way-mark{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+.connect-way-text{display:grid;gap:4px;min-width:0}
+.connect-way-text b{font-size:15px}
+.connect-way-text small{color:var(--graphite);line-height:1.5}
+.connect-way-text em{font-style:normal;font-size:12px;font-weight:700;color:var(--now)}
+.connect-panel:not([hidden]){display:grid;gap:12px}

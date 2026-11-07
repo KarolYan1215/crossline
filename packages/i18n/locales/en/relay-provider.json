@@ -1,6 +1,4 @@
 {
-  "ChatGPT Plus 和官方 API 都没有，也可以用 OpenAI 兼容的中转站：在「其他模型」里点「用中转站接入」，填中转站给的 base URL 和 API key。": "With neither ChatGPT Plus nor an official API, an OpenAI-compatible relay works too: under \"Other models\" choose \"Connect through a relay\" and enter the base URL and API key the relay gives.",
-  "DeepSeek、Kimi、通义千问、智谱 GLM、OpenAI API、OpenRouter，或 OpenAI 兼容的中转站。保存前先测一次连接，之后自动检验回答格式，约 10–20 分钟；访谈一项通过就进入访谈，网页搜索和画形象这类功能仍要 ChatGPT 账号。": "DeepSeek, Kimi, Qwen, Zhipu GLM, the OpenAI API, OpenRouter, or an OpenAI-compatible relay. The connection is tried once before saving, then the answer format is checked automatically, about 10–20 minutes; once the interview passes, the interview starts. Web search and drawing the figure still need a ChatGPT account.",
   "没有 ChatGPT Plus，也没有官方 API": "No ChatGPT Plus and no official API",
   "用 OpenAI 兼容的中转站一样能用：填中转站给的 base URL、API key 和模型名，保存前先测一次连接。": "An OpenAI-compatible relay works the same way: enter the base URL, API key and model name the relay gives; the connection is tried once before saving.",
   "用中转站接入": "Connect through a relay",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { BookOpen } from "lucide-react";
 import type { SetupGuideSpec } from "../../lib/setup-guides";
 import { useT } from "../locale-context";
 
@@ -15,7 +16,8 @@ export function SetupGuide({ guide, selected, open }: { guide: SetupGuideSpec; s
   useEffect(() => { if (selected) setChosen(selected); }, [selected]);
   const provider = guide.providers.find((item) => item.id === chosen) ?? guide.providers[0];
   return <details className="advanced setup-guide" open={open}>
-    <summary>{t(guide.title)}</summary>
+    {/* A tutorial looks like one (2026-11-06): a book, its name and 「查看教程」 on a tinted bar, not a bold line beside a triangle. */}
+    <summary><BookOpen size={16} strokeWidth={1.75} aria-hidden="true" /><span>{t(guide.title)}</span><span className="setup-guide-toggle" aria-hidden="true" /></summary>
     {guide.intro && <p className="setup-guide-intro">{t(guide.intro)}</p>}
     {guide.providers.length > 1 && <div className="setup-guide-tabs" role="group" aria-label={t("{{title}}：选择", { title: t(guide.title) })}>
       {guide.providers.map((item) => <button key={item.id} type="button" aria-pressed={item.id === provider?.id} onClick={() => setChosen(item.id)}>
@@ -26,7 +28,7 @@ export function SetupGuide({ guide, selected, open }: { guide: SetupGuideSpec; s
       {provider.facts && provider.facts.length > 0 && <dl className="setup-guide-facts">{provider.facts.map((fact) => <div key={fact.label}>
         <dt>{t(fact.label)}</dt><dd>{t(fact.value)}</dd></div>)}</dl>}
       {provider.links && provider.links.length > 0 && <p className="setup-guide-links">{provider.links.map((link) =>
-        <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer">{t(link.label)} ↗</a>)}</p>}
+        <a key={link.url} className="setup-guide-link" href={link.url} target="_blank" rel="noopener noreferrer">{t(link.label)} ↗</a>)}</p>}
       {provider.note && <p className="setup-guide-note">{t(provider.note)}</p>}
     </div>}
     {guide.problems && guide.problems.length > 0 && <div className="setup-guide-problems">

@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 1 | 公开仓库：Actions 日志与制品人人可读 | 删除全部历史运行；开密钥扫描与推送保护；之后的运维输出只以本机公钥加密 | 已做 |
 | 2 | 没有 CI 闸门 | 新建 `ci.yml`（Linux，typecheck + test）；`main` 上的镜像构建等它通过再跑 | 已做 |
-| 3 | 托管版在服务器上登录访客的 ChatGPT 订阅 | 访客不再在服务器上登录 ChatGPT：本人电脑当算力节点，或 API key；已登录的保留 | 已做 |
+| 3 | 托管版在服务器上登录访客的 ChatGPT 订阅 | 2026-11-05 停掉；**2026-11-06 撤回**：Crossline 改为免费开源，访客又可以在服务器上用一次性代码登录本人的 ChatGPT；节点和 API key 仍是另外两条路 | 已做 |
 | 4 | 小红书从机房 IP 用程序操作的浏览器读取 | 托管版只在本人节点的浏览器里登录和读取 | 已做 |
 | 5 | 待确认太多（走查时 37 条） | 可撤销的默认通过，其余按断点批量；本人决定的项合并成一张卡 | 已做（见 §5） |
 | 6 | 访谈缺陷 W-183–W-186 | 逐条修 | 未做 |
@@ -52,7 +52,17 @@
   - 删掉 `verify.yml`。它的 Codex 分支来源检查改为手动跑 `scripts/verify-codex-fork.ts`。完整的 `pnpm verify`（含 e2e）仍是提交前的本机检查。
   - `images.yml` 改由 `workflow_run` 触发：`main` 上的 CI 通过后才构建镜像，并且构建的是 CI 测过的那个提交（`workflow_run.head_sha`）。手动触发（`workflow_dispatch`）照旧可用。每次部署因此多等 CI 的时长。
 
-## 3. 托管版不再在服务器上登录访客的 ChatGPT
+## 3. 托管版在服务器上登录访客的 ChatGPT（11-05 停掉，11-06 撤回）
+
+**撤回（2026-11-06，本人的决定）**：Crossline 现在免费、开源，访客在托管版上也可以用 Codex 的一次性代码登录本人的 ChatGPT（`chatgptDeviceCode`），登录照旧只存在该账号自己的运行时（`runtimes/<ws>/codex-home`），退出即删除。下面 11-05 的检查结论没有变：OpenAI 对「远程托管」的应用仍要求意向表或合作方，开源只是自助接入的条件之一；这条风险由本人承担，是否提交意向表仍由本人决定。
+
+- supervisor 去掉了 `HOSTED_SUBSCRIPTION_LOGIN_OFF` 和 `subscriptionLogin: "off"`；`connected`（只有节点的访客也算已连接）保留。
+- 模型连接卡：一次性代码改成四步的步骤条（开启设备代码登录，带 ChatGPT 安全设置的链接 → 取代码 → 在 OpenAI 页面粘贴 → 已连接），当前一步高亮。
+- 连接页：先选方式（ChatGPT 账号〔推荐〕／其他模型的 API key／本人电脑当算力节点），只显示选中那一种的步骤；三个控件都一直挂载，隐藏的照样读连接状态。
+- 测试：`codex.test.ts`「on the hosted server a guest signs its own ChatGPT in there」；`connect-flow.test.tsx`。
+
+以下是 11-05 的原记录。
+
 
 **查到的**
 - OpenAI 的 Codex 认证文档写明，用 ChatGPT 账号登录（含设备码）面向本人自己运行的 Codex。

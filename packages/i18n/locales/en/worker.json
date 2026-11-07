@@ -369,7 +369,6 @@
   "缺少文档 id": "The document id is missing",
   "已有一次提议在运行": "A proposal is already running",
   "登录没有开始": "The sign-in did not start",
-  "托管版不在服务器上登录 ChatGPT：在自己电脑上开启算力节点后在那里登录，或填写 API key。": "The hosted service does not sign ChatGPT in on its server: turn on the compute node on your own computer and sign in there, or enter an API key.",
   "还没有连接模型账号：到 设置 → 模型连接 登录 ChatGPT 或填写 API key。": "No model account is connected yet: sign in with ChatGPT or enter an API key in Settings → Model connection.",
   "同时运行的模型连接已满，稍后再试。": "Too many model connections are running at once; try again later.",
   "模型运行时没有启动起来，稍后再试。": "The model runtime did not start; try again later.",

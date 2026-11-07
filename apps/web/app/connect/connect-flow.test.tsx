@@ -12,11 +12,11 @@ test("the connection control is on the page from the first render, so it can rea
 // An account may connect another model's API instead of ChatGPT (decided 2026-10-17): the card is on the connect page, not only in settings.
 test("the connect page offers another model's API beside ChatGPT", () => {
   const html = renderToStaticMarkup(<ConnectFlow next="/onboarding" />);
-  expect(html).toContain("或者用其他模型的 API");
+  expect(html).toContain("其他模型的 API key");
   expect(html).toContain('aria-label="其他模型"');
 });
 
-// The hosted site signs no guest's ChatGPT in on the server (2026-11-05): installing and pairing a node is walked through right here.
+// On the hosted site the person's own computer is a third way (a node): installing and pairing it is walked through right here.
 test("on the hosted site the connect page walks through installing and pairing the person's own computer; elsewhere it does not", () => {
   const hosted = renderToStaticMarkup(<ConnectFlow next="/onboarding" hosted />);
   expect(hosted).toContain('aria-label="用自己的电脑连接 ChatGPT"');
@@ -36,6 +36,17 @@ test("the page waits with a line, never the choices, until it knows; any way tha
   expect(connectPhase({ chatgpt: false, api: false, connected: false, patient: false })).toBe("choose");
   // A read that never answers does not hold the page: after CHECK_MS the choices are shown.
   expect(connectPhase({ chatgpt: undefined, api: undefined, connected: false, patient: true })).toBe("choose");
+});
+
+// 2026-11-06: the page asks which way first and shows only that way's steps; ChatGPT is chosen to begin with, the rest stay mounted.
+test("the ways to connect are a choice, ChatGPT first and chosen; the others' controls are mounted but hidden", () => {
+  const html = renderToStaticMarkup(<ConnectFlow next="/onboarding" hosted />);
+  expect(html).toContain('role="radiogroup"');
+  expect(html.match(/role="radio"/g)).toHaveLength(3);
+  expect(html.indexOf("ChatGPT 账号")).toBeLessThan(html.indexOf("其他模型的 API key"));
+  expect(html).toMatch(/aria-checked="true"[^>]*><span[^>]*>1<\/span><span class="connect-way-text"><b>ChatGPT 账号/);
+  expect(html).toContain('<div class="connect-panel" hidden="">');
+  expect(renderToStaticMarkup(<ConnectFlow next="/onboarding" />).match(/role="radio"/g)).toHaveLength(2);
 });
 
 test("the first render is the waiting line; the choices are mounted but hidden, since they are what read the connection", () => {

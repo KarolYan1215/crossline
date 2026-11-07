@@ -27,15 +27,15 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const steps = <ol className="login-step-cards" aria-label={t("开始使用的步骤")}>{HOSTED_STEPS.map((step, index) => { const Icon = step.icon;
     return <li key={step.title} data-state={index === 0 ? "current" : "next"}>
       <Icon size={18} strokeWidth={1.75} aria-hidden="true" />
-      <b>{t(step.title)}</b><small>{t(step.detail === MODEL_STEP && process.env.CROSSLINE_PUBLIC_BETA === "1" ? HOSTED_MODEL_STEP : step.detail)}</small>
+      <b>{t(step.title)}</b><small>{t(step.detail)}</small>
     </li>; })}</ol>;
   return <AuthLayout title={LOGIN_SERIF.panel} locale={locale} hero={steps}>
       <LoginForm googleEnabled={isGoogleAuthConfigured()} emailEnabled={isEmailAuthConfigured()} chatgptEnabled={chatgpt} verified={verified === "1"} reset={reset === "1"} deleted={deleted === "1"} next={safeNext(next)}
         {...(error ? { errorCode: error.slice(0, 60) } : {})} />
       <div className="login-foot">
         <p className="login-privacy"><ShieldCheck size={16} strokeWidth={1.75} aria-hidden="true" />{process.env.CROSSLINE_PUBLIC_BETA === "1"
-          // Since 2026-11-05 a guest's ChatGPT is signed in on their own computer, not here (docs/hosted-hardening.md §3).
-          ? <span>{t("每个账号的资料和模型 API key 各自隔离，不与其他账号共享。模型在本人自己的电脑（Crossline 节点）上用本人的 ChatGPT 额度运行，ChatGPT 登录不保存在这台服务器上；也可以用本人的 API。")}{" "}<a href="/privacy">{t("隐私说明")}</a></span>
+          // Since 2026-11-06 a guest's ChatGPT may be signed in here again, in its own runtime (docs/hosted-hardening.md §3).
+          ? <span>{t("每个账号的资料、ChatGPT 登录和模型 API key 各自隔离，不与其他账号共享；模型用本人的 ChatGPT 额度、本人电脑上的 Crossline 节点或本人的 API。退出 ChatGPT 登录即删除这台服务器上的登录。")}{" "}<a href="/privacy">{t("隐私说明")}</a></span>
           : <span>{t("资料和本人的 ChatGPT 登录都保存在运行这个 Crossline 的电脑上，只能通过私有网络访问；模型用本人的 ChatGPT 额度。")}</span>}</p>
         {process.env.ASSESS_BASE_URL?.startsWith("https://") && <p className="login-privacy login-note"><Target size={16} strokeWidth={1.75} aria-hidden="true" /><span>{
           // One sentence with its link marked, so the link sits where each language puts it.
@@ -46,8 +46,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 }
 
 const MODEL_STEP = "本人的 ChatGPT 账号，或模型 API key";
-/** On the public beta the subscription is signed in on the person's own computer (docs/hosted-hardening.md §3). */
-const HOSTED_MODEL_STEP = "在本人电脑上装 Crossline 节点登录 ChatGPT，或填模型 API key";
 const HOSTED_STEPS = [
   { icon: Mail, title: "用邮箱验证码登录", detail: "验证码 10 分钟内有效，之后也可以设密码" },
   { icon: Sparkles, title: "连接模型", detail: MODEL_STEP },

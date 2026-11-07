@@ -37,7 +37,9 @@ import { BackgroundModule } from "./background-module";
 import { backgroundOverview } from "../../lib/background";
 import { SettingsBrowser, type SettingsSection } from "./settings-browser";
 import { SettingsStatus } from "./settings-status";
-import { connectionStatus } from "../../lib/settings-status";
+import { connectionStatus, setupSteps } from "../../lib/settings-status";
+import { ModuleSteps, SetupWizard } from "./setup-wizard";
+import { NODE_TOKEN_SETTING } from "@crossline/core";
 import { PersonalizationModule } from "./personalization";
 import { ApplyCard } from "./apply-card";
 import { loadApplyCard } from "../../lib/apply-profile";
@@ -149,6 +151,10 @@ export default async function SettingsPage() {
   // The quota is read once, for the status overview and for 用量与体检.
   const quota = await timed("settings.quota", () => memoForAsync(`quota:${ctx.workspaceId}`, 60_000, () => readQuota(ctx)));
   const connections = connectionStatus(ctx, quota, { machine, phoneUrl: Boolean(phoneUrl) });
+  // 设置向导: every step of a complete setup, done or not (2026-11-06).
+  const steps = setupSteps(t, { rows: connections, modelConnected: quota.available, interviewDone: interview.complete || interview.ended, hosted,
+    computerLinked: deviceLinked || Boolean(setting(NODE_TOKEN_SETTING)) });
+  const stepsIn = (module: string) => steps.filter((step) => step.module === module);
   const alertsIn = (hrefs: string[]) => connections.filter((row) => row.state === "warn" && hrefs.includes(row.action.href)).length;
   // The index, one module at a time (2026-10-28 redesign): each module with its icon, the cards of a long one under it, and how many of its
   // connections need the person. Connections come second: they are what the person most often comes here for.
@@ -172,8 +178,10 @@ export default async function SettingsPage() {
 
   // `active` names the view in the frame's own table (i18n-ignore on the next line), not shown text.
   return <AppShell active="设置" className="subpage settings-page"><div className="subpage-inner">
-    <SettingsBrowser title={t("设置")} sub={t("每项改动即时保存，保存失败会还原")} sections={sections} status={<SettingsStatus rows={connections} />}>
+    <SettingsBrowser title={t("设置")} sub={t("每项改动即时保存，保存失败会还原")} sections={sections} status={<SettingsStatus rows={connections} />}
+      tools={<SetupWizard steps={steps} />}>
         <section id="general" className="st-section" aria-labelledby="st-general"><h2 id="st-general" className="ds-serif">{t("通用")}</h2>
+          <ModuleSteps steps={stepsIn("general")} />
           <div className="st-modules">
             <LanguageCard />
             <VoiceCard initial={voicePreferences(ctx)} />
@@ -203,6 +211,7 @@ export default async function SettingsPage() {
         </section>
 
         <section id="calendar" className="st-section" aria-labelledby="st-calendar"><h2 id="st-calendar" className="ds-serif">{t("日历与连接")}</h2>
+          <ModuleSteps steps={stepsIn("calendar")} />
           <CalendarModule ctx={ctx} />
           <div className="st-modules"><div id="mail"><MailAccounts accountEmail={sessionEmail} /></div><div id="import"><ImportCard /></div></div>
           <ConnectionsSection />
@@ -287,6 +296,7 @@ export default async function SettingsPage() {
         </section>
 
         <section id="energy" className="st-section" aria-labelledby="st-energy"><h2 id="st-energy" className="ds-serif">{t("精力与手机健康")}</h2>
+          <ModuleSteps steps={stepsIn("energy")} />
           <EnergyCard status={energyStatus} phoneUrl={phoneUrl ?? null} hostSignals={machine} privateNetwork={!hosted} />
         </section>
 

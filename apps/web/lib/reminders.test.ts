@@ -48,7 +48,9 @@ test("Today's reminders gather what other pages flag, one line each with where t
     ["unplaced", "1 个任务未排进日历", "/plan#why"],
     ["clash", "1 个工作时段与日程时间冲突，最早 10/16", "#today-timeline"],
     // A milestone whose deadline passed is the overdue question's, not a risk; the 主线 page's rule estimate is no longer counted here.
-    ["drafts", "1 个里程碑草稿待批准", "/milestones"]
+    ["drafts", "1 个里程碑草稿待批准", "/milestones"],
+    // 设置向导 (2026-11-06): no calendar is connected; the phone does not count here, since this copy has no phone access.
+    ["setup", "设置还差 1 步推荐项：接入日历", "/settings?guide=1"]
   ]);
   // What an open ask is about is not said twice.
   const asks = [{ entityId: "作业 2" }, { entityId: "late" }] as Ask[];
@@ -67,4 +69,16 @@ test("the risk line counts the weekly card's set, and is left out while a risk c
   const plan = { blocks: [], schedule: { blockers: [] } } as unknown as PersistedPlan;
   expect(loadReminders(TEST_CTX, plan, [], []).find((reminder) => reminder.id === "risk")).toMatchObject({ text: "1 个里程碑有风险，每周汇总一次", href: "/plan" });
   expect(loadReminders(TEST_CTX, plan, [], [{ entityId: "weekly", kind: "risk_digest" }] as Ask[]).some((reminder) => reminder.id === "risk")).toBe(false);
+});
+
+test("the setup line names the recommended steps still undone, the phone only where it can be reached, and goes once both are done", () => {
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-10-15T15:00:00.000Z");
+  vi.stubEnv("CROSSLINE_PUBLIC_BETA", "1");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  const plan = { blocks: [], schedule: { blockers: [] } } as unknown as PersistedPlan;
+  const setup = () => loadReminders(TEST_CTX, plan, [], []).find((reminder) => reminder.id === "setup");
+  expect(setup()).toMatchObject({ text: "设置还差 2 步推荐项：接入日历、手机推送", href: "/settings?guide=1" });
+  store.setSetting(ws, "push.subscriptions", JSON.stringify([{ endpoint: "https://push.example/1" }]));
+  store.setSetting(ws, "calendar.subscriptions", JSON.stringify([{ id: "s1" }]));
+  expect(setup()).toBeUndefined();
 });

@@ -64,3 +64,19 @@ test("after a sign-in completes, reads go on until the account is readable, for 
   expect(accountControl.awaitingCodexAccount(read)).toBe(false);
   expect(accountControl.shouldPollCodexLogin(undefined, read, 10_000, 5_000)).toBe(false);
 });
+
+// 2026-11-06: the one-time code as numbered steps; the device-code switch is step 1 with a link to ChatGPT's security settings, and once a
+// code is in hand the first two steps are done and the code with its copy button is the current step.
+test("the one-time code is four steps that follow the sign-in, the switch first with its link", async () => {
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const noop = () => undefined;
+  const before = renderToStaticMarkup(<accountControl.DeviceCodeSteps userCode={undefined} loginUrl={undefined} busy={false} onStart={noop} onRenew={noop} onCopy={noop} />);
+  expect(before.match(/<li /g)).toHaveLength(4);
+  expect(before).toContain(`href="${accountControl.CHATGPT_SECURITY_URL}"`);
+  expect(before).toMatch(/<li data-state="current" aria-current="step">.*?开启「设备代码登录」/);
+  expect(before).toContain("用一次性代码连接");
+  const after = renderToStaticMarkup(<accountControl.DeviceCodeSteps userCode="ABCD-1234" loginUrl="https://auth.openai.com/codex/device" busy={false} onStart={noop} onRenew={noop} onCopy={noop} />);
+  expect(after.match(/data-state="done"/g)).toHaveLength(2);
+  expect(after).toMatch(/<li data-state="current" aria-current="step">.*ABCD-1234.*复制代码并打开 OpenAI 页面/);
+  expect(after).not.toContain(">用一次性代码连接<");
+});

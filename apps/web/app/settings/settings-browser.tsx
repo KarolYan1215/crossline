@@ -11,6 +11,14 @@ const ICONS: Record<string, LucideIcon> = { general: Settings2, calendar: Calend
   personal: UserRound, apply: ClipboardList, skills: BookOpen, privacy: ShieldCheck, energy: Zap, recordings: Mic, usage: BarChart3 };
 const ICON = { size: 16, strokeWidth: 1.75, "aria-hidden": true } as const;
 
+/** The event that opens a module or lands on a card from elsewhere on the page (`openSetting`). */
+const OPEN_SETTING = "crossline:open-setting";
+/** Opens the module holding `id` (a module or a card) and lights the card, with the address showing it. */
+export function openSetting(id: string) {
+  history.replaceState(null, "", `#${id}`);
+  window.dispatchEvent(new CustomEvent(OPEN_SETTING, { detail: id }));
+}
+
 /** What a search reads in each card: its names and the lines that say what each setting does, not every word inside it. */
 const SEARCHED = "h2,h3,h4,header,summary,legend,label,.st-row-label,.st-search-text";
 /** The cards a search shows or hides: every card of a module, the module's own loose rows when it has no card grid. */
@@ -42,8 +50,10 @@ const searchedText = (element: Element) => [...element.querySelectorAll(SEARCHED
  * on the card. The search above filters every module's cards by their names and descriptions; clearing it goes back to the module.
  * Every module is rendered on the server as before; switching only shows and hides them, so nothing is fetched again.
  */
-export function SettingsBrowser({ title, sub, sections, status, children }: {
-  title: string; sub: string; sections: SettingsSection[]; status: ReactNode; children: ReactNode;
+export function SettingsBrowser({ title, sub, sections, status, tools, children }: {
+  title: string; sub: string; sections: SettingsSection[]; status: ReactNode;
+  /** Beside the search: the setup guide's button. */
+  tools?: ReactNode; children: ReactNode;
 }) {
   const t = useT();
   const [active, setActive] = useState(sections[0]?.id ?? "");
@@ -75,6 +85,9 @@ export function SettingsBrowser({ title, sub, sections, status, children }: {
     window.setTimeout(() => {
       const target = id === module ? body.current : document.getElementById(id);
       target?.scrollIntoView({ block: "start" });
+      // The card landed on is lit for a moment (2026-11-06): among several cards the person sees which one the link meant.
+      const card = id === module ? undefined : target?.matches(".st-card") ? target : target?.querySelector<HTMLElement>(".st-card") ?? target?.closest<HTMLElement>(".st-card");
+      if (card) { card.classList.remove("st-spotlight"); void card.offsetWidth; card.classList.add("st-spotlight"); window.setTimeout(() => card.classList.remove("st-spotlight"), 2400); }
     }, 30);
   }, [moduleOf]);
 
@@ -100,10 +113,13 @@ export function SettingsBrowser({ title, sub, sections, status, children }: {
       const url = new URL((event as Event & { destination: { url: string } }).destination.url);
       if (url.pathname === window.location.pathname && url.hash) open(decodeURIComponent(url.hash.slice(1)), true);
     };
+    // A move asked for from inside the page (the setup guide, a module's strip): the router does not always let a hash change through.
+    const asked = (event: Event) => { const id = (event as CustomEvent<string>).detail; if (id) open(id, true); };
+    window.addEventListener(OPEN_SETTING, asked);
     window.addEventListener("hashchange", follow);
     window.addEventListener("popstate", popped);
     nav?.addEventListener("navigate", navigating);
-    return () => { window.clearTimeout(late); window.removeEventListener("hashchange", follow); window.removeEventListener("popstate", popped); nav?.removeEventListener("navigate", navigating); };
+    return () => { window.clearTimeout(late); window.removeEventListener("hashchange", follow); window.removeEventListener(OPEN_SETTING, asked); window.removeEventListener("popstate", popped); nav?.removeEventListener("navigate", navigating); };
   }, [open, moduleOf]);
 
   // 「/」 puts the cursor in the search, unless the person is already typing somewhere (a shortcut is only ever a second way in).
@@ -158,6 +174,7 @@ export function SettingsBrowser({ title, sub, sections, status, children }: {
           placeholder={t("搜索设置：邮箱、推送、额度……")} aria-label={t("搜索设置")} />
         <kbd aria-hidden="true">/</kbd>
       </label>
+      {tools}
     </header>
     {status}
     <div className="st-layout">

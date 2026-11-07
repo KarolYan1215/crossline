@@ -641,7 +641,7 @@ describe("each account's own Codex", () => {
     } finally { await supervisor.stop(); rmSync(dir, { recursive: true, force: true }); }
   });
 
-  test("on the hosted server a guest's ChatGPT is never signed in there; an API key still is, and its own computer counts as connected", async () => {
+  test("on the hosted server a guest signs its own ChatGPT in there (2026-11-06), and its own computer alone counts as connected", async () => {
     const { mkdtempSync, rmSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const dir = mkdtempSync(path.join(tmpdir(), "crossline-guest-"));
@@ -665,17 +665,14 @@ describe("each account's own Codex", () => {
       const call = (method: string, pathname: string, body?: unknown) => fetch(`${supervisor.url}${pathname}`, { method,
         headers: { "content-type": "application/json", "x-crossline-capability": sign("ws-guest", `${method} ${pathname}`, supervisorBootId) },
         ...(body ? { body: JSON.stringify(body) } : {}) });
-      for (const type of ["chatgptDeviceCode", "chatgpt"]) {
-        const refused = await call("POST", "/v1/codex/login", { type });
-        expect(refused.status).toBe(403);
-        expect(await refused.json()).toMatchObject({ blocker: { code: "HOSTED_SUBSCRIPTION_LOGIN_OFF" } });
-      }
-      expect(logins).toEqual([]);
-      expect(await (await call("GET", "/v1/codex/account")).json()).toMatchObject({ account: null, subscriptionLogin: "off", connected: false });
+      expect(await (await call("GET", "/v1/codex/account")).json()).toMatchObject({ account: null, connected: false });
+      expect((await (await call("GET", "/v1/codex/account")).json() as Record<string, unknown>).subscriptionLogin).toBeUndefined();
       nodes = [{ id: "node-1", client: fakeSidecar().handle.client, capacity: 1, priority: 1 }];
       expect(await (await call("GET", "/v1/codex/account")).json()).toMatchObject({ connected: true });
-      // An API key is the one way to connect on the server itself.
-      expect((await call("POST", "/v1/codex/login", { type: "apiKey", apiKey: "sk-test" })).status).not.toBe(403);
+      // The device code (the way in from any browser) and an API key both reach the guest's own runtime.
+      expect((await call("POST", "/v1/codex/login", { type: "chatgptDeviceCode" })).status).toBe(200);
+      expect((await call("POST", "/v1/codex/login", { type: "apiKey", apiKey: "sk-test" })).status).toBe(200);
+      expect(logins).toEqual([{ type: "chatgptDeviceCode" }, { type: "apiKey", apiKey: "sk-test" }]);
     } finally {
       if (previous === undefined) delete process.env.CROSSLINE_PUBLIC_BETA; else process.env.CROSSLINE_PUBLIC_BETA = previous;
       await supervisor.stop(); rmSync(dir, { recursive: true, force: true });
