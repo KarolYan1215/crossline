@@ -22,9 +22,11 @@ const post = async (path: string, body: unknown) => {
  * A redeemed code puts the account on the developer's model, capped per month; the panel then only says how much of the month is used.
  * Nothing is shown where invites are not offered (no approver, no mail, or no developer's model on this server).
  */
-export function InvitePanel({ plan, onRedeemed, onSponsored, lead }: { plan?: string | undefined; onRedeemed?: () => void;
+export function InvitePanel({ plan, onRedeemed, onSponsored, lead, hideWhenSponsored = false }: { plan?: string | undefined; onRedeemed?: () => void;
   /** The account already runs on the developer's model when the panel loads (the connect page moves on by itself then). */
-  onSponsored?: () => void; lead?: string }) {
+  onSponsored?: () => void; lead?: string;
+  /** Today's page: an account already on the developer's model has nothing to do here, so nothing is shown. */
+  hideWhenSponsored?: boolean }) {
   const t = useT();
   const [state, setState] = useState<InviteState>();
   const [reason, setReason] = useState("");
@@ -38,6 +40,7 @@ export function InvitePanel({ plan, onRedeemed, onSponsored, lead }: { plan?: st
     }).catch(() => undefined);
   }, [onSponsored]);
   if (!state) return null;
+  if (state.sponsored && hideWhenSponsored) return null;
   if (state.sponsored) return <p className="invite-panel invite-on" role="status">
     {state.budget ? t("已在用开发者提供的模型：本月已用 ¥{{spent}} / ¥{{cap}}。", { spent: state.budget.spent.toFixed(2), cap: state.budget.cap }) : t("已在用开发者提供的模型。")}
   </p>;
@@ -61,7 +64,8 @@ export function InvitePanel({ plan, onRedeemed, onSponsored, lead }: { plan?: st
   };
   const application = state.application;
   return <div className="invite-panel">
-    {lead && <p>{lead}</p>}
+    {/* Translated here as well: the settings page passes its sentence from a server component with no locale at hand. */}
+    {lead && <p>{t(lead)}</p>}
     {application?.status === "pending" ? <p role="status">{t("申请已提交，开发者通过后邀请码会发到账号邮箱。")}</p>
       : application?.status === "approved" ? <p role="status">{t("申请已通过，邀请码已发到账号邮箱，填在下面即可。")}</p>
       : <details className="invite-apply">

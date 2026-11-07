@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, sponsorshipOf } from "@crossline/db";
 vi.mock("server-only", () => ({}));
-import { applyInvite, decideFromLink, inviteForLink, inviteState, invitesAvailable, redeemCode, signDecisionToken, verifyDecisionToken } from "./invites";
+import { applyAsVisitor, applyInvite, decideFromLink, inviteForLink, inviteState, invitesAvailable, redeemCode, signDecisionToken, verifyDecisionToken } from "./invites";
 import { TEST_CTX } from "./test-support";
 
 let mailbox = "";
@@ -59,4 +59,18 @@ test("without an approver or the developer's model there is nothing to apply for
   expect(invitesAvailable()).toBe(false);
   expect(await applyInvite(TEST_CTX, "tester@example.com", "")).toEqual({ ok: false, code: "INVITES_UNAVAILABLE" });
   expect(mails()).toEqual([]);
+});
+
+test("a visitor's application mails the owner once with where it came from; its code redeems for the account that signs up later", async () => {
+  expect(await applyAsVisitor("Visitor@Example.com", "从测评来", "assess", "速测类型 建造者 BP")).toEqual({ ok: true });
+  expect(await applyAsVisitor("visitor@example.com", "again", "login")).toEqual({ ok: true });
+  expect(mails()).toHaveLength(1);
+  const [request] = mails();
+  expect(request).toMatchObject({ to: "owner@example.com", subject: "Crossline 模型额度申请：visitor@example.com" });
+  expect(request!.text).toContain("来源：公开测评（还没有账号） · 速测类型 建造者 BP");
+  const token = new URL(request!.url).searchParams.get("t")!;
+  expect(await decideFromLink(token, "approve")).toMatchObject({ ok: true, mailed: true });
+  const codeMail = mails().find((mail) => mail.to === "visitor@example.com")!;
+  expect(codeMail.text).toContain("还没有账号就先用这个邮箱注册");
+  expect(redeemCode(TEST_CTX, /CL-[A-Z2-9]{4}-[A-Z2-9]{4}/.exec(codeMail.text)![0])).toMatchObject({ ok: true });
 });

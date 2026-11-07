@@ -1,4 +1,5 @@
 import { CodexAccountControl } from "./codex-account-control";
+import { InvitePanel } from "../connect/invite-panel";
 import { ModelProviderCard } from "../settings/model-provider-card";
 import { CalendarSources } from "./calendar-sources";
 import { CalendarApps } from "./calendar-apps";
@@ -54,10 +55,14 @@ export function CalendarModule({ ctx }: { ctx: AccessContext }) {
   </div>;
 }
 
+/** Translated where the panel shows it (`InvitePanel` runs `t` on its lead). */
+const INVITE_LEAD = "申请内测：用开发者提供的模型（邮件审批），或填入收到的邀请码。";
+
 /** Accounts and devices: the model service, the private network identity, devices allowed to queue offline. */
 export function ConnectionsSection() {
   return <div className="st-modules">
     <div id="model"><CodexAccountControl /></div>
+    <InvitePanel lead={INVITE_LEAD} />
     <ModelProviderCard local={!isHostedBeta()} />
     {!isHostedBeta() && <TailscaleTrust />}
     <DeviceLeases />

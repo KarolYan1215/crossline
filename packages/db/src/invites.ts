@@ -35,6 +35,22 @@ export function applyForInvite(store: CrosslineStore, input: { workspaceId: stri
   return { invite, created: true };
 }
 
+/**
+ * A visitor's application, before there is an account (2026-11-06): from the sign-in page or the public test's 「申请内测」. It has no
+ * workspace (`GUEST_INVITE_WORKSPACE`), so no account's deletion takes it along; the code it earns is redeemed by whichever account
+ * types it in. One open application per address, whether it was made as a visitor or from an account.
+ */
+export const GUEST_INVITE_WORKSPACE = "";
+export function applyAsGuest(store: CrosslineStore, input: { email: string; reason: string; now?: Date }): { invite: StoredInvite; created: boolean } {
+  const email = input.email.trim().toLowerCase().slice(0, 200);
+  const existing = store.listInvites({ email }).find((invite) => invite.status !== "rejected");
+  if (existing) return { invite: existing, created: false };
+  const invite: StoredInvite = { id: randomUUID(), workspaceId: GUEST_INVITE_WORKSPACE, email, reason: input.reason.trim().slice(0, 300),
+    status: "pending", createdAt: (input.now ?? new Date()).toISOString() };
+  store.saveInvite(invite);
+  return { invite, created: true };
+}
+
 /** The owner's decision. Approving mints the code, returned once here to be mailed; a decided application is not decided again. */
 export function decideInvite(store: CrosslineStore, id: string, decision: "approve" | "reject", now = new Date()):
   { ok: true; invite: StoredInvite; code?: string } | { ok: false; code: "INVITE_NOT_FOUND" | "INVITE_ALREADY_DECIDED" } {

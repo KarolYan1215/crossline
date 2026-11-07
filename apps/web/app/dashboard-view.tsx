@@ -12,6 +12,7 @@ import { ScheduleSummary } from "./schedule-summary";
 import type { FinerSplitNote, ScheduleChange } from "../lib/crossline";
 import type { CalendarData } from "./plan/plan-view";
 import { FlywheelGraph } from "./flywheel/flywheel-graph";
+import { InvitePanel } from "./connect/invite-panel";
 import type { Reminder } from "../lib/reminders";
 import { DayHead } from "./today/day-head";
 import { NeedsCard } from "./today/needs-card";
@@ -221,6 +222,9 @@ export function DashboardView({ data }: { data: DashboardData }) {
           <FlywheelGraph data={graph} />
         </section>
       </details>}
+
+      {/* 「申请内测」 here too (2026-11-06): renders nothing where invites are not offered or the account is already on the developer's model. */}
+      <InvitePanel hideWhenSponsored lead={t("ChatGPT 额度不够、也没有模型 API key？可以申请内测，用开发者提供的模型。")} />
     </AppShell>
   </>;
 }

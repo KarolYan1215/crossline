@@ -9,6 +9,8 @@ import { LOGIN_SERIF } from "../ui/serif-strings";
 import { tFor } from "../../lib/i18n";
 import { getLocale } from "../../lib/locale";
 import { safeNext } from "../../lib/safe-next";
+import { invitesAvailable } from "../../lib/invites";
+import { GuestInvite } from "./guest-invite";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ verified?: string; reset?: string; deleted?: string; error?: string; next?: string }> }) {
   const { verified, reset, deleted, error, next } = await searchParams;
@@ -42,6 +44,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           t("还没做过测评？可以<a>先做约 5 分钟的 AI 时代超级个体测评 →</a>，不做也能直接开始；用同一个邮箱登录，测评结果会带进访谈。")
             .split(/<a>(.*?)<\/a>/).map((part, index) => index % 2 ? <a key={index} href={process.env.ASSESS_BASE_URL}>{part}</a> : part)}</span></p>}
       </div>
+      {invitesAvailable() && <GuestInvite />}
   </AuthLayout>;
 }
 

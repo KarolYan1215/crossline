@@ -64,6 +64,14 @@ html:has(.login-split) body{background:var(--ds-bg)}
 /* A sentence with a link inside: a block, not a flex row — as flex items its text and link became three squeezed columns (W-1). */
 .login-note{margin:0;font-size:13px;line-height:1.6;color:var(--graphite)}
 .login-note a,.login-privacy a{color:var(--ink);text-decoration:underline}
+/* A visitor's application for the developer's model (guest-invite.tsx). */
+.login-invite{font-size:13px;line-height:1.6;color:var(--graphite)}
+.login-invite summary{cursor:pointer;color:var(--ink);text-decoration:underline}
+.login-invite form{display:grid;gap:8px;margin-top:8px}
+.login-invite label{display:grid;gap:4px}
+.login-invite input,.login-invite textarea{min-width:0;max-width:100%}
+.login-invite p{margin:8px 0 0}
+.login-invite-trap{position:absolute;left:-10000px;width:1px;height:1px;opacity:0}
 .login-error{margin:0;padding:8px 10px;border-left:3px solid #8A1C1C;background:#F3E3DD;color:#5E1212;font-size:14px}
 
 @media (max-width:820px){

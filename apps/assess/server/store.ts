@@ -294,8 +294,9 @@ export function latestResultByEmail(email: string): StoredResult | undefined {
 }
 
 /** Records that this result's owner asked to be invited to the full app; asking twice keeps the first time. */
-export function requestBeta(resultId: string, now: Date = new Date()): void {
-  db().prepare("INSERT OR IGNORE INTO beta_requests (result_id, created_at) VALUES (?, ?)").run(resultId, now.toISOString());
+/** Records the request; true the first time, so it is passed on once. */
+export function requestBeta(resultId: string, now: Date = new Date()): boolean {
+  return db().prepare("INSERT OR IGNORE INTO beta_requests (result_id, created_at) VALUES (?, ?)").run(resultId, now.toISOString()).changes > 0;
 }
 
 export function betaRequested(resultId: string): boolean {

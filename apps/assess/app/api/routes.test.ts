@@ -268,6 +268,29 @@ test("「申请内测」 is recorded on the person's own result only, refuses a 
   expect(after.betaRequested).toBe(true);
 });
 
+test("「申请内测」 is passed on to the app once, with the shared secret, the address and the type", async () => {
+  Object.assign(process.env, { ASSESS_APP_URL: "https://app.example/", ASSESS_LINK_SECRET: "link-secret" });
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  try {
+    const answer = await submitOk({ email: "beta-app@example.com" });
+    expect((await requestBetaRoute(get(`/api/results/${answer.resultToken}/beta`, {}, "POST"), params(answer.resultToken))).status).toBe(200);
+    expect((await requestBetaRoute(get(`/api/results/${answer.resultToken}/beta`, {}, "POST"), params(answer.resultToken))).status).toBe(200);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://app.example/api/invites/request");
+    expect((init.headers as Record<string, string>).authorization).toBe("Bearer link-secret");
+    expect(JSON.parse(String(init.body))).toMatchObject({ email: "beta-app@example.com", source: "assess", detail: expect.stringMatching(/^速测类型 /) });
+    // An app that does not answer leaves the request recorded and the page answered.
+    fetcher.mockRejectedValueOnce(new Error("down"));
+    const other = await submitOk({ email: "beta-down@example.com" });
+    expect((await requestBetaRoute(get(`/api/results/${other.resultToken}/beta`, {}, "POST"), params(other.resultToken))).status).toBe(200);
+  } finally {
+    vi.unstubAllGlobals();
+    delete process.env.ASSESS_APP_URL; delete process.env.ASSESS_LINK_SECRET;
+  }
+});
+
 test("three tests per address, only the newest kept; a fourth is refused and the newest link is mailed, not returned", async () => {
   const first = await submitOk({ email: "three@example.com" });
   const friend = await submitOk({ email: "friend@example.com", inviteToken: first.inviteToken, sendEmail: false });

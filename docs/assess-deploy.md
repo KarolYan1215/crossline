@@ -10,7 +10,7 @@
 2. `POST /api/results` 在服务器上**重新计分**（`quizScores`，不信任浏览器算的分），保存结果，生成两个令牌，开始生成形象，按勾选发结果邮件。
 3. 本人从邮件或结果页回到 `/r/<结果令牌>`；别人只会拿到 `/t/<邀请令牌>`（海报二维码、转发链接）。
 4. 被邀请的人从 `/t/<邀请令牌>` 做题提交，双人卡当场生成（`/p/<双人卡令牌>`），发起人收到邮件通知。
-5. 结果页的「申请内测」记下申请（`beta_requests`），机主用 `pnpm --filter @crossline/assess exec tsx scripts/beta-requests.ts` 看名单；页面上同时给出机主邮箱（mailto，主题「Crossline 内测申请」，正文带类型代码）。
+5. 结果页的「申请内测」记下申请（`beta_requests`），机主用 `pnpm --filter @crossline/assess exec tsx scripts/beta-requests.ts` 看名单；设了 `ASSESS_APP_URL` 和 `ASSESS_LINK_SECRET` 时，第一次申请还会转发到 App 的 `POST /api/invites/request`（`server/app-invite.ts`，8 秒超时，失败只记日志、不影响页面），由 App 给机主发带审批链接的邮件（2026-11-06）。App 开放注册时按钮也显示。页面上同时给出机主邮箱（mailto，主题「Crossline 模型额度申请」，正文带类型代码）。
 6. 加入内测的人用同一个邮箱登录 App 后，App 通过 `POST /api/link` 取回这份结果（见下文「与 App 的结果连接」）。
 
 | 路由 | 用途 | 令牌 |

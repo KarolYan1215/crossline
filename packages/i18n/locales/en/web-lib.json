@@ -587,7 +587,6 @@
   "每周{{days}} {{start}}–{{end}}，至 {{to}}": "Weekly {{days}} {{start}}–{{end}}, until {{to}}",
   "你申请的 Crossline 开发者模型额度已通过。": "Your application for the Crossline developer's model quota has been approved.",
   "邀请码：{{code}}": "Invite code: {{code}}",
-  "打开 {{url}} ，在「输入邀请码」里填入，就可以用开发者提供的模型做访谈和日常使用（每月有用量上限）。": "Open {{url}} and enter it under \"Enter an invite code\" to use the developer's model for the interview and everyday use (with a monthly limit).",
   "邀请码只能给一个账号使用。": "An invite code works for one account only.",
   "Crossline 模型额度邀请码": "Your Crossline model quota invite code",
   "没有这个配对码，或已过期：在那台电脑上重新生成一个。": "No such pairing code, or it has expired: create a new one on that computer.",
@@ -1116,5 +1115,10 @@
   "一次只看前 {{max}} 张截图，没有看：{{files}}。需要的话再单独发一次。": "Only the first {{max}} screenshots are read at once; not read: {{files}}. Send them again on their own if needed.",
   "一张卡最多列 {{max}} 项；如果还有没列出的，请把剩下的再说一次。": "A card lists at most {{max}} items; if anything is missing, say the rest again.",
   "一次读取只能记这么多，后面的可能没有读到；需要的话在回答里补上": "one reading records only this many, so later ones may not have been read; add them in a reply if needed",
-  "等确认期间日期已过，没有再列出": "its date passed while waiting to be confirmed, so it is no longer listed"
+  "等确认期间日期已过，没有再列出": "its date passed while waiting to be confirmed, so it is no longer listed",
+  "打开 {{url}} （还没有账号就先用这个邮箱注册），在「输入邀请码」里填入，就可以用开发者提供的模型做访谈和日常使用（每月有用量上限）。": "Open {{url}} (no account yet? Sign up with this email first) and type it under \"Enter invite code\". The interview and everyday use then run on the model the developer provides, with a monthly usage limit.",
+  "也可以在 设置 → 日历与连接 → 模型连接 下方填入。": "You can also type it in under Settings → Calendar and connections → Model connection.",
+  "这里暂时不能申请。": "Applications are not open here right now.",
+  "邮箱格式不对。": "That email address does not look right.",
+  "申请太频繁，请稍后再试。": "Too many applications. Try again later."
 }

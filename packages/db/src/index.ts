@@ -4306,9 +4306,10 @@ export class CrosslineStore {
       .run({ codeHash: null, decidedAt: null, redeemedAt: null, redeemedWorkspaceId: null, ...invite });
   }
 
-  /** Invites by id, applicant workspace, or code hash; newest first. */
-  listInvites(filter: { id?: string; workspaceId?: string; codeHash?: string } = {}): StoredInvite[] {
-    const where = [filter.id ? "id = @id" : "", filter.workspaceId ? "workspace_id = @workspaceId" : "", filter.codeHash ? "code_hash = @codeHash" : ""].filter(Boolean);
+  /** Invites by id, applicant workspace, code hash or email (any case); newest first. */
+  listInvites(filter: { id?: string; workspaceId?: string; codeHash?: string; email?: string } = {}): StoredInvite[] {
+    const where = [filter.id ? "id = @id" : "", filter.workspaceId ? "workspace_id = @workspaceId" : "", filter.codeHash ? "code_hash = @codeHash" : "",
+      filter.email ? "lower(email) = lower(@email)" : ""].filter(Boolean);
     const rows = this.#prepare(`SELECT * FROM beta_invites ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC, rowid DESC`)
       .all(Object.fromEntries(Object.entries(filter).filter(([, value]) => value))) as Array<Record<string, string | null>>;
     return rows.map((row) => ({ id: row.id!, workspaceId: row.workspace_id!, email: row.email!, reason: row.reason ?? "",

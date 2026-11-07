@@ -1,0 +1,6 @@
+{
+  "申请内测：用开发者提供的模型（邮件审批），或填入收到的邀请码。": "Apply for the beta: use the model the developer provides (approved by email), or type in an invite code you received.",
+  "ChatGPT 额度不够、也没有模型 API key？可以申请内测，用开发者提供的模型。": "Out of ChatGPT quota and no model API key? Apply for the beta to use the model the developer provides.",
+  "没有 ChatGPT 也没有模型 API key？申请内测，用开发者提供的模型": "No ChatGPT and no model API key? Apply for the beta and use the model the developer provides",
+  "申请已提交。开发者通过后，邀请码会发到 {{email}}；用这个邮箱登录后，在「输入邀请码」里填入。": "Application sent. Once the developer approves, an invite code goes to {{email}}. Sign in with that email and type it under \"Enter invite code\"."
+}

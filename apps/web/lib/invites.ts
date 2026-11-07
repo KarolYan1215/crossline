@@ -1,7 +1,7 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { parseSponsorModels, sponsorMonth, sponsorSpend, SPONSOR_MONTHLY_CAP_CNY, type AccessContext } from "@crossline/core";
-import { applyForInvite, decideInvite, readLocale, redeemInvite, sponsorshipOf, type StoredInvite } from "@crossline/db";
+import { applyAsGuest, applyForInvite, decideInvite, readLocale, redeemInvite, sponsorshipOf, type StoredInvite } from "@crossline/db";
 import { tFor } from "./i18n";
 import { appMailSender } from "./auth";
 import { getStore } from "./crossline";
@@ -73,6 +73,24 @@ export function inviteState(ctx: AccessContext, now = new Date()): InviteState {
     ...(budget ? { budget } : {}) };
 }
 
+/* i18n-ignore-start: mailed to the developer who approves, not to the person */
+/** Tells every approver about a new application, with the link that decides it. A mail that does not go out closes the application. */
+async function mailApprovers(invite: StoredInvite, lines: string[]): Promise<boolean> {
+  const link = `${baseUrl()}/invite/decide?t=${signDecisionToken(invite.id)}`;
+  const text = [`${invite.email} 申请用开发者的模型额度（硅基流动）使用 Crossline。`, "", `理由：${invite.reason || "（未填写）"}`, ...lines,
+    `申请时间：${invite.createdAt}`, "", `通过或拒绝：${link}`, "", `打开链接后按「通过」会生成邀请码并发到申请人的邮箱；链接 ${LINK_DAYS} 天内有效。`].join("\n");
+  try {
+    const send = appMailSender()!;
+    for (const to of approvers()) await send({ to, subject: `Crossline 模型额度申请：${invite.email}`, text });
+    return true;
+  } catch {
+    // Not kept as an open application nobody was told about: the person can apply again once mail works.
+    getStore().saveInvite({ ...invite, status: "rejected", decidedAt: new Date().toISOString() });
+    return false;
+  }
+}
+/* i18n-ignore-end */
+
 /** Applies, and mails the owner the first time: the application, why, and the link that decides it. */
 export async function applyInvite(ctx: AccessContext, email: string, reason: string, context: { plan?: string } = {}):
   Promise<{ ok: true; status: StoredInvite["status"] } | { ok: false; code: string }> {
@@ -80,23 +98,28 @@ export async function applyInvite(ctx: AccessContext, email: string, reason: str
   const store = getStore();
   if (sponsorshipOf(store, ctx.workspaceId)) return { ok: false, code: "INVITE_ALREADY_REDEEMED" };
   const { invite, created } = applyForInvite(store, { workspaceId: ctx.workspaceId, email, reason });
-  if (created) {
-    const link = `${baseUrl()}/invite/decide?t=${signDecisionToken(invite.id)}`;
-    /* i18n-ignore-start: mailed to the developer who approves, not to the person */
-    const text = [`${invite.email} 申请用开发者的模型额度（硅基流动）使用 Crossline。`, "",
-      `理由：${invite.reason || "（未填写）"}`, `ChatGPT 账号类型：${context.plan ?? "未知"}`, `申请时间：${invite.createdAt}`, "",
-      `通过或拒绝：${link}`, "", `打开链接后按「通过」会生成邀请码并发到申请人的邮箱；链接 ${LINK_DAYS} 天内有效。`].join("\n");
-    try {
-      const send = appMailSender()!;
-      for (const to of approvers()) await send({ to, subject: `Crossline 模型额度申请：${invite.email}`, text });
-      /* i18n-ignore-end */
-    } catch {
-      // Not kept as an open application nobody was told about: the person can apply again once mail works.
-      store.saveInvite({ ...invite, status: "rejected", decidedAt: new Date().toISOString() });
-      return { ok: false, code: "INVITE_MAIL_FAILED" };
-    }
-  }
+  /* i18n-ignore-start: mailed to the developer who approves, not to the person */
+  if (created && !await mailApprovers(invite, [`ChatGPT 账号类型：${context.plan ?? "未知"}`])) return { ok: false, code: "INVITE_MAIL_FAILED" };
+  /* i18n-ignore-end */
   return { ok: true, status: invite.status };
+}
+
+/* i18n-ignore-start: where a visitor came from, for the developer's mail */
+export const VISITOR_SOURCES = { login: "登录页", assess: "公开测评" } as const;
+/* i18n-ignore-end */
+
+/**
+ * A visitor's application, with no account yet (the sign-in page, or the public test passing on its 「申请内测」). The answer is the same
+ * whether the address already had one, so the route does not tell a stranger which addresses applied.
+ */
+export async function applyAsVisitor(email: string, reason: string, source: keyof typeof VISITOR_SOURCES, detail?: string):
+  Promise<{ ok: true } | { ok: false; code: string }> {
+  if (!invitesAvailable()) return { ok: false, code: "INVITES_UNAVAILABLE" };
+  const { invite, created } = applyAsGuest(getStore(), { email, reason });
+  /* i18n-ignore-start: the developer's mail */
+  if (created && !await mailApprovers(invite, [`来源：${VISITOR_SOURCES[source]}（还没有账号）${detail ? ` · ${detail}` : ""}`])) return { ok: false, code: "INVITE_MAIL_FAILED" };
+  /* i18n-ignore-end */
+  return { ok: true };
 }
 
 /** The owner's decision from the link. Approving mails the code to the applicant; if that fails the decision stands and the code is shown. */
@@ -107,10 +130,11 @@ export async function decideFromLink(token: string, decision: "approve" | "rejec
   const result = decideInvite(getStore(), id, decision);
   if (!result.ok) return result;
   if (!result.code) return { ok: true, status: result.invite.status, email: result.invite.email, mailed: false };
-  // The applicant's mail is in their account's language (docs/i18n.md).
+  // The applicant's mail is in their account's language (docs/i18n.md); a visitor has no account yet, so theirs is in Chinese.
   const t = tFor(readLocale(getStore(), result.invite.workspaceId));
   const text = [t("你申请的 Crossline 开发者模型额度已通过。"), "", t("邀请码：{{code}}", { code: result.code }), "",
-    t("打开 {{url}} ，在「输入邀请码」里填入，就可以用开发者提供的模型做访谈和日常使用（每月有用量上限）。", { url: `${baseUrl()}/connect` }),
+    t("打开 {{url}} （还没有账号就先用这个邮箱注册），在「输入邀请码」里填入，就可以用开发者提供的模型做访谈和日常使用（每月有用量上限）。", { url: `${baseUrl()}/connect` }),
+    t("也可以在 设置 → 日历与连接 → 模型连接 下方填入。"),
     t("邀请码只能给一个账号使用。")].join("\n");
   try {
     await appMailSender()!({ to: result.invite.email, subject: t("Crossline 模型额度邀请码"), text });

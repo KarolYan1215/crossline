@@ -171,13 +171,17 @@ export function ResultScreen({ token }: { token: string }) {
           <li><b>{t("和 AI 做一次深度访谈。")}</b>{t("先把简历、课表、课程大纲拖进去，约 30 分钟得到一份全面的 AI 时代超级个体跨人生主线报告和跨主线排程计划。")}</li>
         </ol>
         <a className="as-button as-primary" href={view.appUrl} target="_blank" rel="noreferrer">{t("打开 Crossline →")}</a>
+        <p className="as-note">{t("没有 ChatGPT Plus 也没有 API key，想用开发者提供的模型？申请内测，开发者通过后邀请码会发到你留的邮箱，登录 App 后在「输入邀请码」里填入。")}</p>
+        {view.betaRequested ? <p className="as-done" role="status">{t("已申请。开发者通过后，邀请码会发到你留的邮箱。")}</p>
+          : <button type="button" disabled={beta.busy} onClick={() => void askBeta()}>{beta.busy ? t("正在提交…") : t("申请内测")}</button>}
+        {beta.error && <p className="as-error" role="alert">{beta.error}</p>}
       </> : <>
         <p className="as-note">{t("现在小范围内测，名额有限，按申请先后用你留的邮箱发邀请。用同一个邮箱登录，这份结果会自动带进 App。")}</p>
         {view.betaRequested ? <p className="as-done" role="status">{t("已申请。邀请会发到你留的邮箱。")}</p>
           : <button type="button" className="as-primary" disabled={beta.busy} onClick={() => void askBeta()}>{beta.busy ? t("正在提交…") : t("申请内测")}</button>}
         {beta.error && <p className="as-error" role="alert">{beta.error}</p>}
       </>}
-      <p className="as-note">{view.appUrl ? t("没有 ChatGPT Plus 也没有 API key，想用开发者提供的模型？发邮件到") : t("也可以直接发邮件到")}{" "}
+      <p className="as-note">{t("也可以直接发邮件到")}{" "}
         <a href={betaMailto(type.code, type.name, locale)}>{BETA_EMAIL}</a> {t("申请；在各大平台私信我也可以。")}</p>
     </section>
 

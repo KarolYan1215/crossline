@@ -934,7 +934,6 @@
   "用 ChatGPT 的话，先打开一项设置（只需一次）。": "If you use ChatGPT, turn on one setting first (once only).",
   "连接模型。": "Connect a model.",
   "用 ChatGPT：页面会给一串一次性代码，在 OpenAI 的页面登录并输入它，几秒后显示「已连接」；用 API：选模型、填入 key，检测通过后即可使用。服务器忙时会排队，稍等即可。": "With ChatGPT: the page gives you a one-time code; sign in on OpenAI's page and enter it, and after a few seconds it says \"Connected\". With an API: pick a model and enter the key; once the check passes, you're ready. When the server is busy you may wait in a queue for a moment.",
-  "没有 ChatGPT Plus 也没有 API key，想用开发者提供的模型？发邮件到": "No ChatGPT Plus and no API key, and want to use the developer's model? Email",
   "结果保存到 {{date}}，到期自动删除。保存的是四个维度的分数、邮箱、署名、外貌选项和你想做的事，不存每道题的答案。": "Your result is kept until {{date}} and then deleted automatically. What is kept: your four dimension scores, email, nickname, appearance choices and what you want to do. Your answers to each situation are not stored.",
   "这四个维度从哪来": "Where the four dimensions come from",
   "四个维度描述一个人在 AI 时代怎么做事：怎么和 AI 一起干活、用 AI 图什么、先规划还是先上手、经营一条主线还是几条线，各自取自一类已有研究。每个维度 9 个场景，取你偏向的一端；字母只是坐标。这是趣味测评，没有做过信度与效度检验。": "The four dimensions describe how a person works in the age of AI: how they work with AI, what they use it for, whether they plan or dive in first, and whether they run one track or several. Each comes from an existing body of research. Each dimension has 9 situations, and you get the end you lean to; the letters are only coordinates. This is a just-for-fun test and has not been checked for reliability or validity.",
@@ -978,5 +977,7 @@
   "上传一张": "Upload one",
   "你是{{name}}。": "You are {{name}}.",
   "Crossline · AI 时代超级个体类型": "Crossline · AI-era super individual type",
-  "我的超级个体类型.png": "my-super-individual-type.png"
+  "我的超级个体类型.png": "my-super-individual-type.png",
+  "没有 ChatGPT Plus 也没有 API key，想用开发者提供的模型？申请内测，开发者通过后邀请码会发到你留的邮箱，登录 App 后在「输入邀请码」里填入。": "No ChatGPT Plus and no API key, and want to use the model the developer provides? Apply for the beta: once the developer approves, an invite code goes to the email you left here. Sign in to the app and type it under \"Enter invite code\".",
+  "已申请。开发者通过后，邀请码会发到你留的邮箱。": "Applied. Once the developer approves, an invite code goes to the email you left here."
 }

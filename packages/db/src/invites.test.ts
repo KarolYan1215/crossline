@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { CrosslineStore } from "./index";
-import { applyForInvite, decideInvite, mintInviteCode, normalizeInviteCode, redeemInvite, sponsorshipOf } from "./invites";
+import { applyAsGuest, applyForInvite, decideInvite, mintInviteCode, normalizeInviteCode, redeemInvite, sponsorshipOf } from "./invites";
 
 test("an application is decided once, the code is stored only as a hash, and it redeems for one account", () => {
   const store = new CrosslineStore(":memory:");
@@ -27,6 +27,22 @@ test("an application is decided once, the code is stored only as a hash, and it 
   // Deleting the applicant's account deletes the application.
   store.purgeWorkspace("ws-d");
   expect(store.listInvites({ workspaceId: "ws-d" })).toEqual([]);
+  store.close();
+});
+
+test("a visitor applies by email alone: one open application per address, and its code redeems for the account that types it", () => {
+  const store = new CrosslineStore(":memory:");
+  const { invite, created } = applyAsGuest(store, { email: " Visitor@Example.com ", reason: "从测评来" });
+  expect(created).toBe(true);
+  expect(invite).toMatchObject({ email: "visitor@example.com", workspaceId: "", status: "pending" });
+  expect(applyAsGuest(store, { email: "visitor@example.com", reason: "再来" })).toMatchObject({ created: false, invite: { id: invite.id } });
+  // An account's open application for the same address counts too.
+  applyForInvite(store, { workspaceId: "ws-a", email: "member@example.com", reason: "" });
+  expect(applyAsGuest(store, { email: "MEMBER@example.com", reason: "" }).created).toBe(false);
+  const decided = decideInvite(store, invite.id, "approve");
+  if (!decided.ok) throw new Error(decided.code);
+  expect(redeemInvite(store, "ws-new", "owner-new", decided.code!)).toMatchObject({ ok: true });
+  expect(sponsorshipOf(store, "ws-new")).toMatchObject({ inviteId: invite.id });
   store.close();
 });
 
