@@ -184,3 +184,45 @@
 
 /* A pasted list offered to the import's check (docs/personal-agent.md §6). */
 .composer-import{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 0;font-size:13px}
+
+/* 小帮手's page (apps/web/app/assistant): the thread list beside one thread, and each turn's tool calls (tool-steps.tsx). */
+.assistant-page{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;min-height:min(78vh,900px)}
+.assistant-threads{display:grid;align-content:start;gap:8px;border-right:1px solid var(--mist);padding-right:12px}
+.assistant-threads header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.assistant-threads ul{margin:0;padding:0;list-style:none;display:grid;gap:2px}
+.assistant-threads li{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px}
+.assistant-threads li>button.thread-open{all:unset;cursor:pointer;display:grid;gap:2px;padding:6px 8px;min-width:0;font-size:13px}
+.assistant-threads li>button.thread-open span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.assistant-threads li>button.thread-open small{font-size:12px;color:var(--graphite)}
+.assistant-threads li[aria-current="true"]>button.thread-open{background:var(--chalk);box-shadow:inset 3px 0 0 var(--ink)}
+.assistant-threads li>button.thread-open:focus-visible{outline:2px solid var(--ink)}
+.assistant-threads .thread-menu{display:flex;gap:4px}
+.assistant-threads input{width:100%;font-size:13px}
+.assistant-thread{display:grid;grid-template-rows:auto minmax(0,1fr);gap:8px;min-width:0}
+.assistant-thread>header{display:flex;align-items:baseline;gap:8px}
+.assistant-thread>header h2{margin:0;font-size:16px}
+.conversation[data-variant="thread"]{grid-template-rows:minmax(0,1fr) auto;min-height:0}
+.conversation[data-variant="thread"] .conversation-log{overflow:auto;max-height:68vh;padding-right:4px}
+@media (max-width:760px){.assistant-page{grid-template-columns:1fr}.assistant-threads{border-right:0;padding-right:0;border-bottom:1px solid var(--mist);padding-bottom:8px}}
+.tool-steps{font-size:12px;color:var(--graphite);border-left:2px solid var(--mist);padding-left:8px}
+.tool-steps>summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;width:fit-content}
+.tool-steps[data-working]>summary span{color:var(--ink)}
+.tool-steps ol{margin:4px 0 0;padding:0;list-style:none;display:grid;gap:2px}
+.tool-steps li summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:2px 6px;align-items:baseline}
+.tool-steps li summary b{font-weight:600;color:var(--ink)}
+.tool-steps code,.tool-steps .mono{font-size:12px;overflow-wrap:anywhere}
+.tool-step-result{margin:2px 0 4px;padding:6px 8px;background:var(--chalk);white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:160px;overflow:auto}
+.conversation-diff{flex-basis:100%;margin:0;padding:6px 8px;list-style:none;display:grid;gap:0;background:var(--paper);font-size:12px;max-height:260px;overflow:auto}
+.conversation-diff li{display:block;white-space:pre-wrap;padding:0 4px}
+.conversation-diff li[data-kind="added"]{background:var(--tint-add);color:var(--tint-add-ink)}
+.conversation-diff li[data-kind="removed"]{background:var(--tint-del);color:var(--tint-del-ink);text-decoration:line-through}
+.conversation-diff li::before{content:attr(data-sign);display:inline-block;width:1.2em;color:var(--graphite)}
+
+/* One-shot cards vanish (ui/vanish.tsx): a moment's receipt, then gone. */
+.vanish-receipt{margin:0;font-size:13px;color:var(--graphite);display:flex;gap:6px;align-items:baseline;animation:vanish-in .15s ease-out}
+/* 撤销 in the receipt reads as part of the line, not as a second card button. */
+.vanish-receipt .text-button{font-size:13px;font-family:inherit;border:0;padding:0 2px;min-height:0;font-weight:inherit;text-decoration:underline;text-underline-offset:2px}
+@media (pointer:coarse){.vanish-receipt .text-button{min-height:44px;padding:0 10px}}
+@keyframes vanish-in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.vanish-receipt{animation:none}}
+.ask-receipts{display:grid;gap:4px;margin:4px 0}

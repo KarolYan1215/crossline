@@ -422,3 +422,9 @@ html:has(.settings-page){background:var(--ds-bg)}
 .st-spotlight{animation:st-spotlight 2.4s ease-out}
 @keyframes st-spotlight{0%,30%{box-shadow:0 0 0 3px var(--link)}100%{box-shadow:0 0 0 3px transparent}}
 @media (prefers-reduced-motion:reduce){.st-spotlight{animation:none;outline:3px solid var(--link)}}
+/* 给 Crossline 的话 (instructions-card.tsx). */
+.st-instructions { width: 100%; min-height: 120px; font: inherit; }
+.st-instructions-versions ol { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.st-instructions-versions li { display: grid; gap: 4px; border-top: 1px solid var(--ds-line); padding-top: 8px; }
+.st-instructions-versions li .ui-button { justify-self: start; }
+.st-instructions-text { white-space: pre-wrap; color: var(--graphite); max-height: 120px; overflow: auto; }

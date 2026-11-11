@@ -13,6 +13,9 @@ import { pageVisible } from "../ui/page-visible";
 import { isReminderKind } from "../notice-kinds";
 import { announceThinking, HelperFace, useHelper } from "../helper-state";
 import { OpenerCard } from "./opener-card";
+import { ToolSteps } from "./tool-steps";
+import { Receipt } from "../ui/vanish";
+import { DiffView } from "../ui/diff-view";
 import { useT } from "../locale-context";
 
 const PENDING_EVENTS = ["crossline:pending-changed", "crossline:plan-changed"];
@@ -35,15 +38,19 @@ export function pageFromLocation(): PageContext {
  * actions carried out on 执行 (each undoable), or one question back. Today's conversation is shared by every page and device; the
  * floating 小帮手 is the same conversation opened larger. Files are read and proposed for; offline, a line is kept as a capture the old way.
  */
-export function Conversation({ variant, placeholder, page }: {
+export function Conversation({ variant, placeholder, page, threadId, onSent }: {
   /**
    * `inline`: Today's box with the latest exchange under it; `panel`: the whole day's conversation, with search; `task`: a task's own
    * entry — the box first, then only what was said from this task's page; `block`: the same for a block picked on Today's day panel,
-   * showing only this task's latest exchange, held short.
+   * showing only this task's latest exchange, held short; `thread`: 小帮手's page, one whole thread with each turn's tool calls.
    */
-  variant: "inline" | "panel" | "task" | "block"; placeholder?: string;
+  variant: "inline" | "panel" | "task" | "block" | "thread"; placeholder?: string;
   /** Fixed for an entry that belongs to one object (a task dialog); otherwise read from the address. */
   page?: PageContext;
+  /** One of 小帮手's threads; without it, the day's conversation (the default thread). */
+  threadId?: string;
+  /** Called after a turn is answered (the thread list re-reads names and order). */
+  onSent?: () => void;
 }) {
   const t = useT();
   const [messages, setMessages] = useState<MessageView[]>([]);
@@ -56,7 +63,12 @@ export function Conversation({ variant, placeholder, page }: {
     try { return JSON.parse(localStorage.getItem(ACCOUNT_KEY) ?? "null") as { ownerId: string; workspaceId: string } | null; } catch { return null; }
   });
 
-  const load = (withChoices = false) => fetch(`/api/conversation${withChoices ? "?choices" : ""}`).then((response) => response.ok ? response.json() : null)
+  // Messages that became settled while this box was open: only those say 「已执行 · 撤销」 before they go; older settled cards are gone already.
+  const [fresh, setFresh] = useState<Set<string>>(() => new Set());
+  const markFresh = (ids: string[]) => setFresh((set) => new Set([...set, ...ids]));
+  const load = (withChoices = false) => {
+    const query = [threadId ? `thread=${encodeURIComponent(threadId)}` : "", withChoices ? "choices" : ""].filter(Boolean).join("&");
+    return fetch(`/api/conversation${query ? `?${query}` : ""}`).then((response) => response.ok ? response.json() : null)
     .then((body: { messages?: MessageView[]; ownerId?: string; workspaceId?: string; choices?: CardChoices } | null) => {
       if (body?.messages) setMessages(body.messages);
       if (body?.choices) setChoices(body.choices);
@@ -66,15 +78,24 @@ export function Conversation({ variant, placeholder, page }: {
         try { localStorage.setItem(ACCOUNT_KEY, JSON.stringify(ids)); } catch { /* private browsing */ }
       }
     }).catch(() => {});
+  };
   useEffect(() => {
+    setMessages([]);
     void load(true);
     // Another page or device may have added to today's conversation, and the system speaks first now and then (docs/one-input.md §4).
     const refresh = () => { if (pageVisible()) void load(); };
     document.addEventListener("visibilitychange", refresh);
     const timer = setInterval(refresh, 30_000);
     return () => { document.removeEventListener("visibilitychange", refresh); clearInterval(timer); };
-  }, []);
-  useEffect(() => { if (variant === "panel") endRef.current?.scrollIntoView({ block: "nearest" }); }, [messages, variant]);
+  }, [threadId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (variant === "panel" || variant === "thread") endRef.current?.scrollIntoView({ block: "nearest" }); }, [messages, variant]);
+  // While a turn runs, the thread is read often: the reply's tool calls arrive one by one (the worker writes each as the model makes it).
+  const working = busy || messages.some((message) => message.working);
+  useEffect(() => {
+    if (!working || variant !== "thread") return;
+    const timer = setInterval(() => { void load(); }, 800);
+    return () => clearInterval(timer);
+  }, [working, variant, threadId]); // eslint-disable-line react-hooks/exhaustive-deps
   // A card the stronger model is looking at again is fetched until it comes back (a few seconds to half a minute).
   const reviewing = messages.some((message) => message.card?.reviewing);
   useEffect(() => {
@@ -107,10 +128,14 @@ export function Conversation({ variant, placeholder, page }: {
       }
       announceThinking(true);
       const response = await fetch("/api/conversation/turn", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: input.text, mentions: input.mentions, page: page ?? pageFromLocation(), files }) });
+        body: JSON.stringify({ text: input.text, mentions: input.mentions, page: page ?? pageFromLocation(), files, ...(threadId ? { threadId } : {}) }) });
       const body = await response.json().catch(() => null) as { messages?: MessageView[] } | null;
       if (!response.ok || !body?.messages) { setStatus(t("未能发送，请重试")); return false; }
-      setMessages((list) => [...list, ...body.messages!]);
+      const added = body.messages;
+      markFresh(added.map((message) => message.id));
+      // The thread view may already hold them from its polling: replaced, not doubled.
+      setMessages((list) => [...list.filter((item) => !added.some((message) => message.id === item.id)), ...added]);
+      onSent?.();
       return true;
     } catch {
       return keepAsCapture(input, "未能发送，请复制内容后重试");
@@ -118,6 +143,7 @@ export function Conversation({ variant, placeholder, page }: {
   };
 
   const update = (message: MessageView) => {
+    markFresh([message.id]);
     setMessages((list) => list.map((item) => item.id === message.id ? message : item));
     for (const name of PENDING_EVENTS) window.dispatchEvent(new Event(name));
   };
@@ -128,7 +154,8 @@ export function Conversation({ variant, placeholder, page }: {
     : variant === "task" && page ? fromPage(messages, page)
     : variant === "block" && page ? lastExchange(fromPage(messages, page)) : messages;
   // On a page (Today, the return page) a long reply is held to three lines; the full conversation shows it whole.
-  const item = (message: MessageView) => <MessageItem key={message.id} message={message} onUpdate={update} choices={choices} compact={variant === "inline" || variant === "block"} />;
+  const item = (message: MessageView) => <MessageItem key={message.id} message={message} onUpdate={update} choices={choices} compact={variant === "inline" || variant === "block"}
+    fresh={fresh.has(message.id)} showSteps={variant === "thread" || variant === "panel"} />;
   if (variant === "task" || variant === "block") return <div className="conversation" data-variant={variant}>
     <Composer mode="capture" busy={busy} placeholder={t(placeholder ?? "对该任务的指令或问题：改截止、这一步做完了、记进度、推迟、讲解某一步…")} onSubmit={submit}>
       {busy && <small className="muted composer-status" role="status">{t("正在理解…")}</small>}
@@ -138,7 +165,7 @@ export function Conversation({ variant, placeholder, page }: {
   </div>;
   return <div className="conversation" data-variant={variant}>
     {variant === "panel" && <ConversationSearch />}
-    {variant === "panel" && <ol className="conversation-log" aria-label={t("今天的对话")}>
+    {(variant === "panel" || variant === "thread") && <ol className="conversation-log" aria-label={variant === "thread" ? t("对话") : t("今天的对话")}>
       {shown.map(item)}
       <div ref={endRef} />
     </ol>}
@@ -171,16 +198,51 @@ function lastExchange(messages: MessageView[]): MessageView[] {
   return index < 0 ? messages.slice(-1) : messages.slice(index);
 }
 
-function MessageItem({ message, onUpdate, choices, compact = false }: { message: MessageView; onUpdate: (message: MessageView) => void; choices: CardChoices | null; compact?: boolean }) {
+function MessageItem({ message, onUpdate, choices, compact = false, fresh = false, showSteps = false }: { message: MessageView; onUpdate: (message: MessageView) => void;
+  choices: CardChoices | null; compact?: boolean; fresh?: boolean; showSteps?: boolean }) {
   const { avatar } = useHelper();
+  const t = useT();
+  const [receiptGone, setReceiptGone] = useState(false);
   if (message.role === "person") return <li className="conversation-person"><p>{message.text}</p></li>;
+  // A one-shot card that is done or answered vanishes (2026-11-10): a moment's receipt when it settled just now, nothing when it was
+  // settled before; what it did stays in 今日操作.
+  const settled = message.card ? vanishes(message.card) : false;
+  const card = message.card && !settled ? message.card : undefined;
+  const receipt = message.card && settled && fresh && !receiptGone ? <Receipt opIds={opIdsOf(message.card)} text={t(receiptText(message.card))}
+    onGone={() => setReceiptGone(true)} onUndone={() => onUpdate(message)} /> : null;
+  if (!message.text && !card && !receipt && !message.working && !(showSteps && message.steps?.length)) return null;
   // The 小帮手 speaks with the upper half of the person's figure (the 分身); the person's own lines carry no face.
   return <li className={message.role === "nudge" ? "conversation-reply conversation-nudge" : "conversation-reply"} data-face={avatar ? "" : undefined}>
     {avatar && <HelperFace src={avatar} size="reply" />}
+    {(message.working || (showSteps && message.steps?.length)) && <ToolSteps steps={message.steps ?? []} working={Boolean(message.working)} />}
     {message.text && (compact ? <div className="gen"><ClampBlock><Markdown text={message.text} /></ClampBlock></div> : <div className="gen"><Markdown text={message.text} /></div>)}
-    {message.card && <CardView messageId={message.id} card={message.card} onUpdate={onUpdate} choices={choices}
+    {card && <CardView messageId={message.id} card={card} onUpdate={onUpdate} choices={choices}
       {...(message.opener ? { body: <OpenerCard opener={message.opener} /> } : {})} />}
+    {receipt}
   </li>;
+}
+
+/**
+ * Whether a card has nothing left to do: every action it shows ran or was declined, its question (if any) was answered, nothing failed,
+ * and no link it offers is the point of it (a 「去设置」 for a password stays). Exported for its test.
+ */
+export function vanishes(card: Card): boolean {
+  if (card.reviewing || card.error) return false;
+  const visible = cardActionIndexes({ actions: card.actions, clarify: card.clarify } as ConciergeTurn);
+  const chosen = card.clarify.chosen !== undefined ? card.clarify.options[card.clarify.chosen]?.actions ?? [] : [];
+  const shown = [...visible, ...chosen];
+  if (card.clarify.question && card.clarify.chosen === undefined) return false;
+  if (!shown.length && !card.clarify.question) return false;
+  return shown.every((index) => {
+    const item = card.items[index];
+    return item && (item.state === "done" || item.state === "dismissed") && !(item.state === "done" && card.actions[index]?.action === "settings.open");
+  });
+}
+const opIdsOf = (card: Card) => card.items.flatMap((item) => item.state === "done" && item.opId ? [item.opId] : []);
+function receiptText(card: Card): string {
+  const done = card.items.filter((item) => item.state === "done").length;
+  if (!done) return card.clarify.chosen !== undefined ? "已回答" : "已取消";
+  return "已执行";
 }
 
 /**
@@ -267,10 +329,11 @@ function ActionRow({ card, index, editing, onEdit, fields, changed }: { card: Ca
     <b>{t(ACTIONS[action.action].label)}</b><span className="gen">{action.summary}</span>
     <small className="conversation-state">{undone || (changed && item.state === "pending" ? t("已修改，待执行") : STATE_WORD[item.state] ? t(STATE_WORD[item.state]!) : "")}</small>
     {item.setting && <span className="conversation-setting">
-      <small>{t("{{label}}：当前「{{from}}」→ 改成「{{to}}」", { label: item.setting.label, from: item.setting.from, to: item.setting.to })}</small>
+      <small>{item.diff ? item.setting.label : t("{{label}}：当前「{{from}}」→ 改成「{{to}}」", { label: item.setting.label, from: item.setting.from, to: item.setting.to })}</small>
       <small className="muted">{item.setting.consequence}</small>
       {item.setting.explain?.map((line) => <small key={line} className="muted">{line}</small>)}
     </span>}
+    {item.diff && item.diff.length > 0 && <DiffView diff={item.diff} />}
     {onEdit && <button type="button" className="text-button" aria-expanded={editing} onClick={onEdit}>{editing ? t("收起") : t("修改")}</button>}
     {editing && fields}
     {/* A handler with nothing to add says 「已完成」, which only repeated 「已执行」 beside it (「已执行 已完成」, W-148). */}

@@ -10,14 +10,16 @@ import type { EvidenceClaimInput } from "@crossline/db";
 import { addCapturedTaskWithId, approveWorkOrderProposal, archiveWorkOrder, completeWorkOrderExecution, effectiveSchedulePreferences, getStore, saveMilestoneTemplate,
   shiftToday, startWorkOrderExecution, toZonedInstant } from "./crossline";
 import { applySettingChange } from "./setting-change";
-import { applyDesignChange } from "./personal-design";
+import { applyInstructions } from "./instructions";
+import { applyDesignChange, pauseDesignEntry } from "./personal-design";
+import { changeGrownSkill, grownSkillAction, revertGrownRevision } from "./skill-library";
 import { answerWrapBlock } from "./wrap";
 import { saveSourceFiles } from "./sources";
 import { requestStepReplan, requestTaskPass, settleProvideStep } from "./steps";
 import { approveMilestoneDrafts, rejectMilestoneDrafts } from "./approvals";
 import { answerAsk, snoozeAsk } from "./asks";
 import { analyzeNewCapturesInBackground } from "./capture-followups";
-import { requestCodexSupervisor } from "./codex-runtime";
+import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { scheduleEvent } from "./event-scheduling";
 import { applyChange } from "./impact";
 import { createMilestoneDraft } from "./input";
@@ -110,6 +112,38 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
   },
   "setting.change": (ctx, args) => applySettingChange(ctx, args),
   "design.change": (ctx, args) => applyDesignChange(ctx, args),
+  "instructions.set": (ctx, args) => applyInstructions(ctx, { text: args.text, by: "assistant" }),
+  // The 2026-11-10 audit's gaps, each through the function its settings card or route calls.
+  "design.pause": (ctx, args) => {
+    const result = pauseDesignEntry(ctx, args.kind, args.id.replace(/^crossline:/, ""), args.change === "pause");
+    return result.ok ? { ok: true, href: "/settings#design" } : { ok: false, code: "DESIGN_ENTRY_NOT_FOUND" };
+  },
+  "workflow.change": async (ctx, args) => {
+    const id = args.workflowId;
+    const result = args.change === "run" ? await grownSkillAction(ctx, id, "run")
+      : args.change === "revert" ? revertGrownRevision(ctx, id)
+      : changeGrownSkill(ctx, id, args.change === "remove" ? "remove" : args.change === "pause" ? { status: "off" } : args.change === "resume" ? { status: "active" }
+        : { pinned: args.change === "pin" });
+    const message = "message" in result && typeof result.message === "string" ? result.message : "";
+    return result.ok ? { ok: true, href: "/settings#skills" } : { ok: false, code: result.code ?? "SKILL_NOT_FOUND", ...(message ? { message } : {}) };
+  },
+  "automation.change": async (ctx, args) => {
+    const id = encodeURIComponent(args.automationId);
+    try {
+      const result = await requestCodexSupervisor<{ ok?: boolean; code?: string; message?: string }>(ctx, args.change === "run" ? `/v1/automations/${id}/run` : `/v1/automations/${id}`,
+        { method: args.change === "run" ? "POST" : "DELETE", headers: { "content-type": "application/json" }, ...(args.change === "run" ? { body: "{}" } : {}), signal: AbortSignal.timeout(15_000) });
+      return result.ok === false ? { ok: false, code: result.code ?? "AUTOMATION_FAILED", ...(result.message ? { message: result.message } : {}) } : { ok: true, href: "/settings#automations" };
+    } catch (error) {
+      return { ok: false, code: error instanceof CodexSupervisorRequestError ? error.blocker.code : "WORKER_UNAVAILABLE" };
+    }
+  },
+  "line.change": (ctx, args) => updateLine(ctx, args.lineId, { ...(args.label.trim() ? { label: args.label.trim() } : {}),
+    ...(args.hard ? { hard: args.hard === "yes" } : {}), ...(args.archive ? { archived: true } : {}) }),
+  "preference.change": (ctx, args) => {
+    const store = getStore();
+    const done = args.change === "remove" ? store.deletePreference(ctx.workspaceId, args.preferenceId) : store.restorePreference(ctx.workspaceId, args.preferenceId);
+    return done ? { ok: true, href: "/settings#personal" } : { ok: false, code: "PREFERENCE_NOT_FOUND" };
+  },
   // A grown workflow that went wrong: the assistant revises its files on the worker's next pass (workflow-improver.ts) and says what changed.
   "workflow.fix": async (ctx, args) => {
     const result = await improveGrownSkill(ctx, args.workflowId, args.text);

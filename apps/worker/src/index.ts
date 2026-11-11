@@ -4,12 +4,12 @@ import { get } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setDesignNoteProvider, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
+import { accountConcurrency, breakdownOfResponsesUsage, codexProcessEnvironment, flushMeteredUsage, recordMeteredUsage, configureModelGate, enterUsageWorkspace, forgetAccountModels, guestRuntimeLimit, installLocalPlugin, modelGateStatus, setDesignNoteProvider, setInstructionsProvider, setEffortPreferenceProvider, setLocaleProvider, setProviderResolver, setSpendModeProvider, setUsageLimitHandler, setUsageSink, startCodexSupervisor, startModelGateway, withUsagePurpose, withUsageWorkspace, type CodexSupervisor } from "@crossline/codex";
 import { containerMemory, containerPeak, createCollectMemory, heldMemory } from "./memory";
 import { createDpapiSecretStore } from "@crossline/connectors";
 import { createModelProviderService } from "./model-provider";
 import { createSponsorService, sponsorFromEnv, type SponsorService } from "./sponsor";
-import { CrosslineStore, aiToolsFor, designSkillNote, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes, nodeComputeOn } from "@crossline/db";
+import { CrosslineStore, aiToolsFor, currentInstructionsOf, designSkillNote, readLocale, settleLinkNeeds, recordGrownLogin, lessonsPass, backfillExtractWatermarks, backfillFactEvidence, grownHomeLine, interviewChecklistFor, isPaused, startConfirmedFor, listPushSubscriptions, readGrownSkills, readPublicSkills, removePushSubscriptions, repairOwnCompletions, opportunityCosts, retireQuietWatches, settleOpportunityOutcomes, nodeComputeOn } from "@crossline/db";
 import { capturesAwaitingAutoAnalysis, createCaptureAnalyzer } from "./analysis";
 import { closeInterruptedCollections, createFavouritesTopicsService, createTopicClassifier, favouritesTopicPass, refreshFavouritesTopicsText } from "./favourites-topics";
 import { workflowImprovePass } from "./workflow-improver";
@@ -1136,6 +1136,7 @@ setSpendModeProvider(async (workspaceId) => backgroundSpend(await readCost(works
 setLocaleProvider((workspaceId) => workspaceId ? readLocale(analysisStore, workspaceId) : undefined);
 // The person's own note for a Skill (「我的设计」, packages/core/src/personal-design.ts), read per run.
 setDesignNoteProvider((workspaceId, skill) => workspaceId ? designSkillNote(analysisStore, workspaceId, skill) : undefined);
+setInstructionsProvider((workspaceId) => workspaceId ? currentInstructionsOf(analysisStore, workspaceId).text || undefined : undefined);
 // The person's 模型强度 (Settings → 模型连接), read per run; only runs on the account's own Codex take it (skill-runner).
 setEffortPreferenceProvider((workspaceId) => effortPreferenceOf(workspaceId ? analysisStore.getSetting(workspaceId, MODEL_EFFORT_SETTING) : null));
 // The one quota gate for every background pass (core: keeps the person's own work moving; discretionary: nobody is waiting on it).

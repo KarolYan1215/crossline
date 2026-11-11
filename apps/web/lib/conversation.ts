@@ -5,7 +5,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { closeMailReply, listAgentTasks, readGrownSkills, resultsAwaitingReview, type StoredConversationMessage } from "@crossline/db";
 import {
   ACTIONS, AUTOMATIONS_SETTING, CONCIERGE_MAX_ACTIONS, CONCIERGE_MAX_IMAGES, LINE_PROFILES_SETTING, MAIL_ACCOUNTS_SETTING, actionProblem, isImmediate, redactSecrets, readAutomations, readMailAccounts, triggerLabel, availableSlots, conciergeRefs, needsReview, taskTitleOf, type StoredLineProfile,
-  type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type ProposedAction
+  type AccessContext, type AvailabilityWindow, type ClarifyOption, type ConciergePack, type ConciergeTurn, type DiffLine, type ProposedAction
 } from "@crossline/core";
 import { DOMAIN_PACKS } from "@crossline/identity-packs";
 import { effectiveSchedulePreferences, effectiveWeight, getStore, loadCurrentPlan, loadGoalForecast, planRanking, planToday, readAvailability, travelStateOf } from "./crossline";
@@ -22,7 +22,8 @@ import { tOf } from "./locale";
 import { captureProgress } from "./capture-progress";
 import { currentSettings, describeSettingChange, type SettingView } from "./setting-change";
 import { keepNote } from "./person-notes";
-import { describeDesignChange, designSnapshotLine, noteSkills } from "./personal-design";
+import { describeDesignChange, designEntryKeys, designSnapshotLine, noteSkills } from "./personal-design";
+import { describeInstructionsChange, instructionsSnapshotLine, instructionsView } from "./instructions";
 
 /** Where the person typed from: the page and the object open there (a task, a milestone, a plan day). */
 /** `stepId`: on a task, the step its block is for (Today's day panel), so 「这一步」 names that step rather than the first open one. */
@@ -31,7 +32,9 @@ export type Mention = { kind: "material" | "task" | "milestone" | "goal"; id: st
 
 /** One action on a card and what became of it. */
 /** `setting`: a `setting.change`'s 当前 → 改成, what follows and (a consent) its full explanation, read when the card was made. */
-export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; message?: string; opId?: string; href?: string; captureId?: string; setting?: SettingView };
+/** `diff`: an `instructions.set`'s line-by-line before/after, read when the card was made. */
+export type CardItem = { state: "pending" | "done" | "failed" | "dismissed"; message?: string; opId?: string; href?: string; captureId?: string; setting?: SettingView;
+  diff?: DiffLine[] };
 /** An assistant message's card: what the turn proposed, the question back, and the state of each. */
 /**
  * An option of a card's question. A turn's options carry candidate actions; a nudge's buttons may instead open a page (`href`),
@@ -57,7 +60,11 @@ export type Card = {
   /** This turn corrected the previous card. */
   corrects?: boolean;
 };
+/** A lookup the turn made (apps/worker/src/concierge.ts `ConciergeStep`): shown under the reply as a collapsible row. */
+export type ToolStep = { tool: string; args: string; result: string; at: string; review?: true };
 export type MessageView = { id: string; role: StoredConversationMessage["role"]; text: string; createdAt: string; card?: Card; page?: PageContext;
+  /** The turn's lookups, in order; `working` while the turn is still running (the thread view polls until it is not). */
+  steps?: ToolStep[]; working?: true;
   /** The day's opener as data (`lib/opener.ts`); absent on older openers, which are shown as their text. */
   opener?: OpenerView };
 /** What a card's fields can be changed to, by name: the open tasks (with their steps), the lines and the milestones. */
@@ -137,7 +144,12 @@ export async function contextPack(ctx: AccessContext, page: PageContext, now = n
     mailAccounts: readMailAccounts(store.getSetting(ctx.workspaceId, MAIL_ACCOUNTS_SETTING)).map((item) => ({ id: item.id, address: item.address, triage: item.triage,
       bookkeeping: item.bookkeeping !== false })),
     settings: await currentSettings(ctx),
-    design: designSnapshotLine(ctx), designSkills: noteSkills().map((skill) => skill.id),
+    design: `${designSnapshotLine(ctx)}\n${instructionsSnapshotLine(ctx)}`, designSkills: noteSkills().map((skill) => skill.id),
+    designEntries: designEntryKeys(ctx),
+    learned: store.listPreferences(ctx.workspaceId, { includeInvalidated: true }).slice(0, 60)
+      .map((item) => ({ id: item.id, text: item.text.slice(0, 160), lapsed: Boolean(item.invalidatedAt) })),
+    instructions: (() => { const view = instructionsView(ctx);
+      return { ...view.current, versions: view.versions.slice(0, 20).map((item) => ({ version: item.version, at: item.at, text: item.text, ...(item.revertOf !== undefined ? { revertOf: item.revertOf } : {}) })) }; })(),
     // The model's snapshot, not the interface.
     /* i18n-ignore-start */
     life: (() => {
@@ -245,8 +257,12 @@ export function pageTask(pack: ConciergePack): string[] {
 }
 // i18n-ignore-end
 
+/** A turn longer than this was abandoned (the web restarted mid-turn): it is no longer shown as running. */
+const WORKING_MS = 16 * 60_000;
 const view = (message: StoredConversationMessage): MessageView => ({ id: message.id, role: message.role, text: message.text, createdAt: message.createdAt,
   ...(message.payload.card ? { card: message.payload.card as Card } : {}), ...(message.payload.page ? { page: message.payload.page as PageContext } : {}),
+  ...(Array.isArray(message.payload.steps) && message.payload.steps.length ? { steps: message.payload.steps as ToolStep[] } : {}),
+  ...(message.payload.working && Date.now() - Date.parse(message.createdAt) < WORKING_MS ? { working: true as const } : {}),
   ...(readOpener(message.payload.opener) ? { opener: readOpener(message.payload.opener)! } : {}) });
 
 /** The names a card's editable fields take their values from. */
@@ -257,9 +273,18 @@ export async function cardChoices(ctx: AccessContext): Promise<CardChoices> {
 }
 
 /** Today's conversation (made on first use), oldest first. */
-export function loadConversation(ctx: AccessContext, day = planToday(ctx)): { id: string; day: string; messages: MessageView[] } {
+export function loadConversation(ctx: AccessContext, day = planToday(ctx)): { id: string; day: string; title: string; kind: "day" | "thread"; messages: MessageView[] } {
   const conversation = getStore().conversationFor(ctx.workspaceId, day);
-  return { id: conversation.id, day, messages: withCaptureProgress(ctx, getStore().listConversationMessages(ctx.workspaceId, conversation.id).map(view)) };
+  return { id: conversation.id, day, title: conversation.title, kind: conversation.kind,
+    messages: withCaptureProgress(ctx, getStore().listConversationMessages(ctx.workspaceId, conversation.id).map(view)) };
+}
+
+/** One of 小帮手's threads by id (a day's conversation or one the person started); undefined when it is not this account's. */
+export function loadThread(ctx: AccessContext, threadId: string): ReturnType<typeof loadConversation> | undefined {
+  const conversation = getStore().getConversation(ctx.workspaceId, threadId);
+  if (!conversation) return undefined;
+  return { id: conversation.id, day: conversation.day, title: conversation.title, kind: conversation.kind,
+    messages: withCaptureProgress(ctx, getStore().listConversationMessages(ctx.workspaceId, conversation.id).map(view)) };
 }
 
 /** A 「收集」 card's line follows its capture: analysed, done, accepted (W-16). Read when shown; the stored card is not rewritten. */
@@ -277,7 +302,8 @@ function withCaptureProgress(ctx: AccessContext, messages: MessageView[]): Messa
 }
 
 export const searchConversation = (ctx: AccessContext, query: string) =>
-  getStore().searchConversationMessages(ctx.workspaceId, query.trim().slice(0, 100)).map((message) => ({ ...view(message), day: message.conversationId.slice(-10) }));
+  getStore().searchConversationMessages(ctx.workspaceId, query.trim().slice(0, 100)).map((message) => ({ ...view(message),
+    day: getStore().getConversation(ctx.workspaceId, message.conversationId)?.day ?? message.conversationId.slice(-10), threadId: message.conversationId }));
 
 function cardFrom(turn: ConciergeTurn, heard: string): Card {
   return { actions: turn.actions, items: turn.actions.map(() => ({ state: "pending" })), clarify: turn.clarify, confidence: turn.confidence, heard,
@@ -307,13 +333,15 @@ const cardWords = (card: Card) => card.actions.map((item) => `${ACTIONS[item.act
  * snapshot and the pack, and its answer is kept with its card. When the model cannot be reached, the card offers the words as a new
  * task, so the person can still keep it as work with one click.
  */
-export async function conversationTurn(ctx: AccessContext, raw: { text: string; mentions: Mention[]; page: PageContext; files?: string[] }, now = new Date()): Promise<MessageView[]> {
+export async function conversationTurn(ctx: AccessContext, raw: { text: string; mentions: Mention[]; page: PageContext; files?: string[]; threadId?: string }, now = new Date()): Promise<MessageView[]> {
   // A key or password pasted into the box is cut out before anything keeps or reads the line; the reply points to where it is set.
   const secret = redactSecrets(raw.text);
   const input = { ...raw, text: secret.text };
   const store = getStore();
-  const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
-  const earlier = store.listConversationMessages(ctx.workspaceId, conversation.id);
+  // A thread of 小帮手 when one is named and is this account's; otherwise the day's conversation, the default thread every box opens.
+  const named = raw.threadId ? store.getConversation(ctx.workspaceId, raw.threadId) : undefined;
+  const conversation = named ?? store.conversationFor(ctx.workspaceId, planToday(ctx, now));
+  const earlier = store.listConversationMessages(ctx.workspaceId, conversation.id).filter((message) => !message.payload.working);
   const history = earlier.map((message) => ({ role: message.role, text: message.text }));
   // Once the person has corrected the box today, it reads every later line on the stronger model at once.
   const corrected = earlier.some((message) => (message.payload.card as Card | undefined)?.corrects);
@@ -325,6 +353,12 @@ export async function conversationTurn(ctx: AccessContext, raw: { text: string; 
   store.setSetting(ctx.workspaceId, ANSWERED_SETTING, now.toISOString());
   const person = store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "person", text,
     payload: { page: input.page, ...(docs.length ? { files: docs.map((doc) => doc.id) } : {}) } });
+  // A thread the person started is named by its first line until they rename it.
+  if (conversation.kind === "thread" && !conversation.title.trim() && input.text.trim()) store.renameConversation(ctx.workspaceId, conversation.id, input.text.trim().replace(/\s+/g, " ").slice(0, 30));
+  // The reply is written first, empty and running: the worker appends each lookup to it as the model makes it, and the thread view
+  // polls it, so the turn's tool calls show while it runs (小帮手, 2026-11-10).
+  const pendingReply = store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "assistant", text: "",
+    payload: { working: true, steps: [] } });
   const pack = await contextPack(ctx, input.page, now);
   const attached = attachedFiles(docs, pack);
   // From the return page: what the absence left to settle, and which task and step a line typed beside one is about.
@@ -336,7 +370,7 @@ export async function conversationTurn(ctx: AccessContext, raw: { text: string; 
   const unseen = pictures.slice(CONCIERGE_MAX_IMAGES).map((doc) => doc.fileName);
   // i18n-ignore: model context
   const removed = secret.redacted ? "\n本条消息里的密钥或密码已被系统移除：不要复述，用 settings.open 给出本人修改它的设置位置。" : "";
-  const request = { conversationId: conversation.id, text: input.text || "（只附了文件）", mentions: input.mentions, // i18n-ignore: model context
+  const request = { conversationId: conversation.id, replyId: pendingReply.id, text: input.text || "（只附了文件）", mentions: input.mentions, // i18n-ignore: model context
     snapshot: `${conciergeSnapshot(pack, now, { lists: true })}${returning}${attached}${removed}`, pack, history, ...(images.length ? { images } : {}),
     ...(corrected ? { corrected: true } : {}) };
   let reply: { text: string; card: Card };
@@ -362,8 +396,11 @@ export async function conversationTurn(ctx: AccessContext, raw: { text: string; 
   const waiting = reply.card.actions.filter((_, index) => reply.card.items[index]?.state === "pending");
   const review = !corrected && !reply.card.error && needsReview({ actions: waiting, confidence: reply.card.confidence } as ConciergeTurn, warnings);
   if (review) reply.card.reviewing = true;
-  const assistant = store.appendConversationMessage({ id: randomUUID(), workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "assistant",
-    text: reply.text, payload: { card: reply.card } });
+  // The steps the worker wrote while the turn ran are kept with the card.
+  const steps = store.getConversationMessage(ctx.workspaceId, pendingReply.id)?.payload.steps;
+  store.updateConversationPayload(ctx.workspaceId, pendingReply.id, { card: reply.card, ...(Array.isArray(steps) && steps.length ? { steps } : {}) });
+  store.updateConversationText(ctx.workspaceId, pendingReply.id, reply.text);
+  const assistant = store.getConversationMessage(ctx.workspaceId, pendingReply.id)!;
   if (review) void reviewCard(ctx, assistant.id, { ...request, review: true });
   return [view(person), view(assistant)];
 }
@@ -376,7 +413,7 @@ export async function conversationTurn(ctx: AccessContext, raw: { text: string; 
 export function settleCard(ctx: AccessContext, card: Card): Promise<void> | undefined {
   const candidates = new Set(card.clarify.options.flatMap((option) => option.actions));
   const due = card.actions.map((item, index) => ({ item, index }))
-    .filter(({ item, index }) => !candidates.has(index) && card.items[index]?.state === "pending" && (item.action === "setting.change" || item.action === "design.change" || isImmediate(item)));
+    .filter(({ item, index }) => !candidates.has(index) && card.items[index]?.state === "pending" && (item.action === "setting.change" || item.action === "design.change" || item.action === "instructions.set" || isImmediate(item)));
   // Nothing to settle: no await at all, so a card with none is stored in the same turn of the event loop as before.
   return due.length ? settleItems(ctx, card, due) : undefined;
 }
@@ -386,6 +423,8 @@ async function settleItems(ctx: AccessContext, card: Card, due: Array<{ item: Pr
       try { card.items[index] = { ...card.items[index]!, setting: await describeSettingChange(ctx, item.args) }; } catch { /* shown without it */ }
     } else if (item.action === "design.change") {
       try { card.items[index] = { ...card.items[index]!, setting: describeDesignChange(ctx, item.args) }; } catch { /* shown without it */ }
+    } else if (item.action === "instructions.set") {
+      try { const { diff, ...setting } = describeInstructionsChange(ctx, item.args.text); card.items[index] = { ...card.items[index]!, setting, diff }; } catch { /* shown without it */ }
     } else if (isImmediate(item)) card.items[index] = outcomeItem(await executeAction(ctx, item));
   }
 }

@@ -31,7 +31,9 @@ import { PhonePush } from "./phone-push";
 import { EffectivenessCard } from "./effectiveness-card";
 import { SelfCheckCard } from "./self-check-card";
 import { DesignCard } from "./design-card";
+import { InstructionsCard } from "./instructions-card";
 import { designView } from "../../lib/personal-design";
+import { instructionsView } from "../../lib/instructions";
 import { AutomationModule, type RecentTask } from "./automation";
 import { BackgroundModule } from "./background-module";
 import { backgroundOverview } from "../../lib/background";
@@ -269,6 +271,7 @@ export default async function SettingsPage() {
         </section>
 
         <section id="design" className="st-section" aria-labelledby="st-design"><h2 id="st-design" className="ds-serif">{t("规则与指令")}</h2>
+          <InstructionsCard view={instructionsView(ctx)} />
           <DesignCard {...designView(ctx)} />
         </section>
 

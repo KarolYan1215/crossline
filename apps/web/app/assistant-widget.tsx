@@ -166,6 +166,8 @@ export function AssistantWidget() {
       <span className="assistant-panel-actions">
         {pin && !pinned && <button type="button" className="text-button" onClick={() => { void pinToDesktop(); }}
           title={t("在单独的小窗口里打开，切到别的标签页或程序时也留在最上层")} aria-label={t("把小帮手钉在桌面")}>{t("钉在桌面")}</button>}
+        {/* The same day's conversation, as one thread among the others on 小帮手's own page (2026-11-10). */}
+        <a className="text-button" href="/assistant" aria-label={t("在小帮手页面打开，可看工具调用与全部对话")}>{t("全部对话")}</a>
         <button type="button" className="text-button" onClick={() => setFull(!full)} aria-pressed={full}
           aria-label={full ? t("退出全屏对话") : t("全屏对话")}>{full ? t("退出全屏") : t("全屏")}</button>
         <button type="button" className="text-button" onClick={() => { setFull(false); setOpen(false); }} aria-label={t("收起小帮手")}>{t("收起")}</button>

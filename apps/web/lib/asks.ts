@@ -1290,7 +1290,8 @@ export async function loadAsks(ctx: AccessContext, now?: Date): Promise<Ask[]> {
 const UNLISTED = new Set<Ask["kind"]>(["outcome_check", "progress_check", "interview_question", "interview_open"]);
 export const listed = (asks: Ask[]) => asks.filter((ask) => !UNLISTED.has(ask.kind));
 
-export type AskResult = { ok: true } | { ok: false; code: string };
+/** `op`: the operation the answer was recorded as (its 撤销), when there is one — the card's receipt offers it (2026-11-10). */
+export type AskResult = { ok: true; op?: { id: string; label: string } } | { ok: false; code: string };
 
 function record(ctx: AccessContext, type: string, entityId: string, key: string, payload: Record<string, unknown>) {
   getStore().appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: key, type, entityId, payload });
@@ -1665,8 +1666,9 @@ export function snoozeAsk(ctx: AccessContext, askId: string, choice: "tomorrow" 
   record(ctx, "ask.snoozed", ask.entityId, `ask:snoozed:${ask.id}:${now.getTime()}`,
     { askId: ask.id, until, fingerprint: ask.fingerprint, ...(seconds === undefined ? {} : { seconds }) } satisfies AskSnooze & { seconds?: number });
   const added = getStore().listEvents(ctx.workspaceId, { type: "ask.snoozed" }).filter((event) => !before.has(event.eventId)).map((event) => event.eventId);
-  if (added.length && options.undo !== false) recordOp(ctx, tOf(ctx)(choice === "tomorrow" ? "明天再问：{{title}}" : "下周再问：{{title}}", { title: ask.title }), { kind: "event.retract", eventIds: added });
-  return { ok: true };
+  const op = added.length && options.undo !== false
+    ? recordOp(ctx, tOf(ctx)(choice === "tomorrow" ? "明天再问：{{title}}" : "下周再问：{{title}}", { title: ask.title }), { kind: "event.retract", eventIds: added }) : undefined;
+  return op ? { ok: true, op: { id: op.id, label: op.label } } : { ok: true };
 }
 
 /**

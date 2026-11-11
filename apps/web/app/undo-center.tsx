@@ -17,7 +17,8 @@ const UNDO_CODE: Record<string, string> = {
 };
 
 const readSeen = (): string[] => { try { return JSON.parse(sessionStorage.getItem(SEEN_KEY) ?? "[]") as string[]; } catch { return []; } };
-const markSeen = (id: string) => { try { sessionStorage.setItem(SEEN_KEY, JSON.stringify([...readSeen(), id].slice(-50))); } catch { /* private mode */ } };
+/** An operation whose undo is already offered in place (a vanishing card's receipt): the toast does not offer it again. */
+export const markSeen = (id: string) => { try { sessionStorage.setItem(SEEN_KEY, JSON.stringify([...readSeen(), id].slice(-50))); } catch { /* private mode */ } };
 
 /** `t` is the page's language (`useT()`); Chinese when not given. */
 export async function undoOperation(id: string, t: Translate = tFor(undefined)): Promise<{ ok: boolean; message: string }> {

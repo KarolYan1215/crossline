@@ -46,7 +46,7 @@ export function filterAsks(asks: Ask[], filter: DeckFilter): Ask[] {
  * column (the decisions that wait, what is decided elsewhere). A link `?ask=<id>` (Today's 「打开」) brings that card to the front.
  */
 export function AskBoard({ initial, previews, aside }: { initial: Ask[]; previews: AskPreviews; aside?: ReactNode }) {
-  const { asks, onDone } = useAskList(initial, (ask) => !ask.entersOn);
+  const { asks, onDone, receipts } = useAskList(initial, (ask) => !ask.entersOn);
   const t = useT();
   const [filter, setFilter] = useState<DeckFilter>({});
   const shown = filterAsks(asks, filter);
@@ -107,6 +107,7 @@ export function AskBoard({ initial, previews, aside }: { initial: Ask[]; preview
               <IconButton label={t("下一项", { context: "button" })} icon={<ChevronRight {...ICON} />} disabled={at >= shown.length - 1} onClick={() => go(1)} />
             </nav>
           </header>
+          {receipts}
           {shown.length ? <AskDeck asks={shown} at={at} pick={pick} onDone={onDone} previews={previews} keys />
             : <p className="ap-empty-filter">{t("这一类本周没有了。")}</p>}
         </div>}

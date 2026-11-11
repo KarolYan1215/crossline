@@ -80,7 +80,7 @@ test("a consent is turned on and off through the box, its card carrying the sett
 });
 
 test("each consent's explanation is word for word what its settings card shows", () => {
-  const cards = ["energy-card.tsx", "local-activity-toggle.tsx", "agent-history-card.tsx", "recording-card.tsx", "server-recording-card.tsx"]
+  const cards = ["energy-card.tsx", "local-activity-toggle.tsx", "agent-history-card.tsx", "recording-card.tsx", "server-recording-card.tsx", "device-location-card.tsx"]
     .map((file) => readFileSync(new URL(`../app/settings/${file}`, import.meta.url), "utf8")).join("\n");
   for (const key of SETTING_KEYS) for (const line of (SETTING_CATALOG[key] as { explain?: readonly string[] }).explain ?? []) expect(cards).toContain(line);
 });

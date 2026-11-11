@@ -63,6 +63,9 @@ export function pauseDesignEntry(ctx: AccessContext, kind: "knob" | "skill", id:
   return { ok: true };
 }
 
+/** The entries set now, as `knob:<id>` / `skill:<id>` (what `design.pause` may name). */
+export const designEntryKeys = (ctx: AccessContext): string[] => designOf(ctx).entries.map((entry) => `${entry.kind}:${entry.id}`);
+
 /** Settings → 我的设计: every knob with its value and range, every note, and the Skills a note can be added to. */
 export function designView(ctx: AccessContext) {
   const design = designOf(ctx);

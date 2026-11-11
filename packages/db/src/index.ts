@@ -362,7 +362,9 @@ export type StoredPlanVersion = {
 };
 
 /** The one input box's conversation of a day (docs/one-input.md). */
-export type StoredConversation = { id: string; workspaceId: string; day: string; codexThreadId?: string; createdAt: string; updatedAt: string };
+/** `kind` 'day' is the day's conversation (the default thread); 'thread' one the person started in 小帮手, with its own `title`. */
+export type StoredConversation = { id: string; workspaceId: string; day: string; codexThreadId?: string; createdAt: string; updatedAt: string;
+  kind: "day" | "thread"; title: string; archivedAt?: string; instructionsSeen: number };
 /** person = typed by the person; assistant = the turn's answer (its card in `payload`); nudge = a message the system started. */
 export type ConversationRole = "person" | "assistant" | "nudge";
 export type StoredConversationMessage = {
@@ -1361,6 +1363,22 @@ export class CrosslineStore {
           const tags = migratedTags({ lineId: row.line_id, kind: data.kind === "event" ? "event" : "application", title: String(data.title ?? "") });
           update.run(JSON.stringify({ ...data, lines: tags.lines, type: data.type ?? tags.type }), row.workspace_id, row.id);
         }
+      } },
+      // 小帮手's threads (2026-11-10): a conversation is either the day's (`kind` 'day', one per day, the default thread every box opens)
+      // or one the person started (`kind` 'thread', named, archivable). The day's uniqueness becomes a partial index, so the table is
+      // rebuilt without its UNIQUE(workspace_id, day). `instructions_seen` is the version of 「给 Crossline 的话」 the Codex thread was told.
+      { version: 26, up: () => {
+        this.#db.exec(`
+          CREATE TABLE conversations_v24 (
+            id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, day TEXT NOT NULL, codex_thread_id TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'day', title TEXT NOT NULL DEFAULT '',
+            archived_at TEXT NOT NULL DEFAULT '', instructions_seen INTEGER NOT NULL DEFAULT 0);
+          INSERT INTO conversations_v24 (id, workspace_id, day, codex_thread_id, created_at, updated_at)
+            SELECT id, workspace_id, day, codex_thread_id, created_at, updated_at FROM conversations;
+          DROP TABLE conversations;
+          ALTER TABLE conversations_v24 RENAME TO conversations;
+          CREATE UNIQUE INDEX IF NOT EXISTS conversations_one_per_day ON conversations(workspace_id, day) WHERE kind = 'day';
+          CREATE INDEX IF NOT EXISTS conversations_by_update ON conversations(workspace_id, updated_at);`);
       } }
     ];
 
@@ -2029,9 +2047,37 @@ export class CrosslineStore {
 
   /** The day's conversation of the one input box, made on first use. */
   conversationFor(workspaceId: string, day: string, now = new Date().toISOString()): StoredConversation {
-    this.#prepare(`INSERT INTO conversations (id, workspace_id, day, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(workspace_id, day) DO NOTHING`).run(`conv-${workspaceId.slice(0, 8)}-${day}`, workspaceId, day, now, now);
-    return this.#conversation(this.#prepare("SELECT * FROM conversations WHERE workspace_id = ? AND day = ?").get(workspaceId, day) as Record<string, string>);
+    this.#prepare(`INSERT INTO conversations (id, workspace_id, day, created_at, updated_at, kind) VALUES (?, ?, ?, ?, ?, 'day')
+      ON CONFLICT(workspace_id, day) WHERE kind = 'day' DO NOTHING`).run(`conv-${workspaceId.slice(0, 8)}-${day}`, workspaceId, day, now, now);
+    return this.#conversation(this.#prepare("SELECT * FROM conversations WHERE workspace_id = ? AND day = ? AND kind = 'day'").get(workspaceId, day) as Record<string, string>);
+  }
+
+  /** A thread the person started in 小帮手 (`day` is the day it was started). */
+  createConversationThread(workspaceId: string, input: { id: string; title: string; day: string }, now = new Date().toISOString()): StoredConversation {
+    this.#prepare(`INSERT INTO conversations (id, workspace_id, day, created_at, updated_at, kind, title) VALUES (?, ?, ?, ?, ?, 'thread', ?)`)
+      .run(input.id, workspaceId, input.day, now, now, input.title);
+    return this.getConversation(workspaceId, input.id)!;
+  }
+
+  /** 小帮手's thread list: the person's threads and the days', most recently used first; archived ones only when asked. */
+  listConversationThreads(workspaceId: string, options: { archived?: boolean; limit?: number } = {}): StoredConversation[] {
+    return (this.#prepare(`SELECT * FROM conversations WHERE workspace_id = ? AND ${options.archived ? "archived_at != ''" : "archived_at = ''"}
+      AND (kind = 'thread' OR EXISTS (SELECT 1 FROM conversation_messages m WHERE m.workspace_id = conversations.workspace_id AND m.conversation_id = conversations.id AND m.role = 'person'))
+      ORDER BY updated_at DESC LIMIT ?`).all(workspaceId, options.limit ?? 100) as Array<Record<string, string>>).map((row) => this.#conversation(row));
+  }
+
+  renameConversation(workspaceId: string, id: string, title: string): void {
+    this.#prepare("UPDATE conversations SET title = ? WHERE workspace_id = ? AND id = ?").run(title, workspaceId, id);
+  }
+
+  /** Archived threads leave the list but keep every message (and stay searchable); `false` brings one back. */
+  archiveConversation(workspaceId: string, id: string, archived: boolean, now = new Date().toISOString()): void {
+    this.#prepare("UPDATE conversations SET archived_at = ? WHERE workspace_id = ? AND id = ?").run(archived ? now : "", workspaceId, id);
+  }
+
+  /** The version of 「给 Crossline 的话」 this conversation's Codex thread has been given. */
+  setConversationInstructionsSeen(workspaceId: string, id: string, version: number): void {
+    this.#prepare("UPDATE conversations SET instructions_seen = ? WHERE workspace_id = ? AND id = ?").run(version, workspaceId, id);
   }
 
   getConversation(workspaceId: string, id: string): StoredConversation | undefined {
@@ -2092,7 +2138,8 @@ export class CrosslineStore {
 
   #conversation(row: Record<string, string>): StoredConversation {
     return { id: row.id!, workspaceId: row.workspace_id!, day: row.day!, ...(row.codex_thread_id ? { codexThreadId: row.codex_thread_id } : {}),
-      createdAt: row.created_at!, updatedAt: row.updated_at! };
+      createdAt: row.created_at!, updatedAt: row.updated_at!, kind: row.kind === "thread" ? "thread" : "day", title: row.title ?? "",
+      ...(row.archived_at ? { archivedAt: row.archived_at } : {}), instructionsSeen: Number(row.instructions_seen ?? 0) };
   }
 
   #message(row: Record<string, string>): StoredConversationMessage {
@@ -2805,6 +2852,11 @@ export class CrosslineStore {
 
   retireLearnedArchetype(workspaceId: string, id: string, at = new Date().toISOString()): boolean {
     return this.#prepare("UPDATE learned_archetypes SET retired_at = ? WHERE workspace_id = ? AND id = ? AND retired_at IS NULL").run(at, workspaceId, id).changes > 0;
+  }
+
+  /** Undoing a removal (the operation's 撤销): the entry reaches the models again. */
+  undeletePreference(workspaceId: string, id: string): boolean {
+    return this.#prepare("UPDATE preference_entries SET deleted_at = NULL WHERE workspace_id = ? AND id = ? AND deleted_at IS NOT NULL").run(workspaceId, id).changes > 0;
   }
 
   /** The person removing something the system learned: it stops reaching any model, and stays on record as removed. */

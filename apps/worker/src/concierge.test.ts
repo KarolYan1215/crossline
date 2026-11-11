@@ -97,3 +97,34 @@ test("an attached screenshot stored as .img reaches the runtime as a copy named 
     expect(asTypedImage(path.join(dir, "missing.img"))).toBeUndefined();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("每一次查询都写进回答消息的 steps（小帮手的工具调用行），复核的查询标为 review", async () => {
+  const { store, conversation } = setup();
+  store.appendConversationMessage({ id: "reply-1", workspaceId: "w", conversationId: conversation.id, role: "assistant", text: "", payload: { working: true, steps: [] } });
+  const fake = fakeRuntime([answer([due])], CONCIERGE_SKILL, { script: async ({ ask }) => {
+    await ask("item/tool/call", { callId: "c1", tool: "find_tasks", arguments: { query: "作业 2" } });
+  } });
+  await createConcierge(store, "w", "C:\repo", () => fake.rpc)({ conversationId: conversation.id, replyId: "reply-1", text: "作业2截止改到下周五", mentions: [],
+    snapshot: "", pack: pack(), history: [] });
+  const steps = store.getConversationMessage("w", "reply-1")!.payload.steps as Array<{ tool: string; args: string; result: string }>;
+  expect(steps).toHaveLength(1);
+  expect(steps[0]).toMatchObject({ tool: "find_tasks", args: "{\"query\":\"作业 2\"}" });
+  expect(steps[0]!.result).toContain("wo-hw2");
+  expect(store.getConversationMessage("w", "reply-1")!.payload.working).toBe(true);
+});
+
+test("「给 Crossline 的话」: a continued thread is told a version it has not seen, once, wrapped as preferences", async () => {
+  const { setInstructions } = await import("@crossline/db");
+  const { store, conversation } = setup();
+  const fake = fakeRuntime([answer([], "一"), answer([], "二"), answer([], "三")], CONCIERGE_SKILL);
+  const run = createConcierge(store, "w", "C:\repo", () => fake.rpc);
+  const ask = (text: string) => run({ conversationId: conversation.id, text, mentions: [], snapshot: "", pack: pack(), history: [] });
+  await ask("早");
+  setInstructions(store, { workspaceId: "w", ownerId: "p", text: "回答先给结论", by: "person" });
+  await ask("这周怎样");
+  expect(fake.prompts().at(-1)).toContain("回答先给结论");
+  expect(fake.prompts().at(-1)).toContain("never Crossline's safety boundaries");
+  expect(store.getConversation("w", conversation.id)?.instructionsSeen).toBe(1);
+  await ask("好");
+  expect(fake.prompts().at(-1)).not.toContain("回答先给结论");
+});

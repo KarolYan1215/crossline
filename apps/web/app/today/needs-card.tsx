@@ -56,9 +56,9 @@ export function openHref(row: Extract<NeedRow, { kind: "ask" | "missed" }>, toda
   return row.kind === "missed" ? `/wrap?day=${shiftDay(today, -1)}` : `/approvals?ask=${encodeURIComponent(row.ask.id)}#asks`;
 }
 
-async function post(path: string, body: Record<string, unknown>): Promise<{ ok?: boolean; code?: string } | null> {
+async function post(path: string, body: Record<string, unknown>): Promise<{ ok?: boolean; code?: string; op?: { id: string } } | null> {
   const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
-  return await response?.json().catch(() => null) as { ok?: boolean; code?: string } | null;
+  return await response?.json().catch(() => null) as { ok?: boolean; code?: string; op?: { id: string } } | null;
 }
 
 /**
@@ -74,7 +74,7 @@ export function NeedsCard({ asks: initialAsks, reminders, labels, today, notes }
   notes?: ReactNode;
 }) {
   const t = useT();
-  const { asks, onDone } = useAskList(initialAsks, (ask) => !ask.entersOn);
+  const { asks, onDone, receipts } = useAskList(initialAsks, (ask) => !ask.entersOn);
   const rows = needRows({ asks, reminders });
   return <section className="td-card nd" id="asks" aria-labelledby="needs-title">
     <Loop className="nd-loop" size={64} strokeWidth={1} aria-hidden="true" />
@@ -83,6 +83,7 @@ export function NeedsCard({ asks: initialAsks, reminders, labels, today, notes }
       <small>{t("本周紧急")}</small>
     </header>
     {notes}
+    {receipts}
     {rows.length > 0 ? <ol className="nd-list">{rows.map((row) => row.kind === "reminder"
       ? <li key={row.key} className="nd-row" data-kind="reminder" {...(row.reminder.line ? { "data-line": row.reminder.line } : {})}>
         <div className="nd-line">
@@ -101,7 +102,7 @@ function UrgentFlag({ label }: { label: string }) {
   return <span className="nd-flag" title={label}><Flag {...ICON} /><span className="sr-only">{label}</span></span>;
 }
 
-function AskRow({ row, labels, today, onDone }: { row: Extract<NeedRow, { kind: "ask" | "missed" }>; labels: LineLabels; today: string; onDone: (id: string) => void }) {
+function AskRow({ row, labels, today, onDone }: { row: Extract<NeedRow, { kind: "ask" | "missed" }>; labels: LineLabels; today: string; onDone: (id: string, opId?: string) => void }) {
   const t = useT(), locale = useLocale();
   const { ask } = row;
   const [busy, setBusy] = useState(false);
@@ -111,7 +112,7 @@ function AskRow({ row, labels, today, onDone }: { row: Extract<NeedRow, { kind: 
     setBusy(true); setStatus("");
     const result = await post(path, body);
     setBusy(false);
-    if (result?.ok) { onDone(ask.id); return; }
+    if (result?.ok) { onDone(ask.id, result.op?.id); return; }
     setStatus(answerProblem(result?.code, locale));
   };
   const line = ask.line ? labels[ask.line] : undefined;

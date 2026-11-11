@@ -41,6 +41,8 @@
   /* Status colours (2026-11-10, were literals with dark overrides repeated in four files): a line or mark, and its text shade. */
   --risk:#A1262B; --risk-ink:#8A1F24; --warn:#8A5A00; --warn-ink:#6B4400;
   --tint-warn:#F3EAD3; --tint-warn-ink:#5C430F;
+  /* A diff's added and removed lines (小帮手's 「给 Crossline 的话」 card). */
+  --tint-add:#E6F4EA; --tint-add-ink:#14532D; --tint-del:#FDECEA; --tint-del-ink:#7F1D1D;
   /* A neutral wash over any ground (quiet hours on the day view). */
   --wash:rgba(127,127,127,.12);
   /* The level ring (ui/primitives.css), from low to full; each mark at least 3:1 on the paper. */
@@ -55,7 +57,7 @@
     --c-research:#6CB2FF; --c-startup:#FF9B5C; --c-media:#D79BFF; --c-investment:#5FE3AE; --c-health:#E8C547;
     --link:#6CB2FF;
     --risk:#FF8A80; --risk-ink:#FF8A80; --warn:#E8C547; --warn-ink:#E8C547;
-    --tint-warn:#3A3220; --tint-warn-ink:#EBD9AE;
+    --tint-warn:#3A3220; --tint-warn-ink:#EBD9AE; --tint-add:#123222; --tint-add-ink:#B7F0CB; --tint-del:#3A1515; --tint-del-ink:#F6C4C4;
     --ring-1:#FF6B5E; --ring-2:#E8963F; --ring-3:#B5C43A; --ring-4:#4CC47F; --ring-hover:#2E5A40;
   }
 }
@@ -67,7 +69,7 @@
   --c-research:#6CB2FF; --c-startup:#FF9B5C; --c-media:#D79BFF; --c-investment:#5FE3AE; --c-health:#E8C547;
   --link:#6CB2FF;
   --risk:#FF8A80; --risk-ink:#FF8A80; --warn:#E8C547; --warn-ink:#E8C547;
-  --tint-warn:#3A3220; --tint-warn-ink:#EBD9AE;
+  --tint-warn:#3A3220; --tint-warn-ink:#EBD9AE; --tint-add:#123222; --tint-add-ink:#B7F0CB; --tint-del:#3A1515; --tint-del-ink:#F6C4C4;
   --ring-1:#FF6B5E; --ring-2:#E8963F; --ring-3:#B5C43A; --ring-4:#4CC47F; --ring-hover:#2E5A40;
 }
 
