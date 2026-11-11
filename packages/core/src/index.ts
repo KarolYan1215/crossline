@@ -23,6 +23,7 @@ export * from "./line-attributes";
 export * from "./records";
 export * from "./money-events";
 export * from "./ledger";
+export * from "./wealth";
 export * from "./profile-gaps";
 export * from "./profile-instruments";
 export * from "./profile-report";

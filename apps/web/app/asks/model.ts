@@ -23,6 +23,7 @@ const OUTCOMES: Record<AskKind, { answered: string; unanswered: string }> = {
   calendar_sync_failed: { answered: "在设置中恢复日历连接。", unanswered: "排程继续使用最后一次读到的日程。" },
   codex_signed_out: { answered: "重新登录后，后台分析与准备恢复。", unanswered: "需要模型的后台工作保持暂停。" },
   ledger_duplicate: { answered: "按两笔计入，或在总账里逐笔合并。", unanswered: "一周后按两笔计入汇总。" },
+  wealth_balances: { answered: "填的余额记为今天的数，净值曲线与构成随之更新。", unanswered: "净值按各账户上次的余额计算，并标出多久没更新。" },
   missed_block: { answered: "按所选方式顺延、改期、补记或归档。", unanswered: "已按顺延处理，截止前的余量可能变小。" },
   source_project: { answered: "文件归入所选项目，其中的日程与截止带上项目名。", unanswered: "文件中的日程保持无项目名。" },
   calendar_line_unclear: { answered: "该日程按所选主线着色，同名日程相同。", unanswered: "该日程保持无色。" },

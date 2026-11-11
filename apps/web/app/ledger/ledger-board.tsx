@@ -60,6 +60,7 @@ export function LedgerBoard({ view }: { view: LedgerView }) {
       {pace !== null && <p className="lg-pace">{pace >= 0
         ? t("到 {{day}} 日比上月同期多花 {{pct}}%", { day: summary.pace.day, pct: fmt(Math.round(pace)) })
         : t("到 {{day}} 日比上月同期少花 {{pct}}%", { day: summary.pace.day, pct: fmt(Math.round(-pace)) })}</p>}
+      {view.fx.rateDay && <p className="lg-muted">{t("其他币种的收支按每笔当天的汇率折成 {{base}}（最新汇率 {{day}}，欧洲央行）。", { base: view.fx.base, day: view.fx.rateDay })}</p>}
       {summary.others.length > 0 && <p className="lg-others">{t("其他币种：")}{summary.others.map((item) => t("{{currency}} 花 {{spent}}、收 {{income}}", { currency: item.currency, spent: fmt(item.spent), income: fmt(item.income) })).join(t("；"))}</p>}
     </header>
 
@@ -72,6 +73,11 @@ export function LedgerBoard({ view }: { view: LedgerView }) {
       <section className="lg-card">
         <h3>{t("分类")}</h3>
         <Categories view={view} fmt={fmt} active={filter.category} onPick={(category) => setFilter((old) => ({ ...old, category: old.category === category ? "" : category }))} />
+      </section>
+
+      <section className="lg-card lg-wide">
+        <h3>{t("预算")}</h3>
+        <BudgetCard view={view} fmt={fmt} />
       </section>
 
       <section className="lg-card">
@@ -96,7 +102,7 @@ export function LedgerBoard({ view }: { view: LedgerView }) {
         {summary.accounts.length ? <table className="lg-table"><thead><tr><th>{t("账户")}</th><th>{t("支出")}</th><th>{t("收入")}</th></tr></thead>
           <tbody>{summary.accounts.map((item) => <tr key={item.account}><td>{accountLabel(item.account)}</td><td className="mono">{fmt(item.out)}</td><td className="mono">{fmt(item.in)}</td></tr>)}</tbody></table>
           : <p className="lg-muted">{t("本月还没有记录")}</p>}
-        <p className="lg-muted">{t("没有接银行，所以只看进出，不显示余额。")}</p>
+        <p className="lg-muted">{t("这里只看进出；账户余额在上面的「资产与负债」里记。")}</p>
       </section>
 
       <section className="lg-card lg-wide">
@@ -189,6 +195,60 @@ function Row({ row, view, busy, fmt, act, remove, accountLabel }: { row: LedgerR
       <button type="button" disabled={busy} onClick={() => void remove(row.id)}>{t("删除这笔")}</button>
     </div>}
   </li>;
+}
+
+/**
+ * The budget (docs/ledger-wealth.md §4): a monthly cap and caps per category, no envelopes. Each capped category is a meter — spent against
+ * its cap, with a tick where the month ends at the pace so far — and says in words when it is over or will be.
+ */
+function BudgetCard({ view, fmt }: { view: LedgerView; fmt: (value: number) => string }) {
+  const t = useT();
+  const router = useRouter();
+  const { budget, summary } = view;
+  const [monthly, setMonthly] = useState(budget.own.monthly === null ? "" : String(budget.own.monthly));
+  const [category, setCategory] = useState(view.spendCategories[0] ?? "");
+  const [cap, setCap] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async (next: { monthly: number | null; categories: Record<string, number> }) => {
+    setBusy(true);
+    try { if ((await fetch("/api/wealth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "budget", ...next }) })).ok) router.refresh(); }
+    finally { setBusy(false); }
+  };
+  const monthlyNumber = monthly.trim() ? Number(monthly) : null;
+  return <div className="lg-budget">
+    {summary.limit !== null && <p className="lg-budget-total">{t("本月 {{spent}} / 上限 {{limit}} {{currency}}", { spent: fmt(summary.spent), limit: fmt(summary.limit), currency: summary.currency })}
+      <small className="lg-muted"> {budget.limitFrom === "milestone" ? t("（上限来自财富主线的里程碑）") : t("（本人设的上限）")}</small></p>}
+    {budget.lines.length > 0 ? <ul className="lg-meters">{budget.lines.map((line) => <li key={line.category}>
+      <span className="lg-meter-label">{t(line.category)}</span>
+      <span className="lg-meter-track" role="meter" aria-valuemin={0} aria-valuemax={line.cap} aria-valuenow={line.spent}
+        aria-label={t("{{category}}：{{spent}} / {{cap}}", { category: t(line.category), spent: fmt(line.spent), cap: fmt(line.cap) })}>
+        <span className="lg-meter-fill" data-state={line.over ? "over" : line.projectedOver ? "pace" : "ok"} style={{ width: `${Math.min(100, line.pct)}%` }} />
+        {line.projected !== null && line.projected > 0 && <span className="lg-meter-pace" style={{ left: `${Math.min(100, line.projected / line.cap * 100)}%` }}
+          title={t("按当前速度月底约 {{amount}}", { amount: fmt(line.projected) })} />}
+      </span>
+      <span className="lg-meter-value mono">{fmt(line.spent)} / {fmt(line.cap)}</span>
+      <span className="lg-meter-note">{line.over ? t("超出 {{amount}}", { amount: fmt(line.spent - line.cap) })
+        : line.projectedOver ? t("按当前速度会超") : t("{{pct}}%", { pct: line.pct })}</span>
+    </li>)}</ul> : <p className="lg-muted">{t("还没有分类预算。给常超的几类设个上限就够了，不必每类都设。")}</p>}
+    <details className="lg-budget-edit">
+      <summary>{t("设预算")}</summary>
+      <form className="lg-inline" onSubmit={(event) => { event.preventDefault(); void save({ monthly: monthlyNumber, categories: budget.own.categories }); }}>
+        <label>{t("每月总上限（{{currency}}，空 = 不设）", { currency: summary.currency })} <input type="number" min="0" step="any" inputMode="decimal" value={monthly} onChange={(event) => setMonthly(event.target.value)} /></label>
+        <button type="submit" disabled={busy}>{t("保存")}</button>
+      </form>
+      <form className="lg-inline" onSubmit={(event) => { event.preventDefault(); void save({ monthly: budget.own.monthly, categories: { ...budget.own.categories, [category]: Number(cap) } }).then(() => setCap("")); }}>
+        <label>{t("分类")} <select value={category} onChange={(event) => setCategory(event.target.value)}>
+          {view.spendCategories.map((name) => <option key={name} value={name}>{t(name)}</option>)}</select></label>
+        <label>{t("每月上限")} <input type="number" min="0" step="any" inputMode="decimal" required value={cap} onChange={(event) => setCap(event.target.value)} /></label>
+        <button type="submit" disabled={busy}>{t("设上限")}</button>
+      </form>
+      {Object.keys(budget.own.categories).length > 0 && <ul className="lg-list">{Object.entries(budget.own.categories).map(([name, amount]) => <li key={name}>
+        {t("{{category}} 每月 {{amount}}", { category: t(name), amount: fmt(amount) })}
+        <button type="button" disabled={busy} onClick={() => { const rest = { ...budget.own.categories }; delete rest[name]; void save({ monthly: budget.own.monthly, categories: rest }); }}>{t("删除")}</button>
+      </li>)}</ul>}
+      <p className="lg-muted">{t("预算按本位币，只比较已记下的支出；没有信封、不结转。")}</p>
+    </details>
+  </div>;
 }
 
 /** Cumulative spending by day: this month solid, last month light, the three before as a dashed average; the limit and the projection when known. */
