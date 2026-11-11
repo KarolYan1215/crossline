@@ -4,11 +4,13 @@
 .lg-head{display:grid;gap:8px}
 .lg-month{display:inline-flex;gap:8px;align-items:center;font-size:13px;color:var(--graphite)}
 .lg-month select{font:inherit;font-size:14px;color:var(--ink);background:var(--paper);border:1px solid var(--mist);border-radius:6px;padding:4px 8px}
-.lg-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0}
+.lg-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(8em,1fr));gap:12px;margin:0}
 .lg-stats div{border:1px solid var(--mist);border-radius:8px;padding:10px 12px;min-width:0}
 .lg-stats dt{font-size:13px;color:var(--graphite)}
 .lg-stats dd{margin:2px 0 0;font-size:22px;font-weight:700;color:var(--ink);overflow-wrap:anywhere}
 .lg-stats small{font-size:13px;font-weight:400;color:var(--graphite)}
+.lg-stats dd[data-over]{color:var(--lg-over)}
+.lg-stats dd.lg-stat-note{font-size:15px;font-weight:400;color:var(--graphite)}
 .lg-pace,.lg-others{margin:0;font-size:14px;color:var(--ink)}
 .lg-muted{margin:6px 0 0;font-size:13px;color:var(--graphite)}
 .lg-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}

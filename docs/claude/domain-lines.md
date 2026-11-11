@@ -15,8 +15,9 @@ Design, decisions, research and what is reserved: `docs/domain-lines.md`. There 
   - **Refunds and other sources.** A refund is kind `refund`, linked to its expense (`refundOf`), and lowers spending in that category, never income. Phone notifications, Wallet and the input box go through the same matcher (`addDomainRecord` in `lib/records.ts`).
   - **Categories and rules.** Categories are fixed (`SPEND_CATEGORIES`, `INCOME_CATEGORIES`). The person's change can become a merchant rule (`ledger.merchantRules`, undoable); `categoryBy: "person"` is never overwritten.
   - **The ledger page `/ledger`** (`lib/ledger.ts`, `/api/ledger`, `app/ledger/`) draws:
-    - this month's spent, income, net and savings rate, and the pace against the same day of last month;
-    - the cumulative line against last month, the 3-month average, the limit and the month-end projection;
+    - this month's spent, income, net and savings rate, and the pace against the same day of last month — income, net and savings rate only while income is tracked (2026-11-11, docs/ledger-wealth.md §3.4: not under 「只记开销」 `ledger.spendingOnly`, nor with fewer than two income entries this month; then the page says income is not recorded);
+    - the cumulative line against last month, the 3-month average, the limit and the month-end projection (only once spending is booked on 7 days);
+    - the monthly budget (`ledger.budget` with its own `currency`, `monthlyCap`) as a meter: spent, left or over, and the pace against the budget's share of the days gone (`budgetPace`);
     - categories with last month's tick, 12 months of income and spending, and a daily heat calendar;
     - top merchants, accounts (money in and out only; balances live in 资产与负债 above), recurring charges (`recurringCharges`: weekly, monthly or yearly, at least three times, price rises flagged) and anomalies;
     - the filterable list with category change, split, merge and delete, all undoable (`records.fields` / `records.evidence` inverses).

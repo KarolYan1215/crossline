@@ -221,15 +221,22 @@ export function staleAccounts(accounts: WealthAccount[], snapshots: WealthSnapsh
     && !snapshots.some((snapshot) => snapshot.accountId === account.id && snapshot.on >= start));
 }
 
-/** The person's budget: a monthly cap and caps per spending category, in the base currency (0 or absent = none). No envelopes. */
-export type Budget = { monthly: number | null; categories: Record<string, number> };
+/**
+ * The person's budget: a monthly cap and caps per spending category (0 or absent = none). No envelopes. The monthly cap is in `currency`
+ * (null: the base currency, as before 2026-11-11), so changing the base currency later does not silently change the budget; category caps
+ * are in the base currency.
+ */
+export type Budget = { monthly: number | null; currency: string | null; categories: Record<string, number> };
 export type BudgetLine = { category: string; cap: number; spent: number; pct: number; projected: number | null; over: boolean; projectedOver: boolean };
 
-/** Each capped category against this month's spending, with the month-end projection at the pace so far (from the third day). */
-export function budgetLines(budget: Budget, categories: Array<{ category: string; amount: number }>, day: number, daysInMonth: number, current: boolean): BudgetLine[] {
+/**
+ * Each capped category against this month's spending, with the month-end projection at the pace so far — only once spending is booked on
+ * seven days (`spendDays`, as the ledger's own projection), never extrapolated from two or three.
+ */
+export function budgetLines(budget: Budget, categories: Array<{ category: string; amount: number }>, day: number, daysInMonth: number, current: boolean, spendDays: number): BudgetLine[] {
   return Object.entries(budget.categories).filter(([, cap]) => cap > 0).map(([category, cap]) => {
     const spent = round2(categories.find((item) => item.category === category)?.amount ?? 0);
-    const projected = current && day >= 3 ? round2(spent / day * daysInMonth) : null;
+    const projected = current && spendDays >= 7 ? round2(spent / day * daysInMonth) : null;
     return { category, cap, spent, pct: Math.round(spent / cap * 100), projected, over: spent > cap, projectedOver: projected !== null && projected > cap };
   }).sort((a, b) => b.pct - a.pct);
 }
@@ -239,10 +246,27 @@ export function parseBudget(raw: string | undefined): Budget {
   try {
     const value = JSON.parse(raw ?? "null") as { monthly?: unknown; categories?: unknown } | null;
     const monthly = typeof value?.monthly === "number" && value.monthly > 0 ? value.monthly : null;
+    const currency = typeof (value as { currency?: unknown } | null)?.currency === "string" && isFxCurrency((value as { currency: string }).currency) ? (value as { currency: string }).currency : null;
     const categories = Object.fromEntries(Object.entries(value?.categories && typeof value.categories === "object" ? value.categories as Record<string, unknown> : {})
       .filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] > 0));
-    return { monthly, categories };
-  } catch { return { monthly: null, categories: {} }; }
+    return { monthly, currency, categories };
+  } catch { return { monthly: null, currency: null, categories: {} }; }
+}
+
+/** The monthly cap in the base currency, at the latest rate on or before `day`; null with no cap, or no rate for its currency. */
+export function monthlyCap(budget: Budget, base: string, fx: Converter, day: string): number | null {
+  if (budget.monthly === null) return null;
+  if (!budget.currency || budget.currency === base) return budget.monthly;
+  const converted = fx.convert(budget.monthly, budget.currency, base, day);
+  return converted ? round2(converted.value) : null;
+}
+
+/** The month's spending against the monthly cap: what is left, and the pace — what the cap's share of the days gone would allow by `day`. */
+export type BudgetPace = { cap: number; spent: number; left: number; pct: number; over: boolean; day: number; expected: number; ahead: number };
+export function budgetPace(spent: number, cap: number, day: number, daysInMonth: number, current: boolean): BudgetPace {
+  const upTo = current ? day : daysInMonth;
+  const expected = round2(cap * upTo / daysInMonth);
+  return { cap, spent: round2(spent), left: round2(cap - spent), pct: Math.round(spent / cap * 100), over: spent > cap, day: upTo, expected, ahead: round2(spent - expected) };
 }
 
 /**
