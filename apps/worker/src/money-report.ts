@@ -1,7 +1,7 @@
-import { monthlyLimitFrom, monthlyMoneyReport, weeklyMoneyReport, type LedgerRecord } from "@crossline/core";
+import { baseCurrencyFor, convertRecords, converterFrom, isFxCurrency, monthlyLimitFrom, monthlyMoneyReport, parseBudget, weeklyMoneyReport, type LedgerRecord } from "@crossline/core";
 import { settleStaleDuplicates, type CrosslineStore } from "@crossline/db";
 import { identityLines } from "./lines";
-import { tOfWorkspace } from "./locale";
+import { localeOf, tOfWorkspace } from "./locale";
 import { sayToPerson } from "./workflow-smith";
 
 export const MONEY_WEEKLY_KIND = "money_weekly";
@@ -22,8 +22,10 @@ const localParts = (now: Date, zone: string) => {
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 const money = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
-/** The wealth line's monthly spending limit, from its approved milestones. */
+/** The monthly spending limit: the person's own budget cap (`ledger.budget`, docs/ledger-wealth.md §4), else the wealth line's approved milestones. */
 export function monthlyLimit(store: CrosslineStore, workspaceId: string): number | null {
+  const own = parseBudget(store.getSetting(workspaceId, "ledger.budget")).monthly;
+  if (own !== null) return own;
   const line = identityLines(store, workspaceId).find((item) => item.domain === "wealth");
   if (!line) return null;
   return monthlyLimitFrom(store.listMilestones(workspaceId).filter((milestone) => milestone.identityId === line.id && milestone.status === "approved")
@@ -40,7 +42,11 @@ export function moneyReportPass(store: CrosslineStore, workspaceId: string, now 
   const local = localParts(now, zoneOf(store, workspaceId));
   const sent = { weekly: false, monthly: false };
   if (local.hour < REPORT_HOUR) return sent;
-  const records = store.listRecords(workspaceId, { domain: "wealth", since: addDays(local.day, -400) }) as LedgerRecord[];
+  // The totals in the base currency, each record at its day's rate (docs/ledger-wealth.md §3), as the ledger page shows them.
+  const chosen = store.getSetting(workspaceId, "ledger.baseCurrency") ?? "";
+  const base = isFxCurrency(chosen) ? chosen : baseCurrencyFor(zoneOf(store, workspaceId), localeOf(store, workspaceId));
+  const records = convertRecords(store.listRecords(workspaceId, { domain: "wealth", since: addDays(local.day, -400) }) as LedgerRecord[], base,
+    converterFrom(store.listMarketPrices({ kinds: ["fx"] }))).records;
   if (!records.length) return sent;
   const t = tOfWorkspace(store, workspaceId);
   const open = (path: string) => [{ label: t("看总账"), href: path }, { label: t("少问这类"), kind: "mute" as const }];

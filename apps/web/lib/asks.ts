@@ -1,7 +1,7 @@
 import "server-only";
 import { recordOp, retractedEventIds, withUndo } from "./undo";
 import {
-  ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
+  ACCOUNT_CLASS_LABEL, ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
   isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
@@ -41,6 +41,7 @@ import { intlLocale, monthDay, tFor, type Locale, type Translate } from "./i18n"
 import { pendingInterviewSettings, settleInterviewSettings, startConfirmed } from "./start-confirm";
 import { settingWords } from "./setting-change";
 import { keepNote } from "./person-notes";
+import { applyWealthAction, loadWealth, BALANCE_SKIP_SETTING } from "./wealth";
 
 /** Markers an undo has taken back are as if never written. */
 const live = <T extends { eventId: string }>(ctx: AccessContext, events: T[]): T[] => {
@@ -688,6 +689,32 @@ function ledgerDuplicateAsks({ store, ctx, t }: Source): Ask[] {
     ] }];
 }
 
+/**
+ * 「更新余额」 (docs/ledger-wealth.md §5): from the 1st of each month, the accounts typed by hand that have no balance since the month began,
+ * on one card with a box per account. Filled boxes become today's snapshots; 「这个月不更新」 puts it away until next month. Never urgent.
+ */
+function wealthBalanceAsks({ store, ctx, today, t }: Source): Ask[] {
+  const month = today.slice(0, 7);
+  if (store.getSetting(ctx.workspaceId, `${BALANCE_SKIP_SETTING}${month}`)) return [];
+  const view = loadWealth(ctx);
+  const stale = view.accounts.filter((item) => view.stale.includes(item.account.id)).slice(0, 8);
+  if (!stale.length) return [];
+  const label = (item: (typeof stale)[number]) => `${item.account.name}（${t(ACCOUNT_CLASS_LABEL[item.account.accountClass])}，${item.account.currency}）`; // i18n-ignore
+  return [{ id: `wealth:balances:${month}`, kind: "wealth_balances", entityId: month, urgency: "later", raisedAt: `${month}-01T08:00:00.000Z`,
+    fingerprint: stale.map((item) => item.account.id).sort().join("|"),
+    items: stale.map((item) => ({ id: item.account.id, title: item.asOf
+      ? t("{{name}}：上次 {{value}} {{currency}}（{{day}}）", { name: item.account.name, value: item.native ?? 0, currency: item.account.currency, day: item.asOf })
+      : t("{{name}}：还没有余额", { name: item.account.name }), href: "/ledger#wealth" })),
+    title: t("更新余额：{{count}} 个账户本月还没记", { count: stale.length }),
+    why: t("没有接银行，净值只用本人记下的余额；每月记一次，曲线才是真的。负债填欠款金额。不填的账户按上次的数计，并标出多久没更新。"),
+    options: [
+      { id: "fill", label: t("填入新余额"), recommended: true, fields: stale.map((item) => ({ id: item.account.id, label: label(item), kind: "text" as const, required: false,
+        placeholder: item.native === null ? t("今天的余额") : String(item.native) })) },
+      { id: "review", label: t("去总账更新"), href: "/ledger#wealth" },
+      { id: "skip", label: t("这个月不更新"), detail: t("下个月 1 号再问") }
+    ] }];
+}
+
 function missedAsks(source: Source): Ask[] {
   const members = missedMembers(source);
   if (members.length < 2) return members;
@@ -1108,7 +1135,7 @@ function mergeAsks({ ctx, today, now, t, locale }: Source): Ask[] {
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, travelAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, wealthBalanceAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityNeedAsks(context, at),
     ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at)]
@@ -1409,6 +1436,17 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       if (optionId !== "separate") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
       for (const record of store.listRecords(ctx.workspaceId, { domain: "wealth" }).filter((item) => item.status === "pending_review")) {
         resolvePossibleDuplicate(store, ctx.workspaceId, record.id, false);
+      }
+      return { ok: true };
+    }
+    case "wealth_balances": {
+      if (optionId === "skip") { store.setSetting(ctx.workspaceId, `${BALANCE_SKIP_SETTING}${ask.entityId}`, appNow().toISOString()); return { ok: true }; }
+      if (optionId !== "fill") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+      const filled = Object.entries(values).map(([id, raw]) => [id, String(raw ?? "").replace(/[,，\s]/g, "")] as const).filter(([, raw]) => raw !== "");
+      if (!filled.length) return { ok: false, code: "ASK_FIELDS_EMPTY" };
+      for (const [accountId, raw] of filled) {
+        const result = applyWealthAction(ctx, { action: "snapshot", accountId, on: "", value: Number(raw) });
+        if (!result.ok) return result;
       }
       return { ok: true };
     }

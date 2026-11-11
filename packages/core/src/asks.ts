@@ -43,6 +43,8 @@ export type AskKind =
   | "overdue_task"
   /** Money records the ledger kept apart as possible duplicates (docs/mail-bookkeeping.md §4.3): one card for all of them. */
   | "ledger_duplicate"
+  /** From the 1st of each month: hand-typed accounts with no balance yet this month (docs/ledger-wealth.md §5), one box per account. */
+  | "wealth_balances"
   /**
    * Work the assistant can do once the person gives one thing only they hold (docs/work-split.md, an `ask` work order): a question, never
    * a task card. Answered, the assistant takes the work; 「不需要」 archives it.

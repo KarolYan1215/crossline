@@ -36,6 +36,7 @@ import { workSplitRepair } from "./work-split-repair";
 import { mailReminderRepair, moneyAskRepair } from "./mail-reminder-repair";
 import { mailRecordsRepair } from "./mail-records-repair";
 import { moneyReportPass } from "./money-report";
+import { codexQuoteReader, wealthPricePass } from "./wealth-prices";
 import { dateAdvancePass } from "./date-advance";
 import { outputsProbe, selfCheckPass, type Probe } from "./self-check";
 import { agentQuestionsProbe } from "./self-check-agent";
@@ -879,6 +880,13 @@ async function workspaceTick(workspace: { id: string }, checkedAt: string): Prom
     const records = mailRecordsRepair(analysisStore, workspace.id);
     if (records.voided || records.refunds || records.merged) console.info(JSON.stringify({ type: "repair.mail_records", workspaceId: workspace.id, ...records, checkedAt }));
   } catch (error) { console.warn(JSON.stringify({ type: "repair.mail_reminders_failed", workspaceId: workspace.id, error: String(error), checkedAt })); }
+  // FX rates, coin prices and brokerage quotes once a day, then holdings valued (wealth-prices.ts, docs/ledger-wealth.md §2–3).
+  try {
+    const client = accountClient(workspace.id);
+    const priced = await withUsagePurpose(NON_CORE_PURPOSE, () => wealthPricePass(analysisStore, workspace.id,
+      { readQuotes: client ? (symbols, today) => { enterUsageWorkspace(workspace.id); return codexQuoteReader(client, repoRoot)(symbols, today); } : undefined }));
+    if (priced.fx || priced.crypto || priced.quotes || priced.valued) console.info(JSON.stringify({ type: "wealth.priced", workspaceId: workspace.id, ...priced, checkedAt }));
+  } catch (error) { console.warn(JSON.stringify({ type: "wealth.price_pass_failed", workspaceId: workspace.id, error: String(error), checkedAt })); }
   // Monday's and the 1st's spending reports (money-report.ts, docs/mail-bookkeeping.md §5.3). From the ledger by code, no model.
   try {
     const reported = moneyReportPass(analysisStore, workspace.id);

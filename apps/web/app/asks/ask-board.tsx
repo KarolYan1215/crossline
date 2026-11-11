@@ -20,7 +20,7 @@ const GROUP_OF: Partial<Record<AskKind, AskGroup>> = {
   gate_insufficient: "验收", gate_failed: "验收", evidence_manual: "验收",
   missed_block: "日程与承诺", weekly_commit: "日程与承诺", event_propose: "日程与承诺", locked_conflict: "日程与承诺", travel_minutes: "日程与承诺",
   calendar_publish_failed: "日程与承诺", calendar_sync_failed: "日程与承诺", calendar_line_unclear: "日程与承诺",
-  capture_blocked: "收集与文件", materials_blocked: "收集与文件", source_project: "收集与文件", ledger_duplicate: "收集与文件"
+  capture_blocked: "收集与文件", materials_blocked: "收集与文件", source_project: "收集与文件", ledger_duplicate: "收集与文件", wealth_balances: "收集与文件"
 };
 export const ASK_GROUPS: AskGroup[] = ["风险与逾期", "等待到期", "步骤与准备", "助手", "验收", "日程与承诺", "收集与文件", "其他"];
 const GROUP_ICON: Record<AskGroup, LucideIcon> = { 风险与逾期: AlertTriangle, 等待到期: Hourglass, 步骤与准备: ListChecks, 助手: Bot, 验收: ShieldCheck,

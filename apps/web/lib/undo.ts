@@ -3,6 +3,7 @@ import { reopenAgentResult, retractedEventIdsIn, withdrawArtifactRelationsFor, t
 import { PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING, taskTitleOf, type AccessContext, type StoredDomainRecord, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 import { tOf } from "./locale";
+import { restoreWealthRows, wealthRows, type WealthRowEntry } from "./wealth";
 
 /**
  * Undo (decided 2026-10-08): every change of state the person makes is recorded with the operation that reverses it, and can be undone
@@ -50,6 +51,8 @@ export type Inverse =
   /** Sessions of minutes the person reported (`recordConfirmedSession`) and energy they reported, written by the operation: removed again. */
   | { kind: "execution.remove"; ids: string[] }
   | { kind: "energy.remove"; ids: string[] }
+  /** Accounts, balances and positions (docs/ledger-wealth.md) an operation changed: each row as it was, or removed when it did not exist. */
+  | { kind: "wealth.rows"; entries: WealthRowEntry[] }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
@@ -156,6 +159,9 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
         return { ok: true };
       case "records.fields":
         for (const entry of inverse.entries) store.updateRecord(ctx.workspaceId, entry.id, entry.patch);
+        return { ok: true };
+      case "wealth.rows":
+        restoreWealthRows(ctx.workspaceId, inverse.entries);
         return { ok: true };
       case "records.evidence":
         for (const entry of inverse.entries) store.moveRecordEvidence(ctx.workspaceId, [entry.id], entry.recordId);
@@ -282,6 +288,7 @@ function snapshot(ctx: AccessContext) {
     recordFields: new Map(store.listRecords(ctx.workspaceId, { includeDeleted: true }).map((record) => [record.id,
       { kind: record.kind, category: record.category, categoryBy: record.categoryBy, status: record.status, possibleDupOf: record.possibleDupOf, refundOf: record.refundOf, voidReason: record.voidReason }])),
     evidence: new Map(store.listRecordEvidence(ctx.workspaceId).map((item) => [item.id, item.recordId])),
+    wealth: wealthRows(ctx.workspaceId),
     eventIds: new Set(store.listEvents(ctx.workspaceId, { type: RETRACTABLE_EVENTS }).map((event) => event.eventId)),
     sessions: new Set(store.listExecutions(ctx.workspaceId).filter((execution) => String(execution.outcome) === "confirmed").map((execution) => execution.id)),
     energy: new Set(store.listEnergyObservations(ctx.workspaceId).filter((item) => item.source === "self_report").map((item) => item.id))
@@ -307,6 +314,9 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
   if (fieldChanges.length) items.push({ kind: "records.fields", entries: fieldChanges });
   const moves = [...before.evidence].flatMap(([id, recordId]) => after.evidence.has(id) && after.evidence.get(id) !== recordId ? [{ id, recordId }] : []);
   if (moves.length) items.push({ kind: "records.evidence", entries: moves });
+  const wealth = [...new Set([...before.wealth.keys(), ...after.wealth.keys()])].filter((key) => before.wealth.get(key) !== after.wealth.get(key))
+    .map((key) => ({ key, row: before.wealth.get(key) ?? null }));
+  if (wealth.length) items.push({ kind: "wealth.rows", entries: wealth });
   const opened = [...after.waiting].filter(([id, now]) => !before.waiting.has(id) && now.state === "open").map(([id]) => id);
   if (opened.length) items.push({ kind: "waiting.cancel", ids: opened });
   const restored: string[] = [], archived: string[] = [], revoked: string[] = [];

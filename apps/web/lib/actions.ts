@@ -30,6 +30,7 @@ import { undoOp, withUndo } from "./undo";
 import { localeFor, tOf } from "./locale";
 import { monthDay } from "./i18n";
 import { keepNote } from "./person-notes";
+import { wealthFromAssistant } from "./wealth";
 
 /** What carrying out one action did: `message` is shown on the card; `opId` is what the card's 撤销 takes back. */
 export type ActionOutcome = { ok: true; message: string; opId?: string; href?: string; captureId?: string } | { ok: false; message: string };
@@ -131,6 +132,15 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
     const result = addDomainRecord(ctx, { domain: args.domain, kind: args.kind, value: args.value, unit: args.unit, currency: args.domain === "wealth" ? args.currency || "CNY" : "",
       category: args.category, note: args.note, at: args.at || personToday(ctx), source: "input", sourceRef: "" });
     return result.ok ? { ok: true, message: tOf(ctx)("已记下") } : { ok: false, code: result.code, message: result.message };
+  },
+  // A balance or a position on the ledger's assets (docs/ledger-wealth.md §6), confirmed on the card; undone with the wealth rows.
+  "wealth.update": (ctx, args) => {
+    const result = wealthFromAssistant(ctx, args);
+    if (!result.ok) return result;
+    const t = tOf(ctx);
+    return { ok: true, href: "/ledger#wealth", message: args.symbol.trim()
+      ? t("{{account}}：{{symbol}} 记为 {{quantity}}", { account: args.account.trim(), symbol: args.symbol.trim().toUpperCase(), quantity: args.quantity })
+      : t("{{account}}：余额记为 {{balance}}", { account: args.account.trim(), balance: args.balance }) };
   },
   // 「后面都推 10 分钟」: today's plan starts later; started and locked blocks stay. Undone like any `schedule.` setting.
   "schedule.shift": (ctx, args) => {

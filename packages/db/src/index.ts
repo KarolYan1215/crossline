@@ -5,7 +5,7 @@ import { tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, se
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
-  type ChecklistAnswer, type DomainRecordInput, type StoredDomainRecord,
+  type ChecklistAnswer, type DomainRecordInput, type StoredDomainRecord, type WealthAccount, type WealthSnapshot, type WealthHolding, type MarketPrice,
   type EligibilityTerm, type EligibilityVerdict, type Feasibility, type Opportunity, type OpportunityDecision } from "@crossline/core";
 import { handOffArtifacts } from "./artifacts";
 import { readLocale } from "./locale";
@@ -478,7 +478,7 @@ export type StoredBackgroundFact = { key: string; value: string; why: string; so
  * if one somehow has rows, because skipping those would be losing data quietly.
  */
 /** Tables derived from others and rebuilt from them (migration 19's passages): not exported, skipped on restore, rebuilt after it. */
-const DERIVED_TABLES: readonly string[] = ["doc_chunks"];
+const DERIVED_TABLES: readonly string[] = ["doc_chunks", "market_prices"];
 
 const RETIRED_TABLES = ["outbox", "identities", "projects", "milestone_versions", "insight_proposals", "skill_versions"] as const;
 
@@ -1326,6 +1326,27 @@ export class CrosslineStore {
             confirmed_by TEXT NOT NULL DEFAULT '', found_at TEXT NOT NULL, updated_at TEXT NOT NULL,
             PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, key));
           CREATE INDEX IF NOT EXISTS opportunities_by_line ON opportunities(workspace_id, line_id, deadline);`);
+      } },
+      // Assets and liabilities (docs/ledger-wealth.md, 2026-11-10): the person's accounts, a dated balance per account and day (what they
+      // typed, or holdings valued by the worker), and brokerage or crypto positions. `market_prices` is a cache of public prices — FX rates
+      // per EUR, quotes, crypto — shared by every workspace and never in a backup (refetched), so it has no workspace column.
+      { version: 24, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS wealth_accounts (
+            workspace_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, account_class TEXT NOT NULL, currency TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '', archived_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id));
+          CREATE TABLE IF NOT EXISTS wealth_snapshots (
+            workspace_id TEXT NOT NULL, id TEXT NOT NULL, account_id TEXT NOT NULL, on_day TEXT NOT NULL, value REAL NOT NULL,
+            source TEXT NOT NULL, created_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, account_id, on_day));
+          CREATE TABLE IF NOT EXISTS wealth_holdings (
+            workspace_id TEXT NOT NULL, id TEXT NOT NULL, account_id TEXT NOT NULL, symbol TEXT NOT NULL, quantity REAL NOT NULL,
+            price REAL NOT NULL DEFAULT 0, price_currency TEXT NOT NULL DEFAULT '', price_on TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, account_id, symbol));
+          CREATE TABLE IF NOT EXISTS market_prices (
+            kind TEXT NOT NULL, symbol TEXT NOT NULL, day TEXT NOT NULL, price REAL NOT NULL, currency TEXT NOT NULL, source TEXT NOT NULL,
+            fetched_at TEXT NOT NULL, PRIMARY KEY(kind, symbol, day));`);
       } }
     ];
 
@@ -3276,6 +3297,69 @@ export class CrosslineStore {
     return this.#prepare("UPDATE domain_records SET deleted_at = ? WHERE workspace_id = ? AND id = ?").run(deleted ? at : null, workspaceId, id).changes > 0;
   }
 
+  // Assets and liabilities (docs/ledger-wealth.md): plain rows; an undo puts whole rows back.
+  listWealthAccounts(workspaceId: string): WealthAccount[] {
+    return (this.#prepare("SELECT * FROM wealth_accounts WHERE workspace_id = ? ORDER BY created_at, rowid").all(workspaceId) as Array<Record<string, unknown>>)
+      .map((row) => ({ id: String(row.id), name: String(row.name), accountClass: String(row.account_class) as WealthAccount["accountClass"], currency: String(row.currency),
+        note: String(row.note), archivedAt: String(row.archived_at), createdAt: String(row.created_at) }));
+  }
+
+  saveWealthAccount(workspaceId: string, account: WealthAccount): void {
+    this.#prepare(`INSERT INTO wealth_accounts (workspace_id, id, name, account_class, currency, note, archived_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, id) DO UPDATE SET name = excluded.name, account_class = excluded.account_class, currency = excluded.currency, note = excluded.note,
+      archived_at = excluded.archived_at`).run(workspaceId, account.id, account.name, account.accountClass, account.currency, account.note, account.archivedAt, account.createdAt);
+  }
+
+  listWealthSnapshots(workspaceId: string): WealthSnapshot[] {
+    return (this.#prepare("SELECT * FROM wealth_snapshots WHERE workspace_id = ? ORDER BY on_day, created_at").all(workspaceId) as Array<Record<string, unknown>>)
+      .map((row) => ({ id: String(row.id), accountId: String(row.account_id), on: String(row.on_day), value: Number(row.value),
+        source: String(row.source) as WealthSnapshot["source"], createdAt: String(row.created_at) }));
+  }
+
+  /** One balance per account and day: a second one on the same day replaces the first (and keeps its id). */
+  saveWealthSnapshot(workspaceId: string, snapshot: WealthSnapshot): void {
+    this.#prepare(`INSERT INTO wealth_snapshots (workspace_id, id, account_id, on_day, value, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, account_id, on_day) DO UPDATE SET value = excluded.value, source = excluded.source, created_at = excluded.created_at`)
+      .run(workspaceId, snapshot.id, snapshot.accountId, snapshot.on, snapshot.value, snapshot.source, snapshot.createdAt);
+  }
+
+  listWealthHoldings(workspaceId: string): WealthHolding[] {
+    return (this.#prepare("SELECT * FROM wealth_holdings WHERE workspace_id = ? ORDER BY account_id, symbol").all(workspaceId) as Array<Record<string, unknown>>)
+      .map((row) => ({ id: String(row.id), accountId: String(row.account_id), symbol: String(row.symbol), quantity: Number(row.quantity), price: Number(row.price),
+        priceCurrency: String(row.price_currency), priceOn: String(row.price_on), updatedAt: String(row.updated_at) }));
+  }
+
+  /** One position per account and symbol: saving it again replaces the quantity (and the person's price). */
+  saveWealthHolding(workspaceId: string, holding: WealthHolding): void {
+    this.#prepare(`INSERT INTO wealth_holdings (workspace_id, id, account_id, symbol, quantity, price, price_currency, price_on, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, account_id, symbol) DO UPDATE SET quantity = excluded.quantity, price = excluded.price, price_currency = excluded.price_currency,
+      price_on = excluded.price_on, updated_at = excluded.updated_at`).run(workspaceId, holding.id, holding.accountId, holding.symbol, holding.quantity, holding.price,
+      holding.priceCurrency, holding.priceOn, holding.updatedAt);
+  }
+
+  /** Removes one row; an account takes its balances and positions with it. */
+  deleteWealthRow(workspaceId: string, table: "wealth_accounts" | "wealth_snapshots" | "wealth_holdings", id: string): boolean {
+    const deleted = this.#prepare(`DELETE FROM ${table} WHERE workspace_id = ? AND id = ?`).run(workspaceId, id).changes > 0;
+    if (table === "wealth_accounts") for (const child of ["wealth_snapshots", "wealth_holdings"]) this.#prepare(`DELETE FROM ${child} WHERE workspace_id = ? AND account_id = ?`).run(workspaceId, id);
+    return deleted;
+  }
+
+  /** Cached public prices dated on or after `since`, of the kinds asked. */
+  listMarketPrices(filter: { kinds?: Array<MarketPrice["kind"]>; since?: string } = {}): MarketPrice[] {
+    return (this.#prepare("SELECT * FROM market_prices WHERE day >= ? ORDER BY day, kind, symbol").all(filter.since ?? "") as Array<Record<string, unknown>>)
+      .filter((row) => !filter.kinds || filter.kinds.includes(String(row.kind) as MarketPrice["kind"]))
+      .map((row) => ({ kind: String(row.kind) as MarketPrice["kind"], symbol: String(row.symbol), day: String(row.day), price: Number(row.price), currency: String(row.currency),
+        source: String(row.source), fetchedAt: String(row.fetched_at) }));
+  }
+
+  saveMarketPrices(rows: MarketPrice[]): number {
+    const statement = this.#prepare(`INSERT INTO market_prices (kind, symbol, day, price, currency, source, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(kind, symbol, day) DO UPDATE SET price = excluded.price, currency = excluded.currency, source = excluded.source, fetched_at = excluded.fetched_at`);
+    let saved = 0;
+    this.#db.transaction(() => { for (const row of rows) saved += statement.run(row.kind, row.symbol, row.day, row.price, row.currency, row.source, row.fetchedAt).changes; })();
+    return saved;
+  }
+
   appendEvent(event: LedgerEventInput): { inserted: boolean; eventId: string } {
     const existing = this.#prepare(
       "SELECT event_id FROM events WHERE workspace_id = ? AND idempotency_key = ?"
@@ -3963,7 +4047,7 @@ export class CrosslineStore {
       "workspace_projects", "source_documents", "onboarding_sessions", "onboarding_messages", "profile_facts",
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
       "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences", "question_ledger", "workspace_counters", "domain_records",
-      "run_lessons", "record_evidence", "opportunities",
+      "run_lessons", "record_evidence", "opportunities", "wealth_accounts", "wealth_snapshots", "wealth_holdings",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by

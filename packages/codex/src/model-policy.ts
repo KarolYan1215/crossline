@@ -81,6 +81,8 @@ export const SKILL_TIERS: Record<string, RouteTier> = {
   "crossline-opportunity-reader": "mid",
   // Finding the official visa page and copying its sentences: a lookup; code checks every quote and reads the days itself.
   "crossline-visa-finder": "low",
+  // Brokerage quotes for the ledger's holdings (docs/ledger-wealth.md §2): one connector call per symbol, the number checked by code.
+  "crossline-quote-reader": "low",
   "crossline-background-facts": "low",
   "crossline-plan-explainer": "low",
   // The assistant that works on the person's machine: coding and multi-step work, so the strongest tier, and never stepped down.

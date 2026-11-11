@@ -93,3 +93,80 @@
   .lg-row-more{grid-column:3}
   .lg-row-detail{padding-left:0}
 }
+
+/* Assets and liabilities (docs/ledger-wealth.md). Two hues only, validated with the dataviz checks for colour-blind separation on
+   the light (#fff) and dark (#0b0b0b) surfaces: assets aqua, liabilities orange. Every bar also prints its number, which is the
+   relief the light aqua's 2.8:1 contrast needs. Status colours (over budget, on pace to exceed) always come with words. */
+.lg{--lg-asset:#1baf7a;--lg-debt:#eb6834;--lg-warn:#b57700;--lg-over:#d03b3b}
+.lg-wealth{--lg-accent:var(--c-investment);--lg-asset:#1baf7a;--lg-debt:#eb6834;display:grid;gap:16px;margin-bottom:24px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .lg-wealth,:root:not([data-theme="light"]) .lg{--lg-asset:#199e70;--lg-debt:#d95926;--lg-warn:#e0a52e;--lg-over:#e66767}}
+:root[data-theme="dark"] .lg-wealth,:root[data-theme="dark"] .lg{--lg-asset:#199e70;--lg-debt:#d95926;--lg-warn:#e0a52e;--lg-over:#e66767}
+.lg-wealth-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline}
+.lg-wealth-head h2{margin:0;font-size:18px}
+.lg-wealth-head .lg-muted{flex-basis:100%;margin:0}
+.lg-error{margin:6px 0 0;font-size:13px;color:var(--lg-over)}
+
+.lg-nw-plot{position:relative}
+.lg-nw svg{display:block;width:100%;height:auto;touch-action:pan-y}
+.lg-nw-grid{stroke:var(--mist);stroke-width:1}
+.lg-nw-zero{stroke:var(--shade);stroke-width:1}
+.lg-nw-tick{font-size:11px;fill:var(--graphite)}
+.lg-nw-line{fill:none;stroke:var(--lg-accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.lg-nw-area{fill:var(--lg-accent);opacity:.1}
+.lg-nw-dot{fill:var(--lg-accent);stroke:var(--paper);stroke-width:2}
+.lg-nw-cross{stroke:var(--shade);stroke-width:1}
+.lg-nw-tip{position:absolute;top:0;transform:translateX(-50%);display:grid;gap:2px;padding:6px 8px;font-size:12px;color:var(--ink);background:var(--paper);
+  border:1px solid var(--mist);border-radius:6px;pointer-events:none;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+
+.lg-comp{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.lg-comp h4{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:6px}
+.lg-comp ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.lg-comp-row{display:grid;grid-template-columns:6em minmax(0,1fr) auto;gap:8px;align-items:center;font-size:14px;min-height:28px}
+.lg-comp-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg-comp-track{position:relative;height:12px}
+.lg-comp-fill{position:absolute;left:0;top:0;bottom:0;min-width:2px;border-radius:0 4px 4px 0}
+.lg-comp-fill[data-kind="asset"],.lg-swatch[data-kind="asset"]{background:var(--lg-asset)}
+.lg-comp-fill[data-kind="debt"],.lg-swatch[data-kind="debt"]{background:var(--lg-debt)}
+.lg-swatch{display:inline-block;width:10px;height:10px;border-radius:2px}
+.lg-comp-value small{color:var(--graphite);margin-left:4px}
+
+.lg-accounts{list-style:none;margin:0;padding:0;display:grid}
+.lg-account{border-bottom:1px solid var(--mist);padding:8px 0}
+.lg-account-main{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1.2fr) auto;gap:8px;align-items:center;font-size:14px}
+.lg-account-name{display:grid;min-width:0}
+.lg-account-name small,.lg-account-value small{font-size:12px;color:var(--graphite)}
+.lg-account-value{display:grid;text-align:right}
+.lg-account[data-liability] .lg-account-value{font-weight:600}
+.lg-account-age{font-size:13px;color:var(--graphite)}
+.lg-account-detail{display:grid;gap:8px;padding:8px 0 4px}
+.lg-inline{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;font-size:13px}
+.lg-inline label{display:grid;gap:2px;color:var(--graphite)}
+.lg-inline input,.lg-inline select{font:inherit;font-size:14px;color:var(--ink);background:var(--paper);border:1px solid var(--mist);border-radius:6px;padding:4px 6px;min-height:32px;min-width:0;max-width:100%}
+.lg-inline button,.lg-table button{font:inherit;font-size:13px;color:var(--ink);background:var(--paper);border:1px solid var(--mist);border-radius:6px;padding:4px 10px;cursor:pointer;min-height:32px}
+.lg-add{margin-top:12px;padding-top:12px;border-top:1px dashed var(--mist)}
+.lg-archived{margin-top:8px;font-size:13px}
+
+.lg-holdings th,.lg-holdings button{white-space:nowrap}
+.lg-budget{display:grid;gap:10px}
+.lg-budget-total{margin:0;font-size:14px}
+.lg-meters{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.lg-meters li{display:grid;grid-template-columns:6.5em minmax(0,1fr) auto 7em;gap:8px;align-items:center;font-size:14px}
+.lg-meter-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg-meter-track{position:relative;height:8px;border-radius:4px;background:color-mix(in srgb,var(--lg-accent) 18%,var(--paper))}
+.lg-meter-fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--lg-accent)}
+.lg-meter-fill[data-state="pace"]{background:var(--lg-warn)}
+.lg-meter-fill[data-state="over"]{background:var(--lg-over)}
+.lg-meter-pace{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--ink)}
+.lg-meter-note{font-size:13px;color:var(--graphite)}
+.lg-budget-edit summary{cursor:pointer;font-size:14px}
+.lg-budget-edit{display:grid;gap:8px}
+.lg-budget-edit > form,.lg-budget-edit > ul,.lg-budget-edit > p{margin-top:8px}
+
+@media (max-width:760px){
+  .lg-comp{grid-template-columns:minmax(0,1fr)}
+  .lg-account-main{grid-template-columns:minmax(0,1fr) auto}
+  .lg-account-age{grid-column:1}
+  .lg-meters li{grid-template-columns:5em minmax(0,1fr) auto}
+  .lg-meters li{row-gap:2px}
+  .lg-meter-note{grid-column:2 / -1}
+}

@@ -11,6 +11,7 @@ import type { TaskOpType } from "./assistant-schema";
 import { SHIFT_MINUTES } from "./schedule-frozen";
 import { tFor, type Locale } from "./i18n";
 import { recordProblem } from "./records";
+import { ACCOUNT_CLASSES, wealthProblem, type AccountClass } from "./wealth";
 import { DESIGN_NOTE_MAX, designProblem } from "./personal-design";
 import { SETTING_KEYS, SETTINGS_SECTION_IDS, settingCatalogLines, settingProblem, type SettingKey, type SettingsSection } from "./setting-catalog";
 
@@ -60,6 +61,13 @@ export const ACTIONS = {
   "record.add": { label: "记一笔", risk: "internal", args: { domain: enumOf(["wellness", "wealth"]),
     kind: enumOf(["income", "expense", "workout", "weight", "meal", "metric"]), value: { type: "number" }, unit: str(16), currency: str(8),
     category: str(40), note: str(200), at: day } },
+  /**
+   * An account balance or a position for the ledger's assets and liabilities (docs/ledger-wealth.md §6): 「招行储蓄现在 52000」「信用卡欠 3200」
+   * 「长桥里 AAPL.US 加到 20 股」. A balance when `symbol` is ""; a position (quantity) when it is set. The account is matched by name and
+   * created with `accountClass` and `currency` when new. Confirmed on the card, undoable; never a price, a target or advice.
+   */
+  "wealth.update": { label: "更新资产", risk: "internal", args: { account: str(60), accountClass: enumOf(["", ...ACCOUNT_CLASSES]), currency: str(3),
+    balance: { type: "number" }, symbol: str(20), quantity: { type: "number" }, at: day } },
   /** 「后面都推 10 分钟」: today's plan from now on starts later; what the person started or locked stays. */
   "schedule.shift": { label: "整体顺延", risk: "internal", args: { minutes: { type: "number" } } },
   "event.create": { label: "加入日程", risk: "internal", args: {
@@ -132,6 +140,7 @@ type ArgsOf = {
   "settings.open": { section: SettingsSection; topic: string };
   "record.add": { domain: "wellness" | "wealth"; kind: "income" | "expense" | "workout" | "weight" | "meal" | "metric"; value: number; unit: string;
     currency: string; category: string; note: string; at: string };
+  "wealth.update": { account: string; accountClass: "" | AccountClass; currency: string; balance: number; symbol: string; quantity: number; at: string };
   "event.create": { title: string; date: string; weekdays: number[]; startTime: string; endTime: string; until: string; minutes: number; lineId: string; location: string };
   "reminder.add": { text: string; date: string; time: string };
   "errand.prepare": { title: string; goal: string; location: string; date: string; startTime: string; prepare: string; checklist: string[]; lineId: string };
@@ -303,6 +312,13 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
     case "design.change": return designProblem(item.args, refs.designSkills ?? new Set());
     // The same checks the store applies; an empty day is today.
     case "record.add": return recordProblem({ ...item.args, at: item.args.at || new Date().toISOString().slice(0, 10) });
+    case "wealth.update": {
+      const args = item.args;
+      if (!args.account.trim()) return "缺少账户名（本人怎么叫它就怎么写）";
+      if (refs.today && args.at && args.at > refs.today) return `日期 ${args.at} 在今天之后`;
+      return wealthProblem(args.symbol.trim() ? { ...(args.accountClass ? { accountClass: args.accountClass } : {}), symbol: args.symbol.trim().toUpperCase(), quantity: args.quantity, at: args.at }
+        : { accountClass: args.accountClass, currency: args.currency.toUpperCase(), balance: args.balance, at: args.at });
+    }
     case "schedule.shift": return Number.isInteger(item.args.minutes) && item.args.minutes >= SHIFT_MINUTES.min && item.args.minutes <= SHIFT_MINUTES.max
       ? "" : `顺延分钟数须为 ${SHIFT_MINUTES.min}–${SHIFT_MINUTES.max} 的整数`;
     case "event.create": {

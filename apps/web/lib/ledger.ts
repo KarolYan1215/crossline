@@ -1,11 +1,12 @@
 import "server-only";
 import {
-  ledgerCategory, ledgerSummary, monthlyLimitFrom, recurringCharges, spendingAnomalies, INCOME_CATEGORIES, SPEND_CATEGORIES, type AccessContext, type LedgerSummary,
-  type RecurringCharge, type SpendingAnomaly, type StoredDomainRecord
+  budgetLines, convertRecords, ledgerCategory, ledgerSummary, monthlyLimitFrom, recurringCharges, spendingAnomalies, INCOME_CATEGORIES, SPEND_CATEGORIES, type AccessContext,
+  type Budget, type BudgetLine, type LedgerSummary, type RecurringCharge, type SpendingAnomaly, type StoredDomainRecord
 } from "@crossline/core";
 import { merchantRules, mergeRecords, resolvePossibleDuplicate, setRecordCategory, splitRecordEvidence, MERCHANT_RULES_SETTING } from "@crossline/db";
 import { appNow, getStore } from "./crossline";
 import { lineOfDomain, personToday } from "./records";
+import { baseCurrency, budgetOf, fxConverter } from "./wealth";
 
 /** One piece of evidence behind a ledger row, as the page shows it. */
 export type LedgerEvidence = { id: string; source: string; role: string; at: string; amount: number; merchant: string };
@@ -22,12 +23,25 @@ export type LedgerView = {
   rows: LedgerRow[]; pending: Array<{ row: LedgerRow; other: LedgerRow | null }>;
   rules: Array<{ merchantKey: string; category: string }>;
   spendCategories: string[]; incomeCategories: string[];
+  /** Totals are in `base`, each record converted at its own day's rate; `rateDay`: the latest rate used ("" when nothing needed one). */
+  fx: { base: string; rateDay: string };
+  /** The capped categories against the month (docs/ledger-wealth.md §4); `limitFrom` says whose monthly cap it is. */
+  budget: { lines: BudgetLine[]; limitFrom: "person" | "milestone" | null; own: Budget };
 };
 
 const MONEY = new Set(["income", "expense", "refund"]);
 
-/** The wealth line's monthly spending limit from its approved milestones (§5.3), shared with the reports. */
+/**
+ * The monthly spending limit: the person's own budget cap (docs/ledger-wealth.md §4) when set, else the wealth line's approved milestones
+ * (§5.3), shared with the reports.
+ */
 export function ledgerLimit(ctx: AccessContext): number | null {
+  const own = budgetOf(ctx).monthly;
+  if (own !== null) return own;
+  return milestoneLimit(ctx);
+}
+
+function milestoneLimit(ctx: AccessContext): number | null {
   const line = lineOfDomain(ctx, "wealth");
   if (!line) return null;
   return monthlyLimitFrom(getStore().listMilestones(ctx.workspaceId).filter((item) => item.identityId === line.id && item.status === "approved").flatMap((item) => item.successCriteria));
@@ -60,7 +74,13 @@ export function loadLedger(ctx: AccessContext, month?: string): LedgerView {
   const names = new Map<string, string>();
   for (const item of store.listRecordEvidence(ctx.workspaceId)) if (item.merchantKey && item.merchant && !names.has(item.merchantKey)) names.set(item.merchantKey, item.merchant);
   const named = (key: string) => names.get(key) ?? key;
-  const summary = ledgerSummary(all, { today: summaryDay, month: chosen, limit: ledgerLimit(ctx) });
+  // One currency for the totals (docs/ledger-wealth.md §3): each record at its own day's rate; one with no rate stays beside them.
+  const base = baseCurrency(ctx).code;
+  const converted = convertRecords(all, base, fxConverter());
+  const limit = ledgerLimit(ctx);
+  const summary = ledgerSummary(converted.records, { today: summaryDay, month: chosen, currency: base, limit });
+  const isCurrent = chosen === today.slice(0, 7);
+  const daysInMonth = new Date(Date.UTC(Number(chosen.slice(0, 4)), Number(chosen.slice(5, 7)), 0)).getUTCDate();
   return {
     today, month: chosen, months, hasRecords: all.length > 0,
     summary: { ...summary, merchants: summary.merchants.map((item) => ({ ...item, merchant: named(item.merchant) })) },
@@ -69,7 +89,10 @@ export function loadLedger(ctx: AccessContext, month?: string): LedgerView {
     rows: inMonth.map((record) => byId.get(record.id)!),
     pending: waiting.map((record) => ({ row: byId.get(record.id)!, other: byId.get(record.possibleDupOf) ?? null })),
     rules: Object.entries(merchantRules(store, ctx.workspaceId)).map(([merchantKey, category]) => ({ merchantKey, category })),
-    spendCategories: [...SPEND_CATEGORIES], incomeCategories: [...INCOME_CATEGORIES]
+    spendCategories: [...SPEND_CATEGORIES], incomeCategories: [...INCOME_CATEGORIES],
+    fx: { base, rateDay: converted.rateDay },
+    budget: { lines: budgetLines(budgetOf(ctx), summary.categories, summary.pace.day, daysInMonth, isCurrent),
+      limitFrom: limit === null ? null : budgetOf(ctx).monthly !== null ? "person" : "milestone", own: budgetOf(ctx) }
   };
 }
 
