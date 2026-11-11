@@ -5,8 +5,12 @@ import { useLocale, useT } from "../locale-context";
 import { postWatch, type WatchView } from "../milestones/line-watches";
 import { LessList, type LessView } from "../settings/opportunity-card";
 import { shortDay } from "../asks/model";
+import { AskTags } from "../asks/opportunity-parts";
+import type { AskTag } from "@crossline/core";
 
-export type OutOfViewFind = { id: string; title: string; organizer: string; url: string; lineId: string; deadline?: string };
+/** `because`: a scout find not yet urgent, or one no line holds at the push threshold (§18); `tags` its type and lines. */
+export type OutOfViewFind = { id: string; title: string; organizer: string; url: string; lineId: string; deadline?: string; tags?: AskTag[]; reason?: string;
+  because?: "scout" | "relevance" };
 
 /**
  * 视野外 in the weekly review (docs/opportunity-agent.md §17.3): what the weekly scout found outside the person's usual view that did
@@ -21,10 +25,13 @@ export function OutOfView({ finds, watches, less, lines }: { finds: OutOfViewFin
     done(Boolean(response?.ok));
   };
   return <>
-    {finds.length > 0 && <><h3>{t("侦察发现")}</h3>
+    {finds.length > 0 && <><h3>{t("侦察发现与相关度不够的")}</h3>
       <ul className="review-list">{finds.map((find) => <li key={find.id} data-line={find.lineId}>
         <b><a href={find.url} target="_blank" rel="noreferrer">{find.title}</a></b>
-        <small>{[lines[find.lineId] ?? find.lineId, find.organizer, find.deadline ? t("截止 {{day}}", { day: shortDay(find.deadline, locale) }) : ""].filter(Boolean).join(" · ")}</small>
+        <small>{[lines[find.lineId] ?? find.lineId, find.organizer, find.deadline ? t("截止 {{day}}", { day: shortDay(find.deadline, locale) }) : "",
+          find.because === "relevance" ? t("和各主线的相关度不够，没有推送") : ""].filter(Boolean).join(" · ")}</small>
+        {find.tags && find.tags.length > 0 && <AskTags tags={find.tags} />}
+        {find.reason && <small className="muted">{find.reason}</small>}
         <p className="lw-actions"><button type="button" onClick={() => void decide(find.id, "plan")}>{t("加入计划")}</button>
           <button type="button" onClick={() => void decide(find.id, "later")}>{t("以后再说")}</button>
           <button type="button" onClick={() => void decide(find.id, "less_kind")}>{t("少来这类")}</button>

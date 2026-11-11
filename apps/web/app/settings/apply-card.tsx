@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { BROWSER_USE_DOWNLOAD_MB, BROWSER_USE_VERSION, FORM_STATE_LABEL, SLOT_LABEL, STOP_LABEL, type ApplicationSlot, type FormRunState, type FormStop } from "@crossline/core";
 import { useT } from "../locale-context";
+import { ApplyKitSection } from "./apply-kit-card";
+import type { ApplyKit } from "@crossline/core";
 
 export type ApplyItem = { slot: ApplicationSlot; sensitive: boolean; present: boolean; value?: string; usedBy: Array<{ title: string; at: string }> };
 export type ApplyRun = {
@@ -16,7 +18,7 @@ export type ApplyRun = {
  * edited and deleted here; a sensitive item is shown only as held, never its value. Below it, every registration being filled or filled,
  * with why it stopped, what is about to be submitted and the screenshots.
  */
-export function ApplyCard({ items, runs, screen }: { items: ApplyItem[]; runs: ApplyRun[]; screen: boolean }) {
+export function ApplyCard({ items, runs, screen, kit }: { items: ApplyItem[]; runs: ApplyRun[]; screen: boolean; kit?: ApplyKit | undefined }) {
   const t = useT();
   const [editing, setEditing] = useState<ApplicationSlot | undefined>();
   const [draft, setDraft] = useState("");
@@ -51,6 +53,8 @@ export function ApplyCard({ items, runs, screen }: { items: ApplyItem[]; runs: A
             {item.present && <button type="button" className="text-button" onClick={() => void post(`/api/apply-profile/${item.slot}`, "DELETE")}>{t("删除")}</button>}
           </span>}
     </div>)}
+
+    {kit && <ApplyKitSection kit={kit} />}
 
     {screen && <BrowserUseTool />}
 

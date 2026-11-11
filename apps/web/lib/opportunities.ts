@@ -4,12 +4,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DAY_PART_LABEL, LESS_REASONS, LESS_REASON_LABEL, RUNTIME_OWNER_SETTING, SCOUT_STATS_SETTING, WEEKDAY_LABEL, eligibilityAnswer, exploreAccount,
-  nextDeadline, prepStartFor, readScoutStats, stepLeavesMachine, taskTitleOf, watchYield, type AccessContext, type Ask, type AskField, type AskOption, type FormRunState, type FormStop,
+  nextDeadline, prepStartFor, readScoutStats, stepLeavesMachine, taskTitleOf, watchYield, OPPORTUNITY_TYPE_LABEL, SLOT_LABEL, STOP_LABEL, bestRelevance, isSensitiveSlot,
+  kitDrafts, opportunityTypeOf, previewFields, type AccessContext, type Ask, type AskField, type AskFormTrack, type AskOption, type AskTag, type ApplicationSlot,
+  type FormRunState, type FormStop, type PreviewRow, type StoredFormRun,
   type LessEntry, type LessReason, type OpportunityOutcome, type StoredWatch, type WatchTarget
 } from "@crossline/core";
 import {
   addPersonWatch, assistantAvailable, decideWatch, nodeComputeOn, editWatch, isScoutFind, lessLog, lessOpportunity, opportunityCosts, outcomesOf, queueFormRun,
   readFormRuns, readWatchList, readWatchTuning, recordApplicationResult, recordEligibilityAnswer, recordOpportunityOutcome, setWatchState,
+  applicationProfile, closeFormPreview, openFormPreview, readFormPreviews, readKit, saveProfileFact,
   surfacedOpportunities, undoLessEntry, watchOf, type StoredOpportunity, type WatchEdit
 } from "@crossline/db";
 import { appNow, getStore, planToday, saveGoalSettings, saveMilestoneEdit } from "./crossline";
@@ -121,14 +124,33 @@ const CONFIRMED_SHOWN_MS = DAY;
 const lessReasonField = (t: ReturnType<typeof tFor>): AskField => ({ id: "reason", label: t("原因"), kind: "choice", required: false,
   choices: LESS_REASONS.map((reason) => ({ id: reason, label: t(LESS_REASON_LABEL[reason]) })) });
 
+/**
+ * The chips of an offer (§18): its type, then up to three lines it serves with code's relevance (0–100) and the classifier's reason on
+ * hover. A row read before tags existed shows its one line without a number.
+ */
+export function offerTags(row: Pick<StoredOpportunity, "kind" | "title" | "type" | "lines" | "lineId">, names: ReadonlyMap<string, string>, t: ReturnType<typeof tFor>): AskTag[] {
+  const tags: AskTag[] = [{ kind: "type", label: t(OPPORTUNITY_TYPE_LABEL[opportunityTypeOf(row)]) }];
+  const lines = row.lines?.length ? row.lines : [{ lineId: row.lineId, relevance: -1, reason: "", migrated: true as const }];
+  for (const tag of lines.slice(0, 3)) {
+    if (!tag.lineId) continue;
+    tags.push({ kind: "line", label: names.get(tag.lineId) ?? tag.lineId, line: tag.lineId, ...(tag.migrated || tag.relevance < 0 ? {} : { score: Math.round(tag.relevance * 100) }),
+      ...(tag.reason ? { title: tag.reason } : {}) });
+  }
+  return tags;
+}
+const lineNames = (ctx: AccessContext) => new Map(identityLines(ctx).map((line) => [line.id, line.label]));
+
 export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[] {
   const locale = localeFor(ctx);
   const t = tFor(locale);
   const sep = locale === "en" ? " " : "";
   const store = getStore();
   const today = planToday(ctx, now);
-  // Judged on read from the worker's caches (§17.6): what can no longer be reached is not shown at all.
-  const offers = surfacedOpportunities(store, ctx.workspaceId, today).filter((row) => row.inbox)
+  const names = lineNames(ctx);
+  // A row whose 报名 was pressed shows as its per-field preview until 开始代填 or 先不报 (§18.3).
+  const previewing = new Set(readFormPreviews(store, ctx.workspaceId).map((item) => item.opportunityId));
+  // Judged on read from the worker's caches (§17.6): what can no longer be reached is not shown at all. Most relevant first (§18).
+  const offers = surfacedOpportunities(store, ctx.workspaceId, today).filter((row) => row.inbox && !previewing.has(row.id))
     .flatMap((row) => { const verdict = judgeOpportunity(ctx, row, now, locale); return verdict.state === "infeasible" ? [] : [{ row, verdict }]; })
     .map(({ row, verdict }): Ask => {
     const deadline = nextDeadline(row, today);
@@ -139,6 +161,7 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
     const facts = row.verdict.state === "eligible" && row.terms.length ? t("资格：按记录全部符合。") : "";
     const questions = row.verdict.state === "unknown" ? row.verdict.questions : [];
     const parts = [
+      row.reason ? t("为什么值得看：{{reason}}。", { reason: row.reason.replace(/[。.！!？?；;，,\s]+$/u, "") }) : "",
       watch ? t("来自监视项「{{title}}」。", { title: watch.title }) : isScoutFind(row) ? t("每周侦察发现。") : "",
       deadline ? t("截止 {{day}}（原文：{{quote}}）。", { day: deadline, quote: short(quote ?? "", 80) }) : t("页面没写截止。"),
       start && start > today ? t("最晚 {{day}} 开始准备。", { day: start }) : "",
@@ -168,13 +191,83 @@ export function opportunityOfferAsks(ctx: AccessContext, now = new Date()): Ask[
       urgency: left !== undefined && left <= 2 ? "now" : left !== undefined && left <= 7 ? "soon" : "later",
       ...(deadline ? { dueDay: deadline } : {}), raisedAt: row.foundAt,
       fingerprint: `${row.updatedAt}|${row.verdict.state}|${verdict.state}|${verdict.state === "conflict" ? verdict.clashes.map((clash) => clash.blockId).join(",") : ""}`,
-      important: Boolean(watch?.basis.milestoneIds.length),
+      important: Boolean(watch?.basis.milestoneIds.length) || (row.lines ?? []).some((tag) => tag.anchors.some((anchor) => anchor !== "goal") && tag.relevance >= 0.75),
+      // Equal urgency is ordered by relevance to the lines' long-term goals (§18).
+      importance: Math.round(bestRelevance(row) * 100), tags: offerTags(row, names, t),
       preview: { kind: "file", href: row.url, label: row.organizer || new URL(row.url).hostname },
       title: row.organizer ? t("{{title}}（{{organizer}}）", { title: row.title, organizer: short(row.organizer, 30) }) : row.title,
       why: parts.join(sep), options
     };
   });
-  return [...offers, ...formProgressAsks(ctx, now), ...applicationResultAsks(ctx, now)];
+  return [...offers, ...formPreviewAsks(ctx), ...formProgressAsks(ctx, now), ...applicationResultAsks(ctx, now)];
+}
+
+const SOURCE_LABEL: Record<PreviewRow["source"], string> = { profile: "资料", kit_answer: "资料包短答", kit_document: "资料包文件", consent: "报名即同意" };
+/** A missing profile item the person can fill in on the preview card itself; a sensitive one only in settings (it goes to the secret store). */
+const slotField = (slot: ApplicationSlot) => `slot_${slot}`;
+
+/**
+ * The per-field preview before a sign-up (§18.3, Muse-style: the agent comes back before the sensitive step). After 报名, what the form
+ * filler expects to use — each profile item, document and short answer from the 申请资料包, the consents the 报名 covers — with what is
+ * missing. Missing ordinary items can be typed in here; 开始代填 saves them to the profile and queues the run.
+ */
+export function formPreviewAsks(ctx: AccessContext): Ask[] {
+  const t = tFor(localeFor(ctx));
+  const store = getStore();
+  const previews = readFormPreviews(store, ctx.workspaceId);
+  if (!previews.length) return [];
+  const profile = applicationProfile(store, ctx.workspaceId);
+  const kit = readKit(store, ctx.workspaceId);
+  const names = lineNames(ctx);
+  return previews.flatMap(({ opportunityId, at }): Ask[] => {
+    const row = store.listOpportunities(ctx.workspaceId, { id: opportunityId })[0];
+    if (!row || (row.decision && row.decision !== "later")) return [];
+    const rows = previewFields(row, profile, kit);
+    const missing = rows.filter((item) => item.state === "missing");
+    const fields: AskField[] = missing.flatMap((item) => item.slot && !isSensitiveSlot(item.slot)
+      ? [{ id: slotField(item.slot), label: t(SLOT_LABEL[item.slot]), kind: "text" as const, required: false }] : []);
+    const free = row.kind === "event" && row.cost?.amount === 0;
+    return [{
+      id: `opppre:${row.id}`, kind: "opportunity_offer", entityId: row.id, line: row.lineId, urgency: "soon", raisedAt: at, important: true,
+      fingerprint: `${kit.version}|${rows.map((item) => `${item.key}:${item.state}`).join(",")}`, tags: offerTags(row, names, t),
+      title: t("报名「{{title}}」前核对：代填会用这些", { title: short(row.title, 60) }),
+      why: [t("{{ready}} 项已备好，{{missing}} 项缺。", { ready: rows.length - missing.length, missing: missing.length }),
+        t("表单要打开网站后才看得到；遇到缺的项、登录、验证码或付款会停下等本人。"),
+        free ? t("免费活动：每项都来自资料且读回一致、没有文书和上传时自动提交，否则停在提交前。") : t("停在提交前，由本人核对后提交。")].join(""),
+      formPreview: { kitVersion: kit.version, rows: rows.map((item) => ({ key: item.key, label: item.slot ? t(SLOT_LABEL[item.slot]) : item.label,
+        ...(item.value ? { value: item.value } : {}), state: item.state, source: t(SOURCE_LABEL[item.source]) })) },
+      options: [
+        { id: "start", label: t("开始代填"), recommended: true, detail: fields.length ? t("填在下面的会先存进资料") : t("在独立窗口里填，进度和截图出现在这张卡上"),
+          ...(fields.length ? { fields } : {}) },
+        { id: "kit", label: t("改资料包"), href: "/settings#apply" },
+        { id: "cancel_preview", label: t("先不报"), detail: t("回到机会卡") }
+      ]
+    }];
+  });
+}
+
+/** A run's steps as the card draws them (§18.3): queued → filling → the person's check → submitted → receipt → calendar. */
+export function formTrack(run: StoredFormRun, t: ReturnType<typeof tFor>): AskFormTrack {
+  const order = ["queued", "filling", "person", "submitted", "receipt", "calendar"] as const;
+  const at: Record<FormRunState, (typeof order)[number]> = { queued: "queued", filling: "filling", waiting_person: "person", ready_to_submit: "person", stopped: "filling",
+    submitted: "receipt", confirmed: "calendar" };
+  const current = order.indexOf(at[run.state]);
+  const calendarDone = run.state === "confirmed" && Boolean(run.calendarEventId);
+  const label: Record<(typeof order)[number], string> = { queued: t("排队"), filling: run.state === "filling" ? t("填写第 {{page}} 页", { page: run.pageNo || 1 }) : t("填写"),
+    person: run.submittedBy === "system" ? t("自动提交") : t("本人核对"), submitted: t("提交"), receipt: t("回执"), calendar: t("进日历") };
+  const steps = order.map((id, index) => ({ id, label: label[id],
+    state: (index < current || (id === "calendar" && calendarDone)) ? "done" as const
+      : index === current ? (run.state === "waiting_person" || run.state === "stopped" ? "stuck" as const : "now" as const) : "todo" as const }));
+  const detail = [
+    run.state === "waiting_person" && run.stoppedFor ? (run.stoppedFor === "missing_slot" && run.missingSlot ? t("缺「{{slot}}」", { slot: t(SLOT_LABEL[run.missingSlot]) }) : t(STOP_LABEL[run.stoppedFor])) : "",
+    ...(run.state === "ready_to_submit" ? (run.heldBecause ?? []).slice(0, 3).map((reason) => t("没有自动提交：{{reason}}", { reason: t(reason) })) : []),
+    run.confirmation?.quote ? t("回执：{{quote}}", { quote: short(run.confirmation.quote, 120) }) : "",
+    run.state === "confirmed" ? (run.calendarEventId ? t("已放进日历：{{day}}", { day: run.opportunity.startsAt?.day ?? "" }) : t("页面没写时间，没有放进日历")) : "",
+    run.state === "submitted" ? t("等报名网站的确认邮件，48 小时没来会问本人") : "",
+    run.kitVersion !== undefined ? t("用了资料包 v{{version}}", { version: run.kitVersion }) : ""
+  ].filter(Boolean);
+  return { steps, shots: run.screenshots.length, live: run.state === "queued" || run.state === "filling", detail,
+    ...(run.screenshots.length ? { shot: { href: `/api/forms/${encodeURIComponent(run.id)}/shot?n=-1&v=${run.screenshots.length}`, label: t("最新截图（第 {{n}} 张）", { n: run.screenshots.length }) } } : {}) };
 }
 
 /**
@@ -198,6 +291,7 @@ export function formProgressAsks(ctx: AccessContext, now = new Date()): Ask[] {
       title: t("报名「{{title}}」：{{progress}}", { title: short(row.title, 60), progress }),
       why: run.state === "confirmed" ? t("已收到确认：{{quote}}", { quote: short(run.confirmation?.quote ?? "", 120) })
         : waiting ? t("代填停在第 {{page}} 页，要本人看一下。", { page: run.pageNo }) : t("代填在第 {{page}} 页。", { page: run.pageNo }),
+      formTrack: formTrack(run, t), tags: offerTags(row, lineNames(ctx), t),
       options: [{ id: "open", label: t("看代填进度"), href: "/settings#apply" }]
     }];
   });
@@ -280,11 +374,30 @@ export async function answerOpportunityOffer(ctx: AccessContext, ask: Ask, optio
       return { ok: true };
     }
     case "register": {
+      // 报名 first shows what the form filler will use, field by field (§18.3); nothing is queued until 开始代填.
+      openFormPreview(store, ctx.workspaceId, row.id, at);
+      store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `opportunity.form.previewed:${row.id}:${at}`, type: "opportunity.form.previewed",
+        entityId: row.id, payload: { title: row.title } });
+      return { ok: true };
+    }
+    case "cancel_preview":
+      return closeFormPreview(store, ctx.workspaceId, row.id) ? { ok: true } : { ok: false, code: "OPPORTUNITY_PREVIEW_NOT_FOUND" };
+    case "start": {
+      if (!readFormPreviews(store, ctx.workspaceId).some((item) => item.opportunityId === row.id)) return { ok: false, code: "OPPORTUNITY_PREVIEW_NOT_FOUND" };
+      // Items typed on the preview card are the person's confirmed profile, reused by every later form.
+      for (const [key, value] of Object.entries(values)) {
+        const slot = key.startsWith("slot_") ? key.slice(5) as ApplicationSlot : undefined;
+        if (slot && slot in SLOT_LABEL && !isSensitiveSlot(slot) && value.trim()) saveProfileFact(store, ctx.workspaceId, slot, value, `opportunity:${row.id}`);
+      }
       if (!store.decideOpportunity(ctx.workspaceId, row.id, "register", at)) return { ok: false, code: "OPPORTUNITY_NOT_FOUND" };
       // The form-filling track's queue: one run for this opportunity's registration host, started by the worker's form pass.
       const { terms: _terms, verdict: _verdict, decision: _decision, decidedAt: _decidedAt, laterUntil: _laterUntil, confirmedBy: _confirmedBy, updatedAt: _updatedAt,
         feasibility: _feasibility, ...opportunity } = row;
-      queueFormRun(store, ctx.workspaceId, { opportunity, choice: "register", at });
+      // The kit's short answers go along as approved drafts; a run that uses one never submits by itself (autoSubmitProblems).
+      const kit = readKit(store, ctx.workspaceId);
+      const drafts = kitDrafts(kit);
+      queueFormRun(store, ctx.workspaceId, { opportunity, choice: "register", at, ...(Object.keys(drafts).length ? { drafts, kitVersion: kit.version } : {}) });
+      closeFormPreview(store, ctx.workspaceId, row.id);
       outcome("planned");
       await holdEventTime(ctx, row, now);
       record("register");
@@ -411,7 +524,12 @@ export function answerOpportunityApplyReady(ctx: AccessContext, ask: Ask, option
   }
   if (optionId !== "fill") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
   const { terms: _terms, verdict: _verdict, decision: _decision, decidedAt: _decidedAt, laterUntil: _laterUntil, confirmedBy: _confirmedBy, updatedAt: _updatedAt, ...opportunity } = ready.row;
-  queueFormRun(store, ctx.workspaceId, { opportunity, choice: "apply", at: now.toISOString(), ...(Object.keys(ready.drafts).length ? { drafts: ready.drafts } : {}) });
+  // The accepted preparation's texts first, then the 申请资料包's short answers (§18.3) while there is room.
+  const kit = readKit(store, ctx.workspaceId);
+  const fromKit = Object.entries(kitDrafts(kit)).slice(0, Math.max(0, DRAFTS_MAX - Object.keys(ready.drafts).length));
+  const drafts = { ...ready.drafts, ...Object.fromEntries(fromKit) };
+  queueFormRun(store, ctx.workspaceId, { opportunity, choice: "apply", at: now.toISOString(), ...(Object.keys(drafts).length ? { drafts } : {}),
+    ...(fromKit.length ? { kitVersion: kit.version } : {}) });
   return { ok: true };
 }
 
@@ -492,7 +610,9 @@ export function loadOpportunitySettings(ctx: AccessContext, now = new Date()): O
   };
 }
 
-export type OutOfView = { finds: Array<{ id: string; title: string; organizer: string; url: string; lineId: string; deadline?: string }>;
+export type OutOfView = { finds: Array<{ id: string; title: string; organizer: string; url: string; lineId: string; deadline?: string; tags?: AskTag[]; reason?: string;
+  /** Why it is here and not in the inbox: a scout find not yet urgent, or one no line holds at the push threshold (§18). */
+  because?: "scout" | "relevance" }>;
   watches: WatchRow[]; less: LessRow[] };
 
 /**
@@ -505,10 +625,12 @@ export function loadOutOfView(ctx: AccessContext, now = new Date()): OutOfView {
   const t = tFor(localeFor(ctx));
   const today = planToday(ctx, now);
   const since = new Date(now.getTime() - 7 * DAY).toISOString();
+  const names = lineNames(ctx);
   return {
-    finds: surfacedOpportunities(store, ctx.workspaceId, today).filter((row) => isScoutFind(row) && !row.inbox).map((row) => {
+    finds: surfacedOpportunities(store, ctx.workspaceId, today).filter((row) => !row.inbox).map((row) => {
       const deadline = nextDeadline(row, today);
-      return { id: row.id, title: row.title, organizer: row.organizer, url: row.url, lineId: row.lineId, ...(deadline ? { deadline } : {}) };
+      return { id: row.id, title: row.title, organizer: row.organizer, url: row.url, lineId: row.lineId, ...(deadline ? { deadline } : {}),
+        tags: offerTags(row, names, t), ...(row.reason ? { reason: row.reason } : {}), because: isScoutFind(row) && bestRelevance(row) >= 0.6 ? "scout" as const : "relevance" as const };
     }),
     watches: readWatchList(store, ctx.workspaceId).filter((watch) => watch.state === "proposed" && (watch.explore || watch.origin === "scout")).map((watch) => watchRow(watch, t)),
     less: lessLog(store, ctx.workspaceId).filter((entry) => entry.at >= since).reverse().map((entry) => lessRow(entry, t))

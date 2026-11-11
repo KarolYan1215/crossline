@@ -4,6 +4,7 @@ import { tFor, type Locale } from "./i18n";
 import { ELIGIBILITY_DIMS, type ApplicationSlot, type DatedQuote, type EligibilityDim, type EligibilityRule, type EligibilityVerdict, type NeedSource, type Opportunity,
   type OpportunityNeed } from "./opportunity";
 import type { EventPlace } from "./opportunity-watch";
+import { CLASSIFICATION_PROPERTIES, CLASSIFICATION_REQUIRED, type RawClassification } from "./opportunity-tags";
 
 /**
  * The discovery half of the opportunity agent (docs/opportunity-agent.md §5–8, track A): what a line needs from outside, where to look,
@@ -108,8 +109,10 @@ export function mergeNeeds(kept: StoredNeed[], lineId: string, fresh: StoredNeed
 export const OPPORTUNITY_READING_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items", "blocked"], properties: {
     items: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false,
-      required: ["pageId", "url", "title", "organizer", "kind", "deadlines", "startsAt", "cost", "location", "place", "eligibility", "needsAccount", "materials", "consents", "registrationUrl"],
+      required: ["pageId", "url", "title", "organizer", "kind", "deadlines", "startsAt", "cost", "location", "place", "eligibility", "needsAccount", "materials", "consents", "registrationUrl",
+        ...CLASSIFICATION_REQUIRED],
       properties: {
+        ...CLASSIFICATION_PROPERTIES,
         pageId: { type: "string", maxLength: 40 },
         url: { type: "string", maxLength: 500 },
         title: { type: "string", minLength: 2, maxLength: 140 },
@@ -140,6 +143,8 @@ export type ReadItem = {
   /** Optional in the type for answers and fixtures written before it; the schema requires it. */
   place?: ReadPlace | undefined;
   eligibility: EligibilityTerm[]; needsAccount: boolean; materials: string[]; consents: string[]; registrationUrl: string;
+  /** The classifier's type, reason and lines (§18, reader input v3); optional for answers and fixtures written before. */
+  type?: string | undefined; reason?: string | undefined; lines?: RawClassification["lines"] | undefined;
 };
 export type ReadingAnswer = { items: ReadItem[]; blocked: string };
 

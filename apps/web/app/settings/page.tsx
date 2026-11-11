@@ -257,7 +257,7 @@ export default async function SettingsPage() {
         </section>
 
         {apply && <section id="apply" className="st-section" aria-labelledby="st-apply"><h2 id="st-apply" className="ds-serif">{t("报名资料卡")}</h2>
-          <div className="st-modules"><ApplyCard items={apply.items} runs={apply.runs} screen={apply.screen} /></div>
+          <div className="st-modules"><ApplyCard items={apply.items} runs={apply.runs} screen={apply.screen} kit={apply.kit} /></div>
         </section>}
 
         {opportunity && <section id="opportunity" className="st-section" aria-labelledby="st-opportunity"><h2 id="st-opportunity" className="ds-serif">{t("机会代理")}</h2>

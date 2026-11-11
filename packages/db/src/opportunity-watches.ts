@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   IGNORED_AFTER_DAYS, LESS_LOG_SETTING, OUTCOME_WEIGHT, SCOUT_NEED_PREFIX, SCOUT_STATS_SETTING, SCOUT_URGENT_DAYS, SCOUT_NEEDS_SETTING,
-  WATCHES_SETTING, WATCH_TUNING_SETTING, addDays, applyLess, emptyStats, exploreAccount, holdBack, mergeWatches, nextDeadline, prepStartFor, readLessLog,
+  WATCHES_SETTING, WATCH_TUNING_SETTING, addDays, bestRelevance, pushable, applyLess, emptyStats, exploreAccount, holdBack, mergeWatches, nextDeadline, prepStartFor, readLessLog,
   readNeeds, readScoutStats, readTuning, readWatches, retireCandidates, taskTitleOf, tFor, undoLess, watchFromNeed, weightedTokens, withOutcome,
   type LessEntry, type LessFeedback, type OpportunityOutcome, type StoredFormRun, type StoredWatch, type WatchTarget, type WatchTuning
 } from "@crossline/core";
@@ -310,8 +310,8 @@ export function undoLessEntry(store: CrosslineStore, workspaceId: string, ownerI
 
 /**
  * Found opportunities that may reach the person today: undecided (or put off to a day now come), not ruled out, not past their deadline,
- * not infeasible, and not held back by an adjustment (`holdBack`). `inbox: false` for a scout find that is not urgent: it waits for the
- * weekly review's 视野外 instead of the morning brief and 待决 (§17.3).
+ * not infeasible, and not held back by an adjustment (`holdBack`). `inbox: false` for a scout find that is not urgent and for one no line
+ * holds at `PUSH_RELEVANCE` (§18): it waits for the weekly review's 视野外 instead of the morning brief and 待决 (§17.3). Most relevant first.
  */
 export function surfacedOpportunities(store: CrosslineStore, workspaceId: string, today: string): Array<StoredOpportunity & { watch?: StoredWatch | undefined; inbox: boolean }> {
   const watches = new Map(readWatchList(store, workspaceId).map((watch) => [watch.id, watch]));
@@ -323,9 +323,10 @@ export function surfacedOpportunities(store: CrosslineStore, workspaceId: string
     if (holdBack({ opportunity: row, verdict: row.verdict, feasibility: row.feasibility, watch, tuning })) return [];
     const scout = isScoutFind(row);
     const start = prepStartFor(nextDeadline(row, today), 14) ?? nextDeadline(row, today);
-    const inbox = !scout || Boolean(start && start <= addDays(today, SCOUT_URGENT_DAYS));
+    // Pushed only when one line holds it at the push threshold (§18 item 1); a weaker find waits for the weekly review's 视野外.
+    const inbox = pushable(row) && (!scout || Boolean(start && start <= addDays(today, SCOUT_URGENT_DAYS)));
     return [{ ...row, ...(watch ? { watch } : {}), inbox }];
-  });
+  }).sort((a, b) => bestRelevance(b) - bestRelevance(a));
 }
 
 /** Weighted tokens per usage purpose since `sinceIso` (what the watches' costs and the 20% share are counted in). */

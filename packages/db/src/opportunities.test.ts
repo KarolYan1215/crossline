@@ -51,3 +51,37 @@ test("the week counts the ineligible apart", () => {
   store.saveOpportunity(ws, { opportunity: opportunity({ id: "opp-2", key: "k2" }), terms: [graduate], verdict: { state: "ineligible", failed: [] } });
   expect(opportunityWeek(store, ws, "2026-10-25")).toMatchObject({ found: 2, eligible: 1, ineligible: 1 });
 });
+
+test("migration 25: a row read with one line gets it as a migrated tag and a type; line filters see every line it serves", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const Database = (await import("better-sqlite3")).default;
+  const dir = mkdtempSync(path.join(tmpdir(), "crossline-m24-"));
+  const file = path.join(dir, "ledger.db");
+  try {
+    let disk = new CrosslineStore(file);
+    const space = disk.createPrincipalWithWorkspace("owner", "o").workspace.id;
+    disk.saveOpportunity(space, { opportunity: opportunity({ title: "Google Research Internship 2027" }), terms: [], verdict: { state: "eligible", basis: [] } });
+    disk.close();
+    // Back to the schema before tags: the row as track ① wrote it, without `lines` in its JSON.
+    const raw = new Database(file);
+    const row = raw.prepare("SELECT data_json FROM opportunities").get() as { data_json: string };
+    expect(JSON.parse(row.data_json).lines).toBeUndefined();
+    raw.pragma("user_version = 23");
+    raw.close();
+    disk = new CrosslineStore(file);
+    const [migrated] = disk.listOpportunities(space);
+    expect(migrated).toMatchObject({ lineId: "research", type: "internship", lines: [{ lineId: "research", relevance: 0.6, migrated: true }] });
+    // Read again with tags: the judged tag replaces the migrated one, a second line joins, and the line filter sees it.
+    disk.saveOpportunity(space, { opportunity: opportunity({ title: "Google Research Internship 2027", lines: [
+      { lineId: "startup", confidence: 0.8, relevance: 0.82, reason: "做原型", anchors: ["goal"] },
+      { lineId: "research", confidence: 0.7, relevance: 0.7, reason: "研究型", anchors: ["goal"] }] }), terms: [], verdict: { state: "eligible", basis: [] } });
+    const [merged] = disk.listOpportunities(space);
+    expect(merged!.lineId).toBe("startup");
+    expect(merged!.lines!.map((tag) => [tag.lineId, tag.relevance, Boolean(tag.migrated)])).toEqual([["startup", 0.82, false], ["research", 0.7, false]]);
+    expect(disk.listOpportunities(space, { lineId: "research" })).toHaveLength(1);
+    expect(disk.listOpportunities(space, { lineId: "media" })).toHaveLength(0);
+    disk.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
