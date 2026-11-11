@@ -77,6 +77,8 @@ const JUDGED_EVENT = /(考试|测验|小测|期中|期末|面试|答辩|投稿|�
 const TOWARDS = /(复习|准备|整理|汇集|汇总|确认|询问|练习|模拟|提纲|材料|范围|题型|规则|台账|成绩记录|当前成绩|报名|\b(?:review|revise|revision|prepar\w*|prep|organi[sz]e|gather|collect|compile|confirm|ask|practi[cs]e|mock|outline|materials?|scope|format|rules|register|registration|sign up)\b)/i;
 /** Done when said: handing in, finishing homework, sending, attending, filing, looking up. */
 const SELF_EVIDENT = /(提交|交付|上交|作业|发送|发出|寄出|发邮件|参加|出席|上课|听讲|报名|缴费|付款|预约|预订|注册|安装|下载|打印|归档|整理|汇集|汇总|导出|取得|获取|确认|询问|联系|登记|填写|盘点|配置|部署|复习|练习|解题|做题|推导|\b(?:submit|hand in|turn in|deliver|homework|hw\s?\d+|problem set|send|mail|email|attend|go to class|lecture|register|sign up|pay|book|reserve|install|download|print|file|archive|organi[sz]e|gather|compile|export|obtain|confirm|ask|contact|fill in|fill out|configure|deploy|review|practi[cs]e|solve|derive)\b)/i;
+/** A task that IS the formal last act — it starts with handing in, sending or publishing (「把方案发送给导师」 too), not 「完成并提交」. */
+const FORMAL_STEP = /^\s*(?:把[^，。,.]{0,40}?)?(?:提交|上交|递交|交上|发送|发出|发布|寄出|投递)|^\s*(?:submit|hand in|turn in|send|publish|post|mail)\b/i;
 const EXPLORATION = /(探索|调研|研究|尝试|摸索|熟悉|了解|学习|阅读|读完|explore|research|investigate|\b(?:try|try out|figure out|get familiar|familiari[sz]e|learn|study|read)\b)/i;
 const QUALITY = /(撰写|起草|写作|写出|设计|制作|剪辑|拍摄|录制|方案|提纲|论文|报告|稿|笔记|视频|文章|内容包|deck|pitch|\b(?:write|draft|design|make|create|edit|film|shoot|record|proposal|outline|paper|report|essay|notes|video|article|post)\b)/i;
 
@@ -98,6 +100,11 @@ export function completionRule(order: OrderLike, locale?: Locale): CompletionRul
     return { mode: "needs_assessment", reason, why: t("本人选定：完成后再问结果"), question: model?.question || askFor(reason, title, locale),
       askAfterHours: model?.mode === "needs_assessment" ? model.askAfterHours : DEFAULT_HOURS[reason], by: "person" };
   }
+  // A formal last step the person does — handing in, sending, publishing what is already made — is done when they say so, whatever
+  // the model judged (the owner's rule of 2026-11-11: 「提交 xxx 作业」 is a formality, 「完成 xxx 作业」 is the work). Something sent
+  // off to be judged keeps its later question: the score is news, not an approval.
+  if (FORMAL_STEP.test(title) && !JUDGED_EVENT.test(title) && !(model?.mode === "needs_assessment" && model.reason === "result_pending"))
+    return { mode: "self_evident", why: t("交上、发出这一步本身就是完成：点完成即验收"), by: "rule" };
   if (model?.mode === "self_evident") return { mode: "self_evident", why: model.why, by: "model" };
   if (model) {
     const reason = model.reason as AssessmentReason;

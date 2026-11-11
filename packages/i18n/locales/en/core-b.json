@@ -84,6 +84,7 @@
   "完成后再问结果": "Ask about the result later",
   "结果由别人之后评定（成绩、录用、评审意见）": "Someone else judges the result later (a score, an offer, reviews)",
   "交付本身就是完成：点完成即验收": "Handing it in is the work: pressing Done accepts it",
+  "交上、发出这一步本身就是完成：点完成即验收": "Handing it in or sending it is the whole step: pressing Done accepts it",
   "探索类工作没有明确产物，完成程度要问本人": "Exploratory work has no definite product, so you are asked how far it got",
   "产出的质量难以直接判断": "The quality of the output is hard to judge directly",
   "点完成即验收": "Done means accepted",

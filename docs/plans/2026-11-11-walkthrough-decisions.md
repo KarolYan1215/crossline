@@ -12,6 +12,8 @@
 | 4 | 双击开始该步计时；排的步骤到点要弹出能直接回复的提醒；同时显示完成的步骤数 | 双击日程块：锁定、按该块的步骤计时、打开工作台（`startFromBlock`）。计时按 `task.step_focused` 事件取步骤（`focusStep`、`activeTimers`）。到点提醒对每个工作块都发（不再只限一周内截止），开始后 10 分钟内仍发，「开始计时」带上步骤；推送带 `step`，手机上一按即按该步计时，Windows 上常驻到回答（`requireInteraction`）。今日「本周完成」后加「N 步」（`stepsDoneSince`） | `timer.test.ts`、`nudges.test.ts`「every work block is said when it comes up…」、`notify.test.ts`、`acceptance-progress.test.ts` |
 | 5 | 「待办」按实际算 | 「待办」= 今天日历上还没到的工作块分钟数 | `availability.test.ts`「Today's 「待办」 is the work the calendar holds…」 |
 
+第 2 条本人的补充（同日）：本人把关的最后一步若只是形式（「提交 xxx 作业」，不是「完成 xxx 作业」），本人报告完成就算完成，系统不再事后要结果。`completionRule`（`packages/core/src/completion.ts`）：标题以提交、上交、发送、发布、寄出等开头的任务一律「点完成即验收」，即使写任务的模型判了「质量要问」；送去让别人评判的（投稿、考试，成绩之后才出）仍会之后问一句结果，那是消息，不是审批；本人自己选了「完成后再问」的照旧。测试 `completion.test.ts`「a formal last step the person does…」。
+
 第 2 条的读法：本人这句话也可以读成「除了 agent 最后提交，其余一律不用批准」，那样连「本人的选择或决定」「要登录」两条也去掉。这次按窄的读法做，因为那两条不是「提交」的问题：一件「选定首轮选题」直接生效，就等于替本人做了选择。要按宽的读法，再说一声。
 
 ## 1. 拟计时：本人忘了开计时，系统在后台推断、本人确认
