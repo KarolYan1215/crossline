@@ -20,9 +20,9 @@ import type { MessageView } from "../../lib/conversation";
 const URGENCY: Record<Ask["urgency"], string> = { now: "今天要答", soon: "这周", later: "不急" };
 
 
-async function post(path: string, body: Record<string, unknown>): Promise<{ ok?: boolean; code?: string } | null> {
+async function post(path: string, body: Record<string, unknown>): Promise<{ ok?: boolean; code?: string; op?: { id: string } } | null> {
   const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
-  return await response?.json().catch(() => null) as { ok?: boolean; code?: string } | null;
+  return await response?.json().catch(() => null) as { ok?: boolean; code?: string; op?: { id: string } } | null;
 }
 
 /** An option needs its follow-up fields filled before it can be sent: a required one, or optional ones with nowhere else to say it. */
@@ -61,7 +61,7 @@ const needsFields = (ask: Ask, option: AskOption) => Boolean(option.fields?.leng
  * opens them under the options); a multiple-choice ask is ticked and confirmed once; the person's own words go in the input that is
  * always there when the ask takes them, its placeholder the recommended answer.
  */
-export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask: Ask; preview?: AskPreviewData | undefined; onDone: (id: string) => void; level?: 3 | 4;
+export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask: Ask; preview?: AskPreviewData | undefined; onDone: (id: string, opId?: string) => void; level?: 3 | 4;
   /** The card in front on 待确认 (2026-10-29): number keys pick an option, Enter sends it, H asks again tomorrow — only while nothing takes typing. */
   keys?: boolean }) {
   const many = ask.select === "many";
@@ -86,7 +86,7 @@ export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask
     setBusy(true); setStatus(t("保存中…"));
     const result = await post(path, body);
     setBusy(false);
-    if (result?.ok) { onDone(ask.id); return; }
+    if (result?.ok) { onDone(ask.id, result.op?.id); return; }
     setStatus(answerProblem(result?.code, locale));
   };
   const [reply, setReply] = useState<MessageView>();

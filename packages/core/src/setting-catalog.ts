@@ -103,6 +103,17 @@ export const SETTING_CATALOG = {
   "consent.serverRecordings": { label: "录音在服务器转写", target: "", value: { type: "enum", values: KEEP_OFF }, consequence: "关闭后不再接收上传，还没转写的录音会删除", consent: true,
     section: "recordings", explain: ["手机快捷指令把录音上传到服务器，本人时区夜间 1–6 点用 SenseVoice 转写成文字放进材料；录音转完即删，不进备份",
       "录到别人说话前，需让对方知情，并遵守当地关于录音的法律。"] },
+  // Closed on 2026-11-10 (小帮手 audit: what the settings page changes that the box could not).
+  "voice.enabled": { label: "语音输入", target: "", value: { type: "enum", values: ON_OFF }, consequence: "各输入框是否显示麦克风；关闭后不再录音", section: "general" },
+  "voice.language": { label: "语音识别语言", target: "", value: { type: "enum", values: { auto: "自动", zh: "普通话", en: "English", yue: "粤语" } },
+    consequence: "之后的语音输入按这种语言识别", section: "general" },
+  "voice.correct": { label: "语音纠错", target: "", value: { type: "enum", values: ON_OFF }, consequence: "语音转成文字后是否改正错字与标点", section: "general" },
+  "model.effort": { label: "模型强度", target: "", value: { type: "enum", values: { lower: "更省", default: "默认", higher: "更强" } },
+    consequence: "之后在本人 Codex 上的运行用更低或更高的推理强度；更强更慢、更费额度", section: "model" },
+  "activity.pauseMinutes": { label: "暂停屏幕活动记录", target: "", value: percent(0, 10080, "分钟"), consequence: "这段时间内不记录屏幕活动，到时自动恢复（0 为立即恢复）", section: "privacy" },
+  "activity.blacklist": { label: "不记录的窗口词", target: "", value: { type: "text", max: 2000 }, consequence: "窗口标题含这些词（逗号分隔）的活动不记录标题", section: "privacy" },
+  "consent.deviceLocation": { label: "设备位置", target: "", value: { type: "enum", values: ON_OFF }, consequence: "关闭即删除已存的位置", consent: true, section: "notify",
+    explain: ["判断机会是否去得了时用来确定本人今天在哪里；只保留最近一次、精确到约 1 公里，不记录轨迹；关闭即删除", "位置所在城市由 OpenStreetMap 查出"] },
   "consent.voiceprint": { label: "识别本人声音", target: "", value: { type: "enum", values: ON_OFF }, consequence: "关闭即删除声纹", consent: true, section: "recordings",
     explain: ["用语音备忘录录 30 秒到 2 分钟只有本人说话的内容（念一段文字即可），录完「共享 → 存储到文件」，再在这里选那个文件。只保存从中算出的一串数字（声纹），不保存录音；别人的声音只在单个录音里区分，不保存。关闭即删除。"] }
 } as const satisfies Record<string, SettingEntry>;

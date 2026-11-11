@@ -42,7 +42,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const checklistAnswers = readChecklistAnswers(body.checklistAnswers);
       if (!checklistAnswers) return Response.json({ ok: false, code: "INVALID_CHECKLIST_ANSWER" }, { status: 400 });
       // `outcome: {level: "smooth"|"barely"|"gaps", note}` is the optional 「完成情况」; completing is accepting (completion.ts).
-      result = completeWorkOrderExecution(ctx, id, evidence, checklistAnswers, undefined, readReport(body), readCompletionOutcome(body.outcome));
+      // Undoable since 2026-11-10: the completion sheet's receipt offers 撤销 (the task opens again, the reported minutes are removed).
+      result = await withUndo(ctx, tOf(ctx)("完成：{{title}}", { title: titleOf(ctx, id) }),
+        () => completeWorkOrderExecution(ctx, id, evidence, checklistAnswers, undefined, readReport(body), readCompletionOutcome(body.outcome)));
     } else return Response.json({ ok: false, code: "EXECUTION_ACTION_NOT_ALLOWED" }, { status: 400 });
   } catch (error) {
     // A store-level guard is still a known failure, so it stays a typed blocker rather than a 500.

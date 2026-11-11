@@ -1,7 +1,7 @@
 import "server-only";
 import { categoryMode, chosenLocale, isAutoHandoff, isPaused, readCategories, setAutoHandoff, setCategoryMode, setPaused, writeLocale } from "@crossline/db";
 import {
-  AGENT_CATEGORIES, AGENT_HISTORY_CONSENT, BACKGROUND_KINDS, BACKGROUND_PAUSED, CAMERA_ENERGY_CONSENT, FAMILIARITY_SETTING, INPUT_RHYTHM_CONSENT, MAIL_ACCOUNTS_SETTING,
+  AGENT_CATEGORIES, MODEL_EFFORT_SETTING, effortPreferenceOf, type VoicePreferences, AGENT_HISTORY_CONSENT, BACKGROUND_KINDS, BACKGROUND_PAUSED, CAMERA_ENERGY_CONSENT, FAMILIARITY_SETTING, INPUT_RHYTHM_CONSENT, MAIL_ACCOUNTS_SETTING,
   MAIL_REPLY_DRAFTS_SETTING, QUOTA_SAVER_SETTING, RECORDING_CONSENT, RECORDING_SERVER_CONSENT, RECORDING_VOICEPRINT_CONSENT, SETTING_CATALOG, SLEEP_TRACKING_CONSENT,
   TELEMETRY_ENABLED_SETTING, AUTOMATIONS_SETTING, completionRule, familiarityKey, parseShares, parseSlot, pausedKinds, quotaSaverOn, readAutomations, readMailAccounts,
   replyDraftsOn, BRIEF_TIME_SETTING, QUIET_HOURS_SETTING, quietHoursOf, type AccessContext, type AgentCategory, type BackgroundKind, type SettingEntry, type SettingKey, type SettingValueSpec
@@ -13,8 +13,10 @@ import { requestCodexSupervisor } from "./codex-runtime";
 import { SCREEN_LEVEL_CHANGE, dismissEnergyAdvice, screenLevel, setActivityConsent, setAgentHistory, setBriefTime, setEnergySignal, setNotifyLevel, setQuietHours, setRecordings, setServerRecordings,
   setSleepTracking, setTelemetry, setVoiceprint, type ScreenLevel } from "./consents";
 import { appNow, effectiveSchedulePreferences, getStore, loadCurrentPlan, lockBlock, milestoneDeadline, readFrozen, readLineShares, saveGoalSettings, saveMilestoneEdit,
-  setCompletionMode, unlockBlock } from "./crossline";
+  setCompletionMode, unlockBlock, ACTIVITY_BLACKLIST, ACTIVITY_PAUSED_UNTIL } from "./crossline";
 import { phoneHealthOn } from "./energy";
+import { saveVoicePreferences, voicePreferences } from "./voice";
+import { deviceLocationOn, setDeviceLocationConsent } from "./device-location";
 import { setFamiliarity } from "./familiarity";
 import { applyChange, previewChange, type Change } from "./impact";
 import { lineLabels } from "./lines";
@@ -69,6 +71,23 @@ const recordingValue = (on: boolean) => on ? "on" : "off_keep";
 const blockOf = async (ctx: AccessContext, blockId: string) => (await loadCurrentPlan(ctx)).blocks.find((block) => block.id === blockId && block.day);
 
 export const SETTING_HANDLERS: Record<SettingKey, Handler> = {
+  "voice.enabled": { current: (ctx) => flag(voicePreferences(ctx).enabled), apply: (ctx, _target, value) => { saveVoicePreferences(ctx, { enabled: value === "on" }); return ok(); } },
+  "voice.language": { current: (ctx) => voicePreferences(ctx).language,
+    apply: (ctx, _target, value) => { saveVoicePreferences(ctx, { language: value as VoicePreferences["language"] }); return ok(); } },
+  "voice.correct": { current: (ctx) => flag(voicePreferences(ctx).correct), apply: (ctx, _target, value) => { saveVoicePreferences(ctx, { correct: value === "on" }); return ok(); } },
+  "model.effort": { current: (ctx) => effortPreferenceOf(setting(ctx, MODEL_EFFORT_SETTING)),
+    apply: (ctx, _target, value) => { store().setSetting(ctx.workspaceId, MODEL_EFFORT_SETTING, value); return ok(); } },
+  // As the screen-activity card's pause: an instant, so it ends by itself.
+  "activity.pauseMinutes": {
+    current: (ctx) => { const until = Date.parse(setting(ctx, ACTIVITY_PAUSED_UNTIL) ?? ""); return Number.isFinite(until) && until > Date.now() ? String(Math.ceil((until - Date.now()) / 60_000)) : "0"; },
+    apply: (ctx, _target, value) => { const minutes = Number(value);
+      store().setSetting(ctx.workspaceId, ACTIVITY_PAUSED_UNTIL, minutes === 0 ? "" : new Date(Date.now() + minutes * 60_000).toISOString()); return ok(); } },
+  "activity.blacklist": {
+    current: (ctx) => { try { return (JSON.parse(setting(ctx, ACTIVITY_BLACKLIST) ?? "[]") as string[]).join(","); } catch { return ""; } },
+    apply: (ctx, _target, value) => { const words = value.split(/[,，、;；\n]+/).map((word) => word.trim()).filter(Boolean);
+      if (words.length > 100 || words.some((word) => word.length > 60)) return { ok: false, code: "BLACKLIST_INVALID" };
+      store().setSetting(ctx.workspaceId, ACTIVITY_BLACKLIST, JSON.stringify(words)); return ok(); } },
+  "consent.deviceLocation": { current: (ctx) => flag(deviceLocationOn(ctx)), apply: (ctx, _target, value) => { setDeviceLocationConsent(ctx, value === "on"); return ok(); } },
   "schedule.lineShares": {
     current: (ctx) => Object.entries(readLineShares(ctx) ?? {}).map(([line, share]) => `${line}=${share}`).join(","),
     impact: (_ctx, _target, value) => ({ kind: "shares", shares: parseShares(value) ?? {} }),

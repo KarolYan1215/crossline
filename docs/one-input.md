@@ -176,6 +176,16 @@ P3 实现：文件经 `/api/conversation/files` 存为本人的资料并当场�
 - **`material.attach` 结清唯一在等材料的步骤**（`settleProvideStep`，同任务页上传），不再只请求重排。
 - **路由**：每类输入落到其下游 Skill：`task.create` → 收集分析，`task.op replan`/`material.attach` → 步骤规划，`errand.prepare` → 助手，`workflow.request` → 自动化设计，`profile.tell` → 访谈抽取，`dates.read` → 访谈读日期。`scripts/concierge-replay.ts` 第 31–36 例是 11-01 走查的句子。
 
+### 3.7d 小帮手：线程、工具调用、给 Crossline 的话、一次性卡片消失（2026-11-10）
+
+本人决定（两轮，2026-11-10）：小帮手做成「带 Crossline 工具和卡片的 Codex」；「改应用」= 通过工具与确认卡、可撤销，不改源代码。
+
+- **线程**（migration 24，`conversations` 表重建：`kind` `day`/`thread`、`title`、`archived_at`、`instructions_seen`；每日唯一性改为部分唯一索引 `WHERE kind = 'day'`）。当天的对话仍是默认线程：今日页输入框、右下角小帮手、置顶窗口都写在这里，不带 `threadId`。`/assistant`（`app/assistant/assistant-threads.tsx`）左侧是线程列表（新对话 / 重命名 / 继续 / 归档与恢复；当天的不能归档），右侧是 `Conversation variant="thread"`；`?thread=<id>` 打开某一条。每条线程各有自己的 Codex 线程 id；运行时忘了线程（`SKILL_THREAD_LOST`）时仍用这条线程自己的消息重开。新线程以第一句话命名，直到本人改名。路由：`GET/POST /api/conversation/threads`、`PATCH /api/conversation/threads/[id]`；`GET /api/conversation?thread=`、`POST /api/conversation/turn {threadId}`。
+- **每一轮的工具调用**：网页在问 worker 之前先写一条空的、`working: true` 的回答消息，把它的 id（`replyId`）随请求发出；worker 的 `recordingTools` 每次查询后把 `{tool, args, result, at}`（截短）追加到这条消息的 `steps`，复核的查询标 `review`。线程页在回合进行中每 0.8 秒读一次线程，所以查询一条条出现（`chat/tool-steps.tsx`：进行中展开，答完折叠，每行可再展开看结果）。回复正文仍随结构化输出一次到达，不逐字流出——`outputSchema` 的 JSON 回答没有可单独流出的正文。超过 16 分钟仍 `working` 的消息视为中断。
+- **给 Crossline 的话**（`packages/core/src/instructions.ts`、`packages/db/src/personal-design.ts`、`apps/web/lib/instructions.ts`）：一段全局文本，≤4000 字。每一版是本人账本里的一条 `instructions.set` 事件（`version`、`text`、`by`、`revertOf`）；恢复旧版、撤销都写一个新版本，历史只增不减。注入：每个 Skill 新开的运行在 run note 里依次带上该 Skill 自己的指令（我的设计）和这段话（`skill-runner.ts` `withDesignNote` + `setInstructionsProvider`）；包装文字说明这是本人的偏好，不得越过 Skill 的输出格式与校验，也不得越过 Crossline 的安全边界（对外写入、发布、外联、交易、提交表单、发送数据、跳过确认）。小帮手续接的线程在本人改过之后的下一句收到新版本一次（`instructions_seen`）。其他 Skill 的续接回合（访谈等）只在新开线程时读到。编辑：设置 → 规则与指令 → 「给 Crossline 的话」（预览改动 → 前后对比 → 确认；历史版本可「恢复这一版」），或对小帮手说，卡片 `instructions.set {text}` 显示逐行前后对比，确认后才写。撤销靠 `withUndo` 快照里的版本号（`instructions.revert`）。
+- **审计补齐的动作**（设置页能改、输入框原先不能改的）：`design.pause`（我的设计条目暂停/恢复）、`workflow.change`（自建工作流暂停/恢复/保留/立即运行/退回上一版/删除）、`automation.change`（自动化立即运行/删除）、`line.change`（主线改名、硬约束、归档）、`preference.change`（个性化里学到的偏好删除/恢复，撤销用 `preference.undelete`），以及 `setting.change` 新键 `voice.enabled`/`voice.language`/`voice.correct`、`model.effort`、`activity.pauseMinutes`、`activity.blacklist`、`consent.deviceLocation`。`UNDOABLE_SETTINGS` 加了 `notify.`、语音、模型强度、屏幕记录暂停与屏蔽词、`automations`、`skills.grown`（同意类不加：关闭会删数据，设置值还原不回来）。仍未覆盖：主线画像事实的确认/更正/删除、项目改名与归档、画像报告隐私级别、日历来源与订阅、导入来源、公共 Skill 与 AI 工具、机会关注（opportunity-tags 模块）、停止正在运行的助手任务——这些需要各自的函数先能被卡片调用，留作后续。
+- **一次性卡片消失**（`app/ui/vanish.tsx` `Receipt`/`Vanishing`）：做完或答完后显示一行「已执行 · 撤销」约 1.5 秒，然后移除；指针或焦点在这一行上时计时暂停，撤销后显示「已撤销」再离开；回执里的操作标记为已见，全局撤销提示不再重复。适用：小帮手对话卡（`vanishes(card)`：所有显示的动作都已执行或取消、问题已答、没有失败、不是「去设置」链接；之前就已结束的卡不再显示）、待确认与今日「需要处理」的待决事项（`useAskList` 的 `receipts`；`answerAsk`/`snoozeAsk` 返回 `op`）、任务完成与「这一步做完了」（执行完成和步骤进度现在包在 `withUndo` 里，回执后才刷新列表）、提醒类 nudge（答过即消失）。铃铛里的提醒只有链接，没有「完成」动作，不在此列。可复用的东西不消失：工作流、自动化、主线卡、设置项、机会关注、周期性扣费。全部仍可在今日操作（撤销中心）找到并撤销。
+
 ### 3.8 退役
 
 - 前端 `looksLikeScheduleCommand` 分诊：删除，所有输入都进同一回合。

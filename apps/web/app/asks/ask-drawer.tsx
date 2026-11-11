@@ -7,29 +7,36 @@ import { AskCard } from "./ask-card";
 import { uniqueAsks } from "./model";
 import type { AskPreviews } from "./types";
 import { useT } from "../locale-context";
+import { Receipt } from "../ui/vanish";
 
 /**
  * The open asks, kept current after each answer: the answered one leaves at once, and the list is fetched again, because an answer can
  * resolve or raise others (handing over a missing input re-plans the milestone). `keep` picks which of them this view shows.
+ * Where it stood, a one-line receipt 「已执行 · 撤销」 says so for a moment (`receipts`, one-shot cards vanish, 2026-11-10).
  */
 export function useAskList(initial: Ask[], keep: (ask: Ask) => boolean) {
+  const t = useT();
   const [asks, setAsks] = useState(() => uniqueAsks(initial.filter(keep)));
   const reload = async () => {
     const response = await fetch("/api/asks", { cache: "no-store" }).catch(() => null);
     const body = await response?.json().catch(() => null) as { asks?: Ask[] } | null;
     if (body?.asks) setAsks(uniqueAsks(body.asks.filter(keep)));
   };
-  const onDone = (id: string) => {
+  const [done, setDone] = useState<Array<{ id: string; opIds: string[] }>>([]);
+  const onDone = (id: string, opId?: string) => {
     setAsks((list) => list.filter((item) => item.id !== id));
+    setDone((list) => [...list, { id, opIds: opId ? [opId] : [] }]);
     window.dispatchEvent(new Event(PENDING_CHANGED));
   };
+  const receipts = done.length ? <div className="ask-receipts">{done.map((item) => <Receipt key={item.id} opIds={item.opIds} text={t("已处理")}
+    onGone={() => setDone((list) => list.filter((entry) => entry.id !== item.id))} onUndone={() => void reload()} />)}</div> : null;
   // Answered here or anywhere else on the page (the day's opener, the input box): the list is fetched again.
   useEffect(() => {
     const onChanged = () => void reload();
     window.addEventListener(PENDING_CHANGED, onChanged);
     return () => window.removeEventListener(PENDING_CHANGED, onChanged);
   });
-  return { asks, onDone };
+  return { asks, onDone, receipts };
 }
 
 /** Which card of a stack is on top. Stays in range as the stack shrinks. */
@@ -59,7 +66,7 @@ export function DeckNav({ at, count, go, label, children }: { at: number; count:
  * next by itself.
  */
 export function AskDeck({ asks, at, pick, onDone, previews, level, keys = false }: {
-  asks: Ask[]; at: number; pick: (index: number) => void; onDone: (id: string) => void; previews?: AskPreviews | undefined; level?: 3 | 4;
+  asks: Ask[]; at: number; pick: (index: number) => void; onDone: (id: string, opId?: string) => void; previews?: AskPreviews | undefined; level?: 3 | 4;
   /** The top card answers to number keys, Enter and H (待确认). */
   keys?: boolean;
 }) {

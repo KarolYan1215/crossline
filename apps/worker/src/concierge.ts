@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   CONCIERGE_SCHEMA, CONCIERGE_TOOL_SPECS, answerFromPack, queryLedger, conciergeRefs, keepUsable, validateConciergeTurn,
-  tFor, type ConciergePack, type ConciergeTurn
+  instructionsText, tFor, type ConciergePack, type ConciergeTurn
 } from "@crossline/core";
 import { continueSkillTurn, runCodexSkill, type CodexRpcBoundary, type SkillTools } from "@crossline/codex";
-import type { CrosslineStore } from "@crossline/db";
+import { currentInstructionsOf, type CrosslineStore } from "@crossline/db";
 import { localeOf } from "./locale";
 
 export const CONCIERGE_SKILL = "crossline:crossline-concierge";
@@ -38,7 +38,38 @@ export type ConciergeRequest = {
   review?: boolean;
   /** The person corrected the box earlier today: every turn from then on is read by the stronger model at once. */
   corrected?: boolean;
+  /**
+   * The reply message the web wrote before asking (小帮手's thread view, 2026-11-10): every lookup the model makes is appended to its
+   * `steps` as it happens, so the page shows the turn's tool calls while it runs.
+   */
+  replyId?: string;
 };
+
+/** One lookup of a turn as the thread view shows it: the tool, its arguments and the start of its answer, both shortened. */
+export type ConciergeStep = { tool: string; args: string; result: string; at: string; review?: true };
+
+const short = (text: string, max: number) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
+
+/** Appends one step to the reply message's payload (a missing message is ignored: the web may have given up on the turn). */
+export function recordStep(store: CrosslineStore, workspaceId: string, replyId: string, step: ConciergeStep): void {
+  const message = store.getConversationMessage(workspaceId, replyId);
+  if (!message) return;
+  const steps = Array.isArray(message.payload.steps) ? message.payload.steps as ConciergeStep[] : [];
+  store.updateConversationPayload(workspaceId, replyId, { ...message.payload, steps: [...steps, step].slice(-60) });
+}
+
+/** The tools of a turn, each call also written as a step of the reply message when there is one. */
+export function recordingTools(tools: SkillTools, record: ((step: ConciergeStep) => void) | undefined): SkillTools {
+  if (!record) return tools;
+  return { ...tools, call: async (name, raw) => {
+    const answer = await tools.call(name, raw);
+    const text = typeof answer === "string" ? answer : JSON.stringify(answer);
+    let args = "";
+    try { args = raw && typeof raw === "object" && Object.keys(raw).length ? JSON.stringify(raw) : ""; } catch { args = ""; }
+    try { record({ tool: name, args: short(args, 160), result: short(text.replace(/\s+/g, " "), 240), at: new Date().toISOString() }); } catch { /* the turn goes on */ }
+    return answer;
+  } };
+}
 
 // i18n-ignore-start: model-facing
 const REVIEW = "复核上一个回答（review）：逐项核对动作、对象 id、日期、时长与本人原话是否一致，必要时重新查询；"
@@ -90,7 +121,13 @@ export function createConcierge(store: CrosslineStore, workspaceId: string, cwd:
     const conversation = store.getConversation(workspaceId, request.conversationId);
     if (!conversation) return { state: "blocked", code: "CONVERSATION_NOT_FOUND", message: t("会话不存在。") };
     const refs = conciergeRefs(request.pack);
-    const tools = conciergeTools(store, workspaceId, request.pack);
+    const replyId = request.replyId;
+    const tools = recordingTools(conciergeTools(store, workspaceId, request.pack),
+      replyId ? (step) => recordStep(store, workspaceId, replyId, request.review ? { ...step, review: true } : step) : undefined);
+    // 「给 Crossline 的话」: a fresh thread gets it in its run note (skill-runner `withDesignNote`); a thread that was told an older
+    // version (or none) is told the one in force with this message.
+    const words = currentInstructionsOf(store, workspaceId);
+    const tell = words.version !== conversation.instructionsSeen ? { instructions: words.text ? instructionsText(words.text) : "（本人已清空「给 Crossline 的话」）" } : {}; // i18n-ignore: model context
     const message = { snapshot: request.snapshot, text: request.text.slice(0, 4000), mentions: request.mentions.slice(0, 20) };
     const tier = request.review || request.corrected ? "mid" as const : undefined;
     // Only image files that exist, at most three: the web names stored uploads, nothing else. Uploads are stored as `.img`, so each is
@@ -117,10 +154,11 @@ export function createConcierge(store: CrosslineStore, workspaceId: string, cwd:
         history: request.history.slice(-30).map((item) => ({ role: item.role, text: item.text.slice(0, 1500) })), ...message })
     });
     let result = threadId
-      ? await continueSkillTurn<ConciergeTurn>(client, threadId, JSON.stringify(message), { ...shared, ...(images.length ? { images } : {}), onAudit: () => {} })
+      ? await continueSkillTurn<ConciergeTurn>(client, threadId, JSON.stringify({ ...message, ...tell }), { ...shared, ...(images.length ? { images } : {}), onAudit: () => {} })
       : await fresh();
     if (!result.ok && result.blocker.code === "SKILL_THREAD_LOST") { threadId = undefined; result = await fresh(); }
     if (threadId !== conversation.codexThreadId) store.setConversationThread(workspaceId, conversation.id, threadId ?? null);
+    if (result.ok && words.version !== conversation.instructionsSeen) store.setConversationInstructionsSeen(workspaceId, conversation.id, words.version);
     if (!result.ok) return { state: "blocked", code: result.blocker.code, message: result.blocker.message };
     return { state: "replied", turn: result.output, warnings: (result.audit.warnings ?? []).map((warning) => warning.code) };
   };

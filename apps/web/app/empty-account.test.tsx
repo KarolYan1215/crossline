@@ -50,12 +50,14 @@ test("the settings page is not gated: it renders on an account with nothing on i
   expect(renderToStaticMarkup(await Page()).length).toBeGreaterThan(200);
 }, 30000);
 
-test("the old assistant address sends an account to the interview until it is ready, then to 设置 → 自动化与助手", async () => {
+test("小帮手's page sends an account to the interview until it is ready, then opens today's thread first", async () => {
   const { default: AssistantPage } = await import("./assistant/page");
-  await expect(AssistantPage()).rejects.toMatchObject({ digest: expect.stringContaining("/onboarding") });
+  const params = { searchParams: Promise.resolve({}) };
+  await expect(AssistantPage(params)).rejects.toMatchObject({ digest: expect.stringContaining("/onboarding") });
   await seedReady();
-  await expect(AssistantPage()).rejects.toMatchObject({ digest: expect.stringContaining("/settings#automation") });
-});
+  const html = renderToStaticMarkup(await AssistantPage({ searchParams: Promise.resolve({}) }));
+  expect(html).toContain("默认 · 今日");
+}, 30000);
 
 test("a profile alone is not enough: with facts but not the start items, Today leads back to the interview", async () => {
   globalThis.crosslineStore!.upsertProfileFact({ workspaceId: TEST_CTX.workspaceId, identityId: "research", projectId: "", slot: "stage",

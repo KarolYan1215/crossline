@@ -1,6 +1,8 @@
 import { chooseOwnerOfStep, confirmCriterion, editSteps, loadStepPlan, noteResumePoint, recordStepProgress, reportProgress, requestStepReplan, settleProvideStep } from "../../../../../lib/steps";
 import { rejectUnsafeRequest } from "../guard";
 import { resolveAccessContext } from "../../../../../lib/access-guard";
+import { tOf } from "../../../../../lib/locale";
+import { titleOf, withUndo } from "../../../../../lib/undo";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
@@ -43,7 +45,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (typeof body.stepId !== "string") return respond({ ok: false, code: "STEP_INVALID" });
       const status = ["planned", "done", "skipped"].includes(String(body.status)) ? body.status as "planned" | "done" | "skipped" : undefined;
       const quarter = typeof body.progressQuarter === "number" ? body.progressQuarter : undefined;
-      return respond(recordStepProgress(guard.ctx, id, body.stepId, { ...(status ? { status } : {}), ...(quarter !== undefined ? { progressQuarter: quarter } : {}) }));
+      // Undoable since 2026-11-10 (the step's status goes back), so 「这一步做完了」 shows 「已执行 · 撤销」 and leaves the list.
+      const stepId = body.stepId;
+      return respond(await withUndo(guard.ctx, tOf(guard.ctx)("步骤进度：{{title}}", { title: titleOf(guard.ctx, id) }),
+        () => recordStepProgress(guard.ctx, id, stepId, { ...(status ? { status } : {}), ...(quarter !== undefined ? { progressQuarter: quarter } : {}) })));
     }
     default: return respond({ ok: false, code: "STEP_ACTION_INVALID" });
   }

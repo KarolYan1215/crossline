@@ -582,4 +582,5 @@ export * from "./form-fill";
 export * from "./form-observe";
 export * from "./form-browser-use";
 export * from "./personal-design";
+export * from "./instructions";
 export * from "./self-check";

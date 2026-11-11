@@ -12,6 +12,7 @@ import { SHIFT_MINUTES } from "./schedule-frozen";
 import { tFor, type Locale } from "./i18n";
 import { recordProblem } from "./records";
 import { DESIGN_NOTE_MAX, designProblem } from "./personal-design";
+import { INSTRUCTIONS_MAX, instructionsProblem } from "./instructions";
 import { SETTING_KEYS, SETTINGS_SECTION_IDS, settingCatalogLines, settingProblem, type SettingKey, type SettingsSection } from "./setting-catalog";
 
 export type ActionRisk = "internal" | "commitment";
@@ -53,6 +54,23 @@ export const ACTIONS = {
    * one Skill the person's standing words; an empty `value` resets the knob or removes the note. Previewed, confirmed, undoable.
    */
   "design.change": { label: "修改规则与指令", risk: "internal", args: { kind: enumOf(["knob", "skill"]), id: str(64), value: str(DESIGN_NOTE_MAX) } },
+  /**
+   * 「给 Crossline 的话」 (instructions.ts): the person's standing words for the whole system, `text` the complete new text ("" clears it;
+   * an older version is restored by giving its text). The card shows before/after; written as a new version only on 确认, undoable.
+   */
+  "instructions.set": { label: "修改给 Crossline 的话", risk: "internal", args: { text: str(INSTRUCTIONS_MAX) } },
+  // What the settings page changes that the box could not (the 2026-11-10 audit), each through the function its page calls.
+  /** Pause or resume one entry of 我的设计 (the threshold goes back to its default, the note stops being read, until resumed). */
+  "design.pause": { label: "暂停或恢复规则", risk: "internal", args: { kind: enumOf(["knob", "skill"]), id: str(64), change: enumOf(["pause", "resume"]) } },
+  /** A grown workflow (Skill 库 → 自建工作流, a recurring reminder too): switch off or on, keep (pin), run now, back to its previous version, delete. */
+  "workflow.change": { label: "管理工作流", risk: "internal", args: { workflowId: str(128),
+    change: enumOf(["pause", "resume", "pin", "unpin", "run", "revert", "remove"]) } },
+  /** An automation: run it now or delete it (pausing is `setting.change automation.status`). */
+  "automation.change": { label: "管理自动化", risk: "internal", args: { automationId: str(128), change: enumOf(["run", "delete"]) } },
+  /** A line renamed (label, ≤12 characters; "" keeps it), marked as a hard constraint or not, or archived. */
+  "line.change": { label: "修改主线", risk: "internal", args: { lineId: str(64), label: str(12), hard: enumOf(["", "yes", "no"]), archive: { type: "boolean" } } },
+  /** Something the system learned about the person (Settings → 个性化): removed so it no longer reaches any model, or a lapsed one restored. */
+  "preference.change": { label: "管理已学到的偏好", risk: "internal", args: { preferenceId: str(64), change: enumOf(["remove", "restore"]) } },
   /** A credential or a destructive change (a password, a key, deleting the account): a link to the settings card where the person does it. */
   "settings.open": { label: "打开设置", risk: "internal", args: { section: enumOf(SETTINGS_SECTION_IDS), topic: str(60) } },
   // A record of money or health (docs/domain-lines.md): read from the person's line, a pasted text or an attached screenshot; the card
@@ -129,6 +147,12 @@ type ArgsOf = {
   "block.outcome": { blockId: string; outcome: "done" | "partial" | "not_done" };
   "setting.change": { key: SettingKey; target: string; value: string };
   "design.change": { kind: "knob" | "skill"; id: string; value: string };
+  "instructions.set": { text: string };
+  "design.pause": { kind: "knob" | "skill"; id: string; change: "pause" | "resume" };
+  "workflow.change": { workflowId: string; change: "pause" | "resume" | "pin" | "unpin" | "run" | "revert" | "remove" };
+  "automation.change": { automationId: string; change: "run" | "delete" };
+  "line.change": { lineId: string; label: string; hard: "" | "yes" | "no"; archive: boolean };
+  "preference.change": { preferenceId: string; change: "remove" | "restore" };
   "settings.open": { section: SettingsSection; topic: string };
   "record.add": { domain: "wellness" | "wealth"; kind: "income" | "expense" | "workout" | "weight" | "meal" | "metric"; value: number; unit: string;
     currency: string; category: string; note: string; at: string };
@@ -206,6 +230,8 @@ export type ConciergeRefs = {
   automations?: Set<string>; mailboxes?: Set<string>; blocks?: Set<string>;
   /** The person's grown workflows (Skill 库 → 自建工作流), for 修工作流. */
   workflows?: Set<string>;
+  /** Entries set in 我的设计 (`knob:<id>` / `skill:<id>`), and what the system learned about the person, by id. */
+  designEntries?: Set<string>; preferences?: Set<string>;
   /** The Skills a 「我的设计」 note may be written for. */
   designSkills?: Set<string>;
 };
@@ -301,6 +327,14 @@ export function actionProblem(item: ProposedAction, refs: ConciergeRefs): string
       ...(refs.automations ? { automations: refs.automations } : {}), ...(refs.mailboxes ? { mailboxes: refs.mailboxes } : {}), ...(refs.blocks ? { blocks: refs.blocks } : {}) });
     case "settings.open": return "";
     case "design.change": return designProblem(item.args, refs.designSkills ?? new Set());
+    case "instructions.set": return instructionsProblem(item.args.text);
+    case "design.pause": return refs.designEntries && !refs.designEntries.has(`${item.args.kind}:${item.args.id.replace(/^crossline:/, "")}`)
+      ? `我的设计里没有 ${item.args.kind}「${item.args.id}」这一项（快照列出已设的阈值与指令）` : "";
+    case "workflow.change": return refs.workflows?.has(item.args.workflowId) ? "" : `工作流 id「${item.args.workflowId}」不存在（快照列出本人的工作流及其 id）`;
+    case "automation.change": return refs.automations?.has(item.args.automationId) ? "" : `自动化 id「${item.args.automationId}」不存在（用 list_settings 查）`;
+    case "line.change": return !refs.lines.has(item.args.lineId) ? `主线 id「${item.args.lineId}」不存在`
+      : !item.args.label.trim() && !item.args.hard && !item.args.archive ? "没有要改的：label、hard、archive 至少填一项" : "";
+    case "preference.change": return refs.preferences && !refs.preferences.has(item.args.preferenceId) ? `偏好 id「${item.args.preferenceId}」不存在（用 list_settings 的 learned 查）` : "";
     // The same checks the store applies; an empty day is today.
     case "record.add": return recordProblem({ ...item.args, at: item.args.at || new Date().toISOString().slice(0, 10) });
     case "schedule.shift": return Number.isInteger(item.args.minutes) && item.args.minutes >= SHIFT_MINUTES.min && item.args.minutes <= SHIFT_MINUTES.max
@@ -513,6 +547,12 @@ export type ConciergePack = {
   life?: { home: boolean; work: boolean; defaultMinutes: number; places: string[]; reminders: string[] };
   /** 「我的设计」: what may be changed and what is set now (one line), and the Skills a note may be written for. */
   design?: string; designSkills?: string[];
+  /** Entries set in 我的设计, as `knob:<id>` / `skill:<id>` (for `design.pause`). */
+  designEntries?: string[];
+  /** What the system learned about the person (Settings → 个性化), with ids, for `preference.change`; `lapsed` ones can be restored. */
+  learned?: Array<{ id: string; text: string; lapsed: boolean }>;
+  /** 「给 Crossline 的话」: the version in force and the earlier ones, newest first (`get_instructions`). */
+  instructions?: { version: number; text: string; versions: Array<{ version: number; at: string; text: string; revertOf?: number }> };
 };
 
 export function conciergeRefs(pack: ConciergePack): ConciergeRefs {
@@ -525,7 +565,9 @@ export function conciergeRefs(pack: ConciergePack): ConciergeRefs {
     documents: new Set(pack.materials.map((item) => item.id)), projects: new Set(pack.projects.map((item) => item.id)),
     automations: new Set((pack.automations ?? []).flatMap((item) => item.id ? [item.id] : [])), mailboxes: new Set((pack.mailAccounts ?? []).map((item) => item.id)),
     workflows: new Set((pack.workflows ?? []).map((item) => item.id)),
-    blocks: new Set(pack.plan.flatMap((block) => block.id ? [block.id] : [])), designSkills: new Set(pack.designSkills ?? [])
+    blocks: new Set(pack.plan.flatMap((block) => block.id ? [block.id] : [])), designSkills: new Set(pack.designSkills ?? []),
+    ...(pack.designEntries ? { designEntries: new Set(pack.designEntries) } : {}),
+    ...(pack.learned ? { preferences: new Set(pack.learned.map((item) => item.id)) } : {})
   };
 }
 
@@ -550,7 +592,8 @@ export const CONCIERGE_TOOL_SPECS = [
   { name: "read_material", description: "读一个文件的文本（从 offset 起约 6000 字）", inputSchema: { type: "object",
     properties: { id: { type: "string" }, offset: { type: "integer" } }, required: ["id", "offset"], additionalProperties: false } },
   { name: "get_profile_facts", description: "本人确认过的情况（背景、课程评分、目标等），按关键词筛选", inputSchema: QUERY },
-  { name: "list_settings", description: "可用 setting.change 修改的全部设置：键名、名称、针对的对象、可选值、是否隐私同意，以及当前值；另列自动化与邮箱的 id", inputSchema: NONE },
+  { name: "get_instructions", description: "「给 Crossline 的话」：现行版本号与全文，以及历次版本（版本号、时间、全文；revertOf 为恢复自哪一版），最新在前", inputSchema: NONE },
+  { name: "list_settings", description: "可用 setting.change 修改的全部设置：键名、名称、针对的对象、可选值、是否隐私同意，以及当前值；另列自动化、邮箱、工作流的 id，以及系统学到的偏好（learned：id、内容、是否已失效）", inputSchema: NONE },
   { name: "ledger_query", description: "查总账：某月（YYYY-MM，空为本月）按分类、商户、账户、种类（expense 支出含退款冲减 / income / refund）筛选的已记账合计（按币种）与最多 30 笔明细。回答花了多少钱只用它的数字",
     inputSchema: { type: "object", properties: { month: { type: "string" }, category: { type: "string" }, merchant: { type: "string" }, account: { type: "string" }, kind: { type: "string" } },
       required: ["month", "category", "merchant", "account", "kind"], additionalProperties: false } }
@@ -580,8 +623,9 @@ export function answerFromPack(pack: ConciergePack, name: string, args: Record<s
     case "find_materials": return json(pack.materials.filter((item) => matches(query, item.fileName, item.project)).slice(0, 30));
     case "list_projects": return json(pack.projects);
     case "get_profile_facts": return json(pack.facts.filter((fact) => matches(query, fact)).slice(0, 40));
+    case "get_instructions": return json(pack.instructions ?? { version: 0, text: "", versions: [] });
     case "list_settings": return json({ catalog: settingCatalogLines(), current: pack.settings ?? [], mailboxes: pack.mailAccounts ?? [],
-      automations: (pack.automations ?? []).map(({ id, name, status }) => ({ id, name, status })) });
+      automations: (pack.automations ?? []).map(({ id, name, status }) => ({ id, name, status })), workflows: pack.workflows ?? [], learned: pack.learned ?? [] });
     default: return `没有名为 ${name} 的查询`;
   }
 }

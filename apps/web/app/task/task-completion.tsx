@@ -5,6 +5,7 @@ import type { TaskDetail } from "../../lib/task-detail";
 import { Sheet } from "../ui/overlay";
 import { createCommand, enqueue, nextSequence } from "../offline-queue";
 import { useT } from "../locale-context";
+import { Receipt } from "../ui/vanish";
 import { useWholeDetail } from "./whole-detail";
 import { VoiceField } from "../ui/voice/voice-input";
 
@@ -28,11 +29,12 @@ const FAILURE: Record<string, string> = {
 /** The states completion can start from: approved work is started first (the endpoint needs a running session), running work is finished. */
 export const COMPLETABLE = ["approved", "ready_for_human", "active"];
 
-async function postJson(url: string, body: unknown): Promise<{ ok: boolean; code?: string; message?: string; offline?: boolean }> {
+async function postJson(url: string, body: unknown): Promise<{ ok: boolean; code?: string; message?: string; offline?: boolean; opId?: string }> {
   const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
   if (!response) return { ok: false, offline: true };
-  const result = await response.json().catch(() => ({})) as { ok?: boolean; code?: string; message?: string };
-  return { ok: response.ok && result.ok !== false, ...(result.code ? { code: result.code } : {}), ...(result.message ? { message: result.message } : {}) };
+  const result = await response.json().catch(() => ({})) as { ok?: boolean; code?: string; message?: string; op?: { id?: string } };
+  return { ok: response.ok && result.ok !== false, ...(result.code ? { code: result.code } : {}), ...(result.message ? { message: result.message } : {}),
+    ...(result.op?.id ? { opId: result.op.id } : {}) };
 }
 
 /**
@@ -68,7 +70,10 @@ export function TaskCompletion({ task, stepId, onDone }: {
   const step = stepId ? steps.find((item) => item.id === stepId) : undefined;
   const otherSteps = steps.filter((item) => item.status === "planned" && item.schedulable && item.id !== stepId).length;
   const estimateP50 = task.estimate.p50Minutes;
-  const finished = () => { if (onDone) onDone(); else location.reload(); };
+  // One-shot (2026-11-10): done shows 「已执行 · 撤销」 for a moment in place of the sheet, then the list it came from moves on.
+  const [receipt, setReceipt] = useState<string[] | null>(null);
+  const leave = () => { if (onDone) onDone(); else location.reload(); };
+  const finished = (opId?: string) => setReceipt(opId ? [opId] : []);
 
   const add = (incoming: FileList | File[]) => {
     const usable = [...incoming].filter(acceptable);
@@ -115,7 +120,7 @@ export function TaskCompletion({ task, stepId, onDone }: {
     const done = await postJson(`${base}/execution`, { action: "complete", evidence, ...extras() });
     if (done.offline) { setBusy(false); await queue(withEvidence); return; }
     if (!done.ok) { fail(done.code, done.message); return; }
-    finished();
+    finished(done.opId);
   };
   const finishStep = async () => {
     if (!stepId) return;
@@ -123,10 +128,11 @@ export function TaskCompletion({ task, stepId, onDone }: {
     const done = await postJson(`${base}/steps`, { action: "progress", stepId, status: "done" });
     if (!done.ok) { fail(done.code, done.message); return; }
     if (note.trim()) await postJson(`${base}/steps`, { action: "report", text: `${step ? t("「{{step}}」：", { step: step.title }) : ""}${note.trim()}`.slice(0, 2000) });
-    finished();
+    finished(done.opId);
   };
   const hasEvidence = Boolean(note.trim() || files.length);
 
+  if (receipt) return <div className="tk-complete" id="complete"><Receipt opIds={receipt} onGone={leave} onUndone={() => location.reload()} /></div>;
   return <div className="tk-complete" id="complete">
     <p className="tk-complete-task"><b>{task.title}</b>{step ? <small> · {step.title}</small> : null}</p>
     <label className="tk-complete-field"><span>{t("完成说明")}</span>

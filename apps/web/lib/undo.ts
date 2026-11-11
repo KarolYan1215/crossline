@@ -1,6 +1,6 @@
 import "server-only";
-import { reopenAgentResult, retractedEventIdsIn, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
-import { PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING, taskTitleOf, type AccessContext, type StoredDomainRecord, type WorkOrderState } from "@crossline/core";
+import { currentInstructionsOf, instructionVersionsOf, reopenAgentResult, retractedEventIdsIn, setInstructions, withdrawArtifactRelationsFor, type StepPlanInput } from "@crossline/db";
+import { AUTOMATIONS_SETTING, GROWN_LIBRARY_SETTING, MODEL_EFFORT_SETTING, PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING, VOICE_SETTING, taskTitleOf, type AccessContext, type StoredDomainRecord, type WorkOrderState } from "@crossline/core";
 import { archiveWorkOrder, getStore, restoreCapture, restoreWorkOrder, saveMilestoneEdit } from "./crossline";
 import { tOf } from "./locale";
 
@@ -50,6 +50,10 @@ export type Inverse =
   /** Sessions of minutes the person reported (`recordConfirmedSession`) and energy they reported, written by the operation: removed again. */
   | { kind: "execution.remove"; ids: string[] }
   | { kind: "energy.remove"; ids: string[] }
+  /** 「给 Crossline 的话」 changed: the version it had is written again (a new version, so the history keeps the undone one too). */
+  | { kind: "instructions.revert"; version: number }
+  /** Things the system learned that the operation removed (Settings → 个性化, `preference.change`): they reach the models again. */
+  | { kind: "preference.undelete"; ids: string[] }
   | { kind: "batch"; items: Inverse[] };
 
 export type Op = { id: string; label: string; at: string; inverse: Inverse };
@@ -251,6 +255,14 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
       }
       case "event.retract":
         return { ok: true };
+      case "preference.undelete":
+        for (const id of inverse.ids) store.undeletePreference(ctx.workspaceId, id);
+        return { ok: true };
+      case "instructions.revert": {
+        const old = inverse.version ? instructionVersionsOf(store, ctx.workspaceId).find((item) => item.version === inverse.version) : undefined;
+        setInstructions(store, { workspaceId: ctx.workspaceId, ownerId: ctx.principalId, text: old?.text ?? "", by: "person", revertOf: inverse.version });
+        return { ok: true };
+      }
       case "batch":
         // Reversed in the opposite order to the changes they undo.
         for (const item of [...inverse.items].reverse()) { const result = applyInverse(ctx, item); if (!result.ok) return result; }
@@ -262,7 +274,10 @@ function applyInverse(ctx: AccessContext, inverse: Inverse): { ok: true } | { ok
 }
 
 /** Settings an operation may change and an undo puts back. Device, account and calendar-write state are not operations. */
-const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines", "ledger.", "design.", PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING] as const;
+// 2026-11-10: notifications, voice, model strength, the screen record's pause and words, automations and grown workflows joined, so what 小帮手
+// changes there through a card is undoable like the rest (consents stay out: turning one off deletes data a setting cannot bring back).
+const UNDOABLE_SETTINGS = ["schedule.", "goal.settings:", "input.schedule.autoApply", "lines.", "calendar.lines", "ledger.", "design.", PORTRAIT_FIGURE_SETTING, SELF_SLEEP_SETTING,
+  "notify.", VOICE_SETTING, MODEL_EFFORT_SETTING, "localActivity.pausedUntil", "activity.blacklist", AUTOMATIONS_SETTING, GROWN_LIBRARY_SETTING] as const;
 /** Ledger markers that hide or close something when written; undoing the operation that wrote them brings it back. */
 const RETRACTABLE_EVENTS = ["risk.accepted", "ask.snoozed", "missed.handled", "agent.blocked_acknowledged", "source.project_cleared", "milestone.overdue_resolved", "task.overdue_resolved"];
 
@@ -284,7 +299,9 @@ function snapshot(ctx: AccessContext) {
     evidence: new Map(store.listRecordEvidence(ctx.workspaceId).map((item) => [item.id, item.recordId])),
     eventIds: new Set(store.listEvents(ctx.workspaceId, { type: RETRACTABLE_EVENTS }).map((event) => event.eventId)),
     sessions: new Set(store.listExecutions(ctx.workspaceId).filter((execution) => String(execution.outcome) === "confirmed").map((execution) => execution.id)),
-    energy: new Set(store.listEnergyObservations(ctx.workspaceId).filter((item) => item.source === "self_report").map((item) => item.id))
+    energy: new Set(store.listEnergyObservations(ctx.workspaceId).filter((item) => item.source === "self_report").map((item) => item.id)),
+    instructions: currentInstructionsOf(store, ctx.workspaceId).version,
+    preferences: new Set(store.listPreferences(ctx.workspaceId, { includeInvalidated: true }).map((item) => item.id))
   };
 }
 
@@ -361,6 +378,9 @@ function inverseOf(before: Snapshot, after: Snapshot): Inverse[] {
   if (sessions.length) items.push({ kind: "execution.remove", ids: sessions });
   const energy = [...after.energy].filter((id) => !before.energy.has(id));
   if (energy.length) items.push({ kind: "energy.remove", ids: energy });
+  if (after.instructions !== before.instructions) items.push({ kind: "instructions.revert", version: before.instructions });
+  const unlearned = [...before.preferences].filter((id) => !after.preferences.has(id));
+  if (unlearned.length) items.push({ kind: "preference.undelete", ids: unlearned });
   // A task the operation finished (a reported completion) opens again; one that was already accepted is history.
   const finished = [...after.orders].filter(([id, now]) => now.state === "accepted" && before.orders.has(id) && before.orders.get(id)!.state !== "accepted").map(([id]) => id);
   if (finished.length) items.push({ kind: "work_order.reopen", ids: finished });

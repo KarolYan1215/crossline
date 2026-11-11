@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { agentLanguageLine, runLocale, schemaForLocale, styleInstructions } from "./style";
 import { join } from "node:path";
-import { cleanAnswerStrings, designNoteText, tFor, type Locale } from "@crossline/core";
+import { cleanAnswerStrings, designNoteText, instructionsText, tFor, type Locale } from "@crossline/core";
 import type { CodexRpcBoundary } from "./index";
 import { routeForSkill, shiftEffort, tierForSkill, tierRoutes, type ModelRoute, type RouteTier, type SpendMode } from "./model-policy";
 import { createUsageCollector, currentEffortPreference, currentSpendMode, currentUsageWorkspace, reportUsage, takeMeteredUsage, type UsageCollector } from "./usage";
@@ -1313,13 +1313,15 @@ export function cacheOrderedInput(prepared: unknown, stableKeys: readonly string
 let designNoteProvider: ((workspaceId: string | undefined, skillName: string) => string | undefined) | undefined;
 /** The person's own standing note for a Skill (packages/core/src/personal-design.ts), set by the worker; appended to the run note. */
 export function setDesignNoteProvider(provider: typeof designNoteProvider): void { designNoteProvider = provider; }
-function withDesignNote(runNote: string | undefined, skillName: string): string | undefined {
-  const note = designNoteProvider?.(currentUsageWorkspace(), skillName)?.trim();
-  if (!note) return runNote;
-  const framed = designNoteText(note);
-  return runNote?.trim() ? `${runNote.trim()}
-
-${framed}` : framed;
+let instructionsProvider: ((workspaceId: string | undefined) => string | undefined) | undefined;
+/** The person's 「给 Crossline 的话」 (packages/core/src/instructions.ts), set by the worker; appended after the Skill's own note. */
+export function setInstructionsProvider(provider: typeof instructionsProvider): void { instructionsProvider = provider; }
+export function withDesignNote(runNote: string | undefined, skillName: string): string | undefined {
+  const workspace = currentUsageWorkspace();
+  const note = designNoteProvider?.(workspace, skillName)?.trim();
+  const words = instructionsProvider?.(workspace)?.trim();
+  const parts = [runNote?.trim(), note ? designNoteText(note) : "", words ? instructionsText(words) : ""].filter(Boolean);
+  return parts.length ? parts.join("\n\n") : runNote;
 }
 
 export const RUN_NOTE_LEAD = "Instructions for this run only (they extend the developer instructions):";

@@ -18,11 +18,12 @@ const inScope = (scope: Scope) => (ask: Ask) => scope === "later" ? Boolean(ask.
 /** A plain list: on 待确认, the asks whose decision can wait (`scope="later"`), each with the day it comes up. */
 export function AskList({ initial, scope = "week", heading = "待决事项", previews }: { initial: Ask[]; scope?: Scope; heading?: string; previews?: AskPreviews }) {
   const t = useT();
-  const { asks, onDone } = useAskList(initial, inScope(scope));
-  if (!asks.length) return null;
+  const { asks, onDone, receipts } = useAskList(initial, inScope(scope));
+  if (!asks.length) return receipts;
   // `heading` is a Chinese key (or already translated, which `t` returns as it is).
   return <section className="ask-list" id={scope === "later" ? "later-asks" : "asks"} aria-label={t(heading)}>
     <header><h2>{t(heading)} · {asks.length}</h2></header>
+    {receipts}
     <ol className="ak-list">{asks.map((ask) => <AskCard key={ask.id} ask={ask} preview={previews?.[ask.id]} onDone={onDone} />)}</ol>
   </section>;
 }
