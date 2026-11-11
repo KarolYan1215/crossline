@@ -43,7 +43,7 @@ export function autoApproveEligible(store: CrosslineStore, workspaceId: string, 
     const names = locale === "en" ? shown.join(", ") : shown.join("、");
     const values = { count: told.length, names };
     const said = told.length > 5 ? t("{{count}} 项任务已自动生效并排进日程：{{names}} 等。", values) : t("{{count}} 项任务已自动生效并排进日程：{{names}}。", values);
-    sayToPerson(store, workspaceId, said + t("它们无需本人选择、授权或对外动作；24 小时内可在待确认页「最近自动生效」撤销。"),
+    sayToPerson(store, workspaceId, said + t("它们无需本人选择或授权，对外的那一步由本人自己做；24 小时内可在待确认页「最近自动生效」撤销。"),
       "auto_approved", `auto-approved:${told.map((item) => item.id).sort().join(",")}`, [{ label: t("去看看"), href: "/approvals" }], now);
   }
   return approved.map((item) => item.id);

@@ -54,7 +54,7 @@ test("work that takes effect by itself is announced in the workspace's language"
     state: "awaiting_plan_approval", riskTier: "routine", estimate, payload: { family: "preparation", humanCore: [] } });
   expect(autoApproveEligible(store, "w")).toEqual(["prep"]);
   const card = store.listRecentNudges("w", "2000-01-01T00:00:00.000Z")[0]!.payload.card as { clarify: { question: string; options: Array<{ label: string }> } };
-  expect(card.clarify.question).toBe("1 task took effect by itself and is on the schedule: \"Organize review notes\". None of them needs your choice, permission or an outside action; undo any within 24 hours under \"Recently took effect\" on the Decisions page.");
+  expect(card.clarify.question).toBe("1 task took effect by itself and is on the schedule: \"Organize review notes\". None of them needs your choice or permission, and any step that leaves this computer is yours to do; undo any within 24 hours under \"Recently took effect\" on the Decisions page.");
   expect(card.clarify.options.map((option) => option.label)).toEqual(["Take a look", "Got it"]);
   store.close();
 });

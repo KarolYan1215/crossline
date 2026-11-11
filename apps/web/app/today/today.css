@@ -123,6 +123,7 @@ body:has(.today-page) .running-head{background:var(--ds-bg)}
 .ov-grid a:hover .ov-label{color:var(--ink);text-decoration:underline}
 .ov-label{font-size:12px;color:var(--graphite)}
 .ov-value{font-size:20px;font-weight:600;line-height:1.15;overflow-wrap:anywhere}
+.ov-sub{margin-left:6px;font-size:13px;font-weight:400;color:var(--ds-muted)}
 .ov-grid a[data-alarm] .ov-value{color:var(--ds-alarm-ink)}
 .ov-grid .time-bar{min-width:0;height:4px;border-radius:2px;overflow:hidden;background:var(--ds-line)}
 .ov-grid .time-bar-fill{background:var(--ds-accent)}

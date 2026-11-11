@@ -104,11 +104,13 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
   const blocks: NudgeBlock[] = todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {
     const order = byId.get(block.id.split(":")[1]!);
     const due = order ? dueOf(order) : "";
-    if (!order || !due || due < today || due > addDays(today, 7)) return [];
+    // Every work block is said when it comes up (the person's decision of 2026-11-11, W-258); only its due day is said when within the week.
+    if (!order) return [];
+    const dueDay = due && due >= today && due <= addDays(today, 7) ? due : "";
     const stepId = /^v\d+s\d+$/.test(block.id.split(":")[2] ?? "") ? block.id.split(":")[2]! : "";
     const prepared = readyFiles.get(order.id);
     const firstAction = stepId ? store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((step) => step.id === stepId)?.firstAction : undefined;
-    return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", start: block.start, end: block.end, dueDay: due,
+    return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", start: block.start, end: block.end, dueDay,
       ...(prepared?.length ? { prepared } : {}), ...(firstAction ? { firstAction } : {}), ...(block.tag === OVER_CAPACITY_TAG ? { overCapacity: true } : {}) }];
   });
   // Every work block of today, deadline or not, for the completion check.

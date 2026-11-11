@@ -25,11 +25,12 @@ test("backplanner refuses invented quotes, unknown dependencies and implausible 
     dateCandidates: [], blockers: [] }, ["稳定推进实验"])).toThrow("BACKPLAN_TASK_SIZE");
 });
 
-test("approved goal expands into sourced, bound drafts once; a step that reaches outside stays a proposal", async () => {
+test("approved goal expands into sourced, bound drafts once; a step the person sends out themselves takes effect (2026-11-11)", async () => {
   const store = new CrosslineStore(":memory:");
   store.saveMilestone({ id: "m", ownerId, workspaceId, identityId: "research", projectId: "p",
     title: "稳定推进实验", status: "approved", version: 1 });
-  // Steps of an approved milestone take effect by themselves, unless they need the person: this one sends something out.
+  // Steps of an approved milestone take effect by themselves. Sending something out used to hold it; since 2026-11-11 the person's own
+  // send does not (only the assistant's would), so this one takes effect too, still marked high risk.
   const runtime = fakeRuntime([JSON.stringify({ steps: [step({ family: "deep_work", intent: "把实验方案发送给导师" })], dateCandidates: [], blockers: [] })],
     "crossline:crossline-goal-backplanner");
   const backplan = createGoalBackplanner(store, workspaceId, "C:\\repo", () => runtime.rpc);
@@ -37,7 +38,7 @@ test("approved goal expands into sourced, bound drafts once; a step that reaches
   expect(first.state).toBe("proposed");
   const draft = store.listWorkOrders(workspaceId)[0];
   expect(draft).toMatchObject({ identityId: "research", projectId: "p", milestoneId: "m",
-    state: "awaiting_plan_approval", riskTier: "high_risk",
+    state: "approved", riskTier: "high_risk",
     payload: { backplan: { sourceQuote: "稳定推进实验" } } });
   expect(await backplan("m")).toEqual(first);
   expect(runtime.turns()).toBe(1);

@@ -65,10 +65,10 @@ describe("energy-aware planning", () => {
     expect(result.plan.blocks.map((block) => block.taskId)).toEqual(["prepare", "submit"]);
   });
 
-  test("a calibrated (non-low) confidence reserves p50, not the conservative p85 low confidence reserves", async () => {
-    // Same p25/p50/p85 spread, same everything else — only `confidence` differs. This is the direct
-    // proof that `durationOf`'s `confidence === "low" ? p85 : p50` branch is not dead code: nothing in
-    // this codebase ever emitted anything but "low" until real personal-history calibration existed.
+  test("an estimate with no measured time behind it is reserved at p50 plus 10%, not at p85; a calibrated one at p50 (2026-11-11)", async () => {
+    // Same p25/p50/p85 spread, same everything else — only `confidence` differs. The person's decision of 2026-11-11 (W-255): with no
+    // samples the plan does not guess at the slow case, it adds 10% to the usual time and lets measured time correct it; reserving p85
+    // stacked on the low-energy efficiency gave a 90-minute step 3.5 hours of one day.
     const estimate = { p25Minutes: 30, p50Minutes: 50, p85Minutes: 90 };
     const uncalibrated = await planSchedule({ now: start, horizonDays: 1, mode: "asap", tasks: [
       { id: "task", title: "作业", estimate: { ...estimate, confidence: "low" as const }, inputsReady: true, deadlineTier: 2 }
@@ -79,7 +79,7 @@ describe("energy-aware planning", () => {
 
     const minutesOf = (result: typeof uncalibrated) =>
       result.plan.blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
-    expect(minutesOf(uncalibrated)).toBe(estimate.p85Minutes);
+    expect(minutesOf(uncalibrated)).toBe(55);
     expect(minutesOf(calibrated)).toBe(estimate.p50Minutes);
   });
 
@@ -509,15 +509,15 @@ describe("energy-aware planning", () => {
     const task = (extra: object) => ({ id: "long", title: "长作业", inputsReady: true, deadlineTier: 2 as const,
       estimate: { p25Minutes: 90, p50Minutes: 180, p85Minutes: 360, confidence: "low" as const }, ...extra });
 
-    test("an uninterruptible low-confidence job is reserved at what one slot can hold, not at an unreachable p85", async () => {
-      // p85 is 360 but the longest free stretch is 240: asking for 360 in one piece could never succeed.
+    test("an uninterruptible low-confidence job is reserved at what one slot can hold, not at an unreachable buffer", async () => {
+      // The reserve is 198 (p50 180 plus 10%) but the longest free stretch is 190: asking for 198 in one piece could never succeed.
       const result = await planSchedule({ now: start, horizonDays: 3, mode: "asap", tasks: [task({ interruptible: false })],
-        availability: [slot(0, "14:00", "18:00"), slot(1, "14:00", "16:00")], frozenBlocks: [] });
+        availability: [slot(0, "14:00", "17:10"), slot(1, "14:00", "16:00")], frozenBlocks: [] });
       expect(result.status).toBe("feasible");
       const [block] = result.plan.blocks;
-      expect((Date.parse(block!.end) - Date.parse(block!.start)) / 60_000).toBe(240);
+      expect((Date.parse(block!.end) - Date.parse(block!.start)) / 60_000).toBe(190);
       expect(result.notes).toEqual([expect.objectContaining({ taskId: "long", code: "BUFFER_CLAMPED" })]);
-      expect(result.notes![0]!.message).toContain("240");
+      expect(result.notes![0]!.message).toContain("190");
     });
 
     test("when even the expected time will not fit one slot, the blocker names the longest slot", async () => {
@@ -534,7 +534,8 @@ describe("energy-aware planning", () => {
         availability: [slot(0, "14:00", "17:00"), slot(1, "14:00", "17:00"), slot(2, "14:00", "17:00")], frozenBlocks: [] });
       expect(result.status).toBe("feasible");
       const minutes = result.plan.blocks.reduce((sum, block) => sum + (Date.parse(block.end) - Date.parse(block.start)) / 60_000, 0);
-      expect(minutes).toBe(360);
+      // p50 180 plus 10%, on the five-minute grid (2026-11-11; p85 360 before).
+      expect(minutes).toBe(200);
       expect(result.notes).toBeUndefined();
     });
 
@@ -607,7 +608,7 @@ describe("energy-aware planning", () => {
     expect(actions.lowEnergy).toBeUndefined();
   });
 
-  test("low-confidence estimates reserve p85 instead of p50", async () => {
+  test("low-confidence estimates reserve p50 plus 10%, not bare p50 (2026-11-11)", async () => {
     const result = await planSchedule({
       now: start,
       horizonDays: 14,
@@ -619,7 +620,7 @@ describe("energy-aware planning", () => {
         inputsReady: true,
         deadlineTier: 2
       }],
-      availability: [{ start: "2026-09-14T14:00:00.000Z", end: "2026-09-14T14:40:00.000Z", energy: "high" }],
+      availability: [{ start: "2026-09-14T14:00:00.000Z", end: "2026-09-14T14:30:00.000Z", energy: "high" }],
       frozenBlocks: []
     });
     expect(result.status).toBe("infeasible");

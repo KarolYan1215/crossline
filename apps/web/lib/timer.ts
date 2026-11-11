@@ -1,6 +1,6 @@
 import "server-only";
 import type { AccessContext } from "@crossline/core";
-import { getStore, resolvedEstimate } from "./crossline";
+import { getStore, resolvedEstimate, STEP_FOCUSED } from "./crossline";
 
 export type ActiveTimer = {
   workOrderId: string; intent: string; stepId?: string; stepTitle?: string;
@@ -27,7 +27,11 @@ export function activeTimers(ctx: AccessContext): ActiveTimer[] {
     const last = execution.interruptions.at(-1);
     const paused = Boolean(last && !last.resumedAt);
     const sessionStart = last?.resumedAt ?? execution.startedAt;
-    const step = store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((item) => item.status === "planned" && item.schedulable);
+    // The step this session was started on (a block's own step, `focusStep`), while it is still open; else the task's first open one.
+    const open = (store.getStepPlan(ctx.workspaceId, order.id)?.steps ?? []).filter((item) => item.status === "planned" && item.schedulable);
+    const focused = store.listEvents(ctx.workspaceId, { type: STEP_FOCUSED, entityId: order.id })
+      .filter((event) => event.createdAt >= execution.startedAt).at(-1)?.payload as { stepId?: string } | undefined;
+    const step = open.find((item) => item.id === focused?.stepId) ?? open[0];
     const before = executions.filter((item) => item.workOrderId === order.id && item.durationObserved && item.id !== execution.id && item.endedAt)
       .reduce((sum, item) => sum + Math.max(0, Math.round((Date.parse(item.endedAt!) - Date.parse(item.startedAt)) / 60_000) - item.pauseMinutes), 0)
       + Math.max(0, Math.round((Date.parse(sessionStart) - Date.parse(execution.startedAt)) / 60_000) - execution.pauseMinutes);

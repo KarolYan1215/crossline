@@ -1773,6 +1773,20 @@ export function inputsReady(order: { state: string; payload: unknown }): boolean
   return order.state === "approved" && !((order.payload as { materialContract?: unknown[] } | undefined)?.materialContract ?? []).length;
 }
 
+/**
+ * The step a session is about: started from a block, it is that block's step, not the task's first open one (2026-11-11, W-258: the
+ * owner started step 7 from its block and the timer and the completion sheet said step 5). Kept as an event the timer reads
+ * (`activeTimers`), so the executions table needs no new column. A step that is not the task's or is no longer open is not taken.
+ */
+export const STEP_FOCUSED = "task.step_focused";
+export function focusStep(ctx: AccessContext, workOrderId: string, stepId: string): boolean {
+  const store = getStore();
+  if (!store.getStepPlan(ctx.workspaceId, workOrderId)?.steps.some((step) => step.id === stepId && step.status === "planned")) return false;
+  store.appendEvent({ ownerId: ctx.principalId, workspaceId: ctx.workspaceId, idempotencyKey: `${STEP_FOCUSED}:${workOrderId}:${randomUUID()}`,
+    type: STEP_FOCUSED, entityId: workOrderId, payload: { stepId } });
+  return true;
+}
+
 export function startWorkOrderExecution(ctx: AccessContext, workOrderId: string, at?: string): ExecutionResult {
   const store = getStore();
   const workOrder = findWorkOrder(ctx.workspaceId, workOrderId);
@@ -2363,6 +2377,24 @@ export function acceptanceProgress(timestamps: string[], timeZone: string, now: 
   return { streakDays, weekCount };
 }
 
+/**
+ * Steps finished since `since`, each counted once: one whose latest change says done and which was marked done inside the window. A step
+ * opened again afterwards does not count. Shown beside the weekly task count (the person's decision of 2026-11-11, W-258): long tasks
+ * are many steps, and a week of finished steps read as 「本周完成 0 件」.
+ */
+export function stepsDoneSince(events: Array<{ entityId: string; createdAt: string; payload: unknown }>, since: Date): number {
+  const latest = new Map<string, { status: string; at: string; doneAt?: string }>();
+  for (const event of [...events].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    const { stepId, status } = (event.payload ?? {}) as { stepId?: string; status?: string };
+    if (!stepId || !status) continue;
+    const key = `${event.entityId}|${stepId}`;
+    const previous = latest.get(key);
+    const doneAt = status === "done" ? (previous?.status === "done" ? previous.doneAt : event.createdAt) : undefined;
+    latest.set(key, { status, at: event.createdAt, ...(doneAt ? { doneAt } : {}) });
+  }
+  return [...latest.values()].filter((item) => item.status === "done" && item.doneAt && Date.parse(item.doneAt) >= since.getTime()).length;
+}
+
 /** Interruptions per active hour, per day, from real executions — never from a guess about the day. */
 function interruptionDensity(workspaceId: string): Array<{ day: string; perActiveHour: number }> {
   const byDay = new Map<string, { interruptions: number; activeMinutes: number }>();
@@ -2490,12 +2522,12 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
     weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone
   }).format(now);
   const acceptedAt = firstAcceptedAt(ctx.workspaceId);
-  const progress = acceptanceProgress([...acceptedAt.values()], timeZone, now);
+  const progress = { ...acceptanceProgress([...acceptedAt.values()], timeZone, now),
+    weekSteps: stepsDoneSince(store.listEvents(ctx.workspaceId, { type: "task.step_progress" }), new Date(now.getTime() - 7 * 86_400_000)) };
 
   // Today's own capacity read: the weekly pattern for today only, not the calendar-adjusted multi-week
   // forecast Plan already owns.
   const today = planToday(ctx, now);
-  const committedMinutes = active.reduce((sum, order) => sum + resolvedEstimate(ctx, order).p50Minutes, 0);
 
   // Reuses the same Plan-page scheduling read (`loadCurrentPlan` → `scheduledBlocks`) so Today's line and
   // the B lens agree on what "14:00–14:40" means instead of Today inventing a second notion of "when".
@@ -2508,6 +2540,10 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
   const busyToday = plan.blocks.filter((block) => (block.day ?? today) === today && !/^(scheduled|proposed|optional):/.test(block.id))
     .map((block) => ({ day: today, start: block.start, end: block.end }));
   const availableMinutes = remainingMinutes(availableSlots(readAvailability(ctx), [today], busyToday),
+    formatInTimeZone(now, timeZone, "HH:mm"));
+  // 「待办」 is the work the calendar holds for the rest of today (the person's decision of 2026-11-11, W-259): it used to be the p50 of
+  // every task in progress, 48 hours under a label that said today.
+  const committedMinutes = remainingMinutes(plan.blocks.filter((block) => (block.day ?? today) === today && block.id.startsWith("scheduled:")),
     formatInTimeZone(now, timeZone, "HH:mm"));
   const blockByWorkOrderToday = new Map(plan.blocks
     .filter((block) => (block.day ?? today) === today && block.id.startsWith("scheduled:"))

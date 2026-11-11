@@ -88,8 +88,17 @@ const floorGrid = (ms: number) => Math.floor(ms / GRID) * GRID;
 const ceilMinutes = (minutes: number) => Math.ceil(minutes / GRID_MINUTES - 1e-9) * GRID_MINUTES;
 const MIN_SEGMENT = 15;
 
-const durationOf = (task: PlannerTask) => task.estimate.confidence === "low"
-  ? task.estimate.p85Minutes : task.estimate.p50Minutes;
+/**
+ * What the calendar holds for a task. With no measured time behind the estimate (`confidence: "low"`) the plan adds 10% to the usual
+ * time and lets measured time correct it (the person's decision of 2026-11-11, W-255): reserving p85 here, multiplied again by the
+ * low-energy efficiency, gave a 90-minute step 3.5 hours of one day. Never more than p85, which `clampContinuousBuffers` lowers to
+ * the longest slot for work that has to sit in one piece. A calibrated estimate is held at its p50.
+ */
+export function reserveMinutes(estimate: { p50Minutes: number; p85Minutes: number; confidence?: string | undefined }): number {
+  return estimate.confidence === "low"
+    ? Math.max(estimate.p50Minutes, Math.min(estimate.p85Minutes, Math.ceil(estimate.p50Minutes * 1.1 - 1e-9))) : estimate.p50Minutes;
+}
+const durationOf = (task: PlannerTask) => reserveMinutes(task.estimate);
 const term = (coefficient: number, name: string) => `${coefficient < 0 ? "-" : "+"} ${Math.abs(coefficient)} ${name}`;
 const expression = (terms: Array<[number, string]>) => terms.map(([value, name]) => term(value, name)).join(" ") || "0";
 const valueOf = (columns: Record<string, { Primal?: number }>, name: string) => columns[name]?.Primal ?? 0;
@@ -177,7 +186,7 @@ function longestSlotMinutes(slots: Slot[], task: PlannerTask): number {
 }
 
 /**
- * A low-confidence estimate is reserved at p85, which is the right instinct for work that can be split
+ * A low-confidence estimate is reserved with a buffer (`reserveMinutes`; p85 before 2026-11-11), which is the right instinct for work that can be split
  * across days and the wrong one for work that has to sit in one slot: a 90–360 minute job marked
  * uninterruptible asked for a single 360-minute block, which almost no availability pattern contains, so
  * it never reached the schedule at all. When p85 will not fit the longest slot but the expected time (p50)
@@ -198,11 +207,12 @@ function clampContinuousBuffers(input: PlanningInput): { input: PlanningInput; n
       message: t("{{title}}预计 {{p50}} 分钟，超过一次能连续做的 {{max}} 分钟，已分成几段排入", { title: task.title, p50: task.estimate.p50Minutes, max: MAX_SITTING_MINUTES }) });
     if (task.interruptible !== false || task.estimate.confidence !== "low") return task;
     const longest = longestSlotMinutes(slots, task);
-    const { p50Minutes, p85Minutes } = task.estimate;
-    if (p85Minutes <= longest || p50Minutes > longest) return task;
+    const { p50Minutes } = task.estimate;
+    const reserve = durationOf(task);
+    if (reserve <= longest || p50Minutes > longest) return task;
     notes.push({ taskId: task.id, code: "BUFFER_CLAMPED",
       message: t("{{title}}要一口气做完，按保守估计需要 {{p85}} 分钟，但最长的连续空档只有 {{longest}} 分钟；已按 {{longest}} 分钟预留（预期用时 {{p50}} 分钟）",
-        { title: task.title, p85: p85Minutes, longest, p50: p50Minutes }) });
+        { title: task.title, p85: reserve, longest, p50: p50Minutes }) });
     return { ...task, estimate: { ...task.estimate, p85Minutes: longest } };
   });
   return { input: { ...input, tasks }, notes };

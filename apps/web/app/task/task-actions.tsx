@@ -30,7 +30,7 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; code?: 
  * countdown), 暂停 with a reason / 继续计时 (a running session), and 交给助手 when the system can do the work or one of its steps.
  * Archiving sits in the overflow menu. Completion and evidence are in `TaskCompletion` (the task's own page, or a sheet opened from here).
  */
-export function TaskActions({ workOrderId, state, approvable = true, paused, agentReady, agentStepId, onOpen, offline, beforeStart, iconic = false, labelPrimary = false, children }: {
+export function TaskActions({ workOrderId, state, approvable = true, paused, agentReady, agentStepId, startStepId, onOpen, offline, beforeStart, iconic = false, labelPrimary = false, children }: {
   /** Icons in place of the buttons' words (a row on Today); the words stay as each button's name and tip. */
   iconic?: boolean;
   /** With `iconic`, the one primary press keeps its words beside the icon (the task cards, 2026-10-28). */
@@ -47,6 +47,8 @@ export function TaskActions({ workOrderId, state, approvable = true, paused, age
    * (`lockOnStart`), so starting from a block and starting from a card are the same path.
    */
   beforeStart?: (() => Promise<string | null>) | undefined;
+  /** The step 开始计时 times: a block's own step when started from the block (W-258); without it, the task's first open step. */
+  startStepId?: string | undefined;
   /** More buttons beside the primary one (the day panel's 完成并提交材料 and 推迟), before the overflow menu. */
   children?: ReactNode;
 }) {
@@ -87,7 +89,7 @@ export function TaskActions({ workOrderId, state, approvable = true, paused, age
     try { if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission(); } catch { /* unsupported */ }
     void run(async () => {
       const refused = beforeStart ? await beforeStart() : null;
-      return refused ? { ok: false, message: refused } : execution({ action: "start" });
+      return refused ? { ok: false, message: refused } : execution({ action: "start", ...(startStepId ? { stepId: startStepId } : {}) });
     }, () => { location.href = `/workbench/${encodeURIComponent(workOrderId)}`; });
   };
   const delegate = (category?: AgentCategory) => void run(async () => {

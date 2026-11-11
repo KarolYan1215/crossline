@@ -71,16 +71,17 @@ test("rejection blocks the candidate and high risk never auto approves", () => {
   const { store, add } = setup();
   add("reject", "整理本地记录", "routine");
   add("external", "发送邮件给外部", "routine");
-  add("property", "整理财产交易", "high_risk");
+  // Held for the login only the person can give (「交易」 alone held it until the 2026-11-11 rule change).
+  add("property", "登录券商账户导出交易记录", "high_risk");
   setPermissionMode(TEST_CTX, true);
   const candidates = permissionCandidates(TEST_CTX);
-  expect(candidates.find((item) => item.id === "external")?.eligible).toBe(false);
+  // The person's own send takes effect since 2026-11-11 (only the assistant's waits); high risk still never does.
+  expect(candidates.find((item) => item.id === "external")?.eligible).toBe(true);
   expect(candidates.find((item) => item.id === "property")?.eligible).toBe(false);
   expect(rejectPermissionCandidate(TEST_CTX, candidates.find((item) => item.id === "reject")!.key)).toEqual({ ok: true });
   for (let t = 0; t <= 400_000; t += 10_000)
     permissionHeartbeat(TEST_CTX, candidates.map((item) => item.key), true, t);
-  expect(store.listWorkOrders(TEST_CTX.workspaceId).filter((item) => ["external", "property"].includes(item.id))
-    .every((item) => item.state === "awaiting_plan_approval")).toBe(true);
+  expect(store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === "property")?.state).toBe("awaiting_plan_approval");
   expect(store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.id === "reject")?.state).toBe("blocked");
   expect(store.listEvents(TEST_CTX.workspaceId, { type: "permission.rejected" })).toHaveLength(1);
 });

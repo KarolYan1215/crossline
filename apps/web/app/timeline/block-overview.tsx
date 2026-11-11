@@ -156,7 +156,7 @@ export function BlockOverview({ item, items, today, labels, details, compact = f
       <Prepared detail={detail} />
     </>}
     {detail && <TaskActions workOrderId={detail.id} state={detail.state} paused={detail.paused} agentReady={Boolean(agentStepId)} agentStepId={agentStepId}
-      beforeStart={() => lockOnStart(item, locale)} onOpen={() => setOpen(true)}
+      beforeStart={() => lockOnStart(item, locale)} startStepId={item.stepId} onOpen={() => setOpen(true)}
       offline={{ ownerId: detail.viewerId, workspaceId: detail.workspaceId, intent: detail.intent }}>
       {["approved", "ready_for_human", "active"].includes(detail.state) && <button type="button" onClick={() => setCompleting(true)}>{t("完成并提交材料")}</button>}
       {live && !FINISHED.includes(detail.state) && <button type="button" aria-expanded={postponing} onClick={() => setPostponing((value) => !value)}>{t("推迟")}</button>}

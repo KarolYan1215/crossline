@@ -256,3 +256,21 @@ test("Today's hours still free are not reduced by where waiting proposals would 
   // 10:00 to 20:00 Chicago, nothing on the calendar: ten hours, whatever the preview pencils in.
   expect((await loadDashboard(TEST_CTX)).todayCapacity.availableMinutes).toBe(600);
 });
+
+test("Today's 「待办」 is the work the calendar holds for the rest of today, not every open task's p50 (2026-11-11, W-259)", async () => {
+  // The owner's Today said 待办 48 时 25 分 under the label 「今天待办的分钟数」: it was the usual time of every task in progress.
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T15:00:00.000Z");
+  globalThis.crosslineStore = new CrosslineStore(":memory:");
+  setup([{ days: [5], start: "08:00", end: "13:00", energy: "high" }]);
+  const today = (await loadCurrentPlan(TEST_CTX)).blocks
+    .filter((block) => block.id.startsWith("scheduled:") && (block.day ?? "2026-09-18") === "2026-09-18");
+  expect(today.length).toBeGreaterThan(0);
+  // From 10:00 Chicago on, only what is still ahead counts.
+  const ahead = today.reduce((sum, block) => {
+    const minutes = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3, 5));
+    return sum + Math.max(0, minutes(block.end) - Math.max(minutes(block.start), 600));
+  }, 0);
+  const { todayCapacity } = await loadDashboard(TEST_CTX);
+  expect(todayCapacity.committedMinutes).toBe(ahead);
+  expect(todayCapacity.committedMinutes).toBeLessThanOrEqual(180);
+});

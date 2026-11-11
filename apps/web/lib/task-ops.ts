@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import type { AccessContext, TaskOp } from "@crossline/core";
-import { addWaitingForOrder, archiveWorkOrder, effectiveSchedulePreferences, getStore, planToday, startWorkOrderExecution } from "./crossline";
+import { addWaitingForOrder, archiveWorkOrder, effectiveSchedulePreferences, focusStep, getStore, planToday, startWorkOrderExecution } from "./crossline";
 import { applyChange } from "./impact";
 import { editSteps, recordStepProgress, reportProgress, requestStepReplan } from "./steps";
 import { requestTutorial } from "./tutorial";
@@ -56,7 +56,12 @@ export async function applyTaskOp(ctx: AccessContext, workOrderId: string, op: T
     case "note": return recordTaskNote(ctx, workOrderId, op.text);
     case "progress": { const result = reportProgress(ctx, workOrderId, op.text); return result.ok ? { ok: true } : result; }
     case "archive": return archiveWorkOrder(ctx, workOrderId, op.text);
-    case "start": return startWorkOrderExecution(ctx, workOrderId);
+    case "start": {
+      // From a block's prompt: the session is about that block's step (W-258, 2026-11-11).
+      const result = startWorkOrderExecution(ctx, workOrderId);
+      if (result.ok && op.stepId) focusStep(ctx, workOrderId, op.stepId);
+      return result;
+    }
     case "tutorial": return requestTutorial(ctx, workOrderId);
     default: return { ok: false, code: "TASK_OP_UNKNOWN" };
   }

@@ -30,10 +30,12 @@ const clockOf = (minutes: number) => `${String(Math.floor(minutes / 60)).padStar
  * title reads in full and the step sits under it. Blocks that share time sit side by side. A scheduled block's bottom edge is dragged to
  * change its duration; `aside` is the column beside it (the quick actions), which used to restate each block's title.
  */
-export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, selectedId, nextId, onSelect, onResize, aside }: {
+export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, selectedId, nextId, onSelect, onStart, onResize, aside }: {
   day: string; items: TimelineItem[]; deadlines: TimelineDeadline[]; nowMinute: number | undefined; labels: LineLabels;
   /** Stretches of the day that are not available (sleep, meals), drawn pale. */
   quiet?: Array<[string, string]> | undefined; selectedId?: string | undefined; onSelect?: ((item: TimelineItem) => void) | undefined;
+  /** A work block double-clicked: start timing its step (W-258). */
+  onStart?: ((item: TimelineItem) => void) | undefined;
   /** The next block to start (outlined): what the panel beside the day shows while nothing is picked. */
   nextId?: string | undefined;
   /** A scheduled block's bottom edge dragged: how many minutes longer (or shorter, negative) it should be. */
@@ -92,7 +94,7 @@ export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, s
                 "data-line": lineOf(item.identityId), "data-kind": item.kind, "data-missed": item.missed || undefined, "data-agent": item.agent, "data-work-order": item.workOrderId,
                 "data-clash": state === "clash" || undefined, "data-overlap-ok": state === "allowed" || undefined, "aria-pressed": selectedId === item.id,
                 "data-next": nextId === item.id || undefined,
-                title, onClick: () => onSelect?.(item)
+                title, onClick: () => onSelect?.(item), onDoubleClick: () => onStart?.(item)
               };
               // Too short for a line of text: a bare colour bar at its true time; what it is shows on hover, in the 「+N 项」 list and beside the day.
               if (piece.kind === "bar") return <button type="button" key={item.id} className="dv-bar" {...common} aria-label={title}
@@ -142,9 +144,10 @@ export function DayTimeline({ day, items, deadlines, nowMinute, labels, quiet, s
 const HOUR_PX = 44;
 
 /** Seven days side by side, each with the same vertical hour axis, so the shape of the week reads at a glance. */
-export function WeekView({ anchor, today, items, deadlines, labels, selectedId, onSelect, onOpenDay }: {
+export function WeekView({ anchor, today, items, deadlines, labels, selectedId, onSelect, onStart, onOpenDay }: {
   anchor: string; today: string; items: TimelineItem[]; deadlines: TimelineDeadline[]; labels: LineLabels;
   selectedId?: string | undefined; onSelect?: ((item: TimelineItem) => void) | undefined; onOpenDay?: ((day: string) => void) | undefined;
+  onStart?: ((item: TimelineItem) => void) | undefined;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -171,7 +174,7 @@ export function WeekView({ anchor, today, items, deadlines, labels, selectedId, 
               return <button type="button" key={item.id} className="wk-block" data-line={lineOf(item.identityId)} data-kind={item.kind} data-missed={item.missed || undefined} data-work-order={item.workOrderId} aria-pressed={selectedId === item.id}
                 data-warn={item.tag === OVER_CAPACITY_TAG || undefined}
                 data-clash={overlapState.get(item.id) === "clash" || undefined} data-overlap-ok={overlapState.get(item.id) === "allowed" || undefined}
-                style={{ top, height, left: `${(column / columns) * 100}%`, width: `${100 / columns}%` }} onClick={() => onSelect?.(item)}
+                style={{ top, height, left: `${(column / columns) * 100}%`, width: `${100 / columns}%` }} onClick={() => onSelect?.(item)} onDoubleClick={() => onStart?.(item)}
                 title={`${item.title} ${timeText(item)}${item.identityId ? ` · ${labels[item.identityId] ?? item.identityId}` : ""}${overlapState.get(item.id) ? ` · ${t(OVERLAP_TEXT[overlapState.get(item.id)!])}` : ""}${item.tag === OVER_CAPACITY_TAG ? ` · ${t(item.tag)}` : ""}`}>
                 <b>{item.title}</b><small>{item.start}</small>
               </button>;

@@ -163,3 +163,19 @@ test("a block of deadline work past the measured cap says so when it comes up; n
   const [plain] = planNudges(base({ blocks: [block], clock: "14:50" }));
   expect(plain!.text).not.toContain("超出实测");
 });
+
+test("every work block is said when it comes up, deadline or not, until ten minutes after its start; 开始计时 times that block's step (2026-11-11, W-258)", () => {
+  // The person's decision of 2026-11-11: when a step's time comes, a prompt they can answer in place must appear. It used to come only
+  // for work due within a week and only in the fifteen minutes before, so a page opened at 15:02 said nothing.
+  const free = base({ blocks: [{ ...base().blocks[0]!, dueDay: "" }] });
+  const [nudge] = planNudges(free);
+  expect(nudge).toMatchObject({ kind: "block_start" });
+  expect(nudge!.text).not.toContain("截止");
+  expect((nudge!.buttons[0] as { action?: { args?: { stepId?: string } } }).action?.args?.stepId).toBe("v1s1");
+  expect(planNudges(base({ clock: "15:00" }))[0]).toMatchObject({ kind: "block_start" });
+  expect(planNudges(base({ clock: "15:09" }))[0]).toMatchObject({ kind: "block_start" });
+  expect(planNudges(base({ clock: "15:10" }))).toEqual([]);
+  // Already timing it: nothing to say.
+  expect(planNudges(base({ clock: "15:02", timer: { orderId: "hw2", title: "", stepId: "v1s1", stepTitle: "", startedAt: "2026-10-10T20:01:00.000Z", usualMinutes: 30 } as NonNullable<NudgeInput["timer"]> }))
+    .filter((item) => item.kind === "block_start")).toEqual([]);
+});

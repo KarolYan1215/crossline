@@ -158,7 +158,7 @@ export function planHeadDiffers(a: ScheduleBlock[], b: ScheduleBlock[], now: Dat
   return left.size !== right.size || [...left].some((key) => !right.has(key));
 }
 
-export { planSchedule, type SolveOptions, type ModelSolver, type HighsSolution } from "./optimizer";
+export { planSchedule, reserveMinutes, type SolveOptions, type ModelSolver, type HighsSolution } from "./optimizer";
 export { scheduleInputHash } from "./input-hash";
 export { forecastGoals, DEADLINE_MARGIN_DAYS, type ForecastGoal, type ForecastDay, type ForecastResult, type ForecastWeek, type GoalForecast, type WeekDemand } from "./forecast";
 

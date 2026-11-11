@@ -55,6 +55,7 @@ export const CONFIRM_HREF = "/confirm/{message}";
 
 /** A scheduled block of work that bears on a deadline within a week (the only blocks reminded about). */
 export type NudgeBlock = {
+  /** `dueDay` is "" for work with no due day within the week: such a block is still said when it comes up (2026-11-11, W-258). */
   id: string; orderId: string; stepId: string; title: string; step: string; start: string; end: string; dueDay: string;
   /** What the assistant has ready for this work (file names), said when the block comes up. */
   prepared?: string[];
@@ -129,6 +130,8 @@ export type NudgeInput = {
 
 export const DAILY_CAP: Record<NotifyLevelName, number> = { off: 0, less: 3, normal: 6, more: 10 };
 const START_LEAD_MINUTES = 15;
+/** A block not started yet is still said up to this many minutes after its start (a page opened at 15:02 used to say nothing; W-258). */
+const START_LATE_MINUTES = 10;
 /** A block is asked about within this many minutes of its end; after that the next day's `missed_block` question covers it. */
 const CONFIRM_WINDOW_MINUTES = 30;
 const OVERRUN_RATIO = 1.5;
@@ -150,17 +153,18 @@ export function nudgeCandidates(input: NudgeInput): PlannedNudge[] {
   for (const block of input.blocks) {
     const start = minutesOf(block.start), end = minutesOf(block.end);
     const label = quoted(t, block.title, block.step);
-    if (now >= start - START_LEAD_MINUTES && now < start && input.timer?.orderId !== block.orderId) {
+    if (now >= start - START_LEAD_MINUTES && now < start + START_LATE_MINUTES && input.timer?.orderId !== block.orderId) {
       const prepared = block.prepared?.length ? block.prepared.slice(0, 3).join(en ? ", " : "、") : "";
       const text = [
-        t("{{start}} 做{{label}}（{{minutes}} 分），关系到 {{due}} 的截止。", { start: block.start, label, minutes: end - start, due: md(block.dueDay) }),
+        block.dueDay ? t("{{start}} 做{{label}}（{{minutes}} 分），关系到 {{due}} 的截止。", { start: block.start, label, minutes: end - start, due: md(block.dueDay) })
+          : t("{{start}} 做{{label}}（{{minutes}} 分）。", { start: block.start, label, minutes: end - start }),
         block.overCapacity ? t("超出实测 · 可能来不及。") : "",
         block.firstAction ? t("第一步：{{action}}。", { action: block.firstAction.replace(/[。．.！!；;\s]+$/u, "") }) : "",
         !prepared ? "" : block.prepared!.length > 3 ? t("已备好：{{items}} 等 {{count}} 份。", { items: prepared, count: block.prepared!.length })
           : t("已备好：{{items}}。", { items: prepared })
       ].filter(Boolean).join(en ? " " : "");
       out.push({ kind: "block_start", fingerprint: `start:${block.id}:${input.today}`, urgent: true, counted: false, text,
-        buttons: [{ kind: "action", label: t("开始计时"), action: op(block.orderId, "start", t("开始{{label}}", { label })) },
+        buttons: [{ kind: "action", label: t("开始计时"), action: op(block.orderId, "start", t("开始{{label}}", { label }), block.stepId ? { stepId: block.stepId } : {}) },
           { kind: "action", label: t("推到明天"), action: op(block.orderId, "defer", t("{{label}}推到明天", { label }), { date: input.tomorrow }), more: true }, mute] });
     }
   }

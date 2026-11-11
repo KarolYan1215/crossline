@@ -16,7 +16,9 @@ function Cell({ href, label, value, title, alarm, children }: { href: string; la
  * hours), the minutes of work due today (the calendar, with the load bar the head used to carry), what waits on 待确认 (the same shared
  * count as the badge, red while anything waits) and what was finished this week (the weekly review).
  */
-export function OverviewCard({ availableMinutes, committedMinutes, weekCount, basis }: { availableMinutes: number; committedMinutes: number; weekCount: number;
+export function OverviewCard({ availableMinutes, committedMinutes, weekCount, weekSteps = 0, basis }: { availableMinutes: number; committedMinutes: number; weekCount: number;
+  /** Steps finished in the last seven days, said beside the tasks (2026-11-11, W-258). */
+  weekSteps?: number;
   /** What the plan is built on (docs/plans/closed-loop-1030.md §1), said on hover over 可用. */
   basis?: CapacityLine & { statedWeekly: number } }) {
   const t = useT();
@@ -28,10 +30,11 @@ export function OverviewCard({ availableMinutes, committedMinutes, weekCount, ba
     <ul className="ov-grid">
       <Cell href="/plan#time" label={t("可用", { context: "today" })} value={formatMinutes(availableMinutes, locale)} title={basis ? `${t("今天还可用的时间，按可用时段扣掉日历")}
 ${capacityBasisText(t, basis)}` : t("今天还可用的时间，按可用时段扣掉日历")} />
-      <Cell href="#calendar" label={t("待办", { context: "today" })} value={formatMinutes(committedMinutes, locale)} title={t("今天待办的分钟数，条形为占可用时间的比例")}>
+      <Cell href="#calendar" label={t("待办", { context: "today" })} value={formatMinutes(committedMinutes, locale)} title={t("今天日历上还没到的工作块，条形为占可用时间的比例")}>
         <span className="time-bar" aria-hidden="true"><span className="time-bar-fill" style={{ "--pct": `${load}%` } as CSSProperties} /></span></Cell>
       <Cell href="/approvals" label={t("待确认")} value={pending ?? "—"} alarm={Boolean(pending)} title={t("待确认：待决事项、任务提案、助手成果等")} />
-      <Cell href="/review" label={t("本周完成")} value={t("{{count}} 件", { count: weekCount })} title={t("本周已完成的任务")} />
+      <Cell href="/review" label={t("本周完成")} value={<>{t("{{count}} 件", { count: weekCount })}<small className="ov-sub">{t("{{count}} 步", { count: weekSteps })}</small></>}
+        title={t("近 7 天完成的任务和步骤")} />
     </ul>
   </section>;
 }

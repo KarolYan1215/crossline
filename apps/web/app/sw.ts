@@ -29,11 +29,13 @@ serwist.addEventListeners();
 self.addEventListener("push", (event) => {
   // `title` and `body` are written by the server in the account's language; `lang` names it, so the one button the service worker adds
   // itself is in that language too (else the browser's), without bundling the catalogues into the worker (docs/i18n.md).
-  let message: { title?: string; body?: string; url?: string; tag?: string; start?: string; confirm?: string; lang?: string } = {};
+  let message: { title?: string; body?: string; url?: string; tag?: string; start?: string; step?: string; confirm?: string; lang?: string } = {};
   try { message = event.data?.json() ?? {}; } catch { message = { body: event.data?.text() ?? "" }; }
   event.waitUntil(self.registration.showNotification(message.title || "Crossline", {
     body: message.body ?? "", icon: "/pwa-icon/192", badge: "/pwa-icon/192",
-    data: { url: message.url || "/", start: message.start, confirm: message.confirm }, ...(message.tag ? { tag: message.tag } : {}),
+    data: { url: message.url || "/", start: message.start, step: message.step, confirm: message.confirm }, ...(message.tag ? { tag: message.tag } : {}),
+    // A block coming up stays on screen until answered (Chromium keeps it as a reminder toast on Windows; it needs the button below).
+    ...(message.start ? { requireInteraction: true } : {}),
     ...(message.start ? { actions: [{ action: "start", title: startLabel(message.lang) }] }
       : message.confirm ? { actions: [{ action: "confirm_done", title: confirmLabel(message.lang, true) }, { action: "confirm_not_done", title: confirmLabel(message.lang, false) }] } : {})
   } as NotificationOptions));
@@ -53,7 +55,7 @@ function confirmLabel(lang: string | undefined, done: boolean): string {
 // Tapping it opens the page it is about, reusing an open Crossline window when there is one.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const data = event.notification.data as { url?: string; start?: string; confirm?: string } | undefined;
+  const data = event.notification.data as { url?: string; start?: string; step?: string; confirm?: string } | undefined;
   const url = String(data?.url ?? "/");
   event.waitUntil((async () => {
     // ✓做了 / ✗没做 on a completion check: written here, same origin with the session cookie, and nothing opens — that is the point.
@@ -67,7 +69,7 @@ self.addEventListener("notificationclick", (event) => {
     // 「开始计时」: started here, same origin with the session cookie, so the page that opens already shows the running timer.
     if (event.action === "start" && data?.start)
       await fetch(`/api/work-orders/${encodeURIComponent(data.start)}/execution`, { method: "POST", credentials: "include",
-        headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start" }) }).catch(() => undefined);
+        headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start", ...(data.step ? { stepId: data.step } : {}) }) }).catch(() => undefined);
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const target = new URL(url, self.location.origin);
     const open = windows.find((client) => new URL(client.url).origin === target.origin);

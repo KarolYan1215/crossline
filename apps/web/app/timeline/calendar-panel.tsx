@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { nextBlock } from "./panel-model";
 import { minuteInZone, monthOf, shiftDay, shiftMonth, weekDays, weekdayOf, type TimelineDeadline, type TimelineItem } from "./model";
 import { DayTimeline, MonthView, WeekView, type LineLabels } from "./views";
+import { startFromBlock, startableBlock } from "./block-start";
 import { ImpactCard, useImpact } from "../task/impact";
 import { DayQuickActions, type QuickProposal, type Suggestion } from "./quick-actions";
 import { useReturnState } from "../ui/return-state";
@@ -86,6 +87,13 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
   };
   // The week has no panel of its own: picking a block there opens its day with the block picked.
   const pickInWeek = (item: TimelineItem) => { setAnchor(item.day); setView("day"); pick(item); };
+  // Double-clicking a work block starts it on its own step (W-258); anything else stays a pick.
+  const [startNote, setStartNote] = useState("");
+  const startBlock = (item: TimelineItem) => {
+    if (!startableBlock(item)) return;
+    setStartNote(t("开始计时…"));
+    void startFromBlock(item, locale).then((message) => setStartNote(message ?? ""));
+  };
   const [year, month] = monthOf(anchor).split("-");
   const title = view === "day" ? t("{{day}}（{{weekday}}）", { day: anchor, weekday: weekdayShort(locale, weekdayOf(anchor)) })
     : view === "week" ? t("{{from}} 至 {{to}}", { from: weekDays(anchor)[0], to: weekDays(anchor)[6] })
@@ -107,7 +115,7 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
         {Object.entries(labels).map(([id, label]) => <span key={id} data-line={id}>{label}</span>)}
       </div>
     </header>
-    {view === "day" && <DayTimeline day={anchor} items={items} deadlines={deadlines} labels={labels} selectedId={selected?.id} onSelect={pick}
+    {view === "day" && <DayTimeline day={anchor} items={items} deadlines={deadlines} labels={labels} selectedId={selected?.id} onSelect={pick} onStart={startBlock}
       nextId={selected ? undefined : nextBlock(items, anchor, today, anchor === today ? nowMinute : undefined)?.id}
       nowMinute={anchor === today ? nowMinute : undefined} quiet={quietByWeekday?.[weekdayOf(anchor)]}
       aside={<DayQuickActions day={anchor} today={today} items={items} proposals={proposals ?? []} nowMinute={anchor === today ? nowMinute : undefined}
@@ -121,7 +129,8 @@ export function CalendarPanel({ items, deadlines, today, nowIso, timeZone, label
       }} />}
     {impact.pending && <ImpactCard impact={impact.pending.impact} busy={impact.busy} onApply={() => void impact.apply()} onCancel={impact.cancel} />}
     {impact.error && <small role="status">{impact.error}</small>}
-    {view === "week" && <WeekView anchor={anchor} today={today} items={items} deadlines={deadlines} labels={labels} selectedId={selected?.id} onSelect={pickInWeek} onOpenDay={openDay} />}
+    {view === "week" && <WeekView anchor={anchor} today={today} items={items} deadlines={deadlines} labels={labels} selectedId={selected?.id} onSelect={pickInWeek} onStart={startBlock} onOpenDay={openDay} />}
+    {startNote && <small role="status">{startNote}</small>}
     {view === "month" && <MonthView anchor={anchor} today={today} items={items} deadlines={deadlines} labels={labels} onOpenDay={openDay} />}
   </section>;
 }

@@ -27,13 +27,16 @@ test("the person's own choice or decision waits for them", () => {
   expect(autoApprovalEligible({ ...base, payload: { ...base.payload, humanCore: [{ intent: "核验仿真结果并决定图表结论" }] } }).eligible).toBe(true);
 });
 
-test("anything that reaches outside the machine waits for them, wherever it is said", () => {
-  expect(autoApprovalEligible({ ...base, intent: "把图表和数据发送给师兄" }).eligible).toBe(false);
-  expect(autoApprovalEligible({ ...base, payload: { ...base.payload, humanCore: [{ intent: "提交作业" }] } }).eligible).toBe(false);
-  expect(autoApprovalEligible({ ...base, payload: { ...base.payload, humanCore: [{ intent: "批准交付版本并将图表和数据交给师兄" }] } }).eligible).toBe(false);
-  expect(autoApprovalEligible({ ...base, intent: "联系导师约下周时间" }).eligible).toBe(false);
-  expect(autoApprovalEligible({ ...base, intent: "支付会议注册费" }).eligible).toBe(false);
-  // Handing work to the assistant stays inside.
+test("what the person sends, submits or publishes themselves takes effect: only the assistant's own final send waits (2026-11-11)", () => {
+  // The person's decision of 2026-11-11 (W-257): 「完成 ECE 548 作业 4」 waited from 11/1 to the day before it was due because its last
+  // step was 「提交」. Approving only puts the work on the person's week; the person still presses submit.
+  expect(autoApprovalEligible({ ...base, intent: "完成 ECE 548 作业 4 并提交" }).eligible).toBe(true);
+  expect(autoApprovalEligible({ ...base, intent: "发布小红书首轮科研内容" }).eligible).toBe(true);
+  expect(autoApprovalEligible({ ...base, intent: "把图表和数据发送给师兄" }).eligible).toBe(true);
+  expect(autoApprovalEligible({ ...base, payload: { ...base.payload, humanCore: [{ intent: "提交作业" }] } }).eligible).toBe(true);
+  expect(autoApprovalEligible({ ...base, intent: "支付会议注册费" }).eligible).toBe(true);
+  // The assistant sending it is still held.
+  expect(autoApprovalEligible({ ...base, intent: "把方法部分发送给导师", payload: { owner: "assistant", title: "把方法部分发送给导师" } }).eligible).toBe(false);
   expect(autoApprovalEligible({ ...base, intent: "把资料检索交给助手" }).eligible).toBe(true);
 });
 
@@ -72,9 +75,9 @@ test("English wording is read by the same rules (English users write English)", 
   expect(autoApprovalEligible(en).eligible).toBe(true);
   expect(autoApprovalEligible({ ...en, intent: "Pick four topics for the first round" }).eligible).toBe(false);
   expect(autoApprovalEligible({ ...en, intent: "Confirm the review meeting time with the advisor" }).eligible).toBe(false);
-  expect(autoApprovalEligible({ ...en, intent: "Send the charts and data to the senior student" }).eligible).toBe(false);
-  expect(autoApprovalEligible({ ...en, intent: "Email the advisor about next week" }).eligible).toBe(false);
-  expect(autoApprovalEligible({ ...en, intent: "Hand the draft over to the lab manager" }).eligible).toBe(false);
+  expect(autoApprovalEligible({ ...en, intent: "Send the charts and data to the senior student" }).eligible).toBe(true);
+  expect(autoApprovalEligible({ ...en, intent: "Email the advisor about next week" }).eligible).toBe(true);
+  expect(autoApprovalEligible({ ...en, intent: "Hand the draft over to the lab manager" }).eligible).toBe(true);
   expect(autoApprovalEligible({ ...en, intent: "Hand the literature search over to the assistant" }).eligible).toBe(true);
   expect(autoApprovalEligible({ ...en, intent: "Export the brokerage account statement for October" }).eligible).toBe(false);
   expect(autoApprovalEligible({ ...en, intent: "Collect the report structure and submission guidelines into a checklist" }).eligible).toBe(true);
@@ -82,7 +85,7 @@ test("English wording is read by the same rules (English users write English)", 
 
 test("the reason is written in the person's language", async () => {
   await import("@crossline/i18n/catalog/worker");
-  expect(autoApprovalEligible(base).reason).toBe("无需本人选择、授权或对外动作，默认生效");
-  expect(autoApprovalEligible(base, { locale: "en" }).reason).toBe("Needs no choice, permission or outside action from you, so it takes effect by default");
+  expect(autoApprovalEligible(base).reason).toBe("无需本人选择或授权，默认生效；对外的那一步由本人自己做");
+  expect(autoApprovalEligible(base, { locale: "en" }).reason).toBe("Needs no choice or permission from you, so it takes effect; the step that leaves this computer is yours to do");
   expect(autoApprovalEligible({ ...base, payload: { ...base.payload, seeded: true } }, { locale: "en" }).reason).toMatch(/^Example task/);
 });

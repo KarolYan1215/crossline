@@ -1,5 +1,5 @@
 import {
-  archiveWorkOrder, completeWorkOrderExecution, markMaterialsReady, pauseWorkOrderExecution,
+  archiveWorkOrder, completeWorkOrderExecution, focusStep, markMaterialsReady, pauseWorkOrderExecution,
   resumeWorkOrderExecution, retryMaterialPreparation, startWorkOrderExecution,
   type ExecutionResult
 } from "../../../../../lib/crossline";
@@ -19,7 +19,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const reason = String(body.reason ?? "");
   let result: ExecutionResult;
   try {
-    if (body.action === "start") result = startWorkOrderExecution(ctx, id);
+    if (body.action === "start") {
+      result = startWorkOrderExecution(ctx, id);
+      // Started from a block: the session is about that block's step (W-258, 2026-11-11). An unknown or finished step is ignored.
+      if (result.ok && typeof body.stepId === "string") focusStep(ctx, id, body.stepId);
+    }
     else if (body.action === "materials_ready") result = markMaterialsReady(ctx, id, "human");
     else if (body.action === "materials_retry") {
       result = retryMaterialPreparation(ctx, id);

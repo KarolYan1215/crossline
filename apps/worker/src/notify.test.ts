@@ -130,11 +130,12 @@ test("a nudge whose button starts a task reaches the phone with that task, so �
   const conversation = store.conversationFor("w", "2026-10-12");
   store.appendConversationMessage({ id: "n1", workspaceId: "w", conversationId: conversation.id, role: "nudge", text: "", createdAt: "2026-10-12T13:50:00.000Z",
     payload: { nudge: { kind: "block_start", fingerprint: "start:b:2026-10-12", counted: false, urgent: true, delivery: "pending" },
-      card: { actions: [{ action: "task.op", summary: "开始", args: { workOrderId: "wo-7", type: "start" } }],
+      card: { actions: [{ action: "task.op", summary: "开始", args: { workOrderId: "wo-7", type: "start", stepId: "v1s3" } }],
         clarify: { question: "09:00 做「作业 2」。", options: [] } } } });
-  const pushed: Array<{ path: string; start?: string }> = [];
+  const pushed: Array<{ path: string; start?: string; step?: string }> = [];
   await notifyPass(store, "w", new Date("2026-10-12T13:52:00.000Z"), async () => false, undefined, async (_ws, message) => { pushed.push(message); return true; });
-  expect(pushed).toMatchObject([{ path: "/workbench/wo-7", start: "wo-7" }]);
+  // With the block's step, so the phone's 「开始计时」 times that step (2026-11-11, W-258).
+  expect(pushed).toMatchObject([{ path: "/workbench/wo-7", start: "wo-7", step: "v1s3" }]);
   store.close();
 });
 

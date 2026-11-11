@@ -37,3 +37,20 @@ test("two acceptances on the same local day count once toward the streak, but tw
   expect(result.streakDays).toBe(1);
   expect(result.weekCount).toBe(2);
 });
+
+test("steps finished in the last seven days are counted once each, and a step opened again does not count (2026-11-11, W-258)", async () => {
+  // The owner finished steps all week and Today said 本周完成 0 件: only whole accepted tasks were counted.
+  const { stepsDoneSince } = await import("./crossline");
+  const at = (iso: string, workOrderId: string, stepId: string, status: string) =>
+    ({ entityId: workOrderId, createdAt: iso, payload: { stepId, status } });
+  const since = new Date(NOW.getTime() - 7 * 86_400_000);
+  expect(stepsDoneSince([
+    at("2026-09-24T10:00:00.000Z", "a", "s1", "done"),
+    at("2026-09-24T11:00:00.000Z", "a", "s1", "done"),
+    at("2026-09-23T10:00:00.000Z", "a", "s2", "done"),
+    at("2026-09-23T12:00:00.000Z", "a", "s2", "planned"),
+    at("2026-09-10T10:00:00.000Z", "b", "s1", "done"),
+    at("2026-09-24T09:00:00.000Z", "b", "s2", "skipped"),
+    at("2026-09-25T09:00:00.000Z", "c", "s1", "done")
+  ], since)).toBe(2);
+});

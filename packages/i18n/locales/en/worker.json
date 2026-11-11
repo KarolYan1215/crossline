@@ -306,7 +306,7 @@
   "{{count}} 项任务已自动生效并排进日程：{{names}}。_other": "{{count}} tasks took effect by themselves and are on the schedule: {{names}}. ",
   "{{count}} 项任务已自动生效并排进日程：{{names}} 等。_one": "{{count}} task took effect by itself and is on the schedule: {{names}} and more. ",
   "{{count}} 项任务已自动生效并排进日程：{{names}} 等。_other": "{{count}} tasks took effect by themselves and are on the schedule: {{names}} and more. ",
-  "它们无需本人选择、授权或对外动作；24 小时内可在待确认页「最近自动生效」撤销。": "None of them needs your choice, permission or an outside action; undo any within 24 hours under \"Recently took effect\" on the Decisions page.",
+  "它们无需本人选择或授权，对外的那一步由本人自己做；24 小时内可在待确认页「最近自动生效」撤销。": "None of them needs your choice or permission, and any step that leaves this computer is yours to do; undo any within 24 hours under \"Recently took effect\" on the Decisions page.",
   "去看看": "Take a look",
   "由「{{title}}」并入": "Merged in from \"{{title}}\"",
   "与「{{title}}」合并": "Merged with \"{{title}}\"",
