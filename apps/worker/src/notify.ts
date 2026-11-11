@@ -170,7 +170,7 @@ export function awayFromScreen(store: CrosslineStore, workspaceId: string, now: 
  */
 export async function notifyPass(store: CrosslineStore, workspaceId: string, now: Date,
   deliver: (title: string, body: string, url: string) => Promise<boolean> = showToast, baseUrl = process.env.CROSSLINE_WEB_BASE_URL || "http://127.0.0.1:3210",
-  push?: (workspaceId: string, message: { title: string; body: string; path: string; tag: string; start?: string; step?: string; confirm?: string }) => Promise<boolean>): Promise<string[]> {
+  push?: (workspaceId: string, message: { title: string; body: string; path: string; tag: string; start?: string; step?: string; snooze?: string; confirm?: string }) => Promise<boolean>): Promise<string[]> {
   const level = (store.getSetting(workspaceId, NOTIFY_LEVEL_SETTING) as NotifyLevel | undefined) ?? "normal";
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
   try { zone = (JSON.parse(store.getSetting(workspaceId, "schedule.preferences") ?? "null") as { timeZone?: string } | null)?.timeZone || zone; } catch { /* default */ }
@@ -230,7 +230,7 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
   const visibleAt = store.getSetting(workspaceId, "presence.visibleAt");
   const pageShown = Boolean(visibleAt) && now.getTime() - Date.parse(visibleAt!) <= PRESENCE_FRESH_MS;
   for (const message of store.listRecentNudges(workspaceId, new Date(now.getTime() - 3_600_000).toISOString())) {
-    const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string; kind?: string } | undefined;
+    const nudge = message.payload.nudge as { delivery?: string; fingerprint?: string; kind?: string; replaces?: string } | undefined;
     const text = (message.payload.card as { clarify?: { question?: string } } | undefined)?.clarify?.question ?? "";
     if (nudge?.delivery !== "pending" || !text) continue;
     const confirm = nudge.kind === "block_confirm";
@@ -239,15 +239,22 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
     // A completion check opens its confirm page, where the answer is written by a POST (a link in a notification never writes); no
     // 「开始计时」 on it — the block is over. A nudge whose button starts a task (a block coming up, a latest start) carries that task, so
     // the phone's 「开始计时」 starts the timer in one tap.
-    const starter = confirm ? undefined : ((message.payload.card as { actions?: Array<{ action?: string; args?: { type?: string; workOrderId?: string; stepId?: string } }> } | undefined)?.actions ?? [])
-      .find((action) => action.action === "task.op" && action.args?.type === "start")?.args;
+    const ops = confirm ? [] : ((message.payload.card as { actions?: Array<{ action?: string; args?: { type?: string; workOrderId?: string; stepId?: string; text?: string } }> } | undefined)?.actions ?? [])
+      .filter((action) => action.action === "task.op");
+    const starter = ops.find((action) => action.args?.type === "start")?.args;
     const start = starter?.workOrderId;
     // The block's own step, so 「开始计时」 on the phone times what the block is about (W-258, 2026-11-11).
     const step = starter?.stepId || undefined;
+    // 「推迟 10 分钟」 on a block's prompt (2026-11-11 §3): the block it snoozes, the notification's second button.
+    const snoozer = ops.find((action) => action.args?.type === "snooze")?.args;
+    const snooze = start && snoozer?.workOrderId === start && snoozer.text ? snoozer.text : undefined;
     // The evening wrap-up opens its own page (a link that writes nothing, like the confirm page).
     const wrap = nudge.kind === "day_wrap";
     const path = confirm ? `/confirm/${encodeURIComponent(message.id)}` : wrap ? "/wrap" : start ? `/workbench/${encodeURIComponent(start)}` : "/";
-    if (!await both("Crossline", body, `${baseUrl}${confirm || wrap ? path : "/"}`, { title: "Crossline", body, path, tag: nudge.fingerprint ?? message.id, ...(start ? { start } : {}), ...(start && step ? { step } : {}),
+    // Said again after a snooze: the first prompt's tag, so the phone replaces that notification instead of adding a second.
+    const tag = nudge.replaces ?? nudge.fingerprint ?? message.id;
+    if (!await both("Crossline", body, `${baseUrl}${confirm || wrap ? path : "/"}`, { title: "Crossline", body, path, tag, ...(start ? { start } : {}), ...(start && step ? { step } : {}),
+      ...(snooze ? { snooze } : {}),
       // A completion check carries its message: the phone answers 做了 / 没做 in place (docs/plans/closed-loop-1030.md §2).
       ...(confirm ? { confirm: message.id } : {}) })) continue;
     store.updateConversationPayload(workspaceId, message.id, { ...message.payload, nudge: { ...nudge, delivery: "pushed" } });

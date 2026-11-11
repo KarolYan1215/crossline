@@ -50,6 +50,8 @@
   "没做": "Not done",
   "没做，已顺延": "Not done, rolled forward",
   "{{title}} 做得怎么样": "How did {{title}} go",
+  "推迟两次": "Snoozed twice",
+  "{{minutes}} 分钟后再提醒": "Reminding again in {{minutes}} minutes",
   "需要本人回答的问题留在待确认，明早简报会再列一次。": "Questions only you can answer stay on Decisions; tomorrow's brief lists them again.",
   "已收工。今晚不再提醒，明早简报见。": "Wrapped up. No more reminders tonight; see you in the morning brief.",
   "收工（{{count}} 块未确认）_one": "Wrap up ({{count}} block unmarked)",

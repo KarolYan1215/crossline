@@ -76,3 +76,11 @@ test("archiving takes an optional reason, keeps it on the ledger, and an archive
   expect((await post({ action: "archive", reason: "  " })).status).toBe(200);
   expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("archived");
 });
+
+test("the phone's 「推迟 10 分钟」 snoozes the block it names, nothing else (2026-11-11 §3)", async () => {
+  const store = seed();
+  expect((await post({ action: "snooze", blockId: "scheduled:w1:v1s1" })).status).toBe(200);
+  expect(store.listEvents(TEST_CTX.workspaceId, { type: "block.snoozed" }).map((event) => (event.payload as { blockId: string }).blockId)).toEqual(["scheduled:w1:v1s1"]);
+  expect((await post({ action: "snooze", blockId: "scheduled:other:v1s1" })).status).toBe(409);
+  expect(store.listWorkOrders(TEST_CTX.workspaceId)[0]?.state).toBe("ready_for_human");
+});

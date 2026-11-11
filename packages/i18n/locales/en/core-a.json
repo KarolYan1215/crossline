@@ -195,6 +195,8 @@
   "开始{{label}}": "Start {{label}}",
   "推到明天": "Postpone to tomorrow",
   "{{label}}推到明天": "Postpone {{label}} to tomorrow",
+  "推迟 10 分钟": "Snooze 10 min",
+  "{{label}}推迟 10 分钟": "Snooze {{label}} for 10 minutes",
   "{{start}}–{{end}} 的{{label}}做得怎么样？": "How did {{label}} at {{start}}–{{end}} go?",
   "确认": "Confirm",
   "「{{title}}」按保守估时还需 {{remaining}}，{{due}} 截止前只剩 {{free}} 可用，来不及。": "\"{{title}}\" still needs {{remaining}} on a cautious estimate, but only {{free}} is free before the {{due}} deadline. It will not fit.",

@@ -157,7 +157,8 @@ function Block({ row, label, chosen, disabled, timed, onAnswer }: { row: WrapRow
   const t = useT();
   return <li data-line={row.line ?? "none"}>
     <div className="wr-when"><b className="ds-serif">{row.start}–{row.end}</b><small>{timed}</small>
-      {!chosen && <small className="wr-inferred" data-inferred={row.inferred}>{t(INFERRED[row.inferred])}</small>}</div>
+      {!chosen && <small className="wr-inferred" data-inferred={row.inferred}>{t(INFERRED[row.inferred])}</small>}
+      {row.snoozedTwice && <small className="wr-snoozed">{t("推迟两次")}</small>}</div>
     <div className="wr-what">
       <div className="wr-title">{label && <LineTag line={row.line}>{label}</LineTag>}
         <a href={`/workbench/${encodeURIComponent(row.orderId)}`} title={row.title}>{row.title}</a></div>

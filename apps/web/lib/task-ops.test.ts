@@ -37,3 +37,13 @@ test("a note from the task's record is kept in the person's words", async () => 
   expect(await applyTaskOp(TEST_CTX, "w1", { type: "note", date: "", minutes: 0, stepId: "", text: "跑通了第一组数据", who: "", energy: "", summary: "记录" })).toEqual({ ok: true });
   expect(store.listEvents(ws, { type: "task.note" })[0]?.payload).toEqual({ text: "跑通了第一组数据", kind: "note" });
 });
+
+test("「推迟 10 分钟」 on a block's prompt records a snooze of that block until ten minutes from now; another task's block is refused", async () => {
+  const store = setup();
+  const snooze = (blockId: string) => applyTaskOp(TEST_CTX, "w1", { type: "snooze", date: "", minutes: 10, stepId: "v1s1", text: blockId, who: "", energy: "", summary: "" });
+  expect(await snooze("scheduled:w1:v1s1")).toEqual({ ok: true });
+  expect(store.listEvents(ws, { type: "block.snoozed", entityId: "w1" }).map((event) => event.payload))
+    .toEqual([{ blockId: "scheduled:w1:v1s1", day: "2026-10-08", until: "2026-10-08T15:10:00.000Z" }]);
+  expect(await snooze("scheduled:other:v1s1")).toEqual({ ok: false, code: "SNOOZE_BLOCK_INVALID" });
+  expect(store.listEvents(ws, { type: "block.snoozed" })).toHaveLength(1);
+});

@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
 import { decideCard, loadConversation } from "./conversation";
 import { ANSWERED_SETTING, PRESENCE_SETTING, ensureOpener, nudgesFor } from "./nudges";
+import { loadWrap } from "./wrap";
 import { TEST_CTX, seedReadyToStart } from "./test-support";
 
 afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
@@ -54,6 +55,47 @@ test("ten minutes before the scheduler's block for work due in two days, it says
   const mute = message.card!.clarify.options.findIndex((option) => option.kind === "mute");
   expect(await decideCard(TEST_CTX, message.id, { option: mute }, NOW)).toMatchObject({ ok: true });
   expect(store.getSetting(ws, "nudge.mute.block_start")).toBe("2026-10-19");
+});
+
+test("block-start prompts are not silenced by three unanswered in a row (the owner wants them to appear, 2026-11-11); other kinds still are", async () => {
+  const store = setup();
+  const conversation = store.conversationFor(ws, "2026-10-12");
+  for (const kind of ["block_start", "block_confirm"]) for (const n of [1, 2, 3])
+    store.appendConversationMessage({ id: `${kind}-${n}`, workspaceId: ws, conversationId: conversation.id, role: "nudge", text: "",
+      createdAt: new Date(NOW.getTime() - (4 - n) * 3_600_000).toISOString(),
+      payload: { nudge: { kind, fingerprint: `${kind}:old:${n}`, counted: false, urgent: true, delivery: "pushed" },
+        card: { actions: [], items: [], clarify: { question: "…", options: [] }, confidence: "high" } } });
+  expect((await nudgesFor(TEST_CTX, NOW)).map((item) => item.kind)).toContain("block_start");
+  expect(store.getSetting(ws, "nudge.mute.block_start")).toBeFalsy();
+  expect(store.getSetting(ws, "nudge.mute.block_confirm")).toBe("2026-10-15");
+});
+
+test("「推迟 10 分钟」 says the block again ten minutes later in the same message, not a second one; snoozed twice, it is not said again and the wrap-up marks it (2026-11-11 §3)", async () => {
+  const store = setup();
+  const at = (minutes: number) => { const when = new Date(NOW.getTime() + minutes * 60_000); vi.stubEnv("CROSSLINE_FIXED_NOW", when.toISOString()); return when; };
+  const starts = () => nudges().filter((item) => item.card?.nudgeKind === "block_start");
+  const snooze = async (minutes: number) => {
+    const [message] = starts();
+    const option = message!.card!.clarify.options.findIndex((item) => item.label === "推迟 10 分钟");
+    expect(option).toBeGreaterThan(0);
+    expect(await decideCard(TEST_CTX, message!.id, { option }, at(minutes))).toMatchObject({ ok: true });
+  };
+  await nudgesFor(TEST_CTX, at(0));
+  const first = store.getConversationMessage(ws, starts()[0]!.id)!.payload.nudge as { fingerprint: string };
+  const blockId = first.fingerprint.slice("start:".length, -":2026-10-12".length);
+  await snooze(0);
+  expect(store.listEvents(ws, { type: "block.snoozed" })).toHaveLength(1);
+  expect((await nudgesFor(TEST_CTX, at(5))).map((item) => item.kind)).not.toContain("block_start");
+  expect((await nudgesFor(TEST_CTX, at(10))).map((item) => item.kind)).toContain("block_start");
+  // The same message, asked again: not a second card beside the answered one.
+  expect(starts()).toHaveLength(1);
+  expect(starts()[0]!.card!.clarify.chosen).toBeUndefined();
+  expect(store.getConversationMessage(ws, starts()[0]!.id)!.payload.nudge).toMatchObject({ replaces: first.fingerprint, fingerprint: `${first.fingerprint}:1` });
+  await snooze(11);
+  expect((await nudgesFor(TEST_CTX, at(21))).map((item) => item.kind)).not.toContain("block_start");
+  expect((await nudgesFor(TEST_CTX, at(30))).map((item) => item.kind)).not.toContain("block_start");
+  expect(starts()).toHaveLength(1);
+  expect(loadWrap(TEST_CTX, at(30)).rows.find((row) => row.blockId === blockId)).toMatchObject({ snoozedTwice: true });
 });
 
 test("with a page in front of the person it is shown there; while they just answered something, only the urgent get through", async () => {

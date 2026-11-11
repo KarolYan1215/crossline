@@ -33,6 +33,7 @@ export const PRESENCE_FRESH_MS = 10 * 60_000;
 export const ANSWERED_SETTING = "conversation.lastAnsweredAt";
 const ANSWERED_QUIET_MS = 20 * 60_000;
 const muteKey = (kind: string) => `nudge.mute.${kind}`;
+const payloadOfMessage = (message: StoredConversationMessage) => message.payload.nudge as NudgePayload | undefined;
 const DAY = 86_400_000;
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 const minutesOf = (clock: string) => { const [h, m] = clock.split(":").map(Number); return (h ?? 0) * 60 + (m ?? 0); };
@@ -41,7 +42,9 @@ export type NudgePayload = { kind: NudgeKind | "opener"; fingerprint: string; co
   /** `block_confirm`: the block as it stood when asked; the confirm page writes against these times. */
   block?: NudgeEnding;
   /** `timer_overrun`: the step that ran over, read by the worker's adaptive granularity. */
-  step?: { orderId: string; stepId: string } };
+  step?: { orderId: string; stepId: string };
+  /** A block's start said again after a snooze: the first prompt's fingerprint, kept as the push `tag` so the phone replaces it. */
+  replaces?: string };
 
 /** Runs the engine for every workspace (the web's timer). A workspace that fails is skipped until the next interval. */
 export async function nudgePass(now = new Date()): Promise<number> {
@@ -101,6 +104,8 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     readyFiles.set(orderId, [...(readyFiles.get(orderId) ?? []), ...task.artifacts.map((artifact) => artifact.path.split(/[\\/]/).at(-1) ?? artifact.path)]);
   }
 
+  // 「推迟 10 分钟」 pressed today, per block (`snoozeBlock`, lib/task-ops.ts): how many times and until when on the person's clock.
+  const snoozed = snoozesOn(ctx, today, local);
   const blocks: NudgeBlock[] = todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {
     const order = byId.get(block.id.split(":")[1]!);
     const due = order ? dueOf(order) : "";
@@ -111,7 +116,8 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
     const prepared = readyFiles.get(order.id);
     const firstAction = stepId ? store.getStepPlan(ctx.workspaceId, order.id)?.steps.find((step) => step.id === stepId)?.firstAction : undefined;
     return [{ id: block.id, orderId: order.id, stepId, title: taskTitleOf(order), step: block.step ?? "", start: block.start, end: block.end, dueDay,
-      ...(prepared?.length ? { prepared } : {}), ...(firstAction ? { firstAction } : {}), ...(block.tag === OVER_CAPACITY_TAG ? { overCapacity: true } : {}) }];
+      ...(prepared?.length ? { prepared } : {}), ...(firstAction ? { firstAction } : {}), ...(block.tag === OVER_CAPACITY_TAG ? { overCapacity: true } : {}),
+      ...(snoozed.has(block.id) ? { snoozed: snoozed.get(block.id)! } : {}) }];
   });
   // Every work block of today, deadline or not, for the completion check.
   const ending = rememberBlocks(ctx, today, clock, todays.filter((block) => block.id.startsWith("scheduled:")).flatMap((block) => {
@@ -199,8 +205,25 @@ export async function nudgesFor(ctx: AccessContext, now = new Date()): Promise<P
       ...(running.pauseMinutes ? { pausedMinutes: running.pauseMinutes } : {}) } } : {})
   });
   for (const nudge of planned) say(ctx, nudge.text, nudge.buttons, { kind: nudge.kind, fingerprint: nudge.fingerprint, counted: nudge.counted, urgent: nudge.urgent,
-    ...(nudge.covers ? { covers: nudge.covers } : {}), ...(nudge.block ? { block: nudge.block } : {}), ...(nudge.step ? { step: nudge.step } : {}) }, now);
+    ...(nudge.covers ? { covers: nudge.covers } : {}), ...(nudge.block ? { block: nudge.block } : {}), ...(nudge.step ? { step: nudge.step } : {}),
+    ...(nudge.replaces ? { replaces: nudge.replaces } : {}) }, now);
   return planned;
+}
+
+/**
+ * Each block's snoozes on `day` (`block.snoozed` events): how many, and when the last one runs out (`HH:mm` on the person's clock).
+ * The wrap-up counts the same events itself (lib/wrap.ts is imported by this file).
+ */
+function snoozesOn(ctx: AccessContext, day: string, local: (iso: string) => string): Map<string, { count: number; until: string }> {
+  const out = new Map<string, { count: number; until: string }>();
+  for (const event of getStore().listEvents(ctx.workspaceId, { type: "block.snoozed" })) {
+    const payload = event.payload as { blockId?: string; day?: string; until?: string };
+    if (payload.day !== day || !payload.blockId || !payload.until) continue;
+    const before = out.get(payload.blockId);
+    const until = local(payload.until).slice(11, 16);
+    out.set(payload.blockId, { count: (before?.count ?? 0) + 1, until: before && before.until > until ? before.until : until });
+  }
+  return out;
 }
 
 /** Today's blocks as this pass has seen them (`nudge.blocks:<day>`). */
@@ -261,7 +284,7 @@ function backgroundDone(ctx: AccessContext, now: Date, locale?: Locale): Array<{
 
 /**
  * Kinds the person said to ask about less (「少问这类」, a week), and kinds left unanswered three times running (three days — the
- * person's silence is an answer too). Both expire by themselves.
+ * person's silence is an answer too; not a block's start). Both expire by themselves.
  */
 function mutedKinds(ctx: AccessContext, recent: StoredConversationMessage[], today: string, now: Date): Set<NudgeKind> {
   const store = getStore();
@@ -270,6 +293,8 @@ function mutedKinds(ctx: AccessContext, recent: StoredConversationMessage[], tod
   for (const kind of kinds) {
     const until = store.getSetting(ctx.workspaceId, muteKey(kind));
     if (until && until >= today) { muted.add(kind); continue; }
+    // A block's start must reliably appear (the owner's decision of 2026-11-11): silence does not mute it, only 「少问这类」 does.
+    if (kind === "block_start") continue;
     const lastThree = recent.filter((message) => (message.payload.nudge as NudgePayload | undefined)?.kind === kind).slice(-3);
     const ignored = lastThree.length === 3 && lastThree.every((message) => (message.payload.card as Card | undefined)?.clarify.chosen === undefined
       && now.getTime() - Date.parse(message.createdAt) > 30 * 60_000);
@@ -302,12 +327,23 @@ function nudgeCard(id: string, text: string, buttons: NudgeButton[], kind: Nudge
 function say(ctx: AccessContext, text: string, buttons: NudgeButton[], nudge: Omit<NudgePayload, "delivery">, now: Date, extra: Record<string, unknown> = {}): void {
   const store = getStore();
   const conversation = store.conversationFor(ctx.workspaceId, planToday(ctx, now));
-  const id = randomUUID();
-  const card = nudgeCard(id, text, buttons, nudge.kind);
   const visibleAt = store.getSetting(ctx.workspaceId, PRESENCE_SETTING);
   // A completion check goes to the desktop and the phone whatever page is open (docs/loop-and-scout.md §3): the person is rarely on
   // the page at the moment a block ends.
   const delivery = nudge.kind !== "block_confirm" && visibleAt && now.getTime() - Date.parse(visibleAt) < PRESENCE_FRESH_MS ? "page" : "pending";
+  // Said again after a snooze: the earlier prompt's message is asked again in place (its answer cleared), not a second card beside it.
+  const earlier = nudge.replaces ? store.listConversationMessages(ctx.workspaceId, conversation.id).filter((message) => {
+    const said = payloadOfMessage(message);
+    return said?.fingerprint === nudge.replaces || said?.replaces === nudge.replaces;
+  }).at(-1) : undefined;
+  if (earlier) {
+    const before = payloadOfMessage(earlier)!;
+    store.updateConversationPayload(ctx.workspaceId, earlier.id, { ...earlier.payload, ...extra,
+      nudge: { ...nudge, delivery, covers: [...new Set([...(before.covers ?? []), before.fingerprint])] }, card: nudgeCard(earlier.id, text, buttons, nudge.kind) });
+    return;
+  }
+  const id = randomUUID();
+  const card = nudgeCard(id, text, buttons, nudge.kind);
   store.appendConversationMessage({ id, workspaceId: ctx.workspaceId, conversationId: conversation.id, role: "nudge", text: "",
     payload: { ...extra, nudge: { ...nudge, delivery }, card }, createdAt: now.toISOString() });
 }

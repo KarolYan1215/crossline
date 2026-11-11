@@ -139,6 +139,21 @@ test("a nudge whose button starts a task reaches the phone with that task, so �
   store.close();
 });
 
+test("a block's prompt reaches the phone with 「推迟 10 分钟」's block, and said again after a snooze it keeps the first prompt's tag, so it replaces it (2026-11-11 §3)", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.setSetting("w", "notify.level", "off");
+  const conversation = store.conversationFor("w", "2026-10-12");
+  const actions = [{ action: "task.op", summary: "开始", args: { workOrderId: "wo-7", type: "start", stepId: "v1s3", text: "" } },
+    { action: "task.op", summary: "推迟", args: { workOrderId: "wo-7", type: "snooze", stepId: "v1s3", minutes: 10, text: "scheduled:wo-7:v1s3" } }];
+  store.appendConversationMessage({ id: "n1", workspaceId: "w", conversationId: conversation.id, role: "nudge", text: "", createdAt: "2026-10-12T13:50:00.000Z",
+    payload: { nudge: { kind: "block_start", fingerprint: "start:scheduled:wo-7:v1s3:2026-10-12:1", replaces: "start:scheduled:wo-7:v1s3:2026-10-12",
+      counted: false, urgent: true, delivery: "pending" }, card: { actions, clarify: { question: "09:00 做「作业 2」。", options: [] } } } });
+  const pushed: Array<{ tag: string; start?: string; snooze?: string }> = [];
+  await notifyPass(store, "w", new Date("2026-10-12T14:01:00.000Z"), async () => false, undefined, async (_ws, message) => { pushed.push(message); return true; });
+  expect(pushed).toMatchObject([{ tag: "start:scheduled:wo-7:v1s3:2026-10-12", start: "wo-7", step: "v1s3", snooze: "scheduled:wo-7:v1s3" }]);
+  store.close();
+});
+
 test("a completion check goes to the desktop and the phone even with a page open, opening its confirm page, with no 「开始计时」", async () => {
   const store = new CrosslineStore(":memory:");
   store.setSetting("w", "notify.level", "off");
