@@ -36,6 +36,7 @@ import ledger_wealth from "../locales/en/ledger-wealth.json";
 import opportunity_tags from "../locales/en/opportunity-tags.json";
 import no_drill from "../locales/en/no-drill.json";
 import assistant_codex from "../locales/en/assistant-codex.json";
+import workflow_page from "../locales/en/workflow-page.json";
 
 /** Every English catalogue, for the web app and the worker (server-side size does not matter; the web's client reads the same set). */
-export const ALL_CATALOGS = [common, core_a, core_b, assess, web_settings, web_onboarding, web_plan, web_shell, web_tasks, web_lib, worker, task_import, rituals, redesign_today, redesign_tasks, redesign_plan, redesign_settings, redesign_rituals, month_sim, fixes_1029, closed_loop, concierge_settings, relay_provider, opportunity_discovery, opportunity_form, opportunity_watch, opportunity_space, voice_input, reports, agent_kit, node_everyone, self_repair, setup_guide_1106, beta_request, ledger_wealth, opportunity_tags, no_drill, assistant_codex] as Array<Record<string, string>>;
+export const ALL_CATALOGS = [common, core_a, core_b, assess, web_settings, web_onboarding, web_plan, web_shell, web_tasks, web_lib, worker, task_import, rituals, redesign_today, redesign_tasks, redesign_plan, redesign_settings, redesign_rituals, month_sim, fixes_1029, closed_loop, concierge_settings, relay_provider, opportunity_discovery, opportunity_form, opportunity_watch, opportunity_space, voice_input, reports, agent_kit, node_everyone, self_repair, setup_guide_1106, beta_request, ledger_wealth, opportunity_tags, no_drill, assistant_codex, workflow_page] as Array<Record<string, string>>;

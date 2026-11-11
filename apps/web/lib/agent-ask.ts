@@ -29,7 +29,7 @@ function progressRecord(row: AgentTaskRow | undefined, taskId: string): AgentPro
 function previewOf(t: Translate, chain: AgentChain, row: AgentTaskRow | undefined): AskPreview {
   if (row?.partial) return { kind: "agent", href: "/approvals#assistant", label: t("查看已写出的文件") };
   if (chain.latest.workOrderId) return { kind: "agent", href: `/workbench/${encodeURIComponent(chain.latest.workOrderId)}`, label: t("查看这件事和助手的进度") };
-  return { kind: "agent", href: chain.latest.taskId.startsWith("grow-") || chain.latest.taskId.startsWith("flow-") ? "/settings#skills" : "/settings#automation",
+  return { kind: "agent", href: "/automation",
     label: t("查看助手任务") };
 }
 

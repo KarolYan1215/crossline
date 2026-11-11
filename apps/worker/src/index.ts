@@ -97,6 +97,7 @@ import { createImportService } from "./importer";
 import { createDictationService } from "./dictation";
 import { probeSandboxShell } from "./sandbox-probe";
 import { automationPass, reconcileAutomationRuns, createAutomationService, designPending, onNewMail, suggestFromRepeats, type AutomationDeps } from "./automations";
+import { createWorkflowThreadService } from "./workflow-thread";
 import { monthSpend, ownerOf, runtimeOwner, runtimesDir } from "./owner";
 import { createNodeHub, type NodeHub } from "./node/hub";
 import { skillLibraryDir } from "./skill-library";
@@ -641,7 +642,7 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
   if (started.state === "needs_category_approval") {
     const t = tOfWorkspace(analysisStore, workspaceId);
     sayToPerson(analysisStore, workspaceId, t("要把「{{text}}」固化成工作流，需要先允许助手做「{{label}}」这类工作。", { text: candidate.text.slice(0, 40), label: t(started.label) }),
-      "skill_grown", "grow-needs:" + input.taskId, [{ label: t("去开启"), href: "/settings#automation" }]);
+      "skill_grown", "grow-needs:" + input.taskId, [{ label: t("去开启"), href: "/automation#capabilities" }]);
   }
 }
 
@@ -1440,6 +1441,8 @@ const publicSkillInstaller = createPublicSkillInstaller({ store: analysisStore, 
   beforeRun: (workspaceId) => enterUsageWorkspace(workspaceId),
   log: (event) => console.info(JSON.stringify({ ...event, checkedAt: new Date().toISOString() })) });
 const automationService = createAutomationService({ ...automationDeps, afterRequest: (workspaceId) => { void automationDesignPass(workspaceId).catch(() => undefined); } });
+// Each workflow's own conversation on the 自动化 page (workflow-thread.ts): a turn starts at once and streams into the ledger.
+const workflowThreadService = createWorkflowThreadService({ ...automationDeps, improveNow: (workspaceId) => { void workflowPass(workspaceId, new Date().toISOString()).catch(() => undefined); } });
 for (const workspace of analysisStore.listWorkspaces()) {
   const lost = agentService.recoverLost(workspace.id);
   if (lost.length) console.info(JSON.stringify({ type: "agent.recovered_lost", workspaceId: workspace.id, lost, checkedAt: new Date().toISOString() }));
@@ -1821,7 +1824,7 @@ if (!capabilitySecret) {
     services: [{ prefix: "/v1/mail", handle: mailService.handle },
       // 系统体检's 「立即自检」.
       { prefix: "/v1/selfcheck", handle: async (method, pathname, workspaceId) => method === "POST" && pathname === "/v1/selfcheck/run"
-        ? { status: 200, body: { results: await runSelfCheck(workspaceId, true) } } : undefined }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/voice", handle: dictationService.handle }, { prefix: "/v1/automations", handle: automationService.handle },
+        ? { status: 200, body: { results: await runSelfCheck(workspaceId, true) } } : undefined }, { prefix: "/v1/import", handle: importService.handle }, { prefix: "/v1/voice", handle: dictationService.handle }, { prefix: "/v1/automations", handle: automationService.handle }, { prefix: "/v1/workflow-threads", handle: workflowThreadService.handle },
       { prefix: "/v1/forms", handle: formService.handle }, { prefix: "/v1/apply-profile", handle: formService.handle },
       { prefix: "/v1/skills/public", handle: publicSkillInstaller.handle },
       { prefix: "/v1/workflows/favourites-topics", handle: createFavouritesTopicsService(analysisStore).handle },

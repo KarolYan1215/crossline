@@ -167,7 +167,8 @@ test("the limit on requests in flight to one model halves on a refusal and grows
   const provider = await upstream((_seen, response) => {
     inFlight += 1; most = Math.max(most, inFlight);
     if (refuse) { refuse = false; inFlight -= 1; busy(response); return; }
-    setTimeout(() => { inFlight -= 1; ok(response); }, 30);
+    // Long enough that the six requests overlap on a loaded machine (the pre-commit hook beside other suites): at 30 ms they sometimes ran one by one.
+    setTimeout(() => { inFlight -= 1; ok(response); }, 150);
   });
   const started = await startModelGateway({ resolve: () => ({ kind: "chat", baseUrl: provider.base, key: "k" }), initialConcurrency: 4,
     backoffMs: [10, 10], quickRetryMs: 10, log: () => {} });

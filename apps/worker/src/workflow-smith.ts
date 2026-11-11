@@ -272,12 +272,12 @@ export async function installGrown(store: CrosslineStore, workspaceId: string, c
     const login = logins.length ? t("在弹出的浏览器窗口里登录{{sites}}，", { sites: joinList(locale, logins) }) : "";
     sayToPerson(store, workspaceId, t("{{basis}}建好工作流「{{summary}}」，要读取{{sites}}，先请本人看风险：{{risks}}。同意后{{login}}再交给助手执行{{handed}}。",
       { basis, summary: manifest.summary, sites, risks: manifest.risks.slice(0, 3).join(locale === "en" ? "; " : "；"), login, handed }),
-      "skill_grown", `grown:${id}`, [{ label: t("查看风险并启用"), href: "/settings#skills" }], now);
+      "skill_grown", `grown:${id}`, [{ label: t("查看风险并启用"), href: `/automation/${encodeURIComponent(id)}` }], now);
   } else {
     const how = `${scheduleLabel(manifest.schedule, locale)}${final === "text_only" ? t("；脚本未通过扫描，只用文字") : ""}`;
     sayToPerson(store, workspaceId, t("{{basis}}长出新工作流「{{summary}}」，已可用并默认保留（{{how}}）。之后同类的事由助手按它做，发出、上传一类的步骤仍由本人完成{{handed}}。不需要可在设置里关闭。",
       { basis, summary: manifest.summary, how, handed }),
-      "skill_grown", `grown:${id}`, [{ label: t("查看或关闭"), href: "/settings#skills" }], now);
+      "skill_grown", `grown:${id}`, [{ label: t("查看或关闭"), href: `/automation/${encodeURIComponent(id)}` }], now);
   }
   return { state: "installed", id };
 }
@@ -348,7 +348,7 @@ export function workflowLoginTarget(store: CrosslineStore, workspaceId: string, 
 const readerBrowser = (record: GrownSkillRecord, service: string, fallback: string | undefined) =>
   (loginMode() === "remote" ? fallback : record.loginBrowsers?.[service] || fallback) || "";
 /** Where 「去登录」 leads: the workflow's card in 设置 → Skill 库, which opens the login at once (a dialog on the hosted beta). */
-export const loginHref = (id: string) => `/settings?login=${encodeURIComponent(id)}#skills`;
+export const loginHref = (id: string) => `/automation/${encodeURIComponent(id)}?login=1`;
 
 /**
  * 「登录」: opens the service's site in a browser window of its own (its own profile folder), for the person to log in themselves. Nothing
@@ -679,7 +679,7 @@ export function startFavouritesRun(store: CrosslineStore, workspaceId: string, r
     if (ledger.unorganised.length) await describeNotes(folder, collector.media(workspaceId), ledger.unorganised).catch(() => undefined);
     const summary = record.manifest.summary;
     const read = result.read.length;
-    const toSettings = [{ label: t("去看设置"), href: "/settings#skills" }];
+    const toSettings = [{ label: t("去看工作流"), href: `/automation/${encodeURIComponent(record.id)}` }];
     const readSoFar = read ? t("本次已读 {{count}} 条，照常整理。", { count: read }) : "";
     if (result.state === "check") sayToPerson(store, workspaceId, result.trigger
       ? t("「{{summary}}」读取时小红书返回了安全验证或限流（{{trigger}}），已立刻停下并关闭浏览器，不会自己重试。本人确认没问题后，在设置里点「立即运行」继续。{{read}}", { summary, trigger: result.trigger, read: readSoFar })
@@ -732,7 +732,7 @@ function organiseFromShared(store: CrosslineStore, workspaceId: string, record: 
   const t = tFor(locale);
   if (!read || !existsSync(folder)) {
     sayToPerson(store, workspaceId, t("「{{summary}}」用「{{reader}}」读好的收藏笔记来做，那边还没读到笔记；按话题读好后再运行。", { summary: record.manifest.summary, reader: reader.manifest.summary }),
-      "workflow_done", `shared-empty:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: t("去看设置"), href: "/settings#skills" }], now);
+      "workflow_done", `shared-empty:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: t("去看工作流"), href: `/automation/${encodeURIComponent(record.id)}` }], now);
     return { state: "blocked", code: "SHARED_NOTES_EMPTY", message: t("收藏笔记还没有读到。") };
   }
   const home = grownHomeLine(store, workspaceId, record);
@@ -853,7 +853,7 @@ function organiseFavourites(store: CrosslineStore, workspaceId: string, record: 
   if (started.state === "blocked" && HOLD_CODES.has(started.code)) holdWorkflowRun(store, workspaceId, record.id, now);
   if (started.state !== "started") sayToPerson(store, workspaceId, t("「{{summary}}」已读好 {{count}} 条笔记（存在本机 {{folder}}），整理要等一下：{{reason}}。",
     { summary, count: ids.length, folder: path.basename(folder), reason: started.state === "blocked" ? started.message : t("助手还没获准做「{{label}}」这类工作", { label: t(started.label) }) }),
-    "workflow_done", `waiting:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: t("打开设置"), href: "/settings#automation" }]);
+    "workflow_done", `waiting:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: t("打开工作流"), href: `/automation/${encodeURIComponent(record.id)}` }]);
 }
 
 /**
@@ -888,7 +888,7 @@ export function workflowSchedulePass(store: CrosslineStore, workspaceId: string,
         const why = started.state === "needs_category_approval" ? t("助手还没获准做「{{label}}」这类工作，可在设置里开启。", { label: t(started.label) })
           : t("{{message}}这次请本人处理。", { message: started.message });
         sayToPerson(store, workspaceId, t("到点了：{{summary}}。{{why}}", { summary: record.manifest.summary, why }),
-          "workflow_reminder", `due:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: t("打开设置"), href: "/settings#automation" }], now);
+          "workflow_reminder", `due:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: t("打开工作流"), href: `/automation/${encodeURIComponent(record.id)}` }], now);
       }
     }
     markWorkflowRun(store, workspaceId, record.id, note, now);
@@ -981,6 +981,6 @@ export function cleanGrownSkills(store: CrosslineStore, workspaceId: string, now
   for (const record of stale) removeGrownSkill(store, workspaceId, record.id, t("{{days}} 天未用", { days: GROWN_SKILL_IDLE_DAYS }), "system", now);
   if (stale.length) sayToPerson(store, workspaceId, t("已移除 {{count}} 个 {{days}} 天未用的工作流：{{names}}。", { count: stale.length, days: GROWN_SKILL_IDLE_DAYS,
     names: joinList(locale, stale.map((record) => record.manifest.summary.slice(0, 30))) }),
-    "skill_grown", `grown-removed:${today}`, [{ label: t("查看", { context: "view" }), href: "/settings#skills" }], now);
+    "skill_grown", `grown-removed:${today}`, [{ label: t("查看", { context: "view" }), href: "/automation" }], now);
   return stale.map((record) => record.id);
 }

@@ -110,7 +110,7 @@ export function favouritesTopicStep(store: CrosslineStore, workspaceId: string, 
       const pace = plan.window.from === plan.window.to ? t("每天整理一个话题，最多 {{perDay}} 篇；可在设置里改。", { perDay: plan.perDay })
         : t("每天整理一个话题，最多 {{perDay}} 篇；{{from}}–{{to}} 点不限篇数持续整理。可在设置里改。", { perDay: plan.perDay, from: plan.window.from, to: plan.window.to });
       sayToPerson(store, workspaceId, `${sorted}${locale === "en" ? " " : ""}${pace}`,
-        "workflow_done", `topics:${record.id}:${clock.day}`, [{ label: t("去看设置"), href: "/settings#skills" }], now);
+        "workflow_done", `topics:${record.id}:${clock.day}`, [{ label: t("去看工作流"), href: `/automation/${encodeURIComponent(record.id)}` }], now);
     }
   }).catch(() => undefined); };
   // 0. What is already listed is sorted even while the site is held or the list unfinished: sorting reads only the titles kept here and
@@ -203,7 +203,7 @@ function organiseTopics(store: CrosslineStore, workspaceId: string, record: Grow
     claim.release();
     if (outcome.state !== "done") {
       sayToPerson(store, workspaceId, t("收藏已读 {{count}} 条，但按话题整理没有做成：{{reason}}。下次运行一起整理。", { count: ids.length, reason: "message" in outcome ? outcome.message : t("助手未获准做这类工作") }),
-        "workflow_done", `topics-failed:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: t("去看设置"), href: "/settings#skills" }], now);
+        "workflow_done", `topics-failed:${record.id}:${now.toISOString().slice(0, 10)}`, [{ label: t("去看工作流"), href: `/automation/${encodeURIComponent(record.id)}` }], now);
       return;
     }
     markOrganised(store, workspaceId, record.id, ids);
@@ -222,7 +222,7 @@ function organiseTopics(store: CrosslineStore, workspaceId: string, record: Grow
   if (started.state !== "started") claim.release();
   if (started.state === "blocked" && started.code !== "AGENT_BUSY")
     sayToPerson(store, workspaceId, t("收藏已读 {{count}} 条，整理要等一下：{{reason}}", { count: ids.length, reason: started.message }), "workflow_done", `topics-wait:${record.id}:${now.toISOString().slice(0, 10)}`,
-      [{ label: t("打开设置"), href: "/settings#automation" }], now);
+      [{ label: t("打开工作流"), href: `/automation/${encodeURIComponent(record.id)}` }], now);
 }
 
 const TOPIC_FILE = /^话题(-.+|总览)\.md$/;

@@ -553,7 +553,6 @@
   "收藏已按标题分成 {{count}} 个话题：{{topics}}。_other": "Favourites sorted by title into {{count}} topics: {{topics}}.",
   "每天整理一个话题，最多 {{perDay}} 篇；可在设置里改。": "One topic a day, at most {{perDay}} notes; this can be changed in Settings.",
   "每天整理一个话题，最多 {{perDay}} 篇；{{from}}–{{to}} 点不限篇数持续整理。可在设置里改。": "One topic a day, at most {{perDay}} notes, and from {{from}}:00 to {{to}}:00 with no limit. This can be changed in Settings.",
-  "去看设置": "Open Settings",
   "正在按标题把已列出的 {{count}} 条收藏分成话题（不访问小红书）。_one": "Sorting the {{count}} listed favourite into topics by title (Xiaohongshu is not visited).",
   "正在按标题把已列出的 {{count}} 条收藏分成话题（不访问小红书）。_other": "Sorting the {{count}} listed favourites into topics by title (Xiaohongshu is not visited).",
   "正在按标题把收藏分成话题。": "Sorting the favourites into topics by title.",

@@ -401,3 +401,38 @@ export function revertGrownSkill(store: CrosslineStore, workspaceId: string, id:
     entityId: id, payload: { id, from: record.version ?? 1, to: previous.version, ...(reactivate ? { status: "active" } : {}) } });
   return previous.version;
 }
+
+/**
+ * Back to any earlier version of a grown workflow (the 自动化 page, 2026-11-10), as a new version: the one in force is kept among the
+ * versions, and the chosen one's files, manifest, scan and review are put in force under the next number. It carries the checks it was
+ * installed with; one that reaches further than what the person agreed to waits for their consent again, as a revision does.
+ */
+export function restoreGrownVersion(store: CrosslineStore, workspaceId: string, id: string, version: number, now = new Date()):
+  { version: number; needsConsent: boolean } | undefined {
+  const records = readGrownSkills(store, workspaceId);
+  const record = records.find((item) => item.id === id);
+  const target = readGrownVersions(store, workspaceId, id).find((item) => item.version === version);
+  if (!record || !target || version === (record.version ?? 1)) return undefined;
+  const at = now.toISOString();
+  const number = nextGrownVersion(store, workspaceId, record);
+  const kept: GrownSkillVersion = { version: record.version ?? 1, at: record.improvedAt ?? record.createdAt,
+    replacedBecause: tFor(readLocale(store, workspaceId))("回到第 {{version}} 版", { version }), manifest: record.manifest,
+    files: grownFilesOf(store, workspaceId, id), scan: record.scan, review: record.review };
+  store.setSetting(workspaceId, grownVersionsKey(id), JSON.stringify([...readGrownVersions(store, workspaceId, id), kept].slice(-GROWN_VERSIONS_KEPT)));
+  const manifest = { ...target.manifest, lines: record.manifest.lines };
+  const agreed = agreedScope(store, workspaceId, record);
+  const baseline: AgreedScope = agreed ? { ...agreed, external: agreed.external ?? agreedScopeOf(record.manifest).external ?? [] } : agreedScopeOf(record.manifest);
+  const needsConsent = record.status === "active" && widensAgreed(baseline, manifest);
+  // Waiting for consent only because a revision reached further: back within what the person agreed to, it is on again.
+  const reactivate = record.status === "needs_consent" && Boolean(agreed) && !widensAgreed(agreed!, manifest);
+  store.setSetting(workspaceId, grownSkillFilesKey(id), JSON.stringify({ files: target.files }));
+  writeGrownSkills(store, workspaceId, records.map((item) => item.id !== id ? item : { ...item, manifest, files: fileHashes(target.files), scan: target.scan,
+    review: target.review, version: number, improvedAt: at, updatedAt: at,
+    ...(needsConsent ? { status: "needs_consent" as const, agreed: baseline } : reactivate ? { status: "active" as const } : {}) }));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, idempotencyKey: `skill.grown.restored:${id}:${number}:${at}`, type: "skill.grown.restored",
+    entityId: id, payload: { id, from: record.version ?? 1, to: number, restoredFrom: version, needsConsent } });
+  return { version: number, needsConsent };
+}
+
+/** The files of a grown workflow's version in force (for the 自动化 page's diff). */
+export const currentGrownFiles = (store: CrosslineStore, workspaceId: string, id: string) => grownFilesOf(store, workspaceId, id);

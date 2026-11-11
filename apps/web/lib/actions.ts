@@ -1,5 +1,6 @@
 import "server-only";
 import { improveGrownSkill } from "./skill-library";
+import { noteWorkflowFix } from "./workflows";
 import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -147,7 +148,8 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
   // A grown workflow that went wrong: the assistant revises its files on the worker's next pass (workflow-improver.ts) and says what changed.
   "workflow.fix": async (ctx, args) => {
     const result = await improveGrownSkill(ctx, args.workflowId, args.text);
-    return result.ok ? { ok: true, message: tOf(ctx)("已交给助手修这个工作流：它改说明和脚本并试跑，查过后才换上新版，改好会告诉本人；不合适可在设置里回到上一版"), href: "/settings#skills" }
+    if (result.ok) noteWorkflowFix(ctx, args.workflowId, args.text);
+    return result.ok ? { ok: true, message: tOf(ctx)("已交给助手修这个工作流：它改说明和脚本并试跑，查过后才换上新版，改好会告诉本人；不合适可在工作流页回到任一版"), href: `/automation/${encodeURIComponent(args.workflowId)}` }
       : { ok: false, code: result.code ?? "SKILL_NOT_FOUND" };
   },
   // Nothing is changed: a credential or a destructive change is the person's own, on its card.
@@ -264,16 +266,16 @@ export const ACTION_HANDLERS: { [K in ActionId]: Handler<K> } = {
       const record = createReminderWorkflow(getStore(), ctx.workspaceId,
         { text: args.text, reminder: args.reminder.trim(), time: args.time, weekdays: args.weekdays, lineId: line?.id ?? "" });
       return { ok: true, message: tOf(ctx)("已设好：{{when}}提醒「{{reminder}}」", { when: scheduleLabel(record.manifest.schedule, localeFor(ctx)), reminder: args.reminder.trim() }),
-        href: "/settings#skills" };
+        href: `/automation/${encodeURIComponent(record.id)}` };
     }
     // No line, no guess: the first line is not a default (a media request filed under research was grown in research's way).
     const target = line;
     if (!target) return { ok: false, code: "LINE_REQUIRED", message: tOf(ctx)("请说明这件事服务哪条主线") };
     // An automation for every account (docs/personal-agent.md, 2026-10-19): the worker designs it from the words now — a trigger it
     // watches and what the assistant does each time — and says when it is ready. A worker that is down takes it up when it is back.
-    requestAutomation(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
+    const requestId = requestAutomation(getStore(), ctx.workspaceId, args.text, target.id, ctx.principalId);
     void requestCodexSupervisor(ctx, "/v1/automations/design", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
-    return { ok: true, message: tOf(ctx)("已交给助手建成自动化，建好后会通知，并说明它按什么条件运行；发出、发布一类的步骤仍由本人完成"), href: "/settings#automation" };
+    return { ok: true, message: tOf(ctx)("已交给助手建成自动化，建好后会通知，并说明它按什么条件运行；发出、发布一类的步骤仍由本人完成"), href: `/automation/${encodeURIComponent(requestId)}` };
   },
   "proposal.decide": (ctx, args) => {
     if (args.decision !== "approve") return archiveWorkOrder(ctx, args.workOrderId, args.reason.trim() || tOf(ctx)("在输入框中拒绝"));
