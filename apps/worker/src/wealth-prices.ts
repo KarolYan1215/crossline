@@ -105,6 +105,31 @@ async function attempt<T>(key: string, now: Date, run: () => Promise<T>): Promis
   try { return await run(); } catch (error) { failedAt.set(key, now.getTime()); console.warn(JSON.stringify({ type: "wealth.price_failed", source: key, error: String(error) })); return undefined; }
 }
 
+/**
+ * A quote reading is a model run, so one that fails (throws, or leaves a due symbol unpriced — a delisted one never will be) waits an hour,
+ * then two, doubling up to a day; a reading that prices every due symbol clears it. Kept in the workspace's settings so a restarted worker
+ * waits too.
+ */
+export const QUOTE_RETRY_SETTING = "wealth.quotes.retry";
+const QUOTE_BACKOFF_MS = 3_600_000;
+const QUOTE_BACKOFF_MAX_MS = 24 * 3_600_000;
+function readQuoteRetry(store: CrosslineStore, workspaceId: string): { failures: number; retryAt: string } {
+  try {
+    const value = JSON.parse(store.getSetting(workspaceId, QUOTE_RETRY_SETTING) || "null") as { failures?: unknown; retryAt?: unknown } | null;
+    return { failures: typeof value?.failures === "number" ? value.failures : 0, retryAt: typeof value?.retryAt === "string" ? value.retryAt : "" };
+  } catch { return { failures: 0, retryAt: "" }; }
+}
+const quoteReadDue = (store: CrosslineStore, workspaceId: string, now: Date) => {
+  const { retryAt } = readQuoteRetry(store, workspaceId);
+  return !retryAt || !(Date.parse(retryAt) > now.getTime());
+};
+function noteQuoteRead(store: CrosslineStore, workspaceId: string, now: Date, complete: boolean): void {
+  if (complete) { store.deleteSetting(workspaceId, QUOTE_RETRY_SETTING); return; }
+  const failures = readQuoteRetry(store, workspaceId).failures + 1;
+  const wait = Math.min(QUOTE_BACKOFF_MAX_MS, QUOTE_BACKOFF_MS * 2 ** Math.min(failures - 1, 10));
+  store.setSetting(workspaceId, QUOTE_RETRY_SETTING, JSON.stringify({ failures, retryAt: new Date(now.getTime() + wait).toISOString() }));
+}
+
 /** The person's day, in the zone their schedule names (the web's `personToday`). */
 function localDay(store: CrosslineStore, workspaceId: string, now: Date): string {
   let zone = process.env.CROSSLINE_TIME_ZONE?.trim() || "America/Chicago";
@@ -128,13 +153,14 @@ export async function wealthPricePass(store: CrosslineStore, workspaceId: string
   const records = store.listRecords(workspaceId, { domain: "wealth" }).filter((record) => ["income", "expense", "refund"].includes(record.kind));
   if (!accounts.length && !records.length) return counts;
 
-  // FX: today's rates once a day; the history back to the oldest day that needs a rate, once.
+  // FX: today's rates once a day; the history back to the oldest day that needs a rate, once. A day converts only at a rate on or before
+  // it (never a later one), so the history starts a week early: the oldest record may fall on a weekend or holiday with no rate of its own.
   const cached = store.listMarketPrices({ kinds: ["fx"] });
   const needed = [...records.map((record) => record.at.slice(0, 10)), ...store.listWealthSnapshots(workspaceId).map((snapshot) => snapshot.on)].sort()[0] ?? today;
   const earliest = cached[0]?.day;
   const from = [needed, addDays(today, -3 * 366)].sort().at(-1)!;
-  if (!earliest || earliest > addDays(from, 7)) {
-    const body = await attempt("fx-history", now, () => fetchJson(`${FRANKFURTER}/${from}..${today}`));
+  if (!earliest || earliest > from) {
+    const body = await attempt("fx-history", now, () => fetchJson(`${FRANKFURTER}/${addDays(from, -7)}..${today}`));
     if (body) counts.fx += store.saveMarketPrices(fxRows(body, fetchedAt));
   }
   if (!cached.some((row) => row.fetchedAt.slice(0, 10) === today)) {
@@ -158,10 +184,12 @@ export async function wealthPricePass(store: CrosslineStore, workspaceId: string
   const symbols = [...new Set(holdings.filter((holding) => classOf.get(holding.accountId) === "brokerage" && BROKERAGE_SYMBOL.test(holding.symbol)).map((holding) => holding.symbol))];
   const quotesDone = fresh("quote");
   const quotesDue = symbols.filter((symbol) => !quotesDone.has(symbol));
-  if (quotesDue.length && deps.readQuotes) {
-    const quotes = await attempt(`quotes:${workspaceId}`, now, () => deps.readQuotes!(quotesDue, today));
-    if (quotes?.length) counts.quotes += store.saveMarketPrices(quotes.map((quote) => ({ kind: "quote" as const, symbol: quote.symbol, day: quote.day, price: quote.price,
+  if (quotesDue.length && deps.readQuotes && quoteReadDue(store, workspaceId, now)) {
+    let quotes: Awaited<ReturnType<QuoteReader>> = [];
+    try { quotes = await deps.readQuotes(quotesDue, today); } catch (error) { console.warn(JSON.stringify({ type: "wealth.price_failed", source: `quotes:${workspaceId}`, error: String(error) })); }
+    if (quotes.length) counts.quotes += store.saveMarketPrices(quotes.map((quote) => ({ kind: "quote" as const, symbol: quote.symbol, day: quote.day, price: quote.price,
       currency: quote.currency, source: "longbridge", fetchedAt })));
+    noteQuoteRead(store, workspaceId, now, quotesDue.every((symbol) => quotes.some((quote) => quote.symbol === symbol)));
   }
 
   // Valuations: what the holdings are worth on the person's own day, as the account's snapshot for that day.

@@ -208,7 +208,8 @@ function AccountRow({ item, view, busy, act, nf }: { item: WealthView["accounts"
           <tbody>{item.holdings.map((holding) => <tr key={holding.id}>
             <td>{holding.symbol}</td><td className="mono">{nf(holding.quantity, 8)}</td>
             <td className="mono">{holding.valuePrice === null ? t("缺价格") : `${nf(holding.valuePrice, 4)} ${holding.valueCurrency}`}
-              {holding.priceOn && <small className="lg-muted"> {t("{{day}} · {{source}}", { day: holding.priceOn, source: t(SOURCE[holding.priceSource] ?? holding.priceSource) })}</small>}</td>
+              {holding.priceOn && <small className="lg-muted"> {t("{{day}} · {{source}}", { day: holding.priceOn, source: t(SOURCE[holding.priceSource] ?? holding.priceSource) })}</small>}
+              {holding.priceStale && <span className="lg-flag">{t("价格停在 {{day}}，已过期，不计入估值", { day: holding.priceOn })}</span>}</td>
             <td className="mono">{holding.value === null ? "—" : nf(holding.value, 2)}</td>
             <td><button type="button" disabled={busy} onClick={() => void act({ action: "holding_delete", id: holding.id })}>{t("删除")}</button></td>
           </tr>)}</tbody></table>}

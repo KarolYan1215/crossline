@@ -76,7 +76,7 @@ export function baseCurrencyFor(timeZone: string, locale: string): string {
 
 /** One currency into another with the rates cached by day. */
 export type Converter = {
-  /** `value` in `from` as `to` on `day`: the nearest rate on or before it, else the first after; null when no rate covers either currency. */
+  /** `value` in `from` as `to` on `day`: the latest rate on or before it, never a later day's; null when none covers both currencies by then. */
   convert(value: number, from: string, to: string, day: string): { value: number; rateDay: string } | null;
   /** The latest day any rate is cached for ("" with none). */
   latestDay: string;
@@ -99,7 +99,6 @@ export function converterFrom(prices: MarketPrice[]): Converter {
       if (a === b) return { value, rateDay: "" };
       let chosen = "";
       for (const candidate of days) { if (candidate > day.slice(0, 10)) break; if (covers(candidate, a, b)) chosen = candidate; }
-      if (!chosen) chosen = days.find((candidate) => covers(candidate, a, b)) ?? "";
       if (!chosen) return null;
       const rates = byDay.get(chosen)!;
       return { value: value / rates.get(a)! * rates.get(b)!, rateDay: chosen };
@@ -107,18 +106,27 @@ export function converterFrom(prices: MarketPrice[]): Converter {
   };
 }
 
-/** The price a holding is valued at on `day`: the latest cached quote (brokerage) or crypto price on or before it, else the person's own. */
-export function holdingPrice(holding: WealthHolding, accountClass: AccountClass, prices: MarketPrice[], day: string): { price: number; currency: string; on: string; source: string } | null {
+/**
+ * How old a cached quote or coin price may be on the day it values a holding (docs/ledger-wealth.md §2.3). Ten days rides out the longest
+ * regular market closure (Golden Week, Spring Festival: about nine days); past it the symbol is taken as no longer quoted (delisted, renamed).
+ */
+export const QUOTE_MAX_AGE_DAYS = 10;
+
+/**
+ * The price a holding is valued at on `day`: the latest cached quote (brokerage) or crypto price on or before it, else the person's own.
+ * `stale`: the quote is older than `QUOTE_MAX_AGE_DAYS` — shown with its day, never used for a value. The person's own price does not age.
+ */
+export function holdingPrice(holding: WealthHolding, accountClass: AccountClass, prices: MarketPrice[], day: string): { price: number; currency: string; on: string; source: string; stale: boolean } | null {
   const kind = accountClass === "crypto" ? "crypto" : "quote";
   const quote = prices.filter((row) => row.kind === kind && row.symbol === holding.symbol && row.day <= day && row.price > 0).sort((a, b) => a.day.localeCompare(b.day)).at(-1);
   // The person's own price wins when it is newer than the last quote (a delisted stock, a coin no source knows).
-  if (holding.price > 0 && (!quote || holding.priceOn > quote.day)) return { price: holding.price, currency: holding.priceCurrency, on: holding.priceOn, source: "person" };
-  return quote ? { price: quote.price, currency: quote.currency, on: quote.day, source: quote.source } : null;
+  if (holding.price > 0 && (!quote || holding.priceOn > quote.day)) return { price: holding.price, currency: holding.priceCurrency, on: holding.priceOn, source: "person", stale: false };
+  return quote ? { price: quote.price, currency: quote.currency, on: quote.day, source: quote.source, stale: dayDiff(day, quote.day) > QUOTE_MAX_AGE_DAYS } : null;
 }
 
 /**
- * An account's holdings valued on `day`, in the account's currency. Null when any holding has no price or its price's currency cannot be
- * converted: a total with a hole in it would be wrong without saying so.
+ * An account's holdings valued on `day`, in the account's currency. Null when any holding has no price, only a stale one, or its price's
+ * currency cannot be converted: a total with a hole in it would be wrong without saying so.
  */
 export function valueHoldings(account: WealthAccount, holdings: WealthHolding[], prices: MarketPrice[], fx: Converter, day: string): { value: number; priceDay: string } | null {
   const own = holdings.filter((holding) => holding.accountId === account.id && holding.quantity > 0);
@@ -126,7 +134,7 @@ export function valueHoldings(account: WealthAccount, holdings: WealthHolding[],
   let total = 0, priceDay = "";
   for (const holding of own) {
     const price = holdingPrice(holding, account.accountClass, prices, day);
-    if (!price) return null;
+    if (!price || price.stale) return null;
     const value = fx.convert(holding.quantity * price.price, price.currency || account.currency, account.currency, price.on || day);
     if (!value) return null;
     total += value.value;

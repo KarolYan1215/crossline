@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  accountValues, baseCurrencyFor, budgetLines, convertRecords, converterFrom, holdingPrice, netWorthOn, netWorthSeries, parseBudget, staleAccounts, valueHoldings, wealthProblem,
+  accountValues, baseCurrencyFor, budgetLines, convertRecords, converterFrom, holdingPrice, netWorthOn, netWorthSeries, parseBudget, staleAccounts, valueHoldings, wealthProblem, QUOTE_MAX_AGE_DAYS,
   type MarketPrice, type WealthAccount, type WealthHolding, type WealthSnapshot
 } from "./wealth";
 
@@ -31,8 +31,10 @@ describe("conversion", () => {
     expect(rates.convert(108, "USD", "EUR", "2026-11-08")).toEqual({ value: 100, rateDay: "2026-11-06" });
     expect(rates.latestDay).toBe("2026-11-09");
   });
-  test("before the first cached day the first rate is used; an unknown currency is not guessed", () => {
-    expect(rates.convert(1.08, "USD", "EUR", "2025-01-01")?.rateDay).toBe("2026-11-06");
+  test("never a later day's rate: before the first cached day nothing converts; an unknown currency is not guessed", () => {
+    expect(rates.convert(1.08, "USD", "EUR", "2025-01-01")).toBeNull();
+    expect(rates.convert(1.08, "USD", "EUR", "2026-11-05")).toBeNull();
+    expect(convertRecords([{ value: 11, currency: "USD", at: "2026-11-05" }], "CNY", rates).records).toEqual([{ value: 11, currency: "USD", at: "2026-11-05" }]);
     expect(rates.convert(10, "TWD", "CNY", "2026-11-10")).toBeNull();
     expect(rates.convert(10, "CNY", "CNY", "2026-11-10")).toEqual({ value: 10, rateDay: "" });
   });
@@ -81,6 +83,15 @@ describe("holdings", () => {
     const own = holding("NEW.US", 2, { price: 5, priceCurrency: "USD", priceOn: "2026-11-10" });
     expect(holdingPrice(own, "brokerage", [quote("NEW.US", "2026-11-01", 4, "USD")], "2026-11-10")).toMatchObject({ price: 5, source: "person" });
     expect(holdingPrice({ ...own, priceOn: "2026-10-01" }, "brokerage", [quote("NEW.US", "2026-11-01", 4, "USD")], "2026-11-10")).toMatchObject({ price: 4, source: "longbridge" });
+  });
+  test(`a quote older than ${QUOTE_MAX_AGE_DAYS} days is shown as old and values nothing (a delisted symbol is not priced for ever)`, () => {
+    const prices = [quote("GONE.US", "2026-10-20", 30, "USD"), quote("AAPL.US", "2026-11-09", 210, "USD")];
+    expect(holdingPrice(holding("GONE.US", 1), "brokerage", prices, "2026-10-30")).toMatchObject({ price: 30, on: "2026-10-20", stale: false });
+    expect(holdingPrice(holding("GONE.US", 1), "brokerage", prices, "2026-11-10")).toMatchObject({ price: 30, on: "2026-10-20", stale: true });
+    expect(valueHoldings(broker, [holding("AAPL.US", 10), holding("GONE.US", 1)], prices, rates, "2026-11-10")).toBeNull();
+    // The person's own price is their word, dated; it does not age out.
+    const own = holding("GONE.US", 1, { price: 25, priceCurrency: "USD", priceOn: "2026-10-25" });
+    expect(holdingPrice(own, "brokerage", prices, "2026-11-30")).toMatchObject({ price: 25, source: "person", stale: false });
   });
 });
 

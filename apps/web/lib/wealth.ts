@@ -26,7 +26,8 @@ export const budgetOf = (ctx: AccessContext): Budget => parseBudget(getStore().g
 /** Every cached FX rate, as one converter (the cache is small: one row per currency per working day). */
 export const fxConverter = (): Converter => converterFrom(getStore().listMarketPrices({ kinds: ["fx"] }));
 
-export type HoldingView = WealthHolding & { valuePrice: number | null; valueCurrency: string; priceOn: string; priceSource: string; value: number | null };
+/** `priceStale`: the last quote is older than `QUOTE_MAX_AGE_DAYS`, so it is shown with its day and `value` is null. */
+export type HoldingView = WealthHolding & { valuePrice: number | null; valueCurrency: string; priceOn: string; priceSource: string; priceStale: boolean; value: number | null };
 export type WealthView = {
   today: string; base: string; baseChosen: boolean; currencies: string[]; classes: AccountClass[];
   /** The latest day an FX rate is cached for, "" with none (offline from the first start, or never fetched). */
@@ -57,8 +58,8 @@ export function loadWealth(ctx: AccessContext): WealthView {
       return { ...item, valued: HOLDING_CLASSES.includes(item.account.accountClass) && own.length > 0,
         holdings: own.map((holding) => {
           const price = holdingPrice(holding, item.account.accountClass, prices, today);
-          const converted = price ? fx.convert(holding.quantity * price.price, price.currency || item.account.currency, item.account.currency, price.on || today) : null;
-          return { ...holding, valuePrice: price?.price ?? null, valueCurrency: price?.currency ?? "", priceOn: price?.on ?? "", priceSource: price?.source ?? "",
+          const converted = price && !price.stale ? fx.convert(holding.quantity * price.price, price.currency || item.account.currency, item.account.currency, price.on || today) : null;
+          return { ...holding, valuePrice: price?.price ?? null, valueCurrency: price?.currency ?? "", priceOn: price?.on ?? "", priceSource: price?.source ?? "", priceStale: price?.stale ?? false,
             value: converted ? Math.round(converted.value * 100) / 100 : null };
         }) };
     }),

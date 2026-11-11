@@ -65,7 +65,8 @@ test("the daily pass fetches once, values held positions, and leaves the person'
   const readQuotes = async (symbols: string[]) => { asked.push(symbols); return [{ symbol: "AAPL.US", price: 200, currency: "USD", day: "2026-11-07" }]; };
   const first = await wealthPricePass(store, "w", { now, fetchJson, readQuotes });
   expect(first).toMatchObject({ crypto: 1, quotes: 1, valued: 2 });
-  expect(urls.some((url) => url.includes("2026-11-01..2026-11-10"))).toBe(true);
+  // A week before the oldest balance, so its day has a rate on or before it.
+  expect(urls.some((url) => url.includes("2026-10-25..2026-11-10"))).toBe(true);
   // The local day in Shanghai: the valuation is dated there, not in UTC.
   const snaps = store.listWealthSnapshots("w").filter((item) => item.source === "valuation");
   expect(snaps.map((item) => [item.accountId, item.on, item.value])).toEqual([["b", "2026-11-10", 2000], ["c", "2026-11-10", 280000]]);
@@ -82,6 +83,43 @@ test("the daily pass fetches once, values held positions, and leaves the person'
   store.saveWealthHolding("w", { id: "h2", accountId: "c", symbol: "BTC", quantity: 0, price: 0, priceCurrency: "", priceOn: "", updatedAt: "z" });
   await wealthPricePass(store, "w", { now: new Date("2026-11-11T04:00:00Z"), fetchJson, readQuotes });
   expect(store.listWealthSnapshots("w").find((item) => item.accountId === "c" && item.on === "2026-11-11")).toMatchObject({ value: 0, source: "valuation" });
+  store.close();
+});
+
+test("a quote reading that fails or leaves a symbol unpriced waits an hour, doubling to a day, and is reset by a full reading", async () => {
+  const store = new CrosslineStore(":memory:");
+  store.saveWealthAccount("w", { id: "b", name: "长桥", accountClass: "brokerage", currency: "USD", note: "", archivedAt: "", createdAt: "x" });
+  store.saveWealthHolding("w", { id: "h1", accountId: "b", symbol: "AAPL.US", quantity: 10, price: 0, priceCurrency: "", priceOn: "", updatedAt: "x" });
+  const fetchJson = async (url: string) => url.endsWith("/latest") ? { base: "EUR", date: "2026-11-09", rates: { USD: 1.1 } } : { base: "EUR", rates: { "2026-11-02": { USD: 1.1 } } };
+  let answer: "throw" | "empty" | "ok" = "throw";
+  let asked = 0;
+  const readQuotes = async () => {
+    asked += 1;
+    if (answer === "throw") throw new Error("CODEX_DOWN");
+    return answer === "ok" ? [{ symbol: "AAPL.US", price: 200, currency: "USD", day: "2026-11-09" }] : [];
+  };
+  const at = (iso: string) => wealthPricePass(store, "w", { now: new Date(iso), fetchJson, readQuotes });
+  await at("2026-11-10T00:00:00Z");
+  expect(asked).toBe(1);
+  // Every tick inside the hour asks nothing, a restarted worker included (the wait is in the ledger, not in memory).
+  await at("2026-11-10T00:10:00Z");
+  await at("2026-11-10T00:59:00Z");
+  expect(asked).toBe(1);
+  answer = "empty";
+  await at("2026-11-10T01:00:00Z");
+  expect(asked).toBe(2);
+  // The second failure doubles the wait to two hours.
+  await at("2026-11-10T02:30:00Z");
+  expect(asked).toBe(2);
+  answer = "ok";
+  await at("2026-11-10T03:00:00Z");
+  expect(asked).toBe(3);
+  expect(store.getSetting("w", "wealth.quotes.retry") ?? "").toBe("");
+  // Never longer than a day.
+  answer = "throw";
+  store.setSetting("w", "wealth.quotes.retry", JSON.stringify({ failures: 13, retryAt: "2026-11-11T00:00:00Z" }));
+  await at("2026-11-11T00:00:00Z");
+  expect(JSON.parse(store.getSetting("w", "wealth.quotes.retry")!)).toEqual({ failures: 14, retryAt: "2026-11-12T00:00:00.000Z" });
   store.close();
 });
 

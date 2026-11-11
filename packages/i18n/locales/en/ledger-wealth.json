@@ -67,6 +67,7 @@
   "价格": "Price",
   "市值": "Value",
   "缺价格": "No price",
+  "价格停在 {{day}}，已过期，不计入估值": "Price stuck at {{day}}, too old; not counted in the valuation",
   "自填价格（可空）": "Your own price (optional)",
   "记持仓": "Record position",
   "BTC、ETH 等常见币每天取 CoinGecko 价格；其他币按自填价格估值。": "Common coins such as BTC and ETH are priced daily from CoinGecko; other coins use the price you enter.",
