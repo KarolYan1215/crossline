@@ -32,3 +32,5 @@ $env:CROSSLINE_RECORD_DIR='C:\path\to\recordings'; pnpm worker:start
 2026-10-03 起另有 `analysis-degenerate-zero-width-padding`：理由字段在一句完整的话后面挂着交替的零宽字符（U+200B/200C/200D），夹一个马拉雅拉姆字母和一个泄漏的 `numerusform】【。` —— 退化文本逐字来自 `scripts/structured-output-check.ts` 对一条含糊捕获（「整理一下」）的真实运行，两次运行两次都出现。旧的「同一字符重复八次」裁剪认不出交替模式，所以它曾一路存进账本。
 
 2026-11-10 起另有 `opportunity-mail-social-and-lines.json`（`apps/worker/src/opportunity-tags.test.ts`）：八封看起来真实的邮件候选与 reader 对每封的回答——舞会、coffee hour、mentor mixer、社交酒会、导师交流会（都不该推），创始人与天使投资人之夜（创业线的目标是结识投资人，该推），同时服务研究与创业的 Badger Hacks，以及一门瑜伽课（和哪条线都无关）。回答形状按 reader 的输出 schema 构造，不是录制的；它锁住的是旧规则的缺陷：邮件按标题词归线（「ball」让舞会进了研究线）、社交聚会照推。
+
+2026-11-10 起另有 `step-plan-drill-form-from-identity`：步骤规划器按「学生」身份套出「做 2 套往年卷并订正」「整理错题本」，还问「错题本用纸质还是电子？」，本人从没说过这样做。**这一份不是逐字录制**，是按 Skill 旧示例（机主账本里出现过的订正类任务）重建的回答；它让 `drill-forms.ts` 的后检走完 worker → 校验 → 落库：没有依据时剪掉、删步、先问做事方法；本人记过这种做法时原样保留（`step-planner.test.ts`）。

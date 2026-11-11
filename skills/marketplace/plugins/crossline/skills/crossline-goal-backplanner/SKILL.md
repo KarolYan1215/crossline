@@ -33,13 +33,21 @@ An item is **one task of 30 to 480 minutes of usual work (p50)** that ends in so
 
 | | title | why |
 |---|---|---|
-| 好 | 「完成 ECE 555 期中往年卷 2 套并订正」 | the person's practice, checkable, sized to a few sittings |
+| 好 | 「限时做完 1 套往年期中卷」 for a criterion 「期中成绩 ≥ 88」, the facts silent on how the person prepares | the form the goal itself needs (solving at exam level, against the clock); how they go over it afterwards is asked, not assumed |
+| 好 | 「把方法部分讲给师兄听并记下 3 个追问」 for 「方法部分初稿交给导师」, a fact 「写东西习惯先讲一遍再写」 | the form from the person's own recorded method |
 | 好 | 「排出 5 份门店访谈的前 3 个痛点」 | the person's judgement on gathered material |
-| 好 | 「汇集期中考试规则与往年卷」, owner `assistant`, prepares the item above | static material from existing sources: the assistant's |
+| 好 | 「汇集期中考试规则与往年卷」, owner `assistant`, prepares the first item | static material from existing sources: the assistant's |
 | 坏 | 「打开第 3 讲讲义」 | one action: a step, the step planner's job |
 | 坏 | 「复习整门课」「完成论文」 | the whole milestone, not a task |
 | 坏 | 「问助教期中范围」 | a request for a fact: folded into the task that needs it (below) |
+| 坏 | 「做 2 套往年卷并订正」「整理错题本」「背诵公式」「每日打卡」 | a form taken from an identity template (below), with nothing the person said behind it |
 | 坏 | 「制定验收清单」「验收助手整理的材料」 | not a task: the acceptance gate judges the assistant's work, and the person glances at it when the core task begins |
+
+## The form of a task: from the goal and the person, never from an identity template
+
+What a task asks the person to do comes from two places only. First, what the criterion needs on its day, worked out from first principles: a score in a timed exam needs solving at that level against the clock; a submission needs the piece itself at the bar it will be judged by; a decision needs the options laid side by side and the call made. Second, how this person says they work: the `facts` and `personProfile` lines on how they prepare for an exam or a deadline, learn and go back over material, write and present (the interview's 做事方法). Shape the task by the first and phrase it in the second.
+
+Never import a form from who the person is. 订正, 错题本, 背诵, 默写, 打卡, 刷题 and drills like them are a school's or a coach's routine, not this person's: nobody marks a university student's work, and a creator's daily check-in or a worker's ticked log is the same mistake on another line. Such a form appears only when the person's own facts say they work that way. When nothing on record says how they do this kind of work, write the task by what the goal needs and leave the method open: the step planner asks them (「平时怎么准备这类考试？」). The app cuts any drill form the person's words do not back, and drops an item that is nothing else.
 
 ## Who does each item: `owner`, `prepares`, `question`
 
@@ -49,7 +57,7 @@ Judge by what the item produces, never by the line or the kind of goal (a course
 - `assistant` — a static artefact made from existing information: collecting, compiling, sorting, summarising, excerpting, checking against a list, an inventory, a ledger, a template, a calculation or simulation run on a plan the person already gave. `prepares` is the id of the person's item that uses it, and that item depends on it.
 - `ask` — the same, but it needs something only the person holds (data behind their login, a screenshot or an export, one sentence of scope). `question` is the one question (at most two facts, ten minutes of their time); the assistant does the rest after the answer. `prepares` as above.
 
-Only `ask` items carry a `question`; `person` items have `prepares` "". Never give the assistant sending, submitting, publishing, logging in, paying, graded answers or a consequential choice. The app corrects an owner that contradicts these rules, and an answer with no core task of the person's is sent back. Two illustrations from different lines (not templates): for a course exam, 「汇集考试规则、往年卷与已出成绩」 (`ask` for the scores in the course portal) prepares 「按规则与已有成绩规划并完成 2 套往年卷」 (`person`); for a research paper, 「按已定参数跑基线仿真」 (`assistant`) prepares 「判断要补哪些实验、怎么补、用哪个工具」 (`person`).
+Only `ask` items carry a `question`; `person` items have `prepares` "". Never give the assistant sending, submitting, publishing, logging in, paying, graded answers or a consequential choice. The app corrects an owner that contradicts these rules, and an answer with no core task of the person's is sent back. Two illustrations from different lines (not templates): for a course exam, 「汇集考试规则、往年卷与已出成绩」 (`ask` for the scores in the course portal) prepares 「按规则与已有成绩定出要补的部分并限时做完 1 套往年卷」 (`person`); for a research paper, 「按已定参数跑基线仿真」 (`assistant`) prepares 「判断要补哪些实验、怎么补、用哪个工具」 (`person`).
 
 ## Each item
 
@@ -63,7 +71,7 @@ Only `ask` items carry a `question`; `person` items have `prepares` "". Never gi
 - `energy` — low / medium / high. `interruptible` — true unless the work truly needs one unbroken sitting (a timed exam, a live session); long work is several sittings.
 - `family` — `preparation` (gathering, setting up, reading in), `review` (checking, assessing, revising) or `deep_work` (making the thing itself); it pools the person's real durations to correct later estimates.
 - `riskTier` — `routine` (private and reversible), `milestone` (its result decides whether the milestone is reached: a graded hand-in, a submission), `high_risk` (anything that leaves the machine or is hard to undo: sending, publishing, paying, signing). External communication, money, legal commitments, publication and destructive changes are never `routine`.
-- `evidence` — what the person can show when it is done, as a short noun phrase; it becomes the task's checklist line: 「第 1–4 讲复习提纲文档」, 「2 套往年卷的订正记录」.
+- `evidence` — what the person can show when it is done, as a short noun phrase; it becomes the task's checklist line: 「第 1–4 讲复习提纲文档」, 「1 套限时往年卷的得分」, 「3 个痛点及各自的访谈原话」.
 
 ## Missing inputs
 

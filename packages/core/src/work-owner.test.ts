@@ -16,7 +16,7 @@ const cases: Array<[string, WorkOwner, WorkOwner]> = [
   ["汇集期中考试规则与往年卷", "person", "assistant"],
   ["根据已汇集的规则和往年卷规划复习", "person", "person"],
   ["完成 HW3 第 1–4 题", "assistant", "person"],
-  ["做 2 套往年卷并订正", "assistant", "person"],
+  ["限时做完 2 套往年卷", "assistant", "person"],
   ["整理复习提纲", "person", "assistant"],
   ["整理本学期已出成绩", "person", "ask"],
   ["确认期中复习范围", "person", "ask"],
@@ -149,7 +149,7 @@ describe("isPreparationOnlyCriterion", () => {
       expect(isPreparationOnlyCriterion({ statement }), statement).toBe(true);
   });
   it("is false for a result of the person's own, and for a number reached", () => {
-    for (const statement of ["期中成绩 ≥ 88/100", "考前完成 2 套往年卷（计时）并订正", "至少 3 家店长表示愿意继续试用", "方法部分初稿交给导师", "首条视频发布"])
+    for (const statement of ["期中成绩 ≥ 88/100", "考前在计时条件下做完 2 套往年卷", "至少 3 家店长表示愿意继续试用", "方法部分初稿交给导师", "首条视频发布"])
       expect(isPreparationOnlyCriterion({ statement }), statement).toBe(false);
     expect(isPreparationOnlyCriterion({ statement: "资料整理完成率", measure: { kind: "threshold" } })).toBe(false);
   });

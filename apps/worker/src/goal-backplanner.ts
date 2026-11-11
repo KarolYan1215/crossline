@@ -1,6 +1,7 @@
 import { personProfileFor } from "./planning-profile";
+import { drillBackingFor } from "./drill-backing";
 import { randomUUID } from "node:crypto";
-import { assignBackplanOwners, BACKPLAN_SCHEMA, foldInfoRequests, goalSettingKey, isWorkOwner, mentionsExternalAction, producedArtifacts, rollingBackplan, usedArtifacts,
+import { assignBackplanOwners, BACKPLAN_SCHEMA, screenBackplanDrills, foldInfoRequests, goalSettingKey, isWorkOwner, mentionsExternalAction, producedArtifacts, rollingBackplan, usedArtifacts,
   validateBackplan, withCourse, workOwner, type BackplanAnswer as Answer, type MissingInput } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import { handOffArtifacts, linkArtifactWork, readStoredArtifactPlan, type CrosslineStore, type StoredWorkOrder } from "@crossline/db";
@@ -199,7 +200,12 @@ export function createGoalBackplanner(store: CrosslineStore, workspaceId: string
       return { state: "blocked", code: "BACKPLAN_INPUT_BLOCKED", message };
     }
     // A request for a fact that another item needs becomes that item's first step instead of a task (info-request.ts, 2026-10-15).
-    const { steps: shaped } = foldInfoRequests(result.output.steps);
+    // A drill form (订正, 错题本, 背诵, 打卡 …) the person's own words do not back is cut, and a task that is only the drill is dropped
+    // (drill-forms.ts, the owner's rule of 2026-11-10): the milestone's criteria are the model's, not the person's, and back nothing.
+    const drill = screenBackplanDrills(result.output.steps, drillBackingFor(store, workspaceId, { scopes: [milestone.identityId] }).backing);
+    if (drill.stripped.length || drill.dropped.length) console.info(JSON.stringify({ type: "backplan.drill_form_removed", workspaceId, milestoneId: milestone.id,
+      stripped: drill.stripped, dropped: drill.dropped }));
+    const { steps: shaped } = foldInfoRequests(drill.items);
     // Who does each item (docs/work-split.md): the person's core tasks, the assistant's preparation for them, questions to the person.
     // A review-only item is dropped: the gate judges the assistant's work.
     const { steps: owned, dropped } = assignBackplanOwners(shaped, localeOf(store, workspaceId));

@@ -5,6 +5,7 @@ import { normalizeAiAssist } from "./ai-tools";
 import { INFO_REQUEST_PERSON_MINUTES, infoRequestTraits } from "./info-request";
 import { COMPLETION_FIELD, type ModelCompletion } from "./completion";
 import { WORK_OWNERS, workOwner, type WorkOwner } from "./work-owner";
+import { asksMethod, backedDrillForms, drillFormsIn, methodQuestion, screenDrillItems, stripDrillSentences } from "./drill-forms";
 
 /**
  * A task's step graph: the step planner's wire contract, the normalization that makes any answer usable, the warnings a reviewer
@@ -241,12 +242,22 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
   /** The person's own choices of who does a kind of step (`role|product` → owner), applied where nothing forces the person. */
   ownerPreferences?: ReadonlyMap<string, "person" | "assistant">;
   /** The workspace's language: the provide steps written here are stored and shown to the person. */
-  locale?: Locale | undefined } = {}): { plan: StepPlan; warnings: StepWarning[] } {
+  locale?: Locale | undefined;
+  /**
+   * The person's own words a drill form may rest on (`drill-forms.ts`): their confirmed facts, answers and preferences, and the words they
+   * captured the task in. A drill form (订正, 错题本, 背诵, 打卡 …) none of them names is cut from the plan.
+   */
+  drillBacking?: readonly string[];
+  /** Whether a fact already says how the person does this kind of work: then no method question is added when a drill form is cut. */
+  methodKnown?: boolean;
+  /** The task's own title and intent, which pick the wording of that method question. */
+  taskText?: string } = {}): { plan: StepPlan; warnings: StepWarning[] } {
   const t = tFor(options.locale);
   const assistant = options.assistant !== false;
   const warnings: StepWarning[] = [];
   const idMap = new Map<string, string>();
-  const steps = plan.steps.map((step, index) => {
+  const drill = screenStepDrills(plan, options.drillBacking ?? [], warnings);
+  const steps = drill.steps.map((step, index) => {
     const id = `s${index + 1}`;
     idMap.set(step.id, id);
     const raw = [step.estimate?.p25Minutes, step.estimate?.p50Minutes, step.estimate?.p85Minutes].map((value) =>
@@ -287,7 +298,7 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
     if (!step.dependsOn.includes(provide.id)) step.dependsOn.push(provide.id);
   }
   steps.unshift(...provides);
-  const questions = (Array.isArray(plan.questions) ? plan.questions : []).filter((question) => question && question.text)
+  const questions = drill.questions.filter((question) => question && question.text)
     .map((question, index) => ({ id: String(question.id || `q${index + 1}`).slice(0, 40), text: String(question.text).trim().slice(0, 200),
       why: String(question.why ?? "").trim().slice(0, 300), options: (Array.isArray(question.options) ? question.options : list(question.options))
         .map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 8) }));
@@ -328,9 +339,31 @@ export function normalizeStepPlan(plan: StepPlan, toolNames?: string[], options:
     .map((unit) => ({ id: String(unit.id).slice(0, 40), title: String(unit.title).trim().slice(0, 160), docId: String(unit.docId ?? ""), quote: String(unit.quote ?? "").slice(0, 300) })).slice(0, 60);
   const unitIds = new Set(units.map((unit) => unit.id));
   for (const step of steps) step.covers = step.covers.filter((id) => unitIds.has(id));
-  return { plan: { archetypeId: plan.archetypeId, rationale: text(plan.rationale).trim().slice(0, 600),
+  // A drill form was cut and nothing on record says how the person works: ask them, first, instead of guessing a method.
+  if (drill.changed && !options.methodKnown && !questions.some((question) => asksMethod(question.text)))
+    questions.unshift(methodQuestion([options.taskText ?? "", ...steps.map((step) => step.title)].join(" "), options.locale));
+  return { plan: { archetypeId: plan.archetypeId, rationale: stripDrillSentences(text(plan.rationale).trim(), drill.backed).slice(0, 600),
     quantity: { basis: text(plan.quantity?.basis).slice(0, 60), amount, unit: text(plan.quantity?.unit).slice(0, 12) }, units,
     questions: questions.slice(0, 5), needs, steps }, warnings };
+}
+
+/**
+ * The drill forms the model wrote without the person's words behind them (`drill-forms.ts`, the owner's rule of 2026-11-10): cut from
+ * every step's text, a step that is only the drill dropped, a question that asks about one dropped and its options without them.
+ */
+function screenStepDrills(plan: StepPlan, backing: readonly string[], warnings: StepWarning[]) {
+  const backed = backedDrillForms(backing);
+  const raw = plan.steps.map((step) => ({ ...step, dependsOn: list(step.dependsOn) }));
+  const { items: steps, stripped, dropped } = screenDrillItems(raw, backed, ["deliverable", "doneCriterion", "firstAction", "tickOutcome"]);
+  const asked = (Array.isArray(plan.questions) ? plan.questions : []);
+  const questions = asked.filter((question) => !question?.text || !drillFormsIn(String(question.text)).some((form) => !backed.has(form)))
+    .map((question) => question && Array.isArray(question.options)
+      ? { ...question, options: question.options.filter((option) => !drillFormsIn(String(option)).some((form) => !backed.has(form))) } : question);
+  // i18n-ignore-start: warnings for the reviewer model
+  if (stripped.length) warnings.push({ code: "STEP_DRILL_FORM_STRIPPED", detail: `「${stripped.join("」「")}」里的订正、错题、背诵、打卡一类做法本人没说过，已去掉` });
+  if (dropped.length) warnings.push({ code: "STEP_DRILL_FORM_DROPPED", detail: `「${dropped.join("」「")}」只是一种本人没说过的练习形式，已删去` });
+  // i18n-ignore-end
+  return { steps, questions, backed, changed: stripped.length + dropped.length + (asked.length - questions.length) > 0 };
 }
 
 /**

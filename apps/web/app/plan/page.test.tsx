@@ -32,7 +32,8 @@ describe("plan page", () => {
   test("with no painted week, the interview's proposed hours are used and marked inferred; stated hours beyond them are flagged", async () => {
     const store = new CrosslineStore(":memory:");
     globalThis.crosslineStore = store;
-    store.upsertProfileFact({ workspaceId: "workspace-1", identityId: "research", projectId: "p", slot: "weekly_hours", updatedAt: "2026-10-01T00:00:00Z",
+    // Recorded today: the fixed 2026-10-01 stopped counting on 2026-11-11 (the same date rot as energy.test.ts).
+    store.upsertProfileFact({ workspaceId: "workspace-1", identityId: "research", projectId: "p", slot: "weekly_hours", updatedAt: new Date().toISOString(),
       value: "无法按项目拆分；所有事情合计每周约 72 小时。", status: "confirmed", sourceRef: "reply-1", sourceQuote: "72 小时" });
     const { default: PlanPage } = await import("./page");
     const html = renderToStaticMarkup(await PlanPage({}));

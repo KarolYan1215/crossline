@@ -46,7 +46,9 @@ Two to four per milestone, each `{id, statement, required, evidenceOf, measure}`
 
 **Output or outcome, and say which.** `output`: something now exists that did not (a file, a draft, a count of things produced). `outcome`: something changed that the person did not author alone (a score was given, someone replied, a test passed, a number moved). The gate reads submitted evidence, and outputs are easy to evidence: a milestone whose criteria are all outputs passes on a busy afternoon while the goal stands still. **Every milestone needs at least one `outcome` criterion.** When none can honestly be named, say so in `assumptions` instead of dressing an output up as one.
 
-**At least one criterion comes from the person's own work.** Material being ready (rules gathered, a list built, a sample pack obtained, data compiled) is the assistant's preparation, not a result: a milestone whose every criterion is readiness gives the person nothing of their own to do, and its tasks come out as collecting and filing (refused as `MILESTONE_PREP_ONLY`). Fold the preparation into a milestone that has a result of the person's: a score reached after their practice, a draft they wrote, a design they chose, a reply they obtained. Two illustrations from different lines: not 「往年卷与考试规则汇集完成」 but 「期中成绩 ≥ 88」 with 「考前完成 2 套往年卷并订正」; not 「竞品资料库建立」 but 「排出首轮试用的 3 个痛点并得到 2 家门店的答复」.
+**At least one criterion comes from the person's own work.** Material being ready (rules gathered, a list built, a sample pack obtained, data compiled) is the assistant's preparation, not a result: a milestone whose every criterion is readiness gives the person nothing of their own to do, and its tasks come out as collecting and filing (refused as `MILESTONE_PREP_ONLY`). Fold the preparation into a milestone that has a result of the person's: a score reached after their practice, a draft they wrote, a design they chose, a reply they obtained. Two illustrations from different lines: not 「往年卷与考试规则汇集完成」 but 「期中成绩 ≥ 88」 with 「考前在计时条件下做完 1 套往年期中卷」; not 「竞品资料库建立」 but 「排出首轮试用的 3 个痛点并得到 2 家门店的答复」.
+
+**A criterion's form comes from the goal and the person, never from an identity template.** An output criterion names what the outcome needs from first principles (a timed exam is prepared for by solving at its level against the clock; a submission by the piece itself) or what the person says they do (`personProfile`, the 做事方法 facts). Never 订正, 错题本, 背诵, 默写, 打卡, 刷题 or a drill like them because the person is a student, a creator or an employee: nobody marks a university student's work. Such a form is a criterion only when the person's own facts say they work that way; when how they work is unknown, name the result, not a method, and say in `assumptions` that the method is still to be asked.
 
 **Measure with something checkable.** At least one criterion is `count`, `threshold` or `artifact`; anything graded (exam, quiz, homework, project mark) has a `threshold` with the real score line. Use `judgement` only when nothing countable captures the result, and then `failsWhen` names a concrete condition: 「读者不提问就无法复现实验步骤」, never 「做得不好」.
 
@@ -57,8 +59,8 @@ A course milestone:
 ```json
 [{"id": "c1", "statement": "期中成绩 ≥ 88/100", "required": true, "evidenceOf": "outcome",
   "measure": {"kind": "threshold", "unit": "分", "comparator": "gte", "value": 88, "bareLine": 85}},
- {"id": "c2", "statement": "考前完成 2 套往年期中卷（计时）并订正", "required": true, "evidenceOf": "output",
-  "measure": {"kind": "count", "unit": "套", "atLeast": 2}}]
+ {"id": "c2", "statement": "考前在计时条件下做完 1 套往年期中卷", "required": true, "evidenceOf": "output",
+  "measure": {"kind": "count", "unit": "套", "atLeast": 1}}]
 ```
 
 A startup milestone 「首轮 5 家门店试用结束并收回反馈」: outcome 「至少 3 家门店店长表示愿意继续试用」 (`count`, atLeast 3), output 「5 份试用访谈记录」 (`count`, atLeast 5).

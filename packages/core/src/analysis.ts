@@ -4,6 +4,7 @@ import { quoteSupportsDate } from "./date-schema";
 import { cleanTaskTitle, withCourse } from "./task-title";
 import { infoRequestTraits } from "./info-request";
 import { COMPLETION_FIELD, readModelCompletion, type ModelCompletion } from "./completion";
+import { backedDrillForms, stripDrillForms } from "./drill-forms";
 import { tFor, type Locale } from "./i18n";
 import { textWidth } from "./text-width";
 
@@ -424,6 +425,14 @@ export function validateAnalysisProposal(value: unknown, input: AnalysisContext,
     }
     seenLines.add(byproduct.lineId);
   }
+  // A drill form (订正, 错题本, 背诵, 打卡 …) the model added is cut unless the person's words back it: the capture, a file they gave, a
+  // preference or the interview's conclusions (drill-forms.ts, 2026-11-10). The quotes stay verbatim; they are the person's words already.
+  const backed = backedDrillForms([context.capture.title, context.capture.context, ...context.availableInputs.map((item) => item.text),
+    ...(context.personalPreferences ?? []), ...(context.personProfile ?? [])]);
+  proposal.title = stripDrillForms(proposal.title, backed) || proposal.title;
+  proposal.intent = stripDrillForms(proposal.intent, backed) || proposal.title;
+  for (const part of proposal.humanCore) part.intent = stripDrillForms(part.intent, backed) || part.intent;
+  for (const item of proposal.evidenceContract) item.description = stripDrillForms(item.description, backed) || proposal.title;
   if (!("completion" in legacyExtras)) proposal.completion = readModelCompletion(proposal.completion)!;
   // Only an id the context offered: anything else is new work, and the code-level duplicate check still runs on it.
   if (proposal.extendsTaskId && !existingTaskIds(context).has(proposal.extendsTaskId)) proposal.extendsTaskId = "";

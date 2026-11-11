@@ -61,7 +61,7 @@ test("the step an assistant step serves: the soonest open person step waiting on
   // a (agent) → c (agent) → d (person); b is a person step that does not wait on a; nothing follows e.
   const stored = plan(store, "wo", [{ id: "a", title: "汇编规则", executor: "agent" }, { id: "b", title: "读讲义", executor: "human" },
     { id: "c", title: "整理样题", executor: "agent", dependsOn: ["a"] }, { id: "d", title: "限时做样题", executor: "human", dependsOn: ["c"] },
-    { id: "e", title: "汇总错题来源", executor: "agent" }]);
+    { id: "e", title: "汇总例题来源", executor: "agent" }]);
   const [a, b, c, , e] = stored.steps;
   expect(servedPersonStep(stored, a!)?.title).toBe("限时做样题");
   expect(servedPersonStep(stored, c!)?.title).toBe("限时做样题");

@@ -280,3 +280,16 @@ test("asking someone for a fact: the system may draft the email but never send i
   expect(() => core.validateAnalysisProposal(proposal("起草给助教的邮件草稿"), ask)).not.toThrow();
   expect(() => core.validateAnalysisProposal(proposal("发送邮件给助教"), ask)).toThrow("ANALYSIS_INFO_REQUEST_SENT_BY_SYSTEM");
 });
+
+test("a drill form the capture never named is cut from the proposal; the person's own words keep it (2026-11-10)", () => {
+  const exam = { ...analysisContext, capture: { title: "下周三考 ECE 548 期中，想考到 85", context: "" } };
+  const proposal = { ...validProposal, title: "做往年卷并订正错题", intent: "限时做 2 套往年卷，做完订正错题", automationParts: [],
+    humanCore: [{ ...validProposal.humanCore[0], intent: "限时做往年卷并订正", quote: "想考到 85" }],
+    evidenceContract: [{ kind: "record", description: "往年卷订正记录", why: "证明练过", required: true }] };
+  const cut = core.validateAnalysisProposal(structuredClone(proposal), exam);
+  expect(cut).toMatchObject({ title: "做往年卷", intent: "限时做 2 套往年卷", humanCore: [{ intent: "限时做往年卷", quote: "想考到 85" }],
+    evidenceContract: [{ description: "做往年卷" }] });
+  const own = { ...analysisContext, capture: { title: "把 ECE 548 期中往年卷做完并订正错题", context: "" } };
+  const kept = core.validateAnalysisProposal(structuredClone({ ...proposal, humanCore: [{ ...proposal.humanCore[0], quote: "做完并订正错题" }] }), own);
+  expect(kept).toMatchObject({ title: "做往年卷并订正错题", evidenceContract: [{ description: "往年卷订正记录" }] });
+});

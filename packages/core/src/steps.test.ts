@@ -127,13 +127,13 @@ describe("grounded, non-trivial plans", () => {
   });
   it("a step that only reviews the assistant's output is folded into the first core step's first move, at most ten minutes", () => {
     const { plan: normalized, warnings } = normalizeStepPlan(plan([
-      step("g", "gather", { title: "汇集期中考试规则与往年卷", executor: "agent", schedulable: false }),
-      step("r", "check", { title: "验收助手整理的规则清单", dependsOn: ["g"], estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 40 } }),
-      step("p", "practice", { title: "做 2 套往年卷并订正", dependsOn: ["r"], firstAction: "打开第一套卷子" })], "writing"));
-    expect(normalized.steps.map((item) => item.title)).toEqual(["汇集期中考试规则与往年卷", "做 2 套往年卷并订正"]);
+      step("g", "gather", { title: "汇集 5 份门店访谈记录", executor: "agent", schedulable: false }),
+      step("r", "check", { title: "验收助手整理的访谈记录", dependsOn: ["g"], estimate: { p25Minutes: 20, p50Minutes: 30, p85Minutes: 40 } }),
+      step("p", "draft", { title: "排出 5 份访谈的前 3 个痛点", dependsOn: ["r"], firstAction: "打开第一份访谈" })], "writing"));
+    expect(normalized.steps.map((item) => item.title)).toEqual(["汇集 5 份门店访谈记录", "排出 5 份访谈的前 3 个痛点"]);
     const core = normalized.steps[1]!;
     expect(core).toMatchObject({ id: "s2", dependsOn: ["s1"], estimate: { p50Minutes: 40 } });
-    expect(core.firstAction).toBe("先用 10 分钟扫一眼「汇集期中考试规则与往年卷」的产出；打开第一套卷子");
+    expect(core.firstAction).toBe("先用 10 分钟扫一眼「汇集 5 份门店访谈记录」的产出；打开第一份访谈");
     expect(normalized.steps.reduce((sum, item) => sum + item.share, 0)).toBeCloseTo(1, 2);
     expect(warnings.map((warning) => warning.code)).toContain("STEP_REVIEW_FOLDED");
   });
@@ -222,5 +222,51 @@ describe("the step type table (3A, 2026-10-22)", () => {
     // A need nothing on record says the person has is dropped: only one provide step.
     expect(normalized.needs).toEqual([{ id: "n1", what: "L3–L8 讲义", why: "练习要按讲义的推导", basis: "[f2] 讲义在 Canvas 上", kind: "reference" }]);
     expect(normalized.steps.filter((item) => item.provides)).toHaveLength(1);
+  });
+});
+
+describe("drill forms (the owner's rule of 2026-11-10: no 订正-type task from an identity template)", () => {
+  const practice = (extra: Partial<StepPlan["steps"][number]> = {}) => step("p", "practice", { title: "做 2 套往年卷并订正", doneCriterion: "2 套卷子做完并订正错题",
+    firstAction: "打开第一套卷子", ...extra });
+  it("cuts a drill form nothing the person said backs, drops a step that is only the drill, and asks how they work instead", () => {
+    const drillPlan = plan([practice(), step("e", "check", { title: "整理错题本", dependsOn: ["p"] }), step("x", "draft", { title: "写出第 3 章推导", dependsOn: ["e"] })], "writing");
+    drillPlan.rationale = "期中占 30%。按学生惯例做完卷子后订正错题。讲义 12 讲。";
+    drillPlan.questions = [{ id: "q1", text: "期中考到第几讲？", why: "", options: ["L1–L8", "L1–L10"] }];
+    const { plan: normalized, warnings } = normalizeStepPlan(drillPlan, undefined, { taskText: "准备 ECE 548 期中考试" });
+    expect(normalized.steps.map((item) => item.title)).toEqual(["做 2 套往年卷", "写出第 3 章推导"]);
+    expect(normalized.steps[0]!.doneCriterion).toBe("2 套卷子做完");
+    // The dropped step's dependants take its dependencies.
+    expect(normalized.steps[1]!.dependsOn).toEqual(["s1"]);
+    expect(normalized.rationale).toBe("期中占 30%。讲义 12 讲。");
+    expect(normalized.questions[0]).toMatchObject({ id: "q-method", text: "平时怎么准备这类考试？" });
+    // The first option is the neutral one: a minor task's questions are settled as their first option, and that must not invent a method.
+    expect(normalized.questions[0]!.options[0]).toBe("没有固定方法，按这次需要定");
+    expect(normalized.questions[1]!.text).toBe("期中考到第几讲？");
+    expect(warnings.map((warning) => warning.code)).toEqual(expect.arrayContaining(["STEP_DRILL_FORM_STRIPPED", "STEP_DRILL_FORM_DROPPED"]));
+  });
+  it("keeps the form when the person's own words back it, and asks nothing", () => {
+    const { plan: normalized, warnings } = normalizeStepPlan(plan([practice(), step("x", "draft", { title: "写出第 3 章推导" })], "writing"),
+      undefined, { drillBacking: ["做完卷子我习惯对着答案订正，错题记在本子上"], methodKnown: true });
+    expect(normalized.steps.map((item) => item.title)).toEqual(["做 2 套往年卷并订正", "写出第 3 章推导"]);
+    expect(normalized.questions).toEqual([]);
+    expect(warnings.map((warning) => warning.code)).not.toContain("STEP_DRILL_FORM_STRIPPED");
+  });
+  it("a sentence that turns the form down backs nothing; a recorded method stops the question", () => {
+    const { plan: normalized } = normalizeStepPlan(plan([practice(), step("x", "draft", { title: "写出第 3 章推导" })], "writing"),
+      undefined, { drillBacking: ["不用错题本，做完就过"], methodKnown: true });
+    expect(normalized.steps[0]!.title).toBe("做 2 套往年卷");
+    expect(normalized.questions).toEqual([]);
+  });
+  it("a question offering a drill form as an answer loses that option; one asking about the drill is dropped", () => {
+    const drillPlan = plan([step("x", "draft", { title: "写出第 3 章推导" })], "writing");
+    drillPlan.questions = [{ id: "q1", text: "错题本用纸质还是电子？", why: "", options: ["纸质", "电子"] },
+      { id: "q2", text: "平时怎么复习？", why: "", options: ["做题", "背诵公式", "重读讲义"] }];
+    const { plan: normalized } = normalizeStepPlan(drillPlan);
+    // The person's method is already being asked (q2), so no second method question is added.
+    expect(normalized.questions).toEqual([{ id: "q2", text: "平时怎么复习？", why: "", options: ["做题", "重读讲义"] }]);
+  });
+  it("a plan with no drill form is untouched", () => {
+    const clean = plan([step("x", "draft", { title: "写出第 3 章推导" })], "writing");
+    expect(normalizeStepPlan(clean).plan.questions).toEqual([]);
   });
 });

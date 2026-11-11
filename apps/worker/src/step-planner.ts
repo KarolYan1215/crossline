@@ -1,4 +1,5 @@
 import { personProfileFor } from "./planning-profile";
+import { drillBackingFor } from "./drill-backing";
 import {
   ARCHETYPES, AVAILABILITY_PROPOSED_SETTING, aiToolBrief, stepTypesBrief, AVAILABILITY_SETTING, resolveAvailability, VALIDATION_REVIEW_SCHEMA, archetypeBrief, archetypeById, stepPlanSchema, goalSettingKey,
   normalizeStepPlan, readableFromMaterial, STEP_ANSWER_SLOT, stepAnswerSlot, stepPlanWarnings, unverifiedUnits, validateStepPlanShape, validateValidationReview, weeklyAvailableHours,
@@ -23,7 +24,7 @@ const JUDGE = "crossline:crossline-progress-judge";
 const PLANNABLE = ["approved", "preparing", "ready_for_human", "active"];
 const day = (iso: string) => iso.slice(0, 10);
 const AUTO_FIXED = new Set(["STEP_OWNER_TABLE", "STEP_SHARE_NORMALIZED", "STEP_SHARE_MISSING", "STEP_ESTIMATE_MISSING", "STEP_DEPENDENCY_UNKNOWN", "STEP_TRIVIAL_TO_AGENT", "STEP_NO_ASSISTANT",
-  "STEP_OWNER_ASK", "STEP_OWNER_PERSON", "STEP_REVIEW_FOLDED"]);
+  "STEP_OWNER_ASK", "STEP_OWNER_PERSON", "STEP_REVIEW_FOLDED", "STEP_DRILL_FORM_STRIPPED", "STEP_DRILL_FORM_DROPPED"]);
 /** What a task is searched by: its wording, its project, the milestone it serves, what it must deliver and what it needs. */
 export function taskQuery(store: CrosslineStore, workspaceId: string, order: StoredWorkOrder, options: { core?: boolean } = {}): string {
   const project = store.listProjects(workspaceId, { includeArchived: true }).find((item) => item.id === order.projectId);
@@ -378,8 +379,11 @@ export function createStepPlanner(store: CrosslineStore, workspaceId: string, cw
     }
     // Every account has the assistant in one mode or another (assistantMode: the owner's shell, else Crossline's tools on any model), so
     // collecting and filing stay the assistant's on the hosted beta too; tying this to the shell turned every such step into the person's.
+    // A drill form (订正, 错题本, 背诵, 打卡 …) stays only when the person's own words back it (drill-forms.ts, 2026-11-10).
+    const drill = drillBackingFor(store, workspaceId, { captureId: order.id, scopes: [order.identityId, `task:${order.id}`] });
     const { plan: shapedPlan, warnings: fixed } = normalizeStepPlan(result.output, tools.map((tool) => tool.name),
-      { assistant: true, ownerPreferences: ownerPreferencesFor(store, workspaceId, order.identityId), locale: localeOf(store, workspaceId) });
+      { assistant: true, ownerPreferences: ownerPreferencesFor(store, workspaceId, order.identityId), locale: localeOf(store, workspaceId),
+        drillBacking: drill.backing, methodKnown: drill.methodKnown, taskText: taskQuery(store, workspaceId, order, { core: true }) });
     const normalized = result.output.importance ? { ...shapedPlan, importance: result.output.importance } : shapedPlan;
     // Steps must not start before the window or end after it: clamp, the reviewer sees the warning.
     // What normalization already fixed (rescaled shares, a missing estimate filled in, an unknown dependency dropped) needs no judgement;
