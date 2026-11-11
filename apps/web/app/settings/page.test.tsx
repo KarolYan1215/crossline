@@ -28,9 +28,10 @@ describe("settings page", () => {
     // The 系统体检 card renders from an empty ledger without inventing numbers.
     expect(html).toContain("系统体检");
     expect(html).toContain("尚无计时完成的任务");
-    // Each assistant capability is on or off (2026-10-15): results take effect by default, only what needs the person is reviewed.
-    expect(html).toContain("助手做完的结果默认直接生效");
-    expect(html).not.toContain("逐次审阅");
+    // The assistant's capabilities, the workflows, the Skill library and the opportunity agent moved to 自动化 (2026-11-10): a link stays.
+    expect(html).toContain('href="/automation"');
+    expect(html).not.toContain("助手做完的结果默认直接生效");
+    expect(html).not.toContain('id="skills"');
     // Every card in a long module is one click from the index, and each connection has its tutorial beside its button (2026-10-21).
     for (const anchor of ["#phone", "#mail", "#calendar-subscriptions", "#model", "#energy"]) {
       expect(html).toContain(`href="${anchor}"`);
@@ -38,10 +39,6 @@ describe("settings page", () => {
     }
     expect(html.indexOf('id="st-calendar"')).toBeLessThan(html.indexOf('id="st-notify"'));
     for (const guide of ["接入教程：各家邮箱的授权码与服务器", "接入教程：手机健康数据", "接入教程：Siri「记一下」", "接入教程：各日历的订阅链接"]) expect(html).toContain(guide);
-    // The Skill library is read after the page is shown (`SkillLibraryLoader`, 2026-10-28); its folded summary is tested in skill-library.test.tsx.
-    expect(html).toContain('id="skills"');
-    expect(html).toContain("正在读取…");
-    expect(html).not.toContain("Skill 库概览");
     globalThis.crosslineStore.close();
     globalThis.crosslineStore = undefined;
   }, 20000);

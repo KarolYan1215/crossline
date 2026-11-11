@@ -245,8 +245,8 @@ test("goal confirmation and permission-mode rejection persist through the real p
       sourceUrl: "https://example.org/source", sourceTitle: "记录模板", retrievedAt: "2026-09-14T00:00:00Z",
       staleWhen: "方法变更" } }); }
   finally { store.close(); }
-  // The default-approval switch lives in 设置 → 自动化与助手 now, and every decision on an insight is made in the weekly review.
-  await page.goto("/settings#automation");
+  // The default-approval switch lives on 自动化 (moved from 设置 on 2026-11-10), and every decision on an insight is made in the weekly review.
+  await page.goto("/automation#capabilities");
   const lowRisk = page.getByRole("radiogroup", { name: "低风险提案默认批准" });
   await lowRisk.getByRole("radio", { name: "默认批准" }).click();
   await expect(page.locator(".st-ok").first()).toBeVisible();
@@ -255,7 +255,7 @@ test("goal confirmation and permission-mode rejection persist through the real p
   await expect(insight).toBeVisible();
   await Promise.all([page.waitForNavigation({ waitUntil: "load" }), insight.getByRole("button", { name: "拒绝" }).click()]);
   await expect(page.locator(".review-list li").filter({ hasText: "可复用的实验记录模板" })).toContainText("已拒绝");
-  await page.goto("/settings#automation");
+  await page.goto("/automation#capabilities");
   await page.getByRole("radiogroup", { name: "低风险提案默认批准" }).getByRole("radio", { name: "逐项批准" }).click();
   await expect(page.locator(".st-ok").first()).toBeVisible();
   const rejected = openStore();
@@ -703,12 +703,12 @@ test("确认时间块：通知打开的小页上点「超出预估 · 30 分钟�
   await expect(page.getByText("已记下：用时 1 小时 15 分钟，这一步已完成。")).toBeVisible();
 });
 
-test("设置里的 Skill 库：主线 skill 逐条带来源；编辑存为新版本，回到旧版另存为新版本；公开 skill 可删除", async ({ page }, testInfo) => {
+test("自动化里的 Skill 库：主线 skill 逐条带来源；编辑存为新版本，回到旧版另存为新版本；工作流在自己的页面；公开 skill 可删除", async ({ page }, testInfo) => {
   await ensureSkillLibrary(page);
-  // Settings shows one module at a time (2026-10-28) and opens the one the address names; arriving from another page, as a notification's
-  // link does — a hash move inside a page still loading can land before the page is listening.
+  // The library moved from 设置 to 自动化 (2026-11-10); an old link to it lands there.
   await page.goto("about:blank");
   await page.goto("/settings#skills");
+  await page.waitForURL(/\/automation/);
   // The library opens folded to its summary (2026-10-21); 「全部展开」 lists every kind with each item open.
   const expandAll = () => page.getByRole("button", { name: "全部展开" }).click();
   await expandAll();
@@ -741,8 +741,11 @@ test("设置里的 Skill 库：主线 skill 逐条带来源；编辑存为新版
   await expect(mine.getByRole("status")).toContainText("已回到第 1 版");
   await expect(mine.getByText("以冲突和焦虑作为内容核心切口，并以 solution 完成变现。")).toBeVisible();
 
-  // A grown workflow says when it runs and which step stays the person's; it can be turned off.
-  const flows = page.getByRole("region", { name: "生长的工作流" });
+  // A grown workflow is listed with the automations and opened on its own page (2026-11-10): it says when it runs and which step stays the
+  // person's; it can be turned off.
+  await expect(page.locator(".wf-items")).toContainText("工作流");
+  await page.goto("/automation/flow-weekly-vlog-cut");
+  const flows = page.getByRole("region", { name: "运行与授权" });
   await expect(flows.getByText("每周五 18:00，到点由助手执行")).toBeVisible();
   await expect(flows.getByText("上传并发布到小红书", { exact: true })).toBeVisible();
   if (testInfo.project.name !== "desktop-chrome") return;
@@ -751,6 +754,8 @@ test("设置里的 Skill 库：主线 skill 逐条带来源；编辑存为新版
   const off = openStore();
   expect((JSON.parse(off.getSetting(realWorkspaceId(off), "skills.grown")!) as Array<{ status: string }>)[0]!.status).toBe("off");
   off.close();
+  await page.goto("/automation#skills");
+  await expandAll();
   const publics = page.getByRole("region", { name: /公开 skills/ });
   await expect(publics.getByText("example/skills/skills/note-tools")).toBeVisible();
   await expect(publics.getByText("发现联网，脚本未安装")).toBeVisible();

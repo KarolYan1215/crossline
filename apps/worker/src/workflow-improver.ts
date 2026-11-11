@@ -157,7 +157,7 @@ export async function installRevision(store: CrosslineStore, workspaceId: string
         entityId: record.id, payload: { id: record.id, why: why.slice(0, 400) } });
       writeGrownSkills(store, workspaceId, readGrownSkills(store, workspaceId).map((item) => item.id === record.id ? { ...item, improvedAt: now.toISOString() } : item));
       sayToPerson(store, workspaceId, t("看过对工作流「{{summary}}」的意见，这次没有改它：{{why}}", { summary, why: why.slice(0, 200) }), "workflow_improved", `improve-skip:${record.id}:${now.getTime()}`,
-        [{ label: t("去看工作流"), href: "/settings#skills" }], now);
+        [{ label: t("去看工作流"), href: `/automation/${encodeURIComponent(record.id)}` }], now);
       return { state: "unchanged", reason: why };
     }
     return reject(read.problem);
@@ -189,7 +189,7 @@ export async function installRevision(store: CrosslineStore, workspaceId: string
   sayToPerson(store, workspaceId, revised.needsConsent
     ? t("工作流「{{summary}}」按意见改了（第 {{version}} 版）：{{changes}}。改后要读的内容或风险有变，请本人重新看过风险再启用。", values)
     : t("工作流「{{summary}}」按意见改了（第 {{version}} 版）：{{changes}}。下次运行就按新版做；不合适可在设置里回到上一版。", values),
-    "workflow_improved", `improved:${record.id}:${revised.version}`, [{ label: revised.needsConsent ? t("查看风险并启用") : t("查看或回到上一版"), href: "/settings#skills" }], now);
+    "workflow_improved", `improved:${record.id}:${revised.version}`, [{ label: revised.needsConsent ? t("查看风险并启用") : t("查看或回到上一版"), href: `/automation/${encodeURIComponent(record.id)}` }], now);
   return { state: "revised", version: revised.version };
 }
 

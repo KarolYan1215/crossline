@@ -11,7 +11,7 @@ import { TEXT_LIMITS, textBlockAudit } from "./text-blocks.js";
  *
  * Strict since the product pass finished (2026-10-08): any finding fails. `COPY_AUDIT_REPORT=1` only prints them, for a page being reworked.
  */
-const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/return", "/materials/[id]", "/materials/view", "/commit", "/wrap"];
+const PAGES = ["/", "/milestones", "/plan", "/workbench", "/approvals", "/settings", "/automation", "/return", "/materials/[id]", "/materials/view", "/commit", "/wrap"];
 
 /** The material pages need a tutorial and an upload to draw (`ensureMaterials`); every other entry is its own address. */
 const addressOf = async (page: Page, path: string) => path === "/materials/[id]" ? (await ensureMaterials(page)).tutorial
@@ -51,7 +51,7 @@ async function audit(page: Page): Promise<Findings> {
 
 for (const path of PAGES) {
   test(`${path} reads as product copy: third person, few folds, nothing developer-facing`, async ({ page }) => {
-    if (path === "/settings") await ensureSkillLibrary(page);
+    if (path === "/settings" || path === "/automation") await ensureSkillLibrary(page);
     await page.goto(await addressOf(page, path));
     await page.waitForLoadState("networkidle");
     const found = await audit(page);
@@ -67,7 +67,7 @@ for (const path of PAGES) {
 const TEXT_PAGES = [...PAGES, "/portrait", "/review"];
 for (const path of TEXT_PAGES) {
   test(`${path} shows no large area of text: blocks within ${TEXT_LIMITS.BLOCK_LINES} lines and ${TEXT_LIMITS.BLOCK_CHARS} characters, reading text in readable paragraphs`, async ({ page }) => {
-    if (path === "/settings") await ensureSkillLibrary(page);
+    if (path === "/settings" || path === "/automation") await ensureSkillLibrary(page);
     if (path === "/portrait") await ensurePortrait(page);
     await page.goto(await addressOf(page, path));
     await page.waitForLoadState("networkidle");

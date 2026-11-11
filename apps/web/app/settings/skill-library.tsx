@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
-import { AI_TOOL_KIND_LABEL, type AiTool, type AiToolKind } from "@crossline/core";
+import { AI_TOOL_KIND_LABEL, lineDiff, type AiTool, type AiToolKind } from "@crossline/core";
 import { Markdown } from "../ui/markdown";
 import { Clamp } from "../ui/clamp";
 import { LineTag, Tag } from "../ui/tag";
@@ -49,7 +49,7 @@ export const matchesSkill = (query: string, ...texts: Array<string | undefined>)
  * The library read after the page is shown (2026-10-28): every skill's rules, versions, sources and scan were 92 KB of the settings
  * page's 228 on the owner's account, sent twice (as HTML and as the page's data) for a module most visits never open.
  */
-export function SkillLibraryLoader() {
+export function SkillLibraryLoader({ workflowsElsewhere = false }: { workflowsElsewhere?: boolean } = {}) {
   const t = useT();
   const [library, setLibrary] = useState<SkillLibraryView | "failed">();
   useEffect(() => {
@@ -62,10 +62,14 @@ export function SkillLibraryLoader() {
   }, []);
   if (library === "failed") return <p role="alert">{t("读取失败")}</p>;
   if (!library) return <p role="status" className="muted">{t("正在读取…")}</p>;
-  return <SkillLibraryModule library={library} />;
+  return <SkillLibraryModule library={library} workflowsElsewhere={workflowsElsewhere} />;
 }
 
-export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
+/**
+ * `workflowsElsewhere` (the 自动化 page, 2026-11-10): grown workflows are listed with the automations as 工作流 above the library, each
+ * opened on its own page; here they keep only what concerns them all (being made, the favourites offer, the duplicate check).
+ */
+export function SkillLibraryModule({ library, workflowsElsewhere = false }: { library: SkillLibraryView; workflowsElsewhere?: boolean }) {
   const t = useT();
   const { sep, aside } = marks(useLocale());
   const [mine, setMine] = useState(library.mine);
@@ -102,13 +106,16 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
     public: { count: publics.length, detail: t("只用文字 {{n}}", { n: publics.filter((skill) => skill.verdict === "text_only").length }) },
     tools: { count: library.aiTools.length, detail: t("本人添加 {{n}}", { n: library.aiTools.filter((tool) => tool.source === "person").length }) }
   };
-  const open = (which: Kind, id: string) => { setKind(which); setQuery(""); setFocus(id); };
-  const nothing = searching && !mineShown.length && !grownShown.length && !publicShown.length && !toolsShown.length;
+  const open = (which: Kind, id: string) => {
+    if (which === "grown" && workflowsElsewhere) { window.location.assign(`/automation/${encodeURIComponent(id)}`); return; }
+    setKind(which); setQuery(""); setFocus(id);
+  };
+  const nothing = searching && !mineShown.length && (workflowsElsewhere || !grownShown.length) && !publicShown.length && !toolsShown.length;
   return <div className="st-modules">
     <section className="st-card st-card-wide sk-overview" aria-label={t("Skill 库概览")}>
       <header><h3>{t("Skill 库")}</h3><small>{t("助手、步骤拆分、教程与验收按这些 skill 执行；点类别看清单，点单项看规则、来源与扫描结果")}</small></header>
       <div className="sk-counts" role="group" aria-label={t("按类查看")}>
-        {KINDS.map(([id, label]) => <button key={id} type="button" aria-pressed={kind === id} onClick={() => { setKind(kind === id ? undefined : id); setFocus(undefined); }}>
+        {KINDS.filter(([id]) => !workflowsElsewhere || id !== "grown").map(([id, label]) => <button key={id} type="button" aria-pressed={kind === id} onClick={() => { setKind(kind === id ? undefined : id); setFocus(undefined); }}>
           <b>{counts[id].count}</b><span>{t(label)}</span><small>{counts[id].detail}</small></button>)}
       </div>
       {waiting.length > 0 && <p className="sk-attention"><Tag tone="warn">{t("待本人确认风险")}</Tag>
@@ -129,7 +136,13 @@ export function SkillLibraryModule({ library }: { library: SkillLibraryView }) {
       <ul className="sk-lines">{mineShown.map((line) => <MineLine key={`${line.lineId}:${kind}`} line={line} open={all || focus === line.lineId}
         onSaved={(next) => setMine((items) => items.map((item) => item.lineId === next.lineId ? next : item))} />)}</ul>
     </section>}
-    {listed("grown") && (!searching || grownShown.length > 0) && <section className="st-card st-card-wide" aria-label={t("生长的工作流")}>
+    {workflowsElsewhere && !searching && (library.growing > 0 || library.favouritesInstall || grown.length > 1) && <section className="st-card st-card-wide" aria-label={t("生长的工作流")}>
+      <header><h3>{t("生长的工作流")}</h3><small>{t("同类的事采纳过两次，或在输入框里说「以后都这样做」「每周五提醒」，助手会把它写成工作流，建好后通知；发出、发布一类的步骤始终由本人完成")}</small></header>
+      {library.growing > 0 && <p className="st-note">{t("{{count}} 个工作流正在生成，建好后会通知。", { count: library.growing })}</p>}
+      {library.favouritesInstall && <FavouritesInstall suggested={library.favouritesInstall.lineId} lines={library.mine.map((line) => ({ id: line.lineId, label: line.lineLabel }))} />}
+      {grown.length > 1 && <MergeCheck id={grown[0]!.id} />}
+    </section>}
+    {!workflowsElsewhere && listed("grown") && (!searching || grownShown.length > 0) && <section className="st-card st-card-wide" aria-label={t("生长的工作流")}>
       <header><h3>{t("生长的工作流 · {{n}}", { n: grown.length })}</h3><small>{t("同类的事采纳过两次，或在输入框里说「以后都这样做」「每周五提醒」，助手会把它写成工作流，建好后通知；发出、发布一类的步骤始终由本人完成")}</small></header>
       {library.growing > 0 && <p className="st-note">{t("{{count}} 个工作流正在生成，建好后会通知。", { count: library.growing })}</p>}
       {library.favouritesInstall && !searching && <FavouritesInstall suggested={library.favouritesInstall.lineId}
@@ -160,6 +173,8 @@ function MineLine({ line, open, onSaved }: { line: MineSkillView; open: boolean;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(line.current?.markdown ?? "");
   const [note, setNote] = useState("");
+  // 对比: a version against the one before it, line by line (2026-11-10, the same view as a workflow's versions).
+  const [compared, setCompared] = useState<number | undefined>();
   const save = async (body: { markdown: string } | { restore: number }) => {
     setNote(t("保存中"));
     const response = await fetch(`/api/skills/mine/${encodeURIComponent(line.lineId)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
@@ -196,9 +211,14 @@ function MineLine({ line, open, onSaved }: { line: MineSkillView; open: boolean;
       </li>)}</ol>}
       <details className="advanced sk-full"><summary>{t("全文", { context: "label" })}</summary><Markdown className="long-form" text={current.markdown.replace(/^---[\s\S]*?\n---\n/, "")} /></details>
       {line.versions.length > 1 && <details className="advanced"><summary>{t("历次版本 · {{n}}", { n: line.versions.length })}</summary>
-        <ul className="st-list">{line.versions.map((version) => <li key={version.version}>
+        <ul className="st-list">{line.versions.map((version, index) => <li key={version.version}>
           <span>{t("第 {{version}} 版", { version: version.version })}</span><small>{version.by === "person" ? (version.restoredFrom ? t("回到第 {{version}} 版", { version: version.restoredFrom }) : t("本人编辑")) : t("整理 · {{count}} 条", { count: version.rules.length })} · {day(version.at)}</small>
+          {line.versions[index + 1] && <button type="button" className="text-button" aria-pressed={compared === version.version}
+            onClick={() => setCompared(compared === version.version ? undefined : version.version)}>{t("对比上一版")}</button>}
           {version.version !== current.version && <button type="button" className="secondary-button" onClick={() => save({ restore: version.version })}>{t("回到此版")}</button>}
+          {compared === version.version && line.versions[index + 1] && <pre className="wf-diff-lines" aria-label={t("版本对比")}>
+            {lineDiff(line.versions[index + 1]!.markdown, version.markdown).map((row, at) => <span key={at} className={`wf-diff-${row.op}`}>
+              {row.op === "add" ? "+ " : row.op === "del" ? "- " : "  "}{row.text}{"\n"}</span>)}</pre>}
         </li>)}</ul>
       </details>}
     </>}
@@ -275,6 +295,29 @@ function ScriptsConsent({ view, shell, endpoint, onChanged }: { view: ScriptsVie
     </div>}
     {note && <p role="status" className="st-note">{note}</p>}
   </div>;
+}
+
+/**
+ * One grown workflow's controls on its own page (/automation/<id>, 2026-11-10): the same card the library showed — consent, logins, runs,
+ * pace, merge — read after the page is shown, opened, and its login started when the page was reached from 「去登录」.
+ */
+export function GrownWorkflowCard({ id, autoLogin }: { id: string; autoLogin: boolean }) {
+  const t = useT();
+  const [state, setState] = useState<{ flow?: GrownSkillView; shell: boolean } | "failed" | "gone">();
+  useEffect(() => {
+    let live = true;
+    void fetch("/api/skills/library", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() as Promise<{ library: SkillLibraryView }> : Promise.reject(new Error(String(response.status))))
+      .then(({ library }) => { if (live) setState({ shell: library.shell, ...(library.grown.find((flow) => flow.id === id) ? { flow: library.grown.find((flow) => flow.id === id)! } : {}) }); })
+      .catch(() => { if (live) setState("failed"); });
+    return () => { live = false; };
+  }, [id]);
+  if (state === "failed") return <p role="alert">{t("读取失败")}</p>;
+  if (state === "gone") return <p className="muted">{t("这个工作流已删除。")}</p>;
+  if (!state) return <p role="status" className="muted">{t("正在读取…")}</p>;
+  if (!state.flow) return null;
+  return <ul className="sk-publics"><GrownFlow flow={state.flow} shell={state.shell} open autoLogin={autoLogin}
+    onChanged={(next) => setState(next ? { ...state, flow: next } : "gone")} /></ul>;
 }
 
 function GrownFlow({ flow, shell, open, autoLogin, onChanged }: { flow: GrownSkillView; shell: boolean; open: boolean; autoLogin?: boolean; onChanged: (flow: GrownSkillView | undefined) => void }) {

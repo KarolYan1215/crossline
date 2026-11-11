@@ -6,7 +6,8 @@ import { tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, se
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
   type ChecklistAnswer, type DomainRecordInput, type StoredDomainRecord,
-  type EligibilityTerm, type EligibilityVerdict, type Feasibility, type Opportunity, type OpportunityDecision } from "@crossline/core";
+  type EligibilityTerm, type EligibilityVerdict, type Feasibility, type Opportunity, type OpportunityDecision,
+  automationDefinition, type Automation, type StoredWorkflowVersion, type WorkflowKind, type WorkflowThread, type WorkflowTurn, type WorkflowTurnItem } from "@crossline/core";
 import { handOffArtifacts } from "./artifacts";
 import { readLocale } from "./locale";
 
@@ -479,6 +480,19 @@ export type StoredBackgroundFact = { key: string; value: string; why: string; so
  */
 /** Tables derived from others and rebuilt from them (migration 19's passages): not exported, skipped on restore, rebuilt after it. */
 const DERIVED_TABLES: readonly string[] = ["doc_chunks"];
+
+/**
+ * The settings keys the workflow tables now hold (migration 24): read and written through `getSetting`/`setSetting` as before, so the
+ * code that knew them goes on working. Other `skills.grown.*` and `automations.*` keys (runs, queue, merge bookkeeping) stay settings.
+ */
+type WorkflowSettingRoute = { kind: "list"; workflowKind: WorkflowKind } | { kind: "files"; id: string } | { kind: "versions"; id: string };
+export function workflowSettingRoute(key: string): WorkflowSettingRoute | undefined {
+  if (key === "automations") return { kind: "list", workflowKind: "automation" };
+  if (key === "skills.grown") return { kind: "list", workflowKind: "grown" };
+  if (key.startsWith("skills.grown.files.") && key.length > 19) return { kind: "files", id: key.slice(19) };
+  if (key.startsWith("skills.grown.versions.") && key.length > 22) return { kind: "versions", id: key.slice(22) };
+  return undefined;
+}
 
 const RETIRED_TABLES = ["outbox", "identities", "projects", "milestone_versions", "insight_proposals", "skill_versions"] as const;
 
@@ -1326,6 +1340,34 @@ export class CrosslineStore {
             confirmed_by TEXT NOT NULL DEFAULT '', found_at TEXT NOT NULL, updated_at TEXT NOT NULL,
             PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, key));
           CREATE INDEX IF NOT EXISTS opportunities_by_line ON opportunities(workspace_id, line_id, deadline);`);
+      } },
+      // Workflows (2026-11-10, the 自动化 page): automations and grown workflows in tables of their own, each change of one a version, and
+      // each with its own conversation. The settings keys they lived in (`automations`, `skills.grown`, `skills.grown.files.<id>`,
+      // `skills.grown.versions.<id>`) are moved here whole and read and written through these tables from now on (`getSetting`), so
+      // every reader of the old keys goes on working. Not derived: exported.
+      { version: 24, up: () => {
+        this.#db.exec(`
+          CREATE TABLE IF NOT EXISTS workflows (
+            workspace_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('automation','grown')), id TEXT NOT NULL, ord INTEGER NOT NULL,
+            data_json TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(workspace_id, kind, id));
+          CREATE TABLE IF NOT EXISTS workflow_files (
+            workspace_id TEXT NOT NULL, workflow_id TEXT NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(workspace_id, workflow_id));
+          CREATE TABLE IF NOT EXISTS workflow_versions (
+            workspace_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('automation','grown')), workflow_id TEXT NOT NULL, version INTEGER NOT NULL,
+            data_json TEXT NOT NULL, source TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', turn_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, kind, workflow_id, version));
+          CREATE TABLE IF NOT EXISTS workflow_threads (
+            workspace_id TEXT NOT NULL, id TEXT NOT NULL, workflow_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL CHECK(kind IN ('automation','grown')),
+            codex_thread_id TEXT NOT NULL DEFAULT '', line_id TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id));
+          CREATE INDEX IF NOT EXISTS workflow_threads_by_workflow ON workflow_threads(workspace_id, workflow_id);
+          CREATE TABLE IF NOT EXISTS workflow_turns (
+            workspace_id TEXT NOT NULL, id TEXT NOT NULL, thread_id TEXT NOT NULL, ord INTEGER NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('person','assistant','system')), text TEXT NOT NULL DEFAULT '', items_json TEXT NOT NULL DEFAULT '[]',
+            state TEXT NOT NULL CHECK(state IN ('running','done','failed')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            PRIMARY KEY(workspace_id, id));
+          CREATE INDEX IF NOT EXISTS workflow_turns_by_thread ON workflow_turns(workspace_id, thread_id, ord);`);
+        this.adoptLegacyWorkflowSettings();
       } }
     ];
 
@@ -3748,16 +3790,153 @@ export class CrosslineStore {
 
   /** Absent means never asked — which is different from asked and declined. */
   getSetting(workspaceId: string, key: string): string | undefined {
+    const route = workflowSettingRoute(key);
+    if (route) return this.#readWorkflowSetting(workspaceId, route);
     const row = this.#prepare("SELECT value FROM settings WHERE workspace_id = ? AND key = ?")
       .get(workspaceId, key) as { value: string } | undefined;
     return row?.value;
   }
 
   setSetting(workspaceId: string, key: string, value: string): void {
+    const route = workflowSettingRoute(key);
+    if (route) { this.#db.transaction(() => this.#writeWorkflowSetting(workspaceId, route, value, "change"))(); return; }
     this.#prepare(`
       INSERT INTO settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(workspaceId, key, value, new Date().toISOString());
+  }
+
+  // --- Workflows (migration 24) -------------------------------------------------------------------------------------------------
+
+  #readWorkflowSetting(workspaceId: string, route: WorkflowSettingRoute): string | undefined {
+    if (route.kind === "files") {
+      return (this.#prepare("SELECT value FROM workflow_files WHERE workspace_id = ? AND workflow_id = ?").get(workspaceId, route.id) as { value: string } | undefined)?.value;
+    }
+    const rows = (route.kind === "list"
+      ? this.#prepare("SELECT data_json FROM workflows WHERE workspace_id = ? AND kind = ? ORDER BY ord, id").pluck().all(workspaceId, route.workflowKind)
+      : this.#prepare("SELECT data_json FROM workflow_versions WHERE workspace_id = ? AND kind = 'grown' AND workflow_id = ? ORDER BY version").pluck().all(workspaceId, route.id)) as string[];
+    return rows.length ? `[${rows.join(",")}]` : undefined;
+  }
+
+  /** The old settings value written into the tables: a whole list replaces the rows of its kind; an automation whose definition changed gets a version. */
+  #writeWorkflowSetting(workspaceId: string, route: WorkflowSettingRoute, value: string, source: "import" | "change"): void {
+    const at = new Date().toISOString();
+    if (route.kind === "files") {
+      this.#prepare(`INSERT INTO workflow_files (workspace_id, workflow_id, value, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(workspace_id, workflow_id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(workspaceId, route.id, value, at);
+      return;
+    }
+    let parsed: unknown;
+    try { parsed = JSON.parse(value); } catch { parsed = []; }
+    const items = (Array.isArray(parsed) ? parsed : []).filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+    if (route.kind === "versions") {
+      this.#prepare("DELETE FROM workflow_versions WHERE workspace_id = ? AND kind = 'grown' AND workflow_id = ?").run(workspaceId, route.id);
+      const insert = this.#prepare(`INSERT OR REPLACE INTO workflow_versions (workspace_id, kind, workflow_id, version, data_json, source, note, created_at)
+        VALUES (?, 'grown', ?, ?, ?, 'grown', ?, ?)`);
+      items.forEach((item, index) => insert.run(workspaceId, route.id, typeof item.version === "number" ? item.version : index + 1, JSON.stringify(item),
+        typeof item.replacedBecause === "string" ? item.replacedBecause : "", typeof item.at === "string" ? item.at : at));
+      return;
+    }
+    const listed = items.filter((item) => typeof item.id === "string" && item.id);
+    const ids = listed.map((item) => item.id as string);
+    const gone = (this.#prepare("SELECT id FROM workflows WHERE workspace_id = ? AND kind = ?").pluck().all(workspaceId, route.workflowKind) as string[])
+      .filter((id) => !ids.includes(id));
+    for (const id of gone) {
+      this.#prepare("DELETE FROM workflows WHERE workspace_id = ? AND kind = ? AND id = ?").run(workspaceId, route.workflowKind, id);
+      if (route.workflowKind === "automation") this.#prepare("DELETE FROM workflow_versions WHERE workspace_id = ? AND kind = 'automation' AND workflow_id = ?").run(workspaceId, id);
+    }
+    const upsert = this.#prepare(`INSERT INTO workflows (workspace_id, kind, id, ord, data_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, kind, id) DO UPDATE SET ord = excluded.ord, data_json = excluded.data_json, updated_at = excluded.updated_at`);
+    listed.forEach((item, index) => {
+      upsert.run(workspaceId, route.workflowKind, item.id, index, JSON.stringify(item), at);
+      if (route.workflowKind === "automation") this.#noteAutomationVersion(workspaceId, item as unknown as Automation, source, at);
+    });
+  }
+
+  #noteAutomationVersion(workspaceId: string, automation: Automation, source: "import" | "change", at: string): void {
+    const definition = JSON.stringify(automationDefinition(automation));
+    const last = this.#prepare(`SELECT version, data_json FROM workflow_versions WHERE workspace_id = ? AND kind = 'automation' AND workflow_id = ?
+      ORDER BY version DESC LIMIT 1`).get(workspaceId, automation.id) as { version: number; data_json: string } | undefined;
+    if (last?.data_json === definition) return;
+    this.#prepare(`INSERT INTO workflow_versions (workspace_id, kind, workflow_id, version, data_json, source, created_at) VALUES (?, 'automation', ?, ?, ?, ?, ?)`)
+      .run(workspaceId, automation.id, (last?.version ?? 0) + 1, definition, last ? source : source === "import" ? "import" : "created",
+        source === "import" ? (automation.updatedAt || at) : at);
+  }
+
+  /**
+   * Moves the workflow settings keys still in `settings` into the workflow tables (migration 24; a restored backup or a mirror written
+   * before it). A value that does not read as JSON is kept, untouched, under `workflows.unreadable.<key>` rather than dropped.
+   */
+  adoptLegacyWorkflowSettings(workspaceId?: string): number {
+    const rows = this.#prepare(`SELECT workspace_id, key, value FROM settings WHERE (key IN ('automations', 'skills.grown')
+      OR key LIKE 'skills.grown.files.%' OR key LIKE 'skills.grown.versions.%') ${workspaceId ? "AND workspace_id = ?" : ""}`)
+      .all(...(workspaceId ? [workspaceId] : [])) as Array<{ workspace_id: string; key: string; value: string }>;
+    for (const row of rows) {
+      const route = workflowSettingRoute(row.key);
+      if (!route) continue;
+      let readable = route.kind === "files";
+      if (!readable) { try { readable = Array.isArray(JSON.parse(row.value)); } catch { readable = false; } }
+      if (readable) this.#writeWorkflowSetting(row.workspace_id, route, row.value, "import");
+      else this.#prepare(`INSERT OR REPLACE INTO settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?)`)
+        .run(row.workspace_id, `workflows.unreadable.${row.key}`, row.value, new Date().toISOString());
+      this.#prepare("DELETE FROM settings WHERE workspace_id = ? AND key = ?").run(row.workspace_id, row.key);
+    }
+    return rows.length;
+  }
+
+  listWorkflowVersions(workspaceId: string, kind: WorkflowKind, workflowId: string): StoredWorkflowVersion[] {
+    return (this.#prepare(`SELECT * FROM workflow_versions WHERE workspace_id = ? AND kind = ? AND workflow_id = ? ORDER BY version`)
+      .all(workspaceId, kind, workflowId) as Array<Record<string, string | number>>).map((row) => ({
+      kind, workflowId, version: Number(row.version), data: JSON.parse(String(row.data_json)) as unknown, source: String(row.source) as StoredWorkflowVersion["source"],
+      note: String(row.note), turnId: String(row.turn_id), createdAt: String(row.created_at) }));
+  }
+
+  /** Says why the newest version of an automation was made (a turn of its conversation, a rollback); the version itself is written by the change. */
+  annotateWorkflowVersion(workspaceId: string, kind: WorkflowKind, workflowId: string, change: { source: StoredWorkflowVersion["source"]; note: string; turnId?: string }): number | undefined {
+    const last = this.#prepare("SELECT MAX(version) FROM workflow_versions WHERE workspace_id = ? AND kind = ? AND workflow_id = ?").pluck().get(workspaceId, kind, workflowId) as number | null;
+    if (!last) return undefined;
+    this.#prepare("UPDATE workflow_versions SET source = ?, note = ?, turn_id = ? WHERE workspace_id = ? AND kind = ? AND workflow_id = ? AND version = ?")
+      .run(change.source, change.note.slice(0, 600), change.turnId ?? "", workspaceId, kind, workflowId, last);
+    return last;
+  }
+
+  #threadOf(row: Record<string, string> | undefined): WorkflowThread | undefined {
+    return row ? { workspaceId: row.workspace_id!, id: row.id!, workflowId: row.workflow_id!, kind: row.kind as WorkflowKind, codexThreadId: row.codex_thread_id!,
+      lineId: row.line_id!, title: row.title!, createdAt: row.created_at!, updatedAt: row.updated_at! } : undefined;
+  }
+  getWorkflowThread(workspaceId: string, id: string): WorkflowThread | undefined {
+    return this.#threadOf(this.#prepare("SELECT * FROM workflow_threads WHERE workspace_id = ? AND id = ?").get(workspaceId, id) as Record<string, string> | undefined);
+  }
+  /** The conversation of a workflow: the oldest one made for it (a workflow has one). */
+  findWorkflowThread(workspaceId: string, workflowId: string): WorkflowThread | undefined {
+    return this.#threadOf(this.#prepare("SELECT * FROM workflow_threads WHERE workspace_id = ? AND workflow_id = ? ORDER BY created_at LIMIT 1")
+      .get(workspaceId, workflowId) as Record<string, string> | undefined);
+  }
+  listWorkflowThreads(workspaceId: string): WorkflowThread[] {
+    return (this.#prepare("SELECT * FROM workflow_threads WHERE workspace_id = ? ORDER BY updated_at DESC").all(workspaceId) as Array<Record<string, string>>)
+      .map((row) => this.#threadOf(row)!);
+  }
+  saveWorkflowThread(thread: WorkflowThread): void {
+    this.#prepare(`INSERT INTO workflow_threads (workspace_id, id, workflow_id, kind, codex_thread_id, line_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, id) DO UPDATE SET workflow_id = excluded.workflow_id, kind = excluded.kind, codex_thread_id = excluded.codex_thread_id,
+        line_id = excluded.line_id, title = excluded.title, updated_at = excluded.updated_at`)
+      .run(thread.workspaceId, thread.id, thread.workflowId, thread.kind, thread.codexThreadId, thread.lineId, thread.title.slice(0, 200), thread.createdAt, thread.updatedAt);
+  }
+  listWorkflowTurns(workspaceId: string, threadId: string): WorkflowTurn[] {
+    return (this.#prepare("SELECT * FROM workflow_turns WHERE workspace_id = ? AND thread_id = ? ORDER BY ord").all(workspaceId, threadId) as Array<Record<string, string | number>>)
+      .map((row) => ({ workspaceId, id: String(row.id), threadId, ord: Number(row.ord), role: row.role as WorkflowTurn["role"], text: String(row.text),
+        items: JSON.parse(String(row.items_json)) as WorkflowTurnItem[], state: row.state as WorkflowTurn["state"], createdAt: String(row.created_at), updatedAt: String(row.updated_at) }));
+  }
+  /** Adds a turn at the end of its thread (`ord` given by the ledger) or rewrites one already there (a streaming answer). */
+  saveWorkflowTurn(turn: Omit<WorkflowTurn, "ord" | "updatedAt"> & { ord?: number }): WorkflowTurn {
+    const at = new Date().toISOString();
+    const ord = turn.ord ?? (this.#prepare("SELECT ord FROM workflow_turns WHERE workspace_id = ? AND id = ?").pluck().get(turn.workspaceId, turn.id) as number | undefined)
+      ?? Number(this.#prepare("SELECT COALESCE(MAX(ord), 0) + 1 FROM workflow_turns WHERE workspace_id = ? AND thread_id = ?").pluck().get(turn.workspaceId, turn.threadId));
+    this.#prepare(`INSERT INTO workflow_turns (workspace_id, id, thread_id, ord, role, text, items_json, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, id) DO UPDATE SET text = excluded.text, items_json = excluded.items_json, state = excluded.state, updated_at = excluded.updated_at`)
+      .run(turn.workspaceId, turn.id, turn.threadId, ord, turn.role, turn.text.slice(0, 20_000), JSON.stringify(turn.items.slice(0, 60)), turn.state, turn.createdAt, at);
+    this.#prepare("UPDATE workflow_threads SET updated_at = ? WHERE workspace_id = ? AND id = ?").run(at, turn.workspaceId, turn.threadId);
+    return { ...turn, ord, updatedAt: at };
   }
 
   /** Every setting whose key starts with one of `prefixes` (what an undo snapshot compares before and after). */
@@ -3768,6 +3947,9 @@ export class CrosslineStore {
 
   /** Back to never set — what undoing the first save of a setting restores. */
   deleteSetting(workspaceId: string, key: string): void {
+    const route = workflowSettingRoute(key);
+    if (route) { this.#db.transaction(() => this.#writeWorkflowSetting(workspaceId, route, route.kind === "files" ? "" : "[]", "change"))();
+      if (route.kind === "files") this.#prepare("DELETE FROM workflow_files WHERE workspace_id = ? AND workflow_id = ?").run(workspaceId, route.id); return; }
     this.#prepare("DELETE FROM settings WHERE workspace_id = ? AND key = ?").run(workspaceId, key);
   }
 
@@ -3964,6 +4146,7 @@ export class CrosslineStore {
       "diligence_reports", "milestone_anchors", "model_usage", "activity_segments", "waiting_items",
       "task_step_plans", "task_steps", "preference_entries", "learned_archetypes", "conversations", "conversation_messages", "beta_invites", "evidence_sentences", "question_ledger", "workspace_counters", "domain_records",
       "run_lessons", "record_evidence", "opportunities",
+      "workflows", "workflow_files", "workflow_versions", "workflow_threads", "workflow_turns",
       // Consent state is part of the ledger: a restore that silently re-enables collection is not a restore.
       "settings",
       // `principals`/`workspaces` are not workspace-scoped rows themselves — a principal is scoped by
@@ -4128,6 +4311,8 @@ export class CrosslineStore {
       // The passage index is not in a backup: it is cut again from the restored documents.
       this.#prepare("DELETE FROM doc_chunks WHERE workspace_id = ?").run(snapshot.workspaceId);
       this.#indexDocuments(snapshot.workspaceId);
+      // A backup taken before migration 24 carries the workflows as settings: moved into their tables as the migration moved them.
+      this.adoptLegacyWorkflowSettings(snapshot.workspaceId);
     })();
     return counts;
   }

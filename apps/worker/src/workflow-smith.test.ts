@@ -415,7 +415,7 @@ test("a run whose pages listed nothing is partial and points at the login; one t
   expect(said().at(-1)).toBe("本期「每周日整理小红书收藏夹，按主题归类并列出可删的重复项」只做了一部分：这次没读到收藏（上期读到 2 条），可能需要重新登录或页面改版。请在设置里点「登录」重新登录，点「登录完成」后再点「立即运行」。");
   const card = store.listRecentNudges(ws, "2000-01-01T00:00:00Z").at(-1)!.payload.card as { clarify: { options: Array<{ label: string; href?: string }> } };
   // 「去登录」 opens the login of this workflow at once (a dialog on the hosted beta).
-  expect(card.clarify.options).toContainEqual(expect.objectContaining({ label: "去登录", href: "/settings?login=flow-xhs#skills" }));
+  expect(card.clarify.options).toContainEqual(expect.objectContaining({ label: "去登录", href: "/automation/flow-xhs?login=1" }));
   // The baseline stays the last run that read something.
   expect(readGrownSkills(store, ws)[0]!.lastRead).toMatchObject({ taskId: "flow-1", items: 2 });
   expect(store.listEvents(ws, { type: "skill.grown.result" }).map((event) => (event.payload as { outcome: string }).outcome)).toEqual(["done", "partial"]);

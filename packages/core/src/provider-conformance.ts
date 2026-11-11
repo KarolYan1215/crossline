@@ -18,6 +18,7 @@ import { OPPORTUNITY_READING_SCHEMA } from "./opportunity-discovery";
 import { OPPORTUNITY_WATCHES_SCHEMA } from "./opportunity-watches";
 import { IMPORT_TRIAGE_SCHEMA } from "./task-import";
 import { AUTOMATION_PLAN_SCHEMA } from "./automations";
+import { WORKFLOW_TURN_SCHEMA } from "./workflow-authoring";
 import { DATE_EXTRACTION_SCHEMA } from "./date-schema";
 import { DILIGENCE_OUTPUT_SCHEMA } from "./diligence-schema";
 import { ENERGY_ADVICE_REVIEW_SCHEMA } from "./energy-advice";
@@ -115,7 +116,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-mail-triage": { label: "邮件整理", schemas: ["MAIL_TRIAGE_SCHEMA"] },
   "crossline-mail-reply-drafter": { label: "邮件回复草稿", schemas: ["MAIL_REPLY_DRAFT_SCHEMA"] },
   "crossline-import-triage": { label: "导入清单整理", schemas: ["IMPORT_TRIAGE_SCHEMA"] },
-  "crossline-automation-designer": { label: "自动化设计", schemas: ["AUTOMATION_PLAN_SCHEMA"] },
+  "crossline-automation-designer": { label: "自动化设计", schemas: ["AUTOMATION_PLAN_SCHEMA", "WORKFLOW_TURN_SCHEMA"], tools: true },
   "crossline-opportunity-needs": { label: "机会监视项推导", schemas: ["OPPORTUNITY_WATCHES_SCHEMA"], webSearch: true },
   "crossline-opportunity-reader": { label: "机会页面解读", schemas: ["OPPORTUNITY_READING_SCHEMA"] },
   "crossline-visa-finder": { label: "签证核实", schemas: ["VISA_READING_SCHEMA"], webSearch: true }
@@ -195,7 +196,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA,
   OPPORTUNITY_WATCHES_SCHEMA, OPPORTUNITY_READING_SCHEMA, VISA_READING_SCHEMA,
-  FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA
+  FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA, WORKFLOW_TURN_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */
@@ -283,6 +284,8 @@ const LEGACY_CASES: Record<string, string> = { ONBOARDING_TURN_SCHEMA: "ONBOARDI
  * weeks because its record is older than the Skill. A record that ran the new schema itself is judged on those runs only.
  */
 export const SCHEMA_PROXIES: Record<string, string> = { MAIL_TRIAGE_SCHEMA: "CALENDAR_CLASSIFICATION_SCHEMA", AUTOMATION_PLAN_SCHEMA: "CONCIERGE_SCHEMA",
+  // One turn of a workflow's conversation (2026-11-10): a reply, an enum and the automation plan nested inside, like the input box's answer.
+  WORKFLOW_TURN_SCHEMA: "CONCIERGE_SCHEMA",
   // A reply draft: a few short strings, a long text and a short list of strings, like a tutorial step's write-up.
   MAIL_REPLY_DRAFT_SCHEMA: "NODE_WRITEUP_SCHEMA",
   // Several public-skill reviews in one answer (2026-10-21): the single review's object, in a list keyed by id.

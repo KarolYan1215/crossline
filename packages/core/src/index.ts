@@ -570,6 +570,7 @@ export * from "./plain-voice";
 export * from "./mail";
 export * from "./task-import";
 export * from "./automations";
+export * from "./workflow-authoring";
 export * from "./device";
 export * from "./opportunity";
 export * from "./opportunity-discovery";

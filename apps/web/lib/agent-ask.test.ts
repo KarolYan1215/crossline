@@ -44,7 +44,7 @@ test("after three interruptions the card says how far it got and where it stoppe
   for (const id of ["grow-1", "grow-2", "grow-3"]) run(store, id, { title: GROW }, LOST);
   const [ask] = agentAsks();
   expect(ask).toMatchObject({ entityId: "grow-3", important: true, freeText: expect.any(Object),
-    progress: { stuckAt: "后台进程重启，这次运行中断；已自动重试 2 次，仍没做完", external: false, retries: 2 }, preview: { href: "/settings#skills" } });
+    progress: { stuckAt: "后台进程重启，这次运行中断；已自动重试 2 次，仍没做完", external: false, retries: 2 }, preview: { href: "/automation" } });
   expect(ask!.why).not.toContain("不会自动重试，该任务转为本人处理");
   expect(ask!.options.map((option) => option.id)).toEqual(["retry", "self", "drop", "look"]);
   expect(ask!.options.find((option) => option.recommended)?.id).toBe("retry");

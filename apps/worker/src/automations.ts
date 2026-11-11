@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import {
-  AUTOMATION_PLAN_SCHEMA, AUTOMATION_RUNS_SETTING, AUTOMATIONS_MAX, AUTOMATIONS_SETTING, AGENT_CATEGORIES, addedLines, fileMatches,
+  AUTOMATION_PLAN_SCHEMA, AUTOMATION_RUNS_SETTING, automationRunPrompt, AUTOMATIONS_MAX, AUTOMATIONS_SETTING, AGENT_CATEGORIES, addedLines, fileMatches,
   mailMatches, monthlyDays, previousRunNote, readAutomationRuns, readAutomations, tFor, timeTriggerDue, triggerLabel, validateAutomationPlan,
   type AgentCategory, type Automation, type AutomationPlan, type AutomationRun
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
-import { approveCategory, listAgentTasks, readCategories, requestAutomation, type CrosslineStore } from "@crossline/db";
+import { approveCategory, listAgentTasks, readCategories, requestAutomation, requestThreadId, type CrosslineStore } from "@crossline/db";
 import type { AgentOutcome, AgentTaskInput } from "./agent-task";
 import type { DispatchResult } from "./agent-service";
 import { identityLines } from "./lines";
@@ -78,7 +78,7 @@ export function reconcileAutomationRuns(store: CrosslineStore, workspaceId: stri
   for (const run of open.filter((item) => tasks.get(item.taskId)?.blockerCode === "AGENT_RUN_LOST" && now.getTime() - Date.parse(item.firedAt) < 86_400_000)) {
     const name = read(store, workspaceId).find((item) => item.id === run.automationId)?.name ?? run.automationId;
     sayToPerson(store, workspaceId, t("自动化「{{name}}」这次没跑完：{{reason}}", { name, reason: lostDetail }), "automation_failed", `automation-failed:${run.taskId}`,
-      [{ label: t("查看", { context: "view" }), href: "/settings#automation" }], now);
+      [{ label: t("查看", { context: "view" }), href: "/automation" }], now);
   }
   return [...ends.keys()];
 }
@@ -113,7 +113,10 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
   const t = tFor(locale);
   const fail = (reason: string) => {
     deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.design_failed:${requestId}`, type: "automation.design_failed", entityId: requestId, payload: { requestId, reason } });
-    sayToPerson(deps.store, workspaceId, t("没能把「{{text}}」建成自动化：{{reason}}", { text: text.slice(0, 60), reason }), "automation_failed", `automation-failed:${requestId}`, [{ label: t("去设置"), href: "/settings#automation" }], now);
+    const said = t("没能把「{{text}}」建成自动化：{{reason}}", { text: text.slice(0, 60), reason });
+    settleRequestTurn(deps.store, workspaceId, requestId, said, "failed", now);
+    sayToPerson(deps.store, workspaceId, said, "automation_failed", `automation-failed:${requestId}`,
+      [{ label: t("打开对话"), href: `/automation/${encodeURIComponent(requestThreadId(deps.store, workspaceId, requestId) ?? requestId)}` }], now);
     return { state: "failed" };
   };
   const existing = read(deps.store, workspaceId);
@@ -146,31 +149,55 @@ async function designOne(deps: AutomationDeps, workspaceId: string, requestId: s
   const previous = plan.replaces ? existing.find((item) => item.id === plan.replaces) : undefined;
   if (!previous && existing.length >= AUTOMATIONS_MAX) return fail(t("已经有 {{count}} 个自动化，先删掉不用的。", { count: AUTOMATIONS_MAX }));
   const id = previous?.id ?? `auto-${createHash("sha256").update(requestId).digest("hex").slice(0, 8)}`;
-  const automation: Automation = { id, name: plan.name, summary: plan.summary, lineId: plan.lineId, status: plan.enabled ? "active" : "off", trigger: plan.trigger, action: plan.action, steps: plan.steps,
-    origin: previous?.origin ?? { kind: "asked", text, requestId }, createdAt: previous?.createdAt ?? now.toISOString(), updatedAt: now.toISOString(),
-    runs: previous?.runs ?? 0, ...(previous?.lastFiredAt ? { lastFiredAt: previous.lastFiredAt } : {}),
-    ...(previous?.watch && previous.trigger.type === "watch" && plan.trigger.type === "watch" && previous.trigger.url === plan.trigger.url ? { watch: previous.watch } : {}) };
-  write(deps.store, workspaceId, previous ? read(deps.store, workspaceId).map((item) => item.id === id ? automation : item)
-    : [...read(deps.store, workspaceId).filter((item) => item.id !== id), automation]);
-  // The person asked for this in words: the kind of work it does is allowed by that request (said in the message, switchable in 设置).
-  const allowed = automation.action.kind === "run" && !readCategories(deps.store, workspaceId)[automation.action.category];
-  if (automation.action.kind === "run" && allowed) approveCategory(deps.store, workspaceId, automation.action.category);
+  const { automation, allowed } = installAutomation(deps.store, workspaceId, plan, id, { kind: "asked", text, requestId }, previous, now);
   deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `automation.created:${requestId}`, type: "automation.created", entityId: id,
     payload: { requestId, name: plan.name, trigger: plan.trigger.type, action: plan.action.kind, ...(previous ? { replaced: previous.id } : {}) } });
   const person = plan.steps.filter((step) => step.by === "person").map((step) => step.title);
   const values = { name: plan.name, when: triggerLabel(plan.trigger, locale), summary: plan.summary };
-  sayToPerson(deps.store, workspaceId, [!plan.enabled ? t("已暂停自动化「{{name}}」，要恢复在设置里点「恢复」或再说一句。", values)
+  const said = [!plan.enabled ? t("已暂停自动化「{{name}}」，要恢复在设置里点「恢复」或再说一句。", values)
     : previous ? t("已按要求改好自动化「{{name}}」：{{when}}，{{summary}}", values) : t("已建好自动化「{{name}}」：{{when}}，{{summary}}", values),
     person.length ? t("其中「{{steps}}」由本人完成。", { steps: person.join(locale === "en" ? "\", \"" : "」「") }) : "",
     allowed && automation.action.kind === "run" ? t("已按这个请求为助手开启「{{category}}」。", { category: t(AGENT_CATEGORIES[automation.action.category]) }) : "",
-    plan.assumptions ? t("按以下理解建立：{{assumptions}}", { assumptions: plan.assumptions }) : ""].filter(Boolean).join("\n"), "automation_created", `automation:${requestId}`,
-  [{ label: t("查看与修改"), href: "/settings#automation" }], now);
+    plan.assumptions ? t("按以下理解建立：{{assumptions}}", { assumptions: plan.assumptions }) : ""].filter(Boolean).join("\n");
+  const version = deps.store.annotateWorkflowVersion(workspaceId, "automation", id, { source: "thread", note: plan.summary, turnId: `${requestId}-reply` });
+  settleRequestTurn(deps.store, workspaceId, requestId, said, "done", now, { workflowId: id, ...(version ? { version } : {}), note: plan.summary });
+  sayToPerson(deps.store, workspaceId, said, "automation_created", `automation:${requestId}`, [{ label: t("查看与修改"), href: `/automation/${id}` }], now);
   // 「现在先跑一次」: the first run now instead of at the trigger (2026-11-04: the request said it and nothing ran).
   if (plan.runNow && automation.status === "active") fireOrQueue(deps, workspaceId, automation, { reason: t("本人要求建好后先跑一次"), context: "" });
   return { state: "created", id };
 }
 
-const DESIGN_INSTRUCTIONS = "Turn the person's one request into one automation Crossline runs by itself: a trigger it can watch for free, and what "
+/**
+ * The parts of an automation a design or a turn of its conversation decided, put in force: a new one, or the one it changes with its runs
+ * and watched page kept. The person asked for it in words, so the kind of work it does is allowed by that request (said in the message,
+ * switchable on the 自动化 page).
+ */
+export function installAutomation(store: CrosslineStore, workspaceId: string, plan: ReturnType<typeof validateAutomationPlan>, id: string,
+  origin: Automation["origin"], previous: Automation | undefined, now: Date): { automation: Automation; allowed: boolean } {
+  const automation: Automation = { id, name: plan.name, summary: plan.summary, lineId: plan.lineId, status: plan.enabled ? "active" : "off", trigger: plan.trigger, action: plan.action, steps: plan.steps,
+    origin: previous?.origin ?? origin, createdAt: previous?.createdAt ?? now.toISOString(), updatedAt: now.toISOString(),
+    runs: previous?.runs ?? 0, ...(previous?.lastFiredAt ? { lastFiredAt: previous.lastFiredAt } : {}),
+    ...(previous?.watch && previous.trigger.type === "watch" && plan.trigger.type === "watch" && previous.trigger.url === plan.trigger.url ? { watch: previous.watch } : {}) };
+  write(store, workspaceId, previous ? read(store, workspaceId).map((item) => item.id === id ? automation : item)
+    : [...read(store, workspaceId).filter((item) => item.id !== id), automation]);
+  const allowed = automation.action.kind === "run" && !readCategories(store, workspaceId)[automation.action.category];
+  if (automation.action.kind === "run" && allowed) approveCategory(store, workspaceId, automation.action.category);
+  return { automation, allowed };
+}
+
+/** The designer's answer to a request, written into the conversation the request opened (`requestAutomation`). */
+function settleRequestTurn(store: CrosslineStore, workspaceId: string, requestId: string, text: string, state: "done" | "failed", now: Date,
+  made?: { workflowId: string; version?: number; note: string }): void {
+  const threadId = requestThreadId(store, workspaceId, requestId);
+  if (!threadId) return;
+  const turn = store.listWorkflowTurns(workspaceId, threadId).find((item) => item.id === `${requestId}-reply`);
+  store.saveWorkflowTurn({ workspaceId, id: `${requestId}-reply`, threadId, role: "assistant", text, state, createdAt: turn?.createdAt ?? now.toISOString(),
+    items: made?.version ? [{ type: "version", version: made.version, note: made.note }] : [] });
+  const thread = store.getWorkflowThread(workspaceId, threadId);
+  if (made && thread && !thread.workflowId) store.saveWorkflowThread({ ...thread, workflowId: made.workflowId, updatedAt: now.toISOString() });
+}
+
+export const DESIGN_INSTRUCTIONS ="Turn the person's one request into one automation Crossline runs by itself: a trigger it can watch for free, and what "
   + "the assistant does each time it fires. The instructions are read by the assistant on every firing: concrete steps naming what to read and "
   + "which files to write, never a plan. The person gets every run's result as a message, so the inbox is only for new things they must do and "
   + "a person step is only an act the assistant may not take (sending, replying, posting, paying). When `assistant.commandLine` is true "
@@ -236,9 +263,7 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
   const t = tFor(locale);
   const input: AgentTaskInput & { taskId: string } = {
     taskId, title: t("自动化「{{name}}」", { name: automation.name }), category: action.category as AgentCategory, lineId: automation.lineId,
-    // i18n-ignore-start: the run's instructions (model-facing)
-    what: `${action.instructions}\n\n这次运行的原因：${why.reason}${why.context ? `\n\n${why.context}` : ""}${note ? `\n\n${note}` : ""}${action.outputs.length ? `\n\n要交出：${action.outputs.join("、")}` : ""}`,
-    // i18n-ignore-end
+    what: automationRunPrompt(action, why, note),
     humanPart: automation.steps.filter((step) => step.by === "person").map((step) => step.title).join(locale === "en" ? "; " : "；") || t("查看结果"),
     notes: `这是本人设的自动化，第 ${automation.runs + 1} 次运行。每次只做这一轮的事，结果写进任务目录。`, // i18n-ignore: model-facing
     ...(inputs.length ? { inputs } : {}), ...(automation.threadId ? { resumeThreadId: automation.threadId } : {})
@@ -261,7 +286,7 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
         "automation_done", `automation-done:${taskId}`, [...files, ...(outcome.reviewRequired ? [{ label: t("去待确认"), href: "/approvals#assistant" }] : [])], at);
     } else if (outcome.state === "blocked" || outcome.state === "failed") {
       sayToPerson(deps.store, workspaceId, t("自动化「{{name}}」这次没跑完：{{reason}}", { name: automation.name, reason: (outcome.message || "").slice(0, 200) }), "automation_failed", `automation-failed:${taskId}`,
-        [{ label: t("查看", { context: "view" }), href: "/settings#automation" }], at);
+        [{ label: t("查看", { context: "view" }), href: "/automation" }], at);
     }
   });
   if (started.state === "started") {
@@ -282,7 +307,7 @@ export function fire(deps: AutomationDeps, workspaceId: string, automation: Auto
     const told = deps.store.appendEvent({ ownerId: ownerOf(deps.store, workspaceId), workspaceId, idempotencyKey: `automation.refused:${automation.id}:${code}`,
       type: "automation.refused", entityId: automation.id, payload: { code } });
     if (told.inserted) sayToPerson(deps.store, workspaceId, t("自动化「{{name}}」没有运行：{{detail}}。", { name: automation.name, detail }), "automation_failed",
-      `automation-refused:${automation.id}:${code}`, [{ label: t("去设置"), href: "/settings#automation" }], now);
+      `automation-refused:${automation.id}:${code}`, [{ label: t("去设置"), href: "/automation" }], now);
     return run;
   }
   const run = { ...base, taskId: "", state: "queued" as const, detail: started.message };
@@ -468,7 +493,7 @@ export function suggestFromRepeats(store: CrosslineStore, workspaceId: string, c
     const text = t("以后自动做这类事：{{text}}", { text: candidate.text.slice(0, 200) });
     sayToPerson(store, workspaceId, t("助手已经做过 {{count}} 次类似的事（{{text}}），都已采纳。要不要以后自动做？可以按时做，也可以在有新邮件、新文件或任务完成时做。", { count: orders.size, text: candidate.text.slice(0, 80) }),
       "automation_suggest", key, [{ label: t("建成自动化"), action: { action: "workflow.request", summary: text.slice(0, 200),
-        args: { text, lineId: candidate.lineId, reminder: "", time: "", weekdays: [] } } }, { label: t("去设置里写清楚"), href: "/settings#automation" }], now);
+        args: { text, lineId: candidate.lineId, reminder: "", time: "", weekdays: [] } } }, { label: t("去设置里写清楚"), href: "/automation" }], now);
     made += 1;
   }
   return made;

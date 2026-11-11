@@ -93,7 +93,7 @@ describe("settings in English", () => {
     expect(html).toContain("Language");
     expect(html).toContain("No model calls in the last 7 days.");
     expect(html).toContain("No timed task finished yet");
-    expect(html).toContain("When on, the assistant&#x27;s finished results take effect");
+    expect(html).toContain("Open Automation");
     globalThis.crosslineStore.close();
     globalThis.crosslineStore = undefined;
   }, 20000);

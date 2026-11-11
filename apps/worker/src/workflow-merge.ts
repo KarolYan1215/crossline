@@ -100,7 +100,7 @@ export async function workflowMergePass(store: CrosslineStore, workspaceId: stri
     const t = tOfWorkspace(store, workspaceId);
     sayToPerson(store, workspaceId, t("工作流「{{absorbed}}」和「{{kept}}」做的是同一件事（{{why}}），已合并：前者已关闭，它独有的做法会并进后者的下一版。不合适可在设置里撤销合并。",
       { absorbed: absorb.manifest.summary, kept: keep.manifest.summary, why }),
-      "workflow_merged", `merged:${absorb.id}:${keep.id}`, [{ label: t("查看或撤销"), href: "/settings#skills" }], now);
+      "workflow_merged", `merged:${absorb.id}:${keep.id}`, [{ label: t("查看或撤销"), href: `/automation/${encodeURIComponent(keep.id)}` }], now);
   }
   if (requested && !merged.length) sayToPerson(store, workspaceId, pairs.length
     ? tOfWorkspace(store, workspaceId)("检查了 {{count}} 对可能重复的工作流，功能都不相同，没有合并。", { count: pairs.length })

@@ -1,0 +1,76 @@
+/* ── 自动化: the workflows, one list; each with its conversation and versions (2026-11-10) ───────── */
+/* Inside `.settings-page` so the cards take the settings palette (settings.css); the rules here are the page's own. */
+.wf-page-head{display:grid;gap:4px;padding:18px 0 0}
+.wf-page-head h1{margin:0;font-size:30px;font-weight:600;line-height:1.15}
+.wf-page-head p{margin:0;font-size:13px}
+.automation-page .st-section{margin-top:16px}
+
+/* The list */
+.wf-new{display:grid;gap:6px}
+.wf-new textarea,.wf-composer textarea{width:100%;min-width:0;resize:vertical;font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-card);color:var(--ink)}
+.wf-drafts,.wf-items{list-style:none;margin:0;padding:0;display:grid}
+.wf-drafts li{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--chalk);font-size:13px}
+.wf-drafts small{color:var(--graphite);font-size:12px}
+.wf-items li{border-top:1px solid var(--chalk)}
+.wf-items li:first-child{border-top:0}
+.wf-item{display:grid;gap:2px;padding:9px 4px;color:var(--ink);text-decoration:none;min-width:0}
+.wf-item:hover{background:var(--ds-chalk)}
+.wf-item small{font-size:12px;color:var(--graphite);overflow-wrap:anywhere}
+.wf-item-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0}
+.wf-item-head b{font-size:14px;overflow-wrap:anywhere}
+
+/* One workflow */
+.wf-back{font-size:13px}
+.wf-back a{color:var(--graphite)}
+.wf-page{display:grid;gap:12px;min-width:0}
+.wf-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 16px}
+.wf-head h2{margin:0;font-size:24px;font-weight:600;overflow-wrap:anywhere}
+.wf-tags{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:6px 0 0}
+.wf-tags small{font-size:12px;color:var(--graphite)}
+.wf-actions{display:inline-flex;flex-wrap:wrap;gap:6px}
+.wf-columns{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:900px){.wf-columns{grid-template-columns:minmax(0,1fr)}}
+.wf-thread,.wf-versions{display:grid;gap:10px;padding:14px 16px;border:1px solid var(--ds-line);border-radius:var(--ds-radius);background:var(--ds-card);min-width:0}
+.wf-turns{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.wf-turn{display:grid;gap:6px;max-width:100%;min-width:0;font-size:14px}
+.wf-turn p{margin:0;overflow-wrap:anywhere}
+.wf-turn.is-person{justify-self:end;max-width:85%;padding:8px 12px;border-radius:14px 14px 4px 14px;background:var(--ds-chalk)}
+.wf-turn.is-assistant{padding:2px 0}
+.wf-turn.is-system{padding:6px 10px;border-left:3px solid var(--ds-line);font-size:13px;color:var(--graphite)}
+.wf-turn.is-failed{border-left:3px solid var(--ds-alarm)}
+.wf-when{font-size:11px;color:var(--graphite)}
+.wf-turn.is-person .wf-when{justify-self:end}
+.wf-made{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.wf-made small{font-size:12px;color:var(--graphite)}
+.wf-tool{border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);font-size:12px;min-width:0}
+.wf-tool summary{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:4px 8px;cursor:pointer;color:var(--graphite)}
+.wf-tool summary small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.wf-tool pre,.wf-dry pre{margin:0;padding:6px 8px;max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:var(--ds-chalk)}
+.wf-cursor{display:inline-block;width:7px;height:14px;background:var(--graphite);animation:wf-blink 1s steps(2) infinite}
+@keyframes wf-blink{to{opacity:0}}
+@media (prefers-reduced-motion:reduce){.wf-cursor{animation:none}}
+.wf-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;padding-top:8px;border-top:1px solid var(--chalk)}
+
+/* Versions */
+.wf-versions h3{margin:0;font-size:15px}
+.wf-versions>ol{list-style:none;margin:0;padding:0;display:grid}
+.wf-version{display:grid;gap:4px;padding:8px 0;border-top:1px solid var(--chalk)}
+.wf-version:first-child{border-top:0}
+.wf-version>span:first-child{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:13px}
+.wf-version small{font-size:12px;color:var(--graphite)}
+.wf-version-note{overflow-wrap:anywhere}
+.wf-version-actions{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+.wf-version.is-current{background:linear-gradient(90deg,var(--ds-accent-soft),transparent 70%);padding-left:6px}
+.wf-diff,.wf-dry{display:grid;gap:6px;padding:10px 12px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);min-width:0}
+.wf-diff header,.wf-dry header{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:13px}
+.wf-diff header small{color:var(--graphite)}
+.wf-diff header button,.wf-dry header button{margin-left:auto}
+.wf-diff pre,.wf-diff-lines{margin:0;max-height:420px;overflow:auto;font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--ds-chalk);padding:6px 0;width:100%}
+.wf-diff pre span,.wf-diff-lines span{display:block;padding:0 8px}
+.wf-diff-add{background:var(--ds-accent-soft);color:var(--ds-accent-ink)}
+.wf-diff-del{background:var(--ds-alarm-soft);color:var(--ds-alarm-ink);text-decoration:line-through;text-decoration-color:color-mix(in srgb,currentColor 40%,transparent)}
+.wf-diff-same{color:var(--graphite)}
+.wf-dry p{margin:0;font-size:13px}
+.wf-dry p small{display:inline-block;min-width:4em;color:var(--graphite)}
+.wf-dry ol,.wf-checks{margin:0;padding-left:18px;font-size:13px;display:grid;gap:3px}
+.wf-checks{list-style:none;padding:0}

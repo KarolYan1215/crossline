@@ -1102,7 +1102,6 @@
   "都显示，标为时间冲突，不再问": "Show both as a time conflict, don't ask again",
   "不是同一件事": "Not the same thing",
   "都显示，不再问": "Show both, don't ask again",
-  "已交给助手修这个工作流：它改说明和脚本并试跑，查过后才换上新版，改好会告诉本人；不合适可在设置里回到上一版": "Handed to the assistant to fix this workflow: it revises the instructions and scripts and tries them, the new version replaces the old only after checks, and the person is told when it is done; the previous version can be restored in settings",
   "{{count}} 项截止已过，等本人决定": "{{count}} deadlines have passed and wait for a decision",
   "这些日期是课程、别人或本人定的，系统不替本人改，逐个列在下方；最早的是 {{day}}。每项可以补做、改成新的日期或放弃。": "These dates were set by a course, someone else or the person, so the system does not change them; each is listed below, the earliest is {{day}}. Each can be made up, moved to a new date or dropped.",
   "拆成每项一张卡": "One card for each",

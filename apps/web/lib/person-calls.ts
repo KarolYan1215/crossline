@@ -40,14 +40,14 @@ export function personCalls(ctx: AccessContext, now = new Date(), hosted = proce
     if (record.mergedInto) continue;
     if (record.status === "needs_consent") {
       calls.push({ id: `consent:${record.id}`, urgent: false, text: t("工作流「{{name}}」要读取{{services}}，请看过风险后决定是否启用。", { name: record.manifest.summary.slice(0, 40), services: list(workflowAccess(record).access.map((item) => item.service)) }),
-        action: { kind: "href", href: `/settings?flow=${encodeURIComponent(record.id)}#skills`, label: t("查看风险") } });
+        action: { kind: "href", href: `/automation/${encodeURIComponent(record.id)}`, label: t("查看风险") } });
       continue;
     }
     if (record.status !== "active") continue;
     for (const item of workflowAccess(record).access.filter((access) => access.login && !record.logins?.[access.service]))
       calls.push({ id: `login:${record.id}:${item.service}`, urgent: false, text: t("工作流「{{name}}」要读取{{service}}，需要本人先登录一次。", { name: record.manifest.summary.slice(0, 40), service: item.service }),
         action: hosted ? { kind: "remote", workflowId: record.id, service: item.service, label: item.service, purpose: "login" }
-          : { kind: "href", href: `/settings?login=${encodeURIComponent(record.id)}#skills`, label: t("登录{{service}}", { service: item.service }) } });
+          : { kind: "href", href: `/automation/${encodeURIComponent(record.id)}?login=1`, label: t("登录{{service}}", { service: item.service }) } });
   }
   // A registration the form service handed back (docs/opportunity-agent.md §10): a check is urgent, since its window is open and waiting.
   for (const run of readFormRuns(store, ctx.workspaceId)) {
