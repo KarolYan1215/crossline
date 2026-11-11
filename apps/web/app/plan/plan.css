@@ -9,7 +9,7 @@
 .pl-key{display:inline-block;width:12px;height:10px;margin-right:4px;vertical-align:-1px;background:var(--mist)}
 .pl-key[data-k="p50"]{background:var(--ink)}
 .pl-key[data-k="p85"]{background:color-mix(in srgb,var(--ink) 30%,var(--paper))}
-.pl-key[data-k="deadline"]{width:2px;background:#C4302B}
+.pl-key[data-k="deadline"]{width:2px;background:var(--risk)}
 .pl-key[data-k="l3"]{background:var(--en-3)}
 .pl-key[data-k="l2"]{background:var(--en-2)}
 .pl-key[data-k="l1"]{background:var(--en-1)}
@@ -68,5 +68,5 @@
 }
 
 /* Line shares under the packing numbers: the same rows, a small heading of their own. */
-.pl-shares { margin-top: 16px; border-top: 1px solid var(--line, #E5E5E5); padding-top: 12px; }
+.pl-shares { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
 .pl-shares h3 { font-size: 14px; margin: 0 0 4px; }

@@ -180,7 +180,8 @@ function LinesView({ state, onChanged }: { state: OnboardingState; onChanged: ()
 /** Monday first: 1..6, 0 as weekday numbers. */
 const DAYS = [1, 2, 3, 4, 5, 6, 0];
 /** Colours for lines without a colour of their own (a line the person named), so the draft still tells them apart. */
-const DRAFT_PALETTE = ["#2f6f8f", "#8a5a2b", "#5b6b2e", "#7a3f6e", "#3f5f7a"];
+// The line colours (each with a dark value) for a line the stylesheet has no colour for yet.
+const DRAFT_PALETTE = ["var(--c-research)", "var(--c-startup)", "var(--c-media)", "var(--c-investment)", "var(--c-health)"];
 
 /** The capacity conflict in plain sentences (`capacityConflict`), computed from the ledger. */
 function CapacityNote({ capacity }: { capacity: import("@crossline/core").WeekCapacity }) {

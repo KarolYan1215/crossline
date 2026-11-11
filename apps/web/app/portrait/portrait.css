@@ -39,16 +39,16 @@ a.pt-share{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
 .pt-doc [id^="pt-s-"]{scroll-margin-top:16px}
 /* 「这份画像符合本人吗？」, under the type page, on the poster's paper but never exported. */
 .pt-confirm{box-sizing:border-box;width:min(794px,100%);display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:12px 16px;margin:0 0 4px;
-  background:#EFE9DD;color:#1C1A17;border-radius:10px;font-size:14px}
-.pt-confirm small{font-size:12px;color:#4F4A42}
-.pt-confirm[data-state="done"]{background:transparent;border:1px solid #DDD5C7}
+  background:var(--pt-soft);color:var(--pt-ink);border-radius:10px;font-size:14px}
+.pt-confirm small{font-size:12px;color:var(--pt-muted)}
+.pt-confirm[data-state="done"]{background:transparent;border:1px solid var(--pt-track)}
 .pt-confirm-actions{margin-left:auto;display:flex;flex-wrap:wrap;gap:6px}
 .pt-confirm :is(.primary-button,.secondary-button,.text-button){min-height:32px;padding:4px 12px;font-size:13px}
-.pt-confirm .secondary-button{background:#FCFBF8;color:#1C1A17;border-color:#D9D3C7}
-.pt-confirm .text-button{color:#1C1A17}
-.pt-confirm .primary-button{background:#3E5A4C;border-color:#3E5A4C;color:#fff}
+.pt-confirm .secondary-button{background:var(--ds-card);color:var(--pt-ink);border-color:var(--pt-track)}
+.pt-confirm .text-button{color:var(--pt-ink)}
+.pt-confirm .primary-button{background:var(--ds-accent);border-color:var(--ds-accent);color:var(--ds-on-accent)}
 .pt-confirm-note{flex-basis:100%;display:grid;gap:6px}
-.pt-confirm-note textarea{background:#FCFBF8;color:#1C1A17;border:1px solid #D9D3C7;padding:6px 8px}
+.pt-confirm-note textarea{background:var(--ds-card);color:var(--pt-ink);border:1px solid var(--pt-track);padding:6px 8px}
 .pt-confirm-note span{display:flex;gap:6px}
 /* The figure card: the current figure, how the person looks, redraw and upload; every version folded below. */
 .pt-figures{display:grid;gap:10px;padding:12px;background:var(--ds-card);border:1px solid var(--ds-line);border-radius:var(--ds-radius);box-shadow:var(--ds-shadow);scroll-margin-top:16px}
@@ -75,11 +75,18 @@ a.pt-share{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
   .pt-toc-group,.pt-toc-note{grid-column:1/-1}
 }
 /* The document is paper whatever the app's theme: these colours are the poster's, not the page's. #6B655C (the draft's grey) is
-   5.2:1 on the paper, so the grey here is #4F4A42 (7.9:1); the group colour as text on paper is about 7.1:1, so text beside a bar is ink. */
-.pt-doc{--pt-paper:#F6F2EA;--pt-ink:#1C1A17;--pt-muted:#4F4A42;--pt-track:#DDD5C7;--pt-soft:#ECE5D8;--pt-accent:var(--group,#0A5198);--pt-accent-text:#08427A;
+   5.2:1 on the paper, so the grey here is #4F4A42 (7.9:1); the group colour as text on paper is about 7.1:1, so text beside a bar is ink.
+   Every token the page might reach is set here (2026-11-10): the frame's `--ds-*`, `--line`, `--now` and the rest kept their dark values
+   inside the poster under a dark scheme. The confirm strip under the type page sits on the same paper. */
+.pt-doc,.pt-confirm{--pt-paper:#F6F2EA;--pt-ink:#1C1A17;--pt-muted:#4F4A42;--pt-track:#DDD5C7;--pt-soft:#ECE5D8;--pt-accent:var(--group,#0A5198);--pt-accent-text:#08427A;
+  --pt-on-accent:#FFFFFF;
   --paper:#F6F2EA;--ink:#1C1A17;--graphite:#4F4A42;--mist:#DDD5C7;--chalk:#ECE5D8;
   --c-research:#0A5198;--c-startup:#8C3709;--c-media:#792E9C;--c-investment:#085E3A;--c-health:#664E00;
-  display:grid;gap:0;justify-content:center;background:var(--pt-paper);color:var(--pt-ink);padding:8px 0 16px}
+  --ds-bg:#F6F2EA;--ds-side:#EFE9DD;--ds-card:#FCFBF8;--ds-line:#DDD5C7;--ds-chalk:#ECE5D8;--ds-ink:#1C1A17;--ds-muted:#4F4A42;
+  --ds-accent:#3E5A4C;--ds-accent-ink:#33493D;--ds-accent-soft:#DDE6E0;--ds-on-accent:#FFFFFF;--ds-alarm:#A3402A;--ds-alarm-ink:#86301F;--ds-alarm-soft:#F6E4DE;
+  --shade:#4F4A42;--muted:#4F4A42;--line:#DDD5C7;--block:#1C1A17;--link:#08427A;--now:#085E3A;--now-ink:#07633C;--risk:#A1262B;--risk-ink:#8A1F24;--warn:#8A5A00;--warn-ink:#6B4400;
+  --tint-warn:#F3EAD3;--tint-warn-ink:#5C430F;--ring-1:#C4302B;--ring-2:#A85A12;--ring-3:#5E6B0E;--ring-4:#1F8A4C;--ring-hover:#9BD3AE;}
+.pt-doc{display:grid;gap:0;justify-content:center;background:var(--pt-paper);color:var(--pt-ink);padding:8px 0 16px}
 .pt-page{box-sizing:border-box;width:min(794px,100%);padding:36px 48px 32px;background:var(--pt-paper);color:var(--pt-ink);border-top:3px solid var(--pt-ink);
   display:flex;flex-direction:column;gap:18px;--group:#0A5198;--group-tint:#DAE6F2}
 .pt-page h2{margin:0;font-size:28px;line-height:1.2;display:flex;align-items:baseline;gap:12px}
@@ -153,7 +160,7 @@ a.pt-share{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
 .pt-type-quote{margin:4px 0 0;font-size:20px;line-height:1.5;color:var(--group)}
 .pt-type-name{margin:0;font-size:48px;line-height:1.45}
 .pt-type-group{margin:0}
-.pt-type-group span{display:inline-block;padding:4px 12px;background:var(--group);color:#fff;font-size:13px}
+.pt-type-group span{display:inline-block;padding:4px 12px;background:var(--group);color:var(--pt-on-accent);font-size:13px}
 .pt-type-group b{font-size:14px}
 .pt-type-blurb{margin:0;font-size:15px;line-height:1.6}
 .pt-tagline{margin:0;padding-left:16px;border-left:6px solid var(--group);font-size:20px;line-height:1.5;font-weight:700}
@@ -172,7 +179,7 @@ a.pt-share{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
 .pt-axis-track i{position:absolute;top:0;bottom:0;display:flex;align-items:center;background:var(--group);border-radius:14px;font-style:normal}
 .pt-axis-track i[data-side="right"]{justify-content:flex-end;border-top-left-radius:0;border-bottom-left-radius:0}
 .pt-axis-track i[data-side="left"]{justify-content:flex-start;border-top-right-radius:0;border-bottom-right-radius:0}
-.pt-axis-track i b{padding:0 10px;font-size:13px;color:#fff;white-space:nowrap}
+.pt-axis-track i b{padding:0 10px;font-size:13px;color:var(--pt-on-accent);white-space:nowrap}
 .pt-axis-out{position:absolute;top:50%;transform:translateY(-50%);font-size:13px;color:var(--pt-ink);white-space:nowrap}
 /* labels: three cells in a row, then the other lines as identity bars */
 .pt-labels{margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--pt-track);border-bottom:2px solid var(--pt-ink)}
@@ -211,7 +218,7 @@ a.pt-share{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
 .pt-plane-corner[data-at="top-right"]{right:18px;top:2px}
 .pt-plane-corner[data-at="top-left"]{left:72px;top:2px}
 .pt-dot{position:absolute;box-sizing:border-box;display:grid;place-items:center;border:2px solid var(--pt-accent);border-radius:50%;background:var(--pt-paper);color:var(--pt-ink);font-size:12px;font-weight:700;line-height:1}
-.pt-dot[data-filled]{background:var(--pt-accent);color:#fff}
+.pt-dot[data-filled]{background:var(--pt-accent);color:var(--pt-on-accent)}
 .pt-energy{display:grid;gap:12px}
 .pt-legend{margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px}
 .pt-legend>div{display:grid;gap:3px;align-content:start}
@@ -223,7 +230,7 @@ a.pt-share{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
 .pt-goal-strip{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
 .pt-goal-strip li{display:grid;gap:2px;border-left:6px solid var(--lc,var(--pt-ink));padding:4px 0 4px 10px;font-size:13px}
 .pt-num{display:inline-grid;place-items:center;width:22px;height:22px;border:2px solid var(--pt-ink);font-size:12px;font-weight:700}
-.pt-insights li[data-priority="high"] .pt-num{background:var(--pt-ink);color:#fff}
+.pt-insights li[data-priority="high"] .pt-num{background:var(--pt-ink);color:var(--pt-on-accent)}
 /* what is shared: rendered off screen, exported only */
 .pt-offscreen{position:fixed;left:-20000px;top:0;pointer-events:none}
 .pt-shared-half{width:794px}
@@ -319,5 +326,5 @@ html:has(.portrait-page){background:var(--ds-bg)}
 .pt-claim-judge button[aria-pressed="true"],.pt-claim-scale button[aria-checked="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .pt-claims-items li{display:grid;gap:4px;padding:6px 0;border-bottom:1px solid var(--mist)}
 .pt-claims-items .pt-claim-scale{margin-left:0;flex-wrap:wrap}
-.pt-claims-error{color:var(--risk, #9b1c1c)}
+.pt-claims-error{color:var(--risk-ink)}
 @media print{.pt-claims{display:none}}

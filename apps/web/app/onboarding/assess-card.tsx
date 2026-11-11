@@ -4,16 +4,19 @@ import { useEffect, useState } from "react";
 import { TYPE_AXES, TYPE_GROUPS } from "@crossline/core";
 import type { AssessOffer } from "../../lib/assess-link";
 import { useT } from "../locale-context";
+import { Receipt } from "./receipt";
 
 /**
  * The public quick test's result, found under the person's address (decided by the owner 2026-10-15): shown before the interview with its
  * code, name and four axes, and used only after 「使用该结果」. 「不是我的结果」 drops it and the app stops asking; once used, 「移除」 does
  * the same. The test's poster opens from `resultUrl` when the test's server sent one. Nothing shows when the link is off or nothing was found.
+ * Dropping it is a one-shot step (2026-11-10): a receipt for about 1.5 s, then nothing.
  */
 export function AssessCard() {
   const t = useT();
   const [offer, setOffer] = useState<AssessOffer | undefined>();
   const [busy, setBusy] = useState(false);
+  const [dropped, setDropped] = useState(false);
   useEffect(() => {
     void fetch("/api/onboarding/assess", { cache: "no-store" }).then((response) => response.json()).then((body: AssessOffer) => setOffer(body)).catch(() => undefined);
   }, []);
@@ -23,8 +26,10 @@ export function AssessCard() {
       .catch(() => undefined);
     const body = await response?.json().catch(() => undefined) as AssessOffer | undefined;
     if (body) setOffer(body);
+    if (response?.ok && decision === "reject") setDropped(true);
     setBusy(false);
   };
+  if (dropped) return <Receipt text={t("已移除这份测评结果。")} onDone={() => setDropped(false)} />;
   if (offer?.state === "used") return <p className="ob-assess-used">
     {t("已带入公开测评结果：")}<b>{offer.result.code} {t(offer.result.typeName)}</b>{t("（只作访谈的参考，画像仍按访谈评分）")}
     <button type="button" className="ob-btn ob-quiet" disabled={busy} onClick={() => void decide("reject")}>{t("不是我 / 移除")}</button>

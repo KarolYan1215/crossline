@@ -41,8 +41,8 @@
 .mt-kind-key[data-pending]{opacity:.5;stroke-width:1.2}
 .mt-edge-hit{fill:none;stroke:transparent;stroke-width:12;pointer-events:stroke}
 @keyframes mt-draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
-.mt-today{stroke:var(--broken,#A1262B);stroke-width:1.5}
-.mt-today-label{fill:var(--broken-ink,#8A1F24);font-size:12px;font-weight:700}
+.mt-today{stroke:var(--broken);stroke-width:1.5}
+.mt-today-label{fill:var(--broken-ink);font-size:12px;font-weight:700}
 .mt-tick-ghost{fill:none;stroke:var(--lc,var(--graphite));stroke-width:1;stroke-dasharray:2 2;opacity:.6}
 .mt-line{position:absolute;left:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:4px 0 0 8px;border-left:4px solid var(--lc);background:var(--paper);overflow:hidden}
 .mt-line b{font-size:13px;color:var(--lc);line-height:1.2;overflow-wrap:anywhere}
@@ -392,7 +392,7 @@ body:has(.ms-page) .running-head{background:var(--ds-bg)}
 }
 
 /* A line's watches inside its card (docs/opportunity-agent.md §17.9). */
-.lb-watch-panel{min-width:0;border-top:1px solid var(--line-soft,#e2e2e2);padding-top:8px}
+.lb-watch-panel{min-width:0;border-top:1px solid var(--mist);padding-top:8px}
 .lw{display:grid;gap:8px;min-width:0}
 .lw-list{list-style:none;margin:0;padding:0;display:grid;gap:10px}
 .lw-list li{display:grid;gap:2px;min-width:0}

@@ -1,26 +1,45 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useT } from "../locale-context";
+import { Receipt } from "./receipt";
 
 /**
  * The observation the deep stages give back (2026-10-19): two things the person said, connected, with the replies quoted under it, and
  * 准 / 不准. A rating goes to the next round and to the portrait; 「准」 in each deep stage stands for confirming the portrait.
+ *
+ * Rating is a one-shot step (2026-11-10): with `vanish` the card leaves a receipt for about 1.5 s with 撤销 (which clears the rating and
+ * brings the card back), then is gone; its round's fold keeps it, rated, where it can be changed (`vanish` off).
  */
-export function InsightCard({ sessionId, seq, insight, rating, onRated }: {
+export function InsightCard({ sessionId, seq, insight, rating, onRated, vanish = false }: {
   sessionId: string; seq: number; insight: { text: string; refs: Array<{ replyId: string; quote: string }> };
-  rating: "fits" | "off" | undefined; onRated: () => void;
+  rating: "fits" | "off" | undefined; onRated: () => void; vanish?: boolean;
 }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [shown, setShown] = useState(rating);
-  const rate = async (verdict: "fits" | "off") => {
+  const [receipt, setReceipt] = useState(false);
+  // A rating read back from the server (after a reload, or another device) wins; the one just pressed shows until then.
+  useEffect(() => { setShown(rating); }, [rating]);
+  const send = async (verdict: "fits" | "off" | "clear") => {
     setBusy(true);
     const response = await fetch("/api/onboarding/insight", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ sessionId, seq, verdict }) }).catch(() => undefined);
     setBusy(false);
-    if (response?.ok) { setShown(verdict); onRated(); }
+    return Boolean(response?.ok);
   };
+  const rate = async (verdict: "fits" | "off") => {
+    if (!await send(verdict)) return;
+    setShown(verdict);
+    if (vanish) setReceipt(true); else onRated();
+  };
+  const undo = async () => {
+    if (!await send("clear")) return;
+    setShown(undefined); setReceipt(false); onRated();
+  };
+  if (receipt) return <Receipt text={shown === "fits" ? t("已记下，画像会用到这一条。") : t("已记下，画像不会用这一条。")}
+    onUndo={() => void undo()} onDone={() => { setReceipt(false); onRated(); }} />;
+  if (vanish && shown) return null;
   return <aside className="ob-insight" aria-label={t("观察")}>
     <b className="ob-insight-label">{t("观察")}</b>
     <p className="gen">{insight.text}</p>

@@ -1,0 +1,4 @@
+[
+  { "file": "apps/web/app/chat/composer.css", "match": "#F3EEE6", "selector": ".helper-face", "reason": "The ground of the 小帮手's portrait (the image's own paper, so its cut-out edge does not show); the same in both schemes on purpose." },
+  { "file": "apps/web/app/shell.css", "match": "#F3EEE6", "selector": ".helper-face", "reason": "The account button holding the 小帮手's portrait: the image's own paper, as in composer.css." }
+]

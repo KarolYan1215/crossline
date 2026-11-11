@@ -113,7 +113,7 @@
 /* Folded: a dot on the figure says a message waits; hovering or focusing the figure brings the bubble back. */
 .assistant-bubble.helper-bubble{position:relative}
 .corner-stack .assistant-bubble-wrap .assistant-bubble.helper-bubble{position:relative}
-.assistant-bubble.helper-bubble[data-unread]::after{content:"";position:absolute;top:2px;right:2px;width:12px;height:12px;border-radius:50%;background:#C00000;
+.assistant-bubble.helper-bubble[data-unread]::after{content:"";position:absolute;top:2px;right:2px;width:12px;height:12px;border-radius:50%;background:var(--risk);
   box-shadow:0 0 0 2px var(--paper)}
 @keyframes nudge-in{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.assistant-nudge-preview{animation:none}}

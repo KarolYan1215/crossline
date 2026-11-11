@@ -32,6 +32,8 @@ const INK = "#1C1A17", MUTED = "#4F4A42", TRACK = "#DDD5C7";
 const LINE_COLOUR: Record<string, string> = { research: "#0A5198", startup: "#8C3709", media: "#792E9C", investment: "#085E3A", health: "#664E00",
   "line-wellness": "#4A5200", "line-wealth": "#005B66" };
 const colourOf = (lineId: string) => LINE_COLOUR[lineId] ?? INK;
+// The values radar is drawn on the poster and inside the interview's dark frame too, so it reads the frame's names (`--pt-*`).
+const RADAR_INK = `var(--pt-ink, ${INK})`, RADAR_MUTED = `var(--pt-muted, ${MUTED})`, RADAR_TRACK = `var(--pt-track, ${TRACK})`;
 
 /**
  * The four typing axes as diverging bars: both poles named, the one leaned to in bold, the bar growing from the middle towards it, the
@@ -90,16 +92,16 @@ export function ValuesRadar({ values, size = 300 }: { values: NonNullable<Portra
   const shape = values.map((item, index) => point(index, item.score)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   return <svg className="pt-chart" viewBox={`0 0 ${size} ${size}`} role="img" aria-label={t("价值取向：{{values}}", { values: values.map((item) => `${t(item.name)} ${item.score}`).join(t("，")) })}>
     {[25, 50, 75, 100].map((ring) => <polygon key={ring} points={values.map((_, index) => point(index, ring)).map((p) => `${p.x},${p.y}`).join(" ")}
-      fill="none" stroke={TRACK} strokeWidth={ring === 100 ? 1.2 : 0.8} />)}
-    {values.map((_, index) => { const p = point(index, 100); return <line key={index} x1={c} y1={c} x2={p.x} y2={p.y} stroke={TRACK} strokeWidth="0.8" />; })}
+      fill="none" style={{ stroke: RADAR_TRACK }} strokeWidth={ring === 100 ? 1.2 : 0.8} />)}
+    {values.map((_, index) => { const p = point(index, 100); return <line key={index} x1={c} y1={c} x2={p.x} y2={p.y} style={{ stroke: RADAR_TRACK }} strokeWidth="0.8" />; })}
     <polygon points={shape} style={{ fill: "var(--pt-accent)", stroke: "var(--pt-accent)" }} fillOpacity=".16" strokeWidth="2" />
     {values.map((item, index) => { const p = point(index, item.score); return <circle key={item.name} cx={p.x} cy={p.y} r="3.5" style={{ fill: "var(--pt-accent)" }}><title>{item.evidence}</title></circle>; })}
     {values.map((item, index) => {
       const p = point(index, 116);
       const cos = Math.cos(p.angle), sin = Math.sin(p.angle);
       const anchor = Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end";
-      return <text key={`t-${item.name}`} x={p.x} y={p.y + 4 + (Math.abs(cos) < 0.2 ? sin * 6 : 0)} textAnchor={anchor} fontSize="13" fill={INK}>
-        <tspan className="pt-serif" fontWeight="700">{t(item.name)}</tspan><tspan fill={MUTED}> {item.score}</tspan></text>;
+      return <text key={`t-${item.name}`} x={p.x} y={p.y + 4 + (Math.abs(cos) < 0.2 ? sin * 6 : 0)} textAnchor={anchor} fontSize="13" style={{ fill: RADAR_INK }}>
+        <tspan className="pt-serif" fontWeight="700">{t(item.name)}</tspan><tspan style={{ fill: RADAR_MUTED }}> {item.score}</tspan></text>;
     })}
   </svg>;
 }

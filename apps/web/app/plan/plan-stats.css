@@ -47,9 +47,7 @@
 .pl-hit{fill:transparent}
 .pl-cd-week{outline:none}
 .pl-cd-week[data-active] .pl-hit{fill:color-mix(in srgb,var(--ink) 7%,transparent)}
-.pl-over-text,.pl-risk-text{font-weight:700;color:#8A1F24;fill:currentColor}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .pl-over-text,:root:not([data-theme="light"]) .pl-risk-text{color:#FF8A80}}
-:root[data-theme="dark"] .pl-over-text,:root[data-theme="dark"] .pl-risk-text{color:#FF8A80}
+.pl-over-text,.pl-risk-text{font-weight:700;color:var(--risk-ink);fill:currentColor}
 .pl-over-list{display:flex;flex-wrap:wrap;gap:4px;margin:0}
 .pl-tip{position:absolute;top:4px;z-index:5;display:grid;gap:2px;width:220px;max-width:100%;padding:6px 8px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);font-size:12px;line-height:1.45;pointer-events:none}
 .pl-tip small{display:block;padding-left:12px;color:var(--graphite)}

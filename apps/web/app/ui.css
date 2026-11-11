@@ -39,7 +39,7 @@
 .dv-flag small{font-weight:400;color:var(--graphite);font-size:12px}
 .dv-scroll{overflow-y:auto;max-height:640px;border:1px solid var(--mist)}
 .dv-grid{position:relative;min-height:200px}
-.dv-quiet{position:absolute;left:0;right:0;background:rgba(127,127,127,.12);pointer-events:none}
+.dv-quiet{position:absolute;left:0;right:0;background:var(--wash);pointer-events:none}
 .dv-hour{position:absolute;left:0;right:0;height:0;border-top:1px solid var(--mist);font-style:normal;pointer-events:none}
 .dv-hour span{position:absolute;left:6px;top:2px;font-size:12px;color:var(--graphite);font-family:var(--f-mono)}
 .dv-lane{position:absolute;top:0;bottom:0;left:58px;right:8px}
@@ -59,13 +59,13 @@
 /* A proposal still waiting for approval, and a task pencilled in outside working hours: dashed outline on paper, ink text (7:1). */
 .dv-block[data-kind="proposed"],.dv-block[data-kind="optional"],.dv-block[data-missed]{background:var(--paper);border:2px dashed var(--lc,var(--graphite))}
 .dv-block[data-kind="activity"]{background:var(--chalk);border-left-style:dotted}
-.dv-block[data-clash]{box-shadow:inset 0 0 0 2px #C00000}
+.dv-block[data-clash]{box-shadow:inset 0 0 0 2px var(--risk)}
 .dv-resize{position:absolute;left:0;right:0;bottom:0;height:8px;cursor:ns-resize;touch-action:none;border-bottom:3px solid transparent}
 .dv-block:hover .dv-resize,.dv-resize:active{border-bottom-color:var(--ink)}
 .dv-resize-live{position:absolute;right:6px;bottom:8px;padding:0 4px;background:var(--ink);color:var(--paper);font-size:12px}
 .dv-empty{position:absolute;left:58px;right:0;top:60px;margin:0;padding:0 16px;text-align:center;color:var(--graphite)}
 .dv-now{position:absolute;left:52px;right:0;height:0;border-top:2px solid var(--now);pointer-events:none;z-index:2}
-.dv-now i{position:absolute;left:-52px;top:-9px;padding:0 4px;background:var(--now);color:#fff;font-size:12px;font-style:normal;line-height:16px}
+.dv-now i{position:absolute;left:-52px;top:-9px;padding:0 4px;background:var(--now);color:var(--paper);font-size:12px;font-style:normal;line-height:16px}
 
 /* week: seven columns sharing one hour axis */
 .wk-scroll{overflow-x:auto;border:1px solid var(--mist)}

@@ -2,7 +2,11 @@
    Paper, ink rules, the line colours only on shapes; greys #4F4A42 (7.9:1 on the paper). Left: materials and decisions; middle: the
    conversation; right: what the answers are building. */
 /* Since 2026-10-28 the warm design layer of the frame (shell.css `--ds-*`, light and dark): the original names point at its tokens here. */
-.ob-page{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);--pt-accent:#0A5198;
+.ob-page{--paper:var(--ds-card);--ink:var(--ds-ink);--graphite:var(--ds-muted);--mist:var(--ds-line);--chalk:var(--ds-chalk);
+  /* The derived names too (2026-11-10): declared at the root they kept the root's grey here, so a folder card's rules and a signature
+     drew in the wrong colour. The values radar (portrait-charts.tsx) reads the poster's names, here the frame's. */
+  --line:var(--ds-line);--muted:var(--ds-muted);--shade:var(--ds-muted);--block:var(--ds-ink);
+  --pt-ink:var(--ds-ink);--pt-muted:var(--ds-muted);--pt-track:var(--ds-line);--pt-accent:var(--c-research);
   background:var(--ds-bg);color:var(--ink);min-height:calc(100vh - 40px);padding:12px clamp(12px,2vw,24px) 24px}
 html:has(.ob-page) body{background:var(--ds-bg)}
 body:has(.ob-page) .running-head{background:var(--ds-bg)}
@@ -18,7 +22,7 @@ body:has(.ob-page) .running-head{background:var(--ds-bg)}
 .ob3 .ob-chips button{border:1px solid var(--ink);background:var(--paper);color:var(--ink);border-radius:0;font-size:14px;padding:6px 10px}
 .ob3 .ob-chips button small{color:var(--graphite)}
 .ob3 .ob-chips button[data-picked="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
-.ob3 .ob-chips button[data-picked="true"] small{color:#E8E2D6}
+.ob3 .ob-chips button[data-picked="true"] small{color:var(--paper)}
 .ob3 .ob-question{border:0;border-top:1px solid var(--mist);background:transparent;padding:12px 0 4px}
 .ob3 .ob-question legend{font-size:15px;font-weight:700;padding:0;display:grid;gap:2px}
 .ob3 .ob-question legend small{font-weight:400;font-size:13px;color:var(--graphite)}
@@ -39,7 +43,7 @@ body:has(.ob-page) .running-head{background:var(--ds-bg)}
 .ob-doclist li small{color:var(--graphite)}
 .ob-doclist .ob-doc-remove{min-height:26px;padding:0 8px;border:1px solid var(--mist);font-size:12px;color:var(--ink)}
 .ob-doclist .ob-doc-remove:hover{border-color:var(--ink)}
-.ob-doclist li[data-status="failed"] small,.ob-doclist li[data-status="unsupported"] small{color:#5E1212}
+.ob-doclist li[data-status="failed"] small,.ob-doclist li[data-status="unsupported"] small{color:var(--ds-alarm-ink)}
 .ob-card .st-card{border:0;padding:0;background:transparent}
 .ob-goal{display:grid;gap:4px;padding-top:8px;border-top:1px solid var(--mist);border-left:4px solid var(--lc,var(--ink));padding-left:8px}
 .ob-goal-now{font-size:14px;font-weight:700}
@@ -48,7 +52,7 @@ body:has(.ob-page) .running-head{background:var(--ds-bg)}
 .ob3 .ob-facts>div{grid-template-columns:64px minmax(0,1fr)}
 
 /* Centre */
-.ob-centre{display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;border:1.5px solid var(--ink);background:#FBF8F2;height:calc(100vh - 80px);min-height:520px;position:sticky;top:12px}
+.ob-centre{display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;border:1.5px solid var(--ink);background:var(--ds-card);height:calc(100vh - 80px);min-height:520px;position:sticky;top:12px}
 .ob-centre-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1.5px solid var(--ink)}
 .ob3 .ob-stages{padding:0;border:0;gap:2px}
 .ob3 .ob-stages li{font-size:13px;padding:3px 10px;border:1px solid var(--mist);background:var(--paper)}
@@ -63,10 +67,10 @@ body:has(.ob-page) .running-head{background:var(--ds-bg)}
 .ob-deep{display:grid;gap:10px}
 .ob3 .ob-deep-question{font-size:20px;line-height:1.5;font-weight:700}
 .ob3 .ob-composer{border-top:1.5px solid var(--ink);padding:10px 14px;background:var(--paper)}
-.ob3 .ob-composer textarea{border:1px solid var(--ink);background:#FFFDF9;border-radius:0;font-size:15px}
-.ob3 .ob-error{color:#5E1212;padding:6px 14px}
-.ob3 .ob-quota{display:grid;gap:8px;margin:8px 14px;padding:10px 12px;border-left:3px solid #8A5A00;background:#FBF6EA}
-.ob3 .ob-quota[data-verdict="spent"]{border-left-color:#5E1212}
+.ob3 .ob-composer textarea{border:1px solid var(--ink);background:var(--ds-bg);border-radius:0;font-size:15px}
+.ob3 .ob-error{color:var(--ds-alarm-ink);padding:6px 14px}
+.ob3 .ob-quota{display:grid;gap:8px;margin:8px 14px;padding:10px 12px;border-left:3px solid var(--warn);background:var(--ds-chalk)}
+.ob3 .ob-quota[data-verdict="spent"]{border-left-color:var(--ds-alarm)}
 .ob3 .ob-quota>p{margin:0}
 .ob3 .ob-design,.ob3 .ob-diligence,.ob3 .ob-dates{border:1px solid var(--ink);background:var(--paper);font-family:var(--f-sans)}
 
@@ -94,28 +98,32 @@ body:has(.ob-page) .running-head{background:var(--ds-bg)}
 .ob-ring-row .ob-organizing{display:block;margin-top:4px;font-size:12px;line-height:1.6;color:var(--graphite)}
 .ob-ring-row small{font-size:13px;color:var(--graphite)}
 .ob-ring-row .ob-btn{justify-self:start;text-decoration:none;margin-top:4px}
-.ob-ring-on{stroke:#085E3A}
+.ob-ring-on{stroke:var(--now)}
 .ob-ring-off{stroke:var(--mist)}
 .ob-ring-text{font-size:14px;font-weight:700;fill:var(--ink);font-family:var(--f-sans)}
 .ob-stage-tabs{display:flex;flex-wrap:wrap;border-bottom:1.5px solid var(--ink)}
 .ob-stage-tabs button{font:inherit;font-size:13px;padding:5px 9px;border:0;background:transparent;color:var(--ink);cursor:pointer;border-bottom:3px solid transparent}
 .ob-stage-tabs button[aria-current="true"]{border-bottom-color:var(--ink);font-weight:700}
-.ob-stage-tabs button:disabled{color:#5F5950;cursor:default}
+.ob-stage-tabs button:disabled{color:var(--graphite);cursor:default}
 .ob-view{display:grid;gap:10px}
 .ob-view .ob-block{border:0;padding:0;background:transparent}
 .ob-placeholder{font-size:14px;color:var(--graphite);padding:24px 12px;border:1px dashed var(--mist);text-align:center}
 .ob-axis{font-size:12px;fill:var(--graphite);font-family:var(--f-sans)}
 .ob-grid{stroke:var(--mist);stroke-width:1}
 .ob-week,.ob-energy-plane,.ob-timeline{width:100%;height:auto}
-.ob-window{fill:#C9D8E8}
-.ob-window[data-energy="high"]{fill:#7FA3C8}
-.ob-window[data-energy="low"]{fill:#E4ECF3}
+/* The week picture's available windows (by energy) and the connected calendar's events, in both schemes. */
+:root{--ob-window:#C9D8E8;--ob-window-high:#7FA3C8;--ob-window-low:#E4ECF3;--ob-calendar:#8A8478}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ob-window:#2F4A63;--ob-window-high:#4D7AA6;--ob-window-low:#22323F;--ob-calendar:#9A9488}}
+:root[data-theme="dark"]{--ob-window:#2F4A63;--ob-window-high:#4D7AA6;--ob-window-low:#22323F;--ob-calendar:#9A9488}
+.ob-window{fill:var(--ob-window)}
+.ob-window[data-energy="high"]{fill:var(--ob-window-high)}
+.ob-window[data-energy="low"]{fill:var(--ob-window-low)}
 .ob-fixed{fill:var(--ink)}
 .ob-fixed[data-status="pending"]{fill:var(--paper);stroke:var(--ink);stroke-width:1.5;stroke-dasharray:3 2}
 .ob-legend{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:12px;color:var(--graphite)}
-.ob-key{display:inline-block;width:12px;height:10px;margin-right:3px;vertical-align:-1px;background:#C9D8E8}
-.ob-key[data-k="high"]{background:#7FA3C8}
-.ob-key[data-k="low"]{background:#E4ECF3}
+.ob-key{display:inline-block;width:12px;height:10px;margin-right:3px;vertical-align:-1px;background:var(--ob-window)}
+.ob-key[data-k="high"]{background:var(--ob-window-high)}
+.ob-key[data-k="low"]{background:var(--ob-window-low)}
 .ob-key[data-k="fixed"]{background:var(--ink)}
 .ob-key[data-k="pending"]{background:var(--paper);border:1.5px dashed var(--ink)}
 .ob-line-notes{list-style:none;margin:0;padding:0;display:grid;gap:6px}
@@ -170,8 +178,8 @@ body:has(.ob-page) .running-head{background:var(--ds-bg)}
 .ob-progress-counts b{color:var(--ink);font-variant-numeric:tabular-nums}
 .ob3 .ob-progress .ob-btn{justify-self:start}
 /* Events from a connected calendar under the interview's own reading (weekSkeleton.calendar). */
-.ob-calendar{fill:#8A8478;fill-opacity:.55}
-.ob-key[data-k="calendar"]{background:#8A8478;opacity:.55}
+.ob-calendar{fill:var(--ob-calendar);fill-opacity:.55}
+.ob-key[data-k="calendar"]{background:var(--ob-calendar);opacity:.55}
 /* The first step for an account with no model connection: above the opening card, in the thread, so it is the first thing read. */
 /* The public quick test's result, offered before the interview (assess-card.tsx). */
 .ob-assess{display:grid;gap:8px;max-width:760px;margin-bottom:16px;padding:14px 16px;border:1px solid var(--mist);border-left:4px solid var(--ink);background:var(--paper)}
@@ -205,12 +213,12 @@ body:has(.ob-page) .running-head{background:var(--ds-bg)}
 .ob-start-settings label{display:flex;gap:8px;align-items:flex-start}
 .ob-start-settings small{display:block;color:var(--graphite);font-size:12px}
 .ob-start-confirm p{margin:2px 0}
-.ob-start-line{border-left:3px solid var(--lc, var(--rule));padding:4px 0 6px 10px;margin-bottom:8px}
-.ob-start-error{margin:0 auto 0 0;color:#5E1212;font-size:13px}
+.ob-start-line{border-left:3px solid var(--lc, var(--line));padding:4px 0 6px 10px;margin-bottom:8px}
+.ob-start-error{margin:0 auto 0 0;color:var(--ds-alarm-ink);font-size:13px}
 
 /* The folded technical line under a round that did not finish. */
 .ob-failure-detail { margin-top: 6px; font-size: 13px; }
-.ob-failure-detail summary { cursor: pointer; color: var(--ob-muted, inherit); }
+.ob-failure-detail summary { cursor: pointer; color: var(--graphite); }
 .ob-failure-detail p { margin: 4px 0 0; overflow-wrap: anywhere; }
 
 /* What each part gives back (2026-10-19): the progress strip, the observation card, the capacity note, the week's draft, the file list. */
@@ -314,3 +322,14 @@ html:has(.ob-page){background:var(--ds-bg)}/* The profile module's cards (flow v
 .ob-scale-anchors span:nth-child(2){text-align:center}
 .ob-scale-anchors span:nth-child(3){text-align:right}
 .ob3 .ob-scale-card textarea{width:100%;font:inherit;font-size:14px;padding:6px 10px;border:1px solid var(--ds-line);border-radius:var(--ds-radius-control);background:var(--ds-bg);resize:vertical}
+
+/* Past rounds folded to one line (2026-11-10): 「第 N 轮 · 摘要」 opens to the round; a receipt where a one-shot card was. */
+.ob-round{display:grid;gap:6px;max-width:min(720px,100%)}
+.ob-round-fold{border-left:3px solid var(--ds-line);padding:2px 0 2px 12px}
+.ob-round-fold>summary{cursor:pointer;font-size:13px;color:var(--graphite);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ob-round-fold>summary b{color:var(--ink);font-weight:600}
+.ob-round-fold[open]>summary{white-space:normal;margin-bottom:8px}
+.ob-round-fold[open]{display:grid;gap:12px}
+.ob-receipt{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin:0;padding:6px 12px;border-left:3px solid var(--ds-accent);background:var(--ds-accent-soft);color:var(--ink);font-size:13px;border-radius:0 8px 8px 0}
+@media (prefers-reduced-motion:no-preference){.ob-receipt{animation:ob-receipt 1.5s ease-in forwards}}
+@keyframes ob-receipt{0%,70%{opacity:1}100%{opacity:.35}}
