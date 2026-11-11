@@ -108,6 +108,13 @@ export type SetupStep = { id: string; label: string; detail: string; done: boole
   href: string };
 
 /**
+ * Whether the guide's 「完成访谈」 step is done: the interview reached its start bar (the plan runs from it), not only when every last
+ * question is answered — the owner's account, planning for weeks with one question left, was told 「访谈和排程都无法开始」 (2026-11-11).
+ */
+export const interviewSetupDone = (interview: { complete: boolean; ended: boolean; readyToStart: boolean }) =>
+  interview.complete || interview.ended || interview.readyToStart;
+
+/**
  * 设置向导 (2026-11-06, the owner's walkthrough: setting up was too many places with no order): the steps of a complete setup in the order
  * worth doing them, each done or not, read from the same connection rows the status overview shows plus the interview and the person's
  * computer. Pure, so the order and what counts as done are tested without a page.

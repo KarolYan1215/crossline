@@ -32,11 +32,11 @@ beforeEach(() => {
 afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
 
 const owner = () => store.getWorkspaceOwnerId(ws)!;
-function acceptedTask(id: string, title: string) {
-  store.saveWorkOrder({ id: `wo-${id}`, ownerId: "o", workspaceId: ws, identityId: "media", projectId: "p", milestoneId: "", intent: title, state: "accepted",
+function acceptedTask(id: string, title: string, workOrderId = `wo-${id}`) {
+  store.saveWorkOrder({ id: workOrderId, ownerId: "o", workspaceId: ws, identityId: "media", projectId: "p", milestoneId: "", intent: title, state: "accepted",
     riskTier: "routine", estimate, payload: {} });
   store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `req-${id}`, type: "agent.task.requested", entityId: id,
-    payload: { taskId: id, title, category: "media_edit", workOrderId: `wo-${id}` } });
+    payload: { taskId: id, title, category: "media_edit", workOrderId } });
   store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `done-${id}`, type: "agent.task.completed", entityId: id,
     payload: { taskId: id, directory: path.join(root, id), artifacts: [], checksPassed: true, reviewRequired: true } });
   store.appendEvent({ ownerId: owner(), workspaceId: ws, idempotencyKey: `rev-${id}`, type: "agent.task.reviewed", entityId: id,
@@ -72,6 +72,15 @@ test("two accepted edits of the same kind on a line, or the person's words, beco
   expect(growCandidates(store, ws)).toEqual([]);
   const requestId = requestWorkflow(store, ws, "每周五下午六点提醒我发小红书", "media", owner());
   expect(growCandidates(store, ws)).toEqual([expect.objectContaining({ origin: { kind: "asked", text: "每周五下午六点提醒我发小红书", requestId } })]);
+});
+
+test("two steps of one task are one errand, not a repeated one: no workflow is grown from them", () => {
+  // The owner's 待确认 held 「把这类事固化成工作流：参加 11 月 6 日在 Levy Hall 举行的 CoE Alumni …」 grown from two steps of one event (2026-11-11).
+  acceptedTask("s1", "参加 11 月 6 日在 Levy Hall 举行的 CoE Alumni Award 座谈会", "wo-event");
+  acceptedTask("s2", "参加 11 月 6 日在 Levy Hall 举行的 CoE Alumni Award 座谈会", "wo-event");
+  expect(growCandidates(store, ws)).toEqual([]);
+  acceptedTask("s3", "参加 12 月 4 日在 Levy Hall 举行的 CoE Alumni Award 座谈会");
+  expect(growCandidates(store, ws)).toEqual([expect.objectContaining({ origin: { kind: "repeated", taskIds: expect.arrayContaining(["s1", "s2", "s3"]) } })]);
 });
 
 test("a grown workflow is read back, checked, reviewed, installed and announced; publishing handed to the assistant goes to the person", async () => {

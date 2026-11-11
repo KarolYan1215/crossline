@@ -1117,5 +1117,8 @@
   "也可以在 设置 → 日历与连接 → 模型连接 下方填入。": "You can also type it in under Settings → Calendar and connections → Model connection.",
   "这里暂时不能申请。": "Applications are not open here right now.",
   "邮箱格式不对。": "That email address does not look right.",
-  "申请太频繁，请稍后再试。": "Too many applications. Try again later."
+  "申请太频繁，请稍后再试。": "Too many applications. Try again later.",
+  "过去的 {{count}} 个活动不参加了": "Let the {{count}} past events go",
+  "{{titles}} 归档，可从已归档恢复；其余照旧等本人决定": "{{titles}} archived, restorable from the archive; the rest still wait for you",
+  "活动 {{day}} 已过去，本人选择不参加了": "The event on {{day}} is over; let go"
 }

@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 vi.mock("server-only", () => ({}));
-import { setupSteps, type ConnectionRow } from "./settings-status";
+import { interviewSetupDone, setupSteps, type ConnectionRow } from "./settings-status";
 
 const t = (key: string) => key;
 const row = (kind: ConnectionRow["kind"], state: ConnectionRow["state"]): ConnectionRow =>
@@ -15,6 +15,12 @@ test("the setup steps come in the order worth doing them, the two the app needs 
   // The interview is done on its own page; every other step lands on a card of this one.
   expect(steps.find((step) => step.id === "interview")?.href).toBe("/onboarding");
   expect(steps.filter((step) => step.id !== "interview").every((step) => step.href.startsWith("#"))).toBe(true);
+});
+
+test("an interview past its start bar counts as done for the guide, with questions still left", () => {
+  expect(interviewSetupDone({ complete: false, ended: false, readyToStart: true })).toBe(true);
+  expect(interviewSetupDone({ complete: false, ended: false, readyToStart: false })).toBe(false);
+  expect(interviewSetupDone({ complete: false, ended: true, readyToStart: false })).toBe(true);
 });
 
 test("a subscription counts as the calendar, a broken mailbox is still connected, and steps that cannot apply are left out", () => {

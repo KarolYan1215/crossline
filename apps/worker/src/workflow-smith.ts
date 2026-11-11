@@ -127,7 +127,8 @@ export function growCandidates(store: CrosslineStore, workspaceId: string, now =
     const [lineId, category] = key.split("|") as [string, AgentCategory];
     for (const task of tasks) {
       const alike = tasks.filter((other) => other === task || shared(other.title, task.title) >= 3);
-      if (alike.length < GROW_AFTER_ACCEPTED) continue;
+      // Counted by task, not by run: two steps of one task (one event, one errand) are not an errand that keeps coming back (2026-11-11).
+      if (new Set(alike.map((item) => item.workOrderId)).size < GROW_AFTER_ACCEPTED) continue;
       // The same errand run as several steps repeats its task's title; each distinct one is said once.
       const text = [...new Set(alike.map((item) => item.title))].slice(0, 6).join("；");
       const retry = retryContext(store, workspaceId, agentChainKey({ workOrderId: "", stepId: "", title: growTitle(text, localeOf(store, workspaceId)) }));

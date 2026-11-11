@@ -530,12 +530,27 @@ function overdueFoldAsks(source: Source): Ask[] {
       title: ask.kind === "milestone_overdue" ? milestones.get(ask.entityId) ?? quotedTitle(ask.title) : taskTitleOf(tasks.get(ask.entityId) ?? { intent: quotedTitle(ask.title) }),
       ...(ask.dueDay ? { dueDay: ask.dueDay } : {}), ...(ask.line ? { line: ask.line } : {}),
       href: ask.kind === "milestone_overdue" ? `/milestones?open=${encodeURIComponent(ask.entityId)}` : `/workbench/${encodeURIComponent(ask.entityId)}` }));
+    // A talk, rehearsal or meeting whose day is gone cannot be made up: one answer for all of them instead of a card each (2026-11-11, the
+    // owner's plan held eight such 「参加…」 tasks as 「已过截止日」).
+    const events = pastEventsIn(rest, tasks);
     return { id: foldId("overdue", rest), kind: "overdue_task", entityId: "batch", urgency: urgencyFor(due, today) === "later" ? "soon" : urgencyFor(due, today),
       ...(due ? { dueDay: due } : {}), raisedAt: rest.map((ask) => ask.raisedAt).sort().at(-1) ?? "", fingerprint: foldFingerprint(rest), items,
       important: rest.some((ask) => ask.important),
       title: t("{{count}} 项截止已过，等本人决定", { count: rest.length }),
       why: t("这些日期是课程、别人或本人定的，系统不替本人改，逐个列在下方；最早的是 {{day}}。每项可以补做、改成新的日期或放弃。", { day: due ? format(due, locale) : "—" }),
-      options: [{ id: "split", label: t("逐个处理"), recommended: true, detail: t("拆成每项一张卡") }] };
+      options: [{ id: "split", label: t("逐个处理"), recommended: true, detail: t("拆成每项一张卡") },
+        ...(events.length ? [{ id: "drop_events", label: t("过去的 {{count}} 个活动不参加了", { count: events.length }),
+          detail: t("{{titles}} 归档，可从已归档恢复；其余照旧等本人决定", { titles: events.map((item) => `「${short(item.order.intent.trim(), 16)}」`).join("、") }) }] : [])] };
+  });
+}
+
+/** Attending something: its day passing means it is over, not overdue work (a talk, rehearsal, forum, exam sitting). */
+const ATTEND = /^(参加|出席|参观|观看|旁听|attend\b|join\b)/i;
+/** The folded overdue cards that are a started task to attend something, with their work order. */
+function pastEventsIn(members: Ask[], tasks: Map<string, StoredWorkOrder>): Array<{ ask: Ask; order: StoredWorkOrder }> {
+  return members.flatMap((ask) => {
+    const order = ask.kind === "overdue_task" ? tasks.get(ask.entityId) : undefined;
+    return order && ATTEND.test(order.intent.trim()) ? [{ ask, order }] : [];
   });
 }
 
@@ -1417,7 +1432,18 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       return { ok: true };
     }
     case "overdue_task": {
-      if (isFolded(ask)) return optionId === "split" ? splitFold(ctx, ask) : { ok: false, code: "ASK_OPTION_UNKNOWN" };
+      if (isFolded(ask)) {
+        if (optionId === "split") return splitFold(ctx, ask);
+        if (optionId !== "drop_events") return { ok: false, code: "ASK_OPTION_UNKNOWN" };
+        const ids = new Set(ask.fingerprint.split("|"));
+        const tasks = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order]));
+        for (const { ask: member, order } of pastEventsIn(overdueTaskAsks(sourceOf(ctx)).filter((item) => ids.has(item.id)), tasks)) {
+          const archived = archiveWorkOrder(ctx, order.id, tOf(ctx)("活动 {{day}} 已过去，本人选择不参加了", { day: member.fingerprint }));
+          if (!archived.ok) return archived;
+          record(ctx, OVERDUE_TASK_RESOLVED, order.id, `${OVERDUE_TASK_RESOLVED}:${order.id}:${member.fingerprint}:${Date.now()}`, { due: member.fingerprint, how: "drop" });
+        }
+        return { ok: true };
+      }
       const order = store.listWorkOrders(ctx.workspaceId).find((item) => item.id === ask.entityId);
       if (!order) return { ok: false, code: "WORK_ORDER_NOT_FOUND" };
       const due = ask.fingerprint;

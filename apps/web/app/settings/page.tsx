@@ -39,7 +39,7 @@ import { BackgroundModule } from "./background-module";
 import { backgroundOverview } from "../../lib/background";
 import { SettingsBrowser, type SettingsSection } from "./settings-browser";
 import { SettingsStatus } from "./settings-status";
-import { connectionStatus, setupSteps } from "../../lib/settings-status";
+import { connectionStatus, interviewSetupDone, setupSteps } from "../../lib/settings-status";
 import { ModuleSteps, SetupWizard } from "./setup-wizard";
 import { NODE_TOKEN_SETTING } from "@crossline/core";
 import { PersonalizationModule } from "./personalization";
@@ -147,7 +147,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: Pr
   const quota = await timed("settings.quota", () => memoForAsync(`quota:${ctx.workspaceId}`, 60_000, () => readQuota(ctx)));
   const connections = connectionStatus(ctx, quota, { machine, phoneUrl: Boolean(phoneUrl) });
   // 设置向导: every step of a complete setup, done or not (2026-11-06).
-  const steps = setupSteps(t, { rows: connections, modelConnected: quota.available, interviewDone: interview.complete || interview.ended, hosted,
+  const steps = setupSteps(t, { rows: connections, modelConnected: quota.available, interviewDone: interviewSetupDone(interview), hosted,
     computerLinked: deviceLinked || Boolean(setting(NODE_TOKEN_SETTING)) });
   const stepsIn = (module: string) => steps.filter((step) => step.module === module);
   const alertsIn = (hrefs: string[]) => connections.filter((row) => row.state === "warn" && hrefs.includes(row.action.href)).length;

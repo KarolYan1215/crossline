@@ -34,6 +34,30 @@ test("a started course homework past its due day is asked: can it still be hande
   expect(collectAsks(TEST_CTX, NOW).some((ask) => ask.kind === "overdue_task")).toBe(false);
 });
 
+test("passed talks and rehearsals on the folded card are let go in one answer; homework still waits for its own", async () => {
+  const store = setup();
+  for (const [id, intent] of [["talk", "参加 ECE 研究系列讲座"], ["rehearsal", "参加 BadgerShop 排练"]] as const) {
+    store.saveWorkOrder({ id, ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "", intent, state: "active", riskTier: "routine",
+      estimate, payload: { dueDate: "2026-11-03" } });
+  }
+  const folded = collectAsks(TEST_CTX, NOW).find((ask) => ask.id.startsWith("fold:overdue:"))!;
+  const option = folded.options.find((item) => item.id === "drop_events")!;
+  expect(option.label).toBe("过去的 2 个活动不参加了");
+  expect(option.detail).toContain("「参加 BadgerShop 排练」");
+  expect(await answerAsk(TEST_CTX, folded.id, { optionIds: ["drop_events"] }, {}, NOW)).toMatchObject({ ok: true });
+  expect([store.getWorkOrder(ws, "talk")!.state, store.getWorkOrder(ws, "rehearsal")!.state]).toEqual(["archived", "archived"]);
+  expect(store.getWorkOrder(ws, "hw3")!.state).toBe("active");
+  expect(collectAsks(TEST_CTX, NOW).filter((ask) => ask.kind === "overdue_task").map((ask) => ask.entityId)).toEqual(["hw3"]);
+});
+
+test("a folded card with no event on it offers only 逐个处理", () => {
+  const store = setup();
+  store.saveWorkOrder({ id: "hw2", ownerId: owner, workspaceId: ws, identityId: "research", projectId: "ece555", milestoneId: "", intent: "完成 ECE 555 作业 2", state: "active",
+    riskTier: "routine", estimate, payload: { dueDate: "2026-11-01" } });
+  const folded = collectAsks(TEST_CTX, NOW).find((ask) => ask.id.startsWith("fold:overdue:"))!;
+  expect(folded.options.map((item) => item.id)).toEqual(["split"]);
+});
+
 test("不能补交 archives the task (recoverable)", async () => {
   const store = setup();
   const ask = collectAsks(TEST_CTX, NOW).find((item) => item.kind === "overdue_task")!;
