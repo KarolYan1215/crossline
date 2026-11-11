@@ -29,6 +29,7 @@ import { createDiligenceRunner, linesDueForDiligence } from "./diligence";
 import { createAgentService, defaultOutputRoot } from "./agent-service";
 import { createMediaDescriber, realVideoTools } from "./note-media";
 import { createCalendarPublisher } from "./calendar-publish";
+import { publishGoogleCalendar } from "./google-calendar-publish";
 import { repairDuplicateImports, repairFrozenRace } from "./calendar-repair";
 import { repairLineAttributes } from "./attribute-repair";
 import { returnTidy } from "./return-tidy";
@@ -1926,6 +1927,7 @@ if (!capabilitySecret) {
       if (!session) return { state: "blocked", code: "GRAPH_NOT_CONFIGURED", message: tOfWorkspace(analysisStore, workspaceId)("没有配置 Microsoft 日历（CROSSLINE_MS_CLIENT_ID）。") };
       return createCalendarPublisher(analysisStore, workspaceId, { credentialFor: (accountId) => session.credentialFor(accountId) })(blocks, scope);
     },
+    publishGoogleCalendar: (client, workspaceId, blocks) => publishGoogleCalendar(analysisStore, workspaceId, client, blocks),
     explainPlan: (today, workspaceId, ranking) => getPlanExplainer(workspaceId)(today, readRanking(ranking)),
     runWeeklyInsight: (workspaceId) => getWeeklyInsight(workspaceId)(),
     // 立即同步日历 records its outcome like a tick does, so a read that works clears 「日历无法读取」 at once. A workspace that reads no

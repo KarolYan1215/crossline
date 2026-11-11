@@ -523,6 +523,12 @@ export async function startCodexSupervisor(options: {
   publishCalendar?: (workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; note?: string; reminderMinutes?: number | null;
     recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string } }>,
     scope: "work" | "fixed") => Promise<unknown>;
+  /**
+   * Writes the person's calendar items to Google through the Google Calendar connector of this workspace's own runtime (path c of
+   * docs/calendar-write-setup.md, 2026-11-10): only events this app made, never one the person changed, deletes only in the future.
+   */
+  publishGoogleCalendar?: (client: CodexRpcBoundary, workspaceId: string, blocks: Array<{ id: string; title: string; start: string; end: string; reminderMinutes?: number;
+    recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string; exceptions?: string[] } }>) => Promise<unknown>;
   proposeMilestones?: (client: CodexRpcBoundary, request: string, signal: AbortSignal, workspaceId: string, only?: string[]) => Promise<unknown>;
   continueMilestoneConversation?: (client: CodexRpcBoundary, threadId: string, message: string, signal: AbortSignal, workspaceId: string) => Promise<unknown>;
   /** One turn of the profile interview: the person's message in, the saved turn out. The conversation and
@@ -1118,6 +1124,12 @@ export async function startCodexSupervisor(options: {
               ...(typeof row.reminderMinutes === "number" && Number.isInteger(row.reminderMinutes) && row.reminderMinutes >= 0 && row.reminderMinutes <= 1440 ? { reminderMinutes: row.reminderMinutes } : {}),
               ...(recurrenceOf(row.recurrence) ? { recurrence: recurrenceOf(row.recurrence)! } : {}) }] : [];
         }).slice(0, 300);
+        if (body?.path === "google") {
+          if (!options.publishGoogleCalendar) { sendJson(response, 200, { state: "blocked", code: "CALENDAR_GOOGLE_UNAVAILABLE", message: say("Google 日历写入未完成；其他日历未受影响。") }); return; }
+          const rt = await modelClient(response, callerWorkspaceId); if (!rt) return;
+          sendJson(response, 200, await options.publishGoogleCalendar(rt, callerWorkspaceId, blocks));
+          return;
+        }
         // `fixed`: the person's own fixed events, managed apart from the plan's work blocks, so publishing one never removes the other.
         sendJson(response, 200, await options.publishCalendar(callerWorkspaceId, blocks, body?.scope === "fixed" ? "fixed" : "work"));
         return;
@@ -1451,7 +1463,7 @@ export async function startCodexSupervisor(options: {
 }
 
 /** A weekly series as the web sent it, shape-checked: weekday names, two days and two clock times in order, and a zone name. */
-function recurrenceOf(value: unknown): { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string } | undefined {
+function recurrenceOf(value: unknown): { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string; exceptions?: string[] } | undefined {
   if (!value || typeof value !== "object") return undefined;
   const row = value as Record<string, unknown>;
   const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -1460,5 +1472,7 @@ function recurrenceOf(value: unknown): { daysOfWeek: string[]; startDate: string
   const weekdays = Array.isArray(row.daysOfWeek) ? row.daysOfWeek.filter((item): item is string => typeof item === "string" && days.includes(item)) : [];
   if (!weekdays.length || !day(row.startDate) || !day(row.endDate) || !time(row.localStart) || !time(row.localEnd) || String(row.localEnd) <= String(row.localStart)
     || typeof row.timeZone !== "string" || !/^[A-Za-z_/+\- ]{1,64}$/.test(row.timeZone)) return undefined;
-  return { daysOfWeek: weekdays, startDate: row.startDate as string, endDate: row.endDate as string, localStart: row.localStart as string, localEnd: row.localEnd as string, timeZone: row.timeZone };
+  const exceptions = Array.isArray(row.exceptions) ? row.exceptions.filter((item): item is string => day(item)).slice(0, 200) : [];
+  return { daysOfWeek: weekdays, startDate: row.startDate as string, endDate: row.endDate as string, localStart: row.localStart as string, localEnd: row.localEnd as string, timeZone: row.timeZone,
+    ...(exceptions.length ? { exceptions } : {}) };
 }

@@ -7,10 +7,12 @@ import { CalendarSubscriptions } from "./calendar-subscriptions";
 import { SourceFolders } from "./source-folders";
 import { TailscaleTrust } from "./tailscale-trust";
 import { DeviceLeases } from "./device-leases";
-import { effectiveSchedulePreferences, loadCalendarConnectorState } from "../../lib/crossline";
+import { effectiveSchedulePreferences, getStore, loadCalendarConnectorState } from "../../lib/crossline";
 import { publishStatus } from "../../lib/calendar-publish";
 import { CalendarWriteLogin } from "./calendar-write-login";
-import { localStamp, type AccessContext } from "@crossline/core";
+import { CALENDAR_FEED_TOKEN_SETTING, CALENDAR_IMIP_RECIPIENT_SETTING, localStamp, type AccessContext } from "@crossline/core";
+import { CalendarWritePaths } from "./calendar-write-paths";
+import { writePathStatuses } from "../../lib/calendar-write";
 import { Tag } from "../ui/tag";
 import { graphConfigured, isHostedBeta } from "../../lib/hosting";
 import { tOf } from "../../lib/locale";
@@ -29,7 +31,12 @@ export function CalendarModule({ ctx }: { ctx: AccessContext }) {
   // The Microsoft calendar (read sync, the writer's sign-in, the calendar list) needs an Entra app this install may not have: the
   // hosted beta has none, and there its cards only offered a sign-in that could not work and a list that answered 404.
   const graph = graphConfigured() || !isHostedBeta();
+  const store = getStore();
+  const token = store.getSetting(ctx.workspaceId, CALENDAR_FEED_TOKEN_SETTING);
+  const base = (process.env.CROSSLINE_WEB_BASE_URL || "http://127.0.0.1:3210").replace(/\/+$/, "");
   return <div className="st-modules">
+    <div id="calendar-write"><CalendarWritePaths initial={writePathStatuses(ctx)} feedUrl={token ? `${base}/api/calendar/feed/${token}.ics` : ""}
+      recipient={store.getSetting(ctx.workspaceId, CALENDAR_IMIP_RECIPIENT_SETTING) ?? ""} graphAvailable={graph} /></div>
     {graph && <section className="st-card" aria-label={t("日历状态")}>
       <header><h3>{t("日历")}</h3></header>
       <div className="st-row"><span className="st-row-label">{t("读取")}<small>{calendar.synced

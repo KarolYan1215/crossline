@@ -77,6 +77,48 @@ export function createMailSender(config: { smtp?: SmtpConfig; testMailboxDir?: s
 }
 
 /**
+ * Calendar invitations (iMIP, RFC 6047; path b of docs/calendar-write-setup.md, the owner's decision of 2026-11-10), from `from` —
+ * `calendar@mail.crossline.lol` on the hosted beta — only ever to the address the person set for this.
+ *
+ * Sent through Resend's HTTP API, never its SMTP relay (tested against UW Outlook on 2026-11-11, docs/calendar-write-setup.md): the relay
+ * rebuilds every message as multipart/mixed, so a text/calendar alternative arrived as a plain `attachment-0` with no meeting bar; the API
+ * with the .ics attached as `text/calendar; charset=UTF-8; method=…` showed Accept/Decline. The key is the existing Resend account's
+ * (`resendApiKey`, see `resendKeyOf`); with any other mail provider there is no invite sender. `fetch` stands in for the network in
+ * tests; the e2e mailbox gets one JSON file per message.
+ */
+export type InviteMessage = { to: string; subject: string; text: string; method: "REQUEST" | "CANCEL"; ics: string };
+export const RESEND_EMAILS_URL = "https://api.resend.com/emails";
+const escapeHtml = (value: string) => value.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[char]!);
+/** The Resend API key behind an SMTP config, when it is Resend's relay (user `resend`, password = API key); otherwise none. */
+export function resendKeyOf(smtp: SmtpConfig | undefined): string | undefined {
+  return smtp && /(^|\.)resend\.com$/i.test(smtp.host.trim()) && smtp.user === "resend" && smtp.password ? smtp.password : undefined;
+}
+/** The body of one `POST /emails`: text and html, and the calendar object attached with its method in the content type. */
+export function inviteRequest(from: string, mail: InviteMessage) {
+  return { from, to: [mail.to], subject: mail.subject, text: mail.text, html: `<p>${escapeHtml(mail.text).replace(/\n/g, "<br>")}</p>`,
+    attachments: [{ filename: mail.method === "CANCEL" ? "cancel.ics" : "invite.ics", content: Buffer.from(mail.ics, "utf8").toString("base64"),
+      content_type: `text/calendar; charset=UTF-8; method=${mail.method}` }] };
+}
+export function createInviteSender(config: { resendApiKey?: string; testMailboxDir?: string; from: string; fetch?: typeof fetch }):
+  ((mail: InviteMessage) => Promise<void>) | undefined {
+  if (config.testMailboxDir) {
+    const dir = config.testMailboxDir;
+    return async (mail) => {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, `${Date.now()}-${randomUUID()}.json`), JSON.stringify({ to: mail.to, subject: mail.subject, text: mail.text, method: mail.method, ics: mail.ics }));
+    };
+  }
+  if (!config.resendApiKey) return undefined;
+  const key = config.resendApiKey;
+  const post = config.fetch ?? fetch;
+  return async (mail) => {
+    const response = await post(RESEND_EMAILS_URL, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify(inviteRequest(config.from, mail)), signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) throw new Error(`RESEND_INVITE_FAILED:${response.status}`);
+  };
+}
+
+/**
  * A factory, not a singleton: tests build one against a temp `authDbPath`, `apps/web` builds exactly
  * one against `CROSSLINE_DATA_DIR` and caches it the same way `getStore()` caches `CrosslineStore`.
  *

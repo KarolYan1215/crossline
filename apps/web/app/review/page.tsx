@@ -1,5 +1,6 @@
 import { CheckCheck, Clock, GitPullRequestArrow, ShieldCheck } from "lucide-react";
-import { effectiveSchedulePreferences, firstAcceptedAt, getStore, lastNight } from "../../lib/crossline";
+import { effectiveSchedulePreferences, firstAcceptedAt, getStore, lastNight, planToday } from "../../lib/crossline";
+import { mailEventsForReview } from "../../lib/mail-events";
 import { FORM_STATE_LABEL, STOP_LABEL, localStamp } from "@crossline/core";
 import { loadWeekInvestment, loadWeeklyReview } from "../../lib/review";
 import { loadLedger } from "../../lib/ledger";
@@ -58,6 +59,8 @@ export default async function ReviewPage() {
   const review = loadWeeklyReview(ctx);
   const opportunities = loadOpportunityWeek(ctx);
   const outOfView = loadOutOfView(ctx);
+  // Low-relevance events from mail (2026-11-10): listed here once a week, never a card and never on a calendar unless the person adds one.
+  const mailEvents = mailEventsForReview(ctx, planToday(ctx));
   // The same numbers as the monthly report and the ledger page (docs/mail-bookkeeping.md §5.3); only their summary is here.
   const money = loadLedger(ctx);
   const taskDetails = loadTaskDetailsBatch(ctx, review.autoAccepted.map((item) => item.workOrderId));
@@ -143,6 +146,13 @@ export default async function ReviewPage() {
       <p className="review-note">{t("每周侦察在目标旁边找到的、本人没想到的机会和值得长期盯住的地方；不急的都在这里，一条一条定。")}</p>
       <OutOfView finds={outOfView.finds} watches={outOfView.watches} less={outOfView.less}
         lines={Object.fromEntries(linePacks(ctx, { includeArchived: true }).map((pack) => [pack.id, pack.label]))} />
+    </section>}
+
+    {mailEvents.length > 0 && <section className="rd-card review-block" aria-labelledby="rv-mail-events">
+      <header className="rd-card-head"><h2 id="rv-mail-events" className="ds-serif">{t("邮件里的活动")}</h2></header>
+      <p className="review-note">{t("相关度低的群发活动通知，没有单独问；想去的话在输入框里添加。")}</p>
+      <ul className="review-mail-events">{mailEvents.map((event) => <li key={event.id}><b>{event.title}</b> <small className="muted">
+        {`${monthDay(locale, event.date)} ${event.start}–${event.end}`}{event.location ? ` · ${event.location}` : ""} · {t("相关度 {{score}}/100", { score: event.relevance })} · {event.from}</small></li>)}</ul>
     </section>}
 
     <section className="rd-card review-block" aria-labelledby="rv-findings">

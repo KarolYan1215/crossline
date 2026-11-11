@@ -38,6 +38,10 @@ describe("connector reconciliation", () => {
     expect(connectorWritePolicy("personal_graph", "todo:Crossline")).toBe("two_way");
     expect(connectorWritePolicy("uw_outlook_plugin", "calendar:default")).toBe("read_only");
     expect(connectorWritePolicy("google_plugin", "calendar:primary")).toBe("read_only");
+    // 2026-11-10: the Google connector writes only its own events, in Crossline or the primary calendar; nothing else.
+    expect(connectorWritePolicy("google_calendar_app", "calendar:Crossline")).toBe("own_events_only");
+    expect(connectorWritePolicy("google_calendar_app", "calendar:primary")).toBe("own_events_only");
+    expect(connectorWritePolicy("google_calendar_app", "calendar:family")).toBe("read_only");
   });
 
   test("Longbridge allowlist excludes account and trading tools", () => {
