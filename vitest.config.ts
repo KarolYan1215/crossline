@@ -6,6 +6,10 @@ export default defineConfig({
   test: {
     include: ["packages/**/*.test.ts", "apps/**/*.test.ts", "apps/**/*.test.tsx"],
     environment: "node",
+    // A test's first dynamic import transforms a whole page's module graph inside the test's own time; under a busy machine
+    // (the pre-commit hook beside other sessions' suites) that alone passed the 5 s default and failed commits for unrelated
+    // files. 30 s still catches a hang.
+    testTimeout: 30_000,
     // The suites drive a board with example goals on it; a real account starts empty (see `ensureSeeded`).
     env: { CROSSLINE_SEED_EXAMPLES: "1" },
     coverage: { reporter: ["text", "html"] }
