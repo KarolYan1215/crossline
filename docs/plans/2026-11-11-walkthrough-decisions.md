@@ -99,6 +99,11 @@
 
 工作量：分拣 schema 和指令 S；结构信号判定（List-Id、收件人、大纲课程）M；大纲考试缺时间的追问 S；规则沉淀 M。
 
+### 状态（2026-11-11 已做）
+
+- **已做**：两个属性和确定性分档（`packages/core/src/obligation.ts` 的 `mailObligation`、`dateItemAttributes`）；连接器从邮件本身读结构信号（`List-Id`/`List-Unsubscribe`/`Precedence`、To+Cc、text/calendar 里的 ORGANIZER 和本人的 `ROLE`/`PARTSTAT`）；分拣只多抽两个字段（`meet.required` 原句、`meet.senderRole`），档位由代码定；群发上限；`required + fixed` 来自已确认来源且不冲突 → 直接成 Crossline 计划里的固定日程（不出卡，不进 `schedule.events`，所以任何日历路径都不写；写日历仍只有「去」）；第一次出现的来源或与已有固定日程冲突 → 仍出「要去吗」卡，推荐「去」并写明为什么像是必须；`likely`（相关度门槛改为 ≥70）→ 卡；`optional` → 周复盘；日期早于邮件发送日或与原文星期几对不上 → 不收；规则沉淀（两次「不去」→ 最高可选；对必须的答「去」→ 以后直接必须），在 设置 → 邮箱 里能看能删；大纲考试/小测只有日期 → 问「几点到几点」，答了写成 `import:` 只读块，答「没有固定时间」不再问。测试：`packages/core/src/mail-events.test.ts`、`packages/connectors/src/imap-mail.test.ts`「what code reads for the obligation of an event…」、`apps/worker/src/mailbox.test.ts`「must-go and may-go…」、`apps/web/lib/mail-obligation.test.ts`。
+- **未做**：日历导入（Graph/ICS 订阅）的事件还没标这两个属性（它们本来就是固定忙碌时间）；`due` 的 `required` 记为「已确认截止」没接到 capture 分析；为考试复习的 `due` 任务（截止 = 考试开始）仍靠分拣模型另出一条 todo，代码没有自动生成；大纲考试在答时间之前不被里程碑链做成可挪动任务——这条链由模型生成，这次没改，只保证考试日本身照旧显示为当天的日期标记；大纲「上课」只有日期的不问时间（避免每节课都问）。
+
 ## 3. 到点提醒（已做的和还缺的）
 
 已做（§0 第 4 条）。还缺：

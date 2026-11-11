@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { appPasswordPage, MAIL_TRIAGE_KIND_LABEL, type AppPasswordPage, type MailAccount, type MailLogEntry } from "@crossline/core";
+import { appPasswordPage, MAIL_TRIAGE_KIND_LABEL, type AppPasswordPage, type MailAccount, type MailEventRule, type MailLogEntry } from "@crossline/core";
 import { closeDraft, copyDraft } from "../materials/view/mail-draft-actions";
 import { SetupGuide } from "../ui/setup-guide";
 import { MAIL_GUIDE, mailGuideId } from "../../lib/setup-guides";
@@ -63,10 +63,19 @@ export function MailAccounts({ accountEmail }: {
   const [refused, setRefused] = useState(false);
   const typedPage = appPasswordPage(address, locale);
   const provider = mailGuideId(address);
+  const [rules, setRules] = useState<MailEventRule[]>([]);
   const load = async () => {
     const response = await fetch("/api/mail", { cache: "no-store" }).catch(() => undefined);
     const body = await response?.json().catch(() => undefined) as View | undefined;
     setView(body?.accounts ? body : { accounts: [], log: [] });
+    const learnt = await fetch("/api/mail/event-rules", { cache: "no-store" }).then((result) => result.json() as Promise<{ rules?: MailEventRule[] }>).catch(() => undefined);
+    setRules(learnt?.rules ?? []);
+  };
+  const forget = async (rule: MailEventRule) => {
+    setBusy(true);
+    const result = await post("/api/mail/event-rules", { source: rule.source }, "DELETE");
+    if (!result.ok) setMessage(t("没能删除，稍后再试。"));
+    await load(); setBusy(false);
   };
   useEffect(() => { void load(); }, []);
   const add = async () => {
@@ -180,6 +189,14 @@ export function MailAccounts({ accountEmail }: {
     </div>}
     <SetupGuide guide={MAIL_GUIDE} selected={provider} {...(view ? { open: view.accounts.length === 0 || refused } : {})} />
     {message && <p role="status" className="muted">{message}</p>}
+    {rules.length > 0 && <details className="st-fold"><summary>{t("邮件活动的来源规则（{{count}}）", { count: rules.length })}</summary>
+      <small>{t("从本人对「要去吗」的回答记下的：连续两次不去，这个发件人的活动以后只列在周复盘；去过一次必须参加的，以后它的必须参加的活动直接排进日程（不写入日历）。删掉后按邮件本身重新判断。")}</small>
+      <ul className="st-list">{rules.map((rule) => <li key={rule.source}>
+        <span>{rule.source} · {rule.cap === "optional" ? t("最多算可选") : t("可直接算必须参加")}</span>
+        <small>{rule.why === "skipped_twice" ? t("连续两次答了不去，最近一次：「{{title}}」", { title: rule.example }) : t("答过去：「{{title}}」", { title: rule.example })}</small>
+        <button type="button" className="text-button" disabled={busy} onClick={() => void forget(rule)}>{t("删除")}</button>
+      </li>)}</ul>
+    </details>}
     {Boolean(view?.log.length) && <details className="st-fold"><summary>{t("最近整理的邮件")}</summary>
       <ul className="st-list">{view!.log.map((entry) => <li key={`${entry.accountId}:${entry.uid}`}>
         <span>{t(MAIL_TRIAGE_KIND_LABEL[entry.kind])} · {entry.subject || t("（无主题）")}</span>

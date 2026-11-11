@@ -27,6 +27,8 @@ export type AskKind =
   | "missed_block" | "source_project" | "calendar_line_unclear" | "interview_open" | "interview_question" | "event_propose" | "step_question"
   /** Something in the person's mail they could go to (`mail-events.ts`, 2026-11-10): 去 makes it a fixed event on every calendar path, 不去 drops it. */
   | "mail_event"
+  /** A required sitting (exam, quiz) of a confirmed course whose file gave only its day: 「几点到几点」 (2026-11-11, `lib/exam-times.ts`). */
+  | "exam_time"
   | "relation_check" | "background_paused" | "locked_conflict" | "outcome_check" | "progress_check" | "milestone_risk_review"
   /** A course's or the person's own deadline passed with work still open (the daily pass's `milestone.overdue`): 补做 / 新日期 / 放弃. */
   | "milestone_overdue"

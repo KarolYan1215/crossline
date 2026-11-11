@@ -572,6 +572,7 @@ export * from "./workflow-merge";
 export * from "./plain-voice";
 export * from "./mail";
 export * from "./mail-events";
+export * from "./obligation";
 export * from "./task-import";
 export * from "./automations";
 export * from "./workflow-authoring";
