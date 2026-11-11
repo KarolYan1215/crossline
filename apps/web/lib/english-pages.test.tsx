@@ -87,7 +87,7 @@ const PAGES = [
   ["Decisions", () => import("../app/approvals/page"), noParams],
   ["Plan", () => import("../app/plan/page"), {}],
   ["Milestones", () => import("../app/milestones/page"), noParams],
-  ["Settings", () => import("../app/settings/page"), undefined]
+  ["Settings", () => import("../app/settings/page"), {}]
 ] as const;
 
 test.each(PAGES)("%s shows no system Chinese to an English account", async (_name, page, props) => {

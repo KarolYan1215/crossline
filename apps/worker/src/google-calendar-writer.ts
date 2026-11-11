@@ -139,7 +139,10 @@ async function publishInto(call: ToolCall, blocks: GoogleBlock[], ledger: Google
       const same = block.recurrence ? entry.series?.hash === seriesHash(block) : entry.title === title && sameInstant(entry.start, block.start) && sameInstant(entry.end, block.end);
       if (same) { result.unchanged += 1; continue; }
       await tool("google_calendar.update_event", { event_id: entry.eventId, calendar_id: calendarId, ...write(block), ...(block.recurrence ? { update_scope: "entire_series" } : {}) });
-      ledger.events[block.id] = { eventId: entry.eventId, title, start: block.start, end: block.end, ...(block.recurrence ? { series: { until: block.recurrence.endDate, hash: seriesHash(block), rule: rrule(block) } } : {}) };
+      // A series keeps its first occurrence as its start: the block's start is the next occurrence, and a later removal reading that as
+      // 「not begun yet」 deleted the whole series, past occurrences included (deletes only in the future).
+      const start = block.recurrence && entry.series && Date.parse(entry.start) < Date.parse(block.start) ? entry.start : block.start;
+      ledger.events[block.id] = { eventId: entry.eventId, title, start, end: block.end, ...(block.recurrence ? { series: { until: block.recurrence.endDate, hash: seriesHash(block), rule: rrule(block) } } : {}) };
       result.updated += 1;
       continue;
     }

@@ -51,8 +51,20 @@ export type GrowCandidate = {
   retry?: { text: string; inputs: string[] };
 };
 
+/**
+ * The person's request as a card names it: at most 40 characters, cut after the last clause mark in that span when one is past the middle,
+ * with 「…」 when anything was cut. A plain `slice(0, 40)` stopped mid-word on the 待确认 page (「…形成覆盖收益」「CoE Alumni Ea」, 2026-11-11).
+ */
+export function growLabel(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= 40) return flat;
+  const head = flat.slice(0, 40);
+  const mark = Math.max(...["。", "；", "，", "、", "！", "？", ";", ",", ".", " "].map((sign) => head.lastIndexOf(sign)));
+  return `${(mark >= 20 ? head.slice(0, mark) : head).trimEnd()}…`;
+}
+
 /** The title a growing run carries, which is also how its runs are told apart from other work (`agentChainKey`). */
-const growTitle = (text: string, locale?: Locale) => tFor(locale)("把这类事固化成工作流：{{text}}", { text: text.slice(0, 40) });
+const growTitle = (text: string, locale?: Locale) => tFor(locale)("把这类事固化成工作流：{{text}}", { text: growLabel(text) });
 
 /** Errands already tried as a workflow in the last month — except an attempt whose run was interrupted and is due to run again. */
 const attemptedTaskIds = (store: CrosslineStore, workspaceId: string, now: Date, again: (taskId: string) => AgentChain | undefined) =>

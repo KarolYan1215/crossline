@@ -47,7 +47,7 @@ test.each(PAGES)("达到可开始标准、还没有里程碑和工作时 %s 页�
 
 test("the settings page is not gated: it renders on an account with nothing on it", async () => {
   const { default: Page } = await import("./settings/page");
-  expect(renderToStaticMarkup(await Page()).length).toBeGreaterThan(200);
+  expect(renderToStaticMarkup(await Page({})).length).toBeGreaterThan(200);
 }, 30000);
 
 test("小帮手's page sends an account to the interview until it is ready, then opens today's thread first", async () => {

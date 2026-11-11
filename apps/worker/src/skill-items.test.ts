@@ -64,6 +64,24 @@ test("the runtime's own features a run asks for: code mode with its tools, read-
   expect(contextWindowConfig({ id: "p", model: "m", definition: {} })).toEqual({ model_context_window: 128_000, model_auto_compact_token_limit: 102_400 });
 });
 
+test("a connector call outside the run's own allowance ends the run as it starts; an allowed one is handed over", async () => {
+  const { runCodexSkill } = await import("@crossline/codex");
+  const { isQuoteCall } = await import("./wealth-prices");
+  const answer = JSON.stringify({ quotes: [] });
+  const call = (tool: string) => fakeRuntime([answer], "crossline:crossline-quote-reader", { script: async ({ emit, threadId, turnId }) => {
+    emit({ method: "item/started", params: { threadId, turnId, item: { type: "mcpToolCall", id: "c1", server: "codex_apps", tool, status: "inProgress", error: null } } });
+    emit({ method: "item/completed", params: { threadId, turnId, item: { type: "mcpToolCall", id: "c1", server: "codex_apps", tool, status: "completed", error: null, result: "AAPL.US 231.45" } } });
+  } });
+  const seen: string[] = [];
+  const run = (tool: string) => runCodexSkill(call(tool).rpc, {}, { skillName: "crossline:crossline-quote-reader", cwd: "/repo", developerInstructions: "x",
+    outputSchema: { type: "object" }, prepareInput: (input) => input, validateOutput: (output) => output, onAudit: () => {}, connectors: true,
+    connectorAllowed: isQuoteCall, onConnectorCall: (item) => seen.push(String(item.tool)) });
+  expect(await run("longbridge_account_balance")).toMatchObject({ ok: false, blocker: { code: "SKILL_TOOL_FORBIDDEN" } });
+  expect(seen).toEqual([]);
+  expect((await run("longbridge_quote")).ok).toBe(true);
+  expect(seen).toEqual(["longbridge_quote"]);
+});
+
 test("a question the run asks mid-turn goes to the person and the answer comes back on the same turn; the third is not asked", async () => {
   const { runCodexSkill } = await import("@crossline/codex");
   const { personAsker } = await import("./agent-task");

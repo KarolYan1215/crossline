@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
-import { cryptoRows, fxRows, verifiedQuotes, wealthPricePass } from "./wealth-prices";
+import { cryptoRows, fxRows, isQuoteCall, verifiedQuotes, wealthPricePass } from "./wealth-prices";
 
 const quoteCall = (result: unknown, tool = "longbridge_quote") => ({ type: "mcpToolCall", server: "codex_apps", tool, status: "completed", result });
 
@@ -19,6 +19,21 @@ test("a quote is kept only when the quote tool's own result holds that number fo
   const calls = [quoteCall({ content: [{ type: "text", text: JSON.stringify([{ symbol: "AAPL.US", last_done: "231.45" }, { symbol: "700.HK", last_done: "511.5" }]) }] })];
   // 700.HK's number is not the tool's; TSLA.US was never asked for.
   expect(verifiedQuotes(reading, calls, ["AAPL.US", "700.HK"])).toEqual([{ symbol: "AAPL.US", price: 231.45, currency: "USD", day: "2026-11-07" }]);
+});
+
+test("a price is in its market's currency, whatever the model wrote or left empty", () => {
+  const calls = [quoteCall({ text: JSON.stringify([{ symbol: "700.HK", last_done: "512" }, { symbol: "600519.SH", last_done: "1500" }]) })];
+  const reading = { quotes: [{ symbol: "700.HK", price: 512, currency: "", tradeDay: "" }, { symbol: "600519.SH", price: 1500, currency: "USD", tradeDay: "" }] };
+  expect(verifiedQuotes(reading, calls, ["700.HK", "600519.SH"]).map((quote) => [quote.symbol, quote.currency])).toEqual([["700.HK", "HKD"], ["600519.SH", "CNY"]]);
+  // No known market and no currency in the result: dropped rather than valued in the account's currency.
+  expect(verifiedQuotes({ quotes: [{ symbol: "XYZ", price: 9.5, currency: "", tradeDay: "" }] }, [quoteCall({ text: "XYZ 9.5" })], ["XYZ"])).toEqual([]);
+});
+
+test("only Longbridge's quote may start in a quote reading: an account tool is refused before its result is read", () => {
+  expect(isQuoteCall({ server: "codex_apps", tool: "longbridge_quote" })).toBe(true);
+  expect(isQuoteCall({ server: "codex_apps", tool: "longbridge_account_balance" })).toBe(false);
+  expect(isQuoteCall({ server: "codex_apps", tool: "longbridge_submit_order" })).toBe(false);
+  expect(isQuoteCall({ server: "gmail", tool: "search" })).toBe(false);
 });
 
 test("any call beside Longbridge's quote voids the whole reading", () => {
@@ -63,6 +78,10 @@ test("the daily pass fetches once, values held positions, and leaves the person'
   store.saveWealthSnapshot("w", { id: "p", accountId: "b", on: "2026-11-10", value: 2500, source: "person", createdAt: "y" });
   await wealthPricePass(store, "w", { now, fetchJson, readQuotes });
   expect(store.listWealthSnapshots("w").find((item) => item.accountId === "b" && item.on === "2026-11-10")).toMatchObject({ value: 2500, source: "person" });
+  // The coin sold (quantity 0): the next day the wallet is worth 0, not its last valuation for ever after.
+  store.saveWealthHolding("w", { id: "h2", accountId: "c", symbol: "BTC", quantity: 0, price: 0, priceCurrency: "", priceOn: "", updatedAt: "z" });
+  await wealthPricePass(store, "w", { now: new Date("2026-11-11T04:00:00Z"), fetchJson, readQuotes });
+  expect(store.listWealthSnapshots("w").find((item) => item.accountId === "c" && item.on === "2026-11-11")).toMatchObject({ value: 0, source: "valuation" });
   store.close();
 });
 

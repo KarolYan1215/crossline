@@ -120,6 +120,9 @@ test("a task card opens its dialog in place, and the dialog's full-page link sho
 });
 test("Plan is the long view: four figures, three cards and the week's hours over a chosen horizon, nothing to approve", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome");
+  // The shares come from the portrait, which a later test writes into the shared ledger: written here too, so the screenshot no longer
+  // depends on which tests ran first (it showed 0% or 60/18/12/10 by run).
+  await ensurePortrait(page);
   await page.goto("/plan");
   const plan = page.locator("[data-plan-version]");
   await expect(plan).toHaveAttribute("data-plan-version", "personal-plan-v1");
@@ -413,7 +416,7 @@ test("a work order started on one device becomes a conflict when another device'
   // Coming back online, the service worker can still abort this navigation once (Linux CI, 2026-11-02); the second goto is the real test.
   await pageB.goto("/").catch(async (error: unknown) => { if (!String(error).includes("ERR_ABORTED")) throw error; await pageB.goto("/"); });
   await expect(pageB.getByText("1 条与其他设备冲突")).toBeVisible();
-  await expect(pageB.getByText("两台设备冲突测试")).toBeVisible();
+  await expect(pageB.getByText("两台设备冲突测试", { exact: true })).toBeVisible();
 
   await deviceB.close();
 });

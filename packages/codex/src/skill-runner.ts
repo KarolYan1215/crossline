@@ -186,6 +186,12 @@ export type SkillRunOptions<T> = {
   connectors?: boolean;
   /** Each connector tool call the run completed, as the runtime reported it (its result included), so code can check a number against what the tool returned. */
   onConnectorCall?: (item: Record<string, unknown>) => void;
+  /**
+   * Which connector calls this run may make (`server`, `tool` as the runtime reports them). A call outside it ends the run with
+   * SKILL_TOOL_FORBIDDEN as soon as it starts: the runtime's read-only mode stops writes, this stops reading what the run has no business
+   * reading (Longbridge's account tools for a quote reader, 2026-11-11).
+   */
+  connectorAllowed?: (call: { server: string; tool: string }) => boolean;
   /** The runtime's own plan tool: each update of the model's step list is handed here as it is made (`turn/plan/updated`). */
   onPlan?: (plan: { explanation: string; steps: Array<{ step: string; status: string }> }) => void;
   /** Run on this tier instead of the Skill's own (the input box's second, stronger look). Ignored when the budget is tight. */
@@ -932,6 +938,7 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
   onPlan?: SkillRunOptions<unknown>["onPlan"];
   validate: (output: unknown) => T; onAudit: (audit: AnalysisAudit) => void; idleMs?: number; agent?: AgentMode;
   onConnectorCall?: (item: Record<string, unknown>) => void;
+  connectorAllowed?: SkillRunOptions<unknown>["connectorAllowed"];
   soften?: (rejection: Error, output: unknown) => T | undefined;
   keepEarly?: (rejection: Error, output: unknown) => T | undefined;
   onImage?: (image: { base64: string; revisedPrompt: string }) => void;
@@ -989,6 +996,10 @@ async function runTurnsUntilValid<T>(client: CodexRpcBoundary, scope: Scope, con
       } else if (run.agent) {
         // The assistant is meant to use tools; what it did is recorded, not refused here (the guard answers each request).
         if (item) { try { run.agent.onItem(item, message.method === "item/started" ? "started" : "completed"); } catch { /* the audit must never fail the work */ } }
+      } else if (item?.type === "mcpToolCall" && run.connectorAllowed && run.allowedItemTypes.includes("mcpToolCall")
+        && !run.connectorAllowed({ server: String(item.server ?? ""), tool: String(item.tool ?? "") })) {
+        console.info(JSON.stringify({ type: "skill.connector_refused", skill: run.skillName, server: String(item.server ?? ""), tool: String(item.tool ?? ""), at: new Date().toISOString() }));
+        settle?.reject(withDetail(new Error("SKILL_TOOL_FORBIDDEN"), `connector:${String(item.tool ?? "")}`));
       } else if (item?.type === "mcpToolCall" && run.onConnectorCall && run.allowedItemTypes.includes("mcpToolCall")) {
         if (message.method === "item/completed") { try { run.onConnectorCall(item); } catch { /* the caller's check runs on the output */ } }
       } else if (item?.type === "mcpToolCall" && !run.allowedItemTypes.includes("mcpToolCall")
@@ -1380,6 +1391,7 @@ async function runSkillTurn<T>(client: CodexRpcBoundary, given: unknown, wanted:
       ...(options.onPlan ? { onPlan: options.onPlan } : {}),
       ...(options.agent ? { agent: options.agent } : {}),
       ...(options.onConnectorCall ? { onConnectorCall: options.onConnectorCall } : {}),
+      ...(options.connectorAllowed ? { connectorAllowed: options.connectorAllowed } : {}),
       firstPrompt: firstPromptTexts(options.skillName, context.extraSkills, prepared, { ...options, runNote: withDesignNote(options.runNote, options.skillName) }),
       ...(options.images?.length ? { images: options.images } : {}),
       validate: (answer) => options.validateOutput(answer, prepared), onAudit: options.onAudit, ...(options.idleMs ? { idleMs: options.idleMs } : {}),

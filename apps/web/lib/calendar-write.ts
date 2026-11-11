@@ -106,7 +106,8 @@ export const IMIP_PER_PASS = 20;
 // i18n-ignore: a mail header display name, the same in every language
 export const IMIP_FROM_DEFAULT = "Crossline 日历 <calendar@mail.crossline.lol>";
 
-type SentEntry = { sequence: number; hash: string; start: string; end: string; title: string; until?: string };
+/** `cancelled`: a CANCEL went; the entry stays (until it is past) so a block that comes back is re-sent with a higher SEQUENCE than it. */
+type SentEntry = { sequence: number; hash: string; start: string; end: string; title: string; until?: string; cancelled?: boolean };
 export type InviteMail = { to: string; subject: string; text: string; method: "REQUEST" | "CANCEL"; ics: string };
 export type InviteSender = (mail: InviteMail) => Promise<void>;
 
@@ -125,8 +126,10 @@ export async function imipPass(ctx: AccessContext, items: CalendarItem[], send: 
   if (!to) throw Object.assign(new Error("CALENDAR_IMIP_NO_RECIPIENT"), { code: "CALENDAR_IMIP_NO_RECIPIENT" });
   const t = tOf(ctx);
   const horizon = now.getTime() + IMIP_WORK_DAYS * 86_400_000;
-  const wanted = items.filter((item) => item.series || (Date.parse(item.end) > now.getTime() && (item.id.startsWith("fixed:") || Date.parse(item.start) < horizon)));
   const sent = readSent(ctx.workspaceId);
+  // One already mailed keeps being updated wherever it moves (a re-plan past the horizon is an update, not a removal).
+  const wanted = items.filter((item) => item.series || (Date.parse(item.end) > now.getTime()
+    && (item.id.startsWith("fixed:") || Date.parse(item.start) < horizon || (sent[item.uid] && !sent[item.uid]!.cancelled))));
   const organizer = { email: emailOf(imipFrom()), name: "Crossline" };
   // A series is the same series whatever its next occurrence is (its first day moves forward every week): only its rule counts.
   const hashOf = (item: CalendarItem) => createHash("sha256").update(JSON.stringify(item.series
@@ -134,10 +137,12 @@ export async function imipPass(ctx: AccessContext, items: CalendarItem[], send: 
     : [item.title, item.start, item.end])).digest("hex").slice(0, 24);
   type Job = { uid: string; method: "REQUEST" | "CANCEL"; item?: CalendarItem; entry?: SentEntry };
   const jobs: Job[] = [];
-  for (const item of wanted) if (sent[item.uid]?.hash !== hashOf(item)) jobs.push({ uid: item.uid, method: "REQUEST", item });
-  const present = new Set(wanted.map((item) => item.uid));
+  for (const item of wanted) if (sent[item.uid]?.cancelled || sent[item.uid]?.hash !== hashOf(item)) jobs.push({ uid: item.uid, method: "REQUEST", item });
+  // Removal is decided against the whole plan, not the mailed window: a block still on it is never cancelled.
+  const present = new Set(items.map((item) => item.uid));
   for (const [uid, entry] of Object.entries(sent)) {
     if (present.has(uid)) continue;
+    if (entry.cancelled) { if (Date.parse(entry.end) <= now.getTime() && !(entry.until && entry.until >= now.toISOString().slice(0, 10))) delete sent[uid]; continue; }
     // A series is still to come while its last day is; a one-off while its start is.
     if (Date.parse(entry.start) > now.getTime() || (entry.until && entry.until >= now.toISOString().slice(0, 10))) jobs.push({ uid, method: "CANCEL", entry });
     else delete sent[uid];
@@ -157,7 +162,7 @@ export async function imipPass(ctx: AccessContext, items: CalendarItem[], send: 
         const entry = job.entry;
         await send({ to, method: "CANCEL", subject: t("已取消：{{title}}", { title: entry.title }), text: t("Crossline 日历：「{{title}}」已从计划中移除。", { title: entry.title }),
           ics: buildIcs({ method: "CANCEL", now, events: [{ uid: job.uid, summary: entry.title, start: entry.start, end: entry.end, sequence, organizer, attendees: [to] }] }) });
-        delete sent[job.uid];
+        sent[job.uid] = { ...entry, sequence, cancelled: true };
         cancelled += 1;
       }
     }

@@ -73,7 +73,7 @@ const USAGE_DAYS = 7;
  * Everything configured rather than done, as modules under a left-hand index (a strip of tabs on a phone). When the person is free
  * and how the schedule is packed are set on the plan page, next to the schedule they change; what waits for a decision is on 待确认.
  */
-export default async function SettingsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
+export default async function SettingsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireSessionContext();
   // The workflows moved to 自动化 (2026-11-10): an old 「去登录」 or 「查看风险」 link (`?login=` / `?flow=`) lands on that workflow's page.
   const asked = await searchParams;

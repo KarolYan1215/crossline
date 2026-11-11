@@ -81,6 +81,20 @@ test("past events are never deleted; a series under way ends today instead; a we
   expect(second.ledger.events).toEqual({});
 });
 
+test("a series changed after it began and then removed is cut at today, never deleted with its past occurrences", async () => {
+  const google = fakeGoogle();
+  const recurrence = { daysOfWeek: ["thursday"], startDate: "2026-11-12", endDate: "2026-12-17", localStart: "14:00", localEnd: "15:00", timeZone: "America/Chicago", exceptions: [] as string[] };
+  const series: GoogleBlock = { id: "fixed:class", title: "研究 · 组会", start: "2026-11-12T20:00:00Z", end: "2026-11-12T21:00:00Z", reminderMinutes: 10, recurrence };
+  const first = await publishToGoogle(google.call, [series], { events: {} }, NOW);
+  // A week on, one Thursday is skipped: the plan hands the series with its next occurrence as the block's start.
+  const changed: GoogleBlock = { ...series, start: "2026-11-26T20:00:00Z", end: "2026-11-26T21:00:00Z", recurrence: { ...recurrence, exceptions: ["2026-12-03"] } };
+  const second = await publishToGoogle(google.call, [changed], first.ledger, new Date("2026-11-20T12:00:00Z"));
+  google.calls.length = 0;
+  await publishToGoogle(google.call, [], second.ledger, new Date("2026-11-21T12:00:00Z"));
+  expect(google.calls.filter((item) => item.tool === "google_calendar.delete_event")).toEqual([]);
+  expect(google.calls.find((item) => item.tool === "google_calendar.update_event")!.args).toMatchObject({ update_scope: "entire_series" });
+});
+
 test("only the allowlisted tools are called, and an interrupted run keeps what it wrote", async () => {
   const google = fakeGoogle();
   let creates = 0;

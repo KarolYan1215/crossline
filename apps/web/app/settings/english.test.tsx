@@ -86,7 +86,7 @@ describe("settings in English", () => {
   test("the whole settings page renders its frame and modules in English", async () => {
     globalThis.crosslineStore = new CrosslineStore(":memory:");
     const { default: SettingsPage } = await import("./page");
-    const html = english(await SettingsPage());
+    const html = english(await SettingsPage({}));
     for (const section of ["General", "Time and reminders", "Automation and assistant", "Calendar and connections", "Privacy and screen activity", "Usage and health check"]) {
       expect(html).toContain(section);
     }

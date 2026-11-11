@@ -62,7 +62,7 @@ import { deriveWatches, opportunityAgentOn, rejudge, runWatch, todayFor, watches
 import { opportunityScoutDue, startScout } from "./opportunity-scout";
 import { discoveryFeasibility, timeSpacePass } from "./time-space";
 import { browserProfilesRoot, cleanGrownSkills, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, loginBrowser, markWorkflowRun,
-  openWorkflowLogin, resumeByPerson, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
+  growLabel, openWorkflowLogin, resumeByPerson, sayToPerson, startWorkflowRun, workflowCollecting, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { loginMode } from "./browser-launch";
 import { createFormService } from "./form-service";
 import { createRemoteBrowsers } from "./remote-browser";
@@ -642,7 +642,7 @@ async function workflowPass(workspaceId: string, checkedAt: string): Promise<voi
     entityId: candidate.lineId, payload: { taskId: input.taskId, state: started.state, ...(candidate.origin.kind === "asked" ? { requestId: candidate.origin.requestId } : { taskIds: candidate.origin.taskIds }) } });
   if (started.state === "needs_category_approval") {
     const t = tOfWorkspace(analysisStore, workspaceId);
-    sayToPerson(analysisStore, workspaceId, t("要把「{{text}}」固化成工作流，需要先允许助手做「{{label}}」这类工作。", { text: candidate.text.slice(0, 40), label: t(started.label) }),
+    sayToPerson(analysisStore, workspaceId, t("要把「{{text}}」固化成工作流，需要先允许助手做「{{label}}」这类工作。", { text: growLabel(candidate.text), label: t(started.label) }),
       "skill_grown", "grow-needs:" + input.taskId, [{ label: t("去开启"), href: "/automation#capabilities" }]);
   }
 }

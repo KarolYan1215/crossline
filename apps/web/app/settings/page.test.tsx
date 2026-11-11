@@ -15,7 +15,7 @@ describe("settings page", () => {
   test("holds the connections and the model usage, and does not claim measured connector health", async () => {
     globalThis.crosslineStore = new CrosslineStore(":memory:");
     const { default: SettingsPage } = await import("./page");
-    const html = renderToStaticMarkup(await SettingsPage());
+    const html = renderToStaticMarkup(await SettingsPage({}));
     expect(html).not.toContain("连接器健康");
     expect(html).not.toContain("待授权");
     // Targets nobody has configured are not listed one by one as "not connected": only what can be acted on is shown.
@@ -50,7 +50,7 @@ describe("settings page", () => {
       spendMode: "normal", threadId: "t", ok: true, errorCode: "", repairs: 1, turns: 2, inputTokens: 12_000, cachedInputTokens: 0, outputTokens: 3_000,
       reasoningTokens: 500, totalTokens: 15_000, durationMs: 420_000, at: new Date().toISOString() });
     const { default: SettingsPage } = await import("./page");
-    const html = renderToStaticMarkup(await SettingsPage());
+    const html = renderToStaticMarkup(await SettingsPage({}));
     expect(html).toContain("访谈");
     expect(html).not.toContain("gpt-5.6-sol");
     expect(html).toContain("15k tokens");

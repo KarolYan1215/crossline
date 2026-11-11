@@ -9,7 +9,7 @@ import { librarySelection, type AgentOutcome, type AgentTaskInput } from "./agen
 import type { OpenSite, SiteReader } from "./site-reader";
 import { siteHold } from "./site-reader";
 import { cleanGrownSkills, collectionDone, configureFavouritesCollector, configureRemoteLogin, finishWorkflowLogin, growCandidates, growTask, installGrown, openWorkflowLogin, SKILL_CREATOR,
-  resumeByPerson, startWorkflowRun, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
+  growLabel, resumeByPerson, startWorkflowRun, workflowLoginTarget, workflowSchedulePass } from "./workflow-smith";
 import { createRemoteBrowsers } from "./remote-browser";
 import { holdAfterFailure, readCollectLedger, writeCollectLedger, type CollectDriver } from "./favourites-reader";
 import { fakeRuntime, scriptedRuntime } from "./testing/fake-runtime";
@@ -756,4 +756,13 @@ test("on the hosted server the favourites are never logged in to or read there: 
     expect(opened).toBe(0);
     expect(store.listEvents(ws, { type: "collect.started" })).toEqual([]);
   } finally { configureFavouritesCollector(undefined); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a long request is named on its card up to a clause end with 「…」, never cut mid-word", () => {
+  expect(growLabel("我希望能定期整理我的小红书收藏夹，并且重点关注一个叫“人类最强编导”的账号，按照主题分类并写摘要"))
+    .toBe("我希望能定期整理我的小红书收藏夹，并且重点关注一个叫“人类最强编导”的账号…");
+  expect(growLabel("Weekly digest of CoE Alumni Events and department seminars for the research line")).toBe("Weekly digest of CoE Alumni Events and…");
+  expect(growLabel("  整理\n收藏夹 ")).toBe("整理 收藏夹");
+  // No clause end past the middle: cut at 40 and marked as cut.
+  expect(growLabel("一".repeat(50))).toBe(`${"一".repeat(40)}…`);
 });

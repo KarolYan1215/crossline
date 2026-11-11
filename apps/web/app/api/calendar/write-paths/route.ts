@@ -38,7 +38,8 @@ export async function POST(request: Request) {
       if (!email || !EMAIL.test(email)) return Response.json({ ok: false, code: "CALENDAR_IMIP_NO_RECIPIENT" }, { status: 400 });
       store.setSetting(ctx.workspaceId, CALENDAR_IMIP_RECIPIENT_SETTING, email.toLowerCase());
     }
-    if (path === "ics" && body.on) feedToken(ctx);
+    // Turning the feed off kills its link for good: on again, it is a new link (a link given out and then switched off came back to life).
+    if (path === "ics") { if (body.on) feedToken(ctx); else resetFeedToken(ctx); }
     setWritePaths(ctx, { [path]: body.on });
     // A path just turned on is written now, not at the next ten-minute pass.
     if (body.on) void publishWorkspace(ctx.workspaceId).catch(() => undefined);

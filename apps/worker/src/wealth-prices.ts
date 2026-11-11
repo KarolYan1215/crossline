@@ -1,6 +1,6 @@
 import { longbridgeToolAllowed } from "@crossline/connectors";
 import {
-  converterFrom, valueHoldings, BROKERAGE_SYMBOL, CRYPTO_IDS, QUOTE_READING_SCHEMA, type MarketPrice, type QuoteReading
+  converterFrom, latestSnapshots, valueHoldings, BROKERAGE_SYMBOL, CRYPTO_IDS, QUOTE_READING_SCHEMA, type MarketPrice, type QuoteReading
 } from "@crossline/core";
 import { runCodexSkill, type CodexRpcBoundary } from "@crossline/codex";
 import type { CrosslineStore } from "@crossline/db";
@@ -14,7 +14,7 @@ import type { CrosslineStore } from "@crossline/db";
  * - **Crypto**: CoinGecko's public `simple/price`, one request for every coin the workspaces hold (the keyless tier allows a few calls a
  *   minute; one a day is far inside it). Only coins in `CRYPTO_IDS`; any other is priced by hand.
  * - **Brokerage quotes**: Longbridge, read through the person's own ChatGPT connector by `crossline-quote-reader`, `quote` only
- *   (`longbridgeToolAllowed`; any other tool call voids the run). A price is kept only when the same number stands in that call's result.
+ *   (`longbridgeToolAllowed`; any other tool call ends the run as it starts, `connectorAllowed`). A price is kept only when the same number stands in that call's result.
  *
  * What goes out: currency codes, coin ids and ticker symbols. Never an amount, an account or a name.
  */
@@ -53,22 +53,31 @@ export function cryptoRows(body: unknown, symbols: string[], day: string, fetche
 }
 
 const bareTool = (tool: string) => tool.replace(/^mcp__codex_apps__/, "").replace(/^longbridge_/, "");
+/** The one connector call a quote reading may make: Longbridge's `quote`. Checked as each call starts and again on the result. */
+export const isQuoteCall = (call: { server: string; tool: string }) =>
+  /longbridge/i.test(`${call.server} ${call.tool}`) && longbridgeToolAllowed(call.tool) && bareTool(call.tool) === "quote";
+/** A listing's currency from its market (Longbridge symbols end in the market): what a price is in, whatever the model wrote. */
+const MARKET_CURRENCY: Record<string, string> = { US: "USD", HK: "HKD", SH: "CNY", SZ: "CNY", SG: "SGD" };
+export const marketCurrency = (symbol: string) => MARKET_CURRENCY[symbol.trim().toUpperCase().split(".").at(-1) ?? ""] ?? "";
 const numbersIn = (text: string) => (text.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
 
 /**
- * The quotes to keep from one reading: the run must have called only Longbridge's `quote` (an account, order or other tool voids it), and
+ * The quotes to keep from one reading: the run must have called only Longbridge's `quote` (an account, order or other tool voids it, and ends the run as it starts), and
  * each price must stand as a number in a `quote` result that also names its symbol. Anything else is the model's word, so it is dropped.
  */
 export function verifiedQuotes(reading: QuoteReading, calls: Array<Record<string, unknown>>, wanted: string[]): Array<{ symbol: string; price: number; currency: string; day: string }> {
   const named = calls.map((call) => ({ tool: String(call.tool ?? ""), server: String(call.server ?? ""), text: JSON.stringify(call.result ?? "") }));
-  if (named.some((call) => !/longbridge/i.test(`${call.server} ${call.tool}`) || !longbridgeToolAllowed(call.tool) || bareTool(call.tool) !== "quote")) return [];
+  if (named.some((call) => !isQuoteCall(call))) return [];
   const results = named.map((call) => ({ upper: call.text.toUpperCase(), numbers: numbersIn(call.text) }));
   return reading.quotes.flatMap((quote) => {
     const symbol = quote.symbol.trim().toUpperCase();
     if (!wanted.includes(symbol) || !(quote.price > 0)) return [];
     const code = symbol.split(".")[0]!;
     const backed = results.some((result) => result.upper.includes(code) && result.numbers.some((number) => Math.abs(number - quote.price) <= Math.abs(quote.price) * 1e-9));
-    return backed ? [{ symbol, price: quote.price, currency: /^[A-Z]{3}$/.test(quote.currency) ? quote.currency : "", day: DAY.test(quote.tradeDay) ? quote.tradeDay : "" }] : [];
+    // The currency is the market's (a 700.HK price is HKD in any account); a symbol without a known market keeps it only from the result.
+    const said = quote.currency.trim().toUpperCase();
+    const currency = marketCurrency(symbol) || (/^[A-Z]{3}$/.test(said) && results.some((result) => result.upper.includes(said)) ? said : "");
+    return backed && currency ? [{ symbol, price: quote.price, currency, day: DAY.test(quote.tradeDay) ? quote.tradeDay : "" }] : [];
   });
 }
 
@@ -82,7 +91,7 @@ export function codexQuoteReader(client: CodexRpcBoundary, cwd: string): QuoteRe
     const calls: Array<Record<string, unknown>> = [];
     const input = { version: "crossline.quote-reading.v1", symbols, today };
     const result = await runCodexSkill(client, input, { skillName: QUOTE_READER, cwd, developerInstructions: QUOTE_INSTRUCTIONS, outputSchema: QUOTE_READING_SCHEMA,
-      prepareInput: () => input, connectors: true, onConnectorCall: (item) => calls.push(item), onAudit: () => {}, timeoutMs: 10 * 60_000,
+      prepareInput: () => input, connectors: true, connectorAllowed: isQuoteCall, onConnectorCall: (item) => calls.push(item), onAudit: () => {}, timeoutMs: 10 * 60_000,
       validateOutput: (output) => output as QuoteReading });
     return result.ok ? verifiedQuotes(result.output, calls, symbols).map((quote) => ({ ...quote, day: quote.day || today })) : [];
   };
@@ -159,10 +168,16 @@ export async function wealthPricePass(store: CrosslineStore, workspaceId: string
   const local = localDay(store, workspaceId, now);
   const fx = converterFrom(store.listMarketPrices({ kinds: ["fx"] }));
   const prices = store.listMarketPrices({ kinds: ["quote", "crypto"] });
-  const typedToday = new Set(store.listWealthSnapshots(workspaceId).filter((snapshot) => snapshot.on === local && snapshot.source !== "valuation").map((snapshot) => snapshot.accountId));
+  const snapshots = store.listWealthSnapshots(workspaceId);
+  const typedToday = new Set(snapshots.filter((snapshot) => snapshot.on === local && snapshot.source !== "valuation").map((snapshot) => snapshot.accountId));
+  const lastOf = latestSnapshots(snapshots, local);
   for (const account of accounts) {
     if ((account.accountClass !== "brokerage" && account.accountClass !== "crypto") || typedToday.has(account.id)) continue;
-    const valued = valueHoldings(account, holdings, prices, fx, local);
+    // Everything sold or removed: an account the holdings valued is worth 0 from today, not its last valuation forever. One the person keeps
+    // by typed balances (no holdings ever) is left alone.
+    const holdsNothing = !holdings.some((holding) => holding.accountId === account.id && holding.quantity > 0);
+    const last = lastOf.get(account.id);
+    const valued = holdsNothing ? (last?.source === "valuation" && last.value !== 0 ? { value: 0 } : null) : valueHoldings(account, holdings, prices, fx, local);
     if (!valued) continue;
     store.saveWealthSnapshot(workspaceId, { id: `val-${account.id}-${local}`, accountId: account.id, on: local, value: valued.value, source: "valuation", createdAt: fetchedAt });
     counts.valued += 1;

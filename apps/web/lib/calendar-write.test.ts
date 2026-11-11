@@ -95,6 +95,26 @@ test("invitations: REQUEST once per change with SEQUENCE bumped, nothing for unc
   await expect(imipPass(TEST_CTX, items, send, NOW)).rejects.toThrow("CALENDAR_IMIP_NO_RECIPIENT");
 });
 
+test("invitations: a block re-planned past the mailed week is updated, not cancelled; one that comes back after a CANCEL gets a higher SEQUENCE", async () => {
+  const store = setup({ imip: true });
+  store.setSetting(ws, CALENDAR_IMIP_RECIPIENT_SETTING, "person@example.com");
+  const mails: InviteMail[] = [];
+  const send = async (mail: InviteMail) => { mails.push(mail); };
+  const block = (start: string, end: string) => ({ id: "scheduled:b1", uid: "scheduled-b1@crossline", title: "研究 · 写摘要", start, end, reminderMinutes: 10 });
+  expect(await imipPass(TEST_CTX, [block("2026-10-14T15:00:00.000Z", "2026-10-14T16:00:00.000Z")], send, NOW)).toMatchObject({ sent: 1, cancelled: 0 });
+  // Moved ten days out: still on the plan, so its invitation moves with it.
+  expect(await imipPass(TEST_CTX, [block("2026-10-24T15:00:00.000Z", "2026-10-24T16:00:00.000Z")], send, NOW)).toMatchObject({ sent: 1, cancelled: 0 });
+  expect(mails.at(-1)).toMatchObject({ method: "REQUEST" });
+  expect(mails.at(-1)!.ics).toContain("SEQUENCE:1\r\n");
+  // Off the plan: cancelled (sequence 2); back on it: a REQUEST above the CANCEL, so the calendar takes it.
+  expect(await imipPass(TEST_CTX, [], send, NOW)).toMatchObject({ sent: 0, cancelled: 1 });
+  expect(mails.at(-1)!.ics).toContain("SEQUENCE:2\r\n");
+  expect(await imipPass(TEST_CTX, [], send, NOW)).toMatchObject({ sent: 0, cancelled: 0 });
+  expect(await imipPass(TEST_CTX, [block("2026-10-14T15:00:00.000Z", "2026-10-14T16:00:00.000Z")], send, NOW)).toMatchObject({ sent: 1, cancelled: 0 });
+  expect(mails.at(-1)).toMatchObject({ method: "REQUEST" });
+  expect(mails.at(-1)!.ics).toContain("SEQUENCE:3\r\n");
+});
+
 test("mail events: personal first and recommended; 去 makes a fixed event every path writes, 不去 drops it", async () => {
   const store = setup({ ics: true });
   const event = (id: string, title: string, personal: boolean, relevance: number): MailEvent => ({ id, title, date: "2026-10-20", start: "14:00", end: "15:00", location: "",
