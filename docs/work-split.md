@@ -141,6 +141,21 @@
 - 2026-10-22 上线（1e7b1ba8dd，与托管站登录弹窗一起）。
 - 2026-10-22 评估后修正上线（619937d9ba）：本人专属材料直接问，网上查找有缺口不算覆盖。
 
+## 6a. 任务的形式：从目标和本人的习惯来，不从身份模板来（2026-11-10，机主）
+
+机主的决定：永远不要给订正类任务；大学生没有人批改作业；任务不能按身份套模板（学生 → 订正、错题本、背诵、打卡），要从第一性原理和真实需要出发；这类习惯应该在访谈里问。
+
+- **规则（写进每个产出任务的 Skill）**：任务的形式只来自两处。一是里程碑标准在那天真正需要什么（限时考试要的是在考试水平上限时解题；提交要的是作品本身；决定要的是把选项摆开并拍板）；二是本人记录在案的做事方法（访谈的「做事方法」事实、`personProfile` 里的「工作方式（method_…）」行、任务上的回答、本人说过的偏好）。订正、错题本、背诵、默写、打卡、刷题这类练习形式，只有本人的话里说过这样做才出现。不知道本人怎么做这类事时，不替他选方法，先按目标需要写任务，再问一句（「平时怎么准备这类考试？」）。涉及的 Skill：goal-backplanner、milestone-architect、step-planner、automation-stripper、concierge（`task.create`）、agent-tools（`add_to_inbox`）、task-titler、material-writer；访谈：onboarding、onboarding-extract。示例里的「做 2 套往年卷并订正」「2 套往年卷的订正记录」换成从目标推出的形式（「限时做完 1 套往年期中卷」）和从本人记录推出的形式（「写东西习惯先讲一遍再写」→「把方法部分讲给师兄听」）。
+- **代码后检**（`packages/core/src/drill-forms.ts`）：`backedDrillForms` 只认本人的话（已确认的事实、任务上的回答、偏好、本人捕获这件事时的原话；「假设：」和模型推断不算；「不用错题本」这类否定句不算）。没有依据的练习形式：
+  - 步骤计划（`normalizeStepPlan` 的 `drillBacking`）：从标题、交付物、完成标准、第一步、勾选结果里剪掉那一小句（「做 2 套往年卷并订正」→「做 2 套往年卷」）；整步只是这种形式的（「整理错题本」）删掉，依赖它的步骤改依赖它的前置；问到这种形式的问题删掉，选项里的这种形式删掉；理由里提到的那句删掉。记 `STEP_DRILL_FORM_STRIPPED` / `STEP_DRILL_FORM_DROPPED`。没有记录本人做事方法（`methodKnown`）、也没有问过时，在问题最前面加一条「平时怎么准备这类考试？／平时怎么写这类东西？／平时怎么做这类事？」，第一个选项是「没有固定方法，按这次需要定」：次要任务的问题按第一个选项当作假设记下，所以假设出来的方法永远是「没有」。
+  - 倒推（`screenBackplanDrills`，goal-backplanner 写入前）：同样剪掉标题、描述、证据里的那句，只剩这种形式的任务删掉；引文（`sourceQuote`）保持原文。里程碑标准是模型写的，不算本人依据。
+  - 捕获分析（`validateAnalysisProposal`）：依据是捕获原话、本人给的文件、偏好和画像结论；标题、描述、本人部分、证据里没有依据的剪掉，引文不动。
+  - worker 取依据：`apps/worker/src/drill-backing.ts`。
+- **分类不变**：`work-owner.ts` 的 GRADED/LEARN、`milestone-plan.ts` 的计分判断仍然读「作业、考试、往年卷、背诵」这些词来判断谁做、哪项计分，只读不写，不会往任务里加练习形式。
+- **访谈**：画像加第四部分「做事方法」（`interview-checklist.ts` 的 `PORTRAIT_PARTS`，槽位 `METHOD_SLOT`：`method_exam_prep`、`method_learning`、`method_writing` 等），在能量部分问 2–3 题：考核或截止前怎么准备、怎么学新东西和回头看、怎么写和讲。没有画像小节代表它，只有记录在案的事实能勾上，所以没问到之前访谈不算完。答不上来只记「假设：没有固定方法」。`planningProfile` 把 `method_*` 排在工作方式的前面，每个规划 Skill 都看得到。
+- 测试：`drill-forms.test.ts`、`steps.test.ts`、`analysis.test.ts`、`interview-checklist.test.ts`、`planning-profile.test.ts`；worker 回放 `testing/fixtures/step-plan-drill-form-from-identity.txt`（按旧示例重建的回答）走完 worker → 校验 → 落库。
+- 机主账本里已有的订正类任务由协调会话清理，这里不动。
+
 ## 7. 边界
 
 登录（课程网站、券商、平台后台）一律由本人上传文件或截图，不交凭证；发送、提交、发布永远是本人的；带评分的答案不代做；助手结果不合格或在 `needsHuman` 里说缺什么时转成问题，同一件事失败两次后才带着助手的部分产出作为本人任务出现。

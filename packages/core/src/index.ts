@@ -2,6 +2,7 @@ export * from "./access-context";
 export * from "./i18n";
 export * from "./availability";
 export * from "./importance";
+export * from "./drill-forms";
 export * from "./analysis";
 export * from "./assistant-schema";
 export * from "./background-facts-schema";

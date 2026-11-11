@@ -1,4 +1,5 @@
 import { courseCodeOf } from "./task-title";
+import { METHOD_SLOT } from "./drill-forms";
 import type { ProfileModel } from "./onboarding-turn-schema";
 import { joinList, tFor, type Locale } from "./i18n";
 import { depthPace, type OnboardingDepth } from "./onboarding-depth";
@@ -78,14 +79,18 @@ export const ASSUMPTION_PREFIX = /^(假设|assumption|assumed)[：:]/i;
 const assumedFact = (fact: { status: string; value?: string }) => fact.status === "inferred" && ASSUMPTION_PREFIX.test(fact.value ?? "");
 const settledFact = (fact: { status: string; sourceRef: string; value?: string }) => confirmedFact(fact) || assumedFact(fact);
 /**
- * The three parts of the portrait the person's own words must stand behind, read from the slots the interview files facts under. Read by
+ * The parts of the portrait the person's own words must stand behind, read from the slots the interview files facts under. Read by
  * meaning: the 2026-11-01 rerun's extraction filed the person's answers as `near_risk`, `one_year_priority`, `work_motive`, `motto` and
  * `worth_day`, and all three people kept this item open to the round limit with every part answered.
  */
 const PORTRAIT_PARTS: Array<{ label: string; section: string; slots: RegExp; ask: string }> = [
   { label: "现状与真问题", section: "situation", slots: /problem|situation|status|current|pressure|anxi|worry|constraint|gravity|stage|risk|priorit|change|lever|stuck|block|struggle|concern|fear|conflict|tension|dilemma|trouble|difficult|hard_day|regret|undone|stall/i, ask: "眼下最让你放不下的是哪件事？" },
   { label: "工作观与人生观", section: "compass", slots: /work_view|life_view|true_north|value|meaning|compass|purpose|motive|motivation|motto|worth|good_day|ideal|belief|career|tradeoff|work_choice|work_feeling|good_life|standard|principle|dream|life_goal/i, ask: "做事的时候，你最看重的是什么？" },
-  { label: "能量与心流", section: "energy", slots: /flow|energy|drain|charge|anchor|behavio|habit/i, ask: "最近一次做得忘了时间，是在做什么？" }
+  { label: "能量与心流", section: "energy", slots: /flow|energy|drain|charge|anchor|behavio|habit/i, ask: "最近一次做得忘了时间，是在做什么？" },
+  // How the person actually works (decided 2026-11-10, the owner: tasks take their form from the goal and the person's own habits, never
+  // from an identity template such as 学生 → 订正/错题本/背诵/打卡; habits like these are asked in the interview). Asked in the energy part;
+  // no section of the portrait stands for it, so only a fact on record settles it.
+  { label: "做事方法", section: "method", slots: METHOD_SLOT, ask: "遇到要准备的考核、要赶的截止，或者要学一样新东西，你平时是怎么做的？" }
 ];
 /** The portrait's written parts, each a field of the working profile. */
 const PORTRAIT_FIELDS: Array<[keyof ProfileModel, string]> = [["problem", "真问题"],

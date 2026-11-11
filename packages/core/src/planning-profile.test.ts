@@ -25,3 +25,9 @@ test("the interview's working facts and profile reach planning in a few lines, w
   expect(planningProfile(Array.from({ length: 40 }, (_, i) => ({ identityId: "person", slot: `flow_${i}`, value: "x".repeat(400), status: "confirmed" })), model).length)
     .toBe(PLANNING_PROFILE_MAX_LINES);
 });
+
+test("how the person prepares, learns and writes (the interview's 做事方法) reaches every planner, early", () => {
+  const lines = planningProfile([{ identityId: "person", slot: "flow", value: "深夜写代码", status: "confirmed" },
+    { identityId: "person", slot: "method_exam_prep", value: "考前一周每天限时做一套往年题", status: "confirmed" }], undefined);
+  expect(lines).toEqual(["工作方式（method_exam_prep）：考前一周每天限时做一套往年题", "工作方式（flow）：深夜写代码"]);
+});

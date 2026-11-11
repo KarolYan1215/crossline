@@ -85,11 +85,11 @@ test("a clarify option carries out its candidates and dismisses the others; a ca
 test("with the model unreachable the words are kept and offered as a new task, which is created only on 执行", async () => {
   const store = setup();
   worker.mockRejectedValue(new Error("ECONNREFUSED"));
-  const [, reply] = await conversationTurn(TEST_CTX, { text: "整理 ECE 548 错题", mentions: [], page: { kind: "today", entityId: "" } }, NOW);
+  const [, reply] = await conversationTurn(TEST_CTX, { text: "整理 ECE 548 第 3 章笔记", mentions: [], page: { kind: "today", entityId: "" } }, NOW);
   expect(reply!.text).toContain("原话已保存");
   expect(store.listCaptures(ws)).toEqual([]);
   await decideCard(TEST_CTX, reply!.id, {}, NOW);
-  expect(store.listCaptures(ws).map((capture) => capture.title)).toEqual(["整理 ECE 548 错题"]);
+  expect(store.listCaptures(ws).map((capture) => capture.title)).toEqual(["整理 ECE 548 第 3 章笔记"]);
 });
 
 test("an action whose object is gone by the time it is confirmed fails with a reason and changes nothing", async () => {

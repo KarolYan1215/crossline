@@ -11,6 +11,7 @@ const full: ChecklistInput = {
     { identityId: "person", projectId: "", slot: "line_constraint", status: "confirmed", sourceRef: "reply-3" },
     { identityId: "person", projectId: "", slot: "work_view", status: "confirmed", sourceRef: "src-5" },
     { identityId: "person", projectId: "", slot: "flow", status: "confirmed", sourceRef: "src-5" },
+    { identityId: "person", projectId: "", slot: "method_exam_prep", status: "confirmed", sourceRef: "reply-6" },
     { identityId: "research", projectId: "ece555", slot: "grading", status: "confirmed", sourceRef: "src-1" },
     { identityId: "research", projectId: "ece555", slot: "goal", status: "confirmed", sourceRef: "reply-2" },
     { identityId: "research", projectId: "ece555", slot: "evidence", status: "confirmed", sourceRef: "reply-2" }],
@@ -28,7 +29,7 @@ test("a complete record ticks every item, the portrait included", () => {
 
 test("a portrait written only from inferences is not finished, and what is missing is named", () => {
   const items = interviewChecklist({ ...full, facts: full.facts.filter((fact) => fact.identityId !== "person"), profile: { ...full.profile, trueNorth: "", energyMap: [] } });
-  expect(items.find((item) => item.id === "portrait_grounded")).toMatchObject({ done: false, detail: "尚无本人依据：现状与真问题、工作观与人生观、能量与心流" });
+  expect(items.find((item) => item.id === "portrait_grounded")).toMatchObject({ done: false, detail: "尚无本人依据：现状与真问题、工作观与人生观、能量与心流、做事方法" });
   expect(items.find((item) => item.id === "portrait_fields")?.detail).toContain("正北");
   expect(interviewOwnedOpen(items).map((item) => item.id)).toEqual(["portrait_fields", "portrait_grounded"]);
 });
@@ -148,15 +149,31 @@ test("the tier decides which project items the interview asks and which wait for
 
 test("the portrait's parts are read by meaning: the slot names the extraction writes for risks, priorities and motives count", () => {
   const person = (slot: string) => ({ identityId: "person", projectId: "", slot, status: "confirmed", sourceRef: "reply-3", value: "本人原话" });
-  const facts = [...full.facts.filter((fact) => fact.identityId !== "person"), person("near_risk"), person("work_motive"), person("flow_scene")];
+  const facts = [...full.facts.filter((fact) => fact.identityId !== "person"), person("near_risk"), person("work_motive"), person("flow_scene"), person("method_learning")];
   expect(interviewChecklist({ ...full, facts }).find((item) => item.id === "portrait_grounded")).toMatchObject({ done: true, detail: "" });
-  const other = [...full.facts.filter((fact) => fact.identityId !== "person"), person("one_year_priority"), person("motto"), person("drain_activity")];
+  const other = [...full.facts.filter((fact) => fact.identityId !== "person"), person("one_year_priority"), person("motto"), person("drain_activity"), person("method_writing")];
   expect(interviewChecklist({ ...full, facts: other }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
   // 2026-11-01: 「过得好」 and 「做事看重」 were written as good_life and work_standards.
-  const third = [...full.facts.filter((fact) => fact.identityId !== "person"), person("worry"), person("good_life"), person("habits")];
+  const third = [...full.facts.filter((fact) => fact.identityId !== "person"), person("worry"), person("good_life"), person("habits"), person("study_habit")];
   expect(interviewChecklist({ ...full, facts: third }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
   // A section the extraction wrote from numbered sentences grounds its part whatever the slot names were.
-  const odd = [...full.facts.filter((fact) => fact.identityId !== "person"), person("hard_day"), person("misc")];
+  const odd = [...full.facts.filter((fact) => fact.identityId !== "person"), person("hard_day"), person("misc"), person("method_exam_prep")];
   expect(interviewChecklist({ ...full, facts: odd }).find((item) => item.id === "portrait_grounded")?.done).toBe(false);
   expect(interviewChecklist({ ...full, facts: odd, groundedSections: ["compass", "energy"] }).find((item) => item.id === "portrait_grounded")?.done).toBe(true);
+});
+
+test("做事方法 is its own part: the energy part is not finished until the person said how they prepare, learn and write (2026-11-10)", () => {
+  const without = { ...full, facts: full.facts.filter((fact) => fact.slot !== "method_exam_prep") };
+  const item = interviewChecklist(without).find((entry) => entry.id === "portrait_grounded")!;
+  expect(item).toMatchObject({ done: false, detail: "尚无本人依据：做事方法", ask: "遇到要准备的考核、要赶的截止，或者要学一样新东西，你平时是怎么做的？" });
+  expect(interviewOwnedOpen(interviewChecklist(without)).map((entry) => entry.id)).toEqual(["portrait_grounded"]);
+  // No portrait section stands for it: an energy section written from the person's sentences does not settle how they work.
+  expect(interviewChecklist({ ...without, groundedSections: ["situation", "compass", "energy"] }).find((entry) => entry.id === "portrait_grounded")?.done).toBe(false);
+  // An energy habit is not a method; a method fact under any of the names the extraction writes is.
+  const habit = { identityId: "person", projectId: "", slot: "energy_habit", status: "confirmed", sourceRef: "reply-4", value: "晚上效率高" };
+  expect(interviewChecklist({ ...without, facts: [...without.facts, habit] }).find((entry) => entry.id === "portrait_grounded")?.done).toBe(false);
+  for (const slot of ["method_learning", "method_writing", "exam_prep_method", "work_style"]) {
+    const fact = { identityId: "person", projectId: "", slot, status: "confirmed", sourceRef: "reply-7", value: "先做一遍往年题，再回头看讲义" };
+    expect(interviewChecklist({ ...without, facts: [...without.facts, fact] }).find((entry) => entry.id === "portrait_grounded")?.done).toBe(true);
+  }
 });

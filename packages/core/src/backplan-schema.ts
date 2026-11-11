@@ -17,6 +17,7 @@ import { COMPLETION_FIELD, readModelCompletion, type ModelCompletion } from "./c
 import { tFor, type Locale } from "./i18n";
 import { textWidth } from "./text-width";
 import { isWorkOwner, workOwner, WORK_OWNERS, type WorkOwner, type WorkOwnerCode } from "./work-owner";
+import { backedDrillForms, screenDrillItems, stripDrillForms, stripDrillSentences } from "./drill-forms";
 export type BackplanStep = { id: string; title: string; intent: string; sourceQuote: string; rationale: string; dependsOn: string[];
   estimate: { p25Minutes: number; p50Minutes: number; p85Minutes: number };
   energy: "low" | "medium" | "high"; interruptible: boolean;
@@ -153,6 +154,21 @@ export function validateBackplan(value: unknown, sources: string[], dateSources 
     if (!answer.steps.some((step) => step.uses.includes(id))) throw new Error(`BACKPLAN_ARTIFACT_UNUSED: 其他主线的产物「${id}」至少要被一个任务用到（uses 里列出它）`); // i18n-ignore
   }
   return answer;
+}
+
+/**
+ * A backplan with the drill forms the person's own words do not back taken out (`drill-forms.ts`, 2026-11-10): cut from each item's title,
+ * description and evidence, an item that is only the drill dropped (its dependants take its dependencies). The quote stays verbatim.
+ */
+export function screenBackplanDrills<T extends BackplanStep>(steps: readonly T[], backing: readonly string[]): { items: T[]; stripped: string[]; dropped: string[] } {
+  const backed = backedDrillForms(backing);
+  const screened = screenDrillItems(steps, backed, ["intent", "evidence"]);
+  for (const item of screened.items) {
+    item.rationale = stripDrillSentences(item.rationale, backed) || item.title;
+    if (!item.intent.trim()) item.intent = item.title;
+    if (!item.evidence.trim()) item.evidence = stripDrillForms(item.title, backed) || item.title;
+  }
+  return screened;
 }
 
 /** A backplan item once its owner is settled: who does it, why, and for the assistant's and the questions the core item it prepares. */

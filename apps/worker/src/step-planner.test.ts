@@ -3,7 +3,7 @@ import { CrosslineStore, addAiTool } from "@crossline/db";
 import { OUTDATED_PLAN_FEEDBACK, createStepPlanner, createWarningReviewer, requestFinerSplits, requestOutdatedReplans, taskWindow, tasksAwaitingStepPlan, warningsAwaitingReview } from "./step-planner";
 import { materializeDatePairs } from "./date-pairs";
 import { taskFromWorkOrder } from "./agent-dispatch";
-import { scriptedRuntime } from "./testing/fake-runtime";
+import { recordedAnswer, scriptedRuntime } from "./testing/fake-runtime";
 
 const workspaceId = "w";
 const ownerId = "o";
@@ -362,4 +362,36 @@ test("a task's window starts on the person's own day, not the UTC one (W-18)", (
   const window = taskWindow(store, workspaceId, store.getWorkOrder(workspaceId, "wo")!, new Date("2026-10-17T23:30:00Z"));
   expect(window.notBefore).toBe("2026-10-18");
   store.close();
+});
+
+test("a drill form taken from an identity template is cut on the way to the ledger, and the person is asked how they work; their own words keep it", async () => {
+  // A recorded-style answer (testing/fixtures/step-plan-drill-form-from-identity.txt): 「做 2 套往年卷并订正」「整理错题本」 written because the
+  // person is a student, with nothing they said behind it (the owner's rule of 2026-11-10).
+  const answer = recordedAnswer("step-plan-drill-form-from-identity");
+  const run = async (facts: Array<{ slot: string; value: string }>) => {
+    const store = new CrosslineStore(":memory:");
+    seed(store);
+    for (const fact of facts) store.upsertProfileFact({ workspaceId, identityId: "person", projectId: "", slot: fact.slot, value: fact.value, status: "confirmed",
+      sourceRef: "reply-1", sourceQuote: fact.value, updatedAt: "2026-11-10T00:00:00Z" });
+    const runtime = scriptedRuntime(["crossline:crossline-step-planner", "crossline:crossline-validation-reviewer"],
+      (prompt) => prompt.includes("validation-review") ? JSON.stringify({ verdict: "dismiss", notes: "" }) : answer);
+    expect((await createStepPlanner(store, workspaceId, "C:\repo", () => runtime.rpc)("wo")).state).toBe("planned");
+    const saved = store.getStepPlan(workspaceId, "wo")!;
+    const assumed = store.listProfileFacts(workspaceId).filter((fact) => fact.status === "inferred").map((fact) => fact.value);
+    store.close();
+    return { saved, assumed };
+  };
+  const { saved, assumed } = await run([]);
+  const written = saved.steps.flatMap((item) => [item.title, item.deliverable, item.doneCriterion, item.firstAction ?? ""]).join(" ") + saved.rationale;
+  expect(written).not.toMatch(/订正|错题/);
+  expect(saved.steps.map((item) => item.title)).toEqual(["汇集 ECE 555 往年期中卷", "推导 L5–L6 P-N 结静电与 I-V", "做 2 套往年卷", "限时模拟一套期中卷"]);
+  // The mock waited on the dropped step; it now waits on what that step waited on.
+  expect(saved.steps[3]!.dependsOn).toEqual([saved.steps[2]!.id]);
+  // The method is asked, first, and the question about the 错题本 is gone; an assumed answer invents no method.
+  expect(saved.questions.map((question) => question.text)).toEqual(["平时怎么准备这类考试？", "期中考到第几讲？"]);
+  expect(assumed.join(" ")).not.toMatch(/订正|错题/);
+
+  const own = await run([{ slot: "method_exam_prep", value: "做完往年卷我习惯对着答案订正，错题记进错题本" }]);
+  expect(own.saved.steps.map((item) => item.title)).toEqual(["汇集 ECE 555 往年期中卷", "推导 L5–L6 P-N 结静电与 I-V", "做 2 套往年卷并订正", "整理错题本", "限时模拟一套期中卷"]);
+  expect(own.saved.questions.map((question) => question.text)).toEqual(["期中考到第几讲？", "错题本用纸质还是电子？"]);
 });

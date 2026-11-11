@@ -96,6 +96,12 @@ When an `existingTasks` entry already covers this capture's work (the same homew
 
 `blockers` stop the whole proposal, so use them only for: the project question above; work that would have to be done by the system outside the machine on the person's behalf (paying, trading, publishing as them); or **nothing** the work depends on being supplied. A partly supplied input is not a reason to stop: what is missing goes into `materialContract` (to hand over) or `humanCore` (only the person can find it out), and the proposal continues around it. No fitting milestone is never a reason to stop.
 
+## The form of the work
+
+What the person does comes from the capture's own words, what its result needs (first principles: a timed exam needs solving at its level against the clock, a hand-in needs the piece itself, a decision needs the call) and how `personProfile` says the person works. Never add a form from an identity template: 订正, 错题本, 背诵, 默写, 打卡, 刷题 and drills like them appear in `title`, `intent`, `humanCore` or `evidenceContract` only when the capture, a file or the person's profile says they work that way (nobody marks a university student's work). When it does not say how they do this kind of work, describe the work by its result and leave the method to the step planner, which asks them. The app cuts any drill form the person's words do not back.
+
+Capture 「下周三考 ECE 548 期中，想考到 85」 with nothing on how the person prepares: `humanCore` 「在计时条件下做完 1 套往年期中卷」 (quote 「想考到 85」), `evidenceContract` 「1 套限时往年卷的得分」; never 「做往年卷并订正错题」 or 「背诵公式」.
+
 ## A worked example
 
 Capture: 「周五前做完 ECE 548 HW3，第 2 题的推导还没看懂」, with the HW3 handout in `availableInputs`.

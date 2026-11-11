@@ -10,7 +10,7 @@ import { loadConversation } from "./conversation";
 import { TEST_CTX } from "./test-support";
 import { POST as healthPost } from "../app/api/health/sleep/route";
 
-afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); });
+afterEach(() => { globalThis.crosslineStore?.close(); globalThis.crosslineStore = undefined; vi.unstubAllEnvs(); vi.useRealTimers(); });
 const ws = TEST_CTX.workspaceId;
 const setup = () => { const store = globalThis.crosslineStore = new CrosslineStore(":memory:"); store.createPrincipalWithWorkspace("x", "y"); return store; };
 
@@ -93,6 +93,10 @@ test("with nights known and reports that agree, the model is sure enough for the
 });
 
 test("the phone's bed and wake moments become a night; the day's other readings are kept within range and merged per day", () => {
+  // The phone's nights are kept for the last 30 days from now (energy.ts): the clock is pinned to the night recorded below, or the test
+  // stops passing a month after it was written (it did on 2026-11-09).
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-11T00:00:00Z"));
   const store = setup();
   store.setSetting(ws, "health.phone", "granted");
   storeHealthSummary(ws, { events: [{ type: "bed", at: "2026-10-10T04:30:00Z" }, { type: "wake", at: "2026-10-10T12:10:00Z" }, { type: "nap", at: "2026-10-10T13:00:00Z" }] });

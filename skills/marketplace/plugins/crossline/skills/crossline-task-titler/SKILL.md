@@ -12,7 +12,7 @@ Input `{version: "crossline.task-titles.v1", tasks: [{id, intent, project}]}`: `
 - `title` is a short action starting with its verb, at most 24 characters, no closing punctuation.
 - Keep what tells tasks apart (course code, number, object); drop deadlines, reasons and how-to detail, which stay in the description.
 - A task in a course names the course: when `project` or the description carries a code such as 「ECE 555」, so does the title. Several courses run at once.
-- Never change what the task is, and never add an object the description does not name.
+- Never change what the task is, and never add an object the description does not name, nor a form it does not name (订正, 错题本, 背诵, 打卡 and drills like them).
 
 | description | 好 | 坏 |
 |---|---|---|

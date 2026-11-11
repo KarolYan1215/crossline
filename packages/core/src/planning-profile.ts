@@ -16,8 +16,8 @@ export type ProfileModelLike = {
 
 export const PLANNING_PROFILE_MAX_LINES = 14;
 const LINE_MAX = 160;
-/** Person facts about how they work, in the order a planner reads them. */
-const WORK_SLOTS = ["peak_work_time", "work_window", "energy_drain", "behavior_pattern", "flow", "line_constraint", "work_style",
+/** Person facts about how they work, in the order a planner reads them. `method` is the interview's 做事方法 (how they prepare, learn and write): the form of every task follows it (drill-forms.ts). */
+const WORK_SLOTS = ["peak_work_time", "work_window", "method", "energy_drain", "behavior_pattern", "flow", "line_constraint", "work_style",
   "focus", "rhythm", "sleep", "recovery", "collaboration"];
 const LEFT_OUT = /^(appearance|gender|hair|clothing|portrait|lunch|dinner|meal|age|name|appearance_skipped)/;
 
