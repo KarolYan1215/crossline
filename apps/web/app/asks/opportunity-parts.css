@@ -1,0 +1,28 @@
+/* The opportunity agent's parts of a card (docs/opportunity-agent.md §18). */
+.ak-tags{display:flex;flex-wrap:wrap;gap:4px;margin:0}
+.ak-tag-score{font-variant-numeric:tabular-nums;opacity:.8}
+
+.ak-form-preview{display:grid;gap:4px;padding:8px 10px;border:1px solid var(--mist);background:var(--chalk)}
+.ak-fp-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:0;font-size:13px}
+.ak-fp-head small{color:var(--graphite);font-size:12px}
+.ak-form-preview ul{list-style:none;margin:0;padding:0;display:grid;gap:2px;font-size:13px}
+.ak-form-preview li{display:grid;grid-template-columns:16px minmax(0,1fr) minmax(0,1.2fr);gap:6px;align-items:baseline}
+.ak-fp-label{display:flex;flex-direction:column;min-width:0}
+.ak-fp-label small{color:var(--graphite);font-size:11px}
+.ak-fp-value{overflow-wrap:anywhere;color:var(--ink)}
+.ak-form-preview li[data-state="held"] .ak-fp-value{color:var(--graphite)}
+.ak-form-preview li[data-state="missing"] .ak-fp-mark,.ak-form-preview li[data-state="missing"] .ak-fp-value{font-weight:600}
+
+.ak-form-track{display:grid;gap:6px;padding:8px 10px;border:1px solid var(--mist);background:var(--chalk)}
+.ak-ft-steps{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:4px 10px;font-size:13px}
+.ak-ft-steps li{display:inline-flex;align-items:center;gap:4px;color:var(--graphite)}
+.ak-ft-steps li[data-state="done"],.ak-ft-steps li[data-state="now"],.ak-ft-steps li[data-state="stuck"]{color:var(--ink)}
+.ak-ft-dot{width:8px;height:8px;border:1px solid currentColor;border-radius:50%}
+.ak-ft-steps li[data-state="done"] .ak-ft-dot{background:currentColor}
+.ak-ft-steps li[data-state="now"] .ak-ft-dot{background:repeating-linear-gradient(90deg,currentColor 0 2px,transparent 2px 4px)}
+.ak-ft-steps li[data-state="stuck"] .ak-ft-dot{border-radius:0;background:currentColor}
+.ak-ft-steps li[data-state="stuck"]{font-weight:600}
+.ak-ft-detail{margin:0;padding-left:18px;font-size:13px}
+.ak-ft-shot{display:grid;gap:4px}
+.ak-ft-shot-toggle{justify-self:start;font-size:13px;background:none;border:0;padding:0;color:var(--ink);text-decoration:underline;cursor:pointer}
+.ak-ft-shot img{display:block;max-width:100%;height:auto;border:1px solid var(--mist)}

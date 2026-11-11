@@ -163,7 +163,7 @@ export function buildWorld(facts: PersonFacts = BASE_PERSON): World {
     "Tuesday, November 17, 2026, 5:30 PM–7:30 PM EST, Kendall Square, Cambridge, MA.", "Free. Register by November 16, 2026."));
   page("https://hw-challenge.example/2026", html("Lakeshore Hardware Startup Challenge 2026",
     "The application deadline has been extended: originally October 30, 2026, now November 14, 2026.", "Apply online. No entry fee."));
-  page("https://madison-startups.example/events/founders-happy-hour", html("Madison Founders Happy Hour",
+  page("https://madison-startups.example/events/founders-happy-hour", html("Madison Hardware Founders Demo Night",
     "Wednesday, November 4, 2026, 6:00 PM–8:00 PM CST, Madison, WI.", "Free. Registration closes November 2, 2026 at 11:59 PM CST."));
   page("https://lakeshore-scicomm.example/fellowship", html("Lakeshore Science Communication Fellowship 2027", "Apply by December 5, 2026.",
     "Open to graduate students in any STEM field."));
@@ -293,7 +293,7 @@ const SEARCH: World["search"] = [
     organizer: "Lakeshore", kind: "application", deadlines: [at("2026-11-14", "now November 14, 2026")], cost: free("No entry fee.") }),
   adversarial: [reading({ url: "https://hw-challenge.example/2026", title: "Lakeshore Hardware Startup Challenge 2026", organizer: "Lakeshore", kind: "application",
     deadlines: [at("2026-10-30", "originally October 30, 2026")], cost: free("No entry fee.") })] },
-  { query: "madison founders happy hour", reading: reading({ url: "https://madison-startups.example/events/founders-happy-hour", title: "Madison Founders Happy Hour",
+  { query: "madison hardware founders demo night", reading: reading({ url: "https://madison-startups.example/events/founders-happy-hour", title: "Madison Hardware Founders Demo Night",
     organizer: "Madison Startups", kind: "event", deadlines: [at("2026-11-02", "Registration closes November 2, 2026 at 11:59 PM CST.")],
     startsAt: at("2026-11-04", "Wednesday, November 4, 2026, 6:00 PM–8:00 PM CST, Madison, WI."), cost: free("Free."), location: "Madison, WI" }) },
   { query: "science writing fellowship", reading: reading({ url: "https://lakeshore-scicomm.example/fellowship", title: "Lakeshore Science Communication Fellowship 2027",
@@ -345,7 +345,7 @@ export const SCENARIOS: Scenario[] = [
     because: "too_far", requires: ["feasibility"] },
   { id: "trip-local", lineId: "startup", title: "Kendall Hardware Startups Open House", covers: ["planted", "trip"], urls: ["https://cambridge-hardware.example/open-house"], expect: "push" },
   { id: "deadline-extended", lineId: "startup", title: "Lakeshore Hardware Startup Challenge 2026", covers: ["planted", "extended"], urls: ["https://hw-challenge.example/2026"], expect: "push" },
-  { id: "closes-tonight", lineId: "startup", title: "Madison Founders Happy Hour", covers: ["planted", "zone:CST", "local_today"],
+  { id: "closes-tonight", lineId: "startup", title: "Madison Hardware Founders Demo Night", covers: ["planted", "zone:CST", "local_today"],
     urls: ["https://madison-startups.example/events/founders-happy-hour"], expect: "push", requires: ["local_today"] },
   { id: "scicomm-planted", lineId: "media", title: "Lakeshore Science Communication Fellowship 2027", covers: ["planted"], urls: ["https://lakeshore-scicomm.example/fellowship"], expect: "push" },
   { id: "unverifiable-404", lineId: "media", title: "Global Science Writers Fellowship 2027", covers: ["unverifiable"], urls: ["https://sciwrite-fellows.example/2027"],
@@ -400,7 +400,7 @@ export function watchesFor(lineId: string, done: Set<string>): ProposedWatch[] {
   if (lineId === "startup") return [
     need("startup-events", "stream", "硬件创业活动", ["ms-startup-interviews"], 7, [
       { kind: "events", site: "devpost", query: "lakeshore" }, { kind: "web", query: "madison startup events november" },
-      { kind: "web", query: "hardware startup events boston november" }, { kind: "web", query: "madison founders happy hour" }]),
+      { kind: "web", query: "hardware startup events boston november" }, { kind: "web", query: "madison hardware founders demo night" }]),
     need("startup-competitions", "stream", "创业比赛", ["ms-startup-interviews"], 7, [{ kind: "web", query: "hardware startup challenge" }])
   ];
   if (lineId === "media") return [

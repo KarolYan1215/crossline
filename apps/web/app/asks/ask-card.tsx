@@ -7,6 +7,7 @@ import { SegmentedControl } from "../ui/controls";
 import { Clamp } from "../ui/clamp";
 import { RiskList } from "../milestones/risk-glyph";
 import { AskItems } from "./ask-items";
+import { AskTags, FormPreviewView, FormTrackView } from "./opportunity-parts";
 import { answerBody, answerProblem, askOutcome, askSources, shortDay } from "./model";
 import type { AskPreviewData } from "./types";
 import { useLocale, useT } from "../locale-context";
@@ -155,6 +156,7 @@ export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask
   return <li ref={cardRef} className="ask-card ak-card" data-line={ask.line} data-urgency={ask.urgency} data-kind={ask.kind}>
     <AskMeta ask={ask} />
     {level === 4 ? <h4 className="ak-title">{ask.title}</h4> : <h3 className="ak-title">{ask.title}</h3>}
+    {ask.tags && ask.tags.length > 0 && <AskTags tags={ask.tags} />}
     <dl className="ak-brief">
       <div><dt>{t("为何问")}</dt><dd><Clamp text={ask.why} className="ak-clamp" moreClassName="ak-more" /></dd></div>
       <div><dt>{t("答后")}</dt><dd>{outcome.answered}</dd></div>
@@ -163,6 +165,8 @@ export function AskCard({ ask, preview, onDone, level = 3, keys = false }: { ask
     {sources.length > 0 && <p className="ak-sources"><span>{t("来源")}</span>{sources.map((source) =>
       <a key={source.href} href={source.href} {...(source.href.startsWith("/api/") ? { target: "_blank", rel: "noreferrer" } : {})}>{source.label}</a>)}</p>}
     {ask.progress && <AgentProgressView progress={ask.progress} />}
+    {ask.formPreview && <FormPreviewView preview={ask.formPreview} />}
+    {ask.formTrack && <FormTrackView track={ask.formTrack} />}
     {ask.risks && <div className="ak-risks"><RiskList risks={ask.risks} gen /></div>}
     {ask.items && <AskItems items={ask.items} />}
     {ask.preview && <PreviewToggle href={ask.preview.href} label={ask.preview.label} data={preview} />}

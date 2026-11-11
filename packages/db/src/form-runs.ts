@@ -1,9 +1,10 @@
 import {
-  APPLICATION_SLOTS, FORM_RUNS_SETTING, SENSITIVE_PROFILE_SETTING, applySlotFact, assembleProfile, isSensitiveSlot,
+  APPLICATION_SLOTS, APPLY_KIT_SETTING, FORM_RUNS_SETTING, KIT_DOCUMENT_LABEL, editKit, readApplyKit, tFor, type ApplyKit, type KitEdit, SENSITIVE_PROFILE_SETTING, applySlotFact, assembleProfile, isSensitiveSlot,
   type ApplicationSlot, type Opportunity, type ProfileItem, type StoredFormRun
 } from "@crossline/core";
 import { randomUUID } from "node:crypto";
 import type { CrosslineStore } from "./index";
+import { readLocale } from "./locale";
 
 /**
  * The form filling's ledger side (docs/opportunity-agent.md §10–§12), shared by the worker that fills and the web app that shows the
@@ -37,7 +38,7 @@ export function saveFormRun(store: CrosslineStore, workspaceId: string, run: Sto
  * opportunity — pressing again returns the one already there. The registration host is the opportunity's own; nothing else is opened.
  */
 export function queueFormRun(store: CrosslineStore, workspaceId: string, input: { opportunity: Opportunity; choice: "register" | "apply"; at?: string;
-  drafts?: StoredFormRun["drafts"] }): StoredFormRun {
+  drafts?: StoredFormRun["drafts"]; kitVersion?: number }): StoredFormRun {
   const open = readFormRuns(store, workspaceId).find((run) => run.opportunityId === input.opportunity.id && !["confirmed", "stopped"].includes(run.state));
   if (open) return open;
   const host = input.opportunity.registrationHost.toLowerCase().replace(/^www\./, "");
@@ -45,7 +46,8 @@ export function queueFormRun(store: CrosslineStore, workspaceId: string, input: 
   const at = input.at ?? new Date().toISOString();
   const run: StoredFormRun = { id: `form-${randomUUID().slice(0, 12)}`, opportunityId: input.opportunity.id, host, state: "queued", pageNo: 0,
     filled: [], screenshots: [], engines: [], opportunity: input.opportunity, decision: { choice: input.choice, at, by: "person" },
-    queuedAt: at, updatedAt: at, pages: [], ...(input.drafts ? { drafts: input.drafts } : {}) };
+    queuedAt: at, updatedAt: at, pages: [], ...(input.drafts ? { drafts: input.drafts } : {}),
+    ...(input.kitVersion !== undefined ? { kitVersion: input.kitVersion } : {}) };
   return saveFormRun(store, workspaceId, run, { type: "opportunity.form.queued", payload: { choice: input.choice } });
 }
 
@@ -91,4 +93,44 @@ export function profileUsage(store: CrosslineStore, workspaceId: string): Partia
     for (const slot of slots) (usage[slot] ??= []).push({ runId: run.id, title: run.opportunity.title, at: run.updatedAt, state: run.state });
   }
   return usage;
+}
+
+// ———————————————————————————————————————— the 申请资料包 (§18.3)
+
+export const readKit = (store: CrosslineStore, workspaceId: string): ApplyKit => readApplyKit(store.getSetting(workspaceId, APPLY_KIT_SETTING));
+
+/** One edit of the kit as a new version, with its history line and an event; `changed: false` when nothing changed. */
+export function editApplyKit(store: CrosslineStore, workspaceId: string, edit: KitEdit, now = new Date()): { kit: ApplyKit; changed: boolean; id?: string } {
+  const t = tFor(readLocale(store, workspaceId));
+  const result = editKit(readKit(store, workspaceId), edit, { at: now.toISOString(), newId: () => randomUUID().slice(0, 8),
+    change: (applied, title) => applied.op === "answer" ? t("短答「{{title}}」", { title: title.slice(0, 40) })
+      : applied.op === "remove_answer" ? t("删去短答「{{title}}」", { title: title.slice(0, 40) })
+      : applied.op === "document" ? t("{{kind}}「{{title}}」", { kind: t(KIT_DOCUMENT_LABEL[applied.kind]), title: title.slice(0, 40) })
+      : t("删去文件「{{title}}」", { title: title.slice(0, 40) }) });
+  if (!result.changed) return result;
+  store.setSetting(workspaceId, APPLY_KIT_SETTING, JSON.stringify(result.kit));
+  store.appendEvent({ ownerId: ownerOf(store, workspaceId), workspaceId, type: "apply.kit.edited", entityId: String(result.kit.version),
+    idempotencyKey: `apply.kit:${result.kit.version}:${randomUUID().slice(0, 8)}`, payload: { version: result.kit.version, op: edit.op } });
+  return result;
+}
+
+// ———————————————————————————————————————— the preview before a run (§18.3)
+
+/** Opportunities whose 报名 the person pressed and whose per-field preview waits for 开始代填 (`{ opportunityId, at }[]`). */
+export const FORM_PREVIEWS_SETTING = "opportunity.formPreviews";
+export type FormPreview = { opportunityId: string; at: string };
+export function readFormPreviews(store: CrosslineStore, workspaceId: string): FormPreview[] {
+  try { const parsed = JSON.parse(store.getSetting(workspaceId, FORM_PREVIEWS_SETTING) ?? "[]") as FormPreview[]; return Array.isArray(parsed) ? parsed : []; }
+  catch { return []; }
+}
+export function openFormPreview(store: CrosslineStore, workspaceId: string, opportunityId: string, at: string): void {
+  const others = readFormPreviews(store, workspaceId).filter((item) => item.opportunityId !== opportunityId);
+  store.setSetting(workspaceId, FORM_PREVIEWS_SETTING, JSON.stringify([...others, { opportunityId, at }].slice(-50)));
+}
+export function closeFormPreview(store: CrosslineStore, workspaceId: string, opportunityId: string): boolean {
+  const list = readFormPreviews(store, workspaceId);
+  const rest = list.filter((item) => item.opportunityId !== opportunityId);
+  if (rest.length === list.length) return false;
+  store.setSetting(workspaceId, FORM_PREVIEWS_SETTING, JSON.stringify(rest));
+  return true;
 }

@@ -5,6 +5,7 @@
  * types and fixed vocabularies, nothing either track decides on its own.
  */
 import type { EventPlace, OpportunityCategory } from "./opportunity-watch";
+import type { OpportunityLineTag, OpportunityType } from "./opportunity-tags";
 
 /** A need worked out from a line's long-term goal: an outside gate the goal has to pass that the person has not planned for (§5). */
 export type OpportunityNeedKind = "cycle" | "stream";
@@ -71,6 +72,17 @@ export type Opportunity = {
   place?: EventPlace | undefined;
   /** Local event, conference, competition, internship… (§17.6); absent: `opportunityCategory` reads it from kind and title. */
   category?: OpportunityCategory | undefined;
+  /**
+   * Every line it may serve, ranked by code's relevance (docs/opportunity-agent.md §18, 2026-11-10; additive). `lineId` stays the first
+   * of them (or the line it was found under), so code reading one line keeps working. Rows read before were migrated (migration 24).
+   */
+  lines?: OpportunityLineTag[] | undefined;
+  /** 比赛 / 会议 / 实习 / 奖学金 / 项目申请 / 讲座 / 活动 / 社交 …, as the classifier gave it (§18). */
+  type?: OpportunityType | undefined;
+  /** One sentence: why it is worth the person's time (the classifier's). */
+  reason?: string | undefined;
+  /** A social gathering not tied to a line's goal (§18 item 2): kept for dedupe, never pushed. */
+  lowValue?: "social" | undefined;
 };
 
 export type EligibilityVerdict =

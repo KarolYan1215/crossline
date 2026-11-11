@@ -4,6 +4,7 @@ import {
   EXPLORE_SHARE, LOCAL_MINUTES_MAX, OUTCOME_WEIGHT, RETIRE_AFTER_RUNS, RETIRE_QUIET_DAYS, WATCH_TOOLS,
   type Feasibility, type LessFeedback, type OpportunityOutcome, type Watch, type WatchStats, type WatchTarget, type WatchTool
 } from "./opportunity-watch";
+import { OPPORTUNITY_TYPE_LABEL, type RawClassification, QUIET_TYPE_RELEVANCE, bestRelevance, opportunityTypeOf, type OpportunityType, type TaggedOpportunity } from "./opportunity-tags";
 
 /**
  * Track ① of the opportunity agent's second version (docs/opportunity-agent.md §17.2–17.4): watches as the ledger keeps them, the
@@ -49,6 +50,11 @@ export type WatchTuning = {
   badTimes: Array<{ id: string; weekday: number; part: DayPart }>;
   knownHosts: string[];
   sourceWeights: Record<string, number>;
+  /**
+   * Types the person asked for less of with 少来这类 (§18 item 2, 2026-11-10): a quiet type comes only at `QUIET_TYPE_RELEVANCE`, a quiet
+   * social gathering never. Optional: tuning written before has none.
+   */
+  quietTypes?: Array<{ id: string; type: OpportunityType }> | undefined;
 };
 export type DayPart = "morning" | "afternoon" | "evening" | "any";
 
@@ -66,6 +72,7 @@ export type LessEntry = LessFeedback & {
     knownHost?: string | undefined;
     sourceWeight?: { host: string; before: number | null } | undefined;
     preferenceRef?: string | undefined;
+    quietTypeId?: string | undefined;
   };
   undoneAt?: string | undefined;
 };
@@ -384,7 +391,7 @@ export const weekdayOf = (day: string) => new Date(`${day}T00:00:00Z`).getUTCDay
 export const hostKey = (url: string) => { try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
 
 export type SurfaceInput = {
-  opportunity: Pick<Opportunity, "url" | "startsAt">;
+  opportunity: Pick<Opportunity, "url" | "startsAt"> & Partial<Pick<Opportunity, "kind" | "title">> & Partial<TaggedOpportunity>;
   verdict: { state: string };
   feasibility?: Feasibility | undefined;
   watch?: Pick<StoredWatch, "weight" | "strictness" | "state"> | undefined;
@@ -395,6 +402,13 @@ export function holdBack(input: SurfaceInput): string | undefined {
   const { opportunity, verdict, feasibility, watch, tuning } = input;
   if (verdict.state === "ineligible") return "ineligible";
   if (feasibility?.state === "infeasible") return "infeasible";
+  // A dance, a coffee hour, a mentor mixer: not tied to a line whose goal is meeting people in its field (§18 item 2).
+  if (opportunity.lowValue === "social") return "low_value_social";
+  const quiet = new Set((tuning.quietTypes ?? []).map((item) => item.type));
+  if (quiet.size && opportunity.title !== undefined && opportunity.kind !== undefined) {
+    const type = opportunityTypeOf({ kind: opportunity.kind, title: opportunity.title, type: opportunity.type });
+    if (quiet.has(type) && (type === "social" || bestRelevance({ lineId: opportunity.lineId ?? "", lines: opportunity.lines }) < QUIET_TYPE_RELEVANCE)) return "quiet_type";
+  }
   const host = hostKey(opportunity.url);
   if (tuning.knownHosts.includes(host)) return "known_source";
   if ((tuning.sourceWeights[host] ?? 1) < SOURCE_WEIGHT_FLOOR) return "untrusted_source";
@@ -414,11 +428,13 @@ type Translate = (key: string, values?: Record<string, unknown>) => string;
  * One 「少来」: scope `kind` doubles the watch's period and raises its bar; each reason changes its own thing; a note becomes a
  * preference the next derivation reads (written by the caller, whose ref is given back in `undo`). Pure: the caller saves all three.
  */
-export function applyLess(input: { feedback: LessFeedback; watch?: StoredWatch | undefined; tuning: WatchTuning; opportunity: Pick<Opportunity, "id" | "url" | "title" | "lineId" | "startsAt">;
+export function applyLess(input: { feedback: LessFeedback; watch?: StoredWatch | undefined; tuning: WatchTuning;
+  opportunity: Pick<Opportunity, "id" | "url" | "title" | "lineId" | "startsAt"> & Partial<Pick<Opportunity, "kind" | "type">>;
   failedRules: string[]; id: string; at: string; t: Translate }): { watch?: StoredWatch | undefined; tuning: WatchTuning; entry: LessEntry } {
   const { feedback, opportunity, t } = input;
   let watch = input.watch;
-  let tuning: WatchTuning = { badTimes: [...input.tuning.badTimes], knownHosts: [...input.tuning.knownHosts], sourceWeights: { ...input.tuning.sourceWeights } };
+  let tuning: WatchTuning = { badTimes: [...input.tuning.badTimes], knownHosts: [...input.tuning.knownHosts], sourceWeights: { ...input.tuning.sourceWeights },
+    ...(input.tuning.quietTypes ? { quietTypes: [...input.tuning.quietTypes] } : {}) };
   const changes: string[] = [];
   const undo: LessEntry["undo"] = {};
   const keepWatch = (fields: Partial<StoredWatch>) => {
@@ -433,6 +449,16 @@ export function applyLess(input: { feedback: LessFeedback; watch?: StoredWatch |
     const everyDays = Math.min(watch.everyDays * 2, 180);
     keepWatch({ everyDays, strictness: watch.strictness + 1 });
     changes.push(t("「{{title}}」改为每 {{days}} 天看一次，门槛提高一级", { title: watch.title, days: everyDays }));
+  }
+  // 少来这类 also learns the type (§18 item 2): this kind of thing comes only when it is very relevant to a line, a social gathering never.
+  if (feedback.scope === "kind" && opportunity.kind) {
+    const type = opportunityTypeOf({ kind: opportunity.kind, title: opportunity.title, type: opportunity.type });
+    if (type !== "other" && !(tuning.quietTypes ?? []).some((item) => item.type === type)) {
+      tuning = { ...tuning, quietTypes: [...(tuning.quietTypes ?? []), { id: input.id, type }] };
+      undo.quietTypeId = input.id;
+      changes.push(type === "social" ? t("社交类聚会以后不推")
+        : t("「{{type}}」类以后只推和主线目标特别相关的", { type: t(OPPORTUNITY_TYPE_LABEL[type]) }));
+    }
   }
   switch (feedback.reason) {
     case "off_topic":
@@ -487,6 +513,7 @@ export function undoLess(entry: LessEntry, watch: StoredWatch | undefined, tunin
   let next = tuning;
   if (entry.undo.badTimeId) next = { ...next, badTimes: next.badTimes.filter((item) => item.id !== entry.undo.badTimeId) };
   if (entry.undo.knownHost) next = { ...next, knownHosts: next.knownHosts.filter((host) => host !== entry.undo.knownHost) };
+  if (entry.undo.quietTypeId) next = { ...next, quietTypes: (next.quietTypes ?? []).filter((item) => item.id !== entry.undo.quietTypeId) };
   if (entry.undo.sourceWeight) {
     const { host, before } = entry.undo.sourceWeight;
     const weights = { ...next.sourceWeights };
@@ -510,7 +537,9 @@ export type ScoutFind = { url: string; title: string; organizer: string; kind: "
   deadlines: Array<{ day: string; quote: string }>; startsAt?: { day: string; quote: string } | undefined;
   cost?: { known: boolean; amount: number; currency: string; quote: string } | undefined; location?: string | undefined;
   eligibility?: EligibilityTerm[] | undefined; needsAccount?: boolean | undefined; materials?: string[] | undefined; consents?: string[] | undefined;
-  registrationUrl?: string | undefined; why?: string | undefined };
+  registrationUrl?: string | undefined; why?: string | undefined;
+  /** Its type, reason and lines as the scout gave them (§18); code judges them again (`classifyFind`). */
+  classification?: RawClassification | undefined };
 export type ScoutFile = { opportunities: ScoutFind[]; watches: Array<ProposedWatch & { lineId: string }>; notes: string[] };
 
 /** The scout's file read leniently: anything with the wrong shape is left out rather than failing the whole week's run. */
@@ -523,7 +552,13 @@ export function readScoutFile(value: unknown, lineIds: string[]): ScoutFile {
   const opportunities = (Array.isArray(raw.opportunities) ? raw.opportunities : []).slice(0, 12).flatMap((item): ScoutFind[] => {
     if (!item || typeof item !== "object") return [];
     const find = item as Record<string, unknown>;
-    const url = str(find.url), lineId = str(find.lineId, 80);
+    const claimed = (Array.isArray(find.lines) ? find.lines : []).flatMap((entry): RawClassification["lines"] => {
+      const value = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
+      const id = str(value.lineId, 80);
+      return lines.has(id) ? [{ lineId: id, confidence: typeof value.confidence === "number" ? value.confidence : 0, reason: str(value.reason, 160),
+        anchors: (Array.isArray(value.anchors) ? value.anchors : []).map((anchor) => str(anchor, 160)).filter(Boolean) }] : [];
+    }).slice(0, 4);
+    const url = str(find.url), lineId = lines.has(str(find.lineId, 80)) ? str(find.lineId, 80) : claimed[0]?.lineId ?? "";
     if (!/^https:\/\//.test(url) || !lines.has(lineId) || !str(find.title)) return [];
     const startsAt = dated(find.startsAt);
     const terms = (Array.isArray(find.eligibility) ? find.eligibility : []).flatMap((term): EligibilityTerm[] => {
@@ -538,7 +573,9 @@ export function readScoutFile(value: unknown, lineIds: string[]): ScoutFile {
       deadlines: (Array.isArray(find.deadlines) ? find.deadlines : []).map(dated).filter((item): item is { day: string; quote: string } => Boolean(item)),
       ...(startsAt ? { startsAt } : {}), ...(cost && typeof cost === "object" ? { cost } : {}), location: str(find.location, 200), eligibility: terms,
       needsAccount: find.needsAccount === true, materials: (Array.isArray(find.materials) ? find.materials : []).map((m) => str(m, 120)).filter(Boolean),
-      consents: (Array.isArray(find.consents) ? find.consents : []).map((c) => str(c, 300)).filter(Boolean), registrationUrl: str(find.registrationUrl), why: str(find.why, 300) }];
+      consents: (Array.isArray(find.consents) ? find.consents : []).map((c) => str(c, 300)).filter(Boolean), registrationUrl: str(find.registrationUrl), why: str(find.why, 300),
+      classification: { type: str(find.type, 40), reason: str(find.reason, 160) || str(find.why, 160),
+        lines: claimed.length ? claimed : [{ lineId, confidence: 0.5, reason: str(find.why, 160), anchors: [] }] } }];
   });
   const watches = (Array.isArray(raw.watches) ? raw.watches : []).slice(0, 6).flatMap((item): ScoutFile["watches"] => {
     const value = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;

@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync } from "node:fs";
-import { tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria,
+import { mergeLineTags, migratedTags, tFor, chunkText, ftsMatchExpression, searchTerms, SEGMENTER_VERSION, segmentText, type LedgerQuestion, byproductArtifactId, advanceWorkOrder, validateAnalysisProposal, validateAnalysisContext, validateMilestoneGateResult, requiredContractRequirements, validateSuccessCriteria,
   currentMineVersion, mineSkillSettingKey, readMineSkill, acceptanceStandardLines,
   type MilestoneGateResult, type SuccessCriterion, type WorkOrderEvent, type WorkOrderState,
   type MilestoneTemplateKind, type EvidenceQuestionTemplate, type MilestoneTemplateSource,
@@ -1326,6 +1326,20 @@ export class CrosslineStore {
             confirmed_by TEXT NOT NULL DEFAULT '', found_at TEXT NOT NULL, updated_at TEXT NOT NULL,
             PRIMARY KEY(workspace_id, id), UNIQUE(workspace_id, key));
           CREATE INDEX IF NOT EXISTS opportunities_by_line ON opportunities(workspace_id, line_id, deadline);`);
+      } },
+      // Opportunities serve several lines (docs/opportunity-agent.md §18, 2026-11-10): each record carries `lines` (line, the model's
+      // confidence, code's relevance, a reason) and a `type` in its JSON; `line_id` stays the first line. Rows read before get their one
+      // line as a migrated tag at the push threshold — they were shown under the old rules — and a type read from their title.
+      { version: 24, up: () => {
+        const rows = this.#db.prepare("SELECT workspace_id, id, line_id, data_json FROM opportunities").all() as Array<{ workspace_id: string; id: string; line_id: string; data_json: string }>;
+        const update = this.#db.prepare("UPDATE opportunities SET data_json = ? WHERE workspace_id = ? AND id = ?");
+        for (const row of rows) {
+          let data: Record<string, unknown>;
+          try { data = JSON.parse(row.data_json) as Record<string, unknown>; } catch { continue; }
+          if (Array.isArray(data.lines)) continue;
+          const tags = migratedTags({ lineId: row.line_id, kind: data.kind === "event" ? "event" : "application", title: String(data.title ?? "") });
+          update.run(JSON.stringify({ ...data, lines: tags.lines, type: data.type ?? tags.type }), row.workspace_id, row.id);
+        }
       } }
     ];
 
@@ -3194,7 +3208,10 @@ export class CrosslineStore {
    */
   saveOpportunity(workspaceId: string, input: { opportunity: Opportunity; terms: EligibilityTerm[]; verdict: EligibilityVerdict; feasibility?: Feasibility | undefined },
     now = new Date().toISOString()): { inserted: boolean; row: StoredOpportunity } {
-    const { opportunity, terms, verdict } = input;
+    const { terms, verdict } = input;
+    // Seen again (another watch, a mail, the scout), its lines are the union of every reading, each at its best relevance.
+    const before = this.listOpportunities(workspaceId, { key: input.opportunity.key })[0];
+    const opportunity = before?.lines?.length && input.opportunity.lines ? mergeLineTags(before, input.opportunity) : input.opportunity;
     const deadline = [...opportunity.deadlines].map((item) => item.day).sort()[0] ?? "";
     const data = JSON.stringify({ ...opportunity, terms, ...(input.feasibility ? { feasibility: input.feasibility } : {}) });
     const inserted = this.#prepare(`INSERT OR IGNORE INTO opportunities (workspace_id, id, key, line_id, need_id, kind, title, deadline, data_json, verdict, verdict_json,
@@ -3211,7 +3228,8 @@ export class CrosslineStore {
   }
 
   listOpportunities(workspaceId: string, filter: { key?: string; id?: string; lineId?: string } = {}): StoredOpportunity[] {
-    const where = [["key", filter.key], ["id", filter.id], ["line_id", filter.lineId]].filter(([, value]) => value !== undefined) as Array<[string, string]>;
+    // A line filter matches any line the record serves (§18), not only its first: read in code below.
+    const where = [["key", filter.key], ["id", filter.id]].filter(([, value]) => value !== undefined) as Array<[string, string]>;
     const rows = this.#prepare(`SELECT * FROM opportunities WHERE workspace_id = ? ${where.map(([column]) => `AND ${column} = ?`).join(" ")} ORDER BY deadline = '', deadline, found_at`)
       .all(workspaceId, ...where.map(([, value]) => value)) as Array<Record<string, string>>;
     return rows.map((row) => {
@@ -3221,7 +3239,7 @@ export class CrosslineStore {
       return { ...opportunity, id: row.id!, terms: terms ?? [], verdict: JSON.parse(row.verdict_json!) as EligibilityVerdict,
         decision: (row.decision || undefined) as OpportunityDecision | undefined, decidedAt: row.decided_at || undefined,
         laterUntil: row.later_until || undefined, confirmedBy: row.confirmed_by || undefined, updatedAt: row.updated_at!, ...(feasibility ? { feasibility } : {}) };
-    });
+    }).filter((row) => filter.lineId === undefined || row.lineId === filter.lineId || (row.lines ?? []).some((tag) => tag.lineId === filter.lineId));
   }
 
   /** The person's answer on the offer card; `later` keeps it quiet until `laterUntil`, and a later answer replaces it. */

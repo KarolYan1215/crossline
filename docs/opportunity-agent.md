@@ -650,6 +650,41 @@
 
 **证据**：`scripts/opportunity-check.ts needs` 已改用监视项，在真实账本副本上用替身回答跑通：推导出一个监视项，「盯住」后变为运行中。测试见 `packages/core/src/opportunity-watches.test.ts`、`packages/db/src/opportunity-watches.test.ts`、`apps/worker/src/opportunities.test.ts`、`apps/web/lib/opportunities.test.ts`。
 
+## 18. 第三版：标签、主线相关度、低价值社交、类 Muse 报名（本人 2026-11-10 定）
+
+### 18.0 本人定下的
+1. 一条机会可同属多条主线，每条带置信度；另有一个类型标签（比赛 / 会议 / 实习 / 奖学金 / 项目申请 / 讲座 / 活动 / 社交 / 工作 / 资助 / 其他）和一句理由。读页面的 `crossline-opportunity-reader` 与每周侦察给出结构化分类；**代码**再按每条线的长期目标和里程碑复核相关度，按相关度排序。相关度不够的不推卡片，进周复盘「视野外」。邮件候选用同一套分类，不再按关键词归线。
+2. 舞会、coffee hour、导师交流会、社交酒会这类低价值社交直接不推，除非某条线的长期目标明确要结识人（如「结识早期投资人」）。「少来这类」学的是类型。
+3. 类 Muse 报名：可反复编辑、带版本的「申请资料包」；开跑前逐项预览；进度与截图在卡片上；提交后回执 → 固定日程 → 日历。`autoSubmitProblems` 的自动提交门槛一条不改。
+4. 旧的单 `lineId` 记录迁移过来。
+
+### 18.1 分类与相关度（`packages/core/src/opportunity-tags.ts`）
+- 模型给 `type`、`reason`、`lines[{lineId, confidence, reason, anchors}]`（`CLASSIFICATION_PROPERTIES`，reader 的 item 与侦察的 `scout.json` 都带）。`anchors` 只能是该线的里程碑 id 或 `goal`。
+- `classifyFind` 由代码定：未知的线丢掉；每条声明的相关度 `relevanceOf` = 模型置信度，**不是**经该线自己的监视项找到时：没有有效锚点封顶 0.45，和线的目标/里程碑/监视项检索词一个词都不共享封顶 0.5；再 `+(overlap−0.5)×0.2`，经该线自己的监视项 +0.1。低于 `KEEP_RELEVANCE`（0.25）的标签不存。
+- 为什么用词重叠而不用 embedding：本机唯一的嵌入模型是声纹的；多语种文本编码器要再下载约 100 MB；线的监视项检索词本来就是英文页面与中文目标之间的桥。重叠只用来**压低**没根据的高置信，不用来抬高。
+- 推送：`pushable` = 最高相关度 ≥ `PUSH_RELEVANCE`（0.6）且不是低价值社交。`surfacedOpportunities` 按最高相关度排序；不够的进「视野外」（`loadOutOfView` 的 finds 标 `because: "relevance"`）。卡片上显示类型与各线相关度（`Ask.tags`），理由以「为什么值得看：」开头。
+- 截止库条目（不经模型）挂在监视项的线上，置信度 0.8，锚点是监视项依据的里程碑。
+
+### 18.2 低价值社交
+- 只看标题和主办方里的词（`socialSigns`：ball、gala、coffee hour、happy hour、mixer、networking night、舞会、酒会、联谊、导师交流会 …），比赛 / 会议 / 实习 / 奖学金 / 项目申请 / 工作 / 资助不会因带一场 mixer 变成社交。
+- 类型为社交、且没有一条线在 ≥0.6 上目标匹配「结识/人脉/投资人/合伙人/招募…」（`NETWORKING`）时记 `lowValue: "social"`，`holdBack` 返回 `low_value_social`，**连视野外也不进**（记录仍保留，供结果记账）。
+- 「少来这类」把类型记进 `WatchTuning.quietTypes`：社交以后不推；别的类型以后只推相关度 ≥0.8 的。撤销只删这一条。
+- 夹具：`apps/worker/src/testing/fixtures/opportunity-mail-social-and-lines.json`（五个社交聚会不推、创始人与天使之夜推到创业线、Badger Hacks 同属研究与创业、瑜伽课不推）。
+
+### 18.3 申请资料包与报名流程（`packages/core/src/apply-kit.ts`、`packages/db/src/form-runs.ts`）
+- 资料包在设置 `apply.kit`：短答（≤12，每条 ≤4000 字）与文件（简历、成绩单、作品集、推荐信、其他；≤12，**只记名称和本机路径，代填尚不上传文件**）。每次修改升一个版本并写一行版本记录（事件 `apply.kit.edited`）。设置 → 报名资料卡里编辑（`POST /api/apply-kit`）。
+- 报名 → 先出预览卡 `opppre:<id>`（`previewFields`）：姓名、邮箱总在；资格维度、材料、同意项逐项列出，标「已备好 / 缺 / 已加密保存」；敏感项只说是否已存。缺的非敏感项可直接在卡上填（先存进资料）。「开始代填」才排队，run 记下 `kitVersion`；短答作为 `kit-<id>` 草稿传入——用了草稿的 run 由原有「有文书字段」门槛停在提交前，门槛本身不改。
+- 进度卡 `oppform:<run>` 带 `formTrack`：排队 → 填写第 N 页 → 本人核对 → 提交 → 回执 → 进日历，最新截图可展开，运行中每 8 秒刷新。回执与日历沿用 §11 的一条路。
+
+### 18.4 迁移
+- 迁移 **24**（`packages/db/src/index.ts`）：没有 `lines` 的旧机会行补一条迁移标签（原 `lineId`，相关度 = 推送线，`migrated: true`）和从标题推断的类型，所以旧行照旧推送。之后重新读到同一机会时，判过的标签替换迁移标签（`mergeLineTags`）。并行模块若也加了 24，合并时顺延编号。
+- `listOpportunities({ lineId })` 现在匹配主线或任一标签线。
+
+### 18.5 没做的与没验的
+- 需求（`crossline-opportunity-needs`）不给分类：它提的是监视项，本来就属于一条线；分类在 reader 与侦察那一步。
+- 没有用真实模型跑过新的结构化输出；验证是替身回答 + 夹具 + 浏览器预览（一次性实例）。
+- 资料包里的文件只做引用，未接入上传。
+
 ## 附：来源
 
 - Meta Muse：见第 1 节。

@@ -429,6 +429,8 @@ export type StoredFormRun = FormRun & {
   sessionLost?: boolean;
   /** Approved drafts for long answers, by id, and the file each upload may use. */
   drafts?: Record<string, { text: string; version: string }>;
+  /** The 申请资料包 version its kit drafts came from (§18.3), when it took any. */
+  kitVersion?: number;
 };
 
 export const FORM_RUNS_SETTING = "opportunity.formRuns";

@@ -573,6 +573,8 @@ export * from "./automations";
 export * from "./device";
 export * from "./opportunity";
 export * from "./opportunity-discovery";
+export * from "./opportunity-tags";
+export * from "./apply-kit";
 export * from "./opportunity-watch";
 export * from "./opportunity-watches";
 export * from "./feasibility";

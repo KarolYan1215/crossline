@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { CrosslineStore, readWatchList, readWatchTuning, saveFormRun, saveWatchList } from "@crossline/db";
+import { CrosslineStore, applicationProfile, readFormRuns, readWatchList, readWatchTuning, saveFormRun, saveWatchList } from "@crossline/db";
 import { RUNTIME_OWNER_SETTING, emptyStats, validateAskAnswer, type Ask, type Opportunity, type StoredFormRun, type StoredWatch } from "@crossline/core";
 vi.mock("server-only", () => ({}));
 vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({})), CodexSupervisorRequestError: class extends Error {} }));
@@ -88,14 +88,31 @@ test("after 报名 the card shows the form filler's progress until a day after i
   saveWatchList(store, ws, [watch({ state: "active" })]);
   const row = save(store);
   const card = offer(opportunityOfferAsks(TEST_CTX, NOW), "opp:opp-1");
+  expect(card.tags?.[0]).toMatchObject({ kind: "type" });
   expect(await answerOpportunityOffer(TEST_CTX, card, "register", {}, NOW)).toEqual({ ok: true });
+  // 报名 first shows the per-field preview (§18.3); nothing is queued until 开始代填.
+  const asks = opportunityOfferAsks(TEST_CTX, NOW);
+  expect(asks.some((ask) => ask.id === "opp:opp-1")).toBe(false);
+  const preview = offer(asks, "opppre:opp-1");
+  expect(preview.formPreview?.rows.map((item) => item.key)).toEqual(expect.arrayContaining(["slot:full_name", "slot:email"]));
+  expect(readFormRuns(store, ws)).toEqual([]);
+  const start = preview.options.find((option) => option.id === "start")!;
+  expect(start.fields?.map((field) => field.id)).toEqual(expect.arrayContaining(["slot_full_name", "slot_email"]));
+  expect(await answerOpportunityOffer(TEST_CTX, preview, "start", { slot_full_name: "Qiao Lin", slot_email: "qiao@example.edu" }, NOW)).toEqual({ ok: true });
+  expect(applicationProfile(store, ws).find((item) => item.slot === "full_name")?.value).toBe("Qiao Lin");
+  expect(opportunityOfferAsks(TEST_CTX, NOW).some((ask) => ask.id.startsWith("opppre:"))).toBe(false);
   const progress = () => opportunityOfferAsks(TEST_CTX, NOW).find((ask) => ask.id.startsWith("oppform:"));
   expect(progress()?.title).toContain("填写中");
+  expect(progress()?.formTrack?.steps.map((step) => step.state)).toEqual(["now", "todo", "todo", "todo", "todo", "todo"]);
   expect(progress()?.options).toEqual([expect.objectContaining({ href: "/settings#apply" })]);
   const run = { id: "run-1", opportunityId: row.id, opportunity: row, host: "lab.example.org", state: "waiting_person", pageNo: 2,
     queuedAt: NOW.toISOString(), updatedAt: NOW.toISOString(), pages: [], screenshots: [] } as unknown as StoredFormRun;
   saveFormRun(store, ws, run);
   expect(progress()?.title).toContain("等本人");
+  expect(progress()?.formTrack?.steps.find((step) => step.id === "person")?.state).toBe("stuck");
+  saveFormRun(store, ws, { ...run, state: "confirmed", screenshots: ["a.png"], calendarEventId: "opportunity-opp-1", confirmation: { quote: "You're in", kind: "confirmed", at: NOW.toISOString() } });
+  expect(progress()?.formTrack).toMatchObject({ live: false, shots: 1, shot: { href: "/api/forms/run-1/shot?n=-1&v=1" } });
+  expect(progress()?.formTrack?.steps.every((step) => step.state === "done")).toBe(true);
   saveFormRun(store, ws, { ...run, state: "confirmed", updatedAt: "2026-10-30T00:00:00.000Z", confirmation: { quote: "You're in", kind: "confirmed", at: "2026-10-30T00:00:00.000Z" } });
   expect(progress()).toBeUndefined();
 });
@@ -140,4 +157,20 @@ test("the hosted beta's machine owner has the agent; a guest there does not", as
   expect(opportunityOwner(TEST_CTX)).toBe(true);
   const guest = store.createPrincipalWithWorkspace("g", "g").workspace.id;
   expect(opportunityOwner({ ...TEST_CTX, workspaceId: guest })).toBe(false);
+});
+
+test("offers carry their type and lines, most relevant first; one no line holds waits in 视野外 with its tags (§18)", () => {
+  const store = setup();
+  saveWatchList(store, ws, [watch({ state: "active" })]);
+  const tag = (lineId: string, relevance: number) => ({ lineId, confidence: relevance, relevance, reason: `${lineId} 理由`, anchors: ["goal"] });
+  save(store, { id: "opp-a", key: "ka", title: "Workshop A", type: "conference", lines: [tag("research", 0.66)], reason: "正对论文；" });
+  save(store, { id: "opp-b", key: "kb", title: "Hackathon B", type: "competition", lines: [tag("startup", 0.9), tag("research", 0.7)] });
+  save(store, { id: "opp-c", key: "kc", title: "Mixer C", type: "social", lines: [tag("research", 0.4)] });
+  const offers = opportunityOfferAsks(TEST_CTX, NOW).filter((ask) => ask.id.startsWith("opp:"));
+  expect(offers.map((ask) => ask.entityId)).toEqual(["opp-b", "opp-a"]);
+  expect(offers[0]!.tags?.map((item) => [item.kind, item.score ?? null])).toEqual([["type", null], ["line", 90], ["line", 70]]);
+  // The reason ends in its own full stop, so the deadline sentence after it does not run on.
+  expect(offers[1]!.why).toMatch(/^为什么值得看：正对论文。/);
+  const out = loadOutOfView(TEST_CTX, NOW).finds;
+  expect(out.map((find) => [find.id, find.because])).toEqual([["opp-c", "relevance"]]);
 });

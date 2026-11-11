@@ -110,6 +110,23 @@ export type Ask = {
    * level, kinds — instead of one sentence naming all of them (2026-10-21 walkthrough: 25 milestones in one `why`).
    */
   items?: AskItem[];
+  /** Chips under the title: an opportunity's type and the lines it serves with code's relevance (docs/opportunity-agent.md §18). */
+  tags?: AskTag[];
+  /** Before a sign-up starts: what the form filler expects to use, field by field, from the profile and the 申请资料包 (§18.3). */
+  formPreview?: AskFormPreview;
+  /** While and after a sign-up runs: its steps, the latest screenshot and where the receipt and the calendar stand (§18.3). */
+  formTrack?: AskFormTrack;
+};
+export type AskTag = { kind: "type" | "line"; label: string; line?: string; score?: number; title?: string };
+export type AskFormPreview = { kitVersion: number; rows: Array<{ key: string; label: string; value?: string; state: "ready" | "held" | "missing"; source: string }> };
+export type AskFormTrack = {
+  steps: Array<{ id: string; label: string; state: "done" | "now" | "todo" | "stuck" }>;
+  /** The run's latest screenshot (sensitive fields masked when taken). */
+  shot?: { href: string; label: string } | undefined;
+  shots: number;
+  /** Still moving by itself: the card refreshes while true. */
+  live: boolean;
+  detail: string[];
 };
 export type AskItem = { id: string; title: string; dueDay?: string; line?: string; href?: string; risks?: MilestoneRisk[] };
 export type AskPreview = { kind: "portrait" | "milestones" | "plan" | "task" | "file" | "agent"; href: string; label: string };

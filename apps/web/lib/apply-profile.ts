@@ -1,5 +1,6 @@
 import { RUNTIME_OWNER_SETTING } from "@crossline/core";
-import { applicationProfile, assistantAvailable, nodeComputeOn, profileUsage, readFormRuns } from "@crossline/db";
+import { applicationProfile, assistantAvailable, nodeComputeOn, profileUsage, readFormRuns, readKit } from "@crossline/db";
+import type { ApplyKit } from "@crossline/core";
 import type { ApplyItem, ApplyRun } from "../app/settings/apply-card";
 import { getStore } from "./crossline";
 
@@ -8,7 +9,7 @@ import { getStore } from "./crossline";
  * held — and every registration run, shortened to what the card shows. Undefined for any workspace but the machine owner's and an
  * account that paired its own computer as a compute node (its forms are filled in that computer's browser, docs/compute-node.md).
  */
-export function loadApplyCard(workspaceId: string): { items: ApplyItem[]; runs: ApplyRun[]; screen: boolean } | undefined {
+export function loadApplyCard(workspaceId: string): { items: ApplyItem[]; runs: ApplyRun[]; screen: boolean; kit: ApplyKit } | undefined {
   const store = getStore();
   const owner = store.getSetting(workspaceId, RUNTIME_OWNER_SETTING) === "1" || assistantAvailable(store, workspaceId) || nodeComputeOn(store, workspaceId);
   if (!owner) return undefined;
@@ -26,5 +27,5 @@ export function loadApplyCard(workspaceId: string): { items: ApplyItem[]; runs: 
     calendar: Boolean(run.calendarEventId), updatedAt: run.updatedAt
   }));
   // The web cannot see the worker's screen; the worker refuses a queue without one, which the card says when it happens.
-  return { items, runs, screen: process.env.CROSSLINE_PUBLIC_BETA !== "1" };
+  return { items, runs, screen: process.env.CROSSLINE_PUBLIC_BETA !== "1", kit: readKit(store, workspaceId) };
 }

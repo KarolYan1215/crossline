@@ -1,0 +1,113 @@
+{
+  "about": "Defect of 2026-11-10 (owner's walkthrough of the opportunity inbox): mail candidates were filed under a line by subject words (mailCandidateLine), so a department's Winter Ball and a mentor mixer reached the research line as offers, and every find carried one line only. Each case is a mail the triage marked as an opportunity and the reader's answer for it, written the way the model answers: it tags social gatherings with a research claim when the sender is the department (the adversarial habit seen live). Expected: the five low-value gatherings are kept for dedupe but never pushed; the founders' night is kept because the startup line's goal is meeting investors; the hackathon serves two lines; the info session serves research.",
+  "lines": [
+    { "id": "research", "label": "研究", "color": "#335", "goal": "博士期间在类脑计算方向发表顶会论文并拿到研究型实习", "createdAt": "2026-09-01T00:00:00.000Z" },
+    { "id": "startup", "label": "创业", "color": "#353", "goal": "结识早期投资人和合伙人，完成种子轮融资", "createdAt": "2026-09-01T00:00:00.000Z" },
+    { "id": "media", "label": "自媒体", "color": "#533", "goal": "把研究和创业的经历写成每周一篇长文", "createdAt": "2026-09-01T00:00:00.000Z" }
+  ],
+  "milestones": [
+    { "id": "ms-paper", "lineId": "research", "title": "neuromorphic hardware paper submitted to ISCA" },
+    { "id": "ms-seed", "lineId": "startup", "title": "seed round: meet 20 angel investors" }
+  ],
+  "cases": [
+    {
+      "expect": { "pushed": false, "lowValue": "social", "type": "social" },
+      "mail": { "key": "m-ball", "subject": "ECE GSA Winter Ball 2026 — tickets on sale", "from": "ecegsa@engr.wisc.edu",
+        "text": "Dear ECE graduate students, join us for the annual ECE GSA Winter Ball on Friday, December 5, 2026 at Union South, 7:00 PM. Tickets are $15 and must be purchased by November 28, 2026. Formal attire.",
+        "url": "https://ecegsa.engr.wisc.edu/winter-ball" },
+      "answer": { "pageId": "p1", "url": "https://ecegsa.engr.wisc.edu/winter-ball", "title": "ECE GSA Winter Ball 2026", "organizer": "ECE GSA", "kind": "event",
+        "deadlines": [{ "day": "2026-11-28", "quote": "must be purchased by November 28, 2026" }], "startsAt": { "day": "2026-12-05", "quote": "Friday, December 5, 2026 at Union South, 7:00 PM" },
+        "cost": { "known": true, "amount": 15, "currency": "USD", "quote": "Tickets are $15" }, "location": "Union South, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "at Union South" },
+        "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
+        "type": "event", "reason": "院系研究生的年度舞会，可以认识同系同学。",
+        "lines": [{ "lineId": "research", "confidence": 0.6, "reason": "同系研究生聚会，可能遇到合作者。", "anchors": ["goal"] }] }
+    },
+    {
+      "expect": { "pushed": false, "lowValue": "social", "type": "social" },
+      "mail": { "key": "m-coffee", "subject": "CS Coffee Hour with Faculty — this Wednesday", "from": "events@cs.wisc.edu",
+        "text": "Coffee Hour with Faculty is back: Wednesday, November 12, 2026, 3:00 PM in CS 1240. Free coffee and snacks, all graduate students welcome.",
+        "url": "https://www.cs.wisc.edu/events/coffee-hour" },
+      "answer": { "pageId": "p1", "url": "https://www.cs.wisc.edu/events/coffee-hour", "title": "CS Coffee Hour with Faculty", "organizer": "UW–Madison CS", "kind": "event",
+        "deadlines": [], "startsAt": { "day": "2026-11-12", "quote": "Wednesday, November 12, 2026, 3:00 PM in CS 1240" },
+        "cost": { "known": true, "amount": 0, "currency": "USD", "quote": "Free coffee and snacks" }, "location": "CS 1240, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "in CS 1240" },
+        "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
+        "type": "social", "reason": "和系里教授喝咖啡聊天。",
+        "lines": [{ "lineId": "research", "confidence": 0.55, "reason": "可以和教授聊研究方向。", "anchors": [] }] }
+    },
+    {
+      "expect": { "pushed": false, "lowValue": "social", "type": "social" },
+      "mail": { "key": "m-mixer", "subject": "WiC Mentor Mixer: meet your industry mentors", "from": "wic@cs.wisc.edu",
+        "text": "Women in Computing invites you to our Mentor Mixer on Thursday, November 20, 2026 at 6:00 PM, Discovery Building. RSVP by November 17, 2026. Light refreshments provided.",
+        "url": "https://wic.cs.wisc.edu/mentor-mixer" },
+      "answer": { "pageId": "p1", "url": "https://wic.cs.wisc.edu/mentor-mixer", "title": "WiC Mentor Mixer", "organizer": "Women in Computing", "kind": "event",
+        "deadlines": [{ "day": "2026-11-17", "quote": "RSVP by November 17, 2026" }], "startsAt": { "day": "2026-11-20", "quote": "Thursday, November 20, 2026 at 6:00 PM, Discovery Building" },
+        "cost": { "known": false, "amount": 0, "currency": "", "quote": "" }, "location": "Discovery Building, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "Discovery Building" },
+        "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
+        "type": "event", "reason": "和业界导师认识。",
+        "lines": [{ "lineId": "research", "confidence": 0.5, "reason": "导师可能提供实习机会。", "anchors": ["ms-paper"] }] }
+    },
+    {
+      "expect": { "pushed": false, "lowValue": "social", "type": "social" },
+      "mail": { "key": "m-jiuhui", "subject": "研究生会新年社交酒会暨联谊报名", "from": "cssa@wisc.edu",
+        "text": "研究生会将于2026年12月12日晚7点在 Memorial Union 举办新年社交酒会暨联谊，报名截止2026年12月8日，每人10美元。",
+        "url": "https://cssa.wisc.edu/events/new-year-mixer" },
+      "answer": { "pageId": "p1", "url": "https://cssa.wisc.edu/events/new-year-mixer", "title": "新年社交酒会暨联谊", "organizer": "研究生会", "kind": "event",
+        "deadlines": [{ "day": "2026-12-08", "quote": "报名截止2026年12月8日" }], "startsAt": { "day": "2026-12-12", "quote": "2026年12月12日晚7点在 Memorial Union 举办" },
+        "cost": { "known": true, "amount": 10, "currency": "USD", "quote": "每人10美元" }, "location": "Memorial Union, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "在 Memorial Union 举办" },
+        "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
+        "type": "social", "reason": "新年聚会。",
+        "lines": [{ "lineId": "media", "confidence": 0.4, "reason": "可以写一篇活动记录。", "anchors": [] }] }
+    },
+    {
+      "expect": { "pushed": false, "lowValue": "social", "type": "social" },
+      "mail": { "key": "m-daoshi", "subject": "导师交流会：与校友导师面对面", "from": "career@wisc.edu",
+        "text": "职业发展中心导师交流会，2026年11月21日下午4点，Grainger Hall 1100。与在业界工作的校友导师自由交流，提供茶点。请于2026年11月19日前报名。",
+        "url": "https://careers.wisc.edu/events/alumni-mentor" },
+      "answer": { "pageId": "p1", "url": "https://careers.wisc.edu/events/alumni-mentor", "title": "导师交流会：与校友导师面对面", "organizer": "职业发展中心", "kind": "event",
+        "deadlines": [{ "day": "2026-11-19", "quote": "请于2026年11月19日前报名" }], "startsAt": { "day": "2026-11-21", "quote": "2026年11月21日下午4点，Grainger Hall 1100" },
+        "cost": { "known": false, "amount": 0, "currency": "", "quote": "" }, "location": "Grainger Hall 1100, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "Grainger Hall 1100" },
+        "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
+        "type": "event", "reason": "认识校友导师。",
+        "lines": [{ "lineId": "research", "confidence": 0.62, "reason": "校友导师可能帮忙找研究型实习。", "anchors": ["goal"] }] }
+    },
+    {
+      "expect": { "pushed": true, "type": "social", "first": "startup" },
+      "mail": { "key": "m-founders", "subject": "Madison Founders & Angels Networking Night", "from": "hello@madisonstartups.com",
+        "text": "Madison Founders & Angels Networking Night brings early-stage founders together with angel investors and seed funds. Thursday, December 4, 2026, 5:30 PM at StartingBlock Madison. Free for founders; register by December 1, 2026.",
+        "url": "https://madisonstartups.com/angels-night" },
+      "answer": { "pageId": "p1", "url": "https://madisonstartups.com/angels-night", "title": "Madison Founders & Angels Networking Night", "organizer": "Madison Startups", "kind": "event",
+        "deadlines": [{ "day": "2026-12-01", "quote": "register by December 1, 2026" }], "startsAt": { "day": "2026-12-04", "quote": "Thursday, December 4, 2026, 5:30 PM at StartingBlock Madison" },
+        "cost": { "known": true, "amount": 0, "currency": "USD", "quote": "Free for founders" }, "location": "StartingBlock Madison", "place": { "mode": "in_person", "city": "Madison", "country": "", "quote": "at StartingBlock Madison" },
+        "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
+        "type": "social", "reason": "本地天使投资人和种子基金到场，正对种子轮。",
+        "lines": [{ "lineId": "startup", "confidence": 0.85, "reason": "直接接触天使投资人，推进种子轮。", "anchors": ["ms-seed", "goal"] }] }
+    },
+    {
+      "expect": { "pushed": true, "type": "competition", "lines": ["research", "startup"] },
+      "mail": { "key": "m-hack", "subject": "Badger Hacks 2026: neuromorphic hardware track + founders mixer", "from": "team@badgerhacks.org",
+        "text": "Badger Hacks 2026 is a 36-hour hackathon on November 22–23, 2026 at the Discovery Building. New this year: a neuromorphic hardware track judged by lab faculty, and a seed investors pitch round. Applications close November 15, 2026. Free.",
+        "url": "https://badgerhacks.org/2026" },
+      "answer": { "pageId": "p1", "url": "https://badgerhacks.org/2026", "title": "Badger Hacks 2026", "organizer": "Badger Hacks", "kind": "application",
+        "deadlines": [{ "day": "2026-11-15", "quote": "Applications close November 15, 2026" }], "startsAt": { "day": "2026-11-22", "quote": "November 22–23, 2026 at the Discovery Building" },
+        "cost": { "known": true, "amount": 0, "currency": "USD", "quote": "Free" }, "location": "Discovery Building, Madison", "place": { "mode": "in_person", "city": "", "country": "", "quote": "at the Discovery Building" },
+        "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
+        "type": "competition", "reason": "有类脑硬件赛道，也有对投资人的路演。",
+        "lines": [
+          { "lineId": "research", "confidence": 0.75, "reason": "类脑硬件赛道由实验室教授评审，贴近论文方向。", "anchors": ["ms-paper"] },
+          { "lineId": "startup", "confidence": 0.65, "reason": "种子投资人路演环节。", "anchors": ["ms-seed"] }
+        ] }
+    },
+    {
+      "expect": { "pushed": false, "type": "talk", "why": "no line holds it: the reader's one claim rests on nothing and shares no word" },
+      "mail": { "key": "m-yoga", "subject": "Mindful Mondays: guided meditation series", "from": "recwell@wisc.edu",
+        "text": "Mindful Mondays guided meditation, every Monday at 12:15 PM at the Nick, starting November 17, 2026. Drop in, no registration needed.",
+        "url": "https://recwell.wisc.edu/mindful-mondays" },
+      "answer": { "pageId": "p1", "url": "https://recwell.wisc.edu/mindful-mondays", "title": "Mindful Mondays", "organizer": "Rec Well", "kind": "event",
+        "deadlines": [], "startsAt": { "day": "2026-11-17", "quote": "starting November 17, 2026" },
+        "cost": { "known": false, "amount": 0, "currency": "", "quote": "" }, "location": "", "place": { "mode": "unknown", "city": "", "country": "", "quote": "" },
+        "eligibility": [], "needsAccount": false, "materials": [], "consents": [], "registrationUrl": "",
+        "type": "talk", "reason": "放松。",
+        "lines": [{ "lineId": "media", "confidence": 0.7, "reason": "可写成一篇。", "anchors": [] }] }
+    }
+  ]
+}

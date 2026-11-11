@@ -172,10 +172,15 @@ test("deriving proposes watches and never one for work already done", async () =
 });
 
 test("the scout's file is checked like any find; its watches wait in 视野外 as proposals", async () => {
+  store.saveMilestone({ id: "m-lab", ownerId: "o", workspaceId: ws, identityId: "research", projectId: "", title: "visit two neuromorphic labs", version: 1, status: "approved" });
   const dir = mkdtempSync(path.join(tmpdir(), "scout-"));
   writeFileSync(path.join(dir, "scout.json"), JSON.stringify({
     opportunities: [
       { url: "https://lab.example.org/day", title: "Open Day", organizer: "Lab", kind: "event", lineId: "research",
+        deadlines: [{ day: "2026-11-10", quote: "Register by November 10, 2026" }], eligibility: [], why: "近",
+        type: "event", reason: "类脑实验室开放日", lines: [{ lineId: "research", confidence: 0.8, reason: "正对参观实验室的里程碑", anchors: ["m-lab"] }] },
+      // No lines given: its one line rests on nothing, so it waits for 视野外 (§18) even though it is near.
+      { url: "https://lab.example.org/day", title: "Lab Tour", organizer: "Lab", kind: "event", lineId: "research",
         deadlines: [{ day: "2026-11-10", quote: "Register by November 10, 2026" }], eligibility: [], why: "近" },
       { url: "https://made.example.org/", title: "Invented", organizer: "Nobody", kind: "event", lineId: "research",
         deadlines: [{ day: "2026-11-20", quote: "Due November 20, 2026" }], eligibility: [] }
@@ -183,11 +188,12 @@ test("the scout's file is checked like any find; its watches wait in 视野外 a
     watches: [{ lineId: "research", key: "open-days", title: "实验室开放日", why: "相邻方向", query: "实验室 开放日", judge: "同方向", tools: ["web_search"] }],
     notes: ["试了两条线的交叉"]
   }));
-  const http = routes({ "https://lab.example.org/": { body: "<h1>Open Day</h1><p>Register by November 10, 2026.</p>", type: "text/html" } });
+  const http = routes({ "https://lab.example.org/": { body: "<h1>Open Day</h1><p>Neuromorphic lab. Lab Tour too. Register by November 10, 2026.</p>", type: "text/html" } });
   const result = await afterScout(store, ws, { state: "done", taskId: "scout-1", directory: dir } as never, NOW, { http, now: () => NOW, costSince: () => 900 });
   rmSync(dir, { recursive: true, force: true });
-  expect(result).toEqual({ kept: 1, surfaced: 1, watches: 1 });
-  expect(store.listOpportunities(ws)[0]).toMatchObject({ title: "Open Day", needId: "scout:2026-11-01" });
+  expect(result).toEqual({ kept: 2, surfaced: 1, watches: 1 });
+  expect(store.listOpportunities(ws).find((row) => row.title === "Open Day")).toMatchObject({ needId: "scout:2026-11-01", type: "event" });
+  expect(store.listOpportunities(ws).find((row) => row.title === "Lab Tour")?.lines?.[0]?.relevance).toBeLessThan(0.6);
   expect(readWatchList(store, ws)[0]).toMatchObject({ id: "explore:research:open-days", state: "proposed", origin: "scout", explore: true });
   expect(readScoutStats(store.getSetting(ws, SCOUT_STATS_SETTING))).toMatchObject({ runs: 1, cost: 900, outcomes: { surfaced: 1 } });
 });

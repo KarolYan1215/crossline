@@ -1,6 +1,6 @@
 import { OPPORTUNITY_NEEDS_SKILL, OPPORTUNITY_READER_SKILL } from "@crossline/core";
 import { scriptedRuntime } from "../fake-runtime";
-import { PAGE_READINGS, watchesFor } from "./scenarios";
+import { PAGE_READINGS, SCENARIOS, watchesFor } from "./scenarios";
 import { searchWorld, type Reading, type World } from "./world";
 
 /**
@@ -38,6 +38,17 @@ const readingsFor = (choices: { faithful: Reading[]; adversarial?: Reading[] | u
   !choices ? [] : persona === "adversarial" && choices.adversarial && (!choices.injectedText || text.includes(choices.injectedText)) ? choices.adversarial
     : choices.faithful;
 
+/**
+ * The classifier's part of a reading (docs/opportunity-agent.md §18): both personas tag the find with the line its scenario plants it
+ * under (else the watch's), anchored on that line's goal — the world tests what reaches the person, not the classifier's judgement.
+ */
+const tagged = (item: Reading, input: Record<string, unknown>) => {
+  if ((item as { lines?: unknown }).lines) return item;
+  const lineId = SCENARIOS.find((scenario) => scenario.urls.includes(item.url))?.lineId ?? String((input.watch as { line?: string } | undefined)?.line ?? "");
+  return { ...item, type: item.kind === "application" ? "program" : "event", reason: item.title,
+    lines: lineId ? [{ lineId, confidence: 0.8, reason: item.title, anchors: ["goal"] }] : [] };
+};
+
 /** The answer a turn's input gets; exported for tracks that drive the Skills through a runtime of their own. */
 export function answerFor(world: World, persona: Persona, input: Record<string, unknown>): string {
   if (typeof input.version === "string" && input.version.startsWith("crossline.opportunity-watches")) {
@@ -46,12 +57,12 @@ export function answerFor(world: World, persona: Persona, input: Record<string, 
   }
   const pages = (input.pages as Array<{ pageId: string; url: string; text?: string }> | undefined) ?? [];
   if (pages.length) {
-    const items = pages.flatMap((page) => readingsFor(PAGE_READINGS[page.url], persona, page.text).map((item) => ({ ...item, pageId: page.pageId })));
+    const items = pages.flatMap((page) => readingsFor(PAGE_READINGS[page.url], persona, page.text).map((item) => ({ ...tagged(item, input), pageId: page.pageId })));
     return JSON.stringify({ items, blocked: items.length ? "" : "no opening on these pages" });
   }
   const query = String((input.search as { query?: string } | undefined)?.query ?? "");
   const items = searchWorld(world, query).flatMap((hit) => persona === "adversarial" && hit.adversarial ? hit.adversarial : hit.reading ? [hit.reading] : [])
-    .map((item) => ({ ...item, pageId: "" }));
+    .map((item) => ({ ...tagged(item, input), pageId: "" }));
   return JSON.stringify({ items, blocked: items.length ? "" : "nothing found" });
 }
 

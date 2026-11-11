@@ -1,0 +1,6 @@
+/* 申请资料包 (docs/opportunity-agent.md §18.3) inside 报名资料卡. */
+.st-kit{display:grid;gap:6px;margin-top:12px}
+.st-kit h4,.st-kit h5{margin:8px 0 0}
+.st-kit-form{display:grid;gap:6px;max-width:640px}
+.st-kit-form textarea,.st-kit-form input,.st-kit-form select{width:100%;font:inherit}
+.st-kit-history ol{margin:4px 0 0;padding-left:18px;font-size:13px}
