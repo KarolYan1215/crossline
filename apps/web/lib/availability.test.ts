@@ -240,3 +240,19 @@ test("nothing is pencilled into a day the person keeps free (W-48)", async () =>
   expect(optional.length).toBeGreaterThan(0);
   expect(optional.every((block) => ![0, 6].includes(new Date(`${block.day}T12:00:00Z`).getUTCDay()))).toBe(true);
 });
+
+test("Today's hours still free are not reduced by where waiting proposals would go (2026-11-11, W-254)", async () => {
+  // The owner's Today said 可用 3 时 19 分 while the hours left were near six: the dashed 「待批准」 preview blocks were subtracted as if
+  // they were calendar events. Answering the energy question moved them off the day and the same page then said 5 时 54 分.
+  vi.stubEnv("CROSSLINE_FIXED_NOW", "2026-09-18T15:00:00.000Z");
+  const store = globalThis.crosslineStore = new CrosslineStore(":memory:");
+  setup([{ days: [5], start: "08:00", end: "20:00", energy: "high" }]);
+  store.saveWorkOrder({ id: "waiting-proposal", ownerId: TEST_CTX.principalId, workspaceId: TEST_CTX.workspaceId, identityId: "research",
+    projectId: "research-default", milestoneId: "research-starter", intent: "起草组会讲稿", state: "awaiting_plan_approval", riskTier: "routine",
+    estimate: { p25Minutes: 100, p50Minutes: 120, p85Minutes: 150, source: "llm_prior", observationCount: 0, confidence: "medium" },
+    payload: { family: "preparation" } });
+  const plan = await loadCurrentPlan(TEST_CTX);
+  expect(plan.blocks.some((block) => block.id.startsWith("proposed:waiting-proposal") && block.day === "2026-09-18")).toBe(true);
+  // 10:00 to 20:00 Chicago, nothing on the calendar: ten hours, whatever the preview pencils in.
+  expect((await loadDashboard(TEST_CTX)).todayCapacity.availableMinutes).toBe(600);
+});

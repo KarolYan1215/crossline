@@ -51,7 +51,7 @@ export type DashboardData = {
   /** Proposals the system has made that wait for the person; with nothing recommendable yet, Today says so instead of asking for more input. */
   awaitingApproval?: number;
   /** A proposal due within a week, still waiting for the person: unapproved work is not scheduled, so Today names it (W-31). */
-  urgentProposal?: { id: string; title: string; due: string };
+  urgentProposal?: { id: string; title: string; due: string; more?: number };
   milestones?: { drafts: number; any: boolean; firstDrafts: "none" | "running" | "stalled"; backplanning?: number };
   capacity: {
     level: "low" | "medium" | "high" | "uncalibrated";
@@ -168,7 +168,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
             : data.milestones && !data.milestones.any
               ? <>{t("访谈结束（或停下 20 分钟）后，系统按访谈为每条主线设计里程碑草稿，批准后倒推出任务。想现在就设计，在")} <a href="/onboarding">{t("访谈页")}</a> {t("点「设计里程碑草稿」。")}</>
               : t("暂无可执行任务。收集一项工作后，系统完成拆解与排程。");
-  const notes = data.urgentProposal && <p className="today-proposal-note nd-note" role="note">{boldAt(t("「{{title}}」{{due}} 截止，还在等本人批准；批准后才会排进日历。", { title: data.urgentProposal.title, due: MARK }), shortDay(data.urgentProposal.due))} <a href="/approvals#proposals">{t("去批准")}</a></p>;
+  const notes = data.urgentProposal && <p className="today-proposal-note nd-note" role="note">{boldAt(t("「{{title}}」{{due}} 截止，还在等本人批准；批准后才会排进日历。", { title: data.urgentProposal.title, due: MARK }), shortDay(data.urgentProposal.due))}{data.urgentProposal.more ? ` ${t("一周内截止、还在等批准的另有 {{count}} 项。", { count: data.urgentProposal.more })}` : ""} <a href="/approvals#proposals">{t("去批准")}</a></p>;
 
   return <>
     <OfflineReplay workspaceId={data.workspaceId} />

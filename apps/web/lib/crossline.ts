@@ -2503,7 +2503,9 @@ export async function loadDashboard(ctx: AccessContext): Promise<Omit<DashboardD
   const plan = await loadCurrentPlan(ctx);
   // What is still usable today: the weekly pattern minus today's calendar commitments, from now on. It
   // used to count the whole day's pattern, so at 21:10 the header still said 420 minutes were free.
-  const busyToday = plan.blocks.filter((block) => (block.day ?? today) === today && !block.id.startsWith("scheduled:"))
+  // Only what the day holds for the person: work blocks, the dashed preview of proposals still waiting (`proposed:`) and what is pencilled
+  // in outside the hours (`optional:`) are the plan's own guesses, not commitments; counting the preview cut 「可用」 by its length (W-254).
+  const busyToday = plan.blocks.filter((block) => (block.day ?? today) === today && !/^(scheduled|proposed|optional):/.test(block.id))
     .map((block) => ({ day: today, start: block.start, end: block.end }));
   const availableMinutes = remainingMinutes(availableSlots(readAvailability(ctx), [today], busyToday),
     formatInTimeZone(now, timeZone, "HH:mm"));

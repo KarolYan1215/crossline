@@ -269,3 +269,33 @@ test("an event in the mail is asked about, never planned: personal and relevant 
   expect(mailEventDigest(events, "2026-11-10", "2026-11-17").map((event) => event.title)).toEqual(["Graduate coffee hour"]);
   expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["event", "event", "event", "info"]);
 });
+
+test("a mail sorted as a to-do that is only going to something is never a task (2026-11-11, W-256)", async () => {
+  // The owner's plan held nine 「参加…讲座 / 排练 / 论坛」 tasks from mail as overdue, and 「参加 ECE 548 期中考试 2」 as a movable half hour
+  // with 「可用时段内没有空位」: each had been sorted as a to-do, captured and analysed into work.
+  const { store, workspaceId, secrets, resolve } = setup();
+  const box = mailbox();
+  let now = new Date("2026-11-10T09:00:00Z");
+  const deps = { store, secrets, resolve, factory: box.factory, now: () => now };
+  await addMailAccount(deps, workspaceId, { address: "me@qq.com", password: "app-pass" });
+  await readNewMail(deps, workspaceId);
+  box.messages.push({ uid: 1, subject: "ECE 548 Midterm-2", body: "Midterm-2 is on Tuesday, Nov 24, 12:45-13:15 in EH 2540." },
+    { uid: 2, subject: "Robust control seminar", body: "Please join the seminar next week." },
+    { uid: 3, subject: "Quiz 4 next Friday", body: "Review sequential circuits; Quiz 4 is on Friday Nov 13 in class." });
+  now = new Date("2026-11-10T09:20:00Z");
+  const fresh = await readNewMail(deps, workspaceId);
+  const empty = { event: "", amount: 0, amountLabel: "", currency: "", merchant: "", category: "", occurredOn: "", refs: [], last4: "", instrument: "" };
+  const none = { date: "", start: "", end: "", location: "", lineId: "", relevance: 0, personal: false, quote: "" };
+  const answer = JSON.stringify({ items: [
+    { uid: 1, kind: "todo", title: "参加 ECE 548 期中考试 2", waitingId: "", why: "考试", money: empty,
+      meet: { date: "2026-11-24", start: "12:45", end: "13:15", location: "EH 2540", lineId: "", relevance: 90, personal: true, quote: "Midterm-2 is on Tuesday, Nov 24, 12:45-13:15" } },
+    { uid: 2, kind: "todo", title: "参加 Robust control seminar", waitingId: "", why: "讲座", money: empty, meet: none },
+    // Preparing for something is work; only going to it is not.
+    { uid: 3, kind: "todo", title: "复习时序电路，11 月 13 日小测", waitingId: "", why: "小测", money: empty, meet: none }] });
+  const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
+  expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh)).toMatchObject({ state: "done", captured: 1, events: 1 });
+  expect(store.listCaptures(workspaceId).map((capture) => capture.title)).toEqual(["复习时序电路，11 月 13 日小测"]);
+  expect(mailEventAsks(readMailEvents(store.getSetting(workspaceId, MAIL_EVENTS_SETTING)), "2026-11-10").map((event) => [event.title, event.date, event.start]))
+    .toEqual([["参加 ECE 548 期中考试 2", "2026-11-24", "12:45"]]);
+  expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["event", "info", "todo"]);
+});

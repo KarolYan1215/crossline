@@ -4,7 +4,7 @@ import {
   ACCOUNT_CLASS_LABEL, ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
-  isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
+  isAttending, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf,
   parseRiskDigestSeen, RISK_DIGEST_SETTING, riskDigestShows, weekStartOf, type MilestoneRisk, type RiskDigestSeen
 } from "@crossline/core";
@@ -544,13 +544,12 @@ function overdueFoldAsks(source: Source): Ask[] {
   });
 }
 
-/** Attending something: its day passing means it is over, not overdue work (a talk, rehearsal, forum, exam sitting). */
-const ATTEND = /^(参加|出席|参观|观看|旁听|attend\b|join\b)/i;
 /** The folded overdue cards that are a started task to attend something, with their work order. */
 function pastEventsIn(members: Ask[], tasks: Map<string, StoredWorkOrder>): Array<{ ask: Ask; order: StoredWorkOrder }> {
   return members.flatMap((ask) => {
     const order = ask.kind === "overdue_task" ? tasks.get(ask.entityId) : undefined;
-    return order && ATTEND.test(order.intent.trim()) ? [{ ask, order }] : [];
+    // Attending something: its day passing means it is over, not overdue work (a talk, rehearsal, forum, exam sitting).
+    return order && isAttending(order.intent) ? [{ ask, order }] : [];
   });
 }
 

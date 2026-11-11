@@ -32,7 +32,10 @@ export function dayLoad(items: TimelineItem[], day: string): { planned: number; 
     fixed += to - Math.max(from, reach);
     reach = to;
   }
-  return { planned: sum(["scheduled"]), pencilled: sum(["optional"]), fixed, allDay: [...new Set(allDay.map((item) => item.title))] };
+  // A missed block (「未完成」) stays on view so the person can still start it, but its work is already placed again: counting it too made
+  // the same step count twice (W-254).
+  const planned = ofDay.filter((item) => item.kind === "scheduled" && !item.missed).reduce((total, item) => total + length(item), 0);
+  return { planned, pencilled: sum(["optional"]), fixed, allDay: [...new Set(allDay.map((item) => item.title))] };
 }
 
 /** The first block of work on the day that has not ended yet (on today, after `nowMinute`; on another day, the first of the day). */

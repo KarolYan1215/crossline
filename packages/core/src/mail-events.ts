@@ -16,6 +16,16 @@ export const MAIL_EVENTS_KEEP = 120;
 /** Open cards at a time: personal first, then the most relevant. */
 export const MAIL_EVENT_ASKS = 4;
 
+/**
+ * Going to something — a talk, a rehearsal, a forum, an exam sitting — said with the verb first. It has a day and a time and is over when
+ * that passes; it is never work to place in free hours (W-253, W-256: nine 「参加…」 tasks from mail sat in the owner's plan as overdue,
+ * and an exam as a movable half hour). Preparing for it (「复习…，并参加小测」) starts with another verb and stays work.
+ */
+const ATTENDING = /^\s*(参加|出席|参观|观看|旁听|attend\b|join\b)/i;
+export function isAttending(text: string): boolean {
+  return ATTENDING.test(text);
+}
+
 /** What the triage model read about an event in the mail; empty strings and 0 when the mail is not one. */
 export type MailMeetReading = { date: string; start: string; end: string; location: string; lineId: string;
   /** 0–100: how much it serves the person's lines and long-term goals. */

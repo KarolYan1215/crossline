@@ -512,6 +512,7 @@
   "全屏": "Full screen",
   "这个邮箱不在注册名单里。请联系发给你链接的人。": "This email is not on the sign-up list. Ask the person who sent you the link.",
   "「{{title}}」{{due}} 截止，还在等本人批准；批准后才会排进日历。": "\"{{title}}\" is due {{due}} and still waits for your approval; it goes on the calendar only once approved.",
+  "一周内截止、还在等批准的另有 {{count}} 项。": "{{count}} more waiting for approval are due within a week.",
   "系统正在从已批准的 {{n}} 个里程碑倒推任务（每个几分钟），出来的任务会排进日历并显示在这里。也可以先在输入框写下手头要做的事。_one": "Tasks are being worked back from {{n}} approved milestone (a few minutes each); they will go on the calendar and show here. Meanwhile, you can write what is on your plate in the input box.",
   "系统正在从已批准的 {{n}} 个里程碑倒推任务（每个几分钟），出来的任务会排进日历并显示在这里。也可以先在输入框写下手头要做的事。_other": "Tasks are being worked back from {{n}} approved milestones (a few minutes each); they will go on the calendar and show here. Meanwhile, you can write what is on your plate in the input box.",
   "好的，读取接着往下": "OK, reading carries on",

@@ -89,3 +89,13 @@ describe("blocks and the assistant", () => {
     expect(marked.map((entry) => entry.agent)).toEqual(["running", "planned", "running", "planned", undefined]);
   });
 });
+
+test("a missed block is not counted as planned load: its work is placed again later the same day (2026-11-11, W-254)", () => {
+  // The owner's Today said 已排 7.3 小时 against 可用 4.5: 2.6 hours of it were morning blocks shown 「未完成」 whose work the scheduler had
+  // already placed again in the afternoon, so the same step counted twice.
+  const day: TimelineItem[] = [
+    item("missed:scheduled:a:v1s7", { day: "2026-11-11", start: "09:55", end: "10:55", missed: true }),
+    item("scheduled:a:v1s7", { day: "2026-11-11", start: "15:40", end: "16:40" })
+  ];
+  expect(dayLoad(day, "2026-11-11").planned).toBe(60);
+});

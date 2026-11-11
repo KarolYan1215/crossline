@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   MAIL_ACCOUNTS_SETTING, MAIL_TRIPS_SETTING, mailTripPlace, readMailTrips, withMailTrip, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
   isMailReminderTitle, linksFromMail, mailLinksKey, mailMessageKey, moneyEventFromMail, senderName, MAIL_CHECK_NUDGE_KIND, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage,
-  type MoneyReading, MAIL_EVENTS_SETTING, mailEventFrom, readMailEvents, withMailEvent
+  type MoneyReading, MAIL_EVENTS_SETTING, isAttending, mailEventFrom, readMailEvents, withMailEvent
 } from "@crossline/core";
 import {
   createImapMail, hostAllowed, presetFor, unsupportedProvider, type ImapFactory, type ImapMail, type MailHeader, type SecretStore
@@ -199,7 +199,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
     developerInstructions: "Sort each new message once, from its sender, subject and opening. todo when it asks the person to do something or "
       + "doing nothing costs them (a deadline, a question only they can answer, an account or money alert to check); its title is the inbox line, "
       + "verb first, with the day. event for something at a set day and time the person could simply go to (a talk, seminar, info session, "
-      + "activity, meeting, an advisor's or interviewer's invitation, their own group meeting): title is its name; meet.date YYYY-MM-DD, meet.start "
+      + "activity, meeting, rehearsal, an exam or quiz sitting at a set time, an advisor's or interviewer's invitation, their own group meeting; "
+      + "preparing for it, such as revising for an exam, is a separate todo): title is its name; meet.date YYYY-MM-DD, meet.start "
       + "and meet.end HH:MM in the person's zone (end empty when not said), meet.location as written, meet.lineId the line it serves or empty, "
       + "meet.relevance 0-100 for how much it serves the person's lines and long-term goals (a notice sent to a whole list about a social mixer, "
       + "coffee hour or general event is low), meet.personal true only when it is addressed to the person in particular (an advisor asking to "
@@ -268,7 +269,9 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   for (const item of result.output.items) {
     const message = keyed.find((entry) => entry.key === item.uid);
     if (!message) continue;
-    let kind: MailLogEntry["kind"] = item.kind;
+    // A to-do or date that is only going to something (「参加…讲座」「参加期中考试」) is an event: it was captured and analysed into a
+    // movable task and sat in the plan as overdue once its day passed (W-256). Preparing for it starts with another verb and stays a to-do.
+    let kind: MailLogEntry["kind"] = (item.kind === "todo" || item.kind === "date") && isAttending(item.title) ? "event" : item.kind;
     const key = mailMessageKey(message);
     const money = book(message, item.money);
     if (kind === "reply" && !item.waitingId) {
