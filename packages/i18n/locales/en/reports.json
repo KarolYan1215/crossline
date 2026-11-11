@@ -1,9 +1,6 @@
 {
-  "报告": "Reports",
-  "工作流整理出的结果，每个工作流一份最新的报告；报告里的可落地项可以加入任务。": "What workflows have organised, one latest report per workflow; the actions a report proposes can be added to the tasks.",
   "{{files}} 份文档 · 涵盖 {{notes}} 条笔记": "Documents: {{files}} · notes covered: {{notes}}",
   "{{files}} 份文档": "Documents: {{files}}",
-  "还没有报告。工作流整理好结果后会出现在这里。": "No reports yet. They appear here once a workflow has organised its results.",
   "涵盖 {{notes}} 条笔记": "Notes covered: {{notes}}",
   "全部报告": "All reports",
   "报告目录": "Contents",
@@ -16,5 +13,16 @@
   "去看报告": "Open the report",
   "添加：按话题整理小红书收藏": "Add: organise Xiaohongshu favourites by topic",
   "选择主线": "Choose a track",
-  "未添加，请稍后再试": "Not added; try again later"
+  "未添加，请稍后再试": "Not added; try again later",
+  "计划与复盘": "Plan & review",
+  "记账本": "Ledger",
+  "Agent 任务": "Agent tasks",
+  "工作流": "Workflows",
+  "工作流报告": "Workflow reports",
+  "全部主线": "All tracks",
+  "这个筛选下没有产出。": "Nothing under this filter.",
+  "工作流的报告、交给 Agent 的任务结果和它们交出的文件；等待确认的结果仍在「待确认」处理。": "Workflow reports, the results of tasks handed to the agent and the files they handed over; results still waiting are decided on To confirm.",
+  "还没有产出。工作流整理好报告、交给 Agent 的任务做完后，结果和文件会出现在这里。": "Nothing yet. Once a workflow has written a report or a task handed to the agent is done, its results and files appear here.",
+  "助手交出的文件、工作流报告和任务结果都在「Agent 产出」，可按来源和主线筛选。": "The assistant's files, workflow reports and task results are in Agent output, filterable by source and track.",
+  "打开 Agent 产出": "Open Agent output"
 }

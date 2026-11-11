@@ -113,7 +113,7 @@ describe("dashboard view", () => {
     expect(html).not.toContain('name="expectedMinutes"');
   });
 
-  test("uses a side bar with the four working views and the second group, and keeps the running head for narrow screens", () => {
+  test("uses a side bar with the working views and its groups, and keeps the running head for narrow screens", () => {
     const html = renderToStaticMarkup(<DashboardView data={{
       principalId: "test-owner", workspaceId: "test-workspace", nowLabel: "周一 · 09:00", nowIso: "2026-09-14T14:00:00.000Z", timeZone: "America/Chicago", clockPinned: true, dateLabel: "14", monthLabel: "SEP · 2026",
       capacity: { level: "uncalibrated" as const, observationCount: 0, basis: [], blockers: [{ code: "LOCAL_ACTIVITY_NOT_AUTHORISED", message: "本机活动采集未开启" }] },
@@ -124,8 +124,11 @@ describe("dashboard view", () => {
     }} />);
     expect(html).toContain("running-head");
     expect(html).toContain('class="side-nav"');
-    for (const label of ["今日", "主线", "计划", "任务", "待确认", "导入", "画像", "设置", "小帮手", "节奏与回顾", "本周承诺", "收工", "周复盘"]) expect(html).toContain(label);
-    expect(html).toContain('href="/review"');
+    for (const label of ["今日", "主线", "记账本", "任务", "待确认", "导入", "画像", "设置", "小帮手", "节奏与回顾", "计划与复盘", "Agent 产出", "自动化"]) expect(html).toContain(label);
+    for (const href of ["/plan", "/ledger", "/outputs", "/automation"]) expect(html).toContain(`href="${href}"`);
+    // The four rhythm pages are one entry now (2026-11-10): their tabs live on the page, not in the side bar.
+    const side = html.slice(html.indexOf('<aside class="side-nav"'), html.indexOf("</aside>"));
+    for (const gone of ['href="/review"', 'href="/commit"', 'href="/wrap"', 'href="/reports"']) expect(side).not.toContain(gone);
     expect(html).not.toContain("CARE / CAPACITY");
   });
 });

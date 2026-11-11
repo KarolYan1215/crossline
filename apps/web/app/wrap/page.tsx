@@ -5,6 +5,7 @@ import { loadWrap, wrapDayOf } from "../../lib/wrap";
 import { loadTimeline } from "../../lib/timeline";
 import { linePacks } from "../../lib/lines";
 import { WrapBoard, type NextDayBlock } from "./wrap-board";
+import { PlanTabs } from "../plan-tabs";
 import "../rituals.css";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +33,8 @@ export default async function WrapPage({ searchParams }: { searchParams: Promise
       .sort((a, b) => a.start.localeCompare(b.start)).slice(0, 3)
       .map((item) => ({ start: item.start, title: item.task ?? item.title, ...(item.step ? { step: item.step } : {}), ...(item.identityId ? { line: item.identityId } : {}) }));
   }
-  return <AppShell active={"收工"} className="subpage rd-page"><div className="rd-inner">
+  return <AppShell active={"计划与复盘"} className="subpage rd-page"><div className="rd-inner">
+    <PlanTabs current={"收工"} />
     <WrapBoard view={view} labels={labels} tomorrow={tomorrow} />
   </div></AppShell>;
 }

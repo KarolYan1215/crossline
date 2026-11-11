@@ -58,7 +58,7 @@ import {
 import { requireSessionContext } from "../../lib/access-guard";
 import { identityLines, lineLabels } from "../../lib/lines";
 import { AutomationsCard } from "./automations-card";
-import { OutputsCard } from "./outputs-card";
+import { OutputsMoved } from "./outputs-moved";
 import { MailAccounts } from "../connectors/mail-accounts";
 import { ImportCard } from "../connectors/import-card";
 import { interviewStatus } from "../../lib/interview-status";
@@ -249,7 +249,7 @@ export default async function SettingsPage() {
               status: t(agentTaskStatusLabel[task.status] ?? task.status), tone: TONE[task.status] ?? "neutral", day: task.requestedAt.slice(5, 10).replace("-", "/"),
               workOrderId: task.workOrderId }))} />
           <div className="st-modules"><div id="automations"><AutomationsCard lines={identityLines(ctx).map((line) => ({ id: line.id, label: line.label }))} /></div>
-            <div id="outputs"><OutputsCard /></div></div>
+            <div id="outputs"><OutputsMoved /></div></div>
         </section>
 
         <section id="background" className="st-section" aria-labelledby="st-background"><h2 id="st-background" className="ds-serif">{t("后台任务")}</h2>

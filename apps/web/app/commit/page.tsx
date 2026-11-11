@@ -4,6 +4,7 @@ import { gateUntilReady } from "../../lib/start-gate";
 import { loadWeeklyCommit } from "../../lib/weekly-commit";
 import { linePacks } from "../../lib/lines";
 import { CommitBoard } from "./commit-board";
+import { PlanTabs } from "../plan-tabs";
 import "../rituals.css";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,8 @@ export default async function CommitPage() {
   gateUntilReady(ctx);
   const view = loadWeeklyCommit(ctx);
   const labels = Object.fromEntries(linePacks(ctx, { includeArchived: true }).map((pack) => [pack.id, pack.label]));
-  return <AppShell active={"本周承诺"} className="subpage rd-page"><div className="rd-inner">
+  return <AppShell active={"计划与复盘"} className="subpage rd-page"><div className="rd-inner">
+    <PlanTabs current={"本周承诺"} />
     <CommitBoard view={view} labels={labels} />
   </div></AppShell>;
 }

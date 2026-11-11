@@ -6,7 +6,7 @@ import { NavLink } from "./ui/nav-link";
 import { SignOutButton } from "./sign-out-button";
 
 // The tab bar is what a thumb reaches most: Today, the lines, the tasks and 待确认 (with its count, 2026-10-29: it had been behind 「更多」).
-// The plan, the rhythm pages, imports and the settings sit behind a fifth tab. A native disclosure needs no client script to open.
+// 计划与复盘, 记账本, the portrait, the agent pages, imports and the settings sit behind a fifth tab (2026-11-10). A native disclosure needs no client script to open.
 export function BottomNav({ active }: { active?: string | undefined }) {
   const t = useT();
   return <nav className="bottom-nav" aria-label={t("主导航（移动端）")}>

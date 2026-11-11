@@ -26,7 +26,7 @@ export function RunningHead({ active, focus }: { active?: string | undefined; fo
   return <header className="running-head" data-focus={focus || undefined}>
     <NavLink className="wordmark" href="/">Crossline</NavLink>
     <nav aria-label={t("主导航")}>{(focus ? [] : NAV_ITEMS).map((item) =>
-      <NavLink href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>{t(item.label)}</NavLink>)}</nav>
+      <NavLink href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>{t(item.short ?? item.label)}</NavLink>)}</nav>
     <div className="system-state">
       {(focus ? SIDE_ITEMS.filter((item) => item.href === "/settings") : SIDE_ITEMS).map((item) => <NavLink href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>
         {t(item.label)}{item.badge && <PendingBadge />}</NavLink>)}
