@@ -1,6 +1,6 @@
 "use client";
-import { UserRound } from "lucide-react";
-import { NAV_ITEMS, SIDE_ITEMS } from "./nav-items";
+import { Ellipsis, UserRound } from "lucide-react";
+import { NAV_ITEMS, PHONE_MORE, SIDE_ITEMS } from "./nav-items";
 import { PendingBadge } from "./pending-badge";
 import { UndoCenter } from "./undo-center";
 import { SignOutButton, signOutHere } from "./sign-out-button";
@@ -18,6 +18,9 @@ import { HelperFace, useHelper } from "./helper-state";
  * Under 1025px it is the whole navigation (the name, the four views, 待确认 and 设置). On a wider screen the side bar navigates and this
  * is only the cluster at the top right: search, undo, the bell, the language and the account menu (shell.css).
  */
+/** The side bar's pages the row above does not show: everything in the phone's 「更多」 but 计划与复盘 (in the row) and 设置 (beside it). */
+const MORE_ITEMS = PHONE_MORE.filter((item) => item.href !== "/plan" && item.href !== "/settings");
+
 export function RunningHead({ active, focus }: { active?: string | undefined; focus: boolean }) {
   const t = useT();
   const go = (href: string) => () => { location.href = href; };
@@ -26,7 +29,9 @@ export function RunningHead({ active, focus }: { active?: string | undefined; fo
   return <header className="running-head" data-focus={focus || undefined}>
     <NavLink className="wordmark" href="/">Crossline</NavLink>
     <nav aria-label={t("主导航")}>{(focus ? [] : NAV_ITEMS).map((item) =>
-      <NavLink href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>{t(item.short ?? item.label)}</NavLink>)}</nav>
+      <NavLink href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>{t(item.short ?? item.label)}</NavLink>)}
+      {/* Without the side bar the pages it alone listed (记账本, Agent 产出, 自动化, 画像, 导入) had no way in under 1025px (2026-11-11). */}
+      {!focus && <MenuButton label={t("更多")} icon={<Ellipsis {...ICON} />} items={MORE_ITEMS.map((item) => ({ label: t(item.label), onSelect: go(item.href) }))} />}</nav>
     <div className="system-state">
       {(focus ? SIDE_ITEMS.filter((item) => item.href === "/settings") : SIDE_ITEMS).map((item) => <NavLink href={item.href} key={item.label} className={item.label === active ? "active" : ""} aria-current={item.label === active ? "page" : undefined}>
         {t(item.label)}{item.badge && <PendingBadge />}</NavLink>)}
