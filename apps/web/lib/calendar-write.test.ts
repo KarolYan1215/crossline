@@ -101,18 +101,54 @@ test("invitations: a block re-planned past the mailed week is updated, not cance
   const mails: InviteMail[] = [];
   const send = async (mail: InviteMail) => { mails.push(mail); };
   const block = (start: string, end: string) => ({ id: "scheduled:b1", uid: "scheduled-b1@crossline", title: "研究 · 写摘要", start, end, reminderMinutes: 10 });
+  // Each step after the quiet window of the one before.
+  const after = (hours: number) => new Date(NOW.getTime() + hours * 61 * 60_000);
   expect(await imipPass(TEST_CTX, [block("2026-10-14T15:00:00.000Z", "2026-10-14T16:00:00.000Z")], send, NOW)).toMatchObject({ sent: 1, cancelled: 0 });
   // Moved ten days out: still on the plan, so its invitation moves with it.
-  expect(await imipPass(TEST_CTX, [block("2026-10-24T15:00:00.000Z", "2026-10-24T16:00:00.000Z")], send, NOW)).toMatchObject({ sent: 1, cancelled: 0 });
+  expect(await imipPass(TEST_CTX, [block("2026-10-24T15:00:00.000Z", "2026-10-24T16:00:00.000Z")], send, after(1))).toMatchObject({ sent: 1, cancelled: 0 });
   expect(mails.at(-1)).toMatchObject({ method: "REQUEST" });
   expect(mails.at(-1)!.ics).toContain("SEQUENCE:1\r\n");
   // Off the plan: cancelled (sequence 2); back on it: a REQUEST above the CANCEL, so the calendar takes it.
-  expect(await imipPass(TEST_CTX, [], send, NOW)).toMatchObject({ sent: 0, cancelled: 1 });
+  expect(await imipPass(TEST_CTX, [], send, after(2))).toMatchObject({ sent: 0, cancelled: 1 });
   expect(mails.at(-1)!.ics).toContain("SEQUENCE:2\r\n");
-  expect(await imipPass(TEST_CTX, [], send, NOW)).toMatchObject({ sent: 0, cancelled: 0 });
-  expect(await imipPass(TEST_CTX, [block("2026-10-14T15:00:00.000Z", "2026-10-14T16:00:00.000Z")], send, NOW)).toMatchObject({ sent: 1, cancelled: 0 });
+  expect(await imipPass(TEST_CTX, [], send, after(2))).toMatchObject({ sent: 0, cancelled: 0 });
+  expect(await imipPass(TEST_CTX, [block("2026-10-14T15:00:00.000Z", "2026-10-14T16:00:00.000Z")], send, after(3))).toMatchObject({ sent: 1, cancelled: 0 });
   expect(mails.at(-1)).toMatchObject({ method: "REQUEST" });
   expect(mails.at(-1)!.ics).toContain("SEQUENCE:3\r\n");
+});
+
+test("invitations do not flood: nudges are not mailed, a block re-planned within the hour waits and goes once, and each pass and day is capped", async () => {
+  const store = setup({ imip: true });
+  store.setSetting(ws, CALENDAR_IMIP_RECIPIENT_SETTING, "person@example.com");
+  const mails: InviteMail[] = [];
+  const send = async (mail: InviteMail) => { mails.push(mail); };
+  const minutes = (count: number) => new Date(NOW.getTime() + count * 60_000);
+  const block = (id: string, start: string, end: string) => ({ id: `scheduled:${id}`, uid: `scheduled-${id}@crossline`, title: `研究 · ${id}`, start, end, reminderMinutes: 10 });
+  expect(await imipPass(TEST_CTX, [block("a", "2026-10-14T15:00:00.000Z", "2026-10-14T16:00:00.000Z")], send, NOW)).toMatchObject({ sent: 1 });
+  // A re-plan nudges it ten minutes: under the minimum shift, no mail.
+  expect(await imipPass(TEST_CTX, [block("a", "2026-10-14T15:10:00.000Z", "2026-10-14T16:10:00.000Z")], send, minutes(10))).toMatchObject({ sent: 0, left: 0 });
+  // Moved two hours, then again, inside the hour after the last mail: held back, then one mail with where it ended up.
+  expect(await imipPass(TEST_CTX, [block("a", "2026-10-14T17:00:00.000Z", "2026-10-14T18:00:00.000Z")], send, minutes(20))).toMatchObject({ sent: 0, left: 1 });
+  expect(await imipPass(TEST_CTX, [block("a", "2026-10-14T19:00:00.000Z", "2026-10-14T20:00:00.000Z")], send, minutes(40))).toMatchObject({ sent: 0, left: 1 });
+  expect(await imipPass(TEST_CTX, [block("a", "2026-10-14T19:00:00.000Z", "2026-10-14T20:00:00.000Z")], send, minutes(61))).toMatchObject({ sent: 1, left: 0 });
+  expect(mails).toHaveLength(2);
+  expect(mails.at(-1)!.ics).toContain("SEQUENCE:1\r\n");
+  // One that begins within the hour is not held back.
+  expect(await imipPass(TEST_CTX, [block("soon", "2026-10-12T15:30:00.000Z", "2026-10-12T16:00:00.000Z")], send, minutes(61))).toMatchObject({ sent: 1 });
+  expect(await imipPass(TEST_CTX, [block("soon", "2026-10-12T14:30:00.000Z", "2026-10-12T15:00:00.000Z")], send, minutes(62))).toMatchObject({ sent: 1 });
+  // Forty new blocks: five a pass, soonest first, and no more than the daily cap in 24 hours.
+  const many = Array.from({ length: 40 }, (_, index) => block(`m${String(index).padStart(2, "0")}`, `2026-10-${String(13 + (index % 5)).padStart(2, "0")}T${String(8 + Math.floor(index / 5)).padStart(2, "0")}:00:00.000Z`,
+    `2026-10-${String(13 + (index % 5)).padStart(2, "0")}T${String(8 + Math.floor(index / 5)).padStart(2, "0")}:30:00.000Z`))
+    .concat([block("a", "2026-10-14T19:00:00.000Z", "2026-10-14T20:00:00.000Z"), block("soon", "2026-10-12T14:30:00.000Z", "2026-10-12T15:00:00.000Z")]);
+  const before = mails.length;
+  const first = await imipPass(TEST_CTX, many, send, minutes(70));
+  expect(first).toMatchObject({ sent: 5, left: 35 });
+  expect(mails.slice(before).map((mail) => mail.subject)).toEqual(["研究 · m00", "研究 · m05", "研究 · m10", "研究 · m15", "研究 · m20"]);
+  for (let pass = 1; pass < 12; pass += 1) await imipPass(TEST_CTX, many, send, minutes(70 + pass * 10));
+  expect(mails.length).toBe(30);
+  expect(await imipPass(TEST_CTX, many, send, minutes(200))).toMatchObject({ sent: 0, left: 14 });
+  // A day after the first mails, room again.
+  expect((await imipPass(TEST_CTX, many, send, minutes(24 * 60 + 1))).sent).toBeGreaterThan(0);
 });
 
 test("mail events: personal first and recommended; 去 makes a fixed event every path writes, 不去 drops it", async () => {

@@ -103,6 +103,12 @@ export function optimalWaitingMs(ctx: AccessContext, hash: string): number | und
   return asked?.hash === hash ? Date.now() - asked.at : undefined;
 }
 
+/** Waits, at most `ms`, until this workspace has no solve running or waiting (the calendar feed, which cannot answer 「pending」). */
+export async function optimalSettled(workspaceId: string, ms: number): Promise<void> {
+  const deadline = Date.now() + ms;
+  while ((running.has(workspaceId) || queued.has(workspaceId)) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
 /** Tests: wait until nothing is running or waiting. */
 export async function optimalIdle(): Promise<void> {
   while (running.size || queued.size) await new Promise((resolve) => setTimeout(resolve, 5));

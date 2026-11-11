@@ -1,12 +1,15 @@
 import { createRequire } from "node:module";
 import { afterEach, expect, test, vi } from "vitest";
 import { CrosslineStore } from "@crossline/db";
+import { calendarUid } from "@crossline/core";
 import type { ModelSolver, PlanningInput } from "@crossline/planner";
 vi.mock("server-only", () => ({}));
+vi.mock("./codex-runtime", () => ({ requestCodexSupervisor: vi.fn(async () => ({ state: "published" })), CodexSupervisorRequestError: class extends Error {} }));
 import { loadCurrentPlan, planToday, planningInputFor, saveSchedulePreferences, scheduleHashOf, withPreview } from "./crossline";
 import { configureOptimal, OPTIMAL_SETTING, OPTIMAL_VERSION, optimalFor, optimalIdle, requestOptimal } from "./optimal-schedule";
 import { TEST_CTX } from "./test-support";
 import { blocksToPublish, OPTIMAL_WAIT_MS } from "./calendar-publish";
+import { feedText } from "./calendar-write";
 
 const highs = (createRequire(import.meta.url)("highs") as typeof import("highs").default)();
 const NOW = "2026-09-18T13:00:00.000Z";
@@ -135,6 +138,36 @@ test("the automatic publish waits up to a minute for the optimal plan, then writ
   const published = await blocksToPublish(TEST_CTX, now, { waitForOptimal: true });
   expect(published.blocks.filter((block) => block.id.startsWith("scheduled:")).map((block) => block.id))
     .toEqual(plan.blocks.filter((block) => block.id.startsWith("scheduled:") && !block.id.includes("-starter-work-order")).map((block) => block.id));
+}, 60_000);
+
+test("the calendar feed serves the optimal plan, waiting for its solve; where no background solve runs the greedy plan is final and nothing waits", async () => {
+  const store = setup();
+  await loadCurrentPlan(TEST_CTX);
+  const order = store.listWorkOrders(TEST_CTX.workspaceId).find((item) => item.identityId === "research")!;
+  store.saveWorkOrder({ ...order, id: "essay", state: "ready_for_human" });
+  const now = new Date(NOW);
+  const uids = (text: string) => [...text.replace(/\r\n[ \t]/g, "").matchAll(/^UID:(.*)$/gm)].map((match) => match[1]!.trim()).sort();
+  const scheduledUids = async () => (await blocksToPublish(TEST_CTX, now)).blocks.filter((block) => block.id.startsWith("scheduled:")).map((block) => calendarUid(block.id)).sort();
+  // The hosted beta (no background solve): the greedy plan is what the app shows as final, served at once.
+  configureOptimal({ enabled: false });
+  expect((await loadCurrentPlan(TEST_CTX)).schedule.simpleOnly).toBe(true);
+  expect(uids(await feedText(TEST_CTX, now))).toEqual(await scheduledUids());
+  // With a solve under way the fetch waits for it rather than serving the greedy plan.
+  store.saveWorkOrder({ ...order, id: "essay-2", state: "ready_for_human" });
+  let release!: () => void;
+  const solver = countingSolver(new Promise((resolve) => { release = resolve; }));
+  configureOptimal({ enabled: true, solver: solver.solve });
+  vi.spyOn(console, "info").mockImplementation(() => {});
+  let served: string | undefined;
+  const feed = feedText(TEST_CTX, now).then((text) => { served = text; });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const early = served;
+  release();
+  await feed;
+  expect(early).toBeUndefined();
+  const plan = await loadCurrentPlan(TEST_CTX);
+  expect(plan.schedule.optimal).toBe(true);
+  expect(uids(served!)).toEqual(await scheduledUids());
 }, 60_000);
 
 test("a preview neither reads nor asks for the optimal plan", async () => {

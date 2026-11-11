@@ -36,9 +36,10 @@ async function once(store: CrosslineStore, workspaceId: string, runtime: AppsRun
   if (!threadId) return { state: "blocked", code: "CALENDAR_GOOGLE_FAILED", message: t("Google 日历写入未完成；其他日历未受影响。") };
   const call = async (tool: string, args: Record<string, unknown>) => {
     const answer = await runtime.request("mcpServer/tool/call", { threadId, server: "codex_apps", tool, arguments: args }) as { isError?: boolean; structuredContent?: unknown; content?: unknown };
-    if (answer.isError) throw new Error(`GOOGLE_TOOL_FAILED:${tool}`);
-    if (answer.structuredContent !== undefined) return answer.structuredContent;
     const text = Array.isArray(answer.content) ? (answer.content as Array<{ text?: unknown }>).map((part) => typeof part.text === "string" ? part.text : "").join("") : "";
+    // The connector's own words go along: the writer tells Google's 409 (an event already under the id it asked for) from other failures.
+    if (answer.isError) throw new Error(`GOOGLE_TOOL_FAILED:${tool}:${text.slice(0, 300)}`);
+    if (answer.structuredContent !== undefined) return answer.structuredContent;
     try { return JSON.parse(text) as unknown; } catch { return { text }; }
   };
   let ledger: GoogleLedger;

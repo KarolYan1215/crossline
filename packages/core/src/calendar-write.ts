@@ -32,6 +32,8 @@ export const CALENDAR_FEED_SEEN_SETTING = "calendar.feed.seen";
 export const CALENDAR_IMIP_RECIPIENT_SETTING = "calendar.imip.recipient";
 /** What was mailed for each event (`{[uid]: {sequence, hash, start, end, title}}`), so a change bumps SEQUENCE and a removal cancels. */
 export const CALENDAR_IMIP_SENT_SETTING = "calendar.imip.sent";
+/** When each invitation or cancellation of the last 24 hours went (ISO times), for the daily cap. */
+export const CALENDAR_IMIP_DAY_SETTING = "calendar.imip.day";
 /** The last good write of a path that keeps no event of its own (`{at, sent, cancelled}`). */
 export const CALENDAR_IMIP_LAST_SETTING = "calendar.imip.last";
 /** What the Google path wrote (`PublishLedger`-like, by block id), apart from Graph's `calendar.published`. */

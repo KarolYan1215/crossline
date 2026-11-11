@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
-  anyWritePathOn, CALENDAR_FEED_SEEN_SETTING, CALENDAR_FEED_TOKEN_SETTING, CALENDAR_GOOGLE_LAST_SETTING, CALENDAR_IMIP_LAST_SETTING, CALENDAR_IMIP_RECIPIENT_SETTING,
+  anyWritePathOn, CALENDAR_FEED_SEEN_SETTING, CALENDAR_FEED_TOKEN_SETTING, CALENDAR_GOOGLE_LAST_SETTING, CALENDAR_IMIP_DAY_SETTING, CALENDAR_IMIP_LAST_SETTING, CALENDAR_IMIP_RECIPIENT_SETTING,
   CALENDAR_IMIP_SENT_SETTING, CALENDAR_WRITE_ACCOUNT_SETTING, CALENDAR_WRITE_PATHS, CALENDAR_WRITE_PATHS_SETTING, calendarFailureKey, calendarUid, lineTitle, readWritePaths,
   type AccessContext, type CalendarWritePath, type CalendarWritePaths
 } from "@crossline/core";
@@ -11,6 +11,7 @@ import { blocksToPublish } from "./calendar-publish";
 import { fixedEventsToPublish } from "./fixed-events";
 import { identityLines } from "./lines";
 import { tOf } from "./locale";
+import { optimalSettled } from "./optimal-schedule";
 
 /**
  * The calendar paths of the owner's decision of 2026-11-10 (core `calendar-write.ts`): which are on, what each writes, and the two that
@@ -90,9 +91,20 @@ export function workspaceForFeedToken(token: string): string | undefined {
   return undefined;
 }
 
-/** The feed's text for a calendar app. Its fetch is the only sign the path works, so the time is kept for the settings card. */
+/** How long a calendar app's fetch of the feed waits for the optimal plan being solved (a solve is capped at 20 s) before taking the greedy one. */
+export const FEED_OPTIMAL_WAIT_MS = 25_000;
+
+/**
+ * The feed's text for a calendar app. Its fetch is the only sign the path works, so the time is kept for the settings card.
+ * It carries the plan every other path writes: the optimal one, not the greedy one shown while it is solved (docs/loop-and-scout.md §2).
+ * A fetch cannot be answered 「pending」 and asked again in a minute like the automatic publish, so it waits for the solve, and takes the
+ * greedy plan only when the solve does not finish in time or the publish would have stopped waiting too. Where no background solve runs
+ * (the hosted beta, `simpleOnly`) the greedy plan is the final one and nothing waits.
+ */
 export async function feedText(ctx: AccessContext, now = new Date()): Promise<string> {
-  const { items } = await calendarItems(ctx, now);
+  const first = await calendarItems(ctx, now, { waitForOptimal: true });
+  if (first.pending) await optimalSettled(ctx.workspaceId, FEED_OPTIMAL_WAIT_MS);
+  const { items } = first.pending ? await calendarItems(ctx, now) : first;
   getStore().setSetting(ctx.workspaceId, CALENDAR_FEED_SEEN_SETTING, JSON.stringify({ at: now.toISOString(), events: items.length }));
   return buildIcs({ name: "Crossline", now, events: items.map((item) => icsEvent(item)) });
 }
@@ -101,13 +113,29 @@ export async function feedText(ctx: AccessContext, now = new Date()): Promise<st
 
 /** Work blocks are mailed this many days ahead: further ones still move with every re-plan, and each move would be another mail. */
 export const IMIP_WORK_DAYS = 7;
-/** At most this many mails a pass; the rest go with the next pass (ten minutes later). */
-export const IMIP_PER_PASS = 20;
+/** At most this many mails a pass; the rest go with the next pass (ten minutes later), soonest events first. */
+export const IMIP_PER_PASS = 5;
+/** At most this many in any 24 hours: a day of re-plans must not bury the inbox. What is held back goes as room frees up. */
+export const IMIP_PER_DAY = 30;
+/**
+ * An event already mailed is mailed again only when its start or end moved at least this much, or its title changed: re-plans nudge
+ * blocks by a few minutes all the time, and every nudge was another mail. The record keeps what was mailed, so small nudges that add up
+ * to this much still go.
+ */
+export const IMIP_MIN_SHIFT_MINUTES = 15;
+/**
+ * After a mail about an event, the next one about it (update or cancel) waits this long, and then carries the state as it is by then — a
+ * block re-planned three times in an hour is one mail, not three. An event that begins within this time is not held back.
+ */
+export const IMIP_QUIET_MINUTES = 60;
 // i18n-ignore: a mail header display name, the same in every language
 export const IMIP_FROM_DEFAULT = "Crossline 日历 <calendar@mail.crossline.lol>";
 
-/** `cancelled`: a CANCEL went; the entry stays (until it is past) so a block that comes back is re-sent with a higher SEQUENCE than it. */
-type SentEntry = { sequence: number; hash: string; start: string; end: string; title: string; until?: string; cancelled?: boolean };
+/**
+ * `cancelled`: a CANCEL went; the entry stays (until it is past) so a block that comes back is re-sent with a higher SEQUENCE than it.
+ * `at`: when the last mail about it went (the quiet window).
+ */
+type SentEntry = { sequence: number; hash: string; start: string; end: string; title: string; until?: string; cancelled?: boolean; at?: string };
 export type InviteMail = { to: string; subject: string; text: string; method: "REQUEST" | "CANCEL"; ics: string };
 export type InviteSender = (mail: InviteMail) => Promise<void>;
 
@@ -118,7 +146,8 @@ const emailOf = (from: string) => /<([^>]+)>/.exec(from)?.[1] ?? from;
 /**
  * Mails what changed since the last pass, one message per event (RFC 6047 allows one UID per object): a new or changed event as
  * `METHOD:REQUEST` with its SEQUENCE one higher than last time, an event gone from the set as `METHOD:CANCEL` — but only while it is
- * still to come (deletes only in the future). Nothing is mailed twice for the same content. A failure stops the pass and keeps what went.
+ * still to come (deletes only in the future). Nothing is mailed twice for the same content, nor for a nudge under the minimum shift; a
+ * second mail about one event waits out the quiet window; a pass and a day are capped. A failure stops the pass and keeps what went.
  */
 export async function imipPass(ctx: AccessContext, items: CalendarItem[], send: InviteSender, now = new Date()): Promise<{ sent: number; cancelled: number; left: number }> {
   const store = getStore();
@@ -137,7 +166,14 @@ export async function imipPass(ctx: AccessContext, items: CalendarItem[], send: 
     : [item.title, item.start, item.end])).digest("hex").slice(0, 24);
   type Job = { uid: string; method: "REQUEST" | "CANCEL"; item?: CalendarItem; entry?: SentEntry };
   const jobs: Job[] = [];
-  for (const item of wanted) if (sent[item.uid]?.cancelled || sent[item.uid]?.hash !== hashOf(item)) jobs.push({ uid: item.uid, method: "REQUEST", item });
+  const shift = IMIP_MIN_SHIFT_MINUTES * 60_000;
+  // A one-off already on the calendar with the same title, nudged by less than the minimum shift: not worth a mail.
+  const nudged = (item: CalendarItem, entry: SentEntry) => !item.series && entry.title === item.title
+    && Math.abs(Date.parse(item.start) - Date.parse(entry.start)) < shift && Math.abs(Date.parse(item.end) - Date.parse(entry.end)) < shift;
+  for (const item of wanted) {
+    const entry = sent[item.uid];
+    if (!entry || entry.cancelled || (entry.hash !== hashOf(item) && !nudged(item, entry))) jobs.push({ uid: item.uid, method: "REQUEST", item });
+  }
   // Removal is decided against the whole plan, not the mailed window: a block still on it is never cancelled.
   const present = new Set(items.map((item) => item.uid));
   for (const [uid, entry] of Object.entries(sent)) {
@@ -147,30 +183,44 @@ export async function imipPass(ctx: AccessContext, items: CalendarItem[], send: 
     if (Date.parse(entry.start) > now.getTime() || (entry.until && entry.until >= now.toISOString().slice(0, 10))) jobs.push({ uid, method: "CANCEL", entry });
     else delete sent[uid];
   }
+  // Held back: one mailed within the quiet window, unless it (as mailed or as planned now) begins within that window too.
+  const quiet = IMIP_QUIET_MINUTES * 60_000;
+  const due = jobs.filter((job) => {
+    const at = sent[job.uid]?.at;
+    if (!at || now.getTime() - Date.parse(at) >= quiet) return true;
+    return Math.min(Date.parse(sent[job.uid]!.start), Date.parse(job.item?.start ?? sent[job.uid]!.start)) - now.getTime() < quiet;
+  }).sort((a, b) => Date.parse(a.item?.start ?? a.entry!.start) - Date.parse(b.item?.start ?? b.entry!.start));
+  // The daily cap counts every mail of the last 24 hours, whichever event it was about.
+  let day: string[] = [];
+  try { day = (JSON.parse(store.getSetting(ctx.workspaceId, CALENDAR_IMIP_DAY_SETTING) ?? "[]") as string[]).filter((at) => now.getTime() - Date.parse(at) < 86_400_000); } catch { /* unreadable: none */ }
+  const room = Math.max(0, Math.min(IMIP_PER_PASS, IMIP_PER_DAY - day.length));
   let done = 0, cancelled = 0;
   try {
-    for (const job of jobs.slice(0, IMIP_PER_PASS)) {
+    for (const job of due.slice(0, room)) {
       const previous = sent[job.uid];
       const sequence = previous ? previous.sequence + 1 : 0;
       if (job.method === "REQUEST" && job.item) {
         const item = job.item;
         await send({ to, method: "REQUEST", subject: item.title, text: t("Crossline 日历：{{title}}。在邮件应用里接受后出现在日历上；以后有变化会再发更新。", { title: item.title }),
           ics: buildIcs({ method: "REQUEST", now, events: [icsEvent(item, { sequence, organizer, attendees: [to] })] }) });
-        sent[job.uid] = { sequence, hash: hashOf(item), start: item.start, end: item.end, title: item.title, ...(item.series ? { until: item.series.until } : {}) };
+        sent[job.uid] = { sequence, hash: hashOf(item), start: item.start, end: item.end, title: item.title, ...(item.series ? { until: item.series.until } : {}), at: now.toISOString() };
+        day.push(now.toISOString());
         done += 1;
       } else if (job.entry) {
         const entry = job.entry;
         await send({ to, method: "CANCEL", subject: t("已取消：{{title}}", { title: entry.title }), text: t("Crossline 日历：「{{title}}」已从计划中移除。", { title: entry.title }),
           ics: buildIcs({ method: "CANCEL", now, events: [{ uid: job.uid, summary: entry.title, start: entry.start, end: entry.end, sequence, organizer, attendees: [to] }] }) });
-        sent[job.uid] = { ...entry, sequence, cancelled: true };
+        sent[job.uid] = { ...entry, sequence, cancelled: true, at: now.toISOString() };
+        day.push(now.toISOString());
         cancelled += 1;
       }
     }
   } finally {
     store.setSetting(ctx.workspaceId, CALENDAR_IMIP_SENT_SETTING, JSON.stringify(sent));
+    store.setSetting(ctx.workspaceId, CALENDAR_IMIP_DAY_SETTING, JSON.stringify(day));
   }
   store.setSetting(ctx.workspaceId, CALENDAR_IMIP_LAST_SETTING, JSON.stringify({ at: now.toISOString(), sent: done, cancelled }));
-  return { sent: done, cancelled, left: Math.max(0, jobs.length - IMIP_PER_PASS) };
+  return { sent: done, cancelled, left: jobs.length - done - cancelled };
 }
 
 // ---------------------------------------------------------------------------------------------------------------- status

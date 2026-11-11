@@ -17,11 +17,19 @@
 
 `/api/calendar/feed/<令牌>.ics`，任何日历应用「通过网址添加/订阅日历」即可（卡片上有复制和 `webcal://` 打开按钮）。令牌 32 字节随机数，按常数时间比较；只有该方式开着时链接才有效，关掉或「换新链接」后旧链接立即 404；关掉时就换了令牌，再打开是新链接，旧链接不会复活（2026-11-11）。拿到链接的人都能看到内容，所以内容只有标题和时间。日历应用刷新频率由它们自己定（Google 可达半天）。每次被读取记录 `calendar.feed.seen`。
 
+内容和其他方式写的是同一份计划：最优解，不是求解期间先显示的贪心排程（docs/loop-and-scout.md §2）。订阅请求不能像自动发布那样回一句「还在算」一分钟后再来，所以正在求解时它最多等 25 秒（`FEED_OPTIMAL_WAIT_MS`，求解本身上限 20 秒），等到就给最优解，等不到或这份输入已经等过一分钟（自动发布也会在这时改写贪心排程）才给贪心排程。托管内测没有后台求解（`simpleOnly`），贪心排程就是最终计划，不等（2026-11-11）。
+
 输出按 RFC 5545：CRLF、75 字节折行、TEXT 转义、每个用到的 TZID 都有 VTIMEZONE（按实际偏移变化生成）、每周重复用 `RRULE:FREQ=WEEKLY;BYDAY=…;UNTIL=<UTC>` 加 `EXDATE`（`packages/connectors/src/ics-write.ts`，测试用 ical.js 回读校验）。
 
 ## (b) 邮件邀请（iMIP，RFC 6047）
 
-从 `calendar@mail.crossline.lol`（`CROSSLINE_CALENDAR_FROM` 可改）给收件人发 `METHOD:REQUEST` 邀请；收件人默认是账号邮箱，可在卡片上改。时间或标题变了，同一 UID 再发一次，`SEQUENCE` 加一；从日历里移除且还在未来的，发 `METHOD:CANCEL`。只发未来 7 天的工作块，每轮最多 20 封；重复日程的「下一次」往后移不算变化。已发过的块被重排到 7 天以外仍是更新，不是取消：取消只看整份计划里还有没有它。发过 CANCEL 的记录保留到它过去为止，同一块回来时 `SEQUENCE` 接着往上加，日历不会因序号比取消低而丢掉它（2026-11-11）。
+从 `calendar@mail.crossline.lol`（`CROSSLINE_CALENDAR_FROM` 可改）给收件人发 `METHOD:REQUEST` 邀请；收件人默认是账号邮箱，可在卡片上改。时间或标题变了，同一 UID 再发一次，`SEQUENCE` 加一；从日历里移除且还在未来的，发 `METHOD:CANCEL`。只发未来 7 天的工作块；重复日程的「下一次」往后移不算变化。
+
+防刷屏（2026-11-11，计划频繁重排时曾每 10 分钟一轮发出多达 20 封）：
+
+- 已发过的单次事件，标题没变、开始和结束都挪动不到 15 分钟（`IMIP_MIN_SHIFT_MINUTES`）不再发；记录保留上次发出的时间，小挪动累计到 15 分钟才发。
+- 同一事件发过一封后 60 分钟内（`IMIP_QUIET_MINUTES`）不再发第二封（更新或取消都算），窗口过后按那时的最新状态只发一封；一小时内就要开始的事件不受此限。
+- 每轮最多 5 封（`IMIP_PER_PASS`），最近开始的先发；任意 24 小时最多 30 封（`IMIP_PER_DAY`，发送时间记在 `calendar.imip.day`）。没发的留到下一轮。已发过的块被重排到 7 天以外仍是更新，不是取消：取消只看整份计划里还有没有它。发过 CANCEL 的记录保留到它过去为止，同一块回来时 `SEQUENCE` 接着往上加，日历不会因序号比取消低而丢掉它（2026-11-11）。
 
 **只走 Resend 的 HTTP API**（`POST https://api.resend.com/emails`，`packages/auth` 的 `createInviteSender`），密钥取自现有的 Resend SMTP 配置（`CROSSLINE_SMTP_USER=resend` 时 `CROSSLINE_SMTP_PASSWORD` 就是 API key，`resendKeyOf`）。邮件带 text 和 html 正文，日历对象作为附件 `invite.ics`（取消时 `cancel.ics`），类型 `text/calendar; charset=UTF-8; method=…`。不用 SMTP 发邀请：2026-11-10/11 对 UW Outlook（Exchange Online）实测，Resend 的 SMTP 中继会把邮件重建成 multipart/mixed（经 Amazon SES），无论原来是 nodemailer `icalEvent`（另附 invite.ics）还是单个 multipart/alternative，日历部分都成了普通附件 `attachment-0`，没有会议栏；改走 API 并显式标附件类型后出现「接受/拒绝」。测试记录见会话笔记 `imip-test-log.md`。没有 Resend 配置时卡片显示「本站没有配置 Resend 发信」，不会退回到 SMTP 或别的发信方式。测试里从不真发：网络是假的，或用 `CROSSLINE_AUTH_TEST_MAILBOX_DIR` 写到文件。
 
@@ -32,6 +40,9 @@
 - 2026-11-10 用 `scripts/apps-calendar-tools.ts` 只列不写地探过工具：连接器**没有建日历的工具**，也没有私有扩展属性。所以本人若在 Google 里建了名为 `Crossline` 的日历就写进去；没有就写主日历，每个标题前加「Crossline · 」。一旦选定就不再换。
 - 哪些事件是本应用的，只看账本 `calendar.published.google` 里记下的事件 id；不在里面的事件从不碰。
 - 每次写之前读一遍未来 120 天的事件：时间或标题和写进去的不一样，或者事件不见了，就算本人的，此后不改、不重建、不删。
+- 重复日程按单次读回：任何一次被本人改了时间、改了标题或单独删掉（规则算出应有的那一次不见了），整串都算本人的，此后不改、不截断、不删（2026-11-11）。只看窗口内、上次写入的开始之后的各次；读取窗口覆盖到系列最后一天（仍以 120 天为限）。
+- 新建时自带事件 id（`googleEventId`：块 id 加「代」的 sha256，base32hex 字符），并在调用前先把这次新建记进账本（`unconfirmed`）。新建超时而 Google 其实建好了：下一轮在日历上按这个 id 找到它就认领，不再新建；没找到就用同一个 id 再建，Google 回 409（已存在，删掉的事件也保留 id）就认领——在读取窗口内却看不到，说明本人删了，记为本人的，不再建。账本丢失时同理。块从计划移除后「代」加一，同一块以后回来用新 id。
+- 未验证：连接器 `create_event` 接受自带 id 的参数名按 `event_id` 写（和 `update_event`、`delete_event` 一致），尚未用 `scripts/apps-calendar-tools.ts` 对实际工具核对；连接器若因这个参数报错（错误里提到 `event_id`），就不带 id 再建一次，照常写入，只是没有防重保证；409 靠连接器错误文本里的「409 / duplicate / already exists」识别（`google-calendar-publish.ts` 把错误文本带进异常）。
 - 只删未来的事件；已经开始的重复日程不删，而是把 `UNTIL` 改到今天。
 - 建事件时不加参会人、不加 Google Meet、状态空闲。
 - 重复日程更新后，记录里的开始仍是第一次的时间（计划给的是下一次）；之前按「还没开始」整串删掉，连过去的几次一起删（2026-11-11）。已开始的系列移除时只截到今天。

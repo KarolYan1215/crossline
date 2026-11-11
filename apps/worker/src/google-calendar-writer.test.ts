@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { CrosslineStore } from "@crossline/db";
 import { CALENDAR_GOOGLE_LEDGER_SETTING } from "@crossline/core";
-import { GOOGLE_PREFIX, GoogleInterruptedError, publishToGoogle, type GoogleBlock, type GoogleLedger } from "./google-calendar-writer";
+import { GOOGLE_PREFIX, GoogleInterruptedError, googleEventId, publishToGoogle, type GoogleBlock, type GoogleLedger } from "./google-calendar-writer";
 import { publishGoogleCalendar } from "./google-calendar-publish";
 
 const NOW = new Date("2026-11-10T12:00:00Z");
@@ -9,6 +9,8 @@ const NOW = new Date("2026-11-10T12:00:00Z");
 /** A Google calendar behind the connector's tools: events by id, and every call recorded. */
 function fakeGoogle(calendars: Array<{ id: string; summary: string; access_role?: string }> = [{ id: "primary", summary: "me@gmail.com", access_role: "owner" }]) {
   const events = new Map<string, { calendar: string; summary: string; start: string; end: string; recurrence?: string[] }>();
+  /** Ids Google has handed out, deleted ones included: like Google, a create under one of them answers 409. */
+  const used = new Set<string>();
   const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
   let next = 1;
   const call = async (tool: string, args: Record<string, unknown>) => {
@@ -16,7 +18,13 @@ function fakeGoogle(calendars: Array<{ id: string; summary: string; access_role?
     const calendar = String(args.calendar_id ?? "primary");
     if (tool === "google_calendar.list_calendars") return { calendars };
     if (tool === "google_calendar.search_events") return { events: [...events.entries()].filter(([, event]) => event.calendar === calendar).map(([id, event]) => ({ id, summary: event.summary, start: event.start, end: event.end, recurring_event_id: null })) };
-    if (tool === "google_calendar.create_event") { const id = `ev${next++}`; events.set(id, { calendar, summary: String(args.title), start: String(args.start_time), end: String(args.end_time), ...(args.recurrence ? { recurrence: args.recurrence as string[] } : {}) }); return { event: { id } }; }
+    if (tool === "google_calendar.create_event") {
+      const id = typeof args.event_id === "string" ? args.event_id : `ev${next++}`;
+      if (used.has(id)) throw new Error("GOOGLE_TOOL_FAILED:google_calendar.create_event:HttpError 409: The requested identifier already exists. (duplicate)");
+      used.add(id);
+      events.set(id, { calendar, summary: String(args.title), start: String(args.start_time), end: String(args.end_time), ...(args.recurrence ? { recurrence: args.recurrence as string[] } : {}) });
+      return { event: { id } };
+    }
     if (tool === "google_calendar.update_event") { const event = events.get(String(args.event_id))!; Object.assign(event, args.title ? { summary: args.title } : {}, args.start_time ? { start: args.start_time, end: args.end_time } : {}, args.recurrence ? { recurrence: args.recurrence } : {}); return { event: { id: args.event_id } }; }
     if (tool === "google_calendar.delete_event") { events.delete(String(args.event_id)); return { ok: true }; }
     throw new Error(`unexpected ${tool}`);
@@ -102,9 +110,100 @@ test("only the allowlisted tools are called, and an interrupted run keeps what i
   const error = await publishToGoogle(failing, [block("scheduled:a", "A", "2026-11-11T14:00:00Z", "2026-11-11T15:00:00Z"), block("scheduled:b", "B", "2026-11-11T16:00:00Z", "2026-11-11T17:00:00Z")],
     { events: {} }, NOW).catch((caught: unknown) => caught);
   expect(error).toBeInstanceOf(GoogleInterruptedError);
-  expect(Object.keys((error as GoogleInterruptedError).ledger.events)).toEqual(["scheduled:a"]);
+  // The failed create stays recorded as asked for, so the next run looks for it under its id before asking again.
+  expect(Object.keys((error as GoogleInterruptedError).ledger.events)).toEqual(["scheduled:a", "scheduled:b"]);
+  expect((error as GoogleInterruptedError).ledger.events["scheduled:b"]).toMatchObject({ unconfirmed: true });
   const tools = new Set(google.calls.map((item) => item.tool));
   for (const tool of tools) expect(tool).toMatch(/^google_calendar\.(list_calendars|search_events|create_event|update_event|delete_event)$/);
+});
+
+test("a create that timed out after Google made the event is not made twice: found under its own id, or adopted on 409", async () => {
+  const google = fakeGoogle();
+  const a = block("scheduled:a", "A", "2026-11-11T14:00:00Z", "2026-11-11T15:00:00Z");
+  // Google carries the create out, but the answer never arrives.
+  const timingOut = async (tool: string, args: Record<string, unknown>) => { const answer = await google.call(tool, args); if (tool === "google_calendar.create_event") throw new Error("timeout"); return answer; };
+  const error = await publishToGoogle(timingOut, [a], { events: {} }, NOW).catch((caught: unknown) => caught) as GoogleInterruptedError;
+  expect(error).toBeInstanceOf(GoogleInterruptedError);
+  expect(google.calls.find((item) => item.tool === "google_calendar.create_event")!.args.event_id).toBe(googleEventId("scheduled:a"));
+  expect(googleEventId("scheduled:a")).toMatch(/^[a-v0-9]{5,1024}$/);
+  // The next run finds it on the calendar under the id it asked for: no second create.
+  const next = await publishToGoogle(google.call, [a], error.ledger, NOW);
+  expect(next.result).toMatchObject({ created: 0, unchanged: 1 });
+  expect(google.events.size).toBe(1);
+  expect(next.ledger.events["scheduled:a"]).toEqual({ eventId: googleEventId("scheduled:a"), title: "Crossline · A", start: a.start, end: a.end });
+  // Even with the record lost, asking again under the same id answers 409 and the event is adopted, not duplicated.
+  const lost = await publishToGoogle(google.call, [a], { calendarId: "primary", prefix: GOOGLE_PREFIX, events: {} }, NOW);
+  expect(lost.result).toMatchObject({ created: 0, unchanged: 1 });
+  expect(google.events.size).toBe(1);
+  expect(lost.ledger.events["scheduled:a"]?.edited).toBeUndefined();
+});
+
+test("a connector that refuses the event id argument still gets the event made", async () => {
+  const google = fakeGoogle();
+  const strict = async (tool: string, args: Record<string, unknown>) => {
+    if (tool === "google_calendar.create_event" && "event_id" in args) throw new Error("GOOGLE_TOOL_FAILED:google_calendar.create_event:unexpected argument event_id");
+    return google.call(tool, args);
+  };
+  const done = await publishToGoogle(strict, [block("scheduled:a", "A", "2026-11-11T14:00:00Z", "2026-11-11T15:00:00Z")], { events: {} }, NOW);
+  expect(done.result.created).toBe(1);
+  expect(done.ledger.events["scheduled:a"]).toMatchObject({ eventId: "ev1" });
+  expect(done.ledger.events["scheduled:a"]?.unconfirmed).toBeUndefined();
+});
+
+test("after a timed-out create the person's delete or edit still wins; a block that comes back after removal gets a new event", async () => {
+  const google = fakeGoogle();
+  const a = block("scheduled:a", "A", "2026-11-11T14:00:00Z", "2026-11-11T15:00:00Z");
+  const timingOut = async (tool: string, args: Record<string, unknown>) => { const answer = await google.call(tool, args); if (tool === "google_calendar.create_event") throw new Error("timeout"); return answer; };
+  const error = await publishToGoogle(timingOut, [a], { events: {} }, NOW).catch((caught: unknown) => caught) as GoogleInterruptedError;
+  // The person deleted it before the next run: asked again, Google answers 409 (it keeps the id) and nothing is made again.
+  google.events.delete(googleEventId("scheduled:a"));
+  const next = await publishToGoogle(google.call, [a], error.ledger, NOW);
+  expect(next.result).toMatchObject({ created: 0, keptAsEdited: 1 });
+  expect(next.ledger.events["scheduled:a"]).toMatchObject({ removedByPerson: true });
+  expect(google.events.size).toBe(0);
+  // Removed from the plan and later back: a fresh id, so it is created rather than taken for the person's.
+  const b = block("scheduled:b", "B", "2026-11-12T14:00:00Z", "2026-11-12T15:00:00Z");
+  const made = await publishToGoogle(google.call, [b], { events: {} }, NOW);
+  const gone = await publishToGoogle(google.call, [], made.ledger, NOW);
+  expect(gone.result.deleted).toBe(1);
+  const back = await publishToGoogle(google.call, [b], gone.ledger, NOW);
+  expect(back.result).toMatchObject({ created: 1, keptAsEdited: 0 });
+  expect(back.ledger.events["scheduled:b"]!.eventId).toBe(googleEventId("scheduled:b", 1));
+});
+
+test("one occurrence of a series moved or deleted by the person makes the series theirs: never updated or cut again", async () => {
+  const google = fakeGoogle();
+  const recurrence = { daysOfWeek: ["thursday"], startDate: "2026-11-12", endDate: "2026-12-17", localStart: "14:00", localEnd: "15:00", timeZone: "America/Chicago", exceptions: [] as string[] };
+  const series: GoogleBlock = { id: "fixed:class", title: "研究 · 组会", start: "2026-11-12T20:00:00Z", end: "2026-11-12T21:00:00Z", reminderMinutes: 10, recurrence };
+  // Google lists a series as its single occurrences (Thursdays 14:00 Chicago = 20:00Z), each with its series id and original start.
+  let instances: Array<{ id: string; summary: string; start: string; end: string; recurring_event_id: string; original_start_time: string }> = [];
+  const listing = async (tool: string, args: Record<string, unknown>) => tool === "google_calendar.search_events"
+    ? { events: instances.filter((row) => Date.parse(row.end) > Date.parse(String(args.time_min)) && Date.parse(row.start) < Date.parse(String(args.time_max))) } : google.call(tool, args);
+  const first = await publishToGoogle(listing, [series], { events: {} }, NOW);
+  const id = first.ledger.events["fixed:class"]!.eventId;
+  const fresh = () => ["12", "19", "26"].map((day) => `2026-11-${day}`).concat(["2026-12-03", "2026-12-10", "2026-12-17"]).map((day) => {
+    const start = `${day}T20:00:00Z`;
+    return { id: `${id}_${day.replace(/-/g, "")}T200000Z`, summary: "Crossline · 研究 · 组会", start, end: `${day}T21:00:00Z`, recurring_event_id: id, original_start_time: start };
+  });
+  instances = fresh();
+  // Untouched: nothing taken for the person's.
+  const changed: GoogleBlock = { ...series, recurrence: { ...recurrence, exceptions: ["2026-12-10"] } };
+  google.calls.length = 0;
+  const second = await publishToGoogle(listing, [series], first.ledger, NOW);
+  expect(second.result).toMatchObject({ unchanged: 1, keptAsEdited: 0 });
+  // The person moves one class an hour later: the plan's change to the series is not written over it.
+  instances = fresh().map((row, index) => index === 2 ? { ...row, start: "2026-11-26T21:00:00Z", end: "2026-11-26T22:00:00Z" } : row);
+  const moved = await publishToGoogle(listing, [changed], second.ledger, NOW);
+  expect(moved.result).toMatchObject({ updated: 0, keptAsEdited: 1 });
+  expect(moved.ledger.events["fixed:class"]).toMatchObject({ edited: true });
+  expect(google.calls.filter((item) => item.tool === "google_calendar.update_event")).toEqual([]);
+  // The person deletes one class instead: the same; and removed from the plan later, the series is neither deleted nor cut.
+  instances = fresh().filter((_, index) => index !== 1);
+  const deleted = await publishToGoogle(listing, [changed], second.ledger, NOW);
+  expect(deleted.result).toMatchObject({ updated: 0, keptAsEdited: 1 });
+  google.calls.length = 0;
+  await publishToGoogle(listing, [], second.ledger, NOW);
+  expect(google.calls.filter((item) => ["google_calendar.update_event", "google_calendar.delete_event"].includes(item.tool))).toEqual([]);
 });
 
 test("the worker writes only through a connected Google app on the workspace's own runtime, and keeps the ledger", async () => {
