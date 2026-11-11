@@ -1,6 +1,6 @@
 "use client";
-import { Activity, CalendarRange, ClipboardCheck, FileInput, FileText, Inbox, ListTodo, LogOut, MessageCircle, Moon, Route, ScanFace, Settings, Sun, type LucideIcon } from "lucide-react";
-import { DECIDE_ITEM, FOOT_ITEMS, NAV_ITEMS, RHYTHM_ITEMS } from "./nav-items";
+import { CalendarRange, FileInput, FolderOutput, Inbox, ListTodo, LogOut, MessageCircle, Route, ScanFace, Settings, Sun, Wallet, Workflow, type LucideIcon } from "lucide-react";
+import { AGENT_ITEMS, DECIDE_ITEM, FOOT_ITEMS, RHYTHM_ITEMS, WORK_ITEMS } from "./nav-items";
 import { PendingBadge } from "./pending-badge";
 import { LocaleSwitch } from "./locale-switch";
 import { SignOutButton } from "./sign-out-button";
@@ -10,12 +10,12 @@ import { NavLink } from "./ui/nav-link";
 import { ICON } from "./ui/icon-button";
 
 /** Each view's icon, by its label (the id pages pass as `active`). */
-const ICONS: Record<string, LucideIcon> = { 今日: Sun, 主线: Route, 计划: CalendarRange, 任务: ListTodo, 待确认: Inbox, 导入: FileInput, 画像: ScanFace, 设置: Settings,
-  本周承诺: ClipboardCheck, 收工: Moon, 周复盘: Activity, 报告: FileText };
+const ICONS: Record<string, LucideIcon> = { 今日: Sun, 主线: Route, 记账本: Wallet, 任务: ListTodo, 待确认: Inbox, 导入: FileInput, 画像: ScanFace, 设置: Settings,
+  计划与复盘: CalendarRange, "Agent 产出": FolderOutput, 自动化: Workflow };
 
 /**
- * The side bar on a wide screen (2026-10-28, the owner's reference design): the wordmark, the four working views and 待确认; under
- * 「节奏与回顾」 the week's commitment, the wrap-up, the weekly review and the portrait (2026-10-29); then imports and the settings, each an
+ * The side bar on a wide screen (2026-10-28, the owner's reference design; regrouped 2026-11-10): the wordmark, the working views and
+ * 待确认; under 「节奏与回顾」 计划与复盘 and the portrait; under 「Agent」 Agent 产出 and 自动化; then imports and the settings, each an
  * icon and its name; at the foot the 小帮手, the language and signing out. Under 1025px it is not shown and the running head and the
  * phone's tab bar navigate instead (shell.css).
  */
@@ -31,10 +31,14 @@ export function SideNav({ active }: { active?: string | undefined }) {
   return <aside className="side-nav">
     <NavLink className="side-nav-brand ds-serif" href="/">Crossline</NavLink>
     <nav aria-label={t("主导航")}>
-      <div className="side-nav-group">{NAV_ITEMS.map((entry) => item({ ...entry, badge: false }))}{item(DECIDE_ITEM)}</div>
+      <div className="side-nav-group">{WORK_ITEMS.map(item)}{item(DECIDE_ITEM)}</div>
       <div className="side-nav-group" role="group" aria-labelledby="side-nav-rhythm">
         <h2 id="side-nav-rhythm" className="side-nav-heading">{t("节奏与回顾")}</h2>
         {RHYTHM_ITEMS.map(item)}
+      </div>
+      <div className="side-nav-group" role="group" aria-labelledby="side-nav-agent">
+        <h2 id="side-nav-agent" className="side-nav-heading">{t("Agent")}</h2>
+        {AGENT_ITEMS.map(item)}
       </div>
       <div className="side-nav-group">{FOOT_ITEMS.map(item)}</div>
     </nav>

@@ -10,6 +10,7 @@ import { PlanPreviewProvider } from "./preview-context";
 import { CapacityChart } from "./plan-stats-charts";
 import { LineShareChart, PlanKpiRow, UnplacedCard } from "./plan-head";
 import { AppShell } from "../app-shell";
+import { PlanTabs } from "../plan-tabs";
 import { appNow, getStore, loadCurrentPlan, loadPlanExplanation, planToday } from "../../lib/crossline";
 import { loadPlanBoard } from "../../lib/plan-board";
 import { milestoneSummary } from "../../lib/plan-stats";
@@ -44,8 +45,9 @@ export default async function PlanPage(props: { searchParams?: Promise<{ horizon
   const imported = plan.blocks.filter((block) => block.id.startsWith("graph_calendar:") || block.id.startsWith("import:")).length;
   const milestones = milestoneSummary(board.charts.goals, board.today, board.horizon.days, new Set(board.doneMilestones));
   const firstRisk = milestones.risk[0];
-  return <AppShell active={"计划"} className="page subpage plan-page">
+  return <AppShell active={"计划与复盘"} className="page subpage plan-page">
     <div className="subpage-inner" data-plan-version={plan.id}>
+      <PlanTabs current={"计划"} />
       <PlanPreviewProvider horizonDays={board.horizon.days}>
         <header className="pl-head">
           <div>

@@ -1,0 +1,7 @@
+/* 「计划与复盘」's four tabs (plan-tabs.tsx): one row above each tab's own head, scrolling sideways on a narrow phone rather than wrapping. */
+.rhythm-tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--ds-line);margin:0 0 4px}
+.rhythm-tabs a{flex:none;display:inline-flex;align-items:center;min-height:40px;padding:0 14px;margin-bottom:-1px;border-bottom:2px solid transparent;
+  font-size:14px;color:var(--ds-muted);white-space:nowrap}
+.rhythm-tabs a:hover{color:var(--ds-ink)}
+.rhythm-tabs a.active{border-bottom-color:var(--ds-accent-ink);color:var(--ds-ink);font-weight:600}
+.rhythm-tabs a:focus-visible{outline:2px solid var(--ds-accent-ink);outline-offset:-2px}

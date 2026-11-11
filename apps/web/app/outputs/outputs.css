@@ -1,0 +1,22 @@
+/* 「Agent 产出」 (outputs/page.tsx): the filter chips, then one part per source. */
+.ao-filters{display:grid;gap:8px}
+.ao-chips{display:flex;flex-wrap:wrap;gap:6px}
+.ao-chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border:1px solid var(--ds-line);border-radius:999px;
+  background:var(--ds-card);font-size:13px;color:var(--ds-muted)}
+.ao-chip small{font-size:12px;color:var(--ds-muted)}
+.ao-chip:hover{color:var(--ds-ink);border-color:var(--ds-muted)}
+.ao-chip[aria-current]{background:var(--ds-accent-soft);border-color:var(--ds-accent-ink);color:var(--ds-ink);font-weight:600}
+.ao-section{display:grid;gap:12px}
+.ao-part{margin:0;font-size:18px;font-weight:600;color:var(--ds-ink)}
+.ao-runs,.ao-tasks,.ao-files{list-style:none;margin:0;padding:0}
+.ao-runs li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:8px 0;border-top:1px solid var(--ds-line);font-size:14px}
+.ao-runs li:first-child{border-top:0}
+.ao-runs small,.ao-files small{font-size:12px;color:var(--ds-muted)}
+.ao-runs a,.ao-files a{color:var(--ds-ink);text-decoration:underline;overflow-wrap:anywhere}
+.ao-line{border-top:1px solid var(--ds-line);padding:8px 0}
+.ao-line>summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--ds-ink)}
+.ao-tasks>li{padding:6px 0 0 12px}
+.ao-task{display:block;font-size:14px;font-weight:600;color:var(--ds-ink)}
+.ao-zip{margin-left:10px;font-size:13px;font-weight:400;color:var(--ds-muted);text-decoration:underline}
+.ao-files{margin:4px 0 6px;padding-left:12px}
+.ao-files li{font-size:14px;overflow-wrap:anywhere}

@@ -7,6 +7,7 @@ import { BarChart } from "../ui/charts";
 import "../rituals.css";
 import "./review.css";
 import { AppShell } from "../app-shell";
+import { PlanTabs } from "../plan-tabs";
 import { Figure, RitualHead } from "../ritual-head";
 import { RevokeAcceptance } from "./revoke-acceptance";
 import { DecideRelations } from "./decide-relations";
@@ -81,7 +82,8 @@ export default async function ReviewPage() {
   const toDecide = review.candidates.kept.length + pendingProposals + candidateFindings;
   const range = t("{{start}}–{{end}}", { start: monthDay(locale, week.start), end: monthDay(locale, week.end) });
 
-  return <AppShell active={"周复盘"} className="subpage rd-page"><div className="rd-inner">
+  return <AppShell active={"计划与复盘"} className="subpage rd-page"><div className="rd-inner">
+    <PlanTabs current={"周复盘"} />
     <RitualHead title={t("周复盘")} sub={t("{{range}} · 回看上周做成了什么、时间投到了哪，再拍板长期判断；没有记录的指标标为「未标定」。", { range })} />
 
     <ul className="rd-kpis" aria-label={t("这一周的数")}>

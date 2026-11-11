@@ -1,6 +1,6 @@
 import "server-only";
 import { AUTOMATIONS_SETTING, readAutomations, type AccessContext } from "@crossline/core";
-import { listAgentTasks, type AgentTaskRow } from "@crossline/db";
+import { grownHomeLine, listAgentTasks, readGrownSkills, type AgentTaskRow } from "@crossline/db";
 import { groupOutputs } from "../app/approvals/assistant-outputs";
 import { readTaskFile, runFilesHere } from "./agent";
 import { getStore } from "./crossline";
@@ -24,19 +24,36 @@ export type OutputFolder = { lines: OutputLine[]; files: number; bytes: number; 
 export const ZIP_MAX_FILES = 400;
 export const ZIP_MAX_BYTES = 300 * 1024 * 1024;
 const ZIP_FILE_LIMIT = 60 * 1024 * 1024;
-const OTHER = "other";
+/** The line id of everything that belongs to no line the workspace has. */
+export const OTHER_LINE = "other";
+const OTHER = OTHER_LINE;
 
 /** Runs that handed something over: accepted or waiting for the person, never a workflow being grown or one turned down. */
 const delivered = (row: AgentTaskRow) => (row.status === "accepted" || row.status === "needs_review") && !row.taskId.startsWith("grow-") && row.artifacts.length > 0;
 
+/** The line a run belongs to: its order's, or the automation's or grown workflow's that started it; 「其他」 when none says. */
+export function runLineOf(ctx: AccessContext): (row: AgentTaskRow) => string {
+  const store = getStore();
+  const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.identityId]));
+  const automations = readAutomations(store.getSetting(ctx.workspaceId, AUTOMATIONS_SETTING));
+  // A grown workflow's run is named `flow-<id without flow->-<time>`; the longest id that prefixes it owns it (as lib/reports.ts reads it).
+  const workflows = readGrownSkills(store, ctx.workspaceId).sort((a, b) => b.id.length - a.id.length);
+  const homes = new Map<string, string | undefined>();
+  const workflowLine = (taskId: string) => {
+    const owner = taskId.startsWith("flow-") ? workflows.find((record) => taskId.startsWith(`flow-${record.id.replace(/^flow-/, "")}-`)) : undefined;
+    if (!owner) return undefined;
+    if (!homes.has(owner.id)) homes.set(owner.id, grownHomeLine(store, ctx.workspaceId, owner));
+    return homes.get(owner.id);
+  };
+  // An automation's run is named `<automation id>-<time>`: it belongs to that automation's line.
+  return (row) => orders.get(row.workOrderId)
+    ?? automations.find((automation) => row.taskId.startsWith(`${automation.id}-`))?.lineId ?? workflowLine(row.taskId) ?? OTHER;
+}
+
 export function outputFolder(ctx: AccessContext): OutputFolder {
   const store = getStore();
   const lines = identityLines(ctx).map((line) => ({ id: line.id, label: line.label }));
-  const orders = new Map(store.listWorkOrders(ctx.workspaceId).map((order) => [order.id, order.identityId]));
-  const automations = readAutomations(store.getSetting(ctx.workspaceId, AUTOMATIONS_SETTING));
-  // An automation's run is named `<automation id>-<time>`: it belongs to that automation's line.
-  const lineOf = (row: AgentTaskRow) => orders.get(row.workOrderId)
-    ?? automations.find((automation) => row.taskId.startsWith(`${automation.id}-`))?.lineId ?? OTHER;
+  const lineOf = runLineOf(ctx);
   const byLine = new Map<string, OutputTask[]>();
   let files = 0, bytes = 0, elsewhere = 0;
   for (const row of listAgentTasks(store, ctx.workspaceId).filter(delivered)) {

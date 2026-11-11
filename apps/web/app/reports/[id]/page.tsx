@@ -27,8 +27,8 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   const lines = Object.fromEntries(identityLines(ctx).map((line) => [line.id, line.label]));
   const day = (at: string) => monthDay(locale, at.slice(0, 10));
   const sub = [t("{{date}} 生成", { date: day(report.at) }), ...(report.notes !== undefined ? [t("涵盖 {{notes}} 条笔记", { notes: report.notes })] : [])].join(" · ");
-  return <AppShell active={"报告"} className="subpage rd-page"><div className="rd-inner">
-    <RitualHead title={report.title} sub={sub} actions={<a className="secondary-button" href="/reports">{t("全部报告")}</a>} />
+  return <AppShell active={"Agent 产出"} className="subpage rd-page"><div className="rd-inner">
+    <RitualHead title={report.title} sub={sub} actions={<a className="secondary-button" href="/outputs?source=workflow">{t("全部报告")}</a>} />
     {report.documents.length > 1 && <nav className="rd-card" aria-label={t("报告目录")}>
       <div className="rd-preview"><ul>{report.documents.map((doc, index) => <li key={doc.path}><a href={`#doc-${index}`}>{doc.name}</a></li>)}</ul></div>
     </nav>}
