@@ -22,8 +22,8 @@ export type FixedEvent = {
   date: string;
   start: string; end: string;
   location: string;
-  /** Where it came from: typed into the input box, said in the interview, read from a file, or heard in a recording. */
-  source: "input" | "interview" | "file" | "recording";
+  /** Where it came from: typed into the input box, said in the interview, read from a file, heard in a recording, or a mail the person said 去 to. */
+  source: "input" | "interview" | "file" | "recording" | "mail";
 };
 
 const md = (day: string, locale?: Locale) => locale === "en" ? monthDay(locale, day) : `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;

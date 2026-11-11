@@ -6,6 +6,7 @@
  * newest messages, and what was done with each; never the full text, which is read from the server when a run needs it.
  */
 import { tFor, type Locale } from "./i18n";
+import { MAIL_MEET_SHAPE, type MailMeetReading } from "./mail-events";
 import { BOOKABLE_EVENTS, INCOME_CATEGORIES, MONEY_EVENTS, MONEY_INSTRUMENTS, SPEND_CATEGORIES, type MoneyReading } from "./money-events";
 
 export const MAIL_ACCOUNTS_SETTING = "mail.accounts";
@@ -85,8 +86,8 @@ export function appPasswordPage(address: string, locale?: Locale): AppPasswordPa
  * `opportunity`: an event, competition, programme or opening the person could sign up or apply for (docs/opportunity-agent.md §6).
  * `travel`: a booking confirmation (flight, train, hotel) of a future trip, read into `trip` with the mail's own sentence (§17.6 c).
  */
-export type MailTriageKind = "todo" | "date" | "reply" | "transaction" | "opportunity" | "travel" | "info" | "ignore";
-export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply", string> = { todo: "待办", date: "日期", reply: "回复了等待项", transaction: "记账",
+export type MailTriageKind = "todo" | "date" | "event" | "reply" | "transaction" | "opportunity" | "travel" | "info" | "ignore";
+export const MAIL_TRIAGE_KIND_LABEL: Record<MailTriageKind | "needs_reply", string> = { todo: "待办", date: "日期", event: "活动", reply: "回复了等待项", transaction: "记账",
   opportunity: "机会", travel: "行程", info: "知悉", ignore: "略过", needs_reply: "需要回复" };
 /** Where a booking takes the person: city and country, the first and last day there, and the sentence of the mail that says so. */
 export type MailTrip = { city: string; country: string; from: string; to: string; quote: string };
@@ -97,14 +98,16 @@ export type MailTrip = { city: string; country: string; from: string; to: string
  */
 export type MailTriage = { items: Array<{ uid: number; kind: MailTriageKind; title: string; waitingId: string; why: string; money: MoneyReading;
   /** Filled for `travel`, empty strings otherwise; optional here only for answers recorded before it existed. */
-  trip?: MailTrip }> };
+  trip?: MailTrip;
+  /** Filled for `event` (a talk, info session, activity or meeting at a set time; `mail-events.ts`), empty otherwise; optional for older answers. */
+  meet?: MailMeetReading }> };
 
 export const MAIL_TRIAGE_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items"], properties: {
     items: { type: "array", maxItems: 40, items: { type: "object", additionalProperties: false,
-      required: ["uid", "kind", "title", "waitingId", "why", "money", "trip"], properties: {
+      required: ["uid", "kind", "title", "waitingId", "why", "money", "trip", "meet"], properties: {
       uid: { type: "integer", minimum: 1 },
-      kind: { type: "string", enum: ["todo", "date", "reply", "transaction", "opportunity", "travel", "info", "ignore"] },
+      kind: { type: "string", enum: ["todo", "date", "event", "reply", "transaction", "opportunity", "travel", "info", "ignore"] },
       title: { type: "string", maxLength: 140 },
       waitingId: { type: "string", maxLength: 128 },
       why: { type: "string", maxLength: 200 },
@@ -122,7 +125,8 @@ export const MAIL_TRIAGE_SCHEMA = {
         instrument: { type: "string", enum: [...MONEY_INSTRUMENTS] } } },
       trip: { type: "object", additionalProperties: false, required: ["city", "country", "from", "to", "quote"], properties: {
         city: { type: "string", maxLength: 80 }, country: { type: "string", maxLength: 60 },
-        from: { type: "string", maxLength: 10 }, to: { type: "string", maxLength: 10 }, quote: { type: "string", maxLength: 300 } } } } } } }
+        from: { type: "string", maxLength: 10 }, to: { type: "string", maxLength: 10 }, quote: { type: "string", maxLength: 300 } } },
+      meet: MAIL_MEET_SHAPE } } } }
 } as const;
 
 /**
@@ -145,6 +149,12 @@ export function validateMailTriage(value: unknown, uids: number[], waitingIds: s
       problems.push(`uid ${item.uid} 的 waitingId「${item.waitingId}」不是正在等的事项（需要本人回复、不是在等的回信时 waitingId 留空）`);
     }
     if (item.money && BOOKABLE_EVENTS.includes(item.money.event) && !(item.money.amount > 0)) problems.push(`uid ${item.uid} 的 money.event 是 ${item.money.event} 却没有 amount`);
+    if (item.kind === "event") {
+      const meet = item.meet;
+      if (!item.title.trim() || !meet || !/^\d{4}-\d{2}-\d{2}$/.test(meet.date) || !/^\d{2}:\d{2}$/.test(meet.start) || !meet.quote.trim()) {
+        problems.push(`uid ${item.uid} 是活动却缺 meet：title、date（YYYY-MM-DD）、start（HH:MM）和邮件原文 quote 都要有；没有具体时间的不是活动`);
+      }
+    }
     if (item.kind === "travel") {
       const trip = item.trip;
       if (!trip?.city.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(trip.from) || !/^\d{4}-\d{2}-\d{2}$/.test(trip.to) || trip.to < trip.from || !trip.quote.trim()) {

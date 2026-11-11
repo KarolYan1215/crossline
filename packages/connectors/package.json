@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./web-push": "./src/web-push.ts"
+    "./web-push": "./src/web-push.ts",
+    "./ics-write": "./src/ics-write.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

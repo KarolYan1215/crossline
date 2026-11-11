@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   MAIL_ACCOUNTS_SETTING, MAIL_TRIPS_SETTING, mailTripPlace, readMailTrips, withMailTrip, MAIL_CHECK_MINUTES, MAIL_INBOX_PER_PASS, MAIL_LOG_KEEP, MAIL_LOG_SETTING, MAIL_TRIAGE_SCHEMA, readMailAccounts, readMailLog,
   isMailReminderTitle, linksFromMail, mailLinksKey, mailMessageKey, moneyEventFromMail, senderName, MAIL_CHECK_NUDGE_KIND, validateMailTriage, type MailAccount, type MailLogEntry, type MailTriage,
-  type MoneyReading
+  type MoneyReading, MAIL_EVENTS_SETTING, mailEventFrom, readMailEvents, withMailEvent
 } from "@crossline/core";
 import {
   createImapMail, hostAllowed, presetFor, unsupportedProvider, type ImapFactory, type ImapMail, type MailHeader, type SecretStore
@@ -171,7 +171,7 @@ export async function readNewMail(deps: MailDeps, workspaceId: string, force = f
  * lines carry the sender and subject so the analysis knows where a task came from.
  */
 export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | undefined; cwd: string }, workspaceId: string, messages: NewMail[]):
-  Promise<{ state: "done"; captured: number; replies: number; sorted: number; needsReply: ReplyCandidate[]; recorded: number } | { state: "skipped"; reason: string }> {
+  Promise<{ state: "done"; captured: number; replies: number; sorted: number; needsReply: ReplyCandidate[]; recorded: number; events: number } | { state: "skipped"; reason: string }> {
   const sorting = new Set(accounts(deps.store, workspaceId).filter((account) => account.triage).map((account) => account.id));
   // Layer 0 of the dedupe (docs/mail-bookkeeping.md §4.3): the same mail in two mailboxes, or seen again, is sorted once.
   const sortedKeys = new Set(readMailLog(deps.store.getSetting(workspaceId, MAIL_LOG_SETTING)).map((entry) => entry.key).filter(Boolean));
@@ -198,7 +198,14 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
     skillName: MAIL_TRIAGE_SKILL, cwd: deps.cwd, outputSchema: MAIL_TRIAGE_SCHEMA as unknown as Record<string, unknown>,
     developerInstructions: "Sort each new message once, from its sender, subject and opening. todo when it asks the person to do something or "
       + "doing nothing costs them (a deadline, a question only they can answer, an account or money alert to check); its title is the inbox line, "
-      + "verb first, with the day. date for a dated event the mail asks nothing about; reply with the wait's id when the sender is who an open wait "
+      + "verb first, with the day. event for something at a set day and time the person could simply go to (a talk, seminar, info session, "
+      + "activity, meeting, an advisor's or interviewer's invitation, their own group meeting): title is its name; meet.date YYYY-MM-DD, meet.start "
+      + "and meet.end HH:MM in the person's zone (end empty when not said), meet.location as written, meet.lineId the line it serves or empty, "
+      + "meet.relevance 0-100 for how much it serves the person's lines and long-term goals (a notice sent to a whole list about a social mixer, "
+      + "coffee hour or general event is low), meet.personal true only when it is addressed to the person in particular (an advisor asking to "
+      + "meet, an interview, their own group's meeting), meet.quote one sentence copied exactly from the mail that names the day. One that needs "
+      + "a sign-up or application is opportunity, not event. Any other kind has every meet field empty, relevance 0 and personal false. "
+      + "date for a dated deadline or day the mail asks nothing about and nobody attends; reply with the wait's id when the sender is who an open wait "
       + "is on, or with an empty waitingId when a real person or office waits for the person's answer by mail (a draft is written, never sent); info "
       + "for news about the person's own things that needs nothing, and for notices a service sends to all customers or about its own systems (security "
       + "advisories, incidents, CI or deploy results, terms changes) unless they name the person's own resource and a day to act; ignore for promotions, digests, cold pitches, a company's survey or feedback invitation (only one from the person's own course, employer or collaborator is todo), spam and phishing. "
@@ -226,7 +233,7 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   const at = (deps.now?.() ?? new Date()).toISOString();
   const ownerId = ownerOf(deps.store, workspaceId);
   const log: MailLogEntry[] = [];
-  let captured = 0, replies = 0, recorded = 0;
+  let captured = 0, replies = 0, recorded = 0, events = 0;
   const needsReply: ReplyCandidate[] = [];
   const bookkeeping = new Set(accounts(deps.store, workspaceId).filter((account) => account.triage && account.bookkeeping !== false).map((account) => account.id));
   const wealthLine = identityLines(deps.store, workspaceId).find((line) => line.domain === "wealth")?.id;
@@ -279,6 +286,19 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
       log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind, title: title.slice(0, 140), at, key });
       continue;
     }
+    // Something to go to is asked about (「要去吗」), never planned or written to a calendar by itself (the owner, 2026-11-10): a personal
+    // invitation or a relevant one becomes a card, a low-relevance notice waits in the weekly review. Kept only when its day is found in the mail.
+    if (kind === "event") {
+      const event = mailEventFrom(item.meet, { id: createHash("sha256").update(key).digest("hex").slice(0, 16), title: item.title, from: message.from,
+        subject: message.subject, text: `${message.subject}\n${message.body ?? message.snippet}`, today: today.toISOString().slice(0, 10),
+        lineIds: identityLines(deps.store, workspaceId).map((line) => line.id), at });
+      if (event) {
+        deps.store.setSetting(workspaceId, MAIL_EVENTS_SETTING, JSON.stringify(withMailEvent(readMailEvents(deps.store.getSetting(workspaceId, MAIL_EVENTS_SETTING)), event, today.toISOString().slice(0, 10))));
+        events += 1;
+      } else kind = "info";
+      log.push({ accountId: message.accountId, uid: message.uid, from: message.from, subject: message.subject, date: message.date, kind, title: item.title.slice(0, 140), at, key });
+      continue;
+    }
     if ((kind === "todo" || kind === "date") && captured < MAIL_INBOX_PER_PASS) {
       const captureId = `cap-mail-${randomUUID().slice(0, 12)}`;
       // The mail's own links on the sender's domain, read by code and kept for the task (W-158): a step needing 「验证链接」 is met by them.
@@ -323,8 +343,8 @@ export async function triageMail(deps: MailDeps & { client: CodexRpcBoundary | u
   const kept = [...readMailLog(deps.store.getSetting(workspaceId, MAIL_LOG_SETTING)), ...log].slice(-MAIL_LOG_KEEP);
   deps.store.setSetting(workspaceId, MAIL_LOG_SETTING, JSON.stringify(kept));
   deps.store.appendEvent({ ownerId, workspaceId, idempotencyKey: `mail.triaged:${at}:${randomUUID().slice(0, 6)}`, type: "mail.triaged", entityId: workspaceId,
-    payload: { messages: keyed.length, captured, replies, recorded } });
-  return { state: "done", captured, replies, sorted: log.length, needsReply, recorded };
+    payload: { messages: keyed.length, captured, replies, recorded, events } });
+  return { state: "done", captured, replies, sorted: log.length, needsReply, recorded, events };
 }
 
 /**

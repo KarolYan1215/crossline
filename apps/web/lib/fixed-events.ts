@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import {
-  EVENT_DECISIONS, FIXED_EVENTS, fixedEventBlocks, graphWeekdays, heardEventFromFact, importedTitle, inCalendar, itemProjectResolver, occurrences, seriesKey, validFixedEvent,
+  CALENDAR_WRITE_ACCOUNT_SETTING, CALENDAR_WRITE_PATHS_SETTING, readWritePaths, EVENT_DECISIONS, FIXED_EVENTS, fixedEventBlocks, graphWeekdays, heardEventFromFact, importedTitle, inCalendar, itemProjectResolver, occurrences, seriesKey, validFixedEvent,
   type AccessContext, type FixedEvent
 } from "@crossline/core";
 import { effectiveSchedulePreferences, getStore, planToday, toZonedInstant, type PersistedScheduleBlock } from "./crossline";
@@ -111,35 +111,41 @@ export const eventBlocks = (ctx: AccessContext, days: string[]): PersistedSchedu
  * What goes to the Crossline calendar as the person's fixed events: input-box events, and confirmed arrangements the person chose to
  * create. A recurring one is a weekly series starting at its next occurrence; a one-off is one event.
  */
-export function fixedEventsToPublish(ctx: AccessContext, now = new Date()): Array<{ id: string; title: string; start: string; end: string; reminderMinutes: number;
-  recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string } }> {
-  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
-  const today = planToday(ctx, now);
+/** The person's fixed events that any calendar path writes: input-box events (and mail events they said 去 to) and confirmed arrangements chosen for the calendar. */
+export function chosenFixedEvents(ctx: AccessContext): FixedEvent[] {
   const decided = eventDecisions(ctx);
   // An event the person added that they merged into an event of their own calendar is already there: it is not written a second time.
   const merges = readMerges(ctx);
   const onCalendar = (event: FixedEvent) => Object.values(merges).some((entry) => entry.how === "merge" && entry.keep.startsWith("calendar")
     && entry.drop === seriesKey({ id: event.id, kind: "event", title: event.title, day: event.date, start: event.start, end: event.end }));
-  const chosen = [...inputEvents(ctx).filter((event) => !onCalendar(event)), ...offerableEvents(ctx).filter((event) => decided[event.id] === "create")];
-  return chosen.flatMap((event) => {
+  return [...inputEvents(ctx).filter((event) => !onCalendar(event)), ...offerableEvents(ctx).filter((event) => decided[event.id] === "create")];
+}
+
+export function fixedEventsToPublish(ctx: AccessContext, now = new Date()): Array<{ id: string; title: string; start: string; end: string; reminderMinutes: number; lineId: string;
+  recurrence?: { daysOfWeek: string[]; startDate: string; endDate: string; localStart: string; localEnd: string; timeZone: string; weekdays: number[]; exceptions: string[] } }> {
+  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
+  const today = planToday(ctx, now);
+  return chosenFixedEvents(ctx).flatMap((event) => {
     try {
       if (!event.repeat) {
         const start = toZonedInstant(event.date, event.start, zone), end = toZonedInstant(event.date, event.end, zone);
-        return Date.parse(end) > now.getTime() ? [{ id: `fixed:${event.id}`, title: event.title, start, end, reminderMinutes: 10 }] : [];
+        return Date.parse(end) > now.getTime() ? [{ id: `fixed:${event.id}`, title: event.title, start, end, reminderMinutes: 10, lineId: event.lineId }] : [];
       }
       const first = occurrences(event, span(today, 400)).find((day) => day >= today);
       if (!first) return [];
-      return [{ id: `fixed:${event.id}`, title: event.title, start: toZonedInstant(first, event.start, zone), end: toZonedInstant(first, event.end, zone), reminderMinutes: 10,
-        recurrence: { daysOfWeek: graphWeekdays(event.repeat.weekdays), startDate: first, endDate: event.repeat.until, localStart: event.start, localEnd: event.end, timeZone: zone } }];
+      return [{ id: `fixed:${event.id}`, title: event.title, start: toZonedInstant(first, event.start, zone), end: toZonedInstant(first, event.end, zone), reminderMinutes: 10, lineId: event.lineId,
+        recurrence: { daysOfWeek: graphWeekdays(event.repeat.weekdays), startDate: first, endDate: event.repeat.until, localStart: event.start, localEnd: event.end, timeZone: zone,
+          weekdays: event.repeat.weekdays, exceptions: event.repeat.exceptions } }];
     } catch { return []; }
   });
 }
 
 const FIXED_HASH = "calendar.fixed.hash";
-/** Writes the fixed events to the Crossline calendar when they changed — apart from the plan's work blocks, and without waiting for a plan approval. */
+/** Writes the fixed events to the Microsoft Crossline calendar (the Graph path) when they changed — apart from the plan's work blocks. */
 export async function publishFixedEvents(ctx: AccessContext, now = new Date()): Promise<{ state: string }> {
   const store = getStore();
-  if (!store.getSetting(ctx.workspaceId, "calendar.write.account")) return { state: "not_connected" };
+  const account = Boolean(store.getSetting(ctx.workspaceId, CALENDAR_WRITE_ACCOUNT_SETTING));
+  if (!account || !readWritePaths(store.getSetting(ctx.workspaceId, CALENDAR_WRITE_PATHS_SETTING), account).graph) return { state: "not_connected" };
   const blocks = fixedEventsToPublish(ctx, now);
   const hash = createHash("sha256").update(JSON.stringify(blocks)).digest("hex").slice(0, 32);
   if (store.getSetting(ctx.workspaceId, FIXED_HASH) === hash) return { state: "unchanged" };

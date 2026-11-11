@@ -1,0 +1,4 @@
+.st-feed{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px}
+.st-feed input{flex:1 1 220px;min-width:0;font-size:12px}
+.st-switch{display:flex;align-items:center;gap:6px;flex:none;font-size:13px;white-space:nowrap}
+.st-warn{color:var(--graphite);font-weight:600}

@@ -356,6 +356,7 @@ Crossline 自己编译的 Codex 内核（`vendor/codex/codex-rs/target/debug/cod
 - Google 日历从「只读」改为「读（apps）+ 写（自建，`calendar.app.created`，只能写本应用建的日历）」。
 - apps 一律只读：Crossline 代码里的工具白名单只含明确列出的读工具名（如 `google_calendar.search_events`、`microsoft_outlook_calendar.list_events`），其余一律不调用，新增工具名默认不在白名单内。测试断言对写工具的调用次数为 0。写日历只走自建的窄范围令牌。
 - 不变：本人改过的事件不再碰；只删未来事件；预排块不写。
+- **2026-11-10 更新**：本人决定写日历走四条路（`docs/calendar-write-setup.md`）：订阅链接（ICS）、邮件邀请（iMIP）、经本人 ChatGPT 的 Google Calendar 连接器写（白名单五个工具，规则同 Graph；连接器没有建日历的工具，所以有名为 Crossline 的日历就写进去，没有就写主日历加前缀），以及可选的 Graph。上面「apps 一律只读」「写日历只走自建的窄范围令牌」对 Google 这一条不再成立；读工具白名单不变。
 
 ### 13.5 风险
 

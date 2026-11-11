@@ -19,12 +19,14 @@ import {
 import { requestAutoBackplan } from "./approvals";
 import { readScheduledDay } from "./schedule-memory";
 import { requestCodexSupervisor } from "./codex-runtime";
-import { autoPublishPass, forgetPublishedHash } from "./auto-publish";
+import { autoPublishPass, forgetPublishedHash, publishWorkspace } from "./auto-publish";
 import { calendarFiling } from "./timeline";
 import { answerInterviewQuestion, flushPendingAnswers, interviewStatus, type InterviewStatus } from "./interview-status";
 import { recordStepAnswer, requestStepReplan } from "./steps";
 import { unfiledFiles } from "./file-belonging";
-import { decideEvent, eventProposals, publishFixedEvents } from "./fixed-events";
+import { decideEvent, eventProposals } from "./fixed-events";
+import { answerMailEvent, mailEventCards } from "./mail-events";
+import { calendarWriteOn } from "./calendar-write";
 import { placesToAsk, setPlaceMinutes } from "./travel";
 import { decidePair, mergePairs, readMerges, timedItemOf } from "./event-merges";
 import { identityLines } from "./lines";
@@ -968,9 +970,9 @@ function interviewQuestionAsks(status: InterviewStatus, t: Translate): Ask[] {
  * event. At most four open at a time, soonest first.
  */
 function eventAsks({ ctx, today, t, locale }: Source): Ask[] {
-  // Without an account to write the Crossline calendar with, 「创建」 can only answer 「未连接」: an invitee was asked this for every class
-  // (2026-10-15 walkthrough), while the schedule already keeps those hours free either way.
-  if (!getStore().getSetting(ctx.workspaceId, "calendar.write.account")) return [];
+  // With no calendar path on, 「创建」 can only answer 「未连接」: an invitee was asked this for every class (2026-10-15 walkthrough),
+  // while the schedule already keeps those hours free either way. Any one path (feed, invitations, Google, Microsoft) is enough (2026-11-10).
+  if (!calendarWriteOn(ctx)) return [];
   return eventProposals(ctx).slice(0, 4).map((event) => {
     const first = event.repeat ? undefined : event.date;
     return { id: `event:${event.id}`, kind: "event_propose" as const, entityId: event.id, urgency: first ? urgencyFor(first, today) : "later" as const,
@@ -1108,7 +1110,7 @@ function mergeAsks({ ctx, today, now, t, locale }: Source): Ask[] {
 export function collectAsks(ctx: AccessContext, now = appNow()): Ask[] {
   const locale = localeFor(ctx);
   const source = { store: getStore(), ctx, today: planToday(ctx, now), now, t: tFor(locale), locale };
-  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, travelAsks, stepQuestionAsks,
+  return [backplanAsks, waitingAsks, captureAsks, materialsAsks, gateAsks, riskDigestAsks, weeklyCommitAsks, overdueFoldAsks, missedAsks, ledgerDuplicateAsks, prepQuestionAsks, lockedConflictAsks, agentAsks, calendarAsks, sourceProjectAsks, calendarLineAsks, interviewAsks, interviewSettingAsks, mergeAsks, eventAsks, mailEventCards, travelAsks, stepQuestionAsks,
     ({ ctx: context, now: at }: Source) => relationCheckAsks(context, at), backgroundAsks, ({ ctx: context, now: at }: Source) => outcomeAsks(context, at),
     ({ ctx: context, now: at }: Source) => progressAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityNeedAsks(context, at),
     ({ ctx: context, now: at }: Source) => opportunityOfferAsks(context, at), ({ ctx: context, now: at }: Source) => opportunityApplyReadyAsks(context, at)]
@@ -1508,10 +1510,11 @@ async function answerOne(ctx: AccessContext, ask: Ask, choice: AskChoice, values
       decidePair(ctx, pair.a, pair.b, optionId);
       return { ok: true };
     }
+    case "mail_event": return answerMailEvent(ctx, ask.entityId, optionId);
     case "event_propose": {
       decideEvent(ctx, ask.entityId, optionId === "create" ? "create" : optionId === "exists" ? "exists" : "skip");
       // Written now rather than at the next ten-minute pass, so the person sees it on their calendar while they are here.
-      if (optionId === "create") void publishFixedEvents(ctx).catch(() => undefined);
+      if (optionId === "create") void publishWorkspace(ctx.workspaceId).catch(() => undefined);
       return { ok: true };
     }
     case "calendar_line_unclear": {

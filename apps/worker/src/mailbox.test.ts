@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { MAIL_ACCOUNTS_SETTING, MAIL_LOG_SETTING, MAIL_TRIPS_SETTING } from "@crossline/core";
+import { MAIL_ACCOUNTS_SETTING, MAIL_EVENTS_SETTING, MAIL_LOG_SETTING, MAIL_TRIPS_SETTING, mailEventAsks, mailEventDigest, readMailEvents } from "@crossline/core";
 import type { ImapFactory, SecretStore } from "@crossline/connectors";
 import { CrosslineStore } from "@crossline/db";
 import { addMailAccount, createMailService, MAIL_TRIAGE_SKILL, mailLookupFor, readNewMail, removeMailAccount, requeueReplies, setMailBookkeeping, triageMail } from "./mailbox";
@@ -69,7 +69,7 @@ test("new mail is read once per check; sorting turns a to-do into an inbox line 
     { uid: 3, kind: "ignore", title: "", waitingId: "", why: "简报", money: { event: "", amount: 0, amountLabel: "", currency: "", merchant: "", category: "", occurredOn: "", refs: [], last4: "", instrument: "" } }] });
   const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
   const done = await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh);
-  expect(done).toEqual({ state: "done", captured: 1, replies: 1, sorted: 3, needsReply: [], recorded: 0 });
+  expect(done).toEqual({ state: "done", captured: 1, replies: 1, sorted: 3, needsReply: [], recorded: 0, events: 0 });
   expect(store.listCaptures(workspaceId)[0]).toMatchObject({ title: "10/30 前交 HW1（截止延后）" });
   expect(store.listCaptures(workspaceId)[0]!.context).toContain("HW1 extended to Oct 30");
   expect(store.listEvents(workspaceId, { type: "waiting.mail_seen", entityId: "wait-data" })).toHaveLength(1);
@@ -237,4 +237,35 @@ test("the reply queue: a refusal is tried once more then dropped, a passing trou
   expect(requeueReplies([item(3)], [skip(item(3), "already")])).toEqual([]);
   // The same uid in another mailbox is another message: a skip for one says nothing about the other.
   expect(requeueReplies([item(4, "a1"), item(4, "a2")], [skip(item(4, "a2"), "quota")])).toEqual([item(4, "a2")]);
+});
+
+test("an event in the mail is asked about, never planned: personal and relevant ones become cards, a mass notice waits for the weekly review", async () => {
+  const { store, workspaceId, secrets, resolve } = setup();
+  const box = mailbox();
+  let now = new Date("2026-11-10T09:00:00Z");
+  const deps = { store, secrets, resolve, factory: box.factory, now: () => now };
+  await addMailAccount(deps, workspaceId, { address: "me@qq.com", password: "app-pass" });
+  await readNewMail(deps, workspaceId);
+  box.messages.push({ uid: 1, subject: "Meeting next week", body: "Can we meet on Tuesday, Nov 17 at 2pm in my office?" },
+    { uid: 2, subject: "Graduate coffee hour", body: "Join the department coffee hour on Friday Nov 13, 3-4pm." },
+    { uid: 3, subject: "Seminar: Robust control", body: "Talk on Thursday Nov 12 at 4pm, room 1610." },
+    { uid: 4, subject: "Info session", body: "Info session next week." });
+  now = new Date("2026-11-10T09:20:00Z");
+  const fresh = await readNewMail(deps, workspaceId);
+  const empty = { event: "", amount: 0, amountLabel: "", currency: "", merchant: "", category: "", occurredOn: "", refs: [], last4: "", instrument: "" };
+  const meet = (date: string, start: string, end: string, relevance: number, personal: boolean, quote: string) => ({ date, start, end, location: "", lineId: "", relevance, personal, quote });
+  const answer = JSON.stringify({ items: [
+    { uid: 1, kind: "event", title: "与 Lin 老师见面", waitingId: "", why: "导师约见", money: empty, meet: meet("2026-11-17", "14:00", "", 40, true, "Can we meet on Tuesday, Nov 17 at 2pm") },
+    { uid: 2, kind: "event", title: "Graduate coffee hour", waitingId: "", why: "群发活动", money: empty, meet: meet("2026-11-13", "15:00", "16:00", 10, false, "coffee hour on Friday Nov 13, 3-4pm") },
+    { uid: 3, kind: "event", title: "Robust control seminar", waitingId: "", why: "相关讲座", money: empty, meet: meet("2026-11-12", "16:00", "17:00", 80, false, "Talk on Thursday Nov 12 at 4pm") },
+    // No day in the mail: the model's date is not taken, and the mail is only information.
+    { uid: 4, kind: "event", title: "Info session", waitingId: "", why: "说明会", money: empty, meet: meet("2026-11-18", "10:00", "11:00", 70, false, "Info session on Nov 18") }] });
+  const { rpc } = fakeRuntime([answer], MAIL_TRIAGE_SKILL);
+  expect(await triageMail({ ...deps, client: rpc, cwd: "/repo" }, workspaceId, fresh)).toMatchObject({ state: "done", captured: 0, events: 3 });
+  // Nothing became a task: going is the person's decision.
+  expect(store.listCaptures(workspaceId)).toEqual([]);
+  const events = readMailEvents(store.getSetting(workspaceId, MAIL_EVENTS_SETTING));
+  expect(mailEventAsks(events, "2026-11-10").map((event) => [event.title, event.personal, event.end])).toEqual([["与 Lin 老师见面", true, "15:00"], ["Robust control seminar", false, "17:00"]]);
+  expect(mailEventDigest(events, "2026-11-10", "2026-11-17").map((event) => event.title)).toEqual(["Graduate coffee hour"]);
+  expect(JSON.parse(store.getSetting(workspaceId, MAIL_LOG_SETTING)!).map((entry: { kind: string }) => entry.kind)).toEqual(["event", "event", "event", "info"]);
 });

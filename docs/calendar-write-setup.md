@@ -1,31 +1,58 @@
-# Crossline 日历：写入授权与分享到 Google
+# Crossline 日历：四种写入方式
 
-> 硬约束：Crossline **不改动你人工设置的任何日历**。它只写一个名为 `Crossline` 的单独日历，且只写自己创建、带标记的事件。你在里面手动改过的事件，它之后不再碰。
+> 硬约束：Crossline **不改动本人人工设置的任何日历事件**。只写自己创建的事件；本人改过（时间、标题）或删掉的事件，之后不再碰、也不再建；只删未来的事件；预览块、预排块从不写入。邮件里的活动要本人在问答卡上点「去」才会写入。
 
-## 1. 授权（一次）
+2026-11-10 本人决定四种方式都做（`packages/core/src/calendar-write.ts`），可以同时开几种。入口：设置 → 日历与连接 → 「写入日历」卡片，每种方式各有开关、最近一次结果和上次未完成的原因。任意一种开着，「创建」类问答（`event_propose`）就会出现。
 
-Entra 应用的委托权限需包含 `User.Read`、`Calendars.ReadWrite`（学校租户无需管理员同意的前提下）。然后在仓库根目录运行：
+写入的内容都一样（`apps/web/lib/calendar-write.ts` 的 `calendarItems`）：已确认的固定日程（文件里确认的、输入框建的、邮件里点了「去」的）和计划里的工作块；标题「主线 · 任务名」；不带备注、材料、地点；状态「空闲」，开始前 10 分钟提醒。每个事件有稳定的 UID（`<id>@crossline.lol`），所以改动是更新而不是新建。
 
-```powershell
-pnpm exec tsx scripts/graph-write-login.ts
-```
+| 方式 | 设置键 | 失败记录 |
+| --- | --- | --- |
+| (a) 订阅链接 | `calendar.write.paths.ics`，令牌 `calendar.feed.token` | `calendar.publish.failure.ics` |
+| (b) 邮件邀请 | `…paths.imip`，收件人 `calendar.imip.recipient` | `calendar.publish.failure.imip` |
+| (c) Google 日历（ChatGPT 连接器） | `…paths.google`，记录 `calendar.published.google` | `calendar.publish.failure.google` |
+| (d) Microsoft 日历（Graph） | `…paths.graph`（有写入账号时默认开） | `calendar.publish.failure` |
 
-按提示打开网址、输入设备码，同意页应写着「读取和写入你的日历」。成功后账号记入账本设置 `calendar.write.account`。之后重启 worker。
+## (a) 订阅链接
 
-## 2. 写入
+`/api/calendar/feed/<令牌>.ics`，任何日历应用「通过网址添加/订阅日历」即可（卡片上有复制和 `webcal://` 打开按钮）。令牌 32 字节随机数，按常数时间比较；只有该方式开着时链接才有效，关掉或「换新链接」后旧链接立即 404。拿到链接的人都能看到内容，所以内容只有标题和时间。日历应用刷新频率由它们自己定（Google 可达半天）。每次被读取记录 `calendar.feed.seen`。
 
-计划版本批准后，Crossline 每 10 分钟检查一次排程是否变了，变了就自动同步（2026-10-06 起，按你的选择；设置环境变量 `CROSSLINE_AUTO_PUBLISH=off` 可关闭）。计划页的「立即同步」按钮仍然可用。结果会说明新增、调整、移除、不变各几条，以及几条因你手动改过而保持原样。
+输出按 RFC 5545：CRLF、75 字节折行、TEXT 转义、每个用到的 TZID 都有 VTIMEZONE（按实际偏移变化生成）、每周重复用 `RRULE:FREQ=WEEKLY;BYDAY=…;UNTIL=<UTC>` 加 `EXDATE`（`packages/connectors/src/ics-write.ts`，测试用 ical.js 回读校验）。
 
-写入的事件都是「空闲」状态，并带提醒：
+## (b) 邮件邀请（iMIP，RFC 6047）
 
-- 每个工作块开始前 10 分钟提醒；
-- 等待项的跟进日（例如「跟进：师兄的真实测量数据到了吗？」）早上 9:00 一个 15 分钟的小事件，开始时提醒；
-- 已批准里程碑截止前 2 天早上 9:00 一个小事件，开始时提醒。
+从 `calendar@mail.crossline.lol`（`CROSSLINE_CALENDAR_FROM` 可改）给收件人发 `METHOD:REQUEST` 邀请；收件人默认是账号邮箱，可在卡片上改。时间或标题变了，同一 UID 再发一次，`SEQUENCE` 加一；从日历里移除且还在未来的，发 `METHOD:CANCEL`。只发未来 7 天的工作块，每轮最多 20 封；重复日程的「下一次」往后移不算变化。
 
-提醒由 Outlook 和手机日历推送。你在日历里改过的提醒算你的，之后不会被改回；你改过内容的事件也一样。写入范围没有变：只写名为 Crossline 的日历，只改它自己写过且你没动过的事件，只删未来的事件，待批准的预览块从不写入。
+**只走 Resend 的 HTTP API**（`POST https://api.resend.com/emails`，`packages/auth` 的 `createInviteSender`），密钥取自现有的 Resend SMTP 配置（`CROSSLINE_SMTP_USER=resend` 时 `CROSSLINE_SMTP_PASSWORD` 就是 API key，`resendKeyOf`）。邮件带 text 和 html 正文，日历对象作为附件 `invite.ics`（取消时 `cancel.ics`），类型 `text/calendar; charset=UTF-8; method=…`。不用 SMTP 发邀请：2026-11-10/11 对 UW Outlook（Exchange Online）实测，Resend 的 SMTP 中继会把邮件重建成 multipart/mixed（经 Amazon SES），无论原来是 nodemailer `icalEvent`（另附 invite.ics）还是单个 multipart/alternative，日历部分都成了普通附件 `attachment-0`，没有会议栏；改走 API 并显式标附件类型后出现「接受/拒绝」。测试记录见会话笔记 `imip-test-log.md`。没有 Resend 配置时卡片显示「本站没有配置 Resend 发信」，不会退回到 SMTP 或别的发信方式。测试里从不真发：网络是假的，或用 `CROSSLINE_AUTH_TEST_MAILBOX_DIR` 写到文件。
 
-## 3. 分享到 Google 日历
+## (c) Google 日历：经本人 ChatGPT 登录里的 Google Calendar 连接器
 
-在 Outlook（网页版）→ 设置 → 日历 → 共享日历 → 选 Crossline → 发布，取得 ICS 链接；在 Google 日历 → 其他日历 → 通过网址添加。学校租户可能禁止对外发布；那时改用「共享给 Gmail 地址」或在 Outlook 里查看。Google 订阅 ICS 的刷新延迟可达半天到一天，这是 Google 的限制。
+这一条取消了原来「Google 日历只读」的规则，仅限这条路径（CLAUDE.md Safety boundaries）。worker 用该工作区自己的 Codex 运行时，在一个只读沙箱、无模型回合的临时线程上直接调用连接器工具（`mcpServer/tool/call`，`apps/worker/src/google-calendar-publish.ts`）。工具名是白名单：`list_calendars`、`search_events`、`create_event`、`update_event`、`delete_event`，其他一律不调。
 
-Google 日历里的事件目前**不会**被 Crossline 读成硬约束（尚未实现）。
+- 2026-11-10 用 `scripts/apps-calendar-tools.ts` 只列不写地探过工具：连接器**没有建日历的工具**，也没有私有扩展属性。所以本人若在 Google 里建了名为 `Crossline` 的日历就写进去；没有就写主日历，每个标题前加「Crossline · 」。一旦选定就不再换。
+- 哪些事件是本应用的，只看账本 `calendar.published.google` 里记下的事件 id；不在里面的事件从不碰。
+- 每次写之前读一遍未来 120 天的事件：时间或标题和写进去的不一样，或者事件不见了，就算本人的，此后不改、不重建、不删。
+- 只删未来的事件；已经开始的重复日程不删，而是把 `UNTIL` 改到今天。
+- 建事件时不加参会人、不加 Google Meet、状态空闲。
+- 需要：模型连接是 ChatGPT 登录，且 ChatGPT 里连好了 Google 日历；否则卡片显示「ChatGPT 里还没连接 Google 日历」。
+
+## (d) Microsoft 日历（Graph）
+
+只写名为 `Crossline` 的日历，规则不变（`connectorWritePolicy`）。可选：没有配置 Entra 应用的站点不显示这一项。
+
+托管版（Linux）也能用：令牌缓存在 Windows 上用 DPAPI；在 Linux 上用 `CROSSLINE_SECRET_KEY` 加密写进 `CROSSLINE_DATA_DIR` 下的密钥文件（槽 `_machine/msal-graph-cache`）。没有 `CROSSLINE_SECRET_KEY` 时登录直接报 `GRAPH_CACHE_NEEDS_SECRET_KEY`，不会明文落盘。
+
+### Entra 门户配置清单
+
+1. 打开 <https://entra.microsoft.com> → 应用程序 → 应用注册 → 新注册。
+2. 名称随意（如 `Crossline`）；「受支持的帐户类型」选「任何组织目录中的帐户和个人 Microsoft 帐户」（只给一个学校用就选「仅此组织目录」）；重定向 URI 留空。
+3. 注册后在「概述」复制「应用程序(客户端) ID」→ 环境变量 `CROSSLINE_MS_CLIENT_ID`；如果第 2 步选了「仅此组织目录」，再复制「目录(租户) ID」→ `CROSSLINE_MS_TENANT_ID`。
+4. 「身份验证」→「高级设置」→「允许公共客户端流」设为「是」并保存（登录用设备码流程）。
+5. 「API 权限」→ 添加权限 → Microsoft Graph → 委托的权限 → 勾选 `User.Read`、`Calendars.ReadWrite`（读取同步还要 `Calendars.Read`、`Tasks.Read`）。
+6. 学校、公司租户常禁止用户自行同意第三方应用：登录时出现「需要管理员批准」就要请租户管理员在「企业应用程序」里对该应用「授予管理员同意」，或换个人账号。
+7. 托管版设置 `CROSSLINE_SECRET_KEY`（与其他密钥共用）和 `CROSSLINE_DATA_DIR`，重启服务。
+8. 本机：仓库根目录运行 `pnpm exec tsx scripts/graph-write-login.ts`，按提示打开网址、输入设备码；同意页应写着「读取和写入你的日历」。成功后账号记入 `calendar.write.account`，「Microsoft 日历」一项默认开启。
+
+## 邮件里的活动
+
+邮件分拣多了一类「活动」（讲座、宣讲会、活动、会议、导师约见、面试、组会）：模型读出标题、日期、时间、地点、相关度和是否是给本人的邀请，日期和引文必须在原文里找得到（`packages/core/src/mail-events.ts`）。给本人的邀请或相关度 ≥ 50 的，变成问答卡「要去吗：「…」」，给本人的排在最前并默认推荐「去」；点「去」才建固定日程并按上面开着的方式写入日历，点「不去」就丢掉。其余群发通知只进复盘页的「邮件里的活动」一周汇总，不打扰。邮件本身从不直接写日历。要报名的活动仍走机会卡。

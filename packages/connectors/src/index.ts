@@ -1,5 +1,6 @@
 import { tFor, type Locale } from "@crossline/i18n";
-import { PublicClientApplication } from "@azure/msal-node";
+import { PublicClientApplication, type ICachePlugin } from "@azure/msal-node";
+import { createKeyFileSecretStore } from "./secret-file";
 import { DataProtectionScope, PersistenceCachePlugin, PersistenceCreator } from "@azure/msal-node-extensions";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -72,6 +73,10 @@ export function reconcileExternalItems(items: ExternalItem[]): {
 export function connectorWritePolicy(_connector: string, _target: string): string {
   if (_connector === "personal_graph" && _target === "calendar:Crossline") return "batch_approval";
   if (_connector === "personal_graph" && _target === "todo:Crossline") return "two_way";
+  // The Google Calendar connector of the person's own ChatGPT login (path c, the owner's decision of 2026-11-10, which lifted 「Google
+  // Calendar is read-only」): only events this app made, in the calendar named Crossline or the primary one with a prefix
+  // (apps/worker/src/google-calendar-writer.ts). Every other Google target stays read-only.
+  if (_connector === "google_calendar_app" && (_target === "calendar:Crossline" || _target === "calendar:primary")) return "own_events_only";
   return "read_only";
 }
 
@@ -134,6 +139,27 @@ export function graphCacheConfiguration(localAppData = process.env.LOCALAPPDATA,
   };
 }
 
+/**
+ * Where MSAL keeps the Microsoft sign-ins. On Windows: the DPAPI-protected file above. On a Linux server (the hosted beta, which has no
+ * keyring and no DPAPI) the cache is one AES-256-GCM file under the data directory, keyed by `CROSSLINE_SECRET_KEY` — the same key and
+ * format as the mail passwords (`createKeyFileSecretStore`). Without that key nothing is written in plain text: the sign-in is refused.
+ * Before 2026-11-10 the Linux path was a Windows path and a keyring the container does not have, so Graph could not work on hosted at all.
+ */
+export async function graphCachePlugin(localAppData?: string, platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<ICachePlugin> {
+  if (platform === "win32") {
+    const persistenceConfig = graphCacheConfiguration(localAppData);
+    mkdirSync(path.dirname(persistenceConfig.cachePath), { recursive: true });
+    return new PersistenceCachePlugin(await PersistenceCreator.createPersistence(persistenceConfig));
+  }
+  const key = env.CROSSLINE_SECRET_KEY?.trim();
+  if (!key) throw new Error("GRAPH_CACHE_NEEDS_SECRET_KEY");
+  const store = createKeyFileSecretStore(path.resolve(env.CROSSLINE_DATA_DIR?.trim() || "data"), key);
+  return {
+    async beforeCacheAccess(context) { const kept = await store.read("_machine", "msal-graph-cache"); if (kept) context.tokenCache.deserialize(kept); },
+    async afterCacheAccess(context) { if (context.cacheHasChanged) await store.write("_machine", "msal-graph-cache", context.tokenCache.serialize()); }
+  };
+}
+
 const GRAPH_READ_SCOPES = ["User.Read", "Calendars.Read", "Tasks.Read"];
 
 /**
@@ -165,15 +191,12 @@ export async function createGraphAuthSession(config: {
   credentialFor(accountId: string): GraphCredentialProvider;
 }> {
   if (!config.clientId.trim()) throw new Error("GRAPH_CLIENT_ID_REQUIRED");
-  const persistenceConfig = graphCacheConfiguration(config.localAppData);
-  mkdirSync(path.dirname(persistenceConfig.cachePath), { recursive: true });
-  const persistence = await PersistenceCreator.createPersistence(persistenceConfig);
   const client = new PublicClientApplication({
     auth: {
       clientId: config.clientId,
       authority: graphAuthority(config.tenantId, config.authority)
     },
-    cache: { cachePlugin: new PersistenceCachePlugin(persistence) }
+    cache: { cachePlugin: await graphCachePlugin(config.localAppData) }
   });
   const scopes = config.access === "calendar-write" ? GRAPH_CALENDAR_WRITE_SCOPES : config.access === "write" ? GRAPH_WRITE_SCOPES : GRAPH_READ_SCOPES;
   const accountById = async (accountId: string) =>
@@ -673,3 +696,4 @@ export * from "./web-search";
 export * from "./image-generation";
 export * from "./imap-mail";
 export * from "./task-imports";
+export * from "./ics-write";

@@ -1,8 +1,9 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { CALENDAR_PUBLISH_FAILURE, requiredApproval, type AccessContext } from "@crossline/core";
+import { anyWritePathOn, CALENDAR_PUBLISH_FAILURE, requiredApproval, type AccessContext } from "@crossline/core";
 import { getStore } from "./crossline";
 import { blocksToPublish } from "./calendar-publish";
+import { calendarItems, imipFrom, imipPass, recordPathFailure, writePaths, type CalendarItem } from "./calendar-write";
 import { CodexSupervisorRequestError, requestCodexSupervisor } from "./codex-runtime";
 import { publishFixedEvents } from "./fixed-events";
 import { onOptimalWritten } from "./optimal-schedule";
@@ -64,11 +65,69 @@ export function publishWorkspace(workspaceId: string, now = new Date()): Promise
   return run;
 }
 
+/**
+ * Every calendar path that is on (core `calendar-write.ts`, the owner's decision of 2026-11-10). The feed (a) has nothing to push: a
+ * calendar app reads it. Invitations (b) and Google (c) get the same items; Microsoft (d) keeps its own flow below. Each path's failure is
+ * kept apart, so one that fails never stops another. Returns the Microsoft path's state when it is on, else the first other path's.
+ */
 async function publishOnce(workspaceId: string, now: Date): Promise<string | undefined> {
   const store = getStore();
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
-  if (!ownerId || !store.getSetting(workspaceId, "calendar.write.account")) return undefined;
+  const paths = writePaths(workspaceId);
+  if (!ownerId || !anyWritePathOn(paths)) return undefined;
   const ctx = systemContext(workspaceId, ownerId, now);
+  const states: string[] = [];
+  if (paths.imip || paths.google) {
+    const { items, pending } = await calendarItems(ctx, now, { waitForOptimal: true }).catch(() => ({ items: [] as CalendarItem[], pending: true as const }));
+    if (pending) states.push("pending");
+    else {
+      if (paths.imip) states.push(await invitePath(ctx, items, now));
+      if (paths.google) states.push(await googlePath(ctx, items, now));
+    }
+  }
+  const graph = paths.graph && store.getSetting(workspaceId, "calendar.write.account") ? await graphPath(ctx, now) : undefined;
+  return graph ?? states[0] ?? "unchanged";
+}
+
+async function invitePath(ctx: AccessContext, items: CalendarItem[], now: Date): Promise<string> {
+  // Loaded only when invitations are on: the auth module is heavy, and every page that reads asks imports this file.
+  const { appInviteSender } = await import("./auth");
+  const send = appInviteSender(imipFrom());
+  if (!send) { recordPathFailure(ctx.workspaceId, "imip", { code: "CALENDAR_IMIP_NO_MAIL", message: "" }, now); return "failed"; }
+  try {
+    const result = await imipPass(ctx, items, send, now);
+    recordPathFailure(ctx.workspaceId, "imip", undefined, now);
+    return result.sent || result.cancelled ? "published" : "unchanged";
+  } catch (error) {
+    recordPathFailure(ctx.workspaceId, "imip", { code: (error as { code?: string }).code ?? "CALENDAR_IMIP_FAILED", message: error instanceof Error ? error.message.slice(0, 200) : "" }, now);
+    return "failed";
+  }
+}
+
+const GOOGLE_HASH = "calendar.google.hash";
+/** The Google path is the worker's: it holds the Codex runtime whose ChatGPT login carries the connector. Sent only when something changed. */
+async function googlePath(ctx: AccessContext, items: CalendarItem[], now: Date): Promise<string> {
+  const store = getStore();
+  const blocks = items.map((item) => ({ id: item.id, title: item.title, start: item.start, end: item.end, reminderMinutes: item.reminderMinutes,
+    ...(item.series ? { recurrence: item.series.graph } : {}) }));
+  const hash = createHash("sha256").update(JSON.stringify(blocks)).digest("hex").slice(0, 32);
+  if (store.getSetting(ctx.workspaceId, GOOGLE_HASH) === hash) return "unchanged";
+  try {
+    const result = await requestCodexSupervisor<{ state?: string; code?: string; message?: string }>(ctx, "/v1/calendar/publish", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ blocks, path: "google" }), signal: AbortSignal.timeout(300_000) });
+    if (result.state === "published") store.setSetting(ctx.workspaceId, GOOGLE_HASH, hash);
+    recordPathFailure(ctx.workspaceId, "google", result.state === "published" ? undefined : { code: result.code ?? "CALENDAR_GOOGLE_FAILED", message: result.message ?? "" }, now);
+    return result.state ?? "unknown";
+  } catch (error) {
+    recordPathFailure(ctx.workspaceId, "google", error instanceof CodexSupervisorRequestError ? { code: error.blocker.code, message: error.blocker.message ?? "" }
+      : { code: "CALENDAR_GOOGLE_FAILED", message: error instanceof Error ? error.message.slice(0, 200) : "" }, now);
+    return "failed";
+  }
+}
+
+async function graphPath(ctx: AccessContext, now: Date): Promise<string> {
+  const store = getStore();
+  const workspaceId = ctx.workspaceId;
   // The person's fixed events are theirs, not the plan's: published as their own scope.
   await publishFixedEvents(ctx, now).catch(() => undefined);
   try {

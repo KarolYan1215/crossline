@@ -18,7 +18,7 @@ const GROUP_OF: Partial<Record<AskKind, AskGroup>> = {
   step_question: "步骤与准备", prep_question: "步骤与准备", backplan_input: "步骤与准备",
   agent_blocked: "助手",
   gate_insufficient: "验收", gate_failed: "验收", evidence_manual: "验收",
-  missed_block: "日程与承诺", weekly_commit: "日程与承诺", event_propose: "日程与承诺", locked_conflict: "日程与承诺", travel_minutes: "日程与承诺",
+  missed_block: "日程与承诺", weekly_commit: "日程与承诺", event_propose: "日程与承诺", mail_event: "日程与承诺", locked_conflict: "日程与承诺", travel_minutes: "日程与承诺",
   calendar_publish_failed: "日程与承诺", calendar_sync_failed: "日程与承诺", calendar_line_unclear: "日程与承诺",
   capture_blocked: "收集与文件", materials_blocked: "收集与文件", source_project: "收集与文件", ledger_duplicate: "收集与文件"
 };
