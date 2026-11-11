@@ -81,8 +81,8 @@ body:has(.settings-page) .running-head{background:var(--ds-bg)}
 .st-row-actions{display:inline-flex;gap:6px;align-items:center}
 .st-row-wrap{align-items:flex-start}
 .st-note{margin:0;font-size:12px;color:var(--graphite)}
-.st-ok{font-size:12px;color:#1F6E3D}
-.st-fail{font-size:12px;color:#A42620}
+.st-ok{font-size:12px;color:var(--now-ink)}
+.st-fail{font-size:12px;color:var(--risk-ink)}
 .st-trust{display:inline-flex!important;align-items:center;gap:6px}
 .st-trust-bar{display:inline-block;width:48px;height:5px;background:var(--mist)}
 .st-trust-bar i{display:block;height:100%;background:var(--ink)}
@@ -203,7 +203,7 @@ body:has(.settings-page) .running-head{background:var(--ds-bg)}
 .import-group h4{margin:0 0 4px;border-left:3px solid var(--line-color,var(--ink));padding-left:6px}
 .import-items{list-style:none;margin:0;padding:0;display:grid;gap:2px}
 .import-items li{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,160px);gap:2px 8px;padding:6px 0;border-bottom:1px solid var(--mist);align-items:center}
-.import-items li:not([data-kept]) .import-item-title{color:var(--muted,#555)}
+.import-items li:not([data-kept]) .import-item-title{color:var(--muted)}
 .import-item-main{display:flex;gap:6px;align-items:flex-start;min-width:0}
 .import-item-title{overflow-wrap:anywhere}
 .import-item-meta{grid-column:1;padding-left:22px}
@@ -346,7 +346,7 @@ html:has(.settings-page){background:var(--ds-bg)}
 /* 机会代理 (docs/opportunity-agent.md §17.9): the watches as a table that scrolls inside its card on a phone, never the page. */
 .op-table-wrap{overflow-x:auto;max-width:100%}
 .op-table{border-collapse:collapse;width:100%;min-width:560px}
-.op-table th,.op-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line-soft,#e2e2e2);vertical-align:top}
+.op-table th,.op-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--mist);vertical-align:top}
 .op-table td small{display:block}
 .op-less,.op-retired{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .op-less li{display:grid;gap:2px}
@@ -416,7 +416,7 @@ html:has(.settings-page){background:var(--ds-bg)}
 .st-wizard-text b{font-size:14px}
 .st-wizard-text small{color:var(--graphite);line-height:1.5}
 .st-wizard-text em{font-style:normal;font-size:11px;font-weight:700;padding:0 6px;margin-left:4px;border:1px solid var(--mist);border-radius:999px;color:var(--graphite);vertical-align:1px}
-.st-wizard-text em[data-weight="required"]{border-color:#8A5A00;color:#6B4400}
+.st-wizard-text em[data-weight="required"]{border-color:var(--warn);color:var(--warn-ink)}
 .st-wizard-text em[data-weight="recommended"]{border-color:var(--now-ink);color:var(--now)}
 @media (max-width:560px){.st-wizard-steps>li{grid-template-columns:28px minmax(0,1fr)}.st-wizard-steps>li>button{grid-column:2;justify-self:start}}
 .st-module-steps{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:-4px 0 12px}

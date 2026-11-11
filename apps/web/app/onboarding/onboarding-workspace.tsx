@@ -22,6 +22,8 @@ import { withLink } from "./rich-text";
 import { tFor } from "../../lib/i18n";
 import { useLocale } from "../locale-context";
 import { VoiceField } from "../ui/voice/voice-input";
+import { foldThread } from "./round-fold";
+import { Receipt } from "./receipt";
 import { asksLongTermGoal, composeAnswers, type Answer, type AssistantTurn, type DocumentRow, type Message, type OnboardingState } from "./onboarding-types";
 
 const ACCEPT = ".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.m4a,.mp3,.wav,.aac,.ogg,.flac";
@@ -60,6 +62,8 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
   const [cardAnswers, setCardAnswers] = useState<CardAnswers>(NO_CARD_ANSWERS);
   const [over, setOver] = useState(false);
+  // What a one-shot card left when it was done (the dates card): shown for about 1.5 s where the card was.
+  const [receipt, setReceipt] = useState<{ id: number; text: string } | undefined>();
   const [transcription, setTranscription] = useState<TranscriptionStatus | undefined>();
   const [designed, setDesigned] = useState<Array<{ id: string; identityId: string; title: string }> | undefined>();
   // Whether this account has a model connection: every round runs on it, so until it has one the interview's first step is connecting,
@@ -232,6 +236,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
     setBusy((now) => now === "turn" ? now : "dates"); setError("");
     const response = await fetch("/api/onboarding/dates/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ batchId, includedIds }) }).catch(() => undefined);
     if (!response?.ok) setError(t("没有加入成功，请重试。"));
+    else setReceipt({ id: Date.now(), text: includedIds.length ? t("已加入日历 {{count}} 项。", { count: includedIds.length }) : t("这批日期没有加入。") });
     await load();
     setBusy((now) => now === "dates" ? "" : now);
   };
@@ -302,6 +307,23 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
   const centre = deepStage ? roundQuestions : batchQuestions;
   const held = deepStage ? extra : [];
   const opening = !state.focusLine && messages.length === 0 && busy !== "turn" && !pendingText;
+  const insightCard = (message: Message, vanish: boolean) => {
+    const turn = asTurn(message);
+    return turn?.insight?.text && state.session ? <InsightCard key={`insight-${message.seq}`} sessionId={state.session.id} seq={message.seq} insight={turn.insight}
+      rating={state.insightRatings?.[String(message.seq)]} onRated={() => void load()} vanish={vanish} /> : null;
+  };
+  /** One message of the thread; in a fold the observation shows rated (changeable), on the open round it goes once rated. */
+  const renderMessage = (message: Message, folded: boolean) => {
+    const turn = asTurn(message);
+    if (!turn) return <div className="ob-turn ob-user" key={message.seq} data-user-text><p>{userText(message)}</p></div>;
+    const latest = message.seq === messages.at(-1)?.seq;
+    const rated = Boolean(state.insightRatings?.[String(message.seq)]);
+    return <div className="ob-turn ob-assistant" key={message.seq}>
+      <p className="gen">{turn.reply}</p>
+      {(!folded || rated) && insightCard(message, !folded)}
+      {latest && turn.nextAction === "ready_for_milestones" && state.readyToStart && <p className="ob-done">{t("信息已基本完整，可以在下方设计里程碑；画像报告随后生成。")}</p>}
+    </div>;
+  };
   const filesRead = state.documents.some((doc) => doc.extractionStatus === "done");
 
   /** The opening card's answers: tone and lines are written at once, then sent as the first reply the interview quotes. */
@@ -359,17 +381,15 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         {opening && <OpeningCard linesKnown={!state.setupLines} knownLines={state.lines.map((line) => line.label)} initialTone={state.tone} initialDepth={state.depth}
           busy={busy !== ""} hasMaterials={filesRead} needsConnection={!state.focusLine && connected === false} onStart={(answer) => void start(answer)} />}
         {messages.length === 0 && state.focusLine && <div className="ob-turn ob-assistant"><p>{t("「{{line}}」的访谈：现状、长期目标、项目、截止日与已有文件。", { line: state.focusLine.label })}</p></div>}
-        {messages.map((message) => {
-          const turn = asTurn(message);
-          if (!turn) return <div className="ob-turn ob-user" key={message.seq} data-user-text><p>{userText(message)}</p></div>;
-          const latest = message.seq === messages.at(-1)?.seq;
-          return <div className="ob-turn ob-assistant" key={message.seq}>
-            <p className="gen">{turn.reply}</p>
-            {turn.insight?.text && state.session && <InsightCard sessionId={state.session.id} seq={message.seq} insight={turn.insight}
-              rating={state.insightRatings?.[String(message.seq)]} onRated={() => void load()} />}
-            {latest && turn.nextAction === "ready_for_milestones" && state.readyToStart && <p className="ob-done">{t("信息已基本完整，可以在下方设计里程碑；画像报告随后生成。")}</p>}
-          </div>;
-        })}
+        {/* Rounds before the latest fold to one line each; an observation still waiting for 准/不准 stays out until it is rated. */}
+        {foldThread(messages, (seq) => Boolean(state.insightRatings?.[String(seq)])).map((item) => item.kind === "message" ? renderMessage(item.message, false)
+          : <div key={item.key} className="ob-round">
+            <details className="ob-round-fold">
+              <summary><b>{item.round === 0 ? t("开场") : t("第 {{n}} 轮", { n: item.round })}</b>{item.summary && <span className="gen"> · {item.summary}</span>}</summary>
+              {item.messages.map((message) => renderMessage(message, true))}
+            </details>
+            {item.unratedInsight && insightCard(item.unratedInsight, true)}
+          </div>)}
         {busy === "turn" && pendingText && !(messages.at(-1)?.role === "user" && userText(messages.at(-1)!) === pendingText)
           && <div className="ob-turn ob-user" data-user-text><p>{pendingText}</p></div>}
         {busy === "turn" && <div ref={asked}><TurnProgress sessionId={line ? `line-${line}` : sessionId} /></div>}
@@ -395,6 +415,7 @@ export function OnboardingWorkspace({ line }: { line?: string | undefined }) {
         </div>}
         {cards.length > 0 && !waiting && busy !== "turn" && <ProfileCards cards={cards} answers={cardAnswers} disabled={busy !== ""} onChange={setCardAnswers} />}
         {state.adoptedDates && !state.focusLine && <FileReadList data={state.adoptedDates} open={stage === "orientation" || stage === "lines"} onChanged={() => void load()} />}
+        {receipt && <Receipt key={receipt.id} text={receipt.text} onDone={() => setReceipt(undefined)} />}
         {state.dateBatch && <DateBatchCard key={state.dateBatch.id} batch={state.dateBatch} busy={busy !== "" && busy !== "turn"} onDecide={(batchId, ids) => void decideDates(batchId, ids)} onRedo={() => void runTurn(t("请把我已添加的文件里的日期重新读一遍，只整理日期。"), true, true)} />}
         {!state.focusLine && complete && <section className="ob-design" aria-label={t("画像报告")}>
           <b>{t("画像报告")}</b>

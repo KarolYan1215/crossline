@@ -926,5 +926,10 @@
   "另有 {{count}} 项没有写入_one": "{{count}} more item was not recorded",
   "另有 {{count}} 项没有写入_other": "{{count}} more items were not recorded",
   "另有 {{count}} 项没有写入：{{titles}}。需要的话在回答里补上缺的部分即可。_one": "{{count}} more item was not recorded: {{titles}}. If it is needed, add what is missing in a reply.",
-  "另有 {{count}} 项没有写入：{{titles}}。需要的话在回答里补上缺的部分即可。_other": "{{count}} more items were not recorded: {{titles}}. If they are needed, add what is missing in a reply."
+  "另有 {{count}} 项没有写入：{{titles}}。需要的话在回答里补上缺的部分即可。_other": "{{count}} more items were not recorded: {{titles}}. If they are needed, add what is missing in a reply.",
+  "第 {{n}} 轮": "Round {{n}}",
+  "已加入日历 {{count}} 项。_one": "Added {{count}} date to the calendar.",
+  "已加入日历 {{count}} 项。_other": "Added {{count}} dates to the calendar.",
+  "这批日期没有加入。": "None of these dates were added.",
+  "已移除这份测评结果。": "The quick test's result is removed."
 }
