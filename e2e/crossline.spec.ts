@@ -61,7 +61,7 @@ function ensureOwnNextStep(): void {
  */
 // The plan page's charts, ranking lists and capacity figures come from the same time-limited solve, so they are left out as well; the
 // ranking and the overload list are removed rather than hidden because how many rows they hold changes their height.
-const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-aside,.td-load,.td-due,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
+const STABLE_FOR_SCREENSHOT = ".pending-badge,.dv-block,.dv-bar,.dv-aside,.td-load,.td-due,.undo-trigger,.wk-block,.mo-chip[data-kind=\"scheduled\"],.ui-bar-value,.ui-bar-fill,"
   + ".task-card-slot a,.pl-hours,.pl-svg,.pl-timeline>header small,.pl-advice-count,.pl-kpi-value,.pl-kpi-note,.pl-kpi-bar,.pl-share-rows,.pl-milestones>span,"
   + ".schedule-status{visibility:hidden}"
   + ".ui-first-hint,.pl-rank-table,.pl-library,.pl-explain p,.pl-over-list,.pl-stat .pl-chart-foot,.forecast-delta,.pl-unplaced-list,.pl-unplaced .pl-empty,"
