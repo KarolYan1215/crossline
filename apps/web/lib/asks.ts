@@ -4,7 +4,7 @@ import {
   ACCOUNT_CLASS_LABEL, ATTENTION_SNAPSHOT, BACKGROUND_BLOCKER, CALENDAR_LINES, degradedService, CALENDAR_PUBLISH_FAILURE, CALENDAR_SYNC_FAILURE, calendarEventKey, daysBetween, describeEvent, missingInputsOf, rankAsks,
   localStamp, prepStepRetried, readableFromMaterial, snoozeUntil, STEP_ANSWER_SLOT, stepAnswerSlot, taskTitleOf, urgencyFor, type CalendarLines,
   validateAskChoice, withFrozen, type AccessContext, type Ask, type AskField, type AskItem, type AskOption, type AskPreview, type AskSnooze,
-  isAttending, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
+  attendedName, isAttending, isPreparationOnlyMilestone, onPersonsBoard, outcomeCriteriaVerdict, preparesOf, workOwner, decisionFor, similarTitles, type TimedItem,
   MILESTONE_RISK_KIND_LABEL, MILESTONE_RISK_LEVEL_LABEL, MILESTONE_RISKS_SETTING, milestoneRiskFingerprint, parseMilestoneRisks, riskBufferDays, riskCriteriaKeys, riskLevelOf,
   parseRiskDigestSeen, RISK_DIGEST_SETTING, riskDigestShows, weekStartOf, type MilestoneRisk, type RiskDigestSeen
 } from "@crossline/core";
@@ -541,7 +541,8 @@ function overdueFoldAsks(source: Source): Ask[] {
       why: t("这些日期是课程、别人或本人定的，系统不替本人改，逐个列在下方；最早的是 {{day}}。每项可以补做、改成新的日期或放弃。", { day: due ? format(due, locale) : "—" }),
       options: [{ id: "split", label: t("逐个处理"), recommended: true, detail: t("拆成每项一张卡") },
         ...(events.length ? [{ id: "drop_events", label: t("过去的 {{count}} 个活动不参加了", { count: events.length }),
-          detail: t("{{titles}} 归档，可从已归档恢复；其余照旧等本人决定", { titles: events.map((item) => `「${short(item.order.intent.trim(), 16)}」`).join("、") }) }] : [])] };
+          detail: t("{{titles}} 归档，可从已归档恢复；其余照旧等本人决定", { titles: events.map((item) =>
+            `「${item.ask.dueDay ? `${format(item.ask.dueDay, locale)} ` : ""}${short(attendedName(item.order.intent), 24)}」`).join("、") }) }] : [])] };
   });
 }
 

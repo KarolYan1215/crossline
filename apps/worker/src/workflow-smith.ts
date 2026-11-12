@@ -75,6 +75,23 @@ const attemptedTaskIds = (store: CrosslineStore, workspaceId: string, now: Date,
 const shared = (a: string, b: string) => { const left = textTerms(a); let count = 0; for (const term of textTerms(b)) if (left.has(term)) count += 1; return count; };
 
 /**
+ * Growing runs waiting for the person's look whose errands were not one that came back: every result they grew from belongs to fewer than
+ * `GROW_AFTER_ACCEPTED` tasks. Before 2026-11-11 results were counted by run, so two steps of one task (one event, one deliverable) grew a
+ * workflow, and the owner's 待确认 held nine of them, 「参加 11 月 6 日在 Levy Hall…」 among them. The daily pass puts these away
+ * (`dateAdvancePass`); a workflow already installed from one stays, and retires when idle like any other.
+ */
+export function notRepeatedGrowResults(store: CrosslineStore, workspaceId: string, rows = listAgentTasks(store, workspaceId)): string[] {
+  const byId = new Map(rows.map((row) => [row.taskId, row]));
+  return store.listEvents(workspaceId, { type: "skill.grown.attempted" }).flatMap((event) => {
+    const { taskId, taskIds } = event.payload as { taskId?: string; taskIds?: unknown };
+    const run = taskId ? byId.get(taskId) : undefined;
+    if (!run || run.status !== "needs_review" || run.settled || !Array.isArray(taskIds)) return [];
+    const tasks = new Set(taskIds.map((id) => byId.get(String(id))?.workOrderId).filter(Boolean));
+    return tasks.size < GROW_AFTER_ACCEPTED ? [run.taskId] : [];
+  });
+}
+
+/**
  * What could become a workflow now: a request the person made in words (`workflow.requested`) not yet tried, else two or more accepted
  * assistant results of one kind of work on one line whose titles share their words — an errand that keeps coming back — none of them
  * already behind a workflow or tried in the last month.

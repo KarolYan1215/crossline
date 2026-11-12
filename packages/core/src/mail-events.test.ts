@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  dateItemAttributes, mailEventClash, mailEventFrom, mailEventRulesAfter, mailEventsOnSchedule, mailObligation, parseTimeRange, readMailEventRules,
+  attendedName, dateItemAttributes, mailEventClash, mailEventFrom, mailEventRulesAfter, mailEventsOnSchedule, mailObligation, parseTimeRange, readMailEventRules,
   decideMailEvent, withMailEvent, type MailEvent, type MailMeetReading, type MailStructure
 } from "./index";
 
@@ -108,4 +108,12 @@ test("「几点到几点」 is read from the person's words", () => {
   expect(parseTimeRange("2:00 to 3:15")).toEqual({ start: "02:00", end: "03:15" });
   expect(parseTimeRange("13:15-12:45")).toBeUndefined();
   expect(parseTimeRange("下午")).toBeUndefined();
+});
+
+test("an event is named by what it is: no verb, no leading day, no 「在…举行的」", () => {
+  expect(attendedName("参加 11 月 6 日在 Levy Hall 举行的 CoE Alumni Award 座谈会")).toBe("CoE Alumni Award 座谈会");
+  expect(attendedName("参加 11 月 2 日晚间 BadgerShop 排练")).toBe("BadgerShop 排练");
+  expect(attendedName("参加 11 月 5 日 ECE 研究系列讲座")).toBe("ECE 研究系列讲座");
+  expect(attendedName("出席组会")).toBe("组会");
+  expect(attendedName("参加")).toBe("参加");
 });

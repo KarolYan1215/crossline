@@ -110,8 +110,9 @@ export type AgentTaskRow = {
   completedAt?: string;
   /** The guard flagged a send, publish, upload or payment on the way (`resultNeedsPerson`'s reason). */
   external: boolean;
-  /** Put away by the daily pass without a decision (`settleAgentResult`): replaced by a later run, or unreviewed too long. Files are kept. */
-  settled?: "superseded" | "expired";
+  /** Put away by the daily pass without a decision (`settleAgentResult`): replaced by a later run, unreviewed too long, or a workflow grown
+   * from what was not a repeated errand (`notRepeatedGrowResults` in the worker). Files are kept. */
+  settled?: "superseded" | "expired" | "not_repeated";
   /** Who accepted or rejected it: the person, or the daily pass accepting it in their place (`reviewAgentTask(…, { by: "system" })`). */
   reviewedBy?: "person" | "system";
   /** The self-check found none of its files on this machine (`agent.task.files_checked`); missing files are already left out of `artifacts`. */
@@ -174,7 +175,7 @@ export function listAgentTasks(store: CrosslineStore, workspaceId: string, now =
       row.reviewNote = String(p.note ?? "");
       row.reviewedBy = p.by === "system" ? "system" : "person";
     } else if (event.type === "agent.task.settled") {
-      if (row.status === "needs_review" && (p.how === "superseded" || p.how === "expired")) row.settled = p.how;
+      if (row.status === "needs_review" && (p.how === "superseded" || p.how === "expired" || p.how === "not_repeated")) row.settled = p.how;
     } else if (event.type === "agent.task.reopened") {
       // An undo of the daily pass: the result is the person's to look at again, whatever the pass did with it.
       if (row.status === "needs_review" || (row.status === "accepted" && row.reviewedBy === "system")) {
@@ -208,7 +209,7 @@ export function resultsAwaitingReview(store: CrosslineStore, workspaceId: string
  * Puts a waiting result away without a decision (the daily pass, `apps/worker/src/date-advance.ts`): replaced by a later run of the same
  * work, or unreviewed so long and not safe to accept in the person's place. Its status and files stay; it is only no longer a decision.
  */
-export function settleAgentResult(store: CrosslineStore, workspaceId: string, taskId: string, how: "superseded" | "expired", detail: { by?: string; day: string }): boolean {
+export function settleAgentResult(store: CrosslineStore, workspaceId: string, taskId: string, how: "superseded" | "expired" | "not_repeated", detail: { by?: string; day: string }): boolean {
   const ownerId = store.getWorkspaceOwnerId(workspaceId);
   if (!ownerId) return false;
   return store.appendEvent({ ownerId, workspaceId, idempotencyKey: `agent:settled:${taskId}:${how}:${detail.day}`, type: "agent.task.settled", entityId: taskId,

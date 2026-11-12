@@ -260,3 +260,21 @@ test("started work past its own self-set due day moves to the cautious finish at
   expect((store.getWorkOrder(ws, "course")!.payload as { dueDate: string }).dueDate).toBe("2026-10-19");
   expect(advanceMessage(outcome)).toContain("已开始的任务过了本人定的截止");
 });
+
+test("a workflow grown from two steps of one task is put away, one grown from two tasks stays the person's; one undo brings it back", () => {
+  // The owner's 待确认 held nine 「把这类事固化成工作流：…」 results counted by run, 「参加 11 月 6 日在 Levy Hall…」 among them (2026-11-11).
+  for (const [taskId, workOrderId] of [["s1", "t-event"], ["s2", "t-event"], ["c1", "t-548"], ["c2", "t-555"]] as const) {
+    result(taskId, workOrderId, taskId, "整理课程讲义", "2026-10-15T10:00:00Z");
+    event("agent.task.reviewed", taskId, { decision: "accepted", note: "" });
+  }
+  result("grow-one", "", "", "把这类事固化成工作流：参加 11 月 6 日在 Levy Hall 举行的 CoE Alumni …", "2026-10-21T02:00:00Z");
+  result("grow-two", "", "", "把这类事固化成工作流：整理课程讲义", "2026-10-21T02:00:00Z");
+  event("skill.grown.attempted", "media", { taskId: "grow-one", state: "started", taskIds: ["s1", "s2"] }, "att-1");
+  event("skill.grown.attempted", "media", { taskId: "grow-two", state: "started", taskIds: ["c1", "c2"] }, "att-2");
+  at(NOW.toISOString());
+  const outcome = dateAdvancePass(store, ws)!;
+  expect(outcome.notRepeated).toEqual(["grow-one"]);
+  expect(resultsAwaitingReview(store, ws).map((row) => row.taskId)).toEqual(["grow-two"]);
+  expect(advanceMessage(outcome)).toContain("1 个「固化成工作流」的建议来自同一件事的几个步骤，不是反复出现的事，收起");
+  expect(store.listEvents(ws, { type: "op.applied" }).at(-1)!.payload).toMatchObject({ inverse: { kind: "agent.reopen", taskIds: ["grow-one"] } });
+});

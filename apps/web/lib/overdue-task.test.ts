@@ -43,7 +43,8 @@ test("passed talks and rehearsals on the folded card are let go in one answer; h
   const folded = collectAsks(TEST_CTX, NOW).find((ask) => ask.id.startsWith("fold:overdue:"))!;
   const option = folded.options.find((item) => item.id === "drop_events")!;
   expect(option.label).toBe("过去的 2 个活动不参加了");
-  expect(option.detail).toContain("「参加 BadgerShop 排练」");
+  // Named by the day and what it is, not cut off at the verb and the date (「参加 11 月 6 日在 Lev…」, 2026-11-11).
+  expect(option.detail).toBe("「11/3 BadgerShop 排练」、「11/3 ECE 研究系列讲座」 归档，可从已归档恢复；其余照旧等本人决定");
   expect(await answerAsk(TEST_CTX, folded.id, { optionIds: ["drop_events"] }, {}, NOW)).toMatchObject({ ok: true });
   expect([store.getWorkOrder(ws, "talk")!.state, store.getWorkOrder(ws, "rehearsal")!.state]).toEqual(["archived", "archived"]);
   expect(store.getWorkOrder(ws, "hw3")!.state).toBe("active");

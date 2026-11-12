@@ -494,6 +494,8 @@
   "{{count}} 个助手成果交付超过 {{days}} 天无人审阅、自检都通过，已代为采纳_other": "{{count}} assistant results delivered over {{days}} days ago, never reviewed, with all checks passed, were accepted",
   "{{count}} 个助手成果已被同一件事后一次运行取代，收起_one": "{{count}} assistant result was replaced by a later run of the same work and put away",
   "{{count}} 个助手成果已被同一件事后一次运行取代，收起_other": "{{count}} assistant results were replaced by a later run of the same work and put away",
+  "{{count}} 个「固化成工作流」的建议来自同一件事的几个步骤，不是反复出现的事，收起_one": "{{count}} \"make this a workflow\" suggestion came from steps of one task, not a repeated errand, and was put away",
+  "{{count}} 个「固化成工作流」的建议来自同一件事的几个步骤，不是反复出现的事，收起_other": "{{count}} \"make this a workflow\" suggestions came from steps of one task, not a repeated errand, and were put away",
   "{{count}} 个助手成果超过 {{days}} 天未审，且自检未过、改了原文件或涉及对外，不代为采纳，收起_one": "{{count}} assistant result unreviewed for over {{days}} days failed a check, changed original files or acts outside the machine, so it was put away rather than accepted",
   "{{count}} 个助手成果超过 {{days}} 天未审，且自检未过、改了原文件或涉及对外，不代为采纳，收起_other": "{{count}} assistant results unreviewed for over {{days}} days failed a check, changed original files or act outside the machine, so they were put away rather than accepted",
   "{{count}} 个里程碑已过截止、还有没做完的工作，按保守完成日留 2 天余量顺延：{{items}}_one": "{{count}} milestone past its deadline with work still open was moved to its cautious finish plus 2 days: {{items}}",

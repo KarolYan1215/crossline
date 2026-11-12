@@ -11,7 +11,7 @@ import { localToday } from "./analysis";
 import { ownerOf } from "./owner";
 import { archiveBySystem, courseProjects, deadlineReader, STALE_DAYS, staleOpenWork, writeDeadlineMoves, type TidyOutcome, type UndoEntry } from "./return-tidy";
 import { dailyAvailableMinutes } from "./schedule-window";
-import { sayToPerson } from "./workflow-smith";
+import { notRepeatedGrowResults, sayToPerson } from "./workflow-smith";
 
 /**
  * The daily pass that keeps what waits for the person moving with the calendar (the owner's rule of 2026-10-21; the rules are
@@ -51,6 +51,8 @@ const json = <T>(raw: string | null | undefined, fallback: T): T => { try { retu
 
 export type AdvanceOutcome = {
   superseded: string[]; adopted: Array<{ taskId: string; title: string; left: number }>; expired: string[];
+  /** Growing runs from what was not a repeated errand, put away (`notRepeatedGrowResults`). */
+  notRepeated?: string[];
   shifted: TidyOutcome["shifted"]; asked: Array<{ id: string; title: string; deadline: string }>;
   /** Started work whose own self-set due day passed, moved to the cautious finish at the measured pace plus two days (closed-loop-1030 §4). */
   tasksShifted?: Array<{ id: string; title: string; from: string; to: string }>;
@@ -145,6 +147,12 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   const noted = new Set(store.listEvents(workspaceId, { type: "task.note" })
     .map((event) => (event.payload as { kind?: string; agentTaskId?: string })).filter((note) => note.kind === "agent_left").map((note) => note.agentTaskId));
   for (const row of rows) if (row.status === "accepted" && row.reviewedBy === "system" && row.needsHuman && !noted.has(row.taskId)) writeLeftNotes(store, workspaceId, owner, row);
+  // A workflow grown from one task's steps was never an errand that came back: not a decision for the person (2026-11-11).
+  for (const taskId of notRepeatedGrowResults(store, workspaceId, rows)) {
+    if (!settleAgentResult(store, workspaceId, taskId, "not_repeated", { day: today })) continue;
+    (outcome.notRepeated ??= []).push(taskId);
+    reopened.push(taskId);
+  }
   if (reopened.length) inverse.push({ kind: "agent.reopen", taskIds: reopened });
 
   // 2. Approved milestones past their deadline with open work.
@@ -252,6 +260,7 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   }
   store.appendEvent({ ownerId: owner, workspaceId, idempotencyKey: `date.advanced:${today}`, type: "date.advanced", entityId: workspaceId,
     payload: { day: today, superseded: outcome.superseded, adopted: outcome.adopted.map((item) => item.taskId), expired: outcome.expired,
+      ...(outcome.notRepeated?.length ? { notRepeated: outcome.notRepeated } : {}),
       shifted: outcome.shifted, asked: outcome.asked.map((item) => item.id), archived: outcome.archived.map((item) => item.id), drafts: outcome.drafts.map((item) => item.id),
       ...(outcome.opId ? { opId: outcome.opId } : {}) } });
   const text = advanceMessage(outcome, locale, reviewDays);
@@ -262,11 +271,12 @@ export function dateAdvancePass(store: CrosslineStore, workspaceId: string, opti
   return outcome;
 }
 
+const putAway = (outcome: AdvanceOutcome) => outcome.superseded.length + outcome.expired.length + (outcome.notRepeated?.length ?? 0);
 const summaryCounts = (outcome: AdvanceOutcome, locale?: Locale) => {
   const t = tFor(locale);
   return [
     outcome.adopted.length ? t("代为采纳 {{count}} 个助手成果", { count: outcome.adopted.length }) : "",
-    outcome.superseded.length + outcome.expired.length ? t("收起 {{count}} 个助手成果", { count: outcome.superseded.length + outcome.expired.length }) : "",
+    putAway(outcome) ? t("收起 {{count}} 个助手成果", { count: putAway(outcome) }) : "",
     outcome.shifted.length ? t("顺延 {{count}} 个里程碑", { count: outcome.shifted.length }) : "",
     outcome.archived.length ? t("归档 {{count}} 个旧任务", { count: outcome.archived.length }) : "",
     outcome.drafts.length ? t("收起 {{count}} 个旧草稿", { count: outcome.drafts.length }) : ""
@@ -289,6 +299,7 @@ export function advanceMessage(outcome: AdvanceOutcome, locale?: Locale, reviewD
     outcome.adopted.length ? (left ? t("{{count}} 个助手成果交付超过 {{days}} 天无人审阅、自检都通过，已代为采纳，留给本人的 {{left}} 件事写在各自任务的记录里", adopted)
       : t("{{count}} 个助手成果交付超过 {{days}} 天无人审阅、自检都通过，已代为采纳", adopted)) : "",
     outcome.superseded.length ? t("{{count}} 个助手成果已被同一件事后一次运行取代，收起", { count: outcome.superseded.length }) : "",
+    outcome.notRepeated?.length ? t("{{count}} 个「固化成工作流」的建议来自同一件事的几个步骤，不是反复出现的事，收起", { count: outcome.notRepeated.length }) : "",
     outcome.expired.length ? t("{{count}} 个助手成果超过 {{days}} 天未审，且自检未过、改了原文件或涉及对外，不代为采纳，收起", { count: outcome.expired.length, days: RESULT_EXPIRE_DAYS }) : "",
     outcome.shifted.length ? t("{{count}} 个里程碑已过截止、还有没做完的工作，按保守完成日留 2 天余量顺延：{{items}}", { count: outcome.shifted.length,
       items: listed(outcome.shifted, (item) => `${quote(item.title)}${locale === "en" ? " " : ""}${md(item.from, locale)} → ${md(item.to, locale)}`, locale) }) : "",
@@ -301,7 +312,7 @@ export function advanceMessage(outcome: AdvanceOutcome, locale?: Locale, reviewD
     outcome.drafts.length ? t("收起 {{count}} 个 {{days}} 天没动过的里程碑草稿，可在主线页「已归档」恢复", { count: outcome.drafts.length, days: STALE_DAYS }) : ""
   ].filter(Boolean);
   if (!parts.length) return "";
-  const kept = outcome.superseded.length || outcome.expired.length || outcome.adopted.length;
+  const kept = putAway(outcome) || outcome.adopted.length;
   const values = { parts: parts.join(locale === "en" ? "; " : "；") };
   return kept ? t("按今天的日期整理了待办：{{parts}}。助手成果的文件都还在「助手产出」里；24 小时内可撤销。", values)
     : t("按今天的日期整理了待办：{{parts}}。24 小时内可撤销。", values);
