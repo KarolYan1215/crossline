@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CrosslineStore, writeExtractState } from "@crossline/db";
 import { cardWordsHead, ONBOARDING_PROGRESS_SETTING, PROFILE_INSTRUMENTS_SETTING, PROFILE_ITEMS, readInstrumentAnswers, scaleAnswerLine,
   DEPTH_PACE, type OnboardingProgress, type ProfileCard } from "@crossline/core";
-import { cardsForRound, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, stagePace, withChecklist } from "./onboarding-session";
+import { cardsForRound, closingQuestion, createOnboardingSessionRunner as createRunner, finishInterview, INSTRUCTIONS, ONBOARDING_SKILL, paceDeepRound, shownOrOpen, stageOrderFor, stagePace, withChecklist, withFreshOpenQuestion } from "./onboarding-session";
 import { INSTRUCTIONS as EXTRACT_INSTRUCTIONS } from "./onboarding-extract";
 import { ONBOARDING_EXTRACT_SKILL } from "./onboarding-extract";
 import { fakeRuntime as runtimeWithRoutes } from "./testing/fake-runtime";
@@ -169,6 +169,29 @@ test("the main interview never ends itself: a model that is done asks whether th
   expect(outcome).toEqual({ state: "finished", sessionId: "s" });
   expect(store.getOnboardingSession(workspaceId, "s")?.state).toBe("complete");
   expect(store.listEvents(workspaceId, { type: "onboarding.finish_requested" })).toHaveLength(1);
+});
+
+test("before the start standard stands, a model that is done is not shown 「可以按结束」: the round asks what is still owed", async () => {
+  const { rpc } = fakeRuntime([turn({ questions: [], nextAction: "ready_for_milestones" })]);
+  const run = createOnboardingSessionRunner(store, workspaceId, "C:\repo", () => rpc, { extract: "off" });
+  expect(await run({ sessionId: "s", text: "都说完了" })).toEqual({ state: "asked", sessionId: "s" });
+  const last = store.listOnboardingMessages(workspaceId, "s").at(-1)!.content as { questions: Array<{ id: string; text: string }> };
+  expect(last.questions.length).toBeGreaterThan(0);
+  expect(last.questions[0]!.id).toMatch(/^checklist-open-/);
+  expect(last.questions.some((question) => question.text.includes("结束并出报告"))).toBe(false);
+});
+
+test("once every open question is used up, the round asks whether there is more instead of the stage's own question again", () => {
+  const round = { reply: "记下了。", stage: "lines", nextAction: "ask", coverage: [],
+    questions: [{ id: "open-lines", text: "哪条主线你最想先说清楚：现在在做什么、想做成什么样？", kind: "free", allowOther: true, identityId: "", projectId: "", options: [] }] };
+  const used = () => false;
+  const closing = closingQuestion();
+  expect((withFreshOpenQuestion(round as never, used, undefined, closing) as typeof round).questions.map((question) => question.id)).toEqual(["closing-open"]);
+  // Without the closing question (a line's own interview, or before the start standard) the stage's own stands, as before.
+  expect((withFreshOpenQuestion(round as never, used) as typeof round).questions.map((question) => question.id)).toEqual(["open-lines"]);
+  // One still unused is asked first.
+  const fresh = (withFreshOpenQuestion(round as never, (text) => text.startsWith("说说你现在的处境"), undefined, closing) as typeof round).questions;
+  expect(fresh.map((question) => question.id)).toEqual(["open-situation"]);
 });
 
 test("with no Codex runtime the turn is a blocker and saves nothing", async () => {

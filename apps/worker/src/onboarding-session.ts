@@ -460,8 +460,13 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // The main interview never ends itself (the owner, 2026-11-12): only the person's 「结束并出报告」 ends it, once the start standard stands
     // (`finishInterview`). A model that has nothing more to ask says so and asks whether there is anything else to talk about.
     const modelDone = !focusLine && result.output.nextAction === "ready_for_milestones";
+    // Before the start standard stands the person cannot end it yet: a model that is done asks what the start still owes, never 「可以按
+    // 结束」 (2026-11-12 replay: shown two rounds before the button would take it). None with words of its own: the round's open question.
+    const startAsks = () => openChecklist(Infinity, (item) => !item.start, sessionId).filter((item) => item.owner === "interview" && item.ask).slice(0, 2)
+      .map((item, index): TurnQuestion => ({ id: `checklist-open-${index + 1}`, text: item.ask!, kind: "free", allowOther: true,
+        identityId: "", projectId: "", options: [] }));
     if (modelDone) result = { ...result, output: { ...result.output, nextAction: "ask" as const,
-      questions: result.output.questions.length ? result.output.questions : [closingQuestion(locale)] } };
+      questions: result.output.questions.length ? result.output.questions : options.checklist !== false && startOpen() ? startAsks() : [closingQuestion(locale)] } };
     // Questions the dialogue wants looked into on the web go to research threads of their own, in the background.
     const raised = (result.output as { research?: Array<{ question: string; why: string; dimension: DimensionId }> }).research ?? [];
     if (research && raised.length) research.start(sessionId, raised);
@@ -552,7 +557,7 @@ export function createOnboardingSessionRunner(store: CrosslineStore, workspaceId
     // round: a goal question the left column's picker already asks was listed as nothing, and the 2026-11-01 rerun showed 「开始之前还想再问
     // 几件事。」 over an empty batch twice.
     const output = withPlainTerms(withFreshOpenQuestion(shownOrOpen(assembled, questionScreenFor(store, workspaceId), locale),
-      checklistAskable(store, workspaceId, sessionId), locale));
+      checklistAskable(store, workspaceId, sessionId), locale, startStands ? closingQuestion(locale) : undefined));
     // The observation is kept only when its quotes are in the replies it names; the progress record goes back to the model next round.
     const replies = Object.fromEntries(messages.filter((message) => message.role === "user")
       .map((message) => [`reply-${message.seq}`, String((message.content as { text?: string }).text ?? "")]));
@@ -654,10 +659,14 @@ export function shownOrOpen<T extends OnboardingDialogue & { cards?: unknown[] }
  * One the ledger says may not be asked again (`checklistAskable`: answered with something that settles it, or asked twice) gives way to
  * the next stage's open question that may.
  */
-export function withFreshOpenQuestion<T extends OnboardingDialogue>(output: T, askable: (text: string) => boolean, locale?: Locale): T {
+export function withFreshOpenQuestion<T extends OnboardingDialogue>(output: T, askable: (text: string) => boolean, locale?: Locale,
+  /** Once every open question is used up and the start standard stands: whether there is anything else, and the finish button. */
+  closing?: TurnQuestion): T {
   const stale = (question: TurnQuestion) => question.id.startsWith("open-") && !askable(question.text);
   if (!output.questions.some(stale)) return output;
-  const fresh = openStageQuestion(output.stage, locale, askable);
+  const next = openStageQuestion(output.stage, locale, askable);
+  // The 2026-11-12 replay asked 「哪条主线你最想先说清楚」 nine rounds running once all seven were used: the stage's own came back each time.
+  const fresh = askable(next.text) || !closing ? next : closing;
   return { ...output, questions: output.questions.map((question) => stale(question) ? fresh : question) };
 }
 

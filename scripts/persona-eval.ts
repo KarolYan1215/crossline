@@ -246,7 +246,9 @@ async function runPerson(name: string, opening: Opening) {
       const completeness = interviewCompleteness({ lowerBound: Boolean(readyAt), stagesSeen: rounds.map((round) => String(round.stage ?? "")),
         ...json<{ dimensions?: []; hypotheses?: []; careers?: [] }>("profile.model", {}) });
       log({ turn: turns, completeness: completeness.score, full: completeness.full });
-      const closing = batch.some((question) => question.id === "closing-open") && batch.length === 1;
+      // The page also says it in the reply: a person who already said there is nothing more presses the button when it is offered.
+      const closing = batch.some((question) => question.id === "closing-open")
+        || (batch.length <= 1 && /结束并出报告/u.test(turn.reply) && /没有了|没有别的|结束/u.test(text));
       if (readyAt && (completeness.full || closing)) { transcript.push(`**本人按「结束并出报告」**（完善度 ${Math.round(completeness.score * 100)}%）`, ""); break; }
 
       const context = { version: "crossline.eval-persona.v2", persona: life, reply: turn.reply,

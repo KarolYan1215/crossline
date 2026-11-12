@@ -126,6 +126,13 @@ export function quoteSupportsDate(date: string, quote: string): boolean {
   const q = arabicDayNumbers(quote.toLowerCase());
   if (new RegExp(`(^|[^0-9])0?${month}\\s*[/\\-.]\\s*0?${day}(?![0-9])`).test(q)) return true;
   if (new RegExp(`0?${month}\\s*月\\s*0?${day}`).test(q)) return true; // i18n-ignore
+  // 「11 月底」「11月末」, 「年底」 and 「end of November」 name the month's last day (2026-11-12 replay: 「11 月底前投出」 was refused three
+  // rounds running, and the interview asked for the date each time though the person had given it).
+  if (day === new Date(Date.UTC(Number(date.slice(0, 4)), month, 0)).getUTCDate()) {
+    if (new RegExp(`(^|[^0-9])0?${month}\\s*月\\s*(底|末)`).test(q)) return true; // i18n-ignore
+    if (month === 12 && /年(底|末)/u.test(q)) return true; // i18n-ignore
+    if (new RegExp(`end\\s+of\\s+(${MONTHS[month - 1]!}|${MONTH_NAMES[month - 1]!})`).test(q)) return true;
+  }
   for (const name of [MONTHS[month - 1]!, MONTH_NAMES[month - 1]!]) {
     if (new RegExp(`(^|[^a-z])${name}[a-z]*\\.?\\s*0?${day}(?![0-9])`).test(q)) return true;
     if (new RegExp(`(^|[^0-9])0?${day}(st|nd|rd|th)?\\s*(of\\s+)?${name}`).test(q)) return true;
