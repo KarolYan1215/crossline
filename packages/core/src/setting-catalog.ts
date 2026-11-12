@@ -94,7 +94,7 @@ export const SETTING_CATALOG = {
   "consent.phoneHealth": { label: "手机健康数据", target: "", value: { type: "enum", values: ON_OFF }, consequence: "关闭即删除手机记录，健康令牌失效", consent: true, section: "energy",
     explain: ["手机快捷指令发来的睡眠、起床与入睡时刻，以及当天的心率、手腕温度、步数和日照；生成健康令牌即开启；关闭即删除，令牌失效"] },
   "consent.screenActivity": { label: "屏幕活动", target: "", value: { type: "enum", values: { off: "不读取屏幕活动", minutes: "只记每天的活跃分钟数，不记应用与窗口",
-    detail: "记录应用与窗口标题；标题只存本机，14 天后抹除，不发给模型" } }, consequence: "屏幕活动的记录级别", consent: true, section: "privacy",
+    detail: "记录应用与窗口标题；标题只存本机，14 天后抹除" } }, consequence: "屏幕活动的记录级别", consent: true, section: "privacy",
     explain: ["不记录按键、不截屏、不上传；银行、密码管理器、无痕窗口不记录"] },
   "consent.agentHistory": { label: "Codex 与 Claude Code 使用记录", target: "", value: { type: "enum", values: ON_OFF }, consequence: "关闭即删除统计", consent: true, section: "privacy",
     explain: ["只读每条记录的时间和所在文件夹，不读对话内容；用于了解习惯与进度，不用于排程"] },

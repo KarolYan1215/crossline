@@ -5,6 +5,10 @@ import { formatInTimeZone } from "date-fns-tz";
 import { appNow, effectiveSchedulePreferences, getStore, loadCurrentPlan, planToday, readAvailability, readFrozen, toZonedInstant, writeFrozen } from "./crossline";
 import { blockAnswer, confirmBlockAt, type ConfirmOutcome } from "./confirm";
 import { eventBlocks } from "./fixed-events";
+import { draftConsent, pendingDrafts } from "./time-drafts";
+
+/** The tasks a drafted stretch can be put on. */
+const OPEN_STATES = new Set(["approved", "preparing", "ready_for_human", "active"]);
 
 /** The nudge pass's record of today's blocks (`seenBlocksKey` in `lib/nudges.ts`, which imports this file). */
 const seenBlocksKey = (day: string) => `nudge.blocks:${day}`;
@@ -25,12 +29,18 @@ export type WrapRow = { blockId: string; orderId: string; title: string; step: s
    * Work minutes inside the block from every signal joined in time — this task's timer, the screen in work categories, Codex — and what
    * they say about it (`inferBlockOutcome`; docs/plans/closed-loop-1030.md §2). Shown on the row as 「推断」 and taken by 「推断都对」.
    */
-  workMinutes: number; inferred: InferredOutcome };
+  workMinutes: number; inferred: InferredOutcome;
+  /** This task's 拟计时 drafts that overlap the block, offered as one 「按拟计时记 N 分」 (lib/time-drafts.ts). */
+  draft?: { ids: string[]; minutes: number } };
+/** A draft of the day outside the blocks, for 「这些时间在做什么？」, with the task it was put on (if any) by name. */
+export type WrapDraft = { id: string; start: string; end: string; minutes: number; workOrderId?: string; title?: string; why?: string };
 export type WrapView = { day: string; at?: string; rows: WrapRow[]; open: number; done: boolean;
   /** Whether `day` is today: an earlier day (`/wrap?day=`) is caught up on, not wrapped up. */
   today: boolean;
   /** Minutes the timer ran that day, every task; blocks answered done. */
-  timedMinutes: number; doneBlocks: number };
+  timedMinutes: number; doneBlocks: number;
+  /** 拟计时: the day's drafts not beside a block, whether drafting is on (or to be asked about), and the open tasks to pick from. */
+  drafts: WrapDraft[]; draftConsent: "on" | "ask" | "off"; tasks: Array<{ id: string; title: string }> };
 
 /** How far back `/wrap?day=` reaches: the last seven days (the nudge pass keeps a day's blocks for 28). */
 export const WRAP_DAYS_BACK = 7;
@@ -97,17 +107,29 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
     // Paused minutes are taken off in proportion to the part of the timer that fell on this day.
     return sum + Math.max(0, inDay - (whole ? span.pause * inDay / whole : 0));
   }, 0));
+  // 拟计时: the day's undecided drafts; a block takes those of its own task that overlap it, the rest are asked about apart.
+  const dayDrafts = pendingDrafts(ctx, now).filter((draft) => Date.parse(draft.start) >= dayFrom && Date.parse(draft.start) < dayTo);
+  const besideBlocks = new Set<string>();
   const rows = seenBlocks(ctx, day).filter((block) => block.began && lineOf.has(block.orderId)).sort((a, b) => a.start.localeCompare(b.start))
     .map((block): WrapRow => {
       const from = Date.parse(toZonedInstant(day, block.start, zone)), to = Date.parse(toZonedInstant(day, block.end, zone));
       const timed = Math.round(spans.filter((span) => span.orderId === block.orderId).reduce((sum, span) => sum + overlap(span, from, to), 0));
       const line = lineOf.get(block.orderId);
-      const workMinutes = Math.max(timed, blockWorkMinutes(ctx, block.orderId, new Date(from).toISOString(), new Date(to).toISOString(), now));
+      const workMinutes = Math.max(timed, blockWorkMinutes(ctx, block.orderId, new Date(from).toISOString(), new Date(to).toISOString(), now, block.stepId || undefined));
+      const own = dayDrafts.filter((draft) => draft.workOrderId === block.orderId && !besideBlocks.has(draft.id)
+        && overlap({ from: Date.parse(draft.start), to: Date.parse(draft.end) }, from, to) > 0);
+      for (const draft of own) besideBlocks.add(draft.id);
       return { blockId: block.id, orderId: block.orderId, title: block.title, step: block.step, start: block.start, end: block.end, timedMinutes: timed,
         workMinutes, inferred: ((outcome) => outcome === "done" && !finishes(block.orderId, block.stepId, workMinutes) ? "partial" : outcome)(
           inferBlockOutcome(workMinutes, Math.round((to - from) / 60_000))),
-        ...(line ? { line } : {}), ...(answered.has(block.id) ? { answered: answered.get(block.id)! } : {}) };
+        ...(line ? { line } : {}), ...(answered.has(block.id) ? { answered: answered.get(block.id)! } : {}),
+        ...(own.length ? { draft: { ids: own.map((draft) => draft.id), minutes: own.reduce((sum, draft) => sum + draft.minutes, 0) } } : {}) };
     });
+  const titleOf = new Map(orders.map((order) => [order.id, order.intent]));
+  const drafts: WrapDraft[] = dayDrafts.filter((draft) => !besideBlocks.has(draft.id)).map((draft) => ({ id: draft.id, start: draft.start, end: draft.end, minutes: draft.minutes,
+    ...(draft.workOrderId && titleOf.has(draft.workOrderId) ? { workOrderId: draft.workOrderId, title: titleOf.get(draft.workOrderId)! } : {}),
+    ...(draft.why ? { why: draft.why } : {}) }));
+  const tasks = drafts.length ? orders.filter((order) => OPEN_STATES.has(order.state) && !order.tombstone).map((order) => ({ id: order.id, title: order.intent })) : [];
   const weekday = Number(formatInTimeZone(now, zone, "i")) % 7;
   // The day's rest events (「休息」 from 21:00) end the working day where they begin (W-156).
   const rest = ((store.listPlanVersions(ctx.workspaceId)[0]?.payload as { blocks?: Array<{ day?: string; start: string; end: string; title: string }> } | undefined)?.blocks ?? [])
@@ -115,7 +137,8 @@ export function loadWrap(ctx: AccessContext, now = appNow(), requestedDay?: stri
   const at = day === today ? wrapTimeOf(readAvailability(ctx), weekday, rest) : undefined;
   const open = rows.filter((row) => !row.answered).length;
   const doneBlocks = rows.filter((row) => row.answered && row.answered !== "not_done" && row.answered !== "partial").length;
-  return { day, ...(at ? { at } : {}), rows, open, done: Boolean(store.getSetting(ctx.workspaceId, WRAP_DONE(day))), today: day === today, timedMinutes, doneBlocks };
+  return { day, ...(at ? { at } : {}), rows, open, done: Boolean(store.getSetting(ctx.workspaceId, WRAP_DONE(day))), today: day === today, timedMinutes, doneBlocks,
+    drafts, draftConsent: draftConsent(ctx), tasks };
 }
 
 /**

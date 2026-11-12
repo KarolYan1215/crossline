@@ -7,6 +7,7 @@ import { BACKGROUND_FACTS_OUTPUT_SCHEMA } from "./background-facts-schema";
 import { BACKPLAN_SCHEMA } from "./backplan-schema";
 import { CALENDAR_CLASSIFICATION_SCHEMA } from "./calendar-lines";
 import { FOLDER_LINES_SCHEMA } from "./source-folders";
+import { TIME_ATTRIBUTION_SCHEMA } from "./time-drafts";
 import { RECORDING_DIGEST_SCHEMA } from "./recording-digest";
 import { MEDIA_DESCRIPTION_SCHEMA } from "./xhs-notes";
 import { FAVOURITE_TOPICS_SCHEMA } from "./favourite-topics";
@@ -90,6 +91,7 @@ export const SKILL_NEEDS: Record<string, SkillNeeds> = {
   "crossline-dictation-corrector": { label: "语音输入纠错", schemas: ["DICTATION_CORRECTION_SCHEMA"] },
   "crossline-calendar-classifier": { label: "日历归类", schemas: ["CALENDAR_CLASSIFICATION_SCHEMA"] },
   "crossline-folder-classifier": { label: "文件夹归类", schemas: ["FOLDER_LINES_SCHEMA"] },
+  "crossline-time-attributor": { label: "拟计时归属", schemas: ["TIME_ATTRIBUTION_SCHEMA"] },
   "crossline-recording-digest": { label: "录音整理", schemas: ["RECORDING_DIGEST_SCHEMA"] },
   "crossline-media-describer": { label: "图片读取", schemas: ["MEDIA_DESCRIPTION_SCHEMA"], vision: true },
   "crossline-favourite-topics": { label: "收藏分话题", schemas: ["FAVOURITE_TOPICS_SCHEMA"] },
@@ -199,7 +201,7 @@ const CONFORMANCE_SCHEMAS: Record<string, Record<string, unknown>> = {
   ONBOARDING_DIALOGUE_SCHEMA, ONBOARDING_EXTRACT_SCHEMA, PLAN_EXPLAINER_OUTPUT_SCHEMA, PORTRAIT_SCHEMA, PORTRAIT_GAP_SCHEMA, STEP_PLAN_SCHEMA,
   VALIDATION_REVIEW_SCHEMA, PROGRESS_ASSESSMENT_SCHEMA, TASK_TITLES_SCHEMA, WEEKLY_INSIGHT_OUTPUT_SCHEMA, PUBLIC_SKILL_REVIEW_SCHEMA, PUBLIC_SKILL_BATCH_REVIEW_SCHEMA, SKILL_SCOUT_SCHEMA, TASK_MERGE_REVIEW_SCHEMA,
   OPPORTUNITY_WATCHES_SCHEMA, OPPORTUNITY_READING_SCHEMA, VISA_READING_SCHEMA, QUOTE_READING_SCHEMA,
-  FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA, WORKFLOW_TURN_SCHEMA
+  FORM_FILL_SCHEMA, FORM_CHECK_SCHEMA, FORM_OBSERVE_SCHEMA, DICTATION_CORRECTION_SCHEMA, WORKFLOW_TURN_SCHEMA, TIME_ATTRIBUTION_SCHEMA
 } as unknown as Record<string, Record<string, unknown>>;
 
 /** How many times a critical Skill's schema is run: at 3 runs, "repair rate ≤ 5%" means no repair at all. */

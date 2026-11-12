@@ -1,6 +1,6 @@
 import "server-only";
 import {
-  ACTIVITY_HOURLY, AGENT_HISTORY_CONSENT, CAPACITY_FACTOR_SETTING, CAPACITY_FACTORS, nextCapacityFactor, parseCapacityFactor, planRealization, scheduledMinutesKey, weekStartOf,
+  ACTIVITY_HOURLY, ACTIVITY_RULES, AGENT_HISTORY_CONSENT, attributedBlockSpans, type ActivityRule, CAPACITY_FACTOR_SETTING, CAPACITY_FACTORS, nextCapacityFactor, parseCapacityFactor, planRealization, scheduledMinutesKey, weekStartOf,
   type CapacityFactorRecord, AGENT_HISTORY_SUMMARY, CAPACITY_LOOKBACK_DAYS, MEASURED_CAPACITY_SETTING, PRODUCTIVE, SOURCE_FOLDERS_SETTING,
   dayCapacityMinutes, measuredCapacity, measuredWeeklyHours, measuredWorkDays, mergeSpans, minutesWithin, planBasisOf, readSourceFolders, sourceFolderIndexSetting, weeklyAvailableHours,
   type AccessContext, type ActivityCategory, type ActivityHour, type AgentHistorySummary, type PlanCapacityBasis, type FolderIndexEntry, type MeasuredCapacity,
@@ -9,6 +9,7 @@ import {
 import { formatInTimeZone } from "date-fns-tz";
 import { ACTIVITY_DETAIL_CONSENT, LOCAL_ACTIVITY_CONSENT, appNow, effectiveSchedulePreferences, getStore, planToday, readAvailability, toZonedInstant } from "./crossline";
 import { memoByLedger } from "./ledger-memo";
+import { placedDrafts } from "./time-drafts";
 
 /**
  * Measured work time and the capacity planned from it (docs/plans/closed-loop-1030.md §1; rules in `packages/core/src/measured-capacity.ts`).
@@ -154,14 +155,29 @@ export function dayCapacityOf(ctx: AccessContext, day: string, statedMinutes: nu
 }
 
 /**
- * Work minutes inside one block, every signal joined in time: this task's own timer, the screen in work categories, Codex and Claude
- * Code. What the block's inferred outcome is read from (`inferBlockOutcome`).
+ * The screen minutes inside one block that are its task's (the fix of 2026-11-11, `attributedBlockSpans`): the person's rules, the drafts
+ * (拟计时) as the model or the person placed them, else a work category that fits the block's step. Before, every work-category minute
+ * in the block counted, so writing another paper in a writing block read as this one done.
  */
-export function blockWorkMinutes(ctx: AccessContext, orderId: string, from: string, to: string, now = appNow()): number {
+function blockScreenSpans(ctx: AccessContext, orderId: string, stepId: string | undefined, start: number, end: number): Span[] {
+  const store = getStore();
+  if (store.getSetting(ctx.workspaceId, ACTIVITY_DETAIL_CONSENT) !== "granted") return [];
+  const role = stepId ? store.getStepPlan(ctx.workspaceId, orderId)?.steps.find((step) => step.id === stepId)?.role : undefined;
+  const rules = json<unknown[]>(store.getSetting(ctx.workspaceId, ACTIVITY_RULES), [])
+    .filter((rule): rule is ActivityRule => typeof rule === "object" && rule !== null && typeof (rule as ActivityRule).match === "string");
+  return attributedBlockSpans({ segments: store.listActivitySegments(ctx.workspaceId, new Date(start).toISOString()), rules,
+    block: { orderId, stepId: stepId ?? "", ...(role ? { role } : {}), start: new Date(start).toISOString(), end: new Date(end).toISOString() },
+    drafts: placedDrafts(ctx) });
+}
+
+/**
+ * Work minutes inside one block, every signal joined in time: this task's own timer, the screen time attributed to it (`stepId` says which
+ * step the block was for), Codex and Claude Code. What the block's inferred outcome is read from (`inferBlockOutcome`).
+ */
+export function blockWorkMinutes(ctx: AccessContext, orderId: string, from: string, to: string, now = appNow(), stepId?: string): number {
   const start = Date.parse(from), end = Math.min(Date.parse(to), now.getTime());
   if (!(end > start)) return 0;
-  const zone = effectiveSchedulePreferences(ctx).preferences.timeZone;
-  const spans = mergeSpans([...timerSpans(ctx, now, orderId), ...screenSpans(ctx, new Date(start).toISOString(), zone).spans, ...agentSpans(ctx)]);
+  const spans = mergeSpans([...timerSpans(ctx, now, orderId), ...blockScreenSpans(ctx, orderId, stepId, start, end), ...agentSpans(ctx)]);
   return Math.round(minutesWithin(spans, start, end));
 }
 

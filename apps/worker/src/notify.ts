@@ -5,6 +5,7 @@ import { opportunityAgentOn } from "./opportunities";
 import { ownerOf } from "./owner";
 import { ACTIVITY_DETAIL_CONSENT } from "./activity-recorder";
 import { localeOf } from "./locale";
+import { unconfirmedWorkYesterday } from "./time-drafts";
 
 /**
  * Desktop notifications, in the rhythm the person chose: one morning brief, and single messages only when
@@ -41,6 +42,8 @@ export type NotifyInput = {
   gateRefusals: Array<{ id: string; title: string; message: string }>;
   /** Work blocks that ended last night after the quiet hours began and were never confirmed (the brief says how many). */
   unconfirmedLastNight?: number;
+  /** Yesterday's 拟计时 drafts not yet decided (the brief says only how many; no message of their own). */
+  unconfirmedWork?: number;
   /**
    * The web's open asks (`lib/asks.ts`), when its snapshot is fresh. They then replace the three lists above as the
    * source of urgent messages — one definition of "needs you" for the badge, the brief and the desktop — and only an
@@ -87,6 +90,7 @@ export function planNotifications(input: NotifyInput): PlannedNotification[] {
     const prep = (input.opportunities?.prepToday ?? []).slice(0, 1).map((item) => t("今天该开始准备：{{title}}", { title: item.title }));
     out.push({ key: briefKey, kind: "brief", path: "/", title: t("今天的 Crossline"),
       body: [...lines, ...offers, ...prep, input.unconfirmedLastNight ? t("昨晚 {{count}} 块待确认", { count: input.unconfirmedLastNight }) : "",
+        input.unconfirmedWork ? t("昨天有 {{count}} 段没确认的工作时间", { count: input.unconfirmedWork }) : "",
         input.pending ? t("{{count}} 项待决定", { count: input.pending }) : ""].filter(Boolean).join(sep) || t("今日无到期事项。") });
   }
   if (!inWindow(input) || (input.quiet && inQuiet(input.clock, input.quiet))) return out;
@@ -212,6 +216,7 @@ export async function notifyPass(store: CrosslineStore, workspaceId: string, now
     gateRefusals: store.listEvents(workspaceId, { type: "milestone_gate.blocked" }).filter((event) => event.createdAt >= since)
       .map((event) => ({ id: event.eventId, title: orders.get(event.entityId) ?? tFor(locale)("一项作业"), message: String((event.payload as { message?: string }).message ?? "") })),
     unconfirmedLastNight: unconfirmedLastNight(store, workspaceId, today),
+    unconfirmedWork: unconfirmedWorkYesterday(store, workspaceId, today, zone),
     ...(opportunityAgentOn(store, workspaceId) ? { opportunities: opportunityNotices(store, workspaceId, today, now) } : {})
   });
   const delivered: string[] = [];

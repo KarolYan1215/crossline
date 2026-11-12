@@ -1,4 +1,4 @@
-import { classifyWindow, isPrivateWindow, type ActivityReading, type ActivityRule } from "@crossline/core";
+import { ACTIVITY_RULES, classifyWindow, isPrivateWindow, type ActivityReading, type ActivityRule } from "@crossline/core";
 import type { CrosslineStore } from "@crossline/db";
 import { ACTIVITY_HOURLY, ACTIVITY_HOURLY_DAYS, ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, INPUT_RHYTHM_BUCKETS, INPUT_RHYTHM_CONSENT, SLEEP_TRACKING_CONSENT, type ActivityHour, type InputRhythmBucket } from "@crossline/core";
 
@@ -9,7 +9,8 @@ export const ACTIVITY_DETAIL_CONSENT = "localActivity.consentV2";
 /** ISO instant until which nothing is recorded, for "pause for an hour". */
 export const ACTIVITY_PAUSED_UNTIL = "localActivity.pausedUntil";
 export const ACTIVITY_BLACKLIST = "activity.blacklist";
-export const ACTIVITY_RULES = "activity.rules";
+/** The person's rules (category, and for 拟计时 whose time it is): defined in core, read here and by the drafting pass. */
+export { ACTIVITY_RULES } from "@crossline/core";
 
 /** The last active minute, and the long idle stretches (start and end only) the energy model reads sleep from. */
 export { ACTIVITY_LAST_ACTIVE, ACTIVITY_LONG_GAPS, SLEEP_TRACKING_CONSENT } from "@crossline/core";

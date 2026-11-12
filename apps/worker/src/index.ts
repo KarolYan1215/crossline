@@ -56,6 +56,7 @@ import { dedupePass } from "./dedupe";
 import { guestCodexHomes, importCodexMemories } from "./codex-memory-import";
 import { createTaskTitler, untitledTasks } from "./task-titler";
 import { createCalendarClassifier, unfiledCalendarEvents } from "./calendar-classifier";
+import { createTimeDraftPass } from "./time-drafts";
 import { createInsightCompiler, linesAwaitingMineSkill } from "./insight-compiler";
 import { cleanPublicSkills, createPublicSkillInstaller, createSkillScout, lineSetupDue, scoutDue } from "./public-skills";
 import { deriveWatches, opportunityAgentOn, rejudge, runWatch, todayFor, watchesDeriveDue, watchesToRun } from "./opportunities";
@@ -356,6 +357,24 @@ async function calendarLinePass(workspaceId: string, checkedAt: string): Promise
     const outcome = await createCalendarClassifier(analysisStore, workspaceId, repoRoot, () => accountClient(workspaceId))().catch(() => undefined);
     if (outcome) console.info(JSON.stringify({ type: "calendar.lines_filed", checkedAt, workspaceId, ...outcome }));
   } finally { filingCalendar.delete(workspaceId); }
+}
+
+/**
+ * 拟计时 (`time-drafts.ts`): untimed work drafted from the screen record every ten minutes per account, under the 「应用与窗口」 consent;
+ * the attribution model is asked about what nothing placed only while intake work is allowed.
+ */
+const draftingTime = new Set<string>();
+const timeDraftedAt = new Map<string, number>();
+async function timeDraftPass(workspaceId: string, checkedAt: string): Promise<void> {
+  if (draftingTime.has(workspaceId) || Date.now() - (timeDraftedAt.get(workspaceId) ?? 0) < 10 * 60_000) return;
+  draftingTime.add(workspaceId);
+  timeDraftedAt.set(workspaceId, Date.now());
+  try {
+    const modelAllowed = Boolean(codexSupervisor) && !paused(workspaceId, "intake") && spendAllows(await spendFor(workspaceId), "intake");
+    if (modelAllowed) enterUsageWorkspace(workspaceId);
+    const outcome = await createTimeDraftPass(analysisStore, workspaceId, repoRoot, () => modelAllowed ? accountClient(workspaceId) : undefined)().catch(() => undefined);
+    if (outcome && (outcome.drafted || outcome.attributed || outcome.blocked)) console.info(JSON.stringify({ type: "activity.time_drafted", checkedAt, workspaceId, ...outcome }));
+  } finally { draftingTime.delete(workspaceId); }
 }
 
 /**
@@ -836,6 +855,8 @@ async function intakeTick(workspace: { id: string }, checkedAt: string): Promise
       }
     }
   }
+  // Untimed work from the screen record, drafted for the person to confirm on the wrap-up (拟计时).
+  await timeDraftPass(workspace.id, checkedAt);
   // The mailbox (docs/personal-agent.md): new mail read and sorted; to-dos and dates it finds become captures, analysed just below.
   await mailService.pass(workspace.id).catch(() => undefined);
   // The automations' triggers, new mail's included: firing only starts the assistant, so this does not hold the intake up.
